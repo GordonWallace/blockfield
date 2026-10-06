@@ -1,4 +1,4 @@
-// Fast-forward. Press F to cycle the simulation speed 1x -> 3x -> 5x -> 10x -> 100x -> 1000x -> 1x.
+// Fast-forward. Press F to cycle the simulation speed 1x -> 2x -> 3x -> 5x -> 10x -> 100x -> 1x.
 // The game loop (main.js) runs its whole simulation step BF.warp.speed times per frame instead of scaling dt, so
 // the day/night cycle, mobs, villagers, crops, weather and animations all stay consistent, like a sped-up recording.
 // The player is not stepped: it keeps normal speed so you can still move around and observe.
@@ -9,7 +9,7 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const SPEEDS = [1, 3, 5, 10, 100, 1000];
+const SPEEDS = [1, 2, 3, 5, 10, 100];
 let idx = 0, clock = 0, eff = 1, last = 1, shown = null;
 
 BF.simNow = () => clock;
