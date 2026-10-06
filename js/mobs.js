@@ -1498,7 +1498,7 @@ function restockVillagers(dt) { // once per in-game day, never while someone is 
 }
 const VILLAGERS_PER_VILLAGE = 24;
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
-const FORESTER_CHANCE = [0.65, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
+const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
 function findStand(x, y, z, T) {
   x = Math.floor(x); z = Math.floor(z);
   const base = Math.floor(y);
@@ -1537,7 +1537,10 @@ function villageRoster(rec) {
   const rest = slots.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
   const nBuilders = BF.builder ? (rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0) : 0;   // builders count toward the cap of 24
-  const ordered = special.concat(rest).slice(0, VILLAGERS_PER_VILLAGE - nBuilders);
+  // foresters (own seeded stream, drawn first so their places are kept free: a full village used to leave none): ~95% of villages get one
+  let nF = 0;
+  if (BF.forester) { const rf = seededRand("foresters:" + rec.key); for (const p of FORESTER_CHANCE.slice(0, rec.nb >= 19 ? 2 : 1)) if (rf() < p) nF++; }
+  const ordered = special.concat(rest).slice(0, VILLAGERS_PER_VILLAGE - nBuilders - nF);
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
@@ -1562,17 +1565,11 @@ function villageRoster(rec) {
     const re = seededRand("explorers:" + rec.key);
     let nE = 0;
     for (const sl of ordered) if (sl.prof === "cartographer" && re() < EXPLORER_CHANCE) nE++;
-    nE = Math.min(nE, Math.max(0, VILLAGERS_PER_VILLAGE - ordered.length));
+    nE = Math.min(nE, Math.max(0, VILLAGERS_PER_VILLAGE - ordered.length - nF));
     for (let k = 0; k < nE; k++) ordered.push({ house: null, idx: 1100 + k, bed: null, prof: "explorer" });
   }
-  // foresters: own seeded stream and key range (<village key>#1200+n), so no other slot shifts; never beyond the village cap
-  if (BF.forester) {
-    const rf = seededRand("foresters:" + rec.key);
-    let nF = 0;
-    for (const p of FORESTER_CHANCE.slice(0, rec.nb >= 19 ? 2 : 1)) if (rf() < p) nF++;
-    nF = Math.min(nF, Math.max(0, VILLAGERS_PER_VILLAGE - ordered.length));
-    for (let k = 0; k < nF; k++) ordered.push({ house: null, idx: 1200 + k, bed: null, prof: "forester" });
-  }
+  // foresters: key range <village key>#1200+n (their places were reserved above, so the village never exceeds the cap of 24)
+  for (let k = 0; k < nF; k++) ordered.push({ house: null, idx: 1200 + k, bed: null, prof: "forester" });
   return ordered;
 }
 

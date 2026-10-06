@@ -126,7 +126,7 @@ function planVillage(v) {
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   const n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
-  const special = needy.filter(sl => sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith"));
+  const special = needy.filter(sl => sl.prof === "forester" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw
   const rest = needy.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
   const jobs = special.concat(rest).slice(0, n).map(sl => ({ prof: sl.prof, slot: sl.idx, house: sl.house }));
@@ -162,7 +162,7 @@ function planVillage(v) {
   for (const job of jobs) {
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
     if (job.prof === "builder" && plaza(job)) continue;
-    const b = bOf(job.house) || (job.slot < 0 && homes.length ? homes[Math.floor(r() * homes.length)] : null);
+    const b = bOf(job.house) || ((job.slot < 0 || job.prof === "forester") && homes.length ? homes[Math.floor(r() * homes.length)] : null);
     if (b && (inside(b, job) || beside(b, job))) continue;
     plaza(job);
   }
