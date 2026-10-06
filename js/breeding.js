@@ -129,7 +129,7 @@ function scanBeds(rec) {
         if (Math.floor(b.x / CS) === cx && Math.floor(b.z / CS) === cz) beds.push({ x: b.x, y: b.y, z: b.z, f: b.f });
     }
   }
-  rec.beds = beds; rec.bedScanAt = performance.now();
+  rec.beds = beds; rec.bedScanAt = BF.simNow() * 1000;
   return beds;
 }
 function bedCount(rec) { if (!rec.beds || rec.bedDirty) { rec.bedDirty = false; scanBeds(rec); } return rec.beds.length; }
@@ -408,7 +408,7 @@ function childTick(rec, e) {
   // a bed for the night (children and grown newborns are not in the roster)
   const bedOK = b => { const d = BF.blocks[BF.world.getBlock(b.x, b.y, b.z)]; return d && d.bed && !d.bed.head && d.bed.f === b.f; };
   if (BF.sky && BF.sky.time > 0.45 && !m.sleeping && (!m.bed || !bedOK(m.bed))) {
-    if (!rec.beds || performance.now() - (rec.bedScanAt || 0) > 3000) scanBeds(rec);
+    if (!rec.beds || BF.simNow() * 1000 - (rec.bedScanAt || 0) > 3000) scanBeds(rec);
     m.bed = freeBed(rec, m); e.bed = m.bed;
   }
 }
@@ -452,7 +452,7 @@ function tick(dt) {
         childTick(rec, e);
       }
       if (!rec.members.some(m => m.type === "villager" && !m.removed)) continue;
-      if (rec.beds == null || performance.now() - (rec.bedScanAt || 0) > 5000 || rec.bedDirty) { rec.bedDirty = false; scanBeds(rec); }
+      if (rec.beds == null || BF.simNow() * 1000 - (rec.bedScanAt || 0) > 5000 || rec.bedDirty) { rec.bedDirty = false; scanBeds(rec); }
       encounters(rec);
     } catch (err) { console.error(err); }
   }

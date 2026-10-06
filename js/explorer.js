@@ -31,7 +31,7 @@ const EDGE = 24;                          // a patch must have loaded terrain th
 const WORK_START = 0.03, WORK_END = 0.45; // sky.time window of the working day (same as js/cartography.js)
 const TRADE_PAUSE = 1.6;
 const LOG = [];
-const nowS = () => performance.now() / 1000;
+const nowS = () => BF.simNow();
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: "explorer" + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
 
