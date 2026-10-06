@@ -1,4 +1,4 @@
-// Fast-forward. Press F to cycle the simulation speed 1x -> 3x -> 5x -> 10x -> 100x -> 1000x -> 1x; Left arrow steps it up, Right arrow steps it down (both stop at the ends).
+// Fast-forward. Left arrow steps the simulation speed up (1x -> 3x -> 5x -> 10x -> 100x -> 1000x), Right arrow steps it down; both stop at the ends. (F no longer does anything.)
 // The game loop (main.js) runs its whole simulation step BF.warp.speed times per frame instead of scaling dt, so
 // the day/night cycle, mobs, villagers, crops, weather and animations all stay consistent, like a sped-up recording.
 // The player is not stepped: it keeps normal speed so you can still move around and observe.
@@ -65,12 +65,11 @@ BF.warp = {
 };
 
 addEventListener("keydown", e => {
-  if ((e.code !== "KeyF" && e.code !== "ArrowLeft" && e.code !== "ArrowRight") || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if ((e.code !== "ArrowLeft" && e.code !== "ArrowRight") || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
   if (BF.state && BF.state.paused) return;   // menus, inventory, chat, death screen
-  if (e.code === "ArrowLeft") { e.preventDefault(); BF.warp.faster(); }
-  else if (e.code === "ArrowRight") { e.preventDefault(); BF.warp.slower(); }
-  else BF.warp.cycle();
+  e.preventDefault();
+  if (e.code === "ArrowLeft") BF.warp.faster(); else BF.warp.slower();
 });
 if (document.body) ui(); else addEventListener("DOMContentLoaded", ui);
 })();

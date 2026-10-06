@@ -88,7 +88,7 @@ function frame(now) {
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   const W = BF.warp;
   if (!BF.state.paused) {
-    // Fast-forward (F, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
+    // Fast-forward (arrow keys, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
     // behaviour at 10x matches 1x exactly and it plays like a sped-up recording. From 100x the step grows (up to 0.05 s, the
     // same step a slow frame already gets) so the step count stays bounded. Stops early if the frame budget runs out.
     const plan = W.plan(dt), t0 = performance.now();
