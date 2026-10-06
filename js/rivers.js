@@ -9,14 +9,21 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const SPILL_R = 6, RAD = 2, NS = 96, JIT = 0.34, NMAX = 80, SUPER = 8, CELL = 192, MARG = 74, REACH = 34;
+const SPILL_R = 6, RAD = 2, JIT = 0.34, SUPER = 8, CELL = 192, MARG = 74;
+// Per-world scale constants (init opts override; the defaults are generator v2's). Generator v3 stretches heights to 0..~1000.
+let NS = 96, NMAX = 80, REACH = 34, HS = 1, W0 = 1.6, W1 = 4.6, WLO = 2, WHI = 95, SLO = 15, SHI = 85, RANGE = 16;
 const smooth = (a, b, x) => { let t = (x - a) / (b - a); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 
 let noise, macro, SEA = 48, density = 0.03;
 let nodes, edges, cells, traced, ensured, tmp;
 
 function init(n, macroFn, opts) {
-  noise = n; macro = macroFn; SEA = (opts && opts.sea) || BF.SEA || 48; density = opts && opts.density != null ? opts.density : 0.03;
+  const o = opts || {};
+  noise = n; macro = macroFn; SEA = o.sea != null ? o.sea : (BF.SEA != null ? BF.SEA : 48); density = o.density != null ? o.density : 0.03;
+  NS = o.ns || 96; NMAX = o.nmax || 80; REACH = o.reach || 34; W0 = o.w0 != null ? o.w0 : 1.6; W1 = o.w1 != null ? o.w1 : 4.6;
+  WLO = o.wlo != null ? o.wlo : 2; WHI = o.whi || 95; SLO = o.slo != null ? o.slo : 15; SHI = o.shi || 85; HS = o.hs || 1;
+  RANGE = Math.ceil(NMAX * 1.42 / SUPER) + 1;
+  BF.rivers.REACH = REACH;
   nodes = new Map(); edges = new Map(); cells = new Map(); traced = new Set(); ensured = new Set(); tmp = { p: 0, c: 0 };
 }
 
@@ -83,7 +90,7 @@ function surface(nd) {
   }
   return nd.rs;
 }
-const widthAt = rs => 1.6 + 4.6 * (1 - smooth(SEA + 2, SEA + 95, rs));
+const widthAt = rs => W0 + W1 * (1 - smooth(SEA + WLO, SEA + WHI, rs));
 
 function addEdge(a, b) {
   if (edges.has(a.k)) return;
@@ -110,7 +117,7 @@ function seg(e) {
 function trace(i, j) {
   const nd = node(i, j);
   if (nd.p < SEA + 8 || nd.c < 0.2) return;
-  if (noise.hash(i, j, 3103) >= density * smooth(0.2, 0.8, nd.c) * (0.4 + 0.6 * smooth(SEA + 15, SEA + 85, nd.p))) return;
+  if (noise.hash(i, j, 3103) >= density * smooth(0.2, 0.8, nd.c) * (0.4 + 0.6 * smooth(SEA + SLO, SEA + SHI, nd.p))) return;
   // only rivers that really reach the sea within NMAX links exist (a chain that dies in a basin or is too long is dropped)
   const chain = [nd];
   let cur = nd;
@@ -127,7 +134,6 @@ function trace(i, j) {
 }
 const STATS = {};
 // Traces every source that could reach (x, z): sources within NMAX links, i.e. NMAX * NS * sqrt2 blocks.
-const RANGE = Math.ceil(NMAX * 1.42 / SUPER) + 1;
 function ensure(x, z) {
   const si = Math.floor(x / NS / SUPER), sj = Math.floor(z / NS / SUPER), key = si * 4194304 + sj;
   if (ensured.has(key)) return;

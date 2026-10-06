@@ -1,7 +1,9 @@
 // Terrain generation: continuous climate (temperature, humidity, continentalness, erosion, weirdness)
 // drives smoothly blended heights and climate-adjacent biomes; caves, ores, trees, plants and villages.
-// API: BF.worldgen = { init(noise), generate(cx, cz, vox), heightAt(x, z), biomeAt(x, z),
-//                      tintAt(x, z), villagesNear(x, z, r), nearestVillage(x, z) }
+// API: BF.worldgen = { init(noise, {gen, biomeScale}), generate(cx, cz, vox) (gen 1/2, 192-high column), generateBand(cx, cz) -> {lo, hi, vox},
+//                      generateRange(cx, cz, sy0, sy1) -> Uint16Array, heightAt(x, z), biomeAt(x, z), tintAt(x, z),
+//                      villagesNear(x, z, r), nearestVillage(x, z) }
+// Generator 3 ("mile high") works in absolute signed y with limits BF.MIN_Y = -64, BF.H = 3072, BF.SEA = 0 (BF.setLimits(gen)).
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -124,8 +126,13 @@ const band = v => (v < BANDS[0] ? 0 : v < BANDS[1] ? 1 : v < BANDS[2] ? 2 : v < 
 // Generator version of the current world (BF.state.gen; 1 = the original generator, kept so saved worlds have no seams) and the
 // relative biome size (1 = original size). Set by init().
 let GEN = 1, SC = 1;
+// World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
+BF.setLimits = function (gen) {
+  const L = gen >= 3 ? [-64, 3072, 0] : [0, 192, 48];
+  BF.MIN_Y = L[0]; BF.H = L[1]; BF.SEA = L[2]; BF.SY0 = L[0] >> 4; BF.SY1 = L[1] >> 4;
+};
 // Slow climate fields at a (warped) position. Writes into K.
-const K = { t: 0, hu: 0, c: 0, e: 0, wd: 0, wx: 0, wz: 0, u: 0 };
+const K = { t: 0, hu: 0, c: 0, e: 0, wd: 0, wx: 0, wz: 0, u: 0, p: 0, pm: 0, lo: 0 };
 // v2 fields: climate zones and continents scale with SC, continents are big (thousands of blocks) and separated by open ocean.
 function rawFields2(x, z) {
   const q = Math.sqrt(SC), wl = 230 * q, wa = 48 * q;
@@ -144,6 +151,12 @@ function rawFields2(x, z) {
   K.e = noise.fbm(wx / LE + 77.7, wz / LE + 901.3, 3);
   K.wd = noise.fbm(wx / LW - 201.1, wz / LW + 44.4, 2);
   K.u = noise.fbm(wx / LU + 613.3, wz / LU - 88.8, 3);
+  if (GEN >= 3) {       // v3: plateau level selector and plateau coverage mask (very long wavelengths)
+    const LL = 9000 * q, LM = 5200 * q;
+    K.p = noise.fbm(wx / LL + 905.1, wz / LL - 311.3, 3);
+    K.pm = noise.fbm(wx / LM + 1234.5, wz / LM - 777.7, 3);
+    K.lo = noise.fbm(wx / (14000 * q) + 55.5, wz / (14000 * q) - 99.9, 2);
+  }
 }
 const CONT_L = 14000;    // continent wavelength at biome scale 1
 function rawFields(x, z) {
@@ -169,7 +182,7 @@ function lattice(lx, lz) {
   if (!a) {
     if (LAT.size > 60000) LAT.clear();
     rawFields(lx * 4, lz * 4);
-    a = new Float64Array([K.t, K.hu, K.c, K.e, K.wd, K.wx - lx * 4, K.wz - lz * 4, K.u]);
+    a = new Float64Array([K.t, K.hu, K.c, K.e, K.wd, K.wx - lx * 4, K.wz - lz * 4, K.u, K.p, K.pm, K.lo]);
     LAT.set(key, a);
   }
   return a;
@@ -186,12 +199,15 @@ function fields(x, z) {
   K.wx = x + a[5] * w00 + b[5] * w10 + c[5] * w01 + d[5] * w11;
   K.wz = z + a[6] * w00 + b[6] * w10 + c[6] * w01 + d[6] * w11;
   K.u = a[7] * w00 + b[7] * w10 + c[7] * w01 + d[7] * w11;
+  K.p = a[8] * w00 + b[8] * w10 + c[8] * w01 + d[8] * w11;
+  K.pm = a[9] * w00 + b[9] * w10 + c[9] * w01 + d[9] * w11;
+  K.lo = a[10] * w00 + b[10] * w10 + c[10] * w01 + d[10] * w11;
 }
 
 // Full column climate. Writes into C (no allocation) and returns the terrain surface height.
 // C.wl is the water level of the column (sea level, or the surface of a v2 river), C.rv is 1 inside a river channel and its banks.
-const C = { h: 0, t: 0, hu: 0, c: 0, e: 0, wd: 0, m: 0, rf: 0, sw: 0, bw: 0, mi: 0, biome: 0, tb: 0, hb: 0, wl: 48, rv: 0 };
-const climate = (x, z) => (GEN >= 2 ? climate2(x, z) : climate1(x, z));
+const C = { S: 0, h: 0, t: 0, hu: 0, c: 0, e: 0, wd: 0, m: 0, rf: 0, sw: 0, bw: 0, mi: 0, biome: 0, tb: 0, hb: 0, wl: 48, rv: 0 };
+const climate = (x, z) => (GEN >= 3 ? climate3(x, z) : GEN >= 2 ? climate2(x, z) : climate1(x, z));
 function climate1(x, z) {
   const SEA = BF.SEA;
   C.wl = SEA; C.rv = 0;
@@ -380,11 +396,136 @@ function climate2(x, z) {
   return h;
 }
 
+// ---------- generator v3 ("mile high"): sea level y = 0, ocean floors down to -58, high plains around y 900-1300, ranges up to ~2500 ----------
+// continentalness -> lowland base height: continental shelf, deep basins, coastal lowlands rising to ~100 in the interior
+const CONT3_X = [-1.4, -0.7, -0.35, -0.15, -0.05, 0.03, 0.25, 0.6, 1.0, 1.7];
+const CONT3_Y = [-58, -50, -34, -15, -4, 2.5, 18, 48, 80, 105];
+function contBase3(c) {
+  if (c <= CONT3_X[0]) return CONT3_Y[0];
+  for (let i = 1; i < CONT3_X.length; i++)
+    if (c < CONT3_X[i]) return lerp(CONT3_Y[i - 1], CONT3_Y[i], (c - CONT3_X[i - 1]) / (CONT3_X[i] - CONT3_X[i - 1]));
+  return CONT3_Y[CONT3_Y.length - 1];
+}
+// soft ceiling: linear to 2000, then an asymptote at 2700 (the world is 3072 high; trees need ~40)
+const ceil3 = h => (h <= 2000 ? h : 2000 + 700 * Math.tanh((h - 2000) / 700));
+// thin air: the temperature band shifts down gently with altitude (a thousand blocks up is still cool-temperate)
+const cool3 = h => 0.05 * smooth(0, 1300, h) + 0.6 * smooth(1300, 2600, h);
+// Terrain height without rivers (K must hold the fields at x, z). `detail`: local hills and the full ridged-noise mountains.
+// Plateau weight S: continental interior (c) times a coverage mask (pm), so only part of each continent is a high plain;
+// the transition is the escarpment (foothills). Near the origin a plateau is forced so the default spawn is on the high plains.
+function relief3(x, z, detail) {
+  const { t, hu, c, e } = K;
+  const hills = detail ? noise.fbm(x / 150 + 71.3, z / 150 - 33.1, 4) : 0;
+  const land = smooth(-0.13, -0.02, c);
+  const wet = smooth(-0.35, 0.45, hu), hot = smooth(-0.1, 0.45, t);
+  const d2 = x * x + z * z, home = 1 - smooth(360000, 2250000, d2);
+  const S = Math.min(smooth(0.06, 0.55, c), Math.max(smooth(-0.6, -0.3, K.pm), home));
+  const amp = 6 + 9 * wet + 10 * wet * hot + 4 * smooth(-0.2, 0.2, e < 0 ? -e : 0);
+  const hA = lerp(5, amp, land);
+  const low = contBase3(c) + hills * hA + 2.5 * wet * land;
+  // plateau top: level ~810..1270 (the p field tilts it gently), some regions are lower plateaus (~300..750), plus long swells of a few blocks
+  const lvl = lerp(1040 + 230 * Math.tanh(K.p / 0.4) - 520 * smooth(-0.1, -0.5, K.lo), 1070, home);
+  const swell = 6 * noise.n2(x / 430 + 19.7, z / 430 - 4.4) + (detail ? 1.5 * noise.n2(x / 71 - 8.2, z / 71 + 13.1) : 0);
+  const top = lvl + swell + hills * hA * 0.22;
+  let h = lerp(low, top, S);
+  // foothills along the escarpment
+  const fa = 4 * S * (1 - S);
+  if (fa > 0.02) h += fa * (70 * (noise.fbm(x / 420 + 3.3, z / 420 - 8.8, detail ? 3 : 2) + 0.15) + (detail ? hills * 22 : 0));
+  const m = smooth(-0.15, -0.44, e) * smooth(-0.06, 0.1, c) * (1 - 0.97 * home);
+  if (m > 0) {
+    // ridged ranges: three octaves with explicit gains (steepness stays playable), amplitude up to ~1300 above the base
+    const q = Math.sqrt(SC), L1 = 3200 * q;
+    let r = 1 - Math.abs(noise.n2(x / L1 - 401.2, z / L1 + 133.4));
+    let g = 1, tot = 1;
+    r += 0.35 * (1 - Math.abs(noise.n2(x / (L1 * 0.4) + 17.1, z / (L1 * 0.4) - 9.3))); tot += 0.35;
+    if (detail) { r += 0.12 * (1 - Math.abs(noise.n2(x / (L1 * 0.15) - 5.5, z / (L1 * 0.15) + 71.7))); tot += 0.12; }
+    r /= tot;
+    h += m * (1350 * (0.75 + 0.5 * smooth(-0.3, 0.5, K.u)) * r * r * Math.sqrt(r) + 150 + hills * 12);
+  }
+  return { h, m, land, hills, S };
+}
+// Smooth height (no local hills, 2-octave ridges) and continentalness for the river network.
+function macro3(x, z, o) {
+  rawFields2(x, z);       // nodes are sparse: the raw fields are cheaper than the 4-block lattice (and equal up to interpolation error)
+  o.p = ceil3(relief3(x, z, false).h);
+  o.c = K.c;
+}
+function climate3(x, z) {
+  const SEA = BF.SEA, MINY = BF.MIN_Y;
+  fields(x, z);
+  const { t, hu, c, e, wd } = K;
+  const R = relief3(x, z, true), m = R.m, land = R.land, hills = R.hills, S = R.S;
+  let h = R.h;
+  const wet = smooth(-0.35, 0.45, hu);
+  // badlands mesas (hot, dry, weird): terraced bumps on top of the local ground
+  const bw = smooth(0.26, 0.36, t) * (1 - smooth(-0.14, -0.04, hu)) * smooth(0.0, 0.18, wd) * land * (1 - m);
+  if (bw > 0) {
+    const p = h + 14 + (noise.fbm(x / 110 + 5.5, z / 110 - 8.8, 2) + 0.3) * 26;
+    const step = Math.floor(p / 6) * 6, f = p - step;
+    const terr = step + (f > 4.5 ? (f - 4.5) * 4 : 0);
+    if (terr > h) h = lerp(h, terr, bw);
+  }
+  // swamps / mangroves: low, wet, warm-ish coasts and lowlands
+  const sw = smooth(0.2, 0.36, hu) * smooth(-0.2, -0.06, t) * (1 - smooth(0.02, 0.3, c)) * land * (1 - m) * (1 - S);
+  if (sw > 0) h = lerp(h, SEA + 0.35 + hills * 2.6, sw);
+  let mi = 0;
+  if (c < -0.8) {
+    mi = smooth(0.7, 0.8, noise.n2(x / 520 + 77.7, z / 520 - 55.5)) * smooth(-0.8, -0.95, c);
+    if (mi > 0) h = lerp(h, SEA + 3 + hills * 7, mi);
+  }
+  h = ceil3(h);
+  // rivers: a valley floor at the water surface with a flat floodplain, blended into the surrounding terrain
+  let wl = SEA, rv = 0, chan = false;
+  if (land > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
+    const rs = Math.max(SEA, Math.floor(RV.rs)), sd = RV.sd, w = RV.w;
+    const fp = (1 - smooth(w + 3, w + 30, RV.d)) * land;
+    let hr;
+    if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - 3.2 * (1 - q * q); }
+    else hr = rs + 1.4 + smooth(0, 14, sd) * 1.5;
+    h = h + (hr - h) * fp;
+    if (sd < 0 && fp > 0.9) { chan = true; wl = rs; if (h > rs - 1) h = rs - 1; }
+    else if (sd < 3 && h < rs + 1) h = rs + 1;
+    if (sd < 6) rv = 1;
+  }
+  h = Math.floor(h);
+  if (h < MINY + 6) h = MINY + 6; else if (h > BF.H - 6) h = BF.H - 6;
+
+  // ---- discrete biome (dithered borders) ----
+  const sc = Math.pow(SC, 0.7);
+  const dj = noise.n2(x / (22 * sc) + 7.1, z / (22 * sc)) * 0.02 + (noise.hash(x, z, 77) - 0.5) * 0.008 * (1 + 0.45 * (SC - 1));
+  // altitude cools slowly; the high plains are a little drier (rain shadow of the escarpment): more steppe and savanna, fewer forests
+  const tb = band(t - cool3(h) + dj), hb = band(hu - 0.16 * S - dj);
+  let b;
+  if (mi > 0.5 && h >= SEA - 1) b = MUSHROOM;
+  else if (h < SEA - 1 && c < -0.08) b = OCEAN;
+  else if (chan) b = RIVER;
+  else if (c < -0.03 + dj && h <= SEA + 2 && sw < 0.5) b = smooth(-0.18, -0.45, e) > 0.45 ? STONY_SHORE : tb === 0 ? SNOWY_BEACH : BEACH;
+  else if (c < 0.0 && m > 0.25 && h <= SEA + 7) b = STONY_SHORE;
+  else if (bw > 0.5 + dj * 2) b = BADLANDS;
+  else if (m > 0.3 + dj * 2 && h >= 700) {
+    if (h >= 1750) b = tb <= 2 ? PEAKS : STONY_PEAKS;
+    else if (h >= 1350) b = tb <= 1 ? SNOWY_SLOPES : tb === 2 ? MOUNTAINS : STONY_PEAKS;
+    else if (tb <= 1) b = tb === 0 ? SNOWY_TAIGA : TAIGA;
+    else if (tb >= 4) b = SAVANNA;
+    else if (wd > 0.22) b = CHERRY;
+    else b = hb <= 2 ? MEADOW : FOREST;
+  } else if (sw > 0.5 + dj * 2) b = tb >= 3 && t > 0.0 ? MANGROVE : SWAMP;
+  else if (tb === 0) b = hb <= 1 ? (wd > 0.3 ? ICE_SPIKES : SNOWY_PLAINS) : SNOWY_TAIGA;
+  else if (tb === 1) b = hb === 4 ? OLD_TAIGA : TAIGA;
+  else if (tb === 2) b = hb <= 1 ? PLAINS : hb === 2 ? (wd > 0.28 ? FLOWER_FOREST : FOREST) : hb === 3 ? BIRCH : DARK_FOREST;
+  else if (tb === 3) b = hb === 0 ? SAVANNA : hb === 1 ? PLAINS : hb === 2 ? FOREST : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
+  else b = hb <= 1 ? DESERT : hb === 2 ? SAVANNA : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
+
+  C.h = h; C.t = t; C.hu = hu; C.c = c; C.e = e; C.wd = wd; C.m = m; C.rf = chan ? 1 : 0; C.sw = sw; C.bw = bw; C.mi = mi;
+  C.biome = b; C.tb = tb; C.hb = hb; C.wl = wl; C.rv = rv; C.S = S;
+  return h;
+}
+
 function biomeAt(x, z) {
   climate(Math.floor(x), Math.floor(z));
   const id = C.biome;
   let name = NAMES[id];
-  if (id === OCEAN) name = (C.h < 36 ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
+  if (id === OCEAN) name = (C.h < (GEN >= 3 ? -30 : 36) ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
   else if (id === RIVER && C.tb === 0) name = "Frozen River";
   return { name, id, height: C.h, temperature: +C.t.toFixed(2), humidity: +C.hu.toFixed(2) };
 }
@@ -730,10 +871,11 @@ function drawVillage(v, ox, oz, vox, hAt) {
   if (v.maxX < ox || v.minX >= ox + CS || v.maxZ < oz || v.minZ >= oz + CS) return;
   const S = styles()[v.style];
   const ground = [B.grass, B.sand, B.snow_grass][v.ground], fill = v.ground === 1 ? B.sand : B.dirt;
+  const yLo = Math.max(WY0, BF.MIN_Y + 1), yHi = Math.min(WY1, H);
   const set = (x, y, z, id) => {
     x -= ox; z -= oz;
-    if (x < 0 || x >= CS || z < 0 || z >= CS || y <= 0 || y >= H) return;
-    vox[(y * CS + z) * CS + x] = id;
+    if (x < 0 || x >= CS || z < 0 || z >= CS || y < yLo || y >= yHi) return;
+    vox[((y - WY0) * CS + z) * CS + x] = id;
   };
   const isect = (x0, z0, x1, z1) => !(x1 < ox || x0 >= ox + CS || z1 < oz || z0 >= oz + CS);
 
@@ -988,11 +1130,21 @@ let STRATA = null;                 // badlands terracotta bands (built from the 
 let rs = 1;
 const rnd = () => (rs = (Math.imul(rs, 1664525) + 1013904223) >>> 0) / 4294967296;
 
-function generate(cx, cz, vox) {
-  const { CS, H, SEA, B } = BF;
+// Highest extent (blocks above the ground) of whatever a tree-grid candidate of a biome can build; used to size the generator-3 band.
+const TREE_EXT = [];
+(function () {
+  for (let b = 0; b <= MUSHROOM; b++) TREE_EXT[b] = 14;
+  TREE_EXT[PLAINS] = 10; TREE_EXT[FOREST] = 11; TREE_EXT[FLOWER_FOREST] = 11; TREE_EXT[BIRCH] = 11; TREE_EXT[MEADOW] = 11; TREE_EXT[SWAMP] = 11;
+  TREE_EXT[SAVANNA] = 12; TREE_EXT[CHERRY] = 12; TREE_EXT[DESERT] = 6; TREE_EXT[BADLANDS] = 6; TREE_EXT[SPARSE_JUNGLE] = 16;
+  TREE_EXT[JUNGLE] = 36; TREE_EXT[OLD_TAIGA] = 36; TREE_EXT[ICE_SPIKES] = 38; TREE_EXT[MANGROVE] = 16; TREE_EXT[DARK_FOREST] = 15;
+})();
+
+// Per-chunk data shared by the generation passes (filled by prep): column caches, villages and the tree-grid candidates.
+const P = { cx: 0, cz: 0, ox: 0, oz: 0, maxH: 0, minH: 0, topY: 0, hc: 0, vils: [], cands: [], ext: 0, vMin: 0, vMax: 0 };
+let WY0 = 0, WY1 = 0;              // the vertical window being generated: absolute y in [WY0, WY1)
+function prep(cx, cz) {
+  const { CS, SEA, B } = BF;
   const ox = cx * CS, oz = cz * CS;
-  const STONE = B.stone, WATER = B.water, AIR = 0;
-  const step = CS * CS;
   if (!STRATA) {
     const cols = [B.orange_terracotta, B.yellow_terracotta, B.orange_terracotta, B.white_terracotta,
       B.brown_terracotta, B.orange_terracotta, B.red_terracotta, B.yellow_terracotta];
@@ -1007,14 +1159,225 @@ function generate(cx, cz, vox) {
     hCache[i] = climate(ox + x, oz + z);
     bCache[i] = C.biome; tbCache[i] = C.tb; wlCache[i] = C.wl;
   }
-  let maxH = SEA;
+  let maxH = SEA, minH = 1e9, topY = -1e9;
+  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
+    const hi = (z + 1) * HW + x + 1, h = hCache[hi];
+    if (h > maxH) maxH = h;
+    if (h < minH) minH = h;
+    const t = h > wlCache[hi] ? h : wlCache[hi];
+    if (t > topY) topY = t;
+  }
+  P.cx = cx; P.cz = cz; P.ox = ox; P.oz = oz; P.maxH = maxH; P.minH = minH; P.topY = topY; P.hc = hCache[(CS / 2 + 1) * HW + CS / 2 + 1];
+  // villages touching this chunk (a chunk never straddles two regions; the spawn village may lie anywhere)
+  const vils = P.vils = [villageRegion(regionOf(ox), regionOf(oz)), spawnVillage()].filter(v => v &&
+    v.maxX + 2 >= ox && v.minX - 2 < ox + CS && v.maxZ + 2 >= oz && v.minZ - 2 < oz + CS);
+  // tree-grid candidates (4x4 cells, margin M around the chunk)
+  const cands = P.cands = [];
+  let ext = 0;
+  const x0 = ox - M, x1 = ox + CS + M, z0 = oz - M, z1 = oz + CS + M;
+  for (let gz = Math.floor(z0 / 4); gz <= Math.floor((z1 - 1) / 4); gz++)
+    for (let gx = Math.floor(x0 / 4); gx <= Math.floor((x1 - 1) / 4); gx++) {
+      const r = noise.hash(gx, gz, 101);
+      if (r >= 0.92) continue;
+      const tx = gx * 4 + ((noise.hash(gx, gz, 102) * 3) | 0), tz = gz * 4 + ((noise.hash(gx, gz, 103) * 3) | 0);
+      if (tx < x0 || tx >= x1 || tz < z0 || tz >= z1) continue;
+      if (villageAt(tx, tz, 3)) continue;
+      const h = climate(tx, tz), b = C.biome, wl = C.wl;
+      cands.push({ gx, gz, tx, tz, r, h, b, wl });
+      if (GEN >= 3 && (r < TREE_DENSITY[b] || (b === DESERT && r < 0.14) || (b === BADLANDS && r < 0.03) || (b === ICE_SPIKES && r < 0.06) ||
+          (b === OLD_TAIGA && r >= 0.86 && r < 0.9))) ext = Math.max(ext, h + TREE_EXT[b]);
+    }
+  P.ext = ext;
+  // vertical extent of the villages (pads, buildings, arch)
+  let vMin = 1e9, vMax = -1e9;
+  for (const v of vils) {
+    if (v.vMax === undefined) { let lo = v.y, hi = v.y; for (const p of v.pads) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); } v.vMin = lo - 4; v.vMax = hi + 26; }
+    vMin = Math.min(vMin, v.vMin); vMax = Math.max(vMax, v.vMax);
+  }
+  P.vMin = vMin; P.vMax = vMax;
+}
+
+// ---------- generator 3 underground: pure functions of absolute coordinates (any vertical window gives the same blocks) ----------
+// stone with a deepslate blend zone around y -8..8
+function stone3(wx, y, wz) {
+  const B = BF.B;
+  if (y >= 8) return B.stone;
+  if (y < -8) return B.deepslate;
+  return noise.hash3(wx, y, wz, 77) < (8 - y) / 16 ? B.deepslate : B.stone;
+}
+let g3A = new Float32Array(0), g3B = new Float32Array(0), g3C = new Float32Array(0), g3a = new Float32Array(0), g3b = new Float32Array(0), g3c = new Float32Array(0);
+// Caves: coarse 3D noise grid on absolute 4-block rows, interpolated. Spaghetti tunnels (wider with depth), large caverns, deep magma floors.
+// The loop runs one cell above the window so that magma on a cave floor at the window top is decided identically in the window above.
+function caves3(vox, Y0, Y1, cx, cz) {
+  const { CS, SEA, B } = BF, MINY = BF.MIN_Y, step = CS * CS, ox = cx * CS, oz = cz * CS;
+  const STONE = B.stone, DEEP = B.deepslate, WATER = B.water, ICE = B.ice, MAGMA = B.magma_block, BEDROCK = B.bedrock;
+  const lowY = Math.max(Y0, MINY + 5), topY = Math.min(Y1, P.maxH + 2);
+  if (lowY > topY) return;
+  const r0 = lowY >> 2, r1 = (topY >> 2) + 1, NR = r1 - r0 + 1;
+  if (g3A.length < GX * GX * NR) {
+    const n = GX * GX * NR; g3A = new Float32Array(n); g3B = new Float32Array(n); g3C = new Float32Array(n);
+  }
+  if (g3a.length < NR + 1) { g3a = new Float32Array(NR + 1); g3b = new Float32Array(NR + 1); g3c = new Float32Array(NR + 1); }
+  for (let iy = 0; iy < NR; iy++) for (let iz = 0; iz < GX; iz++) for (let ix = 0; ix < GX; ix++) {
+    const wx = ox + ix * 4, wy = (r0 + iy) * 4, wz = oz + iz * 4, gi = (iy * GX + iz) * GX + ix;
+    g3A[gi] = noise.n3(wx / 44, wy / 22, wz / 44);
+    g3B[gi] = noise.n3(wx / 44 + 57.3, wy / 22 + 11.1, wz / 44 - 33.7);
+    g3C[gi] = noise.n3(wx / 72 - 91.7, wy / 36, wz / 72 + 19.3);
+  }
+  const vils = P.vils;
+  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
+    const hi = (z + 1) * HW + x + 1, h = hCache[hi];
+    const minN = Math.min(hCache[hi - 1], hCache[hi + 1], hCache[hi - HW], hCache[hi + HW], h);
+    let limit;
+    if (minN <= SEA + 1 || wlCache[hi] > SEA || wlCache[hi - 1] > SEA || wlCache[hi + 1] > SEA || wlCache[hi - HW] > SEA || wlCache[hi + HW] > SEA)
+      limit = minN - 5;                                        // near water (sea or a river): keep a thick seal
+    else limit = entranceAt(ox + x, oz + z) ? h : h - 4;
+    for (const vil of vils) if (inVillage(vil, ox + x, oz + z, 2)) limit = Math.min(limit, h - 8, vil.minY - 6);
+    if (limit < MINY + 6) continue;
+    const yHi = Math.min(limit, Y1);
+    if (lowY > yHi) continue;
+    const ix = x >> 2, iz = z >> 2, fx = (x & 3) / 4, fz = (z & 3) / 4;
+    const w00 = (1 - fx) * (1 - fz), w10 = fx * (1 - fz), w01 = (1 - fx) * fz, w11 = fx * fz;
+    const rb = lowY >> 2, rt = (yHi >> 2) + 1;
+    for (let iy = rb; iy <= rt; iy++) {
+      const g = ((iy - r0) * GX + iz) * GX + ix, k = iy - rb;
+      g3a[k] = g3A[g] * w00 + g3A[g + 1] * w10 + g3A[g + GX] * w01 + g3A[g + GX + 1] * w11;
+      g3b[k] = g3B[g] * w00 + g3B[g + 1] * w10 + g3B[g + GX] * w01 + g3B[g + GX + 1] * w11;
+      g3c[k] = g3C[g] * w00 + g3C[g + 1] * w10 + g3C[g + GX] * w01 + g3C[g + GX + 1] * w11;
+    }
+    const wx = ox + x, wz = oz + z;
+    let i = x + z * CS + (lowY - Y0) * step;
+    for (let y = lowY; y <= yHi; y++, i += step) {
+      const iy = (y >> 2) - rb, fy = (y & 3) / 4, dd = h - y;
+      const a = g3a[iy] + (g3a[iy + 1] - g3a[iy]) * fy, bb = g3b[iy] + (g3b[iy + 1] - g3b[iy]) * fy;
+      // spaghetti tunnels (intersection of two noise zero-sets), wider deeper down
+      const thr = y < MINY + 34 ? 0.0105 : 0.0066 + 0.0022 * (dd >= 160 ? 1 : dd <= 0 ? 0 : dd / 160);
+      let carve = a * a + bb * bb < thr;
+      if (!carve && y > MINY + 8 && dd > 14) {
+        const c3 = g3c[iy] + (g3c[iy + 1] - g3c[iy]) * fy;           // large caverns
+        carve = c3 > 0.64 + (dd < 44 ? (44 - dd) * 0.02 : 0) + (y < MINY + 30 ? (MINY + 30 - y) * 0.03 : 0);
+      }
+      if (carve) {
+        if (y < Y1) { const v = vox[i]; if (v !== WATER && v !== BEDROCK && v !== ICE) vox[i] = 0; }
+        if (y - 1 >= Y0 && y <= -15 && MAGMA !== undefined) {         // magma on deep cave floors
+          const vv = vox[i - step];
+          if ((vv === STONE || vv === DEEP) && noise.hash3(wx, y - 1, wz, 78) < 0.03) vox[i - step] = MAGMA;
+        }
+      }
+    }
+  }
+}
+// Ores, rocks and pockets: random-walk veins in 32-block buckets of absolute y (seeded by chunk and bucket), so any window agrees.
+// kind 'd': y range by depth below the chunk's centre surface [hc - b, hc - a]; kind 'y': absolute [a, b].
+const ORE3 = [
+  // salt, veins per bucket, size, kind, a, b, block, deepslate variant, depth-weighted (more near the surface)
+  [201, 1.3, 30, "d", 8, 99999, "gravel"], [202, 0.25, 18, "d", 20, 300, "clay"], [203, 1.1, 22, "d", 6, 300, "dirt"],
+  [211, 6.5, 9, "d", 6, 99999, "coal_ore", "deepslate_coal_ore", 1],
+  [212, 6.0, 7, "d", 6, 99999, "iron_ore", "deepslate_iron_ore", 1],
+  [217, 5.5, 9, "d", 6, 99999, "copper_ore", "deepslate_copper_ore", 1],
+  [213, 2.2, 6, "y", -64, 32, "gold_ore", "deepslate_gold_ore"],
+  [214, 2.0, 5, "y", -64, 16, "diamond_ore", "deepslate_diamond_ore"],
+  [215, 1.0, 6, "y", -64, 40, "lapis_ore", "deepslate_lapis_ore"],
+  [216, 3.5, 6, "y", -64, 16, "redstone_ore", "deepslate_redstone_ore"],
+  [219, 0.03, 1, "y", -64, 40, "emerald_ore", "deepslate_emerald_ore"],
+  [218, 1.1, 1, "d", 3, 500, "emerald_ore", "deepslate_emerald_ore", 0, "mtn"],
+  [221, 1.6, 70, "d", 5, 99999, "granite"], [222, 1.6, 70, "d", 5, 99999, "diorite"], [223, 1.6, 70, "d", 5, 99999, "andesite"],
+  [224, 1.0, 60, "y", -64, 16, "tuff", "tuff"], [225, 0.35, 40, "d", 30, 250, "dripstone_block"],
+  [231, 0.4, 14, "d", 10, 99999, "water", "water"],               // water pockets at every height
+  [232, 0.8, 12, "y", -64, -8, "magma_block", "magma_block"],     // there is no lava block: deep magma pockets
+  [233, 0.15, 9, "d", 40, 99999, "magma_block", "magma_block"],
+];
+function ores3(vox, Y0, Y1, cx, cz) {
+  const { CS, B } = BF, MINY = BF.MIN_Y, STONE = B.stone, DEEP = B.deepslate, hc = P.hc;
+  const eb = bCache[((CS >> 1) + 1) * HW + (CS >> 1) + 1], mtn = eb === MOUNTAINS || eb === SNOWY_SLOPES || eb === PEAKS || eb === STONY_PEAKS;
+  for (let q = 0; q < ORE3.length; q++) {
+    const sp = ORE3[q], id = B[sp[6]];
+    if (id === undefined || (sp[9] === "mtn" && !mtn)) continue;
+    if (sp[0] === 219 && mtn) continue;
+    const ds = sp[7] !== undefined ? B[sp[7]] : undefined, size = sp[2];
+    let lo, hi;
+    if (sp[3] === "d") { lo = Math.max(MINY + 5, hc - sp[5]); hi = hc - sp[4]; } else { lo = sp[4]; hi = sp[5]; }
+    if (hi > hc - 3) hi = hc - 3;
+    const reach = Math.ceil(size * 1.2) + 1;
+    const wLo = Math.max(lo, Y0 - reach), wHi = Math.min(hi, Y1 - 1 + reach);
+    if (wHi < wLo) continue;
+    for (let bk = wLo >> 5; bk <= wHi >> 5; bk++) {
+      const bl = Math.max(lo, bk * 32), bh = Math.min(hi, bk * 32 + 31);
+      if (bh < bl) continue;
+      const len = bh - bl + 1;
+      let cnt = sp[1] * len / 32;
+      if (sp[8]) cnt *= 0.8 + 0.8 * Math.exp(-(hc - (bl + bh) / 2) / 150);
+      rs = (noise.hash3(cx, bk, cz, sp[0]) * 4294967296) >>> 0 || 1;
+      let n = cnt | 0; if (rnd() < cnt - n) n++;
+      for (let k = 0; k < n; k++) {
+        let px = (rnd() * CS) | 0, pz = (rnd() * CS) | 0, py = bl + ((rnd() * len) | 0);
+        const sz = size * (0.6 + rnd() * 0.6);
+        for (let s = 0; s < sz; s++) {
+          if (px >= 0 && px < CS && pz >= 0 && pz < CS && py >= Y0 && py < Y1) {
+            const vi = ((py - Y0) * CS + pz) * CS + px, cur = vox[vi];
+            if (cur === STONE) vox[vi] = id; else if (ds !== undefined && cur === DEEP) vox[vi] = ds;
+          }
+          const d = (rnd() * 6) | 0;
+          if (d === 0) px++; else if (d === 1) px--; else if (d === 2) pz++; else if (d === 3) pz--; else if (d === 4) py++; else py--;
+        }
+      }
+    }
+  }
+}
+
+// Generator 3 band of a column: the sections [lo, hi) that hold everything non-trivial (terrain surface, water, trees, plants, villages and
+// ~3 sections of stone below the lowest ground); everything above is air, everything below is what generateRange produces.
+function generateBand(cx, cz) {
+  const { CS } = BF;
+  if (GEN < 3) {
+    const vox = new Uint16Array(CS * CS * BF.H); generate(cx, cz, vox);
+    return { lo: 0, hi: BF.H >> 4, vox };
+  }
+  prep(cx, cz);
+  let top = P.topY + 4;                     // plants, bushes, lamps
+  if (P.ext > 0) top = Math.max(top, P.ext);
+  let low = P.minH;
+  if (P.vils.length) { top = Math.max(top, P.vMax); low = Math.min(low, P.vMin); }
+  const lo = Math.max(BF.SY0, (low >> 4) - 3), hi = Math.min(BF.SY1, Math.max(lo + 1, (top >> 4) + 1));
+  const vox = new Uint16Array((hi - lo) * 4096);
+  core(cx, cz, vox, lo * 16, (hi - lo) * 16);
+  return { lo, hi, vox };
+}
+// Terrain (and everything else the generator makes) for an arbitrary section range [sy0, sy1); agrees with generateBand on overlaps.
+function generateRange(cx, cz, sy0, sy1) {
+  const { CS } = BF;
+  sy0 = Math.max(sy0, BF.SY0); sy1 = Math.min(sy1, BF.SY1);
+  if (sy1 <= sy0) return new Uint16Array(0);
+  if (GEN < 3) {
+    const full = new Uint16Array(CS * CS * BF.H); generate(cx, cz, full);
+    return full.slice(sy0 * 4096, sy1 * 4096);
+  }
+  prep(cx, cz);
+  const vox = new Uint16Array((sy1 - sy0) * 4096);
+  core(cx, cz, vox, sy0 * 16, (sy1 - sy0) * 16);
+  return vox;
+}
+
+// Legacy full-column generation (generator 1/2: the 192-high column; generator 3: the window y 0..191).
+function generate(cx, cz, vox) {
+  prep(cx, cz);
+  core(cx, cz, vox, 0, 192);
+}
+// Fills `vox` (zeroed, window-indexed: ((y - Y0) * 16 + z) * 16 + x) with absolute y in [Y0, Y0 + NY). Everything written outside the window is skipped.
+function core(cx, cz, vox, Y0, NY) {
+  const { CS, H, SEA, B } = BF;
+  const ox = cx * CS, oz = cz * CS;
+  const STONE = B.stone, WATER = B.water, AIR = 0;
+  const step = CS * CS;
+  const Y1 = Y0 + NY, G3 = GEN >= 3, MINY = BF.MIN_Y;
+  WY0 = Y0; WY1 = Y1;
+  const maxH = P.maxH;
 
   // ---- terrain columns ----
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
     const wx = ox + x, wz = oz + z;
     const hi = (z + 1) * HW + x + 1;
     const h = hCache[hi];
-    if (h > maxH) maxH = h;
     const b = bCache[hi], tb = tbCache[hi], wl = wlCache[hi];
     const n0 = hCache[hi - 1], n1 = hCache[hi + 1], n2 = hCache[hi - HW], n3 = hCache[hi + HW];
     const slope = Math.max(Math.abs(n0 - h), Math.abs(n1 - h), Math.abs(n2 - h), Math.abs(n3 - h));
@@ -1046,13 +1409,14 @@ function generate(cx, cz, vox) {
       case DARK_FOREST: if (patch > 0.6) top = B.podzol; break;
       case SAVANNA: if (patch > 0.62) top = B.coarse_dirt; break;
       case MOUNTAINS: case SNOWY_SLOPES: case PEAKS: case STONY_PEAKS: {
-        const snowLine = (b === SNOWY_SLOPES ? 74 : b === PEAKS ? 92 : 100) + noise.n2(wx / 23, wz / 23) * 4;
+        const snowLine = G3 ? (b === SNOWY_SLOPES ? 1450 : b === PEAKS ? 1800 : 1950) + noise.n2(wx / 23, wz / 23) * 30
+          : (b === SNOWY_SLOPES ? 74 : b === PEAKS ? 92 : 100) + noise.n2(wx / 23, wz / 23) * 4;
         const snowy = b !== STONY_PEAKS && h >= snowLine;
         if (snowy) {
           top = slope >= 4 ? STONE : B.snow; fill = slope >= 3 ? STONE : B.snow; depth = 1 + (r * 2 | 0);
           if (b === PEAKS && patch > 0.5 && slope < 3) top = B.packed_ice;
         } else if (b === STONY_PEAKS) top = fill = ((h + (patch * 3 | 0)) % 7 === 0) ? B.calcite : STONE;
-        else if (slope >= 3 || h > 90 + r * 4) { top = STONE; fill = STONE; }
+        else if (G3 ? (slope >= 2 || h > 1850 + r * 30) : (slope >= 3 || h > 90 + r * 4)) { top = STONE; fill = STONE; }
         else if (b === SNOWY_SLOPES) top = B.snow_grass;
         else if (slope >= 2 && r < 0.3) top = B.gravel;
         break;
@@ -1067,30 +1431,34 @@ function generate(cx, cz, vox) {
     const ice = h < wl && b !== SWAMP && b !== MANGROVE && (tb === 0 || (tb === 1 && b === RIVER)) &&
       (wl - h < 4 || patch > -0.35);
     const topY = Math.max(h, wl);
-    let i = x + z * CS;
-    for (let y = 0; y <= topY; y++, i += step) {
+    const yStart = Y0 > MINY ? Y0 : MINY, yEnd = topY < Y1 - 1 ? topY : Y1 - 1;
+    let i = x + z * CS + (yStart - Y0) * step;
+    const strataY = G3 ? h - 36 + r * 4 : 40 + r * 4;
+    for (let y = yStart; y <= yEnd; y++, i += step) {
       let v;
-      if (y === 0) v = B.bedrock;
-      else if (y <= 3 && noise.hash3(wx, y, wz, 9) < 0.75 - y * 0.22) v = B.bedrock;
+      if (y === MINY) v = B.bedrock;
+      else if (!G3 && y <= 3 && noise.hash3(wx, y, wz, 9) < 0.75 - y * 0.22) v = B.bedrock;
+      else if (G3 && y - MINY <= 4 && noise.hash3(wx, y, wz, 9) < 0.85 - (y - MINY) * 0.17) v = B.bedrock;
       else if (y > h) v = (y === wl && ice) ? B.ice : WATER;
       else if (strata) {
         if (y > h - depth) v = y === h ? top : fill;
-        else if (y > 40 + r * 4) v = STRATA[(y + ((noise.n2(wx / 160, wz / 160) * 3) | 0) + 64) & 63];
-        else v = STONE;
+        else if (y > strataY) v = STRATA[(y + ((noise.n2(wx / 160, wz / 160) * 3) | 0) + 64) & 63];
+        else v = G3 ? stone3(wx, y, wz) : STONE;
       }
       else if (y === h) v = top;
       else if (y > h - depth) v = fill;
       else if (y > h - depth - depth2) v = under;
-      else v = STONE;
+      else v = G3 ? stone3(wx, y, wz) : STONE;
       vox[i] = v;
     }
   }
 
-  // villages touching this chunk (a chunk never straddles two regions; the spawn village may lie anywhere)
-  const vils = [villageRegion(regionOf(ox), regionOf(oz)), spawnVillage()].filter(v => v &&
-    v.maxX + 2 >= ox && v.minX - 2 < ox + CS && v.maxZ + 2 >= oz && v.minZ - 2 < oz + CS);
+  const vils = P.vils;
+  // structures (villages, trees, plants) cannot reach a window that lies far below the lowest ground of the chunk
+  const skipTop = G3 && Y1 <= P.minH - 48;
 
   // ---- caves (coarse 3D noise grid, interpolated) ----
+  if (G3) caves3(vox, Y0, Y1, cx, cz); else {
   const NY = Math.min(GY_MAX, ((maxH + 4) >> 2) + 1);
   for (let iy = 0; iy < NY; iy++) for (let iz = 0; iz < GX; iz++) for (let ix = 0; ix < GX; ix++) {
     const wx = ox + ix * 4, wy = iy * 4, wz = oz + iz * 4, gi = (iy * GX + iz) * GX + ix;
@@ -1147,9 +1515,11 @@ function generate(cx, cz, vox) {
       }
     }
   }
+  }   // end of the legacy (generator 1/2) caves and deepslate
 
   // ---- ores and pockets (random-walk veins, chunk-local) ----
   // dsId: block used instead of `id` where the vein passes through deepslate (ore variants; tuff blobs replace deepslate too)
+  const DEEP = B.deepslate;
   function vein(salt, count, size, ymin, ymax, id, dsId) {
     rs = (noise.hash(cx, cz, salt) * 4294967296) >>> 0 || 1;
     let n = count | 0; if (rnd() < count - n) n++;
@@ -1167,6 +1537,7 @@ function generate(cx, cz, vox) {
       }
     }
   }
+  if (G3) ores3(vox, Y0, Y1, cx, cz); else {
   vein(201, 3.5, 30, 6, Math.min(90, maxH), B.gravel);
   vein(202, 0.7, 18, 20, 58, B.clay);
   vein(203, 3, 22, 8, 70, B.dirt);
@@ -1188,23 +1559,23 @@ function generate(cx, cz, vox) {
     vein(224, 2.5, 60, 2, 26, B.tuff, B.tuff);
     vein(225, 0.7, 40, 25, 55, B.dripstone_block);
   }
+  }   // end of the legacy ores
 
   // ---- villages ----
-  for (const vil of vils) drawVillage(vil, ox, oz, vox, (x, z) => hCache[(z - oz + 1) * HW + x - ox + 1]);
-  const nearVillage = (x, z, m) => !!villageAt(x, z, m);
+  if (!skipTop) for (const vil of vils) drawVillage(vil, ox, oz, vox, (x, z) => hCache[(z - oz + 1) * HW + x - ox + 1]);
 
   // ---- trees and large features ----
   const RENDER = BF.RENDER;
   const putLog = (x, y, z, id) => {
     const lx = x - ox, lz = z - oz;
-    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= 0 || y >= H) return;
-    const vi = (y * CS + lz) * CS + lx, cur = vox[vi];
+    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
+    const vi = ((y - Y0) * CS + lz) * CS + lx, cur = vox[vi];
     if (cur === AIR || cur === WATER || RENDER[cur] === 2 || RENDER[cur] === 4) vox[vi] = id;
   };
   const putLeaf = (x, y, z, id) => {
     const lx = x - ox, lz = z - oz;
-    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= 0 || y >= H) return;
-    const vi = (y * CS + lz) * CS + lx;
+    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
+    const vi = ((y - Y0) * CS + lz) * CS + lx;
     if (vox[vi] === AIR) vox[vi] = id;
   };
   const disc = (tx, y, tz, r, id, trim) => {
@@ -1351,32 +1722,25 @@ function generate(cx, cz, vox) {
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > (noise.hash3(tx + dx, ty + dy, tz + dz, 91) < 0.5 ? 1 : 2)) continue;
       const lx = tx + dx - ox, lz = tz + dz - oz, y = ty + dy;
-      if (lx < 0 || lx >= CS || lz < 0 || lz >= CS) continue;
-      vox[(y * CS + lz) * CS + lx] = noise.hash3(tx + dx, y, tz + dz, 92) < 0.7 ? B.mossy_cobblestone : B.cobblestone;
+      if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y < Y0 || y >= Y1) continue;
+      vox[((y - Y0) * CS + lz) * CS + lx] = noise.hash3(tx + dx, y, tz + dz, 92) < 0.7 ? B.mossy_cobblestone : B.cobblestone;
     }
   }
   const grassy = b => !(b === OCEAN || b === BEACH || b === SNOWY_BEACH || b === STONY_SHORE || b === DESERT || b === BADLANDS ||
     b === RIVER || b === PEAKS || b === STONY_PEAKS || b === SNOWY_SLOPES);
 
-  const x0 = ox - M, x1 = ox + CS + M, z0 = oz - M, z1 = oz + CS + M;
   const inChunk = (x, z) => x >= ox && x < ox + CS && z >= oz && z < oz + CS;
-  for (let gz = Math.floor(z0 / 4); gz <= Math.floor((z1 - 1) / 4); gz++)
-    for (let gx = Math.floor(x0 / 4); gx <= Math.floor((x1 - 1) / 4); gx++) {
-      const r = noise.hash(gx, gz, 101);
-      if (r >= 0.92) continue;
-      const tx = gx * 4 + ((noise.hash(gx, gz, 102) * 3) | 0), tz = gz * 4 + ((noise.hash(gx, gz, 103) * 3) | 0);
-      if (tx < x0 || tx >= x1 || tz < z0 || tz >= z1) continue;
-      if (nearVillage(tx, tz, 3)) continue;
-      const h = climate(tx, tz), b = C.biome;
+  if (!skipTop) for (const cd of P.cands) {
+      const { gx, gz, tx, tz, r, h, b } = cd;
       const r2 = noise.hash(gx, gz, 104), r3 = noise.hash(gx, gz, 105);
       if (b === MANGROVE) {
         if (r < TREE_DENSITY[b] && h >= SEA - 3) mangrove(tx, Math.max(h, SEA) + 1, tz, 4 + ((r3 * 3) | 0), h + 1);
         continue;
       }
-      if (h <= C.wl) continue;
+      if (h <= cd.wl) continue;
       if (b === DESERT || b === BADLANDS) {
         if (r < (b === DESERT ? 0.14 : 0.03) && inChunk(tx, tz)) {
-          const top = vox[(h * CS + tz - oz) * CS + tx - ox];
+          const top = h >= Y0 && h < Y1 ? vox[((h - Y0) * CS + tz - oz) * CS + tx - ox] : 0;
           if (top === B.sand || top === B.red_sand) for (let y = h + 1; y <= h + 1 + ((r2 * 3) | 0); y++) putLog(tx, y, tz, B.cactus);
         }
         continue;
@@ -1388,7 +1752,7 @@ function generate(cx, cz, vox) {
       if (b === OLD_TAIGA && r >= 0.86 && r < 0.9 && !entranceAt(tx, tz)) { boulder(tx, h + 1, tz); continue; }
       if (r >= TREE_DENSITY[b] || !grassy(b)) continue;
       if (h <= SEA + 1 && b !== SWAMP) continue;                 // shore sand
-      if (b === MOUNTAINS && h > 90) continue;
+      if (b === MOUNTAINS && h > (G3 ? 1800 : 90)) continue;
       if (entranceAt(tx, tz)) continue;
       const ty = h + 1;
       switch (b) {
@@ -1428,13 +1792,13 @@ function generate(cx, cz, vox) {
       }
     }
   // jungle undergrowth bushes on a 3-grid
-  for (let gz = Math.floor((oz - 3) / 3); gz <= Math.floor((oz + CS + 2) / 3); gz++)
+  if (!skipTop) for (let gz = Math.floor((oz - 3) / 3); gz <= Math.floor((oz + CS + 2) / 3); gz++)
     for (let gx = Math.floor((ox - 3) / 3); gx <= Math.floor((ox + CS + 2) / 3); gx++) {
       if (noise.hash(gx, gz, 121) >= 0.45) continue;
       const tx = gx * 3 + ((noise.hash(gx, gz, 122) * 3) | 0), tz = gz * 3 + ((noise.hash(gx, gz, 123) * 3) | 0);
       if (tx < ox - 3 || tx >= ox + CS + 3 || tz < oz - 3 || tz >= oz + CS + 3) continue;
       const h = climate(tx, tz);
-      if (C.biome !== JUNGLE || h <= SEA + 1 || entranceAt(tx, tz) || nearVillage(tx, tz, 3)) continue;
+      if (C.biome !== JUNGLE || h <= SEA + 1 || entranceAt(tx, tz) || villageAt(tx, tz, 3)) continue;
       putLog(tx, h + 1, tz, B.jungle_log);
       disc(tx, h + 1, tz, 2, B.jungle_leaves, 0.8); disc(tx, h + 2, tz, 1, B.jungle_leaves, 0.5);
     }
@@ -1456,8 +1820,8 @@ function generate(cx, cz, vox) {
   }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
     const hi = (z + 1) * HW + x + 1, h = hCache[hi];
-    if (h < SEA || h + 4 >= H) continue;
-    const vi = (h * CS + z) * CS + x, top = vox[vi];
+    if (skipTop || h < SEA || h + 4 >= H || h < Y0 || h + 1 >= Y1) continue;
+    const vi = ((h - Y0) * CS + z) * CS + x, top = vox[vi];
     if (vox[vi + step] !== AIR || !BF.SOLID[top]) continue;
     const wx = ox + x, wz = oz + z;
     let skip = false;
@@ -1471,7 +1835,7 @@ function generate(cx, cz, vox) {
         (hCache[hi - 1] < SEA || hCache[hi + 1] < SEA || hCache[hi - HW] < SEA || hCache[hi + HW] < SEA)) {
       if (r < 0.14 * 2.2 && r < 0.14 * patchMult(patchField(wx, wz, CANE_S, 23.9, ox, oz, jit), 0.45, 0.2)) {
         const n = 1 + ((noise.hash(wx, wz, 142) * 3) | 0);
-        for (let k = 1; k <= n; k++) vox[vi + step * k] = B.sugar_cane;
+        for (let k = 1; k <= n && h + k < Y1; k++) vox[vi + step * k] = B.sugar_cane;
       }
       continue;
     }
@@ -1528,7 +1892,7 @@ function generate(cx, cz, vox) {
   }
   // rare mushrooms on cave floors
   rs = (noise.hash(cx, cz, 151) * 4294967296) >>> 0 || 1;
-  for (let k = 0; k < 6; k++) {
+  if (!G3) for (let k = 0; k < 6; k++) {
     const x = (rnd() * CS) | 0, z = (rnd() * CS) | 0, pick = rnd(), kind = rnd();
     for (let y = 40; y > 6; y--) {
       const vi = (y * CS + z) * CS + x;
@@ -1553,11 +1917,15 @@ const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: 
 
 BF.worldgen = {
   init(n, opts) {
-    noise = n; GEN = (opts && opts.gen) || 1; SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
-    if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
+    noise = n; GEN = (opts && opts.gen) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
+    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 36, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
+    else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,
+  generateBand,
+  generateRange,
   heightAt,
+  _fields(x, z) { fields(x, z); const R = GEN >= 3 ? relief3(x, z, false) : null; return { c: K.c, pm: K.pm, p: K.p, e: K.e, t: K.t, hu: K.hu, S: R && R.S, m: R && R.m }; },
   waterLevelAt(x, z) { climate(Math.floor(x), Math.floor(z)); return C.wl; },
   biomeAt,
   tintAt,
