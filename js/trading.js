@@ -143,7 +143,7 @@ const TRADES = {
   unemployed: [[], [], [], [], []],   // no jobsite yet (js/jobs.js): no offers
   explorer: [[], [], [], [], []],     // no fixed offers: it sells the maps it has filled, built on the fly (js/explorer.js syncOffers)
   // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
-  // (3 wool + 3 planks each). Its bed price matches the shepherd's; builders buy beds at the same offer.
+  // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer.
   furniture_maker: [
     ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed"],
     ["11 wool > 1 emerald", "10 oak_log > 1 emerald"],
