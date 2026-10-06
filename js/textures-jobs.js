@@ -311,6 +311,25 @@ T.drafting_table_front = p => {
   for (let k = 0; k < 14; k++) { p.set(19 + Math.round(k * 0.3), 13 + k, hex("#e8a83a")); p.setH(19, 13 + k, 1); }                                      // pencil
   p.relief(1.0);
 };
+// ---------- survey table (explorer, not vanilla): a compass rose inlaid in a spruce table, a rolled map and a brass spyglass on the sides ----------
+const SPRUCE = pal(["#2a1c0e", "#35240f", "#412c14", "#4f361a", "#5e4222"]);
+T.survey_table_top = p => {
+  planksBase(p, SPRUCE, "#1a1108");
+  rect(p, 3, 3, 28, 28, (x, y) => mix(hex("#d8c890"), hex("#bfae78"), p.noise(x, y, 4, 4, 250)), 0.8, 0.03);      // parchment
+  circle(p, 16, 16, 10, (x, y, d) => { if (d > 8.4) { p.set(x, y, jit(p, hex("#7a5a2a"), 0.04)); p.setH(x, y, 0.9); } });   // ring
+  const L = (x0, y0, x1, y1, c) => { const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)); for (let s = 0; s <= n; s++) { const x = Math.round(x0 + (x1 - x0) * s / n), y = Math.round(y0 + (y1 - y0) * s / n); p.set(x, y, hex(c)); p.setH(x, y, 0.95); } };
+  L(16, 5, 16, 27, "#3a2a14"); L(5, 16, 27, 16, "#3a2a14");                                                    // axes
+  for (let k = 0; k < 7; k++) { const w = 3 - Math.floor(k / 2); for (let x = 16 - w; x <= 16 + w; x++) if (Math.abs(x - 16) <= w - (k % 2)) { p.set(x, 15 - k, hex("#c83a3a")); p.setH(x, 15 - k, 1); } }   // north needle
+  rect(p, 15, 17, 17, 24, hex("#e8e4d4"), 0.95, 0.02);                                                         // south tail
+  p.relief(0.8);
+};
+T.survey_table_side = p => { planksBase(p, SPRUCE, "#1a1108"); band(p, 0, 3, SPRUCE.map(c => mul(c, 1.3))); rect(p, 0, 14, 31, 16, hex("#b8923a"), 0.9, 0.04); p.relief(1.2); };
+T.survey_table_front = p => {
+  T.survey_table_side(p);
+  rect(p, 5, 19, 14, 26, hex("#d8c890"), 0.95, 0.03); rect(p, 5, 19, 6, 26, hex("#a8946a"), 1, 0.03);        // rolled map
+  rect(p, 17, 22, 27, 24, (x) => ramp(IRON, 0.3 + (x % 3) * 0.2), 0.95, 0.03); rect(p, 17, 21, 19, 25, hex("#b8923a"), 1, 0.03);   // spyglass
+  p.relief(1.0);
+};
 ICON_T.grindstone = p => {
   clearTile(p);
   rect(p, 4, 14, 7, 30, (x) => ramp(DARK_OAK, x === 4 ? 0.8 : 0.4), 0.8, 0.05);

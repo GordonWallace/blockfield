@@ -245,6 +245,10 @@ const BLOCK_DEFS = [
   // ---- sign pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Signs")
   ...signDefs(),
   // ---- end sign pack ----
+  // ---- explorer pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Explorers")
+  // survey table: the explorer villager's jobsite (not vanilla): a compass rose inlaid in a spruce table
+  { name: "survey_table", jobsite: "explorer", tiles: { top: "survey_table_top", side: "survey_table_side", front: "survey_table_front", bottom: "spruce_planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#5a3f24" },
+  // ---- end explorer pack ----
 ];
 
 // ---- slabs/stairs pack runtime: shape placeholders get their base block's tiles / hardness / tool / colour ----

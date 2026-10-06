@@ -392,6 +392,18 @@ first job adds that profession's starting wares to its inventory (no emeralds, o
 later profession changes keep the inventory as it is and offers come from the new table + whatever is in stock. Villagers that have traded (xp > 0)
 never change profession.
 
+### explorer
+
+No fixed offers (`TRADES.explorer` is empty, `PRODUCE.explorer` empty) and no starting wares except 6-24 emeralds (no maps). Its wares are the filled maps it carries (js/explorer.js `syncOffers`), one offer per finished map:
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 7 emerald > 1 filled_map (size 1) | 7.00 | 3.60 + exploring | 0.51 on the blank map alone | buy from villager; only while it holds a finished map; 12 / 20 / 32 / 48 emeralds for sizes 2-5 |
+
+The explorer buys the blank map from a cartographer at the cartographer's own price (`4 emerald > 1 blank_map_1`, rho 0.90 above) and nets 3 emeralds on a size-1 sale; the maker (cartographer) earns 4 per map, so the chain
+paper + iron + gold -> blank map -> filled map costs the player 7 emeralds against 3.6 for the blank map they could craft or buy themselves, the rest paying for the walking.
+Emeralds follow the usual rules (+2 per day up to 12, `EM_CAP`); with fewer than 4 it stops buying maps. The map offers are not in the old-trade tables below.
+
 ### builder
 
 New profession (see CONTRACT.md "Builder villagers"). The builder is the one villager that mostly *buys* from the player: it needs building materials, keeps them in its inventory and places them block by block. Every offer is "sell to villager" (rho 0.79 to 0.91) except the two goods it

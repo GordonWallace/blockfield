@@ -140,6 +140,7 @@ const TRADES = {
   ],
   nitwit: [[], [], [], [], []],
   unemployed: [[], [], [], [], []],   // no jobsite yet (js/jobs.js): no offers
+  explorer: [[], [], [], [], []],     // no fixed offers: it sells the maps it has filled, built on the fly (js/explorer.js syncOffers)
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -161,6 +162,7 @@ const PRODUCE = {
   nitwit: [],
   unemployed: [],
   builder: [],
+  explorer: [],
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -304,6 +306,7 @@ function init(v) {
   if (!Array.isArray(v.trades)) v.trades = buildTrades(v.profession, v.level);
   if (!Array.isArray(v.inv)) { v.inv = stockFor(v.profession, v); if (BF.food) BF.food.startFood(v); }   // + starting food (js/villagelife.js)
   if (v.restockDay == null) v.restockDay = BF.sky ? BF.sky.day : 0;
+  if (v.profession === "explorer" && BF.explorer) BF.explorer.syncOffers(v);   // its filled maps are the offers
   return v;
 }
 // Why the villager cannot do this offer right now, or null.
@@ -337,6 +340,7 @@ function pack(v) {
     level: v.level, xp: v.xp, day: v.restockDay,
     prof: v.profession, job: v.jobsite ? [v.jobsite.x, v.jobsite.y, v.jobsite.z] : null, st: v.jobStocked ? 1 : 0,   // jobsites (js/jobs.js); missing in older saves
     life: BF.food ? BF.food.pack(v) : undefined,   // food state (js/villagelife.js); missing in older saves
+    ex: BF.explorer && v.profession === "explorer" ? BF.explorer.pack(v) : undefined,   // explorer state (js/explorer.js)
   };
 }
 function unpack(v, o) {
@@ -354,6 +358,7 @@ function unpack(v, o) {
   if (+o.xp >= 0) v.xp = +o.xp;
   if (Number.isFinite(+o.day)) v.restockDay = +o.day;
   if (BF.food) BF.food.unpack(v, o.life);   // no o.life = save from before villager food: starting food is added
+  if (BF.explorer && o.ex) BF.explorer.unpack(v, o.ex);
   return v;
 }
 
