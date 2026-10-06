@@ -367,7 +367,7 @@ function creativeItems() {
     else if (it.places || FUNCTIONAL.test(it.name)) cat = "functional";
     else if (NATURAL.test(it.name) || it.render === "cross") cat = "natural";
     else cat = "building";
-    creList.push({ id: it.id, cat, name: nameOf(it.id).toLowerCase() });
+    creList.push({ id: it.id, cat, name: (nameOf(it.id) + (it.search ? " " + it.search : "")).toLowerCase() });
   }
   // keep each 16-colour family together, in dye order (stable: ties keep id order)
   const col = creList.filter(e => e.cat === "colour").map(e => [colourSortKey(BF.items[e.id].name), e]).sort((a, b) => a[0] - b[0]).map(a => a[1]);
@@ -1081,7 +1081,7 @@ function setTab(key) {
 }
 function buildPalette() {
   if (creTab === "inventory") return;
-  const list = creativeItems().filter(e => creTab === "search" ? (!creSearch || e.name.includes(creSearch)) : e.cat === creTab);
+  const list = creativeItems().filter(e => creTab === "search" ? (!creSearch || creSearch.split(/\s+/).every(w => e.name.includes(w))) : e.cat === creTab);
   palEl.textContent = "";
   const frag = document.createDocumentFragment();
   for (const e of list) { const el = makeSlot("", "pal", e.id); setSlot(el, { id: e.id, count: 1 }); frag.appendChild(el); }

@@ -500,12 +500,13 @@ const ITEM_DEFS = [
   // ---- end village life items ----
   // ---- cartography items (js/maps.js, js/cartography.js) ----
   { name: "compass", color: "#a8a8b0" },
-  { name: "auto_map", stack: 1, color: "#d8c890", autoBlank: true, label: "Auto Map (creative)" },   // right click: asks for a width, then fills itself from the world generator (js/mapview.js)
   ...[1, 2, 3, 4, 5].map(n => ({ name: "blank_map_" + n, color: "#d8c890", mapSize: n, label: "Blank Map (" + 8 * Math.pow(2, n - 1) + "x" + 8 * Math.pow(2, n - 1) + " chunks)" })),
   // ---- end cartography items ----
   // ---- explorer items (append-only) ----
   { name: "tent", places: "tent", stack: 1, color: "#c9b27a", creativeTab: "functional" },
   // ---- end explorer items ----
+  // ---- auto map (js/mapview.js; append-only: ids of the items above must not move) ----
+  { name: "auto_map", stack: 1, color: "#d8c890", autoBlank: true, creativeTab: "misc", label: "Auto-Fill Map", search: "auto map autofill auto-fill automap creative terrain overview" },   // right click: asks for a width, then fills itself from the world generator
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -590,7 +591,7 @@ BF.resolveItem = name => {
   const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
   if (a && +a[1] >= 1 && +a[1] <= 128) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
     const k = +a[1], id = dynItem++;
-    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto Map (" + k * 128 + "x" + k * 128 + " blocks)" };
+    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto-Fill Map (" + k * 128 + "x" + k * 128 + " blocks)", search: "auto map autofill auto-fill automap" };
     I[name] = id;
     return id;
   }
