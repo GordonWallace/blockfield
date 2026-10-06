@@ -1,0 +1,478 @@
+<title>Blockfield Terrain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: full-bleed 3D canvas, with a small HUD panel top-left and a control hint bottom. Single deliberate look (sky world), so one theme. */
+  :root {
+    --ink: #f4f7ef;
+    --panel: rgba(18, 28, 22, 0.72);
+    --panel-edge: rgba(244, 247, 239, 0.16);
+    --grass: #7fbf4d;
+    --muted: #b9c6b0;
+    --sky: #9cc9ea;
+    --display: "Silkscreen", ui-monospace, monospace;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body { background: var(--sky); color: var(--ink); overflow: hidden; font-family: var(--mono); font-size: 13px; }
+  #view { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  .hud {
+    position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); left: 16px;
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 4px;
+    padding: 10px 12px; display: grid; gap: 6px; min-width: 0; max-width: calc(100% - 32px);
+    backdrop-filter: blur(4px);
+  }
+  .hud h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 15px; letter-spacing: 0.04em; color: var(--grass); }
+  .stats { display: grid; grid-template-columns: auto auto; column-gap: 14px; row-gap: 2px; font-variant-numeric: tabular-nums; }
+  .stats dt { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; align-self: center; }
+  .stats dd { margin: 0; text-align: right; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button {
+    font: inherit; font-size: 12px; color: var(--ink); background: rgba(244,247,239,0.08);
+    border: 1px solid var(--panel-edge); border-radius: 3px; padding: 4px 8px; cursor: pointer;
+  }
+  button:hover { background: rgba(244,247,239,0.18); }
+  button:focus-visible { outline: 2px solid var(--grass); outline-offset: 1px; }
+  button[aria-pressed="true"] { border-color: var(--grass); color: var(--grass); }
+  .hint {
+    position: fixed; left: 16px; right: 16px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    text-align: center; color: var(--ink); font-size: 12px; text-shadow: 0 1px 2px rgba(0,0,0,0.55); pointer-events: none;
+  }
+  .hint kbd { font-family: var(--mono); border: 1px solid var(--panel-edge); background: var(--panel); border-radius: 3px; padding: 0 4px; }
+  .cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; opacity: 0.8; }
+  .cross::before, .cross::after { content: ""; position: absolute; background: var(--ink); }
+  .cross::before { left: 6px; top: 0; width: 2px; height: 14px; }
+  .cross::after { top: 6px; left: 0; height: 2px; width: 14px; }
+  .touch { position: fixed; right: 16px; bottom: calc(44px + env(safe-area-inset-bottom, 0px)); display: none; gap: 8px; }
+  .touch button { width: 56px; height: 56px; font-size: 18px; background: var(--panel); }
+  @media (pointer: coarse) { .touch { display: grid; } .hint .desk { display: none; } }
+  @media (pointer: fine) { .hint .phone { display: none; } }
+</style>
+
+<canvas id="view" aria-label="3D voxel landscape"></canvas>
+<div class="cross" aria-hidden="true"></div>
+
+<section class="hud" aria-label="World info">
+  <h1>Blockfield</h1>
+  <dl class="stats">
+    <dt>Seed</dt><dd id="s-seed">-</dd>
+    <dt>X / Y / Z</dt><dd id="s-pos">-</dd>
+    <dt>Chunk</dt><dd id="s-chunk">-</dd>
+    <dt>Loaded</dt><dd id="s-loaded">-</dd>
+    <dt>Queued</dt><dd id="s-queue">-</dd>
+    <dt>FPS</dt><dd id="s-fps">-</dd>
+  </dl>
+  <div class="row">
+    <button id="b-mode" type="button" aria-pressed="true">Fly</button>
+    <button id="b-seed" type="button">New seed</button>
+    <button id="b-dist" type="button">View 8</button>
+  </div>
+</section>
+
+<div class="touch" aria-label="Movement">
+  <button id="t-fwd" type="button" aria-label="Move forward">▲</button>
+  <button id="t-up" type="button" aria-label="Jump or rise">⤒</button>
+</div>
+
+<p class="hint">
+  <span class="desk">Click to look around · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Space</kbd> up/jump · <kbd>Shift</kbd> down · <kbd>F</kbd> fly/walk · <kbd>R</kbd> sprint</span>
+  <span class="phone">Drag to look · hold ▲ to move</span>
+</p>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+"use strict";
+
+// ---------- Noise (2D/3D simplex, seeded) ----------
+function makeNoise(seed) {
+  const perm = new Uint8Array(512);
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let s = seed >>> 0 || 1;
+  const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let i = 255; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  const g2 = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+  const F2 = 0.5 * (Math.sqrt(3) - 1), G2 = (3 - Math.sqrt(3)) / 6;
+  function n2(x, y) {
+    const t = (x + y) * F2, i = Math.floor(x + t), j = Math.floor(y + t);
+    const t0 = (i + j) * G2, x0 = x - (i - t0), y0 = y - (j - t0);
+    const i1 = x0 > y0 ? 1 : 0, j1 = 1 - i1;
+    const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2, x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+    const ii = i & 255, jj = j & 255;
+    let n = 0, a;
+    a = 0.5 - x0*x0 - y0*y0; if (a > 0) { const g = g2[perm[ii + perm[jj]] & 7]; a *= a; n += a * a * (g[0]*x0 + g[1]*y0); }
+    a = 0.5 - x1*x1 - y1*y1; if (a > 0) { const g = g2[perm[ii + i1 + perm[jj + j1]] & 7]; a *= a; n += a * a * (g[0]*x1 + g[1]*y1); }
+    a = 0.5 - x2*x2 - y2*y2; if (a > 0) { const g = g2[perm[ii + 1 + perm[jj + 1]] & 7]; a *= a; n += a * a * (g[0]*x2 + g[1]*y2); }
+    return 70 * n; // ~[-1, 1]
+  }
+  function fbm(x, y, oct) {
+    let a = 1, f = 1, sum = 0, norm = 0;
+    for (let o = 0; o < oct; o++) { sum += a * n2(x * f, y * f); norm += a; a *= 0.5; f *= 2; }
+    return sum / norm;
+  }
+  function hash(x, z) {
+    let h = (x * 374761393 + z * 668265263 + seed * 2246822519) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  return { n2, fbm, hash };
+}
+
+// ---------- World constants ----------
+const CS = 16;          // chunk size (x, z)
+const H = 96;           // world height
+const SEA = 22;
+const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, SAND = 4, SNOW = 5, WOOD = 6, LEAF = 7, WATER = 8;
+const COLORS = {
+  [GRASS]: [0.42, 0.68, 0.27], [DIRT]: [0.52, 0.37, 0.24], [STONE]: [0.50, 0.51, 0.52],
+  [SAND]: [0.86, 0.80, 0.56], [SNOW]: [0.94, 0.96, 0.98], [WOOD]: [0.42, 0.30, 0.18],
+  [LEAF]: [0.24, 0.50, 0.20], [WATER]: [0.20, 0.45, 0.78],
+};
+
+let noise, seed;
+
+function terrainHeight(x, z) {
+  const cont = noise.fbm(x / 420, z / 420, 3);            // broad lowlands vs highlands
+  const hills = noise.fbm(x / 90, z / 90, 4);             // rolling hills
+  const ridge = 1 - Math.abs(noise.fbm(x / 160 + 50, z / 160 - 50, 4)); // ridged mountains
+  const mtn = Math.max(0, cont) ** 1.5 * ridge * ridge * 55;
+  const h = SEA + 2 + cont * 10 + hills * 7 + mtn;
+  return Math.max(1, Math.min(H - 8, Math.floor(h)));
+}
+
+// ---------- Chunk generation ----------
+// Voxels are stored with a 1-block border so faces on chunk edges can be culled
+// against neighbours without loading them.
+const P = CS + 2;
+const idx = (x, y, z) => (y * P + z) * P + x;
+
+function generateChunk(cx, cz) {
+  const vox = new Uint8Array(P * P * H);
+  const heights = new Int16Array(P * P);
+  const ox = cx * CS - 1, oz = cz * CS - 1;
+  for (let z = 0; z < P; z++) for (let x = 0; x < P; x++) {
+    const wx = ox + x, wz = oz + z;
+    const h = terrainHeight(wx, wz);
+    heights[z * P + x] = h;
+    const beach = h <= SEA + 1;
+    const snowLine = 62 + Math.floor(noise.n2(wx / 20, wz / 20) * 4);
+    for (let y = 0; y <= Math.max(h, SEA); y++) {
+      let b;
+      if (y > h) b = WATER;
+      else if (y === h) b = beach ? SAND : (h >= snowLine ? SNOW : (h > 52 ? STONE : GRASS));
+      else if (y > h - 4) b = beach ? SAND : (h > 52 ? STONE : DIRT);
+      else b = STONE;
+      vox[idx(x, y, z)] = b;
+    }
+  }
+  // Trees: only rooted far enough from the edge that leaves stay inside this chunk.
+  for (let z = 3; z < P - 3; z++) for (let x = 3; x < P - 3; x++) {
+    const wx = ox + x, wz = oz + z, h = heights[z * P + x];
+    if (vox[idx(x, h, z)] !== GRASS) continue;
+    const forest = noise.n2(wx / 60 + 200, wz / 60) * 0.5 + 0.5;
+    if (noise.hash(wx, wz) > 0.012 + forest * 0.03) continue;
+    const trunk = 4 + Math.floor(noise.hash(wz, wx) * 3);
+    for (let y = 1; y <= trunk; y++) vox[idx(x, h + y, z)] = WOOD;
+    const top = h + trunk;
+    for (let dy = -2; dy <= 1; dy++) {
+      const r = dy >= 0 ? 1 : 2;
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.abs(dx) === r && Math.abs(dz) === r && (dy === 1 || noise.hash(wx + dx, wz + dz + dy) < 0.5)) continue;
+        const i = idx(x + dx, top + dy, z + dz);
+        if (vox[i] === AIR) vox[i] = LEAF;
+      }
+    }
+    vox[idx(x, top + 2, z)] = LEAF;
+  }
+  return { vox, heights };
+}
+
+// Face definitions: normal, 4 corners, brightness
+const FACES = [
+  { n: [0, 1, 0],  c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]], l: 1.0 },
+  { n: [0, -1, 0], c: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], l: 0.5 },
+  { n: [1, 0, 0],  c: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], l: 0.8 },
+  { n: [-1, 0, 0], c: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], l: 0.7 },
+  { n: [0, 0, 1],  c: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], l: 0.85 },
+  { n: [0, 0, -1], c: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], l: 0.65 },
+];
+
+function buildMesh(cx, cz, vox) {
+  const pos = [], col = [], ind = [];
+  const wpos = [], wcol = [], wind = [];
+  const ox = cx * CS - 1, oz = cz * CS - 1;
+  const at = (x, y, z) => (y < 0 ? STONE : y >= H ? AIR : vox[idx(x, y, z)]);
+  for (let y = 0; y < H; y++) for (let z = 1; z <= CS; z++) for (let x = 1; x <= CS; x++) {
+    const b = vox[idx(x, y, z)];
+    if (b === AIR) continue;
+    const isWater = b === WATER;
+    const base = COLORS[b];
+    const jit = 0.94 + noise.hash(ox + x, oz + z * 31 + y * 7) * 0.12;
+    for (let f = 0; f < 6; f++) {
+      const F = FACES[f];
+      const nb = at(x + F.n[0], y + F.n[1], z + F.n[2]);
+      if (isWater) { if (f !== 0 || nb !== AIR) continue; }
+      else if (nb !== AIR && nb !== WATER && nb !== LEAF) continue;
+      else if (b === LEAF && nb === LEAF) continue;
+      const P_ = isWater ? wpos : pos, C_ = isWater ? wcol : col, I_ = isWater ? wind : ind;
+      const v0 = P_.length / 3;
+      // grass sides read as dirt with a green lip
+      let c = base;
+      if (b === GRASS && f >= 2) c = COLORS[DIRT];
+      if (b === GRASS && f === 1) c = COLORS[DIRT];
+      for (let k = 0; k < 4; k++) {
+        const cc = F.c[k];
+        P_.push(ox + x + cc[0], y + cc[1] - (isWater ? 0.12 : 0), oz + z + cc[2]);
+        let shade = F.l * jit;
+        if (b === GRASS && f >= 2 && cc[1] === 1) { C_.push(COLORS[GRASS][0]*shade, COLORS[GRASS][1]*shade, COLORS[GRASS][2]*shade); continue; }
+        // simple height-based darkening for depth cues
+        shade *= 0.75 + 0.25 * Math.min(1, (y + 6) / 40);
+        C_.push(c[0] * shade, c[1] * shade, c[2] * shade);
+      }
+      I_.push(v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3);
+    }
+  }
+  const make = (p, c, i) => {
+    if (!i.length) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(c, 3));
+    g.setIndex(i);
+    g.computeBoundingSphere();
+    return g;
+  };
+  return { solid: make(pos, col, ind), water: make(wpos, wcol, wind) };
+}
+
+// ---------- Three.js scene ----------
+const canvas = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+const SKY = new THREE.Color(0x9cc9ea);
+scene.background = SKY;
+scene.fog = new THREE.Fog(SKY, 60, 140);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1000);
+const solidMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+const waterMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false });
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ---------- Chunk manager ----------
+const chunks = new Map(); // key -> { cx, cz, heights, meshes[] }
+let viewDist = 8;
+const key = (cx, cz) => cx + "," + cz;
+
+function setFog() { scene.fog.near = viewDist * CS * 0.45; scene.fog.far = viewDist * CS * 0.95; }
+setFog();
+
+function loadChunk(cx, cz) {
+  const { vox, heights } = generateChunk(cx, cz);
+  const { solid, water } = buildMesh(cx, cz, vox);
+  const meshes = [];
+  if (solid) { const m = new THREE.Mesh(solid, solidMat); scene.add(m); meshes.push(m); }
+  if (water) { const m = new THREE.Mesh(water, waterMat); m.renderOrder = 1; scene.add(m); meshes.push(m); }
+  // keep top-of-column data (incl. trees) for walking
+  const tops = new Int16Array(CS * CS);
+  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
+    let y = H - 1;
+    while (y > 0) { const b = vox[idx(x + 1, y, z + 1)]; if (b !== AIR && b !== WATER) break; y--; }
+    tops[z * CS + x] = y;
+  }
+  chunks.set(key(cx, cz), { cx, cz, tops, meshes });
+}
+
+function unloadChunk(k) {
+  const c = chunks.get(k);
+  for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); }
+  chunks.delete(k);
+}
+
+function groundAt(x, z) {
+  const fx = Math.floor(x), fz = Math.floor(z);
+  const cx = Math.floor(fx / CS), cz = Math.floor(fz / CS);
+  const c = chunks.get(key(cx, cz));
+  const top = c ? c.tops[(fz - cz * CS) * CS + (fx - cx * CS)] : terrainHeight(fx, fz);
+  return Math.max(top + 1, SEA + 0.6);
+}
+
+let queue = [];
+function updateQueue() {
+  const pcx = Math.floor(camera.position.x / CS), pcz = Math.floor(camera.position.z / CS);
+  const want = new Set();
+  queue = [];
+  for (let dz = -viewDist; dz <= viewDist; dz++) for (let dx = -viewDist; dx <= viewDist; dx++) {
+    const d2 = dx * dx + dz * dz;
+    if (d2 > viewDist * viewDist) continue;
+    const k = key(pcx + dx, pcz + dz);
+    want.add(k);
+    if (!chunks.has(k)) queue.push([pcx + dx, pcz + dz, d2]);
+  }
+  queue.sort((a, b) => a[2] - b[2]);
+  for (const k of [...chunks.keys()]) if (!want.has(k)) unloadChunk(k);
+}
+
+function pumpQueue(budgetMs) {
+  const t0 = performance.now();
+  while (queue.length && performance.now() - t0 < budgetMs) {
+    const [cx, cz] = queue.shift();
+    if (!chunks.has(key(cx, cz))) loadChunk(cx, cz);
+  }
+}
+
+// ---------- Player / controls ----------
+let yaw = -Math.PI / 4, pitch = -0.25;
+let fly = true, vy = 0, onGround = false;
+const keys = new Set();
+let touchFwd = false, touchUp = false;
+
+window.addEventListener("keydown", e => {
+  if (e.target.tagName === "BUTTON" && (e.code === "Space" || e.code === "Enter")) return;
+  keys.add(e.code);
+  if (e.code === "KeyF") toggleMode();
+  if (e.code === "Space") e.preventDefault();
+});
+window.addEventListener("keyup", e => keys.delete(e.code));
+window.addEventListener("blur", () => keys.clear());
+
+function look(dx, dy, k) {
+  yaw -= dx * k; pitch -= dy * k;
+  pitch = Math.max(-1.55, Math.min(1.55, pitch));
+}
+let locked = false;
+canvas.addEventListener("click", () => {
+  if (matchMedia("(pointer: fine)").matches && canvas.requestPointerLock) {
+    try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (_) {}
+  }
+});
+document.addEventListener("pointerlockchange", () => { locked = document.pointerLockElement === canvas; });
+document.addEventListener("mousemove", e => { if (locked) look(e.movementX, e.movementY, 0.0025); });
+// Drag-to-look fallback (touch, or when pointer lock is unavailable)
+let drag = null;
+canvas.addEventListener("pointerdown", e => { if (!locked) { drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); } });
+canvas.addEventListener("pointermove", e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  look(e.clientX - drag.x, e.clientY - drag.y, 0.005);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const endDrag = () => { drag = null; };
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+function hold(id, set) {
+  const el = document.getElementById(id);
+  el.addEventListener("pointerdown", e => { e.preventDefault(); set(true); });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) el.addEventListener(ev, () => set(false));
+}
+hold("t-fwd", v => touchFwd = v);
+hold("t-up", v => touchUp = v);
+
+const bMode = document.getElementById("b-mode");
+function toggleMode() {
+  fly = !fly; vy = 0;
+  bMode.textContent = fly ? "Fly" : "Walk";
+  bMode.setAttribute("aria-pressed", String(fly));
+}
+bMode.addEventListener("click", toggleMode);
+
+const dists = [4, 6, 8, 12];
+const bDist = document.getElementById("b-dist");
+bDist.addEventListener("click", () => {
+  viewDist = dists[(dists.indexOf(viewDist) + 1) % dists.length];
+  bDist.textContent = "View " + viewDist;
+  setFog(); updateQueue();
+});
+
+document.getElementById("b-seed").addEventListener("click", () => newWorld((Math.random() * 1e9) >>> 0));
+
+function newWorld(s) {
+  seed = s;
+  noise = makeNoise(seed);
+  for (const k of [...chunks.keys()]) unloadChunk(k);
+  camera.position.set(8, 0, 8);
+  camera.position.y = terrainHeight(8, 8) + 18;
+  document.getElementById("s-seed").textContent = seed;
+  lastChunk = null;
+  updateQueue();
+}
+
+// ---------- Main loop ----------
+const fwd = new THREE.Vector3(), right = new THREE.Vector3();
+let lastChunk = null, last = performance.now(), frames = 0, fpsT = last, fps = 0;
+const el = id => document.getElementById(id);
+const sPos = el("s-pos"), sChunk = el("s-chunk"), sLoaded = el("s-loaded"), sQueue = el("s-queue"), sFps = el("s-fps");
+
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const p = camera.position;
+
+  // movement
+  fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  right.set(-fwd.z, 0, fwd.x);
+  let mx = 0, mz = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp") || touchFwd) { mx += fwd.x; mz += fwd.z; }
+  if (keys.has("KeyS") || keys.has("ArrowDown")) { mx -= fwd.x; mz -= fwd.z; }
+  if (keys.has("KeyD") || keys.has("ArrowRight")) { mx += right.x; mz += right.z; }
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) { mx -= right.x; mz -= right.z; }
+  const len = Math.hypot(mx, mz) || 1;
+  const sprint = keys.has("KeyR") || keys.has("ControlLeft");
+  const speed = (fly ? 22 : 6) * (sprint ? 2.5 : 1);
+  const up = keys.has("Space") || touchUp;
+  const down = keys.has("ShiftLeft") || keys.has("ShiftRight");
+
+  if (fly) {
+    // in fly mode, forward follows the look pitch
+    const pc = touchFwd || keys.has("KeyW") || keys.has("ArrowUp") ? Math.sin(pitch) : 0;
+    p.x += (mx / len) * speed * dt * Math.cos(pitch);
+    p.z += (mz / len) * speed * dt * Math.cos(pitch);
+    p.y += (pc * speed + (up ? speed : 0) - (down ? speed : 0)) * dt;
+    p.y = Math.max(p.y, groundAt(p.x, p.z) + 1.6);
+    p.y = Math.min(p.y, H + 60);
+  } else {
+    const nx = p.x + (mx / len) * speed * dt, nz = p.z + (mz / len) * speed * dt;
+    const feet = p.y - 1.6;
+    // step up at most one block; otherwise blocked (slide along axes)
+    const canX = groundAt(nx, p.z) <= feet + 1.05, canZ = groundAt(p.x, nz) <= feet + 1.05;
+    if (canX) p.x = nx;
+    if (canZ) p.z = nz;
+    vy -= 28 * dt;
+    if (up && onGround) vy = 9;
+    p.y += vy * dt;
+    const g = groundAt(p.x, p.z) + 1.6;
+    if (p.y <= g) { p.y = g; vy = 0; onGround = true; }
+    else onGround = false;
+  }
+
+  camera.rotation.set(pitch, yaw, 0, "YXZ");
+
+  const pcx = Math.floor(p.x / CS), pcz = Math.floor(p.z / CS);
+  const ck = key(pcx, pcz);
+  if (ck !== lastChunk) { lastChunk = ck; updateQueue(); }
+  pumpQueue(6);
+
+  renderer.render(scene, camera);
+
+  frames++;
+  if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
+  sPos.textContent = `${Math.floor(p.x)} / ${Math.floor(p.y)} / ${Math.floor(p.z)}`;
+  sChunk.textContent = `${pcx}, ${pcz}`;
+  sLoaded.textContent = chunks.size;
+  sQueue.textContent = queue.length;
+  sFps.textContent = fps;
+  requestAnimationFrame(frame);
+}
+
+newWorld(1337);
+requestAnimationFrame(frame);
+})();
+</script>

@@ -1,0 +1,72 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blockfield</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Full-bleed game canvas; modules inject their own UI styles and mount into #ui. Single dark game look. */
+  :root {
+    --ink: #f4f7ef;
+    --muted: #b9c6b0;
+    --panel: rgba(18, 22, 20, 0.78);
+    --panel-edge: rgba(244, 247, 239, 0.18);
+    --accent: #7fbf4d;
+    --danger: #e0533d;
+    --display: "Silkscreen", ui-monospace, monospace;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body { background: #0e1310; color: var(--ink); overflow: hidden; font-family: var(--mono); font-size: 13px; user-select: none; -webkit-user-select: none; }
+  #view { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+  #ui { position: fixed; inset: 0; pointer-events: none; }
+  #ui > * { pointer-events: auto; }
+  #debug {
+    position: fixed; top: calc(8px + env(safe-area-inset-top, 0px)); right: 16px; margin: 0;
+    background: var(--panel); color: var(--ink); padding: 8px 10px; border-radius: 3px;
+    font: 12px/1.5 var(--mono); white-space: pre; font-variant-numeric: tabular-nums; pointer-events: none;
+  }
+</style>
+
+<canvas id="view" aria-label="Blockfield game view"></canvas>
+<div id="ui"></div>
+<pre id="debug" hidden></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/faithful.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/textures-colour.js"></script>
+<script src="js/recipes-colour.js"></script>
+<script src="js/textures-stone.js"></script>
+<script src="js/textures-light.js"></script>
+<script src="js/recipes-light.js"></script>
+<script src="js/textures-shapes.js"></script>
+<script src="js/textures-jobs.js"></script>
+<script src="js/recipes-stone.js"></script>
+<script src="js/recipes-shapes.js"></script>
+<script src="js/recipes-panes.js"></script>
+<script src="js/recipes-jobs.js"></script>
+<script src="js/worldgen.js"></script>
+<script src="js/world.js"></script>
+<script src="js/light.js"></script>
+<script src="js/sky.js"></script>
+<script src="js/weather.js"></script>
+<script src="js/trading.js"></script>
+<script src="js/mobs.js"></script>
+<script src="js/blueprints.js"></script>
+<script src="js/builder.js"></script>
+<script src="js/jobs.js"></script>
+<script src="js/villagelife.js"></script>
+<script src="js/breeding.js"></script>
+<script src="js/inventory.js"></script>
+<script src="js/drops.js"></script>
+<script src="js/player.js"></script>
+<script src="js/cracks.js"></script>
+<script src="js/commands.js"></script>
+<script src="js/village-names.js"></script>
+<script src="js/signs.js"></script>
+<script src="js/save.js"></script>
+<script src="js/main.js"></script>
+<script src="js/audio.js"></script>
