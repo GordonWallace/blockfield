@@ -44,8 +44,29 @@ function rgbOf(id) {
 }
 const WATER = [63, 118, 228];
 // Top visible block of a column: {id, y} or {water: true, depth, bottom, y}; null when the chunk is not loaded.
-function column(wx, wz) {
+// Terrain nobody has loaded can be sampled from chunks generated on the side (exploreFar); a small cache keeps the recent ones.
+const scratch = new Map();
+let useScratch = false;
+function chunkFor(wx, wz) {
   const c = BF.world.chunkAt(wx, wz);
+  if (c || !useScratch || !BF.worldgen) return c;
+  const cx = Math.floor(wx / 16), cz = Math.floor(wz / 16), k = cx + "," + cz;
+  let s = scratch.get(k);
+  if (!s) {
+    const vox = new Uint16Array(16 * 16 * BF.H);
+    BF.worldgen.generate(cx, cz, vox);
+    const e = BF.world.edits.get(k);
+    if (e) for (const [i, id] of e) vox[i] = id;
+    let top = vox.length - 1;
+    while (top > 0 && !vox[top]) top--;
+    s = { cx, cz, vox, maxY: Math.min(BF.H - 1, Math.floor(top / 256) + 1) };
+    scratch.set(k, s);
+    if (scratch.size > 120) scratch.delete(scratch.keys().next().value);
+  }
+  return s;
+}
+function column(wx, wz) {
+  const c = chunkFor(wx, wz);
   if (!c) return null;
   const lx = wx - c.cx * 16, lz = wz - c.cz * 16;
   for (let y = c.maxY; y >= 0; y--) {
@@ -104,6 +125,12 @@ function explore(d, x, z, budget) {
   }
   if (changed) d.ver++;
   return changed;
+}
+
+// Like explore, but terrain that is not loaded is generated on the side (explorers catching up on trips made while the village was out of range).
+function exploreFar(d, x, z, budget) {
+  useScratch = true;
+  try { return explore(d, x, z, budget); } finally { useScratch = false; }
 }
 
 // ---------------------------------------------------------------- bigger maps
@@ -240,7 +267,7 @@ const api = {
   // Fraction of a map's pixels that are explored (0..1); `filled(it)` is true once all of them are.
   progress(it) { const d = dataOfItem(it); if (!d) return 0; let n = 0; for (let k = 0; k < d.px.length; k++) if (d.px[k]) n++; return n / d.px.length; },
   filled(it) { return api.progress(it) >= 1; },
-  PX, ZONE, MAX_SIZE, side, scale, zoneOf, nameOf, centre, originX, getData, dataOfItem, explore, revealBlocks, revealPx, upgradeData, use, craftHook, sample, column,
+  PX, ZONE, MAX_SIZE, side, scale, zoneOf, nameOf, centre, originX, getData, dataOfItem, explore, exploreFar, revealBlocks, revealPx, upgradeData, use, craftHook, sample, column,
   // bounds of a map in world blocks: {x0, z0, x1, z1}
   bounds(s, zx, zz) { const o = originX(s, zx), p = originX(s, zz); return { x0: o, z0: p, x1: o + side(s), z1: p + side(s) }; },
   // Per-frame work for the held item (called by player.js). Returns the texture to show, or null when the item has no dynamic view.

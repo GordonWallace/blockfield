@@ -486,7 +486,7 @@ function emitParticles(x, y, z, id) {
 }
 function advance(e, by) { e.prog += by || 1; }
 // Places the current cell. Returns "placed" | "skipped" | "wait" | "missing" (needs material) | "nowater" (needs a full bucket) | "paused".
-function placeCell(m, bs, e) {
+function placeCell(m, bs, e, quiet) {
   const w = W(), c = cellOf(e, e.prog), T = TR().inv;
   if (!w.isLoaded(c.x, c.z)) return "paused";
   const cur = w.getBlock(c.x, c.y, c.z);
@@ -525,8 +525,7 @@ function placeCell(m, bs, e) {
     w.setBlock(c2.x, c2.y, c2.z, c2.id);
     step = 2;
   }
-  emitParticles(c.x, c.y, c.z, use);
-  m.ai.swingT = 0.35;
+  if (!quiet) { emitParticles(c.x, c.y, c.z, use); m.ai.swingT = 0.35; }
   advance(e, step);
   e.placed = (e.placed || 0) + 1;
   bs.placed = (bs.placed || 0) + 1;
@@ -825,10 +824,29 @@ function onSpawn(m, rec) {
   if (e && bpOf(e).door) { const H = homeFor(e); m.home = H; m.bed = H.beds[0]; }
 }
 
+// Far-village catch-up (js/villagesim.js): the builder places blocks of the structure it was working on for the working time it missed,
+// from its own stock (no shopping, no walking). It stops at the first cell that needs material it lacks; normal AI finishes the rest.
+const CATCHUP_PER_DAY = Math.floor(BUILD_END * 600 / ((BLOCK_T[0] + BLOCK_T[1]) / 2) * 0.5);   // working seconds a day / seconds per block, half of it spent walking
+function catchUp(m, rec, away) {
+  if (m.profession !== "builder" || !m.inv || !BF.world) return;
+  const idx = m.slot ? m.slot.idx : -1, e = builtOf(rec).find(x => x.state === "building" && x.owner === idx);
+  if (!e) return;
+  const bs = m.bs || (m.bs = newState());
+  let budget = Math.min(3000, Math.floor(away * CATCHUP_PER_DAY)), placed = 0;
+  while (budget > 0 && e.prog < e.n) {
+    const r = placeCell(m, bs, e, true);
+    if (r === "placed") { placed++; budget--; }
+    else if (r !== "skipped") break;
+  }
+  if (placed) logEvent("catchup", m, { type: e.type, blocks: placed, prog: e.prog + "/" + e.n });
+  if (e.prog >= e.n && !(e.retry && e.retry.length && !e.retried)) finish(m, bs, e);   // done: claims its home, starts admiring the work
+}
+if (BF.villageSim) BF.villageSim.onCatchUp(catchUp);
+
 BF.builder = {
   BLOCK_T, REACH, BUILD_END, SITE_RANGE, MAX_BUILT, log, pending,
   ai, tick, statusText, startStock, exportAll, importAll, onSpawn, builtOf,
-  analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome,
+  analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome, catchUp,
   reset() { pending.clear(); log.length = 0; for (const p of pool) BF.scene.remove(p.mesh); pool.length = 0; },
 };
 })();

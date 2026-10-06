@@ -415,6 +415,41 @@ function dropsFit(m, cropId) {
   if (seed !== main) adds.push({ id: seed, n: 3 });
   return TR().inv.canFit(m.inv, adds, []);
 }
+// The drops of a harvested crop go into the inventory; spare seeds beyond a stack go on the compost heap.
+function collectDrops(m, id) {
+  const Tinv = TR().inv, drops = BF.rollDrops(id);
+  for (const d of drops) Tinv.add(m.inv, d.id, d.count);
+  for (const d of drops) {
+    const it = BF.items[d.id], extra = it && it.plants != null && !it.food ? cnt(m, d.id) - CROP_CAP : 0;
+    if (extra > 0) Tinv.remove(m.inv, d.id, extra);
+  }
+  return drops;
+}
+// Far-village catch-up (js/villagesim.js): a farmer harvests and replants the mature crops around its jobsite (60 a game day, at most 160),
+// as much as it would have got done while the village was out of range.
+const FARM_CATCHUP_PER_DAY = 60, FARM_CATCHUP_MAX = 160;
+function catchUp(m, rec, away) {
+  if (m.profession !== "farmer" || !m.jobsite || !m.inv || !W()) return;
+  const c = ids(), w = W(), s = m.jobsite;
+  let budget = Math.min(FARM_CATCHUP_MAX, Math.floor(away * FARM_CATCHUP_PER_DAY)), got = 0;
+  for (let x = s.x - FARM_R; x <= s.x + FARM_R && budget > 0; x++) for (let z = s.z - FARM_R; z <= s.z + FARM_R && budget > 0; z++) {
+    if (!w.isLoaded(x, z)) continue;
+    for (let y = s.y - FARM_R; y <= s.y + FARM_R && budget > 0; y++) {
+      const id = getB(x, y, z);
+      if (!c.matureSet.has(id) || getB(x, y - 1, z) !== c.farmland || !dropsFit(m, id)) continue;
+      if (!w.setBlock(x, y, z, 0)) continue;
+      collectDrops(m, id);
+      m.farm = m.farm || newFarm();
+      m.farm.harvested = (m.farm.harvested || 0) + 1;
+      const seed = c.mature.get(id), young = seed != null && cnt(m, seed) > 0 ? BF.items[seed].plants : null;
+      if (young != null && w.setBlock(x, y, z, young)) TR().inv.remove(m.inv, seed, 1);
+      budget--; got++;
+    }
+  }
+  if (got) log("catchup", m, { harvested: got });
+}
+if (BF.villageSim) BF.villageSim.onCatchUp(catchUp);
+
 function think(m, fs, R, D) {
   const c = ids(), px = m.position.x, pz = m.position.z, now = performance.now() / 1000;
   const dist = (x, z) => Math.hypot(x + 0.5 - px, z + 0.5 - pz);
@@ -763,12 +798,7 @@ function perform(m, fs, R, D) {
     const id = getB(t.x, t.y, t.z);
     if (!c.matureSet.has(id) || getB(t.x, t.y - 1, t.z) !== c.farmland || !dropsFit(m, id)) return false;
     if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
-    const drops = BF.rollDrops(id);
-    for (const d of drops) Tinv.add(m.inv, d.id, d.count);
-    for (const d of drops) {                     // spare seeds beyond a stack go on the compost heap
-      const it = BF.items[d.id], extra = it && it.plants != null && !it.food ? cnt(m, d.id) - CROP_CAP : 0;
-      if (extra > 0) Tinv.remove(m.inv, d.id, extra);
-    }
+    const drops = collectDrops(m, id);
     particles(t.x + 0.5, t.y + 0.3, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
     blockSound("break", id, t.x, t.y, t.z);
     m.farm.harvested = (m.farm.harvested || 0) + 1;
