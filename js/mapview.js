@@ -125,6 +125,46 @@ function held(it) {
   return BF.maps.heldCanvas(d, d.ver + "|" + (d.cvVer), src, (p.x - d.x0) / d.scale * 128 / d.N, (p.z - d.z0) / d.scale * 128 / d.N);
 }
 
+// ---------------------------------------------------------------- item icons
+// Inventory / hotbar / drop icon of a filled map (normal or auto): the map itself, shrunk into a framed sheet (brown frame for normal maps, teal for auto
+// maps). textures.js icon() and inventory.js ask BF.mapIcon(item) -> {ver, url}; ver changes when the thumbnail does, and tick() refreshes the inventory
+// icons about once a second while a map in the inventory is changing (generating, or being explored).
+const thumbs = new Map();   // item id -> {ver, t, url}
+function composeIcon(src, auto) {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d");
+  g.fillStyle = "#1c160d"; g.fillRect(4, 2, 56, 60);                       // outline, as the flat item sprites have
+  g.fillStyle = auto ? "#1f5a5a" : "#7a5a30"; g.fillRect(8, 6, 48, 52);
+  g.fillStyle = auto ? "#123c3c" : "#5a4020"; g.fillRect(52, 6, 4, 52); g.fillRect(8, 54, 48, 4);
+  g.fillStyle = "#d8c890"; g.fillRect(12, 10, 40, 44);
+  if (src && src.width) { g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high"; g.drawImage(src, 0, 0, src.width, src.height, 14, 14, 36, 36); }
+  g.strokeStyle = "rgba(60,40,10,0.55)"; g.lineWidth = 1; g.strokeRect(13.5, 13.5, 37, 37);
+  return c.toDataURL();
+}
+function mapIcon(it) {
+  if (!it || typeof document === "undefined") return null;
+  let src, ver;
+  try {
+    if (it.auto) { const d = dataOfItem(it); src = canvasOf(d); ver = "a" + d.cvVer; }
+    else if (it.map && BF.maps && BF.maps.snapshot) { const m = BF.maps.snapshot(it); src = m.src; ver = "n" + m.ver; }
+    else return null;
+  } catch (e) { console.error(e); return null; }
+  const now = performance.now();
+  let t = thumbs.get(it.id);
+  if (!t) thumbs.set(it.id, t = { ver: null, t: 0, url: null });
+  if (t.ver !== ver && (!t.url || now - t.t > 700)) { t.url = composeIcon(src, !!it.auto); t.ver = ver; t.t = now; }
+  return { ver: t.ver, url: t.url };
+}
+BF.mapIcon = mapIcon;
+let iconT = 0, iconSeen = "";
+function refreshIcons(now) {
+  if (now - iconT < 1000 || !BF.inventory || !BF.inventory.slots) return;
+  iconT = now;
+  let sig = "";
+  for (const s of BF.inventory.slots) { const it = s && BF.items[s.id]; if (it && (it.map || it.auto)) { const r = mapIcon(it); sig += s.id + ":" + (r ? r.ver : "") + ","; } }
+  if (sig !== iconSeen) { iconSeen = sig; if (BF.inventory.refreshIcons) BF.inventory.refreshIcons(); }
+}
+
 // ---------------------------------------------------------------- UI
 const view = { open: false, root: null, cv: null, g: null, title: null, info: null, it: null, d: null, S: 0, mouse: null, sig: "", sel: null, tp: null, pending: null };
 const prompt = { open: false, root: null, input: null, hint: null, slot: -1 };
@@ -373,10 +413,10 @@ function use(sel, it) {
 
 BF.mapview = {
   use, held, open: openView, close: () => { closeView(); closePrompt(); }, isOpen: () => view.open || prompt.open,
-  tick() { tick(); if (view.open) drawView(); if (view.pending) settle(); },
+  tick() { tick(); if (view.open) drawView(); if (view.pending) settle(); refreshIcons(performance.now()); },
   teleportToSelection, surfaceAt, getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
   ZONE, MAX_PX, MAX_K,
-  reset() { maps.clear(); },
+  reset() { maps.clear(); thumbs.clear(); iconSeen = ""; },
   _maps: maps, _view: view, _prompt: prompt,
 };
 addEventListener("load", () => { if (BF.on) BF.on("newWorld", () => BF.mapview.reset()); });

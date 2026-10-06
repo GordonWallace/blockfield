@@ -1679,6 +1679,8 @@ function itemIcon(it) {
 
 
 function icon(itemId) {
+  const it0 = BF.items[itemId];
+  if (it0 && (it0.map || it0.auto) && BF.mapIcon) { const r = BF.mapIcon(it0); if (r && r.url) return r.url; }   // filled maps: a thumbnail of the map itself (js/mapview.js), regenerated as it fills in
   if (iconCache.has(itemId)) return iconCache.get(itemId);
   const it = BF.items[itemId];
   let url;
