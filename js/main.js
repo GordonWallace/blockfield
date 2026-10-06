@@ -88,21 +88,23 @@ function frame(now) {
   const W = BF.warp;
   if (!BF.state.paused) {
     // Fast-forward (F, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
-    // behaviour at 10x matches 1x exactly and it plays like a sped-up recording. Stops early if the frame budget runs out.
-    const n = W.steps(), t0 = performance.now();
+    // behaviour at 10x matches 1x exactly and it plays like a sped-up recording. From 100x the step grows (up to 0.05 s, the
+    // same step a slow frame already gets) so the step count stays bounded. Stops early if the frame budget runs out.
+    const plan = W.plan(dt), t0 = performance.now();
     let done = 0;
-    while (done < n && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {
-      W.advance(dt);
-      BF.state.time += dt;
-      BF.sky.update(dt);
-      BF.mobs.update(dt);
-      BF.drops.update(dt);
+    while (done < plan.n && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {
+      const h = plan.h;
+      W.advance(h);
+      BF.state.time += h;
+      BF.sky.update(h);
+      BF.mobs.update(h);
+      BF.drops.update(h);
       BF.world.tickSim();
       done++;
     }
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
     BF.player.update(dt);
-    W.done(done);
+    W.done(done, done * plan.h, dt);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
   }
