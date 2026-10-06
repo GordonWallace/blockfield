@@ -81,7 +81,7 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
   - Continents: continentalness (5 octaves, ~14000-block wavelength, grows 12% per biome-scale step) is contrasted and biased so land and open ocean
     come in blobs thousands of blocks across; a landmass is forced around the origin so spawn is on land. Climate zones (temperature, humidity) and the
     weirdness/erosion fields scale with `biomeScale` (1 = the old size); the border dither widens with it, so big biomes blend softly.
-  - Elevation: ocean basins ~y18-45, shelf and coast ~48, lowlands ~52-70, plus broad "uplands" (up to +74 on continental interiors, gentle lowlands near
+  - Elevation: ocean basins ~y18-45, shelf and coast ~48, lowlands ~52-70, plus broad "uplands" (up to +82 on continental interiors, gentler within ~1500 blocks of
     spawn) and ridged-noise mountains (up to +110 on top), soft-clamped to H-8 = 184. Temperature falls with height (biome bands shift cold above ~y70-175),
     mountain biome thresholds are +35 vs v1 (slopes y115, peaks y135).
   - Rivers (js/rivers.js `BF.rivers`): a jittered 96-block node lattice with a smooth macro potential (terrain without local hills + a bias toward the

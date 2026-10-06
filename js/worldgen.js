@@ -278,7 +278,7 @@ function contBase2(c) {
   return CONT2_Y[CONT2_Y.length - 1];
 }
 // Uplands: broad, gently tilted plateaus on continental interiors (not mountains), up to ~y125.
-const upland = (x, z) => 74 * smooth(0.02, 0.62, K.u * 2.1) * smooth(0.1, 0.65, K.c) * (0.3 + 0.7 * smooth(500, 3500, Math.sqrt(x * x + z * z)));  // gentle lowlands around spawn
+const upland = (x, z) => 82 * smooth(-0.08, 0.5, K.u * 2.1) * smooth(0.05, 0.55, K.c) * (0.3 + 0.7 * smooth(250, 1500, Math.sqrt(x * x + z * z)));  // gentle lowlands around spawn
 // soft ceiling: ~linear below 140, asymptote at the top of the world
 function ceil2(h) {
   const top = BF.H - 8;
@@ -293,7 +293,7 @@ function relief2(x, z, detail) {
   const hl = upland(x, z);
   const amp = 6 + 9 * wet + 10 * wet * hot + 4 * smooth(-0.2, 0.2, e < 0 ? -e : 0) + hl * 0.12;
   let h = contBase2(c) + hills * lerp(5, amp, land) + 2.5 * wet * land + hl;
-  const m = smooth(-0.18, -0.45, e) * smooth(-0.06, 0.1, c);
+  const m = smooth(-0.14, -0.42, e) * smooth(-0.06, 0.1, c);
   if (m > 0) {
     const r = 1 - Math.abs(noise.fbm(x / 300 - 401.2, z / 300 + 133.4, detail ? 5 : 3));
     h += m * (r * r * r * 96 + 14 + hills * 8);
