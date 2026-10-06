@@ -338,7 +338,7 @@ function pack(v) {
   return {
     inv: v.inv.map(s => s && BF.items[s.id] ? { n: BF.items[s.id].name, c: s.count } : null),
     level: v.level, xp: v.xp, day: v.restockDay,
-    prof: v.profession, job: v.jobsite ? [v.jobsite.x, v.jobsite.y, v.jobsite.z] : null, st: v.jobStocked ? 1 : 0,   // jobsites (js/jobs.js); missing in older saves
+    prof: v.profession, job: v.jobsite ? [v.jobsite.x, v.jobsite.y, v.jobsite.z] : null, st: v.jobStocked ? 1 : 0, mem: v.jobMem ? [v.jobMem.prof, v.jobMem.t] : undefined,   // jobsites (js/jobs.js); missing in older saves
     life: BF.food ? BF.food.pack(v) : undefined,   // food state (js/villagelife.js); missing in older saves
     ex: BF.explorer && v.profession === "explorer" ? BF.explorer.pack(v) : undefined,   // explorer state (js/explorer.js)
   };
