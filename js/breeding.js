@@ -425,7 +425,7 @@ function spawnMissing(rec) {
       e.mob = null;
     }
     const pos = e.pos || [rec.x + (Math.random() - 0.5) * 8, rec.y != null ? rec.y : BF.world.heightAt(rec.x, rec.z) + 1, rec.z + (Math.random() - 0.5) * 8];
-    if (Math.hypot(pos[0] - P.x, pos[2] - P.z) > 72 || !BF.world.isLoaded(pos[0], pos[2])) continue;
+    if ((Math.hypot(pos[0] - P.x, pos[2] - P.z) > 72 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) || !BF.world.isLoaded(pos[0], pos[2])) continue;
     const at = standAt(pos[0], pos[1], pos[2]) || standAt(rec.x + 0.5, (rec.y != null ? rec.y : BF.world.heightAt(rec.x, rec.z) + 1), rec.z + 0.5);
     if (!at) continue;
     spawnEntry(rec, e, at[0], at[1], at[2]);
