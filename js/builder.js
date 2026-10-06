@@ -147,6 +147,7 @@ function startStock(v) {
   ex[found] = (ex[found] || 0) + FILL_SPARE;
   for (const k in ex) T.add(a, +k, ex[k]);
   T.add(a, BF.I.emerald, Math.floor(rnd(40, 81)));
+  if (BF.I.bucket != null) T.add(a, BF.I.bucket, 1);        // an empty bucket: the well's water is carried in it
   return a;
 }
 
@@ -484,13 +485,19 @@ function emitParticles(x, y, z, id) {
   }
 }
 function advance(e, by) { e.prog += by || 1; }
-// Places the current cell. Returns "placed" | "skipped" | "wait" | "missing" (needs material) | "paused".
+// Places the current cell. Returns "placed" | "skipped" | "wait" | "missing" (needs material) | "nowater" (needs a full bucket) | "paused".
 function placeCell(m, bs, e) {
   const w = W(), c = cellOf(e, e.prog), T = TR().inv;
   if (!w.isLoaded(c.x, c.z)) return "paused";
   const cur = w.getBlock(c.x, c.y, c.z);
   if (cur === c.id) { advance(e); return "skipped"; }
   if (BF.SOLID[cur] && !BF.REPLACEABLE[cur]) { e.skipped++; advance(e, c.pair ? 2 : 1); logEvent("blocked", m, { at: [c.x, c.y, c.z], by: BF.blocks[cur].name }); return "skipped"; }
+  const isWater = c.id === BF.B.water && BF.I.water_bucket != null;
+  if (isWater && T.count(m.inv, BF.I.water_bucket) < 1) {      // water only comes out of a full bucket
+    if (T.count(m.inv, BF.I.bucket) > 0) return "nowater";
+    e.skipped++; advance(e); logEvent("nobucket", m, { at: [c.x, c.y, c.z] });
+    return "skipped";
+  }
   const solidTarget = BF.SOLID[c.id] || (BF.blocks[c.id] && BF.blocks[c.id].door);
   if (solidTarget && (otherInside(m, c) || (c.pair && otherInside(m, { x: c.x, y: c.y + 1, z: c.z })))) {
     bs.occT += 0.1;
@@ -510,6 +517,7 @@ function placeCell(m, bs, e) {
   }
   if (!w.setBlock(c.x, c.y, c.z, use)) return "paused";
   if (c.cost) T.remove(m.inv, use === c.id ? c.item : use, 1);          // exactly one item per block
+  if (isWater) { T.remove(m.inv, BF.I.water_bucket, 1); T.add(m.inv, BF.I.bucket, 1); }   // the bucket is empty after the one block
   let step = 1;
   if (c.pair) {                                             // door upper half / bed head go in with the lower half / foot
     const c2 = cellOf(e, e.prog + 1);
@@ -543,6 +551,37 @@ function claimHome(m, e) {
   const H = homeFor(e);
   m.home = H; m.bed = H.beds[0]; e.claim = m.slot.idx;
   logEvent("claim", m, { bed: [m.bed.x, m.bed.y, m.bed.z] });
+}
+
+// ---------------------------------------------------------------- fetching water for a well
+// The builder walks to a water source within ~30 blocks of the village (a lake, a pond, the village well) and fills its empty bucket there.
+function fillMode(m, bs, dt, out) {
+  const F = bs.fill, VL = BF.villageLife, ai = m.ai, e = bs.entry;
+  const back = skip => {
+    if (skip && e) { e.skipped++; advance(e); logEvent("nowater", m, {}); }
+    bs.mode = "build"; bs.fill = null; ai.route = null; bs.goal = null; bs.stallT = 0;
+    return false;
+  };
+  if (!F || !VL || !e || e.state !== "building") return back(false);
+  if ((F.t += dt) > 240 || F.bad >= 4) return back(true);        // no water to be had: build the rest, the well stays dry
+  if (!F.src) {
+    if ((F.cd -= dt) > 0) return false;
+    F.cd = 2;
+    F.src = VL.findWater(m, m.village);
+    if (!F.src) return false;                                    // the water around the village is still being scanned
+    F.act = 0;
+  }
+  const s = F.src;
+  ai.mode = "idle"; ai.t = 2;
+  const st = travel(m, bs, dt, out, { x: s.sx, y: s.sy, z: s.sz }, 1.2, m.def.speed * 1.35);
+  if (st === "failed") { F.src = null; F.bad++; return true; }
+  if (st !== "arrived") return true;
+  out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5;
+  m.lookAt = { position: { x: s.x + 0.5, y: s.y + 0.5, z: s.z + 0.5 }, height: 0 };
+  if ((F.act += dt) < 0.9) { if (ai.swingT <= 0 && F.act < 0.2) ai.swingT = 0.35; return true; }
+  if (VL.fillBucket(m, s.x, s.y, s.z)) return back(false);
+  F.src = null; F.bad++; F.act = 0;
+  return true;
 }
 
 // ---------------------------------------------------------------- build mode
@@ -582,6 +621,7 @@ function buildMode(m, bs, dt, out) {
     const r = placeCell(m, bs, e);
     if (r === "placed") { bs.placeT = rnd(BLOCK_T[0], BLOCK_T[1]); bs.cands = null; }
     else if (r === "missing") { toShop(m, bs, e); }
+    else if (r === "nowater") { bs.mode = "fill"; bs.fill = { t: 0, cd: 0, src: null, act: 0, bad: 0 }; ai.route = null; bs.goal = null; }
     else if (r === "skipped") bs.placeT = 0.05;
     return true;
   }
@@ -714,6 +754,7 @@ function ai(m, dt, out) {
   const R = m.village;
   if (!R || !R.wg || !BF.blueprints || !m.inv) return false;
   const bs = m.bs || (m.bs = newState());
+  if (BF.villageLife) BF.villageLife.ensureKit(m);
   if (!allowed()) {
     if (bs.mode !== "idle") { bs.mode = "idle"; bs.stage = null; bs.goal = null; bs.deal = null; m.ai.route = null; bs.want = null; bs.entry = null; }
     return false;
@@ -725,6 +766,7 @@ function ai(m, dt, out) {
       if (bs.t <= 0) { bs.t = 2 + Math.random() * 2; think(m, bs); }
       return false;
     case "build": return buildMode(m, bs, dt, out);
+    case "fill": return fillMode(m, bs, dt, out);
     case "shop": return shopMode(m, bs, dt, out);
   }
   bs.mode = "idle";
@@ -737,6 +779,7 @@ function statusText(m) {
   if (m.sleeping || !allowed()) return "Resting";
   if (!bs) return "Planning";
   if (bs.mode === "build" && bs.entry) return "Building: " + bs.entry.label + " (" + Math.floor(100 * bs.entry.prog / Math.max(1, bs.entry.n)) + "%)";
+  if (bs.mode === "fill") return "Fetching water";
   if (bs.mode === "shop" && bs.want) {
     const t = reqText(bs.want.short || {});
     if (bs.stage === "walk" || bs.stage === "trade") return "Fetching: " + (bs.deal ? bs.deal.times * bs.deal.offer.sell.n + " " + BF.itemName(bs.deal.item) : t);

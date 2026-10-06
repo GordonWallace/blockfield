@@ -284,7 +284,7 @@ The 15th profession `builder` (orange hi-vis vest with reflective band and strap
   centre; rejects overlap with building footprints (+3), pads, roads, plaza/well/bell, lamps, decor, built structures, unloaded chunks, entities nearby, water/ice/farmland/paths/trees, slope > 2 (gaps <= 2 under the floor are filled from inventory with the
   foundation block), solid blocks in the volume (plants are cleared). BUILD places one cell every `BLOCK_T` 0.5-0.8 s (random per block) when the eye is within `REACH` 4 blocks of the cell and the ray is free; otherwise it picks a standing spot (preferring
   outside, with a free line), walks there with A* (hops of 20 blocks for long trips), never places into its own or another entity's body box (waits, skips after 8 s), skips cells that already hold the block, never overwrites solid blocks
-  (skipped, logged). A cell stuck for 15 s (no standing spot / no free line) is put on a retry list (`e.retry`) and revisited in a second pass at the end with a reach stretched by 1.6 blocks (gable tops); only cells still failing then stay `skipped`. Each placed block takes exactly one item from `m.inv` (door/bed: one item, two blocks; free water for wells); a stand-in wood of the same family is used when the exact one is missing; doors/fences/tables/chests/furnaces are crafted from
+  (skipped, logged). A cell stuck for 15 s (no standing spot / no free line) is put on a retry list (`e.retry`) and revisited in a second pass at the end with a reach stretched by 1.6 blocks (gable tops); only cells still failing then stay `skipped`. Each placed block takes exactly one item from `m.inv` (door/bed: one item, two blocks; the water of a well comes from a full water bucket, which is empty again afterwards: a builder without one walks to water within ~30 blocks of the village and fills its empty bucket, `bs.mode "fill"`; with no bucket at all, or no water in 4 tries / 240 s, the water cell is skipped and logged); a stand-in wood of the same family is used when the exact one is missing; doors/fences/tables/chests/furnaces are crafted from
   planks/cobblestone and planks from logs on the spot when short. SHOP (short of materials): buys the shortfall from the nearest other villager whose current offers sell it and who could do the deal (`BF.trades.blockReason`, `exchange`, `addXp`;
   payment from the builder's inventory, 2 s standing pause), else waits (wandering) and re-checks every 30-60 s while the player can sell it materials through the normal trade screen. Exchanges are logged in `BF.builder.log` and `console.info`.
   Status text `BF.builder.statusText(m)`: "Building: small house (63%)", "Looking for: 24 Oak Planks", "Fetching: ...", "Planning", "Resting"; shown in the trade screen header (inventory.js `renderOffers`).
@@ -398,9 +398,10 @@ Villager workstations, loaded after builder.js (`index.html`: `textures-jobs.js`
   grindstone); recipes in `recipes-jobs.js` (vanilla; brewing stand uses a gold ingot for the blaze rod, drafting table = paper + blue dye over 4 planks); wooden ones burn 15 s.
 - **API** `BF.jobs`: `JOBSITE` (profession -> block name), `PROFESSION_OF` (block name -> profession), `profOfBlock(id)`, `blockFor(prof)`,
   `claim(mob, {radius = 48, prefer: [professions]}) -> profession | null` (random unclaimed standing jobsite within radius of the villager's village centre, else its position; each `prefer` match x3 weight;
-  experienced villagers (xp > 0) only take blocks of their own profession; nitwits never; sets `mob.profession`, `mob.jobsite = {x,y,z}`, rebuilds the outfit and the offers; first job ever adds the profession's
+  experienced villagers (xp > 0) only take blocks of their own profession; nitwits never; instant: used by commands / tests, villagers themselves walk to the block, see "Walking to a jobsite";
+  `claim(mob, {site})` takes that exact block if it is still free; sets `mob.profession`, `mob.jobsite = {x,y,z}`, rebuilds the outfit and the offers; first job ever adds the profession's
   starting wares without emeralds; emits `villagerHired(mob, prof)`), `release(mob, {keepProfession}?)` (frees the block; a villager with xp 0 becomes `unemployed`, emits nothing; `villagerFired(mob)` is emitted
-  when a jobsite is lost), `unclaimed(villageRec | {x,z} | mob, radius?, forMob?) -> [{x,y,z,id,prof}]`, `isEmployed(mob)`, `setProfession(mob, prof)`, `sites` / `claims` maps (debug).
+  when a jobsite is lost), `hire(mob, site)` (the claim itself: profession, stock, `BF.villageLife.ensureKit`, `villagerHired`), `unclaimed(villageRec | {x,z} | mob, radius?, forMob?) -> [{x,y,z,id,prof}]`, `isEmployed(mob)`, `setProfession(mob, prof)`, `sites` / `claims` maps (debug).
   Hooks: `planVillage(v)`, `planFor(rec)`, `onSpawn(m, rec, sv)`, `tick(dt)`, `ai(m, dt, out)`, `importAll(o)`, `reset()`, `drawCount(need, rand)`.
 - **Professions**: new key `unemployed` (`VILLAGER_OUTFITS.unemployed = {}`: plain biome robe; never in the roster pool, so old rosters do not shift; `TRADES.unemployed` empty, nitwit-like stock;
   right-click says "This villager has no job yet"). `BF.mobs.roster(rec)` = `villageRoster`, `BF.mobs.setProfession(m, prof)` rebuilds the body parts in place (keeps model scale, badge, everything else).
@@ -410,8 +411,13 @@ Villager workstations, loaded after builder.js (`index.html`: `textures-jobs.js`
   floor cell next to a wall (from `recordBuilding`; never on beds or the door entry, and only where the door still reaches every other floor cell and a bed side), else beside the building, else the plaza. Chunk generation
   stays deterministic; blueprints/recordBuilding are unchanged.
 - **Runtime**: the registry scans every loaded chunk for jobsite ids (`world.onChunkLoad`, registered on the first tick) and follows `blockPlaced` / `blockBroken`; `tick` (from `mobs.update`, 1 Hz) re-checks each
-  employed villager's block when loaded (broken / replaced by anything -> loses it) and lets each unemployed adult villager try `claim` every 4-10 s. A generated block of a roster slot that has not spawned yet is
+  employed villager's block when loaded (broken / replaced by anything -> loses it). A generated block of a roster slot that has not spawned yet is
   reserved for it. `ai` (from `villagerAI`, after the builder) walks an employed villager (not builders) to its block with A* now and then between sky time 0.04 and 0.45 and has it stand there 8-20 s.
+- **Walking to a jobsite** (`seekAI`, from `ai`, which `villagerAI` now calls for every villager after the food and builder logic): a villager without a job (not a nitwit, not a child, awake, not trading) looks
+  every 3-8 s for the nearest free jobsite block within 48 blocks of its village centre (experienced ones only blocks of their own profession; a grown child's parents' professions count 0.6x distance),
+  walks there with A* and takes the block only once it stands beside it (`claim(m, {site})`). Whoever arrives first gets it: a walker whose block is claimed or removed on the way picks again after 0.5-2 s, an unreachable
+  block is left alone for 60 s, a walk is given up after 120 s. Newly grown villagers (`breeding.js finishGrow`) no longer claim instantly: they start unemployed with `m.jobPrefer` and walk like the others.
+  Generated roster slots still take their planned block at spawn (`onSpawn`).
 - **Roster reconciliation** (`onSpawn`, called by `updateVillages` after `trades.unpack`): saved state with `prof` wins (profession + jobsite from the save). Otherwise the slot takes its planned block; no block -> unemployed
   (fresh villagers get unemployed stock); old saves without `prof` keep their profession when they had traded (xp > 0 or level > 1) and look for a block of it.
 - **Save**: `trades.pack` adds `prof`, `job: [x,y,z] | null`, `st` (first-job stock given) to each villager entry; `mobs.importVillagers` -> `jobs.importAll` rebuilds the claim table. Newborns (`#2000+k`) use the same fields.
@@ -434,25 +440,39 @@ Loaded after mobs.js / builder.js (index.html). mobs.js, trading.js, inventory.j
   `BF.trades.exchange`/`addXp` (seller xp), else 1 emerald for ~0.9 emerald of the seller's most plentiful food at `VALUE` prices. The seller never drops below 7 bread-eq.
   No emeralds or no seller: retry after 0.08 day. Log `BF.villageLife.log` (`kind: "buyFood"`), event `villagerFoodTrade(buyer, seller, itemId, n)`.
 - **Starting food** (`BF.food.startFood(v)`, from `trades.init` when the inventory is new, and from `trades.unpack` for saved villagers without `life`): non-farmers are topped up to
-  3-6 bread-eq (bread, apple, carrot, baked potato); farmers get 10-20 wheat seeds, 8-14 carrots and potatoes, 4-10 beetroot seeds, bread up to 12 bread-eq, 35 % a water bucket,
-  25 % an empty bucket, 45 % 3-8 oak logs.
+  3-6 bread-eq (bread, apple, carrot, baked potato); farmers get 10-20 wheat seeds, 8-14 carrots and potatoes, 4-10 beetroot seeds, bread up to 12 bread-eq, 45 % 3-8 oak logs. Buckets and hoes come from the kit
+  (`BF.villageLife.ensureKit(m)`, on hiring and once when a farmer / builder first runs its AI): a farmer or builder with no bucket and no water bucket gets one **empty** bucket, a farmer with no hoe a stone hoe.
 - **Restock**: food is never created (see TRADE_AUDIT.md): `PRODUCE.farmer/butcher/fisherman` are empty; butchers and fishermen cook up to 8 raw meat / cod they hold per day.
 - **Farmer AI** (`BF.villageLife.ai(m, dt, out)`, called from `villagerAI` after the trading freeze, flee, bedtime, morning and breeding logic and before the builder / jobsite AI;
-  only `profession === "farmer"`, not children). Day only (sky time < `WORK_END` 0.5; night/bed handled by mobs.js). Village farm data `rec._life` (`vdata(rec)`): area = worldgen
-  village box + 6, y range from the pads; an incremental column scan (500 columns per 0.5 s tick, every 10 s) lists farmland cells and surface water sources. Task priority:
+  only `profession === "farmer"` with a `jobsite` (its composter), not children). Day only (sky time < `WORK_END` 0.5; night/bed handled by mobs.js). Village farm data `rec._life` (`vdata(rec)`): area = worldgen
+  village box + 6 (`D.base`, widened to the composter's reach box by `ensureCover` when a composter stands outside it, which triggers a rescan), y range from the pads; an incremental column scan (500 columns
+  per 0.5 s tick, rescan every 10 s) lists farmland cells and surface water sources inside the area, and the water sources of the ring `WATER_REACH` 30 blocks around it (lakes, ponds, rivers via `heightAt`),
+  plus the well cells (generated well and built wells, which sit under a roof). **A farmer only tends farmland within `FARM_R` 12 blocks of its composter in every direction** (`inRange`, a Chebyshev box
+  incl. y); harvest, plant, tilling, edging and new irrigation holes all stay inside it. Task priority:
   1. bake (3 wheat -> 1 bread, 9 wheat -> 1 hay bale once it holds 96 bread), 2. harvest the nearest mature crop (wheat, carrots, potatoes, beetroots on farmland) whose drops fit
   (`BF.rollDrops` straight into `m.inv`) and replant it at once with the matching seed, or plant empty farmland (crop chosen from the neighbours' crops), 3. when there is
-  nothing to harvest/plant: till grass/dirt (no hoe needed) within 4 blocks of a water source at the same level (next to existing beds first), and with logs/planks in the
-  inventory edge the beds with wood (a ring of logs replacing the ground just outside the irrigated area); up to `TILL_PER_FARMER` 40 farmland cells per farmer beyond the
-  worldgen farms, 4. no tillable ground left: pour its water bucket into a walled-in hole next to the beds (needs 14+ tillable cells around and no water within 4), filling an
-  empty bucket first at an infinite source (2+ source neighbours, refills like vanilla), 5. tend young crops (stand and look 2-4 s). Each block action: walk until the cell
+  nothing to harvest/plant: till grass/dirt **with a hoe** (any hoe in the inventory, not consumed) within 4 blocks of a water source at the same level (next to existing beds first), and with logs/planks in the
+  inventory edge the beds with wood (a ring of logs replacing the ground just outside the irrigated area); up to `FARM_MAX` 64 farmland cells in reach; with no wood and edging to do it fetches 8 logs (see
+  gathering), 4. **no farmland in reach at all: make a farm** (`planTask`): `pickPlot` samples 60 spots near the composter for a 9x9 plot (`PLOT_R` 4) that lies in reach, in free ground (no building / plaza / lamp / decor /
+  built-structure box), loaded, natural soil only in every column (grass, dirt, coarse dirt, podzol, snow, mycelium, sand, red sand, gravel, clay, path, farmland), no water, at most 2 blocks of slope, cheapest
+  (blocks to dig + fill) first; then per cell (nearest first) `dig` the top soil block where the ground is higher (or is sand / gravel / clay and must become dirt) and `raise` a dirt block where it is lower, then
+  pour a **full** water bucket into the middle (`water`; with only an empty bucket it first walks to a water source and fills it, see Buckets). Tilling and edging then continue from step 3. If no dirt is in the
+  pocket it fetches up to 24 (digging puts dirt in the pocket too). Nothing but soil is ever dug and nothing inside the village's own area is taken for materials, 4b. beds already exist: pour its water bucket into a
+  walled-in hole next to the beds in reach (needs 14+ tillable cells around and no water within 4), filling an empty bucket first, 5. tend young crops (stand and look 2-4 s). Each block action: walk until the cell
   centre is within 1.75 blocks, face it, swing, 0.45-0.9 s, then `world.setBlock` (only loaded chunks, never outside the area or inside building / plaza / lamp / decor /
-  built-structure boxes; worldgen farm plots are harvested and replanted but never re-shaped). Cells are claimed so two farmers never share one; a failed cell is avoided for 30 s.
+  built-structure boxes; worldgen farm plots are harvested and replanted but never re-shaped). Cells are claimed so two farmers never share one; a failed cell is avoided for 30 s (`log` kind `giveup` says why).
   After 5 % of tasks a 4-9 s break (normal wandering). Measured share of the awake daytime spent on farm tasks (incl. trading with the player): 93-97 %.
-  `BF.villageLife.stats(m) -> {today, yesterday, farm, total, counts, harvested, tilled, bordered, watered, task}`.
+  `BF.villageLife.stats(m) -> {today, yesterday, farm, total, counts, harvested, tilled, bordered, watered, task}`; `counts` also has `dig`, `raise`, `gather`, `fill`.
+- **Gathering** (`findGather`, task `gather`): dirt = the top block of open grass / dirt / podzol ground, logs = the base log of a tree, from a random spot of the ring `GATHER_R` 24 blocks around the village
+  area (`D.base`), **never inside it** (the village's own landscape and buildings are left alone); nearest of 120 samples, the drops go into the farmer's inventory. A trip goes on until the farmer holds enough (`fs.haul`).
 - **Buckets**: items `bucket` (stack 16, recipe 3 iron ingots in a V) and `water_bucket` (stack 1) in blocks.js, sprites + recipe registered from villagelife.js (`texKit.SPRITES`,
   `recipeHooks`). The player uses them through `BF.villageLife.useBucket(item, target)` (player.js right-click hook before eating): an empty bucket scoops the water source looked at,
   a water bucket pours a source against the targeted face (creative keeps the bucket).
+  **Villagers' buckets**: a new farmer or builder starts with one empty bucket (see Starting food). Water is only ever placed from a full bucket and leaves the bucket empty (farmer `water` task, builder well
+  cell); a villager without a full bucket walks to a source and fills it first. Sources: any water source within ~30 blocks (`WATER_REACH`) of the village area, wells included
+  (`findFill` picks the nearest 12 with a standing cell within 2 blocks, so the walled-in well is dipped over its wall). A source is only removed when it refills by itself (two source neighbours over
+  ground / source, like vanilla and the 2x2 wells); a lone source stays put. API: `BF.villageLife.findWater(m, rec) -> {x,y,z,sx,sy,sz} | null` (also asks to keep the village's water ring scanned for 2 minutes;
+  null until scanned), `fillBucket(m, x, y, z)`, `ensureKit(m)`.
 - **Save format**: `trades.pack(v)` adds `life: {v: 1, mealT, lastAte, sat, eaten, starving}` to each villager entry (`exportVillagers`), `unpack` restores it; entries without
   `life` (older saves) get the starting food once. Farm progress is ordinary world edits; per-farmer task state and daily stats are not saved.
 
