@@ -763,6 +763,10 @@ function iconTexture(id) {
   } catch (_) {}
   return (iconTex[id] = t);
 }
+// Held map: fixed relative to the body, not the camera. It sits `fwd` ahead of and `down` below the eye, tilted back by atan(down / fwd) (~48 degrees
+// from vertical) so it faces the eye when looking down at it: only its top edge shows when looking straight ahead, and it fills the view when looking down.
+const MAP_VM = { size: 0.5, fwd: 0.5, down: 0.55, side: 0.06 };
+MAP_VM.tilt = Math.atan2(MAP_VM.down, MAP_VM.fwd);
 function setViewModel(sel) {
   const id = sel ? sel.id : 0;
   if (id === vmKey) return;
@@ -776,8 +780,8 @@ function setViewModel(sel) {
     vmMesh.rotation.set(0.1, 0.75, 0);
   } else if (BF.maps && BF.maps.textureFor(it)) { // filled map / compass: live canvas texture (js/maps.js)
     const mat = new THREE.MeshBasicMaterial({ map: BF.maps.textureFor(it), transparent: true, alphaTest: 0.05, side: THREE.DoubleSide, depthTest: false });
-    vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(it.map ? 0.66 : 0.3, it.map ? 0.66 : 0.3), mat);
-    vmMesh.rotation.set(it.map ? -0.1 : 0, it.map ? -0.12 : -0.5, 0);
+    vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(it.map ? MAP_VM.size : 0.3, it.map ? MAP_VM.size : 0.3), mat);
+    vmMesh.rotation.set(0, it.map ? 0 : -0.5, 0);
   } else {
     const mat = new THREE.MeshBasicMaterial({ map: iconTexture(id), transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, depthTest: false });
     vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), mat);
@@ -800,8 +804,14 @@ function updateViewModel(dt) {
   const eating = eatT > 0;
   const eat = eating ? Math.sin(eatT * 25) * 0.02 : 0;
   const bx = Math.cos(bobPhase) * 0.025 * bobAmt, by = Math.abs(Math.sin(bobPhase)) * 0.03 * bobAmt;
-  if (mapHeld) vm.position.set(0.16 + bx * 0.5, -0.1 - by * 0.5, -0.66);   // a held map is shown big, in front of the chest
-  else vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
+  if (mapHeld) { // world-fixed tilt: undo the camera pitch (position rotated by -pitch, orientation = tilt - pitch)
+    const c = Math.cos(pitch), n = Math.sin(pitch), wy = -MAP_VM.down - by * 0.5, wz = -MAP_VM.fwd;
+    vm.position.set(MAP_VM.side + bx * 0.5, wy * c + wz * n, -wy * n + wz * c);
+    vm.rotation.set(-MAP_VM.tilt - pitch, 0, 0);
+    vm.visible = started && !P.dead;
+    return;
+  }
+  vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
   vm.rotation.set(-s * 0.9, s * 0.4, 0);
   vm.visible = started && !P.dead;
 }
