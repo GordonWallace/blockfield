@@ -10,7 +10,7 @@
 const BF = (window.BF = window.BF || {});
 
 const SPEEDS = [1, 3, 5, 10, 100, 1000];
-const MAX_STEP = 0.05, MAX_STEPS = 400;   // from 100x one step covers up to 0.05 s of game time; never more than 400 steps in a frame
+const MAX_STEP = 0.05, MAX_STEPS = 1000;   // from 100x one step covers up to 0.05 s of game time; never more than 1000 steps in a frame
 let idx = 0, clock = 0, eff = 1, last = 1, shown = null;
 
 BF.simNow = () => clock;
