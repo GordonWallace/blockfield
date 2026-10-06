@@ -1,15 +1,16 @@
-// Fast-forward. Press F to cycle the simulation speed 1x -> 2x -> 3x -> 5x -> 10x -> 100x -> 1x.
+// Fast-forward. Press F to cycle the simulation speed 1x -> 3x -> 5x -> 10x -> 100x -> 1000x -> 1x.
 // The game loop (main.js) runs its whole simulation step BF.warp.speed times per frame instead of scaling dt, so
 // the day/night cycle, mobs, villagers, crops, weather and animations all stay consistent, like a sped-up recording.
 // The player is not stepped: it keeps normal speed so you can still move around and observe.
 // BF.simNow() is the simulation clock in seconds: it advances only by simulated steps (not while paused), and every
 // cooldown / scan timer in the sim modules reads it instead of performance.now(), so they speed up with everything else.
-// API: BF.warp = { speed, steps(), advance(dt), done(n), last, reset(), set(i), cycle(), BUDGET_MS, SPEEDS }
+// API: BF.warp = { speed, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt), last, reset(), set(i), cycle(), BUDGET_MS, SPEEDS }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const SPEEDS = [1, 2, 3, 5, 10, 100];
+const SPEEDS = [1, 3, 5, 10, 100, 1000];
+const MAX_STEP = 0.05, MAX_STEPS = 1000;   // from 100x one step covers up to 0.05 s of game time; never more than 1000 steps in a frame
 let idx = 0, clock = 0, eff = 1, last = 1, shown = null;
 
 BF.simNow = () => clock;
@@ -41,12 +42,18 @@ BF.warp = {
   SPEEDS,
   BUDGET_MS: 40,                       // max simulation time per frame; the speed degrades gracefully past this
   get speed() { return SPEEDS[idx]; },
-  get last() { return last; },         // sim steps run in the latest frame
-  steps() { return SPEEDS[idx]; },
+  get last() { return last; },         // achieved speed in the latest frame (game seconds simulated / real seconds)
+  // Steps for a frame of real length dt: n steps of length h. Up to 10x that's `speed` steps of dt; above, as few steps as keep h <= MAX_STEP.
+  plan(dt) {
+    const sp = SPEEDS[idx];
+    if (sp <= 10) return { n: sp, h: dt };
+    const S = sp * dt, n = Math.min(MAX_STEPS, Math.max(1, Math.ceil(S / MAX_STEP)));
+    return { n, h: Math.min(MAX_STEP, S / n) };   // past the cap the frame simulates less than S and the indicator shows the shortfall
+  },
   advance(dt) { clock += dt; },
-  done(n) {
-    last = n;
-    eff = idx === 0 ? 1 : eff + (n - eff) * 0.2;   // smoothed steps per frame = achieved speed
+  done(n, simSec, dt) {
+    last = dt > 0 ? simSec / dt : 1;
+    eff = idx === 0 ? 1 : eff + (last - eff) * 0.2;   // smoothed game seconds per real second = achieved speed
     const key = idx + ":" + Math.round(eff * 10);
     if (key !== shown) { shown = key; show(); }
   },
