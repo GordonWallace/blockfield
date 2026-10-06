@@ -81,7 +81,7 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const p = BF.player.position;
-  BF.world.update(p.x, p.z, 8);
+  BF.world.update(p.x, p.z, BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder
   if (!BF.state.paused) {
     BF.state.time += dt;
     BF.sky.update(dt);
