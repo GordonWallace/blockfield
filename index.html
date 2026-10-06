@@ -26,11 +26,22 @@
     background: var(--panel); color: var(--ink); padding: 8px 10px; border-radius: 3px;
     font: 12px/1.5 var(--mono); white-space: pre; font-variant-numeric: tabular-nums; pointer-events: none;
   }
+  #vlog {
+    position: fixed; left: 16px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); width: min(520px, 46vw); max-height: 55vh; overflow: hidden;
+    background: var(--panel); color: var(--ink); padding: 8px 10px; border-radius: 3px; font: 11px/1.45 var(--mono); pointer-events: none;
+  }
+  #vlog h4 { margin: 0 0 2px; font: 13px var(--display); color: var(--accent); }
+  #vlog .vl-tally { color: var(--muted); margin-bottom: 4px; }
+  #vlog span { color: var(--muted); }
+  #vlog .vl-none { color: var(--muted); font-style: italic; }
+  #vlog .vl-birth { color: #f3b6c8; } #vlog .vl-bed { color: #9fc8f0; } #vlog .vl-trade { color: #f2dd8a; } #vlog .vl-job { color: #b7e08c; }
+  #vlog .vl-birth span, #vlog .vl-bed span, #vlog .vl-trade span, #vlog .vl-job span { color: var(--muted); }
 </style>
 
 <canvas id="view" aria-label="Blockfield game view"></canvas>
 <div id="ui"></div>
 <pre id="debug" hidden></pre>
+<div id="vlog" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/blocks.js"></script>
@@ -74,6 +85,7 @@
 <script src="js/commands.js"></script>
 <script src="js/village-names.js"></script>
 <script src="js/signs.js"></script>
+<script src="js/villagelog.js"></script>
 <script src="js/save.js"></script>
 <script src="js/main.js"></script>
 <script src="js/audio.js"></script>

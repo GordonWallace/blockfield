@@ -114,6 +114,7 @@ function doDeal(m, deal) {
     T.addXp(v2, o);
     done++;
   }
+  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
   if (done) log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }

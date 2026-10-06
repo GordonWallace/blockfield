@@ -239,6 +239,7 @@ function deal(m, dl) {
   t.inv.remove(m.inv, o.buy[0].id, o.buy[0].n);
   t.inv.add(m.inv, o.sell.id, o.sell.n);
   t.addXp(v2, o);
+  if (BF.vlog) BF.vlog.trade(m, v2, o);
   log("buy", m, { from: "cartographer", got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
   return true;
 }
@@ -295,7 +296,10 @@ function pitch(m) {
   if (!BF.tents || tentItem() == null || cnt(m, tentItem()) < 1) return false;
   const px = Math.floor(m.position.x), pz = Math.floor(m.position.z);
   const site = BF.tents.findSite(m.position.x, m.position.z, 7, (x, y, z) => x === px && z === pz);
-  if (!site || !BF.tents.place(site.x, site.y, site.z, site.f)) return false;
+  if (BF.vlog) BF.vlog.actor = m;                       // the blockPlaced events inside place() are logged as this villager's
+  const placed = site && BF.tents.place(site.x, site.y, site.z, site.f);
+  if (BF.vlog) BF.vlog.actor = null;
+  if (!placed) return false;
   T0.inv.remove(m.inv, tentItem(), 1);
   X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
   m.homeBed = m.homeBed || m.bed;
