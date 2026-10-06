@@ -28,7 +28,7 @@ function getAuto(k, zx, zz) {
   let d = maps.get(key);
   if (!d) {
     const g = geometry(k, zx, zz), n = g.N * g.N;
-    d = Object.assign({ key, k, zx, zz, hgt: new Int16Array(n), bio: new Uint8Array(n).fill(255), wl: new Uint8Array(n), pass: 0, idx: 0, cells: 0, done: false, ver: 0, used: 0, cv: null, cvVer: -1, seed: BF.state && BF.state.seed }, g);
+    d = Object.assign({ key, k, zx, zz, hgt: new Int16Array(n), bio: new Uint8Array(n).fill(255), wl: new Int16Array(n), pass: 0, idx: 0, cells: 0, done: false, ver: 0, used: 0, cv: null, cvVer: -1, seed: BF.state && BF.state.seed }, g);
     maps.set(key, d);
   }
   d.used = performance.now();
@@ -52,7 +52,7 @@ function step(d, deadline) {
     const i = ci * s, j = cj * s;
     const x = Math.floor(d.x0 + (i + 0.5) * d.scale), z = Math.floor(d.z0 + (j + 0.5) * d.scale);
     const b = W.biomeAt(x, z), wl = W.waterLevelAt(x, z);
-    const h = Math.round(b.height), id = b.id, w = clamp(Math.round(wl), 0, 255);
+    const h = Math.round(b.height), id = b.id, w = Math.round(wl);
     for (let y = j; y < Math.min(N, j + s); y++) for (let xx = i; xx < Math.min(N, i + s); xx++) {
       const o = y * N + xx; d.hgt[o] = h; d.bio[o] = id; d.wl[o] = w;
     }
@@ -83,7 +83,7 @@ function paint(d) {
     } else {
       const c = COL[id] || [255, 0, 255];
       const hn = i + 1 < N && j + 1 < N && d.bio[p + N + 1] !== 255 ? d.hgt[p + N + 1] : h;
-      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - 40) / 150, 0, 1) + sh;
+      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / 150, 0, 1) + sh;
       r = c[0] * k; g = c[1] * k; b = c[2] * k;
     }
     o[q] = clamp(r, 0, 255); o[q + 1] = clamp(g, 0, 255); o[q + 2] = clamp(b, 0, 255); o[q + 3] = 255;
