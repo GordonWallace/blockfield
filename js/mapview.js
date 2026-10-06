@@ -84,9 +84,10 @@ const GROUND = { 1: SAND, 2: SAND, 3: GRAVEL, 11: MUD, 12: SAND, 13: RSAND, 19: 
 // Colour of the surface for a biome id at height h, written to `out` (before the tint).
 function groundOf(id, h, out) {
   let c = GROUND[id] || GRASS;
-  if (id === 24) c = h > 100 ? SNOW : h > 90 ? STONE : GRASS;
-  else if (id === 25 && h > 74) c = SNOW;
-  else if (id === 26 && h > 92) c = SNOW;
+  const t = BF.H > 192;   // mile-high worlds (generator 3) use their own snow lines (worldgen.js surface rules)
+  if (id === 24) c = h > (t ? 1950 : 100) ? SNOW : h > (t ? 1850 : 90) ? STONE : GRASS;
+  else if (id === 25 && h > (t ? 1450 : 74)) c = SNOW;
+  else if (id === 26 && h > (t ? 1800 : 92)) c = SNOW;
   out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
   if (id === 18) { out[0] = out[0] * 0.6 + PODZOL[0] * 0.4; out[1] = out[1] * 0.6 + PODZOL[1] * 0.4; out[2] = out[2] * 0.6 + PODZOL[2] * 0.4; }   // coarse dirt and podzol patches
   return TINTED[id] && c === GRASS;
