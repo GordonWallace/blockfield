@@ -115,13 +115,11 @@ function freeCells(v, b, r) {
     return null;
   } };
 }
-// Planned jobsite blocks of a worldgen village v: [{x, y, z, id, prof, slot (roster idx, -1 = spare)}].
-function planVillage(v) {
-  const out = [];
-  if (!v || !BF.worldgen || !BF.worldgen.recordBuilding || !BF.mobs || !BF.mobs.roster) return out;
+// The jobs of a worldgen village v, before they get a place: {key, r (the seeded stream, continued by the placement), jobs: [{prof, slot, house}]}.
+// The roster counts the original layout's buildings (v.nb0), so pens added later for the shepherds never change who lives there.
+function jobList(v) {
   const key = Math.round(v.x) + "," + Math.round(v.z);
-  let roster;
-  try { roster = BF.mobs.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length }); } catch (e) { console.error(e); return out; }
+  const roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length });
   const r = seeded("jobs:" + key);
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   const n = drawCount(needy.length, r);
@@ -132,6 +130,19 @@ function planVillage(v) {
   const jobs = special.concat(rest).slice(0, n).map(sl => ({ prof: sl.prof, slot: sl.idx, house: sl.house }));
   for (let k = needy.length; k < n; k++) jobs.push({ prof: needy[Math.floor(r() * needy.length)].prof, slot: -1, house: null }); // spares follow the roster mix
   jobs.sort((a, b) => (a.slot < 0) - (b.slot < 0) || (a.slot - b.slot));
+  return { key, r, jobs };
+}
+// How many shepherd jobsites the plan of village v holds (worldgen adds a pen for each, see layoutVillage).
+function shepherdCount(v) {
+  if (!v || !BF.mobs || !BF.mobs.roster) return 0;
+  return jobList(v).jobs.filter(j => j.prof === "shepherd").length;
+}
+// Planned jobsite blocks of a worldgen village v: [{x, y, z, id, prof, slot (roster idx, -1 = spare)}].
+function planVillage(v) {
+  const out = [];
+  if (!v || !BF.worldgen || !BF.worldgen.recordBuilding || !BF.mobs || !BF.mobs.roster) return out;
+  let key, r, jobs;
+  try { ({ key, r, jobs } = jobList(v)); } catch (e) { console.error(e); return out; }
   // placement
   const blds = v.buildings || [], used = new Set(), cellsOf = new Map();
   const W = (b, u, q) => [b.bx + b.ax * u + b.sx * q, b.bz + b.az * u + b.sz * q];
@@ -159,7 +170,14 @@ function planVillage(v) {
   const homes = blds.filter(b => LIVABLE[b.type]);
   const bOf = h => h && blds.find(b => b.doorX === h.doorX && b.doorZ === h.doorZ && LIVABLE[b.type]);
   let fi = 0;
+  const pens = blds.filter(b => b.type === "pen");   // a shepherd's loom stands right outside a pen (each shepherd gets its own while there are enough)
+  let pi = 0;
   for (const job of jobs) {
+    if (job.prof === "shepherd" && pens.length && (BF.state && BF.state.gen | 0) >= 3) {   // gen 3+ only: older worlds keep their loom positions
+      let placed = false;
+      for (let k = 0; k < pens.length && !placed; k++) placed = beside(pens[(pi + k) % pens.length], job) && (pi += k + 1, true);
+      if (placed) continue;
+    }
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
     if (job.prof === "builder" && plaza(job)) continue;
     const b = bOf(job.house) || (job.slot < 0 && homes.length ? homes[Math.floor(r() * homes.length)] : null);
@@ -487,6 +505,6 @@ function reset() { sites.clear(); claims.clear(); planIndex.clear(); spawned.cle
 BF.jobs = {
   JOBSITE, PROFESSION_OF, RADIUS, sites, claims,
   profOfBlock, blockFor, claim, hire, release, unclaimed, isEmployed, setProfession,
-  planVillage, planFor, drawCount, MEMORY_DAYS, memValid, onSpawn, tick, ai, importAll, reset,
+  planVillage, shepherdCount, planFor, drawCount, MEMORY_DAYS, memValid, onSpawn, tick, ai, importAll, reset,
 };
 })();

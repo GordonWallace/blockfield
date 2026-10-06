@@ -1130,6 +1130,10 @@ function secondaryDown() {
     if (msg) actionBar(msg);
     return true;
   }
+  if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
+    const r = BF.shepherd.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];

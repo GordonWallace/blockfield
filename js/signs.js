@@ -742,7 +742,7 @@ registerAuto("village", (e) => {
       : Math.max(live, rl - ((rec.killed && rec.killed.villager) || 0));
     nb = BF.breeding && BF.breeding.bedCount ? BF.breeding.bedCount(rec) : countBedsFallback(rec.wg || v);
   } else if (v) {
-    try { nv = M && M.roster ? M.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length }).length : 0; } catch (err) { nv = 0; }
+    try { nv = M && M.roster ? M.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length }).length : 0; } catch (err) { nv = 0; }
     nb = countBedsFallback(v);
   } else return null;
   return "Village of " + name + "\nVillagers: " + nv + "\nBeds: " + nb;
