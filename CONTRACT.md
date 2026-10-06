@@ -173,7 +173,7 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 - time in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight. `light` is the block brightness multiplier
   (main passes it to `world.setDaylight`). Owns scene.background, scene.fog (keep fog distances tied to
   `BF.world.viewDist * BF.CS`).
-- Clouds are volumetric slabs ("fancy" clouds): `CLOUD_Y = BF.H + 4` (slab bottom, above the highest possible terrain), `CLOUD_H = 5`, cell 12x12, periodic 64x64 deterministic cell mask,
+- Clouds are volumetric slabs ("fancy" clouds): slab bottom = `BF.sky.cloudHeight` = `BF.sky.cloudBase` (default `BF.H + 4`, settable per world, e.g. for mile-high terrain) + a rise of 0..70 that varies smoothly with game time (never below the base). Cover (`BF.sky.cloudCover`, 0 clear..1 overcast) also varies by game time (clear spells to broken skies; value noise on day+time seeded by world seed) and rain forces overcast and lowers the deck, `CLOUD_H = 5`, cell 12x12, periodic 64x64 deterministic cell mask,
   drifting in -x at 1.2 blocks/s. One BufferGeometry (~6.5k triangles, exposed faces only; shade top 1 / z-sides 0.9 / x-sides 0.8 /
   bottom 0.7) over a 56x56 cell window, rebuilt (preallocated buffers) only when the camera or drift crosses a cell boundary,
   otherwise just translated. Single-sided, depthWrite off, renderOrder 5, alpha 0.9 with distance fade to the horizon colour at CLOUD_R=320.
