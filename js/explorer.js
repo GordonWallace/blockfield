@@ -141,7 +141,7 @@ function travel(m, st, dt, out, tx, tz, speed, radius) {
 // ---------------------------------------------------------------- exploring
 const inLoaded = (x, z) => { const W = BF.world; return W.isLoaded(x, z) && W.isLoaded(x + EDGE, z) && W.isLoaded(x - EDGE, z) && W.isLoaded(x, z + EDGE) && W.isLoaded(x, z - EDGE); };
 // Next patch of map `c` to visit: the nearest unexplored, loaded one near the player that has not been given up. null + reason otherwise.
-function pickTarget(m, c) {
+function pickTarget(m, c, anywhere) {
   const M = BF.maps, d = c.d, X = state(m), s = M.scale(d.size), ox = M.originX(d.size, d.zx), oz = M.originX(d.size, d.zz);
   const CELL = cellPx(d.size), n = M.PX / CELL, pp = BF.player.position;
   let best = null, bd = Infinity, open = 0, avoided = 0;
@@ -151,7 +151,7 @@ function pickTarget(m, c) {
     if ((X.avoid[k] || 0) >= 2) { avoided++; continue; }
     const wx = Math.floor(ox + (ci * CELL + CELL / 2) * s), wz = Math.floor(oz + (cj * CELL + CELL / 2) * s);
     open++;
-    if (!inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE)) continue;
+    if (!anywhere && (!inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE))) continue;
     const dist = Math.hypot(wx + 0.5 - m.position.x, wz + 0.5 - m.position.z);
     if (dist < bd) { bd = dist; best = { ci, cj, wx, wz, k }; }
   }
@@ -204,6 +204,41 @@ function finish(m, c, why) {
   log("filled", m, { map: c.it.name, why, coverage: +coverage(c.d).toFixed(3) });
   syncOffers(m);
 }
+
+// ---------------------------------------------------------------- catching up on trips (js/villagesim.js)
+// A village that was out of range for a while: its explorer is credited with the patches it would have mapped, a few per frame (the terrain is
+// generated on the side, BF.maps.exploreFar, so nothing has to be loaded). Same rules as the live walk: out of reach patches (ocean) are given up.
+const PATCH_SECS = 25, CATCHUP_MAX = 60, CATCH_CALLS = 14;
+function catchUp(m, rec, away) {
+  if (m.profession !== "explorer" || !m.inv || m.child || !BF.maps || !BF.maps.exploreFar || !carried(m).some(c => !c.done)) return;
+  const X = state(m);
+  X.catchLeft = Math.min(CATCHUP_MAX, Math.floor(away * (WORK_END - WORK_START) * 600 / PATCH_SECS));
+  X.catchPos = { x: m.position.x, z: m.position.z };
+}
+function stepCatch(m, X) {
+  const act = carried(m).find(c => !c.done);
+  if (!act || X.catchLeft <= 0) { X.catchLeft = 0; return; }
+  X.catchLeft--;
+  X.work = X.work || {};
+  if (isFilled(m, act.it, act.d)) { finish(m, act, "covered"); X.catchLeft = 0; return; }
+  if ((X.work[act.it.name] = (X.work[act.it.name] || 0) + PATCH_SECS) > MAP_WORK_CAP) { X.fin[act.it.name] = 1; finish(m, act, "time"); X.catchLeft = 0; return; }
+  const vm = Object.create(m);
+  vm.position = X.catchPos;                       // tour from patch to patch, nearest first
+  const p = pickTarget(vm, act, true);
+  if (!p.best) {
+    if (!p.open && p.avoided) { X.fin[act.it.name] = 1; finish(m, act, "unreachable"); }
+    else if (!p.open) finish(m, act, "covered");
+    X.catchLeft = 0;
+    return;
+  }
+  const t = p.best, d = act.d;
+  X.catchPos = { x: t.wx, z: t.wz };
+  if (BF.worldgen.heightAt(t.wx, t.wz) <= BF.SEA) { X.avoid[t.k] = 2; return; }   // water: out of reach
+  for (let i = 0; i < CATCH_CALLS && cellFill(d, t.ci, t.cj) < CELL_DONE; i++) BF.maps.exploreFar(d, t.wx, t.wz, SAMPLE);
+  if (cellFill(d, t.ci, t.cj) < CELL_DONE) X.avoid[t.k] = (X.avoid[t.k] || 0) + 1;
+  if (isFilled(m, act.it, d)) { finish(m, act, "covered"); X.catchLeft = 0; }
+}
+if (BF.villageSim) BF.villageSim.onCatchUp(catchUp);
 
 // ---------------------------------------------------------------- fetching a blank map from a cartographer
 const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession === "cartographer" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
@@ -333,6 +368,7 @@ function campAI(m, t, a) {
 function ai(m, dt, out) {
   if (m.profession !== "explorer" || !m.inv || m.dead || m.child || !BF.maps || !BF.mobs || !BF.mobs.nav || !m.village) return false;
   const X = state(m);
+  for (let k = 0; k < 4 && X.catchLeft > 0; k++) stepCatch(m, X);   // ~3 ms a patch
   X.sync -= dt;
   if (X.sync <= 0) { X.sync = 2; syncOffers(m); }
   const t = skyT();
@@ -363,5 +399,5 @@ function unpack(m, o) {
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
+BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, catchUp, LOG };
 })();

@@ -595,5 +595,6 @@ Villagers only exist while their chunks are loaded. `BF.villageSim` keeps the te
   **Villager catch-up hooks**: `BF.villageSim.onCatchUp(fn(mob, rec, awayDays))` registers a function that runs once per villager of a returning village, after its crops caught up and every footprint chunk is loaded
   (so it may place and break blocks anywhere around the village). Registered so far: `BF.builder.catchUp` (places blocks of the structure in progress from its own stock, about
   `BUILD_END*600/avg(BLOCK_T)*0.5` a game day, stops at the first missing material, finishes the structure when complete) and `BF.villageLife.catchUp` (a farmer harvests and replants the mature crops around
-  its jobsite, 60 a game day, at most 160). Explorer trips register the same way from js/explorer.js.
+  its jobsite, 60 a game day, at most 160) and `BF.explorer.catchUp` (an explorer with an unfinished map is credited `away * working day / 25 s` patches, at most 60, a few per frame, on the usual
+  "give up after 1500 s of work" cap; terrain nobody has loaded is generated on the side by `BF.maps.exploreFar`, water patches are given up as unreachable).
 - API: `update(px, pz) -> changed`, `isActive(villageKey)`, `status()`, `exportSeen(out)` / `importSeen(o)`, `reset()`, `init()`. Debug HUD (F3) shows the simulated village and kept chunk counts.
