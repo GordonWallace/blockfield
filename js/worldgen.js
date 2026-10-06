@@ -327,8 +327,8 @@ function climate2(x, z) {
   const sw = smooth(0.2, 0.36, hu) * smooth(-0.2, -0.06, t) * (1 - smooth(0.02, 0.3, c)) * land * (1 - m);
   if (sw > 0) h = lerp(h, SEA + 0.35 + hills * 2.6, sw);
   let mi = 0;
-  if (c < -0.7) {
-    mi = smooth(0.66, 0.76, noise.n2(x / 520 + 77.7, z / 520 - 55.5)) * smooth(-0.7, -0.85, c);
+  if (c < -0.8) {
+    mi = smooth(0.7, 0.8, noise.n2(x / 520 + 77.7, z / 520 - 55.5)) * smooth(-0.8, -0.95, c);
     if (mi > 0) h = lerp(h, SEA + 3 + hills * 7, mi);
   }
   h = ceil2(h);
@@ -1102,7 +1102,8 @@ function generate(cx, cz, vox) {
     const hi = (z + 1) * HW + x + 1, h = hCache[hi];
     const minN = Math.min(hCache[hi - 1], hCache[hi + 1], hCache[hi - HW], hCache[hi + HW], h);
     let limit;
-    if (minN <= SEA + 1) limit = minN - 5;                     // near water: keep a thick seal
+    if (minN <= SEA + 1 || wlCache[hi] > SEA || wlCache[hi - 1] > SEA || wlCache[hi + 1] > SEA || wlCache[hi - HW] > SEA || wlCache[hi + HW] > SEA)
+      limit = minN - 5;                                        // near water (sea or a river): keep a thick seal
     else limit = entranceAt(ox + x, oz + z) ? h : h - 4;
     for (const vil of vils) if (inVillage(vil, ox + x, oz + z, 2)) limit = Math.min(limit, h - 8, vil.minY - 6);
     if (limit < 5) continue;
