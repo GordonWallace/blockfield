@@ -11,6 +11,7 @@ function run(env, cur, ok, md5) {
     const BF = env(cur);
     BF.noise = BF.makeNoise(seed); BF.worldgen.init(BF.noise, { gen: 3, biomeScale: scale });
     const W = BF.worldgen, B = BF.B, CS = 16;
+    const LOGS = new Set(Object.keys(B).filter(k => k.endsWith("_log")).map(k => B[k]));
     ok(BF.MIN_Y === -64 && BF.H === 3072 && BF.SEA === 0 && BF.SY0 === -4 && BF.SY1 === 192, "limits after init gen 3");
     // pick areas: a mountain top, a coast, plateau, origin
     const spots = [["origin", 0, 0]];
@@ -53,7 +54,7 @@ function run(env, cur, ok, md5) {
           else ok(sb === 0 || solid(sb) || sb === B.ice || (sb === B.water && W.villagesNear(x, z, 70).length > 0),   // a village well holds water at pad level
              `${tag}: no solid block at heightAt ${h} (${x},${z}) id ${sb}`);
           if (wl > h) {
-            const wet = id => id === B.water || id === B.ice || id === B.mangrove_log || id === B.mangrove_leaves;   // mangrove trunks replace water
+            const wet = id => id === B.water || id === B.ice || LOGS.has(id) || id === B.mangrove_leaves;   // mangrove (and 2x2 jungle) trunks replace water
             ok(wl < hi * 16 && wet(blk(lx, wl, lz)), `${tag}: water level ${wl} not water at ${x},${z} (id ${blk(lx, wl, lz)})`);
             ok(wet(blk(lx, h + 1, lz)) || h + 1 === wl, `${tag}: no water just above floor ${h} wl ${wl}`);
           }
