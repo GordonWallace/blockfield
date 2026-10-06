@@ -6,7 +6,7 @@ const BF = (window.BF = window.BF || {});
 
 // ---------- tuning ----------
 const GRAVITY = 32, JUMP_V = 8.4, WALK = 4.3, SPRINT = 5.6, SNEAK = 1.3;
-const TURBO_MULT = 2.5, TURBO_LOOKAHEAD = 2;
+const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W, then hold E): 10x the normal flying speed
 const FLY = 10.9, FLY_SPRINT = 21.6, CFLY = 16, CFLY_SPRINT = 32, SWIM = 2.2, REACH = 5, MOB_REACH = 3.5;
 const BASE_FOV = 75, AIR_MAX = 10, ATTACK_CD = 0.4, EAT_TIME = 1.2, PLACE_REPEAT = 0.22;
 const HW = 0.3, HEIGHT = 1.8, EYE = 1.62, SNEAK_EYE = 1.47;
@@ -24,7 +24,7 @@ let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
 let onGround = false, inWater = false, headInWater = false;
 let flying = false, sprinting = false, sneaking = false, turbo = false;
-let lastSpaceTap = 0, lastWTap = 0, wTaps = 0;
+let lastSpaceTap = 0, lastWTap = 0, wTaps = 0, boostE = false;   // boostE: E went down while flying with W held, so it boosts instead of opening the inventory
 let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
@@ -158,7 +158,7 @@ let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, 
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
-     <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>W x3</b> turbo fly</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
+     <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>Fly + hold W, then E</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
      <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> drop item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -526,7 +526,11 @@ function bindInput() {
       return;
     }
     // inventory.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
-    if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) { deferredToggle(false); return; }
+    if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) {
+      // flying with W held: E is the 10x boost (held), not the inventory key. In every other case E opens/closes the inventory.
+      if (flying && !invOpen() && (keys.has("KeyW") || keys.has("ArrowUp"))) { boostE = true; e.preventDefault(); return; }
+      deferredToggle(false); return;
+    }
     if (menuOpen || invOpen() || P.dead) return;
     if (e.repeat) { keys.add(c); return; }
     const now = performance.now();
@@ -536,14 +540,13 @@ function bindInput() {
     if (c === "KeyW") {
       wTaps = now - lastWTap < 300 ? wTaps + 1 : 1;
       if (wTaps >= 2) sprinting = true;
-      if (wTaps >= 3 && flying) turbo = true;   // triple-tap W while flying: third, fastest speed
       lastWTap = now;
     }
     if (c === "KeyQ") { try { if (selectedItem() && inv().consumeSelected) inv().consumeSelected(1); } catch (_) {} }
     keys.add(c);
   });
-  addEventListener("keyup", e => keys.delete(e.code));
-  addEventListener("blur", () => { keys.clear(); mouseL = mouseR = false; });
+  addEventListener("keyup", e => { keys.delete(e.code); if (e.code === "KeyE") boostE = false; });
+  addEventListener("blur", () => { boostE = false; keys.clear(); mouseL = mouseR = false; });
 
   document.addEventListener("pointerlockchange", () => {
     const was = locked;
@@ -1323,7 +1326,7 @@ P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health +
 const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
 function die() {
   P.dead = true; P.health = 0;
-  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
+  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false; boostE = false;
   if (invOpen()) { try { inv().close(); } catch (_) {} }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
@@ -1372,7 +1375,7 @@ function physics(dt) {
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
   if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
   if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
-  if (!sprinting || !flying) turbo = false;
+  turbo = flying && boostE && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // releasing W or E (or landing) ends the boost
   // forward (sx, sz) and right (-sz, sx) in the horizontal plane
   const sx = -Math.sin(yaw), sz = -Math.cos(yaw);
   let mx = sx * fwd - sz * strafe, mz = sz * fwd + sx * strafe;
@@ -1383,10 +1386,11 @@ function physics(dt) {
   if (flying) {
     speed = creative() ? (sprinting ? CFLY_SPRINT : CFLY) : (sprinting ? FLY_SPRINT : FLY);
     if (turbo) {
+      const base = creative() ? CFLY : FLY;
       // don't outrun terrain: drop to sprint speed when the chunks ahead aren't generated yet
       const sp = Math.hypot(vel.x, vel.z) || 1, ahead = TURBO_LOOKAHEAD * 16;
       const ax = Math.floor((pos.x + vel.x / sp * ahead) / 16), az = Math.floor((pos.z + vel.z / sp * ahead) / 16);
-      if (BF.world.chunks.has(ax + "," + az)) speed *= TURBO_MULT;
+      speed = BF.world.chunks.has(ax + "," + az) ? base * TURBO_MULT : Math.max(speed, base * 2);   // ahead not generated yet: fall back to a fast sprint
     }
   }
   else if (inWater) speed = SWIM * (sprinting ? 1.4 : 1);

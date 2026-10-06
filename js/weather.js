@@ -8,7 +8,7 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const DAY = 600;                               // seconds per in-game day (sky.dayLength)
+const DAY = 1200;                              // seconds per in-game day (sky.dayLength); spells are measured in days
 const RAMP = 15;                               // seconds for intensity 0 -> 1
 const R = 20, BAND = 44, BAND_LO = 16;         // particle cylinder radius, vertical band (cam.y - 16 .. cam.y + 28)
 const N = 4000;                                // particles
@@ -25,7 +25,7 @@ function rnd() {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 const range = (a, b) => a + (b - a) * rnd();
-// spell lengths (vanilla proportions compressed to the 600 s day)
+// spell lengths (vanilla proportions compressed to the 1200 s day)
 const clearSpell = () => range(1, 3) * DAY;
 const rainSpell = () => range(0.3, 1) * DAY;
 

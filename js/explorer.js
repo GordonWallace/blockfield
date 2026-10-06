@@ -284,7 +284,7 @@ function shopAI(m, dt, out) {
 // ---------------------------------------------------------------- camping
 // Out mapping when night is about to fall and the walk home is too long: pitch the tent it carries and sleep there (mobs.js nightAI treats the
 // tent's foot centre as its bed; monsters cannot see anyone asleep in a tent). In the morning it packs the tent up again.
-const BEDTIME = 0.52, DUSK = 0.45, WALK_SLACK = 0.8, DAY_S = 600;
+const BEDTIME = 0.52, DUSK = 0.45, WALK_SLACK = 0.8, DAY_S = 1200;
 const isNight = t => t > BEDTIME && t < 0.985;
 const tentItem = () => BF.I.tent;
 function homeDistance(m) {

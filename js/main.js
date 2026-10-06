@@ -84,10 +84,10 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const p = BF.player.position;
-  BF.world.update(p.x, p.z, BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder
+  BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   const W = BF.warp;
   if (!BF.state.paused) {
-    // Fast-forward (F, js/timewarp.js): run the whole simulation W.speed times per frame with the normal step, so
+    // Fast-forward (F, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
     // behaviour at 10x matches 1x exactly and it plays like a sped-up recording. Stops early if the frame budget runs out.
     const n = W.steps(), t0 = performance.now();
     let done = 0;
@@ -95,12 +95,13 @@ function frame(now) {
       W.advance(dt);
       BF.state.time += dt;
       BF.sky.update(dt);
-      BF.player.update(dt);
       BF.mobs.update(dt);
       BF.drops.update(dt);
       BF.world.tickSim();
       done++;
     }
+    // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
+    BF.player.update(dt);
     W.done(done);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
