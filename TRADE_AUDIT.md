@@ -411,6 +411,29 @@ No fixed offers (`TRADES.explorer` is empty, `PRODUCE.explorer` empty); starting
 Only while it holds a finished map; a map it gave up on before 97% explored is priced by its coverage (at least 15%). The fill radius shrinks with map size (js/maps.js), so sizes 3-5 are rarely finished: the explorer buys small sizes far more often (weights 16:8:4:2:1) and settles for a partial map after 1500 s of exploring. The explorer buys the blank map from a cartographer at the cartographer's prices (4, 8, 16, 32, 64 for sizes 1-5, below), so a sale
 leaves it 3, 8, 20, 48 and 112 emeralds ahead. Its purse is `EXPLORER_EM_CAP` 100 with +6 a day (the usual 12 / +2 could never pay for a size 3 map). The map offers are not in the old-trade tables below.
 
+### furniture_maker
+
+New profession (see CONTRACT.md "Furniture makers"). It buys wool and boards and sells the beds it makes from them (3 wool + 3 planks, `VALUE.red_bed` 0.42). Nothing is restocked (`PRODUCE.furniture_maker = []`): beds come only from its own crafting, wool and boards from the player or from other villagers' tables (the shepherd's `1 emerald > 8 white_wool`, the forester's `1 emerald > 30 planks`).
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 10 white_wool > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 1 | 40 planks > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 1 | 1 emerald > 2 red_bed | 1.00 | 0.84 | 0.84 | buy from villager |
+| 2 | 11 wool > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
+| 2 | 10 oak_log > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 3 | 40 spruce_planks > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 3 | 40 birch_planks > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 3 | 10 spruce_log > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 3 | 10 birch_log > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 4 | 3 emerald > 7 red_bed | 3.00 | 2.94 | 0.98 | buy from villager |
+| 5 | 40 dark_oak_planks > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 5 | 40 acacia_planks > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 5 | 10 dark_oak_log > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+
+- **No round trip.** What it pays per unit stays below what any villager charges: white wool 0.100 < 0.125 (shepherd), wool 0.091 < 0.111 (shepherd), planks 0.025 < 0.033 (forester), logs 0.10 < 0.125 (forester). The builder buys beds from the player at 0.33 each, below the furniture maker's cheapest 0.43.
+- **Its own margin.** Buying everything from villagers, one bed costs 3 white wool (0.375) + 3 planks (0.1) = 0.475 emerald and sells for 0.5 (0.43 at level 4): it lives mostly on cheaper wool and boards sold by the player and on its +2 emeralds a day.
+
 ### builder
 
 New profession (see CONTRACT.md "Builder villagers"). The builder is the one villager that mostly *buys* from the player: it needs building materials, keeps them in its inventory and places them block by block. Every offer is "sell to villager" (rho 0.79 to 0.91) except the two goods it

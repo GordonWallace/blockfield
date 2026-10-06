@@ -142,6 +142,15 @@ const TRADES = {
   nitwit: [[], [], [], [], []],
   unemployed: [[], [], [], [], []],   // no jobsite yet (js/jobs.js): no offers
   explorer: [[], [], [], [], []],     // no fixed offers: it sells the maps it has filled, built on the fly (js/explorer.js syncOffers)
+  // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
+  // (3 wool + 3 planks each). Its bed price matches the shepherd's; builders buy beds at the same offer.
+  furniture_maker: [
+    ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed"],
+    ["11 wool > 1 emerald", "10 oak_log > 1 emerald"],
+    ["40 spruce_planks > 1 emerald", "40 birch_planks > 1 emerald", "10 spruce_log > 1 emerald", "10 birch_log > 1 emerald"],
+    ["3 emerald > 7 red_bed"],
+    ["40 dark_oak_planks > 1 emerald", "40 acacia_planks > 1 emerald", "10 dark_oak_log > 1 emerald"],
+  ],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -164,6 +173,7 @@ const PRODUCE = {
   unemployed: [],
   builder: [],
   explorer: [],
+  furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -274,6 +284,7 @@ function stockFor(prof, v) {
   for (const e of entries) if (e.n > 0) inv.add(a, e.id, e.n);
   if (prof === "explorer" && I.tent !== undefined) inv.add(a, I.tent, 1);   // pitches it when night falls far from a bed (js/explorer.js)
   if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
+  if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
   return a;
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.

@@ -251,6 +251,10 @@ const BLOCK_DEFS = [
   // tent (item `tent`): a 3 wide, 2 long, 2 high A-frame: 12 block states (6 floor, 6 above) x 4 facings, see tentDefs()
   ...tentDefs(),
   // ---- end explorer pack ----
+  // ---- furniture pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Furniture makers")
+  // carpentry bench: the furniture maker villager's jobsite (not vanilla): an oak workbench with a vice, a saw and a roll of wool
+  { name: "carpentry_bench", jobsite: "furniture_maker", tiles: { top: "carpentry_bench_top", side: "carpentry_bench_side", front: "carpentry_bench_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#9a7448" },
+  // ---- end furniture pack ----
 ];
 
 // ---- slabs/stairs pack runtime: shape placeholders get their base block's tiles / hardness / tool / colour ----

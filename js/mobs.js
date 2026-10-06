@@ -143,6 +143,8 @@ const VILLAGER_OUTFITS = {
   cartographer:  { monocle: true, sash: 0x2a4a9a, trim: 0x2a4a9a },
   // explorer (16th, not vanilla): khaki field robe, wide brim hat, leather strap sash; seeks maps from the cartographer (js/explorer.js)
   explorer:      { robe: 0x8c7a4c, trim: 0x4a3a20, hat: { kind: "brim", color: 0x4a3c22, color2: 0x5c4a2a }, sash: 0x3a2a14 },
+  // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
+  furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
   // builder (15th): orange hi-vis vest with reflective band and straps, brown overalls, yellow hard hat, a hammer in hand
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
@@ -1100,6 +1102,7 @@ function villagerAI(m, dt, out) {
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
+  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
@@ -1495,6 +1498,16 @@ function restockVillagers(dt) { // once per in-game day, never while someone is 
 }
 const VILLAGERS_PER_VILLAGE = 24;
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
+const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
+// A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
+// saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
+// "<village key>#<idx>" key) counts as new too: the save already holds that very villager.
+function freshVillage(key, slotKey) {
+  if (slotKey && villagerSaves.has(slotKey)) return true;
+  const pre = key + "#";
+  for (const k of villagerSaves.keys()) if (k.startsWith(pre)) return false;
+  return true;
+}
 function findStand(x, y, z, T) {
   x = Math.floor(x); z = Math.floor(z);
   const base = Math.floor(y);
@@ -1537,7 +1550,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "furniture_maker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -1561,6 +1574,10 @@ function villageRoster(rec) {
     nE = Math.min(nE, Math.max(0, VILLAGERS_PER_VILLAGE - ordered.length));
     for (let k = 0; k < nE; k++) ordered.push({ house: null, idx: 1100 + k, bed: null, prof: "explorer" });
   }
+  // furniture maker: a newly generated village with both a shepherd and a forester gets one with 80% probability (own seeded stream and key
+  // <village key>#1300, so nothing else shifts). It may take the village one past the cap of 24.
+  if (BF.furniture && ordered.some(sl => sl.prof === "shepherd") && ordered.some(sl => sl.prof === "forester") && freshVillage(rec.key, rec.key + "#1300")
+    && seededRand("furniture:" + rec.key)() < FURNITURE_CHANCE) ordered.push({ house: null, idx: 1300, bed: null, prof: "furniture_maker" });
   return ordered;
 }
 

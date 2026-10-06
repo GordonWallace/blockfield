@@ -19,6 +19,7 @@ const JOBSITE = {
   farmer: "composter", librarian: "lectern", cleric: "brewing_stand", armorer: "blast_furnace", weaponsmith: "grindstone",
   toolsmith: "smithing_table", butcher: "smoker", fisherman: "barrel", shepherd: "loom", fletcher: "fletching_table",
   mason: "stonecutter", leatherworker: "cauldron", cartographer: "cartography_table", builder: "drafting_table", explorer: "survey_table",
+  furniture_maker: "carpentry_bench",
 };
 const PROFESSION_OF = {};
 for (const p in JOBSITE) PROFESSION_OF[JOBSITE[p]] = p;
@@ -126,7 +127,7 @@ function planVillage(v) {
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   const n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
-  const special = needy.filter(sl => sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith"));
+  const special = needy.filter(sl => (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")) || sl.prof === "furniture_maker");   // the furniture maker always gets its bench
   const rest = needy.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
   const jobs = special.concat(rest).slice(0, n).map(sl => ({ prof: sl.prof, slot: sl.idx, house: sl.house }));
@@ -161,7 +162,8 @@ function planVillage(v) {
   let fi = 0;
   for (const job of jobs) {
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
-    if (job.prof === "builder" && plaza(job)) continue;
+    if ((job.prof === "builder" || job.prof === "furniture_maker") && plaza(job)) continue;
+    if (job.prof === "furniture_maker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;   // plaza full: beside a house
     const b = bOf(job.house) || (job.slot < 0 && homes.length ? homes[Math.floor(r() * homes.length)] : null);
     if (b && (inside(b, job) || beside(b, job))) continue;
     plaza(job);
@@ -447,6 +449,7 @@ function ai(m, dt, out) {
   if (J.mode === "off") {
     J.t -= dt;
     if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(1, 3);   // something to craft: go to the table soon
+    if (J.t > 3 && m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(1, 3);    // wool and boards in hand: go make beds
     if (J.t > 0) return false;
     if (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 40 || !BF.world.isLoaded(s.x, s.z)) { J.t = rnd(20, 40); return false; }
     if (!nav.takePlan()) { J.t = 0.3; return false; }
@@ -466,6 +469,7 @@ function ai(m, dt, out) {
   if (J.mode === "work") {
     J.t -= dt;
     if (m.profession === "cartographer" && BF.cartography) BF.cartography.work(m, J, dt);   // crafts compasses and maps at its table (js/cartography.js)
+    if (m.profession === "furniture_maker" && BF.furniture) BF.furniture.work(m, J, dt);   // makes beds at its carpentry bench (js/furniture.js)
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.45 };   // head down at the block
     if (J.t <= 0) { J.mode = "off"; J.t = rnd(40, 120); m.ai.mode = "idle"; m.ai.t = 1; return false; }
     return true;
