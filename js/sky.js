@@ -294,7 +294,17 @@ const sky = {
     scene.background.copy(horizon);
     scene.fog.color.copy(horizon);
     const d = ((BF.world && BF.world.viewDist) || 6) * BF.CS;
-    scene.fog.near = d * 0.5 * (1 - 0.45 * wr - 0.15 * wt); scene.fog.far = d * 0.95 * (1 - 0.25 * wr - 0.1 * wt);
+    // high above the ground (peaks, flying over the mile-high plains) the fog moves out by the height above the ground, so the land below stays visible
+    let above = 0;
+    if (cam && BF.world && BF.world.heightAt) {
+      let g = BF.world.heightAt(cam.position.x, cam.position.z);
+      if (g < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) { try { g = BF.worldgen.heightAt(Math.floor(cam.position.x), Math.floor(cam.position.z)); } catch (_) { g = BF.SEA; } }   // before the first world exists
+      let ref = Math.max(g, BF.SEA);
+      if (BF.H > 192) ref = Math.min(ref, cloudTarget - 80);   // the regional ground level (see updateCloudY): steep peaks drop away fast
+      above = Math.max(0, cam.position.y - ref - 24);
+    }
+    scene.fog.near = d * 0.5 * (1 - 0.45 * wr - 0.15 * wt) + above; scene.fog.far = d * 0.95 * (1 - 0.25 * wr - 0.1 * wt) + above;
+    if (cam && cam.far < scene.fog.far + 64) { cam.far = scene.fog.far + 64; cam.updateProjectionMatrix(); }
     sky.light = Math.min(1.35, sky.light + wf * 0.85); // lightning flash brightens terrain briefly
     if (BF.player && BF.player.headInWater) {
       // dense blue fog when the camera is underwater
