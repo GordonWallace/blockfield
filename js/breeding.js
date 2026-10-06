@@ -3,7 +3,7 @@
 // Two eligible adults (>= 7 bread-eq, awake, fed, off cooldown) of the same village that wander within 5 blocks
 // of each other roll 50% once per encounter; on success they stop, face each other, hearts rise, and a child
 // villager appears holding exactly 10 bread (5 bread-eq paid by each parent). The child eats 2 bread a day and
-// grows up when the bread is gone, then claims a jobsite (BF.jobs.claim, preferring its parents' professions).
+// grows up when the bread is gone, then walks to a free jobsite (BF.jobs seekAI, preferring its parents' professions).
 // Newborns are not part of the deterministic roster: they live in rec.bred and are saved under "<village key>#2000+k".
 (function () {
 "use strict";
@@ -369,17 +369,12 @@ function finishGrow(m) {
   m.growing = false; m.child = false;
   setChildLook(m, 1);
   m.profession = "unemployed"; m.variant = "unemployed"; m.trades = []; m.jobStocked = false;   // already wears the plain robe
-  const prefer = (m.parents || []).filter(p => p && p !== "child" && p !== "unemployed");
-  let prof = null;
-  if (BF.jobs && typeof BF.jobs.claim === "function") {
-    try { prof = BF.jobs.claim(m, { prefer }); } catch (err) { console.error(err); }
-  }
-  if (!prof && !m.profession) m.profession = "unemployed";   // stays unemployed; jobs.js keeps retrying
+  m.jobPrefer = (m.parents || []).filter(p => p && p !== "child" && p !== "unemployed");   // the grown child walks to a free jobsite itself (js/jobs.js seekAI), nearer ones of its parents' trades first
   const e = m.bredEntry;
   if (e) { e.child = false; e.prof = m.profession; e.grown = now(); }
   S.stats.grownUp++;
   for (let k = 0; k < 4; k++) heart(m.position.x, headTop(m), m.position.z);
-  console.info("[breeding] grew up", villageKeyOf(m), "->", m.profession, "prefer", prefer.join("/"));
+  console.info("[breeding] grew up", villageKeyOf(m), "->", m.profession, "prefer", m.jobPrefer.join("/"));
   if (BF.emit) BF.emit("villagerGrewUp", m);
 }
 function updateGrow(dt) {

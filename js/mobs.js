@@ -1091,7 +1091,7 @@ function villagerAI(m, dt, out) {
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
-  if (m.jobsite && BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite (js/jobs.js)
+  if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
   if (m.profession === "farmer" && V && ai.mode === "idle" && ai.t < 0.2 && Math.random() < 0.5 && BF.B.farmland != null) {
     for (let k = 0; k < 12; k++) {
