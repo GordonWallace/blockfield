@@ -28,6 +28,7 @@ const VALUE = {
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07,
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
+  compass: 3.2, blank_map_1: 3.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
@@ -122,10 +123,10 @@ const TRADES = {
     ["3 emerald > 18 leather"],
   ],
   cartographer: [
-    ["22 paper > 1 emerald", "1 emerald > 11 glass", "28 sugar_cane > 1 emerald"],
-    ["14 glass > 1 emerald", "1 emerald > 18 paper"],
-    ["5 emerald > 2 lantern", "1 lantern > 2 emerald"],
-    ["2 emerald > 22 glass", "2 emerald > 36 paper"],
+    ["22 paper > 1 emerald", "1 emerald > 11 glass", "28 sugar_cane > 1 emerald", "5 iron_ingot > 2 emerald"],
+    ["14 glass > 1 emerald", "1 emerald > 18 paper", "1 gold_ingot > 1 emerald"],
+    ["5 emerald > 2 lantern", "1 lantern > 2 emerald", "3 emerald > 1 compass", "2 compass > 5 emerald"],
+    ["2 emerald > 22 glass", "2 emerald > 36 paper", "4 emerald > 1 blank_map_1"],
     ["7 emerald > 3 lantern"],
   ],
   // The builder BUYS building materials from the player (rho 0.79-0.83 against VALUE) and sells a few finished goods it may hold.
@@ -245,6 +246,7 @@ function stockFor(prof, v) {
   if (prof === "builder" && BF.builder && BF.builder.startStock) return BF.builder.startStock(v);   // materials for the first house, see js/builder.js
   const a = inv.create(), I = BF.I, em = I.emerald;
   const entries = [];
+  const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -253,8 +255,8 @@ function stockFor(prof, v) {
     const { caps, wants } = profile(prof);
     const sells = new Map();
     table(prof).forEach(pool => pool.forEach(o => { if (o.sell.id !== em) sells.set(o.sell.id, Math.max(sells.get(o.sell.id) || 0, o.sell.n)); }));
-    for (const [id, cap] of caps) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
-    for (const [id, n] of wants) if (!caps.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
+    for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
@@ -267,6 +269,7 @@ function stockFor(prof, v) {
     big.n -= stackOf(big.id); total--;
   }
   for (const e of entries) if (e.n > 0) inv.add(a, e.id, e.n);
+  if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
   return a;
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.
@@ -341,7 +344,7 @@ function unpack(v, o) {
   if (Array.isArray(o.inv)) {
     const a = inv.create();
     o.inv.slice(0, SLOTS).forEach((s, i) => {
-      const id = s && typeof s.n === "string" ? BF.I[s.n] : undefined, c = s && Math.floor(s.c);
+      const id = s && typeof s.n === "string" ? (BF.resolveItem ? BF.resolveItem(s.n) : BF.I[s.n]) : undefined, c = s && Math.floor(s.c);
       if (id !== undefined && BF.items[id] && id !== 0 && c > 0) a[i] = { id, count: Math.min(c, stackOf(id)) };
     });
     v.inv = a;

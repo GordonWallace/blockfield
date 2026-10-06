@@ -471,6 +471,10 @@ const ITEM_DEFS = [
   { name: "bucket", stack: 16, color: "#c8c8c8" },
   { name: "water_bucket", stack: 1, color: "#3f76e4" },
   // ---- end village life items ----
+  // ---- cartography items (js/maps.js, js/cartography.js) ----
+  { name: "compass", color: "#a8a8b0" },
+  ...[1, 2, 3, 4, 5].map(n => ({ name: "blank_map_" + n, color: "#d8c890", mapSize: n, label: "Blank Map (" + 8 * Math.pow(2, n - 1) + "x" + 8 * Math.pow(2, n - 1) + " chunks)" })),
+  // ---- end cartography items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -546,6 +550,18 @@ BF.dirIndex = (dx, dz) => Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz >
 BF.doorId = (f, upper, open) => B["oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
 BF.ladderId = f => B["ladder_" + "nesw"[f & 3]]; // ladder facing f (away from its wall)
 BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3]];
+// Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
+// Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.
+let dynItem = ITEM_BASE + 0x10000;
+BF.resolveItem = name => {
+  if (I[name] !== undefined) return I[name];
+  const m = /^filled_map_([1-5])_(-?\d+)_(-?\d+)$/.exec(name || "");
+  if (!m) return undefined;
+  const size = +m[1], zx = +m[2], zz = +m[3], side = 8 * Math.pow(2, size - 1), id = dynItem++;
+  items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "filled_map", map: { size, zx, zz }, label: "Map (" + side + "x" + side + " chunks)" };
+  I[name] = id;
+  return id;
+};
 // Items dropped when a block breaks: its `drop` plus `extraDrops` [[itemName, min, max, chance], ...].
 // Returns [{id, count}]. Mature crops' extra drops replace nothing: wheat gives wheat + 1-3 seeds.
 BF.rollDrops = function (blockId) {
@@ -562,7 +578,7 @@ BF.rollDrops = function (blockId) {
   }
   return out;
 };
-BF.itemName = id => (items[id] ? items[id].name.replace(/_item$/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "?");
+BF.itemName = id => (items[id] ? items[id].label || items[id].name.replace(/_item$/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "?");
 // ---- wood/colour pack runtime ----
 for (const b of blocks) if (typeof b.hardensTo === "string") b.hardensTo = B[b.hardensTo];
 // Concrete powder turns into concrete when water (source or flowing) touches it from the sides or above.
