@@ -58,7 +58,7 @@ BF.newWorld = function (seed, opts) {
 // ---------- debug overlay (F3) ----------
 const dbg = document.getElementById("debug");
 let showDebug = false;
-addEventListener("keydown", e => { if (e.code === "F3") { e.preventDefault(); showDebug = !showDebug; dbg.hidden = !showDebug; } });
+addEventListener("keydown", e => { if (e.code === "F3") { e.preventDefault(); showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; } });
 let frames = 0, fpsT = performance.now(), fps = 0;
 function updateDebug(now) {
   frames++;
@@ -72,7 +72,7 @@ function updateDebug(now) {
     `Chunk ${Math.floor(p.x / BF.CS)}, ${Math.floor(p.z / BF.CS)}  Biome ${biome ? biome.name : "?"}\n` +
     `Chunks ${BF.world.meshedCount()} drawn / ${BF.world.chunks.size} loaded, ${BF.world.queueLength} queued\n` +
     `Mobs ${BF.mobs.list.length}  Seed ${BF.state.seed}  Gen ${BF.state.gen} Biomes x${BF.state.biomeScale}  ${BF.villageSim.status()}\n` +
-    `Time ${((BF.sky.time * 24 + 6) % 24).toFixed(1)}h  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
+    `${BF.vlog.stamp(BF.sky.day + BF.sky.time)}  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
     (BF.weather && BF.weather.debugText ? "\n" + BF.weather.debugText() : "");
 }
 
@@ -99,6 +99,7 @@ function frame(now) {
   if (BF.save && !BF.state.paused) BF.save.update(dt);
   renderer.render(scene, camera);
   updateDebug(now);
+  BF.vlog.update(dt, showDebug);
 }
 
 // ---------- boot ----------
@@ -106,6 +107,7 @@ BF.sky.init(scene);
 BF.world.init(scene);
 BF.mobs.init(scene);
 BF.villageSim.init();
+BF.vlog.init();
 BF.drops.init(scene);
 BF.player.init();
 BF.inventory.init();

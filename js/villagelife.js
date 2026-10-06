@@ -984,6 +984,7 @@ function doFoodDeal(m, deal) {
   }
   if (done) {
     const paid = deal.offer ? deal.offer.buy[0].n * done : done;
+    if (BF.vlog) BF.vlog.trade(m, v2, deal.offer || ("gave " + paid + " Emerald, got " + n + " " + BF.itemName(item)), done);
     log("buyFood", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: n + " " + BF.items[item].name, paid: paid + " emerald" });
     if (BF.emit) BF.emit("villagerFoodTrade", m, v2, item, n);
   }

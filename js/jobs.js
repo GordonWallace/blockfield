@@ -294,7 +294,7 @@ function take(m, s, prof) {
   if (m.jobsite) release(m, { keepProfession: true });
   m.jobsite = { x: s.x, y: s.y, z: s.z };
   claims.set(pk(s.x, s.y, s.z), { key: vkey(m), mob: m });
-  if (prof && prof !== m.profession) setProfession(m, prof);
+  if (prof && prof !== m.profession) { const was = m.profession; setProfession(m, prof); if (BF.vlog) BF.vlog.profession(m, was, m.profession); }
   if (m.job) { m.job.mode = "off"; m.job.t = rnd(3, 10); }
 }
 // Picks an unclaimed jobsite near the villager's village and takes its profession. opts: {radius = 48, prefer: [professions] (3x weight each)}.

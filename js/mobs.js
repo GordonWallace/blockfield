@@ -569,10 +569,12 @@ function updatePuffs(dt) {
 }
 
 // ---------- damage ----------
-function damageMob(m, amount, knockDir, byPlayer) {
+// `cause` names what did it for the village log (js/villagelog.js), e.g. "a Zombie"; the player is implied by byPlayer.
+function damageMob(m, amount, knockDir, byPlayer, cause) {
   if (!m || m.dead || m.removed || m.invuln > 0) return false;
   if (m.sleeping) wake(m);
   m.hp -= amount;
+  m.lastHurt = byPlayer ? "the player" : (cause || "unknown causes");
   m.invuln = 0.45;
   m.hurtT = 0.3;
   if (BF.emit) BF.emit("mobHurt", m, amount);
@@ -648,7 +650,7 @@ function explode(m) {
   for (const o of list.slice()) {
     if (o === m || o.dead) continue;
     const d = o.position.distanceTo(c);
-    if (d < 6) damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false);
+    if (d < 6) damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false, "an explosion");
   }
   puff(c, 26, 1.6, false, 4);
   puff(c, 10, 1.0, true, 3);
@@ -847,8 +849,9 @@ function chaseAndHit(m, o, dt, out, dmg, cd) {
     ai.attackCd = cd;
     ai.swingT = 0.35;
     const k = new THREE.Vector3(nx, 0, nz);
-    if (m.def.golem) { o.invuln = 0; damageMob(o, dmg, k, false); if (!o.dead) o.vel.y = 8; }
-    else damageMob(o, dmg, k, false);
+    const by = "a" + (/^[aeiou]/i.test(m.type) ? "n " : " ") + m.type.replace(/_/g, " ");
+    if (m.def.golem) { o.invuln = 0; damageMob(o, dmg, k, false, by); if (!o.dead) o.vel.y = 8; }
+    else damageMob(o, dmg, k, false, by);
   }
   return true;
 }
@@ -894,7 +897,7 @@ const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
 function bedOK(bed) {
   const k = blockAt(bed.x, bed.y, bed.z);
-  if (bed.tent) return !!(k.tent && k.tent.r === 0 && k.tent.l === 1 && k.tent.f === bed.f);   // an explorer's tent: its foot centre cell (js/tents.js)
+  if (bed.tent) return !!(k.tent && k.tent.r === 0 && k.tent.l === 1 && !k.tent.up && k.tent.f === bed.f);   // an explorer's tent: its foot centre cell (js/tents.js)
   const b = k.bed; return !!(b && !b.head && b.f === bed.f);
 }
 // A cell a villager can stand in: solid floor (not a bed/door/fence top), feet and head free or a door it can open.
@@ -1228,7 +1231,7 @@ function updateMob(m, dt) {
   if (m.onGround || m.inWater || climbing) {
     if (m.onGround && !wasGround && !T.slowFall && !m.inWater) {
       const fall = m.fallStart - m.position.y;
-      if (fall > 3.5) { m.invuln = 0; damageMob(m, Math.floor(fall - 3), null, false); }
+      if (fall > 3.5) { m.invuln = 0; damageMob(m, Math.floor(fall - 3), null, false, "a fall"); }
     }
     m.fallStart = m.position.y;
   } else if (m.position.y > m.fallStart) m.fallStart = m.position.y;
@@ -1241,7 +1244,7 @@ function updateMob(m, dt) {
         !(BF.weather && BF.weather.rainingAt && BF.weather.rainingAt(m.position.x, m.position.y + m.height, m.position.z))) { // rain/snow shields undead
       burning = true;
       ai.burnT += dt;
-      if (ai.burnT >= 1) { ai.burnT = 0; m.invuln = 0; damageMob(m, 1, null, false); }
+      if (ai.burnT >= 1) { ai.burnT = 0; m.invuln = 0; damageMob(m, 1, null, false, "sunlight"); }
     }
   }
   updateFire(m, burning && !m.dead, dt);
@@ -1713,6 +1716,7 @@ BF.mobs = {
   },
   // Player attack. Returns true if the hit landed (false while the mob is briefly invulnerable).
   hit(mob, damage, knockDir) { return damageMob(mob, damage, knockDir, true); },
+  hurt(mob, damage, cause) { mob.invuln = 0; return damageMob(mob, damage, null, false, cause); },   // non-player damage with a cause (tests, commands)
   // /kill (commands.js): kills outright, no knockback, no golem anger; drops as a normal death. Returns false if already dead.
   kill(mob) { if (!mob || mob.dead || mob.removed) return false; kill(mob, true); return true; },
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
