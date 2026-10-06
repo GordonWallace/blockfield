@@ -2,6 +2,7 @@
 // Every village keeps a timestamped log of births, beds placed (and by whom), trades (villager <-> villager and
 // villager <-> player) and professions gained, capped at CAP entries (oldest dropped) and saved with the world.
 // Villager names are generated deterministically from the villager's persistence key, so they need no saving.
+// Explorers' tents are logged with the beds (the tally still counts only real beds).
 // API: BF.vlog = { nameOf(m), log(rec, kind, text), trade(buyer, seller, offerOrText), bed(m, x, y, z), profession(m, from, to),
 //                  entries(key), villageAt(x, z) -> rec|null, tally(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }
 (() => {
@@ -64,9 +65,9 @@ function trade(buyer, seller, what, times) {
   const a = buyer === "player" ? "Player" : who(buyer);
   log(rec, "trade", a + " traded with " + who(seller) + ": " + text);
 }
-function bed(m, x, y, z) {
+function bed(m, x, y, z, what) {
   const rec = (m && m.village) || villageAt(x, z);
-  if (rec) log(rec, "bed", (m ? who(m) : "Player") + " placed a bed at " + x + ", " + y + ", " + z);
+  if (rec) log(rec, "bed", (m ? who(m) : "Player") + " placed a " + (what || "bed") + " at " + x + ", " + y + ", " + z);
 }
 function profession(m, from, to) {
   if (!m || !m.village || !to || to === "unemployed" || to === "nitwit" || to === "child") return;
@@ -148,13 +149,15 @@ function hook() {
   BF.on("villagerTrade", (v, o) => trade("player", v, o));
   BF.on("blockPlaced", (x, y, z, id) => {      // beds placed by the player (villagers log their own: js/builder.js)
     const b = BF.blocks[id];
-    if (b && b.bed && !b.bed.head) bed(null, x, y, z);
+    if (b && b.bed && !b.bed.head) bed(BF.vlog.actor, x, y, z);
+    else if (b && b.tent && b.tent.r === 0 && b.tent.l === 1) bed(BF.vlog.actor, x, y, z, "tent");   // its foot centre
   });
 }
 
 function reset() { logs.clear(); for (const [m, l] of [...labels]) dropLabel(m, l); }
 
 BF.vlog = {
+  actor: null,      // set around block placements made by a villager that goes through blockPlaced (explorer tents)
   CAP, nameOf, log, trade, bed, profession, entries, villageAt, tally, stamp,
   serialize() { const o = {}; for (const [k, a] of logs) if (a.length) o[k] = a; return o; },
   deserialize(o) {
@@ -171,9 +174,9 @@ BF.vlog = {
     hook();
     updateLabels(on);
     if (!panelEl) panelEl = document.getElementById("vlog");
-    if (!on) { if (panelEl) panelEl.hidden = true; return; }
-    panelT -= dt;
-    if (panelT <= 0) { panelT = 0.5; renderPanel(); }
+    if (!on) { if (panelEl) panelEl.hidden = true; panelT = 0; return; }
+    const t = performance.now();                  // wall clock: the game's dt is clamped at low frame rates
+    if (t - panelT > 500) { panelT = t; renderPanel(); }
   },
 };
 })();

@@ -594,3 +594,9 @@ Villagers only exist while their chunks are loaded. `BF.villageSim` keeps the te
   young crops on farmland in its chunks mature with the chance they would have had (`1 - exp(-days * 600 / 120)`). Meals, trade restocks and breeding already count game days.
   Not caught up: builder progress, farmer harvests, explorer trips.
 - API: `update(px, pz) -> changed`, `isActive(villageKey)`, `status()`, `exportSeen(out)` / `importSeen(o)`, `reset()`, `init()`. Debug HUD (F3) shows the simulated village and kept chunk counts.
+
+## Village logs and villager names (js/villagelog.js, loaded after signs.js)
+`BF.vlog`: every village keeps a timestamped action log (births, beds and tents placed and by whom, trades between villagers and with the player, professions gained), capped at `CAP` (300) entries, oldest dropped. Entries are `[t, kind, text]` with `t` = `sky.day + sky.time`, kind `birth|bed|trade|job`. Saved in the world snapshot as `vlog` (old saves have none).
+- `nameOf(m)`: a deterministic "First Last" from the world seed and the villager's persistence key (`village.key#slot.idx`), so names need no saving.
+- Writers: `log(rec, kind, text)`, `trade(buyer|"player", seller, offer|text, times)`, `bed(m|null, x, y, z, what)`, `profession(m, from, to)`. Hooked in: `villagerBorn`, `villagerTrade`, `blockPlaced` (beds, tents), builder placements, builder/cartography/food/explorer villager trades, `jobs.take` (professions gained at a jobsite). Set `BF.vlog.actor = m` around a villager's own `blockPlaced` emits (explorer tents).
+- F3 shows the log panel (bottom left) while the player is inside a village box (+8 blocks), with the villager and bed tally from `BF.breeding`, and a name + profession tag over every villager within 40 blocks.
