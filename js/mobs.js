@@ -1553,13 +1553,13 @@ function updateVillages(dt) {
   if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return;
   const pp = player().position;
   let vs;
-  try { vs = wg.villagesNear(pp.x, pp.z, 96) || []; } catch (e) { return; }
+  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 : 96) || []; } catch (e) { return; }
   for (const v of vs) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
     if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: (v.buildings || []).length }; villages.set(key, rec); }
-    if (Math.hypot(v.x - pp.x, v.z - pp.z) > 80) continue;
+    if (Math.hypot(v.x - pp.x, v.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
     if (!BF.world.isLoaded(v.x, v.z)) continue;
     const loadedHouse = h => BF.world.isLoaded(h.x, h.z) && BF.world.isLoaded(h.x + (h.w || 1), h.z + (h.d || 1));
     rec.members = rec.members.filter(m => !m.removed);
@@ -1602,7 +1602,9 @@ function despawn(dt) {
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
     const d = m.position.distanceTo(pp);
-    if (d > DESPAWN_DIST || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }
+    const simmed = !!(m.village && BF.villageSim && BF.villageSim.isActive(m.village.key));   // villagers of a far simulated village stay
+    if ((d > DESPAWN_DIST && !simmed) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }
+    m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
     if (m.hostile && !m.dead && d > 48 && m.age > 20 && Math.random() < dt * 0.03) removeMob(m);
   }
 }
@@ -1707,11 +1709,13 @@ BF.mobs = {
     for (const m of list) if (m.type === "villager" && !m.dead && m.inv) { const k = villagerKey(m); if (k) out[k] = BF.trades.pack(m); }
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
+    if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
     return out;
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:") villagerSaves.set(k, o[k]);
+    if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
@@ -1780,6 +1784,7 @@ BF.mobs = {
     if (BF.builder) BF.builder.reset();
     if (BF.villageLife) BF.villageLife.reset();
     if (BF.jobs) BF.jobs.reset();
+    if (BF.villageSim) BF.villageSim.reset();
   },
 };
 })();

@@ -114,7 +114,8 @@ world.reset = function () {
   world._dirty.clear();
   fluidQ.clear();
   growing.clear();
-  lastCenter = null; genList = []; meshList = [];   // force a fresh load plan even if the spawn chunk is unchanged
+  lastCenter = null; genList = []; meshList = []; simList = [];
+  if (BF.villageSim) BF.villageSim.reset();   // force a fresh load plan even if the spawn chunk is unchanged
 };
 
 // ---------- block access ----------
@@ -260,7 +261,7 @@ function neighboursReady(cx, cz) {
   return true;
 }
 
-let lastCenter = null, genList = [], meshList = [];
+let lastCenter = null, genList = [], meshList = [], simList = [];
 let fwdX = 0, fwdZ = -1, lastPlanT = 0;
 function plan(pcx, pcz) {
   const R = world.viewDist;
@@ -286,6 +287,15 @@ function plan(pcx, pcz) {
   }
   genList.sort((a, b) => a[2] - b[2]);
   meshList.sort((a, b) => a[2] - b[2]);
+  // villages simulated beyond view distance (js/villagesim.js): their chunks stay loaded as data, never meshed
+  simList = [];
+  if (BF.villageSim) for (const k of BF.villageSim.keepKeys) {
+    keep.add(k);
+    if (world.chunks.has(k)) continue;
+    const [cx, cz] = k.split(",").map(Number);
+    simList.push([cx, cz, (cx - pcx) * (cx - pcx) + (cz - pcz) * (cz - pcz)]);
+  }
+  simList.sort((a, b) => a[2] - b[2]);
   for (const k of [...world.chunks.keys()]) {
     if (keep.has(k)) continue;
     // hysteresis: only unload chunks clearly out of range
@@ -298,6 +308,7 @@ function plan(pcx, pcz) {
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
+  if (BF.villageSim && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
   const center = pcx + "," + pcz + "," + world.viewDist;
   // re-plan on chunk change, and periodically while loading so turning re-prioritises
   if (center !== lastCenter || (world.queueLength > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
@@ -323,7 +334,14 @@ world.update = function (px, pz, budgetMs = 8) {
     while (gi < genList.length && world.chunks.has(ckey(genList[gi][0], genList[gi][1]))) genList.splice(gi, 1);
     const meshCand = mi < meshList.length ? meshList[mi] : null;
     const genCand = gi < genList.length ? genList[gi] : null;
-    if (!meshCand && !genCand) break;
+    if (!meshCand && !genCand) {
+      // everything in view is ready: spend the rest of the budget on data-only chunks of far villages
+      while (simList.length && world.chunks.has(ckey(simList[0][0], simList[0][1]))) simList.shift();
+      if (!simList.length) break;
+      const [sx, sz] = simList.shift();
+      createChunk(sx, sz);
+      continue;
+    }
     if (meshCand && (!genCand || meshCand[2] <= genCand[2] + 2)) {
       buildMesh(world.chunks.get(ckey(meshCand[0], meshCand[1])));
       meshList.splice(mi, 1);
