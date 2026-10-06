@@ -304,11 +304,11 @@ const sky = {
     // Cover: clear spells to scattered to broken over a day or two; rain forces overcast. Height: base + a rise
     // (never below the base) that is mostly small and sometimes large, and rain pulls the cloud deck back down.
     const T = sky.day + sky.time, cs = ((BF.state && BF.state.seed) | 0);
-    const wanted = smooth(0.3, 0.72, vnoise(T / 1.4, cs));               // 0 = clear sky
+    const wanted = smooth(0.5, 0.88, vnoise(T / 1.4, cs));               // 0 = clear sky
     const cover = wanted + (1 - wanted) * wr;
     const rise = smooth(0.4, 0.9, vnoise(T / 2.1 + 31.7, cs + 1)) * CLOUD_RISE * (1 - 0.8 * wr);
     sky.cloudCover = cover; sky.cloudHeight = cloudY = sky.cloudBase + rise;
-    clouds.userData.setCoverage(cover < 0.03 ? 1 : 0.96 - 0.62 * cover);
+    clouds.userData.setCoverage(cover < 0.06 ? 1 : 0.96 - 0.62 * cover);
     clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift, cloudY);
     const cu = clouds.material.uniforms;
     cu.cam.value.set(cam.position.x, cam.position.z);

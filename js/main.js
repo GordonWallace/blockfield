@@ -74,7 +74,8 @@ function updateDebug(now) {
     `Chunks ${BF.world.meshedCount()} drawn / ${BF.world.chunks.size} loaded, ${BF.world.queueLength} queued\n` +
     `Mobs ${BF.mobs.list.length}  Seed ${BF.state.seed}  Gen ${BF.state.gen} Biomes x${BF.state.biomeScale}  ${BF.villageSim.status()}\n` +
     `${BF.vlog.stamp(BF.sky.day + BF.sky.time)}  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
-    (BF.weather && BF.weather.debugText ? "\n" + BF.weather.debugText() : "");
+    (BF.weather && BF.weather.debugText ? "\n" + BF.weather.debugText() : "") +
+    `\nClouds ${BF.sky.cloudCover < 0.06 ? "clear" : Math.round(BF.sky.cloudCover * 100) + "%"} at y${Math.round(BF.sky.cloudHeight)}`;
 }
 
 // ---------- loop ----------
