@@ -70,7 +70,7 @@ function updateDebug(now) {
     `Chunk ${Math.floor(p.x / BF.CS)}, ${Math.floor(p.z / BF.CS)}  Biome ${biome ? biome.name : "?"}\n` +
     `Chunks ${BF.world.meshedCount()} drawn / ${BF.world.chunks.size} loaded, ${BF.world.queueLength} queued\n` +
     `Mobs ${BF.mobs.list.length}  Seed ${BF.state.seed}  ${BF.villageSim.status()}\n` +
-    `Time ${((BF.sky.time * 24 + 6) % 24).toFixed(1)}h  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
+    `${BF.vlog.stamp(BF.sky.day + BF.sky.time)}  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
     (BF.weather && BF.weather.debugText ? "\n" + BF.weather.debugText() : "");
 }
 
