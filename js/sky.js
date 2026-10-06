@@ -209,7 +209,7 @@ const sky = {
   time: 0.05,
   light: 1,
   day: 0,
-  dayLength: 600, // seconds per full day
+  dayLength: 1200, // seconds per full day (20 min; was 600 until 2026-10-06)
 
   init(sceneRef) {
     scene = sceneRef;
