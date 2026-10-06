@@ -9,9 +9,11 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const SPILL_R = 6, RAD = 2, JIT = 0.34, SUPER = 8, CELL = 192, MARG = 74;
+const SPILL_R = 6, RAD = 2, JIT = 0.34, SUPER = 8, CELL = 192;
 // Per-world scale constants (init opts override; the defaults are generator v2's). Generator v3 stretches heights to 0..~1000.
 let NS = 96, NMAX = 80, REACH = 34, HS = 1, W0 = 1.6, W1 = 4.6, WLO = 2, WHI = 95, SLO = 15, SHI = 85, RANGE = 16;
+// MARG: how far around a segment its cells list it; must cover REACH + half width + the meander displacement (~29)
+let MARG = 74;
 const smooth = (a, b, x) => { let t = (x - a) / (b - a); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 
 let noise, macro, SEA = 48, density = 0.03;
@@ -21,7 +23,7 @@ function init(n, macroFn, opts) {
   const o = opts || {};
   noise = n; macro = macroFn; SEA = o.sea != null ? o.sea : (BF.SEA != null ? BF.SEA : 48); density = o.density != null ? o.density : 0.03;
   NS = o.ns || 96; NMAX = o.nmax || 80; REACH = o.reach || 34; W0 = o.w0 != null ? o.w0 : 1.6; W1 = o.w1 != null ? o.w1 : 4.6;
-  WLO = o.wlo != null ? o.wlo : 2; WHI = o.whi || 95; SLO = o.slo != null ? o.slo : 15; SHI = o.shi || 85; HS = o.hs || 1;
+  WLO = o.wlo != null ? o.wlo : 2; WHI = o.whi || 95; SLO = o.slo != null ? o.slo : 15; SHI = o.shi || 85; HS = o.hs || 1; MARG = o.marg || 74;
   RANGE = Math.ceil(NMAX * 1.42 / SUPER) + 1;
   BF.rivers.REACH = REACH;
   nodes = new Map(); edges = new Map(); cells = new Map(); traced = new Set(); ensured = new Set(); tmp = { p: 0, c: 0 };
