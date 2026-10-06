@@ -58,7 +58,7 @@ BF.newWorld = function (seed, opts) {
 // ---------- debug overlay (F3) ----------
 const dbg = document.getElementById("debug");
 let showDebug = false;
-addEventListener("keydown", e => { if (e.code === "F3") { e.preventDefault(); showDebug = !showDebug; dbg.hidden = !showDebug; } });
+addEventListener("keydown", e => { if (e.code === "F3") { e.preventDefault(); showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; } });
 let frames = 0, fpsT = performance.now(), fps = 0;
 function updateDebug(now) {
   frames++;
@@ -99,6 +99,7 @@ function frame(now) {
   if (BF.save && !BF.state.paused) BF.save.update(dt);
   renderer.render(scene, camera);
   updateDebug(now);
+  BF.vlog.update(dt, showDebug);
 }
 
 // ---------- boot ----------
@@ -106,6 +107,7 @@ BF.sky.init(scene);
 BF.world.init(scene);
 BF.mobs.init(scene);
 BF.villageSim.init();
+BF.vlog.init();
 BF.drops.init(scene);
 BF.player.init();
 BF.inventory.init();

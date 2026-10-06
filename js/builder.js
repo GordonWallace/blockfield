@@ -519,6 +519,7 @@ function placeCell(m, bs, e) {
   if (c.cost) T.remove(m.inv, use === c.id ? c.item : use, 1);          // exactly one item per block
   if (isWater) { T.remove(m.inv, BF.I.water_bucket, 1); T.add(m.inv, BF.I.bucket, 1); }   // the bucket is empty after the one block
   let step = 1;
+  if (BF.vlog && BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) BF.vlog.bed(m, c.x, c.y, c.z);
   if (c.pair) {                                             // door upper half / bed head go in with the lower half / foot
     const c2 = cellOf(e, e.prog + 1);
     w.setBlock(c2.x, c2.y, c2.z, c2.id);
@@ -690,6 +691,7 @@ function doDeal(m, bs, deal) {
     T.addXp(v2, o);
     done++;
   }
+  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
   if (done) logEvent("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   else bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id] = dayNow() + 0.05;
   return done;
