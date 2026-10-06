@@ -788,10 +788,10 @@ function fluidTick() {
 }
 
 // ---------- crop growth ----------
-// Young crops (blocks with growsInto) mature after ~2 minutes on average, only on farmland.
+// Young crops (blocks with growsInto) mature after ~4 minutes (1/5 game day) on average, only on farmland.
 const growing = new Set();
 let growLast = 0;
-const GROW_CHANCE_PER_S = 1 / 120;
+const GROW_CHANCE_PER_S = 1 / 240;   // ~4 minutes (a fifth of the 1200 s game day) on average
 function growTick() {
   const now = BF.simNow();
   if (now - growLast < 1) return;

@@ -84,7 +84,7 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const p = BF.player.position;
-  BF.world.update(p.x, p.z, BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder
+  BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   const W = BF.warp;
   if (!BF.state.paused) {
     // Fast-forward (F, js/timewarp.js): run the whole simulation W.speed times per frame with the normal step, so

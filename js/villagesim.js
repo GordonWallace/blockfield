@@ -12,7 +12,7 @@ const DROP = 216;         // ...and keeps being simulated until it is this far (
 const MAX = 4;            // nearest N villages at a time
 const MARGIN = 16;        // blocks of terrain kept beyond the village bounds (farms, paths)
 const MAX_SPAN = 12;      // chunks per axis, cap for oversized footprints
-const CROP_SECS_PER_DAY = 600, GROW_RATE = 1 / 120;   // matches sky.dayLength and world.js GROW_CHANCE_PER_S
+const CROP_SECS_PER_DAY = 1200, GROW_RATE = 1 / 240;   // matches sky.dayLength and world.js GROW_CHANCE_PER_S
 
 const active = new Map();        // village key -> { v, keys: [chunk keys] }
 const seen = new Map();          // village key -> game day it was last simulated
