@@ -10,7 +10,7 @@ const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328");
 const DUSK_HOR = C("#f08a50"), DUSK_GLOW = C("#ff7a3c"), DUSK_PINK = C("#d86a86");
 const CLOUD_DAY = C("#ffffff"), CLOUD_NIGHT = C("#1c2234"), CLOUD_DUSK = C("#f6b49a");
 
-const SKY_R = 480, SUN_D = 400, CLOUD_Y = 116, CLOUD_H = 5, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
+const SKY_R = 480, SUN_D = 400, CLOUD_Y = BF.H + 4, CLOUD_H = 5, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 let root, celestial, dome, sun, moon, stars, clouds, scene;

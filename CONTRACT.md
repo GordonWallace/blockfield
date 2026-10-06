@@ -17,7 +17,7 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
 
 ## Core (owned by integrator)
 
-- `BF.CS = 16`, `BF.H = 128`, `BF.SEA = 48` (water fills y <= SEA where terrain is lower).
+- `BF.CS = 16`, `BF.H = 192`, `BF.SEA = 48` (water fills y <= SEA where terrain is lower).
 - `BF.vIdx(x, y, z)` -> index into a chunk's `Uint16Array` voxel array, local coords, `(y*CS + z)*CS + x`.
 - `BF.blocks[id]`, `BF.items[id]`, `BF.B.name -> blockId`, `BF.I.name -> itemId` (blocks.js). Block ids are 0..`BF.MAX_BLOCK` (4095;
   voxels are `Uint16Array`; ids 0..255 are the original blocks and are never renumbered, saves store block ids in edit lists),
@@ -74,6 +74,22 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
   depend on other chunks being loaded: structures (trees) that cross chunk borders are placed by iterating candidate
   origins in a margin around the chunk and writing only voxels inside it.
 - `heightAt` is the deterministic surface height (used for spawning before chunks load). y=0 is bedrock.
+- `init(noise, { gen, biomeScale })`. `gen` is the generator version of the world (`BF.state.gen`): 1 = the original generator (kept bit-for-bit, so
+  worlds saved before v2 have no seams), 2 = generator v2. `biomeScale` (>= 1, v2 only) is the relative biome size from the world creation slider.
+  `waterLevelAt(x, z)` is the water surface of a column (sea level, or a river's surface above it); `heightAt` is the floor under that water.
+- **Generator v2** (js/worldgen.js `climate2`, js/rivers.js; saves store `gen` and `biomeScale`, old saves have neither = gen 1):
+  - Continents: continentalness (5 octaves, ~14000-block wavelength, grows 12% per biome-scale step) is contrasted and biased so land and open ocean
+    come in blobs thousands of blocks across; a landmass is forced around the origin so spawn is on land. Climate zones (temperature, humidity) and the
+    weirdness/erosion fields scale with `biomeScale` (1 = the old size); the border dither widens with it, so big biomes blend softly.
+  - Elevation: ocean basins ~y18-45, shelf and coast ~48, lowlands ~52-70, plus broad "uplands" (up to +82 on continental interiors, gentler within ~1500 blocks of
+    spawn) and ridged-noise mountains (up to +110 on top), soft-clamped to H-8 = 184. Temperature falls with height (biome bands shift cold above ~y70-175),
+    mountain biome thresholds are +35 vs v1 (slopes y115, peaks y135).
+  - Rivers (js/rivers.js `BF.rivers`): a jittered 96-block node lattice with a smooth macro potential (terrain without local hills + a bias toward the
+    ocean); each node flows to its steepest lower neighbour (within 2 nodes), basins spill over their lowest rim. Sources (inland, likelier when high) whose
+    chain reaches the sea within 80 links become rivers; the water surface never rises downstream (it falls in 1-block steps), width
+    grows toward the sea. Everything is a pure function of the seed (sources in reach of a query are traced on demand and cached). `climate2` carves the
+    channel and a flat floodplain around it into the terrain; river columns report `C.wl` > sea level and `C.rv`.
+  - Caves: the coarse cave grid now covers y up to 200 (`GY_MAX`).
 
 ## Stone / ore / mineral pack (Tier 1, js/textures-stone.js, js/recipes-stone.js)
 
@@ -157,8 +173,7 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 - time in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight. `light` is the block brightness multiplier
   (main passes it to `world.setDaylight`). Owns scene.background, scene.fog (keep fog distances tied to
   `BF.world.viewDist * BF.CS`).
-- Clouds are volumetric slabs ("fancy" clouds): `CLOUD_Y = 116` (slab bottom; terrain is hard-capped at H-10 = 118, so only the rare
-  tallest peaks, about 0.4% of columns >= 116, poke in), `CLOUD_H = 5`, cell 12x12, periodic 64x64 deterministic cell mask,
+- Clouds are volumetric slabs ("fancy" clouds): `CLOUD_Y = BF.H + 4` (slab bottom, above the highest possible terrain), `CLOUD_H = 5`, cell 12x12, periodic 64x64 deterministic cell mask,
   drifting in -x at 1.2 blocks/s. One BufferGeometry (~6.5k triangles, exposed faces only; shade top 1 / z-sides 0.9 / x-sides 0.8 /
   bottom 0.7) over a 56x56 cell window, rebuilt (preallocated buffers) only when the camera or drift crosses a cell boundary,
   otherwise just translated. Single-sided, depthWrite off, renderOrder 5, alpha 0.9 with distance fade to the horizon colour at CLOUD_R=320.
@@ -316,7 +331,7 @@ The 15th profession `builder` (orange hi-vis vest with reflective band and strap
   in caves or under trees. Rain = camera-facing vertical streaks, snow = drifting round flakes; count scales with intensity; hidden underwater.
   The texture is rebuilt when the camera crosses a block, on block place/break, chunk load and every 1.5 s (~0.1-0.4 ms); steady update ~0.01 ms.
 - Lightning: in thunderstorms every 10-40 s at a random wet column 6-64 blocks from the player (dry biomes never struck): additive camera-facing ribbon bolt
-  (cloud height 118 -> surface, jagged, up to 3 branches, 0.32 s flicker), flash, `lightning` event (audio.js plays thunder). 5 damage to the player/mobs within 2.5 blocks; no fire.
+  (cloud height H+4 -> surface, jagged, up to 3 branches, 0.32 s flicker), flash, `lightning` event (audio.js plays thunder). 5 damage to the player/mobs within 2.5 blocks; no fire.
 - Gameplay: undead do not burn where `rainingAt` (rain or snow falling on an open column) (mobs.js); crops grow 1.5x faster while raining (world.js growTick).
 - F3: line `Weather <type> <intensity> [th <thunder>] (<s> left, <rain|snow|dry> here) <ms>`.
 

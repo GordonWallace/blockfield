@@ -33,16 +33,18 @@ resize();
 // Starts (or restarts) a world from a seed and places the player on solid ground near the origin.
 BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
+  BF.state.gen = opts && opts.gen ? opts.gen | 0 : 2;                       // worldgen version: 1 = classic, 2 = continents (default)
+  BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 only)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
   BF.world.reset();
-  BF.worldgen.init(BF.noise);
+  BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale });
   // pick a dry spawn column near the origin
   let sx = 8, sz = 8;
   for (let r = 0; r < 400; r += 8) {
     const a = r * 0.7, x = Math.round(Math.cos(a) * r) + 8, z = Math.round(Math.sin(a) * r) + 8;
-    if (BF.worldgen.heightAt(x, z) > BF.SEA + 1) { sx = x; sz = z; break; }
+    if (BF.worldgen.heightAt(x, z) > BF.SEA + 1 && BF.worldgen.heightAt(x, z) > BF.worldgen.waterLevelAt(x, z)) { sx = x; sz = z; break; }
   }
   // (worldgen's findSpawn() mirrors the search above; keep them in sync.)
   BF.spawnPoint = { x: sx + 0.5, z: sz + 0.5 };
@@ -69,7 +71,7 @@ function updateDebug(now) {
     `XYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\n` +
     `Chunk ${Math.floor(p.x / BF.CS)}, ${Math.floor(p.z / BF.CS)}  Biome ${biome ? biome.name : "?"}\n` +
     `Chunks ${BF.world.meshedCount()} drawn / ${BF.world.chunks.size} loaded, ${BF.world.queueLength} queued\n` +
-    `Mobs ${BF.mobs.list.length}  Seed ${BF.state.seed}  ${BF.villageSim.status()}\n` +
+    `Mobs ${BF.mobs.list.length}  Seed ${BF.state.seed}  Gen ${BF.state.gen} Biomes x${BF.state.biomeScale}  ${BF.villageSim.status()}\n` +
     `${BF.vlog.stamp(BF.sky.day + BF.sky.time)}  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
     (BF.weather && BF.weather.debugText ? "\n" + BF.weather.debugText() : "");
 }

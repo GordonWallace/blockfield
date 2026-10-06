@@ -228,7 +228,7 @@ function seg(ax, ay, az, bx, by, bz, wa) {
 }
 function buildBolt(x, y, z) {
   segN = 0;
-  const y0 = 118, n = 26, M = Math.random;
+  const y0 = BF.H + 4, n = 26, M = Math.random;
   let px = x + (M() - 0.5) * 8, pz = z + (M() - 0.5) * 8, py = y0;
   let ox = px - x, oz = pz - z;
   const branches = [];

@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
-const CS = 16, H = 128;
+const CS = 16, H = BF.H;
 const light = (BF.light = {});
 const world = () => BF.world;
 const OPAQUE = BF.OPAQUE;

@@ -53,6 +53,7 @@ function snapshot() {
   return {
     version: 1,
     seed: BF.state.seed,
+    gen: BF.state.gen, biomeScale: BF.state.biomeScale,   // worldgen version + biome size (old saves have neither => gen 1)
     time: { t: BF.sky.time, day: BF.sky.day },
     spawn: BF.spawnPoint,
     player,
@@ -67,7 +68,7 @@ function snapshot() {
 }
 
 function restore(data) {
-  BF.newWorld(data.seed, { gameMode: data.player && data.player.gameMode });
+  BF.newWorld(data.seed, { gameMode: data.player && data.player.gameMode, gen: data.gen || 1, biomeScale: data.biomeScale || 1 });
   for (const k in data.edits || {}) {
     const a = data.edits[k], m = new Map();
     for (let i = 0; i < a.length; i += 2) m.set(a[i], a[i + 1]);
@@ -104,15 +105,15 @@ const save = {
       .catch(() => []);
   },
 
-  // Starts a brand-new saved world. opts: {name, seed (number|string|blank), gameMode}
+  // Starts a brand-new saved world. opts: {name, seed (number|string|blank), gameMode, biomeScale (>=1, default 1), gen (default 2)}
   create(opts = {}) {
     let seed = opts.seed;
     if (seed === undefined || seed === null || seed === "") seed = (Math.random() * 4294967296) >>> 0;
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = Number(seed) >>> 0;
     const now = Date.now();
-    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", created: now, lastPlayed: now };
-    BF.newWorld(seed, { gameMode: meta.gameMode });
+    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 2, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), created: now, lastPlayed: now };
+    BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale });
     save.current = meta;
     BF.emit("worldLoaded", meta);
     return save.saveNow().then(() => meta);
@@ -149,7 +150,7 @@ const save = {
     if (!save.current || !save.supported) return Promise.resolve(false);
     let data;
     try { data = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
-    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed });
+    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen || 1, biomeScale: data.biomeScale || 1 });
     save.current = meta;
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").put(meta); t.objectStore("data").put(data, meta.id); })
       .then(() => { save.lastSaved = Date.now(); BF.emit("worldSaved", meta); return true; })

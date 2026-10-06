@@ -428,7 +428,7 @@ def("summon", {
     if (!BF.mobs || !mobTypes().includes(type)) fail(`Unknown entity '${a[0]}'`);
     const p = pos();
     const [x, y, z] = a.length >= 4 ? parsePos(a, 1, false) : [p.x, p.y, p.z];
-    if (y < 0 || y >= (BF.H || 128) + 64) fail("Invalid position for summon");
+    if (y < 0 || y >= (BF.H || 192) + 64) fail("Invalid position for summon");
     needLoaded(x, z);
     let variant, child = false;
     if (a[4] != null) {

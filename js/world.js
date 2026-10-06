@@ -4,7 +4,7 @@
 const BF = (window.BF = window.BF || {});
 
 const CS = 16;      // chunk width/depth
-const H = 128;      // world height
+const H = 192;      // world height
 const SEA = 48;     // sea level (water surface is y = SEA)
 BF.CS = CS; BF.H = H; BF.SEA = SEA;
 
