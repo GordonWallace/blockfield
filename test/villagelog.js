@@ -40,6 +40,16 @@ module.exports = async (pg) => {
     for (const m of [a, b]) BF.trades.inv.add(m.inv, BF.I.bread, 20);
     const kid = BF.breeding.forceBirth(a, b);
     ok("birth happened", !!kid);
+    // deaths: a zombie's hit, an explosion, the player
+    const d1 = vs[2], d2 = vs[3], d3 = vs[4];
+    BF.mobs.hurt(d1, 999, "a zombie"); BF.mobs.hurt(d2, 999, "an explosion");
+    ok("cause logged", L.entries(rec.key).some(e => e[1] === "death" && /killed by a zombie/.test(e[2])) && L.entries(rec.key).some(e => /killed by an explosion/.test(e[2])));
+    BF.mobs.hit(d3, 999, null);
+    ok("player kill logged", L.entries(rec.key).some(e => e[1] === "death" && /killed by the player/.test(e[2])));
+    // tally in the panel
+    BF.vlog.update(1, true);
+    const html = document.getElementById("vlog").innerHTML;
+    ok("panel shows occupations and unclaimed job blocks", /Occupations:/.test(html) && /unclaimed job blocks/.test(html));
     BF.vlog.update(1, true);
     const a2 = L.entries(rec.key);
     ok("log grew by 4+", a2.length - before >= 4);
