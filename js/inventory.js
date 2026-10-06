@@ -356,7 +356,7 @@ function creativeItems() {
     .map(b => typeof b.growsInto === "number" ? (BF.blocks[b.growsInto] || {}).name : b.growsInto));
   creList = [];
   for (const it of BF.items) { // sparse: holes between block ids and ITEM_BASE iterate as undefined
-    if (!it || it.id === 0 || it.hidden || it.internal) continue;
+    if (!it || it.id === 0 || it.hidden || it.internal || it.map || it.auto) continue;   // filled maps are made from blank ones, not picked
     if (it.isBlock && (it.render === "liquid" || it.fluidLevel || it.growsInto || growTargets.has(it.name))) continue;
     let cat;
     if (it.creativeTab) cat = it.creativeTab; // explicit tab on the block def
@@ -367,7 +367,7 @@ function creativeItems() {
     else if (it.places || FUNCTIONAL.test(it.name)) cat = "functional";
     else if (NATURAL.test(it.name) || it.render === "cross") cat = "natural";
     else cat = "building";
-    creList.push({ id: it.id, cat, name: nameOf(it.id).toLowerCase() });
+    creList.push({ id: it.id, cat, name: (nameOf(it.id) + (it.search ? " " + it.search : "")).toLowerCase() });
   }
   // keep each 16-colour family together, in dye order (stable: ties keep id order)
   const col = creList.filter(e => e.cat === "colour").map(e => [colourSortKey(BF.items[e.id].name), e]).sort((a, b) => a[0] - b[0]).map(a => a[1]);
@@ -532,11 +532,13 @@ const hudSlots = [], invSlotEls = [];
 let gridSlotEls = [];
 const iconCache = new Map();
 
+const isMapItem = id => { const it = BF.items[id]; return !!(it && (it.map || it.auto) && BF.mapIcon); };   // filled maps have a live thumbnail icon (js/mapview.js)
+const mapIconVer = id => { const r = isMapItem(id) && BF.mapIcon(BF.items[id]); return r ? r.ver : 0; };
 function iconURL(id) {
-  if (iconCache.has(id)) return iconCache.get(id);
+  if (!isMapItem(id) && iconCache.has(id)) return iconCache.get(id);
   let url = null;
   try { url = BF.textures && BF.textures.icon && BF.textures.icon(id); } catch (e) { url = null; }
-  if (url) iconCache.set(id, url);
+  if (url) { if (!isMapItem(id)) iconCache.set(id, url); }
   else {
     const c = document.createElement("canvas"); c.width = c.height = 16;
     const g = c.getContext("2d"); g.fillStyle = (BF.items[id] && BF.items[id].color) || "#f0f"; g.fillRect(2, 2, 12, 12);
@@ -555,9 +557,9 @@ function makeSlot(cls, c, i) {
   return el;
 }
 function setSlot(el, s) {
-  const id = s ? s.id : -1;
-  if (el._id !== id) {
-    el._id = id;
+  const id = s ? s.id : -1, iv = s ? mapIconVer(id) : 0;
+  if (el._id !== id || el._iv !== iv) {
+    el._id = id; el._iv = iv;
     if (s) { el._img.src = iconURL(s.id); el._img.hidden = false; } else { el._img.removeAttribute("src"); el._img.hidden = true; }
   }
   const t = s && s.count > 1 ? String(s.count) : "";
@@ -1081,7 +1083,7 @@ function setTab(key) {
 }
 function buildPalette() {
   if (creTab === "inventory") return;
-  const list = creativeItems().filter(e => creTab === "search" ? (!creSearch || e.name.includes(creSearch)) : e.cat === creTab);
+  const list = creativeItems().filter(e => creTab === "search" ? (!creSearch || creSearch.split(/\s+/).every(w => e.name.includes(w))) : e.cat === creTab);
   palEl.textContent = "";
   const frag = document.createDocumentFragment();
   for (const e of list) { const el = makeSlot("", "pal", e.id); setSlot(el, { id: e.id, count: 1 }); frag.appendChild(el); }
@@ -1278,6 +1280,7 @@ const api = {
   },
   count(itemId) { let n = 0; for (const s of slots) if (s && s.id === itemId) n += s.count; return n; },
   selected() { return slots[selected]; },
+  refreshIcons() { renderAll(); },   // map thumbnails change while a map fills in (js/mapview.js)
   select(i) {
     i = ((Math.floor(i) % HOTBAR) + HOTBAR) % HOTBAR;
     const changed = i !== selected;

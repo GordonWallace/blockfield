@@ -14,7 +14,7 @@ const SPILL_R = 6, RAD = 2, JIT = 0.34, SUPER = 8, CELL = 192, MARG = 74;
 let NS = 96, NMAX = 80, REACH = 34, HS = 1, W0 = 1.6, W1 = 4.6, WLO = 2, WHI = 95, SLO = 15, SHI = 85, RANGE = 16;
 const smooth = (a, b, x) => { let t = (x - a) / (b - a); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 
-let noise, macro, SEA = 48, density = 0.03;
+let noise, macro, SEA = 48, density = 0.03, enabled = true;
 let nodes, edges, cells, traced, ensured, tmp;
 
 function init(n, macroFn, opts) {
@@ -149,6 +149,7 @@ function ensure(x, z) {
 // Nearest river influence at (x, z). out: d (distance from the centre line), w (half width), rs (water surface), sd = d - w.
 // Returns false when no river is within REACH blocks of the bank.
 function at(x, z, out) {
+  if (!enabled) return false;
   ensure(x, z);
   const l = cells.get(Math.floor(x / CELL) * 4194304 + Math.floor(z / CELL));
   if (!l) return false;
@@ -168,5 +169,7 @@ function at(x, z, out) {
   return true;
 }
 
-BF.rivers = { init, at, REACH, _debug: () => ({ stats: STATS, nodes: nodes.size, edges: edges.size, cells: cells.size }) };
+// setEnabled(false) makes at() report no river (used by overview maps wider than a few km, where a river is under a pixel and tracing the whole
+// network would cost seconds and hundreds of MB); it does not change what is cached, so chunk generation is unaffected.
+BF.rivers = { init, at, setEnabled(v) { enabled = !!v; }, REACH, _debug: () => ({ stats: STATS, nodes: nodes.size, edges: edges.size, cells: cells.size }) };
 })();

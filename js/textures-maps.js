@@ -46,5 +46,25 @@ function sheet(G, filled) {
   put(G, 7, 7, hex("#ffffff")); put(G, 8, 8, hex("#ffffff"));
 }
 SPRITES.filled_map = G => sheet(G, true);
+// Auto map (creative): teal-bordered sheet with a green target ring, cross hairs and a gold sparkle, so it never reads as a plain blank map.
+SPRITES.auto_map = G => {
+  const edge = hex("#1f5a5a"), edgeLo = hex("#123c3c"), edgeHi = hex("#2f8080"), par = hex("#e6dcb4"), parLo = hex("#d2c58f");
+  const ring = hex("#2fae55"), ringLo = hex("#1f7a3b"), gold = hex("#f4d03f"), goldLo = hex("#c9a21c");
+  for (let y = 1; y <= 14; y++) for (let x = 2; x <= 13; x++) {
+    const border = x === 2 || x === 13 || y === 1 || y === 14;
+    put(G, x, y, border ? (x === 13 || y === 14 ? edgeLo : x === 2 || y === 1 ? edgeHi : edge) : (x + y) % 5 === 0 ? parLo : par);
+  }
+  for (let y = 3; y <= 12; y++) for (let x = 4; x <= 11; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d > 3.1 && d < 4.3) put(G, x, y, x + y > 15 ? ringLo : ring);
+  }
+  for (const x of [3, 4, 11, 12]) put(G, x, 7, ring);
+  for (const y of [3, 12]) { put(G, 7, y, ring); put(G, 8, y, ring); }
+  put(G, 7, 7, ringLo); put(G, 8, 8, ringLo);
+  for (const [x, y] of [[11, 3], [11, 4], [10, 4], [12, 4], [11, 5]]) put(G, x, y, gold);
+  put(G, 11, 4, goldLo);
+};
+// Fallback for a filled auto map before its thumbnail exists: the same sheet with land and water (the real icon is the map itself, js/mapview.js).
+SPRITES.auto_map_filled = G => { sheet(G, true); const e = hex("#1f5a5a"); for (let y = 1; y <= 14; y++) for (let x = 2; x <= 13; x++) if (x === 2 || x === 13 || y === 1 || y === 14) put(G, x, y, e); };
 for (let k = 1; k <= 5; k++) SPRITES["blank_map_" + k] = G => sheet(G, false);
 })();

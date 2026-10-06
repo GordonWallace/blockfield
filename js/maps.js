@@ -189,16 +189,20 @@ function marker(g, x, y, ang, onMap) {
   g.restore();
 }
 function drawView(d) {
-  const P = BF.player, p = P.position, s = scale(d.size);
-  const mx = (p.x - originX(d.size, d.zx)) / s, mz = (p.z - originX(d.size, d.zz)) / s;
+  const p = BF.player.position, s = scale(d.size);
+  if (d.ver !== last.paint || last.key !== d) { paintMap(d); last.paint = d.ver; }
+  drawFrame(mapC, (p.x - originX(d.size, d.zx)) / s, (p.z - originX(d.size, d.zz)) / s, false);
+}
+// Draws the framed held map: `src` (a canvas of any size, shown in the 128 px map area) and the player arrow at (mx, mz) in map pixels.
+function drawFrame(src, mx, mz, smooth) {
+  const P = BF.player;
   const ang = Math.atan2(-Math.cos(P.yaw), -Math.sin(P.yaw));         // heading on the map: +x right, +z down
-  vg.imageSmoothingEnabled = false;
+  vg.imageSmoothingEnabled = !!smooth; if (smooth) vg.imageSmoothingQuality = "high";
   vg.fillStyle = "#3f2f18"; vg.fillRect(0, 0, T, T);
   vg.fillStyle = "#a88f58"; vg.fillRect(2, 2, T - 4, T - 4);
   vg.fillStyle = "#c9b27a"; vg.fillRect(4, 4, T - 8, T - 8);
   vg.fillStyle = "#d9c897"; vg.fillRect(M0 - 2, M0 - 2, PX + 4, PX + 4);
-  if (d.ver !== last.paint || last.key !== d) { paintMap(d); last.paint = d.ver; }
-  vg.drawImage(mapC, M0, M0);
+  vg.drawImage(src, 0, 0, src.width || 1, src.height || 1, M0, M0, PX, PX);
   vg.strokeStyle = "#6b5430"; vg.lineWidth = 1; vg.strokeRect(M0 - 1.5, M0 - 1.5, PX + 3, PX + 3);
   const inside = mx >= 0 && mz >= 0 && mx < PX && mz < PX;
   const ex = Math.max(7, Math.min(T - 7, M0 + mx)), ez = Math.max(7, Math.min(T - 7, M0 + mz));
@@ -248,6 +252,7 @@ const api = {
   heldTexture(it) {
     if (!it) return null;
     if (it.name === "compass") { try { return drawCompass(); } catch (e) { console.error(e); return cTex; } }
+    if (it.auto) return BF.mapview ? BF.mapview.held(it) : null;   // auto-filling maps (js/mapview.js)
     if (!it.map) return null;
     ensureView();
     const d = dataOfItem(it), p = BF.player.position;
@@ -256,7 +261,31 @@ const api = {
     if (sig !== last.sig || last.key !== d) { drawView(d); last.sig = sig; last.key = d; }
     return viewTex;
   },
-  textureFor(it) { return it && (it.map || it.name === "compass") ? (it.map ? (ensureView(), viewTex) : drawCompass()) : null; },
+  // Held view of a map whose pixels live elsewhere (js/mapview.js): `key` identifies the map, `ver` its content version, `src` the canvas.
+  heldCanvas(key, ver, src, mx, mz) {
+    ensureView();
+    const p = BF.player.position;
+    const sig = ver + "|" + p.x.toFixed(1) + "|" + p.z.toFixed(1) + "|" + BF.player.yaw.toFixed(2);
+    if (sig !== last.sig || last.key !== key) { drawFrame(src, mx, mz, true); last.sig = sig; last.key = key; }
+    return viewTex;
+  },
+  // Pixels of a normal map for the full-screen view: {src (128x128 canvas), side, x0, z0, N, scale, ver}.
+  snapshot(it) {
+    const d = dataOfItem(it);
+    if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = PX; d.cvG = d.cv.getContext("2d"); d.cvImg = d.cvG.createImageData(PX, PX); d.cvVer = -1; }
+    if (d.cvVer !== d.ver) {
+      const o = d.cvImg.data, px = d.px;
+      for (let k = 0; k < px.length; k++) {
+        const v = px[k], q = k * 4;
+        if (!v) { o[q + 3] = 0; continue; }
+        o[q] = ((v >> 11) & 31) * 255 / 31; o[q + 1] = ((v >> 5) & 63) * 255 / 63; o[q + 2] = (v & 31) * 255 / 31; o[q + 3] = 255;
+      }
+      d.cvG.putImageData(d.cvImg, 0, 0); d.cvVer = d.ver;
+    }
+    const b = api.bounds(d.size, d.zx, d.zz);
+    return { d, src: d.cv, side: side(d.size), x0: b.x0, z0: b.z0, N: PX, scale: scale(d.size), ver: d.ver };
+  },
+  textureFor(it) { return it && (it.map || it.auto || it.name === "compass") ? (it.map || it.auto ? (ensureView(), viewTex) : drawCompass()) : null; },
   serialize() {
     const out = {};
     for (const [k, d] of data) {
