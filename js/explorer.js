@@ -318,6 +318,12 @@ function strike(m) {
   X.camp = null;
   if (m.homeBed !== undefined) { m.bed = m.homeBed; m.homeBed = undefined; }
 }
+// An explorer starts with one tent, but it can lose it (a world saved before tents existed, the player breaking its camp, a full pack when striking it).
+// Back in the village by day it collects a spare from home, so no explorer is ever caught out at dusk without one.
+function spareTent(m) {
+  if (tentItem() == null || state(m).camp || cnt(m, tentItem()) >= 1 || isNight(skyT()) || skyT() >= DUSK || homeDistance(m) > 30) return;
+  if (T().inv.add(m.inv, tentItem(), 1) === 0) log("spare_tent", m, {});
+}
 // Dusk and morning bookkeeping. Returns true while the villager should just stay put at its camp.
 function campAI(m, t, a) {
   const X = state(m);
@@ -338,7 +344,7 @@ function ai(m, dt, out) {
   if (m.profession !== "explorer" || !m.inv || m.dead || m.child || !BF.maps || !BF.mobs || !BF.mobs.nav || !m.village) return false;
   const X = state(m);
   X.sync -= dt;
-  if (X.sync <= 0) { X.sync = 2; syncOffers(m); }
+  if (X.sync <= 0) { X.sync = 2; syncOffers(m); spareTent(m); }
   const t = skyT();
   if (campAI(m, t, m.ai)) return true;
   if (t < WORK_START || t >= WORK_END || m.tradingWith) { if (X.stage) { X.stage = null; X.target = null; X.deal = null; m.ai.route = null; } return false; }

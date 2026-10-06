@@ -894,7 +894,7 @@ const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
 function bedOK(bed) {
   const k = blockAt(bed.x, bed.y, bed.z);
-  if (bed.tent) return !!(k.tent && k.tent.r === 0 && k.tent.l === 1 && k.tent.f === bed.f);   // an explorer's tent: its foot centre cell (js/tents.js)
+  if (bed.tent) return !!(k.tent && k.tent.r === 0 && k.tent.l === 1 && !k.tent.up && k.tent.f === bed.f);   // an explorer's tent: its foot centre cell (js/tents.js)
   const b = k.bed; return !!(b && !b.head && b.f === bed.f);
 }
 // A cell a villager can stand in: solid floor (not a bed/door/fence top), feet and head free or a door it can open.
