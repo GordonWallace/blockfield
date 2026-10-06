@@ -136,8 +136,6 @@ function startFood(v) {
   if (prof === "farmer") {
     addAll(v.inv, [["wheat_seeds", rndInt(10, 20)], ["carrot", rndInt(8, 14)], ["potato", rndInt(8, 14)], ["beetroot_seeds", rndInt(4, 10)]]);
     if (breadEq(v.inv) < 12) addAll(v.inv, [["bread", Math.ceil(12 - breadEq(v.inv))]]);
-    const r = Math.random();
-    if (BF.I.water_bucket != null) { if (r < 0.35) addAll(v.inv, [["water_bucket", 1]]); else if (r < 0.6) addAll(v.inv, [["bucket", 1]]); }
     if (Math.random() < 0.45) addAll(v.inv, [["oak_log", rndInt(3, 8)]]);
   } else {
     const target = rnd(3, 6);
@@ -189,13 +187,17 @@ const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
 const WORK_END = 0.5;             // farmers and shoppers stop at sunset; bedtime (mobs.js) starts at 0.52
 const REACH_H = 1.75;             // horizontal feet -> cell centre distance to work a cell
-const ACT = { harvest: 0.55, plant: 0.45, till: 0.9, border: 0.75, water: 0.9, fill: 0.9, craft: 1.6, tend: 3.0 };
+const ACT = { harvest: 0.55, plant: 0.45, till: 0.9, border: 0.75, water: 0.9, fill: 0.9, craft: 1.6, tend: 3.0, dig: 0.7, raise: 0.5, gather: 0.9 };
 const TASK_MAX = 45;              // seconds before an unfinished task is given up
 const BREAK_P = 0.05;             // chance of a short break after a task (the rest of the day is farming)
 const SCAN_COLS = 500;            // columns of the village area scanned per tick
 const RESCAN = 10;                // seconds between village farm scans
 const IRRIGATE = 4;               // farmland needs a water source within 4 blocks (same level), like vanilla
-const TILL_PER_FARMER = 40;       // farmland a village may gain per farmer beyond its worldgen farms
+const FARM_R = 12;                // a farmer only tends (and makes) farmland within 12 blocks, in every direction, of its composter
+const FARM_MAX = 64;              // farmland cells within that range a farmer is content with: it only adds beds below this
+const PLOT_R = 4;                 // a new farm is a 9x9 plot around one water block (water irrigates 4 blocks)
+const WATER_REACH = 30;           // buckets are filled at water this far (~30 blocks) around the village area, wells included
+const GATHER_R = 24;              // dirt and logs are taken from up to this far outside the village area, never from inside it
 const TRADE_PAUSE = 1.6;
 const SHOP_DAYS = 3;              // a hungry villager buys up to 3 days of food
 const LOG = [];
@@ -210,6 +212,10 @@ function ids() {
     mature: new Map([[B("wheat"), I("wheat_seeds")], [B("carrots"), I("carrot")], [B("potatoes"), I("potato")], [B("beetroots"), I("beetroot_seeds")]]),
     seeds: ["wheat_seeds", "carrot", "potato", "beetroot_seeds"].map(I).filter(x => x != null),
     till: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass", "mycelium"].map(B).filter(x => x != null)),
+    dirt: B("dirt"), hoes: ["wooden_hoe", "stone_hoe", "iron_hoe", "diamond_hoe"].map(I).filter(x => x != null),
+    // natural ground a farmer may dig away (or fill with dirt) to level a field; everything else is somebody's building or the landscape
+    ground: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass", "mycelium", "sand", "red_sand", "gravel", "clay", "dirt_path", "farmland"].map(B).filter(x => x != null)),
+    diggable: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass"].map(B).filter(x => x != null)),
     wheat: I("wheat_item"), bread: I("bread"), hay: I("hay_bale"), bucket: I("bucket"), wbucket: I("water_bucket"), em: I("emerald"),
     cook: [["raw_chicken", "cooked_chicken"], ["raw_porkchop", "cooked_porkchop"], ["raw_beef", "steak"], ["raw_mutton", "cooked_mutton"], ["raw_cod", "cooked_cod"]]
       .map(([a, b]) => [I(a), I(b)]).filter(([a, b]) => a != null && b != null),
@@ -218,6 +224,17 @@ function ids() {
   return C;
 }
 const cnt = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
+const hasHoe = m => ids().hoes.some(id => cnt(m, id) > 0);
+const isLogBlock = id => { const b = BF.blocks[id]; return !!b && /_log$/.test(b.name) && !/^stripped_/.test(b.name); };
+function woodCount(m) { let n = 0; for (const s of m.inv) if (s && BF.items[s.id] && BF.items[s.id].isBlock && /(_log|planks)$/.test(BF.items[s.id].name)) n += s.count; return n; }
+// A new farmer gets an empty bucket (and a hoe), a new builder an empty bucket: water is only ever placed from a bucket that was filled first.
+function ensureKit(m) {
+  if (!m || !Array.isArray(m.inv) || (m.profession !== "farmer" && m.profession !== "builder") || m.kitFor === m.profession) return;
+  m.kitFor = m.profession;
+  const c = ids(), Tinv = TR().inv;
+  if (c.bucket != null && cnt(m, c.bucket) + cnt(m, c.wbucket) === 0) Tinv.add(m.inv, c.bucket, 1);
+  if (m.profession === "farmer" && c.hoes.length && !hasHoe(m)) Tinv.add(m.inv, c.hoes[Math.min(1, c.hoes.length - 1)], 1);
+}
 const woodId = m => { for (const s of m.inv) if (s && BF.items[s.id] && BF.items[s.id].isBlock && /(_log|planks)$/.test(BF.items[s.id].name)) return s.id; return null; };
 const key3 = (x, y, z) => x + "," + y + "," + z;
 const getB = (x, y, z) => W().getBlock(x, y, z);
@@ -286,8 +303,36 @@ function vdata(R) {
   if (Number.isFinite(wg.x)) boxes.push([wg.x - 9, wg.z - 9, wg.x + 9, wg.z + 9]);       // meeting square, bell, well
   for (const l of wg.lamps || []) boxes.push([l[0] - 1, l[1] - 1, l[0] + 1, l[1] + 1]);
   for (const d of wg.decor || []) boxes.push([d[0] - 1, d[1] - 1, d[0] + 1, d[1] + 1]);
-  R._life = { area: A, boxes, farmBase, cells: [], water: [], waterSet: new Set(), ready: false, scan: null, scanT: 0 };
+  R._life = { area: A, base: Object.assign({}, A), boxes, farmBase, cells: [], water: [], waterSet: new Set(), wells: new Set(), ready: false, scan: null, scanT: 0, want: 0 };
   return R._life;
+}
+// The farmer's reach box (composter +-12) must lie inside the scanned area (a composter placed outside the village grounds); a wider area is rescanned.
+function ensureCover(D, m) {
+  const s = m.jobsite, A = D.area;
+  if (!s) return;
+  const x0 = s.x - FARM_R - 1, x1 = s.x + FARM_R + 1, z0 = s.z - FARM_R - 1, z1 = s.z + FARM_R + 1, yLo = s.y - FARM_R, yHi = s.y + FARM_R;
+  if (x0 >= A.x0 && x1 <= A.x1 && z0 >= A.z0 && z1 <= A.z1 && yLo >= A.yLo && yHi <= A.yHi) return;
+  D.area = { x0: Math.min(A.x0, x0), x1: Math.max(A.x1, x1), z0: Math.min(A.z0, z0), z1: Math.max(A.z1, z1), yLo: Math.min(A.yLo, yLo), yHi: Math.max(A.yHi, yHi) };
+  D.ready = false; D.scan = null; D.scanT = 0;
+}
+// the farmland / water cell (x, y, z) is within 12 blocks of the farmer's composter in every direction
+const inRange = (m, x, y, z) => { const s = m.jobsite; return !!s && Math.abs(x - s.x) <= FARM_R && Math.abs(z - s.z) <= FARM_R && Math.abs(y - s.y) <= FARM_R; };
+// inside the village proper (its buildings and 6 blocks around): nothing is dug or felled there for materials
+const inVillage = (D, x, z) => { const b = D.base; return x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1; };
+// top-most water source of an open column outside the village (lake, pond, river), or null
+function surfaceWater(w, x, z) {
+  const h = w.heightAt(x, z);
+  if (h < 0) return null;
+  let top = null;
+  for (let y = h + 1; y < h + 40 && BF.FLUID[w.getBlock(x, y, z)]; y++) if (BF.FLUID[w.getBlock(x, y, z)] === 8) top = y;
+  return top;
+}
+// water cells of the village well (generated) and of wells the builders made; they sit under a roof, so the top-down scan misses them
+function wellCells(R) {
+  const out = [], wg = R.wg || {};
+  if (Number.isFinite(wg.x) && Number.isFinite(wg.y) && Number.isFinite(wg.z)) for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) out.push([wg.x + dx, wg.y, wg.z + dz]);
+  if (BF.builder && BF.builder.builtOf) for (const e of BF.builder.builtOf(R) || []) if (e.type === "well" && e.state === "done") out.push([e.ox + 1, e.oy + 1, e.oz + 1]);
+  return out;
 }
 function inArea(D, x, z) { const A = D.area; return x >= A.x0 && x <= A.x1 && z >= A.z0 && z <= A.z1; }
 function freeCell(R, D, x, z) {
@@ -296,26 +341,35 @@ function freeCell(R, D, x, z) {
   if (BF.builder && BF.builder.builtOf) for (const e of BF.builder.builtOf(R) || []) if (x >= e.ox - 1 && x <= e.ox + e.w && z >= e.oz - 1 && z <= e.oz + e.d) return false;
   return true;
 }
+// One pass over the village area (farmland + water, top-down) and the ring of WATER_REACH blocks around it (water only), `budget` columns per call.
 function scanStep(R, D, budget) {
-  const w = W(), c = ids(), A = D.area;
+  const w = W(), c = ids();
   if (!D.scan) {
     if (performance.now() / 1000 < D.scanT) return;
-    D.scan = { x: A.x0, z: A.z0, cells: [], water: [] };
+    const A = D.area;
+    D.scan = { x: A.x0 - WATER_REACH, z: A.z0 - WATER_REACH, A, e: { x0: A.x0 - WATER_REACH, x1: A.x1 + WATER_REACH, z1: A.z1 + WATER_REACH }, cells: [], water: [] };
   }
-  const S = D.scan;
+  const S = D.scan, A = S.A;
   while (budget-- > 0) {
     if (w.isLoaded(S.x, S.z)) {
-      for (let y = A.yHi; y >= A.yLo; y--) {
-        const id = w.getBlock(S.x, y, S.z);
-        if (id === 0 || BF.RENDER[id] === 4) continue;
-        if (BF.FLUID[id] === 8) S.water.push([S.x, y, S.z]);
-        else if (id === c.farmland) S.cells.push([S.x, y, S.z]);
-        break;
+      if (S.x >= A.x0 && S.x <= A.x1 && S.z >= A.z0 && S.z <= A.z1) {
+        for (let y = A.yHi; y >= A.yLo; y--) {
+          const id = w.getBlock(S.x, y, S.z);
+          if (id === 0 || BF.RENDER[id] === 4) continue;
+          if (BF.FLUID[id] === 8) S.water.push([S.x, y, S.z]);
+          else if (id === c.farmland) S.cells.push([S.x, y, S.z]);
+          break;
+        }
+      } else {
+        const top = surfaceWater(w, S.x, S.z);
+        if (top != null) S.water.push([S.x, top, S.z]);
       }
     }
-    if (++S.x > A.x1) {
-      S.x = A.x0;
-      if (++S.z > A.z1) {
+    if (++S.x > S.e.x1) {
+      S.x = S.e.x0;
+      if (++S.z > S.e.z1) {
+        D.wells = new Set();
+        for (const [x, y, z] of wellCells(R)) if (w.isLoaded(x, z) && BF.FLUID[w.getBlock(x, y, z)] === 8) { D.wells.add(key3(x, y, z)); if (!S.water.some(p => p[0] === x && p[1] === y && p[2] === z)) S.water.push([x, y, z]); }
         D.cells = S.cells; D.water = S.water; D.waterSet = new Set(S.water.map(p => key3(...p)));
         D.ready = true; D.scan = null; D.scanT = performance.now() / 1000 + RESCAN;
         return;
@@ -323,8 +377,6 @@ function scanStep(R, D, budget) {
     }
   }
 }
-const farmersOf = R => (R.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && m.profession === "farmer").length;
-const tillCap = (R, D) => D.farmBase + TILL_PER_FARMER * Math.max(1, farmersOf(R));
 function irrigated(D, x, y, z) {
   for (let dz = -IRRIGATE; dz <= IRRIGATE; dz++) for (let dx = -IRRIGATE; dx <= IRRIGATE; dx++) if (D.waterSet.has(key3(x + dx, y, z + dz))) return true;
   return false;
@@ -335,7 +387,7 @@ function openAbove(x, y, z) {
   if (a !== 0 && !(BF.REPLACEABLE[a] && !BF.FLUID[a] && !BF.SOLID[a]) && !(BF.RENDER[a] === 4 && !BF.blocks[a].growsInto && !ids().matureSet.has(a))) return false;
   return getB(x, y + 2, z) === 0;
 }
-const tillable = (R, D, x, y, z) => W().isLoaded(x, z) && freeCell(R, D, x, z) && ids().till.has(getB(x, y, z)) && openAbove(x, y, z);
+const tillable = (R, D, x, y, z, m) => W().isLoaded(x, z) && (!m || inRange(m, x, y, z)) && freeCell(R, D, x, z) && ids().till.has(getB(x, y, z)) && openAbove(x, y, z);
 
 // ---------------------------------------------------------------- task search
 const claims = new Map();   // cell key -> mob
@@ -373,10 +425,17 @@ function think(m, fs, R, D) {
     const toHay = cnt(m, c.bread) >= 96 && wheat >= 9 && c.hay != null;
     if (TR().inv.canFit(m.inv, [{ id: toHay ? c.hay : c.bread, n: 1 }], [{ id: c.wheat, n: toHay ? 9 : 3 }])) return { kind: "craft", hay: toHay };
   }
-  // harvest mature crops / plant empty farmland: nearest first
+  // a trip for materials (dirt / logs from outside the village) goes on until the farmer carries enough
+  if (fs.haul) {
+    const h = fs.haul, have = h.what === "dirt" ? cnt(m, c.dirt) : woodCount(m);
+    if (have < h.n) { const g = findGather(m, D, h.what, ok); if (g) return g; }
+    fs.haul = null;
+  }
+  // harvest mature crops / plant empty farmland, only within 12 blocks of the composter: nearest first
+  const cells = D.cells.filter(p => inRange(m, p[0], p[1], p[2]));
   let best = null, bd = Infinity, fits = new Map(), hasSeed = c.seeds.some(id => cnt(m, id) > 0);
   const young = [];
-  for (const [x, y, z] of D.cells) {
+  for (const [x, y, z] of cells) {
     if (!W().isLoaded(x, z) || getB(x, y, z) !== c.farmland) continue;
     const a = getB(x, y + 1, z), k = key3(x, y + 1, z);
     let kind = null;
@@ -390,19 +449,23 @@ function think(m, fs, R, D) {
     if (d < bd) { bd = d; best = { kind, x, y: y + 1, z, k }; }
   }
   if (best) return best;
-  // nothing to harvest or plant: make more farmland (till near water, border with wood, carry water)
-  const room = D.cells.length < tillCap(R, D);
-  let exp = room ? findTill(m, R, D, ok) : null;
-  if (woodId(m) != null) {                              // with wood: edge the beds as they grow (nearest of the two jobs)
-    const b = findBorder(m, R, D, ok);
-    if (b && (!exp || dist(b.x, b.z) < dist(exp.x, exp.z) + 2)) exp = b;
+  // nothing to harvest or plant: make more farmland (till near water with the hoe, border with wood, carry water)
+  const room = cells.length < FARM_MAX;
+  let exp = room && hasHoe(m) ? findTill(m, R, D, ok) : null;
+  const b = findBorder(m, R, D, ok);
+  if (b) {
+    if (woodId(m) != null && (!exp || dist(b.x, b.z) < dist(exp.x, exp.z) + 2)) exp = b;   // with wood: edge the beds as they grow (nearest of the two jobs)
+    else if (woodId(m) == null && !exp) { fs.haul = { what: "log", n: 8 }; const g = findGather(m, D, "log", ok); if (g) return g; fs.haul = null; }   // logs as needed, from the trees around the village
   }
   if (exp) return exp;
-  if (room && (cnt(m, c.wbucket) > 0 || cnt(m, c.bucket) > 0)) {
-    const spot = findWaterSpot(m, R, D, ok);
+  if (!cells.length) {                                    // no farmland within reach of the composter at all: make a farm
+    const t = planTask(m, fs, R, D, ok);
+    if (t) return t;
+  } else if (room && (cnt(m, c.wbucket) > 0 || cnt(m, c.bucket) > 0)) {
+    const spot = findWaterSpot(m, R, D, ok, cells);
     if (spot) {
       if (cnt(m, c.wbucket) > 0) return spot;
-      const f = findFill(m, R, D, ok);
+      const f = findFill(m, D, ok);
       if (f) return f;
     }
   }
@@ -413,71 +476,226 @@ function think(m, fs, R, D) {
   return null;
 }
 function findTill(m, R, D, ok) {
-  const px = m.position.x, pz = m.position.z, fset = new Set(D.cells.map(p => key3(...p)));
-  const waters = D.water.slice().sort((a, b) => Math.hypot(a[0] - px, a[2] - pz) - Math.hypot(b[0] - px, b[2] - pz)).slice(0, 48);
+  const px = m.position.x, pz = m.position.z, s = m.jobsite, fset = new Set(D.cells.map(p => key3(...p)));
+  const waters = D.water.filter(p => Math.abs(p[0] - s.x) <= FARM_R + IRRIGATE && Math.abs(p[2] - s.z) <= FARM_R + IRRIGATE)
+    .sort((a, b) => Math.hypot(a[0] - px, a[2] - pz) - Math.hypot(b[0] - px, b[2] - pz)).slice(0, 48);
   let best = null, bs = Infinity;
   const seen = new Set();
   for (const [wx, wy, wz] of waters) for (let dz = -IRRIGATE; dz <= IRRIGATE; dz++) for (let dx = -IRRIGATE; dx <= IRRIGATE; dx++) {
     const x = wx + dx, z = wz + dz, y = wy, k = key3(x, y, z);
     if (seen.has(k)) continue;
     seen.add(k);
-    if (!ok(k) || !tillable(R, D, x, y, z)) continue;
+    if (!ok(k) || !tillable(R, D, x, y, z, m)) continue;
     let adj = 0;
     for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (fset.has(key3(x + ax, y, z + az))) adj++;
-    const s = Math.hypot(x + 0.5 - px, z + 0.5 - pz) - adj * 6;
-    if (s < bs) { bs = s; best = { kind: "till", x, y, z, k, ty: y + 1 }; }
+    const sc = Math.hypot(x + 0.5 - px, z + 0.5 - pz) - adj * 6;
+    if (sc < bs) { bs = sc; best = { kind: "till", x, y, z, k, ty: y + 1 }; }
   }
   return best;
 }
 function findBorder(m, R, D, ok) {
   const px = m.position.x, pz = m.position.z;
   let best = null, bd = Infinity;
-  for (const [x, y, z] of D.cells) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const nx = x + dx, nz = z + dz, k = key3(nx, y, nz);
-    if (!ok(k) || !tillable(R, D, nx, y, nz) || irrigated(D, nx, y, nz)) continue;
-    const d = Math.hypot(nx + 0.5 - px, nz + 0.5 - pz);
-    if (d < bd) { bd = d; best = { kind: "border", x: nx, y, z: nz, k, ty: y + 1 }; }
+  for (const [x, y, z] of D.cells) {
+    if (!inRange(m, x, y, z)) continue;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, nz = z + dz, k = key3(nx, y, nz);
+      if (!ok(k) || !tillable(R, D, nx, y, nz, m) || irrigated(D, nx, y, nz)) continue;
+      const d = Math.hypot(nx + 0.5 - px, nz + 0.5 - pz);
+      if (d < bd) { bd = d; best = { kind: "border", x: nx, y, z: nz, k, ty: y + 1 }; }
+    }
   }
   return best;
 }
 // A new irrigation hole: a ground cell walled in on all four sides (so the water stays put), next to the existing beds,
 // with no water yet within reach and plenty of tillable ground around it.
-function findWaterSpot(m, R, D, ok) {
-  const base = D.cells.length ? D.cells : null;
+function findWaterSpot(m, R, D, ok, base) {
   let best = null, bs = -Infinity;
   for (let t = 0; t < 70; t++) {
-    let x, y, z;
-    if (base) { const c = base[Math.floor(Math.random() * base.length)]; x = c[0] + Math.round(rnd(-7, 7)); y = c[1]; z = c[2] + Math.round(rnd(-7, 7)); }
-    else { x = Math.floor(m.position.x + rnd(-10, 10)); z = Math.floor(m.position.z + rnd(-10, 10)); y = Math.floor(m.position.y) - 1; }
+    const c = base[Math.floor(Math.random() * base.length)];
+    const x = c[0] + Math.round(rnd(-7, 7)), y = c[1], z = c[2] + Math.round(rnd(-7, 7));
     const k = key3(x, y, z);
-    if (!ok(k) || !tillable(R, D, x, y, z) || irrigated(D, x, y, z)) continue;
+    if (!ok(k) || !tillable(R, D, x, y, z, m) || irrigated(D, x, y, z)) continue;
     if (!BF.SOLID[getB(x, y - 1, z)]) continue;
     let walled = true;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!BF.SOLID[getB(x + dx, y, z + dz)] || !W().isLoaded(x + dx, z + dz)) { walled = false; break; }
     if (!walled) continue;
     let n = 0;
-    for (let dz = -IRRIGATE; dz <= IRRIGATE; dz++) for (let dx = -IRRIGATE; dx <= IRRIGATE; dx++) if ((dx || dz) && tillable(R, D, x + dx, y, z + dz)) n++;
+    for (let dz = -IRRIGATE; dz <= IRRIGATE; dz++) for (let dx = -IRRIGATE; dx <= IRRIGATE; dx++) if ((dx || dz) && tillable(R, D, x + dx, y, z + dz, m)) n++;
     if (n < 14) continue;
     const s = n - Math.hypot(x - m.position.x, z - m.position.z) * 0.3;
     if (s > bs) { bs = s; best = { kind: "water", x, y, z, k, ty: y + 1 }; }
   }
   return best;
 }
-// Fill an empty bucket at an infinite water source (two neighbouring sources, solid ground under: it refills at once).
-function findFill(m, R, D, ok) {
-  const px = m.position.x, pz = m.position.z;
-  let best = null, bd = Infinity;
-  for (const [x, y, z] of D.water) {
-    const k = key3(x, y, z);
-    if (!ok(k)) continue;
-    let s = 0;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (BF.FLUID[getB(x + dx, y, z + dz)] === 8) s++;
-    const below = getB(x, y - 1, z);
-    if (s < 2 || !(BF.SOLID[below] || BF.FLUID[below] === 8)) continue;
-    const d = Math.hypot(x + 0.5 - px, z + 0.5 - pz);
-    if (d < bd) { bd = d; best = { kind: "fill", x, y, z, k, ty: y + 1 }; }
+// ---------------------------------------------------------------- water for the buckets
+// A source refills when two neighbouring cells are sources over solid ground / source (like vanilla, and the village wells): taking it leaves no hole.
+function infiniteSource(x, y, z) {
+  let s = 0;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (BF.FLUID[getB(x + dx, y, z + dz)] === 8) s++;
+  const below = getB(x, y - 1, z);
+  return s >= 2 && (BF.SOLID[below] || BF.FLUID[below] === 8);
+}
+// A cell to stand on within 2 blocks of the water cell (the village well is walled in: the bucket is dipped over the wall), nearest to the mob.
+function standFor(m, x, y, z) {
+  const N = nav(), w = W();
+  let best = null, bs = Infinity;
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    if (!dx && !dz) continue;
+    for (let dy = -1; dy <= 2; dy++) {
+      const sx = x + dx, sy = y + dy, sz = z + dz;
+      if (!w.isLoaded(sx, sz) || !N.walkCell(sx, sy, sz)) continue;
+      const sc = Math.hypot(dx, dz) * 4 + Math.hypot(sx + 0.5 - m.position.x, sz + 0.5 - m.position.z) * 0.1 + Math.abs(dy - 1);
+      if (sc < bs) { bs = sc; best = { sx, sy, sz }; }
+    }
   }
   return best;
+}
+// The nearest water source (any source of the scanned ring around the village: lake, pond, well) with a place to stand: {x, y, z, sx, sy, sz} or null.
+function findFill(m, D, ok) {
+  const px = m.position.x, pz = m.position.z, near = [];
+  for (const [x, y, z] of D.water) {                       // the 12 nearest sources
+    const d = Math.hypot(x + 0.5 - px, z + 0.5 - pz);
+    if (near.length >= 12 && d >= near[near.length - 1][0]) continue;
+    let i = near.length;
+    while (i > 0 && near[i - 1][0] > d) i--;
+    near.splice(i, 0, [d, x, y, z]);
+    if (near.length > 12) near.pop();
+  }
+  for (const [, x, y, z] of near) {
+    const k = key3(x, y, z);
+    if (ok && !ok(k)) continue;
+    if (BF.FLUID[getB(x, y, z)] !== 8) continue;
+    const st = standFor(m, x, y, z);
+    if (st) return { kind: "fill", x, y, z, k, ty: y + 1, sx: st.sx, sy: st.sy, sz: st.sz };
+  }
+  return null;
+}
+// Dips the empty bucket in the source (x, y, z): full bucket, and the block is taken only when it refills (so no lake or well is ever drained).
+function fillBucket(m, x, y, z) {
+  const c = ids(), Tinv = TR().inv, w = W();
+  if (BF.FLUID[getB(x, y, z)] !== 8 || cnt(m, c.bucket) < 1) return false;
+  if (!Tinv.canFit(m.inv, [{ id: c.wbucket, n: 1 }], [{ id: c.bucket, n: 1 }])) return false;
+  if (infiniteSource(x, y, z) && !w.setBlock(x, y, z, 0)) return false;
+  Tinv.remove(m.inv, c.bucket, 1); Tinv.add(m.inv, c.wbucket, 1);
+  sound("splash", x + 0.5, y + 0.5, z + 0.5, 0.4);
+  return true;
+}
+const wantVillages = new Set();   // villages whose water ring is scanned for builders although no farmer works there
+// For js/builder.js: the nearest water source (within ~30 blocks of the village, wells included) with a stand cell, or null (also while the village is still being scanned).
+function findWater(m, R) {
+  const D = vdata(R);
+  D.want = performance.now() / 1000; wantVillages.add(R);
+  return D.ready ? findFill(m, D, null) : null;
+}
+
+// ---------------------------------------------------------------- materials from outside the village
+// What to take: "dirt" = the top block of open ground (grass, dirt ...), "log" = the base log of a tree. Never inside the village (buildings + 6 blocks around).
+function findGather(m, D, what, ok) {
+  const c = ids(), w = W(), b0 = D.base, px = m.position.x, pz = m.position.z;
+  let best = null, bd = Infinity;
+  for (let t = 0; t < 120; t++) {
+    const x = Math.floor(rnd(b0.x0 - GATHER_R, b0.x1 + GATHER_R + 1)), z = Math.floor(rnd(b0.z0 - GATHER_R, b0.z1 + GATHER_R + 1));
+    if (inVillage(D, x, z) || !w.isLoaded(x, z)) continue;
+    const h = w.heightAt(x, z);
+    if (h < 1) continue;
+    let y = -1;
+    if (what === "dirt") {
+      const a = getB(x, h + 1, z);
+      if (c.diggable.has(getB(x, h, z)) && (a === 0 || (BF.REPLACEABLE[a] && !BF.SOLID[a] && !BF.FLUID[a]))) y = h;
+    } else {
+      for (let yy = h; yy > h - 16 && yy > 1; yy--) if (isLogBlock(getB(x, yy, z))) { y = yy; while (y > 1 && isLogBlock(getB(x, y - 1, z))) y--; break; }
+      if (y >= 0 && !BF.SOLID[getB(x, y - 1, z)]) y = -1;
+    }
+    if (y < 0 || (ok && !ok(key3(x, y, z)))) continue;
+    const d = Math.hypot(x + 0.5 - px, z + 0.5 - pz);
+    if (d < bd) { bd = d; best = { kind: "gather", what, x, y, z, k: key3(x, y, z), ty: what === "dirt" ? y + 1 : y }; }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------- making a farm (no farmland within 12 blocks of the composter)
+const tillOK = (c, id) => c.till.has(id) || id === c.farmland;
+const looseAbove = id => id === 0 || (BF.REPLACEABLE[id] && !BF.SOLID[id] && !BF.FLUID[id]);
+// Cost of a 9x9 plot around (cx, cz) levelled to height cy: the number of blocks to dig or fill, or null when it does not fit (a building / box, loaded-ness,
+// out of reach of the composter, something other than natural ground in the column, water, a slope of more than 2).
+function plotCost(m, R, D, cx, cy, cz) {
+  const c = ids(), w = W();
+  let ops = 0;
+  for (let dz = -PLOT_R; dz <= PLOT_R; dz++) for (let dx = -PLOT_R; dx <= PLOT_R; dx++) {
+    const x = cx + dx, z = cz + dz;
+    if (!w.isLoaded(x, z) || !freeCell(R, D, x, z) || !inRange(m, x, cy, z)) return null;
+    const top = w.heightAt(x, z), b = top < 0 ? 0 : getB(x, top, z);
+    if (!c.ground.has(b) || !looseAbove(getB(x, top + 1, z)) || BF.FLUID[getB(x, top + 1, z)]) return null;
+    if (Math.abs(top - cy) > 2) return null;
+    if (top > cy) {                                           // dig down to cy: only soil on the way, tillable at the bottom
+      for (let y = top; y > cy; y--) if (!c.ground.has(getB(x, y, z))) return null;
+      if (!tillOK(c, getB(x, cy, z))) return null;
+      ops += top - cy;
+    } else if (top < cy) {
+      if (!BF.SOLID[b]) return null;
+      ops += cy - top;
+    } else if (!tillOK(c, b)) ops += 2;                       // sand, gravel, clay: dig it out and put dirt there
+  }
+  return ops;
+}
+function pickPlot(m, R, D) {
+  const s = m.jobsite, w = W(), c = ids();
+  let best = null, bs = Infinity;
+  const reach = FARM_R - PLOT_R;
+  for (let t = 0; t < 60; t++) {
+    const cx = s.x + (t === 0 ? 0 : Math.round(rnd(-reach, reach))), cz = s.z + (t === 0 ? 0 : Math.round(rnd(-reach, reach)));
+    if (!w.isLoaded(cx, cz)) continue;
+    const cy = w.heightAt(cx, cz);
+    if (cy < 1 || !c.ground.has(getB(cx, cy, cz))) continue;
+    const ops = plotCost(m, R, D, cx, cy, cz);
+    if (ops == null) continue;
+    const sc = ops + Math.hypot(cx - s.x, cz - s.z) * 0.5;
+    if (sc < bs) { bs = sc; best = { cx, cy, cz }; }
+  }
+  return best;
+}
+// The next job of the farm being made: level the 9x9 plot (dig the high cells, fill the low ones with dirt), then pour water in its middle.
+// Digging puts dirt in the pocket; missing dirt is fetched from outside the village. Tilling and edging then follow from think().
+function planTask(m, fs, R, D, ok) {
+  const c = ids(), w = W(), now = performance.now() / 1000;
+  if (!fs.plan) {
+    if (fs.planCd > now) return null;
+    fs.plan = pickPlot(m, R, D);
+    if (!fs.plan) { fs.planCd = now + 20; return null; }
+  }
+  const P = fs.plan;
+  if (BF.FLUID[getB(P.cx, P.cy, P.cz)] === 8) { fs.plan = null; return null; }          // the water is in: tilling takes over
+  let work = null, wd = Infinity, need = 0;
+  for (let dz = -PLOT_R; dz <= PLOT_R; dz++) for (let dx = -PLOT_R; dx <= PLOT_R; dx++) {
+    const x = P.cx + dx, z = P.cz + dz;
+    if (!w.isLoaded(x, z)) continue;
+    const top = w.heightAt(x, z), b = top < 0 ? 0 : getB(x, top, z);
+    let op = null;
+    if (!c.ground.has(b) || !freeCell(R, D, x, z)) { fs.plan = null; fs.planCd = now + 20; return null; }   // the plot changed under us
+    if (top > P.cy || (top === P.cy && !tillOK(c, b))) op = { kind: "dig", x, y: top, z, k: key3(x, top, z), ty: top + 1 };
+    else if (top < P.cy) { op = { kind: "raise", x, y: top, z, k: key3(x, top, z), ty: top + 1 }; need++; }
+    if (!op || !ok(op.k)) continue;
+    const d = Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) + (op.kind === "raise" ? 0.5 : 0);
+    if (d < wd) { wd = d; work = op; }
+  }
+  if (work) {
+    if (work.kind === "raise" && cnt(m, c.dirt) < 1) {                                   // no dirt in the pocket: fetch some
+      fs.haul = { what: "dirt", n: Math.min(24, Math.max(4, need)) };
+      const g = findGather(m, D, "dirt", ok);
+      if (g) return g;
+      fs.haul = null; fs.plan = null; fs.planCd = now + 30;
+      return null;
+    }
+    return work;
+  }
+  if (cnt(m, c.wbucket) > 0) return { kind: "water", x: P.cx, y: P.cy, z: P.cz, k: key3(P.cx, P.cy, P.cz), ty: P.cy + 1 };
+  if (cnt(m, c.bucket) > 0) {
+    const f = findFill(m, D, ok);
+    if (f) return f;
+  }
+  fs.planCd = now + 30;                                                                   // no bucket / no water within reach: try again later
+  return null;
 }
 
 // ---------------------------------------------------------------- doing a task
@@ -538,7 +756,9 @@ function perform(m, fs, R, D) {
     return made > 0;
   }
   if (t.kind === "tend") return true;
+  if (t.kind === "gather") return gatherBlock(m, D, t);
   if (!w.isLoaded(t.x, t.z) || !freeCellOrFarm(R, D, t)) return false;
+  if (t.kind === "dig" || t.kind === "raise") return levelCell(m, R, D, t);
   if (t.kind === "harvest") {
     const id = getB(t.x, t.y, t.z);
     if (!c.matureSet.has(id) || getB(t.x, t.y - 1, t.z) !== c.farmland || !dropsFit(m, id)) return false;
@@ -570,8 +790,9 @@ function perform(m, fs, R, D) {
     return true;
   }
   if (t.kind === "till" || t.kind === "border" || t.kind === "water") {
-    if (!tillable(R, D, t.x, t.y, t.z)) return false;
+    if (!tillable(R, D, t.x, t.y, t.z, m)) return false;
     let place = c.farmland;
+    if (t.kind === "till" && !hasHoe(m)) return false;                 // farmland is made with the hoe
     if (t.kind === "border") { place = woodId(m); if (place == null) return false; }
     if (t.kind === "water") { if (cnt(m, c.wbucket) < 1 || irrigated(D, t.x, t.y, t.z)) return false; place = c.water; }
     const above = getB(t.x, t.y + 1, t.z);
@@ -594,15 +815,53 @@ function perform(m, fs, R, D) {
     return true;
   }
   if (t.kind === "fill") {
-    if (BF.FLUID[getB(t.x, t.y, t.z)] !== 8 || cnt(m, c.bucket) < 1) return false;
-    if (!TR().inv.canFit(m.inv, [{ id: c.wbucket, n: 1 }], [{ id: c.bucket, n: 1 }])) return false;
-    // an infinite source (2+ source neighbours over solid ground) refills itself on the next fluid tick, as in vanilla
-    if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
-    Tinv.remove(m.inv, c.bucket, 1); Tinv.add(m.inv, c.wbucket, 1);
+    if (!fillBucket(m, t.x, t.y, t.z)) return false;
     log("fill", m, { at: [t.x, t.y, t.z] });
     return true;
   }
   return false;
+}
+// Takes the block of a gather task (dirt from open ground, the base log of a tree) outside the village; its drops go into the inventory.
+function gatherBlock(m, D, t) {
+  const c = ids(), w = W(), Tinv = TR().inv;
+  if (!w.isLoaded(t.x, t.z) || inVillage(D, t.x, t.z)) return false;
+  const id = getB(t.x, t.y, t.z);
+  if (t.what === "dirt" ? !c.diggable.has(id) : !isLogBlock(id)) return false;
+  const drops = BF.rollDrops(id);
+  if (!Tinv.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false;
+  if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
+  for (const d of drops) Tinv.add(m.inv, d.id, d.count);
+  particles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
+  blockSound("break", id, t.x, t.y, t.z);
+  log("gather", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
+  return true;
+}
+// Levelling a field: "dig" removes the top soil block of the column (plants on it first), "raise" puts a dirt block on it. Nothing else is ever touched.
+function levelCell(m, R, D, t) {
+  const c = ids(), w = W(), Tinv = TR().inv;
+  if (!D.ready || getB(t.x, t.y, t.z) === 0 || w.heightAt(t.x, t.z) !== t.y) return false;
+  const id = getB(t.x, t.y, t.z);
+  if (!c.ground.has(id) || !looseAbove(getB(t.x, t.y + 1, t.z))) return false;
+  if (t.kind === "dig") {
+    const drops = BF.rollDrops(id);
+    const above = getB(t.x, t.y + 1, t.z);
+    if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); }
+    if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
+    for (const d of drops) if (BF.items[d.id] && Tinv.canFit(m.inv, [{ id: d.id, n: d.count }], [])) Tinv.add(m.inv, d.id, d.count);   // what does not fit is left in the ground
+    particles(t.x + 0.5, t.y + 0.8, t.z + 0.5, BF.blocks[id].color, 5, 0.7);
+    blockSound("break", id, t.x, t.y, t.z);
+    log("dig", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
+    return true;
+  }
+  if (cnt(m, c.dirt) < 1) return false;
+  const above = getB(t.x, t.y + 1, t.z);
+  if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); }
+  if (!w.setBlock(t.x, t.y + 1, t.z, c.dirt)) return false;
+  Tinv.remove(m.inv, c.dirt, 1);
+  particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[c.dirt].color, 4, 0.7);
+  blockSound("place", c.dirt, t.x, t.y + 1, t.z);
+  log("raise", m, { at: [t.x, t.y + 1, t.z] });
+  return true;
 }
 // farm tasks inside worldgen farm plots are fine for harvest/plant (those are the village fields); new blocks need free ground
 function freeCellOrFarm(R, D, t) { return t.kind === "harvest" || t.kind === "plant" || t.kind === "fill" ? inArea(D, t.x, t.z) : freeCell(R, D, t.x, t.z); }
@@ -610,6 +869,7 @@ function freeCellOrFarm(R, D, t) { return t.kind === "harvest" || t.kind === "pl
 function farmAI(m, dt, out) {
   const R = m.village;
   const D = vdata(R), fs = m.farm || (m.farm = newFarm()), ai = m.ai;
+  ensureKit(m); ensureCover(D, m);
   if (fs.breakT > 0) { fs.breakT -= dt; return false; }
   if (!fs.task) {
     if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = ACT[fs.task.kind]; fs.t = 0; claims.set(fs.task.k, m); }
@@ -630,9 +890,9 @@ function farmAI(m, dt, out) {
   if (fs.t > (t.max || TASK_MAX)) { endTask(m, fs, false); return true; }
   ai.mode = "idle"; ai.t = 2;
   if (fs.stage === "walk") {
-    const ty = t.ty != null ? t.ty : t.y;
-    const st = travel(m, fs, dt, out, t.x, ty, t.z, m.def.speed * 1.1);
-    if (st === "failed") { endTask(m, fs, false); return true; }
+    const st = t.sx != null ? travel(m, fs, dt, out, t.sx, t.sy, t.sz, m.def.speed * 1.1)      // a bucket is filled from a cell beside (or over the wall of) the water
+      : travel(m, fs, dt, out, t.x, t.ty != null ? t.ty : t.y, t.z, m.def.speed * 1.1);
+    if (st === "failed") { log("giveup", m, { task: t.kind, why: "no path", at: [t.x, t.y, t.z] }); endTask(m, fs, false); return true; }
     if (st === "arrived") { fs.stage = "act"; fs.actT = t.kind === "tend" ? rnd(2, 4) : ACT[t.kind]; ai.swingT = t.kind === "tend" ? 0 : 0.35; }
     return true;
   }
@@ -644,6 +904,7 @@ function farmAI(m, dt, out) {
     let okDone = false;
     try { okDone = perform(m, fs, R, D); } catch (e) { console.error(e); }
     if (okDone && t.kind !== "tend" && t.kind !== "craft") ai.swingT = 0.35;
+    if (!okDone) log("giveup", m, { task: t.kind, why: "cell changed", at: [t.x, t.y, t.z] });
     endTask(m, fs, okDone);
   }
   return true;
@@ -779,7 +1040,7 @@ function ai(m, dt, out) {
     return false;
   }
   if (shopAI(m, dt, out)) { if (m.farm && m.farm.task) endTask(m, m.farm, true); return true; }
-  if (m.profession === "farmer" && m.village && !m.child) return farmAI(m, dt, out);
+  if (m.profession === "farmer" && m.village && m.jobsite && !m.child) return farmAI(m, dt, out);   // a farmer works from its composter
   return false;
 }
 let acc = 0;
@@ -802,6 +1063,12 @@ function tick(dt) {
       if (!scanned.has(m.village)) { scanned.add(m.village); scanStep(m.village, vdata(m.village), SCAN_COLS); }
     }
   }
+  const nowS = performance.now() / 1000;
+  for (const R of wantVillages) {                       // builders asking for water: keep their village's water ring scanned a while
+    const D = R._life;
+    if (!D || nowS - D.want > 120) { wantVillages.delete(R); continue; }
+    if (!scanned.has(R)) scanStep(R, D, SCAN_COLS);
+  }
 }
 // Butchers and fishermen cook the raw meat / fish they hold (conversion, nothing is created): up to 8 a day.
 function cookDaily(m, day) {
@@ -819,7 +1086,7 @@ function cookDaily(m, day) {
     }
   }
 }
-const NAMES = { harvest: "Harvesting", plant: "Planting", till: "Tilling farmland", border: "Edging a bed", water: "Watering a new bed", fill: "Filling a bucket", craft: "Baking bread", tend: "Tending crops" };
+const NAMES = { dig: "Levelling a field", raise: "Filling in a field", gather: "Gathering", harvest: "Harvesting", plant: "Planting", till: "Tilling farmland", border: "Edging a bed", water: "Watering a new bed", fill: "Filling a bucket", craft: "Baking bread", tend: "Tending crops" };
 function statusText(m) {
   if (!m) return "";
   if (m.starving) return "Too hungry to trade";
@@ -828,6 +1095,7 @@ function statusText(m) {
     const t = m.farm.task;
     if (t.kind === "craft" && t.hay) return "Making hay bales";
     const b = t.kind === "harvest" || t.kind === "plant" ? BF.blocks[getB(t.x, t.y, t.z)] : null;
+    if (t.kind === "gather") return t.what === "dirt" ? "Gathering dirt" : "Gathering wood";
     return NAMES[t.kind] + (t.kind === "harvest" && b && b.name ? " " + b.name : "");
   }
   if (FD().available(m) < FD().rate(m)) return "Hungry";
@@ -840,7 +1108,7 @@ function stats(m) {
   return { today: s && s.total ? s.farm / s.total : 0, yesterday: p && p.total ? p.farm / p.total : null, farm: s.farm, total: s.total, counts: fs.counts,
     harvested: fs.harvested || 0, tilled: fs.tilled || 0, bordered: fs.bordered || 0, watered: fs.watered || 0, task: fs.task && fs.task.kind };
 }
-function reset() { claims.clear(); LOG.length = 0; for (const p of pool) BF.scene && BF.scene.remove(p.mesh); pool.length = 0; acc = 0; }
+function reset() { wantVillages.clear(); claims.clear(); LOG.length = 0; for (const p of pool) BF.scene && BF.scene.remove(p.mesh); pool.length = 0; acc = 0; }
 
 // ---------------------------------------------------------------- the player's buckets (hooked from player.js right-click)
 // Empty bucket: scoops the water source the player looks at (an infinite source refills). Water bucket: pours a source against
@@ -894,6 +1162,6 @@ if (BF.texKit) {
   addShaped(BF.I.bucket, 1, ["I I", " I "], { I: BF.I.iron_ingot }, "3 Iron Ingots in a V → Bucket");
 });
 
-BF.villageLife = { ai, tick, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, TILL_PER_FARMER,
-  _test: { findTill, findBorder, findWaterSpot, findFill, perform, dealWith, findFoodSeller, scanStep } };
+BF.villageLife = { ai, tick, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
+  _test: { findTill, findBorder, findWaterSpot, findFill, findGather, planTask, pickPlot, perform, dealWith, findFoodSeller, scanStep, inRange } };
 })();
