@@ -86,7 +86,7 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
     mountain biome thresholds are +35 vs v1 (slopes y115, peaks y135).
   - Rivers (js/rivers.js `BF.rivers`): a jittered 96-block node lattice with a smooth macro potential (terrain without local hills + a bias toward the
     ocean); each node flows to its steepest lower neighbour (within 2 nodes), basins spill over their lowest rim. Sources (inland, likelier when high) whose
-    chain reaches the sea within 80 links become rivers; the water surface never rises downstream (drops about 1 block every 50 blocks, in steps), width
+    chain reaches the sea within 80 links become rivers; the water surface never rises downstream (it falls in 1-block steps), width
     grows toward the sea. Everything is a pure function of the seed (sources in reach of a query are traced on demand and cached). `climate2` carves the
     channel and a flat floodplain around it into the terrain; river columns report `C.wl` > sea level and `C.rv`.
   - Caves: the coarse cave grid now covers y up to 200 (`GY_MAX`).
