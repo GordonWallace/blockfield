@@ -1663,7 +1663,7 @@ function itemIcon(it) {
   const G = spriteGrid();
   const m = hex(it.color || "#ff00ff");
   const p = new Px(it.name);
-  const n = it.name;
+  const n = it.sprite || it.name;
   let outline = true;
   if (it.tool && SPRITES[it.tool.type]) SPRITES[it.tool.type](G, m);
   else if (n.endsWith("_ingot")) SPRITES.ingot(G, m);

@@ -166,6 +166,11 @@ function matchRecipe() {
   return null;
 }
 function recompute() {
+  for (const hook of BF.craftHooks || []) { // computed results (js/maps.js: paper around a map); the grid is consumed as usual
+    let special = null;
+    try { special = hook(grid, gw); } catch (e) { console.error(e); }
+    if (special && special.id !== undefined) { result = special; return; }
+  }
   const r = matchRecipe();
   result = r ? { id: r.out, count: r.n } : null;
 }
@@ -1179,7 +1184,7 @@ function closeScreen(silent) {
 const toSave = s => s ? { n: BF.items[s.id] ? BF.items[s.id].name : null, c: s.count } : null;
 function fromSave(o) {
   if (!o) return null;
-  const id = typeof o.n === "string" ? BF.I[o.n] : typeof o.id === "number" ? o.id : undefined;
+  const id = typeof o.n === "string" ? (BF.resolveItem ? BF.resolveItem(o.n) : BF.I[o.n]) : typeof o.id === "number" ? o.id : undefined;
   const count = Math.floor(o.c != null ? o.c : o.count);
   if (id === undefined || !BF.items[id] || id === 0 || !(count > 0)) return null;
   return { id, count: Math.min(count, stackOf(id)) };

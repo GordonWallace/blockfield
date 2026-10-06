@@ -774,6 +774,10 @@ function setViewModel(sel) {
     const mat = new THREE.MeshBasicMaterial({ map: BF.world.solidMat.map, vertexColors: true, alphaTest: 0.5, depthTest: false, transparent: it.render === "liquid" });
     vmMesh = new THREE.Mesh(cubeGeometry(id), mat);
     vmMesh.rotation.set(0.1, 0.75, 0);
+  } else if (BF.maps && BF.maps.textureFor(it)) { // filled map / compass: live canvas texture (js/maps.js)
+    const mat = new THREE.MeshBasicMaterial({ map: BF.maps.textureFor(it), transparent: true, alphaTest: 0.05, side: THREE.DoubleSide, depthTest: false });
+    vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(it.map ? 0.66 : 0.3, it.map ? 0.66 : 0.3), mat);
+    vmMesh.rotation.set(it.map ? -0.1 : 0, it.map ? -0.12 : -0.5, 0);
   } else {
     const mat = new THREE.MeshBasicMaterial({ map: iconTexture(id), transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, depthTest: false });
     vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), mat);
@@ -784,7 +788,10 @@ function setViewModel(sel) {
   vm.add(vmMesh);
 }
 function updateViewModel(dt) {
-  setViewModel(selectedItem());
+  const held = selectedItem();
+  setViewModel(held);
+  const heldIt = held && BF.items[held.id], mapHeld = !!(heldIt && heldIt.map);
+  if (heldIt && BF.maps && (heldIt.map || heldIt.name === "compass")) { try { BF.maps.heldTexture(heldIt); } catch (e) { console.error(e); } }
   const l = BF.world.daylight != null ? BF.world.daylight : 1;
   if (vmMesh && vmMesh.material && vmMesh.material.color && vmMesh !== hand) vmMesh.material.color.setScalar(Math.max(0.3, l));
   if (vmMesh === hand) hand.material.color.setHex(0xc8956b).multiplyScalar(Math.max(0.3, l));
@@ -793,7 +800,8 @@ function updateViewModel(dt) {
   const eating = eatT > 0;
   const eat = eating ? Math.sin(eatT * 25) * 0.02 : 0;
   const bx = Math.cos(bobPhase) * 0.025 * bobAmt, by = Math.abs(Math.sin(bobPhase)) * 0.03 * bobAmt;
-  vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
+  if (mapHeld) vm.position.set(0.16 + bx * 0.5, -0.1 - by * 0.5, -0.66);   // a held map is shown big, in front of the chest
+  else vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
   vm.rotation.set(-s * 0.9, s * 0.4, 0);
   vm.visible = started && !P.dead;
 }
@@ -1131,6 +1139,10 @@ function secondaryDown() {
     return true;
   }
   if (BF.villageLife && BF.villageLife.useBucket && BF.villageLife.useBucket(it, target)) { swing(); placeCd = PLACE_REPEAT; return true; }   // buckets (js/villagelife.js)
+  if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
+    const msg = BF.maps.use(sel, it);
+    if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+  }
   if (it.food) { if (P.hunger < P.maxHunger) { if (eatT <= 0) eatT = 0.0001; return true; } return false; }
   if (it.places === "sign" && target) { // signs (js/signs.js): standing on a top face, wall sign on a side face; opens the editor
     if (!(BF.signs && BF.signs.place(target, it))) return false;

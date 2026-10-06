@@ -361,13 +361,23 @@ Columns: value given by the player, value received, rho (received / given). A vi
 | 1 | 22 paper > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
 | 1 | 1 emerald > 11 glass | 1.00 | 0.88 | 0.88 | buy from villager |
 | 1 | 28 sugar_cane > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+| 1 | 5 iron_ingot > 2 emerald | 2.50 | 2.00 | 0.80 | sell to villager (compass ingredient) |
 | 2 | 14 glass > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
 | 2 | 1 emerald > 18 paper | 1.00 | 0.90 | 0.90 | buy from villager |
+| 2 | 1 gold_ingot > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager (compass ingredient) |
 | 3 | 5 emerald > 2 lantern | 5.00 | 4.40 | 0.88 | buy from villager |
 | 3 | 1 lantern > 2 emerald | 2.20 | 2.00 | 0.91 | sell to villager |
+| 3 | 3 emerald > 1 compass | 3.00 | 3.20 | 1.07 | buy from villager (crafted by the cartographer, never in its starting stock) |
+| 3 | 2 compass > 5 emerald | 6.40 | 5.00 | 0.78 | sell to villager |
 | 4 | 2 emerald > 22 glass | 2.00 | 1.76 | 0.88 | buy from villager |
 | 4 | 2 emerald > 36 paper | 2.00 | 1.80 | 0.90 | buy from villager |
+| 4 | 4 emerald > 1 blank_map_1 | 4.00 | 3.60 | 0.90 | buy from villager (crafted: 8 paper + compass; never in its starting stock) |
 | 5 | 7 emerald > 3 lantern | 7.00 | 6.60 | 0.94 | buy from villager |
+
+Value table additions: compass 3.2 (4 iron ingots 2.0 + gold ingot 1.2), blank_map_1 3.6 (compass + 8 paper 0.4). Compasses and maps are crafted
+by the cartographer at its table (js/cartography.js), so they are not restocked (`PRODUCE` is unchanged) and not in the starting stock; "Out of stock"
+until it has made one. The cartographer's buy-side ingredients (paper, iron, gold) are also what it shops for from other villagers: the armorer's
+`1 emerald > 2 iron_ingot` / `3 emerald > 2 gold_ingot` and the librarian's `1 emerald > 18 paper` at the usual price and stock rules.
 
 ### nitwit
 
@@ -481,8 +491,8 @@ Old tables: 179 offers across 13 trading professions (plus a merged "smith" list
 | leatherworker | 3 | 4 emerald > 1 leather_horse_armor | item(s) not in game: leather_horse_armor (silently dropped by the old parser) |
 | leatherworker | 4 | 6 emerald > 1 saddle | item(s) not in game: saddle (silently dropped by the old parser) |
 | leatherworker | 5 | 6 emerald > 1 saddle | item(s) not in game: saddle (silently dropped by the old parser) |
-| cartographer | 1 | 7 emerald > 1 map | item(s) not in game: map (silently dropped by the old parser) |
-| cartographer | 3 | 1 compass > 1 emerald | item(s) not in game: compass (silently dropped by the old parser) |
+| cartographer | 1 | 7 emerald > 1 map | now in the game as `4 emerald > 1 blank_map_1` (level 4); a filled map is made by using it |
+| cartographer | 3 | 1 compass > 1 emerald | now in the game as `2 compass > 5 emerald` (level 3) |
 | cartographer | 4 | 7 emerald > 1 item_frame | item(s) not in game: item_frame (silently dropped by the old parser) |
 
 ### unfair (122)

@@ -1090,6 +1090,7 @@ function villagerAI(m, dt, out) {
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
+  if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.jobsite && BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite (js/jobs.js)
   // farmers sometimes go tend the village fields
   if (m.profession === "farmer" && V && ai.mode === "idle" && ai.t < 0.2 && Math.random() < 0.5 && BF.B.farmland != null) {
