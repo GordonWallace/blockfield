@@ -61,6 +61,22 @@ function run(env, cur, ok, md5) {
         if (lo === -4) for (let lz = 0; lz < 16; lz += 5) for (let lx = 0; lx < 16; lx += 5) ok(blk(lx, -64, lz) === B.bedrock, `${tag}: no bedrock at -64`);
       }
     }
+    // tall structures: every biome that builds big trees / spikes / villages must fit in its band (nothing above hi in the larger range)
+    const want = { 16: "jungle", 18: "old taiga", 20: "ice spikes", 9: "dark forest", 15: "sparse jungle", 11: "mangrove", 14: "savanna", 6: "forest", 17: "taiga", 5: "plains", 22: "meadow", 12: "desert" };
+    const got = {};
+    for (let z = -30000; z <= 30000 && Object.keys(got).length < Object.keys(want).length * 1; z += 700) for (let x = -30000; x <= 30000; x += 700) {
+      const id = W.biomeAt(x, z).id; if (want[id] && (got[id] || (got[id] = [])).length < 4) got[id].push([x >> 4, z >> 4]);
+    }
+    if (process.env.VERBOSE) console.log("biome sweep:", Object.keys(got).map(k => want[k] + "x" + got[k].length).join(" "));
+    for (const id in got) for (const [bx, bz] of got[id]) for (let dz = 0; dz < 3; dz++) for (let dx = 0; dx < 3; dx++) {
+      const cx = bx + dx, cz = bz + dz, band = W.generateBand(cx, cz);
+      const rb = Math.max(-4, band.lo - 1), up = W.generateRange(cx, cz, rb, band.hi + 4), off = (band.hi - rb) * 4096;
+      let bad = -1; for (let i = off; i < up.length; i++) if (up[i] !== 0) { bad = i; break; }
+      chunksDone++;
+      ok(bad < 0, `seed ${seed} sc ${scale} ${want[id]} chunk ${cx},${cz}: blocks above band (y ${bad < 0 ? 0 : Math.floor((bad - off) / 256) + band.hi * 16}) id ${bad < 0 ? 0 : up[bad]}`);
+      let diff = -1; for (let i = 0; i < band.vox.length; i++) if (up[(band.lo - rb) * 4096 + i] !== band.vox[i]) { diff = i; break; }
+      ok(diff < 0, `seed ${seed} sc ${scale} ${want[id]} chunk ${cx},${cz}: range/band mismatch`);
+    }
     // windows split anywhere concatenate to the same blocks (and match the band where they overlap)
     for (const [cx, cz] of [[0, 0], [37, -21], [-100, 55], [spots[1][1] >> 4, spots[1][2] >> 4]]) {
       const b = W.generateBand(cx, cz), lo = b.lo, hi = b.hi;

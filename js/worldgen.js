@@ -419,7 +419,7 @@ function relief3(x, z, detail) {
   const land = smooth(-0.13, -0.02, c);
   const wet = smooth(-0.35, 0.45, hu), hot = smooth(-0.1, 0.45, t);
   const d2 = x * x + z * z, home = 1 - smooth(360000, 2250000, d2);
-  const S = Math.min(smooth(0.0, 0.38, c), Math.max(smooth(-0.45, -0.1, K.pm), home));
+  const S = Math.min(smooth(0.06, 0.55, c), Math.max(smooth(-0.6, -0.3, K.pm), home));
   const amp = 6 + 9 * wet + 10 * wet * hot + 4 * smooth(-0.2, 0.2, e < 0 ? -e : 0);
   const hA = lerp(5, amp, land);
   const low = contBase3(c) + hills * hA + 2.5 * wet * land;
@@ -431,7 +431,7 @@ function relief3(x, z, detail) {
   // foothills along the escarpment
   const fa = 4 * S * (1 - S);
   if (fa > 0.02) h += fa * (70 * (noise.fbm(x / 420 + 3.3, z / 420 - 8.8, detail ? 3 : 2) + 0.15) + (detail ? hills * 22 : 0));
-  const m = smooth(-0.15, -0.44, e) * smooth(-0.06, 0.1, c);
+  const m = smooth(-0.15, -0.44, e) * smooth(-0.06, 0.1, c) * (1 - 0.97 * home);
   if (m > 0) {
     // ridged ranges: three octaves with explicit gains (steepness stays playable), amplitude up to ~1300 above the base
     const q = Math.sqrt(SC), L1 = 3200 * q;
@@ -525,7 +525,7 @@ function biomeAt(x, z) {
   climate(Math.floor(x), Math.floor(z));
   const id = C.biome;
   let name = NAMES[id];
-  if (id === OCEAN) name = (C.h < 36 ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
+  if (id === OCEAN) name = (C.h < (GEN >= 3 ? -30 : 36) ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
   else if (id === RIVER && C.tb === 0) name = "Frozen River";
   return { name, id, height: C.h, temperature: +C.t.toFixed(2), humidity: +C.hu.toFixed(2) };
 }
@@ -1251,11 +1251,11 @@ function caves3(vox, Y0, Y1, cx, cz) {
       const iy = (y >> 2) - rb, fy = (y & 3) / 4, dd = h - y;
       const a = g3a[iy] + (g3a[iy + 1] - g3a[iy]) * fy, bb = g3b[iy] + (g3b[iy + 1] - g3b[iy]) * fy;
       // spaghetti tunnels (intersection of two noise zero-sets), wider deeper down
-      const thr = y < MINY + 34 ? 0.0105 : 0.0072 + 0.0036 * (dd >= 160 ? 1 : dd <= 0 ? 0 : dd / 160);
+      const thr = y < MINY + 34 ? 0.0105 : 0.0066 + 0.0022 * (dd >= 160 ? 1 : dd <= 0 ? 0 : dd / 160);
       let carve = a * a + bb * bb < thr;
       if (!carve && y > MINY + 8 && dd > 14) {
         const c3 = g3c[iy] + (g3c[iy + 1] - g3c[iy]) * fy;           // large caverns
-        carve = c3 > 0.56 + (dd < 44 ? (44 - dd) * 0.02 : 0) + (y < MINY + 30 ? (MINY + 30 - y) * 0.03 : 0);
+        carve = c3 > 0.64 + (dd < 44 ? (44 - dd) * 0.02 : 0) + (y < MINY + 30 ? (MINY + 30 - y) * 0.03 : 0);
       }
       if (carve) {
         if (y < Y1) { const v = vox[i]; if (v !== WATER && v !== BEDROCK && v !== ICE) vox[i] = 0; }
@@ -1271,7 +1271,7 @@ function caves3(vox, Y0, Y1, cx, cz) {
 // kind 'd': y range by depth below the chunk's centre surface [hc - b, hc - a]; kind 'y': absolute [a, b].
 const ORE3 = [
   // salt, veins per bucket, size, kind, a, b, block, deepslate variant, depth-weighted (more near the surface)
-  [201, 1.3, 30, "d", 8, 500, "gravel"], [202, 0.25, 18, "d", 20, 300, "clay"], [203, 1.1, 22, "d", 6, 300, "dirt"],
+  [201, 1.3, 30, "d", 8, 99999, "gravel"], [202, 0.25, 18, "d", 20, 300, "clay"], [203, 1.1, 22, "d", 6, 300, "dirt"],
   [211, 6.5, 9, "d", 6, 99999, "coal_ore", "deepslate_coal_ore", 1],
   [212, 6.0, 7, "d", 6, 99999, "iron_ore", "deepslate_iron_ore", 1],
   [217, 5.5, 9, "d", 6, 99999, "copper_ore", "deepslate_copper_ore", 1],
@@ -1281,7 +1281,7 @@ const ORE3 = [
   [216, 3.5, 6, "y", -64, 16, "redstone_ore", "deepslate_redstone_ore"],
   [219, 0.03, 1, "y", -64, 40, "emerald_ore", "deepslate_emerald_ore"],
   [218, 1.1, 1, "d", 3, 500, "emerald_ore", "deepslate_emerald_ore", 0, "mtn"],
-  [221, 1.6, 70, "d", 5, 600, "granite"], [222, 1.6, 70, "d", 5, 600, "diorite"], [223, 1.6, 70, "d", 5, 600, "andesite"],
+  [221, 1.6, 70, "d", 5, 99999, "granite"], [222, 1.6, 70, "d", 5, 99999, "diorite"], [223, 1.6, 70, "d", 5, 99999, "andesite"],
   [224, 1.0, 60, "y", -64, 16, "tuff", "tuff"], [225, 0.35, 40, "d", 30, 250, "dripstone_block"],
   [231, 0.4, 14, "d", 10, 99999, "water", "water"],               // water pockets at every height
   [232, 0.8, 12, "y", -64, -8, "magma_block", "magma_block"],     // there is no lava block: deep magma pockets
