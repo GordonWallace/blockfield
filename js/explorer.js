@@ -23,7 +23,8 @@ const CELL = 16;                          // patch size in map pixels
 const CELL_DONE = 0.9;                    // a patch is explored when this share of its pixels is
 const MAX_FOR_SALE = 2;                   // stops fetching maps once it carries this many filled ones (waiting for a buyer)
 const SAMPLE = 700;                       // pixel samples per call to BF.maps.explore, ~5 calls per second
-const PLAYER_RANGE = 85;                  // patches further than this from the player are left alone (villagers despawn at 100)
+const PLAYER_RANGE = 85;                  // without BF.villageSim (js/villagesim.js): patches further than this from the player are left alone (villagers despawn at 100)
+const EDGE = 24;                          // a patch must have loaded terrain this far around it, so the explorer never stands at the edge of the loaded area (a villager on an unloaded chunk is removed)
 const WORK_START = 0.03, WORK_END = 0.45; // sky.time window of the working day (same as js/cartography.js)
 const TRADE_PAUSE = 1.6;
 const LOG = [];
@@ -135,6 +136,7 @@ function travel(m, st, dt, out, tx, tz, speed, radius) {
 }
 
 // ---------------------------------------------------------------- exploring
+const inLoaded = (x, z) => { const W = BF.world; return W.isLoaded(x, z) && W.isLoaded(x + EDGE, z) && W.isLoaded(x - EDGE, z) && W.isLoaded(x, z + EDGE) && W.isLoaded(x, z - EDGE); };
 // Next patch of map `c` to visit: the nearest unexplored, loaded one near the player that has not been given up. null + reason otherwise.
 function pickTarget(m, c) {
   const M = BF.maps, d = c.d, X = state(m), s = M.scale(d.size), ox = M.originX(d.size, d.zx), oz = M.originX(d.size, d.zz);
@@ -146,7 +148,7 @@ function pickTarget(m, c) {
     if ((X.avoid[k] || 0) >= 2) { avoided++; continue; }
     const wx = Math.floor(ox + (ci * CELL + CELL / 2) * s), wz = Math.floor(oz + (cj * CELL + CELL / 2) * s);
     open++;
-    if (!BF.world.isLoaded(wx, wz) || Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE) continue;
+    if (!inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE)) continue;
     const dist = Math.hypot(wx + 0.5 - m.position.x, wz + 0.5 - m.position.z);
     if (dist < bd) { bd = dist; best = { ci, cj, wx, wz, k }; }
   }
