@@ -407,8 +407,10 @@ function plantFor(m, x, y, z) {
   for (const id of c.seeds) if (cnt(m, id) > (best == null ? 0 : cnt(m, best))) best = id;
   return best;
 }
+const CROP_CAP = 64;              // a farmer stops harvesting a crop while it holds a full stack of it (sold or eaten first)
 function dropsFit(m, cropId) {
   const c = ids(), seed = c.mature.get(cropId), main = BF.blocks[cropId].drop;
+  if (cnt(m, main) >= CROP_CAP) return false;
   const adds = [{ id: main, n: 4 }];
   if (seed !== main) adds.push({ id: seed, n: 3 });
   return TR().inv.canFit(m.inv, adds, []);
@@ -763,6 +765,10 @@ function perform(m, fs, R, D) {
     if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
     const drops = BF.rollDrops(id);
     for (const d of drops) Tinv.add(m.inv, d.id, d.count);
+    for (const d of drops) {                     // spare seeds beyond a stack go on the compost heap
+      const it = BF.items[d.id], extra = it && it.plants != null && !it.food ? cnt(m, d.id) - CROP_CAP : 0;
+      if (extra > 0) Tinv.remove(m.inv, d.id, extra);
+    }
     particles(t.x + 0.5, t.y + 0.3, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
     blockSound("break", id, t.x, t.y, t.z);
     m.farm.harvested = (m.farm.harvested || 0) + 1;
@@ -875,12 +881,13 @@ function farmAI(m, dt, out) {
       const t = think(m, fs, R, D);
       if (!t) { fs.breakT = rnd(5, 10); fs.idleWork = false; return false; }
       fs.task = t; fs.stage = t.kind === "craft" ? "act" : "walk"; fs.t = 0; fs.actT = ACT[t.kind]; fs.navFail = 0; fs.idleWork = true;
+      t.max = TASK_MAX + (t.x != null ? 2.5 * Math.hypot(t.x + 0.5 - m.position.x, t.z + 0.5 - m.position.z) : 0);   // long walks to a far field get more time
       if (t.k) claims.set(t.k, m);
     }
   }
   const t = fs.task;
   fs.t += dt;
-  if (fs.t > TASK_MAX) { endTask(m, fs, false); return true; }
+  if (fs.t > (t.max || TASK_MAX)) { endTask(m, fs, false); return true; }
   ai.mode = "idle"; ai.t = 2;
   if (fs.stage === "walk") {
     const st = t.sx != null ? travel(m, fs, dt, out, t.sx, t.sy, t.sz, m.def.speed * 1.1)      // a bucket is filled from a cell beside (or over the wall of) the water

@@ -510,3 +510,47 @@ hooks) and `if (m.child) BF.breeding.childMove(m, dt, out)` after `wanderAI`; `r
 - **Not done / notes.** The bed scan is a box test, so a bed inside the village box that belongs to nobody (e.g. a player's base next to the village) counts. Children have no
   home house (`m.home` null): in the morning they just wander off from the bed. Grown newborns keep their jobsite through a save only via trading.js pack's `prof`/`job`
   fields (jobs.js); their profession itself is also kept in the `bred` meta.
+
+## Signs (js/signs.js, js/village-names.js)
+Loaded after commands.js (index.html: `village-names.js`, `signs.js`). Blocks/items in `blocks.js` between the `// ---- sign pack ----` markers (append-only; `signDefs()`): per wood species
+(`BF.WOOD_SPECIES` order) 4 standing signs `<sp>_sign_<nesw>` then 4 wall signs `<sp>_wall_sign_<nesw>` (64 ids, hidden), field `sign: {wood, wall: 0|1, f}` (f = the direction the text faces;
+a wall sign hangs on the block at pos - `DIRS[f]`), `render:"model", model:"sign"`, not solid, axe, hardness 1, `drop`/`item` = `<sp>_sign`; tiles = the species planks (+ `post: <sp>_log` for the post box).
+Items `<sp>_sign` x8 (`places: "sign"`, stack 16, tab functional, fuel 10 s), recipe 6 planks of one wood + 1 stick (`PPP`,`PPP`,` S `) -> 3 signs (`BF.recipeHooks` in signs.js), icon `SPRITES["<sp>_sign"]`.
+- **Placing** (player.js -> `BF.signs.place(target, item)`): top face (or a replaceable plant) = standing sign facing the player (snaps to the facing of an adjacent standing sign of the same wood
+  in the same plane so it merges), side face = wall sign on that block, bottom face refused. Sneak + right click on a sign with a sign extends it: its left/right side adds a column, the top of a standing
+  sign stacks another standing sign, top/bottom of a wall sign another wall sign. Support: wall sign needs a solid block behind it; standing sign a solid block below or the same standing sign
+  (stacking). Signs pop (one item each, none in creative) when the support goes (`world.setBlock` -> `BF.signs.onSet`, chains up stacks). The editor opens right after placing (vanilla).
+- **Groups.** Signs with the same block id (same wood, kind and facing) that touch left/right or above/below in their plane form a connected run, split deterministically into rectangles of at most
+  `MAXW` 4 x `MAXH` 4: repeatedly the largest free rectangle, ties to the lowest row, then the leftmost column (as read from the front), then the wider one (5 in a row = 4 + 1; an L of 2 + 1 on top =
+  2x1 + 1x1). Different woods / kinds / facings never merge. The anchor of a group is its bottom-left sign (`BF.signs.groupAt(x,y,z)` -> `{anchor, W, H, key, f, wall, wood, id}`).
+  Rendering (`world.MODELS.sign`, models now get world coords): one seamless board; wall boards span 4/16 of the bottom row to 12/16 of the top row (2/16 thick against the wall), standing boards
+  from 8/16 (on posts) or from the floor when stacked on another standing sign, up to the top row; posts (the species log tile) under the bottom row only: one for a 1-wide group, else under the two end columns.
+- **Text.** Per group, keyed by the anchor `"x,y,z"` in a per-world map (saved; independent of chunk loading). Capacity: one sign = 4 lines x 15 characters (vanilla); a W x H group = `4H` lines x `15W`
+  characters (3x2 = 8 x 45 = 6x a single sign). `BF.signs.layout(text, cols) -> {lines, pos}` = greedy word wrap (explicit newlines kept, the breaking space is consumed, words longer than a line are split),
+  used by both the editor and the world; text that would need more than `rows` lines is refused (`clampText`). When a group changes shape: each old group's text moves to the new group containing its
+  old anchor (else the one with most of its old signs); a new group receiving several texts joins them top-to-bottom, left-to-right with newlines and cuts what does not fit; an unchanged group keeps its entry.
+- **Editor** (`openEditor(x,y,z)`, right click on a sign when not sneaking with an item; player.js `invOpen()` counts it as a screen): a modal board drawn with the same wood tile, the same aspect as the board
+  and the same text renderer as the world (centred lines, fixed character cells, caret), over an invisible textarea; typing past capacity is blocked; shows lines used / characters left. A window
+  capture-phase keydown listener (registered at load) swallows every key while open; Esc (or Done, or Ctrl+Enter) saves and closes; `P.uiOpen()/uiClose()` release/re-take the pointer lock.
+- **In-world text**: one `CanvasTexture` plane per group with text (192 px per block, `IBM Plex Mono`, dark ink), just in front of the board, polygon offset, rebuilt only when text/shape changes,
+  removed and disposed when the group goes or its chunk unloads; colour = sky term (column top, `world.daylight`) / block light like the mesher, refreshed every 0.4 s.
+- **Auto signs.** `BF.signs.registerAuto(kind, fn(entry, anchorKey, group) -> text|null)`; entries `{t, auto: kind, ak: key}`. Every half in-game hour (`floor((sky.day + sky.time) * 48)` changes)
+  each auto sign whose anchor chunk is loaded is recomputed and its text rewritten if it changed. Auto signs cannot be edited (the editor opens read-only). Breaking any sign of an auto board breaks
+  the whole board: one sign item per sign block (none in creative), the auto key is remembered in `seen` (saved) so it never comes back; nothing can craft an auto sign. Kinds: `village`.
+- **Village names**: `BF.VILLAGE_NAMES` (200 real New Zealand towns, js/village-names.js). `BF.signs.nameFor([rx, rz], spawn)`: a per-seed shuffle indexed by `rx + 9 rz` (no repeats in any 9x9 block of
+  village regions; the spawn village offset by 100). Stored as `v.name` on the worldgen village (so `rec.wg.name`), copied to the mobs.js record as `rec.name`; `BF.signs.villageName(v | "x,z")`.
+  `/locate village` prints it.
+- **Entry arch** (`planArch(v, ctx)` called by worldgen `layoutVillage` before the village box is computed; `drawArch(v, set, palette)` at the end of `drawVillage`; deterministic): a random edge
+  (hash of the village position and the seed), over the main road leaving through it at its end (or a cell beyond / up to 14 cells before it), else another edge, else the middle of an edge of the
+  village extent with a path under it. Footprint 5 wide: two pillars (palette `corner`, foundation block under) at +-2 from the road centre, lintel `top` = highest ground + 5 (logs at the ends,
+  `log` in between), a 3-block crown (`wall`/`roof`), a hanging lantern; the passage is cleared. Sign: 3x1 standing signs (wood by style: oak, birch (desert), spruce (snowy/taiga), acacia) one cell
+  outside the arch on a random side (offsets 2..4), facing out, ground filled with the foundation block. Checks: pillars off plots (second pass: on a plot ring but not in a building or its door front),
+  signs and passage off plots, roads, lamps and decor; dry land; slopes <= 2. `v.arch = {key, x, z, d, L, top, f, wood, signId, anchor, pillars, under, lintel, crown, signs, box}`; `box` is added to the
+  village box (so trees/caves/builders keep clear; builder.js `obstacles` adds `wg.arch.box` + 2). The generated sign becomes an auto entry (`autoPlan`) once all three blocks are loaded; text:
+  `Village of <name>` / `Villagers: N` / `Beds: M`, N = `BF.breeding.villagerCount(rec)` (roster - killed + newborns) or the deterministic roster when the record does not exist yet, M =
+  `BF.breeding.bedCount(rec)` (falls back to the worldgen house beds still standing).
+- **Save**: snapshot field `signs = {v:1, data: [[anchor, text, auto|null, autoKey|null]], seen: [autoKeys]}` (`serialize/deserialize`; old saves have none). Sign blocks are ordinary edits.
+- **API** `BF.signs = {get(x,y,z) -> {anchor, W, H, wall, f, wood, cells, text, auto, autoKey, cols, rows, lines} | null, setText(x,y,z,text, force?), groupAt, layout, clampText, capacity(W,H),
+  place, interact, openEditor, closeEditor, isOpen, registerAuto, runAuto, planArch, drawArch, villageName, nameFor, serialize, deserialize, reset, isSign(id), signId(wood, wall, f), onSet}`.
+- **Not done / notes.** 4 facings only (vanilla 16 for standing signs); no back-side text, glow ink or dyes; signs have no collision (vanilla); the auto sign updates when its own chunk is loaded
+  (the village record needs the player within ~96 blocks, before that the counts come from worldgen); adding a sign next to an auto board can merge into it, which turns it into an ordinary sign.
