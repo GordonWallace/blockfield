@@ -10,25 +10,31 @@ const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328");
 const DUSK_HOR = C("#f08a50"), DUSK_GLOW = C("#ff7a3c"), DUSK_PINK = C("#d86a86");
 const CLOUD_DAY = C("#ffffff"), CLOUD_NIGHT = C("#1c2234"), CLOUD_DUSK = C("#f6b49a");
 
-// Cloud base for mile-high worlds (generator 3): a fixed height above the smoothed regional ground level (sampled from the
-// generator), so you walk under clouds on the plains and climb above them on peaks. Legacy worlds keep BF.H + 4.
-let cloudTarget = 196, cloudProbeT = 0;
+// Cloud base for mile-high worlds (generator 3): above the regional ground (generator samples on two rings around the camera:
+// the higher of average + 110 and upper quartile + 50), so you walk under clouds on the plains and on hills, and climb above
+// them only on real peaks. Teleports and big jumps re-probe at once and snap. Legacy worlds keep BF.H + 4.
+let cloudTarget = 196, regionGround = 64, cloudProbeT = 0, probeX = 1e9, probeZ = 1e9;
+const PROBE = [[0, 0]];
+for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; PROBE.push([Math.cos(a) * 96, Math.sin(a) * 96], [Math.cos(a + 0.39) * 256, Math.sin(a + 0.39) * 256]); }
 function updateCloudBase(dt) {
   const cam = BF.camera;
-  if (BF.H <= 192) { cloudTarget = sky.cloudBase = BF.H + 4; return; }
+  if (BF.H <= 192) { cloudTarget = sky.cloudBase = BF.H + 4; regionGround = BF.SEA; return; }
   cloudProbeT -= dt;
-  if (cam && cloudProbeT <= 0 && BF.worldgen && BF.worldgen.heightAt) {
-    cloudProbeT = 1;
-    let sum = 0, n = 0;
-    try { for (let k = 0; k < 9; k++) {
-      const a = k * 0.785398, r = k ? 192 : 0;
-      sum += Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(cam.position.x + Math.cos(a) * r), Math.floor(cam.position.z + Math.sin(a) * r))); n++;
-    } } catch (_) { sum = BF.SEA + 30; n = 1; }   // generator not ready yet
-    cloudTarget = Math.round(Math.max(BF.SEA + 110, sum / n + 80) / 4) * 4;
+  const jump = cam ? Math.abs(cam.position.x - probeX) + Math.abs(cam.position.z - probeZ) : 0, moved = jump > 64;
+  let snap = false;
+  if (cam && (cloudProbeT <= 0 || moved) && BF.worldgen && BF.worldgen.heightAt) {
+    cloudProbeT = 1; snap = jump > 256; probeX = cam.position.x; probeZ = cam.position.z;
+    const hs = [];
+    try { for (const o of PROBE) hs.push(Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(probeX + o[0]), Math.floor(probeZ + o[1])))); }
+    catch (_) { hs.length = 0; hs.push(BF.SEA + 30); }   // generator not ready yet
+    hs.sort((a, b) => a - b);
+    regionGround = hs.reduce((a, b) => a + b, 0) / hs.length;
+    const q3 = hs[Math.floor(hs.length * 0.75)];
+    cloudTarget = Math.round(Math.max(BF.SEA + 110, regionGround + 110, q3 + 50) / 4) * 4;
   }
   let b = sky.cloudBase;
-  if (!(b > BF.MIN_Y) || Math.abs(cloudTarget - b) > 400) b = cloudTarget;   // first frame and teleports snap
-  else b += (cloudTarget - b) * Math.min(1, dt * 0.6);
+  if (!(b > BF.MIN_Y) || snap || Math.abs(cloudTarget - b) > 150) b = cloudTarget;   // first frame and teleports snap
+  else b += (cloudTarget - b) * Math.min(1, dt * 0.5);
   sky.cloudBase = b;
 }
 const SKY_R = 480, SUN_D = 400, CLOUD_BASE = BF.H + 4, CLOUD_H = 5, CLOUD_RISE = 70, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
@@ -310,7 +316,7 @@ const sky = {
       let g = BF.world.heightAt(cam.position.x, cam.position.z);
       if (g < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) { try { g = BF.worldgen.heightAt(Math.floor(cam.position.x), Math.floor(cam.position.z)); } catch (_) { g = BF.SEA; } }   // before the first world exists
       let ref = Math.max(g, BF.SEA);
-      if (BF.H > 192) ref = Math.min(ref, cloudTarget - 80);   // the regional ground level (see updateCloudBase): steep peaks drop away fast
+      if (BF.H > 192) ref = Math.min(ref, regionGround);   // the regional ground level (see updateCloudBase): steep peaks drop away fast
       above = Math.max(0, cam.position.y - ref - 24);
     }
     scene.fog.near = d * 0.5 * (1 - 0.45 * wr - 0.15 * wt) + above; scene.fog.far = d * 0.95 * (1 - 0.25 * wr - 0.1 * wt) + above;
