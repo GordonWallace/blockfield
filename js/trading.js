@@ -96,9 +96,9 @@ const TRADES = {
     ["2 emerald > 24 raw_cod"],
   ],
   shepherd: [
-    ["11 wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald"],
+    ["11 wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald", "1 emerald > 9 wool"],   // wool sells from level 1: it is what the shepherd shears (js/shepherd.js)
     ["10 white_wool > 1 emerald", "1 emerald > 2 red_bed"],
-    ["1 emerald > 9 wool", "16 raw_mutton > 1 emerald", "1 emerald > 9 cooked_mutton"],
+    ["16 raw_mutton > 1 emerald", "1 emerald > 9 cooked_mutton"],
     ["3 emerald > 4 hay_bale"],
     ["2 emerald > 16 white_wool"],
   ],

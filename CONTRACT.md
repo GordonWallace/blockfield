@@ -658,5 +658,5 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - **Wheat.** `wheatWanted(m)`: under max(4, 2 per adult) wheat the shepherd wants to top up to ~5 days. villagelife.js `shopAI` buys it at the fair price (`VALUE.wheat_item`: 12 wheat per emerald) from the nearest villager
   with spare wheat, farmers first (`findWheatSeller`, `doWheatDeal`; status "Buying wheat"). Farmers bake only wheat above `WHEAT_SPARE` (24) and sell down to `WHEAT_SELF` (4).
 - **Mutton.** Shepherds cook their raw mutton daily like butchers (`cookDaily`, 8 a day) and sell it to hungry villagers through the normal food market (`findFoodSeller`), and to the player (shepherd L3: 1 emerald > 9 cooked_mutton).
-  Wool for sale to other villagers is not part of this module yet.
+  Wool: the shepherd keeps what it shears and offers it as `1 emerald > 9 wool` from level 1 (moved down from level 3), so any villager's trade logic (e.g. the furniture maker) can buy it.
 - Tests: `test/shepherd-check.js`, `test/shepherd-day.js`, `test/shepherd-misc.js` (`NODE_PATH=$(npm root -g) node test/run.js /tmp/x test/shepherd-day.js`).
