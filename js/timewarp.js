@@ -1,10 +1,10 @@
-// Fast-forward. Press F to cycle the simulation speed 1x -> 3x -> 5x -> 10x -> 100x -> 1000x -> 1x.
+// Fast-forward. Press F to cycle the simulation speed 1x -> 3x -> 5x -> 10x -> 100x -> 1000x -> 1x; Left arrow steps it up, Right arrow steps it down (both stop at the ends).
 // The game loop (main.js) runs its whole simulation step BF.warp.speed times per frame instead of scaling dt, so
 // the day/night cycle, mobs, villagers, crops, weather and animations all stay consistent, like a sped-up recording.
 // The player is not stepped: it keeps normal speed so you can still move around and observe.
 // BF.simNow() is the simulation clock in seconds: it advances only by simulated steps (not while paused), and every
 // cooldown / scan timer in the sim modules reads it instead of performance.now(), so they speed up with everything else.
-// API: BF.warp = { speed, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt), last, reset(), set(i), cycle(), BUDGET_MS, SPEEDS }
+// API: BF.warp = { speed, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt), last, reset(), set(i), cycle(), faster(), slower(), BUDGET_MS, SPEEDS }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -59,14 +59,18 @@ BF.warp = {
   },
   set(i) { idx = Math.max(0, Math.min(SPEEDS.length - 1, i | 0)); eff = SPEEDS[idx]; last = 1; shown = null; show(); },
   cycle() { this.set((idx + 1) % SPEEDS.length); },
+  faster() { this.set(Math.min(SPEEDS.length - 1, idx + 1)); },   // Left arrow: one step up, stops at 1000x
+  slower() { this.set(Math.max(0, idx - 1)); },                    // Right arrow: one step down, stops at 1x
   reset() { this.set(0); },
 };
 
 addEventListener("keydown", e => {
-  if (e.code !== "KeyF" || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if ((e.code !== "KeyF" && e.code !== "ArrowLeft" && e.code !== "ArrowRight") || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
   if (BF.state && BF.state.paused) return;   // menus, inventory, chat, death screen
-  BF.warp.cycle();
+  if (e.code === "ArrowLeft") { e.preventDefault(); BF.warp.faster(); }
+  else if (e.code === "ArrowRight") { e.preventDefault(); BF.warp.slower(); }
+  else BF.warp.cycle();
 });
 if (document.body) ui(); else addEventListener("DOMContentLoaded", ui);
 })();
