@@ -1045,7 +1045,7 @@ function placeShaped(sel, it) {
   }
   const into = BF.REPLACEABLE && BF.REPLACEABLE[t.id];
   const x = into ? t.x : t.x + n[0], y = into ? t.y : t.y + n[1], z = into ? t.z : t.z + n[2];
-  if (y < 0 || y >= BF.H || !W.isLoaded(x, z)) return false;
+  if (y < BF.MIN_Y || y >= BF.H || !W.isLoaded(x, z)) return false;
   if (sh.kind === "slab" && merge(x, y, z, wantTop)) return true; // placing next to/onto a slab whose open half faces us
   const cur = W.getBlock(x, y, z);
   if (cur !== 0 && BF.RENDER[cur] !== 3 && !(BF.REPLACEABLE && BF.REPLACEABLE[cur])) return false;
@@ -1065,7 +1065,7 @@ function placeLadder() {
     const into = BF.REPLACEABLE && BF.REPLACEABLE[t.id];
     x = into ? t.x : t.x + n[0]; y = t.y; z = into ? t.z : t.z + n[2];
   }
-  if (y < 0 || y >= BF.H || !W.isLoaded(x, z)) return false;
+  if (y < BF.MIN_Y || y >= BF.H || !W.isLoaded(x, z)) return false;
   const cur = W.getBlock(x, y, z);
   if ((cur !== 0 && !BF.REPLACEABLE[cur]) || BF.FLUID[cur]) return false;
   if (!BF.ladderSupport(W.getBlock(x - BF.DIRS[f][0], y, z - BF.DIRS[f][1]))) return false;
@@ -1204,7 +1204,7 @@ function secondaryDown() {
   // clicking a tall-grass style plant replaces it instead of placing beside it
   const into = BF.REPLACEABLE && BF.REPLACEABLE[target.id];
   const x = into ? target.x : target.x + target.normal[0], y = into ? target.y : target.y + target.normal[1], z = into ? target.z : target.z + target.normal[2];
-  if (y < 0 || y >= BF.H || !BF.world.isLoaded(x, z)) return false;
+  if (y < BF.MIN_Y || y >= BF.H || !BF.world.isLoaded(x, z)) return false;
   const cur = BF.world.getBlock(x, y, z);
   if (cur !== 0 && BF.RENDER[cur] !== 3 && !(BF.REPLACEABLE && BF.REPLACEABLE[cur])) return false;
   let placeId = sel.id;

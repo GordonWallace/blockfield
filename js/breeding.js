@@ -109,17 +109,12 @@ function scanBeds(rec) {
   const beds = [];
   for (const ck of chunks) {
     const c = W.chunks && W.chunks.get(ck);
-    if (c && c.vox) {
-      const found = [], vox = c.vox, maxY = Math.min(BF.H - 1, (c.maxY || BF.H - 1) + 1);
-      for (let y = 1; y <= maxY; y++) for (let lz = 0; lz < CS; lz++) {
-        const row = (y * CS + lz) * CS;
-        for (let lx = 0; lx < CS; lx++) {
-          const f = F[vox[row + lx]];
-          if (f < 0) continue;
-          const x = c.cx * CS + lx, z = c.cz * CS + lz;
-          if (inRects(rects, x, z)) found.push({ x, y, z, f });
-        }
-      }
+    if (c && c.secs) {
+      const found = [];
+      W.scanFlagged(c, F, (lx, y, lz, id) => {
+        const x = c.cx * CS + lx, z = c.cz * CS + lz;
+        if (inRects(rects, x, z)) found.push({ x, y, z, f: F[id] });
+      }, -1, BF.MIN_Y + 1);
       cache.set(ck, found);
       beds.push(...found);
     } else if (cache.has(ck)) beds.push(...cache.get(ck));

@@ -4,11 +4,20 @@
 const BF = (window.BF = window.BF || {});
 
 const CS = 16;      // chunk width/depth
-const H = 192;      // world height
-const SEA = 48;     // sea level (water surface is y = SEA)
-BF.CS = CS; BF.H = H; BF.SEA = SEA;
+// World limits are per world (BF.MIN_Y lowest y, BF.H exclusive top, BF.SEA sea level, BF.SY0/SY1 section range) and are set by
+// BF.setLimits(gen) (worldgen.init). Legacy generators (1, 2): 0 / 192 / 48; generator 3 (mile-high): -64 / 3072 / 0.
+// Never cache them at load time. See docs/MILE_HIGH_CONTRACT.md.
+if (!BF.setLimits) BF.setLimits = gen => {
+  const L = gen >= 3 ? [-64, 3072, 0] : [0, 192, 48];
+  BF.MIN_Y = L[0]; BF.H = L[1]; BF.SEA = L[2]; BF.SY0 = L[0] >> 4; BF.SY1 = L[1] >> 4;
+};
+if (BF.H == null) BF.setLimits(1);
+BF.CS = CS;
 
-const vIdx = (x, y, z) => (y * CS + z) * CS + x;      // index inside a chunk's vox array
+// A chunk is a 16x16 column of 16-high sections. c.secs[sy - c.lo] is a Uint16Array(4096) (index (ly << 8 | lz << 4 | lx)) or a
+// number (the whole section is that block id). Sections outside [c.lo, c.hi) are not loaded: below = stone, above = air.
+const SECN = 4096;
+const vIdx = (x, y, z) => (y * CS + z) * CS + x;      // index inside a legacy full-height window (y from 0)
 BF.vIdx = vIdx;
 const ckey = (cx, cz) => cx + "," + cz;
 
@@ -123,57 +132,131 @@ function chunkAt(x, z) { return world.chunks.get(ckey(Math.floor(x / CS), Math.f
 world.chunkAt = chunkAt;
 world.isLoaded = (x, z) => !!chunkAt(Math.floor(x), Math.floor(z));
 
-// Block id at integer world coords. Unloaded or out-of-range above -> 0 (air); below 0 -> bedrock.
+let STONE_ID = 0, BEDROCK_ID = 0;
+// Block in chunk c at local (lx, lz) and absolute y: below the loaded band stone (bedrock below MIN_Y), above it air.
+function cblock(c, lx, y, lz) {
+  if (y < c.y0) return y < BF.MIN_Y ? BEDROCK_ID : STONE_ID;
+  if (y >= c.y1) return 0;
+  const s = c.secs[(y >> 4) - c.lo];
+  return typeof s === "number" ? s : s[((y & 15) << 8) | (lz << 4) | lx];
+}
+world.chunkBlock = cblock;
+
+// Block id at integer world coords. Unloaded -> 0 (air); below MIN_Y -> bedrock; above H -> air.
 world.getBlock = function (x, y, z) {
-  if (y < 0) return BF.B.bedrock;
-  if (y >= H) return 0;
+  if (y < BF.MIN_Y) return BEDROCK_ID;
+  if (y >= BF.H) return 0;
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
   const c = chunkAt(x, z);
   if (!c) return 0;
-  return c.vox[vIdx(x - c.cx * CS, y, z - c.cz * CS)];
+  return cblock(c, x - c.cx * CS, y, z - c.cz * CS);
 };
 
 // Solid for collision. Unloaded chunks count as solid so nothing falls out of the world.
 world.isSolid = function (x, y, z) {
-  if (y < 0) return true;
-  if (y >= H) return false;
+  if (y < BF.MIN_Y) return true;
+  if (y >= BF.H) return false;
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
   const c = chunkAt(x, z);
   if (!c) return true;
-  return BF.SOLID[c.vox[vIdx(x - c.cx * CS, y, z - c.cz * CS)]] === 1;
+  return BF.SOLID[cblock(c, x - c.cx * CS, y, z - c.cz * CS)] === 1;
+};
+
+// Writes one voxel into chunk c (inside its band); a uniform section becomes a real array first.
+function secSet(c, lx, y, lz, id) {
+  const si = (y >> 4) - c.lo;
+  let s = c.secs[si];
+  if (typeof s === "number") {
+    if (s === id) return;
+    const a = new Uint16Array(SECN); if (s) a.fill(s);
+    c.secs[si] = s = a;
+  }
+  s[((y & 15) << 8) | (lz << 4) | lx] = id;
+}
+
+// Slices a generated window (starting at section sy0) into section storage: uniform sections collapse to a number.
+function sliceSections(data, n) {
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = i * SECN, f = data[o];
+    let uni = true;
+    for (let k = 1; k < SECN; k++) if (data[o + k] !== f) { uni = false; break; }
+    out[i] = uni ? f : data.slice(o, o + SECN);
+  }
+  return out;
+}
+
+// Loads more sections below the band (generated lazily, deterministic from the seed) so the chunk reaches section newLo.
+function extendDown(c, newLo) {
+  newLo = Math.max(BF.SY0, newLo);
+  if (newLo >= c.lo) return;
+  const n = c.lo - newLo, add = sliceSections(BF.worldgen.generateRange(c.cx, c.cz, newLo, c.lo), n);
+  const oldY0 = c.y0;
+  c.secs = add.concat(c.secs);
+  if (c.light) c.light = new Array(n).concat(c.light);
+  c.lo = newLo; c.y0 = newLo * 16;
+  const e = world.edits.get(c.key);       // edits are applied when the chunk is created; deeper ones are only possible if the band was shorter then
+  if (e) for (const [i, id] of e) { const y = (i >> 8) + BF.MIN_Y; if (y >= c.y0 && y < oldY0) secSet(c, i & 15, y, (i >> 4) & 15, id); }
+  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) if (c.top[z * CS + x] < oldY0) updateColumn(c, x, z);
+  if (BF.light && c.light !== undefined) BF.light.onExtended(c, oldY0);
+  markNeighboursDirty(c);
+  if (c.mesh !== undefined) world._dirty.add(c.key);
+}
+// Makes room above the band (all air).
+function extendUp(c, newHi) {
+  newHi = Math.min(BF.SY1, newHi);
+  if (newHi <= c.hi) return;
+  for (let i = c.hi; i < newHi; i++) c.secs.push(0);
+  if (c.light) for (let i = c.hi; i < newHi; i++) c.light.push(undefined);
+  c.hi = newHi; c.y1 = newHi * 16;
+}
+function markNeighboursDirty(c) {
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    if (!dx && !dz) continue;
+    const n = world.chunks.get(ckey(c.cx + dx, c.cz + dz));
+    if (n && n.mesh !== undefined) world._dirty.add(n.key);
+  }
+}
+// Makes sure the sections covering y0..y1 are loaded in the chunk holding (x, z). False if that chunk is not loaded.
+world.ensureRange = function (x, z, y0, y1) {
+  const c = chunkAt(x, z);
+  if (!c) return false;
+  if (y0 < c.y0) extendDown(c, Math.max(BF.MIN_Y, y0) >> 4);
+  if (y1 >= c.y1) extendUp(c, (Math.min(BF.H - 1, y1) >> 4) + 1);
+  return true;
 };
 
 // Sets a block, records the edit, and schedules remeshing. Returns false if the chunk isn't loaded.
 world.setBlock = function (x, y, z, id) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  if (y < 0 || y >= H) return false;
+  if (y < BF.MIN_Y || y >= BF.H) return false;
   const c = chunkAt(x, z);
   if (!c) return false;
-  const lx = x - c.cx * CS, lz = z - c.cz * CS, i = vIdx(lx, y, lz);
-  if (c.vox[i] === id) return true;
-  const oldId = c.vox[i];
-  c.vox[i] = id;
+  if (y < c.y0) extendDown(c, y >> 4); else if (y >= c.y1) extendUp(c, (y >> 4) + 1);
+  const lx = x - c.cx * CS, lz = z - c.cz * CS, i = ((y - BF.MIN_Y) * CS + lz) * CS + lx;   // edit index (legacy limits: the old vIdx)
+  const oldId = cblock(c, lx, y, lz);
+  if (oldId === id) return true;
+  secSet(c, lx, y, lz, id);
   let e = world.edits.get(c.key);
   if (!e) world.edits.set(c.key, (e = new Map()));
   e.set(i, id);
   updateColumn(c, lx, lz);
-  if (y + 1 > c.maxY) c.maxY = Math.min(H - 1, y + 1);
   world._dirty.add(c.key);
   scheduleFluid(x, y, z, true);
   if (BF.light) { BF.light.onSet(x, y, z, oldId, id); BF.light.popUnsupported(x, y, z, id); } // block light + torches losing support
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
   if (BF.blocks[id] && BF.blocks[id].growsInto) growing.add(fkey(x, y, z));
   // plants and crops pop off when the block under them goes away or water floods them
-  if (y + 1 < H && !BF.SOLID[id]) {
-    const above = c.vox[vIdx(lx, y + 1, lz)];
+  if (y + 1 < BF.H && !BF.SOLID[id]) {
+    const above = cblock(c, lx, y + 1, lz);
     if (BF.RENDER[above] === 4 || above === BF.B.wheat) {
       world.setBlock(x, y + 1, z, 0);
       if (BF.drops && !(BF.inventory && BF.inventory.isCreative && BF.inventory.isCreative())) BF.drops.spawnAt(BF.rollDrops(above), x, y + 1, z);
     }
   }
   // doors and beds pop off (one drop) when their support goes; an upper half left without its lower half vanishes
-  if (y + 1 < H) {
-    const aid = c.vox[vIdx(lx, y + 1, lz)], ab = BF.blocks[aid], nb = BF.blocks[id];
+  if (y + 1 < BF.H) {
+    const aid = cblock(c, lx, y + 1, lz), ab = BF.blocks[aid], nb = BF.blocks[id];
     if (ab && ab.door && ab.door.upper && !(nb && nb.door && !nb.door.upper)) world.setBlock(x, y + 1, z, 0);
     else if (ab && !BF.SOLID[id] && ((ab.door && !ab.door.upper) || ab.bed)) {
       world.removePartner(x, y + 1, z, aid);
@@ -200,45 +283,82 @@ world.setBlock = function (x, y, z, id) {
   return true;
 };
 
-// Highest y whose block is solid at column (x, z), or -1. Uses loaded data only.
+// Calls cb(lx, y, lz, id) for every block of chunk c (optionally only y in [ya, yb]) whose flag[id] > thr (default 0).
+world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
+  thr = thr || 0;
+  const lo = ya == null ? c.y0 : Math.max(c.y0, ya), hi = yb == null ? c.y1 - 1 : Math.min(c.y1 - 1, yb);
+  for (let si = 0; si < c.secs.length; si++) {
+    const s = c.secs[si], by = (c.lo + si) * 16;
+    if (by + 15 < lo || by > hi) continue;
+    if (typeof s === "number") {
+      if (!(flag[s] > thr)) continue;
+      for (let i = 0; i < 4096; i++) { const y = by + (i >> 8); if (y >= lo && y <= hi) cb(i & 15, y, (i >> 4) & 15, s); }
+      continue;
+    }
+    for (let i = 0; i < 4096; i++) {
+      const id = s[i];
+      if (!(flag[id] > thr)) continue;
+      const y = by + (i >> 8);
+      if (y >= lo && y <= hi) cb(i & 15, y, (i >> 4) & 15, id);
+    }
+  }
+};
+
+// Highest solid y at column (x, z) in the loaded band, or BF.MIN_Y - 1 (-1 for legacy worlds) when the column is not loaded.
 world.heightAt = function (x, z) {
   x = Math.floor(x); z = Math.floor(z);
   const c = chunkAt(x, z);
-  if (!c) return -1;
-  const lx = x - c.cx * CS, lz = z - c.cz * CS;
-  for (let y = c.maxY; y >= 0; y--) if (BF.SOLID[c.vox[vIdx(lx, y, lz)]]) return y;
-  return -1;
+  if (!c) return BF.MIN_Y - 1;
+  const lx = x - c.cx * CS, lz = z - c.cz * CS, SOLID = BF.SOLID;
+  for (let si = c.hi - c.lo - 1; si >= 0; si--) {
+    const s = c.secs[si];
+    if (typeof s === "number") { if (SOLID[s]) return (c.lo + si) * 16 + 15; continue; }
+    for (let ly = 15; ly >= 0; ly--) if (SOLID[s[(ly << 8) | (lz << 4) | lx]]) return (c.lo + si) * 16 + ly;
+  }
+  return c.y0 - 1;   // nothing solid in the band: solid stone below it
 };
 
 function updateColumn(c, lx, lz) {
   // light-blocking top (opaque blocks and leaves) for the simple sky-shade model
-  let y = H - 1;
-  for (; y >= 0; y--) { const b = c.vox[vIdx(lx, y, lz)]; if (BF.OPAQUE[b] || BF.RENDER[b] === 2 || BF.LIGHTBLOCK[b]) break; }
+  let y = c.y1 - 1;
+  for (; y >= c.y0; y--) { const b = cblock(c, lx, y, lz); if (BF.OPAQUE[b] || BF.RENDER[b] === 2 || BF.LIGHTBLOCK[b]) break; }
   c.top[lz * CS + lx] = y;
 }
 
 // ---------- loading ----------
 function createChunk(cx, cz) {
-  const vox = new Uint16Array(CS * CS * H);
-  BF.worldgen.generate(cx, cz, vox);
+  if (!STONE_ID) { STONE_ID = BF.B.stone; BEDROCK_ID = BF.B.bedrock; }
+  const g = BF.worldgen;
+  let lo, hi, data;
+  if (g.generateBand) { const r = g.generateBand(cx, cz); lo = r.lo; hi = r.hi; data = r.vox; }
+  else { hi = BF.H >> 4; lo = 0; data = new Uint16Array(CS * CS * BF.H); g.generate(cx, cz, data); }
   const key = ckey(cx, cz);
+  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), mesh: undefined, meshes: [], light: undefined };
   const e = world.edits.get(key);
-  if (e) for (const [i, id] of e) vox[i] = id;
-  const c = { cx, cz, key, vox, top: new Int16Array(CS * CS), maxY: 0, mesh: undefined, meshes: [] };
-  let maxY = 0;
-  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
-    updateColumn(c, x, z);
-    for (let y = H - 1; y > maxY; y--) if (vox[vIdx(x, y, z)]) { maxY = y; break; }
+  if (e) {
+    // the band must cover every edited cell (builds above it, tunnels below it)
+    let minY = 1e9, maxY = -1e9;
+    for (const i of e.keys()) { const y = (i >> 8) + BF.MIN_Y; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    if (minY < c.y0) { c.light = undefined; extendDownRaw(c, minY >> 4); }
+    if (maxY >= c.y1) extendUp(c, (maxY >> 4) + 1);
+    for (const [i, id] of e) secSet(c, i & 15, (i >> 8) + BF.MIN_Y, (i >> 4) & 15, id);
   }
-  c.maxY = Math.min(H - 1, maxY + 1);
+  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) updateColumn(c, x, z);
   world.chunks.set(key, c);
   if (BF.light) BF.light.onChunkCreated(c);
   if (e) for (const [i, id] of e) if (BF.blocks[id] && BF.blocks[id].growsInto) {
-    const lx = i % CS, lz = Math.floor(i / CS) % CS, ly = Math.floor(i / (CS * CS));
-    growing.add(fkey(cx * CS + lx, ly, cz * CS + lz));
+    growing.add(fkey(cx * CS + (i & 15), (i >> 8) + BF.MIN_Y, cz * CS + ((i >> 4) & 15)));
   }
   for (const fn of world._loadL) { try { fn(cx, cz, c); } catch (err) { console.error(err); } }
   return c;
+}
+// extendDown for a chunk that is not registered yet (no light, no meshes, no neighbours to notify).
+function extendDownRaw(c, newLo) {
+  newLo = Math.max(BF.SY0, newLo);
+  if (newLo >= c.lo) return;
+  const n = c.lo - newLo;
+  c.secs = sliceSections(BF.worldgen.generateRange(c.cx, c.cz, newLo, c.lo), n).concat(c.secs);
+  c.lo = newLo; c.y0 = newLo * 16;
 }
 
 function unload(key) {
@@ -313,6 +433,16 @@ world.update = function (px, pz, budgetMs = 8) {
   // re-plan on chunk change, and periodically while loading so turning re-prioritises
   if (center !== lastCenter || (world.queueLength > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
   if (world.queueLength > 40) budgetMs = Math.max(budgetMs, 12);
+
+  // vertical streaming: columns near the player load sections down to ~40 blocks below them (digging, caves, falling)
+  if (BF.player && BF.player.position) {
+    const want = Math.max(BF.SY0, (Math.floor(BF.player.position.y) - 40) >> 4);
+    let budget = 3;
+    for (let dz = -2; dz <= 2 && budget > 0; dz++) for (let dx = -2; dx <= 2 && budget > 0; dx++) {
+      const c = world.chunks.get(ckey(pcx + dx, pcz + dz));
+      if (c && c.lo > want) { extendDown(c, dx || dz ? Math.max(want, c.lo - 8) : want); budget--; }
+    }
+  }
 
   // edits first: remesh dirty chunks immediately so breaking/placing feels instant
   for (const k of world._dirty) { const c = world.chunks.get(k); if (c && c.mesh !== undefined) buildMesh(c); }
@@ -430,13 +560,17 @@ function buildMesh(c) {
   // 3x3 neighbourhood for border lookups
   const nb = [];
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) nb.push(world.chunks.get(ckey(c.cx + dx, c.cz + dz)));
+  const MINY = BF.MIN_Y, HTOP = BF.H;
   const get = (x, y, z) => {
-    if (y < 0) return BF.B.bedrock;
-    if (y >= H) return 0;
+    if (y < MINY) return BEDROCK_ID;
+    if (y >= HTOP) return 0;
     const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
     const ch = nb[iz * 3 + ix];
     if (!ch) return 0;
-    return ch.vox[vIdx(x - (ix - 1) * CS, y, z - (iz - 1) * CS)];
+    if (y < ch.y0) return STONE_ID;
+    if (y >= ch.y1) return 0;
+    const s = ch.secs[(y >> 4) - ch.lo];
+    return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)];
   };
   const topAt = (x, z) => {
     const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
@@ -447,10 +581,12 @@ function buildMesh(c) {
   const occ = (x, y, z) => BF.OPAQUE[get(x, y, z)];
   // block light (0..15) from the neighbourhood's chunk.light arrays (0 where unloaded)
   const lget = (x, y, z) => {
-    if (y < 0 || y >= H) return 0;
+    if (y < MINY || y >= HTOP) return 0;
     const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
     const ch = nb[iz * 3 + ix];
-    return ch && ch.light ? ch.light[vIdx(x - (ix - 1) * CS, y, z - (iz - 1) * CS)] : 0;
+    if (!ch || !ch.light || y < ch.y0 || y >= ch.y1) return 0;
+    const ls = ch.light[(y >> 4) - ch.lo];
+    return ls ? ls[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)] : 0;
   };
   // light of the cell a model / plant occupies; a cell that is itself opaque takes the best neighbour
   const cellLight = (x, y, z) => {
@@ -464,8 +600,7 @@ function buildMesh(c) {
 
   const S = { pos: [], uv: [], col: [], sky: [], bl: [], ind: [] };
   const L = { pos: [], uv: [], col: [], sky: [], bl: [], ind: [] };
-  const vox = c.vox, RENDER = BF.RENDER, OPAQUE = BF.OPAQUE, FLUID = BF.FLUID;
-  const maxY = c.maxY;
+  const RENDER = BF.RENDER, OPAQUE = BF.OPAQUE, FLUID = BF.FLUID;
   const faceTint = world._faceTint;
   const B_PATH = BF.B.dirt_path, B_FARM = BF.B.farmland;
 
@@ -579,9 +714,19 @@ function buildMesh(c) {
     }
   }
 
-  for (let y = 0; y <= maxY; y++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
-    const b = vox[vIdx(x, y, z)];
+  for (let si = 0; si < c.hi - c.lo; si++) {
+  const sec = c.secs[si];
+  if (sec === 0) continue;                                   // all-air section
+  const uni = typeof sec === "number", sy0 = (c.lo + si) * 16;
+  for (let ly = 0; ly < 16; ly++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
+    let b;
+    if (uni) {
+      // inside a uniform opaque block nothing is visible: only the shell of the section can show faces
+      if (OPAQUE[sec] && ly > 0 && ly < 15 && z > 0 && z < 15 && x > 0 && x < 15) { x = 14; continue; }
+      b = sec;
+    } else b = sec[(ly << 8) | (z << 4) | x];
     if (!b) continue;
+    const y = sy0 + ly;
     const r = RENDER[b];
 
     if (r === 4) { // crossed-quad plant
@@ -682,6 +827,7 @@ function buildMesh(c) {
       }
     }
   }
+  }
 
   disposeMeshes(c);
   const make = (T, mat, order) => {
@@ -716,13 +862,13 @@ const FLUID_TICK = 0.25; // seconds per spread step
 const fkey = (x, y, z) => x + "," + y + "," + z;
 
 function scheduleFluid(x, y, z, withNeighbours) {
-  if (y < 0 || y >= H) return;
+  if (y < BF.MIN_Y || y >= BF.H) return;
   fluidQ.add(fkey(x, y, z));
   if (withNeighbours) {
     fluidQ.add(fkey(x + 1, y, z)); fluidQ.add(fkey(x - 1, y, z));
     fluidQ.add(fkey(x, y, z + 1)); fluidQ.add(fkey(x, y, z - 1));
-    if (y + 1 < H) fluidQ.add(fkey(x, y + 1, z));
-    if (y > 0) fluidQ.add(fkey(x, y - 1, z));
+    if (y + 1 < BF.H) fluidQ.add(fkey(x, y + 1, z));
+    if (y > BF.MIN_Y) fluidQ.add(fkey(x, y - 1, z));
   }
 }
 world.scheduleFluid = scheduleFluid;

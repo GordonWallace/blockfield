@@ -22,7 +22,7 @@ function originOf(x, y, z, id) {
 // Can a tent stand here: every cell free (air / plants / replaceable) with a solid block below, all loaded, no mob or player inside.
 function canPlace(x, y, z, f, blocked) {
   const W = BF.world, free = id => id === 0 || BF.RENDER[id] === 3 || !!BF.REPLACEABLE[id];
-  return cells(x, y, z, f).every(c => y > 0 && c.y < BF.H && W.isLoaded(c.x, c.z) && free(W.getBlock(c.x, c.y, c.z)) && BF.SOLID[W.getBlock(c.x, c.y - 1, c.z)] &&
+  return cells(x, y, z, f).every(c => y > BF.MIN_Y && c.y < BF.H && W.isLoaded(c.x, c.z) && free(W.getBlock(c.x, c.y, c.z)) && BF.SOLID[W.getBlock(c.x, c.y - 1, c.z)] &&
     !BF.FLUID[W.getBlock(c.x, c.y - 1, c.z)] && !(blocked && blocked(c.x, c.y, c.z)));
 }
 function place(x, y, z, f, blocked) {

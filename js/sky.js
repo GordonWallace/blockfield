@@ -10,7 +10,26 @@ const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328");
 const DUSK_HOR = C("#f08a50"), DUSK_GLOW = C("#ff7a3c"), DUSK_PINK = C("#d86a86");
 const CLOUD_DAY = C("#ffffff"), CLOUD_NIGHT = C("#1c2234"), CLOUD_DUSK = C("#f6b49a");
 
-const SKY_R = 480, SUN_D = 400, CLOUD_Y = BF.H + 4, CLOUD_H = 5, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
+// Cloud deck height. Legacy worlds: fixed just above the world top (BF.H + 4). Mile-high worlds: a fixed height above the
+// smoothed regional ground level (sampled from the generator), so you walk under clouds on the plains and climb above them on peaks.
+let cloudY = 196, cloudTarget = 196, cloudProbeT = 0;
+function updateCloudY(dt) {
+  const cam = BF.camera;
+  if (BF.H <= 192) { cloudTarget = cloudY = BF.H + 4; return; }
+  cloudProbeT -= dt;
+  if (cam && cloudProbeT <= 0 && BF.worldgen && BF.worldgen.heightAt) {
+    cloudProbeT = 1;
+    let sum = 0, n = 0;
+    for (let k = 0; k < 9; k++) {
+      const a = k * 0.785398, r = k ? 192 : 0;
+      sum += Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(cam.position.x + Math.cos(a) * r), Math.floor(cam.position.z + Math.sin(a) * r))); n++;
+    }
+    cloudTarget = Math.round(Math.max(BF.SEA + 110, sum / n + 80) / 4) * 4;
+  }
+  cloudY += (cloudTarget - cloudY) * Math.min(1, dt * 0.6);
+  if (Math.abs(cloudTarget - cloudY) > 400) cloudY = cloudTarget;   // teleports snap
+}
+const SKY_R = 480, SUN_D = 400, CLOUD_H = 5, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 let root, celestial, dome, sun, moon, stars, clouds, scene;
@@ -198,7 +217,7 @@ function makeClouds() {
     // window's first cell index; world x of cell i's left edge is i * CS - drift
     const ci = Math.floor((camX + drift) / CS) - (W >> 1), cj = Math.floor(camZ / CS) - (W >> 1);
     if (ci !== kx || cj !== kz) { kx = ci; kz = cj; rebuild(ci, cj); }
-    m.position.set(ci * CS - drift, CLOUD_Y, cj * CS);
+    m.position.set(ci * CS - drift, cloudY, cj * CS);
   };
   m.userData.triangles = () => nv / 3;
   m.userData.setCoverage = q => { if (setMask(Math.round(q * 20) / 20)) kx = 1e9; };
@@ -227,6 +246,8 @@ const sky = {
   },
 
   setTime(t) { sky.time = ((t % 1) + 1) % 1; if (scene) sky.update(0); },
+
+  get cloudY() { return cloudY; },
 
   isNight() { return sky.light < 0.5; },
 
@@ -293,6 +314,7 @@ const sky = {
     stars.visible = so > 0.01;
 
     // volumetric clouds: mesh moves in whole cells with the camera, sub-cell scroll through position (see makeClouds)
+    updateCloudY(dt);
     clouds.userData.setCoverage(0.7 - 0.4 * wr);
     clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift);
     const cu = clouds.material.uniforms;
@@ -302,7 +324,7 @@ const sky = {
     if (wf > 0) cloudCol.lerp(tmpC.setRGB(0.9, 0.92, 1), wf * 0.7);
     cu.color.value.copy(cloudCol);
     cu.fogCol.value.copy(horizon);
-    cu.under.value = cam.position.y < CLOUD_Y ? 1 : 0;
+    cu.under.value = cam.position.y < cloudY ? 1 : 0;
   },
 };
 

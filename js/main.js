@@ -33,8 +33,8 @@ resize();
 // Starts (or restarts) a world from a seed and places the player on solid ground near the origin.
 BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
-  BF.state.gen = opts && opts.gen ? opts.gen | 0 : 2;                       // worldgen version: 1 = classic, 2 = continents (default)
-  BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 only)
+  BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
+  BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
@@ -65,11 +65,11 @@ function updateDebug(now) {
   if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
   if (!showDebug) return;
   const p = BF.player.position;
-  const biome = BF.worldgen.biomeAt(p.x, p.z);
+  const biome = BF.worldgen.biomeAt(p.x, p.z), cc = BF.world.chunkAt(p.x, p.z);
   dbg.textContent =
     `Blockfield  ${fps} fps\n` +
     `XYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\n` +
-    `Chunk ${Math.floor(p.x / BF.CS)}, ${Math.floor(p.z / BF.CS)}  Biome ${biome ? biome.name : "?"}\n` +
+    `Chunk ${Math.floor(p.x / BF.CS)}, ${Math.floor(p.z / BF.CS)}${cc ? `  Sections ${cc.lo}..${cc.hi - 1} (y ${cc.y0}..${cc.y1 - 1})` : ""}  Biome ${biome ? biome.name : "?"}\n` +
     `Chunks ${BF.world.meshedCount()} drawn / ${BF.world.chunks.size} loaded, ${BF.world.queueLength} queued\n` +
     `Mobs ${BF.mobs.list.length}  Seed ${BF.state.seed}  Gen ${BF.state.gen} Biomes x${BF.state.biomeScale}  ${BF.villageSim.status()}\n` +
     `Time ${((BF.sky.time * 24 + 6) % 24).toFixed(1)}h  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
@@ -112,8 +112,8 @@ BF.drops.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
-const m = /^#seed(\d+)$/.exec(location.hash);
+const m = /^#seed(\d+)(?:gen(\d))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world
 if (m) seed = +m[1];
-BF.newWorld(seed);
+BF.newWorld(seed, m && m[2] ? { gen: +m[2] } : undefined);
 requestAnimationFrame(frame);
 })();

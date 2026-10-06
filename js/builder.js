@@ -203,7 +203,7 @@ function evalTerrain(bp, px, pz, found) {
   for (let z = pz - 1; z <= pz + bp.d; z++) for (let x = px - 1; x <= px + bp.w; x++) {
     if (!w.isLoaded(x, z)) return null;
     const g = w.heightAt(x, z);
-    if (g < 1) return null;
+    if (g < BF.MIN_Y + 1) return null;
     const above = w.getBlock(x, g + 1, z);
     if (BF.RENDER[above] === 3 || BF.RENDER[w.getBlock(x, g, z)] === 3) return null;
     const inner = x >= px && x < px + bp.w && z >= pz && z < pz + bp.d;

@@ -182,11 +182,8 @@ function planFor(rec) {
 let FLAG = null;
 function scanChunk(cx, cz, c) {
   if (!FLAG) { FLAG = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); for (const id of idMap().keys()) FLAG[id] = 1; }
-  const CS = BF.CS, vox = c.vox, n = Math.min(vox.length, ((c.maxY || BF.H - 1) + 1) * CS * CS);
-  for (let i = 0; i < n; i++) if (FLAG[vox[i]]) {
-    const x = cx * CS + (i % CS), z = cz * CS + (Math.floor(i / CS) % CS), y = Math.floor(i / (CS * CS));
-    addSite(x, y, z, vox[i]);
-  }
+  const CS = BF.CS;
+  BF.world.scanFlagged(c, FLAG, (lx, y, lz, id) => addSite(cx * CS + lx, y, cz * CS + lz, id));
 }
 function dropChunk(cx, cz) {
   const CS = BF.CS;

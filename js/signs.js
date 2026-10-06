@@ -54,7 +54,7 @@ function component(get, x, y, z) {
       const n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]], k = ck(n[0], n[1], n[2]);
       if (vis.has(k)) continue;
       vis.add(k);
-      if (n[1] < 0 || n[1] >= BF.H) continue;
+      if (n[1] < BF.MIN_Y || n[1] >= BF.H) continue;
       if (get(n[0], n[1], n[2]) === id) q.push(n);
     }
   }
@@ -302,16 +302,13 @@ function structural(x, y, z, oldId, id, so, sn) {
 }
 
 function onChunkLoad(cx, cz, c) {
-  const CS = BF.CS, vox = c.vox, maxY = Math.min(BF.H - 1, c.maxY);
+  const CS = BF.CS;
   let set = null, edge = false;
-  for (let y = 0; y <= maxY; y++) for (let lz = 0; lz < CS; lz++) {
-    const row = (y * CS + lz) * CS;
-    for (let lx = 0; lx < CS; lx++) if (IS[vox[row + lx]]) {
-      if (!set) set = new Set();
-      set.add(ck(cx * CS + lx, y, cz * CS + lz));
-      if (lx < MAXW || lx >= CS - MAXW || lz < MAXW || lz >= CS - MAXW) edge = true;
-    }
-  }
+  W().scanFlagged(c, IS, (lx, y, lz) => {
+    if (!set) set = new Set();
+    set.add(ck(cx * CS + lx, y, cz * CS + lz));
+    if (lx < MAXW || lx >= CS - MAXW || lz < MAXW || lz >= CS - MAXW) edge = true;
+  });
   if (!set) return;
   chunkSigns.set(cx + "," + cz, set);
   groupCache.clear();
@@ -426,7 +423,7 @@ function place(target, it) {
       }
     } else { wall = 1; f = BF.dirIndex(n[0], n[2]); }
   }
-  if (y < 0 || y >= BF.H || !w.isLoaded(x, z)) return false;
+  if (y < BF.MIN_Y || y >= BF.H || !w.isLoaded(x, z)) return false;
   const cur = wget(x, y, z);
   if ((cur !== 0 && !(BF.REPLACEABLE && BF.REPLACEABLE[cur])) || BF.FLUID[cur]) return false;
   const id = signId(wood, wall, f);

@@ -250,8 +250,8 @@ function markCheats() {
 }
 function needLoaded(x, z) { if (!W().isLoaded(x, z)) fail("That position is not loaded"); }
 function surfaceY(x, z) {
-  let h = W().isLoaded(x, z) ? W().heightAt(x, z) : -1;
-  if (h < 0 && BF.worldgen && BF.worldgen.heightAt) h = BF.worldgen.heightAt(Math.floor(x), Math.floor(z));
+  let h = W().isLoaded(x, z) ? W().heightAt(x, z) : BF.MIN_Y - 1;
+  if (h < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) h = BF.worldgen.heightAt(Math.floor(x), Math.floor(z));
   return h + 1.01;
 }
 function killMob(m) {
@@ -305,7 +305,7 @@ def("tp", {
     }
     if (a.length !== 3 && a.length !== 5) usage("tp");
     const [x, y, z] = parsePos(a, 0, false);
-    if (y < -64 || y > 1024) fail("Invalid position: y must be between -64 and 1024");
+    if (y < BF.MIN_Y - 64 || y > BF.H + 832) fail(`Invalid position: y must be between ${BF.MIN_Y - 64} and ${BF.H + 832}`);
     if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
     let yaw = null, pitch = null;
     if (a.length === 5) {
@@ -320,6 +320,7 @@ def("tp", {
 });
 function teleport(x, y, z, yaw, pitch) {
   const p = P();
+  if (W().ensureRange) W().ensureRange(x, z, Math.floor(y) - 24, Math.floor(y) + 4);   // lazily load the sections around the destination
   if (p.teleport) p.teleport(x, y, z);
   else { p.position.set(x, y, z); if (p.velocity) p.velocity.x = p.velocity.y = p.velocity.z = 0; }
   if (yaw != null && p.setLook) p.setLook(yaw, pitch);
@@ -428,7 +429,7 @@ def("summon", {
     if (!BF.mobs || !mobTypes().includes(type)) fail(`Unknown entity '${a[0]}'`);
     const p = pos();
     const [x, y, z] = a.length >= 4 ? parsePos(a, 1, false) : [p.x, p.y, p.z];
-    if (y < 0 || y >= (BF.H || 192) + 64) fail("Invalid position for summon");
+    if (y < BF.MIN_Y || y >= (BF.H || 192) + 64) fail("Invalid position for summon");
     needLoaded(x, z);
     let variant, child = false;
     if (a[4] != null) {
@@ -527,7 +528,7 @@ def("setblock", {
     const id = resolveBlock(a[3]);
     const mode = norm(a[4] || "replace");
     if (!["replace", "keep", "destroy"].includes(mode)) usage("setblock");
-    if (y < 0 || y >= BF.H) fail("Cannot place block outside of the world");
+    if (y < BF.MIN_Y || y >= BF.H) fail("Cannot place block outside of the world");
     needLoaded(x, z);
     const old = W().getBlock(x, y, z);
     if (old === id || (mode === "keep" && old !== 0)) fail("Could not set the block");
@@ -555,7 +556,7 @@ def("fill", {
     const x0 = Math.min(p1[0], p2[0]), x1 = Math.max(p1[0], p2[0]), y0 = Math.min(p1[1], p2[1]), y1 = Math.max(p1[1], p2[1]), z0 = Math.min(p1[2], p2[2]), z1 = Math.max(p1[2], p2[2]);
     const vol = (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1);
     if (vol > MAX_FILL) fail(`Too many blocks in the specified area (maximum ${MAX_FILL}, specified ${vol})`);
-    if (y0 < 0 || y1 >= BF.H) fail("Cannot place blocks outside of the world");
+    if (y0 < BF.MIN_Y || y1 >= BF.H) fail("Cannot place blocks outside of the world");
     for (let x = x0; x <= x1; x += 16) for (let z = z0; z <= z1; z += 16) needLoaded(x, z);
     needLoaded(x1, z1); needLoaded(x0, z1); needLoaded(x1, z0);
     const w = W();
