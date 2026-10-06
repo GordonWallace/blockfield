@@ -398,9 +398,9 @@ Villager workstations, loaded after builder.js (`index.html`: `textures-jobs.js`
   grindstone); recipes in `recipes-jobs.js` (vanilla; brewing stand uses a gold ingot for the blaze rod, drafting table = paper + blue dye over 4 planks); wooden ones burn 15 s.
 - **API** `BF.jobs`: `JOBSITE` (profession -> block name), `PROFESSION_OF` (block name -> profession), `profOfBlock(id)`, `blockFor(prof)`,
   `claim(mob, {radius = 48, prefer: [professions]}) -> profession | null` (random unclaimed standing jobsite within radius of the villager's village centre, else its position; each `prefer` match x3 weight;
-  experienced villagers (xp > 0) only take blocks of their own profession; nitwits never; instant: used by commands / tests, villagers themselves walk to the block, see "Walking to a jobsite";
+  experienced villagers (xp > 0, or remembering a profession) only take blocks of that profession; nitwits never; instant: used by commands / tests, villagers themselves walk to the block, see "Walking to a jobsite";
   `claim(mob, {site})` takes that exact block if it is still free; sets `mob.profession`, `mob.jobsite = {x,y,z}`, rebuilds the outfit and the offers; first job ever adds the profession's
-  starting wares without emeralds; emits `villagerHired(mob, prof)`), `release(mob, {keepProfession}?)` (frees the block; a villager with xp 0 becomes `unemployed`, emits nothing; `villagerFired(mob)` is emitted
+  starting wares without emeralds; emits `villagerHired(mob, prof)`), `release(mob, {keepProfession}?)` (frees the block; the villager becomes `unemployed` and remembers its profession, see "Jobsite memory"; `villagerFired(mob)` is emitted
   when a jobsite is lost), `hire(mob, site)` (the claim itself: profession, stock, `BF.villageLife.ensureKit`, `villagerHired`), `unclaimed(villageRec | {x,z} | mob, radius?, forMob?) -> [{x,y,z,id,prof}]`, `isEmployed(mob)`, `setProfession(mob, prof)`, `sites` / `claims` maps (debug).
   Hooks: `planVillage(v)`, `planFor(rec)`, `onSpawn(m, rec, sv)`, `tick(dt)`, `ai(m, dt, out)`, `importAll(o)`, `reset()`, `drawCount(need, rand)`.
 - **Professions**: new key `unemployed` (`VILLAGER_OUTFITS.unemployed = {}`: plain biome robe; never in the roster pool, so old rosters do not shift; `TRADES.unemployed` empty, nitwit-like stock;
@@ -420,7 +420,11 @@ Villager workstations, loaded after builder.js (`index.html`: `textures-jobs.js`
   Generated roster slots still take their planned block at spawn (`onSpawn`).
 - **Roster reconciliation** (`onSpawn`, called by `updateVillages` after `trades.unpack`): saved state with `prof` wins (profession + jobsite from the save). Otherwise the slot takes its planned block; no block -> unemployed
   (fresh villagers get unemployed stock); old saves without `prof` keep their profession when they had traded (xp > 0 or level > 1) and look for a block of it.
-- **Save**: `trades.pack` adds `prof`, `job: [x,y,z] | null`, `st` (first-job stock given) to each villager entry; `mobs.importVillagers` -> `jobs.importAll` rebuilds the claim table. Newborns (`#2000+k`) use the same fields.
+- **Jobsite memory**: a villager whose block is broken or replaced always loses its profession (becomes `unemployed`, outfit changes) but keeps `level`, `xp` and inventory and sets `m.jobMem = {prof, t}` (`t` = absolute game day,
+  `sky.day + sky.time`). Within `BF.jobs.MEMORY_DAYS` (30) game days: placing a block of that profession makes the nearest remembering villager within 48 blocks of it (village-centre distance, then nearest by position) take it at once
+  (`reclaimAt`, from `blockPlaced`; level and xp restored, no second starter stock); standing blocks of that profession are reserved for remembering villagers against other unemployed ones (`claimedByOther`), and remembering villagers
+  walk to them first (0.3x distance). A remembering villager with xp > 0 only takes its own profession; taking a job clears the memory. After 30 days the memory ends in `tick`: level 1, xp 0, offers rebuilt, a regular unemployed villager.
+- **Save**: `trades.pack` adds `prof`, `job: [x,y,z] | null`, `st` (first-job stock given), `mem: [prof, t]` (only while remembering) to each villager entry; `mobs.importVillagers` -> `jobs.importAll` rebuilds the claim table. Newborns (`#2000+k`) use the same fields.
 
 ## Villager food and farming (js/villagelife.js)
 Loaded after mobs.js / builder.js (index.html). mobs.js, trading.js, inventory.js and player.js only call `BF.food` / `BF.villageLife` at runtime and work without them.

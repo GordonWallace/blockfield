@@ -5,9 +5,11 @@
 //   rounded normal draw centred on the number of villagers who need a job (all non-nitwits, builders included), professions
 //   follow the village roster (mobs.js villageRoster), blocks go inside the villager's own house (special buildings get their
 //   matching block), composters beside the farms, drafting tables (builders) on the plaza. Deterministic from the seed.
-// - A villager that loses its jobsite (block broken / replaced) becomes unemployed if it never traded (xp 0); an experienced one
-//   keeps its profession and looks for another block of its own trade (vanilla). Inventories are always kept.
-// - Persistence: trading.js pack() stores `prof`, `job` [x,y,z] and `st` (first-job stock given) with the villager state;
+// - A villager that loses its jobsite (block broken / replaced) always becomes unemployed, but remembers its old profession
+//   (`m.jobMem = {prof, t}`, t = absolute game day) and keeps its level, xp and inventory. A block of that profession placed within
+//   MEMORY_DAYS (30) game days is reclaimed at once by the nearest remembering villager, and a remembering villager has priority over other
+//   unemployed ones for blocks of its profession. After MEMORY_DAYS the memory ends: level and xp reset, a regular unemployed villager.
+// - Persistence: trading.js pack() stores `prof`, `job` [x,y,z], `st` (first-job stock given) and `mem` [prof, t] with the villager state;
 //   importAll() rebuilds the claim table from a save. See CONTRACT.md "Jobsites".
 (() => {
 "use strict";
@@ -23,6 +25,7 @@ for (const p in JOBSITE) PROFESSION_OF[JOBSITE[p]] = p;
 const NO_JOB = { nitwit: 1, unemployed: 1 };
 
 const RADIUS = 48;            // claim search radius around the villager's village centre (or the villager)
+const MEMORY_DAYS = 30;       // game days an unemployed villager remembers its profession (and level) after losing its jobsite
 const WORK_START = 0.04, WORK_END = 0.45;   // sky.time window in which villagers visit their jobsite
 
 let byId = null;              // block id -> profession
@@ -35,6 +38,10 @@ const blockFor = prof => (BF.B && JOBSITE[prof] ? BF.B[JOBSITE[prof]] : undefine
 const pk = (x, y, z) => x + "," + y + "," + z;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const vkey = m => (m && m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : null);
+const gameDay = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
+const memValid = m => !!(m && m.jobMem && gameDay() - m.jobMem.t < MEMORY_DAYS);
+// The profession an experienced villager insists on: its own, or the remembered one while unemployed.
+const ownTrade = m => memValid(m) ? m.jobMem.prof : (!NO_JOB[m.profession] && (m.xp || 0) > 0 ? m.profession : null);
 const isChild = m => !!(m.baby || m.child || m.isChild || m.isBaby || m.adult === false);
 
 // ---------------------------------------------------------------- state
@@ -192,7 +199,7 @@ function hook() {
   BF.world.onChunkLoad((cx, cz, c) => scanChunk(cx, cz, c));
   BF.world.onChunkUnload((cx, cz) => dropChunk(cx, cz));
   for (const c of BF.world.chunks.values()) scanChunk(c.cx, c.cz, c);
-  BF.on("blockPlaced", (x, y, z, id) => { if (profOfBlock(id)) addSite(x, y, z, id); });
+  BF.on("blockPlaced", (x, y, z, id) => { if (profOfBlock(id)) { addSite(x, y, z, id); reclaimAt(sites.get(pk(x, y, z))); } });
   BF.on("blockBroken", (x, y, z) => siteGone(x, y, z));
   BF.on("mobKilled", m => { if (m && m.type === "villager" && m.jobsite) { const s = m.jobsite; claims.delete(pk(s.x, s.y, s.z)); } });
 }
@@ -204,6 +211,19 @@ function siteGone(x, y, z) {
   const m = o && (o.mob || liveByKey(o.key));
   if (m && m.jobsite && pk(m.jobsite.x, m.jobsite.y, m.jobsite.z) === k) lose(m);
 }
+// A jobsite block was placed: the nearest unemployed villager still remembering that profession takes it at once.
+function reclaimAt(s) {
+  if (!s || !BF.mobs) return;
+  let best = null, bd = Infinity;
+  for (const m of BF.mobs.list) {
+    if (m.type !== "villager" || m.dead || m.removed || m.jobsite || isChild(m) || !memValid(m) || m.jobMem.prof !== s.prof) continue;
+    const c = center(m);
+    if (!c || Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > RADIUS) continue;
+    const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z);
+    if (d < bd) { bd = d; best = m; }
+  }
+  if (best && !claimedByOther(pk(s.x, s.y, s.z), best)) hire(best, s);
+}
 function liveByKey(key) {
   if (!key || !BF.mobs) return null;
   for (const m of BF.mobs.list) if (m.type === "villager" && !m.dead && !m.removed && vkey(m) === key) return m;
@@ -211,7 +231,19 @@ function liveByKey(key) {
 }
 
 // ---------------------------------------------------------------- claims
+// A block of profession P is reserved for unemployed villagers remembering P (within claim range of it) against everybody else.
+function reservedForMemory(k, m) {
+  const s = sites.get(k);
+  if (!s || !BF.mobs || (memValid(m) && m.jobMem.prof === s.prof)) return false;
+  for (const o of BF.mobs.list) {
+    if (o === m || o.type !== "villager" || o.dead || o.removed || o.jobsite || !memValid(o) || o.jobMem.prof !== s.prof) continue;
+    const c = center(o);
+    if (c && Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) <= RADIUS) return true;
+  }
+  return false;
+}
 function claimedByOther(k, m) {
+  if (reservedForMemory(k, m)) return true;
   const o = claims.get(k);
   if (o) {
     if (o.mob === m || (o.key && o.key === vkey(m))) return false;
@@ -271,10 +303,10 @@ function claim(m, opts) {
   opts = opts || {};
   if (!m || m.dead || m.removed || m.type !== "villager" || m.profession === "nitwit") return null;
   if (opts.site) return !claimedByOther(pk(opts.site.x, opts.site.y, opts.site.z), m) ? hire(m, opts.site) : null;   // the block the villager walked to
-  const own = !NO_JOB[m.profession] && (m.xp || 0) > 0 ? m.profession : null;
+  const own = ownTrade(m);
   const list = unclaimed(m, opts.radius || RADIUS, m).filter(s => (!own || s.prof === own) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
   if (!list.length) return null;
-  const pref = Array.isArray(opts.prefer) ? opts.prefer.filter(Boolean) : [];
+  const pref = (Array.isArray(opts.prefer) ? opts.prefer.filter(Boolean) : []).concat(memValid(m) ? [m.jobMem.prof, m.jobMem.prof] : []);
   const wts = list.map(s => { let w = 1; for (const p of pref) if (p === s.prof) w *= 3; return w; });
   let t = Math.random() * wts.reduce((a, b) => a + b, 0), i = 0;
   while (i < list.length - 1 && (t -= wts[i]) > 0) i++;
@@ -284,6 +316,7 @@ function claim(m, opts) {
 function hire(m, s) {
   const first = !m.jobStocked;
   take(m, s, s.prof);
+  m.jobMem = null;
   if (first && (m.xp || 0) === 0 && BF.trades && m.inv) { // first job: the profession's starting wares (once per villager)
     try { for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count); } catch (e) { console.error(e); }
   }
@@ -292,13 +325,13 @@ function hire(m, s) {
   if (BF.emit) BF.emit("villagerHired", m, s.prof);
   return s.prof;
 }
-// Frees the villager's jobsite. Unless opts.keepProfession, a villager that never traded becomes unemployed.
+// Frees the villager's jobsite. Unless opts.keepProfession the villager becomes unemployed and remembers its profession (level and xp stay).
 function release(m, opts) {
   if (!m) return;
   if (m.jobsite) { const k = pk(m.jobsite.x, m.jobsite.y, m.jobsite.z), o = claims.get(k); if (o && (o.mob === m || o.key === vkey(m))) claims.delete(k); }
   m.jobsite = null;
   if (m.job) m.job.mode = "off";
-  if (!(opts && opts.keepProfession) && !NO_JOB[m.profession] && (m.xp || 0) === 0) setProfession(m, "unemployed");
+  if (!(opts && opts.keepProfession) && !NO_JOB[m.profession]) { m.jobMem = { prof: m.profession, t: gameDay() }; setProfession(m, "unemployed"); }
 }
 function lose(m) { release(m); if (BF.emit) BF.emit("villagerFired", m); }
 const isEmployed = m => !!(m && m.jobsite && !NO_JOB[m.profession]);
@@ -312,6 +345,7 @@ function onSpawn(m, rec, sv) {
   if (sv && typeof sv.prof === "string") {          // saved with the jobs system: profession and jobsite come from the save
     if (sv.prof !== m.profession) setProfession(m, sv.prof);
     m.jobStocked = !!sv.st;
+    if (Array.isArray(sv.mem) && typeof sv.mem[0] === "string" && Number.isFinite(+sv.mem[1])) m.jobMem = { prof: sv.mem[0], t: +sv.mem[1] };
     if (Array.isArray(sv.job) && sv.job.length === 3) {
       const [x, y, z] = sv.job.map(Number), k = pk(x, y, z);
       if (!claimedByOther(k, m)) { m.jobsite = { x, y, z }; claims.set(k, { key, mob: m }); }
@@ -328,6 +362,13 @@ function onSpawn(m, rec, sv) {
   if (!sv && BF.trades) m.inv = BF.trades.stockFor("unemployed", m);
   m.jobStocked = false;
 }
+// The remembered profession expired: a regular unemployed villager again (level and xp reset, inventory kept).
+function forget(m) {
+  m.jobMem = null;
+  if (m.profession !== "unemployed") return;
+  m.level = 1; m.xp = 0;
+  rebuildTrades(m);
+}
 // Global tick (mobs.update): validates the claimed jobsites. Villagers without a job look for one in ai() below (seekAI).
 function tick(dt) {
   hook();
@@ -337,6 +378,7 @@ function tick(dt) {
   const W = BF.world;
   for (const m of BF.mobs.list) {
     if (m.type !== "villager" || m.dead || m.removed) continue;
+    if (m.jobMem && !memValid(m)) forget(m);
     if (m.jobsite) {
       const s = m.jobsite;
       if (W.isLoaded(s.x, s.z) && profOfBlock(W.getBlock(s.x, s.y, s.z)) !== m.profession) { claims.delete(pk(s.x, s.y, s.z)); lose(m); }
@@ -351,11 +393,11 @@ const SEEK_MAX = 120;             // seconds before a walk is given up
 const SEEK_AVOID = 60;            // seconds a site that could not be reached (or was lost) is left alone
 const adjacentTo = (s, x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) === 1 && Math.abs(y - s.y) <= 1;
 function pickSite(m, sk) {
-  const own = !NO_JOB[m.profession] && (m.xp || 0) > 0 ? m.profession : null, pref = m.jobPrefer || [], now = performance.now() / 1000;
+  const own = ownTrade(m), mem = memValid(m) ? m.jobMem.prof : null, pref = m.jobPrefer || [], now = performance.now() / 1000;
   const list = unclaimed(m, RADIUS, m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
   let best = null, bd = Infinity;
   for (const s of list) {
-    const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) * (pref.includes(s.prof) ? 0.6 : 1) * rnd(0.9, 1.1);
+    const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) * (s.prof === mem ? 0.3 : pref.includes(s.prof) ? 0.6 : 1) * rnd(0.9, 1.1);
     if (d < bd) { bd = d; best = s; }
   }
   return best;
@@ -446,6 +488,6 @@ function reset() { sites.clear(); claims.clear(); planIndex.clear(); spawned.cle
 BF.jobs = {
   JOBSITE, PROFESSION_OF, RADIUS, sites, claims,
   profOfBlock, blockFor, claim, hire, release, unclaimed, isEmployed, setProfession,
-  planVillage, planFor, drawCount, onSpawn, tick, ai, importAll, reset,
+  planVillage, planFor, drawCount, MEMORY_DAYS, memValid, onSpawn, tick, ai, importAll, reset,
 };
 })();
