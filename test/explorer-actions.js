@@ -22,7 +22,7 @@ module.exports = async (pg, out) => {
   });
   console.log(JSON.stringify(r));
   await pg.evaluate(() => BF.player.start());
-  await pg.waitForTimeout(3000);
+  await require('./lib').toVillage(pg);
   const setup = await pg.evaluate(() => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     if (vs.length < 2) return "villagers: " + vs.length;

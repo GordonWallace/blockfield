@@ -1,7 +1,7 @@
 // Tent checks: node test/run.js /tmp/tent test/tent-actions.js
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
-  await pg.waitForTimeout(3000);
+  await require('./lib').toVillage(pg);
   const r1 = await pg.evaluate(() => {
     const W = BF.world, p = BF.player.position, res = {};
     const x = Math.floor(p.x) + 4, z = Math.floor(p.z), y = W.heightAt(x, z) + 1;
