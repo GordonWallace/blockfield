@@ -10,7 +10,10 @@
 const BF = (window.BF = window.BF || {});
 
 const PX = 128, ZONE = 128, MAX_SIZE = 5;
-const REVEAL = 40;          // pixels around the player that get sampled while a map is held
+// Fill radius while a map is held, in blocks: 40 on the smallest map, shrinking with the square root of the scale (28, 20, 14, ...) down to a floor of 16,
+// so big maps fill in more slowly per block walked (never less than ~1.5 pixels). Same rule for anything that calls explore(), e.g. explorer villagers.
+const revealBlocks = size => Math.max(16, 40 / Math.sqrt(scale(size)));
+const revealPx = size => Math.max(1.5, revealBlocks(size) / scale(size));
 const BUDGET = 900;         // pixel samples per frame
 const side = s => ZONE * Math.pow(2, s - 1);      // blocks per side of a size-s map
 const scale = s => Math.pow(2, s - 1);            // blocks per pixel
@@ -86,15 +89,15 @@ function sample(wx, wz, s) {
 // Samples the pixels of `d` around the world position (x, z). Returns true when something changed.
 function explore(d, x, z, budget) {
   const s = scale(d.size), ox = originX(d.size, d.zx), oz = originX(d.size, d.zz);
-  const pi = (x - ox) / s, pj = (z - oz) / s;
-  if (pi < -REVEAL || pj < -REVEAL || pi > PX + REVEAL || pj > PX + REVEAL) return false;
-  const n = 2 * REVEAL + 1, i0 = Math.floor(pi) - REVEAL, j0 = Math.floor(pj) - REVEAL;
+  const pi = (x - ox) / s, pj = (z - oz) / s, R = revealPx(d.size), RI = Math.ceil(R);
+  if (pi < -R || pj < -R || pi > PX + R || pj > PX + R) return false;
+  const n = 2 * RI + 1, i0 = Math.floor(pi) - RI, j0 = Math.floor(pj) - RI;
   let changed = false, done = 0, guard = budget * 4;
   while (done < budget && guard-- > 0) {
     const idx = d.cur++ % (n * n), i = i0 + idx % n, j = j0 + ((idx / n) | 0);
     if (i < 0 || j < 0 || i >= PX || j >= PX) continue;
     const dx = i + 0.5 - pi, dz = j + 0.5 - pj;
-    if (dx * dx + dz * dz > REVEAL * REVEAL) continue;
+    if (dx * dx + dz * dz > R * R) continue;
     done++;
     const v = sample(Math.floor(ox + (i + 0.5) * s), Math.floor(oz + (j + 0.5) * s), s);
     if (v && d.px[j * PX + i] !== v) { d.px[j * PX + i] = v; changed = true; }
@@ -176,16 +179,12 @@ function paintMap(d) {
   }
   mapG.putImageData(mapImg, 0, 0);
 }
+// The player's arrow, pointing the way they face. Off the map it sits on the frame edge (slightly smaller, greyer) and still shows the heading.
 function marker(g, x, y, ang, onMap) {
-  g.save(); g.translate(x, y);
-  if (onMap) {
-    g.rotate(ang);
-    g.beginPath(); g.moveTo(5, 0); g.lineTo(-3.5, 3.6); g.lineTo(-1.6, 0); g.lineTo(-3.5, -3.6); g.closePath();
-    g.fillStyle = "#fff"; g.strokeStyle = "#101010"; g.lineWidth = 1.4; g.stroke(); g.fill();
-  } else {
-    g.beginPath(); g.arc(0, 0, 3, 0, Math.PI * 2);
-    g.fillStyle = "#fff"; g.strokeStyle = "#101010"; g.lineWidth = 1.4; g.stroke(); g.fill();
-  }
+  g.save(); g.translate(x, y); g.rotate(ang);
+  if (!onMap) g.scale(0.85, 0.85);
+  g.beginPath(); g.moveTo(5, 0); g.lineTo(-3.5, 3.6); g.lineTo(-1.6, 0); g.lineTo(-3.5, -3.6); g.closePath();
+  g.fillStyle = onMap ? "#fff" : "#d8d8d8"; g.strokeStyle = "#101010"; g.lineWidth = 1.4; g.stroke(); g.fill();
   g.restore();
 }
 function drawView(d) {
@@ -241,7 +240,7 @@ const api = {
   // Fraction of a map's pixels that are explored (0..1); `filled(it)` is true once all of them are.
   progress(it) { const d = dataOfItem(it); if (!d) return 0; let n = 0; for (let k = 0; k < d.px.length; k++) if (d.px[k]) n++; return n / d.px.length; },
   filled(it) { return api.progress(it) >= 1; },
-  PX, ZONE, MAX_SIZE, side, scale, zoneOf, nameOf, centre, originX, getData, dataOfItem, explore, upgradeData, use, craftHook, sample, column,
+  PX, ZONE, MAX_SIZE, side, scale, zoneOf, nameOf, centre, originX, getData, dataOfItem, explore, revealBlocks, revealPx, upgradeData, use, craftHook, sample, column,
   // bounds of a map in world blocks: {x0, z0, x1, z1}
   bounds(s, zx, zz) { const o = originX(s, zx), p = originX(s, zz); return { x0: o, z0: p, x1: o + side(s), z1: p + side(s) }; },
   // Per-frame work for the held item (called by player.js). Returns the texture to show, or null when the item has no dynamic view.
