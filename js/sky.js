@@ -10,13 +10,18 @@ const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328");
 const DUSK_HOR = C("#f08a50"), DUSK_GLOW = C("#ff7a3c"), DUSK_PINK = C("#d86a86");
 const CLOUD_DAY = C("#ffffff"), CLOUD_NIGHT = C("#1c2234"), CLOUD_DUSK = C("#f6b49a");
 
-const SKY_R = 480, SUN_D = 400, CLOUD_Y = BF.H + 4, CLOUD_H = 5, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
+const SKY_R = 480, SUN_D = 400, CLOUD_BASE = BF.H + 4, CLOUD_H = 5, CLOUD_RISE = 70, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 let root, celestial, dome, sun, moon, stars, clouds, scene;
 const tmpV = new THREE.Vector3(), tmpC = new THREE.Color();
 const horizon = new THREE.Color(), zenith = new THREE.Color(), glow = new THREE.Color(), cloudCol = new THREE.Color();
-let cloudDrift = 0;
+let cloudDrift = 0, cloudY = CLOUD_BASE;
+
+// Cloud variety: cover and height are smooth value noise over continuous game time (day + time of day), so they are
+// deterministic per world seed, survive save/load and stay smooth however fast time runs (F fast-forward).
+const nhash = (n, s) => { let h = Math.imul(n | 0, 374761393) ^ Math.imul(s | 0, 668265263); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const vnoise = (x, s) => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return nhash(i, s) * (1 - u) + nhash(i + 1, s) * u; };
 
 function pixelCanvas(n, draw) {
   const c = document.createElement("canvas"); c.width = c.height = n;
@@ -194,11 +199,11 @@ function makeClouds() {
   m.frustumCulled = false;
   m.renderOrder = 5;
   let kx = 1e9, kz = 1e9;
-  m.userData.sync = (camX, camZ, drift) => {
+  m.userData.sync = (camX, camZ, drift, y) => {
     // window's first cell index; world x of cell i's left edge is i * CS - drift
     const ci = Math.floor((camX + drift) / CS) - (W >> 1), cj = Math.floor(camZ / CS) - (W >> 1);
     if (ci !== kx || cj !== kz) { kx = ci; kz = cj; rebuild(ci, cj); }
-    m.position.set(ci * CS - drift, CLOUD_Y, cj * CS);
+    m.position.set(ci * CS - drift, y, cj * CS);
   };
   m.userData.triangles = () => nv / 3;
   m.userData.setCoverage = q => { if (setMask(Math.round(q * 20) / 20)) kx = 1e9; };
@@ -209,6 +214,9 @@ const sky = {
   time: 0.05,
   light: 1,
   day: 0,
+  cloudBase: CLOUD_BASE, // lowest cloud altitude; terrain with taller peaks raises it (world gen sets it per world)
+  cloudCover: 0,         // 0 clear .. 1 fully overcast (current, includes weather)
+  cloudHeight: CLOUD_BASE, // current cloud altitude = cloudBase + variable offset (0..CLOUD_RISE)
   dayLength: 1200, // seconds per full day (20 min; was 600 until 2026-10-06)
 
   init(sceneRef) {
@@ -293,8 +301,15 @@ const sky = {
     stars.visible = so > 0.01;
 
     // volumetric clouds: mesh moves in whole cells with the camera, sub-cell scroll through position (see makeClouds)
-    clouds.userData.setCoverage(0.7 - 0.4 * wr);
-    clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift);
+    // Cover: clear spells to scattered to broken over a day or two; rain forces overcast. Height: base + a rise
+    // (never below the base) that is mostly small and sometimes large, and rain pulls the cloud deck back down.
+    const T = sky.day + sky.time, cs = ((BF.state && BF.state.seed) | 0);
+    const wanted = smooth(0.3, 0.72, vnoise(T / 1.4, cs));               // 0 = clear sky
+    const cover = wanted + (1 - wanted) * wr;
+    const rise = smooth(0.4, 0.9, vnoise(T / 2.1 + 31.7, cs + 1)) * CLOUD_RISE * (1 - 0.8 * wr);
+    sky.cloudCover = cover; sky.cloudHeight = cloudY = sky.cloudBase + rise;
+    clouds.userData.setCoverage(cover < 0.03 ? 1 : 0.96 - 0.62 * cover);
+    clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift, cloudY);
     const cu = clouds.material.uniforms;
     cu.cam.value.set(cam.position.x, cam.position.z);
     cloudCol.copy(CLOUD_NIGHT).lerp(CLOUD_DAY, dayness).lerp(tmpC.copy(CLOUD_DUSK).multiplyScalar(0.25 + 0.75 * dayness), dusk * 0.45);
@@ -302,7 +317,7 @@ const sky = {
     if (wf > 0) cloudCol.lerp(tmpC.setRGB(0.9, 0.92, 1), wf * 0.7);
     cu.color.value.copy(cloudCol);
     cu.fogCol.value.copy(horizon);
-    cu.under.value = cam.position.y < CLOUD_Y ? 1 : 0;
+    cu.under.value = cam.position.y < cloudY ? 1 : 0;
   },
 };
 
