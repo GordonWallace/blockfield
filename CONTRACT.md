@@ -592,5 +592,8 @@ Villagers only exist while their chunks are loaded. `BF.villageSim` keeps the te
   beyond `(viewDist + 1)` chunks. breeding.js lifts its 72-block spawn limit for active villages. When a village leaves the set its chunks unload and `onChunkUnload` removes the mobs (state saved as before).
 - **Catch-up**: the last game day each village was simulated is kept (`seen`, saved as `"seen:<village key>"` in the villagers save). When a village becomes active again after more than 0.1 game day,
   young crops on farmland in its chunks mature with the chance they would have had (`1 - exp(-days * 600 / 120)`). Meals, trade restocks and breeding already count game days.
-  Not caught up: builder progress, farmer harvests, explorer trips.
+  **Villager catch-up hooks**: `BF.villageSim.onCatchUp(fn(mob, rec, awayDays))` registers a function that runs once per villager of a returning village, after its crops caught up and every footprint chunk is loaded
+  (so it may place and break blocks anywhere around the village). Registered so far: `BF.builder.catchUp` (places blocks of the structure in progress from its own stock, about
+  `BUILD_END*600/avg(BLOCK_T)*0.5` a game day, stops at the first missing material, finishes the structure when complete) and `BF.villageLife.catchUp` (a farmer harvests and replants the mature crops around
+  its jobsite, 60 a game day, at most 160). Explorer trips register the same way from js/explorer.js.
 - API: `update(px, pz) -> changed`, `isActive(villageKey)`, `status()`, `exportSeen(out)` / `importSeen(o)`, `reset()`, `init()`. Debug HUD (F3) shows the simulated village and kept chunk counts.
