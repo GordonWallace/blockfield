@@ -196,7 +196,7 @@ function drawView(d) {
 function drawFrame(src, mx, mz, smooth) {
   const P = BF.player;
   const ang = Math.atan2(-Math.cos(P.yaw), -Math.sin(P.yaw));         // heading on the map: +x right, +z down
-  vg.imageSmoothingEnabled = !!smooth;
+  vg.imageSmoothingEnabled = !!smooth; if (smooth) vg.imageSmoothingQuality = "high";
   vg.fillStyle = "#3f2f18"; vg.fillRect(0, 0, T, T);
   vg.fillStyle = "#a88f58"; vg.fillRect(2, 2, T - 4, T - 4);
   vg.fillStyle = "#c9b27a"; vg.fillRect(4, 4, T - 8, T - 8);

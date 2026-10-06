@@ -3,14 +3,15 @@
 //    item into a filled "auto_map_<zones>_<zoneX>_<zoneZ>" map centred on the zone the player stands in. Its pixels come straight from the world
 //    generator (BF.worldgen, whichever version the world was made with), not from loaded chunks, so the whole area fills in by itself, coarse to fine,
 //    a few milliseconds per frame (tick() is called from the main loop). Nothing is saved: the pixels regenerate from the seed when the map is next
-//    held or viewed. At most 512x512 pixels, so a 2048-block map is 4 blocks per pixel.
+//    held or viewed. Always 1024x1024 pixels at most (256 blocks wide and under: one block per pixel), so a 2048-block map is 2 blocks per pixel.
 //  * Right click with any filled map (normal or auto) opens it full screen: zone grid, player arrow, block under the mouse (and biome / height on auto maps).
 // API: BF.mapview = { use(sel, it), held(it), tick(), open(it), close(), isOpen(), getAuto, nameOf, geometry, finish(d), paint(d), stats }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const ZONE = 128, MAX_PX = 512, MAX_K = 128, DEFAULT_W = 2048;
+const ZONE = 128, MAX_PX = 1024, MAX_K = 32768, DEFAULT_W = 2048;   // 32768 zones = 4194304 blocks: past +-2M blocks the generator's lattice cache keys collide
+const RIVER_MAX_SCALE = 16;    // rivers (about 20 blocks wide) only on maps with at most 16 blocks per pixel; see step()
 const STEPS = [16, 8, 4, 2, 1];
 const keyOf = (k, zx, zz) => k + "_" + zx + "_" + zz;
 const nameOf = (k, zx, zz) => "auto_map_" + keyOf(k, zx, zz);
@@ -38,8 +39,10 @@ const dataOfItem = it => (it && it.auto ? getAuto(it.auto.k, it.auto.zx, it.auto
 
 // Samples the next cells of the progressive fill until `deadline` (performance.now() ms). Returns true when something changed.
 function step(d, deadline) {
-  const W = BF.worldgen, N = d.N;
+  const W = BF.worldgen, N = d.N, R = BF.rivers;
   let changed = false, n = 0;
+  if (R && R.setEnabled && d.scale > RIVER_MAX_SCALE) R.setEnabled(false);   // the river network is traced per 768-block cell: far too slow and big for coarse maps
+  try {
   while (!d.done) {
     const s = STEPS[d.pass], per = Math.ceil(N / s);
     if (d.idx >= per * per) {
@@ -59,6 +62,7 @@ function step(d, deadline) {
     changed = true; d.cells++;
     if ((++n & 15) === 0 && performance.now() > deadline) break;
   }
+  } finally { if (R && R.setEnabled) R.setEnabled(true); }
   if (changed) d.ver++;
   return changed;
 }
@@ -67,10 +71,12 @@ function finish(d) { while (!d.done) step(d, Infinity); return d; }
 
 // ---------------------------------------------------------------- colours
 const COL = { 0: [40, 70, 160], 1: [230, 215, 150], 2: [235, 235, 220], 3: [130, 130, 130], 4: [60, 120, 220], 5: [130, 190, 80], 6: [50, 130, 40], 7: [200, 120, 200], 8: [110, 170, 70], 9: [30, 80, 30], 10: [80, 110, 60], 11: [90, 90, 50], 12: [235, 210, 130], 13: [200, 110, 60], 14: [180, 170, 70], 15: [100, 170, 50], 16: [20, 150, 40], 17: [40, 110, 80], 18: [30, 90, 70], 19: [235, 240, 250], 20: [170, 220, 255], 21: [160, 200, 200], 22: [150, 210, 120], 23: [250, 170, 200], 24: [150, 150, 150], 25: [220, 230, 240], 26: [255, 255, 255], 27: [170, 170, 170], 28: [170, 100, 170] };
+let scratch = null;       // one shared ImageData (4 MB at 1024 px) for all maps
 function paint(d) {
   const N = d.N;
-  if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = N; d.img = d.cv.getContext("2d").createImageData(N, N); }
-  const o = d.img.data, sea = BF.SEA || 48, rel = d.scale * 0.9 + 6;
+  if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = N; }
+  if (!scratch || scratch.width !== N) scratch = d.cv.getContext("2d").createImageData(N, N);
+  const o = scratch.data, sea = BF.SEA || 48, rel = d.scale * 0.9 + 6;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const p = j * N + i, q = p * 4, id = d.bio[p];
     if (id === 255) { o[q + 3] = 0; continue; }
@@ -88,18 +94,18 @@ function paint(d) {
     }
     o[q] = clamp(r, 0, 255); o[q + 1] = clamp(g, 0, 255); o[q + 2] = clamp(b, 0, 255); o[q + 3] = 255;
   }
-  d.cv.getContext("2d").putImageData(d.img, 0, 0);
+  d.cv.getContext("2d").putImageData(scratch, 0, 0);
   d.cvVer = d.ver;
   return d.cv;
 }
 function canvasOf(d) {
   const now = performance.now();
-  if (d.cvVer !== d.ver && (!d.cv || d.done || now - d.paintAt > 200)) { paint(d); d.paintAt = now; }
+  if (d.cvVer !== d.ver && (!d.cv || d.done || now - d.paintAt > 400)) { paint(d); d.paintAt = now; }
   return d.cv;
 }
 
 // ---------------------------------------------------------------- scheduler
-let budget = 8;
+let budget = 10;
 function tick() {
   if (!maps.size || !BF.worldgen || (BF.state && BF.state.paused && !view.open)) return;
   const list = [...maps.values()].filter(d => !d.done).sort((a, b) => b.used - a.used);
@@ -250,7 +256,7 @@ function hint() {
   if (!(w > 0)) { prompt.hint.textContent = "Enter a width, e.g. 2000"; prompt.hint.classList.add("bad"); return false; }
   const k = zonesFor(w), side = k * ZONE, sc = side / Math.min(MAX_PX, side);
   prompt.hint.classList.remove("bad");
-  prompt.hint.textContent = "Becomes " + side + " x " + side + " blocks (" + k + " x " + k + " zones of 8x8 chunks), " + (+sc.toFixed(2)) + " block" + (sc === 1 ? "" : "s") + " per pixel" + (w > MAX_K * ZONE ? "\n(largest allowed is " + MAX_K * ZONE + ")" : "");
+  prompt.hint.textContent = "Becomes " + side + " x " + side + " blocks (" + k + " x " + k + " zones of 8x8 chunks), " + (+sc.toFixed(2)) + " block" + (sc === 1 ? "" : "s") + " per pixel" + (sc > RIVER_MAX_SCALE ? ", no rivers at this scale" : "") + (w > MAX_K * ZONE ? "\n(largest allowed is " + MAX_K * ZONE + ")" : "");
   return true;
 }
 function openPrompt(sel) {
