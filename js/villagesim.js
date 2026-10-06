@@ -2,7 +2,7 @@
 // (no meshes) of the nearest few villages loaded out to RADIUS blocks, letting their villagers run their
 // normal AI while the player is beyond view distance. Also catches up crops when a village is revisited.
 // API: BF.villageSim = { RADIUS, MAX, keepKeys, update(px, pz) -> changed, isActive(key), status(),
-//                        exportSeen(out), importSeen(o), reset() }
+//                        onCatchUp(fn(mob, rec, awayDays)), exportSeen(out), importSeen(o), reset() }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -17,6 +17,8 @@ const CROP_SECS_PER_DAY = 600, GROW_RATE = 1 / 120;   // matches sky.dayLength a
 const active = new Map();        // village key -> { v, keys: [chunk keys] }
 const seen = new Map();          // village key -> game day it was last simulated
 const pending = new Map();       // village key -> { away, todo: Set(chunk keys) } crops still to catch up
+const awayOf = new Map();        // village key -> { away, done: Set(mobs), ready } villagers still to catch up
+const hooks = [];                // fn(mob, villageRec, awayDays), see onCatchUp
 const keepKeys = new Set();
 let t = 0, lastT = 0;
 
@@ -64,6 +66,26 @@ function startCatchUp(key, ent) {
     if (c) catchUpChunk(c, away); else todo.add(k);
   }
   if (todo.size) pending.set(key, { away, todo });
+  awayOf.set(key, { away, done: new Set(), ready: null });
+}
+
+// Villagers of a village that was away run the registered hooks once, when its crops have caught up and every chunk
+// of its footprint is loaded (so a hook may place and break blocks anywhere around the village).
+function catchUpVillagers(now) {
+  for (const [key, a] of awayOf) {
+    const ent = active.get(key);
+    if (!ent) { awayOf.delete(key); continue; }
+    if (pending.has(key) || !ent.keys.every(k => BF.world.chunks.has(k))) continue;
+    if (a.ready == null) a.ready = now;
+    if (now - a.ready > 90) { awayOf.delete(key); continue; }   // the roster has had its chance to spawn
+    const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(key);
+    if (!rec) continue;
+    for (const m of rec.members) {
+      if (m.removed || m.dead || m.type !== "villager" || a.done.has(m)) continue;
+      a.done.add(m);
+      for (const fn of hooks) { try { fn(m, rec, a.away); } catch (e) { console.error(e); } }
+    }
+  }
 }
 
 function rebuild() {
@@ -90,7 +112,7 @@ function update(px, pz) {
   }
   let changed = next.size !== active.size;
   for (const k of next.keys()) if (!active.has(k)) changed = true;
-  for (const k of active.keys()) if (!next.has(k)) pending.delete(k);
+  for (const k of active.keys()) if (!next.has(k)) { pending.delete(k); awayOf.delete(k); }
   const fresh = [...next].filter(([k]) => !active.has(k));
   active.clear();
   for (const [k, e] of next) active.set(k, e);
@@ -98,6 +120,7 @@ function update(px, pz) {
   // stamp villages whose centre is loaded: the last stamp is when the village stopped being simulated
   const d = dayNow();
   for (const [k, e] of active) if (BF.world.isLoaded(e.v.x, e.v.z)) seen.set(k, d);
+  catchUpVillagers(now);
   if (changed) rebuild();
   return changed;
 }
@@ -117,10 +140,13 @@ BF.villageSim = {
   keepKeys,
   update,
   isActive: key => active.has(key),
+  // fn(mob, villageRec, awayDays): called once per villager of a village that was out of range for more than 0.1 game day.
+  // Apply what the villager would have got done meanwhile (builders, farmers; explorers hook in the same way).
+  onCatchUp(fn) { hooks.push(fn); },
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks`,
   exportSeen(out) { for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3); },
   importSeen(o) { seen.clear(); if (o) for (const k in o) if (k.slice(0, 5) === "seen:") seen.set(k.slice(5), +o[k]); },
-  reset() { active.clear(); seen.clear(); pending.clear(); keepKeys.clear(); lastT = 0; },
+  reset() { active.clear(); seen.clear(); pending.clear(); awayOf.clear(); keepKeys.clear(); lastT = 0; },
   init() { BF.world.onChunkLoad(onChunkLoad); },
 };
 })();
