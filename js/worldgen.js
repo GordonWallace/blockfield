@@ -233,7 +233,19 @@ function nodeLim(i, j) {
   return v;
 }
 // smooth interpolation of the limited node weights -> K.sp (plateau), K.mp (massif)
+// Coarse mode (overview maps, setCoarse): the raw node weights without the disc scan, which is too slow when every pixel lands
+// on new nodes. Escarpments come out steeper, but at 64+ blocks per pixel that's invisible.
+let COARSE = false;
 function limWeights(x, z) {
+  if (COARSE) {
+    const fi = x / CG, fj = z / CG, i = Math.floor(fi), j = Math.floor(fj), u = fi - i, w = fj - j;
+    const r = (a, b) => { const v = nodeRaw(a, b); return [v[0], v[1] > 0 ? v[1] * smooth(0.85, 1.0, v[0]) : 0, v[2]]; };
+    const a = r(i, j), b = r(i + 1, j), c = r(i, j + 1), d = r(i + 1, j + 1);
+    K.sp = lerp(lerp(a[0], b[0], u), lerp(c[0], d[0], u), w);
+    K.mp = lerp(lerp(a[1], b[1], u), lerp(c[1], d[1], u), w);
+    K.lo = lerp(lerp(a[2], b[2], u), lerp(c[2], d[2], u), w);
+    return;
+  }
   const fi = x / CG, fj = z / CG, i = Math.floor(fi), j = Math.floor(fj), u = fi - i, w = fj - j;
   const tu = u, tw = w;
   const a = nodeLim(i, j), b = nodeLim(i + 1, j), c = nodeLim(i, j + 1), d = nodeLim(i + 1, j + 1);
@@ -2002,6 +2014,7 @@ function recordBuilding(kind, w, d, style, h) {
 const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: h == null ? 0.5 : h });
 
 BF.worldgen = {
+  setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
     if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });

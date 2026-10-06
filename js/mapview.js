@@ -12,6 +12,7 @@
 const BF = (window.BF = window.BF || {});
 
 const ZONE = 128, MAX_PX = 1024, MAX_K = 32768, DEFAULT_W = 2048;   // 32768 zones = 4194304 blocks: past +-2M blocks the generator's lattice cache keys collide
+const COARSE_SCALE = 64;      // above this many blocks per pixel, mile-high plateau weights are approximated (worldgen.setCoarse)
 const RIVER_MAX_SCALE = 16;    // rivers (about 20 blocks wide) only on maps with at most 16 blocks per pixel; see step()
 const STEPS = [16, 8, 4, 2, 1];
 const keyOf = (k, zx, zz) => k + "_" + zx + "_" + zz;
@@ -43,6 +44,7 @@ function step(d, deadline) {
   const W = BF.worldgen, N = d.N, R = BF.rivers, tintOf = W.tintAt;
   let changed = false, n = 0;
   if (R && R.setEnabled && d.scale > RIVER_MAX_SCALE) R.setEnabled(false);   // the river network is traced per 768-block cell: far too slow and big for coarse maps
+  if (W.setCoarse && d.scale > COARSE_SCALE) W.setCoarse(true);              // mile-high plateau weights: skip the slope-limit scan
   try {
   while (!d.done) {
     const s = STEPS[d.pass], per = Math.ceil(N / s);
@@ -65,7 +67,7 @@ function step(d, deadline) {
     changed = true; d.cells++;
     if ((++n & 15) === 0 && performance.now() > deadline) break;
   }
-  } finally { if (R && R.setEnabled) R.setEnabled(true); }
+  } finally { if (R && R.setEnabled) R.setEnabled(true); if (W.setCoarse) W.setCoarse(false); }
   if (changed) d.ver++;
   return changed;
 }
@@ -329,9 +331,10 @@ function drawView(force) {
 }
 // biomeAt without the river network on coarse maps: tracing it for every hovered point far from the last would stall the page (see step()).
 function biomeFor(x, z, scale) {
-  const R = BF.rivers, off = R && R.setEnabled && scale > RIVER_MAX_SCALE;
+  const R = BF.rivers, G = BF.worldgen, off = R && R.setEnabled && scale > RIVER_MAX_SCALE, co = G.setCoarse && scale > COARSE_SCALE;
   if (off) R.setEnabled(false);
-  try { return BF.worldgen.biomeAt(x, z); } finally { if (off) R.setEnabled(true); }
+  if (co) G.setCoarse(true);
+  try { return G.biomeAt(x, z); } finally { if (off) R.setEnabled(true); if (co) G.setCoarse(false); }
 }
 // Teleport to the selected point, landing on the surface (on the water surface over water). Far destinations are not loaded yet, so the height from
 // the generator is used first and corrected by tick() once the chunk exists (trees, buildings).
