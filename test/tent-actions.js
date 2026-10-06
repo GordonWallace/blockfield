@@ -31,12 +31,13 @@ module.exports = async (pg, out) => {
   await pg.screenshot({ path: out + "-view.png" });
   const r2 = await pg.evaluate(async () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
-    const T = BF.trades, I = BF.I, A = vs[0], res = {};
+    const open = m => { const c = BF.world.chunkAt(m.position.x, m.position.z); return c && c.top[(Math.floor(m.position.z) - c.cz * 16) * 16 + Math.floor(m.position.x) - c.cx * 16] < m.position.y; };
+    const T = BF.trades, I = BF.I, A = vs.find(open) || vs[0], res = {};   // a villager outdoors (one inside a house would pitch on its roof)
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     BF.world.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
     res.hasTent = T.inv.count(A.inv, I.tent);
-    BF.jobs.claim(A);
+    BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
     T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2); for (let i = 0; i < 600; i++) BF.mobs.update(0.1); res.spare = T.inv.count(A.inv, I.tent);   // lost its tent: collects a spare at home by day
     // far from its bed, evening: pitches
     const home = A.bed; A.homeBed0 = home;

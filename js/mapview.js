@@ -77,7 +77,7 @@ function paint(d) {
   const N = d.N;
   if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = N; }
   if (!scratch || scratch.width !== N) scratch = d.cv.getContext("2d").createImageData(N, N);
-  const o = scratch.data, sea = BF.SEA || 48, rel = d.scale * 0.9 + 6;
+  const o = scratch.data, sea = BF.SEA, tall = BF.H > 192 ? 9 : 1, rel = d.scale * 0.9 + 6;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const p = j * N + i, q = p * 4, id = d.bio[p];
     if (id === 255) { o[q + 3] = 0; continue; }
@@ -90,7 +90,7 @@ function paint(d) {
     } else {
       const c = COL[id] || [255, 0, 255];
       const hn = i + 1 < N && j + 1 < N && d.bio[p + N + 1] !== 255 ? d.hgt[p + N + 1] : h;
-      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / 150, 0, 1) + sh;
+      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / (150 * tall), 0, 1) + sh;
       r = c[0] * k; g = c[1] * k; b = c[2] * k;
     }
     o[q] = clamp(r, 0, 255); o[q + 1] = clamp(g, 0, 255); o[q + 2] = clamp(b, 0, 255); o[q + 3] = 255;
@@ -303,8 +303,8 @@ function biomeFor(x, z, scale) {
 // the generator is used first and corrected by tick() once the chunk exists (trees, buildings).
 function surfaceAt(x, z) {
   const W = BF.world, G = BF.worldgen;
-  let h = W.isLoaded(x, z) ? W.heightAt(x, z) : -1, wl = BF.SEA;
-  if (G) { if (h < 0) h = G.heightAt(x, z); if (G.waterLevelAt) wl = Math.max(wl, G.waterLevelAt(x, z)); }
+  let h = W.isLoaded(x, z) ? W.heightAt(x, z) : BF.MIN_Y - 1, wl = BF.SEA;
+  if (G) { if (h < BF.MIN_Y) h = G.heightAt(x, z); if (G.waterLevelAt) wl = Math.max(wl, G.waterLevelAt(x, z)); }
   return Math.max(h, wl) + 1.01;
 }
 function teleportToSelection() {
@@ -324,7 +324,7 @@ function settle() {
   if (!W.isLoaded(p.x, p.z)) return;
   view.pending = null;
   const h = W.heightAt(p.x, p.z), pos = BF.player.position;
-  if (h >= 0 && Math.abs(pos.x - (p.x + 0.5)) < 2 && Math.abs(pos.z - (p.z + 0.5)) < 2) { const wl = BF.worldgen && BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(p.x, p.z) : BF.SEA; BF.player.teleport(pos.x, Math.max(h, wl, BF.SEA) + 1.01, pos.z); }
+  if (h >= BF.MIN_Y && Math.abs(pos.x - (p.x + 0.5)) < 2 && Math.abs(pos.z - (p.z + 0.5)) < 2) { const wl = BF.worldgen && BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(p.x, p.z) : BF.SEA; BF.player.teleport(pos.x, Math.max(h, wl, BF.SEA) + 1.01, pos.z); }
 }
 function progressOf(d) {
   if (d.done) return 1;
