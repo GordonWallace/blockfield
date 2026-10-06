@@ -408,7 +408,7 @@ No fixed offers (`TRADES.explorer` is empty, `PRODUCE.explorer` empty); starting
 | 1 | 80 emerald > 1 filled_map (size 4) | 80 | 28.8 + exploring | 0.36 | buy from villager |
 | 1 | 176 emerald > 1 filled_map (size 5) | 176 | 57.6 + exploring | 0.33 | buy from villager |
 
-Only while it holds a finished map; a map it gave up on before 97% explored is priced by its coverage. The explorer buys the blank map from a cartographer at the cartographer's prices (4, 8, 16, 32, 64 for sizes 1-5, below), so a sale
+Only while it holds a finished map; a map it gave up on before 97% explored is priced by its coverage (at least 15%). The fill radius shrinks with map size (js/maps.js), so sizes 3-5 are rarely finished: the explorer buys small sizes far more often (weights 16:8:4:2:1) and settles for a partial map after 1500 s of exploring. The explorer buys the blank map from a cartographer at the cartographer's prices (4, 8, 16, 32, 64 for sizes 1-5, below), so a sale
 leaves it 3, 8, 20, 48 and 112 emeralds ahead. Its purse is `EXPLORER_EM_CAP` 100 with +6 a day (the usual 12 / +2 could never pay for a size 3 map). The map offers are not in the old-trade tables below.
 
 ### builder

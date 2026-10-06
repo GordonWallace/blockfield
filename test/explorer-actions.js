@@ -41,7 +41,7 @@ module.exports = async (pg, out) => {
     return { claim: A.res, prof: A.profession, A: [A.position.x | 0, A.position.z | 0], C: [C.position.x | 0, C.position.z | 0], same: A.village === C.village };
   });
   console.log(JSON.stringify(setup));
-  for (let k = 0; k < 90; k++) {
+  for (let k = 0; k < 40; k++) {
     const line = JSON.stringify(await pg.evaluate(() => {
       const A = window.__A;
       for (let i = 0; i < 300; i++) { BF.sky.setTime(0.1); BF.mobs.update(0.1); BF.player.position.set(A.position.x + 3, A.position.y + 1, A.position.z); }

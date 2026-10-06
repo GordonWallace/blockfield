@@ -1,7 +1,7 @@
 // Explorer villagers (BF.explorer). Companion of js/maps.js (map items, explored pixels) and js/cartography.js (who makes the blank maps).
 // - Spawning (mobs.js villageRoster): only in villages with cartographers, one explorer per cartographer with 70% probability. Jobsite: the survey table.
 // - An explorer never starts with a map. With emeralds in its pocket it walks to a cartographer of its village that holds a blank map and buys it
-//   (PRICE_BLANK emeralds by size, the cartographer's own prices in js/trading.js; stock and room rules of trading.js apply). It takes any size it can pay for, the largest first.
+//   (PRICE_BLANK emeralds by size, the cartographer's own prices in js/trading.js; stock and room rules of trading.js apply). It takes any size it can pay for, favouring small ones.
 // - It uses the blank map where it stands: the map becomes the filled map of an 8x8-chunk zone near it (its own zone first, then the closest zone
 //   that is not mapped yet), and it starts walking from one unexplored patch of the zone to the next. js/maps.js samples the world around it
 //   (BF.maps.explore) so the shared zone data fills in exactly as if a player carried the map.
@@ -19,7 +19,10 @@ const PRICE_BLANK = [4, 8, 16, 32, 64];   // what the cartographer asks for a bl
 const SELL_PRICE = [7, 16, 36, 80, 176];  // emeralds the player pays for a filled map, by size: well over the blank price, and it grows faster (TRADE_AUDIT.md)
 const IDLE_GIVE_UP = 180;                 // seconds of waiting for patches nobody has loaded before it settles for what it mapped
 const FILLED = 0.97;                      // share of mapped pixels that counts as filled
-const CELL = 16;                          // patch size in map pixels
+// patch size in map pixels: 16 on the two small maps, then about 32 blocks (the fill radius of js/maps.js shrinks to 16 blocks on the big ones)
+const cellPx = size => (size <= 2 ? 16 : Math.max(2, Math.round(32 / BF.maps.scale(size))));
+const MAP_WORK_CAP = 1500;                // seconds of exploring after which it settles for what it mapped (a size 5 map is ~130 km of walking)
+const SIZE_WEIGHT = [16, 8, 4, 2, 1];     // which affordable size it buys: mostly small ones, they are the ones it can finish
 const CELL_DONE = 0.9;                    // a patch is explored when this share of its pixels is
 const MAX_FOR_SALE = 2;                   // stops fetching maps once it carries this many filled ones (waiting for a buyer)
 const SAMPLE = 700;                       // pixel samples per call to BF.maps.explore, ~5 calls per second
@@ -49,7 +52,7 @@ function coverage(d) {
   return c.v;
 }
 function cellFill(d, ci, cj) {
-  const PX = BF.maps.PX;
+  const PX = BF.maps.PX, CELL = cellPx(d.size);
   let n = 0;
   for (let j = cj * CELL; j < (cj + 1) * CELL; j++) for (let i = ci * CELL; i < (ci + 1) * CELL; i++) if (d.px[j * PX + i]) n++;
   return n / (CELL * CELL);
@@ -68,8 +71,8 @@ function carried(m) {
 }
 
 // ---------------------------------------------------------------- offers
-// A map it gave up on before 97% is priced by how much of it is explored.
-const priceOf = (it, d) => Math.max(1, Math.round(SELL_PRICE[Math.max(0, Math.min(SELL_PRICE.length - 1, it.map.size - 1))] * Math.min(1, coverage(d) / FILLED)));
+// A map it gave up on before 97% is priced by how much of it is explored (at least 15%).
+const priceOf = (it, d) => Math.max(1, Math.round(SELL_PRICE[Math.max(0, Math.min(SELL_PRICE.length - 1, it.map.size - 1))] * Math.max(0.15, Math.min(1, coverage(d) / FILLED))));
 // One offer per filled map it carries: emeralds for the map. Replaces the previous list only when it changed.
 function syncOffers(m) {
   if (!m || m.profession !== "explorer" || !m.inv || !Array.isArray(m.trades) || !BF.maps) return;
@@ -140,7 +143,7 @@ const inLoaded = (x, z) => { const W = BF.world; return W.isLoaded(x, z) && W.is
 // Next patch of map `c` to visit: the nearest unexplored, loaded one near the player that has not been given up. null + reason otherwise.
 function pickTarget(m, c) {
   const M = BF.maps, d = c.d, X = state(m), s = M.scale(d.size), ox = M.originX(d.size, d.zx), oz = M.originX(d.size, d.zz);
-  const n = M.PX / CELL, pp = BF.player.position;
+  const CELL = cellPx(d.size), n = M.PX / CELL, pp = BF.player.position;
   let best = null, bd = Infinity, open = 0, avoided = 0;
   for (let cj = 0; cj < n; cj++) for (let ci = 0; ci < n; ci++) {
     if (cellFill(d, ci, cj) >= CELL_DONE) continue;
@@ -159,6 +162,8 @@ function exploreAI(m, c, dt, out) {
   X.sampT -= dt;
   if (X.sampT <= 0) { X.sampT = 0.2; M.explore(c.d, m.position.x, m.position.z, SAMPLE); }
   if (isFilled(m, c.it, c.d)) { finish(m, c, "covered"); return false; }
+  X.work = X.work || {};
+  if ((X.work[c.it.name] = (X.work[c.it.name] || 0) + dt) > MAP_WORK_CAP) { X.fin[c.it.name] = 1; finish(m, c, "time"); return false; }
   if (!X.target) {
     X.pickT = (X.pickT || 0) - dt;
     if (X.pickT > 0) return false;
@@ -202,15 +207,18 @@ function finish(m, c, why) {
 
 // ---------------------------------------------------------------- fetching a blank map from a cartographer
 const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession === "cartographer" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
-// The blank map it would buy from v2: the largest size it holds and the explorer can pay for.
+// The blank map it would buy from v2: a size it holds and can pay for, drawn with weights favouring small ones (SIZE_WEIGHT).
 function offerFor(v2, emeralds) {
   if (Array.isArray(v2)) v2 = { inv: v2 };
-  const I = BF.I;
-  for (let s = PRICE_BLANK.length; s >= 1; s--) {
-    const id = I["blank_map_" + s];
-    if (id != null && cnt(v2, id) >= 1 && emeralds >= PRICE_BLANK[s - 1]) return { buy: [{ id: I.emerald, n: PRICE_BLANK[s - 1] }], sell: { id, n: 1 }, level: 4, xp: T().TRADE_XP[3] };
+  const I = BF.I, opts = [];
+  for (let k = 1; k <= PRICE_BLANK.length; k++) {
+    const id = I["blank_map_" + k];
+    if (id != null && cnt(v2, id) >= 1 && emeralds >= PRICE_BLANK[k - 1]) opts.push({ k, id, w: SIZE_WEIGHT[k - 1] });
   }
-  return null;
+  if (!opts.length) return null;
+  let r = Math.random() * opts.reduce((a, o) => a + o.w, 0), o = opts[0];
+  for (const q of opts) { o = q; if ((r -= q.w) <= 0) break; }
+  return { buy: [{ id: I.emerald, n: PRICE_BLANK[o.k - 1] }], sell: { id: o.id, n: 1 }, level: 4, xp: T().TRADE_XP[3] };
 }
 function findCartographer(m, X) {
   const R = m.village;
@@ -355,5 +363,5 @@ function unpack(m, o) {
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, CELL, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
+BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
 })();
