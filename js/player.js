@@ -6,6 +6,7 @@ const BF = (window.BF = window.BF || {});
 
 // ---------- tuning ----------
 const GRAVITY = 32, JUMP_V = 8.4, WALK = 4.3, SPRINT = 5.6, SNEAK = 1.3;
+const TURBO_MULT = 2.5, TURBO_LOOKAHEAD = 2;
 const FLY = 10.9, FLY_SPRINT = 21.6, CFLY = 16, CFLY_SPRINT = 32, SWIM = 2.2, REACH = 5, MOB_REACH = 3.5;
 const BASE_FOV = 75, AIR_MAX = 10, ATTACK_CD = 0.4, EAT_TIME = 1.2, PLACE_REPEAT = 0.22;
 const HW = 0.3, HEIGHT = 1.8, EYE = 1.62, SNEAK_EYE = 1.47;
@@ -22,8 +23,8 @@ let dragMode = false;         // fallback look mode (no pointer lock)
 let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
 let onGround = false, inWater = false, headInWater = false;
-let flying = false, sprinting = false, sneaking = false;
-let lastSpaceTap = 0, lastWTap = 0;
+let flying = false, sprinting = false, sneaking = false, turbo = false;
+let lastSpaceTap = 0, lastWTap = 0, wTaps = 0;
 let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
@@ -52,6 +53,7 @@ const P = (BF.player = {
   get headInWater() { return headInWater; },
   get sneaking() { return sneaking; },
   get sprinting() { return sprinting; },
+  get turbo() { return turbo; },
   get air() { return air; },
   get target() { return target; },
   get yaw() { return yaw; },
@@ -156,7 +158,7 @@ let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, 
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
-     <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
+     <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>W x3</b> turbo fly</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
      <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> drop item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -531,7 +533,12 @@ function bindInput() {
     if (c === "Space") {
       if (now - lastSpaceTap < 300) { flying = !flying; vel.y = 0; lastSpaceTap = 0; } else lastSpaceTap = now;
     }
-    if (c === "KeyW") { if (now - lastWTap < 300) sprinting = true; lastWTap = now; }
+    if (c === "KeyW") {
+      wTaps = now - lastWTap < 300 ? wTaps + 1 : 1;
+      if (wTaps >= 2) sprinting = true;
+      if (wTaps >= 3 && flying) turbo = true;   // triple-tap W while flying: third, fastest speed
+      lastWTap = now;
+    }
     if (c === "KeyQ") { try { if (selectedItem() && inv().consumeSelected) inv().consumeSelected(1); } catch (_) {} }
     keys.add(c);
   });
@@ -772,6 +779,10 @@ function iconTexture(id) {
   } catch (_) {}
   return (iconTex[id] = t);
 }
+// Held map: fixed relative to the body, not the camera. It sits `fwd` ahead of and `down` below the eye, tilted back by atan(down / fwd) (~61 degrees
+// from vertical) so it faces the eye when looking down at it: only its top edge shows when looking straight ahead, and it fills the view when looking down.
+const MAP_VM = { size: 0.75, fwd: 0.38, down: 0.7, side: 0.06 };
+MAP_VM.tilt = Math.atan2(MAP_VM.down, MAP_VM.fwd);
 function setViewModel(sel) {
   const id = sel ? sel.id : 0;
   if (id === vmKey) return;
@@ -785,8 +796,8 @@ function setViewModel(sel) {
     vmMesh.rotation.set(0.1, 0.75, 0);
   } else if (BF.maps && BF.maps.textureFor(it)) { // filled map / compass: live canvas texture (js/maps.js)
     const mat = new THREE.MeshBasicMaterial({ map: BF.maps.textureFor(it), transparent: true, alphaTest: 0.05, side: THREE.DoubleSide, depthTest: false });
-    vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(it.map ? 0.66 : 0.3, it.map ? 0.66 : 0.3), mat);
-    vmMesh.rotation.set(it.map ? -0.1 : 0, it.map ? -0.12 : -0.5, 0);
+    vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(it.map ? MAP_VM.size : 0.3, it.map ? MAP_VM.size : 0.3), mat);
+    vmMesh.rotation.set(0, it.map ? 0 : -0.5, 0);
   } else {
     const mat = new THREE.MeshBasicMaterial({ map: iconTexture(id), transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, depthTest: false });
     vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), mat);
@@ -809,8 +820,14 @@ function updateViewModel(dt) {
   const eating = eatT > 0;
   const eat = eating ? Math.sin(eatT * 25) * 0.02 : 0;
   const bx = Math.cos(bobPhase) * 0.025 * bobAmt, by = Math.abs(Math.sin(bobPhase)) * 0.03 * bobAmt;
-  if (mapHeld) vm.position.set(0.16 + bx * 0.5, -0.1 - by * 0.5, -0.66);   // a held map is shown big, in front of the chest
-  else vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
+  if (mapHeld) { // world-fixed tilt: undo the camera pitch (position rotated by -pitch, orientation = tilt - pitch)
+    const c = Math.cos(pitch), n = Math.sin(pitch), wy = -MAP_VM.down - by * 0.5, wz = -MAP_VM.fwd;
+    vm.position.set(MAP_VM.side + bx * 0.5, wy * c + wz * n, -wy * n + wz * c);
+    vm.rotation.set(-MAP_VM.tilt - pitch, 0, 0);
+    vm.visible = started && !P.dead;
+    return;
+  }
+  vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
   vm.rotation.set(-s * 0.9, s * 0.4, 0);
   vm.visible = started && !P.dead;
 }
@@ -1297,7 +1314,7 @@ P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health +
 const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
 function die() {
   P.dead = true; P.health = 0;
-  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false;
+  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
   if (invOpen()) { try { inv().close(); } catch (_) {} }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
@@ -1346,6 +1363,7 @@ function physics(dt) {
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
   if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
   if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
+  if (!sprinting || !flying) turbo = false;
   // forward (sx, sz) and right (-sz, sx) in the horizontal plane
   const sx = -Math.sin(yaw), sz = -Math.cos(yaw);
   let mx = sx * fwd - sz * strafe, mz = sz * fwd + sx * strafe;
@@ -1353,7 +1371,15 @@ function physics(dt) {
   if (ml > 1) { mx /= ml; mz /= ml; }
 
   let speed;
-  if (flying) speed = creative() ? (sprinting ? CFLY_SPRINT : CFLY) : (sprinting ? FLY_SPRINT : FLY);
+  if (flying) {
+    speed = creative() ? (sprinting ? CFLY_SPRINT : CFLY) : (sprinting ? FLY_SPRINT : FLY);
+    if (turbo) {
+      // don't outrun terrain: drop to sprint speed when the chunks ahead aren't generated yet
+      const sp = Math.hypot(vel.x, vel.z) || 1, ahead = TURBO_LOOKAHEAD * 16;
+      const ax = Math.floor((pos.x + vel.x / sp * ahead) / 16), az = Math.floor((pos.z + vel.z / sp * ahead) / 16);
+      if (BF.world.chunks.has(ax + "," + az)) speed *= TURBO_MULT;
+    }
+  }
   else if (inWater) speed = SWIM * (sprinting ? 1.4 : 1);
   else speed = sneaking ? SNEAK : sprinting ? SPRINT : WALK;
   if (eatT > 0 && !flying) speed *= 0.35;
@@ -1427,7 +1453,7 @@ function syncCamera(dt) {
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
   BF.camera.position.set(pos.x + rx * bx, pos.y + eyeOffset + by, pos.z + rz * bx);
   BF.camera.rotation.set(pitch, yaw, 0, "YXZ");
-  const wantFov = BASE_FOV * (sprinting ? 1.12 : 1);
+  const wantFov = BASE_FOV * (turbo ? 1.25 : sprinting ? 1.12 : 1);
   if (Math.abs(fov - wantFov) > 0.01 || BF.camera.fov !== fov) {
     fov += (wantFov - fov) * Math.min(1, dt * 10);
     if (Math.abs(fov - wantFov) <= 0.01) fov = wantFov;
