@@ -13,4 +13,9 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.setLook(-0.8, -0.83));
   await pg.waitForTimeout(1500);
   await pg.screenshot({ path: out + '-down.png' });
+  console.log(JSON.stringify(await pg.evaluate(() => [1, 2, 3, 4, 5].map(n => [n, +BF.maps.revealBlocks(n).toFixed(1), +BF.maps.revealPx(n).toFixed(2)]))));
+  // off the map: the arrow stays on the frame edge and still points the way the player faces
+  await pg.evaluate(() => { BF.player.position.set(BF.player.position.x + 260, BF.player.position.y + 2, BF.player.position.z); BF.player.setLook(-0.8, -0.83); });
+  await pg.waitForTimeout(2500);
+  await pg.screenshot({ path: out + '-off.png' });
 };

@@ -770,9 +770,9 @@ function iconTexture(id) {
   } catch (_) {}
   return (iconTex[id] = t);
 }
-// Held map: fixed relative to the body, not the camera. It sits `fwd` ahead of and `down` below the eye, tilted back by atan(down / fwd) (~48 degrees
+// Held map: fixed relative to the body, not the camera. It sits `fwd` ahead of and `down` below the eye, tilted back by atan(down / fwd) (~61 degrees
 // from vertical) so it faces the eye when looking down at it: only its top edge shows when looking straight ahead, and it fills the view when looking down.
-const MAP_VM = { size: 0.5, fwd: 0.5, down: 0.55, side: 0.06 };
+const MAP_VM = { size: 0.75, fwd: 0.38, down: 0.7, side: 0.06 };
 MAP_VM.tilt = Math.atan2(MAP_VM.down, MAP_VM.fwd);
 function setViewModel(sel) {
   const id = sel ? sel.id : 0;
