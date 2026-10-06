@@ -97,7 +97,7 @@ const TRADES = {
   ],
   shepherd: [
     ["11 wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald", "1 emerald > 9 wool"],   // wool sells from level 1: it is what the shepherd shears (js/shepherd.js)
-    ["10 white_wool > 1 emerald", "1 emerald > 2 red_bed"],
+    ["10 white_wool > 1 emerald"],
     ["16 raw_mutton > 1 emerald", "1 emerald > 9 cooked_mutton"],
     ["3 emerald > 4 hay_bale"],
     ["2 emerald > 16 white_wool"],
@@ -154,7 +154,7 @@ const PRODUCE = {
   toolsmith: ["iron_hoe", "iron_pickaxe", "iron_axe"],
   butcher: [],         // cooks raw meat it holds instead (js/villagelife.js)
   fisherman: [],       // cooks raw cod it holds instead (js/villagelife.js)
-  shepherd: ["wool", "white_wool", "red_bed", "hay_bale"],
+  shepherd: ["wool", "white_wool", "hay_bale"],
   fletcher: ["arrow"],
   mason: ["brick", "bricks", "stone", "terracotta", "orange_terracotta", "yellow_terracotta", "red_terracotta",
     "white_terracotta", "brown_terracotta", "sandstone_bricks"],
