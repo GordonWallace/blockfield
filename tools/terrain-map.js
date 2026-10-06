@@ -15,7 +15,8 @@ BF.CS = 16;
 load("rivers.js"); load("worldgen.js");
 const [, , out, seed, scale, cx, cz, span, px, gen] = process.argv;
 const G = +(gen || 2);
-BF.noise = BF.makeNoise(+seed); BF.worldgen.init(BF.noise, { gen: G, biomeScale: +scale });   // init calls BF.setLimits(gen)
+BF.setLimits(G);
+BF.noise = BF.makeNoise(+seed); BF.worldgen.init(BF.noise, { gen: G, biomeScale: +scale });   // (init sets the limits too)
 const w = BF.worldgen, SEA = BF.SEA, g3 = G >= 3;
 // per-generator height scales: ocean depth tint range, land shading range, plateau tint threshold
 const OCEAN_D = g3 ? 60 : 30, SH_LO = g3 ? 0 : 40, SH_RNG = g3 ? 2400 : 150, EL_T = g3 ? 900 : 100;
