@@ -94,6 +94,7 @@ function frame(now) {
     BF.player.updatePaused(dt);
   }
   BF.inventory.update && BF.inventory.update(dt);
+  if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);
   if (BF.textures.update) BF.textures.update(dt);
   if (BF.save && !BF.state.paused) BF.save.update(dt);
