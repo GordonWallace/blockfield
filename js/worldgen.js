@@ -409,7 +409,7 @@ function contBase3(c) {
 // soft ceiling: linear to 2000, then an asymptote at 2700 (the world is 3072 high; trees need ~40)
 const ceil3 = h => (h <= 2000 ? h : 2000 + 700 * Math.tanh((h - 2000) / 700));
 // thin air: the temperature band shifts down gently with altitude (a thousand blocks up is still cool-temperate)
-const cool3 = h => 0.08 * smooth(0, 1300, h) + 0.55 * smooth(1200, 2600, h);
+const cool3 = h => 0.05 * smooth(0, 1300, h) + 0.6 * smooth(1300, 2600, h);
 // Terrain height without rivers (K must hold the fields at x, z). `detail`: local hills and the full ridged-noise mountains.
 // Plateau weight S: continental interior (c) times a coverage mask (pm), so only part of each continent is a high plain;
 // the transition is the escarpment (foothills). Near the origin a plateau is forced so the default spawn is on the high plains.
@@ -446,7 +446,7 @@ function relief3(x, z, detail) {
 }
 // Smooth height (no local hills, 2-octave ridges) and continentalness for the river network.
 function macro3(x, z, o) {
-  fields(x, z);
+  rawFields2(x, z);       // nodes are sparse: the raw fields are cheaper than the 4-block lattice (and equal up to interpolation error)
   o.p = ceil3(relief3(x, z, false).h);
   o.c = K.c;
 }
@@ -1918,7 +1918,7 @@ const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: 
 BF.worldgen = {
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
-    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 144, nmax: 90, reach: 36, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.07, hs: 10 });
+    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 36, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,

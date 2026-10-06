@@ -3,7 +3,7 @@
 //   e.g. node tools/terrain-map.js /tmp/map.png 1337 2 0 0 30000 700 3
 // Colours are biomes, shaded by height; rivers are drawn thicker than they are when RV=<blocks> is set (e.g. RV=14).
 // Env: ELEV=1 draws an elevation (hypsometric) map instead of biome colours (gen 3: bands 0/100/500/900/1400/2000, plateaus stand out);
-//      Q=<n> quantizes to an n-colour palette PNG (default 64; Q=0 for full colour) to keep files small;
+//      Q=<n> quantizes to an n-colour palette PNG (default 48; Q=0 for full colour) to keep files small;
 //      HS=<k> hill-shade strength multiplier (default 1); EL=1 tints land above the plateau threshold.
 // Generator 3 uses BF.setLimits(gen) (MIN_Y -64, H 3072, SEA 0); heights, the ocean-depth tint and the shading scale with the generator.
 const fs = require("fs"), vm = require("vm"), zlib = require("zlib"), path = require("path");
@@ -18,7 +18,7 @@ const G = +(gen || 2);
 BF.noise = BF.makeNoise(+seed); BF.worldgen.init(BF.noise, { gen: G, biomeScale: +scale });   // init calls BF.setLimits(gen)
 const w = BF.worldgen, SEA = BF.SEA, g3 = G >= 3;
 // per-generator height scales: ocean depth tint range, land shading range, plateau tint threshold
-const OCEAN_D = g3 ? 60 : 30, SH_LO = g3 ? 0 : 40, SH_RNG = g3 ? 2400 : 150, EL_T = g3 ? 900 : 100, SLOPE_K = g3 ? 0.012 : 0.5 / (1 * 1);
+const OCEAN_D = g3 ? 60 : 30, SH_LO = g3 ? 0 : 40, SH_RNG = g3 ? 2400 : 150, EL_T = g3 ? 900 : 100;
 const HSM = +(process.env.HS || 1);
 const N = +px, S = +span / N, x0 = +cx - +span / 2, z0 = +cz - +span / 2;
 const col = {0:[40,70,160],1:[230,215,150],2:[235,235,220],3:[130,130,130],4:[60,120,220],5:[130,190,80],6:[50,130,40],7:[200,120,200],8:[110,170,70],9:[30,80,30],10:[80,110,60],11:[90,90,50],12:[235,210,130],13:[200,110,60],14:[180,170,70],15:[100,170,50],16:[20,150,40],17:[40,110,80],18:[30,90,70],19:[235,240,250],20:[170,220,255],21:[160,200,200],22:[150,210,120],23:[250,170,200],24:[150,150,150],25:[220,230,240],26:[255,255,255],27:[170,170,170],28:[170,100,170]};
@@ -53,7 +53,7 @@ for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
 function crc(b) { let c, t = []; for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } let r = 0xffffffff; for (const x of b) r = t[(r ^ x) & 255] ^ (r >>> 8); return (r ^ 0xffffffff) >>> 0; }
 function chunk(t, d) { const l = Buffer.alloc(4); l.writeUInt32BE(d.length); const td = Buffer.concat([Buffer.from(t), d]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([l, td, c]); }
 const SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-const Q = process.env.Q == null ? 64 : +process.env.Q;
+const Q = process.env.Q == null ? 48 : +process.env.Q;
 let png;
 if (!Q) {
   const buf = Buffer.alloc(N * (N * 3 + 1));
