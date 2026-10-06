@@ -112,6 +112,34 @@ module.exports = async (pg, out) => {
   })));
   await pg.screenshot({ path: out + '-work.png' });
 
+  // 4. what the mod's GameTests guard: player-built logs are left alone, a full pack stops felling
+  console.log(JSON.stringify(await pg.evaluate(() => {
+    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester, res = {};
+    const p = BF.player.position;
+    const fx = Math.floor(A.position.x), fz = Math.floor(A.position.z);
+    let spot = null;
+    for (let r = 3; r < 14 && !spot; r++) for (let a = 0; a < 6.28 && !spot; a += 0.4) {
+      const x = fx + Math.round(Math.cos(a) * r), z = fz + Math.round(Math.sin(a) * r), y = W.heightAt(x, z);
+      if (W.getBlock(x, y, z) === B.grass && [1, 2, 3, 4, 5].every(k => W.getBlock(x, y + k, z) === 0) && W.getBlock(x + 1, y + 1, z) === 0 && W.getBlock(x - 1, y + 1, z) === 0) spot = [x, y + 1, z];
+    }
+    if (!spot) return "no spot";
+    const [x, y, z] = spot;
+    for (let k = 0; k < 4; k++) W.setBlock(x, y + k, z, B.oak_log);                       // a log pillar, no leaves
+    res.pillarNoLeaves = !!F.treeAt(x, y, z);
+    W.setBlock(x, y + 4, z, B.oak_leaves);
+    res.pillarWithLeaves = !!F.treeAt(x, y, z);
+    W.setBlock(x + 1, y + 1, z, B.planks);                                            // a planked wall touching it: a building
+    res.nextToPlanks = !!F.treeAt(x, y, z);
+    // full pack: no felling
+    W.setBlock(x + 1, y + 1, z, 0);
+    const keep = A.inv.map(s => s && { id: s.id, count: s.count });
+    A.inv = A.inv.map(() => ({ id: BF.I.cobblestone, count: 1 }));
+    A.fo.cutCd = 0; A.fo.plantCd = 99; A.fo.task = null; A.fo.thinkT = 0;
+    for (let i = 0; i < 30; i++) { BF.sky.setTime(0.1); BF.mobs.update(0.1); BF.player.position.set(A.position.x + 4, A.position.y + 2, A.position.z + 4); if (A.fo.task && A.fo.task.kind === "cut") res.cutWithFullPack = true; }
+    A.inv = keep;
+    for (let k = 0; k < 6; k++) W.setBlock(x, y + k, z, 0);
+    return res;
+  })));
   // 3. the trade
   console.log(JSON.stringify(await pg.evaluate(() => {
     const A = window.__A, T = BF.trades, I = BF.I;
