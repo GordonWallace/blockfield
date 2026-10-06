@@ -494,7 +494,7 @@ function woodTile(wood) {
   if (woodCache[wood]) return woodCache[wood];
   let c = null;
   try {
-    const name = wood === "oak" ? "planks" : wood + "_planks", T = BF.textures.build(), img = T.texture.image || T.canvas, uv = BF.textures.uv(name);
+    const name = wood === "oak" ? "planks" : wood + "_planks", T = BF.textures.build(), img = T.canvas, uv = BF.textures.uv(name);
     const aw = img.width, ah = img.height, ts = Math.round((uv[2] - uv[0]) * aw);
     c = document.createElement("canvas"); c.width = c.height = ts;
     c.getContext("2d").drawImage(img, Math.round(uv[0] * aw), Math.round((1 - uv[3]) * ah), ts, ts, 0, 0, ts, ts);
@@ -646,15 +646,19 @@ function planArch(v, ctx) {
   const C = ctx.climate, SEA = BF.SEA, seed = (BF.state && BF.state.seed) | 0;
   const h = hash32(v.x, v.z, seed ^ 0x51a7), start = h & 3, side = (h >> 2) & 1 ? 1 : -1;
   const inB = (x, z, b, m) => x >= b.x0 - m && x <= b.x1 + m && z >= b.z0 - m && z <= b.z1 + m;
-  const blocked = (x, z) => v.buildings.some(b => inB(x, z, b, 1)) || v.pads.some(p => inB(x, z, p, 0)) ||
-    v.lamps.some(l => Math.abs(l[0] - x) <= 1 && Math.abs(l[1] - z) <= 1) || v.decor.some(d => z === d[1] && x >= d[0] - 1 && x <= d[0] + 1);
+  // pillars may stand on a plot's levelled ring (not inside a building, not in front of a door); the signs and the passage stay off plots
+  const near = (x, z) => v.lamps.some(l => Math.abs(l[0] - x) <= 1 && Math.abs(l[1] - z) <= 1) || v.decor.some(d => z === d[1] && x >= d[0] - 1 && x <= d[0] + 2);
+  const inHouse = (x, z) => v.buildings.some(b => inB(x, z, b, 0) || (Math.abs(x - (b.doorX - b.sx)) + Math.abs(z - (b.doorZ - b.sz)) <= 1));
+  const padOf = (x, z) => v.pads.find(p => inB(x, z, p, 0));
   const onRoad = (x, z) => v.roads.some(r => inB(x, z, r, 0));
+  let strict = true;   // first pass: pillars off every plot; second pass: a pillar may stand on a plot's levelled ring
   const site = (cx, cz, d, road) => {
     const L = [-d[1], d[0]], P = (k, t) => [cx + L[0] * k + d[0] * t, cz + L[1] * k + d[1] * t];
     const pillars = [P(-2, 0), P(2, 0)], under = [P(-1, 0), P(0, 0), P(1, 0)], signs = [2, 3, 4].map(k => P(side * k, 1));
-    for (const c of pillars.concat(signs)) if (blocked(c[0], c[1]) || onRoad(c[0], c[1])) return null;
-    for (const c of under) if (blocked(c[0], c[1]) || (road && !onRoad(c[0], c[1]))) return null;
-    const g = c => C(c[0], c[1]);
+    for (const c of pillars) if (inHouse(c[0], c[1]) || near(c[0], c[1]) || onRoad(c[0], c[1]) || (strict ? padOf(c[0], c[1]) : (padOf(c[0], c[1]) || {}).path)) return null;
+    for (const c of signs) if (padOf(c[0], c[1]) || near(c[0], c[1]) || onRoad(c[0], c[1]) || inHouse(c[0], c[1])) return null;
+    for (const c of under) if (padOf(c[0], c[1]) || near(c[0], c[1]) || (road && !onRoad(c[0], c[1]))) return null;
+    const g = c => { const p = padOf(c[0], c[1]); return p ? p.y : C(c[0], c[1]); };
     const all = pillars.concat(under, signs).map(c => [c[0], c[1], g(c)]);
     if (all.some(c => c[2] <= SEA)) return null;
     const pg = pillars.map(g), ug = under.map(g), sg = signs.map(g), gs = sg[1];
@@ -669,11 +673,14 @@ function planArch(v, ctx) {
       box: [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)] };
   };
   let a = null;
-  for (let k = 0; k < 4 && !a; k++) {
+  for (const pass of [true, false]) for (let k = 0; k < 4 && !a; k++) {
+    strict = pass;
     const d = DIRS[(start + k) & 3];
     const road = v.roads.find(r => r.dx === d[0] && r.dz === d[1] && r.sx === v.x + d[0] * 8 && r.sz === v.z + d[1] * 8);
     if (!road) continue;
-    for (let t = road.end; t >= Math.max(4, road.end - 14) && !a; t--) a = site(road.sx + d[0] * t, road.sz + d[1] * t, d, true);
+    const ts = [road.end, road.end + 1];
+    for (let t = road.end - 1; t >= Math.max(4, road.end - 14); t--) ts.push(t);
+    for (const t of ts) if (!a) { a = site(road.sx + d[0] * t, road.sz + d[1] * t, d, t <= road.end); if (a) a.onRoad = true; }
   }
   if (!a) { // no main road fits: the middle of an edge of the village's extent, facing out
     let x0 = v.x - 7, x1 = v.x + 7, z0 = v.z - 7, z1 = v.z + 7;
@@ -732,8 +739,10 @@ registerAuto("village", (e) => {
   if (rec) {
     if (!rec.name) rec.name = name;
     const live = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed).length;
-    nv = BF.breeding && BF.breeding.villagerCount ? BF.breeding.villagerCount(rec)
-      : rec.roster ? Math.max(live, rec.roster.length - ((rec.killed && rec.killed.villager) || 0)) : live;
+    let rl = rec.roster ? rec.roster.length : 0;   // mobs.js builds the roster once the village is near; until then use the same deterministic roster
+    if (!rec.roster && M.roster) { try { rl = M.roster({ key, houses: rec.houses || [], nb: rec.nb || 0 }).length; } catch (err) { rl = 0; } }
+    nv = rec.roster && BF.breeding && BF.breeding.villagerCount ? BF.breeding.villagerCount(rec)
+      : Math.max(live, rl - ((rec.killed && rec.killed.villager) || 0));
     nb = BF.breeding && BF.breeding.bedCount ? BF.breeding.bedCount(rec) : countBedsFallback(rec.wg || v);
   } else if (v) {
     try { nv = M && M.roster ? M.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length }).length : 0; } catch (err) { nv = 0; }

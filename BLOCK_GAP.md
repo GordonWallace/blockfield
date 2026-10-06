@@ -67,3 +67,7 @@ Still missing: soul_torch, redstone_torch, campfire, jack_o_lantern, shroomlight
 ## Tier 3 progress (jobsite blocks)
 Implemented (14 blocks; see CONTRACT.md "Jobsites"): composter, lectern, brewing_stand, blast_furnace, grindstone, smithing_table, smoker, barrel, loom, fletching_table, stonecutter, cauldron, cartography_table, plus drafting_table (builder; not vanilla). Box models for lectern, brewing stand, grindstone, stonecutter, cauldron; vanilla recipes (brewing stand: gold ingot for the blaze rod); generated in villages and claimed by villagers (js/jobs.js).
 Still missing: facing (fronts always look south), the blocks' own functions (composting, lectern books, brewing, smelting in smoker/blast furnace, grinding, smithing upgrades, stonecutting, cauldron water, maps, banners), anvil, enchanting_table, ender_chest, hopper, dispenser, dropper.
+
+## Tier 2 progress (signs)
+Implemented (64 blocks, 8 items; see CONTRACT.md "Signs"): standing and wall signs for all 8 woods (4 facings), merging into boards up to 4x4 with seamless rendering, editable text (4 lines x 15 chars per sign, scaled by board size), crafting, village entry arches with an auto-updating "Village of <name>" sign.
+Still missing: 16 standing rotations, hanging signs, back-side text, dyed / glowing text, bamboo signs.
