@@ -1,4 +1,5 @@
-// Block light: integer 0..15 per voxel (Uint8Array per chunk, chunk.light, same index as chunk.vox), flood-filled from
+// Block light: integer 0..15 per voxel (chunk.light[sectionIndex - chunk.lo] = Uint8Array(4096) or undefined = all dark, same
+// in-section index as the block sections, see world.js), flood-filled from
 // emitting blocks (block def field `emit` 0..15, table BF.EMIT) and attenuating 1 per step through non-opaque blocks.
 // Works across chunk borders (only through loaded chunks; a chunk that loads later pulls light in from its loaded
 // neighbours' border cells). Light is derived data: it is never saved and is recomputed whenever a chunk is created.
@@ -7,7 +8,7 @@
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
-const CS = 16, H = BF.H;
+const CS = 16;
 const light = (BF.light = {});
 const world = () => BF.world;
 const OPAQUE = BF.OPAQUE;
@@ -38,7 +39,17 @@ function chunkOf(x, z) {
   return cC;
 }
 const reset = () => { cCx = cCz = 1e9; cC = null; ah = at = rh = rt = 0; };
-const idx = (x, y, z) => (y * CS + (z & 15)) * CS + (x & 15);
+const idx = (x, y, z) => ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);   // index inside a section
+// light value / writer on chunk c at absolute y (y must be inside c's loaded band); sections without light arrays read 0
+function lget(c, x, y, z) { const s = c.light[(y >> 4) - c.lo]; return s ? s[idx(x, y, z)] : 0; }
+function lset(c, x, y, z, v) {
+  const si = (y >> 4) - c.lo;
+  let s = c.light[si];
+  if (!s) s = c.light[si] = new Uint8Array(4096);
+  s[idx(x, y, z)] = v;
+}
+const inBand = (c, y) => y >= c.y0 && y < c.y1;
+const blockAt = (c, x, y, z) => world().chunkBlock(c, x & 15, y, z & 15);
 
 // ---------- dirty tracking: chunks whose light changed (and neighbours that sample their border cells) ----------
 let touched = [], stamp = 1;
@@ -70,16 +81,14 @@ function propagate() {
   while (ah < at) {
     const x = ax[ah], y = ay[ah], z = az[ah]; ah++;
     const c = chunkOf(x, z);
-    const L = c.light[idx(x, y, z)];
+    const L = lget(c, x, y, z);
     if (L <= 1) continue;
     for (let d = 0; d < 6; d++) {
       const nx = x + DX[d], ny = y + DY[d], nz = z + DZ[d];
-      if (ny < 0 || ny >= H) continue;
       const nc = chunkOf(nx, nz);
-      if (!nc) continue;
-      const ni = idx(nx, ny, nz);
-      if (OPAQUE[nc.vox[ni]] || nc.light[ni] >= L - 1) continue;
-      nc.light[ni] = L - 1;
+      if (!nc || !inBand(nc, ny)) continue;
+      if (OPAQUE[blockAt(nc, nx, ny, nz)] || lget(nc, nx, ny, nz) >= L - 1) continue;
+      lset(nc, nx, ny, nz, L - 1);
       mark(nc, nx, nz);
       pushAdd(nx, ny, nz);
     }
@@ -91,29 +100,28 @@ function propagate() {
 // value) become sources for the re-fill. Emitters inside the cleared region are restored afterwards.
 function removeFrom(x, y, z, v) {
   const c = chunkOf(x, z);
-  c.light[idx(x, y, z)] = 0; mark(c, x, z);
+  lset(c, x, y, z, 0); mark(c, x, z);
   pushRem(x, y, z, v);
   const emitters = [];
   while (rh < rt) {
     const px = rx[rh], py = ry[rh], pz = rz[rh], pv = rv[rh]; rh++;
     for (let d = 0; d < 6; d++) {
       const nx = px + DX[d], ny = py + DY[d], nz = pz + DZ[d];
-      if (ny < 0 || ny >= H) continue;
       const nc = chunkOf(nx, nz);
-      if (!nc) continue;
-      const ni = idx(nx, ny, nz), n = nc.light[ni];
+      if (!nc || !inBand(nc, ny)) continue;
+      const n = lget(nc, nx, ny, nz);
       if (!n) continue;
       if (n < pv) {
-        nc.light[ni] = 0; mark(nc, nx, nz);
+        lset(nc, nx, ny, nz, 0); mark(nc, nx, nz);
         pushRem(nx, ny, nz, n);
-        if (EMIT[nc.vox[ni]]) emitters.push(nx, ny, nz);
+        if (EMIT[blockAt(nc, nx, ny, nz)]) emitters.push(nx, ny, nz);
       } else pushAdd(nx, ny, nz);
     }
   }
   rh = rt = 0;
   for (let i = 0; i < emitters.length; i += 3) {
     const ex = emitters[i], ey = emitters[i + 1], ez = emitters[i + 2], ec = chunkOf(ex, ez);
-    ec.light[idx(ex, ey, ez)] = EMIT[ec.vox[idx(ex, ey, ez)]];
+    lset(ec, ex, ey, ez, EMIT[blockAt(ec, ex, ey, ez)]);
     pushAdd(ex, ey, ez);
   }
 }
@@ -123,23 +131,57 @@ function removeFrom(x, y, z, v) {
 light.onChunkCreated = function (c) {
   reset();
   const W = world();
-  c.light = new Uint8Array(CS * CS * H);
-  const vox = c.vox, lt = c.light, end = Math.min(H, c.maxY + 2) * CS * CS, ox = c.cx * CS, oz = c.cz * CS;
-  for (let i = 0; i < end; i++) {
-    const e = EMIT[vox[i]];
-    if (!e) continue;
-    lt[i] = e;
-    pushAdd(ox + (i & 15), i >> 8, oz + ((i >> 4) & 15));
-  }
+  c.light = new Array(c.hi - c.lo);
+  seedEmitters(c);
   // light already present in loaded neighbours flows into this chunk through the shared border
   for (let d = 0; d < 4; d++) {
     const dx = d === 0 ? -1 : d === 1 ? 1 : 0, dz = d === 2 ? -1 : d === 3 ? 1 : 0;
     const n = W.chunks.get((c.cx + dx) + "," + (c.cz + dz));
     if (!n || !n.light) continue;
-    const top = Math.min(H - 1, n.maxY + 1);
-    for (let t = 0; t < CS; t++) {
-      const lx = dx === -1 ? CS - 1 : dx === 1 ? 0 : t, lz = dz === -1 ? CS - 1 : dz === 1 ? 0 : t;
-      for (let y = 0; y <= top; y++) if (n.light[(y * CS + lz) * CS + lx] > 1) pushAdd(n.cx * CS + lx, y, n.cz * CS + lz);
+    for (let si = 0; si < n.light.length; si++) {
+      const ls = n.light[si];
+      if (!ls) continue;
+      for (let t = 0; t < CS; t++) {
+        const lx = dx === -1 ? CS - 1 : dx === 1 ? 0 : t, lz = dz === -1 ? CS - 1 : dz === 1 ? 0 : t;
+        for (let ly = 0; ly < 16; ly++) if (ls[(ly << 8) | (lz << 4) | lx] > 1) pushAdd(n.cx * CS + lx, (n.lo + si) * 16 + ly, n.cz * CS + lz);
+      }
+    }
+  }
+  if (at > 0) { propagate(); flush(); }
+  touched.length = 0;
+};
+// lights every emitter of chunk c (its sections) and queues it for the flood fill
+function seedEmitters(c) {
+  const ox = c.cx * CS, oz = c.cz * CS;
+  for (let si = 0; si < c.secs.length; si++) {
+    const s = c.secs[si], by = (c.lo + si) * 16;
+    if (typeof s === "number") {
+      if (!EMIT[s]) continue;
+      for (let i = 0; i < 4096; i++) { lset(c, i & 15, by + (i >> 8), (i >> 4) & 15, EMIT[s]); pushAdd(ox + (i & 15), by + (i >> 8), oz + ((i >> 4) & 15)); }
+      continue;
+    }
+    let ls = null;
+    for (let i = 0; i < 4096; i++) {
+      const e = EMIT[s[i]];
+      if (!e) continue;
+      if (!ls) ls = c.light[si] = c.light[si] || new Uint8Array(4096);
+      ls[i] = e;
+      pushAdd(ox + (i & 15), by + (i >> 8), oz + ((i >> 4) & 15));
+    }
+  }
+}
+// Sections were added below a chunk's band (oldY0 = its previous bottom): light the new emitters and pull light in from around.
+light.onExtended = function (c, oldY0) {
+  reset();
+  const ox = c.cx * CS, oz = c.cz * CS;
+  for (let si = 0; si < (oldY0 >> 4) - c.lo; si++) {
+    const s = c.secs[si], by = (c.lo + si) * 16;
+    if (typeof s === "number" && !EMIT[s]) continue;
+    for (let i = 0; i < 4096; i++) {
+      const v = typeof s === "number" ? s : s[i], e = EMIT[v];
+      if (!e) continue;
+      lset(c, i & 15, by + (i >> 8), (i >> 4) & 15, e);
+      pushAdd(ox + (i & 15), by + (i >> 8), oz + ((i >> 4) & 15));
     }
   }
   if (at > 0) { propagate(); flush(); }
@@ -153,47 +195,38 @@ light.onSet = function (x, y, z, oldId, newId) {
   reset();
   const c = chunkOf(x, z);
   if (!c || !c.light) return;
-  const i = idx(x, y, z);
-  const lv = c.light[i];
+  if (!inBand(c, y)) return;
+  const lv = lget(c, x, y, z);
   if (lv > 0 && (eo || on)) removeFrom(x, y, z, lv);  // was an emitter or is now opaque: clear what depended on it
   let nl = en;
   if (!on) {                                           // otherwise light may flow in from the neighbours
     let m = 0;
     for (let d = 0; d < 6; d++) {
       const nx = x + DX[d], ny = y + DY[d], nz = z + DZ[d];
-      if (ny < 0 || ny >= H) continue;
       const nc = chunkOf(nx, nz);
-      if (nc) { const v = nc.light[idx(nx, ny, nz)]; if (v > m) m = v; }
+      if (nc && nc.light && inBand(nc, ny)) { const v = lget(nc, nx, ny, nz); if (v > m) m = v; }
     }
     if (m - 1 > nl) nl = m - 1;
   }
-  if (nl > c.light[i]) { c.light[i] = nl; mark(c, x, z); pushAdd(x, y, z); }
+  if (nl > lget(c, x, y, z)) { lset(c, x, y, z, nl); mark(c, x, z); pushAdd(x, y, z); }
   propagate();
   flush();
 };
 
 // Light level 0..15 at integer world coords (0 in unloaded chunks / out of range).
 light.get = function (x, y, z) {
-  if (y < 0 || y >= H) return 0;
-  x = Math.floor(x); z = Math.floor(z);
+  x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
   const c = world().chunks.get((x >> 4) + "," + (z >> 4));
-  return c && c.light ? c.light[((Math.floor(y)) * CS + (z & 15)) * CS + (x & 15)] : 0;
+  if (!c || !c.light || y < c.y0 || y >= c.y1) return 0;
+  const s = c.light[(y >> 4) - c.lo];
+  return s ? s[idx(x, y, z)] : 0;
 };
 
 // Throws everything away and recomputes all loaded chunks from scratch (tests / debugging); returns ms taken.
 light.recomputeAll = function () {
   const t0 = performance.now(), W = world();
   reset();
-  for (const c of W.chunks.values()) {
-    if (!c.light) c.light = new Uint8Array(CS * CS * H); else c.light.fill(0);
-    const vox = c.vox, end = Math.min(H, c.maxY + 2) * CS * CS, ox = c.cx * CS, oz = c.cz * CS;
-    for (let i = 0; i < end; i++) {
-      const e = EMIT[vox[i]];
-      if (!e) continue;
-      c.light[i] = e;
-      pushAdd(ox + (i & 15), i >> 8, oz + ((i >> 4) & 15));
-    }
-  }
+  for (const c of W.chunks.values()) { c.light = new Array(c.hi - c.lo); seedEmitters(c); }
   propagate();
   for (const c of W.chunks.values()) if (c.mesh !== undefined) W._dirty.add(c.key);
   touched.length = 0;

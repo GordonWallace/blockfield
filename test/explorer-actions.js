@@ -22,7 +22,7 @@ module.exports = async (pg, out) => {
   });
   console.log(JSON.stringify(r));
   await pg.evaluate(() => BF.player.start());
-  await pg.waitForTimeout(3000);
+  await require('./lib').toVillage(pg);
   const setup = await pg.evaluate(() => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     if (vs.length < 2) return "villagers: " + vs.length;
@@ -32,7 +32,7 @@ module.exports = async (pg, out) => {
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     BF.world.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit('blockPlaced', tx, ty, tz, BF.B.survey_table);
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.level = 1; A.trades = []; A.inv = T.stockFor("explorer", A);
-    A.res = BF.jobs.claim(A);
+    A.res = BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });   // this table (another free jobsite nearby could win a plain claim)
     T.inv.add(A.inv, I.emerald, 10);
     BF.mobs.setProfession(C, "cartographer"); C.inv = T.inv.create(); T.inv.add(C.inv, I.blank_map_2, 1); T.inv.add(C.inv, I.emerald, 5);
     C.trades = [1, 2, 3, 4, 5].flatMap(l => T.offers("cartographer", l)); C.level = 5;

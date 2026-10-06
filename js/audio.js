@@ -977,7 +977,8 @@ function updateEnv(dt) {
     if (k === 1) rain = Wx.intensity || 0; else if (k === 2) snow = Wx.intensity || 0;
   }
   // wind: stronger high up and in the open, a gust random walk drives the cut-off
-  const alt = clamp((p.y + 1.6 - (BF.SEA || 48) - 6) / 55, 0, 1);
+  const base = BF.H > 192 && BF.sky && BF.sky.cloudBase != null ? BF.sky.cloudBase - 80 : (BF.SEA || 48);   // mile-high worlds: relative to the regional ground
+  const alt = clamp((p.y + 1.6 - base - 6) / 55, 0, 1);
   let wind = (0.1 + 0.9 * alt) * (0.25 + 0.75 * env.open) * (env.covered ? 0.35 : 1) * (1 + 0.8 * Math.max(rain, snow));
   if (env.under) wind *= 0.15;
   env.windDrift = clamp(env.windDrift + (Math.random() * 2 - 1) * dt * 0.6, -1, 1);

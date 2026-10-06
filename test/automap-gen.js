@@ -2,7 +2,7 @@
 // rivers only on maps up to 16 blocks per pixel, and the widest allowed map. node test/run.js /tmp/ag test/automap-gen.js
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
-  for (const gen of [2, 1]) {
+  for (const gen of [3, 2, 1]) {
     const r = await pg.evaluate(g => {
       BF.newWorld(1337, { gen: g, biomeScale: 1 });
       const res = { gen: g };

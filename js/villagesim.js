@@ -45,12 +45,9 @@ function growsTable() {
 // Young crops on farmland that sat unloaded for `away` game days: each matures with the chance it would have had.
 function catchUpChunk(c, away) {
   const p = 1 - Math.exp(-away * CROP_SECS_PER_DAY * GROW_RATE), G = growsTable(), CS = BF.CS, W = BF.world;
-  const vox = c.vox, top = Math.min(BF.H - 1, c.maxY + 1);
-  for (let y = 2; y <= top; y++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
-    const id = vox[BF.vIdx(x, y, z)];
-    if (!G[id] || vox[BF.vIdx(x, y - 1, z)] !== BF.B.farmland) continue;
-    if (Math.random() < p) W.setBlock(c.cx * CS + x, y, c.cz * CS + z, G[id]);
-  }
+  const found = [];
+  W.scanFlagged(c, G, (x, y, z, id) => { if (W.chunkBlock(c, x, y - 1, z) === BF.B.farmland) found.push([x, y, z, id]); }, 0, BF.MIN_Y + 2);
+  for (const [x, y, z, id] of found) if (Math.random() < p) W.setBlock(c.cx * CS + x, y, c.cz * CS + z, G[id]);
 }
 
 function startCatchUp(key, ent) {

@@ -598,7 +598,7 @@ function findGather(m, D, what, ok) {
     const x = Math.floor(rnd(b0.x0 - GATHER_R, b0.x1 + GATHER_R + 1)), z = Math.floor(rnd(b0.z0 - GATHER_R, b0.z1 + GATHER_R + 1));
     if (inVillage(D, x, z) || !w.isLoaded(x, z)) continue;
     const h = w.heightAt(x, z);
-    if (h < 1) continue;
+    if (h < BF.MIN_Y + 1) continue;
     let y = -1;
     if (what === "dirt") {
       const a = getB(x, h + 1, z);
@@ -647,7 +647,7 @@ function pickPlot(m, R, D) {
     const cx = s.x + (t === 0 ? 0 : Math.round(rnd(-reach, reach))), cz = s.z + (t === 0 ? 0 : Math.round(rnd(-reach, reach)));
     if (!w.isLoaded(cx, cz)) continue;
     const cy = w.heightAt(cx, cz);
-    if (cy < 1 || !c.ground.has(getB(cx, cy, cz))) continue;
+    if (cy < BF.MIN_Y + 1 || !c.ground.has(getB(cx, cy, cz))) continue;
     const ops = plotCost(m, R, D, cx, cy, cz);
     if (ops == null) continue;
     const sc = ops + Math.hypot(cx - s.x, cz - s.z) * 0.5;

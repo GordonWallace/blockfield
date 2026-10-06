@@ -903,7 +903,7 @@ function bedOK(bed) {
 // A cell a villager can stand in: solid floor (not a bed/door/fence top), feet and head free or a door it can open.
 function walkCell(x, y, z) {
   const W = BF.world;
-  if (!W.isLoaded(x, z) || y < 1 || y + 2 >= BF.H) return false;
+  if (!W.isLoaded(x, z) || y < BF.MIN_Y + 1 || y + 2 >= BF.H) return false;
   const fl = blockAt(x, y - 1, z), feet = blockAt(x, y, z), head = blockAt(x, y + 1, z);
   if (!fl.solid || fl.door || fl.bed || fl.model === "fence") return false;
   return (!feet.solid || !!feet.door) && (!head.solid || !!head.door) && feet.render !== "liquid";
@@ -1400,7 +1400,7 @@ function separate(m, dt) {
 // Needs a solid block below and air (not water/plants) for the mob's height.
 function standable(x, y, z, hw, h) {
   const w = BF.world;
-  if (y < 1 || y + Math.ceil(h) >= BF.H) return false;
+  if (y < BF.MIN_Y + 1 || y + Math.ceil(h) >= BF.H) return false;
   if (!w.isSolid(x, y - 1, z)) return false;
   for (let k = 0; k < Math.max(2, Math.ceil(h)); k++) if (w.getBlock(x, y + k, z) !== 0) return false;
   return !w.boxCollides(x + 0.5, y, z + 0.5, hw, h);
@@ -1418,7 +1418,7 @@ function tryPassiveSpawn() {
   const x = Math.floor(pp.x + Math.cos(a) * d), z = Math.floor(pp.z + Math.sin(a) * d);
   if (!w.isLoaded(x, z)) return;
   const gy = w.heightAt(x, z);
-  if (gy < 1 || w.getBlock(x, gy, z) !== grass) return;
+  if (gy < BF.MIN_Y + 1 || w.getBlock(x, gy, z) !== grass) return;
   const type = PASSIVE_TYPES[Math.floor(Math.random() * PASSIVE_TYPES.length)];
   const T = TYPES[type];
   if (!standable(x, gy + 1, z, T.hw, T.h)) return;
@@ -1428,7 +1428,7 @@ function tryPassiveSpawn() {
     const sx = x + (i === 0 ? 0 : irnd(-3, 3)), sz = z + (i === 0 ? 0 : irnd(-3, 3));
     if (!w.isLoaded(sx, sz)) continue;
     const sy = w.heightAt(sx, sz);
-    if (sy < 1 || w.getBlock(sx, sy, sz) !== grass || !standable(sx, sy + 1, sz, T.hw, T.h)) continue;
+    if (sy < BF.MIN_Y + 1 || w.getBlock(sx, sy, sz) !== grass || !standable(sx, sy + 1, sz, T.hw, T.h)) continue;
     if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9)) continue;
     createMob(type, sx + 0.5, sy + 1, sz + 0.5);
     spawned++;
@@ -1450,7 +1450,7 @@ function tryHostileSpawn() {
   if (!w.isLoaded(x, z)) return;
   if (surface) {
     const gy = w.heightAt(x, z);
-    if (gy < 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
+    if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
     if (!standable(x, gy + 1, z, T.hw, T.h)) return;
     if (w.getBlockLight(x, gy + 1, z) > 7) return; // torch/lantern-lit ground stays safe
     if (Math.hypot(x + 0.5 - pp.x, gy + 1 - pp.y, z + 0.5 - pp.z) < 24) return;
@@ -1461,8 +1461,8 @@ function tryHostileSpawn() {
   const c = w.chunkAt(x, z);
   if (!c || !c.top) return;
   const top = c.top[(z - c.cz * BF.CS) * BF.CS + (x - c.cx * BF.CS)];
-  if (top < 8) return;
-  const yMin = Math.max(2, Math.floor(pp.y) - 24), yMax = Math.min(top - 3, Math.floor(pp.y) + 24);
+  if (top < BF.SEA - 40) return;
+  const yMin = Math.max(BF.MIN_Y + 2, Math.floor(pp.y) - 24), yMax = Math.min(top - 3, Math.floor(pp.y) + 24);
   if (yMax <= yMin) return;
   for (let tries = 0; tries < 6; tries++) {
     const y = irnd(yMin, yMax);

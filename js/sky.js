@@ -10,6 +10,27 @@ const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328");
 const DUSK_HOR = C("#f08a50"), DUSK_GLOW = C("#ff7a3c"), DUSK_PINK = C("#d86a86");
 const CLOUD_DAY = C("#ffffff"), CLOUD_NIGHT = C("#1c2234"), CLOUD_DUSK = C("#f6b49a");
 
+// Cloud base for mile-high worlds (generator 3): a fixed height above the smoothed regional ground level (sampled from the
+// generator), so you walk under clouds on the plains and climb above them on peaks. Legacy worlds keep BF.H + 4.
+let cloudTarget = 196, cloudProbeT = 0;
+function updateCloudBase(dt) {
+  const cam = BF.camera;
+  if (BF.H <= 192) { cloudTarget = sky.cloudBase = BF.H + 4; return; }
+  cloudProbeT -= dt;
+  if (cam && cloudProbeT <= 0 && BF.worldgen && BF.worldgen.heightAt) {
+    cloudProbeT = 1;
+    let sum = 0, n = 0;
+    try { for (let k = 0; k < 9; k++) {
+      const a = k * 0.785398, r = k ? 192 : 0;
+      sum += Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(cam.position.x + Math.cos(a) * r), Math.floor(cam.position.z + Math.sin(a) * r))); n++;
+    } } catch (_) { sum = BF.SEA + 30; n = 1; }   // generator not ready yet
+    cloudTarget = Math.round(Math.max(BF.SEA + 110, sum / n + 80) / 4) * 4;
+  }
+  let b = sky.cloudBase;
+  if (!(b > BF.MIN_Y) || Math.abs(cloudTarget - b) > 400) b = cloudTarget;   // first frame and teleports snap
+  else b += (cloudTarget - b) * Math.min(1, dt * 0.6);
+  sky.cloudBase = b;
+}
 const SKY_R = 480, SUN_D = 400, CLOUD_BASE = BF.H + 4, CLOUD_H = 5, CLOUD_RISE = 70, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -236,6 +257,8 @@ const sky = {
 
   setTime(t) { sky.time = ((t % 1) + 1) % 1; if (scene) sky.update(0); },
 
+  get cloudY() { return cloudY; },   // alias of cloudHeight
+
   isNight() { return sky.light < 0.5; },
 
   update(dt) {
@@ -281,7 +304,17 @@ const sky = {
     scene.background.copy(horizon);
     scene.fog.color.copy(horizon);
     const d = ((BF.world && BF.world.viewDist) || 6) * BF.CS;
-    scene.fog.near = d * 0.5 * (1 - 0.45 * wr - 0.15 * wt); scene.fog.far = d * 0.95 * (1 - 0.25 * wr - 0.1 * wt);
+    // high above the ground (peaks, flying over the mile-high plains) the fog moves out by the height above the ground, so the land below stays visible
+    let above = 0;
+    if (cam && BF.world && BF.world.heightAt) {
+      let g = BF.world.heightAt(cam.position.x, cam.position.z);
+      if (g < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) { try { g = BF.worldgen.heightAt(Math.floor(cam.position.x), Math.floor(cam.position.z)); } catch (_) { g = BF.SEA; } }   // before the first world exists
+      let ref = Math.max(g, BF.SEA);
+      if (BF.H > 192) ref = Math.min(ref, cloudTarget - 80);   // the regional ground level (see updateCloudBase): steep peaks drop away fast
+      above = Math.max(0, cam.position.y - ref - 24);
+    }
+    scene.fog.near = d * 0.5 * (1 - 0.45 * wr - 0.15 * wt) + above; scene.fog.far = d * 0.95 * (1 - 0.25 * wr - 0.1 * wt) + above;
+    if (cam && cam.far < scene.fog.far + 64) { cam.far = scene.fog.far + 64; cam.updateProjectionMatrix(); }
     sky.light = Math.min(1.35, sky.light + wf * 0.85); // lightning flash brightens terrain briefly
     if (BF.player && BF.player.headInWater) {
       // dense blue fog when the camera is underwater
@@ -301,6 +334,7 @@ const sky = {
     stars.visible = so > 0.01;
 
     // volumetric clouds: mesh moves in whole cells with the camera, sub-cell scroll through position (see makeClouds)
+    updateCloudBase(dt);
     // Cover: clear spells to scattered to broken over a day or two; rain forces overcast. Height: base + a rise
     // (never below the base) that is mostly small and sometimes large, and rain pulls the cloud deck back down.
     const T = sky.day + sky.time, cs = ((BF.state && BF.state.seed) | 0);

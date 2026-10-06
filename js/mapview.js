@@ -12,6 +12,7 @@
 const BF = (window.BF = window.BF || {});
 
 const ZONE = 128, MAX_PX = 1024, MAX_K = 32768, DEFAULT_W = 2048;   // 32768 zones = 4194304 blocks: past +-2M blocks the generator's lattice cache keys collide
+const COARSE_SCALE = 64;      // above this many blocks per pixel, mile-high plateau weights are approximated (worldgen.setCoarse)
 const RIVER_MAX_SCALE = 16;    // rivers (about 20 blocks wide) only on maps with at most 16 blocks per pixel; see step()
 const STEPS = [16, 8, 4, 2, 1];
 const keyOf = (k, zx, zz) => k + "_" + zx + "_" + zz;
@@ -43,6 +44,7 @@ function step(d, deadline) {
   const W = BF.worldgen, N = d.N, R = BF.rivers, tintOf = W.tintAt;
   let changed = false, n = 0;
   if (R && R.setEnabled && d.scale > RIVER_MAX_SCALE) R.setEnabled(false);   // the river network is traced per 768-block cell: far too slow and big for coarse maps
+  if (W.setCoarse && d.scale > COARSE_SCALE) W.setCoarse(true);              // mile-high plateau weights: skip the slope-limit scan
   try {
   while (!d.done) {
     const s = STEPS[d.pass], per = Math.ceil(N / s);
@@ -65,7 +67,7 @@ function step(d, deadline) {
     changed = true; d.cells++;
     if ((++n & 15) === 0 && performance.now() > deadline) break;
   }
-  } finally { if (R && R.setEnabled) R.setEnabled(true); }
+  } finally { if (R && R.setEnabled) R.setEnabled(true); if (W.setCoarse) W.setCoarse(false); }
   if (changed) d.ver++;
   return changed;
 }
@@ -84,9 +86,10 @@ const GROUND = { 1: SAND, 2: SAND, 3: GRAVEL, 11: MUD, 12: SAND, 13: RSAND, 19: 
 // Colour of the surface for a biome id at height h, written to `out` (before the tint).
 function groundOf(id, h, out) {
   let c = GROUND[id] || GRASS;
-  if (id === 24) c = h > 100 ? SNOW : h > 90 ? STONE : GRASS;
-  else if (id === 25 && h > 74) c = SNOW;
-  else if (id === 26 && h > 92) c = SNOW;
+  const t = BF.H > 192;   // mile-high worlds (generator 3) use their own snow lines (worldgen.js surface rules)
+  if (id === 24) c = h > (t ? 1950 : 100) ? SNOW : h > (t ? 1850 : 90) ? STONE : GRASS;
+  else if (id === 25 && h > (t ? 1450 : 74)) c = SNOW;
+  else if (id === 26 && h > (t ? 1800 : 92)) c = SNOW;
   out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
   if (id === 18) { out[0] = out[0] * 0.6 + PODZOL[0] * 0.4; out[1] = out[1] * 0.6 + PODZOL[1] * 0.4; out[2] = out[2] * 0.6 + PODZOL[2] * 0.4; }   // coarse dirt and podzol patches
   return TINTED[id] && c === GRASS;
@@ -103,7 +106,7 @@ function paint(d) {
   const N = d.N;
   if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = N; }
   if (!scratch || scratch.width !== N) scratch = d.cv.getContext("2d").createImageData(N, N);
-  const o = scratch.data, sea = BF.SEA || 48, rel = d.scale * 0.9 + 6;
+  const o = scratch.data, sea = BF.SEA, tall = BF.H > 192 ? 9 : 1, rel = d.scale * 0.9 + 6;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const p = j * N + i, q = p * 4, id = d.bio[p];
     if (id === 255) { o[q + 3] = 0; continue; }
@@ -118,7 +121,7 @@ function paint(d) {
       if (mode) c = COL[id] || [255, 0, 255];
       else { tinted = groundOf(id, h, gtmp); c = gtmp; }
       const hn = i + 1 < N && j + 1 < N && d.bio[p + N + 1] !== 255 ? d.hgt[p + N + 1] : h;
-      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / 150, 0, 1) + sh;
+      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / (150 * tall), 0, 1) + sh;
       r = c[0] * k; g = c[1] * k; b = c[2] * k;
       if (tinted) { const t = p * 3; r *= d.tn[t] / 100; g *= d.tn[t + 1] / 100; b *= d.tn[t + 2] / 100; }
     }
@@ -328,16 +331,17 @@ function drawView(force) {
 }
 // biomeAt without the river network on coarse maps: tracing it for every hovered point far from the last would stall the page (see step()).
 function biomeFor(x, z, scale) {
-  const R = BF.rivers, off = R && R.setEnabled && scale > RIVER_MAX_SCALE;
+  const R = BF.rivers, G = BF.worldgen, off = R && R.setEnabled && scale > RIVER_MAX_SCALE, co = G.setCoarse && scale > COARSE_SCALE;
   if (off) R.setEnabled(false);
-  try { return BF.worldgen.biomeAt(x, z); } finally { if (off) R.setEnabled(true); }
+  if (co) G.setCoarse(true);
+  try { return G.biomeAt(x, z); } finally { if (off) R.setEnabled(true); if (co) G.setCoarse(false); }
 }
 // Teleport to the selected point, landing on the surface (on the water surface over water). Far destinations are not loaded yet, so the height from
 // the generator is used first and corrected by tick() once the chunk exists (trees, buildings).
 function surfaceAt(x, z) {
   const W = BF.world, G = BF.worldgen;
-  let h = W.isLoaded(x, z) ? W.heightAt(x, z) : -1, wl = BF.SEA;
-  if (G) { if (h < 0) h = G.heightAt(x, z); if (G.waterLevelAt) wl = Math.max(wl, G.waterLevelAt(x, z)); }
+  let h = W.isLoaded(x, z) ? W.heightAt(x, z) : BF.MIN_Y - 1, wl = BF.SEA;
+  if (G) { if (h < BF.MIN_Y) h = G.heightAt(x, z); if (G.waterLevelAt) wl = Math.max(wl, G.waterLevelAt(x, z)); }
   return Math.max(h, wl) + 1.01;
 }
 function teleportToSelection() {
@@ -357,7 +361,7 @@ function settle() {
   if (!W.isLoaded(p.x, p.z)) return;
   view.pending = null;
   const h = W.heightAt(p.x, p.z), pos = BF.player.position;
-  if (h >= 0 && Math.abs(pos.x - (p.x + 0.5)) < 2 && Math.abs(pos.z - (p.z + 0.5)) < 2) { const wl = BF.worldgen && BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(p.x, p.z) : BF.SEA; BF.player.teleport(pos.x, Math.max(h, wl, BF.SEA) + 1.01, pos.z); }
+  if (h >= BF.MIN_Y && Math.abs(pos.x - (p.x + 0.5)) < 2 && Math.abs(pos.z - (p.z + 0.5)) < 2) { const wl = BF.worldgen && BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(p.x, p.z) : BF.SEA; BF.player.teleport(pos.x, Math.max(h, wl, BF.SEA) + 1.01, pos.z); }
 }
 function progressOf(d) {
   if (d.done) return 1;

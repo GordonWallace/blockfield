@@ -48,18 +48,19 @@ function column(wx, wz) {
   const c = BF.world.chunkAt(wx, wz);
   if (!c) return null;
   const lx = wx - c.cx * 16, lz = wz - c.cz * 16;
-  for (let y = c.maxY; y >= 0; y--) {
-    const id = c.vox[(y * 16 + lz) * 16 + lx];
+  const W = BF.world, MIN_Y = BF.MIN_Y;
+  for (let y = c.y1 - 1; y >= c.y0; y--) {
+    const id = W.chunkBlock(c, lx, y, lz);
     if (!id) continue;
     if (BF.FLUID[id]) {
       let d = 1, yy = y - 1, b = 0;
-      for (; yy >= 0; yy--) { b = c.vox[(yy * 16 + lz) * 16 + lx]; if (!BF.FLUID[b]) break; d++; }
-      return { water: true, depth: d, bottom: yy >= 0 && b ? b : BF.B.dirt, y };
+      for (; yy >= c.y0; yy--) { b = W.chunkBlock(c, lx, yy, lz); if (!BF.FLUID[b]) break; d++; }
+      return { water: true, depth: d, bottom: yy >= c.y0 && b ? b : BF.B.dirt, y };
     }
     if (!BF.SOLID[id] || BF.RENDER[id] === 4) continue;   // plants, torches, air-like blocks
     return { id, y };
   }
-  return { id: BF.B.bedrock, y: 0 };
+  return { id: BF.B.stone, y: c.y0 - 1 };
 }
 function pack(r, g, b) {
   const v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);

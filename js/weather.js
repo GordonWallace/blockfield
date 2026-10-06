@@ -52,8 +52,8 @@ function biomeKind(x, z) {
 function kindToPrecip(k, y) {
   if (k === 0) return 0;
   if (k === 2) return 2;
-  if (k === 3) return y >= 90 ? 2 : 1;
-  if (k === 4) return y >= 100 ? 2 : 1;
+  if (k === 3) return y >= BF.SEA + 42 ? 2 : 1;
+  if (k === 4) return y >= BF.SEA + 52 ? 2 : 1;
   return 1;
 }
 
@@ -61,9 +61,9 @@ function kindToPrecip(k, y) {
 let hmData, hmTex, hmOX = 1e9, hmOZ = 1e9, hmDirty = true, hmAge = 0;
 function columnTop(c, lx, lz) {
   const CS = BF.CS;
-  let y = c.top ? c.top[lz * CS + lx] : -1;
+  let y = c.top ? c.top[lz * CS + lx] : BF.MIN_Y - 1;
   // rain also stops on water / lava surfaces (not light-blocking for the sky shade)
-  while (y + 1 < BF.H && BF.RENDER[c.vox[BF.vIdx(lx, y + 1, lz)]] === 3) y++;
+  while (y + 1 < c.y1 && BF.RENDER[BF.world.chunkBlock(c, lx, y + 1, lz)] === 3) y++;
   return y;
 }
 function rebuildHeightMap(ox, oz) {
@@ -76,9 +76,9 @@ function rebuildHeightMap(ox, oz) {
     const z0 = Math.max(oz, ccz * CS), z1 = Math.min(oz + HM, ccz * CS + CS);
     for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) {
       const o = ((z - oz) * HM + (x - ox)) * 4;
-      if (!c) { hmData[o] = 255; hmData[o + 1] = 0; continue; }   // unloaded: no precipitation
-      const top = columnTop(c, x - ccx * CS, z - ccz * CS);
-      hmData[o] = top + 1;                                        // surface y (particles stop here)
+      if (!c) { hmData[o] = 0; hmData[o + 1] = 0; hmData[o + 2] = 0; continue; }   // unloaded: no precipitation
+      const top = columnTop(c, x - ccx * CS, z - ccz * CS), sv = Math.max(0, top + 1 - BF.MIN_Y);
+      hmData[o] = sv & 255; hmData[o + 2] = sv >> 8;              // surface y - MIN_Y, 16 bits in r + b (particles stop here)
       hmData[o + 1] = kindToPrecip(biomeKind(x, z), top + 1);
     }
   }
@@ -115,11 +115,11 @@ function makeParticles() {
   pMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 }, uIntensity: { value: 0 }, uLight: { value: 1 },
-      uHeight: { value: hmTex }, uOrigin: { value: new THREE.Vector2() }, uHide: { value: 0 },
+      uHeight: { value: hmTex }, uOrigin: { value: new THREE.Vector2() }, uHide: { value: 0 }, uMinY: { value: 0 },
     },
     vertexShader: `
       attribute vec4 seed; attribute vec2 corner;
-      uniform float uTime, uIntensity, uHide; uniform sampler2D uHeight; uniform vec2 uOrigin;
+      uniform float uTime, uIntensity, uHide, uMinY; uniform sampler2D uHeight; uniform vec2 uOrigin;
       varying vec2 vUv; varying float vA; varying float vSnow;
       const float R = ${R.toFixed(1)}, BAND = ${BAND.toFixed(1)}, LO = ${BAND_LO.toFixed(1)}, HM = ${HM.toFixed(1)};
       void main() {
@@ -129,7 +129,7 @@ function makeParticles() {
         float z = cam.z + mod(seed.y * span - cam.z, span) - R;
         vec2 cell = floor(vec2(x, z)) - uOrigin;
         vec4 h = texture2D(uHeight, (cell + 0.5) / HM);
-        float top = floor(h.r * 255.0 + 0.5), kind = floor(h.g * 255.0 + 0.5);
+        float top = floor(h.r * 255.0 + 0.5) + 256.0 * floor(h.b * 255.0 + 0.5) + uMinY, kind = floor(h.g * 255.0 + 0.5);
         float snow = step(1.5, kind);
         float speed = mix(11.0 + seed.w * 4.0, 1.4 + seed.z * 0.9, snow);
         float base = cam.y - LO;
@@ -140,7 +140,7 @@ function makeParticles() {
         z += snow * cos(uTime * 0.6 + ph * 1.3) * 0.45;
         float dist = length(vec2(x, z) - cam.xz);
         float len = mix(1.0, 0.0, snow), wid = mix(0.03, 0.06, snow);
-        if (kind < 0.5 || top > 254.0 || y < top || seed.w > uIntensity || dist > R || uHide > 0.5) {
+        if (kind < 0.5 || y < top || seed.w > uIntensity || dist > R || uHide > 0.5) {
           gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vUv = vec2(0.0); vSnow = 0.0; return;
         }
         vec4 mv;
@@ -228,7 +228,7 @@ function seg(ax, ay, az, bx, by, bz, wa) {
 }
 function buildBolt(x, y, z) {
   segN = 0;
-  const y0 = BF.H + 4, n = 26, M = Math.random;
+  const y0 = Math.max(BF.sky && BF.sky.cloudHeight != null ? BF.sky.cloudHeight + 4 : BF.H + 4, y + 30), n = 26, M = Math.random;
   let px = x + (M() - 0.5) * 8, pz = z + (M() - 0.5) * 8, py = y0;
   let ox = px - x, oz = pz - z;
   const branches = [];
@@ -366,6 +366,7 @@ const weather = {
       u.uTime.value = (u.uTime.value + dt) % 7200;
       u.uIntensity.value = weather.intensity;
       u.uOrigin.value.set(hmOX, hmOZ);
+      u.uMinY.value = BF.MIN_Y;
       u.uLight.value = Math.min(1.3, 0.22 + 0.85 * (BF.sky ? BF.sky.light : 1));
       u.uHide.value = BF.player && BF.player.headInWater ? 1 : 0;
     }

@@ -17,8 +17,13 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
 
 ## Core (owned by integrator)
 
-- `BF.CS = 16`, `BF.H = 192`, `BF.SEA = 48` (water fills y <= SEA where terrain is lower).
-- `BF.vIdx(x, y, z)` -> index into a chunk's `Uint16Array` voxel array, local coords, `(y*CS + z)*CS + x`.
+- `BF.CS = 16`. World limits are per world and set by `BF.setLimits(gen)` (called from `worldgen.init`): `BF.MIN_Y` (lowest y, bedrock), `BF.H` (exclusive top), `BF.SEA`
+  (water fills y <= SEA where terrain is lower), `BF.SY0/SY1` (section range). Generators 1 and 2 (every old world): 0 / 192 / 48. Generator 3 (new worlds, mile-high): -64 / 3072 / 0.
+  Never cache them at load time. Full engine/worldgen contract: docs/MILE_HIGH_CONTRACT.md.
+- Chunks are 16x16 columns of 16-high sections: `c.secs[sy - c.lo]` is a `Uint16Array(4096)` (index `(ly<<8)|(lz<<4)|lx`) or a number (the whole section is that block). `[c.lo, c.hi)` is the
+  loaded band (`c.y0 = lo*16`, `c.y1 = hi*16`); below it is stone, above it air, and the band grows lazily (`world.ensureRange`, `setBlock`, the player digging or falling). Read blocks with
+  `world.getBlock` / `world.chunkBlock(c, lx, y, lz)`, scan with `world.scanFlagged(c, flagTable, cb)`. Edits are stored per chunk by `((y - MIN_Y)*16 + lz)*16 + lx` (the old `vIdx` for legacy worlds).
+- `BF.vIdx(x, y, z)` -> index `(y*CS + z)*CS + x` into a legacy full-height window (generator 1/2 `generate`, tools).
 - `BF.blocks[id]`, `BF.items[id]`, `BF.B.name -> blockId`, `BF.I.name -> itemId` (blocks.js). Block ids are 0..`BF.MAX_BLOCK` (4095;
   voxels are `Uint16Array`; ids 0..255 are the original blocks and are never renumbered, saves store block ids in edit lists),
   non-block item ids start at `BF.ITEM_BASE` (4096) and are saved by name. `BF.items` is sparse (blocks, then a gap, then
@@ -173,7 +178,7 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 - time in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight. `light` is the block brightness multiplier
   (main passes it to `world.setDaylight`). Owns scene.background, scene.fog (keep fog distances tied to
   `BF.world.viewDist * BF.CS`).
-- Clouds are volumetric slabs ("fancy" clouds): slab bottom = `BF.sky.cloudHeight` = `BF.sky.cloudBase` (default `BF.H + 4`, settable per world, e.g. for mile-high terrain) + a rise of 0..70 that varies smoothly with game time (never below the base). Cover (`BF.sky.cloudCover`, 0 clear..1 overcast) also varies by game time (clear spells to broken skies; value noise on day+time seeded by world seed) and rain forces overcast and lowers the deck, `CLOUD_H = 5`, cell 12x12, periodic 64x64 deterministic cell mask,
+- Clouds are volumetric slabs ("fancy" clouds): slab bottom = `BF.sky.cloudHeight` = `BF.sky.cloudBase` (default `BF.H + 4`, settable per world, e.g. for mile-high terrain) + a rise of 0..70 that varies smoothly with game time (never below the base). Mile-high worlds (generator 3) set `cloudBase` each second from the smoothed regional ground height (+80, never below SEA+110, eased; teleports snap) so you walk under clouds on the plains and climb above them on peaks. Cover (`BF.sky.cloudCover`, 0 clear..1 overcast) also varies by game time (clear spells to broken skies; value noise on day+time seeded by world seed) and rain forces overcast and lowers the deck, `CLOUD_H = 5`, cell 12x12, periodic 64x64 deterministic cell mask,
   drifting in -x at 1.2 blocks/s. One BufferGeometry (~6.5k triangles, exposed faces only; shade top 1 / z-sides 0.9 / x-sides 0.8 /
   bottom 0.7) over a 56x56 cell window, rebuilt (preallocated buffers) only when the camera or drift crosses a cell boundary,
   otherwise just translated. Single-sided, depthWrite off, renderOrder 5, alpha 0.9 with distance fade to the horizon colour at CLOUD_R=320.
@@ -254,7 +259,7 @@ Non-tree plants are clumped with deterministic world-coordinate noise (no Math.r
 ## Block light (js/light.js, js/textures-light.js, js/recipes-light.js)
 Block light is an integer 0..15 per voxel, separate from the simple per-column sky shade. It is derived data (never saved): `light.onChunkCreated(c)` rebuilds it
 whenever a chunk is created, so loading a save recomputes it.
-- Data: every chunk gets `chunk.light = Uint8Array(CS*CS*H)`, same index as `chunk.vox` (`BF.vIdx`). Emitters: block def field `emit` (0..15), table `BF.EMIT[id]`
+- Data: every chunk gets `chunk.light`, an array parallel to `chunk.secs` of `Uint8Array(4096)` (or undefined = all dark; allocated when light reaches the section), same in-section index as the blocks. Emitters: block def field `emit` (0..15), table `BF.EMIT[id]`
   (blocks.js). Current emitters: torch / wall torches 14, lantern 15, glowstone 15, sea_lantern 15, magma_block 3. Add `emit: n` to any new block def.
 - Propagation: BFS flood fill, -1 per step through blocks with `OPAQUE == 0` (opaque blocks stop it; an opaque emitter still lights its neighbours), across chunk borders
   through loaded chunks. A chunk that loads later seeds from its 4 loaded neighbours' border cells and from its own emitters (only emitters and border light are touched, not a

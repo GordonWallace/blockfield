@@ -78,7 +78,7 @@ const drops = {
       d.vel.y -= GRAV * dt;
       const res = BF.world.moveBox(d.pos, d.vel, HW, H, dt);
       if (res.onGround) { d.vel.x *= Math.pow(0.02, dt); d.vel.z *= Math.pow(0.02, dt); }
-      if (d.pos.y < -10) { drops.remove(d); continue; }
+      if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
       d.sprite.position.set(d.pos.x, d.pos.y + 0.22 + Math.sin(d.age * 2.5 + d.phase) * 0.06, d.pos.z);
       d.sprite.material.color.setScalar(light);
     }
