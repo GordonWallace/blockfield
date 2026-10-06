@@ -589,9 +589,9 @@ let dynItem = ITEM_BASE + 0x10000;
 BF.resolveItem = name => {
   if (I[name] !== undefined) return I[name];
   const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
-  if (a && +a[1] >= 1 && +a[1] <= 128) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
+  if (a && +a[1] >= 1 && +a[1] <= 32768) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
     const k = +a[1], id = dynItem++;
-    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto-Fill Map (" + k * 128 + "x" + k * 128 + " blocks)", search: "auto map autofill auto-fill automap" };
+    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map_filled", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto-Fill Map (" + k * 128 + "x" + k * 128 + " blocks)", search: "auto map autofill auto-fill automap" };
     I[name] = id;
     return id;
   }

@@ -3,14 +3,16 @@
 //    item into a filled "auto_map_<zones>_<zoneX>_<zoneZ>" map centred on the zone the player stands in. Its pixels come straight from the world
 //    generator (BF.worldgen, whichever version the world was made with), not from loaded chunks, so the whole area fills in by itself, coarse to fine,
 //    a few milliseconds per frame (tick() is called from the main loop). Nothing is saved: the pixels regenerate from the seed when the map is next
-//    held or viewed. At most 512x512 pixels, so a 2048-block map is 4 blocks per pixel.
+//    held or viewed. Always 1024x1024 pixels at most (256 blocks wide and under: one block per pixel), so a 2048-block map is 2 blocks per pixel.
 //  * Right click with any filled map (normal or auto) opens it full screen: zone grid, player arrow, block under the mouse (and biome / height on auto maps).
+//    Click a point to select it; in creative mode a Teleport button takes you there, onto the surface (or the water surface).
 // API: BF.mapview = { use(sel, it), held(it), tick(), open(it), close(), isOpen(), getAuto, nameOf, geometry, finish(d), paint(d), stats }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const ZONE = 128, MAX_PX = 512, MAX_K = 128, DEFAULT_W = 2048;
+const ZONE = 128, MAX_PX = 1024, MAX_K = 32768, DEFAULT_W = 2048;   // 32768 zones = 4194304 blocks: past +-2M blocks the generator's lattice cache keys collide
+const RIVER_MAX_SCALE = 16;    // rivers (about 20 blocks wide) only on maps with at most 16 blocks per pixel; see step()
 const STEPS = [16, 8, 4, 2, 1];
 const keyOf = (k, zx, zz) => k + "_" + zx + "_" + zz;
 const nameOf = (k, zx, zz) => "auto_map_" + keyOf(k, zx, zz);
@@ -38,8 +40,10 @@ const dataOfItem = it => (it && it.auto ? getAuto(it.auto.k, it.auto.zx, it.auto
 
 // Samples the next cells of the progressive fill until `deadline` (performance.now() ms). Returns true when something changed.
 function step(d, deadline) {
-  const W = BF.worldgen, N = d.N;
+  const W = BF.worldgen, N = d.N, R = BF.rivers;
   let changed = false, n = 0;
+  if (R && R.setEnabled && d.scale > RIVER_MAX_SCALE) R.setEnabled(false);   // the river network is traced per 768-block cell: far too slow and big for coarse maps
+  try {
   while (!d.done) {
     const s = STEPS[d.pass], per = Math.ceil(N / s);
     if (d.idx >= per * per) {
@@ -59,6 +63,7 @@ function step(d, deadline) {
     changed = true; d.cells++;
     if ((++n & 15) === 0 && performance.now() > deadline) break;
   }
+  } finally { if (R && R.setEnabled) R.setEnabled(true); }
   if (changed) d.ver++;
   return changed;
 }
@@ -67,10 +72,12 @@ function finish(d) { while (!d.done) step(d, Infinity); return d; }
 
 // ---------------------------------------------------------------- colours
 const COL = { 0: [40, 70, 160], 1: [230, 215, 150], 2: [235, 235, 220], 3: [130, 130, 130], 4: [60, 120, 220], 5: [130, 190, 80], 6: [50, 130, 40], 7: [200, 120, 200], 8: [110, 170, 70], 9: [30, 80, 30], 10: [80, 110, 60], 11: [90, 90, 50], 12: [235, 210, 130], 13: [200, 110, 60], 14: [180, 170, 70], 15: [100, 170, 50], 16: [20, 150, 40], 17: [40, 110, 80], 18: [30, 90, 70], 19: [235, 240, 250], 20: [170, 220, 255], 21: [160, 200, 200], 22: [150, 210, 120], 23: [250, 170, 200], 24: [150, 150, 150], 25: [220, 230, 240], 26: [255, 255, 255], 27: [170, 170, 170], 28: [170, 100, 170] };
+let scratch = null;       // one shared ImageData (4 MB at 1024 px) for all maps
 function paint(d) {
   const N = d.N;
-  if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = N; d.img = d.cv.getContext("2d").createImageData(N, N); }
-  const o = d.img.data, sea = BF.SEA || 48, rel = d.scale * 0.9 + 6;
+  if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = N; }
+  if (!scratch || scratch.width !== N) scratch = d.cv.getContext("2d").createImageData(N, N);
+  const o = scratch.data, sea = BF.SEA || 48, rel = d.scale * 0.9 + 6;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const p = j * N + i, q = p * 4, id = d.bio[p];
     if (id === 255) { o[q + 3] = 0; continue; }
@@ -88,18 +95,18 @@ function paint(d) {
     }
     o[q] = clamp(r, 0, 255); o[q + 1] = clamp(g, 0, 255); o[q + 2] = clamp(b, 0, 255); o[q + 3] = 255;
   }
-  d.cv.getContext("2d").putImageData(d.img, 0, 0);
+  d.cv.getContext("2d").putImageData(scratch, 0, 0);
   d.cvVer = d.ver;
   return d.cv;
 }
 function canvasOf(d) {
   const now = performance.now();
-  if (d.cvVer !== d.ver && (!d.cv || d.done || now - d.paintAt > 200)) { paint(d); d.paintAt = now; }
+  if (d.cvVer !== d.ver && (!d.cv || d.done || now - d.paintAt > 400)) { paint(d); d.paintAt = now; }
   return d.cv;
 }
 
 // ---------------------------------------------------------------- scheduler
-let budget = 8;
+let budget = 10;
 function tick() {
   if (!maps.size || !BF.worldgen || (BF.state && BF.state.paused && !view.open)) return;
   const list = [...maps.values()].filter(d => !d.done).sort((a, b) => b.used - a.used);
@@ -118,8 +125,48 @@ function held(it) {
   return BF.maps.heldCanvas(d, d.ver + "|" + (d.cvVer), src, (p.x - d.x0) / d.scale * 128 / d.N, (p.z - d.z0) / d.scale * 128 / d.N);
 }
 
+// ---------------------------------------------------------------- item icons
+// Inventory / hotbar / drop icon of a filled map (normal or auto): the map itself, shrunk into a framed sheet (brown frame for normal maps, teal for auto
+// maps). textures.js icon() and inventory.js ask BF.mapIcon(item) -> {ver, url}; ver changes when the thumbnail does, and tick() refreshes the inventory
+// icons about once a second while a map in the inventory is changing (generating, or being explored).
+const thumbs = new Map();   // item id -> {ver, t, url}
+function composeIcon(src, auto) {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d");
+  g.fillStyle = "#1c160d"; g.fillRect(4, 2, 56, 60);                       // outline, as the flat item sprites have
+  g.fillStyle = auto ? "#1f5a5a" : "#7a5a30"; g.fillRect(8, 6, 48, 52);
+  g.fillStyle = auto ? "#123c3c" : "#5a4020"; g.fillRect(52, 6, 4, 52); g.fillRect(8, 54, 48, 4);
+  g.fillStyle = "#d8c890"; g.fillRect(12, 10, 40, 44);
+  if (src && src.width) { g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high"; g.drawImage(src, 0, 0, src.width, src.height, 14, 14, 36, 36); }
+  g.strokeStyle = "rgba(60,40,10,0.55)"; g.lineWidth = 1; g.strokeRect(13.5, 13.5, 37, 37);
+  return c.toDataURL();
+}
+function mapIcon(it) {
+  if (!it || typeof document === "undefined") return null;
+  let src, ver;
+  try {
+    if (it.auto) { const d = dataOfItem(it); src = canvasOf(d); ver = "a" + d.cvVer; }
+    else if (it.map && BF.maps && BF.maps.snapshot) { const m = BF.maps.snapshot(it); src = m.src; ver = "n" + m.ver; }
+    else return null;
+  } catch (e) { console.error(e); return null; }
+  const now = performance.now();
+  let t = thumbs.get(it.id);
+  if (!t) thumbs.set(it.id, t = { ver: null, t: 0, url: null });
+  if (t.ver !== ver && (!t.url || now - t.t > 700)) { t.url = composeIcon(src, !!it.auto); t.ver = ver; t.t = now; }
+  return { ver: t.ver, url: t.url };
+}
+BF.mapIcon = mapIcon;
+let iconT = 0, iconSeen = "";
+function refreshIcons(now) {
+  if (now - iconT < 1000 || !BF.inventory || !BF.inventory.slots) return;
+  iconT = now;
+  let sig = "";
+  for (const s of BF.inventory.slots) { const it = s && BF.items[s.id]; if (it && (it.map || it.auto)) { const r = mapIcon(it); sig += s.id + ":" + (r ? r.ver : "") + ","; } }
+  if (sig !== iconSeen) { iconSeen = sig; if (BF.inventory.refreshIcons) BF.inventory.refreshIcons(); }
+}
+
 // ---------------------------------------------------------------- UI
-const view = { open: false, root: null, cv: null, g: null, title: null, info: null, it: null, d: null, S: 0, mouse: null, sig: "" };
+const view = { open: false, root: null, cv: null, g: null, title: null, info: null, it: null, d: null, S: 0, mouse: null, sig: "", sel: null, tp: null, pending: null };
 const prompt = { open: false, root: null, input: null, hint: null, slot: -1 };
 function css() {
   const st = document.createElement("style");
@@ -135,6 +182,7 @@ function css() {
 .bfm-row{display:flex;gap:8px}
 .bfm-row button{font:12px var(--display);color:var(--ink);background:rgba(127,191,77,.22);border:1px solid var(--accent);border-radius:3px;padding:6px 18px;cursor:pointer}
 .bfm-row button:hover{background:rgba(127,191,77,.38)}
+.bfm-row button:disabled{opacity:.4;cursor:default;background:rgba(127,191,77,.12)}
 .bfm-in{font:15px var(--mono);width:9em;padding:6px 8px;text-align:center;color:var(--ink);background:rgba(0,0,0,.35);border:1px solid var(--panel-edge);border-radius:3px}`;
   document.head.appendChild(st);
 }
@@ -148,9 +196,19 @@ function mount(inner) {
 function buildView() {
   if (view.root) return;
   css();
-  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="close">Close</button></div>`);
+  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="tp" hidden disabled>Teleport</button><button type="button" data-a="close">Close</button></div>`);
   view.cv = r.querySelector("canvas"); view.g = view.cv.getContext("2d"); view.title = r.querySelector(".bfm-title"); view.info = r.querySelector(".bfm-info");
   r.querySelector('[data-a="close"]').addEventListener("click", closeView);
+  view.tp = r.querySelector('[data-a="tp"]');
+  view.tp.addEventListener("click", teleportToSelection);
+  view.cv.addEventListener("click", e => {          // select a point (any map; the Teleport button only exists in creative mode)
+    const m = view.d, b = view.cv.getBoundingClientRect();
+    if (!m) return;
+    const fx = (e.clientX - b.left) / b.width, fz = (e.clientY - b.top) / b.height;
+    if (fx < 0 || fx >= 1 || fz < 0 || fz >= 1) return;
+    view.sel = { x: Math.floor(m.x0 + fx * m.side), z: Math.floor(m.z0 + fz * m.side) };
+    view.sig = ""; drawView();
+  });
   r.addEventListener("mousedown", e => { if (e.target === r) closeView(); });
   r.addEventListener("contextmenu", e => e.preventDefault());
   view.cv.addEventListener("mousemove", e => { const b = view.cv.getBoundingClientRect(); view.mouse = { x: (e.clientX - b.left) / b.width, y: (e.clientY - b.top) / b.height }; view.sig = ""; });
@@ -178,7 +236,9 @@ function openView(it) {
   view.cv.style.width = view.cv.style.height = view.S + "px";
   view.title.textContent = (it.auto ? "Auto map - " : "Map - ") + view.d.label;
   view.open = true;                       // before releasing the lock: player.js must not pause or re-lock
-  view.sig = "";
+  view.sig = ""; view.sel = null;
+  view.tp.hidden = !(P && P.gameMode === "creative");   // like the creative-only auto map itself; /tp stays the survival route
+  view.tp.disabled = true;
   try { if (P && P.uiOpen) P.uiOpen(); } catch (e) { console.error(e); }
   view.root.classList.add("open");
   drawView();
@@ -215,15 +275,56 @@ function drawView(force) {
   g.save(); g.translate(clamp(mx, 9, S - 9), clamp(mz, 9, S - 9)); g.rotate(ang); if (!inside) g.scale(0.85, 0.85); g.scale(1.9, 1.9);
   g.beginPath(); g.moveTo(5, 0); g.lineTo(-3.5, 3.6); g.lineTo(-1.6, 0); g.lineTo(-3.5, -3.6); g.closePath();
   g.fillStyle = inside ? "#fff" : "#d8d8d8"; g.strokeStyle = "#101010"; g.lineWidth = 1.2; g.stroke(); g.fill(); g.restore();
+  // selected point
+  if (view.sel) {
+    const sx = (view.sel.x + 0.5 - m.x0) * ppb, sz = (view.sel.z + 0.5 - m.z0) * ppb;
+    g.save(); g.translate(sx, sz); g.lineWidth = 2.5; g.strokeStyle = "#101010"; g.beginPath(); g.arc(0, 0, 8, 0, 6.2832); g.moveTo(-14, 0); g.lineTo(-4, 0); g.moveTo(4, 0); g.lineTo(14, 0); g.moveTo(0, -14); g.lineTo(0, -4); g.moveTo(0, 4); g.lineTo(0, 14); g.stroke();
+    g.lineWidth = 1.2; g.strokeStyle = "#ff4a3a"; g.stroke(); g.restore();
+  }
+  view.tp.disabled = !view.sel;
   // readout
   let line = "";
   if (view.mouse && view.mouse.x >= 0 && view.mouse.x < 1 && view.mouse.y >= 0 && view.mouse.y < 1) {
     const x = Math.floor(m.x0 + view.mouse.x * m.side), z = Math.floor(m.z0 + view.mouse.y * m.side);
     line = "x " + x + "  z " + z;
-    if (m.auto && BF.worldgen) { const b = BF.worldgen.biomeAt(x, z); line += "   " + b.name + "   height " + Math.round(b.height); }
+    if (m.auto && BF.worldgen) { const b = biomeFor(x, z, m.scale); line += "   " + b.name + "   height " + Math.round(b.height); }
   }
+  if (view.sel) line += (line ? "\n" : "") + "selected  x " + view.sel.x + "  z " + view.sel.z + (view.tp.hidden ? "" : "   (press Teleport)");
   const prog = m.auto && m.d ? (m.d.done ? "" : "   generating " + Math.floor(100 * progressOf(m.d)) + "%") : "";
   view.info.textContent = (line || "Move the mouse over the map for coordinates") + prog + "\ngrid lines every " + gs + " blocks (world coordinates)  |  Esc to close";
+}
+// biomeAt without the river network on coarse maps: tracing it for every hovered point far from the last would stall the page (see step()).
+function biomeFor(x, z, scale) {
+  const R = BF.rivers, off = R && R.setEnabled && scale > RIVER_MAX_SCALE;
+  if (off) R.setEnabled(false);
+  try { return BF.worldgen.biomeAt(x, z); } finally { if (off) R.setEnabled(true); }
+}
+// Teleport to the selected point, landing on the surface (on the water surface over water). Far destinations are not loaded yet, so the height from
+// the generator is used first and corrected by tick() once the chunk exists (trees, buildings).
+function surfaceAt(x, z) {
+  const W = BF.world, G = BF.worldgen;
+  let h = W.isLoaded(x, z) ? W.heightAt(x, z) : -1, wl = BF.SEA;
+  if (G) { if (h < 0) h = G.heightAt(x, z); if (G.waterLevelAt) wl = Math.max(wl, G.waterLevelAt(x, z)); }
+  return Math.max(h, wl) + 1.01;
+}
+function teleportToSelection() {
+  const s = view.sel, P = BF.player;
+  if (!s || !P || P.gameMode !== "creative") return;
+  const x = s.x + 0.5, z = s.z + 0.5, y = surfaceAt(s.x, s.z);
+  closeView();
+  P.teleport(x, y, z);
+  view.pending = { x: s.x, z: s.z, t: 0 };
+  if (P.actionBar) P.actionBar("Teleported to " + s.x + ", " + Math.floor(y) + ", " + s.z);
+}
+// After a teleport to unloaded ground: once the chunk is there, stand on what is really on top.
+function settle() {
+  const p = view.pending, W = BF.world;
+  if (!p) return;
+  if (++p.t > 3600) { view.pending = null; return; }     // give up after about a minute
+  if (!W.isLoaded(p.x, p.z)) return;
+  view.pending = null;
+  const h = W.heightAt(p.x, p.z), pos = BF.player.position;
+  if (h >= 0 && Math.abs(pos.x - (p.x + 0.5)) < 2 && Math.abs(pos.z - (p.z + 0.5)) < 2) { const wl = BF.worldgen && BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(p.x, p.z) : BF.SEA; BF.player.teleport(pos.x, Math.max(h, wl, BF.SEA) + 1.01, pos.z); }
 }
 function progressOf(d) {
   if (d.done) return 1;
@@ -250,7 +351,7 @@ function hint() {
   if (!(w > 0)) { prompt.hint.textContent = "Enter a width, e.g. 2000"; prompt.hint.classList.add("bad"); return false; }
   const k = zonesFor(w), side = k * ZONE, sc = side / Math.min(MAX_PX, side);
   prompt.hint.classList.remove("bad");
-  prompt.hint.textContent = "Becomes " + side + " x " + side + " blocks (" + k + " x " + k + " zones of 8x8 chunks), " + (+sc.toFixed(2)) + " block" + (sc === 1 ? "" : "s") + " per pixel" + (w > MAX_K * ZONE ? "\n(largest allowed is " + MAX_K * ZONE + ")" : "");
+  prompt.hint.textContent = "Becomes " + side + " x " + side + " blocks (" + k + " x " + k + " zones of 8x8 chunks), " + (+sc.toFixed(2)) + " block" + (sc === 1 ? "" : "s") + " per pixel" + (sc > RIVER_MAX_SCALE ? ", no rivers at this scale" : "") + (w > MAX_K * ZONE ? "\n(largest allowed is " + MAX_K * ZONE + ")" : "");
   return true;
 }
 function openPrompt(sel) {
@@ -312,10 +413,10 @@ function use(sel, it) {
 
 BF.mapview = {
   use, held, open: openView, close: () => { closeView(); closePrompt(); }, isOpen: () => view.open || prompt.open,
-  tick() { tick(); if (view.open) drawView(); },
-  getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
+  tick() { tick(); if (view.open) drawView(); if (view.pending) settle(); refreshIcons(performance.now()); },
+  teleportToSelection, surfaceAt, getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
   ZONE, MAX_PX, MAX_K,
-  reset() { maps.clear(); },
+  reset() { maps.clear(); thumbs.clear(); iconSeen = ""; },
   _maps: maps, _view: view, _prompt: prompt,
 };
 addEventListener("load", () => { if (BF.on) BF.on("newWorld", () => BF.mapview.reset()); });
