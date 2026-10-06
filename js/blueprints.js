@@ -30,7 +30,7 @@ function rotId(id, k) {
 function itemOf(id) {
   const b = BF.blocks[id];
   if (!b || id === 0) return null;
-  if (id === BF.B.water) return null;                          // water is free (there is no bucket in the game)
+  if (id === BF.B.water) return null;                          // water has no item of its own: the builder pours it from a full water bucket (builder.js)
   return b.item != null ? b.item : id;
 }
 // Wood families can stand in for each other: any planks for planks, any (unstripped) log for logs.

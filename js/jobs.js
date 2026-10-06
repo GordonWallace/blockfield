@@ -270,6 +270,7 @@ function take(m, s, prof) {
 function claim(m, opts) {
   opts = opts || {};
   if (!m || m.dead || m.removed || m.type !== "villager" || m.profession === "nitwit") return null;
+  if (opts.site) return !claimedByOther(pk(opts.site.x, opts.site.y, opts.site.z), m) ? hire(m, opts.site) : null;   // the block the villager walked to
   const own = !NO_JOB[m.profession] && (m.xp || 0) > 0 ? m.profession : null;
   const list = unclaimed(m, opts.radius || RADIUS, m).filter(s => (!own || s.prof === own) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
   if (!list.length) return null;
@@ -277,12 +278,17 @@ function claim(m, opts) {
   const wts = list.map(s => { let w = 1; for (const p of pref) if (p === s.prof) w *= 3; return w; });
   let t = Math.random() * wts.reduce((a, b) => a + b, 0), i = 0;
   while (i < list.length - 1 && (t -= wts[i]) > 0) i++;
-  const s = list[i], first = !m.jobStocked;
+  return hire(m, list[i]);
+}
+// The villager takes jobsite s (a site record of `sites`) with its profession; the first job brings the profession's starting wares.
+function hire(m, s) {
+  const first = !m.jobStocked;
   take(m, s, s.prof);
   if (first && (m.xp || 0) === 0 && BF.trades && m.inv) { // first job: the profession's starting wares (once per villager)
     try { for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count); } catch (e) { console.error(e); }
   }
   m.jobStocked = true;
+  if (BF.villageLife && BF.villageLife.ensureKit) BF.villageLife.ensureKit(m);   // a new farmer / builder gets its empty bucket (and hoe)
   if (BF.emit) BF.emit("villagerHired", m, s.prof);
   return s.prof;
 }
@@ -322,7 +328,7 @@ function onSpawn(m, rec, sv) {
   if (!sv && BF.trades) m.inv = BF.trades.stockFor("unemployed", m);
   m.jobStocked = false;
 }
-// Global tick (mobs.update): validates jobsites, unemployed villagers look for work every 4-10 s.
+// Global tick (mobs.update): validates the claimed jobsites. Villagers without a job look for one in ai() below (seekAI).
 function tick(dt) {
   hook();
   tickT -= dt;
@@ -336,15 +342,66 @@ function tick(dt) {
       if (W.isLoaded(s.x, s.z) && profOfBlock(W.getBlock(s.x, s.y, s.z)) !== m.profession) { claims.delete(pk(s.x, s.y, s.z)); lose(m); }
       continue;
     }
-    if (m.profession === "nitwit" || isChild(m) || m.tradingWith) continue;
-    m.jobT = (m.jobT == null ? rnd(1, 5) : m.jobT) - 1;
-    if (m.jobT <= 0) { m.jobT = rnd(4, 10); claim(m); }
   }
+}
+// ---------------------------------------------------------------- walking to a jobsite (unemployed villagers)
+// A villager without a job picks the nearest free jobsite block (one it may take: experienced ones only their own profession), walks to it
+// and takes it on arrival if nobody got there first: the claim happens at the block, not from afar. The loser of a race picks again.
+const SEEK_MAX = 120;             // seconds before a walk is given up
+const SEEK_AVOID = 60;            // seconds a site that could not be reached (or was lost) is left alone
+const adjacentTo = (s, x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) === 1 && Math.abs(y - s.y) <= 1;
+function pickSite(m, sk) {
+  const own = !NO_JOB[m.profession] && (m.xp || 0) > 0 ? m.profession : null, pref = m.jobPrefer || [], now = performance.now() / 1000;
+  const list = unclaimed(m, RADIUS, m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
+  let best = null, bd = Infinity;
+  for (const s of list) {
+    const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) * (pref.includes(s.prof) ? 0.6 : 1) * rnd(0.9, 1.1);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+function seekAI(m, dt, out, nav) {
+  if (!nav || m.profession === "nitwit" || isChild(m) || m.tradingWith || m.sleeping || m.type !== "villager") return false;
+  const sk = m.seek || (m.seek = { site: null, t: 0, cd: rnd(1, 5), avoid: {}, plan: 0 });
+  const ai = m.ai, now = performance.now() / 1000;
+  if (!sk.site) {
+    if ((sk.cd -= dt) > 0) return false;
+    sk.cd = rnd(3, 8);
+    const s = pickSite(m, sk);
+    if (!s) return false;
+    sk.site = s; sk.t = 0; sk.route = false; ai.route = null;
+  }
+  const s = sk.site, k = pk(s.x, s.y, s.z), W = BF.world;
+  const giveUp = lost => { sk.avoid[k] = now + (lost ? 15 : SEEK_AVOID); sk.site = null; sk.cd = lost ? rnd(0.5, 2) : rnd(3, 8); ai.route = null; return false; };
+  sk.t += dt;
+  if (sk.t > SEEK_MAX || (W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id)) return giveUp(false);
+  if (claimedByOther(k, m)) return giveUp(true);                   // somebody else got there first
+  const [x, y, z] = nav.feetCell(m);
+  if (adjacentTo(s, x, y, z) || (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) < 1.9 && Math.abs(s.y - y) <= 1)) {
+    ai.route = null;
+    out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5;
+    if (claim(m, { site: s })) { sk.site = null; m.seek = null; if (m.job) { m.job.mode = "work"; m.job.t = rnd(4, 8); } }   // takes the block and looks at it for a while
+    else giveUp(true);
+    return true;
+  }
+  if (!ai.route || ai.routeKind !== "job") {
+    if (!nav.takePlan()) return true;
+    const route = nav.findPath(x, y, z, { x: s.x, z: s.z, at: (cx, cy, cz) => adjacentTo(s, cx, cy, cz) }, 2500);
+    if (!route) return giveUp(false);
+    ai.route = route; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "job";
+  }
+  const r = nav.followRoute(m, dt, out, m.def.speed);
+  if (r === "stuck") return giveUp(false);
+  if (r === "done") ai.route = null;
+  ai.mode = "idle"; ai.t = 2;
+  return true;
 }
 // Daytime work: now and then walk to the jobsite (A*) and stand at it for a while. Returns true while it steers.
 function ai(m, dt, out) {
   const s = m.jobsite, nav = BF.mobs && BF.mobs.nav;
-  if (!s || !nav || NO_JOB[m.profession] || m.profession === "builder") return false;
+  if (!s) return seekAI(m, dt, out, nav);
+  if (m.seek) m.seek = null;
+  if (!nav || NO_JOB[m.profession] || m.profession === "builder") return false;
   const J = m.job || (m.job = { mode: "off", t: rnd(5, 30) });
   const t = BF.sky ? BF.sky.time : 0.2;
   if (t < WORK_START || t > WORK_END) { if (J.mode !== "off") { J.mode = "off"; m.ai.route = null; } return false; }
@@ -390,7 +447,7 @@ function reset() { sites.clear(); claims.clear(); planIndex.clear(); spawned.cle
 
 BF.jobs = {
   JOBSITE, PROFESSION_OF, RADIUS, sites, claims,
-  profOfBlock, blockFor, claim, release, unclaimed, isEmployed, setProfession,
+  profOfBlock, blockFor, claim, hire, release, unclaimed, isEmployed, setProfession,
   planVillage, planFor, drawCount, onSpawn, tick, ai, importAll, reset,
 };
 })();
