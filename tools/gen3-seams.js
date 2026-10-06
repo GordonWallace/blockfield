@@ -50,7 +50,8 @@ function run(env, cur, ok, md5) {
           const sb = blk(lx, h, lz);
           samples++;
           if (sb === 0 && ok(solid(blk(lx, h - 1, lz)) || blk(lx, h - 1, lz) === 0, `${tag}: odd block under open top at ${x},${z}`)) airTops++;   // cave entrances may open the surface
-          else ok(sb === 0 || solid(sb) || sb === B.ice, `${tag}: no solid block at heightAt ${h} (${x},${z}) id ${sb}`);
+          else ok(sb === 0 || solid(sb) || sb === B.ice || (sb === B.water && W.villagesNear(x, z, 70).length > 0),   // a village well holds water at pad level
+             `${tag}: no solid block at heightAt ${h} (${x},${z}) id ${sb}`);
           if (wl > h) {
             const wet = id => id === B.water || id === B.ice || id === B.mangrove_log || id === B.mangrove_leaves;   // mangrove trunks replace water
             ok(wl < hi * 16 && wet(blk(lx, wl, lz)), `${tag}: water level ${wl} not water at ${x},${z} (id ${blk(lx, wl, lz)})`);
