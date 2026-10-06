@@ -248,7 +248,7 @@ const BLOCK_DEFS = [
   // ---- explorer pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Explorers")
   // survey table: the explorer villager's jobsite (not vanilla): a compass rose inlaid in a spruce table
   { name: "survey_table", jobsite: "explorer", tiles: { top: "survey_table_top", side: "survey_table_side", front: "survey_table_front", bottom: "spruce_planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#5a3f24" },
-  // tent (item `tent`): a 3 wide, 2 long A-frame, 6 block states x 4 facings, see tentDefs()
+  // tent (item `tent`): a 3 wide, 2 long, 2 high A-frame: 12 block states (6 floor, 6 above) x 4 facings, see tentDefs()
   ...tentDefs(),
   // ---- end explorer pack ----
 ];
@@ -390,18 +390,23 @@ function jobsiteDefs() {
   ];
 }
 
-// Tent parts (explorer pack): `tent: {f, r, l}` = facing f (foot -> head, like beds), row r (0 foot, 1 head), lateral cell l (0 left .. 2 right, seen from the foot
+// Tent parts (explorer pack): `tent: {f, r, l, up}` = facing f (foot -> head, like beds), row r (0 foot, 1 head), lateral cell l (0 left .. 2 right, seen from the foot
 // looking at the head). Placed from the cell the player targets: that cell is (r 0, l 1), the tent covers one cell to each side of it and one row further. Boxes
-// are drawn for facing south: z = length, x = across; a floor mat plus a stepped canvas shell that peaks over the middle cell. Not `bed`, so villagers' bed
+// are drawn for facing south: z = length, x = across; a floor mat plus a stepped canvas shell that peaks two blocks high over the middle cell (`up` parts are the layer above the floor). Not `bed`, so villagers' bed
 // checks never pick a tent up; js/tents.js and player.js treat `tent` as a bed that sleeps through monsters.
 function tentDefs() {
-  const out = [], H = uc => Math.max(5, Math.round(15 * (1 - Math.abs(uc - 24) / 24)));
-  for (let f = 0; f < 4; f++) for (let r = 0; r < 2; r++) for (let l = 0; l < 3; l++) {
-    const boxes = [[0, 0, 0, 16, 2, 16]];
-    let top = 2;
-    for (let s = 0; s < 4; s++) { const h = H(16 * l + 4 * s + 2); top = Math.max(top, h); boxes.push([4 * s, Math.max(2, h - 3), 0, 4 * s + 4, h, 16]); }
-    out.push({ name: "tent_" + r + "_" + l + "_" + "nesw"[f], tiles: { top: "tent_cloth", side: "tent_cloth", bottom: "tent_cloth" }, render: "model", model: "shape", opaque: false,
-      hardness: 0.3, drop: "tent", item: "tent", hidden: true, tent: { f, r, l }, boxes: boxes.map(b => rotBox(b, f)), box: rotBox([0, 0, 0, 16, top, 16], f), color: "#c9b27a" });
+  // Canvas height (1/16 blocks) of each of the 12 steps across the 3 cells: a stepped A-frame whose ridge is two blocks (32) high. Steps above 16 live in the
+  // upper layer, a second block state per cell stacked on the first.
+  const STEP_H = [6, 11, 16, 22, 27, 32, 32, 27, 22, 16, 11, 6], out = [];
+  for (let up = 0; up < 2; up++) for (let f = 0; f < 4; f++) for (let r = 0; r < 2; r++) for (let l = 0; l < 3; l++) {
+    const lo = up ? 16 : 0, boxes = up ? [] : [[0, 0, 0, 16, 2, 16]];
+    let top = up ? 0 : 2;
+    for (let s = 4 * l; s < 4 * l + 4; s++) {
+      const h = STEP_H[s], a = Math.max(Math.max(2, h - 6), lo) - lo, b = Math.min(h, lo + 16) - lo;
+      if (b > a) { boxes.push([4 * (s - 4 * l), a, 0, 4 * (s - 4 * l) + 4, b, 16]); top = Math.max(top, b); }
+    }
+    out.push({ name: "tent_" + (up ? "up_" : "") + r + "_" + l + "_" + "nesw"[f], tiles: { top: "tent_cloth", side: "tent_cloth", bottom: "tent_cloth" }, render: "model", model: "shape", opaque: false,
+      hardness: 0.3, drop: "tent", item: "tent", hidden: true, tent: { f, r, l, up: !!up }, boxes: boxes.map(b => rotBox(b, f)), box: rotBox([0, 0, 0, 16, top, 16], f), color: "#c9b27a" });
   }
   return out;
 }
@@ -574,7 +579,7 @@ BF.rotBox = rotBox;
 BF.dirIndex = (dx, dz) => Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0);
 BF.doorId = (f, upper, open) => B["oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
 BF.ladderId = f => B["ladder_" + "nesw"[f & 3]]; // ladder facing f (away from its wall)
-BF.tentId = (f, r, l) => B["tent_" + r + "_" + l + "_" + "nesw"[f & 3]];
+BF.tentId = (f, r, l, up) => B["tent_" + (up ? "up_" : "") + r + "_" + l + "_" + "nesw"[f & 3]];
 BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3]];
 // Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.

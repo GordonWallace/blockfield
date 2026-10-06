@@ -160,7 +160,7 @@ function hook() {
   BF.on("blockPlaced", (x, y, z, id) => {      // beds placed by the player (villagers log their own: js/builder.js)
     const b = BF.blocks[id];
     if (b && b.bed && !b.bed.head) bed(BF.vlog.actor, x, y, z);
-    else if (b && b.tent && b.tent.r === 0 && b.tent.l === 1) bed(BF.vlog.actor, x, y, z, "tent");   // its foot centre
+    else if (b && b.tent && b.tent.r === 0 && b.tent.l === 1 && !b.tent.up) bed(BF.vlog.actor, x, y, z, "tent");   // its foot centre
   });
 }
 
