@@ -345,7 +345,7 @@ function freeCell(R, D, x, z) {
 function scanStep(R, D, budget) {
   const w = W(), c = ids();
   if (!D.scan) {
-    if (performance.now() / 1000 < D.scanT) return;
+    if (BF.simNow() < D.scanT) return;
     const A = D.area;
     D.scan = { x: A.x0 - WATER_REACH, z: A.z0 - WATER_REACH, A, e: { x0: A.x0 - WATER_REACH, x1: A.x1 + WATER_REACH, z1: A.z1 + WATER_REACH }, cells: [], water: [] };
   }
@@ -371,7 +371,7 @@ function scanStep(R, D, budget) {
         D.wells = new Set();
         for (const [x, y, z] of wellCells(R)) if (w.isLoaded(x, z) && BF.FLUID[w.getBlock(x, y, z)] === 8) { D.wells.add(key3(x, y, z)); if (!S.water.some(p => p[0] === x && p[1] === y && p[2] === z)) S.water.push([x, y, z]); }
         D.cells = S.cells; D.water = S.water; D.waterSet = new Set(S.water.map(p => key3(...p)));
-        D.ready = true; D.scan = null; D.scanT = performance.now() / 1000 + RESCAN;
+        D.ready = true; D.scan = null; D.scanT = BF.simNow() + RESCAN;
         return;
       }
     }
@@ -416,7 +416,7 @@ function dropsFit(m, cropId) {
   return TR().inv.canFit(m.inv, adds, []);
 }
 function think(m, fs, R, D) {
-  const c = ids(), px = m.position.x, pz = m.position.z, now = performance.now() / 1000;
+  const c = ids(), px = m.position.x, pz = m.position.z, now = BF.simNow();
   const dist = (x, z) => Math.hypot(x + 0.5 - px, z + 0.5 - pz);
   const ok = k => !claimed(k, m) && !(fs.avoid[k] > now);
   // bake: 3 wheat -> 1 bread (hay bales once bread is plentiful)
@@ -585,7 +585,7 @@ const wantVillages = new Set();   // villages whose water ring is scanned for bu
 // For js/builder.js: the nearest water source (within ~30 blocks of the village, wells included) with a stand cell, or null (also while the village is still being scanned).
 function findWater(m, R) {
   const D = vdata(R);
-  D.want = performance.now() / 1000; wantVillages.add(R);
+  D.want = BF.simNow(); wantVillages.add(R);
   return D.ready ? findFill(m, D, null) : null;
 }
 
@@ -658,7 +658,7 @@ function pickPlot(m, R, D) {
 // The next job of the farm being made: level the 9x9 plot (dig the high cells, fill the low ones with dirt), then pour water in its middle.
 // Digging puts dirt in the pocket; missing dirt is fetched from outside the village. Tilling and edging then follow from think().
 function planTask(m, fs, R, D, ok) {
-  const c = ids(), w = W(), now = performance.now() / 1000;
+  const c = ids(), w = W(), now = BF.simNow();
   if (!fs.plan) {
     if (fs.planCd > now) return null;
     fs.plan = pickPlot(m, R, D);
@@ -730,7 +730,7 @@ function endTask(m, fs, success) {
   const t = fs.task;
   if (t) {
     if (claims.get(t.k) === m) claims.delete(t.k);
-    if (!success) fs.avoid[t.k] = performance.now() / 1000 + 30;
+    if (!success) fs.avoid[t.k] = BF.simNow() + 30;
     fs.last = t.kind;
     if (success) fs.counts[t.kind] = (fs.counts[t.kind] || 0) + 1;
   }
@@ -1064,7 +1064,7 @@ function tick(dt) {
       if (!scanned.has(m.village)) { scanned.add(m.village); scanStep(m.village, vdata(m.village), SCAN_COLS); }
     }
   }
-  const nowS = performance.now() / 1000;
+  const nowS = BF.simNow();
   for (const R of wantVillages) {                       // builders asking for water: keep their village's water ring scanned a while
     const D = R._life;
     if (!D || nowS - D.want > 120) { wantVillages.delete(R); continue; }

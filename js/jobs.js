@@ -390,7 +390,7 @@ const SEEK_MAX = 120;             // seconds before a walk is given up
 const SEEK_AVOID = 60;            // seconds a site that could not be reached (or was lost) is left alone
 const adjacentTo = (s, x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) === 1 && Math.abs(y - s.y) <= 1;
 function pickSite(m, sk) {
-  const own = ownTrade(m), mem = memValid(m) ? m.jobMem.prof : null, pref = m.jobPrefer || [], now = performance.now() / 1000;
+  const own = ownTrade(m), mem = memValid(m) ? m.jobMem.prof : null, pref = m.jobPrefer || [], now = BF.simNow();
   const list = unclaimed(m, RADIUS, m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
   let best = null, bd = Infinity;
   for (const s of list) {
@@ -402,7 +402,7 @@ function pickSite(m, sk) {
 function seekAI(m, dt, out, nav) {
   if (!nav || m.profession === "nitwit" || isChild(m) || m.tradingWith || m.sleeping || m.type !== "villager") return false;
   const sk = m.seek || (m.seek = { site: null, t: 0, cd: rnd(1, 5), avoid: {}, plan: 0 });
-  const ai = m.ai, now = performance.now() / 1000;
+  const ai = m.ai, now = BF.simNow();
   if (!sk.site) {
     if ((sk.cd -= dt) > 0) return false;
     sk.cd = rnd(3, 8);

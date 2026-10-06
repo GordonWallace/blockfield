@@ -447,8 +447,6 @@ world.update = function (px, pz, budgetMs = 8) {
   // edits first: remesh dirty chunks immediately so breaking/placing feels instant
   for (const k of world._dirty) { const c = world.chunks.get(k); if (c && c.mesh !== undefined) buildMesh(c); }
   world._dirty.clear();
-  fluidTick();
-  growTick();
 
   const t0 = performance.now();
   let gi = 0, mi = 0;
@@ -905,7 +903,7 @@ function desiredLevel(x, y, z, cur) {
 }
 
 function fluidTick() {
-  const now = performance.now() / 1000;
+  const now = BF.simNow();
   if (now - fluidLast < FLUID_TICK) return;
   fluidLast = now;
   if (!fluidQ.size) return;
@@ -941,7 +939,7 @@ const growing = new Set();
 let growLast = 0;
 const GROW_CHANCE_PER_S = 1 / 120;
 function growTick() {
-  const now = performance.now() / 1000;
+  const now = BF.simNow();
   if (now - growLast < 1) return;
   const dt = Math.min(5, now - growLast);
   growLast = now;
@@ -956,6 +954,8 @@ function growTick() {
   }
 }
 world.growingCount = () => growing.size;
+// Fluid spread and crop growth run on the simulation clock (BF.simNow), once per sim step, so fast-forward (js/timewarp.js) speeds them up too.
+world.tickSim = () => { fluidTick(); growTick(); };
 
 // ---------- raycast ----------
 // DDA voxel raycast. Returns {x,y,z,id,normal:[nx,ny,nz],dist} for the first block where

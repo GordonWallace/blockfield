@@ -30,7 +30,7 @@ function getAuto(k, zx, zz) {
   let d = maps.get(key);
   if (!d) {
     const g = geometry(k, zx, zz), n = g.N * g.N;
-    d = Object.assign({ key, k, zx, zz, hgt: new Int16Array(n), bio: new Uint8Array(n).fill(255), wl: new Int16Array(n), pass: 0, idx: 0, cells: 0, done: false, ver: 0, used: 0, cv: null, cvVer: -1, seed: BF.state && BF.state.seed }, g);
+    d = Object.assign({ key, k, zx, zz, hgt: new Int16Array(n), bio: new Uint8Array(n).fill(255), wl: new Int16Array(n), tn: new Uint8Array(n * 3), pass: 0, idx: 0, cells: 0, done: false, ver: 0, used: 0, cv: null, cvVer: -1, seed: BF.state && BF.state.seed }, g);
     maps.set(key, d);
   }
   d.used = performance.now();
@@ -40,7 +40,7 @@ const dataOfItem = it => (it && it.auto ? getAuto(it.auto.k, it.auto.zx, it.auto
 
 // Samples the next cells of the progressive fill until `deadline` (performance.now() ms). Returns true when something changed.
 function step(d, deadline) {
-  const W = BF.worldgen, N = d.N, R = BF.rivers;
+  const W = BF.worldgen, N = d.N, R = BF.rivers, tintOf = W.tintAt;
   let changed = false, n = 0;
   if (R && R.setEnabled && d.scale > RIVER_MAX_SCALE) R.setEnabled(false);   // the river network is traced per 768-block cell: far too slow and big for coarse maps
   try {
@@ -57,8 +57,10 @@ function step(d, deadline) {
     const x = Math.floor(d.x0 + (i + 0.5) * d.scale), z = Math.floor(d.z0 + (j + 0.5) * d.scale);
     const b = W.biomeAt(x, z), wl = W.waterLevelAt(x, z);
     const h = Math.round(b.height), id = b.id, w = Math.round(wl);
+    let tr = 100, tg = 100, tb = 100;                              // grass tint x100 (only grass-topped biomes need it)
+    if (TINTED[id] && tintOf) { const t = tintOf(x, z).grass; tr = Math.min(255, Math.round(t[0] * 100)); tg = Math.min(255, Math.round(t[1] * 100)); tb = Math.min(255, Math.round(t[2] * 100)); }
     for (let y = j; y < Math.min(N, j + s); y++) for (let xx = i; xx < Math.min(N, i + s); xx++) {
-      const o = y * N + xx; d.hgt[o] = h; d.bio[o] = id; d.wl[o] = w;
+      const o = y * N + xx; d.hgt[o] = h; d.bio[o] = id; d.wl[o] = w; d.tn[o * 3] = tr; d.tn[o * 3 + 1] = tg; d.tn[o * 3 + 2] = tb;
     }
     changed = true; d.cells++;
     if ((++n & 15) === 0 && performance.now() > deadline) break;
@@ -72,6 +74,30 @@ function finish(d) { while (!d.done) step(d, Infinity); return d; }
 
 // ---------------------------------------------------------------- colours
 const COL = { 0: [40, 70, 160], 1: [230, 215, 150], 2: [235, 235, 220], 3: [130, 130, 130], 4: [60, 120, 220], 5: [130, 190, 80], 6: [50, 130, 40], 7: [200, 120, 200], 8: [110, 170, 70], 9: [30, 80, 30], 10: [80, 110, 60], 11: [90, 90, 50], 12: [235, 210, 130], 13: [200, 110, 60], 14: [180, 170, 70], 15: [100, 170, 50], 16: [20, 150, 40], 17: [40, 110, 80], 18: [30, 90, 70], 19: [235, 240, 250], 20: [170, 220, 255], 21: [160, 200, 200], 22: [150, 210, 120], 23: [250, 170, 200], 24: [150, 150, 150], 25: [220, 230, 240], 26: [255, 255, 255], 27: [170, 170, 170], 28: [170, 100, 170] };
+// Ground colours: the colour of the block you would actually see from above, from the block colours in blocks.js (grass is multiplied by the
+// world's grass tint, so it matches the green you see in game). The biome table above is the alternative, switched with the Colours button.
+const GRASS = [106, 168, 79], SAND = [219, 211, 160], SNOW = [244, 248, 251], SNOWG = [240, 244, 248], STONE = [127, 127, 127], GRAVEL = [131, 126, 124],
+  RSAND = [184, 98, 42], MYC = [111, 98, 101], MUD = [60, 54, 50], PODZOL = [90, 63, 28];
+const TINTED = new Uint8Array(29);
+for (const id of [5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24]) TINTED[id] = 1;
+const GROUND = { 1: SAND, 2: SAND, 3: GRAVEL, 11: MUD, 12: SAND, 13: RSAND, 19: SNOWG, 20: SNOW, 21: SNOWG, 25: SNOWG, 26: STONE, 27: STONE, 28: MYC };
+// Colour of the surface for a biome id at height h, written to `out` (before the tint).
+function groundOf(id, h, out) {
+  let c = GROUND[id] || GRASS;
+  if (id === 24) c = h > 100 ? SNOW : h > 90 ? STONE : GRASS;
+  else if (id === 25 && h > 74) c = SNOW;
+  else if (id === 26 && h > 92) c = SNOW;
+  out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
+  if (id === 18) { out[0] = out[0] * 0.6 + PODZOL[0] * 0.4; out[1] = out[1] * 0.6 + PODZOL[1] * 0.4; out[2] = out[2] * 0.6 + PODZOL[2] * 0.4; }   // coarse dirt and podzol patches
+  return TINTED[id] && c === GRASS;
+}
+let mode = 0;             // 0 = ground colours, 1 = biome colours
+try { if (typeof localStorage !== "undefined" && localStorage.getItem("bf_mapcolours") === "biome") mode = 1; } catch (e) {}
+function setMode(m) {
+  mode = m ? 1 : 0;
+  try { localStorage.setItem("bf_mapcolours", mode ? "biome" : "ground"); } catch (e) {}
+}
+const gtmp = [0, 0, 0];
 let scratch = null;       // one shared ImageData (4 MB at 1024 px) for all maps
 function paint(d) {
   const N = d.N;
@@ -88,20 +114,23 @@ function paint(d) {
       r = 70 - dep * 48; g = 130 - dep * 70; b = 230 - dep * 90;
       if (id === 0) { r = 40 - dep * 25 + 10; g = 80 - dep * 40 + 10; b = 170 - dep * 70 + 20; }
     } else {
-      const c = COL[id] || [255, 0, 255];
+      let c, tinted = false;
+      if (mode) c = COL[id] || [255, 0, 255];
+      else { tinted = groundOf(id, h, gtmp); c = gtmp; }
       const hn = i + 1 < N && j + 1 < N && d.bio[p + N + 1] !== 255 ? d.hgt[p + N + 1] : h;
       const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / (150 * tall), 0, 1) + sh;
       r = c[0] * k; g = c[1] * k; b = c[2] * k;
+      if (tinted) { const t = p * 3; r *= d.tn[t] / 100; g *= d.tn[t + 1] / 100; b *= d.tn[t + 2] / 100; }
     }
     o[q] = clamp(r, 0, 255); o[q + 1] = clamp(g, 0, 255); o[q + 2] = clamp(b, 0, 255); o[q + 3] = 255;
   }
   d.cv.getContext("2d").putImageData(scratch, 0, 0);
-  d.cvVer = d.ver;
+  d.cvVer = d.ver; d.cvMode = mode;
   return d.cv;
 }
 function canvasOf(d) {
   const now = performance.now();
-  if (d.cvVer !== d.ver && (!d.cv || d.done || now - d.paintAt > 400)) { paint(d); d.paintAt = now; }
+  if ((d.cvVer !== d.ver || d.cvMode !== mode) && (!d.cv || d.done || now - d.paintAt > 400)) { paint(d); d.paintAt = now; }
   return d.cv;
 }
 
@@ -122,7 +151,7 @@ function held(it) {
   if (!d || !BF.maps) return null;
   const src = canvasOf(d) || (heldDraw.blank || (heldDraw.blank = document.createElement("canvas")));
   const P = BF.player, p = P.position;
-  return BF.maps.heldCanvas(d, d.ver + "|" + (d.cvVer), src, (p.x - d.x0) / d.scale * 128 / d.N, (p.z - d.z0) / d.scale * 128 / d.N);
+  return BF.maps.heldCanvas(d, d.ver + "|" + (d.cvVer) + "|" + mode, src, (p.x - d.x0) / d.scale * 128 / d.N, (p.z - d.z0) / d.scale * 128 / d.N);
 }
 
 // ---------------------------------------------------------------- item icons
@@ -145,7 +174,7 @@ function mapIcon(it) {
   if (!it || typeof document === "undefined") return null;
   let src, ver;
   try {
-    if (it.auto) { const d = dataOfItem(it); src = canvasOf(d); ver = "a" + d.cvVer; }
+    if (it.auto) { const d = dataOfItem(it); src = canvasOf(d); ver = "a" + d.cvVer + "m" + mode; }
     else if (it.map && BF.maps && BF.maps.snapshot) { const m = BF.maps.snapshot(it); src = m.src; ver = "n" + m.ver; }
     else return null;
   } catch (e) { console.error(e); return null; }
@@ -196,9 +225,11 @@ function mount(inner) {
 function buildView() {
   if (view.root) return;
   css();
-  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="tp" hidden disabled>Teleport</button><button type="button" data-a="close">Close</button></div>`);
+  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="col" hidden>Colours: ground</button><button type="button" data-a="tp" hidden disabled>Teleport</button><button type="button" data-a="close">Close</button></div>`);
   view.cv = r.querySelector("canvas"); view.g = view.cv.getContext("2d"); view.title = r.querySelector(".bfm-title"); view.info = r.querySelector(".bfm-info");
   r.querySelector('[data-a="close"]').addEventListener("click", closeView);
+  view.col = r.querySelector('[data-a="col"]');
+  view.col.addEventListener("click", () => { setMode(mode ? 0 : 1); view.sig = ""; drawView(); });
   view.tp = r.querySelector('[data-a="tp"]');
   view.tp.addEventListener("click", teleportToSelection);
   view.cv.addEventListener("click", e => {          // select a point (any map; the Teleport button only exists in creative mode)
@@ -218,7 +249,7 @@ function buildView() {
 function describe(it) {
   if (it.auto) {
     const d = dataOfItem(it);
-    return { d, auto: true, src: canvasOf(d), side: d.side, x0: d.x0, z0: d.z0, N: d.N, scale: d.scale, ver: d.ver, label: d.side + " x " + d.side + " blocks" };
+    return { d, auto: true, src: canvasOf(d), side: d.side, x0: d.x0, z0: d.z0, N: d.N, scale: d.scale, ver: d.ver + "m" + mode, label: d.side + " x " + d.side + " blocks" };
   }
   const m = BF.maps.snapshot(it);
   return Object.assign({ auto: false, label: m.side + " x " + m.side + " blocks" }, m);
@@ -237,6 +268,7 @@ function openView(it) {
   view.title.textContent = (it.auto ? "Auto map - " : "Map - ") + view.d.label;
   view.open = true;                       // before releasing the lock: player.js must not pause or re-lock
   view.sig = ""; view.sel = null;
+  view.col.hidden = !view.d.auto;
   view.tp.hidden = !(P && P.gameMode === "creative");   // like the creative-only auto map itself; /tp stays the survival route
   view.tp.disabled = true;
   try { if (P && P.uiOpen) P.uiOpen(); } catch (e) { console.error(e); }
@@ -258,6 +290,7 @@ function drawView(force) {
   const sig = m.ver + "|" + (P.x | 0) + "|" + (P.z | 0) + "|" + BF.player.yaw.toFixed(1) + "|" + (view.mouse ? view.mouse.x.toFixed(3) + view.mouse.y.toFixed(3) : "-");
   if (!force && sig === view.sig) return;
   view.sig = sig; view.d = m;
+  view.col.textContent = "Colours: " + (mode ? "biome" : "ground");
   const g = view.g;
   g.imageSmoothingEnabled = !!m.auto;
   g.fillStyle = "#d9c897"; g.fillRect(0, 0, S, S);
@@ -412,6 +445,7 @@ function use(sel, it) {
 }
 
 BF.mapview = {
+  setColourMode: setMode, colourMode: () => (mode ? "biome" : "ground"),
   use, held, open: openView, close: () => { closeView(); closePrompt(); }, isOpen: () => view.open || prompt.open,
   tick() { tick(); if (view.open) drawView(); if (view.pending) settle(); refreshIcons(performance.now()); },
   teleportToSelection, surfaceAt, getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
