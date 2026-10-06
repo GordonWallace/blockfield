@@ -26,4 +26,4 @@ then visit http://localhost:8000. Worlds save in the browser (IndexedDB).
 
 ## Credits
 
-Textures are from the Faithful 32x pack, https://faithfulpack.net. See `FAITHFUL-LICENSE.txt`. Everything else is project code.
+Textures are from the Faithful 32x pack, https://faithfulpack.net. See `FAITHFUL-LICENSE.txt`. The band saw tiles are the artwork of the villager-planter mod (GordonWallace/villager-planter). Everything else is project code.

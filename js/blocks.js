@@ -62,11 +62,11 @@ const BLOCK_DEFS = [
   { name: "ice", tiles: "ice", hardness: 0.5, tool: "pickaxe", render: "cutout", opaque: false, drop: null, color: "#a5c8f5" },
   { name: "water", tiles: "water", solid: false, opaque: false, render: "liquid", hardness: Infinity, drop: null, color: "#3f76e4" },
   { name: "oak_log", tiles: { top: "oak_log_top", side: "oak_log", bottom: "oak_log_top" }, hardness: 2, tool: "axe", color: "#6b5233" },
-  { name: "oak_leaves", tiles: "oak_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#3d7a2a" },
+  { name: "oak_leaves", tiles: "oak_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["oak_sapling", 1, 1, 0.05], ["stick", 1, 2, 0.02], ["apple", 1, 1, 0.005]], color: "#3d7a2a" },
   { name: "birch_log", tiles: { top: "birch_log_top", side: "birch_log", bottom: "birch_log_top" }, hardness: 2, tool: "axe", color: "#d8d3c5" },
-  { name: "birch_leaves", tiles: "birch_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#5c8a3c" },
+  { name: "birch_leaves", tiles: "birch_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["birch_sapling", 1, 1, 0.05], ["stick", 1, 2, 0.02]], color: "#5c8a3c" },
   { name: "spruce_log", tiles: { top: "spruce_log_top", side: "spruce_log", bottom: "spruce_log_top" }, hardness: 2, tool: "axe", color: "#3b2a18" },
-  { name: "spruce_leaves", tiles: "spruce_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#2f4f32" },
+  { name: "spruce_leaves", tiles: "spruce_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["spruce_sapling", 1, 1, 0.05], ["stick", 1, 2, 0.02]], color: "#2f4f32" },
   { name: "planks", tiles: "planks", hardness: 2, tool: "axe", color: "#a2834f" },
   { name: "cactus", tiles: { top: "cactus_top", side: "cactus_side", bottom: "cactus_bottom" }, render: "model", model: "cactus", opaque: false, hardness: 0.4, color: "#4f8a2b" },
   { name: "bedrock", tiles: "bedrock", hardness: Infinity, drop: null, color: "#333" },
@@ -81,7 +81,7 @@ const BLOCK_DEFS = [
   { name: "wool", tiles: "wool", hardness: 0.8, color: "#eaeaea" },
   { name: "mossy_cobblestone", tiles: "mossy_cobblestone", hardness: 2, tool: "pickaxe", needsTool: true, color: "#61724a" },
   { name: "jungle_log", tiles: { top: "jungle_log_top", side: "jungle_log", bottom: "jungle_log_top" }, hardness: 2, tool: "axe", color: "#594420" },
-  { name: "jungle_leaves", tiles: "jungle_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#2f8a1a" },
+  { name: "jungle_leaves", tiles: "jungle_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["jungle_sapling", 1, 1, 0.025], ["stick", 1, 2, 0.02]], color: "#2f8a1a" },
   { name: "pumpkin", tiles: { top: "pumpkin_top", side: "pumpkin_side", bottom: "pumpkin_top" }, hardness: 1, tool: "axe", color: "#c87a1a" },
   { name: "furnace", tiles: { top: "furnace_top", side: "furnace_side", front: "furnace_front", bottom: "furnace_top" }, hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#5e5e5e" },
   // village blocks
@@ -122,13 +122,13 @@ const BLOCK_DEFS = [
   { name: "red_mushroom_block", tiles: "red_mushroom_block", hardness: 0.2, tool: "axe", drop: "red_mushroom", color: "#b82a24" },
   { name: "brown_mushroom_block", tiles: "brown_mushroom_block", hardness: 0.2, tool: "axe", drop: "brown_mushroom", color: "#957052" },
   { name: "dark_oak_log", tiles: { top: "dark_oak_log_top", side: "dark_oak_log", bottom: "dark_oak_log_top" }, hardness: 2, tool: "axe", color: "#3c2a16" },
-  { name: "dark_oak_leaves", tiles: "dark_oak_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#2a5a1a" },
+  { name: "dark_oak_leaves", tiles: "dark_oak_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["dark_oak_sapling", 1, 1, 0.05], ["stick", 1, 2, 0.02], ["apple", 1, 1, 0.005]], color: "#2a5a1a" },
   { name: "cherry_log", tiles: { top: "cherry_log_top", side: "cherry_log", bottom: "cherry_log_top" }, hardness: 2, tool: "axe", color: "#3a2228" },
-  { name: "cherry_leaves", tiles: "cherry_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#f0a8c8" },
+  { name: "cherry_leaves", tiles: "cherry_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["cherry_sapling", 1, 1, 0.05], ["stick", 1, 2, 0.02]], color: "#f0a8c8" },
   { name: "acacia_log", tiles: { top: "acacia_log_top", side: "acacia_log", bottom: "acacia_log_top" }, hardness: 2, tool: "axe", color: "#676157" },
-  { name: "acacia_leaves", tiles: "acacia_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#5a8a22" },
+  { name: "acacia_leaves", tiles: "acacia_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["acacia_sapling", 1, 1, 0.05], ["stick", 1, 2, 0.02]], color: "#5a8a22" },
   { name: "mangrove_log", tiles: { top: "mangrove_log_top", side: "mangrove_log", bottom: "mangrove_log_top" }, hardness: 2, tool: "axe", color: "#6a2a24" },
-  { name: "mangrove_leaves", tiles: "mangrove_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#4a7a1a" },
+  { name: "mangrove_leaves", tiles: "mangrove_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["stick", 1, 2, 0.02]], color: "#4a7a1a" },
   { name: "mud", tiles: "mud", hardness: 0.5, tool: "shovel", color: "#3c3632" },
   { name: "packed_ice", tiles: "packed_ice", hardness: 0.5, tool: "pickaxe", drop: null, color: "#8db4f0" },
   { name: "calcite", tiles: "calcite", hardness: 0.75, tool: "pickaxe", needsTool: true, color: "#e0e0dc" },
@@ -251,6 +251,12 @@ const BLOCK_DEFS = [
   // tent (item `tent`): a 3 wide, 2 long, 2 high A-frame: 12 block states (6 floor, 6 above) x 4 facings, see tentDefs()
   ...tentDefs(),
   // ---- end explorer pack ----
+  // ---- forester pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Foresters")
+  // band saw: the forester villager's jobsite (not vanilla; artwork from the villager-planter mod). Saplings: planted by foresters and players, grow into trees (js/forester.js)
+  { name: "band_saw", jobsite: "forester", tiles: { top: "band_saw_top", side: "band_saw_side", front: "band_saw_front", bottom: "band_saw_bottom" }, hardness: 2, tool: "axe", creativeTab: "functional", color: "#7a7a82" },
+  ...["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"].map(sp => ({ name: sp + "_sapling", tiles: sp + "_sapling", render: "cross", solid: false, opaque: false, hardness: 0, sapling: sp, creativeTab: "natural",
+    color: { oak: "#3a7024", birch: "#5c9040", spruce: "#294f30", jungle: "#2a8a1a", acacia: "#5c9226", dark_oak: "#2e5a22", cherry: "#e898b8" }[sp] })),
+  // ---- end forester pack ----
 ];
 
 // ---- slabs/stairs pack runtime: shape placeholders get their base block's tiles / hardness / tool / colour ----

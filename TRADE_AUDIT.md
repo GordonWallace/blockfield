@@ -411,6 +411,10 @@ No fixed offers (`TRADES.explorer` is empty, `PRODUCE.explorer` empty); starting
 Only while it holds a finished map; a map it gave up on before 97% explored is priced by its coverage (at least 15%). The fill radius shrinks with map size (js/maps.js), so sizes 3-5 are rarely finished: the explorer buys small sizes far more often (weights 16:8:4:2:1) and settles for a partial map after 1500 s of exploring. The explorer buys the blank map from a cartographer at the cartographer's prices (4, 8, 16, 32, 64 for sizes 1-5, below), so a sale
 leaves it 3, 8, 20, 48 and 112 emeralds ahead. Its purse is `EXPLORER_EM_CAP` 100 with +6 a day (the usual 12 / +2 could never pay for a size 3 map). The map offers are not in the old-trade tables below.
 
+### forester
+
+One offer, from the villager-planter mod: the player sells 1 oak sapling and gets 1 emerald (`1 oak_sapling > 1 emerald`). This is **not** inside the usual 75-92% band: a sapling is worth about 0.1 emerald by effort (`VALUE`-style), so the offer pays about 10x. It stays as in the mod; the villager's purse is the limit (6-24 emeralds at the start, +2 a day up to 12, and the offer reads "Out of emeralds" when it is empty), so the most a player can pull out in a day is a couple of emeralds. If this proves too generous, make it `8 oak_sapling > 1 emerald`. No wares: `PRODUCE.forester` is empty, the logs, sticks and apples it picks up are its own.
+
 ### builder
 
 New profession (see CONTRACT.md "Builder villagers"). The builder is the one villager that mostly *buys* from the player: it needs building materials, keeps them in its inventory and places them block by block. Every offer is "sell to villager" (rho 0.79 to 0.91) except the two goods it

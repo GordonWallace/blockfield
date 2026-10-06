@@ -1216,6 +1216,7 @@ function secondaryDown() {
   let placeId = sel.id;
   if (BF.light && BF.light.isTorchItem(placeId)) { placeId = BF.light.torchPlace(x, y, z, into ? [0, 1, 0] : target.normal); if (!placeId) return false; } // standing or wall torch
   if (BF.RENDER[sel.id] === 4 && !BF.SOLID[BF.world.getBlock(x, y - 1, z)]) return false; // plants need ground
+  if (BF.blocks[sel.id] && BF.blocks[sel.id].sapling && BF.forester && !BF.forester.canSurvive(x, y, z)) return false;   // saplings need soil (js/forester.js)
   if (BF.SOLID[sel.id] && cellBlockedByEntity(x, y, z)) return false;
   if (!BF.world.setBlock(x, y, z, placeId)) return false;
   try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }

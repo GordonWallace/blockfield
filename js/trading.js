@@ -142,6 +142,9 @@ const TRADES = {
   nitwit: [[], [], [], [], []],
   unemployed: [[], [], [], [], []],   // no jobsite yet (js/jobs.js): no offers
   explorer: [[], [], [], [], []],     // no fixed offers: it sells the maps it has filled, built on the fly (js/explorer.js syncOffers)
+  // The forester buys oak saplings from the player at 1 emerald each, as in the villager-planter mod. It only pays while it holds emeralds
+  // ("Out of emeralds" otherwise), which is what the mod's trade stock does too. Nothing else to sell: its logs and apples are its own.
+  forester: [["1 oak_sapling > 1 emerald"], [], [], [], []],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -164,6 +167,7 @@ const PRODUCE = {
   unemployed: [],
   builder: [],
   explorer: [],
+  forester: [],
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
