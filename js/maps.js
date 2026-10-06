@@ -236,6 +236,11 @@ function drawCompass() {
 }
 
 const api = {
+  // Non-player use (e.g. explorer villagers): item id of the filled map a blank map of `size` becomes at world position (x, z).
+  filledIdAt(size, x, z) { return BF.resolveItem(nameOf(size, zoneOf(x), zoneOf(z))); },
+  // Fraction of a map's pixels that are explored (0..1); `filled(it)` is true once all of them are.
+  progress(it) { const d = dataOfItem(it); if (!d) return 0; let n = 0; for (let k = 0; k < d.px.length; k++) if (d.px[k]) n++; return n / d.px.length; },
+  filled(it) { return api.progress(it) >= 1; },
   PX, ZONE, MAX_SIZE, side, scale, zoneOf, nameOf, centre, originX, getData, dataOfItem, explore, upgradeData, use, craftHook, sample, column,
   // bounds of a map in world blocks: {x0, z0, x1, z1}
   bounds(s, zx, zz) { const o = originX(s, zx), p = originX(s, zz); return { x0: o, z0: p, x1: o + side(s), z1: p + side(s) }; },
