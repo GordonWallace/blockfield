@@ -971,6 +971,7 @@ const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c 
 // Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z).
 function placeMulti(kind, x, y, z) {
   const W = BF.world, f = lookFacing();
+  if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
   if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0)]];
@@ -1058,13 +1059,18 @@ function sleepFade() {
   setTimeout(() => { fadeEl.style.opacity = "0"; }, 1300);
 }
 // Right-click on a bed: at night with no monsters near, sleep until morning and set the respawn point here.
+// A tent (js/tents.js) works the same, but monsters cannot see anyone asleep in it, so nearby monsters do not stop you.
 function trySleep(t) {
   if (!BF.sky || !BF.sky.isNight()) { actionBar("You can only sleep at night"); return; }
-  const near = ((BF.mobs && BF.mobs.list) || []).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
+  const b = BF.blocks[t.id], tent = !!b.tent;
+  const near = !tent && ((BF.mobs && BF.mobs.list) || []).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
   if (near) { actionBar("You may not rest now, there are monsters nearby"); return; }
-  const b = BF.blocks[t.id], foot = b.bed.head ? BF.world.partnerOf(t.x, t.y, t.z, t.id) : [t.x, t.y, t.z];
+  let foot, sy = 0.5625;
+  if (tent) { const o = BF.tents.originOf(t.x, t.y, t.z, t.id); foot = [o.x, o.y, o.z]; sy = 0.125; }
+  else foot = b.bed.head ? BF.world.partnerOf(t.x, t.y, t.z, t.id) : [t.x, t.y, t.z];
   const sp = BF.spawnPoint || {};
-  BF.spawnPoint = { x: foot[0] + 0.5, y: foot[1] + 0.5625, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp };
+  BF.spawnPoint = { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp };
+  if (tent) { P.hiddenInTent = true; setTimeout(() => { P.hiddenInTent = false; }, 2200); }   // monsters lose sight of the sleeper (mobs.js hostileAI)
   sleepFade();
   setTimeout(() => { BF.sky.setTime(0.01); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
@@ -1073,7 +1079,7 @@ function respawnPoint() {
   let sp = BF.spawnPoint || { x: 8.5, z: 8.5 };
   if (sp.bed) {
     const [bx, by, bz] = sp.bed, b = BF.blocks[BF.world.getBlock(bx, by, bz)];
-    if (!BF.world.isLoaded(bx, bz) || (b && b.bed)) return [sp.x, sp.y + 0.01, sp.z];
+    if (!BF.world.isLoaded(bx, bz) || (b && (b.bed || b.tent))) return [sp.x, sp.y + 0.01, sp.z];
     setTimeout(() => actionBar("You have no home bed"), 300);
     BF.spawnPoint = sp = sp.world && sp.world.x != null ? sp.world : { x: 8.5, z: 8.5 };
   }
@@ -1099,7 +1105,7 @@ function secondaryDown() {
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
   if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
-  if (tb && tb.bed && useBlk) { trySleep(target); mouseR = false; return true; }
+  if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (target && target.id === BF.B.furnace && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
   }
@@ -1474,7 +1480,7 @@ P.init = function () {
   updateModeUI();
   emit("gameModeChanged", gameMode);
   // breaking either half of a door or bed removes the other half (the broken half dropped the item)
-  if (BF.on) BF.on("blockBroken", (x, y, z, id) => { if (BF.blocks[id] && (BF.blocks[id].door || BF.blocks[id].bed)) BF.world.removePartner(x, y, z, id); });
+  if (BF.on) BF.on("blockBroken", (x, y, z, id) => { if (BF.blocks[id] && (BF.blocks[id].door || BF.blocks[id].bed)) BF.world.removePartner(x, y, z, id); else if (BF.blocks[id] && BF.blocks[id].tent) BF.tents.remove(x, y, z, id); });
 };
 
 P.spawn = function (x, y, z) {

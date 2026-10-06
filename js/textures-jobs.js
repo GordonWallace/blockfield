@@ -330,6 +330,25 @@ T.survey_table_front = p => {
   rect(p, 17, 22, 27, 24, (x) => ramp(IRON, 0.3 + (x % 3) * 0.2), 0.95, 0.03); rect(p, 17, 21, 19, 25, hex("#b8923a"), 1, 0.03);   // spyglass
   p.relief(1.0);
 };
+// ---------- tent (explorer): canvas cloth, 8-pixel panels with darker seams and a rust stripe along every other panel; item sprite is a small A-frame ----------
+const CANVAS = pal(["#a8935c", "#b8a46c", "#c6b27a", "#d2bf88", "#ddcb97"]);
+T.tent_cloth = p => {
+  p.fill((x, y) => {
+    const panel = Math.floor(x / 8), seam = x % 8 === 7, weave = ((x + y) % 2 ? 0.04 : -0.03) + (p.noise(x, y, 8, 3, 260) - 0.5) * 0.3;
+    let c = seam ? mul(ramp(CANVAS, 0.15), 0.8) : ramp(CANVAS, 0.55 + weave + (panel % 2 ? 0.08 : 0));
+    if (!seam && panel % 2 === 1 && (y % 16 < 3)) c = hex("#9a4a2a");
+    p.set(x, y, jit(p, c, 0.03)); p.setH(x, y, seam ? 0 : 0.6 + weave);
+  });
+  p.relief(0.9);
+};
+const { SPRITES, put } = K;
+if (SPRITES) SPRITES.tent = (G, m) => {
+  const cloth = hex("#d2bf88"), lo = hex("#a8935c"), pole = hex("#5a3f24"), door = hex("#3a2a14");
+  for (let y = 3; y <= 12; y++) { const w = Math.round((y - 3) * 0.75); for (let x = 8 - w - 1; x <= 8 + w; x++) put(G, x, y, x <= 7 ? cloth : lo); }
+  for (let y = 8; y <= 12; y++) { const w = Math.round((y - 8) * 0.5) + 1; for (let x = 8 - w; x < 8 + w; x++) put(G, x, y, door); }
+  put(G, 7, 2, pole); put(G, 8, 2, pole); put(G, 7, 1, hex("#c83a3a")); put(G, 8, 1, hex("#c83a3a"));
+  for (let x = 1; x <= 14; x++) put(G, x, 13, pole);
+};
 ICON_T.grindstone = p => {
   clearTile(p);
   rect(p, 4, 14, 7, 30, (x) => ramp(DARK_OAK, x === 4 ? 0.8 : 0.4), 0.8, 0.05);

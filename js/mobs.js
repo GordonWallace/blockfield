@@ -762,7 +762,7 @@ function wanderAI(m, dt, out) {
 
 function hostileAI(m, dt, out) {
   const ai = m.ai, T = m.def;
-  const p = playerAlive() && !creative() ? player() : null;
+  const p = playerAlive() && !creative() && !(BF.player && BF.player.hiddenInTent) ? player() : null;   // asleep in a tent: unseen
   ai.aiming = false;
   if (!p) { ai.target = false; ai.fuse = Math.max(0, ai.fuse - dt); if (!zombieHuntVillagers(m, dt, out)) wanderAI(m, dt, out); return; }
   const eye = p.eyePos ? p.eyePos() : new THREE.Vector3(p.position.x, p.position.y + 1.6, p.position.z);
@@ -856,7 +856,7 @@ function zombieHuntVillagers(m, dt, out) {
   if (m.type !== "zombie") return false;
   const ai = m.ai;
   ai.vScanT = (ai.vScanT || 0) - dt;
-  if (ai.vScanT <= 0) { ai.vScanT = 0.6; ai.vTarget = nearestMob(m, 16, o => o.type === "villager"); }
+  if (ai.vScanT <= 0) { ai.vScanT = 0.6; ai.vTarget = nearestMob(m, 16, o => o.type === "villager" && !(BF.tents && BF.tents.hidden(o))); }
   if (ai.vTarget && chaseAndHit(m, ai.vTarget, dt, out, 3, 1.0)) return true;
   ai.vTarget = null;
   return false;
@@ -892,7 +892,11 @@ function zombieBreakDoor(m, dt, out) {
 // ---------- villager nights: walk home along a grid path, open doors on the way, sleep in their bed ----------
 const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.52 && t < 0.985; };
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
-function bedOK(bed) { const b = blockAt(bed.x, bed.y, bed.z).bed; return !!(b && !b.head && b.f === bed.f); }
+function bedOK(bed) {
+  const k = blockAt(bed.x, bed.y, bed.z);
+  if (bed.tent) return !!(k.tent && k.tent.r === 0 && k.tent.l === 1 && k.tent.f === bed.f);   // an explorer's tent: its foot centre cell (js/tents.js)
+  const b = k.bed; return !!(b && !b.head && b.f === bed.f);
+}
 // A cell a villager can stand in: solid floor (not a bed/door/fence top), feet and head free or a door it can open.
 function walkCell(x, y, z) {
   const W = BF.world;
@@ -1016,7 +1020,7 @@ function wake(m) {
   if (at) m.position.set(at[0] + 0.5, at[1], at[2] + 0.5);
   else if (b) { const s = findStand(b.x, b.y, b.z, m.def); if (s) m.position.set(s[0], s[1], s[2]); }
   ai.route = null; ai.night = null;
-  ai.leaving = !bedtime();
+  ai.leaving = !bedtime() && !(b && b.tent);   // out in the field after a night in a tent: nothing to walk out of
 }
 // Night: head for bed and sleep; without a usable bed stand still indoors or by the village bell.
 function nightAI(m, dt, out) {

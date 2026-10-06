@@ -26,6 +26,8 @@ const BF = (window.BF = window.BF || {});
   addShaped(I.cartography_table, 1, ["PP", "WW", "WW"], { P: I.paper, W: PLANKS }, "2 Paper over 4 Planks → Cartography Table");
   addShaped(I.drafting_table, 1, ["PD", "WW", "WW"], { P: I.paper, D: I.blue_dye, W: PLANKS }, "Paper + Blue Dye over 4 Planks → Drafting Table");
   if (I.survey_table !== undefined && I.compass !== undefined) addShaped(I.survey_table, 1, ["PC", "WW", "WW"], { P: I.paper, C: I.compass, W: PLANKS }, "Paper + Compass over 4 Planks → Survey Table (explorer)");
+  const WOOL = ids(names.filter(n => n === "wool" || /_wool$/.test(n)));
+  if (I.tent !== undefined) addShaped(I.tent, 1, ["WWW", "WWW", "S S"], { W: WOOL, S: I.stick }, "6 Wool (any colour) over 2 Sticks → Tent");
   fuel(ids(["composter", "lectern", "barrel", "loom", "fletching_table", "smithing_table", "cartography_table", "drafting_table", "survey_table"]), 15);
 });
 })();

@@ -263,6 +263,55 @@ function shopAI(m, dt, out) {
   return true;
 }
 
+// ---------------------------------------------------------------- camping
+// Out mapping when night is about to fall and the walk home is too long: pitch the tent it carries and sleep there (mobs.js nightAI treats the
+// tent's foot centre as its bed; monsters cannot see anyone asleep in a tent). In the morning it packs the tent up again.
+const BEDTIME = 0.52, DUSK = 0.45, WALK_SLACK = 0.8, DAY_S = 600;
+const isNight = t => t > BEDTIME && t < 0.985;
+const tentItem = () => BF.I.tent;
+function homeDistance(m) {
+  const b = m.homeBed || m.bed, h = b ? { x: b.x, z: b.z } : m.village ? { x: m.village.x, z: m.village.z } : null;
+  return h ? Math.hypot(h.x + 0.5 - m.position.x, h.z + 0.5 - m.position.z) : 0;
+}
+function pitch(m) {
+  const X = state(m), T0 = T();
+  if (!BF.tents || tentItem() == null || cnt(m, tentItem()) < 1) return false;
+  const px = Math.floor(m.position.x), pz = Math.floor(m.position.z);
+  const site = BF.tents.findSite(m.position.x, m.position.z, 7, (x, y, z) => x === px && z === pz);
+  if (!site || !BF.tents.place(site.x, site.y, site.z, site.f)) return false;
+  T0.inv.remove(m.inv, tentItem(), 1);
+  X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
+  m.homeBed = m.homeBed || m.bed;
+  m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
+  log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
+  return true;
+}
+// Takes the tent down (when it still stands the item comes back) and gives the villager its own bed again.
+function strike(m) {
+  const X = state(m), c = X.camp;
+  if (c) {
+    const id = BF.tentId(c.f, 0, 1);
+    if (BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === id && BF.tents.remove(c.x, c.y, c.z, id)) T().inv.add(m.inv, tentItem(), 1);
+    log("strike", m, { at: c.x + "," + c.z });
+  }
+  X.camp = null;
+  if (m.homeBed !== undefined) { m.bed = m.homeBed; m.homeBed = undefined; }
+}
+// Dusk and morning bookkeeping. Returns true while the villager should just stay put at its camp.
+function campAI(m, t, a) {
+  const X = state(m);
+  if (X.camp) {
+    if (!isNight(t) && !m.sleeping && t < DUSK) { strike(m); return false; }
+    if (!isNight(t) && t >= DUSK) { a.mode = "idle"; a.t = 2; return true; }   // evening: waits at the tent
+    return false;
+  }
+  if (t >= DUSK && t < BEDTIME && !m.sleeping && !m.child && tentItem() != null && cnt(m, tentItem()) >= 1) {
+    const left = (BEDTIME - t) * DAY_S, reach = left * m.def.speed * 1.3 * WALK_SLACK;
+    if (homeDistance(m) > reach && pitch(m)) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------- villager AI step (mobs.js villagerAI)
 function ai(m, dt, out) {
   if (m.profession !== "explorer" || !m.inv || m.dead || m.child || !BF.maps || !BF.mobs || !BF.mobs.nav || !m.village) return false;
@@ -270,6 +319,7 @@ function ai(m, dt, out) {
   X.sync -= dt;
   if (X.sync <= 0) { X.sync = 2; syncOffers(m); }
   const t = skyT();
+  if (campAI(m, t, m.ai)) return true;
   if (t < WORK_START || t >= WORK_END || m.tradingWith) { if (X.stage) { X.stage = null; X.target = null; X.deal = null; m.ai.route = null; } return false; }
   let act = carried(m).find(c => !c.done);
   if (!act && blankSlots(m).length) {
@@ -289,11 +339,12 @@ function statusText(m) {
   if (cs.some(c => c.done)) return "has a filled map";
   return blankSlots(m).length ? "has a blank map" : "looking for a map";
 }
-const pack = m => { const X = state(m); return { fin: Object.keys(X.fin) }; };
+const pack = m => { const X = state(m); return { fin: Object.keys(X.fin), camp: X.camp || undefined }; };
 function unpack(m, o) {
   const X = state(m);
   if (o && Array.isArray(o.fin)) for (const n of o.fin) if (typeof n === "string") X.fin[n] = 1;
+  if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { PRICE_BLANK, SELL_PRICE, FILLED, CELL, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
+BF.explorer = { pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, CELL, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
 })();

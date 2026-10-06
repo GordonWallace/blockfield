@@ -248,6 +248,8 @@ const BLOCK_DEFS = [
   // ---- explorer pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Explorers")
   // survey table: the explorer villager's jobsite (not vanilla): a compass rose inlaid in a spruce table
   { name: "survey_table", jobsite: "explorer", tiles: { top: "survey_table_top", side: "survey_table_side", front: "survey_table_front", bottom: "spruce_planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#5a3f24" },
+  // tent (item `tent`): a 3 wide, 2 long A-frame, 6 block states x 4 facings, see tentDefs()
+  ...tentDefs(),
   // ---- end explorer pack ----
 ];
 
@@ -388,6 +390,22 @@ function jobsiteDefs() {
   ];
 }
 
+// Tent parts (explorer pack): `tent: {f, r, l}` = facing f (foot -> head, like beds), row r (0 foot, 1 head), lateral cell l (0 left .. 2 right, seen from the foot
+// looking at the head). Placed from the cell the player targets: that cell is (r 0, l 1), the tent covers one cell to each side of it and one row further. Boxes
+// are drawn for facing south: z = length, x = across; a floor mat plus a stepped canvas shell that peaks over the middle cell. Not `bed`, so villagers' bed
+// checks never pick a tent up; js/tents.js and player.js treat `tent` as a bed that sleeps through monsters.
+function tentDefs() {
+  const out = [], H = uc => Math.max(5, Math.round(15 * (1 - Math.abs(uc - 24) / 24)));
+  for (let f = 0; f < 4; f++) for (let r = 0; r < 2; r++) for (let l = 0; l < 3; l++) {
+    const boxes = [[0, 0, 0, 16, 2, 16]];
+    let top = 2;
+    for (let s = 0; s < 4; s++) { const h = H(16 * l + 4 * s + 2); top = Math.max(top, h); boxes.push([4 * s, Math.max(2, h - 3), 0, 4 * s + 4, h, 16]); }
+    out.push({ name: "tent_" + r + "_" + l + "_" + "nesw"[f], tiles: { top: "tent_cloth", side: "tent_cloth", bottom: "tent_cloth" }, render: "model", model: "shape", opaque: false,
+      hardness: 0.3, drop: "tent", item: "tent", hidden: true, tent: { f, r, l }, boxes: boxes.map(b => rotBox(b, f)), box: rotBox([0, 0, 0, 16, top, 16], f), color: "#c9b27a" });
+  }
+  return out;
+}
+
 // Non-block items. tool: {type, tier, speed, damage}. food: hunger points restored.
 const ITEM_DEFS = [
   { name: "stick", color: "#8a6a3a" },
@@ -479,6 +497,9 @@ const ITEM_DEFS = [
   { name: "compass", color: "#a8a8b0" },
   ...[1, 2, 3, 4, 5].map(n => ({ name: "blank_map_" + n, color: "#d8c890", mapSize: n, label: "Blank Map (" + 8 * Math.pow(2, n - 1) + "x" + 8 * Math.pow(2, n - 1) + " chunks)" })),
   // ---- end cartography items ----
+  // ---- explorer items (append-only) ----
+  { name: "tent", places: "tent", stack: 1, color: "#c9b27a", creativeTab: "functional" },
+  // ---- end explorer items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -553,6 +574,7 @@ BF.rotBox = rotBox;
 BF.dirIndex = (dx, dz) => Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0);
 BF.doorId = (f, upper, open) => B["oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
 BF.ladderId = f => B["ladder_" + "nesw"[f & 3]]; // ladder facing f (away from its wall)
+BF.tentId = (f, r, l) => B["tent_" + r + "_" + l + "_" + "nesw"[f & 3]];
 BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3]];
 // Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.

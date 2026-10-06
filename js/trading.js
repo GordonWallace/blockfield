@@ -271,6 +271,7 @@ function stockFor(prof, v) {
     big.n -= stackOf(big.id); total--;
   }
   for (const e of entries) if (e.n > 0) inv.add(a, e.id, e.n);
+  if (prof === "explorer" && I.tent !== undefined) inv.add(a, I.tent, 1);   // pitches it when night falls far from a bed (js/explorer.js)
   if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
   return a;
 }
