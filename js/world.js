@@ -515,7 +515,7 @@ function buildMesh(c) {
   const sideAxes = [];
   for (let f = 0; f < 6; f++) { const a = []; for (let i = 0; i < 3; i++) if (FACES[f].n[i] === 0) a.push(i); sideAxes.push(a); }
   const p = [0, 0, 0], p1 = [0, 0, 0], p2 = [0, 0, 0], p3 = [0, 0, 0];
-  const aoVals = [0, 0, 0, 0], vh = [0, 0, 0, 0];
+  const lowUV = [[0, 0], [0, 0], [0, 0], [0, 0]], aoVals = [0, 0, 0, 0], vh = [0, 0, 0, 0];
 
   const skyAt = (ax, ay, az) => {
     const top = topAt(ax, az);
@@ -624,7 +624,7 @@ function buildMesh(c) {
       const rect = world._faceUV[b * 6 + f];
       if (!rect) continue;
       const sky = skyAt(ax, ay, az);
-      const uvs = F.kind === "side" ? SIDE_UV : TOP_UV;
+      let uvs = F.kind === "side" ? SIDE_UV : TOP_UV;
       const flL = isFluid ? lget(ax, ay, az) / 15 : 0;
 
       if (isFluid) {
@@ -668,6 +668,11 @@ function buildMesh(c) {
         if (!o2) { ls += lget(p2[0], p2[1], p2[2]); ln++; }
         if (!o3 && !(o1 && o2)) { ls += lget(p3[0], p3[1], p3[2]); ln++; }
         blv[k] = ls / ln / 15;
+      }
+      // a lowered block's sides crop the tile's top 1/16 (as vanilla does) instead of squeezing it, or the tile's top row shows as a strip
+      if (lowTop && F.kind === "side") {
+        for (let k = 0; k < 4; k++) { lowUV[k][0] = SIDE_UV[k][0]; lowUV[k][1] = F.c[k][1] ? (SIDE_UV[k][1] ? 0.9375 : 0.0625) : SIDE_UV[k][1]; }
+        uvs = lowUV;
       }
       const flip = aoVals[0] + aoVals[2] < aoVals[1] + aoVals[3];
       const tk = faceTint[b * 6 + f];
