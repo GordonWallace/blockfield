@@ -150,4 +150,20 @@ module.exports = async (pg, out) => {
     const reason = T.blockReason(A, o), ok = T.exchange(A, o);
     return { reason, ok, emeralds: [em0, T.inv.count(A.inv, I.emerald)], saplings: [sap0, T.inv.count(A.inv, I.oak_sapling)] };
   })));
+  // 5. wares: nothing in the starting pack, planks sawed from logs, sold for emeralds
+  console.log(JSON.stringify(await pg.evaluate(() => {
+    const A = window.__A, T = BF.trades, I = BF.I, res = {};
+    let starts = 0; for (let k = 0; k < 50; k++) if (T.stockFor("forester", {}).some(s => s && /planks|_log$/.test(BF.items[s.id].name))) starts++;
+    res.startsWithWood = starts;
+    A.inv = T.inv.create(); T.inv.add(A.inv, I.emerald, 4); T.inv.add(A.inv, I.birch_log, 10); T.inv.add(A.inv, I.oak_log, 2);
+    A.trades = [1, 2].flatMap(l => T.offers("forester", l));
+    res.offers = A.trades.length;
+    const o = A.trades.find(o => o.sell.id === I.birch_planks);
+    res.beforeSaw = T.blockReason(A, o);
+    A.fo.sawT = 0; A.fo.sawDay = -1;
+    for (let i = 0; i < 5; i++) { BF.sky.setTime(0.3); BF.mobs.update(0.5); }
+    res.afterSaw = { birch_log: T.inv.count(A.inv, I.birch_log), birch_planks: T.inv.count(A.inv, I.birch_planks), oak_log: T.inv.count(A.inv, I.oak_log), oak_planks: T.inv.count(A.inv, I.planks) };
+    res.buy = [T.blockReason(A, o), T.exchange(A, o), T.inv.count(A.inv, I.birch_planks), T.inv.count(A.inv, I.emerald)];
+    return res;
+  })));
 };

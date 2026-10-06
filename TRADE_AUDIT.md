@@ -413,7 +413,7 @@ leaves it 3, 8, 20, 48 and 112 emeralds ahead. Its purse is `EXPLORER_EM_CAP` 10
 
 ### forester
 
-One offer, from the villager-planter mod: the player sells 1 oak sapling and gets 1 emerald (`1 oak_sapling > 1 emerald`). This is **not** inside the usual 75-92% band: a sapling is worth about 0.1 emerald by effort (`VALUE`-style), so the offer pays about 10x. It stays as in the mod; the villager's purse is the limit (6-24 emeralds at the start, +2 a day up to 12, and the offer reads "Out of emeralds" when it is empty), so the most a player can pull out in a day is a couple of emeralds. If this proves too generous, make it `8 oak_sapling > 1 emerald`. No wares: `PRODUCE.forester` is empty, the logs, sticks and apples it picks up are its own.
+One offer, from the villager-planter mod: the player sells 1 oak sapling and gets 1 emerald (`1 oak_sapling > 1 emerald`). This is **not** inside the usual 75-92% band: a sapling is worth about 0.1 emerald by effort (`VALUE`-style), so the offer pays about 10x. It stays as in the mod; the villager's purse is the limit (6-24 emeralds at the start, +2 a day up to 12, and the offer reads "Out of emeralds" when it is empty), so the most a player can pull out in a day is a couple of emeralds. If this proves too generous, make it `8 oak_sapling > 1 emerald`. Wares: planks (level 1, `1 emerald > 30 planks`, every species) and logs (level 2, `1 emerald > 8 logs`), 104-111% of `VALUE`. `PRODUCE.forester` is empty and they are kept out of its starting pack: it sells only what it harvested (it saws up to 8 logs a day into planks, js/forester.js `saw`). The sticks and apples it picks up stay its own.
 
 ### builder
 

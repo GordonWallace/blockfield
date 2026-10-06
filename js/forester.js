@@ -7,6 +7,7 @@
 //   within 3 blocks it fells the whole tree at once, leaves included, and the blocks drop their items (cooldown 20 s). Needs 2 free inventory slots.
 //   Buildings are never touched: a log pile next to planks, stone, glass ... is not a tree.
 // - Picking up: saplings, emeralds, logs, sticks and apples lying within 16 blocks are collected (js/drops.js entities).
+// - Sawing: it turns up to 8 logs a day into 4 planks each (keeping 2 logs of each kind); planks and logs are what it sells (TRADES.forester).
 // - Planting and felling pick one at random, weighted 10 : 8 as in the mod. Everything runs in working hours only, from its band saw.
 // Saplings (blocks.js forester pack) also grow for players: on soil, with room above, a sapling becomes a tree after ~8 minutes on average
 // (simulation clock, so fast-forward speeds it up). Leaves drop saplings, sticks and apples (blocks.js extraDrops).
@@ -316,9 +317,29 @@ function plantAt(m, t) {
   return true;
 }
 
+// Sawing: up to SAW_DAY logs a day become 4 planks each (js/trading.js sells both). It keeps 2 logs of every species unsawn for sale, stops at 128 planks.
+const SAW_DAY = 8, SAW_KEEP = 2, PLANK_CAP = 128;
+const plankName = sp => (sp === "oak" ? "planks" : sp + "_planks");
+function saw(m, F) {
+  const day = BF.sky ? BF.sky.day || 0 : 0;
+  if (F.sawDay !== day) { F.sawDay = day; F.sawn = 0; }
+  if (F.sawn >= SAW_DAY) return;
+  const inv = T().inv, I = BF.I;
+  for (const sp of SPECIES) {
+    const lg = I[sp + "_log"], pl = I[plankName(sp)];
+    if (lg == null || pl == null) continue;
+    while (F.sawn < SAW_DAY && inv.count(m.inv, lg) > SAW_KEEP && inv.count(m.inv, pl) <= PLANK_CAP - 4 && inv.canFit(m.inv, [{ id: pl, n: 4 }], [{ id: lg, n: 1 }])) {
+      inv.remove(m.inv, lg, 1); inv.add(m.inv, pl, 4); F.sawn++;
+      log("saw", m, { log: sp + "_log" });
+    }
+  }
+}
+
 function ai(m, dt, out) {
   if (m.profession !== "forester" || !m.inv || m.dead || m.child || !m.village || !m.jobsite || !BF.mobs || !BF.mobs.nav || !W()) return false;
   const F = state(m), a = m.ai, t = skyT();
+  F.sawT = (F.sawT || 0) - dt;
+  if (F.sawT <= 0) { F.sawT = 5; saw(m, F); }
   if (t < WORK_START || t >= WORK_END || m.tradingWith || m.sleeping) { if (F.task) endTask(m, F, false); return false; }
   F.plantCd -= dt; F.cutCd -= dt; F.gatherCd -= dt;
   if (!F.task) {
