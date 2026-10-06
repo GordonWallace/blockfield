@@ -34,7 +34,7 @@ module.exports = async (pg, out) => {
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.level = 1; A.trades = []; A.inv = T.stockFor("explorer", A);
     A.res = BF.jobs.claim(A);
     T.inv.add(A.inv, I.emerald, 10);
-    BF.mobs.setProfession(C, "cartographer"); C.inv = T.inv.create(); T.inv.add(C.inv, I.blank_map_1, 2); T.inv.add(C.inv, I.emerald, 5);
+    BF.mobs.setProfession(C, "cartographer"); C.inv = T.inv.create(); T.inv.add(C.inv, I.blank_map_2, 1); T.inv.add(C.inv, I.emerald, 5);
     C.trades = [1, 2, 3, 4, 5].flatMap(l => T.offers("cartographer", l)); C.level = 5;
     BF.player.position.set(A.position.x + 5, A.position.y + 1, A.position.z);
     window.__A = A; window.__C = C;

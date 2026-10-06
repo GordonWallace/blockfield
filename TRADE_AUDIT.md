@@ -372,6 +372,10 @@ Columns: value given by the player, value received, rho (received / given). A vi
 | 4 | 2 emerald > 22 glass | 2.00 | 1.76 | 0.88 | buy from villager |
 | 4 | 2 emerald > 36 paper | 2.00 | 1.80 | 0.90 | buy from villager |
 | 4 | 4 emerald > 1 blank_map_1 | 4.00 | 3.60 | 0.90 | buy from villager (crafted: 8 paper + compass; never in its starting stock) |
+| 4 | 8 emerald > 1 blank_map_2 | 8.00 | 7.20 | 0.90 | buy from villager (crafted: 8 paper around a size 1 map, so usually out of stock) |
+| 5 | 16 emerald > 1 blank_map_3 | 16.00 | 14.40 | 0.90 | buy from villager (same) |
+| 5 | 32 emerald > 1 blank_map_4 | 32.00 | 28.80 | 0.90 | buy from villager (same) |
+| 5 | 64 emerald > 1 blank_map_5 | 64.00 | 57.60 | 0.90 | buy from villager (same) |
 | 5 | 7 emerald > 3 lantern | 7.00 | 6.60 | 0.94 | buy from villager |
 
 Value table additions: compass 3.2 (4 iron ingots 2.0 + gold ingot 1.2), blank_map_1 3.6 (compass + 8 paper 0.4). Compasses and maps are crafted
@@ -394,15 +398,18 @@ never change profession.
 
 ### explorer
 
-No fixed offers (`TRADES.explorer` is empty, `PRODUCE.explorer` empty) and no starting wares except 6-24 emeralds (no maps). Its wares are the filled maps it carries (js/explorer.js `syncOffers`), one offer per finished map:
+No fixed offers (`TRADES.explorer` is empty, `PRODUCE.explorer` empty); starting stock is a tent and 6-24 emeralds (no maps). Its wares are the filled maps it carries (js/explorer.js `syncOffers`), one offer per finished map, priced well above the blank map and growing faster with size:
 
 | Lvl | Offer | In | Out | rho | Kind |
 |---:|---|---:|---:|---:|---|
-| 1 | 7 emerald > 1 filled_map (size 1) | 7.00 | 3.60 + exploring | 0.51 on the blank map alone | buy from villager; only while it holds a finished map; 12 / 20 / 32 / 48 emeralds for sizes 2-5 |
+| 1 | 7 emerald > 1 filled_map (size 1) | 7 | 3.6 + exploring | 0.51 on the blank alone | buy from villager |
+| 1 | 16 emerald > 1 filled_map (size 2) | 16 | 7.2 + exploring | 0.45 | buy from villager |
+| 1 | 36 emerald > 1 filled_map (size 3) | 36 | 14.4 + exploring | 0.40 | buy from villager |
+| 1 | 80 emerald > 1 filled_map (size 4) | 80 | 28.8 + exploring | 0.36 | buy from villager |
+| 1 | 176 emerald > 1 filled_map (size 5) | 176 | 57.6 + exploring | 0.33 | buy from villager |
 
-The explorer buys the blank map from a cartographer at the cartographer's own price (`4 emerald > 1 blank_map_1`, rho 0.90 above) and nets 3 emeralds on a size-1 sale; the maker (cartographer) earns 4 per map, so the chain
-paper + iron + gold -> blank map -> filled map costs the player 7 emeralds against 3.6 for the blank map they could craft or buy themselves, the rest paying for the walking.
-Emeralds follow the usual rules (+2 per day up to 12, `EM_CAP`); with fewer than 4 it stops buying maps. The map offers are not in the old-trade tables below.
+Only while it holds a finished map; a map it gave up on before 97% explored is priced by its coverage. The explorer buys the blank map from a cartographer at the cartographer's prices (4, 8, 16, 32, 64 for sizes 1-5, below), so a sale
+leaves it 3, 8, 20, 48 and 112 emeralds ahead. Its purse is `EXPLORER_EM_CAP` 100 with +6 a day (the usual 12 / +2 could never pay for a size 3 map). The map offers are not in the old-trade tables below.
 
 ### builder
 

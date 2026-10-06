@@ -11,6 +11,7 @@ const LEVEL_XP = [0, 10, 70, 150, 250];        // xp needed to reach level 1..5
 const TRADE_XP = [2, 5, 10, 15, 30];           // villager xp per trade, by offer level
 const CAP_K = [6, 5, 4, 3, 2];                 // per-ware stock cap = sell.n * CAP_K[offer level - 1] (max 2 stacks)
 const STOCK_VALUE = 6;                         // ... and at most this many emeralds worth of one ware
+const EXPLORER_EM_CAP = 100, EXPLORER_EM_DAY = 6; // the explorer buys blank maps up to 64 emeralds each: a bigger purse
 const BUILDER_EM_CAP = 80, BUILDER_EM_DAY = 4; // the builder's village budget: +4 emeralds per day up to 80 (see TRADE_AUDIT.md)
 
 // Effort value of every traded item in emerald equivalents (1 emerald = 1). See TRADE_AUDIT.md for the reasoning.
@@ -28,7 +29,7 @@ const VALUE = {
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07,
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
-  compass: 3.2, blank_map_1: 3.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
+  compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
@@ -126,8 +127,8 @@ const TRADES = {
     ["22 paper > 1 emerald", "1 emerald > 11 glass", "28 sugar_cane > 1 emerald", "5 iron_ingot > 2 emerald"],
     ["14 glass > 1 emerald", "1 emerald > 18 paper", "1 gold_ingot > 1 emerald"],
     ["5 emerald > 2 lantern", "1 lantern > 2 emerald", "3 emerald > 1 compass", "2 compass > 5 emerald"],
-    ["2 emerald > 22 glass", "2 emerald > 36 paper", "4 emerald > 1 blank_map_1"],
-    ["7 emerald > 3 lantern"],
+    ["2 emerald > 22 glass", "2 emerald > 36 paper", "4 emerald > 1 blank_map_1", "8 emerald > 1 blank_map_2"],
+    ["7 emerald > 3 lantern", "16 emerald > 1 blank_map_3", "32 emerald > 1 blank_map_4", "64 emerald > 1 blank_map_5"],
   ],
   // The builder BUYS building materials from the player (rho 0.79-0.83 against VALUE) and sells a few finished goods it may hold.
   // Every unit price paid stays below the cheapest price any villager charges for the same item (glass, bricks, beds, sandstone_bricks, terracotta).
@@ -285,7 +286,8 @@ function restock(v, day) {
   v.restockDay = day;
   const caps = profile(v.profession).caps, mk = new Set((PRODUCE[v.profession] || []).map(n => BF.I[n]));
   const em = BF.I.emerald, bld = v.profession === "builder";
-  const emCap = bld ? BUILDER_EM_CAP : EM_CAP, emDay = bld ? BUILDER_EM_DAY : EM_DAY;
+  const exp = v.profession === "explorer";
+  const emCap = bld ? BUILDER_EM_CAP : exp ? EXPLORER_EM_CAP : EM_CAP, emDay = bld ? BUILDER_EM_DAY : exp ? EXPLORER_EM_DAY : EM_DAY;
   for (let k = Math.min(d, 4); k > 0; k--) {
     for (const [id, cap] of caps) {
       if (!mk.has(id)) continue;

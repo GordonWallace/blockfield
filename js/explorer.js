@@ -1,7 +1,7 @@
 // Explorer villagers (BF.explorer). Companion of js/maps.js (map items, explored pixels) and js/cartography.js (who makes the blank maps).
 // - Spawning (mobs.js villageRoster): only in villages with cartographers, one explorer per cartographer with 70% probability. Jobsite: the survey table.
 // - An explorer never starts with a map. With emeralds in its pocket it walks to a cartographer of its village that holds a blank map and buys it
-//   (PRICE_BLANK emeralds, the cartographer's own price in js/trading.js; stock and room rules of trading.js apply).
+//   (PRICE_BLANK emeralds by size, the cartographer's own prices in js/trading.js; stock and room rules of trading.js apply). It takes any size it can pay for, the largest first.
 // - It uses the blank map where it stands: the map becomes the filled map of an 8x8-chunk zone near it (its own zone first, then the closest zone
 //   that is not mapped yet), and it starts walking from one unexplored patch of the zone to the next. js/maps.js samples the world around it
 //   (BF.maps.explore) so the shared zone data fills in exactly as if a player carried the map.
@@ -15,8 +15,9 @@ const BF = window.BF;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const T = () => BF.trades;
 
-const PRICE_BLANK = 4;                    // what the cartographer asks for a size-1 blank map (js/trading.js: 4 emerald > 1 blank_map_1)
-const SELL_PRICE = [7, 12, 20, 32, 48];   // emeralds the player pays for a filled map, by size (blank 3.6 + the exploring, see TRADE_AUDIT.md)
+const PRICE_BLANK = [4, 8, 16, 32, 64];   // what the cartographer asks for a blank map by size (js/trading.js: "4 emerald > 1 blank_map_1" ...)
+const SELL_PRICE = [7, 16, 36, 80, 176];  // emeralds the player pays for a filled map, by size: well over the blank price, and it grows faster (TRADE_AUDIT.md)
+const IDLE_GIVE_UP = 180;                 // seconds of waiting for patches nobody has loaded before it settles for what it mapped
 const FILLED = 0.97;                      // share of mapped pixels that counts as filled
 const CELL = 16;                          // patch size in map pixels
 const CELL_DONE = 0.9;                    // a patch is explored when this share of its pixels is
@@ -66,7 +67,8 @@ function carried(m) {
 }
 
 // ---------------------------------------------------------------- offers
-const priceOf = it => SELL_PRICE[Math.max(0, Math.min(SELL_PRICE.length - 1, it.map.size - 1))];
+// A map it gave up on before 97% is priced by how much of it is explored.
+const priceOf = (it, d) => Math.max(1, Math.round(SELL_PRICE[Math.max(0, Math.min(SELL_PRICE.length - 1, it.map.size - 1))] * Math.min(1, coverage(d) / FILLED)));
 // One offer per filled map it carries: emeralds for the map. Replaces the previous list only when it changed.
 function syncOffers(m) {
   if (!m || m.profession !== "explorer" || !m.inv || !Array.isArray(m.trades) || !BF.maps) return;
@@ -74,7 +76,7 @@ function syncOffers(m) {
   for (const c of carried(m)) {
     if (!c.done || seen.has(c.it.id)) continue;
     seen.add(c.it.id);
-    dyn.push({ buy: [{ id: em, n: priceOf(c.it) }], sell: { id: c.it.id, n: 1 }, level: 1, xp: T().TRADE_XP[0], dyn: 1 });
+    dyn.push({ buy: [{ id: em, n: priceOf(c.it, c.d) }], sell: { id: c.it.id, n: 1 }, level: 1, xp: T().TRADE_XP[0], dyn: 1 });
   }
   const sig = list => list.map(o => o.sell.id + ":" + o.buy[0].n).join("|");
   const old = m.trades.filter(o => o.dyn);
@@ -163,10 +165,13 @@ function exploreAI(m, c, dt, out) {
     if (!p.best) {
       if (!p.open && p.avoided) { X.fin[c.it.name] = 1; finish(m, c, "unreachable"); }   // only patches out of reach are left
       else if (!p.open) finish(m, c, "covered");
-      else X.pickT = 4;                                                                // patches exist but nobody has loaded them: wait for the player
+      else {                                                                           // patches exist but nobody has loaded them: wait for the player
+        X.pickT = 4; X.idleS = (X.idleS || 0) + 4;
+        if (X.idleS >= IDLE_GIVE_UP) { X.fin[c.it.name] = 1; X.idleS = 0; finish(m, c, "out of range"); }
+      }
       return false;
     }
-    X.target = p.best; X.walkT = 0; X.dwell = 0; a.route = null;
+    X.target = p.best; X.walkT = 0; X.dwell = 0; X.idleS = 0; a.route = null;
   }
   const t = X.target;
   a.mode = "idle"; a.t = 2; X.stage = "explore";
@@ -195,11 +200,13 @@ function finish(m, c, why) {
 
 // ---------------------------------------------------------------- fetching a blank map from a cartographer
 const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession === "cartographer" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
-function offerFor(v2) {
+// The blank map it would buy from v2: the largest size it holds and the explorer can pay for.
+function offerFor(v2, emeralds) {
+  if (Array.isArray(v2)) v2 = { inv: v2 };
   const I = BF.I;
-  for (let s = 1; s <= 1; s++) {                      // size 1 only: the cheapest map, the zone is picked from its position
+  for (let s = PRICE_BLANK.length; s >= 1; s--) {
     const id = I["blank_map_" + s];
-    if (id != null && cnt(v2, id) >= 1) return { buy: [{ id: I.emerald, n: PRICE_BLANK }], sell: { id, n: 1 }, level: 4, xp: T().TRADE_XP[3] };
+    if (id != null && cnt(v2, id) >= 1 && emeralds >= PRICE_BLANK[s - 1]) return { buy: [{ id: I.emerald, n: PRICE_BLANK[s - 1] }], sell: { id, n: 1 }, level: 4, xp: T().TRADE_XP[3] };
   }
   return null;
 }
@@ -209,7 +216,7 @@ function findCartographer(m, X) {
   let best = null, bd = Infinity;
   for (const v2 of R.members || []) {
     if (v2 === m || !canSell(v2) || (X.avoidSeller && X.avoidSeller.get(v2) > nowS())) continue;
-    const o = offerFor(v2);
+    const o = offerFor(v2, cnt(m, BF.I.emerald));
     if (!o || T().blockReason(v2, o) || !T().inv.canFit(m.inv, [o.sell], o.buy)) continue;
     const d = v2.position.distanceTo(m.position);
     if (d < bd) { bd = d; best = { seller: v2, offer: o }; }
@@ -222,7 +229,7 @@ function deal(m, dl) {
   t.inv.remove(m.inv, o.buy[0].id, o.buy[0].n);
   t.inv.add(m.inv, o.sell.id, o.sell.n);
   t.addXp(v2, o);
-  log("buy", m, { from: "cartographer", paid: o.buy[0].n + " emerald" });
+  log("buy", m, { from: "cartographer", got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
   return true;
 }
 function shopAI(m, dt, out) {
@@ -232,14 +239,14 @@ function shopAI(m, dt, out) {
     X.cd -= dt;
     if (X.cd > 0) return false;
     X.cd = 4;
-    if (blankSlots(m).length || carried(m).filter(c => c.done).length >= MAX_FOR_SALE || cnt(m, BF.I.emerald) < PRICE_BLANK) return false;
+    if (blankSlots(m).length || carried(m).filter(c => c.done).length >= MAX_FOR_SALE || cnt(m, BF.I.emerald) < PRICE_BLANK[0]) return false;
     const dl = findCartographer(m, X);
     if (!dl) { X.cd = rnd(15, 30); return false; }
     X.deal = dl; X.stage = "walk"; X.walkT = 0; a.route = null;
   }
   const dl = X.deal, v2 = dl && dl.seller;
   const giveUp = () => { if (v2) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2, nowS() + 60); X.stage = null; X.deal = null; a.route = null; X.cd = 5; return false; };
-  if (!v2 || !canSell(v2) || !offerFor(v2)) return giveUp();
+  if (!v2 || !canSell(v2) || !offerFor(v2, cnt(m, BF.I.emerald))) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   a.mode = "idle"; a.t = 2;
   if (X.stage === "walk") {
@@ -346,5 +353,5 @@ function unpack(m, o) {
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, CELL, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
+BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, CELL, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
 })();
