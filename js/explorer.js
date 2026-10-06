@@ -239,6 +239,7 @@ function deal(m, dl) {
   t.inv.remove(m.inv, o.buy[0].id, o.buy[0].n);
   t.inv.add(m.inv, o.sell.id, o.sell.n);
   t.addXp(v2, o);
+  if (BF.vlog) BF.vlog.trade(m, v2, o);
   log("buy", m, { from: "cartographer", got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
   return true;
 }
@@ -295,7 +296,10 @@ function pitch(m) {
   if (!BF.tents || tentItem() == null || cnt(m, tentItem()) < 1) return false;
   const px = Math.floor(m.position.x), pz = Math.floor(m.position.z);
   const site = BF.tents.findSite(m.position.x, m.position.z, 7, (x, y, z) => x === px && z === pz);
-  if (!site || !BF.tents.place(site.x, site.y, site.z, site.f)) return false;
+  if (BF.vlog) BF.vlog.actor = m;                       // the blockPlaced events inside place() are logged as this villager's
+  const placed = site && BF.tents.place(site.x, site.y, site.z, site.f);
+  if (BF.vlog) BF.vlog.actor = null;
+  if (!placed) return false;
   T0.inv.remove(m.inv, tentItem(), 1);
   X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
   m.homeBed = m.homeBed || m.bed;
@@ -313,6 +317,12 @@ function strike(m) {
   }
   X.camp = null;
   if (m.homeBed !== undefined) { m.bed = m.homeBed; m.homeBed = undefined; }
+}
+// An explorer starts with one tent, but it can lose it (a world saved before tents existed, the player breaking its camp, a full pack when striking it).
+// Back in the village by day it collects a spare from home, so no explorer is ever caught out at dusk without one.
+function spareTent(m) {
+  if (tentItem() == null || state(m).camp || cnt(m, tentItem()) >= 1 || isNight(skyT()) || skyT() >= DUSK || homeDistance(m) > 30) return;
+  if (T().inv.add(m.inv, tentItem(), 1) === 0) log("spare_tent", m, {});
 }
 // Dusk and morning bookkeeping. Returns true while the villager should just stay put at its camp.
 function campAI(m, t, a) {
@@ -334,7 +344,7 @@ function ai(m, dt, out) {
   if (m.profession !== "explorer" || !m.inv || m.dead || m.child || !BF.maps || !BF.mobs || !BF.mobs.nav || !m.village) return false;
   const X = state(m);
   X.sync -= dt;
-  if (X.sync <= 0) { X.sync = 2; syncOffers(m); }
+  if (X.sync <= 0) { X.sync = 2; syncOffers(m); spareTent(m); }
   const t = skyT();
   if (campAI(m, t, m.ai)) return true;
   if (t < WORK_START || t >= WORK_END || m.tradingWith) { if (X.stage) { X.stage = null; X.target = null; X.deal = null; m.ai.route = null; } return false; }
