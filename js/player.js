@@ -126,6 +126,8 @@ const css = `
 .bfp-field{display:block;text-align:left;font:12px var(--mono);color:var(--muted);margin:10px 0 0}
 .bfp-field input{display:block;width:100%;box-sizing:border-box;margin-top:4px;font:13px var(--mono);background:rgba(0,0,0,.35);color:var(--ink);border:1px solid var(--panel-edge);border-radius:3px;padding:8px 10px}
 .bfp-field .bfp-mode{margin-top:4px}
+.bfp-field input[type=range]{padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}
+.bfp-field .bfp-hint{display:block;margin-top:2px;font-size:11px;opacity:.8}
 .bfp-view-create>button.primary{margin-top:14px}
 .bfp-ctl{margin-top:10px;text-align:left}
 .bfp-ctl summary{cursor:pointer;font:12px var(--mono);color:var(--muted)}
@@ -147,6 +149,8 @@ const css = `
 `;
 
 // ---------- DOM ----------
+const BIOME_SIZES = [[1, "Small (classic)"], [2, "Large"], [3, "Larger"], [4.5, "Huge"], [6, "Vast"]], BIOME_DEF = 1;   // biomeScale, label
+const biomeLabel = s => (BIOME_SIZES.find(b => b[0] === s) || [0, "Large"])[1];
 let savedEl, worldsEl, createForm, createMode = null, worldsCache = [], saveOk = null;
 let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, helpEl;
 const HELP_HTML = isTouch
@@ -180,6 +184,7 @@ function buildDOM() {
       <div class="bfp-head"><span>Create New World</span></div>
       <label class="bfp-field">World name<input name="name" maxlength="40" value="New World" spellcheck="false"></label>
       <label class="bfp-field">Seed<input name="seed" placeholder="Leave blank for a random seed" spellcheck="false"></label>
+      <label class="bfp-field">Biome size: <b class="bfp-bsl">${BIOME_SIZES[BIOME_DEF][1]}</b><input name="biome" type="range" min="0" max="${BIOME_SIZES.length - 1}" step="1" value="${BIOME_DEF}"><span class="bfp-hint">Relative size of biomes and climate zones. Small matches older worlds.</span></label>
       <div class="bfp-field">Game mode${modeRow}</div>
       <button class="primary" type="submit">Create and play</button>
       <button type="button" data-act="hide-create">Back</button>
@@ -228,6 +233,8 @@ function buildDOM() {
     }
   });
   startEl.addEventListener("keyup", e => e.stopPropagation());
+  const biomeIn = createForm.elements.biome, biomeLbl = createForm.querySelector(".bfp-bsl");
+  biomeIn.addEventListener("input", () => { biomeLbl.textContent = BIOME_SIZES[biomeIn.value | 0][1]; });
   createForm.addEventListener("submit", e => { e.preventDefault(); createWorld(); });
   pauseEl.addEventListener("click", e => {
     const act = e.target.closest("[data-act]");
@@ -351,6 +358,7 @@ function showStartView(v) {
     createMode = createMode || gameMode;
     createForm.elements.name.value = "New World";
     createForm.elements.seed.value = "";
+    createForm.elements.biome.value = BIOME_DEF; createForm.querySelector(".bfp-bsl").textContent = BIOME_SIZES[BIOME_DEF][1];
     updateModeUI();
     setTimeout(() => { try { createForm.elements.name.select(); } catch (_) {} }, 0);
   }
@@ -366,7 +374,7 @@ function renderWorlds(st) {
     return;
   }
   worldsEl.innerHTML = worldsCache.map(w => {
-    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}`;
+    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}${w.gen >= 2 ? " · " + biomeLabel(w.biomeScale) + " biomes" : ""}`;
     if (st.renaming === w.id) return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><input value="${esc(w.name)}" maxlength="40" aria-label="New world name"></div>
       <div class="bfp-wbtns"><button class="primary" data-act="rename-ok">Save</button><button data-act="cancel">Cancel</button></div></div>`;
@@ -399,14 +407,15 @@ function playWorld(id, btn) {
 function createWorld() {
   const f = createForm.elements;
   const name = f.name.value.trim() || "New World", seedText = f.seed.value.trim(), mode = createMode || gameMode;
+  const biomeScale = BIOME_SIZES[f.biome.value | 0][0];
   requestLock();
   const btn = createForm.querySelector('button[type="submit"]');
   btn.disabled = true;
   const done = () => { btn.disabled = false; beginPlay(); };
   if (hasSave() && BF.save.create) {
-    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode })).catch(e => { console.error(e); }).then(done);
+    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale })).catch(e => { console.error(e); }).then(done);
   } else {
-    try { BF.newWorld(parseSeed(seedText), { gameMode: mode }); } catch (e) { console.error(e); }
+    try { BF.newWorld(parseSeed(seedText), { gameMode: mode, biomeScale }); } catch (e) { console.error(e); }
     setGameMode(mode);
     done();
   }
