@@ -65,7 +65,7 @@ const P = (BF.player = {
 // ---------- small helpers ----------
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const inv = () => BF.inventory || {};
-const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
+const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
 const selectedItem = () => {
   try { const s = inv().selected && inv().selected(); return s && s.count > 0 ? s : null; } catch (_) { return null; }
 };
@@ -796,8 +796,8 @@ function setViewModel(sel) {
     vmMesh.rotation.set(0.1, 0.75, 0);
   } else if (BF.maps && BF.maps.textureFor(it)) { // filled map / compass: live canvas texture (js/maps.js)
     const mat = new THREE.MeshBasicMaterial({ map: BF.maps.textureFor(it), transparent: true, alphaTest: 0.05, side: THREE.DoubleSide, depthTest: false });
-    vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(it.map ? MAP_VM.size : 0.3, it.map ? MAP_VM.size : 0.3), mat);
-    vmMesh.rotation.set(0, it.map ? 0 : -0.5, 0);
+    vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(it.map || it.auto ? MAP_VM.size : 0.3, it.map || it.auto ? MAP_VM.size : 0.3), mat);
+    vmMesh.rotation.set(0, it.map || it.auto ? 0 : -0.5, 0);
   } else {
     const mat = new THREE.MeshBasicMaterial({ map: iconTexture(id), transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, depthTest: false });
     vmMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), mat);
@@ -810,8 +810,8 @@ function setViewModel(sel) {
 function updateViewModel(dt) {
   const held = selectedItem();
   setViewModel(held);
-  const heldIt = held && BF.items[held.id], mapHeld = !!(heldIt && heldIt.map);
-  if (heldIt && BF.maps && (heldIt.map || heldIt.name === "compass")) { try { BF.maps.heldTexture(heldIt); } catch (e) { console.error(e); } }
+  const heldIt = held && BF.items[held.id], mapHeld = !!(heldIt && (heldIt.map || heldIt.auto));
+  if (heldIt && BF.maps && (heldIt.map || heldIt.auto || heldIt.name === "compass")) { try { BF.maps.heldTexture(heldIt); } catch (e) { console.error(e); } }
   const l = BF.world.daylight != null ? BF.world.daylight : 1;
   if (vmMesh && vmMesh.material && vmMesh.material.color && vmMesh !== hand) vmMesh.material.color.setScalar(Math.max(0.3, l));
   if (vmMesh === hand) hand.material.color.setHex(0xc8956b).multiplyScalar(Math.max(0.3, l));
@@ -1171,6 +1171,9 @@ function secondaryDown() {
     return true;
   }
   if (BF.villageLife && BF.villageLife.useBucket && BF.villageLife.useBucket(it, target)) { swing(); placeCd = PLACE_REPEAT; return true; }   // buckets (js/villagelife.js)
+  if ((it.map || it.auto || it.autoBlank) && BF.mapview) { // right click with a filled map opens it full screen; the creative auto map asks for a width (js/mapview.js)
+    if (BF.mapview.use(sel, it)) { swing(); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+  }
   if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
     const msg = BF.maps.use(sel, it);
     if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
@@ -1538,6 +1541,7 @@ P.respawn = respawn;
 P.setGameMode = setGameMode;
 // commands.js hooks: an overlay that takes the keyboard (releases the pointer lock without pausing, then re-locks)
 P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
+P.actionBar = actionBar;
 P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };
 P.uiClose = function () { if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
 P.teleport = function (x, y, z) {

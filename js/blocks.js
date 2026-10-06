@@ -505,6 +505,8 @@ const ITEM_DEFS = [
   // ---- explorer items (append-only) ----
   { name: "tent", places: "tent", stack: 1, color: "#c9b27a", creativeTab: "functional" },
   // ---- end explorer items ----
+  // ---- auto map (js/mapview.js; append-only: ids of the items above must not move) ----
+  { name: "auto_map", stack: 1, color: "#d8c890", autoBlank: true, creativeTab: "misc", label: "Auto-Fill Map", search: "auto map autofill auto-fill automap creative terrain overview" },   // right click: asks for a width, then fills itself from the world generator
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -586,6 +588,13 @@ BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3
 let dynItem = ITEM_BASE + 0x10000;
 BF.resolveItem = name => {
   if (I[name] !== undefined) return I[name];
+  const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
+  if (a && +a[1] >= 1 && +a[1] <= 128) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
+    const k = +a[1], id = dynItem++;
+    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto-Fill Map (" + k * 128 + "x" + k * 128 + " blocks)", search: "auto map autofill auto-fill automap" };
+    I[name] = id;
+    return id;
+  }
   const m = /^filled_map_([1-5])_(-?\d+)_(-?\d+)$/.exec(name || "");
   if (!m) return undefined;
   const size = +m[1], zx = +m[2], zz = +m[3], side = 8 * Math.pow(2, size - 1), id = dynItem++;

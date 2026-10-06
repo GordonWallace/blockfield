@@ -46,5 +46,7 @@ function sheet(G, filled) {
   put(G, 7, 7, hex("#ffffff")); put(G, 8, 8, hex("#ffffff"));
 }
 SPRITES.filled_map = G => sheet(G, true);
+// Auto map: a filled map with a bright green corner mark
+SPRITES.auto_map = G => { sheet(G, true); const gr = hex("#7fe04a"); for (const [x, y] of [[11, 3], [11, 4], [10, 4], [12, 4], [11, 5]]) put(G, x, y, gr); };
 for (let k = 1; k <= 5; k++) SPRITES["blank_map_" + k] = G => sheet(G, false);
 })();
