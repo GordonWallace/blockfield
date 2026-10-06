@@ -51,6 +51,7 @@ BF.newWorld = function (seed, opts) {
   BF.player.spawn(sx + 0.5, BF.worldgen.heightAt(sx, sz) + 1.01, sz + 0.5);
   // every world starts at sunrise on day 0; loading a save restores its own time afterwards
   BF.sky.day = 0; BF.sky.setTime(0.05);
+  BF.warp.reset();
   if (opts && opts.gameMode && BF.player.setGameMode) BF.player.setGameMode(opts.gameMode);
   BF.emit("newWorld", BF.state.seed);
 };
@@ -84,19 +85,30 @@ function frame(now) {
   last = now;
   const p = BF.player.position;
   BF.world.update(p.x, p.z, BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder
+  const W = BF.warp;
   if (!BF.state.paused) {
-    BF.state.time += dt;
-    BF.sky.update(dt);
-    BF.player.update(dt);
-    BF.mobs.update(dt);
-    BF.drops.update(dt);
+    // Fast-forward (F, js/timewarp.js): run the whole simulation W.speed times per frame with the normal step, so
+    // behaviour at 10x matches 1x exactly and it plays like a sped-up recording. Stops early if the frame budget runs out.
+    const n = W.steps(), t0 = performance.now();
+    let done = 0;
+    while (done < n && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {
+      W.advance(dt);
+      BF.state.time += dt;
+      BF.sky.update(dt);
+      BF.player.update(dt);
+      BF.mobs.update(dt);
+      BF.drops.update(dt);
+      BF.world.tickSim();
+      done++;
+    }
+    W.done(done);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
   }
   BF.inventory.update && BF.inventory.update(dt);
   if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);
-  if (BF.textures.update) BF.textures.update(dt);
+  if (BF.textures.update) BF.textures.update(dt * Math.max(1, W.last));   // water animation keeps pace with the fast-forward
   if (BF.save && !BF.state.paused) BF.save.update(dt);
   renderer.render(scene, camera);
   updateDebug(now);

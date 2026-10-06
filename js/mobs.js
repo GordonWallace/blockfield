@@ -1755,7 +1755,7 @@ BF.mobs = {
       try { inv.openTrade(mob); } catch (e) { console.error(e); }
       return null;
     }
-    const now = performance.now() / 1000;
+    const now = BF.simNow();
     if (now < mob.tradeCd) return null;
     mob.tradeCd = now + 0.6;
     if (!inv || typeof inv.remove !== "function" || I.wheat_item == null || I.emerald == null) return "The villager has nothing to trade";
