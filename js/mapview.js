@@ -5,6 +5,7 @@
 //    a few milliseconds per frame (tick() is called from the main loop). Nothing is saved: the pixels regenerate from the seed when the map is next
 //    held or viewed. Always 1024x1024 pixels at most (256 blocks wide and under: one block per pixel), so a 2048-block map is 2 blocks per pixel.
 //  * Right click with any filled map (normal or auto) opens it full screen: zone grid, player arrow, block under the mouse (and biome / height on auto maps).
+//    Click a point to select it; in creative mode a Teleport button takes you there, onto the surface (or the water surface).
 // API: BF.mapview = { use(sel, it), held(it), tick(), open(it), close(), isOpen(), getAuto, nameOf, geometry, finish(d), paint(d), stats }
 (() => {
 "use strict";
@@ -125,7 +126,7 @@ function held(it) {
 }
 
 // ---------------------------------------------------------------- UI
-const view = { open: false, root: null, cv: null, g: null, title: null, info: null, it: null, d: null, S: 0, mouse: null, sig: "" };
+const view = { open: false, root: null, cv: null, g: null, title: null, info: null, it: null, d: null, S: 0, mouse: null, sig: "", sel: null, tp: null, pending: null };
 const prompt = { open: false, root: null, input: null, hint: null, slot: -1 };
 function css() {
   const st = document.createElement("style");
@@ -141,6 +142,7 @@ function css() {
 .bfm-row{display:flex;gap:8px}
 .bfm-row button{font:12px var(--display);color:var(--ink);background:rgba(127,191,77,.22);border:1px solid var(--accent);border-radius:3px;padding:6px 18px;cursor:pointer}
 .bfm-row button:hover{background:rgba(127,191,77,.38)}
+.bfm-row button:disabled{opacity:.4;cursor:default;background:rgba(127,191,77,.12)}
 .bfm-in{font:15px var(--mono);width:9em;padding:6px 8px;text-align:center;color:var(--ink);background:rgba(0,0,0,.35);border:1px solid var(--panel-edge);border-radius:3px}`;
   document.head.appendChild(st);
 }
@@ -154,9 +156,19 @@ function mount(inner) {
 function buildView() {
   if (view.root) return;
   css();
-  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="close">Close</button></div>`);
+  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="tp" hidden disabled>Teleport</button><button type="button" data-a="close">Close</button></div>`);
   view.cv = r.querySelector("canvas"); view.g = view.cv.getContext("2d"); view.title = r.querySelector(".bfm-title"); view.info = r.querySelector(".bfm-info");
   r.querySelector('[data-a="close"]').addEventListener("click", closeView);
+  view.tp = r.querySelector('[data-a="tp"]');
+  view.tp.addEventListener("click", teleportToSelection);
+  view.cv.addEventListener("click", e => {          // select a point (any map; the Teleport button only exists in creative mode)
+    const m = view.d, b = view.cv.getBoundingClientRect();
+    if (!m) return;
+    const fx = (e.clientX - b.left) / b.width, fz = (e.clientY - b.top) / b.height;
+    if (fx < 0 || fx >= 1 || fz < 0 || fz >= 1) return;
+    view.sel = { x: Math.floor(m.x0 + fx * m.side), z: Math.floor(m.z0 + fz * m.side) };
+    view.sig = ""; drawView();
+  });
   r.addEventListener("mousedown", e => { if (e.target === r) closeView(); });
   r.addEventListener("contextmenu", e => e.preventDefault());
   view.cv.addEventListener("mousemove", e => { const b = view.cv.getBoundingClientRect(); view.mouse = { x: (e.clientX - b.left) / b.width, y: (e.clientY - b.top) / b.height }; view.sig = ""; });
@@ -184,7 +196,9 @@ function openView(it) {
   view.cv.style.width = view.cv.style.height = view.S + "px";
   view.title.textContent = (it.auto ? "Auto map - " : "Map - ") + view.d.label;
   view.open = true;                       // before releasing the lock: player.js must not pause or re-lock
-  view.sig = "";
+  view.sig = ""; view.sel = null;
+  view.tp.hidden = !(P && P.gameMode === "creative");   // like the creative-only auto map itself; /tp stays the survival route
+  view.tp.disabled = true;
   try { if (P && P.uiOpen) P.uiOpen(); } catch (e) { console.error(e); }
   view.root.classList.add("open");
   drawView();
@@ -221,15 +235,56 @@ function drawView(force) {
   g.save(); g.translate(clamp(mx, 9, S - 9), clamp(mz, 9, S - 9)); g.rotate(ang); if (!inside) g.scale(0.85, 0.85); g.scale(1.9, 1.9);
   g.beginPath(); g.moveTo(5, 0); g.lineTo(-3.5, 3.6); g.lineTo(-1.6, 0); g.lineTo(-3.5, -3.6); g.closePath();
   g.fillStyle = inside ? "#fff" : "#d8d8d8"; g.strokeStyle = "#101010"; g.lineWidth = 1.2; g.stroke(); g.fill(); g.restore();
+  // selected point
+  if (view.sel) {
+    const sx = (view.sel.x + 0.5 - m.x0) * ppb, sz = (view.sel.z + 0.5 - m.z0) * ppb;
+    g.save(); g.translate(sx, sz); g.lineWidth = 2.5; g.strokeStyle = "#101010"; g.beginPath(); g.arc(0, 0, 8, 0, 6.2832); g.moveTo(-14, 0); g.lineTo(-4, 0); g.moveTo(4, 0); g.lineTo(14, 0); g.moveTo(0, -14); g.lineTo(0, -4); g.moveTo(0, 4); g.lineTo(0, 14); g.stroke();
+    g.lineWidth = 1.2; g.strokeStyle = "#ff4a3a"; g.stroke(); g.restore();
+  }
+  view.tp.disabled = !view.sel;
   // readout
   let line = "";
   if (view.mouse && view.mouse.x >= 0 && view.mouse.x < 1 && view.mouse.y >= 0 && view.mouse.y < 1) {
     const x = Math.floor(m.x0 + view.mouse.x * m.side), z = Math.floor(m.z0 + view.mouse.y * m.side);
     line = "x " + x + "  z " + z;
-    if (m.auto && BF.worldgen) { const b = BF.worldgen.biomeAt(x, z); line += "   " + b.name + "   height " + Math.round(b.height); }
+    if (m.auto && BF.worldgen) { const b = biomeFor(x, z, m.scale); line += "   " + b.name + "   height " + Math.round(b.height); }
   }
+  if (view.sel) line += (line ? "\n" : "") + "selected  x " + view.sel.x + "  z " + view.sel.z + (view.tp.hidden ? "" : "   (press Teleport)");
   const prog = m.auto && m.d ? (m.d.done ? "" : "   generating " + Math.floor(100 * progressOf(m.d)) + "%") : "";
   view.info.textContent = (line || "Move the mouse over the map for coordinates") + prog + "\ngrid lines every " + gs + " blocks (world coordinates)  |  Esc to close";
+}
+// biomeAt without the river network on coarse maps: tracing it for every hovered point far from the last would stall the page (see step()).
+function biomeFor(x, z, scale) {
+  const R = BF.rivers, off = R && R.setEnabled && scale > RIVER_MAX_SCALE;
+  if (off) R.setEnabled(false);
+  try { return BF.worldgen.biomeAt(x, z); } finally { if (off) R.setEnabled(true); }
+}
+// Teleport to the selected point, landing on the surface (on the water surface over water). Far destinations are not loaded yet, so the height from
+// the generator is used first and corrected by tick() once the chunk exists (trees, buildings).
+function surfaceAt(x, z) {
+  const W = BF.world, G = BF.worldgen;
+  let h = W.isLoaded(x, z) ? W.heightAt(x, z) : -1, wl = BF.SEA;
+  if (G) { if (h < 0) h = G.heightAt(x, z); if (G.waterLevelAt) wl = Math.max(wl, G.waterLevelAt(x, z)); }
+  return Math.max(h, wl) + 1.01;
+}
+function teleportToSelection() {
+  const s = view.sel, P = BF.player;
+  if (!s || !P || P.gameMode !== "creative") return;
+  const x = s.x + 0.5, z = s.z + 0.5, y = surfaceAt(s.x, s.z);
+  closeView();
+  P.teleport(x, y, z);
+  view.pending = { x: s.x, z: s.z, t: 0 };
+  if (P.actionBar) P.actionBar("Teleported to " + s.x + ", " + Math.floor(y) + ", " + s.z);
+}
+// After a teleport to unloaded ground: once the chunk is there, stand on what is really on top.
+function settle() {
+  const p = view.pending, W = BF.world;
+  if (!p) return;
+  if (++p.t > 3600) { view.pending = null; return; }     // give up after about a minute
+  if (!W.isLoaded(p.x, p.z)) return;
+  view.pending = null;
+  const h = W.heightAt(p.x, p.z), pos = BF.player.position;
+  if (h >= 0 && Math.abs(pos.x - (p.x + 0.5)) < 2 && Math.abs(pos.z - (p.z + 0.5)) < 2) { const wl = BF.worldgen && BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(p.x, p.z) : BF.SEA; BF.player.teleport(pos.x, Math.max(h, wl, BF.SEA) + 1.01, pos.z); }
 }
 function progressOf(d) {
   if (d.done) return 1;
@@ -318,8 +373,8 @@ function use(sel, it) {
 
 BF.mapview = {
   use, held, open: openView, close: () => { closeView(); closePrompt(); }, isOpen: () => view.open || prompt.open,
-  tick() { tick(); if (view.open) drawView(); },
-  getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
+  tick() { tick(); if (view.open) drawView(); if (view.pending) settle(); },
+  teleportToSelection, surfaceAt, getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
   ZONE, MAX_PX, MAX_K,
   reset() { maps.clear(); },
   _maps: maps, _view: view, _prompt: prompt,
