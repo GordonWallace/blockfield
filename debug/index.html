@@ -113,6 +113,9 @@
   details.dd summary::-webkit-details-marker { display: none; }
   details.dd summary::after { content: "\25BE"; color: var(--faint); font-size: 10px; }
   details.dd summary i { width: 8px; height: 8px; border-radius: 50%; }
+  details.dd summary input.tcb { margin: 0 -1px 0 -3px; width: 13px; height: 13px; cursor: pointer; }
+  details.dd.none summary { color: var(--faint); background: transparent; }
+  .fbtn.all { margin-left: 4px; }
   details.dd summary .n { color: var(--faint); }
   details.dd.part summary { border-color: rgba(242, 198, 109, 0.55); }
   details.dd .mark { color: var(--warn); font-size: 11px; }
@@ -538,6 +541,7 @@ function stamp(t) {
   return "Day " + (d + 1) + " " + String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0");
 }
 // ---- log filters: a dropdown per villager type (plus the player) with a checkbox per action; everything starts checked.
+// Each type's chip also has its own checkbox (all of its actions on or off), and Select all / Select none set every type.
 // Unchecked boxes are remembered in this browser (localStorage). Who did what is read from the log text, whose formats come
 // from js/villagelog.js: "Name (Job) traded with Name (Job): ...", "Name (Job) placed a bed at ...", "Name became a Job",
 // "Name was born to ...", "Name (Job) died: ...". Entries that match none of these are always shown.
@@ -549,7 +553,7 @@ try { off = new Set(JSON.parse(localStorage.getItem(STORE) || "[]")); } catch (e
 const saveOff = () => { try { localStorage.setItem(STORE, JSON.stringify([...off])); } catch (e) {} };
 const isOn = (t, act) => !off.has(t + "|" + act);
 const typeOf = party => party === "Player" ? "Player" : (/\(([^()]+)\)\s*$/.exec(party) || [])[1] || null;
-// -> [[type, action], ...]: the entry shows if all of these are checked (a trade has a buyer and a seller); null = unrecognised, always shown
+// -> [[type, action], ...]: the entry shows if any of these is checked (a trade has a buyer and a seller); null = unrecognised, always shown
 function actorsOf(e) {
   const k = e[1], tx = e[2];
   let m;
@@ -564,23 +568,33 @@ function actorsOf(e) {
   if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
   return null;
 }
-const visible = e => { const a = actorsOf(e); return !a || a.every(([t, act]) => isOn(t, act)); };   // unchecking hides every entry with that action
+// An entry shows while any villager in it is selected for what it did there: with Builder on and Furniture Maker off, a builder
+// buying from a furniture maker still shows.
+const visible = e => { const a = actorsOf(e); return !a || a.some(([t, act]) => isOn(t, act)); };
+// every type Select none has to turn off, including ones that haven't done anything here yet
+const allTypes = shown => new Set([...Object.keys(PROF), "Player", ...shown]);
+const setType = (t, on) => { for (const x of ACTS_FOR(t)) { if (on) off.delete(t + "|" + x); else off.add(t + "|" + x); } };
+let shownTypes = [];
 function renderFilters() {
   const a = log ? log.entries : [], cnt = {};   // type -> action -> count
   for (const e of a) for (const [t, act] of actorsOf(e) || []) { const c = cnt[t] || (cnt[t] = {}); c[act] = (c[act] || 0) + 1; }
-  // types that did something in this village's log, plus any with boxes unchecked (so they can be turned back on)
+  // types that did something in this village's log, plus any partly unchecked (so they can be turned back on); a type that is
+  // all off and has done nothing here stays out of the way (Select none turns off every type) until Select all
   const types = new Set(Object.keys(cnt));
   for (const k of off) types.add(k.split("|")[0]);
-  const list = [...types].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
+  const list = [...types].filter(t => cnt[t] || ACTS_FOR(t).some(x => isOn(t, x))).sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
+  shownTypes = list;
   const html = list.map(t => {
     const acts = ACTS_FOR(t), c = cnt[t] || {}, n = acts.filter(x => isOn(t, x)).length, total = acts.reduce((s2, x) => s2 + (c[x] || 0), 0);
     const col = t === "Player" ? "var(--accent2)" : profColor(t);
-    return `<details class="dd${n < acts.length ? " part" : ""}" data-t="${esc(t)}"${openType === t ? " open" : ""}><summary><i style="background:${col}"></i>${esc(t)} <span class="n">${total}</span>${n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}</summary>` +
+    return `<details class="dd${n === 0 ? " none" : n < acts.length ? " part" : ""}" data-t="${esc(t)}"${openType === t ? " open" : ""}><summary>` +
+      `<input type="checkbox" class="tcb" title="Show or hide all of ${esc(t)}"${n ? " checked" : ""}${n && n < acts.length ? ` data-part="1"` : ""}><i style="background:${col}"></i>${esc(t)} <span class="n">${total}</span>${n && n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}</summary>` +
       `<div class="menu">${acts.map(x => `<label><input type="checkbox" data-a="${x}"${isOn(t, x) ? " checked" : ""}><span>${ACTIONS[x]}</span><span class="n">${c[x] || 0}</span></label>`).join("")}` +
       `<div class="mrow"><button data-all="1">All</button><button data-all="0">None</button></div></div></details>`;
   }).join("");
   $("l-filters").innerHTML = `<span class="flabel">Show logs for</span>` + (html || `<span class="sub">No villager actions yet</span>`) +
-    (off.size ? `<button class="fbtn reset" id="l-reset">Show all</button>` : "");
+    (html ? `<button class="fbtn all" id="l-all">Select all</button><button class="fbtn" id="l-none">Select none</button>` : "");
+  for (const cb of $("l-filters").querySelectorAll("input.tcb[data-part]")) cb.indeterminate = true;   // some actions on, some off
 }
 $("l-filters").addEventListener("toggle", e => {
   const d = e.target; if (!d.matches || !d.matches("details.dd")) return;
@@ -588,6 +602,8 @@ $("l-filters").addEventListener("toggle", e => {
   else if (openType === d.dataset.t) openType = null;
 }, true);
 $("l-filters").addEventListener("change", e => {
+  const tcb = e.target.closest("input.tcb");
+  if (tcb) { setType(tcb.closest("details").dataset.t, tcb.checked); saveOff(); renderLog(true); return; }
   const cb = e.target.closest("input[data-a]"); if (!cb) return;
   const t = cb.closest("details").dataset.t, k = t + "|" + cb.dataset.a;
   if (cb.checked) off.delete(k); else off.add(k);
@@ -595,7 +611,8 @@ $("l-filters").addEventListener("change", e => {
 });
 $("l-filters").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
-  if (b.id === "l-reset") { off.clear(); openType = null; }
+  if (b.id === "l-all") { off.clear(); openType = null; }
+  else if (b.id === "l-none") { for (const t of allTypes(shownTypes)) setType(t, false); openType = null; }
   else {
     const t = b.closest("details").dataset.t;
     if (b.dataset.all) for (const x of ACTS_FOR(t)) { if (b.dataset.all === "1") off.delete(t + "|" + x); else off.add(t + "|" + x); }
