@@ -130,7 +130,8 @@ function scanBeds(rec) {
 function bedCount(rec) { if (!rec.beds || rec.bedDirty) { rec.bedDirty = false; scanBeds(rec); } return rec.beds.length; }
 // beds >= villagers + 1, counting the children of pairs already in love (born in a moment) as villagers
 const lovesIn = rec => S.loves.filter(L => L.rec === rec).length;
-function bedsOK(rec) { const v = villagerCount(rec) + lovesIn(rec); return v < MAX_TOTAL && bedCount(rec) >= v + 1; }
+const maxTotal = rec => rec && rec.pop ? Math.max(MAX_TOTAL, Math.ceil(rec.pop * 1.5)) : MAX_TOTAL;   // sized villages (2-100 villagers) may grow by half
+function bedsOK(rec) { const v = villagerCount(rec) + lovesIn(rec); return v < maxTotal(rec) && bedCount(rec) >= v + 1; }
 
 // A free bed for a newborn: not a roster slot's bed, not any live member's bed, not another newborn's.
 const bedKey = b => b.x + "," + b.y + "," + b.z;

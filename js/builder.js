@@ -137,6 +137,8 @@ const reqText = short => Object.keys(short).slice(0, 2).map(k => short[k] + " " 
 
 // ---------------------------------------------------------------- starting stock
 // Materials for the first house (small house of the village style) + 10 %, some spare foundation blocks, and a healthy purse.
+// A village with a furniture maker gets its beds from it (js/furniture.js): its builders start without the beds of their kit and buy them.
+const bedsFromFurniture = rec => !!(rec && rec.roster && rec.roster.some(sl => sl.prof === "furniture_maker"));
 function startStock(v) {
   const T = TR().inv, a = T.create(), BPr = BP();
   const style = styleIdx(v && v.style);
@@ -145,6 +147,7 @@ function startStock(v) {
   const ex = Object.assign({}, bp.exact);
   for (const k in ex) ex[k] = Math.ceil(ex[k] * 1.1);
   ex[found] = (ex[found] || 0) + FILL_SPARE;
+  if (BF.I.red_bed != null && bedsFromFurniture(v && v.village)) delete ex[BF.I.red_bed];
   for (const k in ex) T.add(a, +k, ex[k]);
   T.add(a, BF.I.emerald, Math.floor(rnd(40, 81)));
   if (BF.I.bucket != null) T.add(a, BF.I.bucket, 1);        // an empty bucket: the well's water is carried in it
@@ -821,8 +824,13 @@ function importAll(o) {
   }
 }
 // a builder (re)spawns: give it back the house it claimed
-function onSpawn(m, rec) {
+function onSpawn(m, rec, saved) {
   const built = builtOf(rec), idx = m.slot ? m.slot.idx : -1;
+  // the kit was packed before the builder knew its village (mobs.js createMob): a new builder of a furniture-maker village hands back its beds
+  if (!saved && BF.I.red_bed != null && Array.isArray(m.inv) && bedsFromFurniture(rec)) {
+    const n = TR().inv.count(m.inv, BF.I.red_bed);
+    if (n) TR().inv.remove(m.inv, BF.I.red_bed, n);
+  }
   const e = built.find(x => x.state === "done" && x.claim === idx);
   if (e && bpOf(e).door) { const H = homeFor(e); m.home = H; m.bed = H.beds[0]; }
 }
