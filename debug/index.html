@@ -263,11 +263,12 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
-  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
   es.onopen = () => { serverUp = true; status(); };
 }
+let logDirty = false;   // a (re)connect brought the server's full logs: redraw the log with the next snapshot
 let serverUp = false, gameErr = null, errAt = 0;   // gameErr: the game's feed failing to build a snapshot (it sends the error instead)
 function status() {
   const el = $("conn"), live = snap && Date.now() - lastAt < (snap.hidden ? 70000 : 2500);   // a background tab only sends about once a second, or less
@@ -300,7 +301,7 @@ function onSnap(s) {
   const was = viewKey;
   pickView(s);
   renderTop(s); renderVillages(s); renderVillage(s); status();
-  if (logChanged || was !== viewKey) renderLog();
+  if (logChanged || logDirty || was !== viewKey) { logDirty = false; renderLog(); }
 }
 // The village on show: the one the user picked, else the nearest loaded one (the list comes sorted loaded-first by distance).
 function pickView(s) {
