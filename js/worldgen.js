@@ -1207,11 +1207,14 @@ function drawShell(b, P, S, style) {
       return;
     }
     case "house2": {
-      // two storeys: upper floor with a stair-hole, log band between storeys
+      // two storeys: upper floor with a hatch in the middle of the back wall and a ladder up to it, log band between storeys
+      const lu = w >> 1;                                   // ladder column: between the two beds, straight back from the door
       box(P, S, 0, 0, w, d, y, 7, S.wall, S.floor);
-      for (let q = 1; q < d - 1; q++) for (let u = 1; u < w - 1; u++) if (!(u === w - 2 && q === d - 2)) P(u, y + 4, q, S.floor);
+      for (let q = 1; q < d - 1; q++) for (let u = 1; u < w - 1; u++) if (!(u === lu && q === d - 2)) P(u, y + 4, q, S.floor);
       for (let q = 1; q < d - 1; q++) { P(0, y + 4, q, S.log); P(w - 1, y + 4, q, S.log); }
       windows(P, 0, 0, w, d, y + 2, true); windows(P, 0, 0, w, d, y + 6, false); P(1, y + 6, 0, B.glass); P(w - 2, y + 6, 0, B.glass);
+      P(lu, y + 2, d - 1, S.wall);                         // no window behind the ladder (ladders need a solid wall)
+      for (let k = 1; k <= 5; k++) P(lu, y + k, d - 2, BF.ladderId(out));   // against the back wall, one rung above the upper floor to step off
       if (flat) flatRoof(P, 0, 0, w, d, y + 8, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 7, S.wall, S.roof);
       door();
       P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, B.chest);

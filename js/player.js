@@ -1166,6 +1166,9 @@ function secondaryDown() {
   if (target && target.id === BF.B.furnace && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
   }
+  if (target && target.id === BF.B.chest && useBlk) {
+    openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
+  }
   if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
   const sel = selectedItem(); if (!sel) return false;
   const it = BF.items[sel.id]; if (!it) return false;

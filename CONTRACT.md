@@ -170,6 +170,8 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 - Ladders: block `ladder: {f}` (f = direction the ladder faces, i.e. the clicked face normal; the wall is at pos - `BF.DIRS[f]`), `BF.ladderId(f)`, box 2/16 against the wall, `solid: false` (no collision, still raycast-targetable), hidden, `item`/`drop` = item `ladder`.
   player.js `placeLadder()`: only on the side face of a full solid opaque block (`BF.ladderSupport(id)`), or clicking a ladder's top/bottom face extends the column with the same facing. world.js `setBlock` pops (one drop, none in creative) any ladder whose wall block stops being a support.
 - Climbing (player.js `physics`): when the feet or waist cell is a ladder (and not flying/swimming) gravity is replaced: jump, or forward while pushed against a wall, goes up at 2.35 b/s; sneak holds position; otherwise slides down at 3 b/s; horizontal speed clamped to 3 b/s; fall distance is reset (no fall damage). Mobs do not climb.
+- Village houses: the two-storey `house2` has its upper-floor hatch in the middle of the back wall (u = w>>1, straight back from the door, between the two beds) with a ladder column from the ground floor
+  to one rung above the upper floor (y+1..y+5, facing the door); the back-wall window behind it is left out. Worlds generated before this had the hatch in the back corner with no ladder; unedited houses regenerate with the ladder.
 - Recipes: 6 glass (3x2) -> 16 glass panes; 6 stained glass of a colour (3x2) -> 16 stained panes of it; dye ringed by 8 panes of any kind -> 8 stained panes; 6 iron ingots (3x2) -> 16 iron bars; 7 sticks (H) -> 3 ladders. Ladder burns 7.5 s.
 
 ## sky.js (owner: sky/textures worker)
@@ -232,6 +234,10 @@ Owns camera transform, input, pointer lock, block break/place, attacking mobs, H
   count(itemId), selected() -> {id, count}|null, selectedIndex, select(i), consumeSelected(n),
   isOpen(), open(mode?), close(), clear() }`
 Owns hotbar UI, inventory screen, crafting.
+- Chests: right-clicking a `chest` block (player.js, like the furnace) opens `open("chest", {x,y,z})`: 27 slots in 3 rows above the inventory, same click/drag/shift rules as other containers
+  (shift-click tops up matching stacks first, then empty slots, in either direction). Contents live in `chests` ("x,y,z" -> `{pos, slots[27]}`), created on first open or `chestAdd(x,y,z,id,n) -> leftover`;
+  `chestState(x,y,z)`. Saved in `serialize().chests` (only non-empty chests; old saves have none). world.js `setBlock` calls `chestRemoved(x,y,z)` whenever a chest block is replaced by anything
+  (broken, exploded, /setblock): the screen closes and the contents spill as item drops (also in creative). Events `chestOpened` / `chestClosed` (x,y,z) play a low creak (audio.js). No double chests.
 
 ## save.js
 
