@@ -20,7 +20,7 @@ function rotId(id, k) {
   if (!k) return id;
   const b = BF.blocks[id];
   if (!b) return id;
-  if (b.door) return BF.doorId((b.door.f + k) & 3, b.door.upper, b.door.open);
+  if (b.door) return BF.doorId((b.door.f + k) & 3, b.door.upper, b.door.open, b.door.wood);
   if (b.bed) return BF.bedId((b.bed.f + k) & 3, b.bed.head);
   if (b.wallTorch) return BF.B["wall_torch_" + ["north", "east", "south", "west"][(b.wallTorch.f + k) & 3]];
   if (b.ladder) return BF.ladderId((b.ladder.f + k) & 3);
@@ -192,7 +192,7 @@ function get(type, rot, style, h, opts, wood) {
     const c = cells[i];
     if (!c.pair) continue;
     const bk = BF.blocks[c.id];
-    const want = (bk.door ? BF.doorId(bk.door.f, 1, 0) : BF.bedId(bk.bed.f, 1));
+    const want = (bk.door ? BF.doorId(bk.door.f, 1, 0, bk.door.wood) : BF.bedId(bk.bed.f, 1));
     let j = -1;
     for (let k = i + 1; k < cells.length; k++) if (cells[k].id === want) { j = k; break; }
     if (j > i + 1) { const [e] = cells.splice(j, 1); cells.splice(i + 1, 0, e); }

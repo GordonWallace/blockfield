@@ -17,24 +17,33 @@ function rotBox(b, f) {
 }
 // Two-block doors (lower/upper half, open/closed, facing = side the closed slab sits on, towards the placer)
 // and beds (foot/head, facing = foot -> head). One block id per state.
-const doorDefs = [], bedDefs = [];
+const bedDefs = [];
 // Fence gates (shepherd pens): axis = the direction the closed gate spans ("x" or "z"); open gates swing their two leaves
 // to the +z / +x side and let anything walk through. One block id per state; villagers open and close them like doors.
-const gateDefs = [];
-for (const axis of ["x", "z"]) for (const open of [0, 1]) {
-  const posts = [[0, 5, 7, 2, 16, 9], [14, 5, 7, 16, 16, 9]];
-  const leaves = open ? [[0, 6, 9, 2, 9, 15], [0, 12, 9, 2, 15, 15], [14, 6, 9, 16, 9, 15], [14, 12, 9, 16, 15, 15]]
-    : [[2, 6, 7, 14, 9, 9], [2, 12, 7, 14, 15, 9], [6, 9, 7, 10, 12, 9]];
-  const sw = b => (axis === "x" ? b : [b[2], b[1], b[0], b[5], b[4], b[3]]);
-  gateDefs.push({ name: "oak_fence_gate_" + axis + (open ? "_open" : ""), tiles: "planks", render: "model", model: "gate", opaque: false, solid: !open,
-    hardness: 2, tool: "axe", drop: "oak_fence_gate", item: "oak_fence_gate", hidden: true, gate: { axis, open: !!open },
-    boxes: [...posts, ...leaves].map(sw), color: "#a2834f" });
+// One door / gate per wood species: `<sp>_door_*` and `<sp>_fence_gate_*` (oak's ids come first; the other species are appended in the
+// wood variants pack below). The block's `door.wood` / `gate.wood` names the species; BF.doorId / BF.gateId take it as their last argument.
+function gateDefsOf(sp) {
+  const out = [];
+  for (const axis of ["x", "z"]) for (const open of [0, 1]) {
+    const posts = [[0, 5, 7, 2, 16, 9], [14, 5, 7, 16, 16, 9]];
+    const leaves = open ? [[0, 6, 9, 2, 9, 15], [0, 12, 9, 2, 15, 15], [14, 6, 9, 16, 9, 15], [14, 12, 9, 16, 15, 15]]
+      : [[2, 6, 7, 14, 9, 9], [2, 12, 7, 14, 15, 9], [6, 9, 7, 10, 12, 9]];
+    const sw = b => (axis === "x" ? b : [b[2], b[1], b[0], b[5], b[4], b[3]]);
+    out.push({ name: sp + "_fence_gate_" + axis + (open ? "_open" : ""), tiles: sp === "oak" ? "planks" : sp + "_planks", render: "model", model: "gate", opaque: false, solid: !open,
+      hardness: 2, tool: "axe", drop: sp + "_fence_gate", item: sp + "_fence_gate", hidden: true, gate: { axis, open: !!open, wood: sp },
+      boxes: [...posts, ...leaves].map(sw), color: WOOD_COLOR[sp] });
+  }
+  return out;
 }
-for (let f = 0; f < 4; f++) for (const upper of [0, 1]) for (const open of [0, 1]) {
-  const box = rotBox(open ? [0, 0, 0, 3, 16, 16] : [0, 0, 13, 16, 16, 16], f);
-  doorDefs.push({ name: "oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f], tiles: upper ? "oak_door_top" : "oak_door_bottom",
-    render: "model", model: "door", solid: !open, hardness: 3, tool: "axe", drop: "oak_door", item: "oak_door", hidden: true,
-    door: { f, upper: !!upper, open: !!open }, boxes: [box], box, color: "#9a7448" });
+function doorDefsOf(sp) {
+  const out = [];
+  for (let f = 0; f < 4; f++) for (const upper of [0, 1]) for (const open of [0, 1]) {
+    const box = rotBox(open ? [0, 0, 0, 3, 16, 16] : [0, 0, 13, 16, 16, 16], f);
+    out.push({ name: sp + "_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f], tiles: sp + (upper ? "_door_top" : "_door_bottom"),
+      render: "model", model: "door", solid: !open, hardness: 3, tool: "axe", drop: sp + "_door", item: sp + "_door", hidden: true,
+      door: { f, upper: !!upper, open: !!open, wood: sp }, boxes: [box], box, color: sp === "oak" ? "#9a7448" : WOOD_COLOR[sp] });
+  }
+  return out;
 }
 for (let f = 0; f < 4; f++) for (const head of [0, 1]) {
   const legs = head ? [[0, 0, 13, 3, 3, 16], [13, 0, 13, 16, 3, 16]] : [[0, 0, 0, 3, 3, 3], [13, 0, 0, 16, 3, 3]];
@@ -157,7 +166,7 @@ const BLOCK_DEFS = [
   { name: "potatoes_young", tiles: "potatoes_young", render: "cross", solid: false, opaque: false, hardness: 0, drop: "potato", growsInto: "potatoes", color: "#5a9a3a" },
   { name: "beetroots_young", tiles: "beetroots_young", render: "cross", solid: false, opaque: false, hardness: 0, drop: "beetroot_seeds", growsInto: "beetroots", color: "#5a9a3a" },
   { name: "beetroots", tiles: "beetroots", render: "cross", solid: false, opaque: false, hardness: 0, drop: "beetroot", extraDrops: [["beetroot_seeds", 1, 3, 1]], color: "#a8323a" },
-  ...doorDefs, ...bedDefs,
+  ...doorDefsOf("oak"), ...bedDefs,
   // ---- stone/ore pack ----
   { name: "granite", tiles: "granite", hardness: 1.5, color: "#9a6b5a", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "diorite", tiles: "diorite", hardness: 1.5, color: "#bdbdbd", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 1 },
@@ -275,12 +284,16 @@ const BLOCK_DEFS = [
   { name: "carpentry_bench", jobsite: "furniture_maker", tiles: { top: "carpentry_bench_top", side: "carpentry_bench_side", front: "carpentry_bench_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#9a7448" },
   // ---- end furniture pack ----
   // ---- shepherd pack ---- (appended; ids are saved numerically: only ever append after this line)
-  ...gateDefs,   // oak_fence_gate_<x|z>[_open]: pen gates (js/shepherd.js)
+  ...gateDefsOf("oak"),   // oak_fence_gate_<x|z>[_open]: pen gates (js/shepherd.js)
   // ---- end shepherd pack ----
   // ---- miner pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Miners")
   // mining bench: the miner villager's jobsite (not vanilla): a stone-topped spruce bench with a pickaxe on it and an ore crate in front
   { name: "mining_bench", jobsite: "miner", tiles: { top: "mining_bench_top", side: "mining_bench_side", front: "mining_bench_front", bottom: "spruce_planks" }, hardness: 2.5, tool: "pickaxe", creativeTab: "functional", color: "#6e6a64" },
   // ---- end miner pack ----
+  // ---- wood variants pack ---- (appended; ids are saved numerically: only ever append after this line)
+  // doors (16 states) and fence gates (4 states) for every wood species other than oak, whose ids sit further up
+  ...WOOD_SPECIES.filter(sp => sp !== "oak").flatMap(sp => [...doorDefsOf(sp), ...gateDefsOf(sp)]),
+  // ---- end wood variants pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -513,7 +526,7 @@ const ITEM_DEFS = [
   { name: "raw_cod", food: 2, color: "#b8a888" },
   { name: "cooked_cod", food: 5, color: "#d8b888" },
   { name: "bow", tool: { type: "bow", tier: 1, speed: 1, damage: 1 }, color: "#8a6a3a" },
-  { name: "oak_door", places: "door", color: "#9a7448" },
+  { name: "oak_door", places: "door", wood: "oak", color: "#9a7448" },
   { name: "red_bed", places: "bed", color: "#a82828" },
   // ---- stone/ore pack items ----
   { name: "lapis_lazuli", color: "#2a4aa8" },
@@ -549,9 +562,14 @@ const ITEM_DEFS = [
   // ---- auto map (js/mapview.js; append-only: ids of the items above must not move) ----
   { name: "auto_map", stack: 1, color: "#d8c890", autoBlank: true, creativeTab: "misc", label: "Auto-Fill Map", search: "auto map autofill auto-fill automap creative terrain overview" },   // right click: asks for a width, then fills itself from the world generator
   // ---- shepherd items (js/shepherd.js; append-only) ----
-  { name: "oak_fence_gate", places: "gate", color: "#a2834f", creativeTab: "functional" },   // 4 sticks + 2 planks; pens have one
+  { name: "oak_fence_gate", places: "gate", wood: "oak", color: "#a2834f", creativeTab: "functional" },   // 4 sticks + 2 planks; pens have one
   { name: "shears", stack: 1, tool: { type: "shears", tier: 1, speed: 4, damage: 1 }, color: "#c8c8d0" },   // shears sheep; breaks leaves faster; 3 iron ingots
   // ---- end shepherd items ----
+  // ---- wood variants items (append-only): a door and a fence gate for every other wood; icons reuse the oak sprites in the species colour ----
+  ...WOOD_SPECIES.filter(sp => sp !== "oak").flatMap(sp => [
+    { name: sp + "_door", places: "door", wood: sp, sprite: "oak_door", color: WOOD_COLOR[sp], creativeTab: "functional" },
+    { name: sp + "_fence_gate", places: "gate", wood: sp, sprite: "oak_fence_gate", color: WOOD_COLOR[sp], creativeTab: "functional" }]),
+  // ---- end wood variants items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -627,10 +645,12 @@ BF.CBOXES = CBOXES; BF.SHAPES = SHAPES; BF.LIGHTBLOCK = LIGHTBLOCK;
 BF.DIRS = DIRS;
 BF.rotBox = rotBox;
 BF.dirIndex = (dx, dz) => Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0);
-BF.doorId = (f, upper, open) => B["oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
+// door / gate block for a state; wood = species (default oak; unknown species fall back to oak)
+const woodOr = (wood, probe) => (wood && B[wood + probe] != null ? wood : "oak");
+BF.doorId = (f, upper, open, wood) => B[woodOr(wood, "_door_lower_n") + "_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
 BF.ladderId = f => B["ladder_" + "nesw"[f & 3]]; // ladder facing f (away from its wall)
 BF.tentId = (f, r, l, up) => B["tent_" + (up ? "up_" : "") + r + "_" + l + "_" + "nesw"[f & 3]];
-BF.gateId = (axis, open) => B["oak_fence_gate_" + axis + (open ? "_open" : "")];
+BF.gateId = (axis, open, wood) => B[woodOr(wood, "_fence_gate_x") + "_fence_gate_" + axis + (open ? "_open" : "")];
 BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3]];
 // Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.
