@@ -105,7 +105,7 @@ const BLOCK_DEFS = [
   { name: "jungle_log", tiles: { top: "jungle_log_top", side: "jungle_log", bottom: "jungle_log_top" }, hardness: 2, tool: "axe", color: "#594420" },
   { name: "jungle_leaves", tiles: "jungle_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["jungle_sapling", 1, 1, 0.025], ["stick", 1, 2, 0.02]], color: "#2f8a1a" },
   { name: "pumpkin", tiles: { top: "pumpkin_top", side: "pumpkin_side", bottom: "pumpkin_top" }, hardness: 1, tool: "axe", color: "#c87a1a" },
-  { name: "furnace", tiles: { top: "furnace_top", side: "furnace_side", front: "furnace_front", bottom: "furnace_top" }, hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#5e5e5e" },
+  { name: "furnace", tiles: { top: "furnace_top", side: "furnace_side", front: "furnace_front", bottom: "furnace_top" }, hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#5e5e5e", furnaceFacing: 2 },   // opening to the south; furnace_n/e/w (furnace facing pack) are the other ways round
   // village blocks
   { name: "dirt_path", tiles: { top: "dirt_path_top", side: "dirt_path_side", bottom: "dirt" }, opaque: false, hardness: 0.65, tool: "shovel", drop: "dirt", color: "#94793f" },
   { name: "farmland", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#5a3c22" },
@@ -117,7 +117,7 @@ const BLOCK_DEFS = [
   { name: "lantern", tiles: { top: "lantern_top", side: "lantern", bottom: "lantern_bottom" }, render: "model", model: "lantern", opaque: false, emit: 15, hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#f2b84b" },
   { name: "white_wool", tiles: "white_wool", hardness: 0.8, color: "#f0f0f0" },
   { name: "oak_fence", tiles: "planks", icon: "oak_fence", render: "model", model: "fence", opaque: false, hardness: 2, tool: "axe", color: "#a2834f" },
-  { name: "chest", tiles: { top: "chest_top", side: "chest_side", front: "chest_front", bottom: "chest_bottom" }, render: "model", model: "chest", opaque: false, hardness: 2.5, tool: "axe", color: "#a0742e" },
+  { name: "chest", tiles: { top: "chest_top", side: "chest_side", front: "chest_front", bottom: "chest_bottom" }, render: "model", model: "chest", opaque: false, hardness: 2.5, tool: "axe", color: "#a0742e", chestFacing: 2 },   // lid opening to the south; chest_n/e/w below
   // flowing water: level 1 (next to a source) .. 7 (thinnest). Never placed by worldgen.
   ...[1, 2, 3, 4, 5, 6, 7].map(l => ({ name: "water_flow_" + l, tiles: "water", solid: false, opaque: false, render: "liquid", hardness: Infinity, drop: null, color: "#3f76e4", replaceable: true, fluidLevel: l })),
   // plants (render "cross": two diagonal quads, no collision, broken by flowing water)
@@ -294,6 +294,14 @@ const BLOCK_DEFS = [
   // doors (16 states) and fence gates (4 states) for every wood species other than oak, whose ids sit further up
   ...WOOD_SPECIES.filter(sp => sp !== "oak").flatMap(sp => [...doorDefsOf(sp), ...gateDefsOf(sp)]),
   // ---- end wood variants pack ----
+  // ---- facing pack ---- (appended; ids are saved numerically: only ever append after this line)
+  // furnaces and chests opening to the north, east or west (`furnace` and `chest` themselves open south); hidden states that drop and pick
+  // the plain block, see BF.furnaceId / BF.chestId and BF.openFacing
+  ...[0, 1, 3].map(f => ({ name: "furnace_" + "nesw"[f], tiles: { top: "furnace_top", side: "furnace_side", front: "furnace_front", bottom: "furnace_top" }, frontFace: [5, 2, 4, 3][f],
+    hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#5e5e5e", hidden: true, drop: "furnace", item: "furnace", furnaceFacing: f })),
+  ...[0, 1, 3].map(f => ({ name: "chest_" + "nesw"[f], tiles: { top: "chest_top", side: "chest_side", front: "chest_front", bottom: "chest_bottom" }, frontFace: [5, 2, 4, 3][f],
+    render: "model", model: "chest", opaque: false, hardness: 2.5, tool: "axe", color: "#a0742e", hidden: true, drop: "chest", item: "chest", chestFacing: f })),
+  // ---- end facing pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -656,6 +664,28 @@ BF.dirIndex = (dx, dz) => Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz >
 // door / gate block for a state; wood = species (default oak; unknown species fall back to oak)
 const woodOr = (wood, probe) => (wood && B[wood + probe] != null ? wood : "oak");
 BF.doorId = (f, upper, open, wood) => B[woodOr(wood, "_door_lower_n") + "_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
+// Furnaces and chests: one block id per facing (the side the opening looks out of, 0..3 = n e s w). BF.isFurnace / BF.isChest for any of them.
+BF.furnaceId = f => ((f & 3) === 2 ? B.furnace : B["furnace_" + "nesw"[f & 3]]);
+BF.chestId = f => ((f & 3) === 2 ? B.chest : B["chest_" + "nesw"[f & 3]]);
+const FURNACE = new Uint8Array(MAX_BLOCK + 1), CHEST = new Uint8Array(MAX_BLOCK + 1);
+for (const b of blocks) { if (b.furnaceFacing != null) FURNACE[b.id] = 1; if (b.chestFacing != null) CHEST[b.id] = 1; }
+BF.isFurnace = id => FURNACE[id] === 1;
+BF.isChest = id => CHEST[id] === 1;
+// The facing id of a furnace or chest (any state) turned to f; other blocks come back unchanged.
+BF.facedId = (id, f) => (FURNACE[id] ? BF.furnaceId(f) : CHEST[id] ? BF.chestId(f) : id);
+// Which way a furnace or chest put down at p should open: towards the placer `from` ({x, z}) among the sides whose neighbouring cell is not
+// solid; with no open side, towards the placer anyway. 0..3 = n e s w.
+BF.openFacing = (p, from) => {
+  const W = BF.world;
+  let best = from ? BF.dirIndex(from.x - p.x - 0.5, from.z - p.z - 0.5) : 2, bs = -Infinity;
+  for (let f = 0; f < 4; f++) {
+    const [dx, dz] = DIRS[f];
+    if (SOLID[W.getBlock(p.x + dx, p.y, p.z + dz)]) continue;
+    const sc = from ? dx * (from.x - p.x - 0.5) + dz * (from.z - p.z - 0.5) : f === 2 ? 1 : 0;
+    if (sc > bs) { bs = sc; best = f; }
+  }
+  return best;
+};
 BF.ladderId = f => B["ladder_" + "nesw"[f & 3]]; // ladder facing f (away from its wall)
 BF.tentId = (f, r, l, up) => B["tent_" + (up ? "up_" : "") + r + "_" + l + "_" + "nesw"[f & 3]];
 BF.gateId = (axis, open, wood) => B[woodOr(wood, "_fence_gate_x") + "_fence_gate_" + axis + (open ? "_open" : "")];
