@@ -5,20 +5,25 @@
 // window.BF_DEBUG_FEED, or ?debugfeed=<port or url>; ?debugfeed=off stops it). It never changes what the game shows.
 // Snapshots go out 4 times a second as small POSTs; the village layout and the log are only re-sent when they change.
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
-// API: BF.debugFeed = { url, snapshot(), update() }
+// API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update() }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-function feedUrl() {
+// Where to send: ?debugfeed=<port|url> or the address the debug server injected, else port 8001 on the game's own host, then
+// on localhost and 127.0.0.1 (a game opened by a LAN address or a name like mymac.local still finds a server on this machine).
+function feedUrls() {
   const q = new URLSearchParams(location.search).get("debugfeed");
-  if (q === "off") return "";
-  let u = q || window.BF_DEBUG_FEED || "8001";   // always on: the default debug port on the game's own host
-  if (/^\d+$/.test(u)) u = "http://" + (location.hostname || "localhost") + ":" + u;
-  return u.replace(/\/+$/, "");
+  if (q === "off") return [];
+  const port = u => /^\d+$/.test(u);
+  const given = q || window.BF_DEBUG_FEED || "";
+  if (given && !port(given)) return [given.replace(/\/+$/, "")];
+  const p = given || "8001", h = location.hostname || "localhost";
+  return [...new Set([h, "localhost", "127.0.0.1"].map(x => "http://" + (x.includes(":") && !x.startsWith("[") ? "[" + x + "]" : x) + ":" + p))];
 }
-const URL_ = feedUrl();
-if (!URL_) return;
+const URLS = feedUrls();
+if (!URLS.length) return;
+let URL_ = URLS[0], urlIdx = 0, told = false;
 
 const EVERY = 250, RETRY = 4000, RETRY_SLOW = 15000;
 let misses = 0, nextT = 0, busy = false, sent = 0;
@@ -101,7 +106,7 @@ function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) mobs[m.type] = (mobs[m.type] || 0) + 1;
-  return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, ...villages(pp) };
+  return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden, ...villages(pp) };
 }
 
 function update() {
@@ -110,16 +115,33 @@ function update() {
   if (busy || now < nextT || !BF.debugInfo) return;
   nextT = now + EVERY;
   let body;
-  try { body = JSON.stringify(snapshot()); } catch (e) { console.warn("debug feed:", e); nextT = now + RETRY; return; }
+  try { body = JSON.stringify(snapshot()); }
+  catch (e) {   // tell the debug screen too, so it shows the error instead of waiting for the game
+    console.warn("debug feed:", e); nextT = now + RETRY;
+    body = JSON.stringify({ t: Date.now(), n: ++sent, error: String(e && e.stack || e).split("\n").slice(0, 3).join("\n") });
+  }
   busy = true;
   // text/plain keeps it a "simple" cross-origin request (no CORS preflight)
-  fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000 })
+  // gives up after 5 s, so a request that never gets an answer can't stop the feed for good
+  const ctl = new AbortController(), stop = setTimeout(() => ctl.abort(), 5000);
+  fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000, signal: ctl.signal })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
     .then(t => { if (t === "resync") resync(); })   // a restarted server asks for the layouts and logs again
-    .then(() => { misses = 0; })
-    .catch(() => { nextT = performance.now() + (++misses > 5 ? RETRY_SLOW : RETRY); resync(); })   // server down: resend everything when it's back
-    .finally(() => { busy = false; });
+    .then(() => { if (!told) { told = true; console.info("Blockfield debug feed: sending to " + URL_); } misses = 0; })
+    .catch(() => {                                // server down or not at this address: try the next one, resend everything when it's back
+      misses++;
+      if (misses === URLS.length * 2 && !told) console.info("Blockfield debug feed: no debug server at " + URLS.join(" or ") + ". Start ./run.sh (or node debug/server.js) to use the debug screen; the game plays normally without it.");
+      URL_ = URLS[urlIdx = (urlIdx + 1) % URLS.length];
+      BF.debugFeed.url = URL_;
+      nextT = performance.now() + (misses > 5 * URLS.length ? RETRY_SLOW : RETRY / URLS.length);
+      told = false; resync();
+    })
+    .finally(() => { busy = false; clearTimeout(stop); });
 }
 
-BF.debugFeed = { url: URL_, snapshot, update };
+BF.debugFeed = { url: URL_, urls: URLS, snapshot, update };
+// The game loop (requestAnimationFrame) stops while the game's tab is in the background, e.g. when the debug screen is opened
+// as another tab in the same window. A timer keeps the feed going then (browsers still run it about once a second), so the
+// debug screen can say the game is in the background instead of waiting for it.
+setInterval(() => { if (document.hidden) update(); }, 1000);
 })();

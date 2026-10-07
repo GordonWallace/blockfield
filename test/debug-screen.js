@@ -64,19 +64,34 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   const count = () => dbg.evaluate(() => document.querySelectorAll('#log .ent').length);
   const all = await count();
   ok('dropdown per type', await dbg.evaluate(t => !!document.querySelector(`#l-filters details.dd[data-t="${t}"]`), tr.seller));
-  await dbg.click(`#l-filters details.dd[data-t="${tr.seller}"] summary`);
-  await dbg.uncheck(`#l-filters details.dd[data-t="${tr.seller}"] input[data-a="sell"]`);
+  const texts = () => dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
+  const dd = t => `#l-filters details.dd[data-t="${t}"]`;
+  await dbg.click(`${dd(tr.seller)} summary`);
+  await dbg.uncheck(`${dd(tr.seller)} input[data-a="sell"]`);
   await dbg.waitForTimeout(200);
-  const vis = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
-  ok('unchecking Selling hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
-  ok('so does a villager buying from that type', !vis.some(t => /got 1 Test/.test(t)));
+  let vis = await texts();
+  // an entry shows while any villager in it is selected: the buyer (a villager, or the player) still is
+  ok('a trade still shows while its buyer is selected', vis.some(t => /got 1 Test/.test(t)) && vis.some(t => /^Player traded/.test(t)));
   ok('dropdown stays open after a change', await dbg.evaluate(t => document.querySelector(`#l-filters details.dd[data-t="${t}"]`).open, tr.seller));
+  ok('partly on: chip checkbox shows mixed', await dbg.evaluate(s => document.querySelector(s + ' input.tcb').indeterminate, dd(tr.seller)));
+  // each type's own checkbox turns all of it off without opening its menu
+  await dbg.click(`${dd('Player')} input.tcb`); await dbg.waitForTimeout(200);
+  vis = await texts();
+  ok('player chip checkbox hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
+  ok('chip checkbox does not open the menu', !(await dbg.evaluate(s => document.querySelector(s).open, dd('Player'))));
   await dbg.screenshot({ path: out + '-filters.png' });
   await dbg.reload(); await dbg.waitForTimeout(1500);
-  const texts = () => dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
   ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(t => !document.querySelector(`#l-filters details.dd[data-t="${t}"] input[data-a="sell"]`).checked, tr.seller));
-  await dbg.click('#l-reset'); await dbg.waitForTimeout(200);
-  ok('show all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
+  // Select none, then one type: only entries involving that type (whoever the other party is)
+  await dbg.click('#l-none'); await dbg.waitForTimeout(200);
+  const none = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].filter(e => /trade|bed|job|birth|death/.test(e.className)).length);
+  ok('select none hides villager entries', none === 0);
+  await dbg.check(`${dd(tr.buyer)} input.tcb`); await dbg.waitForTimeout(200);
+  vis = await texts();
+  ok('one type selected shows its trades with unselected types', vis.some(t => /got 1 Test/.test(t)) && !vis.some(t => /^Player traded/.test(t)));
+  ok('and nothing without it', vis.every(t => !/traded with/.test(t) || t.includes('(' + tr.buyer + ')')));
+  await dbg.click('#l-all'); await dbg.waitForTimeout(200);
+  ok('select all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
   // a second village: the view follows the nearest loaded one, the list shows both with distances, and the first can be picked
   const first = want.name;
   const second = await game.evaluate(() => {
@@ -106,6 +121,20 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   await dbg.screenshot({ path: out + '-picked.png' });
   await dbg.click('#vl-auto'); await dbg.waitForTimeout(600);
   ok('follow nearest goes back', (await got()).name === second);
+  // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
+  ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
+  // a feed error (an old villagelog.js without panelData, say) shows on the screen instead of "waiting for the game"
+  await game.evaluate(() => { window._pd = BF.vlog.panelData; delete BF.vlog.panelData; });
+  await dbg.waitForTimeout(6000);
+  const errShown = await dbg.evaluate(() => ({ conn: document.getElementById('conn').textContent, wait: !document.getElementById('waiting').hidden, text: document.getElementById('waiting').textContent }));
+  ok('feed error shown ' + errShown.conn, errShown.conn === 'Game error' && errShown.wait && /panelData/.test(errShown.text));
+  await game.evaluate(() => { BF.vlog.panelData = window._pd; });
+  await dbg.waitForTimeout(5000);   // after an error the feed waits 4 s before its next try
+  ok('live again once fixed', (await got()).conn === 'Live');
+  // a debug screen opened after the game has gone doesn't show its last snapshot as live
+  await game.close(); await dbg.waitForTimeout(3000);
+  await dbg.reload(); await dbg.waitForTimeout(1500);
+  ok('closed game not shown as live: ' + (await got()).conn, (await got()).conn === 'Game not responding');
   await b.close(); srv.kill();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
