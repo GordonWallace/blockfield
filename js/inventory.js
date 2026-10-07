@@ -1339,7 +1339,7 @@ const api = {
     BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); chests.clear(); });
     BF.on("gameModeChanged", () => { if (open_ && (mode === "creative" || mode === "inventory")) api.close(); });
     BF.on("blockBroken", (x, y, z, id) => {
-      if (id !== BF.B.furnace) return;
+      if (!BF.isFurnace(id)) return;
       const key = `${x},${y},${z}`, f = furnaces.get(key);
       if (!f) return;
       if (furnace === f) api.close();

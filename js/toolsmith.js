@@ -93,19 +93,19 @@ let hooked = false, FLAG = null;
 function hook() {
   if (hooked || !BF.world || !BF.on || BF.B.furnace == null) return;
   hooked = true;
-  FLAG = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); FLAG[BF.B.furnace] = 1;
+  FLAG = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); for (const b of BF.blocks) if (b && BF.isFurnace(b.id)) FLAG[b.id] = 1;
   const scan = (cx, cz, c) => { const CS = BF.CS; BF.world.scanFlagged(c, FLAG, (lx, y, lz) => furnaces.set(pk(cx * CS + lx, y, cz * CS + lz), { x: cx * CS + lx, y, z: cz * CS + lz })); };
   BF.world.onChunkLoad(scan);
   if (BF.world.onChunkUnload) BF.world.onChunkUnload((cx, cz) => { const CS = BF.CS; for (const [k, f] of furnaces) if (Math.floor(f.x / CS) === cx && Math.floor(f.z / CS) === cz) furnaces.delete(k); });
   for (const c of BF.world.chunks.values()) scan(c.cx, c.cz, c);
-  BF.on("blockPlaced", (x, y, z, id) => { if (id === BF.B.furnace) furnaces.set(pk(x, y, z), { x, y, z }); });
+  BF.on("blockPlaced", (x, y, z, id) => { if (BF.isFurnace(id)) furnaces.set(pk(x, y, z), { x, y, z }); });
   BF.on("blockBroken", (x, y, z) => furnaces.delete(pk(x, y, z)));
   BF.on("newWorld", () => { furnaces.clear(); inUse.clear(); });
 }
 const reachOf = R => Math.max(48, (R && R.wg && R.wg.reach) || 0);
 // Can m use the furnace at f for raw ore `rawId` now? (still a furnace, input / output free or holding the same, nobody else at it)
 function usable(m, f, rawId) {
-  if (!f || BF.world.getBlock(f.x, f.y, f.z) !== BF.B.furnace) return false;
+  if (!f || !BF.isFurnace(BF.world.getBlock(f.x, f.y, f.z))) return false;
   const u = inUse.get(pk(f.x, f.y, f.z));
   if (u && u !== m && !u.dead && !u.removed && u.tsm && u.tsm.stage === "smelt") return false;
   const st = INV().furnaceState(f.x, f.y, f.z);
@@ -450,12 +450,13 @@ function placeFurnace(m, spot) {
   if (count(m, BF.B.furnace) < 1 || W.getBlock(spot.x, spot.y, spot.z) !== 0) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.8 && Math.abs(o.position.z - spot.z - 0.5) < 0.8 && o.position.y < spot.y + 1 && o.position.y + 1.8 > spot.y;
   if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;
-  if (!W.setBlock(spot.x, spot.y, spot.z, BF.B.furnace)) return false;
+  const id = BF.furnaceId(BF.openFacing(spot, m.position));
+  if (!W.setBlock(spot.x, spot.y, spot.z, id)) return false;
   TR().inv.remove(m.inv, BF.B.furnace, 1);
   hook();
   furnaces.set(pk(spot.x, spot.y, spot.z), { x: spot.x, y: spot.y, z: spot.z });
   state(m).furnace = { x: spot.x, y: spot.y, z: spot.z };
-  if (BF.emit) BF.emit("blockPlaced", spot.x, spot.y, spot.z, BF.B.furnace);
+  if (BF.emit) BF.emit("blockPlaced", spot.x, spot.y, spot.z, id);
   log("place", m, { furnace: pk(spot.x, spot.y, spot.z) });
   vlog(m, "furnace", "put a furnace down at " + spot.x + ", " + spot.y + ", " + spot.z);
   return true;
@@ -528,7 +529,7 @@ function ai(m, dt, out) {
     // smelting: load, wait beside it (adding fuel when the furnace runs dry), then empty it
     if (!deal.loaded) { if (!loadFurnace(m, deal)) return giveUp("furnace busy", fkey); S.stage = "smelt"; return true; }
     const st = INV().furnaceState(s.x, s.y, s.z);
-    if (!st || BF.world.getBlock(s.x, s.y, s.z) !== BF.B.furnace) { inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
+    if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { emptyFurnace(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; return true; }   // done
     topUpFuel(m, deal, st);

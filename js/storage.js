@@ -56,7 +56,7 @@ function chestsIn(H, b) {
   const W = BF.world, y0 = (H.y != null ? H.y : b.y - 1), list = [];
   for (let x = H.x; x < H.x + H.w; x++) for (let z = H.z; z < H.z + H.d; z++) {
     if (!W.isLoaded(x, z)) continue;
-    for (let y = y0; y <= y0 + 9; y++) if (W.getBlock(x, y, z) === BF.B.chest) list.push({ x, y, z });
+    for (let y = y0; y <= y0 + 9; y++) if (BF.isChest(W.getBlock(x, y, z))) list.push({ x, y, z });
   }
   houseCache.set(H, { t: now, list });
   return list;
@@ -236,7 +236,7 @@ function deliver(f, m, spot) {
   if (!T.inv.canFit(f.inv, [{ id: I.emerald, n: 1 }], [{ id: I.chest, n: 1 }])) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.5 + (o.halfWidth || 0.3) && Math.abs(o.position.z - spot.z - 0.5) < 0.5 + (o.halfWidth || 0.3) && o.position.y < spot.y + 1 && o.position.y + (o.height || 1.8) > spot.y;
   if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;   // somebody is standing there
-  if (!W.setBlock(spot.x, spot.y, spot.z, BF.B.chest)) return false;
+  if (!W.setBlock(spot.x, spot.y, spot.z, BF.chestId(BF.openFacing(spot, f.position)))) return false;
   T.inv.remove(f.inv, I.chest, 1); T.inv.remove(m.inv, I.emerald, 1); T.inv.add(f.inv, I.emerald, 1);
   const c = INV().chestRecord(spot.x, spot.y, spot.z);
   c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS };
@@ -318,7 +318,7 @@ function ai(m, dt, out) {
     st.stage = "go"; st.act = d.act; st.p = d.p; st.t = 0; a.route = null;
   }
   const p = st.p, giveUp = () => { st.avoid[pk(p.x, p.y, p.z)] = dayNow() + AVOID; return stop(); };
-  if (BF.world.getBlock(p.x, p.y, p.z) !== BF.B.chest || !usable(p, keyOf(m))) return stop();
+  if (!BF.isChest(BF.world.getBlock(p.x, p.y, p.z)) || !usable(p, keyOf(m))) return stop();
   st.t += dt;
   a.mode = "idle"; a.t = 2;
   if (st.stage === "go") {

@@ -45,6 +45,10 @@ module.exports = async (pg, out) => {
     res.fmAfter = names(fm.inv);
     res.fmShortAfter = F.shortfall(fm);
     const seeded = inv.create(); F.seed(seeded); res.fmSeed = names(seeded);
+    // ---- furnace facing: one id per facing, all of them furnaces that drop a furnace; the opening texture is on the facing side
+    res.facing = [0, 1, 2, 3].map(f => { const id = BF.furnaceId(f), b = BF.blocks[id]; return [b.name, b.furnaceFacing, BF.isFurnace(id), BF.items[b.drop].name, b.frontFace != null ? b.frontFace : 4]; });
+    res.chestFacing = [0, 1, 2, 3].map(f => { const b = BF.blocks[BF.chestId(f)]; return [b.name, b.chestFacing, BF.isChest(b.id), BF.items[b.drop].name, b.frontFace != null ? b.frontFace : 4]; });
+    res.facingRot = BF.blueprints && BF.blueprints.rotId ? BF.blocks[BF.blueprints.rotId(BF.B.furnace, 1)].name : "no rotId";
     return res;
   });
   console.log(JSON.stringify(r, null, 1));
@@ -70,6 +74,18 @@ module.exports = async (pg, out) => {
     return { loaded, ownCoalAtLoad, afterSmelt, inv: m.inv.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count), left: st.slots, xyz: [x, y, z] };
   });
   console.log("fuel", JSON.stringify(fuel));
+  // placing: towards the placer among the open sides; none open: towards the placer anyway
+  console.log("openFacing", JSON.stringify(await pg.evaluate(xyz => {
+    const W = BF.world, [x, y, z] = xyz, p = { x: x + 3, y, z }, st = BF.B.stone, set = (dx, dz, id) => W.setBlock(p.x + dx, y, p.z + dz, id);
+    for (const [dx, dz] of BF.DIRS) set(dx, dz, 0);
+    const east = { x: p.x + 5.5, z: p.z + 1.5 };
+    const r = { allOpen: BF.openFacing(p, east) };
+    set(1, 0, st); r.eastWalled = BF.openFacing(p, east);
+    for (const [dx, dz] of BF.DIRS) set(dx, dz, st);
+    r.boxedIn = BF.openFacing(p, east);
+    for (const [dx, dz] of BF.DIRS) set(dx, dz, 0);
+    return r;   // expect 1 (east), 2 (south: the open side nearest the placer), 1
+  }, fuel.xyz)));
 
   // ---- live: a toolsmith with no furnace buys one, places it, buys ore and coal, smelts, makes tools
   const setup = await pg.evaluate((fx) => {
@@ -77,6 +93,14 @@ module.exports = async (pg, out) => {
     if (vs.length < 4) return "villagers: " + vs.length;
     const T = BF.trades, I = BF.I, inv = T.inv, W = BF.world, R = vs[0].village;
     BF.world.setBlock(fx[0], fx[1], fx[2], 0); BF.emit("blockBroken", fx[0], fx[1], fx[2], BF.B.furnace);
+    // generated furnaces and chests around the village: is the cell in front of the opening clear?
+    const genOpen = { furnace: [0, 0], chest: [0, 0] }, rx = Math.floor(R.x), rz = Math.floor(R.z), ry = Math.floor(vs[0].position.y);
+    for (let x = rx - 70; x <= rx + 70; x++) for (let z = rz - 70; z <= rz + 70; z++) for (let y = ry - 15; y <= ry + 15; y++) {
+      const id = W.getBlock(x, y, z), b = BF.blocks[id], kind = BF.isFurnace(id) ? "furnace" : BF.isChest(id) ? "chest" : null;
+      if (!kind) continue;
+      const d = BF.DIRS[kind === "furnace" ? b.furnaceFacing : b.chestFacing];
+      genOpen[kind][1]++; if (!BF.SOLID[W.getBlock(x + d[0], y, z + d[1])]) genOpen[kind][0]++;
+    }
     let removed = 0;   // no furnace in reach: it has to buy one
     for (const f of [...BF.toolsmith.furnaces.values()]) if (Math.hypot(f.x - R.x, f.z - R.z) < 200) { W.setBlock(f.x, f.y, f.z, 0); BF.emit("blockBroken", f.x, f.y, f.z, BF.B.furnace); removed++; }
     const A = vs[0], M = vs[1], Wd = vs[2], Fm = vs[3];
@@ -98,7 +122,7 @@ module.exports = async (pg, out) => {
     window.__A = A;
     BF.toolsmith.LOG.length = 0;
     if (BF.warp) BF.warp.set(4);
-    return { removed, claim: A.res, jobsite: A.jobsite, M: M.profession, Wd: Wd.profession, Fm: Fm.profession };
+    return { genOpen, removed, claim: A.res, jobsite: A.jobsite, M: M.profession, Wd: Wd.profession, Fm: Fm.profession };
   }, fuel.xyz);
   console.log("live setup", JSON.stringify(setup));
   const t0 = Date.now(), seen = new Set();
@@ -119,6 +143,11 @@ module.exports = async (pg, out) => {
     last = s;
     if (s.tools.length >= 6) break;
   }
+  console.log("placed furnace", JSON.stringify(await pg.evaluate(() => {
+    const f = window.__A.tsm && window.__A.tsm.furnace, W = BF.world; if (!f) return "none";
+    const b = BF.blocks[W.getBlock(f.x, f.y, f.z)], d = b && b.furnaceFacing != null ? BF.DIRS[b.furnaceFacing] : null;
+    return { name: b && b.name, frontClear: d ? !BF.SOLID[W.getBlock(f.x + d[0], f.y, f.z + d[1])] : null, at: f };
+  })));
   console.log("live kinds seen:", [...seen].join(","), "tools:", last && last.tools.join(","));
   await pg.evaluate(() => BF.warp && BF.warp.reset());
   await pg.evaluate(() => { const A = window.__A; BF.player.position.set(A.position.x + 3, A.position.y + 1.5, A.position.z + 3); });
