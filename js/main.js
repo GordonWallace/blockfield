@@ -65,18 +65,38 @@ function updateDebug(now) {
   frames++;
   if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
   if (!showDebug) return;
+  dbg.textContent = debugText(debugInfo());
+}
+// The F3 numbers as data: the overlay prints them and the second-screen feed (js/debugfeed.js) sends them on.
+function debugInfo() {
   const p = BF.player.position;
   const biome = BF.worldgen.biomeAt(p.x, p.z), cc = BF.world.chunkAt(p.x, p.z);
-  dbg.textContent =
-    `Blockfield  ${fps} fps\n` +
-    `XYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\n` +
-    `Chunk ${Math.floor(p.x / BF.CS)}, ${Math.floor(p.z / BF.CS)}${cc ? `  Sections ${cc.lo}..${cc.hi - 1} (y ${cc.y0}..${cc.y1 - 1})` : ""}  Biome ${biome ? biome.name : "?"}\n` +
-    `Chunks ${BF.world.meshedCount()} drawn / ${BF.world.chunks.size} loaded, ${BF.world.queueLength} queued\n` +
-    `Mobs ${BF.mobs.list.length}  Seed ${BF.state.seed}  Gen ${BF.state.gen} Biomes x${BF.state.biomeScale}  ${BF.villageSim.status()}\n` +
-    `${BF.vlog.stamp(BF.sky.day + BF.sky.time)}  Light ${BF.sky.light.toFixed(2)}  BL ${BF.world.getBlockLight(p.x, p.y + 0.05, p.z)}  Calls ${renderer.info.render.calls}` +
-    (BF.weather && BF.weather.debugText ? "\n" + BF.weather.debugText() : "") +
-    `\nClouds ${BF.sky.cloudCover < 0.06 ? "clear" : Math.round(BF.sky.cloudCover * 100) + "%"} at y${Math.round(BF.sky.cloudHeight)}`;
+  return {
+    fps, x: p.x, y: p.y, z: p.z, yaw: BF.player.yaw,
+    chunkX: Math.floor(p.x / BF.CS), chunkZ: Math.floor(p.z / BF.CS),
+    sections: cc ? { lo: cc.lo, hi: cc.hi - 1, y0: cc.y0, y1: cc.y1 - 1 } : null,
+    biome: biome ? biome.name : "?",
+    chunksDrawn: BF.world.meshedCount(), chunksLoaded: BF.world.chunks.size, chunksQueued: BF.world.queueLength,
+    mobs: BF.mobs.list.length, seed: BF.state.seed, gen: BF.state.gen, biomeScale: BF.state.biomeScale, sim: BF.villageSim.status(),
+    day: BF.sky.day + BF.sky.time, clock: BF.vlog.stamp(BF.sky.day + BF.sky.time), light: BF.sky.light,
+    blockLight: BF.world.getBlockLight(p.x, p.y + 0.05, p.z), calls: renderer.info.render.calls,
+    weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
+    cloudCover: BF.sky.cloudCover, cloudHeight: BF.sky.cloudHeight, warp: BF.warp.speed,
+  };
 }
+function debugText(d) {
+  const s = d.sections;
+  return `Blockfield  ${d.fps} fps\n` +
+    `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n` +
+    `Chunk ${d.chunkX}, ${d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
+    `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
+    `Mobs ${d.mobs}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
+    `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
+    (d.weather ? "\n" + d.weather : "") +
+    `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}`;
+}
+BF.debugInfo = debugInfo;
+BF.debugText = debugText;
 
 // ---------- loop ----------
 let last = performance.now();
@@ -117,6 +137,7 @@ function frame(now) {
   renderer.render(scene, camera);
   updateDebug(now);
   BF.vlog.update(dt, showDebug);
+  if (BF.debugFeed) BF.debugFeed.update();
 }
 
 // ---------- boot ----------
