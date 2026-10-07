@@ -3,11 +3,13 @@
 // - Tools: wooden, stone, iron, golden and diamond pickaxes, axes and hoes, and shears, with the vanilla recipes (3 head + 2 sticks for a
 //   pickaxe or an axe, 2 + 2 for a hoe, 2 iron ingots for shears). Head material: any planks, cobblestone (or cobbled deepslate), iron
 //   ingots, gold ingots, diamonds. A tool whose item does not exist (golden tools before they were added) is skipped.
-// - What to make: the category (pickaxe, axe, hoe, shears) it holds fewest of, up to TOOL_CAP each, so the stock stays even. Shears come
+// - What to make: the category (pickaxe, axe, hoe, shears) it holds fewest of, so the stock stays even: it makes a tool while it holds fewer
+//   than TOOL_CAP of that category in that material or better (so 2 wooden pickaxes do not stop a stone one), never past TOOL_MAX. Shears come
 //   first while it has none and holds the iron for them, and the other iron tools leave 2 ingots for shears while it has none. Within a
 //   category it makes the best material it can get, in CALIBER order (diamond, iron, stone, gold, wood, the order BF.toolWear ranks tools in):
 //   what it holds, or what a villager of its village sells and it can pay for. It buys for the better tool even when it already holds the
-//   materials for a lesser one. Gold is only bought when nobody sells iron.
+//   materials for a lesser one; when a better material is sold here but not right now (the miner is out of cobblestone or down the shaft)
+//   it waits up to WAIT_BETTER (6 game hours) before making the lesser tool. Gold is only bought when nobody sells iron.
 // - Crafting: at its smithing table (BF.jobs "work" state), CRAFT_SECS (2 game hours) per tool. Materials are taken when it starts; the tool
 //   is finished on later visits if the day ends first (the craft in progress is saved). Sticks are cut from 2 planks when it is short.
 // - Buying: it walks to the seller and trades at the seller's own offer (stock and room rules of trading.js), like the furniture maker. It
@@ -31,7 +33,9 @@ const dayLen = () => (BF.sky && BF.sky.dayLength) || 1200;
 
 const CRAFT_HOURS = 2;                         // one tool takes 2 game hours at the smithing table
 const CRAFT_SECS = () => dayLen() * CRAFT_HOURS / 24;
-const TOOL_CAP = 2;                            // at most this many tools of one category in stock
+const TOOL_CAP = 2;                            // it makes a tool while it holds fewer than this many of that category in that material or better
+const TOOL_MAX = 4;                            // and never holds more than this many of one category (lesser ones wait to be sold)
+const WAIT_BETTER = 0.25;                      // days it waits for a better material that is sold here but not right now before making a lesser tool
 const CATS = ["pickaxe", "axe", "hoe", "shears"];
 const CALIBER = ["diamond", "iron", "stone", "gold", "wood"];   // best first, as BF.toolWear ranks them (tier, then speed): gold between wood and stone
 const PREFIX = { wood: "wooden", stone: "stone", iron: "iron", gold: "golden", diamond: "diamond" };
@@ -132,6 +136,8 @@ function furnacesFor(m, rawId) {
 const hasFurnace = m => furnacesFor(m).length > 0 || count(m, BF.B.furnace) > 0;
 
 // ---------------------------------------------------------------- what to make
+// Tools of cat it holds that are mat or better (CALIBER order).
+const stockAtLeast = (m, cat, mat) => { let n = 0; const top = CALIBER.indexOf(mat); for (const st of m.inv) { if (!st || catOf(st.id) !== cat) continue; const nm = nameOf(st.id), k = CALIBER.findIndex(x => cat === "shears" || nm.startsWith(PREFIX[x] + "_")); if (k >= 0 && k <= top) n += st.count; } return n; };
 const stockOf = m => { const s = { pickaxe: 0, axe: 0, hoe: 0, shears: 0 }; for (const st of m.inv) { const c = st && catOf(st.id); if (c) s[c] += st.count; } return s; };
 const matsFor = cat => (cat === "shears" ? ["iron"] : CALIBER).filter(mat => toolId(cat, mat) != null);
 // Head material in hand for mat (iron / gold: ingots, plus ore it could smelt when allowed).
@@ -150,35 +156,36 @@ function canMake(m, cat, mat, stock) {
 // The categories it should make next, the one it holds fewest of first (shears first while it has none and holds the iron).
 function catOrder(m) {
   const stock = stockOf(m);
-  const cats = CATS.filter(c => stock[c] < TOOL_CAP && matsFor(c).length);
+  const cats = CATS.filter(c => stock[c] < TOOL_MAX && matsFor(c).length);
   const pri = c => (c === "shears" && stock.shears === 0 && sum(m, MAT.iron) >= SHEARS_IRON ? -1 : stock[c]);
   return { stock, cats: cats.sort((a, b) => pri(a) - pri(b) || CATS.indexOf(a) - CATS.indexOf(b)) };
 }
 
 // ---------------------------------------------------------------- sellers
-const canSell = (m, v2) => v2 && v2 !== m && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && !v2.child
-  && Array.isArray(v2.inv) && Array.isArray(v2.trades) && v2.position && v2.position.y > m.position.y - 6;   // not deep in a mineshaft
+// loose: also sellers who cannot trade right now (asleep, busy, down a mineshaft, out of stock) and ones it gave up on for a while: "sold here at all"
+const canSell = (m, v2, loose) => v2 && v2 !== m && v2.type === "villager" && !v2.dead && !v2.removed && !v2.child && Array.isArray(v2.inv) && Array.isArray(v2.trades)
+  && (loose || (!v2.sleeping && !v2.tradingWith && v2.position && v2.position.y > m.position.y - 6));   // not deep in a mineshaft
 const restocked = (v2, id) => ((TR().PRODUCE[v2.profession] || []).includes(nameOf(id)));
 // Offers of m's village that sell an item matching f, which m can pay for: [{v2, o, max}] (max = how many times), the nearest first.
-function offersFor(m, f, avoidTag) {
+function offersFor(m, f, loose) {
   const R = m.village, T = TR(), S = state(m), out = [];
   if (!R) return out;
   for (const v2 of R.members || []) {
-    if (!canSell(m, v2)) continue;
+    if (!canSell(m, v2, loose)) continue;
     for (const o of v2.trades) {
-      if (o.feed || !f(o.sell.id) || restocked(v2, o.sell.id) || T.blockReason(v2, o)) continue;
-      if (avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id)) continue;
-      let k = Math.floor(T.inv.count(v2.inv, o.sell.id) / o.sell.n);
+      if (o.feed || !f(o.sell.id) || restocked(v2, o.sell.id) || (!loose && T.blockReason(v2, o))) continue;
+      if (!loose && avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id)) continue;
+      let k = loose ? Infinity : Math.floor(T.inv.count(v2.inv, o.sell.id) / o.sell.n);   // loose: it sells this, even if it has none in hand right now
       for (const b of o.buy) k = Math.min(k, Math.floor(T.inv.count(m.inv, b.id) / b.n));
       if (k < 1) continue;
-      out.push({ v2, o, max: k, d: v2.position.distanceTo(m.position) });
+      out.push({ v2, o, max: k, d: v2.position ? v2.position.distanceTo(m.position) : Infinity });
     }
   }
   return out.sort((a, b) => a.d - b.d);
 }
 // Emeralds needed to buy n items matching f (cheapest offers first), or Infinity when the village does not sell that many.
-function priceOf(m, f, n) {
-  const list = offersFor(m, f).filter(e => e.o.buy.every(b => b.id === I("emerald")))
+function priceOf(m, f, n, loose) {
+  const list = offersFor(m, f, loose).filter(e => e.o.buy.every(b => b.id === I("emerald")))
     .sort((a, b) => a.o.buy[0].n / a.o.sell.n - b.o.buy[0].n / b.o.sell.n);
   let cost = 0;
   for (const e of list) {
@@ -199,9 +206,19 @@ function plan(m) {
   const { stock, cats } = catOrder(m);
   if (!cats.length) return null;
   const furnaceOK = hasFurnace(m), budget = ems(m);
+  if (!S.waitBetter) S.waitBetter = {};
   for (const cat of cats) {
+    let later = null;    // a better material sold here, just not right now (seller asleep, busy, underground, or it gave up on them a while)
     for (const mat of matsFor(cat)) {
-      if (canMake(m, cat, mat, stock)) return { cat, mat, ready: true };
+      if (stockAtLeast(m, cat, mat) >= TOOL_CAP) break;   // enough of this or better: lesser ones would not help
+      if (canMake(m, cat, mat, stock)) {
+        if (later) {   // wait for the better one a while
+          const w = S.waitBetter[cat] || (S.waitBetter[cat] = { since: dayNow(), mat: later });
+          if (dayNow() - w.since < WAIT_BETTER) break;
+        }
+        delete S.waitBetter[cat];
+        return { cat, mat, ready: true };
+      }
       const head = HEAD[cat] + (mat === "iron" && cat !== "shears" && stock.shears === 0 && toolId("shears", "iron") != null ? SHEARS_IRON : 0);
       const ingots = sum(m, MAT[mat]), raw = RAW[mat] ? sum(m, RAW[mat]) : 0;
       // ore in hand that would close the gap: smelt it first
@@ -222,7 +239,11 @@ function plan(m) {
           }
         }
         const keep = mat === "diamond" || mat === "gold" ? RESERVE : 0;
-        if (cost === Infinity || cost > budget - keep) continue;   // cannot get it: try the next material
+        if (cost === Infinity || cost > budget - keep) {   // cannot get it now: try the next material
+          if (mat !== "wood" && Math.min(priceOf(m, MAT[mat], short, true), RAW[mat] ? priceOf(m, RAW[mat], short, true) : Infinity) <= budget - keep) later = later || mat;
+          continue;
+        }
+        delete S.waitBetter[cat];
         return { cat, mat, need: { what, f, n: short } };
       }
       // head material is there: sticks
@@ -573,6 +594,8 @@ function statusText(m) {
     if (k === "smelt") return S.stage === "smelt" ? "Smelting " + BF.itemName(smeltsTo(S.deal.rawId)).toLowerCase() + "s" : "Taking ore to a furnace";
     return "Buying " + (S.deal.what === "fuel" ? "fuel" : S.deal.what === "furnace" ? "a furnace" : BF.itemName(S.deal.item).toLowerCase());
   }
+  const w = S && S.waitBetter && Object.entries(S.waitBetter).find(([, x]) => dayNow() - x.since < WAIT_BETTER);
+  if (w && !S.craft) return "Waiting for " + { diamond: "diamonds", iron: "iron", gold: "gold", stone: "cobblestone" }[w[1].mat] + " for a better " + w[0];
   if (S && S.craft) return (m.job && m.job.mode === "work" ? "Making " : "Will finish ") + BF.itemName(S.craft.id).toLowerCase().replace(/^(?!.*s$)(.*)$/, "a $1").replace(/^a ([aeiou])/, "an $1");
   return "";
 }
