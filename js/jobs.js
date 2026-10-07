@@ -125,11 +125,15 @@ function jobList(v) {
   const roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 });   // callers catch
   const r = seeded("jobs:" + key);
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
-  const n = drawCount(needy.length, r);
+  let n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
   const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
+  const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer always gets its composter too
+  const farmer = core && needy.find(sl => sl.prof === "farmer");
+  if (farmer) special.push(farmer);
   const rest = needy.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
+  if (core) n = Math.max(n, special.length);
   const jobs = special.concat(rest).slice(0, n).map(sl => ({ prof: sl.prof, slot: sl.idx, house: sl.house }));
   for (let k = needy.length; k < n; k++) jobs.push({ prof: needy[Math.floor(r() * needy.length)].prof, slot: -1, house: null }); // spares follow the roster mix
   jobs.sort((a, b) => (a.slot < 0) - (b.slot < 0) || (a.slot - b.slot));
@@ -337,10 +341,13 @@ function hire(m, s) {
   take(m, s, s.prof);
   m.jobMem = null;
   if (first && (m.xp || 0) === 0 && BF.trades && m.inv) { // first job: the profession's starting wares (once per villager)
-    try { for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count); } catch (e) { console.error(e); }
+    try {
+      if (BF.trades.STARTER_TOOLS && BF.trades.STARTER_TOOLS[s.prof]) BF.trades.hireKit(m, s.prof);   // farmer, forester, miner, shepherd: emeralds for its tools
+      else for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count);
+    } catch (e) { console.error(e); }
   }
   m.jobStocked = true;
-  if (BF.villageLife && BF.villageLife.ensureKit) BF.villageLife.ensureKit(m);   // a new farmer / builder gets its empty bucket (and hoe)
+  if (BF.villageLife && BF.villageLife.ensureKit) BF.villageLife.ensureKit(m);   // a new farmer / builder gets its empty bucket
   if (BF.emit) BF.emit("villagerHired", m, s.prof);
   return s.prof;
 }

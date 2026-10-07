@@ -35,7 +35,7 @@ BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
   BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
-  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 2;         // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers (default)
+  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 3;         // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens (default)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
