@@ -21,7 +21,8 @@
 // - What it keeps: cobblestone (stone drops it), coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis and emeralds; dirt, gravel and the rest it digs through are left behind.
 // - Selling: holding SELL_MIN cobblestone, it walks to a builder of its village that needs some (its current structure's shortfall, or a reserve
 //   of BUILDER_RESERVE for the next foundation in cobblestone villages) and sells at its own offer "1 emerald > 32 cobblestone". Builders short
-//   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. It stops digging at KEEP_COBBLE.
+//   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. A novice stops digging at KEEP_COBBLE; a
+//   deeper digger keeps going for ore and leaves further cobblestone behind.
 // - Persistence: the current mineshaft (m.mi.shaft) is saved with the villager (trading.js pack, `mi`). See CONTRACT.md "Miners".
 (() => {
 "use strict";
@@ -313,7 +314,7 @@ function dig(m, x, y, z) {
   const p = pickOf(m), b = BF.blocks[id];
   if (!isFinite(b.hardness)) return false;
   W().setBlock(x, y, z, 0);
-  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if (keeps(d.id)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
+  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if (keeps(d.id) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
   if (b.hardness > 0) wearPick(m, p, 1);
   if (BF.emit) BF.emit("blockBroken", x, y, z, id);
   return true;
@@ -551,7 +552,7 @@ function think(m, Q) {
     if (deal) return underground ? { kind: "exit" } : { kind: "trip", deal };
   }
   // 3. digging
-  if (cobble >= KEEP_COBBLE || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
+  if (cobble >= KEEP_COBBLE && digDepth(m) <= DIG_DEPTH[0] || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
   const deep = digDepth(m) > DIG_DEPTH[0];
   if (sh && !sh.done && sh.S != null && deep && digDepth(m) >= sh.S + 12 && !underground) { sh.done = true; log("deeper", m, { was: sh.S, now: digDepth(m) }); }   // levelled up: a deeper shaft
   if (!underground && !deep) {   // a novice quarries surface stone first, whenever there is any; the mineshaft only when there is none
