@@ -2,11 +2,12 @@
 // profession whose jobsite is the band saw, who plants the saplings it carries, fells whole trees and picks up what falls, and who buys
 // saplings from the player for emeralds (the trade itself is in js/trading.js, TRADES.forester).
 // - Planting: a forester holding a sapling picks a random free spot within 16 blocks (+-4 high) of itself: air over soil with room for a tree above,
-//   no other sapling within 4 blocks, no door within 10 blocks, no dirt path within 5. It walks there and plants (cooldown 10 s).
+//   no other sapling within 4 blocks, no door within 10 blocks and no building or other structure within 8 (dirt paths are fine). It walks there and plants (cooldown 10 s).
 // - Felling: it picks a random natural tree within 40 blocks (+12 / -6 high), nearer ones favoured: the connected logs (at most 64) with leaves among them. When it is
 //   within 3 blocks it fells the whole tree at once, leaves included, and the blocks drop their items (cooldown 20 s). Needs 2 free inventory slots.
 //   Buildings are never touched: a log pile next to planks, stone, glass ... is not a tree.
-// - Picking up: saplings, emeralds, logs, sticks and apples lying within 16 blocks are collected (js/drops.js entities).
+// - Picking up: saplings, emeralds, logs, sticks and apples lying within 16 blocks are collected (js/drops.js entities). After felling a tree it
+//   stays and collects until nothing it wants lies within 12 blocks of the stump (waiting for items still falling; 2 minutes at most).
 // - Sawing: it turns up to 8 logs a day into 4 planks each (keeping 2 logs of each kind); planks and logs are what it sells (TRADES.forester).
 // - Planting and felling pick one at random, weighted 10 : 8 as in the mod. Everything runs in working hours only, from its band saw.
 // Players: chopping any log of a natural tree brings down everything above it, leaves included (fallAbove, like the mod).
@@ -24,7 +25,7 @@ const SPECIES = ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cher
 const WORK_START = 0.04, WORK_END = 0.45;   // sky.time window (same as js/jobs.js)
 // numbers of the mod (ticks / 20 = seconds)
 const SEARCH = 16, PLANT_DY = 4, MAX_LOGS = 64, MAX_LEAVES = 256, MIN_FREE = 2;
-const SAP_SPACING = 4, DOOR_AVOID = 10, PATH_AVOID = 5, PLANT_REACH = 2, CUT_REACH = 3;
+const SAP_SPACING = 4, DOOR_AVOID = 10, PLANT_REACH = 2, CUT_REACH = 3;
 const PLANT_CD = 10, CUT_CD = 20, PLANT_MAX = 30, CUT_MAX = 40, W_PLANT = 10, W_CUT = 8;
 // additions
 const CUT_SEARCH = 40, CUT_HOME = 64, CUT_Y_UP = 12, CUT_Y_DOWN = 6;   // felling reaches further than the mod's 16: few trees stand inside a village. Nearer trees are favoured, see findTree
@@ -33,6 +34,8 @@ const CLEAR_ABOVE = 5;      // air above a planting spot, so the sapling has roo
 const CHOP_T = 1.2;         // seconds of chopping before the tree comes down (the mod fells it the moment the villager arrives)
 const GROW_PER_S = 1 / 480; // sapling -> tree: ~8 minutes of simulation time on average
 const GATHER_R = 16;
+const SWEEP_R = 12, SWEEP_MAX = 120;   // after felling it stays until no wanted item lies within 12 blocks of the stump (at most 2 minutes)
+const BUILD_AVOID = 8;  // never plants within 8 blocks of a building or other structure (anything not landscape; dirt paths do not count)
 
 const LOG = [];
 const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: "forester" + (m && m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
@@ -164,6 +167,13 @@ function natural(id) {
   const b = BF.blocks[id], n = b && b.name;
   return !!n && /^(stone|dirt|grass|sand|red_sand|gravel|snow|snow_block|vine|ice|packed_ice|clay|moss|dead_bush|cobweb|deepslate|netherrack|dripstone|rooted|mangrove_roots|muddy|bee_nest|beehive|cocoa|red_mushroom_block|brown_mushroom_block|andesite|diorite|granite|calcite|tuff|sandstone|red_sandstone|terracotta|podzol|mycelium|coarse|farmland|cactus)/.test(n);
 }
+// Something a person put there, for the planting distance: stricter than !natural(), since village walls use sandstone, terracotta and stone bricks.
+const RAW = /^(stone|deepslate|tuff|andesite|diorite|granite|calcite|sand|red_sand|gravel|dirt|clay|snow|snow_block|ice|packed_ice|blue_ice|bedrock|obsidian|moss_block|moss_carpet|vine|dripstone_block|pointed_dripstone|cactus|dead_bush|cobweb|bee_nest|cocoa|mangrove_roots|muddy_mangrove_roots|rooted_dirt|podzol|mycelium|coarse_dirt|mud|sugar_cane|pumpkin|melon|[a-z_]*_ore|[a-z_]*mushroom[a-z_]*)$/;
+function builtBlock(id) {
+  if (id === 0 || isLeaf(id) || isLog(id) || isPlant(id) || isLiquid(id) || isSoil(id) || isSap(id)) return false;
+  const b = BF.blocks[id];
+  return !(b && RAW.test(b.name));
+}
 // The connected logs reached from `seeds` (18-neighbourhood, only at y >= minY) and the leaves joined to them: {logs, leaves}, or null when it is
 // more than 64 logs, touches a block that is not landscape (a building), or has no leaves.
 function collectTree(seeds, minY) {
@@ -237,12 +247,25 @@ const inHome = (m, x, z) => { const c = centre(m); return Math.hypot(x - c.x, z 
 
 function findSpot(m) {
   const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z);
-  // doors and dirt paths in reach of any candidate: scanned once
-  const doors = [], paths = [], R = SEARCH + DOOR_AVOID, DP = BF.B.dirt_path;
+  // doors, and columns holding anything built (not landscape; dirt paths and farmland's crops aside, farmland itself counts), scanned once
+  const doors = [], R = SEARCH + DOOR_AVOID, DP = BF.B.dirt_path, FL = BF.B.farmland, S = 2 * R + 1, built = new Uint8Array(S * S);
   for (let x = px - R; x <= px + R; x++) for (let z = pz - R; z <= pz + R; z++) {
     if (!W().isLoaded(x, z)) continue;
-    for (let y = py - PLANT_DY - 4; y <= py + PLANT_DY + 4; y++) { const id = get(x, y, z); if (id === DP) paths.push([x, y, z]); else if (isDoor(id)) doors.push([x, y, z]); }
+    for (let y = py - PLANT_DY - 4; y <= py + PLANT_DY + 6; y++) {
+      const id = get(x, y, z);
+      if (id === 0 || id === DP || isSap(id)) continue;
+      if (isDoor(id)) doors.push([x, y, z]);
+      if (id === FL || builtBlock(id)) built[(z - pz + R) * S + (x - px + R)] = 1;
+    }
   }
+  const nearBuilt = (x, z) => {
+    for (let dz = -BUILD_AVOID; dz <= BUILD_AVOID; dz++) for (let dx = -BUILD_AVOID; dx <= BUILD_AVOID; dx++) {
+      if (dx * dx + dz * dz > BUILD_AVOID * BUILD_AVOID) continue;
+      const u = x + dx - px + R, v = z + dz - pz + R;
+      if (u >= 0 && v >= 0 && u < S && v < S && built[v * S + u]) return true;
+    }
+    return false;
+  };
   const near = (x, y, z, list, d2) => { for (const o of list) { const dx = o[0] - x, dy = o[1] - y, dz = o[2] - z; if (dx * dx + dy * dy + dz * dz <= d2) return true; } return false; };
   const cands = [];
   for (let x = px - SEARCH; x <= px + SEARCH; x++) for (let z = pz - SEARCH; z <= pz + SEARCH; z++) {
@@ -257,7 +280,7 @@ function findSpot(m) {
   for (let i = cands.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cands[i], cands[j]] = [cands[j], cands[i]]; }
   for (const [x, y, z] of cands) {
     if (claims.has(pk(x, y, z)) && claims.get(pk(x, y, z)) !== m) continue;
-    if (near(x, y, z, doors, DOOR_AVOID * DOOR_AVOID) || near(x, y, z, paths, PATH_AVOID * PATH_AVOID)) continue;
+    if (near(x, y, z, doors, DOOR_AVOID * DOOR_AVOID) || nearBuilt(x, z)) continue;
     let tooClose = false;
     for (const s of saps.values()) if (Math.abs(s.x - x) <= SAP_SPACING && Math.abs(s.z - z) <= SAP_SPACING && Math.abs(s.y - y) <= 2) { tooClose = true; break; }
     if (!tooClose) return { x, y, z };
@@ -294,13 +317,19 @@ const WANT = id => {   // what a forester picks up (the mod's wantsToPickUp)
   const n = it.name;
   return n === "emerald" || n === "stick" || n === "apple" || /_sapling$/.test(n) || /_(log|wood)$/.test(n);
 };
-function findDrop(m) {
+// The nearest wanted drop: within SWEEP_R of the felled tree while sweeping (F.sweep), else within GATHER_R of the forester.
+// `young` counts wanted drops there that are still falling (they are waited for, not skipped).
+function findDrop(m, F) {
   const D = BF.drops && BF.drops.list;
+  F.young = 0;
   if (!D || !D.length) return null;
-  let best = null, bd = GATHER_R * GATHER_R;
+  const sw = F.sweep, R = sw ? SWEEP_R : GATHER_R;
+  let best = null, bd = Infinity;
   for (const d of D) {
-    if (!WANT(d.id) || d.age < 0.8) continue;
-    if (!inHome(m, d.pos.x, d.pos.z)) continue;
+    if (!WANT(d.id) || (F.skip && F.skip.has(d))) continue;
+    const ox = sw ? sw.x + 0.5 : m.position.x, oz = sw ? sw.z + 0.5 : m.position.z;
+    if (Math.hypot(d.pos.x - ox, d.pos.z - oz) > R) continue;
+    if (d.age < 0.8) { F.young++; continue; }
     if (!T().inv.canFit(m.inv, [{ id: d.id, n: 1 }], [])) continue;
     const dx = d.pos.x - m.position.x, dz = d.pos.z - m.position.z, dy = d.pos.y - m.position.y, q = dx * dx + dz * dz + dy * dy * 0.25;
     if (q < bd) { bd = q; best = d; }
@@ -309,9 +338,9 @@ function findDrop(m) {
 }
 
 // walking: legs of at most 20 blocks, like js/explorer.js
-function travel(m, st, dt, out, tx, ty, tz, speed, radius) {
+function travel(m, st, dt, out, tx, ty, tz, speed, radius, dyTol = 2.6) {
   const ai = m.ai, N = BF.mobs.nav, px = m.position.x, pz = m.position.z, d = Math.hypot(tx + 0.5 - px, tz + 0.5 - pz);
-  if (d <= radius && Math.abs(ty - m.position.y) <= 2.6) { ai.route = null; return "arrived"; }
+  if (d <= radius && Math.abs(ty - m.position.y) <= dyTol) { ai.route = null; return "arrived"; }
   if (!ai.route || ai.routeKind !== "fo") {
     ai.route = null;
     if (st.navWait > 0) { st.navWait -= dt; return "going"; }
@@ -320,7 +349,7 @@ function travel(m, st, dt, out, tx, ty, tz, speed, radius) {
     const hop = d > 22 ? [Math.floor(px + (tx + 0.5 - px) * 20 / d), Math.floor(pz + (tz + 0.5 - pz) * 20 / d)] : null;
     const r = Math.max(1, Math.floor(radius / 1.42));   // any cell this close to the target is within `radius` of its centre
     const goal = hop ? { x: hop[0], z: hop[1], at: (x, y, z) => Math.abs(x - hop[0]) + Math.abs(z - hop[1]) <= 2 }
-      : { x: tx, z: tz, at: (x, y, z) => Math.abs(x - tx) <= r && Math.abs(z - tz) <= r && Math.abs(y - ty) <= 2 };
+      : { x: tx, z: tz, at: (x, y, z) => Math.abs(x - tx) <= r && Math.abs(z - tz) <= r && Math.abs(y - ty) <= Math.floor(dyTol) };
     const path = N.findPath(fx, fy, fz, goal, 2500);
     if (path && !path.length) { st.navFail = 0; return "arrived"; }   // already standing on a goal cell
     if (path) { ai.route = path; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "fo"; st.navFail = 0; }
@@ -339,7 +368,7 @@ function endTask(m, F, ok) {
     if (t.claim) claims.delete(t.claim);
     if (t.kind === "plant") F.plantCd = PLANT_CD;
     else if (t.kind === "cut") F.cutCd = CUT_CD;
-    else if (t.kind === "gather") F.gatherCd = ok ? 0 : 6;
+    else if (t.kind === "gather") { if (!ok && F.sweep) { const n = F.tries || (F.tries = new WeakMap()), c = (n.get(t.drop) || 0) + 1; n.set(t.drop, c); if (c >= 2) (F.skip || (F.skip = new WeakSet())).add(t.drop); } else F.gatherCd = ok ? 0 : 6; }   // an item it cannot reach twice is left
   }
   F.task = null; F.t = 0; F.chop = 0; m.ai.route = null;
 }
@@ -384,15 +413,19 @@ function ai(m, dt, out) {
     if (F.thinkT > 0) return false;
     F.thinkT = 1;
     let task = null;
-    const drop = F.gatherCd <= 0 ? findDrop(m) : null;
+    if (F.sweep && (nowS() > F.sweep.until || freeSlots(m) === 0)) { log("swept", m, { why: freeSlots(m) ? "time" : "full" }); F.sweep = null; F.skip = null; F.tries = null; }
+    const drop = F.gatherCd <= 0 || F.sweep ? findDrop(m, F) : null;
     if (drop) task = { kind: "gather", drop, x: Math.floor(drop.pos.x), y: Math.floor(drop.pos.y), z: Math.floor(drop.pos.z), max: GATHER_R * 3 };
-    else {
+    else if (F.sweep && F.young) { F.thinkT = 0.3; a.mode = "idle"; a.t = 1; return true; }       // items still falling: wait for them
+    else if (F.sweep) { log("swept", m, { why: "clear" }); F.sweep = null; F.skip = null; F.tries = null; }
+    if (!task && !F.sweep) {
       const opts = [];
       if (F.plantCd <= 0 && holdsSapling(m)) { const s = findSpot(m); if (s) opts.push([W_PLANT, { kind: "plant", x: s.x, y: s.y, z: s.z, max: PLANT_MAX, claim: pk(s.x, s.y, s.z) }]); else F.plantCd = 5; }
       if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX + 2.5 * Math.hypot(tr.base[0] + 0.5 - m.position.x, tr.base[2] + 0.5 - m.position.z), claim: pk(tr.base[0], tr.base[1], tr.base[2]) }]); else F.cutCd = 8; }
       if (opts.length) { let r = Math.random() * opts.reduce((s, o) => s + o[0], 0); for (const [w, o] of opts) { if ((r -= w) < 0) { task = o; break; } } task = task || opts[0][1]; }
     }
     if (!task) return false;
+    if (F.sweep) F.thinkT = 0.2;
     F.task = task; F.t = 0; F.chop = 0; F.nav.navFail = 0; F.nav.navWait = 0;
     if (task.claim) claims.set(task.claim, m);
     log("start", m, { task: task.kind, at: [task.x, task.y, task.z] });
@@ -406,7 +439,7 @@ function ai(m, dt, out) {
   if (k.kind === "gather") { k.x = Math.floor(k.drop.pos.x); k.y = Math.floor(k.drop.pos.y); k.z = Math.floor(k.drop.pos.z); }
   const dist = Math.hypot(k.x + 0.5 - m.position.x, k.z + 0.5 - m.position.z);
   if (dist > reach || (k.kind !== "gather" && Math.abs(k.y - m.position.y) > 3.2)) {
-    const r = travel(m, F.nav, dt, out, k.x, k.y, k.z, m.def.speed * 1.1, reach);
+    const r = travel(m, F.nav, dt, out, k.x, k.y, k.z, m.def.speed * 1.1, reach, k.kind === "gather" ? 4.5 : 2.6);   // it reaches up for items caught in leaves
     if (r === "failed") { log("giveup", m, { task: k.kind, why: "no path", at: [k.x, k.y, k.z] }); endTask(m, F, false); return true; }
     if (r !== "arrived") return true;
   }
@@ -416,8 +449,14 @@ function ai(m, dt, out) {
   else if (k.kind === "gather") {
     const d = k.drop, left = T().inv.add(m.inv, d.id, d.count);
     if (left < d.count) log("pickup", m, { got: (d.count - left) + " " + BF.items[d.id].name });
+    const ok = left < d.count;
     if (left > 0) d.count = left; else BF.drops.remove(d);
-    endTask(m, F, left < d.count || left === 0);
+    for (const o of BF.drops.list.slice()) {                                  // and whatever else lies at its feet
+      if (o === d || !WANT(o.id) || o.age < 0.8 || Math.hypot(o.pos.x - m.position.x, o.pos.z - m.position.z) > 1.6) continue;
+      const l2 = T().inv.add(m.inv, o.id, o.count);
+      if (l2 > 0) o.count = l2; else BF.drops.remove(o);
+    }
+    endTask(m, F, ok);
   } else {   // cut
     F.chop += dt;
     if (a.swingT <= 0) a.swingT = 0.35;
@@ -428,6 +467,7 @@ function ai(m, dt, out) {
       tr.leaves = tr.leaves.filter(([x, y, z]) => isLeaf(get(x, y, z)));
       fell(m, tr);
       log("fell", m, { at: bx, logs: tr.logs.length, leaves: tr.leaves.length });
+      F.sweep = { x: bx[0], z: bx[2], until: nowS() + SWEEP_MAX }; F.skip = null; F.tries = null; F.thinkT = 0.8;   // now pick up everything that fell
       endTask(m, F, true);
     }
   }
@@ -442,5 +482,5 @@ function statusText(m) {
   return holdsSapling(m) ? "has saplings to plant" : "looking for saplings";
 }
 
-BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, _test: { fell, plantAt, growTick, findDrop, state } };
+BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, _test: { fell, plantAt, growTick, findDrop, state, builtBlock } };
 })();

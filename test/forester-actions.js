@@ -90,7 +90,7 @@ module.exports = async (pg, out) => {
     return null;
   });
   console.log("tree", JSON.stringify(tree));
-  for (let k = 0; k < 70; k++) {
+  for (let k = 0; k < 80; k++) {
     const line = await pg.evaluate(() => {
       const A = window.__A;
       for (let i = 0; i < 100; i++) { BF.sky.setTime(0.1); BF.mobs.update(0.1); BF.player.position.set(A.position.x + 4, A.position.y + 2, A.position.z + 4); BF.world.tickSim && 0; }
@@ -108,7 +108,13 @@ module.exports = async (pg, out) => {
     const doors = [];
     for (let x = A.position.x - 40; x <= A.position.x + 40; x++) for (let z = A.position.z - 40; z <= A.position.z + 40; z++) for (let y = A.position.y - 6; y <= A.position.y + 6; y++) { const b = BF.blocks[W.getBlock(x | 0, y | 0, z | 0)]; if (b && b.door) doors.push([x | 0, y | 0, z | 0]); }
     const dd = planted.map(p => Math.round(Math.min(...doors.map(d => Math.hypot(d[0] - p[0], d[1] - p[1], d[2] - p[2])))));
-    return { kinds, log: F.LOG.slice(-14), planted, doorDist: dd };
+    // every planted sapling: distance to the nearest built column (must be > 8)
+    const bd = planted.map(p => { let m = 99; for (let dx = -12; dx <= 12; dx++) for (let dz = -12; dz <= 12; dz++) for (let dy = -8; dy <= 10; dy++) { const id = W.getBlock(p[0] + dx, p[1] + dy, p[2] + dz); if (id && id !== B.farmland && id !== B.dirt_path && F._test.builtBlock(id)) m = Math.min(m, Math.hypot(dx, dz)); } return Math.round(m * 10) / 10; });
+    // after each fell: wanted items left lying within 12 blocks of the stump
+    const want = new Set(["emerald", "stick", "apple"]), wanted = d => { const n = BF.items[d.id].name; return want.has(n) || /_(log|sapling)$/.test(n); };
+    const left = F.LOG.filter(e => e.kind === "fell").map(e => BF.drops.list.filter(d => wanted(d) && Math.hypot(d.pos.x - e.at[0] - 0.5, d.pos.z - e.at[2] - 0.5) <= 12).length);
+    const fells = F.LOG.filter(e => e.kind === "fell" || e.kind === "swept" || e.kind === "giveup").map(e => e.kind + ":" + e.who + ":" + (e.at || e.why || e.task)); const lying = BF.drops.list.map(d => BF.items[d.id].name + "@" + [d.pos.x, d.pos.y, d.pos.z].map(v => v | 0) + " age" + (d.age | 0));
+    return { fells, lying, kinds, swept: F.LOG.filter(e => e.kind === "swept").map(e => e.why), dropsLeftNearFells: left, log: F.LOG.slice(-14), planted, doorDist: dd, builtDist: bd };
   })));
   await pg.screenshot({ path: out + '-work.png' });
 
