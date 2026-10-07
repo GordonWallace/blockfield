@@ -155,6 +155,14 @@ function routeNext(nd) {
   nd.rn = succ || null;
   return succ || undefined;
 }
+// distance from node p to the link (u, v)
+const pd = (p, u, v) => {
+  const dx = v.x - u.x, dz = v.z - u.z;
+  let t = ((p.x - u.x) * dx + (p.z - u.z) * dz) / (dx * dx + dz * dz);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(u.x + dx * t - p.x, u.z + dz * t - p.z);
+};
+let JOIN = null;
 // segments (a, b) and (c, d) cross or pass within CLR blocks of each other (callers skip pairs that share an end)
 const CLR = 80;
 function near(a, b, c, d) {
@@ -162,12 +170,6 @@ function near(a, b, c, d) {
       Math.max(a.z, b.z) + CLR < Math.min(c.z, d.z) || Math.max(c.z, d.z) + CLR < Math.min(a.z, b.z)) return false;
   const o = (p, q, r) => (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
   if (o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0) return true;
-  const pd = (p, u, v) => {
-    const dx = v.x - u.x, dz = v.z - u.z;
-    let t = ((p.x - u.x) * dx + (p.z - u.z) * dz) / (dx * dx + dz * dz);
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    return Math.hypot(u.x + dx * t - p.x, u.z + dz * t - p.z);
-  };
   return Math.min(pd(a, c, d), pd(b, c, d), pd(c, a, b), pd(d, a, b)) < CLR;
 }
 // Each node flows to its steepest lower neighbour whose link stays clear of the planned links (route successor or steepest descent) of the
@@ -187,17 +189,28 @@ function planarNext(t) {
     if (sl > 0.002) cand.push([sl, m]);
   }
   cand.sort((a, b) => b[0] - a[0] || a[1].k - b[1].k);
-  for (const [, c] of cand) {
-    let bad = false;
-    for (let dj = -WIN; dj <= WIN && !bad; dj++) for (let di = -WIN; di <= WIN; di++) {
+  const ok = c => {
+    for (let dj = -WIN; dj <= WIN; dj++) for (let di = -WIN; di <= WIN; di++) {
       if (!di && !dj) continue;
       const m = node(t.i + di, t.j + dj);
       if (m === c || !lower(m, t)) continue;
       const n = plan(m);
-      if (!n || n === c || n === t) continue;
-      if (near(t, c, m, n)) { bad = true; break; }
+      if (!n || n === t) continue;
+      if (n === c) {
+        // two links into the same node: fine when they arrive from well apart, but when one starts close beside the other they run side
+        // by side down to the junction (two streams on separate ledges); join the lower one's start instead, an earlier confluence
+        if (pd(m, t, c) < CLR || pd(t, m, c) < CLR) { JOIN = m; return false; }
+        continue;
+      }
+      if (near(t, c, m, n)) return false;
     }
-    if (!bad) return (t.next = c);
+    return true;
+  };
+  for (const [, c] of cand) {
+    JOIN = null;
+    if (ok(c)) return (t.next = c);
+    const j = JOIN;
+    if (j && Math.abs(j.i - t.i) <= RAD && Math.abs(j.j - t.j) <= RAD && ok(j)) return (t.next = j);
   }
   return (t.next = first);
 }
@@ -272,6 +285,35 @@ function ensure(x, z) {
 // meanders: the query point is displaced by a slow noise, so channels wind around their polyline
 const warpX = (x, z) => x + noise.n2(x / 170 + 5.1, z / 170 - 2.2) * 24 + noise.n2(x / 53 - 1.3, z / 53 + 8.1) * 5;
 const warpZ = (x, z) => z + noise.n2(x / 170 - 9.4, z / 170 + 3.7) * 24 + noise.n2(x / 53 + 4.4, z / 53 - 6.6) * 5;
+// Exact distance from (x, z) to the meandering centre line C(s) = P(s) - D(P(s)) of segment e (P: the segment, D: the warp), which is
+// kept as a polyline sampled every ~6 blocks. Distances measured in the warped space stretch and squeeze across the channel (up to about
+// 2x either way), so a river's width would wander independently of its flow; on the curve a river is as wide as its flow says around bends.
+const CAND = [], BLEND = 10, EX = { d: 0, w: 0, rs: 0, sd: 0 };
+function curve(e) {
+  const L = Math.hypot(e.bx - e.ax, e.bz - e.az), n = Math.max(1, Math.ceil(L / 6)), c = e.c = new Float64Array(2 * n + 2);
+  for (let k = 0; k <= n; k++) {
+    const px = e.ax + (e.bx - e.ax) * k / n, pz = e.az + (e.bz - e.az) * k / n;
+    c[2 * k] = 2 * px - warpX(px, pz); c[2 * k + 1] = 2 * pz - warpZ(px, pz);
+  }
+  return c;
+}
+function exact(e, tw, x, z) {
+  const c = e.c || curve(e), n = c.length / 2 - 1;
+  let bd = 1e18, bt = 0;
+  for (let k = 0; k < n; k++) {
+    const ax = c[2 * k], az = c[2 * k + 1], dx = c[2 * k + 2] - ax, dz = c[2 * k + 3] - az;
+    let u = ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1);
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    const qx = ax + dx * u - x, qz = az + dz * u - z, d2 = qx * qx + qz * qz;
+    if (d2 < bd) { bd = d2; bt = (k + u) / n; }
+  }
+  // the water surface follows the (smooth) warped position tw along the segment, not the nearest point of the curve, which jumps across
+  // the inside of a bend: on a steep river that jump would be a step of several blocks in the water across the channel
+  EX.rs = e.ra + (e.rb - e.ra) * tw;
+  EX.w = e.n ? flowW(e.n, e.ra + (e.rb - e.ra) * bt) : e.wa + (e.wb - e.wa) * bt;
+  EX.d = Math.sqrt(bd); EX.sd = EX.d - EX.w;
+  return EX;
+}
 // Nearest river influence at (x, z). out: d (distance from the centre line), w (half width), rs (water surface), sd = d - w.
 // Returns false when no river is within REACH blocks of the bank.
 function at(x, z, out) {
@@ -280,31 +322,33 @@ function at(x, z, out) {
   const l = cells.get(Math.floor(x / CELL) * 4194304 + Math.floor(z / CELL));
   if (!l) return false;
   const qx = warpX(x, z), qz = warpZ(x, z);
-  let best = 1e9, bd = 0, bw = 0, brs = 0, be = null, bt = 0;
+  let best = 1e9, bd = 0, bw = 0, brs = 0;
+  // generator 3 refines every segment that could be nearest once the meanders are measured exactly (they move a bank by up to ~2x the
+  // warped estimate), so the nearest one is picked on true distances and no seam is left where the warped pick changes
+  const cand = PLANAR ? CAND : null;
+  if (cand) cand.length = 0;
   for (let k = 0; k < l.length; k++) {
     const e = l[k], dx = e.bx - e.ax, dz = e.bz - e.az;
     let t = ((qx - e.ax) * dx + (qz - e.az) * dz) / (dx * dx + dz * dz);
     t = t < 0 ? 0 : t > 1 ? 1 : t;
     const px = e.ax + dx * t - qx, pz = e.az + dz * t - qz, d = Math.sqrt(px * px + pz * pz), rs = e.ra + (e.rb - e.ra) * t;
     const w = e.n ? flowW(e.n, rs) : e.wa + (e.wb - e.wa) * t, sd = d - w;
-    if (sd < best) { best = sd; bd = d; bw = w; brs = rs; be = e; bt = t; }
+    if (cand) cand.push(sd, k, t);
+    if (sd < best) { best = sd; bd = d; bw = w; brs = rs; }
   }
-  if (PLANAR && be && best < REACH + 60) {
-    // Exact distance to the meandering centre line C(s) = P(s) - D(P(s)) (P: the segment, D: the warp), refined from the warped estimate by
-    // Newton steps. Distances measured in the warped space stretch and squeeze across the channel (up to about 2x either way), so a river's
-    // width would wander independently of its flow; measured on the curve, a river is as wide as its flow says wherever it bends.
-    const e = be, L = Math.hypot(e.bx - e.ax, e.bz - e.az) || 1, ux = (e.bx - e.ax) / L, uz = (e.bz - e.az) / L;
-    const cx = s => { const px = e.ax + ux * s, pz = e.az + uz * s; return 2 * px - warpX(px, pz); };
-    const cz = s => { const px = e.ax + ux * s, pz = e.az + uz * s; return 2 * pz - warpZ(px, pz); };
-    let s = bt * L;
-    for (let it = 0; it < 3; it++) {
-      const x0 = cx(s), z0 = cz(s), tx = cx(s + 1) - x0, tz = cz(s + 1) - z0;
-      s -= ((x0 - x) * tx + (z0 - z) * tz) / (tx * tx + tz * tz || 1);
-      s = s < 0 ? 0 : s > L ? L : s;
+  if (cand && best < REACH + 70) {
+    const lim = best + 70;
+    best = 1e9;
+    for (let c = 0; c < cand.length; c += 3) if (cand[c] <= lim) {
+      const r = exact(l[cand[c + 1]], cand[c + 2], x, z);
+      cand[c] = r.sd; cand[c + 2] = r.rs;   // reused below
+      if (r.sd < best) { best = r.sd; bd = r.d; bw = r.w; brs = r.rs; }
     }
-    const t = s / L, rs = e.ra + (e.rb - e.ra) * t;
-    bw = e.n ? flowW(e.n, rs) : e.wa + (e.wb - e.wa) * t; brs = rs;
-    bd = Math.hypot(cx(s) - x, cz(s) - z); best = bd - bw;
+    // where the nearest segment changes (a bend at a node, a confluence) the surfaces of the two blend over a few blocks instead of
+    // stepping, so water never stands in a ledge across the channel
+    let sw = 0, sr = 0;
+    for (let c = 0; c < cand.length; c += 3) if (cand[c] <= lim && cand[c] < best + BLEND) { const wgt = 1 - (cand[c] - best) / BLEND; sw += wgt; sr += wgt * cand[c + 2]; }
+    if (sw > 0) brs = sr / sw;
   }
   if (best > REACH) return false;
   out.d = bd; out.w = bw; out.rs = brs; out.sd = best;
