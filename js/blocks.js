@@ -578,6 +578,14 @@ const ITEM_DEFS = [
     { name: sp + "_door", places: "door", wood: sp, sprite: "oak_door", color: WOOD_COLOR[sp], creativeTab: "functional" },
     { name: sp + "_fence_gate", places: "gate", wood: sp, sprite: "oak_fence_gate", color: WOOD_COLOR[sp], creativeTab: "functional" }]),
   // ---- end wood variants items ----
+  // ---- gold tools (append-only). Minecraft Java: mine as fast as anything (speed 12) but only at wood's harvest level (tier 1), and last 32 uses.
+  // Recipes come from the tool loop in inventory.js ("golden" + Gold Ingot). Damage as the wooden tool of the same kind.
+  { name: "golden_pickaxe", tool: { type: "pickaxe", tier: 1, speed: 12, damage: 2 }, durability: 32, material: "gold", color: "#f2d64b" },
+  { name: "golden_axe", tool: { type: "axe", tier: 1, speed: 12, damage: 3 }, durability: 32, material: "gold", color: "#f2d64b" },
+  { name: "golden_shovel", tool: { type: "shovel", tier: 1, speed: 12, damage: 1 }, durability: 32, material: "gold", color: "#f2d64b" },
+  { name: "golden_sword", tool: { type: "sword", tier: 1, speed: 1, damage: 4 }, durability: 32, material: "gold", color: "#f2d64b" },
+  { name: "golden_hoe", tool: { type: "hoe", tier: 1, speed: 12, damage: 1 }, durability: 32, material: "gold", color: "#f2d64b" },
+  // ---- end gold tools ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -591,7 +599,7 @@ BLOCK_DEFS.forEach((d, id) => {
   if (def.tiles && !def.tiles.front) def.tiles.front = def.tiles.side; // front = the +z (south) face
   blocks[id] = def; items[id] = def; B[def.name] = id; I[def.name] = id;
 });
-// Tool lifespan in uses, as Minecraft Java: wood 59, stone 131, iron 250, diamond 1561 (by tier); shears 238, bow 384.
+// Tool lifespan in uses, as Minecraft Java: wood 59, stone 131, iron 250, diamond 1561 (by tier); shears 238, bow 384; gold 32 (set on the item).
 const DURABILITY = { 1: 59, 2: 131, 3: 250, 4: 1561 }, DURABILITY_OF = { shears: 238, bow: 384 };
 ITEM_DEFS.forEach((d, i) => {
   const id = ITEM_BASE + i;

@@ -37,6 +37,7 @@
   {"name": "explorer-far", "file": "test/explorer-far.js", "kind": "actions", "tier": "integration"},
   {"name": "farmbeds", "kind": "node", "tier": "integration", "file": "test/farmbeds.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "farm beds soak, 1 day x 2 villages"},
   {"name": "forester-actions", "file": "test/forester-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "forester-axes", "file": "test/forester-axes.js", "kind": "actions", "tier": "integration", "timeout": 600},
   {"name": "furniture-actions", "file": "test/furniture-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "gen3-check", "kind": "node", "tier": "integration", "file": "tools/gen3-check.js", "args": ["all"], "timeout": 900, "what": "terrain generator: old generators unchanged, gen 3 seams"},
   {"name": "map-icons", "file": "test/map-icons.js", "kind": "actions", "tier": "integration"},

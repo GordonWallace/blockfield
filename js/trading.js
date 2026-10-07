@@ -28,11 +28,12 @@ const VALUE = {
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
+  golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
   iron_ore: .45, gold_ore: 1.05, raw_iron: .45, raw_gold: 1.05,    // miner goods: ore smelts into one ingot
   wooden_pickaxe: .13, wooden_axe: .13, wooden_hoe: .1, stone_pickaxe: .13, stone_axe: .13, stone_hoe: .1,   // toolsmith goods (js/toolsmith.js)
-  golden_pickaxe: 3.64, golden_axe: 3.64, golden_hoe: 2.44, furnace: .3,                                     // furnace: 8 cobblestone (js/furniture.js)
+  furnace: .3,                                                       // 8 cobblestone (js/furniture.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
@@ -157,8 +158,9 @@ const TRADES = {
   // ("Out of emeralds" otherwise), which is what the mod's trade stock does too. Nothing else to sell: its logs and apples are its own.
   // It also sells the wood it has harvested (js/forester.js): planks it sawed from its own logs, and the logs. Prices 104-111% of VALUE (30 planks
   // = 0.9 emerald, 8 logs = 1 emerald); only what it actually holds can be bought ("Out of stock"), nothing is restocked or part of its starting pack.
-  // The furniture maker and the builder buy these.
-  forester: [["1 oak_sapling > 1 emerald", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
+  // The furniture maker and the builder buy these. Sticks (104% of VALUE) it makes from its planks and keeps in stock (js/forester.js sticks), for
+  // the toolsmith, the miner and the player.
+  forester: [["1 oak_sapling > 1 emerald", "1 emerald > 48 stick", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
   // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
@@ -298,7 +300,7 @@ function stockFor(prof, v) {
   if (STARTER_TOOLS[prof]) for (const pool of table(prof)) for (const o of pool) if (isToolItem(o.sell.id)) noStart.add(o.sell.id);   // their one tool is the starter below
   if (prof === "miner") for (const n of ["cobblestone", "coal", "iron_ore", "gold_ore", "diamond"]) noStart.add(I[n]);   // mined, never given
   if (prof === "toolsmith") for (const id of profile(prof).caps.keys()) noStart.add(id);   // made, never given (js/toolsmith.js)
-  if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); }   // harvested, never given
+  if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
