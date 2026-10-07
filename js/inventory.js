@@ -497,6 +497,8 @@ const css = `
 .bf-vgrid { display: grid; grid-template-columns: repeat(6, var(--s)); }
 .bf-vgrid .bf-slot { opacity: .5; filter: grayscale(.85); cursor: default; }
 .bf-vgrid .bf-slot:hover { background: none; }
+.bf-vgrid.edit .bf-slot { opacity: 1; filter: none; cursor: pointer; }
+.bf-vgrid.edit .bf-slot:hover { background: rgba(255,255,255,.12); }
 .bf-none { color: var(--muted); font: 12px/1.5 var(--mono); padding: 8px 2px; }
 .bf-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
 .bf-tab { width: calc(var(--s) * 1.05); height: calc(var(--s) * .95); display: grid; place-items: center; background: rgba(255,255,255,.05);
@@ -700,7 +702,7 @@ function buildDOM() {
       return;
     }
     e.preventDefault();
-    if (el.dataset.c === "vinv") return;
+    if (el.dataset.c === "vinv" && !vinvEditable()) return;
     if (document.activeElement === searchEl && e.pointerType !== "mouse") searchEl.blur();
     if (e.pointerType === "touch" || e.pointerType === "pen") {
       const p = press = { el, fired: false, moved: false, x: e.clientX, y: e.clientY };
@@ -763,7 +765,9 @@ function hover(target) {
   if (el && el !== heldEl) showTip(el, false); else hideTip();
 }
 let tipUntil = 0;
+const vinvEditable = () => isCreative() && !!(villager && villager.inv);   // creative mode: the villager's inventory can be edited
 function arrFor(c) {
+  if (c === "vinv") return vinvEditable() ? villager.inv : null;
   return c === "inv" ? slots : c === "grid" ? grid : c === "furn" ? (furnace && furnace.slots) : c === "pay" ? pay : null;
 }
 function stackAt(el) {
@@ -801,7 +805,7 @@ function hideTip() { tipEl && tipEl.classList.remove("on"); }
 function canDrop(el) {
   if (!cursor || !el || !el.dataset) return false;
   const c = el.dataset.c, i = +el.dataset.i;
-  if (!(c === "inv" || c === "grid" || c === "pay" || (c === "furn" && (i === 0 || (i === 1 && FUEL.has(cursor.id)))))) return false;
+  if (!(c === "inv" || c === "grid" || c === "pay" || (c === "vinv" && vinvEditable()) || (c === "furn" && (i === 0 || (i === 1 && FUEL.has(cursor.id)))))) return false;
   const arr = arrFor(c); if (!arr) return false;
   const s = arr[i];
   return !s || (s.id === cursor.id && s.count < stackOf(s.id));
@@ -840,7 +844,7 @@ function applyDrag(d) {
 // ---------------------------------------------------------------- slot interactions
 function slotClick(el, button, shift, touch) {
   const c = el.dataset.c, i = +el.dataset.i;
-  if (c === "vinv") return;
+  if (c === "vinv" && !vinvEditable()) return;
   if (c === "result") clickResult(shift);
   else if (c === "tres") clickTrade(shift);
   else if (c === "pal") clickPalette(i, button, shift);
@@ -905,7 +909,7 @@ function shiftMove(c, i) {
         if (k < 0) k = pay.findIndex(p => !p);
         if (k >= 0) st.count = mergeInto(pay, k, st);
         recomputeTrade();
-      }
+      } else if (vinvEditable()) st.count = BF.trades.inv.add(villager.inv, st.id, st.count);   // creative: shift-click gives it to the villager
     }
     if (st.count === s.count) { // not consumed by the container: hotbar <-> main
       slots[i] = null;
@@ -971,6 +975,7 @@ function renderAll() {
   } else if (mode === "trade") {
     setSlot(paySlots[0], pay[0]); setSlot(paySlots[1], pay[1]);
     const vi = villager && villager.inv;
+    vSlotEls[0].parentNode.classList.toggle("edit", vinvEditable());
     for (let i = 0; i < vSlotEls.length; i++) setSlot(vSlotEls[i], vi ? vi[i] : null);
     setSlot(tresEl, tradeResult);
     tresEl.classList.toggle("has", !!tradeResult);

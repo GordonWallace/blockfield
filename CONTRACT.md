@@ -652,3 +652,5 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - Claimed beds (mobs.js `claimBed`): at night a villager without a working bed (bedless house slot, builder or explorer without a home,
   broken bed) takes the nearest free village bed (`BF.breeding.freeBed`), marked `bed.claimed`; saved as `bed: [x, y, z, f]` in trades.pack.
   A builder who finishes its own house moves into it and evicts anyone who borrowed that bed.
+- Creative mode: the trade screen's villager inventory (`vinv` slots) is editable like any container (click, split, drag, shift-click
+  between it and the player's inventory); in survival it stays greyed out and read-only.
