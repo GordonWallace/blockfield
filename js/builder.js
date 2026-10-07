@@ -52,43 +52,31 @@ function builtOf(rec) {
 }
 
 // ---------------------------------------------------------------- materials
-// Items are counted per bucket: any planks stand in for planks, any log for logs (the builder uses what it holds).
-const bucketHave = (inv, id) => {
-  const BPr = BP(), f = BPr.family(id);
-  if (!f) return TR().inv.count(inv, id);
-  let n = 0;
-  for (const s of inv) if (s && BPr.family(s.id) === f) n += s.count;
-  return n;
-};
-// Removes one item for a block: the exact item first, else the family member held most. Returns the item id used or -1.
-function pickItem(inv, id) {
-  if (TR().inv.count(inv, id) > 0) return id;
-  const f = BP().family(id);
-  if (!f) return -1;
-  let best = -1, bc = 0;
-  for (const s of inv) if (s && BP().family(s.id) === f && s.count > bc) { best = s.id; bc = s.count; }
-  return best;
-}
-function craftTable() {
-  const I = BF.I, t = {};
-  t[I.oak_door] = { n: 3, from: [[I.planks, 6]] };
-  t[I.oak_fence] = { n: 3, from: [[I.planks, 5]] };
-  t[I.crafting_table] = { n: 1, from: [[I.planks, 4]] };
-  t[I.chest] = { n: 1, from: [[I.planks, 8]] };
+// Every structure is built from one wood species (entry.wood, see blueprints.js): its requirement names that species' planks, logs and fences
+// exactly, and nothing stands in for them, so a spruce house never ends up with oak boards in it.
+const have0 = (inv, id) => TR().inv.count(inv, id);
+// Crafts for a structure in species `wood`: fences of that wood, and the oak door, crafting table and chest, all from that wood's planks;
+// the planks from that wood's logs (analyze). Furnaces from cobblestone.
+function craftTable(wood) {
+  const I = BF.I, t = {}, P = BP().woodItem(wood, "planks"), F = BP().woodItem(wood, "fence");
+  t[I.oak_door] = { n: 3, from: [[P, 6]] };
+  if (F != null) t[F] = { n: 3, from: [[P, 5]] };
+  t[I.crafting_table] = { n: 1, from: [[P, 4]] };
+  t[I.chest] = { n: 1, from: [[P, 8]] };
   t[I.furnace] = { n: 1, from: [[I.cobblestone, 8]] };
   return t;
 }
-let CRAFTS = null;
-// What is missing for `req` ({bucketItem: n})? Returns {ok, shortfall: {item: n}, crafts: [{id, times, n, from}]}: doors, fences, tables,
-// chests and furnaces are crafted from planks / cobblestone, planks from logs, when that closes the gap.
-function analyze(inv, req) {
-  const I = BF.I;
-  CRAFTS = CRAFTS || craftTable();
+const CRAFTS = {};
+// What is missing for `req` ({item: n}) when building in `wood`? Returns {ok, shortfall: {item: n}, crafts: [{id, times, n, from}]}: doors, fences,
+// tables, chests and furnaces are crafted from planks / cobblestone, planks from logs of the same wood, when that closes the gap.
+function analyze(inv, req, wood) {
+  wood = wood || "oak";
+  const BPr = BP(), T = CRAFTS[wood] || (CRAFTS[wood] = craftTable(wood));
   const need = {}, gain = {}, crafts = [];
   for (const k in req) need[k] = req[k];
-  const have = id => bucketHave(inv, id) + (gain[id] || 0);
-  for (const k in CRAFTS) {
-    const id = +k, def = CRAFTS[k];
+  const have = id => have0(inv, id) + (gain[id] || 0);
+  for (const k in T) {
+    const id = +k, def = T[k];
     if (!need[id]) continue;
     const deficit = need[id] - have(id);
     if (deficit <= 0) continue;
@@ -97,8 +85,8 @@ function analyze(inv, req) {
     gain[id] = (gain[id] || 0) + times * def.n;
     for (const [ing, q] of def.from) need[ing] = (need[ing] || 0) + q * times;
   }
-  const P = I.planks, L = I.oak_log, defP = (need[P] || 0) - have(P);
-  if (defP > 0) {
+  const P = BPr.woodItem(wood, "planks"), L = BPr.woodItem(wood, "log"), defP = (need[P] || 0) - have(P);
+  if (defP > 0 && L != null) {
     const spareLogs = have(L) - (need[L] || 0);
     if (spareLogs > 0) {
       const times = Math.min(Math.ceil(defP / 4), spareLogs);
@@ -111,24 +99,45 @@ function analyze(inv, req) {
   for (const k in need) { const s = need[k] - have(+k); if (s > 0) { shortfall[k] = s; ok = false; } }
   return { ok, shortfall, crafts };
 }
-function removeBucket(inv, id, n) {
-  let left = n;
-  const f = BP().family(id);
-  while (left > 0) {
-    const use = pickItem(inv, id);
-    if (use < 0) break;
-    const got = TR().inv.remove(inv, use, f ? Math.min(left, TR().inv.count(inv, use)) : left);
-    if (!got) break;
-    left -= got;
+// Units of each item the other villagers could sell right now (their offers x their stock).
+function sellerStock(R) {
+  const T = TR(), out = {};
+  for (const v2 of R.members) {
+    if (!v2 || v2.type !== "villager" || v2.dead || v2.removed || v2.profession === "builder" || !v2.trades || !v2.inv) continue;
+    const seen = new Set();
+    for (const o of v2.trades) {
+      if (seen.has(o.sell.id) || T.blockReason(v2, o)) continue;
+      seen.add(o.sell.id);
+      out[o.sell.id] = (out[o.sell.id] || 0) + T.inv.count(v2.inv, o.sell.id);
+    }
   }
-  return n - left;
+  return out;
 }
+// The wood a new structure of `type` is built from: the species the builder can get most easily. Cost = what it would still lack, where items a
+// villager has in stock cost a fifth; ties go to the wood it holds most of, then the village style's own wood. Returns the species name.
+function chooseWood(m, type, style, opts, stock) {
+  const BPr = BP(), sw = BPr.styleWood(style), R = m.village;
+  stock = stock || (R ? sellerStock(R) : {});
+  let best = null;
+  for (const sp of BPr.woodsAvailable()) {
+    const bp = BPr.get(type, 0, style, 0.5, opts, sp);
+    if (!bp) return sw;
+    const a = analyze(m.inv, bp.req, sp);
+    let cost = 0;
+    for (const k in a.shortfall) { const n = a.shortfall[k], s = Math.min(n, stock[k] || 0); cost += (n - s) + s * 0.2; }
+    const held = have0(m.inv, BPr.woodItem(sp, "planks")) + 4 * have0(m.inv, BPr.woodItem(sp, "log"));
+    const score = cost - Math.min(held, 200) * 0.001 - (sp === sw ? 0.0005 : 0);
+    if (!best || score < best.score) best = { sp, score };
+  }
+  return best ? best.sp : sw;
+}
+function removeItems(inv, id, n) { return TR().inv.remove(inv, id, n) || 0; }
 function applyCrafts(m, crafts) {
   const T = TR().inv;
   for (const c of crafts) for (let k = 0; k < c.times; k++) {
-    if (!c.from.every(([ing, q]) => bucketHave(m.inv, ing) >= q)) break;
+    if (!c.from.every(([ing, q]) => have0(m.inv, ing) >= q)) break;
     const trial = T.clone(m.inv);
-    for (const [ing, q] of c.from) removeBucket(trial, ing, q);
+    for (const [ing, q] of c.from) removeItems(trial, ing, q);
     if (T.add(trial, c.id, c.n) > 0) break;                         // no room
     for (let i = 0; i < m.inv.length; i++) m.inv[i] = trial[i];
   }
@@ -156,7 +165,9 @@ function startStock(v) {
 
 // ---------------------------------------------------------------- entries (persisted) and their cells
 function bpOf(e) {
-  if (!e._bp || e._bpKey !== e.rot + "|" + e.style) { e._bp = BP().get(e.type, e.rot, e.style, e.h, e.opts); e._bpKey = e.rot + "|" + e.style; }
+  if (!e.wood || !BP().woodsAvailable().includes(e.wood)) e.wood = BP().styleWood(e.style);   // planned before woods were chosen: the style's own wood
+  const key = e.rot + "|" + e.style + "|" + e.wood;
+  if (!e._bp || e._bpKey !== key) { e._bp = BP().get(e.type, e.rot, e.style, e.h, e.opts, e.wood); e._bpKey = key; }
   return e._bp;
 }
 const nfill = e => (e.fill ? e.fill.length : 0);
@@ -173,10 +184,10 @@ function cellOf(e, i) {
 }
 // material still needed for the cells from index `from`
 function remainingReq(e, from) {
-  const req = {}, BPr = BP();
+  const req = {};
   for (let i = from; i < e.n; i++) {
     const c = cellOf(e, i);
-    if (c.cost) { const k = BPr.bucket(c.item); req[k] = (req[k] || 0) + 1; }
+    if (c.cost) req[c.item] = (req[c.item] || 0) + 1;
   }
   return req;
 }
@@ -242,7 +253,7 @@ function occupiedBox(m, r) {   // player or another mob inside the rect (x0, z0,
   for (const o of BF.mobs.list) if (o !== m && !o.dead && !o.removed && hit(o.position)) return true;
   return false;
 }
-function findSite(m, type, opts, haveFound) {
+function findSite(m, type, opts, haveFound, wood) {
   const R = m.village, wg = R.wg, w = W(), built = builtOf(R);
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
   const attempt = (m.bs ? (m.bs.siteTry = (m.bs.siteTry || 0) + 1) : 0);
@@ -262,7 +273,7 @@ function findSite(m, type, opts, haveFound) {
     const h = (hash32(px + "," + pz + ":" + type) % 1000) / 1000;
     // probe with a rotation facing the village centre
     const rot = BF.dirIndex(R.x - px, R.z - pz);
-    const bp = BP().get(type, rot, style, h, opts);
+    const bp = BP().get(type, rot, style, h, opts, wood);
     if (!bp) return null;
     const rect = [px, pz, px + bp.w - 1, pz + bp.d - 1];
     if (obs.some(o => rectsOverlap(o, rect))) continue;
@@ -306,14 +317,15 @@ function pickType(m, bs) {
     market_stall: cnt("market_stall") < 2 ? 0.7 : 0.15,
     workshop: cnt("workshop") < 1 ? 0.5 : 0.1,
   };
-  const sold = soldItems(R);
+  const sold = soldItems(R), stock = sellerStock(R);
   let sum = 0;
   const ws = [];
   for (const t of BPr.TYPES) {
     if (bs.fail && bs.fail[t] > dayNow()) continue;
-    const bp = BPr.get(t, 0, style, 0.5, optsFor(t, m.inv));
+    const opts = optsFor(t, m.inv), wood = chooseWood(m, t, style, opts, stock);
+    const bp = BPr.get(t, 0, style, 0.5, opts, wood);
     const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
-    const a = analyze(m.inv, req);
+    const a = analyze(m.inv, req, wood);
     const buyable = Object.keys(a.shortfall).every(k => sold.has(+k));
     const mult = a.ok ? 3 : buyable ? 1.2 : 0.25;
     const x = (wt[t] || 0.3) * mult;
@@ -334,23 +346,25 @@ function logEvent(kind, m, data) {
 }
 
 // Try to start the structure `type`: site, crafts, entry. Returns the entry or null (and remembers the failure).
-function beginPlan(m, bs, type) {
+// `wood`: the species chosen for it (chooseWood when omitted); the whole structure is built from it.
+function beginPlan(m, bs, type, wood) {
   const R = m.village, built = builtOf(R), style = styleIdx(R.style);
   const found = BF.worldgen.palette(style).found;
   const opts = optsFor(type, m.inv);
-  const bp0 = BP().get(type, 0, style, 0.5, opts);
+  wood = wood || chooseWood(m, type, style, opts);
+  const bp0 = BP().get(type, 0, style, 0.5, opts, wood);
   const req = Object.assign({}, bp0.req);
-  const a = analyze(m.inv, req);
+  const a = analyze(m.inv, req, wood);
   if (!a.ok) return null;
-  const spare = Math.max(0, bucketHave(m.inv, found) - (req[found] || 0));
-  const site = findSite(m, type, opts, spare);
+  const spare = Math.max(0, have0(m.inv, found) - (req[found] || 0));
+  const site = findSite(m, type, opts, spare, wood);
   if (!site) { bs.fail[type] = dayNow() + 0.12; logEvent("nosite", m, { type }); return null; }
   applyCrafts(m, a.crafts);
-  const e = { id: nextId(built), type, label: site.bp.label, rot: site.rot, style, h: site.h, opts: opts || undefined, ox: site.ox, oy: site.oy, oz: site.oz,
+  const e = { id: nextId(built), type, label: site.bp.label, rot: site.rot, style, wood, h: site.h, opts: opts || undefined, ox: site.ox, oy: site.oy, oz: site.oz,
     w: site.bp.w, d: site.bp.d, prog: 0, skipped: 0, state: "building", owner: m.slot ? m.slot.idx : 0, fill: site.fill, start: +dayNow().toFixed(3) };
   e.n = nfill(e) + site.bp.n;
   built.push(e);
-  logEvent("plan", m, { type, at: [e.ox, e.oy, e.oz], rot: e.rot, blocks: e.n, fill: nfill(e) });
+  logEvent("plan", m, { type, wood, at: [e.ox, e.oy, e.oz], rot: e.rot, blocks: e.n, fill: nfill(e) });
   return e;
 }
 
@@ -373,16 +387,16 @@ function think(m, bs) {
   const type = pickType(m, bs);
   if (!type) return;
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
-  const opts = optsFor(type, m.inv);
-  const bp = BP().get(type, 0, style, 0.5, opts);
+  const opts = optsFor(type, m.inv), wood = chooseWood(m, type, style, opts);
+  const bp = BP().get(type, 0, style, 0.5, opts, wood);
   const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
-  const a = analyze(m.inv, req);
+  const a = analyze(m.inv, req, wood);
   if (a.ok) {
-    const e = beginPlan(m, bs, type);
+    const e = beginPlan(m, bs, type, wood);
     if (e) startBuild(m, bs, e);
     return;
   }
-  bs.mode = "shop"; bs.want = { type, req, short: a.shortfall }; bs.stage = "think"; bs.t = 0;
+  bs.mode = "shop"; bs.want = { type, wood, req, short: a.shortfall }; bs.stage = "think"; bs.t = 0;
 }
 
 // ---------------------------------------------------------------- movement helpers (A* and route following live in mobs.js)
@@ -508,18 +522,16 @@ function placeCell(m, bs, e) {
     return "wait";
   }
   bs.occT = 0;
-  let use = c.id;
+  const use = c.id;
   if (c.cost) {
-    let item = pickItem(m.inv, c.item);
-    if (item < 0) {
-      const a = analyze(m.inv, remainingReq(e, e.prog));
-      if (a.crafts.length) { applyCrafts(m, a.crafts); item = pickItem(m.inv, c.item); }
-      if (item < 0) return "missing";
+    if (have0(m.inv, c.item) < 1) {                         // only the exact item: no other wood stands in
+      const a = analyze(m.inv, remainingReq(e, e.prog), bpOf(e).wood);
+      if (a.crafts.length) applyCrafts(m, a.crafts);
+      if (have0(m.inv, c.item) < 1) return "missing";
     }
-    if (item !== c.item) use = item;                       // a stand-in wood of the same family
   }
   if (!w.setBlock(c.x, c.y, c.z, use)) return "paused";
-  if (c.cost) T.remove(m.inv, use === c.id ? c.item : use, 1);          // exactly one item per block
+  if (c.cost) T.remove(m.inv, c.item, 1);                   // exactly one item per block
   if (isWater) { T.remove(m.inv, BF.I.water_bucket, 1); T.add(m.inv, BF.I.bucket, 1); }   // the bucket is empty after the one block
   let step = 1;
   if (BF.vlog && BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) BF.vlog.bed(m, c.x, c.y, c.z);
@@ -657,7 +669,7 @@ function nearestDistFrom(g, c) {
 
 // ---------------------------------------------------------------- material seeking
 function toShop(m, bs, e) {
-  const req = remainingReq(e, e.prog), a = analyze(m.inv, req);
+  const req = remainingReq(e, e.prog), a = analyze(m.inv, req, bpOf(e).wood);
   bs.mode = "shop"; bs.want = { entry: e, req, short: a.shortfall }; bs.stage = "think"; bs.t = 0; m.ai.route = null; bs.goal = null;
   logEvent("short", m, { for: e.type, missing: Object.keys(a.shortfall).map(k => BF.itemName(+k) + " x" + a.shortfall[k]) });
 }
@@ -706,11 +718,11 @@ function shopMode(m, bs, dt, out) {
   if (e && e.state !== "building") { bs.mode = "idle"; bs.want = null; return false; }
   bs.t -= dt;
   if (bs.stage === "think" || (bs.stage === "wait" && bs.t <= 0)) {
-    const req = e ? remainingReq(e, e.prog) : wnt.req, a = analyze(m.inv, req);
+    const req = e ? remainingReq(e, e.prog) : wnt.req, a = analyze(m.inv, req, e ? bpOf(e).wood : wnt.wood);
     wnt.short = a.shortfall;
     if (a.ok) {
       if (e) { applyCrafts(m, a.crafts); startBuild(m, bs, e); return false; }
-      const ne = beginPlan(m, bs, wnt.type);
+      const ne = beginPlan(m, bs, wnt.type, wnt.wood);
       bs.want = null;
       if (ne) startBuild(m, bs, ne); else bs.mode = "idle";
       return false;
@@ -783,7 +795,7 @@ function statusText(m) {
   const bs = m.bs;
   if (m.sleeping || !allowed()) return "Resting";
   if (!bs) return "Planning";
-  if (bs.mode === "build" && bs.entry) return "Building: " + bs.entry.label + " (" + Math.floor(100 * bs.entry.prog / Math.max(1, bs.entry.n)) + "%)";
+  if (bs.mode === "build" && bs.entry) return "Building: " + (bpOf(bs.entry).woody ? bpOf(bs.entry).wood.replace("_", " ") + " " : "") + bs.entry.label + " (" + Math.floor(100 * bs.entry.prog / Math.max(1, bs.entry.n)) + "%)";
   if (bs.mode === "fill") return "Fetching water";
   if (bs.mode === "shop" && bs.want) {
     const t = reqText(bs.want.short || {});

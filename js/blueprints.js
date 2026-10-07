@@ -33,19 +33,37 @@ function itemOf(id) {
   if (id === BF.B.water) return null;                          // water has no item of its own: the builder pours it from a full water bucket (builder.js)
   return b.item != null ? b.item : id;
 }
-// Wood families can stand in for each other: any planks for planks, any (unstripped) log for logs.
-function family(item) {
-  const n = nameOf(item);
-  if (n === "planks" || /_planks$/.test(n)) return "planks";
-  if (/_log$/.test(n) && !/^stripped_/.test(n)) return "log";
-  return null;
+// ---- wood: every structure is built from ONE wood species. A blueprint is drawn with the village palette (which mixes woods, e.g. oak walls
+// under a spruce roof) and then every planks / log / fence cell is turned into the chosen species. Doors stay oak (the only door there is);
+// crafting tables and chests are made from any planks.
+const WOODS = ["oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry"];
+const WOOD_PARTS = ["planks", "log", "fence"];
+const woodName = (sp, part) => (sp === "oak" && part === "planks" ? "planks" : sp + "_" + part);
+let WOOD_OF = null;                                             // block id -> [species, part]
+function woodTable() {
+  if (WOOD_OF) return WOOD_OF;
+  WOOD_OF = new Map();
+  for (const sp of WOODS) for (const part of WOOD_PARTS) { const id = BF.B[woodName(sp, part)]; if (id != null) WOOD_OF.set(id, [sp, part]); }
+  return WOOD_OF;
 }
-const bucket = item => { const f = family(item); return f === "planks" ? BF.I.planks : f === "log" ? BF.I.oak_log : item; };
-const familyMembers = f => {
-  const out = [];
-  for (let id = 0; id <= BF.MAX_BLOCK; id++) if (BF.items[id] && BF.items[id].isBlock && family(id) === f) out.push(id);
-  return out;
-};
+// [species, part] of a planks / log / fence block or item, else null.
+const woodOf = id => woodTable().get(id) || null;
+// The same part in another species: woodSwap(B.oak_log, "spruce") = B.spruce_log. Anything else comes back unchanged.
+function woodSwap(id, sp) {
+  const w = woodOf(id);
+  if (!w || !sp || w[0] === sp) return id;
+  const nid = BF.B[woodName(sp, w[1])];
+  return nid != null ? nid : id;
+}
+const woodItem = (sp, part) => (BF.I[woodName(sp, part)] != null ? BF.I[woodName(sp, part)] : null);
+// The species a village style is drawn in (its walls / corner logs): plains oak, snowy spruce, savanna acacia, taiga spruce; desert oak.
+function styleWood(style) {
+  const S = pal(style);
+  for (const id of [S.corner, S.wall, S.log, S.roof]) { const w = woodOf(id); if (w) return w[0]; }
+  return "oak";
+}
+// Species a builder can use: planks, logs and fences all exist.
+const woodsAvailable = () => WOODS.filter(sp => WOOD_PARTS.every(p => BF.B[woodName(sp, p)] != null));
 
 // ---- specs: cells [u, y, q, blockId, phase?] in a local frame (u -> +x, q -> +z, y 0 = floor level, front/door side at q = 0 facing north) ----
 function genSpec(kind, w, d, style, h, bedKind) {
@@ -137,9 +155,10 @@ function classify(spec, u, y, q, id) {
 // rot 0..3: the building turns clockwise by rot quarter turns (the door faces north, east, south, west). h in [0,1): variant.
 // opts: {lantern, hay}. Result cells: {x, y, z, id, item, cost, ph}: x/z relative to the min corner of the footprint box (eaves and
 // doorstep included), y relative to the floor level; cost 1 = one inventory item per block (0 for the upper door half, the bed head, water).
-function get(type, rot, style, h, opts) {
+function get(type, rot, style, h, opts, wood) {
   rot = rot & 3; style = style | 0; h = h == null ? 0.5 : h;
-  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0].join("|");
+  if (!wood || !woodsAvailable().includes(wood)) wood = styleWood(style);
+  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, wood].join("|");
   let bp = cache.get(ck);
   if (bp) return bp;
   const T = SPECS[type];
@@ -148,7 +167,7 @@ function get(type, rot, style, h, opts) {
   const raw = [];
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, maxY = 0;
   for (const c of spec.cells) {
-    const id = c[3];
+    const id = woodSwap(c[3], wood);
     if (!BF.blocks[id] || id === 0) continue;
     const [x, z] = rot90(c[0], c[2], rot);
     const nid = rotId(id, rot);
@@ -180,7 +199,7 @@ function get(type, rot, style, h, opts) {
   }
   const req = {}, exact = {}, free = {};
   for (const c of cells) {
-    if (c.cost) { const bk = bucket(c.item); req[bk] = (req[bk] || 0) + 1; exact[c.item] = (exact[c.item] || 0) + 1; }
+    if (c.cost) { req[c.item] = (req[c.item] || 0) + 1; exact[c.item] = (exact[c.item] || 0) + 1; }
     else if (c.item == null) free[c.id] = (free[c.id] || 0) + 1;
   }
   let door = null, beds = [];
@@ -189,13 +208,14 @@ function get(type, rot, style, h, opts) {
     if (bk.door && !bk.door.upper) door = { x: c.x, y: c.y, z: c.z, f: bk.door.f, outX: c.x + BF.DIRS[bk.door.f][0], outZ: c.z + BF.DIRS[bk.door.f][1] };
     if (bk.bed && !bk.bed.head) beds.push({ x: c.x, y: c.y, z: c.z, f: bk.bed.f });
   }
-  bp = { type, label: T.label, rot, style, h, opts: opts || null, w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door };
+  bp = { type, label: T.label, rot, style, h, opts: opts || null, wood, woody: cells.some(c => woodOf(c.id)), w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door };
   cache.set(ck, bp);
   return bp;
 }
 
 BF.blueprints = {
-  PH, TYPES: TYPE_NAMES, SPECS, get, itemOf, family, bucket, familyMembers, rotId, nameOf,
+  PH, TYPES: TYPE_NAMES, SPECS, get, itemOf, rotId, nameOf,
+  WOODS, woodOf, woodSwap, woodItem, woodName, styleWood, woodsAvailable,
   label: t => (SPECS[t] ? SPECS[t].label : t),
   // human readable material list, e.g. "48 Oak Planks, 12 Oak Log"
   describe(req) { return Object.keys(req).map(k => req[k] + " " + BF.itemName(+k)).join(", "); },
