@@ -234,18 +234,18 @@ function ai(m, dt, out) {
   }
   const deal = sh.deal, v2 = deal && deal.other;
   const avoidKey = () => (v2 && v2.slot ? v2.slot.idx : 0) + ":" + deal.item;
-  const giveUp = () => { if (v2) sh.avoid[avoidKey()] = dayNow() + 0.05; sh.stage = null; sh.deal = null; a.route = null; sh.checkT = 0.5; return false; };
-  if (!v2 || (deal.kind === "buy" ? !canSell(v2) : !canBuy(v2))) return giveUp();
+  const giveUp = why => { log("giveup", m, { to: v2 ? v2.profession : "?", item: deal ? (deal.item === "bed" ? "bed" : BF.itemName(deal.item)) : "?", why }); if (v2) sh.avoid[avoidKey()] = dayNow() + 0.05; sh.stage = null; sh.deal = null; a.route = null; sh.checkT = 0.5; return false; };
+  if (!v2 || (deal.kind === "buy" ? !canSell(v2) : !canBuy(v2))) return giveUp(v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone");
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   a.mode = "idle"; a.t = 2;
   if (sh.stage === "walk") {
     sh.walkT += dt;
-    if (sh.walkT > 60) return giveUp();
+    if (sh.walkT > 60) return giveUp("timeout");
     if (d <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) { sh.stage = "trade"; sh.tt = TRADE_PAUSE; a.route = null; return true; }
     const g = { x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z) };
     if (sh.gx == null || Math.hypot(sh.gx - g.x, sh.gz - g.z) > 3) { if (a.routeKind === "furn") a.route = null; sh.gx = g.x; sh.gz = g.z; }
     const st = travel(m, sh, dt, out, g.x, g.y, g.z, m.def.speed * 1.3);
-    if (st === "failed") return giveUp();
+    if (st === "failed") return giveUp("no path");
     return true;
   }
   sh.tt -= dt;
@@ -255,7 +255,7 @@ function ai(m, dt, out) {
   if (sh.tt <= 0) {
     const done = deal.kind === "buy" ? doBuy(m, deal) : doSell(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
-    if (!done) sh.avoid[avoidKey()] = dayNow() + 0.05;
+    if (!done) { sh.avoid[avoidKey()] = dayNow() + 0.05; log("giveup", m, { to: v2.profession, item: deal.item === "bed" ? "bed" : BF.itemName(deal.item), why: "trade refused" }); }
   }
   return true;
 }

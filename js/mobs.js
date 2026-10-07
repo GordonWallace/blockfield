@@ -1820,7 +1820,7 @@ function updateVillages(dt) {
       const sv = villagerSaves.get(villagerKey(m));
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
-      if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec);
+      if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
     }
     const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {

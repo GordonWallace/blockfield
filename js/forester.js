@@ -264,7 +264,12 @@ const freeSlots = m => m.inv.reduce((n, s) => n + (s ? 0 : 1), 0);
 const holdsSapling = m => { for (const s of m.inv) if (s && /_sapling$/.test(BF.items[s.id].name)) return s; return null; };
 const claims = new Map();   // "x,y,z" of a tree base or a drop -> villager, so two foresters do not go for the same tree
 const centre = m => (m.village ? { x: m.village.x, z: m.village.z } : { x: m.position.x, z: m.position.z });
-const inHome = (m, x, z) => { const c = centre(m); return Math.hypot(x - c.x, z - c.z) <= HOME_R; };
+// Sized villages (village generator 2) can be ~250 blocks across, so their leash runs from the edge of the village's box instead of its centre:
+// planting within SIZED_PLANT of the box, felling within SIZED_CUT of it, and the forester looks for trees SIZED_SEARCH around itself.
+const SIZED_PLANT = 16, SIZED_CUT = 40, SIZED_SEARCH = 72;
+const boxOf = m => { const w = m.village && m.village.pop && m.village.wg; return w && w.minX != null ? w : null; };
+const boxDist = (b, x, z) => Math.hypot(Math.max(0, b.minX - x, x - b.maxX), Math.max(0, b.minZ - z, z - b.maxZ));
+const inHome = (m, x, z) => { const b = boxOf(m); if (b) return boxDist(b, x, z) <= SIZED_PLANT; const c = centre(m); return Math.hypot(x - c.x, z - c.z) <= HOME_R; };
 
 function findSpot(m) {
   const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z);
@@ -308,14 +313,15 @@ function findSpot(m) {
   }
   return null;
 }
-// Trees within 40 blocks (and 64 of the village centre). Candidates are ranked by distance times a random factor of 0.5 to 2, so a near tree
+// Trees within 40 blocks (and 64 of the village centre; sized villages: 72 blocks, and 40 of the village's box). Candidates are ranked by distance times a random factor of 0.5 to 2, so a near tree
 // usually wins but a farther one sometimes does (two foresters do not all go for the same trunk).
 const notTree = new Map();   // "x,y,z" of log bases that are not trees -> sim time until which they are skipped
 function findTree(m) {
-  const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z), cands = [], c = centre(m);
-  for (let x = px - CUT_SEARCH; x <= px + CUT_SEARCH; x++) for (let z = pz - CUT_SEARCH; z <= pz + CUT_SEARCH; z++) {
+  const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z), cands = [], c = centre(m), box = boxOf(m);
+  const RS = box ? SIZED_SEARCH : CUT_SEARCH, home = box ? (x, z) => boxDist(box, x, z) <= SIZED_CUT : (x, z) => Math.hypot(x - c.x, z - c.z) <= CUT_HOME;
+  for (let x = px - RS; x <= px + RS; x++) for (let z = pz - RS; z <= pz + RS; z++) {
     const d = Math.hypot(x + 0.5 - pos.x, z + 0.5 - pos.z);
-    if (d > CUT_SEARCH || Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) > CUT_HOME || !W().isLoaded(x, z)) continue;
+    if (d > RS || !home(x + 0.5, z + 0.5) || !W().isLoaded(x, z)) continue;
     for (let y = py - CUT_Y_DOWN; y <= py + CUT_Y_UP; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z, d * (0.5 + 1.5 * Math.random())]);
   }
   cands.sort((a, b) => a[3] - b[3]);
