@@ -29,7 +29,7 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
   non-block item ids start at `BF.ITEM_BASE` (4096) and are saved by name. `BF.items` is sparse (blocks, then a gap, then
   items from ITEM_BASE): skip holes when iterating; test blocks with `BF.items[id].isBlock`. `SOLID/OPAQUE/RENDER/FLUID/
   REPLACEABLE` and `world._faceTint` are sized `MAX_BLOCK + 1`. Block fields: name, solid, opaque, render ("cube"|"cutout"|"liquid"), tiles{top,side,bottom},
-  hardness (seconds by hand), tool ("pickaxe"|"axe"|"shovel"|"shears"|null), needsTool, drop (item id or null),
+  hardness (vanilla hardness; see "Mining" below), tool ("pickaxe"|"axe"|"shovel"|"hoe"|null), needsTool, drop (item id or null),
   color, stack. Item fields: name, tool{type,tier,speed,damage}, food, color, stack.
   `BF.SOLID/OPAQUE/RENDER` lookup tables. `BF.itemName(id)` -> display name.
 - Doors and beds are two blocks, one block id per state (blocks.js): `BF.DIRS[f]` = [dx, dz] for facing f
@@ -110,10 +110,16 @@ for every tile (`stone_bricks`, `deepslate_top`, `lapis_ore`, `tnt_side`, `magma
   lapis, redstone, coal, copper, raw_iron/raw_gold/raw_copper blocks, amethyst_block.
 - Block field `minTier` (1 wood, 2 stone, 3 iron, 4 diamond pickaxe): `player.js` `canHarvest`/`breakTime` now compare the held tool's `tool.tier` with it (blocks without
   `minTier` behave as before). Existing iron_ore (2), gold_ore (3), diamond_ore (3) got `minTier`. Obsidian needs a diamond pickaxe (hardness 50).
+- Mining (vanilla Java formula, `player.js` `mineSeconds`): per tick a block takes `speed / hardness / (drops ? 30 : 100)`; it breaks when that sums to 1 (>= 1 in one
+  tick = instant). `speed` is the held tool's `tool.speed` (wood 2, stone 4, iron 6, diamond 8) when `tool.type === block.tool`, whatever the tier; otherwise 1.
+  Block fields `shearSpeed` (leaves 15, wool 5) and `swordSpeed` (leaves, pumpkin, melon 1.5) give shears and swords their own speeds. "drops" is `needsTool`
+  satisfied (right tool type and `tier >= minTier`); a too-low tier mines at full tool speed but over the 100 divisor and drops nothing. Head under water and feet
+  off the ground (not flying) each divide speed by 5. Leaves are hoe blocks (`tool: "hoe"`), and `shearSelf` makes shears drop the leaves block itself. After a
+  timed break the next one waits 5 ticks (0.25 s); after an instant break 1 tick. `BF.player.mineSeconds(blockId, itemId|null)` and `minedDrops(blockId, itemId)`
+  give the dry-ground answer for villagers and tests (`test/mining-vanilla.js` checks them against the wiki's tables).
 - Block field `creativeTab` ("building" | "natural" | "functional") overrides the regex classification in `creativeItems()`; new items land in "Miscellaneous".
-- Drops: lapis_ore 4-8 `lapis_lazuli`, redstone_ore 4-5 `redstone`, emerald_ore `emerald`, copper_ore 2-5 `raw_copper`, deepslate variants likewise. **iron/gold ores still
-  drop themselves** (`deepslate_iron_ore` drops `iron_ore`, `deepslate_gold_ore` drops `gold_ore`), so the trade audit is unchanged; `raw_iron/raw_gold` exist for the raw
-  blocks and smelt like the ores.
+- Drops: lapis_ore 4-8 `lapis_lazuli`, redstone_ore 4-5 `redstone`, emerald_ore `emerald`, copper_ore 2-5 `raw_copper`, deepslate variants likewise. Iron and gold ores
+  (and their deepslate forms) drop `raw_iron` / `raw_gold`, as vanilla; both smelt to ingots, and the ore blocks still smelt too. No trade uses the ore items.
 - Recipes live in `js/recipes-stone.js` through `BF.recipeHooks` (functions `({addShaped, addShapeless, smelt, fuel, nameOf})` run at the end of `buildRecipes()`); the
   existing `sandstone_bricks` recipe now takes 4 cut_sandstone (4 sandstone make cut_sandstone, as in vanilla).
 - Textures: `textures.js` exports its painter helpers as `BF.texKit` (T, ICON_T, SPRITES, Px, palettes and painters); `textures-stone.js` adds `T[...]` painters and item

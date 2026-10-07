@@ -939,20 +939,35 @@ function primaryDown() {
 function resetBreak() { breakTarget = null; breakProgress = 0; if (crackMesh) crackMesh.visible = false; if (BF.cracks) BF.cracks.hide(); }
 
 function heldTool() { const sel = selectedItem(), it = sel && BF.items[sel.id]; return (it && it.tool) || null; }
-function breakTime(block) {
-  if (!isFinite(block.hardness)) return Infinity;
-  const tool = heldTool();
-  let t = block.hardness;
-  if (tool && block.tool && tool.type === block.tool && (tool.tier || 0) >= (block.minTier || 0)) t /= tool.speed || 1;
-  else if (block.needsTool) t *= 5;
-  if (tool && tool.type === "sword" && block.tool === "shears") t /= 1.5;
-  return t;
+// Vanilla Minecraft mining: each tick deals speed / hardness / (30 if the block will drop, else 100) of a block; it breaks
+// once that adds up to 1 (a full block in one tick breaks instantly). speed is the tool's (wood 2, stone 4, iron 6, diamond 8)
+// when it is the block's tool type, whatever its tier; a too-low tier still mines at that speed but drops nothing.
+// Shears (leaves 15, wool 5) and swords (leaves, pumpkins, melons 1.5) have their own speeds. Mining with the head under
+// water or with the feet off the ground is 5x slower each.
+function toolSpeed(block, tool) {
+  if (!tool) return 1;
+  if (tool.type === "shears" && block.shearSpeed) return block.shearSpeed;
+  if (tool.type === "sword" && block.swordSpeed) return block.swordSpeed;
+  return block.tool && tool.type === block.tool ? tool.speed || 1 : 1;
 }
-function canHarvest(block) {
+// slow: the extra divisor (5 head under water, x5 feet off the ground).
+function mineSeconds(block, tool, slow) {
+  if (!block || !isFinite(block.hardness)) return Infinity;
+  if (block.hardness <= 0) return 0;
+  const perTick = toolSpeed(block, tool) / (slow || 1) / block.hardness / (harvestsWith(block, tool) ? 30 : 100);
+  return perTick >= 1 ? 0 : Math.ceil(1 / perTick) / 20;
+}
+function harvestsWith(block, tool) {
   if (!block.needsTool) return true;
-  const tool = heldTool();
   return !!(tool && tool.type === block.tool && (tool.tier || 0) >= (block.minTier || 0)); // minTier: 1 wood, 2 stone, 3 iron, 4 diamond
 }
+function breakTime(block) { return mineSeconds(block, heldTool(), (headInWater ? 5 : 1) * (!onGround && !flying ? 5 : 1)); }
+function canHarvest(block) { return harvestsWith(block, heldTool()); }
+// For tests and villagers: seconds to mine block id `blockId` with item id `itemId` (null = bare hand) standing on dry ground,
+// and whether that drops anything.
+const toolOf = itemId => (itemId != null && BF.items[itemId] && BF.items[itemId].tool) || null;
+P.mineSeconds = (blockId, itemId) => mineSeconds(BF.blocks[blockId], toolOf(itemId), 1);
+P.minedDrops = (blockId, itemId) => !!BF.blocks[blockId] && harvestsWith(BF.blocks[blockId], toolOf(itemId));
 
 function updateBreaking(dt) {
   if (breakCd > 0) breakCd -= dt;
@@ -972,7 +987,9 @@ function updateBreaking(dt) {
     spawnParticles(x, y, z, id);
     if (!creative() && canHarvest(b)) {
       try {
-        const drops = BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
+        const tool = heldTool();
+        const drops = b.shearSelf && tool && tool.type === "shears" ? [{ id, count: 1 }]   // shearing leaves drops the leaves
+          : BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
         if (BF.drops) BF.drops.spawnAt(drops, x, y, z);
         else for (const d of drops || []) if (d && d.id != null && d.count > 0 && inv().add) inv().add(d.id, d.count);
       } catch (e) { console.error(e); }
@@ -980,7 +997,7 @@ function updateBreaking(dt) {
     exhaustion += 0.005;
     emit("blockBroken", x, y, z, id);
     resetBreak();
-    breakCd = 0.2;   // also the creative repeat interval while held
+    breakCd = t === 0 && !creative() ? 0.05 : 0.25;   // vanilla: 5 ticks after a break (also the creative repeat), 1 tick for instant breaks
     target = null; outline.visible = false;
     return;
   }
