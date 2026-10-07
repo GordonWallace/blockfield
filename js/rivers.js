@@ -269,6 +269,9 @@ function ensure(x, z) {
   }
 }
 
+// meanders: the query point is displaced by a slow noise, so channels wind around their polyline
+const warpX = (x, z) => x + noise.n2(x / 170 + 5.1, z / 170 - 2.2) * 24 + noise.n2(x / 53 - 1.3, z / 53 + 8.1) * 5;
+const warpZ = (x, z) => z + noise.n2(x / 170 - 9.4, z / 170 + 3.7) * 24 + noise.n2(x / 53 + 4.4, z / 53 - 6.6) * 5;
 // Nearest river influence at (x, z). out: d (distance from the centre line), w (half width), rs (water surface), sd = d - w.
 // Returns false when no river is within REACH blocks of the bank.
 function at(x, z, out) {
@@ -276,17 +279,32 @@ function at(x, z, out) {
   ensure(x, z);
   const l = cells.get(Math.floor(x / CELL) * 4194304 + Math.floor(z / CELL));
   if (!l) return false;
-  // meanders: the query point is displaced by a slow noise, so channels wind around their polyline
-  const qx = x + noise.n2(x / 170 + 5.1, z / 170 - 2.2) * 24 + noise.n2(x / 53 - 1.3, z / 53 + 8.1) * 5;
-  const qz = z + noise.n2(x / 170 - 9.4, z / 170 + 3.7) * 24 + noise.n2(x / 53 + 4.4, z / 53 - 6.6) * 5;
-  let best = 1e9, bd = 0, bw = 0, brs = 0;
+  const qx = warpX(x, z), qz = warpZ(x, z);
+  let best = 1e9, bd = 0, bw = 0, brs = 0, be = null, bt = 0;
   for (let k = 0; k < l.length; k++) {
     const e = l[k], dx = e.bx - e.ax, dz = e.bz - e.az;
     let t = ((qx - e.ax) * dx + (qz - e.az) * dz) / (dx * dx + dz * dz);
     t = t < 0 ? 0 : t > 1 ? 1 : t;
     const px = e.ax + dx * t - qx, pz = e.az + dz * t - qz, d = Math.sqrt(px * px + pz * pz), rs = e.ra + (e.rb - e.ra) * t;
     const w = e.n ? flowW(e.n, rs) : e.wa + (e.wb - e.wa) * t, sd = d - w;
-    if (sd < best) { best = sd; bd = d; bw = w; brs = rs; }
+    if (sd < best) { best = sd; bd = d; bw = w; brs = rs; be = e; bt = t; }
+  }
+  if (PLANAR && be && best < REACH + 60) {
+    // Exact distance to the meandering centre line C(s) = P(s) - D(P(s)) (P: the segment, D: the warp), refined from the warped estimate by
+    // Newton steps. Distances measured in the warped space stretch and squeeze across the channel (up to about 2x either way), so a river's
+    // width would wander independently of its flow; measured on the curve, a river is as wide as its flow says wherever it bends.
+    const e = be, L = Math.hypot(e.bx - e.ax, e.bz - e.az) || 1, ux = (e.bx - e.ax) / L, uz = (e.bz - e.az) / L;
+    const cx = s => { const px = e.ax + ux * s, pz = e.az + uz * s; return 2 * px - warpX(px, pz); };
+    const cz = s => { const px = e.ax + ux * s, pz = e.az + uz * s; return 2 * pz - warpZ(px, pz); };
+    let s = bt * L;
+    for (let it = 0; it < 3; it++) {
+      const x0 = cx(s), z0 = cz(s), tx = cx(s + 1) - x0, tz = cz(s + 1) - z0;
+      s -= ((x0 - x) * tx + (z0 - z) * tz) / (tx * tx + tz * tz || 1);
+      s = s < 0 ? 0 : s > L ? L : s;
+    }
+    const t = s / L, rs = e.ra + (e.rb - e.ra) * t;
+    bw = e.n ? flowW(e.n, rs) : e.wa + (e.wb - e.wa) * t; brs = rs;
+    bd = Math.hypot(cx(s) - x, cz(s) - z); best = bd - bw;
   }
   if (best > REACH) return false;
   out.d = bd; out.w = bw; out.rs = brs; out.sd = best;
