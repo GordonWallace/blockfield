@@ -351,6 +351,8 @@ function edgePoint(m) {
   if (!W().isLoaded(x, z)) return null;
   return { x, y: W().heightAt(x, z) + 1, z };
 }
+// Solid on every side but below: the sandstone under desert sand, a foundation under a floor. Not something a sapling should keep away from.
+const buried = (x, y, z) => get(x, y + 1, z) !== 0 && get(x + 1, y, z) !== 0 && get(x - 1, y, z) !== 0 && get(x, y, z + 1) !== 0 && get(x, y, z - 1) !== 0;
 function findSpot(m, at) {
   const pos = at || m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z);
   // doors, and columns holding anything built (not landscape; dirt paths and farmland's crops aside, farmland itself counts), scanned once
@@ -361,7 +363,7 @@ function findSpot(m, at) {
       const id = get(x, y, z);
       if (id === 0 || id === DP || isSap(id)) continue;
       if (isDoor(id)) doors.push([x, y, z]);
-      if (id === FL || builtBlock(id)) built[(z - pz + R) * S + (x - px + R)] = 1;
+      if (id === FL || (builtBlock(id) && !buried(x, y, z))) built[(z - pz + R) * S + (x - px + R)] = 1;
     }
   }
   const nearBuilt = (x, z) => {
