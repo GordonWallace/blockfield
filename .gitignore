@@ -2,3 +2,4 @@ node_modules/
 *.png
 .DS_Store
 .claude/worktrees/
+ci-out/
