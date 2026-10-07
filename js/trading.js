@@ -31,7 +31,7 @@ const VALUE = {
   golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
-  iron_ore: .45, gold_ore: 1.05, raw_iron: .45, raw_gold: 1.05,    // miner goods: ore smelts into one ingot
+  raw_iron: .45, raw_gold: 1.05, iron_ore: .45, gold_ore: 1.05,    // miner goods: raw ore (or the ore block) smelts into one ingot
   wooden_pickaxe: .13, wooden_axe: .13, wooden_hoe: .1, stone_pickaxe: .13, stone_axe: .13, stone_hoe: .1,   // toolsmith goods (js/toolsmith.js)
   furnace: .3,                                                       // 8 cobblestone (js/furniture.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
@@ -165,10 +165,10 @@ const TRADES = {
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
     ["1 emerald > 32 cobblestone", "1 emerald > 8 coal"],
-    ["2 emerald > 64 cobblestone", "1 emerald > 2 iron_ore"],
-    ["4 emerald > 1 diamond"],
+    ["2 emerald > 64 cobblestone", "1 emerald > 2 raw_iron", "1 emerald > 1 raw_gold"],   // an apprentice digs deep enough for gold
+    ["4 emerald > 1 diamond"],                                                           // a journeyman deep enough for diamonds
     ["2 emerald > 16 coal"],
-    ["1 emerald > 1 gold_ore"],
+    ["3 emerald > 3 raw_gold"],
   ],
   // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer. It also makes furnaces from 8
@@ -298,7 +298,7 @@ function stockFor(prof, v) {
   const entries = [];
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
   if (STARTER_TOOLS[prof]) for (const pool of table(prof)) for (const o of pool) if (isToolItem(o.sell.id)) noStart.add(o.sell.id);   // their one tool is the starter below
-  if (prof === "miner") for (const n of ["cobblestone", "coal", "iron_ore", "gold_ore", "diamond"]) noStart.add(I[n]);   // mined, never given
+  if (prof === "miner") for (const n of ["cobblestone", "coal", "raw_iron", "raw_gold", "diamond"]) noStart.add(I[n]);   // mined, never given
   if (prof === "toolsmith") for (const id of profile(prof).caps.keys()) noStart.add(id);   // made, never given (js/toolsmith.js)
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
   if (prof === "nitwit" || prof === "unemployed") {
