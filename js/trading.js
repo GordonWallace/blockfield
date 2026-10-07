@@ -30,7 +30,7 @@ const VALUE = {
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
-  iron_ore: .45, gold_ore: 1.05,                                    // miner goods: ore smelts into one ingot
+  raw_iron: .45, raw_gold: 1.05, iron_ore: .45, gold_ore: 1.05,    // miner goods: raw ore (or the ore block) smelts into one ingot
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
@@ -153,10 +153,10 @@ const TRADES = {
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
     ["1 emerald > 32 cobblestone", "1 emerald > 8 coal"],
-    ["2 emerald > 64 cobblestone", "1 emerald > 2 iron_ore"],
-    ["4 emerald > 1 diamond"],
+    ["2 emerald > 64 cobblestone", "1 emerald > 2 raw_iron", "1 emerald > 1 raw_gold"],   // an apprentice digs deep enough for gold
+    ["4 emerald > 1 diamond"],                                                           // a journeyman deep enough for diamonds
     ["2 emerald > 16 coal"],
-    ["1 emerald > 1 gold_ore"],
+    ["3 emerald > 3 raw_gold"],
   ],
   // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer.
@@ -278,7 +278,7 @@ function stockFor(prof, v) {
   const a = inv.create(), I = BF.I, em = I.emerald;
   const entries = [];
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
-  if (prof === "miner") for (const n of ["cobblestone", "coal", "iron_ore", "gold_ore", "diamond"]) noStart.add(I[n]);   // mined, never given
+  if (prof === "miner") for (const n of ["cobblestone", "coal", "raw_iron", "raw_gold", "diamond"]) noStart.add(I[n]);   // mined, never given
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); }   // harvested, never given
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);

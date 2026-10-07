@@ -13,6 +13,7 @@
   {"name": "map-held-actions", "file": "test/map-held-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "maps-actions", "file": "test/maps-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "mining-vanilla", "file": "test/mining-vanilla.js", "kind": "actions", "tier": "baseline"},
+  {"name": "miner-depth", "file": "test/miner-depth.js", "kind": "actions", "tier": "baseline", "what": "ores by depth, miner dig depth by level, raw iron and gold kept"},
   {"name": "overlay-behind", "file": "test/overlay-behind.js", "kind": "actions", "tier": "baseline"},
   {"name": "pathgap-actions", "file": "test/pathgap-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "river-check", "kind": "node", "tier": "baseline", "file": "tools/river-check.js", "timeout": 300, "what": "no river walls or steps"},

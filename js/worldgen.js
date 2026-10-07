@@ -1549,11 +1549,13 @@ const ORE3 = [
   [211, 6.5, 9, "d", 6, 99999, "coal_ore", "deepslate_coal_ore", 1],
   [212, 6.0, 7, "d", 6, 99999, "iron_ore", "deepslate_iron_ore", 1],
   [217, 5.5, 9, "d", 6, 99999, "copper_ore", "deepslate_copper_ore", 1],
-  [213, 2.2, 6, "y", -64, 32, "gold_ore", "deepslate_gold_ore"],
-  [214, 2.0, 5, "y", -64, 16, "diamond_ore", "deepslate_diamond_ore"],
-  [215, 1.0, 6, "y", -64, 40, "lapis_ore", "deepslate_lapis_ore"],
-  [216, 3.5, 6, "y", -64, 16, "redstone_ore", "deepslate_redstone_ore"],
-  [219, 0.03, 1, "y", -64, 40, "emerald_ore", "deepslate_emerald_ore"],
+  // the rarer ores are placed by depth below the surface too, so every village's miner can reach them (js/miner.js DIG_DEPTH): an apprentice
+  // reaches gold, a journeyman diamonds and redstone. Each band is about as tall as vanilla's (from y 64 ground), down to bedrock on low land.
+  [213, 2.2, 6, "d", 32, 140, "gold_ore", "deepslate_gold_ore"],
+  [214, 2.0, 5, "d", 48, 140, "diamond_ore", "deepslate_diamond_ore"],
+  [215, 1.0, 6, "d", 24, 140, "lapis_ore", "deepslate_lapis_ore"],
+  [216, 3.5, 6, "d", 48, 140, "redstone_ore", "deepslate_redstone_ore"],
+  [219, 0.03, 1, "d", 24, 140, "emerald_ore", "deepslate_emerald_ore"],
   [218, 1.1, 1, "d", 3, 500, "emerald_ore", "deepslate_emerald_ore", 0, "mtn"],
   [221, 1.6, 70, "d", 5, 99999, "granite"], [222, 1.6, 70, "d", 5, 99999, "diorite"], [223, 1.6, 70, "d", 5, 99999, "andesite"],
   [224, 1.0, 60, "y", -64, 16, "tuff", "tuff"], [225, 0.35, 40, "d", 30, 250, "dripstone_block"],
