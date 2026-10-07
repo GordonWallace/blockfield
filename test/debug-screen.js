@@ -174,6 +174,12 @@ const start = async () => {
   ok('village age shown', /age [\d.,]+ days?/.test(await dbg.evaluate(() => document.getElementById('v-sub').textContent + document.getElementById('vlist').textContent)));
   const rowH = await dbg.evaluate(() => [...document.querySelectorAll('#r-body tr')].map(r => Math.round(r.getBoundingClientRect().height)));
   ok('villager rows all the same height ' + JSON.stringify([...new Set(rowH)]), rowH.length > 3 && new Set(rowH).size === 1);
+  // map legend: structure kinds, and builder-made structures (planned ones count) reach the screen
+  const bkey = await dbg.evaluate(() => document.querySelector('.vrow.sel').dataset.k);
+  const nBuilt = await game.evaluate(key => { const r = BF.mobs.villages.get(key); return (r.built || []).filter(e => e.state !== 'abandoned').length; }, bkey);
+  await dbg.waitForTimeout(800);
+  const leg = await dbg.evaluate(() => document.getElementById('legend').textContent);
+  ok('map legend shows houses, farms, paddocks and builder stars (' + nBuilt + ' built)', /House/.test(leg) && /Farm/.test(leg) && /Paddock/.test(leg) && /Built by a builder/.test(leg));
   // happiness: the formula's terms, events falling out of the week, and the panel showing the game's score
   const hap = await game.evaluate(key => {
     const H = BF.happiness, rec = BF.mobs.villages.get(key);

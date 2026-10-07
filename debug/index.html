@@ -87,6 +87,8 @@
   #map { display: block; width: 100%; height: 420px; cursor: crosshair; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 16px 12px; font-size: 11px; color: var(--muted); }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend .lbreak { flex-basis: 100%; height: 0; }
+  .legend .sw { display: inline-block; width: 12px; height: 9px; border: 1px solid; border-radius: 2px; }
   .tip { position: absolute; pointer-events: none; background: rgba(10, 13, 11, 0.95); border: 1px solid var(--edge2); border-radius: 5px; padding: 6px 9px; font-size: 12px; white-space: nowrap; transform: translate(12px, -50%); display: none; }
   .tip b { font-weight: 600; } .tip .sub { font-size: 11px; }
 
@@ -438,6 +440,8 @@ function renderVillage(s) {
     `<div class="orow"><div class="lbl"><i class="dot" style="background:${profColor(p)}"></i>${esc(p)}</div><div class="track"><i style="width:${n / max * 100}%;background:${profColor(p)}"></i></div><div class="n">${n}</div></div>`).join("")
     : `<div class="sub">No villagers loaded</div>`;
   $("legend").innerHTML = v.occupations.map(([p]) => `<span><i class="dot" style="background:${profColor(p)};border-radius:50%"></i>${esc(p)}</span>`).join("") +
+    `<span class="lbreak"></span>` + Object.values(STRUCT).map(k => `<span><i class="sw" style="background:${k.fill};border-color:${k.stroke}"></i>${k.name}</span>`).join("") +
+    `<span><b style="color:#ffd75e">\u2605</b>Built by a builder</span>` +
     `<span><i class="dot" style="background:#dfe6ea"></i>Iron golem</span><span><i class="dot" style="border:1.5px solid var(--warn)"></i>Free job block</span><span style="color:var(--accent2)">▲ You</span>`;
   drawMap(s);
   renderRoster(s);
@@ -456,6 +460,19 @@ function renderHappy(h) {
 }
 
 // ---------------------------------------------------------------- map
+// Structure kinds on the map, from the worldgen building type (js/worldgen.js) or a builder blueprint (js/blueprints.js).
+const STRUCT = {
+  house:   { name: "House",          fill: "rgba(160,120,80,0.34)", stroke: "rgba(220,190,150,0.3)" },
+  farm:    { name: "Farm or garden", fill: "rgba(140,170,70,0.26)", stroke: "rgba(170,205,100,0.35)" },
+  pen:     { name: "Paddock",        fill: "rgba(90,150,190,0.24)", stroke: "rgba(130,190,230,0.4)" },
+  other:   { name: "Other building", fill: "rgba(150,150,165,0.26)", stroke: "rgba(200,200,215,0.3)" },
+};
+const structKind = t => /house|^big$|cottage/.test(t || "") ? "house" : /farm|garden/.test(t || "") ? "farm" : t === "pen" ? "pen" : "other";
+function star(g, x, y, r) {
+  g.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  g.closePath(); g.fillStyle = "#ffd75e"; g.fill(); g.lineWidth = 1; g.strokeStyle = "#0b0f0d"; g.stroke();
+}
 const mapCv = $("map"), tip = $("tip");
 let mapView = null;   // {sx, ox, oz, cx, cz} world -> screen
 function drawMap(s) {
@@ -466,6 +483,7 @@ function drawMap(s) {
   const L = layout && layout.key === v.key ? layout : null, d = s.info;
   // frame the village bounds, plus the player when they're near enough not to shrink the village to a dot
   let [x0, z0, x1, z1] = L && L.bounds[0] != null ? L.bounds : v.villagerList.length ? [Math.min(...v.villagerList.map(m => m.x)), Math.min(...v.villagerList.map(m => m.z)), Math.max(...v.villagerList.map(m => m.x)), Math.max(...v.villagerList.map(m => m.z))] : [d.x - 40, d.z - 40, d.x + 40, d.z + 40];
+  for (const b of v.built || []) { x0 = Math.min(x0, b[0]); z0 = Math.min(z0, b[1]); x1 = Math.max(x1, b[2] + 1); z1 = Math.max(z1, b[3] + 1); }   // builders may build past the generated village
   const near = d.x > x0 - 80 && d.x < x1 + 80 && d.z > z0 - 80 && d.z < z1 + 80;
   if (near) { x0 = Math.min(x0, d.x); x1 = Math.max(x1, d.x); z0 = Math.min(z0, d.z); z1 = Math.max(z1, d.z); }
   x0 -= 6; x1 += 6; z0 -= 6; z1 += 6;
@@ -482,9 +500,16 @@ function drawMap(s) {
     if (L.bounds[0] != null) { g.setLineDash([4, 4]); rect(L.bounds, null, "rgba(127,191,77,0.25)"); g.setLineDash([]); }
     for (const b of L.roads) rect(b, "rgba(196,170,120,0.22)");
     for (const b of L.plaza) rect(b, "rgba(196,170,120,0.3)");
-    for (const b of L.buildings) rect(b, b[4] && /farm/.test(b[4]) ? "rgba(140,170,70,0.22)" : "rgba(160,120,80,0.32)", "rgba(220,190,150,0.28)");
+    for (const b of L.buildings) { const k = STRUCT[structKind(b[4])]; rect(b, k.fill, k.stroke); }
     g.fillStyle = "rgba(242,198,109,0.5)";
     for (const [lx, lz] of L.lamps) { g.beginPath(); g.arc(X(lx + 0.5), Z(lz + 0.5), Math.max(1.5, sc * 0.35), 0, 7); g.fill(); }
+  }
+  // structures the builders made (a star on each; dashed while still going up)
+  for (const b of v.built || []) {
+    const k = STRUCT[structKind(b[4])];
+    if (!b[5]) g.setLineDash([3, 3]);
+    rect(b, b[5] ? k.fill : null, k.stroke); g.setLineDash([]);
+    star(g, X((b[0] + b[2] + 1) / 2), Z((b[1] + b[3] + 1) / 2), Math.max(4, Math.min(9, sc * 1.6)));
   }
   // free job blocks
   g.strokeStyle = "#f2c66d"; g.lineWidth = 1.5;
