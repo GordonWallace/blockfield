@@ -129,6 +129,8 @@
   .frow .fx { background: transparent; border: 0; color: var(--faint); cursor: pointer; padding: 4px 8px; font-size: 11px; }
   .frow .fx:hover, .frow.x .fx { color: var(--ink); }
   .facts { padding: 0 0 4px 30px; }
+  .fclear { background: transparent; border: 0; color: var(--warn); font-size: 12px; cursor: pointer; padding: 3px 4px; }
+  .fclear:hover { text-decoration: underline; }
   .facts label { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 5px; cursor: pointer; font-size: 12px; color: var(--muted); }
   .facts label:hover { background: rgba(255, 255, 255, 0.05); }
   .facts label span:nth-child(2) { flex: 1; }
@@ -224,7 +226,7 @@
       </div>
       <div class="panel" id="rpanel">
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
-        <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
+        <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="age" title="Game days it has been loaded and active (time its village sat unloaded doesn't count)">Age</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
       </div>
       <div class="panel"><details class="raw" id="raw"><summary>In-game F3 text</summary><pre id="f3"></pre></details></div>
     </div>
@@ -244,6 +246,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const fmt = n => n == null ? "-" : n.toLocaleString();
+const days = n => fmt(n) + (n === 1 ? " day" : " days");
 
 // ---------------------------------------------------------------- state
 // layouts / logs / details: everything known per village key (details = the last full numbers while it was loaded)
@@ -323,7 +326,7 @@ function renderVillages(s) {
   $("vl-auto").classList.toggle("on", !pinned);
   const row = v => {
     const det = details[v.key], b = bearing(v.x - d.x, v.z - d.z);
-    const extra = v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session";
+    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.age != null ? " \u00B7 age " + days(v.age) : "");
     return `<div class="vrow${v.loaded ? " on" : ""}${v.key === viewKey ? " sel" : ""}" data-k="${esc(v.key)}"><i class="ld"></i>` +
       `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs">${esc(extra)}</div>` +
       `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 ? dirName(b) : ""}</div></div>`;
@@ -410,7 +413,7 @@ function renderVillage(s) {
   }
   $("v-name").textContent = v.name;
   $("v-sub").innerHTML = (curStale ? `<span class="stalebadge">Not loaded \u00B7 numbers from ${esc(v.clock)}</span> \u00B7 ` : "") +
-    esc(fmt(row.dist) + " blocks away") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
+    esc(fmt(row.dist) + " blocks away") + (row.age != null ? `<span title="Game days this village has been loaded and active"> \u00B7 age ${esc(days(row.age))}</span>` : "") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
   $("v-villagers").textContent = v.villagers;
   $("v-loaded").textContent = curStale ? "not loaded" : v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
   $("v-beds").textContent = v.beds;
@@ -510,15 +513,18 @@ mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlNa
 // ---------------------------------------------------------------- roster
 function renderRoster(s) {
   const v = curV, q = $("r-q").value.trim().toLowerCase(), d = s.info;
-  let rows = v.villagerList.map(m => ({ ...m, dist: Math.hypot(m.x - d.x, m.z - d.z), hpf: m.hp / (m.maxHp || 20) }));
+  let rows = v.villagerList.map(m => ({ ...m, dist: Math.hypot(m.x - d.x, m.z - d.z), hpf: m.hp / (m.maxHp || 20), emT: (m.em || 0) + (m.emChests || 0), foodT: (m.food || 0) + (m.foodChests || 0) }));
   if (q) rows = rows.filter(m => (m.name + " " + m.prof + " " + m.status).toLowerCase().includes(q));
   const k = rosterSort.k, dir = rosterSort.dir;
   rows.sort((a, b) => { const x = k === "hp" ? a.hpf : a[k], y = k === "hp" ? b.hpf : b[k]; return (typeof x === "string" ? x.localeCompare(y) : (x > y) - (x < y)) * dir || a.name.localeCompare(b.name); });
   $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + (curStale ? " when last loaded" : " loaded");
   $("r-body").innerHTML = rows.map(m => `<tr data-n="${esc(m.name)}"><td>${esc(m.name)}</td><td><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i>${esc(m.prof)}</td>` +
     `<td class="st">${esc(m.status || "")}</td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
-    `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
-    `<tr><td colspan="6" class="dim">No villagers match.</td></tr>`;
+    `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td>` +
+    `<td title="${m.em != null ? `${m.em} carried + ${m.emChests} in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}">${m.em != null ? fmt(m.emT) : "-"}${m.emChests ? ` <span class="dim">(${fmt(m.emChests)} in chests)</span>` : ""}</td>` +
+    `<td title="${m.food != null ? `${m.food} carried + ${m.foodChests} in chests (bread-equivalent)` : ""}">${m.food != null ? fmt(Math.round(m.foodT * 10) / 10) : "-"}${m.foodChests ? ` <span class="dim">(${fmt(m.foodChests)} in chests)</span>` : ""}</td>` +
+    `<td>${m.starving == null ? "-" : m.starving ? '<span class="no">starving</span>' : '<span class="dim">no</span>'}</td><td>${m.age == null ? "-" : days(m.age)}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
+    `<tr><td colspan="10" class="dim">No villagers match.</td></tr>`;
   markRoster();
 }
 function markRoster(scroll) {
@@ -544,20 +550,24 @@ function stamp(t) {
   const d = Math.floor(t), h = (((t - d) * 24 + 6) % 24 + 24) % 24;
   return "Day " + (d + 1) + " " + String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0");
 }
-// ---- log filters: one dropdown listing every villager type (plus the player) in a single column, Select all / Select none at
-// the top. Each type's checkbox turns all of its actions on or off; its arrow unfolds a checkbox per action. Everything starts checked.
-// Unchecked boxes are remembered in this browser (localStorage). Who did what is read from the log text, whose formats come
-// from js/villagelog.js: "Name (Job) traded with Name (Job): ...", "Name (Job) placed a bed at ...", "Name became a Job",
-// "Name was born to ...", "Name (Job) died: ...", "Name (Job)'s Iron Pickaxe broke". Entries that match none of these are always shown.
-const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing beds", job: "Taking the job", born: "Being born", death: "Dying", tool: "Wearing out tools" };
-const ACTS_FOR = t => t === "Player" ? ["buy", "bed"] : t === "Child" ? ["born", "death"] : ["buy", "sell", "bed", "job", "tool", "death"];
-const STORE = "bf-debug-logfilters";
-let off = new Set();
-try { off = new Set(JSON.parse(localStorage.getItem(STORE) || "[]")); } catch (e) { /* private window: start with everything on */ }
-const saveOff = () => { try { localStorage.setItem(STORE, JSON.stringify([...off])); } catch (e) {} };
+// ---- log filters: two dropdowns that combine, "Show [who] [what]": villager types (plus Child and the player) and event types
+// (trades, beds, births, deaths...). An entry shows when its event type is on and, if it names villagers, any of them is on:
+// Explorer + Deaths shows only explorer deaths. Each menu is one column with Select all / Select none at the top; a villager
+// type's arrow unfolds a checkbox per action. Everything starts checked; unchecked boxes are remembered in this browser.
+// Who did what is read from the log text, whose formats come from js/villagelog.js (and mobs.js, storage.js): "Name (Job)
+// traded with Name (Job): ...", "Name (Job) placed a bed at ...", "Name (Job) claimed the bed/chest at ...", "Name became a
+// Job", "Name was born to ...", "Name (Job) died: ...", "Name (Job)'s Iron Pickaxe broke". Entries naming no villager pass the who filter.
+const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", born: "Being born", death: "Dying" };
+const ACTS_FOR = t => t === "Player" ? ["buy", "bed", "chest"] : t === "Child" ? ["born", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
+const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", birth: "Births", death: "Deaths" };
+const kindName = k => KINDS[k] || k.charAt(0).toUpperCase() + k.slice(1);
+const STORE = "bf-debug-logfilters", KSTORE = "bf-debug-logkinds";
+const load = k => { try { return new Set(JSON.parse(localStorage.getItem(k) || "[]")); } catch (e) { return new Set(); } };   // private window: all on
+let off = load(STORE), kindsOff = load(KSTORE);
+const saveOff = () => { try { localStorage.setItem(STORE, JSON.stringify([...off])); localStorage.setItem(KSTORE, JSON.stringify([...kindsOff])); } catch (e) {} };
 const isOn = (t, act) => !off.has(t + "|" + act);
 const typeOf = party => party === "Player" ? "Player" : (/\(([^()]+)\)\s*$/.exec(party) || [])[1] || null;
-// -> [[type, action], ...]: the entry shows if any of these is checked (a trade has a buyer and a seller); null = unrecognised, always shown
+// -> [[type, action], ...]: the entry passes if any of these is checked (a trade has a buyer and a seller); null = names no type
 function actorsOf(e) {
   const k = e[1], tx = e[2];
   let m;
@@ -566,65 +576,85 @@ function actorsOf(e) {
     if (b) out.push([b, "buy"]); if (s) out.push([s, "sell"]);
     return out.length ? out : null;
   }
-  if (k === "bed" && (m = /^(Player|.*?\([^()]+\)) placed a /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "bed"]] : null; }
+  if ((k === "bed" || k === "chest") && (m = /^(Player|.*?\([^()]+\)) (?:placed a |claimed the )/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, k]] : null; }
   if (k === "job" && (m = / became an? (.+?)(?: \(was |$)/.exec(tx))) return [[m[1], "job"]];
   if (k === "tool" && (m = /^(.*?\))'s .* broke$/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "tool"]] : null; }
   if (k === "birth") return [["Child", "born"]];
   if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
   return null;
 }
-// An entry shows while any villager in it is selected for what it did there: with Builder on and Furniture Maker off, a builder
-// buying from a furniture maker still shows.
-const visible = e => { const a = actorsOf(e); return !a || a.some(([t, act]) => isOn(t, act)); };
+// With Builder on and Furniture Maker off, a builder buying from a furniture maker still shows (any villager in it will do).
+const visible = e => { if (kindsOff.has(e[1])) return false; const a = actorsOf(e); return !a || a.some(([t, act]) => isOn(t, act)); };
 // Every villager type is listed, whether or not it lives here or has logged anything yet: the game's professions (sent with
 // each snapshot), the colour table's, Child, anything else the log names, and the player last.
 const allTypes = shown => new Set([...Object.keys(PROF), ...((snap && snap.professions) || []), "Child", "Player", ...shown]);
+const allKinds = shown => new Set([...Object.keys(KINDS), ...shown]);
 const setType = (t, on) => { for (const x of ACTS_FOR(t)) { if (on) off.delete(t + "|" + x); else off.add(t + "|" + x); } };
-let shownTypes = [], menuOpen = false;
+let shownTypes = [], shownKinds = [], openMenu = null;   // openMenu: "l-types" | "l-kinds" | null
 const expanded = new Set();   // types whose actions are unfolded in the menu
+// "All ...", the one name when a single one is on, "None", or "n of m"
+const summary = (on, list, all, every, nothing, unit) => all ? every : !on.length ? nothing : on.length === 1 ? on[0] : on.length + " of " + list.length + " " + unit;
+const menu = (id, sum, some, rows) => `<details class="ft${some ? " some" : ""}" id="${id}"${openMenu === id ? " open" : ""}><summary>${esc(sum)}</summary>` +
+  `<div class="fmenu"><div class="fhead"><button data-all="1">Select all</button><button data-all="0">Select none</button></div><div class="flist">${rows}</div></div></details>`;
 function renderFilters() {
-  const a = log ? log.entries : [], cnt = {};   // type -> action -> count
-  for (const e of a) for (const [t, act] of actorsOf(e) || []) { const c = cnt[t] || (cnt[t] = {}); c[act] = (c[act] || 0) + 1; }
+  const a = log ? log.entries : [], cnt = {}, kcnt = {};   // type -> action -> count; kind -> count
+  for (const e of a) {
+    kcnt[e[1]] = (kcnt[e[1]] || 0) + 1;
+    for (const [t, act] of actorsOf(e) || []) { const c = cnt[t] || (cnt[t] = {}); c[act] = (c[act] || 0) + 1; }
+  }
   const list = [...allTypes(Object.keys(cnt))].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
   shownTypes = list;
-  let typesOn = 0;
+  const typesOn = [];
   const rows = list.map(t => {
     const acts = ACTS_FOR(t), c = cnt[t] || {}, n = acts.filter(x => isOn(t, x)).length, total = acts.reduce((s2, x) => s2 + (c[x] || 0), 0);
-    if (n) typesOn++;
+    if (n) typesOn.push(t);
     const col = t === "Player" ? "var(--accent2)" : profColor(t), x = expanded.has(t);
     return `<div class="frow${n === 0 ? " none" : n < acts.length ? " part" : ""}${total ? "" : " zero"}${x ? " x" : ""}" data-t="${esc(t)}">` +
       `<label><input type="checkbox" class="tcb"${n ? " checked" : ""}${n && n < acts.length ? ` data-part="1"` : ""}><i style="background:${col}"></i><span class="tn">${esc(t)}</span>` +
       `${n && n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}<span class="n">${total}</span></label>` +
-      `<button class="fx" title="Choose actions">${x ? "\u25BE" : "\u25B8"}</button></div>` +
+      `<button class="fx" title="Choose actions">${x ? "▾" : "▸"}</button></div>` +
       (x ? `<div class="facts" data-t="${esc(t)}">${acts.map(k => `<label><input type="checkbox" data-a="${k}"${isOn(t, k) ? " checked" : ""}><span>${ACTIONS[k]}</span><span class="n">${c[k] || 0}</span></label>`).join("")}</div>` : "");
   }).join("");
-  const all = typesOn === list.length && !off.size, sum = all ? "All types" : typesOn === 0 ? "No types" : typesOn + " of " + list.length + " types";
-  const el = $("l-filters"), old = el.querySelector(".flist"), top = old ? old.scrollTop : 0;   // keep the menu's scroll across redraws
-  el.innerHTML = `<span class="flabel">Show logs for</span><details class="ft${all ? "" : " some"}" id="l-types"${menuOpen ? " open" : ""}><summary>${sum}</summary>` +
-    `<div class="fmenu"><div class="fhead"><button id="l-all">Select all</button><button id="l-none">Select none</button></div><div class="flist">${rows}</div></div></details>` +
-    (all ? "" : `<span class="fsum">Entries show while any villager in them is selected</span>`);
-  const nl = el.querySelector(".flist"); if (nl) nl.scrollTop = top;
+  const kinds = [...allKinds(Object.keys(kcnt))].sort((x, y) => kindName(x).localeCompare(kindName(y)));
+  shownKinds = kinds;
+  const kindsOn = kinds.filter(k => !kindsOff.has(k));
+  const krows = kinds.map(k => `<div class="frow${kindsOff.has(k) ? " none" : ""}${kcnt[k] ? "" : " zero"}" data-k="${esc(k)}"><label><input type="checkbox" class="kcb"${kindsOff.has(k) ? "" : " checked"}>` +
+    `<i style="background:var(--${/^\w+$/.test(k) ? k : "x"}, var(--faint))"></i><span class="tn">${esc(kindName(k))}</span><span class="n">${kcnt[k] || 0}</span></label></div>`).join("");
+  const allT = typesOn.length === list.length && !off.size, allK = kindsOn.length === kinds.length;
+  const el = $("l-filters"), tops = {};
+  for (const l of el.querySelectorAll(".flist")) tops[l.closest("details").id] = l.scrollTop;   // keep each menu's scroll across redraws
+  el.innerHTML = `<span class="flabel">Show</span>` +
+    menu("l-types", summary(typesOn, list, allT, "All villagers", "No villagers", "types"), !allT, rows) +
+    menu("l-kinds", summary(kindsOn.map(kindName), kinds, allK, "All events", "No events", "events"), !allK, krows) +
+    (allT && allK ? "" : `<button class="fclear" id="l-clear" title="Show everything">Clear filters</button>`);
+  for (const l of el.querySelectorAll(".flist")) l.scrollTop = tops[l.closest("details").id] || 0;
   for (const cb of el.querySelectorAll("input.tcb[data-part]")) cb.indeterminate = true;   // some actions on, some off
 }
-$("l-filters").addEventListener("toggle", e => { if (e.target.id === "l-types") menuOpen = e.target.open; }, true);
+$("l-filters").addEventListener("toggle", e => {
+  const d = e.target; if (!d.matches || !d.matches("details.ft")) return;
+  if (d.open) { openMenu = d.id; for (const o of $("l-filters").querySelectorAll("details.ft[open]")) if (o !== d) o.open = false; }
+  else if (openMenu === d.id) openMenu = null;
+}, true);
 $("l-filters").addEventListener("change", e => {
-  const tcb = e.target.closest("input.tcb");
-  if (tcb) { setType(tcb.closest("[data-t]").dataset.t, tcb.checked); saveOff(); renderLog(true); return; }
-  const cb = e.target.closest("input[data-a]"); if (!cb) return;
-  const t = cb.closest("[data-t]").dataset.t, k = t + "|" + cb.dataset.a;
-  if (cb.checked) off.delete(k); else off.add(k);
+  const tcb = e.target.closest("input.tcb"), kcb = e.target.closest("input.kcb"), cb = e.target.closest("input[data-a]");
+  if (tcb) setType(tcb.closest("[data-t]").dataset.t, tcb.checked);
+  else if (kcb) { const k = kcb.closest("[data-k]").dataset.k; if (kcb.checked) kindsOff.delete(k); else kindsOff.add(k); }
+  else if (cb) { const k = cb.closest("[data-t]").dataset.t + "|" + cb.dataset.a; if (cb.checked) off.delete(k); else off.add(k); }
+  else return;
   saveOff(); renderLog(true);
 });
 $("l-filters").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
-  if (b.id === "l-all") off.clear();
-  else if (b.id === "l-none") for (const t of allTypes(shownTypes)) setType(t, false);
+  const id = b.closest("details") && b.closest("details").id;
+  if (b.id === "l-clear") { off.clear(); kindsOff.clear(); }
+  else if (b.dataset.all && id === "l-types") { if (b.dataset.all === "1") off.clear(); else for (const t of allTypes(shownTypes)) setType(t, false); }
+  else if (b.dataset.all && id === "l-kinds") { if (b.dataset.all === "1") kindsOff.clear(); else for (const k of allKinds(shownKinds)) kindsOff.add(k); }
   else if (b.classList.contains("fx")) { const t = b.closest("[data-t]").dataset.t; if (expanded.has(t)) expanded.delete(t); else expanded.add(t); renderFilters(); return; }
   else return;
   saveOff(); renderLog(true);
 });
-// a click anywhere else closes the menu
-document.addEventListener("click", e => { if (menuOpen && e.target.isConnected && !e.target.closest("#l-types")) { menuOpen = false; const d = $("l-types"); if (d) d.open = false; } });
+// a click anywhere else closes the open menu
+document.addEventListener("click", e => { if (openMenu && e.target.isConnected && !e.target.closest("#l-filters details.ft")) { const d = $(openMenu); openMenu = null; if (d) d.open = false; } });
 $("l-q").addEventListener("input", () => renderLog(true));
 function renderLog(keepNew) {
   renderFilters();
