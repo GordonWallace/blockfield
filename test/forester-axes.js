@@ -96,24 +96,24 @@ module.exports = async (pg, out) => {
   const left3 = await pg.evaluate(() => !!BF.forester.axeOf(window.__A));
   ok("worn-out axe breaks mid-tree, rest by hand", r3.fell && !left3 && Math.abs(r3.chop - (2 * 1.5 + (r3.fell.logs - 2) * 3)) <= 0.6, { logs: r3.fell && r3.fell.logs, chop: r3.chop, axeLeft: left3 });
 
-  // 3. interrupted by the end of the working day: progress kept
+  // 3. interrupted (a trade): progress kept
   await pg.evaluate(() => { const A = window.__A; A.inv = BF.trades.inv.create(); });
   const t4 = await grow();
   const r4 = await watch(400, { stopAfter: 7, offAt: null });
   ok("hand felling again (control)", r4.fell, r4.chop);
   const t5 = await grow();
-  const part = await pg.evaluate(() => {   // chop 7 s, then end the working day
+  const part = await pg.evaluate(() => {   // chop 7 s, then interrupt it
     const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
     let chop = 0;
     for (let t = 0; t < 120 && chop < 7; t += 0.05) { BF.sky.setTime(0.1); BF.mobs.update(0.05); const k = A.fo.task; if (k && k.kind === "cut" && Math.hypot(k.x + 0.5 - A.position.x, k.z + 0.5 - A.position.z) <= 3) chop += 0.05; }
-    BF.sky.setTime(0.6); BF.mobs.update(0.05);
+    A.tradingWith = BF.player; BF.forester.ai(A, 0.05, {}); A.tradingWith = null;   // the player opens its trade screen: the task ends, progress kept
     return { saved: A.fo.saved, chop, task: A.fo.task && { kind: A.fo.task.kind, done: A.fo.task.done } };
   });
   console.log("part", JSON.stringify(part));
-  const r5 = await watch(240, { keep: true });
+  const r5 = await watch(240);
   console.log("resume", JSON.stringify(r5));
-  ok("interrupted felling resumes", ((part.saved && part.saved.done >= 2) || (part.task && part.task.done >= 2)) && r5.fell && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop });
+  ok("interrupted felling resumes", part.saved && part.saved.done >= 2 && r5.fell && r5.fell.at.join() === part.saved.key && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop });
 
   // 4. axe shopping: a toolsmith sells iron (2 em) and diamond (10 em) axes
   const shop = await pg.evaluate(() => {
