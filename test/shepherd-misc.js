@@ -18,7 +18,7 @@ module.exports = async (pg, out) => {
     const rc = BF.inventory.recipes.find(r => r.out === I.shears);
     ok("shears recipe = 3 iron ingots", !!rc && rc.type === "shapeless" && rc.ings.length === 3 && rc.ings.every(g => g.length === 1 && g[0] === I.iron_ingot), rc && rc.desc);
     ok("shears have an icon", typeof BF.textures.icon(I.shears) === "string" && BF.textures.icon(I.shears).startsWith("data:"));
-    ok("shears speed up leaves", BF.items[I.shears].tool.speed > 1 && BF.blocks[BF.B.oak_leaves].tool === "shears");
+    ok("shears speed up leaves", BF.items[I.shears].tool.speed > 1 && BF.blocks[BF.B.oak_leaves].shearSpeed > 1);
     // ---- wild sheep, player use
     BF.newWorld(5, { gen: 3, gameMode: "creative" });
     BF.mobs.spawning = false;

@@ -1,74 +1,48 @@
 {
+ "about": "Test tiers for test/ci.js. baseline: every PR into a release branch (about 15 min). integration: baseline plus these, on every push to a release branch. kind actions = module for test/run.js; node = standalone script. timeout in seconds (default 300). New tests not listed here run in integration unless they carry a // @ci comment.",
  "tests": [
-  {
-   "name": "gen3-check",
-   "file": "tools/gen3-check.js",
-   "kind": "node",
-   "args": [
-    "all"
-   ],
-   "tier": "integration",
-   "timeout": 900
-  },
-  {
-   "name": "bedchain",
-   "file": "test/bedchain.js",
-   "kind": "node",
-   "args": [
-    "1",
-    "1",
-    "2"
-   ],
-   "tier": "integration",
-   "timeout": 1800
-  },
-  {
-   "name": "builder-woods",
-   "file": "test/builder-woods.js",
-   "kind": "node",
-   "tier": "integration",
-   "timeout": 900
-  },
-  {
-   "name": "river-check",
-   "file": "tools/river-check.js",
-   "kind": "node",
-   "tier": "integration",
-   "timeout": 900
-  },
-  {
-   "name": "debug-screen",
-   "file": "test/debug-screen.js",
-   "kind": "node",
-   "args": [
-    "{out}"
-   ],
-   "tier": "integration",
-   "timeout": 600
-  },
-  {
-   "name": "farmbeds",
-   "file": "test/farmbeds.js",
-   "kind": "node",
-   "args": [
-    "1",
-    "1",
-    "2"
-   ],
-   "tier": "integration",
-   "timeout": 1800
-  },
-  {
-   "name": "minechain",
-   "file": "test/minechain.js",
-   "kind": "node",
-   "args": [
-    "1",
-    "1",
-    "2"
-   ],
-   "tier": "integration",
-   "timeout": 1800
-  }
+  {"name": "automap-colours", "file": "test/automap-colours.js", "kind": "actions", "tier": "baseline"},
+  {"name": "automap-input", "file": "test/automap-input.js", "kind": "actions", "tier": "baseline"},
+  {"name": "cartography-actions", "file": "test/cartography-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "creative-vinv", "file": "test/creative-vinv.js", "kind": "actions", "tier": "baseline"},
+  {"name": "debug-screen", "kind": "node", "tier": "baseline", "file": "test/debug-screen.js", "args": ["{out}"], "timeout": 600, "what": "second-monitor debug screen"},
+  {"name": "explorer-actions", "file": "test/explorer-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "farmbeds-actions", "file": "test/farmbeds-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "golem-actions", "file": "test/golem-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "jobmemory", "file": "test/jobmemory.js", "kind": "actions", "tier": "baseline"},
+  {"name": "map-held-actions", "file": "test/map-held-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "maps-actions", "file": "test/maps-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "mining-vanilla", "file": "test/mining-vanilla.js", "kind": "actions", "tier": "baseline"},
+  {"name": "overlay-behind", "file": "test/overlay-behind.js", "kind": "actions", "tier": "baseline"},
+  {"name": "pathgap-actions", "file": "test/pathgap-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "river-check", "kind": "node", "tier": "baseline", "file": "tools/river-check.js", "timeout": 300, "what": "no river walls or steps"},
+  {"name": "shepherd-check", "file": "test/shepherd-check.js", "kind": "actions", "tier": "baseline"},
+  {"name": "shepherd-day", "file": "test/shepherd-day.js", "kind": "actions", "tier": "baseline"},
+  {"name": "tent-actions", "file": "test/tent-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "villagelog", "file": "test/villagelog.js", "kind": "actions", "tier": "baseline"},
+  {"name": "villager-screens", "file": "test/villager-screens.js", "kind": "actions", "tier": "baseline"},
+  {"name": "wood-variants", "file": "test/wood-variants.js", "kind": "actions", "tier": "baseline"},
+  {"name": "automap-actions", "file": "test/automap-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "automap-big", "file": "test/automap-big.js", "kind": "actions", "tier": "integration"},
+  {"name": "automap-gen", "file": "test/automap-gen.js", "kind": "actions", "tier": "integration", "timeout": 1200},
+  {"name": "automap-time", "file": "test/automap-time.js", "kind": "actions", "tier": "integration", "timeout": 1200},
+  {"name": "automap-tp", "file": "test/automap-tp.js", "kind": "actions", "tier": "integration"},
+  {"name": "bedchain", "kind": "node", "tier": "integration", "file": "test/bedchain.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "bed supply chain soak, 1 day x 2 villages"},
+  {"name": "beds-actions", "file": "test/beds-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "builder-woods", "kind": "node", "tier": "integration", "file": "test/builder-woods.js", "timeout": 900, "what": "builders use one wood per structure"},
+  {"name": "cartography-live", "file": "test/cartography-live.js", "kind": "actions", "tier": "integration"},
+  {"name": "chest-ladder-actions", "file": "test/chest-ladder-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "durability-actions", "file": "test/durability-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "esc-close", "file": "test/esc-close.js", "kind": "actions", "tier": "integration"},
+  {"name": "explorer-far", "file": "test/explorer-far.js", "kind": "actions", "tier": "integration"},
+  {"name": "farmbeds", "kind": "node", "tier": "integration", "file": "test/farmbeds.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "farm beds soak, 1 day x 2 villages"},
+  {"name": "forester-actions", "file": "test/forester-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "furniture-actions", "file": "test/furniture-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "gen3-check", "kind": "node", "tier": "integration", "file": "tools/gen3-check.js", "args": ["all"], "timeout": 900, "what": "terrain generator: old generators unchanged, gen 3 seams"},
+  {"name": "map-icons", "file": "test/map-icons.js", "kind": "actions", "tier": "integration"},
+  {"name": "minechain", "kind": "node", "tier": "integration", "file": "test/minechain.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "miner soak, 1 day x 2 villages"},
+  {"name": "miner-actions", "file": "test/miner-actions.js", "kind": "actions", "tier": "integration"},
+  {"name": "shepherd-misc", "file": "test/shepherd-misc.js", "kind": "actions", "tier": "integration"},
+  {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"}
  ]
 }

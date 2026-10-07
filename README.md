@@ -21,6 +21,15 @@ then open http://localhost:8000 (the game) on one screen and http://localhost:80
 - The feed is always on and doesn't change anything in the game, F3 included. However you open the game (this server, `python3 -m http.server`, or the file itself), it streams to port 8001 on the same machine. To use only the debug screen with your own game server: `node debug/server.js --no-game`. `?debugfeed=<port>` points it elsewhere and `?debugfeed=off` turns it off.
 - With no debug server running, the game plays as normal and quietly retries every few seconds.
 
+## Tests and CI
+
+GitHub Actions runs the headless tests (`.github/workflows/`), one at a time, in two tiers set in `test/ci.json`:
+
+- **Baseline tests** run on every pull request into a `release-*` branch or `main` (about 15 minutes).
+- **Integration tests** (baseline plus the soak, generator and slow map tests, about an hour) run on every push to a `release-*` branch, so after each merged PR, and on a pull request from a release branch into `main`. Either workflow can also be started by hand from the Actions tab.
+
+Each run's page has a results table, and the logs and screenshots are attached to it. A test fails when it exits non-zero, times out, throws in the page, or prints a line starting with `FAIL`. Run a tier locally with `NODE_PATH=$(npm root -g) node test/ci.js baseline` (or `integration`, or name tests after the output folder: `node test/ci.js baseline ci-out esc-close`). A new test file needs no entry in `test/ci.json`: it runs in integration, or in the tier named by a `// @ci baseline` comment in the file.
+
 ## Layout
 
 - `index.html`: entry page and script load order

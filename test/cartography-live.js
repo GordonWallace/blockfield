@@ -1,6 +1,7 @@
 // Live cartographer: node test/run.js /tmp/cartlive test/cartography-live.js
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
+  await require("./lib").toVillage(pg);   // mile-high worlds rarely start inside a village
   const info = await pg.evaluate(async () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager");
     return { n: vs.length, sample: vs.slice(0, 3).map(m => [m.profession, !!m.village, m.position.x | 0, m.position.z | 0, !!m.inv]) };
