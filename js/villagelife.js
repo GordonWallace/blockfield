@@ -6,7 +6,7 @@ const BF = (window.BF = window.BF || {});
 
 const BREAD_PTS = 5;               // bread restores 5 hunger points = 1 bread-equivalent
 const KEEP = 7;                    // a seller always keeps at least this many bread-eq
-const MEALS = [0.04, 0.22, 0.42];  // sky.time of the three daily meals (breakfast, lunch, supper; all before bedtime 0.52)
+const MEALS = [0.04, 0.22, 0.42];  // sky.time of the three daily meals (breakfast, lunch, supper; all before bedtime at sunset 0.5)
 const MAX_CATCHUP_MEALS = 3 * 30;  // at most 30 days of meals are caught up at once
 const LIFE_V = 1;                  // save-format version of the per-villager food state
 
@@ -185,7 +185,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
-const WORK_END = 0.5;             // farmers and shoppers stop at sunset; bedtime (mobs.js) starts at 0.52
+const WORK_END = 0.5;             // farmers and shoppers stop at sunset, which is also bedtime (mobs.js)
 const REACH_H = 1.75;             // horizontal feet -> cell centre distance to work a cell
 const ACT = { harvest: 0.55, plant: 0.45, till: 0.9, border: 0.75, unborder: 0.8, water: 0.9, fill: 0.9, craft: 1.6, tend: 3.0, dig: 0.7, raise: 0.5, gather: 0.9 };
 const TASK_MAX = 45;              // seconds before an unfinished task is given up

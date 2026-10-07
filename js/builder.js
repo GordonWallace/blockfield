@@ -12,7 +12,7 @@ const BLOCK_T = [0.5, 0.8];       // seconds between two placed blocks (random p
 let reachNow = 4.0;
 const REACH = 4.0;                // blocks from the eye to the nearest point of the target cell
 const EYE = 1.62;
-const BUILD_END = 0.47;           // sky time after which builders stop and go home (sunset 0.5, bedtime 0.52)
+const BUILD_END = 0.47;           // sky time after which builders stop and go home (bedtime at sunset 0.5)
 const SITE_RANGE = 40;            // sites up to this far outside the village's bounding box
 const SITE_TRIES = 150, SITE_EVALS = 40, MAX_FILL = 2, MAX_SLOPE = 2;
 const MAX_BUILT = 14;             // structures per village
@@ -41,7 +41,7 @@ function mulberry(a) {
   return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
-const allowed = () => skyT() < BUILD_END && !(skyT() > 0.52);
+const allowed = () => skyT() < BUILD_END && !(skyT() > 0.5);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const styleIdx = s => (typeof s === "number" ? s : Math.max(0, STYLES.indexOf(s)));
 

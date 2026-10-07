@@ -1165,7 +1165,7 @@ function sleepFade() {
 // Right-click on a bed: at night with no monsters near, sleep until morning and set the respawn point here.
 // A tent (js/tents.js) works the same, but monsters cannot see anyone asleep in it, so nearby monsters do not stop you.
 function trySleep(t) {
-  if (!BF.sky || !BF.sky.isNight()) { actionBar("You can only sleep at night"); return; }
+  if (!BF.sky || !(BF.sky.isNight() || (BF.sky.stormy && BF.sky.stormy()))) { actionBar("You can only sleep at night"); return; }
   const b = BF.blocks[t.id], tent = !!b.tent;
   const near = !tent && ((BF.mobs && BF.mobs.list) || []).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
   if (near) { actionBar("You may not rest now, there are monsters nearby"); return; }

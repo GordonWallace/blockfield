@@ -188,7 +188,11 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 
 ## sky.js (owner: sky/textures worker)
 
-`BF.sky = { init(scene), update(dt), time, light, day, isNight() }`
+`BF.sky = { init(scene), update(dt), time, light, day, isNight(), lightAt(t), SUNSET, HOUR, DUSK_LEN }`
+
+Day and night are equal halves: daytime is sky.time 0-0.5 (sun above the horizon), nighttime 0.5-1, and `isNight()` is just `time >= 0.5` (weather never makes it night). Light (`lightAt`, before weather): full day, dipping to 0.84 over the last hour before sunset; dusk is the first 1.5 in-game hours after sunset, darkening gradually to full night (0.18); dawn mirrors it before sunrise.
+
+Monster spawning (mobs.js): a spot must have been dark for half an in-game hour (`DARK_WAIT`): block light <= 7 and, under open sky, sky light <= 0.3 both now and half an hour ago, or a thunderstorm (`stormy()`, no wait) (the curve only falls then rises, so that is the maximum), which puts the first surface monsters about 1.5 h after sunset (sky.time ~0.565) and the last new ones about 1 h before sunrise. Spots under 5+ blocks of cover count as dark at any time. A light source removed or a block placed that can shade the ground (`BF.mobs.onSet`, called from `world.setBlock`) stamps its 8x8-column cell (a light source also the cells within 2) and nothing spawns there for another half hour.
 - time in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight. `light` is the block brightness multiplier
   (main passes it to `world.setDaylight`). Owns scene.background, scene.fog (keep fog distances tied to
   `BF.world.viewDist * BF.CS`).
@@ -200,7 +204,7 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 ## mobs.js (owner: mobs worker)
 
 `BF.mobs = { list, init(scene), update(dt), raycast(origin, dir, maxDist) -> {mob, dist}|null, hit(mob, damage, knockDir: THREE.Vector3), clear() }`
-- Villagers: one per bed of their home (`m.home`, `m.bed` from `worldgen` house records). From sky time 0.52 to 0.985
+- Villagers: one per bed of their home (`m.home`, `m.bed` from `worldgen` house records). From sky time 0.5 (sunset) to 0.985
   they walk home along an A* grid path, opening doors on the way and closing them behind, and sleep (`m.sleeping`,
   lying on the bed); villagers without a usable bed stand indoors or by the bell. They wake at sunrise (or when hurt)
   and walk out through the door. `interact(mob)` returns "Villager is sleeping" for a sleeper.
@@ -350,7 +354,7 @@ The 15th profession `builder` (orange hi-vis vest with reflective band and strap
 - Save: snapshot field `weather = {type, remaining, rng, intensity, thunder}`; restore applies it after `newWorld` (old saves keep the seeded default).
 - Per column precipitation (biome cached per 4x4 cell): desert/badlands/savanna dry (sky still overcast); snowy biomes (snowy beach/plains/taiga/slopes,
   ice spikes, jagged peaks) or temperature < -0.3 snow; temperature < -0.1 snow at y >= 90; < 0.12 snow at y >= 100; else rain.
-- Sky (sky.js hook): `sky.light *= 1 - 0.3*intensity - 0.3*thunder` (noon: rain 0.70, thunder 0.40, so `isNight()` is true in a thunderstorm:
+- Sky (sky.js hook): `sky.light *= 1 - 0.3*intensity - 0.3*thunder` (noon: rain 0.70, thunder 0.40, and `BF.sky.stormy()` (thunder > 0.5) stands in for night:
   surface hostile spawns, no undead burning, sleeping allowed, like vanilla); dome/fog/clouds blend to grey, glow/sun/moon/stars fade by intensity,
   cloud coverage grows (mask quantile 0.7 -> 0.3, `clouds.userData.setCoverage`), fog near/far shorten (~-25%/-35%). Lightning `flash` adds up to +0.85 light
   and whitens the sky for ~0.3 s (double flash).
@@ -543,7 +547,7 @@ hooks) and `if (m.child) BF.breeding.childMove(m, dt, out)` after `wanderAI`; `r
   worldgen, builder-built and player-placed beds all count and broken ones stop counting. Villagers = roster slots still alive (`roster.length - killed.villager`, includes builders) +
   living newborns (children and grown) + pairs already in love. Breeding needs `beds >= villagers + 1` (checked when the encounter rolls and again at the birth) and fewer than
   `MAX_TOTAL` 40 villagers, or 1.5 x `rec.pop` for sized villages (a safety cap; the roster cap of 24 does NOT apply to newborns, the bed rule is the limiter).
-- **Eligible adult**: villager, not a child, not dead/asleep/fleeing/trading/already in love, not `m.starving`, daytime (not bedtime 0.52-0.985), `BF.food.breadEq(m.inv) >= 7`,
+- **Eligible adult**: villager, not a child, not dead/asleep/fleeing/trading/already in love, not `m.starving`, daytime (not bedtime 0.5-0.985), `BF.food.breadEq(m.inv) >= 7`,
   and at least `COOLDOWN` 1 game day since it last bred. Any profession may breed, nitwits, unemployed and builders included (vanilla lets nitwits/unemployed breed).
 - **Encounter.** Every 1 s, per village, each pair of its adults (`rec.members`) within `RADIUS` 5 blocks (3D) whose condition (both eligible + bed rule) has just become true
   rolls `CHANCE` 50% once; the pair is not rolled again until it separates (or stops being eligible) and meets again. Villagers are never steered toward each other.
@@ -642,7 +646,7 @@ Items `<sp>_sign` x8 (`places: "sign"`, stack 16, tab functional, fuel 10 s), re
 - **Persistence.** Maps are ordinary inventory items (saved by name); `trading.pack` adds `ex: {fin: [map names given up on]}` for explorers. Debug log: `BF.explorer.LOG`.
 - **Test.** `test/explorer-far.js` (explorer of a village 130+ blocks beyond view distance keeps exploring on js/villagesim.js chunks), `test/explorer-actions.js` (roster statistics, starting stock, a live explorer buys a blank map from a cartographer, uses it, explores, and offers the filled map): `NODE_PATH=$(npm root -g) node test/run.js /tmp/exp test/explorer-actions.js`.
 - **Tents** (js/tents.js, blocks.js `tentDefs()` in the explorer pack, item `tent`). A bed that is 3 wide, 2 long and 2 high at the ridge: 48 hidden block states `tent_[up_]<row 0|1>_<lateral 0..2>_<n|e|s|w>` (the first 24 are the ground cells, the `up_` ones the six cells stacked above them, appended later; `tent: {f, r, l, up}`, deliberately not `bed`, so villagers' bed checks ignore them), drawn as a floor mat and a stepped canvas A-frame (model "shape"; collision box = the shell height of that cell; the ridge is 32/16 blocks, so a tent needs two free blocks of headroom). The cell a player targets is the foot centre (row 0, lateral 1); the tent covers one cell to each side and one row ahead along the look direction (`BF.tents.cells/place/canPlace/remove/originOf/findSite`). Breaking any part removes the other eleven without extra drops (one tent item drops; `BF.tents.cells` lists all 12, `originOf` steps down from an `up` part). Recipe: 6 wool of any colour over 2 sticks (`WWW/WWW/S S`). Right click at night sleeps like a bed (sets the respawn point; `respawnPoint` accepts tents) but nearby monsters do not stop you, and `BF.player.hiddenInTent` is set for the 2 s of the sleep so `hostileAI` has no player target.
-- **Explorer camping** (explorer.js `campAI`): an explorer carries one tent (added by `stockFor("explorer")`). From `DUSK` (sky.time 0.45) until bedtime (0.52), if the straight-line distance to its bed is more than it can walk in the time left (speed x 1.3 x 0.8 slack), it pitches the tent on the nearest flat 3x2 site within 7 blocks, sets `m.bed = {x, y, z, f, tent: true}` (the tent's foot centre; the home bed is kept in `m.homeBed`; `bedOK` in mobs.js accepts it) and waits; at bedtime the normal `nightAI` walks it in and lies it down. Sleeping villagers in tents are skipped by `zombieHuntVillagers` (`BF.tents.hidden(m)`). Next morning it takes the tent down (the item returns), gets its own bed back and carries on. `ex.camp` is saved so a despawned camper still strikes camp. An explorer that has no tent (a world saved before tents existed, a broken camp, a full pack) collects a spare from home: `spareTent` tops it up by day within 30 blocks of its bed.
+- **Explorer camping** (explorer.js `campAI`): an explorer carries one tent (added by `stockFor("explorer")`). From `DUSK` (sky.time 0.45) until bedtime (0.5, sunset), if the straight-line distance to its bed is more than it can walk in the time left (speed x 1.3 x 0.8 slack), it pitches the tent on the nearest flat 3x2 site within 7 blocks, sets `m.bed = {x, y, z, f, tent: true}` (the tent's foot centre; the home bed is kept in `m.homeBed`; `bedOK` in mobs.js accepts it) and waits; at bedtime the normal `nightAI` walks it in and lies it down. Sleeping villagers in tents are skipped by `zombieHuntVillagers` (`BF.tents.hidden(m)`). Next morning it takes the tent down (the item returns), gets its own bed back and carries on. `ex.camp` is saved so a despawned camper still strikes camp. An explorer that has no tent (a world saved before tents existed, a broken camp, a full pack) collects a spare from home: `spareTent` tops it up by day within 30 blocks of its bed.
 - **Test.** `test/tent-actions.js` (placement in 4 facings, breaking, an explorer pitching at dusk, sleeping hidden, striking camp): `NODE_PATH=$(npm root -g) node test/run.js /tmp/tent test/tent-actions.js`.
 
 ## Foresters (js/forester.js; roster in mobs.js, blocks in blocks.js, tiles in js/textures-forester.js)

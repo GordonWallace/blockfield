@@ -27,7 +27,7 @@ const CHECK = 6;             // seconds between a villager's storage checks
 const TRIP_MAX = 60;         // seconds before a walk to a chest is given up
 const AVOID = 0.3;           // days a chest that could not be reached is left alone
 const ORDER_DAYS = 1;        // an order for a chest stands this long (renewed while the villager still needs one)
-const WORK_END = 0.5;        // villagers stop at sunset (bedtime in mobs.js starts at 0.52)
+const WORK_END = 0.5;        // villagers stop at sunset (bedtime in mobs.js starts then too)
 const PUT_T = 1.2;           // seconds at the open chest
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
