@@ -94,16 +94,31 @@ const start = async () => {
   await dbg.reload(); await dbg.waitForTimeout(1500);
   ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(s => !document.querySelector(s + ' input.tcb').checked, row('Player')));
   // Select none, then one type: only entries involving that type (whoever the other party is)
-  await dbg.click('#l-types summary'); await dbg.click('#l-none'); await dbg.waitForTimeout(200);
+  await dbg.click('#l-types summary'); await dbg.click('#l-types [data-all="0"]'); await dbg.waitForTimeout(200);
   const none = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].filter(e => /trade|bed|job|birth|death/.test(e.className)).length);
   ok('select none hides villager entries', none === 0);
   await dbg.check(`${row(tr.buyer)} input.tcb`); await dbg.waitForTimeout(200);
   vis = await texts();
   ok('one type selected shows its trades with unselected types', vis.some(t => /got 1 Test/.test(t)) && !vis.some(t => /^Player traded/.test(t)));
   ok('and nothing without it', vis.every(t => !/traded with/.test(t) || t.includes('(' + tr.buyer + ')')));
-  await dbg.click('#l-all'); await dbg.waitForTimeout(200);
+  await dbg.click('#l-types [data-all="1"]'); await dbg.waitForTimeout(200);
   ok('select all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
   await dbg.click('#l-count');
+  // event types: a second dropdown that combines with the villager types ("Show <Cleric> <Trades>")
+  await dbg.click('#l-kinds summary');
+  ok('event dropdown lists births, deaths and trades', await dbg.evaluate(() => ['birth', 'death', 'trade'].every(k => document.querySelector(`#l-kinds .frow[data-k="${k}"]`))));
+  await dbg.click('#l-kinds [data-all="0"]'); await dbg.click('#l-kinds .frow[data-k="birth"] input.kcb'); await dbg.waitForTimeout(200);
+  vis = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].map(e => e.className.split(' ')[1]));
+  ok('births only', vis.length > 0 && vis.every(k => k === 'birth'));
+  await dbg.click('#l-kinds [data-all="1"]'); await dbg.click('#l-kinds [data-all="0"]'); await dbg.click('#l-kinds .frow[data-k="trade"] input.kcb');
+  await dbg.click('#l-count'); await dbg.click('#l-types summary'); await dbg.click('#l-types [data-all="0"]'); await dbg.check(`${row(tr.seller)} input.tcb`); await dbg.waitForTimeout(200);
+  vis = await texts();
+  ok('one type and one event type combine', vis.length > 0 && vis.every(t => / traded with /.test(t) && t.includes('(' + tr.seller + ')')));
+  ok('summaries name the single choices', await dbg.evaluate(s => document.querySelector('#l-types summary').textContent === s && document.querySelector('#l-kinds summary').textContent === 'Trades', tr.seller));
+  await dbg.click('#l-kinds summary'); await dbg.waitForTimeout(100);
+  await dbg.screenshot({ path: out + '-events.png', fullPage: true });
+  await dbg.click('#l-clear'); await dbg.waitForTimeout(200);
+  ok('clear filters shows everything', (await count()) >= all && !(await dbg.$('#l-clear')));
   // a second village: the view follows the nearest loaded one, the list shows both with distances, and the first can be picked
   const first = want.name;
   const second = await game.evaluate(() => {
