@@ -1015,6 +1015,20 @@ function gatherBlock(m, D, t) {
   if (t.what === "dirt" ? !c.diggable.has(id) : !isLogBlock(id)) return false;
   const drops = BF.rollDrops(id);
   if (!Tinv.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false;
+  // a natural tree comes down whole (js/forester.js felling, no floating trunk left): its logs go into the pocket, what doesn't fit drops
+  const tree = t.what === "log" && BF.forester && BF.forester.treeAt ? BF.forester.treeAt(t.x, t.y, t.z) : null;
+  if (tree && BF.forester.fell) {
+    const logs = tree.logs.map(([x, y, z]) => getB(x, y, z));
+    BF.forester.fell(null, tree, false);
+    let got = 0;
+    for (const lid of logs) for (const d of BF.rollDrops(lid)) {
+      if (Tinv.canFit(m.inv, [{ id: d.id, n: d.count }], [])) { Tinv.add(m.inv, d.id, d.count); got += d.count; }
+      else if (BF.drops && BF.drops.spawnAt) BF.drops.spawnAt([d], t.x, t.y, t.z);
+    }
+    particles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BF.blocks[id].color, 8, 0.8);
+    log("gather", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name, n: got });
+    return true;
+  }
   if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
   for (const d of drops) Tinv.add(m.inv, d.id, d.count);
   particles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
