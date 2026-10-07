@@ -225,7 +225,7 @@ function ids() {
   return C;
 }
 const cnt = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
-const hasHoe = m => ids().hoes.some(id => cnt(m, id) > 0);
+const hasHoe = m => BF.toolWear.has(m, "hoe");   // any hoe, gold included (js/toolwear.js)
 const isLogBlock = id => { const b = BF.blocks[id]; return !!b && /_log$/.test(b.name) && !/^stripped_/.test(b.name); };
 // A new farmer gets an empty bucket (and a hoe), a new builder an empty bucket: water is only ever placed from a bucket that was filled first.
 function ensureKit(m) {
@@ -882,7 +882,7 @@ function performBed(m, fs, R, D, t) {
   if (!w.setBlock(t.x, t.y, t.z, place)) return false;
   particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[old].color, 5, 0.7);
   blockSound("place", place === c.water ? old : place, t.x, t.y, t.z);
-  if (t.kind === "till") { D.cells.push([t.x, t.y, t.z]); m.farm.tilled = (m.farm.tilled || 0) + 1; }
+  if (t.kind === "till") { D.cells.push([t.x, t.y, t.z]); m.farm.tilled = (m.farm.tilled || 0) + 1; BF.toolWear.use(m, BF.toolWear.best(m, "hoe"), 1); }   // tilling wears the hoe 1 use, as the player's
   if (t.kind === "border") { Tinv.remove(m.inv, place, 1); m.farm.bordered = (m.farm.bordered || 0) + 1; }
   if (t.kind === "water") {
     Tinv.remove(m.inv, c.wbucket, 1); Tinv.add(m.inv, c.bucket, 1);

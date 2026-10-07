@@ -28,6 +28,7 @@ const VALUE = {
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
+  golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
   iron_ore: .45, gold_ore: 1.05,                                    // miner goods: ore smelts into one ingot

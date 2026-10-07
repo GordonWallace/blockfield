@@ -302,16 +302,14 @@ function dig(m, x, y, z) {
   if (!isFinite(b.hardness)) return false;
   W().setBlock(x, y, z, 0);
   if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if (keeps(d.id)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
-  if (b.hardness > 0) wearPick(m, p, 1);
+  wearPick(m, p, BF.toolWear.forBlock(id, p));
   if (BF.emit) BF.emit("blockBroken", x, y, z, id);
   return true;
 }
+// Wear at the player's rate (js/toolwear.js): a used-up pickaxe leaves its pack with a clink and a village log line.
 function wearPick(m, p, n) {
-  if (!p || BF.wearStack(p, n) !== "broken") return;
-  const i = m.inv.indexOf(p);
-  if (i >= 0) m.inv[i] = null;
+  if (!p || BF.toolWear.use(m, p, n) !== "broken") return;
   log("pickBroke", m, { pick: nameOf(p.id) });
-  if (BF.audio) { try { BF.audio.play("dig.metal", { x: m.position.x, y: m.position.y + 1, z: m.position.z, pitch: 1.5 }); } catch (e) { /* optional */ } }
 }
 // A hostile mob within reach (one that wandered into the tunnel from a cave, or spawned in its dark): the miner hits it with its pickaxe
 // (2 + tier damage, 2 uses of wear, like the player's), so it can't block the way for good.
@@ -323,7 +321,7 @@ function fend(m, Q, dt) {
   if (!o) return;
   Q.hitT = 0.8; m.ai.swingT = 0.3;
   BF.mobs.hurt(o, 2 + BF.items[p.id].tool.tier, "villager");
-  wearPick(m, p, 2);
+  wearPick(m, p, BF.toolWear.forHit(p));
   log("fend", m, { mob: o.type });
 }
 
