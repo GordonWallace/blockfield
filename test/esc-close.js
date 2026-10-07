@@ -1,5 +1,7 @@
 // Escape closes in-game screens straight back to play; Escape with nothing open still pauses.
 // Pointer lock is simulated the way Chrome behaves: a lock granted while Escape is held is dropped at once as a user exit.
+// A second pass is a stricter browser that also drops a lock granted just after Escape's release: the game must stay
+// unpaused with the mouse free, and the next click captures it.
 // node test/run.js /tmp/esc test/esc-close.js
 module.exports = async (pg) => {
   await pg.evaluate(() => {
@@ -12,7 +14,9 @@ module.exports = async (pg) => {
     const fire = () => document.dispatchEvent(new Event("pointerlockchange"));
     cv.requestPointerLock = () => new Promise(res => setTimeout(() => {
       el = cv; fire();
-      if (window.__esc) setTimeout(() => { el = null; fire(); }, 5);   // Chrome: Escape is "leave pointer lock"
+      const strictDrop = window.__strict && window.__dropNext;   // strict browser: the lock asked for after an Escape is dropped
+      if (strictDrop) window.__dropNext = false;
+      if (window.__esc || strictDrop) setTimeout(() => { el = null; fire(); }, 5);   // Chrome: Escape is "leave pointer lock"
       res();
     }, 20));
     document.exitPointerLock = () => { if (el) { el = null; setTimeout(fire, 5); } };
@@ -27,23 +31,48 @@ module.exports = async (pg) => {
     // a locked Escape never reaches the page: the browser keeps it and leaves pointer lock
     if (!(await pg.evaluate(() => window.__escDown()))) await pg.keyboard.down('Escape');
     else await pg.waitForTimeout(50); await pg.waitForTimeout(1000);   // long hold: frames are slow under software GL
-    await pg.evaluate(() => { window.__esc = false; });
+    await pg.evaluate(() => { window.__esc = false; window.__dropNext = true; });
     await pg.keyboard.up('Escape'); await pg.waitForTimeout(800);
   };
   console.log("start:", JSON.stringify(await st()));
   let fails = 0;
   const check = (label, s, want) => { const ok = Object.keys(want).every(k => s[k] === want[k]); if (!ok) fails++; console.log((ok ? "ok  " : "FAIL") + " " + label + ": " + JSON.stringify(s)); };
-  for (const how of ["E", "crafting", "furnace", "chat"]) {
-    await waitLocked();
+  const openScreen = async how => {
     if (how === "E") await pg.keyboard.press('e');
     else if (how === "chat") await pg.keyboard.press('t');
-    else await pg.evaluate(m => BF.inventory.open(m), how);
+    else if (how === "villager") await pg.evaluate(() => {
+      const p = BF.player.position;
+      const v = BF.mobs.list.find(m => m.type === "villager" && m.profession) || BF.mobs.spawn("villager", p.x + 2, p.y, p.z);
+      if (v && !v.profession) v.profession = "farmer";
+      BF.inventory.openTrade(v);
+    });
+    else await pg.evaluate(m => { const p = BF.player.position; BF.inventory.open(m, { x: Math.floor(p.x), y: Math.floor(p.y) - 1, z: Math.floor(p.z) }); }, how);
+    // the unlock from opening the screen must land before Escape, as it does in a real browser long before a person reacts
+    await pg.waitForFunction(() => !BF.player.isLocked(), null, { timeout: 10000 }).catch(() => {});
     await pg.waitForTimeout(200);
-    const open = await pg.evaluate(() => BF.inventory.isOpen() || BF.commands.isOpen());
-    console.log(how, "open:", open);
+    console.log(how, "open:", await pg.evaluate(() => BF.inventory.isOpen() || BF.commands.isOpen()));
+  };
+  const SCREENS = ["E", "crafting", "furnace", "chest", "villager", "chat"];
+  for (const how of SCREENS) {
+    await waitLocked();
+    await openScreen(how);
     await esc();
     check("after Esc from " + how, await st(), { locked: true, menu: null, inv: false });
   }
+  await pg.evaluate(() => { window.__strict = true; });
+  await pg.waitForTimeout(1200);   // past the grace after the last Escape-close
+  for (const how of ["crafting", "chest"]) {
+    await waitLocked();
+    await openScreen(how);
+    await esc();
+    check("strict browser: Esc from " + how + " stays in the game", await st(), { menu: null, inv: false });
+    await pg.evaluate(() => { window.__dropNext = false; });
+    await pg.mouse.click(640, 380);
+    await waitLocked();
+    check("strict browser: a click captures the mouse", await st(), { locked: true, menu: null });
+  }
+  await pg.evaluate(() => { window.__strict = false; });
+  await pg.waitForTimeout(1200);   // past the grace after the last Escape-close
   await esc();
   check("Esc with nothing open pauses", await st(), { menu: "pause" });
   await esc();
