@@ -31,9 +31,12 @@ module.exports = async (pg, out) => {
       if (gateOpen()) G.open++;
     };
     const startWheat = c("wheat_item");
+    const boughtSince = seen => BF.villageLife.log.filter(l => !seen.has(l) && l.kind === "buyWheat" && l.who === "shepherd#" + shep.slot.idx).reduce((a, l) => a + parseInt(l.got, 10), 0);
+    const log0 = new Set(BF.villageLife.log);
     // ---- morning: the shepherd feeds the hungry sheep and shears the woolly ones
     for (let i = 0; i < 6000; i++) { step(); if (i % 10 === 0) sample(); }
-    ok("shepherd fed the sheep (wheat used)", c("wheat_item") < startWheat, [startWheat, c("wheat_item")]);
+    const boughtWheat = boughtSince(log0);   // it may buy wheat from the farmer during the morning too
+    ok("shepherd fed the sheep (wheat used)", c("wheat_item") < startWheat + boughtWheat, [startWheat, boughtWheat, c("wheat_item")]);
     ok("every adult pen sheep was fed today", pen.sheep.filter(s => s.mob && !s.mob.lamb).every(s => !BF.shepherd.hungry(s.mob, day())));
     ok("shepherd sheared the flock (wool in inventory)", c("white_wool") >= 1, c("white_wool"));
     ok("shepherd went into the pen", G.inside > 0, G);
