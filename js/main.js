@@ -35,11 +35,12 @@ BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
   BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
+  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 2;         // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers (default)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
   BF.world.reset();
-  BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale });
+  BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   // pick a dry spawn column near the origin
   let sx = 8, sz = 8;
   for (let r = 0; r < 400; r += 8) {
@@ -91,7 +92,7 @@ function frame(now) {
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   const W = BF.warp;
   if (!BF.state.paused) {
-    // Fast-forward (F, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
+    // Fast-forward (arrow keys, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
     // behaviour at 10x matches 1x exactly and it plays like a sped-up recording. From 100x the step grows (up to 0.05 s, the
     // same step a slow frame already gets) so the step count stays bounded. Stops early if the frame budget runs out.
     const plan = W.plan(dt), t0 = performance.now();

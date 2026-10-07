@@ -73,7 +73,7 @@ function buildRecipes() {
   addShaped(I.chest, 1, ["PPP", "P P", "PPP"], { P }, "8 Planks in a ring \u2192 Chest");
   addShaped(I.oak_fence, 3, ["PSP", "PSP"], { P: I.planks, S }, "Oak Planks, Stick, Oak Planks \u00d7 2 rows \u2192 3 Oak Fence");
   addShaped(I.oak_door, 3, ["PP", "PP", "PP"], { P }, "6 Planks (2\u00d73) \u2192 3 Oak Doors");
-  addShaped(I.red_bed, 1, ["WWW", "PPP"], { W: names.filter(n => n === "wool" || /_wool$/.test(n)).map(n => I[n]), P }, "3 Wool (any colour) over 3 Planks \u2192 Red Bed");
+  addShaped(I.red_bed, 1, ["WWW", "PPP"], { W: names.filter(n => /_wool$/.test(n)).map(n => I[n]), P }, "3 Wool (any colour) over 3 Planks \u2192 Red Bed");
   addShaped(I.furnace, 1, ["CCC", "C C", "CCC"], { C }, "8 Cobblestone in a ring \u2192 Furnace");
   const mats = [["wooden", P, "Planks"], ["stone", C, "Cobblestone"], ["iron", I.iron_ingot, "Iron Ingot"],
     ["golden", I.gold_ingot, "Gold Ingot"], ["diamond", I.diamond, "Diamond"]];
@@ -98,7 +98,6 @@ function buildRecipes() {
   addShaped(I.sandstone, 1, ["SS", "SS"], { S: I.sand }, "4 Sand (2\u00d72) \u2192 Sandstone");
   addShaped(I.sandstone_bricks, 4, ["SS", "SS"], { S: I.cut_sandstone !== undefined ? I.cut_sandstone : I.sandstone }, I.cut_sandstone !== undefined ? "4 Cut Sandstone (2\u00d72) \u2192 4 Sandstone Bricks" : "4 Sandstone (2\u00d72) \u2192 4 Sandstone Bricks");
   addShaped(I.white_wool, 1, ["SS", "SS"], { S: I.string }, "4 String (2\u00d72) \u2192 White Wool");
-  addShapeless(I.white_wool, 1, [I.wool], "Wool \u2192 White Wool");
   addShapeless(I.mossy_cobblestone, 1, [C, I.moss_block], "Cobblestone + Moss Block \u2192 Mossy Cobblestone");
   addShaped(I.coarse_dirt, 4, ["DG", "GD"], { D: I.dirt, G: I.gravel }, "2 Dirt + 2 Gravel (checkered) \u2192 4 Coarse Dirt");
   addShaped(I.lantern, 1, [" N ", "NCN", " N "], { N: I.iron_ingot, C: I.coal }, "4 Iron Ingots around Coal \u2192 Lantern");
@@ -124,7 +123,7 @@ function buildRecipes() {
   fuel(LOGS, 15, "Any log"); fuel(PLANKS, 15, "Any planks");
   fuel(idsOf(["crafting_table", "chest", "oak_fence", "bow", "oak_door"]), 15);
   fuel(idsOf(names.filter(n => /^wooden_/.test(n))), 10, "Wooden tools");
-  fuel(idsOf(["stick", "dead_bush", "wool", "white_wool"]), 5);
+  fuel(idsOf(["stick", "dead_bush", "white_wool"]), 5);
   fuel(I.coal_block, 800);
 }
 
@@ -1034,8 +1033,8 @@ function renderOffers() {
   }
   if (v) {
     const lvl = v.level || 1;
-    const prof = (v.profession || "villager").replace(/\b\w/g, c => c.toUpperCase());
-    const st = (BF.villageLife && BF.villageLife.statusText(v)) || (BF.builder && BF.builder.statusText ? BF.builder.statusText(v) : "") || (BF.explorer ? BF.explorer.statusText(v) : "");   // hunger / farm work (js/villagelife.js), builders show what they are doing
+    const prof = (v.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const st = (BF.villageLife && BF.villageLife.statusText(v)) || (BF.builder && BF.builder.statusText ? BF.builder.statusText(v) : "") || (BF.explorer ? BF.explorer.statusText(v) : "") || (BF.forester ? BF.forester.statusText(v) : "") || (BF.furniture ? BF.furniture.statusText(v) : "");   // hunger / farm work (js/villagelife.js), builders show what they are doing
     titleEl.textContent = st ? prof + " \u2014 " + st : prof;
     vinvTitleEl.textContent = prof + " Inventory";
     lvlEl.textContent = levelFlashT > 0 ? "Level up! " + LEVELS[lvl - 1] : LEVELS[lvl - 1];

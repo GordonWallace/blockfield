@@ -8,7 +8,7 @@ const BF = window.BF;
   const dye = c => I[c + "_dye"];
   const woolOf = c => (c === "white" ? I.white_wool : I[c + "_wool"]);
   const terraOf = c => I[c + "_terracotta"];
-  const WOOL = [I.wool, ...C.map(woolOf)];
+  const WOOL = C.map(woolOf);
   const TERRA = [I.terracotta, ...C.map(terraOf)];
   const POWDER = C.map(c => I[c + "_concrete_powder"]);
   const GLASS = [I.glass, ...C.map(c => I[c + "_stained_glass"])];
@@ -52,6 +52,6 @@ const BF = window.BF;
 
   // ---- fuel: fences and wool (logs/woods/planks are covered by inventory.js patterns) ----
   fuel(names.filter(n => /_fence$/.test(n) && n !== "oak_fence").map(n => I[n]), 15, "Other fences");
-  fuel(WOOL.filter(id => id !== I.wool && id !== I.white_wool), 5, "Coloured wool");
+  fuel(WOOL.filter(id => id !== I.white_wool), 5, "Coloured wool");
 });
 })();

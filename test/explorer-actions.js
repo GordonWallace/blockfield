@@ -10,7 +10,7 @@ module.exports = async (pg, out) => {
       const c = ro.filter(s => s.prof === "cartographer").length, e = ro.filter(s => s.prof === "explorer").length;
       villages++; carto += c; expl += e; if (c) withC++; if (e) withE++;
       if (!c && e) badNoCarto++;
-      if (ro.length > 24) badNoCarto += 1000;
+      if (ro.filter(s => s.prof !== "furniture_maker").length > 24) badNoCarto += 1000;   // the furniture maker may go one past the cap (js/furniture.js)
       if (e > c) badNoCarto += 1000;
     }
     res.roster = { villages, carto, expl, ratio: +(expl / Math.max(1, carto)).toFixed(3), withC, withE, bad: badNoCarto };
