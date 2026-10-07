@@ -172,6 +172,8 @@ const start = async () => {
   ok('loaded villager ages through a skip, a returning one does not ' + JSON.stringify(ages), ages.a >= 2.9 && ages.b < 0.5 && ages.village >= 3);
   await dbg.screenshot({ path: out + '-ages.png', fullPage: true });
   ok('village age shown', /age [\d.,]+ days?/.test(await dbg.evaluate(() => document.getElementById('v-sub').textContent + document.getElementById('vlist').textContent)));
+  const rowH = await dbg.evaluate(() => [...document.querySelectorAll('#r-body tr')].map(r => Math.round(r.getBoundingClientRect().height)));
+  ok('villager rows all the same height ' + JSON.stringify([...new Set(rowH)]), rowH.length > 3 && new Set(rowH).size === 1);
   // happiness: the formula's terms, events falling out of the week, and the panel showing the game's score
   const hap = await game.evaluate(key => {
     const H = BF.happiness, rec = BF.mobs.villages.get(key);

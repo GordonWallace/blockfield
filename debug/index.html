@@ -94,7 +94,8 @@
   th { text-align: left; font: 10px var(--display); color: var(--faint); letter-spacing: 0.5px; padding: 6px 10px; border-bottom: 1px solid var(--edge); position: sticky; top: 0; background: var(--card); cursor: pointer; user-select: none; white-space: nowrap; }
   th.on { color: var(--accent2); }
   td { padding: 5px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.035); white-space: nowrap; }
-  td.st { white-space: normal; color: var(--muted); min-width: 160px; }
+  td.st { color: var(--muted); white-space: normal; width: 25ch; min-width: 25ch; max-width: 25ch; height: calc(2.9em + 11px); }
+  td.st div { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }   /* every row is two lines tall, enough for the longest status ("Going to take a job at a cartography table"), so rows don't change height as statuses change; anything longer is cut, full text on hover */
   tr.hl td { background: rgba(127, 191, 77, 0.1); }
   tbody tr:hover td { background: rgba(255, 255, 255, 0.04); }
   .roster { max-height: 420px; overflow: auto; }
@@ -539,7 +540,7 @@ function renderRoster(s) {
   rows.sort((a, b) => { const x = k === "hp" ? a.hpf : a[k], y = k === "hp" ? b.hpf : b[k]; return (typeof x === "string" ? x.localeCompare(y) : (x > y) - (x < y)) * dir || a.name.localeCompare(b.name); });
   $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + (curStale ? " when last loaded" : " loaded");
   $("r-body").innerHTML = rows.map(m => `<tr data-n="${esc(m.name)}"><td>${esc(m.name)}</td><td><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i>${esc(m.prof)}</td>` +
-    `<td class="st">${esc(m.status || "")}</td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
+    `<td class="st" title="${esc(m.status || "")}"><div>${esc(m.status || "")}</div></td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
     `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td>` +
     `<td title="${m.em != null ? `${m.em} carried + ${m.emChests} in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}">${m.em != null ? fmt(m.emT) : "-"}${m.emChests ? ` <span class="dim">(${fmt(m.emChests)} in chests)</span>` : ""}</td>` +
     `<td title="${m.food != null ? `${m.food} carried + ${m.foodChests} in chests (bread-equivalent)` : ""}">${m.food != null ? fmt(Math.round(m.foodT * 10) / 10) : "-"}${m.foodChests ? ` <span class="dim">(${fmt(m.foodChests)} in chests)</span>` : ""}</td>` +
