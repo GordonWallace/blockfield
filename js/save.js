@@ -63,6 +63,7 @@ function snapshot() {
     weather: BF.weather && BF.weather.serialize ? BF.weather.serialize() : undefined,
     signs: BF.signs && BF.signs.serialize ? BF.signs.serialize() : undefined,
     vlog: BF.vlog ? BF.vlog.serialize() : undefined,   // village action logs (js/villagelog.js)
+    happy: BF.happiness ? BF.happiness.serialize() : undefined,   // village happiness: last week's events + last scores (js/happiness.js)
     maps: BF.maps && BF.maps.serialize ? BF.maps.serialize() : undefined, // explored pixels of filled maps (js/maps.js)
     edits,
   };
@@ -89,6 +90,7 @@ function restore(data) {
   if (data.villagers && BF.mobs && BF.mobs.importVillagers) BF.mobs.importVillagers(data.villagers); // old saves have none
   if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather); // old saves: newWorld's seeded default
   if (BF.vlog) BF.vlog.deserialize(data.vlog); // old saves: no logs
+  if (BF.happiness) BF.happiness.deserialize(data.happy || { fromLog: data.vlog }); // old saves: last week's events from the log
   if (BF.maps && BF.maps.deserialize) BF.maps.deserialize(data.maps); // old saves: no maps
   if (BF.signs && BF.signs.deserialize) BF.signs.deserialize(data.signs); // sign texts + auto-sign state (old saves: none)
 }

@@ -99,6 +99,12 @@
   tbody tr:hover td { background: rgba(255, 255, 255, 0.04); }
   .roster { max-height: 420px; overflow: auto; }
   .hp { display: inline-block; width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); vertical-align: middle; margin-right: 6px; overflow: hidden; } .hp i { display: block; height: 100%; background: var(--accent); }
+  .happy { background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; display: grid; grid-template-columns: auto minmax(80px, 1fr); gap: 4px 14px; align-items: center; }
+  .happy .hs { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; } .happy .hs .big { font-size: 22px; }
+  .happy .track { height: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; overflow: hidden; } .happy .track i { display: block; height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .happy .terms { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+  .happy .terms b { font-weight: 600; } .happy .terms .z { color: var(--faint); } .happy .terms .z b { font-weight: 400; }
+  .stale .happy .hs .big, .stale .happy .track { opacity: 0.45; filter: grayscale(0.7); }
   .yes { color: var(--accent2); } .no { color: var(--danger); } .dim { color: var(--faint); }
   input.search { background: var(--bg2); border: 1px solid var(--edge2); border-radius: 5px; padding: 4px 9px; width: 180px; outline: none; } input.search:focus { border-color: var(--accent); }
 
@@ -214,6 +220,7 @@
               <div class="vstat"><div class="sub">Free job blocks</div><div class="big" id="v-unclaimed">0</div><div class="sub" id="v-freesub"></div></div>
               <div class="vstat"><div class="sub">Iron golems</div><div class="big" id="v-golems">0</div><div class="sub" id="v-golemsub"></div></div>
             </div>
+            <div class="happy" id="v-happy" title="Happiness = 100 + each line's points, kept between 0 and 100. The formula is the TERMS table in js/happiness.js"></div>
             <div class="occ" id="v-occ"></div>
           </div>
           <div class="mapwrap"><canvas id="map"></canvas><div class="tip" id="tip"></div></div>
@@ -326,7 +333,7 @@ function renderVillages(s) {
   $("vl-auto").classList.toggle("on", !pinned);
   const row = v => {
     const det = details[v.key], b = bearing(v.x - d.x, v.z - d.z);
-    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.age != null ? " \u00B7 age " + days(v.age) : "");
+    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.age != null ? " \u00B7 age " + days(v.age) : "") + (v.happy ? " \u00B7 happiness " + v.happy.score : "");
     return `<div class="vrow${v.loaded ? " on" : ""}${v.key === viewKey ? " sel" : ""}" data-k="${esc(v.key)}"><i class="ld"></i>` +
       `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs">${esc(extra)}</div>` +
       `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 ? dirName(b) : ""}</div></div>`;
@@ -414,6 +421,7 @@ function renderVillage(s) {
   $("v-name").textContent = v.name;
   $("v-sub").innerHTML = (curStale ? `<span class="stalebadge">Not loaded \u00B7 numbers from ${esc(v.clock)}</span> \u00B7 ` : "") +
     esc(fmt(row.dist) + " blocks away") + (row.age != null ? `<span title="Game days this village has been loaded and active"> \u00B7 age ${esc(days(row.age))}</span>` : "") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
+  renderHappy(row.happy);
   $("v-villagers").textContent = v.villagers;
   $("v-loaded").textContent = curStale ? "not loaded" : v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
   $("v-beds").textContent = v.beds;
@@ -432,6 +440,18 @@ function renderVillage(s) {
     `<span><i class="dot" style="background:#dfe6ea"></i>Iron golem</span><span><i class="dot" style="border:1.5px solid var(--warn)"></i>Free job block</span><span style="color:var(--accent2)">▲ You</span>`;
   drawMap(s);
   renderRoster(s);
+}
+
+// Happiness (js/happiness.js): the score, a bar, and every term with its count and points (zero terms dimmed).
+const happyColor = n => n >= 70 ? "var(--accent)" : n >= 40 ? "var(--warn)" : "var(--danger)";
+function renderHappy(h) {
+  const el = $("v-happy");
+  el.hidden = !h;
+  if (!h) return;
+  const sign = n => (n > 0 ? "+" : n < 0 ? "\u2212" : "") + fmt(Math.abs(n));
+  el.innerHTML = `<div class="hs"><span class="sub">Happiness</span><span class="big" style="color:${happyColor(h.score)}">${h.score}</span><span class="sub">/ ${h.max}${h.raw !== h.score ? ` (formula gives ${h.raw})` : ""}</span></div>` +
+    `<div class="track"><i style="width:${h.score / h.max * 100}%;background:${happyColor(h.score)}"></i></div>` +
+    `<div class="terms">` + h.terms.map(t => `<span class="${t.points ? "" : "z"}" title="${esc(sign(t.weight) + " each")}">${t.points ? `<b class="${t.points > 0 ? "yes" : "no"}">${sign(t.points)}</b> ` : ""}${fmt(t.count)} ${esc(t.label)}</span>`).join("") + `</div>`;
 }
 
 // ---------------------------------------------------------------- map
