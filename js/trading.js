@@ -23,11 +23,11 @@ const VALUE = {
   sandstone: .08, sandstone_bricks: .09, mossy_cobblestone: .15, calcite: .12, terracotta: .15, orange_terracotta: .18,
   yellow_terracotta: .18, red_terracotta: .18, white_terracotta: .18, brown_terracotta: .18,
   flint: .06, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,
-  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .04, wool: .1, white_wool: .12, leather: .15,
+  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .04, white_wool: .12, leather: .15,
   raw_porkchop: .08, raw_beef: .08, raw_mutton: .07, raw_chicken: .06, cooked_porkchop: .12, steak: .12, cooked_mutton: .1,
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
-  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07,
+  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
@@ -96,9 +96,9 @@ const TRADES = {
     ["2 emerald > 24 raw_cod"],
   ],
   shepherd: [
-    ["11 wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald"],
-    ["10 white_wool > 1 emerald", "1 emerald > 2 red_bed"],
-    ["1 emerald > 9 wool", "16 raw_mutton > 1 emerald"],
+    ["11 white_wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald"],   // white wool sells from level 1: it is what the shepherd shears (js/shepherd.js)
+    ["10 white_wool > 1 emerald"],
+    ["16 raw_mutton > 1 emerald", "1 emerald > 9 cooked_mutton"],
     ["3 emerald > 4 hay_bale"],
     ["2 emerald > 16 white_wool"],
   ],
@@ -142,6 +142,21 @@ const TRADES = {
   nitwit: [[], [], [], [], []],
   unemployed: [[], [], [], [], []],   // no jobsite yet (js/jobs.js): no offers
   explorer: [[], [], [], [], []],     // no fixed offers: it sells the maps it has filled, built on the fly (js/explorer.js syncOffers)
+  // The forester buys oak saplings from the player at 1 emerald each, as in the villager-planter mod. It only pays while it holds emeralds
+  // ("Out of emeralds" otherwise), which is what the mod's trade stock does too. Nothing else to sell: its logs and apples are its own.
+  // It also sells the wood it has harvested (js/forester.js): planks it sawed from its own logs, and the logs. Prices 104-111% of VALUE (30 planks
+  // = 0.9 emerald, 8 logs = 1 emerald); only what it actually holds can be bought ("Out of stock"), nothing is restocked or part of its starting pack.
+  // The furniture maker and the builder buy these.
+  forester: [["1 oak_sapling > 1 emerald", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
+  // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
+  // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer.
+  furniture_maker: [
+    ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed"],
+    ["10 oak_log > 1 emerald"],
+    ["40 spruce_planks > 1 emerald", "40 birch_planks > 1 emerald", "10 spruce_log > 1 emerald", "10 birch_log > 1 emerald"],
+    ["3 emerald > 7 red_bed"],
+    ["40 dark_oak_planks > 1 emerald", "40 acacia_planks > 1 emerald", "10 dark_oak_log > 1 emerald"],
+  ],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -154,7 +169,7 @@ const PRODUCE = {
   toolsmith: ["iron_hoe", "iron_pickaxe", "iron_axe"],
   butcher: [],         // cooks raw meat it holds instead (js/villagelife.js)
   fisherman: [],       // cooks raw cod it holds instead (js/villagelife.js)
-  shepherd: ["wool", "white_wool", "red_bed", "hay_bale"],
+  shepherd: ["white_wool", "hay_bale"],
   fletcher: ["arrow"],
   mason: ["brick", "bricks", "stone", "terracotta", "orange_terracotta", "yellow_terracotta", "red_terracotta",
     "white_terracotta", "brown_terracotta", "sandstone_bricks"],
@@ -164,6 +179,8 @@ const PRODUCE = {
   unemployed: [],
   builder: [],
   explorer: [],
+  forester: [],
+  furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -250,6 +267,7 @@ function stockFor(prof, v) {
   const a = inv.create(), I = BF.I, em = I.emerald;
   const entries = [];
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
+  if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); }   // harvested, never given
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -259,7 +277,8 @@ function stockFor(prof, v) {
     const sells = new Map();
     table(prof).forEach(pool => pool.forEach(o => { if (o.sell.id !== em) sells.set(o.sell.id, Math.max(sells.get(o.sell.id) || 0, o.sell.n)); }));
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
-    for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth)
+    if (prof !== "furniture_maker") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
@@ -274,6 +293,7 @@ function stockFor(prof, v) {
   for (const e of entries) if (e.n > 0) inv.add(a, e.id, e.n);
   if (prof === "explorer" && I.tent !== undefined) inv.add(a, I.tent, 1);   // pitches it when night falls far from a bed (js/explorer.js)
   if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
+  if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
   return a;
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.
