@@ -24,7 +24,12 @@ module.exports = async (pg, out) => {
     const pens = BF.shepherd.pensOf(rec);
     ok("village has pens", pens.length >= 1, pens.length);
     run(5);
-    for (const p of pens) ok("pen " + p.idx + " has >=2 live sheep", p.sheep && p.sheep.filter(s => s.mob && !s.mob.dead).length >= 2, p.sheep && p.sheep.length);
+    for (const p of pens) {
+      const n = p.sheep ? p.sheep.filter(s => s.mob && !s.mob.dead).length : -1, loom = BF.shepherd.hasLoom(p);
+      ok("pen " + p.idx + (loom ? " (loom) has >=2 live sheep" : " (no loom) is empty"), loom ? n >= 2 : n === 0, n);
+      const g = BF.blocks[BF.world.getBlock(p.gate[0], p.y + 1, p.gate[1])];
+      ok("pen " + p.idx + " has a closed gate", !!(g && g.gate && !g.gate.open), g && g.name);
+    }
     const sheps = rec.members.filter(m => m.type === "villager" && m.profession === "shepherd");
     ok("shepherd spawned", sheps.length >= 1, sheps.length);
     for (const s of sheps) {

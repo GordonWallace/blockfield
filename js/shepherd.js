@@ -179,7 +179,7 @@ function makePen(rec, b, idx) {
   const room = box(1, 1, b.w - 2, b.d - 3), foot = box(0, 0, b.w - 1, b.d - 1);
   const cells = (b.w - 2) * (b.d - 3);
   return { key: rec.key + "|" + idx, idx, rec, b, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
-    y: b.y, cells, threshold: Math.ceil(cells / PEN_DENSITY), sheep: null };
+    y: b.y, cells, threshold: Math.ceil(cells / PEN_DENSITY), sheep: null, gate: at(b.du, 0), out: at(b.du, -1) };
 }
 function pensOf(rec) {
   if (!rec._pens) {
@@ -212,6 +212,15 @@ function unpackSt(a) {
   if (!Array.isArray(a)) return null;
   return { fed: num(a[0], null), shorn: a[1] != null && Number.isFinite(+a[1]), woolAt: num(a[1], null), growAt: num(a[2], null), cd: num(a[3], 0), x: num(a[4], null), z: num(a[5], null), mob: null };
 }
+// Whether the village plan put a shepherd's loom on the ring right outside this pen (jobs.js planVillage `beside`).
+function hasLoom(pen) {
+  const b = pen.b, plan = (BF.jobs && BF.jobs.planFor && BF.jobs.planFor(pen.rec)) || [];
+  for (const j of plan) {
+    if (j.prof !== "shepherd") continue;
+    for (let q = 1; q < b.d; q += 2) for (const u of [-1, b.w]) if (b.bx + b.ax * u + b.sx * q === j.x && b.bz + b.az * u + b.sz * q === j.z) return true;
+  }
+  return false;
+}
 function initPen(pen) {
   const rec = pending.get(pen.rec.key), at = rec && rec.findIndex(e => e && e.i === pen.idx);
   if (rec && at >= 0) {
@@ -220,8 +229,9 @@ function initPen(pen) {
     if (!rec.length) pending.delete(pen.rec.key);
     return;
   }
-  const r = seeded("pen:" + pen.key), n = 2 + (r() < 0.5 ? 1 : 0) + (r() < 0.2 ? 1 : 0);   // a new pen starts with 2-4 sheep
   pen.sheep = [];
+  if (!hasLoom(pen)) return;   // only a pen with a shepherd's loom beside it starts with sheep (spare pens stay empty)
+  const r = seeded("pen:" + pen.key), n = 2 + (r() < 0.5 ? 1 : 0) + (r() < 0.2 ? 1 : 0);   // a new pen starts with 2-4 sheep
   for (let i = 0; i < n; i++) pen.sheep.push({ fed: null, shorn: false, woolAt: null, growAt: null, cd: 0, x: pen.x0 + 0.6 + r() * (pen.x1 - pen.x0 - 1.2), z: pen.z0 + 0.6 + r() * (pen.z1 - pen.z0 - 1.2), mob: null });
 }
 function spawnSheep(pen, s) {
@@ -439,11 +449,30 @@ function perform(m, tk) {
   return true;
 }
 const ACT = { feed: 0.7, shear: 1.1, cull: 0.8 };
+// A shepherd with nothing to do inside a pen walks out through the gate (opening and closing it, mobs.js villagerDoors)
+// and stands on the path outside, so it never wanders around stuck among the sheep. True while it is walking out.
+function leave(m, S, dt, out) {
+  const p = m.position;
+  let pen = S.exit;
+  if (!pen) {
+    const R = m.village;
+    if (!R) return false;
+    pen = pensOf(R).find(q => p.x > q.fx0 && p.x < q.fx1 && p.z > q.fz0 && p.z < q.fz1 && Math.abs(p.y - (q.y + 1)) < 2);
+    if (!pen) return false;
+    S.exit = pen; S.exitT = 0; S.navFail = 0; m.ai.route = null;
+  }
+  S.exitT += dt;
+  const st = BF.villageLife.travel(m, S, dt, out, pen.out[0], pen.y + 1, pen.out[1], m.def.speed);
+  if (st === "going" && S.exitT < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
+  S.exit = null;
+  return false;
+}
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.tradingWith || !BF.mobs.nav || !BF.villageLife || m.sleeping) return false;
   const S = shp(m), ai = m.ai, t = skyT();
-  if (t >= WORK_END || t < 0.02) { if (S.task) endTask(m, true); return false; }
+  if (t >= WORK_END || t < 0.02) { if (S.task) endTask(m, true); return t >= WORK_END && leave(m, S, dt, out); }
   ensureKit(m);
+  if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
     if ((S.cd -= dt) > 0) return false;
     S.cd = rnd(1.5, 3);
@@ -488,6 +517,11 @@ function statusText(m) {
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShapeless }) => {
   addShapeless(BF.I.shears, 1, [BF.I.iron_ingot, BF.I.iron_ingot, BF.I.iron_ingot], "3 Iron Ingots → Shears");
 });
+(BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
+  if (BF.I.oak_fence_gate === undefined) return;
+  addShaped(BF.I.oak_fence_gate, 1, ["SPS", "SPS"], { S: BF.I.stick, P: BF.I.planks }, "Stick, Oak Planks, Stick \u00d7 2 rows \u2192 Oak Fence Gate");
+  if (fuel) fuel([BF.I.oak_fence_gate], 15);
+});
 if (BF.texKit) {
   const { SPRITES, put, hex, mul, lighten, stroke, WHITE } = BF.texKit;
   SPRITES.shears = (G, m) => {
@@ -499,12 +533,18 @@ if (BF.texKit) {
     ring(3.5, 12, 2.1); ring(10.5, 13, 1.9);
     put(G, 7, 8, pin); put(G, 8, 9, pin);
   };
+  SPRITES.oak_fence_gate = (G, m) => {   // two posts and a two-rail gate between them
+    const d = mul(m, 0.7), l = lighten(m, 0.15);
+    for (const x of [1, 2, 13, 14]) for (let y = 3; y <= 14; y++) put(G, x, y, x === 1 || x === 13 ? l : d);
+    for (const y of [5, 6, 10, 11]) for (let x = 3; x <= 12; x++) put(G, x, y, y === 5 || y === 10 ? l : m);
+    for (let y = 7; y <= 9; y++) for (const x of [7, 8]) put(G, x, y, x === 7 ? l : d);
+  };
 }
 
 BF.shepherd = {
   FEED_DAYS, BREED_CD, LAMB_DAYS, REGROW_DAYS, PEN_DENSITY,
   feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb,
-  pensOf, penOf, tended, wheatWanted, ensureKit, ai, tick, statusText, pickPenTarget, contain,
+  pensOf, penOf, hasLoom, tended, wheatWanted, ensureKit, ai, tick, statusText, pickPenTarget, contain,
   exportAll, importAll, reset,
   pens: () => activePens,
 };

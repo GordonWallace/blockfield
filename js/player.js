@@ -1029,6 +1029,12 @@ const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c 
 function placeMulti(kind, x, y, z) {
   const W = BF.world, f = lookFacing();
   if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
+  if (kind === "gate") {   // fence gate: spans across the player's view
+    if (!(y < BF.H && W.isLoaded(x, z) && freeCell(x, y, z))) return false;
+    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0);
+    W.setBlock(x, y, z, id); emit("blockPlaced", x, y, z, id);
+    return true;
+  }
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
   if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0)]];
@@ -1166,6 +1172,7 @@ function secondaryDown() {
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
   if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
+  if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (target && target.id === BF.B.furnace && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;

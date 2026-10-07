@@ -1179,11 +1179,12 @@ function drawShell(b, P, S, style) {
       }
       return;
     case "pen": {
-      // fenced animal pen with a gate gap facing the road, a trough and hay
+      // fenced animal pen with a gate facing the road (a gap before gen 3), a trough and hay
       for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
         const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
         if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
       }
+      if (GEN >= 3 && BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
       P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale); P(w - 2, y, d - 2, B.water);
       P(du, y, -1, B.dirt_path);
       return;

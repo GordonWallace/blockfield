@@ -659,4 +659,9 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   with spare wheat, farmers first (`findWheatSeller`, `doWheatDeal`; status "Buying wheat"). Farmers bake only wheat above `WHEAT_SPARE` (24) and sell down to `WHEAT_SELF` (4).
 - **Mutton.** Shepherds cook their raw mutton daily like butchers (`cookDaily`, 8 a day) and sell it to hungry villagers through the normal food market (`findFoodSeller`), and to the player (shepherd L3: 1 emerald > 9 cooked_mutton).
   Wool: the shepherd keeps what it shears and offers it as `1 emerald > 8 white_wool` from level 1, so any villager's trade logic (e.g. the furniture maker) can buy it.
+- **Pen gates** (gen 3+): the pen's front gap holds an `oak_fence_gate_<x|z>` (blocks.js `gateDefs`, appended after the tents; 4 states, axis x/z, open/closed;
+  item `oak_fence_gate`, 2 rows of stick-plank-stick). `BF.gateId(axis, open)`, `BF.world.setGate(x, y, z, open?)`; the player toggles it with right click.
+  Villager paths treat a gate like a door (mobs.js `walkCell`, `villagerDoors` opens it ahead and shuts it behind). A shepherd with no task inside a pen
+  walks out through the gate to the path outside (`leave`). Fences connect to gates in line with them.
+- **Looms and sheep**: only a pen with a shepherd's loom on its outside ring (`hasLoom(pen)`, from `BF.jobs.planFor`) is stocked with sheep; spare pens stay empty.
 - Tests: `test/shepherd-check.js`, `test/shepherd-day.js`, `test/shepherd-misc.js` (`NODE_PATH=$(npm root -g) node test/run.js /tmp/x test/shepherd-day.js`).

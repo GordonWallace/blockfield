@@ -913,7 +913,7 @@ function walkCell(x, y, z) {
   if (!W.isLoaded(x, z) || y < BF.MIN_Y + 1 || y + 2 >= BF.H) return false;
   const fl = blockAt(x, y - 1, z), feet = blockAt(x, y, z), head = blockAt(x, y + 1, z);
   if (!fl.solid || fl.door || fl.bed || fl.model === "fence") return false;
-  return (!feet.solid || !!feet.door) && (!head.solid || !!head.door) && feet.render !== "liquid";
+  return (!feet.solid || !!feet.door || !!feet.gate) && (!head.solid || !!head.door) && feet.render !== "liquid";
 }
 // A* over walkable cells (4-way, step up 1, drop up to 3). goal(x, y, z) -> bool. Returns cells after start, or null.
 let planBudget = 0;
@@ -937,7 +937,7 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
       if (!walkCell(nx, ny, nz)) continue;
       if (dy > 0 && blockAt(x, y + 2, z).solid) break;            // no room to jump
       if (dy < 0 && blockAt(nx, y + 1, nz).solid) break;          // wall: cannot step off
-      const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door ? 1 : 0);
+      const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
       if (cost.has(k) && cost.get(k) <= ng) break;
       cost.set(k, ng); from.set(k, [x, y, z]);
       open.push([nx, ny, nz, ng, ng + hh(nx, nz)]);
@@ -982,16 +982,17 @@ function isOccupied(x, y, z) {
 function villagerDoors(m) {
   const ai = m.ai, W = BF.world;
   if (ai.route && !m.sleeping) for (let k = ai.ri; k < Math.min(ai.route.length, ai.ri + 2); k++) {
-    const [x, y, z] = ai.route[k], d = blockAt(x, y, z).door;
+    const [x, y, z] = ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
     if (d && !d.open && Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.7) {
-      W.setDoor(x, y, z, true);
+      if (bk.gate) W.setGate(x, y, z, true); else W.setDoor(x, y, z, true);
       (ai.doors || (ai.doors = [])).push([x, y, z]);
     }
   }
   if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(([x, y, z]) => {
     if (Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || isOccupied(x, y, z)) return true;
-    const d = blockAt(x, y, z).door;
-    if (d && d.open) W.setDoor(x, y, z, false);
+    const bk = blockAt(x, y, z);
+    if (bk.door && bk.door.open) W.setDoor(x, y, z, false);
+    else if (bk.gate && bk.gate.open) W.setGate(x, y, z, false);
     return false;
   });
 }

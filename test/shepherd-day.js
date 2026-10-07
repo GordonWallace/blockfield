@@ -20,13 +20,24 @@ module.exports = async (pg, out) => {
     const pen = BF.shepherd.penOf(shep);
     const I = BF.I, c = n => BF.trades.inv.count(shep.inv, I[n]);
     const tasks = {}; let sheepSeen = 0;
-    const sample = () => { if (shep.shp && shep.shp.task) tasks[shep.shp.task.kind] = (tasks[shep.shp.task.kind] || 0) + 1; };
+    const inPen = () => shep.position.x > pen.fx0 && shep.position.x < pen.fx1 && shep.position.z > pen.fz0 && shep.position.z < pen.fz1;
+    const gateOpen = () => { const g = BF.blocks[BF.world.getBlock(pen.gate[0], pen.y + 1, pen.gate[1])].gate; return !!(g && g.open); };
+    const G = { inside: 0, open: 0, closedAfterInside: false };
+    const sample = () => {
+      if (shep.shp && shep.shp.task) tasks[shep.shp.task.kind] = (tasks[shep.shp.task.kind] || 0) + 1;
+      if (inPen()) G.inside++;
+      if (gateOpen()) G.open++;
+    };
     const startWheat = c("wheat_item");
     // ---- morning: the shepherd feeds the hungry sheep and shears the woolly ones
     for (let i = 0; i < 6000; i++) { step(); if (i % 10 === 0) sample(); }
     ok("shepherd fed the sheep (wheat used)", c("wheat_item") < startWheat, [startWheat, c("wheat_item")]);
     ok("every adult pen sheep was fed today", pen.sheep.filter(s => s.mob && !s.mob.lamb).every(s => !BF.shepherd.hungry(s.mob, day())));
     ok("shepherd sheared the flock (wool in inventory)", c("white_wool") >= 1, c("white_wool"));
+    ok("shepherd went into the pen", G.inside > 0, G);
+    ok("the gate was opened for it", G.open > 0, G);
+    for (let i = 0; i < 1200 && (inPen() || gateOpen()); i++) step();
+    ok("shepherd walked back out and the gate is shut", !inPen() && !gateOpen(), { inPen: inPen(), open: gateOpen(), task: shep.shp && shep.shp.task && shep.shp.task.kind });
     R.tasks = tasks;
     ok("pen still had room, nothing was culled", pen.sheep.length < pen.threshold && !tasks.cull, [pen.sheep.length, pen.threshold, tasks.cull]);
     // ---- overcrowding: shepherd culls adults down to below the threshold, never below two
