@@ -1125,7 +1125,8 @@ function followRoute(m, dt, out, speed) {
   const ai = m.ai, r = ai.route;
   if (!r || ai.ri >= r.length) return "done";
   const c = r[ai.ri], dx = c[0] + 0.5 - m.position.x, dz = c[2] + 0.5 - m.position.z, d = Math.hypot(dx, dz);
-  if (d < 0.3 && Math.abs(m.position.y - c[1]) < (m.onLadder ? 0.5 : 1.1)) { ai.ri++; ai.stuckT = 0; return ai.ri >= r.length ? "done" : "going"; }
+  // reached: within 0.3 of its centre, and on a ladder only once the feet are in that cell
+  if (d < 0.3 && (m.onLadder ? Math.floor(m.position.y + 0.01) === c[1] : Math.abs(m.position.y - c[1]) < 1.1)) { ai.ri++; ai.stuckT = 0; return ai.ri >= r.length ? "done" : "going"; }
   ai.stuckT = (ai.stuckT || 0) + dt;
   if (ai.stuckT > 6) return "stuck";
   const s = Math.min(speed, d * 4 + 0.3);
@@ -1434,9 +1435,9 @@ function updateMob(m, dt) {
     m.vel.y -= GRAVITY * 0.5 * dt;
     m.vel.y = Math.max(-2, Math.min(m.vel.y, 2.5));
   } else if (m.onLadder) {
-    // on a ladder (villagers): climb towards the route's next cell (just clearing its floor), hold on level with it, slide down slowly with no route
+    // on a ladder (villagers): climb towards the route's next cell (just clearing its floor), hold on level with it; with no route hold on while standing still (using a chest beside the ladder) and slide down slowly while walking
     const c = ai.route && ai.route[ai.ri], dy = c ? c[1] - m.position.y : null;
-    m.vel.y = dy == null ? Math.max(m.vel.y - GRAVITY * dt, -LADDER_DOWN) : dy > 0 ? Math.min(LADDER_UP, dy * 8 + 0.3) : dy < -0.02 ? -Math.min(LADDER_DOWN, -dy * 8) : 0;
+    m.vel.y = dy == null ? (Math.abs(_desired.x) + Math.abs(_desired.z) < 0.05 ? 0 : Math.max(m.vel.y - GRAVITY * dt, -LADDER_DOWN)) : dy > 0 ? Math.min(LADDER_UP, dy * 8 + 0.3) : dy < -0.02 ? -Math.min(LADDER_DOWN, -dy * 8) : 0;
   } else {
     m.vel.y -= GRAVITY * dt;
     if (T.slowFall && m.vel.y < -2) m.vel.y = -2;
