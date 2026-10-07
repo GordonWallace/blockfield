@@ -1223,7 +1223,7 @@ function findToolSeller(m, re) {
       const it = BF.items[o.sell.id];
       if (!it || !re.test(it.name) || T.blockReason(v2, o)) continue;
       if (!o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
-      const sc = ((it.tool && it.tool.tier) || 0) * 1000 - v2.position.distanceTo(m.position);
+      const sc = BF.toolWear.rank(o.sell.id) * 10 - v2.position.distanceTo(m.position);   // tier x 1000, then speed (gold above wood), then distance
       if (sc > bs) { bs = sc; best = { kind: "tool", seller: v2, offer: o, item: o.sell.id }; }
     }
   }
