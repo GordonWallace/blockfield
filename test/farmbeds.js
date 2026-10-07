@@ -14,10 +14,10 @@ const OUT = process.argv[5] || null;
 
 let b;
 async function openWorld(seed) {
-  const pg = await b.newPage({ viewport: { width: 320, height: 200 } });
+  const pg = await b.newPage({ viewport: process.env.SHOT ? { width: 1100, height: 650 } : { width: 320, height: 200 } });
   pg.on('pageerror', e => console.log('PAGEERROR', e.stack || e.message));
   pg.on('console', m => { if (m.type() === 'error') console.log('console.error:', m.text().slice(0, 300)); });
-  await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
+  await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.__raf = raf; window.requestAnimationFrame = cb => (window.__halt ? (window.__pending = cb, 0) : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
@@ -86,6 +86,7 @@ function survey(key) {
     for (const v of villages) {
       if (done >= PER_SEED) break;
       const t0 = Date.now();
+      if (process.env.ONLY && process.env.ONLY !== Math.round(v.x) + ',' + Math.round(v.z)) continue;
       if (pg.__used) { await pg.close(); pg = await openWorld(seed); }
       pg.__used = true;
       const key = Math.round(v.x) + ',' + Math.round(v.z);
@@ -112,7 +113,7 @@ function survey(key) {
             if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
           }
           const out = {};
-          for (const e of BF.villageLife.log.splice(0)) { if (e.kind === 'project') (out._p = out._p || []).push(e.plan + ' ' + e.size + ' (' + e.options + ', +' + e.gain + ' farmland, ' + e.logs + ' logs to fetch)'); const kk = e.kind + (e.task ? ':' + e.task : '') + (e.why ? ':' + e.why : '') + (e.plan ? ':' + e.plan : ''); out[kk] = (out[kk] || 0) + 1; }
+          for (const e of BF.villageLife.log.splice(0)) { if (e.kind === 'blockedAt') (out._p = out._p || []).push('BLOCKED ' + JSON.stringify(e)); if (e.kind === 'project') (out._p = out._p || []).push(e.plan + ' ' + e.size + ' (' + e.options + ', +' + e.gain + ' farmland, ' + e.logs + ' logs to fetch)'); const kk = e.kind + (e.task ? ':' + e.task : '') + (e.why ? ':' + e.why : '') + (e.plan ? ':' + e.plan : ''); out[kk] = (out[kk] || 0) + 1; }
           return out;
         }, [Math.min(STEPS_PER_CALL, total - s), h, v]);
         for (const p of k._p || []) console.log('   project ' + p);
@@ -122,7 +123,7 @@ function survey(key) {
       const after = await pg.evaluate(survey, key);
       const projects = await pg.evaluate(key => {
         const R = BF.mobs.list.find(m => m.village && m.village.key === key).village, D = BF.villageLife.vdata(R);
-        return { beds: (D.beds || []).length, open: (D.projects || []).map(p => p.kind + (p.dir ? ':' + p.dir : '')), made: D.made || [] };
+        return { beds: (D.beds || []).length, open: (D.projects || []).map(p => p.kind + (p.dir ? ':' + p.dir : '')), made: (D.made || []).map(m => ({ kind: m.kind, dir: m.dir, size: m.size })), L: (D.made || []).map(m => m.L) };
       }, key);
       if (process.env.DEBUG) console.log(await pg.evaluate(key => {
         const R = BF.mobs.list.find(m => m.village && m.village.key === key).village, D = BF.villageLife.vdata(R);
@@ -132,6 +133,23 @@ function survey(key) {
       results.push(row);
       console.log(`seed ${seed} village ${key} farmers ${row.farmers} gen farms ${row.genFarms}: farmland ${row.farmland0} -> ${row.farmland}, stray ${row.stray0} -> ${row.stray} | beds ${projects.beds} made ${JSON.stringify(projects.made)} open ${JSON.stringify(projects.open)} (${row.secs}s)`);
       console.log('   tasks', JSON.stringify(kinds));
+      // SHOT=1: a picture of the first new bed and the first grown bed, from above and to the south
+      if (OUT && process.env.SHOT && projects.L.length) {
+        const picks = [];
+        for (const kind of ['new', 'grow']) { const i = projects.made.findIndex(m => m.kind === kind); if (i >= 0) picks.push([kind, projects.L[i]]); }
+        for (const [kind, L] of picks) {
+          await pg.evaluate(L => {
+            const cx = (L.x0 + L.x1) / 2 + 0.5, cz = (L.z0 + L.z1) / 2 + 0.5;
+            BF.player.deserialize(Object.assign(BF.player.serialize(), { x: cx, y: L.y + 9, z: cz + 11, flying: true, yaw: 0, pitch: -0.62, gameMode: 'creative' }));
+            BF.sky.setTime(0.25);
+            window.__halt = false; if (window.__pending) window.__raf(window.__pending);
+          }, L);
+          await pg.waitForTimeout(6000);
+          await pg.screenshot({ path: path.join(OUT, `shot-${seed}-${key}-${kind}.png`) });
+          await pg.evaluate(() => { window.__halt = true; });
+          await pg.waitForTimeout(300);
+        }
+      }
       if (OUT) fs.writeFileSync(path.join(OUT, `map-${seed}-${key}.txt`), `before\n${before.map}\n\nafter ${DAYS} days\n${after.map}\n`);
     }
     await pg.close();

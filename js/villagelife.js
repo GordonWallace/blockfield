@@ -783,7 +783,8 @@ function dropProject(D, P, m, why) {
   const i = D.projects.indexOf(P);
   if (i >= 0) D.projects.splice(i, 1);
   if (m) log(why === "done" ? "bedDone" : "bedDropped", m, { plan: P.kind + (P.dir ? ":" + P.dir : ""), why });
-  if (why === "done") { (D.made || (D.made = [])).push({ kind: P.kind, dir: P.dir, size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1) }); D.scanT = 0; }
+  if (m && m.farm && why === "failing") m.farm.projCd = BF.simNow() + 300;      // no dirt or logs to be had: not again for a while
+  if (why === "done") { (D.made || (D.made = [])).push({ kind: P.kind, dir: P.dir, size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), L: P.L }); D.scanT = 0; }
 }
 // The next task of the project: level the ground, lay the new ring, lift the old edge, then water the channels and till.
 function projectTask(m, fs, R, D, P, ok) {
@@ -793,7 +794,7 @@ function projectTask(m, fs, R, D, P, ok) {
     if (!W().isLoaded(x, z)) { left++; return; }
     const j = cellJob(P, x, z);
     if (!j) return;
-    if (j === "blocked") { blocked = true; return; }
+    if (j === "blocked") { if (!blocked) blocked = [x, z, getB(x, P.L.y, z), getB(x, P.L.y + 1, z), getB(x, P.L.y + 2, z), W().heightAt(x, z) - P.L.y]; return; }
     left++;
     if (j.kind === "border") lay++;
     if (!ok(j.k)) return;
@@ -805,7 +806,11 @@ function projectTask(m, fs, R, D, P, ok) {
     P.fails = 0; P.wait = BF.simNow() + 120;                       // halfway: no dirt or logs to be had now, try again later
   }
   if (P.wait > BF.simNow()) return null;
-  if (blocked) { dropProject(D, P, m, "blocked"); return null; }
+  if (blocked) {                                                  // a cell was built on, flooded, dug out: a started bed waits a while before giving up
+    log("blockedAt", m, { cell: blocked, names: blocked.slice(2, 5).map(id => BF.blocks[id] && BF.blocks[id].name), started: !!P.started });
+    if (P.started && (P.blockN = (P.blockN || 0) + 1) <= 3) { P.wait = BF.simNow() + 120; return null; }
+    dropProject(D, P, m, "blocked"); return null;
+  }
   if (!left) { dropProject(D, P, m, "done"); return null; }
   if (!best) return null;
   if (best.stage === 3 && best.kind === "water") {                 // the ring is closed: water the channels from a filled bucket
