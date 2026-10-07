@@ -330,11 +330,36 @@ function init(v) {
   if (!Array.isArray(v.inv)) { v.inv = stockFor(v.profession, v); if (BF.food) BF.food.startFood(v); }   // + starting food (js/villagelife.js)
   if (v.restockDay == null) v.restockDay = BF.sky ? BF.sky.day : 0;
   if (v.profession === "explorer" && BF.explorer) BF.explorer.syncOffers(v);   // its filled maps are the offers
+  syncFeed(v);
   return v;
 }
+// ---------------------------------------------------------------- feeding hungry unemployed villagers
+// An unemployed villager with less than a day's food buys food from the player while the trade screen is open: 1 emerald for ~88% of
+// its worth in one of these foods (the same rule as the trade tables). It keeps buying until it holds 3 days of food (SHOP_DAYS in js/villagelife.js).
+const FEED = ["bread", "baked_potato", "carrot", "potato", "apple", "steak", "cooked_porkchop", "cooked_chicken", "cooked_mutton", "cooked_cod"];
+const FEED_PAY = 0.88, FEED_DAYS = 3;
+const needsFood = v => !!(BF.food && v && Array.isArray(v.inv) && !v.child && (v.starving || BF.food.available(v) < BF.food.rate(v)));
+function feedOffers() {
+  const em = BF.I.emerald, out = [];
+  for (const name of FEED) {
+    const id = BF.I[name], val = VALUE[name];
+    if (id === undefined || !val) continue;
+    out.push({ buy: [{ id, n: Math.min(stackOf(id), Math.ceil(1 / (FEED_PAY * val))) }], sell: { id: em, n: 1 }, level: 1, xp: 0, feed: true });
+  }
+  return out;
+}
+// Adds the food offers to a hungry unemployed villager (or takes them away again). Called when the trade screen opens and closes.
+function syncFeed(v, open = true) {
+  if (!v || !Array.isArray(v.trades)) return v;
+  v.trades = v.trades.filter(o => !o.feed);
+  if (open && v.profession === "unemployed" && needsFood(v)) v.trades.push(...feedOffers());
+  return v;
+}
+
 // Why the villager cannot do this offer right now, or null.
 function blockReason(v, o) {
   if (!v || !v.inv || !o) return "Unavailable";
+  if (o.feed && BF.food && !v.starving && BF.food.available(v) >= FEED_DAYS * BF.food.rate(v)) return "Has enough food";
   const hungry = BF.food && BF.food.blockReason(v, o);   // starving villagers only trade food (js/villagelife.js)
   if (hungry) return hungry;
   if (inv.count(v.inv, o.sell.id) < o.sell.n) return o.sell.id === BF.I.emerald ? "Out of emeralds" : "Out of stock";
@@ -357,6 +382,10 @@ function addXp(v, o) {
 }
 
 // ---------------------------------------------------------------- persistence
+function claimedBed(v) {
+  const b = v.homeBed !== undefined ? v.homeBed : v.bed;   // an explorer camping in its tent keeps its bed at home
+  return b && b.claimed && !b.tent ? [b.x, b.y, b.z, b.f] : undefined;
+}
 function pack(v) {
   return {
     inv: v.inv.map(s => s && BF.items[s.id] ? { n: BF.items[s.id].name, c: s.count } : null),
@@ -364,6 +393,7 @@ function pack(v) {
     prof: v.profession, job: v.jobsite ? [v.jobsite.x, v.jobsite.y, v.jobsite.z] : null, st: v.jobStocked ? 1 : 0, mem: v.jobMem ? [v.jobMem.prof, v.jobMem.t] : undefined,   // jobsites (js/jobs.js); missing in older saves
     life: BF.food ? BF.food.pack(v) : undefined,   // food state (js/villagelife.js); missing in older saves
     ex: BF.explorer && v.profession === "explorer" ? BF.explorer.pack(v) : undefined,   // explorer state (js/explorer.js)
+    bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
   };
 }
 function unpack(v, o) {
@@ -382,11 +412,12 @@ function unpack(v, o) {
   if (Number.isFinite(+o.day)) v.restockDay = +o.day;
   if (BF.food) BF.food.unpack(v, o.life);   // no o.life = save from before villager food: starting food is added
   if (BF.explorer && o.ex) BF.explorer.unpack(v, o.ex);
+  if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;
 }
 
 BF.trades = {
   SLOTS, EM_CAP, EM_DAY, BUILDER_EM_CAP, BUILDER_EM_DAY, LEVELS, LEVEL_XP, TRADE_XP, CAP_K, VALUE, TRADES, PRODUCE, inv,
-  parseTrade, offers: genOffers, table, profile, stockFor, restock, init, blockReason, exchange, addXp, pack, unpack,
+  parseTrade, offers: genOffers, table, profile, stockFor, restock, init, blockReason, FEED, feedOffers, syncFeed, needsFood, exchange, addXp, pack, unpack,
 };
 })();
