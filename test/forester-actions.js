@@ -160,10 +160,56 @@ module.exports = async (pg, out) => {
     res.offers = A.trades.length;
     const o = A.trades.find(o => o.sell.id === I.birch_planks);
     res.beforeSaw = T.blockReason(A, o);
-    A.fo.sawT = 0; A.fo.sawDay = -1;
-    for (let i = 0; i < 5; i++) { BF.sky.setTime(0.3); BF.mobs.update(0.5); }
+    A.fo.sawDay = -1;
+    for (let i = 0; i < 4; i++) { BF.warp.advance(6); BF.forester._test.growTick(); }
     res.afterSaw = { birch_log: T.inv.count(A.inv, I.birch_log), birch_planks: T.inv.count(A.inv, I.birch_planks), oak_log: T.inv.count(A.inv, I.oak_log), oak_planks: T.inv.count(A.inv, I.planks) };
     res.buy = [T.blockReason(A, o), T.exchange(A, o), T.inv.count(A.inv, I.birch_planks), T.inv.count(A.inv, I.emerald)];
+    return res;
+  })));
+  // 6. tree search reaches 40 blocks and favours near trees
+  console.log(JSON.stringify(await pg.evaluate(() => {
+    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester;
+    const grown = [];
+    for (const want of [8, 20, 34, 48]) {
+      let done = false;
+      for (let a = 0; a < 6.28 && !done; a += 0.15) {
+        const x = Math.floor(A.position.x + Math.cos(a) * want), z = Math.floor(A.position.z + Math.sin(a) * want), y = W.heightAt(x, z);
+        if (W.getBlock(x, y, z) !== B.grass || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every(k => W.getBlock(x, y + k, z) === 0)) continue;
+        W.setBlock(x, y + 1, z, B.oak_sapling);
+        if (F.growTree(x, y + 1, z)) { grown.push([want, x, y + 1, z]); done = true; }
+      }
+    }
+    const dists = [];
+    for (let i = 0; i < 60; i++) { const t = F.findTree(A); if (t) dists.push(Math.round(Math.hypot(t.base[0] + 0.5 - A.position.x, t.base[2] + 0.5 - A.position.z))); }
+    const hist = {}; for (const d of dists) { const k = d < 15 ? "<15" : d < 30 ? "15-30" : d <= 40 ? "30-40" : ">40"; hist[k] = (hist[k] || 0) + 1; }
+    // without the two near trees, the one at ~34 blocks is found (48 is beyond reach)
+    for (let i = 0; i < 40; i++) { const t = F.findTree(A); if (!t || Math.hypot(t.base[0] + 0.5 - A.position.x, t.base[2] + 0.5 - A.position.z) > 25) continue; F._test.fell(null, t, false); }   // clear everything nearer
+    const far = []; for (let i = 0; i < 10; i++) { const t = F.findTree(A); far.push(t ? Math.round(Math.hypot(t.base[0] + 0.5 - A.position.x, t.base[2] + 0.5 - A.position.z)) : null); }
+    return { grown: grown.map(g => g[0]), found: dists.length, hist, max: Math.max(...dists), farOnly: far };
+  })));
+  // 7. chopping a trunk brings the tree above down (player); a log pillar in a building stays
+  console.log(JSON.stringify(await pg.evaluate(() => {
+    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester, res = {};
+    let spot = null;
+    for (let r = 10; r < 40 && !spot; r++) for (let a = 0; a < 6.28 && !spot; a += 0.2) {
+      const x = Math.floor(A.position.x + Math.cos(a) * r), z = Math.floor(A.position.z + Math.sin(a) * r), y = W.heightAt(x, z);
+      if (W.getBlock(x, y, z) === B.grass && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].every(k => W.getBlock(x, y + k, z) === 0)) {
+        W.setBlock(x, y + 1, z, B.birch_sapling);
+        if (F.growTree(x, y + 1, z)) spot = [x, y + 1, z]; else W.setBlock(x, y + 1, z, 0);
+      }
+    }
+    if (!spot) return "no spot";
+    const [x, y, z] = spot, count = () => { let l = 0, f = 0; for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) for (let dy = -1; dy <= 12; dy++) { const id = W.getBlock(x + dx, y + dy, z + dz); if (id === B.birch_log) l++; else if (id === B.birch_leaves) f++; } return [l, f]; };
+    res.before = count();
+    const d0 = BF.drops.list.length;
+    W.setBlock(x, y + 1, z, 0); BF.emit("blockBroken", x, y + 1, z, B.birch_log);   // cut the second log: the base log stays
+    res.after = count(); res.drops = BF.drops.list.length - d0;
+    // a building corner: logs beside planks with a leaf on top must not fall
+    W.setBlock(x, y, z, B.oak_log); for (let k = 1; k <= 4; k++) { W.setBlock(x, y + k, z, B.oak_log); W.setBlock(x + 1, y + k, z, B.planks); }
+    W.setBlock(x, y + 5, z, B.oak_leaves);
+    W.setBlock(x, y + 1, z, 0); BF.emit("blockBroken", x, y + 1, z, B.oak_log);
+    res.buildingStays = W.getBlock(x, y + 3, z) === B.oak_log;
+    for (let k = 0; k <= 5; k++) { W.setBlock(x, y + k, z, 0); W.setBlock(x + 1, y + k, z, 0); }
     return res;
   })));
 };

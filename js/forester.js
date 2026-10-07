@@ -3,12 +3,13 @@
 // saplings from the player for emeralds (the trade itself is in js/trading.js, TRADES.forester).
 // - Planting: a forester holding a sapling picks a random free spot within 16 blocks (+-4 high) of itself: air over soil with room for a tree above,
 //   no other sapling within 4 blocks, no door within 10 blocks, no dirt path within 5. It walks there and plants (cooldown 10 s).
-// - Felling: it picks a random natural tree within 16 blocks (+8 / -2 high): the connected logs (at most 64) with leaves among them. When it is
+// - Felling: it picks a random natural tree within 40 blocks (+12 / -6 high), nearer ones favoured: the connected logs (at most 64) with leaves among them. When it is
 //   within 3 blocks it fells the whole tree at once, leaves included, and the blocks drop their items (cooldown 20 s). Needs 2 free inventory slots.
 //   Buildings are never touched: a log pile next to planks, stone, glass ... is not a tree.
 // - Picking up: saplings, emeralds, logs, sticks and apples lying within 16 blocks are collected (js/drops.js entities).
 // - Sawing: it turns up to 8 logs a day into 4 planks each (keeping 2 logs of each kind); planks and logs are what it sells (TRADES.forester).
 // - Planting and felling pick one at random, weighted 10 : 8 as in the mod. Everything runs in working hours only, from its band saw.
+// Players: chopping any log of a natural tree brings down everything above it, leaves included (fallAbove, like the mod).
 // Saplings (blocks.js forester pack) also grow for players: on soil, with room above, a sapling becomes a tree after ~8 minutes on average
 // (simulation clock, so fast-forward speeds it up). Leaves drop saplings, sticks and apples (blocks.js extraDrops).
 // Persistence: nothing of its own. Saplings and trees are blocks; the forester's pack is the usual villager inventory.
@@ -22,10 +23,11 @@ const T = () => BF.trades;
 const SPECIES = ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"];
 const WORK_START = 0.04, WORK_END = 0.45;   // sky.time window (same as js/jobs.js)
 // numbers of the mod (ticks / 20 = seconds)
-const SEARCH = 16, PLANT_DY = 4, CUT_UP = 8, CUT_DOWN = 2, LEAF_R = 6, MAX_LOGS = 64, MAX_LEAVES = 256, MIN_FREE = 2;
+const SEARCH = 16, PLANT_DY = 4, MAX_LOGS = 64, MAX_LEAVES = 256, MIN_FREE = 2;
 const SAP_SPACING = 4, DOOR_AVOID = 10, PATH_AVOID = 5, PLANT_REACH = 2, CUT_REACH = 3;
 const PLANT_CD = 10, CUT_CD = 20, PLANT_MAX = 30, CUT_MAX = 40, W_PLANT = 10, W_CUT = 8;
 // additions
+const CUT_SEARCH = 40, CUT_HOME = 64, CUT_Y_UP = 12, CUT_Y_DOWN = 6;   // felling reaches further than the mod's 16: few trees stand inside a village. Nearer trees are favoured, see findTree
 const HOME_R = 36;          // it never plants or fells further than this from the village centre (the mod has no such leash: villagers there wander)
 const CLEAR_ABOVE = 5;      // air above a planting spot, so the sapling has room to grow
 const CHOP_T = 1.2;         // seconds of chopping before the tree comes down (the mod fells it the moment the villager arrives)
@@ -72,7 +74,7 @@ function canSurvive(x, y, z) {
 // ---------------------------------------------------------------- sapling registry and growth
 const saps = new Map();      // "x,y,z" -> {x, y, z}
 const pk = (x, y, z) => x + "," + y + "," + z;
-let hooked = false, growLast = 0, SCANF = null;
+let hooked = false, growLast = 0, sawT = 0, SCANF = null;
 function addSap(x, y, z, id) { if (isSap(id)) saps.set(pk(x, y, z), { x, y, z }); }
 function hook() {
   if (hooked || !BF.world || !BF.on) return;
@@ -85,6 +87,11 @@ function hook() {
   BF.world.onChunkUnload((cx, cz) => { const CS = BF.CS; for (const [k, s] of saps) if (Math.floor(s.x / CS) === cx && Math.floor(s.z / CS) === cz) saps.delete(k); });
   for (const c of BF.world.chunks.values()) scan(c.cx, c.cz, c);
   BF.on("blockPlaced", (x, y, z, id) => addSap(x, y, z, id));
+  BF.on("blockBroken", (x, y, z, id) => {   // the player chops a log: the tree above falls (js/player.js emits this)
+    if (!isLog(id)) return;
+    const creative = !!(BF.inventory && BF.inventory.isCreative && BF.inventory.isCreative());
+    fallAbove(x, y, z, !creative);
+  });
   BF.on("newWorld", () => saps.clear());
 }
 
@@ -135,6 +142,8 @@ function growTick() {
   if (now - growLast < 1) return;
   const dt = Math.min(5, now - growLast);
   growLast = now;
+  sawT -= dt;
+  if (sawT <= 0 && BF.mobs) { sawT = 5; for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m)); }   // whatever the villager is doing
   for (const [k, s] of saps) {
     if (!W().isLoaded(s.x, s.z)) continue;
     if (!isSap(get(s.x, s.y, s.z))) { saps.delete(k); continue; }
@@ -155,21 +164,22 @@ function natural(id) {
   const b = BF.blocks[id], n = b && b.name;
   return !!n && /^(stone|dirt|grass|sand|red_sand|gravel|snow|snow_block|vine|ice|packed_ice|clay|moss|dead_bush|cobweb|deepslate|netherrack|dripstone|rooted|mangrove_roots|muddy|bee_nest|beehive|cocoa|red_mushroom_block|brown_mushroom_block|andesite|diorite|granite|calcite|tuff|sandstone|red_sandstone|terracotta|podzol|mycelium|coarse|farmland|cactus)/.test(n);
 }
-// The tree whose lowest log is (x, y, z): {logs: [[x,y,z]], leaves: [[x,y,z]], base} or null (too big, a building, no leaves).
-function treeAt(x, y, z) {
-  if (!isLog(get(x, y, z)) || isLog(get(x, y - 1, z)) || !isSoil(get(x, y - 1, z))) return null;
-  const seen = new Set([pk(x, y, z)]), logs = [[x, y, z]];
+// The connected logs reached from `seeds` (18-neighbourhood, only at y >= minY) and the leaves joined to them: {logs, leaves}, or null when it is
+// more than 64 logs, touches a block that is not landscape (a building), or has no leaves.
+function collectTree(seeds, minY) {
+  const seen = new Set(), logs = [];
+  for (const [x, y, z] of seeds) if (isLog(get(x, y, z)) && !seen.has(pk(x, y, z))) { seen.add(pk(x, y, z)); logs.push([x, y, z]); }
   for (let i = 0; i < logs.length; i++) {
     const [cx, cy, cz] = logs[i];
     for (const [dx, dy, dz] of NB18) {
       const nx = cx + dx, ny = cy + dy, nz = cz + dz, k = pk(nx, ny, nz);
-      if (seen.has(k)) continue;
-      const id = get(nx, ny, nz);
-      if (!isLog(id)) continue;
+      if (ny < minY || seen.has(k)) continue;
+      if (!isLog(get(nx, ny, nz))) continue;
       seen.add(k); logs.push([nx, ny, nz]);
       if (logs.length > MAX_LOGS) return null;
     }
   }
+  if (!logs.length) return null;
   for (const [cx, cy, cz] of logs) for (const [dx, dy, dz] of NB6) { if (!natural(get(cx + dx, cy + dy, cz + dz))) return null; }
   // leaves: flood from the logs through leaf blocks
   const lseen = new Set(), leaves = [], q = logs.slice();
@@ -183,10 +193,29 @@ function treeAt(x, y, z) {
     }
   }
   if (!leaves.length) return null;
-  return { logs, leaves, base: [x, y, z] };
+  return { logs, leaves };
 }
-function fell(m, tree) {
-  const world = W(), D = BF.drops;
+// The tree whose lowest log is (x, y, z): {logs, leaves, base} or null.
+function treeAt(x, y, z) {
+  if (!isLog(get(x, y, z)) || isLog(get(x, y - 1, z)) || !isSoil(get(x, y - 1, z))) return null;
+  const t = collectTree([[x, y, z]], y);
+  if (t) t.base = [x, y, z];
+  return t;
+}
+// A log at (x, y, z) was broken: the part of a natural tree above it comes down too, leaves included (as the mod's felling does), unless
+// it still stands on soil somewhere else (a second trunk). Returns the felled tree or null.
+function fallAbove(x, y, z, drops) {
+  const seeds = [];
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) seeds.push([x + dx, y + 1, z + dz]);
+  const t = collectTree(seeds, y + 1);
+  if (!t) return null;
+  for (const [lx, ly, lz] of t.logs) { const below = get(lx, ly - 1, lz); if (!isLog(below) && !isLeaf(below) && below !== 0 && !isPlant(below)) return null; }   // resting on something: still standing
+  t.base = [x, y, z];
+  fell(null, t, drops);
+  return t;
+}
+function fell(m, tree, drops = true) {
+  const world = W(), D = drops ? BF.drops : null;
   const take = (x, y, z) => {
     const id = get(x, y, z);
     if (!id) return;
@@ -235,19 +264,29 @@ function findSpot(m) {
   }
   return null;
 }
+// Trees within 40 blocks (and 64 of the village centre). Candidates are ranked by distance times a random factor of 0.5 to 2, so a near tree
+// usually wins but a farther one sometimes does (two foresters do not all go for the same trunk).
+const notTree = new Map();   // "x,y,z" of log bases that are not trees -> sim time until which they are skipped
 function findTree(m) {
-  const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z), cands = [];
-  for (let x = px - SEARCH; x <= px + SEARCH; x++) for (let z = pz - SEARCH; z <= pz + SEARCH; z++) {
-    if (!W().isLoaded(x, z) || !inHome(m, x + 0.5, z + 0.5)) continue;
-    for (let y = py - CUT_DOWN; y <= py + CUT_UP; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z]);
+  const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z), cands = [], c = centre(m);
+  for (let x = px - CUT_SEARCH; x <= px + CUT_SEARCH; x++) for (let z = pz - CUT_SEARCH; z <= pz + CUT_SEARCH; z++) {
+    const d = Math.hypot(x + 0.5 - pos.x, z + 0.5 - pos.z);
+    if (d > CUT_SEARCH || Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) > CUT_HOME || !W().isLoaded(x, z)) continue;
+    for (let y = py - CUT_Y_DOWN; y <= py + CUT_Y_UP; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z, d * (0.5 + 1.5 * Math.random())]);
   }
-  for (let i = cands.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cands[i], cands[j]] = [cands[j], cands[i]]; }
-  for (const [x, y, z] of cands.slice(0, 14)) {
-    const o = claims.get(pk(x, y, z));
+  cands.sort((a, b) => a[3] - b[3]);
+  const now = nowS();
+  let tested = 0;
+  for (const [x, y, z] of cands) {
+    const k = pk(x, y, z), o = claims.get(k);
     if (o && o !== m && !o.dead && !o.removed) continue;
+    if ((notTree.get(k) || 0) > now) continue;          // a building's log pillar, checked a minute ago
+    if (++tested > 40) break;
     const t = treeAt(x, y, z);
     if (t) return t;
+    notTree.set(k, now + 60);
   }
+  if (notTree.size > 4000) for (const [k, t] of notTree) if (t <= now) notTree.delete(k);
   return null;
 }
 const WANT = id => {   // what a forester picks up (the mod's wantsToPickUp)
@@ -338,8 +377,6 @@ function saw(m, F) {
 function ai(m, dt, out) {
   if (m.profession !== "forester" || !m.inv || m.dead || m.child || !m.village || !m.jobsite || !BF.mobs || !BF.mobs.nav || !W()) return false;
   const F = state(m), a = m.ai, t = skyT();
-  F.sawT = (F.sawT || 0) - dt;
-  if (F.sawT <= 0) { F.sawT = 5; saw(m, F); }
   if (t < WORK_START || t >= WORK_END || m.tradingWith || m.sleeping) { if (F.task) endTask(m, F, false); return false; }
   F.plantCd -= dt; F.cutCd -= dt; F.gatherCd -= dt;
   if (!F.task) {
@@ -352,7 +389,7 @@ function ai(m, dt, out) {
     else {
       const opts = [];
       if (F.plantCd <= 0 && holdsSapling(m)) { const s = findSpot(m); if (s) opts.push([W_PLANT, { kind: "plant", x: s.x, y: s.y, z: s.z, max: PLANT_MAX, claim: pk(s.x, s.y, s.z) }]); else F.plantCd = 5; }
-      if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX, claim: pk(tr.base[0], tr.base[1], tr.base[2]) }]); else F.cutCd = 5; }
+      if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX + 2.5 * Math.hypot(tr.base[0] + 0.5 - m.position.x, tr.base[2] + 0.5 - m.position.z), claim: pk(tr.base[0], tr.base[1], tr.base[2]) }]); else F.cutCd = 8; }
       if (opts.length) { let r = Math.random() * opts.reduce((s, o) => s + o[0], 0); for (const [w, o] of opts) { if ((r -= w) < 0) { task = o; break; } } task = task || opts[0][1]; }
     }
     if (!task) return false;
@@ -405,5 +442,5 @@ function statusText(m) {
   return holdsSapling(m) ? "has saplings to plant" : "looking for saplings";
 }
 
-BF.forester = { ai, statusText, canSurvive, growTree, treeAt, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, _test: { fell, plantAt, growTick, findDrop, state } };
+BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, _test: { fell, plantAt, growTick, findDrop, state } };
 })();
