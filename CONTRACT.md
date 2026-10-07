@@ -484,7 +484,7 @@ Loaded after mobs.js / builder.js (index.html). mobs.js, trading.js, inventory.j
 - **Meals** (`BF.food.digest(m, now)`, run for every loaded villager every 0.5 s by `BF.villageLife.tick` from `mobs.update`): three meals a day at sky time `MEALS` 0.04 / 0.22 / 0.42,
   each `rate/3`. Due meals are counted from `life.mealT` to `day + time` (absolute game days), so sleeping, `/time add`, reloads and villagers coming back into range catch up
   (max 30 days; `/time set` backwards eats nothing). A visible meal (player within 24 blocks): crumbs at the mouth, arm movement, `eat` sound at the villager.
-- **Hunger**: `m.life = {v, mealT, lastAte, sat, eaten, starving, cookDay?}`; `m.starving` = more than 1 game day since a meal found food. A starving villager that gets food eats at once.
+- **Hunger**: `m.life = {v, mealT, lastAte, sat, eaten, starving, cookDay?, born}` (born: game day of birth, or of first load for a village's starting villagers and for saves from before ages); `m.starving` = more than 1 game day since a meal found food. A starving villager that gets food eats at once.
   `BF.trades.blockReason` returns "Too hungry to trade" for every offer whose `sell` item is not food while `m.starving` (food offers keep working); the trade screen title shows
   `BF.villageLife.statusText(v)` ("Too hungry to trade", "Hungry", "Buying food", farmer task) before the builder status.
 - **Buying food** (any villager, daytime until sky time 0.5): when `available < rate` and it holds an emerald, it picks the nearest villager of its village with a surplus (farmers at
