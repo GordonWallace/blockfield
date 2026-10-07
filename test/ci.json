@@ -1,0 +1,74 @@
+{
+ "tests": [
+  {
+   "name": "gen3-check",
+   "file": "tools/gen3-check.js",
+   "kind": "node",
+   "args": [
+    "all"
+   ],
+   "tier": "integration",
+   "timeout": 900
+  },
+  {
+   "name": "bedchain",
+   "file": "test/bedchain.js",
+   "kind": "node",
+   "args": [
+    "1",
+    "1",
+    "2"
+   ],
+   "tier": "integration",
+   "timeout": 1800
+  },
+  {
+   "name": "builder-woods",
+   "file": "test/builder-woods.js",
+   "kind": "node",
+   "tier": "integration",
+   "timeout": 900
+  },
+  {
+   "name": "river-check",
+   "file": "tools/river-check.js",
+   "kind": "node",
+   "tier": "integration",
+   "timeout": 900
+  },
+  {
+   "name": "debug-screen",
+   "file": "test/debug-screen.js",
+   "kind": "node",
+   "args": [
+    "{out}"
+   ],
+   "tier": "integration",
+   "timeout": 600
+  },
+  {
+   "name": "farmbeds",
+   "file": "test/farmbeds.js",
+   "kind": "node",
+   "args": [
+    "1",
+    "1",
+    "2"
+   ],
+   "tier": "integration",
+   "timeout": 1800
+  },
+  {
+   "name": "minechain",
+   "file": "test/minechain.js",
+   "kind": "node",
+   "args": [
+    "1",
+    "1",
+    "2"
+   ],
+   "tier": "integration",
+   "timeout": 1800
+  }
+ ]
+}

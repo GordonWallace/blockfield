@@ -1,0 +1,37 @@
+# Baseline tests: fast headless checks on every pull request into a release branch (and into main).
+# Tiers and timeouts are in test/ci.json; the runner is test/ci.js.
+name: Baseline tests
+
+on:
+  pull_request:
+    branches: ['release-*', main]
+  workflow_dispatch:
+
+concurrency:
+  group: baseline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright and Chromium
+        run: |
+          npm install -g playwright@1.56.1
+          playwright install --with-deps chromium
+      - name: Run baseline tests
+        run: NODE_PATH=$(npm root -g) node test/ci.js baseline ci-out
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-results
+          path: ci-out/
+          retention-days: 14
