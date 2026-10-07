@@ -1244,7 +1244,7 @@ function claimBed(m, n, dt) {
   const h = homeOfBed(rec, b);
   if (h) m.home = h;
   n.fails = 0; m.ai.route = null;
-  if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
+  if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
 }
 // Night: head for bed and sleep; without a usable bed stand still indoors or by the village bell.
 function nightAI(m, dt, out) {

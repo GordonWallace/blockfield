@@ -41,6 +41,15 @@ const start = async () => {
   ok('villager count', g.villagers === want.villagers);
   ok('seed', g.seed === want.seed);
   ok('roster rows = loaded villagers', g.rows === want.loaded);
+  // emeralds and food (inventory plus owned chests) and starving, per villager
+  const gv = await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
+    const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && BF.trades.inv.count(x.inv, BF.I.emerald) > 0) || rec.members.find(x => x.type === 'villager' && !x.dead);
+    const k = BF.storage.keyOf(m), cs = [...BF.inventory.chests.values()].filter(c => c.owner === k);
+    const em = BF.trades.inv.count(m.inv, BF.I.emerald) + cs.reduce((n, c) => n + c.slots.reduce((a, st) => a + (st && st.id === BF.I.emerald ? st.count : 0), 0), 0);
+    return { name: BF.vlog.nameOf(m), em, starving: !!m.starving }; });
+  await dbg.waitForTimeout(600);
+  const rr = await dbg.evaluate(n => { const tr = [...document.querySelectorAll('#r-body tr')].find(t => t.dataset.n === n); return tr && [...tr.children].map(td => td.textContent); }, gv.name);
+  ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 10 && /^[\d.,]+ days?$/.test(rr[8]) && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
   ok('log entries ' + g.log + '/' + want.log, g.log === want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nXYZ /.test((await got()).f3));
@@ -94,16 +103,31 @@ const start = async () => {
   await dbg.reload(); await dbg.waitForTimeout(1500);
   ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(s => !document.querySelector(s + ' input.tcb').checked, row('Player')));
   // Select none, then one type: only entries involving that type (whoever the other party is)
-  await dbg.click('#l-types summary'); await dbg.click('#l-none'); await dbg.waitForTimeout(200);
+  await dbg.click('#l-types summary'); await dbg.click('#l-types [data-all="0"]'); await dbg.waitForTimeout(200);
   const none = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].filter(e => /trade|bed|job|birth|death/.test(e.className)).length);
   ok('select none hides villager entries', none === 0);
   await dbg.check(`${row(tr.buyer)} input.tcb`); await dbg.waitForTimeout(200);
   vis = await texts();
   ok('one type selected shows its trades with unselected types', vis.some(t => /got 1 Test/.test(t)) && !vis.some(t => /^Player traded/.test(t)));
   ok('and nothing without it', vis.every(t => !/traded with/.test(t) || t.includes('(' + tr.buyer + ')')));
-  await dbg.click('#l-all'); await dbg.waitForTimeout(200);
+  await dbg.click('#l-types [data-all="1"]'); await dbg.waitForTimeout(200);
   ok('select all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
   await dbg.click('#l-count');
+  // event types: a second dropdown that combines with the villager types ("Show <Cleric> <Trades>")
+  await dbg.click('#l-kinds summary');
+  ok('event dropdown lists births, deaths and trades', await dbg.evaluate(() => ['birth', 'death', 'trade'].every(k => document.querySelector(`#l-kinds .frow[data-k="${k}"]`))));
+  await dbg.click('#l-kinds [data-all="0"]'); await dbg.click('#l-kinds .frow[data-k="birth"] input.kcb'); await dbg.waitForTimeout(200);
+  vis = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].map(e => e.className.split(' ')[1]));
+  ok('births only', vis.length > 0 && vis.every(k => k === 'birth'));
+  await dbg.click('#l-kinds [data-all="1"]'); await dbg.click('#l-kinds [data-all="0"]'); await dbg.click('#l-kinds .frow[data-k="trade"] input.kcb');
+  await dbg.click('#l-count'); await dbg.click('#l-types summary'); await dbg.click('#l-types [data-all="0"]'); await dbg.check(`${row(tr.seller)} input.tcb`); await dbg.waitForTimeout(200);
+  vis = await texts();
+  ok('one type and one event type combine', vis.length > 0 && vis.every(t => / traded with /.test(t) && t.includes('(' + tr.seller + ')')));
+  ok('summaries name the single choices', await dbg.evaluate(s => document.querySelector('#l-types summary').textContent === s && document.querySelector('#l-kinds summary').textContent === 'Trades', tr.seller));
+  await dbg.click('#l-kinds summary'); await dbg.waitForTimeout(100);
+  await dbg.screenshot({ path: out + '-events.png', fullPage: true });
+  await dbg.click('#l-clear'); await dbg.waitForTimeout(200);
+  ok('clear filters shows everything', (await count()) >= all && !(await dbg.$('#l-clear')));
   // a second village: the view follows the nearest loaded one, the list shows both with distances, and the first can be picked
   const first = want.name;
   const second = await game.evaluate(() => {
@@ -133,6 +157,19 @@ const start = async () => {
   await dbg.screenshot({ path: out + '-picked.png' });
   await dbg.click('#vl-auto'); await dbg.waitForTimeout(600);
   ok('follow nearest goes back', (await got()).name === second);
+  // ages: game days loaded and active, for villagers and villages; a villager that wasn't ticking (unloaded) doesn't age through a gap
+  const ages = await game.evaluate(async () => {
+    const vs = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && m.life);
+    const a = vs[0], b = vs[1], la = a.life.lived, lb = b.life.lived;
+    b._agePass = -99;                                            // as if b had just come back from being unloaded
+    BF.sky.day += 3;                                             // three days pass
+    await new Promise(r => setTimeout(r, 1500));
+    BF.sky.day -= 3;
+    return { a: a.life.lived - la, b: b.life.lived - lb, village: BF.villageLife.villageAge(a.village.key) };
+  });
+  ok('loaded villager ages through a skip, a returning one does not ' + JSON.stringify(ages), ages.a >= 2.9 && ages.b < 0.5 && ages.village >= 3);
+  await dbg.screenshot({ path: out + '-ages.png', fullPage: true });
+  ok('village age shown', /age [\d.,]+ days?/.test(await dbg.evaluate(() => document.getElementById('v-sub').textContent + document.getElementById('vlist').textContent)));
   // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
   ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
   // a feed error (an old villagelog.js without panelData, say) shows on the screen instead of "waiting for the game"
