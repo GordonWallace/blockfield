@@ -159,7 +159,7 @@ const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
      <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>Fly + hold W, then E</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
-     <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> drop item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
+     <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
@@ -532,6 +532,7 @@ function bindInput() {
       deferredToggle(false); return;
     }
     if (menuOpen || invOpen() || P.dead) return;
+    if (c === "KeyQ" && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
     if (e.repeat) { keys.add(c); return; }
     const now = performance.now();
     if (c === "Space") {
@@ -542,7 +543,6 @@ function bindInput() {
       if (wTaps >= 2) sprinting = true;
       lastWTap = now;
     }
-    if (c === "KeyQ") { try { if (selectedItem() && inv().consumeSelected) inv().consumeSelected(1); } catch (_) {} }
     keys.add(c);
   });
   addEventListener("keyup", e => { keys.delete(e.code); if (e.code === "KeyE") boostE = false; });
@@ -882,6 +882,20 @@ function drawHUD() {
 // ---------- world interaction ----------
 function eyeVec() { return new THREE.Vector3(pos.x, pos.y + eyeOffset, pos.z); }
 function dirVec() { return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)); }
+
+// Q: throw one item from the selected hotbar slot forward as a dropped item. The player can't catch it again for 2 seconds.
+// In creative the slot keeps its count (consumeSelected doesn't deduct there), as in Minecraft.
+const THROW_SPEED = 6, THROW_LIFT = 1.5, THROW_PICKUP_DELAY = 2;
+function throwSelected() {
+  const sel = selectedItem();
+  if (!sel || !BF.drops || !inv().consumeSelected) return;
+  const id = sel.id;
+  try { if (!(inv().consumeSelected(1) > 0)) return; } catch (e) { console.error(e); return; }
+  const d = dirVec(), e = eyeVec();
+  const vel = d.clone().multiplyScalar(THROW_SPEED); vel.y += THROW_LIFT;
+  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY });
+  emit("itemThrown", id);
+}
 
 function mobHit() {
   try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH) : null; } catch (_) { return null; }
