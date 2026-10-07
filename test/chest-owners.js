@@ -84,7 +84,7 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: i % 3 ? I.rotten_flesh : I.cobblestone, count: 64 };
     }, v.key);
     pg.on('console', msg => { if (/^\[test\]/.test(msg.text())) console.log(msg.text()); });
-    await step(0.1, 0.3, 60);
+    for (let k = 0; k < 4 && !(await pg.evaluate(p => { const c = BF.inventory.chestState(p.x, p.y, p.z); return !!(c && c.owner); }, v.chest)); k++) await step(0.1 + k * 0.05, 0.15 + k * 0.05, 30);
     const r7 = await pg.evaluate(([k, p]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), c = BF.inventory.chestState(p.x, p.y, p.z);
       return { free: m.inv.filter(s => !s).length, owner: c && c.owner, chest: c ? c.slots.filter(Boolean).map(s => BF.itemName(s.id) + " x" + s.count) : [],
