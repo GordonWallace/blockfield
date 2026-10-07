@@ -108,6 +108,62 @@ function facePaint(base, faceFn) {
 }
 const pick = (pal, u, v, s) => pal[Math.floor(hash(u, v, s, 99) * pal.length)];
 
+// ---------- iron golem cracks ----------
+// Damage shows as cracks in the golem's iron at 3 stages (below 75%, 50% and 25% health, like vanilla). Each box face gets
+// its own deterministic crack network; every crack pixel stores the stage it appears at, so each stage only adds cracks.
+const CRACK_DARK = 0x3b3632, CRACK_EDGE = 0x8f877e;
+const crackMasks = new Map();
+function crackMask(bi, f, W, H) {
+  const key = bi + f + W + "x" + H;
+  let mask = crackMasks.get(key);
+  if (mask) return mask;
+  mask = new Float32Array(W * H).fill(Infinity);
+  let seed = (bi * 7919 + f.length * 104729 + f.charCodeAt(0) * 31 + W * 977 + H * 13) >>> 0;
+  const r = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const mark = (x, y, st) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    const k = y * W + x;
+    if (st < mask[k]) mask[k] = st;
+    return true;
+  };
+  const walk = (x, y, ang, len, stage, depth) => {
+    for (let i = 0; i < len; i++) {
+      ang += (r() - 0.5) * 0.9;
+      x += Math.cos(ang); y += Math.sin(ang);
+      if (!mark(Math.round(x), Math.round(y), stage + (i / len) * 1.6)) return;
+      if (depth < 2 && r() < 0.12) walk(x, y, ang + (r() < 0.5 ? -1 : 1) * (0.6 + r() * 0.8), (len - i) * 0.6, stage + (i / len) * 1.6, depth + 1);
+    }
+  };
+  const n = Math.max(1, Math.round(W * H / 45));
+  for (let k = 0; k < n; k++) {
+    const stage = 1 + (k % 3) * 0.75;
+    const x = r() * (W - 1), y = r() * (H - 1);
+    mark(Math.round(x), Math.round(y), stage);
+    const len = 3 + r() * Math.max(3, Math.sqrt(W * H) * 0.8), a = r() * Math.PI * 2;
+    walk(x, y, a, len, stage, 0); walk(x, y, a + Math.PI + (r() - 0.5), len * 0.7, stage, 0);
+  }
+  crackMasks.set(key, mask);
+  return mask;
+}
+// Wraps a painter so pixels cracked at `level` (0-3) are drawn dark, with a lighter chipped rim beside them.
+function cracked(paint, bi, level) {
+  if (!level) return paint;
+  return (f, u, v, W, H) => {
+    const mask = crackMask(bi, f, W, H);
+    if (mask[v * W + u] <= level) return CRACK_DARK;
+    if (u + 1 < W && mask[v * W + u + 1] <= level - 0.5 && hash(u, v, bi, 77) < 0.5) return CRACK_EDGE;
+    return typeof paint === "function" ? paint(f, u, v, W, H) : paint;
+  };
+}
+const golemCrackLevel = m => { const f = m.hp / m.maxHp; return f < 0.25 ? 3 : f < 0.5 ? 2 : f < 0.75 ? 1 : 0; };
+// Swaps the golem's part geometries to the crack stage matching its health.
+function updateGolemCracks(m) {
+  const lvl = m.dead ? m.crackLevel || 0 : golemCrackLevel(m);
+  if (lvl === (m.crackLevel || 0)) return;
+  m.crackLevel = lvl;
+  for (const p of typeParts("iron_golem", lvl ? String(lvl) : null)) if (m.meshes[p.name]) m.meshes[p.name].geometry = p.geo;
+}
+
 // ---------- mob models (pixel units, mob faces +Z, origin = feet centre) ----------
 function quadLegs(px, pz, len, w, paint) {
   const hw = w / 2, b = () => [box([-hw, -len, -hw], [hw, 0, hw], paint)];
@@ -363,7 +419,10 @@ const MODELS = {
     ];
     return parts;
   },
-  iron_golem() {
+  iron_golem(crack) {
+    const lvl = +crack || 0;
+    let bi = 0;
+    const cbox = (min, max, paint) => box(min, max, cracked(paint, bi++, lvl));
     const iron = 0xd2ccc4, ironD = 0xbab3aa, vine = 0x4f7f2e;
     const metal = (f, u, v) => {
       if (hash(u >> 1, v >> 1, f.length, 21) < 0.06 && hash(u, v, 1, 2) < 0.7) return vine;
@@ -378,17 +437,17 @@ const MODELS = {
     };
     return [
       { name: "body", pivot: [0, 0, 0], boxes: [
-        box([-9, 21, -5.5], [9, 33, 5.5], metal),
-        box([-4.5, 16, -3], [4.5, 21, 3], metal),
+        cbox([-9, 21, -5.5], [9, 33, 5.5], metal),
+        cbox([-4.5, 16, -3], [4.5, 21, 3], metal),
       ] },
       { name: "head", pivot: [0, 31, 1], head: true, boxes: [
-        box([-4, 0, -3], [4, 10, 5], head),
-        box([-1, 1, 5], [1, 5, 7], ironD),
+        cbox([-4, 0, -3], [4, 10, 5], head),
+        cbox([-1, 1, 5], [1, 5, 7], ironD),
       ] },
-      { name: "armL", pivot: [-11, 31, 0], golemArm: -1, boxes: [box([-2, -30, -3], [2, 2, 3], (f, u, v) => (v < 6 ? ironD : metal(f, u, v)))] },
-      { name: "armR", pivot: [11, 31, 0], golemArm: 1, boxes: [box([-2, -30, -3], [2, 2, 3], (f, u, v) => (v < 6 ? ironD : metal(f, u, v)))] },
-      { name: "legL", pivot: [-4, 16, 0], swing: 1, boxes: [box([-3, -16, -2.5], [3, 0, 2.5], metal)] },
-      { name: "legR", pivot: [4, 16, 0], swing: -1, boxes: [box([-3, -16, -2.5], [3, 0, 2.5], metal)] },
+      { name: "armL", pivot: [-11, 31, 0], golemArm: -1, boxes: [cbox([-2, -30, -3], [2, 2, 3], (f, u, v) => (v < 6 ? ironD : metal(f, u, v)))] },
+      { name: "armR", pivot: [11, 31, 0], golemArm: 1, boxes: [cbox([-2, -30, -3], [2, 2, 3], (f, u, v) => (v < 6 ? ironD : metal(f, u, v)))] },
+      { name: "legL", pivot: [-4, 16, 0], swing: 1, boxes: [cbox([-3, -16, -2.5], [3, 0, 2.5], metal)] },
+      { name: "legR", pivot: [4, 16, 0], swing: -1, boxes: [cbox([-3, -16, -2.5], [3, 0, 2.5], metal)] },
     ];
   },
   spider() {
@@ -577,6 +636,7 @@ function damageMob(m, amount, knockDir, byPlayer, cause) {
   m.lastHurt = byPlayer ? "the player" : (cause || "unknown causes");
   m.invuln = 0.45;
   m.hurtT = 0.3;
+  if (m.def.golem) updateGolemCracks(m);
   if (BF.emit) BF.emit("mobHurt", m, amount);
   if (knockDir && !m.def.noKnock) {
     const k = new THREE.Vector3(knockDir.x, 0, knockDir.z);
@@ -605,7 +665,7 @@ function kill(m, byPlayer) {
   if (m.fire) m.fire.visible = false;
   if (m.village) m.village.killed[m.type] = (m.village.killed[m.type] || 0) + 1;
   if (m.type === "creeper") m.model.scale.set(1, 1, 1);
-  if (byPlayer) giveDrops(m);
+  if (byPlayer || (m.def.golem && BF.drops)) giveDrops(m);   // a golem drops its iron whatever killed it
   if (BF.emit) BF.emit("mobKilled", m);
 }
 
@@ -661,7 +721,8 @@ function explode(m) {
 }
 
 // ---------- arrows ----------
-function shootArrow(m, target) {
+// `victim` (optional) is a mob the arrow can hit, e.g. the iron golem a skeleton is fighting.
+function shootArrow(m, target, victim) {
   const from = new THREE.Vector3(m.position.x, m.position.y + 1.5, m.position.z);
   const to = target.clone();
   const dist = from.distanceTo(to);
@@ -675,7 +736,7 @@ function shootArrow(m, target) {
   const mesh = new THREE.Mesh(arrowGeo, arrowMat);
   mesh.position.copy(from);
   scene.add(mesh);
-  arrows.push({ mesh, pos: mesh.position, vel: dir.multiplyScalar(speed), life: 6, stuck: false, owner: m });
+  arrows.push({ mesh, pos: mesh.position, vel: dir.multiplyScalar(speed), life: 6, stuck: false, owner: m, victim: victim || null });
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
@@ -696,6 +757,17 @@ function updateArrows(dt) {
         a.stuck = true; a.life = Math.min(a.life, 3);
         a.pos.addScaledVector(a.vel, -dt / steps * 0.3);
         break;
+      }
+      const v = a.victim;
+      if (v && !v.dead && !v.removed) {
+        const vp = v.position, hw = v.halfWidth + 0.1;
+        if (Math.abs(a.pos.x - vp.x) < hw && Math.abs(a.pos.z - vp.z) < hw && a.pos.y > vp.y && a.pos.y < vp.y + v.height) {
+          const owner = a.owner && !a.owner.removed && !a.owner.dead ? a.owner : null;
+          damageMob(v, irnd(GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton");
+          if (owner && v.def.golem) v.ai.revenge = owner;
+          hitPlayer = true;
+          break;
+        }
       }
       if (p) {
         const pp = p.position, hw = (p.halfWidth || 0.3) + 0.1, h = p.height || 1.8;
@@ -766,6 +838,7 @@ function hostileAI(m, dt, out) {
   const ai = m.ai, T = m.def;
   const p = playerAlive() && !creative() && !(BF.player && BF.player.hiddenInTent) ? player() : null;   // asleep in a tent: unseen
   ai.aiming = false;
+  if (golemFight(m, dt, out)) { ai.fuse = 0; return; }
   if (!p) { ai.target = false; ai.fuse = Math.max(0, ai.fuse - dt); if (!zombieHuntVillagers(m, dt, out)) wanderAI(m, dt, out); return; }
   const eye = p.eyePos ? p.eyePos() : new THREE.Vector3(p.position.x, p.position.y + 1.6, p.position.z);
   const dx = p.position.x - m.position.x, dz = p.position.z - m.position.z, dy = p.position.y - m.position.y;
@@ -835,13 +908,14 @@ function nearestMob(m, r, pred) {
   return best;
 }
 // Walks toward another mob and hits it in melee range. Returns false if the target is gone.
-function chaseAndHit(m, o, dt, out, dmg, cd) {
+function chaseAndHit(m, o, dt, out, dmg, cd, speed) {
   const ai = m.ai, T = m.def;
   if (!o || o.dead || o.removed) return false;
   const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, hd = Math.hypot(dx, dz);
   const nx = hd > 0.01 ? dx / hd : 0, nz = hd > 0.01 ? dz / hd : 0;
   const reach = m.halfWidth + o.halfWidth + 0.55;
-  if (hd > reach * 0.8) { out.x = nx * T.speed; out.z = nz * T.speed; }
+  const sp = speed || T.speed;
+  if (hd > reach * 0.8) { out.x = nx * sp; out.z = nz * sp; }
   out.faceX = o.position.x; out.faceZ = o.position.z;
   m.lookAt = o;
   ai.attackCd -= dt;
@@ -850,11 +924,73 @@ function chaseAndHit(m, o, dt, out, dmg, cd) {
     ai.swingT = 0.35;
     const k = new THREE.Vector3(nx, 0, nz);
     const by = "a" + (/^[aeiou]/i.test(m.type) ? "n " : " ") + m.type.replace(/_/g, " ");
-    if (m.def.golem) { o.invuln = 0; damageMob(o, dmg, k, false, by); if (!o.dead) o.vel.y = 8; }
-    else damageMob(o, dmg, k, false, by);
+    if (m.def.golem) {
+      o.invuln = 0; damageMob(o, dmg, k, false, by); if (!o.dead) o.vel.y = 8;
+      if (o.hostile && !o.dead) { o.ai.golemFoe = m; o.ai.golemFoeT = 12; }   // hostiles fight back (golemFight)
+    } else if (damageMob(o, dmg, k, false, by)) {
+      if (o.type === "villager") { o.attacker = m; o.attackedAt = o.age; }   // golems come running (villagerInDanger)
+      if (o.def.golem) o.ai.revenge = m;
+    }
   }
   return true;
 }
+// ---------- golems vs hostiles ----------
+// Golems sprint to any villager under attack within RESCUE_RANGE; hostile mobs hurt golems with GOLEM_HITS.
+const RESCUE_RANGE = 64, RESCUE_SPEED = 6.0;
+const GOLEM_HITS = { zombie: 4, spider: 3, arrow: [3, 5] };
+// A villager is under attack when a mob hit it in the last 6 s, or a zombie hunting it is within 6 blocks.
+// Returns the nearest such attacker to golem g (only its own village's villagers when it has a village).
+function villagerInDanger(g) {
+  let best = null, bd = RESCUE_RANGE;
+  const consider = (v, h) => {
+    if (!h || h.dead || h.removed || !h.hostile) return;
+    if (g.village && v.village && v.village !== g.village) return;
+    const d = h.position.distanceTo(g.position);
+    if (d < bd) { bd = d; best = h; }
+  };
+  for (const o of list) {
+    if (o.dead || o.removed) continue;
+    if (o.type === "villager" && o.attacker && o.age - o.attackedAt < 6) consider(o, o.attacker);
+    else if (o.type === "zombie" && o.ai.vTarget && !o.ai.vTarget.dead && o.ai.vTarget.position.distanceTo(o.position) < 6) consider(o.ai.vTarget, o);
+  }
+  return best;
+}
+// Hostiles fight a golem that hit them (for 12 s, even over the player), and zombies, spiders and skeletons that aren't
+// chasing the player pick a fight with a golem within 10 blocks (zombies leave a villager for it). Creepers ignore golems. Returns true when it set this frame's movement.
+function golemFight(m, dt, out) {
+  const ai = m.ai, T = m.def;
+  if (m.type === "creeper") return false;
+  ai.golemFoeT = (ai.golemFoeT || 0) - dt;
+  if (!ai.target) {
+    ai.gScanT = (ai.gScanT || 0) - dt;
+    if (ai.gScanT <= 0) {
+      ai.gScanT = 0.8;
+      const calm = m.type === "spider" && skyLight() * skyAt(m.position.x, m.position.y + 0.5, m.position.z).factor > 0.6;
+      const g = calm ? null : nearestMob(m, 10, o => o.def.golem);
+      if (g && ai.golemFoeT <= 0) { ai.golemFoe = g; ai.golemFoeT = 6; }
+    }
+  }
+  const g = ai.golemFoe;
+  if (!g || g.dead || g.removed || ai.golemFoeT <= 0 || g.position.distanceTo(m.position) > 24) { ai.golemFoe = null; return false; }
+  if (m.type === "skeleton") {
+    const dx = g.position.x - m.position.x, dz = g.position.z - m.position.z, d = Math.hypot(dx, dz);
+    const nx = dx / (d || 1), nz = dz / (d || 1);
+    const chest = new THREE.Vector3(g.position.x, g.position.y + g.height * 0.6, g.position.z);
+    ai.losT -= dt;
+    if (ai.losT <= 0) { ai.losT = rnd(0.25, 0.4); ai.gLos = hasLineOfSight(m, chest); }
+    let sp = 0;
+    if (d > 12 || !ai.gLos) sp = T.speed; else if (d < 6) sp = -T.speed * 0.8;
+    if (sp && !m.inWater && dropAhead(m, nx * Math.sign(sp), nz * Math.sign(sp)) > 3) sp = 0;
+    out.x = nx * sp; out.z = nz * sp;
+    out.faceX = g.position.x; out.faceZ = g.position.z; m.lookAt = g;
+    ai.shootCd -= dt;
+    ai.aiming = ai.gLos && d < 16;
+    if (ai.aiming && ai.shootCd <= 0) { ai.shootCd = rnd(1.6, 2.4); shootArrow(m, chest, g); }
+    return true;
+  }
+  return chaseAndHit(m, g, dt, out, GOLEM_HITS[m.type] || T.attack || 2, 1.0);
+}
+
 function zombieHuntVillagers(m, dt, out) {
   if (m.type !== "zombie") return false;
   const ai = m.ai;
@@ -1127,9 +1263,16 @@ function golemAI(m, dt, out) {
   const ai = m.ai, T = m.def;
   ai.provoked = Math.max(0, ai.provoked - dt);
   ai.hScanT = (ai.hScanT || 0) - dt;
-  if (ai.hScanT <= 0) { ai.hScanT = 0.5; ai.foe = nearestMob(m, 16, o => o.hostile); }
-  if (ai.foe && chaseAndHit(m, ai.foe, dt, out, irnd(7, 14), 1.2)) return;
-  ai.foe = null;
+  if (ai.hScanT <= 0) {
+    ai.hScanT = 0.5;
+    // a villager under attack comes first (sprint), then whatever is hurting the golem, then the nearest hostile
+    ai.rescue = villagerInDanger(m);
+    const rv = ai.revenge && !ai.revenge.dead && !ai.revenge.removed && ai.revenge.position.distanceTo(m.position) < 32 ? ai.revenge : null;
+    if (!rv) ai.revenge = null;
+    ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile);
+  }
+  if (ai.foe && chaseAndHit(m, ai.foe, dt, out, irnd(7, 14), 1.2, ai.foe === ai.rescue ? RESCUE_SPEED : T.speed)) return;
+  ai.foe = null; ai.rescue = null;
   if (creative()) ai.provoked = 0;
   if (ai.provoked > 0 && playerAlive()) {
     const p = player();
