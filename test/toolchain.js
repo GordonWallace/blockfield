@@ -36,7 +36,8 @@ function install(key) {
   const R = window.__rec = { key, trades: [], uses: {}, breaks: [], dug: {}, logs: [], minerLog: [], snaps: [], furn: [], lastTools: {}, appeared: [], vanished: [] };
   const day = () => +(BF.sky.day + BF.sky.time).toFixed(3);
   const inV = m => m && m.village && m.village.key === window.__rec.key;
-  const who = m => (m && m.type === 'villager') ? BF.vlog.nameOf(m) : String(m);
+  // a unique label per villager (names can repeat within a village)
+  const who = window.__who = m => (m && m.type === 'villager') ? BF.vlog.nameOf(m) + '#' + (m.__tcid || (m.__tcid = window.__tcn = (window.__tcn || 0) + 1)) : String(m);
   if (window.__hooked) return;
   window.__hooked = true;
   const owner = new WeakMap();
@@ -102,7 +103,7 @@ function snapshot() {
     for (const s of m.inv || []) if (s) { const nm = BF.items[s.id].name; if (/_planks$|^planks$/.test(nm)) planks += s.count; if (/_log$|^log$/.test(nm)) logs += s.count; }
     if (planks) counts.planks = planks; if (logs) counts.logs = logs;
     const x = Math.floor(m.position.x), z = Math.floor(m.position.z);
-    return { name: BF.vlog.nameOf(m), prof: m.profession, level: m.level || 1, xp: m.xp || 0, tools, counts, y: +m.position.y.toFixed(1),
+    return { name: window.__who(m), prof: m.profession, level: m.level || 1, xp: m.xp || 0, tools, counts, y: +m.position.y.toFixed(1),
       depth: +(BF.worldgen.heightAt(x, z) - m.position.y).toFixed(1), status: BF.villagerStatus ? BF.villagerStatus.text(m) : '' };
   });
   // tools that appeared / vanished since the last snapshot (net of trades this interval)
