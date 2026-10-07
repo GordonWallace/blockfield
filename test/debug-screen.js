@@ -67,7 +67,7 @@ const start = async () => {
     return { seller: BF.vlog.pretty(s.profession), buyer: BF.vlog.pretty(b2.profession) };
   });
   // on a slow machine the trades can take a few seconds to reach the screen
-  await dbg.waitForFunction(() => [...document.querySelectorAll('#log .ent .tx')].some(e => /got 1 Test/.test(e.textContent)), null, { timeout: 20000 }).catch(() => {});
+  await dbg.waitForFunction(() => { const t = [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent); return t.some(x => /got 1 Test/.test(x)) && t.some(x => /^Player traded/.test(x)); }, null, { timeout: 20000 }).catch(() => {});
   await dbg.waitForTimeout(500);
   const count = () => dbg.evaluate(() => document.querySelectorAll('#log .ent').length);
   const all = await count();

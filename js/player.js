@@ -454,20 +454,24 @@ function quitToTitle(btn) {
 // unlock reads as a pause. The request waits for the Escape keyup instead.
 // Some browsers still drop that lock, or swallow it, at Escape's release (macOS): an unlock within ESC_GRACE seconds of an
 // Escape that closed a screen leaves you in the game with the mouse free (the next click captures it) instead of pausing.
-const ESC_GRACE = 1;
+// The grace also lasts ESC_GRACE_FRAMES rendered frames, so a machine too slow to draw a frame a second still gets it.
+const ESC_GRACE = 1, ESC_GRACE_FRAMES = 30;
+let frameNo = 0, escClosedFrame = -1e9;
+const markEsc = () => { escClosedAt = performance.now(); escClosedFrame = frameNo; };
+const inEscGrace = () => performance.now() - escClosedAt < ESC_GRACE * 1000 || frameNo - escClosedFrame < ESC_GRACE_FRAMES;
 let lockOnEscUp = false, escClosedAt = -1e9, escCloseEvent = null, escCloseHeld = false, escRelock = false;
 addEventListener("keyup", e => {
   if (e.key !== "Escape") return;
-  if (escCloseHeld) { escCloseHeld = false; escClosedAt = performance.now(); }   // the grace runs from the release, when the re-lock goes out
+  if (escCloseHeld) { escCloseHeld = false; markEsc(); }   // the grace runs from the release, when the re-lock goes out
   if (!lockOnEscUp) return;
   lockOnEscUp = false;
-  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) { requestLock(); escRelock = performance.now() - escClosedAt < ESC_GRACE * 1000; }
+  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) { requestLock(); escRelock = inEscGrace(); }
 }, true);
 addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
 // A screen is closing: note it when Escape did it, so neither that key press nor an unlock in the next ESC_GRACE seconds pauses.
 function screenClosed() {
   const ev = window.event;
-  if (ev && ev.type === "keydown" && ev.key === "Escape") { escClosedAt = performance.now(); escCloseEvent = ev; escCloseHeld = true; }
+  if (ev && ev.type === "keydown" && ev.key === "Escape") { markEsc(); escCloseEvent = ev; escCloseHeld = true; }
 }
 function requestLock() {
   if (isTouch) return;
@@ -578,12 +582,12 @@ function bindInput() {
     locked = document.pointerLockElement === cv;
     if (locked) {
       lockWorked = true; dragMode = false;
-      if (escRelock) { escRelock = false; escClosedAt = performance.now(); }   // the grace also runs from when that re-lock lands, however slow
+      if (escRelock) { escRelock = false; markEsc(); }   // the grace also runs from when that re-lock lands, however slow
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
       keys.clear(); mouseL = mouseR = false; resetBreak();
       if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
-      else if (!invOpen() && !P.dead && started && !menuOpen && performance.now() - escClosedAt > ESC_GRACE * 1000) pause();
+      else if (!invOpen() && !P.dead && started && !menuOpen && !inEscGrace()) pause();
     }
   });
   document.addEventListener("pointerlockerror", onLockError);
@@ -1626,6 +1630,8 @@ P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
+P.escGrace = () => inEscGrace();   // tests: still inside the grace after an Escape closed a screen
+P.frame = () => frameNo;
 P.menu = () => menuOpen;
 P.respawn = respawn;
 P.setGameMode = setGameMode;
@@ -1681,6 +1687,7 @@ P.setMouse = function (left, right) { // test hook: simulate held mouse buttons
 };
 
 P.update = function (dt) {
+  frameNo++;
   if (hurtCd > 0) hurtCd -= dt;
   if (attackCd > 0) attackCd -= dt;
 
@@ -1719,6 +1726,7 @@ P.update = function (dt) {
 };
 
 P.updatePaused = function (dt) {
+  frameNo++;
   if (hurtCd > 0) hurtCd -= dt;
   syncCamera(dt);
   updateParticles(dt);

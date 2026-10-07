@@ -22,6 +22,15 @@ Start the game with the run script above (or `node debug/server.js`), then open 
 - Game served somewhere else (another port, `127.0.0.1`, `0.0.0.0`): the feed tries port 8001 on the game's host, then `localhost` and `127.0.0.1`. If you open the game by your computer's network address or name (`http://192.168.1.5:8080`, `mymac.local`), start the debug server with `--lan`, because browsers won't let such a page talk to `localhost`.
 - Debug screen stuck on "Waiting for the game" with the game open: Shift+Reload the game tab in case the browser kept older cached game files.
 
+## Tests and CI
+
+GitHub Actions runs the headless tests (`.github/workflows/`), one at a time, in two tiers set in `test/ci.json`:
+
+- **Baseline tests** run on every pull request into a `release-*` branch or `main` (about 15 minutes).
+- **Integration tests** (baseline plus the soak, generator and slow map tests, about an hour) run on every push to a `release-*` branch, so after each merged PR, and on a pull request from a release branch into `main`. Either workflow can also be started by hand from the Actions tab.
+
+Each run's page has a results table, and the logs and screenshots are attached to it. A test fails when it exits non-zero, times out, throws in the page, or prints a line starting with `FAIL`. Run a tier locally with `NODE_PATH=$(npm root -g) node test/ci.js baseline` (or `integration`, or name tests after the output folder: `node test/ci.js baseline ci-out esc-close`). A new test file needs no entry in `test/ci.json`: it runs in integration, or in the tier named by a `// @ci baseline` comment in the file.
+
 ## Layout
 
 - `index.html`: entry page and script load order
