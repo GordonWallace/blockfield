@@ -18,8 +18,8 @@ then open http://localhost:8000 (the game) on one screen and http://localhost:80
 
 - Keep the game in its own browser window, not a background tab: browsers pause background tabs.
 - Other ports: `node debug/server.js --game 9000 --debug 9001`. From another computer on your network: add `--lan`.
-- Serving the game some other way: `node debug/server.js --no-game`, then open the game as `index.html?debugfeed=8001`.
-- Without the debug server the game runs exactly as before; it only sends data when the debug server serves it or `?debugfeed` is given.
+- The feed is always on and doesn't change anything in the game, F3 included. However you open the game (this server, `python3 -m http.server`, or the file itself), it streams to port 8001 on the same machine. To use only the debug screen with your own game server: `node debug/server.js --no-game`. `?debugfeed=<port>` points it elsewhere and `?debugfeed=off` turns it off.
+- With no debug server running, the game plays as normal and quietly retries every few seconds.
 
 ## Layout
 

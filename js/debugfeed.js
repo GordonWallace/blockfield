@@ -1,8 +1,9 @@
 // Second-screen debug feed. Sends what the F3 overlay and village panel show (plus the village's villagers, map and full log)
 // to the debug server (debug/server.js), which relays it to the debug screen on its own port.
-// Off unless the page was served by the debug server (it sets window.BF_DEBUG_FEED) or opened with ?debugfeed=<port or url>;
-// otherwise the game never touches the network. Snapshots go out 4 times a second as small POSTs; the village layout and the
-// log are only re-sent when they change. If the server goes away the feed backs off and retries every few seconds.
+// Always on, whatever F3 is doing: it streams to port 8001 on the game's host (or the address the debug server injects as
+// window.BF_DEBUG_FEED, or ?debugfeed=<port or url>; ?debugfeed=off stops it). It never changes what the game shows.
+// Snapshots go out 4 times a second as small POSTs; the village layout and the log are only re-sent when they change.
+// While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
 // API: BF.debugFeed = { url, snapshot(), update() }
 (() => {
 "use strict";
@@ -10,15 +11,16 @@ const BF = (window.BF = window.BF || {});
 
 function feedUrl() {
   const q = new URLSearchParams(location.search).get("debugfeed");
-  let u = q || window.BF_DEBUG_FEED || "";
+  if (q === "off") return "";
+  let u = q || window.BF_DEBUG_FEED || "8001";   // always on: the default debug port on the game's own host
   if (/^\d+$/.test(u)) u = "http://" + (location.hostname || "localhost") + ":" + u;
   return u.replace(/\/+$/, "");
 }
 const URL_ = feedUrl();
 if (!URL_) return;
 
-const EVERY = 250, RETRY = 4000;
-let nextT = 0, busy = false, layoutKey = null, logSig = "", sent = 0;
+const EVERY = 250, RETRY = 4000, RETRY_SLOW = 15000;
+let misses = 0, nextT = 0, busy = false, layoutKey = null, logSig = "", sent = 0;
 
 const r1 = v => Math.round(v * 10) / 10;
 const box = o => [o.x0, o.z0, o.x1, o.z1];
@@ -91,7 +93,8 @@ function update() {
   fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000 })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
     .then(t => { if (t === "resync") { layoutKey = null; logSig = ""; } })   // a restarted server asks for the layout and log again
-    .catch(() => { nextT = performance.now() + RETRY; layoutKey = null; logSig = ""; })   // server down: resend everything when it's back
+    .then(() => { misses = 0; })
+    .catch(() => { nextT = performance.now() + (++misses > 5 ? RETRY_SLOW : RETRY); layoutKey = null; logSig = ""; })   // server down: resend everything when it's back
     .finally(() => { busy = false; });
 }
 
