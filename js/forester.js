@@ -5,11 +5,17 @@
 //   of a random point just outside the village): air over soil with room for a tree above,
 //   no other sapling within 4 blocks, no door within 10 blocks and no building or other structure within 8 (dirt paths are fine). It walks there and plants (cooldown 10 s).
 // - Felling: it picks a random natural tree within 40 blocks (+12 / -6 high), nearer ones favoured: the connected logs (at most 64) with leaves among them. When it is
-//   within 3 blocks it fells the whole tree at once, leaves included, and the blocks drop their items (cooldown 20 s). Needs 2 free inventory slots.
+//   within 3 blocks it chops, then the whole tree comes down at once, leaves included, and the blocks drop their items (cooldown 20 s). Needs 2 free inventory slots.
+//   Chopping takes as long as the player would need to break every log of the tree one by one with the same tool (BF.player.mineSeconds:
+//   3 s a log by hand, 1.5 s wooden axe, 0.75 s stone, 0.5 s iron, 0.4 s diamond), and the axe wears 1 use per log, as the player's does.
+//   Interrupted (end of the working day, a trade), it keeps its progress on that tree. The player's own felling is unchanged.
+// - Axes: it chops with the best axe it holds (speed x sqrt(durability): diamond, iron, gold, stone, wood), drawn in its hands (mobs.js toolHolders).
+//   Every 20 s it looks for a villager of its village selling an axe better than its own that it can pay for, walks there and buys the best one.
 //   Buildings are never touched: a log pile next to planks, stone, glass ... is not a tree.
 // - Picking up: saplings, emeralds, logs, sticks and apples lying within 16 blocks are collected (js/drops.js entities). After felling a tree it
 //   stays and collects until nothing it wants lies within 12 blocks of the stump (waiting for items still falling; 2 minutes at most).
 // - Sawing: it turns up to 8 logs a day into 4 planks each (keeping 2 logs of each kind); planks and logs are what it sells (TRADES.forester).
+// - Sticks: it keeps up to 64 sticks in stock, made 4 from 2 planks (at most 32 a day), and sells them (TRADES.forester "1 emerald > 48 stick").
 // - Planting and felling pick one at random, weighted 10 : 8 as in the mod. Everything runs in working hours only, from its band saw.
 // Players: chopping any log of a natural tree brings down everything above it, leaves included (fallAbove, like the mod).
 // Saplings (blocks.js forester pack) also grow for players: on soil, with room above, a sapling becomes a tree after ~8 minutes on average
@@ -32,7 +38,7 @@ const PLANT_CD = 10, CUT_CD = 20, PLANT_MAX = 30, CUT_MAX = 40, W_PLANT = 10, W_
 const CUT_SEARCH = 40, CUT_HOME = 64, CUT_Y_UP = 12, CUT_Y_DOWN = 6;   // felling reaches further than the mod's 16: few trees stand inside a village. Nearer trees are favoured, see findTree
 const HOME_R = 36;          // it never plants or fells further than this from the village centre (the mod has no such leash: villagers there wander)
 const CLEAR_ABOVE = 5;      // air above a planting spot, so the sapling has room to grow
-const CHOP_T = 1.2;         // seconds of chopping before the tree comes down (the mod fells it the moment the villager arrives)
+const SHOP_EVERY = 20, SHOP_REACH = 2.5, SHOP_MAX = 60;   // axe shopping: how often it looks, how close it stands to the seller, walk limit (+2.5 s a block)
 const GROW_PER_S = 1 / 480; // sapling -> tree: ~8 minutes of simulation time on average
 const GATHER_R = 16;
 const LEAF_D = 6;      // leaves further than this (through leaves) from the felled logs stay, as vanilla leaf decay
@@ -259,8 +265,69 @@ function fell(m, tree, drops = true) {
   if (BF.audio && BF.audio.blockSound) { try { BF.audio.blockSound("break", get(tree.base[0], tree.base[1], tree.base[2]) || BF.B.oak_log, tree.base[0], tree.base[1], tree.base[2], 0.8); } catch (e) { /* optional */ } }
 }
 
+// ---------------------------------------------------------------- axes
+const isAxe = id => { const it = BF.items[id]; return !!(it && it.tool && it.tool.type === "axe"); };
+// How good an axe kind is: chopping speed weighted by how long it lasts (wood 15, stone 46, gold 68, iron 95, diamond 316).
+const axeScore = id => (isAxe(id) ? (BF.items[id].tool.speed || 1) * Math.sqrt(BF.durability(id) || 1) : 0);
+// The axe it chops with: the best kind, then the most worn of that kind (used up first). The slot object itself (its wear lives on it).
+function axeOf(m) {
+  let best = null;
+  for (const s of m.inv || []) if (s && isAxe(s.id) && (!best || axeScore(s.id) > axeScore(best.id) || (s.id === best.id && (s.wear || 0) > (best.wear || 0)))) best = s;
+  return best;
+}
+// Seconds the player would take to break log block `id` with axe slot `axe` (null = bare hands), standing on the ground.
+function logSeconds(id, axe) {
+  const P = BF.player;
+  if (P && P.mineSeconds) { const t = P.mineSeconds(id, axe ? axe.id : null); if (isFinite(t)) return t; }
+  return 3 / (axe ? BF.items[axe.id].tool.speed || 1 : 1);   // logs: hardness 2, 30 ticks per point
+}
+// Wear on its axe, as the player's (js/toolwear.js BF.toolWear.use, which removes a used-up tool; BF.wearStack when that is missing).
+function wearAxe(m, s, n) {
+  if (!s) return;
+  if (BF.toolWear && BF.toolWear.use) { BF.toolWear.use(m, s, n); if (m.inv.includes(s)) return; }
+  else {
+    if (BF.wearStack(s, n) !== "broken") return;
+    const i = m.inv.indexOf(s);
+    if (i >= 0) m.inv[i] = null;
+  }
+  log("axeBroke", m, { axe: BF.items[s.id].name });
+  if (BF.audio) { try { BF.audio.play("dig.metal", { x: m.position.x, y: m.position.y + 1, z: m.position.z, pitch: 1.5 }); } catch (e) { /* optional */ } }
+}
+const chopSecs = (tree, axe) => tree.logs.reduce((t, [x, y, z]) => t + logSeconds(get(x, y, z) || BF.B.oak_log, axe), 0);
+
+// A villager of its village selling an axe better than the best one it holds, at an offer it can pay and store: the best such axe, nearest first.
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
+function findAxeSeller(m, F) {
+  const R = m.village, Tr = T();
+  if (!R || !Tr) return null;
+  const have = m.inv.some(s => s && isAxe(s.id)) ? Math.max(...m.inv.filter(s => s && isAxe(s.id)).map(s => axeScore(s.id))) : 0, now = nowS();
+  let best = null, bs = have, bd = Infinity;
+  for (const v2 of R.members || []) {
+    if (v2 === m || !canSell(v2) || (F.avoid && (F.avoid.get(v2) || 0) > now)) continue;
+    for (const o of v2.trades) {
+      const sc = axeScore(o.sell.id);
+      if (sc <= have || Tr.blockReason(v2, o)) continue;
+      if (!o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
+      const d = v2.position.distanceTo(m.position);
+      if (sc > bs || (sc === bs && d < bd)) { bs = sc; bd = d; best = { other: v2, offer: o }; }
+    }
+  }
+  return best;
+}
+function buyAxe(m, deal) {
+  const Tr = T(), v2 = deal.other, o = deal.offer;
+  if (!canSell(v2) || Tr.blockReason(v2, o) || !o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return false;
+  if (!Tr.exchange(v2, o)) return false;
+  for (const b of o.buy) Tr.inv.remove(m.inv, b.id, b.n);
+  Tr.inv.add(m.inv, o.sell.id, o.sell.n);
+  Tr.addXp(v2, o);
+  if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
+  log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
+  return true;
+}
+
 // ---------------------------------------------------------------- the forester's day
-const state = m => m.fo || (m.fo = { task: null, plantCd: rnd(2, 8), cutCd: rnd(4, 12), gatherCd: 0, t: 0, nav: { navWait: 0, navFail: 0 }, chop: 0, claim: null });
+const state = m => m.fo || (m.fo = { task: null, plantCd: rnd(2, 8), cutCd: rnd(4, 12), gatherCd: 0, shopT: rnd(1, 4), t: 0, nav: { navWait: 0, navFail: 0 }, chop: 0, claim: null, saved: null, avoid: new Map() });
 const freeSlots = m => m.inv.reduce((n, s) => n + (s ? 0 : 1), 0);
 const holdsSapling = m => { for (const s of m.inv) if (s && /_sapling$/.test(BF.items[s.id].name)) return s; return null; };
 const claims = new Map();   // "x,y,z" of a tree base or a drop -> villager, so two foresters do not go for the same tree
@@ -412,7 +479,8 @@ function endTask(m, F, ok) {
   if (t) {
     if (t.claim) claims.delete(t.claim);
     if (t.kind === "plant") F.plantCd = PLANT_CD;
-    else if (t.kind === "cut") F.cutCd = CUT_CD;
+    else if (t.kind === "cut") { F.cutCd = CUT_CD; F.saved = !ok && t.done ? { key: t.claim, done: t.done, chop: F.chop } : null; }   // an interrupted tree keeps its progress
+    else if (t.kind === "buy") { if (!ok) F.avoid.set(t.deal.other, nowS() + 120); }
     else if (t.kind === "gather") { if (!ok && F.sweep) { const n = F.tries || (F.tries = new WeakMap()), c = (n.get(t.drop) || 0) + 1; n.set(t.drop, c); if (c >= 2) (F.skip || (F.skip = new WeakSet())).add(t.drop); } else F.gatherCd = ok ? 0 : 6; }   // an item it cannot reach twice is left
   }
   F.task = null; F.t = 0; F.chop = 0; m.ai.route = null;
@@ -446,6 +514,21 @@ function saw(m, F) {
       log("saw", m, { log: sp + "_log" });
     }
   }
+  sticks(m, F);
+}
+// Sticks: while it holds fewer than STICK_KEEP, 2 planks (the species it holds most of) become 4 sticks, at most STICK_DAY a day.
+const STICK_KEEP = 64, STICK_DAY = 32;
+function sticks(m, F) {
+  const inv = T().inv, st = BF.I.stick;
+  if (st == null) return;
+  if (F.stickDay !== F.sawDay) { F.stickDay = F.sawDay; F.sticks = 0; }
+  while (F.sticks < STICK_DAY && inv.count(m.inv, st) <= STICK_KEEP - 4) {
+    let pl = null, n = 0;
+    for (const sp of SPECIES) { const id = BF.I[plankName(sp)], c = id == null ? 0 : inv.count(m.inv, id); if (c > n) { n = c; pl = id; } }
+    if (!pl || n < 2 || !inv.canFit(m.inv, [{ id: st, n: 4 }], [{ id: pl, n: 2 }])) return;
+    inv.remove(m.inv, pl, 2); inv.add(m.inv, st, 4); F.sticks += 4;
+    log("sticks", m, { from: BF.items[pl].name });
+  }
 }
 
 function ai(m, dt, out) {
@@ -463,15 +546,23 @@ function ai(m, dt, out) {
     if (drop) task = { kind: "gather", drop, x: Math.floor(drop.pos.x), y: Math.floor(drop.pos.y), z: Math.floor(drop.pos.z), max: GATHER_R * 3 };
     else if (F.sweep && F.young) { F.thinkT = 0.3; a.mode = "idle"; a.t = 1; return true; }       // items still falling: wait for them
     else if (F.sweep) { log("swept", m, { why: "clear" }); F.sweep = null; F.skip = null; F.tries = null; }
+    F.shopT -= 1;
+    if (!task && !F.sweep && F.shopT <= 0) {
+      F.shopT = SHOP_EVERY;
+      const deal = findAxeSeller(m, F);
+      if (deal) task = { kind: "buy", deal, x: Math.floor(deal.other.position.x), y: Math.floor(deal.other.position.y), z: Math.floor(deal.other.position.z), max: SHOP_MAX + 2.5 * deal.other.position.distanceTo(m.position) };
+    }
     if (!task && !F.sweep) {
       const opts = [];
       if (F.plantCd <= 0 && holdsSapling(m)) { let s = findSpot(m); if (!s && boxOf(m)) { const e = edgePoint(m); if (e) s = findSpot(m, e); } if (s) opts.push([W_PLANT, { kind: "plant", x: s.x, y: s.y, z: s.z, max: PLANT_MAX + 2.5 * Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z), claim: pk(s.x, s.y, s.z) }]); else F.plantCd = 5; }
-      if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX + 2.5 * Math.hypot(tr.base[0] + 0.5 - m.position.x, tr.base[2] + 0.5 - m.position.z), claim: pk(tr.base[0], tr.base[1], tr.base[2]) }]); else F.cutCd = 8; }
+      if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX + 2.5 * Math.hypot(tr.base[0] + 0.5 - m.position.x, tr.base[2] + 0.5 - m.position.z) + 1.25 * chopSecs(tr, axeOf(m)), claim: pk(tr.base[0], tr.base[1], tr.base[2]), done: 0 }]); else F.cutCd = 8; }
       if (opts.length) { let r = Math.random() * opts.reduce((s, o) => s + o[0], 0); for (const [w, o] of opts) { if ((r -= w) < 0) { task = o; break; } } task = task || opts[0][1]; }
     }
     if (!task) return false;
     if (F.sweep) F.thinkT = 0.2;
     F.task = task; F.t = 0; F.chop = 0; F.nav.navFail = 0; F.nav.navWait = 0;
+    if (task.kind === "cut" && F.saved && F.saved.key === task.claim) { task.done = F.saved.done; F.chop = F.saved.chop; }   // back to a tree it had started on
+    if (task.kind === "cut") F.saved = null;
     if (task.claim) claims.set(task.claim, m);
     log("start", m, { task: task.kind, at: [task.x, task.y, task.z] });
   }
@@ -479,8 +570,15 @@ function ai(m, dt, out) {
   F.t += dt;
   if (F.t > k.max) { log("giveup", m, { task: k.kind, why: "too slow" }); endTask(m, F, false); return true; }
   a.mode = "idle"; a.t = 2;
-  const reach = k.kind === "plant" ? PLANT_REACH : k.kind === "cut" ? CUT_REACH : 1.6;
+  const reach = k.kind === "plant" ? PLANT_REACH : k.kind === "cut" ? CUT_REACH : k.kind === "buy" ? SHOP_REACH : 1.6;
   if (k.kind === "gather" && (!BF.drops.list.includes(k.drop))) { endTask(m, F, true); return true; }
+  if (k.kind === "buy") {   // the seller walks about: follow it
+    const o = k.deal.other;
+    if (!canSell(o) && !(o && o.tradingWith)) { endTask(m, F, false); return true; }
+    const nx = Math.floor(o.position.x), nz = Math.floor(o.position.z);
+    if (Math.abs(nx - k.x) + Math.abs(nz - k.z) > 2) { m.ai.route = null; }
+    k.x = nx; k.y = Math.floor(o.position.y); k.z = nz;
+  }
   if (k.kind === "gather") { k.x = Math.floor(k.drop.pos.x); k.y = Math.floor(k.drop.pos.y); k.z = Math.floor(k.drop.pos.z); }
   const dist = Math.hypot(k.x + 0.5 - m.position.x, k.z + 0.5 - m.position.z);
   if (dist > reach || (k.kind !== "gather" && Math.abs(k.y - m.position.y) > 3.2)) {
@@ -490,7 +588,12 @@ function ai(m, dt, out) {
   }
   a.route = null;
   out.faceX = k.x + 0.5; out.faceZ = k.z + 0.5; m.lookAt = null;
-  if (k.kind === "plant") { const ok = plantAt(m, k); if (ok) a.swingT = 0.35; else log("giveup", m, { task: "plant", why: "spot changed" }); endTask(m, F, ok); }
+  if (k.kind === "buy") {
+    if (k.deal.other.tradingWith) return true;   // the player is trading with it: wait
+    const ok = buyAxe(m, k.deal);
+    if (ok) m.ai.swingT = 0.2; else log("giveup", m, { task: "buy", why: "offer gone" });
+    endTask(m, F, ok);
+  } else if (k.kind === "plant") { const ok = plantAt(m, k); if (ok) a.swingT = 0.35; else log("giveup", m, { task: "plant", why: "spot changed" }); endTask(m, F, ok); }
   else if (k.kind === "gather") {
     const d = k.drop, left = T().inv.add(m.inv, d.id, d.count);
     if (left < d.count) log("pickup", m, { got: (d.count - left) + " " + BF.items[d.id].name });
@@ -503,15 +606,25 @@ function ai(m, dt, out) {
     }
     endTask(m, F, ok);
   } else {   // cut
+    const tr = k.tree, bx = tr.base;
+    if (!isLog(get(bx[0], bx[1], bx[2]))) { k.done = 0; endTask(m, F, false); return true; }
+    tr.logs = tr.logs.filter(([x, y, z]) => isLog(get(x, y, z)));
     F.chop += dt;
-    if (a.swingT <= 0) a.swingT = 0.35;
-    if (F.chop >= CHOP_T) {
-      const tr = k.tree, bx = tr.base;
-      if (!isLog(get(bx[0], bx[1], bx[2]))) { endTask(m, F, false); return true; }
-      tr.logs = tr.logs.filter(([x, y, z]) => isLog(get(x, y, z)));
+    if (a.swingT <= 0) {   // chopping: the arms (and the axe in them) swing, with a knock on the trunk each stroke
+      a.swingT = 0.35;
+      if (BF.audio && BF.audio.blockSound) { try { BF.audio.blockSound("hit", get(bx[0], bx[1], bx[2]), bx[0], bx[1], bx[2], 0.5); } catch (e) { /* optional */ } }
+    }
+    // log by log: each takes the player's break time with the axe it holds now (it may break half way), and wears the axe one use
+    while (k.done < tr.logs.length) {
+      const axe = axeOf(m), [lx, ly, lz] = tr.logs[k.done], need = logSeconds(get(lx, ly, lz), axe);
+      if (F.chop < need) break;
+      F.chop -= need; k.done++;
+      wearAxe(m, axe, 1);
+    }
+    if (k.done >= tr.logs.length) {
       tr.leaves = tr.leaves.filter(([x, y, z]) => isLeaf(get(x, y, z)));
       fell(m, tr);
-      log("fell", m, { at: bx, logs: tr.logs.length, leaves: tr.leaves.length });
+      log("fell", m, { at: bx, logs: tr.logs.length, leaves: tr.leaves.length, secs: +F.t.toFixed(1), axe: axeOf(m) ? BF.items[axeOf(m).id].name : "hand" });
       F.sweep = { x: bx[0], z: bx[2], until: nowS() + SWEEP_MAX }; F.skip = null; F.tries = null; F.thinkT = 0.8;   // now pick up everything that fell
       endTask(m, F, true);
     }
@@ -523,9 +636,12 @@ function ai(m, dt, out) {
 function statusText(m) {
   if (!m || m.profession !== "forester") return "";
   const s = m.fo && m.fo.task;
-  if (s) return s.kind === "plant" ? "planting a sapling" : s.kind === "cut" ? "felling a tree" : "picking things up";
+  if (s) return s.kind === "plant" ? "planting a sapling" : s.kind === "cut" ? "felling a tree" + (axeOf(m) ? " with " + BF.itemName(axeOf(m).id).toLowerCase().replace(/^an? /, "a ") : " by hand") : s.kind === "buy" ? "buying an axe" : "picking things up";
   return holdsSapling(m) ? "has saplings to plant" : "looking for saplings";
 }
 
-BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, fell, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, _test: { fell, plantAt, growTick, findDrop, state, builtBlock } };
+if (BF.mobs && BF.mobs.toolHolders) BF.mobs.toolHolders.forester = m => { const s = m.inv && axeOf(m); return s ? s.id : null; };   // its axe, drawn in its hands
+
+BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, fell, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, axeOf, axeScore, logSeconds, chopSecs,
+  _test: { fell, plantAt, growTick, findDrop, state, builtBlock, findAxeSeller, buyAxe, sticks, saw } };
 })();

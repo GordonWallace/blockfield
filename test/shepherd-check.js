@@ -69,10 +69,11 @@ module.exports = async (pg, out) => {
     const lamb = BF.mobs.list.find(m => m.type === "sheep" && m.lamb);
     ok("lamb is small and in the pen", !!lamb && lamb.model.scale.x < 0.7 && lamb.pen === pen, lamb && lamb.model.scale.x);
     ok("parents rest after breeding", a.sheep.cd > day() && !BF.shepherd.willing(a, day()));
-    BF.sky.day += 1.5; run(2);
-    ok("lamb grows up in a day", lamb && !lamb.lamb && lamb.model.scale.x > 0.99, lamb && lamb.model.scale.x);
-    // not fed -> not willing a day later
+    BF.sky.day += 1.5;
+    // not fed -> not willing a day later (checked before the village runs on: its shepherd may feed the sheep again within seconds)
     ok("fed state lapses after a day", BF.shepherd.hungry(a, day()));
+    run(2);
+    ok("lamb grows up in a day", lamb && !lamb.lamb && lamb.model.scale.x > 0.99, lamb && lamb.model.scale.x);
     // stay in the pen
     run(60);
     let out = 0; for (const s of pen.sheep) if (s.mob && (s.mob.position.x < pen.fx0 || s.mob.position.x > pen.fx1 || s.mob.position.z < pen.fz0 || s.mob.position.z > pen.fz1)) out++;

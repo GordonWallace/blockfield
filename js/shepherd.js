@@ -431,7 +431,7 @@ function perform(m, tk) {
   }
   if (tk.kind === "shear") {
     const n = shear(o, m);
-    if (n) loot(m, c.wool, n, o);
+    if (n) { loot(m, c.wool, n, o); BF.toolWear.use(m, BF.toolWear.best(m, "shears"), 1); }   // shearing wears the shears 1 use, as the player's
     return n > 0;
   }
   // cull: the shepherd keeps the mutton (and the wool the sheep still wears) instead of dropping it

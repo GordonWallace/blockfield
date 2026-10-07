@@ -1579,8 +1579,43 @@ function updateBadge(m) {
   m.badge.visible = true;
 }
 
+// Held tools: a profession module registers toolHolders[profession] = m => item id (or null), and that tool is drawn in the villager's
+// folded hands (a child of the arms, so it swings with them). Shapes by tool type, head coloured from the item's colour. js/forester.js uses it for axes.
+const toolHolders = {}, heldGeos = new Map();
+function heldGeo(id) {
+  if (heldGeos.has(id)) return heldGeos.get(id);
+  const it = BF.items[id], type = it && it.tool ? it.tool.type : "", wood = 0x5a3f26;
+  const c = new THREE.Color(it && it.color ? it.color : "#b0b0b8").getHex(), dark = new THREE.Color(c).multiplyScalar(0.7).getHex();
+  const head = (f, u, v) => (v === 0 ? dark : c);
+  let boxes;
+  if (type === "shears") boxes = [box([1.6, -1.5, 5.6], [2.8, 3, 6.6], c), box([3.0, -1.5, 5.6], [4.2, 3, 6.6], c), box([1.4, -3.5, 5.4], [4.4, -1.5, 6.8], 0x8a2a24)];
+  else {
+    boxes = [box([2.2, -3, 5.6], [3.4, 8, 6.8], wood)];   // held upright in front of the chest; a swing tips it back over the shoulder and down again
+    if (type === "axe") boxes.push(box([1.9, 4.6, 6.8], [3.7, 8.2, 9.8], head), box([1.9, 5.8, 4.9], [3.7, 7.2, 5.6], dark));   // blade facing forward
+    else if (type === "hoe") boxes.push(box([2.0, 6.8, 6.8], [3.6, 8.2, 9.8], head));
+    else boxes.push(box([-1.8, 8, 5.6], [7.4, 9.4, 6.8], head));   // pickaxe and anything else
+  }
+  const g = buildGeometry(boxes, 77);
+  heldGeos.set(id, g);
+  return g;
+}
+function syncHeld(m) {
+  const f = m.type === "villager" && toolHolders[m.profession], arms = m.meshes && m.meshes.arms;
+  let id = null;
+  if (f && arms && !m.dead) { try { id = f(m); } catch (e) { id = null; } }
+  if (id == null || !BF.items[id]) { if (m.heldMesh) m.heldMesh.visible = false; return; }
+  if (!m.heldMesh || m.heldMesh.parent !== arms) {   // first tool, or the outfit was rebuilt (setProfession)
+    if (m.heldMesh && m.heldMesh.parent) m.heldMesh.parent.remove(m.heldMesh);
+    m.heldMesh = new THREE.Mesh(heldGeo(id), m.material); m.heldId = id;
+    arms.add(m.heldMesh);
+  }
+  if (m.heldId !== id) { m.heldMesh.geometry = heldGeo(id); m.heldId = id; }
+  m.heldMesh.visible = true;
+}
+
 function animate(m) {
   const amp = m.walkAmt, ph = m.walkPhase, ai = m.ai;
+  syncHeld(m);
   const sw = Math.sin(ph);
   for (const name in m.meshes) {
     const mesh = m.meshes[name], p = mesh.userData.part;
@@ -1988,6 +2023,7 @@ function rayAABB(o, d, mn, mx) {
 // ---------- public API ----------
 BF.mobs = {
   list,
+  toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null); see syncHeld
   types: Object.keys(TYPES),
   init(sceneRef) {
     scene = sceneRef;

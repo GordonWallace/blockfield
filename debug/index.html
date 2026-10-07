@@ -548,9 +548,9 @@ function stamp(t) {
 // the top. Each type's checkbox turns all of its actions on or off; its arrow unfolds a checkbox per action. Everything starts checked.
 // Unchecked boxes are remembered in this browser (localStorage). Who did what is read from the log text, whose formats come
 // from js/villagelog.js: "Name (Job) traded with Name (Job): ...", "Name (Job) placed a bed at ...", "Name became a Job",
-// "Name was born to ...", "Name (Job) died: ...". Entries that match none of these are always shown.
-const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing beds", job: "Taking the job", born: "Being born", death: "Dying" };
-const ACTS_FOR = t => t === "Player" ? ["buy", "bed"] : t === "Child" ? ["born", "death"] : ["buy", "sell", "bed", "job", "death"];
+// "Name was born to ...", "Name (Job) died: ...", "Name (Job)'s Iron Pickaxe broke". Entries that match none of these are always shown.
+const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing beds", job: "Taking the job", born: "Being born", death: "Dying", tool: "Wearing out tools" };
+const ACTS_FOR = t => t === "Player" ? ["buy", "bed"] : t === "Child" ? ["born", "death"] : ["buy", "sell", "bed", "job", "tool", "death"];
 const STORE = "bf-debug-logfilters";
 let off = new Set();
 try { off = new Set(JSON.parse(localStorage.getItem(STORE) || "[]")); } catch (e) { /* private window: start with everything on */ }
@@ -568,6 +568,7 @@ function actorsOf(e) {
   }
   if (k === "bed" && (m = /^(Player|.*?\([^()]+\)) placed a /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "bed"]] : null; }
   if (k === "job" && (m = / became an? (.+?)(?: \(was |$)/.exec(tx))) return [[m[1], "job"]];
+  if (k === "tool" && (m = /^(.*?\))'s .* broke$/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "tool"]] : null; }
   if (k === "birth") return [["Child", "born"]];
   if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
   return null;
