@@ -23,11 +23,11 @@ const VALUE = {
   sandstone: .08, sandstone_bricks: .09, mossy_cobblestone: .15, calcite: .12, terracotta: .15, orange_terracotta: .18,
   yellow_terracotta: .18, red_terracotta: .18, white_terracotta: .18, brown_terracotta: .18,
   flint: .06, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,
-  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .04, wool: .1, white_wool: .12, leather: .15,
+  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .04, white_wool: .12, leather: .15,
   raw_porkchop: .08, raw_beef: .08, raw_mutton: .07, raw_chicken: .06, cooked_porkchop: .12, steak: .12, cooked_mutton: .1,
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
-  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07,
+  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
@@ -96,9 +96,9 @@ const TRADES = {
     ["2 emerald > 24 raw_cod"],
   ],
   shepherd: [
-    ["11 wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald"],
-    ["10 white_wool > 1 emerald", "1 emerald > 2 red_bed"],
-    ["1 emerald > 9 wool", "16 raw_mutton > 1 emerald"],
+    ["11 white_wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald"],   // white wool sells from level 1: it is what the shepherd shears (js/shepherd.js)
+    ["10 white_wool > 1 emerald"],
+    ["16 raw_mutton > 1 emerald", "1 emerald > 9 cooked_mutton"],
     ["3 emerald > 4 hay_bale"],
     ["2 emerald > 16 white_wool"],
   ],
@@ -152,7 +152,7 @@ const TRADES = {
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer.
   furniture_maker: [
     ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed"],
-    ["11 wool > 1 emerald", "10 oak_log > 1 emerald"],
+    ["10 oak_log > 1 emerald"],
     ["40 spruce_planks > 1 emerald", "40 birch_planks > 1 emerald", "10 spruce_log > 1 emerald", "10 birch_log > 1 emerald"],
     ["3 emerald > 7 red_bed"],
     ["40 dark_oak_planks > 1 emerald", "40 acacia_planks > 1 emerald", "10 dark_oak_log > 1 emerald"],
@@ -169,7 +169,7 @@ const PRODUCE = {
   toolsmith: ["iron_hoe", "iron_pickaxe", "iron_axe"],
   butcher: [],         // cooks raw meat it holds instead (js/villagelife.js)
   fisherman: [],       // cooks raw cod it holds instead (js/villagelife.js)
-  shepherd: ["wool", "white_wool", "red_bed", "hay_bale"],
+  shepherd: ["white_wool", "hay_bale"],
   fletcher: ["arrow"],
   mason: ["brick", "bricks", "stone", "terracotta", "orange_terracotta", "yellow_terracotta", "red_terracotta",
     "white_terracotta", "brown_terracotta", "sandstone_bricks"],

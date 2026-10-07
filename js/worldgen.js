@@ -1024,6 +1024,44 @@ function layoutVillage(cx, cz, spawn, pop) {
     occ = [plaza].concat(roads.map(r => [r.x0, r.z0, r.x1, r.z1]), v.pads.slice(1).map(p => [p.x0, p.z0, p.x1, p.z1]));
   }
 
+  // Shepherd pens (gen 3+): the jobs plan (js/jobs.js) makes some villagers shepherds, and each one is given a fenced pen with its loom
+  // beside it. Pens the layout already rolled are used first; missing ones are added here, after everything else, so no other plot moves.
+  // v.nb0 keeps the building count of the original layout: the villager roster keys off it (js/mobs.js), so these pens never change it.
+  v.nb0 = v.buildings.length;
+  if (GEN >= 3 && BF.jobs && BF.jobs.shepherdCount) {
+    let need = 0;
+    try { need = Math.min(BF.jobs.shepherdCount(v), 4); } catch (e) { need = 0; }
+    let have = v.buildings.filter(b => b.type === "pen").length;
+    const [w, d] = BTYPES.pen;
+    for (const road of roads) for (const side of [1, -1]) {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      for (let t = 1; t + w - 1 <= road.end + 1 && have < need; t += 2) {
+        const bx = road.sx + dx * t + sx * 3, bz = road.sz + dz * t + sz * 3;
+        const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+        const c0 = P(0, 0), c1 = P(w - 1, d - 1);
+        const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+        let ok = Math.abs(box[0] - cx) < 72 && Math.abs(box[2] - cx) < 72 && Math.abs(box[1] - cz) < 72 && Math.abs(box[3] - cz) < 72 && !overlaps(box) && !covers(box, 1);
+        const du = w >> 1, door = P(du, 0), front = P(du, -1);
+        const y = ok ? climate(front[0], front[1]) : 0;
+        if (ok && (y < SEA || C.rv)) ok = false;
+        for (let q = -1; ok && q <= d; q++) for (let u = -1; u <= w; u += (q === -1 || q === d) ? 1 : w + 1) {
+          const p = P(u, q), h = climate(p[0], p[1]);
+          if (h < SEA || C.rv || Math.abs(h - y) > 3) { ok = false; break; }
+        }
+        for (let q = 1; ok && q < d - 1; q += 2) for (let u = 1; u < w - 1; u += 2) {
+          const p = P(u, q), h = climate(p[0], p[1]);
+          if (h < SEA || C.rv || Math.abs(h - y) > 3) { ok = false; break; }
+        }
+        if (!ok) continue;
+        v.buildings.push({ type: "pen", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+          x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 607) });
+        occ.push(box);
+        v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+        have++; t += w;
+      }
+    }
+  }
+
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
   for (const road of roads) {
@@ -1243,11 +1281,12 @@ function drawShell(b, P, S, style) {
       }
       return;
     case "pen": {
-      // fenced animal pen with a gate gap facing the road, a trough and hay
+      // fenced animal pen with a gate facing the road (a gap before gen 3), a trough and hay
       for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
         const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
         if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
       }
+      if (GEN >= 3 && BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
       P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale); P(w - 2, y, d - 2, B.water);
       P(du, y, -1, B.dirt_path);
       return;

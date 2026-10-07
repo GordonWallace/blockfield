@@ -241,17 +241,21 @@ const MODELS = {
       ...quadLegs(4, 7, 12, 4, leg),
     ];
   },
-  sheep() {
-    const wool = 0xe9e9e6, skin = 0xd6c1a4;
-    const leg = (f, u, v) => (v >= 7 ? wool : skin);
+  sheep(variant) {
+    const wool = 0xe9e9e6, skin = 0xd6c1a4, shorn = variant === "shorn", pink = 0xdcb8a4;
+    const leg = (f, u, v) => (!shorn && v >= 7 ? wool : skin);
     const head = (f, u, v) => {
-      if (f === "front") { if (v >= 5) return wool; if (v === 3 && (u === 1 || u === 4)) return 0x1d1a16; return skin; }
-      if (f === "top" || f === "back") return wool;
+      if (f === "front") { if (!shorn && v >= 5) return wool; if (v === 3 && (u === 1 || u === 4)) return 0x1d1a16; return skin; }
+      if (!shorn && (f === "top" || f === "back")) return wool;
       if (f === "bottom") return skin;
-      return v >= 3 ? wool : skin;
+      return !shorn && v >= 3 ? wool : skin;
     };
+    // shorn: a smaller, pinker body (the wool shell is gone)
+    const body = shorn
+      ? box([-4.5, 12, -7], [4.5, 20, 7], (f, u, v) => (hash(u, v, 5, 7) < 0.25 ? 0xd2a692 : pink))
+      : box([-6, 11, -8], [6, 21, 8], (f, u, v) => (hash(u, v, 2, 7) < 0.2 ? 0xd4d4d0 : wool));
     return [
-      { name: "body", pivot: [0, 0, 0], boxes: [box([-6, 11, -8], [6, 21, 8], (f, u, v) => (hash(u, v, 2, 7) < 0.2 ? 0xd4d4d0 : wool))] },
+      { name: "body", pivot: [0, 0, 0], boxes: [body] },
       { name: "head", pivot: [0, 18, 7], head: true, boxes: [box([-3, -3, 0], [3, 4, 8], head)] },
       ...quadLegs(3, 5, 12, 4, leg),
     ];
@@ -485,7 +489,7 @@ const MODELS = {
 const TYPES = {
   pig:      { hostile: false, hp: 10, hw: 0.45, h: 0.9,  speed: 1.3, flee: 3.4, drops: [["raw_porkchop", 1, 3]] },
   cow:      { hostile: false, hp: 10, hw: 0.45, h: 1.4,  speed: 1.1, flee: 3.0, drops: [["raw_beef", 1, 3], ["leather", 0, 2]] },
-  sheep:    { hostile: false, hp: 8,  hw: 0.45, h: 1.3,  speed: 1.2, flee: 3.2, drops: [["wool", 1, 1], ["raw_mutton", 1, 2]] },
+  sheep:    { hostile: false, hp: 8,  hw: 0.45, h: 1.3,  speed: 1.2, flee: 3.2, drops: [["white_wool", 1, 1], ["raw_mutton", 1, 2]] },
   chicken:  { hostile: false, hp: 4,  hw: 0.2,  h: 0.75, speed: 1.1, flee: 3.0, drops: [["raw_chicken", 1, 1], ["feather", 0, 2]], slowFall: true },
   zombie:   { hostile: true,  hp: 20, hw: 0.3,  h: 1.95, speed: 2.2, attack: 3, burns: true, drops: [["rotten_flesh", 0, 2]] },
   skeleton: { hostile: true,  hp: 20, hw: 0.3,  h: 1.99, speed: 2.3, burns: true, drops: [["bone", 0, 2], ["arrow", 0, 2]] },
@@ -604,6 +608,7 @@ function removeMob(m) {
   if (scene) scene.remove(m.root);
   m.material.dispose();
   if (m.type === "villager" && !m.dead) { const k = villagerKey(m); if (k && m.inv) villagerSaves.set(k, BF.trades.pack(m)); }
+  if (m.sheep && m.sheep.mob === m) m.sheep.mob = null;   // pen sheep keep their state and respawn with the pen (js/shepherd.js)
   m.removed = true;
 }
 
@@ -677,6 +682,7 @@ function giveDrops(m) {
   const inv = BF.inventory;
   if (!inv || typeof inv.add !== "function") return;
   for (const [name, lo, hi] of m.def.drops || []) {
+    if (m.type === "sheep" && (m.lamb || (m.sheep && m.sheep.shorn)) && (name === "white_wool" || m.lamb)) continue;   // lambs drop nothing, shorn sheep no wool
     const id = (BF.I && BF.I[name] != null) ? BF.I[name] : (BF.B && BF.B[name]);
     if (id == null) continue;
     const n = irnd(lo, hi);
@@ -809,6 +815,7 @@ function waterAhead(m, dx, dz) {
   return isWater(BF.world.getBlock(x, y0, z)) || isWater(BF.world.getBlock(x, y0 - 1, z));
 }
 function pickWander(m, r) {
+  if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
   const a = Math.random() * Math.PI * 2, d = rnd(3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
   m.ai.tz = m.position.z + Math.sin(a) * d;
@@ -1046,7 +1053,7 @@ function walkCell(x, y, z) {
   if (!W.isLoaded(x, z) || y < BF.MIN_Y + 1 || y + 2 >= BF.H) return false;
   const fl = blockAt(x, y - 1, z), feet = blockAt(x, y, z), head = blockAt(x, y + 1, z);
   if (!fl.solid || fl.door || fl.bed || fl.model === "fence") return false;
-  return (!feet.solid || !!feet.door) && (!head.solid || !!head.door) && feet.render !== "liquid";
+  return (!feet.solid || !!feet.door || !!feet.gate) && (!head.solid || !!head.door) && feet.render !== "liquid";
 }
 // A* over walkable cells (4-way, step up 1, drop up to 3). goal(x, y, z) -> bool. Returns cells after start, or null.
 let planBudget = 0;
@@ -1070,7 +1077,7 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
       if (!walkCell(nx, ny, nz)) continue;
       if (dy > 0 && blockAt(x, y + 2, z).solid) break;            // no room to jump
       if (dy < 0 && blockAt(nx, y + 1, nz).solid) break;          // wall: cannot step off
-      const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door ? 1 : 0);
+      const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
       if (cost.has(k) && cost.get(k) <= ng) break;
       cost.set(k, ng); from.set(k, [x, y, z]);
       open.push([nx, ny, nz, ng, ng + hh(nx, nz)]);
@@ -1115,16 +1122,17 @@ function isOccupied(x, y, z) {
 function villagerDoors(m) {
   const ai = m.ai, W = BF.world;
   if (ai.route && !m.sleeping) for (let k = ai.ri; k < Math.min(ai.route.length, ai.ri + 2); k++) {
-    const [x, y, z] = ai.route[k], d = blockAt(x, y, z).door;
+    const [x, y, z] = ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
     if (d && !d.open && Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.7) {
-      W.setDoor(x, y, z, true);
+      if (bk.gate) W.setGate(x, y, z, true); else W.setDoor(x, y, z, true);
       (ai.doors || (ai.doors = [])).push([x, y, z]);
     }
   }
   if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(([x, y, z]) => {
     if (Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || isOccupied(x, y, z)) return true;
-    const d = blockAt(x, y, z).door;
-    if (d && d.open) W.setDoor(x, y, z, false);
+    const bk = blockAt(x, y, z);
+    if (bk.door && bk.door.open) W.setDoor(x, y, z, false);
+    else if (bk.gate && bk.gate.open) W.setGate(x, y, z, false);
     return false;
   });
 }
@@ -1239,6 +1247,7 @@ function villagerAI(m, dt, out) {
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
+  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
@@ -1356,7 +1365,9 @@ function updateMob(m, dt) {
     const a = Math.atan2(fz, fx) + Math.sin(ai.fleeJitter) * 0.8;
     _desired.x = Math.cos(a) * T.flee; _desired.z = Math.sin(a) * T.flee;
     m.lookAt = null;
-  } else wanderAI(m, dt, _desired);
+  } else if (m.type === "sheep" && BF.shepherd && BF.shepherd.sheepAI(m, dt, _desired)) { /* walking to a mate (js/shepherd.js) */ }
+  else wanderAI(m, dt, _desired);
+  if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
   if (m.removed) return; // exploded
 
   // ---- physics ----
@@ -1567,7 +1578,7 @@ function standable(x, y, z, hw, h) {
 }
 function countMobs() {
   let p = 0, h = 0;
-  for (const m of list) if (!m.dead && !m.def.village) { if (m.hostile) h++; else p++; }
+  for (const m of list) if (!m.dead && !m.def.village && !m.pen) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
   return { p, h };
 }
 function tryPassiveSpawn() {
@@ -1780,7 +1791,7 @@ function updateVillages(dt) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
-    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); }
+    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); }
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - pp.x, pp.x - v.maxX), Math.max(0, v.minZ - pp.z, pp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - pp.x, v.z - pp.z) > 80;
     if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
@@ -1826,7 +1837,7 @@ function despawn(dt) {
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
     const d = m.position.distanceTo(pp);
-    const simmed = !!(m.village && BF.villageSim && BF.villageSim.isActive(m.village.key));   // villagers of a far simulated village stay
+    const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
     if ((d > DESPAWN_DIST && !simmed) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
     if (m.hostile && !m.dead && d > 48 && m.age > 20 && Math.random() < dt * 0.03) removeMob(m);
@@ -1892,6 +1903,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.tick(dt);   // villager meals, farm scans (js/villagelife.js)
     if (BF.jobs) BF.jobs.tick(dt);   // jobsite validation, unemployed villagers look for work (js/jobs.js)
     if (BF.breeding) BF.breeding.tick(dt);   // encounters, hearts, children (js/breeding.js)
+    if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     spawnT -= dt;
@@ -1934,16 +1946,18 @@ BF.mobs = {
     for (const m of list) if (m.type === "villager" && !m.dead && m.inv) { const k = villagerKey(m); if (k) out[k] = BF.trades.pack(m); }
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
+    if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
     return out;
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:") villagerSaves.set(k, o[k]);
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
+    if (BF.shepherd) BF.shepherd.importAll(o);
   },
   // Right-click on a mob (called by the player module). Opens the trade screen when the inventory module has one
   // (returns null); otherwise falls back to a simple 3 wheat -> 1 emerald trade and returns a message string.
@@ -1978,6 +1992,18 @@ BF.mobs = {
     if (on) { mob.vel.x = mob.vel.z = 0; mob.ai.mode = "idle"; mob.ai.t = 2; mob.lookAt = "player"; }
   },
   professions: PROFESSIONS,
+  // js/shepherd.js: swaps a sheep between its woolly and shorn model, and between lamb and adult size (k: 0 = newborn .. 1 = grown)
+  setSheepLook(m, shorn) {
+    if (!m || m.type !== "sheep" || !m.meshes) return;
+    for (const p of typeParts("sheep", shorn ? "shorn" : "")) if (m.meshes[p.name]) { m.meshes[p.name].geometry = p.geo; m.meshes[p.name].userData.part = p; }
+  },
+  setSheepSize(m, k) {
+    if (!m || m.type !== "sheep") return;
+    const s = 0.55 + 0.45 * k, hs = 1.35 + (1 - 1.35) * k;
+    m.model.scale.setScalar(s);
+    if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
+    m.halfWidth = TYPES.sheep.hw * (0.5 + 0.5 * k); m.height = TYPES.sheep.h * (0.55 + 0.45 * k);
+  },
   // js/jobs.js: the deterministic roster of a village record ({key, houses, nb}) and in-place profession change (rebuilds the outfit)
   roster: villageRoster,
   setProfession(m, prof) {
@@ -2010,6 +2036,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.reset();
     if (BF.jobs) BF.jobs.reset();
     if (BF.villageSim) BF.villageSim.reset();
+    if (BF.shepherd) BF.shepherd.reset();
   },
 };
 })();

@@ -132,7 +132,7 @@ for every tile (`stone_bricks`, `deepslate_top`, `lapis_ore`, `tnt_side`, `magma
   `<sp>_fence` for all but oak (model `fence`, tile `<sp>_planks`, icon tile `<sp>_fence`; fences of any wood connect to each other: `connects` in world.js tests `model === "fence"`).
   Any log/wood/stripped variant crafts 4 planks of its own species (inventory.js maps `stripped_`/`_wood` to the species), is furnace fuel and smelts to charcoal.
   Right-clicking a log or wood with an axe strips it (player.js `secondaryDown`). Not done: other-wood doors, fence gates, slabs/stairs (Tier 2), per-species village houses.
-- Colour (names `<colour>_<family>`): `wool` (existing `wool` and `white_wool` kept; 15 new), `terracotta` (existing plain + orange/yellow/white/brown/red kept; 11 new),
+- Colour (names `<colour>_<family>`): `wool` (`white_wool` plus 15 new; the old plain `wool` block is a hidden legacy id that drops and resolves to `white_wool`), `terracotta` (existing plain + orange/yellow/white/brown/red kept; 11 new),
   `_concrete`, `_concrete_powder`, `_stained_glass`, `_glazed_terracotta` (16 each), `tinted_glass`. Block fields: `translucent: true` (stained/tinted glass) sends the
   faces into the blended pass (liquidMat, alpha from the tile) instead of the alpha-tested one; `hardensTo: "<colour>_concrete"` on powder.
 - `BF.hardenPowder(x, y, z, id)` (blocks.js): turns powder into concrete when water is on a side or above; world.js `fluidTick` calls it for every queued cell
@@ -141,7 +141,7 @@ for every tile (`stone_bricks`, `deepslate_top`, `lapis_ore`, `tnt_side`, `magma
   (brown mushroom), `black_dye` (charcoal or coal); vanilla mixes (2 dyes -> 2) for orange, pink, light_blue, purple, lime, cyan, gray, light_gray, magenta.
   Dyeing: dye + 8 wool / terracotta / concrete powder / glass-or-stained-glass in a ring -> 8 coloured (any colour of the family, `BF.inventory.recipes`),
   dye + 1 wool (any) -> that wool, dye + 4 sand + 4 gravel -> 8 concrete powder, coloured terracotta smelts to glazed terracotta, 4 black dye around glass -> tinted glass.
-  The bed recipe accepts any wool. Villagers/sheep still only deal in `wool` / `white_wool`.
+  The bed recipe accepts any wool. Sheep and shepherds produce `white_wool`; plain `wool` was merged into it (`BF.resolveItem("wool")` returns `white_wool`, so old saves convert on load).
 - Creative menu: tab "Colored Blocks" (`colour`): everything matching `/(^|_)(wool|terracotta|concrete|concrete_powder|stained_glass|dye)$|^tinted_glass$/`, sorted by family then dye order.
   Stripped logs carry `creativeTab: "building"`. `bone_meal` is under Miscellaneous.
 - Textures: `js/textures-colour.js` registers painters in `BF.texKit` (shared with textures-stone.js; the kit now also exposes `woolBase, barkSide, logTop, SPRITE_TILES, WOOD_SPRUCE, WOOD_ACACIA`).
@@ -675,3 +675,32 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - Hostiles fight back (`golemFight`): a hostile a golem hit targets it for 12 s (`ai.golemFoe`, `ai.golemFoeT`), even over the player; zombies, spiders (not when calm in daylight) and skeletons not chasing the player pick a golem within 10 blocks. Creepers ignore golems. Damage to golems: `GOLEM_HITS` = zombie 4, spider 3, skeleton arrow 3-5 (arrows carry a `victim` mob they can hit). Golem health 100.
 - Cracks: below 75% / 50% / 25% health the golem's part geometries swap to crack stage 1 / 2 / 3 (`m.crackLevel`; cached per stage via `typeParts("iron_golem", "1".."3")`). Each stage only adds cracks.
 - A golem drops its iron ingots whatever kills it. Test: `node test/run.js /tmp/golem test/golem-actions.js`.
+## Sheep and shepherds (js/shepherd.js, loaded after breeding.js)
+`BF.shepherd`. Every sheep mob carries `m.sheep = {fed, shorn, woolAt, growAt, cd, x, z, mob}` (game days are absolute: `BF.sky.day + BF.sky.time`).
+- **Feeding / breeding.** 1 wheat (`wheat_item`) from the player (right click, player.js `secondaryDown`) or a shepherd sets `fed`; a sheep is *willing* while `now - fed < 1` day
+  (`BF.shepherd.willing/hungry`). A hungry sheep refuses more wheat ("The sheep isn't hungry"). Two willing adults of the same pen (or both wild) within 10 blocks walk to each other (`sheepAI`, called from `updateMob`) and a lamb appears when they
+  are 1.8 blocks apart; both rest 1 day (`cd`). Lambs (`m.lamb`, `growAt`) are scaled 0.55, drop nothing, cannot be fed to breed or sheared and are adult after 1 day; wheat ages one by 10%.
+  No breeding while 30 sheep are within 16 blocks. Events: `sheepFed(m, by)`, `sheepBorn(lamb, a, b)`, `sheepShorn(m, by)`.
+- **Shears** (item `shears`, `tool.type "shears"`, appended to the item list; recipe: 3 iron ingots, shapeless). Right click a woolly adult: 1-3 `white_wool` drop, `shorn = true`, the model swaps to the shorn one
+  (`BF.mobs.setSheepLook`; mobs.js `typeParts("sheep", "shorn")`). The wool regrows after 7 days +-30% (sum of two uniforms), per sheep. Shears also break leaves 4x faster (`block.tool == "shears"`).
+  Killed shorn sheep drop no wool (mobs.js `giveDrops`).
+- **Pens.** worldgen (`layoutVillage`, gen 3+) makes sure a village has a fenced `pen` building for every shepherd job its jobs plan holds (`BF.jobs.shepherdCount`), adding pens after the normal layout so no other plot moves;
+  `v.nb0` is the building count of the original layout and is what the villager roster uses, so the extra pens never change who lives there. `jobs.planVillage` puts a shepherd's loom beside a pen (outside the fence, gen 3+).
+  `BF.shepherd.pensOf(rec)` returns `{key, idx, rec, b, x0..z1 (sheep room, block edges), fx0..fz1 (fence footprint), cells, threshold, sheep: [state]}`. The sheep room is the interior without the back row (hay and trough).
+  Pens are stocked while their village is loaded or simulated: a new pen starts with 2-4 sheep; the state list outlives the mobs (despawned sheep come back with their state); penned sheep (`m.pen`, `m.penVillage`) are
+  kept inside the room by `pickPenTarget` / `contain` (mobs.js `pickWander`, `updateMob`) and count as village stock (not wildlife) in `countMobs`. A sheep that wanders into a pen joins it; one that gets 2.5 blocks out leaves it.
+  Saved under `"pens:<village key>"` in `exportVillagers` (`[{i: building index, s: [[fed, woolAt|null, growAt|null, cd, x, z], ...]}]`); old saves have none (pens just start with new sheep).
+- **Shepherd AI** (`BF.shepherd.ai`, called from `villagerAI` after the farmer/builder hooks; daytime only, before sky time 0.5). It tends its pen (the one whose fence is within 4.5 blocks of its loom), plus loose sheep within 12 blocks;
+  with no pen it tends the sheep within 10 blocks of its loom. Order of work: feed every hungry adult (needs wheat), shear every woolly adult (needs shears), cull. Tasks walk with `BF.villageLife.travel`. It keeps wool and meat in its inventory.
+  New shepherds get shears and 8 wheat (`ensureKit`, once, only when the inventory has no shears).
+- **Overcrowding.** Pen threshold = `ceil(room cells / 6)` (6 for the standard 7x5 room): the pen is full once it holds that many sheep (lambs count). While full the shepherd kills adults (the nearest shorn one first, else the nearest, never below 2 adults) until the count is below the threshold, keeping 1-2 raw mutton (+1 wool if the sheep still wore it). It never kills while the pen has room. Without a pen the threshold is 8 sheep within 10 blocks.
+- **Wheat.** `wheatWanted(m)`: under max(4, 2 per adult) wheat the shepherd wants to top up to ~5 days. villagelife.js `shopAI` buys it at the fair price (`VALUE.wheat_item`: 12 wheat per emerald) from the nearest villager
+  with spare wheat, farmers first (`findWheatSeller`, `doWheatDeal`; status "Buying wheat"). Farmers bake only wheat above `WHEAT_SPARE` (24) and sell down to `WHEAT_SELF` (4).
+- **Mutton.** Shepherds cook their raw mutton daily like butchers (`cookDaily`, 8 a day) and sell it to hungry villagers through the normal food market (`findFoodSeller`), and to the player (shepherd L3: 1 emerald > 9 cooked_mutton).
+  Wool: the shepherd keeps what it shears and offers it as `1 emerald > 8 white_wool` from level 1, so any villager's trade logic (e.g. the furniture maker) can buy it.
+- **Pen gates** (gen 3+): the pen's front gap holds an `oak_fence_gate_<x|z>` (blocks.js `gateDefs`, appended after the tents; 4 states, axis x/z, open/closed;
+  item `oak_fence_gate`, 2 rows of stick-plank-stick). `BF.gateId(axis, open)`, `BF.world.setGate(x, y, z, open?)`; the player toggles it with right click.
+  Villager paths treat a gate like a door (mobs.js `walkCell`, `villagerDoors` opens it ahead and shuts it behind). A shepherd with no task inside a pen
+  walks out through the gate to the path outside (`leave`). Fences connect to gates in line with them.
+- **Looms and sheep**: only a pen with a shepherd's loom on its outside ring (`hasLoom(pen)`, from `BF.jobs.planFor`) is stocked with sheep; spare pens stay empty.
+- Tests: `test/shepherd-check.js`, `test/shepherd-day.js`, `test/shepherd-misc.js` (`NODE_PATH=$(npm root -g) node test/run.js /tmp/x test/shepherd-day.js`).

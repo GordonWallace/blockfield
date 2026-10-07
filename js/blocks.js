@@ -18,6 +18,18 @@ function rotBox(b, f) {
 // Two-block doors (lower/upper half, open/closed, facing = side the closed slab sits on, towards the placer)
 // and beds (foot/head, facing = foot -> head). One block id per state.
 const doorDefs = [], bedDefs = [];
+// Fence gates (shepherd pens): axis = the direction the closed gate spans ("x" or "z"); open gates swing their two leaves
+// to the +z / +x side and let anything walk through. One block id per state; villagers open and close them like doors.
+const gateDefs = [];
+for (const axis of ["x", "z"]) for (const open of [0, 1]) {
+  const posts = [[0, 5, 7, 2, 16, 9], [14, 5, 7, 16, 16, 9]];
+  const leaves = open ? [[0, 6, 9, 2, 9, 15], [0, 12, 9, 2, 15, 15], [14, 6, 9, 16, 9, 15], [14, 12, 9, 16, 15, 15]]
+    : [[2, 6, 7, 14, 9, 9], [2, 12, 7, 14, 15, 9], [6, 9, 7, 10, 12, 9]];
+  const sw = b => (axis === "x" ? b : [b[2], b[1], b[0], b[5], b[4], b[3]]);
+  gateDefs.push({ name: "oak_fence_gate_" + axis + (open ? "_open" : ""), tiles: "planks", render: "model", model: "gate", opaque: false, solid: !open,
+    hardness: 2, tool: "axe", drop: "oak_fence_gate", item: "oak_fence_gate", hidden: true, gate: { axis, open: !!open },
+    boxes: [...posts, ...leaves].map(sw), color: "#a2834f" });
+}
 for (let f = 0; f < 4; f++) for (const upper of [0, 1]) for (const open of [0, 1]) {
   const box = rotBox(open ? [0, 0, 0, 3, 16, 16] : [0, 0, 13, 16, 16, 16], f);
   doorDefs.push({ name: "oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f], tiles: upper ? "oak_door_top" : "oak_door_bottom",
@@ -78,7 +90,7 @@ const BLOCK_DEFS = [
   { name: "glass", tiles: "glass", render: "cutout", opaque: false, hardness: 0.3, drop: null, color: "#cfe9f0" },
   { name: "crafting_table", tiles: { top: "crafting_table_top", side: "crafting_table_side", front: "crafting_table_front", bottom: "planks" }, hardness: 2.5, tool: "axe", color: "#7a5a33" },
   { name: "bricks", tiles: "bricks", hardness: 2, tool: "pickaxe", needsTool: true, color: "#96503f" },
-  { name: "wool", tiles: "wool", hardness: 0.8, color: "#eaeaea" },
+  { name: "wool", tiles: "white_wool", hidden: true, item: "white_wool", drop: "white_wool", hardness: 0.8, color: "#f0f0f0" },   // legacy: merged into white_wool (id kept for old saves)
   { name: "mossy_cobblestone", tiles: "mossy_cobblestone", hardness: 2, tool: "pickaxe", needsTool: true, color: "#61724a" },
   { name: "jungle_log", tiles: { top: "jungle_log_top", side: "jungle_log", bottom: "jungle_log_top" }, hardness: 2, tool: "axe", color: "#594420" },
   { name: "jungle_leaves", tiles: "jungle_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["jungle_sapling", 1, 1, 0.025], ["stick", 1, 2, 0.02]], color: "#2f8a1a" },
@@ -261,6 +273,9 @@ const BLOCK_DEFS = [
   // carpentry bench: the furniture maker villager's jobsite (not vanilla): an oak workbench with a vice, a saw and a roll of wool
   { name: "carpentry_bench", jobsite: "furniture_maker", tiles: { top: "carpentry_bench_top", side: "carpentry_bench_side", front: "carpentry_bench_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#9a7448" },
   // ---- end furniture pack ----
+  // ---- shepherd pack ---- (appended; ids are saved numerically: only ever append after this line)
+  ...gateDefs,   // oak_fence_gate_<x|z>[_open]: pen gates (js/shepherd.js)
+  // ---- end shepherd pack ----
 ];
 
 // ---- slabs/stairs pack runtime: shape placeholders get their base block's tiles / hardness / tool / colour ----
@@ -517,6 +532,10 @@ const ITEM_DEFS = [
   // ---- end explorer items ----
   // ---- auto map (js/mapview.js; append-only: ids of the items above must not move) ----
   { name: "auto_map", stack: 1, color: "#d8c890", autoBlank: true, creativeTab: "misc", label: "Auto-Fill Map", search: "auto map autofill auto-fill automap creative terrain overview" },   // right click: asks for a width, then fills itself from the world generator
+  // ---- shepherd items (js/shepherd.js; append-only) ----
+  { name: "oak_fence_gate", places: "gate", color: "#a2834f", creativeTab: "functional" },   // 4 sticks + 2 planks; pens have one
+  { name: "shears", stack: 1, tool: { type: "shears", tier: 1, speed: 4, damage: 1 }, color: "#c8c8d0" },   // shears sheep; breaks leaves faster; 3 iron ingots
+  // ---- end shepherd items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -592,11 +611,13 @@ BF.dirIndex = (dx, dz) => Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz >
 BF.doorId = (f, upper, open) => B["oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
 BF.ladderId = f => B["ladder_" + "nesw"[f & 3]]; // ladder facing f (away from its wall)
 BF.tentId = (f, r, l, up) => B["tent_" + (up ? "up_" : "") + r + "_" + l + "_" + "nesw"[f & 3]];
+BF.gateId = (axis, open) => B["oak_fence_gate_" + axis + (open ? "_open" : "")];
 BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3]];
 // Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.
 let dynItem = ITEM_BASE + 0x10000;
 BF.resolveItem = name => {
+  if (name === "wool") return I.white_wool;   // old saves: plain wool was merged into white wool
   if (I[name] !== undefined) return I[name];
   const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
   if (a && +a[1] >= 1 && +a[1] <= 32768) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
