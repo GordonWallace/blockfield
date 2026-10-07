@@ -30,10 +30,11 @@ module.exports = async (pg, out) => {
   const g = await pg.evaluate(() => {
     const B = BF.B, W = BF.world, F = BF.forester, res = {};
     const p = BF.player.position;
-    const open = (x, z) => { const y = W.heightAt(x, z); return W.getBlock(x, y, z) === B.grass && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].every(k => W.getBlock(x, y + k, z) === 0) ? y : -1; };
+    const clear = (x, y, z) => { for (let dx = -5; dx <= 5; dx++) for (let dz = -5; dz <= 5; dz++) for (let dy = -2; dy <= 12; dy++) { const id = W.getBlock(x + dx, y + dy, z + dz); if (id && (F._test.builtBlock(id) || /_(log|leaves)$/.test(BF.blocks[id].name))) return false; } return true; };
+    const open = (x, z) => { const y = W.heightAt(x, z); return W.getBlock(x, y, z) === B.grass && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].every(k => W.getBlock(x, y + k, z) === 0) && clear(x, y, z) ? y : -1; };
     // a flat grass patch: 7 spots 8 apart in a row
     let base = null;
-    for (let r = 14; r < 60 && !base; r += 2) for (let a = 0; a < 6.28 && !base; a += 0.4) {
+    for (let r = 14; r < 120 && !base; r += 2) for (let a = 0; a < 6.28 && !base; a += 0.4) {
       const x0 = Math.floor(p.x + Math.cos(a) * r), z0 = Math.floor(p.z + Math.sin(a) * r);
       let ok = true, ys = [];
       for (let i = 0; i < 7 && ok; i++) { const y = open(x0 + i * 8, z0); if (y < 0) ok = false; ys.push(y); }
@@ -216,6 +217,22 @@ module.exports = async (pg, out) => {
     W.setBlock(x, y + 1, z, 0); BF.emit("blockBroken", x, y + 1, z, B.oak_log);
     res.buildingStays = W.getBlock(x, y + 3, z) === B.oak_log;
     for (let k = 0; k <= 5; k++) { W.setBlock(x, y + k, z, 0); W.setBlock(x + 1, y + k, z, 0); }
+    return res;
+  })));
+  // 8. two oaks whose crowns touch: felling one leaves the other's leaves on it
+  console.log("neighbours", JSON.stringify(await pg.evaluate(() => {
+    const B = BF.B, W = BF.world, F = BF.forester, row = window.__row;
+    const x = row.x0, z = row.z0 + 20, y = W.heightAt(x, z);
+    for (let dx = -6; dx <= 10; dx++) for (let dz = -6; dz <= 6; dz++) { W.setBlock(x + dx, y, z + dz, B.grass); for (let dy = 1; dy <= 12; dy++) W.setBlock(x + dx, y + dy, z + dz, 0); }
+    const crown = (cx, leaf) => { for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 3; dy <= 5; dy++) if (!W.getBlock(cx + dx, y + dy, z + dz)) W.setBlock(cx + dx, y + dy, z + dz, leaf); for (let dy = 1; dy <= 5; dy++) W.setBlock(cx, y + dy, z, B.oak_log); };
+    crown(x, B.oak_leaves); crown(x + 4, B.oak_leaves);   // crowns overlap in column x+2
+    const count = cx => { let n = 0; for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 3; dy <= 6; dy++) if (W.getBlock(cx + dx, y + dy, z + dz) === B.oak_leaves) n++; return n; };
+    const before = [count(x), count(x + 4)];
+    const t = F.treeAt(x, y + 1, z);
+    if (!t) return "not a tree";
+    F._test.fell(null, t, false);
+    const res = { before, after: [count(x), count(x + 4)], felledLeaves: t.leaves.length };
+    for (let dx = -6; dx <= 10; dx++) for (let dz = -6; dz <= 6; dz++) for (let dy = 1; dy <= 12; dy++) W.setBlock(x + dx, y + dy, z + dz, 0);
     return res;
   })));
 };

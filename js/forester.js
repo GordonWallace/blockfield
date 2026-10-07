@@ -34,6 +34,7 @@ const CLEAR_ABOVE = 5;      // air above a planting spot, so the sapling has roo
 const CHOP_T = 1.2;         // seconds of chopping before the tree comes down (the mod fells it the moment the villager arrives)
 const GROW_PER_S = 1 / 480; // sapling -> tree: ~8 minutes of simulation time on average
 const GATHER_R = 16;
+const LEAF_D = 6;      // leaves further than this (through leaves) from the felled logs stay, as vanilla leaf decay
 const SWEEP_R = 12, SWEEP_MAX = 120;   // after felling it stays until no wanted item lies within 12 blocks of the stump (at most 2 minutes)
 const BUILD_AVOID = 8;  // never plants within 8 blocks of a building or other structure (anything not landscape; dirt paths do not count)
 
@@ -191,16 +192,36 @@ function collectTree(seeds, minY) {
   }
   if (!logs.length) return null;
   for (const [cx, cy, cz] of logs) for (const [dx, dy, dz] of NB6) { if (!natural(get(cx + dx, cy + dy, cz + dz))) return null; }
-  // leaves: flood from the logs through leaf blocks
-  const lseen = new Set(), leaves = [], q = logs.slice();
+  // leaves: flood from the logs through leaf blocks (up to LEAF_D steps, as vanilla's leaf distance). A leaf goes with this tree only when
+  // its own logs are nearer (through leaves) than any other tree's, so a neighbour's crown that touches this one keeps its leaves.
+  const dA = new Map(), leaves = [], q = logs.map(c => [c[0], c[1], c[2], 0]);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (let i = 0; i < q.length && leaves.length <= MAX_LEAVES; i++) {
-    const [cx, cy, cz] = q[i];
+    const [cx, cy, cz, d] = q[i];
+    if (d >= LEAF_D) continue;
     for (const [dx, dy, dz] of NB6) {
       const nx = cx + dx, ny = cy + dy, nz = cz + dz, k = pk(nx, ny, nz);
-      if (lseen.has(k) || seen.has(k)) continue;
-      lseen.add(k);
-      if (isLeaf(get(nx, ny, nz))) { leaves.push([nx, ny, nz]); q.push([nx, ny, nz]); }
+      if (dA.has(k) || seen.has(k) || !isLeaf(get(nx, ny, nz))) continue;
+      dA.set(k, d + 1); leaves.push([nx, ny, nz]); q.push([nx, ny, nz, d + 1]);
+      if (nx < x0) x0 = nx; if (nx > x1) x1 = nx; if (ny < y0) y0 = ny; if (ny > y1) y1 = ny; if (nz < z0) z0 = nz; if (nz > z1) z1 = nz;
     }
+  }
+  if (leaves.length) {
+    // other trees' logs near the crown, and their leaf distance to each of these leaves
+    const qb = [], dB = new Map();
+    for (let x = x0 - LEAF_D; x <= x1 + LEAF_D; x++) for (let z = z0 - LEAF_D; z <= z1 + LEAF_D; z++) for (let y = y0 - LEAF_D; y <= y1 + LEAF_D; y++) {
+      if (isLog(get(x, y, z)) && !seen.has(pk(x, y, z))) qb.push([x, y, z, 0]);
+    }
+    for (let i = 0; i < qb.length; i++) {
+      const [cx, cy, cz, d] = qb[i];
+      if (d >= LEAF_D) continue;
+      for (const [dx, dy, dz] of NB6) {
+        const nx = cx + dx, ny = cy + dy, nz = cz + dz, k = pk(nx, ny, nz);
+        if (dB.has(k) || seen.has(k) || !isLeaf(get(nx, ny, nz))) continue;
+        dB.set(k, d + 1); qb.push([nx, ny, nz, d + 1]);
+      }
+    }
+    if (dB.size) for (let i = leaves.length - 1; i >= 0; i--) { const k = pk(leaves[i][0], leaves[i][1], leaves[i][2]); if (dB.has(k) && dB.get(k) <= dA.get(k)) leaves.splice(i, 1); }
   }
   if (!leaves.length) return null;
   return { logs, leaves };
