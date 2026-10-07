@@ -1,5 +1,8 @@
 // Day/night cycle: gradient sky dome, square sun and moon, stars, drifting 3D (slab) clouds, fog and light level.
-// time in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight.
+// time in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight. Daytime is exactly the half with the sun above the horizon
+// (0..0.5), nighttime the other half. Light: full day, dipping a little in the last hour before sunset ("golden hour"); dusk is the
+// first DUSK_LEN of the night, darkening gradually to full night; dawn mirrors it before sunrise. lightAt(t) is that curve
+// without weather, so monster spawning (js/mobs.js) can ask how long a spot has been dark.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -39,6 +42,15 @@ function updateCloudBase(dt) {
 }
 const SKY_R = 480, SUN_D = 400, CLOUD_BASE = BF.H + 4, CLOUD_H = 5, CLOUD_RISE = 70, CLOUD_CELL = 12, CLOUD_N = 64, CLOUD_R = 320;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const HOUR = 1 / 24;                     // one in-game hour as a fraction of a day
+const DUSK_LEN = 1.5 * HOUR, GOLDEN_LEN = HOUR, SUNSET_DAYNESS = 0.8;
+// 0 (full night) .. 1 (full day) at time of day t, from the time since sunset / until sunrise (not the sun's height).
+function daynessAt(t) {
+  t = ((t % 1) + 1) % 1;
+  if (t < 0.5) return SUNSET_DAYNESS + (1 - SUNSET_DAYNESS) * smooth(0, GOLDEN_LEN, Math.min(t, 0.5 - t));
+  return SUNSET_DAYNESS * (1 - smooth(0, DUSK_LEN, Math.min(t - 0.5, 1 - t)));
+}
+const lightOf = dayness => 0.18 + 0.82 * dayness;
 
 let root, celestial, dome, sun, moon, stars, clouds, scene;
 const tmpV = new THREE.Vector3(), tmpC = new THREE.Color();
@@ -265,7 +277,14 @@ const sky = {
 
   get cloudY() { return cloudY; },   // alias of cloudHeight
 
-  isNight() { return sky.light < 0.5; },
+  HOUR, DUSK_LEN,
+  SUNSET: 0.5,
+  // Nighttime = the sun is below the horizon (half of every day). Weather never makes it night.
+  isNight() { return sky.time >= 0.5; },
+  // A thunderstorm darkens the day enough for monsters and sleeping, as in vanilla (js/weather.js).
+  stormy() { return !!(BF.weather && BF.weather.thunder > 0.5); },
+  // Light level (no weather) at time of day t; sky.light is this times the weather dimming.
+  lightAt(t) { return lightOf(daynessAt(t)); },
 
   update(dt) {
     if (!scene) return;
@@ -276,9 +295,9 @@ const sky = {
     }
     const t = sky.time, a = t * Math.PI * 2;
     const sh = Math.sin(a); // sun height, -1..1
-    const dayness = smooth(-0.2, 0.22, sh);
+    const dayness = daynessAt(t);
     const dusk = Math.exp(-(sh * sh) / 0.035); // peaks at sunrise / sunset
-    sky.light = 0.18 + 0.82 * dayness;
+    sky.light = lightOf(dayness);
     // weather (js/weather.js): overcast greys the sky and dims light ~30% (rain) / ~60% (thunder); lightning flashes
     const W = BF.weather;
     if (W && W.update) W.update(dt);
@@ -334,7 +353,7 @@ const sky = {
     moon.material.opacity = (0.25 + 0.75 * smooth(-0.02, 0.15, -sh)) * (1 - wr);
     moon.visible = sh < 0.25 && wr < 0.99;
     sun.visible = sh > -0.15 && wr < 0.99;
-    const so = smooth(0.05, -0.25, sh) * (1 - wr);
+    const so = (1 - smooth(0.05, 0.45, dayness)) * (1 - wr);   // stars come out as dusk darkens
     stars.material.uniforms.opacity.value = so;
     stars.material.uniforms.size.value = Math.max(1, Math.round(BF.renderer.getPixelRatio() * 2));
     stars.visible = so > 0.01;

@@ -49,6 +49,36 @@ function skyAt(x, y, z) {
 }
 function isWater(id) { return BF.RENDER[id] === 3; }
 
+// ---------- spawn darkness ----------
+// A monster spawns at a spot only after the spot has been dark enough for DARK_WAIT, half an in-game hour (plus a per-cell extra of up
+// to another half hour, so they trickle in): block light <= 7, and
+// under open sky a sky light <= SPAWN_LIGHT (a little before full night). The sky's light curve is known for any past time, so
+// "dark for half an hour" under open sky is just the light now and half an hour ago: no per-spot tracking. Spots under 5+ blocks
+// of cover (caves, dense forest) count as dark at any time, as before. What the curve can't know is a local change: a light
+// source removed, or a block placed that shades the ground (a new roof). Those stamp a coarse cell (CELL x CELL columns, a light
+// source also the cells around it) and nothing spawns in a stamped cell until DARK_WAIT has passed.
+const SPAWN_LIGHT = 0.3, DARK_WAIT = 0.5 / 24, CELL = 8;
+const darkStamps = new Map();   // "cx,cz" (cells) -> game time (days) of the last darkening change
+const gameNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
+const stormy = () => !!(BF.sky && BF.sky.stormy && BF.sky.stormy());
+function skyLightAt(t) { return BF.sky && BF.sky.lightAt ? BF.sky.lightAt(t) : isNight() ? 0.18 : 1; }
+function darkLongEnough(x, z, factor) {
+  const t = BF.sky ? BF.sky.time || 0 : 0, cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+  // Half an hour at least; each cell adds up to another half hour (varies by cell and night) so monsters trickle in over the
+  // next half hour instead of all appearing the moment the wait ends.
+  const wait = DARK_WAIT * (1 + hash(cx, cz, BF.sky ? BF.sky.day | 0 : 0, 7));
+  // the light curve only falls then rises over the night, so its highest value over the wait is at one of the ends
+  if (factor * Math.max(skyLightAt(t), skyLightAt(t - wait)) > SPAWN_LIGHT && !stormy()) return false;
+  if (!darkStamps.size) return true;
+  const st = darkStamps.get(cx + "," + cz);
+  return st == null || gameNow() - st >= wait || st > gameNow();   // a stamp in the future: time was set back
+}
+function stampDark(x, z, r) {
+  const now = gameNow(), cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+  for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) darkStamps.set((cx + dx) + "," + (cz + dz), now);
+  if (darkStamps.size > 4096) for (const [k, v] of darkStamps) if (now - v >= DARK_WAIT || v > now) darkStamps.delete(k);
+}
+
 // ---------- geometry builder ----------
 // A box is {min:[x,y,z], max:[x,y,z], paint}, in pixels (1/16 block). paint is a hex colour or
 // fn(face, u, v, W, H) -> hex|null. Faces are split into 1px cells with slight jitter so they read as pixel art.
@@ -1044,7 +1074,7 @@ function zombieBreakDoor(m, dt, out) {
 }
 
 // ---------- villager nights: walk home along a grid path, open doors on the way, sleep in their bed ----------
-const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.52 && t < 0.985; };
+const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.5 && t < 0.985; };   // villagers head in at sunset, well before monsters can spawn (js/mobs.js)
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
 function bedOK(bed) {
   const k = blockAt(bed.x, bed.y, bed.z);
@@ -1674,7 +1704,7 @@ function tryHostileSpawn() {
   if (!playerAlive()) return;
   const pp = player().position, w = BF.world;
   const type = pickHostileType(), T = TYPES[type];
-  const surface = isNight() && Math.random() < 0.6;
+  const surface = (skyLightAt(BF.sky ? BF.sky.time || 0 : 0) <= SPAWN_LIGHT || stormy()) && Math.random() < 0.6;
   const a = Math.random() * Math.PI * 2, d = surface ? rnd(24, 48) : rnd(12, 40);
   const x = Math.floor(pp.x + Math.cos(a) * d), z = Math.floor(pp.z + Math.sin(a) * d);
   if (!w.isLoaded(x, z)) return;
@@ -1683,6 +1713,7 @@ function tryHostileSpawn() {
     if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
     if (!standable(x, gy + 1, z, T.hw, T.h)) return;
     if (w.getBlockLight(x, gy + 1, z) > 7) return; // torch/lantern-lit ground stays safe
+    if (!darkLongEnough(x, z, 1)) return;
     if (Math.hypot(x + 0.5 - pp.x, gy + 1 - pp.y, z + 0.5 - pp.z) < 24) return;
     createMob(type, x + 0.5, gy + 1, z + 0.5);
     return;
@@ -1699,7 +1730,8 @@ function tryHostileSpawn() {
     if (!standable(x, y, z, T.hw, T.h)) continue;
     if (!BF.OPAQUE[w.getBlock(x, y - 1, z)]) continue;
     const s = skyAt(x, y, z);
-    if (s.open || s.factor > 0.6) continue;
+    if (s.open || s.factor > 0.6) continue;   // 5+ blocks of cover (caves, dense forest canopy): dark at any time of day, houses never
+    if (!darkLongEnough(x, z, 0)) continue;   // ...unless a light went out or the cover was just built
     if (w.getBlockLight(x, y, z) > 7) continue; // lit caves are safe
     if (Math.hypot(x + 0.5 - pp.x, y - pp.y, z + 0.5 - pp.z) < 20) continue;
     createMob(type, x + 0.5, y, z + 0.5);
@@ -2102,6 +2134,13 @@ BF.mobs = {
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
   nav: { findPath, followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
   spawning: true,
+  // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it
+  onSet(x, y, z, oldId, id) {
+    const E = BF.EMIT;
+    if (E && E[oldId] > E[id]) stampDark(x, z, 2);
+    else if (BF.OPAQUE[id] && !BF.OPAQUE[oldId]) stampDark(x, z, 0);
+  },
+  darkLongEnough,
   clear() {
     for (const m of list.slice()) removeMob(m);
     list.length = 0;

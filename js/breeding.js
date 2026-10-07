@@ -40,7 +40,7 @@ const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i
 
 // ---------- time / food helpers ----------
 const now = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
-const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.52 && t < 0.985; };
+const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.5 && t < 0.985; };   // villagers head in at sunset, well before monsters can spawn (js/mobs.js)
 const breadFood = () => (BF.I && BF.items[BF.I.bread] && BF.items[BF.I.bread].food) || 5;
 function breadEq(inv) {
   if (BF.food && typeof BF.food.breadEq === "function") return BF.food.breadEq(inv) || 0;
