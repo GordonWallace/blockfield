@@ -6,7 +6,7 @@ const BF = (window.BF = window.BF || {});
 
 // ---------- tuning ----------
 const GRAVITY = 32, JUMP_V = 8.4, WALK = 4.3, SPRINT = 5.6, SNEAK = 1.3;
-const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W, then hold E): 10x the normal flying speed
+const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W and R): 10x the normal flying speed
 const FLY = 10.9, FLY_SPRINT = 21.6, CFLY = 16, CFLY_SPRINT = 32, SWIM = 2.2, REACH = 5, MOB_REACH = 3.5;
 const BASE_FOV = 75, AIR_MAX = 10, ATTACK_CD = 0.4, EAT_TIME = 1.2, PLACE_REPEAT = 0.22;
 const HW = 0.3, HEIGHT = 1.8, EYE = 1.62, SNEAK_EYE = 1.47;
@@ -24,7 +24,7 @@ let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
 let onGround = false, inWater = false, headInWater = false;
 let flying = false, sprinting = false, sneaking = false, turbo = false;
-let lastSpaceTap = 0, lastWTap = 0, wTaps = 0, boostE = false;   // boostE: E went down while flying with W held, so it boosts instead of opening the inventory
+let lastSpaceTap = 0, lastWTap = 0, wTaps = 0;
 let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
@@ -158,7 +158,7 @@ let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, 
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
-     <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>Fly + hold W, then E</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
+     <div><b>Shift</b> sneak</div><div><b>R / Ctrl / W x2</b> sprint</div><div><b>Z</b> free the mouse (game keeps running)</div><div><b>Fly + hold W and R</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
      <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -521,6 +521,13 @@ function pause() {
   exitLock();
 }
 
+// Z frees the mouse without pausing (to use the debug screen while the game runs); a click on the game takes it back.
+let mouseFreed = false;
+function releaseMouse() {
+  mouseFreed = true;
+  keys.clear(); mouseL = mouseR = false; resetBreak();
+  exitLock();
+}
 let expectUnlock = false;     // we released the lock for the inventory: the unlock event must not pause
 function openInventory(mode, arg) {
   if (locked) expectUnlock = true;
@@ -555,12 +562,9 @@ function bindInput() {
       return;
     }
     // inventory.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
-    if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) {
-      // flying with W held: E is the 10x boost (held), not the inventory key. In every other case E opens/closes the inventory.
-      if (flying && !invOpen() && (keys.has("KeyW") || keys.has("ArrowUp"))) { boostE = true; e.preventDefault(); return; }
-      deferredToggle(false); return;
-    }
+    if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) { deferredToggle(false); return; }
     if (menuOpen || invOpen() || P.dead) return;
+    if (c === "KeyZ" && !e.repeat && !e.ctrlKey && !e.metaKey && locked) { releaseMouse(); return; }
     if (c === "KeyQ" && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
     if (e.repeat) { keys.add(c); return; }
     const now = performance.now();
@@ -574,8 +578,8 @@ function bindInput() {
     }
     keys.add(c);
   });
-  addEventListener("keyup", e => { keys.delete(e.code); if (e.code === "KeyE") boostE = false; });
-  addEventListener("blur", () => { boostE = false; keys.clear(); mouseL = mouseR = false; });
+  addEventListener("keyup", e => keys.delete(e.code));
+  addEventListener("blur", () => { keys.clear(); mouseL = mouseR = false; });
 
   document.addEventListener("pointerlockchange", () => {
     const was = locked;
@@ -586,7 +590,8 @@ function bindInput() {
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
       keys.clear(); mouseL = mouseR = false; resetBreak();
-      if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
+      if (mouseFreed) { mouseFreed = false; actionBar("Mouse free: click the game to take it back"); }
+      else if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
       else if (!invOpen() && !P.dead && started && !menuOpen && !inEscGrace()) pause();
     }
   });
@@ -1416,7 +1421,7 @@ P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health +
 const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
 function die() {
   P.dead = true; P.health = 0;
-  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false; boostE = false;
+  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
   if (invOpen()) { try { inv().close(); } catch (_) {} }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
@@ -1465,7 +1470,7 @@ function physics(dt) {
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
   if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
   if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
-  turbo = flying && boostE && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // releasing W or E (or landing) ends the boost
+  turbo = flying && k.has("KeyR") && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // flying with W + R held; releasing either (or landing) ends the boost
   // forward (sx, sz) and right (-sz, sx) in the horizontal plane
   const sx = -Math.sin(yaw), sz = -Math.cos(yaw);
   let mx = sx * fwd - sz * strafe, mz = sz * fwd + sx * strafe;
