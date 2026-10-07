@@ -1,5 +1,5 @@
 // Inventory: 36 slots (9 hotbar + 27 main), always-visible hotbar HUD and the container screens:
-// inventory (2x2 crafting), crafting table (3x3), furnace (smelting), villager trading and the creative menu.
+// inventory (2x2 crafting), crafting table (3x3), furnace (smelting), chest (27 slots of storage), villager trading and the creative menu.
 // Minecraft-style mouse/touch stack handling incl. drag-splitting, shaped/shapeless recipes, save/load.
 (() => {
 "use strict";
@@ -14,6 +14,7 @@ let open_ = false, mode = "inventory", openedAt = 0;
 let selected = 0;
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2;
 let furnace = null;                           // furnace state shown on the furnace screen
+let chest = null;                             // chest state shown on the chest screen
 let villager = null, pay = [null, null], offerSel = -1, tradeOffer = null, tradeResult = null, levelFlashT = 0;
 let creTab = "building", creSearch = "";
 let drag = null;                              // drag-split in progress {button, els:[], touch}
@@ -258,6 +259,37 @@ function tickFurnace(f, dt) {
   return changed;
 }
 
+// ---------------------------------------------------------------- chests
+// Contents live here by block position (like furnaces) and are saved with the inventory. A chest that was never opened has no entry.
+const CHEST_SIZE = 27;
+const chests = new Map(); // "x,y,z" -> {key, pos, slots:[27]}
+function chestAt(pos) {
+  const key = `${pos.x | 0},${pos.y | 0},${pos.z | 0}`;
+  let c = chests.get(key);
+  if (!c) { c = { key, pos: { x: pos.x | 0, y: pos.y | 0, z: pos.z | 0 }, slots: new Array(CHEST_SIZE).fill(null) }; chests.set(key, c); }
+  return c;
+}
+// fill arr with `stack`: top up matching stacks first, then empty slots; returns what is left
+function addToArr(arr, id, count) {
+  const max = stackOf(id);
+  for (const s of arr) if (count > 0 && s && s.id === id && s.count < max) { const m = Math.min(max - s.count, count); s.count += m; count -= m; }
+  for (let i = 0; i < arr.length && count > 0; i++) if (!arr[i]) { const m = Math.min(max, count); arr[i] = { id, count: m }; count -= m; }
+  return count;
+}
+// The chest block at x,y,z is gone (broken, exploded, replaced): close its screen and spill what it held on the ground.
+function chestRemoved(x, y, z) {
+  const key = `${x},${y},${z}`, c = chests.get(key);
+  if (!c) return;
+  if (chest === c) closeScreen(false);
+  chests.delete(key);
+  for (const s of c.slots) {
+    if (!s) continue;
+    if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5);
+    else { const left = addTo(s.id, s.count, ORDER_ALL); if (left) BF.emit("itemDropped", s.id, left); }
+  }
+  renderAll(); emitChange();
+}
+
 // ---------------------------------------------------------------- villager trading
 // Tables, stock rules and villager inventories live in trading.js (BF.trades).
 const LEVELS = BF.trades.LEVELS, LEVEL_XP = BF.trades.LEVEL_XP;
@@ -465,6 +497,7 @@ const css = `
 .bf-recipes .big::after { content: " (table)"; color: var(--accent); font-size: 10px; }
 .bf-recipes p { margin: 0 0 4px; color: var(--muted); font-size: 10px; }
 .bf-recipes h3 { margin: 8px 0 3px; font: 11px/1 var(--display); color: var(--accent); font-weight: normal; }
+.bf-inv .bf-chest { margin-bottom: calc(var(--s) * .3); }
 .bf-fcol { display: flex; flex-direction: column; align-items: center; gap: calc(var(--s) * .12); }
 .bf-prog { position: relative; display: block; image-rendering: pixelated; }
 .bf-prog img { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
@@ -525,6 +558,7 @@ const css = `
 let hotbarEl, nameEl, toastsEl, backEl, panelEl, heldEl, tipEl, recipesEl, rbtn, titleEl;
 let craftEl, craftGridEl, resultEl, furnEl, fSlots = [], flameFill, arrowFill, fstatEl;
 let vinvEl, vinvTitleEl, vSlotEls = [];
+let chestEl, chestSlotEls = [];
 let tradeEl, paySlots = [], tresEl, txEl, sideEl, offersEl, lvlEl, xpEl, theadEl;
 let creEl, tabsEl, searchEl, palEl, invHeadEl, mainRowEl, gapEl, trashEl;
 const hudSlots = [], invSlotEls = [];
@@ -634,6 +668,10 @@ function buildDOM() {
   const [parrow, af] = progEl("bf-parrow", S.arrowOff, S.arrowOn); arrowFill = af;
   furnEl.append(parrow, fSlots[2]);
   fstatEl = div("bf-fstat", furnEl);
+
+  // chest: 3 rows of 9
+  chestEl = div("bf-chest bf-row", col);
+  for (let i = 0; i < CHEST_SIZE; i++) { const el = makeSlot("", "chest", i); chestSlotEls.push(el); chestEl.appendChild(el); }
 
   // trade payment
   tradeEl = div("bf-trade", col);
@@ -763,7 +801,7 @@ function hover(target) {
 }
 let tipUntil = 0;
 function arrFor(c) {
-  return c === "inv" ? slots : c === "grid" ? grid : c === "furn" ? (furnace && furnace.slots) : c === "pay" ? pay : null;
+  return c === "inv" ? slots : c === "grid" ? grid : c === "furn" ? (furnace && furnace.slots) : c === "chest" ? (chest && chest.slots) : c === "pay" ? pay : null;
 }
 function stackAt(el) {
   const c = el.dataset.c, i = +el.dataset.i;
@@ -800,7 +838,7 @@ function hideTip() { tipEl && tipEl.classList.remove("on"); }
 function canDrop(el) {
   if (!cursor || !el || !el.dataset) return false;
   const c = el.dataset.c, i = +el.dataset.i;
-  if (!(c === "inv" || c === "grid" || c === "pay" || (c === "furn" && (i === 0 || (i === 1 && FUEL.has(cursor.id)))))) return false;
+  if (!(c === "inv" || c === "grid" || c === "pay" || c === "chest" || (c === "furn" && (i === 0 || (i === 1 && FUEL.has(cursor.id)))))) return false;
   const arr = arrFor(c); if (!arr) return false;
   const s = arr[i];
   return !s || (s.id === cursor.id && s.count < stackOf(s.id));
@@ -895,6 +933,8 @@ function shiftMove(c, i) {
     if (mode === "furnace" && furnace) {
       const target = SMELT.has(s.id) ? 0 : FUEL.has(s.id) ? 1 : -1;
       if (target >= 0) st.count = mergeInto(furnace.slots, target, st);
+    } else if (mode === "chest" && chest) {
+      st.count = addToArr(chest.slots, s.id, s.count);
     } else if (mode === "trade" && villager) {
       const o = villager.trades[offerSel];
       const wanted = o ? o.buy.map(b => b.id) : villager.trades.flatMap(t => t.buy.map(b => b.id));
@@ -967,6 +1007,8 @@ function renderAll() {
   } else if (mode === "furnace" && furnace) {
     for (let i = 0; i < 3; i++) setSlot(fSlots[i], furnace.slots[i]);
     renderFurnaceProgress();
+  } else if (mode === "chest" && chest) {
+    for (let i = 0; i < CHEST_SIZE; i++) setSlot(chestSlotEls[i], chest.slots[i]);
   } else if (mode === "trade") {
     setSlot(paySlots[0], pay[0]); setSlot(paySlots[1], pay[1]);
     const vi = villager && villager.inv;
@@ -1098,6 +1140,7 @@ function layoutFor(m) {
   lvlEl.hidden = !trade; xpEl.hidden = !trade;
   craftEl.hidden = !(m === "inventory" || m === "crafting");
   furnEl.hidden = m !== "furnace";
+  chestEl.hidden = m !== "chest";
   tradeEl.hidden = !trade;
   creEl.hidden = !cre;
   trashEl.hidden = !cre;
@@ -1108,7 +1151,7 @@ function layoutFor(m) {
     setTab(creTab);
   } else if (trade) {
     // title/level set in renderOffers
-  } else titleEl.textContent = m === "crafting" ? "Crafting Table" : m === "furnace" ? "Furnace" : "Crafting";
+  } else titleEl.textContent = m === "crafting" ? "Crafting Table" : m === "furnace" ? "Furnace" : m === "chest" ? "Chest" : "Crafting";
 }
 
 // ---------------------------------------------------------------- toasts / name label
@@ -1149,9 +1192,10 @@ function openScreen(m) {
   recompute();
   if (m === "inventory" || m === "crafting") buildGrid();
   layoutFor(m);
-  if (m !== "creative" && m !== "trade") buildHelp();
+  if (m !== "creative" && m !== "trade" && m !== "chest") buildHelp();
   open_ = true; openedAt = performance.now();
   BF.state.paused = true;
+  if (m === "chest" && chest) BF.emit && BF.emit("chestOpened", chest.pos.x, chest.pos.y, chest.pos.z);
   backEl.classList.add("open");
   hotbarEl.style.visibility = "hidden";
   nameEl.classList.remove("show");
@@ -1171,6 +1215,7 @@ function closeScreen(silent) {
   }
   tradeOffer = tradeResult = null; offerSel = -1;
   furnace = null;
+  if (chest) { const p = chest.pos; chest = null; BF.emit && BF.emit("chestClosed", p.x, p.y, p.z); }
   if (document.activeElement === searchEl) searchEl.blur();
   backEl.classList.remove("open");
   heldEl.classList.remove("on");
@@ -1202,6 +1247,8 @@ const api = {
   smelting: SMELT,  // input id -> output id
   fuel: FUEL,       // item id -> burn seconds
   furnaces,         // "x,y,z" -> furnace state
+  chests,           // "x,y,z" -> chest contents {pos, slots[27]}
+  CHEST_SIZE,
   trades: TRADES,
   levelNames: LEVELS,
   isCreative,
@@ -1220,7 +1267,7 @@ const api = {
       if (/^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey && !(BF.state && BF.state.paused)) api.select(+e.code.slice(5) - 1);
     }, true);
     document.addEventListener("pointermove", e => { mouseX = e.clientX; mouseY = e.clientY; }, { passive: true });
-    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); });
+    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); chests.clear(); });
     BF.on("gameModeChanged", () => { if (open_ && (mode === "creative" || mode === "inventory")) api.close(); });
     BF.on("blockBroken", (x, y, z, id) => {
       if (id !== BF.B.furnace) return;
@@ -1302,10 +1349,11 @@ const api = {
     renderAll(); emitChange();
   },
   isOpen() { return open_; },
-  // mode: "inventory" (creative menu in creative mode) | "crafting" | "furnace" (pos = {x,y,z} of the block) | "creative"
+  // mode: "inventory" (creative menu in creative mode) | "crafting" | "furnace" / "chest" (pos = {x,y,z} of the block) | "creative"
   open(m = "inventory", pos) {
     if (!backEl) return;
     if (m === "furnace") { furnace = furnaceAt(pos); openScreen("furnace"); return; }
+    if (m === "chest" && pos) { if (open_) closeScreen(true); chest = chestAt(pos); openScreen("chest"); return; }
     if (m === "creative" || (m === "inventory" && isCreative())) { openScreen("creative"); return; }
     openScreen(m === "crafting" ? "crafting" : "inventory");
   },
@@ -1323,6 +1371,16 @@ const api = {
   ensureTrades,
   close() { closeScreen(false); },
   furnaceState(x, y, z) { return furnaces.get(`${x},${y},${z}`) || null; },
+  chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
+  // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
+  chestAdd(x, y, z, itemId, count = 1) {
+    if (!BF.items[itemId] || itemId === 0 || !(count > 0)) return count || 0;
+    const left = addToArr(chestAt({ x, y, z }).slots, itemId, Math.floor(count));
+    if (open_ && chest && chest.key === `${x},${y},${z}`) renderAll();
+    return left;
+  },
+  chestRemoved,
+
   serialize() {
     return {
       v: 1,
@@ -1331,6 +1389,7 @@ const api = {
       furnaces: [...furnaces.values()].filter(f => f.pos).map(f => ({
         pos: [f.pos.x, f.pos.y, f.pos.z], slots: f.slots.map(toSave), burn: f.burn, burnMax: f.burnMax, cook: f.cook,
       })),
+      chests: [...chests.values()].filter(c => c.slots.some(Boolean)).map(c => ({ pos: [c.pos.x, c.pos.y, c.pos.z], slots: c.slots.map(toSave) })),
     };
   },
   deserialize(o) {
@@ -1344,6 +1403,12 @@ const api = {
       const f = furnaceAt({ x: fs.pos[0], y: fs.pos[1], z: fs.pos[2] });
       f.slots = [0, 1, 2].map(k => fromSave(fs.slots && fs.slots[k]));
       f.burn = +fs.burn || 0; f.burnMax = +fs.burnMax || 0; f.cook = +fs.cook || 0;
+    }
+    chests.clear();
+    if (Array.isArray(o.chests)) for (const cs of o.chests) {
+      if (!cs || !Array.isArray(cs.pos)) continue;
+      const c = chestAt({ x: cs.pos[0], y: cs.pos[1], z: cs.pos[2] });
+      for (let k = 0; k < CHEST_SIZE; k++) c.slots[k] = fromSave(cs.slots && cs.slots[k]);
     }
     selected = 0;
     api.select(+o.selected || 0);
