@@ -903,11 +903,11 @@ const THROW_SPEED = 6, THROW_LIFT = 1.5, THROW_PICKUP_DELAY = 2;
 function throwSelected() {
   const sel = selectedItem();
   if (!sel || !BF.drops || !inv().consumeSelected) return;
-  const id = sel.id;
+  const id = sel.id, wear = sel.wear || 0;
   try { if (!(inv().consumeSelected(1) > 0)) return; } catch (e) { console.error(e); return; }
   const d = dirVec(), e = eyeVec();
   const vel = d.clone().multiplyScalar(THROW_SPEED); vel.y += THROW_LIFT;
-  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY });
+  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY, wear });
   emit("itemThrown", id);
 }
 
@@ -928,6 +928,7 @@ function tryAttack() {
   d.normalize();
   if (sprinting) { d.multiplyScalar(1.6); sprinting = false; }
   try { BF.mobs.hit(m.mob, dmg, d); } catch (e) { console.error(e); }
+  if (it && it.tool) wearHeld(it.tool.type === "sword" ? 1 : 2);   // a sword wears 1 use per hit, other tools 2 (Minecraft)
   exhaustion += 0.1;
   return true;
 }
@@ -938,6 +939,15 @@ function primaryDown() {
 }
 function resetBreak() { breakTarget = null; breakProgress = 0; if (crackMesh) crackMesh.visible = false; if (BF.cracks) BF.cracks.hide(); }
 
+// Wears the held tool (js/blocks.js BF.wearStack, survival only); a used-up tool breaks with a message and a clink.
+function wearHeld(n) {
+  try {
+    const sel = selectedItem();
+    if (!sel || !inv().wearSelected || inv().wearSelected(n) !== "broken") return;
+    actionBar("Your " + BF.itemName(sel.id) + " broke");
+    if (BF.audio) BF.audio.play("dig.metal", { pitch: 1.5 });
+  } catch (e) { console.error(e); }
+}
 function heldTool() { const sel = selectedItem(), it = sel && BF.items[sel.id]; return (it && it.tool) || null; }
 function breakTime(block) {
   if (!isFinite(block.hardness)) return Infinity;
@@ -978,6 +988,7 @@ function updateBreaking(dt) {
       } catch (e) { console.error(e); }
     }
     exhaustion += 0.005;
+    if (b.hardness > 0) wearHeld(heldTool() && heldTool().type === "sword" ? 2 : 1);   // tools wear 1 use per block, swords 2 (Minecraft)
     emit("blockBroken", x, y, z, id);
     resetBreak();
     breakCd = 0.2;   // also the creative repeat interval while held
@@ -1166,7 +1177,7 @@ function secondaryDown() {
   }
   if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
     const r = BF.shepherd.playerUse(mh.mob, selectedItem());
-    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+    if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
@@ -1187,6 +1198,7 @@ function secondaryDown() {
     const { x, y, z, id } = target;
     if (!BF.world.setBlock(x, y, z, BF.B.farmland)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
+    wearHeld(1);
     emit("blockPlaced", x, y, z, BF.B.farmland);
     placeCd = PLACE_REPEAT;
     return true;
@@ -1197,6 +1209,7 @@ function secondaryDown() {
     const { x, y, z, id } = target, nid = BF.B["stripped_" + BF.blocks[id].name];
     if (!BF.world.setBlock(x, y, z, nid)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
+    wearHeld(1);
     emit("blockPlaced", x, y, z, nid);
     placeCd = PLACE_REPEAT;
     return true;

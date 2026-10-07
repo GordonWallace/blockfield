@@ -1085,6 +1085,7 @@ function ai(m, dt, out) {
     if (m.fshop && m.fshop.stage) { m.fshop.stage = null; m.fshop.deal = null; m.ai.route = null; }
     return false;
   }
+  if (m.profession === "miner" && BF.miner && BF.miner.underground(m)) return false;   // shops for food once back up its mineshaft (js/miner.js)
   if (shopAI(m, dt, out)) { if (m.farm && m.farm.task) endTask(m, m.farm, true); return true; }
   if (m.profession === "farmer" && m.village && m.jobsite && !m.child) return farmAI(m, dt, out);   // a farmer works from its composter
   return false;

@@ -276,6 +276,10 @@ const BLOCK_DEFS = [
   // ---- shepherd pack ---- (appended; ids are saved numerically: only ever append after this line)
   ...gateDefs,   // oak_fence_gate_<x|z>[_open]: pen gates (js/shepherd.js)
   // ---- end shepherd pack ----
+  // ---- miner pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Miners")
+  // mining bench: the miner villager's jobsite (not vanilla): a stone-topped spruce bench with a pickaxe on it and an ore crate in front
+  { name: "mining_bench", jobsite: "miner", tiles: { top: "mining_bench_top", side: "mining_bench_side", front: "mining_bench_front", bottom: "spruce_planks" }, hardness: 2.5, tool: "pickaxe", creativeTab: "functional", color: "#6e6a64" },
+  // ---- end miner pack ----
 ];
 
 // ---- slabs/stairs pack runtime: shape placeholders get their base block's tiles / hardness / tool / colour ----
@@ -549,9 +553,12 @@ BLOCK_DEFS.forEach((d, id) => {
   if (def.tiles && !def.tiles.front) def.tiles.front = def.tiles.side; // front = the +z (south) face
   blocks[id] = def; items[id] = def; B[def.name] = id; I[def.name] = id;
 });
+// Tool lifespan in uses, as Minecraft Java: wood 59, stone 131, iron 250, diamond 1561 (by tier); shears 238, bow 384.
+const DURABILITY = { 1: 59, 2: 131, 3: 250, 4: 1561 }, DURABILITY_OF = { shears: 238, bow: 384 };
 ITEM_DEFS.forEach((d, i) => {
   const id = ITEM_BASE + i;
   const def = Object.assign({ isBlock: false, stack: d.tool ? 1 : 64 }, d, { id });
+  if (def.tool && def.durability === undefined) def.durability = DURABILITY_OF[def.tool.type] || DURABILITY[def.tool.tier] || 0;
   items[id] = def; I[def.name] = id;
 });
 // resolve drop names to ids
@@ -648,6 +655,15 @@ BF.rollDrops = function (blockId) {
     if (same) same.count += n; else out.push({ id, count: n });
   }
   return out;
+};
+// Tool wear (uses spent) lives on the inventory stack as `wear`; a tool breaks when it reaches the item's durability. See CONTRACT.md "Tool durability".
+BF.durability = id => (items[id] && items[id].durability) || 0;
+// Wears stack `s` by n uses. Returns "broken" when the tool is used up (the caller removes it), true when worn, false for items without a lifespan.
+BF.wearStack = (s, n = 1) => {
+  const max = s ? BF.durability(s.id) : 0;
+  if (!max || !(n > 0)) return false;
+  s.wear = (s.wear || 0) + n;
+  return s.wear >= max ? "broken" : true;
 };
 BF.itemName = id => (items[id] ? items[id].label || items[id].name.replace(/_item$/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "?");
 // ---- wood/colour pack runtime ----
