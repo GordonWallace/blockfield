@@ -102,39 +102,37 @@
   .yes { color: var(--accent2); } .no { color: var(--danger); } .dim { color: var(--faint); }
   input.search { background: var(--bg2); border: 1px solid var(--edge2); border-radius: 5px; padding: 4px 9px; width: 180px; outline: none; } input.search:focus { border-color: var(--accent); }
 
-  .filters { padding: 10px 16px; border-bottom: 1px solid var(--edge); }
-  .fhead { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
-  .fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 6px; }
-  .fbtn { border: 1px solid var(--edge2); background: transparent; border-radius: 99px; padding: 2px 10px; font-size: 12px; cursor: pointer; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
-  .fbtn.on { background: rgba(255, 255, 255, 0.08); color: var(--ink); border-color: var(--edge2); }
-  .fbtn i { width: 7px; height: 7px; border-radius: 50%; }
-  .fbtn .n { color: var(--faint); }
-  .flabel { color: var(--faint); font: 10px var(--display); letter-spacing: 0.5px; margin-right: 2px; }
-  details.dd { position: relative; }
-  details.dd summary { list-style: none; border: 1px solid var(--edge2); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; display: flex; gap: 6px; align-items: center; color: var(--ink); background: rgba(255, 255, 255, 0.05); user-select: none; }
-  details.dd summary .tn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  details.dd summary::-webkit-details-marker { display: none; }
-  details.dd summary::after { content: "\25BE"; color: var(--faint); font-size: 10px; }
-  details.dd summary i { width: 8px; height: 8px; border-radius: 50%; }
-  details.dd summary input.tcb { margin: 0 -1px 0 -3px; width: 13px; height: 13px; cursor: pointer; }
-  details.dd.none summary { color: var(--faint); background: transparent; }
-  details.dd.zero:not(.none) summary .tn { color: var(--muted); }
-  .fhead .fbtn.all { margin-left: 4px; }
-  details.dd.rt .menu { left: auto; right: 0; }
-  details.dd summary .n { color: var(--faint); }
-  details.dd.part summary { border-color: rgba(242, 198, 109, 0.55); }
-  details.dd .mark { color: var(--warn); font-size: 11px; }
-  details.dd[open] summary { background: rgba(255, 255, 255, 0.1); }
-  details.dd .menu { position: absolute; z-index: 6; top: calc(100% + 6px); left: 0; min-width: 210px; background: #18211c; border: 1px solid var(--edge2); border-radius: 8px; padding: 6px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
-  details.dd label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; cursor: pointer; font-size: 12px; }
-  details.dd label:hover { background: rgba(255, 255, 255, 0.06); }
-  details.dd label span:nth-child(2) { flex: 1; }
-  details.dd label .n { color: var(--faint); }
-  details.dd input { accent-color: var(--accent); margin: 0; }
-  details.dd .mrow { display: flex; gap: 4px; border-top: 1px solid var(--edge); margin-top: 4px; padding-top: 6px; }
-  details.dd .mrow button { flex: 1; background: transparent; border: 1px solid var(--edge2); border-radius: 4px; padding: 2px 4px; font-size: 11px; cursor: pointer; color: var(--muted); white-space: nowrap; }
-  details.dd .mrow button:hover { color: var(--ink); border-color: var(--accent); }
-  .fbtn.reset { color: var(--warn); border-color: rgba(242, 198, 109, 0.4); }
+  #lpanel { overflow: visible; }   /* the type menu may reach past a short log */
+  .filters { display: flex; gap: 10px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--edge); }
+  .flabel { color: var(--faint); font: 10px var(--display); letter-spacing: 0.5px; }
+  .fsum { color: var(--faint); font-size: 12px; }
+  details.ft { position: relative; }
+  details.ft > summary { list-style: none; border: 1px solid var(--edge2); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; background: rgba(255, 255, 255, 0.05); user-select: none; }
+  details.ft > summary::-webkit-details-marker { display: none; }
+  details.ft > summary::after { content: "\25BE"; color: var(--faint); font-size: 10px; }
+  details.ft[open] > summary { background: rgba(255, 255, 255, 0.1); }
+  details.ft.some > summary { border-color: rgba(242, 198, 109, 0.55); }
+  .fmenu { position: absolute; z-index: 6; top: calc(100% + 6px); left: 0; width: 260px; background: #18211c; border: 1px solid var(--edge2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+  .fmenu .fhead { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--edge); }
+  .fmenu .fhead button { flex: 1; background: transparent; border: 1px solid var(--edge2); border-radius: 5px; padding: 3px 6px; font-size: 12px; cursor: pointer; color: var(--muted); }
+  .fmenu .fhead button:hover { color: var(--ink); border-color: var(--accent); }
+  .fmenu .flist { max-height: min(60vh, 520px); overflow-y: auto; padding: 4px; }
+  .frow { display: flex; align-items: center; border-radius: 5px; }
+  .frow:hover { background: rgba(255, 255, 255, 0.05); }
+  .frow label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 6px; cursor: pointer; font-size: 12px; }
+  .frow i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .frow .tn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .n, .facts .n { color: var(--faint); }
+  .frow.zero .tn { color: var(--muted); }
+  .frow.none .tn { color: var(--faint); }
+  .frow .mark { color: var(--warn); font-size: 11px; }
+  .frow .fx { background: transparent; border: 0; color: var(--faint); cursor: pointer; padding: 4px 8px; font-size: 11px; }
+  .frow .fx:hover, .frow.x .fx { color: var(--ink); }
+  .facts { padding: 0 0 4px 30px; }
+  .facts label { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 5px; cursor: pointer; font-size: 12px; color: var(--muted); }
+  .facts label:hover { background: rgba(255, 255, 255, 0.05); }
+  .facts label span:nth-child(2) { flex: 1; }
+  .fmenu input { accent-color: var(--accent); margin: 0; }
   #log { max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; padding: 4px 0; }
   .ent { display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding: 5px 16px; border-left: 3px solid transparent; font-size: 12px; }
   .ent time { color: var(--faint); }
@@ -231,7 +229,7 @@
       <div class="panel"><details class="raw" id="raw"><summary>In-game F3 text</summary><pre id="f3"></pre></details></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="lpanel">
       <div class="ph"><h2>Village log</h2><span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
       <div class="filters" id="l-filters"></div>
       <div id="log"><div class="empty">Load a village to see its log.</div></div>
@@ -546,15 +544,15 @@ function stamp(t) {
   const d = Math.floor(t), h = (((t - d) * 24 + 6) % 24 + 24) % 24;
   return "Day " + (d + 1) + " " + String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0");
 }
-// ---- log filters: a dropdown per villager type (plus the player) with a checkbox per action; everything starts checked.
-// Each type's chip also has its own checkbox (all of its actions on or off), and Select all / Select none set every type.
+// ---- log filters: one dropdown listing every villager type (plus the player) in a single column, Select all / Select none at
+// the top. Each type's checkbox turns all of its actions on or off; its arrow unfolds a checkbox per action. Everything starts checked.
 // Unchecked boxes are remembered in this browser (localStorage). Who did what is read from the log text, whose formats come
 // from js/villagelog.js: "Name (Job) traded with Name (Job): ...", "Name (Job) placed a bed at ...", "Name became a Job",
 // "Name was born to ...", "Name (Job) died: ...". Entries that match none of these are always shown.
 const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing beds", job: "Taking the job", born: "Being born", death: "Dying" };
 const ACTS_FOR = t => t === "Player" ? ["buy", "bed"] : t === "Child" ? ["born", "death"] : ["buy", "sell", "bed", "job", "death"];
 const STORE = "bf-debug-logfilters";
-let off = new Set(), openType = null;
+let off = new Set();
 try { off = new Set(JSON.parse(localStorage.getItem(STORE) || "[]")); } catch (e) { /* private window: start with everything on */ }
 const saveOff = () => { try { localStorage.setItem(STORE, JSON.stringify([...off])); } catch (e) {} };
 const isOn = (t, act) => !off.has(t + "|" + act);
@@ -581,52 +579,51 @@ const visible = e => { const a = actorsOf(e); return !a || a.some(([t, act]) => 
 // each snapshot), the colour table's, Child, anything else the log names, and the player last.
 const allTypes = shown => new Set([...Object.keys(PROF), ...((snap && snap.professions) || []), "Child", "Player", ...shown]);
 const setType = (t, on) => { for (const x of ACTS_FOR(t)) { if (on) off.delete(t + "|" + x); else off.add(t + "|" + x); } };
-let shownTypes = [];
+let shownTypes = [], menuOpen = false;
+const expanded = new Set();   // types whose actions are unfolded in the menu
 function renderFilters() {
   const a = log ? log.entries : [], cnt = {};   // type -> action -> count
   for (const e of a) for (const [t, act] of actorsOf(e) || []) { const c = cnt[t] || (cnt[t] = {}); c[act] = (c[act] || 0) + 1; }
   const list = [...allTypes(Object.keys(cnt))].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
   shownTypes = list;
-  const html = list.map(t => {
+  let typesOn = 0;
+  const rows = list.map(t => {
     const acts = ACTS_FOR(t), c = cnt[t] || {}, n = acts.filter(x => isOn(t, x)).length, total = acts.reduce((s2, x) => s2 + (c[x] || 0), 0);
-    const col = t === "Player" ? "var(--accent2)" : profColor(t);
-    return `<details class="dd${n === 0 ? " none" : n < acts.length ? " part" : ""}${total ? "" : " zero"}" data-t="${esc(t)}"${openType === t ? " open" : ""}><summary>` +
-      `<input type="checkbox" class="tcb" title="Show or hide all of ${esc(t)}"${n ? " checked" : ""}${n && n < acts.length ? ` data-part="1"` : ""}><i style="background:${col}"></i><span class="tn">${esc(t)}</span><span class="n">${total}</span>${n && n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}</summary>` +
-      `<div class="menu">${acts.map(x => `<label><input type="checkbox" data-a="${x}"${isOn(t, x) ? " checked" : ""}><span>${ACTIONS[x]}</span><span class="n">${c[x] || 0}</span></label>`).join("")}` +
-      `<div class="mrow"><button data-all="1">All</button><button data-all="0">None</button></div></div></details>`;
+    if (n) typesOn++;
+    const col = t === "Player" ? "var(--accent2)" : profColor(t), x = expanded.has(t);
+    return `<div class="frow${n === 0 ? " none" : n < acts.length ? " part" : ""}${total ? "" : " zero"}${x ? " x" : ""}" data-t="${esc(t)}">` +
+      `<label><input type="checkbox" class="tcb"${n ? " checked" : ""}${n && n < acts.length ? ` data-part="1"` : ""}><i style="background:${col}"></i><span class="tn">${esc(t)}</span>` +
+      `${n && n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}<span class="n">${total}</span></label>` +
+      `<button class="fx" title="Choose actions">${x ? "\u25BE" : "\u25B8"}</button></div>` +
+      (x ? `<div class="facts" data-t="${esc(t)}">${acts.map(k => `<label><input type="checkbox" data-a="${k}"${isOn(t, k) ? " checked" : ""}><span>${ACTIONS[k]}</span><span class="n">${c[k] || 0}</span></label>`).join("")}</div>` : "");
   }).join("");
-  $("l-filters").innerHTML = `<div class="fhead"><span class="flabel">Show logs for</span><button class="fbtn all" id="l-all">Select all</button><button class="fbtn" id="l-none">Select none</button></div>` +
-    `<div class="fgrid">${html}</div>`;
-  for (const cb of $("l-filters").querySelectorAll("input.tcb[data-part]")) cb.indeterminate = true;   // some actions on, some off
+  const all = typesOn === list.length && !off.size, sum = all ? "All types" : typesOn === 0 ? "No types" : typesOn + " of " + list.length + " types";
+  const el = $("l-filters"), old = el.querySelector(".flist"), top = old ? old.scrollTop : 0;   // keep the menu's scroll across redraws
+  el.innerHTML = `<span class="flabel">Show logs for</span><details class="ft${all ? "" : " some"}" id="l-types"${menuOpen ? " open" : ""}><summary>${sum}</summary>` +
+    `<div class="fmenu"><div class="fhead"><button id="l-all">Select all</button><button id="l-none">Select none</button></div><div class="flist">${rows}</div></div></details>` +
+    (all ? "" : `<span class="fsum">Entries show while any villager in them is selected</span>`);
+  const nl = el.querySelector(".flist"); if (nl) nl.scrollTop = top;
+  for (const cb of el.querySelectorAll("input.tcb[data-part]")) cb.indeterminate = true;   // some actions on, some off
 }
-$("l-filters").addEventListener("toggle", e => {
-  const d = e.target; if (!d.matches || !d.matches("details.dd")) return;
-  if (d.open) {
-    openType = d.dataset.t; for (const o of $("l-filters").querySelectorAll("details.dd[open]")) if (o !== d) o.open = false;
-    const g = $("l-filters").getBoundingClientRect(), r = d.getBoundingClientRect();
-    d.classList.toggle("rt", r.left + 220 > g.right);   // near the right edge: open the menu leftwards
-  }
-  else if (openType === d.dataset.t) openType = null;
-}, true);
+$("l-filters").addEventListener("toggle", e => { if (e.target.id === "l-types") menuOpen = e.target.open; }, true);
 $("l-filters").addEventListener("change", e => {
   const tcb = e.target.closest("input.tcb");
-  if (tcb) { setType(tcb.closest("details").dataset.t, tcb.checked); saveOff(); renderLog(true); return; }
+  if (tcb) { setType(tcb.closest("[data-t]").dataset.t, tcb.checked); saveOff(); renderLog(true); return; }
   const cb = e.target.closest("input[data-a]"); if (!cb) return;
-  const t = cb.closest("details").dataset.t, k = t + "|" + cb.dataset.a;
+  const t = cb.closest("[data-t]").dataset.t, k = t + "|" + cb.dataset.a;
   if (cb.checked) off.delete(k); else off.add(k);
   saveOff(); renderLog(true);
 });
 $("l-filters").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
-  if (b.id === "l-all") { off.clear(); openType = null; }
-  else if (b.id === "l-none") { for (const t of allTypes(shownTypes)) setType(t, false); openType = null; }
-  else {
-    const t = b.closest("details").dataset.t;
-    if (b.dataset.all) for (const x of ACTS_FOR(t)) { if (b.dataset.all === "1") off.delete(t + "|" + x); else off.add(t + "|" + x); }
-  }
+  if (b.id === "l-all") off.clear();
+  else if (b.id === "l-none") for (const t of allTypes(shownTypes)) setType(t, false);
+  else if (b.classList.contains("fx")) { const t = b.closest("[data-t]").dataset.t; if (expanded.has(t)) expanded.delete(t); else expanded.add(t); renderFilters(); return; }
+  else return;
   saveOff(); renderLog(true);
 });
-document.addEventListener("click", e => { if (e.target.isConnected && !e.target.closest("#l-filters details.dd")) { openType = null; for (const o of document.querySelectorAll("#l-filters details.dd[open]")) o.open = false; } });
+// a click anywhere else closes the menu
+document.addEventListener("click", e => { if (menuOpen && e.target.isConnected && !e.target.closest("#l-types")) { menuOpen = false; const d = $("l-types"); if (d) d.open = false; } });
 $("l-q").addEventListener("input", () => renderLog(true));
 function renderLog(keepNew) {
   renderFilters();
