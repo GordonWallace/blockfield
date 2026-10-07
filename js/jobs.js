@@ -79,6 +79,13 @@ function freeCells(v, b, r) {
   const beds = new Set();
   for (const [u, q, a] of wg.bedPlan(b.type, b.w, b.d, b.h)) { beds.add(u + "," + q); beds.add(a === "u" ? (u + 1) + "," + q : u + "," + (q + 1)); }
   const walk = (u, q) => at(u, 1, q) === 0 && at(u, 2, q) === 0 && !!at(u, 0, q) && !beds.has(u + "," + q);
+  const fronts = new Set();   // village generator 3: no jobsite in front of a chest or furnace (blocks.js facing pack)
+  if ((BF.state && BF.state.gen | 0) >= 3) for (const [k, id] of rec) {
+    const b = BF.blocks[id], f = b && (b.chestFacing != null ? b.chestFacing : b.furnaceFacing);
+    if (f == null) continue;
+    const [u, y, q] = k.split(",").map(Number);
+    if (y === 1) fronts.add((u + BF.DIRS[f][0]) + "," + (q + BF.DIRS[f][1]));
+  }
   const start = [b.du, 1];
   if (!walk(start[0], start[1])) return [];
   const taken = new Set();
@@ -99,7 +106,7 @@ function freeCells(v, b, r) {
   };
   const cands = [];
   for (let q = 1; q < b.d - 1; q++) for (let u = 1; u < b.w - 1; u++) {
-    if (!walk(u, q) || (u === b.du && q <= 2)) continue;
+    if (!walk(u, q) || (u === b.du && q <= 2) || fronts.has(u + "," + q)) continue;
     let wall = 0; for (const [du, dq] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (at(u + du, 1, q + dq)) wall++;
     cands.push({ u, q, s: wall + r() * 0.9 });
   }
