@@ -455,15 +455,15 @@ function quitToTitle(btn) {
 // Some browsers still drop that lock, or swallow it, at Escape's release (macOS): an unlock within ESC_GRACE seconds of an
 // Escape that closed a screen leaves you in the game with the mouse free (the next click captures it) instead of pausing.
 const ESC_GRACE = 1;
-let lockOnEscUp = false, escClosedAt = -1e9, escCloseEvent = null, escCloseHeld = false;
+let lockOnEscUp = false, escClosedAt = -1e9, escCloseEvent = null, escCloseHeld = false, escRelock = false;
 addEventListener("keyup", e => {
   if (e.key !== "Escape") return;
   if (escCloseHeld) { escCloseHeld = false; escClosedAt = performance.now(); }   // the grace runs from the release, when the re-lock goes out
   if (!lockOnEscUp) return;
   lockOnEscUp = false;
-  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) requestLock();
+  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) { requestLock(); escRelock = performance.now() - escClosedAt < ESC_GRACE * 1000; }
 }, true);
-addEventListener("blur", () => { lockOnEscUp = escCloseHeld = false; });
+addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
 // A screen is closing: note it when Escape did it, so neither that key press nor an unlock in the next ESC_GRACE seconds pauses.
 function screenClosed() {
   const ev = window.event;
@@ -472,7 +472,7 @@ function screenClosed() {
 function requestLock() {
   if (isTouch) return;
   const ev = window.event;
-  lockOnEscUp = false;
+  lockOnEscUp = escRelock = false;
   if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
   const cv = canvas();
   if (!cv.requestPointerLock) { dragMode = true; return; }
@@ -482,6 +482,7 @@ function requestLock() {
   } catch (_) { onLockError(); }
 }
 function onLockError() {
+  escRelock = false;
   if (locked) return;
   if (lockWorked) { if (menuOpen === "pause") pauseNote.textContent = "Click Resume again to capture the mouse."; return; }
   dragMode = true;
@@ -577,6 +578,7 @@ function bindInput() {
     locked = document.pointerLockElement === cv;
     if (locked) {
       lockWorked = true; dragMode = false;
+      if (escRelock) { escRelock = false; escClosedAt = performance.now(); }   // the grace also runs from when that re-lock lands, however slow
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
       keys.clear(); mouseL = mouseR = false; resetBreak();

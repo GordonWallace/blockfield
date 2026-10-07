@@ -102,20 +102,25 @@
   .yes { color: var(--accent2); } .no { color: var(--danger); } .dim { color: var(--faint); }
   input.search { background: var(--bg2); border: 1px solid var(--edge2); border-radius: 5px; padding: 4px 9px; width: 180px; outline: none; } input.search:focus { border-color: var(--accent); }
 
-  .filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--edge); align-items: center; }
+  .filters { padding: 10px 16px; border-bottom: 1px solid var(--edge); }
+  .fhead { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 6px; }
   .fbtn { border: 1px solid var(--edge2); background: transparent; border-radius: 99px; padding: 2px 10px; font-size: 12px; cursor: pointer; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
   .fbtn.on { background: rgba(255, 255, 255, 0.08); color: var(--ink); border-color: var(--edge2); }
   .fbtn i { width: 7px; height: 7px; border-radius: 50%; }
   .fbtn .n { color: var(--faint); }
   .flabel { color: var(--faint); font: 10px var(--display); letter-spacing: 0.5px; margin-right: 2px; }
   details.dd { position: relative; }
-  details.dd summary { list-style: none; border: 1px solid var(--edge2); border-radius: 99px; padding: 2px 10px; font-size: 12px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; color: var(--ink); background: rgba(255, 255, 255, 0.05); user-select: none; }
+  details.dd summary { list-style: none; border: 1px solid var(--edge2); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; display: flex; gap: 6px; align-items: center; color: var(--ink); background: rgba(255, 255, 255, 0.05); user-select: none; }
+  details.dd summary .tn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   details.dd summary::-webkit-details-marker { display: none; }
   details.dd summary::after { content: "\25BE"; color: var(--faint); font-size: 10px; }
   details.dd summary i { width: 8px; height: 8px; border-radius: 50%; }
   details.dd summary input.tcb { margin: 0 -1px 0 -3px; width: 13px; height: 13px; cursor: pointer; }
   details.dd.none summary { color: var(--faint); background: transparent; }
-  .fbtn.all { margin-left: 4px; }
+  details.dd.zero:not(.none) summary .tn { color: var(--muted); }
+  .fhead .fbtn.all { margin-left: 4px; }
+  details.dd.rt .menu { left: auto; right: 0; }
   details.dd summary .n { color: var(--faint); }
   details.dd.part summary { border-color: rgba(242, 198, 109, 0.55); }
   details.dd .mark { color: var(--warn); font-size: 11px; }
@@ -263,11 +268,12 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
-  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
   es.onopen = () => { serverUp = true; status(); };
 }
+let logDirty = false;   // a (re)connect brought the server's full logs: redraw the log with the next snapshot
 let serverUp = false, gameErr = null, errAt = 0;   // gameErr: the game's feed failing to build a snapshot (it sends the error instead)
 function status() {
   const el = $("conn"), live = snap && Date.now() - lastAt < (snap.hidden ? 70000 : 2500);   // a background tab only sends about once a second, or less
@@ -300,7 +306,7 @@ function onSnap(s) {
   const was = viewKey;
   pickView(s);
   renderTop(s); renderVillages(s); renderVillage(s); status();
-  if (logChanged || was !== viewKey) renderLog();
+  if (logChanged || logDirty || was !== viewKey) { logDirty = false; renderLog(); }
 }
 // The village on show: the one the user picked, else the nearest loaded one (the list comes sorted loaded-first by distance).
 function pickView(s) {
@@ -571,34 +577,35 @@ function actorsOf(e) {
 // An entry shows while any villager in it is selected for what it did there: with Builder on and Furniture Maker off, a builder
 // buying from a furniture maker still shows.
 const visible = e => { const a = actorsOf(e); return !a || a.some(([t, act]) => isOn(t, act)); };
-// every type Select none has to turn off, including ones that haven't done anything here yet
-const allTypes = shown => new Set([...Object.keys(PROF), "Player", ...shown]);
+// Every villager type is listed, whether or not it lives here or has logged anything yet: the game's professions (sent with
+// each snapshot), the colour table's, Child, anything else the log names, and the player last.
+const allTypes = shown => new Set([...Object.keys(PROF), ...((snap && snap.professions) || []), "Child", "Player", ...shown]);
 const setType = (t, on) => { for (const x of ACTS_FOR(t)) { if (on) off.delete(t + "|" + x); else off.add(t + "|" + x); } };
 let shownTypes = [];
 function renderFilters() {
   const a = log ? log.entries : [], cnt = {};   // type -> action -> count
   for (const e of a) for (const [t, act] of actorsOf(e) || []) { const c = cnt[t] || (cnt[t] = {}); c[act] = (c[act] || 0) + 1; }
-  // types that did something in this village's log, plus any partly unchecked (so they can be turned back on); a type that is
-  // all off and has done nothing here stays out of the way (Select none turns off every type) until Select all
-  const types = new Set(Object.keys(cnt));
-  for (const k of off) types.add(k.split("|")[0]);
-  const list = [...types].filter(t => cnt[t] || ACTS_FOR(t).some(x => isOn(t, x))).sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
+  const list = [...allTypes(Object.keys(cnt))].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
   shownTypes = list;
   const html = list.map(t => {
     const acts = ACTS_FOR(t), c = cnt[t] || {}, n = acts.filter(x => isOn(t, x)).length, total = acts.reduce((s2, x) => s2 + (c[x] || 0), 0);
     const col = t === "Player" ? "var(--accent2)" : profColor(t);
-    return `<details class="dd${n === 0 ? " none" : n < acts.length ? " part" : ""}" data-t="${esc(t)}"${openType === t ? " open" : ""}><summary>` +
-      `<input type="checkbox" class="tcb" title="Show or hide all of ${esc(t)}"${n ? " checked" : ""}${n && n < acts.length ? ` data-part="1"` : ""}><i style="background:${col}"></i>${esc(t)} <span class="n">${total}</span>${n && n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}</summary>` +
+    return `<details class="dd${n === 0 ? " none" : n < acts.length ? " part" : ""}${total ? "" : " zero"}" data-t="${esc(t)}"${openType === t ? " open" : ""}><summary>` +
+      `<input type="checkbox" class="tcb" title="Show or hide all of ${esc(t)}"${n ? " checked" : ""}${n && n < acts.length ? ` data-part="1"` : ""}><i style="background:${col}"></i><span class="tn">${esc(t)}</span><span class="n">${total}</span>${n && n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}</summary>` +
       `<div class="menu">${acts.map(x => `<label><input type="checkbox" data-a="${x}"${isOn(t, x) ? " checked" : ""}><span>${ACTIONS[x]}</span><span class="n">${c[x] || 0}</span></label>`).join("")}` +
       `<div class="mrow"><button data-all="1">All</button><button data-all="0">None</button></div></div></details>`;
   }).join("");
-  $("l-filters").innerHTML = `<span class="flabel">Show logs for</span>` + (html || `<span class="sub">No villager actions yet</span>`) +
-    (html ? `<button class="fbtn all" id="l-all">Select all</button><button class="fbtn" id="l-none">Select none</button>` : "");
+  $("l-filters").innerHTML = `<div class="fhead"><span class="flabel">Show logs for</span><button class="fbtn all" id="l-all">Select all</button><button class="fbtn" id="l-none">Select none</button></div>` +
+    `<div class="fgrid">${html}</div>`;
   for (const cb of $("l-filters").querySelectorAll("input.tcb[data-part]")) cb.indeterminate = true;   // some actions on, some off
 }
 $("l-filters").addEventListener("toggle", e => {
   const d = e.target; if (!d.matches || !d.matches("details.dd")) return;
-  if (d.open) { openType = d.dataset.t; for (const o of $("l-filters").querySelectorAll("details.dd[open]")) if (o !== d) o.open = false; }
+  if (d.open) {
+    openType = d.dataset.t; for (const o of $("l-filters").querySelectorAll("details.dd[open]")) if (o !== d) o.open = false;
+    const g = $("l-filters").getBoundingClientRect(), r = d.getBoundingClientRect();
+    d.classList.toggle("rt", r.left + 220 > g.right);   // near the right edge: open the menu leftwards
+  }
   else if (openType === d.dataset.t) openType = null;
 }, true);
 $("l-filters").addEventListener("change", e => {
