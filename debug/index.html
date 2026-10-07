@@ -92,6 +92,26 @@
   .fbtn.on { background: rgba(255, 255, 255, 0.08); color: var(--ink); border-color: var(--edge2); }
   .fbtn i { width: 7px; height: 7px; border-radius: 50%; }
   .fbtn .n { color: var(--faint); }
+  .flabel { color: var(--faint); font: 10px var(--display); letter-spacing: 0.5px; margin-right: 2px; }
+  details.dd { position: relative; }
+  details.dd summary { list-style: none; border: 1px solid var(--edge2); border-radius: 99px; padding: 2px 10px; font-size: 12px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; color: var(--ink); background: rgba(255, 255, 255, 0.05); user-select: none; }
+  details.dd summary::-webkit-details-marker { display: none; }
+  details.dd summary::after { content: "\25BE"; color: var(--faint); font-size: 10px; }
+  details.dd summary i { width: 8px; height: 8px; border-radius: 50%; }
+  details.dd summary .n { color: var(--faint); }
+  details.dd.part summary { border-color: rgba(242, 198, 109, 0.55); }
+  details.dd .mark { color: var(--warn); font-size: 11px; }
+  details.dd[open] summary { background: rgba(255, 255, 255, 0.1); }
+  details.dd .menu { position: absolute; z-index: 6; top: calc(100% + 6px); left: 0; min-width: 210px; background: #18211c; border: 1px solid var(--edge2); border-radius: 8px; padding: 6px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+  details.dd label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+  details.dd label:hover { background: rgba(255, 255, 255, 0.06); }
+  details.dd label span:nth-child(2) { flex: 1; }
+  details.dd label .n { color: var(--faint); }
+  details.dd input { accent-color: var(--accent); margin: 0; }
+  details.dd .mrow { display: flex; gap: 4px; border-top: 1px solid var(--edge); margin-top: 4px; padding-top: 6px; }
+  details.dd .mrow button { flex: 1; background: transparent; border: 1px solid var(--edge2); border-radius: 4px; padding: 2px 4px; font-size: 11px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  details.dd .mrow button:hover { color: var(--ink); border-color: var(--accent); }
+  .fbtn.reset { color: var(--warn); border-color: rgba(242, 198, 109, 0.4); }
   #log { max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; padding: 4px 0; }
   .ent { display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding: 5px 16px; border-left: 3px solid transparent; font-size: 12px; }
   .ent time { color: var(--faint); }
@@ -203,8 +223,6 @@ const fmt = n => n == null ? "-" : n.toLocaleString();
 // ---------------------------------------------------------------- state
 let snap = null, layout = null, log = null, lastAt = 0, seenLog = 0, logKeyShown = null, hlName = null, hoverName = null;
 const hist = { fps: [], queue: [] }, HIST = 240;   // 60 s at 4 snapshots a second
-const KINDS = [["birth", "Births"], ["bed", "Beds"], ["trade", "Trades"], ["job", "Jobs"], ["death", "Deaths"]];
-const kindOn = new Set(KINDS.map(k => k[0]));
 let rosterSort = { k: "name", dir: 1 };
 
 // Profession colours: fixed for the common ones, hashed hue for anything else so new professions still get a stable colour.
@@ -440,18 +458,72 @@ function stamp(t) {
   const d = Math.floor(t), h = (((t - d) * 24 + 6) % 24 + 24) % 24;
   return "Day " + (d + 1) + " " + String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0");
 }
-function renderFilters() {
-  const a = log ? log.entries : [], c = {};
-  for (const e of a) c[e[1]] = (c[e[1]] || 0) + 1;
-  $("l-filters").innerHTML = KINDS.map(([k, label]) => `<button class="fbtn${kindOn.has(k) ? " on" : ""}" data-k="${k}"><i style="background:var(--${k})"></i>${label} <span class="n">${c[k] || 0}</span></button>`).join("");
+// ---- log filters: a dropdown per villager type (plus the player) with a checkbox per action; everything starts checked.
+// Unchecked boxes are remembered in this browser (localStorage). Who did what is read from the log text, whose formats come
+// from js/villagelog.js: "Name (Job) traded with Name (Job): ...", "Name (Job) placed a bed at ...", "Name became a Job",
+// "Name was born to ...", "Name (Job) died: ...". Entries that match none of these are always shown.
+const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing beds", job: "Taking the job", born: "Being born", death: "Dying" };
+const ACTS_FOR = t => t === "Player" ? ["buy", "bed"] : t === "Child" ? ["born", "death"] : ["buy", "sell", "bed", "job", "death"];
+const STORE = "bf-debug-logfilters";
+let off = new Set(), openType = null;
+try { off = new Set(JSON.parse(localStorage.getItem(STORE) || "[]")); } catch (e) { /* private window: start with everything on */ }
+const saveOff = () => { try { localStorage.setItem(STORE, JSON.stringify([...off])); } catch (e) {} };
+const isOn = (t, act) => !off.has(t + "|" + act);
+const typeOf = party => party === "Player" ? "Player" : (/\(([^()]+)\)\s*$/.exec(party) || [])[1] || null;
+// -> [[type, action], ...]: the entry shows if all of these are checked (a trade has a buyer and a seller); null = unrecognised, always shown
+function actorsOf(e) {
+  const k = e[1], tx = e[2];
+  let m;
+  if (k === "trade" && (m = /^(.*?) traded with (.*?\)):/.exec(tx))) {
+    const out = [], b = typeOf(m[1]), s = typeOf(m[2]);
+    if (b) out.push([b, "buy"]); if (s) out.push([s, "sell"]);
+    return out.length ? out : null;
+  }
+  if (k === "bed" && (m = /^(Player|.*?\([^()]+\)) placed a /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "bed"]] : null; }
+  if (k === "job" && (m = / became an? (.+?)(?: \(was |$)/.exec(tx))) return [[m[1], "job"]];
+  if (k === "birth") return [["Child", "born"]];
+  if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
+  return null;
 }
-$("l-filters").addEventListener("click", e => {
-  const b = e.target.closest(".fbtn"); if (!b) return;
-  const k = b.dataset.k;
-  if (e.shiftKey || e.metaKey || e.ctrlKey) { kindOn.clear(); kindOn.add(k); }   // modifier-click: show only this kind
-  else if (kindOn.has(k)) kindOn.delete(k); else kindOn.add(k);
-  renderLog(true);
+const visible = e => { const a = actorsOf(e); return !a || a.every(([t, act]) => isOn(t, act)); };   // unchecking hides every entry with that action
+function renderFilters() {
+  const a = log ? log.entries : [], cnt = {};   // type -> action -> count
+  for (const e of a) for (const [t, act] of actorsOf(e) || []) { const c = cnt[t] || (cnt[t] = {}); c[act] = (c[act] || 0) + 1; }
+  // types that did something in this village's log, plus any with boxes unchecked (so they can be turned back on)
+  const types = new Set(Object.keys(cnt));
+  for (const k of off) types.add(k.split("|")[0]);
+  const list = [...types].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
+  const html = list.map(t => {
+    const acts = ACTS_FOR(t), c = cnt[t] || {}, n = acts.filter(x => isOn(t, x)).length, total = acts.reduce((s2, x) => s2 + (c[x] || 0), 0);
+    const col = t === "Player" ? "var(--accent2)" : profColor(t);
+    return `<details class="dd${n < acts.length ? " part" : ""}" data-t="${esc(t)}"${openType === t ? " open" : ""}><summary><i style="background:${col}"></i>${esc(t)} <span class="n">${total}</span>${n < acts.length ? `<span class="mark">${n}/${acts.length}</span>` : ""}</summary>` +
+      `<div class="menu">${acts.map(x => `<label><input type="checkbox" data-a="${x}"${isOn(t, x) ? " checked" : ""}><span>${ACTIONS[x]}</span><span class="n">${c[x] || 0}</span></label>`).join("")}` +
+      `<div class="mrow"><button data-all="1">All</button><button data-all="0">None</button></div></div></details>`;
+  }).join("");
+  $("l-filters").innerHTML = `<span class="flabel">Show logs for</span>` + (html || `<span class="sub">No villager actions yet</span>`) +
+    (off.size ? `<button class="fbtn reset" id="l-reset">Show all</button>` : "");
+}
+$("l-filters").addEventListener("toggle", e => {
+  const d = e.target; if (!d.matches || !d.matches("details.dd")) return;
+  if (d.open) { openType = d.dataset.t; for (const o of $("l-filters").querySelectorAll("details.dd[open]")) if (o !== d) o.open = false; }
+  else if (openType === d.dataset.t) openType = null;
+}, true);
+$("l-filters").addEventListener("change", e => {
+  const cb = e.target.closest("input[data-a]"); if (!cb) return;
+  const t = cb.closest("details").dataset.t, k = t + "|" + cb.dataset.a;
+  if (cb.checked) off.delete(k); else off.add(k);
+  saveOff(); renderLog(true);
 });
+$("l-filters").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "l-reset") { off.clear(); openType = null; }
+  else {
+    const t = b.closest("details").dataset.t;
+    if (b.dataset.all) for (const x of ACTS_FOR(t)) { if (b.dataset.all === "1") off.delete(t + "|" + x); else off.add(t + "|" + x); }
+  }
+  saveOff(); renderLog(true);
+});
+document.addEventListener("click", e => { if (e.target.isConnected && !e.target.closest("#l-filters details.dd")) { openType = null; for (const o of document.querySelectorAll("#l-filters details.dd[open]")) o.open = false; } });
 $("l-q").addEventListener("input", () => renderLog(true));
 function renderLog(keepNew) {
   renderFilters();
@@ -460,11 +532,10 @@ function renderLog(keepNew) {
   const a = log.entries, q = $("l-q").value.trim().toLowerCase(), fresh = log.key !== logKeyShown;
   const newFrom = fresh || keepNew ? a.length : seenLog;   // highlight entries that arrived since the last render
   logKeyShown = log.key;
-  const known = new Set(KINDS.map(k => k[0]));
   const rows = [];
   for (let i = a.length - 1; i >= 0; i--) {
     const e = a[i];
-    if (known.has(e[1]) && !kindOn.has(e[1])) continue;
+    if (!visible(e)) continue;
     if (q && !e[2].toLowerCase().includes(q)) continue;
     rows.push(`<div class="ent ${esc(e[1])}${i >= newFrom ? " new" : ""}"><time>${stamp(e[0])}</time><span class="tx">${esc(e[2])}</span></div>`);
   }

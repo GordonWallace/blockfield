@@ -14,7 +14,7 @@ then visit http://localhost:8000. Worlds save in the browser (IndexedDB).
 
     node debug/server.js
 
-then open http://localhost:8000 (the game) on one screen and http://localhost:8001 (the debug screen) on the other. Node only, no packages to install. The debug screen shows everything the F3 overlay and village panel do, live: frame rate, position, chunks, mobs, light, weather, and for the village you are in its villagers, beds, job blocks, occupations, a map with every villager on it, a roster with what each one is doing, and the full village log with filters and search.
+then open http://localhost:8000 (the game) on one screen and http://localhost:8001 (the debug screen) on the other. Node only, no packages to install. The debug screen shows everything the F3 overlay and village panel do, live: frame rate, position, chunks, mobs, light, weather, and for the village you are in its villagers, beds, job blocks, occupations, a map with every villager on it, a roster with what each one is doing, and the full village log with search. The log has a dropdown for each villager type that has done something in it (plus Child and Player), with a checkbox per action: buying, selling, placing beds, taking the job, being born, dying. Everything starts checked; unchecking hides those entries, and your choices are remembered in that browser.
 
 - Keep the game in its own browser window, not a background tab: browsers pause background tabs.
 - Other ports: `node debug/server.js --game 9000 --debug 9001`. From another computer on your network: add `--lan`.

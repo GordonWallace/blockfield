@@ -50,6 +50,32 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   ok('after restart: log resent ' + g.log + '/' + now.length, g.log === now.length && now.some(e => /Tester/.test(e[2])));   // villagers may log more meanwhile
   const st = await (await fetch(`http://localhost:${DBG}/state`)).json();
   ok('after restart: layout resent', !!(st.layout && st.layout.buildings.length));
+  // log filters: a dropdown per villager type, checkboxes per action, remembered across reloads
+  const tr = await game.evaluate(() => {
+    const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
+    const vs = rec.members.filter(m => m.type === 'villager' && !m.child && m.trades && m.trades.length && m.profession !== 'nitwit');
+    const s = vs[0], b2 = vs.find(m => m.profession !== s.profession);
+    BF.vlog.trade(b2, s, 'gave 1 Emerald, got 1 Test');
+    BF.emit('villagerTrade', s, s.trades[0]);
+    return { seller: BF.vlog.pretty(s.profession), buyer: BF.vlog.pretty(b2.profession) };
+  });
+  await dbg.waitForTimeout(1200);
+  const count = () => dbg.evaluate(() => document.querySelectorAll('#log .ent').length);
+  const all = await count();
+  ok('dropdown per type', await dbg.evaluate(t => !!document.querySelector(`#l-filters details.dd[data-t="${t}"]`), tr.seller));
+  await dbg.click(`#l-filters details.dd[data-t="${tr.seller}"] summary`);
+  await dbg.uncheck(`#l-filters details.dd[data-t="${tr.seller}"] input[data-a="sell"]`);
+  await dbg.waitForTimeout(200);
+  const vis = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
+  ok('unchecking Selling hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
+  ok('so does a villager buying from that type', !vis.some(t => /got 1 Test/.test(t)));
+  ok('dropdown stays open after a change', await dbg.evaluate(t => document.querySelector(`#l-filters details.dd[data-t="${t}"]`).open, tr.seller));
+  await dbg.screenshot({ path: out + '-filters.png' });
+  await dbg.reload(); await dbg.waitForTimeout(1500);
+  const texts = () => dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
+  ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(t => !document.querySelector(`#l-filters details.dd[data-t="${t}"] input[data-a="sell"]`).checked, tr.seller));
+  await dbg.click('#l-reset'); await dbg.waitForTimeout(200);
+  ok('show all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
   // leaving the village
   await game.evaluate(() => { const p = BF.player.position; BF.player.spawn(p.x + 300, BF.worldgen.heightAt(p.x + 300, p.z + 120) + 2, p.z + 120); });
   await dbg.waitForTimeout(1500);
