@@ -4,20 +4,19 @@ A Minecraft-style voxel game that runs in the browser. Plain JavaScript modules 
 
 ## Run
 
-Open `index.html` in a browser, or serve the folder:
+    ./run.sh          (macOS / Linux)
+    run.cmd           (Windows)
 
-    python3 -m http.server 8000
+This serves the game on http://localhost:8000 and the debug screen on http://localhost:8001 (it runs `node debug/server.js`, so it needs Node.js, but no packages). Open the game in your browser and, if you want it, the debug screen on a second monitor. Ctrl+C stops it. Worlds save in the browser (IndexedDB).
 
-then visit http://localhost:8000. Worlds save in the browser (IndexedDB).
+You can also open `index.html` directly or serve the folder some other way (`python3 -m http.server 8000`); the game works the same, but the debug screen only exists while the run script or `node debug/server.js` is running.
 
 ## Debug screen on a second monitor
 
-    node debug/server.js
-
-then open http://localhost:8000 (the game) on one screen and http://localhost:8001 (the debug screen) on the other. Node only, no packages to install. The debug screen shows everything the F3 overlay and village panel do, live: frame rate, position, chunks, mobs, light, weather, and for the village you are in its villagers, beds, job blocks, occupations, a map with every villager on it, a roster with what each one is doing, and the full village log with search. A village list shows every village the world has loaded, with its distance from you: loaded villages first (green dot), then the rest by distance. The screen follows the nearest loaded village until you pick another; an unloaded village shows its last known numbers greyed out. The log scrolls back through the village's whole history: the game saves the newest 300 entries per village, and the debug server keeps everything it has seen while it runs. The log has a dropdown for each villager type that has done something in it (plus Child and Player), with a checkbox per action: buying, selling, placing beds, taking the job, being born, dying. Everything starts checked; unchecking hides those entries, and your choices are remembered in that browser.
+Start the game with the run script above (or `node debug/server.js`), then open http://localhost:8000 (the game) on one screen and http://localhost:8001 (the debug screen) on the other. Node only, no packages to install. The debug screen shows everything the F3 overlay and village panel do, live: frame rate, position, chunks, mobs, light, weather, and for the village you are in its villagers, beds, job blocks, occupations, a map with every villager on it, a roster with what each one is doing, and the full village log with search. A village list shows every village the world has loaded, with its distance from you: loaded villages first (green dot), then the rest by distance. The screen follows the nearest loaded village until you pick another; an unloaded village shows its last known numbers greyed out. The log scrolls back through the village's whole history: the game saves the newest 300 entries per village, and the debug server keeps everything it has seen while it runs. The log has a dropdown for each villager type that has done something in it (plus Child and Player), with a checkbox per action: buying, selling, placing beds, taking the job, being born, dying. Everything starts checked; unchecking hides those entries, and your choices are remembered in that browser.
 
 - Keep the game in its own browser window, not a background tab: browsers pause background tabs.
-- Other ports: `node debug/server.js --game 9000 --debug 9001`. From another computer on your network: add `--lan`.
+- Other ports: `./run.sh --game 9000 --debug 9001` (or the same options on `run.cmd` / `node debug/server.js`). From another computer on your network: add `--lan`.
 - The feed is always on and doesn't change anything in the game, F3 included. However you open the game (this server, `python3 -m http.server`, or the file itself), it streams to port 8001 on the same machine. To use only the debug screen with your own game server: `node debug/server.js --no-game`. `?debugfeed=<port>` points it elsewhere and `?debugfeed=off` turns it off.
 - With no debug server running, the game plays as normal and quietly retries every few seconds.
 
