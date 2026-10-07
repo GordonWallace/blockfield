@@ -20,7 +20,7 @@ let creTab = "building", creSearch = "";
 let drag = null;                              // drag-split in progress {button, els:[], touch}
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
-const emitChange = () => BF.emit && BF.emit("inventoryChanged");
+const emitChange = () => { chestCheck(); BF.emit && BF.emit("inventoryChanged"); };
 const nameOf = id => BF.itemName(id).replace(/ Item$/, "");
 const isCreative = () => !!(BF.player && BF.player.gameMode === "creative");
 
@@ -261,14 +261,58 @@ function tickFurnace(f, dt) {
 
 // ---------------------------------------------------------------- chests
 // Contents live here by block position (like furnaces) and are saved with the inventory. A chest that was never opened has no entry.
+// Ownership: a chest is unowned until something puts an item in it (or takes one out of an unowned chest that still holds items);
+// whoever did becomes its owner: "player" or a villager's persistence key "<village key>#<slot>". In survival the player can look into
+// a chest someone else owns but not change it; in creative any chest. js/storage.js gives chests back when they have been empty for a
+// game day or their villager owner dies, and runs the villager side (claiming, storing surplus, taking things back).
 const CHEST_SIZE = 27;
-const chests = new Map(); // "x,y,z" -> {key, pos, slots:[27]}
+const chests = new Map(); // "x,y,z" -> {key, pos, slots:[27], owner, ownerName, emptySince, sig}
 function chestAt(pos) {
   const key = `${pos.x | 0},${pos.y | 0},${pos.z | 0}`;
   let c = chests.get(key);
-  if (!c) { c = { key, pos: { x: pos.x | 0, y: pos.y | 0, z: pos.z | 0 }, slots: new Array(CHEST_SIZE).fill(null) }; chests.set(key, c); }
+  if (!c) { c = { key, pos: { x: pos.x | 0, y: pos.y | 0, z: pos.z | 0 }, slots: new Array(CHEST_SIZE).fill(null), owner: null, ownerName: "", emptySince: null }; chests.set(key, c); }
   return c;
 }
+const chestEmpty = c => !c.slots.some(Boolean);
+const chestSig = c => c.slots.map(s => s ? s.id + ":" + s.count : "").join(",");
+// Something changed the contents of chest c on behalf of `owner` ("player" or a villager key; name = what the owner is called).
+// An unowned chest becomes theirs. Returns true when this made them the owner.
+function chestUsed(c, owner, name, mob) {
+  c.sig = chestSig(c);
+  c.emptySince = c.owner && chestEmpty(c) ? (c.emptySince != null ? c.emptySince : dayNow()) : null;
+  if (c.owner || !owner) return false;
+  c.owner = owner; c.ownerName = name || ""; c.emptySince = chestEmpty(c) ? dayNow() : null; c.reserved = null;
+  BF.emit && BF.emit("chestClaimed", c, mob || null);
+  return true;
+}
+// The chest is free again (why: "empty" | "owner died" | ...).
+function chestRelease(c, why) {
+  if (!c || !c.owner) return false;
+  const was = { owner: c.owner, name: c.ownerName };
+  c.owner = null; c.ownerName = ""; c.emptySince = null;
+  BF.emit && BF.emit("chestReleased", c, why, was);
+  if (open_ && chest === c) layoutFor(mode);
+  return true;
+}
+// Survival: the chest on screen belongs to someone else, so it can be looked at but not changed.
+const chestLocked = () => mode === "chest" && !!chest && !!chest.owner && chest.owner !== "player" && !isCreative();
+// After every player action on the chest screen: did the contents change? (claims an unowned chest for the player)
+function chestCheck() {
+  if (!open_ || mode !== "chest" || !chest) return;
+  const sig = chestSig(chest);
+  if (sig === chest.sig) return;
+  if (chestUsed(chest, "player", "you")) layoutFor(mode);
+}
+// Who owns the chest, as shown on its screen.
+function ownerLabel(c) {
+  if (!c || !c.owner) return "Unclaimed";
+  if (c.owner === "player") return "Yours";
+  let job = "";
+  if (BF.mobs) for (const m of BF.mobs.list) if (m.type === "villager" && !m.dead && m.village && m.slot && m.village.key + "#" + m.slot.idx === c.owner) { job = m.profession; break; }
+  const pretty = s => String(s).replace(/_/g, " ").replace(/\b\w/g, ch => ch.toUpperCase());
+  return "Owned by " + (c.ownerName || "a villager") + (job ? " (" + pretty(job) + ")" : "");
+}
+const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 // fill arr with `stack`: top up matching stacks first, then empty slots; returns what is left
 function addToArr(arr, id, count) {
   const max = stackOf(id);
@@ -282,6 +326,7 @@ function chestRemoved(x, y, z) {
   if (!c) return;
   if (chest === c) closeScreen(false);
   chests.delete(key);
+  if (c.owner && BF.emit) BF.emit("chestBroken", c);
   for (const s of c.slots) {
     if (!s) continue;
     if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5);
@@ -842,7 +887,7 @@ function hideTip() { tipEl && tipEl.classList.remove("on"); }
 function canDrop(el) {
   if (!cursor || !el || !el.dataset) return false;
   const c = el.dataset.c, i = +el.dataset.i;
-  if (!(c === "inv" || c === "grid" || c === "pay" || c === "chest" || (c === "vinv" && vinvEditable()) || (c === "furn" && (i === 0 || (i === 1 && FUEL.has(cursor.id)))))) return false;
+  if (!(c === "inv" || c === "grid" || c === "pay" || (c === "chest" && !chestLocked()) || (c === "vinv" && vinvEditable()) || (c === "furn" && (i === 0 || (i === 1 && FUEL.has(cursor.id)))))) return false;
   const arr = arrFor(c); if (!arr) return false;
   const s = arr[i];
   return !s || (s.id === cursor.id && s.count < stackOf(s.id));
@@ -882,6 +927,7 @@ function applyDrag(d) {
 function slotClick(el, button, shift, touch) {
   const c = el.dataset.c, i = +el.dataset.i;
   if (c === "vinv" && !vinvEditable()) return;
+  if (c === "chest" && chestLocked()) return;   // someone else's chest: look, don't touch
   if (c === "result") clickResult(shift);
   else if (c === "tres") clickTrade(shift);
   else if (c === "pal") clickPalette(i, button, shift);
@@ -937,7 +983,7 @@ function shiftMove(c, i) {
     if (mode === "furnace" && furnace) {
       const target = SMELT.has(s.id) ? 0 : FUEL.has(s.id) ? 1 : -1;
       if (target >= 0) st.count = mergeInto(furnace.slots, target, st);
-    } else if (mode === "chest" && chest) {
+    } else if (mode === "chest" && chest && !chestLocked()) {
       st.count = addToArr(chest.slots, s.id, s.count);
     } else if (mode === "trade" && villager) {
       const o = villager.trades[offerSel];
@@ -1156,7 +1202,8 @@ function layoutFor(m) {
     setTab(creTab);
   } else if (trade) {
     // title/level set in renderOffers
-  } else titleEl.textContent = m === "crafting" ? "Crafting Table" : m === "furnace" ? "Furnace" : m === "chest" ? "Chest" : "Crafting";
+  } else if (m === "chest") titleEl.textContent = "Chest \u2014 " + ownerLabel(chest) + (chestLocked() ? " (look only)" : "");
+  else titleEl.textContent = m === "crafting" ? "Crafting Table" : m === "furnace" ? "Furnace" : "Crafting";
 }
 
 // ---------------------------------------------------------------- toasts / name label
@@ -1200,7 +1247,7 @@ function openScreen(m) {
   if (m !== "creative" && m !== "trade" && m !== "chest") buildHelp();
   open_ = true; openedAt = performance.now();
   BF.state.paused = true;
-  if (m === "chest" && chest) BF.emit && BF.emit("chestOpened", chest.pos.x, chest.pos.y, chest.pos.z);
+  if (m === "chest" && chest) { chest.sig = chestSig(chest); BF.emit && BF.emit("chestOpened", chest.pos.x, chest.pos.y, chest.pos.z); }
   backEl.classList.add("open");
   hotbarEl.style.visibility = "hidden";
   nameEl.classList.remove("show");
@@ -1385,6 +1432,26 @@ const api = {
     if (open_ && chest && chest.key === `${x},${y},${z}`) renderAll();
     return left;
   },
+  // Takes up to n of itemId out of the chest at x,y,z (last slots first); returns how many came out. For villagers and tests.
+  chestTake(x, y, z, itemId, n = 1) {
+    const c = chests.get(`${x},${y},${z}`);
+    if (!c) return 0;
+    let got = 0;
+    for (let i = CHEST_SIZE - 1; i >= 0 && got < n; i--) {
+      const s = c.slots[i];
+      if (!s || s.id !== itemId) continue;
+      const m = Math.min(n - got, s.count); s.count -= m; got += m;
+      if (s.count <= 0) c.slots[i] = null;
+    }
+    if (open_ && chest === c) renderAll();
+    return got;
+  },
+  // Ownership (see "chests" above). chestUsed(x, y, z, owner, name, mob): call after changing a chest's contents for someone.
+  chestUsed(x, y, z, owner, name, mob) { const c = chests.get(`${x},${y},${z}`); return c ? chestUsed(c, owner, name, mob) : false; },
+  chestRelease,
+  chestEmpty,
+  chestRecord(x, y, z) { return chestAt({ x, y, z }); },   // creates the (empty, unowned) record of a chest that was never used
+  ownerLabel,
   chestRemoved,
 
   serialize() {
@@ -1395,7 +1462,8 @@ const api = {
       furnaces: [...furnaces.values()].filter(f => f.pos).map(f => ({
         pos: [f.pos.x, f.pos.y, f.pos.z], slots: f.slots.map(toSave), burn: f.burn, burnMax: f.burnMax, cook: f.cook,
       })),
-      chests: [...chests.values()].filter(c => c.slots.some(Boolean)).map(c => ({ pos: [c.pos.x, c.pos.y, c.pos.z], slots: c.slots.map(toSave) })),
+      chests: [...chests.values()].filter(c => c.slots.some(Boolean) || c.owner).map(c => ({ pos: [c.pos.x, c.pos.y, c.pos.z], slots: c.slots.map(toSave),
+        owner: c.owner || undefined, on: c.owner ? c.ownerName : undefined, es: c.emptySince != null ? +c.emptySince.toFixed(4) : undefined })),
     };
   },
   deserialize(o) {
@@ -1415,6 +1483,7 @@ const api = {
       if (!cs || !Array.isArray(cs.pos)) continue;
       const c = chestAt({ x: cs.pos[0], y: cs.pos[1], z: cs.pos[2] });
       for (let k = 0; k < CHEST_SIZE; k++) c.slots[k] = fromSave(cs.slots && cs.slots[k]);
+      if (typeof cs.owner === "string" && cs.owner) { c.owner = cs.owner; c.ownerName = typeof cs.on === "string" ? cs.on : ""; c.emptySince = Number.isFinite(cs.es) ? cs.es : null; }
     }
     selected = 0;
     api.select(+o.selected || 0);

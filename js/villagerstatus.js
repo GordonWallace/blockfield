@@ -39,6 +39,7 @@ function text(m) {
     || (BF.explorer ? BF.explorer.statusText(m) : "")                          // mapping (js/explorer.js)
     || (BF.forester ? BF.forester.statusText(m) : "")                          // felling, planting, sawing (js/forester.js)
     || (BF.furniture ? BF.furniture.statusText(m) : "")                        // making beds (js/furniture.js)
+    || (BF.storage ? BF.storage.statusText(m) : "")                            // storing in / fetching from its chest (js/storage.js)
     || routine(m);
   return cap(s);
 }
