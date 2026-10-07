@@ -15,7 +15,7 @@ module.exports = async (pg) => {
     cv.requestPointerLock = () => new Promise(res => setTimeout(() => {
       el = cv; fire();
       const strictDrop = window.__strict && window.__dropNext;   // strict browser: the lock asked for after an Escape is dropped
-      if (strictDrop) window.__dropNext = false;
+      if (strictDrop) { window.__dropNext = false; window.__dropped = true; }
       if (window.__esc || strictDrop) setTimeout(() => { el = null; fire(); }, 5);   // Chrome: Escape is "leave pointer lock"
       res();
     }, 20));
@@ -64,7 +64,11 @@ module.exports = async (pg) => {
   for (const how of ["crafting", "chest"]) {
     await waitLocked();
     await openScreen(how);
+    await pg.evaluate(() => { window.__dropped = false; });
     await esc();
+    // the browser's answer to the re-lock can come late on a slow machine: check once it has dropped it
+    await pg.waitForFunction(() => window.__dropped, null, { timeout: 10000 }).catch(() => {});
+    await pg.waitForTimeout(300);
     check("strict browser: Esc from " + how + " stays in the game", await st(), { menu: null, inv: false });
     await pg.evaluate(() => { window.__dropNext = false; });
     await pg.mouse.click(640, 380);
