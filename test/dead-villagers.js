@@ -40,6 +40,8 @@ module.exports = async (pg, out) => {
     const saved = JSON.parse(JSON.stringify(BF.mobs.exportVillagers()));
     ok("save lists the dead slots", saved["dead:" + KEY] && deadIdx.every(i => saved["dead:" + KEY].v.includes(i)), saved["dead:" + KEY]);
     ok("save drops the dead villagers' entries", deadIdx.every(i => !saved[KEY + "#" + i]));
+    const info = saved["dead:" + KEY] && saved["dead:" + KEY].info || [];
+    ok("save keeps who died (name, profession, cause, day)", deadIdx.every(i => info.some(e => e.i === i && e.name && e.prof && /zombie/.test(e.cause) && Number.isFinite(e.day))), info);
     const vc0 = BF.breeding.villagerCount(rec);
     BF.newWorld(1, { gen: 3, gameMode: "creative" });
     BF.mobs.spawning = false;
@@ -50,6 +52,7 @@ module.exports = async (pg, out) => {
     const re = roster().map(m => m.slot.idx).sort((a, b) => a - b);
     ok("after reload: same count", re.length === n0 - 3, [re.length, n0 - 3]);
     ok("after reload: none of the dead", !re.some(i => deadIdx.includes(i)), { re, deadIdx });
+    ok("after reload: who died is kept", rec2.deadInfo && rec2.deadInfo.length === 3 && JSON.stringify(rec2.deadInfo) === JSON.stringify(info), rec2.deadInfo);
     ok("after reload: villager count unchanged", BF.breeding.villagerCount(rec2) === vc0, [BF.breeding.villagerCount(rec2), vc0]);
     return R;
   });

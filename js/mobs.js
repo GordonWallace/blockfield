@@ -679,6 +679,8 @@ function kill(m, byPlayer) {
   if (m.village) m.village.killed[m.type] = (m.village.killed[m.type] || 0) + 1;
   if (m.village && m.type === "villager" && m.slot && !m.bred) {   // a roster villager: its slot stays empty for good (saved, see exportVillagers)
     deadSlots(m.village).add(m.slot.idx);
+    (m.village.deadInfo || (m.village.deadInfo = [])).push({ i: m.slot.idx, name: BF.vlog ? BF.vlog.nameOf(m) : null, prof: m.profession || null,
+      cause: m.lastHurt || null, day: BF.sky ? +((BF.sky.day || 0) + (BF.sky.time || 0)).toFixed(3) : null });
     const k = villagerKey(m); if (k) villagerSaves.delete(k);
   }
   if (m.type === "creeper") m.model.scale.set(1, 1, 1);
@@ -1687,13 +1689,14 @@ function tryHostileSpawn() {
 // not duplicated; villagers/golems removed by chunk unloading are replaced when the village loads again,
 // but killed ones stay dead: rec.dead holds the roster slots of killed villagers (saved as "dead:<village key>").
 const villages = new Map();
-const pendingDead = new Map();   // village key -> {v: [slot idx]} from a loaded save, applied when the record appears
+const pendingDead = new Map();   // village key -> {v: [slot idx], info: [{i, name, prof, cause, day}]} from a loaded save, applied when the record appears
 function deadSlots(rec) { return rec.dead || (rec.dead = new Set()); }
 function applyDead(rec) {
   const d = pendingDead.get(rec.key);
   if (!d) return;
   pendingDead.delete(rec.key);
   for (const i of d.v || []) if (Number.isFinite(+i)) deadSlots(rec).add(+i);
+  if (d.info.length) rec.deadInfo = d.info.concat(rec.deadInfo || []);
   if (rec.dead) rec.killed.villager = Math.max(rec.killed.villager || 0, rec.dead.size);
 }
 let villageT = 0;
@@ -2010,10 +2013,10 @@ BF.mobs = {
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
-    for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers}
+    for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
     for (const rec of villages.values()) {
       const v = rec.dead ? [...rec.dead] : [];
-      if (v.length) out["dead:" + rec.key] = { v };
+      if (v.length) out["dead:" + rec.key] = { v, info: rec.deadInfo || [] };
       for (const i of v) delete out[rec.key + "#" + i];
     }
     return out;
@@ -2022,7 +2025,7 @@ BF.mobs = {
     villagerSaves.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 5) !== "dead:") villagerSaves.set(k, o[k]);
     pendingDead.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [] });
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [] });
     for (const rec of villages.values()) applyDead(rec);
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
