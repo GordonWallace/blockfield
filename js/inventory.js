@@ -73,7 +73,7 @@ function buildRecipes() {
   addShaped(I.crafting_table, 1, ["PP", "PP"], { P }, "4 Planks (2\u00d72) \u2192 Crafting Table");
   addShaped(I.chest, 1, ["PPP", "P P", "PPP"], { P }, "8 Planks in a ring \u2192 Chest");
   addShaped(I.oak_fence, 3, ["PSP", "PSP"], { P: I.planks, S }, "Oak Planks, Stick, Oak Planks \u00d7 2 rows \u2192 3 Oak Fence");
-  addShaped(I.oak_door, 3, ["PP", "PP", "PP"], { P }, "6 Planks (2\u00d73) \u2192 3 Oak Doors");
+  addShaped(I.oak_door, 3, ["PP", "PP", "PP"], { P: I.planks }, "6 Planks of one wood (2\u00d73) \u2192 3 Doors of that wood");   // other woods: recipes-colour.js
   addShaped(I.red_bed, 1, ["WWW", "PPP"], { W: names.filter(n => /_wool$/.test(n)).map(n => I[n]), P }, "3 Wool (any colour) over 3 Planks \u2192 Red Bed");
   addShaped(I.furnace, 1, ["CCC", "C C", "CCC"], { C }, "8 Cobblestone in a ring \u2192 Furnace");
   const mats = [["wooden", P, "Planks"], ["stone", C, "Cobblestone"], ["iron", I.iron_ingot, "Iron Ingot"],
@@ -182,13 +182,15 @@ function consumeGrid() {
 // ---------------------------------------------------------------- core inventory ops
 const ORDER_ALL = [...Array(SIZE).keys()];
 const ORDER_HOT = ORDER_ALL.slice(0, HOTBAR), ORDER_MAIN = ORDER_ALL.slice(HOTBAR);
-function addTo(id, count, order) {
+// A new stack; a worn tool keeps its wear (BF.wearStack) wherever it goes.
+const mk = (id, count, wear) => (wear > 0 ? { id, count, wear } : { id, count });
+function addTo(id, count, order, wear) {
   const max = stackOf(id);
   for (const i of order) {
     const s = slots[i];
-    if (count > 0 && s && s.id === id && s.count < max) { const m = Math.min(max - s.count, count); s.count += m; count -= m; }
+    if (count > 0 && s && s.id === id && s.count < max && !(wear > 0) && !(s.wear > 0)) { const m = Math.min(max - s.count, count); s.count += m; count -= m; }
   }
-  for (const i of order) if (count > 0 && !slots[i]) { const m = Math.min(max, count); slots[i] = { id, count: m }; count -= m; }
+  for (const i of order) if (count > 0 && !slots[i]) { const m = Math.min(max, count); slots[i] = mk(id, m, wear); count -= m; }
   return count;
 }
 function fits(id, n) {
@@ -210,13 +212,13 @@ function takeFromInv(id, n) { // main first, then hotbar
 }
 function giveBack(stack) { // into inventory; overflow is announced as a drop
   if (!stack) return;
-  const left = addTo(stack.id, stack.count, ORDER_ALL);
+  const left = addTo(stack.id, stack.count, ORDER_ALL, stack.wear);
   if (left > 0) BF.emit && BF.emit("itemDropped", stack.id, left);
 }
 // move as much of `stack` as fits into arr[i]; returns what is left
 function mergeInto(arr, i, stack) {
   const s = arr[i], max = stackOf(stack.id);
-  if (!s) { const m = Math.min(max, stack.count); arr[i] = { id: stack.id, count: m }; return stack.count - m; }
+  if (!s) { const m = Math.min(max, stack.count); arr[i] = mk(stack.id, m, stack.wear); return stack.count - m; }
   if (s.id !== stack.id) return stack.count;
   const m = Math.min(max - s.count, stack.count); s.count += m; return stack.count - m;
 }
@@ -490,6 +492,9 @@ const css = `
 .bf-slot .bf-n { position: absolute; right: 2px; bottom: 1px; font: 11px/1 var(--display); color: var(--ink);
   text-shadow: 1px 1px 0 #000, -1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; pointer-events: none; }
 .bf-hotbar .bf-n { font-size: 12px; }
+.bf-slot .bf-wear { position: absolute; left: 12%; right: 12%; bottom: 9%; height: 3px; background: #000; pointer-events: none; }
+.bf-slot .bf-wear::after { content: ""; position: absolute; left: 0; top: 0; height: 2px; width: var(--f); background: var(--c); }
+.bf-slot .bf-wear[hidden] { display: none; }
 .bf-slot.bf-ghost { background: rgba(127,191,77,.3); }
 .bf-slot.bf-ghost img { opacity: .75; }
 #ui > .bf-itemname { position: fixed; left: 50%; transform: translateX(-50%); pointer-events: none;
@@ -631,8 +636,9 @@ function makeSlot(cls, c, i) {
   el.className = "bf-slot" + (cls ? " " + cls : "");
   const img = document.createElement("img"); img.alt = ""; img.draggable = false; img.hidden = true;
   const n = document.createElement("span"); n.className = "bf-n";
-  el.append(img, n);
-  el._img = img; el._n = n; el._id = -1;
+  const w = document.createElement("i"); w.className = "bf-wear"; w.hidden = true;
+  el.append(img, n, w);
+  el._img = img; el._n = n; el._w = w; el._id = -1;
   if (c) { el.dataset.c = c; el.dataset.i = i || 0; }
   return el;
 }
@@ -644,6 +650,12 @@ function setSlot(el, s) {
   }
   const t = s && s.count > 1 ? String(s.count) : "";
   if (el._n.textContent !== t) el._n.textContent = t;
+  // durability bar of a worn tool, green to red, as Minecraft
+  const max = s && s.wear > 0 ? BF.durability(s.id) : 0, f = max ? Math.max(0, 1 - s.wear / max) : -1;
+  if (el._wf !== f) {
+    el._wf = f; el._w.hidden = f < 0;
+    if (f >= 0) { el._w.style.setProperty("--f", (f * 100).toFixed(1) + "%"); el._w.style.setProperty("--c", `hsl(${Math.round(f * 120)},90%,45%)`); }
+  }
 }
 const div = (cls, parent) => { const d = document.createElement("div"); if (cls) d.className = cls; if (parent) parent.appendChild(d); return d; };
 function progEl(cls, off, on) {
@@ -868,6 +880,8 @@ function showTip(el, timed) {
   if (!s || cursor) { hideTip(); return; }
   let t = nameOf(s.id);
   if (el.dataset.c === "furn" && el.dataset.i === "1" && FUEL.has(s.id)) t += "\nBurns " + FUEL.get(s.id) + "s";
+  const max = BF.durability(s.id);
+  if (max && el.dataset.c !== "pal") t += "\nDurability: " + (max - (s.wear || 0)) + " / " + max;
   showTipText(t, timed);
 }
 function showTipText(text, timed) {
@@ -916,7 +930,7 @@ function applyDrag(d) {
   for (const [el, m] of add) {
     if (!m) continue;
     const arr = arrFor(el.dataset.c), i = +el.dataset.i;
-    if (arr[i]) arr[i].count += m; else arr[i] = { id, count: m };
+    if (arr[i]) arr[i].count += m; else arr[i] = mk(id, m, cursor.wear);
   }
   cursor.count = left;
   if (cursor.count <= 0) cursor = null;
@@ -952,8 +966,8 @@ function slotClick(el, button, shift, touch) {
       } else { arr[i] = cursor; cursor = s; }
     } else {
       if (!cursor) {
-        if (s) { const take = Math.ceil(s.count / 2); cursor = { id: s.id, count: take }; s.count -= take; if (s.count <= 0) arr[i] = null; }
-      } else if (!s) { arr[i] = { id: cursor.id, count: 1 }; if (--cursor.count <= 0) cursor = null; }
+        if (s) { const take = Math.ceil(s.count / 2); cursor = mk(s.id, take, s.wear); s.count -= take; if (s.count <= 0) arr[i] = null; }
+      } else if (!s) { arr[i] = mk(cursor.id, 1, cursor.wear); if (--cursor.count <= 0) cursor = null; }
       else if (s.id === cursor.id) { if (s.count < stackOf(s.id)) { s.count++; if (--cursor.count <= 0) cursor = null; } }
       else { arr[i] = cursor; cursor = s; }
     }
@@ -979,7 +993,7 @@ function shiftMove(c, i) {
   if (c === "inv") {
     const s = slots[i]; if (!s) return;
     if (mode === "creative") { if (creTab !== "inventory") return; }
-    let st = { id: s.id, count: s.count };
+    let st = mk(s.id, s.count, s.wear);
     if (mode === "furnace" && furnace) {
       const target = SMELT.has(s.id) ? 0 : FUEL.has(s.id) ? 1 : -1;
       if (target >= 0) st.count = mergeInto(furnace.slots, target, st);
@@ -998,16 +1012,16 @@ function shiftMove(c, i) {
     }
     if (st.count === s.count) { // not consumed by the container: hotbar <-> main
       slots[i] = null;
-      const left = addTo(s.id, s.count, i < HOTBAR ? ORDER_MAIN : ORDER_HOT);
-      if (left > 0) slots[i] = { id: s.id, count: left };
+      const left = addTo(s.id, s.count, i < HOTBAR ? ORDER_MAIN : ORDER_HOT, s.wear);
+      if (left > 0) slots[i] = mk(s.id, left, s.wear);
     } else if (st.count > 0) s.count = st.count;
     else slots[i] = null;
   } else {
     const arr = arrFor(c); if (!arr) return;
     const s = arr[i]; if (!s) return;
     arr[i] = null;
-    const left = addTo(s.id, s.count, ORDER_ALL);
-    if (left > 0) arr[i] = { id: s.id, count: left };
+    const left = addTo(s.id, s.count, ORDER_ALL, s.wear);
+    if (left > 0) arr[i] = mk(s.id, left, s.wear);
     if (c === "grid") recompute();
     if (c === "pay") recomputeTrade();
   }
@@ -1076,10 +1090,10 @@ function renderAll() {
     const { add, left } = dragPlan(drag);
     for (const [el, m] of add) {
       const s = stackAt(el);
-      setSlot(el, { id: cursor.id, count: (s ? s.count : 0) + m });
+      setSlot(el, mk(cursor.id, (s ? s.count : 0) + m, cursor.wear));
       el.classList.add("bf-ghost");
     }
-    held = left > 0 ? { id: cursor.id, count: left } : null;
+    held = left > 0 ? mk(cursor.id, left, cursor.wear) : null;
   }
   setSlot(heldEl, held);
   heldEl.classList.toggle("on", !!held);
@@ -1280,13 +1294,14 @@ function closeScreen(silent) {
 }
 
 // ---------------------------------------------------------------- save / load
-const toSave = s => s ? { n: BF.items[s.id] ? BF.items[s.id].name : null, c: s.count } : null;
+const toSave = s => s ? (s.wear > 0 ? { n: BF.items[s.id] ? BF.items[s.id].name : null, c: s.count, w: s.wear } : { n: BF.items[s.id] ? BF.items[s.id].name : null, c: s.count }) : null;
 function fromSave(o) {
   if (!o) return null;
   const id = typeof o.n === "string" ? (BF.resolveItem ? BF.resolveItem(o.n) : BF.I[o.n]) : typeof o.id === "number" ? o.id : undefined;
   const count = Math.floor(o.c != null ? o.c : o.count);
   if (id === undefined || !BF.items[id] || id === 0 || !(count > 0)) return null;
-  return { id, count: Math.min(count, stackOf(id)) };
+  const w = Math.floor(+o.w || 0), max = BF.durability(id);
+  return mk(id, Math.min(count, stackOf(id)), max ? Math.min(w, max - 1) : 0);
 }
 
 // ---------------------------------------------------------------- public API
@@ -1358,9 +1373,9 @@ const api = {
       if (t.t <= 0) { t.el.remove(); toasts.splice(k, 1); }
     }
   },
-  add(itemId, count = 1) {
+  add(itemId, count = 1, wear = 0) {   // wear: uses already spent on a tool (a worn tool picked up again)
     if (itemId === undefined || itemId === null || itemId === 0 || !BF.items[itemId] || !(count > 0)) return count || 0;
-    const left = addTo(itemId, count, ORDER_ALL);
+    const left = addTo(itemId, count, ORDER_ALL, wear);
     if (left !== count) { showToast(itemId, count - left); renderAll(); emitChange(); }
     return left;
   },
@@ -1373,7 +1388,7 @@ const api = {
   setSlot(i, stack) {
     if (!(i >= 0 && i < SIZE)) return;
     slots[i] = stack && BF.items[stack.id] && stack.id !== 0 && stack.count > 0
-      ? { id: stack.id, count: Math.min(Math.floor(stack.count), stackOf(stack.id)) } : null;
+      ? mk(stack.id, Math.min(Math.floor(stack.count), stackOf(stack.id)), stack.wear) : null;
     renderAll(); emitChange();
     if (i === selected) flashName();
   },
@@ -1386,6 +1401,17 @@ const api = {
     selected = i;
     renderAll();
     if (changed) { flashName(); BF.emit && BF.emit("selectChanged", i); }
+  },
+  // Wears the selected tool by n uses (survival only). When it is used up it breaks: the slot empties and "toolBroken" is emitted.
+  // Returns "broken", true (worn) or false (not a tool with a lifespan, or creative).
+  wearSelected(n = 1) {
+    const s = slots[selected];
+    if (!s || isCreative()) return false;
+    const r = BF.wearStack(s, n);
+    if (r === "broken") { slots[selected] = null; BF.emit && BF.emit("toolBroken", s.id); }
+    if (r) renderAll();
+    if (r === "broken") emitChange();
+    return r;
   },
   consumeSelected(n = 1) {
     const s = slots[selected];

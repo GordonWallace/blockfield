@@ -80,6 +80,7 @@ const INPUTS = {
   forester: m => [[id => /_sapling$/.test(nm(id)), 16]],
   furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8]],
   cartographer: m => [["iron_ingot", 4], ["gold_ingot", 1], ["paper", 32], ["compass", 1]],
+  miner: m => [["torch", 16], ["stick", 8]],   // shaft torches and spare pickaxe handles (js/miner.js)
   builder: m => (TR().profile("builder").wants ? [...TR().profile("builder").wants.keys()].map(id => [nm(id), 128]) : []).concat([["red_bed", 4], ["oak_door", 8], ["torch", 32], ["chest", 2], ["glass", 64]]),
 };
 const SCRAPS = /^(rotten_flesh|spider_eye|poisonous_potato|pufferfish)$/;

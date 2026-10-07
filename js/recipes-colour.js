@@ -44,11 +44,27 @@ const BF = window.BF;
   }
   addShaped(I.tinted_glass, 1, [" D ", "DGD", " D "], { D: dye("black"), G: I.glass }, "4 Black Dye around Glass → Tinted Glass");
 
-  // ---- per-species fences (the oak recipe is in inventory.js; any planks work for the plank slots, as for oak) ----
+  // ---- per-species fences (the oak recipe is in inventory.js; each fence takes its own species' planks, as for oak) ----
   for (const sp of BF.WOOD_SPECIES) if (sp !== "oak") {
     const pl = I[sp + "_planks"];
     addShaped(I[sp + "_fence"], 3, ["PSP", "PSP"], { P: pl, S: I.stick }, "Planks, Stick, Planks × 2 rows → 3 " + nm(sp) + " Fence (" + nm(sp) + " Planks)");
   }
+
+  // ---- per-species doors and fence gates (oak's are in inventory.js / shepherd.js). As in Minecraft each takes its own species' planks;
+  // sticks are one item whatever wood they were cut from. The recipe book shows the oak line ("... of one wood -> ... of that wood") only.
+  for (const sp of BF.WOOD_SPECIES) if (sp !== "oak") {
+    const pl = I[sp + "_planks"];
+    addShaped(I[sp + "_door"], 3, ["PP", "PP", "PP"], { P: pl });
+    addShaped(I[sp + "_fence_gate"], 1, ["SPS", "SPS"], { P: pl, S: I.stick });
+  }
+  // ---- wood and stripped wood: 4 logs of one species (2x2) -> 3 ----
+  for (const sp of BF.WOOD_SPECIES) {
+    const first = sp === "oak";
+    addShaped(I[sp + "_wood"], 3, ["LL", "LL"], { L: I[sp + "_log"] }, first ? "4 Logs of one wood (2×2) → 3 Wood of that wood" : undefined);
+    addShaped(I["stripped_" + sp + "_wood"], 3, ["LL", "LL"], { L: I["stripped_" + sp + "_log"] }, first ? "4 Stripped Logs of one wood (2×2) → 3 Stripped Wood" : undefined);
+  }
+  fuel(names.filter(n => /_door$/.test(n) && n !== "oak_door").map(n => I[n]), 15, "Other doors");
+  fuel(names.filter(n => /_fence_gate$/.test(n) && n !== "oak_fence_gate").map(n => I[n]), 15, "Other fence gates");
 
   // ---- fuel: fences and wool (logs/woods/planks are covered by inventory.js patterns) ----
   fuel(names.filter(n => /_fence$/.test(n) && n !== "oak_fence").map(n => I[n]), 15, "Other fences");

@@ -17,24 +17,33 @@ function rotBox(b, f) {
 }
 // Two-block doors (lower/upper half, open/closed, facing = side the closed slab sits on, towards the placer)
 // and beds (foot/head, facing = foot -> head). One block id per state.
-const doorDefs = [], bedDefs = [];
+const bedDefs = [];
 // Fence gates (shepherd pens): axis = the direction the closed gate spans ("x" or "z"); open gates swing their two leaves
 // to the +z / +x side and let anything walk through. One block id per state; villagers open and close them like doors.
-const gateDefs = [];
-for (const axis of ["x", "z"]) for (const open of [0, 1]) {
-  const posts = [[0, 5, 7, 2, 16, 9], [14, 5, 7, 16, 16, 9]];
-  const leaves = open ? [[0, 6, 9, 2, 9, 15], [0, 12, 9, 2, 15, 15], [14, 6, 9, 16, 9, 15], [14, 12, 9, 16, 15, 15]]
-    : [[2, 6, 7, 14, 9, 9], [2, 12, 7, 14, 15, 9], [6, 9, 7, 10, 12, 9]];
-  const sw = b => (axis === "x" ? b : [b[2], b[1], b[0], b[5], b[4], b[3]]);
-  gateDefs.push({ name: "oak_fence_gate_" + axis + (open ? "_open" : ""), tiles: "planks", render: "model", model: "gate", opaque: false, solid: !open,
-    hardness: 2, tool: "axe", drop: "oak_fence_gate", item: "oak_fence_gate", hidden: true, gate: { axis, open: !!open },
-    boxes: [...posts, ...leaves].map(sw), color: "#a2834f" });
+// One door / gate per wood species: `<sp>_door_*` and `<sp>_fence_gate_*` (oak's ids come first; the other species are appended in the
+// wood variants pack below). The block's `door.wood` / `gate.wood` names the species; BF.doorId / BF.gateId take it as their last argument.
+function gateDefsOf(sp) {
+  const out = [];
+  for (const axis of ["x", "z"]) for (const open of [0, 1]) {
+    const posts = [[0, 5, 7, 2, 16, 9], [14, 5, 7, 16, 16, 9]];
+    const leaves = open ? [[0, 6, 9, 2, 9, 15], [0, 12, 9, 2, 15, 15], [14, 6, 9, 16, 9, 15], [14, 12, 9, 16, 15, 15]]
+      : [[2, 6, 7, 14, 9, 9], [2, 12, 7, 14, 15, 9], [6, 9, 7, 10, 12, 9]];
+    const sw = b => (axis === "x" ? b : [b[2], b[1], b[0], b[5], b[4], b[3]]);
+    out.push({ name: sp + "_fence_gate_" + axis + (open ? "_open" : ""), tiles: sp === "oak" ? "planks" : sp + "_planks", render: "model", model: "gate", opaque: false, solid: !open,
+      hardness: 2, tool: "axe", drop: sp + "_fence_gate", item: sp + "_fence_gate", hidden: true, gate: { axis, open: !!open, wood: sp },
+      boxes: [...posts, ...leaves].map(sw), color: WOOD_COLOR[sp] });
+  }
+  return out;
 }
-for (let f = 0; f < 4; f++) for (const upper of [0, 1]) for (const open of [0, 1]) {
-  const box = rotBox(open ? [0, 0, 0, 3, 16, 16] : [0, 0, 13, 16, 16, 16], f);
-  doorDefs.push({ name: "oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f], tiles: upper ? "oak_door_top" : "oak_door_bottom",
-    render: "model", model: "door", solid: !open, hardness: 3, tool: "axe", drop: "oak_door", item: "oak_door", hidden: true,
-    door: { f, upper: !!upper, open: !!open }, boxes: [box], box, color: "#9a7448" });
+function doorDefsOf(sp) {
+  const out = [];
+  for (let f = 0; f < 4; f++) for (const upper of [0, 1]) for (const open of [0, 1]) {
+    const box = rotBox(open ? [0, 0, 0, 3, 16, 16] : [0, 0, 13, 16, 16, 16], f);
+    out.push({ name: sp + "_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f], tiles: sp + (upper ? "_door_top" : "_door_bottom"),
+      render: "model", model: "door", solid: !open, hardness: 3, tool: "axe", drop: sp + "_door", item: sp + "_door", hidden: true,
+      door: { f, upper: !!upper, open: !!open, wood: sp }, boxes: [box], box, color: sp === "oak" ? "#9a7448" : WOOD_COLOR[sp] });
+  }
+  return out;
 }
 for (let f = 0; f < 4; f++) for (const head of [0, 1]) {
   const legs = head ? [[0, 0, 13, 3, 3, 16], [13, 0, 13, 16, 3, 16]] : [[0, 0, 0, 3, 3, 3], [13, 0, 0, 16, 3, 3]];
@@ -50,7 +59,8 @@ for (let f = 0; f < 4; f++) for (const head of [0, 1]) {
 // render: "cube" (default), "cutout" (alpha-tested, e.g. leaves/glass), "liquid", "cross" (plants),
 // "model" (small boxes defined in world.js MODELS by `model`; e.g. fence, lantern, chest).
 // replaceable: placing a block or flowing water may overwrite it. fluidLevel: flowing water depth 1..7.
-// hardness: seconds to break by hand (Infinity = unbreakable). tool: preferred tool type.
+// hardness: vanilla Minecraft hardness (Infinity = unbreakable); player.js breakTime turns it into seconds with the vanilla formula.
+// tool: the tool type that mines it faster. needsTool: drops nothing unless mined with that tool (minTier: 1 wood .. 4 diamond).
 // drop: item id/name dropped when broken (default: itself; null = nothing).
 // ---- wood/colour pack data (used by woodColourDefs below)
 const WOOD_SPECIES = ["oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry"];
@@ -62,7 +72,7 @@ const TERRA_OLD = ["orange", "yellow", "white", "brown", "red"]; // terracotta c
 BF.WOOD_SPECIES = WOOD_SPECIES; BF.WOOD_COLOR = WOOD_COLOR; BF.DYE_COLOURS = DYE_COLOURS;
 const BLOCK_DEFS = [
   { name: "air", solid: false, opaque: false },
-  { name: "grass", tiles: { top: "grass_top", side: "grass_side", bottom: "dirt" }, hardness: 0.6, tool: "shovel", drop: "dirt", extraDrops: [["wheat_seeds", 1, 1, 0.08]], color: "#6aa84f" },
+  { name: "grass", tiles: { top: "grass_top", side: "grass_side", bottom: "dirt" }, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#6aa84f" },
   { name: "dirt", tiles: "dirt", hardness: 0.5, tool: "shovel", color: "#866043" },
   { name: "stone", tiles: "stone", hardness: 1.5, tool: "pickaxe", needsTool: true, drop: "cobblestone", color: "#7f7f7f" },
   { name: "cobblestone", tiles: "cobblestone", hardness: 2, tool: "pickaxe", needsTool: true, color: "#6e6e6e" },
@@ -70,7 +80,7 @@ const BLOCK_DEFS = [
   { name: "sandstone", tiles: { top: "sandstone_top", side: "sandstone_side", bottom: "sandstone_bottom" }, hardness: 0.8, tool: "pickaxe", needsTool: true, color: "#d8cb92" },
   { name: "gravel", tiles: "gravel", hardness: 0.6, tool: "shovel", extraDrops: [["flint", 1, 1, 0.1]], color: "#837e7c" },
   { name: "snow_grass", tiles: { top: "snow", side: "snow_side", bottom: "dirt" }, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#f0f4f8" },
-  { name: "snow", tiles: "snow", hardness: 0.3, tool: "shovel", color: "#f4f8fb" },
+  { name: "snow", tiles: "snow", hardness: 0.2, tool: "shovel", needsTool: true, color: "#f4f8fb" },
   { name: "ice", tiles: "ice", hardness: 0.5, tool: "pickaxe", render: "cutout", opaque: false, drop: null, color: "#a5c8f5" },
   { name: "water", tiles: "water", solid: false, opaque: false, render: "liquid", hardness: Infinity, drop: null, color: "#3f76e4" },
   { name: "oak_log", tiles: { top: "oak_log_top", side: "oak_log", bottom: "oak_log_top" }, hardness: 2, tool: "axe", color: "#6b5233" },
@@ -83,8 +93,8 @@ const BLOCK_DEFS = [
   { name: "cactus", tiles: { top: "cactus_top", side: "cactus_side", bottom: "cactus_bottom" }, render: "model", model: "cactus", opaque: false, hardness: 0.4, color: "#4f8a2b" },
   { name: "bedrock", tiles: "bedrock", hardness: Infinity, drop: null, color: "#333" },
   { name: "coal_ore", tiles: "coal_ore", hardness: 3, tool: "pickaxe", needsTool: true, drop: "coal", color: "#555" },
-  { name: "iron_ore", tiles: "iron_ore", hardness: 3, tool: "pickaxe", needsTool: true, minTier: 2, color: "#a58a75" },
-  { name: "gold_ore", tiles: "gold_ore", hardness: 3, tool: "pickaxe", needsTool: true, minTier: 3, color: "#c8b24a" },
+  { name: "iron_ore", tiles: "iron_ore", hardness: 3, tool: "pickaxe", needsTool: true, minTier: 2, drop: "raw_iron", color: "#a58a75" },
+  { name: "gold_ore", tiles: "gold_ore", hardness: 3, tool: "pickaxe", needsTool: true, minTier: 3, drop: "raw_gold", color: "#c8b24a" },
   { name: "diamond_ore", tiles: "diamond_ore", hardness: 3, tool: "pickaxe", needsTool: true, minTier: 3, drop: "diamond", color: "#5ddfe0" },
   { name: "clay", tiles: "clay", hardness: 0.6, tool: "shovel", drop: "clay_ball", extraDrops: [["clay_ball", 3, 3, 1]], color: "#a0a6b4" },
   { name: "glass", tiles: "glass", render: "cutout", opaque: false, hardness: 0.3, drop: null, color: "#cfe9f0" },
@@ -97,14 +107,14 @@ const BLOCK_DEFS = [
   { name: "pumpkin", tiles: { top: "pumpkin_top", side: "pumpkin_side", bottom: "pumpkin_top" }, hardness: 1, tool: "axe", color: "#c87a1a" },
   { name: "furnace", tiles: { top: "furnace_top", side: "furnace_side", front: "furnace_front", bottom: "furnace_top" }, hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#5e5e5e" },
   // village blocks
-  { name: "dirt_path", tiles: { top: "dirt_path_top", side: "dirt_path_side", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#94793f" },
+  { name: "dirt_path", tiles: { top: "dirt_path_top", side: "dirt_path_side", bottom: "dirt" }, opaque: false, hardness: 0.65, tool: "shovel", drop: "dirt", color: "#94793f" },
   { name: "farmland", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#5a3c22" },
   { name: "wheat", tiles: "wheat", render: "cross", solid: false, opaque: false, hardness: 0, drop: "wheat_item", extraDrops: [["wheat_seeds", 1, 3, 1]], color: "#d6c25a" },
-  { name: "hay_bale", tiles: { top: "hay_bale_top", side: "hay_bale_side", bottom: "hay_bale_top" }, hardness: 0.5, color: "#c9a62c" },
+  { name: "hay_bale", tiles: { top: "hay_bale_top", side: "hay_bale_side", bottom: "hay_bale_top" }, hardness: 0.5, tool: "hoe", color: "#c9a62c" },
   { name: "bell", tiles: { top: "bell_top", side: "bell", bottom: "bell_bottom" }, render: "model", model: "bell", opaque: false, hardness: 5, tool: "pickaxe", color: "#e8c547" },
   { name: "spruce_planks", tiles: "spruce_planks", hardness: 2, tool: "axe", color: "#6f5232" },
   { name: "sandstone_bricks", tiles: { top: "sandstone_top", side: "sandstone_bricks", bottom: "sandstone_top" }, hardness: 0.8, tool: "pickaxe", needsTool: true, color: "#d8cb92" },
-  { name: "lantern", tiles: { top: "lantern_top", side: "lantern", bottom: "lantern_bottom" }, render: "model", model: "lantern", opaque: false, emit: 15, hardness: 3.5, tool: "pickaxe", color: "#f2b84b" },
+  { name: "lantern", tiles: { top: "lantern_top", side: "lantern", bottom: "lantern_bottom" }, render: "model", model: "lantern", opaque: false, emit: 15, hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#f2b84b" },
   { name: "white_wool", tiles: "white_wool", hardness: 0.8, color: "#f0f0f0" },
   { name: "oak_fence", tiles: "planks", icon: "oak_fence", render: "model", model: "fence", opaque: false, hardness: 2, tool: "axe", color: "#a2834f" },
   { name: "chest", tiles: { top: "chest_top", side: "chest_side", front: "chest_front", bottom: "chest_bottom" }, render: "model", model: "chest", opaque: false, hardness: 2.5, tool: "axe", color: "#a0742e" },
@@ -112,7 +122,7 @@ const BLOCK_DEFS = [
   ...[1, 2, 3, 4, 5, 6, 7].map(l => ({ name: "water_flow_" + l, tiles: "water", solid: false, opaque: false, render: "liquid", hardness: Infinity, drop: null, color: "#3f76e4", replaceable: true, fluidLevel: l })),
   // plants (render "cross": two diagonal quads, no collision, broken by flowing water)
   { name: "short_grass", tiles: "short_grass", render: "cross", solid: false, opaque: false, hardness: 0, drop: null, extraDrops: [["wheat_seeds", 1, 1, 0.125]], replaceable: true, color: "#6aa84f" },
-  { name: "fern", tiles: "fern", render: "cross", solid: false, opaque: false, hardness: 0, drop: null, extraDrops: [["wheat_seeds", 1, 1, 0.08]], replaceable: true, color: "#4f8a3a" },
+  { name: "fern", tiles: "fern", render: "cross", solid: false, opaque: false, hardness: 0, drop: null, extraDrops: [["wheat_seeds", 1, 1, 0.125]], replaceable: true, color: "#4f8a3a" },
   { name: "dead_bush", tiles: "dead_bush", render: "cross", solid: false, opaque: false, hardness: 0, drop: "stick", replaceable: true, color: "#8a6a3a" },
   { name: "poppy", tiles: "poppy", render: "cross", solid: false, opaque: false, hardness: 0, color: "#d8302a" },
   { name: "dandelion", tiles: "dandelion", render: "cross", solid: false, opaque: false, hardness: 0, color: "#f2d64b" },
@@ -129,10 +139,10 @@ const BLOCK_DEFS = [
   { name: "brown_terracotta", tiles: "brown_terracotta", hardness: 1.25, tool: "pickaxe", needsTool: true, color: "#4d3324" },
   { name: "red_terracotta", tiles: "red_terracotta", hardness: 1.25, tool: "pickaxe", needsTool: true, color: "#8f3d2e" },
   { name: "mycelium", tiles: { top: "mycelium_top", side: "mycelium_side", bottom: "dirt" }, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#6f6265" },
-  { name: "podzol", tiles: { top: "podzol_top", side: "podzol_side", bottom: "dirt" }, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#5a3f1c" },
-  { name: "mushroom_stem", tiles: "mushroom_stem", hardness: 0.2, tool: "axe", color: "#cfc8b8" },
-  { name: "red_mushroom_block", tiles: "red_mushroom_block", hardness: 0.2, tool: "axe", drop: "red_mushroom", color: "#b82a24" },
-  { name: "brown_mushroom_block", tiles: "brown_mushroom_block", hardness: 0.2, tool: "axe", drop: "brown_mushroom", color: "#957052" },
+  { name: "podzol", tiles: { top: "podzol_top", side: "podzol_side", bottom: "dirt" }, hardness: 0.5, tool: "shovel", drop: "dirt", color: "#5a3f1c" },
+  { name: "mushroom_stem", tiles: "mushroom_stem", hardness: 0.2, tool: "axe", drop: null, color: "#cfc8b8" },
+  { name: "red_mushroom_block", tiles: "red_mushroom_block", hardness: 0.2, tool: "axe", drop: null, extraDrops: [["red_mushroom", 1, 2, 0.2]], color: "#b82a24" },
+  { name: "brown_mushroom_block", tiles: "brown_mushroom_block", hardness: 0.2, tool: "axe", drop: null, extraDrops: [["brown_mushroom", 1, 2, 0.2]], color: "#957052" },
   { name: "dark_oak_log", tiles: { top: "dark_oak_log_top", side: "dark_oak_log", bottom: "dark_oak_log_top" }, hardness: 2, tool: "axe", color: "#3c2a16" },
   { name: "dark_oak_leaves", tiles: "dark_oak_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, extraDrops: [["dark_oak_sapling", 1, 1, 0.05], ["stick", 1, 2, 0.02], ["apple", 1, 1, 0.005]], color: "#2a5a1a" },
   { name: "cherry_log", tiles: { top: "cherry_log_top", side: "cherry_log", bottom: "cherry_log_top" }, hardness: 2, tool: "axe", color: "#3a2228" },
@@ -144,7 +154,7 @@ const BLOCK_DEFS = [
   { name: "mud", tiles: "mud", hardness: 0.5, tool: "shovel", color: "#3c3632" },
   { name: "packed_ice", tiles: "packed_ice", hardness: 0.5, tool: "pickaxe", drop: null, color: "#8db4f0" },
   { name: "calcite", tiles: "calcite", hardness: 0.75, tool: "pickaxe", needsTool: true, color: "#e0e0dc" },
-  { name: "moss_block", tiles: "moss_block", hardness: 0.1, tool: "axe", color: "#5a7a2a" },
+  { name: "moss_block", tiles: "moss_block", hardness: 0.1, tool: "hoe", color: "#5a7a2a" },
   { name: "coarse_dirt", tiles: "coarse_dirt", hardness: 0.5, tool: "shovel", color: "#77553b" },
   { name: "acacia_planks", tiles: "acacia_planks", hardness: 2, tool: "axe", color: "#a85a32" },
   // more village crops (crossed-quad plants on farmland)
@@ -156,7 +166,7 @@ const BLOCK_DEFS = [
   { name: "potatoes_young", tiles: "potatoes_young", render: "cross", solid: false, opaque: false, hardness: 0, drop: "potato", growsInto: "potatoes", color: "#5a9a3a" },
   { name: "beetroots_young", tiles: "beetroots_young", render: "cross", solid: false, opaque: false, hardness: 0, drop: "beetroot_seeds", growsInto: "beetroots", color: "#5a9a3a" },
   { name: "beetroots", tiles: "beetroots", render: "cross", solid: false, opaque: false, hardness: 0, drop: "beetroot", extraDrops: [["beetroot_seeds", 1, 3, 1]], color: "#a8323a" },
-  ...doorDefs, ...bedDefs,
+  ...doorDefsOf("oak"), ...bedDefs,
   // ---- stone/ore pack ----
   { name: "granite", tiles: "granite", hardness: 1.5, color: "#9a6b5a", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "diorite", tiles: "diorite", hardness: 1.5, color: "#bdbdbd", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 1 },
@@ -185,7 +195,7 @@ const BLOCK_DEFS = [
   { name: "chiseled_red_sandstone", tiles: { top: "red_sandstone_top", side: "chiseled_red_sandstone", bottom: "red_sandstone_top" }, hardness: 0.8, color: "#b4602a", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "smooth_red_sandstone", tiles: "red_sandstone_top", hardness: 2, color: "#b8642c", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "mud_bricks", tiles: "mud_bricks", hardness: 1.5, color: "#8a674f", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
-  { name: "packed_mud", tiles: "packed_mud", hardness: 1, color: "#8e6b50", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
+  { name: "packed_mud", tiles: "packed_mud", hardness: 1, color: "#8e6b50", creativeTab: "building", tool: "pickaxe" },
   { name: "prismarine", tiles: "prismarine", hardness: 1.5, color: "#63a897", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "prismarine_bricks", tiles: "prismarine_bricks", hardness: 1.5, color: "#5fa393", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "dark_prismarine", tiles: "dark_prismarine", hardness: 1.5, color: "#335f50", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
@@ -208,21 +218,21 @@ const BLOCK_DEFS = [
   { name: "purpur_block", tiles: "purpur_block", hardness: 1.5, color: "#a77aa7", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "purpur_pillar", tiles: { top: "purpur_pillar_top", side: "purpur_pillar", bottom: "purpur_pillar_top" }, hardness: 1.5, color: "#a77aa7", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
   { name: "bone_block", tiles: { top: "bone_block_top", side: "bone_block_side", bottom: "bone_block_top" }, hardness: 2, color: "#e2dcc4", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 1 },
-  { name: "blue_ice", tiles: "blue_ice", hardness: 2.8, color: "#74a8f0", creativeTab: "natural", tool: "pickaxe" },
-  { name: "sponge", tiles: "sponge", hardness: 0.6, color: "#c8c04a", creativeTab: "natural" },
-  { name: "wet_sponge", tiles: "wet_sponge", hardness: 0.6, color: "#a8a040", creativeTab: "natural" },
+  { name: "blue_ice", tiles: "blue_ice", hardness: 2.8, color: "#74a8f0", creativeTab: "natural", tool: "pickaxe", drop: null },
+  { name: "sponge", tiles: "sponge", hardness: 0.6, tool: "hoe", color: "#c8c04a", creativeTab: "natural" },
+  { name: "wet_sponge", tiles: "wet_sponge", hardness: 0.6, tool: "hoe", color: "#a8a040", creativeTab: "natural" },
   { name: "melon", tiles: { top: "melon_top", side: "melon_side", bottom: "melon_top" }, hardness: 1, color: "#6a9a2a", creativeTab: "natural", tool: "axe" },
   { name: "tnt", tiles: { top: "tnt_top", side: "tnt_side", bottom: "tnt_bottom" }, hardness: 0, color: "#c83a2a", creativeTab: "functional" },
-  { name: "bookshelf", tiles: { top: "planks", side: "bookshelf", bottom: "planks" }, hardness: 1.5, color: "#7a5a33", creativeTab: "functional", tool: "axe" },
-  { name: "lapis_ore", tiles: "lapis_ore", hardness: 3, color: "#2a4aa8", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "lapis_lazuli", extraDrops: [["lapis_lazuli", 3, 7, 1]] },
+  { name: "bookshelf", tiles: { top: "planks", side: "bookshelf", bottom: "planks" }, hardness: 1.5, color: "#7a5a33", creativeTab: "functional", tool: "axe", drop: "book", extraDrops: [["book", 2, 2, 1]] },
+  { name: "lapis_ore", tiles: "lapis_ore", hardness: 3, color: "#2a4aa8", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "lapis_lazuli", extraDrops: [["lapis_lazuli", 3, 8, 1]] },
   { name: "redstone_ore", tiles: "redstone_ore", hardness: 3, color: "#a82020", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 3, drop: "redstone", extraDrops: [["redstone", 3, 4, 1]] },
   { name: "emerald_ore", tiles: "emerald_ore", hardness: 3, color: "#2fd06a", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 3, drop: "emerald" },
   { name: "copper_ore", tiles: "copper_ore", hardness: 3, color: "#c0704a", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "raw_copper", extraDrops: [["raw_copper", 1, 4, 1]] },
   { name: "deepslate_coal_ore", tiles: "deepslate_coal_ore", hardness: 4.5, color: "#3a3a3c", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 1, drop: "coal" },
-  { name: "deepslate_iron_ore", tiles: "deepslate_iron_ore", hardness: 4.5, color: "#8a6a58", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "iron_ore" },
-  { name: "deepslate_gold_ore", tiles: "deepslate_gold_ore", hardness: 4.5, color: "#b89a30", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 3, drop: "gold_ore" },
+  { name: "deepslate_iron_ore", tiles: "deepslate_iron_ore", hardness: 4.5, color: "#8a6a58", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "raw_iron" },
+  { name: "deepslate_gold_ore", tiles: "deepslate_gold_ore", hardness: 4.5, color: "#b89a30", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 3, drop: "raw_gold" },
   { name: "deepslate_diamond_ore", tiles: "deepslate_diamond_ore", hardness: 4.5, color: "#4ac8d0", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 3, drop: "diamond" },
-  { name: "deepslate_lapis_ore", tiles: "deepslate_lapis_ore", hardness: 4.5, color: "#2a4aa8", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "lapis_lazuli", extraDrops: [["lapis_lazuli", 3, 7, 1]] },
+  { name: "deepslate_lapis_ore", tiles: "deepslate_lapis_ore", hardness: 4.5, color: "#2a4aa8", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "lapis_lazuli", extraDrops: [["lapis_lazuli", 3, 8, 1]] },
   { name: "deepslate_redstone_ore", tiles: "deepslate_redstone_ore", hardness: 4.5, color: "#a82020", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 3, drop: "redstone", extraDrops: [["redstone", 3, 4, 1]] },
   { name: "deepslate_emerald_ore", tiles: "deepslate_emerald_ore", hardness: 4.5, color: "#2fd06a", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 3, drop: "emerald" },
   { name: "deepslate_copper_ore", tiles: "deepslate_copper_ore", hardness: 4.5, color: "#c0704a", creativeTab: "natural", tool: "pickaxe", needsTool: true, minTier: 2, drop: "raw_copper", extraDrops: [["raw_copper", 1, 4, 1]] },
@@ -237,7 +247,7 @@ const BLOCK_DEFS = [
   { name: "raw_iron_block", tiles: "raw_iron_block", hardness: 5, color: "#c8a888", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 2 },
   { name: "raw_gold_block", tiles: "raw_gold_block", hardness: 5, color: "#e0b838", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 3 },
   { name: "raw_copper_block", tiles: "raw_copper_block", hardness: 5, color: "#b8704a", creativeTab: "building", tool: "pickaxe", needsTool: true, minTier: 2 },
-  { name: "amethyst_block", tiles: "amethyst_block", hardness: 1.5, color: "#8a5ac8", creativeTab: "building", tool: "pickaxe" },
+  { name: "amethyst_block", tiles: "amethyst_block", hardness: 1.5, color: "#8a5ac8", creativeTab: "building", tool: "pickaxe", needsTool: true },
   // ---- end stone/ore pack ----
   // ---- wood/colour pack ---- (appended; ids are saved numerically: only ever append after this line)
   ...woodColourDefs(),
@@ -274,10 +284,19 @@ const BLOCK_DEFS = [
   { name: "carpentry_bench", jobsite: "furniture_maker", tiles: { top: "carpentry_bench_top", side: "carpentry_bench_side", front: "carpentry_bench_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#9a7448" },
   // ---- end furniture pack ----
   // ---- shepherd pack ---- (appended; ids are saved numerically: only ever append after this line)
-  ...gateDefs,   // oak_fence_gate_<x|z>[_open]: pen gates (js/shepherd.js)
+  ...gateDefsOf("oak"),   // oak_fence_gate_<x|z>[_open]: pen gates (js/shepherd.js)
   // ---- end shepherd pack ----
+  // ---- miner pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Miners")
+  // mining bench: the miner villager's jobsite (not vanilla): a stone-topped spruce bench with a pickaxe on it and an ore crate in front
+  { name: "mining_bench", jobsite: "miner", tiles: { top: "mining_bench_top", side: "mining_bench_side", front: "mining_bench_front", bottom: "spruce_planks" }, hardness: 2.5, tool: "pickaxe", creativeTab: "functional", color: "#6e6a64" },
+  // ---- end miner pack ----
+  // ---- wood variants pack ---- (appended; ids are saved numerically: only ever append after this line)
+  // doors (16 states) and fence gates (4 states) for every wood species other than oak, whose ids sit further up
+  ...WOOD_SPECIES.filter(sp => sp !== "oak").flatMap(sp => [...doorDefsOf(sp), ...gateDefsOf(sp)]),
+  // ---- end wood variants pack ----
 ];
 
+const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
 // ---- slabs/stairs pack runtime: shape placeholders get their base block's tiles / hardness / tool / colour ----
 {
   const byName = new Map(BLOCK_DEFS.map(d => [d.name, d]));
@@ -288,7 +307,17 @@ const BLOCK_DEFS = [
     d.hardness = base.hardness !== undefined ? base.hardness : 1;
     d.tool = base.tool || null; d.needsTool = !!base.needsTool; d.color = base.color;
     if (base.minTier != null) d.minTier = base.minTier;
+    // vanilla gives these slabs hardness 2 although their full blocks (and stairs) are softer
+    if (d.shape.kind === "slab" && SLAB_HARDNESS_2.has(base.name)) d.hardness = 2;
   }
+}
+
+// ---- vanilla mining extras (player.js breakTime): leaves are hoe blocks that shears (15x) and swords (1.5x) also cut fast,
+// shears clip wool at 5x, swords cut pumpkins and melons at 1.5x. shearSelf: shears make the block drop itself (vanilla shearing).
+for (const d of BLOCK_DEFS) {
+  if (/_leaves$/.test(d.name)) { d.tool = "hoe"; d.shearSpeed = 15; d.swordSpeed = 1.5; d.shearSelf = true; }
+  else if (/_wool$/.test(d.name) || d.name === "wool") d.shearSpeed = 5;
+  else if (d.name === "pumpkin" || d.name === "melon") d.swordSpeed = 1.5;
 }
 
 // ---- slabs/stairs pack: generator (see CONTRACT.md "Slabs and stairs") ----
@@ -339,7 +368,7 @@ function woodColourDefs() {
   for (const [c, col] of DYE_COLOURS) out.push({ name: c + "_concrete_powder", tiles: c + "_concrete_powder", hardness: 0.5, tool: "shovel", hardensTo: c + "_concrete", color: col });
   for (const [c, col] of DYE_COLOURS) out.push({ name: c + "_stained_glass", tiles: c + "_stained_glass", render: "cutout", translucent: true, opaque: false, hardness: 0.3, drop: null, color: col });
   for (const [c, col] of DYE_COLOURS) out.push({ name: c + "_glazed_terracotta", tiles: c + "_glazed_terracotta", hardness: 1.4, tool: "pickaxe", needsTool: true, color: col });
-  out.push({ name: "tinted_glass", tiles: "tinted_glass", render: "cutout", translucent: true, opaque: false, hardness: 0.3, drop: null, color: "#2c2630" });
+  out.push({ name: "tinted_glass", tiles: "tinted_glass", render: "cutout", translucent: true, opaque: false, hardness: 0.3, color: "#2c2630" });
   return out;
 }
 
@@ -352,7 +381,7 @@ function panesLadderDefs() {
     out.push({ name: c + "_stained_glass_pane", tiles: { top: c + "_stained_glass_pane_top", side: c + "_stained_glass", bottom: c + "_stained_glass_pane_top" }, icon: c + "_stained_glass",
       render: "model", model: "pane", opaque: false, translucent: true, hardness: 0.3, drop: null, creativeTab: "building", color: col });
   out.push({ name: "iron_bars", tiles: { top: "iron_bars_top", side: "iron_bars", bottom: "iron_bars_top" }, icon: "iron_bars", render: "model", model: "pane", opaque: false,
-    hardness: 5, tool: "pickaxe", creativeTab: "building", color: "#a8a8ac" });
+    hardness: 5, tool: "pickaxe", needsTool: true, creativeTab: "building", color: "#a8a8ac" });
   // ladders: f = direction the ladder faces (away from the wall); the supporting wall block is at pos - DIRS[f]. Box drawn for facing south (wall at -z).
   for (let f = 0; f < 4; f++) {
     const box = rotBox([0, 0, 0, 16, 16, 2], f);
@@ -497,7 +526,7 @@ const ITEM_DEFS = [
   { name: "raw_cod", food: 2, color: "#b8a888" },
   { name: "cooked_cod", food: 5, color: "#d8b888" },
   { name: "bow", tool: { type: "bow", tier: 1, speed: 1, damage: 1 }, color: "#8a6a3a" },
-  { name: "oak_door", places: "door", color: "#9a7448" },
+  { name: "oak_door", places: "door", wood: "oak", color: "#9a7448" },
   { name: "red_bed", places: "bed", color: "#a82828" },
   // ---- stone/ore pack items ----
   { name: "lapis_lazuli", color: "#2a4aa8" },
@@ -533,9 +562,14 @@ const ITEM_DEFS = [
   // ---- auto map (js/mapview.js; append-only: ids of the items above must not move) ----
   { name: "auto_map", stack: 1, color: "#d8c890", autoBlank: true, creativeTab: "misc", label: "Auto-Fill Map", search: "auto map autofill auto-fill automap creative terrain overview" },   // right click: asks for a width, then fills itself from the world generator
   // ---- shepherd items (js/shepherd.js; append-only) ----
-  { name: "oak_fence_gate", places: "gate", color: "#a2834f", creativeTab: "functional" },   // 4 sticks + 2 planks; pens have one
+  { name: "oak_fence_gate", places: "gate", wood: "oak", color: "#a2834f", creativeTab: "functional" },   // 4 sticks + 2 planks; pens have one
   { name: "shears", stack: 1, tool: { type: "shears", tier: 1, speed: 4, damage: 1 }, color: "#c8c8d0" },   // shears sheep; breaks leaves faster; 3 iron ingots
   // ---- end shepherd items ----
+  // ---- wood variants items (append-only): a door and a fence gate for every other wood; icons reuse the oak sprites in the species colour ----
+  ...WOOD_SPECIES.filter(sp => sp !== "oak").flatMap(sp => [
+    { name: sp + "_door", places: "door", wood: sp, sprite: "oak_door", color: WOOD_COLOR[sp], creativeTab: "functional" },
+    { name: sp + "_fence_gate", places: "gate", wood: sp, sprite: "oak_fence_gate", color: WOOD_COLOR[sp], creativeTab: "functional" }]),
+  // ---- end wood variants items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;
@@ -549,9 +583,12 @@ BLOCK_DEFS.forEach((d, id) => {
   if (def.tiles && !def.tiles.front) def.tiles.front = def.tiles.side; // front = the +z (south) face
   blocks[id] = def; items[id] = def; B[def.name] = id; I[def.name] = id;
 });
+// Tool lifespan in uses, as Minecraft Java: wood 59, stone 131, iron 250, diamond 1561 (by tier); shears 238, bow 384.
+const DURABILITY = { 1: 59, 2: 131, 3: 250, 4: 1561 }, DURABILITY_OF = { shears: 238, bow: 384 };
 ITEM_DEFS.forEach((d, i) => {
   const id = ITEM_BASE + i;
   const def = Object.assign({ isBlock: false, stack: d.tool ? 1 : 64 }, d, { id });
+  if (def.tool && def.durability === undefined) def.durability = DURABILITY_OF[def.tool.type] || DURABILITY[def.tool.tier] || 0;
   items[id] = def; I[def.name] = id;
 });
 // resolve drop names to ids
@@ -608,10 +645,12 @@ BF.CBOXES = CBOXES; BF.SHAPES = SHAPES; BF.LIGHTBLOCK = LIGHTBLOCK;
 BF.DIRS = DIRS;
 BF.rotBox = rotBox;
 BF.dirIndex = (dx, dz) => Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0);
-BF.doorId = (f, upper, open) => B["oak_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
+// door / gate block for a state; wood = species (default oak; unknown species fall back to oak)
+const woodOr = (wood, probe) => (wood && B[wood + probe] != null ? wood : "oak");
+BF.doorId = (f, upper, open, wood) => B[woodOr(wood, "_door_lower_n") + "_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f & 3]];
 BF.ladderId = f => B["ladder_" + "nesw"[f & 3]]; // ladder facing f (away from its wall)
 BF.tentId = (f, r, l, up) => B["tent_" + (up ? "up_" : "") + r + "_" + l + "_" + "nesw"[f & 3]];
-BF.gateId = (axis, open) => B["oak_fence_gate_" + axis + (open ? "_open" : "")];
+BF.gateId = (axis, open, wood) => B[woodOr(wood, "_fence_gate_x") + "_fence_gate_" + axis + (open ? "_open" : "")];
 BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3]];
 // Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.
@@ -648,6 +687,15 @@ BF.rollDrops = function (blockId) {
     if (same) same.count += n; else out.push({ id, count: n });
   }
   return out;
+};
+// Tool wear (uses spent) lives on the inventory stack as `wear`; a tool breaks when it reaches the item's durability. See CONTRACT.md "Tool durability".
+BF.durability = id => (items[id] && items[id].durability) || 0;
+// Wears stack `s` by n uses. Returns "broken" when the tool is used up (the caller removes it), true when worn, false for items without a lifespan.
+BF.wearStack = (s, n = 1) => {
+  const max = s ? BF.durability(s.id) : 0;
+  if (!max || !(n > 0)) return false;
+  s.wear = (s.wear || 0) + n;
+  return s.wear >= max ? "broken" : true;
 };
 BF.itemName = id => (items[id] ? items[id].label || items[id].name.replace(/_item$/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "?");
 // ---- wood/colour pack runtime ----
