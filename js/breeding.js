@@ -556,7 +556,7 @@ addEventListener("load", hookEvents);
 BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,
   tick, ai, childMove, exportAll, importAll, reset,
-  eligible, bedsOK, bedCount, villagerCount, scanBeds, breadEq,
+  eligible, bedsOK, bedCount, villagerCount, scanBeds, freeBed, breadEq,
   forceBreed, birth, growUp, makeChild, info, stats: S.stats, log: S.log, state: S,
   // instant variants for tests
   forceBirth(a, b) { const rec = villageOf(a) || villageOf(b); return rec ? birth(a, b, rec, true) : null; },

@@ -537,7 +537,7 @@ function finish(m, bs, e) {
   e.state = "done"; e.end = +dayNow().toFixed(3);
   bs.mode = "idle"; bs.entry = null; bs.cool = rnd(40, 80); bs.t = 3; m.ai.route = null;
   const bp = bpOf(e);
-  if (bp.house && bp.beds.length && m.slot && !m.bed) claimHome(m, e);
+  if (bp.house && bp.beds.length && m.slot && (!m.bed || m.bed.claimed)) claimHome(m, e);   // moves out of a bed it borrowed (js/mobs.js claimBed) into its own house
   logEvent("done", m, { type: e.type, at: [e.ox, e.oy, e.oz], blocks: e.n, skipped: e.skipped || 0 });
   BF.emit && BF.emit("builderDone", m, e);
 }
@@ -551,6 +551,8 @@ function homeFor(e) {
 function claimHome(m, e) {
   const H = homeFor(e);
   m.home = H; m.bed = H.beds[0]; e.claim = m.slot.idx;
+  const same = b => b && b.x === m.bed.x && b.y === m.bed.y && b.z === m.bed.z;
+  for (const o of m.village ? m.village.members : []) if (o !== m && o.bed && o.bed.claimed && same(o.bed)) o.bed = null;   // a villager who borrowed the bed finds another (js/mobs.js claimBed)
   logEvent("claim", m, { bed: [m.bed.x, m.bed.y, m.bed.z] });
 }
 

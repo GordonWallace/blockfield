@@ -160,9 +160,9 @@ function unpack(v, o) {
   v.eatenTotal = v.life.eaten;
   v.starving = v.life.starving;
 }
-// Trade hook: a starving villager only trades food.
+// Trade hook: a starving villager only trades food (it still buys food it is offered).
 function blockReason(v, o) {
-  if (v && v.starving && o && o.sell && !isFood(o.sell.id)) return "Too hungry to trade";
+  if (v && v.starving && o && o.sell && !isFood(o.sell.id) && !(o.buy || []).some(b => isFood(b.id))) return "Too hungry to trade";
   return null;
 }
 
@@ -1090,7 +1090,7 @@ function cookDaily(m, day) {
 const NAMES = { dig: "Levelling a field", raise: "Filling in a field", gather: "Gathering", harvest: "Harvesting", plant: "Planting", till: "Tilling farmland", border: "Edging a bed", water: "Watering a new bed", fill: "Filling a bucket", craft: "Baking bread", tend: "Tending crops" };
 function statusText(m) {
   if (!m) return "";
-  if (m.starving) return "Too hungry to trade";
+  if (m.starving) return "Starving, only trades food";
   if (m.fshop && m.fshop.stage) return "Buying food";
   if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
     const t = m.farm.task;

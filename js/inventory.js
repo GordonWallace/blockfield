@@ -1035,7 +1035,7 @@ function renderOffers() {
   if (v) {
     const lvl = v.level || 1;
     const prof = (v.profession || "villager").replace(/\b\w/g, c => c.toUpperCase());
-    const st = (BF.villageLife && BF.villageLife.statusText(v)) || (BF.builder && BF.builder.statusText ? BF.builder.statusText(v) : "") || (BF.explorer ? BF.explorer.statusText(v) : "");   // hunger / farm work (js/villagelife.js), builders show what they are doing
+    const st = BF.villagerStatus ? BF.villagerStatus.text(v) : "";   // what the villager is doing (js/villagerstatus.js)
     titleEl.textContent = st ? prof + " \u2014 " + st : prof;
     vinvTitleEl.textContent = prof + " Inventory";
     lvlEl.textContent = levelFlashT > 0 ? "Level up! " + LEVELS[lvl - 1] : LEVELS[lvl - 1];
@@ -1168,6 +1168,7 @@ function closeScreen(silent) {
   giveBack(cursor); cursor = null; result = null;
   if (villager) {
     const v = villager; villager = null;
+    BF.trades.syncFeed(v, false);   // food offers of a hungry unemployed villager only exist while the screen is open
     try { if (v.position && BF.mobs && BF.mobs.setTrading) BF.mobs.setTrading(v, false); } catch (e) { console.error(e); }
   }
   tradeOffer = tradeResult = null; offerSel = -1;

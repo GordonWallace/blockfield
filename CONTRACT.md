@@ -641,3 +641,14 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - Hostiles fight back (`golemFight`): a hostile a golem hit targets it for 12 s (`ai.golemFoe`, `ai.golemFoeT`), even over the player; zombies, spiders (not when calm in daylight) and skeletons not chasing the player pick a golem within 10 blocks. Creepers ignore golems. Damage to golems: `GOLEM_HITS` = zombie 4, spider 3, skeleton arrow 3-5 (arrows carry a `victim` mob they can hit). Golem health 100.
 - Cracks: below 75% / 50% / 25% health the golem's part geometries swap to crack stage 1 / 2 / 3 (`m.crackLevel`; cached per stage via `typeParts("iron_golem", "1".."3")`). Each stage only adds cracks.
 - A golem drops its iron ingots whatever kills it. Test: `node test/run.js /tmp/golem test/golem-actions.js`.
+
+## Villager status, food for the unemployed, claimed beds (js/villagerstatus.js, loaded after villagelog.js)
+- `BF.villagerStatus.text(m)`: the trade screen's status line for any villager. villageLife, builder and explorer statusText speak first;
+  otherwise `routine(m)` reads the everyday AI (sleeping, heading to bed, walking to / working at the jobsite, looking for work, relaxing...).
+  `mobs.interact` snapshots `ai.was = {mode, flee}` before the screen freezes the villager; `setTrading(v, false)` clears it.
+- Nitwits and unemployed villagers open the trade screen like everyone else (no offers). An unemployed villager with less than a day's food
+  gets `BF.trades.feedOffers()` (food -> 1 emerald at 88% of VALUE, `o.feed`) while the screen is open (`syncFeed(v, open)` from init and
+  closeScreen); it buys until it holds 3 days of food ("Has enough food"). A starving villager still accepts offers in which it receives food.
+- Claimed beds (mobs.js `claimBed`): at night a villager without a working bed (bedless house slot, builder or explorer without a home,
+  broken bed) takes the nearest free village bed (`BF.breeding.freeBed`), marked `bed.claimed`; saved as `bed: [x, y, z, f]` in trades.pack.
+  A builder who finishes its own house moves into it and evicts anyone who borrowed that bed.
