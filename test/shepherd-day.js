@@ -8,13 +8,15 @@ module.exports = async (pg, out) => {
     BF.state.paused = true;
     BF.newWorld(1, { gen: 3, gameMode: "survival" });
     BF.mobs.spawning = false;
-    const V = { x: -1, z: -72 };
+    const V = { x: 26, z: 39 };   // seed 1: a village whose shepherd has its loom from the start (with village generator 2 the spawn village's shepherds start unemployed)
     BF.player.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);
     for (let i = 0; i < 400 && !BF.world.isLoaded(V.x, V.z); i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
     for (let i = 0; i < 300; i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     BF.player.invulnerable = true;
     BF.sky.setTime(0.05);
     run(8);
+    // a sized village (village generator 2) spans more chunks: keep loading until its shepherds have spawned
+    for (let k = 0; k < 120 && !((BF.mobs.villages.get(V.x + "," + V.z) || { members: [] }).members.some(m => m.profession === "shepherd")); k++) { BF.world.update(V.x, V.z, 8); run(0.5); }
     const rec = BF.mobs.villages.get(V.x + "," + V.z);
     const shep = rec.members.find(m => m.type === "villager" && m.profession === "shepherd");
     const pen = BF.shepherd.penOf(shep);
@@ -59,7 +61,11 @@ module.exports = async (pg, out) => {
     run(60);
     ok("no more culling once below", pen.sheep.length === pen.threshold - 1 || pen.sheep.length >= pen.threshold - 1, pen.sheep.length);
     // ---- wheat: out of wheat -> buys from a farmer
-    const farmer = rec.members.find(m => m.type === "villager" && m.profession === "farmer");
+    let farmer = rec.members.find(m => m.type === "villager" && m.profession === "farmer");
+    if (!farmer) {   // a small sized village may have none: make one of a plain trade
+      farmer = rec.members.find(m => m.type === "villager" && !m.child && /^(mason|fletcher|toolsmith|weaponsmith|armorer|leatherworker|cleric|librarian|nitwit|unemployed)$/.test(m.profession));
+      if (farmer) BF.mobs.setProfession(farmer, "farmer");
+    }
     ok("village has a farmer", !!farmer);
     if (farmer) {
       BF.trades.inv.remove(shep.inv, I.wheat_item, 999);

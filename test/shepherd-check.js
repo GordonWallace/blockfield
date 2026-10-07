@@ -11,13 +11,15 @@ module.exports = async (pg, out) => {
     BF.state.paused = true;                                  // the page's own loop stays out of the way
     BF.newWorld(1, { gen: 3, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns: only village stock
-    const V = { x: -1, z: -72 };
+    const V = { x: 26, z: 39 };   // seed 1: a village whose shepherd has its loom from the start (with village generator 2 the spawn village's shepherds start unemployed)
     const gy = BF.worldgen.heightAt(V.x + 4, V.z + 4);
     BF.player.teleport(V.x + 4.5, gy + 2, V.z + 4.5);
     for (let i = 0; i < 400 && !BF.world.isLoaded(V.x, V.z); i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
     for (let i = 0; i < 300; i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     BF.sky.setTime(0.1);
     run(5);
+    // a sized village (village generator 2) spans more chunks: keep loading until its shepherds have spawned
+    for (let k = 0; k < 120 && !((BF.mobs.villages.get(V.x + "," + V.z) || { members: [] }).members.some(m => m.profession === "shepherd")); k++) { BF.world.update(V.x, V.z, 8); run(0.5); }
     const rec = BF.mobs.villages.get(V.x + "," + V.z);
     ok("village record", !!rec);
     if (!rec) return R;
