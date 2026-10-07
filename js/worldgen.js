@@ -164,7 +164,7 @@ function rawFields2(x, z) {
 }
 const CONT_L = 14000;    // continent wavelength at biome scale 1
 // v3 continents: wavelength (biome scale 1), contrast, bias (about 30% land), coast roughness, warp wavelength and amplitude (x wavelength), octaves
-const CONT3_L = 90000, CONT3_K = 2.0, CONT3_BIAS = -0.35, CONT3_ROUGH = 0.06, CONT3_WL = 1.2, CONT3_WA = 0.12, CONT3_OCT = 3;
+const CONT3_L = 90000, CONT3_K = 5.0, CONT3_BIAS = -0.875, CONT3_ROUGH = 0.15, CONT3_WL = 1.2, CONT3_WA = 0.12, CONT3_OCT = 3;
 // v3: continentalness alone (same formula as rawFields2), for the coarse slope-limiter grid
 function contOnly(x, z) { return cont3(x, z); }
 // v3 continents: broad landmasses (Earth-like shapes, smaller): a smooth 3-octave field on a long wavelength with a large slow
@@ -204,7 +204,7 @@ function nodeRaw(i, j) {
     const x = i * CG, z = j * CG, q = Math.sqrt(SC);
     const c = contOnly(x, z), d2 = x * x + z * z, home = 1 - smooth(360000, 9000000, d2);
     const pm = noise.fbm(x / (18000 * q) + 1234.5, z / (18000 * q) - 777.7, 2), mt = noise.fbm(x / (14000 * q) + 333.3, z / (14000 * q) - 444.4, 2);
-    const inland = smooth(0.06, 0.12, c);   // a coastal plain before the ramps start
+    const inland = smooth(0.15, 0.3, c);   // a coastal plain before the ramps start
     const pl = inland * Math.max(smooth(-0.75, -0.3, pm), home);
     const lo = noise.fbm(x / (14000 * q) + 55.5, z / (14000 * q) - 99.9, 2);
     v = [pl, pl * smooth(0.05, 0.45, mt) * (1 - 0.97 * home), smooth(-0.03, -0.22, lo)];
@@ -543,7 +543,9 @@ function relief3(x, z, detail) {
   const S = Math.min(1, K.sp) * land;
   const amp = 4 + 6 * wet + 6 * wet * hot + 3 * smooth(-0.2, 0.2, e < 0 ? -e : 0);
   const hA = lerp(4, amp, land);
-  const low = contBase3(c) + hills * hA + 2.5 * wet * land;
+  // near sea level the hills fade out, so the shoreline is one clean line instead of a belt of islets and puddles
+  const bz = contBase3(c), hk = 0.12 + 0.88 * smooth(0, 12, Math.abs(bz - BF.SEA));
+  const low = bz + hills * hA * hk + 2.5 * wet * land;
   // plateau top: level ~910..1110 (the p field tilts it very gently), some regions are lower plateaus (~390..590), plus long low swells
   const lvl = lerp(1010 + 100 * Math.tanh(K.p / 0.45) - 520 * smooth(0, 1, Math.min(1, K.lo)), 1070, home);
   const swell = 5 * noise.n2(x / 520 + 19.7, z / 520 - 4.4) + (detail ? 0.3 * noise.n2(x / 90 - 8.2, z / 90 + 13.1) : 0);
@@ -568,7 +570,7 @@ function relief3(x, z, detail) {
 function macro3(x, z, o) {
   rawFields2(x, z);       // nodes are sparse: the raw fields are cheaper than the 4-block lattice (and equal up to interpolation error)
   o.p = ceil3(relief3(x, z, true).h);
-  o.c = K.c;
+  o.c = K.c / 2.5;   // the river network's continentalness thresholds were tuned for the v2 contrast (cont3 is 2.5x steeper)
 }
 function climate3(x, z) {
   const SEA = BF.SEA, MINY = BF.MIN_Y;
@@ -597,16 +599,17 @@ function climate3(x, z) {
   h = ceil3(h);
   // rivers: a valley floor at the water surface with a flat floodplain, blended into the surrounding terrain
   let wl = SEA, rv = 0, chan = false;
-  if (land > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
+  const rl = Math.max(land, smooth(SEA - 3, SEA + 1, h));   // dry shore ground counts as land for rivers (outlets cut through coastal ridges)
+  if (rl > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
     const rs = Math.max(SEA, Math.floor(RV.rs)), sd = RV.sd, w = RV.w;
     let hr;
     if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - 3.2 * (1 - q * q); }
     else hr = rs + 1.4 + smooth(0, 14, sd) * 1.5;
     const vw = Math.min(BF.rivers.REACH - w - 3, Math.max(27, (h > hr ? h - hr : 1.6 * (hr - h)) * 1.4));
-    const fp = (1 - smooth(w + 3, w + 3 + vw, RV.d)) * land;
-    h = h + (hr - h) * fp;
+    const fp = (1 - smooth(w + 3, w + 3 + vw, RV.d)) * rl;
+    if (!(h < SEA - 1 && hr > h)) h = h + (hr - h) * fp;     // never raise the sea floor (outlets run on into open water)
     if (sd < 0 && fp > 0.9) { chan = true; wl = rs; if (h > rs - 1) h = rs - 1; }
-    else if (sd < 3 && h < rs + 1) h = rs + 1;
+    else if (sd < 3 && h < rs + 1 && h >= SEA - 1) h = rs + 1;   // banks, but no levees out into the sea (they would dam the mouth)
     if (sd < 6) rv = 1;
   }
   h = Math.floor(h);
@@ -2042,7 +2045,7 @@ BF.worldgen = {
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
     if (GEN >= 3) placeHome3();
-    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
+    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, outlet: 260, mouth: -2, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,

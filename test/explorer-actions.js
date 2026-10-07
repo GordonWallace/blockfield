@@ -34,7 +34,9 @@ module.exports = async (pg, out) => {
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.level = 1; A.trades = []; A.inv = T.stockFor("explorer", A);
     A.res = BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });   // this table (another free jobsite nearby could win a plain claim)
     T.inv.add(A.inv, I.emerald, 10);
-    // the cartographer gets its own table too (without one, jobs.js makes it unemployed again)
+    // the cartographer stands beside the explorer and gets its own table there (without one, jobs.js makes it unemployed again;
+    // a seller that keeps walking away makes the explorer give up on it for a while, which would depend on the village layout)
+    C.position.set(A.position.x, A.position.y, A.position.z + 3);
     const cx = Math.floor(C.position.x) + 2, cy = Math.floor(C.position.y), cz = Math.floor(C.position.z);
     BF.world.setBlock(cx, cy, cz, BF.B.cartography_table); BF.emit('blockPlaced', cx, cy, cz, BF.B.cartography_table);
     BF.mobs.setProfession(C, "cartographer"); BF.jobs.claim(C, { site: { x: cx, y: cy, z: cz, id: BF.B.cartography_table, prof: "cartographer" } });
