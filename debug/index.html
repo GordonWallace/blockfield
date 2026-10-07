@@ -275,7 +275,8 @@ function status() {
   const w = $("waiting");
   w.hidden = !!(serverUp && live) || (!!snap && serverUp);
   if (!serverUp) { $("w-title").textContent = "Debug server offline"; $("w-text").innerHTML = "Start it with <code>node debug/server.js</code> in the game folder. This page reconnects by itself."; }
-  else { $("w-title").textContent = "Waiting for the game"; $("w-text").innerHTML = `Open the game from the debug server, at <code>http://${esc(location.hostname)}:8000</code> (or your <code>--game</code> port), and it will appear here.`; }
+  else { $("w-title").textContent = "Waiting for the game"; $("w-text").innerHTML = `Open the game at <code>http://${esc(location.hostname)}:8000</code>, or wherever you serve it, and it will appear here.<br>` +
+    `Game open but nothing here? Reload the game tab with Shift+Reload so the browser isn't using older cached game files, then check its console: it prints <code>Blockfield debug feed: ...</code> saying where it sends.`; }
 }
 setInterval(status, 1000);
 
