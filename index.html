@@ -30,6 +30,8 @@
     position: fixed; left: 16px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); width: min(520px, 46vw); max-height: 55vh; overflow: hidden;
     background: var(--panel); color: var(--ink); padding: 8px 10px; border-radius: 3px; font: 11px/1.45 var(--mono); pointer-events: none;
   }
+  #debug, #vlog { transition: opacity .15s; }
+  body.bf-screen-open #debug, body.bf-screen-open #vlog { opacity: .3; }   /* faded while any in-game screen or menu is open (js/main.js) */
   #vlog h4 { margin: 0 0 2px; font: 13px var(--display); color: var(--accent); }
   #vlog .vl-tally { color: var(--muted); margin-bottom: 4px; }
   #vlog span { color: var(--muted); }
@@ -39,9 +41,10 @@
 </style>
 
 <canvas id="view" aria-label="Blockfield game view"></canvas>
-<div id="ui"></div>
+<!-- debug panels sit before #ui so every in-game screen draws on top of them (#ui is fixed, so its z-indexes stay inside it) -->
 <pre id="debug" hidden></pre>
 <div id="vlog" hidden></div>
+<div id="ui"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/blocks.js"></script>

@@ -61,8 +61,11 @@ const dbg = document.getElementById("debug");
 let showDebug = false;
 addEventListener("keydown", e => { if (e.code === "F3") { e.preventDefault(); showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; } });
 let frames = 0, fpsT = performance.now(), fps = 0;
+let screenWas = false;
 function updateDebug(now) {
   frames++;
+  const scr = !!(BF.player.screenOpen && BF.player.screenOpen());
+  if (scr !== screenWas) { screenWas = scr; document.body.classList.toggle("bf-screen-open", scr); }
   if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
   if (!showDebug) return;
   const p = BF.player.position;
