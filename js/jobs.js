@@ -25,6 +25,8 @@ for (const p in JOBSITE) PROFESSION_OF[JOBSITE[p]] = p;
 const NO_JOB = { nitwit: 1, unemployed: 1 };
 
 const RADIUS = 48;            // claim search radius around the villager's village centre (or the villager)
+// sized villages (village generator 2, up to ~120 blocks from the plaza) search their whole area instead
+const reachOf = o => Math.max(RADIUS, (o && o.village && o.village.wg && o.village.wg.reach) || (o && o.wg && o.wg.reach) || 0);
 const MEMORY_DAYS = 30;       // game days an unemployed villager remembers its profession (and level) after losing its jobsite
 const WORK_START = 0.04, WORK_END = 0.45;   // sky.time window in which villagers visit their jobsite
 
@@ -121,7 +123,7 @@ function planVillage(v) {
   if (!v || !BF.worldgen || !BF.worldgen.recordBuilding || !BF.mobs || !BF.mobs.roster) return out;
   const key = Math.round(v.x) + "," + Math.round(v.z);
   let roster;
-  try { roster = BF.mobs.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length }); } catch (e) { console.error(e); return out; }
+  try { roster = BF.mobs.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length, pop: v.pop || 0 }); } catch (e) { console.error(e); return out; }
   const r = seeded("jobs:" + key);
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   const n = drawCount(needy.length, r);
@@ -215,7 +217,7 @@ function reclaimAt(s) {
   for (const m of BF.mobs.list) {
     if (m.type !== "villager" || m.dead || m.removed || m.jobsite || isChild(m) || !memValid(m) || m.jobMem.prof !== s.prof) continue;
     const c = center(m);
-    if (!c || Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > RADIUS) continue;
+    if (!c || Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > reachOf(m)) continue;
     const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z);
     if (d < bd) { bd = d; best = m; }
   }
@@ -235,7 +237,7 @@ function reservedForMemory(k, m) {
   for (const o of BF.mobs.list) {
     if (o === m || o.type !== "villager" || o.dead || o.removed || o.jobsite || !memValid(o) || o.jobMem.prof !== s.prof) continue;
     const c = center(o);
-    if (c && Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) <= RADIUS) return true;
+    if (c && Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) <= reachOf(o)) return true;
   }
   return false;
 }
@@ -262,7 +264,7 @@ function center(o) {
 // Unclaimed jobsite blocks (loaded, still standing) within `radius` of a village / position / mob. `forMob` treats its own claims as free.
 function unclaimed(where, radius, forMob) {
   hook();
-  const c = center(where), R = radius || RADIUS, out = [], W = BF.world;
+  const c = center(where), R = radius || reachOf(where), out = [], W = BF.world;
   if (!c) return out;
   for (const [k, s] of sites) {
     if (Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > R) continue;
@@ -301,7 +303,7 @@ function claim(m, opts) {
   if (!m || m.dead || m.removed || m.type !== "villager" || m.profession === "nitwit") return null;
   if (opts.site) return !claimedByOther(pk(opts.site.x, opts.site.y, opts.site.z), m) ? hire(m, opts.site) : null;   // the block the villager walked to
   const own = ownTrade(m);
-  const list = unclaimed(m, opts.radius || RADIUS, m).filter(s => (!own || s.prof === own) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
+  const list = unclaimed(m, opts.radius || reachOf(m), m).filter(s => (!own || s.prof === own) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
   if (!list.length) return null;
   const pref = (Array.isArray(opts.prefer) ? opts.prefer.filter(Boolean) : []).concat(memValid(m) ? [m.jobMem.prof, m.jobMem.prof] : []);
   const wts = list.map(s => { let w = 1; for (const p of pref) if (p === s.prof) w *= 3; return w; });
@@ -391,7 +393,7 @@ const SEEK_AVOID = 60;            // seconds a site that could not be reached (o
 const adjacentTo = (s, x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) === 1 && Math.abs(y - s.y) <= 1;
 function pickSite(m, sk) {
   const own = ownTrade(m), mem = memValid(m) ? m.jobMem.prof : null, pref = m.jobPrefer || [], now = BF.simNow();
-  const list = unclaimed(m, RADIUS, m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
+  const list = unclaimed(m, reachOf(m), m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
   let best = null, bd = Infinity;
   for (const s of list) {
     const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) * (s.prof === mem ? 0.3 : pref.includes(s.prof) ? 0.6 : 1) * rnd(0.9, 1.1);

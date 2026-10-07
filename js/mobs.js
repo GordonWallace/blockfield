@@ -1103,20 +1103,26 @@ function villagerAI(m, dt, out) {
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
+  // sized villages (village generator 2) reach far beyond the plaza: villagers living out there keep to their own neighbourhood
+  let ax = V ? V.x : 0, az = V ? V.z : 0;
+  if (V && V.pop && m.home && m.home.x != null) {
+    const hx = m.home.x + (m.home.w || 1) / 2, hz = m.home.z + (m.home.d || 1) / 2;
+    if (Math.hypot(hx - V.x, hz - V.z) > 28) { ax = hx; az = hz; }
+  }
   if (m.profession === "farmer" && V && ai.mode === "idle" && ai.t < 0.2 && Math.random() < 0.5 && BF.B.farmland != null) {
     for (let k = 0; k < 12; k++) {
-      const fx = Math.floor(V.x + rnd(-18, 18)), fz = Math.floor(V.z + rnd(-18, 18));
+      const fx = Math.floor(ax + rnd(-18, 18)), fz = Math.floor(az + rnd(-18, 18));
       if (!BF.world.isLoaded(fx, fz)) continue;
       const fy = BF.world.heightAt(fx, fz);
       if (fy > 0 && BF.world.getBlock(fx, fy, fz) === BF.B.farmland) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
     }
   }
   if (V) {
-    const dx = V.x - m.position.x, dz = V.z - m.position.z, d = Math.hypot(dx, dz);
-    if (d > 40) { // wandered too far: head back toward the centre
-      ai.mode = "walk"; ai.tx = V.x + rnd(-6, 6); ai.tz = V.z + rnd(-6, 6); ai.t = rnd(5, 8);
-    } else if (ai.mode === "walk" && Math.hypot(ai.tx - V.x, ai.tz - V.z) > 36) {
-      ai.tx = V.x + rnd(-20, 20); ai.tz = V.z + rnd(-20, 20);
+    const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
+    if (d > 40) { // wandered too far: head back toward the centre (or home)
+      ai.mode = "walk"; ai.tx = ax + rnd(-6, 6); ai.tz = az + rnd(-6, 6); ai.t = rnd(5, 8);
+    } else if (ai.mode === "walk" && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
+      ai.tx = ax + rnd(-20, 20); ai.tz = az + rnd(-20, 20);
     }
   }
   wanderAI(m, dt, out);
@@ -1149,7 +1155,12 @@ function golemAI(m, dt, out) {
   }
   // patrol near the village centre, slowly
   const V = m.village;
-  if (V && Math.hypot(V.x - m.position.x, V.z - m.position.z) > 14) { ai.mode = "walk"; ai.tx = V.x + rnd(-5, 5); ai.tz = V.z + rnd(-5, 5); ai.t = rnd(5, 8); }
+  let px = V ? V.x : 0, pz = V ? V.z : 0;
+  if (V && V.pop && V.houses && V.houses.length) {   // sized villages: each golem patrols around a house, moving on now and then
+    if (!m.patrol || Math.random() < dt / 90) { const h = V.houses[irnd(0, V.houses.length - 1)]; m.patrol = Math.random() < 0.3 || !h ? [V.x, V.z] : [h.x + (h.w || 1) / 2, h.z + (h.d || 1) / 2]; }
+    px = m.patrol[0]; pz = m.patrol[1];
+  }
+  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14) { ai.mode = "walk"; ai.tx = px + rnd(-5, 5); ai.tz = pz + rnd(-5, 5); ai.t = rnd(5, 8); }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;
 }
@@ -1493,7 +1504,7 @@ function restockVillagers(dt) { // once per in-game day, never while someone is 
   restockT = 2;
   for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child) BF.trades.restock(m, BF.sky.day);
 }
-const VILLAGERS_PER_VILLAGE = 24;
+const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
 function findStand(x, y, z, T) {
   x = Math.floor(x); z = Math.floor(z);
@@ -1532,8 +1543,9 @@ function villageRoster(rec) {
   const special = slots.filter(sl => sl.house && SPECIAL_PROF[sl.house.type]);
   const rest = slots.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
-  const nBuilders = BF.builder ? (rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0) : 0;   // builders count toward the cap of 24
-  const ordered = special.concat(rest).slice(0, VILLAGERS_PER_VILLAGE - nBuilders);
+  const cap = rec.pop || VILLAGERS_PER_VILLAGE;   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
+  const nBuilders = BF.builder ? Math.min(rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0, Math.max(0, cap - 1)) : 0;   // builders count toward the cap
+  const ordered = special.concat(rest).slice(0, cap - nBuilders);
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
@@ -1558,7 +1570,16 @@ function villageRoster(rec) {
     const re = seededRand("explorers:" + rec.key);
     let nE = 0;
     for (const sl of ordered) if (sl.prof === "cartographer" && re() < EXPLORER_CHANCE) nE++;
-    nE = Math.min(nE, Math.max(0, VILLAGERS_PER_VILLAGE - ordered.length));
+    if (rec.pop) {
+      // a sized village has a bed for every villager, so the cap is always full: an explorer takes the place of the last shuffled
+      // resident who is not a cartographer or a special-building tradesperson (explorers sleep in their tents), keeping the 70%
+      for (let need = nE - (cap - ordered.length), i = ordered.length - 1; need > 0 && i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.prof === "cartographer" || sl.prof === "builder" || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        ordered.splice(i, 1); need--;
+      }
+    }
+    nE = Math.min(nE, Math.max(0, cap - ordered.length));
     for (let k = 0; k < nE; k++) ordered.push({ house: null, idx: 1100 + k, bed: null, prof: "explorer" });
   }
   return ordered;
@@ -1578,8 +1599,10 @@ function updateVillages(dt) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
-    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: (v.buildings || []).length }; villages.set(key, rec); }
-    if (Math.hypot(v.x - pp.x, v.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
+    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); }
+    const away = v.pop ? Math.hypot(Math.max(0, v.minX - pp.x, pp.x - v.maxX), Math.max(0, v.minZ - pp.z, pp.z - v.maxZ)) > 24   // sized villages: near any part of it
+      : Math.hypot(v.x - pp.x, v.z - pp.z) > 80;
+    if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
     if (!BF.world.isLoaded(v.x, v.z)) continue;
     const loadedHouse = h => BF.world.isLoaded(h.x, h.z) && BF.world.isLoaded(h.x + (h.w || 1), h.z + (h.d || 1));
     rec.members = rec.members.filter(m => !m.removed);
@@ -1607,7 +1630,7 @@ function updateVillages(dt) {
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
       if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec);
     }
-    const wantG = (rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);
+    const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {
       const gy = v.y != null ? v.y : BF.world.heightAt(v.x, v.z) + 1;
       const at = findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
