@@ -449,8 +449,21 @@ function quitToTitle(btn) {
 }
 
 // ---------- pointer lock ----------
+// Escape that closes a screen (inventory, map, sign, chat) or the pause menu re-captures the mouse, but not while the key is
+// still down: Chrome handles a held Escape as "leave pointer lock", so a lock granted on keydown is dropped at once and the
+// unlock reads as a pause. The request waits for the Escape keyup instead.
+let lockOnEscUp = false;
+addEventListener("keyup", e => {
+  if (e.key !== "Escape" || !lockOnEscUp) return;
+  lockOnEscUp = false;
+  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) requestLock();
+}, true);
+addEventListener("blur", () => { lockOnEscUp = false; });
 function requestLock() {
   if (isTouch) return;
+  const ev = window.event;
+  lockOnEscUp = false;
+  if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
   const cv = canvas();
   if (!cv.requestPointerLock) { dragMode = true; return; }
   try {
@@ -521,6 +534,7 @@ function bindInput() {
     const c = e.code;
     if (c === "Space" || c === "Tab" || (e.ctrlKey && /^Key[WASDQE]$/.test(c))) e.preventDefault();
     if (c === "Escape") {
+      if (e.repeat) return;   // a held Escape that just closed a screen must not go on to open the pause menu
       if (invOpen()) { deferredToggle(true); return; }
       if ((dragMode || !locked) && started && !P.dead) { if (menuOpen === "pause") resume(); else if (!menuOpen) pause(); }
       return;
