@@ -1033,32 +1033,37 @@ function layoutVillage(cx, cz, spawn, pop) {
     try { need = Math.min(BF.jobs.shepherdCount(v), 4); } catch (e) { need = 0; }
     let have = v.buildings.filter(b => b.type === "pen").length;
     const [w, d] = BTYPES.pen;
-    for (const road of roads) for (const side of [1, -1]) {
+    // A pen plot at step t along a road, `back` blocks off its side: true when it fit and was added.
+    const tryPen = (road, side, t, back) => {
       const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
-      for (let t = 1; t + w - 1 <= road.end + 1 && have < need; t += 2) {
-        const bx = road.sx + dx * t + sx * 3, bz = road.sz + dz * t + sz * 3;
-        const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
-        const c0 = P(0, 0), c1 = P(w - 1, d - 1);
-        const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
-        let ok = Math.abs(box[0] - cx) < 72 && Math.abs(box[2] - cx) < 72 && Math.abs(box[1] - cz) < 72 && Math.abs(box[3] - cz) < 72 && !overlaps(box) && !covers(box, 1);
-        const du = w >> 1, door = P(du, 0), front = P(du, -1);
-        const y = ok ? climate(front[0], front[1]) : 0;
-        if (ok && (y < SEA || C.rv)) ok = false;
-        for (let q = -1; ok && q <= d; q++) for (let u = -1; u <= w; u += (q === -1 || q === d) ? 1 : w + 1) {
-          const p = P(u, q), h = climate(p[0], p[1]);
-          if (h < SEA || C.rv || Math.abs(h - y) > 3) { ok = false; break; }
-        }
-        for (let q = 1; ok && q < d - 1; q += 2) for (let u = 1; u < w - 1; u += 2) {
-          const p = P(u, q), h = climate(p[0], p[1]);
-          if (h < SEA || C.rv || Math.abs(h - y) > 3) { ok = false; break; }
-        }
-        if (!ok) continue;
-        v.buildings.push({ type: "pen", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
-          x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 607) });
-        occ.push(box);
-        v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
-        have++; t += w;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(0, 0), c1 = P(w - 1, d - 1);
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      if (!(Math.abs(box[0] - cx) < 72 && Math.abs(box[2] - cx) < 72 && Math.abs(box[1] - cz) < 72 && Math.abs(box[3] - cz) < 72) || overlaps(box) || covers(box, 1)) return false;
+      const du = w >> 1, door = P(du, 0), front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u += (q === -1 || q === d) ? 1 : w + 1) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
       }
+      for (let q = 1; q < d - 1; q += 2) for (let u = 1; u < w - 1; u += 2) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "pen", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 607) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      have++;
+      return true;
+    };
+    // Free road frontage first; when the layout already filled it (large villages), past the road ends, then a row further back.
+    const passes = [[3, 0], [3, 1], [12, 0], [21, 0]];
+    for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 1, t1 = beyond ? road.end + 24 : road.end + 2 - w;
+      for (let t = t0; t <= t1 && have < need; t += 2) if (tryPen(road, side, t, back)) t += w;
     }
   }
 
