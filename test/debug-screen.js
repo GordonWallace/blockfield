@@ -49,7 +49,7 @@ const start = async () => {
     return { name: BF.vlog.nameOf(m), em, starving: !!m.starving }; });
   await dbg.waitForTimeout(600);
   const rr = await dbg.evaluate(n => { const tr = [...document.querySelectorAll('#r-body tr')].find(t => t.dataset.n === n); return tr && [...tr.children].map(td => td.textContent); }, gv.name);
-  ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 9 && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
+  ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 10 && /^[\d.]+ days?$/.test(rr[8]) && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
   ok('log entries ' + g.log + '/' + want.log, g.log === want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nXYZ /.test((await got()).f3));

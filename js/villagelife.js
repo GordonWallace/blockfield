@@ -59,7 +59,8 @@ const surplus = m => Math.max(0, available(m) - KEEP);         // what it can sp
 const eatL = [];
 function onEat(cb) { if (typeof cb === "function") eatL.push(cb); }
 function life(m) {
-  if (!m.life) { const t = dayNow(); m.life = { v: LIFE_V, mealT: t, lastAte: t, sat: 0, eaten: 0, starving: false }; }
+  // born: game day the villager came to be (a newborn's birth; for the villagers a village starts with, when it was first loaded)
+  if (!m.life) { const t = dayNow(); m.life = { v: LIFE_V, mealT: t, lastAte: t, sat: 0, eaten: 0, starving: false, born: m.bredEntry && m.bredEntry.born != null ? m.bredEntry.born : t }; }
   return m.life;
 }
 // Eats `amount` bread-eq: whole items are taken out of the inventory (cheapest first) and any excess is carried as
@@ -150,13 +151,14 @@ function startFood(v) {
 function pack(v) {
   const L = v.life;
   if (!L) return { v: LIFE_V };
-  return { v: LIFE_V, mealT: L.mealT, lastAte: L.lastAte, sat: +L.sat.toFixed(4), eaten: +L.eaten.toFixed(3), starving: !!L.starving };
+  return { v: LIFE_V, mealT: L.mealT, lastAte: L.lastAte, sat: +L.sat.toFixed(4), eaten: +L.eaten.toFixed(3), starving: !!L.starving, born: L.born != null ? +L.born.toFixed(4) : undefined };
 }
 function unpack(v, o) {
   if (!v) return;
   if (!o || typeof o !== "object") { v.life = null; startFood(v); return; }   // save from before villager food
   const t = dayNow(), num = (x, d) => (Number.isFinite(+x) ? +x : d);
-  v.life = { v: LIFE_V, mealT: num(o.mealT, t), lastAte: num(o.lastAte, t), sat: Math.max(0, num(o.sat, 0)), eaten: Math.max(0, num(o.eaten, 0)), starving: !!o.starving };
+  v.life = { v: LIFE_V, mealT: num(o.mealT, t), lastAte: num(o.lastAte, t), sat: Math.max(0, num(o.sat, 0)), eaten: Math.max(0, num(o.eaten, 0)), starving: !!o.starving,
+    born: num(o.born, v.bredEntry && v.bredEntry.born != null ? v.bredEntry.born : t) };   // saves from before ages: counted from now
   v.eatenTotal = v.life.eaten;
   v.starving = v.life.starving;
 }

@@ -76,6 +76,7 @@ function detail(rec) {
       status: status(m) || "", x: r1(m.position.x), y: r1(m.position.y), z: r1(m.position.z),
       hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!m.bed, sleeping: !!m.sleeping,
       job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
+      age: m.life && m.life.born != null ? Math.max(0, Math.round((BF.food.dayNow() - m.life.born) * 10) / 10) : null,   // game days
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));
