@@ -4,7 +4,7 @@
 // Villager names are generated deterministically from the villager's persistence key, so they need no saving.
 // Explorers' tents are logged with the beds (the tally still counts only real beds).
 // API: BF.vlog = { nameOf(m), log(rec, kind, text), trade(buyer, seller, offerOrText), bed(m, x, y, z), profession(m, from, to),
-//                  entries(key), villageAt(x, z) -> rec|null, tally(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }
+//                  entries(key), villageAt(x, z) -> rec|null, tally(rec), panelData(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -128,6 +128,18 @@ function updateLabels(on) {
 
 // ---------------------------------------------------------------- panel (F3)
 const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+// The panel's numbers as data, for the second-screen debug feed (js/debugfeed.js); the F3 panel below draws its own.
+const byName = (x, y) => (x[0] === "Child") - (y[0] === "Child") || x[0].localeCompare(y[0]);   // alphabetical, children last
+function panelData(rec) {
+  const t = tally(rec), name = (BF.signs && BF.signs.villageName && BF.signs.villageName(rec.key)) || "Village";
+  const prof = {};
+  for (const m of rec.members || []) if (m.type === "villager" && !m.dead && !m.removed) { const p = m.child ? "Child" : pretty(m.profession); prof[p] = (prof[p] || 0) + 1; }
+  const un = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec) : [], uc = {};
+  for (const s of un) { const p = pretty(s.prof); uc[p] = (uc[p] || 0) + 1; }
+  return { key: rec.key, name, villagers: t.villagers, beds: t.beds, unclaimed: un.length,
+    occupations: Object.entries(prof).sort(byName), free: Object.entries(uc).sort(byName),
+    loaded: Object.values(prof).reduce((x, y) => x + y, 0) };
+}
 function renderPanel() {
   if (!panelEl) return;
   const pp = BF.player && BF.player.position, rec = pp ? villageAt(pp.x, pp.z) : null;
@@ -169,7 +181,7 @@ function reset() { logs.clear(); for (const [m, l] of [...labels]) dropLabel(m, 
 
 BF.vlog = {
   actor: null,      // set around block placements made by a villager that goes through blockPlaced (explorer tents)
-  CAP, nameOf, log, trade, bed, profession, entries, villageAt, tally, stamp,
+  CAP, nameOf, log, trade, bed, profession, entries, villageAt, tally, stamp, pretty, panelData,
   serialize() { const o = {}; for (const [k, a] of logs) if (a.length) o[k] = a; return o; },
   deserialize(o) {
     logs.clear();
