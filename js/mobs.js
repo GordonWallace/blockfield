@@ -199,6 +199,10 @@ const VILLAGER_OUTFITS = {
   cartographer:  { monocle: true, sash: 0x2a4a9a, trim: 0x2a4a9a },
   // explorer (16th, not vanilla): khaki field robe, wide brim hat, leather strap sash; seeks maps from the cartographer (js/explorer.js)
   explorer:      { robe: 0x8c7a4c, trim: 0x4a3a20, hat: { kind: "brim", color: 0x4a3c22, color2: 0x5c4a2a }, sash: 0x3a2a14 },
+  // forester (17th, not vanilla; from the villager-planter mod): forest-green robe, brown belt, leafy brim hat; plants saplings and fells trees (js/forester.js)
+  forester:      { robe: 0x2f6a2c, trim: 0x1f4a1e, hat: { kind: "brim", color: 0x2a5a26, color2: 0x3a7a34 }, sash: 0x4a3220 },
+  // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
+  furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
   // builder (15th): orange hi-vis vest with reflective band and straps, brown overalls, yellow hard hat, a hammer in hand
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
@@ -237,17 +241,21 @@ const MODELS = {
       ...quadLegs(4, 7, 12, 4, leg),
     ];
   },
-  sheep() {
-    const wool = 0xe9e9e6, skin = 0xd6c1a4;
-    const leg = (f, u, v) => (v >= 7 ? wool : skin);
+  sheep(variant) {
+    const wool = 0xe9e9e6, skin = 0xd6c1a4, shorn = variant === "shorn", pink = 0xdcb8a4;
+    const leg = (f, u, v) => (!shorn && v >= 7 ? wool : skin);
     const head = (f, u, v) => {
-      if (f === "front") { if (v >= 5) return wool; if (v === 3 && (u === 1 || u === 4)) return 0x1d1a16; return skin; }
-      if (f === "top" || f === "back") return wool;
+      if (f === "front") { if (!shorn && v >= 5) return wool; if (v === 3 && (u === 1 || u === 4)) return 0x1d1a16; return skin; }
+      if (!shorn && (f === "top" || f === "back")) return wool;
       if (f === "bottom") return skin;
-      return v >= 3 ? wool : skin;
+      return !shorn && v >= 3 ? wool : skin;
     };
+    // shorn: a smaller, pinker body (the wool shell is gone)
+    const body = shorn
+      ? box([-4.5, 12, -7], [4.5, 20, 7], (f, u, v) => (hash(u, v, 5, 7) < 0.25 ? 0xd2a692 : pink))
+      : box([-6, 11, -8], [6, 21, 8], (f, u, v) => (hash(u, v, 2, 7) < 0.2 ? 0xd4d4d0 : wool));
     return [
-      { name: "body", pivot: [0, 0, 0], boxes: [box([-6, 11, -8], [6, 21, 8], (f, u, v) => (hash(u, v, 2, 7) < 0.2 ? 0xd4d4d0 : wool))] },
+      { name: "body", pivot: [0, 0, 0], boxes: [body] },
       { name: "head", pivot: [0, 18, 7], head: true, boxes: [box([-3, -3, 0], [3, 4, 8], head)] },
       ...quadLegs(3, 5, 12, 4, leg),
     ];
@@ -481,7 +489,7 @@ const MODELS = {
 const TYPES = {
   pig:      { hostile: false, hp: 10, hw: 0.45, h: 0.9,  speed: 1.3, flee: 3.4, drops: [["raw_porkchop", 1, 3]] },
   cow:      { hostile: false, hp: 10, hw: 0.45, h: 1.4,  speed: 1.1, flee: 3.0, drops: [["raw_beef", 1, 3], ["leather", 0, 2]] },
-  sheep:    { hostile: false, hp: 8,  hw: 0.45, h: 1.3,  speed: 1.2, flee: 3.2, drops: [["wool", 1, 1], ["raw_mutton", 1, 2]] },
+  sheep:    { hostile: false, hp: 8,  hw: 0.45, h: 1.3,  speed: 1.2, flee: 3.2, drops: [["white_wool", 1, 1], ["raw_mutton", 1, 2]] },
   chicken:  { hostile: false, hp: 4,  hw: 0.2,  h: 0.75, speed: 1.1, flee: 3.0, drops: [["raw_chicken", 1, 1], ["feather", 0, 2]], slowFall: true },
   zombie:   { hostile: true,  hp: 20, hw: 0.3,  h: 1.95, speed: 2.2, attack: 3, burns: true, drops: [["rotten_flesh", 0, 2]] },
   skeleton: { hostile: true,  hp: 20, hw: 0.3,  h: 1.99, speed: 2.3, burns: true, drops: [["bone", 0, 2], ["arrow", 0, 2]] },
@@ -600,6 +608,7 @@ function removeMob(m) {
   if (scene) scene.remove(m.root);
   m.material.dispose();
   if (m.type === "villager" && !m.dead) { const k = villagerKey(m); if (k && m.inv) villagerSaves.set(k, BF.trades.pack(m)); }
+  if (m.sheep && m.sheep.mob === m) m.sheep.mob = null;   // pen sheep keep their state and respawn with the pen (js/shepherd.js)
   m.removed = true;
 }
 
@@ -673,6 +682,7 @@ function giveDrops(m) {
   const inv = BF.inventory;
   if (!inv || typeof inv.add !== "function") return;
   for (const [name, lo, hi] of m.def.drops || []) {
+    if (m.type === "sheep" && (m.lamb || (m.sheep && m.sheep.shorn)) && (name === "white_wool" || m.lamb)) continue;   // lambs drop nothing, shorn sheep no wool
     const id = (BF.I && BF.I[name] != null) ? BF.I[name] : (BF.B && BF.B[name]);
     if (id == null) continue;
     const n = irnd(lo, hi);
@@ -805,6 +815,7 @@ function waterAhead(m, dx, dz) {
   return isWater(BF.world.getBlock(x, y0, z)) || isWater(BF.world.getBlock(x, y0 - 1, z));
 }
 function pickWander(m, r) {
+  if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
   const a = Math.random() * Math.PI * 2, d = rnd(3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
   m.ai.tz = m.position.z + Math.sin(a) * d;
@@ -1042,7 +1053,7 @@ function walkCell(x, y, z) {
   if (!W.isLoaded(x, z) || y < BF.MIN_Y + 1 || y + 2 >= BF.H) return false;
   const fl = blockAt(x, y - 1, z), feet = blockAt(x, y, z), head = blockAt(x, y + 1, z);
   if (!fl.solid || fl.door || fl.bed || fl.model === "fence") return false;
-  return (!feet.solid || !!feet.door) && (!head.solid || !!head.door) && feet.render !== "liquid";
+  return (!feet.solid || !!feet.door || !!feet.gate) && (!head.solid || !!head.door) && feet.render !== "liquid";
 }
 // A* over walkable cells (4-way, step up 1, drop up to 3). goal(x, y, z) -> bool. Returns cells after start, or null.
 let planBudget = 0;
@@ -1066,7 +1077,7 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
       if (!walkCell(nx, ny, nz)) continue;
       if (dy > 0 && blockAt(x, y + 2, z).solid) break;            // no room to jump
       if (dy < 0 && blockAt(nx, y + 1, nz).solid) break;          // wall: cannot step off
-      const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door ? 1 : 0);
+      const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
       if (cost.has(k) && cost.get(k) <= ng) break;
       cost.set(k, ng); from.set(k, [x, y, z]);
       open.push([nx, ny, nz, ng, ng + hh(nx, nz)]);
@@ -1111,16 +1122,17 @@ function isOccupied(x, y, z) {
 function villagerDoors(m) {
   const ai = m.ai, W = BF.world;
   if (ai.route && !m.sleeping) for (let k = ai.ri; k < Math.min(ai.route.length, ai.ri + 2); k++) {
-    const [x, y, z] = ai.route[k], d = blockAt(x, y, z).door;
+    const [x, y, z] = ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
     if (d && !d.open && Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.7) {
-      W.setDoor(x, y, z, true);
+      if (bk.gate) W.setGate(x, y, z, true); else W.setDoor(x, y, z, true);
       (ai.doors || (ai.doors = [])).push([x, y, z]);
     }
   }
   if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(([x, y, z]) => {
     if (Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || isOccupied(x, y, z)) return true;
-    const d = blockAt(x, y, z).door;
-    if (d && d.open) W.setDoor(x, y, z, false);
+    const bk = blockAt(x, y, z);
+    if (bk.door && bk.door.open) W.setDoor(x, y, z, false);
+    else if (bk.gate && bk.gate.open) W.setGate(x, y, z, false);
     return false;
   });
 }
@@ -1235,24 +1247,33 @@ function villagerAI(m, dt, out) {
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
+  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
+  if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
+  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
+  // sized villages (village generator 2) reach far beyond the plaza: villagers living out there keep to their own neighbourhood
+  let ax = V ? V.x : 0, az = V ? V.z : 0;
+  if (V && V.pop && m.home && m.home.x != null) {
+    const hx = m.home.x + (m.home.w || 1) / 2, hz = m.home.z + (m.home.d || 1) / 2;
+    if (Math.hypot(hx - V.x, hz - V.z) > 28) { ax = hx; az = hz; }
+  }
   if (m.profession === "farmer" && V && ai.mode === "idle" && ai.t < 0.2 && Math.random() < 0.5 && BF.B.farmland != null) {
     for (let k = 0; k < 12; k++) {
-      const fx = Math.floor(V.x + rnd(-18, 18)), fz = Math.floor(V.z + rnd(-18, 18));
+      const fx = Math.floor(ax + rnd(-18, 18)), fz = Math.floor(az + rnd(-18, 18));
       if (!BF.world.isLoaded(fx, fz)) continue;
       const fy = BF.world.heightAt(fx, fz);
       if (fy > 0 && BF.world.getBlock(fx, fy, fz) === BF.B.farmland) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
     }
   }
   if (V) {
-    const dx = V.x - m.position.x, dz = V.z - m.position.z, d = Math.hypot(dx, dz);
-    if (d > 40) { // wandered too far: head back toward the centre
-      ai.mode = "walk"; ai.tx = V.x + rnd(-6, 6); ai.tz = V.z + rnd(-6, 6); ai.t = rnd(5, 8);
-    } else if (ai.mode === "walk" && Math.hypot(ai.tx - V.x, ai.tz - V.z) > 36) {
-      ai.tx = V.x + rnd(-20, 20); ai.tz = V.z + rnd(-20, 20);
+    const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
+    if (d > 40) { // wandered too far: head back toward the centre (or home)
+      ai.mode = "walk"; ai.tx = ax + rnd(-6, 6); ai.tz = az + rnd(-6, 6); ai.t = rnd(5, 8);
+    } else if (ai.mode === "walk" && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
+      ai.tx = ax + rnd(-20, 20); ai.tz = az + rnd(-20, 20);
     }
   }
   wanderAI(m, dt, out);
@@ -1292,7 +1313,12 @@ function golemAI(m, dt, out) {
   }
   // patrol near the village centre, slowly
   const V = m.village;
-  if (V && Math.hypot(V.x - m.position.x, V.z - m.position.z) > 14) { ai.mode = "walk"; ai.tx = V.x + rnd(-5, 5); ai.tz = V.z + rnd(-5, 5); ai.t = rnd(5, 8); }
+  let px = V ? V.x : 0, pz = V ? V.z : 0;
+  if (V && V.pop && V.houses && V.houses.length) {   // sized villages: each golem patrols around a house, moving on now and then
+    if (!m.patrol || Math.random() < dt / 90) { const h = V.houses[irnd(0, V.houses.length - 1)]; m.patrol = Math.random() < 0.3 || !h ? [V.x, V.z] : [h.x + (h.w || 1) / 2, h.z + (h.d || 1) / 2]; }
+    px = m.patrol[0]; pz = m.patrol[1];
+  }
+  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14) { ai.mode = "walk"; ai.tx = px + rnd(-5, 5); ai.tz = pz + rnd(-5, 5); ai.t = rnd(5, 8); }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;
 }
@@ -1339,7 +1365,9 @@ function updateMob(m, dt) {
     const a = Math.atan2(fz, fx) + Math.sin(ai.fleeJitter) * 0.8;
     _desired.x = Math.cos(a) * T.flee; _desired.z = Math.sin(a) * T.flee;
     m.lookAt = null;
-  } else wanderAI(m, dt, _desired);
+  } else if (m.type === "sheep" && BF.shepherd && BF.shepherd.sheepAI(m, dt, _desired)) { /* walking to a mate (js/shepherd.js) */ }
+  else wanderAI(m, dt, _desired);
+  if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
   if (m.removed) return; // exploded
 
   // ---- physics ----
@@ -1550,7 +1578,7 @@ function standable(x, y, z, hw, h) {
 }
 function countMobs() {
   let p = 0, h = 0;
-  for (const m of list) if (!m.dead && !m.def.village) { if (m.hostile) h++; else p++; }
+  for (const m of list) if (!m.dead && !m.def.village && !m.pen) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
   return { p, h };
 }
 function tryPassiveSpawn() {
@@ -1636,8 +1664,19 @@ function restockVillagers(dt) { // once per in-game day, never while someone is 
   restockT = 2;
   for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child) BF.trades.restock(m, BF.sky.day);
 }
-const VILLAGERS_PER_VILLAGE = 24;
+const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
+const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
+const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
+// A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
+// saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
+// "<village key>#<idx>" key) counts as new too: the save already holds that very villager.
+function freshVillage(key, slotKey) {
+  if (slotKey && villagerSaves.has(slotKey)) return true;
+  const pre = key + "#";
+  for (const k of villagerSaves.keys()) if (k.startsWith(pre)) return false;
+  return true;
+}
 function findStand(x, y, z, T) {
   x = Math.floor(x); z = Math.floor(z);
   const base = Math.floor(y);
@@ -1675,12 +1714,17 @@ function villageRoster(rec) {
   const special = slots.filter(sl => sl.house && SPECIAL_PROF[sl.house.type]);
   const rest = slots.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
-  const nBuilders = BF.builder ? (rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0) : 0;   // builders count toward the cap of 24
-  const ordered = special.concat(rest).slice(0, VILLAGERS_PER_VILLAGE - nBuilders);
+  const cap = rec.pop || VILLAGERS_PER_VILLAGE;   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
+  const nBuilders = BF.builder ? Math.min(rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0, Math.max(0, cap - 1)) : 0;   // builders count toward the cap
+  // foresters (own seeded stream, drawn first so their places are kept free: a full village used to leave none): ~95% of villages get one
+  let nF = 0;
+  if (BF.forester) { const rf = seededRand("foresters:" + rec.key); for (const p of FORESTER_CHANCE.slice(0, rec.nb >= 19 ? 2 : 1)) if (rf() < p) nF++; }
+  nF = Math.min(nF, Math.max(0, cap - nBuilders - 1));   // a tiny village still keeps one resident
+  const ordered = special.concat(rest).slice(0, cap - nBuilders - nF);
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -1701,8 +1745,34 @@ function villageRoster(rec) {
     const re = seededRand("explorers:" + rec.key);
     let nE = 0;
     for (const sl of ordered) if (sl.prof === "cartographer" && re() < EXPLORER_CHANCE) nE++;
-    nE = Math.min(nE, Math.max(0, VILLAGERS_PER_VILLAGE - ordered.length));
+    if (rec.pop) {
+      // a sized village has a bed for every villager, so the cap is always full: an explorer takes the place of the last shuffled
+      // resident who is not a cartographer or a special-building tradesperson (explorers sleep in their tents), keeping the 70%
+      for (let need = nE - (cap - nF - ordered.length), i = ordered.length - 1; need > 0 && i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.prof === "cartographer" || sl.prof === "builder" || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        ordered.splice(i, 1); need--;
+      }
+    }
+    nE = Math.min(nE, Math.max(0, cap - nF - ordered.length));
     for (let k = 0; k < nE; k++) ordered.push({ house: null, idx: 1100 + k, bed: null, prof: "explorer" });
+  }
+  // foresters: key range <village key>#1200+n (their places were reserved above, so the village never exceeds its cap)
+  for (let k = 0; k < nF; k++) ordered.push({ house: null, idx: 1200 + k, bed: null, prof: "forester" });
+  // furniture maker: a newly generated village with both a shepherd and a forester gets one with 80% probability (own seeded stream and key
+  // <village key>#1300, so nothing else shifts). In a classic village it may take the village one past the cap of 24; in a sized village
+  // it takes the place of the last plain resident (never the only shepherd), so the village keeps its size.
+  if (BF.furniture && ordered.some(sl => sl.prof === "shepherd") && ordered.some(sl => sl.prof === "forester") && freshVillage(rec.key, rec.key + "#1300")
+    && seededRand("furniture:" + rec.key)() < FURNITURE_CHANCE) {
+    if (rec.pop && ordered.length >= cap) {
+      const nShep = ordered.filter(sl => sl.prof === "shepherd").length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && nShep < 2) || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1300, bed: null, prof: "furniture_maker" });
   }
   return ordered;
 }
@@ -1721,8 +1791,10 @@ function updateVillages(dt) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
-    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: (v.buildings || []).length }; villages.set(key, rec); }
-    if (Math.hypot(v.x - pp.x, v.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
+    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); }
+    const away = v.pop ? Math.hypot(Math.max(0, v.minX - pp.x, pp.x - v.maxX), Math.max(0, v.minZ - pp.z, pp.z - v.maxZ)) > 24   // sized villages: near any part of it
+      : Math.hypot(v.x - pp.x, v.z - pp.z) > 80;
+    if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
     if (!BF.world.isLoaded(v.x, v.z)) continue;
     const loadedHouse = h => BF.world.isLoaded(h.x, h.z) && BF.world.isLoaded(h.x + (h.w || 1), h.z + (h.d || 1));
     rec.members = rec.members.filter(m => !m.removed);
@@ -1748,9 +1820,9 @@ function updateVillages(dt) {
       const sv = villagerSaves.get(villagerKey(m));
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
-      if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec);
+      if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
     }
-    const wantG = (rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);
+    const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {
       const gy = v.y != null ? v.y : BF.world.heightAt(v.x, v.z) + 1;
       const at = findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
@@ -1765,7 +1837,7 @@ function despawn(dt) {
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
     const d = m.position.distanceTo(pp);
-    const simmed = !!(m.village && BF.villageSim && BF.villageSim.isActive(m.village.key));   // villagers of a far simulated village stay
+    const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
     if ((d > DESPAWN_DIST && !simmed) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
     if (m.hostile && !m.dead && d > 48 && m.age > 20 && Math.random() < dt * 0.03) removeMob(m);
@@ -1831,6 +1903,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.tick(dt);   // villager meals, farm scans (js/villagelife.js)
     if (BF.jobs) BF.jobs.tick(dt);   // jobsite validation, unemployed villagers look for work (js/jobs.js)
     if (BF.breeding) BF.breeding.tick(dt);   // encounters, hearts, children (js/breeding.js)
+    if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     spawnT -= dt;
@@ -1874,17 +1947,23 @@ BF.mobs = {
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
     if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
+    if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
     return out;
   },
   importVillagers(o) {
     villagerSaves.clear();
+<<<<<<< HEAD
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 9) !== "farmbeds:") villagerSaves.set(k, o[k]);
+=======
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:") villagerSaves.set(k, o[k]);
+>>>>>>> origin/main
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
     if (BF.villageLife) BF.villageLife.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
+    if (BF.shepherd) BF.shepherd.importAll(o);
   },
   // Right-click on a mob (called by the player module). Opens the trade screen when the inventory module has one
   // (returns null); otherwise falls back to a simple 3 wheat -> 1 emerald trade and returns a message string.
@@ -1919,6 +1998,18 @@ BF.mobs = {
     if (on) { mob.vel.x = mob.vel.z = 0; mob.ai.mode = "idle"; mob.ai.t = 2; mob.lookAt = "player"; }
   },
   professions: PROFESSIONS,
+  // js/shepherd.js: swaps a sheep between its woolly and shorn model, and between lamb and adult size (k: 0 = newborn .. 1 = grown)
+  setSheepLook(m, shorn) {
+    if (!m || m.type !== "sheep" || !m.meshes) return;
+    for (const p of typeParts("sheep", shorn ? "shorn" : "")) if (m.meshes[p.name]) { m.meshes[p.name].geometry = p.geo; m.meshes[p.name].userData.part = p; }
+  },
+  setSheepSize(m, k) {
+    if (!m || m.type !== "sheep") return;
+    const s = 0.55 + 0.45 * k, hs = 1.35 + (1 - 1.35) * k;
+    m.model.scale.setScalar(s);
+    if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
+    m.halfWidth = TYPES.sheep.hw * (0.5 + 0.5 * k); m.height = TYPES.sheep.h * (0.55 + 0.45 * k);
+  },
   // js/jobs.js: the deterministic roster of a village record ({key, houses, nb}) and in-place profession change (rebuilds the outfit)
   roster: villageRoster,
   setProfession(m, prof) {
@@ -1951,6 +2042,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.reset();
     if (BF.jobs) BF.jobs.reset();
     if (BF.villageSim) BF.villageSim.reset();
+    if (BF.shepherd) BF.shepherd.reset();
   },
 };
 })();
