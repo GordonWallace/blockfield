@@ -606,9 +606,9 @@ function climate3(x, z) {
   if (rl > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
     const rs = Math.max(SEA, Math.floor(RV.rs)), sd = RV.sd, w = RV.w;
     let hr;
-    if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - 3.2 * (1 - q * q); }
+    if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - (3.2 + Math.min(4, Math.max(0, w - 7) * 0.15)) * (1 - q * q); }   // wide rivers run a little deeper
     else hr = rs + 1.4 + smooth(0, 14, sd) * 1.5;
-    const vw = Math.min(BF.rivers.REACH - w - 3, Math.max(27, (h > hr ? h - hr : 1.6 * (hr - h)) * 1.4));
+    const vw = Math.min(BF.rivers.REACH - 3, Math.max(27, (h > hr ? h - hr : 1.6 * (hr - h)) * 1.4));
     const fp = (1 - smooth(w + 3, w + 3 + vw, RV.d)) * rl;
     if (!(h < SEA - 1 && hr > h)) h = h + (hr - h) * fp;     // never raise the sea floor (outlets run on into open water)
     if (sd < 0 && fp > 0.9) { chan = true; wl = rs; if (h > rs - 1) h = rs - 1; }
@@ -1353,11 +1353,14 @@ function drawShell(b, P, S, style) {
       return;
     }
     case "house2": {
-      // two storeys: upper floor with a stair-hole, log band between storeys
+      // two storeys: upper floor with a hatch in the middle of the back wall and a ladder up to it, log band between storeys
+      const lu = w >> 1;                                   // ladder column: between the two beds, straight back from the door
       box(P, S, 0, 0, w, d, y, 7, S.wall, S.floor);
-      for (let q = 1; q < d - 1; q++) for (let u = 1; u < w - 1; u++) if (!(u === w - 2 && q === d - 2)) P(u, y + 4, q, S.floor);
+      for (let q = 1; q < d - 1; q++) for (let u = 1; u < w - 1; u++) if (!(u === lu && q === d - 2)) P(u, y + 4, q, S.floor);
       for (let q = 1; q < d - 1; q++) { P(0, y + 4, q, S.log); P(w - 1, y + 4, q, S.log); }
       windows(P, 0, 0, w, d, y + 2, true); windows(P, 0, 0, w, d, y + 6, false); P(1, y + 6, 0, B.glass); P(w - 2, y + 6, 0, B.glass);
+      P(lu, y + 2, d - 1, S.wall);                         // no window behind the ladder (ladders need a solid wall)
+      for (let k = 1; k <= 5; k++) P(lu, y + k, d - 2, BF.ladderId(out));   // against the back wall, one rung above the upper floor to step off
       if (flat) flatRoof(P, 0, 0, w, d, y + 8, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 7, S.wall, S.roof);
       door();
       P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, B.chest);
@@ -2191,7 +2194,7 @@ BF.worldgen = {
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
     if (GEN >= 3) placeHome3();
-    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, outlet: 260, mouth: -2, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
+    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,

@@ -1096,6 +1096,8 @@ function hook() {
   BF.on("mobKilled", m => { if (m && !m.exploded) mobSound(m, "death"); });
   BF.on("mobExploded", (m, c) => { const p = c || (m && m.position); if (p) play("explode", { x: p.x, y: p.y, z: p.z }); });
   BF.on("arrowShot", (m, from) => { const p = from || (m && m.position); if (p) play("bow", { x: p.x, y: p.y, z: p.z }); });
+  BF.on("chestOpened", (x, y, z) => play("door_open", { x: x + 0.5, y: y + 0.5, z: z + 0.5, pitch: 0.72, volume: 0.8 }));   // a lower, heavier creak
+  BF.on("chestClosed", (x, y, z) => play("door_close", { x: x + 0.5, y: y + 0.5, z: z + 0.5, pitch: 0.75, volume: 0.8 }));
   BF.on("doorBroken", (m, x, y, z) => { play("door_bash", { x: x + 0.5, y: y + 1, z: z + 0.5 }); play("dig.wood", { x: x + 0.5, y: y + 1, z: z + 0.5 }); });
   BF.on("villagerTrade", v => { if (v && v.position) play("villager_yes", Object.assign(mobPos(v), { pitch: vpitch(v) })); play("xp", { volume: 0.7 }); });
   BF.on("villagerLevelUp", () => play("levelup", { delay: 0.15 }));

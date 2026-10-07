@@ -245,6 +245,7 @@ world.setBlock = function (x, y, z, id) {
   scheduleFluid(x, y, z, true);
   if (BF.light) { BF.light.onSet(x, y, z, oldId, id); BF.light.popUnsupported(x, y, z, id); } // block light + torches losing support
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
+  if (oldId === BF.B.chest && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
   if (BF.blocks[id] && BF.blocks[id].growsInto) growing.add(fkey(x, y, z));
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {
@@ -1002,7 +1003,7 @@ world.setDoor = function (x, y, z, open) {
   if (!d) return null;
   if (open == null) open = !d.open;
   const by = d.upper ? y - 1 : y;
-  for (const up of [0, 1]) if (BF.blocks[world.getBlock(x, by + up, z)].door) world.setBlock(x, by + up, z, BF.doorId(d.f, up, open));
+  for (const up of [0, 1]) if (BF.blocks[world.getBlock(x, by + up, z)].door) world.setBlock(x, by + up, z, BF.doorId(d.f, up, open, d.wood));
   return open;
 };
 
@@ -1011,7 +1012,7 @@ world.setGate = function (x, y, z, open) {
   const g = BF.blocks[world.getBlock(x, y, z)].gate;
   if (!g) return null;
   if (open == null) open = !g.open;
-  if (open !== g.open) world.setBlock(x, y, z, BF.gateId(g.axis, open));
+  if (open !== g.open) world.setBlock(x, y, z, BF.gateId(g.axis, open, g.wood));
   return open;
 };
 

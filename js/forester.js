@@ -525,5 +525,5 @@ function statusText(m) {
   return holdsSapling(m) ? "has saplings to plant" : "looking for saplings";
 }
 
-BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, _test: { fell, plantAt, growTick, findDrop, state, builtBlock } };
+BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, fell, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, _test: { fell, plantAt, growTick, findDrop, state, builtBlock } };
 })();

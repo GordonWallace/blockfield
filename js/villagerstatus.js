@@ -1,5 +1,5 @@
 // Villager status line for the trade screen ("Farmer — Harvesting Wheat"). Every villager has one: the specialised modules
-// (food, farming and shepherds, builders, explorers, foresters, furniture makers) speak first, then this falls back on what the villager's everyday AI is doing.
+// (food, farming and shepherds, builders, explorers, foresters, furniture makers, miners) speak first, then this falls back on what the villager's everyday AI is doing.
 // API: BF.villagerStatus = { text(m) }
 (() => {
 "use strict";
@@ -39,6 +39,7 @@ function text(m) {
     || (BF.explorer ? BF.explorer.statusText(m) : "")                          // mapping (js/explorer.js)
     || (BF.forester ? BF.forester.statusText(m) : "")                          // felling, planting, sawing (js/forester.js)
     || (BF.furniture ? BF.furniture.statusText(m) : "")                        // making beds (js/furniture.js)
+    || (BF.miner ? BF.miner.statusText(m) : "")                                // quarrying, digging the mineshaft, selling stone (js/miner.js)
     || routine(m);
   return cap(s);
 }

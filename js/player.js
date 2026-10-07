@@ -903,11 +903,11 @@ const THROW_SPEED = 6, THROW_LIFT = 1.5, THROW_PICKUP_DELAY = 2;
 function throwSelected() {
   const sel = selectedItem();
   if (!sel || !BF.drops || !inv().consumeSelected) return;
-  const id = sel.id;
+  const id = sel.id, wear = sel.wear || 0;
   try { if (!(inv().consumeSelected(1) > 0)) return; } catch (e) { console.error(e); return; }
   const d = dirVec(), e = eyeVec();
   const vel = d.clone().multiplyScalar(THROW_SPEED); vel.y += THROW_LIFT;
-  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY });
+  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY, wear });
   emit("itemThrown", id);
 }
 
@@ -928,6 +928,7 @@ function tryAttack() {
   d.normalize();
   if (sprinting) { d.multiplyScalar(1.6); sprinting = false; }
   try { BF.mobs.hit(m.mob, dmg, d); } catch (e) { console.error(e); }
+  if (it && it.tool) wearHeld(it.tool.type === "sword" ? 1 : 2);   // a sword wears 1 use per hit, other tools 2 (Minecraft)
   exhaustion += 0.1;
   return true;
 }
@@ -938,21 +939,45 @@ function primaryDown() {
 }
 function resetBreak() { breakTarget = null; breakProgress = 0; if (crackMesh) crackMesh.visible = false; if (BF.cracks) BF.cracks.hide(); }
 
-function heldTool() { const sel = selectedItem(), it = sel && BF.items[sel.id]; return (it && it.tool) || null; }
-function breakTime(block) {
-  if (!isFinite(block.hardness)) return Infinity;
-  const tool = heldTool();
-  let t = block.hardness;
-  if (tool && block.tool && tool.type === block.tool && (tool.tier || 0) >= (block.minTier || 0)) t /= tool.speed || 1;
-  else if (block.needsTool) t *= 5;
-  if (tool && tool.type === "sword" && block.tool === "shears") t /= 1.5;
-  return t;
+// Wears the held tool (js/blocks.js BF.wearStack, survival only); a used-up tool breaks with a message and a clink.
+function wearHeld(n) {
+  try {
+    const sel = selectedItem();
+    if (!sel || !inv().wearSelected || inv().wearSelected(n) !== "broken") return;
+    actionBar("Your " + BF.itemName(sel.id) + " broke");
+    if (BF.audio) BF.audio.play("dig.metal", { pitch: 1.5 });
+  } catch (e) { console.error(e); }
 }
-function canHarvest(block) {
+function heldTool() { const sel = selectedItem(), it = sel && BF.items[sel.id]; return (it && it.tool) || null; }
+// Vanilla Minecraft mining: each tick deals speed / hardness / (30 if the block will drop, else 100) of a block; it breaks
+// once that adds up to 1 (a full block in one tick breaks instantly). speed is the tool's (wood 2, stone 4, iron 6, diamond 8)
+// when it is the block's tool type, whatever its tier; a too-low tier still mines at that speed but drops nothing.
+// Shears (leaves 15, wool 5) and swords (leaves, pumpkins, melons 1.5) have their own speeds. Mining with the head under
+// water or with the feet off the ground is 5x slower each.
+function toolSpeed(block, tool) {
+  if (!tool) return 1;
+  if (tool.type === "shears" && block.shearSpeed) return block.shearSpeed;
+  if (tool.type === "sword" && block.swordSpeed) return block.swordSpeed;
+  return block.tool && tool.type === block.tool ? tool.speed || 1 : 1;
+}
+// slow: the extra divisor (5 head under water, x5 feet off the ground).
+function mineSeconds(block, tool, slow) {
+  if (!block || !isFinite(block.hardness)) return Infinity;
+  if (block.hardness <= 0) return 0;
+  const perTick = toolSpeed(block, tool) / (slow || 1) / block.hardness / (harvestsWith(block, tool) ? 30 : 100);
+  return perTick >= 1 ? 0 : Math.ceil(1 / perTick) / 20;
+}
+function harvestsWith(block, tool) {
   if (!block.needsTool) return true;
-  const tool = heldTool();
   return !!(tool && tool.type === block.tool && (tool.tier || 0) >= (block.minTier || 0)); // minTier: 1 wood, 2 stone, 3 iron, 4 diamond
 }
+function breakTime(block) { return mineSeconds(block, heldTool(), (headInWater ? 5 : 1) * (!onGround && !flying ? 5 : 1)); }
+function canHarvest(block) { return harvestsWith(block, heldTool()); }
+// For tests and villagers: seconds to mine block id `blockId` with item id `itemId` (null = bare hand) standing on dry ground,
+// and whether that drops anything.
+const toolOf = itemId => (itemId != null && BF.items[itemId] && BF.items[itemId].tool) || null;
+P.mineSeconds = (blockId, itemId) => mineSeconds(BF.blocks[blockId], toolOf(itemId), 1);
+P.minedDrops = (blockId, itemId) => !!BF.blocks[blockId] && harvestsWith(BF.blocks[blockId], toolOf(itemId));
 
 function updateBreaking(dt) {
   if (breakCd > 0) breakCd -= dt;
@@ -972,15 +997,18 @@ function updateBreaking(dt) {
     spawnParticles(x, y, z, id);
     if (!creative() && canHarvest(b)) {
       try {
-        const drops = BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
+        const tool = heldTool();
+        const drops = b.shearSelf && tool && tool.type === "shears" ? [{ id, count: 1 }]   // shearing leaves drops the leaves
+          : BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
         if (BF.drops) BF.drops.spawnAt(drops, x, y, z);
         else for (const d of drops || []) if (d && d.id != null && d.count > 0 && inv().add) inv().add(d.id, d.count);
       } catch (e) { console.error(e); }
     }
     exhaustion += 0.005;
+    if (b.hardness > 0) wearHeld(heldTool() && heldTool().type === "sword" ? 2 : 1);   // tools wear 1 use per block, swords 2 (Minecraft)
     emit("blockBroken", x, y, z, id);
     resetBreak();
-    breakCd = 0.2;   // also the creative repeat interval while held
+    breakCd = t === 0 && !creative() ? 0.05 : 0.25;   // vanilla: 5 ticks after a break (also the creative repeat), 1 tick for instant breaks
     target = null; outline.visible = false;
     return;
   }
@@ -1025,19 +1053,19 @@ function actionBar(text) {
 // ---------- doors and beds ----------
 const lookFacing = () => BF.dirIndex(-Math.sin(yaw), -Math.cos(yaw));
 const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c === 0 || BF.RENDER[c] === 3 || !!BF.REPLACEABLE[c]) && !cellBlockedByEntity(x, y, z); };
-// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z).
-function placeMulti(kind, x, y, z) {
+// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z). wood: species of a door / fence gate item.
+function placeMulti(kind, x, y, z, wood) {
   const W = BF.world, f = lookFacing();
   if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
   if (kind === "gate") {   // fence gate: spans across the player's view
     if (!(y < BF.H && W.isLoaded(x, z) && freeCell(x, y, z))) return false;
-    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0);
+    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0, wood);
     W.setBlock(x, y, z, id); emit("blockPlaced", x, y, z, id);
     return true;
   }
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
-  if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0)]];
+  if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0, wood)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0, wood)]];
   else {
     const hx = x + BF.DIRS[f][0], hz = z + BF.DIRS[f][1];
     if (!BF.SOLID[W.getBlock(hx, y - 1, hz)]) return false;
@@ -1166,7 +1194,7 @@ function secondaryDown() {
   }
   if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
     const r = BF.shepherd.playerUse(mh.mob, selectedItem());
-    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+    if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
@@ -1176,6 +1204,9 @@ function secondaryDown() {
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (target && target.id === BF.B.furnace && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
+  }
+  if (target && target.id === BF.B.chest && useBlk) {
+    openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
   }
   if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
   const sel = selectedItem(); if (!sel) return false;
@@ -1187,6 +1218,7 @@ function secondaryDown() {
     const { x, y, z, id } = target;
     if (!BF.world.setBlock(x, y, z, BF.B.farmland)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
+    wearHeld(1);
     emit("blockPlaced", x, y, z, BF.B.farmland);
     placeCd = PLACE_REPEAT;
     return true;
@@ -1197,6 +1229,7 @@ function secondaryDown() {
     const { x, y, z, id } = target, nid = BF.B["stripped_" + BF.blocks[id].name];
     if (!BF.world.setBlock(x, y, z, nid)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
+    wearHeld(1);
     emit("blockPlaced", x, y, z, nid);
     placeCd = PLACE_REPEAT;
     return true;
@@ -1238,7 +1271,7 @@ function secondaryDown() {
   if (it.places && target) {
     const into = BF.REPLACEABLE && BF.REPLACEABLE[target.id];
     const x = into ? target.x : target.x + target.normal[0], y = into ? target.y : target.y + target.normal[1], z = into ? target.z : target.z + target.normal[2];
-    if (!placeMulti(it.places, x, y, z)) return false;
+    if (!placeMulti(it.places, x, y, z, it.wood)) return false;
     try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing();
     placeCd = PLACE_REPEAT;
@@ -1584,6 +1617,7 @@ P.menu = () => menuOpen;
 P.respawn = respawn;
 P.setGameMode = setGameMode;
 // commands.js hooks: an overlay that takes the keyboard (releases the pointer lock without pausing, then re-locks)
+P.screenOpen = () => !!menuOpen || invOpen();   // any menu or in-game screen; main.js fades the debug panels behind it (new screens: add them to invOpen)
 P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
 P.actionBar = actionBar;
 P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };

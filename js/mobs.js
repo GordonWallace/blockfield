@@ -201,6 +201,8 @@ const VILLAGER_OUTFITS = {
   explorer:      { robe: 0x8c7a4c, trim: 0x4a3a20, hat: { kind: "brim", color: 0x4a3c22, color2: 0x5c4a2a }, sash: 0x3a2a14 },
   // forester (17th, not vanilla; from the villager-planter mod): forest-green robe, brown belt, leafy brim hat; plants saplings and fells trees (js/forester.js)
   forester:      { robe: 0x2f6a2c, trim: 0x1f4a1e, hat: { kind: "brim", color: 0x2a5a26, color2: 0x3a7a34 }, sash: 0x4a3220 },
+  // miner (not vanilla): slate work robe, leather apron, dark hard hat with a lamp, a pickaxe in hand; mines cobblestone (js/miner.js)
+  miner:         { robe: 0x4a4c54, trim: 0x2e3036, apron: 0x6b4a2a, sash: 0xd8a83a, pickaxe: true, hat: { kind: "hard", color: 0x3c3e44, color2: 0x2e3036, lamp: true } },
   // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
   furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
@@ -403,6 +405,7 @@ const MODELS = {
       else if (H.kind === "bucket") { headBoxes.push(box([-5, 8, -5], [5, 9, 5], c), box([-4.3, 9, -4.3], [4.3, 12, 4.3], c2)); }
       else if (H.kind === "hard") {
         headBoxes.push(box([-4.5, 9, -4.5], [4.5, 12, 4.5], c), box([-4.5, 9.5, 4.5], [4.5, 10.5, 6.8], c2), box([-0.9, 12, -4.5], [0.9, 13, 4.5], c2));
+        if (H.lamp) headBoxes.push(box([-1.2, 10, 4.5], [1.2, 12, 5.6], 0x2a2a2e), box([-0.8, 10.4, 5.6], [0.8, 11.6, 5.8], 0xfff2a8));   // miner's lamp
       }
       else if (H.kind === "feather") {
         headBoxes.push(box([-4.3, 9, -4.3], [4.3, 11, 4.3], c), box([-4.6, 8.5, -4.6], [4.6, 9.2, 4.6], c2));
@@ -420,6 +423,7 @@ const MODELS = {
         box([-6, -3, -2], [-4, 3, 6], robeC),
         box([4, -3, -2], [6, 3, 6], robeC),
         box([-2, -2, 6], [2, 2, 6.5], skin),
+        ...(O.pickaxe ? [box([2.2, -7, 5.6], [3.4, 3, 6.8], 0x5a3f26), box([-1.8, 3, 5.6], [7.4, 4.4, 6.8], (f, u, v) => (v === 0 ? 0x707078 : 0xb0b0b8))] : []),
         ...(O.hammer ? [box([2.2, -7, 5.6], [3.4, 2.5, 6.8], 0x7a5530), box([1.0, 2.5, 5.0], [4.6, 5.5, 7.4], (f, u, v) => (v === 0 ? 0x5a5a62 : 0x8e8e98))] : []),
       ] },
       { name: "legL", pivot: [-2, 12, 0], swing: 1, boxes: [box([-2, -12, -2], [2, 0, 2], (f, u, v) => (v < 1 ? 0x3a2a1c : trimC))] },
@@ -1012,7 +1016,7 @@ function zombieHuntVillagers(m, dt, out) {
   return false;
 }
 
-// Zombies with a target that stay pressed against a closed door for 3 s break it (both halves, one oak_door drops).
+// Zombies with a target that stay pressed against a closed door for 3 s break it (both halves, one door of its wood drops).
 function zombieBreakDoor(m, dt, out) {
   const ai = m.ai, W = BF.world;
   let hit = null;
@@ -1252,7 +1256,7 @@ function villagerAI(m, dt, out) {
   }
   // flee nearby zombies
   ai.zScanT = (ai.zScanT || 0) - dt;
-  if (ai.zScanT <= 0) { ai.zScanT = 0.5; ai.threat = nearestMob(m, 8, o => o.type === "zombie"); }
+  if (ai.zScanT <= 0) { ai.zScanT = 0.5; ai.threat = nearestMob(m, 8, o => o.type === "zombie" && hasLineOfSight(m, new THREE.Vector3(o.position.x, o.position.y + o.height * 0.85, o.position.z))); }   // not through rock: a miner would flee a zombie in a cave beside its tunnel all day
   if (ai.threat && !ai.threat.dead && !ai.threat.removed) ai.fleeT = Math.max(ai.fleeT, 1);
   if (ai.fleeT > 0) {
     ai.fleeT -= dt;
@@ -1275,6 +1279,7 @@ function villagerAI(m, dt, out) {
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
+  if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
@@ -1692,6 +1697,7 @@ const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages 
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
 const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
 const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
+const MINER_CHANCE = 0.95;     // newly generated villages (js/miner.js)
 // A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
 // saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
 // "<village key>#<idx>" key) counts as new too: the save already holds that very villager.
@@ -1748,7 +1754,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -1797,6 +1803,20 @@ function villageRoster(rec) {
       }
     }
     if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1300, bed: null, prof: "furniture_maker" });
+  }
+  // miner: ~95% of newly generated villages (own seeded stream and key <village key>#1400, so nothing else shifts; villages the player already
+  // knows keep their people). In a classic village it may take the village one past the cap; in a sized village it takes the place of the
+  // last plain resident, so the village keeps its size.
+  if (BF.miner && freshVillage(rec.key, rec.key + "#1400") && seededRand("miner:" + rec.key)() < MINER_CHANCE && cap >= 3) {
+    if (rec.pop && ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1400, bed: null, prof: "miner" });
   }
   return ordered;
 }
@@ -1970,6 +1990,7 @@ BF.mobs = {
     for (const [k, v] of villagerSaves) out[k] = v;
     for (const m of list) if (m.type === "villager" && !m.dead && m.inv) { const k = villagerKey(m); if (k) out[k] = BF.trades.pack(m); }
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
+    if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
@@ -1977,9 +1998,10 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:") villagerSaves.set(k, o[k]);
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
+    if (BF.villageLife) BF.villageLife.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
