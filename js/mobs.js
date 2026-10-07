@@ -677,6 +677,10 @@ function kill(m, byPlayer) {
   m.ai.fuse = 0;
   if (m.fire) m.fire.visible = false;
   if (m.village) m.village.killed[m.type] = (m.village.killed[m.type] || 0) + 1;
+  if (m.village && m.type === "villager" && m.slot && !m.bred) {   // a roster villager: its slot stays empty for good (saved, see exportVillagers)
+    deadSlots(m.village).add(m.slot.idx);
+    const k = villagerKey(m); if (k) villagerSaves.delete(k);
+  }
   if (m.type === "creeper") m.model.scale.set(1, 1, 1);
   if (byPlayer || (m.def.golem && BF.drops)) giveDrops(m);   // a golem drops its iron whatever killed it
   if (BF.emit) BF.emit("mobKilled", m);
@@ -1681,8 +1685,17 @@ function tryHostileSpawn() {
 // ---------- villages ----------
 // Villages come from BF.worldgen.villagesNear (optional). Each is tracked once by its centre so villagers are
 // not duplicated; villagers/golems removed by chunk unloading are replaced when the village loads again,
-// but killed ones stay dead.
+// but killed ones stay dead: rec.dead holds the roster slots of killed villagers (saved as "dead:<village key>").
 const villages = new Map();
+const pendingDead = new Map();   // village key -> {v: [slot idx]} from a loaded save, applied when the record appears
+function deadSlots(rec) { return rec.dead || (rec.dead = new Set()); }
+function applyDead(rec) {
+  const d = pendingDead.get(rec.key);
+  if (!d) return;
+  pendingDead.delete(rec.key);
+  for (const i of d.v || []) if (Number.isFinite(+i)) deadSlots(rec).add(+i);
+  if (rec.dead) rec.killed.villager = Math.max(rec.killed.villager || 0, rec.dead.size);
+}
 let villageT = 0;
 // Villager trading state by stable key (village "x,z" + roster slot index): kept while unloaded and saved with the world.
 const villagerSaves = new Map();
@@ -1836,7 +1849,7 @@ function updateVillages(dt) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
-    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); }
+    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); applyDead(rec); }
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - pp.x, pp.x - v.maxX), Math.max(0, v.minZ - pp.z, pp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - pp.x, v.z - pp.z) > 80;
     if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
@@ -1845,13 +1858,14 @@ function updateVillages(dt) {
     rec.members = rec.members.filter(m => !m.removed);
     const alive = t => rec.members.filter(m => m.type === t && !m.dead && !m.bred).length;   // newborns (js/breeding.js) are not roster slots
     if (!rec.roster) rec.roster = villageRoster(rec);
-    const wantV = rec.roster.length - (rec.killed.villager || 0);
+    const dead = deadSlots(rec);
+    const wantV = rec.roster.filter(sl => !dead.has(sl.idx)).length;
     let haveV = alive("villager");
     if (rec.style == null) rec.style = typeof v.style === "number" ? v.style : styleAt(v.x, v.z);
     const taken = new Set(rec.members.filter(m => m.type === "villager" && !m.dead).map(m => m.slot));
     for (const sl of rec.roster) {
       if (haveV >= wantV) break;
-      if (taken.has(sl)) continue;
+      if (taken.has(sl) || dead.has(sl.idx)) continue;   // never respawn a killed villager in place of a living one
       const H = sl.house;
       if (H && !loadedHouse(H)) continue;
       const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
@@ -1996,11 +2010,20 @@ BF.mobs = {
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
+    for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers}
+    for (const rec of villages.values()) {
+      const v = rec.dead ? [...rec.dead] : [];
+      if (v.length) out["dead:" + rec.key] = { v };
+      for (const i of v) delete out[rec.key + "#" + i];
+    }
     return out;
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 5) !== "dead:") villagerSaves.set(k, o[k]);
+    pendingDead.clear();
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [] });
+    for (const rec of villages.values()) applyDead(rec);
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
     if (BF.villageLife) BF.villageLife.importAll(o);
@@ -2081,6 +2104,7 @@ BF.mobs = {
     puffs.length = 0;
     villages.clear();
     villagerSaves.clear();
+    pendingDead.clear();
     if (BF.builder) BF.builder.reset();
     if (BF.villageLife) BF.villageLife.reset();
     if (BF.jobs) BF.jobs.reset();
