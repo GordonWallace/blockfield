@@ -1,7 +1,7 @@
 // Miners (BF.miner): a villager profession (not vanilla) that digs cobblestone out of the ground for the village and sells it to builders.
-// - Roster: ~95% of newly generated villages get one (mobs.js villageRoster, own seeded stream and key <village key>#1400). Jobsite: the mining
+// - Roster: ~95% of newly generated villages get one (every one with village generator 3) (mobs.js villageRoster, own seeded stream and key <village key>#1400). Jobsite: the mining
 //   bench (jobs.js), placed in or beside a house like the forester's band saw.
-// - Tools: it starts with an iron pickaxe, which wears out like the player's (BF.wearStack: 1 use per block, 250 uses for iron). Digging speed
+// - Tools: a founding miner starts with a wooden pickaxe and 30-40 torches (one hired later: torches and emeralds only, trading.js hireKit). The pickaxe wears out like the player's (BF.wearStack: 1 use per block, 250 uses for iron). Digging speed
 //   follows the pickaxe's material (blocks.js tool.speed, the player's formula times VILLAGER_SLOW). When the pickaxe breaks it buys a new one
 //   from a toolsmith of its village (emeralds permitting), else crafts a stone pickaxe from 3 cobblestone + 2 sticks (sticks from planks).
 // - Surface stone first: it looks for above-ground stone within SEARCH (40) blocks of the village's box: the top block of a column that is
@@ -72,12 +72,9 @@ function digTime(id, p) {
 }
 const canHarvest = (id, p) => { const b = BF.blocks[id]; if (!b || !b.needsTool) return true; const tool = p && BF.items[p.id].tool; return !!(tool && tool.type === b.tool && (tool.tier || 0) >= (b.minTier || 0)); };
 
-// Starting pack (trading.js stockFor): an iron pickaxe, torches for the shaft and sticks for a spare stone pickaxe.
+// Starting pack (trading.js stockFor, which adds the wooden pickaxe): 30-40 torches for the shaft.
 function seed(a) {
-  const T = TR().inv;
-  if (I("iron_pickaxe") != null && !a.some(s => s && isPick(s.id))) T.add(a, I("iron_pickaxe"), 1);
-  if (I("torch") != null) T.add(a, I("torch"), 16);
-  if (I("stick") != null) T.add(a, I("stick"), 6);
+  if (I("torch") != null) TR().inv.add(a, I("torch"), 30 + Math.floor(Math.random() * 11));
 }
 
 // ---------------------------------------------------------------- block classes

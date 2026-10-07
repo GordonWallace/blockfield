@@ -227,13 +227,14 @@ function ids() {
 const cnt = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
 const hasHoe = m => BF.toolWear.has(m, "hoe");   // any hoe, gold included (js/toolwear.js)
 const isLogBlock = id => { const b = BF.blocks[id]; return !!b && /_log$/.test(b.name) && !/^stripped_/.test(b.name); };
-// A new farmer gets an empty bucket (and a hoe), a new builder an empty bucket: water is only ever placed from a bucket that was filled first.
+// A new farmer or builder gets an empty bucket: water is only ever placed from a bucket that was filled first. Nobody sells buckets, so a farmer
+// hired after its village was generated gets one too. The farmer's hoe is not part of this: a founding farmer starts with a wooden one
+// (trading.js stockFor), any other buys one (toolAI below).
 function ensureKit(m) {
   if (!m || !Array.isArray(m.inv) || (m.profession !== "farmer" && m.profession !== "builder") || m.kitFor === m.profession) return;
   m.kitFor = m.profession;
   const c = ids(), Tinv = TR().inv;
   if (c.bucket != null && cnt(m, c.bucket) + cnt(m, c.wbucket) === 0) Tinv.add(m.inv, c.bucket, 1);
-  if (m.profession === "farmer" && c.hoes.length && !hasHoe(m)) Tinv.add(m.inv, c.hoes[Math.min(1, c.hoes.length - 1)], 1);
 }
 const key3 = (x, y, z) => x + "," + y + "," + z;
 const getB = (x, y, z) => W().getBlock(x, y, z);
@@ -1202,6 +1203,45 @@ function doFoodDeal(m, deal) {
   }
   return done;
 }
+// ---------------------------------------------------------------- tools: a farmer without a hoe, a shepherd without shears
+// They buy one from whoever in the village sells it (the toolsmith, as a rule) at that villager's own offer: the best tool they can pay for,
+// the nearer seller when two are as good. A villager hired after its village was generated starts with only the emeralds for it (trading.js hireKit).
+const TOOL_NEED = { farmer: /_hoe$/, shepherd: /^shears$/ };
+function toolNeed(m) {
+  const re = TOOL_NEED[m.profession];
+  if (!re || m.child) return null;
+  for (const s of m.inv) if (s && re.test(BF.items[s.id].name)) return null;
+  return re;
+}
+function findToolSeller(m, re) {
+  const R = m.village, T = TR(), now = dayNow(), avoid = (m.fshop && m.fshop.avoid) || {};
+  if (!R) return null;
+  let best = null, bs = -Infinity;
+  for (const v2 of R.members || []) {
+    if (v2 === m || !canSell(v2) || !Array.isArray(v2.trades) || (avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
+    for (const o of v2.trades) {
+      const it = BF.items[o.sell.id];
+      if (!it || !re.test(it.name) || T.blockReason(v2, o)) continue;
+      if (!o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
+      const sc = ((it.tool && it.tool.tier) || 0) * 1000 - v2.position.distanceTo(m.position);
+      if (sc > bs) { bs = sc; best = { kind: "tool", seller: v2, offer: o, item: o.sell.id }; }
+    }
+  }
+  return best;
+}
+function doToolDeal(m, deal) {
+  const T = TR(), v2 = deal.seller, o = deal.offer;
+  if (!canSell(v2) || !toolNeed(m) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return 0;
+  if (!T.exchange(v2, o)) return 0;
+  for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
+  T.inv.add(m.inv, o.sell.id, o.sell.n);
+  T.addXp(v2, o);
+  if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
+  log("buyTool", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
+  if (BF.emit) BF.emit("villagerToolTrade", m, v2, o.sell.id);
+  return 1;
+}
+
 // ---------------------------------------------------------------- wheat for the shepherds (js/shepherd.js)
 // A shepherd short of wheat buys it from the village (farmers first) at the fair price: 1 emerald buys ~90% of an emerald's worth.
 function wheatDealWith(m, v2, want) {
@@ -1251,8 +1291,9 @@ function shopAI(m, dt, out) {
     const hasEm = cnt(m, ids().em) >= 1;
     const hungry = hasEm && F.available(m) < F.rate(m);
     const wheat = hasEm && m.profession === "shepherd" && !!BF.shepherd && BF.shepherd.wheatWanted(m) > 0;
-    if (sh.cd > now || m.child || !(hungry || wheat)) return false;
-    const deal = (hungry && findFoodSeller(m)) || (wheat && findWheatSeller(m)) || null;
+    const tool = hasEm && toolNeed(m);
+    if (sh.cd > now || m.child || !(hungry || wheat || tool)) return false;
+    const deal = (hungry && findFoodSeller(m)) || (tool && findToolSeller(m, tool)) || (wheat && findWheatSeller(m)) || null;
     if (!deal) { sh.cd = now + 0.08; return false; }
     sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; ai.route = null;
   }
@@ -1277,10 +1318,10 @@ function shopAI(m, dt, out) {
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
   if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;
   if (sh.tt <= 0) {
-    const done = deal.kind === "wheat" ? doWheatDeal(m, deal) : doFoodDeal(m, deal);
+    const done = deal.kind === "wheat" ? doWheatDeal(m, deal) : deal.kind === "tool" ? doToolDeal(m, deal) : doFoodDeal(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
     if (!done) sh.avoid[v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05;
-    else { particles(m.position.x, m.position.y + 1.5, m.position.z, "#2fd06a", 5, 0.4); sound("villager_trade", m.position.x, m.position.y + 1.5, m.position.z, 0.5); F.digest(m, dayNow()); }
+    else { particles(m.position.x, m.position.y + 1.5, m.position.z, "#2fd06a", 5, 0.4); sound("villager_trade", m.position.x, m.position.y + 1.5, m.position.z, 0.5); if (deal.kind !== "tool") F.digest(m, dayNow()); }
   }
   return true;
 }
@@ -1419,7 +1460,7 @@ if (BF.texKit) {
   addShaped(BF.I.bucket, 1, ["I I", " I "], { I: BF.I.iron_ingot }, "3 Iron Ingots in a V → Bucket");
 });
 
-BF.villageLife = { ai, tick, travel, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
+BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
   exportAll, importAll, bedRects,
   _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, perform, dealWith, findFoodSeller, scanStep, inRange } };
 })();
