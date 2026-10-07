@@ -267,10 +267,10 @@ function connect() {
 }
 let serverUp = false;
 function status() {
-  const el = $("conn"), live = snap && Date.now() - lastAt < 2500;
+  const el = $("conn"), live = snap && Date.now() - lastAt < (snap.hidden ? 70000 : 2500);   // a background tab only sends about once a second, or less
   let cls = "off", txt = "Server offline";
   if (serverUp && !live) { cls = "off"; txt = snap ? "Game not responding" : "Waiting for game"; }
-  if (serverUp && live) { cls = snap.paused ? "paused" : "live"; txt = snap.paused ? "Game paused" : "Live"; }
+  if (serverUp && live) { cls = snap.paused || snap.hidden ? "paused" : "live"; txt = snap.hidden ? "Game tab in the background: the browser pauses it. Put the game in its own window" : snap.paused ? "Game paused" : "Live"; }
   el.className = "pill " + cls; el.lastElementChild.textContent = txt;
   const w = $("waiting");
   w.hidden = !!(serverUp && live) || (!!snap && serverUp);
