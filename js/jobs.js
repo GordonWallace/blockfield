@@ -18,13 +18,17 @@ const BF = (window.BF = window.BF || {});
 const JOBSITE = {
   farmer: "composter", librarian: "lectern", cleric: "brewing_stand", armorer: "blast_furnace", weaponsmith: "grindstone",
   toolsmith: "smithing_table", butcher: "smoker", fisherman: "barrel", shepherd: "loom", fletcher: "fletching_table",
+  mason: "stonecutter", leatherworker: "cauldron", cartographer: "cartography_table", builder: "drafting_table", explorer: "survey_table", forester: "band_saw",
   mason: "stonecutter", leatherworker: "cauldron", cartographer: "cartography_table", builder: "drafting_table", explorer: "survey_table",
+  furniture_maker: "carpentry_bench",
 };
 const PROFESSION_OF = {};
 for (const p in JOBSITE) PROFESSION_OF[JOBSITE[p]] = p;
 const NO_JOB = { nitwit: 1, unemployed: 1 };
 
 const RADIUS = 48;            // claim search radius around the villager's village centre (or the villager)
+// sized villages (village generator 2, up to ~120 blocks from the plaza) search their whole area instead
+const reachOf = o => Math.max(RADIUS, (o && o.village && o.village.wg && o.village.wg.reach) || (o && o.wg && o.wg.reach) || 0);
 const MEMORY_DAYS = 30;       // game days an unemployed villager remembers its profession (and level) after losing its jobsite
 const WORK_START = 0.04, WORK_END = 0.45;   // sky.time window in which villagers visit their jobsite
 
@@ -115,23 +119,34 @@ function freeCells(v, b, r) {
     return null;
   } };
 }
-// Planned jobsite blocks of a worldgen village v: [{x, y, z, id, prof, slot (roster idx, -1 = spare)}].
-function planVillage(v) {
-  const out = [];
-  if (!v || !BF.worldgen || !BF.worldgen.recordBuilding || !BF.mobs || !BF.mobs.roster) return out;
+// The jobs of a worldgen village v, before they get a place: {key, r (the seeded stream, continued by the placement), jobs: [{prof, slot, house}]}.
+// The roster counts the original layout's buildings (v.nb0), so pens added later for the shepherds never change who lives there.
+function jobList(v) {
   const key = Math.round(v.x) + "," + Math.round(v.z);
-  let roster;
-  try { roster = BF.mobs.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length }); } catch (e) { console.error(e); return out; }
+  const roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 });   // callers catch
   const r = seeded("jobs:" + key);
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   const n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
-  const special = needy.filter(sl => sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith"));
+  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
   const rest = needy.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
   const jobs = special.concat(rest).slice(0, n).map(sl => ({ prof: sl.prof, slot: sl.idx, house: sl.house }));
   for (let k = needy.length; k < n; k++) jobs.push({ prof: needy[Math.floor(r() * needy.length)].prof, slot: -1, house: null }); // spares follow the roster mix
   jobs.sort((a, b) => (a.slot < 0) - (b.slot < 0) || (a.slot - b.slot));
+  return { key, r, jobs };
+}
+// How many shepherd jobsites the plan of village v holds (worldgen adds a pen for each, see layoutVillage).
+function shepherdCount(v) {
+  if (!v || !BF.mobs || !BF.mobs.roster) return 0;
+  return jobList(v).jobs.filter(j => j.prof === "shepherd").length;
+}
+// Planned jobsite blocks of a worldgen village v: [{x, y, z, id, prof, slot (roster idx, -1 = spare)}].
+function planVillage(v) {
+  const out = [];
+  if (!v || !BF.worldgen || !BF.worldgen.recordBuilding || !BF.mobs || !BF.mobs.roster) return out;
+  let key, r, jobs;
+  try { ({ key, r, jobs } = jobList(v)); } catch (e) { console.error(e); return out; }
   // placement
   const blds = v.buildings || [], used = new Set(), cellsOf = new Map();
   const W = (b, u, q) => [b.bx + b.ax * u + b.sx * q, b.bz + b.az * u + b.sz * q];
@@ -159,10 +174,18 @@ function planVillage(v) {
   const homes = blds.filter(b => LIVABLE[b.type]);
   const bOf = h => h && blds.find(b => b.doorX === h.doorX && b.doorZ === h.doorZ && LIVABLE[b.type]);
   let fi = 0;
+  const pens = blds.filter(b => b.type === "pen");   // a shepherd's loom stands right outside a pen (each shepherd gets its own while there are enough)
+  let pi = 0;
   for (const job of jobs) {
+    if (job.prof === "shepherd" && pens.length && (BF.state && BF.state.gen | 0) >= 3) {   // gen 3+ only: older worlds keep their loom positions
+      let placed = false;
+      for (let k = 0; k < pens.length && !placed; k++) placed = beside(pens[(pi + k) % pens.length], job) && (pi += k + 1, true);
+      if (placed) continue;
+    }
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
-    if (job.prof === "builder" && plaza(job)) continue;
-    const b = bOf(job.house) || (job.slot < 0 && homes.length ? homes[Math.floor(r() * homes.length)] : null);
+    if ((job.prof === "builder" || job.prof === "furniture_maker") && plaza(job)) continue;
+    if (job.prof === "furniture_maker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;   // plaza full: beside a house
+    const b = bOf(job.house) || ((job.slot < 0 || job.prof === "forester") && homes.length ? homes[Math.floor(r() * homes.length)] : null);
     if (b && (inside(b, job) || beside(b, job))) continue;
     plaza(job);
   }
@@ -215,7 +238,7 @@ function reclaimAt(s) {
   for (const m of BF.mobs.list) {
     if (m.type !== "villager" || m.dead || m.removed || m.jobsite || isChild(m) || !memValid(m) || m.jobMem.prof !== s.prof) continue;
     const c = center(m);
-    if (!c || Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > RADIUS) continue;
+    if (!c || Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > reachOf(m)) continue;
     const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z);
     if (d < bd) { bd = d; best = m; }
   }
@@ -235,7 +258,7 @@ function reservedForMemory(k, m) {
   for (const o of BF.mobs.list) {
     if (o === m || o.type !== "villager" || o.dead || o.removed || o.jobsite || !memValid(o) || o.jobMem.prof !== s.prof) continue;
     const c = center(o);
-    if (c && Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) <= RADIUS) return true;
+    if (c && Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) <= reachOf(o)) return true;
   }
   return false;
 }
@@ -262,7 +285,7 @@ function center(o) {
 // Unclaimed jobsite blocks (loaded, still standing) within `radius` of a village / position / mob. `forMob` treats its own claims as free.
 function unclaimed(where, radius, forMob) {
   hook();
-  const c = center(where), R = radius || RADIUS, out = [], W = BF.world;
+  const c = center(where), R = radius || reachOf(where), out = [], W = BF.world;
   if (!c) return out;
   for (const [k, s] of sites) {
     if (Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > R) continue;
@@ -301,7 +324,7 @@ function claim(m, opts) {
   if (!m || m.dead || m.removed || m.type !== "villager" || m.profession === "nitwit") return null;
   if (opts.site) return !claimedByOther(pk(opts.site.x, opts.site.y, opts.site.z), m) ? hire(m, opts.site) : null;   // the block the villager walked to
   const own = ownTrade(m);
-  const list = unclaimed(m, opts.radius || RADIUS, m).filter(s => (!own || s.prof === own) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
+  const list = unclaimed(m, opts.radius || reachOf(m), m).filter(s => (!own || s.prof === own) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
   if (!list.length) return null;
   const pref = (Array.isArray(opts.prefer) ? opts.prefer.filter(Boolean) : []).concat(memValid(m) ? [m.jobMem.prof, m.jobMem.prof] : []);
   const wts = list.map(s => { let w = 1; for (const p of pref) if (p === s.prof) w *= 3; return w; });
@@ -391,7 +414,7 @@ const SEEK_AVOID = 60;            // seconds a site that could not be reached (o
 const adjacentTo = (s, x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) === 1 && Math.abs(y - s.y) <= 1;
 function pickSite(m, sk) {
   const own = ownTrade(m), mem = memValid(m) ? m.jobMem.prof : null, pref = m.jobPrefer || [], now = BF.simNow();
-  const list = unclaimed(m, RADIUS, m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
+  const list = unclaimed(m, reachOf(m), m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
   let best = null, bd = Infinity;
   for (const s of list) {
     const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) * (s.prof === mem ? 0.3 : pref.includes(s.prof) ? 0.6 : 1) * rnd(0.9, 1.1);
@@ -447,6 +470,7 @@ function ai(m, dt, out) {
   if (J.mode === "off") {
     J.t -= dt;
     if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(1, 3);   // something to craft: go to the table soon
+    if (J.t > 3 && m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(1, 3);    // wool and boards in hand: go make beds
     if (J.t > 0) return false;
     if (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 40 || !BF.world.isLoaded(s.x, s.z)) { J.t = rnd(20, 40); return false; }
     if (!nav.takePlan()) { J.t = 0.3; return false; }
@@ -466,6 +490,7 @@ function ai(m, dt, out) {
   if (J.mode === "work") {
     J.t -= dt;
     if (m.profession === "cartographer" && BF.cartography) BF.cartography.work(m, J, dt);   // crafts compasses and maps at its table (js/cartography.js)
+    if (m.profession === "furniture_maker" && BF.furniture) BF.furniture.work(m, J, dt);   // makes beds at its carpentry bench (js/furniture.js)
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.45 };   // head down at the block
     if (J.t <= 0) { J.mode = "off"; J.t = rnd(40, 120); m.ai.mode = "idle"; m.ai.t = 1; return false; }
     return true;
@@ -487,6 +512,6 @@ function reset() { sites.clear(); claims.clear(); planIndex.clear(); spawned.cle
 BF.jobs = {
   JOBSITE, PROFESSION_OF, RADIUS, sites, claims,
   profOfBlock, blockFor, claim, hire, release, unclaimed, isEmployed, setProfession,
-  planVillage, planFor, drawCount, MEMORY_DAYS, memValid, onSpawn, tick, ai, importAll, reset,
+  planVillage, shepherdCount, planFor, drawCount, MEMORY_DAYS, memValid, onSpawn, tick, ai, importAll, reset,
 };
 })();

@@ -1029,6 +1029,12 @@ const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c 
 function placeMulti(kind, x, y, z) {
   const W = BF.world, f = lookFacing();
   if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
+  if (kind === "gate") {   // fence gate: spans across the player's view
+    if (!(y < BF.H && W.isLoaded(x, z) && freeCell(x, y, z))) return false;
+    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0);
+    W.setBlock(x, y, z, id); emit("blockPlaced", x, y, z, id);
+    return true;
+  }
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
   if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0)]];
@@ -1158,10 +1164,15 @@ function secondaryDown() {
     if (msg) actionBar(msg);
     return true;
   }
+  if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
+    const r = BF.shepherd.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
   if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
+  if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (target && target.id === BF.B.furnace && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
@@ -1247,6 +1258,7 @@ function secondaryDown() {
   let placeId = sel.id;
   if (BF.light && BF.light.isTorchItem(placeId)) { placeId = BF.light.torchPlace(x, y, z, into ? [0, 1, 0] : target.normal); if (!placeId) return false; } // standing or wall torch
   if (BF.RENDER[sel.id] === 4 && !BF.SOLID[BF.world.getBlock(x, y - 1, z)]) return false; // plants need ground
+  if (BF.blocks[sel.id] && BF.blocks[sel.id].sapling && BF.forester && !BF.forester.canSurvive(x, y, z)) return false;   // saplings need soil (js/forester.js)
   if (BF.SOLID[sel.id] && cellBlockedByEntity(x, y, z)) return false;
   if (!BF.world.setBlock(x, y, z, placeId)) return false;
   try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
@@ -1402,7 +1414,7 @@ function physics(dt) {
   const shift = k.has("ShiftLeft") || k.has("ShiftRight");
   sneaking = shift && !flying;
   let fwd = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
-  let strafe = (k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0);
+  let strafe = (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0);
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
   if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
   if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
