@@ -41,27 +41,54 @@ function serveGame(req, res) {
 }
 
 // ------------------------------------------------------------------ debug relay
+// Caches what a new debug screen needs: the latest snapshot, every village layout, the last full detail of every village
+// (shown greyed out once it unloads) and each village's log history. The game keeps the newest 300 log entries per village;
+// the server keeps everything it has seen while it runs, so a long session's history isn't cut off.
 const clients = new Set();
-let latest = null, layout = null, log = null, lastPush = 0;
+let latest = null, lastPush = 0, pushes = 0, seed = null;
+const layouts = new Map(), details = new Map(), history = new Map();
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
 function broadcast(event, obj) { const d = JSON.stringify(obj); for (const c of clients) send(c, event, d); }
+
+const same = (x, y) => x && y && x[0] === y[0] && x[2] === y[2];
+// Adds the game's (capped) log to what the server already holds for that village; returns the full history.
+function mergeLog(key, a) {
+  const h = history.get(key);
+  if (!h || !h.length) { history.set(key, a.slice()); return history.get(key); }
+  const last = h[h.length - 1];
+  let i = a.length - 1;
+  while (i >= 0 && !same(a[i], last)) i--;
+  if (i >= 0) h.push(...a.slice(i + 1));                        // overlap: append what's new
+  else if (a.length && a[0][0] >= last[0]) h.push(...a);         // a gap (more than 300 entries since the last push): keep both
+  else history.set(key, a.slice());                              // older than what we hold: a reloaded save or a new world
+  return history.get(key);
+}
 
 function push(body, res) {
   let s;
   try { s = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
   const fresh = !lastPush || Date.now() - lastPush > 5000;
   lastPush = Date.now();
-  if (s.layout) layout = s.layout;
-  if (s.log) log = s.log;
-  latest = s;
-  broadcast("snap", s);
+  if (s.info && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); } seed = s.info.seed; }
+  for (const k in s.layouts || {}) layouts.set(k, s.layouts[k]);
+  for (const k in s.detail || {}) details.set(k, s.detail[k]);
+  const logs = {};
+  for (const k in s.logs || {}) logs[k] = { key: k, cap: s.logs[k].cap, entries: mergeLog(k, s.logs[k].entries || []) };
+  latest = { ...s, layouts: undefined, logs: undefined };
+  broadcast("snap", { ...s, logs });
   if (fresh) console.log("[debug] game connected");
-  // a village snapshot whose layout/log this server never saw (it restarted, or the game reloaded mid-village): ask again
-  const need = s.here && (!layout || layout.key !== s.here.key || !log || log.key !== s.here.key);
-  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(need ? "resync" : "ok");
+  // a fresh server holds no layouts or logs yet: ask the game to send them all again
+  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(pushes++ === 0 ? "resync" : "ok");
 }
 const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type" }, h);
+const cached = () => {
+  const logs = {}, ls = {}, ds = {};
+  for (const [k, h] of history) logs[k] = { key: k, cap: 300, entries: h };
+  for (const [k, l] of layouts) ls[k] = l;
+  for (const [k, d] of details) ds[k] = d;
+  return { layouts: ls, logs, details: ds };
+};
 
 function serveDebug(req, res) {
   const url = new URL(req.url, "http://x");
@@ -76,15 +103,14 @@ function serveDebug(req, res) {
   if (url.pathname === "/events") {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...cors() });
     res.write("retry: 1500\n\n");
-    // a new screen gets the cached layout and log first, then the latest snapshot
-    if (layout) send(res, "snap", JSON.stringify({ layout, t: 0 }));
-    if (log) send(res, "snap", JSON.stringify({ log, t: 0 }));
-    if (latest) send(res, "snap", JSON.stringify({ ...latest, layout: undefined, log: undefined }));
+    // a new screen gets everything cached first (layouts, logs, last known detail of every village), then the latest snapshot
+    send(res, "cache", JSON.stringify(cached()));
+    if (latest) send(res, "snap", JSON.stringify(latest));
     clients.add(res);
     req.on("close", () => clients.delete(res));
     return;
   }
-  if (url.pathname === "/state") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ latest, layout, log })); return; }
+  if (url.pathname === "/state") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ latest, ...cached() })); return; }
   if (url.pathname === "/" || url.pathname === "/index.html") {
     fs.readFile(PAGE, (err, data) => err ? res.writeHead(500).end(String(err)) : res.writeHead(200, { "Content-Type": TYPES[".html"], "Cache-Control": "no-cache" }).end(data));
     return;

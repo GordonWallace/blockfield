@@ -58,6 +58,21 @@
   .panel > .ph .sub { white-space: nowrap; }
   .pb { padding: 14px 16px; }
 
+  .vlist { max-height: 260px; overflow: auto; padding: 4px 0; }
+  .vrow { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 6px 16px; cursor: pointer; border-left: 3px solid transparent; }
+  .vrow:hover { background: rgba(255, 255, 255, 0.04); }
+  .vrow.sel { background: rgba(127, 191, 77, 0.1); border-left-color: var(--accent); }
+  .vrow .vn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vrow .vn small { color: var(--faint); margin-left: 6px; }
+  .vrow .vd { color: var(--muted); text-align: right; white-space: nowrap; } .vrow .vd b { color: var(--ink); font-weight: 500; }
+  .vrow .vs { color: var(--faint); font-size: 11px; white-space: nowrap; }
+  .vrow .ld { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); opacity: 0.6; }
+  .vrow.on .ld { background: var(--accent); opacity: 1; box-shadow: 0 0 0 3px rgba(127, 191, 77, 0.18); }
+  .vrow:not(.on) .vn { color: var(--muted); }
+  .vsep { padding: 8px 16px 3px; font: 10px var(--display); color: var(--faint); letter-spacing: 0.5px; }
+  #vl-auto.on { background: rgba(127, 191, 77, 0.14); color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); }
+  .stale #v-here .vstat .big, .stale #v-here .occ, .stale .mapwrap, .stale .roster { opacity: 0.45; filter: grayscale(0.7); }
+  .stalebadge { color: var(--warn); font-size: 12px; white-space: nowrap; }
   .vstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
   .vstat { background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; }
   .vstat .big { font-size: 22px; }
@@ -177,6 +192,10 @@
 
   <div class="split">
     <div class="stack">
+      <div class="panel" id="vlpanel">
+        <div class="ph"><h2>Villages</h2><span class="sub" id="vl-count"></span><div class="grow"></div><button class="fbtn" id="vl-auto" title="Show the nearest loaded village, switching as you move">Follow nearest</button></div>
+        <div class="vlist" id="vlist"><div class="empty">No villages loaded yet.</div></div>
+      </div>
       <div class="panel" id="vpanel">
         <div class="ph"><h2 id="v-name">No village</h2><span class="sub" id="v-sub"></span></div>
         <div id="v-here">
@@ -207,7 +226,7 @@
     <div class="panel">
       <div class="ph"><h2>Village log</h2><span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
       <div class="filters" id="l-filters"></div>
-      <div id="log"><div class="empty">Walk into a village to see its log.</div></div>
+      <div id="log"><div class="empty">Load a village to see its log.</div></div>
     </div>
   </div>
 </main>
@@ -221,6 +240,9 @@ const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.t
 const fmt = n => n == null ? "-" : n.toLocaleString();
 
 // ---------------------------------------------------------------- state
+// layouts / logs / details: everything known per village key (details = the last full numbers while it was loaded)
+const layouts = {}, logs = {}, details = {};
+let viewKey = null, pinned = null, curV = null, curStale = false;   // pinned: a village the user picked; null follows the nearest loaded one
 let snap = null, layout = null, log = null, lastAt = 0, seenLog = 0, logKeyShown = null, hlName = null, hoverName = null;
 const hist = { fps: [], queue: [] }, HIST = 240;   // 60 s at 4 snapshots a second
 let rosterSort = { k: "name", dir: 1 };
@@ -238,6 +260,7 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
   es.onopen = () => { serverUp = true; status(); };
@@ -258,13 +281,49 @@ setInterval(status, 1000);
 
 // ---------------------------------------------------------------- snapshots
 function onSnap(s) {
-  if (s.layout) layout = s.layout;
-  if (s.log) { log = s.log; renderLog(); }
+  Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {});
+  let logChanged = false;
+  for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
   if (!s.info) return;
   snap = s; lastAt = Date.now();
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
-  renderTop(s); renderVillage(s); status();
+  const was = viewKey;
+  pickView(s);
+  renderTop(s); renderVillages(s); renderVillage(s); status();
+  if (logChanged || was !== viewKey) renderLog();
 }
+// The village on show: the one the user picked, else the nearest loaded one (the list comes sorted loaded-first by distance).
+function pickView(s) {
+  const list = s.villages || [];
+  const k = pinned && list.some(v => v.key === pinned) ? pinned : (list[0] && list[0].loaded ? list[0].key : null);
+  if (k !== viewKey) { viewKey = k; hlName = null; }
+  layout = viewKey ? layouts[viewKey] || null : null;
+  log = viewKey ? logs[viewKey] || null : null;
+}
+
+// ---------------------------------------------------------------- village list
+function renderVillages(s) {
+  const list = s.villages || [], d = s.info;
+  const nLoaded = list.filter(v => v.loaded).length;
+  $("vl-count").textContent = list.length ? `${nLoaded} loaded \u00B7 ${list.length} known` : "";
+  $("vl-auto").classList.toggle("on", !pinned);
+  const row = v => {
+    const det = details[v.key], b = bearing(v.x - d.x, v.z - d.z);
+    const extra = v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session";
+    return `<div class="vrow${v.loaded ? " on" : ""}${v.key === viewKey ? " sel" : ""}" data-k="${esc(v.key)}"><i class="ld"></i>` +
+      `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs">${esc(extra)}</div>` +
+      `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 ? dirName(b) : ""}</div></div>`;
+  };
+  const on = list.filter(v => v.loaded), off = list.filter(v => !v.loaded);
+  $("vlist").innerHTML = list.length ? on.map(row).join("") + (off.length ? `<div class="vsep">Not loaded</div>` + off.map(row).join("") : "")
+    : `<div class="empty">No villages loaded yet.</div>`;
+}
+$("vlist").addEventListener("click", e => {
+  const r = e.target.closest(".vrow"); if (!r || !snap) return;
+  pinned = r.dataset.k;
+  onSnap(snap);
+});
+$("vl-auto").addEventListener("click", () => { pinned = null; if (snap) onSnap(snap); });
 const push = (a, v) => { a.push(v); if (a.length > HIST) a.shift(); };
 
 const DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -317,12 +376,16 @@ function spark(cv, data, color, minMax) {
 
 // ---------------------------------------------------------------- village
 function renderVillage(s) {
-  const v = s.here;
+  const row = viewKey ? (s.villages || []).find(r => r.key === viewKey) : null;
+  const v = curV = row && details[viewKey] ? { ...details[viewKey], key: viewKey } : null;
+  curStale = !!(v && !row.loaded);
+  $("vpanel").classList.toggle("stale", curStale); $("rpanel").classList.toggle("stale", curStale);
   $("v-here").hidden = !v; $("v-away").hidden = !!v; $("rpanel").hidden = !v;
   if (!v) {
-    $("v-name").textContent = "Not in a village";
-    const n = s.nearest;
-    $("v-sub").textContent = "";
+    $("v-name").textContent = row ? row.name : "No village loaded";
+    // a known village with no numbers yet, or none at all: point the way
+    const n = row ? { name: row.name, dist: row.dist, dx: row.x - s.info.x, dz: row.z - s.info.z } : s.nearest;
+    $("v-sub").textContent = row ? "Not loaded while the debug screen was open, so no numbers yet" : "";
     if (n) {
       const b = bearing(n.dx, n.dz);
       $("a-dist").innerHTML = `${fmt(n.dist)} <small>blocks ${dirName(b)}</small>`;
@@ -332,9 +395,10 @@ function renderVillage(s) {
     return;
   }
   $("v-name").textContent = v.name;
-  $("v-sub").textContent = layout && layout.key === v.key ? pretty(layout.biome) + " · " + layout.buildings.length + " buildings" : "";
+  $("v-sub").innerHTML = (curStale ? `<span class="stalebadge">Not loaded \u00B7 numbers from ${esc(v.clock)}</span> \u00B7 ` : "") +
+    esc(fmt(row.dist) + " blocks away") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
   $("v-villagers").textContent = v.villagers;
-  $("v-loaded").textContent = v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
+  $("v-loaded").textContent = curStale ? "not loaded" : v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
   $("v-beds").textContent = v.beds;
   const gap = v.beds - v.villagers;
   $("v-bedsub").innerHTML = gap >= 0 ? `<span class="yes">${gap} spare</span>` : `<span class="no">${-gap} short</span>`;
@@ -357,14 +421,16 @@ function renderVillage(s) {
 const mapCv = $("map"), tip = $("tip");
 let mapView = null;   // {sx, ox, oz, cx, cz} world -> screen
 function drawMap(s) {
-  const v = s.here, r = devicePixelRatio || 1, w = mapCv.clientWidth, h = mapCv.clientHeight;
+  const v = curV, r = devicePixelRatio || 1, w = mapCv.clientWidth, h = mapCv.clientHeight;
   if (!w) return;
   if (mapCv.width !== w * r || mapCv.height !== h * r) { mapCv.width = w * r; mapCv.height = h * r; }
   const g = mapCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
   const L = layout && layout.key === v.key ? layout : null, d = s.info;
-  // frame the village bounds plus the player
-  let [x0, z0, x1, z1] = L && L.bounds[0] != null ? L.bounds : [d.x - 40, d.z - 40, d.x + 40, d.z + 40];
-  x0 = Math.min(x0, d.x) - 6; x1 = Math.max(x1, d.x) + 6; z0 = Math.min(z0, d.z) - 6; z1 = Math.max(z1, d.z) + 6;
+  // frame the village bounds, plus the player when they're near enough not to shrink the village to a dot
+  let [x0, z0, x1, z1] = L && L.bounds[0] != null ? L.bounds : v.villagerList.length ? [Math.min(...v.villagerList.map(m => m.x)), Math.min(...v.villagerList.map(m => m.z)), Math.max(...v.villagerList.map(m => m.x)), Math.max(...v.villagerList.map(m => m.z))] : [d.x - 40, d.z - 40, d.x + 40, d.z + 40];
+  const near = d.x > x0 - 80 && d.x < x1 + 80 && d.z > z0 - 80 && d.z < z1 + 80;
+  if (near) { x0 = Math.min(x0, d.x); x1 = Math.max(x1, d.x); z0 = Math.min(z0, d.z); z1 = Math.max(z1, d.z); }
+  x0 -= 6; x1 += 6; z0 -= 6; z1 += 6;
   const sc = Math.min((w - 24) / (x1 - x0), (h - 24) / (z1 - z0)), ox = w / 2 - (x0 + x1) / 2 * sc, oz = h / 2 - (z0 + z1) / 2 * sc;
   const X = x => ox + x * sc, Z = z => oz + z * sc;
   mapView = { X, Z, sc };
@@ -396,8 +462,14 @@ function drawMap(s) {
     g.lineWidth = on ? 2 : 1; g.strokeStyle = on ? "#fff" : "rgba(0,0,0,0.6)"; g.stroke();
     if (on && m.job) { g.setLineDash([3, 3]); g.strokeStyle = "rgba(255,255,255,0.5)"; g.beginPath(); g.moveTo(X(m.x), Z(m.z)); g.lineTo(X(m.job[0] + 0.5), Z(m.job[1] + 0.5)); g.stroke(); g.setLineDash([]); }
   }
-  // player: arrow pointing where they look
-  const px = X(d.x), pz = Z(d.z), a = -d.yaw;
+  // player: arrow pointing where they look; when off the map, a marker on its edge in the player's direction
+  let px = X(d.x), pz = Z(d.z), a = -d.yaw;
+  if (!near) {
+    const cx = w / 2, cz = h / 2, dx = px - cx, dz = pz - cz, k = Math.min((w / 2 - 14) / Math.abs(dx || 1e-9), (h / 2 - 14) / Math.abs(dz || 1e-9));
+    px = cx + dx * k; pz = cz + dz * k; a = Math.atan2(dx, -dz);
+    g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "#a6dc72"; g.textAlign = px > w / 2 ? "right" : "left";
+    g.fillText("You", px + (px > w / 2 ? -12 : 12), pz + (pz > h / 2 ? -8 : 14)); g.textAlign = "left";
+  }
   g.save(); g.translate(px, pz); g.rotate(a);
   g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
   g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
@@ -407,10 +479,10 @@ function drawMap(s) {
   g.fillText("N ↑", w - 34, 18);
 }
 mapCv.addEventListener("mousemove", e => {
-  if (!snap || !snap.here || !mapView) return;
+  if (!snap || !curV || !mapView) return;
   const r = mapCv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
   let best = null, bd = 12;
-  for (const m of snap.here.villagerList) { const dd = Math.hypot(mapView.X(m.x) - mx, mapView.Z(m.z) - my); if (dd < bd) { bd = dd; best = m; } }
+  for (const m of curV.villagerList) { const dd = Math.hypot(mapView.X(m.x) - mx, mapView.Z(m.z) - my); if (dd < bd) { bd = dd; best = m; } }
   hoverName = best ? best.name : null;
   if (best) {
     tip.style.display = "block"; tip.style.left = mx + "px"; tip.style.top = my + "px";
@@ -418,17 +490,17 @@ mapCv.addEventListener("mousemove", e => {
   } else tip.style.display = "none";
   drawMap(snap); markRoster();
 });
-mapCv.addEventListener("mouseleave", () => { hoverName = null; tip.style.display = "none"; if (snap && snap.here) drawMap(snap); markRoster(); });
+mapCv.addEventListener("mouseleave", () => { hoverName = null; tip.style.display = "none"; if (snap && curV) drawMap(snap); markRoster(); });
 mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlName ? hoverName : null; markRoster(true); });
 
 // ---------------------------------------------------------------- roster
 function renderRoster(s) {
-  const v = s.here, q = $("r-q").value.trim().toLowerCase(), d = s.info;
+  const v = curV, q = $("r-q").value.trim().toLowerCase(), d = s.info;
   let rows = v.villagerList.map(m => ({ ...m, dist: Math.hypot(m.x - d.x, m.z - d.z), hpf: m.hp / (m.maxHp || 20) }));
   if (q) rows = rows.filter(m => (m.name + " " + m.prof + " " + m.status).toLowerCase().includes(q));
   const k = rosterSort.k, dir = rosterSort.dir;
   rows.sort((a, b) => { const x = k === "hp" ? a.hpf : a[k], y = k === "hp" ? b.hpf : b[k]; return (typeof x === "string" ? x.localeCompare(y) : (x > y) - (x < y)) * dir || a.name.localeCompare(b.name); });
-  $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + " loaded";
+  $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + (curStale ? " when last loaded" : " loaded");
   $("r-body").innerHTML = rows.map(m => `<tr data-n="${esc(m.name)}"><td>${esc(m.name)}</td><td><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i>${esc(m.prof)}</td>` +
     `<td class="st">${esc(m.status || "")}</td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
     `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
@@ -442,14 +514,14 @@ function markRoster(scroll) {
     if (on && scroll) tr.scrollIntoView({ block: "nearest" });
   }
 }
-$("r-body").addEventListener("mouseover", e => { const tr = e.target.closest("tr"); hoverName = tr && tr.dataset.n || null; if (snap && snap.here) drawMap(snap); markRoster(); });
-$("r-body").addEventListener("mouseleave", () => { hoverName = null; if (snap && snap.here) drawMap(snap); markRoster(); });
-$("r-body").addEventListener("click", e => { const tr = e.target.closest("tr"); if (tr) { hlName = tr.dataset.n === hlName ? null : tr.dataset.n; if (snap && snap.here) drawMap(snap); markRoster(); } });
-$("r-q").addEventListener("input", () => snap && snap.here && renderRoster(snap));
+$("r-body").addEventListener("mouseover", e => { const tr = e.target.closest("tr"); hoverName = tr && tr.dataset.n || null; if (snap && curV) drawMap(snap); markRoster(); });
+$("r-body").addEventListener("mouseleave", () => { hoverName = null; if (snap && curV) drawMap(snap); markRoster(); });
+$("r-body").addEventListener("click", e => { const tr = e.target.closest("tr"); if (tr) { hlName = tr.dataset.n === hlName ? null : tr.dataset.n; if (snap && curV) drawMap(snap); markRoster(); } });
+$("r-q").addEventListener("input", () => snap && curV && renderRoster(snap));
 document.querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
   const k = th.dataset.k; rosterSort = { k, dir: rosterSort.k === k ? -rosterSort.dir : 1 };
   document.querySelectorAll("th").forEach(t => t.classList.toggle("on", t === th));
-  if (snap && snap.here) renderRoster(snap);
+  if (snap && curV) renderRoster(snap);
 }));
 document.querySelector('th[data-k="name"]').classList.add("on");
 
@@ -528,7 +600,7 @@ $("l-q").addEventListener("input", () => renderLog(true));
 function renderLog(keepNew) {
   renderFilters();
   const el = $("log");
-  if (!log) return;
+  if (!log) { el.innerHTML = `<div class="empty">${viewKey ? "Nothing logged in this village yet." : "Load a village to see its log."}</div>`; $("l-count").textContent = ""; logKeyShown = null; return; }
   const a = log.entries, q = $("l-q").value.trim().toLowerCase(), fresh = log.key !== logKeyShown;
   const newFrom = fresh || keepNew ? a.length : seenLog;   // highlight entries that arrived since the last render
   logKeyShown = log.key;
@@ -542,12 +614,12 @@ function renderLog(keepNew) {
   seenLog = a.length;
   el.innerHTML = rows.join("") || `<div class="empty">${a.length ? "Nothing matches the filters." : "No events yet."}</div>`;
   const vname = layout && layout.key === log.key ? layout.name + " \u00B7 " : "";
-  $("l-count").textContent = vname + a.length + (a.length >= log.cap ? " (newest " + log.cap + " kept)" : a.length === 1 ? " entry" : " entries");
+  $("l-count").textContent = vname + a.length + (a.length === 1 ? " entry" : " entries");
 }
 renderFilters();
 
 $("raw").addEventListener("toggle", () => { if (snap) $("f3").textContent = snap.text; });
-addEventListener("resize", () => { if (snap) { renderTop(snap); if (snap.here) drawMap(snap); } });
+addEventListener("resize", () => { if (snap) { renderTop(snap); if (curV) drawMap(snap); } });
 status();
 connect();
 })();

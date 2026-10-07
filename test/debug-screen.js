@@ -47,9 +47,10 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   g = await got();
   ok('after restart: live again', g.conn === 'Live');
   const now = await game.evaluate(() => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key));
-  ok('after restart: log resent ' + g.log + '/' + now.length, g.log === now.length && now.some(e => /Tester/.test(e[2])));   // villagers may log more meanwhile
+  await dbg.waitForTimeout(1500); g = await got();   // villagers may log more meanwhile: the screen must hold at least what the game had
+  ok('after restart: log resent ' + g.log + '/' + now.length, g.log >= now.length && now.some(e => /Tester/.test(e[2])));
   const st = await (await fetch(`http://localhost:${DBG}/state`)).json();
-  ok('after restart: layout resent', !!(st.layout && st.layout.buildings.length));
+  ok('after restart: layout resent', Object.values(st.layouts || {}).some(l => l.buildings.length));
   // log filters: a dropdown per villager type, checkboxes per action, remembered across reloads
   const tr = await game.evaluate(() => {
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
@@ -76,11 +77,35 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(t => !document.querySelector(`#l-filters details.dd[data-t="${t}"] input[data-a="sell"]`).checked, tr.seller));
   await dbg.click('#l-reset'); await dbg.waitForTimeout(200);
   ok('show all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
-  // leaving the village
-  await game.evaluate(() => { const p = BF.player.position; BF.player.spawn(p.x + 300, BF.worldgen.heightAt(p.x + 300, p.z + 120) + 2, p.z + 120); });
-  await dbg.waitForTimeout(1500);
-  ok('away view', await dbg.evaluate(() => !document.getElementById('v-away').hidden && /blocks/.test(document.getElementById('a-dist').textContent)));
-  await dbg.screenshot({ path: out + '-away.png' });
+  // a second village: the view follows the nearest loaded one, the list shows both with distances, and the first can be picked
+  const first = want.name;
+  const second = await game.evaluate(() => {
+    const p = BF.player.position, here = BF.vlog.villageAt(p.x, p.z);
+    const vs = BF.worldgen.villagesNear(p.x, p.z, 1500).filter(v => Math.round(v.x) + "," + Math.round(v.z) !== here.key)
+      .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+    const v = vs[0];
+    BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
+    return BF.signs.villageName(Math.round(v.x) + "," + Math.round(v.z));
+  });
+  await game.waitForTimeout(12000);
+  const list = () => dbg.evaluate(() => [...document.querySelectorAll('#vlist .vrow')].map(r => ({ name: r.querySelector('.vn').firstChild.textContent, on: r.classList.contains('on'), sel: r.classList.contains('sel'), dist: +r.querySelector('.vd b').textContent.replace(/,/g, '') })));
+  let L = await list();
+  console.log('villages:', JSON.stringify(L));
+  ok('list has both villages', L.some(v => v.name === first) && L.some(v => v.name === second));
+  ok('nearest loaded village first and shown by default', L[0].name === second && L[0].on && L[0].sel && (await got()).name === second);
+  ok('every village shows a distance', L.every(v => v.dist >= 0 && !isNaN(v.dist)));
+  const onIdx = L.map(v => v.on), firstOff = onIdx.indexOf(false);
+  ok('unloaded below loaded', firstOff < 0 || onIdx.slice(firstOff).every(x => !x));
+  await dbg.click(`#vlist .vrow:has(.vn:text-is("${first}"))`).catch(async () => dbg.evaluate(n => [...document.querySelectorAll('#vlist .vrow')].find(r => r.querySelector('.vn').firstChild.textContent === n).click(), first));
+  await dbg.waitForTimeout(600);
+  g = await got();
+  const firstRow = (await list()).find(v => v.name === first);
+  ok('picked village is shown', g.name === first && firstRow.sel);
+  ok('unloaded village is greyed with its last numbers', firstRow.on || await dbg.evaluate(() => document.getElementById('vpanel').classList.contains('stale') && /Not loaded/.test(document.getElementById('v-sub').textContent) && +document.getElementById('v-villagers').textContent > 0));
+  ok('its full log is still there', g.log > 0);
+  await dbg.screenshot({ path: out + '-picked.png' });
+  await dbg.click('#vl-auto'); await dbg.waitForTimeout(600);
+  ok('follow nearest goes back', (await got()).name === second);
   await b.close(); srv.kill();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
