@@ -158,7 +158,7 @@ let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, 
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
-     <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>Fly + hold W, then E</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
+     <div><b>Shift</b> sneak</div><div><b>Ctrl / W x2</b> sprint</div><div><b>R</b> free the mouse (game keeps running)</div><div><b>Fly + hold W, then E</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
      <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -521,6 +521,13 @@ function pause() {
   exitLock();
 }
 
+// R frees the mouse without pausing (to use the debug screen while the game runs); a click on the game takes it back.
+let mouseFreed = false;
+function releaseMouse() {
+  mouseFreed = true;
+  keys.clear(); mouseL = mouseR = false; resetBreak();
+  exitLock();
+}
 let expectUnlock = false;     // we released the lock for the inventory: the unlock event must not pause
 function openInventory(mode, arg) {
   if (locked) expectUnlock = true;
@@ -561,6 +568,7 @@ function bindInput() {
       deferredToggle(false); return;
     }
     if (menuOpen || invOpen() || P.dead) return;
+    if (c === "KeyR" && !e.repeat && !e.ctrlKey && !e.metaKey && locked) { releaseMouse(); return; }
     if (c === "KeyQ" && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
     if (e.repeat) { keys.add(c); return; }
     const now = performance.now();
@@ -586,7 +594,8 @@ function bindInput() {
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
       keys.clear(); mouseL = mouseR = false; resetBreak();
-      if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
+      if (mouseFreed) { mouseFreed = false; actionBar("Mouse free: click the game to take it back"); }
+      else if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
       else if (!invOpen() && !P.dead && started && !menuOpen && !inEscGrace()) pause();
     }
   });
@@ -1463,7 +1472,7 @@ function physics(dt) {
   let fwd = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
   let strafe = (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0);
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
-  if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
+  if ((k.has("ControlLeft") || k.has("ControlRight")) && fwd > 0) sprinting = true;
   if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
   turbo = flying && boostE && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // releasing W or E (or landing) ends the boost
   // forward (sx, sz) and right (-sz, sx) in the horizontal plane
