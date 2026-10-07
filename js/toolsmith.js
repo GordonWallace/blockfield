@@ -82,6 +82,7 @@ function take(m, f, n) {
   return got;
 }
 const state = m => m.tsm || (m.tsm = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0, craft: null, furnace: null });
+const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Toolsmith") + " (Toolsmith) " + text); };
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();
 
 // ---------------------------------------------------------------- furnaces in the world
@@ -299,7 +300,7 @@ function finishCraft(m) {
   TR().inv.add(m.inv, c.id, 1);
   S.craft = null;
   log("craft", m, { made: nameOf(c.id) });
-  if (BF.vlog && m.village) BF.vlog.log(m.village, "craft", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Toolsmith") + " (Toolsmith) made " + BF.itemName(c.id));
+  vlog(m, "craft", "made " + BF.itemName(c.id));
   return true;
 }
 // Called by jobs.js while the toolsmith stands at its smithing table: works on the tool in hand, starts the next one.
@@ -384,6 +385,7 @@ function loadFurnace(m, job) {
   job.loaded = (job.loaded || 0) + n;
   topUpFuel(m, job, st);
   log("smelt", m, { ore: n + " " + BF.itemName(job.rawId), at: pk(f.x, f.y, f.z), fuelThere: !!(st.burn > 0 || st.slots[1]) });
+  vlog(m, "furnace", "put " + n + " " + BF.itemName(job.rawId) + " in the furnace at " + pk(f.x, f.y, f.z) + (job.ownFuel ? " with " + job.ownFuel + " " + BF.itemName(st.slots[1] ? st.slots[1].id : I("coal")) : " (burning the fuel already in it)"));
   return true;
 }
 // Adds its own fuel only once the furnace has burnt what was in it: enough for the ore still in the input slot.
@@ -408,6 +410,7 @@ function emptyFurnace(m, job, all) {
   grab(2); grab(1);
   if (all && st.slots[0] && st.slots[0].id === job.rawId) grab(0);
   log("collect", m, { got: got.join(", ") || "nothing", at: pk(f.x, f.y, f.z) });
+  vlog(m, "furnace", "took " + (got.join(" + ") || "nothing") + " out of the furnace at " + pk(f.x, f.y, f.z));
 }
 
 // ---------------------------------------------------------------- placing a furnace it bought
@@ -454,7 +457,7 @@ function placeFurnace(m, spot) {
   state(m).furnace = { x: spot.x, y: spot.y, z: spot.z };
   if (BF.emit) BF.emit("blockPlaced", spot.x, spot.y, spot.z, BF.B.furnace);
   log("place", m, { furnace: pk(spot.x, spot.y, spot.z) });
-  if (BF.vlog && m.village) BF.vlog.log(m.village, "craft", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Toolsmith") + " (Toolsmith) put a furnace down at " + spot.x + ", " + spot.y + ", " + spot.z);
+  vlog(m, "furnace", "put a furnace down at " + spot.x + ", " + spot.y + ", " + spot.z);
   return true;
 }
 
