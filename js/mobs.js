@@ -1579,8 +1579,43 @@ function updateBadge(m) {
   m.badge.visible = true;
 }
 
+// Held tools: a profession module registers toolHolders[profession] = m => item id (or null), and that tool is drawn in the villager's
+// folded hands (a child of the arms, so it swings with them). Shapes by tool type, head coloured from the item's colour. js/forester.js uses it for axes.
+const toolHolders = {}, heldGeos = new Map();
+function heldGeo(id) {
+  if (heldGeos.has(id)) return heldGeos.get(id);
+  const it = BF.items[id], type = it && it.tool ? it.tool.type : "", wood = 0x5a3f26;
+  const c = new THREE.Color(it && it.color ? it.color : "#b0b0b8").getHex(), dark = new THREE.Color(c).multiplyScalar(0.7).getHex();
+  const head = (f, u, v) => (v === 0 ? dark : c);
+  let boxes;
+  if (type === "shears") boxes = [box([1.6, -1.5, 5.6], [2.8, 3, 6.6], c), box([3.0, -1.5, 5.6], [4.2, 3, 6.6], c), box([1.4, -3.5, 5.4], [4.4, -1.5, 6.8], 0x8a2a24)];
+  else {
+    boxes = [box([2.2, -3, 5.6], [3.4, 8, 6.8], wood)];   // held upright in front of the chest; a swing tips it back over the shoulder and down again
+    if (type === "axe") boxes.push(box([1.9, 4.6, 6.8], [3.7, 8.2, 9.8], head), box([1.9, 5.8, 4.9], [3.7, 7.2, 5.6], dark));   // blade facing forward
+    else if (type === "hoe") boxes.push(box([2.0, 6.8, 6.8], [3.6, 8.2, 9.8], head));
+    else boxes.push(box([-1.8, 8, 5.6], [7.4, 9.4, 6.8], head));   // pickaxe and anything else
+  }
+  const g = buildGeometry(boxes, 77);
+  heldGeos.set(id, g);
+  return g;
+}
+function syncHeld(m) {
+  const f = m.type === "villager" && toolHolders[m.profession], arms = m.meshes && m.meshes.arms;
+  let id = null;
+  if (f && arms && !m.dead) { try { id = f(m); } catch (e) { id = null; } }
+  if (id == null || !BF.items[id]) { if (m.heldMesh) m.heldMesh.visible = false; return; }
+  if (!m.heldMesh || m.heldMesh.parent !== arms) {   // first tool, or the outfit was rebuilt (setProfession)
+    if (m.heldMesh && m.heldMesh.parent) m.heldMesh.parent.remove(m.heldMesh);
+    m.heldMesh = new THREE.Mesh(heldGeo(id), m.material); m.heldId = id;
+    arms.add(m.heldMesh);
+  }
+  if (m.heldId !== id) { m.heldMesh.geometry = heldGeo(id); m.heldId = id; }
+  m.heldMesh.visible = true;
+}
+
 function animate(m) {
   const amp = m.walkAmt, ph = m.walkPhase, ai = m.ai;
+  syncHeld(m);
   const sw = Math.sin(ph);
   for (const name in m.meshes) {
     const mesh = m.meshes[name], p = mesh.userData.part;
@@ -1807,10 +1842,14 @@ function villageRoster(rec) {
   const rest = slots.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
   const cap = rec.pop || VILLAGERS_PER_VILLAGE;   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
-  const nBuilders = BF.builder ? Math.min(rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0, Math.max(0, cap - 1)) : 0;   // builders count toward the cap
+  // village generator 3: every village has a miner, a farmer and a forester (they supply the others: stone and ore, food, wood), so nothing stalls
+  const core = (BF.state && BF.state.villages | 0) >= 3 && !!rec.pop;
+  let nBuilders = BF.builder ? Math.min(rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0, Math.max(0, cap - 1)) : 0;   // builders count toward the cap
+  if (core) nBuilders = Math.min(nBuilders, Math.max(0, cap - 3));   // ... but never in place of the core three
   // foresters (own seeded stream, drawn first so their places are kept free: a full village used to leave none): ~95% of villages get one
   let nF = 0;
   if (BF.forester) { const rf = seededRand("foresters:" + rec.key); for (const p of FORESTER_CHANCE.slice(0, rec.nb >= 19 ? 2 : 1)) if (rf() < p) nF++; }
+  if (core && BF.forester) nF = Math.max(nF, 1);
   nF = Math.min(nF, Math.max(0, cap - nBuilders - 1));   // a tiny village still keeps one resident
   const ordered = special.concat(rest).slice(0, cap - nBuilders - nF);
   const used = {};
@@ -1829,6 +1868,13 @@ function villageRoster(rec) {
     sl.prof = bag.pop();
     used[sl.prof] = (used[sl.prof] || 0) + 1;
   }
+  // the core farmer: the last plain resident (a nitwit first) becomes one when the shuffle gave the village none
+  if (core && !ordered.some(sl => sl.prof === "farmer")) {
+    const plain = sl => !(sl.house && SPECIAL_PROF[sl.house.type]);
+    const sl = ordered.slice().reverse().find(x => x.prof === "nitwit") || ordered.slice().reverse().find(plain) || ordered[ordered.length - 1];
+    if (sl) sl.prof = "farmer";
+  }
+  const loneFarmer = sl => core && sl.prof === "farmer" && ordered.filter(x => x.prof === "farmer").length < 2;
   // builder slots go at the END with their own key range (<village key>#1000+n): other slots keep their persistence keys
   for (let k = 0; k < nBuilders; k++) ordered.push({ house: null, idx: 1000 + k, bed: null, prof: "builder" });
   // explorers: a village that has cartographers gets an explorer for each of them with 70% probability (own seeded stream, so nothing else shifts);
@@ -1842,7 +1888,7 @@ function villageRoster(rec) {
       // resident who is not a cartographer or a special-building tradesperson (explorers sleep in their tents), keeping the 70%
       for (let need = nE - (cap - nF - ordered.length), i = ordered.length - 1; need > 0 && i >= 0; i--) {
         const sl = ordered[i];
-        if (sl.prof === "cartographer" || sl.prof === "builder" || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        if (sl.prof === "cartographer" || sl.prof === "builder" || (sl.house && SPECIAL_PROF[sl.house.type]) || loneFarmer(sl)) continue;
         ordered.splice(i, 1); need--;
       }
     }
@@ -1860,7 +1906,7 @@ function villageRoster(rec) {
       const nShep = ordered.filter(sl => sl.prof === "shepherd").length;
       for (let i = ordered.length - 1; i >= 0; i--) {
         const sl = ordered[i];
-        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && nShep < 2) || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && nShep < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneFarmer(sl)) continue;
         ordered.splice(i, 1); break;
       }
     }
@@ -1869,14 +1915,23 @@ function villageRoster(rec) {
   // miner: ~95% of newly generated villages (own seeded stream and key <village key>#1400, so nothing else shifts; villages the player already
   // knows keep their people). In a classic village it may take the village one past the cap; in a sized village it takes the place of the
   // last plain resident, so the village keeps its size.
-  if (BF.miner && freshVillage(rec.key, rec.key + "#1400") && seededRand("miner:" + rec.key)() < MINER_CHANCE && cap >= 3) {
+  if (BF.miner && freshVillage(rec.key, rec.key + "#1400") && (seededRand("miner:" + rec.key)() < MINER_CHANCE || core) && cap >= 3) {
     if (rec.pop && ordered.length >= cap) {
       const count = p => ordered.filter(sl => sl.prof === p).length;
-      for (let i = ordered.length - 1; i >= 0; i--) {
+      let gone = false;
+      for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
         const sl = ordered[i];
-        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
-        ordered.splice(i, 1); break;
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneFarmer(sl)) continue;
+        ordered.splice(i, 1); gone = true;
       }
+      // core: the miner may take any resident's place but the farmer's, then the furniture maker's (a tiny village: miner, farmer, forester)
+      for (let i = ordered.length - 1; core && i >= 0 && !gone; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || loneFarmer(sl)) continue;
+        ordered.splice(i, 1); gone = true;
+      }
+      const fm = core && !gone ? ordered.findIndex(sl => sl.idx === 1300) : -1;
+      if (fm >= 0) ordered.splice(fm, 1);
     }
     if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1400, bed: null, prof: "miner" });
   }
@@ -1968,6 +2023,7 @@ function rayAABB(o, d, mn, mx) {
 // ---------- public API ----------
 BF.mobs = {
   list,
+  toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null); see syncHeld
   types: Object.keys(TYPES),
   init(sceneRef) {
     scene = sceneRef;

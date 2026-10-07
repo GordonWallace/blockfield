@@ -1,9 +1,9 @@
 // Miners (BF.miner): a villager profession (not vanilla) that digs cobblestone out of the ground for the village and sells it to builders.
-// - Roster: ~95% of newly generated villages get one (mobs.js villageRoster, own seeded stream and key <village key>#1400). Jobsite: the mining
+// - Roster: ~95% of newly generated villages get one (every one with village generator 3) (mobs.js villageRoster, own seeded stream and key <village key>#1400). Jobsite: the mining
 //   bench (jobs.js), placed in or beside a house like the forester's band saw.
-// - Tools: it starts with an iron pickaxe, which wears out like the player's (BF.wearStack: 1 use per block, 250 uses for iron). Digging speed
+// - Tools: a founding miner starts with a wooden pickaxe and 30-40 torches (one hired later: torches and emeralds only, trading.js hireKit). The pickaxe wears out like the player's (BF.wearStack: 1 use per block, 250 uses for iron). Digging speed
 //   follows the pickaxe's material (blocks.js tool.speed, the player's formula times VILLAGER_SLOW). When the pickaxe breaks it buys a new one
-//   from a toolsmith of its village (emeralds permitting), else crafts a stone pickaxe from 3 cobblestone + 2 sticks (sticks from planks).
+//   from a toolsmith of its village (emeralds permitting), else crafts a stone pickaxe from 3 cobblestone + 2 sticks (sticks bought from the forester, or made from planks).
 // - Surface stone first: it looks for above-ground stone within SEARCH (40) blocks of the village's box: the top block of a column that is
 //   stone (or coal / iron ore) and stands 1 or 2 blocks above one of its four neighbours, so the quarry levels outcrops and hillsides into
 //   walkable steps and never sinks a pit or trench. Never within BUILD_AVOID blocks of anything built, never more than FLOOR_BELOW under the plaza. It walks there and digs one block at a time.
@@ -72,12 +72,9 @@ function digTime(id, p) {
 }
 const canHarvest = (id, p) => { const b = BF.blocks[id]; if (!b || !b.needsTool) return true; const tool = p && BF.items[p.id].tool; return !!(tool && tool.type === b.tool && (tool.tier || 0) >= (b.minTier || 0)); };
 
-// Starting pack (trading.js stockFor): an iron pickaxe, torches for the shaft and sticks for a spare stone pickaxe.
+// Starting pack (trading.js stockFor, which adds the wooden pickaxe): 30-40 torches for the shaft.
 function seed(a) {
-  const T = TR().inv;
-  if (I("iron_pickaxe") != null && !a.some(s => s && isPick(s.id))) T.add(a, I("iron_pickaxe"), 1);
-  if (I("torch") != null) T.add(a, I("torch"), 16);
-  if (I("stick") != null) T.add(a, I("stick"), 6);
+  if (I("torch") != null) TR().inv.add(a, I("torch"), 30 + Math.floor(Math.random() * 11));
 }
 
 // ---------------------------------------------------------------- block classes
@@ -302,16 +299,14 @@ function dig(m, x, y, z) {
   if (!isFinite(b.hardness)) return false;
   W().setBlock(x, y, z, 0);
   if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if (keeps(d.id)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
-  if (b.hardness > 0) wearPick(m, p, 1);
+  wearPick(m, p, BF.toolWear.forBlock(id, p));
   if (BF.emit) BF.emit("blockBroken", x, y, z, id);
   return true;
 }
+// Wear at the player's rate (js/toolwear.js): a used-up pickaxe leaves its pack with a clink and a village log line.
 function wearPick(m, p, n) {
-  if (!p || BF.wearStack(p, n) !== "broken") return;
-  const i = m.inv.indexOf(p);
-  if (i >= 0) m.inv[i] = null;
+  if (!p || BF.toolWear.use(m, p, n) !== "broken") return;
   log("pickBroke", m, { pick: nameOf(p.id) });
-  if (BF.audio) { try { BF.audio.play("dig.metal", { x: m.position.x, y: m.position.y + 1, z: m.position.z, pitch: 1.5 }); } catch (e) { /* optional */ } }
 }
 // A hostile mob within reach (one that wandered into the tunnel from a cave, or spawned in its dark): the miner hits it with its pickaxe
 // (2 + tier damage, 2 uses of wear, like the player's), so it can't block the way for good.
@@ -323,7 +318,7 @@ function fend(m, Q, dt) {
   if (!o) return;
   Q.hitT = 0.8; m.ai.swingT = 0.3;
   BF.mobs.hurt(o, 2 + BF.items[p.id].tool.tier, "villager");
-  wearPick(m, p, 2);
+  wearPick(m, p, BF.toolWear.forHit(p));
   log("fend", m, { mob: o.type });
 }
 
@@ -521,7 +516,7 @@ function think(m, Q) {
       if (deal) return { kind: "trip", deal };
     }
     if (craftPick(m)) return null;
-    if (!underground && count(m, I("stick")) < 2) { const deal = findSeller(m, id => /(^|_)planks$/.test(nameOf(id)), Q.avoid); if (deal) return { kind: "trip", deal }; }
+    if (!underground && count(m, I("stick")) < 2) { const deal = findSeller(m, id => nameOf(id) === "stick" || /(^|_)planks$/.test(nameOf(id)), Q.avoid); if (deal) return { kind: "trip", deal }; }
     if (underground) return { kind: "exit" };
     Q.status = "needs a pickaxe";
     return null;
@@ -709,7 +704,7 @@ function statusText(m) {
     if (k.kind === "dig") return Q.shaft && Q.shaft.S == null ? "Digging a mineshaft" : "Mining underground";
     if (k.kind === "exit") return "Climbing out of the mine";
     if (k.kind === "climb") return "Digging its way out";
-    if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : "planks");
+    if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : nameOf(k.deal.item) === "stick" ? "sticks" : "planks");
   }
   return Q && Q.status ? Q.status.charAt(0).toUpperCase() + Q.status.slice(1) : "";
 }

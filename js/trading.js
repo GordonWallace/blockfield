@@ -28,6 +28,7 @@ const VALUE = {
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
+  golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
   iron_ore: .45, gold_ore: 1.05,                                    // miner goods: ore smelts into one ingot
@@ -147,8 +148,9 @@ const TRADES = {
   // ("Out of emeralds" otherwise), which is what the mod's trade stock does too. Nothing else to sell: its logs and apples are its own.
   // It also sells the wood it has harvested (js/forester.js): planks it sawed from its own logs, and the logs. Prices 104-111% of VALUE (30 planks
   // = 0.9 emerald, 8 logs = 1 emerald); only what it actually holds can be bought ("Out of stock"), nothing is restocked or part of its starting pack.
-  // The furniture maker and the builder buy these.
-  forester: [["1 oak_sapling > 1 emerald", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
+  // The furniture maker and the builder buy these. Sticks (104% of VALUE) it makes from its planks and keeps in stock (js/forester.js sticks), for
+  // the toolsmith, the miner and the player.
+  forester: [["1 oak_sapling > 1 emerald", "1 emerald > 48 stick", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
   // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
@@ -273,13 +275,20 @@ function profile(prof) {
 }
 
 // ---------------------------------------------------------------- stock and restock
+// Starting tools (Gordon's 1.1 list): villagers alive when their village is generated start with a rudimentary tool of their trade. Whoever takes
+// up one of these trades later gets no tools, only the emeralds to buy them (hireKit). These four never start with any other tool among their wares.
+const STARTER_TOOLS = { farmer: ["wooden_hoe"], forester: ["wooden_axe"], miner: ["wooden_pickaxe"], shepherd: ["shears"] };
+// What a newly hired villager of these trades must buy to start work (any one of each group), and what else it is given.
+const HIRE_NEEDS = { farmer: [/_hoe$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/] };
+const isToolItem = id => { const it = BF.items[id]; return !!(it && ((it.tool && typeof it.tool === "object") || it.name === "shears")); };   // blocks carry tool: "axe" etc. (the tool that mines them)
 function stockFor(prof, v) {
   if (prof === "builder" && BF.builder && BF.builder.startStock) return BF.builder.startStock(v);   // materials for the first house, see js/builder.js
   const a = inv.create(), I = BF.I, em = I.emerald;
   const entries = [];
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
+  if (STARTER_TOOLS[prof]) for (const pool of table(prof)) for (const o of pool) if (isToolItem(o.sell.id)) noStart.add(o.sell.id);   // their one tool is the starter below
   if (prof === "miner") for (const n of ["cobblestone", "coal", "iron_ore", "gold_ore", "diamond"]) noStart.add(I[n]);   // mined, never given
-  if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); }   // harvested, never given
+  if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -306,8 +315,37 @@ function stockFor(prof, v) {
   if (prof === "explorer" && I.tent !== undefined) inv.add(a, I.tent, 1);   // pitches it when night falls far from a bed (js/explorer.js)
   if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
   if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
-  if (prof === "miner" && BF.miner) BF.miner.seed(a);                      // an iron pickaxe, torches and sticks
+  if (prof === "miner" && BF.miner) BF.miner.seed(a);                      // torches for the shaft
+  for (const n of STARTER_TOOLS[prof] || []) if (I[n] != null && !a.some(s => s && s.id === I[n])) inv.add(a, I[n], 1);
+  if (prof === "shepherd" && I.wheat_item != null) inv.add(a, I.wheat_item, 8);   // feed for the first days (it buys more when it runs low)
   return a;
+}
+// Emeralds' worth of the cheapest offer in any trade table selling an item `ok(name)` accepts (per piece), or null when nobody sells one.
+function cheapest(ok) {
+  let best = null;
+  for (const prof in TRADES) for (const pool of table(prof)) for (const o of pool) {
+    const it = BF.items[o.sell.id];
+    if (!it || !ok(it.name) || o.buy.length !== 1 || o.buy[0].id !== BF.I.emerald) continue;
+    const p = o.buy[0].n / o.sell.n;
+    if (best == null || p < best) best = p;
+  }
+  return best;
+}
+// A villager takes up farming, forestry, mining or shepherding after its village was generated: no tools, just enough emeralds on top of its
+// own to buy them (the cheapest seller's price of each tool it lacks, 2 when nobody sells one yet), and a new miner its 30-40 torches.
+function hireKit(m, prof) {
+  const I = BF.I, needs = HIRE_NEEDS[prof];
+  if (!m || !Array.isArray(m.inv) || !needs) return 0;
+  let want = 0;
+  for (const re of needs) {
+    if (m.inv.some(s => s && re.test(BF.items[s.id].name))) continue;
+    const p = cheapest(n => re.test(n));
+    want += re.source === "^wheat_item$" ? 1 : Math.max(1, Math.ceil(p == null ? 2 : p));
+  }
+  const have = inv.count(m.inv, I.emerald), add = Math.max(0, want - have);
+  if (add) inv.add(m.inv, I.emerald, add);
+  if (prof === "miner" && I.torch != null) inv.add(m.inv, I.torch, rndInt(30, 40));
+  return add;
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.
 function restock(v, day) {
@@ -434,6 +472,6 @@ function unpack(v, o) {
 
 BF.trades = {
   SLOTS, EM_CAP, EM_DAY, BUILDER_EM_CAP, BUILDER_EM_DAY, LEVELS, LEVEL_XP, TRADE_XP, CAP_K, VALUE, TRADES, PRODUCE, inv,
-  parseTrade, offers: genOffers, table, profile, stockFor, restock, init, blockReason, FEED, feedOffers, syncFeed, needsFood, exchange, addXp, pack, unpack,
+  parseTrade, offers: genOffers, table, profile, stockFor, STARTER_TOOLS, hireKit, restock, init, blockReason, FEED, feedOffers, syncFeed, needsFood, exchange, addXp, pack, unpack,
 };
 })();
