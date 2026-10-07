@@ -123,8 +123,7 @@ function freeCells(v, b, r) {
 // The roster counts the original layout's buildings (v.nb0), so pens added later for the shepherds never change who lives there.
 function jobList(v) {
   const key = Math.round(v.x) + "," + Math.round(v.z);
-  let roster;
-  try { roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }); } catch (e) { console.error(e); return out; }
+  const roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 });   // callers catch
   const r = seeded("jobs:" + key);
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   const n = drawCount(needy.length, r);
