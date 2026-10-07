@@ -43,6 +43,7 @@
   {"name": "minechain", "kind": "node", "tier": "integration", "file": "test/minechain.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "miner soak, 1 day x 2 villages"},
   {"name": "miner-actions", "file": "test/miner-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "shepherd-misc", "file": "test/shepherd-misc.js", "kind": "actions", "tier": "integration"},
+  {"name": "toolsmith-actions", "file": "test/toolsmith-actions.js", "kind": "actions", "tier": "integration", "timeout": 900},
   {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"}
  ]
 }

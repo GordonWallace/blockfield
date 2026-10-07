@@ -12,6 +12,8 @@
 // - Chests: villagers whose inventory is full and whose house has no chest they may use order one (js/storage.js orders). The furniture
 //   maker makes chests from 8 planks (the vanilla recipe) for the orders it has, carries one to the house and puts it down on the spot the
 //   villager picked, taking 1 emerald from the villager's purse. Deliveries come before bed sales.
+// - Furnaces: it makes furnaces from 8 cobblestone (the vanilla recipe), bought from the miner, and keeps FURNACE_STOCK in stock whatever the
+//   demand. It sells them at its offer "1 emerald > 1 furnace"; a toolsmith with no furnace in the village comes to buy one (js/toolsmith.js).
 // See CONTRACT.md "Furniture makers".
 (() => {
 "use strict";
@@ -27,6 +29,8 @@ const BUY_BEDS = 2;                           // buys ingredients for this many 
 const BUILDER_BEDS = 2;                       // a builder is happy to keep this many beds in hand for its next house
 const CHEST_PLANKS = 8;                       // one chest = 8 planks
 const CHEST_STOCK = 3;                        // makes chests only for open orders, at most this many in hand
+const FURNACE_COBBLE = 8;                     // one furnace = 8 cobblestone
+const FURNACE_STOCK = 1;                      // keeps this many furnaces in stock, demand or not
 const CRAFT_PAUSE = 1.8, WORK_END = 0.45, TRADE_PAUSE = 1.6;
 const LOG = [];
 const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
@@ -38,6 +42,9 @@ const isLog = id => { const n = nameOf(id); return /_log$/.test(n) && !/^strippe
 const sum = (m, f) => { let n = 0; for (const s of m.inv) if (s && f(s.id)) n += s.count; return n; };
 const beds = m => TR().inv.count(m.inv, BF.I.red_bed);
 const chests = m => TR().inv.count(m.inv, BF.I.chest);
+const furnaces = m => (BF.B.furnace != null ? TR().inv.count(m.inv, BF.B.furnace) : FURNACE_STOCK);
+const isCobble = id => id === BF.I.cobblestone;
+const furnacesWanted = m => Math.max(0, FURNACE_STOCK - furnaces(m));
 const orders = m => (BF.storage && m.village ? BF.storage.orders(m.village) : []);
 const chestsWanted = m => Math.max(0, Math.min(CHEST_STOCK, orders(m).length) - chests(m));   // chests still to make for open orders
 // Takes n items of a kind (wool, planks, logs) from the inventory, the biggest stacks first. Returns how many were taken.
@@ -62,6 +69,7 @@ function seed(a) {
   const has = f => a.reduce((n, s) => n + (s && f(s.id) ? s.count : 0), 0);
   if (has(isWool) < WOOL) inv.add(a, I.white_wool, WOOL - has(isWool));
   if (has(isPlanks) < PLANKS) inv.add(a, I.planks, PLANKS - has(isPlanks));
+  if (BF.B.furnace != null && inv.count(a, BF.B.furnace) < FURNACE_STOCK) inv.add(a, BF.B.furnace, FURNACE_STOCK - inv.count(a, BF.B.furnace));   // one furnace for sale
 }
 
 // What it could make right now: {kind: "chest" | "bed" | "planks"} or null. Chests for open orders come first.
@@ -73,6 +81,7 @@ function plan(m) {
     if (planks >= CHEST_PLANKS && inv.canFit(m.inv, [{ id: I.chest, n: 1 }], [])) return { kind: "chest" };
     if (planks < CHEST_PLANKS && sum(m, isLog) > 0 && inv.canFit(m.inv, [{ id: I.planks, n: LOG_PLANKS }], [])) return { kind: "planks" };
   }
+  if (furnacesWanted(m) > 0 && sum(m, isCobble) >= FURNACE_COBBLE && inv.canFit(m.inv, [{ id: BF.B.furnace, n: 1 }], [])) return { kind: "furnace" };
   if (beds(m) >= BED_STOCK || sum(m, isWool) < WOOL) return null;
   if (planks >= PLANKS) return inv.canFit(m.inv, [{ id: I.red_bed, n: 1 }], []) ? { kind: "bed" } : null;
   if (sum(m, isLog) > 0 && inv.canFit(m.inv, [{ id: I.planks, n: LOG_PLANKS }], [])) return { kind: "planks" };
@@ -82,6 +91,7 @@ function craft(m, p) {
   const inv = TR().inv, I = BF.I;
   if (p.kind === "planks") { take(m, isLog, 1); inv.add(m.inv, I.planks, LOG_PLANKS); log("craft", m, { made: LOG_PLANKS + " planks" }); return; }
   if (p.kind === "chest") { take(m, isPlanks, CHEST_PLANKS); inv.add(m.inv, I.chest, 1); log("craft", m, { made: "chest", chests: chests(m) }); return; }
+  if (p.kind === "furnace") { take(m, isCobble, FURNACE_COBBLE); inv.add(m.inv, BF.B.furnace, 1); log("craft", m, { made: "furnace", furnaces: furnaces(m) }); return; }
   take(m, isWool, WOOL); take(m, isPlanks, PLANKS);
   inv.add(m.inv, I.red_bed, 1);
   log("craft", m, { made: "bed", beds: beds(m) });
@@ -105,6 +115,8 @@ const wantsJob = m => !!plan(m);
 // Shortfall {wool: n, planks: n} for the next BUY_BEDS beds (logs on hand count as 4 planks each); empty while it holds BED_STOCK beds.
 function shortfall(m) {
   const out = {}, room = BED_STOCK - beds(m), forChests = CHEST_PLANKS * chestsWanted(m);
+  const cobble = FURNACE_COBBLE * furnacesWanted(m) - sum(m, isCobble);
+  if (cobble > 0) out.cobble = cobble;   // furnaces: cobblestone from the miner
   if (room <= 0) { const p = forChests - sum(m, isPlanks) - LOG_PLANKS * sum(m, isLog); if (p > 0) out.planks = p; return out; }
   const n = Math.min(BUY_BEDS, room);
   const w = WOOL * n - sum(m, isWool), p = PLANKS * n + forChests - sum(m, isPlanks) - LOG_PLANKS * sum(m, isLog);
@@ -113,7 +125,7 @@ function shortfall(m) {
   return out;
 }
 // The kind of ingredient an item is, and how many planks one item is worth.
-const kindOf = id => (isWool(id) ? ["wool", 1] : isPlanks(id) ? ["planks", 1] : isLog(id) ? ["planks", LOG_PLANKS] : null);
+const kindOf = id => (isWool(id) ? ["wool", 1] : isPlanks(id) ? ["planks", 1] : isLog(id) ? ["planks", LOG_PLANKS] : isCobble(id) ? ["cobble", 1] : null);
 const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession !== "furniture_maker" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 function findSeller(m, short, avoid) {
   const R = m.village, T = TR();
@@ -310,10 +322,10 @@ function ai(m, dt, out) {
 function statusText(m) {
   if (!m || m.profession !== "furniture_maker") return "";
   const sh = m.furn;
-  if (sh && sh.stage && sh.deal) return sh.deal.kind === "deliver" ? "Delivering a chest" : sh.deal.kind === "sell" ? "Taking beds to a builder" : "Buying " + (isWool(sh.deal.item) ? "wool" : "boards");
-  if (m.job && m.job.mode === "work" && plan(m)) return plan(m).kind === "chest" || chestsWanted(m) > 0 ? "Making a chest" : "Making beds";
+  if (sh && sh.stage && sh.deal) return sh.deal.kind === "deliver" ? "Delivering a chest" : sh.deal.kind === "sell" ? "Taking beds to a builder" : "Buying " + (isWool(sh.deal.item) ? "wool" : isCobble(sh.deal.item) ? "cobblestone" : "boards");
+  if (m.job && m.job.mode === "work" && plan(m)) return plan(m).kind === "chest" || chestsWanted(m) > 0 ? "Making a chest" : plan(m).kind === "furnace" ? "Making a furnace" : "Making beds";
   return "";
 }
 
-BF.furniture = { WOOL, PLANKS, LOG_PLANKS, BED_STOCK, BUY_BEDS, BUILDER_BEDS, CHEST_PLANKS, CHEST_STOCK, chestsWanted, findDelivery, seed, plan, craft, work, wantsJob, shortfall, findSeller, doBuy, builderWants, findBuyer, doSell, ai, statusText, LOG };
+BF.furniture = { WOOL, PLANKS, LOG_PLANKS, BED_STOCK, BUY_BEDS, BUILDER_BEDS, CHEST_PLANKS, CHEST_STOCK, FURNACE_COBBLE, FURNACE_STOCK, furnacesWanted, chestsWanted, findDelivery, seed, plan, craft, work, wantsJob, shortfall, findSeller, doBuy, builderWants, findBuyer, doSell, ai, statusText, LOG };
 })();

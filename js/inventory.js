@@ -14,6 +14,7 @@ let open_ = false, mode = "inventory", openedAt = 0;
 let selected = 0;
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2;
 let furnace = null;                           // furnace state shown on the furnace screen
+let furnaceDirty = false;                     // the open furnace changed in a simulation step: redraw it
 let chest = null;                             // chest state shown on the chest screen
 let villager = null, pay = [null, null], offerSel = -1, tradeOffer = null, tradeResult = null, levelFlashT = 0;
 let creTab = "building", creSearch = "";
@@ -1349,12 +1350,10 @@ const api = {
     });
   },
   update(dt) {
-    // furnaces cook while the game runs, or while you watch one
-    if (!BF.state.paused || (open_ && mode === "furnace")) {
-      let changed = false;
-      for (const f of furnaces.values()) if (tickFurnace(f, dt) && f === furnace) changed = true;
-      if (open_ && mode === "furnace" && furnace) { if (changed) renderAll(); else renderFurnaceProgress(); }
-    }
+    // furnaces cook in game time (simTick, so fast-forward speeds them up too), or in real time while you watch one in the pause
+    if (BF.state.paused && open_ && mode === "furnace" && furnace) furnaceDirty = tickFurnace(furnace, dt) || furnaceDirty;
+    if (open_ && mode === "furnace" && furnace) { if (furnaceDirty) renderAll(); else renderFurnaceProgress(); }
+    furnaceDirty = false;
     if (open_) {
       if (mode === "trade" && villager) {
         if (villager.dead || villager.removed) { api.close(); return; }
@@ -1450,6 +1449,9 @@ const api = {
   ensureTrades,
   close() { closeScreen(false); },
   furnaceState(x, y, z) { return furnaces.get(`${x},${y},${z}`) || null; },
+  furnaceRecord(x, y, z) { return furnaceAt({ x, y, z }); },   // creates the furnace's state when it has none yet (villagers: js/toolsmith.js)
+  // One simulation step for every furnace (main.js runs it with the world, so it follows the fast-forward).
+  simTick(h) { for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true; },
   chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
   // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
   chestAdd(x, y, z, itemId, count = 1) {

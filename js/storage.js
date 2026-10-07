@@ -78,9 +78,10 @@ const INPUTS = {
   farmer: m => [[id => BF.items[id] && BF.items[id].plants != null, (BF.food ? BF.food.SEED_KEEP : 8) * 2], ["wheat_item", BF.villageLife ? BF.villageLife.WHEAT_SPARE : 24], ["bone_meal", 16]],
   shepherd: m => [["wheat_item", 16]],
   forester: m => [[id => /_sapling$/.test(nm(id)), 16]],
-  furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8]],
+  furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8], ["cobblestone", 16]],
   cartographer: m => [["iron_ingot", 4], ["gold_ingot", 1], ["paper", 32], ["compass", 1]],
   miner: m => [["torch", 16], ["stick", 8]],   // shaft torches and spare pickaxe handles (js/miner.js)
+  toolsmith: m => [[id => /planks$/.test(nm(id)), 12], ["stick", 8], ["cobblestone", 9], ["iron_ingot", 9], ["gold_ingot", 6], ["diamond", 6], ["raw_iron", 9], ["raw_gold", 6], ["coal", 8], ["furnace", 1]],   // tool materials (js/toolsmith.js)
   builder: m => (TR().profile("builder").wants ? [...TR().profile("builder").wants.keys()].map(id => [nm(id), 128]) : []).concat([["red_bed", 4], ["oak_door", 8], ["torch", 32], ["chest", 2], ["glass", 64]]),
 };
 const SCRAPS = /^(rotten_flesh|spider_eye|poisonous_potato|pufferfish)$/;
