@@ -767,3 +767,16 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   walks out through the gate to the path outside (`leave`). Fences connect to gates in line with them.
 - **Looms and sheep**: only a pen with a shepherd's loom on its outside ring (`hasLoom(pen)`, from `BF.jobs.planFor`) is stocked with sheep; spare pens stay empty.
 - Tests: `test/shepherd-check.js`, `test/shepherd-day.js`, `test/shepherd-misc.js` (`NODE_PATH=$(npm root -g) node test/run.js /tmp/x test/shepherd-day.js`).
+
+## Villager status, food for the unemployed, claimed beds (js/villagerstatus.js, loaded after villagelog.js)
+- `BF.villagerStatus.text(m)`: the trade screen's status line for any villager. villageLife, builder and explorer statusText speak first;
+  otherwise `routine(m)` reads the everyday AI (sleeping, heading to bed, walking to / working at the jobsite, looking for work, relaxing...).
+  `mobs.interact` snapshots `ai.was = {mode, flee}` before the screen freezes the villager; `setTrading(v, false)` clears it.
+- Nitwits and unemployed villagers open the trade screen like everyone else (no offers). An unemployed villager with less than a day's food
+  gets `BF.trades.feedOffers()` (food -> 1 emerald at 88% of VALUE, `o.feed`) while the screen is open (`syncFeed(v, open)` from init and
+  closeScreen); it buys until it holds 3 days of food ("Has enough food"). A starving villager still accepts offers in which it receives food.
+- Claimed beds (mobs.js `claimBed`): at night a villager without a working bed (bedless house slot, builder or explorer without a home,
+  broken bed) takes the nearest free village bed (`BF.breeding.freeBed`), marked `bed.claimed`; saved as `bed: [x, y, z, f]` in trades.pack.
+  A builder who finishes its own house moves into it and evicts anyone who borrowed that bed.
+- Creative mode: the trade screen's villager inventory (`vinv` slots) is editable like any container (click, split, drag, shift-click
+  between it and the player's inventory); in survival it stays greyed out and read-only.

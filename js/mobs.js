@@ -1177,11 +1177,35 @@ function wake(m) {
   ai.route = null; ai.night = null;
   ai.leaving = !bedtime() && !(b && b.tent);   // out in the field after a night in a tent: nothing to walk out of
 }
+// The house (village layout) whose floor holds this bed, or null.
+function homeOfBed(rec, b) {
+  for (const h of (rec && rec.houses) || []) if (h && h.w && b.x >= h.x && b.x < h.x + h.w && b.z >= h.z && b.z < h.z + h.d) return h;
+  return null;
+}
+// A villager without a working bed of its own (no bed in its house, a builder or explorer before it has a home, its bed broken) claims the
+// nearest free bed of the village and keeps it: it sleeps there every night and the claim is saved (trades.pack). Newborns claim theirs in js/breeding.js.
+function claimBed(m, n, dt) {
+  const rec = m.village, B = BF.breeding;
+  if (!rec || !B || !B.freeBed || (m.slot && m.slot.bred) || (m.bed && m.bed.tent) || m.homeBed !== undefined) return;
+  if (m.bed && bedOK(m.bed)) return;
+  if ((n.claimT = (n.claimT || 0) - dt) > 0) return;
+  n.claimT = 5;                                              // none free: look again in a few seconds
+  if (!rec.beds || BF.simNow() * 1000 - (rec.bedScanAt || 0) > 3000) B.scanBeds(rec);
+  const b = B.freeBed(rec, m);
+  if (!b) return;
+  m.bed = Object.assign(b, { claimed: true });
+  const h = homeOfBed(rec, b);
+  if (h) m.home = h;
+  n.fails = 0; m.ai.route = null;
+  if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
+}
 // Night: head for bed and sleep; without a usable bed stand still indoors or by the village bell.
 function nightAI(m, dt, out) {
-  const ai = m.ai, T = m.def, V = m.village, H = m.home;
+  const ai = m.ai, T = m.def, V = m.village;
   ai.mode = "idle"; ai.t = rnd(1, 3); ai.leaving = false;
   const n = ai.night || (ai.night = { fails: 0, retryT: 0 });
+  claimBed(m, n, dt);
+  const H = m.home;
   if (ai.routeKind !== "bed") ai.route = null;
   if (m.bed && bedOK(m.bed) && n.fails < 3) {
     if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
@@ -1839,6 +1863,7 @@ function updateVillages(dt) {
       m.ai.leaving = !bedtime(); // spawned indoors by day: walk out through the door
       const sv = villagerSaves.get(villagerKey(m));
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
+      if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
       if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
     }
@@ -1987,9 +2012,8 @@ BF.mobs = {
     if (!mob || mob.dead || mob.removed || mob.type !== "villager") return null;
     if (mob.sleeping) return "Villager is sleeping";
     if (mob.child) { mob.lookAt = "player"; mob.ai.lookT = 1.5; return "The child is too young to trade"; }
+    mob.ai.was = { mode: mob.ai.mode, flee: mob.ai.fleeT > 0 };   // what it was doing, for the trade screen's status line (js/villagerstatus.js)
     mob.lookAt = "player"; mob.ai.lookT = 3; mob.ai.mode = "idle"; mob.ai.t = 3;
-    if (mob.profession === "nitwit") { mob.ai.lookT = 1; return "The nitwit just stares at you"; }
-    if (mob.profession === "unemployed") { mob.ai.lookT = 1; return "This villager has no job yet"; }
     const inv = BF.inventory, I = BF.I || {};
     if (inv && typeof inv.openTrade === "function") {
       try { inv.openTrade(mob); } catch (e) { console.error(e); }
@@ -2011,6 +2035,7 @@ BF.mobs = {
   setTrading(mob, on) {
     if (!mob || mob.removed) return;
     mob.tradingWith = on ? BF.player : null;
+    if (!on) mob.ai.was = null;
     if (on) { mob.vel.x = mob.vel.z = 0; mob.ai.mode = "idle"; mob.ai.t = 2; mob.lookAt = "player"; }
   },
   professions: PROFESSIONS,
@@ -2044,7 +2069,7 @@ BF.mobs = {
     return true;
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
-  nav: { findPath, followRoute, feetCell, walkCell, blockAt, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
+  nav: { findPath, followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
   spawning: true,
   clear() {
     for (const m of list.slice()) removeMob(m);
