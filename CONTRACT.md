@@ -33,10 +33,10 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
   color, stack. Item fields: name, tool{type,tier,speed,damage}, food, color, stack.
   `BF.SOLID/OPAQUE/RENDER` lookup tables. `BF.itemName(id)` -> display name.
 - Doors and beds are two blocks, one block id per state (blocks.js): `BF.DIRS[f]` = [dx, dz] for facing f
-  (0 north -z, 1 east +x, 2 south +z, 3 west -x), `BF.dirIndex(dx, dz)`, `BF.doorId(f, upper, open)`, `BF.bedId(f, head)`.
-  Door blocks have `door: {f, upper, open}` (f = edge the closed slab sits on; open doors are not solid), bed blocks
+  (0 north -z, 1 east +x, 2 south +z, 3 west -x), `BF.dirIndex(dx, dz)`, `BF.doorId(f, upper, open, wood?)`, `BF.bedId(f, head)`.
+  Door blocks have `door: {f, upper, open, wood}` (f = edge the closed slab sits on; open doors are not solid), bed blocks
   `bed: {f, head}` (f = foot -> head). Both have `boxes` (model boxes in 1/16, optional 7th entry = tile name),
-  `box` (collision box in 1/16), `item` (the item they drop/pick as: `oak_door`, `red_bed`) and `hidden` (not in the
+  `box` (collision box in 1/16), `item` (the item they drop/pick as: `<wood>_door`, `red_bed`) and `hidden` (not in the
   creative menu). Items with `places: "door"|"bed"` place them. `BF.CBOX[id]` = collision box in blocks for
   non-full solid blocks (used by `boxCollides`/`moveBox`), `BF.rotBox(box16, f)` rotates a south-facing box.
 - `BF.world.partnerOf(x,y,z,id?)` -> other half [x,y,z] | null, `removePartner(x,y,z,id)` (removes the other half
@@ -131,7 +131,13 @@ for every tile (`stone_bricks`, `deepslate_top`, `lapis_ore`, `tnt_side`, `magma
   (tiles `stripped_<sp>_log` / `stripped_<sp>_log_top`), `<sp>_wood` (bark on all six faces, tile `<sp>_log`), `stripped_<sp>_wood` (tile `stripped_<sp>_log`), and
   `<sp>_fence` for all but oak (model `fence`, tile `<sp>_planks`, icon tile `<sp>_fence`; fences of any wood connect to each other: `connects` in world.js tests `model === "fence"`).
   Any log/wood/stripped variant crafts 4 planks of its own species (inventory.js maps `stripped_`/`_wood` to the species), is furnace fuel and smelts to charcoal.
-  Right-clicking a log or wood with an axe strips it (player.js `secondaryDown`). Not done: other-wood doors, fence gates, slabs/stairs (Tier 2), per-species village houses.
+  Right-clicking a log or wood with an axe strips it (player.js `secondaryDown`). Wood variants: every species (`BF.WOOD_SPECIES`) has planks, log, stripped log, wood, stripped wood, fence, fence gate, door, sign, slab and stairs.
+  Doors (`<sp>_door_<upper|lower>[_open]_<nesw>`) and gates (`<sp>_fence_gate_<x|z>[_open]`) come from `doorDefsOf(sp)` / `gateDefsOf(sp)`; oak's ids are
+  the original ones, the other seven woods are appended in the "wood variants pack". `BF.doorId(..., wood)` / `BF.gateId(axis, open, wood)` default to oak;
+  `world.setDoor` / `setGate` keep the wood. Items `<sp>_door` / `<sp>_fence_gate` carry `wood` (placement reads it) and `sprite` (the oak icon in the
+  species colour). Door tiles for the seven woods are painted in textures-colour.js (`DOOR_STYLE`); oak's come from Faithful.
+  Recipes (Minecraft rules): doors, fences, gates, signs, slabs and stairs need planks of their own wood; 4 logs (2x2) of one wood -> 3 wood (stripped too);
+  sticks are one item and anything that only needs "planks" (sticks, tools, crafting table, chest, bed, bookshelf, job blocks) takes any wood, mixed.
 - Colour (names `<colour>_<family>`): `wool` (`white_wool` plus 15 new; the old plain `wool` block is a hidden legacy id that drops and resolves to `white_wool`), `terracotta` (existing plain + orange/yellow/white/brown/red kept; 11 new),
   `_concrete`, `_concrete_powder`, `_stained_glass`, `_glazed_terracotta` (16 each), `tinted_glass`. Block fields: `translucent: true` (stained/tinted glass) sends the
   faces into the blended pass (liquidMat, alpha from the tile) instead of the alpha-tested one; `hardensTo: "<colour>_concrete"` on powder.
@@ -198,7 +204,7 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 - `BF.mobs.exportVillagers() -> {key: {inv:[{n,c}|null x18], level, xp, day}}` (live villagers override stored ones) and
   `importVillagers(obj)` (replaces the stored map; call after `newWorld`). Cows also drop 0-2 leather.
 - Zombies (only) with a target (player, not in creative, or a villager) that stay pressed against a closed door for 3 s
-  break it: both halves removed, one `oak_door` drops. Other hostiles cannot pass closed doors.
+  break it: both halves removed, one door of that wood drops. Other hostiles cannot pass closed doors.
 - `worldgen.villagesNear()` house records: `{x, y, z, w, d, doorX, doorZ, outX, outZ (cell in front of the door), type,
   beds: [{x, y, z, f}]}` (bed = foot block, f = foot -> head).
 

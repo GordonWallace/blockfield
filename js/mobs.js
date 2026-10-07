@@ -1012,7 +1012,7 @@ function zombieHuntVillagers(m, dt, out) {
   return false;
 }
 
-// Zombies with a target that stay pressed against a closed door for 3 s break it (both halves, one oak_door drops).
+// Zombies with a target that stay pressed against a closed door for 3 s break it (both halves, one door of its wood drops).
 function zombieBreakDoor(m, dt, out) {
   const ai = m.ai, W = BF.world;
   let hit = null;

@@ -1025,19 +1025,19 @@ function actionBar(text) {
 // ---------- doors and beds ----------
 const lookFacing = () => BF.dirIndex(-Math.sin(yaw), -Math.cos(yaw));
 const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c === 0 || BF.RENDER[c] === 3 || !!BF.REPLACEABLE[c]) && !cellBlockedByEntity(x, y, z); };
-// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z).
-function placeMulti(kind, x, y, z) {
+// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z). wood: species of a door / fence gate item.
+function placeMulti(kind, x, y, z, wood) {
   const W = BF.world, f = lookFacing();
   if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
   if (kind === "gate") {   // fence gate: spans across the player's view
     if (!(y < BF.H && W.isLoaded(x, z) && freeCell(x, y, z))) return false;
-    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0);
+    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0, wood);
     W.setBlock(x, y, z, id); emit("blockPlaced", x, y, z, id);
     return true;
   }
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
-  if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0)]];
+  if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0, wood)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0, wood)]];
   else {
     const hx = x + BF.DIRS[f][0], hz = z + BF.DIRS[f][1];
     if (!BF.SOLID[W.getBlock(hx, y - 1, hz)]) return false;
@@ -1238,7 +1238,7 @@ function secondaryDown() {
   if (it.places && target) {
     const into = BF.REPLACEABLE && BF.REPLACEABLE[target.id];
     const x = into ? target.x : target.x + target.normal[0], y = into ? target.y : target.y + target.normal[1], z = into ? target.z : target.z + target.normal[2];
-    if (!placeMulti(it.places, x, y, z)) return false;
+    if (!placeMulti(it.places, x, y, z, it.wood)) return false;
     try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing();
     placeCd = PLACE_REPEAT;

@@ -519,7 +519,7 @@ function statusText(m) {
 });
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
   if (BF.I.oak_fence_gate === undefined) return;
-  addShaped(BF.I.oak_fence_gate, 1, ["SPS", "SPS"], { S: BF.I.stick, P: BF.I.planks }, "Stick, Oak Planks, Stick \u00d7 2 rows \u2192 Oak Fence Gate");
+  addShaped(BF.I.oak_fence_gate, 1, ["SPS", "SPS"], { S: BF.I.stick, P: BF.I.planks }, "Stick, Planks, Stick \u00d7 2 rows (one wood) \u2192 Fence Gate of that wood");   // other woods: recipes-colour.js
   if (fuel) fuel([BF.I.oak_fence_gate], 15);
 });
 if (BF.texKit) {

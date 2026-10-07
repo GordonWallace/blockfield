@@ -72,7 +72,7 @@ function buildRecipes() {
   addShaped(I.crafting_table, 1, ["PP", "PP"], { P }, "4 Planks (2\u00d72) \u2192 Crafting Table");
   addShaped(I.chest, 1, ["PPP", "P P", "PPP"], { P }, "8 Planks in a ring \u2192 Chest");
   addShaped(I.oak_fence, 3, ["PSP", "PSP"], { P: I.planks, S }, "Oak Planks, Stick, Oak Planks \u00d7 2 rows \u2192 3 Oak Fence");
-  addShaped(I.oak_door, 3, ["PP", "PP", "PP"], { P }, "6 Planks (2\u00d73) \u2192 3 Oak Doors");
+  addShaped(I.oak_door, 3, ["PP", "PP", "PP"], { P: I.planks }, "6 Planks of one wood (2\u00d73) \u2192 3 Doors of that wood");   // other woods: recipes-colour.js
   addShaped(I.red_bed, 1, ["WWW", "PPP"], { W: names.filter(n => /_wool$/.test(n)).map(n => I[n]), P }, "3 Wool (any colour) over 3 Planks \u2192 Red Bed");
   addShaped(I.furnace, 1, ["CCC", "C C", "CCC"], { C }, "8 Cobblestone in a ring \u2192 Furnace");
   const mats = [["wooden", P, "Planks"], ["stone", C, "Cobblestone"], ["iron", I.iron_ingot, "Iron Ingot"],
