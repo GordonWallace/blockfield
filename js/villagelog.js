@@ -128,7 +128,7 @@ function updateLabels(on) {
 
 // ---------------------------------------------------------------- panel (F3)
 const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-// The panel's numbers as data, for the F3 panel and the second-screen feed (js/debugfeed.js).
+// The panel's numbers as data, for the second-screen debug feed (js/debugfeed.js); the F3 panel below draws its own.
 const byName = (x, y) => (x[0] === "Child") - (y[0] === "Child") || x[0].localeCompare(y[0]);   // alphabetical, children last
 function panelData(rec) {
   const t = tally(rec), name = (BF.signs && BF.signs.villageName && BF.signs.villageName(rec.key)) || "Village";
@@ -144,11 +144,16 @@ function renderPanel() {
   if (!panelEl) return;
   const pp = BF.player && BF.player.position, rec = pp ? villageAt(pp.x, pp.z) : null;
   if (!rec) { panelEl.hidden = true; return; }
-  const d = panelData(rec), a = entries(rec.key);
-  const occ = d.occupations.map(([p, n]) => n + " " + p).join(", "), free = d.free.map(([p, n]) => n + " " + p).join(", ");
+  const t = tally(rec), a = entries(rec.key), name = (BF.signs && BF.signs.villageName && BF.signs.villageName(rec.key)) || "Village";
+  const prof = {};
+  for (const m of rec.members || []) if (m.type === "villager" && !m.dead && !m.removed) { const p = m.child ? "Child" : pretty(m.profession); prof[p] = (prof[p] || 0) + 1; }
+  const occ = Object.entries(prof).sort((x, y) => y[1] - x[1]).map(([p, n]) => n + " " + p).join(", ");
+  const un = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec) : [], uc = {};
+  for (const s of un) { const p = pretty(s.prof); uc[p] = (uc[p] || 0) + 1; }
+  const free = Object.entries(uc).map(([p, n]) => n + " " + p).join(", ");
   const rows = a.slice(-SHOW).map(e => `<div class="vl-${e[1]}"><span>${stamp(e[0])}</span> ${esc(e[2])}</div>`).join("");
-  panelEl.innerHTML = `<h4>${esc(d.name)}</h4><div class="vl-tally">${d.villagers} villagers &middot; ${d.beds} beds &middot; ${d.unclaimed} unclaimed job blocks${free ? " (" + esc(free) + ")" : ""}</div>` +
-    `<div class="vl-tally">Occupations: ${esc(occ || "none loaded")}${d.loaded < d.villagers ? " (rest not loaded)" : ""}</div>` +
+  panelEl.innerHTML = `<h4>${esc(name)}</h4><div class="vl-tally">${t.villagers} villagers &middot; ${t.beds} beds &middot; ${un.length} unclaimed job blocks${free ? " (" + esc(free) + ")" : ""}</div>` +
+    `<div class="vl-tally">Occupations: ${esc(occ || "none loaded")}${Object.values(prof).reduce((x, y) => x + y, 0) < t.villagers ? " (rest not loaded)" : ""}</div>` +
     (rows || `<div class="vl-none">No events yet.</div>`) + (a.length > SHOW ? `<div class="vl-none">${a.length - SHOW} older entries not shown</div>` : "");
   panelEl.hidden = false;
 }
