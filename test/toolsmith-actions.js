@@ -95,10 +95,7 @@ module.exports = async (pg, out) => {
     for (const v of [A, M, Wd, Fm]) inv.add(v.inv, I.bread, 12);
     BF.sky.setTime ? BF.sky.setTime(0.06) : (BF.sky.time = 0.06);
     BF.player.position.set(A.position.x + 5, A.position.y + 1, A.position.z);
-    window.__A = A; window.__calls = { n: 0, t: 0 };
-    window.__hooks = {};
-    for (const [k, mod] of [["storage", BF.storage], ["life", BF.villageLife], ["breed", BF.breeding], ["jobs", BF.jobs]]) { const o = mod.ai; mod.ai = (m, dt, x) => { const r = o(m, dt, x); if (m === A && r) window.__hooks[k] = (window.__hooks[k] || 0) + 1; return r; }; }
-    const orig = BF.toolsmith.ai; BF.toolsmith.ai = (m, dt, o) => { const r = orig(m, dt, o); if (m === A) { window.__calls.n++; if (r) window.__calls.t++; } return r; };
+    window.__A = A;
     BF.toolsmith.LOG.length = 0;
     if (BF.warp) BF.warp.set(4);
     return { removed, claim: A.res, jobsite: A.jobsite, M: M.profession, Wd: Wd.profession, Fm: Fm.profession };
@@ -112,10 +109,8 @@ module.exports = async (pg, out) => {
       const A = window.__A;
       if (BF.sky.time > 0.42) BF.sky.setTime ? BF.sky.setTime(0.06) : (BF.sky.time = 0.06);
       const tools = A.inv.filter(x => x && BF.items[x.id].tool && !BF.items[x.id].isBlock).map(x => BF.items[x.id].name);
-      const S = A.tsm || {}, d = S.deal && S.deal.other;
-      const dbg = { stage: S.stage, walkT: S.walkT && +S.walkT.toFixed(1), calls: window.__calls, t: +BF.sky.time.toFixed(3), job: A.job && A.job.mode, pos: [A.position.x | 0, A.position.y | 0, A.position.z | 0], other: d && d.position ? [d.position.x | 0, d.position.y | 0, d.position.z | 0] : null, trading: !!A.tradingWith, sleeping: !!A.sleeping, fshop: !!(A.fshop && A.fshop.stage), store: !!(A.store && A.store.stage), love: !!A.love, flee: +(A.ai.fleeT || 0).toFixed(1), leaving: !!A.ai.leaving, hooks: window.__hooks, removed: !!A.removed };
-      window.__hooks = {};
-      window.__calls = { n: 0, t: 0 };
+      const S = A.tsm || {};
+      const dbg = { stage: S.stage, t: +BF.sky.time.toFixed(3), job: A.job && A.job.mode, pos: [A.position.x | 0, A.position.y | 0, A.position.z | 0] };
       return { dbg, st: BF.toolsmith.statusText(A), tools, em: BF.trades.inv.count(A.inv, BF.I.emerald), furnace: A.tsm && A.tsm.furnace,
         log: BF.toolsmith.LOG.splice(0).map(e => e.kind + ":" + (e.made || e.got || e.tool || e.ore || e.furnace || e.why || "") + (e.from ? " from " + e.from : "")) };
     });
