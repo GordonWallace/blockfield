@@ -47,6 +47,7 @@ function log(rec, kind, text) {
   if (!a) logs.set(rec.key, a = []);
   a.push([+dayNow().toFixed(4), kind, text]);
   if (a.length > CAP) a.splice(0, a.length - CAP);
+  if (BF.happiness) BF.happiness.note(rec.key, kind);   // its weekly counts outlive the capped log (js/happiness.js)
 }
 const stacks = list => (list || []).map(b => b.n + " " + BF.itemName(b.id)).join(" + ");
 const who = m => nameOf(m) + " (" + pretty(m.profession) + ")";
@@ -162,6 +163,7 @@ function renderPanel() {
 function hook() {
   if (hooked || typeof BF.on !== "function") return;
   hooked = true;
+  if (BF.happiness) BF.happiness.hook();
   BF.on("newWorld", reset);
   BF.on("villagerBorn", (m, a, b) => {
     if (m.village) log(m.village, "birth", nameOf(m) + " was born to " + nameOf(a) + " and " + nameOf(b));
