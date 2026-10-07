@@ -3,7 +3,7 @@
 //   bench (jobs.js), placed in or beside a house like the forester's band saw.
 // - Tools: a founding miner starts with a wooden pickaxe and 30-40 torches (one hired later: torches and emeralds only, trading.js hireKit). The pickaxe wears out like the player's (BF.wearStack: 1 use per block, 250 uses for iron). Digging speed
 //   follows the pickaxe's material (blocks.js tool.speed, the player's formula times VILLAGER_SLOW). When the pickaxe breaks it buys a new one
-//   from a toolsmith of its village (emeralds permitting), else crafts a stone pickaxe from 3 cobblestone + 2 sticks (sticks from planks).
+//   from a toolsmith of its village (emeralds permitting), else crafts a stone pickaxe from 3 cobblestone + 2 sticks (sticks bought from the forester, or made from planks).
 // - Surface stone first: it looks for above-ground stone within SEARCH (40) blocks of the village's box: the top block of a column that is
 //   stone (or coal / iron ore) and stands 1 or 2 blocks above one of its four neighbours, so the quarry levels outcrops and hillsides into
 //   walkable steps and never sinks a pit or trench. Never within BUILD_AVOID blocks of anything built, never more than FLOOR_BELOW under the plaza. It walks there and digs one block at a time.
@@ -518,7 +518,7 @@ function think(m, Q) {
       if (deal) return { kind: "trip", deal };
     }
     if (craftPick(m)) return null;
-    if (!underground && count(m, I("stick")) < 2) { const deal = findSeller(m, id => /(^|_)planks$/.test(nameOf(id)), Q.avoid); if (deal) return { kind: "trip", deal }; }
+    if (!underground && count(m, I("stick")) < 2) { const deal = findSeller(m, id => nameOf(id) === "stick" || /(^|_)planks$/.test(nameOf(id)), Q.avoid); if (deal) return { kind: "trip", deal }; }
     if (underground) return { kind: "exit" };
     Q.status = "needs a pickaxe";
     return null;
@@ -706,7 +706,7 @@ function statusText(m) {
     if (k.kind === "dig") return Q.shaft && Q.shaft.S == null ? "Digging a mineshaft" : "Mining underground";
     if (k.kind === "exit") return "Climbing out of the mine";
     if (k.kind === "climb") return "Digging its way out";
-    if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : "planks");
+    if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : nameOf(k.deal.item) === "stick" ? "sticks" : "planks");
   }
   return Q && Q.status ? Q.status.charAt(0).toUpperCase() + Q.status.slice(1) : "";
 }

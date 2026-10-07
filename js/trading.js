@@ -147,8 +147,9 @@ const TRADES = {
   // ("Out of emeralds" otherwise), which is what the mod's trade stock does too. Nothing else to sell: its logs and apples are its own.
   // It also sells the wood it has harvested (js/forester.js): planks it sawed from its own logs, and the logs. Prices 104-111% of VALUE (30 planks
   // = 0.9 emerald, 8 logs = 1 emerald); only what it actually holds can be bought ("Out of stock"), nothing is restocked or part of its starting pack.
-  // The furniture maker and the builder buy these.
-  forester: [["1 oak_sapling > 1 emerald", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
+  // The furniture maker and the builder buy these. Sticks (104% of VALUE) it makes from its planks and keeps in stock (js/forester.js sticks), for
+  // the toolsmith, the miner and the player.
+  forester: [["1 oak_sapling > 1 emerald", "1 emerald > 48 stick", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
   // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
@@ -286,7 +287,7 @@ function stockFor(prof, v) {
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
   if (STARTER_TOOLS[prof]) for (const pool of table(prof)) for (const o of pool) if (isToolItem(o.sell.id)) noStart.add(o.sell.id);   // their one tool is the starter below
   if (prof === "miner") for (const n of ["cobblestone", "coal", "iron_ore", "gold_ore", "diamond"]) noStart.add(I[n]);   // mined, never given
-  if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); }   // harvested, never given
+  if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
