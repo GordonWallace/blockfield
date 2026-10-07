@@ -490,22 +490,31 @@ Loaded after mobs.js / builder.js (index.html). mobs.js, trading.js, inventory.j
   village box + 6 (`D.base`, widened to the composter's reach box by `ensureCover` when a composter stands outside it, which triggers a rescan), y range from the pads; an incremental column scan (500 columns
   per 0.5 s tick, rescan every 10 s) lists farmland cells and surface water sources inside the area, and the water sources of the ring `WATER_REACH` 30 blocks around it (lakes, ponds, rivers via `heightAt`),
   plus the well cells (generated well and built wells, which sit under a roof). **A farmer only tends farmland within `FARM_R` 12 blocks of its composter in every direction** (`inRange`, a Chebyshev box
-  incl. y); harvest, plant, tilling, edging and new irrigation holes all stay inside it. Task priority:
+  incl. y); harvest, plant and all bed work stay inside it. Task priority:
   1. bake (3 wheat -> 1 bread, 9 wheat -> 1 hay bale once it holds 96 bread), 2. harvest the nearest mature crop (wheat, carrots, potatoes, beetroots on farmland) whose drops fit
   (`BF.rollDrops` straight into `m.inv`) and replant it at once with the matching seed, or plant empty farmland (crop chosen from the neighbours' crops), 3. when there is
-  nothing to harvest/plant: till grass/dirt **with a hoe** (any hoe in the inventory, not consumed) within 4 blocks of a water source at the same level (next to existing beds first), and with logs/planks in the
-  inventory edge the beds with wood (a ring of logs replacing the ground just outside the irrigated area); up to `FARM_MAX` 64 farmland cells in reach; with no wood and edging to do it fetches 8 logs (see
-  gathering), 4. **no farmland in reach at all: make a farm** (`planTask`): `pickPlot` samples 60 spots near the composter for a 9x9 plot (`PLOT_R` 4) that lies in reach, in free ground (no building / plaza / lamp / decor /
-  built-structure box), loaded, natural soil only in every column (grass, dirt, coarse dirt, podzol, snow, mycelium, sand, red sand, gravel, clay, path, farmland), no water, at most 2 blocks of slope, cheapest
-  (blocks to dig + fill) first; then per cell (nearest first) `dig` the top soil block where the ground is higher (or is sand / gravel / clay and must become dirt) and `raise` a dirt block where it is lower, then
-  pour a **full** water bucket into the middle (`water`; with only an empty bucket it first walks to a water source and fills it, see Buckets). Tilling and edging then continue from step 3. If no dirt is in the
-  pocket it fetches up to 24 (digging puts dirt in the pocket too). Nothing but soil is ever dug and nothing inside the village's own area is taken for materials, 4b. beds already exist: pour its water bucket into a
-  walled-in hole next to the beds in reach (needs 14+ tillable cells around and no water within 4), filling an empty bucket first, 5. tend young crops (stand and look 2-4 s). Each block action: walk until the cell
-  centre is within 1.75 blocks, face it, swing, 0.45-0.9 s, then `world.setBlock` (only loaded chunks, never outside the area or inside building / plaza / lamp / decor /
-  built-structure boxes; worldgen farm plots are harvested and replanted but never re-shaped). Cells are claimed so two farmers never share one; a failed cell is avoided for 30 s (`log` kind `giveup` says why).
+  nothing to harvest/plant: **work on a bed project**. Farmland is only ever made inside a **bed** like the generated farms: a rectangle ringed with logs set into the ground (corners included), with
+  water channels every 4 lines across it (3 rows of crops between them). `detectBeds` finds the beds after each scan (farmland regions fully enclosed by a log ring; plain soil inside, the pumpkin patch,
+  is allowed). **Reach for beds**: a farmer looks after the whole of every bed whose ring reaches into its 12-block box (`myBeds`: harvest, plant and growth), and bed work may stretch to
+  `BED_REACH` 16 blocks from the composter. While the farmer has fewer than `FARM_MAX` 64 farmland cells to look after it picks a project (`chooseProject`, every 25 s at most):
+  - **grow a bed** (`growOptions`, its own beds only): push one side out, either along the channels by 2 rows (channels run on) or across them (the edge line becomes a new channel with 3 rows
+    beyond it), up to an interior of 11 along x 15 across; the old side's logs are lifted (`unborder`, back into the pocket) and reused.
+  - **new bed** (`newBedOptions`, 80 samples): one of 7x5 (the village farm), 7x7 or 11x7 (the big farm) interiors, either way round, reaching into the farmer's box, with `ROOM` 2 cells all round its
+    ring clear of buildings (and their margins) and no cliff (1 when the farmer has no farmland at all), levelling at most 0.6 cells per new farmland.
+  Every cell of the new ring and strip must be loaded, within `BED_REACH`, outside building boxes (which include a 1-block margin, so a bed always leaves at least one free block next to a building) and
+  built structures, not a road, natural ground within 2 above / 3 below the bed, nothing on it but plants and nothing solid overhead, and the bed keeps `BED_GAP` 1 free block from other beds, farm plots
+  and projects. Value = new farmland / (tasks + 3 per log to fetch) x bias x random 0.7-1.4, best wins; bias for growing = (1 - 0.8 x area / max area) x (0.55 + 0.45 x short side / long side) (big
+  beds sprawl less, and the step that keeps a bed compact wins), for a new bed `NEW_BONUS` 1.5 (it needs far more logs, and is only offered with room around it). Project tasks, nearest first by stage:
+  `dig` / `raise` to the bed height (dirt from the pocket, fetched from outside the village when short: up to 8), `border` (a log, the bed's own log type first; fetched as needed, up to 16),
+  `unborder`, then `water` (a full bucket into each channel cell once its four sides are solid) and `till` (with a hoe). A full pocket composts the smaller of two stacks of one crop, else its biggest
+  crop stack, to make room for dirt and logs. Projects are saved (`exportAll` / `importAll`, keys `farmbeds:<village key>` in the villagers map) and taken over by another farmer in reach when their
+  farmer is gone. 14 failed fetches drop a project that has changed nothing yet (and the farmer waits 300 s before the next) or pause a started one for 120 s; a blocked cell (built on, flooded) pauses a
+  started project up to 3 times, then drops it. `bedRects(rec)` gives js/builder.js the rings of beds and projects, which it keeps building sites off. Log kinds `project`, `bedDone`, `bedDropped`,
+  `blockedAt`, `compost`, `unborder`. 5. tend young crops (stand and look 2-4 s). Each block action: walk until the cell
+  centre is within 1.75 blocks, face it, swing, 0.45-0.9 s, then `world.setBlock` (only loaded chunks, never inside building / plaza / lamp / decor / built-structure boxes). Cells are claimed so two farmers never share one; a failed cell is avoided for 30 s (`log` kind `giveup` says why).
   After 5 % of tasks a 4-9 s break (normal wandering). Measured share of the awake daytime spent on farm tasks (incl. trading with the player): 93-97 %.
   `BF.villageLife.stats(m) -> {today, yesterday, farm, total, counts, harvested, tilled, bordered, watered, task}`; `counts` also has `dig`, `raise`, `gather`, `fill`.
-- **Gathering** (`findGather`, task `gather`): dirt = the top block of open grass / dirt / podzol ground, logs = the base log of a tree, from a random spot of the ring `GATHER_R` 24 blocks around the village
+- **Gathering** (`findGather`, task `gather`): dirt = the top block of open grass / dirt / podzol ground, logs = the base log of a living tree (`BF.forester.treeAt`: the whole tree comes down with `BF.forester.fell`, its logs into the pocket, the rest dropped), never within a block of a bed, farm plot or project, from a random spot of the ring `GATHER_R` 24 blocks around the village
   area (`D.base`), **never inside it** (the village's own landscape and buildings are left alone); nearest of 120 samples, the drops go into the farmer's inventory. A trip goes on until the farmer holds enough (`fs.haul`).
 - **Buckets**: items `bucket` (stack 16, recipe 3 iron ingots in a V) and `water_bucket` (stack 1) in blocks.js, sprites + recipe registered from villagelife.js (`texKit.SPRITES`,
   `recipeHooks`). The player uses them through `BF.villageLife.useBucket(item, target)` (player.js right-click hook before eating): an empty bucket scoops the water source looked at,
