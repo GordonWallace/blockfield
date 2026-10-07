@@ -707,10 +707,12 @@ function kill(m, byPlayer) {
   m.ai.fuse = 0;
   if (m.fire) m.fire.visible = false;
   if (m.village) m.village.killed[m.type] = (m.village.killed[m.type] || 0) + 1;
+  if (m.village && m.type === "villager" && (m.slot || m.bred)) {   // who died, for the record (newborns too: i null); age = game days loaded and active (js/villagelife.js)
+    (m.village.deadInfo || (m.village.deadInfo = [])).push({ i: m.bred ? null : m.slot.idx, name: BF.vlog ? BF.vlog.nameOf(m) : null, prof: m.child ? "child" : m.profession || null,
+      cause: m.lastHurt || null, day: BF.sky ? +((BF.sky.day || 0) + (BF.sky.time || 0)).toFixed(3) : null, age: m.life ? +(m.life.lived || 0).toFixed(2) : null });
+  }
   if (m.village && m.type === "villager" && m.slot && !m.bred) {   // a roster villager: its slot stays empty for good (saved, see exportVillagers)
     deadSlots(m.village).add(m.slot.idx);
-    (m.village.deadInfo || (m.village.deadInfo = [])).push({ i: m.slot.idx, name: BF.vlog ? BF.vlog.nameOf(m) : null, prof: m.profession || null,
-      cause: m.lastHurt || null, day: BF.sky ? +((BF.sky.day || 0) + (BF.sky.time || 0)).toFixed(3) : null });
     const k = villagerKey(m); if (k) villagerSaves.delete(k);
   }
   if (m.type === "creeper") m.model.scale.set(1, 1, 1);
@@ -2133,7 +2135,7 @@ BF.mobs = {
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
     for (const rec of villages.values()) {
       const v = rec.dead ? [...rec.dead] : [];
-      if (v.length) out["dead:" + rec.key] = { v, info: rec.deadInfo || [] };
+      if (v.length || (rec.deadInfo && rec.deadInfo.length)) out["dead:" + rec.key] = { v, info: rec.deadInfo || [] };
       for (const i of v) delete out[rec.key + "#" + i];
     }
     return out;
