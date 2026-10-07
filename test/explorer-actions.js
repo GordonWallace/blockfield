@@ -34,7 +34,13 @@ module.exports = async (pg, out) => {
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.level = 1; A.trades = []; A.inv = T.stockFor("explorer", A);
     A.res = BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });   // this table (another free jobsite nearby could win a plain claim)
     T.inv.add(A.inv, I.emerald, 10);
-    BF.mobs.setProfession(C, "cartographer"); C.inv = T.inv.create(); T.inv.add(C.inv, I.blank_map_2, 1); T.inv.add(C.inv, I.emerald, 5);
+    // the cartographer stands beside the explorer and gets its own table there (without one, jobs.js makes it unemployed again;
+    // a seller that keeps walking away makes the explorer give up on it for a while, which would depend on the village layout)
+    C.position.set(A.position.x, A.position.y, A.position.z + 3);
+    const cx = Math.floor(C.position.x) + 2, cy = Math.floor(C.position.y), cz = Math.floor(C.position.z);
+    BF.world.setBlock(cx, cy, cz, BF.B.cartography_table); BF.emit('blockPlaced', cx, cy, cz, BF.B.cartography_table);
+    BF.mobs.setProfession(C, "cartographer"); BF.jobs.claim(C, { site: { x: cx, y: cy, z: cz, id: BF.B.cartography_table, prof: "cartographer" } });
+    C.inv = T.inv.create(); T.inv.add(C.inv, I.blank_map_2, 1); T.inv.add(C.inv, I.emerald, 5);
     C.trades = [1, 2, 3, 4, 5].flatMap(l => T.offers("cartographer", l)); C.level = 5;
     BF.player.position.set(A.position.x + 5, A.position.y + 1, A.position.z);
     window.__A = A; window.__C = C;
