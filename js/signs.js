@@ -737,12 +737,12 @@ registerAuto("village", (e) => {
     if (!rec.name) rec.name = name;
     const live = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed).length;
     let rl = rec.roster ? rec.roster.length : 0;   // mobs.js builds the roster once the village is near; until then use the same deterministic roster
-    if (!rec.roster && M.roster) { try { rl = M.roster({ key, houses: rec.houses || [], nb: rec.nb || 0 }).length; } catch (err) { rl = 0; } }
+    if (!rec.roster && M.roster) { try { rl = M.roster({ key, houses: rec.houses || [], nb: rec.nb || 0, pop: rec.pop || 0 }).length; } catch (err) { rl = 0; } }
     nv = rec.roster && BF.breeding && BF.breeding.villagerCount ? BF.breeding.villagerCount(rec)
       : Math.max(live, rl - ((rec.killed && rec.killed.villager) || 0));
     nb = BF.breeding && BF.breeding.bedCount ? BF.breeding.bedCount(rec) : countBedsFallback(rec.wg || v);
   } else if (v) {
-    try { nv = M && M.roster ? M.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length }).length : 0; } catch (err) { nv = 0; }
+    try { nv = M && M.roster ? M.roster({ key, houses: v.houses || [], nb: (v.buildings || []).length, pop: v.pop || 0 }).length : 0; } catch (err) { nv = 0; }
     nb = countBedsFallback(v);
   } else return null;
   return "Village of " + name + "\nVillagers: " + nv + "\nBeds: " + nb;

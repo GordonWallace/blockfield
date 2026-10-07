@@ -126,6 +126,9 @@ const band = v => (v < BANDS[0] ? 0 : v < BANDS[1] ? 1 : v < BANDS[2] ? 2 : v < 
 // Generator version of the current world (BF.state.gen; 1 = the original generator, kept so saved worlds have no seams) and the
 // relative biome size (1 = original size). Set by init().
 let GEN = 1, SC = 1;
+// Village generator of the current world (BF.state.villages): 1 = classic (8-25 buildings, roster capped at 24, kept for saved worlds),
+// 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
+let VGEN = 1;
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
   const L = gen >= 3 ? [-64, 3072, 0] : [0, 192, 48];
@@ -751,6 +754,25 @@ function siteOK(x, z, relaxed) {
   return wet <= [4, 8, 10, 14][relaxed] && hi - lo <= [9, 12, 15, 18][relaxed] && bad <= [3, 8, 12, 81][relaxed];
 }
 
+// Village population (village generator 2): a shifted gamma draw, 2 + Gamma(k = 2.5, theta = 32/3), so the mode is 18, the mean ~29 and
+// the right tail is long (about 1 village in 20 has 60+, 1 in 500 reaches the maximum of 100). Redrawn above 100. Deterministic from (a, b, salt).
+const POP_MIN = 2, POP_MAX = 100, POP_K = 2.5, POP_THETA = 32 / 3;
+function villagePop(a, b, salt) {
+  let s = ((noise.hash(a, b, salt) * 4294967296) >>> 0) || 1;
+  const u = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) + 0.5) / 4294967296;
+  const normal = () => Math.sqrt(-2 * Math.log(u())) * Math.cos(2 * Math.PI * u());
+  const d = POP_K - 1 / 3, c = 1 / Math.sqrt(9 * d);   // Marsaglia-Tsang
+  for (let tries = 0; tries < 64; tries++) {
+    const x = normal(), v = Math.pow(1 + c * x, 3);
+    if (v <= 0 || Math.log(u()) >= 0.5 * x * x + d - d * v + d * Math.log(v)) continue;
+    const n = Math.round(POP_MIN + d * v * POP_THETA);
+    if (n <= POP_MAX) return Math.max(POP_MIN, n);
+  }
+  return 18;
+}
+// Half-width of the square a village of `pop` villagers may spread over around its centre (72 for the classic generator).
+const villageExtent = pop => Math.min(150, Math.max(56, Math.round(40 + 36 * Math.sqrt(pop / 18))));
+
 function villageRegion(rx, rz) {
   const key = rx + "," + rz;
   let v = villageCache.get(key);
@@ -759,11 +781,14 @@ function villageRegion(rx, rz) {
   const rcx = rx * REGION, rcz = rz * REGION;
   const sv = spawnVillage();
   if (noise.hash(rx, rz, 501) < 0.85) {
+    const pop = VGEN >= 2 ? villagePop(rx, rz, 530) : 0;
+    const E = pop ? villageExtent(pop) : 72, lim = pop ? Math.min(VLIM, RHALF - 4 - E) : VLIM;   // the village stays inside its region
     for (let k = 0; k < 12 && !v; k++) {
-      const x = rcx + Math.round((noise.hash(rx, rz, 510 + k) * 2 - 1) * VLIM);
-      const z = rcz + Math.round((noise.hash(rx, rz, 520 + k) * 2 - 1) * VLIM);
-      if (sv && Math.abs(x - sv.x) < 260 && Math.abs(z - sv.z) < 260) continue;   // keep clear of the spawn village
-      if (siteOK(x, z, 0)) v = layoutVillage(x, z, null);
+      const x = rcx + Math.round((noise.hash(rx, rz, 510 + k) * 2 - 1) * lim);
+      const z = rcz + Math.round((noise.hash(rx, rz, 520 + k) * 2 - 1) * lim);
+      if (sv && !pop && Math.abs(x - sv.x) < 260 && Math.abs(z - sv.z) < 260) continue;   // keep clear of the spawn village
+      if (sv && pop && x + E + 16 > sv.minX && x - E - 16 < sv.maxX && z + E + 16 > sv.minZ && z - E - 16 < sv.maxZ) continue;
+      if (siteOK(x, z, 0)) v = layoutVillage(x, z, null, pop);
     }
   }
   villageCache.set(key, v);
@@ -774,13 +799,14 @@ function spawnVillage() {
   if (spawnV !== undefined) return spawnV;
   spawnV = null;
   const [sx, sz] = findSpawn();
+  const pop = VGEN >= 2 ? villagePop(sx, sz, 540) : 0;
   outer: for (let r = 80; r <= 320; r += 8)  // a village somewhere nearby, but not on top of spawn
     for (const relaxed of r < 120 ? [0, 1, 2] : [0, 1, 2, 3]) {
       const n = Math.max(8, Math.round(r / 3));
       for (let k = 0; k < n; k++) {
         const a = (k / n) * Math.PI * 2 + r;
         const x = Math.round(sx + Math.cos(a) * r), z = Math.round(sz + Math.sin(a) * r);
-        if (siteOK(x, z, relaxed) && (spawnV = layoutVillage(x, z, [sx, sz]))) break outer;
+        if (siteOK(x, z, relaxed) && (spawnV = layoutVillage(x, z, [sx, sz], pop))) break outer;
       }
     }
   return spawnV;
@@ -814,8 +840,11 @@ function bedPlan(b) {
 }
 const bedFacing = (b, axis) => axis === "u" ? BF.dirIndex(b.ax, b.az) : BF.dirIndex(b.sx, b.sz);
 
-// Village layout: plaza + well + bell, up to 4 main roads with side streets, 8-25 buildings, lamps.
-function layoutVillage(cx, cz, spawn) {
+// Village layout: plaza + well + bell, up to 4 main roads with side streets, lamps.
+// Classic (pop = 0): 8-25 buildings. Sized (pop > 0, village generator 2): the street network is laid out for the village's extent
+// (villageExtent), plots are filled from the plaza outward until there is a bed for each of the pop villagers, then streets are trimmed
+// back to their last building; null when the site cannot hold them all.
+function layoutVillage(cx, cz, spawn, pop) {
   const SEA = BF.SEA;
   const y0 = climate(cx, cz), biome = C.biome;
   const style = biome === DESERT ? 1 : (biome === SNOWY_PLAINS || biome === SNOWY_TAIGA || C.tb === 0) ? 2 :
@@ -824,7 +853,10 @@ function layoutVillage(cx, cz, spawn) {
   const rand = () => (s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296;
   const v = { x: cx, y: y0, z: cz, biome: NAMES[biome], style, pads: [], roads: [], lamps: [], decor: [], buildings: [], houses: [],
     minX: cx - 7, maxX: cx + 7, minZ: cz - 7, maxZ: cz + 7, minY: y0 };
-  const occ = [];
+  if (pop) v.pop = pop;
+  const E = pop ? villageExtent(pop) : 72, RL = E - 8;    // building / road reach from the centre
+  const sc = pop ? Math.max(1, Math.sqrt(pop / 18)) : 1; // street length scale
+  let occ = [];
   const overlaps = a => occ.some(o => a[0] <= o[2] && a[2] >= o[0] && a[1] <= o[3] && a[3] >= o[1]);
   const covers = (a, m) => spawn && spawn[0] >= a[0] - m && spawn[0] <= a[2] + m && spawn[1] >= a[1] - m && spawn[1] <= a[3] + m;
   const plaza = [cx - 7, cz - 7, cx + 7, cz + 7];
@@ -834,12 +866,12 @@ function layoutVillage(cx, cz, spawn) {
 
   // roads: walk outward from (sx, sz) along (dx, dz) following terrain
   const roads = [];
-  function addRoad(sx, sz, dx, dz, maxLen, minLen) {
+  function addRoad(sx, sz, dx, dz, maxLen, minLen, parent, at) {
     let prev = climate(sx, sz), end = -1;
     if (prev < SEA || C.rv) return null;
     for (let t = 0; t <= maxLen; t++) {
       const x = sx + dx * t, z = sz + dz * t;
-      if (Math.abs(x - cx) > 64 || Math.abs(z - cz) > 64) break;
+      if (Math.abs(x - cx) > RL || Math.abs(z - cz) > RL) break;
       const h = climate(x, z);
       if (h < SEA || C.rv || Math.abs(h - prev) > 2) break;
       prev = h; end = t;
@@ -849,28 +881,52 @@ function layoutVillage(cx, cz, spawn) {
     const box = [Math.min(sx, ex) - (dz ? 1 : 0), Math.min(sz, ez) - (dx ? 1 : 0), Math.max(sx, ex) + (dz ? 1 : 0), Math.max(sz, ez) + (dx ? 1 : 0)];
     if (overlaps(box)) return null;
     const road = { sx, sz, dx, dz, end, x0: box[0], z0: box[1], x1: box[2], z1: box[3] };
+    if (pop) Object.defineProperty(road, "_p", { value: { parent: parent || null, at: at || 0, need: 0, box }, enumerable: false });
     roads.push(road); v.roads.push(road); occ.push(box);
     return road;
   }
   const mains = [];
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const r = addRoad(cx + dx * 8, cz + dz * 8, dx, dz, 30 + ((rand() * 20) | 0), 10);
+    const r = addRoad(cx + dx * 8, cz + dz * 8, dx, dz, Math.round((30 + ((rand() * 20) | 0)) * sc), 10);
     if (r) mains.push(r);
   }
   if (mains.length < 2) return null;
-  // side streets branching off the main roads
-  for (const r of mains) {
-    for (let k = 0; k < 2; k++) {
-      const t = 10 + k * 16 + ((rand() * 6) | 0);
-      if (t > r.end - 4) break;
-      const side = rand() < 0.5 ? 1 : -1;
-      const px = r.dz ? side : 0, pz = r.dx ? side : 0;
-      addRoad(r.sx + r.dx * t + px * 2, r.sz + r.dz * t + pz * 2, px, pz, 14 + ((rand() * 14) | 0), 8);
+  if (!pop) {
+    // side streets branching off the main roads
+    for (const r of mains) {
+      for (let k = 0; k < 2; k++) {
+        const t = 10 + k * 16 + ((rand() * 6) | 0);
+        if (t > r.end - 4) break;
+        const side = rand() < 0.5 ? 1 : -1;
+        const px = r.dz ? side : 0, pz = r.dx ? side : 0;
+        addRoad(r.sx + r.dx * t + px * 2, r.sz + r.dz * t + pz * 2, px, pz, 14 + ((rand() * 14) | 0), 8);
+      }
+    }
+  } else {
+    // a street grid that grows with the village: side streets every ~16 blocks along each road (both sides once the village is
+    // big), cross streets off the side streets, a third level for the largest villages
+    const lvl = sc >= 1.8 ? 3 : sc >= 1.25 ? 2 : 1;
+    let gen = mains.slice();
+    for (let L = 1; L <= lvl; L++) {
+      const next = [];
+      for (const r of gen) {
+        for (let t = 10 + ((rand() * 6) | 0); t <= r.end - 4; t += 14 + ((rand() * 6) | 0)) {
+          for (const side of rand() < 0.5 ? [1, -1] : [-1, 1]) {
+            if (L === 1 && sc < 1.25 && side === -1 && rand() < 0.7) continue;   // small villages: mostly one-sided, like the classic layout
+            const px = r.dz ? side : 0, pz = r.dx ? side : 0;
+            const len = Math.round((14 + ((rand() * 14) | 0)) * (L === 1 ? Math.min(sc, 1.8) : 1));
+            const c = addRoad(r.sx + r.dx * t + px * 2, r.sz + r.dz * t + pz * 2, px, pz, len, 8, r, t);
+            if (c) next.push(c);
+          }
+        }
+      }
+      gen = next;
     }
   }
 
   // buildings beside the roads
-  const caps = { smith: 1, church: 1, library: 1, pen: 3, bigfarm: 2 }, count = {};
+  const cm = pop ? Math.max(1, Math.round(pop / 24)) : 1;
+  const caps = { smith: cm, church: cm, library: cm, pen: 3 * cm, bigfarm: 2 * cm }, count = {};
   const pick = () => {
     const r = rand();
     const ty = r < 0.24 ? "house" : r < 0.36 ? "house2" : r < 0.46 ? "lhouse" : r < 0.55 ? "big" : r < 0.6 ? "library" :
@@ -878,50 +934,95 @@ function layoutVillage(cx, cz, spawn) {
     if (caps[ty] && (count[ty] || 0) >= caps[ty]) return "house";
     return ty;
   };
-  for (const road of roads) for (const side of [1, -1]) {
-    const { dx, dz } = road;
+  let beds = 0;
+  // tries one plot of the next picked type at t along road / side; returns the step to the next plot
+  function plot(road, side) {
+    const { dx, dz } = road, t = road._t[side < 0 ? 1 : 0];
     const sx = dz ? side : 0, sz = dx ? side : 0;       // unit vector away from the road
-    let t = 1 + ((rand() * 3) | 0);
-    while (t < road.end && v.buildings.length < 25) {
-      const type = pick();
-      let [w, d] = BTYPES[type];
-      if (type === "house" && rand() < 0.5) d = 6;
-      if (t + w - 1 > road.end + 1) break;
-      const bx = road.sx + dx * t + sx * 3, bz = road.sz + dz * t + sz * 3;
-      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
-      const c0 = P(0, 0), c1 = P(w - 1, d - 1);
-      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
-      let ok = Math.abs(box[0] - cx) < 72 && Math.abs(box[2] - cx) < 72 && Math.abs(box[1] - cz) < 72 && Math.abs(box[3] - cz) < 72 &&
-        !overlaps(box) && !covers(box, 1);
-      const du = w >> 1, door = P(du, 0), front = P(du, -1);
-      const y = ok ? climate(front[0], front[1]) : 0;
-      if (ok && (y < SEA || C.rv)) ok = false;
-      const tol = type === "farm" || type === "bigfarm" || type === "hay" || type === "pen" ? 3 : 5;
-      // check the plot's border ring and a sparse interior grid
-      for (let q = -1; ok && q <= d; q++) for (let u = -1; u <= w; u += (q === -1 || q === d) ? 1 : w + 1) {
-        const p = P(u, q), h = climate(p[0], p[1]);
-        if (h < SEA || C.rv || Math.abs(h - y) > tol) { ok = false; break; }
-      }
-      for (let q = 1; ok && q < d - 1; q += 2) for (let u = 1; u < w - 1; u += 2) {
-        const p = P(u, q), h = climate(p[0], p[1]);
-        if (h < SEA || C.rv || Math.abs(h - y) > tol) { ok = false; break; }
-      }
-      if (!ok) { t += 2; continue; }
-      count[type] = (count[type] || 0) + 1;
-      const b = { type, w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
-        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 607) };
-      v.buildings.push(b);
-      occ.push(box);
-      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
-      if (LIVABLE[type]) {
-        const beds = bedPlan(b).map(([u, q, a]) => { const p = P(u, q); return { x: p[0], y: y + 1, z: p[1], f: bedFacing(b, a) }; });
-        v.houses.push({ x: b.x0, y, z: b.z0, w: b.x1 - b.x0 + 1, d: b.z1 - b.z0 + 1, doorX: b.doorX, doorZ: b.doorZ,
-          outX: front[0], outZ: front[1], type, beds });
-      }
-      t += w + 2;
+    const type = pick();
+    let [w, d] = BTYPES[type];
+    if (type === "house" && rand() < 0.5) d = 6;
+    if (t + w - 1 > road.end + 1) return Infinity;
+    const bx = road.sx + dx * t + sx * 3, bz = road.sz + dz * t + sz * 3;
+    const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+    const c0 = P(0, 0), c1 = P(w - 1, d - 1);
+    const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+    let ok = Math.abs(box[0] - cx) < E && Math.abs(box[2] - cx) < E && Math.abs(box[1] - cz) < E && Math.abs(box[3] - cz) < E &&
+      !overlaps(box) && !covers(box, 1);
+    const du = w >> 1, door = P(du, 0), front = P(du, -1);
+    const y = ok ? climate(front[0], front[1]) : 0;
+    if (ok && (y < SEA || C.rv)) ok = false;
+    const tol = type === "farm" || type === "bigfarm" || type === "hay" || type === "pen" ? 3 : 5;
+    // check the plot's border ring and a sparse interior grid
+    for (let q = -1; ok && q <= d; q++) for (let u = -1; u <= w; u += (q === -1 || q === d) ? 1 : w + 1) {
+      const p = P(u, q), h = climate(p[0], p[1]);
+      if (h < SEA || C.rv || Math.abs(h - y) > tol) { ok = false; break; }
     }
+    for (let q = 1; ok && q < d - 1; q += 2) for (let u = 1; u < w - 1; u += 2) {
+      const p = P(u, q), h = climate(p[0], p[1]);
+      if (h < SEA || C.rv || Math.abs(h - y) > tol) { ok = false; break; }
+    }
+    if (!ok) return 2;
+    count[type] = (count[type] || 0) + 1;
+    const b = { type, w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+      x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 607) };
+    v.buildings.push(b);
+    occ.push(box);
+    v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+    if (LIVABLE[type]) {
+      const bp = bedPlan(b).map(([u, q, a]) => { const p = P(u, q); return { x: p[0], y: y + 1, z: p[1], f: bedFacing(b, a) }; });
+      v.houses.push({ x: b.x0, y, z: b.z0, w: b.x1 - b.x0 + 1, d: b.z1 - b.z0 + 1, doorX: b.doorX, doorZ: b.doorZ,
+        outX: front[0], outZ: front[1], type, beds: bp });
+      beds += Math.max(1, bp.length);
+    }
+    if (road._p) road._p.need = Math.max(road._p.need, t + w);
+    return w + 2;
   }
-  if (v.buildings.length < 8) return null;
+  if (!pop) {
+    for (const road of roads) for (const side of [1, -1]) {
+      const k = side < 0 ? 1 : 0;
+      road._t = road._t || [0, 0];
+      road._t[k] = 1 + ((rand() * 3) | 0);
+      while (road._t[k] < road.end && v.buildings.length < 25) {
+        const st = plot(road, side);
+        if (st === Infinity) break;
+        road._t[k] += st;
+      }
+    }
+    for (const road of roads) delete road._t;
+    if (v.buildings.length < 8) return null;
+  } else {
+    // plots nearest the plaza first, until every villager has a bed
+    const cur = [];
+    for (const road of roads) {
+      Object.defineProperty(road, "_t", { value: [1 + ((rand() * 3) | 0), 1 + ((rand() * 3) | 0)], writable: true, enumerable: false });
+      for (const side of [1, -1]) cur.push({ road, side });
+    }
+    const distOf = c => { const r = c.road, t = r._t[c.side < 0 ? 1 : 0]; return Math.max(Math.abs(r.sx + r.dx * t - cx), Math.abs(r.sz + r.dz * t - cz)); };
+    while (beds < pop && cur.length) {
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < cur.length; i++) { const d = distOf(cur[i]); if (d < bd) { bd = d; bi = i; } }
+      const c = cur[bi], k = c.side < 0 ? 1 : 0;
+      if (c.road._t[k] >= c.road.end) { cur.splice(bi, 1); continue; }
+      const st = plot(c.road, c.side);
+      if (st === Infinity) cur.splice(bi, 1); else c.road._t[k] += st;
+    }
+    if (beds < pop) return null;
+    // trim each street back to its last building (and to the streets branching off it); drop streets with nothing on them
+    for (let i = roads.length - 1; i >= 0; i--) {
+      const r = roads[i], p = r._p;
+      if (p.parent) p.parent._p.need = Math.max(p.parent._p.need, p.need > 0 ? p.at + 2 : 0);
+    }
+    v.roads = roads.filter(r => r._p.need > 0 || (!r._p.parent && mains.indexOf(r) < 2));
+    for (const r of v.roads) {
+      const end = Math.min(r.end, Math.max(r._p.parent ? 4 : 6, r._p.need + 1)), ex = r.sx + r.dx * end, ez = r.sz + r.dz * end;
+      r.end = end;
+      r.x0 = Math.min(r.sx, ex) - (r.dz ? 1 : 0); r.z0 = Math.min(r.sz, ez) - (r.dx ? 1 : 0);
+      r.x1 = Math.max(r.sx, ex) + (r.dz ? 1 : 0); r.z1 = Math.max(r.sz, ez) + (r.dx ? 1 : 0);
+    }
+    roads.length = 0; roads.push(...v.roads);
+    occ = [plaza].concat(roads.map(r => [r.x0, r.z0, r.x1, r.z1]), v.pads.slice(1).map(p => [p.x0, p.z0, p.x1, p.z1]));
+  }
 
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
@@ -950,6 +1051,7 @@ function layoutVillage(cx, cz, spawn) {
   }
   for (const p of v.pads) v.minY = Math.min(v.minY, p.y);
   v.ground = biome === DESERT ? 1 : style === 2 ? 2 : 0;
+  if (pop) v.reach = Math.max(48, Math.round(Math.hypot(Math.max(cx - v.minX, v.maxX - cx), Math.max(cz - v.minZ, v.maxZ - cz))));   // jobsite search radius (js/jobs.js)
   return v;
 }
 
@@ -2043,7 +2145,7 @@ const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: 
 BF.worldgen = {
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
-    noise = n; GEN = (opts && opts.gen) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
+    noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
     if (GEN >= 3) placeHome3();
     if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, outlet: 260, mouth: -2, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
@@ -2052,6 +2154,8 @@ BF.worldgen = {
   generateBand,
   generateRange,
   heightAt,
+  _layoutVillage: (x, z, pop) => layoutVillage(x, z, null, pop),   // tools / tests: lay out a village of pop villagers at (x, z)
+  _villagePop: (a, b, salt) => villagePop(a, b, salt),
   _fields(x, z) { fields(x, z); const R = GEN >= 3 ? relief3(x, z, false) : null; return { cd: K.sp, cl: K.mp, mt: K.mt, c: K.c, pm: K.pm, p: K.p, e: K.e, t: K.t, hu: K.hu, S: R && R.S, m: R && R.m, rh: R && R.h, lo: K.lo }; },
   waterLevelAt(x, z) { climate(Math.floor(x), Math.floor(z)); return C.wl; },
   biomeAt,
