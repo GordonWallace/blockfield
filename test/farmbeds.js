@@ -140,6 +140,7 @@ function survey(key) {
         for (const [kind, L] of picks) {
           await pg.evaluate(L => {
             const cx = (L.x0 + L.x1) / 2 + 0.5, cz = (L.z0 + L.z1) / 2 + 0.5;
+            if (!window.__started) { window.__started = true; BF.player.start(); }
             BF.player.deserialize(Object.assign(BF.player.serialize(), { x: cx, y: L.y + 9, z: cz + 11, flying: true, yaw: 0, pitch: -0.62, gameMode: 'creative' }));
             BF.sky.setTime(0.25);
             window.__halt = false; if (window.__pending) window.__raf(window.__pending);

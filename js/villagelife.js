@@ -894,6 +894,11 @@ function performBed(m, fs, R, D, t) {
   log(t.kind, m, { at: [t.x, t.y, t.z], block: BF.blocks[place].name });
   return true;
 }
+// For js/builder.js: the ring rectangles of the village's beds and of the beds being made or grown (no building goes there).
+function bedRects(R) {
+  const D = R._life;
+  return D ? (D.beds || []).map(outerOf).concat(D.projects.map(p => outerOf(p.L))) : [];
+}
 // ---------------------------------------------------------------- saving projects (inside the villagers map of save.js: keys "farmbeds:<village key>")
 const savedProjects = new Map();   // village key -> projects not yet attached to a loaded village
 const liveProjects = new Map();    // village key -> the village's project list
@@ -1416,6 +1421,6 @@ if (BF.texKit) {
 });
 
 BF.villageLife = { ai, tick, travel, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
-  exportAll, importAll,
+  exportAll, importAll, bedRects,
   _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, perform, dealWith, findFoodSeller, scanStep, inRange } };
 })();

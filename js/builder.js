@@ -194,6 +194,7 @@ function obstacles(R, built) {
     if (wg.arch && wg.arch.box) out.push(ex(wg.arch.box, 2)); // village entry arch + its sign (js/signs.js)
   } else out.push(ex([R.x - 8, R.z - 8, R.x + 8, R.z + 8], 2));
   for (const e of built) if (e.state !== "abandoned") out.push(ex([e.ox, e.oz, e.ox + e.w - 1, e.oz + e.d - 1], SITE_MARGIN));
+  if (BF.villageLife && BF.villageLife.bedRects) for (const r of BF.villageLife.bedRects(R)) out.push(ex(r, 1));   // farm beds, and beds the farmers are making
   return out;
 }
 const GROUND_OK = /^(grass|dirt|sand|red_sand|snow_grass|snow|podzol|coarse_dirt|mycelium|gravel|mud|moss_block|stone|granite|diorite|andesite|tuff|calcite|clay|sandstone|red_sandstone|terracotta|[a-z_]*_terracotta)$/;
