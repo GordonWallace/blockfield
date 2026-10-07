@@ -452,17 +452,27 @@ function quitToTitle(btn) {
 // Escape that closes a screen (inventory, map, sign, chat) or the pause menu re-captures the mouse, but not while the key is
 // still down: Chrome handles a held Escape as "leave pointer lock", so a lock granted on keydown is dropped at once and the
 // unlock reads as a pause. The request waits for the Escape keyup instead.
-let lockOnEscUp = false;
+// Some browsers still drop that lock, or swallow it, at Escape's release (macOS): an unlock within ESC_GRACE seconds of an
+// Escape that closed a screen leaves you in the game with the mouse free (the next click captures it) instead of pausing.
+const ESC_GRACE = 1;
+let lockOnEscUp = false, escClosedAt = -1e9, escCloseEvent = null, escCloseHeld = false, escRelock = false;
 addEventListener("keyup", e => {
-  if (e.key !== "Escape" || !lockOnEscUp) return;
+  if (e.key !== "Escape") return;
+  if (escCloseHeld) { escCloseHeld = false; escClosedAt = performance.now(); }   // the grace runs from the release, when the re-lock goes out
+  if (!lockOnEscUp) return;
   lockOnEscUp = false;
-  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) requestLock();
+  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) { requestLock(); escRelock = performance.now() - escClosedAt < ESC_GRACE * 1000; }
 }, true);
-addEventListener("blur", () => { lockOnEscUp = false; });
+addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
+// A screen is closing: note it when Escape did it, so neither that key press nor an unlock in the next ESC_GRACE seconds pauses.
+function screenClosed() {
+  const ev = window.event;
+  if (ev && ev.type === "keydown" && ev.key === "Escape") { escClosedAt = performance.now(); escCloseEvent = ev; escCloseHeld = true; }
+}
 function requestLock() {
   if (isTouch) return;
   const ev = window.event;
-  lockOnEscUp = false;
+  lockOnEscUp = escRelock = false;
   if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
   const cv = canvas();
   if (!cv.requestPointerLock) { dragMode = true; return; }
@@ -472,6 +482,7 @@ function requestLock() {
   } catch (_) { onLockError(); }
 }
 function onLockError() {
+  escRelock = false;
   if (locked) return;
   if (lockWorked) { if (menuOpen === "pause") pauseNote.textContent = "Click Resume again to capture the mouse."; return; }
   dragMode = true;
@@ -534,7 +545,7 @@ function bindInput() {
     const c = e.code;
     if (c === "Space" || c === "Tab" || (e.ctrlKey && /^Key[WASDQE]$/.test(c))) e.preventDefault();
     if (c === "Escape") {
-      if (e.repeat) return;   // a held Escape that just closed a screen must not go on to open the pause menu
+      if (e.repeat || e === escCloseEvent) return;   // a held Escape, or the one that just closed a screen, must not go on to open the pause menu
       if (invOpen()) { deferredToggle(true); return; }
       if ((dragMode || !locked) && started && !P.dead) { if (menuOpen === "pause") resume(); else if (!menuOpen) pause(); }
       return;
@@ -567,15 +578,17 @@ function bindInput() {
     locked = document.pointerLockElement === cv;
     if (locked) {
       lockWorked = true; dragMode = false;
+      if (escRelock) { escRelock = false; escClosedAt = performance.now(); }   // the grace also runs from when that re-lock lands, however slow
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
       keys.clear(); mouseL = mouseR = false; resetBreak();
       if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
-      else if (!invOpen() && !P.dead && started && !menuOpen) pause();
+      else if (!invOpen() && !P.dead && started && !menuOpen && performance.now() - escClosedAt > ESC_GRACE * 1000) pause();
     }
   });
   document.addEventListener("pointerlockerror", onLockError);
   if (BF.on) BF.on("inventoryClosed", () => {
+    screenClosed();
     if (started && !menuOpen && !P.dead && !dragMode && !isTouch && !locked) requestLock();
   });
 
@@ -1621,7 +1634,7 @@ P.screenOpen = () => !!menuOpen || invOpen();   // any menu or in-game screen; m
 P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
 P.actionBar = actionBar;
 P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };
-P.uiClose = function () { if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
+P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
 P.teleport = function (x, y, z) {
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists

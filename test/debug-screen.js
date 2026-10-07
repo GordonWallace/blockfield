@@ -5,7 +5,13 @@ const path = require('path'), { spawn } = require('child_process');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug-screen';
 const GAME = 8710, DBG = 8711;
-const start = () => new Promise(res => { const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG]); p.stdout.once('data', () => res(p)); });
+// the server prints its banner before its ports are open: wait until the debug port answers
+const start = async () => {
+  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG]);
+  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
+  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
+  throw new Error('debug server did not start');
+};
 (async () => {
   const fails = [], ok = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails.push(n); };
   let srv = await start();
@@ -40,7 +46,7 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nXYZ /.test((await got()).f3));
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // server restart: a fresh server has no layout/log; the game must resend both
-  srv.kill(); await new Promise(r => setTimeout(r, 500));
+  srv.kill(); await new Promise(r => srv.once('exit', r));
   srv = await start();
   await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'job', 'Someone became a Tester'); });
   await dbg.waitForTimeout(7000);
@@ -60,23 +66,41 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
     BF.emit('villagerTrade', s, s.trades[0]);
     return { seller: BF.vlog.pretty(s.profession), buyer: BF.vlog.pretty(b2.profession) };
   });
-  await dbg.waitForTimeout(1200);
+  // on a slow machine the trades can take a few seconds to reach the screen
+  await dbg.waitForSelector(`#l-filters details.dd[data-t="${tr.seller}"]`, { state: 'attached', timeout: 20000 }).catch(() => {});
+  await dbg.waitForTimeout(500);
   const count = () => dbg.evaluate(() => document.querySelectorAll('#log .ent').length);
   const all = await count();
   ok('dropdown per type', await dbg.evaluate(t => !!document.querySelector(`#l-filters details.dd[data-t="${t}"]`), tr.seller));
-  await dbg.click(`#l-filters details.dd[data-t="${tr.seller}"] summary`);
-  await dbg.uncheck(`#l-filters details.dd[data-t="${tr.seller}"] input[data-a="sell"]`);
+  const texts = () => dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
+  const dd = t => `#l-filters details.dd[data-t="${t}"]`;
+  await dbg.click(`${dd(tr.seller)} summary`);
+  await dbg.uncheck(`${dd(tr.seller)} input[data-a="sell"]`);
   await dbg.waitForTimeout(200);
-  const vis = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
-  ok('unchecking Selling hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
-  ok('so does a villager buying from that type', !vis.some(t => /got 1 Test/.test(t)));
+  let vis = await texts();
+  // an entry shows while any villager in it is selected: the buyer (a villager, or the player) still is
+  ok('a trade still shows while its buyer is selected', vis.some(t => /got 1 Test/.test(t)) && vis.some(t => /^Player traded/.test(t)));
   ok('dropdown stays open after a change', await dbg.evaluate(t => document.querySelector(`#l-filters details.dd[data-t="${t}"]`).open, tr.seller));
+  ok('partly on: chip checkbox shows mixed', await dbg.evaluate(s => document.querySelector(s + ' input.tcb').indeterminate, dd(tr.seller)));
+  // each type's own checkbox turns all of it off without opening its menu (close the open one first: it can cover the chip)
+  await dbg.click('#l-count'); await dbg.waitForTimeout(100);
+  await dbg.click(`${dd('Player')} input.tcb`); await dbg.waitForTimeout(200);
+  vis = await texts();
+  ok('player chip checkbox hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
+  ok('chip checkbox does not open the menu', !(await dbg.evaluate(s => document.querySelector(s).open, dd('Player'))));
   await dbg.screenshot({ path: out + '-filters.png' });
   await dbg.reload(); await dbg.waitForTimeout(1500);
-  const texts = () => dbg.evaluate(() => [...document.querySelectorAll('#log .ent .tx')].map(e => e.textContent));
   ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(t => !document.querySelector(`#l-filters details.dd[data-t="${t}"] input[data-a="sell"]`).checked, tr.seller));
-  await dbg.click('#l-reset'); await dbg.waitForTimeout(200);
-  ok('show all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
+  // Select none, then one type: only entries involving that type (whoever the other party is)
+  await dbg.click('#l-none'); await dbg.waitForTimeout(200);
+  const none = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].filter(e => /trade|bed|job|birth|death/.test(e.className)).length);
+  ok('select none hides villager entries', none === 0);
+  await dbg.check(`${dd(tr.buyer)} input.tcb`); await dbg.waitForTimeout(200);
+  vis = await texts();
+  ok('one type selected shows its trades with unselected types', vis.some(t => /got 1 Test/.test(t)) && !vis.some(t => /^Player traded/.test(t)));
+  ok('and nothing without it', vis.every(t => !/traded with/.test(t) || t.includes('(' + tr.buyer + ')')));
+  await dbg.click('#l-all'); await dbg.waitForTimeout(200);
+  ok('select all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
   // a second village: the view follows the nearest loaded one, the list shows both with distances, and the first can be picked
   const first = want.name;
   const second = await game.evaluate(() => {
@@ -120,7 +144,8 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   await game.close(); await dbg.waitForTimeout(3000);
   await dbg.reload(); await dbg.waitForTimeout(1500);
   ok('closed game not shown as live: ' + (await got()).conn, (await got()).conn === 'Game not responding');
-  await b.close(); srv.kill();
+  await b.close();
+  srv.kill(); await new Promise(r => srv.exitCode !== null ? r() : srv.once('exit', r));   // free the ports for the next run
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
 })();
