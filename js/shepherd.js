@@ -37,7 +37,7 @@ const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const live = o => !!(o && !o.dead && !o.removed);
 const TR = () => BF.trades;
 const cnt = (m, id) => (id == null || !m.inv ? 0 : TR().inv.count(m.inv, id));
-const idsOf = () => ({ wheat: BF.I.wheat_item, wool: BF.I.wool, shears: BF.I.shears, mutton: BF.I.raw_mutton });
+const idsOf = () => ({ wheat: BF.I.wheat_item, wool: BF.I.white_wool, shears: BF.I.shears, mutton: BF.I.raw_mutton });
 
 let ids = 0;
 const idOf = new WeakMap();

@@ -78,7 +78,7 @@ const BLOCK_DEFS = [
   { name: "glass", tiles: "glass", render: "cutout", opaque: false, hardness: 0.3, drop: null, color: "#cfe9f0" },
   { name: "crafting_table", tiles: { top: "crafting_table_top", side: "crafting_table_side", front: "crafting_table_front", bottom: "planks" }, hardness: 2.5, tool: "axe", color: "#7a5a33" },
   { name: "bricks", tiles: "bricks", hardness: 2, tool: "pickaxe", needsTool: true, color: "#96503f" },
-  { name: "wool", tiles: "wool", hardness: 0.8, color: "#eaeaea" },
+  { name: "wool", tiles: "white_wool", hidden: true, item: "white_wool", drop: "white_wool", hardness: 0.8, color: "#f0f0f0" },   // legacy: merged into white_wool (id kept for old saves)
   { name: "mossy_cobblestone", tiles: "mossy_cobblestone", hardness: 2, tool: "pickaxe", needsTool: true, color: "#61724a" },
   { name: "jungle_log", tiles: { top: "jungle_log_top", side: "jungle_log", bottom: "jungle_log_top" }, hardness: 2, tool: "axe", color: "#594420" },
   { name: "jungle_leaves", tiles: "jungle_leaves", render: "cutout", opaque: false, hardness: 0.2, tool: "shears", drop: null, color: "#2f8a1a" },
@@ -590,6 +590,7 @@ BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.
 let dynItem = ITEM_BASE + 0x10000;
 BF.resolveItem = name => {
+  if (name === "wool") return I.white_wool;   // old saves: plain wool was merged into white wool
   if (I[name] !== undefined) return I[name];
   const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
   if (a && +a[1] >= 1 && +a[1] <= 32768) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)

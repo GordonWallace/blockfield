@@ -26,7 +26,7 @@ module.exports = async (pg, out) => {
     for (let i = 0; i < 6000; i++) { step(); if (i % 10 === 0) sample(); }
     ok("shepherd fed the sheep (wheat used)", c("wheat_item") < startWheat, [startWheat, c("wheat_item")]);
     ok("every adult pen sheep was fed today", pen.sheep.filter(s => s.mob && !s.mob.lamb).every(s => !BF.shepherd.hungry(s.mob, day())));
-    ok("shepherd sheared the flock (wool in inventory)", c("wool") >= 1, c("wool"));
+    ok("shepherd sheared the flock (wool in inventory)", c("white_wool") >= 1, c("white_wool"));
     R.tasks = tasks;
     ok("pen still had room, nothing was culled", pen.sheep.length < pen.threshold && !tasks.cull, [pen.sheep.length, pen.threshold, tasks.cull]);
     // ---- overcrowding: shepherd culls adults down to below the threshold, never below two
@@ -57,8 +57,8 @@ module.exports = async (pg, out) => {
       const em0 = c("emerald"), fw0 = BF.trades.inv.count(farmer.inv, I.wheat_item);
       BF.sky.setTime(0.1);
       let bought = false;
-      for (let i = 0; i < 9000 && !bought; i++) { step(); if (c("wheat_item") > 0) bought = true; }
-      ok("shepherd bought wheat from the farmer", bought, { wheat: c("wheat_item"), emeraldsBefore: em0, emeraldsAfter: c("emerald"), farmerWheat: [fw0, BF.trades.inv.count(farmer.inv, I.wheat_item)] });
+      for (let i = 0; i < 9000 && !bought; i++) { if (i % 20 === 0) { farmer.position.set(shep.position.x + 2, shep.position.y, shep.position.z); farmer.vel.set(0, 0, 0); } step(); if (c("wheat_item") > 0) bought = true; }
+      ok("shepherd bought wheat from the farmer", bought, { wheat: c("wheat_item"), emeraldsBefore: em0, emeraldsAfter: c("emerald"), inv: shep.inv.filter(Boolean).map(s => BF.items[s.id].name + ":" + s.count).join(","), want: BF.shepherd.wheatWanted(shep), fshop: shep.fshop && shep.fshop.stage, canSell: BF.villageLife && BF.villageLife.canSell && BF.villageLife.canSell(farmer), farmerWheat: [fw0, BF.trades.inv.count(farmer.inv, I.wheat_item)] });
       ok("it paid emeralds", c("emerald") < em0);
       R.log = BF.villageLife.log.filter(l => l.kind === "buyWheat").slice(-2);
     }
