@@ -1584,6 +1584,7 @@ P.menu = () => menuOpen;
 P.respawn = respawn;
 P.setGameMode = setGameMode;
 // commands.js hooks: an overlay that takes the keyboard (releases the pointer lock without pausing, then re-locks)
+P.screenOpen = () => !!menuOpen || invOpen();   // any menu or in-game screen; main.js fades the debug panels behind it (new screens: add them to invOpen)
 P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
 P.actionBar = actionBar;
 P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };
