@@ -462,6 +462,13 @@ function leave(m, S, dt, out) {
     S.exit = pen; S.exitT = 0; S.navFail = 0; m.ai.route = null;
   }
   S.exitT += dt;
+  const N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(m);
+  if (!N.walkCell(fx, fy, fz) && S.exitT < 30) {   // perched on the fence (mobs step up one block): no path starts there, so walk off it towards the path outside
+    const dx = pen.out[0] + 0.5 - p.x, dz = pen.out[1] + 0.5 - p.z, d = Math.hypot(dx, dz) || 1;
+    m.ai.route = null; m.ai.mode = "idle"; m.ai.t = 2;
+    out.x = dx / d * m.def.speed; out.z = dz / d * m.def.speed;
+    return true;
+  }
   const st = BF.villageLife.travel(m, S, dt, out, pen.out[0], pen.y + 1, pen.out[1], m.def.speed);
   if (st === "going" && S.exitT < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
   S.exit = null;
