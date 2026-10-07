@@ -128,6 +128,7 @@ const band = v => (v < BANDS[0] ? 0 : v < BANDS[1] ? 1 : v < BANDS[2] ? 2 : v < 
 let GEN = 1, SC = 1;
 // Village generator of the current world (BF.state.villages): 1 = classic (8-25 buildings, roster capped at 24, kept for saved worlds),
 // 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
+// 3 = as 2, with at least 3 villagers (a miner, a farmer and a forester, js/mobs.js villageRoster) and a garden with trees in desert villages.
 let VGEN = 1;
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
@@ -756,7 +757,7 @@ function siteOK(x, z, relaxed) {
 
 // Village population (village generator 2): a shifted gamma draw, 2 + Gamma(k = 2.5, theta = 32/3), so the mode is 18, the mean ~29 and
 // the right tail is long (about 1 village in 20 has 60+, 1 in 500 reaches the maximum of 100). Redrawn above 100. Deterministic from (a, b, salt).
-const POP_MIN = 2, POP_MAX = 100, POP_K = 2.5, POP_THETA = 32 / 3;
+const POP_MIN = 2, POP_MIN3 = 3, POP_MAX = 100, POP_K = 2.5, POP_THETA = 32 / 3;
 function villagePop(a, b, salt) {
   let s = ((noise.hash(a, b, salt) * 4294967296) >>> 0) || 1;
   const u = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) + 0.5) / 4294967296;
@@ -766,7 +767,7 @@ function villagePop(a, b, salt) {
     const x = normal(), v = Math.pow(1 + c * x, 3);
     if (v <= 0 || Math.log(u()) >= 0.5 * x * x + d - d * v + d * Math.log(v)) continue;
     const n = Math.round(POP_MIN + d * v * POP_THETA);
-    if (n <= POP_MAX) return Math.max(POP_MIN, n);
+    if (n <= POP_MAX) return Math.max(VGEN >= 3 ? POP_MIN3 : POP_MIN, n);   // village generator 3: at least a miner, a farmer and a forester
   }
   return 18;
 }
@@ -821,7 +822,7 @@ function villageAt(x, z, m) {
 
 const BTYPES = {
   house: [5, 5], house2: [5, 6], lhouse: [7, 7], big: [7, 7], library: [9, 7], church: [5, 10],
-  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3],
+  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11],
 };
 const LIVABLE = { house: 1, house2: 1, lhouse: 1, big: 1, library: 1, church: 1, smith: 1 };
 // Beds of a building in its local coords (u along the road, q inward): [footU, footQ, axis the head lies along (+1)].
@@ -1067,6 +1068,35 @@ function layoutVillage(cx, cz, spawn, pop) {
     }
   }
 
+  // Desert garden (village generator 3): sand grows no saplings, so a desert village gets a square of grass with one or two oak trees
+  // for its forester (js/forester.js). It goes just past the end of a road, clear of the buildings, so the forester may replant there.
+  if (VGEN >= 3 && style === 1) {
+    const [w, d] = BTYPES.garden, M = 3;
+    const tryGarden = (road, t, back) => {
+      const { dx, dz } = road, sx = dz ? 1 : 0, sz = dx ? 1 : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(0, 0), c1 = P(w - 1, d - 1);
+      const box = [Math.min(c0[0], c1[0]), Math.min(c0[1], c1[1]), Math.max(c0[0], c1[0]), Math.max(c0[1], c1[1])];
+      if (Math.max(Math.abs(box[0] - cx), Math.abs(box[2] - cx), Math.abs(box[1] - cz), Math.abs(box[3] - cz)) > E + 16) return false;
+      if (overlaps([box[0] - M, box[1] - M, box[2] + M, box[3] + M]) || covers(box, 2)) return false;
+      const mid = P(w >> 1, d >> 1), y = climate(mid[0], mid[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = 0; q < d; q += 2) for (let u = 0; u < w; u += 2) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "garden", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du: w >> 1, doorX: P(w >> 1, -1)[0], doorZ: P(w >> 1, -1)[1],
+        x0: box[0], z0: box[1], x1: box[2], z1: box[3], h: noise.hash(bx, bz, 631) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    // straight on past a road's end first, then beside the end of it
+    const order = mains.filter(r => roads.indexOf(r) >= 0).concat(roads.filter(r => mains.indexOf(r) < 0));
+    found: for (const back of [-(d >> 1), 3, -d - 2]) for (const road of order) for (let t = road.end + 3; t <= road.end + 12; t += 3) if (tryGarden(road, t, back)) break found;
+  }
+
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
   for (const road of roads) {
@@ -1276,6 +1306,24 @@ function drawShell(b, P, S, style) {
         P(u, y, q, B.farmland);
         P(u, y + 1, q, pickCrop(noise.hash(b.bx * 7 + sec, b.bz * 13 + bandIx, 623)));
       }
+      return;
+    }
+    case "garden": {
+      // grass over dirt, and one or two oak trees (trunks 3 in from the edge, so their leaves stay inside)
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) { P(u, y, q, B.grass); for (let k = 1; k <= 8; k++) P(u, y - k, q, B.dirt); }   // no foundation under it: the forester plants nowhere near built blocks
+      const trees = b.h < 0.5 ? [[3, 3], [w - 4, d - 4]] : [[w >> 1, d >> 1]];
+      trees.forEach(([tu, tq], i) => {
+        const top = y + 1 + 4 + ((noise.hash(b.bx + i, b.bz, 632) * 3) | 0);
+        for (let yy = y + 1; yy < top; yy++) P(tu, yy, tq, B.oak_log);
+        for (let yy = top - 3; yy <= top; yy++) {
+          const r = yy >= top - 1 ? 1 : 2;
+          for (let dq = -r; dq <= r; dq++) for (let du2 = -r; du2 <= r; du2++) {
+            if (!du2 && !dq && yy < top) continue;   // the trunk
+            if (Math.abs(du2) === r && Math.abs(dq) === r && (yy === top || noise.hash(b.bx + tu + du2, yy, b.bz + tq + dq) < 0.5)) continue;   // ragged corners
+            P(tu + du2, yy, tq + dq, B.oak_leaves);
+          }
+        }
+      });
       return;
     }
     case "hay":
