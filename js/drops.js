@@ -25,7 +25,7 @@ const drops = {
   init(sceneRef) { scene = sceneRef; },
 
   // Spawns `count` of item `id` at (x, y, z) with a small random toss. opts.vel (a THREE.Vector3) replaces the toss,
-  // and opts.pickupDelay (seconds) holds off the player's pickup, e.g. for items the player threw.
+  // and opts.pickupDelay (seconds) holds off the player's pickup, e.g. for items the player threw. opts.wear: uses spent on a dropped tool.
   spawn(id, count, x, y, z, opts) {
     if (!scene || id == null || !BF.items[id] || !(count > 0)) return null;
     if (drops.list.length >= MAX) drops.remove(drops.list[0]);
@@ -35,7 +35,7 @@ const drops = {
     const a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 1.5;
     const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + Math.random() * 2, Math.sin(a) * s);
     const d = { id, count, pos: new THREE.Vector3(x, y, z), vel, age: 0, phase: Math.random() * 6.28, sprite,
-      pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY };
+      pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
     return d;
   },
@@ -61,7 +61,7 @@ const drops = {
       if (alive && d.age > d.pickupDelay && pp) {
         const dx = pp.x - d.pos.x, dy = pp.y + 0.6 - d.pos.y, dz = pp.z - d.pos.z, dist = Math.hypot(dx, dy, dz);
         if (dist < 0.6) {
-          const left = BF.inventory.add(d.id, d.count);
+          const left = BF.inventory.add(d.id, d.count, d.wear);
           if (left <= 0) { drops.remove(d); continue; }
           d.count = left;
         } else if (dist < PICKUP_R) {
