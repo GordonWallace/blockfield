@@ -1,8 +1,8 @@
 // Tool economy soak test (release 1.1): miners, foresters, farmers and shepherds work with tools that wear out; the toolsmith makes
 // new ones from ingots, sticks and planks it buys from miners and foresters (smelting ore in a furnace from the furniture maker when it must).
 // Usage: NODE_PATH=$(npm root -g) node test/toolchain.js <seeds e.g. 1,2,3> [days=3] [villagesPerSeed=3] [out.json]
-// Env: ONLY=x,z runs one village. NEED=toolsmith,miner only takes villages with those professions. FURNACE_TICK=1 ticks furnaces from
-// the test loop too (they cook in BF.inventory.update, which the headless loop doesn't call). VERBOSE=1 prints log samples.
+// Env: ONLY=x,z runs one village. NEED=toolsmith,miner only takes villages with those professions. FURNACE_TICK=1 also calls
+// BF.inventory.update (furnaces cook in BF.inventory.simTick when it exists, called every step). VERBOSE=1 prints log samples.
 // Drives the simulation directly (no rendering), like test/bedchain.js and test/minechain.js. For each village it records, per game hour:
 // every villager's tools (with wear), level, key materials, position and status; plus every trade, tool use and break, block broken by
 // a villager (ores with their depth below the surface), village log entry and furnace state. Prints one block per village and a summary,
@@ -174,7 +174,7 @@ function snapshot() {
         await pg.evaluate(([n, h, v, HOUR]) => {
           const R = window.__rec;
           for (let i = 1; i <= n; i++) {
-            BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim();
+            BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
             if (window.__FT) BF.inventory.update(h);
             if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
             if (i % HOUR === 0) window.__snap();
@@ -266,7 +266,8 @@ const CAPS = [
   ['forester bought an axe', r => r.trades_.some(t => t.buyer === 'forester' && /Axe$/.test(t.item) && !/Pickaxe/.test(t.item))],
   ['forester sold sticks', r => r.trades_.some(t => t.seller === 'forester' && t.item === 'Stick')],
   ['forester sold sticks to the toolsmith', r => r.trades_.some(t => t.seller === 'forester' && t.buyer === 'toolsmith' && t.item === 'Stick')],
-  ['toolsmith made a tool', r => Object.keys(r.made).some(k => k.startsWith('toolsmith'))],
+  ['toolsmith made a tool', r => r.logs.some(l => l[1] === 'craft') || Object.keys(r.made).some(k => k.startsWith('toolsmith'))],
+  ['toolsmith used a furnace (village log)', r => r.logs.some(l => l[1] === 'furnace')],
   ['toolsmith made a gold tool', r => Object.keys(r.made).some(k => k.startsWith('toolsmith') && /Gold/.test(k))],
   ['toolsmith made a diamond tool', r => Object.keys(r.made).some(k => k.startsWith('toolsmith') && /Diamond/.test(k))],
   ['toolsmith made shears', r => Object.keys(r.made).some(k => k.startsWith('toolsmith') && /Shears/.test(k))],
