@@ -512,6 +512,10 @@ function findWater(m, R) {
 
 // ---------------------------------------------------------------- materials from outside the village
 // What to take: "dirt" = the top block of open ground (grass, dirt ...), "log" = the base log of a tree. Never inside the village (buildings + 6 blocks around).
+// a living tree (leaves on it), not a log somebody laid: a bed's edge, a post
+const naturalTree = (x, y, z) => (BF.forester && BF.forester.treeAt ? !!BF.forester.treeAt(x, y, z) : isLogBlock(getB(x, y + 1, z)));
+// within a block of a bed, a farm plot or a bed being made (beds made by farmers can lie outside the village box)
+const nearBeds = (D, x, z) => (D.beds || []).some(b => inRect(grow(outerOf(b), 1), x, z)) || D.farms.some(f => inRect(grow(f, 1), x, z)) || D.projects.some(p => inRect(grow(outerOf(p.L), 1), x, z));
 function findGather(m, D, what, ok) {
   const c = ids(), w = W(), b0 = D.base, px = m.position.x, pz = m.position.z;
   let best = null, bd = Infinity;
@@ -519,7 +523,7 @@ function findGather(m, D, what, ok) {
     // half the samples near the farmer (the nearest edge of the village), half anywhere around it
     const near = t & 1, x = Math.floor(near ? rnd(px - 28, px + 28) : rnd(b0.x0 - GATHER_R, b0.x1 + GATHER_R + 1)), z = Math.floor(near ? rnd(pz - 28, pz + 28) : rnd(b0.z0 - GATHER_R, b0.z1 + GATHER_R + 1));
     if (x < b0.x0 - GATHER_R || x > b0.x1 + GATHER_R || z < b0.z0 - GATHER_R || z > b0.z1 + GATHER_R) continue;
-    if (inVillage(D, x, z) || !w.isLoaded(x, z)) continue;
+    if (inVillage(D, x, z) || !w.isLoaded(x, z) || nearBeds(D, x, z)) continue;
     const h = w.heightAt(x, z);
     if (h < BF.MIN_Y + 1) continue;
     let y = -1;
@@ -528,7 +532,7 @@ function findGather(m, D, what, ok) {
       if (c.diggable.has(getB(x, h, z)) && (a === 0 || (BF.REPLACEABLE[a] && !BF.SOLID[a] && !BF.FLUID[a]))) y = h;
     } else {
       for (let yy = h; yy > h - 16 && yy > 1; yy--) if (isLogBlock(getB(x, yy, z))) { y = yy; while (y > 1 && isLogBlock(getB(x, y - 1, z))) y--; break; }
-      if (y >= 0 && !BF.SOLID[getB(x, y - 1, z)]) y = -1;
+      if (y >= 0 && (!BF.SOLID[getB(x, y - 1, z)] || !naturalTree(x, y, z))) y = -1;
     }
     if (y < 0 || (ok && !ok(key3(x, y, z)))) continue;
     const d = Math.hypot(x + 0.5 - px, z + 0.5 - pz);
@@ -1010,9 +1014,9 @@ function perform(m, fs, R, D) {
 // Takes the block of a gather task (dirt from open ground, the base log of a tree) outside the village; its drops go into the inventory.
 function gatherBlock(m, D, t) {
   const c = ids(), w = W(), Tinv = TR().inv;
-  if (!w.isLoaded(t.x, t.z) || inVillage(D, t.x, t.z)) return false;
+  if (!w.isLoaded(t.x, t.z) || inVillage(D, t.x, t.z) || nearBeds(D, t.x, t.z)) return false;
   const id = getB(t.x, t.y, t.z);
-  if (t.what === "dirt" ? !c.diggable.has(id) : !isLogBlock(id)) return false;
+  if (t.what === "dirt" ? !c.diggable.has(id) : !isLogBlock(id) || !naturalTree(t.x, t.y, t.z)) return false;
   const drops = BF.rollDrops(id);
   if (!Tinv.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false;
   // a natural tree comes down whole (js/forester.js felling, no floating trunk left): its logs go into the pocket, what doesn't fit drops
