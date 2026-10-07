@@ -1,4 +1,4 @@
-// Fast-forward. Left arrow steps the simulation speed up (1x -> 3x -> 5x -> 10x -> 100x -> 1000x), Right arrow steps it down; both stop at the ends. (F no longer does anything.)
+// Fast-forward. Right arrow steps the simulation speed up (1x -> 3x -> 5x -> 10x -> 100x -> 1000x), Left arrow steps it down; both stop at the ends. (F no longer does anything.)
 // The game loop (main.js) runs its whole simulation step BF.warp.speed times per frame instead of scaling dt, so
 // the day/night cycle, mobs, villagers, crops, weather and animations all stay consistent, like a sped-up recording.
 // The player is not stepped: it keeps normal speed so you can still move around and observe.
@@ -59,8 +59,8 @@ BF.warp = {
   },
   set(i) { idx = Math.max(0, Math.min(SPEEDS.length - 1, i | 0)); eff = SPEEDS[idx]; last = 1; shown = null; show(); },
   cycle() { this.set((idx + 1) % SPEEDS.length); },
-  faster() { this.set(Math.min(SPEEDS.length - 1, idx + 1)); },   // Left arrow: one step up, stops at 1000x
-  slower() { this.set(Math.max(0, idx - 1)); },                    // Right arrow: one step down, stops at 1x
+  faster() { this.set(Math.min(SPEEDS.length - 1, idx + 1)); },   // Right arrow: one step up, stops at 1000x
+  slower() { this.set(Math.max(0, idx - 1)); },                    // Left arrow: one step down, stops at 1x
   reset() { this.set(0); },
 };
 
@@ -69,7 +69,7 @@ addEventListener("keydown", e => {
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
   if (BF.state && BF.state.paused) return;   // menus, inventory, chat, death screen
   e.preventDefault();
-  if (e.code === "ArrowLeft") BF.warp.faster(); else BF.warp.slower();
+  if (e.code === "ArrowRight") BF.warp.faster(); else BF.warp.slower();
 });
 if (document.body) ui(); else addEventListener("DOMContentLoaded", ui);
 })();
