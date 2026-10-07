@@ -5,9 +5,9 @@
 //   follows the pickaxe's material (blocks.js tool.speed, the player's formula times VILLAGER_SLOW). When the pickaxe breaks it buys a new one
 //   from a toolsmith of its village (emeralds permitting), else crafts a stone pickaxe from 3 cobblestone + 2 sticks (sticks from planks).
 // - Surface stone first: it looks for above-ground stone within SEARCH (40) blocks of the village's box: the top block of a column that is
-//   stone (or coal / iron ore) and stands higher than one of its four neighbours, so the quarry levels outcrops and hillsides and never sinks a
-//   pit. Never within BUILD_AVOID blocks of anything built, never more than FLOOR_BELOW under the plaza. It walks there and digs one block at a time.
-// - Mineshaft: with no surface stone left in range it digs a mineshaft just outside the village's box: a staircase (1 wide, 3 high) going
+//   stone (or coal / iron ore) and stands 1 or 2 blocks above one of its four neighbours, so the quarry levels outcrops and hillsides into
+//   walkable steps and never sinks a pit or trench. Never within BUILD_AVOID blocks of anything built, never more than FLOOR_BELOW under the plaza. It walks there and digs one block at a time.
+// - Mineshaft: only while there is no surface stone in range (checked each time it is above ground) it digs a mineshaft just outside the village's box: a staircase (1 wide, 3 high) going
 //   down until it has cut STONE_RUN steps through solid rock (MAX_STAIRS at most), then a 2-high corridor straight on with side branches every
 //   4 blocks (branch mining, 8 long each side), torches every 6 cells while it has them. It walks the shaft along its own cells, so nothing
 //   needs ladders. A cell that would open into water, something built or a void is skipped (a branch) or ends the shaft (the corridor); a
@@ -124,9 +124,11 @@ const pk = (x, y, z) => x + "," + y + "," + z;
 function quarryable(x, y, z, floor) {
   if (y < floor || !surfaceStone(get(x, y, z))) return false;
   if (W().heightAt(x, z) !== y) return false;
-  let lower = false;
-  for (const [dx, dz] of BF.DIRS) { const h = W().heightAt(x + dx, z + dz); if (h < y) lower = true; }
-  return lower;
+  // a neighbour 1 or 2 lower: the column it leaves (y - 1) is at most a step above that neighbour, so the quarry stays a walkable slope,
+  // never a pit, trench or ledge the miner can't climb out of (a sheer drop on every side leaves the block alone)
+  let step = false;
+  for (const [dx, dz] of BF.DIRS) { const h = W().heightAt(x + dx, z + dz); if (h < y && h >= y - 2) step = true; }
+  return step;
 }
 // All quarryable blocks in the miner's area: [{x, y, z}] (scanned at most every 30 s per miner).
 function scanSurface(m, Q) {
@@ -144,7 +146,9 @@ function findSurface(m, Q) {
   if (!Q.surf || nowS() - Q.surfAt > 30) scanSurface(m, Q);
   const floor = Math.floor(villageY(m)) - FLOOR_BELOW, px = m.position.x, pz = m.position.z;
   const bad = Q.badSurf || (Q.badSurf = new Map());
-  const cands = Q.surf.map(c => [c, Math.hypot(c.x + 0.5 - px, c.z + 0.5 - pz) * (0.8 + 0.4 * Math.random())]).sort((a, b) => a[1] - b[1]);
+  // nearest first, but the highest blocks of an outcrop before the ones under them: it levels a hill from the top down, so the way up
+  // never gets cut off below blocks it still wants
+  const cands = Q.surf.map(c => [c, Math.hypot(c.x + 0.5 - px, c.z + 0.5 - pz) * (0.8 + 0.4 * Math.random()) - 4 * (c.y - floor)]).sort((a, b) => a[1] - b[1]);
   let tested = 0;
   for (const [c] of cands) {
     const k = pk(c.x, c.y, c.z), o = claims.get(k);
@@ -470,6 +474,13 @@ function walkShaft(m, Q, dt, out, walk, speed) {
 // Paths keep failing from where it stands (down in a hole, a ravine, a cave it fell into): it digs itself a staircase out, one step up at a
 // time towards the village, as a player would.
 function lost(m, Q) { Q.lost = (Q.lost || 0) + 1; }
+// Whether it can still walk to the middle of its village (a block it could not reach was cut off, not the miner).
+function canGoHome(m) {
+  const c = m.village, [fx, fy, fz] = feet(m);
+  if (!c) return true;
+  const gx = Math.floor(c.x), gz = Math.floor(c.z);
+  return !!BF.mobs.nav.findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.abs(x - gx) + Math.abs(z - gz) <= 8 }, 6000);
+}
 function climbStep(m, Q, k, dt, out) {
   const [fx, fy, fz] = feet(m), c = m.village || m.position;
   const order = Math.abs(c.x - m.position.x) >= Math.abs(c.z - m.position.z) ? [[Math.sign(c.x - m.position.x) || 1, 0], [0, Math.sign(c.z - m.position.z) || 1]] : [[0, Math.sign(c.z - m.position.z) || 1], [Math.sign(c.x - m.position.x) || 1, 0]];
@@ -523,7 +534,7 @@ function think(m, Q) {
   }
   // 3. digging
   if (cobble >= KEEP_COBBLE || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
-  if (!underground && (!sh || sh.n === 0)) {
+  if (!underground) {   // surface stone first, whenever there is any; the mineshaft only when there is none
     const c = findSurface(m, Q);
     if (c) return { kind: "quarry", x: c.x, y: c.y, z: c.z, claim: pk(c.x, c.y, c.z), max: 60 + 2.5 * Math.hypot(c.x - m.position.x, c.z - m.position.z) };
   }
@@ -589,8 +600,8 @@ function ai(m, dt, out) {
     const goal = { x: k.x, z: k.z, at: (x, y, z) => eye(x, y, z) <= REACH && y >= k.y && !(x === k.x && z === k.z && y === k.y + 1) };   // never from below: it stays out of its own pits
     if (!goal.at(...feet(m))) {
       const r = travel(m, Q.nav, dt, out, goal, speed);
-      if (r === "failed") { log("giveup", m, { task: "quarry", why: "no path", at: [k.x, k.y, k.z] }); (Q.badSurf || (Q.badSurf = new Map())).set(k.claim, nowS() + 600); lost(m, Q); endTask(m, Q); return true; }
-      if (r === "arrived") Q.lost = 0;
+      if (r === "failed") { log("giveup", m, { task: "quarry", why: "no path", at: [k.x, k.y, k.z] }); (Q.badSurf || (Q.badSurf = new Map())).set(k.claim, nowS() + 600); if ((Q.qFail = (Q.qFail || 0) + 1) >= 5) { Q.qFail = 0; if (!canGoHome(m)) Q.lost = 3; } endTask(m, Q); return true; }   // one unreachable block is just skipped; five in a row: it is probably shut in
+      if (r === "arrived") { Q.lost = 0; Q.qFail = 0; }
       if (r !== "arrived") return true;
     }
     a.route = null;
@@ -721,5 +732,5 @@ function unpack(m, o) {
 // In its mineshaft (or digging its way out): village errands such as food shopping wait until it is back up (js/villagelife.js).
 const underground = m => !!(m && m.mi && (inShaft(m, m.mi.shaft) || m.mi.task && m.mi.task.kind === "climb"));
 BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
-  KEEP_COBBLE, SELL_MIN, _test: { state, checkCell, dig, craftPick, inShaft, shaftCellOf, routeIn, standWalk } };
+  KEEP_COBBLE, SELL_MIN, _test: { state, area, checkCell, dig, craftPick, inShaft, shaftCellOf, routeIn, standWalk } };
 })();
