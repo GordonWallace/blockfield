@@ -487,14 +487,14 @@ world.meshedCount = () => { let n = 0; for (const c of world.chunks.values()) if
 
 // ---------- meshing ----------
 // Box models in 1/16 block units: (get, x, y, z, id) -> [[x0,y0,z0,x1,y1,z1], ...]
-const connects = (get, x, y, z, self) => { const n = get(x, y, z); return n === self || (BF.blocks[n] && BF.blocks[n].model === "fence") || (BF.OPAQUE[n] && BF.SOLID[n]); }; // fences of any wood connect to each other
+const connects = (get, x, y, z, self, axis) => { const n = get(x, y, z), b = BF.blocks[n]; return n === self || (b && b.model === "fence") || (b && b.gate && b.gate.axis === axis) || (BF.OPAQUE[n] && BF.SOLID[n]); }; // fences of any wood connect to each other and to gates in line with them
 const MODELS = {
   fence(get, x, y, z, id) {
     const out = [[6, 0, 6, 10, 16, 10]];
-    if (connects(get, x + 1, y, z, id)) out.push([10, 6, 7, 16, 9, 9], [10, 12, 7, 16, 15, 9]);
-    if (connects(get, x - 1, y, z, id)) out.push([0, 6, 7, 6, 9, 9], [0, 12, 7, 6, 15, 9]);
-    if (connects(get, x, y, z + 1, id)) out.push([7, 6, 10, 9, 9, 16], [7, 12, 10, 9, 15, 16]);
-    if (connects(get, x, y, z - 1, id)) out.push([7, 6, 0, 9, 9, 6], [7, 12, 0, 9, 15, 6]);
+    if (connects(get, x + 1, y, z, id, "x")) out.push([10, 6, 7, 16, 9, 9], [10, 12, 7, 16, 15, 9]);
+    if (connects(get, x - 1, y, z, id, "x")) out.push([0, 6, 7, 6, 9, 9], [0, 12, 7, 6, 15, 9]);
+    if (connects(get, x, y, z + 1, id, "z")) out.push([7, 6, 10, 9, 9, 16], [7, 12, 10, 9, 15, 16]);
+    if (connects(get, x, y, z - 1, id, "z")) out.push([7, 6, 0, 9, 9, 6], [7, 12, 0, 9, 15, 6]);
     return out;
   },
   lantern(get, x, y, z) {
@@ -514,6 +514,7 @@ const MODELS = {
   cactus() { return [[1, 0, 1, 15, 16, 15]]; },
   // doors and beds: per-state boxes precomputed in blocks.js (a 7th entry overrides the tile)
   door(get, x, y, z, id) { return BF.blocks[id].boxes; },
+  gate(get, x, y, z, id) { return BF.blocks[id].boxes; },   // fence gates (per-state boxes from blocks.js gateDefs)
   bed(get, x, y, z, id) { return BF.blocks[id].boxes; },
   shape(get, x, y, z, id) { return BF.blocks[id].boxes; }, // slabs and stairs (per-state boxes from blocks.js)
 };
@@ -1002,6 +1003,15 @@ world.setDoor = function (x, y, z, open) {
   if (open == null) open = !d.open;
   const by = d.upper ? y - 1 : y;
   for (const up of [0, 1]) if (BF.blocks[world.getBlock(x, by + up, z)].door) world.setBlock(x, by + up, z, BF.doorId(d.f, up, open));
+  return open;
+};
+
+// Opens (open = true), closes (false) or toggles (undefined) the fence gate at (x, y, z). Returns the new state, or null.
+world.setGate = function (x, y, z, open) {
+  const g = BF.blocks[world.getBlock(x, y, z)].gate;
+  if (!g) return null;
+  if (open == null) open = !g.open;
+  if (open !== g.open) world.setBlock(x, y, z, BF.gateId(g.axis, open));
   return open;
 };
 

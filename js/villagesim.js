@@ -10,8 +10,10 @@ const BF = (window.BF = window.BF || {});
 const RADIUS = 200;       // a village this close to the player is simulated
 const DROP = 216;         // ...and keeps being simulated until it is this far (hysteresis)
 const MAX = 4;            // nearest N villages at a time
+const CHUNK_BUDGET = 640; // ...holding at most this many chunks between them (4 classic villages fit; the nearest one always runs)
 const MARGIN = 16;        // blocks of terrain kept beyond the village bounds (farms, paths)
-const MAX_SPAN = 12;      // chunks per axis, cap for oversized footprints
+const MAX_SPAN = 12;      // chunks per axis, cap for oversized footprints (classic villages)
+const MAX_SPAN_SIZED = 20; // ...and for sized villages (village generator 2, up to ~250 blocks across)
 const CROP_SECS_PER_DAY = 1200, GROW_RATE = 1 / 240;   // matches sky.dayLength and world.js GROW_CHANCE_PER_S
 
 const active = new Map();        // village key -> { v, keys: [chunk keys] }
@@ -27,7 +29,7 @@ function footprint(v) {
   const CS = BF.CS;
   let x0 = Math.floor((v.minX - MARGIN) / CS), x1 = Math.floor((v.maxX + MARGIN) / CS);
   let z0 = Math.floor((v.minZ - MARGIN) / CS), z1 = Math.floor((v.maxZ + MARGIN) / CS);
-  const cx = Math.floor(v.x / CS), cz = Math.floor(v.z / CS), half = MAX_SPAN >> 1;
+  const cx = Math.floor(v.x / CS), cz = Math.floor(v.z / CS), half = (v.pop ? MAX_SPAN_SIZED : MAX_SPAN) >> 1;
   x0 = Math.max(x0, cx - half); x1 = Math.min(x1, cx + half); z0 = Math.max(z0, cz - half); z1 = Math.min(z1, cz + half);
   const keys = [];
   for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) keys.push(x + "," + z);
@@ -81,9 +83,14 @@ function update(px, pz) {
   for (const v of near) if (v && v.x != null && v.minX != null) cand.push({ v, key: vKey(v), d: Math.hypot(v.x - px, v.z - pz) });
   cand.sort((a, b) => a.d - b.d);
   const next = new Map();
+  let kept = 0;
   for (const c of cand) {
     if (next.size >= MAX) break;
-    if (c.d <= RADIUS || (active.has(c.key) && c.d <= DROP)) next.set(c.key, active.get(c.key) || { v: c.v, keys: footprint(c.v) });
+    if (!(c.d <= RADIUS || (active.has(c.key) && c.d <= DROP))) continue;
+    const e = active.get(c.key) || { v: c.v, keys: footprint(c.v) };
+    if (next.size && kept + e.keys.length > CHUNK_BUDGET) continue;   // big (sized) villages: fewer of them at a time
+    kept += e.keys.length;
+    next.set(c.key, e);
   }
   let changed = next.size !== active.size;
   for (const k of next.keys()) if (!active.has(k)) changed = true;
