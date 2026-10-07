@@ -19,7 +19,9 @@ then open http://localhost:8000 (the game) on one screen and http://localhost:80
 - Keep the game in its own browser window, not a background tab: browsers pause background tabs.
 - Other ports: `node debug/server.js --game 9000 --debug 9001`. From another computer on your network: add `--lan`.
 - The feed is always on and doesn't change anything in the game, F3 included. However you open the game (this server, `python3 -m http.server`, or the file itself), it streams to port 8001 on the same machine. To use only the debug screen with your own game server: `node debug/server.js --no-game`. `?debugfeed=<port>` points it elsewhere and `?debugfeed=off` turns it off.
-- With no debug server running, the game plays as normal and quietly retries every few seconds.
+- With no debug server running, the game plays as normal and quietly retries every few seconds. The game's browser console says where the feed is sending (`Blockfield debug feed: ...`).
+- Game served somewhere else (another port, `127.0.0.1`, `0.0.0.0`): the feed tries port 8001 on the game's host, then `localhost` and `127.0.0.1`. If you open the game by your computer's network address or name (`http://192.168.1.5:8080`, `mymac.local`), start the debug server with `--lan`, because browsers won't let such a page talk to `localhost`.
+- Debug screen stuck on "Waiting for the game" with the game open: Shift+Reload the game tab in case the browser kept older cached game files.
 
 ## Tests and CI
 

@@ -265,17 +265,22 @@ function connect() {
   es.onerror = () => { serverUp = false; status(); };
   es.onopen = () => { serverUp = true; status(); };
 }
-let serverUp = false;
+let serverUp = false, gameErr = null, errAt = 0;   // gameErr: the game's feed failing to build a snapshot (it sends the error instead)
 function status() {
-  const el = $("conn"), live = snap && Date.now() - lastAt < 2500;
+  const el = $("conn"), live = snap && Date.now() - lastAt < (snap.hidden ? 70000 : 2500);   // a background tab only sends about once a second, or less
   let cls = "off", txt = "Server offline";
   if (serverUp && !live) { cls = "off"; txt = snap ? "Game not responding" : "Waiting for game"; }
-  if (serverUp && live) { cls = snap.paused ? "paused" : "live"; txt = snap.paused ? "Game paused" : "Live"; }
+  if (serverUp && live) { cls = snap.paused || snap.hidden ? "paused" : "live"; txt = snap.hidden ? "Game tab in the background: the browser pauses it. Put the game in its own window" : snap.paused ? "Game paused" : "Live"; }
+  const err = serverUp && !live && gameErr && Date.now() - errAt < 10000;
+  if (err) { cls = "off"; txt = "Game error"; }
   el.className = "pill " + cls; el.lastElementChild.textContent = txt;
   const w = $("waiting");
-  w.hidden = !!(serverUp && live) || (!!snap && serverUp);
+  w.hidden = !err && (!!(serverUp && live) || (!!snap && serverUp));
   if (!serverUp) { $("w-title").textContent = "Debug server offline"; $("w-text").innerHTML = "Start it with <code>node debug/server.js</code> in the game folder. This page reconnects by itself."; }
-  else { $("w-title").textContent = "Waiting for the game"; $("w-text").innerHTML = `Open the game from the debug server, at <code>http://${esc(location.hostname)}:8000</code> (or your <code>--game</code> port), and it will appear here.`; }
+  else if (err) { $("w-title").textContent = "The game is running but its debug feed hit an error"; $("w-text").innerHTML = `<code style="white-space:pre-wrap">${esc(gameErr)}</code><br>` +
+    `If it names a missing function, the browser is probably running an older saved copy of a game file: reload the game tab with Shift+Reload.`; }
+  else { $("w-title").textContent = "Waiting for the game"; $("w-text").innerHTML = `Open the game at <code>http://${esc(location.hostname)}:8000</code>, or wherever you serve it, and it will appear here.<br>` +
+    `Game open but nothing here? Reload the game tab with Shift+Reload so the browser isn't using older cached game files, then check its console: it prints <code>Blockfield debug feed: ...</code> saying where it sends.`; }
 }
 setInterval(status, 1000);
 
@@ -284,8 +289,10 @@ function onSnap(s) {
   Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {});
   let logChanged = false;
   for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
+  if (s.error) { gameErr = s.error; errAt = Date.now() - (s.age || 0); status(); }
   if (!s.info) return;
-  snap = s; lastAt = Date.now();
+  gameErr = null;
+  snap = s; lastAt = Date.now() - (s.age || 0);   // age: set on the snapshot the server replays on connect, maybe from a closed tab
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
   const was = viewKey;
   pickView(s);

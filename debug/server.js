@@ -33,7 +33,11 @@ function serveGame(req, res) {
       // point the game at this server's debug port, on whatever host name the browser used to reach the game
       const host = (req.headers.host || "localhost").replace(/:\d+$/, "");
       const tag = `<script>window.BF_DEBUG_FEED = ${JSON.stringify("http://" + host + ":" + DEBUG_PORT)};</script>\n`;
-      const html = data.toString("utf8"), at = html.indexOf("<script");
+      // and stamp each script with its file's time, so a browser can't keep running an old copy it saved (from another server
+      // on this port, say) next to new ones: a stale js/villagelog.js once stopped the feed with nothing on the debug screen
+      const html = data.toString("utf8").replace(/(<script src="(js\/[\w.-]+\.js))"/g, (m, a, f) => {
+        try { return a + "?v=" + Math.floor(fs.statSync(path.join(ROOT, f)).mtimeMs) + '"'; } catch (e) { return m; }
+      }), at = html.indexOf("<script");
       data = at >= 0 ? html.slice(0, at) + tag + html.slice(at) : html + tag;
     }
     res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-cache" }).end(data);
@@ -81,7 +85,8 @@ function push(body, res) {
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
   res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(pushes++ === 0 ? "resync" : "ok");
 }
-const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type" }, h);
+// Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
+const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true" }, h);
 const cached = () => {
   const logs = {}, ls = {}, ds = {};
   for (const [k, h] of history) logs[k] = { key: k, cap: 300, entries: h };
@@ -105,7 +110,7 @@ function serveDebug(req, res) {
     res.write("retry: 1500\n\n");
     // a new screen gets everything cached first (layouts, logs, last known detail of every village), then the latest snapshot
     send(res, "cache", JSON.stringify(cached()));
-    if (latest) send(res, "snap", JSON.stringify(latest));
+    if (latest) send(res, "snap", JSON.stringify({ ...latest, age: Date.now() - lastPush }));   // age: an old one isn't shown as live
     clients.add(res);
     req.on("close", () => clients.delete(res));
     return;
@@ -120,13 +125,23 @@ function serveDebug(req, res) {
 // keep proxies and browsers from timing out an idle stream
 setInterval(() => { for (const c of clients) c.write(": ping\n\n"); }, 15000).unref();
 
-function listen(server, port, label) {
-  server.on("error", e => { console.error(`[debug] can't open ${label} on port ${port}: ${e.code === "EADDRINUSE" ? "already in use (try --" + (label === "game" ? "game" : "debug") + " <port>)" : e.message}`); process.exit(1); });
-  server.listen(port, HOST);
+// Listens on 127.0.0.1 and ::1 (browsers may reach "localhost" over either), or on every address with --lan ("::" is dual-stack).
+function listen(handler, port, label) {
+  const hosts = HOST === "0.0.0.0" ? ["::"] : ["127.0.0.1", "::1"];
+  hosts.forEach((h, i) => {
+    const server = http.createServer(handler);
+    server.on("error", e => {
+      if (i > 0 && e.code !== "EADDRINUSE") return;   // no IPv6 on this machine: IPv4 is enough
+      if (h === "::" && e.code !== "EADDRINUSE") { server.listen(port, "0.0.0.0"); return; }
+      console.error(`[debug] can't open ${label} on port ${port}: ${e.code === "EADDRINUSE" ? "already in use (try --" + (label === "game" ? "game" : "debug") + " <port>)" : e.message}`);
+      process.exit(1);
+    });
+    server.listen(port, h);
+  });
 }
 const shown = HOST === "0.0.0.0" ? "<this machine's address>" : "localhost";
-listen(http.createServer(serveDebug), DEBUG_PORT, "debug screen");
-if (!NO_GAME) listen(http.createServer(serveGame), GAME_PORT, "game");
+listen(serveDebug, DEBUG_PORT, "debug screen");
+if (!NO_GAME) listen(serveGame, GAME_PORT, "game");
 console.log(`Blockfield debug server
   ${NO_GAME ? `Game:         serve it yourself and open index.html?debugfeed=${DEBUG_PORT}` : `Game:         http://${shown}:${GAME_PORT}`}
   Debug screen: http://${shown}:${DEBUG_PORT}   (open this one on your second monitor)
