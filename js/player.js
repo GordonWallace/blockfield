@@ -618,21 +618,45 @@ function bindInput() {
   });
   addEventListener("pointerup", e => { if (drag && e.pointerId === drag.id) drag = null; });
 
-  let ctrlRight = false;
+  // Which button a press is. Middle (pick block) only when the browser agrees on both fields: a press that reports button 1 but holds
+  // only the right button in `buttons` is a right click, as is a Mac ctrl+click.
+  const pressKind = e => {
+    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) return "right-ctrl";
+    if (e.button === 0) return "left";
+    if (e.button === 2) return "right";
+    if (e.button === 1) return e.buttons && !(e.buttons & 4) && (e.buttons & 2) ? "right" : "middle";
+    return "other";
+  };
+  let ctrlRight = false, pendingPick = null;
   cv.addEventListener("mousedown", e => {
-    if (!started || menuOpen || P.dead || invOpen()) return;
-    if (!locked && !dragMode) return; // this click only captures the mouse
+    if (!started || menuOpen || P.dead || invOpen()) { logClick(e, "ignored: " + (!started ? "not started" : menuOpen ? "menu open" : P.dead ? "dead" : "screen open")); return; }
+    if (!locked && !dragMode) { logClick(e, "takes the mouse"); return; } // this click only captures the mouse
     e.preventDefault();
-    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) { ctrlRight = true; mouseR = true; placeCd = 0; secondaryDown(); } // macOS ctrl+click = right click
-    else if (e.button === 0) { mouseL = true; primaryDown(); }
-    else if (e.button === 2) { mouseR = true; placeCd = 0; secondaryDown(); }
-    else if (e.button === 1) pickBlock();
+    const kind = pressKind(e);
+    if (kind === "right-ctrl") { ctrlRight = true; mouseR = true; placeCd = 0; logClick(e, "use (ctrl+click)", useNow()); }
+    else if (kind === "left") { mouseL = true; primaryDown(); logClick(e, "attack / break"); }
+    else if (kind === "right") { mouseR = true; placeCd = 0; logClick(e, "use", useNow()); }
+    else if (kind === "middle") { // picked on release, so a context menu event (only right clicks make one) can still turn it into a use
+      updateTarget();
+      pendingPick = { at: performance.now(), name: targetName() };
+      logClick(e, "pick block", pendingPick.name);
+    } else logClick(e, "no action");
   });
   addEventListener("mouseup", e => {
     if (e.button === 0) { mouseL = false; resetBreak(); if (ctrlRight) { ctrlRight = false; mouseR = false; eatT = 0; } }
     if (e.button === 2) { mouseR = false; eatT = 0; }
+    if (e.button === 1 && pendingPick) {
+      const pp = pendingPick;
+      setTimeout(() => { if (pendingPick === pp) { pendingPick = null; if (started && !menuOpen && !P.dead && !invOpen()) pickBlock(); } }, 60);   // Windows sends the context menu just after the release
+    }
   });
-  cv.addEventListener("contextmenu", e => e.preventDefault());
+  cv.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    if (!pendingPick) { logClick(e, ""); return; }
+    pendingPick = null; // a "middle" press with a context menu was a right click
+    if (started && !menuOpen && !P.dead && !invOpen()) logClick(e, "was a right click: use", useNow());
+  });
+  cv.addEventListener("auxclick", e => logClick(e, ""));
   addEventListener("wheel", e => {
     if (!started || menuOpen || invOpen() || !e.deltaY) return;
     const I = inv(); if (!I.select) return;
@@ -641,6 +665,18 @@ function bindInput() {
   }, { passive: true });
 
   if (isTouch) bindTouch(cv);
+}
+
+// Right click on press: use the block / item in front (secondaryDown). Returns what it was aimed at, for the click log.
+function useNow() { const r = secondaryDown(); return targetName() + (r ? "" : " (nothing happened)"); }
+function targetName() { const b = target && BF.blocks[target.id]; return b ? b.name : "no block"; }
+// Click log for the F3 overlay: the raw mouse fields of the last few presses and what the game did with each.
+const clickLog = [];
+function logClick(e, action, aim) {
+  const mods = ["ctrl", "shift", "alt", "meta"].filter(m => e[m + "Key"]).join("+");
+  clickLog.push(`${e.type} button ${e.button} buttons ${e.buttons}${mods ? " " + mods : ""}${e.pointerType ? " " + e.pointerType : ""}${locked ? " locked" : dragMode ? " drag" : ""}` +
+    (action ? ` -> ${action}${aim ? " " + aim : ""}` : ""));
+  if (clickLog.length > 6) clickLog.shift();
 }
 
 function look(dx, dy) {
@@ -1635,6 +1671,7 @@ P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
+P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
 P.escGrace = () => inEscGrace();   // tests: still inside the grace after an Escape closed a screen
 P.frame = () => frameNo;
 P.menu = () => menuOpen;

@@ -86,6 +86,7 @@ function debugInfo() {
     blockLight: BF.world.getBlockLight(p.x, p.y + 0.05, p.z), calls: renderer.info.render.calls,
     weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
     cloudCover: BF.sky.cloudCover, cloudHeight: BF.sky.cloudHeight, warp: BF.warp.speed,
+    clicks: BF.player.clickLog ? BF.player.clickLog() : [],
   };
 }
 function debugText(d) {
@@ -97,7 +98,8 @@ function debugText(d) {
     `Mobs ${d.mobs}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
-    `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}`;
+    `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
+    (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
 }
 BF.debugInfo = debugInfo;
 BF.debugText = debugText;
