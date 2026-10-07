@@ -31,9 +31,12 @@ module.exports = async (pg, out) => {
       if (gateOpen()) G.open++;
     };
     const startWheat = c("wheat_item");
+    let fedByShep = 0;
+    BF.on("sheepFed", (sheep, by) => { if (by === shep) fedByShep++; });
     // ---- morning: the shepherd feeds the hungry sheep and shears the woolly ones
     for (let i = 0; i < 6000; i++) { step(); if (i % 10 === 0) sample(); }
-    ok("shepherd fed the sheep (wheat used)", c("wheat_item") < startWheat, [startWheat, c("wheat_item")]);
+    // counted by feeding, not by the wheat left: it may buy more wheat during the morning
+    ok("shepherd fed the sheep (wheat used)", fedByShep > 0, [fedByShep, startWheat, c("wheat_item")]);
     ok("every adult pen sheep was fed today", pen.sheep.filter(s => s.mob && !s.mob.lamb).every(s => !BF.shepherd.hungry(s.mob, day())));
     ok("shepherd sheared the flock (wool in inventory)", c("white_wool") >= 1, c("white_wool"));
     ok("shepherd went into the pen", G.inside > 0, G);
@@ -71,12 +74,14 @@ module.exports = async (pg, out) => {
       BF.trades.inv.remove(shep.inv, I.wheat_item, 999);
       BF.trades.inv.remove(farmer.inv, I.wheat_item, 999); BF.trades.inv.add(farmer.inv, I.wheat_item, 40);
       farmer.position.set(shep.position.x + 2, shep.position.y, shep.position.z); farmer.vel.set(0, 0, 0);   // standing next to it: no chase
-      const em0 = c("emerald"), fw0 = BF.trades.inv.count(farmer.inv, I.wheat_item);
+      const em0 = c("emerald"), seen = new Set(BF.villageLife.log), fw0 = BF.trades.inv.count(farmer.inv, I.wheat_item);
       BF.sky.setTime(0.1);
       let bought = false;
       for (let i = 0; i < 9000 && !bought; i++) { if (i % 20 === 0) { farmer.position.set(shep.position.x + 2, shep.position.y, shep.position.z); farmer.vel.set(0, 0, 0); } step(); if (c("wheat_item") > 0) bought = true; }
       ok("shepherd bought wheat from the farmer", bought, { wheat: c("wheat_item"), emeraldsBefore: em0, emeraldsAfter: c("emerald"), inv: shep.inv.filter(Boolean).map(s => BF.items[s.id].name + ":" + s.count).join(","), want: BF.shepherd.wheatWanted(shep), fshop: shep.fshop && shep.fshop.stage, canSell: BF.villageLife && BF.villageLife.canSell && BF.villageLife.canSell(farmer), farmerWheat: [fw0, BF.trades.inv.count(farmer.inv, I.wheat_item)] });
-      ok("it paid emeralds", c("emerald") < em0);
+      // the purchase itself, not the purse: other villagers (a furniture maker after wool) may pay the shepherd meanwhile
+      const paid = BF.villageLife.log.filter(l => !seen.has(l)).filter(l => l.kind === "buyWheat" && l.who === "shepherd" + (shep.slot ? "#" + shep.slot.idx : "")).map(l => l.paid);
+      ok("it paid emeralds", paid.some(p => /^[1-9]\d* emerald$/.test(p)) || c("emerald") < em0, { paid, em0, now: c("emerald") });
       R.log = BF.villageLife.log.filter(l => l.kind === "buyWheat").slice(-2);
     }
     R.sheep = pen.sheep.length;
