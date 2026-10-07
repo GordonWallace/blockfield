@@ -1,7 +1,8 @@
 // Forester villagers and sapling growth (BF.forester). A recreation of the villager-planter mod (GordonWallace/villager-planter): a villager
 // profession whose jobsite is the band saw, who plants the saplings it carries, fells whole trees and picks up what falls, and who buys
 // saplings from the player for emeralds (the trade itself is in js/trading.js, TRADES.forester).
-// - Planting: a forester holding a sapling picks a random free spot within 16 blocks (+-4 high) of itself: air over soil with room for a tree above,
+// - Planting: a forester holding a sapling picks a random free spot within 16 blocks (+-4 high) of itself (in a sized village with no such spot near it,
+//   of a random point just outside the village): air over soil with room for a tree above,
 //   no other sapling within 4 blocks, no door within 10 blocks and no building or other structure within 8 (dirt paths are fine). It walks there and plants (cooldown 10 s).
 // - Felling: it picks a random natural tree within 40 blocks (+12 / -6 high), nearer ones favoured: the connected logs (at most 64) with leaves among them. When it is
 //   within 3 blocks it fells the whole tree at once, leaves included, and the blocks drop their items (cooldown 20 s). Needs 2 free inventory slots.
@@ -265,14 +266,26 @@ const holdsSapling = m => { for (const s of m.inv) if (s && /_sapling$/.test(BF.
 const claims = new Map();   // "x,y,z" of a tree base or a drop -> villager, so two foresters do not go for the same tree
 const centre = m => (m.village ? { x: m.village.x, z: m.village.z } : { x: m.position.x, z: m.position.z });
 // Sized villages (village generator 2) can be ~250 blocks across, so their leash runs from the edge of the village's box instead of its centre:
-// planting within SIZED_PLANT of the box, felling within SIZED_CUT of it, and the forester looks for trees SIZED_SEARCH around itself.
-const SIZED_PLANT = 16, SIZED_CUT = 40, SIZED_SEARCH = 72;
+// planting within SIZED_PLANT of the box, felling anywhere within SIZED_CUT of it (its band saw may stand at the far side of the village from the
+// woods), on ground up to SIZED_Y_DOWN below / SIZED_Y_UP above the forester.
+const SIZED_PLANT = 16, SIZED_CUT = 40, SIZED_Y_DOWN = 10, SIZED_Y_UP = 14;
 const boxOf = m => { const w = m.village && m.village.pop && m.village.wg; return w && w.minX != null ? w : null; };
 const boxDist = (b, x, z) => Math.hypot(Math.max(0, b.minX - x, x - b.maxX), Math.max(0, b.minZ - z, z - b.maxZ));
 const inHome = (m, x, z) => { const b = boxOf(m); if (b) return boxDist(b, x, z) <= SIZED_PLANT; const c = centre(m); return Math.hypot(x - c.x, z - c.z) <= HOME_R; };
 
-function findSpot(m) {
-  const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z);
+// A point just outside a sized village's box, in a random direction from its centre: where a forester whose band saw stands among the houses
+// goes to plant when nothing near it is far enough from buildings. {x, y, z} (y = the ground there) or null when that ground is not loaded.
+function edgePoint(m) {
+  const b = boxOf(m);
+  if (!b) return null;
+  const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2, a = Math.random() * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a);
+  const t = Math.min(Math.abs(dx) > 1e-6 ? (b.maxX - b.minX) / 2 / Math.abs(dx) : Infinity, Math.abs(dz) > 1e-6 ? (b.maxZ - b.minZ) / 2 / Math.abs(dz) : Infinity) + rnd(4, SIZED_PLANT - 2);
+  const x = Math.floor(cx + dx * t), z = Math.floor(cz + dz * t);
+  if (!W().isLoaded(x, z)) return null;
+  return { x, y: W().heightAt(x, z) + 1, z };
+}
+function findSpot(m, at) {
+  const pos = at || m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z);
   // doors, and columns holding anything built (not landscape; dirt paths and farmland's crops aside, farmland itself counts), scanned once
   const doors = [], R = SEARCH + DOOR_AVOID, DP = BF.B.dirt_path, FL = BF.B.farmland, S = 2 * R + 1, built = new Uint8Array(S * S);
   for (let x = px - R; x <= px + R; x++) for (let z = pz - R; z <= pz + R; z++) {
@@ -313,16 +326,19 @@ function findSpot(m) {
   }
   return null;
 }
-// Trees within 40 blocks (and 64 of the village centre; sized villages: 72 blocks, and 40 of the village's box). Candidates are ranked by distance times a random factor of 0.5 to 2, so a near tree
+// Trees within 40 blocks (and 64 of the village centre; sized villages: anywhere within 40 of the village's box). Candidates are ranked by distance times a random factor of 0.5 to 2, so a near tree
 // usually wins but a farther one sometimes does (two foresters do not all go for the same trunk).
 const notTree = new Map();   // "x,y,z" of log bases that are not trees -> sim time until which they are skipped
 function findTree(m) {
   const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z), cands = [], c = centre(m), box = boxOf(m);
-  const RS = box ? SIZED_SEARCH : CUT_SEARCH, home = box ? (x, z) => boxDist(box, x, z) <= SIZED_CUT : (x, z) => Math.hypot(x - c.x, z - c.z) <= CUT_HOME;
-  for (let x = px - RS; x <= px + RS; x++) for (let z = pz - RS; z <= pz + RS; z++) {
+  const x0 = box ? box.minX - SIZED_CUT : px - CUT_SEARCH, x1 = box ? box.maxX + SIZED_CUT : px + CUT_SEARCH;
+  const z0 = box ? box.minZ - SIZED_CUT : pz - CUT_SEARCH, z1 = box ? box.maxZ + SIZED_CUT : pz + CUT_SEARCH;
+  const y0 = py - (box ? SIZED_Y_DOWN : CUT_Y_DOWN), y1 = py + (box ? SIZED_Y_UP : CUT_Y_UP);
+  for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
     const d = Math.hypot(x + 0.5 - pos.x, z + 0.5 - pos.z);
-    if (d > RS || !home(x + 0.5, z + 0.5) || !W().isLoaded(x, z)) continue;
-    for (let y = py - CUT_Y_DOWN; y <= py + CUT_Y_UP; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z, d * (0.5 + 1.5 * Math.random())]);
+    if (box ? boxDist(box, x + 0.5, z + 0.5) > SIZED_CUT : d > CUT_SEARCH || Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) > CUT_HOME) continue;
+    if (!W().isLoaded(x, z)) continue;
+    for (let y = y0; y <= y1; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z, d * (0.5 + 1.5 * Math.random())]);
   }
   cands.sort((a, b) => a[3] - b[3]);
   const now = nowS();
@@ -330,11 +346,11 @@ function findTree(m) {
   for (const [x, y, z] of cands) {
     const k = pk(x, y, z), o = claims.get(k);
     if (o && o !== m && !o.dead && !o.removed) continue;
-    if ((notTree.get(k) || 0) > now) continue;          // a building's log pillar, checked a minute ago
+    if ((notTree.get(k) || 0) > now) continue;          // a building's log pillar, checked in the last 5 minutes
     if (++tested > 40) break;
     const t = treeAt(x, y, z);
     if (t) return t;
-    notTree.set(k, now + 60);
+    notTree.set(k, now + 300);
   }
   if (notTree.size > 4000) for (const [k, t] of notTree) if (t <= now) notTree.delete(k);
   return null;
@@ -447,7 +463,7 @@ function ai(m, dt, out) {
     else if (F.sweep) { log("swept", m, { why: "clear" }); F.sweep = null; F.skip = null; F.tries = null; }
     if (!task && !F.sweep) {
       const opts = [];
-      if (F.plantCd <= 0 && holdsSapling(m)) { const s = findSpot(m); if (s) opts.push([W_PLANT, { kind: "plant", x: s.x, y: s.y, z: s.z, max: PLANT_MAX, claim: pk(s.x, s.y, s.z) }]); else F.plantCd = 5; }
+      if (F.plantCd <= 0 && holdsSapling(m)) { let s = findSpot(m); if (!s && boxOf(m)) { const e = edgePoint(m); if (e) s = findSpot(m, e); } if (s) opts.push([W_PLANT, { kind: "plant", x: s.x, y: s.y, z: s.z, max: PLANT_MAX + 2.5 * Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z), claim: pk(s.x, s.y, s.z) }]); else F.plantCd = 5; }
       if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX + 2.5 * Math.hypot(tr.base[0] + 0.5 - m.position.x, tr.base[2] + 0.5 - m.position.z), claim: pk(tr.base[0], tr.base[1], tr.base[2]) }]); else F.cutCd = 8; }
       if (opts.length) { let r = Math.random() * opts.reduce((s, o) => s + o[0], 0); for (const [w, o] of opts) { if ((r -= w) < 0) { task = o; break; } } task = task || opts[0][1]; }
     }

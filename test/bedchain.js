@@ -12,23 +12,28 @@ const DAYS = +(process.argv[3] || 3);
 const PER_SEED = +(process.argv[4] || 6);
 const OUT = process.argv[5] || null;
 
+let b;
+async function openWorld(seed) {
+  const pg = await b.newPage({ viewport: { width: 320, height: 200 } });
+  pg.on('pageerror', e => console.log('PAGEERROR', e.stack || e.message));
+  pg.on('console', m => { if (m.type() === 'error') console.log('console.error:', m.text().slice(0, 300)); });
+  // stop the render loop once the game is up: the test steps the simulation itself
+  await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
+  await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
+  await pg.route('https://fonts.**', r => r.abort());
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
+  await pg.waitForTimeout(3000);
+  await pg.evaluate(t => { window.__TRACE = t; }, !!process.env.TRACE);
+  return pg;
+}
+
 (async () => {
-  const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const results = [];
   for (const seed of seeds) {
-    const pg = await b.newPage({ viewport: { width: 320, height: 200 } });
-    pg.on('pageerror', e => console.log('PAGEERROR', e.stack || e.message));
-    pg.on('console', m => { if (m.type() === 'error') console.log('console.error:', m.text().slice(0, 300)); });
-    // stop the render loop once the game is up: the test steps the simulation itself
-    await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
-    await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
-    await pg.route('https://fonts.**', r => r.abort());
-    await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
-    await pg.waitForTimeout(3000);
-    await pg.evaluate(t => { window.__TRACE = t; }, !!process.env.TRACE);
+    let pg = await openWorld(seed);
     const villages = await pg.evaluate(n => {
       window.__halt = true;
-      BF.world.viewDist = 3;
       if (BF.player.setGameMode) BF.player.setGameMode('creative');
       const vs = BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
       return vs.slice(0, n * 3).map(v => ({ x: v.x, z: v.z, y: v.y, pop: v.pop, biome: v.biome, nb: (v.buildings || []).length }));
@@ -38,6 +43,9 @@ const OUT = process.argv[5] || null;
       if (done >= PER_SEED) break;
       if (process.env.ONLY && process.env.ONLY !== Math.round(v.x) + ',' + Math.round(v.z)) continue;
       const t0 = Date.now();
+      // a fresh page per village: neighbouring villages within the far-village simulation range would otherwise have run already
+      if (done || pg.__used) { await pg.close(); pg = await openWorld(seed); await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); }); }
+      pg.__used = true;
       // ---- recorder (before the villagers spawn: a furniture maker short of stock shops right away)
       await pg.evaluate(key => {
         const R = window.__rec = { key, trades: [], shorn: 0, shornBy: 0, crafts: 0, fells: 0, saws: 0, sweeps: 0, sold: 0, firstCraftFromBought: null, events: [], built: [], giveups: {}, fo: {}, trace: [] };
@@ -72,12 +80,13 @@ const OUT = process.argv[5] || null;
         const roster = rec && rec.roster ? rec.roster.length : 0;
         // trees: natural logs within 40 blocks of the village box (the forester's search radius), surface band only
         const wg = rec && rec.wg, x0 = (wg ? wg.minX : v.x - 40) - 40, x1 = (wg ? wg.maxX : v.x + 40) + 40, z0 = (wg ? wg.minZ : v.z - 40) - 40, z1 = (wg ? wg.maxZ : v.z + 40) + 40;
+        // trees (what a forester can fell: BF.forester.treeAt) standing within 40 blocks of the village box
         let logs = 0;
         const LOG = new Set(Object.keys(BF.B).filter(n => /^(oak|birch|spruce|jungle|acacia|dark_oak|cherry|mangrove)_log$/.test(n)).map(n => BF.B[n]));
-        for (let x = x0; x <= x1; x += 2) for (let z = z0; z <= z1; z += 2) {
+        for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
           if (!BF.world.isLoaded(x, z)) continue;
-          const hy = BF.worldgen.heightAt(x, z);
-          for (let y = hy + 1; y < hy + 9; y++) if (LOG.has(BF.world.getBlock(x, y, z))) { logs++; break; }
+          const hy = BF.world.heightAt(x, z);
+          for (let y = hy - 12; y <= hy; y++) if (LOG.has(BF.world.getBlock(x, y, z)) && !LOG.has(BF.world.getBlock(x, y - 1, z)) && BF.forester.treeAt(x, y, z)) { logs++; break; }
         }
         const pens = BF.shepherd && rec ? BF.shepherd.pensOf(rec) : [];
         const invOf = prof => mem.filter(m => m.profession === prof).map(m => m.inv.filter(Boolean).map(s => BF.itemName(s.id) + 'x' + s.count).join(' '));
@@ -131,7 +140,7 @@ const OUT = process.argv[5] || null;
         giveups: res.R.giveups, end: res.end, status: res.status, secs: Math.round((Date.now() - t0) / 1000),
       };
       results.push(row);
-      console.log(`seed ${seed} village ${row.key} pop ${row.pop} logs ${row.logsNear} pens ${row.pens} sheep ${row.penSheep}: fell ${row.fells} saw ${row.saws} shorn ${row.shornByShepherd}/${row.shorn} | FM bought wool ${row.woolBuys} wood ${row.woodBuys} | crafted ${row.crafts} | sold ${row.bedsSold} (chain ${row.chainBedsSold}) | built ${row.built || '-'} | ${row.full ? "FULL CHAIN" : "broken"} (${row.secs}s)`);
+      console.log(`seed ${seed} village ${row.key} pop ${row.pop} trees ${row.logsNear} pens ${row.pens} sheep ${row.penSheep}: fell ${row.fells} saw ${row.saws} shorn ${row.shornByShepherd}/${row.shorn} | FM bought wool ${row.woolBuys} wood ${row.woodBuys} | crafted ${row.crafts} | sold ${row.bedsSold} (chain ${row.chainBedsSold}) | built ${row.built || '-'} | ${row.full ? "FULL CHAIN" : "broken"} (${row.secs}s)`);
       console.log('   giveups', JSON.stringify(row.giveups), 'forester', JSON.stringify(res.R.fo)); if (process.env.TRACE) for (const t of res.R.trace) console.log('   ', JSON.stringify(t)); console.log('   end', JSON.stringify(row.end), JSON.stringify(row.status));
       if (OUT) fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
     }
