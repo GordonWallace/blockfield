@@ -705,6 +705,11 @@ Recreation of the villager-planter mod (GordonWallace/villager-planter). Differe
 - Status (`statusText`): "Making an iron pickaxe", "Buying raw iron", "Buying fuel", "Buying a furnace", "Taking ore to a furnace", "Smelting iron ingots", "Putting a furnace down". Debug log: `BF.toolsmith.LOG`.
 - **Test.** `test/toolsmith-actions.js` (trade table, plans, crafting time, pack / unpack, the furniture maker's furnaces, fuel rules at a furnace, then a live toolsmith that buys and places a furnace, smelts and makes tools): `NODE_PATH=$(npm root -g) node test/run.js /tmp/ts test/toolsmith-actions.js`.
 
+## Furnace and chest facing (blocks.js facing pack, world.js, player.js, storage.js, toolsmith.js, worldgen.js, blueprints.js)
+- One block id per facing: `furnace` / `chest` open south; `furnace_n/e/w` and `chest_n/e/w` (hidden, appended) drop and pick the plain block. Blocks carry `furnaceFacing` / `chestFacing` (0..3 = n e s w) and `frontFace` (FACES index of the "front" tile, default 4 = +z), which the mesher honours for cubes and box models.
+- Always test with `BF.isFurnace(id)` / `BF.isChest(id)`, never `=== B.furnace` / `B.chest`; make ids with `BF.furnaceId(f)`, `BF.chestId(f)` or `BF.facedId(id, f)`.
+- `BF.openFacing(p, from)`: the side of cell p facing the placer `from` among sides whose neighbour is not solid (none open: towards the placer). The player, toolsmiths placing furnaces and furniture makers delivering chests use it. Generated houses turn their furnaces and chests towards the door side; blueprint rotation turns them with the building.
+
 ## Tool durability (blocks.js, inventory.js, player.js, drops.js, trading.js)
 - Items with a `tool` get `durability` (uses): by tier wood 59, stone 131, iron 250, diamond 1561 (Minecraft Java); shears 238, bow 384; gold 32 (set on the item). `BF.durability(id)`.
 - Gold tools (`golden_pickaxe/axe/shovel/sword/hoe`, appended item ids): speed 12, harvest tier 1 (wood's level: a gold pickaxe gets nothing from iron, gold, diamond or redstone ore), 32 uses, `material: "gold"`. Crafted like the other tiers from Gold Ingots + Sticks (inventory.js tool loop). Test: `test/gold-tools.js`.
