@@ -81,6 +81,8 @@ function detail(rec) {
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));
   d.jobsites = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec).map(s => [s.x, s.z, L.pretty(s.prof)]) : [];
+  // structures the village's builders planned (js/builder.js rec.built): [x0, z0, x1, z1, type, finished 0|1]
+  d.built = (rec.built || []).filter(e => e.state !== "abandoned" && e.w && e.d).map(e => [e.ox, e.oz, e.ox + e.w - 1, e.oz + e.d - 1, e.type, e.state === "done" ? 1 : 0]);
   d.clock = BF.vlog.stamp(BF.sky.day + BF.sky.time);   // when these numbers were taken, shown once the village unloads
   return d;
 }
@@ -95,7 +97,8 @@ function villages(pp) {
     const rec = recs.get(key), [kx, kz] = key.split(",").map(Number);
     const x = rec ? rec.x : kx, z = rec ? rec.z : kz, loaded = !!rec && isLoaded(rec);
     const va = BF.villageLife && BF.villageLife.villageAge ? BF.villageLife.villageAge(key) : null;   // game days loaded and active
-    out.villages.push({ key, name: nameOf(key), x: Math.round(x), z: Math.round(z), dist: Math.round(Math.hypot(x - pp.x, z - pp.z)), loaded, age: va == null ? null : Math.round(va * 10) / 10 });
+    const H = BF.happiness, happy = H ? (loaded ? H.score(rec) : H.last(key)) : null;   // js/happiness.js; an unloaded village keeps its last score
+    out.villages.push({ key, name: nameOf(key), x: Math.round(x), z: Math.round(z), dist: Math.round(Math.hypot(x - pp.x, z - pp.z)), loaded, age: va == null ? null : Math.round(va * 10) / 10, happy });
     if (loaded) out.detail[key] = detail(rec);
     if (rec && rec.wg && !sentLayouts.has(key)) { out.layouts[key] = layout(rec); sentLayouts.add(key); }
     const a = L.entries(key), last = a[a.length - 1], sig = a.length + "|" + (last ? last[0] + last[2] : "");
