@@ -31,9 +31,11 @@ module.exports = async (pg, out) => {
       if (gateOpen()) G.open++;
     };
     const startWheat = c("wheat_item");
-    // ---- morning: the shepherd feeds the hungry sheep and shears the woolly ones
+    const me = shep.profession + (shep.slot ? "#" + shep.slot.idx : ""), t0 = BF.sky.day + BF.sky.time - 0.001;
+    const bought = () => BF.villageLife.log.filter(l => l.kind === "buyWheat" && l.who === me && l.day >= t0).reduce((n, l) => n + (parseInt(l.got) || 0), 0);
+    // ---- morning: the shepherd feeds the hungry sheep and shears the woolly ones (it may buy more wheat meanwhile)
     for (let i = 0; i < 6000; i++) { step(); if (i % 10 === 0) sample(); }
-    ok("shepherd fed the sheep (wheat used)", c("wheat_item") < startWheat, [startWheat, c("wheat_item")]);
+    ok("shepherd fed the sheep (wheat used)", c("wheat_item") < startWheat + bought(), [startWheat, bought(), c("wheat_item")]);
     ok("every adult pen sheep was fed today", pen.sheep.filter(s => s.mob && !s.mob.lamb).every(s => !BF.shepherd.hungry(s.mob, day())));
     ok("shepherd sheared the flock (wool in inventory)", c("white_wool") >= 1, c("white_wool"));
     ok("shepherd went into the pen", G.inside > 0, G);
