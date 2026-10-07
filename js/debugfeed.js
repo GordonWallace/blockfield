@@ -53,8 +53,18 @@ const isLoaded = rec => (rec.members || []).some(m => m.type === "villager" && !
 const nameOf = key => (BF.signs && BF.signs.villageName && BF.signs.villageName(key)) || "Village";
 
 // Full detail for one loaded village: the panel's numbers, its villagers, golems and free job blocks.
+// Emeralds and food (bread-equivalent) a villager holds: its inventory plus every chest it owns.
+function holdings(chestsOf, m) {
+  const em = BF.I && BF.I.emerald, F = BF.food, cs = chestsOf.get(BF.storage && BF.storage.keyOf ? BF.storage.keyOf(m) : null) || [];
+  const emIn = a => (a || []).reduce((n, st) => n + (st && st.id === em ? st.count : 0), 0), food = a => F ? F.breadEq(a || []) : 0;
+  let ce = 0, cf = 0;
+  for (const c of cs) { ce += emIn(c.slots); cf += food(c.slots); }
+  return { em: emIn(m.inv), emChests: ce, food: r1(food(m.inv)), foodChests: r1(cf), chests: cs.length };
+}
 function detail(rec) {
   const L = BF.vlog, d = L.panelData(rec);
+  const chestsOf = new Map();   // owner key -> chests
+  if (BF.inventory && BF.inventory.chests) for (const c of BF.inventory.chests.values()) if (c.owner) { const l = chestsOf.get(c.owner) || []; l.push(c); chestsOf.set(c.owner, l); }
   d.villagerList = [];
   d.golems = [];
   for (const m of rec.members || []) {
@@ -65,7 +75,7 @@ function detail(rec) {
       name: L.nameOf(m), prof: m.child ? "Child" : L.pretty(m.profession), child: !!m.child,
       status: status(m) || "", x: r1(m.position.x), y: r1(m.position.y), z: r1(m.position.z),
       hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!m.bed, sleeping: !!m.sleeping,
-      job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null,
+      job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));

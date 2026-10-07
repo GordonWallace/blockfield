@@ -226,7 +226,7 @@
       </div>
       <div class="panel" id="rpanel">
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
-        <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
+        <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
       </div>
       <div class="panel"><details class="raw" id="raw"><summary>In-game F3 text</summary><pre id="f3"></pre></details></div>
     </div>
@@ -512,15 +512,18 @@ mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlNa
 // ---------------------------------------------------------------- roster
 function renderRoster(s) {
   const v = curV, q = $("r-q").value.trim().toLowerCase(), d = s.info;
-  let rows = v.villagerList.map(m => ({ ...m, dist: Math.hypot(m.x - d.x, m.z - d.z), hpf: m.hp / (m.maxHp || 20) }));
+  let rows = v.villagerList.map(m => ({ ...m, dist: Math.hypot(m.x - d.x, m.z - d.z), hpf: m.hp / (m.maxHp || 20), emT: (m.em || 0) + (m.emChests || 0), foodT: (m.food || 0) + (m.foodChests || 0) }));
   if (q) rows = rows.filter(m => (m.name + " " + m.prof + " " + m.status).toLowerCase().includes(q));
   const k = rosterSort.k, dir = rosterSort.dir;
   rows.sort((a, b) => { const x = k === "hp" ? a.hpf : a[k], y = k === "hp" ? b.hpf : b[k]; return (typeof x === "string" ? x.localeCompare(y) : (x > y) - (x < y)) * dir || a.name.localeCompare(b.name); });
   $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + (curStale ? " when last loaded" : " loaded");
   $("r-body").innerHTML = rows.map(m => `<tr data-n="${esc(m.name)}"><td>${esc(m.name)}</td><td><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i>${esc(m.prof)}</td>` +
     `<td class="st">${esc(m.status || "")}</td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
-    `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
-    `<tr><td colspan="6" class="dim">No villagers match.</td></tr>`;
+    `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td>` +
+    `<td title="${m.em != null ? `${m.em} carried + ${m.emChests} in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}">${m.em != null ? fmt(m.emT) : "-"}${m.emChests ? ` <span class="dim">(${fmt(m.emChests)} in chests)</span>` : ""}</td>` +
+    `<td title="${m.food != null ? `${m.food} carried + ${m.foodChests} in chests (bread-equivalent)` : ""}">${m.food != null ? fmt(Math.round(m.foodT * 10) / 10) : "-"}${m.foodChests ? ` <span class="dim">(${fmt(m.foodChests)} in chests)</span>` : ""}</td>` +
+    `<td>${m.starving == null ? "-" : m.starving ? '<span class="no">starving</span>' : '<span class="dim">no</span>'}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
+    `<tr><td colspan="9" class="dim">No villagers match.</td></tr>`;
   markRoster();
 }
 function markRoster(scroll) {

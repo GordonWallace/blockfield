@@ -41,6 +41,15 @@ const start = async () => {
   ok('villager count', g.villagers === want.villagers);
   ok('seed', g.seed === want.seed);
   ok('roster rows = loaded villagers', g.rows === want.loaded);
+  // emeralds and food (inventory plus owned chests) and starving, per villager
+  const gv = await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
+    const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && BF.trades.inv.count(x.inv, BF.I.emerald) > 0) || rec.members.find(x => x.type === 'villager' && !x.dead);
+    const k = BF.storage.keyOf(m), cs = [...BF.inventory.chests.values()].filter(c => c.owner === k);
+    const em = BF.trades.inv.count(m.inv, BF.I.emerald) + cs.reduce((n, c) => n + c.slots.reduce((a, st) => a + (st && st.id === BF.I.emerald ? st.count : 0), 0), 0);
+    return { name: BF.vlog.nameOf(m), em, starving: !!m.starving }; });
+  await dbg.waitForTimeout(600);
+  const rr = await dbg.evaluate(n => { const tr = [...document.querySelectorAll('#r-body tr')].find(t => t.dataset.n === n); return tr && [...tr.children].map(td => td.textContent); }, gv.name);
+  ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 9 && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
   ok('log entries ' + g.log + '/' + want.log, g.log === want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nXYZ /.test((await got()).f3));
