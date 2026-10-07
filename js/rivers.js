@@ -16,7 +16,7 @@ let NS = 96, NMAX = 80, REACH = 34, HS = 1, W0 = 1.6, W1 = 4.6, WLO = 2, WHI = 9
 let MARG = 74;
 const smooth = (a, b, x) => { let t = (x - a) / (b - a); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 
-let noise, macro, SEA = 48, density = 0.03, enabled = true;
+let noise, macro, SEA = 48, density = 0.03, enabled = true, OUTLET = 0, MOUTH = 49.5;
 let nodes, edges, cells, traced, ensured, tmp;
 
 function init(n, macroFn, opts) {
@@ -25,6 +25,8 @@ function init(n, macroFn, opts) {
   NS = o.ns || 96; NMAX = o.nmax || 80; REACH = o.reach || 34; W0 = o.w0 != null ? o.w0 : 1.6; W1 = o.w1 != null ? o.w1 : 4.6;
   WLO = o.wlo != null ? o.wlo : 2; WHI = o.whi || 95; SLO = o.slo != null ? o.slo : 15; SHI = o.shi || 85; HS = o.hs || 1; MARG = o.marg || 74;
   RANGE = Math.ceil(NMAX * 1.42 / SUPER) + 1;
+  OUTLET = o.outlet || 0;   // blocks the channel runs on past the mouth node (through shore ridges into open water); 0 = none (generator 2)
+  MOUTH = SEA + (o.mouth != null ? o.mouth : 1.5);   // a node this low (macro height) is the sea: the river ends there
   BF.rivers.REACH = REACH;
   nodes = new Map(); edges = new Map(); cells = new Map(); traced = new Set(); ensured = new Set(); tmp = { p: 0, c: 0 };
 }
@@ -44,14 +46,14 @@ function node(i, j) {
 function nextOf(nd) {
   if (nd.next !== undefined) return nd.next;
   let best = null, bs = 0.002;
-  if (nd.p > SEA + 1.5 && nd.c > -0.02) {
+  if (nd.p > MOUTH && nd.c > -0.02) {
     for (let dj = -RAD; dj <= RAD; dj++) for (let di = -RAD; di <= RAD; di++) {
       if (!di && !dj) continue;
       const m = node(nd.i + di, nd.j + dj), dx = m.x - nd.x, dz = m.z - nd.z, sl = (nd.phi - m.phi) / Math.sqrt(dx * dx + dz * dz);
       if (sl > bs) { bs = sl; best = m; }
     }
   }
-  if (!best && nd.p > SEA + 1.5 && nd.c > -0.02) best = spill(nd);
+  if (!best && nd.p > MOUTH && nd.c > -0.02) best = spill(nd);
   return (nd.next = best);
 }
 // A basin (no lower neighbour): flood outward, lowest node first, until a node below the basin floor is reached (the spill point).
@@ -69,7 +71,7 @@ function spill(nd) {
     let bi = 0;
     for (let k = 1; k < open.length; k++) if (open[k].phi < open[bi].phi) bi = k;
     const m = open[bi]; open[bi] = open[open.length - 1]; open.pop();
-    if (m.phi < nd.phi - 0.01 || m.p <= SEA + 1.5 || m.c <= -0.02) {
+    if (m.phi < nd.phi - 0.01 || m.p <= MOUTH || m.c <= -0.02) {
       const route = [];
       for (let q = m; q; q = seen.get(q.k)) route.push(q);
       nd.route = route.reverse();
@@ -87,7 +89,7 @@ function surface(nd) {
   while (cur && cur.rs === undefined) { chain.push(cur); cur = nextOf(cur); }
   let below = cur ? cur.rs : SEA;
   for (let k = chain.length - 1; k >= 0; k--) {
-    const n = chain[k], mouth = nextOf(n) === null && n.p <= SEA + 1.5;
+    const n = chain[k], mouth = nextOf(n) === null && n.p <= MOUTH;
     below = n.rs = mouth ? SEA : Math.max(SEA, n.p - 3, below);
   }
   return nd.rs;
@@ -128,11 +130,18 @@ function trace(i, j) {
     if (!nx) break;
     chain.push(nx); cur = nx;
   }
-  const sea = nextOf(cur) === null && (cur.p <= SEA + 1.5 || cur.c <= -0.02);
+  const sea = nextOf(cur) === null && (cur.p <= MOUTH || cur.c <= -0.02);
   const end = sea ? "sea" : chain.length > NMAX ? "cap" : "basin";
   STATS[end] = (STATS[end] || 0) + 1; if (sea) STATS.len = (STATS.len || 0) + chain.length;
   if (!sea) return;
   for (let k = 0; k + 1 < chain.length; k++) addEdge(chain[k], chain[k + 1]);
+  // outlet: carry the channel on past the mouth node in the flow direction, so a coastal ridge or shore hills between the mouth node
+  // and open water can't dam it (the mouth node lies on the smooth macro coast, the real shore wanders a little around it)
+  if (OUTLET > 0 && chain.length > 1 && !edges.has("o" + cur.k)) {
+    edges.set("o" + cur.k, true);
+    const pv = chain[chain.length - 2], dx = cur.x - pv.x, dz = cur.z - pv.z, l = Math.hypot(dx, dz) || 1, w = widthAt(SEA);
+    seg({ ax: cur.x, az: cur.z, bx: cur.x + dx / l * OUTLET, bz: cur.z + dz / l * OUTLET, ra: SEA, rb: SEA, wa: w, wb: w });
+  }
 }
 const STATS = {};
 // Traces every source that could reach (x, z): sources within NMAX links, i.e. NMAX * NS * sqrt2 blocks.
