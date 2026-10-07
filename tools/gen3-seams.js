@@ -54,7 +54,7 @@ function run(env, cur, ok, md5) {
           else ok(sb === 0 || solid(sb) || sb === B.ice || (sb === B.water && W.villagesNear(x, z, 70).length > 0),   // a village well holds water at pad level
              `${tag}: no solid block at heightAt ${h} (${x},${z}) id ${sb}`);
           if (wl > h) {
-            const wet = id => id === B.water || id === B.ice || LOGS.has(id) || id === B.mangrove_leaves;   // mangrove (and 2x2 jungle) trunks replace water
+            const wet = id => id === B.water || id === B.ice || LOGS.has(id) || id === B.mangrove_leaves || id === B.packed_ice;   // mangrove (and 2x2 jungle) trunks and ice spikes replace water
             ok(wl < hi * 16 && wet(blk(lx, wl, lz)), `${tag}: water level ${wl} not water at ${x},${z} (id ${blk(lx, wl, lz)})`);
             ok(wet(blk(lx, h + 1, lz)) || h + 1 === wl, `${tag}: no water just above floor ${h} wl ${wl}`);
           }

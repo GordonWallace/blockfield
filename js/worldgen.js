@@ -143,10 +143,13 @@ function rawFields2(x, z) {
   K.t = noise.fbm(wx / LT + 41.37, wz / LT - 17.71, 2) * 0.85;
   K.hu = noise.fbm(wx / LH + 311.7, wz / LH - 173.3, 2) * 0.85;
   // continentalness: its own big warp gives coastlines that wander; contrast keeps the oceans wide and the continents solid
-  const LC = CONT_L * (GEN >= 3 ? CONT3 : 1) * (1 + 0.12 * (SC - 1));
-  const cx = x + noise.n2(x / (LC * 0.45) + 7.7, z / (LC * 0.45) - 3.1) * LC * 0.09, cz = z + noise.n2(x / (LC * 0.45) - 13.9, z / (LC * 0.45) + 21.3) * LC * 0.09;
   const d2 = x * x + z * z;     // land is forced around the origin so the default spawn is on a continent
-  K.c = noise.fbm(cx / LC - 517.1, cz / LC + 229.9, 5) * 2.0 - 0.15 + 1.3 * (1 - smooth(62500, 5760000, d2));
+  if (GEN >= 3) K.c = cont3(x, z);
+  else {
+    const LC = CONT_L * (1 + 0.12 * (SC - 1));
+    const cx = x + noise.n2(x / (LC * 0.45) + 7.7, z / (LC * 0.45) - 3.1) * LC * 0.09, cz = z + noise.n2(x / (LC * 0.45) - 13.9, z / (LC * 0.45) + 21.3) * LC * 0.09;
+    K.c = noise.fbm(cx / LC - 517.1, cz / LC + 229.9, 5) * 2.0 - 0.15 + 1.3 * (1 - smooth(62500, 5760000, d2));
+  }
   const LE = 1700 * q, LW = 600 * Math.pow(SC, 0.6), LU = 3600 * q;
   K.e = noise.fbm(wx / LE + 77.7, wz / LE + 901.3, 3);
   K.wd = noise.fbm(wx / LW - 201.1, wz / LW + 44.4, 2);
@@ -160,18 +163,39 @@ function rawFields2(x, z) {
   }
 }
 const CONT_L = 14000;    // continent wavelength at biome scale 1
-const CONT3 = 2.0;       // v3 continents are wider (room for long escarpment ramps and broad high plains)
+// v3 continents: wavelength (biome scale 1), contrast, bias (about 30% land), coast roughness, warp wavelength and amplitude (x wavelength), octaves
+const CONT3_L = 90000, CONT3_K = 5.0, CONT3_BIAS = -0.875, CONT3_ROUGH = 0.15, CONT3_WL = 1.2, CONT3_WA = 0.12, CONT3_OCT = 3;
 // v3: continentalness alone (same formula as rawFields2), for the coarse slope-limiter grid
-function contOnly(x, z) {
-  const LC = CONT_L * (GEN >= 3 ? CONT3 : 1) * (1 + 0.12 * (SC - 1));
-  const cx = x + noise.n2(x / (LC * 0.45) + 7.7, z / (LC * 0.45) - 3.1) * LC * 0.09, cz = z + noise.n2(x / (LC * 0.45) - 13.9, z / (LC * 0.45) + 21.3) * LC * 0.09;
-  return noise.fbm(cx / LC - 517.1, cz / LC + 229.9, 5) * 2.0 - 0.15 + 1.3 * (1 - smooth(62500, 5760000, x * x + z * z));
+function contOnly(x, z) { return cont3(x, z); }
+// v3 continents: broad landmasses (Earth-like shapes, smaller): a smooth 3-octave field on a long wavelength with a large slow
+// warp gives big bodies with a few peninsulas and bays; a weak short octave roughens the coastline without breaking it into
+// arms and islands. Contrast is low so continentalness rises gently inland (wide lowlands before the plateau ramps).
+function cont3(x, z) { return contRaw3(x + CONT3_OX, z + CONT3_OZ) + 1.3 * (1 - smooth(62500, 5760000, x * x + z * z)); }
+// The continent field is shifted so the origin (default spawn) lies well inside a big landmass: init() searches for the point
+// farthest inland (highest field) within one wavelength and moves it to the origin.
+let CONT3_OX = 0, CONT3_OZ = 0;
+function placeHome3() {
+  CONT3_OX = CONT3_OZ = 0;
+  const LC = CONT3_L * (1 + 0.12 * (SC - 1)), st = LC / 16;
+  let best = -1e9, bx = 0, bz = 0;
+  for (let j = -16; j <= 16; j++) for (let i = -16; i <= 16; i++) {
+    const x = i * st, z = j * st, v = contRaw3(x, z) - 0.15 * (i * i + j * j) / 256;   // prefer nearby
+    if (v > best) { best = v; bx = x; bz = z; }
+  }
+  CONT3_OX = Math.round(bx); CONT3_OZ = Math.round(bz);
+}
+function contRaw3(x, z) {
+  const LC = CONT3_L * (1 + 0.12 * (SC - 1)), WL = LC * CONT3_WL, WA = LC * CONT3_WA;
+  const cx = x + noise.n2(x / WL + 7.7, z / WL - 3.1) * WA, cz = z + noise.n2(x / WL - 13.9, z / WL + 21.3) * WA;
+  const big = noise.fbm(cx / LC - 517.1, cz / LC + 229.9, CONT3_OCT);
+  const rough = noise.n2(cx / (LC * 0.11) + 91.3, cz / (LC * 0.11) - 37.7) * CONT3_ROUGH;
+  return big * CONT3_K + rough + CONT3_BIAS;
 }
 // Slope-limited plateau and massif weights on a coarse grid (CG blocks). Raw weights at the nodes may change abruptly (continent
 // edges are steep in continentalness); each node then takes min over a disc of (raw weight + slope * distance), which caps
 // how fast the weight (and so the height) can rise anywhere, so escarpments become long ramps and massifs broad domes.
 // Pure function of the seed: nodes are cached, any order gives the same values.
-const CG = 160, SL_P = 1 / 2100, SL_M = 1 / 2600, SL_L = 1 / 1100, LIM_R = Math.ceil(2600 / CG);
+const CG = 320, SL_P = 1 / 6000, SL_M = 1 / 2600, SL_L = 1 / 2600, LIM_R = Math.ceil(6000 / CG);
 const CRAW = new Map(), CLIM = new Map(), CLIS = new Map();
 function nodeRaw(i, j) {
   const k = i * 1048576 + j; let v = CRAW.get(k);
@@ -180,7 +204,7 @@ function nodeRaw(i, j) {
     const x = i * CG, z = j * CG, q = Math.sqrt(SC);
     const c = contOnly(x, z), d2 = x * x + z * z, home = 1 - smooth(360000, 9000000, d2);
     const pm = noise.fbm(x / (18000 * q) + 1234.5, z / (18000 * q) - 777.7, 2), mt = noise.fbm(x / (14000 * q) + 333.3, z / (14000 * q) - 444.4, 2);
-    const inland = smooth(0.0, 0.05, c);
+    const inland = smooth(0.15, 0.3, c);   // a coastal plain before the ramps start
     const pl = inland * Math.max(smooth(-0.75, -0.3, pm), home);
     const lo = noise.fbm(x / (14000 * q) + 55.5, z / (14000 * q) - 99.9, 2);
     v = [pl, pl * smooth(0.05, 0.45, mt) * (1 - 0.97 * home), smooth(-0.03, -0.22, lo)];
@@ -509,7 +533,7 @@ const ceil3 = h => (h <= 2000 ? h : 2000 + 700 * Math.tanh((h - 2000) / 700));
 const cool3 = h => 0.05 * smooth(0, 1300, h) + 0.6 * smooth(1300, 2600, h);
 // Terrain height without rivers (K must hold the fields at x, z). `detail`: local hills and the full ridged-noise mountains.
 // Plateau weight S, massif weight m and low-plateau weight K.lo come from the slope-limited coarse grid (see nodeLim), so
-// escarpments are ramps ~2 km long and massifs domes ~5 km across. Near the origin a plateau is forced (default spawn).
+// escarpments are ramps ~5 km long (after a 1-2 km coastal plain) and massifs domes ~5 km across. Near the origin a plateau is forced (default spawn).
 function relief3(x, z, detail) {
   const { t, hu, c, e } = K;
   const hills = detail ? noise.fbm(x / 170 + 71.3, z / 170 - 33.1, 4) : 0;
@@ -519,12 +543,14 @@ function relief3(x, z, detail) {
   const S = Math.min(1, K.sp) * land;
   const amp = 4 + 6 * wet + 6 * wet * hot + 3 * smooth(-0.2, 0.2, e < 0 ? -e : 0);
   const hA = lerp(4, amp, land);
-  const low = contBase3(c) + hills * hA + 2.5 * wet * land;
+  // near sea level the hills fade out, so the shoreline is one clean line instead of a belt of islets and puddles
+  const bz = contBase3(c), hk = 0.12 + 0.88 * smooth(0, 12, Math.abs(bz - BF.SEA));
+  const low = bz + hills * hA * hk + 2.5 * wet * land;
   // plateau top: level ~910..1110 (the p field tilts it very gently), some regions are lower plateaus (~390..590), plus long low swells
   const lvl = lerp(1010 + 100 * Math.tanh(K.p / 0.45) - 520 * smooth(0, 1, Math.min(1, K.lo)), 1070, home);
   const swell = 5 * noise.n2(x / 520 + 19.7, z / 520 - 4.4) + (detail ? 0.3 * noise.n2(x / 90 - 8.2, z / 90 + 13.1) : 0);
   const top = lvl + swell + hills * hA * 0.03;
-  const Sn = Math.min(1, S / 0.88), Ss = Sn * Sn * Sn * (Sn * (6 * Sn - 15) + 10);   // the top of the ramp levels off into the plain
+  const Sn = Math.min(1, S / 0.88), Ss = Sn * Sn * (3 - 2 * Sn);   // the ramp eases in at the foot and levels off into the plain
   let h = lerp(low, top, Ss);
   // rolling foothills along the escarpment
   const fa = 4 * Ss * (1 - Ss);
@@ -544,7 +570,7 @@ function relief3(x, z, detail) {
 function macro3(x, z, o) {
   rawFields2(x, z);       // nodes are sparse: the raw fields are cheaper than the 4-block lattice (and equal up to interpolation error)
   o.p = ceil3(relief3(x, z, true).h);
-  o.c = K.c;
+  o.c = K.c / 2.5;   // the river network's continentalness thresholds were tuned for the v2 contrast (cont3 is 2.5x steeper)
 }
 function climate3(x, z) {
   const SEA = BF.SEA, MINY = BF.MIN_Y;
@@ -573,16 +599,17 @@ function climate3(x, z) {
   h = ceil3(h);
   // rivers: a valley floor at the water surface with a flat floodplain, blended into the surrounding terrain
   let wl = SEA, rv = 0, chan = false;
-  if (land > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
+  const rl = Math.max(land, smooth(SEA - 3, SEA + 1, h));   // dry shore ground counts as land for rivers (outlets cut through coastal ridges)
+  if (rl > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
     const rs = Math.max(SEA, Math.floor(RV.rs)), sd = RV.sd, w = RV.w;
     let hr;
     if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - 3.2 * (1 - q * q); }
     else hr = rs + 1.4 + smooth(0, 14, sd) * 1.5;
     const vw = Math.min(BF.rivers.REACH - w - 3, Math.max(27, (h > hr ? h - hr : 1.6 * (hr - h)) * 1.4));
-    const fp = (1 - smooth(w + 3, w + 3 + vw, RV.d)) * land;
-    h = h + (hr - h) * fp;
+    const fp = (1 - smooth(w + 3, w + 3 + vw, RV.d)) * rl;
+    if (!(h < SEA - 1 && hr > h)) h = h + (hr - h) * fp;     // never raise the sea floor (outlets run on into open water)
     if (sd < 0 && fp > 0.9) { chan = true; wl = rs; if (h > rs - 1) h = rs - 1; }
-    else if (sd < 3 && h < rs + 1) h = rs + 1;
+    else if (sd < 3 && h < rs + 1 && h >= SEA - 1) h = rs + 1;   // banks, but no levees out into the sea (they would dam the mouth)
     if (sd < 6) rv = 1;
   }
   h = Math.floor(h);
@@ -2017,7 +2044,8 @@ BF.worldgen = {
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
-    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
+    if (GEN >= 3) placeHome3();
+    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, outlet: 260, mouth: -2, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,
