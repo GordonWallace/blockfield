@@ -33,7 +33,11 @@ function serveGame(req, res) {
       // point the game at this server's debug port, on whatever host name the browser used to reach the game
       const host = (req.headers.host || "localhost").replace(/:\d+$/, "");
       const tag = `<script>window.BF_DEBUG_FEED = ${JSON.stringify("http://" + host + ":" + DEBUG_PORT)};</script>\n`;
-      const html = data.toString("utf8"), at = html.indexOf("<script");
+      // and stamp each script with its file's time, so a browser can't keep running an old copy it saved (from another server
+      // on this port, say) next to new ones: a stale js/villagelog.js once stopped the feed with nothing on the debug screen
+      const html = data.toString("utf8").replace(/(<script src="(js\/[\w.-]+\.js))"/g, (m, a, f) => {
+        try { return a + "?v=" + Math.floor(fs.statSync(path.join(ROOT, f)).mtimeMs) + '"'; } catch (e) { return m; }
+      }), at = html.indexOf("<script");
       data = at >= 0 ? html.slice(0, at) + tag + html.slice(at) : html + tag;
     }
     res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-cache" }).end(data);
@@ -106,7 +110,7 @@ function serveDebug(req, res) {
     res.write("retry: 1500\n\n");
     // a new screen gets everything cached first (layouts, logs, last known detail of every village), then the latest snapshot
     send(res, "cache", JSON.stringify(cached()));
-    if (latest) send(res, "snap", JSON.stringify(latest));
+    if (latest) send(res, "snap", JSON.stringify({ ...latest, age: Date.now() - lastPush }));   // age: an old one isn't shown as live
     clients.add(res);
     req.on("close", () => clients.delete(res));
     return;

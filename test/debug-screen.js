@@ -106,6 +106,20 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   await dbg.screenshot({ path: out + '-picked.png' });
   await dbg.click('#vl-auto'); await dbg.waitForTimeout(600);
   ok('follow nearest goes back', (await got()).name === second);
+  // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
+  ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
+  // a feed error (an old villagelog.js without panelData, say) shows on the screen instead of "waiting for the game"
+  await game.evaluate(() => { window._pd = BF.vlog.panelData; delete BF.vlog.panelData; });
+  await dbg.waitForTimeout(6000);
+  const errShown = await dbg.evaluate(() => ({ conn: document.getElementById('conn').textContent, wait: !document.getElementById('waiting').hidden, text: document.getElementById('waiting').textContent }));
+  ok('feed error shown ' + errShown.conn, errShown.conn === 'Game error' && errShown.wait && /panelData/.test(errShown.text));
+  await game.evaluate(() => { BF.vlog.panelData = window._pd; });
+  await dbg.waitForTimeout(5000);   // after an error the feed waits 4 s before its next try
+  ok('live again once fixed', (await got()).conn === 'Live');
+  // a debug screen opened after the game has gone doesn't show its last snapshot as live
+  await game.close(); await dbg.waitForTimeout(3000);
+  await dbg.reload(); await dbg.waitForTimeout(1500);
+  ok('closed game not shown as live: ' + (await got()).conn, (await got()).conn === 'Game not responding');
   await b.close(); srv.kill();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);

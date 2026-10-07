@@ -115,10 +115,16 @@ function update() {
   if (busy || now < nextT || !BF.debugInfo) return;
   nextT = now + EVERY;
   let body;
-  try { body = JSON.stringify(snapshot()); } catch (e) { console.warn("debug feed:", e); nextT = now + RETRY; return; }
+  try { body = JSON.stringify(snapshot()); }
+  catch (e) {   // tell the debug screen too, so it shows the error instead of waiting for the game
+    console.warn("debug feed:", e); nextT = now + RETRY;
+    body = JSON.stringify({ t: Date.now(), n: ++sent, error: String(e && e.stack || e).split("\n").slice(0, 3).join("\n") });
+  }
   busy = true;
   // text/plain keeps it a "simple" cross-origin request (no CORS preflight)
-  fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000 })
+  // gives up after 5 s, so a request that never gets an answer can't stop the feed for good
+  const ctl = new AbortController(), stop = setTimeout(() => ctl.abort(), 5000);
+  fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000, signal: ctl.signal })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
     .then(t => { if (t === "resync") resync(); })   // a restarted server asks for the layouts and logs again
     .then(() => { if (!told) { told = true; console.info("Blockfield debug feed: sending to " + URL_); } misses = 0; })
@@ -130,7 +136,7 @@ function update() {
       nextT = performance.now() + (misses > 5 * URLS.length ? RETRY_SLOW : RETRY / URLS.length);
       told = false; resync();
     })
-    .finally(() => { busy = false; });
+    .finally(() => { busy = false; clearTimeout(stop); });
 }
 
 BF.debugFeed = { url: URL_, urls: URLS, snapshot, update };
