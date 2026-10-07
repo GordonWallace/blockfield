@@ -14,23 +14,25 @@ concurrency:
 jobs:
   baseline:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
+      # the runner image already has Chromium's system libraries; --with-deps runs apt, which can hang on a slow mirror
       - name: Install Playwright and Chromium
+        timeout-minutes: 10
         run: |
           npm install -g playwright@1.56.1
-          playwright install --with-deps chromium
+          playwright install chromium
       - name: Run baseline tests
         run: NODE_PATH=$(npm root -g) node test/ci.js baseline ci-out
       - name: Upload logs and screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: baseline-results
           path: ci-out/
