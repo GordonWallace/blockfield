@@ -49,7 +49,7 @@ const start = async () => {
     return { name: BF.vlog.nameOf(m), em, starving: !!m.starving }; });
   await dbg.waitForTimeout(600);
   const rr = await dbg.evaluate(n => { const tr = [...document.querySelectorAll('#r-body tr')].find(t => t.dataset.n === n); return tr && [...tr.children].map(td => td.textContent); }, gv.name);
-  ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 10 && /^[\d.]+ days?$/.test(rr[8]) && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
+  ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 10 && /^[\d.,]+ days?$/.test(rr[8]) && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
   ok('log entries ' + g.log + '/' + want.log, g.log === want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nXYZ /.test((await got()).f3));
@@ -157,6 +157,19 @@ const start = async () => {
   await dbg.screenshot({ path: out + '-picked.png' });
   await dbg.click('#vl-auto'); await dbg.waitForTimeout(600);
   ok('follow nearest goes back', (await got()).name === second);
+  // ages: game days loaded and active, for villagers and villages; a villager that wasn't ticking (unloaded) doesn't age through a gap
+  const ages = await game.evaluate(async () => {
+    const vs = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && m.life);
+    const a = vs[0], b = vs[1], la = a.life.lived, lb = b.life.lived;
+    b._agePass = -99;                                            // as if b had just come back from being unloaded
+    BF.sky.day += 3;                                             // three days pass
+    await new Promise(r => setTimeout(r, 1500));
+    BF.sky.day -= 3;
+    return { a: a.life.lived - la, b: b.life.lived - lb, village: BF.villageLife.villageAge(a.village.key) };
+  });
+  ok('loaded villager ages through a skip, a returning one does not ' + JSON.stringify(ages), ages.a >= 2.9 && ages.b < 0.5 && ages.village >= 3);
+  await dbg.screenshot({ path: out + '-ages.png', fullPage: true });
+  ok('village age shown', /age [\d.,]+ days?/.test(await dbg.evaluate(() => document.getElementById('v-sub').textContent + document.getElementById('vlist').textContent)));
   // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
   ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
   // a feed error (an old villagelog.js without panelData, say) shows on the screen instead of "waiting for the game"

@@ -226,7 +226,7 @@
       </div>
       <div class="panel" id="rpanel">
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
-        <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="age" title="Game days since it was born, or since its village was first loaded">Age</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
+        <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="age" title="Game days it has been loaded and active (time its village sat unloaded doesn't count)">Age</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
       </div>
       <div class="panel"><details class="raw" id="raw"><summary>In-game F3 text</summary><pre id="f3"></pre></details></div>
     </div>
@@ -246,6 +246,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const fmt = n => n == null ? "-" : n.toLocaleString();
+const days = n => fmt(n) + (n === 1 ? " day" : " days");
 
 // ---------------------------------------------------------------- state
 // layouts / logs / details: everything known per village key (details = the last full numbers while it was loaded)
@@ -325,7 +326,7 @@ function renderVillages(s) {
   $("vl-auto").classList.toggle("on", !pinned);
   const row = v => {
     const det = details[v.key], b = bearing(v.x - d.x, v.z - d.z);
-    const extra = v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session";
+    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.age != null ? " \u00B7 age " + days(v.age) : "");
     return `<div class="vrow${v.loaded ? " on" : ""}${v.key === viewKey ? " sel" : ""}" data-k="${esc(v.key)}"><i class="ld"></i>` +
       `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs">${esc(extra)}</div>` +
       `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 ? dirName(b) : ""}</div></div>`;
@@ -412,7 +413,7 @@ function renderVillage(s) {
   }
   $("v-name").textContent = v.name;
   $("v-sub").innerHTML = (curStale ? `<span class="stalebadge">Not loaded \u00B7 numbers from ${esc(v.clock)}</span> \u00B7 ` : "") +
-    esc(fmt(row.dist) + " blocks away") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
+    esc(fmt(row.dist) + " blocks away") + (row.age != null ? `<span title="Game days this village has been loaded and active"> \u00B7 age ${esc(days(row.age))}</span>` : "") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
   $("v-villagers").textContent = v.villagers;
   $("v-loaded").textContent = curStale ? "not loaded" : v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
   $("v-beds").textContent = v.beds;
@@ -522,7 +523,7 @@ function renderRoster(s) {
     `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td>` +
     `<td title="${m.em != null ? `${m.em} carried + ${m.emChests} in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}">${m.em != null ? fmt(m.emT) : "-"}${m.emChests ? ` <span class="dim">(${fmt(m.emChests)} in chests)</span>` : ""}</td>` +
     `<td title="${m.food != null ? `${m.food} carried + ${m.foodChests} in chests (bread-equivalent)` : ""}">${m.food != null ? fmt(Math.round(m.foodT * 10) / 10) : "-"}${m.foodChests ? ` <span class="dim">(${fmt(m.foodChests)} in chests)</span>` : ""}</td>` +
-    `<td>${m.starving == null ? "-" : m.starving ? '<span class="no">starving</span>' : '<span class="dim">no</span>'}</td><td>${m.age == null ? "-" : m.age + (m.age === 1 ? " day" : " days")}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
+    `<td>${m.starving == null ? "-" : m.starving ? '<span class="no">starving</span>' : '<span class="dim">no</span>'}</td><td>${m.age == null ? "-" : days(m.age)}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
     `<tr><td colspan="10" class="dim">No villagers match.</td></tr>`;
   markRoster();
 }
