@@ -46,7 +46,8 @@ const start = () => new Promise(res => { const p = spawn(process.execPath, [path
   await dbg.waitForTimeout(7000);
   g = await got();
   ok('after restart: live again', g.conn === 'Live');
-  ok('after restart: log resent ' + g.log, g.log === want.log + 1);
+  const now = await game.evaluate(() => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key));
+  ok('after restart: log resent ' + g.log + '/' + now.length, g.log === now.length && now.some(e => /Tester/.test(e[2])));   // villagers may log more meanwhile
   const st = await (await fetch(`http://localhost:${DBG}/state`)).json();
   ok('after restart: layout resent', !!(st.layout && st.layout.buildings.length));
   // leaving the village
