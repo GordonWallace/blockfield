@@ -1059,7 +1059,15 @@ function walkCell(x, y, z) {
   if (!fl.solid || fl.door || fl.bed || fl.model === "fence") return false;
   return (!feet.solid || !!feet.door || !!feet.gate) && (!head.solid || !!head.door) && feet.render !== "liquid";
 }
-// A* over walkable cells (4-way, step up 1, drop up to 3). goal(x, y, z) -> bool. Returns cells after start, or null.
+// A ladder cell a villager can hang in: a ladder at the feet and room for the head. Only for route planning; standing spots stay walkCell.
+const ladderAt = (x, y, z) => !!blockAt(x, y, z).ladder;
+function ladderCell(x, y, z) {
+  if (!BF.world.isLoaded(x, z) || y < BF.MIN_Y + 1 || y + 2 >= BF.H || !ladderAt(x, y, z)) return false;
+  const head = blockAt(x, y + 1, z);
+  return !head.solid || !!head.door;
+}
+const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
+// A* over walkable cells (4-way, step up 1, drop up to 3, straight up/down ladders). goal(x, y, z) -> bool. Returns cells after start, or null.
 let planBudget = 0;
 function findPath(sx, sy, sz, goal, maxNodes = 3000) {
   const key = (x, y, z) => x + "," + y + "," + z;
@@ -1076,9 +1084,17 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
       out.pop();
       return out.reverse();
     }
+    if (ladderAt(x, y, z)) for (const dy of [1, -1]) {           // climb straight up to the next rung or down to the one below
+      const ny = y + dy;
+      if (dy > 0 ? !navCell(x, ny, z) : !ladderCell(x, ny, z)) continue;
+      const k = key(x, ny, z), ng = g + 1.5;
+      if (cost.has(k) && cost.get(k) <= ng) continue;
+      cost.set(k, ng); from.set(k, [x, y, z]);
+      open.push([x, ny, z, ng, ng + hh(x, z)]);
+    }
     for (const [dx, dz] of BF.DIRS) for (const dy of [0, 1, -1, -2, -3]) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
-      if (!walkCell(nx, ny, nz)) continue;
+      if (!navCell(nx, ny, nz)) continue;
       if (dy > 0 && blockAt(x, y + 2, z).solid) break;            // no room to jump
       if (dy < 0 && blockAt(nx, y + 1, nz).solid) break;          // wall: cannot step off
       const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
@@ -1109,7 +1125,7 @@ function followRoute(m, dt, out, speed) {
   const ai = m.ai, r = ai.route;
   if (!r || ai.ri >= r.length) return "done";
   const c = r[ai.ri], dx = c[0] + 0.5 - m.position.x, dz = c[2] + 0.5 - m.position.z, d = Math.hypot(dx, dz);
-  if (d < 0.3 && Math.abs(m.position.y - c[1]) < 1.1) { ai.ri++; ai.stuckT = 0; return ai.ri >= r.length ? "done" : "going"; }
+  if (d < 0.3 && Math.abs(m.position.y - c[1]) < (m.onLadder ? 0.5 : 1.1)) { ai.ri++; ai.stuckT = 0; return ai.ri >= r.length ? "done" : "going"; }
   ai.stuckT = (ai.stuckT || 0) + dt;
   if (ai.stuckT > 6) return "stuck";
   const s = Math.min(speed, d * 4 + 0.3);
@@ -1354,6 +1370,12 @@ function golemAI(m, dt, out) {
 
 // ---------- per-mob update ----------
 const _desired = { x: 0, z: 0, faceTarget: false };
+// Villagers on ladders: a ladder cell at the feet or the waist (like the player, js/player.js). Speeds in blocks/s.
+const LADDER_UP = 2.35, LADDER_DOWN = 3;
+function onLadder(m) {
+  const x = Math.floor(m.position.x), z = Math.floor(m.position.z);
+  return ladderAt(x, Math.floor(m.position.y + 0.01), z) || ladderAt(x, Math.floor(m.position.y + 0.6), z);
+}
 function updateMob(m, dt) {
   const T = m.def, ai = m.ai;
   m.age += dt;
@@ -1400,6 +1422,7 @@ function updateMob(m, dt) {
   if (m.removed) return; // exploded
 
   // ---- physics ----
+  m.onLadder = m.type === "villager" && !m.inWater && onLadder(m);
   if (m.knockT <= 0) {
     const k = Math.min(1, dt * (m.onGround ? 10 : m.inWater ? 4 : 2.5));
     m.vel.x += (_desired.x - m.vel.x) * k;
@@ -1409,6 +1432,10 @@ function updateMob(m, dt) {
     m.vel.y += (m.headInWater || m.type === "chicken" ? 22 : 9) * dt; // buoyancy: float up
     m.vel.y -= GRAVITY * 0.5 * dt;
     m.vel.y = Math.max(-2, Math.min(m.vel.y, 2.5));
+  } else if (m.onLadder) {
+    // on a ladder (villagers): climb towards the route's next cell (just clearing its floor), hold on level with it, slide down slowly with no route
+    const c = ai.route && ai.route[ai.ri], dy = c ? c[1] - m.position.y : null;
+    m.vel.y = dy == null ? Math.max(m.vel.y - GRAVITY * dt, -LADDER_DOWN) : dy > 0 ? Math.min(LADDER_UP, dy * 8 + 0.3) : dy < -0.02 ? -Math.min(LADDER_DOWN, -dy * 8) : 0;
   } else {
     m.vel.y -= GRAVITY * dt;
     if (T.slowFall && m.vel.y < -2) m.vel.y = -2;
@@ -1422,12 +1449,13 @@ function updateMob(m, dt) {
   const wants = Math.abs(_desired.x) + Math.abs(_desired.z) > 0.1;
   if ((res.hitX || res.hitZ) && wants) {
     if (T.climbs && (ai.target || ai.mode === "walk")) m.vel.y = 3.2;  // spiders climb walls
+    else if (m.onLadder) { /* climbing: the ladder code above lifts it */ }
     else if (res.onGround) m.vel.y = 7.6;                              // jump obstacles
     else if (m.inWater) m.vel.y = 4;
     if (!T.hostile && ai.mode === "walk" && Math.random() < 0.3) pickWander(m, 8);
   }
   // fall damage
-  const climbing = T.climbs && (res.hitX || res.hitZ);
+  const climbing = (T.climbs && (res.hitX || res.hitZ)) || m.onLadder;
   if (m.onGround || m.inWater || climbing) {
     if (m.onGround && !wasGround && !T.slowFall && !m.inWater) {
       const fall = m.fallStart - m.position.y;
