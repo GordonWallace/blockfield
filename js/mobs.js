@@ -1953,11 +1953,7 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-<<<<<<< HEAD
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 9) !== "farmbeds:") villagerSaves.set(k, o[k]);
-=======
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:") villagerSaves.set(k, o[k]);
->>>>>>> origin/main
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:") villagerSaves.set(k, o[k]);
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
     if (BF.villageLife) BF.villageLife.importAll(o);

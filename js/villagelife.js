@@ -192,7 +192,8 @@ const TASK_MAX = 45;              // seconds before an unfinished task is given 
 const BREAK_P = 0.05;             // chance of a short break after a task (the rest of the day is farming)
 const SCAN_COLS = 500;            // columns of the village area scanned per tick
 const RESCAN = 10;                // seconds between village farm scans
-const FARM_R = 12;                // a farmer only tends (and makes) farmland within 12 blocks, in every direction, of its composter
+const FARM_R = 12;                // a farmer tends farmland within 12 blocks, in every direction, of its composter, and the whole of any bed that reaches that box
+const BED_REACH = 16;             // ... so a bed it looks after (and builds) may stretch up to 16 blocks from the composter
 const FARM_MAX = 64;              // farmland cells within that range a farmer is content with: it only grows / adds beds below this
 const WATER_REACH = 30;           // buckets are filled at water this far (~30 blocks) around the village area, wells included
 const GATHER_R = 24;              // dirt and logs are taken from up to this far outside the village area, never from inside it
@@ -308,13 +309,17 @@ function vdata(R) {
 function ensureCover(D, m) {
   const s = m.jobsite, A = D.area;
   if (!s) return;
-  const x0 = s.x - FARM_R - 1, x1 = s.x + FARM_R + 1, z0 = s.z - FARM_R - 1, z1 = s.z + FARM_R + 1, yLo = s.y - FARM_R, yHi = s.y + FARM_R;
+  const x0 = s.x - BED_REACH - 1, x1 = s.x + BED_REACH + 1, z0 = s.z - BED_REACH - 1, z1 = s.z + BED_REACH + 1, yLo = s.y - FARM_R, yHi = s.y + FARM_R;
   if (x0 >= A.x0 && x1 <= A.x1 && z0 >= A.z0 && z1 <= A.z1 && yLo >= A.yLo && yHi <= A.yHi) return;
   D.area = { x0: Math.min(A.x0, x0), x1: Math.max(A.x1, x1), z0: Math.min(A.z0, z0), z1: Math.max(A.z1, z1), yLo: Math.min(A.yLo, yLo), yHi: Math.max(A.yHi, yHi) };
   D.ready = false; D.scan = null; D.scanT = 0;
 }
 // the farmland / water cell (x, y, z) is within 12 blocks of the farmer's composter in every direction
 const inRange = (m, x, y, z) => { const s = m.jobsite; return !!s && Math.abs(x - s.x) <= FARM_R && Math.abs(z - s.z) <= FARM_R && Math.abs(y - s.y) <= FARM_R; };
+const inBedReach = (m, x, y, z) => { const s = m.jobsite; return !!s && Math.abs(x - s.x) <= BED_REACH && Math.abs(z - s.z) <= BED_REACH && Math.abs(y - s.y) <= FARM_R; };
+// the farmer's beds: those reaching into its 12-block box (it tends all of each)
+const reachBox = m => { const s = m.jobsite; return [s.x - FARM_R, s.z - FARM_R, s.x + FARM_R, s.z + FARM_R]; };
+const myBeds = (m, D) => (D.beds || []).filter(b => Math.abs(b.y - m.jobsite.y) <= FARM_R && overlap(outerOf(b), reachBox(m)));
 // inside the village proper (its buildings and 6 blocks around): nothing is dug or felled there for materials
 const inVillage = (D, x, z) => { const b = D.base; return x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1; };
 // top-most water source of an open column outside the village (lake, pond, river), or null
@@ -413,7 +418,8 @@ function think(m, fs, R, D) {
     fs.haul = null;
   }
   // harvest mature crops / plant empty farmland, only within 12 blocks of the composter: nearest first
-  const cells = D.cells.filter(p => inRange(m, p[0], p[1], p[2]));
+  const mine = myBeds(m, D);
+  const cells = D.cells.filter(p => inRange(m, p[0], p[1], p[2]) || mine.some(b => p[1] === b.y && p[0] >= b.x0 && p[0] <= b.x1 && p[2] >= b.z0 && p[2] <= b.z1));
   let best = null, bd = Infinity, fits = new Map(), hasSeed = c.seeds.some(id => cnt(m, id) > 0);
   const young = [];
   for (const [x, y, z] of cells) {
@@ -648,7 +654,7 @@ function priceLayout(m, R, D, P, held) {
   let ops = 0, lvl = 0, lay = 0, lift = 0, gain = 0, bad = false;
   projectCells(P, (x, z) => {
     if (bad) return;
-    if (!W().isLoaded(x, z) || !clearOfBuildings(R, D, x, z) || !inRange(m, x, P.L.y, z)) { bad = true; return; }
+    if (!W().isLoaded(x, z) || !clearOfBuildings(R, D, x, z) || !inBedReach(m, x, P.L.y, z)) { bad = true; return; }
     const top = W().heightAt(x, z);
     if (getB(x, top, z) === c.path) { bad = true; return; }                     // never over a road
     const want = layoutAt(P.L, x, z);
@@ -702,13 +708,14 @@ function newBedOptions(m, R, D, room, held) {
   for (let t = 0; t < 80; t++) {
     const S = SHAPES[Math.floor(Math.random() * SHAPES.length)], ax = Math.random() < 0.5 ? "x" : "z";
     const wx = ax === "x" ? S.u : S.v, wz = ax === "x" ? S.v : S.u;
-    const x0 = s.x + Math.round(rnd(-FARM_R + 1, FARM_R - wx)), z0 = s.z + Math.round(rnd(-FARM_R + 1, FARM_R - wz));
+    const x0 = s.x + Math.round(rnd(-BED_REACH + 1, BED_REACH - wx)), z0 = s.z + Math.round(rnd(-BED_REACH + 1, BED_REACH - wz));
     const cx = x0 + (wx >> 1), cz = z0 + (wz >> 1);
     if (!w.isLoaded(cx, cz)) continue;
     const y = w.heightAt(cx, cz);
     if (y < BF.MIN_Y + 1 || !c.ground.has(getB(cx, y, cz))) continue;
     const L = { x0, z0, x1: x0 + wx - 1, z1: z0 + wz - 1, y, ax, ch: S.ch.map(o => (ax === "x" ? x0 : z0) + o) };
     const o = outerOf(L);
+    if (!overlap(o, reachBox(m))) continue;                // it must reach into the farmer's box
     const W_ = (BF._nb = BF._nb || {}); W_.tries = (W_.tries || 0) + 1;
     if (crowded(D, o, BED_GAP, null)) { W_.crowded = (W_.crowded || 0) + 1; continue; }
     let ok = true;                                     // the margin: no building (or its margin), no cliff; other beds may be a path's width away
@@ -729,7 +736,7 @@ function newBedOptions(m, R, D, room, held) {
 // sprawl), and a new bed only qualifies with ROOM clear cells round it (1 when the farmer has no farmland at all).
 function chooseProject(m, R, D, have) {
   const held = logCount(m), cands = [];
-  for (const b of D.beds || []) {
+  for (const b of myBeds(m, D)) {
     const o = outerOf(b);
     if (D.projects.some(p => overlap(outerOf(p.L), o))) continue;
     for (const g of growOptions(b)) {
@@ -764,7 +771,7 @@ function projectOf(m, R, D) {
   for (const p of D.projects) {
     if (alive.has(p.owner)) continue;
     const o = outerOf(p.L);
-    if (inRange(m, o[0], p.L.y, o[1]) && inRange(m, o[2], p.L.y, o[3])) { p.owner = idx; return p; }
+    if (inBedReach(m, o[0], p.L.y, o[1]) && inBedReach(m, o[2], p.L.y, o[3]) && overlap(o, reachBox(m))) { p.owner = idx; return p; }
   }
   return null;
 }
