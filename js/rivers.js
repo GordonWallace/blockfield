@@ -20,7 +20,7 @@ const smooth = (a, b, x) => { let t = (x - a) / (b - a); t = t < 0 ? 0 : t > 1 ?
 
 let noise, macro, SEA = 48, density = 0.03, enabled = true, OUTLET = 0, MOUTH = 49.5;
 // Generator 3: PLANAR (flow never crosses itself, lake spill routes are followed by every node on them, so rivers never split downstream),
-// width summed over the sources upstream (a river below a confluence is about as wide as the two above it), capped at WCAP;
+// width summed over the sources upstream (a river below a confluence is about as wide as the two above it, see flowW);
 // LIM: a source whose river strays further than this from it (per axis) is dropped, so every source upstream of a queried point is traced
 let PLANAR = false, WCAP = 0, LIM = Infinity;
 let nodes, edges, cells, traced, ensured, tmp;
@@ -156,7 +156,7 @@ function routeNext(nd) {
   return succ || undefined;
 }
 // segments (a, b) and (c, d) cross or pass within CLR blocks of each other (callers skip pairs that share an end)
-const CLR = 40;
+const CLR = 80;
 function near(a, b, c, d) {
   if (Math.max(a.x, b.x) + CLR < Math.min(c.x, d.x) || Math.max(c.x, d.x) + CLR < Math.min(a.x, b.x) ||
       Math.max(a.z, b.z) + CLR < Math.min(c.z, d.z) || Math.max(c.z, d.z) + CLR < Math.min(a.z, b.z)) return false;
@@ -201,7 +201,10 @@ function planarNext(t) {
   }
   return (t.next = first);
 }
-const flowW = (n, rs) => Math.min(WCAP, (n.f || 1) * widthAt(rs));
+// summed width s of the sources above: the half width is s up to KNEE (two rivers merge into one as wide as both), then grows as a square
+// root (a big trunk still widens visibly at each confluence without reaching absurd widths), up to WCAP
+const KNEE = 16;
+const flowW = (n, rs) => { const s = (n.f || 1) * widthAt(rs); return Math.min(WCAP, s <= KNEE ? s : KNEE * Math.sqrt(s / KNEE)); };
 
 function addEdge(a, b) {
   if (edges.has(a.k)) return;
