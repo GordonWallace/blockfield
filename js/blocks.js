@@ -257,6 +257,10 @@ const BLOCK_DEFS = [
   ...["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"].map(sp => ({ name: sp + "_sapling", tiles: sp + "_sapling", render: "cross", solid: false, opaque: false, hardness: 0, sapling: sp, creativeTab: "natural",
     color: { oak: "#3a7024", birch: "#5c9040", spruce: "#294f30", jungle: "#2a8a1a", acacia: "#5c9226", dark_oak: "#2e5a22", cherry: "#e898b8" }[sp] })),
   // ---- end forester pack ----
+  // ---- furniture pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Furniture makers")
+  // carpentry bench: the furniture maker villager's jobsite (not vanilla): an oak workbench with a vice, a saw and a roll of wool
+  { name: "carpentry_bench", jobsite: "furniture_maker", tiles: { top: "carpentry_bench_top", side: "carpentry_bench_side", front: "carpentry_bench_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#9a7448" },
+  // ---- end furniture pack ----
 ];
 
 // ---- slabs/stairs pack runtime: shape placeholders get their base block's tiles / hardness / tool / colour ----

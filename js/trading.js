@@ -148,6 +148,15 @@ const TRADES = {
   // = 0.9 emerald, 8 logs = 1 emerald); only what it actually holds can be bought ("Out of stock"), nothing is restocked or part of its starting pack.
   // The furniture maker and the builder buy these.
   forester: [["1 oak_sapling > 1 emerald", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
+  // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
+  // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer.
+  furniture_maker: [
+    ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed"],
+    ["11 wool > 1 emerald", "10 oak_log > 1 emerald"],
+    ["40 spruce_planks > 1 emerald", "40 birch_planks > 1 emerald", "10 spruce_log > 1 emerald", "10 birch_log > 1 emerald"],
+    ["3 emerald > 7 red_bed"],
+    ["40 dark_oak_planks > 1 emerald", "40 acacia_planks > 1 emerald", "10 dark_oak_log > 1 emerald"],
+  ],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -171,6 +180,7 @@ const PRODUCE = {
   builder: [],
   explorer: [],
   forester: [],
+  furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -282,6 +292,7 @@ function stockFor(prof, v) {
   for (const e of entries) if (e.n > 0) inv.add(a, e.id, e.n);
   if (prof === "explorer" && I.tent !== undefined) inv.add(a, I.tent, 1);   // pitches it when night falls far from a bed (js/explorer.js)
   if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
+  if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
   return a;
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.

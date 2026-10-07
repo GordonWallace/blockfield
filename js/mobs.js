@@ -201,6 +201,8 @@ const VILLAGER_OUTFITS = {
   explorer:      { robe: 0x8c7a4c, trim: 0x4a3a20, hat: { kind: "brim", color: 0x4a3c22, color2: 0x5c4a2a }, sash: 0x3a2a14 },
   // forester (17th, not vanilla; from the villager-planter mod): forest-green robe, brown belt, leafy brim hat; plants saplings and fells trees (js/forester.js)
   forester:      { robe: 0x2f6a2c, trim: 0x1f4a1e, hat: { kind: "brim", color: 0x2a5a26, color2: 0x3a7a34 }, sash: 0x4a3220 },
+  // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
+  furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
   // builder (15th): orange hi-vis vest with reflective band and straps, brown overalls, yellow hard hat, a hammer in hand
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
@@ -1239,6 +1241,7 @@ function villagerAI(m, dt, out) {
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
+  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
@@ -1653,6 +1656,16 @@ function restockVillagers(dt) { // once per in-game day, never while someone is 
 const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
 const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
+const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
+// A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
+// saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
+// "<village key>#<idx>" key) counts as new too: the save already holds that very villager.
+function freshVillage(key, slotKey) {
+  if (slotKey && villagerSaves.has(slotKey)) return true;
+  const pre = key + "#";
+  for (const k of villagerSaves.keys()) if (k.startsWith(pre)) return false;
+  return true;
+}
 function findStand(x, y, z, T) {
   x = Math.floor(x); z = Math.floor(z);
   const base = Math.floor(y);
@@ -1700,7 +1713,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -1735,6 +1748,21 @@ function villageRoster(rec) {
   }
   // foresters: key range <village key>#1200+n (their places were reserved above, so the village never exceeds its cap)
   for (let k = 0; k < nF; k++) ordered.push({ house: null, idx: 1200 + k, bed: null, prof: "forester" });
+  // furniture maker: a newly generated village with both a shepherd and a forester gets one with 80% probability (own seeded stream and key
+  // <village key>#1300, so nothing else shifts). In a classic village it may take the village one past the cap of 24; in a sized village
+  // it takes the place of the last plain resident (never the only shepherd), so the village keeps its size.
+  if (BF.furniture && ordered.some(sl => sl.prof === "shepherd") && ordered.some(sl => sl.prof === "forester") && freshVillage(rec.key, rec.key + "#1300")
+    && seededRand("furniture:" + rec.key)() < FURNITURE_CHANCE) {
+    if (rec.pop && ordered.length >= cap) {
+      const nShep = ordered.filter(sl => sl.prof === "shepherd").length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && nShep < 2) || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1300, bed: null, prof: "furniture_maker" });
+  }
   return ordered;
 }
 
