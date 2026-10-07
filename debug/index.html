@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blockfield Debug</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Second-screen debug view for Blockfield. Fed live by debug/server.js (Server-Sent Events from /events). Same dark look as the game. */
+  :root {
+    --bg: #0b0f0d; --bg2: #101613; --card: #141b17; --card2: #18211c; --edge: rgba(230, 240, 225, 0.09); --edge2: rgba(230, 240, 225, 0.16);
+    --ink: #eef3ea; --muted: #93a28b; --faint: #5d6b58;
+    --accent: #7fbf4d; --accent2: #a6dc72; --warn: #f2c66d; --danger: #e8705c; --info: #79b8e8;
+    --birth: #f3b6c8; --bed: #9fc8f0; --trade: #f2dd8a; --job: #b7e08c; --death: #f08a7a;
+    --display: "Silkscreen", ui-monospace, monospace;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: radial-gradient(1200px 600px at 10% -10%, #15211a 0%, transparent 60%), var(--bg); color: var(--ink); font: 13px/1.45 var(--mono); font-variant-numeric: tabular-nums; }
+  button, input { font: inherit; color: inherit; }
+
+  /* ---------- top bar ---------- */
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 18px; padding: 12px 20px; background: rgba(11, 15, 13, 0.86); backdrop-filter: blur(8px); border-bottom: 1px solid var(--edge); }
+  .brand { font: 18px var(--display); letter-spacing: 1px; color: var(--accent); white-space: nowrap; }
+  .brand span { color: var(--muted); }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--edge2); color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .pill.live { color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); } .pill.live i { background: var(--accent); box-shadow: 0 0 0 0 rgba(127, 191, 77, 0.6); animation: pulse 1.6s infinite; }
+  .pill.paused { color: var(--warn); border-color: rgba(242, 198, 109, 0.4); } .pill.paused i { background: var(--warn); }
+  .pill.off { color: var(--danger); border-color: rgba(232, 112, 92, 0.4); } .pill.off i { background: var(--danger); }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(127, 191, 77, 0.6); } 70% { box-shadow: 0 0 0 7px rgba(127, 191, 77, 0); } 100% { box-shadow: 0 0 0 0 rgba(127, 191, 77, 0); } }
+  .hstat { color: var(--muted); white-space: nowrap; } .hstat b { color: var(--ink); font-weight: 500; }
+  .grow { flex: 1; }
+  .warp { color: #10140f; background: var(--warn); border-radius: 3px; padding: 1px 7px; font-weight: 600; }
+
+  main { padding: 16px 20px 28px; display: grid; gap: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; }
+  .card { background: linear-gradient(180deg, var(--card2), var(--card)); border: 1px solid var(--edge); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+  .card h3 { margin: 0 0 8px; font: 11px var(--display); letter-spacing: 0.5px; color: var(--muted); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .big { font-size: 26px; font-weight: 600; line-height: 1.1; letter-spacing: -0.5px; }
+  .big small { font-size: 13px; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .row { display: flex; justify-content: space-between; gap: 10px; } .row span:first-child { color: var(--muted); }
+  canvas.spark { display: block; width: 100%; height: 34px; margin-top: 6px; }
+  .bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); overflow: hidden; margin-top: 6px; } .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .chip { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); color: var(--muted); white-space: nowrap; } .chip b { color: var(--ink); font-weight: 500; }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
+  .stack { display: grid; gap: 16px; min-width: 0; }
+  .panel { background: var(--card); border: 1px solid var(--edge); border-radius: 10px; overflow: hidden; min-width: 0; }
+  .panel > .ph { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--edge); background: var(--card2); }
+  .panel > .ph h2 { margin: 0; font: 15px var(--display); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panel > .ph .sub { white-space: nowrap; }
+  .pb { padding: 14px 16px; }
+
+  .vstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .vstat { background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; }
+  .vstat .big { font-size: 22px; }
+  .occ { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: column; gap: 5px 28px; font-size: 12px; }
+  .orow { display: grid; grid-template-columns: 124px 1fr 2ch; gap: 10px; align-items: center; }
+  .occ .lbl { display: flex; align-items: center; gap: 6px; } .occ .dot, .dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex: none; }
+  .occ .track { height: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; overflow: hidden; } .occ .track i { display: block; height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .occ .n { color: var(--muted); text-align: right; min-width: 2ch; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 10px; } .note b { color: var(--ink); font-weight: 500; }
+
+  .mapwrap { position: relative; background: #0a0d0b; border-top: 1px solid var(--edge); }
+  #map { display: block; width: 100%; height: 420px; cursor: crosshair; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 16px 12px; font-size: 11px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .tip { position: absolute; pointer-events: none; background: rgba(10, 13, 11, 0.95); border: 1px solid var(--edge2); border-radius: 5px; padding: 6px 9px; font-size: 12px; white-space: nowrap; transform: translate(12px, -50%); display: none; }
+  .tip b { font-weight: 600; } .tip .sub { font-size: 11px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font: 10px var(--display); color: var(--faint); letter-spacing: 0.5px; padding: 6px 10px; border-bottom: 1px solid var(--edge); position: sticky; top: 0; background: var(--card); cursor: pointer; user-select: none; white-space: nowrap; }
+  th.on { color: var(--accent2); }
+  td { padding: 5px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.035); white-space: nowrap; }
+  td.st { white-space: normal; color: var(--muted); min-width: 160px; }
+  tr.hl td { background: rgba(127, 191, 77, 0.1); }
+  tbody tr:hover td { background: rgba(255, 255, 255, 0.04); }
+  .roster { max-height: 420px; overflow: auto; }
+  .hp { display: inline-block; width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); vertical-align: middle; margin-right: 6px; overflow: hidden; } .hp i { display: block; height: 100%; background: var(--accent); }
+  .yes { color: var(--accent2); } .no { color: var(--danger); } .dim { color: var(--faint); }
+  input.search { background: var(--bg2); border: 1px solid var(--edge2); border-radius: 5px; padding: 4px 9px; width: 180px; outline: none; } input.search:focus { border-color: var(--accent); }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--edge); align-items: center; }
+  .fbtn { border: 1px solid var(--edge2); background: transparent; border-radius: 99px; padding: 2px 10px; font-size: 12px; cursor: pointer; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .fbtn.on { background: rgba(255, 255, 255, 0.08); color: var(--ink); border-color: var(--edge2); }
+  .fbtn i { width: 7px; height: 7px; border-radius: 50%; }
+  .fbtn .n { color: var(--faint); }
+  #log { max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; padding: 4px 0; }
+  .ent { display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding: 5px 16px; border-left: 3px solid transparent; font-size: 12px; }
+  .ent time { color: var(--faint); }
+  .ent.new { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: rgba(127, 191, 77, 0.16); } to { background: transparent; } }
+  .ent.birth { border-left-color: var(--birth); } .ent.birth .tx { color: var(--birth); }
+  .ent.bed { border-left-color: var(--bed); } .ent.bed .tx { color: var(--bed); }
+  .ent.trade { border-left-color: var(--trade); } .ent.trade .tx { color: var(--trade); }
+  .ent.job { border-left-color: var(--job); } .ent.job .tx { color: var(--job); }
+  .ent.death { border-left-color: var(--death); } .ent.death .tx { color: var(--death); }
+  .empty { color: var(--muted); padding: 28px 16px; text-align: center; font-style: italic; }
+
+  .away { display: grid; place-items: center; text-align: center; padding: 36px 16px; gap: 10px; }
+  .compass { width: 120px; height: 120px; border-radius: 50%; border: 1px solid var(--edge2); position: relative; background: radial-gradient(circle, var(--card2), var(--bg2)); }
+  .compass b { position: absolute; font: 10px var(--display); color: var(--faint); }
+  .compass::after { content: ""; position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px; border-radius: 50%; background: var(--accent2); }
+  .compass .needle { position: absolute; left: 50%; top: 50%; width: 4px; height: 46px; margin-left: -2px; margin-top: -46px; transform-origin: 50% 100%; background: linear-gradient(var(--accent2), var(--accent)); border-radius: 2px; transition: transform 0.4s; }
+
+  details.raw summary { cursor: pointer; color: var(--muted); font: 11px var(--display); padding: 10px 14px; list-style: none; }
+  details.raw summary::before { content: "▸ "; } details.raw[open] summary::before { content: "▾ "; }
+  details.raw pre { margin: 0; padding: 0 14px 14px; font: 12px/1.5 var(--mono); color: var(--ink); white-space: pre-wrap; }
+
+  .waiting { position: fixed; inset: 64px 0 0; display: grid; place-items: center; background: rgba(11, 15, 13, 0.82); z-index: 4; text-align: center; }
+  .waiting h2 { font: 20px var(--display); color: var(--accent); margin: 0 0 8px; }
+  .waiting p { color: var(--muted); margin: 4px 0; } .waiting code { color: var(--ink); background: var(--card2); padding: 2px 6px; border-radius: 4px; }
+  [hidden] { display: none !important; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; } ::-webkit-scrollbar-thumb { background: #26302a; border-radius: 5px; border: 2px solid var(--card); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">BLOCKFIELD <span>// DEBUG</span></div>
+  <div class="pill off" id="conn"><i></i><span>Connecting</span></div>
+  <div class="hstat" id="h-clock"></div>
+  <span class="warp" id="h-warp" hidden></span>
+  <div class="grow"></div>
+  <div class="hstat">Seed <b id="h-seed">-</b></div>
+  <div class="hstat">Gen <b id="h-gen">-</b></div>
+  <div class="hstat" id="h-biomes"></div>
+</header>
+
+<div class="waiting" id="waiting">
+  <div>
+    <h2 id="w-title">Waiting for the game</h2>
+    <p id="w-text">Open the game from the debug server, at <code id="w-url">http://localhost:8000</code>, and it will appear here.</p>
+    <p class="sub">Keep the game in its own window: browsers pause background tabs.</p>
+  </div>
+</div>
+
+<main>
+  <section class="cards">
+    <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
+    <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
+    <div class="card"><h3>Biome</h3><div class="big" id="c-biome" style="font-size:20px">-</div><div class="sub" id="c-sim"></div></div>
+    <div class="card"><h3>Chunks</h3><div class="big" id="c-chunks">-</div><div class="sub" id="c-queued"></div><canvas class="spark" id="s-queue"></canvas></div>
+    <div class="card"><h3>Mobs</h3><div class="big" id="c-mobs">-</div><div class="chips" id="c-mobtypes"></div></div>
+    <div class="card"><h3>Light</h3>
+      <div class="row"><span>Sky</span><span id="c-sky">-</span></div><div class="bar"><i id="b-sky"></i></div>
+      <div class="row" style="margin-top:8px"><span>Block light here</span><span id="c-bl">-</span></div><div class="bar"><i id="b-bl" style="background:var(--warn)"></i></div>
+    </div>
+    <div class="card"><h3>Weather</h3><div id="c-weather" class="sub" style="color:var(--ink);white-space:pre-wrap">-</div><div class="sub" id="c-clouds"></div></div>
+  </section>
+
+  <div class="split">
+    <div class="stack">
+      <div class="panel" id="vpanel">
+        <div class="ph"><h2 id="v-name">No village</h2><span class="sub" id="v-sub"></span></div>
+        <div id="v-here">
+          <div class="pb">
+            <div class="vstats">
+              <div class="vstat"><div class="sub">Villagers</div><div class="big" id="v-villagers">0</div><div class="sub" id="v-loaded"></div></div>
+              <div class="vstat"><div class="sub">Beds</div><div class="big" id="v-beds">0</div><div class="sub" id="v-bedsub"></div></div>
+              <div class="vstat"><div class="sub">Free job blocks</div><div class="big" id="v-unclaimed">0</div><div class="sub" id="v-freesub"></div></div>
+              <div class="vstat"><div class="sub">Iron golems</div><div class="big" id="v-golems">0</div><div class="sub" id="v-golemsub"></div></div>
+            </div>
+            <div class="occ" id="v-occ"></div>
+          </div>
+          <div class="mapwrap"><canvas id="map"></canvas><div class="tip" id="tip"></div></div>
+          <div class="legend" id="legend"></div>
+        </div>
+        <div id="v-away" class="away" hidden>
+          <div class="compass"><b style="left:56px;top:6px">N</b><b style="right:8px;top:54px">E</b><b style="left:57px;bottom:6px">S</b><b style="left:9px;top:54px">W</b><div class="needle" id="needle"></div></div>
+          <div><div class="big" id="a-dist">-</div><div class="sub" id="a-name"></div></div>
+        </div>
+      </div>
+      <div class="panel" id="rpanel">
+        <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
+        <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
+      </div>
+      <div class="panel"><details class="raw" id="raw"><summary>In-game F3 text</summary><pre id="f3"></pre></details></div>
+    </div>
+
+    <div class="panel">
+      <div class="ph"><h2>Village log</h2><span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
+      <div class="filters" id="l-filters"></div>
+      <div id="log"><div class="empty">Walk into a village to see its log.</div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+const fmt = n => n == null ? "-" : n.toLocaleString();
+
+// ---------------------------------------------------------------- state
+let snap = null, layout = null, log = null, lastAt = 0, seenLog = 0, logKeyShown = null, hlName = null, hoverName = null;
+const hist = { fps: [], queue: [] }, HIST = 240;   // 60 s at 4 snapshots a second
+const KINDS = [["birth", "Births"], ["bed", "Beds"], ["trade", "Trades"], ["job", "Jobs"], ["death", "Deaths"]];
+const kindOn = new Set(KINDS.map(k => k[0]));
+let rosterSort = { k: "name", dir: 1 };
+
+// Profession colours: fixed for the common ones, hashed hue for anything else so new professions still get a stable colour.
+const PROF = { Farmer: "#d9b64a", Librarian: "#c98a4b", Cleric: "#b678d6", Armorer: "#9aa6b2", Weaponsmith: "#e06a52", Toolsmith: "#6fa0d8", Butcher: "#e08aa0",
+  Fisherman: "#4fb8c8", Fletcher: "#9ccf6a", Leatherworker: "#b5865b", Mason: "#c8c2b8", Shepherd: "#f0f0f0", Cartographer: "#e8d38a", Builder: "#f2a64a",
+  Explorer: "#5fd0a0", Forester: "#5f9b4a", "Furniture Maker": "#d79a6f", Unemployed: "#8b7a64", Nitwit: "#6b8a5c", Child: "#f3b6c8" };
+function profColor(p) {
+  if (PROF[p]) return PROF[p];
+  let h = 0; for (const c of p) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return PROF[p] = `hsl(${h % 360}, 55%, 62%)`;
+}
+
+// ---------------------------------------------------------------- connection
+function connect() {
+  const es = new EventSource("events");
+  es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
+  es.onerror = () => { serverUp = false; status(); };
+  es.onopen = () => { serverUp = true; status(); };
+}
+let serverUp = false;
+function status() {
+  const el = $("conn"), live = snap && Date.now() - lastAt < 2500;
+  let cls = "off", txt = "Server offline";
+  if (serverUp && !live) { cls = "off"; txt = snap ? "Game not responding" : "Waiting for game"; }
+  if (serverUp && live) { cls = snap.paused ? "paused" : "live"; txt = snap.paused ? "Game paused" : "Live"; }
+  el.className = "pill " + cls; el.lastElementChild.textContent = txt;
+  const w = $("waiting");
+  w.hidden = !!(serverUp && live) || (!!snap && serverUp);
+  if (!serverUp) { $("w-title").textContent = "Debug server offline"; $("w-text").innerHTML = "Start it with <code>node debug/server.js</code> in the game folder. This page reconnects by itself."; }
+  else { $("w-title").textContent = "Waiting for the game"; $("w-text").innerHTML = `Open the game from the debug server, at <code>http://${esc(location.hostname)}:8000</code> (or your <code>--game</code> port), and it will appear here.`; }
+}
+setInterval(status, 1000);
+
+// ---------------------------------------------------------------- snapshots
+function onSnap(s) {
+  if (s.layout) layout = s.layout;
+  if (s.log) { log = s.log; renderLog(); }
+  if (!s.info) return;
+  snap = s; lastAt = Date.now();
+  push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
+  renderTop(s); renderVillage(s); status();
+}
+const push = (a, v) => { a.push(v); if (a.length > HIST) a.shift(); };
+
+const DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+// angle in the x/z plane, north = -z, clockwise
+const bearing = (dx, dz) => (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+const dirName = deg => DIRS[Math.round(deg / 45) % 8];
+
+function renderTop(s) {
+  const d = s.info;
+  $("h-clock").innerHTML = `<b>${esc(d.clock)}</b>`;
+  $("h-seed").textContent = d.seed; $("h-gen").textContent = d.gen; $("h-biomes").innerHTML = `Biomes <b>x${esc(d.biomeScale)}</b>`;
+  const w = $("h-warp"); w.hidden = !(d.warp > 1); w.textContent = "⏩ " + d.warp + "x";
+  $("c-fps").innerHTML = `${d.fps} <small>fps</small>`;
+  $("c-calls").textContent = d.calls + " draw calls";
+  $("c-xyz").textContent = `${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}`;
+  const face = (-d.yaw * 180 / Math.PI + 360 * 4) % 360;   // yaw 0 looks toward -z (north); turning right lowers yaw
+  $("c-facing").textContent = "facing " + dirName(face);
+  $("c-chunk").textContent = `Chunk ${d.chunkX}, ${d.chunkZ}`;
+  $("c-sections").textContent = d.sections ? `Sections ${d.sections.lo}..${d.sections.hi} (y ${d.sections.y0}..${d.sections.y1})` : "";
+  $("c-biome").textContent = pretty(d.biome);
+  $("c-sim").textContent = d.sim;
+  $("c-chunks").innerHTML = `${fmt(d.chunksDrawn)} <small>/ ${fmt(d.chunksLoaded)}</small>`;
+  $("c-queued").textContent = `drawn / loaded, ${d.chunksQueued} queued`;
+  const types = Object.entries(s.mobs || {}).sort((a, b) => b[1] - a[1]);
+  $("c-mobs").innerHTML = `${d.mobs} <small>total</small>`;
+  $("c-mobtypes").innerHTML = types.map(([t, n]) => `<span class="chip"><b>${n}</b> ${esc(pretty(t))}</span>`).join("");
+  $("c-sky").textContent = d.light.toFixed(2); $("b-sky").style.width = Math.round(d.light * 100) + "%";
+  $("c-bl").textContent = d.blockLight + " / 15"; $("b-bl").style.width = Math.round(d.blockLight / 15 * 100) + "%";
+  $("c-weather").textContent = d.weather || "Clear";
+  $("c-clouds").textContent = `Clouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}`;
+  if ($("raw").open) $("f3").textContent = s.text;
+  spark($("s-fps"), hist.fps, "#7fbf4d", 60);
+  spark($("s-queue"), hist.queue, "#79b8e8", 1);
+}
+
+function spark(cv, data, color, minMax) {
+  const r = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w) return;
+  if (cv.width !== w * r) { cv.width = w * r; cv.height = h * r; }
+  const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+  if (data.length < 2) return;
+  const max = Math.max(minMax, ...data) * 1.1, step = w / (HIST - 1), x0 = w - (data.length - 1) * step;
+  const y = v => h - 2 - (v / max) * (h - 4);
+  g.beginPath(); data.forEach((v, i) => i ? g.lineTo(x0 + i * step, y(v)) : g.moveTo(x0, y(v)));
+  g.lineWidth = 1.5; g.strokeStyle = color; g.lineJoin = "round"; g.stroke();
+  g.lineTo(w, h); g.lineTo(x0, h); g.closePath();
+  const grad = g.createLinearGradient(0, 0, 0, h); grad.addColorStop(0, color + "40"); grad.addColorStop(1, color + "00");
+  g.fillStyle = grad; g.fill();
+}
+
+// ---------------------------------------------------------------- village
+function renderVillage(s) {
+  const v = s.here;
+  $("v-here").hidden = !v; $("v-away").hidden = !!v; $("rpanel").hidden = !v;
+  if (!v) {
+    $("v-name").textContent = "Not in a village";
+    const n = s.nearest;
+    $("v-sub").textContent = "";
+    if (n) {
+      const b = bearing(n.dx, n.dz);
+      $("a-dist").innerHTML = `${fmt(n.dist)} <small>blocks ${dirName(b)}</small>`;
+      $("a-name").textContent = "to " + n.name;
+      $("needle").style.transform = `rotate(${b}deg)`;
+    } else { $("a-dist").textContent = "-"; $("a-name").textContent = "No village nearby"; }
+    return;
+  }
+  $("v-name").textContent = v.name;
+  $("v-sub").textContent = layout && layout.key === v.key ? pretty(layout.biome) + " · " + layout.buildings.length + " buildings" : "";
+  $("v-villagers").textContent = v.villagers;
+  $("v-loaded").textContent = v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
+  $("v-beds").textContent = v.beds;
+  const gap = v.beds - v.villagers;
+  $("v-bedsub").innerHTML = gap >= 0 ? `<span class="yes">${gap} spare</span>` : `<span class="no">${-gap} short</span>`;
+  $("v-unclaimed").textContent = v.unclaimed;
+  $("v-freesub").textContent = v.free.length ? v.free.map(([p, n]) => n + " " + p).join(", ") : "all taken";
+  $("v-golems").textContent = v.golems.length;
+  $("v-golemsub").innerHTML = v.golems.map(g => { const f = g.hp / (g.maxHp || 100); return `<span class="${f < 0.5 ? "no" : "yes"}">${Math.round(f * 100)}%</span>`; }).join(" ") || "none";
+  const max = Math.max(1, ...v.occupations.map(o => o[1]));
+  $("v-occ").style.gridTemplateRows = `repeat(${Math.max(1, Math.ceil(v.occupations.length / 2))}, auto)`;   // alphabetical down each column
+  $("v-occ").innerHTML = v.occupations.length ? v.occupations.map(([p, n]) =>
+    `<div class="orow"><div class="lbl"><i class="dot" style="background:${profColor(p)}"></i>${esc(p)}</div><div class="track"><i style="width:${n / max * 100}%;background:${profColor(p)}"></i></div><div class="n">${n}</div></div>`).join("")
+    : `<div class="sub">No villagers loaded</div>`;
+  $("legend").innerHTML = v.occupations.map(([p]) => `<span><i class="dot" style="background:${profColor(p)};border-radius:50%"></i>${esc(p)}</span>`).join("") +
+    `<span><i class="dot" style="background:#dfe6ea"></i>Iron golem</span><span><i class="dot" style="border:1.5px solid var(--warn)"></i>Free job block</span><span style="color:var(--accent2)">▲ You</span>`;
+  drawMap(s);
+  renderRoster(s);
+}
+
+// ---------------------------------------------------------------- map
+const mapCv = $("map"), tip = $("tip");
+let mapView = null;   // {sx, ox, oz, cx, cz} world -> screen
+function drawMap(s) {
+  const v = s.here, r = devicePixelRatio || 1, w = mapCv.clientWidth, h = mapCv.clientHeight;
+  if (!w) return;
+  if (mapCv.width !== w * r || mapCv.height !== h * r) { mapCv.width = w * r; mapCv.height = h * r; }
+  const g = mapCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+  const L = layout && layout.key === v.key ? layout : null, d = s.info;
+  // frame the village bounds plus the player
+  let [x0, z0, x1, z1] = L && L.bounds[0] != null ? L.bounds : [d.x - 40, d.z - 40, d.x + 40, d.z + 40];
+  x0 = Math.min(x0, d.x) - 6; x1 = Math.max(x1, d.x) + 6; z0 = Math.min(z0, d.z) - 6; z1 = Math.max(z1, d.z) + 6;
+  const sc = Math.min((w - 24) / (x1 - x0), (h - 24) / (z1 - z0)), ox = w / 2 - (x0 + x1) / 2 * sc, oz = h / 2 - (z0 + z1) / 2 * sc;
+  const X = x => ox + x * sc, Z = z => oz + z * sc;
+  mapView = { X, Z, sc };
+  // grid every 16 blocks (chunk lines)
+  g.strokeStyle = "rgba(255,255,255,0.035)"; g.lineWidth = 1; g.beginPath();
+  for (let gx = Math.ceil(x0 / 16) * 16; gx <= x1; gx += 16) { g.moveTo(X(gx) + 0.5, 0); g.lineTo(X(gx) + 0.5, h); }
+  for (let gz = Math.ceil(z0 / 16) * 16; gz <= z1; gz += 16) { g.moveTo(0, Z(gz) + 0.5); g.lineTo(w, Z(gz) + 0.5); }
+  g.stroke();
+  const rect = (b, fill, stroke) => { const rx = X(b[0]), rz = Z(b[1]), rw = (b[2] - b[0] + 1) * sc, rh = (b[3] - b[1] + 1) * sc; if (fill) { g.fillStyle = fill; g.fillRect(rx, rz, rw, rh); } if (stroke) { g.strokeStyle = stroke; g.strokeRect(rx + 0.5, rz + 0.5, rw - 1, rh - 1); } };
+  if (L) {
+    if (L.bounds[0] != null) { g.setLineDash([4, 4]); rect(L.bounds, null, "rgba(127,191,77,0.25)"); g.setLineDash([]); }
+    for (const b of L.roads) rect(b, "rgba(196,170,120,0.22)");
+    for (const b of L.plaza) rect(b, "rgba(196,170,120,0.3)");
+    for (const b of L.buildings) rect(b, b[4] && /farm/.test(b[4]) ? "rgba(140,170,70,0.22)" : "rgba(160,120,80,0.32)", "rgba(220,190,150,0.28)");
+    g.fillStyle = "rgba(242,198,109,0.5)";
+    for (const [lx, lz] of L.lamps) { g.beginPath(); g.arc(X(lx + 0.5), Z(lz + 0.5), Math.max(1.5, sc * 0.35), 0, 7); g.fill(); }
+  }
+  // free job blocks
+  g.strokeStyle = "#f2c66d"; g.lineWidth = 1.5;
+  for (const [jx, jz] of v.jobsites) { const s2 = Math.max(5, sc); g.strokeRect(X(jx) + 0.5, Z(jz) + 0.5, s2 - 1, s2 - 1); }
+  // golems
+  for (const go of v.golems) { g.fillStyle = "#dfe6ea"; const s2 = Math.max(7, sc * 1.4); g.fillRect(X(go.x) - s2 / 2, Z(go.z) - s2 / 2, s2, s2); }
+  // villagers
+  const focus = hoverName || hlName;
+  for (const m of v.villagerList) {
+    const rad = Math.max(3.5, sc * 0.6) * (m.child ? 0.75 : 1), on = m.name === focus;
+    g.beginPath(); g.arc(X(m.x), Z(m.z), on ? rad + 2.5 : rad, 0, 7);
+    g.fillStyle = profColor(m.prof); g.globalAlpha = m.sleeping ? 0.45 : 1; g.fill(); g.globalAlpha = 1;
+    g.lineWidth = on ? 2 : 1; g.strokeStyle = on ? "#fff" : "rgba(0,0,0,0.6)"; g.stroke();
+    if (on && m.job) { g.setLineDash([3, 3]); g.strokeStyle = "rgba(255,255,255,0.5)"; g.beginPath(); g.moveTo(X(m.x), Z(m.z)); g.lineTo(X(m.job[0] + 0.5), Z(m.job[1] + 0.5)); g.stroke(); g.setLineDash([]); }
+  }
+  // player: arrow pointing where they look
+  const px = X(d.x), pz = Z(d.z), a = -d.yaw;
+  g.save(); g.translate(px, pz); g.rotate(a);
+  g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
+  g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
+  // scale bar
+  const blocks = sc > 6 ? 10 : sc > 2.5 ? 25 : 50;
+  g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.font = "11px IBM Plex Mono, monospace"; g.fillText(blocks + " blocks", 12, h - 20);
+  g.fillText("N ↑", w - 34, 18);
+}
+mapCv.addEventListener("mousemove", e => {
+  if (!snap || !snap.here || !mapView) return;
+  const r = mapCv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = null, bd = 12;
+  for (const m of snap.here.villagerList) { const dd = Math.hypot(mapView.X(m.x) - mx, mapView.Z(m.z) - my); if (dd < bd) { bd = dd; best = m; } }
+  hoverName = best ? best.name : null;
+  if (best) {
+    tip.style.display = "block"; tip.style.left = mx + "px"; tip.style.top = my + "px";
+    tip.innerHTML = `<b>${esc(best.name)}</b> <span style="color:${profColor(best.prof)}">${esc(best.prof)}</span><div class="sub">${esc(best.status || "")}</div>`;
+  } else tip.style.display = "none";
+  drawMap(snap); markRoster();
+});
+mapCv.addEventListener("mouseleave", () => { hoverName = null; tip.style.display = "none"; if (snap && snap.here) drawMap(snap); markRoster(); });
+mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlName ? hoverName : null; markRoster(true); });
+
+// ---------------------------------------------------------------- roster
+function renderRoster(s) {
+  const v = s.here, q = $("r-q").value.trim().toLowerCase(), d = s.info;
+  let rows = v.villagerList.map(m => ({ ...m, dist: Math.hypot(m.x - d.x, m.z - d.z), hpf: m.hp / (m.maxHp || 20) }));
+  if (q) rows = rows.filter(m => (m.name + " " + m.prof + " " + m.status).toLowerCase().includes(q));
+  const k = rosterSort.k, dir = rosterSort.dir;
+  rows.sort((a, b) => { const x = k === "hp" ? a.hpf : a[k], y = k === "hp" ? b.hpf : b[k]; return (typeof x === "string" ? x.localeCompare(y) : (x > y) - (x < y)) * dir || a.name.localeCompare(b.name); });
+  $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + " loaded";
+  $("r-body").innerHTML = rows.map(m => `<tr data-n="${esc(m.name)}"><td>${esc(m.name)}</td><td><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i>${esc(m.prof)}</td>` +
+    `<td class="st">${esc(m.status || "")}</td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
+    `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
+    `<tr><td colspan="6" class="dim">No villagers match.</td></tr>`;
+  markRoster();
+}
+function markRoster(scroll) {
+  const focus = hoverName || hlName;
+  for (const tr of $("r-body").children) {
+    const on = tr.dataset.n === focus; tr.classList.toggle("hl", on);
+    if (on && scroll) tr.scrollIntoView({ block: "nearest" });
+  }
+}
+$("r-body").addEventListener("mouseover", e => { const tr = e.target.closest("tr"); hoverName = tr && tr.dataset.n || null; if (snap && snap.here) drawMap(snap); markRoster(); });
+$("r-body").addEventListener("mouseleave", () => { hoverName = null; if (snap && snap.here) drawMap(snap); markRoster(); });
+$("r-body").addEventListener("click", e => { const tr = e.target.closest("tr"); if (tr) { hlName = tr.dataset.n === hlName ? null : tr.dataset.n; if (snap && snap.here) drawMap(snap); markRoster(); } });
+$("r-q").addEventListener("input", () => snap && snap.here && renderRoster(snap));
+document.querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.k; rosterSort = { k, dir: rosterSort.k === k ? -rosterSort.dir : 1 };
+  document.querySelectorAll("th").forEach(t => t.classList.toggle("on", t === th));
+  if (snap && snap.here) renderRoster(snap);
+}));
+document.querySelector('th[data-k="name"]').classList.add("on");
+
+// ---------------------------------------------------------------- log
+function stamp(t) {
+  const d = Math.floor(t), h = (((t - d) * 24 + 6) % 24 + 24) % 24;
+  return "Day " + (d + 1) + " " + String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0");
+}
+function renderFilters() {
+  const a = log ? log.entries : [], c = {};
+  for (const e of a) c[e[1]] = (c[e[1]] || 0) + 1;
+  $("l-filters").innerHTML = KINDS.map(([k, label]) => `<button class="fbtn${kindOn.has(k) ? " on" : ""}" data-k="${k}"><i style="background:var(--${k})"></i>${label} <span class="n">${c[k] || 0}</span></button>`).join("");
+}
+$("l-filters").addEventListener("click", e => {
+  const b = e.target.closest(".fbtn"); if (!b) return;
+  const k = b.dataset.k;
+  if (e.shiftKey || e.metaKey || e.ctrlKey) { kindOn.clear(); kindOn.add(k); }   // modifier-click: show only this kind
+  else if (kindOn.has(k)) kindOn.delete(k); else kindOn.add(k);
+  renderLog(true);
+});
+$("l-q").addEventListener("input", () => renderLog(true));
+function renderLog(keepNew) {
+  renderFilters();
+  const el = $("log");
+  if (!log) return;
+  const a = log.entries, q = $("l-q").value.trim().toLowerCase(), fresh = log.key !== logKeyShown;
+  const newFrom = fresh || keepNew ? a.length : seenLog;   // highlight entries that arrived since the last render
+  logKeyShown = log.key;
+  const known = new Set(KINDS.map(k => k[0]));
+  const rows = [];
+  for (let i = a.length - 1; i >= 0; i--) {
+    const e = a[i];
+    if (known.has(e[1]) && !kindOn.has(e[1])) continue;
+    if (q && !e[2].toLowerCase().includes(q)) continue;
+    rows.push(`<div class="ent ${esc(e[1])}${i >= newFrom ? " new" : ""}"><time>${stamp(e[0])}</time><span class="tx">${esc(e[2])}</span></div>`);
+  }
+  seenLog = a.length;
+  el.innerHTML = rows.join("") || `<div class="empty">${a.length ? "Nothing matches the filters." : "No events yet."}</div>`;
+  const vname = layout && layout.key === log.key ? layout.name + " \u00B7 " : "";
+  $("l-count").textContent = vname + a.length + (a.length >= log.cap ? " (newest " + log.cap + " kept)" : a.length === 1 ? " entry" : " entries");
+}
+renderFilters();
+
+$("raw").addEventListener("toggle", () => { if (snap) $("f3").textContent = snap.text; });
+addEventListener("resize", () => { if (snap) { renderTop(snap); if (snap.here) drawMap(snap); } });
+status();
+connect();
+})();
+</script>
+</body>
+</html>
