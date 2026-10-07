@@ -720,17 +720,15 @@ function newBedOptions(m, R, D, room, held) {
     const L = { x0, z0, x1: x0 + wx - 1, z1: z0 + wz - 1, y, ax, ch: S.ch.map(o => (ax === "x" ? x0 : z0) + o) };
     const o = outerOf(L);
     if (!overlap(o, reachBox(m))) continue;                // it must reach into the farmer's box
-    const W_ = (BF._nb = BF._nb || {}); W_.tries = (W_.tries || 0) + 1;
-    if (crowded(D, o, BED_GAP, null)) { W_.crowded = (W_.crowded || 0) + 1; continue; }
+    if (crowded(D, o, BED_GAP, null)) continue;
     let ok = true;                                     // the margin: no building (or its margin), no cliff; other beds may be a path's width away
     for (let x = o[0] - room; x <= o[2] + room && ok; x++) for (let z = o[1] - room; z <= o[3] + room; z++) {
       if (inRect(o, x, z)) continue;
       if (!w.isLoaded(x, z) || !clearOfBuildings(R, D, x, z) || Math.abs(w.heightAt(x, z) - y) > 3) { ok = false; break; }
     }
-    if (!ok) { W_.margin = (W_.margin || 0) + 1; continue; }
+    if (!ok) continue;
     const P = { L, old: null };
     const pr = priceLayout(m, R, D, P, held);
-    if (!pr) W_.price = (W_.price || 0) + 1; else if (pr.lvl > pr.gain * 0.6) W_.lvl = (W_.lvl || 0) + 1;
     if (pr && pr.lvl <= pr.gain * 0.6) out.push({ L, dir: null, kind: "new", pr });
   }
   return out;
