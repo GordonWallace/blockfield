@@ -106,7 +106,7 @@ function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) mobs[m.type] = (mobs[m.type] || 0) + 1;
-  return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, ...villages(pp) };
+  return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden, ...villages(pp) };
 }
 
 function update() {
@@ -134,4 +134,8 @@ function update() {
 }
 
 BF.debugFeed = { url: URL_, urls: URLS, snapshot, update };
+// The game loop (requestAnimationFrame) stops while the game's tab is in the background, e.g. when the debug screen is opened
+// as another tab in the same window. A timer keeps the feed going then (browsers still run it about once a second), so the
+// debug screen can say the game is in the background instead of waiting for it.
+setInterval(() => { if (document.hidden) update(); }, 1000);
 })();
