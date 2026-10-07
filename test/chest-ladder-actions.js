@@ -46,7 +46,8 @@ module.exports = async (pg, out) => {
   await pg.keyboard.down('KeyW');
   const top = await steps(60);
   // still holding W (pushing at the wall above the hatch), step sideways onto the upper floor
-  await pg.keyboard.down('KeyD'); await steps(10); await pg.keyboard.up('KeyD'); await pg.keyboard.up('KeyW');
+  const away = (house.cx - house.lx) * house.back[1] - (house.cz - house.lz) * house.back[0] > 0 ? 'KeyD' : 'KeyA';   // the side without the upstairs chest
+  await pg.keyboard.down(away); await steps(10); await pg.keyboard.up(away); await pg.keyboard.up('KeyW');
   await steps(20);
   const after = await pg.evaluate(() => BF.player.position.y), where = await pg.evaluate(h => { const p = BF.player.position; return [Math.floor(p.x) - h.lx, Math.floor(p.z) - h.lz, BF.blocks[BF.world.getBlock(Math.floor(p.x), Math.floor(p.y - 0.5), Math.floor(p.z))].name]; }, house);
   console.log('stepped off to offset', JSON.stringify(where));
