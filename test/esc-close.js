@@ -18,7 +18,10 @@ module.exports = async (pg) => {
     document.exitPointerLock = () => { if (el) { el = null; setTimeout(fire, 5); } };
     BF.player.start();
   });
-  await pg.waitForTimeout(300);
+  // under software GL a frame can take longer than the simulated lock delay: wait for the lock before each case, or the
+  // lock lands after a screen opened and the test's simulated Escape drops it instead of reaching the page
+  const waitLocked = () => pg.waitForFunction(() => BF.player.isLocked(), null, { timeout: 10000 }).catch(() => {});
+  await waitLocked();
   const st = () => pg.evaluate(() => ({ locked: BF.player.isLocked(), menu: BF.player.menu(), inv: BF.inventory.isOpen(), map: BF.mapview.isOpen() }));
   const esc = async () => {
     // a locked Escape never reaches the page: the browser keeps it and leaves pointer lock
@@ -31,6 +34,7 @@ module.exports = async (pg) => {
   let fails = 0;
   const check = (label, s, want) => { const ok = Object.keys(want).every(k => s[k] === want[k]); if (!ok) fails++; console.log((ok ? "ok  " : "FAIL") + " " + label + ": " + JSON.stringify(s)); };
   for (const how of ["E", "crafting", "furnace", "chat"]) {
+    await waitLocked();
     if (how === "E") await pg.keyboard.press('e');
     else if (how === "chat") await pg.keyboard.press('t');
     else await pg.evaluate(m => BF.inventory.open(m), how);
