@@ -791,7 +791,7 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   (`BF.shepherd.willing/hungry`). A hungry sheep refuses more wheat ("The sheep isn't hungry"). Two willing adults of the same pen (or both wild) within 10 blocks walk to each other (`sheepAI`, called from `updateMob`) and a lamb appears when they
   are 1.8 blocks apart; both rest 1 day (`cd`). Lambs (`m.lamb`, `growAt`) are scaled 0.55, drop nothing, cannot be fed to breed or sheared and are adult after 1 day; wheat ages one by 10%.
   No breeding while 30 sheep are within 16 blocks. Events: `sheepFed(m, by)`, `sheepBorn(lamb, a, b)`, `sheepShorn(m, by)`.
-- **Shears** (item `shears`, `tool.type "shears"`, appended to the item list; recipe: 3 iron ingots, shapeless). Right click a woolly adult: 1-3 `white_wool` drop, `shorn = true`, the model swaps to the shorn one
+- **Shears** (item `shears`, `tool.type "shears"`, appended to the item list; recipe: 2 iron ingots on a diagonal, as Minecraft). Right click a woolly adult: 1-3 `white_wool` drop, `shorn = true`, the model swaps to the shorn one
   (`BF.mobs.setSheepLook`; mobs.js `typeParts("sheep", "shorn")`). The wool regrows after 7 days +-30% (sum of two uniforms), per sheep. Shears also break leaves 4x faster (`block.tool == "shears"`).
   Killed shorn sheep drop no wool (mobs.js `giveDrops`).
 - **Pens.** worldgen (`layoutVillage`, gen 3+) makes sure a village has a fenced `pen` building for every shepherd job its jobs plan holds (`BF.jobs.shepherdCount`), adding pens after the normal layout so no other plot moves;

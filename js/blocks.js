@@ -571,7 +571,7 @@ const ITEM_DEFS = [
   { name: "auto_map", stack: 1, color: "#d8c890", autoBlank: true, creativeTab: "misc", label: "Auto-Fill Map", search: "auto map autofill auto-fill automap creative terrain overview" },   // right click: asks for a width, then fills itself from the world generator
   // ---- shepherd items (js/shepherd.js; append-only) ----
   { name: "oak_fence_gate", places: "gate", wood: "oak", color: "#a2834f", creativeTab: "functional" },   // 4 sticks + 2 planks; pens have one
-  { name: "shears", stack: 1, tool: { type: "shears", tier: 1, speed: 4, damage: 1 }, color: "#c8c8d0" },   // shears sheep; breaks leaves faster; 3 iron ingots
+  { name: "shears", stack: 1, tool: { type: "shears", tier: 1, speed: 4, damage: 1 }, color: "#c8c8d0" },   // shears sheep; breaks leaves faster; 2 iron ingots
   // ---- end shepherd items ----
   // ---- wood variants items (append-only): a door and a fence gate for every other wood; icons reuse the oak sprites in the species colour ----
   ...WOOD_SPECIES.filter(sp => sp !== "oak").flatMap(sp => [
