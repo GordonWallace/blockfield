@@ -42,17 +42,18 @@ function survey(key) {
     }
     return true;
   };
-  let farmland = 0, stray = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  let farmland = 0, dry = 0, stray = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   const strays = [];
   for (let x = A.x0; x <= A.x1; x++) for (let z = A.z0; z <= A.z1; z++) {
     if (!W.isLoaded(x, z)) continue;
     const [y, id] = top(x, z);
-    if (id !== B.farmland) continue;
+    if (id !== B.farmland && id !== B.farmland_dry) continue;   // hydrated or dehydrated (js/farmland.js)
     farmland++;
+    if (id === B.farmland_dry) dry++;
     x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
     if (!enclosed(x, y, z)) { stray++; if (strays.length < 12) strays.push([x, y, z]); }
   }
-  // the map: F farmland, ~ water, L log, # building / box, = path, C composter, . ground, space other
+  // the map: F farmland, f dehydrated farmland, ~ water, L log, # building / box, = path, C composter, . ground, space other
   const lines = [];
   const boxAt = (x, z) => D.boxes.some(b => x >= b[0] && x <= b[2] && z >= b[1] && z <= b[3]);
   const farms = (R.wg.buildings || []).filter(b => b.type === 'farm' || b.type === 'bigfarm');
@@ -63,13 +64,13 @@ function survey(key) {
       let s = '';
       for (let x = x0 - 4; x <= x1 + 4; x++) {
         const [, id] = top(x, z);
-        const ch = sites.some(p => p.x === x && p.z === z) ? 'C' : id === B.farmland ? 'F' : BF.FLUID[id] ? '~' : isLog(id) ? 'L' : id === B.dirt_path ? '=' : boxAt(x, z) ? '#' : [B.grass, B.dirt, B.sand, B.snow_grass, B.coarse_dirt, B.podzol].includes(id) ? '.' : ' ';
+        const ch = sites.some(p => p.x === x && p.z === z) ? 'C' : id === B.farmland ? 'F' : id === B.farmland_dry ? 'f' : BF.FLUID[id] ? '~' : isLog(id) ? 'L' : id === B.dirt_path ? '=' : boxAt(x, z) ? '#' : [B.grass, B.dirt, B.sand, B.snow_grass, B.coarse_dirt, B.podzol].includes(id) ? '.' : ' ';
         s += ch;
       }
       lines.push(s);
     }
   }
-  return { farmland, stray, strays, map: lines.join('\n'), genFarms: farms.length };
+  return { farmland, dry, stray, strays, map: lines.join('\n'), genFarms: farms.length };
 }
 
 (async () => {
@@ -129,9 +130,9 @@ function survey(key) {
         const R = BF.mobs.list.find(m => m.village && m.village.key === key).village, D = BF.villageLife.vdata(R);
         return JSON.stringify({ projects: D.projects, farmers: BF.mobs.list.filter(m => m.village === R && m.profession === 'farmer').map(m => ({ idx: m.slot && m.slot.idx, site: m.jobsite, pos: [m.position.x | 0, m.position.y | 0, m.position.z | 0], inv: m.inv.filter(Boolean).map(s => BF.itemName(s.id) + 'x' + s.count).join(' '), haul: m.farm.haul, task: m.farm.task, avoid: Object.keys(m.farm.avoid).length, think: BF.villageLife.think(m, m.farm, R, D) })) }, null, 1);
       }, key));
-      const row = { seed, key, farmers: setup.farmers, genFarms: before.genFarms, farmland0: before.farmland, stray0: before.stray, farmland: after.farmland, stray: after.stray, strays: after.strays, kinds, projects, secs: Math.round((Date.now() - t0) / 1000) };
+      const row = { seed, key, farmers: setup.farmers, genFarms: before.genFarms, farmland0: before.farmland, stray0: before.stray, farmland: after.farmland, dry0: before.dry, dry: after.dry, stray: after.stray, strays: after.strays, kinds, projects, secs: Math.round((Date.now() - t0) / 1000) };
       results.push(row);
-      console.log(`seed ${seed} village ${key} farmers ${row.farmers} gen farms ${row.genFarms}: farmland ${row.farmland0} -> ${row.farmland}, stray ${row.stray0} -> ${row.stray} | beds ${projects.beds} made ${JSON.stringify(projects.made)} open ${JSON.stringify(projects.open)} (${row.secs}s)`);
+      console.log(`seed ${seed} village ${key} farmers ${row.farmers} gen farms ${row.genFarms}: farmland ${row.farmland0} -> ${row.farmland} (dehydrated ${row.dry0} -> ${row.dry}), stray ${row.stray0} -> ${row.stray} | beds ${projects.beds} made ${JSON.stringify(projects.made)} open ${JSON.stringify(projects.open)} (${row.secs}s)`);
       console.log('   tasks', JSON.stringify(kinds));
       // SHOT=1: a picture of the first new bed and the first grown bed, from above and to the south
       if (OUT && process.env.SHOT && projects.L.length) {

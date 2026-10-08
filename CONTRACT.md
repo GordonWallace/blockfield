@@ -741,6 +741,18 @@ Villagers only exist while their chunks are loaded. `BF.villageSim` keeps the te
   Not caught up: builder progress, farmer harvests, explorer trips.
 - API: `update(px, pz) -> changed`, `isActive(villageKey)`, `status()`, `exportSeen(out)` / `importSeen(o)`, `reset()`, `init()`. Debug HUD (F3) shows the simulated village and kept chunk counts.
 
+## Farmland hydration (js/farmland.js, loaded after villagesim.js; block in the blocks.js farmland pack)
+`farmland` is hydrated farmland (tile `farmland_moist`, Faithful's farmland darkened, see `DERIVED` in textures.js); `farmland_dry` (appended id) is dehydrated farmland (Faithful's farmland tile). Both drop dirt.
+- Hydrated by any water (`BF.FLUID`) within 3 blocks horizontally (square, diagonals included) at the block's level or one above, or by rain (not snow) with nothing light-blocking above.
+- No water or rain for a day: the block dries at a moment drawn evenly between 1 and 3 days. Water or rain re-hydrates it at once. Bare dehydrated farmland reverts to dirt at a moment drawn
+  evenly between 1 and 14 days after drying; a plant on it (crop, `RENDER` 4) holds it. The moment is a hash of position + stamp, so checking more or less often changes nothing.
+- One stamp per block in game days (last wet, or when dried), saved as `farmland` `[lastRain, x, y, z, day, ...]`. Old saves / generated farms: the clock starts when a block is first seen.
+  `lastRain` (any rain, game day) lets a chunk that was unloaded through a rain catch up on load.
+- Each loaded block is looked at every 20 sim seconds (at most 2000 per sim step); just-loaded or changed blocks first. Hooks: `world.setBlock` calls `onSet`, `world.reset` calls `reset`, `world.tickSim` wraps `tick`.
+- Crops: world.js growTick and the villagesim catch-up grow crops on either kind, at a third of the speed on dehydrated farmland. Player and farmer planting accept either kind (never dirt);
+  hoes and farmers till with `tillId(x, y, z)` (dehydrated unless water or rain reaches it).
+- API: `isFarmland(id)`, `isDry(id)`, `tillId`, `hydrated(x, y, z) -> true | false | null (reach not loaded)`, `growFactor(id)`, `check(x, y, z)`, `checkAll()`, `stampOf` / `setStamp`, `lastRain`, `stats()`, `serialize` / `deserialize`.
+
 ## Village generator 3 (default for new worlds since release 1.1; worldgen.js, mobs.js, jobs.js)
 - As generator 2, plus: every village has at least 4 villagers (`villagePop` minimum 4) and always a miner, a farmer, a forester and a toolsmith (`villageRoster` `core`: forester and miner always drawn, a nitwit or the last plain resident becomes the farmer / toolsmith when the shuffle gave none, builders never take their places, the lone farmer and toolsmith are never displaced). `jobList` ranks the first farmer and toolsmith with the special-building villagers and plans at least one jobsite per special villager.
 - Desert villages get a `garden` building (11x11 grass over dirt, one or two oak trees) just past a road end, 3+ blocks from other plots, so the forester has trees to fell and soil to replant (forester `findSpot` ignores buried built blocks such as the sandstone under desert sand).

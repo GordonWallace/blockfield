@@ -211,13 +211,13 @@ let C = null;   // lazily resolved block / item ids
 function ids() {
   if (C) return C;
   C = {
-    farmland: B("farmland"), water: B("water"), path: B("dirt_path"),
+    farmland: B("farmland"), farmlandDry: B("farmland_dry"), water: B("water"), path: B("dirt_path"),
     mature: new Map([[B("wheat"), I("wheat_seeds")], [B("carrots"), I("carrot")], [B("potatoes"), I("potato")], [B("beetroots"), I("beetroot_seeds")]]),
     seeds: ["wheat_seeds", "carrot", "potato", "beetroot_seeds"].map(I).filter(x => x != null),
     till: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass", "mycelium"].map(B).filter(x => x != null)),
     dirt: B("dirt"), hoes: ["wooden_hoe", "stone_hoe", "iron_hoe", "diamond_hoe"].map(I).filter(x => x != null),
     // natural ground a farmer may dig away (or fill with dirt) to level a field; everything else is somebody's building or the landscape
-    ground: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass", "mycelium", "sand", "red_sand", "gravel", "clay", "dirt_path", "farmland"].map(B).filter(x => x != null)),
+    ground: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass", "mycelium", "sand", "red_sand", "gravel", "clay", "dirt_path", "farmland", "farmland_dry"].map(B).filter(x => x != null)),
     diggable: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass"].map(B).filter(x => x != null)),
     wheat: I("wheat_item"), bread: I("bread"), hay: I("hay_bale"), bucket: I("bucket"), wbucket: I("water_bucket"), em: I("emerald"),
     cook: [["raw_chicken", "cooked_chicken"], ["raw_porkchop", "cooked_porkchop"], ["raw_beef", "steak"], ["raw_mutton", "cooked_mutton"], ["raw_cod", "cooked_cod"]]
@@ -356,7 +356,7 @@ function scanStep(R, D, budget) {
           const id = w.getBlock(S.x, y, S.z);
           if (id === 0 || BF.RENDER[id] === 4) continue;
           if (BF.FLUID[id] === 8) S.water.push([S.x, y, S.z]);
-          else if (id === c.farmland) S.cells.push([S.x, y, S.z]);
+          else if (isFarm(c, id)) S.cells.push([S.x, y, S.z]);
           break;
         }
       } else {
@@ -425,7 +425,7 @@ function think(m, fs, R, D) {
   let best = null, bd = Infinity, fits = new Map(), hasSeed = c.seeds.some(id => cnt(m, id) > 0);
   const young = [];
   for (const [x, y, z] of cells) {
-    if (!W().isLoaded(x, z) || getB(x, y, z) !== c.farmland) continue;
+    if (!W().isLoaded(x, z) || !isFarm(c, getB(x, y, z))) continue;
     const a = getB(x, y + 1, z), k = key3(x, y + 1, z);
     let kind = null;
     if (c.matureSet.has(a)) {
@@ -536,7 +536,9 @@ function findGather(m, D, ok) {
   return best;
 }
 
-const tillOK = (c, id) => c.till.has(id) || id === c.farmland;
+// hydrated or dehydrated farmland (js/farmland.js): both are fields, crops are planted and harvested on either
+const isFarm = (c, id) => id === c.farmland || (id === c.farmlandDry && id != null);
+const tillOK = (c, id) => c.till.has(id) || isFarm(c, id);
 const looseAbove = id => id === 0 || (BF.REPLACEABLE[id] && !BF.SOLID[id] && !BF.FLUID[id]);
 // ---------------------------------------------------------------- garden beds
 // Farmland is only ever made inside a bed like the village farms: a rectangle ringed with logs (set into the ground), with water
@@ -586,7 +588,7 @@ function clearOfBuildings(R, D, x, z) {
 // The region may hold farmland, water and plain soil (the pumpkin patch of a generated farm).
 function detectBeds(D) {
   const c = ids(), w = W(), beds = [], seen = new Set();
-  const member = id => id === c.farmland || BF.FLUID[id] === 8 || c.till.has(id);
+  const member = id => isFarm(c, id) || BF.FLUID[id] === 8 || c.till.has(id);
   for (const [sx, sy, sz] of D.cells) {
     if (seen.has(key3(sx, sy, sz))) continue;
     seen.add(key3(sx, sy, sz));
@@ -628,7 +630,7 @@ function detectBeds(D) {
 // else a task (stage 0 level, 1 lay a ring log, 2 lift an old ring log, 3 water / till).
 function cellJob(P, x, z) {
   const c = ids(), L = P.L, y = L.y, want = layoutAt(L, x, z), cur = getB(x, y, z);
-  if (want === "log" ? isLogBlock(cur) : want === "water" ? BF.FLUID[cur] === 8 : cur === c.farmland) return null;
+  if (want === "log" ? isLogBlock(cur) : want === "water" ? BF.FLUID[cur] === 8 : isFarm(c, cur)) return null;
   const k = key3(x, y, z), at = (kind, stage, yy) => ({ kind, x, y: yy == null ? y : yy, z, k, ty: (yy == null ? y : yy) + 1, stage, proj: P.id });
   if (isLogBlock(cur)) return at("unborder", 2);                                  // an old edge log where the bed now goes on
   if (BF.FLUID[cur]) return "blocked";
@@ -870,7 +872,7 @@ function performBed(m, fs, R, D, t) {
     place = c.water;
   } else {
     if (!hasHoe(m) || !c.till.has(old)) return false;
-    place = c.farmland;
+    place = BF.farmland ? BF.farmland.tillId(t.x, t.y, t.z) : c.farmland;   // dehydrated until the bed's water reaches it
   }
   clearTop();
   if (!w.setBlock(t.x, t.y, t.z, place)) return false;
@@ -981,7 +983,7 @@ function perform(m, fs, R, D) {
   if (t.proj) return performBed(m, fs, R, D, t);
   if (t.kind === "harvest") {
     const id = getB(t.x, t.y, t.z);
-    if (!c.matureSet.has(id) || getB(t.x, t.y - 1, t.z) !== c.farmland || !dropsFit(m, id)) return false;
+    if (!c.matureSet.has(id) || !isFarm(c, getB(t.x, t.y - 1, t.z)) || !dropsFit(m, id)) return false;
     if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
     const drops = BF.rollDrops(id);
     for (const d of drops) Tinv.add(m.inv, d.id, d.count);
@@ -999,7 +1001,7 @@ function perform(m, fs, R, D) {
     return true;
   }
   if (t.kind === "plant") {
-    if (getB(t.x, t.y - 1, t.z) !== c.farmland || getB(t.x, t.y, t.z) !== 0) return false;
+    if (!isFarm(c, getB(t.x, t.y - 1, t.z)) || getB(t.x, t.y, t.z) !== 0) return false;
     const seed = t.seed != null && cnt(m, t.seed) > 0 ? t.seed : plantFor(m, t.x, t.y - 1, t.z);
     if (seed == null || cnt(m, seed) < 1) return false;
     const young = BF.items[seed].plants;

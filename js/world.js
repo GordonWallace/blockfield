@@ -123,6 +123,7 @@ world.reset = function () {
   world._dirty.clear();
   fluidQ.clear();
   growing.clear();
+  if (BF.farmland) BF.farmland.reset();
   lastCenter = null; genList = []; meshList = []; simList = [];
   if (BF.villageSim) BF.villageSim.reset();   // force a fresh load plan even if the spawn chunk is unchanged
 };
@@ -248,6 +249,7 @@ world.setBlock = function (x, y, z, id) {
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
   if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
   if (BF.blocks[id] && BF.blocks[id].growsInto) growing.add(fkey(x, y, z));
+  if (BF.farmland) BF.farmland.onSet(x, y, z, oldId, id);   // farmland hydration clock (js/farmland.js)
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {
     const above = cblock(c, lx, y + 1, lz);
@@ -603,7 +605,7 @@ function buildMesh(c) {
   const L = { pos: [], uv: [], col: [], sky: [], bl: [], ind: [] };
   const RENDER = BF.RENDER, OPAQUE = BF.OPAQUE, FLUID = BF.FLUID;
   const faceTint = world._faceTint;
-  const B_PATH = BF.B.dirt_path, B_FARM = BF.B.farmland;
+  const B_PATH = BF.B.dirt_path, B_FARM = BF.B.farmland, B_FARM_DRY = BF.B.farmland_dry;
 
   // Biome tint per column over an 18x18 area (1-block border) so AO-free tint blends at borders.
   const tintFn = BF.worldgen.tintAt;
@@ -794,7 +796,7 @@ function buildMesh(c) {
       }
 
       // solid / cutout cube face with ambient occlusion (paths and farmland sit 1/16 lower)
-      const lowTop = (b === B_PATH || b === B_FARM) && !BF.SOLID[get(x, y + 1, z)];
+      const lowTop = (b === B_PATH || b === B_FARM || b === B_FARM_DRY) && !BF.SOLID[get(x, y + 1, z)];
       const ua = sideAxes[f][0], va = sideAxes[f][1];
       for (let k = 0; k < 4; k++) {
         const cc = F.c[k];
@@ -937,7 +939,8 @@ function fluidTick() {
 }
 
 // ---------- crop growth ----------
-// Young crops (blocks with growsInto) mature after ~4 minutes (1/5 game day) on average, only on farmland.
+// Young crops (blocks with growsInto) mature after ~4 minutes (1/5 game day) on average, only on farmland; on dehydrated
+// farmland at a third of that speed (js/farmland.js).
 const growing = new Set();
 let growLast = 0;
 const GROW_CHANCE_PER_S = 1 / 240;   // ~4 minutes (a fifth of the 1200 s game day) on average
@@ -951,9 +954,11 @@ function growTick() {
     if (!world.isLoaded(x, z)) continue; // keeps waiting until its chunk is back
     const id = world.getBlock(x, y, z), b = BF.blocks[id];
     if (!b || !b.growsInto) { growing.delete(k); continue; }
-    if (world.getBlock(x, y - 1, z) !== BF.B.farmland) continue;
+    const soil = world.getBlock(x, y - 1, z);
+    if (soil !== BF.B.farmland && soil !== BF.B.farmland_dry) continue;
+    const f = soil === BF.B.farmland_dry ? (BF.farmland ? BF.farmland.growFactor(soil) : 1 / 3) : 1;
     // crops grow 1.5x faster while it rains (js/weather.js)
-    if (Math.random() < GROW_CHANCE_PER_S * dt * (BF.weather && BF.weather.raining ? 1.5 : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
+    if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
   }
 }
 world.growingCount = () => growing.size;

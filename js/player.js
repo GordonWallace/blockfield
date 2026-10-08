@@ -1251,11 +1251,11 @@ function secondaryDown() {
   if (it.tool && it.tool.type === "hoe" && target && target.normal[1] === 1 && BF.B.farmland != null &&
       (target.id === BF.B.grass || target.id === BF.B.dirt || target.id === BF.B.dirt_path) &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
-    const { x, y, z, id } = target;
-    if (!BF.world.setBlock(x, y, z, BF.B.farmland)) return false;
+    const { x, y, z, id } = target, fid = BF.farmland ? BF.farmland.tillId(x, y, z) : BF.B.farmland;   // hydrated only with water or rain (js/farmland.js)
+    if (!BF.world.setBlock(x, y, z, fid)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
     wearHeld(1);
-    emit("blockPlaced", x, y, z, BF.B.farmland);
+    emit("blockPlaced", x, y, z, fid);
     placeCd = PLACE_REPEAT;
     return true;
   }
@@ -1270,8 +1270,8 @@ function secondaryDown() {
     placeCd = PLACE_REPEAT;
     return true;
   }
-  // planting: seeds / carrot / potato on the top face of farmland with air above (takes priority over eating)
-  if (it.plants && target && target.id === BF.B.farmland && target.normal[1] === 1 &&
+  // planting: seeds / carrot / potato on the top face of farmland (hydrated or not, never dirt) with air above (takes priority over eating)
+  if (it.plants && target && (target.id === BF.B.farmland || target.id === BF.B.farmland_dry) && target.normal[1] === 1 &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
     const x = target.x, y = target.y + 1, z = target.z;
     if (!BF.world.setBlock(x, y, z, it.plants)) return false;
