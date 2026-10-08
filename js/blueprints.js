@@ -129,6 +129,16 @@ const SPECS = {
       return { cells: c, beds: [], w, d };
     },
   },
+  coop: {   // chicken coop (js/poultry.js): a fenced run with a gap to walk in by, the poultry keeper's nesting box beside it. It starts empty: the keeper fetches wild chickens
+    label: "chicken coop", weight: "other",
+    gen() {
+      const B = BF.B, c = [], w = 7, d = 7;
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++)
+        if ((u === 0 || u === w - 1 || q === 0 || q === d - 1) && !(q === 0 && u === 3)) c.push([u, 0, q, B.oak_fence, PH.WALL]);
+      if (B.nesting_box != null) c.push([w, 0, 1, B.nesting_box, PH.LIGHT]);
+      return { cells: c, beds: [], w: w + 1, d };
+    },
+  },
   market_stall: {
     label: "market stall", weight: "other",
     gen(st) {

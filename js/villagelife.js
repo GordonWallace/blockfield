@@ -1401,18 +1401,22 @@ function doToolDeal(m, deal) {
   return 1;
 }
 
-// ---------------------------------------------------------------- wheat for the shepherds (js/shepherd.js)
-// A shepherd short of wheat buys it from the village (farmers first) at the fair price: 1 emerald buys ~90% of an emerald's worth.
+// ---------------------------------------------------------------- wheat for the shepherds (js/shepherd.js), seeds for the poultry keepers (js/poultry.js)
+// A shepherd short of wheat (a keeper short of wheat seeds) buys it from the village (farmers first) at the fair price: 1 emerald buys ~90% of an
+// emerald's worth. Farmers keep WHEAT_SELF wheat and SEEDS_SELF seeds for themselves.
+const SEEDS_SELF = 16;
+const feedItem = m => (m.profession === "poultry_keeper" ? I("wheat_seeds") : ids().wheat);
+const feedWanted = m => (m.profession === "shepherd" && BF.shepherd ? BF.shepherd.wheatWanted(m) : m.profession === "poultry_keeper" && BF.poultry ? BF.poultry.seedsWanted(m) : 0);
 function wheatDealWith(m, v2, want) {
-  const T = TR(), c = ids(), val = (T.VALUE && T.VALUE.wheat_item) || 0.07;
-  const per = Math.max(1, Math.floor(0.9 / val)), have = cnt(v2, c.wheat) - (v2.profession === "farmer" ? WHEAT_SELF : 0);
+  const T = TR(), c = ids(), item = feedItem(m), seeds = item !== c.wheat, val = (T.VALUE && T.VALUE[BF.items[item].name]) || 0.07;
+  const per = Math.max(1, Math.floor(0.9 / val)), have = cnt(v2, item) - (v2.profession === "farmer" ? (seeds ? SEEDS_SELF : WHEAT_SELF) : 0);
   if (have < per || cnt(m, c.em) < 1) return null;
   let k = Math.min(Math.ceil(want / per), cnt(m, c.em), Math.floor(have / per), 4);
-  while (k > 0 && !(T.inv.canFit(m.inv, [{ id: c.wheat, n: per * k }], [{ id: c.em, n: k }]) && T.inv.canFit(v2.inv, [{ id: c.em, n: k }], [{ id: c.wheat, n: per * k }]))) k--;
-  return k > 0 ? { kind: "wheat", seller: v2, times: k, per, item: c.wheat, price: 1 / per } : null;
+  while (k > 0 && !(T.inv.canFit(m.inv, [{ id: item, n: per * k }], [{ id: c.em, n: k }]) && T.inv.canFit(v2.inv, [{ id: c.em, n: k }], [{ id: item, n: per * k }]))) k--;
+  return k > 0 ? { kind: "wheat", seller: v2, times: k, per, item, price: 1 / per } : null;
 }
 function findWheatSeller(m) {
-  const R = m.village, want = BF.shepherd ? BF.shepherd.wheatWanted(m) : 0, now = dayNow(), sh = m.fshop;
+  const R = m.village, want = feedWanted(m), now = dayNow(), sh = m.fshop;
   if (!R || want <= 0) return null;
   let best = null, bs = Infinity;
   for (const v2 of R.members || []) {
@@ -1425,18 +1429,18 @@ function findWheatSeller(m) {
   return best;
 }
 function doWheatDeal(m, deal) {
-  const T = TR(), v2 = deal.seller, c = ids();
+  const T = TR(), v2 = deal.seller, c = ids(), item = deal.item != null ? deal.item : c.wheat;
   let done = 0;
   for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2) || cnt(v2, c.wheat) < deal.per || cnt(m, c.em) < 1) break;
-    if (!T.inv.canFit(m.inv, [{ id: c.wheat, n: deal.per }], [{ id: c.em, n: 1 }]) || !T.inv.canFit(v2.inv, [{ id: c.em, n: 1 }], [{ id: c.wheat, n: deal.per }])) break;
-    T.inv.remove(v2.inv, c.wheat, deal.per); T.inv.add(v2.inv, c.em, 1);
-    T.inv.remove(m.inv, c.em, 1); T.inv.add(m.inv, c.wheat, deal.per);
+    if (!canSell(v2) || cnt(v2, item) < deal.per || cnt(m, c.em) < 1) break;
+    if (!T.inv.canFit(m.inv, [{ id: item, n: deal.per }], [{ id: c.em, n: 1 }]) || !T.inv.canFit(v2.inv, [{ id: c.em, n: 1 }], [{ id: item, n: deal.per }])) break;
+    T.inv.remove(v2.inv, item, deal.per); T.inv.add(v2.inv, c.em, 1);
+    T.inv.remove(m.inv, c.em, 1); T.inv.add(m.inv, item, deal.per);
     done++;
   }
   if (done) {
-    if (BF.vlog) BF.vlog.trade(m, v2, "gave " + done + " Emerald, got " + done * deal.per + " Wheat", done);
-    log("buyWheat", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * deal.per + " wheat", paid: done + " emerald" });
+    if (BF.vlog) BF.vlog.trade(m, v2, "gave " + done + " Emerald, got " + done * deal.per + " " + BF.itemName(item), done);
+    log(item === c.wheat ? "buyWheat" : "buySeeds", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * deal.per + " " + BF.items[item].name, paid: done + " emerald" });
   }
   return done;
 }
@@ -1449,7 +1453,7 @@ function shopAI(m, dt, out) {
     const now = dayNow();
     const hasEm = cnt(m, ids().em) >= 1;
     const hungry = hasEm && F.available(m) < F.rate(m);
-    const wheat = hasEm && m.profession === "shepherd" && !!BF.shepherd && BF.shepherd.wheatWanted(m) > 0;
+    const wheat = hasEm && feedWanted(m) > 0;
     const tool = hasEm && toolNeed(m);
     if (sh.cd > now || m.child || !(hungry || wheat || tool)) return false;
     const deal = (hungry && findFoodSeller(m)) || (tool && findToolSeller(m, tool)) || (wheat && findWheatSeller(m)) || null;
@@ -1567,6 +1571,7 @@ function statusText(m) {
   if (m.starving) return "Starving, only trades food";
   if (m.fshop && m.fshop.stage) return m.fshop.deal && m.fshop.deal.kind === "wheat" ? "Buying wheat" : "Buying food";
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.statusText) { const t = BF.shepherd.statusText(m); if (t) return t; }
+  if (m.profession === "poultry_keeper" && BF.poultry) { const t = BF.poultry.statusText(m); if (t) return t; }
   if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
     const t = m.farm.task;
     if (t.kind === "craft" && t.hay) return "Making hay bales";

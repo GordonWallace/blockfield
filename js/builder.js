@@ -64,6 +64,7 @@ function craftTable(wood) {
   t[I.crafting_table] = { n: 1, from: [[P, 4]] };
   t[I.chest] = { n: 1, from: [[P, 8]] };
   t[I.furnace] = { n: 1, from: [[I.cobblestone, 8]] };
+  if (I.nesting_box != null && I.hay_bale != null) t[I.nesting_box] = { n: 1, from: [[P, 4], [I.hay_bale, 1]] };   // the coop's jobsite (js/poultry.js)
   return t;
 }
 const CRAFTS = {};
@@ -317,6 +318,9 @@ function pickType(m, bs) {
     garden: cnt("garden") < 2 ? 0.8 : 0.2,
     market_stall: cnt("market_stall") < 2 ? 0.7 : 0.15,
     workshop: cnt("workshop") < 1 ? 0.5 : 0.1,
+    // a coop (js/poultry.js): wanted when the village has none (generated or built) and 8 or more villagers, hardly ever after that
+    coop: (R.wg && (R.wg.buildings || []).some(b => b.type === "coop")) || cnt("coop") > 0 ? 0.02
+      : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 8 ? 2.4 : 0.05,
   };
   const sold = soldItems(R), stock = sellerStock(R);
   let sum = 0;

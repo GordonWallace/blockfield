@@ -26,6 +26,7 @@
   {"name": "seed-copy", "file": "test/seed-copy.js", "kind": "actions", "tier": "baseline", "what": "title screen shows whole seeds, copy button copies one"},
   {"name": "shepherd-check", "file": "test/shepherd-check.js", "kind": "actions", "tier": "baseline"},
   {"name": "shepherd-day", "file": "test/shepherd-day.js", "kind": "actions", "tier": "baseline"},
+  {"name": "poultry-actions", "file": "test/poultry-actions.js", "kind": "actions", "tier": "baseline", "timeout": 600, "what": "coops, chickens laying and breeding, the poultry keeper collecting, culling and fetching wild chickens"},
   {"name": "tent-actions", "file": "test/tent-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "villagelog", "file": "test/villagelog.js", "kind": "actions", "tier": "baseline"},
   {"name": "villager-hover", "file": "test/villager-hover.js", "kind": "actions", "tier": "baseline", "what": "looking at a villager shows name, job and activity"},

@@ -73,6 +73,17 @@ function invOf(inv) {
     return max ? [s.id, s.count, Math.round(Math.max(0, 1 - s.wear / max) * 100) / 100] : [s.id, s.count];
   });
 }
+// A poultry keeper's flock (js/poultry.js) or a shepherd's (js/shepherd.js): {kind, n (all of them, unloaded ones too), young, eggs (in the nest)}.
+function flockOf(m) {
+  try {
+    if (m.profession === "poultry_keeper" && BF.poultry) {
+      const T = BF.poultry.tended(m), c = T.coop;
+      return { kind: "chickens", n: T.size, young: T.flock.filter(o => o.chick).length, eggs: c ? c.eggs | 0 : null, coop: !!c };
+    }
+    if (m.profession === "shepherd" && BF.shepherd) { const T = BF.shepherd.tended(m); return { kind: "sheep", n: T.pen && T.pen.sheep ? T.pen.sheep.length : T.flock.length, young: T.flock.filter(o => o.lamb).length, eggs: null, coop: !!T.pen }; }
+  } catch (e) { /* not loaded yet */ }
+  return null;
+}
 function icons() {
   const out = {};
   for (const id of newIcons) {
@@ -101,6 +112,7 @@ function detail(rec) {
       job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
       age: m.life ? Math.round((m.life.lived || 0) * 10) / 10 : null,   // game days it has been loaded and active
       inv: invOf(m.inv),
+      flock: flockOf(m),
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));
@@ -146,7 +158,7 @@ let hooked = false;
 function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
-  for (const m of BF.mobs.list) if (!m.dead && !m.removed) mobs[m.type] = (mobs[m.type] || 0) + 1;
+  for (const m of BF.mobs.list) if (!m.dead && !m.removed) { const k = m.type === "chicken" ? (m.coop ? "chicken (coop)" : "chicken (wild)") : m.type; mobs[k] = (mobs[k] || 0) + 1; }   // chickens: penned and wild (js/poultry.js)
   return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
     professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
