@@ -244,6 +244,9 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
   init(), spawn(x,y,z), update(dt), updatePaused?(dt), eyePos() -> Vector3, lookDir() -> Vector3,
   damage(amount, fromPos?), heal(n) }`
 Owns camera transform, input, pointer lock, block break/place, attacking mobs, HUD hearts/hunger, menus.
+- Mouse buttons: left attacks / breaks; right and middle both use (also Mac ctrl+click). There is no pick block: Ubuntu trackpads report some
+  two-finger right clicks as middle clicks. `clickLog()` returns the raw fields of the last 6 mouse events on the canvas and what each did; the F3
+  overlay (and so the debug screen) prints them under "Mouse".
 
 ## inventory.js (owner: inventory worker)
 
