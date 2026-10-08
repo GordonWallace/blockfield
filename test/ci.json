@@ -5,6 +5,7 @@
   {"name": "automap-input", "file": "test/automap-input.js", "kind": "actions", "tier": "baseline"},
   {"name": "cartography-actions", "file": "test/cartography-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "boats", "file": "test/boats.js", "kind": "actions", "tier": "baseline", "timeout": 600, "what": "boat recipes, placing, rowing speeds, river steps, mob passengers, breaking, saving"},
+  {"name": "horses", "file": "test/horses.js", "kind": "actions", "tier": "baseline", "timeout": 600, "what": "horse recipes, stats, foals, taming, saddles, riding, jumping, fall damage, leads, saving, herds"},
   {"name": "builder-log", "kind": "node", "tier": "baseline", "file": "test/builder-log.js", "timeout": 600, "what": "builders log what they start and finish building"},
   {"name": "creative-vinv", "file": "test/creative-vinv.js", "kind": "actions", "tier": "baseline"},
   {"name": "debug-alerts", "kind": "node", "tier": "baseline", "file": "test/debug-alerts.js", "args": ["{out}"], "timeout": 600, "what": "debug screen alerts, 0x, teleport"},
@@ -65,6 +66,7 @@
   {"name": "dead-villagers", "file": "test/dead-villagers.js", "kind": "actions", "tier": "baseline"},
   {"name": "shepherd-misc", "file": "test/shepherd-misc.js", "kind": "actions", "tier": "integration"},
   {"name": "toolsmith-actions", "file": "test/toolsmith-actions.js", "kind": "actions", "tier": "integration", "timeout": 900},
-  {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"}
+  {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"},
+  {"name": "stables", "file": "test/stables.js", "kind": "actions", "tier": "integration", "timeout": 900, "what": "tack rack recipe and stable blueprint; stable hand stocks, breeds (max 4) and trades horses, 3 game days, nothing from nowhere"}
  ]
 }

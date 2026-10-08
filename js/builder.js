@@ -64,6 +64,9 @@ function craftTable(wood) {
   t[I.crafting_table] = { n: 1, from: [[P, 4]] };
   t[I.chest] = { n: 1, from: [[P, 8]] };
   t[I.furnace] = { n: 1, from: [[I.cobblestone, 8]] };
+  const G = BP().woodItem(wood, "fence_gate");
+  if (G != null) t[G] = { n: 1, from: [[P, 4]] };                                        // 4 sticks (2 planks) + 2 planks: the stable's paddock gate
+  if (I.tack_rack != null) t[I.tack_rack] = { n: 1, from: [[P, 4], [I.leather, 1], [I.iron_ingot, 1]] };   // the stable's jobsite (recipes-jobs.js)
   return t;
 }
 const CRAFTS = {};
@@ -279,6 +282,7 @@ function findSite(m, type, opts, haveFound, wood) {
     const rect = [px, pz, px + bp.w - 1, pz + bp.d - 1];
     if (obs.some(o => rectsOverlap(o, rect))) continue;
     if (dist(px + bp.w / 2, pz + bp.d / 2) > SITE_RANGE) continue;
+    if (type === "stable" && BF.horses && !BF.horses.isHorseBiome(px + bp.w / 2, pz + bp.d / 2)) continue;   // a stable stands on horse land itself
     evals++;
     if (occupiedBox(m, rect)) continue;
     const t = evalTerrain(bp, px, pz, found);
@@ -294,12 +298,33 @@ function findSite(m, type, opts, haveFound, wood) {
 const lamps = inv => (TR().inv.count(inv, BF.I.lantern) >= 3 ? { lantern: true } : null);
 function optsFor(type, inv) {
   if (type === "lamp_posts") return lamps(inv);
-  if (type === "garden" && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
+  if ((type === "garden" || type === "stable") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
   return null;
+}
+// Items no current offer sells but some villager's trade table does at a later level (the leatherworker's "1 emerald > 6 leather" is a level 2
+// offer): a builder buys them at that offer's price out of what the villager holds, with the usual stock and room rules (exchange). Only the
+// stable's tack rack needs one so far (leather); everything else keeps to current offers.
+const TABLE_ITEMS = () => new Set([BF.I.leather].filter(x => x != null));
+function tableOffer(v2, id) {
+  const em = BF.I.emerald;
+  for (const pool of TR().table(v2.profession)) for (const o of pool)
+    if (o.sell.id === id && o.buy.length === 1 && o.buy[0].id === em) return { buy: [{ id: em, n: o.buy[0].n }], sell: { id, n: o.sell.n }, level: 1, xp: 0, table: true };
+  return null;
+}
+const offersOf = v2 => {
+  const out = v2.trades.slice(), have = new Set(out.map(o => o.sell.id));
+  for (const id of TABLE_ITEMS()) if (!have.has(id) && TR().inv.count(v2.inv, id) > 0) { const o = tableOffer(v2, id); if (o) out.push(o); }
+  return out;
+};
+// Stables: only in villages on horse land, wanted most by a village of 10 or more without one (js/stables.js decides what horse land is).
+function stableWeight(R, has) {
+  if (!BF.stables || !BF.stables.villageOK(R)) return 0;
+  const pop = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length;
+  return has ? 0.02 : pop >= 10 ? 2.5 : 0.15;
 }
 function soldItems(R) {
   const s = new Set();
-  for (const o of R.members) if (o.type === "villager" && !o.dead && !o.removed && o.profession !== "builder" && o.trades) for (const t of o.trades) s.add(t.sell.id);
+  for (const o of R.members) if (o.type === "villager" && !o.dead && !o.removed && o.profession !== "builder" && o.trades && o.inv) for (const t of offersOf(o)) s.add(t.sell.id);
   return s;
 }
 function pickType(m, bs) {
@@ -317,12 +342,14 @@ function pickType(m, bs) {
     garden: cnt("garden") < 2 ? 0.8 : 0.2,
     market_stall: cnt("market_stall") < 2 ? 0.7 : 0.15,
     workshop: cnt("workshop") < 1 ? 0.5 : 0.1,
+    stable: stableWeight(R, cnt("stable") > 0),
   };
   const sold = soldItems(R), stock = sellerStock(R);
   let sum = 0;
   const ws = [];
   for (const t of BPr.TYPES) {
     if (bs.fail && bs.fail[t] > dayNow()) continue;
+    if (t === "stable" && !wt.stable) continue;                  // never outside horse land
     const opts = optsFor(t, m.inv), wood = chooseWood(m, t, style, opts, stock);
     const bp = BPr.get(t, 0, style, 0.5, opts, wood);
     const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
@@ -554,6 +581,7 @@ function placeCell(m, bs, e) {
   if (isWater) { T.remove(m.inv, BF.I.water_bucket, 1); T.add(m.inv, BF.I.bucket, 1); }   // the bucket is empty after the one block
   let step = 1;
   if (BF.vlog && BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) BF.vlog.bed(m, c.x, c.y, c.z);
+  if (BF.blocks[use] && BF.blocks[use].jobsite && BF.emit) BF.emit("blockPlaced", c.x, c.y, c.z, use);   // a jobsite (the stable's tack rack): js/jobs.js lists it for the jobless at once
   if (c.pair) {                                             // door upper half / bed head go in with the lower half / foot
     const c2 = cellOf(e, e.prog + 1);
     w.setBlock(c2.x, c2.y, c2.z, c2.id);
@@ -701,7 +729,7 @@ function findSeller(m, bs, short) {
   const R = m.village, T = TR(), best = { d: 1e9 };
   for (const v2 of R.members) {
     if (!canSell(v2)) continue;
-    for (const o of v2.trades) {
+    for (const o of offersOf(v2)) {
       const need = short[o.sell.id];
       if (!need || T.blockReason(v2, o)) continue;
       if (bs.avoid[v2.slot ? v2.slot.idx + ":" + o.sell.id : ""] > dayNow()) continue;

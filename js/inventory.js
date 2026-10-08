@@ -391,6 +391,7 @@ function performTrade(o) {
 function clickTrade(shift) {
   if (!tradeOffer) return;
   const o = tradeOffer, out = o.sell;
+  if (o.horse) { performTrade(o); topUp(o); recomputeTrade(); return; }   // a stable's horse (js/stables.js): it walks out to the player, nothing goes into a slot
   if (shift) {
     let got = 0;
     for (let g = 0; g < 64 && tradeOffer === o; g++) {
@@ -1171,6 +1172,7 @@ function renderOffers() {
       const ar = document.createElement("span"); ar.className = "ar"; ar.textContent = tradeReason(o) ? "X" : "\u2192";
       row.append(cell(o.buy[0]), cell(o.buy[1]), ar, cell(o.sell));
       row.setAttribute("aria-label", o.buy.map(b => b.n + " " + nameOf(b.id)).join(" + ") + " for " + o.sell.n + " " + nameOf(o.sell.id));
+      if (o.note) row.title = o.note;   // e.g. a stable horse's stats (js/stables.js)
       offersEl.appendChild(row);
     });
   }
