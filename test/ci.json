@@ -8,6 +8,7 @@
   {"name": "debug-screen", "kind": "node", "tier": "baseline", "file": "test/debug-screen.js", "args": ["{out}"], "timeout": 600, "what": "second-monitor debug screen"},
   {"name": "explorer-actions", "file": "test/explorer-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "farmbeds-actions", "file": "test/farmbeds-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "farmer-dig", "file": "test/farmer-dig.js", "kind": "actions", "tier": "baseline", "what": "farmers dig dirt off natural edges or from one neat shallow pit"},
   {"name": "farmer-logs", "file": "test/farmer-logs.js", "kind": "actions", "tier": "baseline", "what": "farmers buy logs from foresters, never fell trees"},
   {"name": "golem-actions", "file": "test/golem-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "held-items", "file": "test/held-items.js", "kind": "actions", "tier": "baseline", "what": "held grass top tinted, flowers and torches flat in hand"},
