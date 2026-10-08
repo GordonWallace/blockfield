@@ -237,6 +237,14 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
   (the table amounts); `tick(v, day)` runs with the restock (and when the trade screen opens) and is the only place amounts change; `filled(v, o, times)`
   is called by `BF.vlog.trade` and the player's trades. Trade sites must read `o.buy` / `o.sell` amounts when they trade, not from a plan made earlier.
   `pack` adds `pr` ({offer key: step}) and `pd` (last tick day).
+- One market (`BF.market`, js/market.js, after prices.js): villagers trade with each other only through offers on their trade screens.
+  `sync(v)` (with the restock pass and when the trade screen opens) appends spare-goods sell offers (`spare: 1`: what it holds above its reserve
+  that its job doesn't sell, at the cheapest base table price, else VALUE x 1.05) and need buy offers (`need: 1`: a missing job tool, a shepherd's
+  wheat, a builder's shortfall its table doesn't buy) and the food offers of any hungry villager (`feed: 1`) after the job offers. `reserve(v)`
+  is what it keeps (job tools, KEEP bread-eq, farmer seed and wheat, shepherd feed, `BF.builder.reserve` = the structure it is building plus
+  the next it chose, crafters' next 2 crafts); `blockReason` refuses a sale into it ("Keeping for own use"), for villagers and the player.
+  Any villager may buy from any other. Code that moves goods between two villagers must use a seller's offer with `exchange` and log it with
+  `BF.vlog.trade(buyer, seller, offer, times)`.
 - `inv` helpers on plain `{id,count}|null` arrays: `create()`, `count(a,id)`, `add(a,id,n) -> leftover`, `remove(a,id,n) -> removed`,
   `canFit(a, adds, removes)`, `clone(a)`. `pack(v) / unpack(v, saved)` convert the persisted form (item names, not ids).
 - Trade screen (inventory.js): shows the villager inventory greyed and read-only under the offer list; unavailable offers are dimmed with an "X"
