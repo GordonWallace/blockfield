@@ -329,7 +329,7 @@ function restoreStowed(b, dt) {
 function pickUpMobs(b) {
   if (b.mob || b.stowed || !BF.mobs) return;
   for (const m of BF.mobs.list) {
-    if (m.dead || m.removed || m.riding || m.sleeping || m.tradingWith || (m.def && m.def.golem) || (m.boatCd || 0) > 0) continue;
+    if (m.dead || m.removed || m.riding || m.rider || m.sleeping || m.tradingWith || (m.def && (m.def.golem || m.def.herd)) || (m.boatCd || 0) > 0) continue;
     const r = HW + m.halfWidth - 0.1;
     if (Math.abs(m.position.x - b.pos.x) > r || Math.abs(m.position.z - b.pos.z) > r) continue;
     if (m.position.y > b.pos.y + H || m.position.y + m.height < b.pos.y) continue;

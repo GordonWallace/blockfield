@@ -30,6 +30,7 @@ const BF = (window.BF = window.BF || {});
   const WOOL = ids(names.filter(n => /_wool$/.test(n)));
   if (I.carpentry_bench !== undefined) addShaped(I.carpentry_bench, 1, ["WI", "PP", "PP"], { W: WOOL, I: I.iron_ingot, P: PLANKS }, "Wool + Iron Ingot over 4 Planks → Carpentry Bench (furniture maker)");
   if (I.mining_bench !== undefined) addShaped(I.mining_bench, 1, ["IC", "PP", "PP"], { I: I.iron_pickaxe, C: I.cobblestone, P: PLANKS }, "Iron Pickaxe + Cobblestone over 4 Planks → Mining Bench (miner)");
+  if (I.tack_rack !== undefined) addShaped(I.tack_rack, 1, ["LI", "PP", "PP"], { L: I.leather, I: I.iron_ingot, P: PLANKS }, "Leather + Iron Ingot over 4 Planks → Tack Rack (stable hand)");
   if (I.tent !== undefined) addShaped(I.tent, 1, ["WWW", "WWW", "S S"], { W: WOOL, S: I.stick }, "6 Wool (any colour) over 2 Sticks → Tent");
   fuel(ids(["composter", "lectern", "barrel", "loom", "fletching_table", "smithing_table", "cartography_table", "drafting_table", "survey_table", "carpentry_bench"]), 15);
 });

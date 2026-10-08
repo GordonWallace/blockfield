@@ -306,6 +306,10 @@ const BLOCK_DEFS = [
   // dehydrated farmland (js/farmland.js): crops grow at a third of the speed; left bare it reverts to dirt
   { name: "farmland_dry", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#7a5a3a" },
   // ---- end farmland pack ----
+  // ---- stable pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Stables")
+  // tack rack: the stable hand villager's jobsite (not vanilla): a wooden wall rack with a saddle on its peg and a bridle hanging beside it
+  { name: "tack_rack", jobsite: "stable_hand", tiles: { top: "tack_rack_top", side: "tack_rack_side", front: "tack_rack_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#7a5232" },
+  // ---- end stable pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -593,6 +597,15 @@ const ITEM_DEFS = [
   // ---- boats (js/boats.js; append-only): one per wood, stack of 1 as in vanilla; the icon is the "boat" sprite in the wood's colour ----
   ...WOOD_SPECIES.map(sp => ({ name: sp + "_boat", boat: sp, stack: 1, sprite: "boat", color: WOOD_COLOR[sp], creativeTab: "tools" })),
   // ---- end boats ----
+  // ---- horses (js/horses.js; append-only) ----
+  { name: "saddle", stack: 1, color: "#6b3e1e", creativeTab: "tools" },        // 3 leather + 1 iron ingot (a Blockfield recipe: vanilla has none)
+  { name: "lead", color: "#a07a4a", creativeTab: "tools" },                     // 4 string + 1 leather (vanilla's slime ball: there are no slimes)
+  { name: "horse_spawn_egg", color: "#c09060", creativeTab: "misc", label: "Horse Spawn Egg" },   // creative: right click on the ground spawns a wild horse
+  // ---- end horses ----
+  // ---- stables (js/stables.js; append-only) ----
+  // The icon of a stable hand's "sell a horse" offer: the horse itself walks out of the paddock to the player, so this item is never held
+  { name: "tamed_horse", stack: 1, color: "#8a5a32", hidden: true, label: "Tamed Horse" },
+  // ---- end stables ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

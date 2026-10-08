@@ -13,6 +13,7 @@ const CAP_K = [6, 5, 4, 3, 2];                 // per-ware stock cap = sell.n * 
 const STOCK_VALUE = 6;                         // ... and at most this many emeralds worth of one ware
 const EXPLORER_EM_CAP = 100, EXPLORER_EM_DAY = 6; // the explorer buys blank maps up to 64 emeralds each: a bigger purse
 const BUILDER_EM_CAP = 80, BUILDER_EM_DAY = 4; // the builder's village budget: +4 emeralds per day up to 80 (see TRADE_AUDIT.md)
+const STABLE_EM_CAP = 40, STABLE_EM_DAY = 3;   // the stable hand buys tamed horses from the player at 8-24 emeralds: a bigger purse (js/stables.js)
 
 // Effort value of every traded item in emerald equivalents (1 emerald = 1). See TRADE_AUDIT.md for the reasoning.
 const VALUE = {
@@ -35,6 +36,7 @@ const VALUE = {
   wooden_pickaxe: .13, wooden_axe: .13, wooden_hoe: .1, stone_pickaxe: .13, stone_axe: .13, stone_hoe: .1,   // toolsmith goods (js/toolsmith.js)
   furnace: .3,                                                       // 8 cobblestone (js/furniture.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
+  saddle: 1.8, lead: .3,                                           // stable hand goods (js/stables.js): saddle 3 leather + 1 iron ingot (.95) + work, lead 4 string + 1 leather -> 2
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
   VALUE[sp + "planks"] = .03; VALUE[(sp || "oak_") + "log"] = .12;
@@ -180,6 +182,16 @@ const TRADES = {
     ["3 emerald > 7 red_bed"],
     ["40 dark_oak_planks > 1 emerald", "40 acacia_planks > 1 emerald", "10 dark_oak_log > 1 emerald"],
   ],
+  // The stable hand (js/stables.js) buys horse feed from the player and sells the tack it makes from leather, iron and string it bought in the
+  // village (saddle 111% of VALUE, leads 111%); nothing is restocked or part of its starting pack. Its tamed horses are offered on top of these,
+  // one offer per paddock horse priced by its stats (BF.horses.price, 8-24 emeralds; `horse` offers, built in BF.stables.syncOffers).
+  stable_hand: [
+    ["18 wheat_item > 1 emerald", "2 hay_bale > 1 emerald", "1 emerald > 3 lead"],
+    ["2 emerald > 1 saddle"],
+    ["11 string > 1 emerald", "8 leather > 1 emerald"],
+    [],
+    [],
+  ],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -205,6 +217,7 @@ const PRODUCE = {
   forester: [],
   miner: [],          // everything it sells is dug out of the ground (js/miner.js)
   furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
+  stable_hand: [],     // saddles and leads are made from leather, iron and string it bought; horses are caught or bred (js/stables.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -299,7 +312,7 @@ function stockFor(prof, v) {
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
   if (STARTER_TOOLS[prof]) for (const pool of table(prof)) for (const o of pool) if (isToolItem(o.sell.id)) noStart.add(o.sell.id);   // their one tool is the starter below
   if (prof === "miner") for (const n of ["cobblestone", "coal", "raw_iron", "raw_gold", "diamond"]) noStart.add(I[n]);   // mined, never given
-  if (prof === "toolsmith") for (const id of profile(prof).caps.keys()) noStart.add(id);   // made, never given (js/toolsmith.js)
+  if (prof === "toolsmith" || prof === "stable_hand") for (const id of profile(prof).caps.keys()) noStart.add(id);   // made, never given (js/toolsmith.js, js/stables.js)
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
@@ -312,7 +325,7 @@ function stockFor(prof, v) {
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
     // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js)
-    if (prof !== "furniture_maker" && prof !== "toolsmith") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "stable_hand") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
@@ -371,8 +384,8 @@ function restock(v, day) {
   v.restockDay = day;
   const caps = profile(v.profession).caps, mk = new Set((PRODUCE[v.profession] || []).map(n => BF.I[n]));
   const em = BF.I.emerald, bld = v.profession === "builder";
-  const exp = v.profession === "explorer";
-  const emCap = bld ? BUILDER_EM_CAP : exp ? EXPLORER_EM_CAP : EM_CAP, emDay = bld ? BUILDER_EM_DAY : exp ? EXPLORER_EM_DAY : EM_DAY;
+  const exp = v.profession === "explorer", stb = v.profession === "stable_hand";
+  const emCap = bld ? BUILDER_EM_CAP : exp ? EXPLORER_EM_CAP : stb ? STABLE_EM_CAP : EM_CAP, emDay = bld ? BUILDER_EM_DAY : exp ? EXPLORER_EM_DAY : stb ? STABLE_EM_DAY : EM_DAY;
   for (let k = Math.min(d, 4); k > 0; k--) {
     for (const [id, cap] of caps) {
       if (!mk.has(id)) continue;
@@ -395,6 +408,7 @@ function init(v) {
   if (!Array.isArray(v.inv)) { v.inv = stockFor(v.profession, v); if (BF.food) BF.food.startFood(v); }   // + starting food (js/villagelife.js)
   if (v.restockDay == null) v.restockDay = BF.sky ? BF.sky.day : 0;
   if (v.profession === "explorer" && BF.explorer) BF.explorer.syncOffers(v);   // its filled maps are the offers
+  if (v.profession === "stable_hand" && BF.stables) BF.stables.syncOffers(v);   // one offer per paddock horse it may sell
   syncFeed(v);
   return v;
 }
@@ -425,6 +439,7 @@ function syncFeed(v, open = true) {
 // Why the villager cannot do this offer right now, or null.
 function blockReason(v, o) {
   if (!v || !v.inv || !o) return "Unavailable";
+  if (o.horse) return BF.stables ? BF.stables.horseReason(v, o) : "Unavailable";   // a paddock horse: the stable's rules (js/stables.js)
   if (o.feed && BF.food && !v.starving && BF.food.available(v) >= FEED_DAYS * BF.food.rate(v)) return "Has enough food";
   const hungry = BF.food && BF.food.blockReason(v, o);   // starving villagers only trade food (js/villagelife.js)
   if (hungry) return hungry;
@@ -437,6 +452,7 @@ function blockReason(v, o) {
 // Moves the goods: the sold items leave the villager, the payment arrives. Returns false (and changes nothing) when blocked.
 function exchange(v, o) {
   if (blockReason(v, o)) return false;
+  if (o.horse) { for (const b of o.buy) inv.add(v.inv, b.id, b.n); BF.stables.handOver(v, o); return true; }   // the horse itself goes to the player (js/stables.js)
   inv.remove(v.inv, o.sell.id, o.sell.n);
   for (const b of o.buy) inv.add(v.inv, b.id, b.n);
   return true;
