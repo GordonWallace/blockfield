@@ -9,7 +9,7 @@
 //   category it makes the best material it can get, in CALIBER order (diamond, iron, stone, gold, wood, the order BF.toolWear ranks tools in):
 //   what it holds, or what a villager of its village sells and it can pay for. It buys for the better tool even when it already holds the
 //   materials for a lesser one; when a better material is sold here but not right now (the miner is out of cobblestone or down the shaft)
-//   it waits up to WAIT_BETTER (6 game hours) before making the lesser tool. Gold is only bought when nobody sells iron.
+//   it waits up to WAIT_BETTER (6 game hours) before making the lesser tool, but only while it has one of that kind on the shelf already. Gold is only bought when nobody sells iron.
 // - Crafting: at its smithing table (BF.jobs "work" state), CRAFT_SECS (2 game hours) per tool. Materials are taken when it starts; the tool
 //   is finished on later visits if the day ends first (the craft in progress is saved). Sticks are cut from 2 planks when it is short.
 // - Buying: it walks to the seller and trades at the seller's own offer (stock and room rules of trading.js), like the furniture maker. It
@@ -212,7 +212,7 @@ function plan(m) {
     for (const mat of matsFor(cat)) {
       if (stockAtLeast(m, cat, mat) >= TOOL_CAP) break;   // enough of this or better: lesser ones would not help
       if (canMake(m, cat, mat, stock)) {
-        if (later) {   // wait for the better one a while; the wait ends when the lesser tool is started (startCraft), not when it is planned
+        if (later && stock[cat] > 0) {   // wait for the better one a while (only with one of these already on the shelf for buyers); the wait ends when the lesser tool is started (startCraft)
           const w = S.waitBetter[cat] || (S.waitBetter[cat] = { since: dayNow(), mat: later });
           if (dayNow() - w.since < WAIT_BETTER) break;
           return { cat, mat, ready: true };
