@@ -80,7 +80,23 @@ module.exports = async (pg, out) => {
     ok(turns.join() === "1,2,0", "staircase reuse turns " + turns.join());
     const t1 = Object.assign({}, Q.shaft, { x: 0, y: 100, z: 0, dx: 1, dz: 0, S: 10, turn: 1 }), c1 = BF.miner.cellOf(t1, 10);
     ok(c1.x === 10 && c1.z === 1 && c1.y === 90, "turned corridor's first cell " + JSON.stringify(c1));
-    // 5. save / load keeps the shaft's depth
+    // 5. starting kit and surplus: a founding miner gets a stone pickaxe; with no pickaxe it never makes one; unsold finds go to a chest
+    res.kit = T.stockFor("miner", M).filter(Boolean).map(s => BF.items[s.id].name);
+    ok(res.kit.includes("stone_pickaxe") && !res.kit.includes("wooden_pickaxe"), "miner kit " + res.kit.join());
+    const keepInv = M.inv;
+    M.inv = new Array(T.SLOTS).fill(null); T.inv.add(M.inv, I.cobblestone, 64); T.inv.add(M.inv, I.stick, 8); T.inv.add(M.inv, I.planks, 8);
+    const Q2 = BF.miner._test.state(M), svShaft = Q2.shaft; Q2.shaft = null;
+    BF.miner._test.think(M, Q2);
+    ok(!M.inv.some(s => s && typeof BF.items[s.id].tool === "object"), "miner made itself a tool");
+    Q2.shaft = svShaft;
+    M.inv = new Array(T.SLOTS).fill(null); T.inv.add(M.inv, I.stone_pickaxe, 1);
+    for (let i = 0; i < 13; i++) T.inv.add(M.inv, I.cobblestone, 64);
+    const before = BF.miner.wantsStore(M);
+    T.inv.add(M.inv, I.raw_copper, 20);
+    res.wantsStore = [before, BF.miner.wantsStore(M)];
+    ok(!before && res.wantsStore[1], "wantsStore " + res.wantsStore);
+    M.inv = keepInv;
+    // 6. save / load keeps the shaft's depth
     const p = BF.miner.pack(M), M2 = { position: M.position };
     BF.miner.unpack(M2, JSON.parse(JSON.stringify(p)));
     ok(M2.mi.shaft && M2.mi.shaft.D === Q.shaft.D, "shaft depth not saved");

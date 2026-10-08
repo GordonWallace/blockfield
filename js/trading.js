@@ -288,7 +288,7 @@ function profile(prof) {
 // ---------------------------------------------------------------- stock and restock
 // Starting tools (Gordon's 1.1 list): villagers alive when their village is generated start with a rudimentary tool of their trade. Whoever takes
 // up one of these trades later gets no tools, only the emeralds to buy them (hireKit). These four never start with any other tool among their wares.
-const STARTER_TOOLS = { farmer: ["wooden_hoe", "bucket"], forester: ["wooden_axe"], miner: ["wooden_pickaxe"], shepherd: ["shears"] };
+const STARTER_TOOLS = { farmer: ["wooden_hoe", "bucket"], forester: ["wooden_axe"], miner: ["stone_pickaxe"], shepherd: ["shears"] };
 // What a newly hired villager of these trades must buy to start work (any one of each group), and what else it is given.
 const HIRE_NEEDS = { farmer: [/_hoe$/, /^(water_)?bucket$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/] };
 const isToolItem = id => { const it = BF.items[id]; return !!(it && ((it.tool && typeof it.tool === "object") || it.name === "shears")); };   // blocks carry tool: "axe" etc. (the tool that mines them)
