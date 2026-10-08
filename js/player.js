@@ -106,7 +106,7 @@ const css = `
 .bfp-card .bfp-mode button{margin:0;border:0;border-radius:0;background:rgba(0,0,0,.3);color:var(--muted);border-bottom:3px solid transparent}
 .bfp-card .bfp-mode button.on{background:#3b4a35;color:var(--ink);border-bottom-color:var(--accent)}
 .bfp-modehint{font:12px var(--mono);color:var(--muted);margin:6px 0 0;min-height:1em}
-.bfp-card.bfp-wide{max-width:520px}
+.bfp-card.bfp-wide{max-width:760px}
 .bfp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px;font:400 15px/1 var(--display);color:var(--ink);text-align:left}
 .bfp-card button.bfp-small{width:auto;margin:0;padding:8px 10px;font-size:12px}
 .bfp-worlds{max-height:min(46vh,340px);overflow:auto;border:1px solid var(--panel-edge);border-radius:3px;background:rgba(0,0,0,.25);text-align:left}
@@ -116,6 +116,9 @@ const css = `
 .bfp-wname{font:400 14px/1.2 var(--display);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bfp-wmeta{font:11px/1.5 var(--mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bfp-wmeta b{color:var(--accent);font-weight:500}
+.bfp-card button.bfp-copy{display:inline-block;width:auto;margin:0 0 0 3px;padding:0 4px;font:12px/16px var(--mono);vertical-align:baseline;background:rgba(0,0,0,.35);border:1px solid var(--panel-edge);border-radius:3px;color:var(--muted)}
+.bfp-card button.bfp-copy:hover,.bfp-card button.bfp-copy:focus-visible{background:#4f6a3f;color:var(--ink)}
+.bfp-card button.bfp-copy.done{color:var(--accent)}
 .bfp-wbtns{display:flex;gap:6px;flex-shrink:0}
 .bfp-card .bfp-wbtns button{width:auto;margin:0;padding:7px 9px;font-size:11px}
 .bfp-card .bfp-wbtns button.danger{background:var(--danger);color:#fff}
@@ -219,6 +222,7 @@ function buildDOM() {
     if (a === "mode") { createMode = act.dataset.mode; updateModeUI(); }
     else if (a === "show-create") showStartView("create");
     else if (a === "hide-create") showStartView("list");
+    else if (a === "copy-seed") copySeed(id, act);
     else if (a === "play") playWorld(id, act);
     else if (a === "rename") renderWorlds({ renaming: id });
     else if (a === "rename-ok") finishRename(row);
@@ -376,7 +380,7 @@ function renderWorlds(st) {
     return;
   }
   worldsEl.innerHTML = worldsCache.map(w => {
-    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}${w.gen >= 2 ? " · " + biomeLabel(w.biomeScale) + " biomes" : ""}`;
+    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}<button type="button" class="bfp-copy" data-act="copy-seed" title="Copy seed to clipboard" aria-label="Copy seed ${esc(w.seed)}">⧉</button>${w.gen >= 2 ? " · " + biomeLabel(w.biomeScale) + " biomes" : ""}`;
     if (st.renaming === w.id) return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><input value="${esc(w.name)}" maxlength="40" aria-label="New world name"></div>
       <div class="bfp-wbtns"><button class="primary" data-act="rename-ok">Save</button><button data-act="cancel">Cancel</button></div></div>`;
@@ -389,6 +393,21 @@ function renderWorlds(st) {
   }).join("");
   const inp = worldsEl.querySelector("input");
   if (inp) { inp.focus(); inp.select(); }
+}
+// Puts a saved world's seed on the clipboard (handy when reporting a bug). The button shows a tick for a moment.
+function copySeed(id, btn) {
+  const w = worldsCache.find(x => x.id === id);
+  if (!w) return;
+  const text = String(w.seed);
+  const done = ok => { btn.textContent = ok ? "✓" : "✗"; btn.classList.toggle("done", ok); btn.title = ok ? "Copied" : "Couldn't copy";
+    setTimeout(() => { btn.textContent = "⧉"; btn.classList.remove("done"); btn.title = "Copy seed to clipboard"; }, 1200); };
+  const fallback = () => {   // file:// pages and older browsers have no async clipboard
+    const ta = document.createElement("textarea"); ta.value = text; ta.style.cssText = "position:fixed;left:-9999px";
+    document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (_) {}
+    ta.remove(); return ok;
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => done(fallback()));
+  else done(fallback());
 }
 function finishRename(row) {
   const id = row.dataset.id, inp = row.querySelector("input"), name = inp && inp.value.trim();

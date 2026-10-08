@@ -317,6 +317,8 @@ The 15th profession `builder` (orange hi-vis vest with reflective band and strap
 - **Village record** (`BF.mobs.villages` value): new `rec.wg` (the worldgen village object: buildings, pads, roads, lamps, decor, minX..maxZ), `rec.nb`, `rec.built` = list of structures
   `{id, type, label, rot, style, wood, h, opts?, ox, oy, oz (min corner, oy = floor level), w, d (footprint box incl. eaves/doorstep), prog (next cell index), n (total cells), skipped, placed, state: "building"|"done"|"abandoned",
   owner (slot idx), claim?, fill: [[x,y,z]] (foundation cells filled under the floor), start, end}`. Sites of later structures avoid `built` (+3 margin); one active build (`state "building"`) per village.
+- **Village log.** Builders log kind `"build"` entries (`BF.vlog.log`, location = the structure's min corner): `"<Name> (Builder) started building a spruce small house at x, y, z"` (beginPlan),
+  `"... took over building the spruce small house at ..."` (a builder resumes a structure whose owner is gone) and `"... built a spruce small house at x, y, z (131 blocks)"` (finish). Plural labels take no article ("lamp posts").
 - **Blueprint API** `BF.blueprints`: `get(type, rot 0..3, style 0..4, h in [0,1), opts?, wood?) -> {type, label, rot, style, wood, woody, w, d, hgt, cells: [{x, y, z, id, item, cost, pair, ph}], n, req, exact, free, door, beds, house}`
   (cached, treat as read-only). x/z are relative to the min corner of the rotated footprint box, y relative to the floor level (floor blocks at y 0, standing on the ground block below). `rot` turns the building clockwise
   (door faces north, east, south, west). `cells` are in build order (phase `ph`: 1 floor/foundation, 2 walls bottom-to-top going round, 3 roof, 4 windows, 5 door, 6 bed, 7 torches/furniture); `cost` is 1 inventory item per block
@@ -851,3 +853,9 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   A builder who finishes its own house moves into it and evicts anyone who borrowed that bed.
 - Creative mode: the trade screen's villager inventory (`vinv` slots) is editable like any container (click, split, drag, shift-click
   between it and the player's inventory); in survival it stays greyed out and read-only.
+- The trade screen title starts with the villager's name (`BF.vlog.nameOf`), and its inventory panel reads "<Name>'s Inventory".
+
+## Villager hover card (js/villagerhover.js, loaded after villagerstatus.js)
+- `BF.villagerHover.update(dt)` (main.js, every frame): when the crosshair's ray hits a villager within 32 blocks with no block in front,
+  a card at the top centre shows its name, profession ("Child" for children) and `BF.villagerStatus.text`, refreshed 4 times a second.
+  Survival and creative alike; hidden while any screen or menu is open or the player is dead. `shown()` returns the villager or null.

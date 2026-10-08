@@ -305,7 +305,7 @@ function soldItems(R) {
 function pickType(m, bs) {
   const R = m.village, built = builtOf(R), BPr = BP(), style = styleIdx(R.style);
   const cnt = t => built.filter(e => e.type === t && e.state !== "abandoned").length;
-  const homeless = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed && !x.bed).length;
+  const homeless = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed && !(x.bed && !x.bed.tent ? x.bed : x.homeBed)).length;   // a camping explorer with no bed at home is homeless too
   const found = BF.worldgen.palette(style).found;
   if (built.length === 0 && !(bs.fail && bs.fail.small_house > dayNow())) return "small_house";
   const wt = {
@@ -346,6 +346,19 @@ function logEvent(kind, m, data) {
   try { console.info("[builder] " + kind + " " + JSON.stringify(data)); } catch (_) {}
 }
 
+// Village log lines (kind "build", js/villagelog.js): "Aroha Parata (Builder) started building a spruce small house at x, y, z", "... built a ...".
+// The location is the structure's corner (ox, oy, oz). js/logmatch.js reads these lines for the debug screen's filters and alerts.
+function what(e, the) {   // "a spruce small house", "an oak cottage", "the spruce small house", "lamp posts"
+  const label = String(e.label || BP().label(e.type)), s = (e.wood && bpOf(e).woody ? String(e.wood).replace(/_/g, " ") + " " : "") + label;
+  return /s$/.test(label) ? s : (the ? "the " : /^[aeiou]/i.test(s) ? "an " : "a ") + s;
+}
+function vlogBuild(m, e, verb) {
+  if (!BF.vlog || !m || !m.village) return;
+  const who = BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "builder") + ")";
+  BF.vlog.log(m.village, "build", who + " " + verb + " " + what(e, verb === "took over building") + " at " + e.ox + ", " + e.oy + ", " + e.oz +
+    (verb === "built" ? " (" + e.n + " blocks)" : ""), [e.ox, e.oy, e.oz]);
+}
+
 // Try to start the structure `type`: site, crafts, entry. Returns the entry or null (and remembers the failure).
 // `wood`: the species chosen for it (chooseWood when omitted); the whole structure is built from it.
 function beginPlan(m, bs, type, wood) {
@@ -366,6 +379,7 @@ function beginPlan(m, bs, type, wood) {
   e.n = nfill(e) + site.bp.n;
   built.push(e);
   logEvent("plan", m, { type, wood, at: [e.ox, e.oy, e.oz], rot: e.rot, blocks: e.n, fill: nfill(e) });
+  vlogBuild(m, e, "started building");
   return e;
 }
 
@@ -380,7 +394,11 @@ function think(m, bs) {
   const active = built.find(e => e.state === "building");
   if (active) {
     const ownerAlive = R.members.some(x => !x.removed && !x.dead && x.slot && x.slot.idx === active.owner);
-    if (active.owner === (m.slot && m.slot.idx) || !ownerAlive) { active.owner = m.slot ? m.slot.idx : 0; startBuild(m, bs, active); }
+    const mine = active.owner === (m.slot && m.slot.idx);
+    if (mine || !ownerAlive) {
+      if (!mine) vlogBuild(m, active, "took over building");
+      active.owner = m.slot ? m.slot.idx : 0; startBuild(m, bs, active);
+    }
     return;
   }
   if (bs.cool > 0 || built.filter(e => e.state !== "abandoned").length >= MAX_BUILT) return;
@@ -555,6 +573,7 @@ function finish(m, bs, e) {
   const bp = bpOf(e);
   if (bp.house && bp.beds.length && m.slot && (!m.bed || m.bed.claimed)) claimHome(m, e);   // moves out of a bed it borrowed (js/mobs.js claimBed) into its own house
   logEvent("done", m, { type: e.type, at: [e.ox, e.oy, e.oz], blocks: e.n, skipped: e.skipped || 0 });
+  vlogBuild(m, e, "built");
   BF.emit && BF.emit("builderDone", m, e);
 }
 function homeFor(e) {

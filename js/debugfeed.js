@@ -75,7 +75,7 @@ function detail(rec) {
     d.villagerList.push({
       name: L.nameOf(m), prof: m.child ? "Child" : L.pretty(m.profession), child: !!m.child,
       status: status(m) || "", x: r1(m.position.x), y: r1(m.position.y), z: r1(m.position.z),
-      hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!m.bed, sleeping: !!m.sleeping,
+      hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!(m.bed && !m.bed.tent ? m.bed : m.homeBed), tent: !!(m.bed && m.bed.tent), sleeping: !!m.sleeping,   // an explorer's pitched tent is not a bed: its own bed (homeBed) is
       job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
       age: m.life ? Math.round((m.life.lived || 0) * 10) / 10 : null,   // game days it has been loaded and active
     });

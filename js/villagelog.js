@@ -4,6 +4,7 @@
 // Entries are [t, kind, text, [x, y, z]?]: the location of the event (block coordinates) when it has one, from the `where` given
 // to log() (a mob or a point) or else the first "at x, y, z" in the text. Every logged entry also goes to BF.alerts (js/alerts.js).
 // Villager names are generated deterministically from the villager's persistence key, so they need no saving.
+// Builders log what they start, take over and finish building (kind "build", js/builder.js).
 // Explorers' tents are logged with the beds (the tally still counts only real beds).
 // API: BF.vlog = { nameOf(m), log(rec, kind, text, where?), posOf(where, text) -> [x, y, z]|null, trade(buyer, seller, offerOrText), bed(m, x, y, z), profession(m, from, to),
 //                  entries(key), villageAt(x, z) -> rec|null, tally(rec), panelData(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }

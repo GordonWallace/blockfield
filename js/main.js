@@ -144,6 +144,7 @@ function frame(now) {
   renderer.render(scene, camera);
   updateDebug(now);
   BF.vlog.update(dt, showDebug);
+  if (BF.villagerHover) BF.villagerHover.update(dt);
   if (BF.debugFeed) BF.debugFeed.update();
 }
 

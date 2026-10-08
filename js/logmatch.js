@@ -3,16 +3,16 @@
 // Entries are [t, kind, text, [x, y, z]?] (js/villagelog.js). Who did what is read from the text, whose formats come from
 // js/villagelog.js (and mobs.js, storage.js, toolwear.js, villagelife.js): "Name (Job) traded with Name (Job): ...", "Name (Job)
 // placed a bed at ...", "Name (Job) claimed the bed/chest at ...", "Name became a Job", "Name was born to ...", "Name (Job)
-// died: ...", "Name (Job)'s Iron Pickaxe broke", "Name (Farmer) started harvesting Wheat at ...".
+// died: ...", "Name (Job)'s Iron Pickaxe broke", "Name (Farmer) started harvesting Wheat at ...", "Name (Builder) started building a ... at ...".
 // API: BFLog = { ACTIONS, KINDS, ACTS_FOR(type), kindName(k), typeOf(party), actorsOf(entry), matches(alert, entry), describe(alert) }
 // (BF.logmatch in the game is the same object.)
 (() => {
 "use strict";
 
-const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", born: "Being born", death: "Dying" };
+const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", build: "Building", born: "Being born", death: "Dying" };
 const ACTS_FOR = t => t === "Player" ? ["buy", "bed", "chest"] : t === "Child" ? ["born", "death"] :
-  t === "Farmer" ? ["buy", "sell", "bed", "chest", "job", "tool", "harvest", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
-const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", farm: "Harvests", birth: "Births", death: "Deaths" };
+  t === "Farmer" ? ["buy", "sell", "bed", "chest", "job", "tool", "harvest", "death"] : t === "Builder" ? ["buy", "sell", "bed", "chest", "job", "tool", "build", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
+const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", farm: "Harvests", build: "Building", birth: "Births", death: "Deaths" };
 const kindName = k => KINDS[k] || k.charAt(0).toUpperCase() + k.slice(1);
 const typeOf = party => party === "Player" ? "Player" : (/\(([^()]+)\)\s*$/.exec(party) || [])[1] || null;
 
@@ -29,6 +29,7 @@ function actorsOf(e) {
   if (k === "job" && (m = / became an? (.+?)(?: \(was |$)/.exec(tx))) return [[m[1], "job"]];
   if (k === "tool" && (m = /^(.*?\))'s .* broke$/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "tool"]] : null; }
   if (k === "farm" && (m = /^(.*?\)) started harvesting /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "harvest"]] : null; }
+  if (k === "build" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "build"]] : null; }
   if (k === "birth") return [["Child", "born"]];
   if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
   return null;

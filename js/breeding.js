@@ -138,7 +138,7 @@ const bedKey = b => b.x + "," + b.y + "," + b.z;
 function freeBed(rec, self) {
   const used = new Set();
   for (const sl of rec.roster || []) if (sl.bed) used.add(bedKey(sl.bed));
-  for (const m of rec.members || []) if (m !== self && m.bed && !m.dead && !m.removed) used.add(bedKey(m.bed));
+  for (const m of rec.members || []) if (m !== self && !m.dead && !m.removed) { if (m.bed && !m.bed.tent) used.add(bedKey(m.bed)); if (m.homeBed) used.add(bedKey(m.homeBed)); }   // an explorer away in its tent keeps its bed at home
   for (const e of bredList(rec)) if (!e.dead && e.bed && (!self || e.mob !== self)) used.add(bedKey(e.bed));
   const W = BF.world, foot = (b) => { const d = BF.blocks[W.getBlock(b.x, b.y, b.z)]; return d && d.bed && !d.bed.head && d.bed.f === b.f; };
   let best = null, bd = Infinity;
