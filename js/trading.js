@@ -73,10 +73,10 @@ const TRADES = {
   ],
   weaponsmith: [
     ["9 coal > 1 emerald", "1 emerald > 1 iron_sword", "5 iron_ingot > 2 emerald"],
-    ["2 emerald > 1 iron_axe", "1 gold_ingot > 1 emerald"],
+    ["1 gold_ingot > 1 emerald"],                                     // weapons only: axes come from the toolsmith (js/toolsmith.js)
     ["1 diamond > 3 emerald", "4 emerald > 1 diamond"],
     ["7 emerald > 1 diamond_sword"],
-    ["10 emerald > 1 diamond_axe", "6 emerald + 1 iron_sword > 1 diamond_sword", "1 diamond_sword > 6 emerald"],
+    ["6 emerald + 1 iron_sword > 1 diamond_sword", "1 diamond_sword > 6 emerald"],
   ],
   // The toolsmith (js/toolsmith.js) sells only the tools it has made from materials it bought, so every tool it sells is offered from
   // level 1 and its stock is the limit ("Out of stock"); levels only add the materials it buys from the player. Prices: at least the cost
@@ -84,10 +84,10 @@ const TRADES = {
   toolsmith: [
     ["9 coal > 1 emerald", "40 cobblestone > 1 emerald",
       "1 emerald > 1 wooden_pickaxe", "1 emerald > 1 wooden_axe", "1 emerald > 1 wooden_hoe",
-      "1 emerald > 1 stone_pickaxe", "1 emerald > 1 stone_axe", "1 emerald > 1 stone_hoe",
+      "2 emerald > 1 stone_pickaxe", "2 emerald > 1 stone_axe", "2 emerald > 1 stone_hoe",
       "2 emerald > 1 iron_pickaxe", "2 emerald > 1 iron_axe", "2 emerald > 1 iron_hoe", "2 emerald > 1 shears", "2 emerald > 1 bucket",
       "4 emerald > 1 golden_pickaxe", "4 emerald > 1 golden_axe", "3 emerald > 1 golden_hoe",
-      "13 emerald > 1 diamond_pickaxe", "13 emerald > 1 diamond_axe", "9 emerald > 1 diamond_hoe"],
+      "15 emerald > 1 diamond_pickaxe", "15 emerald > 1 diamond_axe", "15 emerald > 1 diamond_hoe"],
     ["5 iron_ingot > 2 emerald", "32 stick > 1 emerald"],
     ["1 diamond > 3 emerald", "1 gold_ingot > 1 emerald"],
     ["6 raw_iron > 2 emerald", "16 planks > 1 emerald"],
@@ -187,8 +187,8 @@ const PRODUCE = {
   farmer: [],          // food is never created by the restock: farmers harvest and bake it (js/villagelife.js), see TRADE_AUDIT.md
   librarian: ["paper", "book", "glass"],
   cleric: [],
-  armorer: ["iron_ingot"],
-  weaponsmith: ["iron_sword", "iron_axe"],
+  armorer: [],          // no free iron any more: it sells only the ingots it holds (Gordon, 1.1)
+  weaponsmith: ["iron_sword"],
   toolsmith: [],        // makes every tool from materials it buys (js/toolsmith.js)
   butcher: [],         // cooks raw meat it holds instead (js/villagelife.js)
   fisherman: [],       // cooks raw cod it holds instead (js/villagelife.js)
