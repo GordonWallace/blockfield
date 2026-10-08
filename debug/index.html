@@ -187,6 +187,32 @@
   #vlpanel.wide { position: fixed; z-index: 6; inset: 64px 20px 20px; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
   #vlpanel.wide #vcmp { flex: 1; min-height: 0; display: flex; flex-direction: column; } #vlpanel.wide .ctable { max-height: none; flex: 1; }
 
+  /* ---------- economy (the log panel's second tab) ---------- */
+  .tabs { display: flex; gap: 14px; align-items: baseline; }
+  .tab { background: none; border: 0; padding: 0; font: 15px var(--display); color: var(--faint); cursor: pointer; white-space: nowrap; }
+  .tab:hover { color: var(--muted); } .tab.on { color: var(--accent); cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--edge2); border-radius: 6px; overflow: hidden; }
+  .seg button { background: transparent; border: 0; border-left: 1px solid var(--edge2); padding: 3px 9px; font-size: 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  .seg button:first-child { border-left: 0; } .seg button:hover { color: var(--ink); } .seg button.on { background: rgba(127, 191, 77, 0.16); color: var(--accent2); }
+  .econbar { flex-wrap: wrap; }
+  #econ { position: relative; max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; }
+  .etot { padding: 10px 16px 0; color: var(--muted); font-size: 12px; } .etot b { color: var(--ink); font-weight: 500; }
+  .elegend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 16px 0; font-size: 11px; color: var(--muted); } .elegend span { display: inline-flex; align-items: center; gap: 5px; }
+  .elegend i { width: 12px; height: 9px; border-radius: 2px; display: inline-block; }
+  svg.flow { display: block; width: 100%; height: auto; margin: 6px 0 4px; }
+  svg.flow path { fill-opacity: 0.5; transition: fill-opacity 0.1s; } svg.flow path:hover { fill-opacity: 0.88; }
+  svg.flow text { font: 11px var(--mono); fill: var(--ink); } svg.flow .v { fill: var(--faint); }
+  .etip { position: absolute; z-index: 3; pointer-events: none; background: rgba(10, 13, 11, 0.96); border: 1px solid var(--edge2); border-radius: 5px; padding: 6px 9px; font-size: 12px; white-space: nowrap; display: none; }
+  .etip b { font-weight: 600; } .etip .sub { font-size: 11px; } .etip table { width: auto; margin-top: 4px; } .etip td { padding: 1px 10px 1px 0; border: 0; } .etip td.r { text-align: right; color: var(--muted); }
+  .dead { padding: 4px 16px 14px; display: grid; gap: 4px; }
+  .dead h4 { margin: 8px 0 4px; font: 10px var(--display); letter-spacing: 0.5px; color: var(--faint); font-weight: normal; }
+  .drow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 10px; padding: 3px 8px; border-left: 3px solid var(--edge2); font-size: 12px; color: var(--muted); }
+  .drow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .drow > span:last-child { text-align: right; }
+  .drow.warn { border-left-color: var(--warn); color: var(--warn); } .drow.danger { border-left-color: var(--danger); color: var(--danger); }
+  .drow .dim { color: var(--faint); }
+  .etable td.r, .etable th.r { text-align: right; } .etable th { cursor: default; position: static; }
+  .ecopy { margin: 8px 16px 4px; }
+
   /* ---------- alerts ---------- */
   .aform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--edge); }
   .aform select, .aform input { background: var(--bg2); border: 1px solid var(--edge2); border-radius: 5px; padding: 4px 7px; font-size: 12px; outline: none; color: var(--ink); }
@@ -314,9 +340,21 @@
       <div class="anote" id="a-note">An alert freezes the game (0×) when a matching event is logged in any loaded village and shows it in the game's top-left corner. Alerts are kept by the debug server, so they carry over to other games.</div>
     </div>
     <div class="panel" id="lpanel">
-      <div class="ph"><h2>Village log</h2><span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
-      <div class="filters" id="l-filters"></div>
-      <div id="log"><div class="empty">Load a village to see its log.</div></div>
+      <div class="ph"><div class="tabs" id="l-tabs"><button class="tab on" data-tab="log">Village log</button><button class="tab" data-tab="econ" title="Goods moving between jobs, and what can't be bought or isn't selling">Economy</button></div>
+        <span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
+      <div id="l-pane">
+        <div class="filters" id="l-filters"></div>
+        <div id="log"><div class="empty">Load a village to see its log.</div></div>
+      </div>
+      <div id="e-pane" hidden>
+        <div class="filters econbar">
+          <div class="seg" id="e-range" title="Game days"><button data-v="1">Today</button><button data-v="3">3 days</button><button data-v="7">7 days</button></div>
+          <div class="seg" id="e-scope"><button data-v="one">This village</button><button data-v="all">All villages</button></div>
+          <div class="grow"></div>
+          <div class="seg" id="e-mode"><button data-v="flow">Diagram</button><button data-v="table">Table</button></div>
+        </div>
+        <div id="econ"><div class="empty">Load a village to see its economy.</div></div>
+      </div>
     </div>
     </div>
   </div>
@@ -334,7 +372,7 @@ const days = n => fmt(n) + (n === 1 ? " day" : " days");
 
 // ---------------------------------------------------------------- state
 // layouts / logs / details: everything known per village key (details = the last full numbers while it was loaded)
-const layouts = {}, logs = {}, details = {}, icons = {};   // icons: item id -> {url, name}, sent once by the game for the inventory view
+const layouts = {}, logs = {}, details = {}, icons = {}, econ = {};   // econ: each village's Economy tallies (js/economy.js)   // icons: item id -> {url, name}, sent once by the game for the inventory view
 let viewKey = null, pinned = null, curV = null, curStale = false;   // pinned: a village the user picked; null follows the nearest loaded one
 let snap = null, layout = null, log = null, lastAt = 0, seenLog = 0, logKeyShown = null, hlName = null, hoverName = null;
 const hist = { fps: [], queue: [] }, HIST = 240;   // 60 s at 4 snapshots a second
@@ -353,7 +391,7 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
-  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); logDirty = true; } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
@@ -382,8 +420,9 @@ setInterval(status, 1000);
 // ---------------------------------------------------------------- snapshots
 function onSnap(s) {
   Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
-  let logChanged = false;
+  let logChanged = false, econChanged = false;
   for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
+  for (const k in s.econ || {}) { econ[k] = s.econ[k]; if (k === viewKey || eopt.scope === "all") econChanged = true; }
   if (s.error) { gameErr = s.error; errAt = Date.now() - (s.age || 0); status(); }
   if (!s.info) return;
   gameErr = null;
@@ -392,7 +431,8 @@ function onSnap(s) {
   const was = viewKey;
   pickView(s);
   renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); status(); alertsFromSnap(s);
-  if (logChanged || logDirty || was !== viewKey) { logDirty = false; renderLog(); }
+  if (logChanged || logDirty || was !== viewKey) { if (logDirty || was !== viewKey) econChanged = true; logDirty = false; renderLog(); }
+  if (econChanged && eopt.tab === "econ") renderEcon();
 }
 // The village on show: the one the user picked, else the nearest loaded one (the list comes sorted loaded-first by distance).
 function pickView(s) {
@@ -935,6 +975,138 @@ function renderLog(keepNew) {
   $("l-count").textContent = vname + a.length + (a.length === 1 ? " entry" : " entries");
 }
 renderFilters();
+
+// ---------------------------------------------------------------- economy (the log panel's second tab)
+// The game's tallies per village (js/economy.js, sent by js/debugfeed.js when they change): per game day, flows
+// [seller, buyer, item, group, items, emeralds, trades], waits [buyer, item, hours] and that day's unsold stock [villager, job, item, count, days].
+// The diagram puts sellers on the left and buyers on the right; a band's width is the emeralds that changed hands, its colour the item's group.
+const GROUPS = { wood: ["Wood", "#b5865b"], stone: ["Stone", "#a9a59c"], ore: ["Ore and ingots", "#e0b84a"], food: ["Food", "#9ccf6a"],
+  tools: ["Tools", "#6fa0d8"], wool: ["Wool and beds", "#e9a6c4"], other: ["Other", "#8f9aa3"] };
+const ESTORE = "bf-debug-econ";
+let eopt = { tab: "log", range: 3, scope: "one", mode: "flow" };
+try { Object.assign(eopt, JSON.parse(localStorage.getItem(ESTORE) || "{}")); } catch (e) { /* private window: defaults */ }
+const saveE = () => { try { localStorage.setItem(ESTORE, JSON.stringify(eopt)); } catch (e) {} };
+const r2 = n => Math.round(n * 100) / 100;
+const emf = n => fmt(r2(n));
+let eBands = [];
+// The flows, waits and unsold stock of the chosen village (or every village) over the chosen range of game days.
+function econData() {
+  const keys = eopt.scope === "all" ? Object.keys(econ) : viewKey ? [viewKey] : [];
+  const today = Math.max(-Infinity, ...keys.map(k => econ[k] ? econ[k].today : -Infinity));
+  const flows = {}, wanted = {}, held = [];
+  let trades = 0, ems = 0;
+  const vname = k => { const v = snap && (snap.villages || []).find(x => x.key === k); return v ? v.name : layouts[k] ? layouts[k].name : k; };
+  for (const k of keys) {
+    const E = econ[k]; if (!E) continue;
+    const ds = Object.keys(E.days).map(Number).filter(d => d > today - eopt.range).sort((a, b) => b - a);
+    for (const d of ds) {
+      const day = E.days[d];
+      for (const [s, b, it, g, n, em, t] of day.f) {
+        const f = flows[s + "|" + b + "|" + it] || (flows[s + "|" + b + "|" + it] = { s, b, it, g, n: 0, em: 0, t: 0 });
+        f.n += n; f.em += em; f.t += t; trades += t; ems += em;
+      }
+      for (const [b, it, h] of day.w) wanted[b + "|" + it] = (wanted[b + "|" + it] || 0) + h;
+    }
+    const last = ds.find(d => E.days[d].s && E.days[d].s.length) ;   // the newest day's count of unsold stock
+    if (last != null) for (const r of E.days[last].s) held.push(eopt.scope === "all" ? [r[0] + " · " + vname(k), ...r.slice(1)] : r);
+  }
+  return { keys, flows: Object.values(flows), wanted: Object.entries(wanted).map(([k, h]) => [...k.split("|"), h]).sort((a, b) => b[2] - a[2]),
+    held: held.sort((a, b) => b[4] - a[4] || b[3] - a[3]), trades, ems };
+}
+function sankey(flows) {
+  const bands = {};   // seller|buyer|group -> band
+  for (const f of flows) {
+    const k = f.s + "|" + f.b + "|" + f.g, b = bands[k] || (bands[k] = { s: f.s, b: f.b, g: f.g, em: 0, n: 0, t: 0, items: [] });
+    b.em += f.em; b.n += f.n; b.t += f.t; b.items.push(f);
+  }
+  const list = Object.values(bands);
+  const val = b => b.em > 0 ? b.em : 0.5;   // trades with no emeralds (barter) still get a thin band
+  const side = key => { const m = {}; for (const b of list) m[b[key]] = (m[b[key]] || 0) + val(b); return Object.keys(m).sort((x, y) => m[y] - m[x]).map(n => ({ n, v: m[n] })); };
+  const L = side("s"), R = side("b"), PAD = 12, MIN = 1.5, W = 640, NW = 10, X0 = 150, X1 = W - 150 - NW;
+  const total = list.reduce((a, b) => a + val(b), 0), H = Math.max(160, 30 * Math.max(L.length, R.length));
+  const scale = Math.min((H - PAD * (L.length - 1)) / total, (H - PAD * (R.length - 1)) / total);
+  const li = new Map(L.map((x, i) => [x.n, i])), ri = new Map(R.map((x, i) => [x.n, i]));
+  for (const b of list) b.w = Math.max(MIN, val(b) * scale);
+  const place = (nodes, key, other, idx) => {
+    let y = 18;
+    for (const nd of nodes) {
+      nd.y = y; let o = y;
+      for (const b of list.filter(b => b[key] === nd.n).sort((p, q) => idx.get(p[other]) - idx.get(q[other]) || q.w - p.w)) { b[key + "y"] = o; o += b.w; }
+      nd.h = o - y; y = o + PAD;
+    }
+    return y;
+  };
+  const h = Math.max(place(L, "s", "b", ri), place(R, "b", "s", li)) + 6;
+  eBands = list;
+  const xm = (X0 + NW + X1) / 2, col = n => n === "Player" ? "#a6dc72" : profColor(n);
+  const paths = list.map((b, i) => {
+    const a0 = b.sy, a1 = b.sy + b.w, c0 = b.by, c1 = b.by + b.w;
+    return `<path data-i="${i}" fill="${GROUPS[b.g] ? GROUPS[b.g][1] : GROUPS.other[1]}" d="M${X0 + NW},${a0}C${xm},${a0} ${xm},${c0} ${X1},${c0}L${X1},${c1}C${xm},${c1} ${xm},${a1} ${X0 + NW},${a1}Z"/>`;
+  }).join("");
+  const node = (nd, x, left) => `<rect x="${x}" y="${nd.y}" width="${NW}" height="${Math.max(nd.h, 1)}" rx="2" fill="${col(nd.n)}"/>` +
+    `<text x="${left ? x - 6 : x + NW + 6}" y="${nd.y + nd.h / 2 + 4}" text-anchor="${left ? "end" : "start"}">${esc(nd.n)} <tspan class="v">${emf(nd.v >= 1 ? nd.v : 0)}</tspan></text>`;
+  return `<svg class="flow" viewBox="0 0 ${W} ${h}" role="img" aria-label="Goods flowing from sellers to buyers">` +
+    `<text x="${X0 + NW}" y="11" class="v" text-anchor="end">SELLERS</text><text x="${X1}" y="11" class="v">BUYERS</text>${paths}` +
+    L.map(nd => node(nd, X0, true)).join("") + R.map(nd => node(nd, X1, false)).join("") + `</svg>`;
+}
+function deadEnds(d) {
+  const wsev = h => h >= 12 ? " danger" : h >= 4 ? " warn" : "", hsev = n => n >= 5 ? " danger" : " warn";
+  const w = d.wanted.map(([b, it, h]) => `<div class="drow${wsev(h)}"><span>${esc(b)}</span><span>${esc(it)}</span><span>${fmt(h)} h waited</span></div>`).join("");
+  const hl = d.held.map(([n, job, it, c, days]) => `<div class="drow${hsev(days)}"><span>${esc(n)} <span class="dim">${esc(job)}</span></span><span>${fmt(c)} ${esc(it)}</span><span>${days} days unsold</span></div>`).join("");
+  return `<div class="dead"><div><h4>Wanted but not available</h4>${w || `<div class="drow"><span class="dim">Nothing waited for in this range.</span></div>`}</div>` +
+    `<div><h4>Held but not selling</h4>${hl || `<div class="drow"><span class="dim">Nothing unsold for 2 days or more.</span></div>`}</div></div>`;
+}
+function flowTable(flows) {
+  const rows = flows.slice().sort((a, b) => b.em - a.em || b.n - a.n);
+  return `<button class="abtn ecopy" id="e-copy" title="Copy as tab-separated text">Copy table</button>` +
+    `<table class="etable"><thead><tr><th>Seller</th><th>Buyer</th><th>Item</th><th class="r">Count</th><th class="r">Emeralds</th><th class="r">Trades</th></tr></thead><tbody>` +
+    rows.map(f => `<tr><td>${esc(f.s)}</td><td>${esc(f.b)}</td><td>${esc(f.it)}</td><td class="r">${fmt(f.n)}</td><td class="r">${emf(f.em)}</td><td class="r">${fmt(f.t)}</td></tr>`).join("") + `</tbody></table>`;
+}
+let eLast = null;
+function renderEcon() {
+  const el = $("econ");
+  for (const [id, k] of [["e-range", "range"], ["e-scope", "scope"], ["e-mode", "mode"]]) for (const b of $(id).children) b.classList.toggle("on", b.dataset.v === String(eopt[k]));
+  if (eopt.tab !== "econ") return;
+  const d = econData();
+  eLast = d;
+  if (!d.keys.length) { el.innerHTML = `<div class="empty">Load a village to see its economy.</div>`; return; }
+  const top = `<div class="etot">${eopt.scope === "all" ? `All villages (${d.keys.length})` : esc(layouts[viewKey] ? layouts[viewKey].name : "This village")} · ` +
+    `${eopt.range === 1 ? "today" : "last " + eopt.range + " game days"}: <b>${fmt(d.trades)}</b> trades, <b>${emf(d.ems)}</b> emeralds</div>`;
+  const body = !d.flows.length ? `<div class="empty">No trades in this range.</div>` : eopt.mode === "table" ? flowTable(d.flows) :
+    `<div class="elegend">${[...new Set(d.flows.map(f => f.g))].sort((a, b) => Object.keys(GROUPS).indexOf(a) - Object.keys(GROUPS).indexOf(b)).map(g => `<span><i style="background:${(GROUPS[g] || GROUPS.other)[1]}"></i>${(GROUPS[g] || GROUPS.other)[0]}</span>`).join("")}</div>` + sankey(d.flows);
+  const tip = `<div class="etip" id="e-tip"></div>`;
+  el.innerHTML = top + body + deadEnds(d) + tip;
+}
+function setTab(t) {
+  eopt.tab = t; saveE();
+  for (const b of $("l-tabs").children) b.classList.toggle("on", b.dataset.tab === t);
+  $("l-pane").hidden = t !== "log"; $("e-pane").hidden = t !== "econ";
+  $("l-count").hidden = $("l-q").hidden = t !== "log";
+  renderEcon();
+}
+$("l-tabs").addEventListener("click", e => { const b = e.target.closest("button[data-tab]"); if (b) setTab(b.dataset.tab); });
+for (const [id, k] of [["e-range", "range"], ["e-scope", "scope"], ["e-mode", "mode"]])
+  $(id).addEventListener("click", e => { const b = e.target.closest("button[data-v]"); if (!b) return; eopt[k] = k === "range" ? +b.dataset.v : b.dataset.v; saveE(); renderEcon(); });
+$("econ").addEventListener("mousemove", e => {
+  const tip = $("e-tip"); if (!tip) return;
+  const p = e.target.closest("svg.flow path"), b = p && eBands[+p.dataset.i];
+  if (!b) { tip.style.display = "none"; return; }
+  const items = b.items.slice().sort((x, y) => y.em - x.em || y.n - x.n);
+  tip.innerHTML = `<b>${esc(b.s)}</b> to <b>${esc(b.b)}</b> <span class="sub">${(GROUPS[b.g] || GROUPS.other)[0]}</span><table>` +
+    items.map(f => `<tr><td>${fmt(f.n)} ${esc(f.it)}</td><td class="r">${f.em ? emf(f.em) + " emeralds" : "no emeralds"}</td><td class="r">${fmt(f.t)} ${f.t === 1 ? "trade" : "trades"}</td></tr>`).join("") + `</table>`;
+  const box = $("econ").getBoundingClientRect();
+  tip.style.display = "block";
+  const x = e.clientX - box.left + $("econ").scrollLeft + 14, y = e.clientY - box.top + $("econ").scrollTop + 10;
+  tip.style.left = Math.min(x, $("econ").clientWidth - tip.offsetWidth - 6) + "px"; tip.style.top = y + "px";
+});
+$("econ").addEventListener("mouseleave", () => { const t = $("e-tip"); if (t) t.style.display = "none"; });
+$("econ").addEventListener("click", e => {
+  if (!e.target.closest("#e-copy") || !eLast) return;
+  const tsv = [["Seller", "Buyer", "Item", "Count", "Emeralds", "Trades"], ...eLast.flows.slice().sort((a, b) => b.em - a.em).map(f => [f.s, f.b, f.it, f.n, r2(f.em), f.t])].map(r => r.join("\t")).join("\n");
+  const done = () => { e.target.textContent = "Copied"; setTimeout(() => { if (e.target.isConnected) e.target.textContent = "Copy table"; }, 1500); };
+  if (navigator.clipboard) navigator.clipboard.writeText(tsv).then(done, () => {}); 
+});
+setTab(eopt.tab);
 
 // ---------------------------------------------------------------- alerts
 // Each alert is { id, who, act, kind, text, on }: the same choices as the log filters (a villager type and one of its actions,

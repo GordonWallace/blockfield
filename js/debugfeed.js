@@ -3,7 +3,7 @@
 // has loaded, not just the one the player is in.
 // Always on, whatever F3 is doing: it streams to port 8001 on the game's host (or the address the debug server injects as
 // window.BF_DEBUG_FEED, or ?debugfeed=<port or url>; ?debugfeed=off stops it). It never changes what the game shows.
-// Snapshots go out 4 times a second as small POSTs; the village layout and the log are only re-sent when they change.
+// Snapshots go out 4 times a second as small POSTs; the village layout, the log and the economy tallies are only re-sent when they change.
 // The server's answer carries the alerts set up on the debug screen whenever the game's copy is out of date (js/alerts.js).
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
 // API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update() }
@@ -125,9 +125,10 @@ function detail(rec) {
 // Every village this world has loaded: the ones the mob system knows this session, plus any with a saved log (earlier
 // sessions). Each snapshot carries the list with distances, full detail for the loaded ones, new layouts and changed logs.
 function villages(pp) {
-  const L = BF.vlog, recs = BF.mobs.villages || new Map(), out = { villages: [], detail: {}, layouts: {}, logs: {} };
+  const L = BF.vlog, E = BF.econ, recs = BF.mobs.villages || new Map(), out = { villages: [], detail: {}, layouts: {}, logs: {}, econ: {} };
   const keys = new Set(recs.keys());
   for (const k in L.serialize()) keys.add(k);
+  if (E) for (const k of E.keys()) keys.add(k);
   for (const key of keys) {
     const rec = recs.get(key), [kx, kz] = key.split(",").map(Number);
     const x = rec ? rec.x : kx, z = rec ? rec.z : kz, loaded = !!rec && isLoaded(rec);
@@ -138,6 +139,9 @@ function villages(pp) {
     if (rec && rec.wg && !sentLayouts.has(key)) { out.layouts[key] = layout(rec); sentLayouts.add(key); }
     const a = L.entries(key), last = a[a.length - 1], sig = a.length + "|" + (last ? last[0] + last[2] : "");
     if (logSigs.get(key) !== sig) { out.logs[key] = { key, cap: L.CAP, entries: a }; logSigs.set(key, sig); }
+    // the Economy view's tallies (js/economy.js), like the log: only when they changed (or a new day dropped the oldest)
+    const es = E ? E.version(key) + "|" + Math.floor(BF.sky.day + BF.sky.time) : "";
+    if (E && econSigs.get(key) !== es) { out.econ[key] = E.view(key); econSigs.set(key, es); }
   }
   out.villages.sort((a, b) => (b.loaded - a.loaded) || a.dist - b.dist);   // loaded first, then by distance
   const inside = L.villageAt(pp.x, pp.z);
@@ -148,8 +152,8 @@ function villages(pp) {
   }
   return out;
 }
-const sentLayouts = new Set(), logSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
-const resync = () => { sentLayouts.clear(); logSigs.clear(); sentIcons.clear(); };
+const sentLayouts = new Set(), logSigs = new Map(), econSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
+const resync = () => { sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); };
 let hooked = false;
 
 function snapshot() {

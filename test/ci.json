@@ -10,6 +10,8 @@
   {"name": "debug-screen", "kind": "node", "tier": "baseline", "file": "test/debug-screen.js", "args": ["{out}"], "timeout": 600, "what": "second-monitor debug screen"},
   {"name": "compare", "file": "test/compare.js", "kind": "actions", "tier": "baseline", "what": "village comparison counters: population history, weekly events, tool coverage"},
   {"name": "compare-view", "kind": "node", "tier": "baseline", "file": "test/compare-view.js", "args": ["{out}"], "timeout": 600, "what": "debug screen Compare table: outliers, sorting, rows match the village panel"},
+  {"name": "economy", "file": "test/economy.js", "kind": "actions", "tier": "baseline", "what": "Economy view tallies: trades match the log, waits, unsold stock, 7 days, save and load"},
+  {"name": "economy-view", "kind": "node", "tier": "baseline", "file": "test/economy-view.js", "args": ["{out}"], "timeout": 600, "what": "debug screen Economy tab: diagram, hover, dead ends, table, ranges, all villages"},
   {"name": "debug-inventory", "kind": "node", "tier": "baseline", "file": "test/debug-inventory.js", "args": ["{out}"], "timeout": 300, "what": "debug screen shows a picked villager's inventory"},
   {"name": "explorer-actions", "file": "test/explorer-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "farmbeds-actions", "file": "test/farmbeds-actions.js", "kind": "actions", "tier": "baseline"},

@@ -489,14 +489,24 @@ function placeFurnace(m, spot) {
 
 // ---------------------------------------------------------------- AI
 // The next trip: {kind: "buy" | "smelt" | "place", ...} or null.
+// Things it wants and can't get now, for the Economy view's dead ends (js/economy.js): a better material it is waiting for, or what a plan needs and nobody sells.
+const MAT_LABEL = { diamond: "Diamonds", iron: "Iron", gold: "Gold", stone: "Cobblestone", wood: "Planks" };
+const NEED_LABEL = { stick: "Sticks", fuel: "Fuel", furnace: "Furnace" };
+function noteWants(m, p) {
+  const S = m.tsm;
+  if (!BF.econ || !S || S.craft) return;
+  for (const w of Object.values(S.waitBetter || {})) if (dayNow() - w.since < WAIT_BETTER) BF.econ.want(m, MAT_LABEL[w.mat] || w.mat);
+  if (p && p.need) BF.econ.want(m, NEED_LABEL[p.need.what] || MAT_LABEL[p.mat] || p.mat);
+}
 function nextTrip(m) {
   const p = plan(m), J = m.jobsite;
+  noteWants(m, null);
   // a tool to make but far from its table (jobs.js only sends villagers within 40 blocks to their jobsite): walk back first
   if (p && (p.ready || p.crafting) && J && Math.hypot(J.x + 0.5 - m.position.x, J.z + 0.5 - m.position.z) > 24) return { kind: "table", spot: { x: J.x, y: J.y, z: J.z } };
   if (!p || p.ready || p.crafting) return null;
   if (p.place) { const spot = furnaceSpot(m); return spot ? { kind: "place", spot } : null; }
   if (p.smelt != null) return { kind: "smelt", rawId: p.smelt, furnace: p.furnace };
-  if (p.need) return findDeal(m, p.need);
+  if (p.need) { const d = findDeal(m, p.need); if (!d) noteWants(m, p); return d; }
   return null;
 }
 // Villager AI step (mobs.js villagerAI, daytime): trips to buy materials, to smelt ore, to put a furnace down. Returns true while it steers.
