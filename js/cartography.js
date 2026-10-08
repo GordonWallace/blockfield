@@ -154,7 +154,7 @@ function ai(m, dt, out) {
     const short = shortfall(m);
     if (!Object.keys(short).length) return false;
     const deal = findSeller(m, short, sh.avoid);
-    if (!deal) { sh.cd = now + 0.08; return false; }
+    if (!deal) { if (BF.econ) for (const id in short) BF.econ.want(m, +id); sh.cd = now + 0.08; return false; }   // dead ends (js/economy.js)
     sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; a.route = null;
   }
   const deal = sh.deal, v2 = deal && deal.seller;

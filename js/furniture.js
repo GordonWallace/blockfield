@@ -266,6 +266,7 @@ function ai(m, dt, out) {
     if (!deal && TR().inv.count(m.inv, BF.I.emerald) > 0) {
       const short = shortfall(m);
       if (Object.keys(short).length) deal = findSeller(m, short, sh.avoid);
+      if (!deal && BF.econ) for (const k in short) BF.econ.want(m, { cobble: "Cobblestone", planks: "Planks", wool: "Wool" }[k] || k);   // dead ends (js/economy.js)
     }
     if (!deal) { sh.cd = now + 0.04; return false; }
     sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; sh.gx = null; a.route = null;
