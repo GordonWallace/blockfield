@@ -123,11 +123,12 @@ module.exports = async (pg, out) => {
     const S = BF.mobs.list.find(m => m !== A && m.type === "villager" && m.village === A.village && m.inv && !m.child && m.profession !== "nitwit");
     if (!S) return "no second villager";
     // a smithing table of its own: with its old jobsite it would be fired (unemployed) within a second and sell nothing
-    const W = BF.world, sx = Math.floor(A.position.x) + 7, sy = Math.floor(A.position.y), sz = Math.floor(A.position.z) + 3;
+    const W = BF.world, sx = Math.floor(A.position.x) + 3, sy = Math.floor(A.position.y), sz = Math.floor(A.position.z) + 1;
     W.setBlock(sx, sy, sz, BF.B.smithing_table); BF.jobs.claim(S, { site: { x: sx, y: sy, z: sz, id: BF.B.smithing_table, prof: "toolsmith" } });
     BF.mobs.setProfession(S, "toolsmith"); S.level = 5; S.trades = T.offers("toolsmith", 1).concat(T.offers("toolsmith", 2), T.offers("toolsmith", 3), T.offers("toolsmith", 4), T.offers("toolsmith", 5));
     S.inv = T.inv.create(); T.inv.add(S.inv, I.iron_axe, 1); T.inv.add(S.inv, I.diamond_axe, 1); T.inv.add(S.inv, I.emerald, 3);
-    S.position.set(A.position.x + 6, A.position.y, A.position.z + 3);
+    // within reach: the test is about which axe it buys, not walking there (a seller up a slope could be out of reach for good)
+    S.position.set(A.position.x + 2, A.position.y, A.position.z + 1);
     A.inv = T.inv.create(); T.inv.add(A.inv, I.wooden_axe, 1); T.inv.add(A.inv, I.emerald, 3);
     // its pack has no food now: hungry, it would spend an emerald on food and the toolsmith would refuse to sell (too hungry to trade). Both fed
     for (const m of [A, S]) { const L = BF.food.life(m); L.sat = 5; L.lastAte = BF.food.dayNow(); L.starving = m.starving = false; m.fshop = { stage: null, deal: null, checkT: 1e9, avoid: {}, cd: 0 }; }
@@ -142,7 +143,7 @@ module.exports = async (pg, out) => {
     // richer now: enough for the diamond axe at the toolsmith's price
     res.smith = [S.profession, S.trades.length];
     BF.mobs.setProfession(S, "toolsmith"); S.trades = [1, 2, 3, 4, 5].flatMap(l => T.offers("toolsmith", l)); if (!T.inv.count(S.inv, I.diamond_axe)) T.inv.add(S.inv, I.diamond_axe, 1);
-    S.position.set(A.position.x + 5, A.position.y, A.position.z + 2);
+    S.position.set(A.position.x + 2, A.position.y, A.position.z + 1);
     const dPrice = S.trades.filter(o => o.sell.id === I.diamond_axe && o.buy.length === 1 && o.buy[0].id === I.emerald).reduce((p, o) => Math.min(p, o.buy[0].n), Infinity);
     res.diamondPrice = dPrice;
     T.inv.add(A.inv, I.emerald, Math.max(0, dPrice - T.inv.count(A.inv, I.emerald))); st.shopT = 0; st.thinkT = 0;
