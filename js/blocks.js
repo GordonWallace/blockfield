@@ -578,13 +578,13 @@ const ITEM_DEFS = [
     { name: sp + "_door", places: "door", wood: sp, sprite: "oak_door", color: WOOD_COLOR[sp], creativeTab: "functional" },
     { name: sp + "_fence_gate", places: "gate", wood: sp, sprite: "oak_fence_gate", color: WOOD_COLOR[sp], creativeTab: "functional" }]),
   // ---- end wood variants items ----
-  // ---- gold tools (append-only). Minecraft Java: mine as fast as anything (speed 12) but only at wood's harvest level (tier 1), and last 32 uses.
+  // ---- gold tools (append-only). Not vanilla (Gordon, 1.1): between iron and diamond, iron's harvest level (tier 3), speed 7 (iron 6, diamond 8), 800 uses (iron 250, diamond 1561).
   // Recipes come from the tool loop in inventory.js ("golden" + Gold Ingot). Damage as the wooden tool of the same kind.
-  { name: "golden_pickaxe", tool: { type: "pickaxe", tier: 1, speed: 12, damage: 2 }, durability: 32, material: "gold", color: "#f2d64b" },
-  { name: "golden_axe", tool: { type: "axe", tier: 1, speed: 12, damage: 3 }, durability: 32, material: "gold", color: "#f2d64b" },
-  { name: "golden_shovel", tool: { type: "shovel", tier: 1, speed: 12, damage: 1 }, durability: 32, material: "gold", color: "#f2d64b" },
-  { name: "golden_sword", tool: { type: "sword", tier: 1, speed: 1, damage: 4 }, durability: 32, material: "gold", color: "#f2d64b" },
-  { name: "golden_hoe", tool: { type: "hoe", tier: 1, speed: 12, damage: 1 }, durability: 32, material: "gold", color: "#f2d64b" },
+  { name: "golden_pickaxe", tool: { type: "pickaxe", tier: 3, speed: 7, damage: 2 }, durability: 800, material: "gold", color: "#f2d64b" },
+  { name: "golden_axe", tool: { type: "axe", tier: 3, speed: 7, damage: 3 }, durability: 800, material: "gold", color: "#f2d64b" },
+  { name: "golden_shovel", tool: { type: "shovel", tier: 3, speed: 7, damage: 1 }, durability: 800, material: "gold", color: "#f2d64b" },
+  { name: "golden_sword", tool: { type: "sword", tier: 3, speed: 1, damage: 4 }, durability: 800, material: "gold", color: "#f2d64b" },
+  { name: "golden_hoe", tool: { type: "hoe", tier: 3, speed: 7, damage: 1 }, durability: 800, material: "gold", color: "#f2d64b" },
   // ---- end gold tools ----
 ];
 

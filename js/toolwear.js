@@ -2,7 +2,7 @@
 // - Breaking a block with hardness above 0 costs a tool 1 use (a sword 2); a block with no hardness (crops, grass, torches) costs nothing.
 //   So felling a 10-log tree with an axe costs it 10 uses, as it would the player breaking those logs one by one.
 // - Hitting a mob costs 2 uses (a sword 1). Tilling a block with a hoe, shearing a sheep and stripping a log cost 1.
-// - Lifespans are the items' (js/blocks.js BF.durability): wood 59, gold 32, stone 131, iron 250, diamond 1561, shears 238.
+// - Lifespans are the items' (js/blocks.js BF.durability): wood 59, stone 131, iron 250, gold 800, diamond 1561, shears 238.
 // - A used-up tool leaves the villager's pack, with a clink, a line in the village log ("<name> (<job>)'s Iron Pickaxe broke") and a
 //   record in BF.toolWear.LOG.
 // - Who wears what: the miner's pickaxe (js/miner.js digging and fending off mobs), the farmer's hoe (js/villagelife.js tilling), the
@@ -17,7 +17,7 @@ const LOG = [];
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const toolOf = s => { const it = s && BF.items[s.id]; return (it && it.tool) || null; };
 
-// How good a tool is to work with: harvest tier first, then speed (so gold, tier 1 at speed 12, sits between wood and stone).
+// How good a tool is to work with: harvest tier first, then speed (so gold, tier 3 at speed 7, sits between iron and diamond).
 const rank = id => { const t = BF.items[id] && BF.items[id].tool; return t ? (t.tier || 0) * 100 + (t.speed || 0) : -1; };
 // The tool of `type` a villager works with: the best one, and of equals the most worn (used up first). The stack itself (its wear lives on it).
 function best(m, type) {
