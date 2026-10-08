@@ -152,7 +152,7 @@ function plan(m) {
 function buyFrom(m, v2, o, want) {
   const Tr = T(), e = em();
   let done = 0;
-  while (done * o.sell.n < want) {
+  while ((done + 1) * o.sell.n <= want || (!done && want > 0 && o.sell.n <= stackOf(o.sell.id))) {   // whole lots up to what it wants (at least one)
     if (cnt(m, e) < o.buy[0].n || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
     if (!Tr.exchange(v2, o)) break;                 // its stock above its reserve, its room
     Tr.inv.remove(m.inv, e, o.buy[0].n);

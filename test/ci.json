@@ -69,7 +69,7 @@
   {"name": "gen3-check", "kind": "node", "tier": "integration", "file": "tools/gen3-check.js", "args": ["all"], "timeout": 900, "what": "terrain generator: old generators unchanged, gen 3 seams"},
   {"name": "map-icons", "file": "test/map-icons.js", "kind": "actions", "tier": "integration"},
   {"name": "toolchain", "kind": "node", "tier": "integration", "file": "test/toolchain.js", "args": ["1", "1", "1"], "timeout": 900, "what": "tool economy soak, 1 day x 1 village"},
-  {"name": "caravan-soak", "kind": "node", "tier": "integration", "file": "test/caravan-soak.js", "args": ["1", "21"], "timeout": 1800, "what": "trading caravans soak, 21 days x 2 villages, the player walks away on day 11"},
+  {"name": "caravan-soak", "kind": "node", "tier": "integration", "file": "test/caravan-soak.js", "args": ["1", "30"], "timeout": 2400, "what": "trading caravans soak, 30 days x 2 villages, the player walks away on day 20"},
   {"name": "market-soak", "kind": "node", "tier": "integration", "file": "test/market-soak.js", "args": ["1", "7"], "timeout": 900, "what": "one market soak, 7 days x 1 village with a builder"},
   {"name": "prices-soak", "kind": "node", "tier": "integration", "file": "test/prices-soak.js", "args": ["1", "10"], "timeout": 900, "what": "demand prices soak, 10 days x 1 village"},
   {"name": "minechain", "kind": "node", "tier": "integration", "file": "test/minechain.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "miner soak, 1 day x 2 villages"},

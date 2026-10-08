@@ -1,10 +1,11 @@
 // Trading caravans soak (release 1.3): two villages between 60 and 200 blocks apart, both with merchants, for many game days.
 // Usage: NODE_PATH=$(npm root -g) node test/caravan-soak.js [seed=1] [days=14] [out.json]
-// Drives the simulation directly (no rendering), like test/prices-soak.js. The player stands between the two villages, then on day AWAY
-// (default: half way) walks 1500 blocks off and stays there, so trips on the road must keep both villages and the route loaded (pins).
+// Drives the simulation directly (no rendering), like test/prices-soak.js. The player stands between the two villages, then from day AWAY
+// (default: two thirds of the way), as soon as a merchant is on the road, walks 1500 blocks off and stays there, so trips on the road must keep both villages and the route loaded (pins).
 // Once per game day it records each village's villagers, emeralds and items, the merchants' trips (out and home), goods sold each way, pins,
 // and path blocks made. FAILs on a page error, a villager trade made without an offer, no goods carried each way, a trip that left a pin
-// behind, more than 2 trips on the road, a merchant who never came home, or (days >= 14) no dirt path forming.
+// behind, more than 2 trips on the road, or a merchant who never came home. Prices take about 10 game days to drift far enough apart for a
+// trip to pay (js/prices.js: a month to double), so run 30 days; a dirt path needs 20 crossings, so it is only required after 10 trips.
 const path = require('path');
 const fs = require('fs');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -12,7 +13,7 @@ const root = path.resolve(__dirname, '..');
 const SEED = +(process.argv[2] || 1);
 const DAYS = +(process.argv[3] || 14);
 const OUT = process.argv[4] || null;
-const AWAY = +(process.env.AWAY || Math.ceil(DAYS / 2));
+const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -89,10 +90,11 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS / 2));
   const h = 0.05, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
   let away = false;
   for (let s = 0, d = 0; s < DAYS * DAY; s += PER_CALL) {
-    if (!away && s >= AWAY * DAY) {
+    // from day AWAY on, the player leaves as soon as a merchant is on the road (or 3 days before the end, whatever happens)
+    if (!away && s >= AWAY * DAY && (s >= (DAYS - 3) * DAY || await pg.evaluate(() => BF.merchant.routes().some(r => r.road.some(x => x.stage === 'go' || x.stage === 'buy' || x.stage === 'back'))))) {
       away = true;
       const r = await pg.evaluate(() => { const [mx, mz] = window.__mid, x = mx + 1500, z = mz; BF.player.spawn(x + 0.5, BF.worldgen.heightAt(x, z) + 3, z + 0.5); window.__mid2 = [x, z]; for (let i = 0; i < 300; i++) BF.world.update(x, z, 40); return BF.villageSim.status() + ' / on the road: ' + BF.merchant.routes().reduce((a, r) => a + r.road.length, 0); });
-      console.log(`day ${AWAY}: the player walks 1500 blocks away (${r})`);
+      console.log(`day ${Math.floor(s / DAY)}: the player walks 1500 blocks away (${r})`);
     }
     await pg.evaluate(([n, h, away]) => {
       const [x, z] = away ? window.__mid2 : window.__mid;
@@ -130,7 +132,8 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS / 2));
   const onRoad = R.routes.reduce((a, r) => a + r.road.length, 0);
   if (R.pinsLeft > onRoad) F(`pins left behind: ${R.pinsLeft} pins, ${onRoad} merchants on the road`);
   if (last.left - last.home > 2 + onRoad) F(`merchants who never came home: ${last.left} out, ${last.home} home`);
-  if (DAYS >= 14 && !(R.paths > 0)) F('no dirt path formed (most crossings of one block: ' + last.paths + ')');
+  if (last.left >= 10 && !(R.paths > 0)) F('no dirt path formed after ' + last.left + ' trips (most crossings of one block: ' + last.paths + ')');
+  if (last.left >= 2 && !(last.paths >= 2)) F('trips do not wear the same ground (most crossings of one block: ' + last.paths + ')');
   console.log(fail ? fail + ' FAILED' : 'all passed');
   await b.close();
   process.exit(fail ? 1 : 0);
