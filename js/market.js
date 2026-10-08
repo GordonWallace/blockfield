@@ -96,17 +96,22 @@ function batch(id, u) {
   if (u < 1) return [1, Math.max(1, Math.min(stackOf(id), Math.round(1 / u)))];
   return [Math.max(1, Math.min(64, Math.round(u))), 1];
 }
+// A lot smaller than a batch still sells for 1 emerald when it is worth at least SMALL_LOT of one (a few steaks, a half stack of cobblestone):
+// whole emeralds are coarse, and stock that never fills a batch would otherwise never sell.
+const SMALL_LOT = 0.5;
 function spareOffers(v) {
-  const sold = new Set(), out = [], seen = new Set(), e = em();
-  for (const o of v.trades) if (!o.spare && !o.need && o.sell.id !== e) sold.add(o.sell.id);
+  const sold = new Map(), out = [], seen = new Set(), e = em();   // its job's wares -> the smallest batch its job offers sell
+  for (const o of v.trades) if (!o.spare && !o.need && o.sell.id !== e) sold.set(o.sell.id, Math.min(sold.get(o.sell.id) || Infinity, o.sell.n));
   for (const s of v.inv) {
-    if (!s || s.id === e || seen.has(s.id) || sold.has(s.id)) continue;
+    if (!s || s.id === e || seen.has(s.id)) continue;
     seen.add(s.id);
     if (v.profession === "explorer" && /^(filled_)?map/.test(nameOf(s.id))) continue;   // its maps are its job offers (js/explorer.js)
     const u = sellUnit(s.id);
     if (u == null) continue;
-    const [ems, n] = batch(s.id, u);
-    if (spareOf(v, s.id) < n) continue;
+    let [ems, n] = batch(s.id, u);
+    const sp = spareOf(v, s.id), job = sold.get(s.id);
+    if (job != null) { if (sp >= job) continue; n = Math.min(n, job); }   // its job offers sell it: only a lot too small for them
+    if (sp < n) { if (ems !== 1 || sp * u < SMALL_LOT) continue; n = sp; }
     out.push({ buy: [{ id: e, n: ems }], sell: { id: s.id, n }, level: 1, xp: 0, spare: 1 });
   }
   return out;

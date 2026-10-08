@@ -61,6 +61,10 @@ const OUT = process.argv[4] || null;
         if (m.starving) starving++;
         for (const s of m.inv || []) if (s) { if (s.id === BF.I.emerald) ems += s.count; else items += s.count; }
       }
+      // what the builders and the food shoppers did today (their logs, drained): kinds counted, what builders were short of
+      const tally = R.tally || (R.tally = { builder: {}, life: {}, short: {} });
+      if (BF.builder && BF.builder.log) for (const e of BF.builder.log.splice(0)) { tally.builder[e.kind] = (tally.builder[e.kind] || 0) + 1; if (e.kind === 'short') for (const x of e.missing || []) { const n = x.replace(/ x\d+$/, ''); tally.short[n] = (tally.short[n] || 0) + 1; } }
+      if (BF.villageLife && BF.villageLife.log) for (const e of BF.villageLife.log.splice(0)) tally.life[e.kind] = (tally.life[e.kind] || 0) + 1;
       const built = BF.builder && rec.key ? BF.builder.builtOf(rec) : [];
       const hs = BF.happiness && rec.key ? BF.happiness.score(rec) : null;
       R.days.push({ day: BF.sky.day, alive: alive.length, starving, dead: vs.length - alive.length, happy: hs ? Math.round(hs.score) : null, ems, items, trades: R.trades, spare: R.spare,
@@ -84,11 +88,21 @@ const OUT = process.argv[4] || null;
     if (Math.floor((s + PER_CALL) / DAY) > d) { d = Math.floor((s + PER_CALL) / DAY); await pg.evaluate(() => window.__day()); const x = await pg.evaluate(() => window.__rec.days.at(-1)); console.log(`day ${String(x.day).padStart(3)}  alive ${x.alive}  starving ${x.starving}  dead ${x.dead}  happy ${x.happy}  emeralds ${x.ems}  items ${x.items}  trades ${x.trades} (spare ${x.spare})  built ${x.done} placed ${x.placed}  (${Math.round((Date.now() - t0) / 1000)} s)`); }
   }
   const R = await pg.evaluate(() => window.__rec);
+  // who is starving and what the builders are doing, at the end
+  R.end = await pg.evaluate(() => {
+    const key = window.__rec.key, F = BF.food, em = BF.I.emerald;
+    const vs = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === key && !m.dead && !m.removed);
+    return {
+      starving: vs.filter(m => m.starving).map(m => ({ prof: m.profession, em: BF.trades.inv.count(m.inv, em), food: +F.available(m).toFixed(2), shop: m.fshop && m.fshop.stage })),
+      builders: vs.filter(m => m.profession === 'builder').map(m => ({ status: BF.builder.statusText(m), mode: m.bs && m.bs.mode, short: m.bs && m.bs.want && m.bs.want.short, em: BF.trades.inv.count(m.inv, em) })),
+      food: vs.map(m => [m.profession, +F.available(m).toFixed(1), BF.trades.inv.count(m.inv, em)]),
+    };
+  });
   const days = R.days, last = days.at(-1);
   const sum = { seed: SEED, village: R.key, days: DAYS, alive: last.alive, dead: last.dead,
     starvingDays: days.reduce((a, x) => a + x.starving, 0), happyMean: Math.round(days.filter(x => x.happy != null).reduce((a, x) => a + x.happy, 0) / Math.max(1, days.filter(x => x.happy != null).length)),
     happyEnd: last.happy, emeraldsStart: days[0].ems, emeraldsEnd: last.ems, itemsStart: days[0].items, itemsEnd: last.items, trades: last.trades, spareTrades: last.spare,
-    built: last.done, placed: last.placed, bad: R.bad.slice(0, 10), seconds: Math.round((Date.now() - t0) / 1000) };
+    built: last.done, placed: last.placed, tally: R.tally, end: R.end, bad: R.bad.slice(0, 10), seconds: Math.round((Date.now() - t0) / 1000) };
   console.log(JSON.stringify(sum, null, 1));
   if (OUT) fs.writeFileSync(OUT, JSON.stringify({ sum, days }, null, 1));
   let fail = 0;
