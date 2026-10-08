@@ -42,6 +42,7 @@
   {"name": "furniture-actions", "file": "test/furniture-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "gen3-check", "kind": "node", "tier": "integration", "file": "tools/gen3-check.js", "args": ["all"], "timeout": 900, "what": "terrain generator: old generators unchanged, gen 3 seams"},
   {"name": "map-icons", "file": "test/map-icons.js", "kind": "actions", "tier": "integration"},
+  {"name": "toolchain", "kind": "node", "tier": "integration", "file": "test/toolchain.js", "args": ["1", "1", "1"], "timeout": 900, "what": "tool economy soak, 1 day x 1 village"},
   {"name": "minechain", "kind": "node", "tier": "integration", "file": "test/minechain.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "miner soak, 1 day x 2 villages"},
   {"name": "miner-actions", "file": "test/miner-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "dead-villagers", "file": "test/dead-villagers.js", "kind": "actions", "tier": "baseline"},
