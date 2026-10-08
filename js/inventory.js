@@ -1356,6 +1356,7 @@ const api = {
   trades: TRADES,
   levelNames: LEVELS,
   isCreative,
+  iconURL,          // item id -> icon image URL, as the slots show it (js/debugfeed.js sends these to the debug screen)
   init() {
     buildRecipes();
     buildDOM();

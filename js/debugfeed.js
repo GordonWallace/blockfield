@@ -62,6 +62,28 @@ function holdings(chestsOf, m) {
   for (const c of cs) { ce += emIn(c.slots); cf += food(c.slots); }
   return { em: emIn(m.inv), emChests: ce, food: r1(food(m.inv)), foodChests: r1(cf), chests: cs.length };
 }
+// A villager's inventory slots, compact: 0 for empty, [id, count] or [id, count, durability left 0-1] for a worn tool.
+// Icons for item ids not sent yet go out once (snapshot.icons), like layouts.
+function invOf(inv) {
+  if (!inv) return null;
+  return inv.map(s => {
+    if (!s || !s.count) return 0;
+    if (!sentIcons.has(s.id)) newIcons.add(s.id);
+    const max = s.wear > 0 && BF.durability ? BF.durability(s.id) : 0;
+    return max ? [s.id, s.count, Math.round(Math.max(0, 1 - s.wear / max) * 100) / 100] : [s.id, s.count];
+  });
+}
+function icons() {
+  const out = {};
+  for (const id of newIcons) {
+    let url = null;
+    try { url = BF.inventory && BF.inventory.iconURL ? BF.inventory.iconURL(id) : BF.textures.icon(id); } catch (e) { url = null; }
+    out[id] = { url, name: (BF.itemName ? BF.itemName(id) : (BF.items[id] || {}).name || "Item " + id).replace(/ Item$/, "") };
+    sentIcons.add(id);
+  }
+  newIcons.clear();
+  return out;
+}
 function detail(rec) {
   const L = BF.vlog, d = L.panelData(rec);
   const chestsOf = new Map();   // owner key -> chests
@@ -78,6 +100,7 @@ function detail(rec) {
       hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!(m.bed && !m.bed.tent ? m.bed : m.homeBed), tent: !!(m.bed && m.bed.tent), sleeping: !!m.sleeping,   // an explorer's pitched tent is not a bed: its own bed (homeBed) is
       job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
       age: m.life ? Math.round((m.life.lived || 0) * 10) / 10 : null,   // game days it has been loaded and active
+      inv: invOf(m.inv),
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));
@@ -116,8 +139,8 @@ function villages(pp) {
   }
   return out;
 }
-const sentLayouts = new Set(), logSigs = new Map();
-const resync = () => { sentLayouts.clear(); logSigs.clear(); };
+const sentLayouts = new Set(), logSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
+const resync = () => { sentLayouts.clear(); logSigs.clear(); sentIcons.clear(); };
 let hooked = false;
 
 function snapshot() {
@@ -125,7 +148,7 @@ function snapshot() {
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) mobs[m.type] = (mobs[m.type] || 0) + 1;
   return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
-    professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp),
+    professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
     alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null };
 }
