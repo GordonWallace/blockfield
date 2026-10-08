@@ -1582,7 +1582,8 @@ function updateMob(m, dt) {
 
   // head look
   let hy = 0, hp = 0;
-  if (m.lookAt === "player" && playerAlive()) {
+  if (m.rider) hp = -0.35;   // a ridden horse holds its head a little low, out of the rider's view
+  else if (m.lookAt === "player" && playerAlive()) {
     const p = player(), e = p.eyePos ? p.eyePos() : p.position;
     const dx = e.x - m.position.x, dz = e.z - m.position.z, dy = e.y - (m.position.y + m.height * 0.85);
     hy = wrapAngle(Math.atan2(dx, dz) - m.yaw);
