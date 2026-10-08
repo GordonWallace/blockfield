@@ -104,9 +104,9 @@ const start = async () => {
   ok('debug screen shows it fired', await dbg.evaluate(() => [...document.querySelectorAll('#a-body tr')].some(tr => /1×/.test(tr.textContent) && tr.classList.contains('firing'))));
   await dbg.screenshot({ path: out + '-screen.png', fullPage: true });
   // the player still moves at 0x
-  const p0 = await game.evaluate(() => { BF.player.teleport(BF.player.position.x + 30, BF.player.position.y + 12, BF.player.position.z); return BF.player.position.y; });
-  await game.waitForTimeout(1200);
-  ok('player physics still run at 0x (falls)', await game.evaluate(y => BF.player.position.y < y - 1 || BF.player.flying, p0));
+  // (straight up, so the chunk is already loaded; the CI runner manages only a few frames a second)
+  const p0 = await game.evaluate(() => { BF.player.teleport(BF.player.position.x, BF.player.position.y + 12, BF.player.position.z); return BF.player.position.y; });
+  ok('player physics still run at 0x (falls)', await until(game, y => BF.player.position.y < y - 1 || BF.player.flying, p0, 20000));
   // Teleport
   await game.click('#bf-alert [data-act=tp]');
   await game.waitForTimeout(400);
