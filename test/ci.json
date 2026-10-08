@@ -12,6 +12,7 @@
   {"name": "debug-inventory", "kind": "node", "tier": "baseline", "file": "test/debug-inventory.js", "args": ["{out}"], "timeout": 300, "what": "debug screen shows a picked villager's inventory"},
   {"name": "explorer-actions", "file": "test/explorer-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "farmbeds-actions", "file": "test/farmbeds-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "eggcook-actions", "file": "test/eggcook-actions.js", "kind": "actions", "tier": "baseline", "what": "villagers cook eggs only in a real furnace with fuel, one per furnace, buy eggs only when they can cook them"},
   {"name": "farmer-dig", "file": "test/farmer-dig.js", "kind": "actions", "tier": "baseline", "what": "farmers dig dirt off natural edges or from one neat shallow pit"},
   {"name": "farmer-logs", "file": "test/farmer-logs.js", "kind": "actions", "tier": "baseline", "what": "farmers buy logs from foresters, never fell trees"},
   {"name": "golem-actions", "file": "test/golem-actions.js", "kind": "actions", "tier": "baseline"},

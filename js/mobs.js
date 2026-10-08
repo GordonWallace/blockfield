@@ -1396,6 +1396,7 @@ function villagerAI(m, dt, out) {
   if (ai.leaving && morningAI(m, dt, out)) return;
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
   if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
@@ -1406,6 +1407,7 @@ function villagerAI(m, dt, out) {
   if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;
   if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
   // sized villages (village generator 2) reach far beyond the plaza: villagers living out there keep to their own neighbourhood

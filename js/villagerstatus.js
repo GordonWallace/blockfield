@@ -34,7 +34,8 @@ function routine(m) {
 
 function text(m) {
   if (!m || m.type !== "villager") return "";
-  const s = (BF.villageLife && BF.villageLife.statusText(m))                    // hunger, buying food, farm work (js/villagelife.js)
+  const s = (BF.eggCook ? BF.eggCook.statusText(m) : "")                        // cooking eggs in a furnace, buying fuel for it (js/eggcook.js)
+    || (BF.villageLife && BF.villageLife.statusText(m))                    // hunger, buying food, farm work (js/villagelife.js)
     || (BF.builder && BF.builder.statusText ? BF.builder.statusText(m) : "")   // building, fetching materials (js/builder.js)
     || (BF.explorer ? BF.explorer.statusText(m) : "")                          // mapping (js/explorer.js)
     || (BF.forester ? BF.forester.statusText(m) : "")                          // felling, planting, sawing (js/forester.js)
