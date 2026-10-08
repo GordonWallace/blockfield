@@ -212,9 +212,10 @@ function plan(m) {
     for (const mat of matsFor(cat)) {
       if (stockAtLeast(m, cat, mat) >= TOOL_CAP) break;   // enough of this or better: lesser ones would not help
       if (canMake(m, cat, mat, stock)) {
-        if (later) {   // wait for the better one a while
+        if (later) {   // wait for the better one a while; the wait ends when the lesser tool is started (startCraft), not when it is planned
           const w = S.waitBetter[cat] || (S.waitBetter[cat] = { since: dayNow(), mat: later });
           if (dayNow() - w.since < WAIT_BETTER) break;
+          return { cat, mat, ready: true };
         }
         delete S.waitBetter[cat];
         return { cat, mat, ready: true };
@@ -310,6 +311,7 @@ function startCraft(m, p) {
   }
   const mats = take(m, MAT[p.mat], HEAD[p.cat]).concat(STICKS[p.cat] ? take(m, isStick, STICKS[p.cat]) : []);
   S.craft = { id, t: CRAFT_SECS(), mats };
+  if (S.waitBetter) delete S.waitBetter[p.cat];
   log("start", m, { tool: nameOf(id) });
   return S.craft;
 }
