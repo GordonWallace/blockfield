@@ -103,6 +103,21 @@
   .roster { max-height: 420px; overflow: auto; }
   .past { border-top: 1px solid var(--edge); } .past summary { cursor: pointer; padding: 10px 16px; color: var(--muted); font-size: 12px; letter-spacing: 0.5px; } .past summary b { color: var(--ink); font-weight: 500; margin-left: 4px; }
   .past .roster { max-height: 240px; } .past td { color: var(--muted); }
+  /* the selected villager's inventory, drawn like the game's trade screen (js/inventory.js .bf-vinv / .bf-slot) */
+  .vinv { border-top: 1px solid var(--edge); padding: 12px 16px 14px; display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .vinv .box { background: rgba(18, 22, 20, 0.93); border: 1px solid rgba(244, 247, 239, 0.18); border-radius: 4px; padding: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4); }
+  .vinv h4 { margin: 0 0 6px; font: 13px/1 var(--display); color: var(--muted); font-weight: normal; letter-spacing: 0.5px; display: flex; gap: 10px; align-items: baseline; }
+  .vinv h4 button { margin-left: auto; background: none; border: 0; color: var(--faint); cursor: pointer; padding: 0 2px; font-size: 13px; } .vinv h4 button:hover { color: var(--ink); }
+  .vgrid { display: grid; grid-template-columns: repeat(6, 40px); }
+  .vslot { position: relative; width: 40px; height: 40px; box-sizing: border-box; background: rgba(0, 0, 0, 0.38); box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.6), inset -2px -2px 0 rgba(255, 255, 255, 0.09); display: grid; place-items: center; }
+  .vslot:hover { background: rgba(255, 255, 255, 0.13); }
+  .vslot img { width: 76%; height: 76%; image-rendering: pixelated; image-rendering: crisp-edges; pointer-events: none; }
+  .vslot .q { width: 60%; height: 60%; background: var(--faint); border-radius: 2px; }
+  .vslot b { position: absolute; right: 2px; bottom: 1px; font: 11px/1 var(--display); color: var(--ink); font-weight: normal; text-shadow: 1px 1px 0 #000, -1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; pointer-events: none; }
+  .vslot .wear { position: absolute; left: 12%; right: 12%; bottom: 9%; height: 3px; background: #000; pointer-events: none; }
+  .vslot .wear::after { content: ""; position: absolute; left: 0; top: 0; height: 2px; width: var(--f); background: var(--c); }
+  .vinv .side { font-size: 12px; color: var(--muted); min-width: 180px; } .vinv .side div { padding: 2px 0; } .vinv .side b { color: var(--ink); font-weight: 500; }
+  .stale .vinv .box { opacity: 0.6; filter: grayscale(0.7); }
   .hp { display: inline-block; width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); vertical-align: middle; margin-right: 6px; overflow: hidden; } .hp i { display: block; height: 100%; background: var(--accent); }
   .happy { background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; display: grid; grid-template-columns: auto minmax(80px, 1fr); gap: 4px 14px; align-items: center; }
   .happy .hs { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; } .happy .hs .big { font-size: 22px; }
@@ -239,6 +254,7 @@
       <div class="panel" id="rpanel">
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
         <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="age" title="Game days it has been loaded and active (time its village sat unloaded doesn't count)">Age</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
+        <div class="vinv" id="r-inv" hidden></div>
         <details class="past" id="r-past" open><summary>Past villagers <b id="r-pastn">0</b></summary>
           <div class="roster"><table><thead><tr><th>Name</th><th>Job</th><th>Died</th><th>Cause</th><th title="Game days it had been loaded and active">Age</th></tr></thead><tbody id="r-pastb"></tbody></table></div>
         </details>
@@ -265,7 +281,7 @@ const days = n => fmt(n) + (n === 1 ? " day" : " days");
 
 // ---------------------------------------------------------------- state
 // layouts / logs / details: everything known per village key (details = the last full numbers while it was loaded)
-const layouts = {}, logs = {}, details = {};
+const layouts = {}, logs = {}, details = {}, icons = {};   // icons: item id -> {url, name}, sent once by the game for the inventory view
 let viewKey = null, pinned = null, curV = null, curStale = false;   // pinned: a village the user picked; null follows the nearest loaded one
 let snap = null, layout = null, log = null, lastAt = 0, seenLog = 0, logKeyShown = null, hlName = null, hoverName = null;
 const hist = { fps: [], queue: [] }, HIST = 240;   // 60 s at 4 snapshots a second
@@ -284,7 +300,7 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
-  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); logDirty = true; } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
   es.onopen = () => { serverUp = true; status(); };
@@ -311,7 +327,7 @@ setInterval(status, 1000);
 
 // ---------------------------------------------------------------- snapshots
 function onSnap(s) {
-  Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {});
+  Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
   let logChanged = false;
   for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
   if (s.error) { gameErr = s.error; errAt = Date.now() - (s.age || 0); status(); }
@@ -584,8 +600,35 @@ function markRoster(scroll) {
   for (const tr of $("r-body").children) {
     const on = tr.dataset.n === focus; tr.classList.toggle("hl", on);
     if (on && scroll) tr.scrollIntoView({ block: "nearest" });
-  }
+  }  renderInv();
 }
+// The selected villager's inventory (picked from the list or on the map), slot for slot as the game's trade screen shows it:
+// 18 slots, 6 across, item icons with stack counts and durability bars. Hover a slot for the item's name.
+let invSig = "";
+function renderInv() {
+  const el = $("r-inv"), m = hlName && curV ? curV.villagerList.find(v => v.name === hlName) : null;
+  if (!m) { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; invSig = ""; } return; }
+  const inv = m.inv || [], sig = m.name + "|" + JSON.stringify(inv) + "|" + m.em + "|" + m.emChests + "|" + m.food + "|" + m.chests + "|" + Object.keys(icons).length;
+  el.hidden = false;
+  if (sig === invSig) return;
+  invSig = sig;
+  const slots = Array.from({ length: Math.max(18, inv.length) }, (_, i) => inv[i] || 0);
+  const used = slots.filter(Boolean).length;
+  const cell = st => {
+    if (!st) return '<div class="vslot"></div>';
+    const [id, n, f] = st, ic = icons[id], name = ic ? ic.name : "Item " + id;
+    const tip = name + (n > 1 ? " \u00D7" + n : "") + (f != null ? " (" + Math.round(f * 100) + "% durability left)" : "");
+    return `<div class="vslot" title="${esc(tip)}">${ic && ic.url ? `<img alt="" src="${esc(ic.url)}">` : '<i class="q"></i>'}${n > 1 ? `<b>${n}</b>` : ""}` +
+      (f != null ? `<i class="wear" style="--f:${(f * 100).toFixed(1)}%;--c:hsl(${Math.round(f * 120)},90%,45%)"></i>` : "") + "</div>";
+  };
+  el.innerHTML = `<div class="box"><h4>${esc(m.name)}'s Inventory <button type="button" id="r-invx" title="Close">\u2715</button></h4>` +
+    (m.inv ? `<div class="vgrid">${slots.map(cell).join("")}</div>` : '<div class="sub">No inventory (this game build does not send it).</div>') + "</div>" +
+    `<div class="side"><div><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i><b>${esc(m.prof)}</b></div>` +
+    `<div>${esc(m.status || "")}</div><div>Slots used: <b>${used}</b> of ${slots.length}</div>` +
+    `<div>Emeralds: <b>${fmt(m.em || 0)}</b> carried${m.chests ? `, <b>${fmt(m.emChests || 0)}</b> in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}</div>` +
+    `<div>Food: <b>${fmt(m.food || 0)}</b> bread-equivalent carried${m.chests ? `, <b>${fmt(m.foodChests || 0)}</b> in chests` : ""}</div></div>`;
+}
+$("r-inv").addEventListener("click", e => { if (e.target.closest("#r-invx")) { hlName = null; if (snap && curV) drawMap(snap); markRoster(); } });
 // Villagers who died in this village, newest first (the filter box applies to them too).
 function renderPast(dead, q) {
   const rows = dead.slice().reverse().filter(d => !q || (d.name + " " + d.prof + " " + (d.cause || "")).toLowerCase().includes(q));

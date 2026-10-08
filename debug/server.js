@@ -50,7 +50,7 @@ function serveGame(req, res) {
 // the server keeps everything it has seen while it runs, so a long session's history isn't cut off.
 const clients = new Set();
 let latest = null, lastPush = 0, pushes = 0, seed = null;
-const layouts = new Map(), details = new Map(), history = new Map();
+const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map();   // icons: item id -> {url, name}, sent once by the game
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
 function broadcast(event, obj) { const d = JSON.stringify(obj); for (const c of clients) send(c, event, d); }
@@ -77,6 +77,7 @@ function push(body, res) {
   if (s.info && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); } seed = s.info.seed; }
   for (const k in s.layouts || {}) layouts.set(k, s.layouts[k]);
   for (const k in s.detail || {}) details.set(k, s.detail[k]);
+  for (const k in s.icons || {}) icons.set(k, s.icons[k]);
   const logs = {};
   for (const k in s.logs || {}) logs[k] = { key: k, cap: s.logs[k].cap, entries: mergeLog(k, s.logs[k].entries || []) };
   latest = { ...s, layouts: undefined, logs: undefined };
@@ -88,11 +89,12 @@ function push(body, res) {
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
 const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true" }, h);
 const cached = () => {
-  const logs = {}, ls = {}, ds = {};
+  const logs = {}, ls = {}, ds = {}, ic = {};
+  for (const [k, i] of icons) ic[k] = i;
   for (const [k, h] of history) logs[k] = { key: k, cap: 300, entries: h };
   for (const [k, l] of layouts) ls[k] = l;
   for (const [k, d] of details) ds[k] = d;
-  return { layouts: ls, logs, details: ds };
+  return { layouts: ls, logs, details: ds, icons: ic };
 };
 
 function serveDebug(req, res) {
