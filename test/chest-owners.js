@@ -138,7 +138,9 @@ module.exports = async (pg, out) => {
       return { buyer: m.profession, em: T.inv.count(m.inv, I.emerald), fm: BF.storage.keyOf(f) };
     }, v.noChestKeys[0]);
     console.log("order test:", JSON.stringify(r10));
-    for (let k = 0; k < 6 && !(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k); return !!(m.store && m.store.order); }, v.noChestKeys[0])); k++)
+    for (let k = 0; k < 6 && !(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
+      if (!(m.store && m.store.order)) for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: BF.I.cobblestone, count: 64 };   // it may eat or sell between steps: keep it full
+      return !!(m.store && m.store.order); }, v.noChestKeys[0])); k++)
       await step(0.1 + k * 0.004, 0.104 + k * 0.004, 10);   // the buyer notices it is full and orders a chest
     const r11 = await pg.evaluate(k => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead);
