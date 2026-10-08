@@ -860,3 +860,13 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - `BF.villagerHover.update(dt)` (main.js, every frame): when the crosshair's ray hits a villager within 32 blocks with no block in front,
   a card at the top centre shows its name, profession ("Child" for children) and `BF.villagerStatus.text`, refreshed 4 times a second.
   Survival and creative alike; hidden while any screen or menu is open or the player is dead. `shown()` returns the villager or null.
+
+## Boats (js/boats.js, loaded after drops.js)
+- Items `<wood>_boat` for every `BF.WOOD_SPECIES` (appended to ITEM_DEFS, `boat: wood`, stack 1, "boat" sprite in the wood colour). Recipe: 5 planks of that wood in a U (`P P` / `PPP`); furnace fuel 60 s.
+- `BF.boats = { list, init, update(dt), drive(b, dt, {fwd, turn}), raycast(origin, dir, max, skip), placeFromPlayer(wood, origin, dir, yaw, reach), canBoard(b), hit(b, creative), remove(b, drop), letOut(b), exitSpot(b, hw, h), seatOf(b, "player"|"mob"), seat(m), holds(m), clear, counts, serialize, deserialize, spawn(wood, x, y, z, yaw) }`.
+- A boat: `{wood, pos, vel, yaw, damage, rider, mob, stowed, medium}`. Bow faces `(-sin yaw, -cos yaw)` like the player's look. Box half-width 0.6875, height 0.5625 (1.5 with the player aboard, so the sitting player never clips into blocks). `moveBox` with no step-up: boats never climb a ledge or a river step; going down one they fall to the lower water.
+- Speeds: water 8 blocks/s (accel 9.6, drag 1.2), ice / packed ice / blue ice 40, land 0.4. Flowing water pushes along the flow. Boats in an unloaded chunk wait; a boat never moves into an unloaded chunk.
+- `update(dt)` runs in main.js's simulation loop (so empty boats drift with the fast-forward); the player's boat is driven by `drive` from `BF.player` every real-time frame. `BF.player.boat`, `mount(b)`, `dismount()`, `ride(fwd, turn, dt)` (tests).
+- Mobs: one mob passenger (`b.mob`, `m.riding = b`); mobs.js skips its physics and despawning while `BF.boats.seat(m)` holds it. Its chunk unloading stows it (`b.stowed = {type, variant, style, key}`): a villager is taken back when its village respawns it, other mobs are spawned again in the seat.
+- Save (`boats` in the world save): `[[wood, x, y, z, yaw, rider, passenger|null]]`; `rider` puts the player back in that boat. Debug feed: boat counts by wood (`oak_boat`, ...) next to the mob types; F3 shows `Boats n`.
+
