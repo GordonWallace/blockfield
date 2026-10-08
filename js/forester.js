@@ -550,6 +550,7 @@ function ai(m, dt, out) {
     if (!task && !F.sweep && F.shopT <= 0) {
       F.shopT = SHOP_EVERY;
       const deal = findAxeSeller(m, F);
+      if (!deal && BF.econ && !m.inv.some(s => s && isAxe(s.id))) BF.econ.want(m, "Axe");   // dead ends (js/economy.js)
       if (deal) task = { kind: "buy", deal, x: Math.floor(deal.other.position.x), y: Math.floor(deal.other.position.y), z: Math.floor(deal.other.position.z), max: SHOP_MAX + 2.5 * deal.other.position.distanceTo(m.position) };
     }
     if (!task && !F.sweep) {

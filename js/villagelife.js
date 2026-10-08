@@ -1367,6 +1367,7 @@ function doLogDeal(m, t) {
 // They buy one from whoever in the village sells it (the toolsmith, as a rule) at that villager's own offer: the best tool they can pay for,
 // the nearer seller when two are as good. A villager hired after its village was generated starts with only the emeralds for it (trading.js hireKit).
 const TOOL_NEED = { farmer: [/_hoe$/, /^(water_)?bucket$/], shepherd: [/^shears$/] };
+const TOOL_LABEL = { "_hoe$": "Hoe", "^(water_)?bucket$": "Bucket", "^shears$": "Shears" };   // for the Economy view (js/economy.js)
 function toolNeed(m) {
   if (!TOOL_NEED[m.profession] || m.child) return null;
   const miss = TOOL_NEED[m.profession].filter(re => !m.inv.some(s => s && re.test(BF.items[s.id].name)));
@@ -1453,7 +1454,14 @@ function shopAI(m, dt, out) {
     const tool = hasEm && toolNeed(m);
     if (sh.cd > now || m.child || !(hungry || wheat || tool)) return false;
     const deal = (hungry && findFoodSeller(m)) || (tool && findToolSeller(m, tool)) || (wheat && findWheatSeller(m)) || null;
-    if (!deal) { sh.cd = now + 0.08; return false; }
+    if (!deal) {
+      if (BF.econ) {   // nobody sells any of it now: the Economy view's dead ends (js/economy.js)
+        if (hungry) BF.econ.want(m, "Food");
+        if (wheat) BF.econ.want(m, ids().wheat);
+        if (tool) for (const re of TOOL_NEED[m.profession]) if (!m.inv.some(s => s && re.test(BF.items[s.id].name))) BF.econ.want(m, TOOL_LABEL[re.source]);
+      }
+      sh.cd = now + 0.08; return false;
+    }
     sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; ai.route = null;
   }
   const deal = sh.deal, v2 = deal && deal.seller;

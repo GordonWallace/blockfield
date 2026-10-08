@@ -33,7 +33,7 @@ async function openWorld(seed) {
 
 // ---- in-page recorder, installed before the villagers spawn (starting kits are handed out at spawn)
 function install(key) {
-  const R = window.__rec = { key, trades: [], uses: {}, breaks: [], dug: {}, logs: [], minerLog: [], snaps: [], furn: [], lastTools: {}, appeared: [], vanished: [] };
+  const R = window.__rec = { key, trades: [], calls: [], uses: {}, breaks: [], dug: {}, logs: [], minerLog: [], snaps: [], furn: [], lastTools: {}, appeared: [], vanished: [] };
   const day = () => +(BF.sky.day + BF.sky.time).toFixed(3);
   const inV = m => m && m.village && m.village.key === window.__rec.key;
   // a unique label per villager (names can repeat within a village)
@@ -50,6 +50,8 @@ function install(key) {
   const oTrade = BF.vlog.trade;
   BF.vlog.trade = function (buyer, seller, o, times) {
     const r = window.__rec;
+    if (r && (inV(buyer) || inV(seller)))   // every trade as given, for checking the Economy view's tallies (js/economy.js) at the end
+      r.calls.push([buyer === 'player' ? 'Player' : BF.vlog.pretty(buyer.profession), BF.vlog.pretty(seller.profession), typeof o === 'object' ? JSON.parse(JSON.stringify(o)) : String(o), times || 1]);
     if (r && o && typeof o === 'object' && o.sell && (inV(buyer) || inV(seller)))
       r.trades.push({ d: day(), buyer: buyer === 'player' ? 'player' : buyer.profession, bName: who(buyer), seller: seller.profession, sName: who(seller),
         item: BF.itemName(o.sell.id), n: o.sell.n * (times || 1), paid: o.buy.map(x => x.n * (times || 1) + ' ' + BF.itemName(x.id)).join(' + ') });
@@ -85,6 +87,45 @@ function install(key) {
     }
     return oEmit.apply(this, arguments);
   };
+}
+
+// The Economy view's tallies (js/economy.js) against the soak's own record of every trade: goods per seller, buyer and item must match.
+// Dead ends: a toolsmith the soak saw "Waiting for gold ..." must show as wanting it, and a miner holding cobblestone it hasn't sold
+// for 2 days must show as holding it.
+function econCheck() {
+  const R = window.__rec, E = BF.econ, out = [];
+  if (!E) return ['FAIL economy: BF.econ missing'];
+  const nm = id => BF.itemName(id).replace(/ Item$/, ''), want = {};
+  const add = (k, n) => { want[k] = (want[k] || 0) + n; };
+  for (const [b, s, o, t] of R.calls) {
+    let gave, got;
+    if (typeof o === 'object') { gave = o.buy.map(x => [nm(x.id), x.n * t]); got = [[nm(o.sell.id), o.sell.n * t]]; }
+    else { const m = /gave (.+?), got (.+)$/.exec(o); if (!m) continue; const st = x => x.split(' + ').map(y => /^(\d+) (.+)$/.exec(y.trim())).filter(Boolean).map(r => [r[2].replace(/ Item$/, ''), +r[1]]); gave = st(m[1]); got = st(m[2]); }
+    for (const [it, n] of got) if (it !== 'Emerald') add(s + '|' + b + '|' + it, n);
+    for (const [it, n] of gave) if (it !== 'Emerald') add(b + '|' + s + '|' + it, n);
+  }
+  const have = {}, v = E.view(R.key);
+  for (const d in v.days) for (const f of v.days[d].f) have[f[0] + '|' + f[1] + '|' + f[2]] = (have[f[0] + '|' + f[1] + '|' + f[2]] || 0) + f[4];
+  const keys = new Set([...Object.keys(want), ...Object.keys(have)]), bad = [...keys].filter(k => (want[k] || 0) !== (have[k] || 0));
+  out.push((bad.length ? 'FAIL' : 'PASS') + ` economy tallies match the soak's ${R.calls.length} trades (${keys.size} flows)` + (bad.length ? ': ' + bad.slice(0, 5).map(k => k + ' soak ' + (want[k] || 0) + ' tally ' + (have[k] || 0)).join('; ') : ''));
+  // dead ends
+  const rec = BF.mobs.villages.get(R.key), w = {};
+  if (rec) E.scan(rec);
+  const v2 = E.view(R.key);
+  for (const d in v2.days) for (const x of v2.days[d].w) w[x[0] + '|' + x[1]] = (w[x[0] + '|' + x[1]] || 0) + x[2];
+  const waits = new Set();
+  for (const sn of R.snaps) for (const x of sn.vs) { const m = x.prof === 'toolsmith' && /^Waiting for (\w+)/.exec(x.status || ''); if (m) waits.add(m[1][0].toUpperCase() + m[1].slice(1)); }
+  for (const mat of waits) out.push((w['Toolsmith|' + mat] ? 'PASS' : 'FAIL') + ` economy: the toolsmith's wait for ${mat} is a dead end (${w['Toolsmith|' + mat] || 0} h)`);
+  const today = v2.days[v2.today], now = BF.sky.day + BF.sky.time, cob = BF.I.cobblestone;
+  for (const m of (rec ? rec.members : [])) {
+    if (m.profession !== 'miner' || m.dead || !m.position || !(m.trades || []).some(o => o.sell.id === cob)) continue;
+    const held = BF.trades.inv.count(m.inv, cob), name = BF.vlog.nameOf(m), first = R.snaps[0] ? R.snaps[0].d : now;
+    const lastSale = Math.max(first, ...R.trades.filter(t => t.sName === window.__who(m) && t.item === 'Cobblestone').map(t => t.d));
+    if (held < 1 || now - lastSale < E.STUCK) continue;
+    const line = today && today.s.find(r => r[0] === name && r[2] === 'Cobblestone');
+    out.push((line ? 'PASS' : 'FAIL') + ` economy: miner ${name}'s unsold cobblestone (${held}, last sold day ${lastSale.toFixed(2)}) is a dead end` + (line ? ' (' + line[4] + ' days)' : ''));
+  }
+  return out;
 }
 
 // One snapshot of the village (every game hour).
@@ -160,6 +201,7 @@ function snapshot() {
       await pg.evaluate(t => { window.__TSTRACE0 = t; }, !!process.env.TSTRACE);
       await pg.evaluate(install, key);
       await pg.evaluate('window.__snap = ' + snapshot.toString());
+      await pg.evaluate('window.__econCheck = ' + econCheck.toString());
       const setup = await pg.evaluate(([v, ft]) => {
         window.__FT = ft; window.__TSTRACE = !!(window.__TSTRACE0);
         const key = Math.round(v.x) + ',' + Math.round(v.z);
@@ -207,7 +249,8 @@ const add = (o, k, n = 1) => { o[k] = (o[k] || 0) + n; };
 const top = (o, n = 6) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => k + ' ' + v).join(', ');
 
 async function summarise(pg, seed, v, setup, t0) {
-  const R = await pg.evaluate(() => { const r = Object.assign({}, window.__rec); delete r.lastTools; return r; });
+  const econ = await pg.evaluate(() => window.__econCheck());
+  const R = await pg.evaluate(() => { const r = Object.assign({}, window.__rec); delete r.lastTools; delete r.calls; return r; });
   const first = R.snaps[0], last = R.snaps[R.snaps.length - 1];
   const profsEnd = {};
   for (const x of last.vs) add(profsEnd, x.prof);
@@ -265,6 +308,7 @@ async function summarise(pg, seed, v, setup, t0) {
   console.log('   village log kinds:', JSON.stringify(logKinds), 'miner log:', JSON.stringify(minerKinds));
   if (process.env.TSTRACE) for (const l of R.tstrace || []) console.log('     ts', JSON.stringify(l));
   if (process.env.VERBOSE) for (const l of R.logs.slice(-40)) console.log('     log', JSON.stringify(l));
+  for (const l of econ) console.log(l.startsWith('FAIL') ? l : '   ' + l);
   for (const w of workers) if (w.toolShare === 0) console.log(`WARN seed ${seed} village ${row.key}: ${w.prof} ${w.name} never held a ${NEEDS[w.prof]} during work hours`);
   return row;
 }

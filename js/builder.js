@@ -780,6 +780,7 @@ function shopMode(m, bs, dt, out) {
     const deal = findSeller(m, bs, a.shortfall);
     if (deal) { bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0; }
     else {
+      if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
       bs.stage = "wait"; bs.t = rnd(RECHECK[0], RECHECK[1]);
       if (!e && Math.random() < 0.5) { bs.mode = "idle"; bs.want = null; bs.cool = 0; bs.t = 1; }   // look at other plans too
     }
