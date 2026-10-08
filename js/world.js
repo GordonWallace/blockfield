@@ -60,7 +60,7 @@ world.init = function (sceneRef) {
   world._faceUV = [];
   for (const b of BF.blocks) {
     if (!b.tiles) continue;
-    for (let f = 0; f < 6; f++) world._faceUV[b.id * 6 + f] = BF.textures.uv(b.tiles[f === 4 ? "front" : FACES[f].kind]);
+    for (let f = 0; f < 6; f++) world._faceUV[b.id * 6 + f] = BF.textures.uv(b.tiles[f === (b.frontFace != null ? b.frontFace : 4) ? "front" : FACES[f].kind]);
   }
   // Biome tint per face: 0 none, 1 grass, 2 foliage, 3 water, 4 grass side (untinted dirt + tinted overlay quad)
   const tinted = BF.textures.tinted || {};
@@ -72,7 +72,7 @@ world.init = function (sceneRef) {
   for (const b of BF.blocks) {
     if (!b.tiles) continue;
     for (let f = 0; f < 6; f++) {
-      const n = b.tiles[f === 4 ? "front" : FACES[f].kind];
+      const n = b.tiles[f === (b.frontFace != null ? b.frontFace : 4) ? "front" : FACES[f].kind];
       let t = 0;
       if (n === "grass_side" && hasOverlay) t = 4;
       else if (inList("grass", n)) t = 1;
@@ -246,7 +246,7 @@ world.setBlock = function (x, y, z, id) {
   if (BF.light) { BF.light.onSet(x, y, z, oldId, id); BF.light.popUnsupported(x, y, z, id); } // block light + torches losing support
   if (BF.mobs && BF.mobs.onSet) BF.mobs.onSet(x, y, z, oldId, id); // monster spawn wait restarts where it got darker (js/mobs.js)
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
-  if (oldId === BF.B.chest && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
+  if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
   if (BF.blocks[id] && BF.blocks[id].growsInto) growing.add(fkey(x, y, z));
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {

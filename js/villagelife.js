@@ -59,7 +59,8 @@ const surplus = m => Math.max(0, available(m) - KEEP);         // what it can sp
 const eatL = [];
 function onEat(cb) { if (typeof cb === "function") eatL.push(cb); }
 function life(m) {
-  if (!m.life) { const t = dayNow(); m.life = { v: LIFE_V, mealT: t, lastAte: t, sat: 0, eaten: 0, starving: false }; }
+  // lived: game days this villager has been loaded and active (see tick), its age
+  if (!m.life) { const t = dayNow(); m.life = { v: LIFE_V, mealT: t, lastAte: t, sat: 0, eaten: 0, starving: false, lived: 0 }; }
   return m.life;
 }
 // Eats `amount` bread-eq: whole items are taken out of the inventory (cheapest first) and any excess is carried as
@@ -150,13 +151,14 @@ function startFood(v) {
 function pack(v) {
   const L = v.life;
   if (!L) return { v: LIFE_V };
-  return { v: LIFE_V, mealT: L.mealT, lastAte: L.lastAte, sat: +L.sat.toFixed(4), eaten: +L.eaten.toFixed(3), starving: !!L.starving };
+  return { v: LIFE_V, mealT: L.mealT, lastAte: L.lastAte, sat: +L.sat.toFixed(4), eaten: +L.eaten.toFixed(3), starving: !!L.starving, lived: +(L.lived || 0).toFixed(4) };
 }
 function unpack(v, o) {
   if (!v) return;
   if (!o || typeof o !== "object") { v.life = null; startFood(v); return; }   // save from before villager food
   const t = dayNow(), num = (x, d) => (Number.isFinite(+x) ? +x : d);
-  v.life = { v: LIFE_V, mealT: num(o.mealT, t), lastAte: num(o.lastAte, t), sat: Math.max(0, num(o.sat, 0)), eaten: Math.max(0, num(o.eaten, 0)), starving: !!o.starving };
+  v.life = { v: LIFE_V, mealT: num(o.mealT, t), lastAte: num(o.lastAte, t), sat: Math.max(0, num(o.sat, 0)), eaten: Math.max(0, num(o.eaten, 0)), starving: !!o.starving,
+    lived: Math.max(0, num(o.lived, 0)) };   // saves from before ages: counted from now
   v.eatenTotal = v.life.eaten;
   v.starving = v.life.starving;
 }
@@ -909,11 +911,13 @@ function projectsFor(R) {
 function exportAll(out) {
   for (const [k, list] of savedProjects) if (list.length) out["farmbeds:" + k] = JSON.parse(JSON.stringify(list));
   for (const [k, list] of liveProjects) if (list.length) out["farmbeds:" + k] = JSON.parse(JSON.stringify(list));
+  for (const [k, A] of villageAges) out["vage:" + k] = +A.lived.toFixed(4);   // the village's age: game days loaded and active
   return out;
 }
 function importAll(o) {
-  savedProjects.clear(); liveProjects.clear(); savedProjects.clear();
+  savedProjects.clear(); liveProjects.clear(); savedProjects.clear(); villageAges.clear();
   for (const k in o || {}) {
+    if (k.slice(0, 5) === "vage:" && Number.isFinite(+o[k])) { villageAges.set(k.slice(5), { lived: Math.max(0, +o[k]), pass: -9, t: 0 }); continue; }
     if (k.slice(0, 9) !== "farmbeds:" || !Array.isArray(o[k])) continue;
     const list = o[k].filter(p => p && p.L && ["x0", "z0", "x1", "z1", "y"].every(f => Number.isFinite(p.L[f])) && Array.isArray(p.L.ch) && (p.L.ax === "x" || p.L.ax === "z"));
     for (const p of list) { p.fails = 0; p.wait = 0; }
@@ -1341,6 +1345,22 @@ function ai(m, dt, out) {
   return false;
 }
 let acc = 0;
+// Ages: game days of being loaded and active, for each villager (life.lived) and each village (villageAges). Only time between
+// two consecutive ticks that both saw the villager counts, so days spent unloaded (or in a closed save) don't; a skip while it
+// is loaded (sleeping, fast-forward) does, since it lives through it (its meals catch up too).
+let pass = 0, agesHooked = false;
+const villageAges = new Map();   // village key -> {lived, pass, t}
+function ageStep(m, now) {
+  const L = FD().life(m);
+  if (m._agePass === pass - 1 && now > m._ageT) L.lived = (L.lived || 0) + (now - m._ageT);
+  m._agePass = pass; m._ageT = now;
+  const k = m.village && m.village.key;
+  if (!k) return;
+  const A = villageAges.get(k) || (villageAges.set(k, { lived: 0, pass: -9, t: now }), villageAges.get(k));
+  if (A.pass === pass) return;   // already counted this pass (another of its villagers)
+  if (A.pass === pass - 1 && now > A.t) A.lived += now - A.t;
+  A.pass = pass; A.t = now;
+}
 const isWorking = m => !!((m.farm && (m.farm.task || (m.farm.idleWork && m.farm.thinkT > 0))) || m.tradingWith);
 function tick(dt) {
   updateParticles(dt);
@@ -1348,10 +1368,13 @@ function tick(dt) {
   if (acc < 0.5 || !BF.mobs || !BF.food) return;
   const step = acc; acc = 0;
   const now = dayNow(), t = skyT(), day = BF.sky ? BF.sky.day || 0 : 0;
+  if (!agesHooked && BF.on) { agesHooked = true; BF.on("newWorld", () => villageAges.clear()); }
+  pass++;
   const scanned = new Set();
   for (const m of BF.mobs.list) {
     if (m.type !== "villager" || m.dead || m.removed || !Array.isArray(m.inv)) continue;
     try { FD().digest(m, now); } catch (e) { console.error(e); }
+    ageStep(m, now);
     cookDaily(m, day);
     if (m.profession === "farmer" && m.village) {
       const fs = m.farm || (m.farm = newFarm());
@@ -1462,5 +1485,6 @@ if (BF.texKit) {
 
 BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
   exportAll, importAll, bedRects,
+  villageAge: key => { const A = villageAges.get(key); return A ? A.lived : null; },   // game days loaded and active, or null if never
   _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, perform, dealWith, findFoodSeller, scanStep, inRange } };
 })();

@@ -1353,7 +1353,7 @@ function drawShell(b, P, S, style) {
       }
       flatRoof(P, 0, 0, w, d, y + 4, flat ? S.roof : B.planks, flat ? 0 : S.corner);
       door(); P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass);
-      P(1, y + 1, d - 2, B.furnace); P(2, y + 1, d - 2, B.furnace); P(w - 2, y + 1, d - 2, B.chest); P(w - 2, y + 1, d - 3, B.crafting_table);
+      P(1, y + 1, d - 2, BF.furnaceId(out)); P(2, y + 1, d - 2, BF.furnaceId(out)); P(w - 2, y + 1, d - 3, BF.chestId(out)); P(w - 2, y + 1, d - 2, B.crafting_table);   // chest in front of the table, so its lid is clear
       P(1, y + 1, 1, B.lantern);
       return;
     }
@@ -1383,7 +1383,7 @@ function drawShell(b, P, S, style) {
       windows(P, 0, 0, w, d, y + 2, false); windows(P, 0, 0, w, d, y + 3, false);
       if (flat) flatRoof(P, 0, 0, w, d, y + 6, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 5, S.wall, S.roof);
       door();
-      for (let u = 1; u < w - 1; u++) { P(u, y + 1, d - 2, u % 2 ? B.chest : S.wall); P(u, y + 2, d - 2, S.wall); }   // shelves
+      for (let u = 1; u < w - 1; u++) { P(u, y + 1, d - 2, u % 2 ? BF.chestId(out) : S.wall); P(u, y + 2, d - 2, S.wall); }   // shelves
       P(1, y + 1, 1, B.crafting_table); P(w - 2, y + 1, 1, B.lantern);
       return;
     }
@@ -1411,7 +1411,7 @@ function drawShell(b, P, S, style) {
       for (let k = 1; k <= 5; k++) P(lu, y + k, d - 2, BF.ladderId(out));   // against the back wall, one rung above the upper floor to step off
       if (flat) flatRoof(P, 0, 0, w, d, y + 8, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 7, S.wall, S.roof);
       door();
-      P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, B.chest);
+      P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, BF.chestId(out));
       return;
     }
     default: {
@@ -1422,7 +1422,7 @@ function drawShell(b, P, S, style) {
       if (flat) flatRoof(P, 0, 0, w, d, y + Hh + 1, S.roof, 0); else roof(P, S, 0, 0, w, d, y + Hh, S.wall, S.roof);
       door();
       if (b.type === "big" || b.h < 0.6) P(1, y + 1, d - 2, B.crafting_table);
-      if (b.type === "big") { P(w - 2, y + 1, d - 2, B.chest); P(w - 2, y + 1, 1, B.lantern); }
+      if (b.type === "big") { P(w - 2, y + 1, d - 2, BF.chestId(out)); P(w - 2, y + 1, 1, B.lantern); }
     }
   }
 }
@@ -1597,11 +1597,13 @@ const ORE3 = [
   [211, 6.5, 9, "d", 6, 99999, "coal_ore", "deepslate_coal_ore", 1],
   [212, 6.0, 7, "d", 6, 99999, "iron_ore", "deepslate_iron_ore", 1],
   [217, 5.5, 9, "d", 6, 99999, "copper_ore", "deepslate_copper_ore", 1],
-  [213, 2.2, 6, "y", -64, 32, "gold_ore", "deepslate_gold_ore"],
-  [214, 2.0, 5, "y", -64, 16, "diamond_ore", "deepslate_diamond_ore"],
-  [215, 1.0, 6, "y", -64, 40, "lapis_ore", "deepslate_lapis_ore"],
-  [216, 3.5, 6, "y", -64, 16, "redstone_ore", "deepslate_redstone_ore"],
-  [219, 0.03, 1, "y", -64, 40, "emerald_ore", "deepslate_emerald_ore"],
+  // the rarer ores are placed by depth below the surface too, so every village's miner can reach them (js/miner.js DIG_DEPTH): an apprentice
+  // reaches gold, a journeyman diamonds and redstone. Each band is about as tall as vanilla's (from y 64 ground), down to bedrock on low land.
+  [213, 2.2, 6, "d", 32, 140, "gold_ore", "deepslate_gold_ore"],
+  [214, 2.0, 5, "d", 48, 140, "diamond_ore", "deepslate_diamond_ore"],
+  [215, 1.0, 6, "d", 24, 140, "lapis_ore", "deepslate_lapis_ore"],
+  [216, 3.5, 6, "d", 48, 140, "redstone_ore", "deepslate_redstone_ore"],
+  [219, 0.03, 1, "d", 24, 140, "emerald_ore", "deepslate_emerald_ore"],
   [218, 1.1, 1, "d", 3, 500, "emerald_ore", "deepslate_emerald_ore", 0, "mtn"],
   [221, 1.6, 70, "d", 5, 99999, "granite"], [222, 1.6, 70, "d", 5, 99999, "diorite"], [223, 1.6, 70, "d", 5, 99999, "andesite"],
   [224, 1.0, 60, "y", -64, 16, "tuff", "tuff"], [225, 0.35, 40, "d", 30, 250, "dripstone_block"],

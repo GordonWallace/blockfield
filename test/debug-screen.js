@@ -41,6 +41,15 @@ const start = async () => {
   ok('villager count', g.villagers === want.villagers);
   ok('seed', g.seed === want.seed);
   ok('roster rows = loaded villagers', g.rows === want.loaded);
+  // emeralds and food (inventory plus owned chests) and starving, per villager
+  const gv = await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
+    const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && BF.trades.inv.count(x.inv, BF.I.emerald) > 0) || rec.members.find(x => x.type === 'villager' && !x.dead);
+    const k = BF.storage.keyOf(m), cs = [...BF.inventory.chests.values()].filter(c => c.owner === k);
+    const em = BF.trades.inv.count(m.inv, BF.I.emerald) + cs.reduce((n, c) => n + c.slots.reduce((a, st) => a + (st && st.id === BF.I.emerald ? st.count : 0), 0), 0);
+    return { name: BF.vlog.nameOf(m), em, starving: !!m.starving }; });
+  await dbg.waitForTimeout(600);
+  const rr = await dbg.evaluate(n => { const tr = [...document.querySelectorAll('#r-body tr')].find(t => t.dataset.n === n); return tr && [...tr.children].map(td => td.textContent); }, gv.name);
+  ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 10 && /^[\d.,]+ days?$/.test(rr[8]) && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
   ok('log entries ' + g.log + '/' + want.log, g.log === want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nXYZ /.test((await got()).f3));
@@ -85,25 +94,42 @@ const start = async () => {
   ok('a trade still shows while its buyer is selected', vis.some(t => /got 1 Test/.test(t)) && vis.some(t => /^Player traded/.test(t)));
   ok('menu stays open after a change', await dbg.evaluate(() => document.getElementById('l-types').open && !!document.querySelector('#l-types .facts')));
   ok('partly on: type checkbox shows mixed', await dbg.evaluate(s => document.querySelector(s + ' input.tcb').indeterminate, row(tr.seller)));
-  await dbg.click(`${row('Player')} input.tcb`); await dbg.waitForTimeout(200);
+  await dbg.click(`${row('Player')} input.tcb`);
+  await dbg.waitForFunction(() => ![...document.querySelectorAll('#log .ent .tx')].some(e => /^Player traded/.test(e.textContent)), null, { timeout: 3000 }).catch(() => {});
   vis = await texts();
-  ok('player checkbox hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
+  // (villagers keep logging meanwhile, so the count can't be compared with the one taken earlier)
+  ok('player checkbox hides the player trade ' + JSON.stringify(vis.filter(t => /^Player traded/.test(t))), !vis.some(t => /^Player traded/.test(t)));
   await dbg.screenshot({ path: out + '-filters.png', fullPage: true });
   await dbg.click('#l-count'); await dbg.waitForTimeout(100);
   ok('a click elsewhere closes the menu', !(await dbg.evaluate(() => document.getElementById('l-types').open)));
   await dbg.reload(); await dbg.waitForTimeout(1500);
   ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(s => !document.querySelector(s + ' input.tcb').checked, row('Player')));
   // Select none, then one type: only entries involving that type (whoever the other party is)
-  await dbg.click('#l-types summary'); await dbg.click('#l-none'); await dbg.waitForTimeout(200);
+  await dbg.click('#l-types summary'); await dbg.click('#l-types [data-all="0"]'); await dbg.waitForTimeout(200);
   const none = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].filter(e => /trade|bed|job|birth|death/.test(e.className)).length);
   ok('select none hides villager entries', none === 0);
   await dbg.check(`${row(tr.buyer)} input.tcb`); await dbg.waitForTimeout(200);
   vis = await texts();
   ok('one type selected shows its trades with unselected types', vis.some(t => /got 1 Test/.test(t)) && !vis.some(t => /^Player traded/.test(t)));
   ok('and nothing without it', vis.every(t => !/traded with/.test(t) || t.includes('(' + tr.buyer + ')')));
-  await dbg.click('#l-all'); await dbg.waitForTimeout(200);
+  await dbg.click('#l-types [data-all="1"]'); await dbg.waitForTimeout(200);
   ok('select all restores', (await texts()).some(t => /^Player traded/.test(t)) && (await count()) >= all);   // villagers may have logged more meanwhile
   await dbg.click('#l-count');
+  // event types: a second dropdown that combines with the villager types ("Show <Cleric> <Trades>")
+  await dbg.click('#l-kinds summary');
+  ok('event dropdown lists births, deaths and trades', await dbg.evaluate(() => ['birth', 'death', 'trade'].every(k => document.querySelector(`#l-kinds .frow[data-k="${k}"]`))));
+  await dbg.click('#l-kinds [data-all="0"]'); await dbg.click('#l-kinds .frow[data-k="birth"] input.kcb'); await dbg.waitForTimeout(200);
+  vis = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].map(e => e.className.split(' ')[1]));
+  ok('births only', vis.length > 0 && vis.every(k => k === 'birth'));
+  await dbg.click('#l-kinds [data-all="1"]'); await dbg.click('#l-kinds [data-all="0"]'); await dbg.click('#l-kinds .frow[data-k="trade"] input.kcb');
+  await dbg.click('#l-count'); await dbg.click('#l-types summary'); await dbg.click('#l-types [data-all="0"]'); await dbg.check(`${row(tr.seller)} input.tcb`); await dbg.waitForTimeout(200);
+  vis = await texts();
+  ok('one type and one event type combine', vis.length > 0 && vis.every(t => / traded with /.test(t) && t.includes('(' + tr.seller + ')')));
+  ok('summaries name the single choices', await dbg.evaluate(s => document.querySelector('#l-types summary').textContent === s && document.querySelector('#l-kinds summary').textContent === 'Trades', tr.seller));
+  await dbg.click('#l-kinds summary'); await dbg.waitForTimeout(100);
+  await dbg.screenshot({ path: out + '-events.png', fullPage: true });
+  await dbg.click('#l-clear'); await dbg.waitForTimeout(200);
+  ok('clear filters shows everything', (await count()) >= all && !(await dbg.$('#l-clear')));
   // a second village: the view follows the nearest loaded one, the list shows both with distances, and the first can be picked
   const first = want.name;
   const second = await game.evaluate(() => {
@@ -133,6 +159,67 @@ const start = async () => {
   await dbg.screenshot({ path: out + '-picked.png' });
   await dbg.click('#vl-auto'); await dbg.waitForTimeout(600);
   ok('follow nearest goes back', (await got()).name === second);
+  // ages: game days loaded and active, for villagers and villages; a villager that wasn't ticking (unloaded) doesn't age through a gap
+  const shownKey = await dbg.evaluate(() => document.querySelector('.vrow.sel').dataset.k);   // the village on the screen (another may be known but unloaded)
+  const ages = await game.evaluate(async key => {
+    const vs = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && m.life && m.village && m.village.key === key);
+    const a = vs[0], b = vs[1], la = a.life.lived, lb = b.life.lived;
+    b._agePass = -99;                                            // as if b had just come back from being unloaded
+    BF.sky.day += 3;                                             // three days pass
+    for (let p0 = a._agePass, i = 0; a._agePass < p0 + 2 && i < 100; i++) await new Promise(r => setTimeout(r, 100));   // two village ticks (slow frames stretch them)
+    BF.sky.day -= 3;
+    return { a: a.life.lived - la, b: b.life.lived - lb, village: BF.villageLife.villageAge(a.village.key) };
+  }, shownKey);
+  ok('loaded villager ages through a skip, a returning one does not ' + JSON.stringify(ages), ages.a >= 2.9 && ages.b < 0.5 && ages.village >= 3);
+  await dbg.screenshot({ path: out + '-ages.png', fullPage: true });
+  ok('village age shown', /age [\d.,]+ days?/.test(await dbg.evaluate(() => document.getElementById('v-sub').textContent + document.getElementById('vlist').textContent)));
+  const rowH = await dbg.evaluate(() => [...document.querySelectorAll('#r-body tr')].map(r => Math.round(r.getBoundingClientRect().height)));
+  ok('villager rows all the same height ' + JSON.stringify([...new Set(rowH)]), rowH.length > 3 && new Set(rowH).size === 1);
+  // map legend: structure kinds, and builder-made structures (planned ones count) reach the screen
+  const bkey = await dbg.evaluate(() => document.querySelector('.vrow.sel').dataset.k);
+  const nBuilt = await game.evaluate(key => { const r = BF.mobs.villages.get(key); return (r.built || []).filter(e => e.state !== 'abandoned').length; }, bkey);
+  await dbg.waitForTimeout(800);
+  const leg = await dbg.evaluate(() => document.getElementById('legend').textContent);
+  ok('map legend shows houses, farms, paddocks and builder stars (' + nBuilt + ' built)', /House/.test(leg) && /Farm/.test(leg) && /Paddock/.test(leg) && /Built by a builder/.test(leg));
+  // happiness: the formula's terms, events falling out of the week, and the panel showing the game's score
+  const hap = await game.evaluate(key => {
+    const H = BF.happiness, rec = BF.mobs.villages.get(key);
+    const vs = rec.members.filter(m => m.type === 'villager' && !m.dead && !m.removed), ad = vs.filter(m => !m.child);
+    const h0 = H.score(rec), c = id => h0.terms.find(t => t.id === id).count;
+    const sum = h0.terms.reduce((n, t) => n + t.count * t.weight, H.BASE);
+    H.note(rec.key, 'birth'); H.note(rec.key, 'death');
+    const h1 = H.score(rec);
+    return { score: h0.score, raw: h0.raw, sum, starving: c('starving') === vs.filter(m => m.starving).length,
+      unemployed: c('unemployed') === ad.filter(m => m.profession === 'unemployed').length, d1: h1.raw - h0.raw, key: rec.key };
+  }, shownKey);
+  ok('happiness = 100 + terms, clamped ' + JSON.stringify(hap), hap.raw === Math.round(hap.sum) && hap.score === Math.max(0, Math.min(100, hap.raw)) && hap.starving && hap.unemployed);
+  await dbg.waitForFunction(() => /\u221210 1 villagers? killed/.test(document.getElementById('v-happy').textContent), null, { timeout: 8000 }).catch(() => {});
+  const hShown = await dbg.evaluate(() => document.getElementById('v-happy').textContent);
+  ok('happiness shown on the debug screen: ' + hShown.slice(0, 60), /Happiness\s*\d+\s*\/ 100/.test(hShown) && /\u221210 1 villagers? killed this week/.test(hShown) && /\+\d+ \d+ born this week/.test(hShown));
+  await dbg.screenshot({ path: out + '-happy.png', fullPage: true });
+  const born2 = await game.evaluate(key => { BF.sky.day += 8; const n = BF.happiness.score(BF.mobs.villages.get(key)).terms.find(t => t.id === 'born').count; BF.sky.day -= 8; return n; }, hap.key);
+  ok('a birth and a death this week move happiness by +5 - 10, gone after a week', hap.d1 === -5 && born2 === 0);
+  const hsave = await game.evaluate(key => {
+    const H = BF.happiness, saved = JSON.stringify(H.serialize());
+    H.deserialize(JSON.parse(saved));
+    const round = JSON.stringify(H.serialize()) === saved && H.last(key) != null;
+    const d = BF.sky.day + BF.sky.time;   // a save from before happiness: last week's events come from the village log
+    H.deserialize({ fromLog: { [key]: [[d - 10, 'trade', 'old'], [d - 1, 'trade', 'a'], [d - 0.5, 'death', 'b']] } });
+    const t = H.score(BF.mobs.villages.get(key)).terms, n = id => t.find(x => x.id === id).count;
+    const fromLog = n('trades') === 1 && n('killed') === 1;
+    H.deserialize(JSON.parse(saved));
+    return { round, fromLog };
+  }, hap.key);
+  ok('happiness saves and loads, old saves read last week from the log ' + JSON.stringify(hsave), hsave.round && hsave.fromLog);
+  // past villagers: a villager killed in the shown village is listed with its job, cause and age, and counted
+  const victim = await game.evaluate(key => {
+    const r = BF.mobs.villages.get(key), m = r.members.find(x => x.type === 'villager' && !x.dead && !x.child && x.profession !== 'unemployed');
+    const name = BF.vlog.nameOf(m); BF.mobs.hurt(m, 999, 'a zombie'); return name;
+  }, bkey);
+  await dbg.waitForFunction(n => document.getElementById('r-pastb').textContent.includes(n), victim, { timeout: 8000 }).catch(() => {});
+  const past = await dbg.evaluate(() => ({ n: document.getElementById('r-pastn').textContent, row: document.getElementById('r-pastb').querySelector('tr').textContent, count: document.getElementById('r-count').textContent }));
+  await dbg.screenshot({ path: out + '-past.png', fullPage: true });
+  ok('past villagers list the dead one ' + JSON.stringify(past), +past.n >= 1 && past.row.includes(victim) && /killed by a zombie/.test(past.row) && /days?$/.test(past.row) && /\d+ died/.test(past.count));
   // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
   ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
   // a feed error (an old villagelog.js without panelData, say) shows on the screen instead of "waiting for the game"

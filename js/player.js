@@ -1238,10 +1238,10 @@ function secondaryDown() {
   if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
-  if (target && target.id === BF.B.furnace && useBlk) {
+  if (target && BF.isFurnace(target.id) && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
   }
-  if (target && target.id === BF.B.chest && useBlk) {
+  if (target && BF.isChest(target.id) && useBlk) {
     openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
   }
   if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
@@ -1326,6 +1326,7 @@ function secondaryDown() {
   if (BF.RENDER[sel.id] === 4 && !BF.SOLID[BF.world.getBlock(x, y - 1, z)]) return false; // plants need ground
   if (BF.blocks[sel.id] && BF.blocks[sel.id].sapling && BF.forester && !BF.forester.canSurvive(x, y, z)) return false;   // saplings need soil (js/forester.js)
   if (BF.SOLID[sel.id] && cellBlockedByEntity(x, y, z)) return false;
+  placeId = BF.facedId(placeId, BF.openFacing({ x, y, z }, P.position));   // furnaces and chests open towards the player (an open side)
   if (!BF.world.setBlock(x, y, z, placeId)) return false;
   try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
   swing();

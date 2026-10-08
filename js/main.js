@@ -126,6 +126,7 @@ function frame(now) {
       BF.sky.update(h);
       BF.mobs.update(h);
       BF.drops.update(h);
+      if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
       BF.world.tickSim();
       done++;
     }

@@ -7,15 +7,22 @@
 // - Surface stone first: it looks for above-ground stone within SEARCH (40) blocks of the village's box: the top block of a column that is
 //   stone (or coal / iron ore) and stands 1 or 2 blocks above one of its four neighbours, so the quarry levels outcrops and hillsides into
 //   walkable steps and never sinks a pit or trench. Never within BUILD_AVOID blocks of anything built, never more than FLOOR_BELOW under the plaza. It walks there and digs one block at a time.
-// - Mineshaft: only while there is no surface stone in range (checked each time it is above ground) it digs a mineshaft just outside the village's box: a staircase (1 wide, 3 high) going
-//   down until it has cut STONE_RUN steps through solid rock (MAX_STAIRS at most), then a 2-high corridor straight on with side branches every
-//   4 blocks (branch mining, 8 long each side), torches every 6 cells while it has them. It walks the shaft along its own cells, so nothing
+// - Mineshaft: while there is no surface stone in range (checked each time it is above ground), or once it may dig deeper than a novice (see
+//   below), it digs a mineshaft just outside the village's box: a staircase (1 wide, 3 high) going down DIG_DEPTH[level] blocks below the
+//   entrance, then a 2-high corridor straight on with side branches every
+//   4 blocks (branch mining, 8 long each side), torches every 6 cells while it has them. Ore it can harvest in the walls and ceiling of a cell it
+//   opens is dug too (never ore next to water, never the floor it walks on).
+// - Depth by level: ores generate by depth below the surface (js/worldgen.js ORE3): coal, iron and copper from 6 down, lapis from 24, gold from
+//   32, diamonds and redstone from 48. A novice's staircase goes 20 down (coal, iron, copper), an apprentice's 40 (gold), a journeyman's and
+//   above 60 (diamonds, redstone). Below novice depth it only goes with an iron or better pickaxe (gold, diamonds and redstone need one), and
+//   a shaft dug for a lower level is abandoned for a deeper one when it levels up. It walks the shaft along its own cells, so nothing
 //   needs ladders. A cell that would open into water, something built or a void is skipped (a branch) or ends the shaft (the corridor); a
 //   finished shaft is followed by a new one in another direction. It leaves the shaft before the end of the working day.
-// - What it keeps: cobblestone (stone drops it), coal, ores, raw copper and diamonds; dirt, gravel and the rest it digs through are left behind.
+// - What it keeps: cobblestone (stone drops it), coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis and emeralds; dirt, gravel and the rest it digs through are left behind.
 // - Selling: holding SELL_MIN cobblestone, it walks to a builder of its village that needs some (its current structure's shortfall, or a reserve
 //   of BUILDER_RESERVE for the next foundation in cobblestone villages) and sells at its own offer "1 emerald > 32 cobblestone". Builders short
-//   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. It stops digging at KEEP_COBBLE.
+//   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. A novice stops digging at KEEP_COBBLE; a
+//   deeper digger keeps going for ore and leaves further cobblestone behind.
 // - Persistence: the current mineshaft (m.mi.shaft) is saved with the villager (trading.js pack, `mi`). See CONTRACT.md "Miners".
 (() => {
 "use strict";
@@ -36,7 +43,9 @@ const FLOOR_BELOW = 12;                     // the surface quarry never goes dee
 const REACH = 4.2;                          // eye to block centre
 const VILLAGER_SLOW = 2.5;                  // a villager digs this many times slower than the player's breakTime formula
 const KEEP_COBBLE = 256, SELL_MIN = 32, BUILDER_RESERVE = 32;
-const STONE_RUN = 5, MAX_STAIRS = 48, CORRIDOR = 64, BRANCH_EVERY = 4, BRANCH_LEN = 8, TORCH_EVERY = 6;
+const DIG_DEPTH = [20, 40, 60, 60, 60];     // staircase depth below the entrance, by villager level 1..5
+const DEEP_TIER = 3;                        // pickaxe tier (iron) needed to dig below DIG_DEPTH[0]: gold, diamonds and redstone need it
+const MAX_STAIRS = 64, CORRIDOR = 64, BRANCH_EVERY = 4, BRANCH_LEN = 8, TORCH_EVERY = 6;
 const PERIOD = BRANCH_EVERY + 2 * BRANCH_LEN;   // tunnel cells per corridor stretch: 4 corridor cells, then a branch left and one right
 const TRADE_PAUSE = 1.6;
 const STYLES = ["plains", "desert", "snowy", "savanna", "taiga"];
@@ -46,7 +55,7 @@ const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().t
 // ---------------------------------------------------------------- items
 const I = n => BF.I[n];
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
-const KEEP = new Set(["cobblestone", "coal", "iron_ore", "gold_ore", "raw_copper", "diamond", "cobbled_deepslate", "emerald", "lapis_lazuli", "redstone"]);
+const KEEP = new Set(["cobblestone", "coal", "raw_iron", "raw_gold", "raw_copper", "diamond", "cobbled_deepslate", "emerald", "lapis_lazuli", "redstone"]);
 const keeps = id => KEEP.has(nameOf(id));
 const isPick = id => { const it = BF.items[id]; return !!(it && it.tool && it.tool.type === "pickaxe"); };
 const count = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
@@ -59,6 +68,11 @@ function pickOf(m) {
     if (!best || t > BF.items[best.id].tool.tier || (t === BF.items[best.id].tool.tier && (s.wear || 0) > (best.wear || 0))) best = s;
   }
   return best;
+}
+// How deep (blocks below the entrance) a new staircase goes: by the miner's level, but only novice depth without an iron or better pickaxe.
+function digDepth(m) {
+  const lv = Math.max(1, Math.min(5, m.level || 1)), p = pickOf(m), tier = p ? BF.items[p.id].tool.tier || 0 : 0;
+  return tier >= DEEP_TIER ? DIG_DEPTH[lv - 1] : DIG_DEPTH[0];
 }
 // Seconds to dig block `id` with pickaxe stack `p` (null = bare hands), or Infinity when it cannot be dug.
 function digTime(id, p) {
@@ -162,13 +176,15 @@ function findSurface(m, Q) {
 // ---------------------------------------------------------------- the mineshaft plan
 // shaft = {x, y, z (entrance feet cell), dx, dz (outward), S (stair count once decided, else null), run (stone steps in a row), n (cells done),
 //          k (shafts dug so far), done}. Cell t: stairs while t < S (step i = t + 1: feet y - i, 3 high), then tunnel cell u = t - S.
+// The corridor's direction: straight on from the stairs (turn 0), or to their left (1) or right (2) when a later shaft reuses the staircase.
+const cdir = sh => (sh.turn === 1 ? [-sh.dz, sh.dx] : sh.turn === 2 ? [sh.dz, -sh.dx] : [sh.dx, sh.dz]);
 function tunnelCell(sh, u) {
-  const xs = sh.x + sh.dx * sh.S, zs = sh.z + sh.dz * sh.S, ys = sh.y - sh.S;
+  const xs = sh.x + sh.dx * sh.S, zs = sh.z + sh.dz * sh.S, ys = sh.y - sh.S, [ux, uz] = cdir(sh);
   const p = Math.floor(u / PERIOD), r = u % PERIOD;
-  if (r < BRANCH_EVERY) { const j = p * BRANCH_EVERY + r + 1; return { x: xs + sh.dx * j, y: ys, z: zs + sh.dz * j, h: 2, kind: "corridor", j }; }
+  if (r < BRANCH_EVERY) { const j = p * BRANCH_EVERY + r + 1; return { x: xs + ux * j, y: ys, z: zs + uz * j, h: 2, kind: "corridor", j }; }
   const J = (p + 1) * BRANCH_EVERY, side = r < BRANCH_EVERY + BRANCH_LEN ? 1 : -1, k = side > 0 ? r - BRANCH_EVERY + 1 : r - BRANCH_EVERY - BRANCH_LEN + 1;
-  const px = -sh.dz * side, pz = sh.dx * side;
-  return { x: xs + sh.dx * J + px * k, y: ys, z: zs + sh.dz * J + pz * k, h: 2, kind: "branch", J, side, k };
+  const px = -uz * side, pz = ux * side;
+  return { x: xs + ux * J + px * k, y: ys, z: zs + uz * J + pz * k, h: 2, kind: "branch", J, side, k };
 }
 function cellOf(sh, t) {
   if (sh.S == null || t < sh.S) { const i = t + 1; return { x: sh.x + sh.dx * i, y: sh.y - i, z: sh.z + sh.dz * i, h: 3, kind: "stairs", i }; }
@@ -180,10 +196,10 @@ function walkTo(sh, c) {
   const stairs = c.kind === "stairs" ? c.i : sh.S;
   for (let i = 1; i <= stairs; i++) out.push([sh.x + sh.dx * i, sh.y - i, sh.z + sh.dz * i]);
   if (c.kind === "stairs") return out;
-  const xs = sh.x + sh.dx * sh.S, zs = sh.z + sh.dz * sh.S, ys = sh.y - sh.S;
+  const xs = sh.x + sh.dx * sh.S, zs = sh.z + sh.dz * sh.S, ys = sh.y - sh.S, [ux, uz] = cdir(sh);
   const jEnd = c.kind === "corridor" ? c.j : c.J;
-  for (let j = 1; j <= jEnd; j++) out.push([xs + sh.dx * j, ys, zs + sh.dz * j]);
-  if (c.kind === "branch") { const px = -sh.dz * c.side, pz = sh.dx * c.side, bx = xs + sh.dx * c.J, bz = zs + sh.dz * c.J; for (let k = 1; k <= c.k; k++) out.push([bx + px * k, ys, bz + pz * k]); }
+  for (let j = 1; j <= jEnd; j++) out.push([xs + ux * j, ys, zs + uz * j]);
+  if (c.kind === "branch") { const px = -uz * c.side, pz = ux * c.side, bx = xs + ux * c.J, bz = zs + uz * c.J; for (let k = 1; k <= c.k; k++) out.push([bx + px * k, ys, bz + pz * k]); }
   return out;
 }
 // Where the miner stands to dig cell t: the walk to it minus its last cell (cell t itself).
@@ -240,7 +256,7 @@ function planShaft(m, k) {
     let dry = true;
     for (let i = 1; i <= 10 && dry; i++) for (let dy = -i - 1; dy <= 2 - i; dy++) { const id = get(x + dx * i, y + dy, z + dz * i); if (liquid(id) || built(id)) dry = false; }
     if (!dry) continue;
-    return { x, y, z, dx, dz, S: null, run: 0, n: 0, k, done: false };
+    return { x, y, z, dx, dz, S: null, run: 0, n: 0, k, done: false, D: digDepth(m) };
   }
   return null;
 }
@@ -273,7 +289,7 @@ function afterCell(m, sh, c, rocky) {
   sh.n++;
   if (c.kind === "stairs") {
     sh.run = rocky ? (sh.run || 0) + 1 : 0;
-    if (sh.run >= STONE_RUN || c.i >= MAX_STAIRS || c.y - 1 <= BF.MIN_Y + 4) { sh.S = c.i; log("stairs", m, { steps: c.i, y: c.y }); }
+    if (c.i >= Math.min(MAX_STAIRS, sh.D || DIG_DEPTH[0]) || c.y - 1 <= BF.MIN_Y + 4) { sh.S = c.i; log("stairs", m, { steps: c.i, y: c.y }); }
   } else if (c.kind === "corridor" && c.j >= CORRIDOR && (sh.n - sh.S) % PERIOD === 0) { sh.done = true; log("shaftDone", m, { n: sh.n }); }
   const step = c.kind === "stairs" ? c.i : c.kind === "corridor" ? c.j : c.k;
   if (step % TORCH_EVERY === 0) torch(m, c);
@@ -298,7 +314,7 @@ function dig(m, x, y, z) {
   const p = pickOf(m), b = BF.blocks[id];
   if (!isFinite(b.hardness)) return false;
   W().setBlock(x, y, z, 0);
-  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if (keeps(d.id)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
+  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if (keeps(d.id) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
   wearPick(m, p, BF.toolWear.forBlock(id, p));
   if (BF.emit) BF.emit("blockBroken", x, y, z, id);
   return true;
@@ -521,6 +537,12 @@ function think(m, Q) {
     Q.status = "needs a pickaxe";
     return null;
   }
+  // 1b. a level that may dig deeper than a novice but no iron pickaxe to harvest gold and diamonds with: buy one when a villager sells one
+  if (!underground && (m.level || 1) > 1 && (BF.items[pickOf(m).id].tool.tier || 0) < DEEP_TIER && count(m, I("emerald")) > 0 && nowS() >= (Q.upCheck || 0)) {
+    Q.upCheck = nowS() + 60;
+    const deal = findSeller(m, id => isPick(id) && (BF.items[id].tool.tier || 0) >= DEEP_TIER, Q.avoid);
+    if (deal) return { kind: "trip", deal };
+  }
   // 2. cobblestone for the builders
   if (cobble >= SELL_MIN && nowS() >= Q.sellCheck) {
     Q.sellCheck = nowS() + 20;
@@ -528,12 +550,19 @@ function think(m, Q) {
     if (deal) return underground ? { kind: "exit" } : { kind: "trip", deal };
   }
   // 3. digging
-  if (cobble >= KEEP_COBBLE || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
-  if (!underground) {   // surface stone first, whenever there is any; the mineshaft only when there is none
+  if (cobble >= KEEP_COBBLE && digDepth(m) <= DIG_DEPTH[0] || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
+  const deep = digDepth(m) > DIG_DEPTH[0];
+  if (sh && !sh.done && sh.S != null && deep && digDepth(m) >= sh.S + 12 && !underground) { sh.done = true; log("deeper", m, { was: sh.S, now: digDepth(m) }); }   // levelled up: a deeper shaft
+  if (!underground && !deep) {   // a novice quarries surface stone first, whenever there is any; the mineshaft only when there is none
     const c = findSurface(m, Q);
     if (c) return { kind: "quarry", x: c.x, y: c.y, z: c.z, claim: pk(c.x, c.y, c.z), max: 60 + 2.5 * Math.hypot(c.x - m.position.x, c.z - m.position.z) };
   }
-  if (!sh || sh.done) {
+  if (sh && sh.done && sh.S != null && sh.n > sh.S && !sh.stuck && (sh.turn || 0) < 2 && Math.abs(digDepth(m) - sh.S) < 12) {
+    // a finished shaft at the right depth: its staircase serves a new corridor to the left, then one to the right (no new staircase to dig)
+    Q.shaft = { x: sh.x, y: sh.y, z: sh.z, dx: sh.dx, dz: sh.dz, S: sh.S, run: 0, n: sh.S, k: Q.shafts || 0, done: false, D: sh.D, turn: (sh.turn || 0) + 1 };
+    Q.shafts = (Q.shafts || 0) + 1;
+    log("shaft", m, { at: [sh.x, sh.y, sh.z], dir: cdir(Q.shaft), k: Q.shaft.k, reuse: true });
+  } else if (!sh || sh.done) {
     const ns = planShaft(m, Q.shafts || 0);
     Q.shafts = (Q.shafts || 0) + 1;
     if (!ns) { Q.status = "found no place for a mineshaft"; return null; }
@@ -636,7 +665,7 @@ function ai(m, dt, out) {
   const r = walkShaft(m, Q, dt, out, walk, speed);
   if (r === "failed") {
     log("giveup", m, { task: "dig", why: "stuck in the shaft", at: feet(m), next: Q.stuckAt }); lost(m, Q); endTask(m, Q);
-    if ((Q.shaftStuck = (Q.shaftStuck || 0) + 1) >= 3) { sh.done = true; Q.shaftStuck = 0; }   // something blocks it for good (water, a fall): start another
+    if ((Q.shaftStuck = (Q.shaftStuck || 0) + 1) >= 3) { sh.done = true; sh.stuck = true; Q.shaftStuck = 0; }   // something blocks it for good (water, a fall): start another
     return true;
   }
   if (r !== "arrived") return true;
@@ -645,11 +674,28 @@ function ai(m, dt, out) {
   const blocks = [];
   for (let y = c.y + c.h - 1; y >= c.y; y--) if (get(c.x, y, c.z) !== 0) blocks.push([c.x, y, c.z]);
   k.rocky = k.rocky == null ? blocks.length === c.h && blocks.every(([x, y, z]) => rock(get(x, y, z))) : k.rocky;
+  if (!k.ores) k.ores = wallOres(m, sh, c);
+  for (const o of k.ores) if (get(o[0], o[1], o[2]) !== 0) blocks.push(o);
   return digBlocks(m, Q, blocks, dt, () => {
     if (k.floor && !solid(get(c.x, c.y - 1, c.z)) && count(m, I("cobblestone")) > 0) { W().setBlock(c.x, c.y - 1, c.z, BF.B.cobblestone); TR().inv.remove(m.inv, I("cobblestone"), 1); if (BF.emit) BF.emit("blockPlaced", c.x, c.y - 1, c.z, BF.B.cobblestone); }
     afterCell(m, sh, c, k.rocky); Q.shaftStuck = 0;
     endTask(m, Q); Q.thinkT = 0.1;
   });
+}
+// Ore in the walls and ceiling of cell c that its pickaxe can harvest and that has no liquid next to it: [[x, y, z]] (dug with the cell).
+function wallOres(m, sh, c) {
+  const out = [], p = pickOf(m), [ux, uz] = c.kind === "stairs" ? [sh.dx, sh.dz] : cdir(sh);
+  const [rx, rz] = c.kind === "branch" ? [-uz, ux] : [ux, uz];   // the direction the cell's run goes; its walls are either side of it
+  const cand = [[c.x, c.y + c.h, c.z]];
+  for (let k = 0; k < c.h; k++) cand.push([c.x - rz, c.y + k, c.z + rx], [c.x + rz, c.y + k, c.z - rx]);
+  for (const [x, y, z] of cand) {
+    const id = get(x, y, z), b = BF.blocks[id];
+    if (!b || !/_ore$/.test(b.name) || !canHarvest(id, p)) continue;
+    let wet = false;
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (liquid(get(x + dx, y + dy, z + dz))) wet = true;
+    if (!wet) out.push([x, y, z]);
+  }
+  return out;
 }
 // Digs the listed blocks one after another (each takes digTime with its pickaxe), swinging; calls done() after the last.
 function digBlocks(m, Q, blocks, dt, done) {
@@ -714,18 +760,18 @@ function pack(m) {
   const Q = m.mi;
   if (!Q || (!Q.shaft && !Q.shafts)) return undefined;
   const s = Q.shaft;
-  return { k: Q.shafts || 0, s: s ? [s.x, s.y, s.z, s.dx, s.dz, s.S == null ? -1 : s.S, s.run || 0, s.n, s.k, s.done ? 1 : 0] : null };
+  return { k: Q.shafts || 0, s: s ? [s.x, s.y, s.z, s.dx, s.dz, s.S == null ? -1 : s.S, s.run || 0, s.n, s.k, s.done ? 1 : 0, s.D || DIG_DEPTH[0], s.turn || 0, s.stuck ? 1 : 0] : null };
 }
 function unpack(m, o) {
   if (!o || typeof o !== "object") return;
   const Q = state(m);
   Q.shafts = Math.max(0, Math.floor(+o.k || 0));
   const a = Array.isArray(o.s) && o.s.length >= 10 && o.s.every(Number.isFinite) ? o.s : null;
-  Q.shaft = a ? { x: a[0], y: a[1], z: a[2], dx: a[3], dz: a[4], S: a[5] < 0 ? null : a[5], run: a[6], n: a[7], k: a[8], done: !!a[9] } : null;
+  Q.shaft = a ? { x: a[0], y: a[1], z: a[2], dx: a[3], dz: a[4], S: a[5] < 0 ? null : a[5], run: a[6], n: a[7], k: a[8], done: !!a[9], D: a[10] > 0 ? a[10] : DIG_DEPTH[0], turn: a[11] > 0 ? a[11] : 0, stuck: a[12] === 1 } : null;
 }
 
 // In its mineshaft (or digging its way out): village errands such as food shopping wait until it is back up (js/villagelife.js).
 const underground = m => !!(m && m.mi && (inShaft(m, m.mi.shaft) || m.mi.task && m.mi.task.kind === "climb"));
 BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
-  KEEP_COBBLE, SELL_MIN, _test: { state, area, checkCell, dig, craftPick, inShaft, shaftCellOf, routeIn, standWalk } };
+  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, digDepth, _test: { state, area, checkCell, dig, craftPick, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
 })();

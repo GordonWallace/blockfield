@@ -56,7 +56,7 @@ function chestsIn(H, b) {
   const W = BF.world, y0 = (H.y != null ? H.y : b.y - 1), list = [];
   for (let x = H.x; x < H.x + H.w; x++) for (let z = H.z; z < H.z + H.d; z++) {
     if (!W.isLoaded(x, z)) continue;
-    for (let y = y0; y <= y0 + 9; y++) if (W.getBlock(x, y, z) === BF.B.chest) list.push({ x, y, z });
+    for (let y = y0; y <= y0 + 9; y++) if (BF.isChest(W.getBlock(x, y, z))) list.push({ x, y, z });
   }
   houseCache.set(H, { t: now, list });
   return list;
@@ -78,9 +78,10 @@ const INPUTS = {
   farmer: m => [[id => BF.items[id] && BF.items[id].plants != null, (BF.food ? BF.food.SEED_KEEP : 8) * 2], ["wheat_item", BF.villageLife ? BF.villageLife.WHEAT_SPARE : 24], ["bone_meal", 16]],
   shepherd: m => [["wheat_item", 16]],
   forester: m => [[id => /_sapling$/.test(nm(id)), 16]],
-  furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8]],
+  furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8], ["cobblestone", 16]],
   cartographer: m => [["iron_ingot", 4], ["gold_ingot", 1], ["paper", 32], ["compass", 1]],
   miner: m => [["torch", 16], ["stick", 8]],   // shaft torches and spare pickaxe handles (js/miner.js)
+  toolsmith: m => [[id => /planks$/.test(nm(id)), 12], ["stick", 8], ["cobblestone", 9], ["iron_ingot", 9], ["gold_ingot", 6], ["diamond", 6], ["raw_iron", 9], ["raw_gold", 6], ["coal", 8], ["furnace", 1]],   // tool materials (js/toolsmith.js)
   builder: m => (TR().profile("builder").wants ? [...TR().profile("builder").wants.keys()].map(id => [nm(id), 128]) : []).concat([["red_bed", 4], ["oak_door", 8], ["torch", 32], ["chest", 2], ["glass", 64]]),
 };
 const SCRAPS = /^(rotten_flesh|spider_eye|poisonous_potato|pufferfish)$/;
@@ -235,7 +236,7 @@ function deliver(f, m, spot) {
   if (!T.inv.canFit(f.inv, [{ id: I.emerald, n: 1 }], [{ id: I.chest, n: 1 }])) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.5 + (o.halfWidth || 0.3) && Math.abs(o.position.z - spot.z - 0.5) < 0.5 + (o.halfWidth || 0.3) && o.position.y < spot.y + 1 && o.position.y + (o.height || 1.8) > spot.y;
   if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;   // somebody is standing there
-  if (!W.setBlock(spot.x, spot.y, spot.z, BF.B.chest)) return false;
+  if (!W.setBlock(spot.x, spot.y, spot.z, BF.chestId(BF.openFacing(spot, f.position)))) return false;
   T.inv.remove(f.inv, I.chest, 1); T.inv.remove(m.inv, I.emerald, 1); T.inv.add(f.inv, I.emerald, 1);
   const c = INV().chestRecord(spot.x, spot.y, spot.z);
   c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS };
@@ -317,7 +318,7 @@ function ai(m, dt, out) {
     st.stage = "go"; st.act = d.act; st.p = d.p; st.t = 0; a.route = null;
   }
   const p = st.p, giveUp = () => { st.avoid[pk(p.x, p.y, p.z)] = dayNow() + AVOID; return stop(); };
-  if (BF.world.getBlock(p.x, p.y, p.z) !== BF.B.chest || !usable(p, keyOf(m))) return stop();
+  if (!BF.isChest(BF.world.getBlock(p.x, p.y, p.z)) || !usable(p, keyOf(m))) return stop();
   st.t += dt;
   a.mode = "idle"; a.t = 2;
   if (st.stage === "go") {
