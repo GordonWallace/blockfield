@@ -5,7 +5,7 @@ module.exports = async (pg, out) => {
     const r = await pg.evaluate(g => {
       BF.newWorld(1337, { gen: g, biomeScale: 1 });
       const res = { gen: g };
-      for (const k of [16, 32768]) {          // 2048 blocks (2 b/px, rivers) and 4194304 blocks (4096 b/px)
+      for (const k of [16, 128]) {            // 2048 blocks (2 b/px) and 16384 blocks (16 b/px, the widest allowed), both with rivers
         let best = 1e9;
         for (let n = 0; n < 3; n++) {
           BF.mapview.reset();
