@@ -260,8 +260,12 @@ function trySpawnHerd() {
   const x = Math.floor(P.position.x + Math.cos(a) * d), z = Math.floor(P.position.z + Math.sin(a) * d);
   if (!W.isLoaded(x, z) || !isHorseBiome(x, z)) return;
   for (const r of recs.values()) { const rx = r.mob ? r.mob.position.x : r.x, rz = r.mob ? r.mob.position.z : r.z; if (Math.hypot(rx - x, rz - z) < SPAWN_GAP) return; }
-  const gy = W.heightAt(x, z);
-  if (W.getBlock(x, gy, z) !== BF.B.grass) return;
+  spawnHerdAt(x, z);
+}
+// A wild herd of 2-6 (sometimes with foals) on the grass around (x, z). Returns the herd, or null when there was no room.
+function spawnHerdAt(x, z) {
+  const W = BF.world, gy = W.heightAt(x, z);
+  if (W.getBlock(x, gy, z) !== BF.B.grass) return null;
   const h = { id: nextHerd++, cx: x + 0.5, cz: z + 0.5, dir: Math.random() * Math.PI * 2 };
   herds.set(h.id, h);
   const n = irnd(2, 6);
@@ -275,7 +279,8 @@ function trySpawnHerd() {
     spawn(sx + 0.5, sy + 1, sz + 0.5, { herd: h.id, growAt: foal ? now() + rnd(0.2, 1) * FOAL_DAYS : null });
     made++;
   }
-  if (!made) herds.delete(h.id);
+  if (!made) { herds.delete(h.id); return null; }
+  return h;
 }
 
 // ---------------------------------------------------------------- lead lines
@@ -537,7 +542,7 @@ BF.horses = {
   HORSE_BIOMES, COATS, MARKS, FEED, SPEED_MIN, SPEED_MAX, JUMP_MIN, JUMP_MAX, HP_MIN, HP_MAX,
   isHorseBiome, rollStats, foalStats, jumpHeight, price: m => price(m.horse || m),
   spawn, tame, feed, breed, leash, setPen, willing: m => !!(m && m.horse && willing(m.horse, now())),
-  ai, tick, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
+  ai, tick, spawnHerdAt, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
   ride: RIDE, drawLeads,
   serialize, deserialize, reset,
 };
