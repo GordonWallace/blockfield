@@ -1351,7 +1351,7 @@ function villagerAI(m, dt, out) {
       const fx = Math.floor(ax + rnd(-18, 18)), fz = Math.floor(az + rnd(-18, 18));
       if (!BF.world.isLoaded(fx, fz)) continue;
       const fy = BF.world.heightAt(fx, fz);
-      if (fy > 0 && BF.world.getBlock(fx, fy, fz) === BF.B.farmland) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
+      if (fy > 0 && (BF.world.getBlock(fx, fy, fz) === BF.B.farmland || BF.world.getBlock(fx, fy, fz) === BF.B.farmland_dry)) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
     }
   }
   if (V) {

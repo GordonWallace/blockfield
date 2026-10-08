@@ -44,12 +44,14 @@ function growsTable() {
   return GROWS;
 }
 
-// Young crops on farmland that sat unloaded for `away` game days: each matures with the chance it would have had.
+// Young crops on farmland that sat unloaded for `away` game days: each matures with the chance it would have had
+// (a third of the speed on dehydrated farmland, js/farmland.js).
 function catchUpChunk(c, away) {
-  const p = 1 - Math.exp(-away * CROP_SECS_PER_DAY * GROW_RATE), G = growsTable(), CS = BF.CS, W = BF.world;
+  const rate = f => 1 - Math.exp(-away * CROP_SECS_PER_DAY * GROW_RATE * f), G = growsTable(), CS = BF.CS, W = BF.world;
+  const pWet = rate(1), pDry = rate(BF.farmland ? BF.farmland.DRY_GROWTH : 1 / 3), DRY = BF.B.farmland_dry;
   const found = [];
-  W.scanFlagged(c, G, (x, y, z, id) => { if (W.chunkBlock(c, x, y - 1, z) === BF.B.farmland) found.push([x, y, z, id]); }, 0, BF.MIN_Y + 2);
-  for (const [x, y, z, id] of found) if (Math.random() < p) W.setBlock(c.cx * CS + x, y, c.cz * CS + z, G[id]);
+  W.scanFlagged(c, G, (x, y, z, id) => { const s = W.chunkBlock(c, x, y - 1, z); if (s === BF.B.farmland || s === DRY) found.push([x, y, z, id, s === DRY]); }, 0, BF.MIN_Y + 2);
+  for (const [x, y, z, id, dry] of found) if (Math.random() < (dry ? pDry : pWet)) W.setBlock(c.cx * CS + x, y, c.cz * CS + z, G[id]);
 }
 
 function startCatchUp(key, ent) {

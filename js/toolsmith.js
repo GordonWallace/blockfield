@@ -460,7 +460,7 @@ function furnaceSpot(m) {
       for (let y = c.y + 2; y >= c.y - 3; y--) {
         const g = W.getBlock(x, y - 1, z), here = W.getBlock(x, y, z);
         if (!S[g] || here !== 0 || W.getBlock(x, y + 1, z) !== 0) continue;
-        if (B[g] && (B[g].name === "dirt_path" || B[g].name === "farmland" || B[g].fluid)) break;   // not on paths or fields
+        if (B[g] && (B[g].name === "dirt_path" || B[g].name === "farmland" || B[g].name === "farmland_dry" || B[g].fluid)) break;   // not on paths or fields
         if (BF.mobs.list.some(o => !o.removed && Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2)) break;
         const d = Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) + Math.abs(y - c.y);
         if (d < bd) { bd = d; best = { x, y, z }; }

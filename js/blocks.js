@@ -108,7 +108,7 @@ const BLOCK_DEFS = [
   { name: "furnace", tiles: { top: "furnace_top", side: "furnace_side", front: "furnace_front", bottom: "furnace_top" }, hardness: 3.5, tool: "pickaxe", needsTool: true, color: "#5e5e5e", furnaceFacing: 2 },   // opening to the south; furnace_n/e/w (furnace facing pack) are the other ways round
   // village blocks
   { name: "dirt_path", tiles: { top: "dirt_path_top", side: "dirt_path_side", bottom: "dirt" }, opaque: false, hardness: 0.65, tool: "shovel", drop: "dirt", color: "#94793f" },
-  { name: "farmland", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#5a3c22" },
+  { name: "farmland", tiles: { top: "farmland_moist", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#5a3c22" },   // hydrated (js/farmland.js)
   { name: "wheat", tiles: "wheat", render: "cross", solid: false, opaque: false, hardness: 0, drop: "wheat_item", extraDrops: [["wheat_seeds", 1, 3, 1]], color: "#d6c25a" },
   { name: "hay_bale", tiles: { top: "hay_bale_top", side: "hay_bale_side", bottom: "hay_bale_top" }, hardness: 0.5, tool: "hoe", color: "#c9a62c" },
   { name: "bell", tiles: { top: "bell_top", side: "bell", bottom: "bell_bottom" }, render: "model", model: "bell", opaque: false, hardness: 5, tool: "pickaxe", color: "#e8c547" },
@@ -302,6 +302,10 @@ const BLOCK_DEFS = [
   ...[0, 1, 3].map(f => ({ name: "chest_" + "nesw"[f], tiles: { top: "chest_top", side: "chest_side", front: "chest_front", bottom: "chest_bottom" }, frontFace: [5, 2, 4, 3][f],
     render: "model", model: "chest", opaque: false, hardness: 2.5, tool: "axe", color: "#a0742e", hidden: true, drop: "chest", item: "chest", chestFacing: f })),
   // ---- end facing pack ----
+  // ---- farmland pack ---- (appended; ids are saved numerically: only ever append after this line)
+  // dehydrated farmland (js/farmland.js): crops grow at a third of the speed; left bare it reverts to dirt
+  { name: "farmland_dry", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#7a5a3a" },
+  // ---- end farmland pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);

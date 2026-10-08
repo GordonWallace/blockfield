@@ -780,6 +780,7 @@ T.farmland = p => {
   for (let i = 0; i < 18; i++) dome(p, p.ri(TS), p.ri(TS), 0.9, 0.7, hex("#4e3820"), 0.6, 0.4);
   p.relief(1.8);
 };
+T.farmland_moist = p => T.farmland(p);   // without Faithful: the procedural farmland is already dark (wet-looking)
 T.hay_bale_side = p => {
   const C = pal(["#8e7022", "#a5832a", "#b99532", "#c9a63e", "#d6b64c"]);
   p.fill((x, y) => { p.set(x, y, jit(p, ramp(C, 0.3 + p.rand() * 0.3), 0.05)); p.setH(x, y, 0.3); });
@@ -1271,16 +1272,18 @@ function boxDown(src, sw, sh) {
   return { d, w: dw, h: dh };
 }
 const tileInfo = new Map(); // name -> {mips, wrapX, wrapY, cutout}
+// tiles made from another Faithful tile with a brightness gain: hydrated farmland is Faithful's (dry) farmland, darkened as if wet
+const DERIVED = { farmland_moist: ["farmland", 0.58] };
 function paintTile(name, color, paintFn) {
   const p = new Px(name);
   for (let i = 3; i < p.c.length; i += 4) p.c[i] = 255;
   (paintFn || T[name] || (q => fallback(q, color)))(p);
   const f = p.c;
-  const fa = BF.faithful && BF.faithful[name];
+  const der = DERIVED[name], fa = BF.faithful && BF.faithful[der ? der[0] : name];
   if (fa && !paintFn) { // Faithful 32x override (raw RGBA), see FAITHFUL-LICENSE.txt
     const raw = atob(fa);
     // grass tiles are grey in Faithful and tinted by the game; foliage tiles are not overridden (original leaves kept)
-    const gain = TINTED.grass.includes(name) ? 0.95 : 1;
+    const gain = der ? der[1] : TINTED.grass.includes(name) ? 0.95 : 1;
     for (let i = 0; i < f.length; i++) f[i] = (i & 3) === 3 ? raw.charCodeAt(i) : raw.charCodeAt(i) * gain;
   }
   for (let i = 0; i < f.length; i++) f[i] = Math.max(0, Math.min(255, f[i]));

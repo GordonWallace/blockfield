@@ -65,7 +65,7 @@ function flags() {
     else if (/_leaves$/.test(b.name)) LEAFF[id] = 1;
     else if (b.sapling) SAPF[id] = 1;
   }
-  for (const nm of ["grass", "dirt", "coarse_dirt", "podzol", "mud", "moss_block", "farmland", "mycelium"]) if (BF.B[nm] != null) SOILF[BF.B[nm]] = 1;
+  for (const nm of ["grass", "dirt", "coarse_dirt", "podzol", "mud", "moss_block", "farmland", "farmland_dry", "mycelium"]) if (BF.B[nm] != null) SOILF[BF.B[nm]] = 1;
 }
 const isLog = id => (flags(), LOGF[id] === 1);
 const isLeaf = id => (flags(), LEAFF[id] === 1);
@@ -363,7 +363,7 @@ function findSpot(m, at) {
       const id = get(x, y, z);
       if (id === 0 || id === DP || isSap(id)) continue;
       if (isDoor(id)) doors.push([x, y, z]);
-      if (id === FL || (builtBlock(id) && !buried(x, y, z))) built[(z - pz + R) * S + (x - px + R)] = 1;
+      if (id === FL || id === BF.B.farmland_dry || (builtBlock(id) && !buried(x, y, z))) built[(z - pz + R) * S + (x - px + R)] = 1;
     }
   }
   const nearBuilt = (x, z) => {
@@ -379,7 +379,7 @@ function findSpot(m, at) {
   for (let x = px - SEARCH; x <= px + SEARCH; x++) for (let z = pz - SEARCH; z <= pz + SEARCH; z++) {
     if (!W().isLoaded(x, z) || !inHome(m, x + 0.5, z + 0.5)) continue;
     for (let y = py - PLANT_DY; y <= py + PLANT_DY; y++) {
-      if (get(x, y, z) !== 0 || get(x, y - 1, z) === BF.B.farmland || !isSoil(get(x, y - 1, z))) continue;
+      if (get(x, y, z) !== 0 || get(x, y - 1, z) === BF.B.farmland || get(x, y - 1, z) === BF.B.farmland_dry || !isSoil(get(x, y - 1, z))) continue;
       let clear = true;
       for (let k = 1; k <= CLEAR_ABOVE && clear; k++) if (get(x, y + k, z) !== 0) clear = false;
       if (clear) cands.push([x, y, z]);
