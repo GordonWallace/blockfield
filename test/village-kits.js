@@ -3,7 +3,7 @@
 // - founding villagers' tools (wooden hoe / axe / pickaxe, shears; 30-40 torches for miners); villagers hired later get emeralds only
 // - desert villages have a garden of grass with oak trees that the forester can fell and replant
 // - a farmer without a hoe buys one from the village's toolsmith
-// @ci baseline
+// @ci integration
 module.exports = async (pg) => {
   const res = await pg.evaluate(async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));

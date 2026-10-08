@@ -1,4 +1,4 @@
-// @ci baseline
+// @ci integration
 // Villagers are where you left them: after Save and Quit to Title (the title screen keeps the world running behind it) and Play,
 // and after walking away from a village and coming back, each roster villager comes back on the spot where it stood.
 // Usage: node test/run.js /tmp/vs test/villagers-stay-put.js

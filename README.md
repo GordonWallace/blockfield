@@ -26,10 +26,10 @@ Start the game with the run script above (or `node debug/server.js`), then open 
 
 GitHub Actions runs the headless tests (`.github/workflows/`), one at a time, in two tiers set in `test/ci.json`:
 
-- **Baseline tests** run on every pull request into a `release-*` branch or `main` (about 15 minutes).
-- **Integration tests** (baseline plus the soak, generator and slow map tests, about an hour) run on every push to a `release-*` branch, so after each merged PR, and on a pull request from a release branch into `main`. Either workflow can also be started by hand from the Actions tab.
+- **Baseline tests** run on every pull request into a `release-*` branch or `main`: a quick smoke set, about 5 minutes. Keep it light: only tests under about 20 seconds that cover something core belong in it.
+- **Integration tests** (baseline plus everything else: soak, generator, map and slower feature tests, about an hour) run on the pull request that takes a release branch into `main`, so right before a release ships. They don't run on each push to a release branch; start them from the Actions tab (Integration tests, Run workflow, pick the branch) to check a release branch earlier.
 
-Each run's page has a results table, and the logs and screenshots are attached to it. A test fails when it exits non-zero, times out, uses more than 10 GB of memory (it is stopped so the rest of the run still reports), throws in the page, or prints a line starting with `FAIL`. A push to a release branch waits for the integration run already going instead of cancelling it. Run a tier locally with `NODE_PATH=$(npm root -g) node test/ci.js baseline` (or `integration`, or name tests after the output folder: `node test/ci.js baseline ci-out esc-close`). A new test file needs no entry in `test/ci.json`: it runs in integration, or in the tier named by a `// @ci baseline` comment in the file.
+Each run's page has a results table, and the logs and screenshots are attached to it. A test fails when it exits non-zero, times out, uses more than 10 GB of memory (it is stopped so the rest of the run still reports), throws in the page, or prints a line starting with `FAIL`. Run a tier locally with `NODE_PATH=$(npm root -g) node test/ci.js baseline` (or `integration`, or name tests after the output folder: `node test/ci.js baseline ci-out esc-close`). A new test file needs no entry in `test/ci.json`: it runs in integration, or in the tier named by a `// @ci baseline` comment in the file (baseline only for quick, core tests).
 
 ## Layout
 
