@@ -81,7 +81,7 @@ function shortfall(m) {
   need(I.paper, PAPER);
   return out;
 }
-const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession !== "cartographer" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 function findSeller(m, short, avoid) {
   const R = m.village, T = TR();
   if (!R) return null;

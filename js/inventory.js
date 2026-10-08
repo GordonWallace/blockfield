@@ -594,6 +594,7 @@ const css = `
 .bf-vgrid.edit .bf-slot { opacity: 1; filter: none; cursor: pointer; }
 .bf-vgrid.edit .bf-slot:hover { background: rgba(255,255,255,.12); }
 .bf-none { color: var(--muted); font: 12px/1.5 var(--mono); padding: 8px 2px; }
+.bf-osep { color: var(--muted); font: 11px/1.4 var(--mono); padding: 6px 2px 2px; border-top: 1px solid rgba(255,255,255,.12); margin-top: 4px; }
 .bf-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
 .bf-tab { width: calc(var(--s) * 1.05); height: calc(var(--s) * .95); display: grid; place-items: center; background: rgba(255,255,255,.05);
   border: 1px solid var(--panel-edge); border-radius: 2px 2px 0 0; cursor: pointer; padding: 0; }
@@ -1159,6 +1160,9 @@ function renderOffers() {
     if (!v || !v.trades.length) {
       const d = div("bf-none", offersEl); d.textContent = "This villager has nothing to trade.";
     } else v.trades.forEach((o, i) => {
+      // spare goods and what it needs now (js/market.js) come after its job's offers
+      const extra = x => !!(x.spare || x.need || x.feed);
+      if (extra(o) && (i === 0 || !extra(v.trades[i - 1]))) { const d = div("bf-osep", offersEl); d.textContent = "Spare goods and needs"; }
       const row = document.createElement("button"); row.type = "button";
       row.className = "bf-offer" + (i === offerSel ? " sel" : "") + (tradeReason(o) ? " out" : "");
       row.dataset.i = i;
@@ -1314,7 +1318,7 @@ function closeScreen(silent) {
   giveBack(cursor); cursor = null; result = null;
   if (villager) {
     const v = villager; villager = null;
-    BF.trades.syncFeed(v, false);   // food offers of a hungry unemployed villager only exist while the screen is open
+    BF.trades.syncFeed(v, false);   // food offers of a hungry villager, spare goods and needs (js/market.js)
     try { if (v.position && BF.mobs && BF.mobs.setTrading) BF.mobs.setTrading(v, false); } catch (e) { console.error(e); }
   }
   tradeOffer = tradeResult = null; offerSel = -1;

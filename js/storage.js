@@ -232,17 +232,17 @@ function orders(rec) {
 // js/furniture.js: furniture maker f puts a chest it holds at spot for villager m and takes 1 emerald from m. Returns true when done.
 function deliver(f, m, spot) {
   const W = BF.world, T = TR(), I = BF.I;
-  if (!m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || count(f.inv, I.chest) < 1 || count(m.inv, I.emerald) < 1) return false;
-  if (!T.inv.canFit(f.inv, [{ id: I.emerald, n: 1 }], [{ id: I.chest, n: 1 }])) return false;
+  const o = (f.trades || []).find(x => x.sell.id === I.chest && x.sell.n === 1 && x.buy.length === 1 && x.buy[0].id === I.emerald);   // its chest offer: the player can buy one too
+  if (!o || !m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || T.blockReason(f, o) || count(m.inv, I.emerald) < o.buy[0].n) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.5 + (o.halfWidth || 0.3) && Math.abs(o.position.z - spot.z - 0.5) < 0.5 + (o.halfWidth || 0.3) && o.position.y < spot.y + 1 && o.position.y + (o.height || 1.8) > spot.y;
   if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;   // somebody is standing there
   if (!W.setBlock(spot.x, spot.y, spot.z, BF.chestId(BF.openFacing(spot, f.position)))) return false;
-  T.inv.remove(f.inv, I.chest, 1); T.inv.remove(m.inv, I.emerald, 1); T.inv.add(f.inv, I.emerald, 1);
+  T.exchange(f, o); T.inv.remove(m.inv, I.emerald, o.buy[0].n);
   const c = INV().chestRecord(spot.x, spot.y, spot.z);
   c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS };
   m.store.order = null; m.store.checkT = 0.5;
   houseCache.clear();
-  if (BF.vlog) BF.vlog.trade(m, f, "gave 1 Emerald, got 1 Chest");
+  if (BF.vlog) BF.vlog.trade(m, f, o, 1);
   log(m.village, who(f) + " placed a chest at " + at(spot) + " in the house of " + who(m));
   return true;
 }

@@ -126,7 +126,7 @@ function shortfall(m) {
 }
 // The kind of ingredient an item is, and how many planks one item is worth.
 const kindOf = id => (isWool(id) ? ["wool", 1] : isPlanks(id) ? ["planks", 1] : isLog(id) ? ["planks", LOG_PLANKS] : isCobble(id) ? ["cobble", 1] : null);
-const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession !== "furniture_maker" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 function findSeller(m, short, avoid) {
   const R = m.village, T = TR();
   if (!R) return null;
