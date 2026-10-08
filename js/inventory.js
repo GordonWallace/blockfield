@@ -1152,7 +1152,7 @@ function renderFurnaceProgress() {
 let offersKey = "";
 function renderOffers() {
   const v = villager;
-  const key = v ? v.trades.map(o => tradeReason(o) || "").join("|") + "#" + offerSel + "#" + v.level : "-";
+  const key = v ? v.trades.map(o => (tradeReason(o) || "") + o.buy.map(b => b.id + "x" + b.n).join("+") + ">" + o.sell.id + "x" + o.sell.n).join("|") + "#" + offerSel + "#" + v.level : "-";   // amounts too: prices move (js/prices.js)
   if (key !== offersKey) {
     offersKey = key;
     offersEl.textContent = "";
