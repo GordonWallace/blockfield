@@ -20,6 +20,7 @@
   {"name": "overlay-behind", "file": "test/overlay-behind.js", "kind": "actions", "tier": "baseline"},
   {"name": "pathgap-actions", "file": "test/pathgap-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "river-check", "kind": "node", "tier": "baseline", "file": "tools/river-check.js", "timeout": 300, "what": "no river walls or steps"},
+  {"name": "seed-copy", "file": "test/seed-copy.js", "kind": "actions", "tier": "baseline", "what": "title screen shows whole seeds, copy button copies one"},
   {"name": "shepherd-check", "file": "test/shepherd-check.js", "kind": "actions", "tier": "baseline"},
   {"name": "shepherd-day", "file": "test/shepherd-day.js", "kind": "actions", "tier": "baseline"},
   {"name": "tent-actions", "file": "test/tent-actions.js", "kind": "actions", "tier": "baseline"},
