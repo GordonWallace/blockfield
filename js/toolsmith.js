@@ -4,7 +4,7 @@
 //   pickaxe or an axe, 2 + 2 for a hoe, 2 iron ingots for shears, 3 for a bucket: the farmers' water). Head material: any planks, cobblestone (or cobbled deepslate), iron
 //   ingots, gold ingots, diamonds. A tool whose item does not exist (golden tools before they were added) is skipped.
 // - What to make: the category (pickaxe, axe, hoe, shears) it holds fewest of, so the stock stays even: it makes a tool while it holds fewer
-//   than TOOL_CAP of that category in that material or better (so 2 wooden pickaxes do not stop a stone one), never past TOOL_MAX. Shears come
+//   than TOOL_CAP of that category in that material or better (so 2 wooden pickaxes do not stop a stone one), never past TOOL_MAX (1 of each for hoes, shears and buckets). Shears come
 //   first while it has none and holds the iron for them, and the other iron tools leave 2 ingots for shears while it has none. Within a
 //   category it makes the best material it can get, in CALIBER order (diamond, gold, iron, stone, wood, the order BF.toolWear ranks tools in):
 //   what it holds, or what a villager of its village sells and it can pay for. It buys for the better tool even when it already holds the
@@ -35,6 +35,8 @@ const CRAFT_HOURS = 2;                         // one tool takes 2 game hours at
 const CRAFT_SECS = () => dayLen() * CRAFT_HOURS / 24;
 const TOOL_CAP = 2;                            // it makes a tool while it holds fewer than this many of that category in that material or better
 const TOOL_MAX = 4;                            // and never holds more than this many of one category (lesser ones wait to be sold)
+const ONE_OF = { hoe: 1, shears: 1, bucket: 1 }; // these wear slowly or not at all and sell rarely, so it keeps just one of each
+const capOf = c => ONE_OF[c] || TOOL_CAP, maxOf = c => ONE_OF[c] || TOOL_MAX;
 const WAIT_BETTER = 0.25;                      // days it waits for a better material that is sold here but not right now before making a lesser tool
 const CATS = ["pickaxe", "axe", "hoe", "shears", "bucket"];   // a bucket is no tool, but it is made the same way (3 iron ingots) and kept in stock like one
 const CALIBER = ["diamond", "gold", "iron", "stone", "wood"];   // best first, as BF.toolWear ranks them (tier, then speed): gold between iron and diamond
@@ -157,7 +159,7 @@ function canMake(m, cat, mat, stock) {
 // The categories it should make next, the one it holds fewest of first (shears first while it has none and holds the iron).
 function catOrder(m) {
   const stock = stockOf(m);
-  const cats = CATS.filter(c => stock[c] < TOOL_MAX && matsFor(c).length);
+  const cats = CATS.filter(c => stock[c] < maxOf(c) && matsFor(c).length);
   const pri = c => (c === "shears" && stock.shears === 0 && sum(m, MAT.iron) >= SHEARS_IRON ? -1 : stock[c]);
   return { stock, cats: cats.sort((a, b) => pri(a) - pri(b) || CATS.indexOf(a) - CATS.indexOf(b)) };
 }
@@ -211,7 +213,7 @@ function plan(m) {
   for (const cat of cats) {
     let later = null;    // a better material sold here, just not right now (seller asleep, busy, underground, or it gave up on them a while)
     for (const mat of matsFor(cat)) {
-      if (stockAtLeast(m, cat, mat) >= TOOL_CAP) break;   // enough of this or better: lesser ones would not help
+      if (stockAtLeast(m, cat, mat) >= capOf(cat)) break;   // enough of this or better: lesser ones would not help
       if (canMake(m, cat, mat, stock)) {
         if (later && (stock[cat] > 0 || mat === "wood")) {   // wait for the better one a while (only with one of these already on the shelf, or before falling back to wood); the wait ends when the lesser tool is started (startCraft)
           const w = S.waitBetter[cat] || (S.waitBetter[cat] = { since: dayNow(), mat: later });
