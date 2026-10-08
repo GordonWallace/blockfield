@@ -1783,7 +1783,7 @@ P.viewModel = function () { // test hook: what the held view model is ("hand", "
   if (vmMesh === hand) return { kind: "hand" };
   const g = vmMesh.geometry, col = g.attributes.color;
   if (g.userData.cube) return { kind: "cube", top: col ? [col.getX(8), col.getY(8), col.getZ(8)] : null, faces: g.index.count / 6 };
-  return { kind: "sprite", bow: vmMesh.userData.bowStage != null ? vmMesh.userData.bowStage : null };
+  return vmMesh.userData.bowStage != null ? { kind: "sprite", bow: vmMesh.userData.bowStage } : { kind: "sprite" };   // bow: drawn stage 0..2, -1 resting
 };
 // Bow (tests, debug): drawing seconds, the power it would fire at, the view-model stage; power(t) / damage(f) as used on release.
 P.bow = { get drawing() { return drawT; }, get pull() { return drawT > 0 ? bowPower(drawT) : 0; }, get stage() { return bowStage(); }, power: bowPower, damage: bowDamage, DRAW: BOW_DRAW };

@@ -45,9 +45,9 @@ module.exports = async (pg, out) => {
     ok("drawing zooms in (FOV narrows)", fov < 72, +fov.toFixed(1));
     step(4);
     ok("released bow goes back to the resting sprite", P.viewModel().bow === -1 && Math.abs(BF.camera.fov - 75) < 3, [P.viewModel(), +BF.camera.fov.toFixed(1)]);
-    // crit chance at full draw (fired straight up, a few times)
+    // crit chance at full draw (fired straight up 40 times: none at all is 0.8^40, about 1 in 7500)
     let crits = 0, shots = 0; aim(x0 + 0.5, y0 + 50, z0 + 0.5);
-    for (let k = 0; k < 20; k++) { inv.setSlot(1, { id: I.arrow, count: 16 }); hold(1.05); release(); shots++; if (P.lastShot.crit) crits++; }
+    for (let k = 0; k < 40; k++) { inv.setSlot(1, { id: I.arrow, count: 16 }); hold(1.05); release(); shots++; if (P.lastShot.crit) crits++; }
     ok("full draws are sometimes critical, not always", crits > 0 && crits < shots, [crits, shots]);
     for (const a of M.playerArrows()) a.life = 0; step(1);
 
