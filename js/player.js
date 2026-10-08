@@ -1656,6 +1656,9 @@ P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
 P.actionBar = actionBar;
 P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };
 P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
+// alerts (js/alerts.js): free the mouse like Z, and take it back (from a key press or click, which browsers require)
+P.freeMouse = function () { if (locked) { releaseMouse(); return true; } return false; };
+P.relock = function () { if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !invOpen() && !locked) requestLock(); };
 P.teleport = function (x, y, z) {
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists

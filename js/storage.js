@@ -38,7 +38,7 @@ const who = m => nameOf(m) + " (" + pretty(m.child ? "child" : m.profession) + "
 const at = p => p.x + ", " + p.y + ", " + p.z;
 const pk = (x, y, z) => x + "," + y + "," + z;
 const listOf = items => items.map(e => e.n + " " + BF.itemName(e.id)).join(" + ");
-function log(rec, text) { if (rec && BF.vlog) BF.vlog.log(rec, "chest", text); }
+function log(rec, text, where) { if (rec && BF.vlog) BF.vlog.log(rec, "chest", text, where); }
 const recAt = (m, p) => (m && m.village) || (BF.vlog ? BF.vlog.villageAt(p.x, p.z) : null);
 
 // ---------------------------------------------------------------- the house of a villager's bed, its chests
@@ -292,7 +292,7 @@ function decide(m) {
       if (spot) {
         const fresh = !st.order;
         st.order = { spot, until: dayNow() + ORDER_DAYS };
-        if (fresh) log(m.village, who(m) + " wants a chest for their house (inventory full)");
+        if (fresh) log(m.village, who(m) + " wants a chest for their house (inventory full)", m);
       }
     }
     return null;

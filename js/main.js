@@ -119,7 +119,7 @@ function frame(now) {
     // same step a slow frame already gets) so the step count stays bounded. Stops early if the frame budget runs out.
     const plan = W.plan(dt), t0 = performance.now();
     let done = 0;
-    while (done < plan.n && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {
+    while (done < plan.n && !W.frozen && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {   // an alert can freeze it mid-frame (js/alerts.js)
       const h = plan.h;
       W.advance(h);
       BF.state.time += h;
@@ -139,7 +139,7 @@ function frame(now) {
   BF.inventory.update && BF.inventory.update(dt);
   if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);
-  if (BF.textures.update) BF.textures.update(dt * Math.max(1, W.last));   // water animation keeps pace with the fast-forward
+  if (BF.textures.update) BF.textures.update(W.frozen ? 0 : dt * Math.max(1, W.last));   // water animation keeps pace with the fast-forward (and stops at 0x)
   if (BF.save && !BF.state.paused) BF.save.update(dt);
   renderer.render(scene, camera);
   updateDebug(now);

@@ -12,7 +12,7 @@
     --bg: #0b0f0d; --bg2: #101613; --card: #141b17; --card2: #18211c; --edge: rgba(230, 240, 225, 0.09); --edge2: rgba(230, 240, 225, 0.16);
     --ink: #eef3ea; --muted: #93a28b; --faint: #5d6b58;
     --accent: #7fbf4d; --accent2: #a6dc72; --warn: #f2c66d; --danger: #e8705c; --info: #79b8e8;
-    --birth: #f3b6c8; --bed: #9fc8f0; --trade: #f2dd8a; --job: #b7e08c; --death: #f08a7a;
+    --birth: #f3b6c8; --bed: #9fc8f0; --trade: #f2dd8a; --job: #b7e08c; --death: #f08a7a; --farm: #e3c46a; --chest: #c9a7e8; --tool: #b0b8c0;
     --display: "Silkscreen", ui-monospace, monospace;
     --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     color-scheme: dark;
@@ -156,6 +156,28 @@
   .ent.trade { border-left-color: var(--trade); } .ent.trade .tx { color: var(--trade); }
   .ent.job { border-left-color: var(--job); } .ent.job .tx { color: var(--job); }
   .ent.death { border-left-color: var(--death); } .ent.death .tx { color: var(--death); }
+  .ent.farm { border-left-color: var(--farm); } .ent.farm .tx { color: var(--farm); }
+  .ent .at { color: var(--faint); margin-left: 8px; white-space: nowrap; }
+
+  /* ---------- alerts ---------- */
+  .aform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--edge); }
+  .aform select, .aform input { background: var(--bg2); border: 1px solid var(--edge2); border-radius: 5px; padding: 4px 7px; font-size: 12px; outline: none; color: var(--ink); }
+  .aform input { width: 130px; } .aform select:focus, .aform input:focus { border-color: var(--accent); }
+  .abtn { background: transparent; border: 1px solid var(--edge2); border-radius: 5px; padding: 3px 9px; font-size: 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  .abtn:hover:not(:disabled) { color: var(--ink); border-color: var(--accent); } .abtn:disabled { opacity: 0.4; cursor: default; }
+  .abtn.add { color: #10140f; background: var(--accent); border-color: var(--accent); font-weight: 600; } .abtn.add:hover:not(:disabled) { background: var(--accent2); color: #10140f; }
+  .abtn.del:hover { border-color: var(--danger); color: var(--danger); }
+  .abtn.on { color: var(--accent2); border-color: rgba(127, 191, 77, 0.5); }
+  .apre { color: var(--faint); font-size: 12px; }
+  #a-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+  #a-table col.c3 { width: 146px; } #a-table col.c2 { width: 34%; }
+  #a-table td, #a-table th { padding: 6px 10px; border-top: 1px solid var(--edge); text-align: left; vertical-align: top; }
+  #a-table th { color: var(--faint); font: 10px var(--display); letter-spacing: 0.5px; font-weight: 400; border-top: 0; }
+  #a-table td.btns { white-space: nowrap; text-align: right; } #a-table td.btns .abtn { margin-left: 4px; }
+  #a-table tr.off td.an { color: var(--faint); text-decoration: line-through; } #a-table td.an { white-space: normal; overflow-wrap: anywhere; }
+  #a-table tr.firing td { background: rgba(242, 198, 109, 0.12); } #a-table tr.firing td.an::before { content: "\26A0  "; color: var(--warn); }
+  #a-table .last { color: var(--faint); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .anote { color: var(--faint); font-size: 12px; padding: 8px 16px 10px; }
   .empty { color: var(--muted); padding: 28px 16px; text-align: center; font-style: italic; }
 
   .away { display: grid; place-items: center; text-align: center; padding: 36px 16px; gap: 10px; }
@@ -246,14 +268,29 @@
       <div class="panel"><details class="raw" id="raw"><summary>In-game F3 text</summary><pre id="f3"></pre></details></div>
     </div>
 
+    <div class="stack">
+    <div class="panel" id="apanel">
+      <div class="ph"><h2>Alerts</h2><span class="sub" id="a-count"></span></div>
+      <div class="aform" id="a-form">
+        <span class="apre">When</span><select id="a-who" title="Which villager type (any of the parties, for a trade)"></select>
+        <select id="a-act" title="What that villager does"></select>
+        <select id="a-kind" title="Event type"></select>
+        <input id="a-text" placeholder="containing (optional)" title="Words the log line must contain, e.g. wheat">
+        <button class="abtn add" id="a-add">Add alert</button>
+      </div>
+      <table id="a-table"><colgroup><col><col class="c2"><col class="c3"></colgroup><thead><tr><th>Alert</th><th>Fired</th><th></th></tr></thead><tbody id="a-body"></tbody></table>
+      <div class="anote" id="a-note">An alert freezes the game (0×) when a matching event is logged in any loaded village and shows it in the game's top-left corner. Alerts are kept by the debug server, so they carry over to other games.</div>
+    </div>
     <div class="panel" id="lpanel">
       <div class="ph"><h2>Village log</h2><span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
       <div class="filters" id="l-filters"></div>
       <div id="log"><div class="empty">Load a village to see its log.</div></div>
     </div>
+    </div>
   </div>
 </main>
 
+<script src="logmatch.js"></script>
 <script>
 (() => {
 "use strict";
@@ -286,6 +323,7 @@ function connect() {
   const es = new EventSource("events");
   es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
+  es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
   es.onopen = () => { serverUp = true; status(); };
 }
@@ -321,7 +359,7 @@ function onSnap(s) {
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
   const was = viewKey;
   pickView(s);
-  renderTop(s); renderVillages(s); renderVillage(s); status();
+  renderTop(s); renderVillages(s); renderVillage(s); status(); alertsFromSnap(s);
   if (logChanged || logDirty || was !== viewKey) { logDirty = false; renderLog(); }
 }
 // The village on show: the one the user picked, else the nearest loaded one (the list comes sorted loaded-first by distance).
@@ -367,7 +405,7 @@ function renderTop(s) {
   const d = s.info;
   $("h-clock").innerHTML = `<b>${esc(d.clock)}</b>`;
   $("h-seed").textContent = d.seed; $("h-gen").textContent = d.gen; $("h-biomes").innerHTML = `Biomes <b>x${esc(d.biomeScale)}</b>`;
-  const w = $("h-warp"); w.hidden = !(d.warp > 1); w.textContent = "⏩ " + d.warp + "x";
+  const w = $("h-warp"); w.hidden = d.warp === 1 || d.warp == null; w.textContent = d.warp === 0 ? "❚❚ 0x frozen" : "⏩ " + d.warp + "x";
   $("c-fps").innerHTML = `${d.fps} <small>fps</small>`;
   $("c-calls").textContent = d.calls + " draw calls";
   $("c-xyz").textContent = `${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}`;
@@ -614,35 +652,13 @@ function stamp(t) {
 // (trades, beds, births, deaths...). An entry shows when its event type is on and, if it names villagers, any of them is on:
 // Explorer + Deaths shows only explorer deaths. Each menu is one column with Select all / Select none at the top; a villager
 // type's arrow unfolds a checkbox per action. Everything starts checked; unchecked boxes are remembered in this browser.
-// Who did what is read from the log text, whose formats come from js/villagelog.js (and mobs.js, storage.js): "Name (Job)
-// traded with Name (Job): ...", "Name (Job) placed a bed at ...", "Name (Job) claimed the bed/chest at ...", "Name became a
-// Job", "Name was born to ...", "Name (Job) died: ...", "Name (Job)'s Iron Pickaxe broke". Entries naming no villager pass the who filter.
-const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", born: "Being born", death: "Dying" };
-const ACTS_FOR = t => t === "Player" ? ["buy", "bed", "chest"] : t === "Child" ? ["born", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
-const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", birth: "Births", death: "Deaths" };
-const kindName = k => KINDS[k] || k.charAt(0).toUpperCase() + k.slice(1);
+// Who did what is read from the log text by js/logmatch.js (the formats are listed there). Entries naming no villager pass the who filter.
+const { ACTIONS, ACTS_FOR, KINDS, kindName, typeOf, actorsOf } = window.BFLog;   // /logmatch.js = js/logmatch.js, the game reads entries with it too (alerts)
 const STORE = "bf-debug-logfilters", KSTORE = "bf-debug-logkinds";
 const load = k => { try { return new Set(JSON.parse(localStorage.getItem(k) || "[]")); } catch (e) { return new Set(); } };   // private window: all on
 let off = load(STORE), kindsOff = load(KSTORE);
 const saveOff = () => { try { localStorage.setItem(STORE, JSON.stringify([...off])); localStorage.setItem(KSTORE, JSON.stringify([...kindsOff])); } catch (e) {} };
 const isOn = (t, act) => !off.has(t + "|" + act);
-const typeOf = party => party === "Player" ? "Player" : (/\(([^()]+)\)\s*$/.exec(party) || [])[1] || null;
-// -> [[type, action], ...]: the entry passes if any of these is checked (a trade has a buyer and a seller); null = names no type
-function actorsOf(e) {
-  const k = e[1], tx = e[2];
-  let m;
-  if (k === "trade" && (m = /^(.*?) traded with (.*?\)):/.exec(tx))) {
-    const out = [], b = typeOf(m[1]), s = typeOf(m[2]);
-    if (b) out.push([b, "buy"]); if (s) out.push([s, "sell"]);
-    return out.length ? out : null;
-  }
-  if ((k === "bed" || k === "chest") && (m = /^(Player|.*?\([^()]+\)) (?:placed a |claimed the )/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, k]] : null; }
-  if (k === "job" && (m = / became an? (.+?)(?: \(was |$)/.exec(tx))) return [[m[1], "job"]];
-  if (k === "tool" && (m = /^(.*?\))'s .* broke$/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "tool"]] : null; }
-  if (k === "birth") return [["Child", "born"]];
-  if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
-  return null;
-}
 // With Builder on and Furniture Maker off, a builder buying from a furniture maker still shows (any villager in it will do).
 const visible = e => { if (kindsOff.has(e[1])) return false; const a = actorsOf(e); return !a || a.some(([t, act]) => isOn(t, act)); };
 // Every villager type is listed, whether or not it lives here or has logged anything yet: the game's professions (sent with
@@ -728,7 +744,8 @@ function renderLog(keepNew) {
     const e = a[i];
     if (!visible(e)) continue;
     if (q && !e[2].toLowerCase().includes(q)) continue;
-    rows.push(`<div class="ent ${esc(e[1])}${i >= newFrom ? " new" : ""}"><time>${stamp(e[0])}</time><span class="tx">${esc(e[2])}</span></div>`);
+    const at = Array.isArray(e[3]) && !e[2].includes(e[3].join(", ")) ? `<span class="at">at ${e[3].join(", ")}</span>` : "";   // where it happened, unless the text says already
+    rows.push(`<div class="ent ${esc(e[1])}${i >= newFrom ? " new" : ""}"><time>${stamp(e[0])}</time><span class="tx">${esc(e[2])}${at}</span></div>`);
   }
   seenLog = a.length;
   el.innerHTML = rows.join("") || `<div class="empty">${a.length ? "Nothing matches the filters." : "No events yet."}</div>`;
@@ -736,6 +753,75 @@ function renderLog(keepNew) {
   $("l-count").textContent = vname + a.length + (a.length === 1 ? " entry" : " entries");
 }
 renderFilters();
+
+// ---------------------------------------------------------------- alerts
+// Each alert is { id, who, act, kind, text, on }: the same choices as the log filters (a villager type and one of its actions,
+// an event type) plus words the line must contain; js/logmatch.js decides what matches, in the game as well as here. The debug
+// server keeps the list (debug/.alerts.json) and passes it to the game, which freezes at 0x and shows the line when one fires.
+let alerts = [], alertErr = null, alertSig = "", formTypes = "";
+const ANY_ACTS = Object.keys(ACTIONS);
+function renderAlertForm() {
+  const types = [...allTypes([])].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
+  const sig = types.join("|");
+  const who = $("a-who"), act = $("a-act"), kind = $("a-kind");
+  if (sig !== formTypes) {
+    formTypes = sig;
+    const v = who.value;
+    who.innerHTML = `<option value="">anyone</option>` + types.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+    who.value = types.includes(v) ? v : "";
+  }
+  const acts = who.value ? ACTS_FOR(who.value) : ANY_ACTS, av = act.value;
+  act.innerHTML = `<option value="">does anything</option>` + acts.map(k => `<option value="${k}">${esc(ACTIONS[k].toLowerCase())}</option>`).join("");
+  act.value = acts.includes(av) ? av : "";
+  if (!kind.options.length) kind.innerHTML = `<option value="">in any event</option>` + Object.keys(KINDS).map(k => `<option value="${k}">in ${esc(kindName(k).toLowerCase())}</option>`).join("");
+  $("a-add").disabled = !who.value && !act.value && !kind.value && !$("a-text").value.trim();
+}
+function hitsOf() { return (snap && snap.alerts && snap.alerts.hits) || {}; }
+function renderAlerts() {
+  const hits = hitsOf(), firing = snap && snap.alerts ? snap.alerts.active : null;
+  alertSig = JSON.stringify([alerts, hits, firing, alertErr]);
+  $("a-count").textContent = alerts.length ? alerts.filter(a => a.on !== false).length + " on · " + alerts.length + " total" : "";
+  $("a-body").innerHTML = alerts.map(a => {
+    const h = hits[a.id], on = a.on !== false;
+    return `<tr data-id="${esc(a.id)}" class="${on ? "" : "off"}${firing === a.id ? " firing" : ""}"><td class="an">${esc(BFLog.describe(a))}${on ? "" : ` <span class="dim">(off)</span>`}</td>` +
+      `<td>${h ? `${h.n}× <span class="last" title="${esc(h.text)}">${esc(stamp(h.day))}: ${esc(h.text)}</span>` : `<span class="dim">not yet</span>`}</td>` +
+      `<td class="btns"><button class="abtn${on ? "" : " on"}" data-act="toggle" title="${on ? "On: click to turn it off" : "Off: click to turn it back on"}">${on ? "Disable" : "Enable"}</button>` +
+      `<button class="abtn del" data-act="del" title="Delete this alert">Delete</button></td></tr>`;
+  }).join("") || `<tr><td colspan="3" class="dim">No alerts yet. Pick who, what and/or an event type above.</td></tr>`;
+  $("a-note").textContent = alertErr || "An alert freezes the game (0×) when a matching event is logged in any loaded village and shows it in the game's top-left corner. Alerts are kept by the debug server, so they carry over to other games.";
+  $("a-note").style.color = alertErr ? "var(--danger)" : "";
+}
+function alertsFromSnap(s) {
+  const types = [...allTypes([])].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y)).join("|");
+  if (types !== formTypes) renderAlertForm();   // the game's professions arrived: list them (redrawing every time would close an open menu)
+  const sig = JSON.stringify([alerts, hitsOf(), s.alerts ? s.alerts.active : null, alertErr]);
+  if (sig !== alertSig) renderAlerts();
+}
+function saveAlerts() {
+  renderAlerts();
+  fetch("alerts", { method: "POST", body: JSON.stringify({ alerts }), headers: { "Content-Type": "text/plain" } })
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(o => { alerts = o.alerts || []; alertErr = null; renderAlerts(); })
+    .catch(() => { alertErr = "Couldn't reach the debug server: the change isn't saved."; renderAlerts(); });
+}
+$("a-form").addEventListener("change", renderAlertForm);
+$("a-text").addEventListener("input", renderAlertForm);
+$("a-text").addEventListener("keydown", e => { if (e.key === "Enter" && !$("a-add").disabled) $("a-add").click(); });
+$("a-add").addEventListener("click", () => {
+  const a = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), who: $("a-who").value, act: $("a-act").value, kind: $("a-kind").value, text: $("a-text").value.trim(), on: true, created: Date.now() };
+  if (!a.who && !a.act && !a.kind && !a.text) return;
+  alerts.push(a);
+  $("a-text").value = ""; renderAlertForm();
+  saveAlerts();
+});
+$("a-body").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const id = b.closest("tr").dataset.id, a = alerts.find(x => x.id === id); if (!a) return;
+  if (b.dataset.act === "toggle") a.on = a.on === false;
+  else if (b.dataset.act === "del") alerts = alerts.filter(x => x !== a);
+  saveAlerts();
+});
+renderAlertForm(); renderAlerts();
 
 $("raw").addEventListener("toggle", () => { if (snap) $("f3").textContent = snap.text; });
 addEventListener("resize", () => { if (snap) { renderTop(snap); if (curV) drawMap(snap); } });

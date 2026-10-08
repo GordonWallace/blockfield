@@ -4,6 +4,7 @@
 // Always on, whatever F3 is doing: it streams to port 8001 on the game's host (or the address the debug server injects as
 // window.BF_DEBUG_FEED, or ?debugfeed=<port or url>; ?debugfeed=off stops it). It never changes what the game shows.
 // Snapshots go out 4 times a second as small POSTs; the village layout and the log are only re-sent when they change.
+// The server's answer carries the alerts set up on the debug screen whenever the game's copy is out of date (js/alerts.js).
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
 // API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update() }
 (() => {
@@ -124,7 +125,9 @@ function snapshot() {
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) mobs[m.type] = (mobs[m.type] || 0) + 1;
   return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
-    professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp) };
+    professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp),
+    // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
+    alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null };
 }
 
 function update() {
@@ -144,7 +147,14 @@ function update() {
   const ctl = new AbortController(), stop = setTimeout(() => ctl.abort(), 5000);
   fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000, signal: ctl.signal })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-    .then(t => { if (t === "resync") resync(); })   // a restarted server asks for the layouts and logs again
+    .then(t => {
+      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?}: the server's alerts, when the game's copy is out of date
+        const o = JSON.parse(t);
+        if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
+        t = o.resync ? "resync" : "ok";
+      }
+      if (t === "resync") resync();   // a restarted server asks for the layouts and logs again
+    })
     .then(() => { if (!told) { told = true; console.info("Blockfield debug feed: sending to " + URL_); } misses = 0; })
     .catch(() => {                                // server down or not at this address: try the next one, resend everything when it's back
       misses++;

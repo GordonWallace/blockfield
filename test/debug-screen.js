@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug
 const GAME = 8710, DBG = 8711;
 // the server prints its banner before its ports are open: wait until the debug port answers
 const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG]);
+  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-debug-screen-alerts.json')]);   // not the user's own alerts
   let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
   for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
   throw new Error('debug server did not start');
