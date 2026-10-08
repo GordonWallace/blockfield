@@ -86,10 +86,10 @@ module.exports = async (pg) => {
   });
   // ---- no villager-to-villager trade without an offer: every BF.vlog.trade call passes an offer object, no fair-price fallbacks
   const fs = require('fs'), path = require('path'), bad = [];
-  for (const f of ["builder", "cartography", "explorer", "forester", "furniture", "miner", "storage", "toolsmith", "villagelife", "shepherd"]) {
+  for (const f of ["builder", "cartography", "explorer", "forester", "furniture", "miner", "storage", "toolsmith", "villagelife", "shepherd", "stables"]) {
     const src = fs.readFileSync(path.join(__dirname, '..', 'js', f + '.js'), 'utf8');
     for (const line of src.split("\n")) if (/vlog\.trade\(/.test(line) && /"gave /.test(line)) bad.push(f + ": " + line.trim().slice(0, 90));
-    if (/deal\.fair|LOG_PER\b|0\.9 \/ val/.test(src)) bad.push(f + ": fair-price fallback");
+    if (/deal\.fair|LOG_PER\b|0\.9 \/ val|[{,] fair: true|[{,] table: true/.test(src)) bad.push(f + ": fair-price fallback");
   }
   res.push((bad.length ? "FAIL " : "PASS ") + "every villager trade goes through an offer " + JSON.stringify(bad));
   for (const l of res) console.log(l);

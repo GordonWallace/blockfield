@@ -301,21 +301,8 @@ function optsFor(type, inv) {
   if ((type === "garden" || type === "stable") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
   return null;
 }
-// Items no current offer sells but some villager's trade table does at a later level (the leatherworker's "1 emerald > 6 leather" is a level 2
-// offer): a builder buys them at that offer's price out of what the villager holds, with the usual stock and room rules (exchange). Only the
-// stable's tack rack needs one so far (leather); everything else keeps to current offers.
-const TABLE_ITEMS = () => new Set([BF.I.leather].filter(x => x != null));
-function tableOffer(v2, id) {
-  const em = BF.I.emerald;
-  for (const pool of TR().table(v2.profession)) for (const o of pool)
-    if (o.sell.id === id && o.buy.length === 1 && o.buy[0].id === em) return { buy: [{ id: em, n: o.buy[0].n }], sell: { id, n: o.sell.n }, level: 1, xp: 0, table: true };
-  return null;
-}
-const offersOf = v2 => {
-  const out = v2.trades.slice(), have = new Set(out.map(o => o.sell.id));
-  for (const id of TABLE_ITEMS()) if (!have.has(id) && TR().inv.count(v2.inv, id) > 0) { const o = tableOffer(v2, id); if (o) out.push(o); }
-  return out;
-};
+// What a villager sells: its offers, job and spare goods (js/market.js). Leather for a stable's tack rack comes from a leatherworker's spare goods.
+const offersOf = v2 => v2.trades;
 // Stables: only in villages on horse land, wanted most by a village of 10 or more without one (js/stables.js decides what horse land is).
 function stableWeight(R, has) {
   if (!BF.stables || !BF.stables.villageOK(R)) return 0;
