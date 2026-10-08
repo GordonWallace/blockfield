@@ -434,6 +434,7 @@ function pickTask(m, S) {
   if (coop && coop.hens && coop.hens.length < STOCK_TO && seeds > 0 && t >= S.stockAt) {
     const o = wildChicken(m, coop, S);
     if (o) return { kind: "fetch", mob: o, coop };
+    if (wildChicken(m, coop, { avoid: new Map() })) { S.stockAt = t + 0.1; return null; }   // only ones it just failed to bring in: tries them again in a while
     S.stockAt = Math.floor(t) + 1 + 0.03;   // none in range: look again tomorrow morning
     log("noWild", { coop: coop.key });
     vlog(m, "poultry", "found no wild chickens within " + FIND_R + " blocks of the coop; will look again tomorrow");
@@ -547,8 +548,12 @@ function lead(m, S, tk, dt, out) {
   const tx = inside || S.stage === "in" ? Math.floor((coop.x0 + coop.x1) / 2) : coop.out[0], tz = inside || S.stage === "in" ? Math.floor((coop.z0 + coop.z1) / 2) : coop.out[1];
   const st = BF.villageLife.travel(m, S, dt, out, tx, coop.y + 1, tz, m.def.speed * 0.8);
   if (st === "arrived") {
-    if (S.stage === "lead") { S.stage = "in"; m.ai.route = null; }
-    else { out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; }
+    if (S.stage === "lead") { S.stage = "in"; S.inT = 0; m.ai.route = null; }
+    else {
+      out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
+      // in the run but the chicken is still outside (caught on the fence, or the gate swung shut): go back out and lead it round again
+      if (!inRoom(coop, o.position) && (S.inT = (S.inT || 0) + dt) > 20) { S.stage = "lead"; S.inT = 0; m.ai.route = null; S.trail = [[p.x, p.y, p.z]]; S.trailBase = 0; o.crumb = 0; }
+    }
   } else if (st === "failed") { log("leadFailed", { why: "nopath" }); endTask(m, false); return false; }
   return true;
 }
@@ -568,7 +573,10 @@ function ai(m, dt, out) {
   const tk = S.task;
   S.t += dt;
   const limit = tk.kind === "fetch" ? LEAD_MAX : TASK_MAX;
-  if (S.t > limit || !stillWanted(m, tk)) { endTask(m, S.t <= limit && tk.kind !== "fetch"); return false; }
+  if (S.t > limit || !stillWanted(m, tk)) {
+    if (tk.kind === "fetch") log("leadFailed", { why: S.t > limit ? "slow" : "unwanted", stage: S.stage });
+    endTask(m, S.t <= limit && tk.kind !== "fetch"); return false;
+  }
   ai.mode = "idle"; ai.t = 2;
   if (tk.kind === "fetch" && S.stage !== "walk") return lead(m, S, tk, dt, out);
   // where to go: the nesting box (collect) or the chicken
@@ -584,7 +592,7 @@ function ai(m, dt, out) {
     if (S.gx != null && Math.hypot(S.gx - g.x, S.gz - g.z) > 2) ai.route = null;   // the chicken moved: plan again
     S.gx = g.x; S.gz = g.z;
     const st = BF.villageLife.travel(m, S, dt, out, g.x, g.y, g.z, m.def.speed * 1.2);
-    if (st === "failed") { endTask(m, false); return false; }
+    if (st === "failed") { if (tk.kind === "fetch") log("leadFailed", { why: "nopath", stage: "walk", d: +d.toFixed(1) }); endTask(m, false); return false; }
     if (st === "arrived" && tk.kind !== "fetch") { S.stage = "act"; S.actT = ACT[tk.kind]; ai.swingT = 0.35; }
     return true;
   }

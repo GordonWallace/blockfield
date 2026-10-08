@@ -83,7 +83,7 @@ module.exports = async (pg, out) => {
     let fetches = 0;
     const seeds0 = c("wheat_seeds");
     for (let i = 0; i < 24000 && coop.hens.length < 2; i++) { step(); if (pkp.task && pkp.task.kind === "fetch" && pkp.stage !== "walk" && i % 20 === 0) fetches++; if (BF.sky.time > 0.45) BF.sky.setTime(0.06); }
-    ok("the keeper led wild chickens into the empty coop until it held 2", coop.hens.length >= 2, { hens: coop.hens.length, wild: wild.map(h => !!h.coop), log: P.log.filter(e => /lead|stock|fetch/.test(e.kind)).slice(-6) });
+    ok("the keeper led wild chickens into the empty coop until it held 2", coop.hens.length >= 2, { hens: coop.hens.length, wild: wild.map(h => !!h.coop), log: P.log.filter(e => /lead|stock|fetch|noWild/.test(e.kind)).slice(-6) });
     ok("it led them (it walked with a chicken behind it)", fetches > 0, fetches);
     ok("they are inside the run", wild.filter(h => h.coop === coop).every(h => h.position.x > coop.fx0 && h.position.x < coop.fx1 && h.position.z > coop.fz0 && h.position.z < coop.fz1));
     const gateOpen = () => { const g = BF.blocks[BF.world.getBlock(coop.gate[0], coop.y + 1, coop.gate[1])]; return !!(g && g.gate && g.gate.open); };

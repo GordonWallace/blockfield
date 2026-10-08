@@ -22,7 +22,8 @@
 //   finished shaft is followed by a new one in another direction. It leaves the shaft before the end of the working day.
 // - What it keeps: cobblestone (stone drops it), coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis, emeralds and flint (gravel drops
 //   it 10% of the time, blocks.js extraDrops); dirt, the gravel itself and the rest it digs through are left behind. While a fletcher of its
-//   village is short of flint (BF.fletcher) and it holds fewer than FLINT_WANT, it also digs the gravel in the walls and ceiling of its shaft.
+//   village is short of flint (BF.fletcher) and it holds fewer than FLINT_WANT, it also digs the gravel in the walls and ceiling of its shaft,
+//   and on the surface it digs dry gravel in its area (riverbanks, shores, scree: findGravel) before anything else.
 // - Selling: holding SELL_MIN cobblestone, it walks to a builder of its village that needs some (its current structure's shortfall, or a reserve
 //   of BUILDER_RESERVE for the next foundation in cobblestone villages) and sells at its own offer "1 emerald > 32 cobblestone". Builders short
 //   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. A novice stops digging at KEEP_COBBLE; a
@@ -60,7 +61,7 @@ const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().t
 const I = n => BF.I[n];
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const KEEP = new Set(["cobblestone", "coal", "raw_iron", "raw_gold", "raw_copper", "diamond", "cobbled_deepslate", "emerald", "lapis_lazuli", "redstone", "flint"]);
-const FLINT_WANT = 8;   // digs wall gravel for flint while it holds fewer than this and a fletcher of its village is short of flint
+const FLINT_WANT = 16;  // digs gravel for flint while it holds fewer than this (its offer, "1 emerald > 16 flint") and a fletcher of its village is short of flint
 // Is a fletcher of m's village short of flint while m holds little? (then gravel in the shaft walls is worth digging)
 const wantsFlint = m => I("flint") != null && count(m, I("flint")) < FLINT_WANT && !!(BF.fletcher && m.village && (m.village.members || []).some(v => v.profession === "fletcher" && !v.dead && !v.removed && Array.isArray(v.inv) && BF.fletcher.shortfall(v).flint > 0));
 const keeps = id => KEEP.has(nameOf(id));
@@ -139,8 +140,9 @@ function area(m) {
 const claims = new Map();   // "x,y,z" -> miner, so two miners do not dig the same block
 const pk = (x, y, z) => x + "," + y + "," + z;
 // Can (x, y, z) be quarried: the column's top block, stone (or coal / iron ore), sticking up above one of its four neighbours?
-function quarryable(x, y, z, floor) {
-  if (y < floor || !surfaceStone(get(x, y, z))) return false;
+function quarryable(x, y, z, floor, gravel) {
+  const id = get(x, y, z);
+  if (y < floor || !(surfaceStone(id) || gravel && id === BF.B.gravel)) return false;
   if (W().heightAt(x, z) !== y) return false;
   // a neighbour 1 or 2 lower: the column it leaves (y - 1) is at most a step above that neighbour, so the quarry stays a walkable slope,
   // never a pit, trench or ledge the miner can't climb out of (a sheer drop on every side leaves the block alone)
@@ -150,14 +152,30 @@ function quarryable(x, y, z, floor) {
 }
 // All quarryable blocks in the miner's area: [{x, y, z}] (scanned at most every 30 s per miner).
 function scanSurface(m, Q) {
-  const A = area(m), floor = Math.floor(villageY(m)) - FLOOR_BELOW, out = [];
+  const A = area(m), floor = Math.floor(villageY(m)) - FLOOR_BELOW, out = [], grav = [];   // grav: dry surface gravel (dug for flint, see findGravel)
   for (let x = A.x0; x <= A.x1; x++) for (let z = A.z0; z <= A.z1; z++) {
     if (!A.inside(x + 0.5, z + 0.5) || !W().isLoaded(x, z)) continue;
     const y = W().heightAt(x, z);
     if (quarryable(x, y, z, floor)) out.push({ x, y, z });
+    else if (get(x, y, z) === BF.B.gravel && get(x, y + 1, z) === 0 && quarryable(x, y, z, floor, true)) grav.push({ x, y, z });
   }
-  Q.surf = out; Q.surfAt = nowS();
+  Q.surf = out; Q.grav = grav; Q.surfAt = nowS();
   return out;
+}
+// While the village's fletcher is short of flint (wantsFlint): the nearest dry surface gravel in its area (riverbanks, shores, scree), dug like
+// quarry stone; gravel drops flint 10% of the time. Null when there is none.
+function findGravel(m, Q) {
+  if (!Q.grav || nowS() - Q.surfAt > 30) scanSurface(m, Q);
+  const floor = Math.floor(villageY(m)) - FLOOR_BELOW, px = m.position.x, pz = m.position.z, bad = Q.badSurf || (Q.badSurf = new Map());
+  const cands = Q.grav.map(c => [c, Math.hypot(c.x + 0.5 - px, c.z + 0.5 - pz)]).sort((a, b) => a[1] - b[1]);
+  for (const [c] of cands) {
+    const k = pk(c.x, c.y, c.z), o = claims.get(k);
+    if (o && o !== m && !o.dead && !o.removed || (bad.get(k) || 0) > nowS()) continue;
+    if (get(c.x, c.y + 1, c.z) !== 0 || !quarryable(c.x, c.y, c.z, floor, true)) continue;
+    if (nearBuilt(c.x, c.y, c.z, BUILD_AVOID)) { bad.set(k, nowS() + 600); continue; }
+    return c;
+  }
+  return null;
 }
 // The next surface block to dig: near the miner (and near the last one, so it works an outcrop down before moving on), checked again now.
 function findSurface(m, Q) {
@@ -551,6 +569,10 @@ function think(m, Q) {
   if (cobble >= KEEP_COBBLE && digDepth(m) <= DIG_DEPTH[0] || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
   const deep = digDepth(m) > DIG_DEPTH[0];
   if (sh && !sh.done && sh.S != null && deep && digDepth(m) >= sh.S + 12 && !underground) { sh.done = true; log("deeper", m, { was: sh.S, now: digDepth(m) }); }   // levelled up: a deeper shaft
+  if (!underground && wantsFlint(m)) {   // the fletcher is short of flint: surface gravel first, at any level
+    const g = findGravel(m, Q);
+    if (g) return { kind: "quarry", gravel: true, x: g.x, y: g.y, z: g.z, claim: pk(g.x, g.y, g.z), max: 60 + 2.5 * Math.hypot(g.x - m.position.x, g.z - m.position.z) };
+  }
   if (!underground && !deep) {   // a novice quarries surface stone first, whenever there is any; the mineshaft only when there is none
     const c = findSurface(m, Q);
     if (c) return { kind: "quarry", x: c.x, y: c.y, z: c.z, claim: pk(c.x, c.y, c.z), max: 60 + 2.5 * Math.hypot(c.x - m.position.x, c.z - m.position.z) };
@@ -617,7 +639,7 @@ function ai(m, dt, out) {
     return true;
   }
   if (k.kind === "quarry") {
-    if (!quarryable(k.x, k.y, k.z, -Infinity) && get(k.x, k.y, k.z) === 0) { endTask(m, Q); return true; }
+    if (!quarryable(k.x, k.y, k.z, -Infinity, k.gravel) && get(k.x, k.y, k.z) === 0) { endTask(m, Q); return true; }
     const eye = (x, y, z) => Math.hypot(x + 0.5 - (k.x + 0.5), y + 1.62 - (k.y + 0.5), z + 0.5 - (k.z + 0.5));
     const goal = { x: k.x, z: k.z, at: (x, y, z) => eye(x, y, z) <= REACH && y >= k.y && !(x === k.x && z === k.z && y === k.y + 1) };   // never from below: it stays out of its own pits
     if (!goal.at(...feet(m))) {
@@ -745,7 +767,7 @@ function statusText(m) {
   if (!m || m.profession !== "miner") return "";
   const Q = m.mi, k = Q && Q.task;
   if (k) {
-    if (k.kind === "quarry") return "Quarrying stone";
+    if (k.kind === "quarry") return k.gravel ? "Digging gravel for flint" : "Quarrying stone";
     if (k.kind === "dig") return Q.shaft && Q.shaft.S == null ? "Digging a mineshaft" : "Mining underground";
     if (k.kind === "exit") return "Climbing out of the mine";
     if (k.kind === "climb") return "Digging its way out";
@@ -771,6 +793,6 @@ function unpack(m, o) {
 
 // In its mineshaft (or digging its way out): village errands such as food shopping wait until it is back up (js/villagelife.js).
 const underground = m => !!(m && m.mi && (inShaft(m, m.mi.shaft) || m.mi.task && m.mi.task.kind === "climb"));
-BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
+BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, findGravel, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
   KEEP_COBBLE, SELL_MIN, DIG_DEPTH, FLINT_WANT, digDepth, wantsStore, wantsFlint, _test: { state, area, checkCell, dig, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
 })();
