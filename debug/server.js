@@ -2,6 +2,7 @@
 // Blockfield debug server: the game on one port, a live debug screen on another (for a second monitor).
 //   node debug/server.js                 game on http://localhost:8000, debug screen on http://localhost:8001
 //   node debug/server.js --game 9000 --debug 9001 --lan
+//   (--alerts <file> keeps the debug screen's alerts somewhere other than debug/.alerts.json)
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to
 // /push on the debug port and every open debug screen receives them over Server-Sent Events (/events).
 // The game can also be served some other way and pointed here with index.html?debugfeed=8001.
@@ -49,6 +50,19 @@ function serveGame(req, res) {
 // (shown greyed out once it unloads) and each village's log history. The game keeps the newest 300 log entries per village;
 // the server keeps everything it has seen while it runs, so a long session's history isn't cut off.
 const clients = new Set();
+// Alerts set up on the debug screen, kept in debug/.alerts.json so they carry over to other games and server restarts.
+// av changes with every edit; the game reports the av it holds with each snapshot and gets the list back when it differs.
+const ai = args.indexOf("--alerts"), ALERTS = ai >= 0 && args[ai + 1] ? path.resolve(args[ai + 1]) : path.join(__dirname, ".alerts.json");   // --alerts <file>: tests
+let alerts = [], av = "0";
+try { const o = JSON.parse(fs.readFileSync(ALERTS, "utf8")); if (Array.isArray(o.alerts)) { alerts = o.alerts; av = String(o.av || Date.now()); } } catch (e) { /* none yet */ }
+function setAlerts(list) {
+  alerts = (Array.isArray(list) ? list : []).filter(a => a && typeof a.id === "string").slice(0, 200).map(a => ({
+    id: a.id.slice(0, 40), who: String(a.who || "").slice(0, 60), act: String(a.act || "").slice(0, 30), kind: String(a.kind || "").slice(0, 30),
+    text: String(a.text || "").slice(0, 120), on: a.on !== false, created: +a.created || Date.now() }));
+  av = String(Date.now());
+  try { fs.writeFileSync(ALERTS, JSON.stringify({ av, alerts }, null, 1)); } catch (e) { console.error("[debug] can't save alerts:", e.message); }
+  broadcast("alerts", { av, alerts });
+}
 let latest = null, lastPush = 0, pushes = 0, seed = null;
 const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map();   // icons: item id -> {url, name}, sent once by the game
 
@@ -84,7 +98,8 @@ function push(body, res) {
   broadcast("snap", { ...s, logs });
   if (fresh) console.log("[debug] game connected");
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
-  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(pushes++ === 0 ? "resync" : "ok");
+  const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
+  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(stale ? JSON.stringify({ resync, av, alerts }) : resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
 const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true" }, h);
@@ -107,11 +122,28 @@ function serveDebug(req, res) {
     req.on("end", () => push(body, res));
     return;
   }
+  if (url.pathname === "/alerts" && req.method === "POST") {   // the debug screen's whole alert list, after any change
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", c => { body += c; if (body.length > 1e6) req.destroy(); });
+    req.on("end", () => {
+      let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+      setAlerts(o.alerts);
+      res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts }));
+    });
+    return;
+  }
+  if (url.pathname === "/alerts") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts })); return; }
+  if (url.pathname === "/logmatch.js") {   // the log reader the game uses too, so the screen's filters and alerts read entries the same way
+    fs.readFile(path.join(ROOT, "js", "logmatch.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
+    return;
+  }
   if (url.pathname === "/events") {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...cors() });
     res.write("retry: 1500\n\n");
     // a new screen gets everything cached first (layouts, logs, last known detail of every village), then the latest snapshot
     send(res, "cache", JSON.stringify(cached()));
+    send(res, "alerts", JSON.stringify({ av, alerts }));
     if (latest) send(res, "snap", JSON.stringify({ ...latest, age: Date.now() - lastPush }));   // age: an old one isn't shown as live
     clients.add(res);
     req.on("close", () => clients.delete(res));

@@ -6,6 +6,7 @@
   {"name": "cartography-actions", "file": "test/cartography-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "builder-log", "kind": "node", "tier": "baseline", "file": "test/builder-log.js", "timeout": 600, "what": "builders log what they start and finish building"},
   {"name": "creative-vinv", "file": "test/creative-vinv.js", "kind": "actions", "tier": "baseline"},
+  {"name": "debug-alerts", "kind": "node", "tier": "baseline", "file": "test/debug-alerts.js", "args": ["{out}"], "timeout": 600, "what": "debug screen alerts, 0x, teleport"},
   {"name": "debug-screen", "kind": "node", "tier": "baseline", "file": "test/debug-screen.js", "args": ["{out}"], "timeout": 600, "what": "second-monitor debug screen"},
   {"name": "debug-inventory", "kind": "node", "tier": "baseline", "file": "test/debug-inventory.js", "args": ["{out}"], "timeout": 300, "what": "debug screen shows a picked villager's inventory"},
   {"name": "explorer-actions", "file": "test/explorer-actions.js", "kind": "actions", "tier": "baseline"},

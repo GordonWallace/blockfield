@@ -1,10 +1,12 @@
 // Village action logs, villager names and the F3 village panel.
 // Every village keeps a timestamped log of births, beds placed (and by whom), trades (villager <-> villager and
 // villager <-> player) and professions gained, capped at CAP entries (oldest dropped) and saved with the world.
+// Entries are [t, kind, text, [x, y, z]?]: the location of the event (block coordinates) when it has one, from the `where` given
+// to log() (a mob or a point) or else the first "at x, y, z" in the text. Every logged entry also goes to BF.alerts (js/alerts.js).
 // Villager names are generated deterministically from the villager's persistence key, so they need no saving.
 // Builders log what they start, take over and finish building (kind "build", js/builder.js).
 // Explorers' tents are logged with the beds (the tally still counts only real beds).
-// API: BF.vlog = { nameOf(m), log(rec, kind, text), trade(buyer, seller, offerOrText), bed(m, x, y, z), profession(m, from, to),
+// API: BF.vlog = { nameOf(m), log(rec, kind, text, where?), posOf(where, text) -> [x, y, z]|null, trade(buyer, seller, offerOrText), bed(m, x, y, z), profession(m, from, to),
 //                  entries(key), villageAt(x, z) -> rec|null, tally(rec), panelData(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }
 (() => {
 "use strict";
@@ -42,13 +44,24 @@ function nameOf(m) {
 }
 
 // ---------------------------------------------------------------- logging
-function log(rec, kind, text) {
+// where: a mob (its position), {x, y, z} or [x, y, z]; without one, the first "at x, y, z" in the text
+function posOf(where, text) {
+  const p = where && where.position ? where.position : where;
+  if (Array.isArray(p) && p.length === 3 && p.every(Number.isFinite)) return p.map(Math.floor);
+  if (p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)) return [Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)];
+  const m = / at (-?\d+), ?(-?\d+), ?(-?\d+)/.exec(text || "");
+  return m ? [+m[1], +m[2], +m[3]] : null;
+}
+function log(rec, kind, text, where) {
   if (!rec || !rec.key) return;
   let a = logs.get(rec.key);
   if (!a) logs.set(rec.key, a = []);
-  a.push([+dayNow().toFixed(4), kind, text]);
+  const e = [+dayNow().toFixed(4), kind, text], at = posOf(where, text);
+  if (at) e.push(at);
+  a.push(e);
   if (a.length > CAP) a.splice(0, a.length - CAP);
   if (BF.happiness) BF.happiness.note(rec.key, kind);   // its weekly counts outlive the capped log (js/happiness.js)
+  if (BF.alerts) BF.alerts.check(rec, e);
 }
 const stacks = list => (list || []).map(b => b.n + " " + BF.itemName(b.id)).join(" + ");
 const who = m => nameOf(m) + " (" + pretty(m.profession) + ")";
@@ -65,15 +78,15 @@ function trade(buyer, seller, what, times) {
     text = "gave " + stacks(what.buy.map(b => ({ id: b.id, n: b.n * n }))) + ", got " + stacks([{ id: what.sell.id, n: what.sell.n * n }]);
   }
   const a = buyer === "player" ? "Player" : who(buyer);
-  log(rec, "trade", a + " traded with " + who(seller) + ": " + text);
+  log(rec, "trade", a + " traded with " + who(seller) + ": " + text, seller && seller.position ? seller : buyer && buyer.position ? buyer : null);
 }
 function bed(m, x, y, z, what) {
   const rec = (m && m.village) || villageAt(x, z);
-  if (rec) log(rec, "bed", (m ? who(m) : "Player") + " placed a " + (what || "bed") + " at " + x + ", " + y + ", " + z);
+  if (rec) log(rec, "bed", (m ? who(m) : "Player") + " placed a " + (what || "bed") + " at " + x + ", " + y + ", " + z, [x, y, z]);
 }
 function profession(m, from, to) {
   if (!m || !m.village || !to || to === "unemployed" || to === "nitwit" || to === "child") return;
-  log(m.village, "job", nameOf(m) + " became a " + pretty(to) + (from && from !== "unemployed" ? " (was " + pretty(from) + ")" : ""));
+  log(m.village, "job", nameOf(m) + " became a " + pretty(to) + (from && from !== "unemployed" ? " (was " + pretty(from) + ")" : ""), m);
 }
 
 // ---------------------------------------------------------------- where is a point / the player
@@ -154,7 +167,8 @@ function renderPanel() {
   const un = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec) : [], uc = {};
   for (const s of un) { const p = pretty(s.prof); uc[p] = (uc[p] || 0) + 1; }
   const free = Object.entries(uc).sort(byName).map(([p, n]) => n + " " + p).join(", ");
-  const rows = a.slice(-SHOW).map(e => `<div class="vl-${e[1]}"><span>${stamp(e[0])}</span> ${esc(e[2])}</div>`).join("");
+  const at = e => Array.isArray(e[3]) && !e[2].includes(e[3].join(", ")) ? " at " + e[3].join(", ") : "";   // where, unless the text says already
+  const rows = a.slice(-SHOW).map(e => `<div class="vl-${e[1]}"><span>${stamp(e[0])}</span> ${esc(e[2] + at(e))}</div>`).join("");
   panelEl.innerHTML = `<h4>${esc(name)}</h4><div class="vl-tally">${t.villagers} villagers &middot; ${t.beds} beds &middot; ${un.length} unclaimed job blocks${free ? " (" + esc(free) + ")" : ""}</div>` +
     `<div class="vl-tally">Occupations: ${esc(occ || "none loaded")}${Object.values(prof).reduce((x, y) => x + y, 0) < t.villagers ? " (rest not loaded)" : ""}</div>` +
     (rows || `<div class="vl-none">No events yet.</div>`) + (a.length > SHOW ? `<div class="vl-none">${a.length - SHOW} older entries not shown</div>` : "");
@@ -167,10 +181,10 @@ function hook() {
   if (BF.happiness) BF.happiness.hook();
   BF.on("newWorld", reset);
   BF.on("villagerBorn", (m, a, b) => {
-    if (m.village) log(m.village, "birth", nameOf(m) + " was born to " + nameOf(a) + " and " + nameOf(b));
+    if (m.village) log(m.village, "birth", nameOf(m) + " was born to " + nameOf(a) + " and " + nameOf(b), m);
   });
   BF.on("mobKilled", m => {
-    if (m && m.type === "villager" && m.village) log(m.village, "death", who(m) + " died: killed by " + (m.lastHurt || "unknown causes"));
+    if (m && m.type === "villager" && m.village) log(m.village, "death", who(m) + " died: killed by " + (m.lastHurt || "unknown causes"), m);
   });
   BF.on("villagerTrade", (v, o) => trade("player", v, o));
   BF.on("blockPlaced", (x, y, z, id) => {      // beds placed by the player (villagers log their own: js/builder.js)
@@ -184,12 +198,12 @@ function reset() { logs.clear(); for (const [m, l] of [...labels]) dropLabel(m, 
 
 BF.vlog = {
   actor: null,      // set around block placements made by a villager that goes through blockPlaced (explorer tents)
-  CAP, nameOf, log, trade, bed, profession, entries, villageAt, tally, stamp, pretty, panelData,
+  CAP, nameOf, log, posOf, trade, bed, profession, entries, villageAt, tally, stamp, pretty, panelData,
   serialize() { const o = {}; for (const [k, a] of logs) if (a.length) o[k] = a; return o; },
   deserialize(o) {
     logs.clear();
     if (!o || typeof o !== "object") return;
-    for (const k in o) if (Array.isArray(o[k])) logs.set(k, o[k].filter(e => Array.isArray(e) && typeof e[2] === "string").slice(-CAP));
+    for (const k in o) if (Array.isArray(o[k])) logs.set(k, o[k].filter(e => Array.isArray(e) && typeof e[2] === "string").slice(-CAP));   // older saves: no locations
   },
   reset,
   init() {

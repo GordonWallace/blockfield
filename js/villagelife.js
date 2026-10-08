@@ -1090,6 +1090,11 @@ function perform(m, fs, R, D) {
     blockSound("break", id, t.x, t.y, t.z);
     m.farm.harvested = (m.farm.harvested || 0) + 1;
     log("harvest", m, { at: [t.x, t.y, t.z], crop: BF.blocks[id].name, got: drops.map(d => d.count + " " + BF.items[d.id].name).join(", ") });
+    // the village log gets one line when a farmer starts on a crop (not one per block): its first harvest of that crop in 30 s
+    const now = BF.simNow(), crop = BF.blocks[id].name, seen = fs.harvSeen || (fs.harvSeen = {}), since = now - (seen[crop] == null ? -1e9 : seen[crop]);
+    if (BF.vlog && m.village && !(since >= 0 && since < 30))
+      BF.vlog.log(m.village, "farm", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession) + ") started harvesting " + BF.vlog.pretty(crop) + " at " + t.x + ", " + t.y + ", " + t.z, [t.x, t.y, t.z]);
+    seen[crop] = now;
     // replant right away with the matching seed
     const seed = c.mature.get(id);
     if (seed != null && cnt(m, seed) > 0) { fs.next = { kind: "plant", x: t.x, y: t.y, z: t.z, k: t.k, seed }; }
