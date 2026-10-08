@@ -519,7 +519,7 @@ Loaded after mobs.js / builder.js (index.html). mobs.js, trading.js, inventory.j
   built structures, not a road, natural ground within 2 above / 3 below the bed, nothing on it but plants and nothing solid overhead, and the bed keeps `BED_GAP` 1 free block from other beds, farm plots
   and projects. Value = new farmland / (tasks + 3 per log to fetch) x bias x random 0.7-1.4, best wins; bias for growing = (1 - 0.8 x area / max area) x (0.55 + 0.45 x short side / long side) (big
   beds sprawl less, and the step that keeps a bed compact wins), for a new bed `NEW_BONUS` 1.5 (it needs far more logs, and is only offered with room around it). Project tasks, nearest first by stage:
-  `dig` / `raise` to the bed height (dirt from the pocket, fetched from outside the village when short: up to 8), `border` (a log, the bed's own log type first; fetched as needed, up to 16),
+  `dig` / `raise` to the bed height (dirt from the pocket, fetched from outside the village when short: up to 8), `border` (a log, the bed's own log type first; bought from a forester as needed, up to 16, see Logs below),
   `unborder`, then `water` (a full bucket into each channel cell once its four sides are solid) and `till` (with a hoe). A full pocket composts the smaller of two stacks of one crop, else its biggest
   crop stack, to make room for dirt and logs. Projects are saved (`exportAll` / `importAll`, keys `farmbeds:<village key>` in the villagers map) and taken over by another farmer in reach when their
   farmer is gone. 14 failed fetches drop a project that has changed nothing yet (and the farmer waits 300 s before the next) or pause a started one for 120 s; a blocked cell (built on, flooded) pauses a
@@ -528,8 +528,12 @@ Loaded after mobs.js / builder.js (index.html). mobs.js, trading.js, inventory.j
   centre is within 1.75 blocks, face it, swing, 0.45-0.9 s, then `world.setBlock` (only loaded chunks, never inside building / plaza / lamp / decor / built-structure boxes). Cells are claimed so two farmers never share one; a failed cell is avoided for 30 s (`log` kind `giveup` says why).
   After 5 % of tasks a 4-9 s break (normal wandering). Measured share of the awake daytime spent on farm tasks (incl. trading with the player): 93-97 %.
   `BF.villageLife.stats(m) -> {today, yesterday, farm, total, counts, harvested, tilled, bordered, watered, task}`; `counts` also has `dig`, `raise`, `gather`, `fill`.
-- **Gathering** (`findGather`, task `gather`): dirt = the top block of open grass / dirt / podzol ground, logs = the base log of a living tree (`BF.forester.treeAt`: the whole tree comes down with `BF.forester.fell`, its logs into the pocket, the rest dropped), never within a block of a bed, farm plot or project, from a random spot of the ring `GATHER_R` 24 blocks around the village
+- **Gathering** (`findGather`, task `gather`): dirt only, the top block of open grass / dirt / podzol ground, never within a block of a bed, farm plot or project, from a random spot of the ring `GATHER_R` 24 blocks around the village
   area (`D.base`), **never inside it** (the village's own landscape and buildings are left alone); nearest of 120 samples, the drops go into the farmer's inventory. A trip goes on until the farmer holds enough (`fs.haul`).
+- **Logs** (since 1.1 only foresters fell trees; `findLogSeller`, task `buylog`): a farmer whose bed edge needs logs buys up to 16 (what the ring still lacks) from a forester of its village. It uses the forester's own log offer
+  when it has one (level 2, 1 emerald > 8 logs, with the player's stock / room / xp rules), else pays 1 emerald for 8 of the logs the forester holds (`LOG_PER`). The bed's own species first, then the bigger deal,
+  then the nearer forester; at most 4 emeralds a trip. It follows the forester and trades within 2.1 blocks (log kind `buyLogs`, status "Buying logs"). No forester with logs or no emeralds counts as a failed fetch
+  (`P.fails`); a forester that was asleep, busy or refused is skipped for ~70 s.
 - **Buckets**: items `bucket` (stack 16, recipe 3 iron ingots in a V) and `water_bucket` (stack 1) in blocks.js, sprites + recipe registered from villagelife.js (`texKit.SPRITES`,
   `recipeHooks`). The player uses them through `BF.villageLife.useBucket(item, target)` (player.js right-click hook before eating): an empty bucket scoops the water source looked at,
   a water bucket pours a source against the targeted face (creative keeps the bucket).
