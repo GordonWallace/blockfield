@@ -38,6 +38,7 @@
   {"name": "durability-actions", "file": "test/durability-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "esc-close", "file": "test/esc-close.js", "kind": "actions", "tier": "integration"},
   {"name": "explorer-far", "file": "test/explorer-far.js", "kind": "actions", "tier": "integration"},
+  {"name": "farm-repair", "kind": "node", "tier": "integration", "file": "test/farm-repair.js", "args": ["2", "1"], "timeout": 900, "what": "every farm has a composter; a farmer restores a dry, run-down farm"},
   {"name": "farmbeds", "kind": "node", "tier": "integration", "file": "test/farmbeds.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "farm beds soak, 1 day x 2 villages"},
   {"name": "forester-actions", "file": "test/forester-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "forester-axes", "file": "test/forester-axes.js", "kind": "actions", "tier": "integration", "timeout": 600},
