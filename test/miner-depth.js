@@ -30,7 +30,7 @@ module.exports = async (pg, out) => {
     // 2. trades and keeps
     const offers = [1, 2, 3, 4, 5].map(l => BF.trades.offers("miner", l).map(o => o.sell.n + " " + BF.items[o.sell.id].name).join(", "));
     res.offers = offers;
-    ok(/raw_iron/.test(offers[1]) && /raw_gold/.test(offers[1]), "apprentice offers lack raw iron / raw gold");
+    ok(/raw_iron/.test(offers[0]) && /raw_gold/.test(offers[1]), "novice offers lack raw iron or apprentice offers lack raw gold");
     ok(!offers.join().match(/(^|[^_])(iron|gold)_ore/), "miner still sells ore blocks");
     // 3. a live miner beside the player
     const v = BF.mobs.list.find(m => m.type === "villager" && m.village && m.inv && !m.child);

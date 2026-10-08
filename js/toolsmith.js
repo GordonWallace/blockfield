@@ -9,7 +9,7 @@
 //   category it makes the best material it can get, in CALIBER order (diamond, gold, iron, stone, wood, the order BF.toolWear ranks tools in):
 //   what it holds, or what a villager of its village sells and it can pay for. It buys for the better tool even when it already holds the
 //   materials for a lesser one; when a better material is sold here but not right now (the miner is out of cobblestone or down the shaft)
-//   it waits up to WAIT_BETTER (6 game hours) before making the lesser tool.
+//   it waits up to WAIT_BETTER (6 game hours) before making the lesser tool, but only while it has one of that kind on the shelf already or the lesser tool would be wooden.
 // - Crafting: at its smithing table (BF.jobs "work" state), CRAFT_SECS (2 game hours) per tool. Materials are taken when it starts; the tool
 //   is finished on later visits if the day ends first (the craft in progress is saved). Sticks are cut from 2 planks when it is short.
 // - Buying: it walks to the seller and trades at the seller's own offer (stock and room rules of trading.js), like the furniture maker. It
@@ -212,9 +212,10 @@ function plan(m) {
     for (const mat of matsFor(cat)) {
       if (stockAtLeast(m, cat, mat) >= TOOL_CAP) break;   // enough of this or better: lesser ones would not help
       if (canMake(m, cat, mat, stock)) {
-        if (later) {   // wait for the better one a while
+        if (later && (stock[cat] > 0 || mat === "wood")) {   // wait for the better one a while (only with one of these already on the shelf, or before falling back to wood); the wait ends when the lesser tool is started (startCraft)
           const w = S.waitBetter[cat] || (S.waitBetter[cat] = { since: dayNow(), mat: later });
           if (dayNow() - w.since < WAIT_BETTER) break;
+          return { cat, mat, ready: true };
         }
         delete S.waitBetter[cat];
         return { cat, mat, ready: true };
@@ -309,6 +310,7 @@ function startCraft(m, p) {
   }
   const mats = take(m, MAT[p.mat], HEAD[p.cat]).concat(STICKS[p.cat] ? take(m, isStick, STICKS[p.cat]) : []);
   S.craft = { id, t: CRAFT_SECS(), mats };
+  if (S.waitBetter) delete S.waitBetter[p.cat];
   log("start", m, { tool: nameOf(id) });
   return S.craft;
 }

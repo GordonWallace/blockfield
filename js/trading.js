@@ -164,8 +164,8 @@ const TRADES = {
   // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
-    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal"],
-    ["2 emerald > 64 cobblestone", "1 emerald > 2 raw_iron", "1 emerald > 1 raw_gold"],   // an apprentice digs deep enough for gold
+    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal", "1 emerald > 2 raw_iron"],      // raw iron from the start: the toolsmith's iron (shears, iron tools)
+    ["2 emerald > 64 cobblestone", "1 emerald > 1 raw_gold"],                            // an apprentice digs deep enough for gold
     ["4 emerald > 1 diamond"],                                                           // a journeyman deep enough for diamonds
     ["2 emerald > 16 coal"],
     ["3 emerald > 3 raw_gold"],
