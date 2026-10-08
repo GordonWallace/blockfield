@@ -304,7 +304,7 @@ function vdata(R) {
   if (Number.isFinite(wg.x)) boxes.push([wg.x - 9, wg.z - 9, wg.x + 9, wg.z + 9]);       // meeting square, bell, well
   for (const l of wg.lamps || []) boxes.push([l[0] - 1, l[1] - 1, l[0] + 1, l[1] + 1]);
   for (const d of wg.decor || []) boxes.push([d[0] - 1, d[1] - 1, d[0] + 1, d[1] + 1]);
-  R._life = { area: A, base: Object.assign({}, A), boxes, farms, beds: [], projects: projectsFor(R), farmBase, cells: [], water: [], waterSet: new Set(), wells: new Set(), ready: false, scan: null, scanT: 0, want: 0 };
+  R._life = { area: A, base: Object.assign({}, A), boxes, farms, beds: [], projects: projectsFor(R), dig: digFor(R), farmBase, cells: [], water: [], waterSet: new Set(), wells: new Set(), ready: false, scan: null, scanT: 0, want: 0 };
   return R._life;
 }
 // The farmer's reach box (composter +-12) must lie inside the scanned area (a composter placed outside the village grounds); a wider area is rescanned.
@@ -517,23 +517,105 @@ function findWater(m, R) {
 // Logs are not taken from trees: since 1.1 only foresters fell trees, and a farmer buys its logs from them (see "logs from the foresters" below).
 // within a block of a bed, a farm plot or a bed being made (beds made by farmers can lie outside the village box)
 const nearBeds = (D, x, z) => (D.beds || []).some(b => inRect(grow(outerOf(b), 1), x, z)) || D.farms.some(f => inRect(grow(f, 1), x, z)) || D.projects.some(p => inRect(grow(outerOf(p.L), 1), x, z));
+// Dirt is taken neatly (Gordon, 1.2): first off the natural edges of the land, the top of a bank or a step where the ground beside it
+// is lower, highest first, so a bank is cut back evenly and no hole is left; on flat ground, from one shallow rectangular pit
+// (one block deep, at most PIT_MAX across) that is dug out row by row before another is begun. Columns the farmers dug are
+// remembered (D.dig.dug, saved), so the rim of an old pit never counts as a natural edge.
+const PIT = 3, PIT_MAX = 6, DUG_MAX = 3000, GATHER_SCAN = 22;
+function digOf(D) { return D.dig || (D.dig = { dug: new Set(), pit: null }); }
+const ckey = (x, z) => x + "," + z;
+// a column dirt may come from: grass / dirt on top with nothing solid above it, solid ground below (no hole into a cave),
+// no water or lava beside the block (it would run in), outside the village and away from beds
+function gatherCol(c, D, x, z) {
+  const w = W(), b0 = D.base;
+  if (x < b0.x0 - GATHER_R || x > b0.x1 + GATHER_R || z < b0.z0 - GATHER_R || z > b0.z1 + GATHER_R) return -1;
+  if (inVillage(D, x, z) || !w.isLoaded(x, z) || nearBeds(D, x, z)) return -1;
+  const h = w.heightAt(x, z);
+  if (h < BF.MIN_Y + 1 || !c.diggable.has(getB(x, h, z)) || !looseAbove(getB(x, h + 1, z)) || !BF.SOLID[getB(x, h - 1, z)]) return -1;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (BF.FLUID[getB(x + dx, h, z + dz)] || BF.FLUID[getB(x + dx, h + 1, z + dz)]) return -1;
+  return h;
+}
 function findGather(m, D, ok) {
-  const c = ids(), w = W(), b0 = D.base, px = m.position.x, pz = m.position.z;
-  let best = null, bd = Infinity;
-  for (let t = 0; t < 120; t++) {
-    // half the samples near the farmer (the nearest edge of the village), half anywhere around it
-    const near = t & 1, x = Math.floor(near ? rnd(px - 28, px + 28) : rnd(b0.x0 - GATHER_R, b0.x1 + GATHER_R + 1)), z = Math.floor(near ? rnd(pz - 28, pz + 28) : rnd(b0.z0 - GATHER_R, b0.z1 + GATHER_R + 1));
-    if (x < b0.x0 - GATHER_R || x > b0.x1 + GATHER_R || z < b0.z0 - GATHER_R || z > b0.z1 + GATHER_R) continue;
-    if (inVillage(D, x, z) || !w.isLoaded(x, z) || nearBeds(D, x, z)) continue;
-    const h = w.heightAt(x, z);
-    if (h < BF.MIN_Y + 1) continue;
-    const a = getB(x, h + 1, z);
-    const y = c.diggable.has(getB(x, h, z)) && (a === 0 || (BF.REPLACEABLE[a] && !BF.SOLID[a] && !BF.FLUID[a])) ? h : -1;
-    if (y < 0 || (ok && !ok(key3(x, y, z)))) continue;
-    const d = Math.hypot(x + 0.5 - px, z + 0.5 - pz);
-    if (d < bd) { bd = d; best = { kind: "gather", what: "dirt", x, y, z, k: key3(x, y, z), ty: y + 1 }; }
+  const c = ids(), w = W(), b0 = D.base, G = digOf(D), px = m.position.x, pz = m.position.z;
+  const dist = (x, z) => Math.hypot(x + 0.5 - px, z + 0.5 - pz);
+  const free = (x, y, z) => !ok || ok(key3(x, y, z));
+  const task = (x, y, z) => ({ kind: "gather", what: "dirt", x, y, z, k: key3(x, y, z), ty: y + 1 });
+  // 1. a pit being dug is finished first: its undug cells, nearest first; when it is done it grows by a row while it can
+  for (let tries = 0; G.pit && tries < 2; tries++) {
+    const P = G.pit;
+    let best = null, bd = Infinity;
+    for (let x = P.x0; x <= P.x1; x++) for (let z = P.z0; z <= P.z1; z++) {
+      if (G.dug.has(ckey(x, z)) || gatherCol(c, D, x, z) !== P.y || !free(x, P.y, z)) continue;
+      const d = dist(x, z);
+      if (d < bd) { bd = d; best = task(x, P.y, z); }
+    }
+    if (best) return best;
+    if (!growPit(c, D, G)) G.pit = null;
   }
-  return best;
+  // the ground scanned: around the village edge nearest the farmer
+  let cx = Math.floor(px), cz = Math.floor(pz);
+  if (inVillage(D, cx, cz)) {
+    const e = [[cx - b0.x0, b0.x0 - 6, cz], [b0.x1 - cx, b0.x1 + 6, cz], [cz - b0.z0, cx, b0.z0 - 6], [b0.z1 - cz, cx, b0.z1 + 6]];
+    e.sort((a, b) => a[0] - b[0]);
+    cx = e[0][1]; cz = e[0][2];
+  }
+  const R = GATHER_SCAN, N = 2 * R + 1, H = new Int32Array(N * N).fill(-1 << 30);
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { const x = cx - R + i, z = cz - R + j; if (w.isLoaded(x, z)) H[i * N + j] = w.heightAt(x, z); }
+  const hAt = (x, z) => { const i = x - cx + R, j = z - cz + R; return i >= 0 && j >= 0 && i < N && j < N ? H[i * N + j] : w.isLoaded(x, z) ? w.heightAt(x, z) : -1 << 30; };
+  // 2. natural edges: a column with a lower neighbour that the farmers did not dig; the highest above its neighbours first
+  let best = null, bs = Infinity;
+  const ok2 = new Map();   // valid columns of the scan, for a pit
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x = cx - R + i, z = cz - R + j, h = gatherCol(c, D, x, z);
+    if (h < 0) continue;
+    ok2.set(ckey(x, z), h);
+    let low = 0, sum = 0, n = 0;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nh = hAt(x + dx, z + dz);
+      if (nh < BF.MIN_Y) continue;
+      const dug = G.dug.has(ckey(x + dx, z + dz));
+      sum += dug ? Math.max(nh, h) : nh; n++;
+      if (!dug && nh < h) low++;
+    }
+    if (!low || !free(x, h, z)) continue;
+    const relief = h - sum / n;   // 0.25 for a one-block step on one side ... up to several blocks for the lip of a bank
+    const s = dist(x, z) - 6 * Math.min(relief, 2);
+    if (s < bs) { bs = s; best = task(x, h, z); }
+  }
+  if (best) return best;
+  // 3. flat ground: a new shallow pit, PIT x PIT cells at one height, nearest the farmer
+  let pb = null, pd = Infinity;
+  for (const [k, h] of ok2) {
+    const [x, z] = k.split(",").map(Number);
+    let fit = true;
+    for (let a = 0; a < PIT && fit; a++) for (let b = 0; b < PIT && fit; b++) if (ok2.get(ckey(x + a, z + b)) !== h || G.dug.has(ckey(x + a, z + b))) fit = false;
+    if (!fit) continue;
+    const d = dist(x + 1, z + 1);
+    if (d < pd) { pd = d; pb = { x0: x, z0: z, x1: x + PIT - 1, z1: z + PIT - 1, y: h }; }
+  }
+  if (pb) {
+    G.pit = pb;
+    for (let x = pb.x0; x <= pb.x1; x++) for (let z = pb.z0; z <= pb.z1; z++) if (free(x, pb.y, z)) return task(x, pb.y, z);
+  }
+  return null;
+}
+// A finished pit grows by one row on a side whose next row is all undug ground at the pit's height, up to PIT_MAX across.
+function growPit(c, D, G) {
+  const P = G.pit, sides = [];
+  if (P.x1 - P.x0 + 1 < PIT_MAX) sides.push(["x0", -1], ["x1", 1]);
+  if (P.z1 - P.z0 + 1 < PIT_MAX) sides.push(["z0", -1], ["z1", 1]);
+  for (let i = sides.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [sides[i], sides[j]] = [sides[j], sides[i]]; }
+  for (const [f, s] of sides) {
+    const v = P[f] + s, row = [];
+    if (f[0] === "x") for (let z = P.z0; z <= P.z1; z++) row.push([v, z]); else for (let x = P.x0; x <= P.x1; x++) row.push([x, v]);
+    if (row.every(([x, z]) => !G.dug.has(ckey(x, z)) && gatherCol(c, D, x, z) === P.y)) { P[f] = v; return true; }
+  }
+  return false;
+}
+function noteDug(D, x, z) {
+  const G = digOf(D), k = ckey(x, z);
+  G.dug.delete(k); G.dug.add(k);
+  while (G.dug.size > DUG_MAX) G.dug.delete(G.dug.values().next().value);
 }
 
 // hydrated or dehydrated farmland (js/farmland.js): both are fields, crops are planted and harvested on either
@@ -901,15 +983,28 @@ function projectsFor(R) {
   savedProjects.delete(k); liveProjects.set(k, list);
   return list;
 }
+// where the farmers took dirt ("farmdig:<village key>": the columns dug and the pit being dug, see findGather)
+const savedDig = new Map(), liveDig = new Map();
+function digFor(R) {
+  const k = R.key, G = savedDig.get(k) || liveDig.get(k) || { dug: new Set(), pit: null };
+  savedDig.delete(k); liveDig.set(k, G);
+  return G;
+}
 function exportAll(out) {
+  for (const M of [savedDig, liveDig]) for (const [k, G] of M) if (G.dug.size || G.pit) out["farmdig:" + k] = { dug: [...G.dug], pit: G.pit ? Object.assign({}, G.pit) : null };
   for (const [k, list] of savedProjects) if (list.length) out["farmbeds:" + k] = JSON.parse(JSON.stringify(list));
   for (const [k, list] of liveProjects) if (list.length) out["farmbeds:" + k] = JSON.parse(JSON.stringify(list));
   for (const [k, A] of villageAges) out["vage:" + k] = +A.lived.toFixed(4);   // the village's age: game days loaded and active
   return out;
 }
 function importAll(o) {
-  savedProjects.clear(); liveProjects.clear(); savedProjects.clear(); villageAges.clear();
+  savedProjects.clear(); liveProjects.clear(); savedProjects.clear(); villageAges.clear(); savedDig.clear(); liveDig.clear();
   for (const k in o || {}) {
+    if (k.slice(0, 8) === "farmdig:" && o[k] && Array.isArray(o[k].dug)) {
+      const P = o[k].pit, pit = P && ["x0", "z0", "x1", "z1", "y"].every(f => Number.isFinite(P[f])) ? { x0: P.x0, z0: P.z0, x1: P.x1, z1: P.z1, y: P.y } : null;
+      savedDig.set(k.slice(8), { dug: new Set(o[k].dug.filter(d => typeof d === "string")), pit });
+      continue;
+    }
     if (k.slice(0, 5) === "vage:" && Number.isFinite(+o[k])) { villageAges.set(k.slice(5), { lived: Math.max(0, +o[k]), pass: -9, t: 0 }); continue; }
     if (k.slice(0, 9) !== "farmbeds:" || !Array.isArray(o[k])) continue;
     const list = o[k].filter(p => p && p.L && ["x0", "z0", "x1", "z1", "y"].every(f => Number.isFinite(p.L[f])) && Array.isArray(p.L.ch) && (p.L.ax === "x" || p.L.ax === "z"));
@@ -1030,6 +1125,7 @@ function gatherBlock(m, D, t) {
   for (const d of drops) Tinv.add(m.inv, d.id, d.count);
   particles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
   blockSound("break", id, t.x, t.y, t.z);
+  noteDug(D, t.x, t.z);
   log("gather", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
   return true;
 }
@@ -1540,5 +1636,5 @@ if (BF.texKit) {
 BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
   exportAll, importAll, bedRects,
   villageAge: key => { const A = villageAges.get(key); return A ? A.lived : null; },   // game days loaded and active, or null if never
-  _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, findLogSeller, doLogDeal, perform, dealWith, findFoodSeller, scanStep, inRange } };
+  _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, digOf, findLogSeller, doLogDeal, perform, dealWith, findFoodSeller, scanStep, inRange } };
 })();
