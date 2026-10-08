@@ -841,6 +841,25 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - **Looms and sheep**: only a pen with a shepherd's loom on its outside ring (`hasLoom(pen)`, from `BF.jobs.planFor`) is stocked with sheep; spare pens stay empty.
 - Tests: `test/shepherd-check.js`, `test/shepherd-day.js`, `test/shepherd-misc.js` (`NODE_PATH=$(npm root -g) node test/run.js /tmp/x test/shepherd-day.js`).
 
+## Poultry keepers (js/poultry.js, loaded after shepherd.js)
+`BF.poultry`. Every chicken mob carries `m.hen = {fed, cd, growAt, layAt, x, z, mob}` (absolute game days). Mirrors the sheep code (js/shepherd.js).
+- **Feeding / breeding.** 1 `wheat_seeds` from the player (right click, player.js) or a poultry keeper sets `fed`; willing for 1 day. Two willing adults of the same coop (or both wild) within 8 blocks
+  walk together and a chick hatches; both rest 1 day. Chicks (`m.chick`, `growAt`) are scaled 0.5 (`BF.mobs.setChickenSize`), drop nothing and grow up after 2 days. Events: `chickenFed(m, by)`, `chickenBorn(chick, a, b)`, `chickenPenned(m, coop)`.
+- **Eggs.** Item `egg` (stack 16, not food) and `cooked_egg` (food 6, not vanilla; furnaces cook `egg` -> `cooked_egg`). An adult lays one every 0.25-0.5 days: a wild chicken drops it, a coop chicken lays into the coop's nest
+  (`coop.eggs`, up to 64). Unloaded coop chickens keep laying (states hold absolute days).
+- **Tempting.** A chicken within 10 blocks follows a player holding wheat seeds (`chickenAI`), so the player can lure chickens into a coop; any chicken that ends up inside a coop's run joins it.
+- **Coops.** Village generator 4 (default for new worlds from 1.3; worlds saved with 3 keep 3): a village of 8+ villagers gets a poultry keeper (roster slot `<village key>#1500`, taking the last plain resident's place) and a 7x7
+  `coop` building (worldgen `layoutVillage`, added after everything else so no plot moves): fence ring, gate facing the road, hay bales in the back corners; the nesting box goes beside it (`jobs.planVillage`).
+  Builders can build a `coop` (blueprints.js: fence ring with a gap, nesting box beside the east fence; builder.js weights it 2.4 when the village has no coop and 8+ villagers, 0.02 after; the builder crafts the nesting box from 4 planks + 1 hay bale).
+  `BF.poultry.coopsOf(rec)`: `{key, idx ("g<n>" generated / "b<id>" built), gen, rec, x0..z1 (run), fx0..fz1 (fence), y (ground), gate, out, cells, hens: [state], eggs}`. A generated coop starts with 2-4 chickens, a built one empty.
+  Saved as `coops:<village key>` = `[{i, h: [packed states], e: eggs}]`. Coop chickens (`m.coop`) wander only in the run (`pickCoopTarget`, `contain`).
+- **The keeper** (profession `poultry_keeper`, jobsite `nesting_box`; outfit in mobs.js). Works from 0.02 to 0.5 of the day: collects the nest at its nesting box when it holds 3+ eggs (any before the end of its day), feeds hungry chickens
+  seeds while the flock is 8 or fewer, culls adults while the flock is over 8 (never below 2 adults; keeps 1 `raw_chicken` and 0-2 `feather`), and while its coop holds fewer than 2 chickens walks to the nearest wild adult chicken
+  within 128 blocks and leads it home (the chicken walks the keeper's trail; the keeper waits when it falls behind and holds the gate open, shutting it once clear). No wild chicken in range: it looks again the next morning.
+  Seeds: a generated keeper starts with 12+, a hired one gets 1 emerald (`trading.js hireKit`); it buys more from farmers (villagelife.js `wheatDealWith`, farmers keep 16). Sells eggs, feathers, raw chicken (TRADES.poultry_keeper, never restocked).
+- **Debug screen.** Mob counts split chickens into `chicken (coop)` and `chicken (wild)`; a keeper's (and shepherd's) holdings show its flock and the eggs in the nest. Village log lines: chick hatched, eggs collected, culled, fetched / brought in, none in range.
+- Test: `test/poultry-actions.js`.
+
 ## Villager status, food for the unemployed, claimed beds (js/villagerstatus.js, loaded after villagelog.js)
 - `BF.villagerStatus.text(m)`: the trade screen's status line for any villager. villageLife, builder and explorer statusText speak first;
   otherwise `routine(m)` reads the everyday AI (sleeping, heading to bed, walking to / working at the jobsite, looking for work, relaxing...).

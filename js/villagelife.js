@@ -1405,8 +1405,11 @@ function doToolDeal(m, deal) {
 // A shepherd short of wheat (a keeper short of wheat seeds) buys it from the village (farmers first) at the fair price: 1 emerald buys ~90% of an
 // emerald's worth. Farmers keep WHEAT_SELF wheat and SEEDS_SELF seeds for themselves.
 const SEEDS_SELF = 16;
-const feedItem = m => (m.profession === "poultry_keeper" ? I("wheat_seeds") : ids().wheat);
-const feedWanted = m => (m.profession === "shepherd" && BF.shepherd ? BF.shepherd.wheatWanted(m) : m.profession === "poultry_keeper" && BF.poultry ? BF.poultry.seedsWanted(m) : 0);
+// Butchers buy raw chicken from the poultry keepers in the same way, to cook and sell (only from keepers: nobody else raises chickens).
+const feedItem = m => (m.profession === "poultry_keeper" ? I("wheat_seeds") : m.profession === "butcher" ? I("raw_chicken") : ids().wheat);
+const chickenWanted = m => { const n = cnt(m, I("raw_chicken")) + cnt(m, I("cooked_chicken")); return BF.poultry && n < 9 ? 15 : 0; };   // one emerald's worth while it holds fewer than 9
+const feedWanted = m => (m.profession === "shepherd" && BF.shepherd ? BF.shepherd.wheatWanted(m) : m.profession === "poultry_keeper" && BF.poultry ? BF.poultry.seedsWanted(m)
+  : m.profession === "butcher" ? chickenWanted(m) : 0);
 function wheatDealWith(m, v2, want) {
   const T = TR(), c = ids(), item = feedItem(m), seeds = item !== c.wheat, val = (T.VALUE && T.VALUE[BF.items[item].name]) || 0.07;
   const per = Math.max(1, Math.floor(0.9 / val)), have = cnt(v2, item) - (v2.profession === "farmer" ? (seeds ? SEEDS_SELF : WHEAT_SELF) : 0);
@@ -1421,6 +1424,7 @@ function findWheatSeller(m) {
   let best = null, bs = Infinity;
   for (const v2 of R.members || []) {
     if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
+    if (m.profession === "butcher" && v2.profession !== "poultry_keeper") continue;
     const d = wheatDealWith(m, v2, want);
     if (!d) continue;
     const sc = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
@@ -1569,7 +1573,7 @@ const NAMES = { dig: "Levelling a field", raise: "Filling in a field", gather: "
 function statusText(m) {
   if (!m) return "";
   if (m.starving) return "Starving, only trades food";
-  if (m.fshop && m.fshop.stage) return m.fshop.deal && m.fshop.deal.kind === "wheat" ? "Buying wheat" : "Buying food";
+  if (m.fshop && m.fshop.stage) return m.fshop.deal && m.fshop.deal.kind === "wheat" ? "Buying " + (m.fshop.deal.item === ids().wheat ? "wheat" : BF.itemName(m.fshop.deal.item).toLowerCase()) : "Buying food";
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.statusText) { const t = BF.shepherd.statusText(m); if (t) return t; }
   if (m.profession === "poultry_keeper" && BF.poultry) { const t = BF.poultry.statusText(m); if (t) return t; }
   if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
