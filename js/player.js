@@ -618,21 +618,23 @@ function bindInput() {
   });
   addEventListener("pointerup", e => { if (drag && e.pointerId === drag.id) drag = null; });
 
+  // No pick block: a middle click uses, like a right click. Ubuntu trackpads report some two-finger right clicks as middle clicks.
   let ctrlRight = false;
   cv.addEventListener("mousedown", e => {
-    if (!started || menuOpen || P.dead || invOpen()) return;
-    if (!locked && !dragMode) return; // this click only captures the mouse
+    if (!started || menuOpen || P.dead || invOpen()) { logClick(e, "ignored: " + (!started ? "not started" : menuOpen ? "menu open" : P.dead ? "dead" : "screen open")); return; }
+    if (!locked && !dragMode) { logClick(e, "takes the mouse"); return; } // this click only captures the mouse
     e.preventDefault();
-    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) { ctrlRight = true; mouseR = true; placeCd = 0; secondaryDown(); } // macOS ctrl+click = right click
-    else if (e.button === 0) { mouseL = true; primaryDown(); }
-    else if (e.button === 2) { mouseR = true; placeCd = 0; secondaryDown(); }
-    else if (e.button === 1) pickBlock();
+    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) { ctrlRight = true; mouseR = true; placeCd = 0; logClick(e, "use (ctrl+click)", useNow()); } // macOS ctrl+click = right click
+    else if (e.button === 0) { mouseL = true; primaryDown(); logClick(e, "attack / break"); }
+    else if (e.button === 2 || e.button === 1) { mouseR = true; placeCd = 0; logClick(e, "use", useNow()); }
+    else logClick(e, "no action");
   });
   addEventListener("mouseup", e => {
     if (e.button === 0) { mouseL = false; resetBreak(); if (ctrlRight) { ctrlRight = false; mouseR = false; eatT = 0; } }
-    if (e.button === 2) { mouseR = false; eatT = 0; }
+    if (e.button === 2 || e.button === 1) { mouseR = false; eatT = 0; }
   });
-  cv.addEventListener("contextmenu", e => e.preventDefault());
+  cv.addEventListener("contextmenu", e => { e.preventDefault(); logClick(e, ""); });
+  cv.addEventListener("auxclick", e => logClick(e, ""));
   addEventListener("wheel", e => {
     if (!started || menuOpen || invOpen() || !e.deltaY) return;
     const I = inv(); if (!I.select) return;
@@ -641,6 +643,18 @@ function bindInput() {
   }, { passive: true });
 
   if (isTouch) bindTouch(cv);
+}
+
+// Right click on press: use the block / item in front (secondaryDown). Returns what it was aimed at, for the click log.
+function useNow() { const r = secondaryDown(); return targetName() + (r ? "" : " (nothing happened)"); }
+function targetName() { const b = target && BF.blocks[target.id]; return b ? b.name : "no block"; }
+// Click log for the F3 overlay: the raw mouse fields of the last few presses and what the game did with each.
+const clickLog = [];
+function logClick(e, action, aim) {
+  const mods = ["ctrl", "shift", "alt", "meta"].filter(m => e[m + "Key"]).join("+");
+  clickLog.push(`${e.type} button ${e.button} buttons ${e.buttons}${mods ? " " + mods : ""}${e.pointerType ? " " + e.pointerType : ""}${locked ? " locked" : dragMode ? " drag" : ""}` +
+    (action ? ` -> ${action}${aim ? " " + aim : ""}` : ""));
+  if (clickLog.length > 6) clickLog.shift();
 }
 
 function look(dx, dy) {
@@ -1340,39 +1354,6 @@ function updateUse(dt) {
   if (mouseR && placeCd <= 0 && !secondaryDown()) placeCd = PLACE_REPEAT;
 }
 
-function pickBlock() {
-  if (!target) return;
-  const I = inv();
-  const tb = BF.blocks[target.id];
-  const tid = tb && tb.item != null ? tb.item : target.id; // door/bed halves pick their item
-  if (creative() && BF.items[tid] && I.select) {
-    // creative: put the block into the hotbar (an existing slot with it, else an empty one, else the selected one)
-    try {
-      const slots = I.slots || I.hotbar;
-      if (slots) {
-        let i = -1;
-        for (let k = 0; k < 9; k++) if (slots[k] && slots[k].id === tid) { i = k; break; }
-        if (i < 0) {
-          const cur = I.selectedIndex | 0;
-          i = !slots[cur] ? cur : -1;
-          for (let k = 0; i < 0 && k < 9; k++) if (!slots[k]) i = k;
-          if (i < 0) i = cur;
-          if (I.setSlot) I.setSlot(i, { id: tid, count: 1 });
-          else slots[i] = { id: tid, count: 1 };
-          if (BF.emit) BF.emit("inventoryChanged");
-        }
-        I.select(i);   // also re-renders the hotbar
-        return;
-      }
-    } catch (e) { console.error(e); }
-  }
-  // best effort: if the inventory exposes hotbar slots, select the one holding this block
-  try {
-    const slots = I.hotbar || (I.slots && I.slots.slice(0, 9));
-    if (slots && I.select) { const i = slots.findIndex(s => s && s.id === tid); if (i >= 0) I.select(i); }
-  } catch (_) {}
-}
-
 // ---------- survival ----------
 function survivalTick(dt) {
   if (!started || P.dead) return;
@@ -1636,6 +1617,7 @@ P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
+P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
 P.escGrace = () => inEscGrace();   // tests: still inside the grace after an Escape closed a screen
 P.frame = () => frameNo;
 P.menu = () => menuOpen;
