@@ -80,7 +80,7 @@ const INPUTS = {
   forester: m => [[id => /_sapling$/.test(nm(id)), 16]],
   furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8], ["cobblestone", 16]],
   cartographer: m => [["iron_ingot", 4], ["gold_ingot", 1], ["paper", 32], ["compass", 1]],
-  miner: m => [["torch", 16], ["stick", 8]],   // shaft torches and spare pickaxe handles (js/miner.js)
+  miner: m => [["torch", 16]],   // shaft torches (js/miner.js)
   toolsmith: m => [[id => /planks$/.test(nm(id)), 12], ["stick", 8], ["cobblestone", 9], ["iron_ingot", 9], ["gold_ingot", 6], ["diamond", 6], ["raw_iron", 9], ["raw_gold", 6], ["coal", 8], ["furnace", 1]],   // tool materials (js/toolsmith.js)
   builder: m => (TR().profile("builder").wants ? [...TR().profile("builder").wants.keys()].map(id => [nm(id), 128]) : []).concat([["red_bed", 4], ["oak_door", 8], ["torch", 32], ["chest", 2], ["glass", 64]]),
 };
@@ -281,7 +281,9 @@ function doTake(m, p) {
 }
 // What it should do now: {act: "store" | "take", p} or null; orders a chest when it is full and has none it may use.
 function decide(m) {
-  const st = m.store, full = free(m.inv) === 0, k = keyOf(m);
+  const st = m.store, k = keyOf(m);
+  if (BF.miner && BF.miner.underground(m)) return null;   // a miner down its shaft deals with chests once it is back up
+  const full = free(m.inv) === 0 || !!(BF.miner && BF.miner.wantsStore && BF.miner.wantsStore(m));   // a miner stores unsold finds early
   if (full) {
     const p = pickChest(m, true);
     if (p) { st.order = null; return { act: "store", p }; }

@@ -1,9 +1,11 @@
 // Miners (BF.miner): a villager profession (not vanilla) that digs cobblestone out of the ground for the village and sells it to builders.
 // - Roster: ~95% of newly generated villages get one (every one with village generator 3) (mobs.js villageRoster, own seeded stream and key <village key>#1400). Jobsite: the mining
 //   bench (jobs.js), placed in or beside a house like the forester's band saw.
-// - Tools: a founding miner starts with a wooden pickaxe and 30-40 torches (one hired later: torches and emeralds only, trading.js hireKit). The pickaxe wears out like the player's (BF.wearStack: 1 use per block, 250 uses for iron). Digging speed
+// - Tools: a founding miner starts with a stone pickaxe and 30-40 torches (one hired later: torches and emeralds only, trading.js hireKit). The pickaxe wears out like the player's (BF.wearStack: 1 use per block, 250 uses for iron). Digging speed
 //   follows the pickaxe's material (blocks.js tool.speed, the player's formula times VILLAGER_SLOW). When the pickaxe breaks it buys a new one
-//   from a toolsmith of its village (emeralds permitting), else crafts a stone pickaxe from 3 cobblestone + 2 sticks (sticks bought from the forester, or made from planks).
+//   from a toolsmith of its village (emeralds permitting); it never makes tools itself.
+// - Surplus: above ground with STORE_FREE or fewer free slots and goods nobody buys from it (raw copper, lapis, redstone...), it stores
+//   them in a chest of its house, claiming an unowned one or ordering one from the furniture maker (js/storage.js, wantsStore).
 // - Surface stone first: it looks for above-ground stone within SEARCH (40) blocks of the village's box: the top block of a column that is
 //   stone (or coal / iron ore) and stands 1 or 2 blocks above one of its four neighbours, so the quarry levels outcrops and hillsides into
 //   walkable steps and never sinks a pit or trench. Never within BUILD_AVOID blocks of anything built, never more than FLOOR_BELOW under the plaza. It walks there and digs one block at a time.
@@ -86,7 +88,7 @@ function digTime(id, p) {
 }
 const canHarvest = (id, p) => { const b = BF.blocks[id]; if (!b || !b.needsTool) return true; const tool = p && BF.items[p.id].tool; return !!(tool && tool.type === b.tool && (tool.tier || 0) >= (b.minTier || 0)); };
 
-// Starting pack (trading.js stockFor, which adds the wooden pickaxe): 30-40 torches for the shaft.
+// Starting pack (trading.js stockFor, which adds the stone pickaxe): 30-40 torches for the shaft.
 function seed(a) {
   if (I("torch") != null) TR().inv.add(a, I("torch"), 30 + Math.floor(Math.random() * 11));
 }
@@ -338,20 +340,13 @@ function fend(m, Q, dt) {
   log("fend", m, { mob: o.type });
 }
 
-// ---------------------------------------------------------------- pickaxes
-// Crafts what it can right now: sticks from planks when short, a stone pickaxe from 3 cobblestone + 2 sticks when it has no pickaxe.
-function craftPick(m) {
-  const T = TR().inv;
-  if (count(m, I("stick")) < 2) {
-    const pl = m.inv.find(s => s && (nameOf(s.id) === "planks" || /_planks$/.test(nameOf(s.id))) && s.count >= 2);
-    if (pl && T.canFit(m.inv, [{ id: I("stick"), n: 4 }], [{ id: pl.id, n: 2 }])) { T.remove(m.inv, pl.id, 2); T.add(m.inv, I("stick"), 4); }
-  }
-  if (count(m, I("cobblestone")) >= 3 && count(m, I("stick")) >= 2 && T.canFit(m.inv, [{ id: I("stone_pickaxe"), n: 1 }], [{ id: I("cobblestone"), n: 3 }, { id: I("stick"), n: 2 }])) {
-    T.remove(m.inv, I("cobblestone"), 3); T.remove(m.inv, I("stick"), 2); T.add(m.inv, I("stone_pickaxe"), 1);
-    log("craft", m, { made: "stone_pickaxe" });
-    return true;
-  }
-  return false;
+// ---------------------------------------------------------------- surplus (js/storage.js stores it)
+const STORE_FREE = 3;
+// Above ground, nearly full and holding things it has no trade for (raw copper, lapis, redstone, ...): time to put them in a chest.
+function wantsStore(m) {
+  if (m.profession !== "miner" || !Array.isArray(m.inv) || freeSlots(m) > STORE_FREE || underground(m)) return false;
+  const sold = TR().profile("miner").caps;   // its wares at any level
+  return m.inv.some(s => s && s.id !== I("emerald") && !isPick(s.id) && s.id !== I("torch") && !sold.has(s.id) && !(BF.food && BF.food.isFood(s.id)));
 }
 
 // ---------------------------------------------------------------- trips (buying pickaxes / planks, selling cobblestone to builders)
@@ -525,14 +520,12 @@ function think(m, Q) {
   const T = TR().inv, cobble = count(m, I("cobblestone"));
   const sh = Q.shaft, underground = inShaft(m, sh);
   if ((Q.lost || 0) >= 3 && pickOf(m)) return { kind: "climb", max: 40 };
-  // 1. a pickaxe: craft a stone one, or buy one from the toolsmith
+  // 1. a pickaxe: buy one from the toolsmith (it never makes tools itself)
   if (!pickOf(m)) {
     if (!underground) {
       const deal = count(m, I("emerald")) > 0 ? findSeller(m, isPick, Q.avoid) : null;
       if (deal) return { kind: "trip", deal };
     }
-    if (craftPick(m)) return null;
-    if (!underground && count(m, I("stick")) < 2) { const deal = findSeller(m, id => nameOf(id) === "stick" || /(^|_)planks$/.test(nameOf(id)), Q.avoid); if (deal) return { kind: "trip", deal }; }
     if (underground) return { kind: "exit" };
     Q.status = "needs a pickaxe";
     return null;
@@ -750,7 +743,7 @@ function statusText(m) {
     if (k.kind === "dig") return Q.shaft && Q.shaft.S == null ? "Digging a mineshaft" : "Mining underground";
     if (k.kind === "exit") return "Climbing out of the mine";
     if (k.kind === "climb") return "Digging its way out";
-    if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : nameOf(k.deal.item) === "stick" ? "sticks" : "planks");
+    if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : BF.itemName(k.deal.item));
   }
   return Q && Q.status ? Q.status.charAt(0).toUpperCase() + Q.status.slice(1) : "";
 }
@@ -773,5 +766,5 @@ function unpack(m, o) {
 // In its mineshaft (or digging its way out): village errands such as food shopping wait until it is back up (js/villagelife.js).
 const underground = m => !!(m && m.mi && (inShaft(m, m.mi.shaft) || m.mi.task && m.mi.task.kind === "climb"));
 BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
-  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, digDepth, _test: { state, area, checkCell, dig, craftPick, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
+  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, digDepth, wantsStore, _test: { state, area, checkCell, dig, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
 })();
