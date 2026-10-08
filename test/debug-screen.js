@@ -97,7 +97,8 @@ const start = async () => {
   await dbg.click(`${row('Player')} input.tcb`);
   await dbg.waitForFunction(() => ![...document.querySelectorAll('#log .ent .tx')].some(e => /^Player traded/.test(e.textContent)), null, { timeout: 3000 }).catch(() => {});
   vis = await texts();
-  ok('player checkbox hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
+  // (villagers keep logging meanwhile, so the count can't be compared with the one taken earlier)
+  ok('player checkbox hides the player trade ' + JSON.stringify(vis.filter(t => /^Player traded/.test(t))), !vis.some(t => /^Player traded/.test(t)));
   await dbg.screenshot({ path: out + '-filters.png', fullPage: true });
   await dbg.click('#l-count'); await dbg.waitForTimeout(100);
   ok('a click elsewhere closes the menu', !(await dbg.evaluate(() => document.getElementById('l-types').open)));
