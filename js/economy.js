@@ -133,7 +133,7 @@ function scan(rec) {
     const h = held.get(k) || {}, have = forSale(m), next = {};
     for (const [id, n] of have) {
       next[id] = h[id] != null ? h[id] : now;
-      const age = now - next[id];
+      const age = now - next[id] + 1e-6;   // game days are floats: exactly 2 days later can come out a hair under 2
       if (age >= STUCK) list.push([BF.vlog.nameOf(m), profOf(m), id, n, Math.floor(age)]);
     }
     held.set(k, next);

@@ -23,7 +23,7 @@ const start = async () => {
   await game.goto(`http://localhost:${GAME}/`);
   await game.waitForTimeout(5000);
   await require('./lib').toVillage(game);
-  // the scripted economy: a forester's planks to a builder, a miner's cobblestone nobody buys, a toolsmith waiting for gold
+  // the scripted economy: planks and logs, a pickaxe, bread for the player, a wait for gold, and stock nobody buys
   const want = await game.evaluate(() => {
     const L = BF.vlog, E = BF.econ, I = BF.I, rec = L.villageAt(BF.player.position.x, BF.player.position.z);
     const vs = rec.members.filter(m => m.type === 'villager' && !m.dead && !m.child && m.slot && Array.isArray(m.inv));
@@ -33,8 +33,9 @@ const start = async () => {
     L.trade(a, c, 'gave 4 Emerald, got 1 Iron Pickaxe', 1);
     BF.emit('villagerTrade', c, { buy: [{ id: I.emerald, n: 1 }], sell: { id: I.bread, n: 4 } });
     E.want(c, 'Gold');
-    c.trades = [{ buy: [{ id: I.emerald, n: 1 }], sell: { id: I.cobblestone, n: 16 }, maxUses: 99, uses: 0 }];
-    c.inv[c.inv.length - 1] = { id: I.cobblestone, count: 64 };   // a slot of its own: its pack may be full
+    // something nobody in the village buys (a builder would buy cobblestone while the screen is open, and that sale would reset it)
+    c.trades = [{ buy: [{ id: I.emerald, n: 1 }], sell: { id: I.dead_bush, n: 16 }, maxUses: 99, uses: 0 }];
+    c.inv[c.inv.length - 1] = { id: I.dead_bush, count: 64 };   // a slot of its own: its pack may be full
     E.scan(rec); BF.sky.day += 2; E.scan(rec);
     const p = m => L.pretty(m.profession);
     return { key: rec.key, seller: p(b2), buyer: p(a), cname: L.nameOf(c), cprof: p(c), name: BF.signs.villageName(rec.key) };
@@ -61,7 +62,7 @@ const start = async () => {
   ok('flow bands ' + v.bands, v.bands >= 3);   // wood (planks and logs share a band), tools, food
   ok('seller and buyer nodes ' + JSON.stringify(v.labels.slice(0, 8)), v.labels.some(t => t.startsWith(want.seller)) && v.labels.some(t => t.startsWith(want.buyer)) && v.labels.some(t => t.startsWith('Player')));
   ok('wanted: gold ' + JSON.stringify(v.wanted), v.wanted.some(t => t.includes(want.cprof) && t.includes('Gold') && /h waited/.test(t)));
-  ok('held: cobblestone ' + JSON.stringify(v.held.slice(0, 3)), v.held.some(t => t.includes(want.cname) && /64 Cobblestone/.test(t) && /2 days unsold/.test(t)));
+  ok('held: dead bushes ' + JSON.stringify(v.held.filter(t => t.includes(want.cname))), v.held.some(t => t.includes(want.cname) && /64 Dead Bush/.test(t) && /2 days unsold/.test(t)));
   ok('held line coloured as an alert', await dbg.evaluate(() => [...document.querySelectorAll('#econ .dead .drow')].some(r => /warn|danger/.test(r.className))));
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // hover a band: its items with counts and emeralds
@@ -81,7 +82,9 @@ const start = async () => {
   // today only: the trades were two game days ago
   await dbg.click('#e-range [data-v="1"]'); await dbg.waitForTimeout(300);
   v = await view();
-  ok('no trades today: ' + v.empty, v.empty === 'No trades in this range.' && v.held.some(t => t.includes(want.cname)));
+  // villagers may trade among themselves in the moments since: only the scripted trades must be gone
+  const todayRows = await dbg.evaluate(() => [...document.querySelectorAll('#econ .etable tbody tr')].map(r => [...r.children].map(td => td.textContent)));
+  ok('today leaves out the trades from 2 days ago: ' + (v.empty || todayRows.length + ' rows'), (v.empty === 'No trades in this range.' || !todayRows.some(r => /Planks/.test(r[2]) && r[3] === '24')) && v.held.some(t => t.includes(want.cname)));
   // all villages
   await dbg.click('#e-range [data-v="3"]'); await dbg.click('#e-scope [data-v="all"]'); await dbg.waitForTimeout(300);
   v = await view();
