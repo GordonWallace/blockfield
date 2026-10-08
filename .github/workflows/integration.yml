@@ -1,0 +1,46 @@
+# Integration tests: the baseline set plus the slower soak and simulation tests. Runs on every push to a release branch
+# (each merged PR), on the pull request that takes a release branch into main, and on demand from the Actions tab.
+name: Integration tests
+
+on:
+  push:
+    branches: ['release-*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push waits for the running integration run instead of cancelling it: with merges minutes apart and runs taking
+# about an hour, cancelling meant no run ever finished. Only the newest waiting push runs next; pull request runs still
+# cancel their superseded ones.
+concurrency:
+  group: integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  integration:
+    # pull requests into main only run this when they come from a release branch
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # the runner image already has Chromium's system libraries; --with-deps runs apt, which can hang on a slow mirror
+      - name: Install Playwright and Chromium
+        timeout-minutes: 10
+        run: |
+          npm install -g playwright@1.56.1
+          playwright install chromium
+      - name: Run integration tests
+        run: NODE_PATH=$(npm root -g) node test/ci.js integration ci-out
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: integration-results
+          path: ci-out/
+          retention-days: 30

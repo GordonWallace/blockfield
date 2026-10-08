@@ -30,6 +30,7 @@ const VALUE = {
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
+  iron_ore: .45, gold_ore: 1.05,                                    // miner goods: ore smelts into one ingot
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
@@ -148,6 +149,15 @@ const TRADES = {
   // = 0.9 emerald, 8 logs = 1 emerald); only what it actually holds can be bought ("Out of stock"), nothing is restocked or part of its starting pack.
   // The furniture maker and the builder buy these.
   forester: [["1 oak_sapling > 1 emerald", "1 emerald > 30 planks", "1 emerald > 30 birch_planks", "1 emerald > 30 spruce_planks", "1 emerald > 30 jungle_planks", "1 emerald > 30 acacia_planks", "1 emerald > 30 dark_oak_planks", "1 emerald > 30 cherry_planks"], ["1 emerald > 8 oak_log", "1 emerald > 8 birch_log", "1 emerald > 8 spruce_log", "1 emerald > 8 jungle_log", "1 emerald > 8 acacia_log", "1 emerald > 8 dark_oak_log", "1 emerald > 8 cherry_log"], [], [], []],
+  // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
+  // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
+  miner: [
+    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal"],
+    ["2 emerald > 64 cobblestone", "1 emerald > 2 iron_ore"],
+    ["4 emerald > 1 diamond"],
+    ["2 emerald > 16 coal"],
+    ["1 emerald > 1 gold_ore"],
+  ],
   // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer.
   furniture_maker: [
@@ -180,6 +190,7 @@ const PRODUCE = {
   builder: [],
   explorer: [],
   forester: [],
+  miner: [],          // everything it sells is dug out of the ground (js/miner.js)
   furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
 };
 
@@ -219,7 +230,7 @@ const inv = {
     for (const x of adds) if (inv.add(sim, x.id, x.n) > 0) return false;
     return true;
   },
-  clone: a => a.map(s => s && { id: s.id, count: s.count }),
+  clone: a => a.map(s => s && (s.wear > 0 ? { id: s.id, count: s.count, wear: s.wear } : { id: s.id, count: s.count })),   // wear: uses spent on a tool (BF.wearStack)
 };
 
 // ---------------------------------------------------------------- tables
@@ -267,6 +278,7 @@ function stockFor(prof, v) {
   const a = inv.create(), I = BF.I, em = I.emerald;
   const entries = [];
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
+  if (prof === "miner") for (const n of ["cobblestone", "coal", "iron_ore", "gold_ore", "diamond"]) noStart.add(I[n]);   // mined, never given
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); }   // harvested, never given
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
@@ -294,6 +306,7 @@ function stockFor(prof, v) {
   if (prof === "explorer" && I.tent !== undefined) inv.add(a, I.tent, 1);   // pitches it when night falls far from a bed (js/explorer.js)
   if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
   if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
+  if (prof === "miner" && BF.miner) BF.miner.seed(a);                      // an iron pickaxe, torches and sticks
   return a;
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.
@@ -330,11 +343,36 @@ function init(v) {
   if (!Array.isArray(v.inv)) { v.inv = stockFor(v.profession, v); if (BF.food) BF.food.startFood(v); }   // + starting food (js/villagelife.js)
   if (v.restockDay == null) v.restockDay = BF.sky ? BF.sky.day : 0;
   if (v.profession === "explorer" && BF.explorer) BF.explorer.syncOffers(v);   // its filled maps are the offers
+  syncFeed(v);
   return v;
 }
+// ---------------------------------------------------------------- feeding hungry unemployed villagers
+// An unemployed villager with less than a day's food buys food from the player while the trade screen is open: 1 emerald for ~88% of
+// its worth in one of these foods (the same rule as the trade tables). It keeps buying until it holds 3 days of food (SHOP_DAYS in js/villagelife.js).
+const FEED = ["bread", "baked_potato", "carrot", "potato", "apple", "steak", "cooked_porkchop", "cooked_chicken", "cooked_mutton", "cooked_cod"];
+const FEED_PAY = 0.88, FEED_DAYS = 3;
+const needsFood = v => !!(BF.food && v && Array.isArray(v.inv) && !v.child && (v.starving || BF.food.available(v) < BF.food.rate(v)));
+function feedOffers() {
+  const em = BF.I.emerald, out = [];
+  for (const name of FEED) {
+    const id = BF.I[name], val = VALUE[name];
+    if (id === undefined || !val) continue;
+    out.push({ buy: [{ id, n: Math.min(stackOf(id), Math.ceil(1 / (FEED_PAY * val))) }], sell: { id: em, n: 1 }, level: 1, xp: 0, feed: true });
+  }
+  return out;
+}
+// Adds the food offers to a hungry unemployed villager (or takes them away again). Called when the trade screen opens and closes.
+function syncFeed(v, open = true) {
+  if (!v || !Array.isArray(v.trades)) return v;
+  v.trades = v.trades.filter(o => !o.feed);
+  if (open && v.profession === "unemployed" && needsFood(v)) v.trades.push(...feedOffers());
+  return v;
+}
+
 // Why the villager cannot do this offer right now, or null.
 function blockReason(v, o) {
   if (!v || !v.inv || !o) return "Unavailable";
+  if (o.feed && BF.food && !v.starving && BF.food.available(v) >= FEED_DAYS * BF.food.rate(v)) return "Has enough food";
   const hungry = BF.food && BF.food.blockReason(v, o);   // starving villagers only trade food (js/villagelife.js)
   if (hungry) return hungry;
   if (inv.count(v.inv, o.sell.id) < o.sell.n) return o.sell.id === BF.I.emerald ? "Out of emeralds" : "Out of stock";
@@ -357,13 +395,19 @@ function addXp(v, o) {
 }
 
 // ---------------------------------------------------------------- persistence
+function claimedBed(v) {
+  const b = v.homeBed !== undefined ? v.homeBed : v.bed;   // an explorer camping in its tent keeps its bed at home
+  return b && b.claimed && !b.tent ? [b.x, b.y, b.z, b.f] : undefined;
+}
 function pack(v) {
   return {
-    inv: v.inv.map(s => s && BF.items[s.id] ? { n: BF.items[s.id].name, c: s.count } : null),
+    inv: v.inv.map(s => s && BF.items[s.id] ? (s.wear > 0 ? { n: BF.items[s.id].name, c: s.count, w: s.wear } : { n: BF.items[s.id].name, c: s.count }) : null),
     level: v.level, xp: v.xp, day: v.restockDay,
     prof: v.profession, job: v.jobsite ? [v.jobsite.x, v.jobsite.y, v.jobsite.z] : null, st: v.jobStocked ? 1 : 0, mem: v.jobMem ? [v.jobMem.prof, v.jobMem.t] : undefined,   // jobsites (js/jobs.js); missing in older saves
     life: BF.food ? BF.food.pack(v) : undefined,   // food state (js/villagelife.js); missing in older saves
     ex: BF.explorer && v.profession === "explorer" ? BF.explorer.pack(v) : undefined,   // explorer state (js/explorer.js)
+    mi: BF.miner && v.profession === "miner" ? BF.miner.pack(v) : undefined,          // the miner's mineshaft (js/miner.js)
+    bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
   };
 }
 function unpack(v, o) {
@@ -373,6 +417,7 @@ function unpack(v, o) {
     o.inv.slice(0, SLOTS).forEach((s, i) => {
       const id = s && typeof s.n === "string" ? (BF.resolveItem ? BF.resolveItem(s.n) : BF.I[s.n]) : undefined, c = s && Math.floor(s.c);
       if (id !== undefined && BF.items[id] && id !== 0 && c > 0) a[i] = { id, count: Math.min(c, stackOf(id)) };
+      if (a[i] && s.w > 0 && BF.durability(id)) a[i].wear = Math.min(Math.floor(s.w), BF.durability(id) - 1);   // a worn tool
     });
     v.inv = a;
   }
@@ -382,11 +427,13 @@ function unpack(v, o) {
   if (Number.isFinite(+o.day)) v.restockDay = +o.day;
   if (BF.food) BF.food.unpack(v, o.life);   // no o.life = save from before villager food: starting food is added
   if (BF.explorer && o.ex) BF.explorer.unpack(v, o.ex);
+  if (BF.miner && o.mi) BF.miner.unpack(v, o.mi);
+  if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;
 }
 
 BF.trades = {
   SLOTS, EM_CAP, EM_DAY, BUILDER_EM_CAP, BUILDER_EM_DAY, LEVELS, LEVEL_XP, TRADE_XP, CAP_K, VALUE, TRADES, PRODUCE, inv,
-  parseTrade, offers: genOffers, table, profile, stockFor, restock, init, blockReason, exchange, addXp, pack, unpack,
+  parseTrade, offers: genOffers, table, profile, stockFor, restock, init, blockReason, FEED, feedOffers, syncFeed, needsFood, exchange, addXp, pack, unpack,
 };
 })();

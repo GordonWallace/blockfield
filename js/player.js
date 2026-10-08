@@ -6,7 +6,7 @@ const BF = (window.BF = window.BF || {});
 
 // ---------- tuning ----------
 const GRAVITY = 32, JUMP_V = 8.4, WALK = 4.3, SPRINT = 5.6, SNEAK = 1.3;
-const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W, then hold E): 10x the normal flying speed
+const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W and R): 10x the normal flying speed
 const FLY = 10.9, FLY_SPRINT = 21.6, CFLY = 16, CFLY_SPRINT = 32, SWIM = 2.2, REACH = 5, MOB_REACH = 3.5;
 const BASE_FOV = 75, AIR_MAX = 10, ATTACK_CD = 0.4, EAT_TIME = 1.2, PLACE_REPEAT = 0.22;
 const HW = 0.3, HEIGHT = 1.8, EYE = 1.62, SNEAK_EYE = 1.47;
@@ -24,7 +24,7 @@ let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
 let onGround = false, inWater = false, headInWater = false;
 let flying = false, sprinting = false, sneaking = false, turbo = false;
-let lastSpaceTap = 0, lastWTap = 0, wTaps = 0, boostE = false;   // boostE: E went down while flying with W held, so it boosts instead of opening the inventory
+let lastSpaceTap = 0, lastWTap = 0, wTaps = 0;
 let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
@@ -158,7 +158,7 @@ let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, 
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
-     <div><b>Shift</b> sneak</div><div><b>R / W x2</b> sprint</div><div><b>Fly + hold W, then E</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
+     <div><b>Shift</b> sneak</div><div><b>R / Ctrl / W x2</b> sprint</div><div><b>Z</b> free the mouse (game keeps running)</div><div><b>Fly + hold W and R</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
      <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -452,17 +452,31 @@ function quitToTitle(btn) {
 // Escape that closes a screen (inventory, map, sign, chat) or the pause menu re-captures the mouse, but not while the key is
 // still down: Chrome handles a held Escape as "leave pointer lock", so a lock granted on keydown is dropped at once and the
 // unlock reads as a pause. The request waits for the Escape keyup instead.
-let lockOnEscUp = false;
+// Some browsers still drop that lock, or swallow it, at Escape's release (macOS): an unlock within ESC_GRACE seconds of an
+// Escape that closed a screen leaves you in the game with the mouse free (the next click captures it) instead of pausing.
+// The grace also lasts ESC_GRACE_FRAMES rendered frames, so a machine too slow to draw a frame a second still gets it.
+const ESC_GRACE = 1, ESC_GRACE_FRAMES = 30;
+let frameNo = 0, escClosedFrame = -1e9;
+const markEsc = () => { escClosedAt = performance.now(); escClosedFrame = frameNo; };
+const inEscGrace = () => performance.now() - escClosedAt < ESC_GRACE * 1000 || frameNo - escClosedFrame < ESC_GRACE_FRAMES;
+let lockOnEscUp = false, escClosedAt = -1e9, escCloseEvent = null, escCloseHeld = false, escRelock = false;
 addEventListener("keyup", e => {
-  if (e.key !== "Escape" || !lockOnEscUp) return;
+  if (e.key !== "Escape") return;
+  if (escCloseHeld) { escCloseHeld = false; markEsc(); }   // the grace runs from the release, when the re-lock goes out
+  if (!lockOnEscUp) return;
   lockOnEscUp = false;
-  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) requestLock();
+  if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) { requestLock(); escRelock = inEscGrace(); }
 }, true);
-addEventListener("blur", () => { lockOnEscUp = false; });
+addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
+// A screen is closing: note it when Escape did it, so neither that key press nor an unlock in the next ESC_GRACE seconds pauses.
+function screenClosed() {
+  const ev = window.event;
+  if (ev && ev.type === "keydown" && ev.key === "Escape") { markEsc(); escCloseEvent = ev; escCloseHeld = true; }
+}
 function requestLock() {
   if (isTouch) return;
   const ev = window.event;
-  lockOnEscUp = false;
+  lockOnEscUp = escRelock = false;
   if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
   const cv = canvas();
   if (!cv.requestPointerLock) { dragMode = true; return; }
@@ -472,6 +486,7 @@ function requestLock() {
   } catch (_) { onLockError(); }
 }
 function onLockError() {
+  escRelock = false;
   if (locked) return;
   if (lockWorked) { if (menuOpen === "pause") pauseNote.textContent = "Click Resume again to capture the mouse."; return; }
   dragMode = true;
@@ -506,6 +521,13 @@ function pause() {
   exitLock();
 }
 
+// Z frees the mouse without pausing (to use the debug screen while the game runs); a click on the game takes it back.
+let mouseFreed = false;
+function releaseMouse() {
+  mouseFreed = true;
+  keys.clear(); mouseL = mouseR = false; resetBreak();
+  exitLock();
+}
 let expectUnlock = false;     // we released the lock for the inventory: the unlock event must not pause
 function openInventory(mode, arg) {
   if (locked) expectUnlock = true;
@@ -534,18 +556,15 @@ function bindInput() {
     const c = e.code;
     if (c === "Space" || c === "Tab" || (e.ctrlKey && /^Key[WASDQE]$/.test(c))) e.preventDefault();
     if (c === "Escape") {
-      if (e.repeat) return;   // a held Escape that just closed a screen must not go on to open the pause menu
+      if (e.repeat || e === escCloseEvent) return;   // a held Escape, or the one that just closed a screen, must not go on to open the pause menu
       if (invOpen()) { deferredToggle(true); return; }
       if ((dragMode || !locked) && started && !P.dead) { if (menuOpen === "pause") resume(); else if (!menuOpen) pause(); }
       return;
     }
     // inventory.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
-    if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) {
-      // flying with W held: E is the 10x boost (held), not the inventory key. In every other case E opens/closes the inventory.
-      if (flying && !invOpen() && (keys.has("KeyW") || keys.has("ArrowUp"))) { boostE = true; e.preventDefault(); return; }
-      deferredToggle(false); return;
-    }
+    if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) { deferredToggle(false); return; }
     if (menuOpen || invOpen() || P.dead) return;
+    if (c === "KeyZ" && !e.repeat && !e.ctrlKey && !e.metaKey && locked) { releaseMouse(); return; }
     if (c === "KeyQ" && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
     if (e.repeat) { keys.add(c); return; }
     const now = performance.now();
@@ -559,23 +578,26 @@ function bindInput() {
     }
     keys.add(c);
   });
-  addEventListener("keyup", e => { keys.delete(e.code); if (e.code === "KeyE") boostE = false; });
-  addEventListener("blur", () => { boostE = false; keys.clear(); mouseL = mouseR = false; });
+  addEventListener("keyup", e => keys.delete(e.code));
+  addEventListener("blur", () => { keys.clear(); mouseL = mouseR = false; });
 
   document.addEventListener("pointerlockchange", () => {
     const was = locked;
     locked = document.pointerLockElement === cv;
     if (locked) {
       lockWorked = true; dragMode = false;
+      if (escRelock) { escRelock = false; markEsc(); }   // the grace also runs from when that re-lock lands, however slow
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
       keys.clear(); mouseL = mouseR = false; resetBreak();
-      if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
-      else if (!invOpen() && !P.dead && started && !menuOpen) pause();
+      if (mouseFreed) { mouseFreed = false; actionBar("Mouse free: click the game to take it back"); }
+      else if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
+      else if (!invOpen() && !P.dead && started && !menuOpen && !inEscGrace()) pause();
     }
   });
   document.addEventListener("pointerlockerror", onLockError);
   if (BF.on) BF.on("inventoryClosed", () => {
+    screenClosed();
     if (started && !menuOpen && !P.dead && !dragMode && !isTouch && !locked) requestLock();
   });
 
@@ -903,11 +925,11 @@ const THROW_SPEED = 6, THROW_LIFT = 1.5, THROW_PICKUP_DELAY = 2;
 function throwSelected() {
   const sel = selectedItem();
   if (!sel || !BF.drops || !inv().consumeSelected) return;
-  const id = sel.id;
+  const id = sel.id, wear = sel.wear || 0;
   try { if (!(inv().consumeSelected(1) > 0)) return; } catch (e) { console.error(e); return; }
   const d = dirVec(), e = eyeVec();
   const vel = d.clone().multiplyScalar(THROW_SPEED); vel.y += THROW_LIFT;
-  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY });
+  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY, wear });
   emit("itemThrown", id);
 }
 
@@ -928,6 +950,7 @@ function tryAttack() {
   d.normalize();
   if (sprinting) { d.multiplyScalar(1.6); sprinting = false; }
   try { BF.mobs.hit(m.mob, dmg, d); } catch (e) { console.error(e); }
+  if (it && it.tool) wearHeld(it.tool.type === "sword" ? 1 : 2);   // a sword wears 1 use per hit, other tools 2 (Minecraft)
   exhaustion += 0.1;
   return true;
 }
@@ -938,21 +961,45 @@ function primaryDown() {
 }
 function resetBreak() { breakTarget = null; breakProgress = 0; if (crackMesh) crackMesh.visible = false; if (BF.cracks) BF.cracks.hide(); }
 
-function heldTool() { const sel = selectedItem(), it = sel && BF.items[sel.id]; return (it && it.tool) || null; }
-function breakTime(block) {
-  if (!isFinite(block.hardness)) return Infinity;
-  const tool = heldTool();
-  let t = block.hardness;
-  if (tool && block.tool && tool.type === block.tool && (tool.tier || 0) >= (block.minTier || 0)) t /= tool.speed || 1;
-  else if (block.needsTool) t *= 5;
-  if (tool && tool.type === "sword" && block.tool === "shears") t /= 1.5;
-  return t;
+// Wears the held tool (js/blocks.js BF.wearStack, survival only); a used-up tool breaks with a message and a clink.
+function wearHeld(n) {
+  try {
+    const sel = selectedItem();
+    if (!sel || !inv().wearSelected || inv().wearSelected(n) !== "broken") return;
+    actionBar("Your " + BF.itemName(sel.id) + " broke");
+    if (BF.audio) BF.audio.play("dig.metal", { pitch: 1.5 });
+  } catch (e) { console.error(e); }
 }
-function canHarvest(block) {
+function heldTool() { const sel = selectedItem(), it = sel && BF.items[sel.id]; return (it && it.tool) || null; }
+// Vanilla Minecraft mining: each tick deals speed / hardness / (30 if the block will drop, else 100) of a block; it breaks
+// once that adds up to 1 (a full block in one tick breaks instantly). speed is the tool's (wood 2, stone 4, iron 6, diamond 8)
+// when it is the block's tool type, whatever its tier; a too-low tier still mines at that speed but drops nothing.
+// Shears (leaves 15, wool 5) and swords (leaves, pumpkins, melons 1.5) have their own speeds. Mining with the head under
+// water or with the feet off the ground is 5x slower each.
+function toolSpeed(block, tool) {
+  if (!tool) return 1;
+  if (tool.type === "shears" && block.shearSpeed) return block.shearSpeed;
+  if (tool.type === "sword" && block.swordSpeed) return block.swordSpeed;
+  return block.tool && tool.type === block.tool ? tool.speed || 1 : 1;
+}
+// slow: the extra divisor (5 head under water, x5 feet off the ground).
+function mineSeconds(block, tool, slow) {
+  if (!block || !isFinite(block.hardness)) return Infinity;
+  if (block.hardness <= 0) return 0;
+  const perTick = toolSpeed(block, tool) / (slow || 1) / block.hardness / (harvestsWith(block, tool) ? 30 : 100);
+  return perTick >= 1 ? 0 : Math.ceil(1 / perTick) / 20;
+}
+function harvestsWith(block, tool) {
   if (!block.needsTool) return true;
-  const tool = heldTool();
   return !!(tool && tool.type === block.tool && (tool.tier || 0) >= (block.minTier || 0)); // minTier: 1 wood, 2 stone, 3 iron, 4 diamond
 }
+function breakTime(block) { return mineSeconds(block, heldTool(), (headInWater ? 5 : 1) * (!onGround && !flying ? 5 : 1)); }
+function canHarvest(block) { return harvestsWith(block, heldTool()); }
+// For tests and villagers: seconds to mine block id `blockId` with item id `itemId` (null = bare hand) standing on dry ground,
+// and whether that drops anything.
+const toolOf = itemId => (itemId != null && BF.items[itemId] && BF.items[itemId].tool) || null;
+P.mineSeconds = (blockId, itemId) => mineSeconds(BF.blocks[blockId], toolOf(itemId), 1);
+P.minedDrops = (blockId, itemId) => !!BF.blocks[blockId] && harvestsWith(BF.blocks[blockId], toolOf(itemId));
 
 function updateBreaking(dt) {
   if (breakCd > 0) breakCd -= dt;
@@ -972,15 +1019,18 @@ function updateBreaking(dt) {
     spawnParticles(x, y, z, id);
     if (!creative() && canHarvest(b)) {
       try {
-        const drops = BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
+        const tool = heldTool();
+        const drops = b.shearSelf && tool && tool.type === "shears" ? [{ id, count: 1 }]   // shearing leaves drops the leaves
+          : BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
         if (BF.drops) BF.drops.spawnAt(drops, x, y, z);
         else for (const d of drops || []) if (d && d.id != null && d.count > 0 && inv().add) inv().add(d.id, d.count);
       } catch (e) { console.error(e); }
     }
     exhaustion += 0.005;
+    if (b.hardness > 0) wearHeld(heldTool() && heldTool().type === "sword" ? 2 : 1);   // tools wear 1 use per block, swords 2 (Minecraft)
     emit("blockBroken", x, y, z, id);
     resetBreak();
-    breakCd = 0.2;   // also the creative repeat interval while held
+    breakCd = t === 0 && !creative() ? 0.05 : 0.25;   // vanilla: 5 ticks after a break (also the creative repeat), 1 tick for instant breaks
     target = null; outline.visible = false;
     return;
   }
@@ -1025,19 +1075,19 @@ function actionBar(text) {
 // ---------- doors and beds ----------
 const lookFacing = () => BF.dirIndex(-Math.sin(yaw), -Math.cos(yaw));
 const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c === 0 || BF.RENDER[c] === 3 || !!BF.REPLACEABLE[c]) && !cellBlockedByEntity(x, y, z); };
-// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z).
-function placeMulti(kind, x, y, z) {
+// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z). wood: species of a door / fence gate item.
+function placeMulti(kind, x, y, z, wood) {
   const W = BF.world, f = lookFacing();
   if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
   if (kind === "gate") {   // fence gate: spans across the player's view
     if (!(y < BF.H && W.isLoaded(x, z) && freeCell(x, y, z))) return false;
-    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0);
+    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0, wood);
     W.setBlock(x, y, z, id); emit("blockPlaced", x, y, z, id);
     return true;
   }
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
-  if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0)]];
+  if (kind === "door") cells = [[x, y, z, BF.doorId((f + 2) % 4, 0, 0, wood)], [x, y + 1, z, BF.doorId((f + 2) % 4, 1, 0, wood)]];
   else {
     const hx = x + BF.DIRS[f][0], hz = z + BF.DIRS[f][1];
     if (!BF.SOLID[W.getBlock(hx, y - 1, hz)]) return false;
@@ -1166,7 +1216,7 @@ function secondaryDown() {
   }
   if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
     const r = BF.shepherd.playerUse(mh.mob, selectedItem());
-    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+    if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
@@ -1190,6 +1240,7 @@ function secondaryDown() {
     const { x, y, z, id } = target;
     if (!BF.world.setBlock(x, y, z, BF.B.farmland)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
+    wearHeld(1);
     emit("blockPlaced", x, y, z, BF.B.farmland);
     placeCd = PLACE_REPEAT;
     return true;
@@ -1200,6 +1251,7 @@ function secondaryDown() {
     const { x, y, z, id } = target, nid = BF.B["stripped_" + BF.blocks[id].name];
     if (!BF.world.setBlock(x, y, z, nid)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
+    wearHeld(1);
     emit("blockPlaced", x, y, z, nid);
     placeCd = PLACE_REPEAT;
     return true;
@@ -1241,7 +1293,7 @@ function secondaryDown() {
   if (it.places && target) {
     const into = BF.REPLACEABLE && BF.REPLACEABLE[target.id];
     const x = into ? target.x : target.x + target.normal[0], y = into ? target.y : target.y + target.normal[1], z = into ? target.z : target.z + target.normal[2];
-    if (!placeMulti(it.places, x, y, z)) return false;
+    if (!placeMulti(it.places, x, y, z, it.wood)) return false;
     try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing();
     placeCd = PLACE_REPEAT;
@@ -1369,7 +1421,7 @@ P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health +
 const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
 function die() {
   P.dead = true; P.health = 0;
-  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false; boostE = false;
+  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
   if (invOpen()) { try { inv().close(); } catch (_) {} }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
@@ -1418,7 +1470,7 @@ function physics(dt) {
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
   if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
   if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
-  turbo = flying && boostE && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // releasing W or E (or landing) ends the boost
+  turbo = flying && k.has("KeyR") && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // flying with W + R held; releasing either (or landing) ends the boost
   // forward (sx, sz) and right (-sz, sx) in the horizontal plane
   const sx = -Math.sin(yaw), sz = -Math.cos(yaw);
   let mx = sx * fwd - sz * strafe, mz = sz * fwd + sx * strafe;
@@ -1583,6 +1635,8 @@ P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
+P.escGrace = () => inEscGrace();   // tests: still inside the grace after an Escape closed a screen
+P.frame = () => frameNo;
 P.menu = () => menuOpen;
 P.respawn = respawn;
 P.setGameMode = setGameMode;
@@ -1591,7 +1645,7 @@ P.screenOpen = () => !!menuOpen || invOpen();   // any menu or in-game screen; m
 P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
 P.actionBar = actionBar;
 P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };
-P.uiClose = function () { if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
+P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
 P.teleport = function (x, y, z) {
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists
@@ -1638,6 +1692,7 @@ P.setMouse = function (left, right) { // test hook: simulate held mouse buttons
 };
 
 P.update = function (dt) {
+  frameNo++;
   if (hurtCd > 0) hurtCd -= dt;
   if (attackCd > 0) attackCd -= dt;
 
@@ -1676,6 +1731,7 @@ P.update = function (dt) {
 };
 
 P.updatePaused = function (dt) {
+  frameNo++;
   if (hurtCd > 0) hurtCd -= dt;
   syncCamera(dt);
   updateParticles(dt);

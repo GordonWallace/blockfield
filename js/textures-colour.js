@@ -39,6 +39,56 @@ for (const sp of BF.WOOD_SPECIES) {
   SPRITE_TILES.add(sp + "_fence");
 }
 
+// ---------- doors (other woods; oak's tiles come from Faithful): boards of the species planks in a darker frame. Each wood has its own
+// pattern, after its Minecraft door: windows (transparent holes with mullions) up top, raised panels, battens or braces below.
+// win: [x0, y0, x1, y1] holes in the top tile; bars: mullion columns/rows inside them; panels: raised rectangles; brace: Z brace; studs: iron nails.
+const DOOR_STYLE = {
+  spruce: { top: { panels: [[5, 4, 26, 13]], battens: [22, 23] }, bottom: { battens: [6, 7, 24, 25], brace: true, studs: true } },
+  birch: { top: { win: [[5, 3, 26, 26]], barsX: [12, 13, 18, 19], barsY: [11, 12, 18, 19] }, bottom: { panels: [[5, 4, 14, 13], [17, 4, 26, 13], [5, 17, 14, 27], [17, 17, 26, 27]] } },
+  jungle: { top: { win: [[6, 4, 25, 11], [6, 15, 25, 22]], barsX: [15, 16] }, bottom: { panels: [[6, 4, 25, 26]], diamond: true } },
+  acacia: { top: { win: [[6, 4, 12, 24], [19, 4, 25, 24]] }, bottom: { panels: [[6, 4, 12, 26], [19, 4, 25, 26]] } },
+  dark_oak: { top: { win: [[10, 6, 21, 15]], barsX: [15, 16], barsY: [10, 11] }, bottom: { panels: [[5, 4, 26, 26]], studs: true } },
+  mangrove: { top: { win: [[5, 4, 26, 24]], barsY: [9, 10, 15, 16, 21] }, bottom: { brace: true, battens: [4, 5, 26, 27] } },
+  cherry: { top: { win: [[6, 4, 25, 24]], barsX: [15, 16], arch: true }, bottom: { panels: [[6, 4, 14, 26], [17, 4, 25, 26]] } },
+};
+for (const sp in DOOR_STYLE) {
+  const cols = PLANK_COLS[sp], dark = c => mul(c, 0.72);
+  const boards = p => {
+    p.fill((x, y) => {
+      const board = x >> 3, grain = p.noise(x, y, 16, 2, 300 + board), fine = p.noise(x, y, 32, 4, 310 + board);
+      let t = 0.5 + (((board * 7 + 3) % 5) / 5 - 0.4) * 0.3 + (grain - 0.5) * 0.8 + (fine - 0.5) * 0.4, h = 0.7 + grain * 0.15;
+      if (x % 8 === 7) { t -= 0.55; h = 0.1; }
+      p.set(x, y, jit(p, ramp(cols, t), 0.04)); p.setH(x, y, h);
+    });
+    p.fill((x, y) => { const e = Math.min(x, 31 - x); if (e <= 2) { p.set(x, y, jit(p, dark(ramp(cols, e === 2 ? 0.2 : 0.7)), 0.05)); p.setH(x, y, 1); } });
+  };
+  const rail = (p, y, lo) => { for (let x = 3; x < 29; x++) { p.set(x, y, jit(p, dark(ramp(cols, lo ? 0.15 : 0.7)), 0.05)); p.setH(x, y, 1); } };
+  const paint = (p, s, upper) => {
+    boards(p);
+    for (const y of upper ? [0, 1] : [30, 31]) rail(p, y, y === 1 || y === 31);
+    for (const y of s.battens || []) rail(p, y, y & 1);
+    if (s.brace) for (let i = 0; i < 24; i++) for (const d of [0, 1]) { const x = 4 + i, y = (upper ? 22 : 24) - Math.round(i * 16 / 24) + d; p.set(x, y, jit(p, dark(ramp(cols, d ? 0.2 : 0.75)), 0.05)); p.setH(x, y, 1); }
+    for (const [x0, y0, x1, y1] of s.panels || []) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const e = Math.min(x - x0, y - y0, x1 - x, y1 - y);
+      if (e === 0) { p.set(x, y, jit(p, dark(ramp(cols, x === x0 || y === y0 ? 0.05 : 0.9)), 0.05)); p.setH(x, y, 0.3); }
+      else if (e === 1) p.scale(x, y, 1.1);
+      else if (s.diamond && Math.abs(x - (x0 + x1) / 2) / ((x1 - x0) / 2) + Math.abs(y - (y0 + y1) / 2) / ((y1 - y0) / 2) < 0.55) p.scale(x, y, 0.82);
+    }
+    for (const [x0, y0, x1, y1] of s.win || []) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const e = Math.min(x - x0, y - y0, x1 - x, y1 - y), bar = (s.barsX || []).includes(x) || (s.barsY || []).includes(y);
+      const cut = s.arch && y - y0 < 4 && Math.min(x - x0, x1 - x) < 4 - (y - y0);   // rounded upper corners
+      if (cut) continue;
+      if (e >= 2 && !bar) { p.set(x, y, [70, 60, 45], 0); continue; }
+      p.set(x, y, jit(p, dark(ramp(cols, e === 0 ? 0.15 : 0.75)), 0.05)); p.setH(x, y, e === 0 ? 0.2 : 0.95);
+    }
+    if (s.studs) for (const [x, y] of [[6, 6], [25, 6], [6, 25], [25, 25]]) { p.set(x, y, hex("#3a3a40")); p.set(x + 1, y, hex("#6a6a74")); p.setH(x, y, 1.2); }
+    if (!upper) { const m = pal(["#2e2e34", "#5a5a64", "#9a9aa6"]); for (let y = 0; y <= 3; y++) for (let x = 25; x <= 27; x++) { p.set(x, y, ramp(m, x === 25 ? 0.95 : y === 3 ? 0 : 0.5)); p.setH(x, y, 1.2); } }
+    p.relief(1.3);
+  };
+  T[sp + "_door_top"] = p => paint(p, DOOR_STYLE[sp].top, true);
+  T[sp + "_door_bottom"] = p => paint(p, DOOR_STYLE[sp].bottom, false);
+}
+
 // ---------- stripped logs (side + top) ----------
 const STRIPPED = { // 5-stop side ramp, then log-top ring colours (outer ring, inner ring, core)
   oak: [["#8f7347", "#a0824f", "#ae9059", "#bb9d64", "#c6a96f"], "#b48f5c", "#9a7748", "#7d5e38"],

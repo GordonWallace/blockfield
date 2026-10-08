@@ -11,7 +11,7 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const ZONE = 128, MAX_PX = 1024, MAX_K = 32768, DEFAULT_W = 2048;   // 32768 zones = 4194304 blocks: past +-2M blocks the generator's lattice cache keys collide
+const ZONE = 128, MAX_PX = 1024, MAX_K = BF.AUTO_MAP_MAX_K || 4096, DEFAULT_W = 2048;   // 4096 zones = 524288 blocks, see js/blocks.js
 const COARSE_SCALE = 64;      // above this many blocks per pixel, mile-high plateau weights are approximated (worldgen.setCoarse)
 const RIVER_MAX_SCALE = 16;    // rivers (about 20 blocks wide) only on maps with at most 16 blocks per pixel; see step()
 const STEPS = [16, 8, 4, 2, 1];
@@ -27,6 +27,7 @@ function geometry(k, zx, zz) {
   return { side, N, scale: side / N, x0: zx * ZONE + ZONE / 2 - side / 2, z0: zz * ZONE + ZONE / 2 - side / 2 };
 }
 function getAuto(k, zx, zz) {
+  k = clamp(k, 1, MAX_K);
   const key = keyOf(k, zx, zz);
   let d = maps.get(key);
   if (!d) {

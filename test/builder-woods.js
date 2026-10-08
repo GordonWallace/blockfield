@@ -2,7 +2,7 @@
 // Usage: NODE_PATH=$(npm root -g) node test/builder-woods.js [seed=1337]
 // 1. Blueprints: every type x style x wood holds no wood but the chosen one (oak doors aside), and its requirement names only that wood.
 // 2. A builder that holds only spruce builds a spruce structure, nothing else.
-// 3. A builder with no wood but emeralds, in a village whose forester stocks birch, picks birch, buys it from the forester and builds in birch.
+// 3. A builder with no wood but emeralds, in a village whose forester stocks birch, buys wood and builds only in the wood it bought.
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
@@ -91,7 +91,8 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
     if (!e) return { planned: false, buys, status: BF.builder.statusText(bl), inv: bl.inv.filter(Boolean).map(s => BF.itemName(s.id) + "x" + s.count).join(" ") };
     const woods = {};
     for (let i = 0; i < e.prog; i++) { const c = BF.builder.cellOf(e, i), id = BF.world.getBlock(c.x, c.y, c.z), w = P.woodOf(id); if (w) woods[w[0]] = (woods[w[0]] || 0) + 1; }
-    return { planned: true, type: e.type, wood: e.wood, state: e.state, prog: e.prog, n: e.n, woods, buys: buys.slice(0, 12) };
+    const woodNames = ["planks", "log"].map(k => P.woodItem(e.wood, k)).filter(id => id != null).map(id => BF.itemName(id));   // the item names of the wood it built from
+    return { planned: true, type: e.type, wood: e.wood, state: e.state, prog: e.prog, n: e.n, woods, woodNames, buys: buys.slice(0, 12) };
   }, [vk, setup, days]);
 
   // ---- 2. spruce only
@@ -100,12 +101,13 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
   check(r2.planned && r2.wood === 'spruce', `builder holding spruce plans a ${r2.type} in ${r2.wood}`);
   check(r2.planned && Object.keys(r2.woods).every(w => w === 'spruce') && (r2.woods.spruce || 0) > 0, `placed wood: ${JSON.stringify(r2.woods)} (${r2.state} ${r2.prog}/${r2.n})`);
 
-  // ---- 3. no wood, forester stocks birch
+  // ---- 3. no wood, forester stocks birch. A builder builds with whatever wood it legitimately acquires (Gordon, 2026-10-07): while it shops
+  // the forester may fell and saw other trees, so the check is that it bought the wood it builds with, not that the wood is birch.
   const r3 = await run({ builder: [['cobblestone', 64], ['glass_pane', 16], ['glass', 16], ['torch', 8], ['red_bed', 2], ['emerald', 80]], forester: [['birch_planks', 128], ['birch_log', 30]] }, 3);
   console.log('   ', JSON.stringify(r3));
-  check(r3.planned && r3.wood === 'birch', `builder with no wood plans in the forester's wood: ${r3.wood}`);
-  check(r3.planned && (r3.buys || []).some(s => /buy/.test(s) && /Birch/.test(s)), 'bought birch from the forester');
-  check(r3.planned && Object.keys(r3.woods).every(w => w === 'birch') && (r3.woods.birch || 0) > 0, `placed wood: ${JSON.stringify(r3.woods)} (${r3.state} ${r3.prog}/${r3.n})`);
+  const boughtNames = (r3.buys || []).filter(s => /^buy /.test(s)).map(s => { try { return JSON.parse(s.slice(4)).got || ''; } catch (e) { return ''; } });
+  check(r3.planned && boughtNames.some(g => (r3.woodNames || []).includes(g.replace(/^\d+ /, ''))), `builder with no wood bought the wood it builds with: ${r3.wood} (${boughtNames.join(', ')})`);
+  check(r3.planned && Object.keys(r3.woods).every(w => w === r3.wood) && (r3.woods[r3.wood] || 0) > 0, `placed only that wood: ${JSON.stringify(r3.woods)} (${r3.state} ${r3.prog}/${r3.n})`);
 
   console.log(fails ? `FAILED ${fails}` : 'ALL OK');
   await b.close();

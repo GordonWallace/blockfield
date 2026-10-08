@@ -295,37 +295,40 @@ function rawFields(x, z) {
   K.wd = noise.fbm(wx / 600 - 201.1, wz / 600 + 44.4, 2);
 }
 // The slow fields are sampled on a 4-block lattice (cached) and bilinearly interpolated: identical results
-// for any call order, and ~10x cheaper per column.
-const LAT = new Map();
+// for any call order, and ~10x cheaper per column. Nodes live in one preallocated buffer (LAT maps key -> offset): wide auto maps touch
+// millions of fresh nodes, and a typed array per node let the browser grow by gigabytes of short-lived buffers before freeing them.
+const LAT = new Map(), LAT_MAX = 60000, LAT_W = 14, LATB = new Float64Array(LAT_MAX * LAT_W);
 function lattice(lx, lz) {
   const key = lx * 1048576 + lz;
-  let a = LAT.get(key);
-  if (!a) {
-    if (LAT.size > 60000) LAT.clear();
+  let o = LAT.get(key);
+  if (o === undefined) {
     rawFields(lx * 4, lz * 4);
-    a = new Float64Array([K.t, K.hu, K.c, K.e, K.wd, K.wx - lx * 4, K.wz - lz * 4, K.u, K.p, K.pm, K.lo, K.mt, K.sp, K.mp]);
-    LAT.set(key, a);
+    o = LAT.size * LAT_W;
+    LATB[o] = K.t; LATB[o + 1] = K.hu; LATB[o + 2] = K.c; LATB[o + 3] = K.e; LATB[o + 4] = K.wd; LATB[o + 5] = K.wx - lx * 4; LATB[o + 6] = K.wz - lz * 4;
+    LATB[o + 7] = K.u; LATB[o + 8] = K.p; LATB[o + 9] = K.pm; LATB[o + 10] = K.lo; LATB[o + 11] = K.mt; LATB[o + 12] = K.sp; LATB[o + 13] = K.mp;
+    LAT.set(key, o);
   }
-  return a;
+  return o;
 }
 function fields(x, z) {
   const lx = Math.floor(x / 4), lz = Math.floor(z / 4), fx = (x - lx * 4) / 4, fz = (z - lz * 4) / 4;
-  const a = lattice(lx, lz), b = lattice(lx + 1, lz), c = lattice(lx, lz + 1), d = lattice(lx + 1, lz + 1);
+  if (LAT.size > LAT_MAX - 4) LAT.clear();   // here, not in lattice(): the four nodes below must not be overwritten while in use
+  const L = LATB, a = lattice(lx, lz), b = lattice(lx + 1, lz), c = lattice(lx, lz + 1), d = lattice(lx + 1, lz + 1);
   const w00 = (1 - fx) * (1 - fz), w10 = fx * (1 - fz), w01 = (1 - fx) * fz, w11 = fx * fz;
-  K.t = a[0] * w00 + b[0] * w10 + c[0] * w01 + d[0] * w11;
-  K.hu = a[1] * w00 + b[1] * w10 + c[1] * w01 + d[1] * w11;
-  K.c = a[2] * w00 + b[2] * w10 + c[2] * w01 + d[2] * w11;
-  K.e = a[3] * w00 + b[3] * w10 + c[3] * w01 + d[3] * w11;
-  K.wd = a[4] * w00 + b[4] * w10 + c[4] * w01 + d[4] * w11;
-  K.wx = x + a[5] * w00 + b[5] * w10 + c[5] * w01 + d[5] * w11;
-  K.wz = z + a[6] * w00 + b[6] * w10 + c[6] * w01 + d[6] * w11;
-  K.u = a[7] * w00 + b[7] * w10 + c[7] * w01 + d[7] * w11;
-  K.p = a[8] * w00 + b[8] * w10 + c[8] * w01 + d[8] * w11;
-  K.pm = a[9] * w00 + b[9] * w10 + c[9] * w01 + d[9] * w11;
-  K.lo = a[10] * w00 + b[10] * w10 + c[10] * w01 + d[10] * w11;
-  K.mt = a[11] * w00 + b[11] * w10 + c[11] * w01 + d[11] * w11;
-  K.sp = a[12] * w00 + b[12] * w10 + c[12] * w01 + d[12] * w11;
-  K.mp = a[13] * w00 + b[13] * w10 + c[13] * w01 + d[13] * w11;
+  K.t = L[a + 0] * w00 + L[b + 0] * w10 + L[c + 0] * w01 + L[d + 0] * w11;
+  K.hu = L[a + 1] * w00 + L[b + 1] * w10 + L[c + 1] * w01 + L[d + 1] * w11;
+  K.c = L[a + 2] * w00 + L[b + 2] * w10 + L[c + 2] * w01 + L[d + 2] * w11;
+  K.e = L[a + 3] * w00 + L[b + 3] * w10 + L[c + 3] * w01 + L[d + 3] * w11;
+  K.wd = L[a + 4] * w00 + L[b + 4] * w10 + L[c + 4] * w01 + L[d + 4] * w11;
+  K.wx = x + L[a + 5] * w00 + L[b + 5] * w10 + L[c + 5] * w01 + L[d + 5] * w11;
+  K.wz = z + L[a + 6] * w00 + L[b + 6] * w10 + L[c + 6] * w01 + L[d + 6] * w11;
+  K.u = L[a + 7] * w00 + L[b + 7] * w10 + L[c + 7] * w01 + L[d + 7] * w11;
+  K.p = L[a + 8] * w00 + L[b + 8] * w10 + L[c + 8] * w01 + L[d + 8] * w11;
+  K.pm = L[a + 9] * w00 + L[b + 9] * w10 + L[c + 9] * w01 + L[d + 9] * w11;
+  K.lo = L[a + 10] * w00 + L[b + 10] * w10 + L[c + 10] * w01 + L[d + 10] * w11;
+  K.mt = L[a + 11] * w00 + L[b + 11] * w10 + L[c + 11] * w01 + L[d + 11] * w11;
+  K.sp = L[a + 12] * w00 + L[b + 12] * w10 + L[c + 12] * w01 + L[d + 12] * w11;
+  K.mp = L[a + 13] * w00 + L[b + 13] * w10 + L[c + 13] * w01 + L[d + 13] * w11;
 }
 
 // Full column climate. Writes into C (no allocation) and returns the terrain surface height.
@@ -606,9 +609,9 @@ function climate3(x, z) {
   if (rl > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
     const rs = Math.max(SEA, Math.floor(RV.rs)), sd = RV.sd, w = RV.w;
     let hr;
-    if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - 3.2 * (1 - q * q); }
+    if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - (3.2 + Math.min(4, Math.max(0, w - 7) * 0.15)) * (1 - q * q); }   // wide rivers run a little deeper
     else hr = rs + 1.4 + smooth(0, 14, sd) * 1.5;
-    const vw = Math.min(BF.rivers.REACH - w - 3, Math.max(27, (h > hr ? h - hr : 1.6 * (hr - h)) * 1.4));
+    const vw = Math.min(BF.rivers.REACH - 3, Math.max(27, (h > hr ? h - hr : 1.6 * (hr - h)) * 1.4));
     const fp = (1 - smooth(w + 3, w + 3 + vw, RV.d)) * rl;
     if (!(h < SEA - 1 && hr > h)) h = h + (hr - h) * fp;     // never raise the sea floor (outlets run on into open water)
     if (sd < 0 && fp > 0.9) { chan = true; wl = rs; if (h > rs - 1) h = rs - 1; }
@@ -2194,7 +2197,7 @@ BF.worldgen = {
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
     if (GEN >= 3) placeHome3();
-    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 64, reach: 100, marg: 140, outlet: 260, mouth: -2, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
+    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,

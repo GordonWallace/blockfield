@@ -21,7 +21,7 @@ Functional: crafting_table, furnace, chest, door, bed, fence, lantern, bell, gla
 
 ### Tier 2: shaped or stateful blocks (needs per-state ids and new models)
 - Slabs and stairs for every material (stone, cobble, bricks, planks of each wood, sandstone, quartz, and so on). This is the biggest visual gap for builders and the reason the id space had to grow.
-- Walls, fence for every wood, fence_gate, trapdoors, doors of other woods, iron_door, iron_bars, glass_pane (and 16 stained panes), ladder, carpets (16 colours), snow layers, torches (needs block light), soul_torch, chains, buttons, pressure_plates, levers, signs, flower_pot, rails, scaffolding, cobweb.
+- Walls, trapdoors, iron_door, iron_bars, glass_pane (and 16 stained panes), ladder, carpets (16 colours), snow layers, torches (needs block light), soul_torch, chains, buttons, pressure_plates, levers, signs, flower_pot, rails, scaffolding, cobweb.
 
 ### Tier 3: job-site and utility blocks (tie into villager professions)
 - lectern (librarian), barrel (fisherman), smoker (butcher), blast_furnace (armorer), cartography_table, fletching_table, grindstone (weaponsmith), smithing_table, stonecutter (mason), loom (shepherd), composter (farmer), brewing_stand (cleric), cauldron (leatherworker), anvil, enchanting_table, ender_chest, hopper, dispenser, dropper.
@@ -53,7 +53,7 @@ Still missing from Tier 1: bamboo planks/mosaic, falling concrete powder, carpet
 
 ## Tier 2 progress (slabs and stairs)
 Implemented (410 blocks, see CONTRACT.md "Slabs and stairs"): slabs (bottom/top, merge to the full block) and straight stairs (4 facings x 2 halves) for 41 materials (all planks, cobble, stone, bricks, granite/diorite/andesite, sandstones, quartz, deepslate, blackstone, prismarine, purpur, nether bricks, mud bricks, terracotta), vanilla crafting and wood fuel.
-Still missing: inner/outer corner stairs, walls, fence gates, trapdoors, other doors, panes, ladders, carpets, etc.; slabs/stairs for copper, moss, concrete, wool and other blocks.
+Still missing: inner/outer corner stairs, walls, trapdoors, panes, ladders, carpets, etc.; slabs/stairs for copper, moss, concrete, wool and other blocks.
 
 ## Tier 2 progress (panes / bars / ladders)
 Implemented (22 blocks, 1 item; see CONTRACT.md "Panes, bars, ladders"): glass_pane, 16 stained glass panes (translucent), iron_bars, ladder (4 facings, climbable, pops off). Recipes for all of them.

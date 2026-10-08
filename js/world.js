@@ -1003,7 +1003,7 @@ world.setDoor = function (x, y, z, open) {
   if (!d) return null;
   if (open == null) open = !d.open;
   const by = d.upper ? y - 1 : y;
-  for (const up of [0, 1]) if (BF.blocks[world.getBlock(x, by + up, z)].door) world.setBlock(x, by + up, z, BF.doorId(d.f, up, open));
+  for (const up of [0, 1]) if (BF.blocks[world.getBlock(x, by + up, z)].door) world.setBlock(x, by + up, z, BF.doorId(d.f, up, open, d.wood));
   return open;
 };
 
@@ -1012,7 +1012,7 @@ world.setGate = function (x, y, z, open) {
   const g = BF.blocks[world.getBlock(x, y, z)].gate;
   if (!g) return null;
   if (open == null) open = !g.open;
-  if (open !== g.open) world.setBlock(x, y, z, BF.gateId(g.axis, open));
+  if (open !== g.open) world.setBlock(x, y, z, BF.gateId(g.axis, open, g.wood));
   return open;
 };
 

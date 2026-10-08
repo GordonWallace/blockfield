@@ -201,6 +201,8 @@ const VILLAGER_OUTFITS = {
   explorer:      { robe: 0x8c7a4c, trim: 0x4a3a20, hat: { kind: "brim", color: 0x4a3c22, color2: 0x5c4a2a }, sash: 0x3a2a14 },
   // forester (17th, not vanilla; from the villager-planter mod): forest-green robe, brown belt, leafy brim hat; plants saplings and fells trees (js/forester.js)
   forester:      { robe: 0x2f6a2c, trim: 0x1f4a1e, hat: { kind: "brim", color: 0x2a5a26, color2: 0x3a7a34 }, sash: 0x4a3220 },
+  // miner (not vanilla): slate work robe, leather apron, dark hard hat with a lamp, a pickaxe in hand; mines cobblestone (js/miner.js)
+  miner:         { robe: 0x4a4c54, trim: 0x2e3036, apron: 0x6b4a2a, sash: 0xd8a83a, pickaxe: true, hat: { kind: "hard", color: 0x3c3e44, color2: 0x2e3036, lamp: true } },
   // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
   furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
@@ -403,6 +405,7 @@ const MODELS = {
       else if (H.kind === "bucket") { headBoxes.push(box([-5, 8, -5], [5, 9, 5], c), box([-4.3, 9, -4.3], [4.3, 12, 4.3], c2)); }
       else if (H.kind === "hard") {
         headBoxes.push(box([-4.5, 9, -4.5], [4.5, 12, 4.5], c), box([-4.5, 9.5, 4.5], [4.5, 10.5, 6.8], c2), box([-0.9, 12, -4.5], [0.9, 13, 4.5], c2));
+        if (H.lamp) headBoxes.push(box([-1.2, 10, 4.5], [1.2, 12, 5.6], 0x2a2a2e), box([-0.8, 10.4, 5.6], [0.8, 11.6, 5.8], 0xfff2a8));   // miner's lamp
       }
       else if (H.kind === "feather") {
         headBoxes.push(box([-4.3, 9, -4.3], [4.3, 11, 4.3], c), box([-4.6, 8.5, -4.6], [4.6, 9.2, 4.6], c2));
@@ -420,6 +423,7 @@ const MODELS = {
         box([-6, -3, -2], [-4, 3, 6], robeC),
         box([4, -3, -2], [6, 3, 6], robeC),
         box([-2, -2, 6], [2, 2, 6.5], skin),
+        ...(O.pickaxe ? [box([2.2, -7, 5.6], [3.4, 3, 6.8], 0x5a3f26), box([-1.8, 3, 5.6], [7.4, 4.4, 6.8], (f, u, v) => (v === 0 ? 0x707078 : 0xb0b0b8))] : []),
         ...(O.hammer ? [box([2.2, -7, 5.6], [3.4, 2.5, 6.8], 0x7a5530), box([1.0, 2.5, 5.0], [4.6, 5.5, 7.4], (f, u, v) => (v === 0 ? 0x5a5a62 : 0x8e8e98))] : []),
       ] },
       { name: "legL", pivot: [-2, 12, 0], swing: 1, boxes: [box([-2, -12, -2], [2, 0, 2], (f, u, v) => (v < 1 ? 0x3a2a1c : trimC))] },
@@ -673,6 +677,12 @@ function kill(m, byPlayer) {
   m.ai.fuse = 0;
   if (m.fire) m.fire.visible = false;
   if (m.village) m.village.killed[m.type] = (m.village.killed[m.type] || 0) + 1;
+  if (m.village && m.type === "villager" && m.slot && !m.bred) {   // a roster villager: its slot stays empty for good (saved, see exportVillagers)
+    deadSlots(m.village).add(m.slot.idx);
+    (m.village.deadInfo || (m.village.deadInfo = [])).push({ i: m.slot.idx, name: BF.vlog ? BF.vlog.nameOf(m) : null, prof: m.profession || null,
+      cause: m.lastHurt || null, day: BF.sky ? +((BF.sky.day || 0) + (BF.sky.time || 0)).toFixed(3) : null });
+    const k = villagerKey(m); if (k) villagerSaves.delete(k);
+  }
   if (m.type === "creeper") m.model.scale.set(1, 1, 1);
   if (byPlayer || (m.def.golem && BF.drops)) giveDrops(m);   // a golem drops its iron whatever killed it
   if (BF.emit) BF.emit("mobKilled", m);
@@ -1012,7 +1022,7 @@ function zombieHuntVillagers(m, dt, out) {
   return false;
 }
 
-// Zombies with a target that stay pressed against a closed door for 3 s break it (both halves, one oak_door drops).
+// Zombies with a target that stay pressed against a closed door for 3 s break it (both halves, one door of its wood drops).
 function zombieBreakDoor(m, dt, out) {
   const ai = m.ai, W = BF.world;
   let hit = null;
@@ -1173,11 +1183,35 @@ function wake(m) {
   ai.route = null; ai.night = null;
   ai.leaving = !bedtime() && !(b && b.tent);   // out in the field after a night in a tent: nothing to walk out of
 }
+// The house (village layout) whose floor holds this bed, or null.
+function homeOfBed(rec, b) {
+  for (const h of (rec && rec.houses) || []) if (h && h.w && b.x >= h.x && b.x < h.x + h.w && b.z >= h.z && b.z < h.z + h.d) return h;
+  return null;
+}
+// A villager without a working bed of its own (no bed in its house, a builder or explorer before it has a home, its bed broken) claims the
+// nearest free bed of the village and keeps it: it sleeps there every night and the claim is saved (trades.pack). Newborns claim theirs in js/breeding.js.
+function claimBed(m, n, dt) {
+  const rec = m.village, B = BF.breeding;
+  if (!rec || !B || !B.freeBed || (m.slot && m.slot.bred) || (m.bed && m.bed.tent) || m.homeBed !== undefined) return;
+  if (m.bed && bedOK(m.bed)) return;
+  if ((n.claimT = (n.claimT || 0) - dt) > 0) return;
+  n.claimT = 5;                                              // none free: look again in a few seconds
+  if (!rec.beds || BF.simNow() * 1000 - (rec.bedScanAt || 0) > 3000) B.scanBeds(rec);
+  const b = B.freeBed(rec, m);
+  if (!b) return;
+  m.bed = Object.assign(b, { claimed: true });
+  const h = homeOfBed(rec, b);
+  if (h) m.home = h;
+  n.fails = 0; m.ai.route = null;
+  if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
+}
 // Night: head for bed and sleep; without a usable bed stand still indoors or by the village bell.
 function nightAI(m, dt, out) {
-  const ai = m.ai, T = m.def, V = m.village, H = m.home;
+  const ai = m.ai, T = m.def, V = m.village;
   ai.mode = "idle"; ai.t = rnd(1, 3); ai.leaving = false;
   const n = ai.night || (ai.night = { fails: 0, retryT: 0 });
+  claimBed(m, n, dt);
+  const H = m.home;
   if (ai.routeKind !== "bed") ai.route = null;
   if (m.bed && bedOK(m.bed) && n.fails < 3) {
     if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
@@ -1228,7 +1262,7 @@ function villagerAI(m, dt, out) {
   }
   // flee nearby zombies
   ai.zScanT = (ai.zScanT || 0) - dt;
-  if (ai.zScanT <= 0) { ai.zScanT = 0.5; ai.threat = nearestMob(m, 8, o => o.type === "zombie"); }
+  if (ai.zScanT <= 0) { ai.zScanT = 0.5; ai.threat = nearestMob(m, 8, o => o.type === "zombie" && hasLineOfSight(m, new THREE.Vector3(o.position.x, o.position.y + o.height * 0.85, o.position.z))); }   // not through rock: a miner would flee a zombie in a cave beside its tunnel all day
   if (ai.threat && !ai.threat.dead && !ai.threat.removed) ai.fleeT = Math.max(ai.fleeT, 1);
   if (ai.fleeT > 0) {
     ai.fleeT -= dt;
@@ -1245,12 +1279,14 @@ function villagerAI(m, dt, out) {
   ai.night = null;
   if (ai.leaving && morningAI(m, dt, out)) return;
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
+  if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
+  if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
@@ -1651,8 +1687,18 @@ function tryHostileSpawn() {
 // ---------- villages ----------
 // Villages come from BF.worldgen.villagesNear (optional). Each is tracked once by its centre so villagers are
 // not duplicated; villagers/golems removed by chunk unloading are replaced when the village loads again,
-// but killed ones stay dead.
+// but killed ones stay dead: rec.dead holds the roster slots of killed villagers (saved as "dead:<village key>").
 const villages = new Map();
+const pendingDead = new Map();   // village key -> {v: [slot idx], info: [{i, name, prof, cause, day}]} from a loaded save, applied when the record appears
+function deadSlots(rec) { return rec.dead || (rec.dead = new Set()); }
+function applyDead(rec) {
+  const d = pendingDead.get(rec.key);
+  if (!d) return;
+  pendingDead.delete(rec.key);
+  for (const i of d.v || []) if (Number.isFinite(+i)) deadSlots(rec).add(+i);
+  if (d.info.length) rec.deadInfo = d.info.concat(rec.deadInfo || []);
+  if (rec.dead) rec.killed.villager = Math.max(rec.killed.villager || 0, rec.dead.size);
+}
 let villageT = 0;
 // Villager trading state by stable key (village "x,z" + roster slot index): kept while unloaded and saved with the world.
 const villagerSaves = new Map();
@@ -1668,6 +1714,7 @@ const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages 
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
 const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
 const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
+const MINER_CHANCE = 0.95;     // newly generated villages (js/miner.js)
 // A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
 // saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
 // "<village key>#<idx>" key) counts as new too: the save already holds that very villager.
@@ -1724,7 +1771,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -1774,6 +1821,20 @@ function villageRoster(rec) {
     }
     if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1300, bed: null, prof: "furniture_maker" });
   }
+  // miner: ~95% of newly generated villages (own seeded stream and key <village key>#1400, so nothing else shifts; villages the player already
+  // knows keep their people). In a classic village it may take the village one past the cap; in a sized village it takes the place of the
+  // last plain resident, so the village keeps its size.
+  if (BF.miner && freshVillage(rec.key, rec.key + "#1400") && seededRand("miner:" + rec.key)() < MINER_CHANCE && cap >= 3) {
+    if (rec.pop && ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type])) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1400, bed: null, prof: "miner" });
+  }
   return ordered;
 }
 
@@ -1791,7 +1852,7 @@ function updateVillages(dt) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
-    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); }
+    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); applyDead(rec); }
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - pp.x, pp.x - v.maxX), Math.max(0, v.minZ - pp.z, pp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - pp.x, v.z - pp.z) > 80;
     if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
@@ -1800,13 +1861,14 @@ function updateVillages(dt) {
     rec.members = rec.members.filter(m => !m.removed);
     const alive = t => rec.members.filter(m => m.type === t && !m.dead && !m.bred).length;   // newborns (js/breeding.js) are not roster slots
     if (!rec.roster) rec.roster = villageRoster(rec);
-    const wantV = rec.roster.length - (rec.killed.villager || 0);
+    const dead = deadSlots(rec);
+    const wantV = rec.roster.filter(sl => !dead.has(sl.idx)).length;
     let haveV = alive("villager");
     if (rec.style == null) rec.style = typeof v.style === "number" ? v.style : styleAt(v.x, v.z);
     const taken = new Set(rec.members.filter(m => m.type === "villager" && !m.dead).map(m => m.slot));
     for (const sl of rec.roster) {
       if (haveV >= wantV) break;
-      if (taken.has(sl)) continue;
+      if (taken.has(sl) || dead.has(sl.idx)) continue;   // never respawn a killed villager in place of a living one
       const H = sl.house;
       if (H && !loadedHouse(H)) continue;
       const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
@@ -1819,6 +1881,7 @@ function updateVillages(dt) {
       m.ai.leaving = !bedtime(); // spawned indoors by day: walk out through the door
       const sv = villagerSaves.get(villagerKey(m));
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
+      if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
       if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
     }
@@ -1903,6 +1966,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.tick(dt);   // villager meals, farm scans (js/villagelife.js)
     if (BF.jobs) BF.jobs.tick(dt);   // jobsite validation, unemployed villagers look for work (js/jobs.js)
     if (BF.breeding) BF.breeding.tick(dt);   // encounters, hearts, children (js/breeding.js)
+    if (BF.storage) BF.storage.tick(dt);   // chest owners: empty chests and those of dead villagers are freed (js/storage.js)
     if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
@@ -1945,16 +2009,27 @@ BF.mobs = {
     for (const [k, v] of villagerSaves) out[k] = v;
     for (const m of list) if (m.type === "villager" && !m.dead && m.inv) { const k = villagerKey(m); if (k) out[k] = BF.trades.pack(m); }
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
+    if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
+    for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
+    for (const rec of villages.values()) {
+      const v = rec.dead ? [...rec.dead] : [];
+      if (v.length) out["dead:" + rec.key] = { v, info: rec.deadInfo || [] };
+      for (const i of v) delete out[rec.key + "#" + i];
+    }
     return out;
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 5) !== "dead:") villagerSaves.set(k, o[k]);
+    pendingDead.clear();
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [] });
+    for (const rec of villages.values()) applyDead(rec);
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
+    if (BF.villageLife) BF.villageLife.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
@@ -1965,9 +2040,8 @@ BF.mobs = {
     if (!mob || mob.dead || mob.removed || mob.type !== "villager") return null;
     if (mob.sleeping) return "Villager is sleeping";
     if (mob.child) { mob.lookAt = "player"; mob.ai.lookT = 1.5; return "The child is too young to trade"; }
+    mob.ai.was = { mode: mob.ai.mode, flee: mob.ai.fleeT > 0 };   // what it was doing, for the trade screen's status line (js/villagerstatus.js)
     mob.lookAt = "player"; mob.ai.lookT = 3; mob.ai.mode = "idle"; mob.ai.t = 3;
-    if (mob.profession === "nitwit") { mob.ai.lookT = 1; return "The nitwit just stares at you"; }
-    if (mob.profession === "unemployed") { mob.ai.lookT = 1; return "This villager has no job yet"; }
     const inv = BF.inventory, I = BF.I || {};
     if (inv && typeof inv.openTrade === "function") {
       try { inv.openTrade(mob); } catch (e) { console.error(e); }
@@ -1989,6 +2063,7 @@ BF.mobs = {
   setTrading(mob, on) {
     if (!mob || mob.removed) return;
     mob.tradingWith = on ? BF.player : null;
+    if (!on) mob.ai.was = null;
     if (on) { mob.vel.x = mob.vel.z = 0; mob.ai.mode = "idle"; mob.ai.t = 2; mob.lookAt = "player"; }
   },
   professions: PROFESSIONS,
@@ -2022,7 +2097,7 @@ BF.mobs = {
     return true;
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
-  nav: { findPath, followRoute, feetCell, walkCell, blockAt, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
+  nav: { findPath, followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
   spawning: true,
   clear() {
     for (const m of list.slice()) removeMob(m);
@@ -2032,6 +2107,7 @@ BF.mobs = {
     puffs.length = 0;
     villages.clear();
     villagerSaves.clear();
+    pendingDead.clear();
     if (BF.builder) BF.builder.reset();
     if (BF.villageLife) BF.villageLife.reset();
     if (BF.jobs) BF.jobs.reset();
