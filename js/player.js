@@ -460,6 +460,21 @@ let frameNo = 0, escClosedFrame = -1e9;
 const markEsc = () => { escClosedAt = performance.now(); escClosedFrame = frameNo; };
 const inEscGrace = () => performance.now() - escClosedAt < ESC_GRACE * 1000 || frameNo - escClosedFrame < ESC_GRACE_FRAMES;
 let lockOnEscUp = false, escClosedAt = -1e9, escCloseEvent = null, escCloseHeld = false, escRelock = false;
+// When the browser refuses or drops that re-lock (Chrome on macOS refuses one for about a second after any Escape), the game
+// still wants the mouse back: it asks once more when that second is up, and on the next key press or click (both count as a
+// user gesture, which every browser accepts).
+const ESC_RETRY_MS = 1300;
+let wantLock = false, escRetryT = 0;
+function relockLater() {
+  wantLock = true;
+  if (escRetryT) return;
+  actionBar("Click or press a key to capture the mouse");
+  escRetryT = setTimeout(() => {
+    escRetryT = 0;
+    if (wantLock && !locked && started && !P.dead && !menuOpen && !invOpen()) requestLock();
+  }, ESC_RETRY_MS);
+}
+function stopRelock() { wantLock = false; if (escRetryT) { clearTimeout(escRetryT); escRetryT = 0; } }
 addEventListener("keyup", e => {
   if (e.key !== "Escape") return;
   if (escCloseHeld) { escCloseHeld = false; markEsc(); }   // the grace runs from the release, when the re-lock goes out
@@ -486,6 +501,7 @@ function requestLock() {
   } catch (_) { onLockError(); }
 }
 function onLockError() {
+  if (escRelock && !locked && !escRetryT) relockLater();
   escRelock = false;
   if (locked) return;
   if (lockWorked) { if (menuOpen === "pause") pauseNote.textContent = "Click Resume again to capture the mouse."; return; }
@@ -518,13 +534,14 @@ function pause() {
   keys.clear(); mouseL = mouseR = false; resetBreak();
   showScreen("pause");
   BF.state.paused = true;
+  stopRelock();
   exitLock();
 }
 
 // Z frees the mouse without pausing (to use the debug screen while the game runs); a click on the game takes it back.
 let mouseFreed = false;
 function releaseMouse() {
-  mouseFreed = true;
+  mouseFreed = true; stopRelock();
   keys.clear(); mouseL = mouseR = false; resetBreak();
   exitLock();
 }
@@ -564,6 +581,7 @@ function bindInput() {
     // inventory.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
     if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) { deferredToggle(false); return; }
     if (menuOpen || invOpen() || P.dead) return;
+    if (wantLock && !locked && !dragMode) requestLock();   // a key press is a user gesture: take the mouse back that Escape's re-lock missed
     if (c === "KeyZ" && !e.repeat && !e.ctrlKey && !e.metaKey && locked) { releaseMouse(); return; }
     if (c === "KeyQ" && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
     if (e.repeat) { keys.add(c); return; }
@@ -585,7 +603,7 @@ function bindInput() {
     const was = locked;
     locked = document.pointerLockElement === cv;
     if (locked) {
-      lockWorked = true; dragMode = false;
+      lockWorked = true; dragMode = false; stopRelock();
       if (escRelock) { escRelock = false; markEsc(); }   // the grace also runs from when that re-lock lands, however slow
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
@@ -593,6 +611,7 @@ function bindInput() {
       if (mouseFreed) { mouseFreed = false; actionBar("Mouse free: click the game to take it back"); }
       else if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
       else if (!invOpen() && !P.dead && started && !menuOpen && !inEscGrace()) pause();
+      else if (!invOpen() && !P.dead && started && !menuOpen && !escRetryT) relockLater();   // dropped just after Escape: ask again
     }
   });
   document.addEventListener("pointerlockerror", onLockError);
