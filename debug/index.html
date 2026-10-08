@@ -175,6 +175,18 @@
   .ent.farm { border-left-color: var(--farm); } .ent.farm .tx { color: var(--farm); }
   .ent .at { color: var(--faint); margin-left: 8px; white-space: nowrap; }
 
+  /* ---------- compare villages (the village list's table) ---------- */
+  #vl-cmp.on, #vl-wide.on { background: rgba(127, 191, 77, 0.14); color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); }
+  .cneed { padding: 8px 16px; font-size: 12px; color: var(--warn); border-bottom: 1px solid var(--edge); } .cneed b { font-weight: 600; } .cneed.ok { color: var(--muted); }
+  .ctable { max-height: 420px; overflow: auto; }
+  .ctable th.r, .ctable td.r { text-align: right; }
+  .ctable td.cn { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; } .ctable td.cn small { display: block; color: var(--faint); font-size: 10px; }
+  .ctable tbody tr { cursor: pointer; } .ctable tr.sel td { background: rgba(127, 191, 77, 0.1); }
+  .ctable tr.off td { color: var(--muted); } .ctable tr.off td:not(.warn):not(.danger) { opacity: 0.7; }
+  .ctable td.warn { color: var(--warn); background: rgba(242, 198, 109, 0.08); } .ctable td.danger { color: var(--danger); background: rgba(232, 112, 92, 0.1); }
+  #vlpanel.wide { position: fixed; z-index: 6; inset: 64px 20px 20px; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+  #vlpanel.wide #vcmp { flex: 1; min-height: 0; display: flex; flex-direction: column; } #vlpanel.wide .ctable { max-height: none; flex: 1; }
+
   /* ---------- alerts ---------- */
   .aform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--edge); }
   .aform select, .aform input { background: var(--bg2); border: 1px solid var(--edge2); border-radius: 5px; padding: 4px 7px; font-size: 12px; outline: none; color: var(--ink); }
@@ -250,8 +262,11 @@
   <div class="split">
     <div class="stack">
       <div class="panel" id="vlpanel">
-        <div class="ph"><h2>Villages</h2><span class="sub" id="vl-count"></span><div class="grow"></div><button class="fbtn" id="vl-auto" title="Show the nearest loaded village, switching as you move">Follow nearest</button></div>
+        <div class="ph"><h2>Villages</h2><span class="sub" id="vl-count"></span><div class="grow"></div>
+          <button class="fbtn" id="vl-cmp" title="Every known village side by side in one table">Compare</button><button class="fbtn" id="vl-wide" title="Open the table across the whole screen (Esc closes)" hidden>Full width</button>
+          <button class="fbtn" id="vl-auto" title="Show the nearest loaded village, switching as you move">Follow nearest</button></div>
         <div class="vlist" id="vlist"><div class="empty">No villages loaded yet.</div></div>
+        <div id="vcmp" hidden></div>
       </div>
       <div class="panel" id="vpanel">
         <div class="ph"><h2 id="v-name">No village</h2><span class="sub" id="v-sub"></span></div>
@@ -376,7 +391,7 @@ function onSnap(s) {
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
   const was = viewKey;
   pickView(s);
-  renderTop(s); renderVillages(s); renderVillage(s); status(); alertsFromSnap(s);
+  renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); status(); alertsFromSnap(s);
   if (logChanged || logDirty || was !== viewKey) { logDirty = false; renderLog(); }
 }
 // The village on show: the one the user picked, else the nearest loaded one (the list comes sorted loaded-first by distance).
@@ -411,6 +426,129 @@ $("vlist").addEventListener("click", e => {
   onSnap(snap);
 });
 $("vl-auto").addEventListener("click", () => { pinned = null; if (snap) onSnap(snap); });
+// ---------------------------------------------------------------- compare villages (the village list's Compare table)
+// One row per known village, side by side: the numbers each village's own panel shows (its last snapshot while it was loaded)
+// plus last week's trades, births and deaths and the population change. Unloaded villages are greyed with when they were seen.
+// Outliers get the alert colours: the worst 10% of a column (with 5 or more villages, and worse than the middle village),
+// or past a danger line (no food, unhappy, shrinking by more than a quarter in 7 days). Click a header to sort, a row to pick the village.
+const CMP_MAX = 200, CSTORE = "bf-debug-compare";
+const UNHAPPY = 40;   // happiness below this is the red band (happyColor)
+// key, header, tooltip, value(row) -> number|null, worse: "low" | "high" | null (no outlier colour)
+const CCOLS = [
+  { k: "name", h: "Village", sort: r => r.name.toLowerCase() },
+  { k: "dist", h: "Distance", v: r => r.dist },
+  { k: "pop", h: "Villagers", t: "Population, and its change over the last 7 game days", v: r => r.pop },
+  { k: "pop7", h: "7-day change", t: "Population change since the oldest count in the last 7 game days", v: r => r.pop7, worse: "low" },
+  { k: "happy", h: "Happiness", v: r => r.happy, worse: "low" },
+  { k: "beds", h: "Beds", v: r => r.beds },
+  { k: "free", h: "Free beds", t: "Beds minus villagers (negative: villagers without a bed)", v: r => r.free, worse: "low" },
+  { k: "food", h: "Food", t: "Bread-equivalent held by its villagers and in their chests", v: r => r.food, worse: "low" },
+  { k: "trades", h: "Trades 7d", v: r => r.trades, worse: "low" },
+  { k: "noTools", h: "No tools", t: "Miners, foresters, farmers and shepherds without the tool their job needs", v: r => r.noTools, worse: "high" },
+  { k: "jobs", h: "Free jobs", t: "Job blocks nobody has taken", v: r => r.jobs, worse: "high" },
+  { k: "births", h: "Births 7d", v: r => r.births },
+  { k: "deaths", h: "Deaths 7d", v: r => r.deaths, worse: "high" },
+  { k: "golems", h: "Golems", v: r => r.golems },
+];
+let cmpOn = false, cmpWide = false, cmpSort = { k: "dist", dir: 1 };
+try { const o = JSON.parse(sessionStorage.getItem(CSTORE) || "{}"); if (o.sort) cmpSort = o.sort; cmpOn = !!o.on; } catch (e) { /* defaults */ }
+const saveCmp = () => { try { sessionStorage.setItem(CSTORE, JSON.stringify({ sort: cmpSort, on: cmpOn })); } catch (e) {} };
+// A table row from the village list entry v and its last detail d (null: never loaded while this screen or the server ran).
+function cmpRow(v, d, now) {
+  const r = { key: v.key, name: v.name, dist: v.dist, loaded: v.loaded, happy: v.happy ? v.happy.score : null, seen: null };
+  if (!d) return Object.assign(r, { pop: null, pop7: null, pop7from: null, beds: null, free: null, food: null, trades: null, noTools: null, toolJobs: 0, jobs: null, births: null, deaths: null, golems: null, none: true });
+  const food = (d.villagerList || []).reduce((a, x) => a + (x.food || 0) + (x.foodChests || 0), 0);
+  Object.assign(r, { pop: d.villagers, pop7: d.pop7 ? d.pop7.change : null, pop7from: d.pop7 ? d.pop7.from : null, beds: d.beds, free: d.beds ? d.beds - d.villagers : null,
+    food: Math.round(food), trades: d.week ? d.week.trade : null, noTools: d.noTools && d.noTools[1] ? d.noTools[0] : null, toolJobs: d.noTools ? d.noTools[1] : 0,
+    jobs: d.unclaimed, births: d.week ? d.week.birth : null, deaths: d.week ? d.week.death : null, golems: (d.golems || []).length });
+  if (!v.loaded && d.day != null && now != null) r.seen = now - d.day;
+  return r;
+}
+// Which cells are outliers, and why: {key: {col: reason}}. rows: cmpRow()s. Exposed as BFCompare.flags for tests.
+function cmpFlags(rows) {
+  const out = {}, flag = (r, c, why) => { (out[r.key] || (out[r.key] = {}))[c] = why; };
+  for (const r of rows) {
+    if (r.food === 0 && r.pop > 0) flag(r, "food", "no food");
+    if (r.happy != null && r.happy < UNHAPPY) flag(r, "happy", "unhappy");
+    if (r.pop7 != null && r.pop7from > 0 && -r.pop7 / r.pop7from > 0.25) flag(r, "pop7", "shrinking");
+  }
+  for (const c of CCOLS) {
+    if (!c.worse) continue;
+    const vals = rows.map(r => [r, c.v(r)]).filter(x => x[1] != null);
+    if (vals.length < 5) continue;
+    const s = vals.map(x => x[1]).sort((a, b) => c.worse === "low" ? a - b : b - a), n = Math.ceil(vals.length * 0.1), cut = s[n - 1], mid = s[Math.floor(s.length / 2)];
+    const worse = (a, b) => c.worse === "low" ? a < b : a > b;
+    for (const [r, x] of vals) if (!worse(cut, x) && worse(x, mid) && !(out[r.key] && out[r.key][c.k])) flag(r, c.k, (c.worse === "low" ? "low " : "high ") + c.h.toLowerCase());
+  }
+  return out;
+}
+function cmpSortRows(rows, sort) {
+  const c = CCOLS.find(x => x.k === sort.k) || CCOLS[1], key = c.sort || c.v;
+  return rows.slice().sort((a, b) => {
+    const x = key(a), y = key(b);
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;   // blanks last either way
+    return (x < y ? -1 : x > y ? 1 : 0) * sort.dir || a.dist - b.dist;
+  });
+}
+window.BFCompare = { flags: cmpFlags, sortRows: cmpSortRows, row: cmpRow, COLS: CCOLS.map(c => c.k) };
+const sgn = n => n > 0 ? "+" + n : n < 0 ? "−" + -n : "0";
+const ago = dd => dd < 1 / 24 ? "just now" : dd < 1 ? Math.round(dd * 24) + " h ago" : (Math.round(dd * 10) / 10) + " days ago";
+function renderCompare(s) {
+  const el = $("vcmp");
+  if (!cmpOn) return;
+  const list = s.villages || [];
+  if (!list.length) { el.innerHTML = cmpHtml = `<div class="empty">No villages known yet.</div>`; return; }
+  const now = s.info && s.info.day;
+  const all = list.map(v => cmpRow(v, details[v.key], now)), flags = cmpFlags(all);
+  // loaded first, then the others (as in the list), each part sorted by the chosen column
+  const rows = [...cmpSortRows(all.filter(r => r.loaded), cmpSort), ...cmpSortRows(all.filter(r => !r.loaded), cmpSort)];
+  const need = all.filter(r => flags[r.key]);
+  const why = r => [...new Set(Object.values(flags[r.key]))].join(", ");
+  const head = need.length ? `<div class="cneed"><b>${need.length} ${need.length === 1 ? "village needs" : "villages need"} a look:</b> ` + need.slice(0, 8).map(r => `${esc(r.name)} (${esc(why(r))})`).join(", ") + (need.length > 8 ? `, and ${need.length - 8} more` : "") + `</div>`
+    : `<div class="cneed ok">No village stands out.</div>`;
+  const cell = (r, c) => {
+    const f = flags[r.key] && flags[r.key][c.k], cls = f ? (/no food|unhappy|shrinking/.test(f) ? "danger" : "warn") : "";
+    let x = c.v ? c.v(r) : null, txt;
+    if (c.k === "name") txt = `${esc(r.name)}${r.loaded ? "" : `<small>${r.seen != null ? "seen " + ago(r.seen) : r.none ? "no numbers yet" : "not loaded"}</small>`}`;
+    else if (x == null) txt = `<span class="dim">-</span>`;
+    else if (c.k === "pop7") txt = sgn(x);
+    else if (c.k === "free") txt = sgn(x);
+    else if (c.k === "dist") txt = fmt(x);
+    else txt = fmt(x);
+    if (c.k === "noTools" && x != null) txt += `<span class="dim"> / ${r.toolJobs}</span>`;
+    if (c.k === "happy" && x != null) txt = `<span style="color:${happyColor(x)}">${x}</span>`;
+    return `<td class="${c.k === "name" ? "cn" : "r"} ${cls}"${f ? ` title="${esc(f)}"` : ""}>${txt}</td>`;
+  };
+  const shown = rows.slice(0, CMP_MAX);
+  const html = head + `<div class="ctable"><table><thead><tr>${CCOLS.map(c => `<th data-k="${c.k}" class="${c.k === "name" ? "" : "r"}${cmpSort.k === c.k ? " on" : ""}"${c.t ? ` title="${esc(c.t)}"` : ""}>${c.h}${cmpSort.k === c.k ? (cmpSort.dir > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>` +
+    shown.map(r => `<tr data-k="${esc(r.key)}" class="${r.loaded ? "" : "off"}${r.key === viewKey ? " sel" : ""}">${CCOLS.map(c => cell(r, c)).join("")}</tr>`).join("") + `</tbody></table></div>` +
+    (rows.length > CMP_MAX ? `<div class="anote">${rows.length - CMP_MAX} more villages not shown (the first ${CMP_MAX} in this order are).</div>` : "");
+  if (html === cmpHtml && el.firstChild) return;   // unchanged: keep the DOM (and the reader's place in it)
+  const t = el.querySelector(".ctable"), top = t ? t.scrollTop : 0, left = t ? t.scrollLeft : 0;
+  el.innerHTML = cmpHtml = html;
+  const t2 = el.querySelector(".ctable"); if (t2) { t2.scrollTop = top; t2.scrollLeft = left; }
+}
+let cmpHtml = "";
+function setCompare(on, wide) {
+  cmpOn = on; cmpWide = on && wide; saveCmp();
+  $("vl-cmp").classList.toggle("on", cmpOn); $("vl-wide").hidden = !cmpOn; $("vl-wide").classList.toggle("on", cmpWide);
+  $("vlist").hidden = cmpOn; $("vcmp").hidden = !cmpOn;
+  $("vlpanel").classList.toggle("wide", cmpWide);
+  if (snap) renderCompare(snap); else if (cmpOn) $("vcmp").innerHTML = `<div class="empty">No villages known yet.</div>`;
+}
+$("vl-cmp").addEventListener("click", () => setCompare(!cmpOn, false));
+$("vl-wide").addEventListener("click", () => setCompare(true, !cmpWide));
+$("vcmp").addEventListener("click", e => {
+  const th = e.target.closest("th[data-k]");
+  if (th) { cmpSort = cmpSort.k === th.dataset.k ? { k: th.dataset.k, dir: -cmpSort.dir } : { k: th.dataset.k, dir: th.dataset.k === "name" || th.dataset.k === "dist" ? 1 : -1 }; saveCmp(); if (snap) renderCompare(snap); return; }
+  const tr = e.target.closest("tr[data-k]"); if (!tr || !snap) return;
+  pinned = tr.dataset.k;
+  if (cmpWide) setCompare(true, false);   // a full-width table would cover the village panel it just picked
+  onSnap(snap);
+});
+addEventListener("keydown", e => { if (e.key === "Escape" && cmpWide) setCompare(true, false); });
+setCompare(cmpOn, false);
+
 const push = (a, v) => { a.push(v); if (a.length > HIST) a.shift(); };
 
 const DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];

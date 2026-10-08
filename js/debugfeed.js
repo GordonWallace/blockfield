@@ -84,6 +84,8 @@ function icons() {
   newIcons.clear();
   return out;
 }
+// The tool each job works with (js/miner.js, forester.js, villagelife.js, shepherd.js): a villager without one can't do its job.
+const JOB_TOOL = { miner: /_pickaxe$/, forester: /(^|_)axe$/, farmer: /_hoe$/, shepherd: /^shears$/ };
 function detail(rec) {
   const L = BF.vlog, d = L.panelData(rec);
   const chestsOf = new Map();   // owner key -> chests
@@ -110,6 +112,13 @@ function detail(rec) {
   // villagers who have died here (js/mobs.js rec.deadInfo, saved): name, job, cause, game day, age in days loaded and active
   d.dead = (rec.deadInfo || []).map(e => ({ name: e.name || "Someone", prof: L.pretty(e.prof || "unknown"), cause: e.cause || null, day: e.day, age: e.age == null ? null : Math.round(e.age * 10) / 10 }));
   d.clock = BF.vlog.stamp(BF.sky.day + BF.sky.time);   // when these numbers were taken, shown once the village unloads
+  d.day = +(BF.sky.day + BF.sky.time).toFixed(3);
+  // for the comparison table: last week's events (js/happiness.js), the population change (js/villagestats.js), tool coverage
+  const H = BF.happiness, wk = k => H && H.week ? H.week(rec.key, k) : null;
+  d.week = { trade: wk("trade"), birth: wk("birth"), death: wk("death") };
+  d.pop7 = BF.vstats ? BF.vstats.popChange(rec.key) : null;
+  const toolJobs = d.villagerList.length ? (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && m.position && !m.child && JOB_TOOL[m.profession]) : [];
+  d.noTools = [toolJobs.filter(m => !(m.inv || []).some(s => s && BF.items[s.id] && JOB_TOOL[m.profession].test(BF.items[s.id].name))).length, toolJobs.length];
   return d;
 }
 

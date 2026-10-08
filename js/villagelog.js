@@ -212,6 +212,7 @@ BF.vlog = {
   },
   update(dt, on) {
     hook();
+    if (BF.vstats) BF.vstats.update();
     updateLabels(on);
     if (!panelEl) panelEl = document.getElementById("vlog");
     if (!on) { if (panelEl) panelEl.hidden = true; panelT = 0; return; }
