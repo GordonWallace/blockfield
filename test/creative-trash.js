@@ -1,4 +1,4 @@
-// @ci baseline
+// @ci integration
 // Creative trashcan: click, right-click (one), drag-and-release, Del key and shift-click destroy items; survival has no trash. node test/run.js /tmp/trash test/creative-trash.js
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.mobs.spawning = false; });
