@@ -1,4 +1,4 @@
-// @ci baseline
+// @ci integration
 // Creative right and middle clicks on doors and chests use them; nothing picks the block (there is no pick block). node test/run.js /tmp/rc test/creative-rclick.js
 // Gordon's Ubuntu trackpad sends some right clicks as middle clicks, which used to pick the block into his hotbar.
 module.exports = async (pg, out) => {

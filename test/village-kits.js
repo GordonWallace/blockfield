@@ -3,7 +3,7 @@
 // - founding villagers' tools (wooden hoe / axe / pickaxe, shears; 30-40 torches for miners); villagers hired later get emeralds only
 // - desert villages have a garden of grass with oak trees that the forester can fell and replant
 // - a farmer without a hoe buys one from the village's toolsmith
-// @ci baseline
+// @ci integration
 module.exports = async (pg) => {
   const res = await pg.evaluate(async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
@@ -12,11 +12,11 @@ module.exports = async (pg) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     BF.state.paused = true;
 
-    // ---- rosters (village generator 3 is the default for new worlds)
+    // ---- rosters (village generator 4 is the default for new worlds; 3 and 4 have the same rosters but 4 adds a coop and its poultry keeper)
     let villages = 0, minPop = Infinity, core = 0, planned = 0, deserts = 0, gardens = 0, bad = [], desertV = null;
     for (const seed of [1, 2, 3, 4, 5, 6]) {
       BF.newWorld(seed, { gen: 3 });
-      if (seed === 1) ok("new worlds use village generator 3", BF.state.villages === 3, BF.state.villages);
+      if (seed === 1) ok("new worlds use village generator 4", BF.state.villages === 4, BF.state.villages);
       const seen = new Set();
       for (let rz = -8; rz < 8; rz++) for (let rx = -8; rx < 8; rx++) for (const v of BF.worldgen.villagesNear(rx * 384, rz * 384, 200)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
