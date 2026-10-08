@@ -1536,6 +1536,9 @@ function updateMob(m, dt) {
   if (m.removed) return; // exploded
 
   // ---- physics ----
+  if (m.riding && BF.boats && BF.boats.seat(m)) {   // sitting in a boat (js/boats.js): the boat carries it, no walking, falling or fall damage
+    m.onGround = true; m.inWater = false; m.headInWater = false; m.onLadder = false; m.fallStart = m.position.y;
+  } else {
   m.onLadder = m.type === "villager" && !m.inWater && onLadder(m);
   if (m.knockT <= 0) {
     const k = Math.min(1, dt * (m.onGround ? 10 : m.inWater ? 4 : 2.5));
@@ -1577,6 +1580,7 @@ function updateMob(m, dt) {
     }
     m.fallStart = m.position.y;
   } else if (m.position.y > m.fallStart) m.fallStart = m.position.y;
+  }
   if (m.dead) return;
 
   // ---- daylight burning ----
@@ -1702,7 +1706,7 @@ function animate(m) {
   for (const name in m.meshes) {
     const mesh = m.meshes[name], p = mesh.userData.part;
     if (p.head) { mesh.rotation.y = m.headYaw; mesh.rotation.x = -m.headPitch; }
-    else if (p.swing) mesh.rotation.x = sw * 0.75 * amp * p.swing;
+    else if (p.swing) mesh.rotation.x = m.riding && m.meshes.legL && !m.meshes.legFL ? -Math.PI / 2 : sw * 0.75 * amp * p.swing;   // sitting in a boat: two-legged mobs put their legs forward
     else if (p.folded) mesh.rotation.x = ai.swingT > 0 ? -Math.sin(ai.swingT / 0.35 * Math.PI) * 0.85 : 0;   // builders swing the folded arms as they place a block
     else if (p.arm) {
       if (m.type === "zombie") {
@@ -2108,6 +2112,7 @@ function despawn(dt) {
   const pp = BF.player.position;
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
+    if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
     const d = m.position.distanceTo(pp);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
     if ((d > DESPAWN_DIST && !simmed) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }

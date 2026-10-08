@@ -594,6 +594,9 @@ const ITEM_DEFS = [
   { name: "golden_sword", tool: { type: "sword", tier: 3, speed: 1, damage: 4 }, durability: 800, material: "gold", color: "#f2d64b" },
   { name: "golden_hoe", tool: { type: "hoe", tier: 3, speed: 7, damage: 1 }, durability: 800, material: "gold", color: "#f2d64b" },
   // ---- end gold tools ----
+  // ---- boats (js/boats.js; append-only): one per wood, stack of 1 as in vanilla; the icon is the "boat" sprite in the wood's colour ----
+  ...WOOD_SPECIES.map(sp => ({ name: sp + "_boat", boat: sp, stack: 1, sprite: "boat", color: WOOD_COLOR[sp], creativeTab: "tools" })),
+  // ---- end boats ----
   // ---- poultry items (js/poultry.js; append-only). Eggs are laid by chickens; a cooked egg (not vanilla) is cooked in a furnace.
   { name: "egg", stack: 16, color: "#efe2c4" },
   { name: "cooked_egg", food: 6, color: "#f4ecd8" },

@@ -3,7 +3,7 @@
 // has loaded, not just the one the player is in.
 // Always on, whatever F3 is doing: it streams to port 8001 on the game's host (or the address the debug server injects as
 // window.BF_DEBUG_FEED, or ?debugfeed=<port or url>; ?debugfeed=off stops it). It never changes what the game shows.
-// Snapshots go out 4 times a second as small POSTs; the village layout and the log are only re-sent when they change.
+// Snapshots go out 4 times a second as small POSTs; the village layout, the log and the economy tallies are only re-sent when they change.
 // The server's answer carries the alerts set up on the debug screen whenever the game's copy is out of date (js/alerts.js).
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
 // API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update() }
@@ -95,6 +95,8 @@ function icons() {
   newIcons.clear();
   return out;
 }
+// The tool each job works with (js/miner.js, forester.js, villagelife.js, shepherd.js): a villager without one can't do its job.
+const JOB_TOOL = { miner: /_pickaxe$/, forester: /(^|_)axe$/, farmer: /_hoe$/, shepherd: /^shears$/ };
 function detail(rec) {
   const L = BF.vlog, d = L.panelData(rec);
   const chestsOf = new Map();   // owner key -> chests
@@ -122,15 +124,23 @@ function detail(rec) {
   // villagers who have died here (js/mobs.js rec.deadInfo, saved): name, job, cause, game day, age in days loaded and active
   d.dead = (rec.deadInfo || []).map(e => ({ name: e.name || "Someone", prof: L.pretty(e.prof || "unknown"), cause: e.cause || null, day: e.day, age: e.age == null ? null : Math.round(e.age * 10) / 10 }));
   d.clock = BF.vlog.stamp(BF.sky.day + BF.sky.time);   // when these numbers were taken, shown once the village unloads
+  d.day = +(BF.sky.day + BF.sky.time).toFixed(3);
+  // for the comparison table: last week's events (js/happiness.js), the population change (js/villagestats.js), tool coverage
+  const H = BF.happiness, wk = k => H && H.week ? H.week(rec.key, k) : null;
+  d.week = { trade: wk("trade"), birth: wk("birth"), death: wk("death") };
+  d.pop7 = BF.vstats ? BF.vstats.popChange(rec.key) : null;
+  const toolJobs = d.villagerList.length ? (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && m.position && !m.child && JOB_TOOL[m.profession]) : [];
+  d.noTools = [toolJobs.filter(m => !(m.inv || []).some(s => s && BF.items[s.id] && JOB_TOOL[m.profession].test(BF.items[s.id].name))).length, toolJobs.length];
   return d;
 }
 
 // Every village this world has loaded: the ones the mob system knows this session, plus any with a saved log (earlier
 // sessions). Each snapshot carries the list with distances, full detail for the loaded ones, new layouts and changed logs.
 function villages(pp) {
-  const L = BF.vlog, recs = BF.mobs.villages || new Map(), out = { villages: [], detail: {}, layouts: {}, logs: {} };
+  const L = BF.vlog, E = BF.econ, recs = BF.mobs.villages || new Map(), out = { villages: [], detail: {}, layouts: {}, logs: {}, econ: {} };
   const keys = new Set(recs.keys());
   for (const k in L.serialize()) keys.add(k);
+  if (E) for (const k of E.keys()) keys.add(k);
   for (const key of keys) {
     const rec = recs.get(key), [kx, kz] = key.split(",").map(Number);
     const x = rec ? rec.x : kx, z = rec ? rec.z : kz, loaded = !!rec && isLoaded(rec);
@@ -141,6 +151,9 @@ function villages(pp) {
     if (rec && rec.wg && !sentLayouts.has(key)) { out.layouts[key] = layout(rec); sentLayouts.add(key); }
     const a = L.entries(key), last = a[a.length - 1], sig = a.length + "|" + (last ? last[0] + last[2] : "");
     if (logSigs.get(key) !== sig) { out.logs[key] = { key, cap: L.CAP, entries: a }; logSigs.set(key, sig); }
+    // the Economy view's tallies (js/economy.js), like the log: only when they changed (or a new day dropped the oldest)
+    const es = E ? E.version(key) + "|" + Math.floor(BF.sky.day + BF.sky.time) : "";
+    if (E && econSigs.get(key) !== es) { out.econ[key] = E.view(key); econSigs.set(key, es); }
   }
   out.villages.sort((a, b) => (b.loaded - a.loaded) || a.dist - b.dist);   // loaded first, then by distance
   const inside = L.villageAt(pp.x, pp.z);
@@ -151,14 +164,15 @@ function villages(pp) {
   }
   return out;
 }
-const sentLayouts = new Set(), logSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
-const resync = () => { sentLayouts.clear(); logSigs.clear(); sentIcons.clear(); };
+const sentLayouts = new Set(), logSigs = new Map(), econSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
+const resync = () => { sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); };
 let hooked = false;
 
 function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) { const k = m.type === "chicken" ? (m.coop ? "chicken (coop)" : "chicken (wild)") : m.type; mobs[k] = (mobs[k] || 0) + 1; }   // chickens: penned and wild (js/poultry.js)
+  if (BF.boats) Object.assign(mobs, BF.boats.counts());   // boats by wood ("oak_boat": n) next to the mob types
   return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
     professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired

@@ -69,6 +69,7 @@ const recOf = m => m && m.village;
 
 // buyer/seller: villager mobs, or buyer === "player". what: an offer {buy, sell} (times = repeats) or a ready-made string.
 function trade(buyer, seller, what, times) {
+  if (BF.econ) BF.econ.trade(buyer, seller, what, times);   // the Economy view's tallies (js/economy.js)
   const rec = recOf(seller) || recOf(buyer);
   if (!rec) return;
   let text;
@@ -212,6 +213,8 @@ BF.vlog = {
   },
   update(dt, on) {
     hook();
+    if (BF.vstats) BF.vstats.update();
+    if (BF.econ) BF.econ.update();
     updateLabels(on);
     if (!panelEl) panelEl = document.getElementById("vlog");
     if (!on) { if (panelEl) panelEl.hidden = true; panelT = 0; return; }

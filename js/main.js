@@ -39,6 +39,7 @@ BF.newWorld = function (seed, opts) {
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
+  if (BF.boats) BF.boats.clear();
   BF.world.reset();
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   // pick a dry spawn column near the origin
@@ -81,7 +82,7 @@ function debugInfo() {
     sections: cc ? { lo: cc.lo, hi: cc.hi - 1, y0: cc.y0, y1: cc.y1 - 1 } : null,
     biome: biome ? biome.name : "?",
     chunksDrawn: BF.world.meshedCount(), chunksLoaded: BF.world.chunks.size, chunksQueued: BF.world.queueLength,
-    mobs: BF.mobs.list.length, seed: BF.state.seed, gen: BF.state.gen, biomeScale: BF.state.biomeScale, sim: BF.villageSim.status(),
+    mobs: BF.mobs.list.length, boats: BF.boats ? BF.boats.list.length : 0, seed: BF.state.seed, gen: BF.state.gen, biomeScale: BF.state.biomeScale, sim: BF.villageSim.status(),
     day: BF.sky.day + BF.sky.time, clock: BF.vlog.stamp(BF.sky.day + BF.sky.time), light: BF.sky.light,
     blockLight: BF.world.getBlockLight(p.x, p.y + 0.05, p.z), calls: renderer.info.render.calls,
     weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
@@ -95,7 +96,7 @@ function debugText(d) {
     `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n` +
     `Chunk ${d.chunkX}, ${d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
     `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
-    `Mobs ${d.mobs}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
+    `Mobs ${d.mobs}${d.boats ? `  Boats ${d.boats}` : ""}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
@@ -126,6 +127,7 @@ function frame(now) {
       BF.sky.update(h);
       BF.mobs.update(h);
       BF.drops.update(h);
+      BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
       if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
       BF.world.tickSim();
       done++;
@@ -155,6 +157,7 @@ BF.mobs.init(scene);
 BF.villageSim.init();
 BF.vlog.init();
 BF.drops.init(scene);
+BF.boats.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
