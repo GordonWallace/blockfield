@@ -70,6 +70,7 @@ const recOf = m => m && m.village;
 // buyer/seller: villager mobs, or buyer === "player". what: an offer {buy, sell} (times = repeats) or a ready-made string.
 function trade(buyer, seller, what, times) {
   if (BF.econ) BF.econ.trade(buyer, seller, what, times);   // the Economy view's tallies (js/economy.js)
+  if (BF.prices && what && typeof what === "object") for (const m of [seller, buyer]) BF.prices.filled(m, what, times);   // eases its price at the next tick (js/prices.js)
   const rec = recOf(seller) || recOf(buyer);
   if (!rec) return;
   let text;

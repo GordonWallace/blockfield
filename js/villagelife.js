@@ -1343,6 +1343,7 @@ function findLogSeller(m, want, prefer) {
 function doLogDeal(m, t) {
   const T = TR(), v2 = t.seller, em = ids().em;
   if (!canSell(v2)) return 0;
+  if (t.offer) { if (t.offer.buy[0].n !== 1) return 0; t.per = t.offer.sell.n; }   // the price may have moved since the deal was planned (js/prices.js)
   let done = 0;
   for (let i = 0; i < t.times && logCount(m) < t.want; i++) {
     if (cnt(m, em) < 1 || !T.inv.canFit(m.inv, [{ id: t.item, n: t.per }], [{ id: em, n: 1 }])) break;
