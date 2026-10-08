@@ -297,6 +297,10 @@ const CAPS = [
   ['a miner dug diamond ore', r => Object.keys(r.dug).some(k => /Diamond/.test(k))],
   ['a miner dug redstone ore', r => Object.keys(r.dug).some(k => /Redstone/.test(k))],
   ['a miner sold raw iron / raw gold', r => r.trades_.some(t => t.seller === 'miner' && /Raw (Iron|Gold)/.test(t.item))],
+  ['toolsmith made a bucket', r => Object.keys(r.made).some(k => k.startsWith('toolsmith') && /Bucket/.test(k)) || r.logs.some(l => l[1] === 'craft' && /Bucket/.test(l[2]))],
+  ['farmer bought a bucket', r => r.trades_.some(t => t.buyer === 'farmer' && /Bucket/.test(t.item))],
+  ['miner stored finds in its chest', r => r.logs.some(l => l[1] === 'chest' && /\(Miner\) put /.test(l[2]))],
+  ['furniture maker placed a chest for a miner', r => r.logs.some(l => l[1] === 'chest' && /placed a chest .* house of .*\(Miner\)/.test(l[2]))],
   ['a gold tool was traded', r => r.trades_.some(t => /Gold(en)? (Pickaxe|Axe|Hoe|Shovel|Sword)/.test(t.item))],
 ];
 function overall(results) {
