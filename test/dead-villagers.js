@@ -42,7 +42,7 @@ module.exports = async (pg, out) => {
     ok("save drops the dead villagers' entries", deadIdx.every(i => !saved[KEY + "#" + i]));
     const info = saved["dead:" + KEY] && saved["dead:" + KEY].info || [];
     ok("save keeps who died (name, profession, cause, day)", deadIdx.every(i => info.some(e => e.i === i && e.name && e.prof && /zombie/.test(e.cause) && Number.isFinite(e.day))), info);
-    const vc0 = BF.breeding.villagerCount(rec);
+    const vc0 = BF.breeding.villagerCount(rec), vb0 = (rec.bred || []).reduce((k, e) => Math.max(k, e.k + 1), 0);
     BF.newWorld(1, { gen: 3, gameMode: "creative" });
     BF.mobs.spawning = false;
     BF.mobs.importVillagers(saved);
@@ -53,7 +53,9 @@ module.exports = async (pg, out) => {
     ok("after reload: same count", re.length === n0 - 3, [re.length, n0 - 3]);
     ok("after reload: none of the dead", !re.some(i => deadIdx.includes(i)), { re, deadIdx });
     ok("after reload: who died is kept", rec2.deadInfo && rec2.deadInfo.length === 3 && JSON.stringify(rec2.deadInfo) === JSON.stringify(info), rec2.deadInfo);
-    ok("after reload: villager count unchanged", BF.breeding.villagerCount(rec2) === vc0, [BF.breeding.villagerCount(rec2), vc0]);
+    // a baby born while the village settles after the reload is a new villager, not one the reload made up
+    const born = (rec2.bred || []).filter(e => e.k >= vb0 && !e.dead).length;
+    ok("after reload: villager count unchanged", BF.breeding.villagerCount(rec2) - born === vc0, [BF.breeding.villagerCount(rec2), born, vc0]);
     return R;
   });
   for (const l of res.lines) console.log(l);
