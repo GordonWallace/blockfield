@@ -55,7 +55,7 @@ module.exports = async (pg) => {
     // ---- stuck: stock held for sale that hasn't sold for 2 days
     const s = vs.find(m => m !== a && m !== c && m.inv);
     s.trades = [{ buy: [{ id: I.emerald, n: 1 }], sell: { id: I.cobblestone, n: 16 }, maxUses: 99, uses: 0 }];
-    BF.trades.inv.add(s.inv, I.cobblestone, 40);
+    s.inv[s.inv.length - 1] = { id: I.cobblestone, count: 40 };   // a slot of its own: its pack may be full
     E.scan(rec);
     ok("not stuck on day 0", !E.days(rec.key).get(Math.floor(BF.sky.day + BF.sky.time)).s.some(r => r[0] === L.nameOf(s)));
     BF.sky.day += 2;

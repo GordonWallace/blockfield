@@ -34,7 +34,7 @@ const start = async () => {
     BF.emit('villagerTrade', c, { buy: [{ id: I.emerald, n: 1 }], sell: { id: I.bread, n: 4 } });
     E.want(c, 'Gold');
     c.trades = [{ buy: [{ id: I.emerald, n: 1 }], sell: { id: I.cobblestone, n: 16 }, maxUses: 99, uses: 0 }];
-    BF.trades.inv.add(c.inv, I.cobblestone, 64);
+    c.inv[c.inv.length - 1] = { id: I.cobblestone, count: 64 };   // a slot of its own: its pack may be full
     E.scan(rec); BF.sky.day += 2; E.scan(rec);
     const p = m => L.pretty(m.profession);
     return { key: rec.key, seller: p(b2), buyer: p(a), cname: L.nameOf(c), cprof: p(c), name: BF.signs.villageName(rec.key) };
