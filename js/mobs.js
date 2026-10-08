@@ -235,6 +235,9 @@ const VILLAGER_OUTFITS = {
   miner:         { robe: 0x4a4c54, trim: 0x2e3036, apron: 0x6b4a2a, sash: 0xd8a83a, pickaxe: true, hat: { kind: "hard", color: 0x3c3e44, color2: 0x2e3036, lamp: true } },
   // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
   furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
+  // stable hand (not vanilla): saddle-brown work coat, denim apron, rope belt, tan wide-brim hat; catches, breeds and sells horses (js/stables.js).
+  // Never in the roster pool: villages only get one when a builder puts up a stable and a villager takes its tack rack
+  stable_hand:   { robe: 0x7a5232, trim: 0x4a3018, apron: 0x3d5a7a, sash: 0xc9a24a, hat: { kind: "brim", color: 0xb08850, color2: 0x9a7444 } },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
   // builder (15th): orange hi-vis vest with reflective band and straps, brown overalls, yellow hard hat, a hammer in hand
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
@@ -494,6 +497,46 @@ const MODELS = {
       { name: "legR", pivot: [4, 16, 0], swing: -1, boxes: [cbox([-3, -16, -2.5], [3, 0, 2.5], metal)] },
     ];
   },
+  // Horse (js/horses.js): variant "<coat>/<marking>", 7 vanilla coats x 5 markings. The saddle part is always there and shown only on a saddled horse.
+  horse(variant) {
+    const [coatName, mark] = String(variant || "brown/none").split("/");
+    const COATS = { white: 0xe6e1d6, creamy: 0xc8a06a, chestnut: 0xa25e2c, brown: 0x6e4628, black: 0x2a2420, gray: 0x7e7873, dark_brown: 0x40291a };
+    const coat = COATS[coatName] != null ? COATS[coatName] : COATS.brown;
+    const dk = new THREE.Color(coat).multiplyScalar(0.55).getHex(), mane = coatName === "white" || coatName === "creamy" ? 0x8a7a64 : 0x1e1814;
+    const WHITE = 0xf2efe8, BLACK = 0x221c18;
+    const spot = (u, v, s, k) => hash(u >> 1, v >> 1, s, 41) < k;
+    const fur = s => (f, u, v) => {
+      if (mark === "white_field" && spot(u, v, s, 0.45)) return WHITE;
+      if (mark === "white_dots" && spot(u * 3, v * 3, s, 0.12)) return WHITE;
+      if (mark === "black_dots" && spot(u * 3, v * 3, s, 0.14)) return BLACK;
+      return hash(u, v, s, 3) < 0.12 ? dk : coat;
+    };
+    const legPaint = (f, u, v) => (v === 0 ? 0x2e2620 : mark === "white" && v <= 4 ? WHITE : fur(9)(f, u, v));
+    const headPaint = (f, u, v, W, H) => {
+      if (f === "front") return v >= 1 && v <= 2 && (u === 1 || u === W - 2) ? 0x1a1410 : mark === "white" && u >= 2 && u <= W - 3 ? WHITE : coat;   // nostrils, blaze
+      if ((f === "left" || f === "right") && v === H - 2 && u === 3) return 0x111111;   // eyes
+      if (mark === "white" && f === "top" && u >= 2 && u <= 3) return WHITE;
+      return fur(5)(f, u, v);
+    };
+    const leather = 0x6b3e1e, iron = 0xa8a8b0;
+    return [
+      { name: "body", pivot: [0, 0, 0], boxes: [box([-5, 11, -10], [5, 21, 11], fur(1))] },
+      { name: "head", pivot: [0, 19, 10], head: true, boxes: [
+        box([-2.5, -1, -2], [2.5, 10, 4], fur(4)),                 // neck, rising from the chest
+        box([-1, 2, -3], [1, 12, -2], mane),                        // mane down the back of the neck
+        box([-3, 7, 1], [3, 12, 8], fur(6)),                        // head
+        box([-2, 7, 8], [2, 11, 13], headPaint),                    // muzzle
+        box([-2.5, 12, 1.5], [-1, 14, 3], coat), box([1, 12, 1.5], [2.5, 14, 3], coat),   // ears
+      ] },
+      { name: "tail", pivot: [0, 20, -10], boxes: [box([-1.5, -12, -3], [1.5, 1, 0], mane)] },
+      { name: "saddle", pivot: [0, 0, 0], boxes: [
+        box([-5.5, 20.5, -4], [5.5, 22, 5], leather), box([-2, 22, 3], [2, 23.5, 5], leather),
+        box([-5.8, 13, 0], [-5.3, 20.5, 1], 0x3a2414), box([5.3, 13, 0], [5.8, 20.5, 1], 0x3a2414),
+        box([-6.2, 12, -0.5], [-5.2, 13, 1.5], iron), box([5.2, 12, -0.5], [6.2, 13, 1.5], iron),
+      ] },
+      ...quadLegs(3, 8, 11, 4, legPaint),
+    ];
+  },
   spider() {
     const c1 = 0x3a3029, c2 = 0x29221d;
     const fur = (f, u, v) => (hash(u, v, f.length, 3) < 0.35 ? c2 : c1);
@@ -533,6 +576,8 @@ const TYPES = {
   spider:   { hostile: true,  hp: 16, hw: 0.7,  h: 0.9,  speed: 3.4, attack: 2, climbs: true, drops: [["string", 0, 2]] },
   villager: { hostile: false, hp: 20, hw: 0.3,  h: 1.95, speed: 0.9, flee: 2.8, village: true, variants: PROFESSIONS, drops: [] },
   iron_golem: { hostile: false, hp: 100, hw: 0.7, h: 2.7, speed: 1.4, attack: 10, village: true, golem: true, noKnock: true, drops: [["iron_ingot", 3, 5]] },
+  // horses (js/horses.js): spawned in herds by js/horses.js, not by the passive spawner, and not counted against its cap; hp is rolled per horse
+  horse:    { hostile: false, hp: 22, hw: 0.7, h: 1.6, speed: 1.6, flee: 5.5, herd: true, drops: [["leather", 0, 2]] },
 };
 const PASSIVE_TYPES = ["pig", "cow", "sheep", "chicken"];
 const HOSTILE_WEIGHTS = [["zombie", 0.33], ["skeleton", 0.25], ["creeper", 0.24], ["spider", 0.18]];
@@ -925,7 +970,8 @@ function waterAhead(m, dx, dz) {
 function pickWander(m, r) {
   if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
   if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return;   // coop chickens wander inside their run (js/poultry.js)
-  const a = Math.random() * Math.PI * 2, d = rnd(3, r);
+  if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
+  const a =Math.random() * Math.PI * 2, d = rnd(3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
   m.ai.tz = m.position.z + Math.sin(a) * d;
 }
@@ -1406,6 +1452,7 @@ function villagerAI(m, dt, out) {
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
   if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;
   if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
+  if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
   if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.ai(m, dt, out)) return;   // buys flint, sticks, feathers and string for arrows and bows (js/fletcher.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
@@ -1517,7 +1564,8 @@ function updateMob(m, dt) {
 
   // ---- AI ----
   _desired.x = 0; _desired.z = 0; _desired.faceTarget = false; _desired.faceX = null; _desired.faceZ = null;
-  if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
+  if (m.rider) { /* ridden (js/horses.js): its rider moves it */ }
+  else if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
   else if (m.type === "villager") villagerAI(m, dt, _desired);
   else if (T.golem) golemAI(m, dt, _desired);
   else if (ai.fleeT > 0) {
@@ -1529,6 +1577,7 @@ function updateMob(m, dt) {
     _desired.x = Math.cos(a) * T.flee; _desired.z = Math.sin(a) * T.flee;
     m.lookAt = null;
   } else if (m.type === "sheep" && BF.shepherd && BF.shepherd.sheepAI(m, dt, _desired)) { /* walking to a mate (js/shepherd.js) */ }
+  else if (m.type === "horse" && BF.horses && BF.horses.ai(m, dt, _desired)) { /* herd, lead, pen, mate (js/horses.js) */ }
   else if (m.type === "chicken" && BF.poultry && BF.poultry.chickenAI(m, dt, _desired)) { /* led home, following seeds, or to a mate (js/poultry.js) */ }
   else wanderAI(m, dt, _desired);
   if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
@@ -1536,7 +1585,8 @@ function updateMob(m, dt) {
   if (m.removed) return; // exploded
 
   // ---- physics ----
-  if (m.riding && BF.boats && BF.boats.seat(m)) {   // sitting in a boat (js/boats.js): the boat carries it, no walking, falling or fall damage
+  if (m.rider) {   // ridden (js/horses.js moves it every real-time frame)
+  } else if (m.riding && BF.boats && BF.boats.seat(m)) {   // sitting in a boat (js/boats.js): the boat carries it, no walking, falling or fall damage
     m.onGround = true; m.inWater = false; m.headInWater = false; m.onLadder = false; m.fallStart = m.position.y;
   } else {
   m.onLadder = m.type === "villager" && !m.inWater && onLadder(m);
@@ -1599,7 +1649,8 @@ function updateMob(m, dt) {
   // ---- orientation ----
   const hs = Math.hypot(m.vel.x, m.vel.z);
   let targetYaw = m.yaw;
-  if (_desired.faceTarget && playerAlive()) {
+  if (m.rider) targetYaw = m.yaw;
+  else if (_desired.faceTarget && playerAlive()) {
     const p = player().position;
     targetYaw = Math.atan2(p.x - m.position.x, p.z - m.position.z);
   } else if (_desired.faceX != null) targetYaw = Math.atan2(_desired.faceX - m.position.x, _desired.faceZ - m.position.z);
@@ -1609,7 +1660,8 @@ function updateMob(m, dt) {
 
   // head look
   let hy = 0, hp = 0;
-  if (m.lookAt === "player" && playerAlive()) {
+  if (m.rider) hp = -0.35;   // a ridden horse holds its head a little low, out of the rider's view
+  else if (m.lookAt === "player" && playerAlive()) {
     const p = player(), e = p.eyePos ? p.eyePos() : p.position;
     const dx = e.x - m.position.x, dz = e.z - m.position.z, dy = e.y - (m.position.y + m.height * 0.85);
     hy = wrapAngle(Math.atan2(dx, dz) - m.yaw);
@@ -1788,7 +1840,7 @@ function standable(x, y, z, hw, h) {
 }
 function countMobs() {
   let p = 0, h = 0;
-  for (const m of list) if (!m.dead && !m.def.village && !m.pen) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
+  for (const m of list) if (!m.dead && !m.def.village && !m.def.herd && !m.pen) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
   return { p, h };
 }
 function tryPassiveSpawn() {
@@ -1952,7 +2004,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "poultry_keeper");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "poultry_keeper" && p !== "stable_hand");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2183,6 +2235,8 @@ BF.mobs = {
     if (BF.breeding) BF.breeding.tick(dt);   // encounters, hearts, children (js/breeding.js)
     if (BF.storage) BF.storage.tick(dt);   // chest owners: empty chests and those of dead villagers are freed (js/storage.js)
     if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
+    if (BF.horses) BF.horses.tick(dt);   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
+    if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
     if (BF.poultry) BF.poultry.tick(dt);   // chickens growing up, laying, coop stock (js/poultry.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
@@ -2197,11 +2251,11 @@ BF.mobs = {
     despawn(dt);
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
-  raycast(origin, dir, maxDist) {
+  raycast(origin, dir, maxDist, skip) {
     let best = null;
     const mn = [0, 0, 0], mx = [0, 0, 0];
     for (const m of list) {
-      if (m.dead || m.removed) continue;
+      if (m.dead || m.removed || m === skip) continue;
       const p = m.position, hw = m.halfWidth;
       mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
       mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
@@ -2261,6 +2315,7 @@ BF.mobs = {
     if (!mob || mob.dead || mob.removed || mob.type !== "villager") return null;
     if (mob.sleeping) return "Villager is sleeping";
     if (mob.child) { mob.lookAt = "player"; mob.ai.lookT = 1.5; return "The child is too young to trade"; }
+    if (mob.profession === "stable_hand" && BF.stables) { const msg = BF.stables.playerSells(mob); if (msg) return msg; }   // the player leading a tamed horse sells it to the stable (js/stables.js)
     mob.ai.was = { mode: mob.ai.mode, flee: mob.ai.fleeT > 0 };   // what it was doing, for the trade screen's status line (js/villagerstatus.js)
     mob.lookAt = "player"; mob.ai.lookT = 3; mob.ai.mode = "idle"; mob.ai.t = 3;
     const inv = BF.inventory, I = BF.I || {};
@@ -2300,6 +2355,13 @@ BF.mobs = {
     if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
     m.halfWidth = TYPES.sheep.hw * (0.5 + 0.5 * k); m.height = TYPES.sheep.h * (0.55 + 0.45 * k);
   },
+  // js/horses.js: swaps every part to the model of another variant (coat / marking) and shows or hides one part (the saddle)
+  setLook(m, variant) {
+    if (!m || !m.meshes) return;
+    for (const p of typeParts(m.type, variant)) if (m.meshes[p.name]) { m.meshes[p.name].geometry = p.geo; m.meshes[p.name].userData.part = p; }
+    m.variant = variant;
+  },
+  showPart(m, name, on) { if (m && m.meshes && m.meshes[name]) m.meshes[name].visible = !!on; },
   // js/poultry.js: chick to adult size (k: 0 = hatched .. 1 = grown)
   setChickenSize(m, k) {
     if (!m || m.type !== "chicken") return;
@@ -2350,6 +2412,7 @@ BF.mobs = {
     if (BF.jobs) BF.jobs.reset();
     if (BF.villageSim) BF.villageSim.reset();
     if (BF.shepherd) BF.shepherd.reset();
+    if (BF.stables) BF.stables.reset();
     if (BF.poultry) BF.poultry.reset();
   },
 };

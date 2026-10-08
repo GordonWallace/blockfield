@@ -44,6 +44,7 @@ function text(m) {
     || (BF.toolsmith ? BF.toolsmith.statusText(m) : "")                        // making tools, buying materials, smelting (js/toolsmith.js)
     || (BF.fletcher ? BF.fletcher.statusText(m) : "")                          // making arrows and bows, buying materials (js/fletcher.js)
     || (BF.storage ? BF.storage.statusText(m) : "")                            // storing in / fetching from its chest (js/storage.js)
+    || (BF.stables ? BF.stables.statusText(m) : "")                            // catching, feeding and penning horses (js/stables.js)
     || routine(m);
   return cap(s);
 }

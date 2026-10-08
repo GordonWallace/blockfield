@@ -19,8 +19,10 @@ const JOBSITE = {
   farmer: "composter", librarian: "lectern", cleric: "brewing_stand", armorer: "blast_furnace", weaponsmith: "grindstone",
   toolsmith: "smithing_table", butcher: "smoker", fisherman: "barrel", shepherd: "loom", fletcher: "fletching_table",
   mason: "stonecutter", leatherworker: "cauldron", cartographer: "cartography_table", builder: "drafting_table", explorer: "survey_table", forester: "band_saw",
-  furniture_maker: "carpentry_bench", miner: "mining_bench", poultry_keeper: "nesting_box",
+  furniture_maker: "carpentry_bench", miner: "mining_bench", stable_hand: "tack_rack", poultry_keeper: "nesting_box",
 };
+// Professions with a say in who may take their block: the stable hand only in a village on horse land, one per village (js/stables.js).
+const mayTake = (m, s) => !(s && s.prof === "stable_hand" && BF.stables && !BF.stables.mayHire(m, s));
 const PROFESSION_OF = {};
 for (const p in JOBSITE) PROFESSION_OF[JOBSITE[p]] = p;
 const NO_JOB = { nitwit: 1, unemployed: 1 };
@@ -247,7 +249,7 @@ function reclaimAt(s) {
   if (!s || !BF.mobs) return;
   let best = null, bd = Infinity;
   for (const m of BF.mobs.list) {
-    if (m.type !== "villager" || m.dead || m.removed || m.jobsite || isChild(m) || !memValid(m) || m.jobMem.prof !== s.prof) continue;
+    if (m.type !== "villager" || m.dead || m.removed || m.jobsite || isChild(m) || !memValid(m) || m.jobMem.prof !== s.prof || !mayTake(m, s)) continue;
     const c = center(m);
     if (!c || Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > reachOf(m)) continue;
     const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z);
@@ -333,9 +335,9 @@ function take(m, s, prof) {
 function claim(m, opts) {
   opts = opts || {};
   if (!m || m.dead || m.removed || m.type !== "villager" || m.profession === "nitwit") return null;
-  if (opts.site) return !claimedByOther(pk(opts.site.x, opts.site.y, opts.site.z), m) ? hire(m, opts.site) : null;   // the block the villager walked to
+  if (opts.site) return !claimedByOther(pk(opts.site.x, opts.site.y, opts.site.z), m) && mayTake(m, opts.site) ? hire(m, opts.site) : null;   // the block the villager walked to
   const own = ownTrade(m);
-  const list = unclaimed(m, opts.radius || reachOf(m), m).filter(s => (!own || s.prof === own) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
+  const list = unclaimed(m, opts.radius || reachOf(m), m).filter(s => (!own || s.prof === own) && mayTake(m, s) && !(m.jobsite && s.x === m.jobsite.x && s.y === m.jobsite.y && s.z === m.jobsite.z));
   if (!list.length) return null;
   const pref = (Array.isArray(opts.prefer) ? opts.prefer.filter(Boolean) : []).concat(memValid(m) ? [m.jobMem.prof, m.jobMem.prof] : []);
   const wts = list.map(s => { let w = 1; for (const p of pref) if (p === s.prof) w *= 3; return w; });
@@ -428,7 +430,7 @@ const SEEK_AVOID = 60;            // seconds a site that could not be reached (o
 const adjacentTo = (s, x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) === 1 && Math.abs(y - s.y) <= 1;
 function pickSite(m, sk) {
   const own = ownTrade(m), mem = memValid(m) ? m.jobMem.prof : null, pref = m.jobPrefer || [], now = BF.simNow();
-  const list = unclaimed(m, reachOf(m), m).filter(s => (!own || s.prof === own) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
+  const list = unclaimed(m, reachOf(m), m).filter(s => (!own || s.prof === own) && mayTake(m, s) && !((sk.avoid[pk(s.x, s.y, s.z)] || 0) > now));
   let best = null, bd = Infinity;
   for (const s of list) {
     const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) * (s.prof === mem ? 0.3 : pref.includes(s.prof) ? 0.6 : 1) * rnd(0.9, 1.1);
@@ -486,6 +488,7 @@ function ai(m, dt, out) {
     if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(1, 3);   // something to craft: go to the table soon
     if (J.t > 3 && m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(1, 3);    // wool and boards in hand: go make beds
     if (J.t > 3 && m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.wantsJob(m)) J.t = rnd(1, 3);          // a tool to make or finish
+    if (J.t > 3 && m.profession === "stable_hand" && BF.stables && BF.stables.wantsJob(m)) J.t = rnd(1, 3);            // leather and iron or string in hand: go make tack
     if (J.t > 3 && m.profession === "fletcher" && BF.fletcher && BF.fletcher.wantsJob(m)) J.t = rnd(1, 3);            // arrows or a bow to make or finish
     if (J.t > 3 && m.profession === "shepherd" && BF.shepherd && BF.shepherd.wantsSpin(m)) J.t = rnd(1, 3);           // wool to spin into string
     if (J.t > 0) return false;
@@ -509,6 +512,7 @@ function ai(m, dt, out) {
     if (m.profession === "cartographer" && BF.cartography) BF.cartography.work(m, J, dt);   // crafts compasses and maps at its table (js/cartography.js)
     if (m.profession === "furniture_maker" && BF.furniture) BF.furniture.work(m, J, dt);   // makes beds at its carpentry bench (js/furniture.js)
     if (m.profession === "toolsmith" && BF.toolsmith) BF.toolsmith.work(m, J, dt);   // makes tools at its smithing table, 2 game hours each (js/toolsmith.js)
+    if (m.profession === "stable_hand" && BF.stables) BF.stables.work(m, J, dt);   // makes saddles and leads at its tack rack (js/stables.js)
     if (m.profession === "fletcher" && BF.fletcher) BF.fletcher.work(m, J, dt);   // makes arrows and bows at its fletching table (js/fletcher.js)
     if (m.profession === "shepherd" && BF.shepherd) BF.shepherd.work(m, J, dt);   // spins wool into string at its loom (js/shepherd.js)
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.45 };   // head down at the block

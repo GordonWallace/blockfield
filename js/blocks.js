@@ -306,6 +306,10 @@ const BLOCK_DEFS = [
   // dehydrated farmland (js/farmland.js): crops grow at a third of the speed; left bare it reverts to dirt
   { name: "farmland_dry", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#7a5a3a" },
   // ---- end farmland pack ----
+  // ---- stable pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Stables")
+  // tack rack: the stable hand villager's jobsite (not vanilla): a wooden wall rack with a saddle on its peg and a bridle hanging beside it
+  { name: "tack_rack", jobsite: "stable_hand", tiles: { top: "tack_rack_top", side: "tack_rack_side", front: "tack_rack_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#7a5232" },
+  // ---- end stable pack ----
   // ---- poultry pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Poultry keepers")
   // nesting box: the poultry keeper villager's jobsite (not vanilla): a plank box of straw with eggs in it
   { name: "nesting_box", jobsite: "poultry_keeper", tiles: { top: "nesting_box_top", side: "nesting_box_side", front: "nesting_box_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#c8a85a" },
@@ -597,6 +601,15 @@ const ITEM_DEFS = [
   // ---- boats (js/boats.js; append-only): one per wood, stack of 1 as in vanilla; the icon is the "boat" sprite in the wood's colour ----
   ...WOOD_SPECIES.map(sp => ({ name: sp + "_boat", boat: sp, stack: 1, sprite: "boat", color: WOOD_COLOR[sp], creativeTab: "tools" })),
   // ---- end boats ----
+  // ---- horses (js/horses.js; append-only) ----
+  { name: "saddle", stack: 1, color: "#6b3e1e", creativeTab: "tools" },        // 3 leather + 1 iron ingot (a Blockfield recipe: vanilla has none)
+  { name: "lead", color: "#a07a4a", creativeTab: "tools" },                     // 4 string + 1 leather (vanilla's slime ball: there are no slimes)
+  { name: "horse_spawn_egg", color: "#c09060", creativeTab: "misc", label: "Horse Spawn Egg" },   // creative: right click on the ground spawns a wild horse
+  // ---- end horses ----
+  // ---- stables (js/stables.js; append-only) ----
+  // The icon of a stable hand's "sell a horse" offer: the horse itself walks out of the paddock to the player, so this item is never held
+  { name: "tamed_horse", stack: 1, color: "#8a5a32", hidden: true, label: "Tamed Horse" },
+  // ---- end stables ----
   // ---- poultry items (js/poultry.js; append-only). Eggs are laid by chickens; a cooked egg (not vanilla) is cooked in a furnace.
   { name: "egg", stack: 16, color: "#efe2c4" },
   { name: "cooked_egg", food: 6, color: "#f4ecd8" },

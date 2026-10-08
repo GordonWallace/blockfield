@@ -349,6 +349,47 @@ if (SPRITES) SPRITES.tent = (G, m) => {
   put(G, 7, 2, pole); put(G, 8, 2, pole); put(G, 7, 1, hex("#c83a3a")); put(G, 8, 1, hex("#c83a3a"));
   for (let x = 1; x <= 14; x++) put(G, x, 13, pole);
 };
+// ---------- tack rack (stable hand, not vanilla): a dark board on oak posts; the front carries a saddle on its peg, the sides a bridle and
+// a coiled lead on hooks, the top the rack's shelf with a brush. Leather browns over spruce so it reads apart from the plank blocks. ----------
+const LEATHER = pal(["#3e200e", "#552d14", "#6b3e1e", "#80502a", "#966438"]);
+const BRASS = hex("#c8a040");
+T.tack_rack_side = p => {
+  vboards(p, SPRUCE, 8, "#1a1108");
+  band(p, 0, 2, WOOD_OAK); band(p, 29, 31, WOOD_OAK);
+  rect(p, 2, 8, 29, 9, hex("#2a1a0c"), 0.95, 0.03);                                                            // the hook rail
+  for (const x of [8, 23]) { rect(p, x, 7, x + 1, 10, (xx, y) => (y === 7 ? BRASS : mul(BRASS, 0.7)), 1, 0.02); }   // brass hooks
+  // bridle: headstall loop hanging from the left hook, a brass bit ring at the bottom
+  for (let a = 0; a < 40; a++) { const t = a / 40 * Math.PI * 2, x = Math.round(9 + Math.sin(t) * 4), y = Math.round(18 + Math.cos(t) * 7.5); if (y > 10) { p.set(x, y, jit(p, ramp(LEATHER, 0.35 + (x < 9 ? 0.25 : 0)), 0.03)); p.setH(x, y, 0.95); } }
+  circle(p, 9, 26.5, 1.8, (x, y, d) => { if (d > 0.9) { p.set(x, y, BRASS); p.setH(x, y, 1); } });
+  // lead: a coil on the right hook
+  for (let r = 3; r <= 5; r += 2) for (let a = 0; a < 36; a++) { const t = a / 36 * Math.PI * 2, x = Math.round(24 + Math.cos(t) * r), y = Math.round(16 + Math.sin(t) * (r + 1)); p.set(x, y, jit(p, hex(a % 6 < 3 ? "#a07a4a" : "#7a5a32"), 0.03)); p.setH(x, y, 0.9); }
+  p.relief(1.1);
+};
+T.tack_rack_front = p => {
+  vboards(p, SPRUCE, 8, "#1a1108");
+  band(p, 0, 2, WOOD_OAK); band(p, 29, 31, WOOD_OAK);
+  rect(p, 4, 9, 27, 11, (x, y) => ramp(WOOD_OAK, y === 9 ? 0.85 : 0.35), 1, 0.03);                              // the saddle peg (a rail)
+  // saddle: seat curving over the peg, cantle and pommel raised, skirts hanging down, stirrups on irons
+  for (let x = 5; x <= 26; x++) {
+    const u = (x - 15.5) / 10.5, top = Math.round(8 - (1 - u * u) * 2 + (Math.abs(u) > 0.8 ? -2 : 0));
+    for (let y = top; y <= 16; y++) { p.set(x, y, jit(p, ramp(LEATHER, 0.75 - (y - top) * 0.05 + (y === top ? 0.15 : 0)), 0.03)); p.setH(x, y, 1 - (y - top) * 0.03); }
+  }
+  rect(p, 7, 17, 24, 22, (x, y) => ramp(LEATHER, 0.4 - (y - 17) * 0.04 + (x === 7 || x === 24 ? -0.15 : 0)), 0.85, 0.03);   // skirt
+  for (let x = 7; x <= 24; x += 3) p.set(x, 20, hex("#2a140a"));                                                // stitching
+  for (const x of [9, 22]) {
+    rect(p, x, 23, x, 26, hex("#3e200e"), 0.8, 0.02);                                                           // stirrup leathers
+    rect(p, x - 2, 27, x + 2, 27, hex("#b0b0b8"), 1, 0.02); p.set(x - 2, 26, hex("#8e8e96")); p.set(x + 2, 26, hex("#8e8e96"));   // irons
+  }
+  p.relief(1.0);
+};
+T.tack_rack_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  frame(p, 2, "#2a1c0e", "#5e4222");
+  rect(p, 6, 13, 25, 17, (x, y) => ramp(WOOD_SPRUCE, y === 13 ? 0.8 : 0.4), 0.9, 0.03);                         // a grooming brush on the shelf
+  for (let x = 7; x <= 24; x += 2) { p.set(x, 18, hex("#c8a878")); p.set(x, 19, hex("#a88858")); }               // its bristles
+  p.relief(1.0);
+};
+
 ICON_T.grindstone = p => {
   clearTile(p);
   rect(p, 4, 14, 7, 30, (x) => ramp(DARK_OAK, x === 4 ? 0.8 : 0.4), 0.8, 0.05);

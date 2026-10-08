@@ -40,6 +40,7 @@ BF.newWorld = function (seed, opts) {
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
   if (BF.boats) BF.boats.clear();
+  if (BF.horses) BF.horses.reset();
   BF.world.reset();
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   // pick a dry spawn column near the origin
@@ -134,6 +135,7 @@ function frame(now) {
     }
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
     BF.player.update(dt);
+    if (BF.horses) BF.horses.drawLeads();   // lead ropes follow the player and the horses every frame
     W.done(done, done * plan.h, dt);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);

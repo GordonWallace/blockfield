@@ -980,12 +980,13 @@ function drawIcon(g, pat, ox, oy, pal, fromCol, toCol) {
 }
 let hudKey = "", hurtBlink = 0;
 function drawHUD() {
-  const h = Math.max(0, Math.ceil(P.health)), f = Math.max(0, Math.ceil(P.hunger));
+  const mountHud = vehicle && vehicle.ctl.hud ? vehicle.ctl.hud(vehicle) : null;   // riding a horse: its health in place of hunger
+  const h = Math.max(0, Math.ceil(P.health)), f = mountHud ? Math.max(0, Math.ceil(mountHud.hp / mountHud.max * 20)) : Math.max(0, Math.ceil(P.hunger));
   const showAir = headInWater || air < AIR_MAX - 0.01;
   const bubbles = Math.ceil(air - 0.01);
   const blink = hurtBlink > 0 && Math.floor(hurtBlink * 8) % 2 === 0;
   const vis = started && !P.dead && menuOpen !== "start" && !creative();
-  const key = h + "|" + f + "|" + (showAir ? bubbles : -1) + "|" + blink + "|" + vis;
+  const key = h + "|" + f + "|" + (showAir ? bubbles : -1) + "|" + blink + "|" + vis + "|" + !!mountHud;
   if (key === hudKey) return;
   hudKey = key;
   const g = hudCtx;
@@ -999,9 +1000,10 @@ function drawHUD() {
   }
   for (let i = 0; i < 10; i++) { // hunger, right half, filled right to left
     const x = 189 - ((i * 9.5) | 0), y = 11, v = f - i * 2;
-    drawIcon(g, FOOD, x, y, PAL_EMPTY);
-    if (v >= 2) drawIcon(g, FOOD, x, y, PAL);
-    else if (v === 1) drawIcon(g, FOOD, x, y, PAL, 4, 9);
+    const ic = mountHud ? HEART : FOOD;
+    drawIcon(g, ic, x, y, PAL_EMPTY);
+    if (v >= 2) drawIcon(g, ic, x, y, PAL);
+    else if (v === 1) drawIcon(g, ic, x, y, PAL, 4, 9);
   }
   if (showAir) for (let i = 0; i < bubbles && i < 10; i++) drawIcon(g, BUBBLE, 189 - ((i * 9.5) | 0), 1, PAL_BUB);
 }
@@ -1028,7 +1030,7 @@ function boatHit() {
   try { return BF.boats ? BF.boats.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
 }
 function mobHit() {
-  try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH) : null; } catch (_) { return null; }
+  try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
 }
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
@@ -1331,10 +1333,22 @@ function secondaryDown() {
     const r = BF.poultry.playerUse(mh.mob, selectedItem());
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
+  if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
+    const sel = selectedItem(), r = BF.horses.playerUse(mh.mob, sel, sneaking);
+    if (r) {
+      mouseR = false; swing();
+      if (r.consume) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
+      if (r.give && BF.I[r.give] != null) { const left = inv().add ? inv().add(BF.I[r.give], 1) : 1; if (left > 0 && BF.drops) BF.drops.spawn(BF.I[r.give], left, pos.x, pos.y + 1, pos.z); }
+      if (r.mount && !mount(mh.mob)) actionBar("No room to get on that horse");
+      if (r.msg) actionBar(r.msg);
+      return true;
+    }
+  }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
   if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
+  if (tb && /_fence$/.test(tb.name) && BF.horses && BF.horses.tieToPost(target.x, target.y, target.z)) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
   if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (target && BF.isFurnace(target.id) && useBlk) {
@@ -1397,6 +1411,12 @@ function secondaryDown() {
     try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing(); mouseR = false;
     placeCd = PLACE_REPEAT;
+    return true;
+  }
+  if (it.name === "horse_spawn_egg" && BF.horses && target && target.normal[1] === 1) {   // creative spawn item: a wild horse on the ground in front
+    if (!BF.horses.spawn(target.x + 0.5, target.y + 1, target.z + 0.5)) return false;
+    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    swing(); mouseR = false; placeCd = PLACE_REPEAT;
     return true;
   }
   if (it.food) { if (P.hunger < P.maxHunger) { if (eatT <= 0) eatT = 0.0001; return true; } return false; }
@@ -1594,7 +1614,7 @@ function ridePhysics(dt, k) {
   let turn = (k.has("KeyA") ? 1 : 0) - (k.has("KeyD") ? 1 : 0);
   if (stick.id != null) { fwd = -stick.y; turn = -stick.x; }
   if (eatT > 0) fwd *= 0.35;
-  rideStep(dt, { fwd, turn, strafe: -turn, jump: k.has("Space") });
+  rideStep(dt, { fwd, turn, strafe: -turn, jump: k.has("Space"), yaw });
   onGround = true; inWater = false; flying = false; sprinting = false; sneaking = false; turbo = false; fallStart = null;
   headInWater = BF.RENDER[BF.world.getBlock(pos.x, pos.y + eyeOffset, pos.z)] === 3;
   return 0;   // no head bob or walking hunger
@@ -1615,6 +1635,7 @@ function mount(v, fromSave) {
   if (!fromSave && !v.ctl.canBoard(v)) return false;
   if (vehicle) dismount();
   vehicle = v; v.rider = true; rideShift = true;
+  if (v.ctl.onMount) v.ctl.onMount(v);
   flying = false; sprinting = false; sneaking = false; turbo = false; fallStart = null; resetBreak();
   const s = v.ctl.seatOf(v, "player");
   pos.set(s.x, s.y, s.z); vel.x = vel.y = vel.z = 0;
@@ -1838,7 +1859,7 @@ P.mount = mount;                     // js/boats.js: get in a boat (right click,
 P.dismount = () => dismount();       // get off (Shift); also when the boat breaks
 P.ride = function (fwd, turn, dt, jump) {  // tests: one real-time step of what the player rides with this input; false when riding nothing
   if (!vehicle) return false;
-  rideStep(dt, { fwd, turn, strafe: -turn, jump: !!jump });
+  rideStep(dt, { fwd, turn, strafe: -turn, jump: !!jump, yaw });
   return true;
 };
 // Save-game state. deserialize() expects the world (seed) to be set up already, e.g. right after BF.newWorld.

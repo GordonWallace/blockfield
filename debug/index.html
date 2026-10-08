@@ -705,7 +705,7 @@ const STRUCT = {
   pen:     { name: "Paddock",        fill: "rgba(90,150,190,0.24)", stroke: "rgba(130,190,230,0.4)" },
   other:   { name: "Other building", fill: "rgba(150,150,165,0.26)", stroke: "rgba(200,200,215,0.3)" },
 };
-const structKind = t => /house|^big$|cottage/.test(t || "") ? "house" : /farm|garden/.test(t || "") ? "farm" : t === "pen" ? "pen" : "other";
+const structKind = t => /house|^big$|cottage/.test(t || "") ? "house" : /farm|garden/.test(t || "") ? "farm" : t === "pen" || t === "stable" ? "pen" : "other";
 function star(g, x, y, r) {
   g.beginPath();
   for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
@@ -825,7 +825,7 @@ let invSig = "";
 function renderInv() {
   const el = $("r-inv"), m = hlName && curV ? curV.villagerList.find(v => v.name === hlName) : null;
   if (!m) { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; invSig = ""; } return; }
-  const inv = m.inv || [], sig = m.name + "|" + JSON.stringify(inv) + "|" + m.em + "|" + m.emChests + "|" + m.food + "|" + m.chests + "|" + JSON.stringify(m.flock || null) + "|" + Object.keys(icons).length;
+  const inv = m.inv || [], sig = m.name + "|" + JSON.stringify(inv) + "|" + m.em + "|" + m.emChests + "|" + m.food + "|" + m.chests + "|" + JSON.stringify(m.flock || null) + "|" + JSON.stringify(m.horses || null) + "|" + Object.keys(icons).length;
   el.hidden = false;
   if (sig === invSig) return;
   invSig = sig;
@@ -844,7 +844,15 @@ function renderInv() {
     `<div>${esc(m.status || "")}</div><div>Slots used: <b>${used}</b> of ${slots.length}</div>` +
     `<div>Emeralds: <b>${fmt(m.em || 0)}</b> carried${m.chests ? `, <b>${fmt(m.emChests || 0)}</b> in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}</div>` +
     `<div>Food: <b>${fmt(m.food || 0)}</b> bread-equivalent carried${m.chests ? `, <b>${fmt(m.foodChests || 0)}</b> in chests` : ""}</div>` +
-    (m.flock ? `<div>Flock: <b>${fmt(m.flock.n)}</b> ${m.flock.kind}${m.flock.young ? ` (${fmt(m.flock.young)} young)` : ""}${m.flock.coop ? "" : `, no ${m.flock.kind === "chickens" ? "coop" : "pen"}`}${m.flock.eggs != null ? `, <b>${fmt(m.flock.eggs)}</b> egg${m.flock.eggs === 1 ? "" : "s"} in the nest` : ""}</div>` : "") + "</div>";
+    (m.flock ? `<div>Flock: <b>${fmt(m.flock.n)}</b> ${m.flock.kind}${m.flock.young ? ` (${fmt(m.flock.young)} young)` : ""}${m.flock.coop ? "" : `, no ${m.flock.kind === "chickens" ? "coop" : "pen"}`}${m.flock.eggs != null ? `, <b>${fmt(m.flock.eggs)}</b> egg${m.flock.eggs === 1 ? "" : "s"} in the nest` : ""}</div>` : "") + horsesHtml(m.horses) + "</div>";
+}
+// A stable hand's paddock horses (js/stables.js holdings): how many, then one line per horse with its stats and price.
+function horsesHtml(H) {
+  if (!H) return "";
+  if (!H.paddock) return "<div>Horses: <b>0</b> (no stable yet)</div>";
+  const rows = H.horses.map(h => `<div class="sub">${esc(h.coat)}${h.foal ? " foal" : ""}: speed ${h.speed}, jump ${h.jump}, health ${h.hp}, worth ${h.price}` +
+    `${h.led ? " (on a lead)" : h.penned ? "" : " (loose)"}${h.here ? "" : " (not loaded)"}</div>`).join("");
+  return `<div>Paddock horses: <b>${H.horses.length}</b> of 4</div>` + rows;
 }
 $("r-inv").addEventListener("click", e => { if (e.target.closest("#r-invx")) { hlName = null; if (snap && curV) drawMap(snap); markRoster(); } });
 // Villagers who died in this village, newest first (the filter box applies to them too).

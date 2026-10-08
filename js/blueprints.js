@@ -24,6 +24,7 @@ function rotId(id, k) {
   if (b.bed) return BF.bedId((b.bed.f + k) & 3, b.bed.head);
   if (b.wallTorch) return BF.B["wall_torch_" + ["north", "east", "south", "west"][(b.wallTorch.f + k) & 3]];
   if (b.ladder) return BF.ladderId((b.ladder.f + k) & 3);
+  if (b.gate) return BF.gateId(k & 1 ? (b.gate.axis === "x" ? "z" : "x") : b.gate.axis, b.gate.open, b.gate.wood);   // a quarter turn swaps the axis the gate spans
   if (b.furnaceFacing != null) return BF.furnaceId(b.furnaceFacing + k);
   if (b.chestFacing != null) return BF.chestId(b.chestFacing + k);
   return id;
@@ -52,6 +53,8 @@ function woodTable() {
 const woodOf = id => woodTable().get(id) || null;
 // The same part in another species: woodSwap(B.oak_log, "spruce") = B.spruce_log. Anything else comes back unchanged.
 function woodSwap(id, sp) {
+  const g = BF.blocks[id] && BF.blocks[id].gate;
+  if (g && sp && g.wood !== sp) { const nid = BF.gateId(g.axis, g.open, sp); return nid != null ? nid : id; }   // fence gates (the stable's paddock) follow the wood too
   const w = woodOf(id);
   if (!w || !sp || w[0] === sp) return id;
   const nid = BF.B[woodName(sp, w[1])];
@@ -149,6 +152,27 @@ const SPECS = {
       return { cells: c, beds: [], w: 5, d: 3 };
     },
   },
+  // Stable (js/stables.js): a small open-sided shelter (5x5: plank floor, four log posts, a closed back wall, plank roof) with the stable
+  // hand's tack rack against the back wall, and beside it a fenced paddock (8x7 ring, 6x5 inside) whose front holds a double fence gate
+  // (2 wide, so a horse fits through). Only in villages on horse land (builder.js pickType / findSite). `marks` name the paddock's inside
+  // corners, the gate cells and the cells in front of them, turned with the building (get).
+  stable: {
+    label: "stable", weight: "other",
+    gen(st, h, opts) {
+      const B = BF.B, c = [];
+      for (let q = 0; q < 5; q++) for (let u = 0; u < 5; u++) { c.push([u, 0, q, B.planks, PH.FLOOR], [u, 4, q, B.planks, PH.ROOF]); }
+      for (const [u, q] of [[0, 0], [4, 0], [0, 4], [4, 4]]) for (let y = 1; y <= 3; y++) c.push([u, y, q, B.oak_log, PH.WALL]);
+      for (let u = 1; u <= 3; u++) for (let y = 1; y <= 3; y++) c.push([u, y, 4, B.planks, PH.WALL]);
+      c.push([2, 1, 3, B.tack_rack, PH.LIGHT], [2, 3, 3, B.wall_torch_north, PH.LIGHT]);
+      if (opts && opts.hay) c.push([1, 1, 3, B.hay_bale, PH.LIGHT], [3, 1, 3, B.hay_bale, PH.LIGHT]);
+      const gate = BF.gateId("x", false, "oak");
+      for (let q = 0; q < 7; q++) for (let u = 5; u < 13; u++) {
+        if (!(u === 5 || u === 12 || q === 0 || q === 6)) continue;
+        c.push([u, 0, q, q === 0 && (u === 8 || u === 9) ? gate : B.oak_fence, q === 0 && (u === 8 || u === 9) ? PH.DOOR : PH.WALL]);
+      }
+      return { cells: c, beds: [], w: 13, d: 7, marks: { paddock: [[6, 1], [11, 5]], gate: [[8, 0], [9, 0]], out: [[8, -1], [9, -1]], rack: [[2, 3]] } };
+    },
+  },
 };
 const TYPE_NAMES = Object.keys(SPECS);
 
@@ -220,7 +244,10 @@ function get(type, rot, style, h, opts, wood) {
     if (bk.door && !bk.door.upper) door = { x: c.x, y: c.y, z: c.z, f: bk.door.f, outX: c.x + BF.DIRS[bk.door.f][0], outZ: c.z + BF.DIRS[bk.door.f][1] };
     if (bk.bed && !bk.bed.head) beds.push({ x: c.x, y: c.y, z: c.z, f: bk.bed.f });
   }
-  bp = { type, label: T.label, rot, style, h, opts: opts || null, wood, woody: cells.some(c => woodOf(c.id)), w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door };
+  // marks: named spots of the design ([u, q] in the local frame, js/stables.js reads the paddock's), in the same rotated, min-corner frame as the cells
+  const marks = {};
+  for (const k in spec.marks || {}) marks[k] = spec.marks[k].map(([u, q]) => { const [x, z] = rot90(u, q, rot); return [x - minX, z - minZ]; });
+  bp = { type, label: T.label, rot, style, h, opts: opts || null, wood, woody: cells.some(c => woodOf(c.id)), w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door, marks };
   cache.set(ck, bp);
   return bp;
 }
