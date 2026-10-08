@@ -46,6 +46,7 @@
   {"name": "miner-actions", "file": "test/miner-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "dead-villagers", "file": "test/dead-villagers.js", "kind": "actions", "tier": "baseline"},
   {"name": "shepherd-misc", "file": "test/shepherd-misc.js", "kind": "actions", "tier": "integration"},
+  {"name": "toolsmith-actions", "file": "test/toolsmith-actions.js", "kind": "actions", "tier": "integration", "timeout": 900},
   {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"}
  ]
 }

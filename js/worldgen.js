@@ -1353,7 +1353,7 @@ function drawShell(b, P, S, style) {
       }
       flatRoof(P, 0, 0, w, d, y + 4, flat ? S.roof : B.planks, flat ? 0 : S.corner);
       door(); P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass);
-      P(1, y + 1, d - 2, B.furnace); P(2, y + 1, d - 2, B.furnace); P(w - 2, y + 1, d - 2, B.chest); P(w - 2, y + 1, d - 3, B.crafting_table);
+      P(1, y + 1, d - 2, BF.furnaceId(out)); P(2, y + 1, d - 2, BF.furnaceId(out)); P(w - 2, y + 1, d - 3, BF.chestId(out)); P(w - 2, y + 1, d - 2, B.crafting_table);   // chest in front of the table, so its lid is clear
       P(1, y + 1, 1, B.lantern);
       return;
     }
@@ -1383,7 +1383,7 @@ function drawShell(b, P, S, style) {
       windows(P, 0, 0, w, d, y + 2, false); windows(P, 0, 0, w, d, y + 3, false);
       if (flat) flatRoof(P, 0, 0, w, d, y + 6, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 5, S.wall, S.roof);
       door();
-      for (let u = 1; u < w - 1; u++) { P(u, y + 1, d - 2, u % 2 ? B.chest : S.wall); P(u, y + 2, d - 2, S.wall); }   // shelves
+      for (let u = 1; u < w - 1; u++) { P(u, y + 1, d - 2, u % 2 ? BF.chestId(out) : S.wall); P(u, y + 2, d - 2, S.wall); }   // shelves
       P(1, y + 1, 1, B.crafting_table); P(w - 2, y + 1, 1, B.lantern);
       return;
     }
@@ -1411,7 +1411,7 @@ function drawShell(b, P, S, style) {
       for (let k = 1; k <= 5; k++) P(lu, y + k, d - 2, BF.ladderId(out));   // against the back wall, one rung above the upper floor to step off
       if (flat) flatRoof(P, 0, 0, w, d, y + 8, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 7, S.wall, S.roof);
       door();
-      P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, B.chest);
+      P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, BF.chestId(out));
       return;
     }
     default: {
@@ -1422,7 +1422,7 @@ function drawShell(b, P, S, style) {
       if (flat) flatRoof(P, 0, 0, w, d, y + Hh + 1, S.roof, 0); else roof(P, S, 0, 0, w, d, y + Hh, S.wall, S.roof);
       door();
       if (b.type === "big" || b.h < 0.6) P(1, y + 1, d - 2, B.crafting_table);
-      if (b.type === "big") { P(w - 2, y + 1, d - 2, B.chest); P(w - 2, y + 1, 1, B.lantern); }
+      if (b.type === "big") { P(w - 2, y + 1, d - 2, BF.chestId(out)); P(w - 2, y + 1, 1, B.lantern); }
     }
   }
 }
