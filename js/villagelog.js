@@ -214,6 +214,7 @@ BF.vlog = {
   },
   update(dt, on) {
     hook();
+    if (BF.vstats) BF.vstats.update();
     if (BF.econ) BF.econ.update();
     updateLabels(on);
     if (!panelEl) panelEl = document.getElementById("vlog");
