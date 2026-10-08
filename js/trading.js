@@ -27,7 +27,7 @@ const VALUE = {
   raw_porkchop: .08, raw_beef: .08, raw_mutton: .07, raw_chicken: .06, cooked_porkchop: .12, steak: .12, cooked_mutton: .1,
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
-  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
+  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6, bucket: 1.6,   // shears: 3 iron ingots
   golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
@@ -85,7 +85,7 @@ const TRADES = {
     ["9 coal > 1 emerald", "40 cobblestone > 1 emerald",
       "1 emerald > 1 wooden_pickaxe", "1 emerald > 1 wooden_axe", "1 emerald > 1 wooden_hoe",
       "1 emerald > 1 stone_pickaxe", "1 emerald > 1 stone_axe", "1 emerald > 1 stone_hoe",
-      "2 emerald > 1 iron_pickaxe", "2 emerald > 1 iron_axe", "2 emerald > 1 iron_hoe", "2 emerald > 1 shears",
+      "2 emerald > 1 iron_pickaxe", "2 emerald > 1 iron_axe", "2 emerald > 1 iron_hoe", "2 emerald > 1 shears", "2 emerald > 1 bucket",
       "4 emerald > 1 golden_pickaxe", "4 emerald > 1 golden_axe", "3 emerald > 1 golden_hoe",
       "13 emerald > 1 diamond_pickaxe", "13 emerald > 1 diamond_axe", "9 emerald > 1 diamond_hoe"],
     ["5 iron_ingot > 2 emerald", "32 stick > 1 emerald"],
@@ -288,9 +288,9 @@ function profile(prof) {
 // ---------------------------------------------------------------- stock and restock
 // Starting tools (Gordon's 1.1 list): villagers alive when their village is generated start with a rudimentary tool of their trade. Whoever takes
 // up one of these trades later gets no tools, only the emeralds to buy them (hireKit). These four never start with any other tool among their wares.
-const STARTER_TOOLS = { farmer: ["wooden_hoe"], forester: ["wooden_axe"], miner: ["wooden_pickaxe"], shepherd: ["shears"] };
+const STARTER_TOOLS = { farmer: ["wooden_hoe", "bucket"], forester: ["wooden_axe"], miner: ["wooden_pickaxe"], shepherd: ["shears"] };
 // What a newly hired villager of these trades must buy to start work (any one of each group), and what else it is given.
-const HIRE_NEEDS = { farmer: [/_hoe$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/] };
+const HIRE_NEEDS = { farmer: [/_hoe$/, /^(water_)?bucket$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/] };
 const isToolItem = id => { const it = BF.items[id]; return !!(it && ((it.tool && typeof it.tool === "object") || it.name === "shears")); };   // blocks carry tool: "axe" etc. (the tool that mines them)
 function stockFor(prof, v) {
   if (prof === "builder" && BF.builder && BF.builder.startStock) return BF.builder.startStock(v);   // materials for the first house, see js/builder.js

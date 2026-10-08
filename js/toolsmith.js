@@ -1,7 +1,7 @@
 // Toolsmiths (BF.toolsmith): the toolsmith makes the tools it sells from materials it buys from the other villagers of its village.
 // Nothing appears from the daily restock any more (trading.js PRODUCE).
-// - Tools: wooden, stone, iron, golden and diamond pickaxes, axes and hoes, and shears, with the vanilla recipes (3 head + 2 sticks for a
-//   pickaxe or an axe, 2 + 2 for a hoe, 2 iron ingots for shears). Head material: any planks, cobblestone (or cobbled deepslate), iron
+// - Tools: wooden, stone, iron, golden and diamond pickaxes, axes and hoes, shears and buckets, with the vanilla recipes (3 head + 2 sticks for a
+//   pickaxe or an axe, 2 + 2 for a hoe, 2 iron ingots for shears, 3 for a bucket: the farmers' water). Head material: any planks, cobblestone (or cobbled deepslate), iron
 //   ingots, gold ingots, diamonds. A tool whose item does not exist (golden tools before they were added) is skipped.
 // - What to make: the category (pickaxe, axe, hoe, shears) it holds fewest of, so the stock stays even: it makes a tool while it holds fewer
 //   than TOOL_CAP of that category in that material or better (so 2 wooden pickaxes do not stop a stone one), never past TOOL_MAX. Shears come
@@ -36,10 +36,10 @@ const CRAFT_SECS = () => dayLen() * CRAFT_HOURS / 24;
 const TOOL_CAP = 2;                            // it makes a tool while it holds fewer than this many of that category in that material or better
 const TOOL_MAX = 4;                            // and never holds more than this many of one category (lesser ones wait to be sold)
 const WAIT_BETTER = 0.25;                      // days it waits for a better material that is sold here but not right now before making a lesser tool
-const CATS = ["pickaxe", "axe", "hoe", "shears"];
+const CATS = ["pickaxe", "axe", "hoe", "shears", "bucket"];   // a bucket is no tool, but it is made the same way (3 iron ingots) and kept in stock like one
 const CALIBER = ["diamond", "iron", "stone", "gold", "wood"];   // best first, as BF.toolWear ranks them (tier, then speed): gold between wood and stone
 const PREFIX = { wood: "wooden", stone: "stone", iron: "iron", gold: "golden", diamond: "diamond" };
-const HEAD = { pickaxe: 3, axe: 3, hoe: 2, shears: 2 }, STICKS = { pickaxe: 2, axe: 2, hoe: 2, shears: 0 };
+const HEAD = { pickaxe: 3, axe: 3, hoe: 2, shears: 2, bucket: 3 }, STICKS = { pickaxe: 2, axe: 2, hoe: 2, shears: 0, bucket: 0 };
 const SHEARS_IRON = 2;                         // iron kept back for shears while it has none
 const RESERVE = 2;                             // emeralds it keeps after buying gold or diamonds
 const WORK_END = 0.45, TRADE_PAUSE = 1.6, FURNACE_SPAN = 6;
@@ -67,8 +67,9 @@ const isCoal = id => id === I("coal") || id === I("charcoal");
 const isFuel = id => isCoal(id) || isLog(id) || isPlanks(id);
 const fuelWorth = id => (isCoal(id) ? PER_COAL : isLog(id) || isPlanks(id) ? PER_WOOD : 0);
 const isStick = id => id === I("stick");
-const catOf = id => { const it = BF.items[id]; if (!it || !it.tool) return null; return CATS.includes(it.tool.type) ? it.tool.type : null; };
-const toolId = (cat, mat) => I(cat === "shears" ? "shears" : PREFIX[mat] + "_" + cat);
+const IRON_ONLY = c => c === "shears" || c === "bucket";
+const catOf = id => { const it = BF.items[id]; if (it && it.name === "bucket") return "bucket"; if (!it || !it.tool) return null; return CATS.includes(it.tool.type) ? it.tool.type : null; };
+const toolId = (cat, mat) => I(IRON_ONLY(cat) ? cat : PREFIX[mat] + "_" + cat);
 const sum = (m, f) => { let n = 0; for (const s of m.inv) if (s && f(s.id)) n += s.count; return n; };
 const count = (m, id) => TR().inv.count(m.inv, id);
 const ems = m => count(m, I("emerald"));
@@ -137,9 +138,9 @@ const hasFurnace = m => furnacesFor(m).length > 0 || count(m, BF.B.furnace) > 0;
 
 // ---------------------------------------------------------------- what to make
 // Tools of cat it holds that are mat or better (CALIBER order).
-const stockAtLeast = (m, cat, mat) => { let n = 0; const top = CALIBER.indexOf(mat); for (const st of m.inv) { if (!st || catOf(st.id) !== cat) continue; const nm = nameOf(st.id), k = CALIBER.findIndex(x => cat === "shears" || nm.startsWith(PREFIX[x] + "_")); if (k >= 0 && k <= top) n += st.count; } return n; };
-const stockOf = m => { const s = { pickaxe: 0, axe: 0, hoe: 0, shears: 0 }; for (const st of m.inv) { const c = st && catOf(st.id); if (c) s[c] += st.count; } return s; };
-const matsFor = cat => (cat === "shears" ? ["iron"] : CALIBER).filter(mat => toolId(cat, mat) != null);
+const stockAtLeast = (m, cat, mat) => { let n = 0; const top = CALIBER.indexOf(mat); for (const st of m.inv) { if (!st || catOf(st.id) !== cat) continue; const nm = nameOf(st.id), k = CALIBER.findIndex(x => IRON_ONLY(cat) || nm.startsWith(PREFIX[x] + "_")); if (k >= 0 && k <= top) n += st.count; } return n; };
+const stockOf = m => { const s = { pickaxe: 0, axe: 0, hoe: 0, shears: 0, bucket: 0 }; for (const st of m.inv) { const c = st && catOf(st.id); if (c) s[c] += st.count; } return s; };
+const matsFor = cat => (IRON_ONLY(cat) ? ["iron"] : CALIBER).filter(mat => toolId(cat, mat) != null);
 // Head material in hand for mat (iron / gold: ingots, plus ore it could smelt when allowed).
 function headInHand(m, mat, withRaw) { return sum(m, MAT[mat]) + (withRaw && RAW[mat] ? sum(m, RAW[mat]) : 0); }
 // Sticks in hand, counting what its spare planks would make (2 planks -> 4 sticks), leaving `keepPlanks` planks.

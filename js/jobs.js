@@ -135,9 +135,8 @@ function jobList(v) {
   let n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
   const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
-  const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer always gets its composter too
-  const farmer = core && needy.find(sl => sl.prof === "farmer");
-  if (farmer) special.push(farmer);
+  const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer and toolsmith always get their blocks too
+  for (const p of core ? ["farmer", "toolsmith"] : []) { const sl = needy.find(x => x.prof === p); if (sl && !special.includes(sl)) special.push(sl); }
   const rest = needy.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
   if (core) n = Math.max(n, special.length);
@@ -354,7 +353,7 @@ function hire(m, s) {
     } catch (e) { console.error(e); }
   }
   m.jobStocked = true;
-  if (BF.villageLife && BF.villageLife.ensureKit) BF.villageLife.ensureKit(m);   // a new farmer / builder gets its empty bucket
+  if (BF.villageLife && BF.villageLife.ensureKit) BF.villageLife.ensureKit(m);   // a new builder gets its empty bucket
   if (BF.emit) BF.emit("villagerHired", m, s.prof);
   return s.prof;
 }

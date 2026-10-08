@@ -229,11 +229,10 @@ function ids() {
 const cnt = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
 const hasHoe = m => BF.toolWear.has(m, "hoe");   // any hoe, gold included (js/toolwear.js)
 const isLogBlock = id => { const b = BF.blocks[id]; return !!b && /_log$/.test(b.name) && !/^stripped_/.test(b.name); };
-// A new farmer or builder gets an empty bucket: water is only ever placed from a bucket that was filled first. Nobody sells buckets, so a farmer
-// hired after its village was generated gets one too. The farmer's hoe is not part of this: a founding farmer starts with a wooden one
-// (trading.js stockFor), any other buys one (toolAI below).
+// A new builder gets an empty bucket: water is only ever placed from a bucket that was filled first. Farmers are not part of this: a founding
+// farmer starts with a wooden hoe and an empty bucket (trading.js stockFor), any other buys them from the toolsmith (toolAI below).
 function ensureKit(m) {
-  if (!m || !Array.isArray(m.inv) || (m.profession !== "farmer" && m.profession !== "builder") || m.kitFor === m.profession) return;
+  if (!m || !Array.isArray(m.inv) || m.profession !== "builder" || m.kitFor === m.profession) return;
   m.kitFor = m.profession;
   const c = ids(), Tinv = TR().inv;
   if (c.bucket != null && cnt(m, c.bucket) + cnt(m, c.wbucket) === 0) Tinv.add(m.inv, c.bucket, 1);
@@ -1207,15 +1206,14 @@ function doFoodDeal(m, deal) {
   }
   return done;
 }
-// ---------------------------------------------------------------- tools: a farmer without a hoe, a shepherd without shears
+// ---------------------------------------------------------------- tools: a farmer without a hoe or a bucket, a shepherd without shears
 // They buy one from whoever in the village sells it (the toolsmith, as a rule) at that villager's own offer: the best tool they can pay for,
 // the nearer seller when two are as good. A villager hired after its village was generated starts with only the emeralds for it (trading.js hireKit).
-const TOOL_NEED = { farmer: /_hoe$/, shepherd: /^shears$/ };
+const TOOL_NEED = { farmer: [/_hoe$/, /^(water_)?bucket$/], shepherd: [/^shears$/] };
 function toolNeed(m) {
-  const re = TOOL_NEED[m.profession];
-  if (!re || m.child) return null;
-  for (const s of m.inv) if (s && re.test(BF.items[s.id].name)) return null;
-  return re;
+  if (!TOOL_NEED[m.profession] || m.child) return null;
+  const miss = TOOL_NEED[m.profession].filter(re => !m.inv.some(s => s && re.test(BF.items[s.id].name)));
+  return miss.length ? new RegExp(miss.map(re => "(" + re.source + ")").join("|")) : null;   // any of what it lacks
 }
 function findToolSeller(m, re) {
   const R = m.village, T = TR(), now = dayNow(), avoid = (m.fshop && m.fshop.avoid) || {};

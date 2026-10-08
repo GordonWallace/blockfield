@@ -25,10 +25,10 @@ module.exports = async (pg) => {
         const ro = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0 });
         minPop = Math.min(minPop, v.pop);
         const has = p => ro.some(sl => sl.prof === p);
-        if (has("miner") && has("farmer") && has("forester")) core++; else bad.push([seed, key, v.pop, ro.map(sl => sl.prof).join(" ")]);
+        if (has("miner") && has("farmer") && has("forester") && has("toolsmith")) core++; else bad.push([seed, key, v.pop, ro.map(sl => sl.prof).join(" ")]);
         if (ro.length !== v.pop) bad.push([seed, key, "roster", ro.length, "pop", v.pop]);
         const plan = BF.jobs.planVillage(v), slotOf = p => ro.filter(sl => sl.prof === p).map(sl => sl.idx);
-        if (["miner", "farmer", "forester"].every(p => plan.some(j => slotOf(p).includes(j.slot) && j.prof === p))) planned++;
+        if (["miner", "farmer", "forester", "toolsmith"].every(p => plan.some(j => slotOf(p).includes(j.slot) && j.prof === p))) planned++;
         if (v.style === 1) {
           deserts++;
           const g = v.buildings.find(b => b.type === "garden");
@@ -38,12 +38,12 @@ module.exports = async (pg) => {
       }
     }
     ok("sampled villages", villages > 30, villages);
-    ok("every village has 3+ villagers", minPop >= 3, minPop);
-    ok("every village has a miner, a farmer and a forester", core === villages, { core, villages, bad: bad.slice(0, 4) });
-    ok("each of the three has its jobsite planned", planned === villages, { planned, villages });
+    ok("every village has 4+ villagers", minPop >= 4, minPop);
+    ok("every village has a miner, a farmer, a forester and a toolsmith", core === villages, { core, villages, bad: bad.slice(0, 4) });
+    ok("each of the four has its jobsite planned", planned === villages, { planned, villages });
     ok("every desert village has a garden", deserts > 0 && gardens === deserts, { deserts, gardens });
-    const tiny = BF.mobs.roster({ key: "9999,9999", houses: [{ type: "house", beds: [{}] }, { type: "house", beds: [{}] }, { type: "house", beds: [{}] }], nb: 7, pop: 3 }).map(s => s.prof).sort();
-    ok("a 3-villager village is exactly miner, farmer, forester", tiny.join() === "farmer,forester,miner", tiny);
+    const tiny = BF.mobs.roster({ key: "9999,9999", houses: [1, 2, 3, 4].map(() => ({ type: "house", beds: [{}] })), nb: 7, pop: 4 }).map(s => s.prof).sort();
+    ok("a 4-villager village is exactly miner, farmer, forester, toolsmith", tiny.join() === "farmer,forester,miner,toolsmith", tiny);
 
     // ---- founding kits
     const kit = p => T.stockFor(p, {});
@@ -52,9 +52,18 @@ module.exports = async (pg) => {
     const mi = kit("miner"), fa = kit("farmer"), fo = kit("forester"), sh = kit("shepherd");
     ok("founding miner: wooden pickaxe only", tools(mi).join() === "wooden_pickaxe", names(mi));
     ok("founding miner: 30-40 torches", cnt(mi, "torch") >= 30 && cnt(mi, "torch") <= 40, cnt(mi, "torch"));
-    ok("founding farmer: wooden hoe only", tools(fa).join() === "wooden_hoe", tools(fa));
+    ok("founding farmer: wooden hoe only, and a bucket", tools(fa).join() === "wooden_hoe" && cnt(fa, "bucket") === 1, names(fa));
     ok("founding forester: wooden axe only", tools(fo).join() === "wooden_axe", names(fo));
     ok("founding shepherd: one pair of shears and wheat", tools(sh).join() === "shears" && cnt(sh, "wheat_item") >= 8, names(sh));
+
+    // ---- the toolsmith makes buckets: with only iron for one and a full stock of everything else, it makes a bucket
+    if (BF.toolsmith && BF.toolsmith.CATS.includes("bucket")) {
+      const m = { inv: T.inv.create(), profession: "toolsmith", position: { x: 0, y: 0, z: 0, distanceTo: () => 0 }, village: null };
+      for (const n of ["iron_pickaxe", "iron_axe", "iron_hoe", "shears"]) T.inv.add(m.inv, I[n], 2);
+      T.inv.add(m.inv, I.iron_ingot, 3);
+      const p = BF.toolsmith.plan(m);
+      ok("toolsmith plans a bucket from 3 iron ingots", !!p && p.cat === "bucket" && p.ready, p);
+    } else ok("toolsmith knows buckets", false);
 
     // ---- later hires: emeralds (and a miner's torches), nothing else
     for (const p of ["miner", "farmer", "forester", "shepherd"]) {
@@ -97,7 +106,7 @@ module.exports = async (pg) => {
       }
     } else ok("seed 1 has a desert village to visit", false);
 
-    // ---- a farmer with no hoe buys one from the toolsmith
+    // ---- a farmer with no hoe and no bucket buys both from the toolsmith
     BF.newWorld(1, { gen: 3, gameMode: "survival" });
     BF.mobs.spawning = false;
     const V = BF.worldgen.nearestVillage(0, 0), vkey = Math.round(V.x) + "," + Math.round(V.z);
@@ -109,22 +118,24 @@ module.exports = async (pg) => {
     const fm = vs.find(m => m.profession === "farmer" && m.jobsite);
     ok("village farmer found", !!fm);
     if (fm) {
-      // the village's toolsmith, or (seed 1's spawn village has none) another working villager given the toolsmith's hoe offer
+      // the village's toolsmith, or (in case it has none) another working villager given the toolsmith's hoe and bucket offers
       let ts = vs.find(m => m.profession === "toolsmith" && m.jobsite);
       if (!ts) {
         ts = vs.find(m => m !== fm && m.jobsite && m.profession !== "farmer");
         BF.inventory.ensureTrades(ts);
-        ts.trades.push(BF.trades.offers("toolsmith", 1).find(o => o.sell.id === I.iron_hoe));
+        for (const id of [I.iron_hoe, I.bucket]) ts.trades.push(BF.trades.offers("toolsmith", 1).find(o => o.sell.id === id));
       }
       BF.inventory.ensureTrades(ts);
       if (T.inv.count(ts.inv, I.iron_hoe) < 1) T.inv.add(ts.inv, I.iron_hoe, 1);
-      fm.inv = fm.inv.map(s => s && /_hoe$/.test(BF.items[s.id].name) ? null : s);
-      if (T.inv.count(fm.inv, I.emerald) < 3) T.inv.add(fm.inv, I.emerald, 3);
-      ok("farmer without a hoe wants one", !!BF.villageLife.toolNeed(fm));
+      if (T.inv.count(ts.inv, I.bucket) < 1) T.inv.add(ts.inv, I.bucket, 1);
+      fm.inv = fm.inv.map(s => s && /(_hoe|bucket)$/.test(BF.items[s.id].name) ? null : s);
+      if (T.inv.count(fm.inv, I.emerald) < 5) T.inv.add(fm.inv, I.emerald, 5);
+      ok("farmer without a hoe or bucket wants one", !!BF.villageLife.toolNeed(fm));
       ok("toolsmith is a seller", !!BF.villageLife.findToolSeller(fm, BF.villageLife.toolNeed(fm)));
       const t0 = BF.sky.time;
       for (let k = 0; k < 240 && BF.villageLife.toolNeed(fm); k++) run(0.5);
       const hoe = fm.inv.find(s => s && /_hoe$/.test(BF.items[s.id].name));
+      ok("farmer bought a bucket too", T.inv.count(fm.inv, I.bucket) + T.inv.count(fm.inv, I.water_bucket) > 0, names(fm.inv));
       ok("farmer bought a hoe", !!hoe, hoe ? BF.items[hoe.id].name : { prof: fm.profession, need: !!BF.villageLife.toolNeed(fm), inv: names(fm.inv), shop: fm.fshop && { stage: fm.fshop.stage, cd: fm.fshop.cd, checkT: fm.fshop.checkT, avoid: fm.fshop.avoid }, now: BF.sky.day + BF.sky.time, mode: fm.ai && fm.ai.mode, st: fm.st || null, ts: { prof: ts.profession, d: ts.position.distanceTo(fm.position), sleeping: ts.sleeping, hoes: T.inv.count(ts.inv, I.iron_hoe), offers: (ts.trades || []).map(o => BF.items[o.sell.id].name) }, log: BF.villageLife.log.slice(-5) });
       R.lines.push("INFO bought after " + ((BF.sky.time - t0) * 20).toFixed(1) + " game minutes");
     }
