@@ -593,6 +593,11 @@ const ITEM_DEFS = [
   // ---- boats (js/boats.js; append-only): one per wood, stack of 1 as in vanilla; the icon is the "boat" sprite in the wood's colour ----
   ...WOOD_SPECIES.map(sp => ({ name: sp + "_boat", boat: sp, stack: 1, sprite: "boat", color: WOOD_COLOR[sp], creativeTab: "tools" })),
   // ---- end boats ----
+  // ---- horses (js/horses.js; append-only) ----
+  { name: "saddle", stack: 1, color: "#6b3e1e", creativeTab: "tools" },        // 3 leather + 1 iron ingot (a Blockfield recipe: vanilla has none)
+  { name: "lead", color: "#a07a4a", creativeTab: "tools" },                     // 4 string + 1 leather (vanilla's slime ball: there are no slimes)
+  { name: "horse_spawn_egg", color: "#c09060", creativeTab: "misc", label: "Horse Spawn Egg" },   // creative: right click on the ground spawns a wild horse
+  // ---- end horses ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

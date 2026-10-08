@@ -67,6 +67,7 @@ function snapshot() {
     maps: BF.maps && BF.maps.serialize ? BF.maps.serialize() : undefined, // explored pixels of filled maps (js/maps.js)
     drops: BF.drops && BF.drops.serialize ? BF.drops.serialize() : undefined, // dropped items lying in the world, with their age (js/drops.js)
     boats: BF.boats ? BF.boats.serialize() : undefined, // placed boats, the player's included, with any mob passenger (js/boats.js)
+    horses: BF.horses ? BF.horses.serialize() : undefined, // every horse, wild or tamed, with its stats, saddle, owner and lead (js/horses.js)
     farmland: BF.farmland ? BF.farmland.serialize() : undefined, // farmland hydration clocks + last rain (js/farmland.js)
     edits,
   };
@@ -98,6 +99,7 @@ function restore(data) {
   if (BF.signs && BF.signs.deserialize) BF.signs.deserialize(data.signs); // sign texts + auto-sign state (old saves: none)
   if (BF.drops && BF.drops.deserialize) BF.drops.deserialize(data.drops); // dropped items (old saves: none)
   if (BF.boats) BF.boats.deserialize(data.boats); // boats, after the player: one saved with the player aboard puts them back in it (old saves: none)
+  if (BF.horses) BF.horses.deserialize(data.horses); // horses come back when the player is near their chunk (old saves: none)
   if (BF.farmland) BF.farmland.deserialize(data.farmland); // farmland clocks (old saves: each block's clock starts when first seen)
 }
 
