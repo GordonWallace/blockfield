@@ -11,19 +11,27 @@ module.exports = async (pg) => {
     const mk = (prof, level = 1) => { const v = { type: "villager", profession: prof, level, xp: 0, inv: inv.create(), position: BF.player.position.clone() }; v.trades = []; for (let l = 1; l <= level; l++) v.trades.push(...T.offers(prof, l)); return v; };
     const spare = (v, id) => v.trades.find(o => o.spare && o.sell.id === id);
     // ---- spare goods: inventory minus reserve, at the cheapest seller's price, after the job offers
-    const mason = mk("mason"); inv.add(mason.inv, em, 5); inv.add(mason.inv, I.cobblestone, 64); inv.add(mason.inv, I.bone, 10);
+    const mason = mk("mason"); inv.add(mason.inv, em, 5); inv.add(mason.inv, I.cobblestone, 64); inv.add(mason.inv, I.bone, 5);
     M.sync(mason);
     const cob = spare(mason, I.cobblestone);
     ok(`spare cobblestone at the miner's price: ${cob && cob.buy[0].n} emerald > ${cob && cob.sell.n}`, cob && cob.buy[0].n === 1 && cob.sell.n === 32 && M.spareOf(mason, I.cobblestone) === 64);
-    ok("10 bones: short of one batch (12 an emerald, VALUE + 5%)", !spare(mason, I.bone));
-    inv.add(mason.inv, I.bone, 2); M.sync(mason);
-    ok("12 bones: offered", spare(mason, I.bone) && spare(mason, I.bone).sell.n === 12 && spare(mason, I.bone).buy[0].n === 1);
+    ok("5 bones: under half an emerald's worth, not offered", !spare(mason, I.bone));
+    inv.add(mason.inv, I.bone, 5); M.sync(mason);
+    ok("10 bones: a small lot for 1 emerald", spare(mason, I.bone) && spare(mason, I.bone).sell.n === 10 && spare(mason, I.bone).buy[0].n === 1);
+    inv.add(mason.inv, I.bone, 10); M.sync(mason);
+    ok("20 bones: a full batch of 12 (VALUE + 5%)", spare(mason, I.bone) && spare(mason, I.bone).sell.n === 12 && spare(mason, I.bone).buy[0].n === 1);
     ok("job offers first, then spare goods", mason.trades.findIndex(o => o.spare) > mason.trades.findIndex(o => !o.spare) && mason.trades.slice(mason.trades.findIndex(o => o.spare)).every(o => o.spare || o.need || o.feed));
     ok("no spare offer for what its job sells (bricks)", (inv.add(mason.inv, I.brick, 30), M.sync(mason), !spare(mason, I.brick)));
     ok("no spare emeralds", !spare(mason, em));
     const keep = mason.trades.filter(o => o.spare).length;
     M.sync(mason);
     ok("sync keeps the same offers", mason.trades.filter(o => o.spare).length === keep && spare(mason, I.cobblestone) === cob);
+    // a job ware below its job batch: a small spare lot (a butcher with 5 steak, its offer sells 8)
+    const bu = mk("butcher", 3); inv.add(bu.inv, I.steak, 5); inv.add(bu.inv, I.bread, 7); M.sync(bu);
+    const st = spare(bu, I.steak);
+    ok("job ware below its batch: small spare lot " + (st && st.sell.n), st && st.sell.n === 5 && st.buy[0].n === 1);
+    inv.add(bu.inv, I.steak, 8); M.sync(bu);
+    ok("enough for the job offer: no spare lot", !spare(bu, I.steak));
     // ---- crafter reserve: the furniture maker keeps wool and planks for its next 2 beds
     const fm = mk("furniture_maker"); inv.add(fm.inv, em, 5); inv.add(fm.inv, I.white_wool, 6); inv.add(fm.inv, I.planks, 8); inv.add(fm.inv, I.bone, 4);
     M.sync(fm);
