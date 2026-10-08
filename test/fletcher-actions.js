@@ -155,7 +155,18 @@ module.exports = async (pg, out) => {
     if (!shp || others.length < 4) { ok("village has a shepherd and 4 other villagers", false, R.info.village); return R; }
     const Fl = vs.find(v => v.profession === "fletcher") || others.pop(), [Mn, Fo, Pk] = others;   // the village's own fletcher when it has one (the only one)
     if (Fl.profession !== "fletcher" || !Fl.jobsite) {   // no fletcher here: one takes up a new fletching table
-      const W = BF.world, tx = Math.floor(Fl.position.x) + 2, tz = Math.floor(Fl.position.z), ty = W.heightAt(tx, tz) + 1;
+      // the nearest spot it can walk up to (not on a fence, a roof or inside a pen)
+      const W = BF.world, N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(Fl);
+      let tx = Math.floor(Fl.position.x) + 2, tz = Math.floor(Fl.position.z), ty = W.heightAt(tx, tz) + 1;
+      const spots = [];
+      for (let dx = -6; dx <= 6; dx++) for (let dz = -6; dz <= 6; dz++) if (Math.abs(dx) + Math.abs(dz) >= 2) spots.push([fx + dx, fz + dz]);
+      spots.sort((a, b) => Math.hypot(a[0] - fx, a[1] - fz) - Math.hypot(b[0] - fx, b[1] - fz));
+      for (const [x, z] of spots) {
+        const y = W.heightAt(x, z) + 1, below = BF.blocks[W.getBlock(x, y - 1, z)];
+        if (!below || !BF.SOLID[W.getBlock(x, y - 1, z)] || /fence|wall|slab|stairs|leaves/.test(below.name) || W.getBlock(x, y, z) || W.getBlock(x, y + 1, z)) continue;
+        const path = N.findPath(fx, fy, fz, { x, z, at: (a, b, c) => Math.abs(a - x) + Math.abs(c - z) === 1 && Math.abs(b - y) <= 1 }, 2500);
+        if (path && path.length) { tx = x; ty = y; tz = z; break; }
+      }
       W.setBlock(tx, ty, tz, BF.B.fletching_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.fletching_table);
       BF.mobs.setProfession(Fl, "fletcher");
       R.info.claim = BF.jobs.claim(Fl, { site: { x: tx, y: ty, z: tz, id: BF.B.fletching_table, prof: "fletcher" } });

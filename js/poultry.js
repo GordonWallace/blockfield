@@ -150,6 +150,12 @@ function chickenAI(m, dt, out) {
       while (ci < k0 + tr.length - 1 && Math.hypot(tr[ci - k0][0] - m.position.x, tr[ci - k0][2] - m.position.z) < 0.7) ci++;
       m.crumb = ci;
       const dk = Math.hypot(L.position.x - m.position.x, L.position.z - m.position.z);
+      if (S.stage === "pen") {   // the keeper waits outside with the gate open: in through the gate, then to the middle of the run (as js/stables.js)
+        const C = tk.coop, [gx, gz] = C.gate, inG = Math.abs(m.position.x - gx - 0.5) < 0.6 && Math.abs(m.position.z - gz - 0.5) < 0.6;
+        m.penIn = m.penIn || inG || inRoom(C, m.position);
+        return m.penIn ? follow(m, dt, out, (C.x0 + C.x1) / 2, (C.z0 + C.z1) / 2, 0.8, sp) : follow(m, dt, out, gx + 0.5, gz + 0.5, 0.2, sp);
+      }
+      m.penIn = false;
       m.lookAt = L;
       if (ci >= k0 + tr.length - 1 || dk < 2.2) return follow(m, dt, out, L.position.x, L.position.z, 1.4, sp * 1.2);
       const c = tr[ci - k0];
@@ -548,18 +554,15 @@ function lead(m, S, tk, dt, out) {
       for (let i = toShut.length - 1; i >= 0; i--) { const a = toShut[i].at; if (a[0] === gx && a[1] === gy && a[2] === gz) toShut.splice(i, 1); }
     }
   }
+  if (S.stage === "pen") {   // at the gate: the chicken walks in by itself (chickenAI) while the keeper holds the gate open, as the stable hand does
+    m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
+    if ((S.inT = (S.inT || 0) + dt) > 20) { S.stage = "lead"; S.inT = 0; S.trail = [[p.x, p.y, p.z]]; S.trailBase = 0; o.crumb = 0; }   // it wandered off: lead it back to the gate
+    return true;
+  }
   if (dk > 5) { m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; return true; }   // wait for it
-  const inside = inRoom(coop, p);
-  const tx = inside || S.stage === "in" ? Math.floor((coop.x0 + coop.x1) / 2) : coop.out[0], tz = inside || S.stage === "in" ? Math.floor((coop.z0 + coop.z1) / 2) : coop.out[1];
-  const st = BF.villageLife.travel(m, S, dt, out, tx, coop.y + 1, tz, m.def.speed * 0.8);
-  if (st === "arrived") {
-    if (S.stage === "lead") { S.stage = "in"; S.inT = 0; m.ai.route = null; }
-    else {
-      out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
-      // in the run but the chicken is still outside (caught on the fence, or the gate swung shut): go back out and lead it round again
-      if (!inRoom(coop, o.position) && (S.inT = (S.inT || 0) + dt) > 20) { S.stage = "lead"; S.inT = 0; m.ai.route = null; S.trail = [[p.x, p.y, p.z]]; S.trailBase = 0; o.crumb = 0; }
-    }
-  } else if (st === "failed") { log("leadFailed", { why: "nopath" }); endTask(m, false); return false; }
+  const st = BF.villageLife.travel(m, S, dt, out, coop.out[0], coop.y + 1, coop.out[1], m.def.speed * 0.8);
+  if (st === "arrived") { m.ai.route = null; if (dk < 3) { S.stage = "pen"; S.inT = 0; } else { out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; } }
+  else if (st === "failed") { log("leadFailed", { why: "nopath" }); endTask(m, false); return false; }
   return true;
 }
 function ai(m, dt, out) {
