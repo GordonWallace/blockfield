@@ -1861,10 +1861,11 @@ function villageRoster(rec) {
   const rest = slots.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
   const cap = rec.pop || VILLAGERS_PER_VILLAGE;   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
-  // village generator 3: every village has a miner, a farmer and a forester (they supply the others: stone and ore, food, wood), so nothing stalls
+  // village generator 3: every village has a miner, a farmer, a forester and a toolsmith (stone and ore, food, wood, and the tools for all of
+  // them), so nothing stalls
   const core = (BF.state && BF.state.villages | 0) >= 3 && !!rec.pop;
   let nBuilders = BF.builder ? Math.min(rec.nb >= 19 ? 2 : rec.nb >= 6 ? 1 : 0, Math.max(0, cap - 1)) : 0;   // builders count toward the cap
-  if (core) nBuilders = Math.min(nBuilders, Math.max(0, cap - 3));   // ... but never in place of the core three
+  if (core) nBuilders = Math.min(nBuilders, Math.max(0, cap - 4));   // ... but never in place of the core four
   // foresters (own seeded stream, drawn first so their places are kept free: a full village used to leave none): ~95% of villages get one
   let nF = 0;
   if (BF.forester) { const rf = seededRand("foresters:" + rec.key); for (const p of FORESTER_CHANCE.slice(0, rec.nb >= 19 ? 2 : 1)) if (rf() < p) nF++; }
@@ -1887,13 +1888,16 @@ function villageRoster(rec) {
     sl.prof = bag.pop();
     used[sl.prof] = (used[sl.prof] || 0) + 1;
   }
-  // the core farmer: the last plain resident (a nitwit first) becomes one when the shuffle gave the village none
-  if (core && !ordered.some(sl => sl.prof === "farmer")) {
-    const plain = sl => !(sl.house && SPECIAL_PROF[sl.house.type]);
-    const sl = ordered.slice().reverse().find(x => x.prof === "nitwit") || ordered.slice().reverse().find(plain) || ordered[ordered.length - 1];
-    if (sl) sl.prof = "farmer";
+  // the core farmer and toolsmith: the last plain resident (a nitwit first) takes up the trade when the shuffle gave the village none
+  const CORE_RES = ["farmer", "toolsmith"];
+  if (core) for (const p of CORE_RES) {
+    if (ordered.some(sl => sl.prof === p)) continue;
+    const free = sl => !CORE_RES.includes(sl.prof), plain = sl => free(sl) && !(sl.house && SPECIAL_PROF[sl.house.type]);
+    const back = ordered.slice().reverse();
+    const sl = back.find(x => x.prof === "nitwit") || back.find(plain) || back.find(free);
+    if (sl) sl.prof = p;
   }
-  const loneFarmer = sl => core && sl.prof === "farmer" && ordered.filter(x => x.prof === "farmer").length < 2;
+  const loneCore = sl => core && CORE_RES.includes(sl.prof) && ordered.filter(x => x.prof === sl.prof).length < 2;   // the only farmer / toolsmith stays
   // builder slots go at the END with their own key range (<village key>#1000+n): other slots keep their persistence keys
   for (let k = 0; k < nBuilders; k++) ordered.push({ house: null, idx: 1000 + k, bed: null, prof: "builder" });
   // explorers: a village that has cartographers gets an explorer for each of them with 70% probability (own seeded stream, so nothing else shifts);
@@ -1907,7 +1911,7 @@ function villageRoster(rec) {
       // resident who is not a cartographer or a special-building tradesperson (explorers sleep in their tents), keeping the 70%
       for (let need = nE - (cap - nF - ordered.length), i = ordered.length - 1; need > 0 && i >= 0; i--) {
         const sl = ordered[i];
-        if (sl.prof === "cartographer" || sl.prof === "builder" || (sl.house && SPECIAL_PROF[sl.house.type]) || loneFarmer(sl)) continue;
+        if (sl.prof === "cartographer" || sl.prof === "builder" || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
         ordered.splice(i, 1); need--;
       }
     }
@@ -1925,7 +1929,7 @@ function villageRoster(rec) {
       const nShep = ordered.filter(sl => sl.prof === "shepherd").length;
       for (let i = ordered.length - 1; i >= 0; i--) {
         const sl = ordered[i];
-        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && nShep < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneFarmer(sl)) continue;
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && nShep < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
         ordered.splice(i, 1); break;
       }
     }
@@ -1940,13 +1944,13 @@ function villageRoster(rec) {
       let gone = false;
       for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
         const sl = ordered[i];
-        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneFarmer(sl)) continue;
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
         ordered.splice(i, 1); gone = true;
       }
-      // core: the miner may take any resident's place but the farmer's, then the furniture maker's (a tiny village: miner, farmer, forester)
+      // core: the miner may take any resident's place but the farmer's or toolsmith's, then the furniture maker's (a tiny village: miner, farmer, forester, toolsmith)
       for (let i = ordered.length - 1; core && i >= 0 && !gone; i--) {
         const sl = ordered[i];
-        if (sl.idx >= 1000 || loneFarmer(sl)) continue;
+        if (sl.idx >= 1000 || loneCore(sl)) continue;
         ordered.splice(i, 1); gone = true;
       }
       const fm = core && !gone ? ordered.findIndex(sl => sl.idx === 1300) : -1;

@@ -128,7 +128,7 @@ const band = v => (v < BANDS[0] ? 0 : v < BANDS[1] ? 1 : v < BANDS[2] ? 2 : v < 
 let GEN = 1, SC = 1;
 // Village generator of the current world (BF.state.villages): 1 = classic (8-25 buildings, roster capped at 24, kept for saved worlds),
 // 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
-// 3 = as 2, with at least 3 villagers (a miner, a farmer and a forester, js/mobs.js villageRoster) and a garden with trees in desert villages.
+// 3 = as 2, with at least 4 villagers (a miner, a farmer, a forester and a toolsmith, js/mobs.js villageRoster) and a garden with trees in desert villages.
 let VGEN = 1;
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
@@ -757,7 +757,7 @@ function siteOK(x, z, relaxed) {
 
 // Village population (village generator 2): a shifted gamma draw, 2 + Gamma(k = 2.5, theta = 32/3), so the mode is 18, the mean ~29 and
 // the right tail is long (about 1 village in 20 has 60+, 1 in 500 reaches the maximum of 100). Redrawn above 100. Deterministic from (a, b, salt).
-const POP_MIN = 2, POP_MIN3 = 3, POP_MAX = 100, POP_K = 2.5, POP_THETA = 32 / 3;
+const POP_MIN = 2, POP_MIN3 = 4, POP_MAX = 100, POP_K = 2.5, POP_THETA = 32 / 3;
 function villagePop(a, b, salt) {
   let s = ((noise.hash(a, b, salt) * 4294967296) >>> 0) || 1;
   const u = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) + 0.5) / 4294967296;
@@ -767,7 +767,7 @@ function villagePop(a, b, salt) {
     const x = normal(), v = Math.pow(1 + c * x, 3);
     if (v <= 0 || Math.log(u()) >= 0.5 * x * x + d - d * v + d * Math.log(v)) continue;
     const n = Math.round(POP_MIN + d * v * POP_THETA);
-    if (n <= POP_MAX) return Math.max(VGEN >= 3 ? POP_MIN3 : POP_MIN, n);   // village generator 3: at least a miner, a farmer and a forester
+    if (n <= POP_MAX) return Math.max(VGEN >= 3 ? POP_MIN3 : POP_MIN, n);   // village generator 3: at least a miner, a farmer, a forester and a toolsmith
   }
   return 18;
 }
