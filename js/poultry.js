@@ -559,7 +559,12 @@ function lead(m, S, tk, dt, out) {
     if ((S.inT = (S.inT || 0) + dt) > 20) { S.stage = "lead"; S.inT = 0; S.trail = [[p.x, p.y, p.z]]; S.trailBase = 0; o.crumb = 0; }   // it wandered off: lead it back to the gate
     return true;
   }
-  if (dk > 5) { m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; return true; }   // wait for it
+  if (dk > 5) {   // wait for it; if it doesn't come (caught behind something), go back for it and start the trail again from there
+    m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
+    if ((S.waitT = (S.waitT || 0) + dt) > 8) { S.waitT = 0; S.stage = "walk"; S.gx = null; o.ledBy = null; }
+    return true;
+  }
+  S.waitT = 0;
   const st = BF.villageLife.travel(m, S, dt, out, coop.out[0], coop.y + 1, coop.out[1], m.def.speed * 0.8);
   if (st === "arrived") { m.ai.route = null; if (dk < 3) { S.stage = "pen"; S.inT = 0; } else { out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; } }
   else if (st === "failed") { log("leadFailed", { why: "nopath" }); endTask(m, false); return false; }
@@ -580,6 +585,7 @@ function ai(m, dt, out) {
   }
   const tk = S.task;
   S.t += dt;
+  if (tk.kind === "fetch" && tk.mob.coop === tk.coop && tk.coop) return lead(m, S, tk, dt, out);   // it walked in: lead() logs it and ends the task
   const limit = tk.kind === "fetch" ? LEAD_MAX : TASK_MAX;
   if (S.t > limit || !stillWanted(m, tk)) {
     if (tk.kind === "fetch") log("leadFailed", { why: S.t > limit ? "slow" : "unwanted", stage: S.stage });
