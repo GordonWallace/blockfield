@@ -27,7 +27,7 @@ const VALUE = {
   raw_porkchop: .08, raw_beef: .08, raw_mutton: .07, raw_chicken: .06, cooked_porkchop: .12, steak: .12, cooked_mutton: .1,
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
-  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.6,   // shears: 3 iron ingots
+  iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.0,   // shears: 2 iron ingots
   golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
   diamond_pickaxe: 10.6, diamond_axe: 10.6, diamond_shovel: 3.57, diamond_sword: 7.05, diamond_hoe: 7.07,
   compass: 3.2, blank_map_1: 3.6, blank_map_2: 7.2, blank_map_3: 14.4, blank_map_4: 28.8, blank_map_5: 57.6,                                  // cartographer goods: 4 iron + 1 gold ingot; + 8 paper (js/cartography.js)
@@ -45,10 +45,10 @@ for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "m
 const TRADES = {
   farmer: [
     ["16 wheat_item > 1 emerald", "18 potato > 1 emerald", "18 carrot > 1 emerald", "1 emerald > 4 bread"],
-    ["16 beetroot > 1 emerald", "8 pumpkin > 1 emerald", "1 emerald > 6 apple", "1 emerald > 10 baked_potato"],
+    ["16 beetroot > 1 emerald", "8 pumpkin > 1 emerald", "1 emerald > 10 baked_potato"],
     ["28 sugar_cane > 1 emerald", "3 emerald > 4 hay_bale", "2 hay_bale > 1 emerald"],
-    ["1 emerald > 1 iron_hoe", "12 baked_potato > 1 emerald"],
-    ["6 emerald + 1 iron_hoe > 1 diamond_hoe"],
+    ["1 emerald > 14 wheat_item", "12 baked_potato > 1 emerald"],   // farmers sell only crops and food baked from them (Gordon, 1.1): no hoes, no apples
+    ["1 emerald > 16 carrot", "1 emerald > 16 potato"],
   ],
   librarian: [
     ["22 paper > 1 emerald", "16 feather > 1 emerald", "1 emerald > 11 glass"],
@@ -73,10 +73,10 @@ const TRADES = {
   ],
   weaponsmith: [
     ["9 coal > 1 emerald", "1 emerald > 1 iron_sword", "5 iron_ingot > 2 emerald"],
-    ["2 emerald > 1 iron_axe", "1 gold_ingot > 1 emerald"],
+    ["1 gold_ingot > 1 emerald"],                                     // weapons only: axes come from the toolsmith (js/toolsmith.js)
     ["1 diamond > 3 emerald", "4 emerald > 1 diamond"],
     ["7 emerald > 1 diamond_sword"],
-    ["10 emerald > 1 diamond_axe", "6 emerald + 1 iron_sword > 1 diamond_sword", "1 diamond_sword > 6 emerald"],
+    ["6 emerald + 1 iron_sword > 1 diamond_sword", "1 diamond_sword > 6 emerald"],
   ],
   // The toolsmith (js/toolsmith.js) sells only the tools it has made from materials it bought, so every tool it sells is offered from
   // level 1 and its stock is the limit ("Out of stock"); levels only add the materials it buys from the player. Prices: at least the cost
@@ -84,10 +84,10 @@ const TRADES = {
   toolsmith: [
     ["9 coal > 1 emerald", "40 cobblestone > 1 emerald",
       "1 emerald > 1 wooden_pickaxe", "1 emerald > 1 wooden_axe", "1 emerald > 1 wooden_hoe",
-      "1 emerald > 1 stone_pickaxe", "1 emerald > 1 stone_axe", "1 emerald > 1 stone_hoe",
+      "2 emerald > 1 stone_pickaxe", "2 emerald > 1 stone_axe", "2 emerald > 1 stone_hoe",
       "2 emerald > 1 iron_pickaxe", "2 emerald > 1 iron_axe", "2 emerald > 1 iron_hoe", "2 emerald > 1 shears",
       "4 emerald > 1 golden_pickaxe", "4 emerald > 1 golden_axe", "3 emerald > 1 golden_hoe",
-      "13 emerald > 1 diamond_pickaxe", "13 emerald > 1 diamond_axe", "9 emerald > 1 diamond_hoe"],
+      "15 emerald > 1 diamond_pickaxe", "15 emerald > 1 diamond_axe", "15 emerald > 1 diamond_hoe"],
     ["5 iron_ingot > 2 emerald", "32 stick > 1 emerald"],
     ["1 diamond > 3 emerald", "1 gold_ingot > 1 emerald"],
     ["6 raw_iron > 2 emerald", "16 planks > 1 emerald"],
@@ -164,8 +164,8 @@ const TRADES = {
   // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
-    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal"],
-    ["2 emerald > 64 cobblestone", "1 emerald > 2 raw_iron", "1 emerald > 1 raw_gold"],   // an apprentice digs deep enough for gold
+    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal", "1 emerald > 2 raw_iron"],      // raw iron from the start: the toolsmith's iron (shears, iron tools)
+    ["2 emerald > 64 cobblestone", "1 emerald > 1 raw_gold"],                            // an apprentice digs deep enough for gold
     ["4 emerald > 1 diamond"],                                                           // a journeyman deep enough for diamonds
     ["2 emerald > 16 coal"],
     ["3 emerald > 3 raw_gold"],
@@ -187,8 +187,8 @@ const PRODUCE = {
   farmer: [],          // food is never created by the restock: farmers harvest and bake it (js/villagelife.js), see TRADE_AUDIT.md
   librarian: ["paper", "book", "glass"],
   cleric: [],
-  armorer: ["iron_ingot"],
-  weaponsmith: ["iron_sword", "iron_axe"],
+  armorer: [],          // no free iron any more: it sells only the ingots it holds (Gordon, 1.1)
+  weaponsmith: ["iron_sword"],
   toolsmith: [],        // makes every tool from materials it buys (js/toolsmith.js)
   butcher: [],         // cooks raw meat it holds instead (js/villagelife.js)
   fisherman: [],       // cooks raw cod it holds instead (js/villagelife.js)

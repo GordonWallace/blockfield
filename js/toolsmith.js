@@ -6,10 +6,10 @@
 // - What to make: the category (pickaxe, axe, hoe, shears) it holds fewest of, so the stock stays even: it makes a tool while it holds fewer
 //   than TOOL_CAP of that category in that material or better (so 2 wooden pickaxes do not stop a stone one), never past TOOL_MAX. Shears come
 //   first while it has none and holds the iron for them, and the other iron tools leave 2 ingots for shears while it has none. Within a
-//   category it makes the best material it can get, in CALIBER order (diamond, iron, stone, gold, wood, the order BF.toolWear ranks tools in):
+//   category it makes the best material it can get, in CALIBER order (diamond, gold, iron, stone, wood, the order BF.toolWear ranks tools in):
 //   what it holds, or what a villager of its village sells and it can pay for. It buys for the better tool even when it already holds the
 //   materials for a lesser one; when a better material is sold here but not right now (the miner is out of cobblestone or down the shaft)
-//   it waits up to WAIT_BETTER (6 game hours) before making the lesser tool. Gold is only bought when nobody sells iron.
+//   it waits up to WAIT_BETTER (6 game hours) before making the lesser tool, but only while it has one of that kind on the shelf already or the lesser tool would be wooden.
 // - Crafting: at its smithing table (BF.jobs "work" state), CRAFT_SECS (2 game hours) per tool. Materials are taken when it starts; the tool
 //   is finished on later visits if the day ends first (the craft in progress is saved). Sticks are cut from 2 planks when it is short.
 // - Buying: it walks to the seller and trades at the seller's own offer (stock and room rules of trading.js), like the furniture maker. It
@@ -37,7 +37,7 @@ const TOOL_CAP = 2;                            // it makes a tool while it holds
 const TOOL_MAX = 4;                            // and never holds more than this many of one category (lesser ones wait to be sold)
 const WAIT_BETTER = 0.25;                      // days it waits for a better material that is sold here but not right now before making a lesser tool
 const CATS = ["pickaxe", "axe", "hoe", "shears"];
-const CALIBER = ["diamond", "iron", "stone", "gold", "wood"];   // best first, as BF.toolWear ranks them (tier, then speed): gold between wood and stone
+const CALIBER = ["diamond", "gold", "iron", "stone", "wood"];   // best first, as BF.toolWear ranks them (tier, then speed): gold between iron and diamond
 const PREFIX = { wood: "wooden", stone: "stone", iron: "iron", gold: "golden", diamond: "diamond" };
 const HEAD = { pickaxe: 3, axe: 3, hoe: 2, shears: 2 }, STICKS = { pickaxe: 2, axe: 2, hoe: 2, shears: 0 };
 const SHEARS_IRON = 2;                         // iron kept back for shears while it has none
@@ -212,9 +212,10 @@ function plan(m) {
     for (const mat of matsFor(cat)) {
       if (stockAtLeast(m, cat, mat) >= TOOL_CAP) break;   // enough of this or better: lesser ones would not help
       if (canMake(m, cat, mat, stock)) {
-        if (later) {   // wait for the better one a while
+        if (later && (stock[cat] > 0 || mat === "wood")) {   // wait for the better one a while (only with one of these already on the shelf, or before falling back to wood); the wait ends when the lesser tool is started (startCraft)
           const w = S.waitBetter[cat] || (S.waitBetter[cat] = { since: dayNow(), mat: later });
           if (dayNow() - w.since < WAIT_BETTER) break;
+          return { cat, mat, ready: true };
         }
         delete S.waitBetter[cat];
         return { cat, mat, ready: true };
@@ -228,7 +229,6 @@ function plan(m) {
       }
       let short = head - ingots - (RAW[mat] && furnaceOK ? raw : 0);
       if (short > 0) {
-        if (mat === "gold" && (priceOf(m, MAT.iron, 1) < Infinity || (furnaceOK && priceOf(m, RAW.iron, 1) < Infinity))) continue;   // gold only when nobody sells iron
         // buy ingots / diamonds / cobblestone / planks, or ore when it can smelt it
         let cost = priceOf(m, MAT[mat], short), what = "head", f = MAT[mat];
         if (RAW[mat]) {
@@ -310,6 +310,7 @@ function startCraft(m, p) {
   }
   const mats = take(m, MAT[p.mat], HEAD[p.cat]).concat(STICKS[p.cat] ? take(m, isStick, STICKS[p.cat]) : []);
   S.craft = { id, t: CRAFT_SECS(), mats };
+  if (S.waitBetter) delete S.waitBetter[p.cat];
   log("start", m, { tool: nameOf(id) });
   return S.craft;
 }
