@@ -25,7 +25,8 @@
 //   village is short of flint (BF.fletcher) and it holds fewer than FLINT_WANT, it also digs the gravel in the walls and ceiling of its shaft,
 //   following a vein it meets into the rock around the cell (VEIN_R), and on the surface it digs dry gravel in its area (riverbanks, shores,
 //   scree: findGravel) before anything else. Meanwhile it keeps the gravel (up to GRAVEL_KEEP) and, back on the surface, sifts it: each gravel
-//   is placed and broken again until it drops flint, as a player does, so 1 gravel becomes 1 flint (SIFT_SECS each).
+//   is placed and broken again until it drops flint, as a player does, so 1 gravel becomes 1 flint (SIFT_SECS each). A novice holding
+//   KEEP_COBBLE cobblestone keeps digging while the fletcher needs flint (the extra stone is left behind).
 // - Selling: holding SELL_MIN cobblestone, it walks to a builder of its village that needs some (its current structure's shortfall, or a reserve
 //   of BUILDER_RESERVE for the next foundation in cobblestone villages) and sells at its own offer "1 emerald > 32 cobblestone". Builders short
 //   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. A novice stops digging at KEEP_COBBLE; a
@@ -66,7 +67,7 @@ const KEEP = new Set(["cobblestone", "coal", "raw_iron", "raw_gold", "raw_copper
 const GRAVEL_KEEP = 48;  // gravel it keeps to sift for flint (while wantsFlint)
 const SIFT_SECS = 2.5;   // per gravel sifted into flint: placing and breaking it again until it drops flint, as a player does
 const VEIN_R = 3;        // gravel connected to a shaft cell's gravel within this many blocks of the cell is dug with it (while wantsFlint)
-const FLINT_WANT = 16;  // digs gravel for flint while it holds fewer than this (its offer, "1 emerald > 16 flint") and a fletcher of its village is short of flint
+const FLINT_WANT = 16;  // digs gravel for flint while it holds fewer than this (two of its "1 emerald > 8 flint" offers) and a fletcher of its village is short of flint
 // Is a fletcher of m's village short of flint while m holds little? (then gravel in the shaft walls is worth digging)
 const wantsFlint = m => I("flint") != null && count(m, I("flint")) < FLINT_WANT && !!(BF.fletcher && m.village && (m.village.members || []).some(v => v.profession === "fletcher" && !v.dead && !v.removed && Array.isArray(v.inv) && BF.fletcher.shortfall(v).flint > 0));
 const keeps = id => KEEP.has(nameOf(id));
@@ -574,7 +575,7 @@ function think(m, Q) {
   }
   if (!underground && count(m, I("gravel")) > 0 && count(m, I("flint")) < FLINT_WANT) return { kind: "sift", max: 30 + SIFT_SECS * count(m, I("gravel")) };   // 2b. gravel kept for flint (before digging: also with a full pack)
   // 3. digging
-  if (cobble >= KEEP_COBBLE && digDepth(m) <= DIG_DEPTH[0] || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
+  if (cobble >= KEEP_COBBLE && digDepth(m) <= DIG_DEPTH[0] && !wantsFlint(m) || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
   const deep = digDepth(m) > DIG_DEPTH[0];
   if (sh && !sh.done && sh.S != null && deep && digDepth(m) >= sh.S + 12 && !underground) { sh.done = true; log("deeper", m, { was: sh.S, now: digDepth(m) }); }   // levelled up: a deeper shaft
   if (!underground && wantsFlint(m)) {   // the fletcher is short of flint: surface gravel first, at any level

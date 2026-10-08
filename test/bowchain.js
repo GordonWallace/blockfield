@@ -107,7 +107,8 @@ const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
     R.fletcher = f ? { inv: f.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count), offers: (f.trades || []).filter(o => o.sell.id === I.arrow || o.sell.id === I.bow).map(o => BF.items[o.sell.id].name + (BF.trades.blockReason(f, o) ? ' (' + BF.trades.blockReason(f, o) + ')' : ' in stock')) } : null;
     R.miners = BF.mobs.list.filter(m => m.type === 'villager' && m.profession === 'miner' && m.village && m.village.key === R.key && !m.dead).map(m => {
       const Q = BF.miner._test.state(m);
-      return { inv: m.inv.filter(Boolean).map(x => BF.items[x.id].name + ':' + x.count).join(' '), flint: BF.trades.inv.count(m.inv, I.flint), wantsFlint: BF.miner.wantsFlint(m), grav: Q.grav ? Q.grav.length : null, surf: Q.surf ? Q.surf.length : null, depth: BF.miner.digDepth(m), status: BF.villagerStatus.text(m) };
+      return { inv: m.inv.filter(Boolean).map(x => BF.items[x.id].name + ':' + x.count).join(' '), flint: BF.trades.inv.count(m.inv, I.flint), wantsFlint: BF.miner.wantsFlint(m), grav: Q.grav ? Q.grav.length : null, surf: Q.surf ? Q.surf.length : null, depth: BF.miner.digDepth(m), status: BF.villagerStatus.text(m), qstatus: Q.status, shaft: Q.shaft ? { n: Q.shaft.n, S: Q.shaft.S, done: Q.shaft.done, stuck: Q.shaft.stuck } : null,
+        log: Object.entries(BF.miner.LOG.filter(e => e.village === R.key).reduce((a, e) => (a[e.kind] = (a[e.kind] || 0) + 1, a), {})).map(([k, n]) => k + ':' + n).join(' ') };
     });
     R.holders = {};
     for (const n of ['feather', 'flint', 'string', 'arrow']) R.holders[n] = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === R.key && !m.dead && Array.isArray(m.inv) && BF.trades.inv.count(m.inv, I[n]) > 0).map(m => m.profession + ':' + BF.trades.inv.count(m.inv, I[n])).join(' ');

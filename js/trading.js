@@ -23,8 +23,8 @@ const VALUE = {
   stick: .02, cobblestone: .03, stone: .05, sand: .03, gravel: .03, clay_ball: .06, brick: .15, bricks: .62, glass: .08,
   sandstone: .08, sandstone_bricks: .09, mossy_cobblestone: .15, calcite: .12, terracotta: .15, orange_terracotta: .18,
   yellow_terracotta: .18, red_terracotta: .18, white_terracotta: .18, brown_terracotta: .18,
-  flint: .06, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,
-  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .04, white_wool: .12, leather: .15,
+  flint: .12, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,
+  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .055, white_wool: .12, leather: .15,
   raw_porkchop: .08, raw_beef: .08, raw_mutton: .07, raw_chicken: .06, cooked_porkchop: .12, steak: .12, cooked_mutton: .1,
   cooked_chicken: .1, raw_cod: .07, cooked_cod: .1, egg: .055, cooked_egg: .1, nesting_box: .2,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
@@ -119,12 +119,12 @@ const TRADES = {
   // The fletcher (js/fletcher.js) sells only the arrows and bows it has made from materials it bought (flint from the miner, sticks or planks from
   // the forester, feathers from the poultry keeper, string from the shepherd), so both are offered from level 1 and its stock is the limit
   // ("Out of stock"); levels only add materials it buys from the player. Prices: above the cost at village prices (4 arrows = 1 flint + 1 stick
-  // + 1 feather ~ 0.16 emerald: 22 arrows ~ 0.88; a bow = 3 sticks + 3 string ~ 0.4), 1 emerald at the least. It no longer resells flint,
+  // + 1 feather ~ 0.22 emerald: 16 arrows ~ 0.89; a bow = 3 sticks + 3 string ~ 0.4), 1 emerald at the least. It no longer resells flint,
   // feathers or string.
   fletcher: [
-    ["54 stick > 1 emerald", "18 flint > 1 emerald", "16 feather > 1 emerald", "1 emerald > 22 arrow", "1 emerald > 1 bow"],
+    ["54 stick > 1 emerald", "9 flint > 1 emerald", "16 feather > 1 emerald", "1 emerald > 16 arrow", "1 emerald > 1 bow"],
     ["11 string > 1 emerald"],
-    ["2 emerald > 44 arrow"],
+    ["2 emerald > 32 arrow"],
     ["40 planks > 1 emerald"],
     [],
   ],
@@ -136,7 +136,7 @@ const TRADES = {
     ["1 emerald > 5 white_terracotta", "1 emerald > 5 brown_terracotta", "1 emerald > 8 calcite"],
   ],
   leatherworker: [
-    ["8 leather > 1 emerald", "14 raw_beef > 1 emerald", "18 flint > 1 emerald"],
+    ["8 leather > 1 emerald", "14 raw_beef > 1 emerald", "9 flint > 1 emerald"],
     ["1 emerald > 6 leather", "11 string > 1 emerald"],
     ["2 emerald > 5 book", "22 rotten_flesh > 1 emerald"],
     ["2 emerald > 12 leather"],
@@ -171,7 +171,7 @@ const TRADES = {
   // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
-    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal", "1 emerald > 2 raw_iron", "1 emerald > 16 flint"],      // raw iron from the start: the toolsmith's iron (shears, iron tools); flint from the gravel it digs: the fletcher's arrowheads
+    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal", "1 emerald > 2 raw_iron", "1 emerald > 8 flint"],       // raw iron from the start: the toolsmith's iron (shears, iron tools); flint from the gravel it digs: the fletcher's arrowheads
     ["2 emerald > 64 cobblestone", "1 emerald > 1 raw_gold"],                            // an apprentice digs deep enough for gold
     ["4 emerald > 1 diamond"],                                                           // a journeyman deep enough for diamonds
     ["2 emerald > 16 coal"],

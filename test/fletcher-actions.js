@@ -174,7 +174,7 @@ module.exports = async (pg, out) => {
     Fl.xp = 0; Fl.level = 1; Fl.inv = inv.create(); Fl.trades = T.offers("fletcher", 1); Fl.flt = null;
     inv.add(Fl.inv, I.emerald, 12); inv.add(Fl.inv, I.bread, 12);
     const off = s => Object.assign(T.parseTrade(s), { level: 1, xp: 2 });
-    Mn.inv = inv.create(); inv.add(Mn.inv, I.flint, 24); inv.add(Mn.inv, I.bread, 12); Mn.trades = ["1 emerald > 16 flint"].map(off);                 // the miner's flint offer
+    Mn.inv = inv.create(); inv.add(Mn.inv, I.flint, 24); inv.add(Mn.inv, I.bread, 12); Mn.trades = ["1 emerald > 8 flint"].map(off);                  // the miner's flint offer
     Fo.inv = inv.create(); inv.add(Fo.inv, I.stick, 48); inv.add(Fo.inv, I.bread, 12); Fo.trades = ["1 emerald > 48 stick"].map(off);                // the forester's sticks
     Pk.inv = inv.create(); inv.add(Pk.inv, I.feather, 26); inv.add(Pk.inv, I.bread, 12); Pk.trades = ["1 emerald > 13 feather"].map(off);             // stand-in poultry keeper
     inv.remove(shp.inv, I.string, 999); inv.remove(shp.inv, I.white_wool, 999); inv.add(shp.inv, I.white_wool, 28);
@@ -183,7 +183,7 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.06);
     const got = { string: false, flint: false, feather: false, stick: false }, seenStatus = new Set();
     let spunAt = null, arrowsAt = null, bowAt = null;
-    for (let i = 0; i < 20000 && !(arrowsAt && bowAt); i++) {
+    for (let i = 0; i < 40000 && !(arrowsAt && bowAt); i++) {
       step();
       if (i % 20 === 0) {
         if (BF.sky.time > 0.43) BF.sky.setTime(0.06);   // one long working day

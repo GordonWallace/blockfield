@@ -314,23 +314,23 @@ Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple a
 | Lvl | Offer | In | Out | rho | Kind |
 |---:|---|---:|---:|---:|---|
 | 1 | 54 stick > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
-| 1 | 18 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
+| 1 | 9 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
 | 1 | 16 feather > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
-| 1 | 1 emerald > 22 arrow | 1.00 | 0.88 | 0.88 | buy from villager |
+| 1 | 1 emerald > 16 arrow | 1.00 | 0.88 | 0.88 | buy from villager |
 | 1 | 1 emerald > 1 bow | 1.00 | 0.42 | 0.42 | buy from villager |
 | 2 | 11 string > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
-| 3 | 2 emerald > 44 arrow | 2.00 | 1.76 | 0.88 | buy from villager |
+| 3 | 2 emerald > 32 arrow | 2.00 | 1.76 | 0.88 | buy from villager |
 | 4 | 40 planks > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
 
 The fletcher makes the arrows and bows it sells (js/fletcher.js, CONTRACT.md "Fletchers") from flint, sticks or planks, feathers and string it buys
-from the player or from villagers (the miner's `1 emerald > 16 flint`, the forester's sticks and planks, the poultry keeper's `1 emerald > 13 feather`,
+from the player or from villagers (the miner's `1 emerald > 8 flint`, the forester's sticks and planks, the poultry keeper's `1 emerald > 13 feather`,
 the shepherd's `1 emerald > 9 string`). `PRODUCE.fletcher` was `arrow` and is now empty, and a generated fletcher starts with no arrows or bows (8 sticks,
 4 flint, 4 feathers instead). Both wares are offered from level 1, the stock is the limit (it makes arrows up to 48, bows up to 2). It no longer sells
-flint, feathers or string. Prices are above its cost at village prices: 4 arrows = 1 flint (0.0625) + 1 stick (0.021) + 1 feather (0.077) = 0.16,
-so 22 arrows cost ~0.88; a bow = 3 sticks + 3 string (0.33) = ~0.4, sold for 1 emerald (the toolsmith's minimum for a tool).
-No round trip: what it pays the player per unit stays below what any villager charges (flint 0.056 < 0.0625 miner, feathers 0.0625 < 0.077 poultry
+flint, feathers or string. Prices are above its cost at village prices: 4 arrows = 1 flint (0.125) + 1 stick (0.021) + 1 feather (0.077) = 0.22,
+so 16 arrows cost ~0.89; a bow = 3 sticks + 3 string (0.33) = ~0.4, sold for 1 emerald (the toolsmith's minimum for a tool).
+No round trip: what it pays the player per unit stays below what any villager charges (flint 0.111 < 0.125 miner, feathers 0.0625 < 0.077 poultry
 keeper, string 0.091 < 0.111 shepherd, sticks 0.019 < 0.021 and planks 0.025 < 0.033 forester).
-The miner keeps the flint its gravel drops (10%, js/miner.js) and sells it at `1 emerald > 16 flint` (104% of `VALUE`); the shepherd spins its
+The miner keeps the flint its gravel drops (10%, js/miner.js), and while the fletcher is short it keeps gravel and sifts it into flint 1:1 (as a player re-places and breaks gravel), so flint's `VALUE` is .12 (was .06) and it sells it at `1 emerald > 8 flint` (104% of `VALUE`); the shepherd spins its
 own wool into string (1 wool -> 2 string, js/shepherd.js) and sells it at `1 emerald > 9 string` (111%); neither is restocked or in a starting pack.
 
 ### mason
@@ -360,7 +360,7 @@ own wool into string (1 wool -> 2 string, js/shepherd.js) and sells it at `1 eme
 |---:|---|---:|---:|---:|---|
 | 1 | 8 leather > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
 | 1 | 14 raw_beef > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
-| 1 | 18 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
+| 1 | 9 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
 | 2 | 1 emerald > 6 leather | 1.00 | 0.90 | 0.90 | buy from villager |
 | 2 | 11 string > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
 | 3 | 2 emerald > 5 book | 2.00 | 1.75 | 0.88 | buy from villager |
