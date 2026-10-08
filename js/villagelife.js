@@ -294,17 +294,18 @@ function areaOf(R) {
 function vdata(R) {
   if (R._life) return R._life;
   const A = areaOf(R), wg = R.wg || {};
-  const boxes = [], farms = [];      // [x0, z0, x1, z1]: buildings with a 1-block margin (no bed comes there), generated farm plots
+  const boxes = [], farms = [], farmSeeds = [];      // [x0, z0, x1, z1]: buildings with a 1-block margin (no bed comes there), generated farm plots
   let farmBase = 0;
   for (const b of wg.buildings || []) {
     const farm = b.type === "farm" || b.type === "bigfarm";
-    if (farm) { farms.push([b.x0, b.z0, b.x1, b.z1]); farmBase += (b.w - 2) * (b.d - 2); }
+    // a cell inside each generated farm's ring: a farm whose farmland has all gone back to dirt is still found as a bed (detectBeds)
+    if (farm) { farms.push([b.x0, b.z0, b.x1, b.z1]); farmBase += (b.w - 2) * (b.d - 2); farmSeeds.push([b.x0 + 1, b.y, b.z0 + 1]); }
     else boxes.push([b.x0 - 1, b.z0 - 1, b.x1 + 1, b.z1 + 1]);
   }
   if (Number.isFinite(wg.x)) boxes.push([wg.x - 9, wg.z - 9, wg.x + 9, wg.z + 9]);       // meeting square, bell, well
   for (const l of wg.lamps || []) boxes.push([l[0] - 1, l[1] - 1, l[0] + 1, l[1] + 1]);
   for (const d of wg.decor || []) boxes.push([d[0] - 1, d[1] - 1, d[0] + 1, d[1] + 1]);
-  R._life = { area: A, base: Object.assign({}, A), boxes, farms, beds: [], projects: projectsFor(R), farmBase, cells: [], water: [], waterSet: new Set(), wells: new Set(), ready: false, scan: null, scanT: 0, want: 0 };
+  R._life = { area: A, base: Object.assign({}, A), boxes, farms, farmSeeds, beds: [], projects: projectsFor(R), farmBase, cells: [], water: [], waterSet: new Set(), wells: new Set(), ready: false, scan: null, scanT: 0, want: 0 };
   return R._life;
 }
 // The farmer's reach box (composter +-12) must lie inside the scanned area (a composter placed outside the village grounds); a wider area is rescanned.
@@ -440,6 +441,7 @@ function think(m, fs, R, D) {
   if (best) return best;
   // nothing to harvest or plant: work on a bed (grow one, or lay out a new one) while the farmer wants more farmland
   let P = projectOf(m, R, D);
+  if (!P && !(fs.repCd > now)) { fs.repCd = now + 15; P = chooseRepair(m, D); }   // a run-down bed first: water back in its channels, its dirt tilled
   if (!P && cells.length < FARM_MAX && !(fs.projCd > now)) { fs.projCd = now + PROJECT_CD; P = chooseProject(m, R, D, cells.length); }
   if (P) {
     const t = projectTask(m, fs, R, D, P, ok);
@@ -585,11 +587,13 @@ function clearOfBuildings(R, D, x, z) {
 }
 
 // The beds of the village: every farmland region enclosed by a complete ring of logs (corners included), found after each scan.
-// The region may hold farmland, water and plain soil (the pumpkin patch of a generated farm).
+// The region may hold farmland, water and plain soil (the pumpkin patch of a generated farm), and, in a run-down farm, dirt and
+// empty or half-empty channels (air or flowing water). Generated farms are looked for even with no farmland left in them.
 function detectBeds(D) {
   const c = ids(), w = W(), beds = [], seen = new Set();
-  const member = id => isFarm(c, id) || BF.FLUID[id] === 8 || c.till.has(id);
-  for (const [sx, sy, sz] of D.cells) {
+  const member = id => isFarm(c, id) || BF.FLUID[id] > 0 || id === 0 || c.till.has(id);
+  const wet = id => BF.FLUID[id] > 0 || id === 0;   // a channel cell: water, or an empty trench
+  for (const [sx, sy, sz] of D.cells.concat((D.farmSeeds || []).filter(p => w.isLoaded(p[0], p[2]) && c.till.has(getB(p[0], p[1], p[2]))))) {
     if (seen.has(key3(sx, sy, sz))) continue;
     seen.add(key3(sx, sy, sz));
     const q = [[sx, sz]];
@@ -616,7 +620,7 @@ function detectBeds(D) {
       if (!isLogBlock(getB(x, sy, z))) { ring = false; break; }
     }
     if (!ring) continue;
-    const full = (ax, p) => { for (let t = ax === "x" ? z0 : x0; t <= (ax === "x" ? z1 : x1); t++) if (BF.FLUID[ax === "x" ? getB(p, sy, t) : getB(t, sy, p)] !== 8) return false; return true; };
+    const full = (ax, p) => { for (let t = ax === "x" ? z0 : x0; t <= (ax === "x" ? z1 : x1); t++) if (!wet(ax === "x" ? getB(p, sy, t) : getB(t, sy, p))) return false; return true; };
     const cx = [], cz = [];
     for (let x = x0; x <= x1; x++) if (full("x", x)) cx.push(x);
     for (let z = z0; z <= z1; z++) if (full("z", z)) cz.push(z);
@@ -629,6 +633,7 @@ function detectBeds(D) {
 // What has to happen at one cell of a project to match its layout: null when it already does, "blocked" when it cannot,
 // else a task (stage 0 level, 1 lay a ring log, 2 lift an old ring log, 3 water / till).
 function cellJob(P, x, z) {
+  if (P.kind === "repair") return repairJob(P, x, z);
   const c = ids(), L = P.L, y = L.y, want = layoutAt(L, x, z), cur = getB(x, y, z);
   if (want === "log" ? isLogBlock(cur) : want === "water" ? BF.FLUID[cur] === 8 : isFarm(c, cur)) return null;
   const k = key3(x, y, z), at = (kind, stage, yy) => ({ kind, x, y: yy == null ? y : yy, z, k, ty: (yy == null ? y : yy) + 1, stage, proj: P.id });
@@ -642,6 +647,30 @@ function cellJob(P, x, z) {
   const a = getB(x, y + 1, z);
   if ((!looseAbove(a) && BF.RENDER[a] !== 4) || BF.SOLID[getB(x, y + 2, z)]) return "blocked";                // a block on it, or overhead
   return want === "log" ? at("border", 1) : at(want === "water" ? "water" : "till", 3);
+}
+// A run-down bed (a generated farm nobody worked, js/worldgen.js): the repair project puts water back in the empty channel cells
+// and tills the farmland that went back to dirt. The ring, the pumpkin patch (grass / sand) and anything else stay as they are.
+function repairJob(P, x, z) {
+  const c = ids(), L = P.L, y = L.y, want = layoutAt(L, x, z), cur = getB(x, y, z);
+  if (want !== "water" && want !== "farm") return null;
+  const a = getB(x, y + 1, z), at = kind => ({ kind, x, y, z, k: key3(x, y, z), ty: y + 1, stage: 3, proj: P.id });
+  if (want === "water") return (cur === 0 || (BF.FLUID[cur] > 0 && BF.FLUID[cur] < 8)) && BF.SOLID[getB(x, y - 1, z)] && looseAbove(a) ? at("water") : null;
+  return cur === c.dirt && (looseAbove(a) || BF.RENDER[a] === 4) && !BF.SOLID[getB(x, y + 2, z)] ? at("till") : null;
+}
+// The first of the farmer's beds that needs repairing, as a new repair project (or null).
+function chooseRepair(m, D) {
+  for (const b of myBeds(m, D)) {
+    const o = outerOf(b);
+    if (D.projects.some(p => overlap(outerOf(p.L), o))) continue;
+    const P = { id: "p" + Math.floor(Math.random() * 1e9).toString(36), kind: "repair", dir: null, L: { x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, y: b.y, ax: b.ax, ch: b.ch.slice() }, old: null, owner: m.slot ? m.slot.idx : -1, log: b.log, fails: 0 };
+    let water = 0, till = 0;
+    projectCells(P, (x, z) => { if (!W().isLoaded(x, z)) return; const j = repairJob(P, x, z); if (j) j.kind === "water" ? water++ : till++; });
+    if (!water && !till) continue;
+    D.projects.push(P);
+    log("project", m, { plan: "repair", options: water + " water / " + till + " till", at: [P.L.x0, P.L.y, P.L.z0], size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), gain: till, logs: 0 });
+    return P;
+  }
+  return null;
 }
 // cells of a project that it changes: its ring and interior, less the interior of the bed it grows (that stays as it is)
 function projectCells(P, f) {
@@ -868,7 +897,10 @@ function performBed(m, fs, R, D, t) {
   if (t.kind === "border") { place = logId(m, P.log); if (place == null) return false; }
   else if (t.kind === "water") {
     if (cnt(m, c.wbucket) < 1) return false;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = getB(t.x + dx, t.y, t.z + dz); if (!BF.SOLID[n] && BF.FLUID[n] !== 8) return false; }   // walled in: it stays put
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {   // walled in: it stays put (a repaired channel may run on into the rest of the trench)
+      const n = getB(t.x + dx, t.y, t.z + dz);
+      if (!BF.SOLID[n] && BF.FLUID[n] !== 8 && !(P.kind === "repair" && layoutAt(P.L, t.x + dx, t.z + dz) === "water")) return false;
+    }
     place = c.water;
   } else {
     if (!hasHoe(m) || !c.till.has(old)) return false;
@@ -1540,5 +1572,5 @@ if (BF.texKit) {
 BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
   exportAll, importAll, bedRects,
   villageAge: key => { const A = villageAges.get(key); return A ? A.lived : null; },   // game days loaded and active, or null if never
-  _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, findLogSeller, doLogDeal, perform, dealWith, findFoodSeller, scanStep, inRange } };
+  _test: { detectBeds, repairJob, chooseRepair, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, findLogSeller, doLogDeal, perform, dealWith, findFoodSeller, scanStep, inRange } };
 })();

@@ -183,6 +183,7 @@ function planVillage(v) {
   const homes = blds.filter(b => LIVABLE[b.type]);
   const bOf = h => h && blds.find(b => b.doorX === h.doorX && b.doorZ === h.doorZ && LIVABLE[b.type]);
   let fi = 0;
+  const farmSite = new Set(), farmHand = new Set();   // farms with a composter beside them / with a roster farmer's composter
   const pens = blds.filter(b => b.type === "pen");   // a shepherd's loom stands right outside a pen (each shepherd gets its own while there are enough)
   let pi = 0;
   for (const job of jobs) {
@@ -191,12 +192,21 @@ function planVillage(v) {
       for (let k = 0; k < pens.length && !placed; k++) placed = beside(pens[(pi + k) % pens.length], job) && (pi += k + 1, true);
       if (placed) continue;
     }
-    if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
+    if (job.prof === "farmer" && farms.length) {
+      const f = farms[fi++ % farms.length];
+      if (beside(f, job)) { farmSite.add(f); if (job.slot >= 0) farmHand.add(f); continue; }
+    }
     if ((job.prof === "builder" || job.prof === "furniture_maker") && plaza(job)) continue;
     if (job.prof === "furniture_maker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;   // plaza full: beside a house
     const b = bOf(job.house) || ((job.slot < 0 || job.prof === "forester" || job.prof === "miner") && homes.length ? homes[Math.floor(r() * homes.length)] : null);
     if (b && (inside(b, job) || beside(b, job))) continue;
     plaza(job);
+  }
+  // village generator 3: every farm has a composter (a spare one where no roster farmer got one there, for an unemployed villager to
+  // take up), and a farm with no farmer at spawn is run down (worldgen drawShell reads b.untended; js/villagelife.js farmers repair it)
+  if ((BF.state && BF.state.villages | 0) >= 3) for (const f of farms) {
+    if (!farmSite.has(f)) beside(f, { prof: "farmer", slot: -1 });
+    f.untended = !farmHand.has(f);
   }
   for (const j of out) if (j.slot >= 0 && !planIndex.has(pk(j.x, j.y, j.z))) planIndex.set(pk(j.x, j.y, j.z), { vkey: key, slot: j.slot });
   return out;
