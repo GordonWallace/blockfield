@@ -270,8 +270,9 @@ headlessly, prints console errors, runs `module.exports = async (page, outPrefix
 F3 and screenshots `<outPrefix>.png`. Use `page.evaluate(() => BF...)` to drive state. Headless FPS is low (software GL).
 
 ## BF.drops (js/drops.js)
-Dropped item entities (sprites with gravity) from broken blocks, popped plants and killed mobs; picked up within ~1.6 blocks after 0.5s, merge nearby, despawn after 300s, not saved.
+Dropped item entities (sprites with gravity) from broken blocks, popped plants and killed mobs; picked up within ~1.6 blocks after 0.5s, merge nearby, despawn after 300s of lying in a loaded chunk (in an unloaded chunk they neither age nor fall, and are hidden).
 - `init(scene)`, `update(dt)`, `clear()` (called by newWorld), `list`
+- `serialize()` -> `[[id, count, x, y, z, age, wear, pickupDelayLeft]]`, saved as `drops` by save.js; `deserialize(a)` puts them back at rest with their age (old saves: none).
 - `spawn(itemId, count, x, y, z)`; `spawnAt([{id,count}], bx, by, bz)` drops at the centre of a block.
 
 ## Plant clustering (worldgen.js, ground plants)

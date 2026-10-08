@@ -1,5 +1,5 @@
 // Saved worlds in the browser's IndexedDB: a list of worlds (name, seed, mode, last played),
-// each storing block edits, player, inventory and time of day. Autosaves while playing.
+// each storing block edits, player, inventory, time of day and the dropped items lying around. Autosaves while playing.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -65,6 +65,7 @@ function snapshot() {
     vlog: BF.vlog ? BF.vlog.serialize() : undefined,   // village action logs (js/villagelog.js)
     happy: BF.happiness ? BF.happiness.serialize() : undefined,   // village happiness: last week's events + last scores (js/happiness.js)
     maps: BF.maps && BF.maps.serialize ? BF.maps.serialize() : undefined, // explored pixels of filled maps (js/maps.js)
+    drops: BF.drops && BF.drops.serialize ? BF.drops.serialize() : undefined, // dropped items lying in the world, with their age (js/drops.js)
     edits,
   };
 }
@@ -93,6 +94,7 @@ function restore(data) {
   if (BF.happiness) BF.happiness.deserialize(data.happy || { fromLog: data.vlog }); // old saves: last week's events from the log
   if (BF.maps && BF.maps.deserialize) BF.maps.deserialize(data.maps); // old saves: no maps
   if (BF.signs && BF.signs.deserialize) BF.signs.deserialize(data.signs); // sign texts + auto-sign state (old saves: none)
+  if (BF.drops && BF.drops.deserialize) BF.drops.deserialize(data.drops); // dropped items (old saves: none)
 }
 
 // ---------- public API ----------
