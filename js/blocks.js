@@ -306,6 +306,10 @@ const BLOCK_DEFS = [
   // dehydrated farmland (js/farmland.js): crops grow at a third of the speed; left bare it reverts to dirt
   { name: "farmland_dry", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#7a5a3a" },
   // ---- end farmland pack ----
+  // ---- poultry pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Poultry keepers")
+  // nesting box: the poultry keeper villager's jobsite (not vanilla): a plank box of straw with eggs in it
+  { name: "nesting_box", jobsite: "poultry_keeper", tiles: { top: "nesting_box_top", side: "nesting_box_side", front: "nesting_box_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#c8a85a" },
+  // ---- end poultry pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -590,6 +594,10 @@ const ITEM_DEFS = [
   { name: "golden_sword", tool: { type: "sword", tier: 3, speed: 1, damage: 4 }, durability: 800, material: "gold", color: "#f2d64b" },
   { name: "golden_hoe", tool: { type: "hoe", tier: 3, speed: 7, damage: 1 }, durability: 800, material: "gold", color: "#f2d64b" },
   // ---- end gold tools ----
+  // ---- poultry items (js/poultry.js; append-only). Eggs are laid by chickens; a cooked egg (not vanilla) is cooked in a furnace.
+  { name: "egg", stack: 16, color: "#efe2c4" },
+  { name: "cooked_egg", food: 6, color: "#f4ecd8" },
+  // ---- end poultry items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

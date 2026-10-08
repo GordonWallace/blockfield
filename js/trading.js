@@ -25,7 +25,7 @@ const VALUE = {
   flint: .06, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,
   string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .04, white_wool: .12, leather: .15,
   raw_porkchop: .08, raw_beef: .08, raw_mutton: .07, raw_chicken: .06, cooked_porkchop: .12, steak: .12, cooked_mutton: .1,
-  cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
+  cooked_chicken: .1, raw_cod: .07, cooked_cod: .1, egg: .055, cooked_egg: .1, nesting_box: .2,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.0, bucket: 1.6,   // shears: 2 iron ingots, bucket: 3
   golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
@@ -170,6 +170,13 @@ const TRADES = {
     ["2 emerald > 16 coal"],
     ["3 emerald > 3 raw_gold"],
   ],
+  // The poultry keeper (js/poultry.js) sells what its flock gives: eggs it collects, feathers and raw chicken from the birds it culls. Prices
+  // 104-114% of VALUE. Only what it actually holds can be bought ("Out of stock"): nothing is restocked or part of its starting pack.
+  poultry_keeper: [
+    ["1 emerald > 16 egg", "1 emerald > 13 feather", "48 wheat_seeds > 1 emerald"],
+    ["1 emerald > 15 raw_chicken"],
+    [], [], [],
+  ],
   // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer. It also makes furnaces from 8
   // cobblestone bought from the miner, keeping one in stock for the toolsmith.
@@ -204,6 +211,7 @@ const PRODUCE = {
   explorer: [],
   forester: [],
   miner: [],          // everything it sells is dug out of the ground (js/miner.js)
+  poultry_keeper: [], // eggs, feathers and chicken come only from its flock (js/poultry.js)
   furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
 };
 
@@ -301,6 +309,7 @@ function stockFor(prof, v) {
   if (prof === "miner") for (const n of ["cobblestone", "coal", "raw_iron", "raw_gold", "diamond"]) noStart.add(I[n]);   // mined, never given
   if (prof === "toolsmith") for (const id of profile(prof).caps.keys()) noStart.add(id);   // made, never given (js/toolsmith.js)
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
+  if (prof === "poultry_keeper") for (const n of ["egg", "feather", "raw_chicken"]) noStart.add(I[n]);   // laid or culled, never given (js/poultry.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
