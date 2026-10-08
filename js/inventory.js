@@ -1143,8 +1143,9 @@ function renderOffers() {
     const lvl = v.level || 1;
     const prof = (v.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
     const st = BF.villagerStatus ? BF.villagerStatus.text(v) : "";   // what the villager is doing (js/villagerstatus.js)
-    titleEl.textContent = st ? prof + " \u2014 " + st : prof;
-    vinvTitleEl.textContent = prof + " Inventory";
+    const vn = BF.vlog ? BF.vlog.nameOf(v) : "";                      // villager names (js/villagelog.js)
+    titleEl.textContent = (vn ? vn + ", " : "") + (st ? prof + " \u2014 " + st : prof);
+    vinvTitleEl.textContent = vn ? vn + "'s Inventory" : prof + " Inventory";
     lvlEl.textContent = levelFlashT > 0 ? "Level up! " + LEVELS[lvl - 1] : LEVELS[lvl - 1];
     lvlEl.classList.toggle("flash", levelFlashT > 0);
     const frac = lvl >= 5 ? 1 : (v.xp - LEVEL_XP[lvl - 1]) / (LEVEL_XP[lvl] - LEVEL_XP[lvl - 1]);

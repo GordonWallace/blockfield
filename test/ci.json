@@ -23,6 +23,7 @@
   {"name": "shepherd-day", "file": "test/shepherd-day.js", "kind": "actions", "tier": "baseline"},
   {"name": "tent-actions", "file": "test/tent-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "villagelog", "file": "test/villagelog.js", "kind": "actions", "tier": "baseline"},
+  {"name": "villager-hover", "file": "test/villager-hover.js", "kind": "actions", "tier": "baseline", "what": "looking at a villager shows name, job and activity"},
   {"name": "villager-screens", "file": "test/villager-screens.js", "kind": "actions", "tier": "baseline"},
   {"name": "wood-variants", "file": "test/wood-variants.js", "kind": "actions", "tier": "baseline"},
   {"name": "automap-actions", "file": "test/automap-actions.js", "kind": "actions", "tier": "integration"},
