@@ -386,6 +386,7 @@ function performTrade(o) {
   BF.trades.exchange(villager, o);
   if (BF.trades.addXp(villager, o)) { levelFlashT = 2.5; BF.emit("villagerLevelUp", villager, villager.level); }
   BF.emit("villagerTrade", villager, o);
+  if (BF.prices) BF.prices.filled(villager, o, 1);
 }
 function clickTrade(shift) {
   if (!tradeOffer) return;
@@ -1152,7 +1153,7 @@ function renderFurnaceProgress() {
 let offersKey = "";
 function renderOffers() {
   const v = villager;
-  const key = v ? v.trades.map(o => tradeReason(o) || "").join("|") + "#" + offerSel + "#" + v.level : "-";
+  const key = v ? v.trades.map(o => (tradeReason(o) || "") + o.buy.map(b => b.id + "x" + b.n).join("+") + ">" + o.sell.id + "x" + o.sell.n).join("|") + "#" + offerSel + "#" + v.level : "-";   // amounts too: prices move (js/prices.js)
   if (key !== offersKey) {
     offersKey = key;
     offersEl.textContent = "";
@@ -1480,6 +1481,7 @@ const api = {
     if (open_) closeScreen(true);
     ensureTrades(v);
     BF.trades.restock(v);
+    if (BF.prices) BF.prices.tick(v);   // prices follow demand (js/prices.js)
     villager = v; offerSel = -1; pay = [null, null]; levelFlashT = 0;
     recomputeTrade();
     openScreen("trade");
