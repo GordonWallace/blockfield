@@ -50,7 +50,7 @@ module.exports = async (pg) => {
     const tools = a => a.filter(s => s && ((BF.items[s.id].tool && typeof BF.items[s.id].tool === "object") || BF.items[s.id].name === "shears")).map(s => BF.items[s.id].name);
     const cnt = (a, n) => T.inv.count(a, I[n]);
     const mi = kit("miner"), fa = kit("farmer"), fo = kit("forester"), sh = kit("shepherd");
-    ok("founding miner: wooden pickaxe only", tools(mi).join() === "wooden_pickaxe", names(mi));
+    ok("founding miner: stone pickaxe only", tools(mi).join() === "stone_pickaxe", names(mi));
     ok("founding miner: 30-40 torches", cnt(mi, "torch") >= 30 && cnt(mi, "torch") <= 40, cnt(mi, "torch"));
     ok("founding farmer: wooden hoe only", tools(fa).join() === "wooden_hoe", tools(fa));
     ok("founding forester: wooden axe only", tools(fo).join() === "wooden_axe", names(fo));
