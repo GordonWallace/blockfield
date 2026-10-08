@@ -9,9 +9,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer push waits for the running integration run instead of cancelling it: with merges minutes apart and runs taking
+# about an hour, cancelling meant no run ever finished. Only the newest waiting push runs next; pull request runs still
+# cancel their superseded ones.
 concurrency:
   group: integration-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   integration:
