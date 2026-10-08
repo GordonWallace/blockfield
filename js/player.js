@@ -805,20 +805,47 @@ function updateParticles(dt) {
 const iconTex = {};
 function cubeGeometry(id) {
   const b = BF.blocks[id];
-  const g = new THREE.BoxGeometry(0.34, 0.34, 0.34);
-  const uv = g.attributes.uv, col = [];
+  const box = new THREE.BoxGeometry(0.34, 0.34, 0.34);
+  const bp = box.attributes.position, bn = box.attributes.normal, bu = box.attributes.uv, bi = box.index;
   const faces = ["side", "side", "top", "bottom", "side", "side"];  // BoxGeometry order: +x -x +y -y +z -z
   const shade = [0.8, 0.8, 1, 0.55, 0.68, 0.68];
+  const worldFace = [2, 3, 0, 1, 4, 5];  // BoxGeometry face -> js/world.js FACES index (top, bottom, +x, -x, +z, -z)
+  // Grey tiles (grass top, leaves) are tinted by biome in the world (js/world.js _faceTint), so tint them here with the biome
+  // the player stands in, or the hotbar's default tint, else the held grass block shows a stone-grey top. Grass sides are
+  // drawn as in the world: plain dirt with the tinted fringe overlay just outside it.
+  let biome = null;
+  try { biome = BF.worldgen.tintAt(pos.x, pos.z); } catch (_) {}
+  const deft = BF.textures.defaultTint || {};
+  const tintFor = k => (k === 1 || k === 4 ? (biome && biome.grass) || deft.grass : k === 2 ? (biome && biome.foliage) || deft.foliage : k === 3 ? (biome && biome.water) || deft.water : null);
+  const P = [], N = [], U = [], C = [], I = [];
+  const quad = (f, r, t, push) => {
+    const v0 = P.length / 3, s = shade[f], c = t ? [s * t[0], s * t[1], s * t[2]] : [s, s, s];
+    for (let k = 0; k < 4; k++) {
+      const i = f * 4 + k;
+      P.push(bp.getX(i) + bn.getX(i) * push, bp.getY(i) + bn.getY(i) * push, bp.getZ(i) + bn.getZ(i) * push);
+      N.push(bn.getX(i), bn.getY(i), bn.getZ(i));
+      U.push(r ? r[0] + (r[2] - r[0]) * bu.getX(i) : bu.getX(i), r ? r[1] + (r[3] - r[1]) * bu.getY(i) : bu.getY(i));
+      C.push(c[0], c[1], c[2]);
+    }
+    for (let k = 0; k < 6; k++) I.push(bi.getX(f * 6 + k) - f * 4 + v0);
+  };
+  const overlays = [];
   for (let f = 0; f < 6; f++) {
     let r = null;
     try { r = BF.textures.uv(b.tiles[faces[f]]); } catch (_) {}
-    for (let k = 0; k < 4; k++) {
-      const i = f * 4 + k;
-      if (r) uv.setXY(i, r[0] + (r[2] - r[0]) * uv.getX(i), r[1] + (r[3] - r[1]) * uv.getY(i));
-      col.push(shade[f], shade[f], shade[f]);
-    }
+    const tk = BF.world._faceTint ? BF.world._faceTint[id * 6 + worldFace[f]] : 0;
+    if (tk === 4 && BF.world._overlayUV) { quad(f, BF.world._dirtUV, null, 0); overlays.push(f); }
+    else quad(f, r, tintFor(tk), 0);
   }
-  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  for (const f of overlays) quad(f, BF.world._overlayUV, tintFor(4), 0.002);
+  box.dispose();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(U, 2));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
+  g.setIndex(I);
+  g.userData.cube = true;
   return g;
 }
 function iconTexture(id) {
@@ -843,7 +870,7 @@ function setViewModel(sel) {
   if (vmMesh) { vm.remove(vmMesh); if (vmMesh !== hand) { vmMesh.geometry.dispose(); vmMesh.material.dispose(); } }
   const it = BF.items[id];
   if (!id || !it) vmMesh = hand;
-  else if (it.isBlock && it.tiles && BF.world.solidMat) {
+  else if (it.isBlock && it.tiles && BF.world.solidMat && !(BF.textures.iconIsFlat && BF.textures.iconIsFlat(it))) { // flowers, saplings, torches...: a flat sprite, as in the hotbar
     const mat = new THREE.MeshBasicMaterial({ map: BF.world.solidMat.map, vertexColors: true, alphaTest: 0.5, depthTest: false, transparent: it.render === "liquid" });
     vmMesh = new THREE.Mesh(cubeGeometry(id), mat);
     vmMesh.rotation.set(0.1, 0.75, 0);
@@ -1668,6 +1695,13 @@ P.deserialize = function (o) {
   if (menuOpen === "death") { showScreen(null); BF.state.paused = false; }
   hudKey = "";
   syncCamera(0.016);
+};
+P.viewModel = function () { // test hook: what the held view model is ("hand", "cube" or "sprite") and a cube's top-face vertex colour
+  if (!vmMesh) return null;
+  if (vmMesh === hand) return { kind: "hand" };
+  const g = vmMesh.geometry, col = g.attributes.color;
+  if (g.userData.cube) return { kind: "cube", top: col ? [col.getX(8), col.getY(8), col.getZ(8)] : null, faces: g.index.count / 6 };
+  return { kind: "sprite" };
 };
 P.setMouse = function (left, right) { // test hook: simulate held mouse buttons
   if (left && !mouseL) { mouseL = true; primaryDown(); } else if (!left) { mouseL = false; resetBreak(); }

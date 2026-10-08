@@ -10,6 +10,7 @@
   {"name": "farmbeds-actions", "file": "test/farmbeds-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "farmer-logs", "file": "test/farmer-logs.js", "kind": "actions", "tier": "baseline", "what": "farmers buy logs from foresters, never fell trees"},
   {"name": "golem-actions", "file": "test/golem-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "held-items", "file": "test/held-items.js", "kind": "actions", "tier": "baseline", "what": "held grass top tinted, flowers and torches flat in hand"},
   {"name": "jobmemory", "file": "test/jobmemory.js", "kind": "actions", "tier": "baseline"},
   {"name": "map-held-actions", "file": "test/map-held-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "maps-actions", "file": "test/maps-actions.js", "kind": "actions", "tier": "baseline"},
