@@ -55,13 +55,16 @@ module.exports = async (pg, out) => {
     A.fo = A.fo || null; const st = A.fo || (BF.forester._test.state(A));
     st.cutCd = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.thinkT = 0; st.sweep = null; if (!opts || !opts.keep) st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
-    let chop = 0, t = 0, fell = null, swings = 0, lastSw = 0, held = null, stop = null;
+    let chop = 0, t = 0, fell = null, swings = 0, lastSw = 0, held = null, stop = null; let pk = null, pc = 0, pd = 0;
     for (; t < limit && !fell; t += dt) {
       BF.sky.setTime(opts && opts.offAt != null && t >= opts.offAt && t < opts.offAt + 2 ? 0.6 : 0.1);
       BF.mobs.update(dt);
       BF.player.position.set(A.position.x + 4, A.position.y + 2, A.position.z + 4);
       const k = A.fo && A.fo.task;
-      if (k && k.kind === "cut" && Math.hypot(k.x + 0.5 - A.position.x, k.z + 0.5 - A.position.z) <= 3.6 && (k.done > 0 || A.fo.chop > 0)) {
+      // chopping time is the ticks its felling progress moved on (in reach is not enough: it can stand by the trunk without cutting)
+      const moved = k && k.kind === "cut" && k === pk && (A.fo.chop > pc + 1e-9 || k.done > pd);
+      pk = k; pc = A.fo ? A.fo.chop : 0; pd = k ? k.done : 0;
+      if (moved) {
         chop += dt;
         if (A.ai.swingT > lastSw) swings++;
         if (A.heldMesh) held = { visible: A.heldMesh.visible, item: BF.items[A.heldId].name, parent: A.heldMesh.parent === A.meshes.arms };
@@ -107,10 +110,16 @@ module.exports = async (pg, out) => {
   const part = await pg.evaluate(() => {   // chop 7 s, then interrupt it
     const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
-    let chop = 0;
-    for (let t = 0; t < 240 && chop < 7; t += 0.05) { BF.sky.setTime(0.1); BF.mobs.update(0.05); const k = A.fo.task; if (k && k.kind === "cut" && Math.hypot(k.x + 0.5 - A.position.x, k.z + 0.5 - A.position.z) <= 3) chop += 0.05; }
+    // the sim clock and drops must move too: with them frozen, a forester waiting for items to land after a felling waits for good
+    let chop = 0, pk = null, pc = 0, pd = 0;
+    for (let t = 0; t < 400 && chop < 7; t += 0.05) {
+      BF.sky.setTime(0.1); BF.warp.advance(0.05); BF.mobs.update(0.05); BF.drops.update(0.05);
+      const k = A.fo.task;
+      if (k && k.kind === "cut" && k === pk && (A.fo.chop > pc + 1e-9 || k.done > pd)) chop += 0.05;
+      pk = k; pc = A.fo.chop; pd = k ? k.done : 0;
+    }
     A.tradingWith = BF.player; BF.forester.ai(A, 0.05, {}); A.tradingWith = null;   // the player opens its trade screen: the task ends, progress kept
-    return { saved: A.fo.saved, chop, task: A.fo.task && { kind: A.fo.task.kind, done: A.fo.task.done } };
+    return { saved: A.fo.saved, chop, task: A.fo.task && { kind: A.fo.task.kind, done: A.fo.task.done }, log: BF.forester.LOG.slice(-6).map(e => JSON.stringify(e)) };
   });
   console.log("part", JSON.stringify(part));
   const r5 = await watch(240);
