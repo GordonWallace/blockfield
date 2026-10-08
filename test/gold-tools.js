@@ -10,32 +10,31 @@ module.exports = async (pg) => {
     // ---- gold tools
     const kinds = ["pickaxe", "axe", "shovel", "sword", "hoe"];
     ok("five gold tools exist", kinds.every(k => I["golden_" + k] != null), kinds.filter(k => I["golden_" + k] == null));
-    ok("gold tools last 32 uses", kinds.every(k => BF.durability(I["golden_" + k]) === 32), kinds.map(k => BF.durability(I["golden_" + k])));
+    ok("gold tools last 800 uses (iron 250, diamond 1561)", kinds.every(k => BF.durability(I["golden_" + k]) === 800), kinds.map(k => BF.durability(I["golden_" + k])));
     ok("other lifespans unchanged", ["wooden", "stone", "iron", "diamond"].map(m => BF.durability(I[m + "_pickaxe"])).join() === "59,131,250,1561");
     const recipe = id => BF.inventory.recipes.find(x => x.out === id);
     const rp = recipe(I.golden_pickaxe), rh = recipe(I.golden_hoe);
     ok("golden pickaxe recipe: 3 gold ingots + 2 sticks", !!rp && rp.pattern.join("|") === "MMM| S | S " && rp.key.M.includes(I.gold_ingot), rp && rp.pattern);
     ok("every gold tool has a recipe", kinds.every(k => recipe(I["golden_" + k])));
     ok("gold tools sit in the Tools tab with an icon", !!BF.textures.icon(I.golden_axe));
-    // vanilla times (Java): stone 0.2 s with a gold pickaxe (0.3 s diamond, 0.4 s iron), oak log 0.25 s with a gold axe
+    // gold sits between iron and diamond (Gordon, 1.1; not vanilla): stone 0.4 s with iron, 0.3 s with diamond
     const ms = (b, t) => +P.mineSeconds(B[b], t == null ? null : I[t]).toFixed(2);
-    ok("gold pickaxe mines stone in 0.2 s (iron 0.4, diamond 0.3)", ms("stone", "golden_pickaxe") === 0.2 && ms("stone", "iron_pickaxe") === 0.4 && ms("stone", "diamond_pickaxe") === 0.3, [ms("stone", "golden_pickaxe"), ms("stone", "iron_pickaxe"), ms("stone", "diamond_pickaxe")]);
-    ok("gold axe fells an oak log in 0.25 s (hand 3 s)", ms("oak_log", "golden_axe") === 0.25 && ms("oak_log", null) === 3, [ms("oak_log", "golden_axe"), ms("oak_log", null)]);
-    ok("gold pickaxe harvests stone and coal", P.minedDrops(B.stone, I.golden_pickaxe) && P.minedDrops(B.coal_ore, I.golden_pickaxe));
-    ok("gold pickaxe gets nothing from iron, gold or diamond ore (wood's level)", !P.minedDrops(B.iron_ore, I.golden_pickaxe) && !P.minedDrops(B.gold_ore, I.golden_pickaxe) && !P.minedDrops(B.diamond_ore, I.golden_pickaxe));
+    ok("gold pickaxe mines stone between iron and diamond", ms("stone", "golden_pickaxe") <= ms("stone", "iron_pickaxe") && ms("stone", "golden_pickaxe") >= ms("stone", "diamond_pickaxe") && ms("stone", "iron_pickaxe") === 0.4 && ms("stone", "diamond_pickaxe") === 0.3, [ms("stone", "golden_pickaxe"), ms("stone", "iron_pickaxe"), ms("stone", "diamond_pickaxe")]);
+    ok("gold axe fells an oak log between iron and diamond (hand 3 s)", ms("oak_log", "golden_axe") <= ms("oak_log", "iron_axe") && ms("oak_log", "golden_axe") >= ms("oak_log", "diamond_axe") && ms("oak_log", null) === 3, [ms("oak_log", "golden_axe"), ms("oak_log", "iron_axe"), ms("oak_log", null)]);
+    ok("gold pickaxe harvests stone, coal and diamond ore (iron's level)", P.minedDrops(B.stone, I.golden_pickaxe) && P.minedDrops(B.coal_ore, I.golden_pickaxe) && P.minedDrops(B.diamond_ore, I.golden_pickaxe));
     ok("gold tools have a trade value", ["golden_pickaxe", "golden_hoe"].every(n => BF.trades.VALUE ? BF.trades.VALUE[n] > 0 : true));
     // ---- villager wear helper
     ok("breaking a log costs an axe 1 use, a crop nothing", TW.forBlock(B.oak_log, { id: I.iron_axe }) === 1 && TW.forBlock(B.wheat, { id: I.iron_axe }) === 0);
     ok("a sword pays 2 per block, 1 per hit; other tools 2 per hit", TW.forBlock(B.stone, { id: I.iron_sword }) === 2 && TW.forHit({ id: I.iron_sword }) === 1 && TW.forHit({ id: I.iron_pickaxe }) === 2);
     ok("bare hands cost nothing", TW.forBlock(B.stone, null) === 0 && TW.use({ inv: [] }, null, 1) === false);
     const v = { inv: T.create(), profession: "farmer", position: P.position.clone() };
-    v.inv[0] = { id: I.wooden_hoe, count: 1, wear: 50 }; v.inv[1] = { id: I.golden_hoe, count: 1 }; v.inv[2] = { id: I.stone_hoe, count: 1, wear: 3 };
-    ok("best tool: stone over gold over wood", TW.best(v, "hoe") === v.inv[2]);
+    v.inv[0] = { id: I.iron_hoe, count: 1, wear: 50 }; v.inv[1] = { id: I.golden_hoe, count: 1 }; v.inv[2] = { id: I.diamond_hoe, count: 1, wear: 3 };
+    ok("best tool: diamond over gold over iron", TW.best(v, "hoe") === v.inv[2]);
     v.inv[2] = null;
-    ok("gold over wood", TW.best(v, "hoe") === v.inv[1]);
+    ok("gold over iron", TW.best(v, "hoe") === v.inv[1]);
     let r1;
-    for (let k = 0; k < 32; k++) r1 = TW.use(v, v.inv[1] || { id: 0 }, 1);
-    ok("a gold hoe breaks on its 32nd use and leaves the pack", r1 === "broken" && v.inv[1] === null, v.inv[1]);
+    for (let k = 0; k < 800; k++) r1 = TW.use(v, v.inv[1] || { id: 0 }, 1);
+    ok("a gold hoe breaks on its 800th use and leaves the pack", r1 === "broken" && v.inv[1] === null, v.inv[1]);
     ok("the break is recorded", TW.LOG.length > 0 && TW.LOG[TW.LOG.length - 1].tool === "golden_hoe");
 
     // ---- a farmer tilling a planned bed (js/villagelife.js performBed): one use per block tilled

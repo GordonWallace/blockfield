@@ -101,6 +101,8 @@
   tr.hl td { background: rgba(127, 191, 77, 0.1); }
   tbody tr:hover td { background: rgba(255, 255, 255, 0.04); }
   .roster { max-height: 420px; overflow: auto; }
+  .past { border-top: 1px solid var(--edge); } .past summary { cursor: pointer; padding: 10px 16px; color: var(--muted); font-size: 12px; letter-spacing: 0.5px; } .past summary b { color: var(--ink); font-weight: 500; margin-left: 4px; }
+  .past .roster { max-height: 240px; } .past td { color: var(--muted); }
   .hp { display: inline-block; width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); vertical-align: middle; margin-right: 6px; overflow: hidden; } .hp i { display: block; height: 100%; background: var(--accent); }
   .happy { background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; display: grid; grid-template-columns: auto minmax(80px, 1fr); gap: 4px 14px; align-items: center; }
   .happy .hs { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; } .happy .hs .big { font-size: 22px; }
@@ -237,6 +239,9 @@
       <div class="panel" id="rpanel">
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
         <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="age" title="Game days it has been loaded and active (time its village sat unloaded doesn't count)">Age</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
+        <details class="past" id="r-past" open><summary>Past villagers <b id="r-pastn">0</b></summary>
+          <div class="roster"><table><thead><tr><th>Name</th><th>Job</th><th>Died</th><th>Cause</th><th title="Game days it had been loaded and active">Age</th></tr></thead><tbody id="r-pastb"></tbody></table></div>
+        </details>
       </div>
       <div class="panel"><details class="raw" id="raw"><summary>In-game F3 text</summary><pre id="f3"></pre></details></div>
     </div>
@@ -563,7 +568,8 @@ function renderRoster(s) {
   if (q) rows = rows.filter(m => (m.name + " " + m.prof + " " + m.status).toLowerCase().includes(q));
   const k = rosterSort.k, dir = rosterSort.dir;
   rows.sort((a, b) => { const x = k === "hp" ? a.hpf : a[k], y = k === "hp" ? b.hpf : b[k]; return (typeof x === "string" ? x.localeCompare(y) : (x > y) - (x < y)) * dir || a.name.localeCompare(b.name); });
-  $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + (curStale ? " when last loaded" : " loaded");
+  $("r-count").textContent = rows.length + (q ? " of " + v.villagerList.length : "") + (curStale ? " when last loaded" : " loaded") + (v.dead && v.dead.length ? " \u00B7 " + v.dead.length + " died" : "");
+  renderPast(v.dead || [], q);
   $("r-body").innerHTML = rows.map(m => `<tr data-n="${esc(m.name)}"><td>${esc(m.name)}</td><td><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i>${esc(m.prof)}</td>` +
     `<td class="st" title="${esc(m.status || "")}"><div>${esc(m.status || "")}</div></td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
     `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td>` +
@@ -579,6 +585,14 @@ function markRoster(scroll) {
     const on = tr.dataset.n === focus; tr.classList.toggle("hl", on);
     if (on && scroll) tr.scrollIntoView({ block: "nearest" });
   }
+}
+// Villagers who died in this village, newest first (the filter box applies to them too).
+function renderPast(dead, q) {
+  const rows = dead.slice().reverse().filter(d => !q || (d.name + " " + d.prof + " " + (d.cause || "")).toLowerCase().includes(q));
+  $("r-pastn").textContent = dead.length;
+  $("r-pastb").innerHTML = rows.map(d => `<tr><td>${esc(d.name)}</td><td><i class="dot" style="background:${profColor(d.prof)};margin-right:6px"></i>${esc(d.prof)}</td>` +
+    `<td>${d.day == null ? "-" : esc(stamp(d.day))}</td><td>${esc(d.cause ? "killed by " + d.cause : "unknown")}</td><td>${d.age == null ? "-" : days(d.age)}</td></tr>`).join("") ||
+    `<tr><td colspan="5" class="dim">${dead.length ? "No past villagers match." : "Nobody has died here."}</td></tr>`;
 }
 $("r-body").addEventListener("mouseover", e => { const tr = e.target.closest("tr"); hoverName = tr && tr.dataset.n || null; if (snap && curV) drawMap(snap); markRoster(); });
 $("r-body").addEventListener("mouseleave", () => { hoverName = null; if (snap && curV) drawMap(snap); markRoster(); });

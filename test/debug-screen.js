@@ -97,7 +97,8 @@ const start = async () => {
   await dbg.click(`${row('Player')} input.tcb`);
   await dbg.waitForFunction(() => ![...document.querySelectorAll('#log .ent .tx')].some(e => /^Player traded/.test(e.textContent)), null, { timeout: 3000 }).catch(() => {});
   vis = await texts();
-  ok('player checkbox hides the player trade', !vis.some(t => /^Player traded/.test(t)) && vis.length < all);
+  // (villagers keep logging meanwhile, so the count can't be compared with the one taken earlier)
+  ok('player checkbox hides the player trade ' + JSON.stringify(vis.filter(t => /^Player traded/.test(t))), !vis.some(t => /^Player traded/.test(t)));
   await dbg.screenshot({ path: out + '-filters.png', fullPage: true });
   await dbg.click('#l-count'); await dbg.waitForTimeout(100);
   ok('a click elsewhere closes the menu', !(await dbg.evaluate(() => document.getElementById('l-types').open)));
@@ -210,6 +211,15 @@ const start = async () => {
     return { round, fromLog };
   }, hap.key);
   ok('happiness saves and loads, old saves read last week from the log ' + JSON.stringify(hsave), hsave.round && hsave.fromLog);
+  // past villagers: a villager killed in the shown village is listed with its job, cause and age, and counted
+  const victim = await game.evaluate(key => {
+    const r = BF.mobs.villages.get(key), m = r.members.find(x => x.type === 'villager' && !x.dead && !x.child && x.profession !== 'unemployed');
+    const name = BF.vlog.nameOf(m); BF.mobs.hurt(m, 999, 'a zombie'); return name;
+  }, bkey);
+  await dbg.waitForFunction(n => document.getElementById('r-pastb').textContent.includes(n), victim, { timeout: 8000 }).catch(() => {});
+  const past = await dbg.evaluate(() => ({ n: document.getElementById('r-pastn').textContent, row: document.getElementById('r-pastb').querySelector('tr').textContent, count: document.getElementById('r-count').textContent }));
+  await dbg.screenshot({ path: out + '-past.png', fullPage: true });
+  ok('past villagers list the dead one ' + JSON.stringify(past), +past.n >= 1 && past.row.includes(victim) && /killed by a zombie/.test(past.row) && /days?$/.test(past.row) && /\d+ died/.test(past.count));
   // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
   ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
   // a feed error (an old villagelog.js without panelData, say) shows on the screen instead of "waiting for the game"
