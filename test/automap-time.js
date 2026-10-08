@@ -6,7 +6,7 @@ module.exports = async (pg, out) => {
   for (const gen of [2, 1]) {
     await pg.evaluate(g => BF.newWorld(1337, { gen: g, biomeScale: 1 }), gen);
     const res = { gen };
-    for (const k of [16, 128]) {            // 2048 blocks (2 b/px) and 16384 blocks (16 b/px, the widest allowed), both with rivers
+    for (const k of [16, 4096]) {           // 2048 blocks (2 b/px, rivers) and 524288 blocks (512 b/px, the widest allowed)
       let best = 1e9;
       for (let n = 0; n < 3; n++) {
         const r = await pg.evaluate(([k, n]) => {
