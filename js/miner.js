@@ -20,7 +20,9 @@
 //   a shaft dug for a lower level is abandoned for a deeper one when it levels up. It walks the shaft along its own cells, so nothing
 //   needs ladders. A cell that would open into water, something built or a void is skipped (a branch) or ends the shaft (the corridor); a
 //   finished shaft is followed by a new one in another direction. It leaves the shaft before the end of the working day.
-// - What it keeps: cobblestone (stone drops it), coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis and emeralds; dirt, gravel and the rest it digs through are left behind.
+// - What it keeps: cobblestone (stone drops it), coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis, emeralds and flint (gravel drops
+//   it 10% of the time, blocks.js extraDrops); dirt, the gravel itself and the rest it digs through are left behind. While a fletcher of its
+//   village is short of flint (BF.fletcher) and it holds fewer than FLINT_WANT, it also digs the gravel in the walls and ceiling of its shaft.
 // - Selling: holding SELL_MIN cobblestone, it walks to a builder of its village that needs some (its current structure's shortfall, or a reserve
 //   of BUILDER_RESERVE for the next foundation in cobblestone villages) and sells at its own offer "1 emerald > 32 cobblestone". Builders short
 //   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. A novice stops digging at KEEP_COBBLE; a
@@ -57,7 +59,10 @@ const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().t
 // ---------------------------------------------------------------- items
 const I = n => BF.I[n];
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
-const KEEP = new Set(["cobblestone", "coal", "raw_iron", "raw_gold", "raw_copper", "diamond", "cobbled_deepslate", "emerald", "lapis_lazuli", "redstone"]);
+const KEEP = new Set(["cobblestone", "coal", "raw_iron", "raw_gold", "raw_copper", "diamond", "cobbled_deepslate", "emerald", "lapis_lazuli", "redstone", "flint"]);
+const FLINT_WANT = 8;   // digs wall gravel for flint while it holds fewer than this and a fletcher of its village is short of flint
+// Is a fletcher of m's village short of flint while m holds little? (then gravel in the shaft walls is worth digging)
+const wantsFlint = m => I("flint") != null && count(m, I("flint")) < FLINT_WANT && !!(BF.fletcher && m.village && (m.village.members || []).some(v => v.profession === "fletcher" && !v.dead && !v.removed && Array.isArray(v.inv) && BF.fletcher.shortfall(v).flint > 0));
 const keeps = id => KEEP.has(nameOf(id));
 const isPick = id => { const it = BF.items[id]; return !!(it && it.tool && it.tool.type === "pickaxe"); };
 const count = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
@@ -676,14 +681,15 @@ function ai(m, dt, out) {
   });
 }
 // Ore in the walls and ceiling of cell c that its pickaxe can harvest and that has no liquid next to it: [[x, y, z]] (dug with the cell).
+// Gravel too while the village's fletcher needs flint (wantsFlint).
 function wallOres(m, sh, c) {
-  const out = [], p = pickOf(m), [ux, uz] = c.kind === "stairs" ? [sh.dx, sh.dz] : cdir(sh);
+  const out = [], p = pickOf(m), [ux, uz] = c.kind === "stairs" ? [sh.dx, sh.dz] : cdir(sh), gravel = wantsFlint(m) ? BF.B.gravel : -1;
   const [rx, rz] = c.kind === "branch" ? [-uz, ux] : [ux, uz];   // the direction the cell's run goes; its walls are either side of it
   const cand = [[c.x, c.y + c.h, c.z]];
   for (let k = 0; k < c.h; k++) cand.push([c.x - rz, c.y + k, c.z + rx], [c.x + rz, c.y + k, c.z - rx]);
   for (const [x, y, z] of cand) {
     const id = get(x, y, z), b = BF.blocks[id];
-    if (!b || !/_ore$/.test(b.name) || !canHarvest(id, p)) continue;
+    if (!b || !(/_ore$/.test(b.name) || id === gravel) || !canHarvest(id, p)) continue;
     let wet = false;
     for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (liquid(get(x + dx, y + dy, z + dz))) wet = true;
     if (!wet) out.push([x, y, z]);
@@ -766,5 +772,5 @@ function unpack(m, o) {
 // In its mineshaft (or digging its way out): village errands such as food shopping wait until it is back up (js/villagelife.js).
 const underground = m => !!(m && m.mi && (inShaft(m, m.mi.shaft) || m.mi.task && m.mi.task.kind === "climb"));
 BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
-  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, digDepth, wantsStore, _test: { state, area, checkCell, dig, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
+  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, FLINT_WANT, digDepth, wantsStore, wantsFlint, _test: { state, area, checkCell, dig, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
 })();

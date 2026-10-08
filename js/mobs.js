@@ -1406,6 +1406,7 @@ function villagerAI(m, dt, out) {
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
   if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;
   if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
+  if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.ai(m, dt, out)) return;   // buys flint, sticks, feathers and string for arrows and bows (js/fletcher.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)

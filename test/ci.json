@@ -15,6 +15,7 @@
   {"name": "eggcook-actions", "file": "test/eggcook-actions.js", "kind": "actions", "tier": "baseline", "what": "villagers cook eggs only in a real furnace with fuel, one per furnace, buy eggs only when they can cook them"},
   {"name": "farmer-dig", "file": "test/farmer-dig.js", "kind": "actions", "tier": "baseline", "what": "farmers dig dirt off natural edges or from one neat shallow pit"},
   {"name": "farmer-logs", "file": "test/farmer-logs.js", "kind": "actions", "tier": "baseline", "what": "farmers buy logs from foresters, never fell trees"},
+  {"name": "fletcher-actions", "file": "test/fletcher-actions.js", "kind": "actions", "tier": "baseline", "what": "fletchers make arrows and bows only from materials bought in the village, shepherds spin wool into string, miners keep flint from gravel, no arrows or iron swords from the restock"},
   {"name": "golem-actions", "file": "test/golem-actions.js", "kind": "actions", "tier": "baseline"},
   {"name": "held-items", "file": "test/held-items.js", "kind": "actions", "tier": "baseline", "what": "held grass top tinted, flowers and torches flat in hand"},
   {"name": "jobmemory", "file": "test/jobmemory.js", "kind": "actions", "tier": "baseline"},

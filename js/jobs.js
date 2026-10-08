@@ -486,6 +486,8 @@ function ai(m, dt, out) {
     if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(1, 3);   // something to craft: go to the table soon
     if (J.t > 3 && m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(1, 3);    // wool and boards in hand: go make beds
     if (J.t > 3 && m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.wantsJob(m)) J.t = rnd(1, 3);          // a tool to make or finish
+    if (J.t > 3 && m.profession === "fletcher" && BF.fletcher && BF.fletcher.wantsJob(m)) J.t = rnd(1, 3);            // arrows or a bow to make or finish
+    if (J.t > 3 && m.profession === "shepherd" && BF.shepherd && BF.shepherd.wantsSpin(m)) J.t = rnd(1, 3);           // wool to spin into string
     if (J.t > 0) return false;
     if (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 40 || !BF.world.isLoaded(s.x, s.z)) { J.t = rnd(20, 40); return false; }
     if (!nav.takePlan()) { J.t = 0.3; return false; }
@@ -507,6 +509,8 @@ function ai(m, dt, out) {
     if (m.profession === "cartographer" && BF.cartography) BF.cartography.work(m, J, dt);   // crafts compasses and maps at its table (js/cartography.js)
     if (m.profession === "furniture_maker" && BF.furniture) BF.furniture.work(m, J, dt);   // makes beds at its carpentry bench (js/furniture.js)
     if (m.profession === "toolsmith" && BF.toolsmith) BF.toolsmith.work(m, J, dt);   // makes tools at its smithing table, 2 game hours each (js/toolsmith.js)
+    if (m.profession === "fletcher" && BF.fletcher) BF.fletcher.work(m, J, dt);   // makes arrows and bows at its fletching table (js/fletcher.js)
+    if (m.profession === "shepherd" && BF.shepherd) BF.shepherd.work(m, J, dt);   // spins wool into string at its loom (js/shepherd.js)
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.45 };   // head down at the block
     if (J.t <= 0) { J.mode = "off"; J.t = rnd(40, 120); m.ai.mode = "idle"; m.ai.t = 1; return false; }
     return true;
