@@ -42,6 +42,7 @@ function text(m) {
     || (BF.miner ? BF.miner.statusText(m) : "")                                // quarrying, digging the mineshaft, selling stone (js/miner.js)
     || (BF.toolsmith ? BF.toolsmith.statusText(m) : "")                        // making tools, buying materials, smelting (js/toolsmith.js)
     || (BF.storage ? BF.storage.statusText(m) : "")                            // storing in / fetching from its chest (js/storage.js)
+    || (BF.stables ? BF.stables.statusText(m) : "")                            // catching, feeding and penning horses (js/stables.js)
     || routine(m);
   return cap(s);
 }

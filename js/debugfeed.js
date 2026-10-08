@@ -103,6 +103,7 @@ function detail(rec) {
       job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
       age: m.life ? Math.round((m.life.lived || 0) * 10) / 10 : null,   // game days it has been loaded and active
       inv: invOf(m.inv),
+      horses: BF.stables ? BF.stables.holdings(m) : null,   // a stable hand's paddock horses (js/stables.js)
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));
