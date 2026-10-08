@@ -455,6 +455,7 @@ function pack(v) {
   return {
     inv: v.inv.map(s => s && BF.items[s.id] ? (s.wear > 0 ? { n: BF.items[s.id].name, c: s.count, w: s.wear } : { n: BF.items[s.id].name, c: s.count }) : null),
     level: v.level, xp: v.xp, day: v.restockDay,
+    pr: BF.prices ? BF.prices.pack(v) : undefined, pd: v.priceDay,   // prices off base and the last price tick (js/prices.js); missing in older saves
     prof: v.profession, job: v.jobsite ? [v.jobsite.x, v.jobsite.y, v.jobsite.z] : null, st: v.jobStocked ? 1 : 0, mem: v.jobMem ? [v.jobMem.prof, v.jobMem.t] : undefined,   // jobsites (js/jobs.js); missing in older saves
     life: BF.food ? BF.food.pack(v) : undefined,   // food state (js/villagelife.js); missing in older saves
     ex: BF.explorer && v.profession === "explorer" ? BF.explorer.pack(v) : undefined,   // explorer state (js/explorer.js)
@@ -477,6 +478,7 @@ function unpack(v, o) {
   const lv = Math.floor(+o.level);
   if (lv >= 1 && lv <= 5) { v.level = lv; v.trades = buildTrades(v.profession, lv); }
   if (+o.xp >= 0) v.xp = +o.xp;
+  if (BF.prices) BF.prices.unpack(v, o.pr, o.pd);   // no o.pr = base prices
   if (Number.isFinite(+o.day)) v.restockDay = +o.day;
   if (BF.food) BF.food.unpack(v, o.life);   // no o.life = save from before villager food: starting food is added
   if (BF.explorer && o.ex) BF.explorer.unpack(v, o.ex);
