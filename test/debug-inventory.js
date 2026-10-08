@@ -54,7 +54,8 @@ const start = async () => {
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // live: the game changes the inventory, the view follows
   await game.evaluate(n => { const m = BF.mobs.list.find(x => x.type === 'villager' && BF.vlog.nameOf(x) === n); m.inv[0].count = 3; m.inv[8] = { id: BF.I.emerald, count: 12 }; }, v.name);
-  await dbg.waitForTimeout(1200);
+  // a slow machine (CI runs the game at a few fps) can take several seconds to send the next snapshot
+  await dbg.waitForFunction(() => { const s = document.querySelectorAll('#r-inv .vslot'); return s[0] && s[8] && (s[0].querySelector('b') || {}).textContent === '3' && (s[8].querySelector('b') || {}).textContent === '12'; }, null, { timeout: 20000 }).catch(() => {});
   r = await read();
   ok('updates live ' + r.slots[0].n + ' / ' + r.slots[8].n, r.slots[0].n === '3' && r.slots[8].n === '12' && r.slots[8].img);
   // a restarted server and a reloaded screen still get every icon
