@@ -1,4 +1,4 @@
-// @ci baseline
+// @ci integration
 // Dropped items survive a save and load, keep their age (so they still despawn on time), and wait in an unloaded chunk
 // instead of ageing or falling out of the world. Usage: node test/run.js /tmp/ds test/drops-save.js
 module.exports = async (pg, out) => {
