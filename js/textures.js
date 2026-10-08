@@ -1450,6 +1450,8 @@ function shapeIcon(g, c, top, side, front, sh) {
   g.setTransform(1, 0, 0, 1, 0, 0);
   return c.toDataURL();
 }
+// Blocks whose icon is a flat picture rather than an isometric cube; the held view model draws these flat too (js/player.js).
+const iconIsFlat = b => !!(b && b.isBlock !== false && b.tiles && (b.icon || ICON_T[b.name] || b.render === "cross"));
 function blockIcon(b) {
   if (b.icon) return flatIcon(tileCanvas(b.icon));
   if (ICON_T[b.name]) return flatIcon(iconTileCanvas(b.name));
@@ -1695,5 +1697,5 @@ function icon(itemId) {
 BF.texKit = { T, ICON_T, SPRITES, TS, Px, hex, pal, mul, mix, ramp, clamp01, smooth, jit, dome, voronoi, ihash, WHITE, lighten,
   put, stroke, blob, stoneBase, cobbleBase, mossOver, sandBase, bricks, smoothBase, frame, planksBase, grassBlades, STONE, SAND, RED_SAND, SANDSTONE, SNOW, MOSS, WOOD_OAK,
   woolBase, barkSide, logTop, SPRITE_TILES, WOOD_SPRUCE, WOOD_ACACIA };
-BF.textures = { build, uv, icon, has, update, tinted: TINTED, defaultTint: DEFAULT_TINT, TILE: TS };
+BF.textures = { build, uv, icon, iconIsFlat, has, update, tinted: TINTED, defaultTint: DEFAULT_TINT, TILE: TS };
 })();
