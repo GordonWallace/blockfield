@@ -1595,18 +1595,19 @@ function caves3(vox, Y0, Y1, cx, cz) {
 // Ores, rocks and pockets: random-walk veins in 32-block buckets of absolute y (seeded by chunk and bucket), so any window agrees.
 // kind 'd': y range by depth below the chunk's centre surface [hc - b, hc - a]; kind 'y': absolute [a, b].
 const ORE3 = [
-  // salt, veins per bucket, size, kind, a, b, block, deepslate variant, depth-weighted (more near the surface)
+  // salt, veins per bucket, size, kind, a, b, block, deepslate variant, depth curve (ORE_CURVE: veins per bucket are scaled by it)
   [201, 1.3, 30, "d", 8, 99999, "gravel"], [202, 0.25, 18, "d", 20, 300, "clay"], [203, 1.1, 22, "d", 6, 300, "dirt"],
-  [211, 6.5, 9, "d", 6, 99999, "coal_ore", "deepslate_coal_ore", 1],
-  [212, 6.0, 7, "d", 6, 99999, "iron_ore", "deepslate_iron_ore", 1],
-  [217, 5.5, 9, "d", 6, 99999, "copper_ore", "deepslate_copper_ore", 1],
+  // coal, iron and copper: rare in surface rock (exposed rock above the chunk's surface too), most common about 100 down, gone by about 210
+  [211, 11.0, 10, "d", -9999, 210, "coal_ore", "deepslate_coal_ore", "c"],
+  [212, 8.0, 8, "d", -9999, 210, "iron_ore", "deepslate_iron_ore", "c"],
+  [217, 6.5, 7, "d", -9999, 210, "copper_ore", "deepslate_copper_ore", "c"],
   // the rarer ores are placed by depth below the surface too, so every village's miner can reach them (js/miner.js DIG_DEPTH): an apprentice
-  // reaches gold, a journeyman diamonds and redstone. Each band is about as tall as vanilla's (from y 64 ground), down to bedrock on low land.
-  [213, 3.3, 6, "d", 32, 140, "gold_ore", "deepslate_gold_ore"],
-  [214, 2.4, 5, "d", 48, 140, "diamond_ore", "deepslate_diamond_ore"],
-  [215, 1.0, 6, "d", 24, 140, "lapis_ore", "deepslate_lapis_ore"],
-  [216, 3.5, 6, "d", 48, 140, "redstone_ore", "deepslate_redstone_ore"],
-  [219, 0.03, 1, "d", 24, 140, "emerald_ore", "deepslate_emerald_ore"],
+  // reaches gold, a journeyman diamonds and redstone. They begin at the same depth wherever the land is and grow richer all the way down.
+  [213, 3.3, 6, "d", 32, 99999, "gold_ore", "deepslate_gold_ore", "r"],
+  [214, 2.4, 5, "d", 48, 99999, "diamond_ore", "deepslate_diamond_ore", "r"],
+  [215, 1.0, 6, "d", 24, 99999, "lapis_ore", "deepslate_lapis_ore", "r"],
+  [216, 3.5, 6, "d", 48, 99999, "redstone_ore", "deepslate_redstone_ore", "r"],
+  [219, 0.03, 1, "d", 24, 99999, "emerald_ore", "deepslate_emerald_ore", "r"],
   [218, 1.1, 1, "d", 3, 500, "emerald_ore", "deepslate_emerald_ore", 0, "mtn"],
   [221, 1.6, 70, "d", 5, 99999, "granite"], [222, 1.6, 70, "d", 5, 99999, "diorite"], [223, 1.6, 70, "d", 5, 99999, "andesite"],
   [224, 1.0, 60, "y", -64, 16, "tuff", "tuff"], [225, 0.35, 40, "d", 30, 250, "dripstone_block"],
@@ -1614,6 +1615,14 @@ const ORE3 = [
   [232, 0.8, 12, "y", -64, -8, "magma_block", "magma_block"],     // there is no lava block: deep magma pockets
   [233, 0.15, 9, "d", 40, 99999, "magma_block", "magma_block"],
 ];
+// Depth curves (d = blocks below the chunk's centre surface, negative above it), as a multiple of the row's veins per bucket.
+//   "c": 0.1 in surface rock and above, rising smoothly to 1 at 100 down, falling smoothly to 0 at 200 (and nothing deeper).
+//   "r": 1 where the band begins (a blocks down), rising towards 3; half of the gain comes within 210 blocks, so it changes quickly near the
+//        top of the band and barely at all a kilometre down.
+const ORE_CURVE = {
+  c: { max: 1, at: (d) => d <= 0 ? 0.1 : d < 100 ? 0.1 + 0.9 * Math.sin(Math.PI / 2 * d / 100) ** 2 : d < 200 ? Math.cos(Math.PI / 2 * (d - 100) / 100) ** 2 : 0 },
+  r: { max: 3, at: (d, a) => 3 - 2 * Math.exp(-Math.max(0, d - a) / 300) },
+};
 function ores3(vox, Y0, Y1, cx, cz) {
   const { CS, B } = BF, MINY = BF.MIN_Y, STONE = B.stone, DEEP = B.deepslate, hc = P.hc;
   const eb = bCache[((CS >> 1) + 1) * HW + (CS >> 1) + 1], mtn = eb === MOUNTAINS || eb === SNOWY_SLOPES || eb === PEAKS || eb === STONY_PEAKS;
@@ -1624,7 +1633,8 @@ function ores3(vox, Y0, Y1, cx, cz) {
     const ds = sp[7] !== undefined ? B[sp[7]] : undefined, size = sp[2];
     let lo, hi;
     if (sp[3] === "d") { lo = Math.max(MINY + 5, hc - sp[5]); hi = hc - sp[4]; } else { lo = sp[4]; hi = sp[5]; }
-    if (hi > hc - 3) hi = hc - 3;
+    const curve = sp[8] ? ORE_CURVE[sp[8]] : null;
+    if (sp[8] === "c") hi = Math.min(hi, P.maxH); else if (hi > hc - 3) hi = hc - 3;   // common ores reach exposed rock above the surface
     const reach = Math.ceil(size * 1.2) + 1;
     const wLo = Math.max(lo, Y0 - reach), wHi = Math.min(hi, Y1 - 1 + reach);
     if (wHi < wLo) continue;
@@ -1632,13 +1642,13 @@ function ores3(vox, Y0, Y1, cx, cz) {
       const bl = Math.max(lo, bk * 32), bh = Math.min(hi, bk * 32 + 31);
       if (bh < bl) continue;
       const len = bh - bl + 1;
-      let cnt = sp[1] * len / 32;
-      if (sp[8]) cnt *= 0.8 + 0.8 * Math.exp(-(hc - (bl + bh) / 2) / 150);
+      const cnt = sp[1] * len / 32 * (curve ? curve.max : 1);
       rs = (noise.hash3(cx, bk, cz, sp[0]) * 4294967296) >>> 0 || 1;
       let n = cnt | 0; if (rnd() < cnt - n) n++;
       for (let k = 0; k < n; k++) {
         let px = (rnd() * CS) | 0, pz = (rnd() * CS) | 0, py = bl + ((rnd() * len) | 0);
         const sz = size * (0.6 + rnd() * 0.6);
+        if (curve && rnd() * curve.max >= curve.at(hc - py, sp[4])) continue;   // thinned to the curve at the vein's own depth
         for (let s = 0; s < sz; s++) {
           if (px >= 0 && px < CS && pz >= 0 && pz < CS && py >= Y0 && py < Y1) {
             const vi = ((py - Y0) * CS + pz) * CS + px, cur = vox[vi];

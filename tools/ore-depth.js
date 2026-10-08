@@ -1,5 +1,6 @@
-// Gen 3 ore census by depth below the surface: node tools/ore-depth.js [seed] [chunks]
-// Samples land chunks on a coarse grid around the origin, generates each column from 150 below its surface to the surface and counts ore
+// Gen 3 ore census by depth below the surface: node tools/ore-depth.js [seed] [chunks]   (DEPTH=<blocks> BIN=<blocks>, default 150 and 10;
+// MINH=<y> samples only higher land whose surface is at least that high, so deep bins are not short of chunks that hit bedrock)
+// Samples land chunks on a coarse grid around the origin, generates each column from DEPTH below its surface to the surface and counts ore
 // blocks per 10-block depth bin, split into low land (surface below y 40) and the rest. With REF=<rev> it reads js/ from that revision.
 const path = require("path"), cp = require("child_process");
 const { env, cur } = require("./gen3-check.js");
@@ -11,7 +12,7 @@ BF.noise = BF.makeNoise(seed); BF.worldgen.init(BF.noise, { gen: 3, biomeScale: 
 const ORES = ["coal", "iron", "copper", "lapis", "gold", "redstone", "diamond", "emerald"];
 const idOre = new Map();
 for (const o of ORES) for (const n of [o + "_ore", "deepslate_" + o + "_ore"]) if (BF.B[n] !== undefined) idOre.set(BF.B[n], o);
-const DEPTH = 150, BIN = 10;
+const DEPTH = +(process.env.DEPTH || 150), BIN = +(process.env.BIN || 10);
 const tab = { low: { n: 0, bins: {} }, high: { n: 0, bins: {} } };
 let found = 0;
 for (let r = 0; found < want && r < 40000; r++) {
@@ -20,6 +21,7 @@ for (let r = 0; found < want && r < 40000; r++) {
   const wl = BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(cx * 16 + 8, cz * 16 + 8) : null;
   if (hc < 2 || (wl != null && wl > hc)) continue;      // land only
   const lowLand = hc < 40;
+  if (process.env.MINH && hc < +process.env.MINH) continue;
   if (lowLand ? tab.low.n >= want / 2 : tab.high.n >= want / 2) continue;
   found++;
   const T = lowLand ? tab.low : tab.high; T.n++;
@@ -38,11 +40,11 @@ for (let r = 0; found < want && r < 40000; r++) {
 for (const k of ["low", "high"]) {
   const T = tab[k];
   console.log(`\n${k === "low" ? "low land (surface < y40)" : "higher land"}: ${T.n} chunks, ore blocks per chunk by depth below the surface`);
-  console.log("depth   " + ORES.map(o => o.padStart(9)).join(""));
+  console.log("depth      " + ORES.map(o => o.padStart(9)).join(""));
   const tot = {};
   for (let b = 0; b < DEPTH; b += BIN) {
     const row = T.bins[b] || {};
-    console.log(String(b).padStart(3) + "-" + String(b + BIN - 1).padEnd(4) + ORES.map(o => { tot[o] = (tot[o] || 0) + (row[o] || 0); return ((row[o] || 0) / Math.max(1, T.n)).toFixed(2).padStart(9); }).join(""));
+    console.log(String(b).padStart(4) + "-" + String(b + BIN - 1).padEnd(5) + ORES.map(o => { tot[o] = (tot[o] || 0) + (row[o] || 0); return ((row[o] || 0) / Math.max(1, T.n)).toFixed(2).padStart(9); }).join(""));
   }
-  console.log("total   " + ORES.map(o => ((tot[o] || 0) / Math.max(1, T.n)).toFixed(1).padStart(9)).join(""));
+  console.log("total      " + ORES.map(o => ((tot[o] || 0) / Math.max(1, T.n)).toFixed(1).padStart(9)).join(""));
 }
