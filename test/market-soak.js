@@ -1,5 +1,5 @@
 // One market soak (release 1.3): one village for many game days. Run it on this build and on the one before (copy the script there) to compare.
-// Usage: NODE_PATH=$(npm root -g) node test/market-soak.js [seed=1] [days=14] [out.json]
+// Usage: NODE_PATH=$(npm root -g) node test/market-soak.js [seed=1] [days=14] [out.json]   Env: NEED=builder,farmer (jobs the village must have).
 // Drives the simulation directly (no rendering), like test/toolchain.js. Once per game day it records the villagers alive, starving and
 // dead, the village's happiness, the emeralds and items villagers hold, trades so far (and how many went through spare-goods offers), and
 // the builders' progress (structures finished, blocks placed). Prints a day table and a summary. FAILs on a page error, or a villager trade
@@ -20,15 +20,24 @@ const OUT = process.argv[4] || null;
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
+  await pg.addInitScript(n => { window.__NEED = n; }, process.env.NEED || 'builder');
   await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForTimeout(3000);
   const setup = await pg.evaluate(() => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    const v = BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))[0];
-    const key = Math.round(v.x) + ',' + Math.round(v.z);
-    BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
+    // the nearest village with every job in NEED (default: a builder, so building progress shows)
+    const need = (window.__NEED || 'builder').split(',').filter(Boolean);
+    const cands = BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 10);
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+    let v = null, key = null;
+    for (const c of cands) {
+      const k = Math.round(c.x) + ',' + Math.round(c.z);
+      BF.player.spawn(c.x + 0.5, (c.y || BF.worldgen.heightAt(c.x, c.z)) + 3, c.z + 0.5);
+      for (let i = 0; i < 400; i++) { BF.world.update(c.x, c.z, 60); if (i % 4 === 0) step(0.05); }
+      const profs = new Set(BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === k && !m.dead).map(m => m.profession));
+      if (need.every(p => profs.has(p))) { v = c; key = k; break; }
+    }
+    if (!v) { v = cands[0]; key = Math.round(v.x) + ',' + Math.round(v.z); BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5); for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); } }
     BF.sky.setTime(0.02);
     for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
     // every trade, as the village log sees it
