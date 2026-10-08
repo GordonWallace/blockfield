@@ -151,7 +151,7 @@ module.exports = async (pg, out) => {
 
     // set up: a fletcher at a new fletching table with emeralds only; the real shepherd with wool and no string; stand-in sellers
     const shp = vs.find(v => v.profession === "shepherd");
-    const others = vs.filter(v => v !== shp && v.profession !== "builder" && v.profession !== "miner" && v.profession !== "fletcher");
+    const others = vs.filter(v => v !== shp && v.profession !== "builder" && v.profession !== "miner" && v.profession !== "fletcher" && v.profession !== "poultry_keeper");   // not the keeper: it may stand inside its fenced coop, where a new table would be out of reach
     if (!shp || others.length < 4) { ok("village has a shepherd and 4 other villagers", false, R.info.village); return R; }
     const Fl = vs.find(v => v.profession === "fletcher") || others.pop(), [Mn, Fo, Pk] = others;   // the village's own fletcher when it has one (the only one)
     if (Fl.profession !== "fletcher" || !Fl.jobsite) {   // no fletcher here: one takes up a new fletching table

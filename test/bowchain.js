@@ -43,6 +43,11 @@ const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
       }
       return oTrade.apply(this, arguments);
     };
+    const oEmit = BF.emit;   // gravel broken in the village area (the miner's flint source)
+    BF.emit = function (ev, x, y, z, id) {
+      if (ev === 'blockBroken' && id === BF.B.gravel && R.key) { const [cx, cz] = R.key.split(',').map(Number); if (Math.hypot(x - cx, z - cz) < 120) R.gravel = (R.gravel || 0) + 1; }
+      return oEmit.apply(this, arguments);
+    };
     const oRestock = BF.trades.restock;
     BF.trades.restock = function (m) {
       const cnt = () => WATCH.map(n => m && Array.isArray(m.inv) ? BF.trades.inv.count(m.inv, BF.I[n]) : 0);
@@ -80,7 +85,7 @@ const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r.profs)}`);
   }
   if (!setup) setup = { err: 'no village with ' + NEED.join(', ') + ' and a coop among the nearest ' + cands.length };
-  else await pg.evaluate(() => { const R = window.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.start = window.__total(); });
+  else await pg.evaluate(() => { const R = window.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = window.__total(); });
   if (setup.err) { console.log('FAIL ' + setup.err); await b.close(); process.exitCode = 1; return; }
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
@@ -100,6 +105,15 @@ const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
     R.end = window.__total();
     const f = BF.mobs.list.find(m => m.type === 'villager' && m.profession === 'fletcher' && m.village && m.village.key === R.key && !m.dead);
     R.fletcher = f ? { inv: f.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count), offers: (f.trades || []).filter(o => o.sell.id === I.arrow || o.sell.id === I.bow).map(o => BF.items[o.sell.id].name + (BF.trades.blockReason(f, o) ? ' (' + BF.trades.blockReason(f, o) + ')' : ' in stock')) } : null;
+    R.miners = BF.mobs.list.filter(m => m.type === 'villager' && m.profession === 'miner' && m.village && m.village.key === R.key && !m.dead).map(m => {
+      const Q = BF.miner._test.state(m);
+      return { inv: m.inv.filter(Boolean).map(x => BF.items[x.id].name + ':' + x.count).join(' '), flint: BF.trades.inv.count(m.inv, I.flint), wantsFlint: BF.miner.wantsFlint(m), grav: Q.grav ? Q.grav.length : null, surf: Q.surf ? Q.surf.length : null, depth: BF.miner.digDepth(m), status: BF.villagerStatus.text(m) };
+    });
+    R.holders = {};
+    for (const n of ['feather', 'flint', 'string', 'arrow']) R.holders[n] = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === R.key && !m.dead && Array.isArray(m.inv) && BF.trades.inv.count(m.inv, I[n]) > 0).map(m => m.profession + ':' + BF.trades.inv.count(m.inv, I[n])).join(' ');
+    R.flShort = f ? BF.fletcher.shortfall(f) : null;
+    R.keepers = BF.mobs.list.filter(m => m.type === 'villager' && m.profession === 'poultry_keeper' && m.village && m.village.key === R.key && !m.dead)
+      .map(m => ({ inv: m.inv.filter(Boolean).map(x => BF.items[x.id].name + ':' + x.count).join(' '), offers: (m.trades || []).map(o => BF.trades.table ? (o.buy.map(b => b.n + ' ' + BF.items[b.id].name).join('+') + ' > ' + o.sell.n + ' ' + BF.items[o.sell.id].name + (BF.trades.blockReason(m, o) ? ' (' + BF.trades.blockReason(m, o) + ')' : '')) : '') }));
     R.poultry = BF.poultry.coopsOf(BF.mobs.villages.get(R.key)).map(c => ({ hens: c.hens ? c.hens.length : null, eggs: c.eggs }));
     return R;
   });
@@ -112,7 +126,10 @@ const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
   console.log('start', JSON.stringify(R.start), 'end', JSON.stringify(R.end));
   console.log('made', JSON.stringify({ arrows, bows, spun, culledFeathers }), 'coops', JSON.stringify(R.poultry));
   console.log('fletcher', JSON.stringify(R.fletcher));
-  console.log('fletcher bought', JSON.stringify(R.buys));
+  console.log('fletcher bought', JSON.stringify(R.buys), 'short', JSON.stringify(R.flShort));
+  console.log('miners', JSON.stringify(R.miners), 'gravel broken', R.gravel);
+  console.log('keepers', JSON.stringify(R.keepers));
+  console.log('holders', JSON.stringify(R.holders));
   ok('the fletcher bought feathers', bought('feather') > 0, bought('feather'));
   ok('the fletcher bought string', bought('string') > 0, bought('string'));
   ok('the fletcher bought flint', bought('flint') > 0, bought('flint'));

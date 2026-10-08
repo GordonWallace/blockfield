@@ -40,6 +40,7 @@
   {"name": "villager-hover", "file": "test/villager-hover.js", "kind": "actions", "tier": "baseline", "what": "looking at a villager shows name, job and activity"},
   {"name": "villager-screens", "file": "test/villager-screens.js", "kind": "actions", "tier": "baseline"},
   {"name": "wood-variants", "file": "test/wood-variants.js", "kind": "actions", "tier": "baseline"},
+  {"name": "bowchain", "kind": "node", "tier": "integration", "file": "test/bowchain.js", "args": ["14", "1"], "timeout": 1500, "what": "14-game-day soak: feathers, string and flint reach the fletcher, arrows and bows made, nothing from the restock or from nothing"},
   {"name": "automap-actions", "file": "test/automap-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "automap-big", "file": "test/automap-big.js", "kind": "actions", "tier": "integration"},
   {"name": "automap-gen", "file": "test/automap-gen.js", "kind": "actions", "tier": "integration", "timeout": 2400},

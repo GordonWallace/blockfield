@@ -542,6 +542,11 @@ function lead(m, S, tk, dt, out) {
   if (coop.gate) {   // hold the gate open while the chicken is on its way in
     const [gx, gz] = coop.gate, gy = coop.y + 1, bk = BF.blocks[BF.world.getBlock(gx, gy, gz)];
     if (bk && bk.gate && Math.hypot(gx + 0.5 - p.x, gz + 0.5 - p.z) < 3) { if (!bk.gate.open) BF.world.setGate(gx, gy, gz, true); S.gateHeld = [gx, gy, gz]; }
+    if (bk && bk.gate && bk.gate.open) {   // not shut behind it: by its own walking (mobs.js villagerDoors) or an earlier fetch's pending close
+      S.gateHeld = [gx, gy, gz];
+      if (m.ai.doors) m.ai.doors = m.ai.doors.filter(([x, y, z]) => !(x === gx && y === gy && z === gz));
+      for (let i = toShut.length - 1; i >= 0; i--) { const a = toShut[i].at; if (a[0] === gx && a[1] === gy && a[2] === gz) toShut.splice(i, 1); }
+    }
   }
   if (dk > 5) { m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; return true; }   // wait for it
   const inside = inRoom(coop, p);

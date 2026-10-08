@@ -23,7 +23,9 @@
 // - What it keeps: cobblestone (stone drops it), coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis, emeralds and flint (gravel drops
 //   it 10% of the time, blocks.js extraDrops); dirt, the gravel itself and the rest it digs through are left behind. While a fletcher of its
 //   village is short of flint (BF.fletcher) and it holds fewer than FLINT_WANT, it also digs the gravel in the walls and ceiling of its shaft,
-//   and on the surface it digs dry gravel in its area (riverbanks, shores, scree: findGravel) before anything else.
+//   following a vein it meets into the rock around the cell (VEIN_R), and on the surface it digs dry gravel in its area (riverbanks, shores,
+//   scree: findGravel) before anything else. Meanwhile it keeps the gravel (up to GRAVEL_KEEP) and, back on the surface, sifts it: each gravel
+//   is placed and broken again until it drops flint, as a player does, so 1 gravel becomes 1 flint (SIFT_SECS each).
 // - Selling: holding SELL_MIN cobblestone, it walks to a builder of its village that needs some (its current structure's shortfall, or a reserve
 //   of BUILDER_RESERVE for the next foundation in cobblestone villages) and sells at its own offer "1 emerald > 32 cobblestone". Builders short
 //   of cobblestone also come to it (builder.js findSeller), and the player can buy at its trade table. A novice stops digging at KEEP_COBBLE; a
@@ -61,6 +63,9 @@ const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().t
 const I = n => BF.I[n];
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const KEEP = new Set(["cobblestone", "coal", "raw_iron", "raw_gold", "raw_copper", "diamond", "cobbled_deepslate", "emerald", "lapis_lazuli", "redstone", "flint"]);
+const GRAVEL_KEEP = 48;  // gravel it keeps to sift for flint (while wantsFlint)
+const SIFT_SECS = 2.5;   // per gravel sifted into flint: placing and breaking it again until it drops flint, as a player does
+const VEIN_R = 3;        // gravel connected to a shaft cell's gravel within this many blocks of the cell is dug with it (while wantsFlint)
 const FLINT_WANT = 16;  // digs gravel for flint while it holds fewer than this (its offer, "1 emerald > 16 flint") and a fletcher of its village is short of flint
 // Is a fletcher of m's village short of flint while m holds little? (then gravel in the shaft walls is worth digging)
 const wantsFlint = m => I("flint") != null && count(m, I("flint")) < FLINT_WANT && !!(BF.fletcher && m.village && (m.village.members || []).some(v => v.profession === "fletcher" && !v.dead && !v.removed && Array.isArray(v.inv) && BF.fletcher.shortfall(v).flint > 0));
@@ -339,7 +344,8 @@ function dig(m, x, y, z) {
   const p = pickOf(m), b = BF.blocks[id];
   if (!isFinite(b.hardness)) return false;
   W().setBlock(x, y, z, 0);
-  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if (keeps(d.id) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
+  const keepGravel = id === BF.B.gravel && count(m, I("gravel")) < GRAVEL_KEEP && wantsFlint(m);   // to sift for flint later
+  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if ((keeps(d.id) || keepGravel && d.id === I("gravel")) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
   wearPick(m, p, BF.toolWear.forBlock(id, p));
   if (BF.emit) BF.emit("blockBroken", x, y, z, id);
   return true;
@@ -566,6 +572,7 @@ function think(m, Q) {
     const deal = findBuyer(m, Q.avoid);
     if (deal) return underground ? { kind: "exit" } : { kind: "trip", deal };
   }
+  if (!underground && count(m, I("gravel")) > 0 && count(m, I("flint")) < FLINT_WANT) return { kind: "sift", max: 30 + SIFT_SECS * count(m, I("gravel")) };   // 2b. gravel kept for flint (before digging: also with a full pack)
   // 3. digging
   if (cobble >= KEEP_COBBLE && digDepth(m) <= DIG_DEPTH[0] || freeSlots(m) < 1 && !T.canFit(m.inv, [{ id: I("cobblestone"), n: 1 }], [])) { Q.status = "has a full pack of stone"; return underground ? { kind: "exit" } : null; }
   const deep = digDepth(m) > DIG_DEPTH[0];
@@ -631,6 +638,20 @@ function ai(m, dt, out) {
     return true;
   }
   if (k.kind === "trip") return trip(m, Q, k, dt, out);
+  if (k.kind === "sift") {   // on the spot: each gravel is placed and broken again until it drops flint (the gravel is used up)
+    a.route = null;
+    if (Math.random() < dt * 2) a.swingT = 0.25;
+    k.n = k.n || 0;
+    if ((k.st = (k.st || 0) + dt) >= SIFT_SECS) {
+      k.st = 0;
+      if (count(m, I("gravel")) > 0 && count(m, I("flint")) < FLINT_WANT && TR().inv.canFit(m.inv, [{ id: I("flint"), n: 1 }], [{ id: I("gravel"), n: 1 }])) { TR().inv.remove(m.inv, I("gravel"), 1); TR().inv.add(m.inv, I("flint"), 1); k.n++; }
+      else {
+        if (k.n) { log("sift", m, { flint: k.n }); if (BF.vlog && m.village) BF.vlog.log(m.village, "craft", BF.vlog.nameOf(m) + " (Miner) sifted " + k.n + " gravel into flint", m); }
+        endTask(m, Q); Q.thinkT = 0.2;
+      }
+    }
+    return true;
+  }
   if (k.kind === "climb") {
     const r = climbStep(m, Q, k, dt, out);
     if (r === "failed" || r === "stepped") {
@@ -717,7 +738,26 @@ function wallOres(m, sh, c) {
     for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (liquid(get(x + dx, y + dy, z + dz))) wet = true;
     if (!wet) out.push([x, y, z]);
   }
-  return out;
+  if (gravel < 0) return out;
+  // a gravel vein met by the cell or its walls: the rest of it within VEIN_R of the cell, highest first so none of it falls
+  const seen = new Set(), q = [];
+  for (let k = 0; k < c.h; k++) cand.push([c.x, c.y + k, c.z]);
+  for (const [x, y, z] of cand) if (get(x, y, z) === gravel) { seen.add(x + "," + y + "," + z); q.push([x, y, z]); }
+  const vein = [];
+  while (q.length && vein.length < 40) {
+    const [x, y, z] = q.shift();
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      const nx = x + dx, ny = y + dy, nz = z + dz, key = nx + "," + ny + "," + nz;
+      if (seen.has(key) || Math.max(Math.abs(nx - c.x), Math.abs(nz - c.z), Math.abs(ny - c.y)) > VEIN_R || get(nx, ny, nz) !== gravel) continue;
+      seen.add(key);
+      let wet = false;
+      for (const [ex, ey, ez] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (liquid(get(nx + ex, ny + ey, nz + ez))) wet = true;
+      if (wet) continue;
+      vein.push([nx, ny, nz]); q.push([nx, ny, nz]);
+    }
+  }
+  vein.sort((a, b) => b[1] - a[1]);
+  return out.concat(vein);
 }
 // Digs the listed blocks one after another (each takes digTime with its pickaxe), swinging; calls done() after the last.
 function digBlocks(m, Q, blocks, dt, done) {
@@ -769,6 +809,7 @@ function statusText(m) {
   const Q = m.mi, k = Q && Q.task;
   if (k) {
     if (k.kind === "quarry") return k.gravel ? "Digging gravel for flint" : "Quarrying stone";
+    if (k.kind === "sift") return "Sifting gravel for flint";
     if (k.kind === "dig") return Q.shaft && Q.shaft.S == null ? "Digging a mineshaft" : "Mining underground";
     if (k.kind === "exit") return "Climbing out of the mine";
     if (k.kind === "climb") return "Digging its way out";
@@ -795,5 +836,5 @@ function unpack(m, o) {
 // In its mineshaft (or digging its way out): village errands such as food shopping wait until it is back up (js/villagelife.js).
 const underground = m => !!(m && m.mi && (inShaft(m, m.mi.shaft) || m.mi.task && m.mi.task.kind === "climb"));
 BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, findGravel, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
-  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, FLINT_WANT, digDepth, wantsStore, wantsFlint, _test: { state, area, checkCell, dig, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
+  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, FLINT_WANT, GRAVEL_KEEP, SIFT_SECS, VEIN_R, digDepth, wantsStore, wantsFlint, _test: { state, area, checkCell, dig, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
 })();
