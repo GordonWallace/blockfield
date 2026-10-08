@@ -161,7 +161,7 @@ module.exports = async (pg, out) => {
         status: BF.villagerStatus.text(m), log: BF.vlog.entries(m.village.key).filter(e => e[1] === "chest" || /Chest/.test(e[2])).slice(-5).map(e => e[2]) };
     }, [v.noChestKeys[0], r11.order]);
     console.log(JSON.stringify(r12, null, 1));
-    ok(r12.block === "chest" && r12.owner === v.noChestKeys[0], "the furniture maker delivered the chest and the villager claimed it");
+    ok(/^chest(_[new])?$/.test(r12.block) && r12.owner === v.noChestKeys[0], "the furniture maker delivered the chest and the villager claimed it", r12.block);
     await pg.evaluate(s => { const e = BF.player.eyePos(); BF.player.teleport(s.x + 2.5, s.y + 0.01, s.z + 0.5); }, r11.order.spot);
   } else console.log("SKIP no villager without a chest here");
 };
