@@ -1,6 +1,6 @@
 // @ci baseline
-// Creative right click on doors and chests uses them; only a real middle click picks the block. node test/run.js /tmp/rc test/creative-rclick.js
-// Gordon saw right clicks put the door / chest in his hotbar instead (pick block). Every way a browser can report a press is sent here.
+// Creative right and middle clicks on doors and chests use them; nothing picks the block (there is no pick block). node test/run.js /tmp/rc test/creative-rclick.js
+// Gordon's Ubuntu trackpad sends some right clicks as middle clicks, which used to pick the block into his hotbar.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.mobs.spawning = false; });
   await pg.waitForTimeout(1500);
@@ -22,13 +22,12 @@ module.exports = async (pg, out) => {
     return { door: !!(BF.blocks[d].door && BF.blocks[d].door.open), chest: BF.inventory.isOpen ? !!BF.inventory.isOpen() : BF.player.screenOpen(),
       hotbar: s.slots.slice(0, 9).filter(Boolean).map(x => (BF.items[x.id] || BF.blocks[x.id]).name).join(",") };
   });
-  // [label, mousedown fields, also send a context menu event, expect: "use" or "pick"]
+  // [label, mousedown fields, also send a context menu event, expect]
   const variants = [
     ["right (button 2)", { button: 2, buttons: 2 }, true, "use"],
     ["right with ctrl held", { button: 2, buttons: 2, ctrlKey: true }, true, "use"],
     ["button 1 holding only the right button", { button: 1, buttons: 2 }, false, "use"],
-    ["button 1 followed by a context menu", { button: 1, buttons: 4 }, true, "use"],
-    ["middle (button 1, buttons 4)", { button: 1, buttons: 4 }, false, "pick"],
+    ["middle (button 1, buttons 4)", { button: 1, buttons: 4 }, false, "use"],
   ];
   let fails = 0;
   for (const [label, init, ctx, want] of variants) {
@@ -44,10 +43,10 @@ module.exports = async (pg, out) => {
         if (ctx) cv.dispatchEvent(new MouseEvent("contextmenu", o));
         window.dispatchEvent(new MouseEvent("mouseup", Object.assign({}, o, { buttons: 0 })));
       }, [init, ctx]);
-      await pg.waitForTimeout(2000);   // headless frames are slow and the pick waits for the release
+      await pg.waitForTimeout(500);
       const s = await state();
       const used = what === "door" ? s.door : s.chest, picked = /door|chest/.test(s.hotbar);
-      const ok = want === "use" ? used && !picked : !used && picked;
+      const ok = used && !picked;
       if (!ok) fails++;
       console.log(`${ok ? "ok  " : "FAIL"} ${label} on the ${what}: ${used ? "used" : "not used"}, hotbar [${s.hotbar}] (want ${want})`);
       await pg.evaluate(() => { try { BF.inventory.close(); } catch (_) {} });

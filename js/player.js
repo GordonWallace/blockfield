@@ -618,44 +618,22 @@ function bindInput() {
   });
   addEventListener("pointerup", e => { if (drag && e.pointerId === drag.id) drag = null; });
 
-  // Which button a press is. Middle (pick block) only when the browser agrees on both fields: a press that reports button 1 but holds
-  // only the right button in `buttons` is a right click, as is a Mac ctrl+click.
-  const pressKind = e => {
-    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) return "right-ctrl";
-    if (e.button === 0) return "left";
-    if (e.button === 2) return "right";
-    if (e.button === 1) return e.buttons && !(e.buttons & 4) && (e.buttons & 2) ? "right" : "middle";
-    return "other";
-  };
-  let ctrlRight = false, pendingPick = null;
+  // No pick block: a middle click uses, like a right click. Ubuntu trackpads report some two-finger right clicks as middle clicks.
+  let ctrlRight = false;
   cv.addEventListener("mousedown", e => {
     if (!started || menuOpen || P.dead || invOpen()) { logClick(e, "ignored: " + (!started ? "not started" : menuOpen ? "menu open" : P.dead ? "dead" : "screen open")); return; }
     if (!locked && !dragMode) { logClick(e, "takes the mouse"); return; } // this click only captures the mouse
     e.preventDefault();
-    const kind = pressKind(e);
-    if (kind === "right-ctrl") { ctrlRight = true; mouseR = true; placeCd = 0; logClick(e, "use (ctrl+click)", useNow()); }
-    else if (kind === "left") { mouseL = true; primaryDown(); logClick(e, "attack / break"); }
-    else if (kind === "right") { mouseR = true; placeCd = 0; logClick(e, "use", useNow()); }
-    else if (kind === "middle") { // picked on release, so a context menu event (only right clicks make one) can still turn it into a use
-      updateTarget();
-      pendingPick = { at: performance.now(), name: targetName() };
-      logClick(e, "pick block", pendingPick.name);
-    } else logClick(e, "no action");
+    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) { ctrlRight = true; mouseR = true; placeCd = 0; logClick(e, "use (ctrl+click)", useNow()); } // macOS ctrl+click = right click
+    else if (e.button === 0) { mouseL = true; primaryDown(); logClick(e, "attack / break"); }
+    else if (e.button === 2 || e.button === 1) { mouseR = true; placeCd = 0; logClick(e, "use", useNow()); }
+    else logClick(e, "no action");
   });
   addEventListener("mouseup", e => {
     if (e.button === 0) { mouseL = false; resetBreak(); if (ctrlRight) { ctrlRight = false; mouseR = false; eatT = 0; } }
-    if (e.button === 2) { mouseR = false; eatT = 0; }
-    if (e.button === 1 && pendingPick) {
-      const pp = pendingPick;
-      setTimeout(() => { if (pendingPick === pp) { pendingPick = null; if (started && !menuOpen && !P.dead && !invOpen()) pickBlock(); } }, 60);   // Windows sends the context menu just after the release
-    }
+    if (e.button === 2 || e.button === 1) { mouseR = false; eatT = 0; }
   });
-  cv.addEventListener("contextmenu", e => {
-    e.preventDefault();
-    if (!pendingPick) { logClick(e, ""); return; }
-    pendingPick = null; // a "middle" press with a context menu was a right click
-    if (started && !menuOpen && !P.dead && !invOpen()) logClick(e, "was a right click: use", useNow());
-  });
+  cv.addEventListener("contextmenu", e => { e.preventDefault(); logClick(e, ""); });
   cv.addEventListener("auxclick", e => logClick(e, ""));
   addEventListener("wheel", e => {
     if (!started || menuOpen || invOpen() || !e.deltaY) return;
@@ -1373,39 +1351,6 @@ function updateUse(dt) {
     return;
   }
   if (mouseR && placeCd <= 0 && !secondaryDown()) placeCd = PLACE_REPEAT;
-}
-
-function pickBlock() {
-  if (!target) return;
-  const I = inv();
-  const tb = BF.blocks[target.id];
-  const tid = tb && tb.item != null ? tb.item : target.id; // door/bed halves pick their item
-  if (creative() && BF.items[tid] && I.select) {
-    // creative: put the block into the hotbar (an existing slot with it, else an empty one, else the selected one)
-    try {
-      const slots = I.slots || I.hotbar;
-      if (slots) {
-        let i = -1;
-        for (let k = 0; k < 9; k++) if (slots[k] && slots[k].id === tid) { i = k; break; }
-        if (i < 0) {
-          const cur = I.selectedIndex | 0;
-          i = !slots[cur] ? cur : -1;
-          for (let k = 0; i < 0 && k < 9; k++) if (!slots[k]) i = k;
-          if (i < 0) i = cur;
-          if (I.setSlot) I.setSlot(i, { id: tid, count: 1 });
-          else slots[i] = { id: tid, count: 1 };
-          if (BF.emit) BF.emit("inventoryChanged");
-        }
-        I.select(i);   // also re-renders the hotbar
-        return;
-      }
-    } catch (e) { console.error(e); }
-  }
-  // best effort: if the inventory exposes hotbar slots, select the one holding this block
-  try {
-    const slots = I.hotbar || (I.slots && I.slots.slice(0, 9));
-    if (slots && I.select) { const i = slots.findIndex(s => s && s.id === tid); if (i >= 0) I.select(i); }
-  } catch (_) {}
 }
 
 // ---------- survival ----------
