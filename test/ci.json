@@ -4,6 +4,7 @@
   {"name": "automap-colours", "file": "test/automap-colours.js", "kind": "actions", "tier": "baseline"},
   {"name": "automap-input", "file": "test/automap-input.js", "kind": "actions", "tier": "baseline"},
   {"name": "cartography-actions", "file": "test/cartography-actions.js", "kind": "actions", "tier": "baseline"},
+  {"name": "builder-log", "kind": "node", "tier": "baseline", "file": "test/builder-log.js", "timeout": 600, "what": "builders log what they start and finish building"},
   {"name": "creative-vinv", "file": "test/creative-vinv.js", "kind": "actions", "tier": "baseline"},
   {"name": "debug-screen", "kind": "node", "tier": "baseline", "file": "test/debug-screen.js", "args": ["{out}"], "timeout": 600, "what": "second-monitor debug screen"},
   {"name": "explorer-actions", "file": "test/explorer-actions.js", "kind": "actions", "tier": "baseline"},
