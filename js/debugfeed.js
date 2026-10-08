@@ -83,6 +83,8 @@ function detail(rec) {
   d.jobsites = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec).map(s => [s.x, s.z, L.pretty(s.prof)]) : [];
   // structures the village's builders planned (js/builder.js rec.built): [x0, z0, x1, z1, type, finished 0|1]
   d.built = (rec.built || []).filter(e => e.state !== "abandoned" && e.w && e.d).map(e => [e.ox, e.oz, e.ox + e.w - 1, e.oz + e.d - 1, e.type, e.state === "done" ? 1 : 0]);
+  // villagers who have died here (js/mobs.js rec.deadInfo, saved): name, job, cause, game day, age in days loaded and active
+  d.dead = (rec.deadInfo || []).map(e => ({ name: e.name || "Someone", prof: L.pretty(e.prof || "unknown"), cause: e.cause || null, day: e.day, age: e.age == null ? null : Math.round(e.age * 10) / 10 }));
   d.clock = BF.vlog.stamp(BF.sky.day + BF.sky.time);   // when these numbers were taken, shown once the village unloads
   return d;
 }
