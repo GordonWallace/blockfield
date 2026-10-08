@@ -1,9 +1,12 @@
 // CI test runner: runs a tier of the headless tests one after another and fails if any of them fails.
-// Usage: NODE_PATH=$(npm root -g) node test/ci.js <baseline|integration> [outDir=ci-out] [name ...]
+// Usage: NODE_PATH=$(npm root -g) node test/ci.js <baseline|integration|suites> [outDir=ci-out] [name ...]
 // Tiers and per-test settings live in test/ci.json. A test file that is not listed there can declare its own tier with a comment
 // line `// @ci baseline`, `// @ci integration` or `// @ci skip <reason>`; an unlisted, untagged test runs in integration.
 // Tests run serially: several headless games at once starve each other and village loading gets flaky.
 // A test fails when it exits non-zero, times out, uses more memory than CI_MEM_LIMIT_MB (10 GB), throws in the page (PAGEERROR), or prints a line starting with FAIL / FAILED.
+// Suites (test/ci.json "suites") group the tests by game area. A baseline run adds every test of the suites named in CI_SUITES
+// ("jobs ui", "all"), or in a "CI suites: jobs, ui" line of the pull request body (PR_BODY, set by the workflow).
+// `node test/ci.js suites` lists them.
 // Writes <outDir>/<name>.log (+ screenshots) and a markdown table to $GITHUB_STEP_SUMMARY when set.
 const fs = require('fs'), path = require('path'), cp = require('child_process');
 const root = path.resolve(__dirname, '..');
@@ -27,7 +30,21 @@ for (const f of fs.readdirSync(__dirname).filter(f => f.endsWith('.js') && !NOT_
 }
 for (const t of tests) if (!fs.existsSync(path.join(root, t.file))) t.missing = true;
 
-const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier);
+// suites: name -> tests; each test's suite
+const SUITES = manifest.suites || {};
+for (const [k, s] of Object.entries(SUITES)) for (const n of s.tests) { const t = tests.find(t => t.name === n); if (t) t.suite = k; }
+if (tier === 'suites') {
+  for (const [k, s] of Object.entries(SUITES)) console.log(`${k}: ${s.about}\n  ${tests.filter(t => t.suite === k && !t.missing).map(t => t.name).join(' ')}\n`);
+  const none = tests.filter(t => !t.suite && !t.missing && t.tier !== 'skip');
+  if (none.length) console.log('in no suite (add them to one in test/ci.json): ' + none.map(t => t.name).join(' '));
+  process.exit(0);
+}
+const bodyLine = /^[\s>*_-]*CI suites?\s*:\s*(.*)$/im.exec(process.env.PR_BODY || '');
+const picked = (process.env.CI_SUITES || (bodyLine ? bodyLine[1] : '')).toLowerCase().split(/[\s,]+/).map(s => s.replace(/[`*_.]/g, '')).filter(s => s && s !== 'none');
+const suites = picked.includes('all') ? Object.keys(SUITES) : picked;
+const unknown = suites.filter(s => !SUITES[s]);
+if (unknown.length) { console.log(`FAIL unknown CI suite(s): ${unknown.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}, all`); process.exit(1); }
+const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier || (t.tier !== 'skip' && suites.includes(t.suite)));
 const run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -83,7 +100,8 @@ async function runOne(t) {
 }
 
 (async () => {
-console.log(`tier ${tier}: ${run.length} test(s)`);
+const label = tier + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') : '');
+console.log(`tier ${label}: ${run.length} test(s)`);
 const results = [];
 for (const t of run) {
   process.stdout.write(`::group::${t.name}\n`);
@@ -97,7 +115,7 @@ for (const t of run) {
 
 const failed = results.filter(r => !r.ok);
 const esc = s => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
-let md = `## ${tier} tests: ${results.length - failed.length}/${results.length} passed\n\n| Test | Result | Time | Notes |\n|---|---|---|---|\n`;
+let md = `## ${label} tests: ${results.length - failed.length}/${results.length} passed\n\n| Test | Result | Time | Notes |\n|---|---|---|---|\n`;
 for (const r of results) md += `| ${r.t.name} | ${r.ok ? '✅ pass' : '❌ fail'} | ${r.secs.toFixed(0)}s | ${esc(r.ok ? r.t.what || '' : r.reasons.join('; '))} |\n`;
 const notRun = tests.filter(t => !run.includes(t) && (t.tier === 'skip' || t.missing));
 if (notRun.length && !only.length) {

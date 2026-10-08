@@ -1,4 +1,4 @@
-// @ci baseline
+// @ci integration
 // Horses (js/horses.js): recipes, vanilla stat ranges and prices, foal inheritance, taming by riding (food helps), saddles, riding speed
 // and jumping, fall damage going to the horse, leads and fence posts, and saving tamed horses (they never despawn).
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/horses test/horses.js
