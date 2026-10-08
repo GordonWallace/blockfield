@@ -5,7 +5,7 @@
 //  - Fed: 1 wheat from the player or a shepherd makes a sheep willing to breed for 1 day (`fed` = absolute game day it was fed).
 //  - Breeding: two willing adults within MATE_R walk to each other and a lamb appears; both then rest BREED_CD days.
 //    A lamb is smaller, drops nothing and grows up after LAMB_DAYS.
-//  - Shearing: shears (3 iron ingots) take 1-3 wool and swap the model for a shorn one. The wool grows back after ~7 days, +-30% per sheep.
+//  - Shearing: shears (2 iron ingots) take 1-3 wool and swap the model for a shorn one. The wool grows back after ~7 days, +-30% per sheep.
 // Pens: worldgen gives every shepherd a fenced pen (js/worldgen.js layoutVillage, js/jobs.js puts the loom beside it). Each pen holds a list of sheep
 //  states that outlives the sheep mobs: 2-4 sheep when it is first seen, respawned whenever the pen is loaded, saved as "pens:<village key>".
 //  Penned sheep wander only inside the pen (the fence has a gate gap and sheep can hop one-block fences, so the AI keeps them in).
@@ -513,8 +513,8 @@ function statusText(m) {
 }
 
 // ---------------------------------------------------------------- shears: recipe + sprite
-(BF.recipeHooks = BF.recipeHooks || []).push(({ addShapeless }) => {
-  addShapeless(BF.I.shears, 1, [BF.I.iron_ingot, BF.I.iron_ingot, BF.I.iron_ingot], "3 Iron Ingots → Shears");
+(BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped }) => {
+  addShaped(BF.I.shears, 1, [" I", "I "], { I: BF.I.iron_ingot }, "2 Iron Ingots (diagonal) → Shears");   // Minecraft's recipe
 });
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
   if (BF.I.oak_fence_gate === undefined) return;
