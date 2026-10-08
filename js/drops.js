@@ -1,5 +1,6 @@
 // Dropped item entities: items that pop out of broken blocks and killed mobs, bob on the ground,
-// and fly into the player's inventory when they walk close. Not saved; they despawn after 5 minutes.
+// and fly into the player's inventory when they walk close. They despawn after 5 minutes of lying in a loaded chunk
+// (in an unloaded chunk they wait, as in vanilla), and are saved with the world, keeping their age.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -51,10 +52,35 @@ const drops = {
 
   clear() { for (const d of drops.list.slice()) drops.remove(d); },
 
+  // -> [[id, count, x, y, z, age, wear, pickupDelay]] for the save (js/save.js)
+  serialize() {
+    const r = v => Math.round(v * 100) / 100;
+    return drops.list.map(d => [d.id, d.count, r(d.pos.x), r(d.pos.y), r(d.pos.z), r(d.age), d.wear || 0, r(Math.max(0, d.pickupDelay - d.age))]);
+  },
+
+  // Puts saved drops back where they lay, at rest and with the age they had. Old saves have none.
+  deserialize(a) {
+    if (!Array.isArray(a)) return;
+    for (const e of a) {
+      if (!Array.isArray(e)) continue;
+      const [id, count, x, y, z, age, wear, delay] = e;
+      if (![x, y, z].every(Number.isFinite)) continue;
+      const d = drops.spawn(id, count, x, y, z, { vel: new THREE.Vector3(0, 0, 0), pickupDelay: 0, wear: wear || 0 });
+      if (!d) continue;
+      d.age = Math.max(0, +age || 0);
+      d.pickupDelay = d.age + Math.max(0, +delay || 0);
+      d.sprite.position.copy(d.pos);
+    }
+  },
+
   update(dt) {
     const P = BF.player, pp = P && P.position, alive = P && !P.dead;
     const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1;
     for (const d of drops.list.slice()) {
+      // in an unloaded chunk an item neither ages nor falls (it would drop out of the world); it waits for the chunk
+      const here = BF.world.isLoaded(d.pos.x, d.pos.z);
+      d.sprite.visible = here;
+      if (!here) continue;
       d.age += dt;
       if (d.age > LIFE) { drops.remove(d); continue; }
       // pulled toward the player once close enough, then collected
