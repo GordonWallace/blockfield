@@ -1251,17 +1251,23 @@ function dealWith(m, v2, want) {
   }
   return null;
 }
+// Raw eggs it can cook count as food it has (js/eggcook.js); a villager that can cook eggs buys them first (cheap food), from the nearest
+// seller, and one that cannot buys ready food: never eggs it could not cook.
+const eggsPending = m => (BF.eggCook ? BF.eggCook.pending(m) : 0);
 function findFoodSeller(m) {
-  const R = m.village, F = FD(), want = SHOP_DAYS * F.rate(m) - F.available(m), now = dayNow();
+  const R = m.village, F = FD(), want = SHOP_DAYS * F.rate(m) - F.available(m) - eggsPending(m), now = dayNow();
   if (!R || want <= 0) return null;
   const sh = m.fshop;
   let best = null, bs = Infinity;
-  for (const v2 of R.members || []) {
-    if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
-    const d = dealWith(m, v2, want);
-    if (!d) continue;
-    const s = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
-    if (s < bs) { bs = s; best = d; }
+  for (const pass of BF.eggCook ? ["egg", "food"] : ["food"]) {
+    for (const v2 of R.members || []) {
+      if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
+      const d = pass === "egg" ? BF.eggCook.eggDeal(m, v2, want) : dealWith(m, v2, want);
+      if (!d) continue;
+      const s = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
+      if (s < bs) { bs = s; best = d; }
+    }
+    if (best) break;   // eggs found: no need for dearer ready food
   }
   return best;
 }
@@ -1448,7 +1454,7 @@ function shopAI(m, dt, out) {
     sh.checkT = 3;
     const now = dayNow();
     const hasEm = cnt(m, ids().em) >= 1;
-    const hungry = hasEm && F.available(m) < F.rate(m);
+    const hungry = hasEm && F.available(m) + eggsPending(m) < F.rate(m);   // raw eggs it is about to cook are food on the way
     const wheat = hasEm && m.profession === "shepherd" && !!BF.shepherd && BF.shepherd.wheatWanted(m) > 0;
     const tool = hasEm && toolNeed(m);
     if (sh.cd > now || m.child || !(hungry || wheat || tool)) return false;
