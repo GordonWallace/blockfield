@@ -1,17 +1,14 @@
-# Integration tests: the baseline set plus the slower soak and simulation tests. Runs on every push to a release branch
-# (each merged PR), on the pull request that takes a release branch into main, and on demand from the Actions tab.
+# Integration tests: the baseline set plus every other test (soak, simulation and slower feature tests). Runs on the pull
+# request that takes a release branch into main, and on demand from the Actions tab (pick the release branch). Not on each
+# push to a release branch: release-branch PRs stay light and the full run comes right before a release goes into main.
 name: Integration tests
 
 on:
-  push:
-    branches: ['release-*']
   pull_request:
     branches: [main]
   workflow_dispatch:
 
-# A newer push waits for the running integration run instead of cancelling it: with merges minutes apart and runs taking
-# about an hour, cancelling meant no run ever finished. Only the newest waiting push runs next; pull request runs still
-# cancel their superseded ones.
+# A newer manual run waits for the running one instead of cancelling it; pull request runs cancel their superseded ones.
 concurrency:
   group: integration-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
