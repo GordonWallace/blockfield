@@ -527,6 +527,7 @@ function think(m, Q) {
       if (deal) return { kind: "trip", deal };
     }
     if (underground) return { kind: "exit" };
+    if (BF.econ && count(m, I("emerald")) > 0) BF.econ.want(m, "Pickaxe");   // dead ends (js/economy.js)
     Q.status = "needs a pickaxe";
     return null;
   }
