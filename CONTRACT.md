@@ -847,3 +847,9 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   A builder who finishes its own house moves into it and evicts anyone who borrowed that bed.
 - Creative mode: the trade screen's villager inventory (`vinv` slots) is editable like any container (click, split, drag, shift-click
   between it and the player's inventory); in survival it stays greyed out and read-only.
+- The trade screen title starts with the villager's name (`BF.vlog.nameOf`), and its inventory panel reads "<Name>'s Inventory".
+
+## Villager hover card (js/villagerhover.js, loaded after villagerstatus.js)
+- `BF.villagerHover.update(dt)` (main.js, every frame): when the crosshair's ray hits a villager within 32 blocks with no block in front,
+  a card at the top centre shows its name, profession ("Child" for children) and `BF.villagerStatus.text`, refreshed 4 times a second.
+  Survival and creative alike; hidden while any screen or menu is open or the player is dead. `shown()` returns the villager or null.
