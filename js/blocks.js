@@ -655,11 +655,15 @@ BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3
 // Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.
 let dynItem = ITEM_BASE + 0x10000;
+// Widest auto map, in 128-block zones a side: 128 zones = 16384 blocks (16 blocks per pixel, the widest that still draws rivers). Wider maps cost as
+// much memory (about 3 GB of browser memory each) for little use, and several in a row crashed the browser.
+BF.AUTO_MAP_MAX_K = 128;
 BF.resolveItem = name => {
   if (name === "wool") return I.white_wool;   // old saves: plain wool was merged into white wool
   if (I[name] !== undefined) return I[name];
   const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
-  if (a && +a[1] >= 1 && +a[1] <= 32768) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
+  if (a && +a[1] > BF.AUTO_MAP_MAX_K) return BF.resolveItem("auto_map_" + BF.AUTO_MAP_MAX_K + "_" + a[2] + "_" + a[3]);   // old saves: wider maps shrink to the widest allowed, same centre
+  if (a && +a[1] >= 1) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
     const k = +a[1], id = dynItem++;
     items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map_filled", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto-Fill Map (" + k * 128 + "x" + k * 128 + " blocks)", search: "auto map autofill auto-fill automap" };
     I[name] = id;
