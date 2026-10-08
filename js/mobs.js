@@ -235,6 +235,9 @@ const VILLAGER_OUTFITS = {
   miner:         { robe: 0x4a4c54, trim: 0x2e3036, apron: 0x6b4a2a, sash: 0xd8a83a, pickaxe: true, hat: { kind: "hard", color: 0x3c3e44, color2: 0x2e3036, lamp: true } },
   // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
   furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
+  // stable hand (not vanilla): saddle-brown work coat, denim apron, rope belt, tan wide-brim hat; catches, breeds and sells horses (js/stables.js).
+  // Never in the roster pool: villages only get one when a builder puts up a stable and a villager takes its tack rack
+  stable_hand:   { robe: 0x7a5232, trim: 0x4a3018, apron: 0x3d5a7a, sash: 0xc9a24a, hat: { kind: "brim", color: 0xb08850, color2: 0x9a7444 } },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
   // builder (15th): orange hi-vis vest with reflective band and straps, brown overalls, yellow hard hat, a hammer in hand
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
@@ -900,7 +903,8 @@ function waterAhead(m, dx, dz) {
 }
 function pickWander(m, r) {
   if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
-  const a = Math.random() * Math.PI * 2, d = rnd(3, r);
+  if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
+  const a =Math.random() * Math.PI * 2, d = rnd(3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
   m.ai.tz = m.position.z + Math.sin(a) * d;
 }
@@ -1379,6 +1383,7 @@ function villagerAI(m, dt, out) {
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
   if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;
   if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
+  if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
@@ -1926,7 +1931,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2145,6 +2150,7 @@ BF.mobs = {
     if (BF.storage) BF.storage.tick(dt);   // chest owners: empty chests and those of dead villagers are freed (js/storage.js)
     if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
     if (BF.horses) BF.horses.tick(dt);   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
+    if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     spawnT -= dt;
@@ -2217,6 +2223,7 @@ BF.mobs = {
     if (!mob || mob.dead || mob.removed || mob.type !== "villager") return null;
     if (mob.sleeping) return "Villager is sleeping";
     if (mob.child) { mob.lookAt = "player"; mob.ai.lookT = 1.5; return "The child is too young to trade"; }
+    if (mob.profession === "stable_hand" && BF.stables) { const msg = BF.stables.playerSells(mob); if (msg) return msg; }   // the player leading a tamed horse sells it to the stable (js/stables.js)
     mob.ai.was = { mode: mob.ai.mode, flee: mob.ai.fleeT > 0 };   // what it was doing, for the trade screen's status line (js/villagerstatus.js)
     mob.lookAt = "player"; mob.ai.lookT = 3; mob.ai.mode = "idle"; mob.ai.t = 3;
     const inv = BF.inventory, I = BF.I || {};
@@ -2304,6 +2311,7 @@ BF.mobs = {
     if (BF.jobs) BF.jobs.reset();
     if (BF.villageSim) BF.villageSim.reset();
     if (BF.shepherd) BF.shepherd.reset();
+    if (BF.stables) BF.stables.reset();
   },
 };
 })();

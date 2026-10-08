@@ -59,6 +59,7 @@
   {"name": "dead-villagers", "file": "test/dead-villagers.js", "kind": "actions", "tier": "baseline"},
   {"name": "shepherd-misc", "file": "test/shepherd-misc.js", "kind": "actions", "tier": "integration"},
   {"name": "toolsmith-actions", "file": "test/toolsmith-actions.js", "kind": "actions", "tier": "integration", "timeout": 900},
-  {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"}
+  {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"},
+  {"name": "stables", "file": "test/stables.js", "kind": "actions", "tier": "integration", "timeout": 900, "what": "tack rack recipe and stable blueprint; stable hand stocks, breeds (max 4) and trades horses, 3 game days, nothing from nowhere"}
  ]
 }
