@@ -1329,6 +1329,10 @@ function secondaryDown() {
     const r = BF.shepherd.playerUse(mh.mob, selectedItem());
     if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
+  if (mh && mh.mob && mh.mob.type === "cow" && BF.cowherd && (!target || mh.dist < target.dist)) {   // wheat feeds a cow, a bucket milks it (js/cowherd.js)
+    const r = BF.cowherd.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
   if (mh && mh.mob && mh.mob.type === "chicken" && BF.poultry && (!target || mh.dist < target.dist)) {   // seeds feed a chicken (js/poultry.js)
     const r = BF.poultry.playerUse(mh.mob, selectedItem());
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
@@ -1464,6 +1468,24 @@ function secondaryDown() {
   placeCd = PLACE_REPEAT;
   return true;
 }
+// After eating or drinking `it`: its container (blocks.js `container`: milk bucket -> bucket, milk bottle -> glass bottle) goes into the
+// emptied hand slot, else the inventory, else drops. Creative mode used nothing up, so nothing comes back.
+function leaveContainer(it) {
+  const back = it && it.container ? BF.I[it.container] : null, I2 = inv();
+  if (back == null || P.gameMode === "creative" || !I2) return;
+  if (!I2.selected() && I2.setSlot) { I2.setSlot(I2.selectedIndex, { id: back, count: 1 }); return; }
+  const left = I2.add(back, 1);
+  if (left > 0 && BF.drops) BF.drops.spawn(back, left, P.position.x, P.position.y + 1, P.position.z);
+}
+// The end of eating the selected item `it`: hunger, the item used up, its container left (also BF.player.finishEating, for tests).
+function finishEating(it) {
+  P.hunger = Math.min(P.maxHunger, P.hunger + it.food);
+  saturation = Math.min(P.hunger, saturation + it.food * 0.6);
+  try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+  try { leaveContainer(it); } catch (e) { console.error(e); }   // milk: the empty bucket or bottle stays in hand (js/cowherd.js)
+  emit("playerAte", it.id);
+}
+P.finishEating = finishEating;
 function updateUse(dt) {
   if (placeCd > 0) placeCd -= dt;
   if (drawT > 0) { updateDraw(dt); return; }
@@ -1474,10 +1496,7 @@ function updateUse(dt) {
     emit("playerEating", it.id); // per frame while eating (audio crunch)
     if (eatT >= EAT_TIME) {
       eatT = 0;
-      P.hunger = Math.min(P.maxHunger, P.hunger + it.food);
-      saturation = Math.min(P.hunger, saturation + it.food * 0.6);
-      try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
-      emit("playerAte", it.id);
+      finishEating(it);
       placeCd = 0.3;
     }
     return;

@@ -34,7 +34,7 @@ const WHEAT_SELF = 4;                   // a farmer keeps this much wheat (js/vi
 const SADDLE_STOCK = 1, LEAD_STOCK = 4; // tack it keeps made up for sale
 const CRAFT_SECS = 6;                   // at the rack: one saddle or two leads every 6 s
 const TRADE_PAUSE = 1.6;
-const SELLERS = { wheat_item: ["farmer"], hay_bale: ["farmer", "shepherd"], leather: ["leatherworker", "butcher"], string: ["shepherd", "fletcher"], iron_ingot: null };   // null: anyone with an offer
+const SELLERS = { wheat_item: ["farmer"], hay_bale: ["farmer", "shepherd"], leather: ["leatherworker", "butcher", "cowherd"], string: ["shepherd", "fletcher"], iron_ingot: null };   // null: anyone with an offer
 const KEEP = { wheat_item: WHEAT_SELF };
 const LOG = [];
 

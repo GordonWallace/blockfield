@@ -142,6 +142,25 @@ const SPECS = {
       return { cells: c, beds: [], w: w + 1, d };
     },
   },
+  // Pasture (js/cowherd.js): a fenced grass field (11x9 ring) with an oak gate in the front, a water trough (2 water in a plank rim) and two hay
+  // bales (when the builder holds them) along the back, and the cowherd's milk churn beside it. Only in villages on grass (builder.js pickType / findSite): cows spawn only on
+  // grass. It starts empty: the cowherd fetches wild cows. `marks`: the room the cows graze (inside corners), the gate, the cell in front of it,
+  // the fence's corners and the churn, turned with the building (get).
+  pasture: {
+    label: "pasture", weight: "other",
+    gen(st, h, opts) {
+      const B = BF.B, c = [], w = 11, d = 9, gate = BF.gateId("x", false, "oak");
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        if (!(u === 0 || u === w - 1 || q === 0 || q === d - 1)) continue;
+        c.push([u, 0, q, q === 0 && u === 5 ? gate : B.oak_fence, q === 0 && u === 5 ? PH.DOOR : PH.WALL]);
+      }
+      for (let u = 6; u <= 9; u++) c.push([u, 0, 6, B.planks, PH.WALL]);
+      c.push([6, 0, 7, B.planks, PH.WALL], [9, 0, 7, B.planks, PH.WALL], [7, 0, 7, B.water, PH.WALL], [8, 0, 7, B.water, PH.WALL]);
+      if (opts && opts.hay && B.hay_bale != null) c.push([1, 0, 7, B.hay_bale, PH.LIGHT], [2, 0, 7, B.hay_bale, PH.LIGHT]);
+      if (B.milk_churn != null) c.push([w, 0, 1, B.milk_churn, PH.LIGHT]);
+      return { cells: c, beds: [], w: w + 1, d, marks: { room: [[1, 1], [9, 5]], gate: [[5, 0]], out: [[5, -1]], fence: [[0, 0], [10, 8]], churn: [[w, 1]] } };
+    },
+  },
   market_stall: {
     label: "market stall", weight: "other",
     gen(st) {

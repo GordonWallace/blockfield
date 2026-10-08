@@ -135,6 +135,15 @@ Dropped (not replaced) because no equivalent exists: iron/diamond armor (iron_he
 | raw_cod | 0.07 | No fishing in the game: trade-only; priced like other raw meat |
 | cooked_cod | 0.1 | Raw + furnace |
 
+### Milk and bottles (js/cowherd.js)
+
+| Item | Value | Basis |
+|---|---:|---|
+| glass_bottle | 0.1 | 3 glass in a V -> 3 bottles (1 glass, 0.08, + work); in villages only from the cowherd's hire kit until villagers make glass |
+| milk_bottle | 0.15 | A glass bottle + a third of a milking; food 2 (0.4 bread-eq) |
+| milk_bucket | 1.75 | A bucket (1.6) + milk; food 6; not traded (the cowherd bottles it) |
+| milk_churn | 0.62 | 4 planks + 1 iron ingot (the cowherd's jobsite) |
+
 ### Paper goods
 
 | Item | Value | Basis |
@@ -356,6 +365,10 @@ own wool into string (1 wool -> 2 string, js/shepherd.js) and sells it at `1 eme
 
 ### leatherworker
 
+`PRODUCE.leatherworker` was `leather` and is now empty (1.3): leather comes only from cows. A leatherworker holding fewer than 12 leather buys
+it from the cowherd or the butcher at the fair price (1 emerald for 6, `VALUE` 0.15; js/villagelife.js `shopAI`, like the shepherd's wheat).
+Its starting stock is unchanged.
+
 | Lvl | Offer | In | Out | rho | Kind |
 |---:|---|---:|---:|---:|---|
 | 1 | 8 leather > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
@@ -367,6 +380,31 @@ own wool into string (1 wool -> 2 string, js/shepherd.js) and sells it at `1 eme
 | 3 | 22 rotten_flesh > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
 | 4 | 2 emerald > 12 leather | 2.00 | 1.80 | 0.90 | buy from villager |
 | 5 | 3 emerald > 18 leather | 3.00 | 2.70 | 0.90 | buy from villager |
+
+### cowherd
+
+New profession (see CONTRACT.md "Cowherds"). It sells what its herd gives and buys its feed and its empty bottles back. Nothing is restocked
+(`PRODUCE.cowherd = []`) and none of its wares are in its starting pack: milk bottles come from milking (1 milk bucket + 3 glass bottles ->
+3 milk bottles), raw beef and leather from the cows it culls, steak from beef it cooks in a real furnace. Its hire kit (1 bucket, 30 glass bottles)
+is the only way bottles enter a village.
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 1 emerald > 7 milk_bottle | 1.00 | 1.05 | 1.05 | buy from villager |
+| 1 | 1 emerald > 12 raw_beef | 1.00 | 0.96 | 0.96 | buy from villager |
+| 1 | 1 emerald > 7 leather | 1.00 | 1.05 | 1.05 | buy from villager |
+| 1 | 16 wheat_item > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+| 1 | 12 glass_bottle > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 2 | 1 emerald > 8 steak | 1.00 | 0.96 | 0.96 | buy from villager |
+| 3 | 2 emerald > 16 steak | 2.00 | 1.92 | 0.96 | buy from villager |
+
+- **Empty bottles.** Every other villager holding 9 or more empty bottles (left from milk it drank) offers them to the player at `1 emerald > 9 glass_bottle`
+  (rho 0.90, an offer added while the trade screen is open, `syncFeed`), and the cowherd buys them back from villagers holding 5 or more, up to 9 for an
+  emerald, while it holds fewer than 9.
+- **Milk as food.** Hungry villagers buy milk bottles from the cowherd only when no other food is for sale in the village (fair price 1 emerald for 6,
+  or its offer); it keeps 3 bottles back.
+- **No round trip.** Leather 0.125 (butcher, leatherworker pay) < 0.143 (cowherd charges); raw beef 0.071 < 0.083; steak 0.106 (feed offers) < 0.125;
+  glass bottles 0.083 (cowherd pays) < 0.111 (villagers charge). It never sells its last bucket.
 
 ### cartographer
 

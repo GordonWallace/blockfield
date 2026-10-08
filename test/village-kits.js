@@ -12,17 +12,19 @@ module.exports = async (pg) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     BF.state.paused = true;
 
-    // ---- rosters (village generator 4 is the default for new worlds; 3 and 4 have the same rosters but 4 adds a coop and its poultry keeper)
+    // ---- rosters (village generator 5 is the default for new worlds; 3, 4 and 5 have the same rosters but 4 adds a coop and its poultry keeper,
+    // 5 a pasture and its cowherd in grass villages of 10+)
+    let cowherds = 0, pastureBad = [];
     let villages = 0, minPop = Infinity, core = 0, planned = 0, deserts = 0, gardens = 0, bad = [], desertV = null;
     for (const seed of [1, 2, 3, 4, 5, 6]) {
       BF.newWorld(seed, { gen: 3 });
-      if (seed === 1) ok("new worlds use village generator 4", BF.state.villages === 4, BF.state.villages);
+      if (seed === 1) ok("new worlds use village generator 5", BF.state.villages === 5, BF.state.villages);
       const seen = new Set();
       for (let rz = -8; rz < 8; rz++) for (let rx = -8; rx < 8; rx++) for (const v of BF.worldgen.villagesNear(rx * 384, rz * 384, 200)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
         if (seen.has(key)) continue;
         seen.add(key); villages++;
-        const ro = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0 });
+        const ro = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground });
         minPop = Math.min(minPop, v.pop);
         const has = p => ro.some(sl => sl.prof === p);
         if (has("miner") && has("farmer") && has("forester") && has("toolsmith")) core++; else bad.push([seed, key, v.pop, ro.map(sl => sl.prof).join(" ")]);
@@ -35,12 +37,16 @@ module.exports = async (pg) => {
           if (g) { gardens++; if (!desertV && seed === 1) desertV = { x: v.x, z: v.z, g: { x0: g.x0, z0: g.z0, x1: g.x1, z1: g.z1, y: g.y } }; }
         }
         if (v.style !== 1 && v.buildings.some(b => b.type === "garden")) bad.push([seed, key, "garden outside the desert"]);
+        const ch = has("cowherd"), pa = v.buildings.some(b => b.type === "pasture");
+        if (ch) cowherds++;
+        if (ch !== pa || (ch && (v.ground !== 0 || v.pop < 10 || !plan.some(j => j.prof === "cowherd" && slotOf("cowherd").includes(j.slot))))) pastureBad.push([seed, key, v.pop, v.ground, ch, pa]);
       }
     }
     ok("sampled villages", villages > 30, villages);
     ok("every village has 4+ villagers", minPop >= 4, minPop);
     ok("every village has a miner, a farmer, a forester and a toolsmith", core === villages, { core, villages, bad: bad.slice(0, 4) });
     ok("each of the four has its jobsite planned", planned === villages, { planned, villages });
+    ok("generator 5: grass villages of 10+ with a cowherd have a pasture and a churn, none without", cowherds > 5 && pastureBad.length === 0, { cowherds, bad: pastureBad.slice(0, 4) });
     ok("every desert village has a garden", deserts > 0 && gardens === deserts, { deserts, gardens });
     const tiny = BF.mobs.roster({ key: "9999,9999", houses: [1, 2, 3, 4].map(() => ({ type: "house", beds: [{}] })), nb: 7, pop: 4 }).map(s => s.prof).sort();
     ok("a 4-villager village is exactly miner, farmer, forester, toolsmith", tiny.join() === "farmer,forester,miner,toolsmith", tiny);

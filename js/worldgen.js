@@ -130,7 +130,9 @@ let GEN = 1, SC = 1;
 // 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
 // 3 = as 2, with at least 4 villagers (a miner, a farmer, a forester and a toolsmith, js/mobs.js villageRoster) and a garden with trees in desert villages.
 // 4 = as 3, and a village of 8 or more villagers has a poultry keeper with a chicken coop (js/poultry.js). Worlds saved with 3 keep 3: no coops appear in them.
+// 5 = as 4, and a village of 10 or more villagers on grass has a cowherd with a fenced pasture (js/cowherd.js). Worlds saved with 4 keep 4: no pastures appear in them.
 let VGEN = 1;
+const COWHERD_POP = 10;   // village generator 5: villages of this many villagers on grass get a cowherd and a pasture (js/mobs.js villageRoster reads BF.worldgen.COWHERD_POP)
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
   const L = gen >= 3 ? [-64, 3072, 0] : [0, 192, 48];
@@ -826,7 +828,7 @@ function villageAt(x, z, m) {
 
 const BTYPES = {
   house: [5, 5], house2: [5, 6], lhouse: [7, 7], big: [7, 7], library: [9, 7], church: [5, 10],
-  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11], coop: [7, 7],
+  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11], coop: [7, 7], pasture: [11, 9],
 };
 const LIVABLE = { house: 1, house2: 1, lhouse: 1, big: 1, library: 1, church: 1, smith: 1 };
 // Beds of a building in its local coords (u along the road, q inward): [footU, footQ, axis the head lies along (+1)].
@@ -859,6 +861,7 @@ function layoutVillage(cx, cz, spawn, pop) {
   const v = { x: cx, y: y0, z: cz, biome: NAMES[biome], style, pads: [], roads: [], lamps: [], decor: [], buildings: [], houses: [],
     minX: cx - 7, maxX: cx + 7, minZ: cz - 7, maxZ: cz + 7, minY: y0 };
   if (pop) v.pop = pop;
+  v.ground = biome === DESERT ? 1 : style === 2 ? 2 : 0;   // set again at the end (unchanged); known this early for the roster (js/mobs.js villageRoster: cowherds on grass)
   const E = pop ? villageExtent(pop) : 72, RL = E - 8;    // building / road reach from the centre
   const sc = pop ? Math.max(1, Math.sqrt(pop / 18)) : 1; // street length scale
   let occ = [];
@@ -1132,6 +1135,39 @@ function layoutVillage(cx, cz, spawn, pop) {
     }
   }
 
+  // Pasture (village generator 5): a village of 10 or more villagers on grass has a cowherd (js/mobs.js villageRoster, when one of its residents
+  // can make way), who gets a fenced pasture with its milk churn beside it (js/jobs.js planVillage, js/cowherd.js). Added last, after the coop, so no other plot moves.
+  let cowherd = 0;
+  if (VGEN >= 5 && (v.pop || 0) >= COWHERD_POP && v.ground === 0 && BF.jobs && BF.jobs.cowherdCount) { try { cowherd = BF.jobs.cowherdCount(v); } catch (e) { cowherd = 0; } }
+  if (cowherd > 0) {   // only when the roster has room for the cowherd (a village whose residents are all tradespeople it cannot replace has none)
+    const [w, d] = BTYPES.pasture;
+    const tryPasture = (road, side, t, back) => {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side: the churn stands beside the fence
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      if (!(Math.abs(box[0] - cx) < 80 && Math.abs(box[2] - cx) < 80 && Math.abs(box[1] - cz) < 80 && Math.abs(box[3] - cz) < 80) || overlaps(box) || covers(box, 1)) return false;
+      const du = w >> 1, door = P(du, 0), front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u++) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "pasture", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 651) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    const passes = [[3, 0], [3, 1], [12, 0], [21, 0], [30, 1]];
+    found: for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 2, t1 = beyond ? road.end + 24 : road.end + 1 - w;
+      for (let t = t0; t <= t1; t += 2) if (tryPasture(road, side, t, back)) break found;
+    }
+  }
+
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
   for (const road of roads) {
@@ -1376,6 +1412,19 @@ function drawShell(b, P, S, style) {
       }
       if (GEN >= 3 && BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
       P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale); P(w - 2, y, d - 2, B.water);
+      P(du, y, -1, B.dirt_path);
+      return;
+    }
+    case "pasture": {
+      // cow pasture (js/cowherd.js): a fenced grass field with a gate facing the road, hay bales and a sunken water trough along the back; the churn beside it is the jobs plan's
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
+        if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
+        else if (!edge) P(u, y, q, v_ground(style));
+      }
+      if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
+      P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale);
+      for (let u = w - 5; u <= w - 2; u++) P(u, y, d - 2, B.water);
       P(du, y, -1, B.dirt_path);
       return;
     }
@@ -2297,6 +2346,7 @@ function recordBuilding(kind, w, d, style, h) {
 const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: h == null ? 0.5 : h });
 
 BF.worldgen = {
+  COWHERD_POP,
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;

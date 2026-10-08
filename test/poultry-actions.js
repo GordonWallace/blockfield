@@ -10,7 +10,7 @@ module.exports = async (pg, out) => {
     const P = BF.poultry, I = BF.I;
     BF.state.paused = true;
     BF.newWorld(1, { gen: 3, gameMode: "survival" });
-    ok("new worlds use village generator 4", BF.state.villages === 4, BF.state.villages);
+    ok("new worlds use village generator 5 (4 + pastures)", BF.state.villages === 5, BF.state.villages);
     BF.mobs.spawning = false;
     const V = { x: 26, z: 39 };   // seed 1: a village of 12 with a coop
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
