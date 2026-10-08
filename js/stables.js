@@ -437,6 +437,9 @@ function handOver(v, o) {
   const H = BF.horses, r = H.records.get(o.horse), h = r && r.mob, P = BF.player;
   if (!h) return;
   H.tame(h, "player"); H.setPen(h, null);
+  const paid = o.buy[0] ? o.buy[0].n : H.price(r);
+  if (BF.vlog && v.village) BF.vlog.log(v.village, "horse", who(v) + " sold a horse to the player for " + paid + " emerald" + (paid === 1 ? "" : "s") + " (" + stats(r) + ")", v);
+  log("sold", v, { hid: r.hid, price: paid });
   if (TR().inv.remove(v.inv, I("lead"), 1) === 1) H.leash(h, "player");
   else {
     H.leash(h, null);
