@@ -1,4 +1,4 @@
-# Baseline tests: fast headless checks on every pull request into a release branch (and into main).
+# Baseline tests: a quick smoke set (about 5 min) on every pull request into a release branch (and into main).
 # Tiers and timeouts are in test/ci.json; the runner is test/ci.js.
 name: Baseline tests
 
