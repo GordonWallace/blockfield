@@ -86,7 +86,8 @@ module.exports = async (pg, out) => {
     ok("the keeper led wild chickens into the empty coop until it held 2", coop.hens.length >= 2, { hens: coop.hens.length, wild: wild.map(h => !!h.coop), log: P.log.filter(e => /lead|stock|fetch/.test(e.kind)).slice(-6) });
     ok("it led them (it walked with a chicken behind it)", fetches > 0, fetches);
     ok("they are inside the run", wild.filter(h => h.coop === coop).every(h => h.position.x > coop.fx0 && h.position.x < coop.fx1 && h.position.z > coop.fz0 && h.position.z < coop.fz1));
-    for (let i = 0; i < 600; i++) step();
+    const gateOpen = () => { const g = BF.blocks[BF.world.getBlock(coop.gate[0], coop.y + 1, coop.gate[1])]; return !!(g && g.gate && g.gate.open); };
+    for (let i = 0; i < 2400 && gateOpen(); i++) step();
     const gb = BF.blocks[BF.world.getBlock(coop.gate[0], coop.y + 1, coop.gate[1])];
     ok("the gate is shut again", !!(gb && gb.gate && !gb.gate.open), gb && gb.name);
     // none in range: it looks again the next day

@@ -341,6 +341,7 @@ function tick(dt) {
   if (coopT <= 0 && BF.world) { coopT = 1; try { tickCoops(); } catch (e) { console.error(e); } }
   if (acc < 0.5 || !BF.mobs) return;
   acc = 0;
+  if (toShut.length) shutGates();
   const t = now();
   for (const m of BF.mobs.list) {
     if (m.type !== "chicken" || !live(m)) continue;
@@ -376,7 +377,7 @@ function importAll(o) {
   if (!o || typeof o !== "object") return;
   for (const k in o) if (k.slice(0, 6) === "coops:" && Array.isArray(o[k])) pending.set(k.slice(6), o[k].filter(e => e && e.i != null && Array.isArray(e.h)));
 }
-function reset() { pending = new Map(); activeCoops.length = 0; acc = 0; coopT = 0; LOG.length = 0; }
+function reset() { pending = new Map(); activeCoops.length = 0; toShut.length = 0; acc = 0; coopT = 0; LOG.length = 0; }
 
 // ---------------------------------------------------------------- the poultry keeper
 const pkp = m => m.pkp || (m.pkp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
@@ -454,15 +455,18 @@ function endTask(m, ok) {
   const S = pkp(m), tk = S.task;
   if (tk && !ok && tk.mob) S.avoid.set(tk.mob, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
   if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
-  if (S.gateHeld) { S.gateShut = S.gateHeld; S.gateHeld = null; shutGate(m, S); }
+  if (S.gateHeld) { toShut.push({ at: S.gateHeld, m, t: BF.simNow() }); S.gateHeld = null; shutGates(); }
   S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;
 }
-// The gate it held open for a chicken is shut as soon as nothing stands in it (and the keeper is out of the way).
-function shutGate(m, S) {
-  const [x, y, z] = S.gateShut, bk = BF.blocks[BF.world.getBlock(x, y, z)];
-  if (!bk || !bk.gate || !bk.gate.open) { S.gateShut = null; return; }
-  if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5) return;
-  BF.world.setGate(x, y, z, false); S.gateShut = null;
+// Gates a keeper held open for a chicken are shut as soon as nothing stands in them (and the keeper is out of the way); checked from tick().
+const toShut = [];
+function shutGates() {
+  for (let i = toShut.length - 1; i >= 0; i--) {
+    const g = toShut[i], [x, y, z] = g.at, bk = BF.world.isLoaded(x, z) ? BF.blocks[BF.world.getBlock(x, y, z)] : null;
+    if (!bk || !bk.gate || !bk.gate.open || BF.simNow() - g.t > 120) { toShut.splice(i, 1); continue; }
+    if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || (live(g.m) && Math.hypot(x + 0.5 - g.m.position.x, z + 0.5 - g.m.position.z) < 1.5)) continue;
+    BF.world.setGate(x, y, z, false); toShut.splice(i, 1);
+  }
 }
 function loot(m, id, n, where) {
   if (id == null || n <= 0) return 0;
@@ -551,7 +555,6 @@ function lead(m, S, tk, dt, out) {
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.tradingWith || !BF.mobs.nav || !BF.villageLife || m.sleeping) return false;
   const S = pkp(m), ai = m.ai, t = skyT();
-  if (S.gateShut) shutGate(m, S);
   if (t >= WORK_END || t < 0.02) { if (S.task) endTask(m, true); return t >= WORK_END && leave(m, S, dt, out); }
   if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
