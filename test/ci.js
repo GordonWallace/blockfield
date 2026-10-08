@@ -3,7 +3,7 @@
 // Tiers and per-test settings live in test/ci.json. A test file that is not listed there can declare its own tier with a comment
 // line `// @ci baseline`, `// @ci integration` or `// @ci skip <reason>`; an unlisted, untagged test runs in integration.
 // Tests run serially: several headless games at once starve each other and village loading gets flaky.
-// A test fails when it exits non-zero, times out, throws in the page (PAGEERROR), or prints a line starting with FAIL / FAILED.
+// A test fails when it exits non-zero, times out, uses more memory than CI_MEM_LIMIT_MB (10 GB), throws in the page (PAGEERROR), or prints a line starting with FAIL / FAILED.
 // Writes <outDir>/<name>.log (+ screenshots) and a markdown table to $GITHUB_STEP_SUMMARY when set.
 const fs = require('fs'), path = require('path'), cp = require('child_process');
 const root = path.resolve(__dirname, '..');
@@ -31,17 +31,46 @@ const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline
 const run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
 fs.mkdirSync(outDir, { recursive: true });
 
-function runOne(t) {
+// Memory cap per test (process tree RSS, MB). A browser that eats the whole machine gets the CI runner killed, which loses
+// every result of the run; stopping the one test keeps the rest. CI_MEM_LIMIT_MB overrides.
+const MEM_LIMIT_MB = +(process.env.CI_MEM_LIMIT_MB || 10240);
+// the test's process and all its descendants (Playwright starts the browser in a session of its own, so walk parent links)
+function tree(pid) {
+  let rows;
+  try { rows = cp.execFileSync('ps', ['-eo', 'pid=,ppid=,rss='], { encoding: 'utf8' }).trim().split('\n').map(l => l.trim().split(/\s+/).map(Number)); }
+  catch (e) { return { pids: [pid], mb: 0 }; }
+  const pids = new Set([pid]);
+  for (let grew = true; grew;) { grew = false; for (const [p, pp] of rows) if (pids.has(pp) && !pids.has(p)) { pids.add(p); grew = true; } }
+  return { pids: [...pids], mb: rows.reduce((a, [p, , rss]) => a + (pids.has(p) ? rss : 0), 0) / 1024 };
+}
+function spawnWatched(args, env, timeout, memMB) {
+  return new Promise(resolve => {
+    const ch = cp.spawn(process.execPath, args, { cwd: root, env });
+    let out = '', killed = null, peakMB = 0;
+    ch.stdout.on('data', d => { out += d; });
+    ch.stderr.on('data', d => { out += d; });
+    const seen = new Set();   // every process seen in the tree: one forked after the last look would otherwise be left orphaned
+    const killTree = () => { for (const p of tree(ch.pid).pids) seen.add(p); for (const p of seen) try { process.kill(p, 'SIGKILL'); } catch (e) {} };
+    const stop = why => { if (killed) return; killed = why; killTree(); };
+    const timer = setTimeout(() => stop('time'), timeout);
+    const poll = setInterval(() => { const tr = tree(ch.pid), mb = tr.mb; for (const p of tr.pids) seen.add(p); peakMB = Math.max(peakMB, mb); if (mb > memMB) stop('memory'); }, 2000);
+    ch.on('error', error => { clearTimeout(timer); clearInterval(poll); resolve({ out, error, killed, peakMB }); });
+    ch.on('close', status => { clearTimeout(timer); clearInterval(poll); resolve({ out, status, killed, peakMB }); });
+  });
+}
+
+async function runOne(t) {
   const out = path.join(outDir, t.name);
   const args = t.kind === 'actions' ? [path.join('test', 'run.js'), out, t.file] : [t.file, ...(t.args || []).map(a => a.replace('{out}', out))];
   const timeout = (t.timeout || 300) * 1000;
   const t0 = Date.now();
-  const r = cp.spawnSync(process.execPath, args, { cwd: root, env: { ...process.env, ...(t.env || {}) }, timeout, encoding: 'utf8', maxBuffer: 1 << 28 });
+  const r = await spawnWatched(args, { ...process.env, ...(t.env || {}) }, timeout, MEM_LIMIT_MB);
   const secs = (Date.now() - t0) / 1000;
-  const log = (r.stdout || '') + (r.stderr || '');
+  const log = r.out;
   fs.writeFileSync(out + '.log', log);
   const reasons = [];
-  if (r.error && r.error.code === 'ETIMEDOUT') reasons.push('timed out after ' + (t.timeout || 300) + 's');
+  if (r.killed === 'time') reasons.push('timed out after ' + (t.timeout || 300) + 's');
+  else if (r.killed === 'memory') reasons.push(`stopped after using ${(r.peakMB / 1024).toFixed(1)} GB of memory (limit ${(MEM_LIMIT_MB / 1024).toFixed(0)} GB)`);
   else if (r.error) reasons.push(r.error.message);
   else if (r.status !== 0) reasons.push('exit code ' + r.status);
   const lines = log.split('\n');
@@ -53,11 +82,12 @@ function runOne(t) {
   return { t, secs, ok: !reasons.length, reasons, tail: lines.filter(Boolean).slice(-15).join('\n') };
 }
 
+(async () => {
 console.log(`tier ${tier}: ${run.length} test(s)`);
 const results = [];
 for (const t of run) {
   process.stdout.write(`::group::${t.name}\n`);
-  const r = runOne(t);
+  const r = await runOne(t);
   results.push(r);
   console.log(r.tail);
   process.stdout.write('::endgroup::\n');
@@ -78,3 +108,4 @@ if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_S
 fs.writeFileSync(path.join(outDir, 'summary.md'), md);
 console.log(`\n${results.length - failed.length}/${results.length} passed` + (failed.length ? '; failed: ' + failed.map(r => r.t.name).join(', ') : ''));
 process.exit(failed.length ? 1 : 0);
+})();

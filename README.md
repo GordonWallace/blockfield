@@ -30,7 +30,7 @@ GitHub Actions runs the headless tests (`.github/workflows/`), one at a time, in
 - **Baseline tests** run on every pull request into a `release-*` branch or `main` (about 15 minutes).
 - **Integration tests** (baseline plus the soak, generator and slow map tests, about an hour) run on every push to a `release-*` branch, so after each merged PR, and on a pull request from a release branch into `main`. Either workflow can also be started by hand from the Actions tab.
 
-Each run's page has a results table, and the logs and screenshots are attached to it. A test fails when it exits non-zero, times out, throws in the page, or prints a line starting with `FAIL`. Run a tier locally with `NODE_PATH=$(npm root -g) node test/ci.js baseline` (or `integration`, or name tests after the output folder: `node test/ci.js baseline ci-out esc-close`). A new test file needs no entry in `test/ci.json`: it runs in integration, or in the tier named by a `// @ci baseline` comment in the file.
+Each run's page has a results table, and the logs and screenshots are attached to it. A test fails when it exits non-zero, times out, uses more than 10 GB of memory (it is stopped so the rest of the run still reports), throws in the page, or prints a line starting with `FAIL`. A push to a release branch waits for the integration run already going instead of cancelling it. Run a tier locally with `NODE_PATH=$(npm root -g) node test/ci.js baseline` (or `integration`, or name tests after the output folder: `node test/ci.js baseline ci-out esc-close`). A new test file needs no entry in `test/ci.json`: it runs in integration, or in the tier named by a `// @ci baseline` comment in the file.
 
 ## Layout
 
