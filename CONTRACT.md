@@ -216,6 +216,9 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
 - Killed villagers: `rec.dead` (Set of roster slots that never respawn) and `rec.deadInfo` ([{i (slot, null for a newborn), name, prof ("child" for a child), cause, day, age (game days loaded and active)}], every villager that died there), saved as `"dead:<village key>": {v, info}` in `exportVillagers`.
 - `BF.mobs.exportVillagers() -> {key: {inv:[{n,c}|null x18], level, xp, day}}` (live villagers override stored ones) and
   `importVillagers(obj)` (replaces the stored map; call after `newWorld`). Cows also drop 0-2 leather.
+  Each entry also has `pos: [x, y, z, yaw]`, where the villager stood when saved or unloaded: it respawns there (exactly, unless
+  something now blocks the spot) once that chunk is loaded, waiting for it while the spot is in or near the village; a spot that is
+  neither loaded nor near the village, or an older save without `pos`, falls back to the house.
 - Zombies (only) with a target (player, not in creative, or a villager) that stay pressed against a closed door for 3 s
   break it: both halves removed, one door of that wood drops. Other hostiles cannot pass closed doors.
 - `worldgen.villagesNear()` house records: `{x, y, z, w, d, doorX, doorZ, outX, outZ (cell in front of the door), type,

@@ -1963,6 +1963,11 @@ function villageRoster(rec) {
   return ordered;
 }
 
+// (x, z) is in or next to the village (sized villages: their bounds + 32, classic villages: 80 of the centre)
+function inVillage(v, x, z) {
+  if (v.minX != null) return x >= v.minX - 32 && x <= v.maxX + 32 && z >= v.minZ - 32 && z <= v.maxZ + 32;
+  return Math.hypot(v.x - x, v.z - z) <= 80;
+}
 function updateVillages(dt) {
   for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
   villageT -= dt;
@@ -1995,16 +2000,26 @@ function updateVillages(dt) {
       if (haveV >= wantV) break;
       if (taken.has(sl) || dead.has(sl.idx)) continue;   // never respawn a killed villager in place of a living one
       const H = sl.house;
-      if (H && !loadedHouse(H)) continue;
-      const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
-      const sy = H && H.y != null ? H.y : (v.y != null ? v.y : BF.world.heightAt(sx, sz) + 1);
-      let at = findStand(sx, sy, sz, TYPES.villager);
-      if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, TYPES.villager);
-      if (!at) continue;
+      const sv = villagerSaves.get(rec.key + "#" + sl.idx);
+      // a villager with a saved spot (a saved game, or it was unloaded) comes back where it stood, once that spot is loaded;
+      // one whose spot is out of reach (and older saves) starts at its house as before
+      const sp = sv && Array.isArray(sv.pos) && sv.pos.length >= 3 && sv.pos.slice(0, 3).every(Number.isFinite) ? sv.pos : null;
+      const spNear = sp && (BF.world.isLoaded(sp[0], sp[2]) || inVillage(v, sp[0], sp[2]));
+      if (spNear && !BF.world.isLoaded(sp[0], sp[2])) continue;   // its spot in the village has not loaded yet: wait for it
+      const T = TYPES.villager;
+      let at = !spNear ? null : !BF.world.boxCollides(sp[0], sp[1], sp[2], T.hw, T.h) ? sp.slice(0, 3) : findStand(sp[0], sp[1], sp[2], T);   // its exact spot while nothing has been built there
+      if (!at) {
+        if (H && !loadedHouse(H)) continue;
+        const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
+        const sy = H && H.y != null ? H.y : (v.y != null ? v.y : BF.world.heightAt(sx, sz) + 1);
+        at = findStand(sx, sy, sz, T);
+        if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, T);
+        if (!at) continue;
+      }
       const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
       m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m); haveV++;
-      m.ai.leaving = !bedtime(); // spawned indoors by day: walk out through the door
-      const sv = villagerSaves.get(villagerKey(m));
+      if (spNear && Math.hypot(at[0] - sp[0], at[2] - sp[2]) < 4) { if (Number.isFinite(sp[3])) m.yaw = m.model.rotation.y = sp[3]; }   // back on its spot, facing as it did
+      else m.ai.leaving = !bedtime(); // spawned indoors by day: walk out through the door
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
       if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
