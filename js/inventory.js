@@ -465,6 +465,13 @@ const FLAME = ["......#.......", ".....##.......", ".....###......", "....####..
   "..###########.", "..###########.", ".#############", ".#############", ".#############", "..###########.", "...#########..", "....#######..."];
 const inFlame = (x, y) => FLAME[y][x] === "#";
 const inArrow = (x, y) => (x < 14 && y >= 5 && y <= 9) || (x >= 13 && Math.abs(y - 7) <= 21 - x);
+// creative trashcan, 16x16 (L lid, B body, D rib/shadow, E rim); the open can (lid lifted) shows while an item is held
+const CAN = ["................", "......LLLL......", "......L..L......", ".LLLLLLLLLLLLLL.", ".LLLLLLLLLLLLLL."];
+const CAN_OPEN = ["....LLLL........", "....L..L........", "LLLLLLLLLLLLLL..", "LLLLLLLLLLLLLL..", "................"];
+const CAN_BODY = ["..EEEEEEEEEEEE..", ...Array(7).fill("..DBBBDBBDBBBD.."), "...DBBDBBDBBD...", "...DBBDBBDBBD...", "...EEEEEEEEEE..."];
+const CAN_COL = { L: "#c9d1c4", B: "#a9b2a4", D: "#6d7569", E: "#8f988b" };
+const trashCan = open => { const rows = (open ? CAN_OPEN : CAN).concat(CAN_BODY);
+  return (x, y) => CAN_COL[(rows[y] || "")[x]] || null; };
 let SPR = null;
 function sprites() {
   if (SPR) return SPR;
@@ -474,6 +481,8 @@ function sprites() {
     flameOn: sprite(14, 14, (x, y) => inFlame(x, y) ? fl[Math.max(0, Math.min(5, y >> 1) - ((x + y) % 5 === 0 ? 1 : 0))] : null),
     arrowOff: sprite(22, 15, (x, y) => inArrow(x, y) ? "#3b403d" : null),
     arrowOn: sprite(22, 15, (x, y) => inArrow(x, y) ? (y === 5 || y === 9 ? "#cfd8c8" : "#f4f7ef") : null),
+    trash: sprite(16, 16, trashCan(false)),
+    trashOpen: sprite(16, 16, trashCan(true)),
   };
   return SPR;
 }
@@ -534,8 +543,9 @@ const css = `
 .bf-inv .bf-big.has { box-shadow: inset 2px 2px 0 rgba(0,0,0,.6), inset -2px -2px 0 rgba(255,255,255,.09), 0 0 0 2px var(--accent); }
 .bf-inv .bf-gap { height: calc(var(--s) * .25); }
 .bf-hotwrap { display: flex; gap: calc(var(--s) * .3); align-items: center; }
-.bf-trash { font: calc(var(--s) * .5) / 1 var(--display); color: var(--danger); }
-.bf-trash::before { content: "X"; opacity: .7; }
+.bf-inv .bf-slot.bf-trash { background-image: var(--can); background-repeat: no-repeat; background-position: center; background-size: 72%; image-rendering: pixelated; }
+.bf-inv .bf-slot.bf-trash.armed { background-image: var(--can-open); }
+.bf-inv .bf-slot.bf-trash.armed:hover { background-color: rgba(214,72,56,.45); box-shadow: inset 0 0 0 2px var(--danger); }
 .bf-rbtn { position: absolute; right: 0; top: calc(var(--s) * .55); font: calc(var(--s) * .28) / 1 var(--display); color: var(--ink); background: rgba(255,255,255,.07);
   border: 1px solid var(--panel-edge); border-radius: 2px; padding: 5px 7px; cursor: pointer; z-index: 2; }
 .bf-rbtn:hover, .bf-rbtn[aria-expanded="true"] { background: rgba(127,191,77,.28); }
@@ -770,7 +780,8 @@ function buildDOM() {
     const el = makeSlot("", "inv", i); invSlotEls[i] = el;
     (i < HOTBAR ? hot : mainRowEl).appendChild(el);
   }
-  trashEl = makeSlot("bf-trash", "trash"); trashEl.title = "Destroy item";
+  trashEl = makeSlot("bf-trash", "trash"); trashEl.setAttribute("aria-label", "Trash");
+  trashEl.style.setProperty("--can", `url(${S.trash})`); trashEl.style.setProperty("--can-open", `url(${S.trashOpen})`);
   hotWrap.appendChild(trashEl);
 
   heldEl = makeSlot("bf-held");
@@ -779,6 +790,7 @@ function buildDOM() {
   ui.append(hotbarEl, nameEl, toastsEl, backEl);
 
   // ----- pointer handling
+  let mpick = null;  // mouse: the slot a stack was just picked up from, so releasing it over the trash destroys it (drag to trash)
   let press = null; // touch: tap = left click, long-press = right click / start an even split while holding a stack
   backEl.addEventListener("contextmenu", e => e.preventDefault());
   backEl.addEventListener("pointermove", e => {
@@ -815,9 +827,16 @@ function buildDOM() {
       renderAll();
       return;
     }
+    const had = !!cursor;
     slotClick(el, button, e.shiftKey, false);
+    mpick = !had && cursor ? el : null;
   });
   const endPress = (e, cancel) => {
+    if (mpick) {
+      const from = mpick; mpick = null;
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      if (!cancel && cursor && from !== trashEl && under && under.closest && under.closest(".bf-slot") === trashEl) { slotClick(trashEl, 0, false, false); return; }
+    }
     if (drag) {
       const d = drag; drag = null;
       if (press) { clearTimeout(press.timer); press = null; }
@@ -876,7 +895,11 @@ function stackAt(el) {
   return arr ? arr[i] : null;
 }
 function showTip(el, timed) {
-  if (el.dataset.c === "trash") { if (!cursor) showTipText("Destroy Item", timed); else hideTip(); return; }
+  if (el.dataset.c === "trash") {
+    showTipText(cursor ? "Destroy " + nameOf(cursor.id) + (cursor.count > 1 ? " \u00d7" + cursor.count : "") + "\nRight-click: destroy one"
+      : "Trash: drop an item here to destroy it\nDel: destroy the stack under the pointer\nShift-click: empty the " + (creTab === "inventory" ? "inventory" : "hotbar"), timed);
+    return;
+  }
   const s = stackAt(el);
   if (!s || cursor) { hideTip(); return; }
   let t = nameOf(s.id);
@@ -947,8 +970,9 @@ function slotClick(el, button, shift, touch) {
   else if (c === "tres") clickTrade(shift);
   else if (c === "pal") clickPalette(i, button, shift);
   else if (c === "trash") {
-    if (cursor) cursor = null;
-    else if (shift) for (let k = 0; k < HOTBAR; k++) slots[k] = null;
+    if (cursor && button === 2) { if (--cursor.count <= 0) cursor = null; }   // right-click: destroy one
+    else if (cursor) cursor = null;
+    else if (shift) for (let k = 0, n = creTab === "inventory" ? SIZE : HOTBAR; k < n; k++) slots[k] = null;   // the slots you can see
   }
   else if (c === "furn" && i === 2) takeOutput(button, shift);
   else if (shift && button === 0) shiftMove(c, i);
@@ -1050,6 +1074,15 @@ function clickPalette(id, button, shift) {
   if (button === 2) { if (!cursor) cursor = { id, count: 1 }; else if (cursor.count < max) cursor.count++; }
   else cursor = { id, count: max };
 }
+// creative Del key: destroys the held stack, or else the inventory stack under the pointer
+function trashKey() {
+  if (cursor) { cursor = null; renderAll(); emitChange(); return; }
+  const under = document.elementFromPoint(mouseX, mouseY);
+  const el = under && under.closest && under.closest(".bf-slot");
+  if (!el || el.dataset.c !== "inv" || !slots[+el.dataset.i]) return;
+  slots[+el.dataset.i] = null;
+  renderAll(); emitChange(); hideTip();
+}
 function selectOffer(i) {
   if (!villager || !villager.trades[i]) return;
   offerSel = i;
@@ -1098,6 +1131,7 @@ function renderAll() {
   }
   setSlot(heldEl, held);
   heldEl.classList.toggle("on", !!held);
+  trashEl.classList.toggle("armed", !!cursor);
   if (held) heldEl.style.transform = `translate(${mouseX - 20}px, ${mouseY - 20}px)`;
 }
 function renderFurnaceProgress() {
@@ -1331,6 +1365,7 @@ const api = {
       if (open_) {
         const typing = e.target === searchEl;
         if (e.code === "Escape" || (e.code === "KeyE" && !typing)) { e.preventDefault(); e.stopImmediatePropagation(); api.close(); }
+        else if (e.code === "Delete" && !typing && mode === "creative") { e.preventDefault(); e.stopImmediatePropagation(); trashKey(); }
         else if (typing) e.stopImmediatePropagation();
         return;
       }
