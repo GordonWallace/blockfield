@@ -11,7 +11,7 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const ZONE = 128, MAX_PX = 1024, MAX_K = BF.AUTO_MAP_MAX_K || 128, DEFAULT_W = 2048;   // 128 zones = 16384 blocks, see js/blocks.js
+const ZONE = 128, MAX_PX = 1024, MAX_K = BF.AUTO_MAP_MAX_K || 4096, DEFAULT_W = 2048;   // 4096 zones = 524288 blocks, see js/blocks.js
 const COARSE_SCALE = 64;      // above this many blocks per pixel, mile-high plateau weights are approximated (worldgen.setCoarse)
 const RIVER_MAX_SCALE = 16;    // rivers (about 20 blocks wide) only on maps with at most 16 blocks per pixel; see step()
 const STEPS = [16, 8, 4, 2, 1];
