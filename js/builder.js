@@ -305,7 +305,7 @@ function soldItems(R) {
 function pickType(m, bs) {
   const R = m.village, built = builtOf(R), BPr = BP(), style = styleIdx(R.style);
   const cnt = t => built.filter(e => e.type === t && e.state !== "abandoned").length;
-  const homeless = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed && !x.bed).length;
+  const homeless = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed && !(x.bed && !x.bed.tent ? x.bed : x.homeBed)).length;   // a camping explorer with no bed at home is homeless too
   const found = BF.worldgen.palette(style).found;
   if (built.length === 0 && !(bs.fail && bs.fail.small_house > dayNow())) return "small_house";
   const wt = {

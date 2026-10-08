@@ -39,8 +39,20 @@ module.exports = async (pg, out) => {
     res.hasTent = T.inv.count(A.inv, I.tent);
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
     T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2); for (let i = 0; i < 600; i++) BF.mobs.update(0.1); res.spare = T.inv.count(A.inv, I.tent);   // lost its tent: collects a spare at home by day
-    // far from its bed, evening: pitches
+    // in its village minutes before dark, 20 blocks from its bed, on open ground: walks to bed at nightfall, no tent (1.0 bug: the allowance
+    // to walk home shrank to nothing just before dark, so explorers pitched beside their houses)
     const home = A.bed; A.homeBed0 = home;
+    { const W = BF.world, cx = Math.floor(A.position.x), cz = Math.floor(A.position.z), cy = Math.floor(A.position.y);
+      for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) { W.setBlock(cx + dx, cy - 1, cz + dz, BF.B.grass || BF.B.dirt); for (let k = 0; k < 40; k++) W.setBlock(cx + dx, cy + k, cz + dz, 0); }   // open sky: nothing overhead
+      A.position.set(cx + 0.5, cy, cz + 0.5);
+      res.inVillageSite = !!BF.tents.findSite(A.position.x, A.position.z, 7);   // there is room for a tent: not pitching is a choice
+      BF.sky.setTime(0.2); BF.mobs.update(0.1);
+      A.bed = { x: cx - 20, y: cy, z: cz, f: 0 }; A.ai.leaving = false; A.ai.route = null;   // not still walking out of a house after the time jumps
+      for (let i = 0; i < 100; i++) { BF.sky.setTime(0.495); A.position.set(cx + 0.5, cy, cz + 0.5); BF.explorer.ai(A, 0.1, {}); if (A.ex && A.ex.camp) break; } }   // its own AI step directly (village chores can run first)
+    res.inVillageCamp = !!(A.ex && A.ex.camp);
+    if (A.ex && A.ex.camp) BF.explorer.strike(A);
+    A.bed = home;
+    // far from its bed, evening: pitches
     const far = { x: A.village.x + 140, z: A.village.z };
     BF.world.isLoaded(far.x, far.z);
     A.position.set(A.position.x, A.position.y, A.position.z);
@@ -49,7 +61,9 @@ module.exports = async (pg, out) => {
     // pretend it is 120 blocks from home by moving the home bed marker
     A.bed = { x: A.position.x - 150, y: A.position.y, z: A.position.z, f: 0 };
     BF.sky.setTime(0.47);
-    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (A.ex && A.ex.camp) break; }
+    BF.sky.setTime(0.2); BF.explorer.ai(A, 0.1, {});   // a new day: tonight's camping decision is still to be made
+    BF.sky.setTime(0.47);
+    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) BF.explorer.ai(A, 0.1, {}); if (A.ex && A.ex.camp) break; }
     res.camp = A.ex && A.ex.camp; res.bed = A.bed && A.bed.tent; res.tentLeft = T.inv.count(A.inv, I.tent);
     window.__A = A; window.__home = A.homeBed;
     // a zombie nearby
@@ -57,6 +71,8 @@ module.exports = async (pg, out) => {
     return res;
   });
   console.log(JSON.stringify(r2));
+  if (r2.inVillageCamp) console.log("FAIL: explorer pitched its tent inside its own village");
+  if (!r2.camp) console.log("FAIL: explorer far from home at dusk did not pitch its tent");
   const r3 = await pg.evaluate(async () => {
     const A = window.__A, res = {};
     BF.sky.setTime(0.56);
@@ -64,9 +80,10 @@ module.exports = async (pg, out) => {
     res.sleeping = A.sleeping; res.hidden = BF.tents.hidden(A); res.pos = [A.position.x.toFixed(1), A.position.y.toFixed(1), A.position.z.toFixed(1)];
     BF.sky.setTime(0.005);
     for (let i = 0; i < 100; i++) { BF.sky.setTime(0.005); BF.mobs.update(0.1); if (!A.sleeping) break; }
-    for (let i = 0; i < 30; i++) { BF.sky.setTime(0.01); BF.mobs.update(0.1); }
+    for (let i = 0; i < 30; i++) { BF.sky.setTime(0.01); BF.mobs.update(0.1); if (A.ex.camp && !A.sleeping) BF.explorer.ai(A, 0.1, {}); }   // morning chores can run before its own step
     res.awake = !A.sleeping; res.camp = A.ex.camp; res.tentBack = BF.trades.inv.count(A.inv, BF.I.tent); res.bedRestored = A.bed === window.__home || (A.bed && !A.bed.tent);
     return res;
   });
   console.log(JSON.stringify(r3));
+  if (!r3.bedRestored || r3.camp) console.log("FAIL: explorer did not strike its tent and go back to its own bed in the morning");
 };

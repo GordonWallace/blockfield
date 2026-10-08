@@ -288,9 +288,13 @@ const BEDTIME = 0.5, DUSK = 0.45, WALK_SLACK = 0.8, DAY_S = 1200;
 const isNight = t => t > BEDTIME && t < 0.985;
 const tentItem = () => BF.I.tent;
 function homeDistance(m) {
-  const b = m.homeBed || m.bed, h = b ? { x: b.x, z: b.z } : m.village ? { x: m.village.x, z: m.village.z } : null;
+  const b = m.homeBed || m.bed, h = b && !b.tent ? { x: b.x, z: b.z } : m.village ? { x: m.village.x, z: m.village.z } : null;
   return h ? Math.hypot(h.x + 0.5 - m.position.x, h.z + 0.5 - m.position.z) : 0;
 }
+// Within this many blocks of its bed (the village centre when it has none) it is home: it never camps there, it just goes to bed when night falls
+// like everyone else (after dusk villagers keep within 40 blocks of their own neighbourhood, mobs.js villagerAI).
+const HOME_R = 48;
+const atHome = m => homeDistance(m) <= HOME_R;
 function pitch(m) {
   const X = state(m), T0 = T();
   if (!BF.tents || tentItem() == null || cnt(m, tentItem()) < 1) return false;
@@ -332,10 +336,18 @@ function campAI(m, t, a) {
     if (!isNight(t) && t >= DUSK) { a.mode = "idle"; a.t = 2; return true; }   // evening: waits at the tent
     return false;
   }
-  if (t >= DUSK && t < BEDTIME && !m.sleeping && !m.child && tentItem() != null && cnt(m, tentItem()) >= 1) {
-    const left = (BEDTIME - t) * DAY_S, reach = left * m.def.speed * 1.3 * WALK_SLACK;
-    if (homeDistance(m) > reach && pitch(m)) return true;
+  // Decided once per evening, when the working day ends: measured against the whole dusk, not the minutes left (that allowance shrinks to nothing
+  // just before dark, and an explorer still strolling round its own village would pitch beside its house). Going home means it sleeps in its bed.
+  if (t < DUSK || t >= BEDTIME) { X.eve = null; return false; }
+  const day = BF.sky ? BF.sky.day : 0;
+  if (X.eve && X.eve.day === day) {
+    if (X.eve.camp && !atHome(m) && !m.sleeping && cnt(m, tentItem()) >= 1 && pitch(m)) { X.eve = null; return true; }   // a failed site: tries again
+    return false;
   }
+  if (m.sleeping || m.child || tentItem() == null || cnt(m, tentItem()) < 1) return false;
+  const left = (BEDTIME - t) * DAY_S, reach = left * m.def.speed * 1.3 * WALK_SLACK;
+  X.eve = { day, camp: !atHome(m) && homeDistance(m) > reach };
+  if (X.eve.camp && pitch(m)) { X.eve = null; return true; }
   return false;
 }
 
