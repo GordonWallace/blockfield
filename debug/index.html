@@ -572,7 +572,7 @@ function renderRoster(s) {
   renderPast(v.dead || [], q);
   $("r-body").innerHTML = rows.map(m => `<tr data-n="${esc(m.name)}"><td>${esc(m.name)}</td><td><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i>${esc(m.prof)}</td>` +
     `<td class="st" title="${esc(m.status || "")}"><div>${esc(m.status || "")}</div></td><td><span class="hp"><i style="width:${Math.round(m.hpf * 100)}%;background:${m.hpf < 0.34 ? "var(--danger)" : m.hpf < 0.67 ? "var(--warn)" : "var(--accent)"}"></i></span>${m.hp}</td>` +
-    `<td>${m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td>` +
+    `<td>${m.sleeping && m.tent ? '<span class="yes">asleep in tent</span>' : m.sleeping ? '<span class="yes">asleep</span>' : m.bed ? '<span class="yes">yes</span>' : '<span class="no">none</span>'}</td>` +
     `<td title="${m.em != null ? `${m.em} carried + ${m.emChests} in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}">${m.em != null ? fmt(m.emT) : "-"}${m.emChests ? ` <span class="dim">(${fmt(m.emChests)} in chests)</span>` : ""}</td>` +
     `<td title="${m.food != null ? `${m.food} carried + ${m.foodChests} in chests (bread-equivalent)` : ""}">${m.food != null ? fmt(Math.round(m.foodT * 10) / 10) : "-"}${m.foodChests ? ` <span class="dim">(${fmt(m.foodChests)} in chests)</span>` : ""}</td>` +
     `<td>${m.starving == null ? "-" : m.starving ? '<span class="no">starving</span>' : '<span class="dim">no</span>'}</td><td>${m.age == null ? "-" : days(m.age)}</td><td>${Math.round(m.dist)}</td></tr>`).join("") ||
