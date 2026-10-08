@@ -796,23 +796,85 @@ function shootArrow(m, target, victim) {
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
-const _look = new THREE.Vector3();
+// Player arrows (js/player.js bow): `vel` in blocks/s, `o` = { damage, crit, pickup } where pickup is 1 (walking over the stuck
+// arrow gives it back), 2 (fired in creative: it is just removed) or 0. They hit any living mob as a player attack (BF.mobs.hit:
+// knockback, hostiles turn on the player, a hurt villager or golem angers the village's golems), never the player, and stick in
+// blocks for 60 s (vanilla); a stuck arrow whose block is broken falls again. Returns the arrow record.
+const PLAYER_ARROW_LIFE = 60, ARROW_DRAG = 0.99;   // vanilla: stuck arrows despawn after 1200 ticks; 1% air drag per tick
+function shootPlayerArrow(from, vel, o) {
+  o = o || {};
+  const mesh = new THREE.Mesh(arrowGeo, arrowMat);
+  mesh.position.copy(from);
+  scene.add(mesh);
+  const a = { mesh, pos: mesh.position, vel: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
+    byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
+  _look.copy(a.pos).add(a.vel); mesh.lookAt(_look);
+  arrows.push(a);
+  if (BF.emit) BF.emit("arrowShot", null, from);
+  return a;
+}
+// Damage a player arrow deals: its draw damage, plus 1..damage/2 on a critical (full-draw) arrow; so 1..6, a crit 7..9.
+const playerArrowDamage = a => a.damage + (a.crit ? irnd(1, Math.max(1, a.damage >> 1)) : 0);
+function playerArrowStep(a, p) {
+  if (a.stuck) {   // stuck: falls when its block goes; walking over it picks it up
+    if (!BF.world.isSolid(a.cell[0] + 0.5, a.cell[1] + 0.5, a.cell[2] + 0.5)) { a.stuck = false; a.pos.addScaledVector(a.dir, -0.1); a.vel.set(0, 0, 0); return false; }   // out of the freed cell, then down
+    if (!a.pickup || !p) return false;
+    const pp = p.position, hw = (p.halfWidth || 0.3) + 0.6, h = p.height || 1.8;
+    if (Math.abs(a.pos.x - pp.x) > hw || Math.abs(a.pos.z - pp.z) > hw || a.pos.y < pp.y - 0.6 || a.pos.y > pp.y + h + 0.3) return false;
+    if (a.pickup === 1 && BF.inventory && BF.I) { try { if (BF.inventory.add(BF.I.arrow, 1) > 0) return false; } catch (e) { console.error(e); return false; } }   // a full inventory leaves it there
+    if (BF.emit) BF.emit("arrowPickedUp", a.pickup === 1);
+    return true;
+  }
+  return false;
+}
+// Living mob whose box holds point q (player arrows test every mob).
+function mobAt(q) {
+  for (const m of list) {
+    if (m.dead || m.removed) continue;
+    const vp = m.position, hw = m.halfWidth + 0.1;
+    if (Math.abs(q.x - vp.x) < hw && Math.abs(q.z - vp.z) < hw && q.y > vp.y && q.y < vp.y + m.height) return m;
+  }
+  return null;
+}
+const _look = new THREE.Vector3(), _dir = new THREE.Vector3();
 function updateArrows(dt) {
   const p = playerAlive() ? player() : null;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
     a.life -= dt;
     if (a.life <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
+    if (a.byPlayer && playerArrowStep(a, p)) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
     if (a.stuck) continue;
     a.vel.y -= 20 * dt;
+    if (a.byPlayer) a.vel.multiplyScalar(Math.pow(ARROW_DRAG, dt * 20));
     const steps = Math.max(1, Math.ceil(a.vel.length() * dt / 0.25));
     let hitPlayer = false;
     for (let s = 0; s < steps; s++) {
       a.pos.addScaledVector(a.vel, dt / steps);
       if (BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z)) {
+        if (a.byPlayer) {   // back up and creep in 5 cm steps, so the tip sits just inside the first solid block on the path
+          const sp = a.vel.length(), back = sp * dt / steps;
+          _dir.copy(a.vel).divideScalar(sp || 1); a.pos.addScaledVector(_dir, -back);
+          for (let d = 0; d < back && !BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z); d += 0.05) a.pos.addScaledVector(_dir, 0.05);
+          a.cell = [Math.floor(a.pos.x), Math.floor(a.pos.y), Math.floor(a.pos.z)]; a.dir = _dir.clone(); a.life = PLAYER_ARROW_LIFE;
+          a.stuck = true;
+          if (BF.emit) BF.emit("arrowStuck", a);
+          break;
+        }
         a.stuck = true; a.life = Math.min(a.life, 3);
         a.pos.addScaledVector(a.vel, -dt / steps * 0.3);
         break;
+      }
+      if (a.byPlayer) {   // player arrow: hits the first mob it enters, as a player attack
+        const m = mobAt(a.pos);
+        if (m) {
+          const dmg = playerArrowDamage(a);
+          a.hit = { mob: m, damage: dmg, landed: damageMob(m, dmg, a.vel, true) };
+          if (BF.emit) BF.emit("arrowHitMob", m, dmg, a.crit);
+          hitPlayer = true;
+          break;
+        }
+        continue;
       }
       const v = a.victim;
       if (v && !v.dead && !v.removed) {
@@ -2142,6 +2204,9 @@ BF.mobs = {
   },
   // Player attack. Returns true if the hit landed (false while the mob is briefly invulnerable).
   hit(mob, damage, knockDir) { return damageMob(mob, damage, knockDir, true); },
+  // Player bow shot (js/player.js): see shootPlayerArrow. arrows() lists the player's arrows in flight or stuck (tests, debug).
+  shootArrow(from, vel, opts) { return scene ? shootPlayerArrow(from, vel, opts) : null; },
+  playerArrows() { return arrows.filter(a => a.byPlayer); },
   hurt(mob, damage, cause) { mob.invuln = 0; return damageMob(mob, damage, null, false, cause); },   // non-player damage with a cause (tests, commands)
   // /kill (commands.js): kills outright, no knockback, no golem anger; drops as a normal death. Returns false if already dead.
   kill(mob) { if (!mob || mob.dead || mob.removed) return false; kill(mob, true); return true; },
