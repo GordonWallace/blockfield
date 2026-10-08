@@ -30,7 +30,7 @@ module.exports = async (pg, out) => {
     for (let i = 0; i < 2000; i++) {
       const s = H.rollStats(), j = H.jumpHeight ? H.jumpHeight(s) : s.jump;
       for (const k of ["hp", "speed", "jump"]) { lo[k] = Math.min(lo[k], s[k]); hi[k] = Math.max(hi[k], s[k]); }
-      if (s.hp < 15 || s.hp > 30 || s.speed < 4.8 || s.speed > 14.2 || s.jump < 1.1 || s.jump > 5.3 || !Number.isInteger(s.hp)) inRange = false;
+      if (s.hp < 15 || s.hp > 30 || s.speed < H.SPEED_MIN || s.speed > H.SPEED_MAX || s.jump < H.JUMP_MIN || s.jump > H.JUMP_MAX || !Number.isInteger(s.hp)) inRange = false;
     }
     ok("rolled stats stay inside vanilla's ranges (health 15-30, speed 4.8-14.2, jump 1.1-5.3)", inRange, { lo, hi });
     ok("rolled stats spread across the ranges", hi.hp - lo.hp >= 10 && hi.speed - lo.speed >= 5 && hi.jump - lo.jump >= 2.5, { lo, hi });
@@ -46,8 +46,8 @@ module.exports = async (pg, out) => {
       sum.hp += f.hp; sum.speed += f.speed; sum.jump += f.jump;
     }
     ok("a foal's stats are its parents' average, varied by up to 5%", foalOk, { avg: { hp: sum.hp / 500, speed: sum.speed / 500, jump: sum.jump / 500 } });
-    const top = H.foalStats({ maxHp: 30, speed: 14.2, jump: 5.3 }, { maxHp: 30, speed: 14.2, jump: 5.3 });
-    ok("a foal of two perfect parents stays inside the ranges", top.hp <= 30 && top.speed <= 14.2 && top.jump <= 5.3, top);
+    const best = { maxHp: H.HP_MAX, speed: H.SPEED_MAX, jump: H.JUMP_MAX }, top = H.foalStats(best, best);
+    ok("a foal of two perfect parents stays inside the ranges", top.hp <= H.HP_MAX && top.speed <= H.SPEED_MAX + 1e-9 && top.jump <= H.JUMP_MAX + 1e-9, top);
 
     // ---- a flat test field high above the spawn ----
     const x0 = 8, z0 = 8, y0 = BF.worldgen.heightAt(x0, z0) + 30;
