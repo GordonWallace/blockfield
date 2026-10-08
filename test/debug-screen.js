@@ -217,6 +217,7 @@ const start = async () => {
   }, bkey);
   await dbg.waitForFunction(n => document.getElementById('r-pastb').textContent.includes(n), victim, { timeout: 8000 }).catch(() => {});
   const past = await dbg.evaluate(() => ({ n: document.getElementById('r-pastn').textContent, row: document.getElementById('r-pastb').querySelector('tr').textContent, count: document.getElementById('r-count').textContent }));
+  await dbg.screenshot({ path: out + '-past.png', fullPage: true });
   ok('past villagers list the dead one ' + JSON.stringify(past), +past.n >= 1 && past.row.includes(victim) && /killed by a zombie/.test(past.row) && /days?$/.test(past.row) && /\d+ died/.test(past.count));
   // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
   ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
