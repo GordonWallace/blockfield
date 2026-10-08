@@ -115,7 +115,7 @@ module.exports = async (pg, out) => {
   console.log("resume", JSON.stringify(r5));
   ok("interrupted felling resumes", part.saved && part.saved.done >= 2 && r5.fell && r5.fell.at.join() === part.saved.key && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop });
 
-  // 4. axe shopping: a toolsmith sells iron (2 em) and diamond (10 em) axes
+  // 4. axe shopping: a toolsmith sells iron and diamond axes at its own offers (prices from TRADES.toolsmith)
   const shop = await pg.evaluate(() => {
     const A = window.__A, T = BF.trades, I = BF.I, F = BF.forester;
     const S = BF.mobs.list.find(m => m !== A && m.type === "villager" && m.village === A.village && m.inv && !m.child);
@@ -132,11 +132,13 @@ module.exports = async (pg, out) => {
     res.run1 = run();
     res.first = A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count);
     res.statusBuy = "buying an axe";
-    // richer now: the diamond axe (10 emeralds)
+    // richer now: enough for the diamond axe at the toolsmith's price
     res.smith = [S.profession, S.trades.length];
     BF.mobs.setProfession(S, "toolsmith"); S.trades = [1, 2, 3, 4, 5].flatMap(l => T.offers("toolsmith", l)); if (!T.inv.count(S.inv, I.diamond_axe)) T.inv.add(S.inv, I.diamond_axe, 1);
     S.position.set(A.position.x + 5, A.position.y, A.position.z + 2);
-    T.inv.add(A.inv, I.emerald, 12); st.shopT = 0; st.thinkT = 0;
+    const dPrice = S.trades.filter(o => o.sell.id === I.diamond_axe && o.buy.length === 1 && o.buy[0].id === I.emerald).reduce((p, o) => Math.min(p, o.buy[0].n), Infinity);
+    res.diamondPrice = dPrice;
+    T.inv.add(A.inv, I.emerald, Math.max(0, dPrice - T.inv.count(A.inv, I.emerald))); st.shopT = 0; st.thinkT = 0;
     res.run2 = run();
     res.second = A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count);
     res.holds = F.axeOf(A) && BF.items[F.axeOf(A).id].name;
@@ -148,7 +150,7 @@ module.exports = async (pg, out) => {
     return res;
   });
   console.log("shop", JSON.stringify(shop));
-  ok("buys the best axe it can afford (iron with 3 emeralds)", shop.first && shop.first.includes("iron_axex1"), shop.first);
+  ok("buys the best axe it can afford (iron, not gold or diamond, with 3 emeralds)", shop.first && shop.first.includes("iron_axex1"), shop.first);
   ok("upgrades to diamond once it can afford it", shop.holds === "diamond_axe" && shop.drawn === "diamond_axe", { holds: shop.holds, drawn: shop.drawn });
   ok("no trip when nothing better is on sale", shop.thirdTask !== "buy", shop.thirdTask);
 
