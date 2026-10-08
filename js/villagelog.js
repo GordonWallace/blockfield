@@ -2,6 +2,7 @@
 // Every village keeps a timestamped log of births, beds placed (and by whom), trades (villager <-> villager and
 // villager <-> player) and professions gained, capped at CAP entries (oldest dropped) and saved with the world.
 // Villager names are generated deterministically from the villager's persistence key, so they need no saving.
+// Builders log what they start, take over and finish building (kind "build", js/builder.js).
 // Explorers' tents are logged with the beds (the tally still counts only real beds).
 // API: BF.vlog = { nameOf(m), log(rec, kind, text), trade(buyer, seller, offerOrText), bed(m, x, y, z), profession(m, from, to),
 //                  entries(key), villageAt(x, z) -> rec|null, tally(rec), panelData(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }
