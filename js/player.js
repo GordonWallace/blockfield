@@ -33,6 +33,11 @@ let mouseL = false, mouseR = false;
 let breakTarget = null, breakProgress = 0, breakCd = 0;
 let placeCd = 0, eatT = 0;
 let target = null;            // current block raycast hit
+// What the player rides (a boat, js/boats.js), or null. A vehicle carries `ctl`, its module's riding interface:
+//   drive(v, dt, input {fwd, turn, strafe, jump}) -> yaw change, seatOf(v, "player") -> {x, y, z}, sitEye(v) -> eye above the seat,
+//   canBoard(v), exitSpot(v, hw, h) -> {x, y, z}, onLeave(v) (e.g. a boat lets its mob passenger out too).
+// Shift held when it was boarded must be let go first.
+let vehicle = null, rideShift = false;
 const VIEW_OPTS = [4, 6, 8, 10, 12, 16, 20, 24];
 const store = {
   get(k) { try { return localStorage.getItem("blockfield." + k); } catch (_) { return null; } },
@@ -60,6 +65,8 @@ const P = (BF.player = {
   get gameMode() { return gameMode; },
   set gameMode(m) { setGameMode(m); },
   get pitch() { return pitch; },
+  get vehicle() { return vehicle; },
+  get boat() { return vehicle && vehicle.kind === "boat" ? vehicle : null; },
 });
 
 // ---------- small helpers ----------
@@ -162,7 +169,7 @@ const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
      <div><b>Shift</b> sneak</div><div><b>R / Ctrl / W x2</b> sprint</div><div><b>Z</b> free the mouse (game keeps running)</div><div><b>Fly + hold W and R</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
-     <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
+     <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Boat</b> R-click to get in, W/S row, A/D turn, Shift out</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
@@ -993,12 +1000,24 @@ function throwSelected() {
   emit("itemThrown", id);
 }
 
+function boatHit() {
+  try { return BF.boats ? BF.boats.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
+}
 function mobHit() {
   try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH) : null; } catch (_) { return null; }
 }
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
-  const m = mobHit();
+  const bh = boatHit(), m0 = mobHit();
+  if (bh && (!target || bh.dist < target.dist) && (!m0 || bh.dist < m0.dist)) {   // hitting a boat: lets its mob out, else damages it (js/boats.js)
+    swing();
+    if (attackCd > 0) return true;
+    attackCd = ATTACK_CD;
+    const r = BF.boats.hit(bh.boat, creative());
+    emit("boatHit", r);
+    return true;
+  }
+  const m = m0;
   if (!m || !m.mob || (target && target.dist < m.dist)) return false;
   swing();
   if (attackCd > 0) return true;
@@ -1262,7 +1281,13 @@ function respawnPoint() {
 // Right click: open a crafting table, start eating, or place a block. Returns true if something happened.
 function secondaryDown() {
   updateTarget();
-  const mh = mobHit();
+  const mh = mobHit(), bh = boatHit();
+  if (bh && (!target || bh.dist < target.dist) && (!mh || bh.dist < mh.dist)) {   // right click on a boat: get in (js/boats.js)
+    mouseR = false;
+    if (mount(bh.boat)) { swing(); return true; }
+    actionBar(bh.boat.rider ? "Someone is already in that boat" : "No room to sit in that boat");
+    return true;
+  }
   if (mh && mh.mob && mh.mob.type === "villager" && BF.mobs.interact && (!target || mh.dist < target.dist)) {
     mouseR = false;
     const msg = BF.mobs.interact(mh.mob);
@@ -1334,6 +1359,13 @@ function secondaryDown() {
   if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
     const msg = BF.maps.use(sel, it);
     if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+  }
+  if (it.boat && BF.boats) {   // boat: on the water (or the ground) in front, facing the way the player looks
+    if (!BF.boats.placeFromPlayer(it.boat, eyeVec(), dirVec(), yaw, REACH)) return false;
+    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    swing(); mouseR = false;
+    placeCd = PLACE_REPEAT;
+    return true;
   }
   if (it.food) { if (P.hunger < P.maxHunger) { if (eatT <= 0) eatT = 0.0001; return true; } return false; }
   if (it.places === "sign" && target) { // signs (js/signs.js): standing on a top face, wall sign on a side face; opens the editor
@@ -1448,6 +1480,7 @@ P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health +
 
 const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
 function die() {
+  dismount();
   P.dead = true; P.health = 0;
   resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
   if (invOpen()) { try { inv().close(); } catch (_) {} }
@@ -1478,6 +1511,7 @@ function resetStats() {
   P.health = P.maxHealth; P.hunger = P.maxHunger; P.dead = false;
   saturation = 5; exhaustion = 0; air = AIR_MAX; fallStart = null; flying = false; sprinting = false;
   hurtCd = 1; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
+  dismount(true);
   resetBreak();
 }
 
@@ -1488,8 +1522,57 @@ function onLadder() {                       // a ladder cell at the feet or at t
   const W = BF.world, a = BF.blocks[W.getBlock(pos.x, pos.y + 0.001, pos.z)], b = BF.blocks[W.getBlock(pos.x, pos.y + 1, pos.z)];
   return !!((a && a.ladder) || (b && b.ladder));
 }
+// Riding (a boat, js/boats.js): W/S forward and back, A/D turn (the view turns with the vehicle), Space jump, Shift gets off.
+function ridePhysics(dt, k) {
+  const shift = k.has("ShiftLeft") || k.has("ShiftRight");
+  if (shift && !rideShift) { dismount(); return 0; }
+  rideShift = shift;
+  let fwd = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
+  let turn = (k.has("KeyA") ? 1 : 0) - (k.has("KeyD") ? 1 : 0);
+  if (stick.id != null) { fwd = -stick.y; turn = -stick.x; }
+  if (eatT > 0) fwd *= 0.35;
+  rideStep(dt, { fwd, turn, strafe: -turn, jump: k.has("Space") });
+  onGround = true; inWater = false; flying = false; sprinting = false; sneaking = false; turbo = false; fallStart = null;
+  headInWater = BF.RENDER[BF.world.getBlock(pos.x, pos.y + eyeOffset, pos.z)] === 3;
+  return 0;   // no head bob or walking hunger
+}
+function rideStep(dt, input) {
+  const v = vehicle;
+  yaw += v.ctl.drive(v, dt, input) || 0;
+  if (vehicle !== v) return;   // thrown off
+  const s = v.ctl.seatOf(v, "player");
+  pos.set(s.x, s.y, s.z);
+  const vv = v.vel || { x: 0, y: 0, z: 0 };
+  vel.x = vv.x; vel.y = vv.y; vel.z = vv.z;
+}
+// Gets in boat b (fromSave: back into the boat the player was saved in, without the room check). Returns true if seated.
+function mount(v, fromSave) {
+  if (!v || !v.ctl || P.dead) return false;
+  if (vehicle === v) return true;
+  if (!fromSave && !v.ctl.canBoard(v)) return false;
+  if (vehicle) dismount();
+  vehicle = v; v.rider = true; rideShift = true;
+  flying = false; sprinting = false; sneaking = false; turbo = false; fallStart = null; resetBreak();
+  const s = v.ctl.seatOf(v, "player");
+  pos.set(s.x, s.y, s.z); vel.x = vel.y = vel.z = 0;
+  emit("mounted", v);
+  return true;
+}
+// Gets out: onto the nearest solid block beside the boat, else into the water. A mob passenger gets out too.
+// stay: leave the player where they are (teleport, respawn, a new world).
+function dismount(stay) {
+  const v = vehicle;
+  if (!v) return;
+  vehicle = null; v.rider = false;
+  if (stay) return;
+  if (v.ctl.onLeave) v.ctl.onLeave(v);
+  const s = v.ctl.exitSpot(v, HW, HEIGHT);
+  pos.set(s.x, s.y, s.z); vel.x = vel.y = vel.z = 0; fallStart = null;
+  emit("dismounted", v);
+}
 function physics(dt) {
   const k = touchKeys.size ? new Set([...keys, ...touchKeys]) : keys;
+  if (vehicle) return ridePhysics(dt, k);
   const wantJump = k.has("Space");
   const shift = k.has("ShiftLeft") || k.has("ShiftRight");
   sneaking = shift && !flying;
@@ -1583,7 +1666,7 @@ function physics(dt) {
 
 // ---------- camera ----------
 function syncCamera(dt) {
-  const want = sneaking ? SNEAK_EYE : EYE;
+  const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
   eyeOffset += (want - eyeOffset) * Math.min(1, dt * 14);
   const by = Math.abs(Math.sin(bobPhase)) * 0.06 * bobAmt, bx = Math.cos(bobPhase) * 0.035 * bobAmt;
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
@@ -1679,6 +1762,7 @@ P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started &
 P.freeMouse = function () { if (locked) { releaseMouse(); return true; } return false; };
 P.relock = function () { if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !invOpen() && !locked) requestLock(); };
 P.teleport = function (x, y, z) {
+  dismount(true);
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists
   syncCamera(0.016);
@@ -1686,6 +1770,13 @@ P.teleport = function (x, y, z) {
 P.kill = function () { if (P.dead || !started) return; lastCause = "killed"; die(); };
 P.feed = function () { if (P.dead) return; P.hunger = P.maxHunger; saturation = 5; exhaustion = 0; starveT = 0; };
 P.spawnParticles = (x, y, z, id, n) => spawnParticles(x, y, z, id, n);
+P.mount = mount;                     // js/boats.js: get in a boat (right click, or a save made in one)
+P.dismount = () => dismount();       // get off (Shift); also when the boat breaks
+P.ride = function (fwd, turn, dt, jump) {  // tests: one real-time step of what the player rides with this input; false when riding nothing
+  if (!vehicle) return false;
+  rideStep(dt, { fwd, turn, strafe: -turn, jump: !!jump });
+  return true;
+};
 // Save-game state. deserialize() expects the world (seed) to be set up already, e.g. right after BF.newWorld.
 P.serialize = function () {
   return {
@@ -1741,7 +1832,7 @@ P.update = function (dt) {
     if (W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
         W.isLoaded(pos.x + 1, pos.z - 1) && W.isLoaded(pos.x - 1, pos.z + 1)) {
       waitingForChunk = false;
-      if (W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);
+      if (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }
