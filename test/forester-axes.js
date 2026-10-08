@@ -124,6 +124,8 @@ module.exports = async (pg, out) => {
     S.inv = T.inv.create(); T.inv.add(S.inv, I.iron_axe, 1); T.inv.add(S.inv, I.diamond_axe, 1); T.inv.add(S.inv, I.emerald, 3);
     S.position.set(A.position.x + 6, A.position.y, A.position.z + 3);
     A.inv = T.inv.create(); T.inv.add(A.inv, I.wooden_axe, 1); T.inv.add(A.inv, I.emerald, 3);
+    // its pack has no food now, so it would spend an emerald on food first and could no longer afford the axe: keep both fed
+    for (const m of [A, S]) { const L = BF.food.life(m); L.sat = 5; L.lastAte = BF.food.dayNow(); L.starving = m.starving = false; m.fshop = null; }
     const st = A.fo; st.task = null; st.saved = null; st.sweep = null; st.thinkT = 0; st.shopT = 0; st.cutCd = 999; st.plantCd = 999; st.gatherCd = 999; st.avoid = new Map();
     const res = { first: null, second: null };
     const run = () => { let seen = false, t = 0; for (; t < 120; t += 0.05) { BF.sky.setTime(0.1); BF.mobs.update(0.05); if (A.fo.task) seen = true; else if (seen) break; } return { seen, t: +t.toFixed(1) }; };
