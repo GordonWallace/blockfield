@@ -238,6 +238,8 @@ const VILLAGER_OUTFITS = {
   // stable hand (not vanilla): saddle-brown work coat, denim apron, rope belt, tan wide-brim hat; catches, breeds and sells horses (js/stables.js).
   // Never in the roster pool: villages only get one when a builder puts up a stable and a villager takes its tack rack
   stable_hand:   { robe: 0x7a5232, trim: 0x4a3018, apron: 0x3d5a7a, sash: 0xc9a24a, hat: { kind: "brim", color: 0xb08850, color2: 0x9a7444 } },
+  // merchant (not vanilla): deep blue travelling coat with gold trim, a satchel-brown sash, a tall felt hat; carries goods between villages (js/merchant.js)
+  merchant:      { robe: 0x24346a, trim: 0xc8a040, sash: 0x6b4a2a, hat: { kind: "brim", color: 0x3a2a4a, color2: 0x2a1e36 } },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
   // builder (15th): orange hi-vis vest with reflective band and straps, brown overalls, yellow hard hat, a hammer in hand
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
@@ -1385,6 +1387,7 @@ function villagerAI(m, dt, out) {
   if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
   if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
+  if (m.profession === "merchant" && BF.merchant && BF.merchant.ai(m, dt, out)) return;   // carries surplus goods to a neighbouring village and back (js/merchant.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
   // sized villages (village generator 2) reach far beyond the plaza: villagers living out there keep to their own neighbourhood
@@ -1931,7 +1934,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2014,6 +2017,22 @@ function villageRoster(rec) {
     }
     if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1400, bed: null, prof: "miner" });
   }
+  // merchants (js/merchant.js): newly generated villages of 8 or more get one per 20 villagers, at least one (key range <village key>#1600+n,
+  // so nothing else shifts; villages the player already knows keep their people). In a sized village each takes the place of the last plain
+  // resident, so the village keeps its size; a classic village may go one past its cap.
+  const nM = BF.merchant && cap >= 8 && freshVillage(rec.key, rec.key + "#1600") ? Math.max(1, Math.floor(cap / 20)) : 0;
+  for (let k = 0; k < nM; k++) {
+    if (rec.pop && ordered.length >= cap) {
+      let gone = false;
+      for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || sl.prof === "shepherd" || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); gone = true;
+      }
+      if (!gone) break;
+    }
+    ordered.push({ house: null, idx: 1600 + k, bed: null, prof: "merchant" });
+  }
   return ordered;
 }
 
@@ -2027,6 +2046,7 @@ function updateVillages(dt) {
   const pp = player().position;
   let vs;
   try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 : 96) || []; } catch (e) { return; }
+  if (BF.villageSim && BF.villageSim.pinned) { const ks = new Set(vs.map(v => v && Math.round(v.x) + "," + Math.round(v.z))); for (const v of BF.villageSim.pinned()) if (!ks.has(Math.round(v.x) + "," + Math.round(v.z))) vs.push(v); }   // villages a merchant's trip keeps loaded (js/merchant.js)
   for (const v of vs) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
@@ -2160,7 +2180,7 @@ BF.mobs = {
       if (c.p < PASSIVE_CAP && Math.random() < 0.5) tryPassiveSpawn();
       if (c.h < HOSTILE_CAP) tryHostileSpawn();
     }
-    try { updateVillages(dt); restockVillagers(dt); } catch (e) { console.error(e); }
+    try { updateVillages(dt); restockVillagers(dt); if (BF.merchant) BF.merchant.tick(dt); } catch (e) { console.error(e); }
     despawn(dt);
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
@@ -2195,7 +2215,8 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
-    if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
+    if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
+    if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
     for (const rec of villages.values()) {
       const v = rec.dead ? [...rec.dead] : [];
@@ -2206,7 +2227,7 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans") villagerSaves.set(k, o[k]);
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [] });
     for (const rec of villages.values()) applyDead(rec);
@@ -2216,6 +2237,7 @@ BF.mobs = {
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
+    if (BF.merchant) BF.merchant.importAll(o);
   },
   // Right-click on a mob (called by the player module). Opens the trade screen when the inventory module has one
   // (returns null); otherwise falls back to a simple 3 wheat -> 1 emerald trade and returns a message string.

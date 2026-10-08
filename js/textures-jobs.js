@@ -390,6 +390,44 @@ T.tack_rack_top = p => {
   p.relief(1.0);
 };
 
+// ---------- merchant's counter (merchant, not vanilla): a plank shop counter with a green cloth top; the top carries an open ledger, brass
+// scales and a cash box, the front a hanging cloth with an emerald sign, the sides bolts of goods stacked on the shelf under the board. ----------
+const CLOTH = pal(["#1e4a2a", "#265a34", "#2e6a3e", "#387a48", "#428a52"]);
+const EMER = pal(["#0c6a2a", "#149a3c", "#22c050", "#4ae070", "#9af0b0"]);
+T.merchant_counter_side = p => {
+  vboards(p, WOOD_OAK, 8, "#2a1c0e");
+  band(p, 0, 3, CLOTH);                                                                                          // cloth over the board
+  rect(p, 2, 14, 29, 15, hex("#3a2814"), 0.95, 0.03);                                                            // the shelf
+  const bolt = (x0, x1, y0, y1, c) => rect(p, x0, y0, x1, y1, (x, y) => ramp(c, 0.35 + (y === y0 ? 0.35 : 0) + ((x + y) % 4 === 0 ? 0.1 : 0)), 0.9, 0.03);
+  bolt(4, 13, 8, 13, pal(["#5a1a1a", "#7a2222", "#9a2c2c", "#b23a3a", "#c84a4a"]));                            // cloth bolts on the shelf
+  bolt(16, 27, 9, 13, pal(["#2a3a6a", "#344a82", "#3e5a9a", "#4a6ab0", "#5a7ac4"]));
+  rect(p, 5, 18, 12, 27, (x, y) => ramp(WOOD_SPRUCE, 0.3 + (y === 18 ? 0.4 : 0)), 0.85, 0.03);                   // a crate under it
+  for (const y of [21, 24]) rect(p, 5, y, 12, y, hex("#2a1a0c"), 0.6, 0.02);
+  p.relief(1.0);
+};
+T.merchant_counter_front = p => {
+  vboards(p, WOOD_OAK, 8, "#2a1c0e");
+  band(p, 0, 3, CLOTH);
+  rect(p, 3, 4, 28, 21, (x, y) => ramp(CLOTH, 0.45 + (y === 4 ? 0.3 : 0) - (x % 5 === 0 ? 0.12 : 0) + (y > 19 ? -0.15 : 0)), 0.8, 0.03);   // the hanging cloth
+  for (let x = 3; x <= 28; x += 2) p.set(x, 21, hex("#c8a040"));                                                // gold fringe
+  circle(p, 15.5, 12.5, 4.6, (x, y, d) => { const t = 1 - d / 4.6 + (x < 15 && y < 12 ? 0.25 : 0); p.set(x, y, jit(p, ramp(EMER, t), 0.03)); p.setH(x, y, 1); });   // the emerald sign
+  circle(p, 15.5, 12.5, 5.6, (x, y, d) => { if (d > 4.7) { p.set(x, y, hex("#c8a040")); p.setH(x, y, 1); } });
+  p.relief(1.0);
+};
+T.merchant_counter_top = p => {
+  rect(p, 0, 0, TS - 1, TS - 1, (x, y) => ramp(CLOTH, 0.45 + p.noise(x, y, 8, 2, 170) * 0.3), 0.6, 0.04);       // green cloth
+  rect(p, 0, 0, TS - 1, 1, (x) => ramp(WOOD_OAK, 0.6), 0.8, 0.03); rect(p, 0, TS - 2, TS - 1, TS - 1, (x) => ramp(WOOD_OAK, 0.4), 0.8, 0.03);
+  rect(p, 3, 4, 14, 14, (x, y) => (x === 8 || x === 9 ? hex("#b8a888") : ramp(pal(["#c8b890", "#d8c8a0", "#e4d6b0", "#eee2c0", "#f6eed8"]), 0.6)), 0.9, 0.02);   // open ledger
+  for (let y = 6; y <= 12; y += 2) { rect(p, 4, y, 7, y, hex("#5a4a3a"), 0.9, 0.01); rect(p, 10, y, 13, y, hex("#5a4a3a"), 0.9, 0.01); }
+  const B2 = hex("#c8a040"), B3 = hex("#8a6a20");
+  rect(p, 19, 5, 28, 5, B2, 1, 0.02); rect(p, 23, 5, 24, 13, B3, 1, 0.02);                                      // scales: beam and post
+  circle(p, 19.5, 8, 2.4, (x, y) => { p.set(x, y, B2); p.setH(x, y, 0.95); }); circle(p, 27.5, 8, 2.4, (x, y) => { p.set(x, y, B2); p.setH(x, y, 0.95); });
+  rect(p, 6, 19, 17, 27, (x, y) => ramp(DARK_OAK, 0.5 + (y === 19 ? 0.3 : 0)), 0.95, 0.03);                      // cash box
+  rect(p, 10, 22, 13, 24, B2, 1, 0.02);
+  for (const [x, y] of [[22, 20], [25, 22], [21, 25], [26, 26]]) circle(p, x, y, 1.5, (xx, yy) => { p.set(xx, yy, jit(p, ramp(EMER, 0.7), 0.03)); p.setH(xx, yy, 1); });   // a few emeralds
+  p.relief(1.0);
+};
+
 ICON_T.grindstone = p => {
   clearTile(p);
   rect(p, 4, 14, 7, 30, (x) => ramp(DARK_OAK, x === 4 ? 0.8 : 0.4), 0.8, 0.05);
