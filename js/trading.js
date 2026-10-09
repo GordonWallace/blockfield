@@ -189,7 +189,7 @@ const TRADES = {
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer. It also makes furnaces from 8
   // cobblestone bought from the miner, keeping one in stock for the toolsmith.
   furniture_maker: [
-    ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed", "1 emerald > 1 furnace"],
+    ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed", "1 emerald > 1 furnace", "1 emerald > 1 chest"],   // a chest: what villagers pay to have one put in their house (js/storage.js)
     ["10 oak_log > 1 emerald", "40 cobblestone > 1 emerald"],
     ["40 spruce_planks > 1 emerald", "40 birch_planks > 1 emerald", "10 spruce_log > 1 emerald", "10 birch_log > 1 emerald"],
     ["3 emerald > 7 red_bed"],
@@ -215,6 +215,9 @@ const TRADES = {
     [],
     [],
   ],
+  // The merchant (js/merchant.js) has no wares of its own: it carries other villagers' goods between villages, buying and selling through
+  // their offers. Whatever it holds outside a trip shows as its spare goods (js/market.js).
+  merchant: [[], [], [], [], []],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -241,6 +244,7 @@ const PRODUCE = {
   miner: [],          // everything it sells is dug out of the ground (js/miner.js)
   poultry_keeper: [], // eggs, feathers and chicken come only from its flock (js/poultry.js)
   furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
+  merchant: [],        // buys and sells other villagers' goods (js/merchant.js)
   stable_hand: [],     // saddles and leads are made from leather, iron and string it bought; horses are caught or bred (js/stables.js)
   cowherd: [],         // milk, beef, leather and steak come only from its herd (js/cowherd.js)
 };
@@ -366,7 +370,7 @@ function stockFor(prof, v) {
     big.n -= stackOf(big.id); total--;
   }
   for (const e of entries) if (e.n > 0) inv.add(a, e.id, e.n);
-  if (prof === "explorer" && I.tent !== undefined) inv.add(a, I.tent, 1);   // pitches it when night falls far from a bed (js/explorer.js)
+  if ((prof === "explorer" || prof === "merchant") && I.tent !== undefined) inv.add(a, I.tent, 1);   // the merchant camps on the road too (js/merchant.js)   // pitches it when night falls far from a bed (js/explorer.js)
   if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
   if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
   if (prof === "miner" && BF.miner) BF.miner.seed(a);                      // torches for the shaft
@@ -461,14 +465,11 @@ function feedOffers() {
 // Adds the food offers to a hungry unemployed villager (or takes them away again). Called when the trade screen opens and closes.
 function syncFeed(v, open = true) {
   if (!v || !Array.isArray(v.trades)) return v;
-  v.trades = v.trades.filter(o => !o.feed && !o.bottle);
+  if (BF.market) return BF.market.sync(v);   // food offers for any hungry villager, with its spare goods and needs (js/market.js)
+  v.trades = v.trades.filter(o => !o.feed);
   if (open && v.profession === "unemployed" && needsFood(v)) v.trades.push(...feedOffers());
-  // empty glass bottles left from milk it drank (js/cowherd.js): any villager but the cowherd sells them cheaply, 1 emerald for 9 (111% of VALUE)
-  const gb = BF.I.glass_bottle;
-  if (open && gb != null && v.profession !== "cowherd" && Array.isArray(v.inv) && inv.count(v.inv, gb) >= BOTTLE_LOT) v.trades.push({ buy: [{ id: BF.I.emerald, n: 1 }], sell: { id: gb, n: BOTTLE_LOT }, level: 1, xp: 0, bottle: true });
   return v;
 }
-const BOTTLE_LOT = 9;
 
 // Why the villager cannot do this offer right now, or null.
 function blockReason(v, o) {
@@ -478,7 +479,8 @@ function blockReason(v, o) {
   const hungry = BF.food && BF.food.blockReason(v, o);   // starving villagers only trade food (js/villagelife.js)
   if (hungry) return hungry;
   if (inv.count(v.inv, o.sell.id) < o.sell.n) return o.sell.id === BF.I.emerald ? "Out of emeralds" : "Out of stock";
-  if (v.profession === "cowherd" && o.sell.id === BF.I.bucket && inv.count(v.inv, o.sell.id) - o.sell.n < 1) return "Out of stock";   // never its last bucket (js/cowherd.js)
+  const keep = BF.market && BF.market.keeps(v, o);   // its reserve: what its next moves need (js/market.js)
+  if (keep) return keep;
   if (!inv.canFit(v.inv, o.buy, [o.sell])) return "Villager has no room";
   return null;
 }
@@ -515,6 +517,7 @@ function pack(v) {
     ts: BF.toolsmith && v.profession === "toolsmith" ? BF.toolsmith.pack(v) : undefined,   // the tool on the toolsmith's table, its furnace (js/toolsmith.js)
     fl: BF.fletcher && v.profession === "fletcher" ? BF.fletcher.pack(v) : undefined,     // the arrows or bow on the fletcher's table (js/fletcher.js)
     ck: v.cowKit ? 1 : undefined,                                                      // it was given the cowherd's bucket and bottles (js/cowherd.js)
+    mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
   };
 }
@@ -540,6 +543,7 @@ function unpack(v, o) {
   if (BF.toolsmith && o.ts) BF.toolsmith.unpack(v, o.ts);
   if (BF.fletcher && o.fl) BF.fletcher.unpack(v, o.fl);
   v.cowKit = !!o.ck;
+  if (BF.merchant && o.mc) BF.merchant.unpack(v, o.mc);
   if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;
 }

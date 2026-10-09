@@ -122,12 +122,16 @@ module.exports = async (pg, out) => {
     const d1 = VL.findFoodSeller(buyer);
     ok("with food for sale in the village, a hungry villager does not buy milk", !!d1 && d1.item !== I.milk_bottle && d1.item !== I.milk_bucket, d1 && { item: BF.items[d1.item].name, from: d1.seller.profession });
     for (const m of vill()) if (m !== buyer) hide(m);
-    T.inv.add(herder.inv, I.milk_bottle, 12);   // hide() took its bottles too (milk is food)
+    T.inv.add(herder.inv, I.milk_bottle, 30);   // hide() took its bottles too (milk is food); like anyone it keeps 7 bread-eq of food to eat (js/market.js)
+    T.syncFeed(herder);   // its offers follow its pack (js/market.js)
     const d2 = VL.findFoodSeller(buyer);
-    ok("with no other food for sale, it buys milk bottles from the cowherd", !!d2 && d2.item === I.milk_bottle && d2.seller === herder, d2 && { item: BF.items[d2.item].name, from: d2.seller.profession });
+    ok("with no other food for sale, it buys milk bottles from the cowherd", !!d2 && d2.item === I.milk_bottle && d2.seller === herder, d2 ? { item: BF.items[d2.item].name, from: d2.seller.profession } : { milk: c("milk_bottle"), surplus: BF.food.surplus(herder), spare: BF.market.spareOf(herder, I.milk_bottle), offers: herder.trades.filter(o => o.sell.id === I.milk_bottle).map(o => [o.buy[0].n, o.sell.n, !!o.spare, T.blockReason(herder, o)]) });
     ok("the cowherd never sells milk as ordinary food", VL.dealWith(buyer, herder, 3) === null);
     T.inv.remove(herder.inv, I.milk_bottle, c("milk_bottle") - 3);
-    ok("it keeps 3 bottles back (the baker's next cake)", VL.milkDeal(buyer, herder, 3) === null && VL.findFoodSeller(buyer) === null, c("milk_bottle"));
+    T.inv.add(herder.inv, I.bread, 30);   // plenty of other food: only the milk reserve holds the bottles back
+    T.syncFeed(herder);
+    ok("it keeps 3 bottles back (the baker's next cake)", VL.milkDeal(buyer, herder, 3) === null && BF.market.spareOf(herder, I.milk_bottle) === 0, c("milk_bottle"));
+    T.inv.remove(herder.inv, I.bread, c("bread"));
     T.inv.remove(herder.inv, I.milk_bottle, c("milk_bottle"));
     unhide();
     T.inv.remove(herder.inv, I.milk_bottle, c("milk_bottle"));
@@ -143,9 +147,17 @@ module.exports = async (pg, out) => {
     const other = vill().find(m => m !== herder && m.profession !== "cowherd");
     T.inv.add(other.inv, I.glass_bottle, 9);
     T.syncFeed(other, true);
-    const bo = other.trades.find(o => o.bottle);
-    ok("a villager holding empty bottles offers them to the player cheaply", !!bo && bo.sell.id === I.glass_bottle && bo.sell.n === 9 && bo.buy[0].n === 1, bo);
-    T.syncFeed(other, false);
+    const gbOffer = v => v.trades.find(o => o.spare && o.sell.id === I.glass_bottle);
+    const bo = gbOffer(other);
+    ok("a villager holding empty bottles offers them cheaply (spare goods, js/market.js)", !!bo && bo.sell.n === 9 && bo.buy.length === 1 && bo.buy[0].id === I.emerald && bo.buy[0].n === 1, bo);
+    T.inv.remove(other.inv, I.glass_bottle, 6); T.syncFeed(other);
+    const bo3 = gbOffer(other);
+    T.inv.remove(other.inv, I.glass_bottle, 1); T.syncFeed(other);
+    const bo2 = gbOffer(other);
+    ok("from as few as 3 (1 emerald), not 2", !!bo3 && bo3.sell.n === 3 && bo3.buy[0].n === 1 && !bo2, { bo3: bo3 && bo3.sell.n, bo2: !!bo2 });
+    T.inv.add(other.inv, I.glass_bottle, 7); T.syncFeed(other);
+    T.syncFeed(herder);
+    ok("the cowherd never offers its own bottles", !gbOffer(herder) && c("glass_bottle") > 0, c("glass_bottle"));
     const keepGB = c("glass_bottle");
     T.inv.remove(herder.inv, I.glass_bottle, keepGB - 4);
     const em0 = c("emerald");
@@ -153,10 +165,10 @@ module.exports = async (pg, out) => {
     herder.fshop = herder.fshop || { stage: null, deal: null, checkT: 9, avoid: {}, cd: 0 };
     herder.fshop.avoid = {};
     const bd = VL.findBottleSeller(herder);
-    ok("a cowherd short of bottles finds a villager to buy them from", !!bd && bd.item === I.glass_bottle && bd.seller.profession !== "cowherd", bd && { from: bd.seller.profession, n: bd.per });
+    ok("a cowherd short of bottles finds a villager's offer for them", !!bd && bd.item === I.glass_bottle && bd.seller.profession !== "cowherd" && !!bd.offer, bd && { from: bd.seller.profession, n: bd.offer.sell.n, times: bd.times });
     if (bd) {
       const sg0 = c("glass_bottle", bd.seller), hg0 = c("glass_bottle");
-      const done = VL.doWheatDeal(herder, bd) * bd.per;   // the shared "buy at the fair price" trade (js/villagelife.js)
+      const done = VL.doWheatDeal(herder, bd) * bd.offer.sell.n;   // the shared "buy through an offer" trade (js/villagelife.js)
       ok("the bottles change hands for an emerald", done > 0 && c("glass_bottle") === hg0 + done && c("glass_bottle", bd.seller) === sg0 - done, [hg0, c("glass_bottle")]);
     }
     T.inv.remove(other.inv, I.glass_bottle, c("glass_bottle", other));
@@ -192,7 +204,18 @@ module.exports = async (pg, out) => {
     // ---- breeding needs wheat and two willing adults
     const spot = (dx, dz) => { const x = Math.floor(P.out[0] + dx), z = Math.floor(P.out[1] + dz), y = BF.world.heightAt(x, z) + 1; return [x + 0.5, y, z + 0.5]; };
     const wildAt = (dx, dz) => { const [x, y, z] = spot(dx, dz); return BF.mobs.spawn("cow", x, y, z); };
-    const wa = wildAt(-12, -9), wb = wildAt(-11, -9);
+    // a flat 5x5 patch of ground outside the pasture (cows only mate within 2 blocks of height: a pit or a roof between them would stop them)
+    const flat = (() => {
+      for (let r = 9; r < 30; r++) for (let dx = -r; dx <= r; dx++) for (const dz of [-r, r]) {
+        const x0 = Math.floor(P.out[0] + dx), z0 = Math.floor(P.out[1] + dz), h = BF.world.heightAt(x0, z0);
+        if (x0 > P.fx0 - 3 && x0 < P.fx1 + 3 && z0 > P.fz0 - 3 && z0 < P.fz1 + 3) continue;
+        let ok2 = true;
+        for (let a = -2; a <= 2 && ok2; a++) for (let b = -2; b <= 2 && ok2; b++) if (BF.world.heightAt(x0 + a, z0 + b) !== h) ok2 = false;
+        if (ok2) return [dx, dz];
+      }
+      return [-12, -9];
+    })();
+    const wa = wildAt(flat[0], flat[1]), wb = wildAt(flat[0] + 1, flat[1]);
     let wildBorn = 0;
     const onBorn = (cf, a, b) => { if (a === wa || a === wb || b === wa || b === wb) wildBorn++; };
     BF.on("cowBorn", onBorn);
@@ -312,6 +335,15 @@ module.exports = async (pg, out) => {
     realLw.trades = T.offers ? T.offers("leatherworker", 5) || [] : [];
     try { T.restock(realLw, BF.sky.day || 0); T.restock(realLw, (BF.sky.day || 0) + 3); } catch (e) { R.restockErr = String(e); }
     ok("the daily restock gives it no leather", T.inv.count(realLw.inv, I.leather) === 0, T.inv.count(realLw.inv, I.leather));
+    const lw = vill().find(m => m.profession === "leatherworker");
+    if (lw) {
+      const lwKeep = c("leather", lw); T.inv.remove(lw.inv, I.leather, lwKeep); T.inv.add(lw.inv, I.emerald, 3);
+      T.inv.add(herder.inv, I.leather, 14); T.syncFeed(herder);
+      lw.fshop = lw.fshop || { stage: null, deal: null, checkT: 9, avoid: {}, cd: 0 }; lw.fshop.avoid = {};
+      const ld = BF.villageLife._test.findWheatSeller(lw);
+      ok("a leatherworker short of leather buys it through an offer", !!ld && ld.item === I.leather && !!ld.offer && ld.offer.sell.id === I.leather, ld && { from: ld.seller.profession, n: ld.offer.sell.n, spare: !!ld.offer.spare });
+      T.inv.remove(herder.inv, I.leather, c("leather")); T.inv.add(lw.inv, I.leather, lwKeep); T.syncFeed(herder);
+    } else ok("a leatherworker short of leather buys it through an offer (no leatherworker in this village)", true);
 
     // ---- builders: a pasture only in a village on grass
     const bp = BF.blueprints.get("pasture", 1, 0, 0.5, { hay: true }, "spruce");

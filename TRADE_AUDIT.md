@@ -10,6 +10,7 @@ Generated against `js/trading.js` (value table `BF.trades.VALUE`, tables `BF.tra
   - player **sells goods for emeralds**: rho 0.72 to 0.93 (villager keeps 7 to 28%; typically ~0.9)
   - player **buys wares** (emeralds, optionally plus a trade-in): rho 0.78 to 1.15 (typically ~0.85 to 1.05; bulk cheap goods may be slightly favourable because whole emeralds are coarse)
   - all offers stay inside +-30%; no round trip is profitable: for every item, the best price any villager pays per unit is below the lowest price any villager charges (checked by script, 0 loops).
+  - since 1.3 every villager also sells its **spare goods** (anything above what it keeps for its next moves, js/market.js) at the cheapest base price any villager's table charges for the item, or VALUE + 5% when none does, and buys what it **needs** right now at VALUE x 0.88. The furniture maker sells a chest for 1 emerald (what villagers pay to have one put in their house). There are no fair-price deals between villagers any more: every trade is an offer the player can take too.
   - these are **base** prices. Since 1.3 prices follow demand (js/prices.js): a buy offer nobody fills rises up to x2 over 30 game days, a sell offer stuck at its stock cap falls to x0.5, and each filled trade moves it 3 steps (of 2^(1/30)) back. A villager never buys an item above its own sell price for it, never sells below its own buy price, and never buys above the cheapest base price any villager charges. Buying marked-down goods from one villager and selling them to another whose offer has risen can now pay: that is the point (shortages pull goods in), and it is bounded by the seller's stock and the buyer's emerald purse.
 - **Stock.** Each villager only holds what its table sells; per-ware cap = offer size x [6,5,4,3,2] by offer level, at most 2 stacks (gear 1-2 pieces) and at most 6 emeralds worth of any single ware. Start quantity is 50 to 100% of cap, plus the goods it buys occasionally (40% chance, small counts) and 6 to 24 emeralds.
 - **Daily restock** (once per in-game day, skipped while the trade screen is open): only wares in the profession's `PRODUCE` list rise, by 25% of cap (min 1) per day up to the cap (a gap of several days counts up to 4); emeralds +2 per day up to 12. Diamonds, gold, bells, lanterns, mob drops etc. never regenerate; they return only if the player sells them to that villager.
@@ -367,7 +368,7 @@ own wool into string (1 wool -> 2 string, js/shepherd.js) and sells it at `1 eme
 ### leatherworker
 
 `PRODUCE.leatherworker` was `leather` and is now empty (1.3): leather comes only from cows. A leatherworker holding fewer than 12 leather buys
-it from the cowherd or the butcher at the fair price (1 emerald for 6, `VALUE` 0.15; js/villagelife.js `shopAI`, like the shepherd's wheat).
+it through any villager's leather offer (the cowherd's `1 emerald > 7 leather`, or spare leather at the cheapest table price; js/villagelife.js `shopAI`, like the shepherd's wheat).
 Its starting stock is unchanged.
 
 | Lvl | Offer | In | Out | rho | Kind |
@@ -399,11 +400,11 @@ is the only way bottles enter a village.
 | 2 | 1 emerald > 8 steak | 1.00 | 0.96 | 0.96 | buy from villager |
 | 3 | 2 emerald > 16 steak | 2.00 | 1.92 | 0.96 | buy from villager |
 
-- **Empty bottles.** Every other villager holding 9 or more empty bottles (left from milk it drank) offers them to the player at `1 emerald > 9 glass_bottle`
-  (rho 0.90, an offer added while the trade screen is open, `syncFeed`), and the cowherd buys them back from villagers holding 3 or more, up to 9 for an
-  emerald, while it holds fewer than 9.
-- **Milk as food.** Hungry villagers buy milk bottles from the cowherd only when no other food is for sale in the village (fair price 1 emerald for 6,
-  or its offer); it keeps 3 bottles back.
+- **Empty bottles.** Every villager but the cowherd holding empty bottles (left from milk it drank) offers them as spare goods (js/market.js): `1 emerald > 10 glass_bottle`
+  (VALUE x 1.05), or a small lot of 3-9 for 1 emerald (`LOT_MIN.glass_bottle`: the empties are spread thin). The cowherd buys them back through those offers while it holds fewer
+  than 9; it keeps every bottle it holds (its reserve).
+- **Milk as food.** Hungry villagers buy milk bottles only when no other food is for sale in the village, through an offer for them (the cowherd's `1 emerald > 7 milk_bottle`
+  or spare milk at the same price); the cowherd keeps 3 bottles back.
 - **No round trip.** Leather 0.125 (butcher, leatherworker pay) < 0.143 (cowherd charges); raw beef 0.071 < 0.083; steak 0.106 (feed offers) < 0.125;
   glass bottles 0.083 (cowherd pays) < 0.111 (villagers charge). It never sells its last bucket.
 

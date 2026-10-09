@@ -34,7 +34,8 @@ const ADOPT_MAX = 24;         // a pasture takes in wandering cows up to this ma
 const FREE_RADIUS = 10;       // a cowherd without a pasture milks the free cows within 10 blocks of its churn
 const TEND_R = 12;            // stray cows this near the pasture are fed and milked too
 const WHEAT_KEEP = 2;         // wheat it keeps back for luring a cow home
-const MILK_CAP = 32;          // it stops milking while it holds this many milk bottles
+const MILK_CAP = 32;
+const MILK_KEEP = 3;          // milk bottles it never sells (the baker's next cake)          // it stops milking while it holds this many milk bottles
 const BOTTLES_LOW = 9;        // it buys empty bottles back while it holds fewer than this ...
 const BOTTLES_TO = 30;        // ... up to this many
 const KIT_BOTTLES = 30;       // the hire kit: 1 bucket and 30 glass bottles
@@ -478,6 +479,19 @@ function bottleWanted(m) {
   const have = cnt(m, I("glass_bottle"));
   return have < BOTTLES_LOW ? BOTTLES_TO - have : 0;
 }
+// Its market reserve (js/market.js reserve: nothing in it is sold, to villagers or the player): one pail (a bucket or a milk bucket: never its
+// last), every milk bucket (it bottles them), every empty glass bottle (it fills them), MILK_KEEP milk bottles and its cows' wheat.
+function reserve(m) {
+  const out = [], c = id => (id == null ? 0 : cnt(m, id)), set = (...ids) => new Set(ids.filter(id => id != null));
+  if (m.profession !== "cowherd" || !Array.isArray(m.inv)) return out;
+  const b = I("bucket"), mb = I("milk_bucket"), gb = I("glass_bottle"), milk = I("milk_bottle"), w = I("wheat_item");
+  if (c(b) + c(mb) > 0) out.push({ ids: set(b, mb), n: 1 });
+  if (c(mb) > 0) out.push({ ids: set(mb), n: c(mb) });
+  if (c(gb) > 0) out.push({ ids: set(gb), n: c(gb) });
+  if (milk != null) out.push({ ids: set(milk), n: MILK_KEEP });
+  if (w != null) out.push({ ids: set(w), n: c(w) + wheatWanted(m) });
+  return out;
+}
 // Glass bottles it needs to bottle the milk buckets it holds (3 each), plus 3 for the next one.
 const canBottle = m => cnt(m, I("milk_bucket")) > 0 && cnt(m, I("glass_bottle")) >= 3;
 const canMilk = m => cnt(m, I("bucket")) > 0 && cnt(m, I("glass_bottle")) >= 3 * (cnt(m, I("milk_bucket")) + 1) && cnt(m, I("milk_bottle")) < MILK_CAP;
@@ -730,7 +744,7 @@ function toCook(m) {
   const n = Math.min(cnt(m, RAW()) - BEEF_KEEP, STEAK_CAP - cnt(m, STEAK()), 16);
   return n >= 3 ? n : 0;
 }
-const fuelOk = m => id => FU().isCoal(id) || !(m.trades || []).some(o => o && o.sell && o.sell.id === id);
+const fuelOk = m => id => FU().isCoal(id) || !(m.trades || []).some(o => o && !o.spare && !o.need && o.sell && o.sell.id === id);   // never burns its job's wares (a spare-goods offer doesn't count, js/market.js)
 const skipFurnace = S => f => avoided(S, "f:" + FU().pk(f.x, f.y, f.z));
 const skipOffer = S => (v2, o) => avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id);
 function cookPlan(m, n) {
@@ -892,7 +906,7 @@ if (BF.texKit) {
 });
 
 BF.cowherd = {
-  FEED_DAYS, BREED_CD, CALF_DAYS, DENSITY, MIN_ADULTS, STOCK_TO, FIND_R, KIT_BOTTLES, MILK_CAP, BEEF_KEEP, STEAK_CAP, WORK_END,
+  FEED_DAYS, BREED_CD, CALF_DAYS, DENSITY, MIN_ADULTS, STOCK_TO, FIND_R, KIT_BOTTLES, MILK_CAP, MILK_KEEP, BEEF_KEEP, reserve, STEAK_CAP, WORK_END,
   feed, milk, milkable, milkedToday, playerUse, cowAI, syncLook, hungry, willing, isCalf, breed, bottle,
   pasturesOf, pastureOf, tended, wheatWanted, bottleWanted, kitInto, hireKit, grassVillage, grassAt,
   ai, cookAI, toCook, tick, statusText, holdings, pickPastureTarget, contain, counts,

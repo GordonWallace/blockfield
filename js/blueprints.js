@@ -168,6 +168,7 @@ const SPECS = {
       for (const [u, q] of [[0, 0], [4, 0], [0, 2], [4, 2]]) c.push([u, 0, q, B.oak_fence, PH.WALL], [u, 1, q, B.oak_fence, PH.WALL]);
       for (let q = 0; q < 3; q++) for (let u = 0; u < 5; u++) c.push([u, 2, q, S.wall, PH.ROOF]);
       c.push([1, 0, 2, B.crafting_table, PH.LIGHT], [3, 0, 2, BF.chestId(0), PH.LIGHT], [2, 3, 1, B.torch, PH.LIGHT]);
+      if (B.merchant_counter != null) c.push([2, 0, 2, B.merchant_counter, PH.LIGHT]);   // a merchant's jobsite in every stall (js/merchant.js)
       return { cells: c, beds: [], w: 5, d: 3 };
     },
   },

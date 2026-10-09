@@ -380,7 +380,7 @@ function wantsStore(m) {
 }
 
 // ---------------------------------------------------------------- trips (buying pickaxes / planks, selling cobblestone to builders)
-const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession !== "miner" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 // The nearest villager of its village that sells an item `want(id)` accepts, at an offer the miner can pay and store: {kind: "buy", other, offer, times}.
 function findSeller(m, want, avoid) {
   const R = m.village, T = TR();

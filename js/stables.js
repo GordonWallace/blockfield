@@ -14,9 +14,8 @@
 //    horse walks out on the player's lead when it has one to give, else it is left untied beside the player), and buys them: the player leading
 //    a tamed adult of its own right-clicks the stable hand, which pays the price when it has the emeralds and leads the horse home.
 //  - makes saddles (3 leather + 1 iron ingot) and leads (4 string + 1 leather -> 2) at its tack rack and sells them; buys horse feed from the player.
-// Nothing comes from nowhere: every wheat, hay bale, leather, iron ingot and string it uses is bought from a villager of its village (farmers for
-// feed, the leatherworker or butcher for leather, the shepherd or fletcher for string, whoever sells iron ingots) at their offer, their trade
-// table's price, or the fair VALUE price; saddles and leads exist only once made from those. Horses are owned "stable:<village key>".
+// Nothing comes from nowhere: every wheat, hay bale, leather, iron ingot and string it uses is bought from a villager of its village through
+// one of that villager's sell offers (its job's or its spare goods, js/market.js: one market); saddles and leads exist only once made from those. Horses are owned "stable:<village key>".
 // Far villages (js/villagesim.js): horses only exist as mobs near the player, so catching and breeding pause there; shopping goes on.
 (() => {
 "use strict";
@@ -34,7 +33,6 @@ const WHEAT_SELF = 4;                   // a farmer keeps this much wheat (js/vi
 const SADDLE_STOCK = 1, LEAD_STOCK = 4; // tack it keeps made up for sale
 const CRAFT_SECS = 6;                   // at the rack: one saddle or two leads every 6 s
 const TRADE_PAUSE = 1.6;
-const SELLERS = { wheat_item: ["farmer"], hay_bale: ["farmer", "shepherd"], leather: ["leatherworker", "butcher", "cowherd"], string: ["shepherd", "fletcher"], iron_ingot: null };   // null: anyone with an offer
 const KEEP = { wheat_item: WHEAT_SELF };
 const LOG = [];
 
@@ -107,16 +105,12 @@ function pickPenTarget(m) {
 }
 
 // ---------------------------------------------------------------- buying from other villagers
-// The deal for `want` of item id from seller v2: its own current offer (emeralds -> item), else the price of that offer in its trade table at a
-// later level, else the fair VALUE price (1 emerald buys ~90% of an emerald's worth). The seller's stock (above what it keeps) and room, and
-// the buyer's emeralds and room, set how many times. Pseudo offers go through BF.trades.exchange like real ones.
+// The deal for `want` of item id from seller v2: one of its sell offers (its job's, or spare goods, js/market.js), at that offer's price. The
+// seller's stock above its reserve (blockReason) and room, and the buyer's emeralds and room, set how many times.
 function offerFor(v2, id) {
   const T = TR(), em = I("emerald");
   for (const o of v2.trades || []) if (o.sell.id === id && o.buy.length === 1 && o.buy[0].id === em && !o.horse && !T.blockReason(v2, o)) return o;
-  for (const pool of T.table(v2.profession)) for (const o of pool)
-    if (o.sell.id === id && o.buy.length === 1 && o.buy[0].id === em) return { buy: [{ id: em, n: o.buy[0].n }], sell: { id, n: o.sell.n }, level: 1, xp: 0, table: true };
-  const val = T.VALUE[BF.items[id].name] || 1;
-  return { buy: [{ id: em, n: Math.max(1, Math.round(val)) }], sell: { id, n: Math.max(1, Math.floor(0.9 / val)) }, level: 1, xp: 0, fair: true };
+  return null;
 }
 function dealWith(m, v2, id, want) {
   const T = TR(), em = I("emerald"), o = offerFor(v2, id);
@@ -146,12 +140,9 @@ function findDeal(m, st, S) {
   const t = now();
   for (const w of wants(m, st)) {
     if ((S.noSeller[w.id] || 0) > t) continue;
-    const name = BF.items[w.id].name, profs = SELLERS[name];
     let best = null, bd = Infinity;
     for (const v2 of R.members || []) {
       if (v2 === m || !BF.villageLife.canSell(v2) || v2.child || (S.avoid[v2.slot ? v2.slot.idx : -1] || 0) > t) continue;
-      if (profs && !profs.includes(v2.profession)) continue;
-      if (!profs && !(v2.trades || []).some(o => o.sell.id === w.id && !o.horse)) continue;   // iron: only from a villager that sells it
       const d = dealWith(m, v2, w.id, w.n);
       if (!d) continue;
       const dist = v2.position.distanceTo(m.position);
@@ -176,7 +167,7 @@ function doDeal(m, deal) {
   }
   if (done) {
     if (BF.vlog) BF.vlog.trade(m, v2, o, done);
-    log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.items[o.sell.id].name, paid: done * o.buy[0].n + " emerald", how: o.fair ? "fair" : o.table ? "table" : "offer" });
+    log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.items[o.sell.id].name, paid: done * o.buy[0].n + " emerald", how: o.spare ? "spare" : "offer" });
   }
   return done;
 }

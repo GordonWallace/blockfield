@@ -19,10 +19,11 @@ const JOBSITE = {
   farmer: "composter", librarian: "lectern", cleric: "brewing_stand", armorer: "blast_furnace", weaponsmith: "grindstone",
   toolsmith: "smithing_table", butcher: "smoker", fisherman: "barrel", shepherd: "loom", fletcher: "fletching_table",
   mason: "stonecutter", leatherworker: "cauldron", cartographer: "cartography_table", builder: "drafting_table", explorer: "survey_table", forester: "band_saw",
-  furniture_maker: "carpentry_bench", miner: "mining_bench", stable_hand: "tack_rack", poultry_keeper: "nesting_box", cowherd: "milk_churn",
+  furniture_maker: "carpentry_bench", miner: "mining_bench", stable_hand: "tack_rack", merchant: "merchant_counter", poultry_keeper: "nesting_box", cowherd: "milk_churn",
 };
 // Professions with a say in who may take their block: the stable hand only in a village on horse land, one per village (js/stables.js).
-const mayTake = (m, s) => !(s && s.prof === "stable_hand" && BF.stables && !BF.stables.mayHire(m, s));
+// Merchants: at most one per 20 villagers, at least one (js/merchant.js).
+const mayTake = (m, s) => !(s && s.prof === "stable_hand" && BF.stables && !BF.stables.mayHire(m, s)) && !(s && s.prof === "merchant" && BF.merchant && !BF.merchant.mayHire(m, s));
 const PROFESSION_OF = {};
 for (const p in JOBSITE) PROFESSION_OF[JOBSITE[p]] = p;
 const NO_JOB = { nitwit: 1, unemployed: 1 };
@@ -136,7 +137,7 @@ function jobList(v) {
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   let n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
-  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
+  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "merchant" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
   const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer and toolsmith always get their blocks too
   for (const p of core ? ["farmer", "toolsmith"] : []) { const sl = needy.find(x => x.prof === p); if (sl && !special.includes(sl)) special.push(sl); }
   const rest = needy.filter(sl => !special.includes(sl));
@@ -203,7 +204,7 @@ function planVillage(v) {
     if (job.prof === "poultry_keeper" && coops.length && beside(coops[0], job)) continue;   // the nesting box stands right outside the coop (js/poultry.js)
     if (job.prof === "cowherd" && pastures.length && beside(pastures[0], job)) continue;   // the milk churn stands right outside the pasture (js/cowherd.js)
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
-    if ((job.prof === "builder" || job.prof === "furniture_maker") && plaza(job)) continue;
+    if ((job.prof === "builder" || job.prof === "furniture_maker" || job.prof === "merchant") && plaza(job)) continue;
     if (job.prof === "furniture_maker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;   // plaza full: beside a house
     const b = bOf(job.house) || ((job.slot < 0 || job.prof === "forester" || job.prof === "miner") && homes.length ? homes[Math.floor(r() * homes.length)] : null);
     if (b && (inside(b, job) || beside(b, job))) continue;
