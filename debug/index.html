@@ -69,6 +69,9 @@
   .vrow .ld { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); opacity: 0.6; }
   .vrow.on .ld { background: var(--accent); opacity: 1; box-shadow: 0 0 0 3px rgba(127, 191, 77, 0.18); }
   .vrow:not(.on) .vn { color: var(--muted); }
+  .lerrs { margin: 6px 12px; padding: 6px 10px; border: 1px solid var(--danger, #c0392b); border-radius: 6px; font-size: 11px; }
+  .lerrs h4 { margin: 0 0 4px; font: 11px var(--display); color: var(--danger, #c0392b); }
+  .lerrs div { padding: 1px 0; color: var(--muted); }
   .vsep { padding: 8px 16px 3px; font: 10px var(--display); color: var(--faint); letter-spacing: 0.5px; }
   #vl-auto.on { background: rgba(127, 191, 77, 0.14); color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); }
   .stale #v-here .vstat .big, .stale #v-here .occ, .stale .mapwrap, .stale .roster { opacity: 0.45; filter: grayscale(0.7); }
@@ -310,6 +313,7 @@
           <button class="fbtn" id="vl-cmp" title="Every known village side by side in one table">Compare</button><button class="fbtn" id="vl-wide" title="Open the table across the whole screen (Esc closes)" hidden>Full width</button>
           <button class="fbtn" id="vl-auto" title="Show the nearest loaded village, switching as you move">Follow nearest</button></div>
         <div class="vlist" id="vlist"><div class="empty">No villages loaded yet.</div></div>
+        <div class="lerrs" id="lerrs" hidden></div>
         <div id="vcmp" hidden></div>
       </div>
       <div class="panel" id="vpanel">
@@ -392,6 +396,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const fmt = n => n == null ? "-" : n.toLocaleString();
+const gameLeft = secs => { const m = Math.round(secs / 1200 * 24 * 60), h = Math.floor(m / 60); return h ? h + "h " + (m % 60) + "m" : (m % 60) + "m"; };   // game time left
 const days = n => fmt(n) + (n === 1 ? " day" : " days");
 
 // ---------------------------------------------------------------- state
@@ -486,14 +491,17 @@ function renderVillages(s) {
   $("vl-auto").classList.toggle("on", !pinned);
   const row = v => {
     const det = details[v.key], b = bearing(v.x - d.x, v.z - d.z);
-    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.age != null ? " \u00B7 age " + days(v.age) : "") + (v.happy ? " \u00B7 happiness " + v.happy.score : "");
+    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.unload ? " \u00B7 unloads in " + gameLeft(v.unload.left) : "") + (v.age != null ? " \u00B7 age " + days(v.age) : "") + (v.happy ? " \u00B7 happiness " + v.happy.score : "");
     return `<div class="vrow${v.loaded ? " on" : ""}${v.key === viewKey ? " sel" : ""}" data-k="${esc(v.key)}"><i class="ld"></i>` +
-      `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs">${esc(extra)}</div>` +
+      `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs"${v.unload ? ` title="${esc(v.unload.est.map(x => x.who + ": " + x.task + " (" + gameLeft(x.secs) + ")").join("\n"))}"` : ""}>${esc(extra)}</div>` +
       `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 ? dirName(b) : ""}</div></div>`;
   };
   const on = list.filter(v => v.loaded), off = list.filter(v => !v.loaded);
   $("vlist").innerHTML = list.length ? on.map(row).join("") + (off.length ? `<div class="vsep">Not loaded</div>` + off.map(row).join("") : "")
     : `<div class="empty">No villages loaded yet.</div>`;
+  const le = s.loadErrors || [];
+  $("lerrs").hidden = !le.length;
+  $("lerrs").innerHTML = le.length ? `<h4>Loading errors (${le.length})</h4>` + le.slice().reverse().map(e => `<div>${esc(e.kind)} \u00B7 ${esc(e.who || "")} \u00B7 ${esc(e.task || "")} \u00B7 estimate ${e.estimate}s, ran ${e.ran}s${e.why ? " \u00B7 " + esc(e.why) : ""} \u00B7 ${esc(e.village || "")}</div>`).join("") : "";
 }
 $("vlist").addEventListener("click", e => {
   const r = e.target.closest(".vrow"); if (!r || !snap) return;
