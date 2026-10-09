@@ -2005,7 +2005,9 @@ function updateVillages(dt) {
       const spNear = sp && (BF.world.isLoaded(sp[0], sp[2]) || inVillage(v, sp[0], sp[2]));
       if (spNear && !BF.world.isLoaded(sp[0], sp[2])) continue;   // its spot in the village has not loaded yet: wait for it
       const T = TYPES.villager;
-      let at = !spNear ? null : !BF.world.boxCollides(sp[0], sp[1], sp[2], T.hw, T.h) ? sp.slice(0, 3) : findStand(sp[0], sp[1], sp[2], T);   // its exact spot while nothing has been built there
+      // saves round to 0.01, which can put one standing on a bed (top at 9/16) just inside it: test (and spawn) a hair higher
+      const spY = sp && sp[1] + 0.01;
+      let at = !spNear ? null : !BF.world.boxCollides(sp[0], spY, sp[2], T.hw, T.h) ? [sp[0], spY, sp[2]] : findStand(sp[0], sp[1], sp[2], T);   // its exact spot while nothing has been built there
       if (!at) {
         if (H && !loadedHouse(H)) continue;
         const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
