@@ -113,10 +113,12 @@ function load(m, o, kind, n, fuelOk) {
   topUp(m, o, fuelOk);
   return k;
 }
-// Fuel for what is left in the tray, from m's pack, once the oven has burnt what was in it (one fuel kind fits the slot).
+// Fuel for what is left in the tray beyond the fire burning now, from m's pack, into the empty fuel slot (one fuel kind fits it).
 function topUp(m, o, fuelOk) {
-  if (o.burn > 0 || o.fuel || !trayReady(o)) return 0;
-  const need = Math.max(1, Math.ceil((BAKE_T[o.kind] * o.n - o.cook) / FU().COOK));
+  if (o.fuel || !trayReady(o)) return 0;
+  const secs = BAKE_T[o.kind] * o.n - o.cook - o.burn + 0.5;   // fire still needed beyond what burns now (a little over: the last tick)
+  if (secs <= 0) return 0;
+  const need = Math.max(1, Math.ceil(secs / FU().COOK));
   let fuel = FU().fuelFor(m, need, fuelOk);
   if (!fuel.length) { const any = m.inv.find(s => s && isFuel(s.id) && (!fuelOk || fuelOk(s.id))); if (any) fuel = [{ id: any.id, n: Math.min(any.count, 64) }]; }
   if (!fuel.length) return 0;
@@ -240,8 +242,8 @@ function shopping(m) {
 function buyDeal(m, e) {
   const F = FU(), S = st(m), ok = fuelOk(m);
   if (e.nm === "fuel") {
-    const coal = { what: "fuel", f: F.isCoal, n: e.n };
-    if (F.priceOf(m, F.isCoal, e.n, false, skipOffer(S)) <= cnt(m, I("emerald"))) return F.findDeal(m, coal, skipOffer(S));
+    const nc = Math.ceil(e.n / F.PER_COAL), coal = { what: "fuel", f: F.isCoal, n: nc };   // e.n: furnace items' worth
+    if (F.priceOf(m, F.isCoal, nc, false, skipOffer(S)) <= cnt(m, I("emerald"))) { const d = F.findDeal(m, coal, skipOffer(S)); if (d) return d; }
     const wood = id => (F.isLog(id) || F.isPlanks(id)) && ok(id);
     return F.findDeal(m, { what: "fuel", f: wood, n: Math.ceil(e.n / F.PER_WOOD) }, skipOffer(S));
   }
@@ -263,10 +265,11 @@ function nextJob(m) {
     if (kind === "cake") n = Math.min(n, Math.ceil((SLICE_CAP - slicesHeld(m)) / SLICES));
     else n = Math.min(n, PIE_CAP - cnt(m, I("pumpkin_pie")));
     if (n <= 0) continue;
-    const fuelNeed = Math.ceil(BAKE_T[kind] * n / FU().COOK);
-    if (fuelHeld(m) >= Math.min(fuelNeed, 1)) return { kind: "bake", oven: o, what: kind, n };
+    const per = BAKE_T[kind] / FU().COOK, fuelNeed = Math.ceil(per * n), held = fuelHeld(m);   // furnace items' worth of fuel
+    if (held >= fuelNeed) return { kind: "bake", oven: o, what: kind, n };
     const d = buyDeal(m, { nm: "fuel", n: Math.max(fuelNeed, 4) });
     if (d) return d;
+    if (held >= per) return { kind: "bake", oven: o, what: kind, n: Math.max(1, Math.floor(held / per)) };   // nobody sells fuel now: bake what it has fuel for
     if (S.noFuelDay !== Math.floor(now())) { S.noFuelDay = Math.floor(now()); log("noFuel", { who: m.slot ? m.slot.idx : null }); vlog(m, "has no fuel for the oven and nobody sells any: no baking today", o); }
     return null;
   }
@@ -455,12 +458,11 @@ const treatCounts = m => !!(m && m.life && m.life.tt != null && now() - m.life.t
 
 // ---------------------------------------------------------------- the player and cakes
 // Right click on a cake: eat a slice (2 hunger, as vanilla), the cake shrinks; the 7th slice takes it. Returns a message or true.
-function eatCake(x, y, z, P) {
+function eatCake(x, y, z, P, creative) {
   const id = BF.world.getBlock(x, y, z), k = cakeBites(id);
   if (k < 0) return false;
-  const creative = P && P.gameMode === "creative";
   if (P && !creative && P.hunger >= P.maxHunger) return "You aren't hungry";
-  if (P) { P.hunger = Math.min(P.maxHunger, P.hunger + 2); if (typeof P.addSaturation === "function") P.addSaturation(0.4); }
+  if (P) P.hunger = Math.min(P.maxHunger, P.hunger + 2);
   const next = k + 1 >= SLICES ? 0 : BF.B["cake_bitten_" + (k + 1)];
   BF.world.setBlock(x, y, z, next);
   if (BF.emit) BF.emit("playerAteCake", x, y, z, k + 1);
