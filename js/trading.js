@@ -244,7 +244,7 @@ const PRODUCE = {
   toolsmith: [],        // makes every tool from materials it buys (js/toolsmith.js)
   butcher: [],         // cooks raw meat it holds instead (js/villagelife.js)
   fisherman: [],       // cooks raw cod it holds instead (js/villagelife.js)
-  shepherd: ["white_wool", "hay_bale"],
+  shepherd: [],         // wool only from shearing its flock (js/shepherd.js); hay bales come from farmers, who bale their spare wheat
   fletcher: [],        // makes arrows and bows from materials it buys (js/fletcher.js)
   mason: ["brick", "bricks", "stone", "terracotta", "orange_terracotta", "yellow_terracotta", "red_terracotta",
     "white_terracotta", "brown_terracotta", "sandstone_bricks"],

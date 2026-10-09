@@ -73,6 +73,7 @@
   {"name": "bedchain", "kind": "node", "tier": "integration", "file": "test/bedchain.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "bed supply chain soak, 1 day x 2 villages"},
   {"name": "beds-actions", "file": "test/beds-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "boat-river", "file": "test/boat-river.js", "kind": "actions", "tier": "integration", "timeout": 900, "what": "rows a boat 500 blocks down a generated river"},
+  {"name": "builder-torches", "file": "test/builder-torches.js", "kind": "actions", "tier": "baseline", "what": "builders craft torches from bought coal and their own sticks; shepherds get no wool or hay bales from the restock; builder pick weights (full villages, stock-only materials, no cap)"},
   {"name": "builder-woods", "kind": "node", "tier": "integration", "file": "test/builder-woods.js", "timeout": 900, "what": "builders use one wood per structure"},
   {"name": "cartography-live", "file": "test/cartography-live.js", "kind": "actions", "tier": "integration"},
   {"name": "chest-ladder-actions", "file": "test/chest-ladder-actions.js", "kind": "actions", "tier": "integration"},
