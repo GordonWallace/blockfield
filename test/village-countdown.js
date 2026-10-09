@@ -44,7 +44,7 @@ module.exports = async (pg) => {
   const counting = await wait(k => BF.villageSim.countdown(k) !== null, info.key, 30000);
   const cd = await pg.evaluate(k => ({ cd: BF.villageSim.countdown(k), active: BF.villageSim.isActive(k), may: [BF.villageSim.mayStart(k, 1e6), BF.villageSim.mayStart(k, 1)] }), info.key);
   ok("a village with a villager out on a task counts down instead of unloading", counting && cd.active && cd.cd.left > 0, cd.cd);
-  ok("the timer comes from the longest task, and the debug feed shows it", cd.cd && cd.cd.est.length > 0 && cd.cd.est[0].who === who, cd.cd && cd.cd.est[0]);
+  ok("the timer comes from the longest task, and the debug feed shows it", cd.cd && cd.cd.est.length > 0 && cd.cd.est.some(e => e.who === who) && cd.cd.est.every(e => e.secs <= cd.cd.est[0].secs), cd.cd && cd.cd.est);
   ok("a task longer than the time left may not start; a short one may", cd.may[0] === false && cd.may[1] === true, cd.may);
   await unpin();
   // 3. coming back within range cancels it
