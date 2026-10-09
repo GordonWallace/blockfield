@@ -245,6 +245,8 @@ const VILLAGER_OUTFITS = {
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
   // no jobsite (js/jobs.js): the plain biome robe of a vanilla unemployed villager; never in the roster pool
   unemployed:    {},
+  // poultry keeper (not vanilla): straw-yellow apron over a russet robe, a brim hat; keeps chickens in a coop (js/poultry.js)
+  poultry_keeper: { robe: 0x8a4a2a, trim: 0x5a2e1a, apron: 0xe6cf7a, sash: 0xd8b84a, hat: { kind: "brim", color: 0xc9a24a, color2: 0xd8b45a } },
 };
 const PROFESSIONS = Object.keys(VILLAGER_OUTFITS);
 const PROF_ALIAS = { smith: "toolsmith" };
@@ -690,6 +692,7 @@ function removeMob(m) {
   m.material.dispose();
   if (m.type === "villager" && !m.dead) { const k = villagerKey(m); if (k && m.inv) villagerSaves.set(k, BF.trades.pack(m)); }
   if (m.sheep && m.sheep.mob === m) m.sheep.mob = null;   // pen sheep keep their state and respawn with the pen (js/shepherd.js)
+  if (m.hen && m.hen.mob === m) m.hen.mob = null;   // so do coop chickens (js/poultry.js)
   m.removed = true;
 }
 
@@ -772,6 +775,7 @@ function giveDrops(m) {
   if (!inv || typeof inv.add !== "function") return;
   for (const [name, lo, hi] of m.def.drops || []) {
     if (m.type === "sheep" && (m.lamb || (m.sheep && m.sheep.shorn)) && (name === "white_wool" || m.lamb)) continue;   // lambs drop nothing, shorn sheep no wool
+    if (m.type === "chicken" && m.chick) continue;   // nor do chicks (js/poultry.js)
     const id = (BF.I && BF.I[name] != null) ? BF.I[name] : (BF.B && BF.B[name]);
     if (id == null) continue;
     const n = irnd(lo, hi);
@@ -839,23 +843,85 @@ function shootArrow(m, target, victim) {
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
-const _look = new THREE.Vector3();
+// Player arrows (js/player.js bow): `vel` in blocks/s, `o` = { damage, crit, pickup } where pickup is 1 (walking over the stuck
+// arrow gives it back), 2 (fired in creative: it is just removed) or 0. They hit any living mob as a player attack (BF.mobs.hit:
+// knockback, hostiles turn on the player, a hurt villager or golem angers the village's golems), never the player, and stick in
+// blocks for 60 s (vanilla); a stuck arrow whose block is broken falls again. Returns the arrow record.
+const PLAYER_ARROW_LIFE = 60, ARROW_DRAG = 0.99;   // vanilla: stuck arrows despawn after 1200 ticks; 1% air drag per tick
+function shootPlayerArrow(from, vel, o) {
+  o = o || {};
+  const mesh = new THREE.Mesh(arrowGeo, arrowMat);
+  mesh.position.copy(from);
+  scene.add(mesh);
+  const a = { mesh, pos: mesh.position, vel: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
+    byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
+  _look.copy(a.pos).add(a.vel); mesh.lookAt(_look);
+  arrows.push(a);
+  if (BF.emit) BF.emit("arrowShot", null, from);
+  return a;
+}
+// Damage a player arrow deals: its draw damage, plus 1..damage/2 on a critical (full-draw) arrow; so 1..6, a crit 7..9.
+const playerArrowDamage = a => a.damage + (a.crit ? irnd(1, Math.max(1, a.damage >> 1)) : 0);
+function playerArrowStep(a, p) {
+  if (a.stuck) {   // stuck: falls when its block goes; walking over it picks it up
+    if (!BF.world.isSolid(a.cell[0] + 0.5, a.cell[1] + 0.5, a.cell[2] + 0.5)) { a.stuck = false; a.pos.addScaledVector(a.dir, -0.1); a.vel.set(0, 0, 0); return false; }   // out of the freed cell, then down
+    if (!a.pickup || !p) return false;
+    const pp = p.position, hw = (p.halfWidth || 0.3) + 0.6, h = p.height || 1.8;
+    if (Math.abs(a.pos.x - pp.x) > hw || Math.abs(a.pos.z - pp.z) > hw || a.pos.y < pp.y - 0.6 || a.pos.y > pp.y + h + 0.3) return false;
+    if (a.pickup === 1 && BF.inventory && BF.I) { try { if (BF.inventory.add(BF.I.arrow, 1) > 0) return false; } catch (e) { console.error(e); return false; } }   // a full inventory leaves it there
+    if (BF.emit) BF.emit("arrowPickedUp", a.pickup === 1);
+    return true;
+  }
+  return false;
+}
+// Living mob whose box holds point q (player arrows test every mob).
+function mobAt(q) {
+  for (const m of list) {
+    if (m.dead || m.removed) continue;
+    const vp = m.position, hw = m.halfWidth + 0.1;
+    if (Math.abs(q.x - vp.x) < hw && Math.abs(q.z - vp.z) < hw && q.y > vp.y && q.y < vp.y + m.height) return m;
+  }
+  return null;
+}
+const _look = new THREE.Vector3(), _dir = new THREE.Vector3();
 function updateArrows(dt) {
   const p = playerAlive() ? player() : null;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
     a.life -= dt;
     if (a.life <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
+    if (a.byPlayer && playerArrowStep(a, p)) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
     if (a.stuck) continue;
     a.vel.y -= 20 * dt;
+    if (a.byPlayer) a.vel.multiplyScalar(Math.pow(ARROW_DRAG, dt * 20));
     const steps = Math.max(1, Math.ceil(a.vel.length() * dt / 0.25));
     let hitPlayer = false;
     for (let s = 0; s < steps; s++) {
       a.pos.addScaledVector(a.vel, dt / steps);
       if (BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z)) {
+        if (a.byPlayer) {   // back up and creep in 5 cm steps, so the tip sits just inside the first solid block on the path
+          const sp = a.vel.length(), back = sp * dt / steps;
+          _dir.copy(a.vel).divideScalar(sp || 1); a.pos.addScaledVector(_dir, -back);
+          for (let d = 0; d < back && !BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z); d += 0.05) a.pos.addScaledVector(_dir, 0.05);
+          a.cell = [Math.floor(a.pos.x), Math.floor(a.pos.y), Math.floor(a.pos.z)]; a.dir = _dir.clone(); a.life = PLAYER_ARROW_LIFE;
+          a.stuck = true;
+          if (BF.emit) BF.emit("arrowStuck", a);
+          break;
+        }
         a.stuck = true; a.life = Math.min(a.life, 3);
         a.pos.addScaledVector(a.vel, -dt / steps * 0.3);
         break;
+      }
+      if (a.byPlayer) {   // player arrow: hits the first mob it enters, as a player attack
+        const m = mobAt(a.pos);
+        if (m) {
+          const dmg = playerArrowDamage(a);
+          a.hit = { mob: m, damage: dmg, landed: damageMob(m, dmg, a.vel, true) };
+          if (BF.emit) BF.emit("arrowHitMob", m, dmg, a.crit);
+          hitPlayer = true;
+          break;
+        }
+        continue;
       }
       const v = a.victim;
       if (v && !v.dead && !v.removed) {
@@ -905,6 +971,7 @@ function waterAhead(m, dx, dz) {
 }
 function pickWander(m, r) {
   if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
+  if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return;   // coop chickens wander inside their run (js/poultry.js)
   if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
   const a =Math.random() * Math.PI * 2, d = rnd(3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
@@ -1377,17 +1444,21 @@ function villagerAI(m, dt, out) {
   if (ai.leaving && morningAI(m, dt, out)) return;
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
   if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
+  if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
   if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;
   if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
   if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
+  if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.ai(m, dt, out)) return;   // buys flint, sticks, feathers and string for arrows and bows (js/fletcher.js)
   if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
   if (m.profession === "merchant" && BF.merchant && BF.merchant.ai(m, dt, out)) return;   // carries surplus goods to a neighbouring village and back (js/merchant.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
   if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
   // farmers sometimes go tend the village fields
   // sized villages (village generator 2) reach far beyond the plaza: villagers living out there keep to their own neighbourhood
@@ -1510,8 +1581,10 @@ function updateMob(m, dt) {
     m.lookAt = null;
   } else if (m.type === "sheep" && BF.shepherd && BF.shepherd.sheepAI(m, dt, _desired)) { /* walking to a mate (js/shepherd.js) */ }
   else if (m.type === "horse" && BF.horses && BF.horses.ai(m, dt, _desired)) { /* herd, lead, pen, mate (js/horses.js) */ }
+  else if (m.type === "chicken" && BF.poultry && BF.poultry.chickenAI(m, dt, _desired)) { /* led home, following seeds, or to a mate (js/poultry.js) */ }
   else wanderAI(m, dt, _desired);
   if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
+  if (m.coop && BF.poultry) BF.poultry.contain(m, _desired);   // nor does a coop chicken
   if (m.removed) return; // exploded
 
   // ---- physics ----
@@ -1934,7 +2007,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2016,6 +2089,19 @@ function villageRoster(rec) {
       if (fm >= 0) ordered.splice(fm, 1);
     }
     if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1400, bed: null, prof: "miner" });
+  }
+  // poultry keeper: village generator 4 gives every village of 8 or more villagers one, with a coop beside its nesting box (js/poultry.js,
+  // worldgen layoutVillage). Own key <village key>#1500, so nothing else shifts; it takes the place of the last plain resident, so the village keeps its size.
+  if ((BF.state && BF.state.villages | 0) >= 4 && (rec.pop || 0) >= 8) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1500, bed: null, prof: "poultry_keeper" });
   }
   // merchants (js/merchant.js): newly generated villages of 8 or more get one per 20 villagers, at least one (key range <village key>#1600+n,
   // so nothing else shifts; villages the player already knows keep their people). In a sized village each takes the place of the last plain
@@ -2171,6 +2257,7 @@ BF.mobs = {
     if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
     if (BF.horses) BF.horses.tick(dt);   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
     if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
+    if (BF.poultry) BF.poultry.tick(dt);   // chickens growing up, laying, coop stock (js/poultry.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     spawnT -= dt;
@@ -2199,6 +2286,9 @@ BF.mobs = {
   },
   // Player attack. Returns true if the hit landed (false while the mob is briefly invulnerable).
   hit(mob, damage, knockDir) { return damageMob(mob, damage, knockDir, true); },
+  // Player bow shot (js/player.js): see shootPlayerArrow. arrows() lists the player's arrows in flight or stuck (tests, debug).
+  shootArrow(from, vel, opts) { return scene ? shootPlayerArrow(from, vel, opts) : null; },
+  playerArrows() { return arrows.filter(a => a.byPlayer); },
   hurt(mob, damage, cause) { mob.invuln = 0; return damageMob(mob, damage, null, false, cause); },   // non-player damage with a cause (tests, commands)
   // /kill (commands.js): kills outright, no knockback, no golem anger; drops as a normal death. Returns false if already dead.
   kill(mob) { if (!mob || mob.dead || mob.removed) return false; kill(mob, true); return true; },
@@ -2215,6 +2305,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
+    if (BF.poultry) BF.poultry.exportAll(out);   // "coops:<village key>" -> the chickens and nest eggs of each coop
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
     if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
@@ -2237,6 +2328,7 @@ BF.mobs = {
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
+    if (BF.poultry) BF.poultry.importAll(o);
     if (BF.merchant) BF.merchant.importAll(o);
   },
   // Right-click on a mob (called by the player module). Opens the trade screen when the inventory module has one
@@ -2292,6 +2384,14 @@ BF.mobs = {
     m.variant = variant;
   },
   showPart(m, name, on) { if (m && m.meshes && m.meshes[name]) m.meshes[name].visible = !!on; },
+  // js/poultry.js: chick to adult size (k: 0 = hatched .. 1 = grown)
+  setChickenSize(m, k) {
+    if (!m || m.type !== "chicken") return;
+    const s = 0.5 + 0.5 * k, hs = 1.3 + (1 - 1.3) * k;
+    m.model.scale.setScalar(s);
+    if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
+    m.halfWidth = TYPES.chicken.hw * (0.6 + 0.4 * k); m.height = TYPES.chicken.h * (0.5 + 0.5 * k);
+  },
   // js/jobs.js: the deterministic roster of a village record ({key, houses, nb}) and in-place profession change (rebuilds the outfit)
   roster: villageRoster,
   setProfession(m, prof) {
@@ -2310,6 +2410,7 @@ BF.mobs = {
     return true;
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
+  isOccupied,
   nav: { findPath, followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
   spawning: true,
   // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it
@@ -2334,6 +2435,7 @@ BF.mobs = {
     if (BF.villageSim) BF.villageSim.reset();
     if (BF.shepherd) BF.shepherd.reset();
     if (BF.stables) BF.stables.reset();
+    if (BF.poultry) BF.poultry.reset();
   },
 };
 })();

@@ -33,6 +33,7 @@ const BF = (window.BF = window.BF || {});
   if (I.tack_rack !== undefined) addShaped(I.tack_rack, 1, ["LI", "PP", "PP"], { L: I.leather, I: I.iron_ingot, P: PLANKS }, "Leather + Iron Ingot over 4 Planks → Tack Rack (stable hand)");
   if (I.merchant_counter !== undefined) addShaped(I.merchant_counter, 1, ["SSS", "PCP"], { S: WSLAB, P: PLANKS, C: I.chest }, "3 Wooden Slabs over Planks, Chest, Planks → Merchant's Counter (merchant)");
   if (I.tent !== undefined) addShaped(I.tent, 1, ["WWW", "WWW", "S S"], { W: WOOL, S: I.stick }, "6 Wool (any colour) over 2 Sticks → Tent");
-  fuel(ids(["composter", "lectern", "barrel", "loom", "fletching_table", "smithing_table", "cartography_table", "drafting_table", "survey_table", "carpentry_bench", "merchant_counter"]), 15);
+  if (I.nesting_box !== undefined && I.hay_bale !== undefined) addShaped(I.nesting_box, 1, [" P ", "PHP", " P "], { P: PLANKS, H: I.hay_bale }, "4 Planks around 1 Hay Bale → Nesting Box (poultry keeper)");
+  fuel(ids(["composter", "lectern", "barrel", "loom", "fletching_table", "smithing_table", "cartography_table", "drafting_table", "survey_table", "carpentry_bench", "merchant_counter", "nesting_box"]), 15);
 });
 })();

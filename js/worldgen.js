@@ -129,6 +129,7 @@ let GEN = 1, SC = 1;
 // Village generator of the current world (BF.state.villages): 1 = classic (8-25 buildings, roster capped at 24, kept for saved worlds),
 // 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
 // 3 = as 2, with at least 4 villagers (a miner, a farmer, a forester and a toolsmith, js/mobs.js villageRoster) and a garden with trees in desert villages.
+// 4 = as 3, and a village of 8 or more villagers has a poultry keeper with a chicken coop (js/poultry.js). Worlds saved with 3 keep 3: no coops appear in them.
 let VGEN = 1;
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
@@ -825,7 +826,7 @@ function villageAt(x, z, m) {
 
 const BTYPES = {
   house: [5, 5], house2: [5, 6], lhouse: [7, 7], big: [7, 7], library: [9, 7], church: [5, 10],
-  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11],
+  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11], coop: [7, 7],
 };
 const LIVABLE = { house: 1, house2: 1, lhouse: 1, big: 1, library: 1, church: 1, smith: 1 };
 // Beds of a building in its local coords (u along the road, q inward): [footU, footQ, axis the head lies along (+1)].
@@ -1100,6 +1101,37 @@ function layoutVillage(cx, cz, spawn, pop) {
     found: for (const back of [-(d >> 1), 3, -d - 2]) for (const road of order) for (let t = road.end + 3; t <= road.end + 12; t += 3) if (tryGarden(road, t, back)) break found;
   }
 
+  // Chicken coop (village generator 4): a village of 8 or more villagers has a poultry keeper (js/mobs.js villageRoster), who gets a fenced coop
+  // with its nesting box beside it (js/jobs.js planVillage, js/poultry.js). Added last, like the pens, so no other plot moves.
+  if (VGEN >= 4 && (v.pop || 0) >= 8) {
+    const [w, d] = BTYPES.coop;
+    const tryCoop = (road, side, t, back) => {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side: the nesting box stands beside the fence
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      if (!(Math.abs(box[0] - cx) < 72 && Math.abs(box[2] - cx) < 72 && Math.abs(box[1] - cz) < 72 && Math.abs(box[3] - cz) < 72) || overlaps(box) || covers(box, 1)) return false;
+      const du = w >> 1, door = P(du, 0), front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u++) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "coop", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 641) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    const passes = [[3, 0], [3, 1], [12, 0], [21, 0]];
+    found: for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 2, t1 = beyond ? road.end + 24 : road.end + 1 - w;
+      for (let t = t0; t <= t1; t += 2) if (tryCoop(road, side, t, back)) break found;
+    }
+  }
+
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
   for (const road of roads) {
@@ -1344,6 +1376,18 @@ function drawShell(b, P, S, style) {
       }
       if (GEN >= 3 && BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
       P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale); P(w - 2, y, d - 2, B.water);
+      P(du, y, -1, B.dirt_path);
+      return;
+    }
+    case "coop": {
+      // chicken coop (js/poultry.js): a fenced run with a gate facing the road and hay bales in the back corners; the nesting box beside it is the jobs plan's
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
+        if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
+        else if (!edge) P(u, y, q, noise.hash(b.bx + u, b.bz + q, 642) < 0.35 ? B.coarse_dirt : v_ground(style));   // scratched-up ground
+      }
+      if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
+      P(1, y + 1, d - 2, B.hay_bale); P(w - 2, y + 1, d - 2, B.hay_bale);
       P(du, y, -1, B.dirt_path);
       return;
     }

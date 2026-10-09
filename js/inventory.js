@@ -113,7 +113,7 @@ function buildRecipes() {
   // smelting
   smelt(I.raw_porkchop, I.cooked_porkchop); smelt(I.raw_beef, I.steak); smelt(I.raw_mutton, I.cooked_mutton);
   smelt(I.raw_chicken, I.cooked_chicken); smelt(I.potato, I.baked_potato);
-  smelt(I.raw_cod, I.cooked_cod); smelt(I.raw_salmon, I.cooked_salmon);
+  smelt(I.raw_cod, I.cooked_cod); if (I.egg !== undefined) smelt(I.egg, I.cooked_egg); smelt(I.raw_salmon, I.cooked_salmon);
   smelt([I.sand, I.red_sand], I.glass); smelt(C, I.stone);
   if (I.brick !== undefined && I.clay_ball !== undefined) { smelt(I.clay_ball, I.brick); smelt(I.clay, I.terracotta); }
   else smelt(I.clay, I.bricks);

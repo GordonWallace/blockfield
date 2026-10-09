@@ -82,6 +82,7 @@ const INPUTS = {
   cartographer: m => [["iron_ingot", 4], ["gold_ingot", 1], ["paper", 32], ["compass", 1]],
   miner: m => [["torch", 16]],   // shaft torches (js/miner.js)
   toolsmith: m => [[id => /planks$/.test(nm(id)), 12], ["stick", 8], ["cobblestone", 9], ["iron_ingot", 9], ["gold_ingot", 6], ["diamond", 6], ["raw_iron", 9], ["raw_gold", 6], ["coal", 8], ["furnace", 1]],   // tool materials (js/toolsmith.js)
+  fletcher: m => [["stick", 16], [id => /planks$/.test(nm(id)), 8], ["flint", 8], ["feather", 8], ["string", 6]],   // arrow and bow materials (js/fletcher.js)
   builder: m => (TR().profile("builder").wants ? [...TR().profile("builder").wants.keys()].map(id => [nm(id), 128]) : []).concat([["red_bed", 4], ["oak_door", 8], ["torch", 32], ["chest", 2], ["glass", 64]]),
 };
 const SCRAPS = /^(rotten_flesh|spider_eye|poisonous_potato|pufferfish)$/;

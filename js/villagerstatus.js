@@ -34,13 +34,15 @@ function routine(m) {
 
 function text(m) {
   if (!m || m.type !== "villager") return "";
-  const s = (BF.villageLife && BF.villageLife.statusText(m))                    // hunger, buying food, farm work (js/villagelife.js)
+  const s = (BF.eggCook ? BF.eggCook.statusText(m) : "")                        // cooking eggs in a furnace, buying fuel for it (js/eggcook.js)
+    || (BF.villageLife && BF.villageLife.statusText(m))                    // hunger, buying food, farm work (js/villagelife.js)
     || (BF.builder && BF.builder.statusText ? BF.builder.statusText(m) : "")   // building, fetching materials (js/builder.js)
     || (BF.explorer ? BF.explorer.statusText(m) : "")                          // mapping (js/explorer.js)
     || (BF.forester ? BF.forester.statusText(m) : "")                          // felling, planting, sawing (js/forester.js)
     || (BF.furniture ? BF.furniture.statusText(m) : "")                        // making beds (js/furniture.js)
     || (BF.miner ? BF.miner.statusText(m) : "")                                // quarrying, digging the mineshaft, selling stone (js/miner.js)
     || (BF.toolsmith ? BF.toolsmith.statusText(m) : "")                        // making tools, buying materials, smelting (js/toolsmith.js)
+    || (BF.fletcher ? BF.fletcher.statusText(m) : "")                          // making arrows and bows, buying materials (js/fletcher.js)
     || (BF.storage ? BF.storage.statusText(m) : "")                            // storing in / fetching from its chest (js/storage.js)
     || (BF.merchant ? BF.merchant.statusText(m) : "")                          // trips to other villages (js/merchant.js)
     || (BF.stables ? BF.stables.statusText(m) : "")                            // catching, feeding and penning horses (js/stables.js)

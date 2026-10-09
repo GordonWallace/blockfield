@@ -10,6 +10,9 @@ const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W and R): 10x
 const FLY = 10.9, FLY_SPRINT = 21.6, CFLY = 16, CFLY_SPRINT = 32, SWIM = 2.2, REACH = 5, MOB_REACH = 3.5;
 const BASE_FOV = 75, AIR_MAX = 10, ATTACK_CD = 0.4, EAT_TIME = 1.2, PLACE_REPEAT = 0.22;
 const HW = 0.3, HEIGHT = 1.8, EYE = 1.62, SNEAK_EYE = 1.47;
+// Bow (vanilla): full draw takes 1 s; power f = (t^2 + 2t) / 3 for t = draw seconds, capped at 1, and below 0.1 nothing is fired.
+// The arrow leaves at 60 f blocks/s (3 blocks a tick) and deals ceil(6 f); a full-draw arrow is critical 1 time in 5 (+1..3, so up to 9).
+const BOW_DRAW = 1, BOW_SPEED = 60, BOW_DAMAGE = 6, BOW_CRIT = 0.2, BOW_MIN = 0.1;
 
 // ---------- state ----------
 const pos = new THREE.Vector3(8, 80, 8);
@@ -32,6 +35,7 @@ let hurtCd = 0, flashT = 0, attackCd = 0, swingT = 0;
 let mouseL = false, mouseR = false;
 let breakTarget = null, breakProgress = 0, breakCd = 0;
 let placeCd = 0, eatT = 0;
+let drawT = 0, drawStack = null;   // bow: seconds the string has been held back (0 = not drawing) and the bow stack being drawn
 let target = null;            // current block raycast hit
 // What the player rides (a boat, js/boats.js), or null. A vehicle carries `ctl`, its module's riding interface:
 //   drive(v, dt, input {fwd, turn, strafe, jump}) -> yaw change, seatOf(v, "player") -> {x, y, z}, sitEye(v) -> eye above the seat,
@@ -657,7 +661,7 @@ function bindInput() {
   });
   addEventListener("mouseup", e => {
     if (e.button === 0) { mouseL = false; resetBreak(); if (ctrlRight) { ctrlRight = false; mouseR = false; eatT = 0; } }
-    if (e.button === 2 || e.button === 1) { mouseR = false; eatT = 0; }
+    if (e.button === 2 || e.button === 1) { if (drawT > 0) logClick(e, "release bow", bowPower(drawT).toFixed(2)); mouseR = false; eatT = 0; }   // right and middle both draw and release a bow (Ubuntu trackpads)
   });
   cv.addEventListener("contextmenu", e => { e.preventDefault(); logClick(e, ""); });
   cv.addEventListener("auxclick", e => logClick(e, ""));
@@ -672,7 +676,7 @@ function bindInput() {
 }
 
 // Right click on press: use the block / item in front (secondaryDown). Returns what it was aimed at, for the click log.
-function useNow() { const r = secondaryDown(); return targetName() + (r ? "" : " (nothing happened)"); }
+function useNow() { const r = secondaryDown(); return drawT > 0 ? "draw bow" : targetName() + (r ? "" : " (nothing happened)"); }
 function targetName() { const b = target && BF.blocks[target.id]; return b ? b.name : "no block"; }
 // Click log for the F3 overlay: the raw mouse fields of the last few presses and what the game did with each.
 const clickLog = [];
@@ -885,6 +889,17 @@ function iconTexture(id) {
   } catch (_) {}
   return (iconTex[id] = t);
 }
+// Drawn bow sprites (js/textures.js bowPull): stage 0..2 as vanilla bow_pulling_0/1/2, picked like vanilla's pull predicate
+// (draw time under 0.65 s, under 0.9 s, then fully drawn); -1 when not drawing.
+const bowTex = [];
+function bowTexture(stage) {
+  if (bowTex[stage]) return bowTex[stage];
+  const t = new THREE.Texture();
+  t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+  try { const img = new Image(); img.onload = () => { t.image = img; t.needsUpdate = true; }; img.src = BF.textures.bowPull(stage); } catch (_) {}
+  return (bowTex[stage] = t);
+}
+const bowStage = () => (drawT <= 0 ? -1 : drawFrac() < 0.65 ? 0 : drawFrac() < 0.9 ? 1 : 2);
 // Held map: fixed relative to the body, not the camera. It sits `fwd` ahead of and `down` below the eye, tilted back by atan(down / fwd) (~61 degrees
 // from vertical) so it faces the eye when looking down at it: only its top edge shows when looking straight ahead, and it fills the view when looking down.
 const MAP_VM = { size: 0.75, fwd: 0.38, down: 0.7, side: 0.06 };
@@ -933,7 +948,16 @@ function updateViewModel(dt) {
     vm.visible = started && !P.dead;
     return;
   }
-  vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
+  // drawing a bow: the drawn sprite, turned so the arrow points ahead towards the crosshair, brought in and up a little
+  const bowSt = vmMesh && vmMesh !== hand && isBow(held) ? bowStage() : -2;
+  if (bowSt > -2 && vmMesh.userData.bowStage !== bowSt) {
+    vmMesh.userData.bowStage = bowSt;
+    vmMesh.material.map = bowSt < 0 ? iconTexture(held.id) : bowTexture(bowSt);
+    if (bowSt < 0) { vmMesh.rotation.set(0, -0.5, 0.15); vmMesh.position.set(0, 0.06, 0); }
+    else { vmMesh.rotation.set(0, -1.0, -Math.PI * 0.75); vmMesh.position.set(-0.02, 0.1, 0); }
+  }
+  const dr = bowSt >= 0 ? Math.min(1, drawT * 6) : 0, shake = bowSt === 2 ? Math.sin(drawT * 40) * 0.003 : 0;   // a full draw trembles slightly
+  vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0) - dr * 0.2, -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0) + dr * 0.1 + shake, -0.72 - s * 0.12 + dr * 0.08);
   vm.rotation.set(-s * 0.9, s * 0.4, 0);
   vm.visible = started && !P.dead;
 }
@@ -1305,6 +1329,10 @@ function secondaryDown() {
     const r = BF.shepherd.playerUse(mh.mob, selectedItem());
     if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
+  if (mh && mh.mob && mh.mob.type === "chicken" && BF.poultry && (!target || mh.dist < target.dist)) {   // seeds feed a chicken (js/poultry.js)
+    const r = BF.poultry.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
   if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
     const sel = selectedItem(), r = BF.horses.playerUse(mh.mob, sel, sneaking);
     if (r) {
@@ -1330,6 +1358,10 @@ function secondaryDown() {
     openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
   }
   if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
+  if (isBow(selectedItem()) && (creative() || inv().count(BF.I.arrow) > 0)) {   // bow with arrows: start drawing (released in updateDraw); never places or uses a block
+    if (drawT <= 0) { drawT = 1e-4; drawStack = selectedItem(); }
+    return true;
+  }
   const sel = selectedItem(); if (!sel) return false;
   const it = BF.items[sel.id]; if (!it) return false;
   // hoe: till grass / dirt / path into farmland (top face, air above)
@@ -1434,6 +1466,7 @@ function secondaryDown() {
 }
 function updateUse(dt) {
   if (placeCd > 0) placeCd -= dt;
+  if (drawT > 0) { updateDraw(dt); return; }
   if (eatT > 0) {
     const sel = selectedItem(), it = sel && BF.items[sel.id];
     if (!mouseR || !it || !it.food || P.hunger >= P.maxHunger) { eatT = 0; return; }
@@ -1451,6 +1484,36 @@ function updateUse(dt) {
   }
   if (mouseR && placeCd <= 0 && !secondaryDown()) placeCd = PLACE_REPEAT;
 }
+
+// ---------- bow ----------
+const isBow = s => { const it = s && BF.items[s.id]; return !!(it && it.tool && it.tool.type === "bow"); };
+function bowPower(t) { const f = t / BOW_DRAW; return Math.min(1, (f * f + 2 * f) / 3); }
+const bowDamage = f => Math.ceil(BOW_DAMAGE * f);
+// While the button is held the draw builds up; on release the arrow flies. Switching away from the bow, running out of arrows
+// or opening a screen cancels the draw without firing.
+function updateDraw(dt) {
+  const sel = selectedItem();
+  if (sel !== drawStack || !isBow(sel) || invOpen() || (!creative() && !(inv().count(BF.I.arrow) > 0))) { drawT = 0; drawStack = null; return; }
+  if (mouseR) { drawT += dt; return; }
+  const f = bowPower(drawT);
+  drawT = 0; drawStack = null; placeCd = PLACE_REPEAT;
+  if (f >= BOW_MIN) fireArrow(f);
+}
+function fireArrow(f) {
+  if (!BF.mobs || !BF.mobs.shootArrow) return null;
+  const d = dirVec();
+  for (const k of ["x", "y", "z"]) d[k] += (Math.random() - 0.5) * 0.015;   // vanilla's small spread
+  d.normalize();
+  const from = eyeVec().addScaledVector(d, 0.4); from.y -= 0.1;
+  const crit = f >= 1 && Math.random() < BOW_CRIT, damage = bowDamage(f);
+  const a = BF.mobs.shootArrow(from, d.multiplyScalar(BOW_SPEED * f), { damage, crit, pickup: creative() ? 2 : 1 });
+  if (!creative()) { try { inv().remove(BF.I.arrow, 1); } catch (e) { console.error(e); } }   // creative: arrows are free
+  wearHeld(1);   // 1 use of the bow's 384 per shot (survival; js/inventory.js wearSelected)
+  P.lastShot = { power: +f.toFixed(3), damage, crit, speed: +(BOW_SPEED * f).toFixed(2) };
+  emit("playerShot", P.lastShot);
+  return a;
+}
+const drawFrac = () => Math.min(1, drawT / BOW_DRAW);
 
 // ---------- survival ----------
 function survivalTick(dt) {
@@ -1502,7 +1565,7 @@ const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too har
 function die() {
   dismount();
   P.dead = true; P.health = 0;
-  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
+  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; drawT = 0; flying = false; turbo = false;
   if (invOpen()) { try { inv().close(); } catch (_) {} }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
@@ -1601,7 +1664,7 @@ function physics(dt) {
   let strafe = (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0);
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
   if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
-  if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
+  if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0 || drawT > 0) sprinting = false;
   turbo = flying && k.has("KeyR") && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // flying with W + R held; releasing either (or landing) ends the boost
   // forward (sx, sz) and right (-sz, sx) in the horizontal plane
   const sx = -Math.sin(yaw), sz = -Math.cos(yaw);
@@ -1622,7 +1685,7 @@ function physics(dt) {
   }
   else if (inWater) speed = SWIM * (sprinting ? 1.4 : 1);
   else speed = sneaking ? SNEAK : sprinting ? SPRINT : WALK;
-  if (eatT > 0 && !flying) speed *= 0.35;
+  if ((eatT > 0 || drawT > 0) && !flying) speed *= 0.35;   // eating or drawing a bow: slowed, as in vanilla
 
   const climbing = !flying && !inWater && onLadder();   // body in a ladder cell: gravity is replaced by climbing
   const accel = flying ? 10 : inWater ? 6 : onGround ? 14 : 2.6;
@@ -1693,7 +1756,8 @@ function syncCamera(dt) {
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
   BF.camera.position.set(pos.x + rx * bx, pos.y + eyeOffset + by, pos.z + rz * bx);
   BF.camera.rotation.set(pitch, yaw, 0, "YXZ");
-  const wantFov = BASE_FOV * (turbo ? 1.25 : sprinting ? 1.12 : 1);
+  const df = drawT > 0 ? drawFrac() : 0;
+  const wantFov = BASE_FOV * (turbo ? 1.25 : sprinting ? 1.12 : 1) * (1 - df * df * 0.15);   // drawing a bow zooms in up to 15% (vanilla)
   if (Math.abs(fov - wantFov) > 0.01 || BF.camera.fov !== fov) {
     fov += (wantFov - fov) * Math.min(1, dt * 10);
     if (Math.abs(fov - wantFov) <= 0.01) fov = wantFov;
@@ -1777,7 +1841,7 @@ P.setGameMode = setGameMode;
 P.screenOpen = () => !!menuOpen || invOpen();   // any menu or in-game screen; main.js fades the debug panels behind it (new screens: add them to invOpen)
 P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
 P.actionBar = actionBar;
-P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };
+P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; drawT = 0; resetBreak(); exitLock(); };
 P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
 // alerts (js/alerts.js): free the mouse like Z, and take it back (from a key press or click, which browsers require)
 P.freeMouse = function () { if (locked) { releaseMouse(); return true; } return false; };
@@ -1835,8 +1899,10 @@ P.viewModel = function () { // test hook: what the held view model is ("hand", "
   if (vmMesh === hand) return { kind: "hand" };
   const g = vmMesh.geometry, col = g.attributes.color;
   if (g.userData.cube) return { kind: "cube", top: col ? [col.getX(8), col.getY(8), col.getZ(8)] : null, faces: g.index.count / 6 };
-  return { kind: "sprite" };
+  return vmMesh.userData.bowStage != null ? { kind: "sprite", bow: vmMesh.userData.bowStage } : { kind: "sprite" };   // bow: drawn stage 0..2, -1 resting
 };
+// Bow (tests, debug): drawing seconds, the power it would fire at, the view-model stage; power(t) / damage(f) as used on release.
+P.bow = { get drawing() { return drawT; }, get pull() { return drawT > 0 ? bowPower(drawT) : 0; }, get stage() { return bowStage(); }, power: bowPower, damage: bowDamage, DRAW: BOW_DRAW };
 P.setMouse = function (left, right) { // test hook: simulate held mouse buttons
   if (left && !mouseL) { mouseL = true; primaryDown(); } else if (!left) { mouseL = false; resetBreak(); }
   if (right && !mouseR) { mouseR = true; placeCd = 0; secondaryDown(); } else if (!right) { mouseR = false; eatT = 0; }

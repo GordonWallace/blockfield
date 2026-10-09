@@ -68,6 +68,7 @@ function craftTable(wood) {
   if (G != null) t[G] = { n: 1, from: [[P, 4]] };                                        // 4 sticks (2 planks) + 2 planks: the stable's paddock gate
   if (I.merchant_counter != null) t[I.merchant_counter] = { n: 1, from: [[P, 12]] };   // the market stall's jobsite: 3 slabs, 2 planks and a chest (recipes-jobs.js)
   if (I.tack_rack != null) t[I.tack_rack] = { n: 1, from: [[P, 4], [I.leather, 1], [I.iron_ingot, 1]] };   // the stable's jobsite (recipes-jobs.js)
+  if (I.nesting_box != null && I.hay_bale != null) t[I.nesting_box] = { n: 1, from: [[P, 4], [I.hay_bale, 1]] };   // the coop's jobsite (js/poultry.js)
   return t;
 }
 const CRAFTS = {};
@@ -331,6 +332,9 @@ function pickType(m, bs) {
     market_stall: cnt("market_stall") < 2 ? 0.7 : 0.15,
     workshop: cnt("workshop") < 1 ? 0.5 : 0.1,
     stable: stableWeight(R, cnt("stable") > 0),
+    // a coop (js/poultry.js): wanted when the village has none (generated or built) and 8 or more villagers, hardly ever after that
+    coop: (R.wg && (R.wg.buildings || []).some(b => b.type === "coop")) || cnt("coop") > 0 ? 0.02
+      : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 8 ? 2.4 : 0.05,
   };
   const sold = soldItems(R), stock = sellerStock(R);
   let sum = 0;

@@ -1530,13 +1530,21 @@ const SPRITES = {
     const guard = hex("#4a3a2a");
     for (let i = -2; i <= 2; i++) put(G, 4 + i, 10 + i, guard);
   },
-  bow(G) {
-    for (let a = 0; a <= 1.0001; a += 0.04) {
-      const bulge = Math.sin(a * Math.PI) * 3.5;
-      const x = Math.round(2 + 11 * a + bulge), y = Math.round(13 - 11 * a + bulge);
-      put(G, x, y, WOOD); put(G, x + 1, y, WOOD_L);
+  // pull: undefined = the resting bow (hotbar); 0, 1, 2 = drawn as vanilla bow_pulling_0/1/2 (held view model, js/player.js): the
+  // limbs bend further, the string comes back to a point and an arrow lies on it, pointing the way the bow bulges (down-right).
+  bow(G, m, p, pull) {
+    const k = pull == null ? 0 : (pull + 1) / 3, tip = k * 0.8, bend = 3.5 + k * 1.2;
+    const at = a => [Math.round(2 + tip + (11 - 2 * tip) * a + Math.sin(a * Math.PI) * bend + tip * 0.7), Math.round(13 - tip - (11 - 2 * tip) * a + Math.sin(a * Math.PI) * bend + tip * 0.7)];
+    const string = hex("#e8e8e8"), [x0, y0] = at(0), [x1, y1] = at(1);
+    if (!k) stroke(G, x0, y0, x1, y1, string);
+    else {   // string pulled back to the nock; arrow from the nock out past the bow
+      const n = Math.round(7.5 - 2.6 * k);
+      stroke(G, x0, y0, n, n, string); stroke(G, x1, y1, n, n, string);
+      stroke(G, n + 1, n + 1, 13, 13, WOOD_L);
+      const h = hex("#9a9a9a"); put(G, 14, 14, hex("#cfcfcf")); put(G, 13, 14, h); put(G, 14, 13, h);
+      const f = hex("#f0f0f0"); put(G, n, n + 1, f); put(G, n + 1, n, f); put(G, n - 1, n + 1, f); put(G, n + 1, n - 1, f);
     }
-    stroke(G, 2, 13, 13, 2, hex("#e8e8e8"));
+    for (let a = 0; a <= 1.0001; a += 0.04) { const [x, y] = at(a); put(G, x, y, WOOD); put(G, x + 1, y, WOOD_L); }
   },
   coal(G, m, p) {
     blob(G, 7.5, 8, 5.2, 4.4, m, hex("#5a5a5a"), 0.6, 0.4);
@@ -1696,9 +1704,19 @@ function icon(itemId) {
   return url;
 }
 
+// The drawn bow for the held view model (js/player.js): stage 0..2 as vanilla bow_pulling_0/1/2. Data URL, cached.
+const bowCache = [];
+function bowPull(stage) {
+  stage = Math.max(0, Math.min(2, stage | 0));
+  if (bowCache[stage]) return bowCache[stage];
+  const G = spriteGrid(), it = BF.items[BF.I && BF.I.bow];
+  SPRITES.bow(G, hex((it && it.color) || "#8a6a3a"), null, stage);
+  return (bowCache[stage] = renderGrid(G));
+}
+
 // Painter kit for extra tile packs (js/textures-stone.js etc.): add painters to T / ICON_T / SPRITES at load time.
 BF.texKit = { T, ICON_T, SPRITES, TS, Px, hex, pal, mul, mix, ramp, clamp01, smooth, jit, dome, voronoi, ihash, WHITE, lighten,
   put, stroke, blob, stoneBase, cobbleBase, mossOver, sandBase, bricks, smoothBase, frame, planksBase, grassBlades, STONE, SAND, RED_SAND, SANDSTONE, SNOW, MOSS, WOOD_OAK,
   woolBase, barkSide, logTop, SPRITE_TILES, WOOD_SPRUCE, WOOD_ACACIA };
-BF.textures = { build, uv, icon, iconIsFlat, has, update, tinted: TINTED, defaultTint: DEFAULT_TINT, TILE: TS };
+BF.textures = { build, uv, icon, bowPull, iconIsFlat, has, update, tinted: TINTED, defaultTint: DEFAULT_TINT, TILE: TS };
 })();

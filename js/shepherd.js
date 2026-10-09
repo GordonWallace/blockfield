@@ -12,6 +12,10 @@
 // Shepherds (profession "shepherd"): feed hungry sheep, shear woolly ones, buy wheat when low (js/villagelife.js shopAI), and cull
 //  adults once the pen is too full: THRESHOLD = ceil(room cells / 6), i.e. one sheep per 6 cells, and the pen counts as full from that many sheep
 //  on. They never kill before that, and always leave at least 2 adults. Their mutton is cooked daily and sold through the village food market.
+// Spinning (a Blockfield recipe for the shepherd's job only, not a player recipe): at its loom (BF.jobs "work" state) the shepherd spins 1 white
+//  wool into 2 string, SPIN_HOURS (a quarter of a game hour) per wool, up to SPIN_BATCH wool per sitting, while it holds more than WOOL_KEEP wool
+//  (for its wool sales and the furniture maker) and fewer than STRING_CAP string. The wool is taken when the batch is done (nothing is lost
+//  if the day or the game ends first), logged as "spun N string". It sells the string ("1 emerald > 9 string"): the fletcher's bowstrings.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -27,6 +31,8 @@ const FREE_RADIUS = 10, FREE_THRESHOLD = 8;   // a shepherd without a pen tends 
 const TEND_R = 12;            // stray sheep this near the pen / loom are also fed and shorn
 const MIN_ADULTS = 2;         // the shepherd never culls below this many adults
 const WORK_END = 0.5;
+const WOOL_KEEP = 16, STRING_CAP = 16;     // spins only wool beyond 16, and only while it holds fewer than 16 string
+const SPIN_BATCH = 4, SPIN_HOURS = 0.25;   // up to 4 wool a sitting, a quarter of a game hour each (1 wool -> 2 string)
 const TASK_MAX = 45;
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -506,8 +512,39 @@ function ai(m, dt, out) {
   }
   return true;
 }
+// ---------------------------------------------------------------- spinning string at the loom
+const woolOf = m => cnt(m, idsOf().wool), stringOf = m => cnt(m, BF.I.string);
+// Wool it would spin now (0 = none): the wool beyond WOOL_KEEP, while it holds fewer than STRING_CAP string, at most SPIN_BATCH.
+function spinnable(m) {
+  if (m.profession !== "shepherd" || !m.inv || BF.I.string == null) return 0;
+  const room = Math.ceil((STRING_CAP - stringOf(m)) / 2);
+  return Math.max(0, Math.min(SPIN_BATCH, woolOf(m) - WOOL_KEEP, room));
+}
+const wantsSpin = m => !!(m && (spinnable(m) > 0 || (m.shp && m.shp.spin)));
+// Called by jobs.js while the shepherd stands at its loom: spins a batch of wool, SPIN_HOURS of game time per wool (dt is simulation time).
+function work(m, J, dt) {
+  const S = shp(m), j = m.jobsite;
+  if (S.task || !j || Math.hypot(j.x + 0.5 - m.position.x, j.z + 0.5 - m.position.z) > 3) return;   // only at the loom (a pen task may have taken it away)
+  if (!S.spin) {
+    const n = spinnable(m);
+    if (!n) return;
+    S.spin = { n, t: n * ((BF.sky && BF.sky.dayLength) || 1200) * SPIN_HOURS / 24 };
+  }
+  S.spin.t -= dt;
+  if (m.ai && Math.random() < dt) m.ai.swingT = 0.3;
+  if (J && J.t < 3) J.t = 3;   // stays at the loom until the batch is done
+  if (S.spin.t > 0) return;
+  const c = idsOf(), T = TR().inv;
+  let n = Math.min(S.spin.n, woolOf(m));   // the wool it still holds (some may have been sold meanwhile)
+  while (n > 0 && !T.canFit(m.inv, [{ id: BF.I.string, n: 2 * n }], [{ id: c.wool, n }])) n--;
+  S.spin = null;
+  if (n <= 0) return;
+  T.remove(m.inv, c.wool, n); T.add(m.inv, BF.I.string, 2 * n);
+  if (BF.vlog && m.village) BF.vlog.log(m.village, "craft", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Shepherd") + " (Shepherd) spun " + 2 * n + " string", m);
+}
 function statusText(m) {
   const S = m.shp;
+  if (S && !S.task && S.spin && m.job && m.job.mode === "work") return "Spinning string";
   if (!S || !S.task) return "";
   return { feed: "Feeding the sheep", shear: "Shearing a sheep", cull: "Culling the flock" }[S.task.kind] || "";
 }
@@ -544,6 +581,7 @@ BF.shepherd = {
   FEED_DAYS, BREED_CD, LAMB_DAYS, REGROW_DAYS, PEN_DENSITY,
   feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb,
   pensOf, penOf, hasLoom, tended, wheatWanted, ensureKit, ai, tick, statusText, pickPenTarget, contain,
+  WOOL_KEEP, STRING_CAP, SPIN_BATCH, SPIN_HOURS, spinnable, wantsSpin, work,
   exportAll, importAll, reset,
   pens: () => activePens,
 };

@@ -23,10 +23,10 @@ const VALUE = {
   stick: .02, cobblestone: .03, stone: .05, sand: .03, gravel: .03, clay_ball: .06, brick: .15, bricks: .62, glass: .08,
   sandstone: .08, sandstone_bricks: .09, mossy_cobblestone: .15, calcite: .12, terracotta: .15, orange_terracotta: .18,
   yellow_terracotta: .18, red_terracotta: .18, white_terracotta: .18, brown_terracotta: .18,
-  flint: .06, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,
-  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .04, white_wool: .12, leather: .15,
+  flint: .12, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,
+  string: .1, feather: .07, bone: .08, rotten_flesh: .05, gunpowder: .2, arrow: .055, white_wool: .12, leather: .15,
   raw_porkchop: .08, raw_beef: .08, raw_mutton: .07, raw_chicken: .06, cooked_porkchop: .12, steak: .12, cooked_mutton: .1,
-  cooked_chicken: .1, raw_cod: .07, cooked_cod: .1,
+  cooked_chicken: .1, raw_cod: .07, cooked_cod: .1, egg: .055, cooked_egg: .1, nesting_box: .2,
   paper: .05, book: .35, lantern: 2.2, bell: 6, chest: .26, red_bed: .42, bow: .42,
   iron_pickaxe: 1.58, iron_axe: 1.58, iron_shovel: .57, iron_sword: 1.07, iron_hoe: 1.07, shears: 1.0, bucket: 1.6,   // shears: 2 iron ingots, bucket: 3
   golden_pickaxe: 3.68, golden_axe: 3.68, golden_shovel: 1.28, golden_sword: 2.44, golden_hoe: 2.48,   // gold ingots + sticks
@@ -110,18 +110,23 @@ const TRADES = {
     ["2 emerald > 24 raw_cod"],
   ],
   shepherd: [
-    ["11 white_wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald"],   // white wool sells from level 1: it is what the shepherd shears (js/shepherd.js)
+    ["11 white_wool > 1 emerald", "1 emerald > 8 white_wool", "11 string > 1 emerald", "1 emerald > 9 string"],   // white wool sells from level 1: it is what the shepherd shears; string (111% of VALUE) it spins from its wool at the loom (js/shepherd.js), only what it holds
     ["10 white_wool > 1 emerald"],
     ["16 raw_mutton > 1 emerald", "1 emerald > 9 cooked_mutton"],
     ["3 emerald > 4 hay_bale"],
     ["2 emerald > 16 white_wool"],
   ],
+  // The fletcher (js/fletcher.js) sells only the arrows and bows it has made from materials it bought (flint from the miner, sticks or planks from
+  // the forester, feathers from the poultry keeper, string from the shepherd), so both are offered from level 1 and its stock is the limit
+  // ("Out of stock"); levels only add materials it buys from the player. Prices: above the cost at village prices (4 arrows = 1 flint + 1 stick
+  // + 1 feather ~ 0.22 emerald: 16 arrows ~ 0.89; a bow = 3 sticks + 3 string ~ 0.4), 1 emerald at the least. It no longer resells flint,
+  // feathers or string.
   fletcher: [
-    ["54 stick > 1 emerald", "1 emerald > 22 arrow", "18 flint > 1 emerald"],
-    ["16 feather > 1 emerald", "11 string > 1 emerald"],
-    ["1 emerald > 15 flint", "1 emerald > 13 feather"],
-    ["1 emerald > 9 string", "2 emerald > 44 arrow"],
-    ["3 emerald > 64 arrow"],
+    ["54 stick > 1 emerald", "9 flint > 1 emerald", "16 feather > 1 emerald", "1 emerald > 16 arrow", "1 emerald > 1 bow"],
+    ["11 string > 1 emerald"],
+    ["2 emerald > 32 arrow"],
+    ["40 planks > 1 emerald"],
+    [],
   ],
   mason: [
     ["18 clay_ball > 1 emerald", "1 emerald > 6 brick", "40 cobblestone > 1 emerald"],
@@ -131,7 +136,7 @@ const TRADES = {
     ["1 emerald > 5 white_terracotta", "1 emerald > 5 brown_terracotta", "1 emerald > 8 calcite"],
   ],
   leatherworker: [
-    ["8 leather > 1 emerald", "14 raw_beef > 1 emerald", "18 flint > 1 emerald"],
+    ["8 leather > 1 emerald", "14 raw_beef > 1 emerald", "9 flint > 1 emerald"],
     ["1 emerald > 6 leather", "11 string > 1 emerald"],
     ["2 emerald > 5 book", "22 rotten_flesh > 1 emerald"],
     ["2 emerald > 12 leather"],
@@ -166,11 +171,18 @@ const TRADES = {
   // The miner (js/miner.js) sells what it digs out of the ground: cobblestone first (the builders' foundations), then coal and ores. Prices
   // 104-114% of VALUE (32 cobblestone = 0.96 emerald). Only what it actually holds can be bought: nothing is restocked or part of its starting pack.
   miner: [
-    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal", "1 emerald > 2 raw_iron"],      // raw iron from the start: the toolsmith's iron (shears, iron tools)
+    ["1 emerald > 32 cobblestone", "1 emerald > 8 coal", "1 emerald > 2 raw_iron", "1 emerald > 8 flint"],       // raw iron from the start: the toolsmith's iron (shears, iron tools); flint from the gravel it digs: the fletcher's arrowheads
     ["2 emerald > 64 cobblestone", "1 emerald > 1 raw_gold"],                            // an apprentice digs deep enough for gold
     ["4 emerald > 1 diamond"],                                                           // a journeyman deep enough for diamonds
     ["2 emerald > 16 coal"],
     ["3 emerald > 3 raw_gold"],
+  ],
+  // The poultry keeper (js/poultry.js) sells what its flock gives: eggs it collects, feathers and raw chicken from the birds it culls. Prices
+  // 104-114% of VALUE. Only what it actually holds can be bought ("Out of stock"): nothing is restocked or part of its starting pack.
+  poultry_keeper: [
+    ["1 emerald > 16 egg", "1 emerald > 13 feather", "48 wheat_seeds > 1 emerald"],
+    ["1 emerald > 15 raw_chicken"],
+    [], [], [],
   ],
   // The furniture maker (js/furniture.js) buys wool and boards (planks, or logs it saws into planks) and sells the beds it makes from them
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer. It also makes furnaces from 8
@@ -203,12 +215,12 @@ const PRODUCE = {
   librarian: ["paper", "book", "glass"],
   cleric: [],
   armorer: [],          // no free iron any more: it sells only the ingots it holds (Gordon, 1.1)
-  weaponsmith: ["iron_sword"],
+  weaponsmith: [],      // no free iron swords (board bug-032): it sells only the swords it holds
   toolsmith: [],        // makes every tool from materials it buys (js/toolsmith.js)
   butcher: [],         // cooks raw meat it holds instead (js/villagelife.js)
   fisherman: [],       // cooks raw cod it holds instead (js/villagelife.js)
   shepherd: ["white_wool", "hay_bale"],
-  fletcher: ["arrow"],
+  fletcher: [],        // makes arrows and bows from materials it buys (js/fletcher.js)
   mason: ["brick", "bricks", "stone", "terracotta", "orange_terracotta", "yellow_terracotta", "red_terracotta",
     "white_terracotta", "brown_terracotta", "sandstone_bricks"],
   leatherworker: ["leather"],
@@ -219,6 +231,7 @@ const PRODUCE = {
   explorer: [],
   forester: [],
   miner: [],          // everything it sells is dug out of the ground (js/miner.js)
+  poultry_keeper: [], // eggs, feathers and chicken come only from its flock (js/poultry.js)
   furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
   merchant: [],        // buys and sells other villagers' goods (js/merchant.js)
   stable_hand: [],     // saddles and leads are made from leather, iron and string it bought; horses are caught or bred (js/stables.js)
@@ -307,7 +320,7 @@ function profile(prof) {
 // up one of these trades later gets no tools, only the emeralds to buy them (hireKit). These four never start with any other tool among their wares.
 const STARTER_TOOLS = { farmer: ["wooden_hoe", "bucket"], forester: ["wooden_axe"], miner: ["stone_pickaxe"], shepherd: ["shears"] };
 // What a newly hired villager of these trades must buy to start work (any one of each group), and what else it is given.
-const HIRE_NEEDS = { farmer: [/_hoe$/, /^(water_)?bucket$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/] };
+const HIRE_NEEDS = { farmer: [/_hoe$/, /^(water_)?bucket$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/], poultry_keeper: [/^wheat_seeds$/] };
 const isToolItem = id => { const it = BF.items[id]; return !!(it && ((it.tool && typeof it.tool === "object") || it.name === "shears")); };   // blocks carry tool: "axe" etc. (the tool that mines them)
 function stockFor(prof, v) {
   if (prof === "builder" && BF.builder && BF.builder.startStock) return BF.builder.startStock(v);   // materials for the first house, see js/builder.js
@@ -315,9 +328,11 @@ function stockFor(prof, v) {
   const entries = [];
   const noStart = new Set([I.compass, ...[1, 2, 3, 4, 5].map(n => I["blank_map_" + n])]);   // crafted, never part of the starting stock (js/cartography.js)
   if (STARTER_TOOLS[prof]) for (const pool of table(prof)) for (const o of pool) if (isToolItem(o.sell.id)) noStart.add(o.sell.id);   // their one tool is the starter below
-  if (prof === "miner") for (const n of ["cobblestone", "coal", "raw_iron", "raw_gold", "diamond"]) noStart.add(I[n]);   // mined, never given
-  if (prof === "toolsmith" || prof === "stable_hand") for (const id of profile(prof).caps.keys()) noStart.add(id);   // made, never given (js/toolsmith.js, js/stables.js)
+  if (prof === "miner") for (const n of ["cobblestone", "coal", "raw_iron", "raw_gold", "diamond", "flint"]) noStart.add(I[n]);   // mined, never given
+  if (prof === "toolsmith" || prof === "fletcher" || prof === "stable_hand") for (const id of profile(prof).caps.keys()) noStart.add(id);   // made, never given (js/toolsmith.js, js/fletcher.js, js/stables.js)
+  if (prof === "shepherd") noStart.add(I.string);   // spun from its wool, never given (js/shepherd.js)
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
+  if (prof === "poultry_keeper") for (const n of ["egg", "feather", "raw_chicken"]) noStart.add(I[n]);   // laid or culled, never given (js/poultry.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -328,8 +343,8 @@ function stockFor(prof, v) {
     table(prof).forEach(pool => pool.forEach(o => { if (o.sell.id !== em) sells.set(o.sell.id, Math.max(sells.get(o.sell.id) || 0, o.sell.n)); }));
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
-    // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js)
-    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "stable_hand") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js); nor the fletcher (js/fletcher.js seed gives a few)
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
@@ -347,8 +362,10 @@ function stockFor(prof, v) {
   if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
   if (prof === "miner" && BF.miner) BF.miner.seed(a);                      // torches for the shaft
   if (prof === "toolsmith" && BF.toolsmith) BF.toolsmith.seed(a);          // no tools (it makes them), planks and sticks for its first ones
+  if (prof === "fletcher" && BF.fletcher) BF.fletcher.seed(a);             // no arrows or bows (it makes them), sticks, flint and feathers for its first arrows
   for (const n of STARTER_TOOLS[prof] || []) if (I[n] != null && !a.some(s => s && s.id === I[n])) inv.add(a, I[n], 1);
   if (prof === "shepherd" && I.wheat_item != null) inv.add(a, I.wheat_item, 8);   // feed for the first days (it buys more when it runs low)
+  if (prof === "poultry_keeper" && I.wheat_seeds != null && inv.count(a, I.wheat_seeds) < 12) inv.add(a, I.wheat_seeds, 12 - inv.count(a, I.wheat_seeds));   // chicken feed (js/poultry.js)
   return a;
 }
 // Emeralds' worth of the cheapest offer in any trade table selling an item `ok(name)` accepts (per piece), or null when nobody sells one.
@@ -371,7 +388,7 @@ function hireKit(m, prof) {
   for (const re of needs) {
     if (m.inv.some(s => s && re.test(BF.items[s.id].name))) continue;
     const p = cheapest(n => re.test(n));
-    want += re.source === "^wheat_item$" ? 1 : Math.max(1, Math.ceil(p == null ? 2 : p));
+    want += re.source === "^wheat_item$" || re.source === "^wheat_seeds$" ? 1 : Math.max(1, Math.ceil(p == null ? 2 : p));
   }
   const have = inv.count(m.inv, I.emerald), add = Math.max(0, want - have);
   if (add) inv.add(m.inv, I.emerald, add);
@@ -483,8 +500,9 @@ function pack(v) {
     life: BF.food ? BF.food.pack(v) : undefined,   // food state (js/villagelife.js); missing in older saves
     ex: BF.explorer && v.profession === "explorer" ? BF.explorer.pack(v) : undefined,   // explorer state (js/explorer.js)
     mi: BF.miner && v.profession === "miner" ? BF.miner.pack(v) : undefined,          // the miner's mineshaft (js/miner.js)
-    ts: BF.toolsmith && v.profession === "toolsmith" ? BF.toolsmith.pack(v) : undefined,
-    mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)   // the tool on the toolsmith's table, its furnace (js/toolsmith.js)
+    ts: BF.toolsmith && v.profession === "toolsmith" ? BF.toolsmith.pack(v) : undefined,   // the tool on the toolsmith's table, its furnace (js/toolsmith.js)
+    fl: BF.fletcher && v.profession === "fletcher" ? BF.fletcher.pack(v) : undefined,     // the arrows or bow on the fletcher's table (js/fletcher.js)
+    mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
   };
 }
@@ -508,6 +526,7 @@ function unpack(v, o) {
   if (BF.explorer && o.ex) BF.explorer.unpack(v, o.ex);
   if (BF.miner && o.mi) BF.miner.unpack(v, o.mi);
   if (BF.toolsmith && o.ts) BF.toolsmith.unpack(v, o.ts);
+  if (BF.fletcher && o.fl) BF.fletcher.unpack(v, o.fl);
   if (BF.merchant && o.mc) BF.merchant.unpack(v, o.mc);
   if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;

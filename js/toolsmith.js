@@ -20,12 +20,14 @@
 //   usable when its input and output slots are empty (or hold the same ore / ingot) and no other villager is using it.
 // - No furnace: when it needs to smelt (it holds ore or a miner sells it) it buys one from a furniture maker (js/furniture.js) and puts it
 //   down inside the house of its bed (BF.storage.chestSpot), or just outside it when there is no room, as close as it can.
+// The furnace registry, loading / emptying, walking and buying are shared with the egg cooks (js/furnaceuse.js, BF.furnaceUse).
 // See CONTRACT.md "Toolsmiths".
 (() => {
 "use strict";
 const BF = window.BF;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
+const FU = BF.furnaceUse;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
@@ -45,13 +47,11 @@ const HEAD = { pickaxe: 3, axe: 3, hoe: 2, shears: 2, bucket: 3 }, STICKS = { pi
 const SHEARS_IRON = 2;                         // iron kept back for shears while it has none
 const RESERVE = 2;                             // emeralds it keeps after buying gold or diamonds
 const WORK_END = 0.45, TRADE_PAUSE = 1.6, FURNACE_SPAN = 6;
-const PER_COAL = 8, PER_WOOD = 1.5;            // items one coal / one log or plank smelts (inventory.js fuel: 80 s, 15 s; 10 s an item)
+const { PER_COAL, PER_WOOD, isPlanks, isLog, isCoal, isFuel, fuelWorth, fuelFor, pk, furnaces, canSell } = FU;   // js/furnaceuse.js
 const LOG = [];
 
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const I = n => BF.I[n];
-const isPlanks = id => { const n = nameOf(id); return n === "planks" || /_planks$/.test(n); };
-const isLog = id => { const n = nameOf(id); return /_log$/.test(n) && !/^stripped_/.test(n); };
 // What counts as each material (the head of a tool), raw ore that smelts into it, fuel.
 const MAT = {
   wood: isPlanks,
@@ -65,9 +65,6 @@ const RAW = {
   gold: id => /^(raw_gold|gold_ore|deepslate_gold_ore)$/.test(nameOf(id)),
 };
 const INGOT = { iron: "iron_ingot", gold: "gold_ingot" };
-const isCoal = id => id === I("coal") || id === I("charcoal");
-const isFuel = id => isCoal(id) || isLog(id) || isPlanks(id);
-const fuelWorth = id => (isCoal(id) ? PER_COAL : isLog(id) || isPlanks(id) ? PER_WOOD : 0);
 const isStick = id => id === I("stick");
 const IRON_ONLY = c => c === "shears" || c === "bucket";
 const catOf = id => { const it = BF.items[id]; if (it && it.name === "bucket") return "bucket"; if (!it || !it.tool) return null; return CATS.includes(it.tool.type) ? it.tool.type : null; };
@@ -92,49 +89,16 @@ const state = m => m.tsm || (m.tsm = { stage: null, deal: null, checkT: rnd(1, 5
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Toolsmith") + " (Toolsmith) " + text, / at -?\d+, ?-?\d+, ?-?\d+/.test(text) ? null : m); };
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();
 
-// ---------------------------------------------------------------- furnaces in the world
-// Every loaded furnace block, by position (scanned as chunks load, kept up to date on block events; checked again before use).
-const furnaces = new Map(), inUse = new Map();   // "x,y,z" -> {x,y,z}; "x,y,z" -> villager using it
-const pk = (x, y, z) => x + "," + y + "," + z;
-let hooked = false, FLAG = null;
-function hook() {
-  if (hooked || !BF.world || !BF.on || BF.B.furnace == null) return;
-  hooked = true;
-  FLAG = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); for (const b of BF.blocks) if (b && BF.isFurnace(b.id)) FLAG[b.id] = 1;
-  const scan = (cx, cz, c) => { const CS = BF.CS; BF.world.scanFlagged(c, FLAG, (lx, y, lz) => furnaces.set(pk(cx * CS + lx, y, cz * CS + lz), { x: cx * CS + lx, y, z: cz * CS + lz })); };
-  BF.world.onChunkLoad(scan);
-  if (BF.world.onChunkUnload) BF.world.onChunkUnload((cx, cz) => { const CS = BF.CS; for (const [k, f] of furnaces) if (Math.floor(f.x / CS) === cx && Math.floor(f.z / CS) === cz) furnaces.delete(k); });
-  for (const c of BF.world.chunks.values()) scan(c.cx, c.cz, c);
-  BF.on("blockPlaced", (x, y, z, id) => { if (BF.isFurnace(id)) furnaces.set(pk(x, y, z), { x, y, z }); });
-  BF.on("blockBroken", (x, y, z) => furnaces.delete(pk(x, y, z)));
-  BF.on("newWorld", () => { furnaces.clear(); inUse.clear(); });
-}
-const reachOf = R => Math.max(48, (R && R.wg && R.wg.reach) || 0);
+// ---------------------------------------------------------------- furnaces in the world (registry and inUse: js/furnaceuse.js)
+const hook = () => FU.hook();
+FU.busyWhen(u => !!(u.tsm && u.tsm.stage === "smelt"));   // a toolsmith holds the furnace it loaded while it waits for the ingots
 // Can m use the furnace at f for raw ore `rawId` now? (still a furnace, input / output free or holding the same, nobody else at it)
-function usable(m, f, rawId) {
-  if (!f || !BF.isFurnace(BF.world.getBlock(f.x, f.y, f.z))) return false;
-  const u = inUse.get(pk(f.x, f.y, f.z));
-  if (u && u !== m && !u.dead && !u.removed && u.tsm && u.tsm.stage === "smelt") return false;
-  const st = INV().furnaceState(f.x, f.y, f.z);
-  if (!st) return true;
-  const a = st.slots[0], o = st.slots[2];
-  if (a && (rawId == null || a.id !== rawId)) return false;
-  if (o && (rawId == null || o.id !== smeltsTo(rawId))) return false;
-  return true;
-}
+const usable = (m, f, rawId) => FU.usable(m, f, rawId, smeltsTo(rawId));
 const smeltsTo = rawId => (RAW.iron(rawId) ? I("iron_ingot") : RAW.gold(rawId) ? I("gold_ingot") : null);
 // The furnaces of m's village it may use (its own first, then the nearest), or [] when there is none.
 function furnacesFor(m, rawId) {
-  hook();
-  const R = m.village, S = state(m), out = [];
-  if (!R) return out;
-  const reach = reachOf(R) + 8;
-  for (const f of furnaces.values()) {
-    if (Math.hypot(f.x + 0.5 - R.x, f.z + 0.5 - R.z) > reach || avoided(S, "f:" + pk(f.x, f.y, f.z))) continue;
-    if (usable(m, f, rawId)) out.push(f);
-  }
-  const own = S.furnace, d = f => (own && f.x === own.x && f.y === own.y && f.z === own.z ? -1e6 : 0) + Math.hypot(f.x - m.position.x, f.z - m.position.z) + Math.abs(f.y - m.position.y) * 2;
-  return out.sort((a, b) => d(a) - d(b));
+  const S = state(m);
+  return FU.near(m, rawId, smeltsTo(rawId), f => avoided(S, "f:" + pk(f.x, f.y, f.z)), S.furnace);
 }
 const hasFurnace = m => furnacesFor(m).length > 0 || count(m, BF.B.furnace) > 0;
 
@@ -165,39 +129,11 @@ function catOrder(m) {
 }
 
 // ---------------------------------------------------------------- sellers
-// loose: also sellers who cannot trade right now (asleep, busy, down a mineshaft, out of stock) and ones it gave up on for a while: "sold here at all"
-const canSell = (m, v2, loose) => v2 && v2 !== m && v2.type === "villager" && !v2.dead && !v2.removed && !v2.child && Array.isArray(v2.inv) && Array.isArray(v2.trades)
-  && (loose || (!v2.sleeping && !v2.tradingWith && v2.position && v2.position.y > m.position.y - 6));   // not deep in a mineshaft
-const restocked = (v2, id) => ((TR().PRODUCE[v2.profession] || []).includes(nameOf(id)));
-// Offers of m's village that sell an item matching f, which m can pay for: [{v2, o, max}] (max = how many times), the nearest first.
-function offersFor(m, f, loose) {
-  const R = m.village, T = TR(), S = state(m), out = [];
-  if (!R) return out;
-  for (const v2 of R.members || []) {
-    if (!canSell(m, v2, loose)) continue;
-    for (const o of v2.trades) {
-      if (o.feed || !f(o.sell.id) || restocked(v2, o.sell.id) || (!loose && T.blockReason(v2, o))) continue;
-      if (!loose && avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id)) continue;
-      let k = loose ? Infinity : Math.floor(T.inv.count(v2.inv, o.sell.id) / o.sell.n);   // loose: it sells this, even if it has none in hand right now
-      for (const b of o.buy) k = Math.min(k, Math.floor(T.inv.count(m.inv, b.id) / b.n));
-      if (k < 1) continue;
-      out.push({ v2, o, max: k, d: v2.position ? v2.position.distanceTo(m.position) : Infinity });
-    }
-  }
-  return out.sort((a, b) => a.d - b.d);
-}
+// Offers of m's village that sell an item matching f, which m can pay for (js/furnaceuse.js offersFor), skipping the ones it gave up on a while.
+const skipOf = m => { const S = state(m); return (v2, o) => avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id); };
+const offersFor = (m, f, loose) => FU.offersFor(m, f, loose, skipOf(m));
 // Emeralds needed to buy n items matching f (cheapest offers first), or Infinity when the village does not sell that many.
-function priceOf(m, f, n, loose) {
-  const list = offersFor(m, f, loose).filter(e => e.o.buy.every(b => b.id === I("emerald")))
-    .sort((a, b) => a.o.buy[0].n / a.o.sell.n - b.o.buy[0].n / b.o.sell.n);
-  let cost = 0;
-  for (const e of list) {
-    if (n <= 0) break;
-    const k = Math.min(e.max, Math.ceil(n / e.o.sell.n));
-    cost += k * e.o.buy[0].n; n -= k * e.o.sell.n;
-  }
-  return n > 0 ? Infinity : cost;
-}
+const priceOf = (m, f, n, loose) => FU.priceOf(m, f, n, loose, skipOf(m));
 
 // ---------------------------------------------------------------- the plan
 // What it is after: {cat, mat, ready} (ready = materials in hand: go craft), or {cat, mat, need: {what, f, n}} (a thing to get first,
@@ -281,26 +217,6 @@ function smeltPlan(m, mat) {
   if (priceOf(m, isLog, 1) <= ems(m)) return { need: { what: "fuel", f: isLog, n: Math.ceil(n / PER_WOOD) } };
   return null;
 }
-// Fuel from its pack enough to smelt n items: [{id, n}] (coal first, then logs, then planks it does not need), [] when it has too little.
-function fuelFor(m, n) {
-  const out = [];
-  let left = n;
-  const plankSpare = Math.max(0, sum(m, isPlanks) - 3);
-  for (const pass of [isCoal, isLog, isPlanks]) {
-    for (const s of m.inv) {
-      if (left <= 0) break;
-      if (!s || !pass(s.id)) continue;
-      const already = out.filter(e => e.id === s.id).reduce((a, e) => a + e.n, 0);
-      let avail = s.count - already;
-      if (pass === isPlanks) avail = Math.min(avail, plankSpare - out.filter(e => isPlanks(e.id)).reduce((a, e) => a + e.n, 0));
-      if (avail <= 0) continue;
-      const k = Math.min(avail, Math.ceil(left / fuelWorth(s.id)));
-      out.push({ id: s.id, n: k }); left -= k * fuelWorth(s.id);
-    }
-  }
-  return left > 0 ? [] : out;
-}
-
 // ---------------------------------------------------------------- crafting at the smithing table
 // Starts the tool of plan p: takes the materials (cuts sticks from planks first when short). Returns the craft record or null.
 function startCraft(m, p) {
@@ -346,94 +262,34 @@ function work(m, J, dt) {
 const wantsJob = m => { if (!m || m.profession !== "toolsmith") return false; const S = state(m); return !!S.craft || !!(plan(m) || {}).ready; };
 
 // ---------------------------------------------------------------- trips
-function travel(m, st, dt, out, tx, ty, tz, speed, near) {
-  const ai = m.ai, N = BF.mobs.nav, px = m.position.x, pz = m.position.z;
-  if (near ? near(...N.feetCell(m)) : Math.hypot(tx + 0.5 - px, tz + 0.5 - pz) <= 1.75 && Math.abs(ty - m.position.y) < 1.6) { ai.route = null; return "arrived"; }
-  if (!ai.route || ai.routeKind !== "tsm") {
-    ai.route = null;
-    if (st.navWait > 0) { st.navWait -= dt; return "going"; }
-    if (!N.takePlan()) return "going";
-    const [fx, fy, fz] = N.feetCell(m);
-    const d = Math.hypot(tx + 0.5 - px, tz + 0.5 - pz);
-    const hop = d > 22 ? [Math.floor(px + (tx + 0.5 - px) * 20 / d), Math.floor(pz + (tz + 0.5 - pz) * 20 / d)] : null;
-    const goal = hop ? { x: hop[0], z: hop[1], at: (x, y, z) => Math.abs(x - hop[0]) + Math.abs(z - hop[1]) <= 2 }
-      : { x: tx, z: tz, at: near || ((x, y, z) => Math.abs(x - tx) <= 1 && Math.abs(z - tz) <= 1 && Math.abs(y - ty) <= 1) };
-    const path = N.findPath(fx, fy, fz, goal, 2500);
-    if (path && path.length) { ai.route = path; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "tsm"; st.navFail = 0; }
-    else { st.navFail = (st.navFail || 0) + 1; st.navWait = 0.6; if (st.navFail >= (hop ? 5 : 2)) { st.navFail = 0; return "failed"; } }
-    return "going";
-  }
-  const r = N.followRoute(m, dt, out, speed);
-  if (r === "stuck") { ai.route = null; st.navFail = (st.navFail || 0) + 1; if (st.navFail >= 3) { st.navFail = 0; return "failed"; } }
-  else if (r === "done") ai.route = null;
-  return "going";
-}
+const travel = (m, st, dt, out, tx, ty, tz, speed, near) => FU.travel(m, st, dt, out, tx, ty, tz, speed, near, "tsm");
 // A buying deal for need {f, n}: {kind: "buy", other, offer, times, item}, the nearest seller (cheapest for the head material).
-function findDeal(m, need) {
-  const T = TR();
-  for (const e of offersFor(m, need.f)) {
-    let k = Math.min(e.max, Math.ceil(need.n / e.o.sell.n), 4);
-    while (k > 0 && !T.inv.canFit(m.inv, [{ id: e.o.sell.id, n: e.o.sell.n * k }], e.o.buy.map(b => ({ id: b.id, n: b.n * k })))) k--;
-    if (k > 0) return { kind: "buy", other: e.v2, offer: e.o, times: k, item: e.o.sell.id, what: need.what };
-  }
-  return null;
-}
+const findDeal = (m, need) => FU.findDeal(m, need, skipOf(m));
 function doBuy(m, deal) {
-  const T = TR(), v2 = deal.other, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(m, v2) || T.blockReason(v2, o)) break;
-    if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    if (!T.exchange(v2, o)) break;
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.add(m.inv, o.sell.id, o.sell.n);
-    T.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
-  if (done) log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
+  const done = FU.doBuy(m, deal), o = deal.offer;
+  if (done) log("buy", m, { from: deal.other.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }
 
 // ---------------------------------------------------------------- the furnace: loading, waiting, emptying
 // Puts ore and (when the furnace has none left) fuel in. Returns false when the furnace cannot be used.
 function loadFurnace(m, job) {
-  const f = job.furnace, st = INV().furnaceRecord(f.x, f.y, f.z), T = TR().inv;
-  if (!usable(m, f, job.rawId)) return false;
-  inUse.set(pk(f.x, f.y, f.z), m);
-  const room = 64 - (st.slots[0] ? st.slots[0].count : 0), outRoom = 64 - (st.slots[2] ? st.slots[2].count : 0);
-  const n = Math.min(count(m, job.rawId), room, outRoom);
-  if (n <= 0) return false;
-  T.remove(m.inv, job.rawId, n);
-  if (st.slots[0]) st.slots[0].count += n; else st.slots[0] = { id: job.rawId, count: n };
-  job.loaded = (job.loaded || 0) + n;
-  topUpFuel(m, job, st);
+  const f = job.furnace;
+  job.outId = smeltsTo(job.rawId);
+  const n = FU.load(m, job);
+  if (!n) return false;
+  const st = INV().furnaceState(f.x, f.y, f.z);
   log("smelt", m, { ore: n + " " + BF.itemName(job.rawId), at: pk(f.x, f.y, f.z), fuelThere: !!(st.burn > 0 || st.slots[1]) });
   vlog(m, "furnace", "put " + n + " " + BF.itemName(job.rawId) + " in the furnace at " + pk(f.x, f.y, f.z) + (job.ownFuel ? " with " + job.ownFuel + " " + BF.itemName(st.slots[1] ? st.slots[1].id : I("coal")) : " (burning the fuel already in it)"));
   return true;
 }
 // Adds its own fuel only once the furnace has burnt what was in it: enough for the ore still in the input slot.
-function topUpFuel(m, job, st) {
-  if (st.burn > 0 || st.slots[1] || !st.slots[0]) return;
-  const need = st.slots[0].count - (st.cook > 0 ? st.cook / 10 : 0);
-  let fuel = fuelFor(m, need);
-  if (!fuel.length) { const any = m.inv.find(s => s && isFuel(s.id)); if (any) fuel = [{ id: any.id, n: Math.min(any.count, 64) }]; }   // part of the ore
-  if (!fuel.length) return;
-  const f = fuel[0];   // one fuel kind fits the slot
-  TR().inv.remove(m.inv, f.id, f.n);
-  st.slots[1] = { id: f.id, count: f.n };
-  job.ownFuel = (job.ownFuel || 0) + f.n;
-}
+const topUpFuel = (m, job, st) => FU.topUp(m, job, st);
 // Takes the ingots out, and all the fuel left in the furnace (its own or not); also ore that did not get smelted when it gives up.
 function emptyFurnace(m, job, all) {
-  const f = job.furnace, st = INV().furnaceState(f.x, f.y, f.z), T = TR().inv;
-  inUse.delete(pk(f.x, f.y, f.z));
-  if (!st) return;
-  const got = [];
-  const grab = i => { const s = st.slots[i]; if (!s) return; const left = T.add(m.inv, s.id, s.count); if (left < s.count) got.push((s.count - left) + " " + BF.itemName(s.id)); if (left > 0) s.count = left; else st.slots[i] = null; };
-  grab(2); grab(1);
-  if (all && st.slots[0] && st.slots[0].id === job.rawId) grab(0);
+  const f = job.furnace, taken = FU.empty(m, job, all);
+  if (!taken) return;
+  const got = taken.map(e => e.n + " " + BF.itemName(e.id));
   log("collect", m, { got: got.join(", ") || "nothing", at: pk(f.x, f.y, f.z) });
   vlog(m, "furnace", "took " + (got.join(" + ") || "nothing") + " out of the furnace at " + pk(f.x, f.y, f.z));
 }
@@ -564,7 +420,7 @@ function ai(m, dt, out) {
     // smelting: load, wait beside it (adding fuel when the furnace runs dry), then empty it
     if (!deal.loaded) { if (!loadFurnace(m, deal)) return giveUp("furnace busy", fkey); S.stage = "smelt"; return true; }
     const st = INV().furnaceState(s.x, s.y, s.z);
-    if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
+    if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { FU.inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { emptyFurnace(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; return true; }   // done
     topUpFuel(m, deal, st);

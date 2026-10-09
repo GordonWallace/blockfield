@@ -314,6 +314,10 @@ const BLOCK_DEFS = [
   // merchant's counter: the merchant villager's jobsite (not vanilla): a plank counter with a ledger, scales and a cash box on top
   { name: "merchant_counter", jobsite: "merchant", tiles: { top: "merchant_counter_top", side: "merchant_counter_side", front: "merchant_counter_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#8a6a3a" },
   // ---- end merchant pack ----
+  // ---- poultry pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Poultry keepers")
+  // nesting box: the poultry keeper villager's jobsite (not vanilla): a plank box of straw with eggs in it
+  { name: "nesting_box", jobsite: "poultry_keeper", tiles: { top: "nesting_box_top", side: "nesting_box_side", front: "nesting_box_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#c8a85a" },
+  // ---- end poultry pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -610,6 +614,10 @@ const ITEM_DEFS = [
   // The icon of a stable hand's "sell a horse" offer: the horse itself walks out of the paddock to the player, so this item is never held
   { name: "tamed_horse", stack: 1, color: "#8a5a32", hidden: true, label: "Tamed Horse" },
   // ---- end stables ----
+  // ---- poultry items (js/poultry.js; append-only). Eggs are laid by chickens; a cooked egg (not vanilla) is cooked in a furnace.
+  { name: "egg", stack: 16, color: "#efe2c4" },
+  { name: "cooked_egg", food: 6, color: "#f4ecd8" },
+  // ---- end poultry items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

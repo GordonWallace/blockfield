@@ -435,4 +435,33 @@ ICON_T.grindstone = p => {
   circle(p, 16, 14, 11, (x, y, d) => { p.set(x, y, jit(p, ramp(pal(STONE_G), d > 9.5 ? 0.2 : 0.55 + (y < 10 ? 0.25 : 0)), 0.04)); p.setH(x, y, 0.9); });
   circle(p, 16, 14, 2.2, (x, y) => p.set(x, y, hex("#3a2c1c")));
 };
+
+// ---------- nesting box (poultry keeper, not vanilla): an oak box of straw with eggs in it, a hen-sized opening in the front ----------
+const STRAW = pal(["#8a6a24", "#a8862e", "#c8a43a", "#dcbc50", "#ecd27a"]);
+function straw(p, x0, y0, x1, y1) {
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const n = p.noise(x, y, 8, 3, 230), s = Math.sin((x * 1.7 + y * 0.6 + n * 9)) * 0.5 + 0.5;
+    p.set(x, y, jit(p, ramp(STRAW, 0.25 + s * 0.6 + (p.rand() - 0.5) * 0.15), 0.06)); p.setH(x, y, 0.4 + s * 0.4);
+  }
+}
+const egg = (p, cx, cy) => circle(p, cx, cy, 2.6, (x, y, d) => { p.set(x, y, jit(p, mix(hex("#fbf3e0"), hex("#d8c4a0"), Math.min(1, d / 2.6 + (y + 0.5 - cy) * 0.12)), 0.02)); p.setH(x, y, 1 - d / 4); });
+T.nesting_box_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  straw(p, 4, 4, 27, 27);
+  frame(p, 3, "#5a4224", "#94734a");
+  egg(p, 12, 14); egg(p, 19, 18); egg(p, 15, 21);
+  p.relief(1.1, 0.3);
+};
+T.nesting_box_side = p => {
+  vboards(p, WOOD_OAK, 8, "#3d2c18");
+  band(p, 0, 2, WOOD_SPRUCE); band(p, 29, 31, WOOD_SPRUCE);
+  straw(p, 0, 3, 31, 5);
+  p.relief(1.2);
+};
+T.nesting_box_front = p => {
+  T.nesting_box_side(p);
+  circle(p, 16, 19, 7.5, (x, y, d) => { if (y > 27) return; p.set(x, y, jit(p, d > 6.3 ? hex("#2e2010") : ramp(STRAW, 0.15 + (y - 12) * 0.03), 0.05)); p.setH(x, y, d > 6.3 ? 0.9 : 0.2); });
+  egg(p, 15, 23);
+  p.relief(1.0);
+};
 })();
