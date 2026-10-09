@@ -116,8 +116,10 @@ module.exports = async (pg) => {
     BF.villagerStatus.text = realText;
     const T = D.get(vk);
     waits = waits || [];
+    // It starts on the minute; the end can run a few minutes over, since a status seen at only one sample right after
+    // 15:00 merges into the stretch before it (SHORT in js/daytimeline.js), so the length is checked to the nearest hour.
     const wlen = waits.reduce((n, s) => n + s[1] - s[0], 0) / MIN;
-    ok(`the stuck villager's timeline shows "Waiting for gold" for 2 game hours (${Math.round(wlen)} min)`, waits.length === 1 && Math.abs(wlen - 120) <= 2 && waits[0][3] === "wait", waits.map(s => [BF.vlog.stamp(s[0]), BF.vlog.stamp(s[1])]));
+    ok(`the stuck villager's timeline shows "Waiting for gold" for 2 game hours (${Math.round(wlen)} min)`, waits.length === 1 && Math.round(wlen / 60) === 2 && Math.abs(waits[0][0] - from) <= 2 * MIN && waits[0][3] === "wait", waits.map(s => [BF.vlog.stamp(s[0]), BF.vlog.stamp(s[1])]));
     const all = D.keys().map(k => D.get(k));
     const cats = {}, evk = {};
     for (const L2 of all) { for (const s of L2.s) cats[s[3]] = (cats[s[3]] || 0) + (s[1] - s[0]); for (const e of L2.e) evk[e[1]] = (evk[e[1]] || 0) + 1; }
