@@ -156,7 +156,7 @@ function use(sel, it) {
   const i = slots.indexOf(sel);
   explore(d, p.x, p.z, BUDGET);
   if (sel.count === 1 && i >= 0) inv.setSlot(i, { id, count: 1 });
-  else { inv.consumeSelected(1); const left = inv.add(id, 1); if (left > 0 && BF.emit) BF.emit("itemDropped", id, left); }
+  else { inv.consumeSelected(1); const left = inv.add(id, 1); if (left > 0) inv.dropOverflow(id, left); }
   return "Map created";
 }
 
