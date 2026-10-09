@@ -9,6 +9,7 @@ const PX = 1 / 16;
 const GRAVITY = 26;
 const PASSIVE_CAP = 16, HOSTILE_CAP = 12;
 const DESPAWN_DIST = 100;
+const TRAVELLER_SPEED = 1.5;   // merchants and explorers walk this much faster than other villagers (village loading plan)
 
 let scene = null;
 const list = [];
@@ -1581,7 +1582,7 @@ function updateMob(m, dt) {
   _desired.x = 0; _desired.z = 0; _desired.faceTarget = false; _desired.faceX = null; _desired.faceZ = null;
   if (m.rider) { /* ridden (js/horses.js): its rider moves it */ }
   else if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
-  else if (m.type === "villager") villagerAI(m, dt, _desired);
+  else if (m.type === "villager") { villagerAI(m, dt, _desired); if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
   else if (T.golem) golemAI(m, dt, _desired);
   else if (ai.fleeT > 0) {
     ai.fleeT -= dt;
