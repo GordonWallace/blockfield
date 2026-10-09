@@ -39,8 +39,10 @@ module.exports = async (pg) => {
     put(); clearInterval(window.__pin); window.__pin = setInterval(put, 150);
     return BF.vlog.nameOf(m);
   }, k);
+  const heldOut = (k, who) => wait(a => BF.villageSim.estimates(a.k).list.some(e => e.who === a.who && e.errand), { k, who }, 15000);   // the village sees it out on an errand
   const unpin = () => pg.evaluate(() => clearInterval(window.__pin));
   const who = await pin(info.key);
+  await heldOut(info.key, who);
   await tp(info.x + 900, info.z);
   const counting = await wait(k => BF.villageSim.countdown(k) !== null, info.key, 30000);
   const cd = await pg.evaluate(k => ({ cd: BF.villageSim.countdown(k), active: BF.villageSim.isActive(k), may: [BF.villageSim.mayStart(k, 1e6), BF.villageSim.mayStart(k, 1)] }), info.key);
@@ -53,7 +55,7 @@ module.exports = async (pg) => {
   const cancelled = await wait(k => BF.villageSim.countdown(k) === null && BF.villageSim.isActive(k), info.key, 30000);
   ok("the player coming back cancels the countdown", cancelled);
   // 4. leave again; the timer runs out with the villager still out: error logged, village and villagers gone together
-  await pin(info.key);
+  await heldOut(info.key, await pin(info.key));
   await tp(info.x + 900, info.z);
   await wait(k => BF.villageSim.countdown(k) !== null, info.key, 30000);
   await pg.evaluate(k => { BF.sky.day += 3; }, info.key);   // the clock jumps past the timer (the villager is still held out there)

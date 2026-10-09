@@ -26,6 +26,7 @@ module.exports = async (pg) => {
     put(); window.__pin = setInterval(put, 150);
     window.__who = BF.vlog.nameOf(m);
   }, info.key);
+  await wait(k => BF.villageSim.estimates(k).max > 0, info.key, 15000);   // the village knows it is out on an errand
   await tp(info.x + 300, info.z);
   const gone = await wait(k => !BF.villageSim.isActive(k), info.key, 30000);
   await pg.evaluate(() => clearInterval(window.__pin));
