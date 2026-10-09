@@ -1450,7 +1450,11 @@ const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too har
 function die() {
   P.dead = true; P.health = 0;
   resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
-  if (invOpen()) { try { inv().close(); } catch (_) {} }
+  if (invOpen()) {   // every screen closes (the command line closes itself on playerDied)
+    try { inv().close(); } catch (_) {}
+    try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
+    try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
+  }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
   BF.state.paused = true;
