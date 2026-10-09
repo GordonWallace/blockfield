@@ -231,7 +231,20 @@ function sellErrands(rec, m, cargo) {
 }
 
 // ---------------------------------------------------------------- walking
-function travel(m, st, dt, out, tx, tz, radius) {
+// The next waypoint on a road between two village centres: fixed every HOP blocks from the lower-keyed village, so every trip on the road (either way)
+// steps through the same points and wears the same ground. null when the goal is near or off the line.
+const HOP = 20;
+function waypoint(px, pz, tx, tz, line) {
+  const dx = line.bx - line.ax, dz = line.bz - line.az, L = Math.hypot(dx, dz);
+  if (L < 3 * HOP) return null;
+  const s = ((px - line.ax) * dx + (pz - line.az) * dz) / L;                      // how far along the line the merchant is
+  if (Math.abs((px - line.ax) * dz - (pz - line.az) * dx) / L > 3 * HOP) return null;   // well off the line (a detour): plain hops
+  const fwd = (tx - px) * dx + (tz - pz) * dz > 0;
+  let t = fwd ? (Math.floor(s / HOP + 1e-6) + 1) * HOP : (Math.ceil(s / HOP - 1e-6) - 1) * HOP;
+  t = Math.max(0, Math.min(L, t));
+  return [Math.floor(line.ax + dx / L * t), Math.floor(line.az + dz / L * t)];
+}
+function travel(m, st, dt, out, tx, tz, radius, line) {
   const ai = m.ai, N = BF.mobs.nav, px = m.position.x, pz = m.position.z, d = Math.hypot(tx - px, tz - pz), nv = st.nav;
   if (d <= radius) { ai.route = null; return "arrived"; }
   if (!ai.route || ai.routeKind !== "mc") {
@@ -239,7 +252,8 @@ function travel(m, st, dt, out, tx, tz, radius) {
     if (nv.wait > 0) { nv.wait -= dt; return "going"; }
     if (!N.takePlan()) return "going";
     const [fx, fy, fz] = N.feetCell(m);
-    const hop = d > 22 ? [Math.floor(px + (tx - px) * 20 / d), Math.floor(pz + (tz - pz) * 20 / d)] : [Math.floor(tx), Math.floor(tz)];
+    const wp = d > 22 && line && !nv.fail ? waypoint(px, pz, tx, tz, line) : null;   // a failed attempt falls back to plain hops
+    const hop = wp || (d > 22 ? [Math.floor(px + (tx - px) * 20 / d), Math.floor(pz + (tz - pz) * 20 / d)] : [Math.floor(tx), Math.floor(tz)]);
     const goal = { x: hop[0], z: hop[1], at: (x, y, z) => Math.abs(x - hop[0]) + Math.abs(z - hop[1]) <= 2 };
     const path = N.findPath(fx, fy, fz, goal, 2500);
     if (path && path.length) { ai.route = path; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "mc"; nv.fail = 0; }
@@ -309,6 +323,16 @@ function routesView() {
   return out.sort((x, y) => y.road.length - x.road.length || y.trips - x.trips);
 }
 
+// Seconds of game time the merchant's trip still needs (for its village's unload countdown, js/villagesim.js).
+function leftSecs(m) {
+  const st = m.mc, tr = st && st.trip;
+  if (!tr) return 0;
+  const speed = ((m.def && m.def.speed) || 0.9) * ROAD * BOOST, walkSecs = (DUSK - WORK_START) * DAY_S;
+  const toDest = Math.hypot(tr.dx - m.position.x, tr.dz - m.position.z), a = recOf(tr.home) || m.village;
+  const homeD = a ? Math.hypot(a.x - m.position.x, a.z - m.position.z) : 0, legD = a ? Math.hypot(tr.dx - a.x, tr.dz - a.z) : toDest;
+  const dist = st.stage === "buy" ? 2 * legD : st.stage === "go" ? toDest + legD : st.stage === "sell" || st.stage === "shop" ? legD : homeD;
+  return (dist * WIND / (speed * walkSecs) + (st.stage === "unload" ? 0.02 : DEAL_DAYS)) * DAY_S;
+}
 // ---------------------------------------------------------------- the trip
 const recOf = key => (BF.mobs.villages && BF.mobs.villages.get(key)) || null;
 function cargoOf(m, ids) { const out = []; for (const id of ids) { const n = cnt(m, id); if (n > 0) out.push({ id, n }); } return out; }
@@ -367,6 +391,11 @@ function errands(m, st, dt, out) {
 function vlogLine(m, text) { if (BF.vlog && m.village) BF.vlog.log(m.village, "caravan", who(m) + " " + text, m); }
 function destName(key) { const r = recOf(key); return r ? "the village at " + Math.round(r.x) + ", " + Math.round(r.z) : "the village at " + key; }
 
+// The road of a trip as a line from the lower-keyed village to the other, so both ways use the same waypoints.
+function roadLine(tr, home) {
+  const a = { x: home.x, z: home.z }, b = { x: tr.dx, z: tr.dz };
+  return tr.home < tr.dest ? { ax: a.x, az: a.z, bx: b.x, bz: b.z } : { ax: b.x, az: b.z, bx: a.x, bz: a.z };
+}
 function tripAI(m, st, dt, out) {
   const tr = st.trip, home = recOf(tr.home) || m.village, dest = recOf(tr.dest);
   if (dayNow() - tr.day0 > TRIP_MAX_DAYS) { noRoad.set(roadKey(tr.home, tr.dest), dayNow() + 7); log("error", m, { why: "trip over " + TRIP_MAX_DAYS + " days", dest: tr.dest }); endTrip(m, st, "gave up"); return false; }
@@ -383,7 +412,7 @@ function tripAI(m, st, dt, out) {
       return true;
     }
     case "go": {
-      const r = travel(m, st, dt, out, tr.dx, tr.dz, ARRIVE_R);
+      const r = travel(m, st, dt, out, tr.dx, tr.dz, ARRIVE_R, roadLine(tr, home));
       if (r === "failed") { log("lost", m, { dest: tr.dest }); noRoad.set(roadKey(tr.home, tr.dest), dayNow() + 7); st.stage = "back"; return true; }
       if (r !== "arrived") return true;
       if (!dest || !traders(dest, m).length) { st.aw = (st.aw || 0) + dt; if (st.aw < 30) return true; st.aw = 0; if (!dest) { st.stage = "back"; return true; } }   // its villagers are still appearing
@@ -418,7 +447,7 @@ function tripAI(m, st, dt, out) {
       return true;
     }
     case "back": {
-      const r = travel(m, st, dt, out, home.x, home.z, ARRIVE_R);
+      const r = travel(m, st, dt, out, home.x, home.z, ARRIVE_R, roadLine(tr, home));
       if (r === "failed") { st.nav.giveUp = (st.nav.giveUp || 0) + 1; if (st.nav.giveUp > 20) { endTrip(m, st, "lost"); return false; } return true; }
       if (r !== "arrived") return true;
       st.stage = "unload"; st.errands = sellErrands(home, m, st.cargo.filter(c => tr.back.some(g => g.id === c.id))); st.ei = 0; st.et = 0; st.e0 = cnt(m, em());
@@ -477,6 +506,7 @@ function ai(m, dt, out) {
   if (dayNow() - st.last < TRIP_EVERY || (m.ex && m.ex.camp)) return false;
   const p = plan(m);
   if (!p || !fitsInDay(m, p.d)) return false;
+  if (BF.villageSim && BF.villageSim.mayStart && !BF.villageSim.mayStart(m.village.key, tripDays(m, p.d) * DAY_S)) return false;   // its village is counting down to unload and the trip would outlast it
   if (!start(m, st)) return false;
   return tripAI(m, st, dt, out);
 }
@@ -584,5 +614,5 @@ let hooked = false;
 function hook() { if (!hooked && BF.on) { hooked = true; BF.on("mobKilled", onKilled); } }
 setTimeout(hook, 0);
 
-BF.merchant = { PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
+BF.merchant = { PROF, RANGE, leftSecs, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
 })();

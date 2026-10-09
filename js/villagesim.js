@@ -14,8 +14,10 @@ const DROP = 216;         // ...and keeps being simulated until it is this far (
 const MAX = 4;            // nearest N villages at a time
 const CHUNK_BUDGET = 640; // ...holding at most this many chunks between them (4 classic villages fit; the nearest one always runs)
 const MARGIN = 16;        // blocks of terrain kept beyond the village bounds (farms, paths)
-const MAX_SPAN = 12;      // chunks per axis, cap for oversized footprints (classic villages)
-const MAX_SPAN_SIZED = 20; // ...and for sized villages (village generator 2, up to ~250 blocks across)
+const ALWAYS = 100;       // a village whose edge is this close to the player is always simulated (past MAX and the chunk budget)
+const WIN = 2;            // chunks kept around every villager (5 x 5): the ground it walks on beyond its village
+const MAXT = 2400;        // seconds (2 game days): the longest a village waits for its villagers' tasks before unloading
+const DAY_S = 1200;
 const CROP_SECS_PER_DAY = 1200, GROW_RATE = 1 / 240;   // matches sky.dayLength and world.js GROW_CHANCE_PER_S
 
 const active = new Map();        // village key -> { v, keys: [chunk keys] }
@@ -33,8 +35,6 @@ function footprint(v) {
   const CS = BF.CS;
   let x0 = Math.floor((v.minX - MARGIN) / CS), x1 = Math.floor((v.maxX + MARGIN) / CS);
   let z0 = Math.floor((v.minZ - MARGIN) / CS), z1 = Math.floor((v.maxZ + MARGIN) / CS);
-  const cx = Math.floor(v.x / CS), cz = Math.floor(v.z / CS), half = (v.pop ? MAX_SPAN_SIZED : MAX_SPAN) >> 1;
-  x0 = Math.max(x0, cx - half); x1 = Math.min(x1, cx + half); z0 = Math.max(z0, cz - half); z1 = Math.min(z1, cz + half);
   const keys = [];
   for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) keys.push(x + "," + z);
   return keys;
@@ -75,6 +75,7 @@ function rebuild() {
   keepKeys.clear();
   for (const ent of active.values()) for (const k of ent.keys) keepKeys.add(k);
   for (const p of pins.values()) for (const k of p.keys) keepKeys.add(k);
+  for (const k of winKeys) keepKeys.add(k);
 }
 // The chunks a walk from village a to village b crosses, plus one chunk either side.
 function corridor(a, b) {
@@ -94,24 +95,96 @@ function pin(id, a, b, keys) {
 function unpin(id) { if (pins.delete(id)) { pinDirty = true; lastT = 0; } }
 const pinnedKeys = () => { const s = new Set(); for (const p of pins.values()) { s.add(vKey(p.a)); s.add(vKey(p.b)); } return s; };
 
+// Distance from a point to the village's edge (its bounds), 0 inside.
+const edgeDist = (v, px, pz) => Math.hypot(Math.max(0, v.minX - px, px - v.maxX), Math.max(0, v.minZ - pz, pz - v.maxZ));
+
+// ---- the unload countdown
+// A village that would stop (the player is too far, or it lost its place among the nearest few) keeps running until its villagers' tasks are
+// done: the longest estimate sets the timer. When it ends, the village and all its villagers unload together; any task still running is logged.
+const ending = new Map();        // village key -> {t0, until (game day), est: [{who, task, secs}], max}
+const errors = [];               // loading errors, newest last (shown on the debug screen)
+const nowDay = () => dayNow();
+function logError(kind, data) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }
+const nameOf = m => (BF.vlog && BF.vlog.nameOf ? BF.vlog.nameOf(m) : "villager");
+// Seconds of game time the villager still needs to finish what it is doing (0 = nothing that must finish). Sets taskLeft.errand when the
+// task is an errand beyond the village (or a caravan trip): only those are errors if they are still running when the timer ends.
+function taskLeft(m, rec) {
+  taskLeft.errand = false;
+  if (m.dead || m.removed || m.child || m.sleeping || m.type !== "villager") return 0;
+  if (m.profession === "explorer") return 0;                         // explorers are carved out: they unload with their village wherever they are
+  if (m.profession === "merchant" && m.mc && m.mc.trip && BF.merchant && BF.merchant.leftSecs) { taskLeft.errand = true; return Math.min(MAXT, BF.merchant.leftSecs(m)); }
+  const v = rec.wg, speed = ((m.def && m.def.speed) || 0.9) * 1.3;
+  const out = v && v.minX != null ? edgeDist(v, m.position.x, m.position.z) : Math.max(0, Math.hypot(m.position.x - rec.x, m.position.z - rec.z) - 40);
+  if (out > 4) { taskLeft.errand = true; return Math.min(MAXT, (out / speed) * 1.25 + 20); }      // out on an errand: the walk back (with a margin)
+  const text = BF.villagerStatus ? BF.villagerStatus.text(m) : "", cat = BF.dayTimeline ? BF.dayTimeline.catOf(text) : "idle";
+  return cat === "work" || cat === "trade" ? 30 : 0;                 // finishing the job at hand
+}
+function estimates(key) {
+  const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(key), list = [];
+  let max = 0;
+  if (rec) for (const m of rec.members) {
+    const s = taskLeft(m, rec);
+    if (s > 0) { list.push({ who: nameOf(m), task: BF.villagerStatus ? BF.villagerStatus.text(m) : "", secs: Math.round(s), errand: taskLeft.errand }); max = Math.max(max, s); }
+  }
+  list.sort((a, b) => b.secs - a.secs);
+  return { list, max: Math.min(max, MAXT) };
+}
+// May a task of `secs` seconds start in this village now? (false while the countdown has less time left)
+function mayStart(key, secs) {
+  const en = ending.get(key);
+  return !en || secs <= (en.until - nowDay()) * DAY_S;
+}
+function countdown(key) {
+  const en = ending.get(key);
+  if (!en) return null;
+  return { left: Math.max(0, Math.round((en.until - nowDay()) * DAY_S)), est: en.est.slice(0, 6), max: Math.round(en.max) };
+}
+
+// ---- chunks kept around villagers outside their village
+const winKeys = new Set();
+let winT = 0;
+function windows() {
+  const CS = BF.CS, next = new Set(), L = BF.mobs && BF.mobs.list;
+  if (L) for (const m of L) {
+    const rec = m.village;
+    if (!rec || m.type !== "villager" || m.dead || m.removed || !m.position) continue;
+    const ent = active.get(rec.key);
+    if (!ent) continue;
+    if (!ent.set) ent.set = new Set(ent.keys);
+    const cx = Math.floor(m.position.x / CS), cz = Math.floor(m.position.z / CS);
+    if (ent.set.has((cx - WIN) + "," + (cz - WIN)) && ent.set.has((cx + WIN) + "," + (cz + WIN)) && ent.set.has((cx - WIN) + "," + (cz + WIN)) && ent.set.has((cx + WIN) + "," + (cz - WIN))) continue;   // well inside its village
+    for (let dz = -WIN; dz <= WIN; dz++) for (let dx = -WIN; dx <= WIN; dx++) next.add((cx + dx) + "," + (cz + dz));
+  }
+  let same = next.size === winKeys.size;
+  if (same) for (const k of next) if (!winKeys.has(k)) { same = false; break; }
+  if (same) return false;
+  winKeys.clear();
+  for (const k of next) winKeys.add(k);
+  return true;
+}
+
 // Called from world.update every frame; cheap (re-evaluates about every 1.5 s). Returns true when the kept set changed.
 function update(px, pz) {
   const now = performance.now() / 1000;
-  if (now - lastT < 1.5 && !pinDirty) return false;
+  let winChanged = false;
+  if (now - winT >= 0.5) { winT = now; winChanged = windows(); }
+  if (now - lastT < 1.5 && !pinDirty) { if (winChanged) rebuild(); return winChanged; }
   lastT = now;
   const pinChange = pinDirty;
   pinDirty = false;
   const wg = BF.worldgen;
   if (!wg || typeof wg.villagesNear !== "function") return false;
   let near;
-  try { near = wg.villagesNear(px, pz, DROP) || []; } catch (e) { return false; }
+  try { near = wg.villagesNear(px, pz, DROP + 200) || []; } catch (e) { return false; }   // the query is by centre: reach villages whose edge is near
   const cand = [];
-  for (const v of near) if (v && v.x != null && v.minX != null) cand.push({ v, key: vKey(v), d: Math.hypot(v.x - px, v.z - pz) });
+  for (const v of near) if (v && v.x != null && v.minX != null) { const d = edgeDist(v, px, pz); if (d <= DROP) cand.push({ v, key: vKey(v), d }); }
   cand.sort((a, b) => a.d - b.d);
   const next = new Map();
   let kept = 0;
   // pinned villages first, outside MAX and the chunk budget
   for (const p of pins.values()) for (const v of [p.a, p.b]) { const k = vKey(v); if (!next.has(k)) next.set(k, active.get(k) || { v, keys: footprint(v), pinned: true }); }
+  // then every village whose edge is within ALWAYS of the player
+  for (const c of cand) if (c.d <= ALWAYS && !next.has(c.key)) { next.set(c.key, active.get(c.key) || { v: c.v, keys: footprint(c.v) }); }
   const nPinned = next.size;
   for (const c of cand) {
     if (next.size - nPinned >= MAX) break;
@@ -122,13 +195,33 @@ function update(px, pz) {
     kept += e.keys.length;
     next.set(c.key, e);
   }
-  let changed = pinChange || next.size !== active.size;
+  // a village that would stop waits for its villagers' tasks (the countdown); one the player came back to cancels it
+  const nd = nowDay();
+  for (const k of [...ending.keys()]) if (next.has(k) || !active.has(k)) ending.delete(k);
+  for (const [k, e] of active) {
+    if (next.has(k)) continue;
+    let en = ending.get(k);
+    if (!en) {
+      const est = estimates(k);
+      if (!(est.max > 0)) continue;                                  // nothing out on a task: it unloads now
+      en = { t0: nd, until: nd + est.max / DAY_S, est: est.list, max: est.max };
+      ending.set(k, en);
+    }
+    if (nd < en.until || nd < en.t0) { next.set(k, e); continue; }   // still counting down
+    const rec = BF.mobs.villages.get(k);
+    for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.secs, ran: Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
+    ending.delete(k);
+  }
+  let changed = pinChange || next.size !== active.size || winChanged;
   for (const k of next.keys()) if (!active.has(k)) changed = true;
+  for (const k of active.keys()) if (!next.has(k)) changed = true;
   for (const k of active.keys()) if (!next.has(k)) pending.delete(k);
+  const dropped = [...active.keys()].filter(k => !next.has(k));
   const fresh = [...next].filter(([k]) => !active.has(k));
   active.clear();
   for (const [k, e] of next) active.set(k, e);
   for (const [k, e] of fresh) startCatchUp(k, e);
+  for (const k of dropped) if (BF.mobs && BF.mobs.unloadVillage) BF.mobs.unloadVillage(k);   // the village and all its villagers go together
   // stamp villages whose centre is loaded: the last stamp is when the village stopped being simulated
   const d = dayNow();
   for (const [k, e] of active) if (BF.world.isLoaded(e.v.x, e.v.z)) seen.set(k, d);
@@ -163,6 +256,7 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
+  mayStart, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);
@@ -178,7 +272,7 @@ BF.villageSim = {
       }
     }
   },
-  reset() { active.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); lastT = 0; pinDirty = false; },
+  reset() { winT = 0; active.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); lastT = 0; pinDirty = false; },
   init() { BF.world.onChunkLoad(onChunkLoad); },
 };
 })();

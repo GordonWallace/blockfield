@@ -2179,7 +2179,7 @@ function updateVillages(dt) {
   if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return;
   const pp = player().position;
   let vs;
-  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 : 96) || []; } catch (e) { return; }
+  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 + 150 : 96) || []; } catch (e) { return; }   // by centre: sized villages are measured from their edge (js/villagesim.js)
   if (BF.villageSim && BF.villageSim.pinned) { const ks = new Set(vs.map(v => v && Math.round(v.x) + "," + Math.round(v.z))); for (const v of BF.villageSim.pinned()) if (!ks.has(Math.round(v.x) + "," + Math.round(v.z))) vs.push(v); }   // villages a merchant's trip keeps loaded (js/merchant.js)
   for (const v of vs) {
     if (!v || v.x == null) continue;
@@ -2243,7 +2243,7 @@ function despawn(dt) {
     if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
     const d = m.position.distanceTo(pp);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
-    if ((d > DESPAWN_DIST && !simmed) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }
+    if ((d > DESPAWN_DIST && !simmed && !m.village) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), not by distance
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
     if (m.hostile && !m.dead && d > 48 && m.age > 20 && Math.random() < dt * 0.03) removeMob(m);
   }
@@ -2355,6 +2355,15 @@ BF.mobs = {
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
   villages,
+  // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
+  unloadVillage(key) {
+    const rec = villages.get(key);
+    if (!rec) return 0;
+    let n = 0;
+    for (const m of list.slice()) if (m.village === rec || m.penVillage === rec) { removeMob(m); n++; }
+    rec.members = [];
+    return n;
+  },
   // Villager trading state for saved games: {key -> {inv, level, xp, day}} (see CONTRACT.md); loaded ones override stored.
   exportVillagers() {
     const out = {};
