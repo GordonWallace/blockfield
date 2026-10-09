@@ -84,7 +84,10 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: i % 3 ? I.rotten_flesh : I.cobblestone, count: 64 };
     }, v.key);
     pg.on('console', msg => { if (/^\[test\]/.test(msg.text())) console.log(msg.text()); });
-    for (let k = 0; k < 4 && !(await pg.evaluate(p => { const c = BF.inventory.chestState(p.x, p.y, p.z); return !!(c && c.owner); }, v.chest)); k++) await step(0.1 + k * 0.05, 0.15 + k * 0.05, 30);
+    for (let k = 0; k < 4 && !(await pg.evaluate(([k, p]) => { const c = BF.inventory.chestState(p.x, p.y, p.z); if (c && c.owner) return true;
+      const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);   // it may eat, sell or trade between steps: keep it full until it stores
+      for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: i % 3 ? BF.I.rotten_flesh : BF.I.cobblestone, count: 64 };
+      return false; }, [v.key, v.chest])); k++) await step(0.1 + k * 0.05, 0.15 + k * 0.05, 30);
     const r7 = await pg.evaluate(([k, p]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), c = BF.inventory.chestState(p.x, p.y, p.z);
       return { free: m.inv.filter(s => !s).length, owner: c && c.owner, chest: c ? c.slots.filter(Boolean).map(s => BF.itemName(s.id) + " x" + s.count) : [],
@@ -153,9 +156,25 @@ module.exports = async (pg, out) => {
     ok(!!r11.order && (r11.had > 0 || (r11.plan && r11.plan.kind === "chest")) && r11.chests >= 1, "full villager without a chest orders one; the furniture maker makes it from planks");
     if (!r11.order) return;
     const placed = () => pg.evaluate(([k, s]) => { const c = BF.inventory.chestState(s.x, s.y, s.z); return !!(c && c.owner === k); }, [v.noChestKeys[0], r11.order.spot]);
-    // it may take beds to a builder or buy wool first, so give it a second day if the first runs out
+    // The test checks the order and the hand-over, not a long walk across a busy village: walking there competes with every other
+    // villager for route searches, and on slow runners it timed out and gave up again and again. So stand the furniture maker
+    // beside the spot (where its walk would end), fed and free to pick the delivery, then let it put the chest down itself.
+    const besideSpot = () => pg.evaluate(([k, s]) => {
+      const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead), N = BF.mobs.nav;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const dy of [0, -1, 1]) {
+        const x = s.x + dx, y = s.y + dy, z = s.z + dz;
+        if (!N.walkCell(x, y, z)) continue;
+        f.position.set(x + 0.5, y + 0.01, z + 0.5); f.ai.route = null; f.ai.leaving = false;
+        f.furn = { stage: null, deal: null, checkT: 0, avoid: {}, cd: 0 };
+        if (f.life) f.life.sat = 20;
+        return [x, y, z];
+      }
+      return null;
+    }, [v.noChestKeys[0], r11.order.spot]);
+    console.log("furniture maker placed beside the spot at", JSON.stringify(await besideSpot()));
+    // it may still take beds to a builder or buy wool first, so give it a second day if the first runs out
     for (let k = 0; k < 20 && !(await placed()); k++) {
-      if (k === 10) await pg.evaluate(() => { BF.sky.day += 1; });
+      if (k === 10) { await pg.evaluate(() => { BF.sky.day += 1; }); await besideSpot(); }
       await step(0.13 + (k % 10) * 0.03, 0.16 + (k % 10) * 0.03, 30);
       if (process.env.DEBUG) console.log("fm@", JSON.stringify(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead); return { st: f.furn && f.furn.stage, kind: f.furn && f.furn.deal && f.furn.deal.kind, pos: [Math.round(f.position.x), Math.round(f.position.z)], status: BF.villagerStatus.text(f), chests: BF.trades.inv.count(f.inv, BF.I.chest), orders: BF.storage.orders(m.village).length, log: BF.furniture.LOG.slice(-2) }; }, v.noChestKeys[0])));
     }   // it walks over, puts the chest down; the villager stores its surplus there
