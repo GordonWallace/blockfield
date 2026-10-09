@@ -242,7 +242,7 @@ function deliver(f, m, spot) {
   if (!W.setBlock(spot.x, spot.y, spot.z, BF.chestId(BF.openFacing(spot, f.position)))) return false;
   T.exchange(f, o); T.inv.remove(m.inv, I.emerald, o.buy[0].n);
   const c = INV().chestRecord(spot.x, spot.y, spot.z);
-  c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS };
+  c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS, name: nameOf(m) };
   m.store.order = null; m.store.checkT = 0.5;
   houseCache.clear();
   if (BF.vlog) BF.vlog.trade(m, f, o, 1);
