@@ -481,4 +481,58 @@ T.milk_churn_top = p => {
   p.relief(1.2);
 };
 T.milk_churn_bottom = p => { planksBase(p, WOOD_SPRUCE, "#2a1e10"); p.relief(1.2); };
+
+// ---------- baker's oven (baker, not vanilla): a brick oven, a dark arched mouth with embers in the front, a stone hearth top ----------
+const BRICK_R = pal(["#6a2a1c", "#7e3422", "#923e28", "#a64a30", "#b85a3c"]);
+T.bakers_oven_side = p => {
+  for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) {
+    const row = Math.floor(y / 6), off = row % 2 ? 4 : 0, mortar = y % 6 === 5 || (x + off) % 12 === 11;
+    const b = Math.floor((x + off) / 12) + row * 7;
+    p.set(x, y, jit(p, mortar ? hex("#b8ad9c") : ramp(BRICK_R, 0.3 + K.ihash(b, p.seed, 11) * 0.5 + p.noise(x, y, 8, 4, 301) * 0.2), 0.05));
+    p.setH(x, y, mortar ? 0.1 : 0.8);
+  }
+  p.relief(1.2);
+};
+T.bakers_oven_front = p => {
+  T.bakers_oven_side(p);
+  for (let y = 8; y < 28; y++) for (let x = 6; x < 26; x++) {
+    const d = Math.hypot((x + 0.5 - 16) / 10, (y + 0.5 - 18) / 10);
+    if (y < 18 && d > 1) continue;
+    const edge = (y < 18 ? d > 0.82 : x < 8 || x > 23) || y > 25;
+    const ember = y >= 22 && !edge && p.rand() < 0.5;
+    p.set(x, y, edge ? jit(p, hex("#4a4440"), 0.05) : ember ? jit(p, p.rand() < 0.5 ? hex("#ff8a1c") : hex("#d0401a"), 0.06) : jit(p, hex("#1a1210"), 0.04));
+    p.setH(x, y, edge ? 0.9 : 0.05);
+  }
+  p.relief(1.0);
+};
+T.bakers_oven_top = p => { cobbleBase(p); frame(p, 2, "#6a2a1c", "#a64a30"); p.relief(1.1); };
+T.bakers_oven_bottom = p => { cobbleBase(p); p.relief(1.1); };
+
+// ---------- cake (vanilla): white icing with red berries on top, sponge and cream on the sides ----------
+T.cake_top = p => {
+  p.fill((x, y) => { p.set(x, y, jit(p, mix(hex("#fbf8f2"), hex("#ece4d8"), p.noise(x, y, 8, 4, 311)), 0.02)); p.setH(x, y, 0.6); });
+  for (const [x, y] of [[7, 7], [16, 5], [24, 9], [9, 17], [20, 16], [13, 25], [25, 24]]) circle(p, x, y, 1.6, (xx, yy) => { p.set(xx, yy, jit(p, hex("#c8202a"), 0.05)); p.setH(xx, yy, 1); });
+  p.relief(0.8);
+};
+T.cake_side = p => {
+  p.fill((x, y) => {
+    let c;
+    const r = y % 16;                                                                // box models sample rows 16-31 (the cake's half block)
+    if (r < 5) c = hex(r === 4 && x % 5 === 2 ? "#e8dccc" : "#fbf8f2");             // the icing
+    else if (r === 10 || r === 11) c = hex("#f0e6d8");                              // a cream layer
+    else c = ramp(pal(["#a8642a", "#b8743a", "#c8844a", "#d69458"]), 0.4 + p.noise(x, y, 8, 4, 313) * 0.4);
+    p.set(x, y, jit(p, c, 0.03)); p.setH(x, y, y % 16 < 5 ? 0.7 : 0.5);
+  });
+  p.relief(0.8);
+};
+T.cake_bottom = p => { p.fill((x, y) => { p.set(x, y, jit(p, hex("#b8743a"), 0.05)); p.setH(x, y, 0.5); }); p.relief(0.6); };
+
+// ---------- pumpkin stem (young pumpkin, cross plant): a curly green vine with leaves ----------
+T.pumpkin_stem = p => {
+  clearTile(p);
+  const G = pal(["#3a6a1e", "#4a7e26", "#5a9230", "#6aa63a"]);
+  for (let y = 10; y < TS; y++) { const x = Math.round(16 + Math.sin(y * 0.45) * 3); for (const dx of [0, 1]) { p.set(x + dx, y, jit(p, ramp(G, 0.3 + dx * 0.3), 0.05)); p.setH(x + dx, y, 0.8); } }
+  for (const [cx, cy, r] of [[10, 14, 4.5], [22, 18, 4.5], [13, 24, 3.8], [20, 9, 3.6]]) circle(p, cx, cy, r, (x, y, d) => { p.set(x, y, jit(p, ramp(G, 0.85 - d / r * 0.6), 0.06)); p.setH(x, y, 1 - d / r * 0.5); });
+  p.relief(0.9);
+};
 })();

@@ -70,6 +70,7 @@ function craftTable(wood) {
   if (I.tack_rack != null) t[I.tack_rack] = { n: 1, from: [[P, 4], [I.leather, 1], [I.iron_ingot, 1]] };   // the stable's jobsite (recipes-jobs.js)
   if (I.nesting_box != null && I.hay_bale != null) t[I.nesting_box] = { n: 1, from: [[P, 4], [I.hay_bale, 1]] };   // the coop's jobsite (js/poultry.js)
   if (I.milk_churn != null) t[I.milk_churn] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the pasture's jobsite (js/cowherd.js)
+  if (I.bakers_oven != null) t[I.bakers_oven] = { n: 1, from: [[I.cobblestone, 8], [I.iron_ingot, 1]] };   // the bakehouse's jobsite (js/baker.js)
   return t;
 }
 const CRAFTS = {};
@@ -341,6 +342,9 @@ function pickType(m, bs) {
     // a pasture (js/cowherd.js): only in a village on grass; wanted when it has none and 10 or more villagers, hardly ever after that
     pasture: !(BF.cowherd && BF.cowherd.grassVillage(R)) ? 0 : (R.wg && (R.wg.buildings || []).some(b => b.type === "pasture")) || cnt("pasture") > 0 ? 0.02
       : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 10 ? 2 : 0.05,
+    // a bakehouse (js/baker.js): wanted when the village has no baker's oven (planned or built) and 15 or more villagers, hardly ever after that
+    bakehouse: (R.wg && (R.wg.jobsites || []).some(j => j.prof === "baker")) || cnt("bakehouse") > 0 || R.members.some(x => x.profession === "baker" && !x.dead) ? 0.02
+      : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 15 ? 1.5 : 0.05,
   };
   const sold = soldItems(R), stock = sellerStock(R);
   let sum = 0;

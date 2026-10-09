@@ -65,8 +65,8 @@ function snapshot() {
     vlog: BF.vlog ? BF.vlog.serialize() : undefined,   // village action logs (js/villagelog.js)
     vstats: BF.vstats ? BF.vstats.serialize() : undefined,   // population per game day, last 7 days (js/villagestats.js)
     econ: BF.econ ? BF.econ.serialize() : undefined,   // Economy view tallies, last 7 game days (js/economy.js)
-    happy: BF.happiness ? BF.happiness.serialize() : undefined,
-    days: BF.dayTimeline ? BF.dayTimeline.serialize() : undefined,   // villagers' day timelines, today and yesterday (js/daytimeline.js)   // village happiness: last week's events + last scores (js/happiness.js)
+    happy: BF.happiness ? BF.happiness.serialize() : undefined,   // village happiness: last week's events + last scores (js/happiness.js)
+    days: BF.dayTimeline ? BF.dayTimeline.serialize() : undefined,   // villagers' day timelines, today and yesterday (js/daytimeline.js)
     maps: BF.maps && BF.maps.serialize ? BF.maps.serialize() : undefined, // explored pixels of filled maps (js/maps.js)
     drops: BF.drops && BF.drops.serialize ? BF.drops.serialize() : undefined, // dropped items lying in the world, with their age (js/drops.js)
     boats: BF.boats ? BF.boats.serialize() : undefined, // placed boats, the player's included, with any mob passenger (js/boats.js)
@@ -142,7 +142,7 @@ const save = {
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 5, created: now, lastPlayed: now };
+    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 6, created: now, lastPlayed: now };
     BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
     save.current = meta;
     BF.emit("worldLoaded", meta);

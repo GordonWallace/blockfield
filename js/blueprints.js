@@ -161,6 +161,19 @@ const SPECS = {
       return { cells: c, beds: [], w: w + 1, d, marks: { room: [[1, 1], [9, 5]], gate: [[5, 0]], out: [[5, -1]], fence: [[0, 0], [10, 8]], churn: [[w, 1]] } };
     },
   },
+  // Bakehouse (js/baker.js): a small open shelter (3x3: four fence posts under a roof) over the baker's oven at the back. The oven is a jobsite:
+  // an unemployed villager takes the baker's job there (one baker per 15 villagers, at least one).
+  bakehouse: {
+    label: "bakehouse", weight: "other",
+    gen(st) {
+      const B = BF.B, S = pal(st), c = [];
+      for (const [u, q] of [[0, 0], [2, 0], [0, 2], [2, 2]]) c.push([u, 0, q, B.oak_fence, PH.WALL], [u, 1, q, B.oak_fence, PH.WALL]);
+      for (let q = 0; q < 3; q++) for (let u = 0; u < 3; u++) c.push([u, 2, q, S.wall, PH.ROOF]);
+      if (B.bakers_oven != null) c.push([1, 0, 2, B.bakers_oven, PH.LIGHT]);
+      c.push([1, 3, 1, B.torch, PH.LIGHT]);
+      return { cells: c, beds: [], w: 3, d: 3 };
+    },
+  },
   market_stall: {
     label: "market stall", weight: "other",
     gen(st) {

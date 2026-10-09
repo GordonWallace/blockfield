@@ -119,6 +119,7 @@ function detail(rec) {
       inv: invOf(m.inv),
       flock: flockOf(m),
       horses: BF.stables ? BF.stables.holdings(m) : null,   // a stable hand's paddock horses (js/stables.js)
+      bakes: m.profession === "baker" && BF.baker ? BF.baker.holdings(m) : null,   // a baker's ingredients, baked goods and oven (js/baker.js)
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));

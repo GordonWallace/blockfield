@@ -866,7 +866,7 @@ let invSig = "";
 function renderInv() {
   const el = $("r-inv"), m = hlName && curV ? curV.villagerList.find(v => v.name === hlName) : null;
   if (!m) { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; invSig = ""; } return; }
-  const inv = m.inv || [], sig = m.name + "|" + JSON.stringify(inv) + "|" + m.em + "|" + m.emChests + "|" + m.food + "|" + m.chests + "|" + JSON.stringify(m.flock || null) + "|" + JSON.stringify(m.horses || null) + "|" + Object.keys(icons).length;
+  const inv = m.inv || [], sig = m.name + "|" + JSON.stringify(inv) + "|" + m.em + "|" + m.emChests + "|" + m.food + "|" + m.chests + "|" + JSON.stringify(m.flock || null) + "|" + JSON.stringify(m.horses || null) + "|" + JSON.stringify(m.bakes || null) + "|" + Object.keys(icons).length;
   el.hidden = false;
   if (sig === invSig) return;
   invSig = sig;
@@ -885,9 +885,17 @@ function renderInv() {
     `<div>${esc(m.status || "")}</div><div>Slots used: <b>${used}</b> of ${slots.length}</div>` +
     `<div>Emeralds: <b>${fmt(m.em || 0)}</b> carried${m.chests ? `, <b>${fmt(m.emChests || 0)}</b> in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}</div>` +
     `<div>Food: <b>${fmt(m.food || 0)}</b> bread-equivalent carried${m.chests ? `, <b>${fmt(m.foodChests || 0)}</b> in chests` : ""}</div>` +
-    (m.flock ? `<div>Flock: <b>${fmt(m.flock.n)}</b> ${m.flock.kind}${m.flock.young ? ` (${fmt(m.flock.young)} young)` : ""}${m.flock.coop ? "" : `, no ${m.flock.kind === "chickens" ? "coop" : m.flock.kind === "cows" ? "pasture" : "pen"}`}${m.flock.eggs != null ? `, <b>${fmt(m.flock.eggs)}</b> egg${m.flock.eggs === 1 ? "" : "s"} in the nest` : ""}${m.flock.milked != null ? `, <b>${fmt(m.flock.milked)}</b> milked today, <b>${fmt(m.flock.culls || 0)}</b> culled${m.flock.limit ? ` (the pasture holds ${fmt(m.flock.limit)})` : ""}` : ""}</div>` : "") + horsesHtml(m.horses) + "</div>";
+    (m.flock ? `<div>Flock: <b>${fmt(m.flock.n)}</b> ${m.flock.kind}${m.flock.young ? ` (${fmt(m.flock.young)} young)` : ""}${m.flock.coop ? "" : `, no ${m.flock.kind === "chickens" ? "coop" : m.flock.kind === "cows" ? "pasture" : "pen"}`}${m.flock.eggs != null ? `, <b>${fmt(m.flock.eggs)}</b> egg${m.flock.eggs === 1 ? "" : "s"} in the nest` : ""}${m.flock.milked != null ? `, <b>${fmt(m.flock.milked)}</b> milked today, <b>${fmt(m.flock.culls || 0)}</b> culled${m.flock.limit ? ` (the pasture holds ${fmt(m.flock.limit)})` : ""}` : ""}</div>` : "") + horsesHtml(m.horses) + bakesHtml(m.bakes) + "</div>";
 }
 // A stable hand's paddock horses (js/stables.js holdings): how many, then one line per horse with its stats and price.
+// A baker's holdings (js/baker.js holdings): what it holds to bake with, what it has baked and holds, its oven.
+function bakesHtml(b) {
+  if (!b) return "";
+  const g = b.ingredients, o = b.goods, v = b.oven;
+  const ov = !v ? "no oven" : v.kind && v.n ? `oven ${v.lit ? "baking" : "waiting for fuel:"} <b>${fmt(v.n)}</b> ${v.kind === "cake" ? "cake" : "pie"}${v.n === 1 ? "" : "s"}${v.ready ? `, <b>${fmt(v.ready)}</b> ready` : ""}` : v.ready ? `oven: <b>${fmt(v.ready)}</b> ready` : "oven empty";
+  return `<div>Ingredients: <b>${fmt(g.wheat)}</b> wheat, <b>${fmt(g.eggs)}</b> eggs, <b>${fmt(g.milk)}</b> milk, <b>${fmt(g.sugar)}</b> sugar (+${fmt(g.cane)} cane), <b>${fmt(g.pumpkins)}</b> pumpkins, fuel for <b>${fmt(g.fuel)}</b></div>` +
+    `<div>Baked goods: <b>${fmt(o.cakes)}</b> cakes, <b>${fmt(o.slices)}</b> slices, <b>${fmt(o.pies)}</b> pies, <b>${fmt(o.bottles)}</b> empty bottles; ${ov}; baked so far <b>${fmt(b.made.cakes)}</b> cakes, <b>${fmt(b.made.pies)}</b> pies</div>`;
+}
 function horsesHtml(H) {
   if (!H) return "";
   if (!H.paddock) return "<div>Horses: <b>0</b> (no stable yet)</div>";
