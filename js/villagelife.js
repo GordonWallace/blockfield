@@ -1478,8 +1478,9 @@ function findWheatSeller(m) {
   return best;
 }
 // Empty glass bottles back to the cowherd (js/cowherd.js): a cowherd short of bottles buys them from any villager holding BOTTLE_MIN or more
-// (left from milk it drank), 1 emerald for up to 9 (a bottle is worth ~0.1 emerald).
-const BOTTLE_MIN = 5, BOTTLE_LOT = 9;
+// (left from milk it drank), 1 emerald for up to 9 (a bottle is worth ~0.1 emerald). The minimum is low because milk is bought a few bottles at a
+// time and spread over many villagers: with a higher one the empties stayed scattered 2-4 a head and the cowherd ran out of bottles.
+const BOTTLE_MIN = 3, BOTTLE_LOT = 9;
 function findBottleSeller(m) {
   const R = m.village, gb = I("glass_bottle"), now = dayNow(), sh = m.fshop;
   const want = BF.cowherd && m.profession === "cowherd" ? BF.cowherd.bottleWanted(m) : 0;

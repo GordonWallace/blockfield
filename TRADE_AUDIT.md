@@ -400,7 +400,7 @@ is the only way bottles enter a village.
 | 3 | 2 emerald > 16 steak | 2.00 | 1.92 | 0.96 | buy from villager |
 
 - **Empty bottles.** Every other villager holding 9 or more empty bottles (left from milk it drank) offers them to the player at `1 emerald > 9 glass_bottle`
-  (rho 0.90, an offer added while the trade screen is open, `syncFeed`), and the cowherd buys them back from villagers holding 5 or more, up to 9 for an
+  (rho 0.90, an offer added while the trade screen is open, `syncFeed`), and the cowherd buys them back from villagers holding 3 or more, up to 9 for an
   emerald, while it holds fewer than 9.
 - **Milk as food.** Hungry villagers buy milk bottles from the cowherd only when no other food is for sale in the village (fair price 1 emerald for 6,
   or its offer); it keeps 3 bottles back.

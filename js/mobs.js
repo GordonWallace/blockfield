@@ -2110,7 +2110,7 @@ function villageRoster(rec) {
     if (ordered.length < cap) ordered.push({ house: null, idx: 1500, bed: null, prof: "poultry_keeper" });
   }
   // cowherd: village generator 5 gives every village of COWHERD_POP (10) or more villagers on grass (cows spawn only on grass) one, with a pasture
-  // beside its milk churn (js/cowherd.js, worldgen layoutVillage). Own key <village key>#1600; it takes the place of the last plain resident.
+  // beside its milk churn (js/cowherd.js, worldgen layoutVillage). Own key <village key>#1700 (#1600+k are the trading caravans' merchants); it takes the place of the last plain resident.
   const ground = rec.ground != null ? rec.ground : rec.wg ? rec.wg.ground : null;
   if ((BF.state && BF.state.villages | 0) >= 5 && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.COWHERD_POP) || 10) && ground === 0) {
     if (ordered.length >= cap) {
@@ -2121,7 +2121,7 @@ function villageRoster(rec) {
         ordered.splice(i, 1); break;
       }
     }
-    if (ordered.length < cap) ordered.push({ house: null, idx: 1600, bed: null, prof: "cowherd" });
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1700, bed: null, prof: "cowherd" });
   }
   return ordered;
 }

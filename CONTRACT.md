@@ -905,7 +905,7 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   Test hooks: `BF.inventory.gridSet(stacks, w)`, `craftResult()`, `craftTake()`, `gridGet()`; `BF.player.finishEating(item)`.
 - **Milk churn** (block after the nesting box pack, jobsite of `cowherd`; model: a banded wooden churn; 4 planks + 1 iron ingot, as a U). Only the churn makes a cowherd. Old saves get cowherds only once a churn exists (placed or built).
 - **Pastures.** Village generator 5 (default for new worlds; worlds saved with 4 keep 4): a village of `COWHERD_POP` (10)+ villagers on grass (`v.ground === 0`, set early in `layoutVillage`; desert 1, snow 2) gets a cowherd (roster slot
-  `<village key>#1600`, taking the last plain resident's place, as the poultry keeper; a village whose residents are all tradespeople it cannot replace has none) and an 11x9 `pasture` (worldgen, added after the coop only when
+  `<village key>#1700`, taking the last plain resident's place, as the poultry keeper; a village whose residents are all tradespeople it cannot replace has none) and an 11x9 `pasture` (worldgen, added after the coop only when
   `BF.jobs.cowherdCount(v)` holds the cowherd, so no other plot moves): fence ring, oak gate facing the road, grass inside, two hay bales and a 4-long sunken water trough along the back; the churn goes beside it (`jobs.planVillage`).
   The roster takes `ground` (`rec.wg.ground`, or `ground` passed by jobs.js / signs.js).
   Builders build a `pasture` only in villages on grass (`BF.cowherd.grassVillage`; builder.js `pickType` weight 0 off grass, 2 with 10+ villagers and none, 0.02 after; `findSite` refuses it off grass and wants grass under its centre):
@@ -924,7 +924,7 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - **Hire kit.** 1 `bucket` + 30 `glass_bottle`, once per villager (`m.cowKit`, saved as `ck` in trades.pack): in the starting pack of a generated cowherd (`trading.stockFor` -> `kitInto`) or when a villager is hired as a
   cowherd later (`jobs.hire` -> `hireKit`). This is the only way glass bottles enter a village. Its wares (milk bottles, beef, leather, steak) are never in its starting pack and never restocked (`PRODUCE.cowherd = []`).
 - **Shopping** (villagelife.js `shopAI`): wheat at the fair price from the village, farmers first (`wheatWanted`: below max(2, adults) it tops up to 2 per adult + 4); empty glass bottles while it holds fewer than 9
-  (`bottleWanted`, `findBottleSeller`: from any villager holding 5+, up to 9 for 1 emerald). It never sells its last bucket (`trading.blockReason`), never drinks its milk buckets and never eats its raw beef (villagelife.js `reserveOf`).
+  (`bottleWanted`, `findBottleSeller`: from any villager holding 3+, up to 9 for 1 emerald). It never sells its last bucket (`trading.blockReason`), never drinks its milk buckets and never eats its raw beef (villagelife.js `reserveOf`).
 - **Beef.** It cooks the raw beef it holds beyond 6 (kept to sell), while it holds fewer than 24 steaks, in a real furnace of its village with fuel it holds or buys (the egg cook's errand, js/furnaceuse.js; state `m.cwc`,
   route kind `beef`, `busyWhen` stage `cook`), never instantly and never without a furnace; with no furnace in reach the beef stays raw.
 - **Milk as food.** Villagers count milk as food (bottle 0.4 bread-eq, bucket 1.2) and drink it, keeping the empty container. A hungry villager buys milk bottles only as a last resort (villagelife.js `findFoodSeller` passes

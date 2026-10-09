@@ -343,7 +343,7 @@ function tickPastures() {
 }
 function leavePasture(m) {
   const p = m.pasture;
-  if (p && p.cows) { const i = p.cows.indexOf(m.cow); if (i >= 0) p.cows.splice(i, 1); }
+  if (p && p.cows) { const i = p.cows.indexOf(m.cow); if (i >= 0) { p.cows.splice(i, 1); if (!m.dead) log("left", { pasture: p.key, herd: p.cows.length }); } }
   m.pasture = null; m.penVillage = null;
 }
 // A cow that walked (or was led) into a pasture joins its herd; one that got out for good leaves it.
@@ -353,7 +353,9 @@ function adoptOrRelease(m) {
     if (inRoom(p, m.position) && p.cows.length < ADOPT_MAX) {
       const s = stOf(m);
       if (p.cows.indexOf(s) < 0) p.cows.push(s);
+      const led = !!m.ledBy;
       s.mob = m; m.pasture = p; m.penVillage = p.rec; m.ledBy = null;
+      if (!led) log("joined", { pasture: p.key, herd: p.cows.length });   // walked in by itself (a led cow is logged as stocked)
       if (BF.emit) BF.emit("cowPenned", m, p);
       return;
     }
@@ -479,12 +481,15 @@ function bottleWanted(m) {
 // Glass bottles it needs to bottle the milk buckets it holds (3 each), plus 3 for the next one.
 const canBottle = m => cnt(m, I("milk_bucket")) > 0 && cnt(m, I("glass_bottle")) >= 3;
 const canMilk = m => cnt(m, I("bucket")) > 0 && cnt(m, I("glass_bottle")) >= 3 * (cnt(m, I("milk_bucket")) + 1) && cnt(m, I("milk_bottle")) < MILK_CAP;
-// Whether feeding herd cow o now keeps the herd within one over its limit once the willing cows have paired up (each pair gives one calf); the
-// cull then takes it back to the limit. Strays near the pasture are always fed.
+// Whether feeding cow o now keeps the herd within one over its limit once the willing cows have paired up (each pair gives one calf); the
+// cull then takes it back to the limit. Fed strays near the pasture count as if they had walked in through the gate (they can, and then breed
+// in the herd), and so does o when it is a stray.
 function feedOk(T, o, t) {
-  if (!T.pasture || o.pasture !== T.pasture) return true;
-  const willingN = adults(T.herd).filter(x => !hungry(x, t)).length;
-  return T.size + Math.floor((willingN + 1) / 2) <= T.limit + 1;
+  if (!T.pasture) return true;
+  const strays = adults(T.cows).filter(x => x.pasture !== T.pasture);
+  const willingHerd = adults(T.herd).filter(x => !hungry(x, t)).length, willingStray = strays.filter(x => !hungry(x, t)).length;
+  const join = o.pasture !== T.pasture ? 1 : 0;
+  return T.size + willingStray + join + Math.floor((willingHerd + willingStray + 1) / 2) <= T.limit + 1;
 }
 function wildCow(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
