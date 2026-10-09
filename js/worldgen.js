@@ -1189,17 +1189,17 @@ function layoutVillage(cx, cz, spawn, pop) {
     try { v.arch = BF.signs.planArch(v, { climate: (x, z) => climate(x, z), spawn: !!spawn, region: [regionOf(cx), regionOf(cz)] }); } catch (e) { console.error(e); v.arch = null; }
     if (v.arch) occ.push(v.arch.box);
   }
-  // signposts to nearby villages (js/signs.js): sites at the main road ends and on the plaza; which ones stand is decided when drawn
-  if (BF.signs && BF.signs.planPosts) {
-    try { v.posts = BF.signs.planPosts(v, { climate: (x, z) => climate(x, z) }); } catch (e) { console.error(e); v.posts = null; }
-    for (const p of v.posts || []) occ.push(p.box);
-  }
   for (const o of occ) {
     v.minX = Math.min(v.minX, o[0]); v.minZ = Math.min(v.minZ, o[1]);
     v.maxX = Math.max(v.maxX, o[2]); v.maxZ = Math.max(v.maxZ, o[3]);
   }
   for (const [x, z] of v.lamps) {
     v.minX = Math.min(v.minX, x); v.maxX = Math.max(v.maxX, x); v.minZ = Math.min(v.minZ, z); v.maxZ = Math.max(v.maxZ, z);
+  }
+  // signposts to nearby villages (js/signs.js): sites at the main road ends and on the plaza, inside the village box as it stands
+  // (they never grow it, so which villages a world has stays the same); which ones stand is decided when the village is drawn
+  if (BF.signs && BF.signs.planPosts) {
+    try { v.posts = BF.signs.planPosts(v, { climate: (x, z) => climate(x, z) }); } catch (e) { console.error(e); v.posts = null; }
   }
   for (const p of v.pads) v.minY = Math.min(v.minY, p.y);
   v.ground = biome === DESERT ? 1 : style === 2 ? 2 : 0;

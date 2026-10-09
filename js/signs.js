@@ -737,7 +737,7 @@ function drawArch(v, set, S) {
 // A signpost (two standing signs that merge into one 30-character board) at the outer end of each main road, facing back toward
 // the village and listing the villages within 45 degrees of that road, and one on the plaza beside the well listing all of them:
 // the 4 nearest villages within POST_RANGE, each as an arrow (as the reader sees it), the name and the distance rounded to 10.
-// planPosts (worldgen layoutVillage, after planArch) only picks the sites, so they go in the village box; assignPosts (worldgen
+// planPosts (worldgen layoutVillage, once the village box is known) only picks sites inside that box; assignPosts (worldgen
 // drawVillage, once per village) finds the neighbours and drops sites with nothing to list; drawPosts draws the used ones.
 const POST_RANGE = 800, POST_MAX = 4;
 const ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"];   // ahead, then clockwise
@@ -750,7 +750,7 @@ function planPosts(v, ctx) {
   const padOf = (x, z) => v.pads.find(p => inB(x, z, p, 0));
   const onRoad = (x, z) => v.roads.some(r => inB(x, z, r, 0));
   const inArch = (x, z) => a && a.box && x >= a.box[0] - 1 && x <= a.box[2] + 1 && z >= a.box[1] - 1 && z <= a.box[3] + 1;
-  const free = (x, z) => !padOf(x, z) && !near(x, z) && !onRoad(x, z) && !inHouse(x, z) && !inArch(x, z);
+  const free = (x, z) => x >= v.minX && x <= v.maxX && z >= v.minZ && z <= v.maxZ && !padOf(x, z) && !near(x, z) && !onRoad(x, z) && !inHouse(x, z) && !inArch(x, z);
   const wood = SIGN_WOOD[v.style] || "oak", h = hash32(v.x, v.z, ((BF.state && BF.state.seed) | 0) ^ 0x5197);
   const post = (cells, d, f) => {
     const id = signId(wood, 0, f);
