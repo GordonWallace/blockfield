@@ -342,6 +342,34 @@ function chestRemoved(x, y, z) {
   renderAll(); emitChange();
 }
 
+// The furnace block at x,y,z is gone (world.js calls furnaceRemoved from setBlock): close its screen, stop it cooking and empty it.
+// Mined by the player, the contents go to the inventory: player.js emits blockBroken straight after setBlock, in the same task, and
+// that claims them. Removed any other way (explosion, /setblock, /fill) they drop on the ground a microtask later. The record leaves
+// the furnace map at once, so a furnace placed in the cell again starts empty.
+const removedFurnaces = new Map();   // "x,y,z" -> furnace state waiting to be emptied
+function furnaceRemoved(x, y, z) {
+  const key = `${x},${y},${z}`, f = furnaces.get(key);
+  if (!f) return;
+  if (furnace === f) closeScreen(false);
+  furnaces.delete(key);
+  if (f.lit) { f.lit = false; BF.emit("furnaceLit", x, y, z, false); }
+  removedFurnaces.set(key, f);
+  queueMicrotask(() => furnaceEmpty(key, false));
+}
+function furnaceEmpty(key, toPlayer) {
+  const f = removedFurnaces.get(key);
+  if (!f) return;
+  removedFurnaces.delete(key);
+  const [x, y, z] = key.split(",").map(Number);
+  for (const s of f.slots) {
+    if (!s) continue;
+    if (!toPlayer && BF.drops && BF.drops.spawn) { BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5); continue; }
+    const left = addTo(s.id, s.count, ORDER_ALL); if (left < s.count) showToast(s.id, s.count - left);
+    if (left) { if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, left, x + 0.5, y + 0.4, z + 0.5); else BF.emit("itemDropped", s.id, left); }   // no room: drops where the furnace stood
+  }
+  renderAll(); emitChange();
+}
+
 // ---------------------------------------------------------------- villager trading
 // Tables, stock rules and villager inventories live in trading.js (BF.trades).
 const LEVELS = BF.trades.LEVELS, LEVEL_XP = BF.trades.LEVEL_XP;
@@ -1340,22 +1368,9 @@ const api = {
       if (/^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey && !(BF.state && BF.state.paused)) api.select(+e.code.slice(5) - 1);
     }, true);
     document.addEventListener("pointermove", e => { mouseX = e.clientX; mouseY = e.clientY; }, { passive: true });
-    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); chests.clear(); });
+    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); removedFurnaces.clear(); chests.clear(); });
     BF.on("gameModeChanged", () => { if (open_ && (mode === "creative" || mode === "inventory")) api.close(); });
-    BF.on("blockBroken", (x, y, z, id) => {
-      if (!BF.isFurnace(id)) return;
-      const key = `${x},${y},${z}`, f = furnaces.get(key);
-      if (!f) return;
-      if (furnace === f) api.close();
-      furnaces.delete(key);
-      for (const s of f.slots) if (s) {
-        const left = addTo(s.id, s.count, ORDER_ALL);
-        if (left < s.count) showToast(s.id, s.count - left);
-        if (left) { if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, left, x + 0.5, y + 0.4, z + 0.5); else BF.emit("itemDropped", s.id, left); }
-      }
-      if (f.lit) BF.emit("furnaceLit", x, y, z, false);
-      renderAll(); emitChange();
-    });
+    BF.on("blockBroken", (x, y, z, id) => { if (BF.isFurnace(id)) { furnaceRemoved(x, y, z); furnaceEmpty(`${x},${y},${z}`, true); } });
   },
   update(dt) {
     // furnaces cook in game time (simTick, so fast-forward speeds them up too), or in real time while you watch one in the pause
@@ -1490,6 +1505,7 @@ const api = {
   chestRecord(x, y, z) { return chestAt({ x, y, z }); },   // creates the (empty, unowned) record of a chest that was never used
   ownerLabel,
   chestRemoved,
+  furnaceRemoved,
 
   serialize() {
     return {
