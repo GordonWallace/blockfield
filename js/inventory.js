@@ -211,10 +211,14 @@ function takeFromInv(id, n) { // main first, then hotbar
   }
   return got;
 }
-function giveBack(stack) { // into inventory; overflow is announced as a drop
+function giveBack(stack) { // into inventory; what doesn't fit drops in front of the player
   if (!stack) return;
   const left = addTo(stack.id, stack.count, ORDER_ALL, stack.wear);
-  if (left > 0) BF.emit && BF.emit("itemDropped", stack.id, left);
+  if (left > 0) dropOverflow(stack.id, left, stack.wear);
+}
+function dropOverflow(id, n, wear) {
+  if (BF.drops && BF.drops.atPlayer && BF.drops.atPlayer(id, n, wear)) return;
+  BF.emit && BF.emit("itemDropped", id, n);
 }
 // move as much of `stack` as fits into arr[i]; returns what is left
 function mergeInto(arr, i, stack) {
@@ -333,7 +337,35 @@ function chestRemoved(x, y, z) {
   for (const s of c.slots) {
     if (!s) continue;
     if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5);
-    else { const left = addTo(s.id, s.count, ORDER_ALL); if (left) BF.emit("itemDropped", s.id, left); }
+    else { const left = addTo(s.id, s.count, ORDER_ALL, s.wear); if (left) dropOverflow(s.id, left, s.wear); }
+  }
+  renderAll(); emitChange();
+}
+
+// The furnace block at x,y,z is gone (world.js calls furnaceRemoved from setBlock): close its screen, stop it cooking and empty it.
+// Mined by the player, the contents go to the inventory: player.js emits blockBroken straight after setBlock, in the same task, and
+// that claims them. Removed any other way (explosion, /setblock, /fill) they drop on the ground a microtask later. The record leaves
+// the furnace map at once, so a furnace placed in the cell again starts empty.
+const removedFurnaces = new Map();   // "x,y,z" -> furnace state waiting to be emptied
+function furnaceRemoved(x, y, z) {
+  const key = `${x},${y},${z}`, f = furnaces.get(key);
+  if (!f) return;
+  if (furnace === f) closeScreen(false);
+  furnaces.delete(key);
+  if (f.lit) { f.lit = false; BF.emit("furnaceLit", x, y, z, false); }
+  removedFurnaces.set(key, f);
+  queueMicrotask(() => furnaceEmpty(key, false));
+}
+function furnaceEmpty(key, toPlayer) {
+  const f = removedFurnaces.get(key);
+  if (!f) return;
+  removedFurnaces.delete(key);
+  const [x, y, z] = key.split(",").map(Number);
+  for (const s of f.slots) {
+    if (!s) continue;
+    if (!toPlayer && BF.drops && BF.drops.spawn) { BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5); continue; }
+    const left = addTo(s.id, s.count, ORDER_ALL); if (left < s.count) showToast(s.id, s.count - left);
+    if (left) { if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, left, x + 0.5, y + 0.4, z + 0.5); else BF.emit("itemDropped", s.id, left); }   // no room: drops where the furnace stood
   }
   renderAll(); emitChange();
 }
@@ -1373,18 +1405,9 @@ const api = {
       if (/^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey && !(BF.state && BF.state.paused) && !(BF.player && BF.player.menu && BF.player.menu())) api.select(+e.code.slice(5) - 1);   // not on the title screen
     }, true);
     document.addEventListener("pointermove", e => { mouseX = e.clientX; mouseY = e.clientY; }, { passive: true });
-    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); chests.clear(); });
+    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); removedFurnaces.clear(); chests.clear(); });
     BF.on("gameModeChanged", () => { if (open_ && (mode === "creative" || mode === "inventory")) api.close(); });
-    BF.on("blockBroken", (x, y, z, id) => {
-      if (!BF.isFurnace(id)) return;
-      const key = `${x},${y},${z}`, f = furnaces.get(key);
-      if (!f) return;
-      if (furnace === f) api.close();
-      furnaces.delete(key);
-      for (const s of f.slots) if (s) { const left = addTo(s.id, s.count, ORDER_ALL); if (left < s.count) showToast(s.id, s.count - left); if (left) BF.emit("itemDropped", s.id, left); }
-      if (f.lit) BF.emit("furnaceLit", x, y, z, false);
-      renderAll(); emitChange();
-    });
+    BF.on("blockBroken", (x, y, z, id) => { if (BF.isFurnace(id)) { furnaceRemoved(x, y, z); furnaceEmpty(`${x},${y},${z}`, true); } });
   },
   update(dt) {
     // furnaces cook in game time (simTick, so fast-forward speeds them up too), or in real time while you watch one in the pause
@@ -1409,6 +1432,7 @@ const api = {
       if (t.t <= 0) { t.el.remove(); toasts.splice(k, 1); }
     }
   },
+  dropOverflow(itemId, count, wear) { dropOverflow(itemId, count, wear); },   // items with no room: dropped in front of the player
   add(itemId, count = 1, wear = 0) {   // wear: uses already spent on a tool (a worn tool picked up again)
     if (itemId === undefined || itemId === null || itemId === 0 || !BF.items[itemId] || !(count > 0)) return count || 0;
     const left = addTo(itemId, count, ORDER_ALL, wear);
@@ -1518,12 +1542,16 @@ const api = {
   chestRecord(x, y, z) { return chestAt({ x, y, z }); },   // creates the (empty, unowned) record of a chest that was never used
   ownerLabel,
   chestRemoved,
+  furnaceRemoved,
 
   serialize() {
     return {
       v: 1,
       slots: slots.map(toSave),
       selected,
+      // items out of the inventory while a screen is open (crafting grid, trade payment, cursor): the tab can close
+      // mid-screen, so they are saved and go back into the inventory on load
+      held: open_ ? [...grid, ...pay, cursor].filter(Boolean).map(toSave) : undefined,
       furnaces: [...furnaces.values()].filter(f => f.pos).map(f => ({
         pos: [f.pos.x, f.pos.y, f.pos.z], slots: f.slots.map(toSave), burn: f.burn, burnMax: f.burnMax, cook: f.cook,
       })),
@@ -1549,6 +1577,13 @@ const api = {
       const c = chestAt({ x: cs.pos[0], y: cs.pos[1], z: cs.pos[2] });
       for (let k = 0; k < CHEST_SIZE; k++) c.slots[k] = fromSave(cs.slots && cs.slots[k]);
       if (typeof cs.owner === "string" && cs.owner) { c.owner = cs.owner; c.ownerName = typeof cs.on === "string" ? cs.on : ""; c.emptySince = Number.isFinite(cs.es) ? cs.es : null; }
+    }
+    if (Array.isArray(o.held)) for (const h of o.held) {
+      const st = fromSave(h);
+      if (!st) continue;
+      const left = addTo(st.id, st.count, ORDER_ALL, st.wear);
+      const p = BF.player && BF.player.position;
+      if (left > 0 && p && BF.drops && BF.drops.spawn) BF.drops.spawn(st.id, left, p.x, p.y + 0.5, p.z, { wear: st.wear });
     }
     selected = 0;
     api.select(+o.selected || 0);
