@@ -1,3 +1,4 @@
+// @ci integration suite=world
 // Rain, not snow, on temperate land in mile-high worlds; snow stays on cold biomes (bug-016):
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/tr test/temperate-rain.js
 module.exports = async (pg, out) => {
