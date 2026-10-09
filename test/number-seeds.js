@@ -1,3 +1,4 @@
+// @ci integration suite=world
 // Different number seeds give different worlds; seeds 1..4294967295 and saved worlds are unchanged (bug-021):
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/ns test/number-seeds.js
 module.exports = async (pg, out) => {
