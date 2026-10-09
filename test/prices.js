@@ -30,25 +30,26 @@ module.exports = async (pg) => {
     const f = mk("fletcher"); T.inv.add(f.inv, em, 12);
     const arrows = find(f, "emerald", "arrow"), cap = T.profile("fletcher").caps.get(I.arrow);
     T.inv.add(f.inv, I.arrow, cap);
+    const arrowBase = arrows.sell.n;   // its trade table's arrows per emerald
     P.tick(f, 0);
     for (let d = 1; d <= 29; d++) P.tick(f, d);
-    ok(`29 days: not yet half (${arrows.sell.n} arrows an emerald)`, P.step(arrows) === -29 && arrows.sell.n < 44);
+    ok(`29 days: not yet half (${arrows.sell.n} arrows an emerald)`, P.step(arrows) === -29 && arrows.sell.n < 2 * arrowBase);
     P.tick(f, 30);
-    ok(`sell offer halves in 30 days: 1 emerald > ${arrows.sell.n} arrows`, P.step(arrows) === -30 && arrows.sell.n === 44 && arrows.buy[0].n === 1);
+    ok(`sell offer halves in 30 days: 1 emerald > ${arrows.sell.n} arrows`, P.step(arrows) === -30 && arrows.sell.n === 2 * arrowBase && arrows.buy[0].n === 1);
     for (let d = 31; d <= 45; d++) P.tick(f, d);
-    ok("and not below", P.step(arrows) === -30 && arrows.sell.n === 44);
+    ok("and not below", P.step(arrows) === -30 && arrows.sell.n === 2 * arrowBase);
     // below the cap there's no glut
     const f3 = mk("fletcher"); const a3 = find(f3, "emerald", "arrow"); T.inv.add(f3.inv, I.arrow, cap - 1);
     P.tick(f3, 0); P.tick(f3, 5);
     ok("under the stock cap: no drop", P.step(a3) === 0);
     // ---- trades ease the price back 3 steps each, at the next tick
     P.filled(f, arrows, 2);
-    ok("no change in the middle of trading", arrows.sell.n === 44);
+    ok("no change in the middle of trading", arrows.sell.n === 2 * arrowBase);
     T.inv.remove(f.inv, I.arrow, 999);   // sold out: no glut now
     P.tick(f, 46);
-    ok(`2 trades: 6 steps back (${P.step(arrows)}, ${arrows.sell.n} arrows)`, P.step(arrows) === -24 && arrows.sell.n < 44);
+    ok(`2 trades: 6 steps back (${P.step(arrows)}, ${arrows.sell.n} arrows)`, P.step(arrows) === -24 && arrows.sell.n < 2 * arrowBase);
     P.filled(f, arrows, 20); P.tick(f, 47);
-    ok("never past base", P.step(arrows) === 0 && arrows.sell.n === 22 && arrows.buy[0].n === 1);
+    ok("never past base", P.step(arrows) === 0 && arrows.sell.n === arrowBase && arrows.buy[0].n === 1);
     P.filled(c, flesh, 1); P.tick(c, 141);
     ok("a filled buy offer comes down 3 steps", P.step(flesh) === 27 && unit(flesh) < base(flesh) * 2);
     // ---- floors
