@@ -21,7 +21,8 @@ module.exports = async (pg) => {
   // 2. out on a task, 300 blocks away, over the village-count limit: stopped at once, the villager sent home first, and logged
   await pg.evaluate(k => {
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
-    const put = () => { m.sleeping = false; m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
     put(); window.__pin = setInterval(put, 150);
     window.__who = BF.vlog.nameOf(m);
   }, info.key);
