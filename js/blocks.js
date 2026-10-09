@@ -310,6 +310,10 @@ const BLOCK_DEFS = [
   // tack rack: the stable hand villager's jobsite (not vanilla): a wooden wall rack with a saddle on its peg and a bridle hanging beside it
   { name: "tack_rack", jobsite: "stable_hand", tiles: { top: "tack_rack_top", side: "tack_rack_side", front: "tack_rack_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#7a5232" },
   // ---- end stable pack ----
+  // ---- merchant pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Merchants")
+  // merchant's counter: the merchant villager's jobsite (not vanilla): a plank counter with a ledger, scales and a cash box on top
+  { name: "merchant_counter", jobsite: "merchant", tiles: { top: "merchant_counter_top", side: "merchant_counter_side", front: "merchant_counter_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#8a6a3a" },
+  // ---- end merchant pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);

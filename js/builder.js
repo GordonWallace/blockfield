@@ -66,6 +66,7 @@ function craftTable(wood) {
   t[I.furnace] = { n: 1, from: [[I.cobblestone, 8]] };
   const G = BP().woodItem(wood, "fence_gate");
   if (G != null) t[G] = { n: 1, from: [[P, 4]] };                                        // 4 sticks (2 planks) + 2 planks: the stable's paddock gate
+  if (I.merchant_counter != null) t[I.merchant_counter] = { n: 1, from: [[P, 12]] };   // the market stall's jobsite: 3 slabs, 2 planks and a chest (recipes-jobs.js)
   if (I.tack_rack != null) t[I.tack_rack] = { n: 1, from: [[P, 4], [I.leather, 1], [I.iron_ingot, 1]] };   // the stable's jobsite (recipes-jobs.js)
   return t;
 }

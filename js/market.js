@@ -57,6 +57,7 @@ function reserve(v) {
   if (v.profession === "farmer" && F()) for (const s of v.inv) if (s && BF.items[s.id].plants != null) add(new Set([s.id]), F().SEED_KEEP);
   if (v.profession === "shepherd" && BF.shepherd && BF.I.wheat_item != null) add(new Set([BF.I.wheat_item]), count(v, BF.I.wheat_item) + BF.shepherd.wheatWanted(v));
   if (v.profession === "builder" && BF.builder && BF.builder.reserve) { const r = BF.builder.reserve(v); for (const k in r) add(new Set([+k]), r[k]); }
+  if (v.profession === "merchant" && BF.merchant) { const r = BF.merchant.reserve(v); for (const k in r) add(new Set([+k]), r[k]); }   // its tent, and its cargo on a trip
   v._res = { t: now, list };
   return list;
 }

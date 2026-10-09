@@ -1,8 +1,10 @@
 // Far-village simulation. Villagers only exist while their chunks are loaded, so this keeps the terrain data
 // (no meshes) of the nearest few villages loaded out to RADIUS blocks, letting their villagers run their
 // normal AI while the player is beyond view distance. Also catches up crops when a village is revisited.
-// API: BF.villageSim = { RADIUS, MAX, keepKeys, update(px, pz) -> changed, isActive(key), status(),
-//                        exportSeen(out), importSeen(o), reset() }
+// Trips (js/merchant.js) pin both villages and a corridor of chunks between them: pinned villages run whatever the player's distance, outside
+// MAX and the chunk budget, until the trip ends (unpin). At most MAX_PINS trips at a time; pins are saved with the game ("pin:<id>").
+// API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), pin(id, a, b, keys) -> ok, unpin(id),
+//                        pins(), pinned() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -20,7 +22,9 @@ const active = new Map();        // village key -> { v, keys: [chunk keys] }
 const seen = new Map();          // village key -> game day it was last simulated
 const pending = new Map();       // village key -> { away, todo: Set(chunk keys) } crops still to catch up
 const keepKeys = new Set();
-let t = 0, lastT = 0;
+const MAX_PINS = 2;              // trips on the road at once, world-wide
+const pins = new Map();          // trip id -> { a, b (worldgen villages), keys: [corridor chunk keys] }
+let t = 0, lastT = 0, pinDirty = false;
 
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
@@ -70,13 +74,33 @@ function startCatchUp(key, ent) {
 function rebuild() {
   keepKeys.clear();
   for (const ent of active.values()) for (const k of ent.keys) keepKeys.add(k);
+  for (const p of pins.values()) for (const k of p.keys) keepKeys.add(k);
 }
+// The chunks a walk from village a to village b crosses, plus one chunk either side.
+function corridor(a, b) {
+  const CS = BF.CS, out = new Set(), d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(d / 4));
+  for (let i = 0; i <= n; i++) {
+    const cx = Math.floor((a.x + (b.x - a.x) * i / n) / CS), cz = Math.floor((a.z + (b.z - a.z) * i / n) / CS);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) out.add((cx + dx) + "," + (cz + dz));
+  }
+  return [...out];
+}
+function pin(id, a, b, keys) {
+  if (!pins.has(id) && pins.size >= MAX_PINS) return false;
+  pins.set(id, { a, b, keys: keys || corridor(a, b) });
+  pinDirty = true; lastT = 0;
+  return true;
+}
+function unpin(id) { if (pins.delete(id)) { pinDirty = true; lastT = 0; } }
+const pinnedKeys = () => { const s = new Set(); for (const p of pins.values()) { s.add(vKey(p.a)); s.add(vKey(p.b)); } return s; };
 
 // Called from world.update every frame; cheap (re-evaluates about every 1.5 s). Returns true when the kept set changed.
 function update(px, pz) {
   const now = performance.now() / 1000;
-  if (now - lastT < 1.5) return false;
+  if (now - lastT < 1.5 && !pinDirty) return false;
   lastT = now;
+  const pinChange = pinDirty;
+  pinDirty = false;
   const wg = BF.worldgen;
   if (!wg || typeof wg.villagesNear !== "function") return false;
   let near;
@@ -86,15 +110,19 @@ function update(px, pz) {
   cand.sort((a, b) => a.d - b.d);
   const next = new Map();
   let kept = 0;
+  // pinned villages first, outside MAX and the chunk budget
+  for (const p of pins.values()) for (const v of [p.a, p.b]) { const k = vKey(v); if (!next.has(k)) next.set(k, active.get(k) || { v, keys: footprint(v), pinned: true }); }
+  const nPinned = next.size;
   for (const c of cand) {
-    if (next.size >= MAX) break;
+    if (next.size - nPinned >= MAX) break;
+    if (next.has(c.key)) continue;
     if (!(c.d <= RADIUS || (active.has(c.key) && c.d <= DROP))) continue;
     const e = active.get(c.key) || { v: c.v, keys: footprint(c.v) };
-    if (next.size && kept + e.keys.length > CHUNK_BUDGET) continue;   // big (sized) villages: fewer of them at a time
+    if (next.size > nPinned && kept + e.keys.length > CHUNK_BUDGET) continue;   // big (sized) villages: fewer of them at a time
     kept += e.keys.length;
     next.set(c.key, e);
   }
-  let changed = next.size !== active.size;
+  let changed = pinChange || next.size !== active.size;
   for (const k of next.keys()) if (!active.has(k)) changed = true;
   for (const k of active.keys()) if (!next.has(k)) pending.delete(k);
   const fresh = [...next].filter(([k]) => !active.has(k));
@@ -118,15 +146,39 @@ function onChunkLoad(cx, cz, c) {
   }
 }
 
+// a saved village by its key: the worldgen village there
+function villageByKey(key) {
+  const [x, z] = key.split(",").map(Number);
+  let vs = [];
+  try { vs = BF.worldgen.villagesNear(x, z, 8) || []; } catch (e) { return null; }
+  return vs.find(v => v && vKey(v) === key) || null;
+}
+
 BF.villageSim = {
-  RADIUS, MAX,
+  RADIUS, MAX, MAX_PINS,
   keepKeys,
   update,
+  pin, unpin, corridor,
+  pins: () => pins,
+  pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
+  isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks`,
-  exportSeen(out) { for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3); },
-  importSeen(o) { seen.clear(); if (o) for (const k in o) if (k.slice(0, 5) === "seen:") seen.set(k.slice(5), +o[k]); },
-  reset() { active.clear(); seen.clear(); pending.clear(); keepKeys.clear(); lastT = 0; },
+  status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
+  exportSeen(out) {
+    for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);
+    for (const [id, p] of pins) out["pin:" + id] = { a: vKey(p.a), b: vKey(p.b) };   // the corridor is worked out again on load
+  },
+  importSeen(o) {
+    seen.clear(); pins.clear(); pinDirty = true;
+    if (o) for (const k in o) {
+      if (k.slice(0, 5) === "seen:") seen.set(k.slice(5), +o[k]);
+      else if (k.slice(0, 4) === "pin:" && o[k] && typeof o[k].a === "string" && typeof o[k].b === "string") {
+        const a = villageByKey(o[k].a), b = villageByKey(o[k].b);
+        if (a && b && pins.size < MAX_PINS) pins.set(k.slice(4), { a, b, keys: corridor(a, b) });
+      }
+    }
+  },
+  reset() { active.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); lastT = 0; pinDirty = false; },
   init() { BF.world.onChunkLoad(onChunkLoad); },
 };
 })();
