@@ -51,7 +51,7 @@ function toCook(m) {
   return want > 0 && F.available(m) < F.rate(m) ? Math.min(n, Math.ceil(want / F.breadEq(COOKED()))) : 0;
 }
 // Fuel it may burn: coal always, wood unless it works with wood or sells that kind.
-const fuelOk = m => id => FU.isCoal(id) || (!NO_WOOD[m.profession] && !(m.trades || []).some(o => o && o.sell && o.sell.id === id));
+const fuelOk = m => id => FU.isCoal(id) || (!NO_WOOD[m.profession] && !(m.trades || []).some(o => o && !o.spare && !o.need && o.sell && o.sell.id === id));
 const skipFurnace = S => f => avoided(S, "f:" + FU.pk(f.x, f.y, f.z));
 const skipOffer = S => (v2, o) => avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id);
 // How it would cook n eggs, spending at most `budget` emeralds on fuel: {furnace} (fuel in hand or burning there), {furnace, need: {f, n, what}}
