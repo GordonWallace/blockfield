@@ -1,5 +1,6 @@
 # Baseline tests: a quick smoke set (about 5 min) on every pull request into a release branch (and into main), plus the
-# suites (game areas) the pull request turns on with a line in its description, e.g. `CI suites: jobs, ui` (or `all`).
+# suites (game areas) the pull request turns on with a line in its description, e.g. `CI suites: jobs, ui` (or `all`). A suite's
+# long tests run only when `soak` is on the line too (`CI suites: village, soak`); `all` includes them.
 # Editing that line re-runs the check. Tiers, suites and timeouts are in test/ci.json; the runner is test/ci.js.
 name: Baseline tests
 
@@ -10,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       suites:
-        description: 'Suites to add to the smoke set (e.g. "jobs ui", or "all")'
+        description: 'Suites to add to the smoke set (e.g. "jobs ui", "village soak", or "all")'
         required: false
         default: ''
 
