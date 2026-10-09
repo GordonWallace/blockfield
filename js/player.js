@@ -32,6 +32,7 @@ let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
 let hurtCd = 0, flashT = 0, attackCd = 0, swingT = 0;
+let hurtAmt = 0;   // the hit that started the current hurtCd window (Infinity: spawn protection)
 let mouseL = false, mouseR = false;
 let breakTarget = null, breakProgress = 0, breakCd = 0;
 let placeCd = 0, eatT = 0;
@@ -1563,9 +1564,14 @@ let lastCause = "";
 // environmental damage, which ignores the post-hit invulnerability window.
 P.damage = function (amount, fromPos, cause) {
   if (creative() || P.dead || !started || waitingForChunk || !(amount > 0)) return;
-  if (hurtCd > 0 && !cause) return;
-  if (!cause) hurtCd = 0.5;
-  P.health = Math.max(0, P.health - amount);
+  // Vanilla invulnerability: during the half second after a hit, a stronger hit still deals the difference (a creeper
+  // blast right after a zombie punch), a weaker or equal one does nothing.
+  let dealt = amount;
+  if (!cause) {
+    if (hurtCd > 0) { if (amount <= hurtAmt) return; dealt = amount - hurtAmt; hurtAmt = amount; }
+    else { hurtCd = 0.5; hurtAmt = amount; }
+  }
+  P.health = Math.max(0, P.health - dealt);
   lastCause = cause || (fromPos ? "slain" : "hurt");
   flashT = 0.45; hurtBlink = 0.5;
   if (fromPos) {
@@ -1575,7 +1581,7 @@ P.damage = function (amount, fromPos, cause) {
     if (!flying) vel.y = Math.max(vel.y, 5);
   }
   exhaustion += 0.1;
-  emit("playerDamaged", amount);
+  emit("playerDamaged", dealt);
   if (P.health <= 0) die();
 };
 P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health + n); };
@@ -1612,7 +1618,7 @@ function resetStats() {
   vel.x = vel.y = vel.z = 0;
   P.health = P.maxHealth; P.hunger = P.maxHunger; P.dead = false;
   saturation = 5; exhaustion = 0; air = AIR_MAX; fallStart = null; flying = false; sprinting = false;
-  hurtCd = 1; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
+  hurtCd = 1; hurtAmt = Infinity; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
   dismount(true);
   resetBreak();
 }
@@ -1840,7 +1846,7 @@ P.spawn = function (x, y, z) {
   pos.set(x, y, z);
   waitingForChunk = true;
   faceOpen = true;
-  hurtCd = 2;
+  hurtCd = 2; hurtAmt = Infinity;
   if (menuOpen === "death") { showScreen(null); BF.state.paused = false; }
   syncCamera(0.016);
 };
@@ -1908,7 +1914,7 @@ P.deserialize = function (o) {
   yaw = num(o.yaw, yaw); pitch = clamp(num(o.pitch, pitch), -1.55, 1.55);
   waitingForChunk = true;   // no physics until the chunks around the saved position are loaded
   faceOpen = false;         // keep the saved look direction
-  hurtCd = 2;
+  hurtCd = 2; hurtAmt = Infinity;
   if (menuOpen === "death") { showScreen(null); BF.state.paused = false; }
   hudKey = "";
   syncCamera(0.016);
