@@ -6,10 +6,11 @@
   "farming": {"about": "farmers, farmland, shepherds and sheep, food", "tests": ["farmbeds", "farmbeds-actions", "farmer-dig", "farmer-logs", "farmland-actions", "farm-repair", "shepherd-check", "shepherd-day", "shepherd-misc"]},
   "village": {"about": "village life: sizes and kits, paths, chests and beds, deaths, golems, explorers and tents, jobsites, the village log, economy", "tests": ["beds-actions", "chest-ladder-actions", "chest-owners", "dead-villagers", "economy", "explorer-actions", "explorer-far", "golem-actions", "jobmemory", "pathgap-actions", "tent-actions", "village-kits", "village-sizes", "villagelog", "villager-ladder", "villager-ladder-chest", "villagers-stay-put"]},
   "world": {"about": "world generation, rivers, maps and auto maps, cartographers, mobs and night spawning, boats and horses", "tests": ["automap-actions", "automap-big", "automap-colours", "automap-gen", "automap-input", "automap-time", "automap-tp", "boat-river", "boats", "cartography-actions", "cartography-live", "gen3-check", "horses", "map-held-actions", "map-upgrade-again", "map-icons", "maps-actions", "night-spawn", "river-check", "stables"]},
-  "items": {"about": "inventory, crafting, creative mode, dropped items and saves, durability, held items, block variants", "tests": ["creative-rclick", "creative-trash", "creative-vinv", "drops-save", "durability-actions", "held-items", "mining-vanilla", "wood-variants"]},
+  "items": {"about": "inventory, crafting, creative mode, dropped items and saves, durability, held items, block variants", "tests": ["creative-rclick", "creative-trash", "creative-vinv", "drops-save", "durability-actions", "held-items", "mining-vanilla", "open-screen-save", "wood-variants"]},
   "ui": {"about": "screens and input: debug screen and its views, villager screens and hover cards, overlays, Escape and mouse release, title screen", "tests": ["compare", "compare-view", "debug-alerts", "debug-inventory", "debug-screen", "economy-view", "esc-close", "overlay-behind", "seed-copy", "villager-hover", "villager-screens", "z-release"]}
  },
  "tests": [
+  {"name": "map-upgrade-again", "file": "test/map-upgrade-again.js", "kind": "actions", "tier": "integration", "what": "upgrading a map again includes what was explored since"},
   {"name": "automap-colours", "file": "test/automap-colours.js", "kind": "actions", "tier": "integration"},
   {"name": "automap-input", "file": "test/automap-input.js", "kind": "actions", "tier": "integration"},
   {"name": "cartography-actions", "file": "test/cartography-actions.js", "kind": "actions", "tier": "baseline"},
@@ -34,6 +35,7 @@
   {"name": "villagelog", "file": "test/villagelog.js", "kind": "actions", "tier": "baseline"},
   {"name": "villager-screens", "file": "test/villager-screens.js", "kind": "actions", "tier": "baseline"},
   {"name": "wood-variants", "file": "test/wood-variants.js", "kind": "actions", "tier": "integration"},
+  {"name": "open-screen-save", "file": "test/open-screen-save.js", "kind": "actions", "tier": "integration", "what": "items in the crafting grid, trade payment or on the cursor survive closing the tab"},
   {"name": "automap-actions", "file": "test/automap-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "automap-big", "file": "test/automap-big.js", "kind": "actions", "tier": "integration"},
   {"name": "automap-gen", "file": "test/automap-gen.js", "kind": "actions", "tier": "integration", "timeout": 2400},
@@ -53,7 +55,6 @@
   {"name": "forester-axes", "file": "test/forester-axes.js", "kind": "actions", "tier": "integration", "timeout": 600},
   {"name": "furniture-actions", "file": "test/furniture-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "gen3-check", "kind": "node", "tier": "integration", "file": "tools/gen3-check.js", "args": ["all"], "timeout": 900, "what": "terrain generator: old generators unchanged, gen 3 seams"},
-  {"name": "map-upgrade-again", "file": "test/map-upgrade-again.js", "kind": "actions", "tier": "integration", "what": "upgrading a map again includes what was explored since"},
   {"name": "map-icons", "file": "test/map-icons.js", "kind": "actions", "tier": "integration"},
   {"name": "toolchain", "kind": "node", "tier": "integration", "file": "test/toolchain.js", "args": ["1", "1", "1"], "timeout": 900, "what": "tool economy soak, 1 day x 1 village"},
   {"name": "minechain", "kind": "node", "tier": "integration", "file": "test/minechain.js", "args": ["1", "1", "2"], "timeout": 1800, "what": "miner soak, 1 day x 2 villages"},
