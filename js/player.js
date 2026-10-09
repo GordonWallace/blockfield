@@ -1584,7 +1584,7 @@ P.damage = function (amount, fromPos, cause) {
 };
 P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health + n); };
 
-const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
+const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", lightning: "You were struck by lightning", hurt: "You died" };
 function die() {
   dismount();
   P.dead = true; P.health = 0;
