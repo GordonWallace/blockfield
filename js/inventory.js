@@ -378,9 +378,10 @@ function furnaceEmpty(key, toPlayer) {
   const [x, y, z] = key.split(",").map(Number);
   for (const s of f.slots) {
     if (!s) continue;
-    if (!toPlayer && BF.drops && BF.drops.spawn) { BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5); continue; }
-    const left = addTo(s.id, s.count, ORDER_ALL); if (left < s.count) showToast(s.id, s.count - left);
-    if (left) { if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, left, x + 0.5, y + 0.4, z + 0.5); else BF.emit("itemDropped", s.id, left); }   // no room: drops where the furnace stood
+    const w = s.wear > 0 ? { wear: s.wear } : undefined;   // a worn wooden tool used as fuel keeps its wear
+    if (!toPlayer && BF.drops && BF.drops.spawn) { BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5, w); continue; }
+    const left = addTo(s.id, s.count, ORDER_ALL, s.wear); if (left < s.count) showToast(s.id, s.count - left);
+    if (left) { if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, left, x + 0.5, y + 0.4, z + 0.5, w); else BF.emit("itemDropped", s.id, left); }   // no room: drops where the furnace stood
   }
   renderAll(); emitChange();
 }
