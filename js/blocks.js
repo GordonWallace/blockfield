@@ -686,7 +686,11 @@ BF.waterFlowId = l => B["water_flow_" + l];
 // Collision box [x0,y0,z0,x1,y1,z1] in blocks for solid blocks smaller than a full cube (doors, beds), else undefined.
 const CBOX = [];
 for (const b of blocks) if (b.box) CBOX[b.id] = b.box.slice(0, 6).map(v => v / 16);
-BF.CBOX = CBOX;
+// Fences and closed fence gates collide 1.5 blocks tall, as in vanilla, so a jump (about 1.1 blocks) can't clear them.
+// BF.TALLBOX marks them: world.js boxHit also checks the layer below an entity's feet for these ids.
+const TALLBOX = new Uint8Array(MAX_BLOCK + 1);
+for (const b of blocks) if (b.model === "fence" || (b.gate && !b.gate.open)) { CBOX[b.id] = [0, 0, 0, 1, 1.5, 1]; TALLBOX[b.id] = 1; }
+BF.CBOX = CBOX; BF.TALLBOX = TALLBOX;
 // Slabs/stairs: collision box LIST in blocks (CBOXES[id]; world.js boxHit prefers it over CBOX) and the families by base block id.
 // BF.SHAPES[baseId] = {slab: [bottomId, topId], stairs: [[bottom f0..f3], [top f0..f3]], name}; blocks carry shape = {kind, base (id), top, f}.
 // BF.LIGHTBLOCK[id] = 1 for them: world.js counts them as sky-light blocking for the column top (they are not opaque for face culling).
