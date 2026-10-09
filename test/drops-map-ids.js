@@ -1,4 +1,4 @@
-// @ci integration
+// @ci integration suite=items
 // A filled or auto map lying on the ground is the same map after a page reload (bug-003): drops are saved by item name,
 // since map item ids are handed out fresh each session. Usage: node test/run.js /tmp/dmi test/drops-map-ids.js
 module.exports = async (pg, out) => {
