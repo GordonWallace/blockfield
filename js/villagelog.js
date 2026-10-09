@@ -79,16 +79,20 @@ function trade(buyer, seller, what, times) {
     const n = times || 1;
     text = "gave " + stacks(what.buy.map(b => ({ id: b.id, n: b.n * n }))) + ", got " + stacks([{ id: what.sell.id, n: what.sell.n * n }]);
   }
-  const a = buyer === "player" ? "Player" : who(buyer);
-  log(rec, "trade", a + " traded with " + who(seller) + ": " + text, seller && seller.position ? seller : buyer && buyer.position ? buyer : null);
+  const a = buyer === "player" ? "Player" : who(buyer), line = a + " traded with " + who(seller) + ": " + text;
+  log(rec, "trade", line, seller && seller.position ? seller : buyer && buyer.position ? buyer : null);
+  if (BF.dayTimeline) for (const m of [buyer, seller]) if (m && m !== "player") BF.dayTimeline.event(m, "trade", line);   // the villager's day (js/daytimeline.js)
 }
 function bed(m, x, y, z, what) {
   const rec = (m && m.village) || villageAt(x, z);
   if (rec) log(rec, "bed", (m ? who(m) : "Player") + " placed a " + (what || "bed") + " at " + x + ", " + y + ", " + z, [x, y, z]);
+  if (m && BF.dayTimeline) BF.dayTimeline.event(m, "bed", "Placed a " + (what || "bed") + " at " + x + ", " + y + ", " + z, [x, y, z]);
 }
 function profession(m, from, to) {
   if (!m || !m.village || !to || to === "unemployed" || to === "nitwit" || to === "child") return;
-  log(m.village, "job", nameOf(m) + " became a " + pretty(to) + (from && from !== "unemployed" ? " (was " + pretty(from) + ")" : ""), m);
+  const text = nameOf(m) + " became a " + pretty(to) + (from && from !== "unemployed" ? " (was " + pretty(from) + ")" : "");
+  log(m.village, "job", text, m);
+  if (BF.dayTimeline) BF.dayTimeline.event(m, "job", text);
 }
 
 // ---------------------------------------------------------------- where is a point / the player

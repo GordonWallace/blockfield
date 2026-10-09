@@ -188,6 +188,9 @@ module.exports = async (pg, out) => {
       if (i % 20 === 0) {
         if (BF.sky.time > 0.43) BF.sky.setTime(0.06);   // one long working day
         for (const n of Object.keys(got)) if (c(Fl, n) > 0) got[n] = true;
+        // the village's furniture maker buys wool too: when it got there first the shepherd was left at WOOL_KEEP with too little
+        // string for its "1 emerald > 9 string" offer, and the fletcher never got any. Keep the shepherd's spare wool topped up.
+        if (c(shp, "white_wool") < 28) inv.add(shp.inv, I.white_wool, 28 - c(shp, "white_wool"));
         const st = BF.villagerStatus.text(Fl); if (st) seenStatus.add(st);
         if (spunAt == null && c(shp, "string") > 0) spunAt = +BF.sky.time.toFixed(3);
         if (arrowsAt == null && c(Fl, "arrow") > 0) arrowsAt = +BF.sky.time.toFixed(3);

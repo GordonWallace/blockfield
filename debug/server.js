@@ -65,6 +65,9 @@ function setAlerts(list) {
   broadcast("alerts", { av, alerts });
 }
 let latest = null, lastPush = 0, pushes = 0, seed = null;
+// The villager picked on the debug screen (its village key#slot, js/daytimeline.js): passed to the game in the answer to its next
+// snapshot, like the alerts; the game then adds that villager's day timeline to its snapshots. day: the last timeline it sent.
+let pick = null, pv = "0", day = null;
 const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map(), econ = new Map();   // econ: each village's Economy tallies (js/economy.js)   // icons: item id -> {url, name}, sent once by the game
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
@@ -90,12 +93,13 @@ function push(body, res) {
   if (!s || typeof s !== "object" || Array.isArray(s)) { res.writeHead(400, cors()).end("not a snapshot"); return; }
   const fresh = !lastPush || Date.now() - lastPush > 5000;
   lastPush = Date.now();
-  if (s.info && typeof s.info === "object" && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); econ.clear(); } seed = s.info.seed; }
+  if (s.info && typeof s.info === "object" && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); econ.clear(); day = null; } seed = s.info.seed; }
   const obj = o => (o && typeof o === "object" ? o : {});
   for (const k in obj(s.layouts)) layouts.set(k, s.layouts[k]);
   for (const k in obj(s.detail)) details.set(k, s.detail[k]);
   for (const k in obj(s.icons)) icons.set(k, s.icons[k]);
   for (const k in obj(s.econ)) econ.set(k, s.econ[k]);
+  if (s.day !== undefined) day = s.day && typeof s.day === "object" ? s.day : null;
   const logs = {};
   for (const k in obj(s.logs)) {
     const l = s.logs[k], a = l && Array.isArray(l.entries) ? l.entries.filter(Array.isArray) : [];   // log entries are arrays; skip anything else
@@ -106,7 +110,9 @@ function push(body, res) {
   if (fresh) console.log("[debug] game connected");
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
-  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(stale ? JSON.stringify({ resync, av, alerts }) : resync ? "resync" : "ok");
+  const staleP = !!s.pick && s.pick.pv !== pv;                                 // so is its picked villager
+  const o = stale || staleP ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}) : null;
+  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(o ? JSON.stringify(o) : resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
 const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true" }, h);
@@ -117,7 +123,7 @@ const cached = () => {
   for (const [k, h] of history) logs[k] = { key: k, cap: 300, entries: h };
   for (const [k, l] of layouts) ls[k] = l;
   for (const [k, d] of details) ds[k] = d;
-  return { layouts: ls, logs, details: ds, icons: ic, econ: ec };
+  return { layouts: ls, logs, details: ds, icons: ic, econ: ec, day };
 };
 
 function serveDebug(req, res) {
@@ -139,6 +145,18 @@ function serveDebug(req, res) {
       if (!o || typeof o !== "object" || Array.isArray(o)) { res.writeHead(400, cors()).end("not an alert list"); return; }
       setAlerts(o.alerts);
       res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts }));
+    }).bind(null, req, res));
+    return;
+  }
+  if (url.pathname === "/pick" && req.method === "POST") {   // the debug screen picked a villager ({key}) or none ({key: null})
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", c => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on("end", safe(() => {
+      let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+      const k = o && typeof o.key === "string" ? o.key.slice(0, 80) : null;
+      if (k !== pick) { pick = k; pv = String(Date.now()); if (!k) day = null; }
+      res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ pick, pv }));
     }).bind(null, req, res));
     return;
   }

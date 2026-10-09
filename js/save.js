@@ -66,6 +66,7 @@ function snapshot() {
     vstats: BF.vstats ? BF.vstats.serialize() : undefined,   // population per game day, last 7 days (js/villagestats.js)
     econ: BF.econ ? BF.econ.serialize() : undefined,   // Economy view tallies, last 7 game days (js/economy.js)
     happy: BF.happiness ? BF.happiness.serialize() : undefined,   // village happiness: last week's events + last scores (js/happiness.js)
+    days: BF.dayTimeline ? BF.dayTimeline.serialize() : undefined,   // villagers' day timelines, today and yesterday (js/daytimeline.js)
     maps: BF.maps && BF.maps.serialize ? BF.maps.serialize() : undefined, // explored pixels of filled maps (js/maps.js)
     drops: BF.drops && BF.drops.serialize ? BF.drops.serialize() : undefined, // dropped items lying in the world, with their age (js/drops.js)
     boats: BF.boats ? BF.boats.serialize() : undefined, // placed boats, the player's included, with any mob passenger (js/boats.js)
@@ -99,6 +100,7 @@ function restore(data) {
   if (BF.vstats) BF.vstats.deserialize(data.vstats); // old saves: no population history
   if (BF.econ) BF.econ.deserialize(data.econ); // old saves: empty tallies
   if (BF.happiness) BF.happiness.deserialize(data.happy || { fromLog: data.vlog }); // old saves: last week's events from the log
+  if (BF.dayTimeline) BF.dayTimeline.deserialize(data.days); // old saves: empty timelines
   if (BF.maps && BF.maps.deserialize) BF.maps.deserialize(data.maps); // old saves: no maps
   if (BF.signs && BF.signs.deserialize) BF.signs.deserialize(data.signs); // sign texts + auto-sign state (old saves: none)
   if (BF.drops && BF.drops.deserialize) BF.drops.deserialize(data.drops); // dropped items (old saves: none)

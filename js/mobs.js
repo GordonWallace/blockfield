@@ -766,6 +766,7 @@ function kill(m, byPlayer) {
     (m.village.deadInfo || (m.village.deadInfo = [])).push({ i: m.bred ? null : m.slot.idx, name: BF.vlog ? BF.vlog.nameOf(m) : null, prof: m.child ? "child" : m.profession || null,
       cause: m.lastHurt || null, day: BF.sky ? +((BF.sky.day || 0) + (BF.sky.time || 0)).toFixed(3) : null, age: m.life ? +(m.life.lived || 0).toFixed(2) : null });
   }
+  if (m.type === "villager" && BF.dayTimeline) BF.dayTimeline.drop(m);   // its day timeline goes with it (js/daytimeline.js)
   if (m.village && m.type === "villager" && m.slot && !m.bred) {   // a roster villager: its slot stays empty for good (saved, see exportVillagers)
     deadSlots(m.village).add(m.slot.idx);
     const k = villagerKey(m); if (k) villagerSaves.delete(k);

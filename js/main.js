@@ -127,6 +127,7 @@ function frame(now) {
       BF.state.time += h;
       BF.sky.update(h);
       BF.mobs.update(h);
+      if (BF.dayTimeline) BF.dayTimeline.update();   // villagers' day timelines, once a game minute (js/daytimeline.js)
       BF.drops.update(h);
       BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
       if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
