@@ -42,7 +42,9 @@ module.exports = async (pg, out) => {
     ok("shepherd went into the pen", G.inside > 0, G);
     ok("the gate was opened for it", G.open > 0, G);
     for (let i = 0; i < 1200 && (inPen() || gateOpen()); i++) step();
-    ok("shepherd walked back out and the gate is shut", !inPen() && !gateOpen(), { inPen: inPen(), open: gateOpen(), task: shep.shp && shep.shp.task && shep.shp.task.kind });
+    ok("shepherd walked back out and the gate is shut", !inPen() && !gateOpen(), { inPen: inPen(), open: gateOpen(), task: shep.shp && shep.shp.task && shep.shp.task.kind,
+      at: [shep.position.x, shep.position.y, shep.position.z].map(v => +v.toFixed(2)), gate: [pen.gate[0], pen.y + 1, pen.gate[1]], pen: [pen.fx0, pen.fx1, pen.fz0, pen.fz1],
+      status: BF.villagerStatus.text(shep), mode: shep.ai.mode, route: shep.ai.routeKind, hasRoute: !!shep.ai.route, job: shep.job && shep.job.mode, t: +BF.sky.time.toFixed(3), shp: shep.shp && Object.keys(shep.shp) });
     R.tasks = tasks;
     ok("pen still had room, nothing was culled", pen.sheep.length < pen.threshold && !tasks.cull, [pen.sheep.length, pen.threshold, tasks.cull]);
     // ---- overcrowding: shepherd culls adults down to below the threshold, never below two
