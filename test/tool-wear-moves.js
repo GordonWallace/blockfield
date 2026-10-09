@@ -1,7 +1,7 @@
 // A worn tool keeps its wear wherever it is moved (bug-005): NODE_PATH=$(npm root -g) node test/run.js /tmp/tw test/tool-wear-moves.js
 // @ci integration suite=items
 // Shift-click into a chest and back, a broken chest's drops, the chest API villagers use, the trade screen's payment slots and what a
-// villager pays and sells, and villager-to-villager exchanges. A villager sells its least worn copy first.
+// villager pays and sells, and villager-to-villager exchanges, including a villager buying a tool. A villager sells its least worn copy first.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(500);
@@ -77,10 +77,18 @@ module.exports = async (pg, out) => {
     const buyer = T.inv.create();
     T.inv.addStacks(buyer, sold2);
     res.buyerHas = wearOf(buyer, I.diamond_sword);
+    // a farmer buying a hoe from the toolsmith gets it as worn as it was (js/villagelife.js doToolDeal)
+    const smith = { type: "villager", profession: "toolsmith", inv: T.inv.create(), trades: [Object.assign(T.parseTrade("1 emerald > 1 iron_hoe"), { xp: 1 })], position: { x: 0, y: 0, z: 0 } };
+    smith.level = 5; smith.inv[0] = { id: I.iron_hoe, count: 1, wear: 70 };
+    const farmer = { type: "villager", profession: "farmer", inv: T.inv.create(), position: { x: 0, y: 0, z: 0 } };
+    farmer.inv[0] = { id: I.emerald, count: 3 };
+    const got = BF.villageLife._test.doToolDeal(farmer, { kind: "tool", seller: smith, offer: smith.trades[0], item: I.iron_hoe });
+    res.farmerHoe = got ? wearOf(farmer.inv, I.iron_hoe) : "no deal";
     return res;
   });
   console.log(JSON.stringify(r, null, 1));
   const want = { intoChest: 200, backOut: 200, chestDrop: 200, apiStored: "0,90", apiTaken: "0,90", paySlot: "moved", villagerGot: 1500, playerEmeralds: 6,
-    resultBar: "shown", boughtBack: 1500, soldFirst: "0", soldNext: "900", buyerHas: 900 };
+    resultBar: "shown", boughtBack: 1500, soldFirst: "0", soldNext: "900", buyerHas: 900,
+    farmerHoe: 70 };
   for (const [k, v] of Object.entries(want)) console.log((r[k] === v ? "ok   " : "FAIL ") + k + ": " + JSON.stringify(r[k]) + (r[k] === v ? "" : " (want " + JSON.stringify(v) + ")"));
 };
