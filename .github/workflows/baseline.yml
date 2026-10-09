@@ -73,10 +73,11 @@ jobs:
           name: baseline-results-${{ matrix.part }}
           path: ci-out/
           retention-days: 14
-  # one check named baseline that passes only when every part did (the result branch rules and emails look at)
+  # one check named baseline that passes only when every part did (the result branch rules and emails look at); skipped when a
+  # newer push cancels the run, so a superseded run sends no failure email
   baseline:
     needs: baseline-part
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - run: '[ "${{ needs.baseline-part.result }}" = success ] || { echo "a baseline part failed or was cancelled: ${{ needs.baseline-part.result }}"; exit 1; }'

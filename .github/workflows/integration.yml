@@ -67,10 +67,11 @@ jobs:
           name: integration-results-${{ matrix.part }}
           path: ci-out/
           retention-days: 30
-  # one check named integration that passes only when every part did (the result branch rules and emails look at)
+  # one check named integration that passes only when every part did (the result branch rules and emails look at); skipped when a
+  # newer push cancels the run, so a superseded run sends no failure email
   integration:
     needs: integration-part
-    if: always() && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'release-'))
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'release-')) }}
     runs-on: ubuntu-latest
     steps:
       - run: '[ "${{ needs.integration-part.result }}" = success ] || { echo "an integration part failed or was cancelled: ${{ needs.integration-part.result }}"; exit 1; }'
