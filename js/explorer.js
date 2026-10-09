@@ -349,7 +349,7 @@ function campAI(m, t, a) {
     return false;
   }
   if (m.sleeping || m.child || tentItem() == null || cnt(m, tentItem()) < 1) return false;
-  const left = (BEDTIME - t) * DAY_S, reach = left * m.def.speed * 1.3 * WALK_SLACK;
+  const left = (BEDTIME - t) * DAY_S, reach = left * m.def.speed * 1.3 * 1.5 * WALK_SLACK;
   X.eve = { day, camp: !atHome(m) && homeDistance(m) > reach };
   if (X.eve.camp && pitch(m)) { X.eve = null; return true; }
   return false;
