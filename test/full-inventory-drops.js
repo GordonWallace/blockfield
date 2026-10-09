@@ -1,4 +1,4 @@
-// @ci integration
+// @ci integration suite=items
 // Items that don't fit back in a full inventory drop on the ground instead of vanishing: the crafting grid, the cursor
 // and trade payment slots when a screen closes, a broken furnace's contents, and a map made from a stack of blank maps.
 // Usage: node test/run.js /tmp/fid test/full-inventory-drops.js
