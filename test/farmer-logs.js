@@ -50,8 +50,12 @@ module.exports = async (pg) => {
     f6.village = { members: [f6, vill("forester", 1, 3), vill("mason", 1, 4)] };
     ok("nobody with spare logs: no deal", X.findLogSeller(f6, 8, null) === null);
     // a gather task never takes a log: put a log where the task points
-    const W = BF.world, px = Math.floor(BF.player.position.x) + 40, pz = Math.floor(BF.player.position.z) + 40, y = W.heightAt(px, pz);
+    // in a loaded chunk: on a busy machine the chunks 40 blocks out may not be loaded yet, and a block set there is dropped
+    const W = BF.world, p0x = Math.floor(BF.player.position.x), p0z = Math.floor(BF.player.position.z);
+    let d = 40; while (d > 4 && !W.isLoaded(p0x + d, p0z + d)) d -= 4;
+    const px = p0x + d, pz = p0z + d, y = W.heightAt(px, pz);
     W.setBlock(px, y + 1, pz, I.oak_log); W.setBlock(px, y + 2, pz, I.oak_log);
+    ok("log placed for the gather check", W.getBlock(px, y + 1, pz) === I.oak_log, { d, loaded: W.isLoaded(px, pz) });
     const D = { base: { x0: px - 200, z0: pz - 200, x1: px - 190, z1: pz - 190 }, boxes: [], farms: [], projects: [], beds: [], ready: true };
     const f5 = vill("farmer", 1, 0);
     let took = null;
