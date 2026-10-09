@@ -289,6 +289,7 @@ function update(px, pz) {
   active.clear();
   for (const [k, e] of next) active.set(k, e);
   for (const [k, e] of fresh) startCatchUp(k, e);
+  for (const k of dropped) if (BF.merchant && BF.merchant.remember) BF.merchant.remember(k, true);   // its prices are written down for merchants elsewhere
   for (const k of dropped) if (BF.mobs && BF.mobs.unloadVillage) BF.mobs.unloadVillage(k);   // the village and all its villagers go together
   // stamp villages whose centre is loaded: the last stamp is when the village stopped being simulated
   const d = dayNow();

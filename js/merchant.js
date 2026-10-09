@@ -20,7 +20,7 @@
 //   at WEAR_N crossings it becomes a dirt path. The counts are saved.
 // - Routes (debug screen): each pair of villages that traded, trips and goods moved in the last 7 days, and whether a merchant is on the road.
 // - Death on the road: its goods drop where it fell (mobKilled).
-// API: BF.merchant = { forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
+// API: BF.merchant = { remember, forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -241,6 +241,7 @@ function waypoint(px, pz, tx, tz, line) {
   if (Math.abs((px - line.ax) * dz - (pz - line.az) * dx) / L > 3 * HOP) return null;   // well off the line (a detour): plain hops
   const fwd = (tx - px) * dx + (tz - pz) * dz > 0;
   let t = fwd ? (Math.floor(s / HOP + 1e-6) + 1) * HOP : (Math.ceil(s / HOP - 1e-6) - 1) * HOP;
+  if (Math.hypot(line.ax + dx / L * t - px, line.az + dz / L * t - pz) < 5) t += fwd ? HOP : -HOP;   // already at that point (a path of no steps would count as a failure): the next one
   t = Math.max(0, Math.min(L, t));
   return [Math.floor(line.ax + dx / L * t), Math.floor(line.az + dz / L * t)];
 }
@@ -550,13 +551,19 @@ function onKilled(m) {
   }
 }
 // Pins whose merchant is gone (no living merchant with that key for a game day) are dropped.
+// Writes down what a loaded village buys and sells (its last-known prices, for merchants choosing a far destination); also done as it unloads.
+function remember(rec, going) {
+  if (typeof rec === "string") rec = BF.mobs.villages.get(rec);
+  if (rec && rec.wg && (going || BF.villageSim.isActive(rec.key)) && BF.world.isLoaded(rec.x, rec.z) && traders(rec, null).length) market.set(rec.key, summarize(rec));
+}
 let tickT = 0, summT = 0;
 const lastSeen = new Map();
 function tick(dt) {
   tickT -= dt;
   if (tickT > 0 || !BF.villageSim) return;
   tickT = 5;
-  if ((summT -= 5) <= 0) { summT = 60; for (const rec of BF.mobs.villages.values()) if (rec.wg && BF.villageSim.isActive(rec.key) && BF.world.isLoaded(rec.x, rec.z) && traders(rec, null).length) market.set(rec.key, summarize(rec)); }
+  if ((summT -= 5) <= 0) { summT = 60; for (const rec of BF.mobs.villages.values()) remember(rec); }
+  else for (const rec of BF.mobs.villages.values()) if (!market.has(rec.key)) remember(rec);   // a village seen for the first time is written down at once
   const now = dayNow(), ids = new Set();
   for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && !m.dead && !m.removed && m.mc && m.mc.trip) ids.add(m.mc.trip.id);
   for (const id of [...BF.villageSim.pins().keys()]) {
