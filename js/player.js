@@ -340,6 +340,8 @@ function showScreen(name) {
   if (name === "pause") { updateViewBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
+  const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
+  if (a && a !== document.body && a.closest && a.closest(".bfp-screen") && !a.closest(".bfp-screen.on")) a.blur();
 }
 
 // ---------- saved worlds (start screen) ----------
@@ -579,11 +581,13 @@ function deferredToggle(closeOnly) {
 }
 
 // ---------- input ----------
+// keys typed into a text box are its own; a focused slider, checkbox or button doesn't stop game keys (Escape in the pause menu)
+const typingIn = t => !!t && (t.tagName === "TEXTAREA" || t.isContentEditable || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button|submit|reset|color)$/i.test(t.type)));
 function bindInput() {
   const cv = canvas();
   addEventListener("keydown", e => {
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     const c = e.code;
+    if (typingIn(e.target)) return;
     if (c === "Space" || c === "Tab" || (e.ctrlKey && /^Key[WASDQE]$/.test(c))) e.preventDefault();
     if (c === "Escape") {
       if (e.repeat || e === escCloseEvent) return;   // a held Escape, or the one that just closed a screen, must not go on to open the pause menu
