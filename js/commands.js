@@ -192,7 +192,9 @@ const isCoord = t => /^(~[+-]?(\d+\.?\d*|\.\d+)?|[+-]?(\d+\.?\d*|\.\d+))$/.test(
 function parseTicks(tok) {
   const m = /^(\d+(?:\.\d+)?)([tsd]?)$/i.exec(tok || "");
   if (!m) fail(`Invalid time '${tok == null ? "" : tok}' (use ticks, or a number with t, s or d)`);
-  return Math.round(+m[1] * ({ "": 1, t: 1, s: 20, d: 24000 })[m[2].toLowerCase()]);
+  const n = Math.round(+m[1] * ({ "": 1, t: 1, s: 20, d: 24000 })[m[2].toLowerCase()]);
+  if (!(n <= 2147483647)) fail(`Time must not be more than 2147483647 ticks, found '${tok}'`);   // vanilla's int limit; more breaks the day counter
+  return n;
 }
 
 // Item / block names (with or without "minecraft:"), a few vanilla aliases.
