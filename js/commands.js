@@ -262,7 +262,7 @@ function killMob(m) {
 }
 
 // ---------- commands ----------
-const CMDS = {}, ALIASES = {};
+const CMDS = Object.create(null), ALIASES = Object.create(null);   // no prototype, so /constructor or /__proto__ is just an unknown command
 function def(name, o) { o.name = name; CMDS[name] = o; for (const a of o.aliases || []) ALIASES[a] = name; }
 const usage = c => fail("Usage: " + [].concat(CMDS[c].usage).join("\n       "));
 
