@@ -293,6 +293,8 @@ function claimedByOther(k, m) {
   const pl = planIndex.get(k);
   if (!pl) return false;
   const owner = pl.vkey + "#" + pl.slot;
+  const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(pl.vkey);
+  if (rec && rec.dead && rec.dead.has(pl.slot)) return false;   // planned for a villager that was killed (slots never respawn)
   return owner !== vkey(m) && !spawned.has(owner) && !savedKeys.has(owner);
 }
 function center(o) {
