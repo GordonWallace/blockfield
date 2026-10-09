@@ -27,6 +27,8 @@ module.exports = async (pg, out) => {
     BF.mobs.setProfession(A, "forester"); A.xp = 0; A.level = 1; A.trades = T.offers("forester", 1); A.inv = T.inv.create();
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: B.band_saw, prof: "forester" } });
     window.__A = A;
+    // chest trips (js/storage.js) and food shopping (js/villagelife.js) can pull it away from the tree for minutes or spend its emeralds: off
+    A.store = { stage: null, checkT: 1e9, avoid: {}, stored: {}, order: null }; A.fshop = { stage: null, deal: null, checkT: 1e9, avoid: {}, cd: 0 };
     // no other trees near: only the one we grow
     for (const m of BF.mobs.list) if (m !== A && m.type === "villager" && m.profession === "forester") BF.mobs.setProfession(m, "nitwit");
     return { prof: A.profession, jobsite: !!A.jobsite };
@@ -53,13 +55,16 @@ module.exports = async (pg, out) => {
     A.fo = A.fo || null; const st = A.fo || (BF.forester._test.state(A));
     st.cutCd = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.thinkT = 0; st.sweep = null; if (!opts || !opts.keep) st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
-    let chop = 0, t = 0, fell = null, swings = 0, lastSw = 0, held = null, stop = null;
+    let chop = 0, t = 0, fell = null, swings = 0, lastSw = 0, held = null, stop = null; let pk = null, pc = 0, pd = 0;
     for (; t < limit && !fell; t += dt) {
       BF.sky.setTime(opts && opts.offAt != null && t >= opts.offAt && t < opts.offAt + 2 ? 0.6 : 0.1);
       BF.mobs.update(dt);
       BF.player.position.set(A.position.x + 4, A.position.y + 2, A.position.z + 4);
       const k = A.fo && A.fo.task;
-      if (k && k.kind === "cut" && Math.hypot(k.x + 0.5 - A.position.x, k.z + 0.5 - A.position.z) <= 3.6 && (k.done > 0 || A.fo.chop > 0)) {
+      // chopping time is the ticks its felling progress moved on (in reach is not enough: it can stand by the trunk without cutting)
+      const moved = k && k.kind === "cut" && k === pk && (A.fo.chop > pc + 1e-9 || k.done > pd);
+      pk = k; pc = A.fo ? A.fo.chop : 0; pd = k ? k.done : 0;
+      if (moved) {
         chop += dt;
         if (A.ai.swingT > lastSw) swings++;
         if (A.heldMesh) held = { visible: A.heldMesh.visible, item: BF.items[A.heldId].name, parent: A.heldMesh.parent === A.meshes.arms };
@@ -105,10 +110,16 @@ module.exports = async (pg, out) => {
   const part = await pg.evaluate(() => {   // chop 7 s, then interrupt it
     const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
-    let chop = 0;
-    for (let t = 0; t < 120 && chop < 7; t += 0.05) { BF.sky.setTime(0.1); BF.mobs.update(0.05); const k = A.fo.task; if (k && k.kind === "cut" && Math.hypot(k.x + 0.5 - A.position.x, k.z + 0.5 - A.position.z) <= 3) chop += 0.05; }
+    // the sim clock and drops must move too: with them frozen, a forester waiting for items to land after a felling waits for good
+    let chop = 0, pk = null, pc = 0, pd = 0;
+    for (let t = 0; t < 400 && chop < 7; t += 0.05) {
+      BF.sky.setTime(0.1); BF.warp.advance(0.05); BF.mobs.update(0.05); BF.drops.update(0.05);
+      const k = A.fo.task;
+      if (k && k.kind === "cut" && k === pk && (A.fo.chop > pc + 1e-9 || k.done > pd)) chop += 0.05;
+      pk = k; pc = A.fo.chop; pd = k ? k.done : 0;
+    }
     A.tradingWith = BF.player; BF.forester.ai(A, 0.05, {}); A.tradingWith = null;   // the player opens its trade screen: the task ends, progress kept
-    return { saved: A.fo.saved, chop, task: A.fo.task && { kind: A.fo.task.kind, done: A.fo.task.done } };
+    return { saved: A.fo.saved, chop, task: A.fo.task && { kind: A.fo.task.kind, done: A.fo.task.done }, log: BF.forester.LOG.slice(-6).map(e => JSON.stringify(e)) };
   });
   console.log("part", JSON.stringify(part));
   const r5 = await watch(240);
@@ -118,12 +129,18 @@ module.exports = async (pg, out) => {
   // 4. axe shopping: a toolsmith sells iron and diamond axes at its own offers (prices from TRADES.toolsmith)
   const shop = await pg.evaluate(() => {
     const A = window.__A, T = BF.trades, I = BF.I, F = BF.forester;
-    const S = BF.mobs.list.find(m => m !== A && m.type === "villager" && m.village === A.village && m.inv && !m.child);
+    const S = BF.mobs.list.find(m => m !== A && m.type === "villager" && m.village === A.village && m.inv && !m.child && m.profession !== "nitwit");
     if (!S) return "no second villager";
+    // a smithing table of its own: with its old jobsite it would be fired (unemployed) within a second and sell nothing
+    const W = BF.world, sx = Math.floor(A.position.x) + 3, sy = Math.floor(A.position.y), sz = Math.floor(A.position.z) + 1;
+    W.setBlock(sx, sy, sz, BF.B.smithing_table); BF.jobs.claim(S, { site: { x: sx, y: sy, z: sz, id: BF.B.smithing_table, prof: "toolsmith" } });
     BF.mobs.setProfession(S, "toolsmith"); S.level = 5; S.trades = T.offers("toolsmith", 1).concat(T.offers("toolsmith", 2), T.offers("toolsmith", 3), T.offers("toolsmith", 4), T.offers("toolsmith", 5));
     S.inv = T.inv.create(); T.inv.add(S.inv, I.iron_axe, 1); T.inv.add(S.inv, I.diamond_axe, 1); T.inv.add(S.inv, I.emerald, 3);
-    S.position.set(A.position.x + 6, A.position.y, A.position.z + 3);
+    // within reach: the test is about which axe it buys, not walking there (a seller up a slope could be out of reach for good)
+    S.position.set(A.position.x + 2, A.position.y, A.position.z + 1);
     A.inv = T.inv.create(); T.inv.add(A.inv, I.wooden_axe, 1); T.inv.add(A.inv, I.emerald, 3);
+    // its pack has no food now: hungry, it would spend an emerald on food and the toolsmith would refuse to sell (too hungry to trade). Both fed
+    for (const m of [A, S]) { const L = BF.food.life(m); L.sat = 5; L.lastAte = BF.food.dayNow(); L.starving = m.starving = false; m.fshop = { stage: null, deal: null, checkT: 1e9, avoid: {}, cd: 0 }; }
     const st = A.fo; st.task = null; st.saved = null; st.sweep = null; st.thinkT = 0; st.shopT = 0; st.cutCd = 999; st.plantCd = 999; st.gatherCd = 999; st.avoid = new Map();
     const res = { first: null, second: null };
     const run = () => { let seen = false, t = 0; for (; t < 120; t += 0.05) { BF.sky.setTime(0.1); BF.mobs.update(0.05); if (A.fo.task) seen = true; else if (seen) break; } return { seen, t: +t.toFixed(1) }; };
@@ -135,7 +152,7 @@ module.exports = async (pg, out) => {
     // richer now: enough for the diamond axe at the toolsmith's price
     res.smith = [S.profession, S.trades.length];
     BF.mobs.setProfession(S, "toolsmith"); S.trades = [1, 2, 3, 4, 5].flatMap(l => T.offers("toolsmith", l)); if (!T.inv.count(S.inv, I.diamond_axe)) T.inv.add(S.inv, I.diamond_axe, 1);
-    S.position.set(A.position.x + 5, A.position.y, A.position.z + 2);
+    S.position.set(A.position.x + 2, A.position.y, A.position.z + 1);
     const dPrice = S.trades.filter(o => o.sell.id === I.diamond_axe && o.buy.length === 1 && o.buy[0].id === I.emerald).reduce((p, o) => Math.min(p, o.buy[0].n), Infinity);
     res.diamondPrice = dPrice;
     T.inv.add(A.inv, I.emerald, Math.max(0, dPrice - T.inv.count(A.inv, I.emerald))); st.shopT = 0; st.thinkT = 0;
