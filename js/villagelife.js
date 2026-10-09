@@ -157,6 +157,7 @@ function startFood(v) {
   const prof = v.profession;
   if (prof === "farmer") {
     addAll(v.inv, [["wheat_seeds", rndInt(10, 20)], ["carrot", rndInt(8, 14)], ["potato", rndInt(8, 14)], ["beetroot_seeds", rndInt(4, 10)]]);
+    if (BF.baker) addAll(v.inv, [["sugar_cane", rndInt(2, 4)]]);   // a few canes to plant beside its beds' water, like its seeds (js/baker.js: the baker's sugar)
     if (breadEq(v.inv) < 12) addAll(v.inv, [["bread", Math.ceil(12 - breadEq(v.inv))]]);
     if (Math.random() < 0.45) addAll(v.inv, [["oak_log", rndInt(3, 8)]]);
   } else {

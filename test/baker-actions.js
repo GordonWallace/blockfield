@@ -145,6 +145,34 @@ module.exports = async (pg, out) => {
     ok("without water it does not grow", K.caneHeight(px, py - 1, pz) === 1);
     W.setBlock(px, py, pz, 0);
 
+    // ---- a farmer harvests a pumpkin in its bed and replants the cell from seeds it cuts from the pumpkin
+    const fm = vill().find(m => m.profession === "farmer" && m.jobsite);
+    for (let k = 0; k < 240 && !(rec._life && rec._life.ready && rec._life.beds.length); k++) run(0.5);   // the village's farm scan
+    const D = rec._life;
+    const bed = fm && D && (D.beds || []).find(b => Math.abs(b.y - fm.jobsite.y) <= 12);
+    let cell = null;
+    if (bed) for (let x = bed.x0; x <= bed.x1 && !cell; x++) for (let z = bed.z0; z <= bed.z1 && !cell; z++) {
+      const g = W.getBlock(x, bed.y, z);
+      if ((g === BF.B.farmland || g === BF.B.farmland_dry) && ![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[W.getBlock(x + dx, bed.y, z + dz)])) cell = [x, bed.y, z];
+    }
+    ok("the farmer has a bed with a dry cell", !!cell, bed);
+    if (cell) {
+      const [x, y, z] = cell, H = { myBeds: () => [bed], ok: () => true, key3: (a, b, c) => a + "," + b + "," + c, hasHoe: () => true };
+      W.setBlock(x, y + 1, z, 0); W.setBlock(x, y, z, BF.B.grass); W.setBlock(x, y + 1, z, BF.B.pumpkin);
+      T.inv.remove(fm.inv, I.pumpkin, 64); T.inv.remove(fm.inv, I.pumpkin_seeds, 64);
+      fm.farm = fm.farm || {};
+      const t1 = K.farmTask(fm, fm.farm, rec, D, H);
+      ok("a pumpkin in its bed is a farmer task", !!t1 && (t1.kind === "pumpkin" || t1.kind === "cane" || t1.kind === "caneplant" || t1.kind === "canespot"), t1);
+      const done = K.farmPerform(fm, { kind: "pumpkin", x, y: y + 1, z, ty: y + 1, soil: y, k: "t" }, D, H);
+      ok("it harvests the pumpkin", done && W.getBlock(x, y + 1, z) === 0 && n("pumpkin", fm) === 1);
+      const nx = fm.farm.next;
+      ok("and replants the cell next", nx && nx.kind === "pumpkinplant" && nx.x === x && nx.z === z, nx);
+      const planted = nx && K.farmPerform(fm, nx, D, H);
+      ok("it cuts the pumpkin into 4 seeds, tills the soil and plants a stem", planted && W.getBlock(x, y + 1, z) === BF.B.pumpkin_stem && (W.getBlock(x, y, z) === BF.B.farmland || W.getBlock(x, y, z) === BF.B.farmland_dry) && n("pumpkin", fm) === 0 && n("pumpkin_seeds", fm) === 3, [W.getBlock(x, y, z), n("pumpkin_seeds", fm)]);
+      ok("the cell is kept for pumpkins (no wheat planted there)", D.pumpkins && D.pumpkins.has(x + "," + y + "," + z));
+      W.setBlock(x, y + 1, z, 0);
+    }
+
     // ---- treats: eaten once a day at most, first when due; the happiness term
     const eater = other;
     const stash = [];

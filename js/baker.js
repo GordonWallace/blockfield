@@ -95,6 +95,7 @@ function tickOven(o, h) {
       addTo(o.out, I(OUT[o.kind]), 1);
       if (o.kind === "cake" && I("glass_bottle") != null) addTo(o.out, I("glass_bottle"), 3);   // the milk is poured in: the bottles come back empty
       o.n--; o.baked = (o.baked || 0) + 1;
+      if (BF.emit) BF.emit("ovenBaked", o.pos.x, o.pos.y, o.pos.z, o.kind);
       if (o.n <= 0) { o.n = 0; }
     }
   } else if (o.cook > 0) o.cook = Math.max(0, o.cook - h * 2);

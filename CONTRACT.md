@@ -939,13 +939,56 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   route kind `beef`, `busyWhen` stage `cook`), never instantly and never without a furnace; with no furnace in reach the beef stays raw.
 - **Milk as food.** Villagers count milk as food (bottle 0.4 bread-eq, bucket 1.2) and drink it, keeping the empty container. A hungry villager buys milk bottles only as a last resort (villagelife.js `findFoodSeller` passes
   egg, food, then `milkDeal`): never through the normal food market (`dealWith` skips milk), through an offer for milk bottles (the cowherd's job offer, or anyone's spare milk); the cowherd keeps
-  `MILK_KEEP` (3) bottles back for the baker (its reserve). Empty bottles: any villager holding them gets a spare-goods offer (js/market.js; batch 10 for 1 emerald, small lots from `LOT_MIN.glass_bottle` = 3
+  `MILK_KEEP` (3) bottles back for the baker (its reserve; offered while a baker buys, see Bakers). Empty bottles: any villager holding them gets a spare-goods offer (js/market.js; batch 10 for 1 emerald, small lots from `LOT_MIN.glass_bottle` = 3
   bottles for 1 emerald), which the player and the cowherd buy through (above).
 - **Leatherworkers** no longer restock leather (`PRODUCE.leatherworker = []`); holding fewer than 12 they buy it through any villager's leather offer (the cowherd's job offer `1 emerald > 7 leather`, the butcher's, or spare leather; `feedWanted` -> `findWheatSeller`). The stable hand buys leather through offers too.
 - **Debug screen.** Mob counts split cows into `cow (pasture)` and `cow (wild)`; a cowherd's holdings (`BF.cowherd.holdings(m)`: `{kind: "cows", n, young, milked, culls, limit, coop}`) show the herd, calves, cows milked today,
   culls and the limit; pastures are drawn as pens on the map. Village log (kind `cattle`, logmatch action `cattle`): calf born, milked a cow, bottled N milk bottles, culled a cow (beef, leather), went to fetch / brought a wild cow,
   none in range, cooked N steak; sales are ordinary trade lines. `BF.cowherd.log` keeps the last 300 internal events.
 - Tests: `test/cowherd-actions.js`, `test/cowchain.js` (14-day soak: `node test/cowchain.js 14 1`).
+
+## Bakers (js/baker.js, loaded after cowherd.js)
+`BF.baker`. Cakes and pumpkin pies, baked only from ingredients bought in the village. Hooks: blocks.js (baker pack), world.js (cane growth), inventory.js (`simTick` ticks the ovens, `creativeItems`),
+player.js (cake, oven), mobs.js (roster, outfit, villagerAI, export/import/reset, tick), jobs.js, trading.js, market.js, villagelife.js, eggcook.js, cowherd.js, happiness.js, builder.js / blueprints.js, storage.js,
+logmatch.js, debugfeed.js / debug/index.html, worldgen.js (`BAKER_POP`).
+- **Blocks** (appended after the cowherd pack, between `// ---- baker pack` markers): `bakers_oven` (jobsite of `baker`; brick sides, an arched mouth with embers; pickaxe; 8 cobblestone around 1 iron ingot),
+  `pumpkin_stem` (cross plant on farmland, `growsInto: "pumpkin"`, `fruit: true` so the pumpkin stays in the creative menu; drops pumpkin seeds; a simplification of vanilla's fruit beside the stem),
+  `cake` (half-height model, stack 1, drops nothing) and `cake_bitten_1..6` (hidden, `item: "cake"`, `cakeBites`). `sugar_cane` gained `growsUp: 3`.
+- **Items** (appended after the cowherd items): `sugar` (1 sugar cane), `pumpkin_seeds` (1 pumpkin -> 4; `plants: "pumpkin_stem"`), `pumpkin_pie` (food 8; pumpkin + sugar + egg, shapeless),
+  `cake_slice` (food 2; not vanilla: what the baker cuts a cake into, 7 to a cake). Cake: shaped `MMM / SES / WWW`, M = milk bottle or milk bucket (any mix); the bottles or buckets stay in the grid empty (`container`).
+- **Growing.** Sugar cane someone placed or cut back (an edit) grows a block on top at the crop rate (`GROW_CHANCE_PER_S`, rain x1.5) up to 3 tall while its bottom block stands on grass, dirt, coarse dirt, podzol, sand,
+  red sand or snowy grass with water beside it (world.js `caneTick`); generated wild cane stays as generated until cut. A pumpkin stem on farmland grows into a pumpkin where it stands. Both on the sim clock (fast-forward too).
+- **Cake.** Right click on a placed cake (player.js): +2 hunger (and a little saturation), the next bitten state; the 7th slice removes it. A full player is told "You aren't hungry" (creative eats anyway). Pie is eaten from the hand.
+- **The oven** (`BF.baker.ovens`, keyed `x,y,z`): `{pos, kind ("cake" | "pie"), n (left to bake), tray (the cooking slot: the ingredients of n), fuel {id, count} (one kind), out, burn, burnMax, cook}`. It bakes like a furnace,
+  on `BF.inventory.simTick` (so in game time and fast-forward): with a batch's ingredients in the tray and fire burning (fuel seconds = furnaceuse `fuelWorth` x 10 s: coal 80 s, a log or plank 15 s) a cake takes 20 s,
+  a pie 10 s; each cake's 3 milk bottles come out empty with it. No fuel, no bake (the cook decays). Right click shows what it holds in the action bar. Breaking it drops its contents. Saved as `ovens` in
+  `exportVillagers` (`[{p, k, n, t, f, o, b, bm, c}]`, item names). It is only the baker's: villagers' egg cooking and the cowherd's beef use real furnaces (js/furnaceuse.js), never the oven. Event `ovenBaked(x, y, z, kind)`.
+- **Who bakes.** Profession `baker` (outfit: cream robe, white apron, brick-red belt, tall white cap). At most one per 15 villagers, at least one (`BF.baker.mayHire`, jobs.js `mayTake`). Village generator 6 (default for new
+  worlds; worlds saved with 5 keep 5): a village of `BAKER_POP` (15)+ gets floor(pop / 15) bakers (roster slots `<village key>#1800+k`, each taking the last plain resident's place as the cowherd does; a village whose residents
+  are all ones it may not replace has fewer) and the jobs plan puts each oven on the square, else beside a house; no plot of its own, so layouts are the same as generator 5. In other villages an unemployed villager takes the job
+  once an oven is placed (by the player, or a builder's `bakehouse`: a 3x3 roofed shelter on fence posts with the oven at the back; builder.js weight 1.5 with 15+ villagers and no oven, 0.05 below, 0.02 once there is one;
+  the builder crafts the oven from 8 cobblestone + 1 iron ingot). A new baker gets nothing (no starting wares, `PRODUCE.baker = []`).
+- **The baker's day** (state `m.bkr`, route kind `bake`, 0.02 to 0.45 of the day): turns its cane into sugar (the recipe, in hand), cuts whole cakes into 7 slices while it holds fewer than 7 slices (one cake stays whole for the
+  player's `1 emerald > 1 cake`), then: (1) empties an oven holding leftovers (after a reload or the day's end); (2) bakes cakes while it holds fewer than 21 slices (cakes count 7; up to 2 a load), else pies while it holds
+  fewer than 9 (up to 4 a load): it walks to its own oven, loads the tray, puts fuel in (topped up while it waits beside it), waits, takes out the food, the empties and the fuel left. Fuel it holds or buys first (coal,
+  then logs or planks, through any villager's offer); with none for sale it bakes what the fuel it holds covers, and with none at all it bakes nothing ("has no fuel for the oven" in the log, once a day); (3) before 0.4 of
+  the day it buys missing ingredients up to 6 wheat, 6 milk bottles, 4 eggs, 4 sugar (as cane), 3 pumpkins (`HOLD_MAX` caps), through other villagers' offers (FU `findDeal` / `doBuy`, `T.exchange`): wheat and cane, pumpkins
+  from farmers' spare goods, eggs from the poultry keeper (or the merchant's or anyone's spare eggs; the player may sell it eggs, wheat and pumpkins too), milk bottles from the cowherd. The cowherd's `MILK_KEEP` (3) bottles
+  are kept for the baker: `BF.cowherd.forBaker` is set while a baker buys (cowherd.js `reserve`). It never milks and never uses a bucket. No cowherd, no milk: no cakes, pies still. No eggs: neither.
+  **Reserve** (`BF.baker.reserve` in `market.reserve`): every ingredient it holds and its fuel. Its slices and pies are its wares, not its meals (`market.spareOf` skips the food clamp for them; villagelife.js `reserveOf` keeps
+  them and its milk from being eaten); its empty bottles are spare goods, which the cowherd buys back.
+- **Farmers** (villagelife.js `think` / `perform` call `BF.baker.farmTask` / `farmPerform`; task kinds `cane`, `canegather`, `caneplant`, `canespot`, `pumpkin`, `pumpkinplant`): sugar cane on the soil cells of its beds beside
+  water (a generated pumpkin patch's edge by the channel), up to 3 spots: while it has fewer it turns farmland at a channel's end back to dirt; it cuts cane 3 tall down to the bottom block, top first; its first cane comes
+  from the 2-4 canes a new farmer starts with (like its seeds) or wild cane near the village's water. Pumpkins in its beds are harvested; a patch cell not beside water is tilled and replanted from seeds (a pumpkin is cut
+  into 4 when it has none) and remembered (`D.pumpkins`, not saved: after a reload a replanted cell may get wheat). Its cane and pumpkins are ordinary spare goods (its trade tables are unchanged).
+- **Treats.** Cake slices and pumpkin pies are food (`breadEq`), but treats: everyday hunger buys plain food first (`dealWith` skips treats; findFoodSeller's `treat` pass comes before milk). A villager (not a child, not the
+  baker) buys a treat now and then (villagelife.js `shopAI`, `BF.baker.treatWanted`): before 0.4 of the day, its village has a baker, it holds none, has 2+ emeralds and bought none for 3 days (`life.tb`, saved; the first
+  look is spread at random). Eating (villagelife.js `nextBite`): a treat is eaten first when it ate none for a day (`life.tt`, saved), otherwise only when nothing else is left. Happiness term `treats`
+  ("ate a treat in the last 3 days", +1 each villager whose `life.tt` is within 3 days); the rest of the formula is unchanged.
+- **Debug screen.** A baker's holdings (`BF.baker.holdings(m)`: ingredients, goods, its oven, baked so far) under its pack; the happiness breakdown shows `treats`. Village log (kind `bake`, logmatch action `bake`):
+  "baked N cakes / pumpkin pies in the oven", "bought N milk bottles from ... for cakes", "sold N cake slices / pumpkin pies to ...", "has no fuel for the oven ..."; farmers' cane and pumpkin work is `farm`.
+  `BF.baker.log` keeps the last 300 internal events.
+- Tests: `test/baker-actions.js`, `test/bakechain.js` (14-day soak: `node test/bakechain.js 14 1`).
 
 ## Villager status, food for the unemployed, claimed beds (js/villagerstatus.js, loaded after villagelog.js)
 - `BF.villagerStatus.text(m)`: the trade screen's status line for any villager. villageLife, builder and explorer statusText speak first;
