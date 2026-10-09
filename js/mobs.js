@@ -1378,6 +1378,43 @@ function claimBed(m, n, dt) {
   n.fails = 0; m.ai.route = null;
   if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
 }
+// Without a bed at night: walk into the nearest building (its own house first) that has room, along a path through the door. True while going.
+const inHouse = (h, x, z) => x >= h.x && x <= h.x + h.w && z >= h.z && z <= h.z + h.d;
+function shelterAI(m, dt0, dt, out) {
+  const ai = m.ai, V = m.village, n = dt0;
+  if (!V || (n.sFail || 0) >= 3) return false;
+  if (!n.shelter) {
+    let best = m.home, bd = 1e9;
+    if (!best) for (const h of V.houses || []) {
+      if (!h || !h.w || h.w * h.d < 9) continue;
+      let used = 0;
+      for (const o of V.members) if (o !== m && o.type === "villager" && !o.dead && inHouse(h, o.position.x, o.position.z)) used++;
+      if (used >= 4) continue;                                // full: next one
+      const d = Math.hypot(h.x + h.w / 2 - m.position.x, h.z + h.d / 2 - m.position.z);
+      if (d < bd) { bd = d; best = h; }
+    }
+    if (!best) return false;
+    n.shelter = best;
+  }
+  const h = n.shelter;
+  if (inHouse(h, m.position.x, m.position.z)) return true;
+  if (ai.routeKind !== "shelter") ai.route = null;
+  if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
+    planBudget--;
+    const [fx, fy, fz] = feetCell(m);
+    const gx = Math.floor(h.x + h.w / 2), gz = Math.floor(h.z + h.d / 2);
+    ai.route = findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => x >= h.x && x < h.x + h.w && z >= h.z && z < h.z + h.d }, 2500);
+    ai.ri = 0; ai.stuckT = 0; ai.routeKind = "shelter";
+    if (!ai.route) { n.sFail = (n.sFail || 0) + 1; n.retryT = 8; }
+  }
+  if (ai.route) {
+    const st = followRoute(m, dt, out, m.def.speed * 1.3);
+    if (st === "done") ai.route = null;
+    else if (st === "stuck") { ai.route = null; n.sFail = (n.sFail || 0) + 1; n.retryT = 4; }
+    return true;
+  }
+  return false;
+}
 // Night: head for bed and sleep; without a usable bed stand still indoors or by the village bell.
 function nightAI(m, dt, out) {
   const ai = m.ai, T = m.def, V = m.village;
@@ -1401,6 +1438,7 @@ function nightAI(m, dt, out) {
   }
   const inside = H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d;
   if (inside || !V) return;
+  if (shelterAI(m, n, dt, out)) return;      // a villager without a bed goes indoors for the night
   const dx = V.x + 0.5 - m.position.x, dz = V.z + 0.5 - m.position.z, d = Math.hypot(dx, dz);
   if (d > 3.5) { out.x = dx / d * T.speed; out.z = dz / d * T.speed; }
 }
@@ -2183,6 +2221,23 @@ function villageRoster(rec) {
   return ordered;
 }
 
+// Where a villager appears when its village loads and it is not restored exactly: by day a random spot inside the village within the leash of its
+// bed (the village centre without one); at bedtime in its bed. null: no spot found (the house is used).
+const LEASH = 40;
+function scatterAt(rec, sl, v) {
+  const b = sl.bed;
+  if (bedtime()) return b ? findStand(b.x, b.y, b.z, TYPES.villager) : null;
+  const cx = b ? b.x : v.x, cz = b ? b.z : v.z;
+  for (let i = 0; i < 14; i++) {
+    const a = Math.random() * Math.PI * 2, d = LEASH * Math.sqrt(Math.random());
+    const x = Math.floor(cx + Math.cos(a) * d), z = Math.floor(cz + Math.sin(a) * d);
+    if (v.minX != null && (x < v.minX || x > v.maxX || z < v.minZ || z > v.maxZ)) continue;
+    if (!BF.world.isLoaded(x, z)) continue;
+    const at = findStand(x, BF.world.heightAt(x, z) + 1, z, TYPES.villager);
+    if (at) return at;
+  }
+  return null;
+}
 function updateVillages(dt) {
   for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
   villageT -= dt;
@@ -2220,6 +2275,8 @@ function updateVillages(dt) {
       if (snap === "wait") continue;
       let at = null;
       if (snap) at = standable(Math.floor(snap.p[0]), Math.floor(snap.p[1]), Math.floor(snap.p[2]), TYPES.villager.hw, TYPES.villager.h) ? snap.p.slice() : findStand(snap.p[0], snap.p[1], snap.p[2], TYPES.villager);
+      let scattered = false;
+      if (!at && (at = scatterAt(rec, sl, v))) scattered = !bedtime();   // otherwise: by day a random spot within the leash of its bed, at night in the bed
       if (!at) {
         if (H && !loadedHouse(H)) continue;
         const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
@@ -2230,7 +2287,7 @@ function updateVillages(dt) {
       if (!at) continue;
       const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
       m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m); haveV++;
-      m.ai.leaving = !bedtime(); // spawned indoors by day: walk out through the door
+      m.ai.leaving = !bedtime() && !scattered; // spawned indoors by day: walk out through the door
       const sv = villagerSaves.get(villagerKey(m));
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
       if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
@@ -2376,7 +2433,7 @@ BF.mobs = {
     const rec = villages.get(key);
     if (!rec) return 0;
     let n = 0;
-    for (const m of list.slice()) if (m.village === rec || m.penVillage === rec) { removeMob(m); n++; }
+    for (const m of list.slice()) if (m.village === rec || m.penVillage === rec) { if (BF.mobSave && BF.mobSave.stash && m.village === rec) BF.mobSave.stash(m); removeMob(m); n++; }   // written down where it stands: back exactly after a short absence
     rec.members = [];
     return n;
   },
