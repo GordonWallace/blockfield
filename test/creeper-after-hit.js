@@ -1,3 +1,4 @@
+// @ci integration suite=world
 // A creeper blast right after another mob's hit still does its damage; weaker hits in the same half second don't (bug-026):
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/cah test/creeper-after-hit.js
 module.exports = async (pg, out) => {
