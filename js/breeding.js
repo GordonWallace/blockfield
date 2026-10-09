@@ -133,11 +133,12 @@ const lovesIn = rec => S.loves.filter(L => L.rec === rec).length;
 const maxTotal = rec => rec && rec.pop ? Math.max(MAX_TOTAL, Math.ceil(rec.pop * 1.5)) : MAX_TOTAL;   // sized villages (2-100 villagers) may grow by half
 function bedsOK(rec) { const v = villagerCount(rec) + lovesIn(rec); return v < maxTotal(rec) && bedCount(rec) >= v + 1; }
 
-// A free bed for a newborn: not a roster slot's bed, not any live member's bed, not another newborn's.
+// A free bed for a newborn: not a living roster slot's bed (a killed slot never respawns, so its bed is free), not any live member's bed,
+// not another newborn's.
 const bedKey = b => b.x + "," + b.y + "," + b.z;
 function freeBed(rec, self) {
   const used = new Set();
-  for (const sl of rec.roster || []) if (sl.bed) used.add(bedKey(sl.bed));
+  for (const sl of rec.roster || []) if (sl.bed && !(rec.dead && rec.dead.has(sl.idx))) used.add(bedKey(sl.bed));
   for (const m of rec.members || []) if (m !== self && m.bed && !m.dead && !m.removed) used.add(bedKey(m.bed));
   for (const e of bredList(rec)) if (!e.dead && e.bed && (!self || e.mob !== self)) used.add(bedKey(e.bed));
   const W = BF.world, foot = (b) => { const d = BF.blocks[W.getBlock(b.x, b.y, b.z)]; return d && d.bed && !d.bed.head && d.bed.f === b.f; };
