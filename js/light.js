@@ -86,7 +86,10 @@ function propagate() {
     for (let d = 0; d < 6; d++) {
       const nx = x + DX[d], ny = y + DY[d], nz = z + DZ[d];
       const nc = chunkOf(nx, nz);
-      if (!nc || !inBand(nc, ny)) continue;
+      if (!nc) continue;
+      // above a chunk's loaded band is all air: make room so light can spread there (a tall build next door)
+      if (ny >= nc.y1 && ny < BF.H && nc.light) world().ensureRange(nx, nz, ny, ny);
+      if (!inBand(nc, ny)) continue;
       if (OPAQUE[blockAt(nc, nx, ny, nz)] || lget(nc, nx, ny, nz) >= L - 1) continue;
       lset(nc, nx, ny, nz, L - 1);
       mark(nc, nx, nz);
