@@ -58,6 +58,7 @@ function reserve(v) {
   if (v.profession === "shepherd" && BF.shepherd && BF.I.wheat_item != null) add(new Set([BF.I.wheat_item]), count(v, BF.I.wheat_item) + BF.shepherd.wheatWanted(v));
   if (v.profession === "builder" && BF.builder && BF.builder.reserve) { const r = BF.builder.reserve(v); for (const k in r) add(new Set([+k]), r[k]); }
   if (v.profession === "merchant" && BF.merchant) { const r = BF.merchant.reserve(v); for (const k in r) add(new Set([+k]), r[k]); }   // its tent, and its cargo on a trip
+  if (v.profession === "cowherd" && BF.cowherd) for (const r of BF.cowherd.reserve(v)) add(r.ids, r.n);   // a pail, its milk, empties and feed (js/cowherd.js)
   v._res = { t: now, list };
   return list;
 }
@@ -100,6 +101,8 @@ function batch(id, u) {
 // A lot smaller than a batch still sells for 1 emerald when it is worth at least SMALL_LOT of one (a few steaks, a half stack of cobblestone):
 // whole emeralds are coarse, and stock that never fills a batch would otherwise never sell.
 const SMALL_LOT = 0.5;
+// Empty glass bottles go back to the cowherd from a few: milk is bought a few bottles at a time, so the empties are spread thin (js/cowherd.js).
+const LOT_MIN = { glass_bottle: 3 };
 function spareOffers(v) {
   const sold = new Map(), out = [], seen = new Set(), e = em();   // its job's wares -> the smallest batch its job offers sell
   for (const o of v.trades) if (!o.spare && !o.need && o.sell.id !== e) sold.set(o.sell.id, Math.min(sold.get(o.sell.id) || Infinity, o.sell.n));
@@ -112,7 +115,7 @@ function spareOffers(v) {
     let [ems, n] = batch(s.id, u);
     const sp = spareOf(v, s.id), job = sold.get(s.id);
     if (job != null) { if (sp >= job) continue; n = Math.min(n, job); }   // its job offers sell it: only a lot too small for them
-    if (sp < n) { if (ems !== 1 || sp * u < SMALL_LOT) continue; n = sp; }
+    if (sp < n) { if (ems !== 1 || (sp * u < SMALL_LOT && !(sp >= (LOT_MIN[nameOf(s.id)] || Infinity)))) continue; n = sp; }
     out.push({ buy: [{ id: e, n: ems }], sell: { id: s.id, n }, level: 1, xp: 0, spare: 1 });
   }
   return out;

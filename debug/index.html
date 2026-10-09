@@ -720,7 +720,7 @@ const STRUCT = {
   pen:     { name: "Paddock",        fill: "rgba(90,150,190,0.24)", stroke: "rgba(130,190,230,0.4)" },
   other:   { name: "Other building", fill: "rgba(150,150,165,0.26)", stroke: "rgba(200,200,215,0.3)" },
 };
-const structKind = t => /house|^big$|cottage/.test(t || "") ? "house" : /farm|garden/.test(t || "") ? "farm" : t === "pen" || t === "stable" ? "pen" : "other";
+const structKind = t => /house|^big$|cottage/.test(t || "") ? "house" : /farm|garden/.test(t || "") ? "farm" : t === "pen" || t === "stable" || t === "pasture" ? "pen" : "other";
 function star(g, x, y, r) {
   g.beginPath();
   for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
@@ -859,7 +859,7 @@ function renderInv() {
     `<div>${esc(m.status || "")}</div><div>Slots used: <b>${used}</b> of ${slots.length}</div>` +
     `<div>Emeralds: <b>${fmt(m.em || 0)}</b> carried${m.chests ? `, <b>${fmt(m.emChests || 0)}</b> in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}</div>` +
     `<div>Food: <b>${fmt(m.food || 0)}</b> bread-equivalent carried${m.chests ? `, <b>${fmt(m.foodChests || 0)}</b> in chests` : ""}</div>` +
-    (m.flock ? `<div>Flock: <b>${fmt(m.flock.n)}</b> ${m.flock.kind}${m.flock.young ? ` (${fmt(m.flock.young)} young)` : ""}${m.flock.coop ? "" : `, no ${m.flock.kind === "chickens" ? "coop" : "pen"}`}${m.flock.eggs != null ? `, <b>${fmt(m.flock.eggs)}</b> egg${m.flock.eggs === 1 ? "" : "s"} in the nest` : ""}</div>` : "") + horsesHtml(m.horses) + "</div>";
+    (m.flock ? `<div>Flock: <b>${fmt(m.flock.n)}</b> ${m.flock.kind}${m.flock.young ? ` (${fmt(m.flock.young)} young)` : ""}${m.flock.coop ? "" : `, no ${m.flock.kind === "chickens" ? "coop" : m.flock.kind === "cows" ? "pasture" : "pen"}`}${m.flock.eggs != null ? `, <b>${fmt(m.flock.eggs)}</b> egg${m.flock.eggs === 1 ? "" : "s"} in the nest` : ""}${m.flock.milked != null ? `, <b>${fmt(m.flock.milked)}</b> milked today, <b>${fmt(m.flock.culls || 0)}</b> culled${m.flock.limit ? ` (the pasture holds ${fmt(m.flock.limit)})` : ""}` : ""}</div>` : "") + horsesHtml(m.horses) + "</div>";
 }
 // A stable hand's paddock horses (js/stables.js holdings): how many, then one line per horse with its stats and price.
 function horsesHtml(H) {

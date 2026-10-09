@@ -464,4 +464,21 @@ T.nesting_box_front = p => {
   egg(p, 15, 23);
   p.relief(1.0);
 };
+
+// ---------- milk churn (cowherd, not vanilla): an oak churn bound with two iron hoops, a plank lid and the dasher handle through it ----------
+// Box model (blocks.js): the body spans rows 6-31 of the side tile (y 0-13), the lid samples the top tile, the handle the bottom tile.
+T.milk_churn_side = p => {
+  vboards(p, WOOD_OAK, 5, "#3d2c18");
+  band(p, 9, 11, IRON); band(p, 25, 27, IRON);
+  for (const x of [3, 13, 23]) { rivet(p, x, 10); rivet(p, x + 2, 26); }
+  rect(p, 6, 13, 25, 14, (x, y) => mix(hex("#f4f2ea"), hex("#d8d2c0"), p.noise(x, y, 4, 4, 251)), 0.75, 0.02);   // a milk drip
+  p.relief(1.25);
+};
+T.milk_churn_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  frame(p, 2, "#4a4a52", "#9a9aa2");
+  circle(p, 16, 16, 3.2, (x, y, d) => { p.set(x, y, jit(p, ramp(WOOD_SPRUCE, 0.3 + d * 0.1), 0.04)); p.setH(x, y, 1 - d / 5); });   // the dasher through the lid
+  p.relief(1.2);
+};
+T.milk_churn_bottom = p => { planksBase(p, WOOD_SPRUCE, "#2a1e10"); p.relief(1.2); };
 })();

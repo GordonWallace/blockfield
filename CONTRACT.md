@@ -888,7 +888,7 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - **Eggs.** Item `egg` (stack 16, not food) and `cooked_egg` (food 6, not vanilla; furnaces cook `egg` -> `cooked_egg`). An adult lays one every 0.25-0.5 days: a wild chicken drops it, a coop chicken lays into the coop's nest
   (`coop.eggs`, up to 64). Unloaded coop chickens keep laying (states hold absolute days).
 - **Tempting.** A chicken within 10 blocks follows a player holding wheat seeds (`chickenAI`), so the player can lure chickens into a coop; any chicken that ends up inside a coop's run joins it.
-- **Coops.** Village generator 4 (default for new worlds from 1.3; worlds saved with 3 keep 3): a village of 8+ villagers gets a poultry keeper (roster slot `<village key>#1500`, taking the last plain resident's place) and a 7x7
+- **Coops.** Village generator 4 (the default for new worlds from 1.3 until generator 5 added pastures, see "Cowherds"; worlds saved with 3 keep 3): a village of 8+ villagers gets a poultry keeper (roster slot `<village key>#1500`, taking the last plain resident's place) and a 7x7
   `coop` building (worldgen `layoutVillage`, added after everything else so no plot moves): fence ring, gate facing the road, hay bales in the back corners; the nesting box goes beside it (`jobs.planVillage`).
   Builders can build a `coop` (blueprints.js: fence ring with a gap, nesting box beside the east fence; builder.js weights it 2.4 when the village has no coop and 8+ villagers, 0.02 after; the builder crafts the nesting box from 4 planks + 1 hay bale).
   `BF.poultry.coopsOf(rec)`: `{key, idx ("g<n>" generated / "b<id>" built), gen, rec, x0..z1 (run), fx0..fz1 (fence), y (ground), gate, out, cells, hens: [state], eggs}`. A generated coop starts with 2-4 chickens, a built one empty.
@@ -899,6 +899,53 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   Seeds: a generated keeper starts with 12+, a hired one gets 1 emerald (`trading.js hireKit`); it buys more from farmers (villagelife.js `wheatDealWith`, farmers keep 16). Sells eggs, feathers, raw chicken (TRADES.poultry_keeper, never restocked).
 - **Debug screen.** Mob counts split chickens into `chicken (coop)` and `chicken (wild)`; a keeper's (and shepherd's) holdings show its flock and the eggs in the nest. Village log lines: chick hatched, eggs collected, culled, fetched / brought in, none in range.
 - Test: `test/poultry-actions.js`.
+
+## Cowherds (js/cowherd.js, loaded after eggcook.js)
+`BF.cowherd`. Every cow mob carries `m.cow = {fed, cd, growAt, milkDay, x, z, mob}` (absolute game days; `milkDay` the whole game day it was last milked). Mirrors the poultry code (js/poultry.js).
+- **Feeding / breeding.** 1 `wheat_item` from the player (right click, player.js) or a cowherd sets `fed`; willing for 1 day. Two willing adults of the same pasture (or both wild) within 10 blocks walk together and a calf
+  appears; both rest 1 day and need wheat again. Calves (`m.calf`, `growAt`) are scaled 0.5 (`BF.mobs.setCowSize`), drop nothing (mobs.js `giveDrops`), give no milk and grow up after 3 days (`CALF_DAYS`); wheat ages one by 10%.
+  No breeding while 24 cows are within 16 blocks. Events: `cowFed(m, by)`, `cowBorn(calf, a, b)`, `cowMilked(m, by)`, `cowPenned(m, pasture)`.
+- **Milking.** An empty bucket on an adult cow gives a `milk_bucket` (the player's right click swaps the bucket in hand; creative keeps the bucket), once per cow per game day, for the player and the cowherd alike
+  ("This cow was milked today", "Calves give no milk"). Fast-forward and unloaded time count: the day is the sky's.
+- **Items** (appended after the poultry items): `milk_bucket` (stack 1, food 6, `container: "bucket"`), `glass_bottle` (3 glass in a V -> 3), `milk_bottle` (stack 16, food 2, `container: "glass_bottle"`;
+  shapeless 1 milk bucket + 3 glass bottles -> 3 milk bottles, the bucket stays in the grid). An item's `container` is what is left when it is eaten or drunk (player.js `finishEating` / `leaveContainer`: into the
+  emptied hand slot, else the pack, else dropped; villagers: villagelife.js `eat` / `take` -> `emptied`) and when it is used in a recipe (inventory.js `consumeGrid`: left in its grid slot when that empties, else given back).
+  Test hooks: `BF.inventory.gridSet(stacks, w)`, `craftResult()`, `craftTake()`, `gridGet()`; `BF.player.finishEating(item)`.
+- **Milk churn** (block after the nesting box pack, jobsite of `cowherd`; model: a banded wooden churn; 4 planks + 1 iron ingot, as a U). Only the churn makes a cowherd. Old saves get cowherds only once a churn exists (placed or built).
+- **Pastures.** Village generator 5 (default for new worlds; worlds saved with 4 keep 4): a village of `COWHERD_POP` (10)+ villagers on grass (`v.ground === 0`, set early in `layoutVillage`; desert 1, snow 2) gets a cowherd (roster slot
+  `<village key>#1700`, taking the last plain resident's place, as the poultry keeper; a village whose residents are all tradespeople it cannot replace has none) and an 11x9 `pasture` (worldgen, added after the coop only when
+  `BF.jobs.cowherdCount(v)` holds the cowherd, so no other plot moves): fence ring, oak gate facing the road, grass inside, two hay bales and a 4-long sunken water trough along the back; the churn goes beside it (`jobs.planVillage`).
+  The roster takes `ground` (`rec.wg.ground`, or `ground` passed by jobs.js / signs.js).
+  Builders build a `pasture` only in villages on grass (`BF.cowherd.grassVillage`; builder.js `pickType` weight 0 off grass, 2 with 10+ villagers and none, 0.02 after; `findSite` refuses it off grass and wants grass under its centre):
+  blueprints.js `pasture` = 11x9 fence ring with an oak gate, a 2-water trough in a plank rim, 2 hay bales when the builder holds them, the churn beside the east fence; `bp.marks` = room (inside corners), gate, out, fence corners, churn.
+  The builder crafts the churn (4 planks + 1 iron ingot).
+  `BF.cowherd.pasturesOf(rec)`: `{key, idx ("g<n>" generated / "b<id>" built), gen, rec, x0..z1 (field, block edges), fx0..fz1 (fence), y (ground), gate, out, cells, limit (= floor(cells / 8), 6 generated, 5 built), cows: [state], culls}`.
+  A generated pasture starts with 2-4 cows, a built one empty. Pasture cows (`m.pasture`, `m.penVillage`) graze only in the field (`pickPastureTarget`, `contain`), are village stock (not wildlife) in `countMobs`, stay while their village is simulated and otherwise come back with their state when the pasture is loaded again;
+  a cow that walks into a field joins it, one that gets 2.5 blocks out leaves it. Saved as `pastures:<village key>` = `[{i, c: [[fed, cd, growAt, milkDay, x, z]], k: culls}]` in `exportVillagers`.
+  The player killing pasture cows is the same as killing penned sheep: stock lost, no other rule.
+- **The cowherd** (profession `cowherd`, jobsite `milk_churn`; outfit: olive smock, leather apron, white belt, brown brim hat). Works from 0.02 to 0.5 of the day on the pasture its churn stands beside (fence within 4.5 blocks), plus
+  stray cows within 12 blocks; without a pasture it only milks the cows that come within 10 blocks of its churn. Order of work: bottle (milk buckets at the churn, 3 glass bottles each), milk every adult not milked today
+  (needs an empty bucket and 3 free glass bottles for each bucket it would fill, and fewer than 32 milk bottles), feed hungry adults wheat while the herd is at or under its limit (no more willing cows than keep it within one over the limit once they pair up), cull adults while it is over the limit and
+  more than 2 adults remain (keeps the cow's drops: 1-3 `raw_beef`, 0-2 `leather`), and while its pasture holds fewer than 2 cows fetch the nearest wild adult within 96 blocks and lead it home exactly as the poultry keeper does
+  (trail, wait, hold the gate open, cancel its own door closing, shut the gate once clear; `leadFailed` avoids that cow for 120 s; none in range: tomorrow, `noWild`). It keeps one wheat back as the lure. With no task it walks
+  out of the field through the gate.
+- **Hire kit.** 1 `bucket` + 30 `glass_bottle`, once per villager (`m.cowKit`, saved as `ck` in trades.pack): in the starting pack of a generated cowherd (`trading.stockFor` -> `kitInto`) or when a villager is hired as a
+  cowherd later (`jobs.hire` -> `hireKit`). This is the only way glass bottles enter a village. Its wares (milk bottles, beef, leather, steak) are never in its starting pack and never restocked (`PRODUCE.cowherd = []`).
+- **Shopping** (villagelife.js `shopAI`, one market: only through other villagers' offers, `T.exchange`): wheat through any villager's wheat offer, farmers first (`wheatWanted`: below max(2, adults) it tops
+  up to 2 per adult + 4); empty glass bottles while it holds fewer than 9 (`bottleWanted`, `findBottleSeller` -> `wheatDealWith` with the bottle: other villagers' spare-goods bottle offers).
+  **Reserve** (`BF.cowherd.reserve`, added to `market.reserve`): one pail (a bucket or milk bucket: never its last, `market.keeps` via `blockReason`), every milk bucket, every empty glass bottle,
+  `MILK_KEEP` (3) milk bottles and its cows' wheat; none of it is sold or offered as spare goods. It never drinks its milk buckets and never eats its raw beef (villagelife.js `reserveOf`).
+- **Beef.** It cooks the raw beef it holds beyond 6 (kept to sell), while it holds fewer than 24 steaks, in a real furnace of its village with fuel it holds or buys (the egg cook's errand, js/furnaceuse.js; state `m.cwc`,
+  route kind `beef`, `busyWhen` stage `cook`), never instantly and never without a furnace; with no furnace in reach the beef stays raw.
+- **Milk as food.** Villagers count milk as food (bottle 0.4 bread-eq, bucket 1.2) and drink it, keeping the empty container. A hungry villager buys milk bottles only as a last resort (villagelife.js `findFoodSeller` passes
+  egg, food, then `milkDeal`): never through the normal food market (`dealWith` skips milk), through an offer for milk bottles (the cowherd's job offer, or anyone's spare milk); the cowherd keeps
+  `MILK_KEEP` (3) bottles back for the baker (its reserve). Empty bottles: any villager holding them gets a spare-goods offer (js/market.js; batch 10 for 1 emerald, small lots from `LOT_MIN.glass_bottle` = 3
+  bottles for 1 emerald), which the player and the cowherd buy through (above).
+- **Leatherworkers** no longer restock leather (`PRODUCE.leatherworker = []`); holding fewer than 12 they buy it through any villager's leather offer (the cowherd's job offer `1 emerald > 7 leather`, the butcher's, or spare leather; `feedWanted` -> `findWheatSeller`). The stable hand buys leather through offers too.
+- **Debug screen.** Mob counts split cows into `cow (pasture)` and `cow (wild)`; a cowherd's holdings (`BF.cowherd.holdings(m)`: `{kind: "cows", n, young, milked, culls, limit, coop}`) show the herd, calves, cows milked today,
+  culls and the limit; pastures are drawn as pens on the map. Village log (kind `cattle`, logmatch action `cattle`): calf born, milked a cow, bottled N milk bottles, culled a cow (beef, leather), went to fetch / brought a wild cow,
+  none in range, cooked N steak; sales are ordinary trade lines. `BF.cowherd.log` keeps the last 300 internal events.
+- Tests: `test/cowherd-actions.js`, `test/cowchain.js` (14-day soak: `node test/cowchain.js 14 1`).
 
 ## Villager status, food for the unemployed, claimed beds (js/villagerstatus.js, loaded after villagelog.js)
 - `BF.villagerStatus.text(m)`: the trade screen's status line for any villager. villageLife, builder and explorer statusText speak first;

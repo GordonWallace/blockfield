@@ -73,13 +73,14 @@ function invOf(inv) {
     return max ? [s.id, s.count, Math.round(Math.max(0, 1 - s.wear / max) * 100) / 100] : [s.id, s.count];
   });
 }
-// A poultry keeper's flock (js/poultry.js) or a shepherd's (js/shepherd.js): {kind, n (all of them, unloaded ones too), young, eggs (in the nest)}.
+// A poultry keeper's flock (js/poultry.js), a cowherd's herd (js/cowherd.js) or a shepherd's (js/shepherd.js): {kind, n (all of them, unloaded ones too), young, eggs (in the nest)}.
 function flockOf(m) {
   try {
     if (m.profession === "poultry_keeper" && BF.poultry) {
       const T = BF.poultry.tended(m), c = T.coop;
       return { kind: "chickens", n: T.size, young: T.flock.filter(o => o.chick).length, eggs: c ? c.eggs | 0 : null, coop: !!c };
     }
+    if (m.profession === "cowherd" && BF.cowherd) return BF.cowherd.holdings(m);   // {kind: "cows", n, young, milked (today), culls, limit, coop: has a pasture} (js/cowherd.js)
     if (m.profession === "shepherd" && BF.shepherd) { const T = BF.shepherd.tended(m); return { kind: "sheep", n: T.pen && T.pen.sheep ? T.pen.sheep.length : T.flock.length, young: T.flock.filter(o => o.lamb).length, eggs: null, coop: !!T.pen }; }
   } catch (e) { /* not loaded yet */ }
   return null;
@@ -172,7 +173,7 @@ let hooked = false;
 function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
-  for (const m of BF.mobs.list) if (!m.dead && !m.removed) { const k = m.type === "chicken" ? (m.coop ? "chicken (coop)" : "chicken (wild)") : m.type; mobs[k] = (mobs[k] || 0) + 1; }   // chickens: penned and wild (js/poultry.js)
+  for (const m of BF.mobs.list) if (!m.dead && !m.removed) { const k = m.type === "chicken" ? (m.coop ? "chicken (coop)" : "chicken (wild)") : m.type === "cow" ? (m.pasture ? "cow (pasture)" : "cow (wild)") : m.type; mobs[k] = (mobs[k] || 0) + 1; }   // chickens: penned and wild (js/poultry.js)
   if (BF.boats) Object.assign(mobs, BF.boats.counts());   // boats by wood ("oak_boat": n) next to the mob types
   return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
     professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),

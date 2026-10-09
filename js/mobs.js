@@ -247,6 +247,8 @@ const VILLAGER_OUTFITS = {
   unemployed:    {},
   // poultry keeper (not vanilla): straw-yellow apron over a russet robe, a brim hat; keeps chickens in a coop (js/poultry.js)
   poultry_keeper: { robe: 0x8a4a2a, trim: 0x5a2e1a, apron: 0xe6cf7a, sash: 0xd8b84a, hat: { kind: "brim", color: 0xc9a24a, color2: 0xd8b45a } },
+  // cowherd (not vanilla): leather apron over an olive smock, a milk-white belt and a brown brim hat; keeps cows in a pasture (js/cowherd.js)
+  cowherd:       { robe: 0x6a7448, trim: 0x454c2c, apron: 0x8a5530, sash: 0xf0ece0, hat: { kind: "brim", color: 0x5e3a1e, color2: 0x74492a } },
 };
 const PROFESSIONS = Object.keys(VILLAGER_OUTFITS);
 const PROF_ALIAS = { smith: "toolsmith" };
@@ -693,6 +695,7 @@ function removeMob(m) {
   if (m.type === "villager" && !m.dead) { const k = villagerKey(m); if (k && m.inv) villagerSaves.set(k, BF.trades.pack(m)); }
   if (m.sheep && m.sheep.mob === m) m.sheep.mob = null;   // pen sheep keep their state and respawn with the pen (js/shepherd.js)
   if (m.hen && m.hen.mob === m) m.hen.mob = null;   // so do coop chickens (js/poultry.js)
+  if (m.cow && m.cow.mob === m) m.cow.mob = null;   // and pasture cows (js/cowherd.js)
   m.removed = true;
 }
 
@@ -776,6 +779,7 @@ function giveDrops(m) {
   for (const [name, lo, hi] of m.def.drops || []) {
     if (m.type === "sheep" && (m.lamb || (m.sheep && m.sheep.shorn)) && (name === "white_wool" || m.lamb)) continue;   // lambs drop nothing, shorn sheep no wool
     if (m.type === "chicken" && m.chick) continue;   // nor do chicks (js/poultry.js)
+    if (m.type === "cow" && m.calf) continue;   // nor do calves (js/cowherd.js)
     const id = (BF.I && BF.I[name] != null) ? BF.I[name] : (BF.B && BF.B[name]);
     if (id == null) continue;
     const n = irnd(lo, hi);
@@ -972,6 +976,7 @@ function waterAhead(m, dx, dz) {
 function pickWander(m, r) {
   if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
   if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return;   // coop chickens wander inside their run (js/poultry.js)
+  if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
   if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
   const a =Math.random() * Math.PI * 2, d = rnd(3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
@@ -1445,10 +1450,12 @@ function villagerAI(m, dt, out) {
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
   if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
   if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
+  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return;   // carries on cooking beef it started (js/cowherd.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
   if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
+  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
@@ -1582,9 +1589,11 @@ function updateMob(m, dt) {
   } else if (m.type === "sheep" && BF.shepherd && BF.shepherd.sheepAI(m, dt, _desired)) { /* walking to a mate (js/shepherd.js) */ }
   else if (m.type === "horse" && BF.horses && BF.horses.ai(m, dt, _desired)) { /* herd, lead, pen, mate (js/horses.js) */ }
   else if (m.type === "chicken" && BF.poultry && BF.poultry.chickenAI(m, dt, _desired)) { /* led home, following seeds, or to a mate (js/poultry.js) */ }
+  else if (m.type === "cow" && BF.cowherd && BF.cowherd.cowAI(m, dt, _desired)) { /* led home, following wheat, or to a mate (js/cowherd.js) */ }
   else wanderAI(m, dt, _desired);
   if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
   if (m.coop && BF.poultry) BF.poultry.contain(m, _desired);   // nor does a coop chicken
+  if (m.pasture && BF.cowherd) BF.cowherd.contain(m, _desired);   // nor a pasture cow
   if (m.removed) return; // exploded
 
   // ---- physics ----
@@ -1843,7 +1852,7 @@ function standable(x, y, z, hw, h) {
 }
 function countMobs() {
   let p = 0, h = 0;
-  for (const m of list) if (!m.dead && !m.def.village && !m.def.herd && !m.pen) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
+  for (const m of list) if (!m.dead && !m.def.village && !m.def.herd && !m.pen && !m.pasture) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
   return { p, h };
 }
 function tryPassiveSpawn() {
@@ -2007,7 +2016,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2118,6 +2127,20 @@ function villageRoster(rec) {
       if (!gone) break;
     }
     ordered.push({ house: null, idx: 1600 + k, bed: null, prof: "merchant" });
+  }
+  // cowherd: village generator 5 gives every village of COWHERD_POP (10) or more villagers on grass (cows spawn only on grass) one, with a pasture
+  // beside its milk churn (js/cowherd.js, worldgen layoutVillage). Own key <village key>#1700 (#1600+k are the trading caravans' merchants); it takes the place of the last plain resident.
+  const ground = rec.ground != null ? rec.ground : rec.wg ? rec.wg.ground : null;
+  if ((BF.state && BF.state.villages | 0) >= 5 && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.COWHERD_POP) || 10) && ground === 0) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1700, bed: null, prof: "cowherd" });
   }
   return ordered;
 }
@@ -2258,6 +2281,7 @@ BF.mobs = {
     if (BF.horses) BF.horses.tick(dt);   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
     if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
     if (BF.poultry) BF.poultry.tick(dt);   // chickens growing up, laying, coop stock (js/poultry.js)
+    if (BF.cowherd) BF.cowherd.tick(dt);   // calves growing up, pasture stock (js/cowherd.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     spawnT -= dt;
@@ -2306,6 +2330,7 @@ BF.mobs = {
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.poultry) BF.poultry.exportAll(out);   // "coops:<village key>" -> the chickens and nest eggs of each coop
+    if (BF.cowherd) BF.cowherd.exportAll(out);   // "pastures:<village key>" -> the cows of each pasture
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
     if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
@@ -2329,6 +2354,7 @@ BF.mobs = {
     if (BF.breeding) BF.breeding.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
     if (BF.poultry) BF.poultry.importAll(o);
+    if (BF.cowherd) BF.cowherd.importAll(o);
     if (BF.merchant) BF.merchant.importAll(o);
   },
   // Right-click on a mob (called by the player module). Opens the trade screen when the inventory module has one
@@ -2392,6 +2418,14 @@ BF.mobs = {
     if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
     m.halfWidth = TYPES.chicken.hw * (0.6 + 0.4 * k); m.height = TYPES.chicken.h * (0.5 + 0.5 * k);
   },
+  // js/cowherd.js: calf to adult size (k: 0 = born .. 1 = grown)
+  setCowSize(m, k) {
+    if (!m || m.type !== "cow") return;
+    const s = 0.5 + 0.5 * k, hs = 1.35 + (1 - 1.35) * k;
+    m.model.scale.setScalar(s);
+    if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
+    m.halfWidth = TYPES.cow.hw * (0.6 + 0.4 * k); m.height = TYPES.cow.h * (0.5 + 0.5 * k);
+  },
   // js/jobs.js: the deterministic roster of a village record ({key, houses, nb}) and in-place profession change (rebuilds the outfit)
   roster: villageRoster,
   setProfession(m, prof) {
@@ -2436,6 +2470,7 @@ BF.mobs = {
     if (BF.shepherd) BF.shepherd.reset();
     if (BF.stables) BF.stables.reset();
     if (BF.poultry) BF.poultry.reset();
+    if (BF.cowherd) BF.cowherd.reset();
   },
 };
 })();

@@ -37,6 +37,7 @@ const VALUE = {
   furnace: .3,                                                       // 8 cobblestone (js/furniture.js)
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
   saddle: 1.8, lead: .3,                                           // stable hand goods (js/stables.js): saddle 3 leather + 1 iron ingot (.95) + work, lead 4 string + 1 leather -> 2
+  glass_bottle: .1, milk_bottle: .15, milk_bucket: 1.75, milk_churn: .62,   // cowherd goods (js/cowherd.js): a bottle is 1 glass (.08) + work; milk in a bottle .05 on top; the churn 4 planks + 1 iron ingot
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
   VALUE[sp + "planks"] = .03; VALUE[(sp || "oak_") + "log"] = .12;
@@ -197,6 +198,16 @@ const TRADES = {
   // The stable hand (js/stables.js) buys horse feed from the player and sells the tack it makes from leather, iron and string it bought in the
   // village (saddle 111% of VALUE, leads 111%); nothing is restocked or part of its starting pack. Its tamed horses are offered on top of these,
   // one offer per paddock horse priced by its stats (BF.horses.price, 8-24 emeralds; `horse` offers, built in BF.stables.syncOffers).
+  // The cowherd (js/cowherd.js) sells what its herd gives: milk it bottles (1 milk bucket + 3 glass bottles -> 3 milk bottles), raw beef and
+  // leather from the cows it culls, steak it cooks from that beef in a furnace. Prices 95-104% of VALUE. Only what it holds can be bought: nothing is
+  // restocked or part of its starting pack. It buys wheat (the herd's feed) and empty glass bottles back. It never sells its bucket.
+  cowherd: [
+    ["1 emerald > 7 milk_bottle", "1 emerald > 12 raw_beef", "1 emerald > 7 leather", "16 wheat_item > 1 emerald", "12 glass_bottle > 1 emerald"],
+    ["1 emerald > 8 steak"],
+    ["2 emerald > 16 steak"],
+    [],
+    [],
+  ],
   stable_hand: [
     ["18 wheat_item > 1 emerald", "2 hay_bale > 1 emerald", "1 emerald > 3 lead"],
     ["2 emerald > 1 saddle"],
@@ -223,7 +234,7 @@ const PRODUCE = {
   fletcher: [],        // makes arrows and bows from materials it buys (js/fletcher.js)
   mason: ["brick", "bricks", "stone", "terracotta", "orange_terracotta", "yellow_terracotta", "red_terracotta",
     "white_terracotta", "brown_terracotta", "sandstone_bricks"],
-  leatherworker: ["leather"],
+  leatherworker: [],   // no leather from nothing (1.3): it buys leather from the cowherd and the butcher (js/villagelife.js shopAI)
   cartographer: ["paper", "glass"],
   nitwit: [],
   unemployed: [],
@@ -235,6 +246,7 @@ const PRODUCE = {
   furniture_maker: [], // beds are only ever made from wool and planks it holds (js/furniture.js)
   merchant: [],        // buys and sells other villagers' goods (js/merchant.js)
   stable_hand: [],     // saddles and leads are made from leather, iron and string it bought; horses are caught or bred (js/stables.js)
+  cowherd: [],         // milk, beef, leather and steak come only from its herd (js/cowherd.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -333,6 +345,7 @@ function stockFor(prof, v) {
   if (prof === "shepherd") noStart.add(I.string);   // spun from its wool, never given (js/shepherd.js)
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
   if (prof === "poultry_keeper") for (const n of ["egg", "feather", "raw_chicken"]) noStart.add(I[n]);   // laid or culled, never given (js/poultry.js)
+  if (prof === "cowherd") for (const n of ["milk_bottle", "raw_beef", "leather", "steak"]) noStart.add(I[n]);   // milked, culled or cooked, never given (js/cowherd.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -344,7 +357,7 @@ function stockFor(prof, v) {
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
     // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js); nor the fletcher (js/fletcher.js seed gives a few)
-    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
@@ -366,6 +379,7 @@ function stockFor(prof, v) {
   for (const n of STARTER_TOOLS[prof] || []) if (I[n] != null && !a.some(s => s && s.id === I[n])) inv.add(a, I[n], 1);
   if (prof === "shepherd" && I.wheat_item != null) inv.add(a, I.wheat_item, 8);   // feed for the first days (it buys more when it runs low)
   if (prof === "poultry_keeper" && I.wheat_seeds != null && inv.count(a, I.wheat_seeds) < 12) inv.add(a, I.wheat_seeds, 12 - inv.count(a, I.wheat_seeds));   // chicken feed (js/poultry.js)
+  if (prof === "cowherd" && BF.cowherd) BF.cowherd.kitInto(a, v);   // 1 bucket + 30 glass bottles, once per villager (js/cowherd.js)
   return a;
 }
 // Emeralds' worth of the cheapest offer in any trade table selling an item `ok(name)` accepts (per piece), or null when nobody sells one.
@@ -502,6 +516,7 @@ function pack(v) {
     mi: BF.miner && v.profession === "miner" ? BF.miner.pack(v) : undefined,          // the miner's mineshaft (js/miner.js)
     ts: BF.toolsmith && v.profession === "toolsmith" ? BF.toolsmith.pack(v) : undefined,   // the tool on the toolsmith's table, its furnace (js/toolsmith.js)
     fl: BF.fletcher && v.profession === "fletcher" ? BF.fletcher.pack(v) : undefined,     // the arrows or bow on the fletcher's table (js/fletcher.js)
+    ck: v.cowKit ? 1 : undefined,                                                      // it was given the cowherd's bucket and bottles (js/cowherd.js)
     mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
   };
@@ -527,6 +542,7 @@ function unpack(v, o) {
   if (BF.miner && o.mi) BF.miner.unpack(v, o.mi);
   if (BF.toolsmith && o.ts) BF.toolsmith.unpack(v, o.ts);
   if (BF.fletcher && o.fl) BF.fletcher.unpack(v, o.fl);
+  v.cowKit = !!o.ck;
   if (BF.merchant && o.mc) BF.merchant.unpack(v, o.mc);
   if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;

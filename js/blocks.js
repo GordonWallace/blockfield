@@ -318,6 +318,11 @@ const BLOCK_DEFS = [
   // nesting box: the poultry keeper villager's jobsite (not vanilla): a plank box of straw with eggs in it
   { name: "nesting_box", jobsite: "poultry_keeper", tiles: { top: "nesting_box_top", side: "nesting_box_side", front: "nesting_box_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#c8a85a" },
   // ---- end poultry pack ----
+  // ---- cowherd pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Cowherds")
+  // milk churn: the cowherd villager's jobsite (not vanilla): an iron-banded oak churn with its lid and dasher handle
+  { name: "milk_churn", jobsite: "cowherd", tiles: { top: "milk_churn_top", side: "milk_churn_side", bottom: "milk_churn_bottom" }, hardness: 2.5, tool: "axe", creativeTab: "functional",
+    render: "model", model: "shape", opaque: false, boxes: [[3, 0, 3, 13, 13, 13], [4, 13, 4, 12, 14, 12, "milk_churn_top"], [7, 14, 7, 9, 16, 9, "milk_churn_bottom"]], box: [3, 0, 3, 13, 16, 13], color: "#a8824e" },
+  // ---- end cowherd pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -618,6 +623,11 @@ const ITEM_DEFS = [
   { name: "egg", stack: 16, color: "#efe2c4" },
   { name: "cooked_egg", food: 6, color: "#f4ecd8" },
   // ---- end poultry items ----
+  // ---- cowherd items (js/cowherd.js; append-only). container: what is left in hand (and in the crafting grid) once it is drunk or used up.
+  { name: "milk_bucket", stack: 1, food: 6, container: "bucket", color: "#f4f2ea" },              // vanilla: an empty bucket used on a cow (6 hunger here: vanilla's restores none)
+  { name: "glass_bottle", color: "#c8dce4" },                                                     // vanilla: 3 glass in a V -> 3 bottles
+  { name: "milk_bottle", stack: 16, food: 2, container: "glass_bottle", color: "#f6f4ec" },       // not vanilla: 1 milk bucket + 3 glass bottles -> 3 (the bucket comes back)
+  // ---- end cowherd items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

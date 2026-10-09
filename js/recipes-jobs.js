@@ -34,6 +34,7 @@ const BF = (window.BF = window.BF || {});
   if (I.merchant_counter !== undefined) addShaped(I.merchant_counter, 1, ["SSS", "PCP"], { S: WSLAB, P: PLANKS, C: I.chest }, "3 Wooden Slabs over Planks, Chest, Planks → Merchant's Counter (merchant)");
   if (I.tent !== undefined) addShaped(I.tent, 1, ["WWW", "WWW", "S S"], { W: WOOL, S: I.stick }, "6 Wool (any colour) over 2 Sticks → Tent");
   if (I.nesting_box !== undefined && I.hay_bale !== undefined) addShaped(I.nesting_box, 1, [" P ", "PHP", " P "], { P: PLANKS, H: I.hay_bale }, "4 Planks around 1 Hay Bale → Nesting Box (poultry keeper)");
+  if (I.milk_churn !== undefined) addShaped(I.milk_churn, 1, ["P P", "PIP"], { P: PLANKS, I: I.iron_ingot }, "4 Planks around 1 Iron Ingot (a U) → Milk Churn (cowherd)");
   fuel(ids(["composter", "lectern", "barrel", "loom", "fletching_table", "smithing_table", "cartography_table", "drafting_table", "survey_table", "carpentry_bench", "merchant_counter", "nesting_box"]), 15);
 });
 })();

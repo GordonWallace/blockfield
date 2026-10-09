@@ -69,6 +69,7 @@ function craftTable(wood) {
   if (I.merchant_counter != null) t[I.merchant_counter] = { n: 1, from: [[P, 12]] };   // the market stall's jobsite: 3 slabs, 2 planks and a chest (recipes-jobs.js)
   if (I.tack_rack != null) t[I.tack_rack] = { n: 1, from: [[P, 4], [I.leather, 1], [I.iron_ingot, 1]] };   // the stable's jobsite (recipes-jobs.js)
   if (I.nesting_box != null && I.hay_bale != null) t[I.nesting_box] = { n: 1, from: [[P, 4], [I.hay_bale, 1]] };   // the coop's jobsite (js/poultry.js)
+  if (I.milk_churn != null) t[I.milk_churn] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the pasture's jobsite (js/cowherd.js)
   return t;
 }
 const CRAFTS = {};
@@ -261,6 +262,7 @@ function occupiedBox(m, r) {   // player or another mob inside the rect (x0, z0,
 }
 function findSite(m, type, opts, haveFound, wood) {
   const R = m.village, wg = R.wg, w = W(), built = builtOf(R);
+  if (type === "pasture" && !(BF.cowherd && BF.cowherd.grassVillage(R))) return null;   // never off grass (js/cowherd.js)
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
   const attempt = (m.bs ? (m.bs.siteTry = (m.bs.siteTry || 0) + 1) : 0);
   const rng = mulberry(hash32(R.key + ":" + built.length + ":" + attempt + ":" + type) ^ ((BF.state && BF.state.seed) | 0));
@@ -285,6 +287,7 @@ function findSite(m, type, opts, haveFound, wood) {
     if (obs.some(o => rectsOverlap(o, rect))) continue;
     if (dist(px + bp.w / 2, pz + bp.d / 2) > SITE_RANGE) continue;
     if (type === "stable" && BF.horses && !BF.horses.isHorseBiome(px + bp.w / 2, pz + bp.d / 2)) continue;   // a stable stands on horse land itself
+    if (type === "pasture" && BF.cowherd && !BF.cowherd.grassAt(px + bp.w / 2, pz + bp.d / 2)) continue;   // a pasture stands on grass itself
     evals++;
     if (occupiedBox(m, rect)) continue;
     const t = evalTerrain(bp, px, pz, found);
@@ -300,7 +303,7 @@ function findSite(m, type, opts, haveFound, wood) {
 const lamps = inv => (TR().inv.count(inv, BF.I.lantern) >= 3 ? { lantern: true } : null);
 function optsFor(type, inv) {
   if (type === "lamp_posts") return lamps(inv);
-  if ((type === "garden" || type === "stable") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
+  if ((type === "garden" || type === "stable" || type === "pasture") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
   return null;
 }
 // What a villager sells: its offers, job and spare goods (js/market.js). Leather for a stable's tack rack comes from a leatherworker's spare goods.
@@ -335,6 +338,9 @@ function pickType(m, bs) {
     // a coop (js/poultry.js): wanted when the village has none (generated or built) and 8 or more villagers, hardly ever after that
     coop: (R.wg && (R.wg.buildings || []).some(b => b.type === "coop")) || cnt("coop") > 0 ? 0.02
       : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 8 ? 2.4 : 0.05,
+    // a pasture (js/cowherd.js): only in a village on grass; wanted when it has none and 10 or more villagers, hardly ever after that
+    pasture: !(BF.cowherd && BF.cowherd.grassVillage(R)) ? 0 : (R.wg && (R.wg.buildings || []).some(b => b.type === "pasture")) || cnt("pasture") > 0 ? 0.02
+      : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 10 ? 2 : 0.05,
   };
   const sold = soldItems(R), stock = sellerStock(R);
   let sum = 0;
@@ -342,6 +348,7 @@ function pickType(m, bs) {
   for (const t of BPr.TYPES) {
     if (bs.fail && bs.fail[t] > dayNow()) continue;
     if (t === "stable" && !wt.stable) continue;                  // never outside horse land
+    if (t === "pasture" && !wt.pasture) continue;                // never off grass
     const opts = optsFor(t, m.inv), wood = chooseWood(m, t, style, opts, stock);
     const bp = BPr.get(t, 0, style, 0.5, opts, wood);
     const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;

@@ -175,8 +175,16 @@ function recompute() {
   const r = matchRecipe();
   result = r ? { id: r.out, count: r.n } : null;
 }
+// Takes one of each grid ingredient. An ingredient with a container (a milk bucket, a milk bottle: blocks.js `container`) leaves it behind:
+// in its grid slot when that empties, as in vanilla, else back in the inventory (js/cowherd.js).
 function consumeGrid() {
-  for (let i = 0; i < grid.length; i++) if (grid[i] && --grid[i].count <= 0) grid[i] = null;
+  for (let i = 0; i < grid.length; i++) {
+    const s = grid[i];
+    if (!s) continue;
+    const it = BF.items[s.id], back = it && it.container && BF.I[it.container];
+    if (--s.count <= 0) grid[i] = back != null ? { id: back, count: 1 } : null;
+    else if (back != null) giveBack({ id: back, count: 1 });
+  }
   recompute();
 }
 
@@ -1456,6 +1464,12 @@ const api = {
     if (r === "broken") emitChange();
     return r;
   },
+  // Crafting grid for tests (headless): gridSet(stacks, w) fills a w x w grid; craftResult() is what it makes; craftTake() takes one craft
+  // (as a click on the result slot) and returns it; gridGet() is the grid's contents.
+  gridSet(stacks, w) { gw = w || 3; grid = Array.from({ length: gw * gw }, (_, i) => (stacks && stacks[i] ? { id: stacks[i].id, count: stacks[i].count || 1 } : null)); recompute(); return result; },
+  craftResult() { return result ? { id: result.id, count: result.count } : null; },
+  craftTake() { if (!result) return null; const r = { id: result.id, count: result.count }; addTo(r.id, r.count, ORDER_ALL); consumeGrid(); return r; },
+  gridGet() { return grid.map(s => (s ? { id: s.id, count: s.count } : null)); },
   consumeSelected(n = 1) {
     const s = slots[selected];
     if (!s) return 0;
