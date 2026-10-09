@@ -211,10 +211,14 @@ function takeFromInv(id, n) { // main first, then hotbar
   }
   return got;
 }
-function giveBack(stack) { // into inventory; overflow is announced as a drop
+function giveBack(stack) { // into inventory; what doesn't fit drops in front of the player
   if (!stack) return;
   const left = addTo(stack.id, stack.count, ORDER_ALL, stack.wear);
-  if (left > 0) BF.emit && BF.emit("itemDropped", stack.id, left);
+  if (left > 0) dropOverflow(stack.id, left, stack.wear);
+}
+function dropOverflow(id, n, wear) {
+  if (BF.drops && BF.drops.atPlayer && BF.drops.atPlayer(id, n, wear)) return;
+  BF.emit && BF.emit("itemDropped", id, n);
 }
 // move as much of `stack` as fits into arr[i]; returns what is left
 function mergeInto(arr, i, stack) {
@@ -333,7 +337,7 @@ function chestRemoved(x, y, z) {
   for (const s of c.slots) {
     if (!s) continue;
     if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5);
-    else { const left = addTo(s.id, s.count, ORDER_ALL); if (left) BF.emit("itemDropped", s.id, left); }
+    else { const left = addTo(s.id, s.count, ORDER_ALL, s.wear); if (left) dropOverflow(s.id, left, s.wear); }
   }
   renderAll(); emitChange();
 }
@@ -1344,7 +1348,11 @@ const api = {
       if (!f) return;
       if (furnace === f) api.close();
       furnaces.delete(key);
-      for (const s of f.slots) if (s) { const left = addTo(s.id, s.count, ORDER_ALL); if (left < s.count) showToast(s.id, s.count - left); if (left) BF.emit("itemDropped", s.id, left); }
+      for (const s of f.slots) if (s) {
+        const left = addTo(s.id, s.count, ORDER_ALL);
+        if (left < s.count) showToast(s.id, s.count - left);
+        if (left) { if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, left, x + 0.5, y + 0.4, z + 0.5); else BF.emit("itemDropped", s.id, left); }
+      }
       if (f.lit) BF.emit("furnaceLit", x, y, z, false);
       renderAll(); emitChange();
     });
@@ -1372,6 +1380,7 @@ const api = {
       if (t.t <= 0) { t.el.remove(); toasts.splice(k, 1); }
     }
   },
+  dropOverflow(itemId, count, wear) { dropOverflow(itemId, count, wear); },   // items with no room: dropped in front of the player
   add(itemId, count = 1, wear = 0) {   // wear: uses already spent on a tool (a worn tool picked up again)
     if (itemId === undefined || itemId === null || itemId === 0 || !BF.items[itemId] || !(count > 0)) return count || 0;
     const left = addTo(itemId, count, ORDER_ALL, wear);
