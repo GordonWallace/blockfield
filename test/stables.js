@@ -200,9 +200,15 @@ module.exports = async (pg) => {
     ok("with no wild horse in range it waits for the next day", nowild && hand.stb && hand.stb.waitWild > BF.sky.day + BF.sky.time);
     // a herd of 3 wild adults ~40 blocks from the rack, on the ground
     const L = window.__L, sp = [];
-    const a0 = Math.random() * Math.PI * 2;
+    // the same spot every run: the first direction whose 3 spots are dry grass on horse land, near the rack's height (a random one
+    // could land in water or up a cliff, and the stable hand would never reach the herd)
+    const spot = (a, k) => [Math.floor(st.rack.x + Math.cos(a) * 38 + k * 2), Math.floor(st.rack.z + Math.sin(a) * 38 + k)];
+    const fine = a => [0, 1, 2].every(k => { const [x, z] = spot(a, k), y = BF.world.heightAt(x, z);
+      return BF.world.getBlock(x, y, z) === BF.B.grass && Math.abs(y - st.y) <= 4 && BF.horses.isHorseBiome(x, z); });
+    let a0 = 0;
+    for (let i = 0; i < 32; i++) if (fine(i / 32 * Math.PI * 2)) { a0 = i / 32 * Math.PI * 2; break; }
     for (let k = 0; k < 3; k++) {
-      const x = Math.floor(st.rack.x + Math.cos(a0) * 38 + k * 2), z = Math.floor(st.rack.z + Math.sin(a0) * 38 + k);
+      const [x, z] = spot(a0, k);
       const y = BF.world.heightAt(x, z) + 1;
       const h = BF.horses.spawn(x + 0.5, y, z + 0.5, {});
       if (h) sp.push(h.horse.hid);
