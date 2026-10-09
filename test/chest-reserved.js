@@ -19,7 +19,7 @@ module.exports = async (pg, out) => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && !m.dead && !m.child && m.inv && S.keyOf(m) && S.bedHouse(m));
     const m = vs.find(m => !S.chestsIn(S.bedHouse(m), m.bed).length && S.chestSpot(m));
     if (!m) return { err: "no villager without a chest", n: vs.length };
-    const f = BF.mobs.list.find(o => o.type === "villager" && o !== m && o.inv && !o.dead);
+    const f = BF.mobs.list.find(o => o.profession === "furniture_maker" && o !== m && o.inv && !o.dead) || BF.mobs.list.find(o => o.type === "villager" && o !== m && o.inv && !o.dead);   // 1.3 delivers only from a chest offer
     const spot = S.chestSpot(m);
     T.inv.add(m.inv, I.emerald, 3);
     m.store = m.store || { stage: null, checkT: 99, avoid: {}, stored: {}, order: null };
