@@ -1025,9 +1025,10 @@ world.setGate = function (x, y, z, open) {
 
 // ---------- collision ----------
 // Union of the collision boxes of solid blocks overlapping an entity box (filled by boxHit).
-// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored while the move
-// takes it away from the box's centre, so an entity caught inside a door slab can walk out of it; moving further
-// in still collides (HIT.inside is then set, and moveAxis keeps the entity where it was).
+// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored, so an entity caught
+// inside a door slab can walk out of it, unless this axis is the one the entity is least far into the box and the move
+// takes it deeper: then it still collides (HIT.inside is set, and moveAxis keeps the entity where it was), so nothing
+// walks through a block it is only slightly inside, while sliding past a corner it grazes still works.
 const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, inside: false };
 function boxHit(px, py, pz, hw, h, axis, prev) {
   HIT.inside = false;
@@ -1048,9 +1049,13 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
     }
     if (axis === "x" ? ax < prev + hw && bx > prev - hw : axis === "z" ? az < prev + hw && bz > prev - hw :
       axis === "y" && ay < prev + h && by > prev) {
+      // how far the entity (at prev) was into the box on each axis; it only pushes through a face it is shallowest in
+      const qx = axis === "x" ? prev : px, qy = axis === "y" ? prev : py, qz = axis === "z" ? prev : pz;
+      const ox = Math.min(bx, qx + hw) - Math.max(ax, qx - hw), oy = Math.min(by, qy + h) - Math.max(ay, qy), oz = Math.min(bz, qz + hw) - Math.max(az, qz - hw);
+      const o = axis === "x" ? ox : axis === "y" ? oy : oz;
       const mv = (axis === "x" ? px : axis === "y" ? py : pz) - prev;
       const mid = axis === "x" ? (ax + bx) / 2 - prev : axis === "y" ? (ay + by) / 2 - (prev + h / 2) : (az + bz) / 2 - prev;
-      if (mv * mid <= 0) continue;           // leaving (or not moving deeper into) a box it was already inside
+      if (o > Math.min(ox, oy, oz) || mv * mid <= 0) continue;   // grazing it along another face, or leaving it
       HIT.inside = true;
     }
     if (!hit) { HIT.x0 = ax; HIT.y0 = ay; HIT.z0 = az; HIT.x1 = bx; HIT.y1 = by; HIT.z1 = bz; hit = true; continue; }
