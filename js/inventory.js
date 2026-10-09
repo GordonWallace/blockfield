@@ -1571,6 +1571,9 @@ const api = {
       v: 1,
       slots: slots.map(toSave),
       selected,
+      // items out of the inventory while a screen is open (crafting grid, trade payment, cursor): the tab can close
+      // mid-screen, so they are saved and go back into the inventory on load
+      held: open_ ? [...grid, ...pay, cursor].filter(Boolean).map(toSave) : undefined,
       furnaces: [...furnaces.values()].filter(f => f.pos).map(f => ({
         pos: [f.pos.x, f.pos.y, f.pos.z], slots: f.slots.map(toSave), burn: f.burn, burnMax: f.burnMax, cook: f.cook,
       })),
@@ -1596,6 +1599,13 @@ const api = {
       const c = chestAt({ x: cs.pos[0], y: cs.pos[1], z: cs.pos[2] });
       for (let k = 0; k < CHEST_SIZE; k++) c.slots[k] = fromSave(cs.slots && cs.slots[k]);
       if (typeof cs.owner === "string" && cs.owner) { c.owner = cs.owner; c.ownerName = typeof cs.on === "string" ? cs.on : ""; c.emptySince = Number.isFinite(cs.es) ? cs.es : null; }
+    }
+    if (Array.isArray(o.held)) for (const h of o.held) {
+      const st = fromSave(h);
+      if (!st) continue;
+      const left = addTo(st.id, st.count, ORDER_ALL, st.wear);
+      const p = BF.player && BF.player.position;
+      if (left > 0 && p && BF.drops && BF.drops.spawn) BF.drops.spawn(st.id, left, p.x, p.y + 0.5, p.z, { wear: st.wear });
     }
     selected = 0;
     api.select(+o.selected || 0);
