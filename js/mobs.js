@@ -2202,11 +2202,17 @@ function updateVillages(dt) {
       if (haveV >= wantV) break;
       if (taken.has(sl) || dead.has(sl.idx)) continue;   // never respawn a killed villager in place of a living one
       const H = sl.house;
-      if (H && !loadedHouse(H)) continue;
-      const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
-      const sy = H && H.y != null ? H.y : (v.y != null ? v.y : BF.world.heightAt(sx, sz) + 1);
-      let at = findStand(sx, sy, sz, TYPES.villager);
-      if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, TYPES.villager);
+      const snap = BF.mobSave ? BF.mobSave.peek(rec.key + "#" + sl.idx) : null;   // quit and reload: back exactly where it was (js/mobsave.js)
+      if (snap === "wait") continue;
+      let at = null;
+      if (snap) at = standable(Math.floor(snap.p[0]), Math.floor(snap.p[1]), Math.floor(snap.p[2]), TYPES.villager.hw, TYPES.villager.h) ? snap.p.slice() : findStand(snap.p[0], snap.p[1], snap.p[2], TYPES.villager);
+      if (!at) {
+        if (H && !loadedHouse(H)) continue;
+        const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
+        const sy = H && H.y != null ? H.y : (v.y != null ? v.y : BF.world.heightAt(sx, sz) + 1);
+        at = findStand(sx, sy, sz, TYPES.villager);
+        if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, TYPES.villager);
+      }
       if (!at) continue;
       const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
       m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m); haveV++;
@@ -2216,12 +2222,14 @@ function updateVillages(dt) {
       if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
       if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
+      if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
     }
     const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {
       const gy = v.y != null ? v.y : BF.world.heightAt(v.x, v.z) + 1;
-      const at = findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
-      if (at) { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); }
+      const gs = BF.mobSave ? BF.mobSave.golem(rec.key) : null;
+      const at = (gs && findStand(gs.p[0], gs.p[1], gs.p[2], TYPES.iron_golem)) || findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
+      if (at) { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); if (gs) BF.mobSave.apply(g, gs); }
     }
   }
 }
@@ -2318,6 +2326,7 @@ BF.mobs = {
     }
     try { updateVillages(dt); restockVillagers(dt); if (BF.merchant) BF.merchant.tick(dt); } catch (e) { console.error(e); }
     despawn(dt);
+    if (BF.mobSave) BF.mobSave.update(dt);
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
   raycast(origin, dir, maxDist, skip) {

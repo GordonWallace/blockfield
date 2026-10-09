@@ -60,6 +60,7 @@ function snapshot() {
     player,
     inventory: BF.inventory.serialize ? BF.inventory.serialize() : null,
     villagers: BF.mobs && BF.mobs.exportVillagers ? BF.mobs.exportVillagers() : undefined,
+    mobs: BF.mobSave ? BF.mobSave.serialize() : undefined,   // where every loaded mob was and what it was doing, for an exact reload (js/mobsave.js)
     weather: BF.weather && BF.weather.serialize ? BF.weather.serialize() : undefined,
     signs: BF.signs && BF.signs.serialize ? BF.signs.serialize() : undefined,
     vlog: BF.vlog ? BF.vlog.serialize() : undefined,   // village action logs (js/villagelog.js)
@@ -95,6 +96,7 @@ function restore(data) {
   }
   if (data.inventory && BF.inventory.deserialize) BF.inventory.deserialize(data.inventory);
   if (data.villagers && BF.mobs && BF.mobs.importVillagers) BF.mobs.importVillagers(data.villagers); // old saves have none
+  if (BF.mobSave) BF.mobSave.deserialize(data.mobs); // old saves: nothing to restore exactly
   if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather); // old saves: newWorld's seeded default
   if (BF.vlog) BF.vlog.deserialize(data.vlog); // old saves: no logs
   if (BF.vstats) BF.vstats.deserialize(data.vstats); // old saves: no population history
