@@ -3,7 +3,7 @@
 // world (village generator 2) has to regenerate the 1.0 layout, or its saved chest contents end up under a crafting table.
 // 1. A save written in the 1.0 format (seed 4242, gen 3, villages 2, 3 diamonds in the smithy chest at -8,1074,-47, the spot a real
 //    1.0 build put it) loads with a chest at that spot holding the diamonds, and the crafting table one block toward the door.
-// 2. A new world (village generator 3) still puts the smith chest in front of the table.
+// 2. The smith building itself: village generator 2 keeps the 1.0 layout, village generator 3 (new worlds) puts the chest in front of the table.
 module.exports = async (pg, out) => {
   const ok = (cond, what) => console.log((cond ? "PASS " : "FAIL ") + what);
   const r = await pg.evaluate(async () => {
@@ -28,23 +28,16 @@ module.exports = async (pg, out) => {
     const c = BF.inventory.chestState(...pos), held = c ? c.slots.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count) : [];
     const b0 = BF.blocks[BF.world.getBlock(...pos)], [ox, oz] = b0.chestFacing != null ? BF.DIRS[b0.chestFacing] : [0, 0];   // the side the chest opens on
     const old = { villages: BF.state.villages, at: b0.name, front: name(pos[0] + ox, pos[1], pos[2] + oz), behind: name(pos[0] - ox, pos[1], pos[2] - oz), held };
-    // ---- 2. a new world: the smith chest sits in front of its table
-    await BF.save.create({ name: "new smithy", seed: 4242, gameMode: "creative" });
-    BF.state.paused = true;
-    const v = BF.worldgen.nearestVillage(0, 0), smiths = v.buildings.filter(b => b.type === "smith");
-    const fresh = [];
-    for (const b of smiths.slice(0, 2)) {
-      await load((b.x0 + b.x1) >> 1, (b.z0 + b.z1) >> 1);
-      for (let x = b.x0; x <= b.x1; x++) for (let z = b.z0; z <= b.z1; z++) for (let y = b.y; y < b.y + 4; y++) {
-        if (!BF.isChest(BF.world.getBlock(x, y, z))) continue;
-        const f = BF.blocks[BF.world.getBlock(x, y, z)].chestFacing, [dx, dz] = BF.DIRS[f];
-        fresh.push({ chest: [x, y, z], behindIsTable: BF.world.getBlock(x - dx, y, z - dz) === BF.B.crafting_table });
-      }
-    }
-    return { old, fresh, villages3: BF.state.villages, smiths: smiths.length };
+    // ---- 2. the smith layout per village generator, from the building generator itself (no second world to load)
+    const smith = vg => { BF.worldgen.init(BF.noise, { gen: 3, biomeScale: 1, villages: vg }); const cells = BF.worldgen.recordBuilding("smith", 7, 6);
+      const at = id => cells.filter(c => c[1] === 1 && (id === "chest" ? BF.isChest(c[3]) : c[3] === BF.B[id])).map(c => c[2]);
+      return { chest: at("chest"), table: at("crafting_table") }; };
+    const v3 = smith(3), v2 = smith(2);   // v2 last: back to the loaded world's own generator
+    return { old, v2, v3 };
   });
   console.log(JSON.stringify(r));
   ok(r.old.villages === 2 && /chest/.test(r.old.at) && r.old.held.join() === "diamond x3", "1.0 save: the smithy chest is still a chest with its 3 diamonds");
   ok(r.old.front === "crafting_table" && !/chest/.test(r.old.behind), "1.0 save: the smithy keeps its 1.0 layout (its crafting table in front of the chest)");
-  ok(r.villages3 === 3 && (r.smiths === 0 || (r.fresh.length > 0 && r.fresh.every(f => f.behindIsTable))), "new world: the smith chest sits in front of its crafting table");
+  ok(r.v2.chest.join() === "4" && r.v2.table.join() === "3", "village generator 2 (1.0): chest against the back wall, table in front of it");
+  ok(r.v3.chest.join() === "3" && r.v3.table.join() === "4", "village generator 3 (new worlds): chest in front of the table, so its lid is clear");
 };
