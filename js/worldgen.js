@@ -1189,6 +1189,11 @@ function layoutVillage(cx, cz, spawn, pop) {
     try { v.arch = BF.signs.planArch(v, { climate: (x, z) => climate(x, z), spawn: !!spawn, region: [regionOf(cx), regionOf(cz)] }); } catch (e) { console.error(e); v.arch = null; }
     if (v.arch) occ.push(v.arch.box);
   }
+  // signposts to nearby villages (js/signs.js): sites at the main road ends and on the plaza; which ones stand is decided when drawn
+  if (BF.signs && BF.signs.planPosts) {
+    try { v.posts = BF.signs.planPosts(v, { climate: (x, z) => climate(x, z) }); } catch (e) { console.error(e); v.posts = null; }
+    for (const p of v.posts || []) occ.push(p.box);
+  }
   for (const o of occ) {
     v.minX = Math.min(v.minX, o[0]); v.minZ = Math.min(v.minZ, o[1]);
     v.maxX = Math.max(v.maxX, o[2]); v.maxZ = Math.max(v.maxZ, o[3]);
@@ -1312,6 +1317,10 @@ function drawVillage(v, ox, oz, vox, hAt) {
     for (const j of v.jobsites) if (j.id != null) set(j.x, j.y, j.z, j.id);
   }
   if (v.arch && BF.signs && BF.signs.drawArch) BF.signs.drawArch(v, set, styles()[v.style]); // entry arch + village sign (js/signs.js)
+  if (v.posts && BF.signs && BF.signs.drawPosts) {   // signposts to nearby villages (js/signs.js); finding the neighbours lays them out, so keep C
+    if (!v.posts.assigned) { const c0 = Object.assign({}, C); try { BF.signs.assignPosts(v); } catch (e) { console.error(e); } Object.assign(C, c0); }
+    BF.signs.drawPosts(v, set, styles()[v.style]);
+  }
 }
 
 // A box room: foundation ring + floor at y, walls y+1..y+Hh, log corners, air inside.
