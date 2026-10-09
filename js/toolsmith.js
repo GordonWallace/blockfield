@@ -470,6 +470,24 @@ function statusText(m) {
   return "";
 }
 
+// The villager stops being a toolsmith (js/jobs.js setProfession): the materials of the tool on its table go back into its pack,
+// and what does not fit drops at its feet, so nothing is lost or made twice. Its trip plans end with the job.
+function leave(m) {
+  const S = m && m.tsm;
+  if (!S) return;
+  const c = S.craft;
+  S.craft = null; S.deal = null; S.stage = null;
+  if (!c) return;
+  const back = [];
+  for (const e of c.mats || []) {
+    if (e.id == null || !(e.n > 0)) continue;
+    const left = TR().inv.add(m.inv, e.id, e.n);
+    if (left > 0 && BF.drops && BF.drops.spawn && m.position) BF.drops.spawn(e.id, left, m.position.x, m.position.y + 0.5, m.position.z);
+    back.push(e.n + " " + nameOf(e.id));
+  }
+  log("abandon", m, { tool: nameOf(c.id), back: back.join(" + ") });
+}
+
 // ---------------------------------------------------------------- persistence (trading.js pack / unpack, key "ts")
 function pack(m) {
   const S = m.tsm;
@@ -501,6 +519,6 @@ function seed(a) {
 BF.toolsmith = {
   CRAFT_HOURS, CRAFT_SECS, TOOL_CAP, CATS, CALIBER, HEAD, STICKS, SHEARS_IRON,
   hook, furnaces, furnacesFor, usable, plan, smeltPlan, fuelFor, canMake, stockOf, catOrder, toolId, startCraft, finishCraft, work, wantsJob,
-  offersFor, priceOf, findDeal, doBuy, loadFurnace, emptyFurnace, furnaceSpot, placeFurnace, nextTrip, ai, statusText, pack, unpack, seed, LOG,
+  offersFor, priceOf, findDeal, doBuy, loadFurnace, emptyFurnace, furnaceSpot, placeFurnace, nextTrip, ai, statusText, leave, pack, unpack, seed, LOG,
 };
 })();

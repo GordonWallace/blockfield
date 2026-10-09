@@ -30,7 +30,7 @@ const clearSpell = () => range(1, 3) * DAY;
 const rainSpell = () => range(0.3, 1) * DAY;
 
 // ---------- biome classification (cached per 4x4 column cell) ----------
-// kind: 0 dry, 1 rain, 2 snow, 3 snow at y >= 90 (cold), 4 snow at y >= 100 (cool)
+// kind: 0 dry, 1 rain, 2 snow, 3 snow above the cold snow line, 4 snow above the cool snow line (see snowLines)
 const SNOW_IDS = new Set([2, 19, 20, 21, 25, 26]);   // snowy beach/plains, ice spikes, snowy taiga/slopes, jagged peaks
 const DRY_IDS = new Set([12, 13, 14]);               // desert, badlands, savanna
 const biomeCache = new Map();
@@ -49,11 +49,14 @@ function biomeKind(x, z) {
   biomeCache.set(key, k);
   return k;
 }
+// Snow lines (blocks above sea level) for cold and cool biomes. Old 192-high worlds keep 42 / 52. In mile-high worlds the
+// climate already cools with altitude and the plains sit at about y900-1300, so the lines start above the plains, in the ranges.
+const snowLines = () => (BF.H > 192 ? [1400, 1700] : [42, 52]);
 function kindToPrecip(k, y) {
   if (k === 0) return 0;
   if (k === 2) return 2;
-  if (k === 3) return y >= BF.SEA + 42 ? 2 : 1;
-  if (k === 4) return y >= BF.SEA + 52 ? 2 : 1;
+  if (k === 3) return y >= BF.SEA + snowLines()[0] ? 2 : 1;
+  if (k === 4) return y >= BF.SEA + snowLines()[1] ? 2 : 1;
   return 1;
 }
 
