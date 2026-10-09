@@ -629,5 +629,5 @@ let hooked = false;
 function hook() { if (!hooked && BF.on) { hooked = true; BF.on("mobKilled", onKilled); } }
 setTimeout(hook, 0);
 
-BF.merchant = { PROF, RANGE, leftSecs, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
+BF.merchant = { remember, forceHome, PROF, RANGE, leftSecs, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
 })();
