@@ -1,4 +1,5 @@
 // A toolsmith that loses its job mid-craft gets the tool's materials back (bug-009): NODE_PATH=$(npm root -g) node test/run.js /tmp/tj test/toolsmith-job-change.js
+// @ci integration suite=jobs
 // Starts a craft, releases the jobsite (it becomes unemployed), and checks the iron and sticks are back in its pack, nothing more or less,
 // that the craft is gone, that a save and load keeps them, and that what does not fit in a full pack drops at its feet.
 module.exports = async (pg, out) => {
