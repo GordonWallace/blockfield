@@ -1,3 +1,4 @@
+// @ci integration suite=world
 // Torch light crosses a chunk border above the neighbour's loaded height (bug-014):
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/tlb test/torch-light-border.js
 module.exports = async (pg, out) => {
