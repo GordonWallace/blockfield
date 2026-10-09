@@ -448,9 +448,10 @@ function think(m, bs) {
   const R = m.village, built = builtOf(R);
   const active = built.find(e => e.state === "building");
   if (active) {
-    const ownerAlive = R.members.some(x => !x.removed && !x.dead && x.slot && x.slot.idx === active.owner);
+    // the owner keeps it only while it is alive and still a builder; otherwise this builder takes it over (with its own materials)
+    const ownerBuilds = R.members.some(x => !x.removed && !x.dead && x.profession === "builder" && x.slot && x.slot.idx === active.owner);
     const mine = active.owner === (m.slot && m.slot.idx);
-    if (mine || !ownerAlive) {
+    if (mine || !ownerBuilds) {
       if (!mine) vlogBuild(m, active, "took over building");
       active.owner = m.slot ? m.slot.idx : 0; startBuild(m, bs, active);
     }
@@ -682,7 +683,7 @@ function fillMode(m, bs, dt, out) {
 // ---------------------------------------------------------------- build mode
 function buildMode(m, bs, dt, out) {
   const e = bs.entry, ai = m.ai;
-  if (!e || e.state !== "building") { bs.mode = "idle"; bs.entry = null; return false; }
+  if (!e || e.state !== "building" || e.owner !== (m.slot ? m.slot.idx : 0)) { bs.mode = "idle"; bs.entry = null; return false; }   // done, or another builder took it over
   bs.placeT -= dt;
   reachNow = e.retried ? REACH + 1.6 : REACH;     // second pass: stretch a little for the last awkward cells (gable tops)
   // watchdog: a cell that cannot be placed for 15 s (unreachable, stuck, no free line) is skipped so the structure still gets finished
