@@ -1,4 +1,5 @@
 // A worn tool keeps its wear wherever it is moved (bug-005): NODE_PATH=$(npm root -g) node test/run.js /tmp/tw test/tool-wear-moves.js
+// @ci integration suite=items
 // Shift-click into a chest and back, a broken chest's drops, the chest API villagers use, the trade screen's payment slots and what a
 // villager pays and sells, and villager-to-villager exchanges. A villager sells its least worn copy first.
 module.exports = async (pg, out) => {
