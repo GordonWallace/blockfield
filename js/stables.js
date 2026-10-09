@@ -63,11 +63,12 @@ function stableOf(R) {
   if (!e) return null;
   const k = e.ox + "," + e.oy + "," + e.oz + "," + e.rot;
   if (e._st && e._stKey === k) { e._st.rec = R; return e._st; }
-  const M = BF.builder.bpOf(e).marks || {};
+  const bp = BF.builder.bpOf(e), M = bp.marks || {};
   if (!M.paddock || !M.gate || !M.out) return null;
   const at = ([x, z]) => [e.ox + x, e.oz + z], P = M.paddock.map(at), rk = M.rack ? at(M.rack[0]) : [e.ox, e.oz];
   const st = { e, rec: R, owner: ownerOf(R), y: e.oy, box: { x0: Math.min(P[0][0], P[1][0]), z0: Math.min(P[0][1], P[1][1]), x1: Math.max(P[0][0], P[1][0]), z1: Math.max(P[0][1], P[1][1]) },
     gates: M.gate.map(at), out: M.out.map(at), rack: { x: rk[0], y: e.oy + 1, z: rk[1] } };
+  st.box.fp = { x0: e.ox, z0: e.oz, x1: e.ox + bp.w, z1: e.oz + bp.d };   // the whole building: horses walk round it, not at its fence
   st.box.gx = st.gates.reduce((a, g) => a + g[0], 0) / st.gates.length + 0.5;   // the gate's middle: a penned horse outside lines up on it to walk in
   st.box.gz = st.gates.reduce((a, g) => a + g[1], 0) / st.gates.length + 0.5;
   Object.defineProperty(e, "_st", { value: st, writable: true, enumerable: false, configurable: true });   // "_" keys are dropped from the save too (builder.js clean)
@@ -224,7 +225,7 @@ function pickTask(m, S) {
   const st = stableOf(m.village), mine = horsesOf(st), t = now();
   if (st) {
     for (const r of mine) if (r.lead && r.lead.kind === "mob" && r.lead.mob === m && r.mob && live(r.mob)) return { kind: "home", r };
-    for (const r of mine) if (r.mob && live(r.mob) && !r.pen && !r.lead && !r.mob.rider) return { kind: "fetch", r };   // a horse that lost its lead
+    for (const r of mine) if (r.mob && live(r.mob) && !r.lead && !r.mob.rider && (!r.pen || !inBox(r.pen, r.mob.position.x, r.mob.position.z, 1))) return { kind: "fetch", r };   // a horse that lost its lead or got left outside the paddock
     if (mine.length < MIN_HORSES && t >= S.waitWild && food(m)) {
       const h = BF.horses.wildNear(st.rack.x + 0.5, st.rack.z + 0.5, CATCH_R);
       if (h && !((S.avoid["h" + h.horse.hid] || 0) > t)) return { kind: "catch", mob: h, r: h.horse };
@@ -240,6 +241,7 @@ function endTask(m, S, ok) {
   const tk = S.task;
   if (tk && !ok) { if (tk.r) S.avoid["h" + tk.r.hid] = now() + 0.05; if (tk.deal && tk.deal.seller.slot) S.avoid[tk.deal.seller.slot.idx] = now() + 0.05; }
   if (tk && tk.gatesOpen) setGates(tk.st, false);
+  if (tk && tk.r && tk.r.mob) BF.horses.setAvoid(tk.r.mob, null);
   S.task = null; S.stage = null; S.gx = null; m.ai.route = null;
 }
 function setGates(st, open) {
@@ -293,10 +295,10 @@ function taskStep(m, S, dt, out) {
     return true;
   }
   if (tk.kind === "fetch") {
-    if (r.lead || r.pen || r.owner !== st.owner) return endTask(m, S, true), false;
+    if (r.lead || (r.pen && inBox(r.pen, h.position.x, h.position.z, 1)) || r.owner !== st.owner) return endTask(m, S, true), false;
     const s = toMob(m, S, dt, out, h, 2.4);
     if (s === "failed") return endTask(m, S, false), false;
-    if (s === "near") { H.leash(h, m); ai.swingT = 0.35; endTask(m, S, true); }
+    if (s === "near") { H.setPen(h, null); H.leash(h, m); ai.swingT = 0.35; endTask(m, S, true); }   // then it is led home again
     return true;
   }
   if (tk.kind === "feed") {
@@ -317,16 +319,23 @@ function taskStep(m, S, dt, out) {
   if (S.stage !== "pen") {
     const [ox, oz] = st.out[0], oy = groundY(ox, oz);
     if (oy == null) return true;
+    H.setAvoid(h, st.box);                                // the led horse walks round the paddock's fence, not at it
     const s = BF.villageLife.travel(m, S, dt, out, ox, oy, oz, m.def.speed * 1.1);
     if (s === "failed") return endTask(m, S, false), false;
     if (s !== "arrived") return true;
-    S.stage = "pen"; S.penT = 0; tk.st = st; tk.gatesOpen = true;
+    // wait at the gate until the horse has caught up (it follows more slowly round the fence), then open up
+    if (Math.hypot(h.position.x - m.position.x, h.position.z - m.position.z) > 5 && (S.hw = (S.hw || 0) + dt) < 30) return true;
+    S.hw = 0; S.stage = "pen"; S.penT = 0; tk.st = st; tk.gatesOpen = true;
     setGates(st, true);
-    H.setPen(h, st.box); H.leash(h, null);
+    H.setPen(h, st.box); H.setAvoid(h, null); H.leash(h, null);
     return true;
   }
   out.faceX = (st.box.x0 + st.box.x1 + 1) / 2; out.faceZ = (st.box.z0 + st.box.z1 + 1) / 2;
   S.penT += dt;
+  if (S.penT > 25 && !inBox(st.box, h.position.x, h.position.z, 0) && (tk.retry = (tk.retry || 0) + 1) <= 2) {
+    H.setPen(h, null); H.leash(h, m); S.stage = null;     // it never got in: lead it to the gate again
+    return true;
+  }
   if (inBox(st.box, h.position.x, h.position.z, -0.3) || S.penT > 20) {
     if (BF.vlog && m.village) BF.vlog.log(m.village, "horse", who(m) + (r.caught ? " brought a wild horse home to the stable at " : " led a horse into the paddock at ") +
       st.rack.x + ", " + st.rack.y + ", " + st.rack.z + " (" + stats(r) + ")", [st.rack.x, st.rack.y, st.rack.z]);

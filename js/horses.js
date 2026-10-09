@@ -183,7 +183,52 @@ function setPen(m, box) {
   if (!m || !m.horse) return;
   m.horse.pen = box ? { x0: box.x0, z0: box.z0, x1: box.x1, z1: box.z1 } : null;
   if (box && box.gx != null) { m.horse.pen.gx = box.gx; m.horse.pen.gz = box.gz; }
+  if (box && box.fp) m.horse.pen.fp = box.fp;
 }
+
+// ---------------------------------------------------------------- walking round a paddock
+// A horse that walks straight at something on the far side of a paddock's fence only presses itself into the fence (fences stand 1.5 tall,
+// so it can't get over), so it plans round the fence ring by its corners. `box` is a pen's inside cells (js/stables.js).
+const padRing = box => ({ x0: box.x0 - 1, z0: box.z0 - 1, x1: box.x1 + 2, z1: box.z1 + 2 });   // the paddock fence ring's outer edges
+const ringOf = box => box.fp || padRing(box);   // what a horse walks round: the whole stable (shelter too) when the pen knows its footprint
+// Does the segment a->b pass through the rectangle R (open)? Liang-Barsky.
+function segHits(ax, az, bx, bz, R) {
+  let t0 = 0, t1 = 1;
+  const dx = bx - ax, dz = bz - az;
+  for (const [pp, qq] of [[-dx, ax - R.x0], [dx, R.x1 - ax], [-dz, az - R.z0], [dz, R.z1 - az]]) {
+    if (pp === 0) { if (qq <= 0) return false; continue; }
+    const t = qq / pp;
+    if (pp < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
+  }
+  return t1 - t0 > 1e-6;
+}
+// Where to head for to reach (gx, gz) from p without crossing the ring R: the goal itself when the way is clear, else the corner that starts
+// the shortest way round (either direction).
+function routeAround(p, gx, gz, R) {
+  const M = 0.75, E = { x0: R.x0 - M, z0: R.z0 - M, x1: R.x1 + M, z1: R.z1 + M };   // keep a horse's width (0.7) clear of the building
+  const out = (x, z) => {   // the nearest point just outside E when (x, z) is inside it
+    if (!(x > E.x0 && x < E.x1 && z > E.z0 && z < E.z1)) return [x, z];
+    const d = [x - E.x0, E.x1 - x, z - E.z0, E.z1 - z], m = Math.min(...d);
+    return m === d[0] ? [E.x0 - 0.02, z] : m === d[1] ? [E.x1 + 0.02, z] : m === d[2] ? [x, E.z0 - 0.02] : [x, E.z1 + 0.02];
+  };
+  [gx, gz] = out(gx, gz);
+  const [sx, sz] = out(p.x, p.z);
+  if (!segHits(sx, sz, gx, gz, E)) return [gx, gz];
+  const C = 1.6, cs = [[R.x0 - C, R.z0 - C], [R.x1 + C, R.z0 - C], [R.x1 + C, R.z1 + C], [R.x0 - C, R.z1 + C]];
+  let best = null, bl = Infinity;
+  for (let i = 0; i < 4; i++) {
+    if (segHits(sx, sz, cs[i][0], cs[i][1], E)) continue;
+    for (const dir of [1, 3]) {
+      let len = Math.hypot(cs[i][0] - sx, cs[i][1] - sz), j = i;
+      for (let k = 0; k < 3 && segHits(cs[j][0], cs[j][1], gx, gz, E); k++) { const n = (j + dir) % 4; len += Math.hypot(cs[n][0] - cs[j][0], cs[n][1] - cs[j][1]); j = n; }
+      len += Math.hypot(gx - cs[j][0], gz - cs[j][1]);
+      if (len < bl) { bl = len; best = cs[i]; }
+    }
+  }
+  return best || [gx, gz];
+}
+// A horse being led home (js/stables.js) goes round the paddock too: r.avoid is the pen's box while it is.
+function setAvoid(m, box) { if (m && m.horse) m.horse.avoid = box ? { x0: box.x0, z0: box.z0, x1: box.x1, z1: box.z1, fp: box.fp } : null; }
 
 // ---------------------------------------------------------------- AI (called from mobs.js updateMob for unridden horses)
 function walkTo(m, out, x, z, speed) {
@@ -203,7 +248,11 @@ function ai(m, dt, out) {
     else { hx = r.lead.x + 0.5; hz = r.lead.z + 0.5; }
     const d = Math.hypot(hx - p.x, hz - p.z), slack = r.lead.kind === "post" ? POST_R : LEAD_SLACK;
     if (d > LEAD_BREAK && r.lead.kind !== "post") { dropLead(m); return false; }
-    if (d > slack) { walkTo(m, out, hx, hz, Math.min(6, 1.5 + (d - slack) * 1.5)); return true; }
+    if (d > slack) {
+      const [wx, wz] = r.avoid ? routeAround(p, hx, hz, ringOf(r.avoid)) : [hx, hz];
+      walkTo(m, out, wx, wz, Math.min(6, 1.5 + (d - slack) * 1.5));
+      return true;
+    }
     if (r.lead.kind !== "post") { out.x = out.z = 0; return true; }
     return false;   // tied: wanders inside the post's reach (see the clamp below)
   }
@@ -225,12 +274,16 @@ function ai(m, dt, out) {
   if (r.pen) {
     const b = r.pen, inside = p.x > b.x0 + 0.8 && p.x < b.x1 + 0.2 && p.z > b.z0 + 0.8 && p.z < b.z1 + 0.2;
     const cx = (b.x0 + b.x1 + 1) / 2, cz = (b.z0 + b.z1 + 1) / 2;
+    const R = ringOf(b), Pr = padRing(b), outsideRing = !(p.x > R.x0 && p.x < R.x1 && p.z > R.z0 && p.z < R.z1);
     if (!inside && b.gx != null) {
-      // fences stand 1.5 tall (js/blocks.js), so a horse can't step over them: from outside it first lines up in front of the gate, then walks in
+      // fences stand 1.5 tall (js/blocks.js), so a horse can't step over them: from outside it goes round to the front of the gate, lines up, then walks in
       const ix = Math.abs(cx - b.gx) > Math.abs(cz - b.gz) ? Math.sign(cx - b.gx) : 0, iz = ix ? 0 : Math.sign(cz - b.gz);
       const along = (p.x - b.gx) * ix + (p.z - b.gz) * iz, side = ix ? p.z - b.gz : p.x - b.gx;
-      if (along < 0.5 && Math.abs(side) > 0.2) { walkTo(m, out, b.gx - ix * 1.5,b.gz - iz * 1.5, 1.2); return true; }
-      if (along < 0.5) { walkTo(m, out, b.gx + ix, b.gz + iz, 1.2); return true; }
+      if (along < 0.5 && Math.abs(side) <= 0.2) { walkTo(m, out, b.gx + ix * 2, b.gz + iz * 2, 1.2); return true; }
+      if (outsideRing) { const [wx, wz] = routeAround(p, b.gx - ix * 1.5, b.gz - iz * 1.5, R); walkTo(m, out, wx, wz, 1.2); return true; }
+      if (!(p.x > Pr.x0 && p.x < Pr.x1 && p.z > Pr.z0 && p.z < Pr.z1)) {   // in the shelter beside the paddock: out through its open front first
+        walkTo(m, out, ix ? b.gx - ix * 1.5 : p.x, iz ? b.gz - iz * 1.5 : p.z, 1.2); return true;
+      }
     }
     if (!inside) { walkTo(m, out, cx, cz, 1.2); return true; }
     return false;
@@ -554,7 +607,7 @@ BF.horses = {
   HORSE_BIOMES, COATS, MARKS, FEED, SPEED_MIN, SPEED_MAX, JUMP_MIN, JUMP_MAX, HP_MIN, HP_MAX,
   isHorseBiome, rollStats, foalStats, jumpHeight, price: m => price(m.horse || m),
   spawn, tame, feed, breed, leash, setPen, willing: m => !!(m && m.horse && willing(m.horse, now())),
-  ai, tick, spawnHerdAt, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
+  ai, tick, spawnHerdAt, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
   ride: RIDE, drawLeads,
   serialize, deserialize, reset,
 };
