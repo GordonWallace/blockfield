@@ -32,6 +32,7 @@ let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
 let hurtCd = 0, flashT = 0, attackCd = 0, swingT = 0;
+let hurtAmt = 0;   // the hit that started the current hurtCd window (Infinity: spawn protection)
 let mouseL = false, mouseR = false;
 let breakTarget = null, breakProgress = 0, breakCd = 0;
 let placeCd = 0, eatT = 0;
@@ -340,6 +341,8 @@ function showScreen(name) {
   if (name === "pause") { updateViewBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
+  const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
+  if (a && a !== document.body && a.closest && a.closest(".bfp-screen") && !a.closest(".bfp-screen.on")) a.blur();
 }
 
 // ---------- saved worlds (start screen) ----------
@@ -579,11 +582,13 @@ function deferredToggle(closeOnly) {
 }
 
 // ---------- input ----------
+// keys typed into a text box are its own; a focused slider, checkbox or button doesn't stop game keys (Escape in the pause menu)
+const typingIn = t => !!t && (t.tagName === "TEXTAREA" || t.isContentEditable || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button|submit|reset|color)$/i.test(t.type)));
 function bindInput() {
   const cv = canvas();
   addEventListener("keydown", e => {
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     const c = e.code;
+    if (typingIn(e.target)) return;
     if (c === "Space" || c === "Tab" || (e.ctrlKey && /^Key[WASDQE]$/.test(c))) e.preventDefault();
     if (c === "Escape") {
       if (e.repeat || e === escCloseEvent) return;   // a held Escape, or the one that just closed a screen, must not go on to open the pause menu
@@ -1150,7 +1155,7 @@ function boxOverlapsCell(px, py, pz, hw, h, x, y, z) {
   return px + hw > x && px - hw < x + 1 && py + h > y && py < y + 1 && pz + hw > z && pz - hw < z + 1;
 }
 function cellBlockedByEntity(x, y, z) {
-  if (boxOverlapsCell(pos.x, pos.y, pos.z, HW - 0.01, HEIGHT, x, y, z)) return true;
+  if (boxOverlapsCell(pos.x, pos.y, pos.z, HW, HEIGHT, x, y, z)) return true;   // full box: no block may be placed inside the player
   const list = (BF.mobs && BF.mobs.list) || [];
   for (const m of list) {
     if (!m || m.dead) continue;
@@ -1292,6 +1297,8 @@ function trySleep(t) {
   sleepFade();
   setTimeout(() => { BF.sky.setTime(0.01); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
+const inWorld = (x, z) => Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7;   // inside the world border (false for NaN)
+const worldSpawn = () => ({ x: 8.5, z: 8.5 });   // the fallback respawnPoint uses when there is no spawn point
 // Where to stand when respawning at a bed: on it if there is headroom, else on the floor beside it (either half), as in vanilla.
 // A bed in a room with a 2-high ceiling has no headroom on top, and the spawn lift would otherwise put you on the roof. Null if
 // nowhere near the bed fits.
@@ -1311,6 +1318,7 @@ let bedRespawn = null;   // the bed spawn point while its chunk loads (P.update 
 // Where to respawn: at the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
 function respawnPoint() {
   let sp = BF.spawnPoint || { x: 8.5, z: 8.5 };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();   // a spawn point past the border (older saves): back to the world spawn
   bedRespawn = null;
   if (sp.bed) {
     const [bx, by, bz] = sp.bed, b = BF.blocks[BF.world.getBlock(bx, by, bz)];
@@ -1319,6 +1327,7 @@ function respawnPoint() {
     setTimeout(() => actionBar("You have no home bed"), 300);
     BF.spawnPoint = sp = sp.world && sp.world.x != null ? sp.world : { x: 8.5, z: 8.5 };
   }
+  if (sp.y != null && sp.y >= BF.MIN_Y && sp.y < BF.H) return [sp.x, sp.y + 0.01, sp.z];   // /spawnpoint x y z (lifted out if it's inside blocks)
   return [sp.x, surfaceY(sp.x, sp.z), sp.z];
 }
 
@@ -1587,9 +1596,14 @@ let lastCause = "";
 // environmental damage, which ignores the post-hit invulnerability window.
 P.damage = function (amount, fromPos, cause) {
   if (creative() || P.dead || !started || waitingForChunk || !(amount > 0)) return;
-  if (hurtCd > 0 && !cause) return;
-  if (!cause) hurtCd = 0.5;
-  P.health = Math.max(0, P.health - amount);
+  // Vanilla invulnerability: during the half second after a hit, a stronger hit still deals the difference (a creeper
+  // blast right after a zombie punch), a weaker or equal one does nothing.
+  let dealt = amount;
+  if (!cause) {
+    if (hurtCd > 0) { if (amount <= hurtAmt) return; dealt = amount - hurtAmt; hurtAmt = amount; }
+    else { hurtCd = 0.5; hurtAmt = amount; }
+  }
+  P.health = Math.max(0, P.health - dealt);
   lastCause = cause || (fromPos ? "slain" : "hurt");
   flashT = 0.45; hurtBlink = 0.5;
   if (fromPos) {
@@ -1599,17 +1613,21 @@ P.damage = function (amount, fromPos, cause) {
     if (!flying) vel.y = Math.max(vel.y, 5);
   }
   exhaustion += 0.1;
-  emit("playerDamaged", amount);
+  emit("playerDamaged", dealt);
   if (P.health <= 0) die();
 };
 P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health + n); };
 
-const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
+const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", lightning: "You were struck by lightning", hurt: "You died" };
 function die() {
   dismount();
   P.dead = true; P.health = 0;
   resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; drawT = 0; flying = false; turbo = false;
-  if (invOpen()) { try { inv().close(); } catch (_) {} }
+  if (invOpen()) {   // every screen closes (the command line closes itself on playerDied)
+    try { inv().close(); } catch (_) {}
+    try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
+    try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
+  }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
   BF.state.paused = true;
@@ -1636,7 +1654,7 @@ function resetStats() {
   vel.x = vel.y = vel.z = 0;
   P.health = P.maxHealth; P.hunger = P.maxHunger; P.dead = false;
   saturation = 5; exhaustion = 0; air = AIR_MAX; fallStart = null; flying = false; sprinting = false;
-  hurtCd = 1; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
+  hurtCd = 1; hurtAmt = Infinity; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
   dismount(true);
   resetBreak();
 }
@@ -1770,7 +1788,7 @@ function physics(dt) {
   }
 
   const ox = pos.x, oz = pos.z;
-  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, { stepUp: 0.6 }); // vanilla step height: slabs, stairs and beds, not full blocks
+  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, { stepUp: 0.6, firm: true }); // vanilla step height: slabs, stairs and beds, not full blocks
   const wasGround = onGround;
   onGround = res.onGround; inWater = res.inWater; headInWater = !!res.headInWater; ladderHit = res.hitX || res.hitZ;
   if (inWater && wantJump && (res.hitX || res.hitZ)) vel.y = Math.max(vel.y, 6.5); // climb out onto a ledge
@@ -1864,7 +1882,7 @@ P.spawn = function (x, y, z) {
   pos.set(x, y, z);
   waitingForChunk = true;
   faceOpen = true;
-  hurtCd = 2;
+  hurtCd = 2; hurtAmt = Infinity;
   if (menuOpen === "death") { showScreen(null); BF.state.paused = false; }
   syncCamera(0.016);
 };
@@ -1893,6 +1911,7 @@ P.teleport = function (x, y, z) {
   dismount(true);
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists
+  if (y < BF.MIN_Y + 5) waitingForChunk = true;           // in the bedrock floor: lifted to the surface if stuck (bedrock can't be dug out)
   syncCamera(0.016);
 };
 P.kill = function () { if (P.dead || !started) return; lastCause = "killed"; die(); };
@@ -1918,8 +1937,9 @@ P.deserialize = function (o) {
   const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : d);
   if (o.gameMode) setGameMode(o.gameMode);
   resetStats();
-  const sp = BF.spawnPoint || { x: pos.x, z: pos.z };
-  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z)) {
+  let sp = BF.spawnPoint || { x: pos.x, z: pos.z };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();
+  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z) || !inWorld(o.x, o.z)) {
     pos.set(sp.x, surfaceY(sp.x, sp.z), sp.z);           // saved while dead (or broken data): back to spawn
   } else {
     pos.set(o.x, o.y, o.z);
@@ -1932,7 +1952,7 @@ P.deserialize = function (o) {
   yaw = num(o.yaw, yaw); pitch = clamp(num(o.pitch, pitch), -1.55, 1.55);
   waitingForChunk = true;   // no physics until the chunks around the saved position are loaded
   faceOpen = false;         // keep the saved look direction
-  hurtCd = 2;
+  hurtCd = 2; hurtAmt = Infinity;
   if (menuOpen === "death") { showScreen(null); BF.state.paused = false; }
   hudKey = "";
   syncCamera(0.016);
@@ -1965,7 +1985,7 @@ P.update = function (dt) {
       const bed = !vehicle && bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);
       bedRespawn = null;
       if (bed) pos.set(bed[0], bed[1], bed[2]);
-      else if (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
+      else if (pos.y < BF.MIN_Y || (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT))) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }
