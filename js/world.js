@@ -1032,7 +1032,8 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
   const y0 = Math.floor(py), y1 = Math.floor(py + h - 1e-6);
   const z0 = Math.floor(pz - hw), z1 = Math.floor(pz + hw - 1e-6);
   let hit = false;
-  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+  for (let y = y0 - 1; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (y < y0 && !BF.TALLBOX[world.getBlock(x, y, z)]) continue;   // the layer below the feet only matters for fences / gates (1.5 tall)
     if (!world.isSolid(x, y, z)) continue;
     const bid = world.getBlock(x, y, z);
     const cbl = (BF.DYNBOXES[bid] && BF.DYNBOXES[bid](world.getBlock, x, y, z, bid)) || BF.CBOXES[bid] || (BF.CBOX[bid] ? [BF.CBOX[bid]] : [null]); // slabs/stairs: several boxes, each tested on its own
