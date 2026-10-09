@@ -193,6 +193,7 @@ function snapshot() {
     professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
+    loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), maxAiMs: BF.villageSim.LIMITS.aiMs, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired

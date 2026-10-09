@@ -215,5 +215,14 @@ function statusText(m) {
   return S.stage === "cook" ? "Cooking eggs" : "Taking eggs to a furnace";
 }
 
-BF.eggCook = { WORK_END, BUY_BY, toCook, fuelOk, cookPlan, canCook, pending, eggDeal, nextTrip, finish, ai, statusText, LOG };
+// A forced stop (js/villagesim.js): takes the eggs, the fuel and its input out of the furnace. Returns what it did, or null.
+function forceStop(m) {
+  const S = m.eggc;
+  if (!S || !S.deal) return null;
+  const loaded = S.deal.kind === "cook" && S.deal.loaded;
+  if (loaded) finish(m, S.deal, true);
+  S.stage = null; S.deal = null; m.ai.route = null;
+  return loaded ? "emptied the furnace" : null;
+}
+BF.eggCook = { forceStop, WORK_END, BUY_BY, toCook, fuelOk, cookPlan, canCook, pending, eggDeal, nextTrip, finish, ai, statusText, LOG };
 })();

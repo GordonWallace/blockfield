@@ -500,8 +500,8 @@ function renderVillages(s) {
   $("vlist").innerHTML = list.length ? on.map(row).join("") + (off.length ? `<div class="vsep">Not loaded</div>` + off.map(row).join("") : "")
     : `<div class="empty">No villages loaded yet.</div>`;
   const le = s.loadErrors || [];
-  $("lerrs").hidden = !le.length;
-  $("lerrs").innerHTML = le.length ? `<h4>Loading errors (${le.length})</h4>` + le.slice().reverse().map(e => `<div>${esc(e.kind)} \u00B7 ${esc(e.who || "")} \u00B7 ${esc(e.task || "")} \u00B7 estimate ${e.estimate}s, ran ${e.ran}s${e.why ? " \u00B7 " + esc(e.why) : ""} \u00B7 ${esc(e.village || "")}</div>`).join("") : "";
+  $("lerrs").hidden = !le.length && !s.loadLimits;
+  $("lerrs").innerHTML = le.length ? `<h4>Loading errors (${le.length})${s.loadLimits ? " \u00B7 villager AI " + s.loadLimits.aiMs.toFixed(1) + " of " + s.loadLimits.maxAiMs + " ms, " + s.loadLimits.villages + " of " + s.loadLimits.maxVillages + " villages" : ""}</h4>` + le.slice().reverse().map(e => `<div>${esc(e.kind)} \u00B7 ${esc(e.who || "")} \u00B7 ${esc(e.task || "")} \u00B7 ${e.action ? esc(e.action) : "estimate " + e.estimate + "s, ran " + e.ran + "s"}${e.why ? " \u00B7 " + esc(e.why) : ""} \u00B7 ${esc(e.village || "")}</div>`).join("") : "";
 }
 $("vlist").addEventListener("click", e => {
   const r = e.target.closest(".vrow"); if (!r || !snap) return;

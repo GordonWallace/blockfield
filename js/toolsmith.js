@@ -516,7 +516,16 @@ function seed(a) {
   if (I("stick") != null && T.count(a, I("stick")) < 4) T.add(a, I("stick"), 4);
 }
 
-BF.toolsmith = {
+// A forced stop (js/villagesim.js): takes the product, the fuel and its input out of the furnace it loaded. Returns what it did, or null.
+function forceStop(m) {
+  const S = m.tsm;
+  if (!S || !S.deal) return null;
+  const loaded = S.deal.kind === "smelt" && S.deal.loaded;
+  if (loaded) emptyFurnace(m, S.deal, true);
+  S.stage = null; S.deal = null; m.ai.route = null;
+  return loaded ? "emptied the furnace" : null;
+}
+BF.toolsmith = { forceStop,
   CRAFT_HOURS, CRAFT_SECS, TOOL_CAP, CATS, CALIBER, HEAD, STICKS, SHEARS_IRON,
   hook, furnaces, furnacesFor, usable, plan, smeltPlan, fuelFor, canMake, stockOf, catOrder, toolId, startCraft, finishCraft, work, wantsJob,
   offersFor, priceOf, findDeal, doBuy, loadFurnace, emptyFurnace, furnaceSpot, placeFurnace, nextTrip, ai, statusText, leave, pack, unpack, seed, LOG,

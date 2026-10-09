@@ -706,7 +706,16 @@ if (BF.texKit) {
   if (R.bakers_oven != null && R.cobblestone != null && R.iron_ingot != null) addShaped(R.bakers_oven, 1, ["CCC", "CIC", "CCC"], { C: R.cobblestone, I: R.iron_ingot }, "8 Cobblestone around 1 Iron Ingot → Baker's Oven (baker)");
 });
 
-BF.baker = {
+// A forced stop (js/villagesim.js): takes the baking, the fuel and its input out of the oven. Returns what it did, or null.
+function forceStop(m) {
+  const S = m.bkr;
+  if (!S || !S.job) return null;
+  const oven = !!(S.job.oven && S.stage !== "walk");
+  if (oven) finish(m, S, true);
+  S.stage = null; S.job = null; m.ai.route = null;
+  return oven ? "emptied the oven" : null;
+}
+BF.baker = { forceStop,
   PROF, PER_VILLAGERS, BAKE_T, RECIPE, SLICES, SLICE_CAP, PIE_CAP, TREAT_EVERY, TREAT_GAP, TREAT_HAPPY, CANE_SPOTS, FARM_KINDS, FARM_NAMES,
   ovens, ovenAt, ovenState, tickOven, ovenRemoved: dropOven, simTick, load, topUp, unload, ovenText, isOven, isCake, cakeBites, eatCake, isTreat,
   canMake, reserve, farmerReserve, keepsFood, fuelOk, mayHire, makeSugar, slice, nextJob, shopping, ai, statusText, holdings,

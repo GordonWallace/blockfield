@@ -20,7 +20,7 @@
 //   at WEAR_N crossings it becomes a dirt path. The counts are saved.
 // - Routes (debug screen): each pair of villages that traded, trips and goods moved in the last 7 days, and whether a merchant is on the road.
 // - Death on the road: its goods drop where it fell (mobKilled).
-// API: BF.merchant = { PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
+// API: BF.merchant = { forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -349,6 +349,14 @@ function endTrip(m, st, why) {
   if (tr) log("home", m, { dest: tr.dest, why, sold: tr.soldN, bought: tr.boughtN });
   st.trip = null; st.stage = null; st.errands = null; st.cargo = null; m.ai.route = null;
   st.last = dayNow();
+}
+// A forced stop (js/villagesim.js): the merchant goes home with what it carries and the trip ends. True when it was on a trip.
+function forceHome(m, why) {
+  const st = state(m);
+  if (!st.trip) return false;
+  endTrip(m, st, "forced stop: " + why);
+  if (BF.mobs.sendHome) BF.mobs.sendHome(m);
+  return true;
 }
 function start(m, st) {
   const p = plan(m);
