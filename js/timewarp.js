@@ -68,6 +68,7 @@ addEventListener("keydown", e => {
   if ((e.code !== "ArrowLeft" && e.code !== "ArrowRight") || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
   if (BF.state && BF.state.paused) return;   // menus, inventory, chat, death screen
+  if (BF.player && BF.player.menu && BF.player.menu()) return;   // the title screen (not paused, but no game yet)
   e.preventDefault();
   if (e.code === "ArrowRight") BF.warp.faster(); else BF.warp.slower();
 });
