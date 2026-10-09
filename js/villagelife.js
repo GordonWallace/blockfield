@@ -1274,9 +1274,10 @@ function doFoodDeal(m, deal) {
       const o = deal.offer, per = F.breadEq(o.sell.id) * o.sell.n;
       if (F.surplus(v2) < per || T.blockReason(v2, o) || cnt(m, em) < o.buy[0].n) break;
       if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-      if (!T.exchange(v2, o)) break;                 // the seller's stock and room, as for a player trade
+      const sold = T.exchange(v2, o);                 // the seller's stock and room, as for a player trade
+      if (!sold) break;
       T.inv.remove(m.inv, em, o.buy[0].n);
-      T.inv.add(m.inv, o.sell.id, o.sell.n);
+      T.inv.addStacks(m.inv, sold);
       T.addXp(v2, o);
       n += o.sell.n;
     } else {
@@ -1391,9 +1392,10 @@ function findToolSeller(m, re) {
 function doToolDeal(m, deal) {
   const T = TR(), v2 = deal.seller, o = deal.offer;
   if (!canSell(v2) || !toolNeed(m) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return 0;
-  if (!T.exchange(v2, o)) return 0;
+  const sold = T.exchange(v2, o);
+  if (!sold) return 0;
   for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-  T.inv.add(m.inv, o.sell.id, o.sell.n);
+  T.inv.addStacks(m.inv, sold);
   T.addXp(v2, o);
   if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
   log("buyTool", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
@@ -1641,5 +1643,5 @@ if (BF.texKit) {
 BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
   exportAll, importAll, bedRects,
   villageAge: key => { const A = villageAges.get(key); return A ? A.lived : null; },   // game days loaded and active, or null if never
-  _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, digOf, findLogSeller, doLogDeal, perform, dealWith, findFoodSeller, scanStep, inRange } };
+  _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, digOf, findLogSeller, doLogDeal, doToolDeal, perform, dealWith, findFoodSeller, scanStep, inRange } };
 })();

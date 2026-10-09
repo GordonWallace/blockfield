@@ -317,9 +317,10 @@ function findAxeSeller(m, F) {
 function buyAxe(m, deal) {
   const Tr = T(), v2 = deal.other, o = deal.offer;
   if (!canSell(v2) || Tr.blockReason(v2, o) || !o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return false;
-  if (!Tr.exchange(v2, o)) return false;
+  const sold = Tr.exchange(v2, o);
+  if (!sold) return false;
   for (const b of o.buy) Tr.inv.remove(m.inv, b.id, b.n);
-  Tr.inv.add(m.inv, o.sell.id, o.sell.n);
+  Tr.inv.addStacks(m.inv, sold);
   Tr.addXp(v2, o);
   if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
   log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
