@@ -1,4 +1,5 @@
 // The debug server survives malformed requests (bug-013): node test/debug-server-bad-requests.js
+// @ci integration suite=ui
 // Starts debug/server.js on spare ports, sends bad snapshots to /push and odd paths to the game port, and checks each gets a 4xx
 // answer, the server is still running afterwards, and a good snapshot still goes through.
 "use strict";
