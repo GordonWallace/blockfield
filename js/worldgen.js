@@ -1452,7 +1452,8 @@ function drawShell(b, P, S, style) {
       }
       flatRoof(P, 0, 0, w, d, y + 4, flat ? S.roof : B.planks, flat ? 0 : S.corner);
       door(); P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass);
-      P(1, y + 1, d - 2, BF.furnaceId(out)); P(2, y + 1, d - 2, BF.furnaceId(out)); P(w - 2, y + 1, d - 3, BF.chestId(out)); P(w - 2, y + 1, d - 2, B.crafting_table);   // chest in front of the table, so its lid is clear
+      const cq = VGEN >= 3 ? d - 3 : d - 2;   // village generator 3: chest in front of the table, so its lid is clear; older worlds keep the 1.0 spot, where their saved chest contents are
+      P(1, y + 1, d - 2, BF.furnaceId(out)); P(2, y + 1, d - 2, BF.furnaceId(out)); P(w - 2, y + 1, cq, BF.chestId(out)); P(w - 2, y + 1, 2 * d - 5 - cq, B.crafting_table);
       P(1, y + 1, 1, B.lantern);
       return;
     }
