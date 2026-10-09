@@ -22,7 +22,7 @@ const nameOf = (s, zx, zz) => "filled_map_" + keyOf(s, zx, zz);
 const centre = z => z * ZONE + ZONE / 2;
 const originX = (s, zx) => centre(zx) - side(s) / 2;
 
-const data = new Map();     // key -> {size, zx, zz, px: Uint16Array(PX*PX) (RGB565, 0 = unexplored), ver, cur, merged}
+const data = new Map();     // key -> {size, zx, zz, px: Uint16Array(PX*PX) (RGB565, 0 = unexplored), ver, cur, merged: {size: ver of that smaller map when last merged in}}
 function getData(s, zx, zz, create = true) {
   const k = keyOf(s, zx, zz);
   let d = data.get(k);
@@ -112,8 +112,8 @@ function explore(d, x, z, budget) {
 function upgradeData(s, zx, zz) {
   if (s >= MAX_SIZE) return null;
   const from = getData(s, zx, zz, false), to = getData(s + 1, zx, zz);
-  if (!from || to.merged[s]) return to;
-  to.merged[s] = 1;
+  if (!from || to.merged[s] === from.ver) return to;   // nothing new on the smaller map since the last merge
+  to.merged[s] = from.ver;
   const fs = scale(s), ts = scale(s + 1), fo = originX(s, zx), fz = originX(s, zz), to_x = originX(s + 1, zx), to_z = originX(s + 1, zz);
   let changed = false;
   for (let j = 0; j < PX; j++) for (let i = 0; i < PX; i++) {
@@ -156,7 +156,7 @@ function use(sel, it) {
   const i = slots.indexOf(sel);
   explore(d, p.x, p.z, BUDGET);
   if (sel.count === 1 && i >= 0) inv.setSlot(i, { id, count: 1 });
-  else { inv.consumeSelected(1); const left = inv.add(id, 1); if (left > 0 && BF.emit) BF.emit("itemDropped", id, left); }
+  else { inv.consumeSelected(1); const left = inv.add(id, 1); if (left > 0) inv.dropOverflow(id, left); }
   return "Map created";
 }
 
