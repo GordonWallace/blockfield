@@ -3,7 +3,7 @@ module.exports = async (pg) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.setGameMode("survival"); });
   await pg.waitForTimeout(3000);
   const check = (ok, msg) => console.log((ok ? "PASS " : "FAIL ") + msg);
-  const sleepAt = (time, storm) => pg.evaluate(async ({ time, storm }) => {
+  const sleepAt = (time, storm, clicks) => pg.evaluate(async ({ time, storm, clicks }) => {
     BF.mobs.spawning = false;
     for (const m of BF.mobs.list) if (m.hostile) m.dead = true;
     const p = BF.player.position, x = Math.floor(p.x), z = Math.floor(p.z);
@@ -18,13 +18,18 @@ module.exports = async (pg) => {
     BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
     BF.player.update(0.016);
     BF.spawnPoint = null;
-    BF.player.setMouse(false, true); BF.player.setMouse(false, false);
+    for (let i = 0; i < (clicks || 1); i++) {   // quick repeat clicks land inside the 0.7 s fade
+      if (i) { await new Promise(r => setTimeout(r, 200)); BF.player.update(0.016); }
+      BF.player.setMouse(false, true); BF.player.setMouse(false, false);
+    }
     await new Promise(r => setTimeout(r, 1500));
     return { slept: !!(BF.spawnPoint && BF.spawnPoint.bed), day: BF.sky.day, time: BF.sky.time, stormy: !!(BF.sky.stormy && BF.sky.stormy()) };
-  }, { time, storm });
+  }, { time, storm, clicks });
   const night = await sleepAt(0.8, false);
   check(night.slept, "slept at night");
   check(night.day === 6 && night.time < 0.02, `night: woke on day 6 morning (day ${night.day}, time ${night.time.toFixed(3)})`);
+  const twice = await sleepAt(0.8, false, 3);
+  check(twice.day === 6, `three quick clicks on the bed: woke on day 6, not later (day ${twice.day}) (bug-041)`);
   const late = await sleepAt(0.99, false);
   check(late.day === 6, `just before sunrise: woke on day 6 (day ${late.day})`);
   const storm = await sleepAt(0.3, true);
