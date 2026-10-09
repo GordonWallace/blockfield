@@ -913,7 +913,7 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
   The player killing pasture cows is the same as killing penned sheep: stock lost, no other rule.
 - **The cowherd** (profession `cowherd`, jobsite `milk_churn`; outfit: olive smock, leather apron, white belt, brown brim hat). Works from 0.02 to 0.5 of the day on the pasture its churn stands beside (fence within 4.5 blocks), plus
   stray cows within 12 blocks; without a pasture it only milks the cows that come within 10 blocks of its churn. Order of work: bottle (milk buckets at the churn, 3 glass bottles each), milk every adult not milked today
-  (needs an empty bucket and 3 free glass bottles for each bucket it would fill, and fewer than 32 milk bottles), feed hungry adults wheat while the herd is at or under its limit, cull adults while it is over the limit and
+  (needs an empty bucket and 3 free glass bottles for each bucket it would fill, and fewer than 32 milk bottles), feed hungry adults wheat while the herd is at or under its limit (no more willing cows than keep it within one over the limit once they pair up), cull adults while it is over the limit and
   more than 2 adults remain (keeps the cow's drops: 1-3 `raw_beef`, 0-2 `leather`), and while its pasture holds fewer than 2 cows fetch the nearest wild adult within 96 blocks and lead it home exactly as the poultry keeper does
   (trail, wait, hold the gate open, cancel its own door closing, shut the gate once clear; `leadFailed` avoids that cow for 120 s; none in range: tomorrow, `noWild`). It keeps one wheat back as the lure. With no task it walks
   out of the field through the gate.

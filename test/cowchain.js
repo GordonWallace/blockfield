@@ -134,6 +134,7 @@ const LEAN = 3;
     const FU = BF.furnaceUse, VR = BF.mobs.villages.get(R.key);
     R.furnaces = [...FU.furnaces.values()].filter(f => Math.hypot(f.x + 0.5 - VR.x, f.z + 0.5 - VR.z) <= FU.reachOf(VR) + 8).length;   // furnaces the village's villagers may use
     R.pasture = P ? { cows: P.cows.length, calves: P.cows.filter(c => c.growAt != null).length, limit: P.limit, culls: P.culls } : null;
+    R.events = BF.cowherd.log.filter(e => e.kind === 'bred' || e.kind === 'culled' || e.kind === 'stocked').map(e => e.kind[0] + (e.herd != null ? e.herd : '') + '@' + e.day.toFixed(2)).join(' ');
     R.log = Object.entries(BF.cowherd.log.reduce((a, e) => (a[e.kind] = (a[e.kind] || 0) + 1, a), {})).map(([k, n]) => k + ':' + n).join(' ');
     R.holders = {};
     for (const n of ['milk_bottle', 'glass_bottle', 'leather', 'raw_beef', 'steak']) R.holders[n] = window.__villagers().filter(m => window.__count(m, n) > 0).map(m => m.profession + ':' + window.__count(m, n)).join(' ');
@@ -160,10 +161,13 @@ const LEAN = 3;
   console.log('pasture', JSON.stringify(R.pasture), 'herd sizes', JSON.stringify(sizes.filter((x, i) => i % 6 === 0)), 'log', R.log);
   console.log('cowherd', JSON.stringify(R.herderStart), '->', JSON.stringify(R.herderEnd));
   console.log('holders', JSON.stringify(R.holders));
+  console.log('herd events (b = bred, c = culled, s = stocked; herd size after)', R.events);
   ok('the cowherd stayed alive', R.herderEnd.alive);
   ok('the herd grew: calves were born', calves > 0 && Math.max(...sizes) > start, { start, max: Math.max(...sizes), calves });
   ok('the herd reached the pasture limit', firstFull >= 0, { limit: lim, max: Math.max(...sizes) });
-  ok('and was held there: culled past it, never far over it', culls > 0 && after.every(x => x <= lim + 2) && R.pasture.cows <= lim + 1, { culls, limit: lim, maxAfter: Math.max(...after), end: R.pasture && R.pasture.cows });
+  const bredOver = R.lines.map(l => /A calf was born in the pasture \((\d+) cows?\)/.exec(l[2])).filter(Boolean).map(m => +m[1]).filter(n => n > lim + 1);   // herd size after each birth
+  ok('and was held there: culled back to it, never more than one over it by breeding', culls > 0 && bredOver.length === 0 && after.every(x => x <= lim + 2) && R.pasture.cows <= lim + 1,
+    { culls, limit: lim, bredOver, maxAfter: Math.max(...after), end: R.pasture && R.pasture.cows });   // + 2: a wild cow may slip in while the gate is open
   ok('the cowherd milked its cows and bottled the milk', R.milked > 0 && bottled > 0, { milked: R.milked, bottled });
   if (R.furnaces) ok('the cowherd cooked beef into steak in a furnace', steak > 0, { steak, furnaces: R.furnaces });
   else ok('no furnace in the village: no steak cooked, the beef kept raw (test/cowherd-actions.js cooks it in one)', steak === 0, { steak, furnaces: R.furnaces });

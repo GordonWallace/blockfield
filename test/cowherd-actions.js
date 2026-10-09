@@ -173,12 +173,14 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.05);
     const tasks = {};
     const adults0 = P.cows.filter(s => s.growAt == null).length;
+    const log0 = C.log.length ? C.log[C.log.length - 1] : null;
     for (let i = 0; i < 8000; i++) { step(); if (i % 10 === 0 && herder.cwk && herder.cwk.task) tasks[herder.cwk.task.kind] = (tasks[herder.cwk.task.kind] || 0) + 1; }
     R.tasks = tasks;
     const twice = [...milked.values()].filter(a => a.length !== new Set(a).size).length;
     ok("the cowherd milked every adult cow", milked.size >= adults0, { milked: milked.size, adults0, tasks });
     ok("each cow once a day", twice === 0, [...milked.values()]);
-    ok("it bottled the milk: 3 bottles a bucket, the bucket back", c("milk_bottle") === 3 * milked.size && c("bucket") === 1 && c("milk_bucket") === 0 && c("glass_bottle") + c("milk_bottle") === 30, { milk: c("milk_bottle"), bucket: c("bucket"), mb: c("milk_bucket"), gb: c("glass_bottle") });
+    const bottledN = C.log.slice(C.log.indexOf(log0) + 1).filter(e => e.kind === "bottled").reduce((n, e) => n + e.bottles, 0);   // it may drink one of them meanwhile: the bottle stays
+    ok("it bottled the milk: 3 bottles a bucket, the bucket back", bottledN === 3 * milked.size && c("bucket") === 1 && c("milk_bucket") === 0 && c("glass_bottle") + c("milk_bottle") === 30, { bottled: bottledN, milk: c("milk_bottle"), bucket: c("bucket"), mb: c("milk_bucket"), gb: c("glass_bottle") });
     ok("it fed the cows wheat", fedN > 0, fedN);
     ok("fed cows bred: a calf was born in the pasture", born > 0 && P.cows.some(s => s.growAt != null), { born, herd: P.cows.length });
     const calfS = P.cows.find(s => s.growAt != null);
@@ -201,7 +203,8 @@ module.exports = async (pg, out) => {
     ok("one fed cow alone does not breed", wildBorn === 0 && C.willing(wa, day()) && !C.willing(wb, day()));
     C.feed(wb, "test");
     for (let i = 0; i < 600 && !wildBorn; i++) step();
-    ok("two fed adults breed: a calf", wildBorn === 1, wildBorn);
+    ok("two fed adults breed: a calf", wildBorn === 1, { wildBorn, d: +Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z).toFixed(2), dy: +(wa.position.y - wb.position.y).toFixed(2),
+      willing: [C.willing(wa, day()), C.willing(wb, day())], mate: [wa.mate === wb, wb.mate === wa], dead: [!!wa.dead, !!wb.dead], pasture: [!!wa.pasture, !!wb.pasture], led: [!!wa.ledBy, !!wb.ledBy], cows: BF.mobs.list.filter(m => m.type === "cow" && !m.dead).length });
     ok("a calf cannot breed or be fed to breed, and grows up after a few days", (() => {
       const cf = BF.mobs.list.find(m => m.type === "cow" && m.calf && !m.pasture && !m.dead);
       if (!cf) return false;

@@ -479,6 +479,13 @@ function bottleWanted(m) {
 // Glass bottles it needs to bottle the milk buckets it holds (3 each), plus 3 for the next one.
 const canBottle = m => cnt(m, I("milk_bucket")) > 0 && cnt(m, I("glass_bottle")) >= 3;
 const canMilk = m => cnt(m, I("bucket")) > 0 && cnt(m, I("glass_bottle")) >= 3 * (cnt(m, I("milk_bucket")) + 1) && cnt(m, I("milk_bottle")) < MILK_CAP;
+// Whether feeding herd cow o now keeps the herd within one over its limit once the willing cows have paired up (each pair gives one calf); the
+// cull then takes it back to the limit. Strays near the pasture are always fed.
+function feedOk(T, o, t) {
+  if (!T.pasture || o.pasture !== T.pasture) return true;
+  const willingN = adults(T.herd).filter(x => !hungry(x, t)).length;
+  return T.size + Math.floor((willingN + 1) / 2) <= T.limit + 1;
+}
 function wildCow(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
   let best = null, bd = FIND_R;
@@ -499,7 +506,7 @@ function pickTask(m, S) {
   if (!p) return null;   // without a pasture it only milks the cows that come by its churn
   const wheat = cnt(m, I("wheat_item")), spare = p.cows && p.cows.length < STOCK_TO ? wheat - 1 : wheat;   // one wheat is always kept to lure a cow home
   const ad = adults(T.cows).filter(ok);
-  if (spare > 0 && T.size <= T.limit) { const o = nearest(ad.filter(x => hungry(x, t))); if (o) return { kind: "feed", mob: o }; }
+  if (spare > 0 && T.size <= T.limit) { const o = nearest(ad.filter(x => hungry(x, t) && feedOk(T, x, t))); if (o) return { kind: "feed", mob: o }; }
   if (T.size > T.limit && adults(T.herd).length > MIN_ADULTS && adultStates(p) > MIN_ADULTS) { const o = nearest(adults(T.herd).filter(ok)); if (o) return { kind: "cull", mob: o }; }
   if (p.cows && p.cows.length < STOCK_TO && wheat > 0 && t >= S.stockAt) {
     const o = wildCow(m, p, S);
@@ -518,8 +525,8 @@ function stillWanted(m, tk) {
   if (tk.kind === "fetch") return !o.pasture && cnt(m, I("wheat_item")) > 0 && !(o.ledBy && o.ledBy !== m);
   if (isCalf(o)) return false;
   if (tk.kind === "milk") return milkable(o) && canMilk(m);
-  if (tk.kind === "feed") return hungry(o, now()) && cnt(m, I("wheat_item")) > 0;
   const T = tended(m);
+  if (tk.kind === "feed") return hungry(o, now()) && cnt(m, I("wheat_item")) > 0 && T.size <= T.limit && feedOk(T, o, now());
   return T.size > T.limit && adults(T.herd).length > MIN_ADULTS && adultStates(T.pasture) > MIN_ADULTS && T.herd.indexOf(o) >= 0;
 }
 function endTask(m, ok) {
