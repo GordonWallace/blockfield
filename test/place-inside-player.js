@@ -1,3 +1,4 @@
+// @ci integration suite=items
 // No block can be placed inside the player, and an entity slightly inside a block can't walk through it (bug-015):
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/pip test/place-inside-player.js
 module.exports = async (pg, out) => {
