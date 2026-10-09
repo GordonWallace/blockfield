@@ -1,4 +1,4 @@
-// @ci integration
+// @ci integration suite=world
 // Upgrading a map again picks up what the smaller map explored since the last upgrade (bug-031): seeing the crafting
 // result used to merge the small map in once per session and never again.
 // Usage: node test/run.js /tmp/mua test/map-upgrade-again.js
