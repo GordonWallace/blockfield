@@ -38,7 +38,13 @@ module.exports = async (pg, out) => {
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
     res.hasTent = T.inv.count(A.inv, I.tent);
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
-    T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2); for (let i = 0; i < 600; i++) BF.mobs.update(0.1); res.spare = T.inv.count(A.inv, I.tent);   // lost its tent: collects a spare at home by day
+    T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2);   // lost its tent: collects a spare at home by day
+    { const p0 = A.position.clone(), h = A.bed || A.village; res.spareFrom = Math.round(Math.hypot(h.x + 0.5 - p0.x, h.z + 0.5 - p0.z));
+      for (let i = 0; i < 600; i++) {   // held where it stands until it has the spare (left to roam it can walk out mapping past the 30 blocks one is handed over in)
+        BF.mobs.update(0.1);
+        if (T.inv.count(A.inv, I.tent) < 1) { A.position.copy(p0); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); A.position.copy(p0); }
+      } }
+    res.spare = T.inv.count(A.inv, I.tent);
     // in its village minutes before dark, 20 blocks from its bed, on open ground: walks to bed at nightfall, no tent (1.0 bug: the allowance
     // to walk home shrank to nothing just before dark, so explorers pitched beside their houses)
     const home = A.bed; A.homeBed0 = home;
@@ -72,7 +78,7 @@ module.exports = async (pg, out) => {
   });
   console.log(JSON.stringify(r2));
   if (r2.inVillageCamp) console.log("FAIL: explorer pitched its tent inside its own village");
-  if (!r2.camp) console.log("FAIL: explorer far from home at dusk did not pitch its tent");
+  if (!r2.camp) console.log("FAIL: explorer far from home at dusk did not pitch its tent " + JSON.stringify(r2));
   const r3 = await pg.evaluate(async () => {
     const A = window.__A, res = {};
     BF.sky.setTime(0.56);
