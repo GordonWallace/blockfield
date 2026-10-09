@@ -477,6 +477,7 @@ function pack(v) {
     mi: BF.miner && v.profession === "miner" ? BF.miner.pack(v) : undefined,          // the miner's mineshaft (js/miner.js)
     ts: BF.toolsmith && v.profession === "toolsmith" ? BF.toolsmith.pack(v) : undefined,   // the tool on the toolsmith's table, its furnace (js/toolsmith.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
+    pos: v.position ? [v.position.x, v.position.y, v.position.z, v.yaw || 0].map(n => Math.round(n * 100) / 100) : undefined,   // where it stood (js/mobs.js spawns it there again); missing in older saves
   };
 }
 function unpack(v, o) {
