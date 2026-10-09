@@ -35,7 +35,7 @@ const FREE_RADIUS = 10;       // a cowherd without a pasture milks the free cows
 const TEND_R = 12;            // stray cows this near the pasture are fed and milked too
 const WHEAT_KEEP = 2;         // wheat it keeps back for luring a cow home
 const MILK_CAP = 32;
-const MILK_KEEP = 3;          // milk bottles it never sells (the baker's next cake)          // it stops milking while it holds this many milk bottles
+const MILK_KEEP = 3;          // milk bottles it sells only to the baker (its next cake; js/baker.js sets forBaker while it buys)          // it stops milking while it holds this many milk bottles
 const BOTTLES_LOW = 9;        // it buys empty bottles back while it holds fewer than this ...
 const BOTTLES_TO = 30;        // ... up to this many
 const KIT_BOTTLES = 30;       // the hire kit: 1 bucket and 30 glass bottles
@@ -488,7 +488,7 @@ function reserve(m) {
   if (c(b) + c(mb) > 0) out.push({ ids: set(b, mb), n: 1 });
   if (c(mb) > 0) out.push({ ids: set(mb), n: c(mb) });
   if (c(gb) > 0) out.push({ ids: set(gb), n: c(gb) });
-  if (milk != null) out.push({ ids: set(milk), n: MILK_KEEP });
+  if (milk != null && !(BF.cowherd && BF.cowherd.forBaker)) out.push({ ids: set(milk), n: MILK_KEEP });   // kept for the baker: offered while a baker buys (js/baker.js)
   if (w != null) out.push({ ids: set(w), n: c(w) + wheatWanted(m) });
   return out;
 }
