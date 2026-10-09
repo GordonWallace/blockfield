@@ -211,6 +211,20 @@ function takeFromInv(id, n) { // main first, then hotbar
   }
   return got;
 }
+// Takes up to n of id as one stack (main first, then hotbar), wear included: only stacks with the same wear as the first one
+// found (or as `wear`, when given) are taken together. Returns the stack, or null.
+function takeStack(id, n, wear) {
+  let got = 0;
+  for (let i = SIZE - 1; i >= 0 && got < n; i--) {
+    const s = slots[i];
+    if (!s || s.id !== id) continue;
+    if (wear === undefined) wear = s.wear || 0; else if ((s.wear || 0) !== wear) continue;
+    const m = Math.min(s.count, n - got);
+    s.count -= m; got += m;
+    if (s.count <= 0) slots[i] = null;
+  }
+  return got ? mk(id, got, wear) : null;
+}
 function giveBack(stack) { // into inventory; what doesn't fit drops in front of the player
   if (!stack) return;
   const left = addTo(stack.id, stack.count, ORDER_ALL, stack.wear);
@@ -321,10 +335,11 @@ function ownerLabel(c) {
 }
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 // fill arr with `stack`: top up matching stacks first, then empty slots; returns what is left
-function addToArr(arr, id, count) {
+// wear: a worn tool keeps it and never merges (as addTo).
+function addToArr(arr, id, count, wear) {
   const max = stackOf(id);
-  for (const s of arr) if (count > 0 && s && s.id === id && s.count < max) { const m = Math.min(max - s.count, count); s.count += m; count -= m; }
-  for (let i = 0; i < arr.length && count > 0; i++) if (!arr[i]) { const m = Math.min(max, count); arr[i] = { id, count: m }; count -= m; }
+  for (const s of arr) if (count > 0 && s && s.id === id && s.count < max && !(wear > 0) && !(s.wear > 0)) { const m = Math.min(max - s.count, count); s.count += m; count -= m; }
+  for (let i = 0; i < arr.length && count > 0; i++) if (!arr[i]) { const m = Math.min(max, count); arr[i] = mk(id, m, wear); count -= m; }
   return count;
 }
 // The chest block at x,y,z is gone (broken, exploded, replaced): close its screen and spill what it held on the ground.
@@ -336,7 +351,7 @@ function chestRemoved(x, y, z) {
   if (c.owner && BF.emit) BF.emit("chestBroken", c);
   for (const s of c.slots) {
     if (!s) continue;
-    if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5);
+    if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5, s.wear > 0 ? { wear: s.wear } : undefined);
     else { const left = addTo(s.id, s.count, ORDER_ALL, s.wear); if (left) dropOverflow(s.id, left, s.wear); }
   }
   renderAll(); emitChange();
@@ -395,29 +410,31 @@ function recomputeTrade() {
   const order = offerSel >= 0 ? [offerSel] : [...list.keys()]; // a chosen offer never silently switches
   for (const i of order) if (offerFits(list[i])) {
     tradeOffer = list[i]; offerSel = i;
-    tradeResult = { id: tradeOffer.sell.id, count: tradeOffer.sell.n };
+    tradeResult = mk(tradeOffer.sell.id, tradeOffer.sell.n, BF.trades.inv.bestWear(villager.inv, tradeOffer.sell.id));   // a worn tool is sold worn
     return;
   }
 }
 function autoFill(o) { // return payment to the inventory, then pull this offer's costs from it
   for (let k = 0; k < 2; k++) { giveBack(pay[k]); pay[k] = null; }
-  o.buy.forEach((b, k) => { const got = takeFromInv(b.id, stackOf(b.id)); if (got) pay[k] = { id: b.id, count: got }; });
+  o.buy.forEach((b, k) => { pay[k] = takeStack(b.id, stackOf(b.id)); });
 }
 function topUp(o) { // after a trade, refill the payment slots from the inventory
   o.buy.forEach((b, k) => {
     let i = pay.findIndex(s => s && s.id === b.id);
     if (i < 0) { i = pay.findIndex(s => !s); if (i < 0) return; }
     const have = pay[i] ? pay[i].count : 0, want = stackOf(b.id) - have;
-    const got = want > 0 ? takeFromInv(b.id, want) : 0;
-    if (got) pay[i] = { id: b.id, count: have + got };
+    const got = want > 0 ? takeStack(b.id, want, pay[i] ? pay[i].wear || 0 : undefined) : null;
+    if (got) pay[i] = mk(b.id, have + got.count, got.wear);
   });
 }
 function performTrade(o) {
   const idx = offerFits(o);
+  const wear = o.buy.map((b, k) => pay[idx[k]].wear || 0);
   o.buy.forEach((b, k) => { const s = pay[idx[k]]; s.count -= b.n; if (s.count <= 0) pay[idx[k]] = null; });
-  BF.trades.exchange(villager, o);
+  const sold = BF.trades.exchange(villager, o, wear);
   if (BF.trades.addXp(villager, o)) { levelFlashT = 2.5; BF.emit("villagerLevelUp", villager, villager.level); }
   BF.emit("villagerTrade", villager, o);
+  return sold || [];
 }
 function clickTrade(shift) {
   if (!tradeOffer) return;
@@ -426,15 +443,17 @@ function clickTrade(shift) {
     let got = 0;
     for (let g = 0; g < 64 && tradeOffer === o; g++) {
       if (!fits(out.id, out.n)) break;
-      performTrade(o); addTo(out.id, out.n, ORDER_ALL); got += out.n;
+      for (const st of performTrade(o)) addTo(st.id, st.count, ORDER_ALL, st.wear);
+      got += out.n;
       topUp(o); recomputeTrade();
     }
     if (got) showToast(out.id, got);
     return;
   }
-  if (cursor && (cursor.id !== out.id || cursor.count + out.n > stackOf(out.id))) return;
+  const w = BF.trades.inv.bestWear(villager.inv, out.id);
+  if (cursor && (cursor.id !== out.id || cursor.count + out.n > stackOf(out.id) || w > 0 || cursor.wear > 0)) return;
   performTrade(o);
-  if (cursor) cursor.count += out.n; else cursor = { id: out.id, count: out.n };
+  if (cursor) cursor.count += out.n; else cursor = mk(out.id, out.n, w);
   topUp(o); recomputeTrade();
 }
 
@@ -1031,7 +1050,7 @@ function shiftMove(c, i) {
       const target = SMELT.has(s.id) ? 0 : FUEL.has(s.id) ? 1 : -1;
       if (target >= 0) st.count = mergeInto(furnace.slots, target, st);
     } else if (mode === "chest" && chest && !chestLocked()) {
-      st.count = addToArr(chest.slots, s.id, s.count);
+      st.count = addToArr(chest.slots, s.id, s.count, s.wear);
     } else if (mode === "trade" && villager) {
       const o = villager.trades[offerSel];
       const wanted = o ? o.buy.map(b => b.id) : villager.trades.flatMap(t => t.buy.map(b => b.id));
@@ -1041,7 +1060,7 @@ function shiftMove(c, i) {
         if (k < 0) k = pay.findIndex(p => !p);
         if (k >= 0) st.count = mergeInto(pay, k, st);
         recomputeTrade();
-      } else if (vinvEditable()) st.count = BF.trades.inv.add(villager.inv, st.id, st.count);   // creative: shift-click gives it to the villager
+      } else if (vinvEditable()) st.count = BF.trades.inv.add(villager.inv, st.id, st.count, st.wear);   // creative: shift-click gives it to the villager
     }
     if (st.count === s.count) { // not consumed by the container: hotbar <-> main
       slots[i] = null;
@@ -1478,25 +1497,21 @@ const api = {
   simTick(h) { for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true; },
   chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
   // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
-  chestAdd(x, y, z, itemId, count = 1) {
+  chestAdd(x, y, z, itemId, count = 1, wear = 0) {   // wear: uses spent on a worn tool
     if (!BF.items[itemId] || itemId === 0 || !(count > 0)) return count || 0;
-    const left = addToArr(chestAt({ x, y, z }).slots, itemId, Math.floor(count));
+    const left = addToArr(chestAt({ x, y, z }).slots, itemId, Math.floor(count), wear);
     if (open_ && chest && chest.key === `${x},${y},${z}`) renderAll();
     return left;
   },
   // Takes up to n of itemId out of the chest at x,y,z (last slots first); returns how many came out. For villagers and tests.
-  chestTake(x, y, z, itemId, n = 1) {
+  chestTake(x, y, z, itemId, n = 1) { let got = 0; for (const s of this.chestTakeStacks(x, y, z, itemId, n)) got += s.count; return got; },
+  // The same, returning what came out as stacks with their wear ([{id, count, wear?}]).
+  chestTakeStacks(x, y, z, itemId, n = 1) {
     const c = chests.get(`${x},${y},${z}`);
-    if (!c) return 0;
-    let got = 0;
-    for (let i = CHEST_SIZE - 1; i >= 0 && got < n; i--) {
-      const s = c.slots[i];
-      if (!s || s.id !== itemId) continue;
-      const m = Math.min(n - got, s.count); s.count -= m; got += m;
-      if (s.count <= 0) c.slots[i] = null;
-    }
+    if (!c) return [];
+    const out = BF.trades.inv.take(c.slots, itemId, n);
     if (open_ && chest === c) renderAll();
-    return got;
+    return out;
   },
   // Ownership (see "chests" above). chestUsed(x, y, z, owner, name, mob): call after changing a chest's contents for someone.
   chestUsed(x, y, z, owner, name, mob) { const c = chests.get(`${x},${y},${z}`); return c ? chestUsed(c, owner, name, mob) : false; },

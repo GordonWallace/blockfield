@@ -216,26 +216,40 @@ const inv = {
   create: () => new Array(SLOTS).fill(null),
   count(a, id) { let n = 0; for (const s of a) if (s && s.id === id) n += s.count; return n; },
   // Adds into existing stacks first, then empty slots. Returns the leftover that did not fit.
-  add(a, id, n) {
+  // wear: uses spent on a worn tool (BF.wearStack); a worn stack never merges with another.
+  add(a, id, n, wear) {
     const max = stackOf(id);
     for (let i = 0; i < a.length && n > 0; i++) {
       const s = a[i];
-      if (s && s.id === id && s.count < max) { const m = Math.min(n, max - s.count); s.count += m; n -= m; }
+      if (s && s.id === id && s.count < max && !(wear > 0) && !(s.wear > 0)) { const m = Math.min(n, max - s.count); s.count += m; n -= m; }
     }
-    for (let i = 0; i < a.length && n > 0; i++) if (!a[i]) { const m = Math.min(n, max); a[i] = { id, count: m }; n -= m; }
+    for (let i = 0; i < a.length && n > 0; i++) if (!a[i]) { const m = Math.min(n, max); a[i] = wear > 0 ? { id, count: m, wear } : { id, count: m }; n -= m; }
     return n;
   },
-  // Removes up to n (from the last slots first). Returns how many were removed.
-  remove(a, id, n) {
+  // Adds stacks as they are (a worn tool keeps its wear). Returns the leftover count that did not fit.
+  addStacks(a, stacks) { let left = 0; for (const s of stacks || []) if (s && s.count > 0) left += inv.add(a, s.id, s.count, s.wear); return left; },
+  // Removes up to n and returns what came out as stacks, wear included. From the last slots first;
+  // best: the least worn first (what a villager sells).
+  take(a, id, n, best) {
+    const idx = [];
+    for (let i = a.length - 1; i >= 0; i--) if (a[i] && a[i].id === id) idx.push(i);
+    if (best) idx.sort((i, j) => (a[i].wear || 0) - (a[j].wear || 0) || j - i);
+    const out = [];
     let got = 0;
-    for (let i = a.length - 1; i >= 0 && got < n; i--) {
-      const s = a[i];
-      if (!s || s.id !== id) continue;
-      const m = Math.min(n - got, s.count); s.count -= m; got += m;
+    for (const i of idx) {
+      if (got >= n) break;
+      const s = a[i], m = Math.min(n - got, s.count);
+      s.count -= m; got += m;
+      const last = out[out.length - 1];
+      if (last && (last.wear || 0) === (s.wear || 0)) last.count += m; else out.push(s.wear > 0 ? { id, count: m, wear: s.wear } : { id, count: m });
       if (s.count <= 0) a[i] = null;
     }
-    return got;
+    return out;
   },
+  // Removes up to n (from the last slots first). Returns how many were removed.
+  remove(a, id, n) { let got = 0; for (const s of inv.take(a, id, n)) got += s.count; return got; },
+  // Wear of the stack a villager would sell first (0 when it has an unworn one).
+  bestWear(a, id) { let w = -1; for (const s of a) if (s && s.id === id && (w < 0 || (s.wear || 0) < w)) w = s.wear || 0; return Math.max(0, w); },
   // Could `adds` ([{id,n}]) be stored once `removes` ([{id,n}]) have been taken out?
   canFit(a, adds, removes) {
     const sim = a.map(s => s && { id: s.id, count: s.count });
@@ -431,12 +445,14 @@ function blockReason(v, o) {
   if (!inv.canFit(v.inv, o.buy, [o.sell])) return "Villager has no room";
   return null;
 }
-// Moves the goods: the sold items leave the villager, the payment arrives. Returns false (and changes nothing) when blocked.
-function exchange(v, o) {
+// Moves the goods: the sold items leave the villager, the payment arrives. Returns false (and changes nothing) when blocked,
+// else the sold stacks (wear included, least worn first) for the buyer to add with inv.addStacks.
+// paidWear: the wear of each payment item, in o.buy order, so a worn tool the villager takes stays worn.
+function exchange(v, o, paidWear) {
   if (blockReason(v, o)) return false;
-  inv.remove(v.inv, o.sell.id, o.sell.n);
-  for (const b of o.buy) inv.add(v.inv, b.id, b.n);
-  return true;
+  const sold = inv.take(v.inv, o.sell.id, o.sell.n, true);
+  o.buy.forEach((b, k) => inv.add(v.inv, b.id, b.n, paidWear && paidWear[k]));
+  return sold;
 }
 // Villager xp for a completed offer; returns the number of levels gained and appends their offers.
 function addXp(v, o) {
