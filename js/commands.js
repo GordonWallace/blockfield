@@ -305,7 +305,7 @@ def("tp", {
     }
     if (a.length !== 3 && a.length !== 5) usage("tp");
     const [x, y, z] = parsePos(a, 0, false);
-    if (y < BF.MIN_Y - 64 || y > BF.H + 832) fail(`Invalid position: y must be between ${BF.MIN_Y - 64} and ${BF.H + 832}`);
+    if (y < BF.MIN_Y || y > BF.H + 832) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${BF.H + 832}`);   // below MIN_Y is solid bedrock with no way out
     if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
     let yaw = null, pitch = null;
     if (a.length === 5) {
