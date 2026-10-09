@@ -153,8 +153,10 @@ module.exports = async (pg, out) => {
     ok(!!r11.order && (r11.had > 0 || (r11.plan && r11.plan.kind === "chest")) && r11.chests >= 1, "full villager without a chest orders one; the furniture maker makes it from planks");
     if (!r11.order) return;
     const placed = () => pg.evaluate(([k, s]) => { const c = BF.inventory.chestState(s.x, s.y, s.z); return !!(c && c.owner === k); }, [v.noChestKeys[0], r11.order.spot]);
-    for (let k = 0; k < 10 && !(await placed()); k++) {
-      await step(0.13 + k * 0.03, 0.16 + k * 0.03, 30);
+    // it may take beds to a builder or buy wool first, so give it a second day if the first runs out
+    for (let k = 0; k < 20 && !(await placed()); k++) {
+      if (k === 10) await pg.evaluate(() => { BF.sky.day += 1; });
+      await step(0.13 + (k % 10) * 0.03, 0.16 + (k % 10) * 0.03, 30);
       if (process.env.DEBUG) console.log("fm@", JSON.stringify(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead); return { st: f.furn && f.furn.stage, kind: f.furn && f.furn.deal && f.furn.deal.kind, pos: [Math.round(f.position.x), Math.round(f.position.z)], status: BF.villagerStatus.text(f), chests: BF.trades.inv.count(f.inv, BF.I.chest), orders: BF.storage.orders(m.village).length, log: BF.furniture.LOG.slice(-2) }; }, v.noChestKeys[0])));
     }   // it walks over, puts the chest down; the villager stores its surplus there
     const r12 = await pg.evaluate(([k, o]) => {
