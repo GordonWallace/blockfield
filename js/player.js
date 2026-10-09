@@ -1290,7 +1290,13 @@ function trySleep(t) {
   BF.spawnPoint = { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp };
   if (tent) { P.hiddenInTent = true; setTimeout(() => { P.hiddenInTent = false; }, 2200); }   // monsters lose sight of the sleeper (mobs.js hostileAI)
   sleepFade();
-  setTimeout(() => { BF.sky.setTime(0.01); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
+  setTimeout(() => { wakeUp(); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
+}
+// Waking up is the next morning: the day counter moves on unless it is already early morning (sleeping in a daytime storm moves to tomorrow too).
+function wakeUp() {
+  const S = BF.sky;
+  if (S.time > 0.01) S.day = (S.day || 0) + 1;
+  S.setTime(0.01);
 }
 // Where to respawn: on the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
 function respawnPoint() {
