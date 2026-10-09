@@ -1025,15 +1025,18 @@ world.setGate = function (x, y, z, open) {
 
 // ---------- collision ----------
 // Union of the collision boxes of solid blocks overlapping an entity box (filled by boxHit).
-// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored,
-// so an entity caught inside a door slab can walk out of it.
-const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
+// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored while the move
+// takes it away from the box's centre, so an entity caught inside a door slab can walk out of it; moving further
+// in still collides (HIT.inside is then set, and moveAxis keeps the entity where it was).
+const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, inside: false };
 function boxHit(px, py, pz, hw, h, axis, prev) {
+  HIT.inside = false;
   const x0 = Math.floor(px - hw), x1 = Math.floor(px + hw - 1e-6);
   const y0 = Math.floor(py), y1 = Math.floor(py + h - 1e-6);
   const z0 = Math.floor(pz - hw), z1 = Math.floor(pz + hw - 1e-6);
   let hit = false;
-  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+  for (let y = y0 - 1; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (y < y0 && !BF.TALLBOX[world.getBlock(x, y, z)]) continue;   // the layer below the feet only matters for fences / gates (1.5 tall)
     if (!world.isSolid(x, y, z)) continue;
     const bid = world.getBlock(x, y, z);
     const cbl = (BF.DYNBOXES[bid] && BF.DYNBOXES[bid](world.getBlock, x, y, z, bid)) || BF.CBOXES[bid] || (BF.CBOX[bid] ? [BF.CBOX[bid]] : [null]); // slabs/stairs: several boxes, each tested on its own
@@ -1044,7 +1047,12 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
       if (ax >= px + hw || bx <= px - hw || ay >= py + h || by <= py || az >= pz + hw || bz <= pz - hw) continue;
     }
     if (axis === "x" ? ax < prev + hw && bx > prev - hw : axis === "z" ? az < prev + hw && bz > prev - hw :
-      axis === "y" && ay < prev + h && by > prev) continue;
+      axis === "y" && ay < prev + h && by > prev) {
+      const mv = (axis === "x" ? px : axis === "y" ? py : pz) - prev;
+      const mid = axis === "x" ? (ax + bx) / 2 - prev : axis === "y" ? (ay + by) / 2 - (prev + h / 2) : (az + bz) / 2 - prev;
+      if (mv * mid <= 0) continue;           // leaving (or not moving deeper into) a box it was already inside
+      HIT.inside = true;
+    }
     if (!hit) { HIT.x0 = ax; HIT.y0 = ay; HIT.z0 = az; HIT.x1 = bx; HIT.y1 = by; HIT.z1 = bz; hit = true; continue; }
     HIT.x0 = Math.min(HIT.x0, ax); HIT.y0 = Math.min(HIT.y0, ay); HIT.z0 = Math.min(HIT.z0, az);
     HIT.x1 = Math.max(HIT.x1, bx); HIT.y1 = Math.max(HIT.y1, by); HIT.z1 = Math.max(HIT.z1, bz);
@@ -1071,6 +1079,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
       const prev = pos[axis];
       pos[axis] += step;
       if (boxHit(pos.x, pos.y, pos.z, hw, h, axis, prev)) {
+        if (HIT.inside) { pos[axis] = prev; if (axis === "y" && step < 0) res.onGround = true; top = HIT.y1; return true; }
         if (axis === "y") {
           if (step < 0) { pos.y = HIT.y1; res.onGround = true; }
           else { pos.y = HIT.y0 - h - 1e-4; res.hitCeil = true; }
