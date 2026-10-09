@@ -403,9 +403,10 @@ function doBuy(m, deal) {
   for (let i = 0; i < deal.times; i++) {
     if (!canSell(v2) || T.blockReason(v2, o)) break;
     if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    if (!T.exchange(v2, o)) break;
+    const sold = T.exchange(v2, o);
+    if (!sold) break;
     for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.add(m.inv, o.sell.id, o.sell.n);
+    T.inv.addStacks(m.inv, sold);
     T.addXp(v2, o);
     done++;
   }
@@ -453,9 +454,10 @@ function doSell(m, deal) {
   let done = 0;
   for (let i = 0; i < deal.times; i++) {
     if (!canBuy(b) || saleTimes(m, b, o) < 1) break;
-    if (!T.exchange(m, o)) break;
+    const sold = T.exchange(m, o);
+    if (!sold) break;
     for (const p of o.buy) T.inv.remove(b.inv, p.id, p.n);
-    T.inv.add(b.inv, o.sell.id, o.sell.n);
+    T.inv.addStacks(b.inv, sold);
     T.addXp(m, o);
     done++;
   }

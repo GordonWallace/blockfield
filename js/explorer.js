@@ -237,9 +237,11 @@ function findCartographer(m, X) {
 }
 function deal(m, dl) {
   const t = T(), v2 = dl.seller, o = dl.offer;
-  if (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy) || !t.exchange(v2, o)) return false;
+  if (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy)) return false;
+  const sold = t.exchange(v2, o);
+  if (!sold) return false;
   t.inv.remove(m.inv, o.buy[0].id, o.buy[0].n);
-  t.inv.add(m.inv, o.sell.id, o.sell.n);
+  t.inv.addStacks(m.inv, sold);
   t.addXp(v2, o);
   if (BF.vlog) BF.vlog.trade(m, v2, o);
   log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
