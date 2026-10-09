@@ -1196,6 +1196,11 @@ function layoutVillage(cx, cz, spawn, pop) {
   for (const [x, z] of v.lamps) {
     v.minX = Math.min(v.minX, x); v.maxX = Math.max(v.maxX, x); v.minZ = Math.min(v.minZ, z); v.maxZ = Math.max(v.maxZ, z);
   }
+  // signposts to nearby villages (js/signs.js): sites at the main road ends and on the plaza, inside the village box as it stands
+  // (they never grow it, so which villages a world has stays the same); which ones stand is decided when the village is drawn
+  if (BF.signs && BF.signs.planPosts) {
+    try { v.posts = BF.signs.planPosts(v, { climate: (x, z) => climate(x, z) }); } catch (e) { console.error(e); v.posts = null; }
+  }
   for (const p of v.pads) v.minY = Math.min(v.minY, p.y);
   v.ground = biome === DESERT ? 1 : style === 2 ? 2 : 0;
   if (pop) v.reach = Math.max(48, Math.round(Math.hypot(Math.max(cx - v.minX, v.maxX - cx), Math.max(cz - v.minZ, v.maxZ - cz))));   // jobsite search radius (js/jobs.js)
@@ -1312,6 +1317,10 @@ function drawVillage(v, ox, oz, vox, hAt) {
     for (const j of v.jobsites) if (j.id != null) set(j.x, j.y, j.z, j.id);
   }
   if (v.arch && BF.signs && BF.signs.drawArch) BF.signs.drawArch(v, set, styles()[v.style]); // entry arch + village sign (js/signs.js)
+  if (v.posts && BF.signs && BF.signs.drawPosts) {   // signposts to nearby villages (js/signs.js); finding the neighbours lays them out, so keep C
+    if (!v.posts.assigned) { const c0 = Object.assign({}, C); try { BF.signs.assignPosts(v); } catch (e) { console.error(e); } Object.assign(C, c0); }
+    BF.signs.drawPosts(v, set, styles()[v.style]);
+  }
 }
 
 // A box room: foundation ring + floor at y, walls y+1..y+Hh, log corners, air inside.

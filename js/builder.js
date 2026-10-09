@@ -210,6 +210,7 @@ function obstacles(R, built) {
     for (const l of wg.lamps || []) out.push(ex([l[0], l[1], l[0], l[1]], 2));
     for (const dd of wg.decor || []) out.push(ex([dd[0], dd[1], dd[0] + 1, dd[1]], 2));
     if (wg.arch && wg.arch.box) out.push(ex(wg.arch.box, 2)); // village entry arch + its sign (js/signs.js)
+    for (const p of wg.posts || []) out.push(ex(p.box, 2));   // signposts to nearby villages (js/signs.js)
   } else out.push(ex([R.x - 8, R.z - 8, R.x + 8, R.z + 8], 2));
   for (const e of built) if (e.state !== "abandoned") out.push(ex([e.ox, e.oz, e.ox + e.w - 1, e.oz + e.d - 1], SITE_MARGIN));
   if (BF.villageLife && BF.villageLife.bedRects) for (const r of BF.villageLife.bedRects(R)) out.push(ex(r, 1));   // farm beds, and beds the farmers are making

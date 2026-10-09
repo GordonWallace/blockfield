@@ -1,6 +1,6 @@
 // Signs (see CONTRACT.md "Signs"): standing and wall signs for all 8 woods that merge into one board when placed side by side or
 // stacked, a per-world text store keyed by each group's anchor sign, a modal editor that wraps text exactly like the in-world
-// board, CanvasTexture text overlays, auto-updating signs (registry) and the village entry arch with its "Village of ..." sign.
+// board, CanvasTexture text overlays, auto-updating signs (registry), the village entry arch with its "Village of ..." sign and signposts to nearby villages.
 // Hooks elsewhere (one line each): world.js setBlock -> onSet, world.js MODELS.sign + world coords for models, player.js
 // interact/place/invOpen, worldgen.js layoutVillage -> planArch and drawVillage -> drawArch, save.js serialize/deserialize,
 // builder.js keeps clear of v.arch.box, commands.js /locate prints the village name.
@@ -733,6 +733,107 @@ function drawArch(v, set, S) {
     set(x, y + 1, z, 0); set(x, y + 2, z, 0);
   }
 }
+// ---------------------------------------------------------------- signposts to nearby villages
+// A signpost (two standing signs that merge into one 30-character board) at the outer end of each main road, facing back toward
+// the village and listing the villages within 45 degrees of that road, and one on the plaza beside the well listing all of them:
+// the 4 nearest villages within POST_RANGE, each as an arrow (as the reader sees it), the name and the distance rounded to 10.
+// planPosts (worldgen layoutVillage, once the village box is known) only picks sites inside that box; assignPosts (worldgen
+// drawVillage, once per village) finds the neighbours and drops sites with nothing to list; drawPosts draws the used ones.
+const POST_RANGE = 800, POST_MAX = 4;
+const ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"];   // ahead, then clockwise
+const postText = new Map();   // auto key -> text (fixed per village; rebuilt when the village is drawn again)
+function planPosts(v, ctx) {
+  const C = ctx.climate, SEA = BF.SEA, key = vkeyOf(v), a = v.arch;
+  const inB = (x, z, b, m) => x >= b.x0 - m && x <= b.x1 + m && z >= b.z0 - m && z <= b.z1 + m;
+  const near = (x, z) => v.lamps.some(l => Math.abs(l[0] - x) <= 1 && Math.abs(l[1] - z) <= 1) || v.decor.some(d => z === d[1] && x >= d[0] - 1 && x <= d[0] + 2);
+  const inHouse = (x, z) => v.buildings.some(b => inB(x, z, b, 0) || (Math.abs(x - (b.doorX - b.sx)) + Math.abs(z - (b.doorZ - b.sz)) <= 1));
+  const padOf = (x, z) => v.pads.find(p => inB(x, z, p, 0));
+  const onRoad = (x, z) => v.roads.some(r => inB(x, z, r, 0));
+  const inArch = (x, z) => a && a.box && x >= a.box[0] - 1 && x <= a.box[2] + 1 && z >= a.box[1] - 1 && z <= a.box[3] + 1;
+  const free = (x, z) => x >= v.minX && x <= v.maxX && z >= v.minZ && z <= v.maxZ && !padOf(x, z) && !near(x, z) && !onRoad(x, z) && !inHouse(x, z) && !inArch(x, z);
+  const wood = SIGN_WOOD[v.style] || "oak", h = hash32(v.x, v.z, ((BF.state && BF.state.seed) | 0) ^ 0x5197);
+  const post = (cells, d, f) => {
+    const id = signId(wood, 0, f);
+    if (id == null) return null;
+    const R = RIGHT[f];
+    cells.sort((p, q) => (p[0] * R[0] + p[2] * R[1]) - (q[0] * R[0] + q[2] * R[1]));
+    const xs = cells.map(c => c[0]), zs = cells.map(c => c[2]);
+    return { d, f, id, cells, box: [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)] };
+  };
+  const posts = [];
+  for (let k = 0; k < 4; k++) {
+    const d = DIRS[k], L = [-d[1], d[0]];
+    const road = v.roads.find(r => r.dx === d[0] && r.dz === d[1] && r.sx === v.x + d[0] * 8 && r.sz === v.z + d[1] * 8);
+    if (!road) continue;
+    const P = (s, t) => [road.sx + d[0] * t + L[0] * s, road.sz + d[1] * t + L[1] * s];
+    let ts = [road.end, road.end + 1];
+    for (let t = road.end - 1; t >= Math.max(4, road.end - 14); t--) ts.push(t);
+    if (a && a.onRoad && a.d[0] === d[0] && a.d[1] === d[1]) {   // the arch's road: just outside the arch
+      const ta = (a.x - road.sx) * d[0] + (a.z - road.sz) * d[1];
+      ts = [ta + 2, ta + 3, ta + 4, ta + 5].concat(ts.filter(t => t < ta - 1));
+    }
+    const sides = (h >> k) & 1 ? [1, -1] : [-1, 1];
+    let got = null;
+    for (const t of ts) for (const s of sides) {
+      if (got) break;
+      const cs = [P(s * 2, t), P(s * 3, t)];
+      if (!cs.every(c => free(c[0], c[1]))) continue;
+      const g = cs.map(c => C(c[0], c[1]));
+      if (g.some(q => q <= SEA) || Math.abs(g[0] - g[1]) > 1) continue;
+      const y = Math.max(...g) + 1;
+      got = post(cs.map((c, i) => [c[0], y, c[1], g[i]]), d, BF.dirIndex(-d[0], -d[1]));
+    }
+    if (got) posts.push(got);
+  }
+  // the plaza: north of the well, facing north, read looking south toward the bell
+  const pc = [[v.x - 3, v.z - 3], [v.x - 2, v.z - 3]];
+  if (pc.every(c => !near(c[0], c[1]) && !inHouse(c[0], c[1]))) {
+    const pz = post(pc.map(c => [c[0], v.y + 1, c[1], v.y]), null, 0);
+    if (pz) { pz.plaza = true; posts.push(pz); }
+  }
+  posts.forEach((p, i) => { p.ak = key + "/post" + i; });
+  return posts;
+}
+// arrow for a village at (dx, dz) from the sign, seen by a reader facing r
+function arrowFor(dx, dz, r) {
+  const fwd = dx * r[0] + dz * r[1], right = dx * -r[1] + dz * r[0];
+  return ARROWS[(((Math.round(Math.atan2(right, fwd) / (Math.PI / 4))) % 8) + 8) % 8];
+}
+function postLine(o, r) { return arrowFor(o.dx, o.dz, r) + " " + String(o.name).slice(0, 16).padEnd(16) + " " + String(o.dist).padStart(3); }
+function postNeighbours(v) {
+  const G = BF.worldgen;
+  if (!G || !G.villagesNear) return [];
+  return G.villagesNear(v.x, v.z, POST_RANGE).filter(o => o && !(o.x === v.x && o.z === v.z))
+    .map(o => { const dx = o.x - v.x, dz = o.z - v.z, d = Math.hypot(dx, dz); return { name: o.name || villageName(o) || "Village", dx, dz, d, dist: Math.round(d / 10) * 10 }; })
+    .sort((p, q) => p.d - q.d).slice(0, POST_MAX);
+}
+// Decides which planned signposts stand (once per village) and queues their auto text.
+function assignPosts(v) {
+  if (!v.posts || v.posts.assigned) return;
+  Object.defineProperty(v.posts, "assigned", { value: true, enumerable: false });
+  const list = postNeighbours(v);
+  for (const p of v.posts) {
+    const r = p.plaza ? [0, 1] : p.d;   // the reader faces away from the sign's front
+    const mine = p.plaza ? list : list.filter(o => (o.dx * p.d[0] + o.dz * p.d[1]) >= o.d * Math.SQRT1_2 - 1e-9);
+    p.used = mine.length > 0;
+    if (!p.used) continue;
+    postText.set(p.ak, mine.map(o => postLine(o, r)).join("\n"));
+    if (!seen.has(p.ak)) autoPlan.set(ck(p.cells[0][0], p.cells[0][1], p.cells[0][2]), { kind: "signpost", ak: p.ak, id: p.id, cells: p.cells.map(c => [c[0], c[1], c[2]]) });
+  }
+  pendingAuto = true;
+}
+function drawPosts(v, set, S) {
+  for (const p of v.posts || []) {
+    if (!p.used) continue;
+    for (const [x, y, z, g] of p.cells) {
+      for (let yy = g + 1; yy < y; yy++) set(x, yy, z, S.found);
+      set(x, y, z, p.id);
+      set(x, y + 1, z, 0); set(x, y + 2, z, 0);
+    }
+  }
+}
+registerAuto("signpost", e => postText.has(e.ak) ? postText.get(e.ak) : null);
+
 function countBedsFallback(v) {
   let n = 0;
   for (const h of (v && v.houses) || []) for (const b of h.beds || []) {
@@ -837,6 +938,7 @@ BF.signs = {
   onSet, place, interact, openEditor, closeEditor, isOpen: () => ed.open,
   registerAuto, runAuto, autos,
   planArch, drawArch, villageName, nameFor,
+  planPosts, assignPosts, drawPosts, postNeighbours, arrowFor, postLine, POST_RANGE,
   serialize, deserialize, reset,
   isSign: id => !!IS[id], signId,
   _state: { data, seen, autoPlan, overlays, chunkSigns, groupCache, vByKey },
