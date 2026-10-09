@@ -299,6 +299,7 @@ def("tp", {
     if (/^@[spa]$/.test(a[0] || "")) a = a.slice(1);
     if (a.length === 2) {
       const p = pos(), x = parseCoord(a[0], p.x, "x"), z = parseCoord(a[1], p.z, "z");
+      if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
       const y = surfaceY(x, z);
       teleport(x, y, z);
       return `Teleported ${PLAYER} to ${fmt(x)}, ${fmt(y)}, ${fmt(z)}`;
@@ -510,6 +511,8 @@ def("spawnpoint", {
     if (a.length && /^@[spa]$/.test(a[0])) a = a.slice(1);
     if (a.length && a.length !== 3) usage("spawnpoint");
     const [x, y, z] = a.length ? parsePos(a, 0, true) : [Math.floor(pos().x), Math.floor(pos().y), Math.floor(pos().z)];
+    if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
+    if (y < BF.MIN_Y || y >= BF.H) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${BF.H - 1}`);
     BF.spawnPoint = { x: x + 0.5, y, z: z + 0.5 };
     return `Set spawn point to ${x}, ${y}, ${z} for ${PLAYER}`;
   },

@@ -1248,14 +1248,18 @@ function trySleep(t) {
   setTimeout(() => { BF.sky.setTime(0.01); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
 // Where to respawn: on the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
+const inWorld = (x, z) => Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7;   // inside the world border (false for NaN)
+const worldSpawn = () => ({ x: 8.5, z: 8.5 });   // the fallback respawnPoint uses when there is no spawn point
 function respawnPoint() {
   let sp = BF.spawnPoint || { x: 8.5, z: 8.5 };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();   // a spawn point past the border (older saves): back to the world spawn
   if (sp.bed) {
     const [bx, by, bz] = sp.bed, b = BF.blocks[BF.world.getBlock(bx, by, bz)];
     if (!BF.world.isLoaded(bx, bz) || (b && (b.bed || b.tent))) return [sp.x, sp.y + 0.01, sp.z];
     setTimeout(() => actionBar("You have no home bed"), 300);
     BF.spawnPoint = sp = sp.world && sp.world.x != null ? sp.world : { x: 8.5, z: 8.5 };
   }
+  if (sp.y != null && sp.y >= BF.MIN_Y && sp.y < BF.H) return [sp.x, sp.y + 0.01, sp.z];   // /spawnpoint x y z (lifted out if it's inside blocks)
   return [sp.x, surfaceY(sp.x, sp.z), sp.z];
 }
 
@@ -1696,8 +1700,9 @@ P.deserialize = function (o) {
   const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : d);
   if (o.gameMode) setGameMode(o.gameMode);
   resetStats();
-  const sp = BF.spawnPoint || { x: pos.x, z: pos.z };
-  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z)) {
+  let sp = BF.spawnPoint || { x: pos.x, z: pos.z };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();
+  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z) || !inWorld(o.x, o.z)) {
     pos.set(sp.x, surfaceY(sp.x, sp.z), sp.z);           // saved while dead (or broken data): back to spawn
   } else {
     pos.set(o.x, o.y, o.z);
