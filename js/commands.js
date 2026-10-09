@@ -203,12 +203,14 @@ const ALIAS = {
   porkchop: "raw_porkchop", beef: "raw_beef", cooked_beef: "steak", chicken: "raw_chicken", mutton: "raw_mutton", cod: "raw_cod",
   wall_torch: "wall_torch_north", tall_grass: "short_grass", grass_path: "dirt_path", sugar_cane_block: "sugar_cane",
 };
+// Own keys only: BF.B, BF.I and the tables here are plain objects, so a bare lookup of 'constructor' or 'toString' finds a function (bug-044).
+const own = (o, k) => (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined);
 function lookupName(n) {
   const B = BF.B || {}, I = BF.I || {};
-  for (const k of [n, ALIAS[n], n + "_item"]) {
+  for (const k of [n, own(ALIAS, n), n + "_item"]) {
     if (!k) continue;
-    if (I[k] != null) return I[k];
-    if (B[k] != null) return B[k];
+    if (own(I, k) != null) return I[k];
+    if (own(B, k) != null) return B[k];
   }
   return null;
 }
@@ -226,7 +228,8 @@ function resolveBlock(tok) {
   const n = norm(tok);
   if (!n) fail("Expected a block");
   const B = BF.B || {};
-  const id = n === "air" ? 0 : B[n] != null ? B[n] : B[ALIAS[n]] != null ? B[ALIAS[n]] : null;
+  const a = own(ALIAS, n);
+  const id = n === "air" ? 0 : own(B, n) != null ? B[n] : a && own(B, a) != null ? B[a] : null;
   if (id == null) {
     const it = lookupName(n);
     if (it != null && BF.items[it] && !BF.items[it].isBlock) fail(`'${tok}' is an item, not a block`);
@@ -341,7 +344,7 @@ def("time", {
     if (sub === "set") {
       if (a.length !== 2) usage("time");
       const n = norm(a[1]);
-      const t = TIME_NAMES[n] != null ? TIME_NAMES[n] : parseTicks(a[1]);
+      const t = own(TIME_NAMES, n) != null ? TIME_NAMES[n] : parseTicks(a[1]);
       S.setTime((t % 24000) / 24000);
       return `Set the time to ${t % 24000}`;
     }
@@ -372,7 +375,7 @@ def("gamemode", {
     const n = norm(a[0]);
     if (!n) usage("gamemode");
     if (n === "adventure" || n === "spectator" || n === "a" || n === "sp" || n === "2" || n === "3") fail(`Game mode '${a[0]}' is not available here (survival or creative)`);
-    const m = MODES[n];
+    const m = own(MODES, n);
     if (!m) fail(`Unknown game mode '${a[0]}'`);
     if (P().gameMode === m) return `${PLAYER} is already in ${m === "creative" ? "Creative" : "Survival"} Mode`;
     if (P().setGameMode) P().setGameMode(m); else P().gameMode = m;
