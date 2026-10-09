@@ -1238,7 +1238,9 @@ function sleepFade() {
 }
 // Right-click on a bed: at night with no monsters near, sleep until morning and set the respawn point here.
 // A tent (js/tents.js) works the same, but monsters cannot see anyone asleep in it, so nearby monsters do not stop you.
+let falling = false;   // asleep and fading out: more clicks on the bed do nothing until you wake (else each one adds a day, bug-041)
 function trySleep(t) {
+  if (falling) return;
   if (!BF.sky || !(BF.sky.isNight() || (BF.sky.stormy && BF.sky.stormy()))) { actionBar("You can only sleep at night"); return; }
   const b = BF.blocks[t.id], tent = !!b.tent;
   const near = !tent && ((BF.mobs && BF.mobs.list) || []).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
@@ -1250,7 +1252,8 @@ function trySleep(t) {
   BF.spawnPoint = { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp };
   if (tent) { P.hiddenInTent = true; setTimeout(() => { P.hiddenInTent = false; }, 2200); }   // monsters lose sight of the sleeper (mobs.js hostileAI)
   sleepFade();
-  setTimeout(() => { wakeUp(); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
+  falling = true;
+  setTimeout(() => { falling = false; wakeUp(); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
 // Waking up is the next morning: the day counter moves on unless it is already early morning (sleeping in a daytime storm moves to tomorrow too).
 function wakeUp() {
