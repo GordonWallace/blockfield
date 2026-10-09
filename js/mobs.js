@@ -1582,7 +1582,7 @@ function updateMob(m, dt) {
   _desired.x = 0; _desired.z = 0; _desired.faceTarget = false; _desired.faceX = null; _desired.faceZ = null;
   if (m.rider) { /* ridden (js/horses.js): its rider moves it */ }
   else if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
-  else if (m.type === "villager") { villagerAI(m, dt, _desired); if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
+  else if (m.type === "villager") { { const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0; } if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
   else if (T.golem) golemAI(m, dt, _desired);
   else if (ai.fleeT > 0) {
     ai.fleeT -= dt;
@@ -1972,6 +1972,19 @@ function freshVillage(key, slotKey) {
   for (const k of villagerSaves.keys()) if (k.startsWith(pre)) return false;
   return true;
 }
+// Villager AI time (ms per frame, averaged over about 5 s): what the force-unload limit looks at (js/villagesim.js).
+let aiAcc = 0, aiEma = 0;
+function aiTick(dt) { aiEma += (aiAcc - aiEma) * Math.min(1, dt / 5); aiAcc = 0; }
+// Puts a villager back at its bed, else at its village centre (a forced stop of an errand).
+function sendHome(m) {
+  const b = m.bed, rec = m.village;
+  let x = b ? b.x : rec ? rec.x : m.position.x, z = b ? b.z : rec ? rec.z : m.position.z;
+  let y = b ? b.y : BF.worldgen.heightAt(x, z) + 1;
+  const s = findStand(x, y, z, TYPES.villager);
+  if (s) m.position.set(s[0], s[1], s[2]); else m.position.set(x + 0.5, y, z + 0.5);
+  m.vel.set(0, 0, 0); m.ai.route = null; m.fallStart = m.position.y;
+  return true;
+}
 function findStand(x, y, z, T) {
   x = Math.floor(x); z = Math.floor(z);
   const base = Math.floor(y);
@@ -2327,6 +2340,7 @@ BF.mobs = {
     }
     try { updateVillages(dt); restockVillagers(dt); if (BF.merchant) BF.merchant.tick(dt); } catch (e) { console.error(e); }
     despawn(dt);
+    aiTick(dt);
     if (BF.mobSave) BF.mobSave.update(dt);
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
@@ -2356,6 +2370,8 @@ BF.mobs = {
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
   villages,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
+  aiTime: () => aiEma,
+  sendHome,
   unloadVillage(key) {
     const rec = villages.get(key);
     if (!rec) return 0;

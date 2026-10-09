@@ -140,6 +140,60 @@ function countdown(key) {
   return { left: Math.max(0, Math.round((en.until - nowDay()) * DAY_S)), est: en.est.slice(0, 6), max: Math.round(en.max) };
 }
 
+// ---- force unload: when the game would bog down, villages are stopped even with tasks running (each one logged as an error)
+const LIMITS = { chunks: 1500, aiMs: 6, villages: 10 };
+let aiCoolUntil = 0;
+const JOBS = () => [BF.toolsmith, BF.eggCook, BF.baker];
+// Stops what the village's villagers are doing so that it can unload: merchants go home with their cargo, furnace and oven workers empty
+// them, led animals are let go, trades are cancelled and villagers out on an errand are put back at their bed. Each one is logged.
+function forceStop(rec, why) {
+  const L = BF.mobs.list, key = rec.key;
+  for (const m of L.slice()) {
+    if (m.type !== "villager" || m.village !== rec || m.dead || m.removed) continue;
+    const acts = [], task = BF.villagerStatus ? BF.villagerStatus.text(m) : "";
+    if (m.tradingWith) { m.tradingWith = null; acts.push("cancelled the trade"); }
+    if (m.profession === "merchant" && BF.merchant && BF.merchant.forceHome && BF.merchant.forceHome(m, why)) acts.push("went home with its cargo");
+    for (const j of JOBS()) { const a = j && j.forceStop && j.forceStop(m); if (a) acts.push(a); }
+    for (const o of L) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
+    const v = rec.wg;
+    if (m.profession !== "explorer" && !acts.length && v && v.minX != null && edgeDist(v, m.position.x, m.position.z) > 4 && BF.mobs.sendHome) { BF.mobs.sendHome(m); acts.push("went home"); }
+    if (acts.length) logError("forced-stop", { village: key, who: nameOf(m), task, action: acts.join(", "), why });
+  }
+}
+// Trips towards or from a village end when it is forced off.
+function forceTrips(key, why) {
+  if (!BF.merchant || !BF.merchant.forceHome) return;
+  for (const m of BF.mobs.list) if (m.mc && m.mc.trip && (m.mc.trip.home === key || m.mc.trip.dest === key) && m.type === "villager") {
+    BF.merchant.forceHome(m, why);
+    logError("forced-stop", { village: key, who: nameOf(m), task: "caravan trip", action: "went home with its cargo", why });
+  }
+}
+// The village to stop first, or null: 1. counting down, farthest first; 2. caravan destinations; 3. running villages beyond ALWAYS; never within ALWAYS.
+function victim(next, px, pz) {
+  let best = null, bs = -1;
+  const dests = new Set();
+  for (const p of pins.values()) dests.add(vKey(p.b));
+  for (const [k, e] of next) {
+    const d = edgeDist(e.v, px, pz);
+    if (d <= ALWAYS) continue;
+    const rank = ending.has(k) ? 3 : dests.has(k) ? 2 : 1;
+    const sc = rank * 1e6 + d;
+    if (sc > bs) { bs = sc; best = k; }
+  }
+  return best;
+}
+function heldChunks(next) {
+  const all = new Set(winKeys);
+  for (const e of next.values()) for (const k of e.keys) all.add(k);
+  return all.size;
+}
+function overLimit(next, now) {
+  if (next.size > LIMITS.villages) return "village count";
+  if (heldChunks(next) > LIMITS.chunks) return "held chunks";
+  if (now >= aiCoolUntil && BF.mobs.aiTime && BF.mobs.aiTime() > LIMITS.aiMs) return "AI time";
+  return null;
+}
+
 // ---- chunks kept around villagers outside their village
 const winKeys = new Set();
 let winT = 0;
@@ -212,6 +266,20 @@ function update(px, pz) {
     for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.secs, ran: Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
     ending.delete(k);
   }
+  // over a limit: stop villages in priority order until it is fine (never one within ALWAYS of the player)
+  for (let guard = 0; guard < 16; guard++) {
+    const why = overLimit(next, now);
+    if (!why) break;
+    const k = victim(next, px, pz);
+    if (k == null) break;
+    const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(k);
+    if (why === "AI time") aiCoolUntil = now + 5;
+    if (rec) forceStop(rec, why);
+    forceTrips(k, why);
+    ending.delete(k);
+    next.delete(k);
+    if (why === "AI time") break;                                    // let the average settle before the next one
+  }
   let changed = pinChange || next.size !== active.size || winChanged;
   for (const k of next.keys()) if (!active.has(k)) changed = true;
   for (const k of active.keys()) if (!next.has(k)) changed = true;
@@ -221,6 +289,7 @@ function update(px, pz) {
   active.clear();
   for (const [k, e] of next) active.set(k, e);
   for (const [k, e] of fresh) startCatchUp(k, e);
+  for (const k of dropped) if (BF.merchant && BF.merchant.remember) BF.merchant.remember(k, true);   // its prices are written down for merchants elsewhere
   for (const k of dropped) if (BF.mobs && BF.mobs.unloadVillage) BF.mobs.unloadVillage(k);   // the village and all its villagers go together
   // stamp villages whose centre is loaded: the last stamp is when the village stopped being simulated
   const d = dayNow();
@@ -256,7 +325,7 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  mayStart, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
+  LIMITS, mayStart, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);

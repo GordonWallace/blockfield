@@ -1,5 +1,7 @@
 // Trading caravans soak (release 1.3): two villages between 60 and 200 blocks apart, both with merchants, for many game days.
-// Usage: NODE_PATH=$(npm root -g) node test/caravan-soak.js [seed=1] [days=14] [out.json]
+// Usage: NODE_PATH=$(npm root -g) node test/caravan-soak.js [seed=1] [days=14] [out.json] [far]
+// far (or FAR=1): a pair 450-590 blocks apart (caravan range is 600), the player visits both, then stays at the one with a merchant; the other village's last-known
+// prices are set to pay double (the real gap takes many days to grow), and only the trips are checked: 2 or more out and home, none lost on the way.
 // Drives the simulation directly (no rendering), like test/prices-soak.js. The player stands between the two villages, then from day AWAY
 // (default: two thirds of the way), as soon as a merchant is on the road, walks 1500 blocks off and stays there, so trips on the road must keep both villages and the route loaded (pins).
 // Once per game day it records each village's villagers, emeralds and items, the merchants' trips (out and home), goods sold each way, pins,
@@ -13,6 +15,7 @@ const root = path.resolve(__dirname, '..');
 const SEED = +(process.argv[2] || 1);
 const DAYS = +(process.argv[3] || 14);
 const OUT = process.argv[4] || null;
+const FAR = !!process.env.FAR || process.argv[5] === 'far', LO = +(process.env.LO || (FAR ? 450 : 60)), HI = +(process.env.HI || (FAR ? 590 : 190));
 const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
 
 (async () => {
@@ -26,16 +29,27 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   await pg.addInitScript(d => { window.__DIAG = d; }, !!process.env.DIAG);
   await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForTimeout(3000);
+  await pg.evaluate(c => { window.__C = c; }, { LO, HI, FAR });
   const setup = await pg.evaluate(() => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
     const vs = BF.worldgen.villagesNear(0, 0, 4000).filter(v => v && v.pop >= 8).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
     let pair = null;
     for (let i = 0; i < vs.length && !pair; i++) for (let j = i + 1; j < vs.length && !pair; j++) {
       const d = Math.hypot(vs[i].x - vs[j].x, vs[i].z - vs[j].z);
-      if (d >= 60 && d <= 190) pair = [vs[i], vs[j], d];
+      if (d >= __C.LO && d <= __C.HI) pair = [vs[i], vs[j], d];
     }
-    if (!pair) return { err: 'no pair of villages 60-190 blocks apart' };
-    const [A, B, d] = pair, mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2;
+    if (!pair) return { err: 'no pair of villages ' + __C.LO + '-' + __C.HI + ' blocks apart' };
+    let [A, B, d] = pair, mx = __C.FAR ? A.x : (A.x + B.x) / 2, mz = __C.FAR ? A.z : (A.z + B.z) / 2;
+    if (__C.FAR) {   // far pair: the player visits both villages first, so that the merchants know the other one's prices; then stays at one that has a merchant
+      const has = [];
+      for (const V of [A, B]) {
+        BF.player.spawn(V.x + 0.5, BF.worldgen.heightAt(Math.floor(V.x), Math.floor(V.z)) + 3, V.z + 0.5);
+        for (let i = 0; i < 400; i++) { BF.world.update(V.x, V.z, 60); if (i % 4 === 0) { BF.warp.advance(0.05); BF.sky.update(0.05); BF.mobs.update(0.05); BF.world.tickSim(); } }
+        const k = Math.round(V.x) + ',' + Math.round(V.z);
+        has.push(BF.mobs.list.some(m => m.type === 'villager' && m.profession === 'merchant' && m.village && m.village.key === k));
+      }
+      if (has[0]) { mx = A.x; mz = A.z; } else { [A, B] = [B, A]; mx = A.x; mz = A.z; }
+    }
     window.__mid = [mx, mz];
     BF.player.spawn(mx + 0.5, BF.worldgen.heightAt(Math.floor(mx), Math.floor(mz)) + 3, mz + 0.5);
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
@@ -51,6 +65,7 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
       return orig.apply(this, arguments);
     };
     window.__day = () => {
+      window.__seed();
       const out = { day: BF.sky.day, v: {}, pins: BF.villageSim.pins().size, sim: BF.villageSim.status() };
       for (const k of keys) {
         const ms = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === k && !m.dead && !m.removed);
@@ -72,6 +87,10 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
         if (other) { const g = BF.merchant.goods(m.village, other, m, 999); o.raw = g.list.slice(0, 3).map(x => x.n + ' ' + BF.items[x.id].name + ' ' + x.buy.toFixed(3) + '>' + x.sell.toFixed(3)); }
         return o;
       });
+      if (window.__DIAG) {   // why a merchant does or does not set out (DIAG=1)
+        const m = BF.mobs.list.find(x => x.type === 'villager' && x.profession === 'merchant' && !x.dead && keys.includes(x.village && x.village.key));
+        if (m) { const cs = BF.merchant.candidates(m); out.diag = { market: [...BF.merchant.market.keys()], cands: cs.map(c => c.rec.key + ':' + Math.round(c.d)), days540: +BF.merchant.tripDays(m, 540).toFixed(2), goods: cs.map(c => { const g = BF.merchant.goods(m.village, c.rec, m, 999); return g.profit.toFixed(1) + '/' + g.list.length; }), sells: [...BF.merchant.book(m.village, m).sells].filter(([id, a]) => a.reduce((t, x) => t + (BF.market ? BF.market.spareOf(x.v, id) : 0), 0) >= 4).slice(0, 8).map(([id, a]) => id + ':' + a[0].u.toFixed(2) + ' s' + a[0].s + ' spare' + (BF.market ? BF.market.spareOf(a[0].v, id) : '?')), buyAt: Object.keys((BF.merchant.market.get(keys[1]) || { buys: {} }).buys).length, plan: !!BF.merchant.plan(m), mc: m.mc && { stage: m.mc.stage, cd: m.mc.cd, last: m.mc.last } }; }
+      }
       out.routes = BF.merchant.routes().map(r => ({ a: r.a, b: r.b, trips: r.trips, items: r.items, ems: r.emeralds, road: r.road.length }));
       R.days.push(out);
     };
@@ -81,6 +100,12 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
     BF.world.setBlock = function (x, y, z, id) { if (id === BF.B.dirt_path && new Error().stack.includes('merchant.js')) R.paths++; return sb(x, y, z, id); };
     const profs = {};
     for (const m of BF.mobs.list) if (m.type === 'villager' && m.village && keys.includes(m.village.key) && !m.dead) profs[m.village.key + ' ' + m.profession] = 1;
+    window.__seed = () => {   // the far village is not loaded, so its last-known prices never move: they are set to pay double for everything the home village sells (stands for the price gap that grows over many days)
+      if (!__C.FAR) return;
+      const m = BF.mobs.list.find(x => x.type === 'villager' && x.profession === 'merchant' && !x.dead && x.village && x.village.key === keys[0]), sum = BF.merchant.market.get(keys[1]);
+      if (m && sum) for (const [id, ss] of BF.merchant.book(m.village, m).sells) sum.buys[id] = [[ss[0].u * 2, 1, 64]];
+    };
+    window.__seed();
     return { keys, d: Math.round(d), merchants: Object.keys(profs).filter(k => /merchant$/.test(k)), sim: BF.villageSim.status() };
   });
   if (setup.err) { console.log('FAIL ' + setup.err); await b.close(); process.exit(1); }
@@ -109,7 +134,16 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
       await pg.evaluate(() => window.__day());
       const x = await pg.evaluate(() => window.__rec.days.at(-1));
       const vs = Object.entries(x.v).map(([k, v]) => `${k}: ${v.alive} alive, ${v.ems} em, ${v.items} items, merchants ${v.merchants.join('/')}`).join(' | ');
-      if (x.diag) console.log('  diag ' + JSON.stringify(x.diag));
+      if (await pg.evaluate(() => !!window.__stuck)) {
+        console.log('  STUCK ' + JSON.stringify(await pg.evaluate(() => {
+          const m = window.__stuck, N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(m), CS = BF.CS, out = { feet: [fx, fy, fz], ground: BF.world.getBlock(fx, fy - 1, fz), at: BF.world.getBlock(fx, fy, fz), head: BF.world.getBlock(fx, fy + 1, fz), paths: {}, chunks: [] };
+          for (const [dx, dz] of [[2, 0], [-2, 0], [0, 2], [0, -2], [5, 5], [-5, -5], [15, 15], [-15, -15], [-15, -14]]) { const gx = fx + dx, gz = fz + dz; const p = N.findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.abs(x - gx) + Math.abs(z - gz) <= 2 }, 2500); out.paths[dx + ',' + dz] = p ? p.length : null; }
+          for (let cz = -2; cz <= 2; cz++) { let row = ''; for (let cx = -2; cx <= 2; cx++) row += BF.world.isLoaded(fx + cx * CS, fz + cz * CS) ? 'X' : '.'; out.chunks.push(row); }
+          out.kind = m.ai.routeKind;
+          return out; })));
+        break;
+      }
+      { const nf = await pg.evaluate(() => window.__nf); if (nf && nf.length) { console.log('  nf ' + JSON.stringify(nf)); } } if (x.diag) console.log('  diag ' + JSON.stringify(x.diag));
       console.log(`day ${String(x.day).padStart(3)}  gap ${JSON.stringify(x.gap)}  trips out ${x.left} home ${x.home}  pins ${x.pins}  wear max ${x.paths}  ${vs}  (${Math.round((Date.now() - t0) / 1000)} s)`);
     }
   }
@@ -126,8 +160,9 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   const F = m => { console.log('FAIL ' + m); fail++; };
   if (pageErrors) F('page errors: ' + pageErrors);
   if (R.bad.length) F('villager trades without an offer: ' + R.bad.length);
-  if (!(allSells.there > 0)) F('no goods sold in the other village');
-  if (DAYS >= 7 && !(allSells.home > 0)) F('no goods brought home and sold');
+  if (FAR && !(last.left >= 2 && last.home >= 2)) F(`far pair: expected at least 2 trips out and home, got ${last.left} out, ${last.home} home`);
+  if (!FAR && !(allSells.there > 0)) F('no goods sold in the other village');
+  if (!FAR && DAYS >= 7 && !(allSells.home > 0)) F('no goods brought home and sold');
   if (R.maxPins > 2) F('more than 2 trips on the road: ' + R.maxPins);
   const onRoad = R.routes.reduce((a, r) => a + r.road.length, 0);
   if (R.pinsLeft > onRoad) F(`pins left behind: ${R.pinsLeft} pins, ${onRoad} merchants on the road`);

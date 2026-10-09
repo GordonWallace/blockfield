@@ -34,7 +34,8 @@ module.exports = async (pg) => {
   await wait(k => BF.mobs.list.filter(m => m.village && m.village.key === k && m.type === "villager").length >= 4, info.key);
   const pin = k => pg.evaluate(k => {   // a villager held out beyond the village edge until the test lets go
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
-    const put = () => { m.sleeping = false; m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
     put(); clearInterval(window.__pin); window.__pin = setInterval(put, 150);
     return BF.vlog.nameOf(m);
   }, k);
