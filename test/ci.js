@@ -4,7 +4,7 @@
 // line `// @ci baseline`, `// @ci integration` or `// @ci skip <reason>`; an unlisted, untagged test runs in integration.
 // Tests run serially: several headless games at once starve each other and village loading gets flaky.
 // A test fails when it exits non-zero, times out, uses more memory than CI_MEM_LIMIT_MB (10 GB), throws in the page (PAGEERROR), or prints a line starting with FAIL / FAILED.
-// Suites (test/ci.json "suites") group the tests by game area. A baseline run adds every test of the suites named in CI_SUITES
+// Suites (test/ci.json "suites", or a test file's `// @ci ... suite=<name>` header) group the tests by game area. A baseline run adds every test of the suites named in CI_SUITES
 // ("jobs ui", "all"), or in a "CI suites: jobs, ui" line of the pull request body (PR_BODY, set by the workflow). The long tests
 // (ci.json "soak") run only when soak is named too ("jobs soak") or with all, so a suite stays a few minutes.
 // `node test/ci.js suites` lists them.
@@ -17,32 +17,58 @@ const only = process.argv.slice(4);
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci.json'), 'utf8'));
 const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js']);
 
+// A test file can carry its own settings in a header line, so adding a test needs no edit to the shared ci.json (parallel PRs
+// kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>] [soak] [timeout=<s>] [args=<a,b,...>] [reason]`,
+// e.g. `// @ci integration suite=farming timeout=600`. For a test listed in ci.json, ci.json wins where both say something.
+const header = src => {
+  const m = /^\/\/ @ci (baseline|integration|skip)\b(.*)$/m.exec(src);
+  if (!m) return null;
+  const h = { tier: m[1] }, rest = [];
+  for (const w of m[2].trim().split(/\s+/).filter(Boolean)) {
+    const kv = /^(suite|timeout|args)=(.+)$/.exec(w);
+    if (kv) h[kv[1]] = kv[1] === 'timeout' ? +kv[2] : kv[1] === 'args' ? kv[2].split(',') : kv[2];
+    else if (w === 'soak') h.soak = true;
+    else rest.push(w);
+  }
+  h.why = rest.join(' ');
+  return h;
+};
 // the full test list: manifest entries, then any other test/*.js
 const tests = manifest.tests.map(t => ({ ...t }));
-const listed = new Set(tests.map(t => t.file));
+const listed = new Map(tests.map(t => [t.file, t]));
 for (const f of fs.readdirSync(__dirname).filter(f => f.endsWith('.js') && !NOT_TESTS.has(f)).sort()) {
   const file = 'test/' + f;
-  if (listed.has(file)) continue;
   const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
-  const tag = /^\/\/ @ci (baseline|integration|skip)\b(.*)$/m.exec(src);
+  const h = header(src);
+  const t = listed.get(file);
+  if (t) { if (h) t.header = h; continue; }
   // a module that exports a function is an action script for test/run.js; anything else runs on its own
   const kind = /module\.exports\s*=/.test(src) ? 'actions' : 'node';
-  tests.push({ name: f.replace(/\.js$/, ''), file, kind, tier: tag ? tag[1] : 'integration', why: tag && tag[2].trim(), discovered: true });
+  tests.push({ name: f.replace(/\.js$/, ''), file, kind, tier: h ? h.tier : 'integration', why: h && h.why, timeout: h && h.timeout, args: h && h.args, header: h, discovered: true });
 }
 for (const t of tests) if (!fs.existsSync(path.join(root, t.file))) t.missing = true;
 
-// suites: name -> tests; each test's suite
+// suites: name -> tests; each test's suite (ci.json's suite lists, else the file's header)
 const SUITES = manifest.suites || {};
 for (const [k, s] of Object.entries(SUITES)) for (const n of s.tests) { const t = tests.find(t => t.name === n); if (t) t.suite = k; }
 // soak: the long tests of every suite. A named suite runs without them unless soak is named too (or all); soak alone runs them all
 const SOAK = manifest.soak || { tests: [] };
 for (const n of SOAK.tests) { const t = tests.find(t => t.name === n); if (t) t.soak = true; }
+const badSuite = [];
+for (const t of tests) {
+  const h = t.header;
+  if (!h) continue;
+  if (h.suite && !t.suite) { if (SUITES[h.suite]) t.suite = h.suite; else badSuite.push(`${t.name} (suite=${h.suite})`); }
+  if (h.soak) t.soak = true;
+  if (h.timeout && !t.timeout) t.timeout = h.timeout;
+}
+if (badSuite.length) { console.log(`FAIL unknown suite in a // @ci header: ${badSuite.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}`); process.exit(1); }
 if (tier === 'suites') {
   const names = (k, soak) => tests.filter(t => t.suite === k && !t.missing && !!t.soak === soak).map(t => t.name).join(' ');
   for (const [k, s] of Object.entries(SUITES)) console.log(`${k}: ${s.about}\n  ${names(k, false)}\n  with soak: ${names(k, true) || '-'}\n`);
   console.log(`soak: ${SOAK.about}\n`);
   const none = tests.filter(t => !t.suite && !t.missing && t.tier !== 'skip');
-  if (none.length) console.log('in no suite (add them to one in test/ci.json): ' + none.map(t => t.name).join(' '));
+  if (none.length) console.log('in no suite (give each a // @ci header with suite=<name>): ' + none.map(t => t.name).join(' '));
   process.exit(0);
 }
 const bodyLine = /^[\s>*_-]*CI suites?\s*:\s*(.*)$/im.exec(process.env.PR_BODY || '');
