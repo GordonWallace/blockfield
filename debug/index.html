@@ -339,6 +339,11 @@
       <table id="a-table"><colgroup><col><col class="c2"><col class="c3"></colgroup><thead><tr><th>Alert</th><th>Fired</th><th></th></tr></thead><tbody id="a-body"></tbody></table>
       <div class="anote" id="a-note">An alert freezes the game (0×) when a matching event is logged in any loaded village and shows it in the game's top-left corner. Alerts are kept by the debug server, so they carry over to other games.</div>
     </div>
+    <div class="panel" id="rtpanel">
+      <div class="ph"><h2>Routes</h2><span class="sub" id="rt-count"></span></div>
+      <div class="roster"><table><thead><tr><th>Between</th><th title="Trips along this route in the last 7 game days">Trips (7 d)</th><th title="Items carried and sold, and the emeralds they fetched, in the last 7 game days">Goods moved</th><th>On the road</th></tr></thead><tbody id="rt-body"></tbody></table></div>
+      <div class="empty" id="rt-empty">No merchant has travelled yet.</div>
+    </div>
     <div class="panel" id="lpanel">
       <div class="ph"><div class="tabs" id="l-tabs"><button class="tab on" data-tab="log">Village log</button><button class="tab" data-tab="econ" title="Goods moving between jobs, and what can't be bought or isn't selling">Economy</button></div>
         <span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
@@ -430,7 +435,7 @@ function onSnap(s) {
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
   const was = viewKey;
   pickView(s);
-  renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); status(); alertsFromSnap(s);
+  renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); renderRoutes(s); status(); alertsFromSnap(s);
   if (logChanged || logDirty || was !== viewKey) { if (logDirty || was !== viewKey) econChanged = true; logDirty = false; renderLog(); }
   if (econChanged && eopt.tab === "econ") renderEcon();
 }
@@ -444,6 +449,16 @@ function pickView(s) {
 }
 
 // ---------------------------------------------------------------- village list
+// Caravan routes (js/merchant.js routes): each pair of villages a merchant has travelled between, trips and goods of the last 7 game days,
+// and who is on the road now.
+const STAGE = { buy: "buying goods", go: "on the way there", sell: "selling there", shop: "buying to take home", back: "on the way home", unload: "selling at home" };
+function renderRoutes(s) {
+  const rs = s.routes || [], body = $("rt-body");
+  $("rt-empty").hidden = rs.length > 0;
+  $("rt-count").textContent = rs.length ? rs.length + " route" + (rs.length === 1 ? "" : "s") : "";
+  body.innerHTML = rs.map(r => `<tr><td>${esc(r.an)} ↔ ${esc(r.bn)}<div class="sub">${esc(r.a)} ↔ ${esc(r.b)}</div></td><td>${r.trips}<span class="sub"> of ${r.total}</span></td>` +
+    `<td>${r.items} items<span class="sub">, ${r.emeralds} emeralds</span></td><td>${r.road.length ? r.road.map(x => esc(x.who) + " <span class=\"sub\">(" + esc(STAGE[x.stage] || x.stage || "") + ")</span>").join("<br>") : "<span class=\"sub\">no</span>"}</td></tr>`).join("");
+}
 function renderVillages(s) {
   const list = s.villages || [], d = s.info;
   const nLoaded = list.filter(v => v.loaded).length;

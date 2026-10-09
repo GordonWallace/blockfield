@@ -9,10 +9,10 @@
 (() => {
 "use strict";
 
-const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", build: "Building", born: "Being born", death: "Dying", horse: "Handling horses" };
+const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", build: "Building", born: "Being born", death: "Dying", horse: "Handling horses", caravan: "Travelling with goods" };
 const ACTS_FOR = t => t === "Player" ? ["buy", "bed", "chest"] : t === "Child" ? ["born", "death"] :
-  t === "Farmer" ? ["buy", "sell", "bed", "chest", "job", "tool", "harvest", "death"] : t === "Builder" ? ["buy", "sell", "bed", "chest", "job", "tool", "build", "death"] : t === "Stable Hand" ? ["buy", "sell", "bed", "chest", "job", "tool", "horse", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
-const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", farm: "Harvests", build: "Building", birth: "Births", death: "Deaths", horse: "Horses" };
+  t === "Farmer" ? ["buy", "sell", "bed", "chest", "job", "tool", "harvest", "death"] : t === "Builder" ? ["buy", "sell", "bed", "chest", "job", "tool", "build", "death"] : t === "Stable Hand" ? ["buy", "sell", "bed", "chest", "job", "tool", "horse", "death"] : t === "Merchant" ? ["buy", "sell", "bed", "job", "caravan", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
+const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", farm: "Harvests", build: "Building", birth: "Births", death: "Deaths", horse: "Horses", caravan: "Caravans" };
 const kindName = k => KINDS[k] || k.charAt(0).toUpperCase() + k.slice(1);
 const typeOf = party => party === "Player" ? "Player" : (/\(([^()]+)\)\s*$/.exec(party) || [])[1] || null;
 
@@ -31,6 +31,7 @@ function actorsOf(e) {
   if (k === "farm" && (m = /^(.*?\)) started harvesting /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "harvest"]] : null; }
   if (k === "build" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "build"]] : null; }
   if (k === "horse" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "horse"]] : null; }   // js/stables.js
+  if (k === "caravan" && (m = /^(.*?\(Merchant\)) /.exec(tx))) return [["Merchant", "caravan"]];   // js/merchant.js
   if (k === "birth") return [["Child", "born"]];
   if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
   return null;

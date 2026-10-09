@@ -310,6 +310,10 @@ const BLOCK_DEFS = [
   // tack rack: the stable hand villager's jobsite (not vanilla): a wooden wall rack with a saddle on its peg and a bridle hanging beside it
   { name: "tack_rack", jobsite: "stable_hand", tiles: { top: "tack_rack_top", side: "tack_rack_side", front: "tack_rack_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#7a5232" },
   // ---- end stable pack ----
+  // ---- merchant pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Merchants")
+  // merchant's counter: the merchant villager's jobsite (not vanilla): a plank counter with a ledger, scales and a cash box on top
+  { name: "merchant_counter", jobsite: "merchant", tiles: { top: "merchant_counter_top", side: "merchant_counter_side", front: "merchant_counter_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#8a6a3a" },
+  // ---- end merchant pack ----
   // ---- poultry pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Poultry keepers")
   // nesting box: the poultry keeper villager's jobsite (not vanilla): a plank box of straw with eggs in it
   { name: "nesting_box", jobsite: "poultry_keeper", tiles: { top: "nesting_box_top", side: "nesting_box_side", front: "nesting_box_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#c8a85a" },
