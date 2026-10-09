@@ -1110,7 +1110,7 @@ function boxOverlapsCell(px, py, pz, hw, h, x, y, z) {
   return px + hw > x && px - hw < x + 1 && py + h > y && py < y + 1 && pz + hw > z && pz - hw < z + 1;
 }
 function cellBlockedByEntity(x, y, z) {
-  if (boxOverlapsCell(pos.x, pos.y, pos.z, HW - 0.01, HEIGHT, x, y, z)) return true;
+  if (boxOverlapsCell(pos.x, pos.y, pos.z, HW, HEIGHT, x, y, z)) return true;   // full box: no block may be placed inside the player
   const list = (BF.mobs && BF.mobs.list) || [];
   for (const m of list) {
     if (!m || m.dead) continue;
