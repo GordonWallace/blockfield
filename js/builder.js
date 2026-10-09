@@ -221,6 +221,7 @@ function obstacles(R, built) {
     for (const l of wg.lamps || []) out.push(ex([l[0], l[1], l[0], l[1]], 2));
     for (const dd of wg.decor || []) out.push(ex([dd[0], dd[1], dd[0] + 1, dd[1]], 2));
     if (wg.arch && wg.arch.box) out.push(ex(wg.arch.box, 2)); // village entry arch + its sign (js/signs.js)
+    for (const p of wg.posts || []) out.push(ex(p.box, 2));   // signposts to nearby villages (js/signs.js)
   } else out.push(ex([R.x - 8, R.z - 8, R.x + 8, R.z + 8], 2));
   for (const e of built) if (e.state !== "abandoned") out.push(ex([e.ox, e.oz, e.ox + e.w - 1, e.oz + e.d - 1], SITE_MARGIN));
   if (BF.villageLife && BF.villageLife.bedRects) for (const r of BF.villageLife.bedRects(R)) out.push(ex(r, 1));   // farm beds, and beds the farmers are making
@@ -630,6 +631,7 @@ function placeCell(m, bs, e) {
   let step = 1;
   if (BF.vlog && BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) BF.vlog.bed(m, c.x, c.y, c.z);
   if (BF.blocks[use] && BF.blocks[use].jobsite && BF.emit) BF.emit("blockPlaced", c.x, c.y, c.z, use);   // a jobsite (the stable's tack rack): js/jobs.js lists it for the jobless at once
+  if (BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) firstDibs(m, e, c);
   if (c.pair) {                                             // door upper half / bed head go in with the lower half / foot
     const c2 = cellOf(e, e.prog + 1);
     w.setBlock(c2.x, c2.y, c2.z, c2.id);
@@ -647,7 +649,7 @@ function finish(m, bs, e) {
   e.state = "done"; e.end = +dayNow().toFixed(3);
   bs.mode = "idle"; bs.entry = null; bs.cool = rnd(40, 80); bs.t = 3; m.ai.route = null;
   const bp = bpOf(e);
-  if (bp.house && bp.beds.length && m.slot && (!m.bed || m.bed.claimed)) claimHome(m, e);   // moves out of a bed it borrowed (js/mobs.js claimBed) into its own house
+  if (bp.house && m.slot && e.claim === m.slot.idx && m.bed && homeFor(e).beds.some(b => sameBed(b, m.bed))) m.home = homeFor(e);   // it took a bed here as it placed it (firstDibs): this is its home now
   logEvent("done", m, { type: e.type, at: [e.ox, e.oy, e.oz], blocks: e.n, skipped: e.skipped || 0 });
   vlogBuild(m, e, "built");
   BF.emit && BF.emit("builderDone", m, e);
@@ -659,12 +661,22 @@ function homeFor(e) {
     beds: bp.beds.map(b => ({ x: e.ox + b.x, y: e.oy + b.y, z: e.oz + b.z, f: b.f })),
   };
 }
-function claimHome(m, e) {
-  const H = homeFor(e);
-  m.home = H; m.bed = H.beds[0]; e.claim = m.slot.idx;
-  const same = b => b && b.x === m.bed.x && b.y === m.bed.y && b.z === m.bed.z;
-  for (const o of m.village ? m.village.members : []) if (o !== m && o.bed && o.bed.claimed && same(o.bed)) o.bed = null;   // a villager who borrowed the bed finds another (js/mobs.js claimBed)
-  logEvent("claim", m, { bed: [m.bed.x, m.bed.y, m.bed.z] });
+const sameBed = (a, b) => a && b && a.x === b.x && a.y === b.y && a.z === b.z;
+const heldByOther = (m, b) => (m.village ? m.village.members : []).some(o => o !== m && !o.dead && !o.removed && sameBed(o.bed, b));
+// A builder keeps a bed it has of its own. One with none (or only a borrowed one, js/mobs.js claimBed) takes the first bed it places in a
+// house, the moment it places it, so nobody has borrowed it yet. No villager ever takes a bed another villager holds (bug-027).
+function firstDibs(m, e, c) {
+  if (!bpOf(e).house || !m.slot || (m.bed && !m.bed.claimed)) return;
+  const b = homeFor(e).beds.find(x => x.x === c.x && x.y === c.y && x.z === c.z);
+  if (b) claimHome(m, e, b);
+}
+function claimHome(m, e, bed) {
+  const H = homeFor(e), b = bed || H.beds[0];
+  if (!b || heldByOther(m, b)) return false;
+  m.bed = b; e.claim = m.slot.idx; e.claimBed = H.beds.indexOf(b);
+  if (e.state === "done") m.home = H;
+  logEvent("claim", m, { bed: [b.x, b.y, b.z] });
+  return true;
 }
 
 // ---------------------------------------------------------------- fetching water for a well
@@ -941,8 +953,12 @@ function onSpawn(m, rec, saved) {
     const n = TR().inv.count(m.inv, BF.I.red_bed);
     if (n) TR().inv.remove(m.inv, BF.I.red_bed, n);
   }
-  const e = built.find(x => x.state === "done" && x.claim === idx);
-  if (e && bpOf(e).door) { const H = homeFor(e); m.home = H; m.bed = H.beds[0]; }
+  const e = built.find(x => x.state !== "abandoned" && x.claim === idx);
+  if (e && bpOf(e).door) {
+    const H = homeFor(e), b = H.beds[e.claimBed > 0 ? e.claimBed : 0];
+    if (e.state === "done") m.home = H;
+    if (b && !heldByOther(m, b)) m.bed = b;
+  }
 }
 
 BF.builder = {

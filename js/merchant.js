@@ -20,13 +20,13 @@
 //   at WEAR_N crossings it becomes a dirt path. The counts are saved.
 // - Routes (debug screen): each pair of villages that traded, trips and goods moved in the last 7 days, and whether a merchant is on the road.
 // - Death on the road: its goods drop where it fell (mobKilled).
-// API: BF.merchant = { PROF, RANGE, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
+// API: BF.merchant = { PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
 
 const PROF = "merchant";
-const RANGE = 200;              // blocks from home village centre to the other village's centre
+const RANGE = 600;              // blocks from home village centre to the other village's centre (a trip must also fit in MAX_PLAN_DAYS)
 const CARGO_STACKS = 2;         // stacks it carries each way
 const TRIP_EVERY = 2;           // game days between setting out (a few trips a week)
 const MIN_GAIN = 0.05;          // the buy price there must beat the price here by this much
@@ -36,8 +36,13 @@ const WEAR_N = 20;              // crossings that turn grass or dirt into a dirt
 const WEAR_MAX = 6000;          // wear counts kept (oldest dropped)
 const WORK_START = 0.03, DUSK = 0.45, BEDTIME = 0.5, DAY_S = 1200;
 const HOME_R = 48;              // this close to its bed (or village centre) it is home and never camps
-const ARRIVE_R = 6, DEAL_R = 2.6, DEAL_TIMEOUT = 60, TRIP_MAX_DAYS = 5;
+const ARRIVE_R = 6, DEAL_R = 2.6, DEAL_TIMEOUT = 60, TRIP_MAX_DAYS = 3;
+const BOOST = 1.5, ROAD = 1.3, WIND = 1.3;   // merchants and explorers walk 1.5x a villager (js/mobs.js); on the road at 1.3x; roads wind: 1.3x the straight line
+const MAX_PLAN_DAYS = 2;        // a trip is only planned when it should be over in this many game days (walk time plus the dealing)
+const DEAL_DAYS = 0.1;          // a day's tenth for buying and selling at both ends
 const LOG = [];
+const market = new Map();       // village key -> last-known prices {t, sells: {id: [[unit, step, spare]]}, buys: {id: [[unit, step, items it pays for]]}}
+const noRoad = new Map();       // "a|b" (sorted) -> game day until which a trip between them is not planned (a trip lost on the way)
 const T = () => BF.trades;
 const P = () => BF.prices;
 const em = () => BF.I.emerald;
@@ -95,7 +100,7 @@ function book(rec, m) {
 // Goods worth carrying from village `from` to village `to`: [{id, buy (cheapest seller's unit), sell (dearest buyer's unit), n (items), gain}],
 // best first, and the expected profit with `purse` emeralds and room for CARGO_STACKS stacks.
 function goods(from, to, m, purse) {
-  const A = book(from, m), B = book(to, m), out = [];
+  const A = book(from, m), B = to.sum ? bookOf(to.sum) : book(to, m), out = [];
   for (const [id, ss] of A.sells) {
     const bs = B.buys.get(id);
     if (!bs || !bs.length) continue;
@@ -104,8 +109,8 @@ function goods(from, to, m, purse) {
     if (!(ss.some(x => x.s < 0) || bs.some(x => x.s > 0))) continue;   // surplus here or lack there: otherwise base prices already balance
     // supply: what the sellers can spare; demand: what the buyers can pay for
     let supply = 0, demand = 0;
-    for (const x of ss) if (x.u < hi.u) supply += BF.market ? BF.market.spareOf(x.v, id) : cnt(x.v, id);
-    for (const x of bs) if (x.u > lo.u) demand += Math.floor(cnt(x.v, em()) / x.o.sell.n) * x.o.buy[0].n;
+    for (const x of ss) if (x.u < hi.u) supply += x.spare != null ? x.spare : BF.market ? BF.market.spareOf(x.v, id) : cnt(x.v, id);
+    for (const x of bs) if (x.u > lo.u) demand += x.items != null ? x.items : Math.floor(cnt(x.v, em()) / x.o.sell.n) * x.o.buy[0].n;
     const n = Math.min(supply, demand, stackOf(id));
     if (n <= 0) continue;
     out.push({ id, buy: lo.u, sell: hi.u, n, gain: (hi.u - lo.u) * n });
@@ -122,15 +127,47 @@ function goods(from, to, m, purse) {
   }
   return { list: take, profit };
 }
-// Villages the merchant could go to now: simulated, loaded, within RANGE of home.
+// The last-known prices of a village (what a merchant plans a trip from while it is not loaded). Taken from the live offers.
+function summarize(rec) {
+  const B = book(rec, null), sells = {}, buys = {}, e = em();
+  for (const [id, a] of B.sells) sells[id] = a.slice(0, 3).map(x => [+x.u.toFixed(4), x.s, BF.market ? BF.market.spareOf(x.v, id) : cnt(x.v, id)]);
+  for (const [id, a] of B.buys) buys[id] = a.slice(0, 3).map(x => [+x.u.toFixed(4), x.s, Math.floor(cnt(x.v, e) / x.o.sell.n) * x.o.buy[0].n]);
+  return { t: +dayNow().toFixed(3), sells, buys };
+}
+// A summary read as a book (the same shape as book()).
+function bookOf(sum) {
+  const sells = new Map(), buys = new Map();
+  for (const id in sum.sells) sells.set(+id, sum.sells[id].map(a => ({ u: a[0], s: a[1], spare: a[2] })));
+  for (const id in sum.buys) buys.set(+id, sum.buys[id].map(a => ({ u: a[0], s: a[1], items: a[2] })));
+  return { sells, buys };
+}
+const roadKey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+const blocked = (a, b) => (noRoad.get(roadKey(a, b)) || 0) > dayNow();
+// Game days a trip over straight-line distance d should take: walking days (the tent between) plus the dealing.
+function tripDays(m, d) {
+  const speed = ((m.def && m.def.speed) || 0.9) * ROAD * BOOST, walkSecs = (DUSK - WORK_START) * DAY_S;
+  return (2 * d * WIND) / (speed * walkSecs) + DEAL_DAYS;
+}
+// Villages the merchant could go to: within RANGE of home, a trip that fits in MAX_PLAN_DAYS, and either loaded now (live prices) or
+// seen before (last-known prices).
 function candidates(m) {
-  const home = m.village, out = [];
+  const home = m.village, out = [], seenK = new Set();
   if (!home || !BF.mobs.villages) return out;
   for (const rec of BF.mobs.villages.values()) {
     if (rec === home || !rec.wg || !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     if (!BF.world.isLoaded(rec.x, rec.z) || !traders(rec, m).length) continue;
+    seenK.add(rec.key);
     const d = Math.hypot(rec.x - home.x, rec.z - home.z);
-    if (d <= RANGE) out.push({ rec, d });
+    if (d <= RANGE && tripDays(m, d) <= MAX_PLAN_DAYS && !blocked(home.key, rec.key)) out.push({ rec, d });
+  }
+  let near = [];
+  try { near = BF.worldgen.villagesNear(home.x, home.z, RANGE) || []; } catch (e) { near = []; }
+  for (const v of near) {
+    if (!v || v.x == null) continue;
+    const key = vKey(v), sum = market.get(key);
+    if (key === home.key || seenK.has(key) || !sum || blocked(home.key, key)) continue;
+    const d = Math.hypot(v.x - home.x, v.z - home.z);
+    if (d <= RANGE && tripDays(m, d) <= MAX_PLAN_DAYS) out.push({ rec: { key, x: v.x, z: v.z, wg: v, sum }, d });
   }
   return out.sort((a, b) => a.d - b.d);
 }
@@ -209,7 +246,7 @@ function travel(m, st, dt, out, tx, tz, radius) {
     else { nv.fail = (nv.fail || 0) + 1; nv.wait = 0.6; if (nv.fail >= 6) { nv.fail = 0; return "failed"; } }
     return "going";
   }
-  const r = N.followRoute(m, dt, out, 1);
+  const r = N.followRoute(m, dt, out, ROAD);
   if (r === "stuck") { ai.route = null; nv.fail = (nv.fail || 0) + 1; if (nv.fail >= 4) { nv.fail = 0; return "failed"; } }
   else if (r === "done") ai.route = null;
   return "going";
@@ -278,8 +315,9 @@ function cargoOf(m, ids) { const out = []; for (const id of ids) { const n = cnt
 const listText = l => l.map(g => g.n + " " + pretty(g.id)).join(", ") || "nothing";
 function pinTrip(m, st) {
   const tr = st.trip, VS = BF.villageSim, a = recOf(tr.home), b = recOf(tr.dest);
-  if (!VS || !a || !b || !a.wg || !b.wg) return false;
-  return VS.pin(tr.id, a.wg, b.wg);
+  const bw = (b && b.wg) || st.destWg;   // an unloaded destination is loaded by the pin itself
+  if (!VS || !a || !bw || !a.wg) return false;
+  return VS.pin(tr.id, a.wg, bw);
 }
 function endTrip(m, st, why) {
   const tr = st.trip;
@@ -294,6 +332,7 @@ function start(m, st) {
   const tr = { id: keyOf(m), home: m.village.key, dest: p.rec.key, dx: p.rec.x, dz: p.rec.z, day0: dayNow(), out: p.list.map(g => ({ id: g.id, n: g.n, buy: g.buy, sell: g.sell })), back: [], soldN: 0, soldE: 0, boughtN: 0 };
   if (!tr.id) return false;
   st.trip = tr;
+  st.destWg = p.rec.wg;
   if (!pinTrip(m, st)) { st.trip = null; st.cd = 30; return false; }   // two trips already on the road: wait
   st.stage = "buy"; st.errands = buyErrands(m.village, m, tr.out, g => g.sell / (1 + MIN_GAIN)); st.ei = 0; st.et = 0;
   st.want = new Map(tr.out.map(g => [g.id, g.n]));
@@ -330,7 +369,7 @@ function destName(key) { const r = recOf(key); return r ? "the village at " + Ma
 
 function tripAI(m, st, dt, out) {
   const tr = st.trip, home = recOf(tr.home) || m.village, dest = recOf(tr.dest);
-  if (dayNow() - tr.day0 > TRIP_MAX_DAYS) { endTrip(m, st, "gave up"); return false; }
+  if (dayNow() - tr.day0 > TRIP_MAX_DAYS) { noRoad.set(roadKey(tr.home, tr.dest), dayNow() + 7); log("error", m, { why: "trip over " + TRIP_MAX_DAYS + " days", dest: tr.dest }); endTrip(m, st, "gave up"); return false; }
   if (!dest && (st.stage === "sell" || st.stage === "shop")) st.stage = "back";   // the other village is gone (not simulated any more): home
   if (st.stage === "go" || st.stage === "back") step(m, st);
   switch (st.stage) {
@@ -345,9 +384,10 @@ function tripAI(m, st, dt, out) {
     }
     case "go": {
       const r = travel(m, st, dt, out, tr.dx, tr.dz, ARRIVE_R);
-      if (r === "failed") { log("lost", m, { dest: tr.dest }); st.stage = "back"; return true; }
+      if (r === "failed") { log("lost", m, { dest: tr.dest }); noRoad.set(roadKey(tr.home, tr.dest), dayNow() + 7); st.stage = "back"; return true; }
       if (r !== "arrived") return true;
-      if (!dest) { st.stage = "back"; return true; }
+      if (!dest || !traders(dest, m).length) { st.aw = (st.aw || 0) + dt; if (st.aw < 30) return true; st.aw = 0; if (!dest) { st.stage = "back"; return true; } }   // its villagers are still appearing
+      st.aw = 0;
       vlogLine(m, "arrived at " + destName(tr.dest) + " with " + listText(st.cargo));
       log("arrive", m, { dest: tr.dest });
       st.stage = "sell"; st.errands = sellErrands(dest, m, st.cargo); st.ei = 0; st.et = 0; st.e0 = cnt(m, em());
@@ -421,7 +461,7 @@ function campAI(m, st, t) {
 function fitsInDay(m, d) {
   if (hasTent(m)) return true;
   const left = (DUSK - skyT()) * DAY_S, speed = (m.def && m.def.speed) || 0.5;
-  return left > 0 && (2 * d) / (speed * 1.3) + 60 < left;
+  return left > 0 && (2 * d * WIND) / (speed * ROAD * BOOST) + 60 < left;
 }
 
 // ---------------------------------------------------------------- villager AI step (mobs.js villagerAI)
@@ -472,12 +512,13 @@ function onKilled(m) {
   }
 }
 // Pins whose merchant is gone (no living merchant with that key for a game day) are dropped.
-let tickT = 0;
+let tickT = 0, summT = 0;
 const lastSeen = new Map();
 function tick(dt) {
   tickT -= dt;
   if (tickT > 0 || !BF.villageSim) return;
   tickT = 5;
+  if ((summT -= 5) <= 0) { summT = 60; for (const rec of BF.mobs.villages.values()) if (rec.wg && BF.villageSim.isActive(rec.key) && BF.world.isLoaded(rec.x, rec.z) && traders(rec, null).length) market.set(rec.key, summarize(rec)); }
   const now = dayNow(), ids = new Set();
   for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && !m.dead && !m.removed && m.mc && m.mc.trip) ids.add(m.mc.trip.id);
   for (const id of [...BF.villageSim.pins().keys()]) {
@@ -521,23 +562,27 @@ function exportAll(out) {
   for (const [k, v] of routes) r[k] = { t: v.trips, n: v.total };
   const w = [];
   for (const [k, n] of wear) if (n >= 2) w.push(k + "," + n);
-  out["caravans"] = { routes: r, wear: w };
+  const nr = {};
+  for (const [k, d] of noRoad) if (d > dayNow()) nr[k] = +d.toFixed(3);
+  out["caravans"] = { routes: r, wear: w, market: Object.fromEntries(market), noroad: nr };
 }
 function importAll(o) {
-  routes.clear(); wear.clear();
+  routes.clear(); wear.clear(); market.clear(); noRoad.clear();
   const c = o && o.caravans;
   if (!c || typeof c !== "object") return;
   for (const k in c.routes || {}) {
     const v = c.routes[k], [a, b] = k.split("|");
     if (a && b && v && Array.isArray(v.t)) routes.set(k, { a, b, trips: v.t.filter(t => Array.isArray(t) && t.length === 3), total: +v.n || v.t.length });
   }
+  for (const k in c.market || {}) { const v = c.market[k]; if (v && typeof v === "object" && v.sells && v.buys) market.set(k, v); }
+  for (const k in c.noroad || {}) if (Number.isFinite(+c.noroad[k])) noRoad.set(k, +c.noroad[k]);
   for (const s of Array.isArray(c.wear) ? c.wear : []) { const p = String(s).split(",").map(Number); if (p.length === 4 && p.every(Number.isFinite)) wear.set(p.slice(0, 3).join(","), p[3]); }
 }
-function reset() { routes.clear(); wear.clear(); lastSeen.clear(); LOG.length = 0; }
+function reset() { routes.clear(); wear.clear(); market.clear(); noRoad.clear(); lastSeen.clear(); LOG.length = 0; }
 
 let hooked = false;
 function hook() { if (!hooked && BF.on) { hooked = true; BF.on("mobKilled", onKilled); } }
 setTimeout(hook, 0);
 
-BF.merchant = { PROF, RANGE, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
+BF.merchant = { PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
 })();

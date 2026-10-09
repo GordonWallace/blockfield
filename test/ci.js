@@ -2,7 +2,8 @@
 // Usage: NODE_PATH=$(npm root -g) node test/ci.js <baseline|integration|suites> [outDir=ci-out] [name ...]
 // Tiers and per-test settings live in test/ci.json. A test file that is not listed there can declare its own tier with a comment
 // line `// @ci baseline`, `// @ci integration` or `// @ci skip <reason>`; an unlisted, untagged test runs in integration.
-// Tests run serially: several headless games at once starve each other and village loading gets flaky.
+// Tests run serially: several headless games at once starve each other and village loading gets flaky. To go faster, CI
+// splits a tier across several runners (CI_SHARD below), one machine each.
 // A test fails when it exits non-zero, times out, uses more memory than CI_MEM_LIMIT_MB (10 GB), throws in the page (PAGEERROR), or prints a line starting with FAIL / FAILED.
 // Suites (test/ci.json "suites", or a test file's `// @ci ... suite=<name>` header) group the tests by game area. A baseline run adds every test of the suites named in CI_SUITES
 // ("jobs ui", "all"), or in a "CI suites: jobs, ui" line of the pull request body (PR_BODY, set by the workflow). The long tests
@@ -79,7 +80,37 @@ const unknown = suites.filter(s => !SUITES[s]);
 if (unknown.length) { console.log(`FAIL unknown CI suite(s): ${unknown.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}, soak, all`); process.exit(1); }
 if (withSoak && !suites.length) suites = Object.keys(SUITES);   // soak on its own: every suite's long tests (plus the suites)
 const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier || (t.tier !== 'skip' && suites.includes(t.suite) && (!t.soak || withSoak)));
-const run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
+let run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
+// CI_SHARD=k/n (1-based): this job runs only its share of the tests, so a workflow can spread one tier across n runners at
+// once. Each runner is a machine of its own, so the games don't starve each other as they would side by side on one runner.
+// Longest first, each to the share with the least expected time so far. Expected times are seconds measured on a CI runner
+// (test/ci-times.json, from the 2026-10-09 integration run; refresh it when tests change a lot). A test not in it counts as a
+// minute, or ten when it is a soak test.
+const shardM = /^(\d+)\/(\d+)$/.exec(process.env.CI_SHARD || '');
+const shard = shardM ? { k: +shardM[1], n: +shardM[2] } : null;
+let times = {};
+try { times = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci-times.json'), 'utf8')); } catch (e) {}
+const weight = t => times[t.name] || (t.soak ? 600 : 60);
+// CI_PLAN=1: how many runners this run should use, so each part takes about CI_PART_SECS (default 240) and never less than
+// its longest test allows; at most 20 (GitHub's limit on jobs at once for a free account). Written to $GITHUB_OUTPUT as parts=[1..n] and n.
+if (process.env.CI_PLAN) {
+  const total = run.reduce((a, t) => a + weight(t), 0), longest = Math.max(1, ...run.map(weight));
+  const n = Math.max(1, Math.min(20, run.length, Math.ceil(total / Math.max(+(process.env.CI_PART_SECS || 240), longest))));
+  const line = `parts=${JSON.stringify(Array.from({ length: n }, (_, i) => i + 1))}\nn=${n}\n`;
+  console.log(`${run.length} test(s), about ${Math.round(total / 60)} min in all: ${n} part(s)`);
+  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line); else process.stdout.write(line);
+  process.exit(0);
+}
+if (shard) {
+  const load = Array(shard.n).fill(0), mine = new Set();
+  for (const t of [...run].sort((a, b) => weight(b) - weight(a) || a.name.localeCompare(b.name))) {
+    const i = load.indexOf(Math.min(...load));
+    load[i] += weight(t);
+    if (i === shard.k - 1) mine.add(t);
+  }
+  run = run.filter(t => mine.has(t));
+}
+if (process.env.CI_DRY) { console.log(run.map(t => t.name).join(' ')); process.exit(0); }   // CI_DRY=1: list what would run, run nothing
 fs.mkdirSync(outDir, { recursive: true });
 
 // Memory cap per test (process tree RSS, MB). A browser that eats the whole machine gets the CI runner killed, which loses
@@ -134,7 +165,7 @@ async function runOne(t) {
 }
 
 (async () => {
-const label = tier + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') + (withSoak ? ' with soak' : '') : '');
+const label = tier + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') + (withSoak ? ' with soak' : '') : '') + (shard ? ` (part ${shard.k} of ${shard.n})` : '');
 console.log(`tier ${label}: ${run.length} test(s)`);
 const results = [];
 for (const t of run) {
