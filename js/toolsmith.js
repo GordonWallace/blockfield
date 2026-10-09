@@ -385,9 +385,10 @@ function doBuy(m, deal) {
     if (!canSell(m, v2) || T.blockReason(v2, o)) break;
     if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
     if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    if (!T.exchange(v2, o)) break;
+    const sold = T.exchange(v2, o);
+    if (!sold) break;
     for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.add(m.inv, o.sell.id, o.sell.n);
+    T.inv.addStacks(m.inv, sold);
     T.addXp(v2, o);
     done++;
   }

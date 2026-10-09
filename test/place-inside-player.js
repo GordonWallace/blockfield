@@ -54,5 +54,20 @@ module.exports = async (pg, out) => {
     return W.getBlock(X - 1, gy, Z);
   });
   check(flush === BF_COBBLE, "a block can still be placed right next to the player");
+  // 5. grazing: a player slightly inside a block's side (0.005 in z) but well along it in x keeps walking along it
+  const graze = await pg.evaluate(() => {
+    const W = BF.world, p = BF.player.position;
+    const X = Math.floor(p.x), Z = Math.floor(p.z), gy = Math.floor(p.y);
+    for (let dx = -8; dx <= 8; dx++) for (let dz = -2; dz <= 2; dz++) { W.setBlock(X + dx, gy - 1, Z + dz, BF.B.stone); for (let k = 0; k <= 3; k++) W.setBlock(X + dx, gy + k, Z + dz, 0); }
+    BF.player.teleport(X - 0.2, gy, Z + 1 - 0.295);           // body spans x X-0.5..X+0.1, z just 0.005 into row Z+1
+    W.setBlock(X - 1, gy, Z + 1, BF.B.cobblestone);          // the block it is grazing (x X-1..X, row Z+1)
+    BF.player.setLook(Math.PI / 2, 0);                        // facing -x, along the block's side
+    return { X };
+  });
+  await pg.keyboard.down('KeyW');
+  const along = await pg.evaluate(() => { const xs = []; for (let i = 0; i < 20; i++) { BF.player.update(0.05); xs.push(+BF.player.position.x.toFixed(3)); } return xs; });
+  await pg.keyboard.up('KeyW');
+  console.log("walking along a grazed block:", JSON.stringify(along));
+  check(along[along.length - 1] < graze.X - 2, "walking along a block you graze still works");
   if (fails.length) console.log("FAIL " + fails.length + " check(s)");
 };
