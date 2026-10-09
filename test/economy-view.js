@@ -66,10 +66,14 @@ const start = async () => {
   ok('held line coloured as an alert', await dbg.evaluate(() => [...document.querySelectorAll('#econ .dead .drow')].some(r => /warn|danger/.test(r.className))));
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // hover a band: its items with counts and emeralds
-  const box = await dbg.evaluate(() => { const ps = [...document.querySelectorAll('#econ svg.flow path')]; const p = ps.sort((x, y) => y.getBBox().height - x.getBBox().height)[0];
-    const r = p.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
-  await dbg.mouse.move(box.x, box.y); await dbg.waitForTimeout(300);
-  const tip = await dbg.evaluate(() => { const t = document.getElementById('e-tip'); return { shown: t && t.style.display === 'block', text: t ? t.textContent : '' }; });
+  // a snapshot with new trades redraws the diagram (and its hidden tooltip) under the mouse, more often on a slow CI machine: hover again, up to 5 times
+  let tip = { shown: false, text: '' };
+  for (let i = 0; i < 5 && !(tip.shown && /trade/.test(tip.text)); i++) {
+    const box = await dbg.evaluate(() => { const ps = [...document.querySelectorAll('#econ svg.flow path')]; const p = ps.sort((x, y) => y.getBBox().height - x.getBBox().height)[0];
+      const r = p.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await dbg.mouse.move(box.x - 40, box.y); await dbg.mouse.move(box.x, box.y); await dbg.waitForTimeout(300);
+    tip = await dbg.evaluate(() => { const t = document.getElementById('e-tip'); return { shown: t && t.style.display === 'block', text: t ? t.textContent : '' }; });
+  }
   ok('hover lists items ' + tip.text, tip.shown && /emeralds|no emeralds/.test(tip.text) && /trade/.test(tip.text));
   await dbg.screenshot({ path: out + '-hover.png' });
   // table view
