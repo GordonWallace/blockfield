@@ -328,6 +328,7 @@ function rebuildTrades(m) {
 // Profession change in place: outfit (mobs.js rebuilds the body), offers; inventory, level and xp are kept.
 function setProfession(m, prof) {
   if (!m || !prof || m.profession === prof) return;
+  if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.leave) BF.toolsmith.leave(m);   // the unfinished tool's materials go back to its pack
   if (BF.mobs && BF.mobs.setProfession) BF.mobs.setProfession(m, prof);
   else { m.profession = prof; m.variant = prof; }
   m.profession = prof;

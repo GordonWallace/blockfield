@@ -139,7 +139,7 @@ function unload(m, o, all) {
   if (empty(o)) o.by = null;
   return got;
 }
-function dropOven(x, y, z) {   // the oven block was broken: its contents spill
+function dropOven(x, y, z) {   // the oven block is gone (broken, exploded, /setblock): its contents spill
   const o = ovenState(x, y, z);
   if (!o) return;
   ovens.delete(o.key);
@@ -708,7 +708,7 @@ if (BF.texKit) {
 
 BF.baker = {
   PROF, PER_VILLAGERS, BAKE_T, RECIPE, SLICES, SLICE_CAP, PIE_CAP, TREAT_EVERY, TREAT_GAP, TREAT_HAPPY, CANE_SPOTS, FARM_KINDS, FARM_NAMES,
-  ovens, ovenAt, ovenState, tickOven, simTick, load, topUp, unload, ovenText, isOven, isCake, cakeBites, eatCake, isTreat,
+  ovens, ovenAt, ovenState, tickOven, ovenRemoved: dropOven, simTick, load, topUp, unload, ovenText, isOven, isCake, cakeBites, eatCake, isTreat,
   canMake, reserve, farmerReserve, keepsFood, fuelOk, mayHire, makeSugar, slice, nextJob, shopping, ai, statusText, holdings,
   treatWanted, treatDeal, findTreatSeller, treatDue, ateTreat, treatCounts,
   farmTask, farmPerform, caneHeight, wildCane,

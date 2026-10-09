@@ -1292,12 +1292,30 @@ function trySleep(t) {
   sleepFade();
   setTimeout(() => { BF.sky.setTime(0.01); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
-// Where to respawn: on the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
+// Where to stand when respawning at a bed: on it if there is headroom, else on the floor beside it (either half), as in vanilla.
+// A bed in a room with a 2-high ceiling has no headroom on top, and the spawn lift would otherwise put you on the roof. Null if
+// nowhere near the bed fits.
+function bedStandSpot(sp) {
+  const W = BF.world, fits = (x, y, z) => !W.boxCollides(x, y, z, HW, HEIGHT) && W.boxCollides(x, y - 0.1, z, HW, 0.1);
+  if (!W.boxCollides(sp.x, sp.y + 0.01, sp.z, HW, HEIGHT)) return [sp.x, sp.y + 0.01, sp.z];
+  const [bx, by, bz] = sp.bed, id = W.getBlock(bx, by, bz), b = BF.blocks[id];
+  const halves = [[bx, bz]];
+  if (b && b.bed && W.partnerOf) { const o = W.partnerOf(bx, by, bz, id); if (o) halves.push([o[0], o[2]]); }
+  for (const dy of [0, -1, 1]) for (const [hx, hz] of halves) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const x = hx + dx + 0.5, z = hz + dz + 0.5, y = by + dy + 0.01;
+    if (fits(x, y, z)) return [x, y, z];
+  }
+  return null;
+}
+let bedRespawn = null;   // the bed spawn point while its chunk loads (P.update picks the standing spot then)
+// Where to respawn: at the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
 function respawnPoint() {
   let sp = BF.spawnPoint || { x: 8.5, z: 8.5 };
+  bedRespawn = null;
   if (sp.bed) {
     const [bx, by, bz] = sp.bed, b = BF.blocks[BF.world.getBlock(bx, by, bz)];
-    if (!BF.world.isLoaded(bx, bz) || (b && (b.bed || b.tent))) return [sp.x, sp.y + 0.01, sp.z];
+    if (!BF.world.isLoaded(bx, bz)) { bedRespawn = sp; return [sp.x, sp.y + 0.01, sp.z]; }
+    if (b && (b.bed || b.tent)) return bedStandSpot(sp) || [sp.x, sp.y + 0.01, sp.z];
     setTimeout(() => actionBar("You have no home bed"), 300);
     BF.spawnPoint = sp = sp.world && sp.world.x != null ? sp.world : { x: 8.5, z: 8.5 };
   }
@@ -1944,7 +1962,10 @@ P.update = function (dt) {
     if (W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
         W.isLoaded(pos.x + 1, pos.z - 1) && W.isLoaded(pos.x - 1, pos.z + 1)) {
       waitingForChunk = false;
-      if (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
+      const bed = !vehicle && bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);
+      bedRespawn = null;
+      if (bed) pos.set(bed[0], bed[1], bed[2]);
+      else if (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }

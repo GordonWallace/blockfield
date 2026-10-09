@@ -248,6 +248,8 @@ world.setBlock = function (x, y, z, id) {
   if (BF.mobs && BF.mobs.onSet) BF.mobs.onSet(x, y, z, oldId, id); // monster spawn wait restarts where it got darker (js/mobs.js)
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
   if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
+  if (BF.isFurnace(oldId) && !BF.isFurnace(id) && BF.inventory && BF.inventory.furnaceRemoved) BF.inventory.furnaceRemoved(x, y, z); // a furnace stops and spills (js/inventory.js)
+  if (BF.baker && BF.baker.isOven(oldId) && !BF.baker.isOven(id)) BF.baker.ovenRemoved(x, y, z); // a baker's oven spills (js/baker.js)
   if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) growing.add(fkey(x, y, z));
   if (y > BF.MIN_Y) { const bl = BF.blocks[cblock(c, lx, y - 1, lz)]; if (bl && bl.growsUp && id !== bl.id) growing.add(fkey(x, y - 1, z)); }   // cane cut back: the top left grows again
   if (BF.farmland) BF.farmland.onSet(x, y, z, oldId, id);   // farmland hydration clock (js/farmland.js)
