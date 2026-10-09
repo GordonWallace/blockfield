@@ -42,7 +42,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
         let item = null, n = 0;
         if (o && o.sell) { item = BF.items[o.sell.id].name; n = o.sell.n * (times || 1); }
         else if (typeof o === 'string') { const m = /got (\d+) (.+)$/.exec(o); if (m) { n = +m[1]; item = m[2]; } }
-        if (item) R.trades.push([buyer.profession, seller && seller.profession, item.toLowerCase().replace(/ /g, '_'), n]);
+        if (item) R.trades.push([buyer.profession, seller && seller.profession, item.toLowerCase().replace(/ /g, '_'), n, !!mine(seller)]);
       }
       return oTrade.apply(this, arguments);
     };
@@ -152,7 +152,9 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   ok('no slices or cakes from nothing (a baked cake is 7 slices)', R.end.cake_slice + 7 * R.end.cake <= R.start.cake_slice + 7 * R.start.cake + 7 * cakes, [R.start.cake_slice + 7 * R.start.cake, cakes, R.end.cake_slice + 7 * R.end.cake]);
   ok('no pies from nothing', R.end.pumpkin_pie <= R.start.pumpkin_pie + pies, [R.start.pumpkin_pie, pies, R.end.pumpkin_pie]);
   ok('no glass bottles from nothing (only hire kits)', R.end.glass_bottle + R.end.milk_bottle <= R.start.glass_bottle + R.start.milk_bottle + 30 * R.kits, [R.start.glass_bottle + R.start.milk_bottle, R.kits, R.end.glass_bottle + R.end.milk_bottle]);
-  ok('no buckets from nothing (the village holds no more than at the start plus kits)', R.end.bucket + R.end.milk_bucket <= R.start.bucket + R.start.milk_bucket + R.kits + traded(x => x[2] === 'bucket'), [R.start.bucket + R.start.milk_bucket, R.end.bucket + R.end.milk_bucket]);
+  const bucketsMade = sum(/\(Toolsmith\) made Bucket/), bucketsIn = traded(x => x[2] === 'bucket' && !x[4]);   // the toolsmith makes them from iron; a merchant may bring some
+  ok('no buckets from nothing (start + kits + made by the toolsmith + brought from other villages)', R.end.bucket + R.end.milk_bucket <= R.start.bucket + R.start.milk_bucket + R.kits + bucketsMade + bucketsIn,
+    [R.start.bucket + R.start.milk_bucket, R.kits, bucketsMade, bucketsIn, R.end.bucket + R.end.milk_bucket]);
   ok('the baker never held a bucket or milked', !R.bucketSeen);
   ok('villagers bought treats from the baker', R.soldTreats > 0, R.soldTreats);
   ok('the treats happiness term counted villagers', R.happy.some(x => x > 0), Math.max(0, ...R.happy.filter(x => x != null)));

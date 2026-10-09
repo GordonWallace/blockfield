@@ -175,6 +175,14 @@ function reserve(m) {
   if (fuel.size) out.push({ ids: fuel, n: 16 });
   return out;
 }
+// A farmer's market reserve (js/market.js reserve): the canes it plants its cane spots with, and a pumpkin to cut into seeds while it has none.
+function farmerReserve(m) {
+  const out = [];
+  if (!m || m.profession !== "farmer" || !Array.isArray(m.inv)) return out;
+  if (I("sugar_cane") != null) out.push({ ids: new Set([I("sugar_cane")]), n: CANE_SPOTS });
+  if (I("pumpkin") != null && cnt(m, I("pumpkin_seeds")) === 0) out.push({ ids: new Set([I("pumpkin")]), n: 1 });
+  return out;
+}
 // It never eats its milk (villagelife.js reserveOf).
 const keepsFood = (m, id) => m && m.profession === PROF && id === I("milk_bottle");
 // Fuel it may burn: coal always, wood unless a job offer of its sells that kind (none does).
@@ -701,7 +709,7 @@ if (BF.texKit) {
 BF.baker = {
   PROF, PER_VILLAGERS, BAKE_T, RECIPE, SLICES, SLICE_CAP, PIE_CAP, TREAT_EVERY, TREAT_GAP, TREAT_HAPPY, CANE_SPOTS, FARM_KINDS, FARM_NAMES,
   ovens, ovenAt, ovenState, tickOven, simTick, load, topUp, unload, ovenText, isOven, isCake, cakeBites, eatCake, isTreat,
-  canMake, reserve, keepsFood, fuelOk, mayHire, makeSugar, slice, nextJob, shopping, ai, statusText, holdings,
+  canMake, reserve, farmerReserve, keepsFood, fuelOk, mayHire, makeSugar, slice, nextJob, shopping, ai, statusText, holdings,
   treatWanted, treatDeal, findTreatSeller, treatDue, ateTreat, treatCounts,
   farmTask, farmPerform, caneHeight, wildCane,
   exportAll, importAll, tick, reset, log: LOG,
