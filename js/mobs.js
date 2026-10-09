@@ -1932,9 +1932,10 @@ function tryHostileSpawn() {
 // ---------- villages ----------
 // Villages come from BF.worldgen.villagesNear (optional). Each is tracked once by its centre so villagers are
 // not duplicated; villagers/golems removed by chunk unloading are replaced when the village loads again,
-// but killed ones stay dead: rec.dead holds the roster slots of killed villagers (saved as "dead:<village key>").
+// but killed ones stay dead: rec.dead holds the roster slots of killed villagers, and rec.killed.iron_golem the golems killed
+// (both saved as "dead:<village key>").
 const villages = new Map();
-const pendingDead = new Map();   // village key -> {v: [slot idx], info: [{i, name, prof, cause, day}]} from a loaded save, applied when the record appears
+const pendingDead = new Map();   // village key -> {v: [slot idx], info: [{i, name, prof, cause, day}], g: golems killed} from a loaded save, applied when the record appears
 function deadSlots(rec) { return rec.dead || (rec.dead = new Set()); }
 function applyDead(rec) {
   const d = pendingDead.get(rec.key);
@@ -1943,6 +1944,7 @@ function applyDead(rec) {
   for (const i of d.v || []) if (Number.isFinite(+i)) deadSlots(rec).add(+i);
   if (d.info.length) rec.deadInfo = d.info.concat(rec.deadInfo || []);
   if (rec.dead) rec.killed.villager = Math.max(rec.killed.villager || 0, rec.dead.size);
+  if (d.g > 0) rec.killed.iron_golem = Math.max(rec.killed.iron_golem || 0, d.g);
 }
 let villageT = 0;
 // Villager trading state by stable key (village "x,z" + roster slot index): kept while unloaded and saved with the world.
@@ -2360,7 +2362,8 @@ BF.mobs = {
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
     for (const rec of villages.values()) {
       const v = rec.dead ? [...rec.dead] : [];
-      if (v.length || (rec.deadInfo && rec.deadInfo.length)) out["dead:" + rec.key] = { v, info: rec.deadInfo || [] };
+      const g = rec.killed.iron_golem || 0;
+      if (v.length || g || (rec.deadInfo && rec.deadInfo.length)) out["dead:" + rec.key] = g ? { v, info: rec.deadInfo || [], g } : { v, info: rec.deadInfo || [] };
       for (const i of v) delete out[rec.key + "#" + i];
     }
     return out;
@@ -2369,7 +2372,7 @@ BF.mobs = {
     villagerSaves.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens") villagerSaves.set(k, o[k]);
     pendingDead.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [] });
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [], g: Math.max(0, Math.floor(+o[k].g || 0)) });
     for (const rec of villages.values()) applyDead(rec);
     if (BF.villageSim) BF.villageSim.importSeen(o);
     if (BF.builder) BF.builder.importAll(o);
