@@ -1572,7 +1572,7 @@ function physics(dt) {
   }
 
   const ox = pos.x, oz = pos.z;
-  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, { stepUp: 0.6 }); // vanilla step height: slabs, stairs and beds, not full blocks
+  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, { stepUp: 0.6, firm: true }); // vanilla step height: slabs, stairs and beds, not full blocks
   const wasGround = onGround;
   onGround = res.onGround; inWater = res.inWater; headInWater = !!res.headInWater; ladderHit = res.hitX || res.hitZ;
   if (inWater && wantJump && (res.hitX || res.hitZ)) vel.y = Math.max(vel.y, 6.5); // climb out onto a ledge
