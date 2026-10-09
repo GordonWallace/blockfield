@@ -1365,7 +1365,7 @@ const api = {
         else if (typing) e.stopImmediatePropagation();
         return;
       }
-      if (/^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey && !(BF.state && BF.state.paused)) api.select(+e.code.slice(5) - 1);
+      if (/^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey && !(BF.state && BF.state.paused) && !(BF.player && BF.player.menu && BF.player.menu())) api.select(+e.code.slice(5) - 1);   // not on the title screen
     }, true);
     document.addEventListener("pointermove", e => { mouseX = e.clientX; mouseY = e.clientY; }, { passive: true });
     BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); removedFurnaces.clear(); chests.clear(); });

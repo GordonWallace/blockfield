@@ -325,6 +325,8 @@ function showScreen(name) {
   if (name === "pause") { updateViewBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
+  const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
+  if (a && a !== document.body && a.closest && a.closest(".bfp-screen") && !a.closest(".bfp-screen.on")) a.blur();
 }
 
 // ---------- saved worlds (start screen) ----------
@@ -566,11 +568,13 @@ function deferredToggle(closeOnly) {
 }
 
 // ---------- input ----------
+// keys typed into a text box are its own; a focused slider, checkbox or button doesn't stop game keys (Escape in the pause menu)
+const typingIn = t => !!t && (t.tagName === "TEXTAREA" || t.isContentEditable || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button|submit|reset|color)$/i.test(t.type)));
 function bindInput() {
   const cv = canvas();
   addEventListener("keydown", e => {
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     const c = e.code;
+    if (typingIn(e.target)) return;
     if (c === "Space" || c === "Tab" || (e.ctrlKey && /^Key[WASDQE]$/.test(c))) e.preventDefault();
     if (c === "Escape") {
       if (e.repeat || e === escCloseEvent) return;   // a held Escape, or the one that just closed a screen, must not go on to open the pause menu
@@ -1248,14 +1252,18 @@ function trySleep(t) {
   setTimeout(() => { BF.sky.setTime(0.01); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
 // Where to respawn: on the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
+const inWorld = (x, z) => Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7;   // inside the world border (false for NaN)
+const worldSpawn = () => ({ x: 8.5, z: 8.5 });   // the fallback respawnPoint uses when there is no spawn point
 function respawnPoint() {
   let sp = BF.spawnPoint || { x: 8.5, z: 8.5 };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();   // a spawn point past the border (older saves): back to the world spawn
   if (sp.bed) {
     const [bx, by, bz] = sp.bed, b = BF.blocks[BF.world.getBlock(bx, by, bz)];
     if (!BF.world.isLoaded(bx, bz) || (b && (b.bed || b.tent))) return [sp.x, sp.y + 0.01, sp.z];
     setTimeout(() => actionBar("You have no home bed"), 300);
     BF.spawnPoint = sp = sp.world && sp.world.x != null ? sp.world : { x: 8.5, z: 8.5 };
   }
+  if (sp.y != null && sp.y >= BF.MIN_Y && sp.y < BF.H) return [sp.x, sp.y + 0.01, sp.z];   // /spawnpoint x y z (lifted out if it's inside blocks)
   return [sp.x, surfaceY(sp.x, sp.z), sp.z];
 }
 
@@ -1446,11 +1454,15 @@ P.damage = function (amount, fromPos, cause) {
 };
 P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health + n); };
 
-const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
+const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", lightning: "You were struck by lightning", hurt: "You died" };
 function die() {
   P.dead = true; P.health = 0;
   resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
-  if (invOpen()) { try { inv().close(); } catch (_) {} }
+  if (invOpen()) {   // every screen closes (the command line closes itself on playerDied)
+    try { inv().close(); } catch (_) {}
+    try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
+    try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
+  }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
   BF.state.paused = true;
@@ -1678,6 +1690,7 @@ P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started &
 P.teleport = function (x, y, z) {
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists
+  if (y < BF.MIN_Y + 5) waitingForChunk = true;           // in the bedrock floor: lifted to the surface if stuck (bedrock can't be dug out)
   syncCamera(0.016);
 };
 P.kill = function () { if (P.dead || !started) return; lastCause = "killed"; die(); };
@@ -1696,8 +1709,9 @@ P.deserialize = function (o) {
   const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : d);
   if (o.gameMode) setGameMode(o.gameMode);
   resetStats();
-  const sp = BF.spawnPoint || { x: pos.x, z: pos.z };
-  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z)) {
+  let sp = BF.spawnPoint || { x: pos.x, z: pos.z };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();
+  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z) || !inWorld(o.x, o.z)) {
     pos.set(sp.x, surfaceY(sp.x, sp.z), sp.z);           // saved while dead (or broken data): back to spawn
   } else {
     pos.set(o.x, o.y, o.z);
@@ -1738,7 +1752,7 @@ P.update = function (dt) {
     if (W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
         W.isLoaded(pos.x + 1, pos.z - 1) && W.isLoaded(pos.x - 1, pos.z + 1)) {
       waitingForChunk = false;
-      if (W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);
+      if (pos.y < BF.MIN_Y || W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }
