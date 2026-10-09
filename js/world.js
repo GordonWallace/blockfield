@@ -1025,10 +1025,16 @@ world.setGate = function (x, y, z, open) {
 
 // ---------- collision ----------
 // Union of the collision boxes of solid blocks overlapping an entity box (filled by boxHit).
-// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored,
-// so an entity caught inside a door slab can walk out of it.
-const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
+// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored, so an entity caught
+// inside a door slab can walk out of it. For the player (moveBox opts.firm) there is one exception: when this axis is the
+// one the player is least far into the box and the move takes it deeper, it still collides (HIT.inside is set, and
+// moveAxis keeps the player where it was), so the player can't walk through a block it is only slightly inside, while
+// walking along a block it grazes still works. Mobs keep walking out of anything they end up inside (their AI and
+// saved spots rely on it).
+const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, inside: false };
+let firmInside = false;   // set by moveBox for the player (opts.firm): see boxHit
 function boxHit(px, py, pz, hw, h, axis, prev) {
+  HIT.inside = false;
   const x0 = Math.floor(px - hw), x1 = Math.floor(px + hw - 1e-6);
   const y0 = Math.floor(py), y1 = Math.floor(py + h - 1e-6);
   const z0 = Math.floor(pz - hw), z1 = Math.floor(pz + hw - 1e-6);
@@ -1044,7 +1050,16 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
       if (ax >= px + hw || bx <= px - hw || ay >= py + h || by <= py || az >= pz + hw || bz <= pz - hw) continue;
     }
     if (axis === "x" ? ax < prev + hw && bx > prev - hw : axis === "z" ? az < prev + hw && bz > prev - hw :
-      axis === "y" && ay < prev + h && by > prev) continue;
+      axis === "y" && ay < prev + h && by > prev) {
+      // how far the entity (at prev) was into the box on each axis; it only pushes through a face it is shallowest in
+      const qx = axis === "x" ? prev : px, qy = axis === "y" ? prev : py, qz = axis === "z" ? prev : pz;
+      const ox = Math.min(bx, qx + hw) - Math.max(ax, qx - hw), oy = Math.min(by, qy + h) - Math.max(ay, qy), oz = Math.min(bz, qz + hw) - Math.max(az, qz - hw);
+      const o = axis === "x" ? ox : axis === "y" ? oy : oz;
+      const mv = (axis === "x" ? px : axis === "y" ? py : pz) - prev;
+      const mid = axis === "x" ? (ax + bx) / 2 - prev : axis === "y" ? (ay + by) / 2 - (prev + h / 2) : (az + bz) / 2 - prev;
+      if (!firmInside || o > Math.min(ox, oy, oz) || mv * mid <= 0) continue;   // a mob, grazing it along another face, or leaving it
+      HIT.inside = true;
+    }
     if (!hit) { HIT.x0 = ax; HIT.y0 = ay; HIT.z0 = az; HIT.x1 = bx; HIT.y1 = by; HIT.z1 = bz; hit = true; continue; }
     HIT.x0 = Math.min(HIT.x0, ax); HIT.y0 = Math.min(HIT.y0, ay); HIT.z0 = Math.min(HIT.z0, az);
     HIT.x1 = Math.max(HIT.x1, bx); HIT.y1 = Math.max(HIT.y1, by); HIT.z1 = Math.max(HIT.z1, bz);
@@ -1062,6 +1077,7 @@ world.boxCollides = (px, py, pz, hw, h) => boxHit(px, py, pz, hw, h);
 // Returns {onGround, hitX, hitZ, hitCeil, inWater}.
 world.moveBox = function (pos, vel, hw, h, dt, opts) {
   const stepUp = (opts && opts.stepUp) || 0;
+  firmInside = !!(opts && opts.firm);
   const res = { onGround: false, hitX: false, hitZ: false, hitCeil: false, inWater: false };
   let top = 0; // top of the last obstacle hit (for stepping up onto beds and blocks)
   const moveAxis = (axis, d) => {
@@ -1071,6 +1087,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
       const prev = pos[axis];
       pos[axis] += step;
       if (boxHit(pos.x, pos.y, pos.z, hw, h, axis, prev)) {
+        if (HIT.inside) { pos[axis] = prev; if (axis === "y" && step < 0) res.onGround = true; top = HIT.y1; return true; }
         if (axis === "y") {
           if (step < 0) { pos.y = HIT.y1; res.onGround = true; }
           else { pos.y = HIT.y0 - h - 1e-4; res.hitCeil = true; }
@@ -1106,6 +1123,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
   if (!res.onGround && vel.y <= 0 && world.boxCollides(pos.x, pos.y - 0.02, pos.z, hw, 0.02)) res.onGround = true;
   res.inWater = BF.RENDER[world.getBlock(pos.x, pos.y + 0.4, pos.z)] === 3;
   res.headInWater = BF.RENDER[world.getBlock(pos.x, pos.y + h - 0.15, pos.z)] === 3;
+  firmInside = false;
   return res;
 };
 })();

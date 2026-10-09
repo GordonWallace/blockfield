@@ -24,6 +24,7 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
 function serveGame(req, res) {
   let rel;
   try { rel = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400).end(); return; }
+  if (rel.includes("\0")) { res.writeHead(404).end(); return; }   // fs throws on a NUL byte (/%00)
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep) || rel.split("/").some(p => p.startsWith(".") && p.length > 1)) { res.writeHead(404).end(); return; }
@@ -89,16 +90,21 @@ function mergeLog(key, a) {
 function push(body, res) {
   let s;
   try { s = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+  if (!s || typeof s !== "object" || Array.isArray(s)) { res.writeHead(400, cors()).end("not a snapshot"); return; }
   const fresh = !lastPush || Date.now() - lastPush > 5000;
   lastPush = Date.now();
-  if (s.info && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); econ.clear(); day = null; } seed = s.info.seed; }
-  for (const k in s.layouts || {}) layouts.set(k, s.layouts[k]);
-  for (const k in s.detail || {}) details.set(k, s.detail[k]);
-  for (const k in s.icons || {}) icons.set(k, s.icons[k]);
-  for (const k in s.econ || {}) econ.set(k, s.econ[k]);
-  if (s.day !== undefined) day = s.day;
+  if (s.info && typeof s.info === "object" && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); econ.clear(); day = null; } seed = s.info.seed; }
+  const obj = o => (o && typeof o === "object" ? o : {});
+  for (const k in obj(s.layouts)) layouts.set(k, s.layouts[k]);
+  for (const k in obj(s.detail)) details.set(k, s.detail[k]);
+  for (const k in obj(s.icons)) icons.set(k, s.icons[k]);
+  for (const k in obj(s.econ)) econ.set(k, s.econ[k]);
+  if (s.day !== undefined) day = s.day && typeof s.day === "object" ? s.day : null;
   const logs = {};
-  for (const k in s.logs || {}) logs[k] = { key: k, cap: s.logs[k].cap, entries: mergeLog(k, s.logs[k].entries || []) };
+  for (const k in obj(s.logs)) {
+    const l = s.logs[k], a = l && Array.isArray(l.entries) ? l.entries.filter(Array.isArray) : [];   // log entries are arrays; skip anything else
+    logs[k] = { key: k, cap: l && l.cap, entries: mergeLog(k, a) };
+  }
   latest = { ...s, layouts: undefined, logs: undefined, econ: undefined };
   broadcast("snap", { ...s, logs });
   if (fresh) console.log("[debug] game connected");
@@ -127,30 +133,31 @@ function serveDebug(req, res) {
     let body = "";
     req.setEncoding("utf8");
     req.on("data", c => { body += c; if (body.length > 8e6) req.destroy(); });
-    req.on("end", () => push(body, res));
+    req.on("end", () => safe(() => push(body, res))(req, res));
     return;
   }
   if (url.pathname === "/alerts" && req.method === "POST") {   // the debug screen's whole alert list, after any change
     let body = "";
     req.setEncoding("utf8");
     req.on("data", c => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on("end", () => {
+    req.on("end", safe(() => {
       let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+      if (!o || typeof o !== "object" || Array.isArray(o)) { res.writeHead(400, cors()).end("not an alert list"); return; }
       setAlerts(o.alerts);
       res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts }));
-    });
+    }).bind(null, req, res));
     return;
   }
   if (url.pathname === "/pick" && req.method === "POST") {   // the debug screen picked a villager ({key}) or none ({key: null})
     let body = "";
     req.setEncoding("utf8");
     req.on("data", c => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on("end", () => {
+    req.on("end", safe(() => {
       let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
       const k = o && typeof o.key === "string" ? o.key.slice(0, 80) : null;
       if (k !== pick) { pick = k; pv = String(Date.now()); if (!k) day = null; }
       res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ pick, pv }));
-    });
+    }).bind(null, req, res));
     return;
   }
   if (url.pathname === "/alerts") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts })); return; }
@@ -180,10 +187,17 @@ function serveDebug(req, res) {
 setInterval(() => { for (const c of clients) c.write(": ping\n\n"); }, 15000).unref();
 
 // Listens on 127.0.0.1 and ::1 (browsers may reach "localhost" over either), or on every address with --lan ("::" is dual-stack).
+// A request that still throws gets a 500 instead of stopping the server (and with it the game page and every debug screen).
+const safe = handler => (req, res) => {
+  try { handler(req, res); } catch (e) {
+    console.error("[debug] " + req.method + " " + req.url + ": " + (e && e.message));
+    try { if (!res.headersSent) res.writeHead(500, cors()); res.end(); } catch (e2) { /* the connection is gone */ }
+  }
+};
 function listen(handler, port, label) {
   const hosts = HOST === "0.0.0.0" ? ["::"] : ["127.0.0.1", "::1"];
   hosts.forEach((h, i) => {
-    const server = http.createServer(handler);
+    const server = http.createServer(safe(handler));
     server.on("error", e => {
       if (i > 0 && e.code !== "EADDRINUSE") return;   // no IPv6 on this machine: IPv4 is enough
       if (h === "::" && e.code !== "EADDRINUSE") { server.listen(port, "0.0.0.0"); return; }
