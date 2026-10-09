@@ -206,19 +206,21 @@ function finish(m, c, why) {
 }
 
 // ---------------------------------------------------------------- fetching a blank map from a cartographer
-const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession === "cartographer" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
-// The blank map it would buy from v2: a size it holds and can pay for, drawn with weights favouring small ones (SIZE_WEIGHT).
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
+// The blank map it would buy from v2: one of v2's own offers (its job's, or its spare goods, js/market.js) selling a blank map it can pay
+// for, drawn with weights favouring small ones (SIZE_WEIGHT). A villager with blank maps but no offer for them is passed by: every trade is
+// an offer the player could take too.
 function offerFor(v2, emeralds) {
-  if (Array.isArray(v2)) v2 = { inv: v2 };
   const I = BF.I, opts = [];
-  for (let k = 1; k <= PRICE_BLANK.length; k++) {
-    const id = I["blank_map_" + k];
-    if (id != null && cnt(v2, id) >= 1 && emeralds >= PRICE_BLANK[k - 1]) opts.push({ k, id, w: SIZE_WEIGHT[k - 1] });
+  for (const o of (v2 && v2.trades) || []) {
+    if (o.buy.length !== 1 || o.buy[0].id !== I.emerald || o.buy[0].n > emeralds || o.sell.n !== 1) continue;
+    const k = [1, 2, 3, 4, 5].find(n => I["blank_map_" + n] === o.sell.id);
+    if (k && cnt(v2, o.sell.id) >= 1) opts.push({ o, w: SIZE_WEIGHT[k - 1] });
   }
   if (!opts.length) return null;
-  let r = Math.random() * opts.reduce((a, o) => a + o.w, 0), o = opts[0];
-  for (const q of opts) { o = q; if ((r -= q.w) <= 0) break; }
-  return { buy: [{ id: I.emerald, n: PRICE_BLANK[o.k - 1] }], sell: { id: o.id, n: 1 }, level: 4, xp: T().TRADE_XP[3] };
+  let r = Math.random() * opts.reduce((a, q) => a + q.w, 0), pick = opts[0];
+  for (const q of opts) { pick = q; if ((r -= q.w) <= 0) break; }
+  return pick.o;
 }
 function findCartographer(m, X) {
   const R = m.village;
@@ -240,7 +242,7 @@ function deal(m, dl) {
   t.inv.add(m.inv, o.sell.id, o.sell.n);
   t.addXp(v2, o);
   if (BF.vlog) BF.vlog.trade(m, v2, o);
-  log("buy", m, { from: "cartographer", got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
+  log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
   return true;
 }
 function shopAI(m, dt, out) {
