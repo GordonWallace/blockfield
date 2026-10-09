@@ -233,6 +233,10 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
   `sell.n` of `sell.id` and, with those removed, can store all `buy` items. `exchange(v, offer)` moves the goods in the villager inventory
   (sold items out, the player's payment in; returns false if blocked), `addXp(v, offer) -> levelsGained`.
 - `restock(v, day?)` applies the daily production (wares in `PRODUCE` +25% of cap up to the cap, emeralds +2 up to 12; never diamonds etc.).
+- Prices follow demand (`BF.prices`, js/prices.js, loaded after trading.js): offers with one emerald side carry `step` (-30..30, x2^(step/30)) and `base`
+  (the table amounts); `tick(v, day)` runs with the restock (and when the trade screen opens) and is the only place amounts change; `filled(v, o, times)`
+  is called by `BF.vlog.trade` and the player's trades. Trade sites must read `o.buy` / `o.sell` amounts when they trade, not from a plan made earlier.
+  `pack` adds `pr` ({offer key: step}) and `pd` (last tick day).
 - `inv` helpers on plain `{id,count}|null` arrays: `create()`, `count(a,id)`, `add(a,id,n) -> leftover`, `remove(a,id,n) -> removed`,
   `canFit(a, adds, removes)`, `clone(a)`. `pack(v) / unpack(v, saved)` convert the persisted form (item names, not ids).
 - Trade screen (inventory.js): shows the villager inventory greyed and read-only under the offer list; unavailable offers are dimmed with an "X"
