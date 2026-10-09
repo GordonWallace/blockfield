@@ -62,10 +62,11 @@ const drops = {
 
   clear() { for (const d of drops.list.slice()) drops.remove(d); },
 
-  // -> [[id, count, x, y, z, age, wear, pickupDelay]] for the save (js/save.js)
+  // -> [[name, count, x, y, z, age, wear, pickupDelay]] for the save (js/save.js). Items are saved by name, like the
+  // inventory: filled and auto map ids are handed out fresh each session, so an id would come back as another map.
   serialize() {
     const r = v => Math.round(v * 100) / 100;
-    return drops.list.map(d => [d.id, d.count, r(d.pos.x), r(d.pos.y), r(d.pos.z), r(d.age), d.wear || 0, r(Math.max(0, d.pickupDelay - d.age))]);
+    return drops.list.map(d => [BF.items[d.id].name, d.count, r(d.pos.x), r(d.pos.y), r(d.pos.z), r(d.age), d.wear || 0, r(Math.max(0, d.pickupDelay - d.age))]);
   },
 
   // Puts saved drops back where they lay, at rest and with the age they had. Old saves have none.
@@ -73,8 +74,10 @@ const drops = {
     if (!Array.isArray(a)) return;
     for (const e of a) {
       if (!Array.isArray(e)) continue;
-      const [id, count, x, y, z, age, wear, delay] = e;
+      const [key, count, x, y, z, age, wear, delay] = e;
       if (![x, y, z].every(Number.isFinite)) continue;
+      // old saves stored the numeric id: fine for fixed items, but a map's id meant whichever map got it that session
+      const id = typeof key === "string" ? BF.resolveItem(key) : key < BF.ITEM_BASE + 0x10000 ? key : undefined;
       const d = drops.spawn(id, count, x, y, z, { vel: new THREE.Vector3(0, 0, 0), pickupDelay: 0, wear: wear || 0 });
       if (!d) continue;
       d.age = Math.max(0, +age || 0);
