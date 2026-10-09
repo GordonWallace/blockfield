@@ -1,4 +1,5 @@
-# Baseline tests: a quick smoke set (about 5 min, split over 6 runners at once) on every pull request into a release branch (and into main), plus the
+# Baseline tests: a quick smoke set (split over parts of about 4 min that run at once,
+# 2 to 20 runners) on every pull request into a release branch (and into main), plus the
 # suites (game areas) the pull request turns on with a line in its description, e.g. `CI suites: jobs, ui` (or `all`). A suite's
 # long tests run only when `soak` is on the line too (`CI suites: village, soak`); `all` includes them.
 # Editing that line re-runs the check. Tiers, suites and timeouts are in test/ci.json; the runner is test/ci.js.
@@ -20,12 +21,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # how many runners this run needs (test/ci.js CI_PLAN: parts of about 4 minutes, from the test times in test/ci-times.json)
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      parts: ${{ steps.plan.outputs.parts }}
+      n: ${{ steps.plan.outputs.n }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - id: plan
+        env:
+          CI_PLAN: 1
+          PR_BODY: ${{ github.event.pull_request.body }}
+          CI_SUITES: ${{ inputs.suites }}
+        run: node test/ci.js baseline
   baseline-part:
-    name: baseline part ${{ matrix.part }} of 6
+    needs: plan
+    name: baseline part ${{ matrix.part }} of ${{ needs.plan.outputs.n }}
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5, 6]
+        part: ${{ fromJSON(needs.plan.outputs.parts) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -43,7 +62,7 @@ jobs:
           playwright install chromium
       - name: Run baseline tests
         env:
-          CI_SHARD: ${{ matrix.part }}/6
+          CI_SHARD: ${{ matrix.part }}/${{ needs.plan.outputs.n }}
           PR_BODY: ${{ github.event.pull_request.body }}
           CI_SUITES: ${{ inputs.suites }}
         run: NODE_PATH=$(npm root -g) node test/ci.js baseline ci-out
