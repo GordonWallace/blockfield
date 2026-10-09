@@ -15,7 +15,6 @@ const EYE = 1.62;
 const BUILD_END = 0.47;           // sky time after which builders stop and go home (bedtime at sunset 0.5)
 const SITE_RANGE = 40;            // sites up to this far outside the village's bounding box
 const SITE_TRIES = 150, SITE_EVALS = 40, MAX_FILL = 2, MAX_SLOPE = 2;
-const MAX_BUILT = 14;             // structures per village
 const RECHECK = [30, 60];         // seconds between material re-checks while waiting for the player
 const TRADE_PAUSE = 2.0;          // seconds the builder stands with a seller before the goods change hands
 const FILL_SPARE = 8;             // foundation blocks reserved on top of a blueprint's own requirement
@@ -327,24 +326,18 @@ function stableWeight(R, has) {
   const pop = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length;
   return has ? 0.02 : pop >= 10 ? 2.5 : 0.15;
 }
-function soldItems(R) {
-  const s = new Set();
-  for (const o of R.members) if (o.type === "villager" && !o.dead && !o.removed && o.profession !== "builder" && o.trades && o.inv) for (const t of offersOf(o)) s.add(t.sell.id);
-  return s;
-}
-function pickType(m, bs) {
+// The weight of each type the builder may pick now: [[type, weight]].
+function weighTypes(m, bs) {
   const R = m.village, built = builtOf(R), BPr = BP(), style = styleIdx(R.style);
   const cnt = t => built.filter(e => e.type === t && e.state !== "abandoned").length;
   const homeless = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed && !(x.bed && !x.bed.tent ? x.bed : x.homeBed)).length;   // a camping explorer with no bed at home is homeless too
-  // a village with no spare bed cannot grow (js/breeding.js needs one free bed per birth): want houses as if two villagers had none
+  // a village with no spare bed cannot grow (js/breeding.js needs one free bed per birth): its bed structures are as likely as the likeliest other one
   const Br = BF.breeding, full = !!(Br && R.roster && Br.bedCount(R) - Br.villagerCount(R) < 1);
-  const short = homeless + (full ? 2 : 0);
   const found = BF.worldgen.palette(style).found;
-  if (built.length === 0 && !(bs.fail && bs.fail.small_house > dayNow())) return "small_house";
   const wt = {
-    small_house: cnt("small_house") + cnt("medium_house") + cnt("cottage") >= 8 ? 0.3 : 1 + 1.6 * Math.min(short, 3),
-    medium_house: 0.4 + (short >= 2 ? 1.2 : 0),
-    cottage: 0.3 + (short >= 1 ? 0.6 : 0),
+    small_house: cnt("small_house") + cnt("medium_house") + cnt("cottage") >= 8 ? 0.3 : 1,
+    medium_house: 0.4,
+    cottage: 0.3,
     well: cnt("well") === 0 ? 1.2 : 0.15,
     lamp_posts: cnt("lamp_posts") < 2 ? 1.0 : 0.2,
     garden: cnt("garden") < 2 ? 0.8 : 0.2,
@@ -361,8 +354,16 @@ function pickType(m, bs) {
     bakehouse: (R.wg && (R.wg.jobsites || []).some(j => j.prof === "baker")) || cnt("bakehouse") > 0 || R.members.some(x => x.profession === "baker" && !x.dead) ? 0.02
       : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 15 ? 1.5 : 0.05,
   };
-  const sold = soldItems(R), stock = sellerStock(R);
-  let sum = 0;
+  const BEDS = ["small_house", "medium_house", "cottage"];
+  if (full) {   // with every bed claimed they rise to the weight of the likeliest other type
+    let top = 0;
+    for (const t in wt) if (!BEDS.includes(t) && !(bs.fail && bs.fail[t] > dayNow())) top = Math.max(top, wt[t]);
+    for (const t of BEDS) wt[t] = Math.max(wt[t], top);
+  }
+  wt.small_house += 1.6 * Math.min(homeless, 3);      // and each villager with no bed makes them likelier still
+  wt.medium_house += homeless >= 2 ? 1.2 : 0;
+  wt.cottage += homeless >= 1 ? 0.6 : 0;
+  const stock = sellerStock(R);
   const ws = [];
   for (const t of BPr.TYPES) {
     if (bs.fail && bs.fail[t] > dayNow()) continue;
@@ -372,12 +373,20 @@ function pickType(m, bs) {
     const bp = BPr.get(t, 0, style, 0.5, opts, wood);
     const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
     const a = analyze(m.inv, req, wood);
-    const buyable = Object.keys(a.shortfall).every(k => sold.has(+k));
+    const buyable = Object.keys(a.shortfall).every(k => stock[k] > 0);   // some villager has it to sell right now
     const mult = a.ok ? 3 : buyable ? 1.2 : 0.25;
     const x = (wt[t] || 0.3) * mult;
-    ws.push([t, x]); sum += x;
+    ws.push([t, x]);
   }
+  return ws;
+}
+function pickType(m, bs) {
+  const R = m.village;
+  if (builtOf(R).length === 0 && !(bs.fail && bs.fail.small_house > dayNow())) return "small_house";
+  const ws = weighTypes(m, bs);
   if (!ws.length) return null;
+  let sum = 0;
+  for (const w of ws) sum += w[1];
   let r = Math.random() * sum;
   for (const [t, x] of ws) if ((r -= x) <= 0) return t;
   return ws[ws.length - 1][0];
@@ -437,7 +446,7 @@ function startBuild(m, bs, e) {
 // The structure it will build after this one: {type, wood, req} with the requirement as think() counts it.
 function pickNext(m, bs) {
   const R = m.village;
-  if (!R || !R.wg || builtOf(R).filter(e => e.state !== "abandoned").length + 1 >= MAX_BUILT) return null;
+  if (!R || !R.wg) return null;
   const type = pickType(m, bs);
   if (!type) return null;
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
@@ -476,7 +485,7 @@ function think(m, bs) {
     }
     return;
   }
-  if (bs.cool > 0 || built.filter(e => e.state !== "abandoned").length >= MAX_BUILT) return;
+  if (bs.cool > 0) return;
   if (!R.wg) return;
   const nx = bs.next; bs.next = null;   // chosen when it started the last one
   const type = nx && !(bs.fail[nx.type] > dayNow()) ? nx.type : pickType(m, bs);
@@ -962,9 +971,9 @@ function onSpawn(m, rec, saved) {
 }
 
 BF.builder = {
-  BLOCK_T, REACH, BUILD_END, SITE_RANGE, MAX_BUILT, log, pending,
+  BLOCK_T, REACH, BUILD_END, SITE_RANGE, log, pending,
   ai, tick, statusText, startStock, exportAll, importAll, onSpawn, builtOf,
-  analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome, reserve, shortfall, pickNext,
+  analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, weighTypes, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome, reserve, shortfall, pickNext,
   reset() { pending.clear(); log.length = 0; for (const p of pool) BF.scene.remove(p.mesh); pool.length = 0; },
 };
 })();
