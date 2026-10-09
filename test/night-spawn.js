@@ -67,11 +67,14 @@ module.exports = async (pg, out) => {
     for (const m of M.list.slice()) if (m.hostile) m.dead = true;
     const surf = () => M.list.filter(m => m.hostile && !m.dead && !m.removed && m.position.y >= BF.world.heightAt(m.position.x, m.position.z) + 0.5);
     const seen = new Set(M.list.filter(m => m.hostile));
+    // only monsters that spawned on the surface: one that spawned in a dark cave may walk out into the open at any time
+    const born = new Map(), onTop = m => m.position.y >= BF.world.heightAt(m.position.x, m.position.z) + 0.5;
     let firstAt = null, dt = 0.05, counts = {};
     S.day = 9; S.time = 0.5;
     for (let i = 0; S.time < 0.62; i++) {
       S.time += dt / S.dayLength; M.update(dt);
-      const s = surf().filter(m => !seen.has(m));
+      for (const m of M.list) if (m.hostile && !seen.has(m) && !born.has(m)) born.set(m, onTop(m));
+      const s = surf().filter(m => !seen.has(m) && born.get(m));
       if (s.length && firstAt == null) firstAt = +S.time.toFixed(4);
       const k = (Math.floor(S.time * 100) / 100).toFixed(2); counts[k] = s.length;
       if (i % 500 === 0) await new Promise(r => setTimeout(r, 0));
