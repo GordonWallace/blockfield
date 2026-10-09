@@ -481,6 +481,8 @@ function seekAI(m, dt, out, nav) {
   ai.mode = "idle"; ai.t = 2;
   return true;
 }
+// A cell to stand in to work at jobsite s: beside it (not on it), at most a block up or down.
+const atSite = (s, cx, cy, cz) => Math.abs(cx - s.x) + Math.abs(cz - s.z) === 1 && Math.abs(cy - s.y) <= 1;
 // Daytime work: now and then walk to the jobsite (A*) and stand at it for a while. Returns true while it steers.
 function ai(m, dt, out) {
   const s = m.jobsite, nav = BF.mobs && BF.mobs.nav;
@@ -499,8 +501,7 @@ function ai(m, dt, out) {
     if (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 40 || !BF.world.isLoaded(s.x, s.z)) { J.t = rnd(20, 40); return false; }
     if (!nav.takePlan()) { J.t = 0.3; return false; }
     const [x, y, z] = nav.feetCell(m);
-    const at = (cx, cy, cz) => Math.abs(cx - s.x) + Math.abs(cz - s.z) === 1 && Math.abs(cy - s.y) <= 1;
-    const route = at(x, y, z) ? [] : nav.findPath(x, y, z, { x: s.x, z: s.z, at }, 2500);
+    const route = atSite(s, x, y, z) ? [] : nav.findPath(x, y, z, { x: s.x, z: s.z, at: (cx, cy, cz) => atSite(s, cx, cy, cz) }, 2500);
     if (!route) { J.t = rnd(40, 90); return false; }
     m.ai.route = route; m.ai.ri = 0; m.ai.stuckT = 0; J.mode = "go";
   }
@@ -509,6 +510,9 @@ function ai(m, dt, out) {
     if (r === "going") return true;
     m.ai.route = null;
     if (r === "stuck") { J.mode = "off"; J.t = rnd(30, 60); return false; }
+    // "done" also when another task took the route over and dropped it (a shepherd leaving its pen): only work once beside the site,
+    // else it stood "working" wherever it was, e.g. in the pen gate, holding it open
+    if (!atSite(s, ...nav.feetCell(m))) { J.mode = "off"; J.t = rnd(1, 3); return false; }
     J.mode = "work"; J.t = rnd(8, 20);
   }
   if (J.mode === "work") {
