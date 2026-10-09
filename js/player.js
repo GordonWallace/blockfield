@@ -1973,7 +1973,7 @@ P.update = function (dt) {
       const bed = !vehicle && bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);
       bedRespawn = null;
       if (bed) pos.set(bed[0], bed[1], bed[2]);
-      else if (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
+      else if (pos.y < BF.MIN_Y || (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT))) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }
