@@ -56,7 +56,7 @@ function builtOf(rec) {
 // exactly, and nothing stands in for them, so a spruce house never ends up with oak boards in it.
 const have0 = (inv, id) => TR().inv.count(inv, id);
 // Crafts for a structure in species `wood`: fences of that wood, and the oak door, crafting table and chest, all from that wood's planks;
-// the planks from that wood's logs (analyze). Furnaces from cobblestone.
+// the planks from that wood's logs (analyze). Furnaces from cobblestone. Torches from coal and sticks, the sticks from that wood's planks.
 function craftTable(wood) {
   const I = BF.I, t = {}, P = BP().woodItem(wood, "planks"), F = BP().woodItem(wood, "fence");
   t[I.oak_door] = { n: 3, from: [[P, 6]] };
@@ -64,6 +64,10 @@ function craftTable(wood) {
   t[I.crafting_table] = { n: 1, from: [[P, 4]] };
   t[I.chest] = { n: 1, from: [[P, 8]] };
   t[I.furnace] = { n: 1, from: [[I.cobblestone, 8]] };
+  if (I.torch != null && I.coal != null && I.stick != null) {
+    t[I.torch] = { n: 4, from: [[I.coal, 1], [I.stick, 1]] };   // the coal is bought from whoever sells it
+    t[I.stick] = { n: 4, from: [[P, 2]] };
+  }
   const G = BP().woodItem(wood, "fence_gate");
   if (G != null) t[G] = { n: 1, from: [[P, 4]] };                                        // 4 sticks (2 planks) + 2 planks: the stable's paddock gate
   if (I.merchant_counter != null) t[I.merchant_counter] = { n: 1, from: [[P, 12]] };   // the market stall's jobsite: 3 slabs, 2 planks and a chest (recipes-jobs.js)
@@ -82,7 +86,7 @@ function analyze(inv, req, wood) {
   const need = {}, gain = {}, crafts = [];
   for (const k in req) need[k] = req[k];
   const have = id => have0(inv, id) + (gain[id] || 0);
-  for (const k in T) {
+  for (const k of Object.keys(T).sort((a, b) => (+a === BF.I.stick) - (+b === BF.I.stick))) {   // sticks last: torches add to their need
     const id = +k, def = T[k];
     if (!need[id]) continue;
     const deficit = need[id] - have(id);
@@ -140,13 +144,20 @@ function chooseWood(m, type, style, opts, stock) {
 }
 function removeItems(inv, id, n) { return TR().inv.remove(inv, id, n) || 0; }
 function applyCrafts(m, crafts) {
-  const T = TR().inv;
-  for (const c of crafts) for (let k = 0; k < c.times; k++) {
-    if (!c.from.every(([ing, q]) => have0(m.inv, ing) >= q)) break;
-    const trial = T.clone(m.inv);
-    for (const [ing, q] of c.from) removeItems(trial, ing, q);
-    if (T.add(trial, c.id, c.n) > 0) break;                         // no room
-    for (let i = 0; i < m.inv.length; i++) m.inv[i] = trial[i];
+  const T = TR().inv, done = crafts.map(() => 0);
+  for (let pass = 0; pass < 3; pass++) {                             // again: a craft can wait on another's output (planks -> sticks -> torches)
+    let any = false;
+    crafts.forEach((c, j) => {
+      for (; done[j] < c.times; done[j]++) {
+        if (!c.from.every(([ing, q]) => have0(m.inv, ing) >= q)) break;
+        const trial = T.clone(m.inv);
+        for (const [ing, q] of c.from) removeItems(trial, ing, q);
+        if (T.add(trial, c.id, c.n) > 0) break;                     // no room
+        for (let i = 0; i < m.inv.length; i++) m.inv[i] = trial[i];
+        any = true;
+      }
+    });
+    if (!any) break;
   }
 }
 const reqText = short => Object.keys(short).slice(0, 2).map(k => short[k] + " " + BF.itemName(+k)).join(", ");
@@ -324,12 +335,15 @@ function pickType(m, bs) {
   const R = m.village, built = builtOf(R), BPr = BP(), style = styleIdx(R.style);
   const cnt = t => built.filter(e => e.type === t && e.state !== "abandoned").length;
   const homeless = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed && !(x.bed && !x.bed.tent ? x.bed : x.homeBed)).length;   // a camping explorer with no bed at home is homeless too
+  // a village with no spare bed cannot grow (js/breeding.js needs one free bed per birth): want houses as if two villagers had none
+  const Br = BF.breeding, full = !!(Br && R.roster && Br.bedCount(R) - Br.villagerCount(R) < 1);
+  const short = homeless + (full ? 2 : 0);
   const found = BF.worldgen.palette(style).found;
   if (built.length === 0 && !(bs.fail && bs.fail.small_house > dayNow())) return "small_house";
   const wt = {
-    small_house: cnt("small_house") + cnt("medium_house") + cnt("cottage") >= 8 ? 0.3 : 1 + 1.6 * Math.min(homeless, 3),
-    medium_house: 0.4 + (homeless >= 2 ? 1.2 : 0),
-    cottage: 0.3 + (homeless >= 1 ? 0.6 : 0),
+    small_house: cnt("small_house") + cnt("medium_house") + cnt("cottage") >= 8 ? 0.3 : 1 + 1.6 * Math.min(short, 3),
+    medium_house: 0.4 + (short >= 2 ? 1.2 : 0),
+    cottage: 0.3 + (short >= 1 ? 0.6 : 0),
     well: cnt("well") === 0 ? 1.2 : 0.15,
     lamp_posts: cnt("lamp_posts") < 2 ? 1.0 : 0.2,
     garden: cnt("garden") < 2 ? 0.8 : 0.2,
