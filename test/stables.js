@@ -160,7 +160,7 @@ module.exports = async (pg) => {
     // which js/stables.js function the call came from (builder.js has a doDeal of its own)
     const ctx = () => { const s = (new Error().stack || "").split("\n").filter(l => /stables\.js/.test(l) && !/test\//.test(l)).join("\n");
       return /doDeal/.test(s) ? "deal" : /craftOne/.test(s) ? "craft" : /taskStep/.test(s) ? "task" : /handOver|playerSells/.test(s) ? "player" : "other"; };
-    const oAdd = T.add, oRem = T.remove;
+    const oAdd = T.add, oTake = T.take;   // remove() and a villager's sale (trading.js exchange) both take through T.take
     T.add = function (inv, id, n) {
       const name = TRACK.get(id), r = oAdd.apply(this, arguments);
       if (name && n > 0) {
@@ -175,15 +175,16 @@ module.exports = async (pg) => {
       }
       return r;
     };
-    T.remove = function (inv, id, n) {
-      const name = TRACK.get(id), r = oRem.apply(this, arguments);
+    T.take = function (inv, id, n) {
+      const name = TRACK.get(id), got = oTake.apply(this, arguments);
+      let r = 0; for (const s of got) r += s.count;
       if (name && r > 0) {
         const c = ctx();
         if (inv !== hand.inv && c === "deal" && BF.mobs.list.some(m => m.inv === inv)) L.dealOut[name] = (L.dealOut[name] || 0) + r;
         if (inv === hand.inv && c === "craft") L.craftUsed[name] = (L.craftUsed[name] || 0) + r;
         if (inv === hand.inv && c === "task") L.fedOut[name] = (L.fedOut[name] || 0) + r;
       }
-      return r;
+      return got;
     };
     BF.on("horseFed", (m, by) => { if (by === hand) L.fed++; });
     BF.on("horseBred", (foal) => { L.bred++; L.bredOwners.push(foal.horse.owner); });

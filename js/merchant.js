@@ -154,9 +154,10 @@ function buyFrom(m, v2, o, want) {
   let done = 0;
   while ((done + 1) * o.sell.n <= want || (!done && want > 0 && o.sell.n <= stackOf(o.sell.id))) {   // whole lots up to what it wants (at least one)
     if (cnt(m, e) < o.buy[0].n || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    if (!Tr.exchange(v2, o)) break;                 // its stock above its reserve, its room
+    const sold = Tr.exchange(v2, o);                 // its stock above its reserve, its room
+    if (!sold) break;
     Tr.inv.remove(m.inv, e, o.buy[0].n);
-    Tr.inv.add(m.inv, o.sell.id, o.sell.n);
+    Tr.inv.addStacks(m.inv, sold);
     Tr.addXp(v2, o);
     done++;
   }
@@ -169,9 +170,10 @@ function sellTo(m, v2, o, max) {
   let done = 0;
   while ((done + 1) * o.buy[0].n <= max && cnt(m, id) >= o.buy[0].n) {
     if (!Tr.inv.canFit(m.inv, [o.sell], o.buy)) break;
-    if (!Tr.exchange(v2, o)) break;                 // its emeralds, its room
+    const sold = Tr.exchange(v2, o);                 // its emeralds, its room
+    if (!sold) break;
     Tr.inv.remove(m.inv, id, o.buy[0].n);
-    Tr.inv.add(m.inv, o.sell.id, o.sell.n);
+    Tr.inv.addStacks(m.inv, sold);
     Tr.addXp(v2, o);
     done++;
   }

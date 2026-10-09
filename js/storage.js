@@ -255,9 +255,13 @@ function doStore(m, p) {
   if (!usable(p, k)) return false;
   const plan = storePlan(m, c.slots), done = [], now = dayNow();
   for (const e of plan) {
-    const got = TR().inv.remove(m.inv, e.id, e.n);
-    const left = INV().chestAdd(p.x, p.y, p.z, e.id, got);
-    if (left) TR().inv.add(m.inv, e.id, left);
+    let got = 0, left = 0;
+    for (const s of TR().inv.take(m.inv, e.id, e.n)) {   // a worn tool keeps its wear in the chest
+      got += s.count;
+      const l = INV().chestAdd(p.x, p.y, p.z, s.id, s.count, s.wear);
+      if (l) TR().inv.add(m.inv, s.id, l, s.wear);
+      left += l;
+    }
     if (got - left > 0) { done.push({ id: e.id, n: got - left }); (st.stored || (st.stored = {}))[e.id] = now; }
   }
   if (!done.length) return false;
@@ -270,10 +274,14 @@ function doTake(m, p) {
   if (!c || !usable(p, k)) return false;
   const done = [];
   for (const e of withdrawPlan(m, c)) {
-    const got = INV().chestTake(p.x, p.y, p.z, e.id, e.n);
+    let got = 0, left = 0;
+    for (const s of INV().chestTakeStacks(p.x, p.y, p.z, e.id, e.n)) {
+      got += s.count;
+      const l = TR().inv.add(m.inv, s.id, s.count, s.wear);
+      if (l) INV().chestAdd(p.x, p.y, p.z, s.id, l, s.wear);
+      left += l;
+    }
     if (!got) continue;
-    const left = TR().inv.add(m.inv, e.id, got);
-    if (left) INV().chestAdd(p.x, p.y, p.z, e.id, left);
     if (got - left > 0) done.push({ id: e.id, n: got - left });
   }
   if (!done.length) return false;

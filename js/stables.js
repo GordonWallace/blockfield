@@ -159,9 +159,10 @@ function doDeal(m, deal) {
   for (let i = 0; i < deal.times; i++) {
     if (!BF.villageLife.canSell(v2) || cnt(v2, o.sell.id) - o.sell.n < deal.keep || cnt(m, em) < o.buy[0].n) break;
     if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    if (!T.exchange(v2, o)) break;                    // the seller's stock and room, as for a player trade
+    const sold = T.exchange(v2, o);                    // the seller's stock and room, as for a player trade
+    if (!sold) break;
     T.inv.remove(m.inv, em, o.buy[0].n);
-    T.inv.add(m.inv, o.sell.id, o.sell.n);
+    T.inv.addStacks(m.inv, sold);
     T.addXp(v2, o);
     done++;
   }
