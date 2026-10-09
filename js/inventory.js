@@ -302,10 +302,14 @@ function chestUsed(c, owner, name, mob) {
   c.sig = chestSig(c);
   c.emptySince = c.owner && chestEmpty(c) ? (c.emptySince != null ? c.emptySince : dayNow()) : null;
   if (c.owner || !owner) return false;
+  const r = reservedFor(c);
+  if (r && r.key !== owner) return false;   // paid for by a villager (bug-037): stays theirs to claim
   c.owner = owner; c.ownerName = name || ""; c.emptySince = chestEmpty(c) ? dayNow() : null; c.reserved = null;
   BF.emit && BF.emit("chestClaimed", c, mob || null);
   return true;
 }
+// A furniture maker just delivered this unowned chest to the villager who paid for it: {key, until, name} until that runs out, else null.
+const reservedFor = c => (c && !c.owner && c.reserved && c.reserved.until > dayNow() ? c.reserved : null);
 // The chest is free again (why: "empty" | "owner died" | ...).
 function chestRelease(c, why) {
   if (!c || !c.owner) return false;
@@ -315,8 +319,8 @@ function chestRelease(c, why) {
   if (open_ && chest === c) layoutFor(mode);
   return true;
 }
-// Survival: the chest on screen belongs to someone else, so it can be looked at but not changed.
-const chestLocked = () => mode === "chest" && !!chest && !!chest.owner && chest.owner !== "player" && !isCreative();
+// Survival: the chest on screen belongs to someone else (or was just paid for by a villager), so it can be looked at but not changed.
+const chestLocked = () => mode === "chest" && !!chest && ((!!chest.owner && chest.owner !== "player") || !!reservedFor(chest)) && !isCreative();
 // After every player action on the chest screen: did the contents change? (claims an unowned chest for the player)
 function chestCheck() {
   if (!open_ || mode !== "chest" || !chest) return;
@@ -326,6 +330,8 @@ function chestCheck() {
 }
 // Who owns the chest, as shown on its screen.
 function ownerLabel(c) {
+  const r = reservedFor(c);
+  if (r) return "Reserved for " + (r.name || "a villager");
   if (!c || !c.owner) return "Unclaimed";
   if (c.owner === "player") return "Yours";
   let job = "";
@@ -1571,8 +1577,9 @@ const api = {
       furnaces: [...furnaces.values()].filter(f => f.pos).map(f => ({
         pos: [f.pos.x, f.pos.y, f.pos.z], slots: f.slots.map(toSave), burn: f.burn, burnMax: f.burnMax, cook: f.cook,
       })),
-      chests: [...chests.values()].filter(c => c.slots.some(Boolean) || c.owner).map(c => ({ pos: [c.pos.x, c.pos.y, c.pos.z], slots: c.slots.map(toSave),
-        owner: c.owner || undefined, on: c.owner ? c.ownerName : undefined, es: c.emptySince != null ? +c.emptySince.toFixed(4) : undefined })),
+      chests: [...chests.values()].filter(c => c.slots.some(Boolean) || c.owner || reservedFor(c)).map(c => ({ pos: [c.pos.x, c.pos.y, c.pos.z], slots: c.slots.map(toSave),
+        owner: c.owner || undefined, on: c.owner ? c.ownerName : undefined, es: c.emptySince != null ? +c.emptySince.toFixed(4) : undefined,
+        rs: reservedFor(c) ? { k: c.reserved.key, u: +c.reserved.until.toFixed(4), n: c.reserved.name || "" } : undefined })),
     };
   },
   deserialize(o) {
@@ -1593,6 +1600,7 @@ const api = {
       const c = chestAt({ x: cs.pos[0], y: cs.pos[1], z: cs.pos[2] });
       for (let k = 0; k < CHEST_SIZE; k++) c.slots[k] = fromSave(cs.slots && cs.slots[k]);
       if (typeof cs.owner === "string" && cs.owner) { c.owner = cs.owner; c.ownerName = typeof cs.on === "string" ? cs.on : ""; c.emptySince = Number.isFinite(cs.es) ? cs.es : null; }
+      else if (cs.rs && typeof cs.rs.k === "string" && Number.isFinite(cs.rs.u)) c.reserved = { key: cs.rs.k, until: cs.rs.u, name: typeof cs.rs.n === "string" ? cs.rs.n : "" };
     }
     if (Array.isArray(o.held)) for (const h of o.held) {
       const st = fromSave(h);
