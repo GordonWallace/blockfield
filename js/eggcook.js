@@ -40,7 +40,8 @@ const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.t
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Villager") + " (" + pretty(m.profession) + ") " + text); };   // place: the "at x,y,z" in the text
 
 // ---------------------------------------------------------------- what it cooks, with what
-const sellsEggs = m => (m.trades || []).some(o => o && o.sell && o.sell.id === EGG());
+// Its job sells eggs (a market spare-goods offer for eggs it holds does not count: it would eat or cook them first).
+const sellsEggs = m => (m.trades || []).some(o => o && !o.spare && o.sell && o.sell.id === EGG());
 // Raw eggs it would cook now: all of them, or for an egg seller only what it needs to eat while hungry.
 function toCook(m) {
   const n = count(m, EGG());
