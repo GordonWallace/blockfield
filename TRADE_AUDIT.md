@@ -146,6 +146,17 @@ Dropped (not replaced) because no equivalent exists: iron/diamond armor (iron_he
 | milk_bucket | 1.75 | A bucket (1.6) + milk; food 6; not traded (the cowherd bottles it) |
 | milk_churn | 0.62 | 4 planks + 1 iron ingot (the cowherd's jobsite) |
 
+### Baking (js/baker.js)
+
+| Item | Value | Basis |
+|---|---:|---|
+| sugar | 0.05 | 1 sugar cane (0.04) + work |
+| pumpkin_seeds | 0.035 | A quarter of a pumpkin (0.14) |
+| pumpkin_pie | 0.3 | Pumpkin 0.14 + sugar 0.05 + egg 0.055 + baking; food 8 (1.6 bread-eq) |
+| cake | 1.0 | 3 milk (0.45, of which the bottles 0.3 come back) + 2 sugar 0.1 + egg 0.055 + 3 wheat 0.21 + fuel and work |
+| cake_slice | 0.14 | A seventh of a cake; food 2 (0.4 bread-eq) |
+| bakers_oven | 0.75 | 8 cobblestone (0.24) + 1 iron ingot (0.5) (the baker's jobsite) |
+
 ### Paper goods
 
 | Item | Value | Basis |
@@ -407,6 +418,27 @@ is the only way bottles enter a village.
   or spare milk at the same price); the cowherd keeps 3 bottles back.
 - **No round trip.** Leather 0.125 (butcher, leatherworker pay) < 0.143 (cowherd charges); raw beef 0.071 < 0.083; steak 0.106 (feed offers) < 0.125;
   glass bottles 0.083 (cowherd pays) < 0.111 (villagers charge). It never sells its last bucket.
+
+### baker
+
+New profession (see CONTRACT.md "Bakers"). It sells what it bakes in its oven from ingredients it bought in the village; nothing is restocked
+(`PRODUCE.baker = []`) and none of its wares are in its starting pack. Its ingredients are its reserve (never sold); its empty bottles are spare goods.
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 1 emerald > 7 cake_slice | 1.00 | 0.98 | 0.98 | buy from villager |
+| 1 | 1 emerald > 3 pumpkin_pie | 1.00 | 0.90 | 0.90 | buy from villager |
+| 1 | 20 egg > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
+| 1 | 16 wheat_item > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+| 2 | 1 emerald > 1 cake | 1.00 | 1.00 | 1.00 | buy from villager |
+| 2 | 8 pumpkin > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+
+- **Treats.** Villagers buy a slice offer or a pie offer at most every 3 days (2 emeralds in hand, none held); hunger buys bread first. A slice costs 0.143 an item
+  (0.36 an emerald per bread-eq), a pie 0.333 (0.21 per bread-eq), bread 0.25: pies are the cheaper food per bread-eq but are eaten as treats (one a day at most).
+- **Ingredients** are bought at the sellers' own offers: milk bottles at the cowherd's `1 emerald > 7 milk_bottle`, eggs at the poultry keeper's, wheat, cane and
+  pumpkins as farmers' spare goods (cane 24 for 1 emerald, VALUE x 1.05, small lots from 12; pumpkins 7 for 1, small lots from 4).
+- **No round trip.** Eggs 0.05 (baker pays) < 0.055+ (sellers charge); wheat 0.0625 < 0.071; pumpkins 0.125 < 0.147; a cake's ingredients (about 0.9 at sellers' prices, less 0.25
+  for the 3 empties sold back) stay under the 1.0 of 7 slices or a whole cake.
 
 ### cartographer
 

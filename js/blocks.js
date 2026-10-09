@@ -129,7 +129,7 @@ const BLOCK_DEFS = [
   { name: "cornflower", tiles: "cornflower", render: "cross", solid: false, opaque: false, hardness: 0, color: "#4a6ed8" },
   { name: "red_mushroom", tiles: "red_mushroom", render: "cross", solid: false, opaque: false, hardness: 0, color: "#c8302a" },
   { name: "brown_mushroom", tiles: "brown_mushroom", render: "cross", solid: false, opaque: false, hardness: 0, color: "#9a7050" },
-  { name: "sugar_cane", tiles: "sugar_cane", render: "cross", solid: false, opaque: false, hardness: 0, color: "#8ac85a" },
+  { name: "sugar_cane", tiles: "sugar_cane", render: "cross", solid: false, opaque: false, hardness: 0, growsUp: 3, color: "#8ac85a" },   // growsUp: placed cane beside water grows to 3 tall (world.js growTick, js/baker.js)
   // new biome blocks
   { name: "red_sand", tiles: "red_sand", hardness: 0.5, tool: "shovel", color: "#b8622a" },
   { name: "terracotta", tiles: "terracotta", hardness: 1.25, tool: "pickaxe", needsTool: true, color: "#9a5a40" },
@@ -323,6 +323,18 @@ const BLOCK_DEFS = [
   { name: "milk_churn", jobsite: "cowherd", tiles: { top: "milk_churn_top", side: "milk_churn_side", bottom: "milk_churn_bottom" }, hardness: 2.5, tool: "axe", creativeTab: "functional",
     render: "model", model: "shape", opaque: false, boxes: [[3, 0, 3, 13, 13, 13], [4, 13, 4, 12, 14, 12, "milk_churn_top"], [7, 14, 7, 9, 16, 9, "milk_churn_bottom"]], box: [3, 0, 3, 13, 16, 13], color: "#a8824e" },
   // ---- end cowherd pack ----
+  // ---- baker pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Bakers")
+  // baker's oven: the baker villager's jobsite (not vanilla): a domed brick oven on a stone base with an arched mouth. It bakes like a furnace
+  // (fuel and a cooking slot, js/baker.js), but only the baker uses it; the player gets its state on a right click.
+  { name: "bakers_oven", jobsite: "baker", tiles: { top: "bakers_oven_top", side: "bakers_oven_side", front: "bakers_oven_front", bottom: "bakers_oven_bottom" }, hardness: 3.5, tool: "pickaxe", needsTool: true, creativeTab: "functional", color: "#a0523a" },
+  // pumpkin stem: planted from pumpkin seeds on farmland, grows into a pumpkin where it stands (a simplification of vanilla's fruit beside the stem)
+  { name: "pumpkin_stem", tiles: "pumpkin_stem", render: "cross", solid: false, opaque: false, hardness: 0, drop: "pumpkin_seeds", growsInto: "pumpkin", fruit: true, color: "#6a9a3a" },
+  // cake (vanilla): placed whole, eaten a slice at a time with a right click (js/baker.js); 7 slices, then it is gone. Breaking it drops nothing.
+  { name: "cake", tiles: { top: "cake_top", side: "cake_side", bottom: "cake_bottom" }, render: "model", model: "shape", opaque: false, hardness: 0.5, drop: null, stack: 1,
+    boxes: [[1, 0, 1, 15, 8, 15]], box: [1, 0, 1, 15, 8, 15], creativeTab: "food", color: "#f4ece0" },
+  ...[1, 2, 3, 4, 5, 6].map(k => ({ name: "cake_bitten_" + k, tiles: { top: "cake_top", side: "cake_side", bottom: "cake_bottom" }, render: "model", model: "shape", opaque: false,
+    hardness: 0.5, drop: null, hidden: true, item: "cake", cakeBites: k, boxes: [[1 + 2 * k, 0, 1, 15, 8, 15]], box: [1 + 2 * k, 0, 1, 15, 8, 15], color: "#f4ece0" })),
+  // ---- end baker pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -628,6 +640,12 @@ const ITEM_DEFS = [
   { name: "glass_bottle", color: "#c8dce4" },                                                     // vanilla: 3 glass in a V -> 3 bottles
   { name: "milk_bottle", stack: 16, food: 2, container: "glass_bottle", color: "#f6f4ec" },       // not vanilla: 1 milk bucket + 3 glass bottles -> 3 (the bucket comes back)
   // ---- end cowherd items ----
+  // ---- baker items (js/baker.js; append-only)
+  { name: "sugar", color: "#f4f4f0" },                                                            // vanilla: 1 sugar cane -> 1 sugar
+  { name: "pumpkin_seeds", plants: "pumpkin_stem", color: "#e8dca0" },                            // vanilla: 1 pumpkin -> 4 seeds; planted on farmland
+  { name: "pumpkin_pie", food: 8, color: "#d88a3a" },                                             // vanilla: pumpkin + sugar + egg, shapeless
+  { name: "cake_slice", food: 2, color: "#f4ece0" },                                              // not vanilla: what the baker cuts a cake into (7) and sells; a slice of a placed cake gives the same
+  // ---- end baker items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

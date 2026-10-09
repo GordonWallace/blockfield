@@ -131,7 +131,10 @@ let GEN = 1, SC = 1;
 // 3 = as 2, with at least 4 villagers (a miner, a farmer, a forester and a toolsmith, js/mobs.js villageRoster) and a garden with trees in desert villages.
 // 4 = as 3, and a village of 8 or more villagers has a poultry keeper with a chicken coop (js/poultry.js). Worlds saved with 3 keep 3: no coops appear in them.
 // 5 = as 4, and a village of 10 or more villagers on grass has a cowherd with a fenced pasture (js/cowherd.js). Worlds saved with 4 keep 4: no pastures appear in them.
+// 6 = as 5, and a village of 15 or more villagers has a baker per 15 villagers, with a baker's oven placed by the jobs plan (js/baker.js, js/mobs.js
+//     villageRoster, js/jobs.js planVillage); no plot of its own, so layouts are the same as 5. Worlds saved with 5 keep 5: their bakers come when an oven is placed.
 let VGEN = 1;
+const BAKER_POP = 15;     // village generator 6: a baker per this many villagers (js/mobs.js villageRoster reads BF.worldgen.BAKER_POP)
 const COWHERD_POP = 10;   // village generator 5: villages of this many villagers on grass get a cowherd and a pasture (js/mobs.js villageRoster reads BF.worldgen.COWHERD_POP)
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
@@ -2347,6 +2350,7 @@ const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: 
 
 BF.worldgen = {
   COWHERD_POP,
+  BAKER_POP,
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;

@@ -45,7 +45,7 @@ const sellsEggs = m => (m.trades || []).some(o => o && !o.spare && o.sell && o.s
 // Raw eggs it would cook now: all of them, or for an egg seller only what it needs to eat while hungry.
 function toCook(m) {
   const n = count(m, EGG());
-  if (!n || COOKED() == null) return 0;
+  if (!n || COOKED() == null || m.profession === "baker") return 0;   // the baker's eggs go into cakes and pies (js/baker.js)
   if (!sellsEggs(m)) return n;
   const F = BF.food, want = SHOP_DAYS * F.rate(m) - F.available(m);
   return want > 0 && F.available(m) < F.rate(m) ? Math.min(n, Math.ceil(want / F.breadEq(COOKED()))) : 0;
@@ -82,7 +82,7 @@ function pending(m) {
 // or emeralds left over for it). {seller, offer, times, price, item, egg: true} or null.
 function eggDeal(m, v2, want) {
   const T = TR(), em = I("emerald"), egg = EGG();
-  if (egg == null || COOKED() == null || skyT() > BUY_BY || !v2 || v2 === m || !Array.isArray(v2.trades) || !Array.isArray(v2.inv)) return null;
+  if (egg == null || COOKED() == null || skyT() > BUY_BY || m.profession === "baker" || !v2 || v2 === m || !Array.isArray(v2.trades) || !Array.isArray(v2.inv)) return null;
   const per1 = BF.food.breadEq(COOKED()), myEm = ems(m);
   let best = null;
   for (const o of v2.trades) {
