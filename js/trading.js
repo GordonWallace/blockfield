@@ -188,7 +188,7 @@ const TRADES = {
   // (3 wool + 3 planks each). It is the only villager that sells beds; builders buy them at the same offer. It also makes furnaces from 8
   // cobblestone bought from the miner, keeping one in stock for the toolsmith.
   furniture_maker: [
-    ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed", "1 emerald > 1 furnace"],
+    ["10 white_wool > 1 emerald", "40 planks > 1 emerald", "1 emerald > 2 red_bed", "1 emerald > 1 furnace", "1 emerald > 1 chest"],   // a chest: what villagers pay to have one put in their house (js/storage.js)
     ["10 oak_log > 1 emerald", "40 cobblestone > 1 emerald"],
     ["40 spruce_planks > 1 emerald", "40 birch_planks > 1 emerald", "10 spruce_log > 1 emerald", "10 birch_log > 1 emerald"],
     ["3 emerald > 7 red_bed"],
@@ -447,6 +447,7 @@ function feedOffers() {
 // Adds the food offers to a hungry unemployed villager (or takes them away again). Called when the trade screen opens and closes.
 function syncFeed(v, open = true) {
   if (!v || !Array.isArray(v.trades)) return v;
+  if (BF.market) return BF.market.sync(v);   // food offers for any hungry villager, with its spare goods and needs (js/market.js)
   v.trades = v.trades.filter(o => !o.feed);
   if (open && v.profession === "unemployed" && needsFood(v)) v.trades.push(...feedOffers());
   return v;
@@ -460,6 +461,8 @@ function blockReason(v, o) {
   const hungry = BF.food && BF.food.blockReason(v, o);   // starving villagers only trade food (js/villagelife.js)
   if (hungry) return hungry;
   if (inv.count(v.inv, o.sell.id) < o.sell.n) return o.sell.id === BF.I.emerald ? "Out of emeralds" : "Out of stock";
+  const keep = BF.market && BF.market.keeps(v, o);   // its reserve: what its next moves need (js/market.js)
+  if (keep) return keep;
   if (!inv.canFit(v.inv, o.buy, [o.sell])) return "Villager has no room";
   return null;
 }

@@ -200,8 +200,7 @@ const FARM_MAX = 64;              // farmland cells within that range a farmer i
 const WATER_REACH = 30;           // buckets are filled at water this far (~30 blocks) around the village area, wells included
 const GATHER_R = 24;              // dirt is taken from up to this far outside the village area, never from inside it
 const TRADE_PAUSE = 1.6;
-const WHEAT_SPARE = 24;           // a farmer bakes only the wheat above this: the rest is for sale to shepherds (12 wheat per emerald)
-const WHEAT_SELF = 4;             // ...and sells wheat down to this many
+const WHEAT_SPARE = 24;           // a farmer bakes only the wheat above this: the rest is for sale to shepherds (its spare goods down to 4, js/market.js)
 const SHOP_DAYS = 3;              // a hungry villager buys up to 3 days of food
 const LOG = [];
 
@@ -1219,7 +1218,7 @@ function farmAI(m, dt, out) {
 
 // ---------------------------------------------------------------- buying food from other villagers
 const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv);
-// Best food purchase from one seller for `want` bread-eq: a real food offer of its trade table, else a fair price from VALUE.
+// Best food purchase from one seller for `want` bread-eq: one of its food offers (its job's, or its spare food, js/market.js).
 function dealWith(m, v2, want) {
   const F = FD(), T = TR(), em = ids().em, myEm = cnt(m, em);
   const sp = F.surplus(v2);
@@ -1236,20 +1235,7 @@ function dealWith(m, v2, want) {
     const price = o.buy[0].n / per;
     if (!best || price < best.price) best = { seller: v2, offer: o, times: k, price, item: o.sell.id };
   }
-  if (best) return best;
-  // no matching offer: 1 emerald buys ~90% of an emerald's worth of its most plentiful food (VALUE table)
-  const V = T.VALUE;
-  const items = F.edible(v2).sort((a, b) => b.n * b.eq - a.n * a.eq);
-  for (const e of items) {
-    const val = V[BF.items[e.id].name] || 0.2;
-    const n = Math.min(Math.max(1, Math.floor(0.9 / val)), e.n, Math.floor(sp / e.eq));
-    if (n < 1 || n * e.eq < Math.min(want, 0.6)) continue;
-    let k = Math.min(Math.ceil(want / (n * e.eq)), myEm, Math.floor(sp / (n * e.eq)), Math.floor(e.n / n), 4);
-    while (k > 0 && !T.inv.canFit(m.inv, [{ id: e.id, n: n * k }], [{ id: em, n: k }])) k--;
-    if (k < 1) continue;
-    return { seller: v2, fair: { id: e.id, n }, times: k, price: 1 / (n * e.eq), item: e.id };
-  }
-  return null;
+  return best;   // only through offers the player could take too: job offers and spare goods (js/market.js)
 }
 // Raw eggs it can cook count as food it has (js/eggcook.js); a villager that can cook eggs buys them first (cheap food), from the nearest
 // seller, and one that cannot buys ready food: never eggs it could not cook.
@@ -1276,7 +1262,7 @@ function doFoodDeal(m, deal) {
   let done = 0, item = deal.item, n = 0;
   for (let i = 0; i < deal.times; i++) {
     if (!canSell(v2)) break;
-    if (deal.offer) {
+    {
       const o = deal.offer, per = F.breadEq(o.sell.id) * o.sell.n;
       if (F.surplus(v2) < per || T.blockReason(v2, o) || cnt(m, em) < o.buy[0].n) break;
       if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
@@ -1285,29 +1271,21 @@ function doFoodDeal(m, deal) {
       T.inv.add(m.inv, o.sell.id, o.sell.n);
       T.addXp(v2, o);
       n += o.sell.n;
-    } else {
-      const f = deal.fair, per = F.breadEq(f.id) * f.n;
-      if (F.surplus(v2) < per || cnt(m, em) < 1 || T.inv.count(v2.inv, f.id) < f.n) break;
-      if (!T.inv.canFit(m.inv, [{ id: f.id, n: f.n }], [{ id: em, n: 1 }]) || !T.inv.canFit(v2.inv, [{ id: em, n: 1 }], [{ id: f.id, n: f.n }])) break;
-      T.inv.remove(v2.inv, f.id, f.n); T.inv.add(v2.inv, em, 1);
-      T.inv.remove(m.inv, em, 1); T.inv.add(m.inv, f.id, f.n);
-      n += f.n;
     }
     done++;
   }
   if (done) {
-    const paid = deal.offer ? deal.offer.buy[0].n * done : done;
-    if (BF.vlog) BF.vlog.trade(m, v2, deal.offer || ("gave " + paid + " Emerald, got " + n + " " + BF.itemName(item)), done);
+    const paid = deal.offer.buy[0].n * done;
+    if (BF.vlog) BF.vlog.trade(m, v2, deal.offer, done);
     log("buyFood", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: n + " " + BF.items[item].name, paid: paid + " emerald" });
     if (BF.emit) BF.emit("villagerFoodTrade", m, v2, item, n);
   }
   return done;
 }
 // ---------------------------------------------------------------- logs from the foresters
-// Since 1.1 only foresters fell trees. A farmer short of logs for a bed's edge buys them from a forester of its village (any forester with logs):
-// at the forester's own log offer when it has one (level 2, "1 emerald > 8 oak_log"), else at the same price (LOG_PER logs an emerald) for the logs
-// it holds. The species the bed is edged with is preferred, then the nearer forester. A forester that failed is skipped for a while (fshop.avoid).
-const LOG_PER = 8;
+// Since 1.1 only foresters fell trees. A farmer short of logs for a bed's edge buys them from any villager of its village with a log offer: a
+// forester's own (level 2, "1 emerald > 8 oak_log") or anyone's spare logs (js/market.js). The species the bed is edged with is preferred, then
+// the nearer seller, foresters first. A seller that failed is skipped for a while (fshop.avoid).
 const sellerIdx = v2 => (v2 && v2.slot ? v2.slot.idx : -1);
 function avoidSeller(m, v2) { if (!v2) return; const sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(0, 3), avoid: {}, cd: 0 }); sh.avoid[sellerIdx(v2)] = dayNow() + 0.05; }
 function logDealWith(m, v2, want, prefer) {
@@ -1317,17 +1295,15 @@ function logDealWith(m, v2, want, prefer) {
   const consider = (item, per, offer) => {
     const stock = T.inv.count(v2.inv, item);
     let k = Math.min(Math.ceil(want / per), Math.floor(stock / per), myEm, 4);
-    while (k > 0 && !(T.inv.canFit(m.inv, [{ id: item, n: per * k }], [{ id: em, n: k }]) && (offer || T.inv.canFit(v2.inv, [{ id: em, n: k }], [{ id: item, n: per * k }])))) k--;
+    while (k > 0 && !T.inv.canFit(m.inv, [{ id: item, n: per * k }], [{ id: em, n: k }])) k--;
     if (k < 1) return;
     const sc = (item === prefer ? 1000 : 0) + per * k;
     if (!best || sc > best.sc) best = { item, per, offer, times: k, sc };
   };
-  const seen = new Set();
   for (const o of v2.trades || []) {
     if (o.buy.length !== 1 || o.buy[0].id !== em || o.buy[0].n !== 1 || !isLogItem(o.sell.id) || T.blockReason(v2, o)) continue;
-    seen.add(o.sell.id); consider(o.sell.id, o.sell.n, o);
+    consider(o.sell.id, o.sell.n, o);
   }
-  for (const s of v2.inv) if (s && isLogItem(s.id) && !seen.has(s.id)) { seen.add(s.id); consider(s.id, LOG_PER, null); }
   return best;
 }
 function findLogSeller(m, want, prefer) {
@@ -1335,10 +1311,10 @@ function findLogSeller(m, want, prefer) {
   if (!R || want <= 0 || cnt(m, ids().em) < 1) return null;
   let best = null, bs = -Infinity;
   for (const v2 of R.members || []) {
-    if (v2 === m || v2.profession !== "forester" || !canSell(v2) || (avoid[sellerIdx(v2)] || 0) > now) continue;
+    if (v2 === m || !canSell(v2) || (avoid[sellerIdx(v2)] || 0) > now) continue;
     const d = logDealWith(m, v2, want, prefer);
     if (!d) continue;
-    const sc = d.sc - v2.position.distanceTo(m.position);
+    const sc = d.sc - v2.position.distanceTo(m.position) + (v2.profession === "forester" ? 20 : 0);
     if (sc > bs) { bs = sc; best = d; best.seller = v2; }
   }
   if (!best) return null;
@@ -1349,22 +1325,18 @@ function findLogSeller(m, want, prefer) {
 function doLogDeal(m, t) {
   const T = TR(), v2 = t.seller, em = ids().em;
   if (!canSell(v2)) return 0;
-  if (t.offer) { if (t.offer.buy[0].n !== 1) return 0; t.per = t.offer.sell.n; }   // the price may have moved since the deal was planned (js/prices.js)
+  if (!t.offer || t.offer.buy[0].n !== 1) return 0;
+  t.per = t.offer.sell.n;   // the price may have moved since the deal was planned (js/prices.js)
   let done = 0;
   for (let i = 0; i < t.times && logCount(m) < t.want; i++) {
     if (cnt(m, em) < 1 || !T.inv.canFit(m.inv, [{ id: t.item, n: t.per }], [{ id: em, n: 1 }])) break;
-    if (t.offer) {
-      if (!T.exchange(v2, t.offer)) break;            // the forester's stock and room, as for a player trade
-      T.addXp(v2, t.offer);
-    } else {
-      if (T.inv.count(v2.inv, t.item) < t.per || !T.inv.canFit(v2.inv, [{ id: em, n: 1 }], [{ id: t.item, n: t.per }])) break;
-      T.inv.remove(v2.inv, t.item, t.per); T.inv.add(v2.inv, em, 1);
-    }
+    if (!T.exchange(v2, t.offer)) break;              // the seller's stock, reserve and room, as for a player trade
+    T.addXp(v2, t.offer);
     T.inv.remove(m.inv, em, 1); T.inv.add(m.inv, t.item, t.per);
     done++;
   }
   if (done) {
-    if (BF.vlog) BF.vlog.trade(m, v2, t.offer || ("gave " + done + " Emerald, got " + done * t.per + " " + BF.itemName(t.item)), done);
+    if (BF.vlog) BF.vlog.trade(m, v2, t.offer, done);
     log("buyLogs", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * t.per + " " + BF.items[t.item].name, paid: done + " emerald" });
   }
   return done;
@@ -1410,21 +1382,23 @@ function doToolDeal(m, deal) {
 }
 
 // ---------------------------------------------------------------- wheat for the shepherds (js/shepherd.js), seeds for the poultry keepers (js/poultry.js)
-// A shepherd short of wheat (a keeper short of wheat seeds) buys it from the village (farmers first) at the fair price: 1 emerald buys ~90% of an
-// emerald's worth. Farmers keep WHEAT_SELF wheat and SEEDS_SELF seeds for themselves.
-const SEEDS_SELF = 16;
-// Butchers buy raw chicken from the poultry keepers in the same way, to cook and sell (only from keepers: nobody else raises chickens).
+// A shepherd short of wheat (a keeper short of wheat seeds) buys it through any villager's offer for it (a farmer's job offer or anyone's spare
+// wheat or seeds, js/market.js), farmers first. Butchers buy raw chicken from the poultry keepers the same way, to cook and sell.
 const feedItem = m => (m.profession === "poultry_keeper" ? I("wheat_seeds") : m.profession === "butcher" ? I("raw_chicken") : ids().wheat);
 const chickenWanted = m => { const n = cnt(m, I("raw_chicken")) + cnt(m, I("cooked_chicken")); return BF.poultry && n < 9 ? 15 : 0; };   // one emerald's worth while it holds fewer than 9
 const feedWanted = m => (m.profession === "shepherd" && BF.shepherd ? BF.shepherd.wheatWanted(m) : m.profession === "poultry_keeper" && BF.poultry ? BF.poultry.seedsWanted(m)
   : m.profession === "butcher" ? chickenWanted(m) : 0);
 function wheatDealWith(m, v2, want) {
-  const T = TR(), c = ids(), item = feedItem(m), seeds = item !== c.wheat, val = (T.VALUE && T.VALUE[BF.items[item].name]) || 0.07;
-  const per = Math.max(1, Math.floor(0.9 / val)), have = cnt(v2, item) - (v2.profession === "farmer" ? (seeds ? SEEDS_SELF : WHEAT_SELF) : 0);
-  if (have < per || cnt(m, c.em) < 1) return null;
-  let k = Math.min(Math.ceil(want / per), cnt(m, c.em), Math.floor(have / per), 4);
-  while (k > 0 && !(T.inv.canFit(m.inv, [{ id: item, n: per * k }], [{ id: c.em, n: k }]) && T.inv.canFit(v2.inv, [{ id: c.em, n: k }], [{ id: item, n: per * k }]))) k--;
-  return k > 0 ? { kind: "wheat", seller: v2, times: k, per, item, price: 1 / per } : null;
+  const T = TR(), c = ids(), item = feedItem(m);
+  let best = null;
+  for (const o of v2.trades || []) {
+    if (o.sell.id !== item || o.buy.length !== 1 || o.buy[0].id !== c.em || T.blockReason(v2, o)) continue;
+    let k = Math.min(Math.ceil(want / o.sell.n), Math.floor(cnt(m, c.em) / o.buy[0].n), Math.floor(cnt(v2, item) / o.sell.n), 4);
+    while (k > 0 && !T.inv.canFit(m.inv, [{ id: item, n: o.sell.n * k }], [{ id: c.em, n: o.buy[0].n * k }])) k--;
+    const price = o.buy[0].n / o.sell.n;
+    if (k > 0 && (!best || price < best.price)) best = { kind: "wheat", seller: v2, offer: o, times: k, item, price };
+  }
+  return best;
 }
 function findWheatSeller(m) {
   const R = m.village, want = feedWanted(m), now = dayNow(), sh = m.fshop;
@@ -1441,18 +1415,19 @@ function findWheatSeller(m) {
   return best;
 }
 function doWheatDeal(m, deal) {
-  const T = TR(), v2 = deal.seller, c = ids(), item = deal.item != null ? deal.item : c.wheat;
+  const T = TR(), v2 = deal.seller, o = deal.offer;
   let done = 0;
   for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2) || cnt(v2, item) < deal.per || cnt(m, c.em) < 1) break;
-    if (!T.inv.canFit(m.inv, [{ id: item, n: deal.per }], [{ id: c.em, n: 1 }]) || !T.inv.canFit(v2.inv, [{ id: c.em, n: 1 }], [{ id: item, n: deal.per }])) break;
-    T.inv.remove(v2.inv, item, deal.per); T.inv.add(v2.inv, c.em, 1);
-    T.inv.remove(m.inv, c.em, 1); T.inv.add(m.inv, item, deal.per);
+    if (!canSell(v2) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
+    if (!T.exchange(v2, o)) break;                   // the seller's stock, reserve and room, as for a player trade
+    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
+    T.inv.add(m.inv, o.sell.id, o.sell.n);
+    T.addXp(v2, o);
     done++;
   }
   if (done) {
-    if (BF.vlog) BF.vlog.trade(m, v2, "gave " + done + " Emerald, got " + done * deal.per + " " + BF.itemName(item), done);
-    log(item === c.wheat ? "buyWheat" : "buySeeds", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * deal.per + " " + BF.items[item].name, paid: done + " emerald" });
+    if (BF.vlog) BF.vlog.trade(m, v2, o, done);
+    log(o.sell.id === ids().wheat ? "buyWheat" : "buySeeds", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * o.sell.n + " " + BF.items[o.sell.id].name, paid: done * o.buy[0].n + " emerald" });
   }
   return done;
 }

@@ -302,21 +302,8 @@ function optsFor(type, inv) {
   if ((type === "garden" || type === "stable") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
   return null;
 }
-// Items no current offer sells but some villager's trade table does at a later level (the leatherworker's "1 emerald > 6 leather" is a level 2
-// offer): a builder buys them at that offer's price out of what the villager holds, with the usual stock and room rules (exchange). Only the
-// stable's tack rack needs one so far (leather); everything else keeps to current offers.
-const TABLE_ITEMS = () => new Set([BF.I.leather].filter(x => x != null));
-function tableOffer(v2, id) {
-  const em = BF.I.emerald;
-  for (const pool of TR().table(v2.profession)) for (const o of pool)
-    if (o.sell.id === id && o.buy.length === 1 && o.buy[0].id === em) return { buy: [{ id: em, n: o.buy[0].n }], sell: { id, n: o.sell.n }, level: 1, xp: 0, table: true };
-  return null;
-}
-const offersOf = v2 => {
-  const out = v2.trades.slice(), have = new Set(out.map(o => o.sell.id));
-  for (const id of TABLE_ITEMS()) if (!have.has(id) && TR().inv.count(v2.inv, id) > 0) { const o = tableOffer(v2, id); if (o) out.push(o); }
-  return out;
-};
+// What a villager sells: its offers, job and spare goods (js/market.js). Leather for a stable's tack rack comes from a leatherworker's spare goods.
+const offersOf = v2 => v2.trades;
 // Stables: only in villages on horse land, wanted most by a village of 10 or more without one (js/stables.js decides what horse land is).
 function stableWeight(R, has) {
   if (!BF.stables || !BF.stables.villageOK(R)) return 0;
@@ -418,7 +405,36 @@ function startBuild(m, bs, e) {
   bs.mode = "build"; bs.entry = e; bs.goal = null; bs.cands = null; bs.ci = 0; bs.noSpot = 0; bs.occT = 0; bs.want = null; bs.stage = null;
   bs.placeT = Math.max(bs.placeT, 0.4); bs.losT = 0; bs.losFor = -1;
   m.ai.route = null;
+  if (!bs.next) bs.next = pickNext(m, bs);   // it knows what comes next, so it keeps those materials too (js/market.js)
 }
+// The structure it will build after this one: {type, wood, req} with the requirement as think() counts it.
+function pickNext(m, bs) {
+  const R = m.village;
+  if (!R || !R.wg || builtOf(R).filter(e => e.state !== "abandoned").length + 1 >= MAX_BUILT) return null;
+  const type = pickType(m, bs);
+  if (!type) return null;
+  const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
+  const opts = optsFor(type, m.inv), wood = chooseWood(m, type, style, opts);
+  const req = Object.assign({}, BP().get(type, 0, style, 0.5, opts, wood).req); req[found] = (req[found] || 0) + FILL_SPARE;
+  return { type, wood, req };
+}
+// What the builder keeps for itself (js/market.js): the materials left on the structure it is building (or is buying for) and those of
+// the next one it has chosen, with whatever it would craft them from (logs for planks, planks for doors). {item id: n}
+function reserve(m) {
+  const bs = m.bs, R = m.village, out = {};
+  if (!bs || !R) return out;
+  const add = (req, wood) => {
+    for (const k in req) out[k] = (out[k] || 0) + req[k];
+    for (const c of analyze(m.inv, req, wood).crafts) for (const [ing, q] of c.from) out[ing] = (out[ing] || 0) + q * c.times;
+  };
+  const mine = builtOf(R).find(e => e.state === "building" && e.owner === (m.slot ? m.slot.idx : 0));
+  if (mine) add(remainingReq(mine, mine.prog), bpOf(mine).wood);
+  else if (bs.want && bs.want.req) add(bs.want.req, bs.want.wood);
+  if (bs.next) add(bs.next.req, bs.next.wood);
+  return out;
+}
+// What it is short of while shopping (js/market.js turns what its table doesn't buy into need offers). {item id: n}
+const shortfall = m => (m.bs && m.bs.mode === "shop" && m.bs.want && m.bs.want.short) || {};
 
 function think(m, bs) {
   const R = m.village, built = builtOf(R);
@@ -434,10 +450,11 @@ function think(m, bs) {
   }
   if (bs.cool > 0 || built.filter(e => e.state !== "abandoned").length >= MAX_BUILT) return;
   if (!R.wg) return;
-  const type = pickType(m, bs);
+  const nx = bs.next; bs.next = null;   // chosen when it started the last one
+  const type = nx && !(bs.fail[nx.type] > dayNow()) ? nx.type : pickType(m, bs);
   if (!type) return;
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
-  const opts = optsFor(type, m.inv), wood = chooseWood(m, type, style, opts);
+  const opts = optsFor(type, m.inv), wood = nx && nx.type === type ? nx.wood : chooseWood(m, type, style, opts);
   const bp = BP().get(type, 0, style, 0.5, opts, wood);
   const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
   const a = analyze(m.inv, req, wood);
@@ -727,12 +744,12 @@ function toShop(m, bs, e) {
   bs.mode = "shop"; bs.want = { entry: e, req, short: a.shortfall }; bs.stage = "think"; bs.t = 0; m.ai.route = null; bs.goal = null;
   logEvent("short", m, { for: e.type, missing: Object.keys(a.shortfall).map(k => BF.itemName(+k) + " x" + a.shortfall[k]) });
 }
-function canSell(v2) { return v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession !== "builder" && v2.inv && v2.trades; }
+function canSell(v2) { return v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.inv && v2.trades; }   // other builders too: their reserve keeps what they need (js/market.js)
 // The nearest other villager that sells something on the shortfall list and could do the deal now.
 function findSeller(m, bs, short) {
   const R = m.village, T = TR(), best = { d: 1e9 };
   for (const v2 of R.members) {
-    if (!canSell(v2)) continue;
+    if (v2 === m || !canSell(v2)) continue;
     for (const o of offersOf(v2)) {
       const need = short[o.sell.id];
       if (!need || T.blockReason(v2, o)) continue;
@@ -903,7 +920,7 @@ function onSpawn(m, rec, saved) {
 BF.builder = {
   BLOCK_T, REACH, BUILD_END, SITE_RANGE, MAX_BUILT, log, pending,
   ai, tick, statusText, startStock, exportAll, importAll, onSpawn, builtOf,
-  analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome,
+  analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome, reserve, shortfall, pickNext,
   reset() { pending.clear(); log.length = 0; for (const p of pool) BF.scene.remove(p.mesh); pool.length = 0; },
 };
 })();
