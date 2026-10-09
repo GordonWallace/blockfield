@@ -1,4 +1,4 @@
-# Baseline tests: a quick smoke set (about 5 min) on every pull request into a release branch (and into main), plus the
+# Baseline tests: a quick smoke set (about 5 min, split over 6 runners at once) on every pull request into a release branch (and into main), plus the
 # suites (game areas) the pull request turns on with a line in its description, e.g. `CI suites: jobs, ui` (or `all`). A suite's
 # long tests run only when `soak` is on the line too (`CI suites: village, soak`); `all` includes them.
 # Editing that line re-runs the check. Tiers, suites and timeouts are in test/ci.json; the runner is test/ci.js.
@@ -20,9 +20,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  baseline:
+  baseline-part:
+    name: baseline part ${{ matrix.part }} of 6
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
         with:
@@ -38,6 +43,7 @@ jobs:
           playwright install chromium
       - name: Run baseline tests
         env:
+          CI_SHARD: ${{ matrix.part }}/6
           PR_BODY: ${{ github.event.pull_request.body }}
           CI_SUITES: ${{ inputs.suites }}
         run: NODE_PATH=$(npm root -g) node test/ci.js baseline ci-out
@@ -45,6 +51,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: baseline-results
+          name: baseline-results-${{ matrix.part }}
           path: ci-out/
           retention-days: 14
+  # one check named baseline that passes only when every part did (the result branch rules and emails look at)
+  baseline:
+    needs: baseline-part
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[ "${{ needs.baseline-part.result }}" = success ] || { echo "a baseline part failed or was cancelled: ${{ needs.baseline-part.result }}"; exit 1; }'

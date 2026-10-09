@@ -1,6 +1,7 @@
 # Integration tests: the baseline set plus every other test (soak, simulation and slower feature tests). Runs on the pull
 # request that takes a release branch into main, and on demand from the Actions tab (pick the release branch). Not on each
 # push to a release branch: release-branch PRs stay light and the full run comes right before a release goes into main.
+# The tests are split over 12 runners at once (CI_SHARD in test/ci.js), so the run takes minutes rather than an hour.
 name: Integration tests
 
 on:
@@ -14,11 +15,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  integration:
+  integration-part:
+    name: integration part ${{ matrix.part }} of 12
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     # pull requests into main only run this when they come from a release branch
     if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release-')
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
         with:
@@ -33,11 +39,20 @@ jobs:
           npm install -g playwright@1.56.1
           playwright install chromium
       - name: Run integration tests
+        env:
+          CI_SHARD: ${{ matrix.part }}/12
         run: NODE_PATH=$(npm root -g) node test/ci.js integration ci-out
       - name: Upload logs and screenshots
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: integration-results
+          name: integration-results-${{ matrix.part }}
           path: ci-out/
           retention-days: 30
+  # one check named integration that passes only when every part did (the result branch rules and emails look at)
+  integration:
+    needs: integration-part
+    if: always() && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'release-'))
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[ "${{ needs.integration-part.result }}" = success ] || { echo "an integration part failed or was cancelled: ${{ needs.integration-part.result }}"; exit 1; }'
