@@ -1276,7 +1276,7 @@ function pathToBed(m) {
   return findPath(x, y, z, { x: b.x, z: b.z, at });
 }
 function pathOut(m) {
-  const H = m.home;
+  const H = m.home || (m.bed && !m.bed.tent ? homeOfBed(m.village, m.bed) : null);   // bred children have no home of their own: the house of their bed
   if (!H || H.outX == null) return null;
   const [x, y, z] = feetCell(m);
   return findPath(x, y, z, { x: H.outX, z: H.outZ, at: (cx, cy, cz) => cx === H.outX && cz === H.outZ }, 1200);
