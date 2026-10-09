@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
     const dt = 0.05, n = Math.round(secs / dt);
     for (let i = 0; i < n; i++) { BF.sky.setTime(t0 + (t1 - t0) * i / n); BF.mobs.update(dt); if (i % 400 === 0) await new Promise(r => setTimeout(r, 0)); }
   }, [t0, t1, secs]);
-  const ok = (cond, what) => console.log((cond ? "PASS " : "FAIL ") + what);
+  const ok = (cond, what, extra) => console.log((cond ? "PASS " : "FAIL ") + what + (!cond && extra !== undefined ? "  " + JSON.stringify(extra) : ""));
 
   // ---- 1. player ownership
   const p1 = await pg.evaluate(() => {
@@ -171,11 +171,14 @@ module.exports = async (pg, out) => {
       }
       return null;
     }, [v.noChestKeys[0], r11.order.spot]);
-    console.log("furniture maker placed beside the spot at", JSON.stringify(await besideSpot()));
+    const beside = await besideSpot(), trail = [];
+    console.log("furniture maker placed beside the spot at", JSON.stringify(beside));
     // it may still take beds to a builder or buy wool first, so give it a second day if the first runs out
     for (let k = 0; k < 20 && !(await placed()); k++) {
       if (k === 10) { await pg.evaluate(() => { BF.sky.day += 1; }); await besideSpot(); }
       await step(0.13 + (k % 10) * 0.03, 0.16 + (k % 10) * 0.03, 30);
+      trail.push(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead);
+        return [f.furn && f.furn.stage, f.furn && f.furn.deal && f.furn.deal.kind, BF.villagerStatus.text(f), BF.trades.inv.count(f.inv, BF.I.chest), !!(m.store && m.store.order), +BF.sky.time.toFixed(2)].join("/"); }, v.noChestKeys[0]));
       if (process.env.DEBUG) console.log("fm@", JSON.stringify(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead); return { st: f.furn && f.furn.stage, kind: f.furn && f.furn.deal && f.furn.deal.kind, pos: [Math.round(f.position.x), Math.round(f.position.z)], status: BF.villagerStatus.text(f), chests: BF.trades.inv.count(f.inv, BF.I.chest), orders: BF.storage.orders(m.village).length, log: BF.furniture.LOG.slice(-2) }; }, v.noChestKeys[0])));
     }   // it walks over, puts the chest down; the villager stores its surplus there
     const r12 = await pg.evaluate(([k, o]) => {
@@ -184,7 +187,8 @@ module.exports = async (pg, out) => {
         status: BF.villagerStatus.text(m), log: BF.vlog.entries(m.village.key).filter(e => e[1] === "chest" || /Chest/.test(e[2])).slice(-5).map(e => e[2]) };
     }, [v.noChestKeys[0], r11.order]);
     console.log(JSON.stringify(r12, null, 1));
-    ok(/^chest(_[new])?$/.test(r12.block) && r12.owner === v.noChestKeys[0], "the furniture maker delivered the chest and the villager claimed it", r12.block);
+    ok(/^chest(_[new])?$/.test(r12.block) && r12.owner === v.noChestKeys[0], "the furniture maker delivered the chest and the villager claimed it",
+      { block: r12.block, owner: r12.owner, spot: r11.order.spot, beside, trail: trail.slice(-6), log: r12.log, flog: await pg.evaluate(() => BF.furniture.LOG.slice(-5).map(e => e.kind + ":" + (e.why || e.made || e.got || e.item || "") + (e.to ? ">" + e.to : ""))) });
     await pg.evaluate(s => { const e = BF.player.eyePos(); BF.player.teleport(s.x + 2.5, s.y + 0.01, s.z + 0.5); }, r11.order.spot);
   } else console.log("SKIP no villager without a chest here");
 };
