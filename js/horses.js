@@ -179,7 +179,11 @@ function leash(m, holder) {
   else { r.lead = { kind: "post", x: holder.x, y: holder.y, z: holder.z }; r.post = [holder.x, holder.y, holder.z]; }
   return true;
 }
-function setPen(m, box) { if (m && m.horse) m.horse.pen = box ? { x0: box.x0, z0: box.z0, x1: box.x1, z1: box.z1 } : null; }
+function setPen(m, box) {
+  if (!m || !m.horse) return;
+  m.horse.pen = box ? { x0: box.x0, z0: box.z0, x1: box.x1, z1: box.z1 } : null;
+  if (box && box.gx != null) { m.horse.pen.gx = box.gx; m.horse.pen.gz = box.gz; }
+}
 
 // ---------------------------------------------------------------- AI (called from mobs.js updateMob for unridden horses)
 function walkTo(m, out, x, z, speed) {
@@ -220,7 +224,15 @@ function ai(m, dt, out) {
   // a pen (js/stables.js) keeps a horse inside it
   if (r.pen) {
     const b = r.pen, inside = p.x > b.x0 + 0.8 && p.x < b.x1 + 0.2 && p.z > b.z0 + 0.8 && p.z < b.z1 + 0.2;
-    if (!inside) { walkTo(m, out, (b.x0 + b.x1 + 1) / 2, (b.z0 + b.z1 + 1) / 2, 1.2); return true; }
+    const cx = (b.x0 + b.x1 + 1) / 2, cz = (b.z0 + b.z1 + 1) / 2;
+    if (!inside && b.gx != null) {
+      // fences stand 1.5 tall (js/blocks.js), so a horse can't step over them: from outside it first lines up in front of the gate, then walks in
+      const ix = Math.abs(cx - b.gx) > Math.abs(cz - b.gz) ? Math.sign(cx - b.gx) : 0, iz = ix ? 0 : Math.sign(cz - b.gz);
+      const along = (p.x - b.gx) * ix + (p.z - b.gz) * iz, side = ix ? p.z - b.gz : p.x - b.gx;
+      if (along < 0.5 && Math.abs(side) > 0.2) { walkTo(m, out, b.gx - ix * 1.5,b.gz - iz * 1.5, 1.2); return true; }
+      if (along < 0.5) { walkTo(m, out, b.gx + ix, b.gz + iz, 1.2); return true; }
+    }
+    if (!inside) { walkTo(m, out, cx, cz, 1.2); return true; }
     return false;
   }
   // a wild herd: stay near its drifting centre
