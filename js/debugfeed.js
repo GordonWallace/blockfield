@@ -4,7 +4,8 @@
 // Always on, whatever F3 is doing: it streams to port 8001 on the game's host (or the address the debug server injects as
 // window.BF_DEBUG_FEED, or ?debugfeed=<port or url>; ?debugfeed=off stops it). It never changes what the game shows.
 // Snapshots go out 4 times a second as small POSTs; the village layout, the log and the economy tallies are only re-sent when they change.
-// The server's answer carries the alerts set up on the debug screen whenever the game's copy is out of date (js/alerts.js).
+// The server's answer carries the alerts set up on the debug screen whenever the game's copy is out of date (js/alerts.js), and
+// the villager picked there; while one is picked, snapshots carry its day timeline (js/daytimeline.js) whenever it changes.
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
 // API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update() }
 (() => {
@@ -109,6 +110,7 @@ function detail(rec) {
     if (m.type === "iron_golem") { d.golems.push({ x: r1(m.position.x), z: r1(m.position.z), hp: m.hp, maxHp: m.maxHp }); continue; }
     if (m.type !== "villager") continue;
     d.villagerList.push({
+      id: BF.dayTimeline ? BF.dayTimeline.keyOf(m) : null,   // village key#slot: how the debug screen names the villager it picked (js/daytimeline.js)
       name: L.nameOf(m), prof: m.child ? "Child" : L.pretty(m.profession), child: !!m.child,
       status: status(m) || "", x: r1(m.position.x), y: r1(m.position.y), z: r1(m.position.z),
       hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!(m.bed && !m.bed.tent ? m.bed : m.homeBed), tent: !!(m.bed && m.bed.tent), sleeping: !!m.sleeping,   // an explorer's pitched tent is not a bed: its own bed (homeBed) is
@@ -167,7 +169,18 @@ function villages(pp) {
   return out;
 }
 const sentLayouts = new Set(), logSigs = new Map(), econSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
-const resync = () => { sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); };
+let daySig = null;   // the picked villager's day timeline as last sent: "key|version"
+const resync = () => { sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); daySig = null; };
+// The day timeline of the villager picked on the debug screen (js/daytimeline.js), only when it changed; null once nothing is picked.
+// undefined (left out) when nothing changed, so the feed stays as light as before while nobody is picked.
+function dayline() {
+  const D = BF.dayTimeline;
+  if (!D) return undefined;
+  const k = D.picked, sig = k ? k + "|" + D.version(k) : "";
+  if (sig === daySig) return undefined;
+  daySig = sig;
+  return k ? D.view(k) || { key: k, none: true } : null;
+}
 let hooked = false;
 
 function snapshot() {
@@ -177,6 +190,8 @@ function snapshot() {
   if (BF.boats) Object.assign(mobs, BF.boats.counts());   // boats by wood ("oak_boat": n) next to the mob types
   return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
     professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
+    gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
+    pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
     alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null };
@@ -200,9 +215,10 @@ function update() {
   fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000, signal: ctl.signal })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
     .then(t => {
-      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?}: the server's alerts, when the game's copy is out of date
+      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?}: the server's alerts / picked villager, when the game's copy is out of date
         const o = JSON.parse(t);
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
+        if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
         t = o.resync ? "resync" : "ok";
       }
       if (t === "resync") resync();   // a restarted server asks for the layouts and logs again

@@ -118,6 +118,24 @@
   .vslot .wear::after { content: ""; position: absolute; left: 0; top: 0; height: 2px; width: var(--f); background: var(--c); }
   .vinv .side { font-size: 12px; color: var(--muted); min-width: 180px; } .vinv .side div { padding: 2px 0; } .vinv .side b { color: var(--ink); font-weight: 500; }
   .stale .vinv .box { opacity: 0.6; filter: grayscale(0.7); }
+  /* the selected villager's day (js/daytimeline.js): a 24-hour strip of what it did, ticks for trades, meals and job changes, a list below */
+  .vday { border-top: 1px solid var(--edge); padding: 12px 16px 14px; font-size: 12px; color: var(--muted); }
+  .vday h4 { margin: 0 0 8px; font: 13px/1 var(--display); color: var(--muted); font-weight: normal; letter-spacing: 0.5px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .vday .seg { display: inline-flex; border: 1px solid var(--edge2); border-radius: 4px; overflow: hidden; margin-left: auto; }
+  .vday .seg button { background: none; border: 0; color: var(--muted); font: 12px var(--mono); padding: 3px 9px; cursor: pointer; } .vday .seg button.on { background: var(--card2); color: var(--ink); }
+  .dstrip { position: relative; height: 22px; margin-top: 14px; background: repeating-linear-gradient(135deg, rgba(255,255,255,0.03) 0 4px, rgba(255,255,255,0.06) 4px 8px); border-radius: 3px; }
+  .dstrip .b { position: absolute; top: 0; bottom: 0; min-width: 1px; cursor: pointer; } .dstrip .b:hover { filter: brightness(1.3); outline: 1px solid var(--ink); z-index: 1; }
+  .dstrip .now { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+  .dticks { position: absolute; left: 0; right: 0; top: -11px; height: 9px; }
+  .dticks i { position: absolute; top: 0; width: 3px; height: 9px; margin-left: -1px; border-radius: 1px; cursor: pointer; } .dticks i:hover { outline: 1px solid var(--ink); }
+  .dhours { position: relative; height: 14px; margin-top: 3px; font-size: 10px; color: var(--faint); }
+  .dhours span { position: absolute; transform: translateX(-50%); } .dhours span::before { content: ""; position: absolute; left: 50%; top: -3px; height: 3px; border-left: 1px solid var(--faint); }
+  .dkey { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0; } .dkey i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .dsum { margin: 4px 0 8px; color: var(--ink); } .dsum .w { color: var(--danger); }
+  .dlist { max-height: 240px; overflow: auto; border: 1px solid var(--edge); border-radius: 4px; }
+  .dlist div { display: grid; grid-template-columns: 92px 64px 1fr; gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--edge); }
+  .dlist div.at { cursor: pointer; } .dlist div.at:hover { background: rgba(255, 255, 255, 0.04); } .dlist div.sel { background: rgba(127, 191, 77, 0.12); }
+  .dlist .t { color: var(--faint); } .dlist .ev { color: var(--muted); } .dlist .k { white-space: nowrap; }
   .hp { display: inline-block; width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); vertical-align: middle; margin-right: 6px; overflow: hidden; } .hp i { display: block; height: 100%; background: var(--accent); }
   .happy { background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; display: grid; grid-template-columns: auto minmax(80px, 1fr); gap: 4px 14px; align-items: center; }
   .happy .hs { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; } .happy .hs .big { font-size: 22px; }
@@ -319,6 +337,7 @@
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
         <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="age" title="Game days it has been loaded and active (time its village sat unloaded doesn't count)">Age</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
         <div class="vinv" id="r-inv" hidden></div>
+        <div class="vday" id="r-day" hidden></div>
         <details class="past" id="r-past" open><summary>Past villagers <b id="r-pastn">0</b></summary>
           <div class="roster"><table><thead><tr><th>Name</th><th>Job</th><th>Died</th><th>Cause</th><th title="Game days it had been loaded and active">Age</th></tr></thead><tbody id="r-pastb"></tbody></table></div>
         </details>
@@ -396,7 +415,7 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
-  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.day !== undefined) dayData = c.day; Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
@@ -425,6 +444,7 @@ setInterval(status, 1000);
 // ---------------------------------------------------------------- snapshots
 function onSnap(s) {
   Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
+  if (s.day !== undefined) dayData = s.day;   // the picked villager's day timeline, when it changed (js/daytimeline.js)
   let logChanged = false, econChanged = false;
   for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
   for (const k in s.econ || {}) { econ[k] = s.econ[k]; if (k === viewKey || eopt.scope === "all") econChanged = true; }
@@ -435,7 +455,7 @@ function onSnap(s) {
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
   const was = viewKey;
   pickView(s);
-  renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); renderRoutes(s); status(); alertsFromSnap(s);
+  renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); renderRoutes(s); renderDay(); status(); alertsFromSnap(s);
   if (logChanged || logDirty || was !== viewKey) { if (logDirty || was !== viewKey) econChanged = true; logDirty = false; renderLog(); }
   if (econChanged && eopt.tab === "econ") renderEcon();
 }
@@ -778,6 +798,12 @@ function drawMap(s) {
     g.lineWidth = on ? 2 : 1; g.strokeStyle = on ? "#fff" : "rgba(0,0,0,0.6)"; g.stroke();
     if (on && m.job) { g.setLineDash([3, 3]); g.strokeStyle = "rgba(255,255,255,0.5)"; g.beginPath(); g.moveTo(X(m.x), Z(m.z)); g.lineTo(X(m.job[0] + 0.5), Z(m.job[1] + 0.5)); g.stroke(); g.setLineDash([]); }
   }
+  // a stretch or event picked in the villager's day list: a ring where it happened
+  if (dayAt) {
+    const cx = X(dayAt[0]), cz = Z(dayAt[1]);
+    g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.arc(cx, cz, 9, 0, 7); g.stroke();
+    g.strokeStyle = "rgba(255,255,255,0.5)"; g.lineWidth = 1; g.beginPath(); g.moveTo(cx - 14, cz); g.lineTo(cx - 5, cz); g.moveTo(cx + 5, cz); g.lineTo(cx + 14, cz); g.moveTo(cx, cz - 14); g.lineTo(cx, cz - 5); g.moveTo(cx, cz + 5); g.lineTo(cx, cz + 14); g.stroke();
+  }
   // player: arrow pointing where they look; when off the map, a marker on its edge in the player's direction
   let px = X(d.x), pz = Z(d.z), a = -d.yaw;
   if (!near) {
@@ -832,7 +858,7 @@ function markRoster(scroll) {
   for (const tr of $("r-body").children) {
     const on = tr.dataset.n === focus; tr.classList.toggle("hl", on);
     if (on && scroll) tr.scrollIntoView({ block: "nearest" });
-  }  renderInv();
+  }  renderInv(); renderDay();
 }
 // The selected villager's inventory (picked from the list or on the map), slot for slot as the game's trade screen shows it:
 // 18 slots, 6 across, item icons with stack counts and durability bars. Hover a slot for the item's name.
@@ -870,6 +896,72 @@ function horsesHtml(H) {
   return `<div>Paddock horses: <b>${H.horses.length}</b> of 4</div>` + rows;
 }
 $("r-inv").addEventListener("click", e => { if (e.target.closest("#r-invx")) { hlName = null; if (snap && curV) drawMap(snap); markRoster(); } });
+// ---------------------------------------------------------------- the selected villager's day (js/daytimeline.js)
+// Picking a villager tells the server (POST /pick), which tells the game; the game then sends that villager's timeline with its
+// snapshots (snap.day) whenever it changes. Stretches: [t0, t1, text, category, x, z]; events: [t, kind, text, x, z]; times in game days.
+let dayData = null, dayView = "today", daySig = "", dayAt = null, dayAtId = null, pickSent;
+const DCAT = { work: ["Work", "var(--accent)"], trade: ["Trade", "var(--warn)"], walk: ["Walk", "var(--info)"], sleep: ["Sleep", "#6c5fa8"], wait: ["Waiting", "var(--danger)"], idle: ["Idle", "#8b7a64"] };
+const DEV = { trade: ["Trade", "var(--trade)"], meal: ["Meal", "var(--farm)"], bed: ["Bed", "var(--bed)"], job: ["Job", "var(--job)"] };
+const hm = d => { const m = Math.round(d * 1440); return m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? " " + (m % 60) + "m" : "") : m + "m"; };
+function sendPick(key) {
+  if (key === pickSent) return;
+  pickSent = key; dayAt = null; dayAtId = null;
+  fetch("pick", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ key }) }).catch(() => { pickSent = undefined; });
+}
+function renderDay() {
+  const el = $("r-day"), m = hlName && curV ? curV.villagerList.find(v => v.name === hlName) : null;
+  sendPick(m && m.id ? m.id : null);
+  if (!m || !m.id) { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; daySig = ""; } return; }
+  el.hidden = false;
+  const D = dayData && dayData.key === m.id && !dayData.none ? dayData : null;
+  const now = curStale ? curV.day : snap && snap.gt != null ? snap.gt : curV.day;
+  const sig = m.id + "|" + (D ? D.v : "-") + "|" + dayView + "|" + Math.floor(now * 1440) + "|" + dayAtId + "|" + curStale;
+  if (sig === daySig) return;
+  daySig = sig;
+  const head = `<h4>${esc(m.name)}'s Day${curStale ? ' <span class="sub">when last loaded</span>' : ""}<span class="seg"><button type="button" data-dv="today" class="${dayView === "today" ? "on" : ""}">Last 24h</button><button type="button" data-dv="yesterday" class="${dayView === "yesterday" ? "on" : ""}">Yesterday</button></span></h4>`;
+  if (!D) { el.innerHTML = head + `<div class="sub">${dayData && dayData.none ? "Nothing recorded for this villager yet." : "Waiting for the game to send this villager's day…"}</div>`; return; }
+  // the window: the last 24 game hours ending now, or the whole previous game day (06:00 to 06:00, as the log's clock shows it)
+  const w0 = dayView === "today" ? now - 1 : Math.floor(now) - 1, w1 = dayView === "today" ? now : Math.floor(now), span = w1 - w0;
+  const pct = t => ((Math.min(w1, Math.max(w0, t)) - w0) / span * 100).toFixed(3) + "%";
+  // the open stretch runs on to now while the villager is loaded and was seen in the last few game minutes
+  const S = D.s.map((s, i) => i === D.s.length - 1 && !curStale && now - s[1] < 5 / 1440 ? [s[0], now, ...s.slice(2)] : s).filter(s => s[1] > w0 && s[0] < w1);
+  const E = D.e.filter(e => e[0] >= w0 && e[0] <= w1);
+  const clip = s => Math.max(0, Math.min(w1, s[1]) - Math.max(w0, s[0]));
+  const tot = {}, waits = new Map();
+  for (const s of S) { tot[s[3]] = (tot[s[3]] || 0) + clip(s); if (s[3] === "wait") waits.set(s[2], (waits.get(s[2]) || 0) + clip(s)); }
+  const off = Math.max(0, span - Object.values(tot).reduce((a, b) => a + b, 0));
+  const id = (k, i) => k + i;
+  const blocks = S.map((s, i) => { const c = DCAT[s[3]] || DCAT.idle; return `<div class="b" data-di="${id("s", D.s.indexOf(s) >= 0 ? D.s.indexOf(s) : D.s.length - 1)}" style="left:${pct(s[0])};width:calc(${pct(s[1])} - ${pct(s[0])});background:${c[1]}" title="${esc(s[2] + " (" + c[0] + ")\n" + stamp(s[0]) + " to " + stamp(s[1]) + ", " + hm(s[1] - s[0]))}"></div>`; }).join("");
+  const ticks = E.map(e => { const c = DEV[e[1]] || DEV.trade; return `<i data-di="${id("e", D.e.indexOf(e))}" style="left:${pct(e[0])};background:${c[1]}" title="${esc(c[0] + ", " + stamp(e[0]) + "\n" + e[2])}"></i>`; }).join("");
+  // hour marks every 3 game hours (the clock reads 06:00 at the start of a game day)
+  const hours = [];
+  for (let k = Math.ceil(w0 * 8); k <= Math.floor(w1 * 8); k++) { const t = k / 8, h = ((t - Math.floor(t)) * 24 + 6) % 24; hours.push(`<span style="left:${pct(t)}">${String(Math.round(h)).padStart(2, "0")}:00</span>`); }
+  const key = Object.entries(DCAT).filter(([k]) => tot[k] >= 0.5 / 1440).map(([k, c]) => `<span><i style="background:${c[1]}"></i>${c[0]} ${hm(tot[k])}</span>`).join("") + (off > 1 / 1440 ? `<span><i style="background:rgba(255,255,255,0.08)"></i>Not loaded ${hm(off)}</span>` : "") +
+    Object.entries(DEV).filter(([k]) => E.some(e => e[1] === k)).map(([k, c]) => `<span><i style="background:${c[1]};width:3px"></i>${c[0]}s ${E.filter(e => e[1] === k).length}</span>`).join("");
+  const wl = [...waits].sort((a, b) => b[1] - a[1]);
+  const sum = tot.wait ? `<span class="w">Waited ${hm(tot.wait)}</span>: ` + wl.slice(0, 3).map(([t, d]) => `${esc(t)} (${hm(d)})`).join(", ") + (wl.length > 3 ? `, and ${wl.length - 3} more` : "") : "No waiting.";
+  // the list: stretches and events, newest first
+  const rows = [...S.map(s => ({ t: s[0], s, i: id("s", D.s.indexOf(s) >= 0 ? D.s.indexOf(s) : D.s.length - 1) })), ...E.map(e => ({ t: e[0], e, i: id("e", D.e.indexOf(e)) }))].sort((a, b) => b.t - a.t);
+  const row = r => {
+    const at = r.s ? r.s.length > 4 && r.s[4] != null : r.e.length > 3;
+    if (r.s) { const c = DCAT[r.s[3]] || DCAT.idle; return `<div class="${at ? "at" : ""}${r.i === dayAtId ? " sel" : ""}" data-di="${r.i}"><span class="t">${esc(stamp(r.s[0]))}</span><span class="k"><i class="dot" style="background:${c[1]};margin-right:5px"></i>${hm(r.s[1] - r.s[0])}</span><span>${esc(r.s[2])}</span></div>`; }
+    const c = DEV[r.e[1]] || DEV.trade;
+    return `<div class="${at ? "at" : ""}${r.i === dayAtId ? " sel" : ""}" data-di="${r.i}"><span class="t">${esc(stamp(r.e[0]))}</span><span class="k" style="color:${c[1]}">${c[0]}</span><span class="ev">${esc(r.e[2])}</span></div>`;
+  };
+  el.innerHTML = head + `<div class="dstrip"><div class="dticks">${ticks}</div>${blocks}${dayView === "today" && !curStale ? '<div class="now" style="right:0" title="Now"></div>' : ""}</div>` +
+    `<div class="dhours">${hours.join("")}</div><div class="dkey">${key}</div><div class="dsum">${sum}</div>` +
+    `<div class="dlist">${rows.map(row).join("") || '<div><span></span><span></span><span class="sub">Nothing recorded in this window.</span></div>'}</div>`;
+}
+$("r-day").addEventListener("click", e => {
+  const b = e.target.closest("button[data-dv]");
+  if (b) { dayView = b.dataset.dv; daySig = ""; renderDay(); return; }
+  const r = e.target.closest("[data-di]"), D = dayData;
+  if (!r || !D) return;
+  const i = r.dataset.di, x = i[0] === "s" ? D.s[+i.slice(1)] : D.e[+i.slice(1)];
+  const p = !x ? null : i[0] === "s" ? (x.length > 4 ? [x[4], x[5]] : null) : (x.length > 3 ? [x[3], x[4]] : null);
+  if (dayAtId === i || !p) { dayAt = null; dayAtId = null; } else { dayAt = p; dayAtId = i; }
+  daySig = ""; renderDay(); if (snap && curV) drawMap(snap);
+});
 // Villagers who died in this village, newest first (the filter box applies to them too).
 function renderPast(dead, q) {
   const rows = dead.slice().reverse().filter(d => !q || (d.name + " " + d.prof + " " + (d.cause || "")).toLowerCase().includes(q));
