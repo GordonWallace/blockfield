@@ -23,6 +23,7 @@ const TERMS = [
   { id: "grown",      label: "children grown up this week",       weight: +5,  count: v => v.week("grown") },
   { id: "unemployed", label: "unemployed",                        weight: -3,  count: v => v.adults.filter(m => m.profession === "unemployed").length },
   { id: "broke",      label: "with no emeralds",                  weight: -3,  count: v => v.adults.filter(m => v.emeralds(m) === 0).length },
+  { id: "treats",     label: "ate a treat in the last 3 days",    weight: +1,  count: v => (BF.baker ? v.villagers.filter(m => BF.baker.treatCounts(m)).length : 0) },   // a cake slice or a pumpkin pie (js/baker.js)
 ];
 
 const events = new Map();   // village key -> {kind: [game day, ...]} (only the last WINDOW days are kept)

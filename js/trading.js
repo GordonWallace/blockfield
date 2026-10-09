@@ -38,6 +38,10 @@ const VALUE = {
   oak_door: .07, torch: .04, oak_fence: .05,                       // builder goods (door 6 planks -> 3, torch coal + stick -> 4, fence 5 planks -> 3)
   saddle: 1.8, lead: .3,                                           // stable hand goods (js/stables.js): saddle 3 leather + 1 iron ingot (.95) + work, lead 4 string + 1 leather -> 2
   glass_bottle: .1, milk_bottle: .15, milk_bucket: 1.75, milk_churn: .62,   // cowherd goods (js/cowherd.js): a bottle is 1 glass (.08) + work; milk in a bottle .05 on top; the churn 4 planks + 1 iron ingot
+  // baker goods (js/baker.js): sugar = 1 cane + work; pie = pumpkin .14 + sugar .05 + egg .055 + baking; cake = 3 milk (.15 of the bottles' .45
+  // come back as empties: .15 net) + 2 sugar .1 + egg .055 + 3 wheat .21 + fuel and work = 1.0, a slice a seventh of it (.14);
+  // the oven 8 cobblestone .24 + 1 iron ingot .5; pumpkin seeds a quarter pumpkin
+  sugar: .05, pumpkin_pie: .3, cake: 1.0, cake_slice: .14, pumpkin_seeds: .035, bakers_oven: .75,
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
   VALUE[sp + "planks"] = .03; VALUE[(sp || "oak_") + "log"] = .12;
@@ -218,6 +222,16 @@ const TRADES = {
   // The merchant (js/merchant.js) has no wares of its own: it carries other villagers' goods between villages, buying and selling through
   // their offers. Whatever it holds outside a trip shows as its spare goods (js/market.js).
   merchant: [[], [], [], [], []],
+  // The baker (js/baker.js) sells what it bakes in its oven from ingredients it bought in the village: cake slices (a cake cut in 7), pumpkin
+  // pies, whole cakes from level 2 (prices 100-111% of VALUE). Nothing is restocked or part of its starting pack. It buys eggs, wheat and pumpkins
+  // from the player too (75-92%).
+  baker: [
+    ["1 emerald > 7 cake_slice", "1 emerald > 3 pumpkin_pie", "20 egg > 1 emerald", "16 wheat_item > 1 emerald"],
+    ["1 emerald > 1 cake", "8 pumpkin > 1 emerald"],
+    [],
+    [],
+    [],
+  ],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
@@ -247,6 +261,7 @@ const PRODUCE = {
   merchant: [],        // buys and sells other villagers' goods (js/merchant.js)
   stable_hand: [],     // saddles and leads are made from leather, iron and string it bought; horses are caught or bred (js/stables.js)
   cowherd: [],         // milk, beef, leather and steak come only from its herd (js/cowherd.js)
+  baker: [],           // cakes and pies come only from its oven, from ingredients it bought (js/baker.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -360,6 +375,7 @@ function stockFor(prof, v) {
   if (prof === "forester") for (const sp of ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"]) { noStart.add(I[sp + "_log"]); noStart.add(I[sp === "oak" ? "planks" : sp + "_planks"]); } if (prof === "forester") noStart.add(I.stick);   // harvested (sticks made from them), never given
   if (prof === "poultry_keeper") for (const n of ["egg", "feather", "raw_chicken"]) noStart.add(I[n]);   // laid or culled, never given (js/poultry.js)
   if (prof === "cowherd") for (const n of ["milk_bottle", "raw_beef", "leather", "steak"]) noStart.add(I[n]);   // milked, culled or cooked, never given (js/cowherd.js)
+  if (prof === "baker") for (const n of ["cake_slice", "pumpkin_pie", "cake"]) noStart.add(I[n]);   // baked, never given (js/baker.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -371,7 +387,7 @@ function stockFor(prof, v) {
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
     // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js); nor the fletcher (js/fletcher.js seed gives a few)
-    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));

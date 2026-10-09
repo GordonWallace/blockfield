@@ -68,6 +68,8 @@ function stableOf(R) {
   const at = ([x, z]) => [e.ox + x, e.oz + z], P = M.paddock.map(at), rk = M.rack ? at(M.rack[0]) : [e.ox, e.oz];
   const st = { e, rec: R, owner: ownerOf(R), y: e.oy, box: { x0: Math.min(P[0][0], P[1][0]), z0: Math.min(P[0][1], P[1][1]), x1: Math.max(P[0][0], P[1][0]), z1: Math.max(P[0][1], P[1][1]) },
     gates: M.gate.map(at), out: M.out.map(at), rack: { x: rk[0], y: e.oy + 1, z: rk[1] } };
+  st.box.gx = st.gates.reduce((a, g) => a + g[0], 0) / st.gates.length + 0.5;   // the gate's middle: a penned horse outside lines up on it to walk in
+  st.box.gz = st.gates.reduce((a, g) => a + g[1], 0) / st.gates.length + 0.5;
   Object.defineProperty(e, "_st", { value: st, writable: true, enumerable: false, configurable: true });   // "_" keys are dropped from the save too (builder.js clean)
   e._stKey = k;
   return st;

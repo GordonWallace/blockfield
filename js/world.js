@@ -249,7 +249,9 @@ world.setBlock = function (x, y, z, id) {
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
   if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
   if (BF.isFurnace(oldId) && !BF.isFurnace(id) && BF.inventory && BF.inventory.furnaceRemoved) BF.inventory.furnaceRemoved(x, y, z); // a furnace stops and spills (js/inventory.js)
-  if (BF.blocks[id] && BF.blocks[id].growsInto) growing.add(fkey(x, y, z));
+  if (BF.baker && BF.baker.isOven(oldId) && !BF.baker.isOven(id)) BF.baker.ovenRemoved(x, y, z); // a baker's oven spills (js/baker.js)
+  if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) growing.add(fkey(x, y, z));
+  if (y > BF.MIN_Y) { const bl = BF.blocks[cblock(c, lx, y - 1, lz)]; if (bl && bl.growsUp && id !== bl.id) growing.add(fkey(x, y - 1, z)); }   // cane cut back: the top left grows again
   if (BF.farmland) BF.farmland.onSet(x, y, z, oldId, id);   // farmland hydration clock (js/farmland.js)
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {
@@ -351,7 +353,7 @@ function createChunk(cx, cz) {
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) updateColumn(c, x, z);
   world.chunks.set(key, c);
   if (BF.light) BF.light.onChunkCreated(c);
-  if (e) for (const [i, id] of e) if (BF.blocks[id] && BF.blocks[id].growsInto) {
+  if (e) for (const [i, id] of e) if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) {
     growing.add(fkey(cx * CS + (i & 15), (i >> 8) + BF.MIN_Y, cz * CS + ((i >> 4) & 15)));
   }
   for (const fn of world._loadL) { try { fn(cx, cz, c); } catch (err) { console.error(err); } }
@@ -954,6 +956,7 @@ function growTick() {
     const [x, y, z] = k.split(",").map(Number);
     if (!world.isLoaded(x, z)) continue; // keeps waiting until its chunk is back
     const id = world.getBlock(x, y, z), b = BF.blocks[id];
+    if (b && b.growsUp) { if (caneTick(x, y, z, id, b, dt)) growing.delete(k); continue; }
     if (!b || !b.growsInto) { growing.delete(k); continue; }
     const soil = world.getBlock(x, y - 1, z);
     if (soil !== BF.B.farmland && soil !== BF.B.farmland_dry) continue;
@@ -961,6 +964,21 @@ function growTick() {
     // crops grow 1.5x faster while it rains (js/weather.js)
     if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
   }
+}
+// Sugar cane (blocks with growsUp: their tallest height) grows a block on top, at the crop rate, while the column is shorter than that and its
+// bottom stands on dirt, grass or sand beside water (vanilla). Only cane someone placed or cut back is tracked (an edit), so wild cane stays as
+// generated until it is cut. Returns true when the cell is done (not the top, full height, or no water).
+function caneTick(x, y, z, id, b, dt) {
+  const up = world.getBlock(x, y + 1, z);
+  if (up !== 0) return true;
+  let h = 1, by = y - 1;
+  while (by > BF.MIN_Y && world.getBlock(x, by, z) === id) { h++; by--; }
+  if (h >= b.growsUp) return true;
+  const g = BF.blocks[world.getBlock(x, by, z)], gn = g ? g.name : "";
+  if (!/^(grass|dirt|coarse_dirt|podzol|sand|red_sand|snow_grass)$/.test(gn)) return true;
+  if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[world.getBlock(x + dx, by, z + dz)])) return true;
+  if (Math.random() < GROW_CHANCE_PER_S * dt * (BF.weather && BF.weather.raining ? 1.5 : 1)) { world.setBlock(x, y + 1, z, id); return true; }
+  return false;
 }
 world.growingCount = () => growing.size;
 // Fluid spread and crop growth run on the simulation clock (BF.simNow), once per sim step, so fast-forward (js/timewarp.js) speeds them up too.
@@ -1039,7 +1057,8 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
   const y0 = Math.floor(py), y1 = Math.floor(py + h - 1e-6);
   const z0 = Math.floor(pz - hw), z1 = Math.floor(pz + hw - 1e-6);
   let hit = false;
-  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+  for (let y = y0 - 1; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (y < y0 && !BF.TALLBOX[world.getBlock(x, y, z)]) continue;   // the layer below the feet only matters for fences / gates (1.5 tall)
     if (!world.isSolid(x, y, z)) continue;
     const bid = world.getBlock(x, y, z);
     const cbl = (BF.DYNBOXES[bid] && BF.DYNBOXES[bid](world.getBlock, x, y, z, bid)) || BF.CBOXES[bid] || (BF.CBOX[bid] ? [BF.CBOX[bid]] : [null]); // slabs/stairs: several boxes, each tested on its own

@@ -33,6 +33,7 @@ function breadEq(x) {
 const SEED_KEEP = 8;
 function reserveOf(m, id) {
   if (m && m.profession === "cowherd" && ((BF.I.milk_bucket != null && id === BF.I.milk_bucket) || (BF.I.raw_beef != null && id === BF.I.raw_beef))) return Infinity;   // it bottles its milk (never drinks the pail) and cooks or sells its beef (js/cowherd.js)
+  if (m && m.profession === "baker" && BF.baker && (BF.baker.keepsFood(m, id) || BF.baker.isTreat(id))) return Infinity;   // its milk is for cakes, its slices and pies are its wares (js/baker.js)
   if (!m || m.profession !== "farmer") return 0;
   const it = BF.items[id];
   return it && it.plants != null ? SEED_KEEP : 0;
@@ -72,6 +73,14 @@ function emptied(m, id) {
   const left = T().inv.add(m.inv, back, 1);
   if (left > 0 && BF.drops && m.position) BF.drops.spawn(back, left, m.position.x, m.position.y + 0.6, m.position.z);
 }
+// The next item to eat from list (edible(m)): treats (js/baker.js cake slices, pumpkin pies) are kept for a treat once a day at most: one is eaten
+// first when a treat is due, otherwise only when nothing else is left.
+function nextBite(m, list) {
+  if (!list.length || !BF.baker) return list[0] || null;
+  const treat = e => BF.baker.isTreat(e.id);
+  if (BF.baker.treatDue(m)) { const t = list.find(treat); if (t) return t; }
+  return list.find(e => !treat(e)) || list[0];
+}
 // Eats `amount` bread-eq: whole items are taken out of the inventory (cheapest first) and any excess is carried as
 // satiation (`life.sat`) for later meals. Returns the bread-eq actually eaten (less when food ran out).
 function eat(m, amount) {
@@ -80,10 +89,11 @@ function eat(m, amount) {
   let need = amount, ate = [];
   while (need > 1e-9) {
     if (L.sat > 1e-9) { const u = Math.min(L.sat, need); L.sat -= u; need -= u; continue; }
-    const e = edible(m)[0];
+    const e = nextBite(m, edible(m));
     if (!e) break;
     T().inv.remove(m.inv, e.id, 1);
     emptied(m, e.id);
+    if (BF.baker && BF.baker.isTreat(e.id)) BF.baker.ateTreat(m);
     L.sat += e.eq;
     ate.push(e.id);
   }
@@ -147,6 +157,7 @@ function startFood(v) {
   const prof = v.profession;
   if (prof === "farmer") {
     addAll(v.inv, [["wheat_seeds", rndInt(10, 20)], ["carrot", rndInt(8, 14)], ["potato", rndInt(8, 14)], ["beetroot_seeds", rndInt(4, 10)]]);
+    if (BF.baker) addAll(v.inv, [["sugar_cane", rndInt(2, 4)]]);   // a few canes to plant beside its beds' water, like its seeds (js/baker.js: the baker's sugar)
     if (breadEq(v.inv) < 12) addAll(v.inv, [["bread", Math.ceil(12 - breadEq(v.inv))]]);
     if (Math.random() < 0.45) addAll(v.inv, [["oak_log", rndInt(3, 8)]]);
   } else {
@@ -162,7 +173,8 @@ function startFood(v) {
 function pack(v) {
   const L = v.life;
   if (!L) return { v: LIFE_V };
-  return { v: LIFE_V, mealT: L.mealT, lastAte: L.lastAte, sat: +L.sat.toFixed(4), eaten: +L.eaten.toFixed(3), starving: !!L.starving, lived: +(L.lived || 0).toFixed(4) };
+  return { v: LIFE_V, mealT: L.mealT, lastAte: L.lastAte, sat: +L.sat.toFixed(4), eaten: +L.eaten.toFixed(3), starving: !!L.starving, lived: +(L.lived || 0).toFixed(4),
+    tt: L.tt != null ? L.tt : undefined, tb: L.tb != null ? L.tb : undefined };   // last treat eaten, last treat bought (js/baker.js)
 }
 function unpack(v, o) {
   if (!v) return;
@@ -170,6 +182,8 @@ function unpack(v, o) {
   const t = dayNow(), num = (x, d) => (Number.isFinite(+x) ? +x : d);
   v.life = { v: LIFE_V, mealT: num(o.mealT, t), lastAte: num(o.lastAte, t), sat: Math.max(0, num(o.sat, 0)), eaten: Math.max(0, num(o.eaten, 0)), starving: !!o.starving,
     lived: Math.max(0, num(o.lived, 0)) };   // saves from before ages: counted from now
+  if (Number.isFinite(+o.tt) && o.tt != null) v.life.tt = +o.tt;   // last treat eaten / bought (js/baker.js)
+  if (Number.isFinite(+o.tb) && o.tb != null) v.life.tb = +o.tb;
   v.eatenTotal = v.life.eaten;
   v.starving = v.life.starving;
 }
@@ -201,6 +215,7 @@ const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const WORK_END = 0.5;             // farmers and shoppers stop at sunset, which is also bedtime (mobs.js)
 const REACH_H = 1.75;             // horizontal feet -> cell centre distance to work a cell
 const ACT = { harvest: 0.55, plant: 0.45, till: 0.9, border: 0.75, unborder: 0.8, water: 0.9, fill: 0.9, craft: 1.6, tend: 3.0, dig: 0.7, raise: 0.5, gather: 0.9, buylog: 1.2 };
+const actOf = k => (ACT[k] != null ? ACT[k] : BF.baker && BF.baker.FARM_KINDS[k] != null ? BF.baker.FARM_KINDS[k] : 0.6);   // + sugar cane and pumpkin tasks (js/baker.js)
 const TASK_MAX = 45;              // seconds before an unfinished task is given up
 const BREAK_P = 0.05;             // chance of a short break after a task (the rest of the day is farming)
 const SCAN_COLS = 500;            // columns of the village area scanned per tick
@@ -441,13 +456,15 @@ function think(m, fs, R, D) {
     if (c.matureSet.has(a)) {
       if (!fits.has(a)) fits.set(a, dropsFit(m, a));
       if (fits.get(a)) kind = "harvest";
-    } else if (a === 0 && hasSeed && !BF.SOLID[getB(x, y + 2, z)]) kind = "plant";
+    } else if (a === 0 && hasSeed && !BF.SOLID[getB(x, y + 2, z)] && !(D.pumpkins && D.pumpkins.has(key3(x, y, z)))) kind = "plant";   // a pumpkin cell gets pumpkin seeds (js/baker.js)
     else if (BF.blocks[a] && BF.blocks[a].growsInto != null) young.push([x, y, z]);
     if (!kind || !ok(k)) continue;
     const d = dist(x, z) + (kind === "plant" ? 1.5 : 0);
     if (d < bd) { bd = d; best = { kind, x, y: y + 1, z, k }; }
   }
   if (best) return best;
+  // sugar cane beside the water of its beds, the pumpkin patches (js/baker.js: the baker's sugar and pumpkins)
+  if (BF.baker) { const t = BF.baker.farmTask(m, fs, R, D, { myBeds, ok, key3, hasHoe }); if (t) return t; }
   // nothing to harvest or plant: work on a bed (grow one, or lay out a new one) while the farmer wants more farmland
   let P = projectOf(m, R, D);
   if (!P && cells.length < FARM_MAX && !(fs.projCd > now)) { fs.projCd = now + PROJECT_CD; P = chooseProject(m, R, D, cells.length); }
@@ -1084,6 +1101,7 @@ function perform(m, fs, R, D) {
   if (t.kind === "tend") return true;
   if (t.kind === "gather") return gatherBlock(m, D, t);
   if (t.kind === "buylog") return doLogDeal(m, t) > 0;
+  if (BF.baker && BF.baker.FARM_KINDS[t.kind] != null) return BF.baker.farmPerform(m, t, D, { myBeds, ok: () => true, key3, hasHoe });   // sugar cane, pumpkins (js/baker.js)
   if (!w.isLoaded(t.x, t.z) || !freeCellOrFarm(R, D, t)) return false;
   if (t.proj) return performBed(m, fs, R, D, t);
   if (t.kind === "harvest") {
@@ -1180,7 +1198,7 @@ function farmAI(m, dt, out) {
   ensureKit(m); ensureCover(D, m);
   if (fs.breakT > 0) { fs.breakT -= dt; return false; }
   if (!fs.task) {
-    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = ACT[fs.task.kind]; fs.t = 0; claims.set(fs.task.k, m); }
+    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind); fs.t = 0; claims.set(fs.task.k, m); }
     else {
       fs.thinkT = (fs.thinkT || 0) - dt;
       if (fs.thinkT > 0) return fs.idleWork;      // brief pause between tasks still counts as work
@@ -1188,7 +1206,7 @@ function farmAI(m, dt, out) {
       if (!D.ready) { fs.idleWork = false; return false; }
       const t = think(m, fs, R, D);
       if (!t) { fs.breakT = rnd(5, 10); fs.idleWork = false; return false; }
-      fs.task = t; fs.stage = t.kind === "craft" ? "act" : "walk"; fs.t = 0; fs.actT = ACT[t.kind]; fs.navFail = 0; fs.idleWork = true;
+      fs.task = t; fs.stage = t.kind === "craft" ? "act" : "walk"; fs.t = 0; fs.actT = actOf(t.kind); fs.navFail = 0; fs.idleWork = true;
       t.max = TASK_MAX + (t.x != null ? 2.5 * Math.hypot(t.x + 0.5 - m.position.x, t.z + 0.5 - m.position.z) : 0);   // long walks to a far field get more time
       if (t.k) claims.set(t.k, m);
     }
@@ -1210,7 +1228,7 @@ function farmAI(m, dt, out) {
     const st = t.sx != null ? travel(m, fs, dt, out, t.sx, t.sy, t.sz, m.def.speed * 1.1)      // a bucket is filled from a cell beside (or over the wall of) the water
       : travel(m, fs, dt, out, t.x, t.ty != null ? t.ty : t.y, t.z, m.def.speed * 1.1);
     if (st === "failed") { log("giveup", m, { task: t.kind, why: "no path", at: [t.x, t.y, t.z] }); endTask(m, fs, false); return true; }
-    if (st === "arrived") { fs.stage = "act"; fs.actT = t.kind === "tend" ? rnd(2, 4) : ACT[t.kind]; ai.swingT = t.kind === "tend" ? 0 : 0.35; }
+    if (st === "arrived") { fs.stage = "act"; fs.actT = t.kind === "tend" ? rnd(2, 4) : actOf(t.kind); ai.swingT = t.kind === "tend" ? 0 : 0.35; }
     return true;
   }
   // act: face the cell, swing, then do it
@@ -1237,7 +1255,7 @@ function dealWith(m, v2, want) {
   const ed = new Map(F.edible(v2).map(e => [e.id, e.n]));
   let best = null;
   for (const o of v2.trades || []) {
-    if (o.buy.length !== 1 || o.buy[0].id !== em || !F.isFood(o.sell.id) || isMilk(o.sell.id) || T.blockReason(v2, o)) continue;
+    if (o.buy.length !== 1 || o.buy[0].id !== em || !F.isFood(o.sell.id) || isMilk(o.sell.id) || isTreat(o.sell.id) || T.blockReason(v2, o)) continue;
     const per = F.breadEq(o.sell.id) * o.sell.n;
     if ((ed.get(o.sell.id) || 0) < o.sell.n || per > sp) continue;
     let k = Math.min(Math.ceil(want / per), Math.floor(myEm / o.buy[0].n), Math.floor(sp / per), Math.floor((ed.get(o.sell.id) || 0) / o.sell.n), 4);
@@ -1248,6 +1266,9 @@ function dealWith(m, v2, want) {
   }
   return best;   // only through offers the player could take too: job offers and spare goods (js/market.js)
 }
+// Cake slices and pumpkin pies (js/baker.js) are treats: everyday hunger buys them only when no plain food is for sale (findFoodSeller's "treat"
+// pass, before milk); a villager buys one for the treat now and then (shopAI, BF.baker.treatWanted).
+const isTreat = id => !!(BF.baker && BF.baker.isTreat(id));
 // Milk (js/cowherd.js) is a last resort: a hungry villager buys milk bottles only when no other food is for sale anywhere in its village, through
 // an offer for them (the cowherd's job offer, or anyone's spare milk, js/market.js). The cowherd keeps BF.cowherd.MILK_KEEP bottles back (the baker's
 // next cake) in its market reserve (BF.cowherd.reserve). Never a milk bucket: the cowherd keeps its pails to bottle them.
@@ -1274,10 +1295,10 @@ function findFoodSeller(m) {
   if (!R || want <= 0) return null;
   const sh = m.fshop;
   let best = null, bs = Infinity;
-  for (const pass of (BF.eggCook ? ["egg", "food"] : ["food"]).concat(I("milk_bottle") != null ? ["milk"] : [])) {
+  for (const pass of (BF.eggCook ? ["egg", "food"] : ["food"]).concat(BF.baker ? ["treat"] : [], I("milk_bottle") != null ? ["milk"] : [])) {
     for (const v2 of R.members || []) {
       if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
-      const d = pass === "egg" ? BF.eggCook.eggDeal(m, v2, want) : pass === "milk" ? milkDeal(m, v2, want) : dealWith(m, v2, want);
+      const d = pass === "egg" ? BF.eggCook.eggDeal(m, v2, want) : pass === "milk" ? milkDeal(m, v2, want) : pass === "treat" ? BF.baker.treatDeal(m, v2, want) : dealWith(m, v2, want);
       if (!d) continue;
       const s = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
       if (s < bs) { bs = s; best = d; }
@@ -1293,7 +1314,7 @@ function doFoodDeal(m, deal) {
     if (!canSell(v2)) break;
     {
       const o = deal.offer, per = F.breadEq(o.sell.id) * o.sell.n;
-      if ((!deal.milk && F.surplus(v2) < per) || T.blockReason(v2, o) || cnt(m, em) < o.buy[0].n) break;
+      if ((!deal.milk && !deal.treat && F.surplus(v2) < per) || T.blockReason(v2, o) || cnt(m, em) < o.buy[0].n) break;
       if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
       const sold = T.exchange(v2, o);                 // the seller's stock and room, as for a player trade
       if (!sold) break;
@@ -1496,8 +1517,9 @@ function shopAI(m, dt, out) {
     const wheat = hasEm && feedWanted(m) > 0;
     const tool = hasEm && toolNeed(m);
     const bottles = hasEm && m.profession === "cowherd" && BF.cowherd && BF.cowherd.bottleWanted(m) > 0;
-    if (sh.cd > now || m.child || !(hungry || wheat || tool || bottles)) return false;
-    const deal = (hungry && findFoodSeller(m)) || (tool && findToolSeller(m, tool)) || (wheat && findWheatSeller(m)) || (bottles && findBottleSeller(m)) || null;
+    const treat = hasEm && !hungry && !!BF.baker && BF.baker.treatWanted(m);   // a cake slice or a pie now and then (js/baker.js)
+    if (sh.cd > now || m.child || !(hungry || wheat || tool || bottles || treat)) return false;
+    const deal = (hungry && findFoodSeller(m)) || (tool && findToolSeller(m, tool)) || (wheat && findWheatSeller(m)) || (bottles && findBottleSeller(m)) || (treat && BF.baker.findTreatSeller(m)) || null;
     if (!deal) {
       if (BF.econ) {   // nobody sells any of it now: the Economy view's dead ends (js/economy.js)
         if (hungry) BF.econ.want(m, "Food");
@@ -1621,11 +1643,13 @@ function statusText(m) {
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.statusText) { const t = BF.shepherd.statusText(m); if (t) return t; }
   if (m.profession === "poultry_keeper" && BF.poultry) { const t = BF.poultry.statusText(m); if (t) return t; }
   if (m.profession === "cowherd" && BF.cowherd) { const t = BF.cowherd.statusText(m); if (t) return t; }
+  if (m.profession === "baker" && BF.baker) { const t = BF.baker.statusText(m); if (t) return t; }
   if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
     const t = m.farm.task;
     if (t.kind === "craft" && t.hay) return "Making hay bales";
     const b = t.kind === "harvest" || t.kind === "plant" ? BF.blocks[getB(t.x, t.y, t.z)] : null;
     if (t.kind === "gather") return "Gathering dirt";
+    if (NAMES[t.kind] == null && BF.baker && BF.baker.FARM_NAMES[t.kind]) return BF.baker.FARM_NAMES[t.kind];
     return NAMES[t.kind] + (t.kind === "harvest" && b && b.name ? " " + b.name : "");
   }
   if (FD().available(m) < FD().rate(m)) return "Hungry";
@@ -1696,5 +1720,5 @@ if (BF.texKit) {
 BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
   exportAll, importAll, bedRects,
   villageAge: key => { const A = villageAges.get(key); return A ? A.lived : null; },   // game days loaded and active, or null if never
-  _test: { detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, digOf, findLogSeller, doLogDeal, doToolDeal, perform, dealWith, findFoodSeller, milkDeal, findBottleSeller, findWheatSeller, doWheatDeal, feedWanted, get MILK_KEEP() { return BF.cowherd ? BF.cowherd.MILK_KEEP : 3; }, scanStep, inRange } };
+  _test: { doFoodDeal, detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, digOf, findLogSeller, doLogDeal, doToolDeal, perform, dealWith, findFoodSeller, milkDeal, findBottleSeller, findWheatSeller, doWheatDeal, feedWanted, get MILK_KEEP() { return BF.cowherd ? BF.cowherd.MILK_KEEP : 3; }, scanStep, inRange } };
 })();

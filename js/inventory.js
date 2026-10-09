@@ -492,7 +492,7 @@ const NATURAL = /(^grass$|dirt|^sand$|red_sand|gravel|snow|ice|_log$|leaves|cact
 let creList = null;
 function creativeItems() {
   if (creList) return creList;
-  const growTargets = new Set(BF.blocks.filter(b => b && b.growsInto != null)
+  const growTargets = new Set(BF.blocks.filter(b => b && b.growsInto != null && !b.fruit)   // a pumpkin stem's pumpkin stays in the menu (js/baker.js)
     .map(b => typeof b.growsInto === "number" ? (BF.blocks[b.growsInto] || {}).name : b.growsInto));
   creList = [];
   for (const it of BF.items) { // sparse: holes between block ids and ITEM_BASE iterate as undefined
@@ -1553,7 +1553,10 @@ const api = {
   furnaceState(x, y, z) { return furnaces.get(`${x},${y},${z}`) || null; },
   furnaceRecord(x, y, z) { return furnaceAt({ x, y, z }); },   // creates the furnace's state when it has none yet (villagers: js/toolsmith.js)
   // One simulation step for every furnace (main.js runs it with the world, so it follows the fast-forward).
-  simTick(h) { for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true; },
+  simTick(h) {
+    for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true;
+    if (BF.baker) BF.baker.simTick(h);   // bakers' ovens bake on the same clock (js/baker.js)
+  },
   chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
   // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
   chestAdd(x, y, z, itemId, count = 1, wear = 0) {   // wear: uses spent on a worn tool
