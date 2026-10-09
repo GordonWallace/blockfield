@@ -78,6 +78,7 @@ const INPUTS = {
   farmer: m => [[id => BF.items[id] && BF.items[id].plants != null, (BF.food ? BF.food.SEED_KEEP : 8) * 2], ["wheat_item", BF.villageLife ? BF.villageLife.WHEAT_SPARE : 24], ["bone_meal", 16]],
   shepherd: m => [["wheat_item", 16]],
   cowherd: m => [["wheat_item", 16], ["bucket", 2], ["milk_bucket", 4], ["glass_bottle", 64], ["raw_beef", 32]],   // feed, its bucket, milk to bottle, bottles, beef to cook (js/cowherd.js)
+  baker: m => [["wheat_item", 16], ["milk_bottle", 14], ["egg", 16], ["sugar", 16], ["sugar_cane", 32], ["pumpkin", 10], ["coal", 16], ["charcoal", 16], ["cake_slice", 64], ["pumpkin_pie", 16], ["cake", 2]],   // ingredients, fuel and its wares (js/baker.js)
   forester: m => [[id => /_sapling$/.test(nm(id)), 16]],
   furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8], ["cobblestone", 16]],
   cartographer: m => [["iron_ingot", 4], ["gold_ingot", 1], ["paper", 32], ["compass", 1]],

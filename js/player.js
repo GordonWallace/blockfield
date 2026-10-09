@@ -1382,6 +1382,12 @@ function secondaryDown() {
   if (tb && /_fence$/.test(tb.name) && BF.horses && BF.horses.tieToPost(target.x, target.y, target.z)) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
   if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
+  if (tb && BF.baker && BF.baker.isCake(target.id) && useBlk) {   // a placed cake: eat a slice (js/baker.js)
+    const r = BF.baker.eatCake(target.x, target.y, target.z, P, creative());
+    if (r === true) { saturation = Math.min(P.hunger, saturation + 0.4); swing(); } else if (typeof r === "string") actionBar(r);
+    mouseR = false; return true;
+  }
+  if (tb && BF.baker && BF.baker.isOven(target.id) && useBlk) { actionBar(BF.baker.ovenText(target.x, target.y, target.z)); mouseR = false; return true; }   // what a baker's oven holds
   if (target && BF.isFurnace(target.id) && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
   }

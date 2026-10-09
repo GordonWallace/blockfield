@@ -249,6 +249,8 @@ const VILLAGER_OUTFITS = {
   poultry_keeper: { robe: 0x8a4a2a, trim: 0x5a2e1a, apron: 0xe6cf7a, sash: 0xd8b84a, hat: { kind: "brim", color: 0xc9a24a, color2: 0xd8b45a } },
   // cowherd (not vanilla): leather apron over an olive smock, a milk-white belt and a brown brim hat; keeps cows in a pasture (js/cowherd.js)
   cowherd:       { robe: 0x6a7448, trim: 0x454c2c, apron: 0x8a5530, sash: 0xf0ece0, hat: { kind: "brim", color: 0x5e3a1e, color2: 0x74492a } },
+  // baker (not vanilla): a cream robe, a flour-white apron, a brick-red belt and a tall white cap; bakes cakes and pies in its oven (js/baker.js)
+  baker:         { robe: 0xd8c8a8, trim: 0x9a7a52, apron: 0xf6f4ee, sash: 0xa0523a, hat: { kind: "bucket", color: 0xf8f8f4, color2: 0xe8e6e0 } },
 };
 const PROFESSIONS = Object.keys(VILLAGER_OUTFITS);
 const PROF_ALIAS = { smith: "toolsmith" };
@@ -1451,11 +1453,13 @@ function villagerAI(m, dt, out) {
   if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
   if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
   if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return;   // carries on cooking beef it started (js/cowherd.js)
+  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, true)) return;   // carries on baking or buying it started (js/baker.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
   if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
   if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
+  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, false)) return;   // buys ingredients and fuel, bakes cakes and pies in its oven (js/baker.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
@@ -2016,7 +2020,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2141,6 +2145,23 @@ function villageRoster(rec) {
       }
     }
     if (ordered.length < cap) ordered.push({ house: null, idx: 1700, bed: null, prof: "cowherd" });
+  }
+  // bakers: village generator 6 gives a village of BAKER_POP (15) or more villagers a baker per 15 villagers, each with a baker's oven placed by the
+  // jobs plan (js/baker.js, js/jobs.js planVillage). Own keys <village key>#1800+k; each takes the place of the last plain resident.
+  const BP = (BF.worldgen && BF.worldgen.BAKER_POP) || 15;
+  const nB = (BF.state && BF.state.villages | 0) >= 6 && (rec.pop || 0) >= BP ? Math.floor(rec.pop / BP) : 0;
+  for (let k = 0; k < nB; k++) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      let gone = false;
+      for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); gone = true;
+      }
+      if (!gone) break;
+    }
+    ordered.push({ house: null, idx: 1800 + k, bed: null, prof: "baker" });
   }
   return ordered;
 }
@@ -2282,6 +2303,7 @@ BF.mobs = {
     if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
     if (BF.poultry) BF.poultry.tick(dt);   // chickens growing up, laying, coop stock (js/poultry.js)
     if (BF.cowherd) BF.cowherd.tick(dt);   // calves growing up, pasture stock (js/cowherd.js)
+    if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     spawnT -= dt;
@@ -2331,6 +2353,7 @@ BF.mobs = {
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
     if (BF.poultry) BF.poultry.exportAll(out);   // "coops:<village key>" -> the chickens and nest eggs of each coop
     if (BF.cowherd) BF.cowherd.exportAll(out);   // "pastures:<village key>" -> the cows of each pasture
+    if (BF.baker) BF.baker.exportAll(out);   // "ovens" -> what each baker's oven holds
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
     if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
@@ -2343,7 +2366,7 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens") villagerSaves.set(k, o[k]);
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [] });
     for (const rec of villages.values()) applyDead(rec);
@@ -2355,6 +2378,7 @@ BF.mobs = {
     if (BF.shepherd) BF.shepherd.importAll(o);
     if (BF.poultry) BF.poultry.importAll(o);
     if (BF.cowherd) BF.cowherd.importAll(o);
+    if (BF.baker) BF.baker.importAll(o);
     if (BF.merchant) BF.merchant.importAll(o);
   },
   // Right-click on a mob (called by the player module). Opens the trade screen when the inventory module has one
@@ -2471,6 +2495,7 @@ BF.mobs = {
     if (BF.stables) BF.stables.reset();
     if (BF.poultry) BF.poultry.reset();
     if (BF.cowherd) BF.cowherd.reset();
+    if (BF.baker) BF.baker.reset();
   },
 };
 })();
