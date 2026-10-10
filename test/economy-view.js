@@ -69,7 +69,15 @@ const start = async () => {
   // a snapshot with new trades redraws the diagram (and its hidden tooltip) under the mouse, more often on a slow CI machine: hover again, up to 5 times
   let tip = { shown: false, text: '' };
   for (let i = 0; i < 5 && !(tip.shown && /trade/.test(tip.text)); i++) {
-    const box = await dbg.evaluate(() => { const ps = [...document.querySelectorAll('#econ svg.flow path')]; const p = ps.sort((x, y) => y.getBBox().height - x.getBBox().height)[0];
+    const box = await dbg.evaluate(() => {   // a point that is really on the tallest band (the middle of its box can fall outside a curved band, or under another one)
+      const ps = [...document.querySelectorAll('#econ svg.flow path')]; const p = ps.sort((x, y) => y.getBBox().height - x.getBBox().height)[0];
+      const b = p.getBBox(), m = p.getScreenCTM(), svg = p.ownerSVGElement;
+      for (const fx of [0.5, 0.4, 0.6, 0.3, 0.7]) for (let k = 1; k < 40; k++) {
+        const q = svg.createSVGPoint(); q.x = b.x + b.width * fx; q.y = b.y + b.height * k / 40;
+        if (p.isPointInFill && !p.isPointInFill(q)) continue;
+        const sc = q.matrixTransform(m);
+        if (document.elementFromPoint(sc.x, sc.y) === p) return { x: sc.x, y: sc.y };
+      }
       const r = p.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
     await dbg.mouse.move(box.x - 40, box.y); await dbg.mouse.move(box.x, box.y); await dbg.waitForTimeout(300);
     tip = await dbg.evaluate(() => { const t = document.getElementById('e-tip'); return { shown: t && t.style.display === 'block', text: t ? t.textContent : '' }; });
