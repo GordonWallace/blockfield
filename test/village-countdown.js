@@ -49,16 +49,20 @@ module.exports = async (pg) => {
   ok("a village with a villager out on a task counts down instead of unloading", counting && cd.active && cd.cd.left > 0, cd.cd);
   ok("the timer comes from the longest task, and the debug feed shows it", cd.cd && cd.cd.est.length > 0 && cd.cd.est.some(e => e.who === who) && cd.cd.est.every(e => e.secs <= cd.cd.est[0].secs), cd.cd && cd.cd.est);
   ok("a task longer than the time left may not start; a short one may", cd.may[0] === false && cd.may[1] === true, cd.may);
-  // no villager begins a new task of any kind that would not finish: with 15 s left, only the one already out may carry on
-  await pg.evaluate(k => { const c = BF.villageSim.countdown(k); BF.sky.time += Math.max(0, c.left - 15) / 1200; }, info.key);
-  const gate = await pg.evaluate(k => {
-    const rec = BF.mobs.villages.get(k), c = BF.villageSim.countdown(k);
-    const vs = rec.members.filter(m => m.type === "villager" && !m.dead && !m.child && m.profession !== "explorer" && m.profession !== "merchant");
-    const out = vs.filter(m => BF.villageSim.estimates(k).list.some(e => e.errand && e.who === BF.vlog.nameOf(m)));
-    const idle = vs.filter(m => !out.includes(m) && !BF.villageSim.estimates(k).list.some(e => e.who === BF.vlog.nameOf(m)));
-    return { left: c && c.left, out: out.length, idle: idle.length, idleBegin: idle.filter(m => BF.villageSim.canBegin(m)).length, outBegin: out.filter(m => BF.villageSim.canBegin(m)).length };
-  }, info.key);
-  ok("with too little time left an idle villager may not begin a task, one already out carries on", gate.left !== null && gate.idle > 0 && gate.idleBegin === 0 && gate.out > 0 && gate.outBegin === gate.out, gate);
+  // no villager begins a task that would not finish before the timer ends: a task's estimate is asked for before it starts (begin), so any
+  // task begun while the timer runs ends before it does, and a short one still may start
+  const gate0 = await pg.evaluate(k => { window.__before = new Set(BF.mobs.list.filter(m => m.vtask).map(m => m.vtask)); const c = BF.villageSim.countdown(k);
+    const rec = BF.mobs.villages.get(k), v = rec.members.find(m => m.type === "villager" && !m.dead && !m.child && !m.vtask && m.profession !== "merchant");
+    if (!v) return { left: c && c.left, none: true };
+    const r = { left: c.left, long: BF.villageSim.begin(v, c.left + 60, "test: too long"), short: BF.villageSim.begin(v, Math.max(1, c.left - 20), "test: fits") };
+    BF.villageSim.done(v); return r; }, info.key);
+  ok("a task longer than the time left is refused, a shorter one may begin", gate0.none || (gate0.long === false && gate0.short === true), gate0);
+  await sleep(6000);
+  const gate = await pg.evaluate(k => { const en = BF.villageSim.countdown(k), rec = BF.mobs.villages.get(k), until = BF.sky.day + BF.sky.time + en.left / 1200;
+    const fresh = rec.members.filter(m => m.vtask && !window.__before.has(m.vtask));
+    return { left: en.left, begun: fresh.map(m => ({ who: BF.vlog.nameOf(m), what: m.vtask.what, secs: m.vtask.secs })), late: fresh.filter(m => m.vtask.end > until + 2 / 1200).length,
+      denied: rec.members.filter(m => m.vdenied).map(m => m.vdenied.what + " " + m.vdenied.secs + "s") }; }, info.key);
+  ok("while the timer runs, villagers only begin tasks that end before it does", gate.late === 0, gate);
   await unpin();
   // 3. coming back within range cancels it
   await tp(info.x, info.z);

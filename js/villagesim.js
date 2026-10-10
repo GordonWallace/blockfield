@@ -113,12 +113,35 @@ function taskLeft(m, rec) {
   if (m.dead || m.removed || m.child || m.sleeping || m.type !== "villager") return 0;
   if (m.profession === "explorer") return 0;                         // explorers are carved out: they unload with their village wherever they are
   if (m.profession === "merchant" && m.mc && m.mc.trip && BF.merchant && BF.merchant.leftSecs) { taskLeft.errand = true; return Math.min(MAXT, BF.merchant.leftSecs(m)); }
-  const v = rec.wg, speed = ((m.def && m.def.speed) || 0.9) * 1.3;
+  const v = rec.wg;
   const out = v && v.minX != null ? edgeDist(v, m.position.x, m.position.z) : Math.max(0, Math.hypot(m.position.x - rec.x, m.position.z - rec.z) - 40);
-  if (out > 4) { taskLeft.errand = true; return Math.min(MAXT, (out / speed) * 1.25 + 20); }      // out on an errand: the walk back (with a margin)
-  const text = BF.villagerStatus ? BF.villagerStatus.text(m) : "", cat = BF.dayTimeline ? BF.dayTimeline.catOf(text) : "idle";
-  return cat === "work" || cat === "trade" ? 30 : 0;                 // finishing the job at hand
+  const t = m.vtask, left = t && t.end > nowDay() ? (t.end - nowDay()) * DAY_S : 0;   // what its task's estimate says is left (begin)
+  if (out > 4) { taskLeft.errand = true; return Math.min(MAXT, Math.max(left, out * 1.3 / (((m.def && m.def.speed) || 0.9) * travellerSpeed(m)))); }   // out beyond the edge: at least the walk back
+  return Math.min(MAXT, left);
 }
+// ---- task estimates: a villager says how long a task will take before it starts it (begin). While its village counts down, a task that
+// would not finish in the time left is not started (the job picks something shorter or waits), and the estimates set the timer.
+const travellerSpeed = m => (m.profession === "merchant" || m.profession === "explorer" ? 1.5 : 1);
+// Seconds to walk from the villager through the points ([x, z] or {x, z}) in turn: straight-line distance with a margin for paths.
+function walkSecs(m, pts) {
+  const sp = ((m.def && m.def.speed) || 0.9) * travellerSpeed(m);
+  let x = m.position.x, z = m.position.z, d = 0;
+  for (const p of pts || []) { if (!p) continue; const px = p.x != null ? p.x : p[0], pz = p.z != null ? p.z : p[1]; d += Math.hypot(px - x, pz - z); x = px; z = pz; }
+  return d * 1.3 / sp;
+}
+// The villager is about to start a task of `secs` game seconds (`what` names it for the debug screen). Returns false, and the task must not
+// start, when its village is counting down and the task would not finish before the timer ends; otherwise records it and returns true.
+function begin(m, secs, what) {
+  if (!m || !m.village) return true;
+  secs = Math.max(1, Math.round(secs || 0));
+  if (!mayStart(m.village.key, secs)) { m.vdenied = { what, secs, t: nowDay() }; return false; }
+  m.vtask = { what: what || "", secs, end: nowDay() + secs / DAY_S };
+  return true;
+}
+// The task is over (or was given up): nothing left to wait for.
+function done(m) { if (m) m.vtask = null; }
+// Time left on the village's countdown in seconds (Infinity when it is not counting down), for jobs that size a task to fit.
+function timeLeft(key) { const en = ending.get(key); return en ? Math.max(0, (en.until - nowDay()) * DAY_S) : Infinity; }
 function estimates(key) {
   const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(key), list = [];
   let max = 0;
@@ -133,15 +156,6 @@ function estimates(key) {
 function mayStart(key, secs) {
   const en = ending.get(key);
   return !en || secs <= (en.until - nowDay()) * DAY_S;
-}
-// May this villager begin something new now? While its village counts down, a villager that is not in the middle of a task (and is not out on
-// an errand) only starts one if the usual task time fits in what is left; otherwise it idles near home (village loading plan).
-const NEW_TASK_S = 30;
-function canBegin(m) {
-  const en = m.village && ending.get(m.village.key);
-  if (!en || m.profession === "explorer") return true;
-  if (taskLeft(m, m.village) > 0) return true;                       // already at a task or out on an errand: it finishes (counted in the timer)
-  return mayStart(m.village.key, NEW_TASK_S);
 }
 function countdown(key) {
   const en = ending.get(key);
@@ -334,7 +348,7 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  LIMITS, mayStart, canBegin, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
+  LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);

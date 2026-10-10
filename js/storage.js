@@ -321,13 +321,15 @@ const chestEmpty = c => !c.slots.some(Boolean);
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.sleeping || m.tradingWith || !m.village || !BF.mobs || !BF.mobs.nav || !BF.inventory || !BF.inventory.chestState || !keyOf(m)) return false;
   const st = m.store || (m.store = { stage: null, checkT: rnd(1, CHECK), avoid: {}, stored: {}, order: null }), a = m.ai, N = BF.mobs.nav;
-  const stop = () => { st.stage = null; st.p = null; if (a.routeKind === "chest") a.route = null; return false; };
+  const stop = () => { st.stage = null; st.p = null; if (a.routeKind === "chest") a.route = null; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
   if (skyT() >= WORK_END) return st.stage ? stop() : false;
   if (!st.stage) {
     if ((st.checkT -= dt) > 0) return false;
     st.checkT = CHECK * rnd(0.8, 1.2);
     const d = decide(m);
     if (!d) return false;
+    const VS = BF.villageSim;   // estimate: the walk to the chest and the time at it
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [[d.p.x + 0.5, d.p.z + 0.5]]) + PUT_T, d.act === "store" ? "Putting things away in their chest" : "Fetching things from their chest")) return false;
     st.stage = "go"; st.act = d.act; st.p = d.p; st.t = 0; a.route = null;
   }
   const p = st.p, giveUp = () => { st.avoid[pk(p.x, p.y, p.z)] = dayNow() + AVOID; return stop(); };

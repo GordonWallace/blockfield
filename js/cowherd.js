@@ -554,7 +554,9 @@ function endTask(m, ok) {
   if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
   if (S.gateHeld) { toShut.push({ at: S.gateHeld, m, t: BF.simNow() }); S.gateHeld = null; shutGates(); }
   S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;
+  vdone(m);
 }
+const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
 // Gates a cowherd held open for a cow are shut as soon as nothing stands in them (and the cowherd is out of the way); checked from tick().
 const toShut = [];
 function shutGates() {
@@ -689,6 +691,14 @@ function ai(m, dt, out) {
     S.cd = rnd(1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return cookAI(m, dt, out, false);
+    const VS = BF.villageSim;
+    if (VS && VS.begin) {   // estimate: walk there + the action; a fetch walks out to the cow, leads it (slower) to the gate and waits for it to go in
+      let est, what = { feed: "Feeding the cows", cull: "Culling the herd", milk: "Milking a cow", bottle: "Bottling milk", fetch: "Fetching a wild cow" }[tk.kind];
+      if (tk.kind === "bottle") est = VS.walkSecs(m, [[m.jobsite.x + 0.5, m.jobsite.z + 0.5]]) + ACT.bottle;
+      else if (tk.kind === "fetch") { const w1 = VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z]]); est = w1 / 1.2 + (VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z], tk.pasture.out]) - w1) / 0.8 + 8; }
+      else est = VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z]]) + ACT[tk.kind];
+      if (!VS.begin(m, est, what)) return cookAI(m, dt, out, false);
+    }
     S.task = tk; S.stage = "walk"; S.t = 0; S.navFail = 0; S.gx = null; S.lostT = 0;
     if (tk.kind === "fetch") { log("fetch", { d: +Math.hypot(tk.mob.position.x - m.position.x, tk.mob.position.z - m.position.z).toFixed(1) }); vlog(m, "went to fetch a wild cow for the pasture"); }
   }
@@ -778,7 +788,7 @@ function cookAI(m, dt, out, cont) {
   if (!m.inv || m.dead || m.child || m.type !== "villager" || !BF.mobs || !BF.mobs.nav || !m.village || !FU() || RAW() == null || STEAK() == null) return false;
   const F = FU(), S = cst(m), a = m.ai;
   if (skyT() >= COOK_END || m.tradingWith) {
-    if (S.stage) { if (S.deal && S.deal.kind === "cook" && S.deal.loaded) finishCook(m, S.deal, true); S.stage = null; S.deal = null; a.route = null; }
+    if (S.stage) { if (S.deal && S.deal.kind === "cook" && S.deal.loaded) finishCook(m, S.deal, true); S.stage = null; S.deal = null; vdone(m); a.route = null; }
     return false;
   }
   if (!S.stage) {
@@ -789,6 +799,8 @@ function cookAI(m, dt, out, cont) {
     if (S.cd > now()) return false;
     const deal = nextTrip(m);
     if (!deal) { S.cd = now() + 0.03; return false; }
+    const VS = BF.villageSim, o = deal.kind === "cook" ? deal.furnace : deal.other && deal.other.position;   // estimate: walk there, the pause, and (cooking) the furnace time
+    if (VS && VS.begin && o && !VS.begin(m, VS.walkSecs(m, [[o.x + (deal.kind === "cook" ? 0.5 : 0), o.z + (deal.kind === "cook" ? 0.5 : 0)]]) + TRADE_PAUSE + (deal.kind === "cook" ? FU().COOK * Math.min(deal.n || 1, 16) : 0), deal.kind === "cook" ? "Cooking beef" : "Buying fuel to cook beef")) return false;
     S.deal = deal; S.stage = "walk"; S.walkT = 0; S.navFail = 0; S.gx = null; a.route = null;
   }
   const deal = S.deal;
@@ -796,7 +808,7 @@ function cookAI(m, dt, out, cont) {
     log("cookGiveup", { kind: deal.kind, why });
     if (key) S.avoid[key] = now() + 0.05;
     if (deal.kind === "cook" && deal.loaded) finishCook(m, deal, true);
-    S.stage = null; S.deal = null; a.route = null; S.checkT = 0.5; return false;
+    S.stage = null; S.deal = null; vdone(m); a.route = null; S.checkT = 0.5; return false;
   };
   a.mode = "idle"; a.t = 2;
   S.walkT += dt;
@@ -812,7 +824,7 @@ function cookAI(m, dt, out, cont) {
       return true;
     }
     if (S.stage === "cook" && Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 3) {   // pulled away (a zombie): back to the furnace
-      if (go() === "failed") { F.inUse.delete(F.pk(s.x, s.y, s.z)); log("cookGiveup", { kind: "cook", why: "cannot get back" }); S.stage = null; S.deal = null; a.route = null; return false; }
+      if (go() === "failed") { F.inUse.delete(F.pk(s.x, s.y, s.z)); log("cookGiveup", { kind: "cook", why: "cannot get back" }); S.stage = null; S.deal = null; vdone(m); a.route = null; return false; }
       return true;
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.4 };
@@ -827,7 +839,7 @@ function cookAI(m, dt, out, cont) {
     const st = BF.inventory.furnaceState(s.x, s.y, s.z);
     if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { F.inUse.delete(F.pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
-    if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finishCook(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; return true; }   // all cooked
+    if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finishCook(m, deal, false); S.stage = null; S.deal = null; vdone(m); S.checkT = 0.5; return true; }   // all cooked
     F.topUp(m, deal, st);
     if (S.waitT > F.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;
@@ -851,7 +863,7 @@ function cookAI(m, dt, out, cont) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
   if (S.tt <= 0) {
     const done = F.doBuy(m, deal);
-    S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5;
+    S.stage = null; S.deal = null; vdone(m); S.gx = null; S.checkT = 0.5;
     if (done) log("buyFuel", { from: v2.profession, got: done * deal.offer.sell.n + " " + BF.itemName(deal.item) });
     else { S.avoid[key] = now() + 0.05; log("cookGiveup", { kind: "buy", why: "trade refused" }); }
   }

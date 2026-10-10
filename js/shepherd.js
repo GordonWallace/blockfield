@@ -422,6 +422,7 @@ function endTask(m, ok) {
   const S = shp(m);
   if (S.task && !ok) S.avoid.set(S.task.mob, BF.simNow() + 40);
   S.task = null; S.stage = null; m.ai.route = null;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
 }
 function loot(m, id, n, where) {
   if (id == null || n <= 0) return;
@@ -483,6 +484,8 @@ function ai(m, dt, out) {
     S.cd = rnd(1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return false;
+    const VS = BF.villageSim;
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z]]) + ACT[tk.kind], { feed: "Feeding the sheep", shear: "Shearing a sheep", cull: "Culling the flock" }[tk.kind])) return false;   // won't finish before the village stops
     S.task = tk; S.stage = "walk"; S.t = 0; S.navFail = 0; S.gx = null;
   }
   const tk = S.task, o = tk.mob;
@@ -528,6 +531,8 @@ function work(m, J, dt) {
   if (!S.spin) {
     const n = spinnable(m);
     if (!n) return;
+    const VS = BF.villageSim, secs = n * ((BF.sky && BF.sky.dayLength) || 1200) * SPIN_HOURS / 24;
+    if (VS && VS.begin && !VS.begin(m, secs, "Spinning string")) return;
     S.spin = { n, t: n * ((BF.sky && BF.sky.dayLength) || 1200) * SPIN_HOURS / 24 };
   }
   S.spin.t -= dt;
@@ -538,6 +543,7 @@ function work(m, J, dt) {
   let n = Math.min(S.spin.n, woolOf(m));   // the wool it still holds (some may have been sold meanwhile)
   while (n > 0 && !T.canFit(m.inv, [{ id: BF.I.string, n: 2 * n }], [{ id: c.wool, n }])) n--;
   S.spin = null;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   if (n <= 0) return;
   T.remove(m.inv, c.wool, n); T.add(m.inv, BF.I.string, 2 * n);
   if (BF.vlog && m.village) BF.vlog.log(m.village, "craft", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Shepherd") + " (Shepherd) spun " + 2 * n + " string", m);

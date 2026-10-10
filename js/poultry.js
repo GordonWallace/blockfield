@@ -464,6 +464,7 @@ function endTask(m, ok) {
   if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
   if (S.gateHeld) { toShut.push({ at: S.gateHeld, m, t: BF.simNow() }); S.gateHeld = null; shutGates(); }
   S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
 }
 // Gates a keeper held open for a chicken are shut as soon as nothing stands in them (and the keeper is out of the way); checked from tick().
 const toShut = [];
@@ -580,6 +581,14 @@ function ai(m, dt, out) {
     S.cd = rnd(1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return false;
+    const VS = BF.villageSim;
+    if (VS && VS.begin) {   // estimate: walk there + the action; a fetch walks out to the chicken, leads it (slower) to the gate and waits for it to go in
+      let est;
+      if (tk.kind === "collect") est = VS.walkSecs(m, [[m.jobsite.x + 0.5, m.jobsite.z + 0.5]]) + ACT.collect;
+      else if (tk.kind === "fetch") { const w1 = VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z]]); est = w1 / 1.2 + (VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z], tk.coop.out]) - w1) / 0.8 + 8; }
+      else est = VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z]]) + ACT[tk.kind];
+      if (!VS.begin(m, est, { feed: "Feeding the chickens", cull: "Culling the flock", collect: "Collecting eggs", fetch: "Fetching a wild chicken" }[tk.kind])) return false;
+    }
     S.task = tk; S.stage = "walk"; S.t = 0; S.navFail = 0; S.gx = null; S.lostT = 0;
     if (tk.kind === "fetch") { log("fetch", { d: +Math.hypot(tk.mob.position.x - m.position.x, tk.mob.position.z - m.position.z).toFixed(1) }); vlog(m, "poultry", "went to fetch a wild chicken for the coop"); }
   }

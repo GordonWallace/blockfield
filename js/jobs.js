@@ -453,6 +453,7 @@ function pickSite(m, sk) {
   }
   return best;
 }
+const endTask = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
 function seekAI(m, dt, out, nav) {
   if (!nav || m.profession === "nitwit" || isChild(m) || m.tradingWith || m.sleeping || m.type !== "villager") return false;
   const sk = m.seek || (m.seek = { site: null, t: 0, cd: rnd(1, 5), avoid: {}, plan: 0 });
@@ -462,10 +463,12 @@ function seekAI(m, dt, out, nav) {
     sk.cd = rnd(3, 8);
     const s = pickSite(m, sk);
     if (!s) return false;
+    const VS = BF.villageSim;   // estimate: the walk to the block and the look at it (4 to 8 s)
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [[s.x + 0.5, s.z + 0.5]]) + 8, "Looking for a job")) { sk.cd = rnd(1, 3); return false; }
     sk.site = s; sk.t = 0; sk.route = false; ai.route = null;
   }
   const s = sk.site, k = pk(s.x, s.y, s.z), W = BF.world;
-  const giveUp = lost => { sk.avoid[k] = now + (lost ? 15 : SEEK_AVOID); sk.site = null; sk.cd = lost ? rnd(0.5, 2) : rnd(3, 8); ai.route = null; return false; };
+  const giveUp = lost => { sk.avoid[k] = now + (lost ? 15 : SEEK_AVOID); sk.site = null; sk.cd = lost ? rnd(0.5, 2) : rnd(3, 8); ai.route = null; endTask(m); return false; };
   sk.t += dt;
   if (sk.t > SEEK_MAX || (W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id)) return giveUp(false);
   if (claimedByOther(k, m)) return giveUp(true);                   // somebody else got there first
@@ -473,7 +476,7 @@ function seekAI(m, dt, out, nav) {
   if (adjacentTo(s, x, y, z) || (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) < 1.9 && Math.abs(s.y - y) <= 1)) {
     ai.route = null;
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5;
-    if (claim(m, { site: s })) { sk.site = null; m.seek = null; if (m.job) { m.job.mode = "work"; m.job.t = rnd(4, 8); } }   // takes the block and looks at it for a while
+    if (claim(m, { site: s })) { sk.site = null; m.seek = null; if (m.job) { m.job.mode = "work"; m.job.t = rnd(4, 8); } endTask(m); }   // takes the block and looks at it for a while
     else giveUp(true);
     return true;
   }
@@ -499,7 +502,7 @@ function ai(m, dt, out) {
   if (!nav || NO_JOB[m.profession] || m.profession === "builder") return false;
   const J = m.job || (m.job = { mode: "off", t: rnd(5, 30) });
   const t = BF.sky ? BF.sky.time : 0.2;
-  if (t < WORK_START || t > WORK_END) { if (J.mode !== "off") { J.mode = "off"; m.ai.route = null; } return false; }
+  if (t < WORK_START || t > WORK_END) { if (J.mode !== "off") { J.mode = "off"; m.ai.route = null; endTask(m); } return false; }
   if (J.mode === "off") {
     J.t -= dt;
     if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(1, 3);   // something to craft: go to the table soon
@@ -514,16 +517,18 @@ function ai(m, dt, out) {
     const [x, y, z] = nav.feetCell(m);
     const route = atSite(s, x, y, z) ? [] : nav.findPath(x, y, z, { x: s.x, z: s.z, at: (cx, cy, cz) => atSite(s, cx, cy, cz) }, 2500);
     if (!route) { J.t = rnd(40, 90); return false; }
+    const VS = BF.villageSim;   // estimate: the walk to the jobsite and the longest stay at it (J.t up to 20 s)
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [[s.x + 0.5, s.z + 0.5]]) + 20, "Going to work at the jobsite")) { J.t = rnd(1, 3); return false; }
     m.ai.route = route; m.ai.ri = 0; m.ai.stuckT = 0; J.mode = "go";
   }
   if (J.mode === "go") {
     const r = nav.followRoute(m, dt, out, m.def.speed);
     if (r === "going") return true;
     m.ai.route = null;
-    if (r === "stuck") { J.mode = "off"; J.t = rnd(30, 60); return false; }
+    if (r === "stuck") { J.mode = "off"; J.t = rnd(30, 60); endTask(m); return false; }
     // "done" also when another task took the route over and dropped it (a shepherd leaving its pen): only work once beside the site,
     // else it stood "working" wherever it was, e.g. in the pen gate, holding it open
-    if (!atSite(s, ...nav.feetCell(m))) { J.mode = "off"; J.t = rnd(1, 3); return false; }
+    if (!atSite(s, ...nav.feetCell(m))) { J.mode = "off"; J.t = rnd(1, 3); endTask(m); return false; }
     J.mode = "work"; J.t = rnd(8, 20);
   }
   if (J.mode === "work") {
@@ -535,7 +540,7 @@ function ai(m, dt, out) {
     if (m.profession === "fletcher" && BF.fletcher) BF.fletcher.work(m, J, dt);   // makes arrows and bows at its fletching table (js/fletcher.js)
     if (m.profession === "shepherd" && BF.shepherd) BF.shepherd.work(m, J, dt);   // spins wool into string at its loom (js/shepherd.js)
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.45 };   // head down at the block
-    if (J.t <= 0) { J.mode = "off"; J.t = rnd(40, 120); m.ai.mode = "idle"; m.ai.t = 1; return false; }
+    if (J.t <= 0) { J.mode = "off"; J.t = rnd(40, 120); m.ai.mode = "idle"; m.ai.t = 1; endTask(m); return false; }
     return true;
   }
   return false;

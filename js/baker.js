@@ -291,6 +291,7 @@ function nextJob(m) {
   }
   return null;
 }
+const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
 function finish(m, S, all) {
   const job = S.job, o = job && job.oven && ovenState(job.oven.x, job.oven.y, job.oven.z);
   if (!o) return;
@@ -311,7 +312,7 @@ function ai(m, dt, out, cont) {
   if (!m.inv || m.dead || m.child || m.type !== "villager" || !BF.mobs || !BF.mobs.nav || !m.village || !FU() || m.sleeping) return false;
   const F = FU(), S = st(m), a = m.ai, t = skyT();
   if (t >= WORK_END || t < WORK_START || m.tradingWith) {
-    if (S.stage) { if (S.job && S.job.oven && S.stage !== "walk") finish(m, S, true); S.stage = null; S.job = null; a.route = null; }
+    if (S.stage) { if (S.job && S.job.oven && S.stage !== "walk") finish(m, S, true); S.stage = null; S.job = null; vdone(m); a.route = null; }
     return false;
   }
   if (!S.stage) {
@@ -325,6 +326,9 @@ function ai(m, dt, out, cont) {
     if (S.cd > now()) return false;
     const job = nextJob(m);
     if (!job) { S.cd = now() + 0.02; return false; }
+    const VS = BF.villageSim, o = job.kind === "bake" || job.kind === "collect" ? job.oven : job.other && job.other.position;   // estimate: walk there, the pause, and (baking) the oven time
+    if (VS && VS.begin && o && !VS.begin(m, VS.walkSecs(m, [job.oven === o ? [o.x + 0.5, o.z + 0.5] : [o.x, o.z]]) + TRADE_PAUSE + (job.kind === "bake" ? BAKE_T[job.what] * job.n : 0),
+      job.kind === "collect" ? "Emptying the oven" : job.kind === "bake" ? (job.what === "cake" ? "Baking cakes" : "Baking pumpkin pies") : "Buying " + (job.what === "fuel" ? "fuel for the oven" : BF.itemName(job.item).toLowerCase()))) return false;
     S.job = job; S.stage = "walk"; S.walkT = 0; S.navFail = 0; S.gx = null; a.route = null;
   }
   const job = S.job;
@@ -332,7 +336,7 @@ function ai(m, dt, out, cont) {
     log("giveup", { kind: job.kind, why });
     if (key) S.avoid[key] = now() + 0.05;
     if (job.oven && S.stage !== "walk") finish(m, S, true);
-    S.stage = null; S.job = null; a.route = null; S.checkT = 0.5; return false;
+    S.stage = null; S.job = null; vdone(m); a.route = null; S.checkT = 0.5; return false;
   };
   a.mode = "idle"; a.t = 2;
   S.walkT += dt;
@@ -352,7 +356,7 @@ function ai(m, dt, out, cont) {
     const o = ovenAt(s.x, s.y, s.z);
     if (S.stage === "work") {
       if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
-      if (job.kind === "collect") { finish(m, S, true); S.stage = null; S.job = null; S.checkT = 0.5; return true; }
+      if (job.kind === "collect") { finish(m, S, true); S.stage = null; S.job = null; vdone(m); S.checkT = 0.5; return true; }
       makeSugar(m);
       const n = load(m, o, job.what, job.n, fuelOk(m));
       if (!n) return giveUp("cannot load");
@@ -362,7 +366,7 @@ function ai(m, dt, out, cont) {
     }
     // baking: wait beside it, add fuel when it runs dry, take everything out when it is done
     S.waitT += dt;
-    if (!(o.n > 0)) { finish(m, S, false); S.stage = null; S.job = null; S.checkT = 0.5; return true; }
+    if (!(o.n > 0)) { finish(m, S, false); S.stage = null; S.job = null; vdone(m); S.checkT = 0.5; return true; }
     topUp(m, o, fuelOk(m));
     if (S.waitT > BAKE_T[o.kind || "cake"] * 1.5 * (o.n + 1) + 40 || (o.burn <= 0 && !o.fuel && S.waitT > 3)) return giveUp(o.burn <= 0 && !o.fuel ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;
@@ -389,7 +393,7 @@ function ai(m, dt, out, cont) {
     if (milk) clearRes();
     const done = milk ? withBaker(() => F.doBuy(m, job)) : F.doBuy(m, job);
     if (milk) clearRes();
-    S.stage = null; S.job = null; S.gx = null; S.checkT = 0.5;
+    S.stage = null; S.job = null; vdone(m); S.gx = null; S.checkT = 0.5;
     if (done) {
       const n = done * job.offer.sell.n;
       log("buy", { what: nameOf(job.item), n, from: v2.profession });
@@ -712,7 +716,7 @@ function forceStop(m) {
   if (!S || !S.job) return null;
   const oven = !!(S.job.oven && S.stage !== "walk");
   if (oven) finish(m, S, true);
-  S.stage = null; S.job = null; m.ai.route = null;
+  S.stage = null; S.job = null; vdone(m); m.ai.route = null;
   return oven ? "emptied the oven" : null;
 }
 BF.baker = { forceStop,
