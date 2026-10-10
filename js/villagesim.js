@@ -134,6 +134,15 @@ function mayStart(key, secs) {
   const en = ending.get(key);
   return !en || secs <= (en.until - nowDay()) * DAY_S;
 }
+// May this villager begin something new now? While its village counts down, a villager that is not in the middle of a task (and is not out on
+// an errand) only starts one if the usual task time fits in what is left; otherwise it idles near home (village loading plan).
+const NEW_TASK_S = 30;
+function canBegin(m) {
+  const en = m.village && ending.get(m.village.key);
+  if (!en || m.profession === "explorer") return true;
+  if (taskLeft(m, m.village) > 0) return true;                       // already at a task or out on an errand: it finishes (counted in the timer)
+  return mayStart(m.village.key, NEW_TASK_S);
+}
 function countdown(key) {
   const en = ending.get(key);
   if (!en) return null;
@@ -325,7 +334,7 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  LIMITS, mayStart, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
+  LIMITS, mayStart, canBegin, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);

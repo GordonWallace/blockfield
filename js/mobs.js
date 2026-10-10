@@ -1489,6 +1489,7 @@ function villagerAI(m, dt, out) {
   if (bedtime()) { nightAI(m, dt, out); return; }
   ai.night = null;
   if (ai.leaving && morningAI(m, dt, out)) return;
+  if (V && BF.villageSim && BF.villageSim.canBegin && !BF.villageSim.canBegin(m)) { ai.mode = "idle"; ai.t = 1; return; }   // its village is counting down and a new task would not finish: idles near home (js/villagesim.js)
   if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
   if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
   if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
