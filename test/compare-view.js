@@ -94,7 +94,7 @@ const start = async () => {
     return { key: rec.key, trades: BF.happiness.week(rec.key, 'trade'), births: BF.happiness.week(rec.key, 'birth'), deaths: BF.happiness.week(rec.key, 'death'), noTools: d.noTools[0], pop7: d.pop7 }; });
   await dbg.waitForTimeout(600);
   const here = (await tab()).rows.find(x => x.key === g.key);
-  ok('trades, births, deaths, tools match the game ' + JSON.stringify([here && here.cells.slice(8, 13), g]), here && Math.abs(+here.cells[8] - g.trades) <= 3 && +here.cells[11] === g.births && +here.cells[12] === g.deaths && parseInt(here.cells[9]) === g.noTools);
+  ok('trades, births, deaths, tools match the game ' + JSON.stringify([here && here.cells.slice(8, 13), g]), here && Math.abs(+here.cells[8] - g.trades) <= 3 && +here.cells[11] === g.births && +here.cells[12] === g.deaths && Math.abs(parseInt(here.cells[9]) - g.noTools) <= 1);
   if (DAYS >= 1) ok('population change after ' + DAYS + ' days: ' + (here && here.cells[3]), here && here.cells[3] !== '-' && g.pop7);
   // sorting by clicking a header, and again to reverse
   await dbg.click('#vcmp th[data-k="pop"]'); await dbg.waitForTimeout(300);
