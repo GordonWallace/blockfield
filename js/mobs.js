@@ -2276,7 +2276,8 @@ function updateVillages(dt) {
       let at = null;
       if (snap) at = standable(Math.floor(snap.p[0]), Math.floor(snap.p[1]), Math.floor(snap.p[2]), TYPES.villager.hw, TYPES.villager.h) ? snap.p.slice() : findStand(snap.p[0], snap.p[1], snap.p[2], TYPES.villager);
       let scattered = false;
-      if (!at && (at = scatterAt(rec, sl, v))) scattered = !bedtime();   // otherwise: by day a random spot within the leash of its bed, at night in the bed
+      if (!at && villagerSaves.has(rec.key + "#" + sl.idx) && (at = scatterAt(rec, sl, v))) scattered = !bedtime();   // (a village's first load is not a return: its villagers start at home)
+        // otherwise: by day a random spot within the leash of its bed, at night in the bed
       if (!at) {
         if (H && !loadedHouse(H)) continue;
         const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
