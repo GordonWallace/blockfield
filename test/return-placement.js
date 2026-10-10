@@ -20,7 +20,7 @@ module.exports = async (pg) => {
     await tp(info.x + 900, info.z);
     for (let i = 0; i < 4; i++) {
       if (await wait(k => !BF.villageSim.isActive(k) && !BF.mobs.list.some(m => m.village && m.village.key === k), info.key, 8000)) return true;
-      await pg.evaluate(() => { BF.sky.time += 0.03; });
+      await pg.evaluate(k => { const t = BF.villageSim.timeLeft(k); BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200); }, info.key);   // past the countdown, which lasts as long as the longest task
     }
     return false;
   };
@@ -40,7 +40,7 @@ module.exports = async (pg) => {
   // 2. a longer absence by day: scattered within the leash
   await setTime(0.2);
   const before2 = await snapshot();
-  await leave();
+  ok("the village unloads again for the longer absence", await leave());
   const savedAt = await pg.evaluate(([k, idxs]) => Object.fromEntries(idxs.map(i => { const s = BF.mobSave.serialize().v[k + "#" + i]; return [i, s ? [s.p[0], s.p[2]] : null]; })), [info.key, Object.keys(before2).filter(i => before2[i][2] === "explorer")]);   // where an explorer was when the village unloaded (it walks on while the test waits)
   await pg.evaluate(() => { BF.sky.time = 0.3; BF.sky.day += 1; if (BF.explorer && !BF.explorer.__ai) { BF.explorer.__ai = BF.explorer.ai; BF.explorer.ai = m => m.profession === "explorer"; } });   // a day later, mid-morning; explorers stand still so the spot they load at can be read
   await back();
@@ -55,7 +55,7 @@ module.exports = async (pg) => {
   }
   await pg.evaluate(() => { if (BF.explorer && BF.explorer.__ai) { BF.explorer.ai = BF.explorer.__ai; BF.explorer.__ai = null; } });
   // 3. back at bedtime: in bed
-  await leave();
+  ok("the village unloads again before night", await leave());
   await pg.evaluate(() => { BF.sky.time = 0.75; BF.sky.day += 1; });
   await back();
   const bed = await pg.evaluate(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && m.slot.bed && !m.dead).map(m => Math.hypot(m.position.x - m.slot.bed.x, m.position.z - m.slot.bed.z)), info.key);
