@@ -30,7 +30,7 @@ module.exports = async (pg, out) => {
     ok("three villagers killed", victims.length === 3 && roster().length === n0 - 3, [victims.length, roster().length]);
     ok("their slots are recorded as dead", deadIdx.every(i => rec.dead && rec.dead.has(i)), rec.dead && [...rec.dead]);
     // walk away (the village unloads) and come back
-    await load(1500, 1500); for (let k = 0; k < 20; k++) { BF.world.update(1500, 1500, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); }
+    await load(1500, 1500); for (let k = 0; k < 20; k++) { BF.world.update(1500, 1500, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); if (k === 5) BF.sky.time += 0.03; }   // (the clock jumps past the unload countdown: frames are slow here)
     ok("villagers unloaded while away", roster().length === 0, roster().length);
     await load(30, 43); await settle();
     const back = roster().map(m => m.slot.idx).sort((a, b) => a - b);
