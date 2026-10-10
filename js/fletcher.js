@@ -167,6 +167,12 @@ function startCraft(m, what) {
   log("start", m, { item: what });
   return S.craft;
 }
+// Starts a craft at the table only when it fits the countdown (the whole craft is the task).
+function startCraftIn(m, what) {
+  const VS = BF.villageSim;
+  if (VS && VS.begin && !VS.begin(m, secsOf(what), what === "bow" ? "Making a bow" : "Making arrows")) return null;
+  return startCraft(m, what);
+}
 // Finishes the craft in progress when its time is up and the result fits. Returns true when it was made.
 function finishCraft(m) {
   const S = state(m), c = S.craft;
@@ -174,6 +180,7 @@ function finishCraft(m) {
   if (!TR().inv.canFit(m.inv, [{ id: c.id, n: c.n }], [])) return false;
   TR().inv.add(m.inv, c.id, c.n);
   S.craft = null;
+  if (BF.villageSim) BF.villageSim.done(m);
   log("craft", m, { made: c.n + " " + nameOf(c.id) });
   vlog(m, "craft", c.n > 1 ? "made " + c.n + " " + BF.itemName(c.id).toLowerCase() + "s" : "made a " + BF.itemName(c.id).toLowerCase());
   return true;
@@ -183,7 +190,7 @@ function work(m, J, dt) {
   const S = state(m);
   if (!S.craft) {
     const p = plan(m);
-    if (p && p.ready && (!J || J.t >= 3 || !buyNeed(m))) startCraft(m, p.what);   // at the end of a sitting a seller with what it lacks comes first
+    if (p && p.ready && (!J || J.t >= 3 || !buyNeed(m))) startCraftIn(m, p.what);   // at the end of a sitting a seller with what it lacks comes first
   }
   if (S.craft) {
     S.craft.t -= dt;
@@ -232,7 +239,7 @@ function nextTrip(m) {
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.profession !== "fletcher" || !BF.mobs || !BF.mobs.nav || !m.village) return false;
   const S = state(m), a = m.ai;
-  if (skyT() >= WORK_END || m.tradingWith) { if (S.stage) { S.stage = null; S.deal = null; a.route = null; } return false; }
+  if (skyT() >= WORK_END || m.tradingWith) { if (S.stage) { S.stage = null; S.deal = null; a.route = null; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   if (!S.stage) {
     S.checkT -= dt;
     if (S.checkT > 0) return false;
@@ -240,13 +247,16 @@ function ai(m, dt, out) {
     if (S.cd > dayNow()) return false;
     const deal = nextTrip(m);
     if (!deal) { S.cd = dayNow() + 0.03; return false; }
+    const VS = BF.villageSim;
+    if (VS && VS.begin && !VS.begin(m, deal.kind === "table" ? VS.walkSecs(m, [deal.spot]) / 1.2 : VS.walkSecs(m, [deal.other.position]) / 1.3 + TRADE_PAUSE,
+      deal.kind === "table" ? "Going back to the fletching table" : "Buying " + BF.itemName(deal.item).toLowerCase())) return false;   // walk at 1.2x / 1.3x speed (+ one trade pause)
     S.deal = deal; S.stage = "walk"; S.walkT = 0; S.navFail = 0; S.gx = null; a.route = null;
   }
   const deal = S.deal;
   const giveUp = (why, key) => {
     log("giveup", m, { kind: deal.kind, item: deal.item != null ? BF.itemName(deal.item) : deal.kind, why });
     if (key) S.avoid[key] = dayNow() + 0.05;
-    S.stage = null; S.deal = null; a.route = null; S.checkT = 0.5; return false;
+    S.stage = null; S.deal = null; a.route = null; S.checkT = 0.5; if (BF.villageSim) BF.villageSim.done(m); return false;
   };
   a.mode = "idle"; a.t = 2;
   S.walkT += dt;
@@ -255,7 +265,7 @@ function ai(m, dt, out) {
     if (S.walkT > 90) return giveUp("timeout");
     const st = travel(m, S, dt, out, s.x, s.y, s.z, m.def.speed * 1.2, (x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) <= 3 && Math.abs(y - s.y) <= 2);
     if (st === "failed") return giveUp("no path");
-    if (st === "arrived") { S.stage = null; S.deal = null; S.checkT = 2; if (m.job && m.job.mode === "off") m.job.t = Math.min(m.job.t, 0.5); }
+    if (st === "arrived") { S.stage = null; S.deal = null; S.checkT = 2; if (BF.villageSim) BF.villageSim.done(m); if (m.job && m.job.mode === "off") m.job.t = Math.min(m.job.t, 0.5); }
     return true;
   }
   // buying
@@ -278,6 +288,7 @@ function ai(m, dt, out) {
   if (S.tt <= 0) {
     const done = doBuy(m, deal);
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5;
+    if (BF.villageSim) BF.villageSim.done(m);
     if (!done) { S.avoid[key] = dayNow() + 0.05; log("giveup", m, { kind: "buy", item: BF.itemName(deal.item), why: "trade refused" }); }
   }
   return true;

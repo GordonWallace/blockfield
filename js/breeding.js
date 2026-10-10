@@ -232,15 +232,21 @@ function encounters(rec) {
     if (S.near.has(k)) continue;                 // already rolled this encounter
     S.near.add(k);
     S.stats.encounters++; S.stats.rolls++;
-    if (Math.random() < CHANCE) { S.stats.successes++; startLove(a, b, rec); el[i] = el[j] = false; }
+    if (Math.random() < CHANCE) { if (!startLove(a, b, rec)) { S.near.delete(k); continue; } S.stats.successes++; el[i] = el[j] = false; }
   }
 }
 function startLove(a, b, rec) {
+  const VS = BF.villageSim;   // estimate: they stand facing each other for LOVE_T, then the child appears
+  if (VS && VS.begin) {
+    if (!VS.begin(a, LOVE_T + 1, "Courting")) return false;
+    if (!VS.begin(b, LOVE_T + 1, "Courting")) { VS.done(a); return false; }
+  }
   a.love = b; b.love = a;
   for (const m of [a, b]) { m.vel.x = m.vel.z = 0; m.ai.mode = "idle"; m.ai.t = LOVE_T + 1; m.ai.route = null; }
   S.loves.push({ a, b, rec, t: 0, heartT: 0 });
+  return true;
 }
-function endLove(L) { if (L.a.love === L.b) L.a.love = null; if (L.b.love === L.a) L.b.love = null; }
+function endLove(L) { if (BF.villageSim && BF.villageSim.done) { BF.villageSim.done(L.a); BF.villageSim.done(L.b); } if (L.a.love === L.b) L.a.love = null; if (L.b.love === L.a) L.b.love = null; }
 function bad(m) { return !m || m.dead || m.removed || m.sleeping || m.tradingWith || (m.ai && m.ai.fleeT > 0); }
 function updateLoves(dt) {
   for (let i = S.loves.length - 1; i >= 0; i--) {
@@ -541,7 +547,7 @@ function forceBreed(a, b) {
   const rec = villageOf(a) || villageOf(b);
   if (!rec) return "villagers have no village";
   if (a.love || b.love) return "already in love";
-  startLove(a, b, rec);
+  if (!startLove(a, b, rec)) return "village is closing";
   S.loves[S.loves.length - 1].force = true;   // debug: ignores the bed rule
   return true;
 }

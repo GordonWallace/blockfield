@@ -437,11 +437,20 @@ function beginPlan(m, bs, type, wood) {
   return e;
 }
 
-function startBuild(m, bs, e) {
+// Whole-structure estimate: blocks left x the mean time per block, the walk to the site and the steps between standing spots (~0.25 s a block).
+// Tells the village sim (begin) before the builder commits; false = it would not finish in time, so it must not start the structure.
+function beginBuild(m, blocks, x, z, name) {
+  const VS = BF.villageSim;
+  return !(VS && VS.begin) || VS.begin(m, blocks * ((BLOCK_T[0] + BLOCK_T[1]) / 2 + 0.25) + (x == null ? 0 : VS.walkSecs(m, [[x, z]])), "Building " + name);
+}
+// `pre`: the caller already began the task. Returns false when the structure is not started (countdown: it would not finish).
+function startBuild(m, bs, e, pre) {
+  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; } return false; }
   bs.mode = "build"; bs.entry = e; bs.goal = null; bs.cands = null; bs.ci = 0; bs.noSpot = 0; bs.occT = 0; bs.want = null; bs.stage = null;
   bs.placeT = Math.max(bs.placeT, 0.4); bs.losT = 0; bs.losFor = -1;
   m.ai.route = null;
   if (!bs.next) bs.next = pickNext(m, bs);   // it knows what comes next, so it keeps those materials too (js/market.js)
+  return true;
 }
 // The structure it will build after this one: {type, wood, req} with the requirement as think() counts it.
 function pickNext(m, bs) {
@@ -480,8 +489,9 @@ function think(m, bs) {
     const ownerBuilds = R.members.some(x => !x.removed && !x.dead && x.profession === "builder" && x.slot && x.slot.idx === active.owner);
     const mine = active.owner === (m.slot && m.slot.idx);
     if (mine || !ownerBuilds) {
+      if (!beginBuild(m, active.n - active.prog, active.ox + active.w / 2, active.oz + active.d / 2, what(active))) return;
       if (!mine) vlogBuild(m, active, "took over building");
-      active.owner = m.slot ? m.slot.idx : 0; startBuild(m, bs, active);
+      active.owner = m.slot ? m.slot.idx : 0; startBuild(m, bs, active, true);
     }
     return;
   }
@@ -496,8 +506,9 @@ function think(m, bs) {
   const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
   const a = analyze(m.inv, req, wood);
   if (a.ok) {
+    if (!beginBuild(m, bp.n, null, null, String(bp.label || BP().label(type)))) return;   // not started: no site chosen, nothing used
     const e = beginPlan(m, bs, type, wood);
-    if (e) startBuild(m, bs, e);
+    if (e) startBuild(m, bs, e); else if (BF.villageSim) BF.villageSim.done(m);
     return;
   }
   bs.mode = "shop"; bs.want = { type, wood, req, short: a.shortfall }; bs.stage = "think"; bs.t = 0;
@@ -656,6 +667,7 @@ function placeCell(m, bs, e) {
 
 function finish(m, bs, e) {
   e.state = "done"; e.end = +dayNow().toFixed(3);
+  if (BF.villageSim) BF.villageSim.done(m);
   bs.mode = "idle"; bs.entry = null; bs.cool = rnd(40, 80); bs.t = 3; m.ai.route = null;
   const bp = bpOf(e);
   if (bp.house && m.slot && e.claim === m.slot.idx && m.bed && homeFor(e).beds.some(b => sameBed(b, m.bed))) m.home = homeFor(e);   // it took a bed here as it placed it (firstDibs): this is its home now
@@ -790,6 +802,7 @@ function nearestDistFrom(g, c) {
 function toShop(m, bs, e) {
   const req = remainingReq(e, e.prog), a = analyze(m.inv, req, bpOf(e).wood);
   bs.mode = "shop"; bs.want = { entry: e, req, short: a.shortfall }; bs.stage = "think"; bs.t = 0; m.ai.route = null; bs.goal = null;
+  if (BF.villageSim) BF.villageSim.done(m);   // the build stops here; shopping and then building again are tasks of their own
   logEvent("short", m, { for: e.type, missing: Object.keys(a.shortfall).map(k => BF.itemName(+k) + " x" + a.shortfall[k]) });
 }
 function canSell(v2) { return v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.inv && v2.trades; }   // other builders too: their reserve keeps what they need (js/market.js)
@@ -848,7 +861,11 @@ function shopMode(m, bs, dt, out) {
       return false;
     }
     const deal = findSeller(m, bs, a.shortfall);
-    if (deal) { bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0; }
+    if (deal) {
+      const VS = BF.villageSim;   // a shopping trip: walk at 1.3x speed + one trade pause
+      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; return false; }
+      bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0;
+    }
     else {
       if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
       bs.stage = "wait"; bs.t = rnd(RECHECK[0], RECHECK[1]);
@@ -858,17 +875,17 @@ function shopMode(m, bs, dt, out) {
   }
   if (bs.stage === "wait") return false;                       // wander the village (normal villager AI)
   const deal = bs.deal;
-  if (!deal || !canSell(deal.seller)) { bs.stage = "think"; bs.deal = null; return false; }
+  if (!deal || !canSell(deal.seller)) { bs.stage = "think"; bs.deal = null; if (BF.villageSim) BF.villageSim.done(m); return false; }
   const v2 = deal.seller, d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   if (bs.stage === "walk") {
     bs.walkT += dt;
-    if (bs.walkT > 60) { bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; bs.stage = "think"; return false; }
+    if (bs.walkT > 60) { bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; bs.stage = "think"; if (BF.villageSim) BF.villageSim.done(m); return false; }
     if (d <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) { bs.stage = "trade"; bs.tt = TRADE_PAUSE; ai.route = null; return true; }
     const g = { x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z) };
     if (bs.goalSeller !== v2 || Math.hypot(bs.goalX - g.x, bs.goalZ - g.z) > 3) { ai.route = null; bs.goalSeller = v2; bs.goalX = g.x; bs.goalZ = g.z; }
     const st = travel(m, bs, dt, out, g, 1.8, m.def.speed * 1.3);
     ai.mode = "idle"; ai.t = 2;
-    if (st === "failed") { bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; bs.stage = "think"; ai.route = null; return false; }
+    if (st === "failed") { bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; bs.stage = "think"; ai.route = null; if (BF.villageSim) BF.villageSim.done(m); return false; }
     return true;
   }
   if (bs.stage === "trade") {
@@ -880,6 +897,7 @@ function shopMode(m, bs, dt, out) {
     if (bs.tt <= 0) {
       doDeal(m, bs, deal);
       bs.deal = null; bs.stage = "think"; bs.t = 0;
+      if (BF.villageSim) BF.villageSim.done(m);
       emitParticles(m.position.x - 0.5, m.position.y + 1.4, m.position.z - 0.5, BF.B.emerald_block != null ? BF.B.emerald_block : 0);
     }
     return true;
@@ -894,7 +912,7 @@ function ai(m, dt, out) {
   const bs = m.bs || (m.bs = newState());
   if (BF.villageLife) BF.villageLife.ensureKit(m);
   if (!allowed()) {
-    if (bs.mode !== "idle") { bs.mode = "idle"; bs.stage = null; bs.goal = null; bs.deal = null; m.ai.route = null; bs.want = null; bs.entry = null; }
+    if (bs.mode !== "idle") { bs.mode = "idle"; bs.stage = null; bs.goal = null; bs.deal = null; m.ai.route = null; bs.want = null; bs.entry = null; if (BF.villageSim) BF.villageSim.done(m); }
     return false;
   }
   if (bs.cool > 0) bs.cool -= dt;

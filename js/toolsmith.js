@@ -239,7 +239,7 @@ function finishCraft(m) {
   if (!c || c.t > 0) return false;
   if (!TR().inv.canFit(m.inv, [{ id: c.id, n: 1 }], [])) return false;
   TR().inv.add(m.inv, c.id, 1);
-  S.craft = null;
+  S.craft = null; vdone(m);
   log("craft", m, { made: nameOf(c.id) });
   vlog(m, "craft", "made " + BF.itemName(c.id));
   return true;
@@ -249,7 +249,10 @@ function work(m, J, dt) {
   const S = state(m);
   if (!S.craft) {
     const p = plan(m);
-    if (p && p.ready) startCraft(m, p);
+    if (p && p.ready) {   // 2 game hours at the table: only started when the village's countdown (if any) allows
+      const VS = BF.villageSim, id = toolId(p.cat, p.mat);
+      if (!VS || !VS.begin || VS.begin(m, CRAFT_SECS(), "Making " + BF.itemName(id).toLowerCase())) { if (!startCraft(m, p)) vdone(m); }
+    }
   }
   if (S.craft) {
     S.craft.t -= dt;
@@ -344,6 +347,19 @@ function placeFurnace(m, spot) {
 }
 
 // ---------------------------------------------------------------- AI
+// Task estimates (js/villagesim.js), in game seconds: the walk there plus the pause at the seller / furnace, and for smelting the furnace's COOK seconds an
+// ore. false when its village is counting down and the trip would not finish.
+const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
+function begins(m, deal) {
+  const VS = BF.villageSim;
+  if (!VS || !VS.begin) return true;
+  const k = deal.kind, at = k === "table" || k === "place" ? deal.spot : k === "smelt" ? deal.furnace : deal.other.position;
+  const walk = VS.walkSecs(m, [k === "buy" ? at : [at.x + 0.5, at.z + 0.5]]);
+  if (k === "table") return VS.begin(m, walk, "Going back to the smithing table");
+  if (k === "place") return VS.begin(m, walk + TRADE_PAUSE, "Putting a furnace down");
+  if (k === "smelt") return VS.begin(m, walk + TRADE_PAUSE + (FU.COOK || 10) * Math.min(64, count(m, deal.rawId)), "Smelting " + BF.itemName(smeltsTo(deal.rawId)).toLowerCase() + "s");
+  return VS.begin(m, walk + TRADE_PAUSE, "Buying " + (deal.what === "fuel" ? "fuel" : deal.what === "furnace" ? "a furnace" : BF.itemName(deal.item).toLowerCase()));
+}
 // The next trip: {kind: "buy" | "smelt" | "place", ...} or null.
 // Things it wants and can't get now, for the Economy view's dead ends (js/economy.js): a better material it is waiting for, or what a plan needs and nobody sells.
 const MAT_LABEL = { diamond: "Diamonds", iron: "Iron", gold: "Gold", stone: "Cobblestone", wood: "Planks" };
@@ -370,7 +386,7 @@ function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.profession !== "toolsmith" || !BF.mobs || !BF.mobs.nav || !m.village) return false;
   const S = state(m), a = m.ai;
   if (skyT() >= WORK_END || m.tradingWith) {
-    if (S.stage) { if (S.deal && S.deal.kind === "smelt" && S.deal.loaded) emptyFurnace(m, S.deal, true); S.stage = null; S.deal = null; a.route = null; }
+    if (S.stage) { if (S.deal && S.deal.kind === "smelt" && S.deal.loaded) emptyFurnace(m, S.deal, true); S.stage = null; S.deal = null; a.route = null; vdone(m); }
     return false;
   }
   if (!S.stage) {
@@ -380,6 +396,7 @@ function ai(m, dt, out) {
     if (S.cd > dayNow()) return false;
     const deal = nextTrip(m);
     if (!deal) { S.cd = dayNow() + 0.03; return false; }
+    if (!begins(m, deal)) return false;
     S.deal = deal; S.stage = "walk"; S.walkT = 0; S.navFail = 0; S.gx = null; a.route = null;
   }
   const deal = S.deal;
@@ -387,7 +404,7 @@ function ai(m, dt, out) {
     log("giveup", m, { kind: deal.kind, item: deal.item != null ? BF.itemName(deal.item) : deal.kind, why });
     if (key) S.avoid[key] = dayNow() + 0.05;
     if (deal.kind === "smelt" && deal.loaded) emptyFurnace(m, deal, true);
-    S.stage = null; S.deal = null; a.route = null; S.checkT = 0.5; return false;
+    S.stage = null; S.deal = null; a.route = null; S.checkT = 0.5; vdone(m); return false;
   };
   a.mode = "idle"; a.t = 2;
   S.walkT += dt;
@@ -396,7 +413,7 @@ function ai(m, dt, out) {
     if (S.walkT > 90) return giveUp("timeout");
     const st = travel(m, S, dt, out, s.x, s.y, s.z, m.def.speed * 1.2, (x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) <= 3 && Math.abs(y - s.y) <= 2);
     if (st === "failed") return giveUp("no path");
-    if (st === "arrived") { S.stage = null; S.deal = null; S.checkT = 2; if (m.job && m.job.mode === "off") m.job.t = Math.min(m.job.t, 0.5); }
+    if (st === "arrived") { S.stage = null; S.deal = null; S.checkT = 2; vdone(m); if (m.job && m.job.mode === "off") m.job.t = Math.min(m.job.t, 0.5); }
     return true;
   }
   if (deal.kind === "place" || deal.kind === "smelt") {
@@ -413,7 +430,7 @@ function ai(m, dt, out) {
     if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
     if (deal.kind === "place") {
       const ok = placeFurnace(m, s);
-      S.stage = null; S.deal = null; S.checkT = 1;
+      S.stage = null; S.deal = null; S.checkT = 1; vdone(m);
       if (!ok) S.avoid[fkey] = dayNow() + 0.05;
       return true;
     }
@@ -422,7 +439,7 @@ function ai(m, dt, out) {
     const st = INV().furnaceState(s.x, s.y, s.z);
     if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { FU.inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
-    if (!st.slots[0] || st.slots[0].id !== deal.rawId) { emptyFurnace(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; return true; }   // done
+    if (!st.slots[0] || st.slots[0].id !== deal.rawId) { emptyFurnace(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; vdone(m); return true; }   // done
     topUpFuel(m, deal, st);
     if (S.waitT > 15 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;
@@ -447,7 +464,7 @@ function ai(m, dt, out) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
   if (S.tt <= 0) {
     const done = doBuy(m, deal);
-    S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5;
+    S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5; vdone(m);
     if (!done) { S.avoid[key] = dayNow() + 0.05; log("giveup", m, { kind: "buy", item: BF.itemName(deal.item), why: "trade refused" }); }
   }
   return true;
@@ -476,7 +493,7 @@ function leave(m) {
   const S = m && m.tsm;
   if (!S) return;
   const c = S.craft;
-  S.craft = null; S.deal = null; S.stage = null;
+  S.craft = null; S.deal = null; S.stage = null; vdone(m);
   if (!c) return;
   const back = [];
   for (const e of c.mats || []) {
@@ -522,7 +539,7 @@ function forceStop(m) {
   if (!S || !S.deal) return null;
   const loaded = S.deal.kind === "smelt" && S.deal.loaded;
   if (loaded) emptyFurnace(m, S.deal, true);
-  S.stage = null; S.deal = null; m.ai.route = null;
+  S.stage = null; S.deal = null; m.ai.route = null; vdone(m);
   return loaded ? "emptied the furnace" : null;
 }
 BF.toolsmith = { forceStop,

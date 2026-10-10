@@ -1077,6 +1077,7 @@ function endTask(m, fs, success) {
     if (success) fs.counts[t.kind] = (fs.counts[t.kind] || 0) + 1;
   }
   fs.task = null; fs.stage = null; m.ai.route = null;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   if (success && Math.random() < BREAK_P) fs.breakT = rnd(4, 9);
 }
 function log(kind, m, data) {
@@ -1206,6 +1207,8 @@ function farmAI(m, dt, out) {
       if (!D.ready) { fs.idleWork = false; return false; }
       const t = think(m, fs, R, D);
       if (!t) { fs.breakT = rnd(5, 10); fs.idleWork = false; return false; }
+      const VS = BF.villageSim;   // estimate: the walk to the cell (or the bucket's water, the seller) and the action (a harvest replants at once)
+      if (VS && VS.begin && !VS.begin(m, (t.kind === "craft" ? 0 : VS.walkSecs(m, [t.seller ? t.seller.position : [(t.sx != null ? t.sx : t.x) + 0.5, (t.sz != null ? t.sz : t.z) + 0.5]])) + (t.kind === "tend" ? 4 : actOf(t.kind) + (t.kind === "harvest" ? ACT.plant : 0)), t.kind === "craft" && t.hay ? "Making hay bales" : t.kind === "gather" ? "Gathering dirt" : NAMES[t.kind] || (BF.baker && BF.baker.FARM_NAMES[t.kind]) || "Farm work")) { fs.thinkT = 1; fs.idleWork = false; return false; }
       fs.task = t; fs.stage = t.kind === "craft" ? "act" : "walk"; fs.t = 0; fs.actT = actOf(t.kind); fs.navFail = 0; fs.idleWork = true;
       t.max = TASK_MAX + (t.x != null ? 2.5 * Math.hypot(t.x + 0.5 - m.position.x, t.z + 0.5 - m.position.z) : 0);   // long walks to a far field get more time
       if (t.k) claims.set(t.k, m);
@@ -1519,8 +1522,17 @@ function shopAI(m, dt, out) {
     const bottles = hasEm && m.profession === "cowherd" && BF.cowherd && BF.cowherd.bottleWanted(m) > 0;
     const treat = hasEm && !hungry && !!BF.baker && BF.baker.treatWanted(m);   // a cake slice or a pie now and then (js/baker.js)
     if (sh.cd > now || m.child || !(hungry || wheat || tool || bottles || treat)) return false;
-    const deal = (hungry && findFoodSeller(m)) || (tool && findToolSeller(m, tool)) || (wheat && findWheatSeller(m)) || (bottles && findBottleSeller(m)) || (treat && BF.baker.findTreatSeller(m)) || null;
+    // estimate (villageSim.begin): the walk to the seller and the trade pause; during a countdown the next candidate is tried when one is too long
+    const VS = BF.villageSim, tries = [hungry && (() => findFoodSeller(m)), tool && (() => findToolSeller(m, tool)), wheat && (() => findWheatSeller(m)), bottles && (() => findBottleSeller(m)), treat && (() => BF.baker.findTreatSeller(m))];
+    let deal = null, found = false;
+    for (const f of tries) {
+      const d = f && f();
+      if (!d) continue;
+      found = true;
+      if (!VS || !VS.begin || VS.begin(m, VS.walkSecs(m, [d.seller.position]) + TRADE_PAUSE, d.kind === "wheat" ? "Buying " + (d.item === ids().wheat ? "wheat" : BF.itemName(d.item).toLowerCase()) : "Buying food")) { deal = d; break; }
+    }
     if (!deal) {
+      if (found) { sh.cd = now + 0.02; return false; }
       if (BF.econ) {   // nobody sells any of it now: the Economy view's dead ends (js/economy.js)
         if (hungry) BF.econ.want(m, "Food");
         if (wheat) BF.econ.want(m, ids().wheat);
@@ -1531,7 +1543,7 @@ function shopAI(m, dt, out) {
     sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; ai.route = null;
   }
   const deal = sh.deal, v2 = deal && deal.seller;
-  const giveUp = () => { sh.avoid[v2 && v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05; sh.stage = null; sh.deal = null; ai.route = null; sh.checkT = 0.5; return false; };
+  const giveUp = () => { sh.avoid[v2 && v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05; sh.stage = null; sh.deal = null; ai.route = null; sh.checkT = 0.5; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
   if (!v2 || !canSell(v2)) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   ai.mode = "idle"; ai.t = 2;
@@ -1553,6 +1565,7 @@ function shopAI(m, dt, out) {
   if (sh.tt <= 0) {
     const done = deal.kind === "wheat" ? doWheatDeal(m, deal) : deal.kind === "tool" ? doToolDeal(m, deal) : doFoodDeal(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
+    if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
     if (!done) sh.avoid[v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05;
     else { particles(m.position.x, m.position.y + 1.5, m.position.z, "#2fd06a", 5, 0.4); sound("villager_trade", m.position.x, m.position.y + 1.5, m.position.z, 0.5); if (deal.kind !== "tool") F.digest(m, dayNow()); }
   }
@@ -1565,7 +1578,7 @@ function ai(m, dt, out) {
   if (!m.inv || m.dead || !BF.mobs || !BF.mobs.nav) return false;
   if (skyT() >= WORK_END) {
     if (m.farm && m.farm.task) endTask(m, m.farm, true);
-    if (m.fshop && m.fshop.stage) { m.fshop.stage = null; m.fshop.deal = null; m.ai.route = null; }
+    if (m.fshop && m.fshop.stage) { m.fshop.stage = null; m.fshop.deal = null; m.ai.route = null; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); }
     return false;
   }
   if (m.profession === "miner" && BF.miner && BF.miner.underground(m)) return false;   // shops for food once back up its mineshaft (js/miner.js)

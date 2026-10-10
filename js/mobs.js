@@ -1463,6 +1463,33 @@ function morningAI(m, dt, out) {
 }
 
 // ---------- village mobs ----------
+// The jobs, in order: the first that has something to do this frame takes the villager (true). Each one says how long a task will take before
+// starting it (BF.villageSim.begin); a villager none of them takes for a few seconds is idle and has no task left to wait for.
+function jobsAI(m, dt, out) {
+  if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return true;   // breeding pair: stand still, face each other (js/breeding.js)
+  if (BF.storage && BF.storage.ai(m, dt, out)) return true;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return true;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
+  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return true;   // carries on cooking beef it started (js/cowherd.js)
+  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, true)) return true;   // carries on baking or buying it started (js/baker.js)
+  if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return true;   // buys food when hungry, farmers farm (js/villagelife.js)
+  if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return true;   // builds / shops for materials (js/builder.js)
+  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return true;   // feeds, shears and culls the pen sheep (js/shepherd.js)
+  if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return true;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
+  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return true;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
+  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, false)) return true;   // buys ingredients and fuel, bakes cakes and pies in its oven (js/baker.js)
+  if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return true;   // buys compass / map ingredients (js/cartography.js)
+  if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return true;   // plants saplings, fells trees, picks up what falls (js/forester.js)
+  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return true;   // sells beds to builders, buys wool and boards (js/furniture.js)
+  if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return true;
+  if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return true;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
+  if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return true;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
+  if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.ai(m, dt, out)) return true;   // buys flint, sticks, feathers and string for arrows and bows (js/fletcher.js)
+  if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return true;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
+  if (m.profession === "merchant" && BF.merchant && BF.merchant.ai(m, dt, out)) return true;   // carries surplus goods to a neighbouring village and back (js/merchant.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return true;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
+  if (BF.jobs && BF.jobs.ai(m, dt, out)) return true;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
+  return false;
+}
 function villagerAI(m, dt, out) {
   const ai = m.ai, T = m.def, V = m.village;
   if (m.tradingWith) {
@@ -1489,29 +1516,9 @@ function villagerAI(m, dt, out) {
   if (bedtime()) { nightAI(m, dt, out); return; }
   ai.night = null;
   if (ai.leaving && morningAI(m, dt, out)) return;
-  if (V && BF.villageSim && BF.villageSim.canBegin && !BF.villageSim.canBegin(m)) { ai.mode = "idle"; ai.t = 1; return; }   // its village is counting down and a new task would not finish: idles near home (js/villagesim.js)
-  if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
-  if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
-  if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
-  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return;   // carries on cooking beef it started (js/cowherd.js)
-  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, true)) return;   // carries on baking or buying it started (js/baker.js)
-  if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
-  if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
-  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
-  if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
-  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
-  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, false)) return;   // buys ingredients and fuel, bakes cakes and pies in its oven (js/baker.js)
-  if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
-  if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
-  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
-  if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;
-  if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
-  if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
-  if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.ai(m, dt, out)) return;   // buys flint, sticks, feathers and string for arrows and bows (js/fletcher.js)
-  if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
-  if (m.profession === "merchant" && BF.merchant && BF.merchant.ai(m, dt, out)) return;   // carries surplus goods to a neighbouring village and back (js/merchant.js)
-  if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
-  if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
+  if (jobsAI(m, dt, out)) { m.idleT = 0; return; }
+  m.idleT = (m.idleT || 0) + dt;
+  if (m.vtask && m.idleT > 3 && BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   // farmers sometimes go tend the village fields
   // sized villages (village generator 2) reach far beyond the plaza: villagers living out there keep to their own neighbourhood
   let ax = V ? V.x : 0, az = V ? V.z : 0;

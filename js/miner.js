@@ -544,6 +544,37 @@ function endTask(m, Q) {
   const k = Q.task;
   if (k && k.claim) claims.delete(k.claim);
   Q.task = null; m.ai.route = null; Q.digT = 0;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
+}
+// Task estimates (js/villagesim.js), in game seconds: walks + work, and for the mineshaft the way back up to the surface too. Leaving the mine is never
+// refused (a miner stuck below would only be unloaded there): exit and climb are just recorded.
+const cellPts = list => list.map(c => [c[0] + 0.5, c[2] + 0.5]);
+const digSecs = (m, id) => { const t = digTime(id, pickOf(m)); return isFinite(t) ? t : 3; };
+function digEstimate(m, Q) {
+  const sh = Q.shaft;
+  if (!sh) return 0;
+  const c = cellOf(sh, sh.n), walk = standWalk(sh, sh.n), here = shaftCellOf(m, sh);
+  const pts = (here == null ? [[sh.x + 0.5, sh.z + 0.5]].concat(cellPts(walk)) : cellPts(routeIn(sh, here, walk))).concat(cellPts(walkTo(sh, c).reverse()));   // down to the cell, and back up to the entrance
+  let dig = 0;
+  for (let y = c.y; y < c.y + c.h; y++) { const id = get(c.x, y, c.z); if (id && !liquid(id)) dig += digSecs(m, id); }
+  for (const [x, y, z] of wallOres(m, sh, c)) dig += digSecs(m, get(x, y, z));
+  return BF.villageSim.walkSecs(m, pts) + dig;
+}
+function begins(m, Q, k) {
+  const VS = BF.villageSim;
+  if (!VS || !VS.begin) return true;
+  const to = (x, z) => VS.walkSecs(m, [[x + 0.5, z + 0.5]]);
+  let secs = 0;
+  if (k.kind === "trip") secs = VS.walkSecs(m, [k.deal.other.position]) + TRADE_PAUSE;
+  else if (k.kind === "sift") secs = SIFT_SECS * Math.max(1, Math.min(count(m, I("gravel")), FLINT_WANT - count(m, I("flint"))));
+  else if (k.kind === "quarry") secs = to(k.x, k.z) + digSecs(m, get(k.x, k.y, k.z));
+  else if (k.kind === "dig") secs = digEstimate(m, Q);
+  else if (k.kind === "exit" || k.kind === "climb") {
+    secs = k.kind === "climb" ? 3 * (3 * digSecs(m, BF.B.stone) + 1) : (() => { const t = shaftCellOf(m, Q.shaft); return t == null || t < 0 ? 0 : VS.walkSecs(m, cellPts(walkTo(Q.shaft, cellOf(Q.shaft, t)).reverse())); })();
+    VS.begin(m, secs, taskName(Q, k));
+    return true;
+  }
+  return VS.begin(m, secs, taskName(Q, k));
 }
 // Seconds the walk out of the shaft takes from where it stands, with a margin.
 const exitSecs = (m, Q) => { const t = shaftCellOf(m, Q.shaft); return t == null || t < 0 ? 0 : walkTo(Q.shaft, cellOf(Q.shaft, t)).length / Math.max(0.5, m.def.speed) + 20; };
@@ -612,7 +643,7 @@ function ai(m, dt, out) {
   if (!working) {
     if (inShaft(m, Q.shaft) || Q.task && Q.task.kind === "climb") {
       const want = (Q.lost || 0) >= 3 || Q.task && Q.task.kind === "climb" ? "climb" : "exit";
-      if (!Q.task || Q.task.kind !== want) { endTask(m, Q); Q.task = { kind: want, max: want === "exit" ? 120 : 40 }; Q.t = 0; }
+      if (!Q.task || Q.task.kind !== want) { endTask(m, Q); Q.task = { kind: want, max: want === "exit" ? 120 : 40 }; Q.t = 0; begins(m, Q, Q.task); }
     }
     else { if (Q.task) endTask(m, Q); return false; }
   }
@@ -622,7 +653,7 @@ function ai(m, dt, out) {
     Q.thinkT = 1;
     Q.status = "";
     const task = think(m, Q);
-    if (!task) return false;
+    if (!task || !begins(m, Q, task)) return false;   // (nothing that fits the village's countdown: look again in a second)
     Q.task = task; Q.t = 0; Q.digT = 0; Q.nav.navFail = 0; Q.nav.navWait = 0; Q.stuck = 0; a.route = null;
     if (task.claim) claims.set(task.claim, m);
   }
@@ -807,17 +838,19 @@ function trip(m, Q, k, dt, out) {
 }
 
 // Trade-screen status line (inventory.js).
+function taskName(Q, k) {
+  if (k.kind === "quarry") return k.gravel ? "Digging gravel for flint" : "Quarrying stone";
+  if (k.kind === "sift") return "Sifting gravel for flint";
+  if (k.kind === "dig") return Q.shaft && Q.shaft.S == null ? "Digging a mineshaft" : "Mining underground";
+  if (k.kind === "exit") return "Climbing out of the mine";
+  if (k.kind === "climb") return "Digging its way out";
+  if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : BF.itemName(k.deal.item));
+  return "";
+}
 function statusText(m) {
   if (!m || m.profession !== "miner") return "";
   const Q = m.mi, k = Q && Q.task;
-  if (k) {
-    if (k.kind === "quarry") return k.gravel ? "Digging gravel for flint" : "Quarrying stone";
-    if (k.kind === "sift") return "Sifting gravel for flint";
-    if (k.kind === "dig") return Q.shaft && Q.shaft.S == null ? "Digging a mineshaft" : "Mining underground";
-    if (k.kind === "exit") return "Climbing out of the mine";
-    if (k.kind === "climb") return "Digging its way out";
-    if (k.kind === "trip") return k.deal.kind === "sell" ? "Taking cobblestone to a builder" : "Buying " + (isPick(k.deal.item) ? "a pickaxe" : BF.itemName(k.deal.item));
-  }
+  if (k && taskName(Q, k)) return taskName(Q, k);
   return Q && Q.status ? Q.status.charAt(0).toUpperCase() + Q.status.slice(1) : "";
 }
 

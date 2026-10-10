@@ -196,10 +196,12 @@ const canCraft = m => {
   return (c("saddle") < SADDLE_STOCK && c("leather") >= 3 && c("iron_ingot") >= 1) || (c("lead") < LEAD_STOCK && c("string") >= 4 && c("leather") >= 1);
 };
 function work(m, J, dt) {
-  const S = stb(m);
+  const S = stb(m), VS = BF.villageSim;
+  if (!S.craftT && canCraft(m) && VS && VS.begin && !VS.begin(m, CRAFT_SECS, "Making tack")) return;   // one craft = CRAFT_SECS at the rack
   if ((S.craftT = (S.craftT || 0) + dt) < CRAFT_SECS) return;
   S.craftT = 0;
   const made = craftOne(m);
+  if (VS && VS.done) VS.done(m);
   if (!made) return;
   log("craft", m, { made });
   if (BF.vlog && m.village) BF.vlog.log(m.village, "craft", who(m) + " made " + (made === "saddle" ? "a Saddle" : "2 Leads") + " at the tack rack", m.jobsite || m);
@@ -242,6 +244,9 @@ function endTask(m, S, ok) {
   if (tk && !ok) { if (tk.r) S.avoid["h" + tk.r.hid] = now() + 0.05; if (tk.deal && tk.deal.seller.slot) S.avoid[tk.deal.seller.slot.idx] = now() + 0.05; }
   if (tk && tk.gatesOpen) setGates(tk.st, false);
   if (tk && tk.r && tk.r.mob) BF.horses.setAvoid(tk.r.mob, null);
+  const keep = ok && tk && (tk.kind === "catch" || tk.kind === "fetch") && tk.r && tk.r.lead && tk.r.lead.mob === m;   // a led horse: the walk home carries on under the same estimate
+  S.cont = !!keep;
+  if (!keep && BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   S.task = null; S.stage = null; S.gx = null; m.ai.route = null;
 }
 function setGates(st, open) {
@@ -390,6 +395,19 @@ function ai(m, dt, out) {
     let tk = null;
     try { tk = pickTask(m, S); } catch (e) { console.error(e); }
     if (!tk) return false;
+    const VS = BF.villageSim, cont = S.cont; S.cont = false;
+    if (VS && VS.begin && !(tk.kind === "home" && cont)) {   // estimate: the whole errand; catching or fetching a horse includes leading it home to the gate and into the paddock
+      const o = tk.kind === "shop" ? tk.deal.seller : tk.kind === "catch" ? tk.mob : tk.r.mob, st = stableOf(m.village), out = st && st.out && st.out[0];
+      const home = tk.kind === "catch" || tk.kind === "fetch" || tk.kind === "home", pen = 10;   // pen: waiting at the gate while the horse follows and walks in
+      let est = VS.walkSecs(m, tk.kind === "home" ? [out] : home && out ? [[o.position.x, o.position.z], out] : [[o.position.x, o.position.z]]);
+      if (tk.kind === "catch") est += TAME_EVERY * Math.min(30, 100 / Math.max(5, tk.r.temper || 50)) + 0.4 + pen;
+      else if (tk.kind === "fetch") est += pen;
+      else if (tk.kind === "home") est += pen;
+      else if (tk.kind === "feed") est += 1;
+      else est += TRADE_PAUSE;
+      const what = { catch: "Catching a wild horse", fetch: "Fetching a loose horse", home: "Leading a horse home", feed: "Feeding the horses" }[tk.kind] || "Buying " + BF.itemName(tk.deal.item);
+      if (!VS.begin(m, est, what)) return false;
+    }
     S.task = tk; S.stage = null; S.t = 0; S.navFail = 0; S.gx = null; m.ai.route = null;
   }
   S.t += dt;
