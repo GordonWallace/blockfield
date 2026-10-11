@@ -174,6 +174,21 @@ const SPECS = {
       return { cells: c, beds: [], w: 3, d: 3 };
     },
   },
+  // Glassworks (js/glassmaker.js): a small open-sided shed (5x3: front posts of the village's wall material, a closed stone back wall with two
+  // glass pane windows, a roof) over the glass kiln, a furnace and a chest against the back wall, a torch under the roof. The kiln is a jobsite:
+  // an unemployed villager takes the glassmaker's job there.
+  glassworks: {
+    label: "glassworks", weight: "other",
+    gen(st) {
+      const B = BF.B, S = pal(st), c = [];
+      for (const u of [0, 4]) c.push([u, 0, 0, S.wall, PH.WALL], [u, 1, 0, S.wall, PH.WALL]);
+      for (let u = 0; u < 5; u++) for (let y = 0; y < 2; y++) c.push([u, y, 2, y === 1 && (u === 1 || u === 3) && B.glass_pane != null ? B.glass_pane : S.found, y === 1 && (u === 1 || u === 3) ? PH.GLASS : PH.WALL]);
+      for (let q = 0; q < 3; q++) for (let u = 0; u < 5; u++) c.push([u, 2, q, S.wall, PH.ROOF]);
+      if (B.glass_kiln != null) c.push([2, 0, 1, B.glass_kiln, PH.LIGHT]);
+      c.push([1, 0, 1, BF.furnaceId(0), PH.LIGHT], [3, 0, 1, BF.chestId(0), PH.LIGHT], [2, 1, 1, B.wall_torch_north, PH.LIGHT]);
+      return { cells: c, beds: [], w: 5, d: 3 };
+    },
+  },
   market_stall: {
     label: "market stall", weight: "other",
     gen(st) {

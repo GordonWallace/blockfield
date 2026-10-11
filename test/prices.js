@@ -60,11 +60,11 @@ module.exports = async (pg) => {
     P.tick(s, 0);
     for (let d = 1; d <= 45; d++) { P.tick(s, d); if (unit(wb) > unit(ws) + 1e-9) crossed = true; }
     ok(`own buy price never above own sell price (buys ${wb.buy[0].n} for ${wb.sell.n}, sells ${ws.sell.n} for ${ws.buy[0].n})`, !crossed);
-    // the builder never pays more for glass than the cheapest seller asks (the librarian, 11 an emerald)
+    // the builder never pays more for glass panes than the cheapest seller asks (the glassmaker, 26 an emerald)
     const b = mk("builder", 2); T.inv.add(b.inv, em, 60);
-    const glass = find(b, "glass", "emerald");
+    const glass = find(b, "glass_pane", "emerald");
     P.tick(b, 0); for (let d = 1; d <= 40; d++) P.tick(b, d);
-    ok(`builder pays below the cheapest seller: ${glass.buy[0].n} glass an emerald (cheapest ${(1 / P.cheapest(I.glass)).toFixed(1)})`, unit(glass) < P.cheapest(I.glass) && P.step(glass) > 0);
+    ok(`builder pays below the cheapest seller: ${glass.buy[0].n} panes an emerald (cheapest ${(1 / P.cheapest(I.glass_pane)).toFixed(1)})`, unit(glass) < P.cheapest(I.glass_pane) && P.step(glass) > 0);
     // fixed prices: barter and two-item offers, the explorer's maps, food offers of the hungry
     const w = mk("weaponsmith", 5); const sword = w.trades.find(o => o.buy.length === 2);
     ok("two-item payments keep their price", sword && P.kind(sword) === null);

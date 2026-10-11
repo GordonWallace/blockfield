@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
     const K = BF.baker, I = BF.I, T = BF.trades, W = BF.world;
     BF.state.paused = true;
     BF.newWorld(1, { gen: 3, gameMode: "survival" });
-    ok("new worlds use village generator 6", BF.state.villages === 6, BF.state.villages);
+    ok("new worlds use village generator 6", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
 
     // ---- recipes

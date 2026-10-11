@@ -991,6 +991,16 @@ logmatch.js, debugfeed.js / debug/index.html, worldgen.js (`BAKER_POP`).
   `BF.baker.log` keeps the last 300 internal events.
 - Tests: `test/baker-actions.js`, `test/bakechain.js` (14-day soak: `node test/bakechain.js 14 1`).
 
+## Glassmakers (js/glassmaker.js, loaded after baker.js)
+`BF.glassmaker`. Hooks: blocks.js (glassmaker pack, `glass_kiln`), textures-jobs.js, mobs.js (roster #1900, outfit, villagerAI), jobs.js (jobsite, stone shovel kit, kiln + furnace placement), trading.js
+(table, `PRODUCE`, values; librarians and cartographers no longer trade or restock glass; builders buy panes), market.js (reserve), storage.js, villagelife.js (status), villagesim.js (`JOBS`), builder.js / blueprints.js.
+- **Kiln**: 4 cobblestone around 1 iron ingot, jobsite of `glassmaker`. The glassmaker digs the top layer of natural open sand within `DIG_R` (64) of the village, never edited cells, beside water or on village
+  ground (`keepOut`), at most `DIG_DAY` (64) a day; buys sand; smelts it in a furnace through js/furnaceuse.js with bought fuel; at the kiln crafts bottles (for cowherds' empties) and panes (for builders' needs).
+- **Village generator 7** (worldgen `VGEN`): house windows are panes (also builder blueprints, via `REC`); a village with sand within 64 (`worldgen.sandNear`) gets a glassmaker, kiln and furnace 80% of the time.
+  Older saves keep generator 6 and their glass windows.
+- **Builders**: the `glassworks` blueprint (weight 1.5 at 12+ villagers with sand and no glassmaker or kiln, else 0.02); with no panes anywhere and no glassmaker, window cells are skipped into `entry.gaps` and
+  `glaze` reopens the building later to fill them.
+
 ## Villager status, food for the unemployed, claimed beds (js/villagerstatus.js, loaded after villagelog.js)
 - `BF.villagerStatus.text(m)`: the trade screen's status line for any villager. villageLife, builder and explorer statusText speak first;
   otherwise `routine(m)` reads the everyday AI (sleeping, heading to bed, walking to / working at the jobsite, looking for work, relaxing...).

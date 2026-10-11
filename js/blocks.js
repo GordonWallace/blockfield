@@ -335,6 +335,10 @@ const BLOCK_DEFS = [
   ...[1, 2, 3, 4, 5, 6].map(k => ({ name: "cake_bitten_" + k, tiles: { top: "cake_top", side: "cake_side", bottom: "cake_bottom" }, render: "model", model: "shape", opaque: false,
     hardness: 0.5, drop: null, hidden: true, item: "cake", cakeBites: k, boxes: [[1 + 2 * k, 0, 1, 15, 8, 15]], box: [1 + 2 * k, 0, 1, 15, 8, 15], color: "#f4ece0" })),
   // ---- end baker pack ----
+  // ---- glassmaker pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Glassmakers")
+  // glass kiln: the glassmaker villager's jobsite (not vanilla): a squat stone kiln with a glowing glass-melt mouth and a chimney top
+  { name: "glass_kiln", jobsite: "glassmaker", tiles: { top: "glass_kiln_top", side: "glass_kiln_side", front: "glass_kiln_front", bottom: "glass_kiln_bottom" }, hardness: 3.5, tool: "pickaxe", needsTool: true, creativeTab: "functional", color: "#7a7a80" },
+  // ---- end glassmaker pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);

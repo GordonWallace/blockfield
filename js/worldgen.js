@@ -133,7 +133,12 @@ let GEN = 1, SC = 1;
 // 5 = as 4, and a village of 10 or more villagers on grass has a cowherd with a fenced pasture (js/cowherd.js). Worlds saved with 4 keep 4: no pastures appear in them.
 // 6 = as 5, and a village of 15 or more villagers has a baker per 15 villagers, with a baker's oven placed by the jobs plan (js/baker.js, js/mobs.js
 //     villageRoster, js/jobs.js planVillage); no plot of its own, so layouts are the same as 5. Worlds saved with 5 keep 5: their bakers come when an oven is placed.
+// 7 = as 6, and windows are glass panes instead of glass blocks; a village with natural sand within 64 blocks (sandNear) starts with a glassmaker,
+//     a glass kiln and a furnace 80% of the time (js/glassmaker.js, js/mobs.js villageRoster, js/jobs.js planVillage). Worlds saved with 6 keep 6:
+//     their buildings keep their glass blocks (builders build panes everywhere: recordBuilding).
 let VGEN = 1;
+let REC = false;          // recordBuilding is running (builders' blueprints): windows are panes whatever the world's village generator
+const winB = () => (VGEN >= 7 || REC ? BF.B.glass_pane : BF.B.glass);
 const BAKER_POP = 15;     // village generator 6: a baker per this many villagers (js/mobs.js villageRoster reads BF.worldgen.BAKER_POP)
 const COWHERD_POP = 10;   // village generator 5: villages of this many villagers on grass get a cowherd and a pasture (js/mobs.js villageRoster reads BF.worldgen.COWHERD_POP)
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
@@ -1348,7 +1353,7 @@ function flatRoof(P, u0, q0, w, d, y, mat, rim) {
     P(u, y, q, rim && (u === u0 || u === u0 + w - 1 || q === q0 || q === q0 + d - 1) ? rim : mat);
 }
 function windows(P, u0, q0, w, d, y, skipFront) {
-  const G = BF.B.glass;
+  const G = winB();
   for (let u = u0 + 2; u < u0 + w - 2; u += 2) { P(u, y, q0 + d - 1, G); if (!skipFront && w >= 7) P(u, y, q0, G); }
   for (let q = q0 + 2; q < q0 + d - 1; q += 2) { P(u0, y, q, G); P(u0 + w - 1, y, q, G); }
 }
@@ -1460,7 +1465,7 @@ function drawShell(b, P, S, style) {
         for (let k = 1; k <= 3; k++) P(u, y + k, q, (eu && q === 0) ? B.oak_fence : eu || eq || q === 0 ? wall : 0);
       }
       flatRoof(P, 0, 0, w, d, y + 4, flat ? S.roof : B.planks, flat ? 0 : S.corner);
-      door(); P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass);
+      door(); P(1, y + 2, 0, winB()); P(w - 2, y + 2, 0, winB());
       const cq = VGEN >= 3 ? d - 3 : d - 2;   // village generator 3: chest in front of the table, so its lid is clear; older worlds keep the 1.0 spot, where their saved chest contents are
       P(1, y + 1, d - 2, BF.furnaceId(out)); P(2, y + 1, d - 2, BF.furnaceId(out)); P(w - 2, y + 1, cq, BF.chestId(out)); P(w - 2, y + 1, 2 * d - 5 - cq, B.crafting_table);
       P(1, y + 1, 1, B.lantern);
@@ -1482,8 +1487,8 @@ function drawShell(b, P, S, style) {
       P(2, y + 11, d - 3, B.bell); P(2, y + 10, d - 3, B.oak_fence); P(2, y + 14, d - 3, B.lantern);
       if (flat) flatRoof(P, 0, 0, w, d - 5, y + 6, S.roof, 0);
       else roof(P, S, 0, 0, w, d - 4, y + 5, wall, S.roof);
-      door(); P(du, y + 3, 0, B.glass);
-      for (let q = 2; q < d - 1; q += 2) { P(0, y + 2, q, B.glass); P(0, y + 3, q, B.glass); P(w - 1, y + 2, q, B.glass); P(w - 1, y + 3, q, B.glass); }
+      door(); P(du, y + 3, 0, winB());
+      for (let q = 2; q < d - 1; q += 2) { P(0, y + 2, q, winB()); P(0, y + 3, q, winB()); P(w - 1, y + 2, q, winB()); P(w - 1, y + 3, q, winB()); }
       P(2, y + 1, d - 2, B.crafting_table);
       return;
     }
@@ -1505,7 +1510,7 @@ function drawShell(b, P, S, style) {
       if (flat) { flatRoof(P, 0, 0, w, 4, y + 4, S.roof, 0); flatRoof(P, side, 3, 3, d - 3, y + 4, S.roof, 0); }
       else { roof(P, S, 0, 0, w, 4, y + 3, S.wall, S.roof); roof(P, S, side, 4, 3, d - 4, y + 3, S.wall, S.roof); }
       door();
-      P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass); P(side + 1, y + 2, d - 1, B.glass);
+      P(1, y + 2, 0, winB()); P(w - 2, y + 2, 0, winB()); P(side + 1, y + 2, d - 1, winB());
       P(side === 0 ? w - 2 : 1, y + 1, 2, B.crafting_table);
       return;
     }
@@ -1515,7 +1520,7 @@ function drawShell(b, P, S, style) {
       box(P, S, 0, 0, w, d, y, 7, S.wall, S.floor);
       for (let q = 1; q < d - 1; q++) for (let u = 1; u < w - 1; u++) if (!(u === lu && q === d - 2)) P(u, y + 4, q, S.floor);
       for (let q = 1; q < d - 1; q++) { P(0, y + 4, q, S.log); P(w - 1, y + 4, q, S.log); }
-      windows(P, 0, 0, w, d, y + 2, true); windows(P, 0, 0, w, d, y + 6, false); P(1, y + 6, 0, B.glass); P(w - 2, y + 6, 0, B.glass);
+      windows(P, 0, 0, w, d, y + 2, true); windows(P, 0, 0, w, d, y + 6, false); P(1, y + 6, 0, winB()); P(w - 2, y + 6, 0, winB());
       P(lu, y + 2, d - 1, S.wall);                         // no window behind the ladder (ladders need a solid wall)
       for (let k = 1; k <= 5; k++) P(lu, y + k, d - 2, BF.ladderId(out));   // against the back wall, one rung above the upper floor to step off
       if (flat) flatRoof(P, 0, 0, w, d, y + 8, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 7, S.wall, S.roof);
@@ -2353,8 +2358,31 @@ function recordBuilding(kind, w, d, style, h) {
   style = style | 0;
   const b = { type: kind, w, d, y: 0, bx: 0, bz: 0, ax: 1, az: 0, sx: 0, sz: 1, du: w >> 1, doorX: 0, doorZ: 0, h: h == null ? 0.5 : h };
   const cells = new Map();
-  drawShell(b, (u, y, q, id) => { cells.set(u + "," + y + "," + q, [u, y, q, id]); }, styles()[style] || styles()[0], style);
+  REC = true;
+  try { drawShell(b, (u, y, q, id) => { cells.set(u + "," + y + "," + q, [u, y, q, id]); }, styles()[style] || styles()[0], style); } finally { REC = false; }
   return [...cells.values()];
+}
+// Natural sand open to the sky within r (64) blocks of (x, z): desert, beach and river-bank sand above the water, from the climate (no chunks
+// needed; a grid every 8 blocks). Villages of generator 7 with it start with a glassmaker (js/mobs.js villageRoster); builders want a glassworks
+// (js/builder.js). Memoised per spot; keeps C (it runs during chunk generation, from js/jobs.js planVillage).
+const sandCache = new Map();
+function sandNear(x, z, r) {
+  r = r || 64; x = Math.round(x); z = Math.round(z);
+  const k = x + "," + z + "," + r;
+  if (sandCache.has(k)) return sandCache.get(k);
+  const c0 = Object.assign({}, C);
+  let found = false;
+  try {
+    for (let dz = -r; dz <= r && !found; dz += 8) for (let dx = -r; dx <= r && !found; dx += 8) {
+      if (dx * dx + dz * dz > r * r) continue;
+      climate(x + dx, z + dz);
+      const b = C.biome, dry = C.h >= C.wl;
+      if (dry && (b === DESERT || b === BEACH || b === RIVER || (b === SNOWY_BEACH && C.h < BF.SEA + 1))) found = true;
+    }
+  } finally { Object.assign(C, c0); }
+  if (sandCache.size > 4000) sandCache.clear();
+  sandCache.set(k, found);
+  return found;
 }
 const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: h == null ? 0.5 : h });
 
@@ -2367,7 +2395,7 @@ BF.worldgen = {
     if (GEN >= 3) placeHome3();
     if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
-    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
+    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); sandCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,
   generateBand,
   generateRange,
@@ -2380,6 +2408,8 @@ BF.worldgen = {
   tintAt,
   villagesNear,
   nearestVillage,
+  padAt,
+  sandNear,
   recordBuilding,
   bedPlan: bedPlanOf,
   palette: style => styles()[style | 0] || styles()[0],

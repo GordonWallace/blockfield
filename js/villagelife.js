@@ -1657,6 +1657,7 @@ function statusText(m) {
   if (m.profession === "poultry_keeper" && BF.poultry) { const t = BF.poultry.statusText(m); if (t) return t; }
   if (m.profession === "cowherd" && BF.cowherd) { const t = BF.cowherd.statusText(m); if (t) return t; }
   if (m.profession === "baker" && BF.baker) { const t = BF.baker.statusText(m); if (t) return t; }
+  if (m.profession === "glassmaker" && BF.glassmaker) { const t = BF.glassmaker.statusText(m); if (t) return t; }
   if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
     const t = m.farm.task;
     if (t.kind === "craft" && t.hay) return "Making hay bales";

@@ -252,6 +252,8 @@ const VILLAGER_OUTFITS = {
   cowherd:       { robe: 0x6a7448, trim: 0x454c2c, apron: 0x8a5530, sash: 0xf0ece0, hat: { kind: "brim", color: 0x5e3a1e, color2: 0x74492a } },
   // baker (not vanilla): a cream robe, a flour-white apron, a brick-red belt and a tall white cap; bakes cakes and pies in its oven (js/baker.js)
   baker:         { robe: 0xd8c8a8, trim: 0x9a7a52, apron: 0xf6f4ee, sash: 0xa0523a, hat: { kind: "bucket", color: 0xf8f8f4, color2: 0xe8e6e0 } },
+  // glassmaker (not vanilla): a slate-blue robe, a scorched leather apron and a pale glass-blue belt; digs sand and makes glass at its kiln (js/glassmaker.js)
+  glassmaker:    { robe: 0x4e5e6e, trim: 0x2e3a46, apron: 0x7a5636, sash: 0xa8dcea },
 };
 const PROFESSIONS = Object.keys(VILLAGER_OUTFITS);
 const PROF_ALIAS = { smith: "toolsmith" };
@@ -1455,7 +1457,7 @@ function morningAI(m, dt, out) {
   if (st === "stuck" && (ai.leaveTries = (ai.leaveTries || 0) + 1) < 3) { ai.route = null; return true; }
   if (st === "going") return true;
   ai.leaving = false; ai.route = null; ai.leaveTries = 0; ai.leaveEnd = st;
-  if (st === "done") { // keep walking away from the door so it gets closed behind them
+  if (st === "done" && m.home) { // keep walking away from the door so it gets closed behind them
     const H = m.home;
     ai.mode = "walk"; ai.t = 5; ai.tx = H.outX + 0.5 + (H.outX - H.doorX) * 5; ai.tz = H.outZ + 0.5 + (H.outZ - H.doorZ) * 5;
   }
@@ -1471,12 +1473,14 @@ function jobsAI(m, dt, out) {
   if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return true;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
   if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return true;   // carries on cooking beef it started (js/cowherd.js)
   if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, true)) return true;   // carries on baking or buying it started (js/baker.js)
+  if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, true)) return true;   // carries on digging, smelting or buying it started (js/glassmaker.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return true;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return true;   // builds / shops for materials (js/builder.js)
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return true;   // feeds, shears and culls the pen sheep (js/shepherd.js)
   if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return true;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
   if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return true;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
   if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, false)) return true;   // buys ingredients and fuel, bakes cakes and pies in its oven (js/baker.js)
+  if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, false)) return true;   // digs and buys sand, smelts glass, makes panes and bottles (js/glassmaker.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return true;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return true;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return true;   // sells beds to builders, buys wool and boards (js/furniture.js)
@@ -2009,6 +2013,7 @@ const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
 const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
 const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
 const MINER_CHANCE = 0.95;     // newly generated villages (js/miner.js)
+const GLASS_CHANCE = 0.8;      // village generator 7: villages with natural sand within 64 blocks (js/glassmaker.js), as FURNITURE_CHANCE
 // A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
 // saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
 // "<village key>#<idx>" key) counts as new too: the save already holds that very villager.
@@ -2083,7 +2088,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker" && p !== "glassmaker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2225,6 +2230,22 @@ function villageRoster(rec) {
       if (!gone) break;
     }
     ordered.push({ house: null, idx: 1800 + k, bed: null, prof: "baker" });
+  }
+  // glassmaker: village generator 7 gives a newly generated village with natural sand within 64 blocks (worldgen sandNear) a glassmaker 80% of
+  // the time (own seeded stream and key <village key>#1900, so nothing else shifts), its glass kiln and a furnace placed by the jobs plan
+  // (js/glassmaker.js, js/jobs.js planVillage). It takes the place of the last plain resident.
+  const kxz = String(rec.key || "").split(",").map(Number);
+  if ((BF.state && BF.state.villages | 0) >= 7 && BF.glassmaker && (rec.pop || 0) >= 4 && kxz.length === 2 && freshVillage(rec.key, rec.key + "#1900")
+    && seededRand("glass:" + rec.key)() < GLASS_CHANCE && BF.worldgen && BF.worldgen.sandNear && BF.worldgen.sandNear(kxz[0], kxz[1], 64)) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1900, bed: null, prof: "glassmaker" });
   }
   return ordered;
 }
