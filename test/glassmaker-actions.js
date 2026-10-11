@@ -103,7 +103,7 @@ module.exports = async (pg) => {
     ok("it smelted glass, never more than the sand it loaded", smelted > 0 && smelted <= loaded, { loaded, smelted });
     const made = H1.made;
     ok("glass conserved: glass + panes*6/16 + bottles == smelted", Math.abs(H1.glass + H1.panes * 6 / 16 + H1.bottles - smelted) < 0.01 && made.glass === smelted, { H1, smelted });
-    ok("sand conserved: dug == held + loaded", digs === H1.sand + loaded, { digs, sand: H1.sand, loaded });
+    ok("sand conserved: dug today (finished trips and one under way) == held + loaded", H1.dugToday === H1.sand + loaded && digs <= H1.dugToday, { digs, dugToday: H1.dugToday, sand: H1.sand, loaded });
     ok("it crafted bottles and panes", made.bottles > 0 && made.panes > 0, made);
     ok("statuses: digging sand, smelting glass, making bottles or panes", statuses.has("Digging sand") && statuses.has("Smelting glass") && (statuses.has("Making bottles") || statuses.has("Making panes")), [...statuses]);
     const stF = BF.inventory.furnaceState(fur.x, fur.y, fur.z);
