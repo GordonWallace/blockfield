@@ -117,6 +117,7 @@ module.exports = async (pg, out) => {
     PF.feed(wa, "test");
     run(6);
     ok("one fed pig alone does not breed", wildBorn === 0 && PF.willing(wa, day()) && !PF.willing(wb, day()));
+    if (Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z) > 4) { const [x, y, z] = spot(flat[0], flat[1]); wa.position.set(x, y, z); const s2 = spot(flat[0] + 1, flat[1]); wb.position.set(s2[0], s2[1], s2[2]); }   // they wandered apart while one was fed: back side by side (mates look within 10 blocks)
     PF.feed(wb, "test");
     for (let i = 0; i < 1200 && !wildBorn; i++) step();
     ok("two fed adults breed: a piglet", wildBorn === 1 && !!piglet, { wildBorn, willing: [PF.willing(wa, day()), PF.willing(wb, day())], d: +Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z).toFixed(2),
