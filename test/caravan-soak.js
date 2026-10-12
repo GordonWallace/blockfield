@@ -5,7 +5,7 @@
 // (default: two thirds of the way), as soon as a merchant is on the road, walks 1500 blocks off and stays there, so trips on the road must keep both villages and the route loaded (pins).
 // Once per game day it records each village's villagers, emeralds and items, the merchants' trips (out and home), goods sold each way, pins,
 // and path blocks made. FAILs on a page error, a villager trade made without an offer, no goods carried each way, a trip that left a pin
-// behind, more than 2 trips on the road, or a merchant who never came home. Prices take about 10 game days to drift far enough apart for a
+// behind, more than 2 trips on the road, or a merchant who never came home (one killed on the road counts as ended). Prices take about 10 game days to drift far enough apart for a
 // trip to pay (js/prices.js: a month to double), so run 30 days; a dirt path needs 20 crossings, so it is only required after 10 trips.
 const path = require('path');
 const fs = require('fs');
@@ -99,7 +99,7 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
         out.v[k] = { alive: ms.length, ems, items, merchants: ms.filter(m => m.profession === 'merchant').map(m => (m.mc && m.mc.stage) || 'home') };
       }
       const L = BF.merchant.LOG;
-      out.left = L.filter(e => e.kind === 'leave').length; out.home = L.filter(e => e.kind === 'home' && e.why === 'done').length;
+      out.left = L.filter(e => e.kind === 'leave').length; out.home = L.filter(e => e.kind === 'home' && e.why === 'done').length; out.died = L.filter(e => e.kind === 'died').length; out.cut = L.filter(e => e.kind === 'home' && e.why !== 'done').length;
       out.sells = L.filter(e => e.kind === 'sell').map(e => e.at + ':' + e.gave);
       out.paths = 0; for (const n of BF.merchant.wear.values()) out.paths = Math.max(out.paths, n);
       // the best price gap between the two villages either way (dearest buy there / cheapest sell here), whatever the steps
@@ -179,14 +179,22 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   const F = m => { console.log('FAIL ' + m); fail++; };
   if (pageErrors) F('page errors: ' + pageErrors);
   if (R.bad.length) F('villager trades without an offer: ' + R.bad.length);
-  if (FAR && !(R.farTrades > 0)) F('far pair: the merchant made no trade at the far village');
-  if (FAR && !(last.left >= 2 && last.home >= 2)) F(`far pair: expected at least 2 trips out and home, got ${last.left} out, ${last.home} home`);
+  // merchants may die on the road (monsters live in the whole world since idea-037; Gordon accepts it until villagers get armour): a trip ends
+  // home or with the merchant's death
+  const died = last.died || 0;
+  if (died) console.log(`merchants killed on the road: ${died} of ${last.left} trips`);
+  if (FAR && last.home > 0 && !(R.farTrades > 0)) F('far pair: the merchant made no trade at the far village');
+  // a trip cut short (a forced stop when the game gets heavy, js/villagesim.js) also ends it; a death or a cut may keep the merchant home for days.
+  // Trips run longer with monsters about, so the second one may still be on the road when the run ends
+  const cut = last.cut || 0, ended = last.home + died + cut;
+  if (cut) console.log(`trips cut short: ${cut}`);
+  if (FAR && !(last.left >= 2 && ended >= 1) && !(died + cut > 0 && last.left >= 1 && ended >= 1)) F(`far pair: expected at least 2 trips out and one ended, got ${last.left} out, ${last.home} home, ${died} died, ${cut} cut short`);
   if (!FAR && !(allSells.there > 0)) F('no goods sold in the other village');
   if (!FAR && DAYS >= 7 && !(allSells.home > 0)) F('no goods brought home and sold');
   if (R.maxPins > 2) F('more than 2 trips on the road: ' + R.maxPins);
   const onRoad = R.routes.reduce((a, r) => a + r.road.length, 0);
   if (R.pinsLeft > onRoad) F(`pins left behind: ${R.pinsLeft} pins, ${onRoad} merchants on the road`);
-  if (last.left - last.home > 2 + onRoad) F(`merchants who never came home: ${last.left} out, ${last.home} home`);
+  if (last.left - last.home - died - cut > 2 + onRoad) F(`merchants who never came home: ${last.left} out, ${last.home} home`);
   if (last.left >= 10 && !(R.paths > 0)) F('no dirt path formed after ' + last.left + ' trips (most crossings of one block: ' + last.paths + ')');
   if (last.left >= 2 && !(last.paths >= 2)) F('trips do not wear the same ground (most crossings of one block: ' + last.paths + ')');
   console.log(fail ? fail + ' FAILED' : 'all passed');

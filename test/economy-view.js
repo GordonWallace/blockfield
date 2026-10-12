@@ -71,6 +71,7 @@ const start = async () => {
   for (let i = 0; i < 5 && !(tip.shown && /trade/.test(tip.text)); i++) {
     const box = await dbg.evaluate(() => {   // a point that is really on the tallest band (the middle of its box can fall outside a curved band, or under another one)
       const ps = [...document.querySelectorAll('#econ svg.flow path')]; const p = ps.sort((x, y) => y.getBBox().height - x.getBBox().height)[0];
+      p.scrollIntoView({ block: 'center' });   // more wanted/held lines above can push the diagram below the fold
       const b = p.getBBox(), m = p.getScreenCTM(), svg = p.ownerSVGElement;
       for (const fx of [0.5, 0.4, 0.6, 0.3, 0.7]) for (let k = 1; k < 40; k++) {
         const q = svg.createSVGPoint(); q.x = b.x + b.width * fx; q.y = b.y + b.height * k / 40;

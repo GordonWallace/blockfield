@@ -1,7 +1,7 @@
 // Exact save and restore of mobs (BF.mobSave). Release 1.3, village loading plan (/mnt/project-files/plans/village-loading-1.3.md, scenario 1).
 // Quitting and reloading takes no game time, so every mob that was loaded comes back exactly as it was: position, facing, health and what it
 // was doing. Villagers (and village iron golems) come back through their village's normal spawn (js/mobs.js updateVillages); wild and
-// hostile mobs come back here, once the player is near the spot. A snapshot is only used when the game clock is still within EXACT of the
+// hostile mobs (every one that was loaded, no cap) go to js/wildlife.js, which brings each back when its chunk loads. A snapshot is only used when the game clock is still within EXACT of the
 // saved time; older ones are dropped and the old rules apply (villagers appear at home).
 // - A snapshot is the mob's own plain data: its ai table and any other plain fields (a job's stage, target, timers; routes too). Anything
 //   that is not plain (meshes, other mobs, villages, registries) is left out, and the fields job modules restore from their own saves
@@ -15,13 +15,12 @@ const BF = (window.BF = window.BF || {});
 
 const SHORT = 1 / 24;       // game days (a game hour): a village unloaded for less than this, with no bedtime in between, brings its mobs back exactly too
 const EXACT = 0.02;          // game days (about 24 s at 1x): a snapshot older than this is not an exact restore
-const MAX_WILD = 120;        // wild mobs saved (the ones nearest the player)
 const MAX_DEPTH = 7, MAX_ARR = 2500;
 // Fields a snapshot never holds: render objects, identity (set again by the spawn), what the modules restore from their own saves.
 const SKIP = new Set(["def", "position", "vel", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
   "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
-  "tradingWith", "badge", "badgeLevel", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child"]);
+  "tradingWith", "badge", "badgeLevel", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig"]);
 
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const r2 = v => Math.round(v * 100) / 100;
@@ -112,6 +111,27 @@ let savedAt = -1, wildT = 0;
 
 const owned = m => m.pen || m.penVillage || m.coop || m.pasture || m.sty || m.horse || m.riding || m.ledBy || m.removed || m.dead;
 // A village unloading: its villagers and golems are written down where they stand, to come back exactly after a short absence.
+// A wild mob for a save: its snapshot plus its animal state (a sheep's wool, a calf's growth, breeding cooldowns), which the snapshot leaves out
+// because pen, coop and pasture stock keep theirs in their own saves.
+const ST_KEYS = ["sheep", "hen", "cow", "pig"];
+// what a wild mob keeps: its spot, health, young/shorn flags and breeding roll; motion, animation and AI timers start fresh (a third of the size)
+const WILD_DROP = new Set(["tradeCd", "hp", "yaw", "headYaw", "headPitch", "lookAt", "walkPhase", "walkAmt", "onGround", "inWater", "headInWater", "fallStart",
+  "hurtT", "invuln", "knockT", "ai", "age", "fire", "mate", "onLadder", "_farT"]);
+function packWild(m) {
+  const snap = snapOf(m);
+  for (const k of Object.keys(snap.s)) if (WILD_DROP.has(k)) delete snap.s[k];
+  const e = { type: m.type, snap };
+  if (m.variant != null) e.variant = m.variant;
+  if (m.style != null) e.style = m.style;
+  for (const k of ST_KEYS) if (m[k] && typeof m[k] === "object") { const st = ser(Object.assign({}, m[k], { mob: undefined }), 0, new Set()); if (st) e.st = st; break; }
+  return e;
+}
+// Puts a packed wild mob's animal state back on mob m.
+function applyState(m, e) {
+  if (!m || !e || !e.st) return;
+  const k = { sheep: "sheep", chicken: "hen", cow: "cow", pig: "pig" }[m.type];
+  if (k) m[k] = Object.assign(deser(e.st), { mob: m });
+}
 function stash(m) {
   if (!m || !m.position || owned(m) || !m.village) return;
   const snap = Object.assign(snapOf(m), { t: dayNow(), away: true, night: nightNow() });
@@ -121,7 +141,7 @@ function stash(m) {
 function serialize() {
   const L = BF.mobs && BF.mobs.list;
   if (!L || !BF.player || !BF.player.position) return undefined;
-  const o = { t: dayNow(), v: {}, g: {}, w: [] }, pp = BF.player.position, cand = [];
+  const o = { t: dayNow(), v: {}, g: {}, w: [] }, cand = [];
   for (const m of L) {
     if (!m.position || owned(m)) continue;
     if (m.type === "villager" && m.village && m.slot) { o.v[m.village.key + "#" + m.slot.idx] = snapOf(m); continue; }
@@ -131,8 +151,7 @@ function serialize() {
   }
   for (const [k, s] of villagers) if (!o.v[k] && fresh(s)) o.v[k] = s;   // unloaded villages' villagers still waiting to come back
   for (const [k, a] of golems) for (const s of a) if (fresh(s)) (o.g[k] || (o.g[k] = [])).push(s);
-  cand.sort((a, b) => a.position.distanceToSquared(pp) - b.position.distanceToSquared(pp));
-  for (const m of cand.slice(0, MAX_WILD)) o.w.push({ type: m.type, variant: m.variant, style: m.style, snap: snapOf(m) });
+  for (const m of cand) o.w.push(packWild(m));   // every loaded wild mob (idea-037: no cap)
   return o;
 }
 function deserialize(o) {
@@ -142,6 +161,7 @@ function deserialize(o) {
   for (const k in o.v || {}) villagers.set(k, o.v[k]);
   for (const k in o.g || {}) golems.set(k, o.g[k]);
   wild = Array.isArray(o.w) ? o.w.filter(e => e && e.type && e.snap && e.snap.p) : [];
+  if (BF.wildlife) { BF.wildlife.adopt(wild, savedAt); wild = []; }   // each comes back with its chunk, exactly while within a game hour of the save
 }
 function reset() { villagers = new Map(); golems = new Map(); wild = []; savedAt = -1; }
 const exact = () => savedAt >= 0 && dayNow() - savedAt >= -1e-6 && dayNow() - savedAt < EXACT;   // wild mobs (saved with the game)
@@ -185,5 +205,5 @@ function update(dt) {
 }
 
 if (typeof BF.on === "function") BF.on("newWorld", reset);
-BF.mobSave = { SHORT, stash, fresh, EXACT, serialize, deserialize, peek, golem, apply, done, update, reset, snapOf, pending: () => ({ villagers: villagers.size, golems: golems.size, wild: wild.length }) };
+BF.mobSave = { SHORT, stash, fresh, EXACT, serialize, deserialize, peek, golem, apply, done, update, reset, snapOf, packWild, applyState, pending: () => ({ villagers: villagers.size, golems: golems.size, wild: wild.length }) };
 })();

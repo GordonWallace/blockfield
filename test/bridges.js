@@ -85,6 +85,8 @@ module.exports = async (pg) => {
     T.add(bm.inv, I.coal, 4); T.add(bm.inv, I.cobblestone, 40);
     bm.bs = bm.bs || {}; Object.assign(bm.bs, { mode: "idle", cool: 0, t: 0, fail: {}, avoid: {}, entry: null });
     const built = Bd.builtOf(rec);
+    M.update(0.05);
+    for (const o of M.list) if ((M.isWild(o) || o.hostile) && Math.hypot(o.position.x - x0, o.position.z - z0) < 40) o.dead = true;   // wild animals live round villages (idea-037): one standing on the span would hold the plan back (cleared after the update, which can spawn a monster)
     const e = Bd.beginPlan(bm, bm.bs, "bridge", "oak");
     ok("the builder plans the bridge", !!e && e.type === "bridge" && !!e.span, e && { ox: e.ox, oy: e.oy, oz: e.oz, w: e.w, d: e.d, n: e.n });
     if (!e) return R;

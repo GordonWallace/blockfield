@@ -94,6 +94,17 @@
   .legend .sw { display: inline-block; width: 12px; height: 9px; border: 1px solid; border-radius: 2px; }
   .tip { position: absolute; pointer-events: none; background: rgba(10, 13, 11, 0.95); border: 1px solid var(--edge2); border-radius: 5px; padding: 6px 9px; font-size: 12px; white-space: nowrap; transform: translate(12px, -50%); display: none; }
   .tip b { font-weight: 600; } .tip .sub { font-size: 11px; }
+  /* ---------- wild mobs (js/wildlife.js): the village panel's numbers and the Mobs map ---------- */
+  .wild { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: flex-start; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .wild b { color: var(--ink); font-weight: 500; }
+  .wild table { width: auto; font-size: 11px; } .wild td, .wild th { padding: 1px 8px 1px 0; border: 0; text-align: right; } .wild th { color: var(--faint); font-weight: 400; } .wild td:first-child, .wild th:first-child { text-align: left; }
+  .wild td.hit { color: var(--warn); } .wild td.dead { color: var(--danger); }
+  #mmap { display: block; width: 100%; height: 460px; cursor: grab; touch-action: none; } #mmap.drag { cursor: grabbing; }
+  .mleg { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 8px 16px 12px; font-size: 11px; align-items: center; }
+  .mleg .item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--edge2); background: none; color: var(--muted); cursor: pointer; font-size: 11px; }
+  .mleg .item b { color: var(--ink); font-weight: 500; } .mleg .item i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .mleg .item.off { opacity: 0.4; text-decoration: line-through; } .mleg .item.off i { filter: grayscale(1); }
+  .mleg .seg { margin-right: 6px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th { text-align: left; font: 10px var(--display); color: var(--faint); letter-spacing: 0.5px; padding: 6px 10px; border-bottom: 1px solid var(--edge); position: sticky; top: 0; background: var(--card); cursor: pointer; user-select: none; white-space: nowrap; }
@@ -327,6 +338,7 @@
               <div class="vstat"><div class="sub">Iron golems</div><div class="big" id="v-golems">0</div><div class="sub" id="v-golemsub"></div></div>
             </div>
             <div class="happy" id="v-happy" title="Happiness = 100 + each line's points, kept between 0 and 100. The formula is the TERMS table in js/happiness.js"></div>
+            <div class="wild" id="v-wild" hidden></div>
             <div class="occ" id="v-occ"></div>
           </div>
           <div class="mapwrap"><canvas id="map"></canvas><div class="tip" id="tip"></div></div>
@@ -336,6 +348,12 @@
           <div class="compass"><b style="left:56px;top:6px">N</b><b style="right:8px;top:54px">E</b><b style="left:57px;bottom:6px">S</b><b style="left:9px;top:54px">W</b><div class="needle" id="needle"></div></div>
           <div><div class="big" id="a-dist">-</div><div class="sub" id="a-name"></div></div>
         </div>
+      </div>
+      <div class="panel" id="mpanel">
+        <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
+          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div></div>
+        <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
+        <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
       </div>
       <div class="panel" id="rpanel">
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
@@ -461,6 +479,7 @@ function onSnap(s) {
   const was = viewKey;
   pickView(s);
   renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); renderRoutes(s); renderDay(); status(); alertsFromSnap(s);
+  if (s.mobmap) { mm = s.mobmap; renderMobMap(); }
   if (logChanged || logDirty || was !== viewKey) { if (logDirty || was !== viewKey) econChanged = true; logDirty = false; renderLog(); }
   if (econChanged && eopt.tab === "econ") renderEcon();
 }
@@ -706,6 +725,7 @@ function renderVillage(s) {
   $("v-sub").innerHTML = (curStale ? `<span class="stalebadge">Not loaded \u00B7 numbers from ${esc(v.clock)}</span> \u00B7 ` : "") +
     esc(fmt(row.dist) + " blocks away") + (row.age != null ? `<span title="Game days this village has been loaded and active"> \u00B7 age ${esc(days(row.age))}</span>` : "") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
   renderHappy(row.happy);
+  renderWild(v.wild);
   $("v-villagers").textContent = v.villagers;
   $("v-loaded").textContent = curStale ? "not loaded" : v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
   $("v-beds").textContent = v.beds;
@@ -726,6 +746,18 @@ function renderVillage(s) {
     `<span><i class="dot" style="background:#dfe6ea"></i>Iron golem</span><span><i class="dot" style="border:1.5px solid var(--warn)"></i>Free job block</span><span style="color:var(--accent2)">▲ You</span>`;
   drawMap(s);
   renderRoster(s);
+}
+
+// Wild mobs around the village (js/wildlife.js): hostiles in its area, wild animals within 128 blocks, and the last 7 nights.
+function renderWild(w) {
+  const el = $("v-wild");
+  el.hidden = !w;
+  if (!w) return;
+  const an = Object.entries(w.animals || {}).sort((a, b) => b[1] - a[1]);
+  el.innerHTML = `<div><div>Hostiles in the village area <b>${fmt(w.hostiles)}</b></div><div>Wild animals within 128 blocks <b>${fmt(an.reduce((n, a) => n + a[1], 0))}</b>` +
+    (an.length ? ` <span class="sub">(${an.map(([t, n]) => n + " " + esc(pretty(t))).join(", ")})</span>` : "") + `</div></div>` +
+    `<table title="Nights start at sunset. Zombie in: a zombie got inside the village. Attacks: zombie hits on its villagers. Deaths: villagers who died that night"><thead><tr><th>Night of</th><th>Zombie in</th><th>Attacks</th><th>Deaths</th></tr></thead><tbody>` +
+    w.nights.map(([n, r, a, d]) => `<tr><td>Day ${n + 1}</td><td class="${r ? "hit" : ""}">${r ? "yes" : "-"}</td><td class="${a ? "hit" : ""}">${a}</td><td class="${d ? "dead" : ""}">${d}</td></tr>`).join("") + `</tbody></table>`;
 }
 
 // Happiness (js/happiness.js): the score, a bar, and every term with its count and points (zero terms dimmed).
@@ -844,6 +876,144 @@ mapCv.addEventListener("mousemove", e => {
 });
 mapCv.addEventListener("mouseleave", () => { hoverName = null; tip.style.display = "none"; if (snap && curV) drawMap(snap); markRoster(); });
 mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlName ? hoverName : null; markRoster(true); });
+
+// ---------------------------------------------------------------- Mobs map (js/debugfeed.js mobMap, once a second)
+// Every loaded mob as a dot over the loaded land: hostiles warm, animals cool, village stock ringed. Click a legend entry to hide a type
+// (remembered in this browser); wheel or + / - zooms, dragging pans, Centre follows the player again.
+const MOB_COLORS = { zombie: "#e8583c", skeleton: "#f2c66d", creeper: "#ff9a3d", spider: "#d6477e", pig: "#a796f2", cow: "#4f9be8", sheep: "#a8dcf2",
+  chicken: "#5fd6c2", horse: "#4f6fd0", villager: "#e6dfc8", merchant: "#c98a4b", iron_golem: "#b9c6ce" };
+const MOB_ORDER = ["zombie", "skeleton", "creeper", "spider", "cow", "sheep", "chicken", "pig", "horse", "villager", "merchant", "iron_golem"];
+const MSTORE = "bf-debug-mobmap-hidden";
+let mobHidden = new Set();
+try { mobHidden = new Set(JSON.parse(localStorage.getItem(MSTORE) || "[]")); } catch (e) { /* storage off: nothing remembered */ }
+const saveHidden = () => { try { localStorage.setItem(MSTORE, JSON.stringify([...mobHidden])); } catch (e) { /* storage off */ } };
+const mobColor = k => MOB_COLORS[k] || (() => { let h = 0; for (const c of k) h = (h * 31 + c.charCodeAt(0)) >>> 0; return MOB_COLORS[k] = `hsl(${h % 360}, 50%, 62%)`; })();
+let mm = null, mview = { x: 0, z: 0, sc: 0, follow: true }, mdots = [], mHover = null;
+const mCv = $("mmap"), mTip = $("mtip");
+let hatch = null;
+function hatchPattern(g) {
+  if (hatch) return hatch;
+  const c = document.createElement("canvas"); c.width = c.height = 8;
+  const h = c.getContext("2d"); h.fillStyle = "#070908"; h.fillRect(0, 0, 8, 8);
+  h.strokeStyle = "rgba(255,255,255,0.05)"; h.lineWidth = 1; h.beginPath(); h.moveTo(0, 8); h.lineTo(8, 0); h.stroke();
+  return hatch = g.createPattern(c, "repeat");
+}
+function mobBounds() {
+  const c = mm.chunks, cs = mm.cs || 16;
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < c.length; i += 2) { x0 = Math.min(x0, c[i] * cs); z0 = Math.min(z0, c[i + 1] * cs); x1 = Math.max(x1, (c[i] + 1) * cs); z1 = Math.max(z1, (c[i + 1] + 1) * cs); }
+  if (!isFinite(x0)) { x0 = mm.player[0] - 64; x1 = mm.player[0] + 64; z0 = mm.player[1] - 64; z1 = mm.player[1] + 64; }
+  return [x0, z0, x1, z1];
+}
+const mZoomMin = (w, h) => { const [x0, z0, x1, z1] = mobBounds(); return Math.min((w - 20) / (x1 - x0), (h - 20) / (z1 - z0)); };   // the whole loaded area
+const mZoomMax = w => w / (3 * (mm.cs || 16));                                                                                     // about 3 chunks across
+function clampZoom(w, h) { const lo = mZoomMin(w, h), hi = Math.max(lo, mZoomMax(w)); mview.sc = Math.max(lo, Math.min(hi, mview.sc)); }
+function renderMobMap() {
+  const r = devicePixelRatio || 1, w = mCv.clientWidth, h = mCv.clientHeight;
+  if (!mm || !w) { $("m-count").textContent = mm ? "" : "waiting for the game"; return; }
+  if (mCv.width !== w * r || mCv.height !== h * r) { mCv.width = w * r; mCv.height = h * r; }
+  const g = mCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0);
+  if (!mview.sc) { mview.sc = mZoomMin(w, h); const [x0, z0, x1, z1] = mobBounds(); mview.x = (x0 + x1) / 2; mview.z = (z0 + z1) / 2; mview.follow = false; mview.fitted = true; }
+  if (mview.follow) { mview.x = mm.player[0]; mview.z = mm.player[1]; }
+  clampZoom(w, h);
+  const sc = mview.sc, X = x => w / 2 + (x - mview.x) * sc, Z = z => h / 2 + (z - mview.z) * sc, cs = mm.cs || 16;
+  // unloaded land: dark and faintly hatched; loaded chunks: a soft tone, with a thin line where loaded land ends
+  g.fillStyle = hatchPattern(g); g.fillRect(0, 0, w, h);
+  const set = new Set(), c = mm.chunks;
+  for (let i = 0; i < c.length; i += 2) set.add(c[i] + "," + c[i + 1]);
+  g.fillStyle = "#18221c";
+  for (let i = 0; i < c.length; i += 2) g.fillRect(Math.floor(X(c[i] * cs)), Math.floor(Z(c[i + 1] * cs)), Math.ceil(cs * sc) + 1, Math.ceil(cs * sc) + 1);
+  g.strokeStyle = "rgba(166,220,114,0.35)"; g.lineWidth = 1; g.beginPath();
+  for (let i = 0; i < c.length; i += 2) {
+    const cx = c[i], cz = c[i + 1], x0 = Math.round(X(cx * cs)) + 0.5, z0 = Math.round(Z(cz * cs)) + 0.5, x1 = Math.round(X((cx + 1) * cs)) + 0.5, z1 = Math.round(Z((cz + 1) * cs)) + 0.5;
+    if (!set.has(cx + "," + (cz - 1))) { g.moveTo(x0, z0); g.lineTo(x1, z0); }
+    if (!set.has(cx + "," + (cz + 1))) { g.moveTo(x0, z1); g.lineTo(x1, z1); }
+    if (!set.has((cx - 1) + "," + cz)) { g.moveTo(x0, z0); g.lineTo(x0, z1); }
+    if (!set.has((cx + 1) + "," + cz)) { g.moveTo(x1, z0); g.lineTo(x1, z1); }
+  }
+  g.stroke();
+  // running villages: a subtle outline and their name
+  g.setLineDash([4, 4]); g.strokeStyle = "rgba(242,198,109,0.35)"; g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "rgba(242,198,109,0.6)";
+  for (const v of mm.villages) { g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText(v[4] || "", X(v[0]) + 3, Z(v[1]) - 4); }
+  g.setLineDash([]);
+  // mobs
+  const rad = Math.max(2, Math.min(5, sc * 0.5));
+  mdots = [];
+  for (const d of mm.mobs) {
+    const kind = mm.kinds[d[0]];
+    if (mobHidden.has(kind)) continue;
+    const px = X(d[1]), pz = Z(d[2]);
+    if (px < -6 || pz < -6 || px > w + 6 || pz > h + 6) continue;
+    g.beginPath(); g.arc(px, pz, rad, 0, 7); g.fillStyle = mobColor(kind); g.fill();
+    if (d[4]) { g.lineWidth = 1.5; g.strokeStyle = "#fff"; g.beginPath(); g.arc(px, pz, rad + 2, 0, 7); g.stroke(); }   // village stock
+    mdots.push([px, pz, d]);
+  }
+  if (mHover) { g.lineWidth = 2; g.strokeStyle = "#fff"; g.beginPath(); g.arc(X(mHover[1]), Z(mHover[2]), rad + 4, 0, 7); g.stroke(); }
+  // the player
+  const [ppx, ppz, yaw] = mm.player;
+  g.save(); g.translate(X(ppx), Z(ppz)); g.rotate(-yaw);
+  g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
+  g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
+  // scale bar
+  const blocks = [8, 16, 32, 64, 128, 256, 512].find(b => b * sc >= 60) || 512;
+  g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.fillText(blocks + " blocks", 12, h - 20); g.fillText("N ↑", w - 34, 18);
+  $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded`;
+  renderMobLegend();
+}
+let legSig = "";
+function renderMobLegend() {
+  const n = {};
+  for (const d of mm.mobs) { const k = mm.kinds[d[0]]; n[k] = (n[k] || 0) + 1; }
+  for (const k of mobHidden) if (!(k in n)) n[k] = 0;
+  const keys = Object.keys(n).sort((a, b) => ((MOB_ORDER.indexOf(a) + 1) || 99) - ((MOB_ORDER.indexOf(b) + 1) || 99) || a.localeCompare(b));
+  const sig = keys.map(k => k + n[k] + mobHidden.has(k)).join("|");
+  if (sig === legSig) return;
+  legSig = sig;
+  $("m-legend").innerHTML = keys.map(k => `<button class="item${mobHidden.has(k) ? " off" : ""}" data-k="${esc(k)}" title="Click to ${mobHidden.has(k) ? "show" : "hide"}"><i style="background:${mobColor(k)}"></i>${esc(pretty(k))} <b>${fmt(n[k])}</b></button>`).join("") +
+    `<span class="sub" style="margin-left:6px"><i style="display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px solid #fff;vertical-align:-1px"></i> village animal (pen, coop, pasture, paddock)</span>`;
+}
+$("m-legend").addEventListener("click", e => {
+  const b = e.target.closest("button[data-k]"); if (!b) return;
+  const k = b.dataset.k; if (mobHidden.has(k)) mobHidden.delete(k); else mobHidden.add(k);
+  saveHidden(); renderMobMap();
+});
+$("m-all").addEventListener("click", () => { mobHidden.clear(); saveHidden(); renderMobMap(); });
+$("m-none").addEventListener("click", () => { if (mm) for (const k of mm.kinds) mobHidden.add(k); saveHidden(); renderMobMap(); });
+function mZoom(f, mx, my) {
+  if (!mm) return;
+  const w = mCv.clientWidth, h = mCv.clientHeight, sc0 = mview.sc;
+  mview.sc *= f; clampZoom(w, h);
+  if (mx != null && !mview.follow) { mview.x += (mx - w / 2) * (1 / sc0 - 1 / mview.sc); mview.z += (my - h / 2) * (1 / sc0 - 1 / mview.sc); }   // keep the point under the cursor
+  renderMobMap();
+}
+$("m-zin").addEventListener("click", () => mZoom(1.5));
+$("m-zout").addEventListener("click", () => mZoom(1 / 1.5));
+$("m-center").addEventListener("click", () => { mview.follow = true; renderMobMap(); });
+mCv.addEventListener("wheel", e => { e.preventDefault(); const r = mCv.getBoundingClientRect(); mZoom(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+let mDrag = null;
+mCv.addEventListener("pointerdown", e => { mDrag = { x: e.clientX, y: e.clientY, vx: mview.x, vz: mview.z, moved: false }; mCv.setPointerCapture(e.pointerId); });
+mCv.addEventListener("pointerup", () => { mDrag = null; mCv.classList.remove("drag"); });
+mCv.addEventListener("pointermove", e => {
+  if (!mm) return;
+  const r = mCv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (mDrag) {
+    const dx = e.clientX - mDrag.x, dy = e.clientY - mDrag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) { mDrag.moved = true; mview.follow = false; mCv.classList.add("drag"); }
+    if (mDrag.moved) { mview.x = mDrag.vx - dx / mview.sc; mview.z = mDrag.vz - dy / mview.sc; mTip.style.display = "none"; renderMobMap(); return; }
+  }
+  let best = null, bd = 10;
+  for (const [px, pz, d] of mdots) { const dd = Math.hypot(px - mx, pz - my); if (dd < bd) { bd = dd; best = d; } }
+  mHover = best;
+  if (best) {
+    const kind = mm.kinds[best[0]];
+    mTip.style.display = "block"; mTip.style.left = mx + "px"; mTip.style.top = my + "px";
+    mTip.innerHTML = `<b style="color:${mobColor(kind)}">${esc(pretty(kind))}</b>${best[4] ? ' <span class="sub">village animal</span>' : ""}<div class="sub">${fmt(Math.round(best[1]))}, ${fmt(best[3])}, ${fmt(Math.round(best[2]))}</div><div>${esc(mm.acts[best[5]] || "")}</div>`;
+  } else mTip.style.display = "none";
+  renderMobMap();
+});
+mCv.addEventListener("mouseleave", () => { mHover = null; mTip.style.display = "none"; if (mm) renderMobMap(); });
+addEventListener("resize", () => { if (mm) renderMobMap(); });
+window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], scale: () => mview.sc, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
 
 // ---------------------------------------------------------------- roster
 function renderRoster(s) {

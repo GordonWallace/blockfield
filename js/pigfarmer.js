@@ -7,9 +7,8 @@
 //  - Breeding: two willing adults within MATE_R walk to each other and a piglet appears; both then rest BREED_CD days. A piglet (`m.piglet`) is
 //    smaller, drops nothing and grows up after PIGLET_DAYS (feed ages it by 10%). No breeding while 24 pigs stand within 16 blocks.
 //  - Following: a pig within FOLLOW_R of a player holding pig feed walks after them. A pig farmer leads a wild pig home the same way.
-//  NOTE for "Mobs live in the world" (board idea-037), which adds wild pig breeding in js/mobs.js: whichever lands second should keep one
-//  version. Everything about pig breeding is in this file (feed, willing, findMate / breed via js/herd.js, piglet growth); mobs.js only calls
-//  pigAI, the drop rule for piglets (`m.piglet`) and setYoungSize.
+//  - Wild pigs breed on their own too: js/wildlife.js (idea-037) makes a pair willing once a game day, then this file walks them together.
+//  mobs.js only calls pigAI, the drop rule for piglets (`m.piglet`) and setYoungSize.
 // Sties: a fenced pen (js/worldgen.js "sty" with village generator 9, or the builder's "sty" blueprint) with a gate, a coarse-dirt corner, a
 //  water trough and a small roofed shelter. Each sty holds a list of pig states that outlives the pig mobs: a generated sty starts with 2-4
 //  pigs, a builder's starts empty; respawned whenever the sty is loaded, saved as "sties:<village key>". Sty pigs root about only inside the

@@ -7,15 +7,14 @@ const BF = (window.BF = window.BF || {});
 
 const PX = 1 / 16;
 const GRAVITY = 26;
-const PASSIVE_CAP = 16, HOSTILE_CAP = 12;
-const DESPAWN_DIST = 100;
+const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or the view distance) update 4 times a game second (BF.mobs.update)
+const DESPAWN_DIST = 100;   // village stock of a stopped village only: wild mobs and horses are never removed by distance (they wait with their chunk)
 const TRAVELLER_SPEED = 1.5;   // merchants and explorers walk this much faster than other villagers (village loading plan)
 
 let scene = null;
 const list = [];
 const arrows = [];
 const puffs = [];
-let spawnT = 0;
 let baseMat = null, arrowMat = null, fireMat = null, puffMat = null, puffMatDark = null;
 let fireGeo = null, puffGeo = null, arrowGeo = null;
 
@@ -1086,6 +1085,18 @@ function hostileAI(m, dt, out) {
 // Finds the nearest living mob matching pred within r blocks (horizontal + vertical box).
 function nearestMob(m, r, pred) {
   let best = null, bd = r;
+  if (r <= 32 && chunkGrid.size) {   // only the 16-block cells within r (the grid is rebuilt every update)
+    const gx = Math.floor(m.position.x / 16), gz = Math.floor(m.position.z / 16), n = Math.ceil(r / 16);
+    for (let cz = gz - n; cz <= gz + n; cz++) for (let cx = gx - n; cx <= gx + n; cx++) {
+      const cell = chunkGrid.get(sepKey(cx, cz));
+      if (cell) for (const o of cell) {
+        if (o === m || o.dead || o.removed || !pred(o)) continue;
+        const d = o.position.distanceTo(m.position);
+        if (d < bd) { bd = d; best = o; }
+      }
+    }
+    return best;
+  }
   for (const o of list) {
     if (o === m || o.dead || o.removed || !pred(o)) continue;
     const d = o.position.distanceTo(m.position);
@@ -1114,7 +1125,7 @@ function chaseAndHit(m, o, dt, out, dmg, cd, speed) {
       o.invuln = 0; damageMob(o, dmg, k, false, by); if (!o.dead) o.vel.y = 8;
       if (o.hostile && !o.dead) { o.ai.golemFoe = m; o.ai.golemFoeT = 12; }   // hostiles fight back (golemFight)
     } else if (damageMob(o, dmg, k, false, by)) {
-      if (o.type === "villager") { o.attacker = m; o.attackedAt = o.age; }   // golems come running (villagerInDanger)
+      if (o.type === "villager") { o.attacker = m; o.attackedAt = o.age; if (BF.emit) BF.emit("villagerHit", o, m); }   // golems come running (villagerInDanger); js/wildlife.js counts zombie attacks per night
       if (o.def.golem) o.ai.revenge = m;
     }
   }
@@ -1618,7 +1629,7 @@ function updateMob(m, dt) {
   m.age += dt;
   m.hurtT -= dt; m.invuln -= dt; m.knockT -= dt; ai.swingT -= dt;
 
-  const light = Math.max(0.12, skyLight() * skyAt(m.position.x, m.position.y + 0.5, m.position.z).factor,
+  const light = !m.root.visible ? 1 : Math.max(0.12, skyLight() * skyAt(m.position.x, m.position.y + 0.5, m.position.z).factor,   // only for its colour
     Math.pow(BF.world.getBlockLight(m.position.x, m.position.y + 0.5, m.position.z) / 15, 1.5));
 
   if (m.dead) {
@@ -1658,8 +1669,7 @@ function updateMob(m, dt) {
   else if (m.type === "horse" && BF.horses && BF.horses.ai(m, dt, _desired)) { /* herd, lead, pen, mate (js/horses.js) */ }
   else if (m.type === "chicken" && BF.poultry && BF.poultry.chickenAI(m, dt, _desired)) { /* led home, following seeds, or to a mate (js/poultry.js) */ }
   else if (m.type === "cow" && BF.cowherd && BF.cowherd.cowAI(m, dt, _desired)) { /* led home, following wheat, or to a mate (js/cowherd.js) */ }
-  // Pig breeding lives in js/pigfarmer.js (feed, mates, piglets; wild and sty pigs alike). "Mobs live in the world" (idea-037) adds wild pig
-  // breeding too: whichever lands second keeps one version and calls it from here.
+  // Pig breeding lives in js/pigfarmer.js (feed, mates, piglets; wild and sty pigs alike; js/wildlife.js makes wild pairs willing)
   else if (m.type === "pig" && BF.pigFarmer && BF.pigFarmer.pigAI(m, dt, _desired)) { /* led home, following feed, or to a mate (js/pigfarmer.js) */ }
   else wanderAI(m, dt, _desired);
   if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
@@ -1694,6 +1704,11 @@ function updateMob(m, dt) {
   }
   separate(m, dt);
 
+  // standing still on solid ground with nothing pushing it: no move to make (most grazing animals most of the time)
+  const resting = m.onGround && !m.inWater && !m.onLadder && m.knockT <= 0 && !_desired.x && !_desired.z && m.vel.y <= 0 &&
+    Math.abs(m.vel.x) < 0.02 && Math.abs(m.vel.z) < 0.02 && BF.world.isSolid(Math.floor(m.position.x), Math.floor(m.position.y - 0.05), Math.floor(m.position.z));
+  if (resting) { m.vel.set(0, 0, 0); m.fallStart = m.position.y; }
+  else {
   const wasGround = m.onGround;
   const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05 });
   m.onGround = res.onGround; m.inWater = res.inWater; m.headInWater = !!res.headInWater;
@@ -1715,6 +1730,7 @@ function updateMob(m, dt) {
     }
     m.fallStart = m.position.y;
   } else if (m.position.y > m.fallStart) m.fallStart = m.position.y;
+  }
   }
   if (m.dead) return;
 
@@ -1742,6 +1758,7 @@ function updateMob(m, dt) {
   else if (hs > 0.3 && m.knockT <= 0) targetYaw = Math.atan2(m.vel.x, m.vel.z);
   m.yaw = wrapAngle(m.yaw + Math.max(-7 * dt, Math.min(7 * dt, wrapAngle(targetYaw - m.yaw))));
   m.model.rotation.y = m.yaw;
+  if (!m.root.visible) return;   // the rest is how it looks: nothing to draw beyond the meshed terrain (far villages' land, despawn() hides those)
 
   // head look
   let hy = 0, hp = 0;
@@ -1893,8 +1910,26 @@ function updateFire(m, on, dt) {
   }
 }
 
-function separate(m, dt) {
+// Mobs bucketed in 2-block cells once per update (separate() looks at the 3 x 3 cells around a mob instead of every mob).
+const sepGrid = new Map(), chunkGrid = new Map();   // 2-block cells for separate(), 16-block cells for nearestMob()
+const sepKey = (gx, gz) => (((gx & 0xffff) << 16) | (gz & 0xffff)) >>> 0;
+function buildSepGrid() {
+  sepGrid.clear(); chunkGrid.clear();
   for (const o of list) {
+    if (o.dead || o.removed) continue;
+    const k = sepKey(Math.floor(o.position.x / 2), Math.floor(o.position.z / 2));
+    const a = sepGrid.get(k);
+    if (a) a.push(o); else sepGrid.set(k, [o]);
+    const k2 = sepKey(Math.floor(o.position.x / 16), Math.floor(o.position.z / 16));
+    const b = chunkGrid.get(k2);
+    if (b) b.push(o); else chunkGrid.set(k2, [o]);
+  }
+}
+function separate(m, dt) {
+  const gx = Math.floor(m.position.x / 2), gz = Math.floor(m.position.z / 2);
+  for (let cz = gz - 1; cz <= gz + 1; cz++) for (let cx = gx - 1; cx <= gx + 1; cx++) {
+  const cell = sepGrid.get(sepKey(cx, cz));
+  if (cell) for (const o of cell) {
     if (o === m || o.dead) continue;
     const dx = m.position.x - o.position.x, dz = m.position.z - o.position.z;
     const min = m.halfWidth + o.halfWidth;
@@ -1902,6 +1937,7 @@ function separate(m, dt) {
     if (m.position.y > o.position.y + o.height || o.position.y > m.position.y + m.height) continue;
     const d = Math.hypot(dx, dz) || 0.01;
     m.vel.x += (dx / d) * 6 * dt; m.vel.z += (dz / d) * 6 * dt;
+  }
   }
   if (playerAlive()) {
     const p = player();
@@ -1923,6 +1959,12 @@ function standable(x, y, z, hw, h) {
   for (let k = 0; k < Math.max(2, Math.ceil(h)); k++) if (w.getBlock(x, y + k, z) !== 0) return false;
   return !w.boxCollides(x + 0.5, y, z + 0.5, hw, h);
 }
+// A wild mob: one that belongs to no village and no other module's save (not a villager or golem of a village, not pen, coop, pasture, sty or
+// paddock stock, not a horse, not in a boat). Wild mobs live in the world: stored with their chunk when it unloads, never removed by
+// distance (js/wildlife.js).
+function isWild(m) {
+  return !!(m && !m.dead && !m.removed && !m.village && !m.penVillage && !m.pen && !m.coop && !m.pasture && !m.sty && !m.riding && !m.def.village && !m.def.herd && m.type !== "villager");
+}
 // A young farm animal's size (js/herd.js users: calves, piglets): k 0 = born (half size, head hs0 times bigger) .. 1 = grown.
 function setYoungSize(m, k, hs0) {
   const T = m && TYPES[m.type];
@@ -1937,60 +1979,77 @@ function countMobs() {
   for (const m of list) if (!m.dead && !m.def.village && !m.def.herd && !m.pen && !m.pasture && !m.sty) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
   return { p, h };
 }
-function tryPassiveSpawn() {
-  if (!playerAlive()) return;
-  if (isNight() && Math.random() > 0.12) return;
-  const pp = player().position, w = BF.world, grass = BF.B.grass;
-  const a = Math.random() * Math.PI * 2, d = rnd(24, 64);
-  const x = Math.floor(pp.x + Math.cos(a) * d), z = Math.floor(pp.z + Math.sin(a) * d);
-  if (!w.isLoaded(x, z)) return;
-  const gy = w.heightAt(x, z);
-  if (gy < BF.MIN_Y + 1 || w.getBlock(x, gy, z) !== grass) return;
-  const type = PASSIVE_TYPES[Math.floor(Math.random() * PASSIVE_TYPES.length)];
-  const T = TYPES[type];
-  if (!standable(x, gy + 1, z, T.hw, T.h)) return;
-  const n = irnd(2, 4);
-  let spawned = 0;
-  for (let i = 0; i < n * 3 && spawned < n; i++) {
+// A group of n wild animals of one type on the grass of chunk (cx, cz): its first-generation roll (js/wildlife.js). Returns how many were placed.
+function spawnGroup(type, cx, cz, n) {
+  const w = BF.world, grass = BF.B.grass, T = TYPES[type], CS = BF.CS;
+  if (!T || !scene || !w.chunks.has(cx + "," + cz)) return 0;
+  const inChunk = (x, z) => Math.floor(x / CS) === cx && Math.floor(z / CS) === cz;
+  const ok = (x, z) => { const y = w.heightAt(x, z); return y >= BF.MIN_Y + 1 && w.getBlock(x, y, z) === grass && standable(x, y + 1, z, T.hw, T.h) ? y + 1 : null; };
+  let x = null, z = null;
+  for (let i = 0; i < 12 && x == null; i++) { const tx = cx * CS + irnd(1, 14), tz = cz * CS + irnd(1, 14); if (ok(tx, tz) != null) { x = tx; z = tz; } }
+  if (x == null) return 0;
+  let made = 0;
+  for (let i = 0; i < n * 4 && made < n; i++) {
     const sx = x + (i === 0 ? 0 : irnd(-3, 3)), sz = z + (i === 0 ? 0 : irnd(-3, 3));
-    if (!w.isLoaded(sx, sz)) continue;
-    const sy = w.heightAt(sx, sz);
-    if (sy < BF.MIN_Y + 1 || w.getBlock(sx, sy, sz) !== grass || !standable(sx, sy + 1, sz, T.hw, T.h)) continue;
-    if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9)) continue;
-    createMob(type, sx + 0.5, sy + 1, sz + 0.5);
-    spawned++;
-    if (countMobs().p >= PASSIVE_CAP) break;
+    if (!inChunk(sx, sz)) continue;
+    const sy = ok(sx, sz);
+    if (sy == null) continue;
+    if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9 && Math.abs(o.position.y - sy) < 2)) continue;
+    if (type === "horse" ? BF.horses && BF.horses.spawn(sx + 0.5, sy, sz + 0.5) : createMob(type, sx + 0.5, sy, sz + 0.5)) made++;   // a horse gets its record (js/horses.js)
   }
+  return made;
 }
 function pickHostileType() {
   let r = Math.random();
   for (const [t, wgt] of HOSTILE_WEIGHTS) { if ((r -= wgt) <= 0) return t; }
   return "zombie";
 }
-function tryHostileSpawn() {
+// ---------- monster spawning ----------
+// Every loaded chunk has the same odds of a spawn try, however many chunks are loaded: each update makes tries in proportion to the loaded
+// chunk count (a surface try per chunk every SURFACE_EVERY s while the sky is dark, a cave try per chunk every CAVE_EVERY s) and spreads them
+// over random loaded chunks. Only the spot decides (darkness, block light 7 or less, open sky or cave cover, the dark-long-enough rule);
+// js/wildlife.js adds the density cap of the spot's area and the buffer around the player, villagers and golems.
+const SURFACE_EVERY = 8, CAVE_EVERY = 8, MAX_TRIES = 64;
+let surfAcc = 0, caveAcc = 0, chunkArr = [], chunkArrT = 0;
+function spawnMonsters(dt) {
   if (!playerAlive()) return;
-  const pp = player().position, w = BF.world;
-  const type = pickHostileType(), T = TYPES[type];
-  const surface = (skyLightAt(BF.sky ? BF.sky.time || 0 : 0) <= SPAWN_LIGHT || stormy()) && Math.random() < 0.6;
-  const a = Math.random() * Math.PI * 2, d = surface ? rnd(24, 48) : rnd(12, 40);
-  const x = Math.floor(pp.x + Math.cos(a) * d), z = Math.floor(pp.z + Math.sin(a) * d);
-  if (!w.isLoaded(x, z)) return;
-  if (surface) {
-    const gy = w.heightAt(x, z);
-    if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
-    if (!standable(x, gy + 1, z, T.hw, T.h)) return;
-    if (w.getBlockLight(x, gy + 1, z) > 7) return; // torch/lantern-lit ground stays safe
-    if (!darkLongEnough(x, z, 1)) return;
-    if (Math.hypot(x + 0.5 - pp.x, gy + 1 - pp.y, z + 0.5 - pp.z) < 24) return;
-    createMob(type, x + 0.5, gy + 1, z + 0.5);
-    return;
-  }
-  // cave: a dark, covered air pocket in this column
-  const c = w.chunkAt(x, z);
-  if (!c || !c.top) return;
-  const top = c.top[(z - c.cz * BF.CS) * BF.CS + (x - c.cx * BF.CS)];
+  const W = BF.world;
+  chunkArrT -= dt;
+  if (chunkArrT <= 0 || !chunkArr.length) { chunkArrT = 1; chunkArr = [...W.chunks.values()]; }
+  const n = chunkArr.length;
+  if (!n) return;
+  const dark = skyLightAt(BF.sky ? BF.sky.time || 0 : 0) <= SPAWN_LIGHT || stormy();
+  if (dark) surfAcc += dt * n / SURFACE_EVERY; else surfAcc = 0;
+  caveAcc += dt * n / CAVE_EVERY;
+  const s = Math.min(MAX_TRIES, Math.floor(surfAcc)), c = Math.min(MAX_TRIES, Math.floor(caveAcc));
+  surfAcc -= Math.floor(surfAcc); caveAcc -= Math.floor(caveAcc);
+  for (let i = 0; i < s; i++) { const ch = chunkArr[Math.floor(Math.random() * n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch); }
+  for (let i = 0; i < c; i++) { const ch = chunkArr[Math.floor(Math.random() * n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch); }
+}
+function spawnHostile(type, x, y, z) {
+  if (BF.wildlife && !BF.wildlife.mayHostile(x, y, z)) return null;
+  const m = createMob(type, x, y, z);
+  if (m && BF.wildlife) BF.wildlife.spawned(m);
+  return m;
+}
+function trySurface(c) {
+  const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  const x = c.cx * CS + irnd(0, CS - 1), z = c.cz * CS + irnd(0, CS - 1);
+  const gy = w.heightAt(x, z);
+  if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
+  if (!standable(x, gy + 1, z, T.hw, T.h)) return;
+  if (w.getBlockLight(x, gy + 1, z) > 7) return; // torch/lantern-lit ground stays safe
+  if (!darkLongEnough(x, z, 1)) return;
+  spawnHostile(type, x + 0.5, gy + 1, z + 0.5);
+}
+// a dark, covered air pocket in a random column of the chunk
+function tryCave(c) {
+  const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  const lx = irnd(0, CS - 1), lz = irnd(0, CS - 1), x = c.cx * CS + lx, z = c.cz * CS + lz;
+  if (!c.top) return;
+  const top = c.top[lz * CS + lx];
   if (top < BF.SEA - 40) return;
-  const yMin = Math.max(BF.MIN_Y + 2, Math.floor(pp.y) - 24), yMax = Math.min(top - 3, Math.floor(pp.y) + 24);
+  const yMin = Math.max(BF.MIN_Y + 2, c.y0 + 1), yMax = Math.min(top - 3, c.y1 - 3);
   if (yMax <= yMin) return;
   for (let tries = 0; tries < 6; tries++) {
     const y = irnd(yMin, yMax);
@@ -2000,8 +2059,7 @@ function tryHostileSpawn() {
     if (s.open || s.factor > 0.6) continue;   // 5+ blocks of cover (caves, dense forest canopy): dark at any time of day, houses never
     if (!darkLongEnough(x, z, 0)) continue;   // ...unless a light went out or the cover was just built
     if (w.getBlockLight(x, y, z) > 7) continue; // lit caves are safe
-    if (Math.hypot(x + 0.5 - pp.x, y - pp.y, z + 0.5 - pp.z) < 20) continue;
-    createMob(type, x + 0.5, y, z + 0.5);
+    spawnHostile(type, x + 0.5, y, z + 0.5);
     return;
   }
 }
@@ -2399,11 +2457,12 @@ function despawn(dt) {
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
     if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
+    const wild = isWild(m);
+    if (!BF.world.isLoaded(m.position.x, m.position.z)) { if (wild && BF.wildlife) BF.wildlife.stow(m); removeMob(m); continue; }   // a wild mob that walked off the loaded land waits with its chunk
     const d = m.position.distanceTo(pp);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
-    if ((d > DESPAWN_DIST && !simmed && !m.village) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), not by distance
+    if (d > DESPAWN_DIST && !simmed && !m.village && !wild && !m.def.herd) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
-    if (m.hostile && !m.dead && d > 48 && m.age > 20 && Math.random() < dt * 0.03) removeMob(m);
   }
 }
 
@@ -2445,21 +2504,36 @@ BF.mobs = {
     BF.world.onChunkUnload((cx, cz) => {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
-        if (Math.floor(m.position.x / BF.CS) === cx && Math.floor(m.position.z / BF.CS) === cz) removeMob(m);
+        if (Math.floor(m.position.x / BF.CS) === cx && Math.floor(m.position.z / BF.CS) === cz) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];
         if (Math.floor(a.pos.x / BF.CS) === cx && Math.floor(a.pos.z / BF.CS) === cz) { scene.remove(a.mesh); arrows.splice(i, 1); }
       }
     });
+    if (BF.wildlife) BF.wildlife.init();
   },
   update(dt) {
     if (!scene) return;
     dt = Math.min(dt, 0.05);
     planBudget = 2; // A* searches per frame
+    buildSepGrid();
+    // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
+    // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
+    const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     for (const m of list.slice()) {
       if (m.removed) continue;
-      try { updateMob(m, dt); } catch (e) { console.error(e); removeMob(m); }
+      let h = dt;
+      if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
+        const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
+        if (dx * dx + dz * dz > far2) {
+          if (m._farT == null) m._farT = Math.random() / FAR_HZ;
+          m._farT += dt;
+          if (m._farT < 1 / FAR_HZ) continue;
+          h = m._farT; m._farT = 0;
+        } else m._farT = null;
+      }
+      try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
     }
     updateArrows(dt);
     updatePuffs(dt);
@@ -2477,13 +2551,8 @@ BF.mobs = {
     if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
-    spawnT -= dt;
-    if (spawnT <= 0 && BF.mobs.spawning !== false) {
-      spawnT = 0.4;
-      const c = countMobs();
-      if (c.p < PASSIVE_CAP && Math.random() < 0.5) tryPassiveSpawn();
-      if (c.h < HOSTILE_CAP) tryHostileSpawn();
-    }
+    if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
+    if (BF.wildlife) BF.wildlife.update(dt);
     try { updateVillages(dt); restockVillagers(dt); if (BF.merchant) BF.merchant.tick(dt); } catch (e) { console.error(e); }
     despawn(dt);
     aiTick(dt);
@@ -2514,6 +2583,9 @@ BF.mobs = {
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
+  // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
+  isWild, spawnGroup, standable, findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
+  skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
   aiTime: () => aiEma,
