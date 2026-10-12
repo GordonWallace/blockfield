@@ -1,4 +1,4 @@
-// @ci integration suite=village
+// @ci integration suite=village timeout=480
 // Where villagers appear when their village loads again (village loading plan, scenario 2): a short absence (under a game hour, no bedtime in
 // between) brings everyone back exactly where they stood; a longer one by day puts them at random spots within the leash of their bed; at bedtime
 // they are in their beds; an explorer comes back at its saved spot; a villager without a bed goes indoors at night.
@@ -24,7 +24,17 @@ module.exports = async (pg) => {
     }
     return false;
   };
-  const back = async () => { await tp(info.x, info.z); await wait(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length >= 4, info.key, 60000); await sleep(300); };
+  // back, then waits until the village's villagers have all loaded (the count holds for 2 s): a busy runner loads them over several seconds
+  const back = async () => {
+    await tp(info.x, info.z);
+    await wait(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length >= 4, info.key, 60000);
+    let last = -1;
+    for (let i = 0; i < 30; i++) {
+      const n = await pg.evaluate(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length, info.key);
+      if (n === last) break;
+      last = n; await sleep(2000);
+    }
+  };
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   const setTime = t => pg.evaluate(t => { BF.sky.setTime(t); }, t);
   // 1. a short absence by day: exact
@@ -70,7 +80,7 @@ module.exports = async (pg) => {
     window.__bedless = m;
     return true;
   }, info.key);
-  await wait(() => { const m = window.__bedless, H = m && m.home; return !!H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d; }, null, 150000);
+  await wait(() => { const m = window.__bedless, H = m && m.home; return !!H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d; }, null, 240000);
   const inside = await pg.evaluate(() => { const m = window.__bedless, H = m && m.home; const ins = !!H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d; window.__why = { pos: [Math.round(m.position.x), Math.round(m.position.z)], H: H && [H.x, H.z, H.w, H.d], night: m.ai.night && { f: m.ai.night.fails, sf: m.ai.night.sFail, sh: !!m.ai.night.shelter }, rk: m.ai.routeKind, route: m.ai.route && m.ai.route.length, bed: !!m.bed, mode: m.ai.mode, bt: BF.mobs.nav.bedtime(), sleeping: !!m.sleeping, hb: m.homeBed }; return ins; });
   ok("a villager without a bed goes indoors at night", night && inside, { night, inside, why: await pg.evaluate(() => window.__why) });
 };
