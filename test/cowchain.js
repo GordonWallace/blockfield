@@ -160,7 +160,9 @@ const LEAN = 3;
   const sizes = R.herd.map(x => x[1]).filter(x => x != null), start = setup.pasture ? setup.pasture.cows : sizes[0],   // before the first day: the first sample may already hold calves
         lim = R.pasture ? R.pasture.limit : 0;
   const firstFull = sizes.findIndex(x => x >= lim), after = firstFull >= 0 ? sizes.slice(firstFull) : [];
-  const stuck = R.herd.filter(x => x[4] < 9 && x[5] >= 9).length;   // samples where some villager held a full lot of empties while the cowherd was short
+  // samples where some villager held a full lot of empties while the cowherd was short, as at the sample before too: one sample alone is the
+  // cowherd still on its way to buy them after bottling
+  const short = x => x && x[4] < 9 && x[5] >= 9, stuck = R.herd.filter((x, i) => short(x) && short(R.herd[i - 1])).length;
   console.log('start', JSON.stringify(R.start), 'end', JSON.stringify(R.end));
   console.log('made', JSON.stringify({ culls, beef, leather, milked: R.milked, bottled, steak, calves, fetched, fed: R.fed, kits: R.kits }));
   console.log('trades', JSON.stringify({ bottlesBack, milkSold, wheatBought, bucketsBought, leatherToLw }));
