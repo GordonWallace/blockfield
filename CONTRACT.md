@@ -585,7 +585,7 @@ hooks) and `if (m.child) BF.breeding.childMove(m, dt, out)` after `wanderAI`; `r
   job (preferred professions weigh 3x); with no free jobsite it stays unemployed and jobs.js keeps retrying. Event `villagerGrewUp(m)`. From then on it is an ordinary adult
   (starving rules, trading, can breed).
 - **Persistence.** Newborns live in `rec.bred` (village record) as `{k, child, born, eaten, parents: [profA, profB], prof, cd, pos, bed, ...}` and use the existing villager map with
-  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+, added trades #1700 cowherd, #1800+k bakers, #1900 glassmaker, #2000 beekeeper (which shares the newborn range), #2500 pig farmer; never #2000+k): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
+  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+, added trades #1700 cowherd, #1800+k bakers, #1900 glassmaker, #2000 beekeeper (which shares the newborn range), #1960 pig farmer; never #2000+k): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
   breeding.js (not the roster) near their saved position when the player is within ~72 blocks; grown ones get `BF.jobs.onSpawn(m, rec, {prof, ...saved})`. Dead newborns
   are removed from `rec.bred` and their keys from the next save (and their death is not counted in `rec.killed`, so no roster slot is lost). Parents' cooldowns:
   `"breeding:cd": {villagerKey: day}`. Old saves have none of this and load unchanged.
@@ -1017,7 +1017,7 @@ logmatch.js, debugfeed.js / debug/index.html, worldgen.js (`BAKER_POP`).
 
 ## Pig farmers (js/pigfarmer.js, loaded after beekeeper.js; board idea-042)
 `BF.pigFarmer`. Pigs breed, live in sties and are raised by the pig farmer, the way cows, pastures and the cowherd work (js/cowherd.js), on the shared herd code (js/herd.js). Hooks: blocks.js (pig farmer pack after the
-bees pack, `feed_trough`), textures-jobs.js, recipes-jobs.js (7 planks as `P P / P P / PPP`; burns as fuel), mobs.js (roster #2500, outfit, `pigAI` branch, `contain`, `pickWander`, no drops for piglets, `setYoungSize`,
+bees pack, `feed_trough`), textures-jobs.js, recipes-jobs.js (7 planks as `P P / P P / PPP`; burns as fuel), mobs.js (roster #1960, outfit, `pigAI` branch, `contain`, `pickWander`, no drops for piglets, `setYoungSize`,
 `countMobs`, villagerAI cook errand and `ai`, tick / export / import / reset), mobsave.js (`pig`, `sty` skipped; sty pigs are the sty's), jobs.js (jobsite, `pigFarmerCount`, trough beside the sty gate, hire),
 worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock, `HIRE_NEEDS`), market.js (reserve, wares), villagelife.js (shopping, butcher's pork, `reserveOf`, status), villagesim.js (`JOBS`), player.js
 (right click), storage.js (inputs), logmatch.js (`pigs`), debugfeed.js / debug/index.html, builder.js / blueprints.js (`sty`).
@@ -1027,7 +1027,7 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
   them (not sty pigs). Events: `pigFed(m, by)`, `pigBorn(piglet, a, b)`, `pigPenned(m, sty)`, `pigCulled(m, by, pork)`. idea-037 ("mobs live in the world") is to add wild pig breeding too; it was not merged when this
   landed, so pig breeding lives here and the mobs.js hooks are marked for whichever lands second to share one version.
 - **Sties.** Village generator 9 (default for new worlds; worlds saved with 8 or less keep theirs): a village of `PIG_POP` (10)+ villagers on grass (`v.ground === 0`) gets a pig farmer 60% of the time (`PIG_CHANCE`, its own seeded
-  stream `pigs:<village key>`, so it is the same every time and nothing else moves; roster slot `<village key>#2500`, taking the last plain resident's place as the cowherd does) and a `sty` plot (7x8: worldgen adds it
+  stream `pigs:<village key>`, so it is the same every time and nothing else moves; roster slot `<village key>#1960`, taking the last plain resident's place as the cowherd does) and a `sty` plot (7x8: worldgen adds it
   after every other plot, the pasture included, only when `BF.jobs.pigFarmerCount(v)` holds the pig farmer, so no other plot moves): fence ring with an oak gate facing the road, a coarse-dirt corner by the gate, a
   2-water trough at the back, and a plank roof on fence posts over the back corner; the feed trough stands beside the gate (`jobs.planVillage`). Inside is 5x5 = 25 cells: `limit` = max(2, floor(cells / 8)) = 3.
   `BF.pigFarmer.stiesOf(rec)`: `{key, idx ("g<n>" / "b<id>"), gen, rec, x0..z1 (room), fx0..fz1 (fence), y, gate, out, cells, limit, pigs: [state], culls}`. A generated sty starts with 2-4 pigs (seeded), a built one

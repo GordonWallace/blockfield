@@ -2290,7 +2290,7 @@ function villageRoster(rec) {
   }
   // pig farmer: village generator 9 gives a village of PIG_POP (10) or more villagers on grass (forest and taiga villages are on grass too) a
   // pig farmer PIG_CHANCE (60%) of the time, drawn from the village key (own seeded stream, so nothing else shifts), with a sty beside its feed
-  // trough (js/pigfarmer.js, worldgen layoutVillage, js/jobs.js planVillage). Own key <village key>#2500 (#2000+k are newborns, js/breeding.js);
+  // trough (js/pigfarmer.js, worldgen layoutVillage, js/jobs.js planVillage). Own key <village key>#1960 (keys #2000 and up are newborns, js/breeding.js);
   // it takes the place of the last plain resident.
   if ((BF.state && BF.state.villages | 0) >= 9 && BF.pigFarmer && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.PIG_POP) || 10) && ground === 0
     && seededRand("pigs:" + rec.key)() < PIG_CHANCE) {
@@ -2302,7 +2302,7 @@ function villageRoster(rec) {
         ordered.splice(i, 1); break;
       }
     }
-    if (ordered.length < cap) ordered.push({ house: null, idx: 2500, bed: null, prof: "pig_farmer" });
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1960, bed: null, prof: "pig_farmer" });
   }
   return ordered;
 }
