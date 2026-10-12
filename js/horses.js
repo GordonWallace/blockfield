@@ -1,4 +1,4 @@
-// Horses (BF.horses): wild herds on plains, savanna and meadow, taming by riding, saddles, riding, leads, breeding, and saving every horse.
+// Horses (BF.horses): wild horses on plains, savanna and meadow (they live like other wild animals: js/wildlife.js), taming by riding, saddles, riding, leads, breeding, and saving every horse.
 // Loaded after js/boats.js (it shares the player's riding code: a ridden horse is the player's `vehicle`, see js/player.js) and before
 // js/player.js. Hooks: mobs.js (model, type, horses.ai in the AI chain, ridden horses skip AI and physics), player.js (right click, HUD),
 // save.js ("horses"), main.js (nothing: tick runs from mobs.update via BF.horses.tick).
@@ -18,8 +18,8 @@ const MARKS = ["none", "white", "white_field", "white_dots", "black_dots"];
 const FEED = { wheat_item: { heal: 2, temper: 3, grow: 0.1 }, apple: { heal: 3, temper: 3, grow: 0.15 }, hay_bale: { heal: 20, temper: 10, grow: 0.5 }, sugar: { heal: 1, temper: 3, grow: 0.05 } };
 const BREEDS = new Set(["wheat_item", "hay_bale"]);   // what makes a tamed adult willing to breed
 const FEED_DAYS = 1, BREED_CD = 1, FOAL_DAYS = 1, MATE_R = 10, MEET = 2.2;
-const HERD_R = 9, HERD_SPEED = 100 / 1200;   // members keep within 9 blocks of the herd centre, which drifts ~100 blocks a game day (1200 s)
-const SPAWN_GAP = 96, HERD_ROLL = 0.04;   // at most one herd per 96 blocks; a chunk of horse land gets one at its first generation with this chance (js/wildlife.js)
+const HERD_R = 9, HERD_SPEED = 100 / 1200;   // spawnHerdAt (tests): members keep within 9 blocks of the herd centre, which drifts ~100 blocks a game day
+const HOUR = 1 / 24;   // a wild horse back after longer than this away comes back somewhere within 8 blocks, as other wild animals do
 const LEAD_SLACK = 3, LEAD_BREAK = 12, POST_R = 3.5;
 const GRAV = 32;
 const live = o => !!(o && !o.dead && !o.removed);
@@ -99,6 +99,11 @@ const variantOf = r => r.coat + "/" + r.mark;
 // Puts the record's horse into the world as a mob.
 function embody(r) {
   if (!BF.mobs || r.mob) return r.mob;
+  if (!r.tamed && !r.owner && !r.lead && !r.pen && r.t != null && now() - r.t > HOUR && BF.wildlife && BF.wildlife.relocate) {
+    const at = BF.wildlife.relocate("horse", r.x, r.y, r.z);
+    if (at) { r.x = at[0]; r.y = at[1]; r.z = at[2]; }
+  }
+  r.t = null;
   const m = BF.mobs.spawn("horse", r.x, r.y, r.z);
   if (!m) return null;
   m.horse = r; r.mob = m;
@@ -153,14 +158,14 @@ function feed(m, itemName, by) {
   if (used) { fx(m, "#ffd84a", 4); if (BF.emit) BF.emit("horseFed", m, by); }
   return used;
 }
-const willing = (r, t) => r.tamed && !isFoal(r) && r.fed != null && t - r.fed < FEED_DAYS && t >= r.cd;
+const willing = (r, t) => (r.tamed || !r.owner) && !isFoal(r) && r.fed != null && t - r.fed < FEED_DAYS && t >= r.cd;   // wild ones are made willing by wild breeding (js/wildlife.js)
 function breed(a, b) {
   const ra = a.horse, rb = b.horse, t = now();
   const st = foalStats(ra, rb);
   const pick = (x, y) => (Math.random() < 0.45 ? x : Math.random() < 0.82 ? y : null);
   const foal = spawn((a.position.x + b.position.x) / 2, Math.max(a.position.y, b.position.y), (a.position.z + b.position.z) / 2, {
     stats: st, coat: pick(ra.coat, rb.coat) || COATS[irnd(0, 6)], mark: pick(ra.mark, rb.mark) || MARKS[irnd(0, 4)],
-    tamed: true, owner: ra.owner, growAt: t + FOAL_DAYS, cd: t + FOAL_DAYS + BREED_CD, pen: ra.pen || rb.pen,
+    tamed: !!ra.tamed, owner: ra.owner, growAt: t + FOAL_DAYS, cd: t + FOAL_DAYS + BREED_CD, pen: ra.pen || rb.pen,
   });
   ra.cd = rb.cd = t + BREED_CD; ra.fed = rb.fed = null; ra.mate = rb.mate = null;
   fx(a, "#ff5a7a", 6); fx(b, "#ff5a7a", 6);
@@ -255,7 +260,7 @@ function ai(m, dt, out) {
     if (r.lead.kind !== "post") { out.x = out.z = 0; return true; }
     return false;   // tied: wanders inside the post's reach (see the clamp below)
   }
-  // breeding: a willing tamed adult walks to a willing mate
+  // breeding: a willing adult walks to a willing mate (tamed ones of the same owner, or two wild ones)
   if (willing(r, t)) {
     let best = null, bd = MATE_R;
     for (const o of BF.mobs.list) {
@@ -316,15 +321,6 @@ function moveHerds(dt) {
     const mx = sx / n, mz = sz / n;
     if (Math.hypot(mx - h.cx, mz - h.cz) > HERD_R * 2) { h.cx = mx; h.cz = mz; }
   }
-}
-// A chunk's first-generation roll (js/wildlife.js; idea-037: no herds turn up later around the player): sometimes a herd somewhere in it.
-function rollHerd(cx, cz) {
-  const W = BF.world, CS = BF.CS;
-  if (Math.random() >= HERD_ROLL) return null;
-  const x = cx * CS + irnd(2, CS - 3), z = cz * CS + irnd(2, CS - 3);
-  if (!W.isLoaded(x, z) || !isHorseBiome(x, z)) return null;
-  for (const r of recs.values()) { const rx = r.mob ? r.mob.position.x : r.x, rz = r.mob ? r.mob.position.z : r.z; if (Math.hypot(rx - x, rz - z) < SPAWN_GAP) return; }
-  return spawnHerdAt(x, z);
 }
 // A wild herd of 2-6 (sometimes with foals) on the grass around (x, z). Returns the herd, or null when there was no room.
 function spawnHerdAt(x, z) {
@@ -392,7 +388,7 @@ function tick(dt) {
   for (const r of recs.values()) {
     const m = r.mob;
     if (m && m.dead) { recs.delete(r.hid); continue; }   // died: gone for good
-    if (m && m.removed) { store(r); r.mob = null; if (r.rider) r.rider = false; continue; }   // chunk unloaded or left behind: it waits there
+    if (m && m.removed) { store(r); r.t = now(); r.mob = null; if (r.rider) r.rider = false; continue; }   // chunk unloaded or left behind: it waits there
     if (m) {
       if (isFoal(r) && t >= r.growAt) { r.growAt = null; syncLook(m); }
       else if (isFoal(r)) syncLook(m);
@@ -571,7 +567,7 @@ function serialize() {
     store(r);
     const q = v => Math.round(v * 100) / 100;
     out.push({ hid: r.hid, x: q(r.x), y: q(r.y), z: q(r.z), yaw: q(r.yaw), coat: r.coat, mark: r.mark, maxHp: r.maxHp, hp: q(r.hp), speed: q(r.speed), jump: q(r.jump),
-      tamed: r.tamed ? 1 : 0, owner: r.owner, saddle: r.saddle ? 1 : 0, temper: r.temper, growAt: r.growAt, cd: r.cd, fed: r.fed, herd: r.herd,
+      tamed: r.tamed ? 1 : 0, owner: r.owner, saddle: r.saddle ? 1 : 0, temper: r.temper, growAt: r.growAt, cd: r.cd, fed: r.fed, herd: r.herd, t: r.mob ? null : r.t,
       post: r.lead && r.lead.kind === "post" ? [r.lead.x, r.lead.y, r.lead.z] : null, led: r.lead && r.lead.kind === "player" ? 1 : 0, pen: r.pen,
       rider: r.mob && r.mob.rider ? 1 : 0 });
   }
@@ -586,7 +582,7 @@ function deserialize(o) {
     if (!e || ![e.x, e.y, e.z].every(Number.isFinite)) continue;
     const r = { hid: e.hid || nextId++, x: e.x, y: e.y, z: e.z, yaw: +e.yaw || 0, coat: COATS.includes(e.coat) ? e.coat : "brown", mark: MARKS.includes(e.mark) ? e.mark : "none",
       maxHp: clamp(+e.maxHp || 20, 1, 60), hp: +e.hp || 20, speed: +e.speed || 9, jump: +e.jump || 2, tamed: !!e.tamed, owner: e.owner || null, saddle: !!e.saddle,
-      temper: +e.temper || 0, growAt: e.growAt != null ? +e.growAt : null, cd: +e.cd || 0, fed: e.fed != null ? +e.fed : null, herd: e.herd || null,
+      temper: +e.temper || 0, growAt: e.growAt != null ? +e.growAt : null, cd: +e.cd || 0, fed: e.fed != null ? +e.fed : null, herd: e.herd || null, t: e.t != null ? +e.t : null,
       lead: Array.isArray(e.post) ? { kind: "post", x: e.post[0], y: e.post[1], z: e.post[2] } : e.led ? { kind: "player" } : null, post: Array.isArray(e.post) ? e.post : null,
       pen: e.pen && typeof e.pen === "object" ? e.pen : null, rider: !!e.rider, mob: null };
     recs.set(r.hid, r);
@@ -604,7 +600,7 @@ BF.horses = {
   HORSE_BIOMES, COATS, MARKS, FEED, SPEED_MIN, SPEED_MAX, JUMP_MIN, JUMP_MAX, HP_MIN, HP_MAX,
   isHorseBiome, rollStats, foalStats, jumpHeight, price: m => price(m.horse || m),
   spawn, tame, feed, breed, leash, setPen, willing: m => !!(m && m.horse && willing(m.horse, now())),
-  ai, tick, spawnHerdAt, rollHerd, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
+  ai, tick, spawnHerdAt, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
   ride: RIDE, drawLeads,
   serialize, deserialize, reset,
 };

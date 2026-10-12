@@ -1972,7 +1972,7 @@ function spawnGroup(type, cx, cz, n) {
     const sy = ok(sx, sz);
     if (sy == null) continue;
     if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9 && Math.abs(o.position.y - sy) < 2)) continue;
-    if (createMob(type, sx + 0.5, sy, sz + 0.5)) made++;
+    if (type === "horse" ? BF.horses && BF.horses.spawn(sx + 0.5, sy, sz + 0.5) : createMob(type, sx + 0.5, sy, sz + 0.5)) made++;   // a horse gets its record (js/horses.js)
   }
   return made;
 }
@@ -2469,7 +2469,7 @@ BF.mobs = {
     for (const m of list.slice()) {
       if (m.removed) continue;
       let h = dt;
-      if (pp && !m.riding && (m.hostile || isWild(m))) {
+      if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
         const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
         if (dx * dx + dz * dz > far2) {
           if (m._farT == null) m._farT = Math.random() / FAR_HZ;

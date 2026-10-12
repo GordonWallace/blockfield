@@ -146,16 +146,26 @@ module.exports = async (pg) => {
       for (let i = 0; i < 7; i++) { const m = BF.mobs.spawn("cow", x + 0.5 + (i % 3), y, z + 0.5 + Math.floor(i / 3)); m.wildB = { next: 0 }; crowd.push(m); }
       for (let i = 0; i < 100; i++) BF.mobs.update(0.05);
       const willing = crowd.filter(m => m.cow && m.cow.fed != null).length;
-      BF.wildlife.tune.pairP = 0.0513;
       for (const m of crowd) m.dead = true;
+      for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
+      // two wild horses breed on their own too, and their foal is wild
+      const h1 = BF.horses.spawn(x + 0.5, y, z + 0.5), h2 = BF.horses.spawn(x + 2.5, y, z + 0.5);
+      for (const m of [h1, h2]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
+      for (let i = 0; i < 40; i++) BF.mobs.update(0.05);
+      for (const m of [h1, h2]) m.wildB = { next: 0 };
+      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
+      const foals = L.filter(m => m.type === "horse" && !m.dead && m.horse && m.horse.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 20).map(m => ({ tamed: m.horse.tamed, owner: m.horse.owner }));
+      for (const m of L.slice()) if (m.type === "horse") m.dead = true;
+      BF.wildlife.tune.pairP = 0.0513;
       // fed pigs
       const p1 = BF.mobs.spawn("pig", x + 0.5, y, z + 0.5), p2 = BF.mobs.spawn("pig", x + 2.5, y, z + 1.5);
       const fedOk = BF.pigs.feed(p1, "player") && BF.pigs.feed(p2, "player");
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
       const piglets = L.filter(m => m.type === "pig" && !m.dead && m.pig && m.pig.growAt != null).length;
-      return { calves, pairs, cows, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
+      return { calves, pairs, cows, foals, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
     }, spot);
     ok("two wild cows on grass breed on their own", br.calves >= 1, br);
+    ok("two wild horses breed on their own and the foal is wild", br.foals.length >= 1 && br.foals.every(f => !f.tamed && !f.owner), br.foals);
     ok("no wild breeding with 6 or more of a kind within 24 blocks", br.willing === 0, br);
     ok("fed pigs breed and a piglet appears (smaller)", br.fedOk && br.piglets >= 1 && br.pigScale.every(s => s < 0.9), br);
   }

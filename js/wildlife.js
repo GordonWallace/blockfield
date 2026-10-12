@@ -34,11 +34,13 @@ const NIGHTS = 7;
 // badlands, mountain peaks and mushroom fields have none; wild horse herds are js/horses.js's own.
 // The spec's starting odds (plains 25% cows, 25% sheep, 20% chickens, 15% pigs; woods 20% pigs, 15% chickens, 10% sheep; snow 10% sheep) gave
 // about 2.5 animals a chunk, several hundred in a loaded area; tuned to a third of those (closer to vanilla's density).
-const OPEN = [["cow", 0.08], ["sheep", 0.08], ["chicken", 0.07], ["pig", 0.05]];
+const OPEN = [["cow", 0.08], ["sheep", 0.08], ["chicken", 0.07], ["pig", 0.05], ["horse", 0.04]];
 const WOODS = [["pig", 0.07], ["chicken", 0.05], ["sheep", 0.03]];
 const SNOW = [["sheep", 0.03]];
 const HABITAT = { 5: OPEN, 14: OPEN, 22: OPEN, 6: WOODS, 7: WOODS, 8: WOODS, 9: WOODS, 17: WOODS, 18: WOODS, 23: WOODS, 19: SNOW, 20: SNOW, 21: SNOW, 25: SNOW };
-const ST = { sheep: "sheep", chicken: "hen", cow: "cow", pig: "pig" };   // where each animal module keeps its state on the mob
+const ST = { sheep: "sheep", chicken: "hen", cow: "cow", pig: "pig", horse: "horse" };   // where each animal module keeps its state on the mob (a horse: its record)
+// A wild animal: BF.mobs.isWild, or a horse no one owns, on no lead and in no paddock (horses keep their own records: js/horses.js)
+const wildAnimal = m => BF.mobs.isWild(m) || (m.type === "horse" && !!m.horse && !m.horse.tamed && !m.horse.owner && !m.horse.lead && !m.horse.pen && !m.rider);
 
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const live = o => !!(o && !o.dead && !o.removed);
@@ -93,7 +95,8 @@ function relocate(type, x, y, z) {
   if (!T) return null;
   const grass = BF.B.grass, dark = BF.sky && BF.sky.lightAt ? BF.sky.lightAt(BF.sky.time || 0) <= 0.3 : false;
   for (let i = 0; i < 40; i++) {
-    const sx = Math.floor(x + rnd(-RELOCATE_R, RELOCATE_R)), sz = Math.floor(z + rnd(-RELOCATE_R, RELOCATE_R));
+    const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * (RELOCATE_R - 1);   // within RELOCATE_R blocks (the block centre too)
+    const sx = Math.floor(x + Math.cos(a) * d), sz = Math.floor(z + Math.sin(a) * d);
     if (!W.isLoaded(sx, sz)) continue;
     if (isAnimal(type)) {
       const gy = W.heightAt(sx, sz);
@@ -138,7 +141,6 @@ function roll(k) {
   const [cx, cz] = k.split(",").map(Number), CS = BF.CS;
   let b = null;
   try { b = BF.worldgen.biomeAt(cx * CS + 8, cz * CS + 8); } catch (e) { return; }
-  if (BF.horses && BF.horses.rollHerd) { const h = BF.horses.rollHerd(cx, cz); if (h) log("rolled", { type: "horse", chunk: k, biome: b && b.name }); }
   const tbl = b && HABITAT[b.id];
   if (!tbl) return;
   for (const [type, p] of tbl) if (Math.random() < p) { const n = BF.mobs.spawnGroup(type, cx, cz, irnd(GROUP[0], GROUP[1])); if (n) log("rolled", { type, n, chunk: k, biome: b.name }); }
@@ -150,12 +152,12 @@ const stOf = m => m[ST[m.type]];
 const adult = m => { const s = stOf(m); return !!(s && s.growAt == null); };
 function breedable(m, t) {
   const s = stOf(m);
-  return !!(s && s.growAt == null && t >= (s.cd || 0) && (s.fed == null || t - s.fed >= 1) && BF.mobs.isWild(m) && !m.ledBy && onGrass(m));
+  return !!(s && s.growAt == null && t >= (s.cd || 0) && (s.fed == null || t - s.fed >= 1) && wildAnimal(m) && !m.ledBy && onGrass(m));
 }
 function wildBreeding() {
   const t = dayNow(), L = BF.mobs.list;
   const byType = {};
-  for (const m of L) if (ST[m.type] && live(m) && BF.mobs.isWild(m)) (byType[m.type] || (byType[m.type] = [])).push(m);
+  for (const m of L) if (ST[m.type] && live(m) && wildAnimal(m)) (byType[m.type] || (byType[m.type] = [])).push(m);
   for (const type in byType) {
     const a = byType[type];
     for (const m of a) {
@@ -257,7 +259,7 @@ function villageStats(rec) {
   for (const m of BF.mobs.list) {
     if (!live(m)) continue;
     if (m.hostile) { if (keys.has(ck(m.position.x, m.position.z))) hostiles++; continue; }
-    if ((ST[m.type] || m.type === "horse") && BF.mobs.isWild(m) && Math.hypot(m.position.x - rec.x, m.position.z - rec.z) <= 128) animals[m.type] = (animals[m.type] || 0) + 1;
+    if (ST[m.type] && wildAnimal(m) && Math.hypot(m.position.x - rec.x, m.position.z - rec.z) <= 128) animals[m.type] = (animals[m.type] || 0) + 1;
   }
   const v = nights.get(rec.key), cur = Math.floor(dayNow() - 0.5), out = [];
   for (let n = cur; n > cur - NIGHTS; n--) { const r = v && v.get(n); out.push([n, r ? r[0] : 0, r ? r[1] : 0, r ? r[2] : 0]); }
