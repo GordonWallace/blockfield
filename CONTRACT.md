@@ -192,7 +192,7 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 
 Day and night are equal halves: daytime is sky.time 0-0.5 (sun above the horizon), nighttime 0.5-1, and `isNight()` is just `time >= 0.5` (weather never makes it night). Light (`lightAt`, before weather): full day, dipping to 0.84 over the last hour before sunset; dusk is the first 1.5 in-game hours after sunset, darkening gradually to full night (0.18); dawn mirrors it before sunrise.
 
-Monster spawning (mobs.js): a spot must have been dark for half an in-game hour (`DARK_WAIT`): block light <= 7 and, under open sky, sky light <= 0.3 both now and half an hour ago, or a thunderstorm (`stormy()`, no wait) (the curve only falls then rises, so that is the maximum), which puts the first surface monsters about 1.5 h after sunset (sky.time ~0.565) and the last new ones about 1 h before sunrise. Spots under 5+ blocks of cover count as dark at any time. A light source removed or a block placed that can shade the ground (`BF.mobs.onSet`, called from `world.setBlock`) stamps its 8x8-column cell (a light source also the cells within 2) and nothing spawns there for another half hour.
+Monster spawning (mobs.js): a spot must have been dark for half an in-game hour (`DARK_WAIT`): block light <= 7 and, under open sky, sky light <= 0.3 both now and half an hour ago, or a thunderstorm (`stormy()`, no wait) (the curve only falls then rises, so that is the maximum), which puts the first surface monsters about 1.5 h after sunset (sky.time ~0.565) and the last new ones about 1 h before sunrise. Spots whose sky light (js/skylight.js) is 7 or less (`CAVE_SKY`: caves, deep forest shade, windowless rooms) count as dark at any time. The undead burn by day where the sky light at their head is 12 or more (`SUN_BURN`). A light source removed or a block placed that can shade the ground (`BF.mobs.onSet`, called from `world.setBlock`) stamps its 8x8-column cell (a light source also the cells within 2) and nothing spawns there for another half hour.
 - time in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight. `light` is the block brightness multiplier
   (main passes it to `world.setDaylight`). Owns scene.background, scene.fog (keep fog distances tied to
   `BF.world.viewDist * BF.CS`).
@@ -296,7 +296,7 @@ Non-tree plants are clumped with deterministic world-coordinate noise (no Math.r
 - Fields are sampled on a 2-block grid per chunk (`patchField`, cached in `fieldCache`, cleared per chunk) with bilinear interpolation and a per-column hash jitter. Villages/structures are untouched (village columns are skipped as before).
 
 ## Block light (js/light.js, js/textures-light.js, js/recipes-light.js)
-Block light is an integer 0..15 per voxel, separate from the simple per-column sky shade. It is derived data (never saved): `light.onChunkCreated(c)` rebuilds it
+Block light is an integer 0..15 per voxel, separate from sky light (js/skylight.js, below). It is derived data (never saved): `light.onChunkCreated(c)` rebuilds it
 whenever a chunk is created, so loading a save recomputes it.
 - Data: every chunk gets `chunk.light`, an array parallel to `chunk.secs` of `Uint8Array(4096)` (or undefined = all dark; allocated when light reaches the section), same in-section index as the blocks. Emitters: block def field `emit` (0..15), table `BF.EMIT[id]`
   (blocks.js). Current emitters: torch / wall torches 14, lantern 15, glowstone 15, sea_lantern 15, magma_block 3. Add `emit: n` to any new block def.
@@ -361,6 +361,17 @@ The 15th profession `builder` (orange hi-vis vest with reflective band and strap
   The placed blocks are ordinary world edits. `mobs.nav` exposes `findPath, followRoute, feetCell, walkCell, blockAt, takePlan` for builder.js. `findPath` also climbs ladders (straight up/down a ladder column, stepping on or off at any rung); `walkCell` stays the test for standing spots and never accepts a mid-air ladder cell. In updateMob a villager whose feet or waist is in a ladder cell (`m.onLadder`) has no gravity: it climbs at 2.35 blocks/s towards a higher next route cell, descends at up to 3 blocks/s towards a lower one, holds still level with it, and with no route holds on while standing still (a chest reached from the ladder) or slides down at 3 blocks/s while walking; no fall damage while on a ladder.
 - **Not done / notes.** Other villagers do not adopt built beds; the builder does not climb, so structures are limited to what it reaches from the floor or the ground (2-storey houses were left out); garden crops, farmland and lanterns depend on items it holds; if the builder is killed
   its partial structure stays (state "building", resumed by a replacement builder of the same village).
+
+## Sky light (js/skylight.js, loaded after light.js)
+Sky light is an integer 0..15 per voxel that spreads like Minecraft's. Derived data (never saved), computed when a chunk is created (`skyLight.onChunkCreated`).
+- Data: `chunk.sky`, parallel to `chunk.secs`: a number (whole section at that level) or `Uint8Array(4096)`. Above a chunk's band is 15, below it 0.
+- Rules: `BF.skyLight.ATT[id]`: 255 stops it (opaque blocks, and `BF.LIGHTBLOCK` slabs and stairs); 1 (leaves, fluids, ice) takes straight-down 15 to 14;
+  0 clear. Straight down from 15 stays 15 through clear blocks; every other step loses 1. Chunks exchange light across borders through loaded neighbours.
+  `world.setBlock` calls `onSet` (Minecraft-style removal and refill); `extendDown` recomputes the chunk, `extendUp` adds open sections.
+- `BF.skyLight.get(x, y, z)` (15 where unloaded), `bright(level)` (Minecraft's curve with its 50% brightness lift), `recomputeAll()` (tests).
+- Rendering: the mesher's `skyl` attribute is `bright(level)`, averaged per vertex like block light (cube faces: the face cell and the corner cells that don't stop
+  sky light); models and plants use their own cell (a cell that stops sky light takes its best neighbour). Signs (js/signs.js) use the same value.
+- `chunk.top` (highest light-blocking y per column) remains for rain and snow (js/weather.js) and farmland; it no longer shades anything.
 
 ## Weather (js/weather.js, loaded after sky.js)
 `BF.weather = { type: "clear"|"rain"|"thunder", remaining (s left in the spell), intensity 0..1, thunder 0..1, flash 0..1,

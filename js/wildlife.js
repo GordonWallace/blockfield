@@ -106,7 +106,7 @@ function relocate(type, x, y, z) {
     for (const dy of [0, 1, -1, 2, -2, 3, -3]) {   // near its old height first: a cave monster stays in its cave
       const sy = Math.floor(y) + dy;
       if (!BF.mobs.standable(sx, sy, sz, T.hw, T.h) || W.getBlockLight(sx, sy, sz) > 7) continue;
-      if (!dark && BF.mobs.skyOpen(sx, sy, sz)) continue;
+      if (!dark && !BF.mobs.skyDark(sx, sy, sz)) continue;   // by day only where a monster could spawn
       return [sx + 0.5, sy, sz + 0.5];
     }
   }

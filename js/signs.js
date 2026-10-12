@@ -346,9 +346,8 @@ if (BF.world && BF.world.onChunkLoad) { BF.world.onChunkLoad(onChunkLoad); BF.wo
 
 // ---------------------------------------------------------------- in-world text overlays
 function lightAt(x, y, z) {
-  const w = W(), c = w.chunkAt(x, z), CS = BF.CS;
-  let sky = 1;
-  if (c) { const top = c.top[(z - c.cz * CS) * CS + (x - c.cx * CS)]; sky = y > top ? 1 : Math.max(0.3, 0.92 - (top - y) * 0.06); }
+  const w = W();
+  const sky = BF.skyLight ? BF.skyLight.bright(BF.skyLight.get(x, y, z)) : 1;   // js/skylight.js
   const ss = Math.min(1, Math.max(0, (sky - 0.3) / 0.4)), sm = ss * ss * (3 - 2 * ss);
   const sk = Math.max(0.1, sky * (0.6 + 0.4 * sm) * (w.daylight == null ? 1 : w.daylight));
   const bl = (w.getBlockLight ? w.getBlockLight(x, y, z) : 0) / 15;
