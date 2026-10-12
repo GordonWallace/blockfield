@@ -1,7 +1,8 @@
 // @ci integration suite=village
 // Builders bridge rivers (idea-030, js/bridges.js). A river is carved through a village, crossings are counted, and the checks follow:
 //  - the weights offer a bridge only with 12 or more crossings in the last 3 days and water 3 to 24 wide, at most 3 per village
-//  - the builder builds it from materials it holds, with a 3-wide deck, rails, torch posts and room for a boat to pass under
+//  - the builder builds it from materials it holds, with a 3-wide deck, rails, torch posts, log posts down to the bed (each built from the bed up
+//    before the deck above it) and room for a boat to pass under between them
 //  - walks across the river go over the bridge instead of nowhere (swimming), and the crossing counts and the bridge survive a save
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/br test/bridges.js
 module.exports = async (pg) => {
@@ -15,29 +16,30 @@ module.exports = async (pg) => {
     const bm = M.list.find(m => m.type === "villager" && m.profession === "builder" && !m.dead);
     if (!bm) { ok("setup: a builder", false); return R; }
     const rec = bm.village, key = rec.key;
-    // ---- a river: x0 .. x0+wd-1 over z0-30 .. z0+30, banks flattened 8 blocks either side, water two blocks below the bank
+    // ---- a river: x0 .. x0+wd-1 over z0-30 .. z0+30, banks flattened 8 blocks either side, water 7 deep, its top level with the bank's top block
     const wg = rec.wg, x0 = Math.floor(wg ? wg.maxX : rec.x) + 14, z0 = Math.floor(rec.z);
     const gref = W.heightAt(x0 - 9, z0);
     const carve = (x0, wd) => {
       for (let z = z0 - 30; z <= z0 + 30; z++) for (let x = x0 - 9; x < x0 + wd + 9; x++) {
         const inRiver = x >= x0 && x < x0 + wd, top = Math.max(W.heightAt(x, z), gref) + 6;
-        for (let y = gref - 6; y <= top; y++) W.setBlock(x, y, z, y <= gref - 4 ? B.stone : inRiver ? (y <= gref - 1 ? B.water : 0) : y <= gref ? B.dirt : 0);
+        for (let y = gref - 10; y <= top; y++) W.setBlock(x, y, z, y <= gref - 8 ? B.stone : inRiver ? (y <= gref - 1 ? B.water : 0) : y <= gref ? B.dirt : 0);
       }
     };
-    carve(x0, 10);
+    carve(x0, 12);
     const ws = gref - 1;   // top water block: level with the bank, so each bank needs a ramp plank
     R.env = { x0, z0, gref, ws, probe: [W.getBlock(x0 + 3, ws, z0) === B.water, W.getBlock(x0 + 3, ws + 1, z0) === 0, W.heightAt(x0 - 2, z0) === gref] };
     ok("the carved river holds water between flat banks", R.env.probe.every(Boolean), R.env);
     // ---- crossings: below the threshold nothing is offered; at 12 a bridge is
-    const cx = x0 + 4, cz = z0, gx = Math.floor(cx / Br.CELL), gz = Math.floor(cz / Br.CELL);
+    const cx = x0 + 5, cz = z0, gx = Math.floor(cx / Br.CELL), gz = Math.floor(cz / Br.CELL);
     const wBridge = () => { const w = {}; for (const [t, x] of Bd.weighTypes(bm, bm.bs || (bm.bs = { fail: {}, avoid: {} }))) w[t] = x; return w.bridge || 0; };
     for (let i = 0; i < 11; i++) { BF.sky.setTime(0.2 + i * 0.004); Br.record(cx, cz, rec); }
     rec._bridgePlan = null;
     ok("11 crossings are not enough for a bridge", wBridge() === 0, { n: Br.count(rec, gx, gz) });
     BF.sky.setTime(0.2 + 12 * 0.004); Br.record(cx, cz, rec); rec._bridgePlan = null;
     const p = Br.plan(rec, true);
-    ok("12 crossings offer a bridge across the 10-wide river", !!p && p.span.b - p.span.a + 1 === 10 && p.opts.len === 10, p && { len: p.opts.len, r0: p.opts.r0, r1: p.opts.r1, dy: p.span.dy });
+    ok("12 crossings offer a bridge across the 12-wide river", !!p && p.span.b - p.span.a + 1 === 12 && p.opts.len === 12, p && { len: p.opts.len, r0: p.opts.r0, r1: p.opts.r1, dy: p.span.dy, posts: p.opts.posts });
     ok("its deck is three blocks above the water, with a plank ramp to each low bank", !!p && p.span.dy === ws + 3 && p.opts.r0 === 1 && p.opts.r1 === 1, p && p.span);
+    ok("posts at both ends and one between, each 9 blocks deep to the bed", !!p && p.opts.posts === "0:9:9;6:9:9;11:9:9", p && p.opts.posts);
     rec._bridgePlan = null;
     ok("the weight is 1.2 times the materials multiplier (the builder holds nothing)", wBridge() > 0 && wBridge() <= 1.2 * 3, wBridge());
     for (let i = 13; i < 31; i++) { BF.sky.setTime(0.2 + i * 0.004); Br.record(cx, cz, rec); }
@@ -50,13 +52,13 @@ module.exports = async (pg) => {
     ok("water 30 blocks wide gets no bridge", Br.plan(rec, true) === null);
     carve(x0, 2); rec._bridgePlan = null;
     ok("water 2 blocks wide gets no bridge", Br.plan(rec, true) === null);
-    carve(x0, 10); rec._bridgePlan = null;
-    ok("the 10-wide river offers one again", !!Br.plan(rec, true));
+    carve(x0, 12); rec._bridgePlan = null;
+    ok("the 12-wide river offers one again", !!Br.plan(rec, true));
     // ---- ten walks from one bank to the other, before the bridge: each one swims (no route, or a route more than twice the straight way)
     const trips = () => {
       let swims = 0;
       for (let k = 0; k < 10; k++) {
-        const w0 = [x0 - 7 - (k % 3), gref + 1, z0 - 12 + k * 2], g0 = [x0 + 11 + (k % 3), gref + 1, z0 + 12 - k * 2];
+        const w0 = [x0 - 7 - (k % 3), gref + 1, z0 - 12 + k * 2], g0 = [x0 + 13 + (k % 3), gref + 1, z0 + 12 - k * 2];
         const gl = { x: g0[0], z: g0[2], at: (x, y, z) => x === g0[0] && z === g0[2] };
         const pth = M.nav.findPath(w0[0], w0[1], w0[2], gl, 2500);
         if (!pth || pth.length > 2 * Math.hypot(g0[0] - w0[0], g0[2] - w0[2]) + 6) swims++;
@@ -68,7 +70,17 @@ module.exports = async (pg) => {
     ok("and walks that find no way round count as crossings", Br.heat(rec).reduce((a, h) => a + h[2], 0) > before, { before, heat: Br.heat(rec) });
     // ---- the builder builds it from what it holds
     const bp = BF.blueprints.get("bridge", keep.rot, 0, 0.5, keep.opts, "oak");
-    ok("a 10-wide bridge needs planks, fences, logs and torches", bp.req[I.oak_planks != null ? I.oak_planks : I.planks] >= 30 && bp.req[I.oak_fence] >= 20 && bp.req[I.oak_log] >= 4 && bp.req[I.torch] === 4, BF.blueprints.describe(bp.req));
+    ok("a 12-wide bridge needs planks, fences, logs and torches (54 logs: 3 posts x 2 lanes x 9)", bp.req[I.oak_planks != null ? I.oak_planks : I.planks] >= 36 && bp.req[I.oak_fence] >= 24 && bp.req[I.oak_log] === 54 && bp.req[I.torch] === 4, BF.blueprints.describe(bp.req));
+    // build order: in every post column the logs go in from the bed up, all before the deck plank above them
+    let order = true;
+    for (let i = 0; i < bp.cells.length; i++) {
+      const c = bp.cells[i];
+      if (c.y >= 0) continue;
+      const deckAt = bp.cells.findIndex(d => d.x === c.x && d.z === c.z && d.y === 0), below = bp.cells.findIndex(d => d.x === c.x && d.z === c.z && d.y === c.y - 1);
+      if (deckAt >= 0 && deckAt < i) order = false;
+      if (below > i) order = false;
+    }
+    ok("each post is built from the bed up, before the deck above it", order);
     for (const k in bp.req) T.add(bm.inv, +k, bp.req[k] + 4);
     T.add(bm.inv, I.coal, 4); T.add(bm.inv, I.cobblestone, 40);
     bm.bs = bm.bs || {}; Object.assign(bm.bs, { mode: "idle", cool: 0, t: 0, fail: {}, avoid: {}, entry: null });
@@ -100,21 +112,29 @@ module.exports = async (pg) => {
       if (W.getBlock(x, s.dy + 3, z) === B.torch) torches++;
       for (const dy of [-1, -2]) if (q === 0 && BF.SOLID[W.getBlock(x, s.dy + dy, z)]) free = false;   // under the middle lane: clear for a boat
     }
-    ok("a 3-wide plank deck over the whole span", deck === 30, deck);
-    ok("fence rails on both edges", rails === 20, rails);
+    ok("a 3-wide plank deck over the whole span", deck === 36, deck);
+    ok("fence rails on both edges", rails === 24, rails);
+    let posts = 0, postsOk = true;
+    for (const u of [0, 6, 11]) for (const q of [-1, 1]) {
+      const [x, z] = at(s.a + u, q);
+      let n = 0;
+      for (let y = s.dy - 1; y > gref - 8; y--) if (/_log$/.test(BF.blocks[W.getBlock(x, y, z)].name)) n++;
+      if (n === 9) posts++; else postsOk = false;
+    }
+    ok("six log posts run from under the deck to the river bed", postsOk && posts === 6, posts);
     ok("four torch posts", torches === 4, torches);
     ok("room under the middle lane for a boat with a rider (2 clear blocks over the water)", free && !BF.SOLID[W.getBlock(at(s.a + 5, 0)[0], ws + 1, at(s.a + 5, 0)[1])] && !BF.SOLID[W.getBlock(at(s.a + 5, 0)[0], ws + 2, at(s.a + 5, 0)[1])]);
     ok("a second bridge within 32 blocks is not offered", Br.plan(rec, true) === null);
     R.done = e.state === "done";
     // ---- walking: a route across the river goes over the deck
-    const N = M.nav, west = [x0 - 7, gref + 1, z0 + 12], east = [x0 + 17, gref + 1, z0 + 12];
+    const N = M.nav, west = [x0 - 7, gref + 1, z0 + 12], east = [x0 + 19, gref + 1, z0 + 12];
     const goal = { x: east[0], z: east[2], at: (x, y, z) => x === east[0] && z === east[2] };
     const path = N.findPath(west[0], west[1], west[2], goal, 2500);
     ok("a walk across the river has a route", !!path && path.length > 0, path && path.length);
     const swimsAfter = trips();
     ok("with the bridge up, swimming crossings drop by at least 70% (" + swimsBefore + " -> " + swimsAfter + " of 10 walks)", swimsAfter <= 3, { swimsBefore, swimsAfter });
-    // a boat with a rider (1.375 wide, 1.5 tall) drifts down the river under the middle of the deck
-    const mid = (s.a + s.b) >> 1, pos = { x: s.axis === "x" ? mid + 0.5 : s.f - 7, y: ws + 0.95, z: s.axis === "x" ? s.f - 7 : mid + 0.5 }, vel = { x: 0, y: 0, z: 0 };
+    // a boat with a rider (1.375 wide, 1.5 tall) drifts down the river under the deck, through the 4-block gap between the last two posts
+    const mid = s.a + 8, pos = { x: s.axis === "x" ? mid + 0.5 : s.f - 7, y: ws + 0.95, z: s.axis === "x" ? s.f - 7 : mid + 0.5 }, vel = { x: 0, y: 0, z: 0 };
     let hit = false, crossed = false;
     for (let k = 0; k < 400 && !crossed; k++) {
       vel.x = s.axis === "x" ? 0 : 3; vel.z = s.axis === "x" ? 3 : 0; vel.y = 0;
