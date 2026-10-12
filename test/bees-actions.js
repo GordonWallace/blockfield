@@ -186,12 +186,18 @@ module.exports = async (pg) => {
     if (K.bkp) K.bkp.cd = 1e12;   // its own leading would fill the new hive too
     BF.inventory.clear(); BF.inventory.setSlot(0, { id: B.poppy, count: 1 }); BF.inventory.select(0);
     BF.player.teleport(hb2.x + 1.5, hb2.y + 0.1, hb2.z + 1.5);
-    for (let i = 0; i < 200; i++) step();
-    const fol = BE.list.filter(b => b.follow && b.follow.who === "player").length;
+    let fol = 0;   // stand near a bee of that hive that is out (they may all be off at flowers): within 8 blocks it comes over
+    for (let i = 0; i < 1200 && !(fol = BE.list.filter(b => b.follow && b.follow.who === "player").length); i++) {
+      if (i % 100 === 0) { const b = BE.out(hb2)[0]; if (b) BF.player.position.set(b.x + 2, Math.max(b.y - 1.3, W.heightAt(b.x + 2, b.z) + 1), b.z); }
+      step();
+    }
+    for (let i = 0; i < 40; i++) step();
+    fol = BE.list.filter(b => b.follow && b.follow.who === "player").length;
     ok("bees follow a player holding a flower", fol > 0, { fol, sel: BF.inventory.selected(), out: BE.out(hb2).length, near: BE.list.filter(b => Math.hypot(b.x - BF.player.position.x, b.z - BF.player.position.z) < 8).length });
     const total = () => BE.loadedHomes().reduce((n, o) => n + o.bees, 0);
     const before = [hb2.bees, nh.bees, total()];
-    for (let i = 0; i < 600; i++) { const t = Math.min(1, i / 300); BF.player.position.set(hb2.x + 1.5 + (spot.x + 1.5 - hb2.x - 1.5) * t, Math.max(hb2.y, spot.y) + 0.1, hb2.z + 1.5 + (spot.z + 0.5 - hb2.z - 1.5) * t); step(); }
+    const p0 = { x: BF.player.position.x, z: BF.player.position.z };
+    for (let i = 0; i < 600; i++) { const t = Math.min(1, i / 300), x = p0.x + (spot.x + 1.5 - p0.x) * t, z = p0.z + (spot.z + 0.5 - p0.z) * t; BF.player.position.set(x, Math.max(W.heightAt(Math.floor(x), Math.floor(z)) + 1, spot.y) + 0.1, z); step(); }
     ok("led to another hive they move in, one from one count to the other", nh.bees > 0 && before[1] === 0 && total() === before[2] && hb2.bees < before[0], { before, after: [hb2.bees, nh.bees, total()] });
     BF.inventory.clear(); if (K.bkp) K.bkp.cd = 0;
     W.setBlock(spot.x, spot.y, spot.z, 0);
