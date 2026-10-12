@@ -19,7 +19,7 @@ const FEED = { wheat_item: { heal: 2, temper: 3, grow: 0.1 }, apple: { heal: 3, 
 const BREEDS = new Set(["wheat_item", "hay_bale"]);   // what makes a tamed adult willing to breed
 const FEED_DAYS = 1, BREED_CD = 1, FOAL_DAYS = 1, MATE_R = 10, MEET = 2.2;
 const HERD_R = 9, HERD_SPEED = 100 / 1200;   // members keep within 9 blocks of the herd centre, which drifts ~100 blocks a game day (1200 s)
-const SPAWN_GAP = 96, SPAWN_EVERY = 2, SPAWN_CHANCE = 0.25;   // at most one herd per 96 blocks; a try every 2 s near the player
+const SPAWN_GAP = 96, HERD_ROLL = 0.04;   // at most one herd per 96 blocks; a chunk of horse land gets one at its first generation with this chance (js/wildlife.js)
 const BACK_IN = 80;            // a waiting horse comes back once the player is this near (mobs.js removes mobs beyond 100)
 const LEAD_SLACK = 3, LEAD_BREAK = 12, POST_R = 3.5;
 const GRAV = 32;
@@ -318,14 +318,14 @@ function moveHerds(dt) {
     if (Math.hypot(mx - h.cx, mz - h.cz) > HERD_R * 2) { h.cx = mx; h.cz = mz; }
   }
 }
-function trySpawnHerd() {
-  const P = BF.player, W = BF.world;
-  if (!P || P.dead || !BF.mobs || BF.mobs.spawning === false) return;
-  const a = Math.random() * Math.PI * 2, d = rnd(32, 72);
-  const x = Math.floor(P.position.x + Math.cos(a) * d), z = Math.floor(P.position.z + Math.sin(a) * d);
-  if (!W.isLoaded(x, z) || !isHorseBiome(x, z)) return;
+// A chunk's first-generation roll (js/wildlife.js; idea-037: no herds turn up later around the player): sometimes a herd somewhere in it.
+function rollHerd(cx, cz) {
+  const W = BF.world, CS = BF.CS;
+  if (Math.random() >= HERD_ROLL) return null;
+  const x = cx * CS + irnd(2, CS - 3), z = cz * CS + irnd(2, CS - 3);
+  if (!W.isLoaded(x, z) || !isHorseBiome(x, z)) return null;
   for (const r of recs.values()) { const rx = r.mob ? r.mob.position.x : r.x, rz = r.mob ? r.mob.position.z : r.z; if (Math.hypot(rx - x, rz - z) < SPAWN_GAP) return; }
-  spawnHerdAt(x, z);
+  return spawnHerdAt(x, z);
 }
 // A wild herd of 2-6 (sometimes with foals) on the grass around (x, z). Returns the herd, or null when there was no room.
 function spawnHerdAt(x, z) {
@@ -386,7 +386,7 @@ function drawLeads() {
 }
 
 // ---------------------------------------------------------------- tick (mobs.update, world simulation time)
-let spawnT = 0, backT = 0;
+let backT = 0;
 function tick(dt) {
   if (!BF.mobs) return;
   const t = now(), P = BF.player, pp = P && P.position;
@@ -410,8 +410,6 @@ function tick(dt) {
     }
   }
   moveHerds(dt);
-  spawnT -= dt;
-  if (spawnT <= 0) { spawnT = SPAWN_EVERY; if (Math.random() < SPAWN_CHANCE) trySpawnHerd(); }
   // herds left with no horses at all are forgotten
   for (const h of herds.values()) { let any = false; for (const r of recs.values()) if (r.herd === h.id) { any = true; break; } if (!any) herds.delete(h.id); }
 }
@@ -607,7 +605,7 @@ BF.horses = {
   HORSE_BIOMES, COATS, MARKS, FEED, SPEED_MIN, SPEED_MAX, JUMP_MIN, JUMP_MAX, HP_MIN, HP_MAX,
   isHorseBiome, rollStats, foalStats, jumpHeight, price: m => price(m.horse || m),
   spawn, tame, feed, breed, leash, setPen, willing: m => !!(m && m.horse && willing(m.horse, now())),
-  ai, tick, spawnHerdAt, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
+  ai, tick, spawnHerdAt, rollHerd, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
   ride: RIDE, drawLeads,
   serialize, deserialize, reset,
 };

@@ -138,6 +138,7 @@ function roll(k) {
   const [cx, cz] = k.split(",").map(Number), CS = BF.CS;
   let b = null;
   try { b = BF.worldgen.biomeAt(cx * CS + 8, cz * CS + 8); } catch (e) { return; }
+  if (BF.horses && BF.horses.rollHerd) { const h = BF.horses.rollHerd(cx, cz); if (h) log("rolled", { type: "horse", chunk: k, biome: b && b.name }); }
   const tbl = b && HABITAT[b.id];
   if (!tbl) return;
   for (const [type, p] of tbl) if (Math.random() < p) { const n = BF.mobs.spawnGroup(type, cx, cz, irnd(GROUP[0], GROUP[1])); if (n) log("rolled", { type, n, chunk: k, biome: b.name }); }
