@@ -73,6 +73,7 @@ function snapshot() {
     boats: BF.boats ? BF.boats.serialize() : undefined, // placed boats, the player's included, with any mob passenger (js/boats.js)
     horses: BF.horses ? BF.horses.serialize() : undefined, // every horse, wild or tamed, with its stats, saddle, owner and lead (js/horses.js)
     farmland: BF.farmland ? BF.farmland.serialize() : undefined, // farmland hydration clocks + last rain (js/farmland.js)
+    bees: BF.bees ? BF.bees.serialize() : undefined, // every bee nest and hive: its bee count, honey level and last growth day (js/bees.js)
     edits,
   };
 }
@@ -109,6 +110,7 @@ function restore(data) {
   if (BF.boats) BF.boats.deserialize(data.boats); // boats, after the player: one saved with the player aboard puts them back in it (old saves: none)
   if (BF.horses) BF.horses.deserialize(data.horses); // horses come back when the player is near their chunk (old saves: none)
   if (BF.farmland) BF.farmland.deserialize(data.farmland); // farmland clocks (old saves: each block's clock starts when first seen)
+  if (BF.bees) BF.bees.deserialize(data.bees); // bee homes (old saves: none)
 }
 
 // A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
@@ -144,7 +146,7 @@ const save = {
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 7, created: now, lastPlayed: now };
+    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 8, created: now, lastPlayed: now };
     BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
     save.current = meta;
     BF.emit("worldLoaded", meta);

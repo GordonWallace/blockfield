@@ -1275,13 +1275,15 @@ const isTreat = id => !!(BF.baker && BF.baker.isTreat(id));
 // Milk (js/cowherd.js) is a last resort: a hungry villager buys milk bottles only when no other food is for sale anywhere in its village, through
 // an offer for them (the cowherd's job offer, or anyone's spare milk, js/market.js). The cowherd keeps BF.cowherd.MILK_KEEP bottles back (the baker's
 // next cake) in its market reserve (BF.cowherd.reserve). Never a milk bucket: the cowherd keeps its pails to bottle them.
-const isMilk = id => id != null && (id === I("milk_bottle") || id === I("milk_bucket"));
+// Honey bottles (js/beekeeper.js) are the same kind of last resort, in the same pass.
+const isMilk = id => id != null && (id === I("milk_bottle") || id === I("milk_bucket") || id === I("honey_bottle"));
 function milkDeal(m, v2, want) {
-  const T = TR(), F = FD(), em = ids().em, myEm = cnt(m, em), id = I("milk_bottle");
-  if (id == null || myEm < 1) return null;
+  const T = TR(), F = FD(), em = ids().em, myEm = cnt(m, em), mb = I("milk_bottle"), hb = I("honey_bottle");
+  if ((mb == null && hb == null) || myEm < 1) return null;
   let best = null;
   for (const o of v2.trades || []) {
-    if (o.buy.length !== 1 || o.buy[0].id !== em || o.sell.id !== id || T.blockReason(v2, o)) continue;
+    const id = o.sell.id;
+    if (o.buy.length !== 1 || o.buy[0].id !== em || id == null || (id !== mb && id !== hb) || T.blockReason(v2, o)) continue;
     const per = F.breadEq(id) * o.sell.n;
     let k = Math.min(Math.ceil(want / per), Math.floor(myEm / o.buy[0].n), Math.floor(cnt(v2, id) / o.sell.n), 4);
     while (k > 0 && !T.inv.canFit(m.inv, [{ id, n: o.sell.n * k }], [{ id: em, n: o.buy[0].n * k }])) k--;
@@ -1298,7 +1300,7 @@ function findFoodSeller(m) {
   if (!R || want <= 0) return null;
   const sh = m.fshop;
   let best = null, bs = Infinity;
-  for (const pass of (BF.eggCook ? ["egg", "food"] : ["food"]).concat(BF.baker ? ["treat"] : [], I("milk_bottle") != null ? ["milk"] : [])) {
+  for (const pass of (BF.eggCook ? ["egg", "food"] : ["food"]).concat(BF.baker ? ["treat"] : [], I("milk_bottle") != null || I("honey_bottle") != null ? ["milk"] : [])) {
     for (const v2 of R.members || []) {
       if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
       const d = pass === "egg" ? BF.eggCook.eggDeal(m, v2, want) : pass === "milk" ? milkDeal(m, v2, want) : pass === "treat" ? BF.baker.treatDeal(m, v2, want) : dealWith(m, v2, want);
@@ -1477,7 +1479,7 @@ function findWheatSeller(m) {
 // spare goods of a villager left with the empties of milk it drank, js/market.js: small lots from GLASS_LOT_MIN bottles), the biggest lot nearest.
 function findBottleSeller(m) {
   const R = m.village, gb = I("glass_bottle"), now = dayNow(), sh = m.fshop;
-  const want = BF.cowherd && m.profession === "cowherd" ? BF.cowherd.bottleWanted(m) : 0;
+  const want = BF.cowherd && m.profession === "cowherd" ? BF.cowherd.bottleWanted(m) : BF.beekeeper && m.profession === "beekeeper" ? BF.beekeeper.bottleWanted(m) : 0;   // and the beekeeper (js/beekeeper.js)
   if (!R || gb == null || want <= 0 || cnt(m, ids().em) < 1) return null;
   let best = null, bs = Infinity;
   for (const v2 of R.members || []) {
@@ -1519,7 +1521,7 @@ function shopAI(m, dt, out) {
     const hungry = hasEm && F.available(m) + eggsPending(m) < F.rate(m);   // raw eggs it is about to cook are food on the way
     const wheat = hasEm && feedWanted(m) > 0;
     const tool = hasEm && toolNeed(m);
-    const bottles = hasEm && m.profession === "cowherd" && BF.cowherd && BF.cowherd.bottleWanted(m) > 0;
+    const bottles = hasEm && ((m.profession === "cowherd" && BF.cowherd && BF.cowherd.bottleWanted(m) > 0) || (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.bottleWanted(m) > 0));
     const treat = hasEm && !hungry && !!BF.baker && BF.baker.treatWanted(m);   // a cake slice or a pie now and then (js/baker.js)
     if (sh.cd > now || m.child || !(hungry || wheat || tool || bottles || treat)) return false;
     // estimate (villageSim.begin): the walk to the seller and the trade pause; during a countdown the next candidate is tried when one is too long
@@ -1658,6 +1660,7 @@ function statusText(m) {
   if (m.profession === "cowherd" && BF.cowherd) { const t = BF.cowherd.statusText(m); if (t) return t; }
   if (m.profession === "baker" && BF.baker) { const t = BF.baker.statusText(m); if (t) return t; }
   if (m.profession === "glassmaker" && BF.glassmaker) { const t = BF.glassmaker.statusText(m); if (t) return t; }
+  if (m.profession === "beekeeper" && BF.beekeeper) { const t = BF.beekeeper.statusText(m); if (t) return t; }
   if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
     const t = m.farm.task;
     if (t.kind === "craft" && t.hay) return "Making hay bales";

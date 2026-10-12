@@ -254,6 +254,8 @@ const VILLAGER_OUTFITS = {
   baker:         { robe: 0xd8c8a8, trim: 0x9a7a52, apron: 0xf6f4ee, sash: 0xa0523a, hat: { kind: "bucket", color: 0xf8f8f4, color2: 0xe8e6e0 } },
   // glassmaker (not vanilla): a slate-blue robe, a scorched leather apron and a pale glass-blue belt; digs sand and makes glass at its kiln (js/glassmaker.js)
   glassmaker:    { robe: 0x4e5e6e, trim: 0x2e3a46, apron: 0x7a5636, sash: 0xa8dcea },
+  // beekeeper (not vanilla): a pale smock, a honey-gold apron and belt and a wide brim hat; keeps hives and makes candles (js/beekeeper.js)
+  beekeeper:     { robe: 0xe8e2cc, trim: 0xb8ae90, apron: 0xd89a2a, sash: 0x8a5a1a, hat: { kind: "brim", color: 0xf0ead6, color2: 0xd8d0b8 } },
 };
 const PROFESSIONS = Object.keys(VILLAGER_OUTFITS);
 const PROF_ALIAS = { smith: "toolsmith" };
@@ -1474,6 +1476,7 @@ function jobsAI(m, dt, out) {
   if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return true;   // carries on cooking beef it started (js/cowherd.js)
   if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, true)) return true;   // carries on baking or buying it started (js/baker.js)
   if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, true)) return true;   // carries on digging, smelting or buying it started (js/glassmaker.js)
+  if (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.ai(m, dt, out, true)) return true;   // carries on harvesting, leading bees or buying it started (js/beekeeper.js)
   if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return true;   // buys food when hungry, farmers farm (js/villagelife.js)
   if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return true;   // builds / shops for materials (js/builder.js)
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return true;   // feeds, shears and culls the pen sheep (js/shepherd.js)
@@ -1481,6 +1484,7 @@ function jobsAI(m, dt, out) {
   if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return true;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
   if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, false)) return true;   // buys ingredients and fuel, bakes cakes and pies in its oven (js/baker.js)
   if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, false)) return true;   // digs and buys sand, smelts glass, makes panes and bottles (js/glassmaker.js)
+  if (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.ai(m, dt, out, false)) return true;   // harvests hives, plants flowers, builds hives, leads bees, makes candles (js/beekeeper.js)
   if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return true;   // buys compass / map ingredients (js/cartography.js)
   if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return true;   // plants saplings, fells trees, picks up what falls (js/forester.js)
   if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return true;   // sells beds to builders, buys wool and boards (js/furniture.js)
@@ -2014,6 +2018,7 @@ const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
 const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
 const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
 const MINER_CHANCE = 0.95;     // newly generated villages (js/miner.js)
+const BEE_POP = 6;              // village generator 8: grass villages of this many villagers get a beekeeper (js/beekeeper.js)
 const GLASS_CHANCE = 0.8;      // village generator 7: villages with natural sand within 64 blocks (js/glassmaker.js), as FURNITURE_CHANCE
 // A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
 // saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
@@ -2089,7 +2094,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker" && p !== "glassmaker");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker" && p !== "glassmaker" && p !== "beekeeper");   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2247,6 +2252,20 @@ function villageRoster(rec) {
       }
     }
     if (ordered.length < cap) ordered.push({ house: null, idx: 1900, bed: null, prof: "glassmaker" });
+  }
+  // beekeeper: village generator 8 gives a village of BEE_POP (6) or more villagers on grass a beekeeper (own key <village key>#2000), its honey
+  // extractor, 2 beehives and a flower bed placed by the jobs plan by the farms (js/beekeeper.js, js/jobs.js planVillage). It takes the place of
+  // the last plain resident.
+  if ((BF.state && BF.state.villages | 0) >= 8 && BF.beekeeper && (rec.pop || 0) >= BEE_POP && ground === 0) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 2000, bed: null, prof: "beekeeper" });
   }
   return ordered;
 }

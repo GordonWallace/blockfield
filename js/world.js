@@ -253,6 +253,7 @@ world.setBlock = function (x, y, z, id) {
   if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) growing.add(fkey(x, y, z));
   if (y > BF.MIN_Y) { const bl = BF.blocks[cblock(c, lx, y - 1, lz)]; if (bl && bl.growsUp && id !== bl.id) growing.add(fkey(x, y - 1, z)); }   // cane cut back: the top left grows again
   if (BF.farmland) BF.farmland.onSet(x, y, z, oldId, id);   // farmland hydration clock (js/farmland.js)
+  if (BF.bees) BF.bees.onSet(x, y, z, oldId, id);   // bee homes placed and broken, flowers planted and picked (js/bees.js)
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {
     const above = cblock(c, lx, y + 1, lz);
@@ -961,8 +962,8 @@ function growTick() {
     const soil = world.getBlock(x, y - 1, z);
     if (soil !== BF.B.farmland && soil !== BF.B.farmland_dry) continue;
     const f = soil === BF.B.farmland_dry ? (BF.farmland ? BF.farmland.growFactor(soil) : 1 / 3) : 1;
-    // crops grow 1.5x faster while it rains (js/weather.js)
-    if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
+    // crops grow 1.5x faster while it rains (js/weather.js), 1.25x by day near a home with bees (js/bees.js)
+    if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1) * (BF.bees ? BF.bees.cropFactor(x, y, z) : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
   }
 }
 // Sugar cane (blocks with growsUp: their tallest height) grows a block on top, at the crop rate, while the column is shorter than that and its

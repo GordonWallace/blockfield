@@ -166,7 +166,7 @@ function countdown(key) {
 // ---- force unload: when the game would bog down, villages are stopped even with tasks running (each one logged as an error)
 const LIMITS = { chunks: 1500, aiMs: 6, villages: 10 };
 let aiCoolUntil = 0;
-const JOBS = () => [BF.toolsmith, BF.eggCook, BF.baker, BF.glassmaker];
+const JOBS = () => [BF.toolsmith, BF.eggCook, BF.baker, BF.glassmaker, BF.beekeeper];
 // Stops what the village's villagers are doing so that it can unload: merchants go home with their cargo, furnace and oven workers empty
 // them, led animals are let go, trades are cancelled and villagers out on an errand are put back at their bed. Each one is logged.
 function forceStop(rec, why) {

@@ -75,6 +75,7 @@ function craftTable(wood) {
   if (I.milk_churn != null) t[I.milk_churn] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the pasture's jobsite (js/cowherd.js)
   if (I.bakers_oven != null) t[I.bakers_oven] = { n: 1, from: [[I.cobblestone, 8], [I.iron_ingot, 1]] };   // the bakehouse's jobsite (js/baker.js)
   if (I.glass_kiln != null) t[I.glass_kiln] = { n: 1, from: [[I.cobblestone, 4], [I.iron_ingot, 1]] };   // the glassworks' jobsite (js/glassmaker.js)
+  if (I.honey_extractor != null) t[I.honey_extractor] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the apiary's jobsite (js/beekeeper.js)
   return t;
 }
 const CRAFTS = {};
@@ -376,6 +377,10 @@ function weighTypes(m, bs) {
     bakehouse: (R.wg && (R.wg.jobsites || []).some(j => j.prof === "baker")) || cnt("bakehouse") > 0 || R.members.some(x => x.profession === "baker" && !x.dead) ? 0.02
       : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 15 ? 1.5 : 0.05,
     glassworks: glassWeight(R, (R.wg && (R.wg.jobsites || []).some(j => j.prof === "glassmaker")) || cnt("glassworks") > 0),
+    // an apiary (js/beekeeper.js): only in a village on grass; wanted when it has no beekeeper or extractor and 6 or more villagers, hardly ever after
+    apiary: !(BF.cowherd && BF.cowherd.grassVillage(R)) || BF.B.honey_extractor == null ? 0
+      : (R.wg && (R.wg.jobsites || []).some(j => j.prof === "beekeeper")) || cnt("apiary") > 0 || R.members.some(x => x.profession === "beekeeper" && !x.dead) ? 0.02
+      : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 6 ? 1.2 : 0.05,
   };
   const BEDS = ["small_house", "medium_house", "cottage"];
   if (full) {   // with every bed claimed they rise to the weight of the likeliest other type
@@ -394,6 +399,7 @@ function weighTypes(m, bs) {
     if (t === "stable" && !wt.stable) continue;                  // never outside horse land
     if (t === "pasture" && !wt.pasture) continue;                // never off grass
     if (t === "glassworks" && !wt.glassworks) continue;          // never without sand nearby
+    if (t === "apiary" && !wt.apiary) continue;                  // never off grass
     if (t === "bridge" && !wt.bridge) continue;                  // only where villagers keep crossing water (js/bridges.js)
     const opts = optsFor(t, m.inv, R), wood = chooseWood(m, t, style, opts, stock);
     const bp = BPr.get(t, 0, style, 0.5, opts, wood);
