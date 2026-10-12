@@ -73,7 +73,19 @@ module.exports = async (pg) => {
     R.info.sideSpots = sides;
     let landed = 0, wall = 0, flowerL = 0, ceil = 0;
     for (let i = 0; i < 1200; i++) { step(); for (const b of BE.list) if (b.mode === "land" && b.land) { landed++; if (b.land.ny === 0) wall++; if (b.land.flower) flowerL++; if (b.land.ny < 0) ceil++; } }
-    ok("bees land on flowers, on other surfaces and on walls, never on ceilings", flowerL > 0 && wall > 0 && landed > flowerL && ceil === 0, { landed, wall, flowerL, ceil });
+    ok("bees land on flowers and other surfaces, never on ceilings", flowerL > 0 && landed > flowerL && ceil === 0, { landed, wall, flowerL, ceil });
+    // walls: rest stops on a wall are rare by chance, so send one bee to a wall spot and see it land there, flat against the face
+    let ws = null, wb = null, onWall = false;
+    for (let tries = 0; tries < 6 && !onWall; tries++) {   // a few wall spots, each with the bee nearest it (a spot can be awkward to reach)
+      ws = null;
+      for (let i = 0; i < 4000 && !ws; i++) { const sp = BE.landingSpot(h0.x, h0.y + 2, h0.z, 8); if (sp && sp.ny === 0) ws = sp; }
+      if (!ws) break;
+      wb = BE.list.filter(b => !b.follow && b.home).sort((p, q) => Math.hypot(p.x - ws.x, p.y - ws.y, p.z - ws.z) - Math.hypot(q.x - ws.x, q.y - ws.y, q.z - ws.z))[0];
+      if (!wb) break;
+      wb.mode = "fly"; wb.tgt = ws; wb.land = null; wb.stuck = 0; wb.lastD = Infinity; wb.front = false; wb.restedOut = wb.restedBack = true;
+      for (let i = 0; i < 400 && !onWall && wb.tgt === ws; i++) { step(); onWall = wb.mode === "land" && wb.land === ws; }
+    }
+    ok("bees land on walls", sides > 0 && onWall, { sides, spot: ws && [ws.x, ws.y, ws.z, ws.nx, ws.nz], bee: wb && [wb.mode, +wb.x.toFixed(2), +wb.y.toFixed(2), +wb.z.toFixed(2)] });
     ok("honey rises after flower visits", h0.honey > 0, h0.honey);
     BF.sky.setTime(BE.DUSK - 0.002);
     for (let i = 0; i < 200; i++) step();
