@@ -263,7 +263,9 @@ module.exports = async (pg, out) => {
     for (const m of BF.mobs.list.slice()) if (m.type === "pig" && !m.dead) BF.mobs.hurt(m, 999, "test");
     run(1);
     S.stockAt = 0;
-    for (let i = 0; i < 600; i++) step();
+    if (PF.feedHeld(pf) < 2) T.inv.add(pf.inv, I.carrot, 2);   // the lure it would set out with
+    BF.sky.setTime(0.1);
+    for (let i = 0; i < 4000 && !(S.stockAt > day()); i++) step();
     ok("no wild pig in range: it looks again tomorrow", S.stockAt > day() && S.stockAt - day() < 1.05 && PF.log.some(e => e.kind === "noWild"), { stockAt: S.stockAt, day: day() });
 
     // ---- the butcher buys raw pork from the pig farmer
@@ -292,7 +294,7 @@ module.exports = async (pg, out) => {
     ok("a spot for a furnace by the trough", !!fpos, fpos);
     if (fpos) {
       for (const n of ["raw_porkchop", "cooked_porkchop", "coal", "charcoal"]) T.inv.remove(pf.inv, I[n], c(n));
-      for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "cherry_"]) for (const k of [(sp || "oak_") + "log", sp ? sp + "planks" : "planks"]) if (I[k] != null) T.inv.remove(pf.inv, I[k], c(k));
+      { const FU0 = BF.furnaceUse; for (let i = 0; i < pf.inv.length; i++) { const st = pf.inv[i]; if (st && (FU0.isCoal(st.id) || FU0.isLog(st.id) || FU0.isPlanks(st.id))) pf.inv[i] = null; } }   // no fuel of its own at all
       T.inv.add(pf.inv, I.raw_porkchop, 14);
       for (const b of vill().filter(m => m.profession === "butcher")) T.inv.add(b.inv, I.cooked_porkchop, 12);   // the butcher is stocked: it buys no raw pork meanwhile
       if (c("emerald") < 4) T.inv.add(pf.inv, I.emerald, 4 - c("emerald"));
