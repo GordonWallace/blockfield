@@ -289,7 +289,6 @@ function shopAI(m, dt, out) {
 // Out mapping when night is about to fall and the walk home is too long: pitch the tent it carries and sleep there (mobs.js nightAI treats the
 // tent's foot centre as its bed; monsters cannot see anyone asleep in a tent). In the morning it packs the tent up again.
 const BEDTIME = 0.5, DUSK = 0.45, WALK_SLACK = 0.8, DAY_S = 1200;
-const CAMP_LEAVE = 0.1;   // packs the tent up this far into the day (~2.4 game hours after sunrise; js/merchant.js camps the same way)
 const isNight = t => t > BEDTIME && t < 0.985;
 const tentItem = () => BF.I.tent;
 function homeDistance(m) {
@@ -337,8 +336,8 @@ function spareTent(m) {
 function campAI(m, t, a) {
   const X = state(m);
   if (X.camp) {
-    if (!isNight(t) && !m.sleeping && t >= CAMP_LEAVE && t < DUSK) { strike(m); return false; }
-    if (!isNight(t) && (t >= DUSK || t < CAMP_LEAVE || t > BEDTIME)) { a.mode = "idle"; a.t = 2; return true; }   // evening, and the morning while the night's zombies burn off: waits at the tent
+    if (!isNight(t) && !m.sleeping && t < DUSK) { strike(m); return false; }
+    if (!isNight(t) && t >= DUSK) { a.mode = "idle"; a.t = 2; return true; }   // evening: waits at the tent
     return false;
   }
   // Decided once per evening, when the working day ends: measured against the whole dusk, not the minutes left (that allowance shrinks to nothing
