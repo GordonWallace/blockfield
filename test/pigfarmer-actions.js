@@ -136,10 +136,10 @@ module.exports = async (pg, out) => {
       const dd = BF.sky.day; BF.sky.day = dd + PF.PIGLET_DAYS + 1; run(1); const grown = piglet.pig.growAt == null && !piglet.piglet && piglet.model.scale.x > 0.95; BF.sky.day = dd;
       ok("and is an adult after 3 days", grown, piglet.model.scale.x);
     }
-    // the crowding rule: no breeding with 24 pigs within 16 blocks
+    // the crowding rule: no breeding with 24 pigs within 16 blocks (30 placed: a few wander off during the run)
     {
       const crowd = [];
-      for (let i = 0; i < 26; i++) crowd.push(wildAt(flat[0] + (i % 5) - 2, flat[1] + Math.floor(i / 5) - 2));
+      for (let i = 0; i < 30; i++) crowd.push(wildAt(flat[0] + (i % 5) - 2, flat[1] + Math.floor(i / 5) - 2));
       for (const m of [wa, wb]) { m.pig.cd = 0; PF.feed(m, "test"); }
       let crowdBorn = 0;
       const cb = () => crowdBorn++;
