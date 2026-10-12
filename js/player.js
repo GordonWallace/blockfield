@@ -1401,6 +1401,21 @@ function secondaryDown() {
     mouseR = false; return true;
   }
   if (tb && BF.baker && BF.baker.isOven(target.id) && useBlk) { actionBar(BF.baker.ovenText(target.x, target.y, target.z)); mouseR = false; return true; }   // what a baker's oven holds
+  if (tb && BF.bees && BF.bees.isHome(target.id) && useBlk) {   // a bee nest or beehive: shears or a glass bottle harvest a full one, otherwise how it is (js/bees.js)
+    const r = BF.bees.playerUse(target, selectedItem());
+    if (r) {
+      mouseR = false;
+      if (r.give) {
+        swing();
+        if (r.consume && !creative()) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
+        if (r.wear) wearHeld(r.wear);
+        const left = inv().add ? inv().add(r.give.id, r.give.n) : r.give.n;
+        if (left > 0 && BF.drops) BF.drops.spawn(r.give.id, left, pos.x, pos.y + 1, pos.z);
+      }
+      if (r.msg) actionBar(r.msg);
+      return true;
+    }
+  }
   if (target && BF.isFurnace(target.id) && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
   }
