@@ -121,8 +121,8 @@ const LEAN = 3;
         for (const [m, id, n] of R.lean) if (!m.dead) BF.trades.inv.add(m.inv, id, n);
       }
       // the herd, and empty bottles other villagers hold while the cowherd is short of them (not the beekeeper's, kept for honey, nor the
-      // glassmaker's, made to sell)
-      const stranded = window.__villagers().filter(m => !['cowherd', 'beekeeper', 'glassmaker'].includes(m.profession)).reduce((a, m) => Math.max(a, window.__count(m, 'glass_bottle')), 0);
+      // glassmaker's, made to sell), counted only while both are awake: nobody trades at night, and the cowherd bottles its evening milk
+      const stranded = hd.sleeping ? 0 : window.__villagers().filter(m => !m.sleeping && !['cowherd', 'beekeeper', 'glassmaker'].includes(m.profession)).reduce((a, m) => Math.max(a, window.__count(m, 'glass_bottle')), 0);
       R.herd.push([+(BF.sky.day + BF.sky.time).toFixed(2), P && P.cows ? P.cows.length : null, P && P.cows ? P.cows.filter(c => c.growAt != null).length : null, P ? P.culls : null,
         window.__count(hd, 'glass_bottle'), stranded]);
     }, [Math.min(PER, total - s), h, setup.key, LEAN]);

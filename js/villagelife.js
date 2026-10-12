@@ -1496,6 +1496,7 @@ function findWheatSeller(m) {
 }
 // Empty glass bottles back to the cowherd (js/cowherd.js): a cowherd short of bottles buys them through any villager's offer for them (the
 // spare goods of a villager left with the empties of milk it drank, js/market.js: small lots from GLASS_LOT_MIN bottles), the biggest lot nearest.
+// Empties come first: the glassmaker's new bottles count as 64 blocks further off, so a baker's pile is bought back before them.
 function findBottleSeller(m) {
   const R = m.village, gb = I("glass_bottle"), now = dayNow(), sh = m.fshop;
   const want = BF.cowherd && m.profession === "cowherd" ? BF.cowherd.bottleWanted(m) : BF.beekeeper && m.profession === "beekeeper" ? BF.beekeeper.bottleWanted(m) : 0;   // and the beekeeper (js/beekeeper.js)
@@ -1505,7 +1506,7 @@ function findBottleSeller(m) {
     if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
     const d = wheatDealWith(m, v2, want, gb);
     if (!d) continue;
-    const sc = v2.position.distanceTo(m.position) - d.offer.sell.n * d.times;
+    const sc = v2.position.distanceTo(m.position) - d.offer.sell.n * d.times + (v2.profession === "glassmaker" ? 64 : 0);
     if (sc < bs) { bs = sc; best = d; }
   }
   return best;
