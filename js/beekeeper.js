@@ -504,7 +504,7 @@ function holdings(m) {
 });
 
 BF.beekeeper = {
-  PROF, HIVES_MAX, HIVE_R, LEAD_BELOW, NEST_R, PICK_R, FLOWERS_WANT, CANDLE_STOCK, LOG,
+  PROF, HIVES_MAX, HIVE_R, LEAD_BELOW, NEST_R, PICK_R, FLOWERS_WANT, CANDLE_STOCK, KIT_BOTTLES, LOG,
   ai, nextJob, statusText, forceStop, reserve, holdings, hivesOf, hiveSpot, plantSpot, pickSpot, nestFor, bottleWanted, kitInto, hireKit, craft, keepOut, openCell,
 };
 })();

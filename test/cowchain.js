@@ -4,7 +4,7 @@
 //  - beef, leather and milk come only from the cows: the daily restock never gives anyone raw beef, steak, leather, milk, glass bottles, buckets or
 //    wheat, and the village's totals (packs and chests within 80 blocks) never exceed what it held at the start plus what the cows gave (culls:
 //    raw beef and leather from the village log; milkings: 3 bottles' worth each);
-//  - no glass bottles from nothing: the village's bottles (empty and full) never exceed the start plus 30 per hire kit given during the run;
+//  - no glass bottles from nothing: the village's bottles (empty and full) never exceed the start plus 30 per cowherd hire kit and 16 per beekeeper kit given during the run, plus the bottles a glassmaker made from sand (honey bottles count as full bottles);
 //  - the cowherd's buckets and wheat come only from its kit and what it bought: it never holds more than that, minus the wheat it fed;
 //  - empty bottles flow back: bottles villagers emptied (milk they drank) are bought back by the cowherd, and none pile up while it is short.
 // A lean day: from day LEAN to LEAN + 1 every villager but the cowherd has its food (all but milk) put away, as after a bad harvest, so hungry
@@ -35,7 +35,7 @@ const LEAN = 3;
       .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
   await pg.evaluate(() => {
-    const WATCH = window.__WATCH = ['raw_beef', 'steak', 'leather', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'bucket', 'wheat_item'];
+    const WATCH = window.__WATCH = ['raw_beef', 'steak', 'leather', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'honey_bottle', 'bucket', 'wheat_item'];
     const R = window.__rec = { key: null, lines: [], restock: [], trades: [], fed: 0, milked: 0, kits: 0, herd: [] };
     const mine = m => m && m.village && m.village.key === R.key;
     const oLog = BF.vlog.log;
@@ -98,6 +98,7 @@ const LEAN = 3;
     R.start = window.__total();
     R.herderStart = { bucket: window.__count(h, 'bucket') + window.__count(h, 'milk_bucket'), wheat: window.__count(h, 'wheat_item') };
     R.herder = h;
+    R.beeKit0 = new Set(window.__villagers().filter(m => m.beeKit));   // beekeepers' kits (16 glass bottles each, js/beekeeper.js) given before the run
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: pasture ${JSON.stringify(setup.pasture)}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
@@ -119,8 +120,9 @@ const LEAN = 3;
         R.leanBack = true;
         for (const [m, id, n] of R.lean) if (!m.dead) BF.trades.inv.add(m.inv, id, n);
       }
-      // the herd, and empty bottles other villagers hold while the cowherd is short of them
-      const stranded = window.__villagers().filter(m => m.profession !== 'cowherd').reduce((a, m) => Math.max(a, window.__count(m, 'glass_bottle')), 0);
+      // the herd, and empty bottles other villagers hold while the cowherd is short of them (not the beekeeper's, kept for honey, nor the
+      // glassmaker's, made to sell)
+      const stranded = window.__villagers().filter(m => !['cowherd', 'beekeeper', 'glassmaker'].includes(m.profession)).reduce((a, m) => Math.max(a, window.__count(m, 'glass_bottle')), 0);
       R.herd.push([+(BF.sky.day + BF.sky.time).toFixed(2), P && P.cows ? P.cows.length : null, P && P.cows ? P.cows.filter(c => c.growAt != null).length : null, P ? P.culls : null,
         window.__count(hd, 'glass_bottle'), stranded]);
     }, [Math.min(PER, total - s), h, setup.key, LEAN]);
@@ -129,6 +131,9 @@ const LEAN = 3;
   const R = await pg.evaluate(() => {
     const R = window.__rec, hd = R.herder, P = BF.cowherd.pastureOf(hd);
     R.end = window.__total();
+    R.beeKits = window.__villagers().filter(m => m.beeKit && !R.beeKit0.has(m)).length;   // ... and during it
+    R.beeKitBottles = BF.beekeeper ? BF.beekeeper.KIT_BOTTLES : 0;
+    delete R.beeKit0;
     R.herderEnd = { bucket: window.__count(hd, 'bucket') + window.__count(hd, 'milk_bucket'), wheat: window.__count(hd, 'wheat_item'), alive: !hd.dead,
       inv: hd.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' ') };
     const FU = BF.furnaceUse, VR = BF.mobs.villages.get(R.key);
@@ -176,7 +181,9 @@ const LEAN = 3;
   ok('no beef from nothing (raw beef and steak only from culls)', R.end.raw_beef + R.end.steak <= R.start.raw_beef + R.start.steak + beef, [R.start.raw_beef + R.start.steak, beef, R.end.raw_beef + R.end.steak]);
   ok('no leather from nothing (only from culls)', R.end.leather <= R.start.leather + leather, [R.start.leather, leather, R.end.leather]);
   ok('no milk from nothing (3 bottles a milking at most)', R.end.milk_bottle + 3 * R.end.milk_bucket <= R.start.milk_bottle + 3 * R.start.milk_bucket + 3 * R.milked, [R.start.milk_bottle, R.milked, R.end.milk_bottle, R.end.milk_bucket]);
-  ok('no glass bottles from nothing (only hire kits)', R.end.glass_bottle + R.end.milk_bottle <= R.start.glass_bottle + R.start.milk_bottle + 30 * R.kits, [R.start.glass_bottle + R.start.milk_bottle, R.kits, R.end.glass_bottle + R.end.milk_bottle]);
+  const glassMade = sum(/made (\d+) glass bottles? at the glass kiln/);   // a village glassmaker makes them from sand (js/glassmaker.js)
+  const bottles = t => t.glass_bottle + t.milk_bottle + (t.honey_bottle || 0);   // empty, milk and honey (a beekeeper fills its kit bottles with honey)
+  ok('no glass bottles from nothing (only hire kits and the glassmaker)', bottles(R.end) <= bottles(R.start) + 30 * R.kits + R.beeKitBottles * R.beeKits + glassMade, [bottles(R.start), R.kits, R.beeKits, glassMade, bottles(R.end)]);
   ok("no buckets from nothing for the cowherd (kit and purchases only)", R.herderEnd.bucket <= R.herderStart.bucket + bucketsBought + R.kits, [R.herderStart.bucket, bucketsBought, R.herderEnd.bucket]);
   ok('no wheat from nothing for the cowherd (bought, then fed)', R.herderEnd.wheat <= R.herderStart.wheat + wheatBought - R.fed, [R.herderStart.wheat, wheatBought, R.fed, R.herderEnd.wheat]);
   ok('the cowherd fed its cows wheat it bought', R.fed > 0 && wheatBought > 0, { fed: R.fed, wheatBought });
