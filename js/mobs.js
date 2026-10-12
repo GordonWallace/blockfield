@@ -47,19 +47,6 @@ function skyAt(x, y, z) {
   if (by > top) return OPEN_SKY;
   return { open: false, factor: Math.max(0.22, 0.92 - (top - by) * 0.07) };
 }
-// Sunlight on undead (Gordon, idea-037): leaves don't shade them, only something solid above (a roof, a cave), so no zombie lives through
-// the day under a forest canopy now that monsters live in the whole world.
-let leafIds = null;
-function sunOn(x, y, z) {
-  const s = skyAt(x, y, z);
-  if (s.open) return true;
-  const w = BF.world, c = w.chunkAt ? w.chunkAt(Math.floor(x), Math.floor(z)) : null;
-  if (!c || !c.top) return true;
-  if (!leafIds) { leafIds = new Set(); BF.blocks.forEach((b, i) => { if (b && /_leaves$/.test(b.name || "")) leafIds.add(i); }); }
-  const bx = Math.floor(x), bz = Math.floor(z), top = c.top[(bz - c.cz * BF.CS) * BF.CS + bx - c.cx * BF.CS];
-  for (let yy = top; yy > Math.floor(y); yy--) { const id = w.getBlock(bx, yy, bz); if (id && !leafIds.has(id)) return false; }
-  return true;
-}
 function isWater(id) { return BF.RENDER[id] === 3; }
 
 // ---------- spawn darkness ----------
@@ -1742,7 +1729,7 @@ function updateMob(m, dt) {
   // ---- daylight burning ----
   let burning = false;
   if (T.burns && !m.inWater && skyLight() > 0.55 && !isNight()) {
-    if (sunOn(m.position.x, m.position.y + m.height - 0.1, m.position.z) &&
+    if (skyAt(m.position.x, m.position.y + m.height - 0.1, m.position.z).open &&
         !(BF.weather && BF.weather.rainingAt && BF.weather.rainingAt(m.position.x, m.position.y + m.height, m.position.z))) { // rain/snow shields undead
       burning = true;
       ai.burnT += dt;
