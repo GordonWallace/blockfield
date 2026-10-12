@@ -182,7 +182,7 @@ function wildBreeding() {
 
 // ---------------------------------------------------------------- monster areas, caps and the buffer
 let areaList = [], areaOf = new Map(), areasT = 0;
-let targets = new Map(), targetsT = 0;
+let targets = new Map(), targetsDirty = true;   // villagers and golems by chunk, rebuilt at most once a frame when a spawn is checked
 function rebuildAreas() {
   areaList = []; areaOf = new Map();
   const W = BF.world, VS = BF.villageSim;
@@ -212,6 +212,7 @@ function mayHostile(x, y, z) {
   if (A && A.h >= A.cap) return false;
   const p = BF.player && BF.player.position;
   if (p && !BF.player.dead && Math.hypot(p.x - x, p.y - y, p.z - z) < BUFFER) return false;
+  if (targetsDirty) { targetsDirty = false; rebuildTargets(); }   // fresh positions: villagers wake, walk home or load with their village
   const cx = Math.floor(x / BF.CS), cz = Math.floor(z / BF.CS);
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
     const a = targets.get((cx + dx) + "," + (cz + dz));
@@ -288,7 +289,7 @@ function update(dt) {
     }
   }
   areasT -= dt; if (areasT <= 0) { areasT = 1; rebuildAreas(); }
-  targetsT -= dt; if (targetsT <= 0) { targetsT = 0.5; rebuildTargets(); }
+  targetsDirty = true;
   breedT -= dt; if (breedT <= 0) { breedT = 2; try { wildBreeding(); } catch (e) { console.error(e); } }
   watchT -= dt; if (watchT <= 0) { watchT = 1; watchVillages(); }
 }
@@ -310,7 +311,7 @@ function deserialize(o) {
 }
 function reset() {
   rolled = new Set(); toRoll.clear(); stored = new Map(); toRestore.clear(); nights = new Map();
-  areaList = []; areaOf = new Map(); targets = new Map(); LOG.length = 0;
+  areaList = []; areaOf = new Map(); targets = new Map(); targetsDirty = true; LOG.length = 0;
 }
 function counts() {
   let n = 0;
