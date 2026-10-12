@@ -9,7 +9,7 @@
 //    Chunks of saves from before this change roll the first time they load too. Nothing else spawns animals; they breed.
 //  - Wild breeding: two wild adults of a kind on grass within BREED_R blocks may breed on their own: each adult gets one roll a game day
 //    (PAIR_P, so about BREED_CHANCE a pair), never while CROWD_MAX of its kind are within CROWD_R blocks. A roll makes the pair willing,
-//    and the animal's own module walks them together (js/shepherd.js, poultry.js, cowherd.js, pigs.js).
+//    and the animal's own module walks them together (js/shepherd.js, poultry.js, cowherd.js, pigfarmer.js).
 //  - Monsters (spawned by js/mobs.js spawnMonsters in any loaded chunk): mayHostile refuses a spot whose area already holds its cap (CAP
 //    per CAP_CHUNKS chunks, counted per area: each running village with its margin, each trip corridor, each group of villager windows,
 //    and the player's surroundings), or within BUFFER blocks of the player, a villager or an iron golem.

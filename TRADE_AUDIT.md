@@ -302,6 +302,9 @@ Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple a
 | 4 | 8 leather > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
 | 5 | 2 emerald > 18 steak | 2.00 | 2.16 | 1.08 | buy from villager |
 
+- **Pork from the pig farmer (1.3).** The butcher's table is unchanged; it now also buys raw porkchops from the pig farmer's `1 emerald > 12 raw_porkchop` while it holds fewer than 9
+  porkchops (raw or cooked), as it buys raw chicken from the poultry keeper, and cooks them as before.
+
 ### fisherman
 
 | Lvl | Offer | In | Out | rho | Kind |
@@ -439,6 +442,25 @@ New profession (see CONTRACT.md "Bakers"). It sells what it bakes in its oven fr
   pumpkins as farmers' spare goods (cane 24 for 1 emerald, VALUE x 1.05, small lots from 12; pumpkins 7 for 1, small lots from 4).
 - **No round trip.** Eggs 0.05 (baker pays) < 0.055+ (sellers charge); wheat 0.0625 < 0.071; pumpkins 0.125 < 0.147; a cake's ingredients (about 0.9 at sellers' prices, less 0.25
   for the 3 empties sold back) stay under the 1.0 of 7 slices or a whole cake.
+
+### pig_farmer
+
+New profession (see CONTRACT.md "Pig farmers"). It sells what its sty gives: raw porkchops from the pigs it culls and porkchops it cooks from them in a real furnace with
+fuel it bought. Nothing is restocked (`PRODUCE.pig_farmer = []`) and no pork is in its starting pack (a generated one starts with a few carrots and potatoes and emeralds;
+one hired later with an emerald for its first feed). It buys its feed (carrots, potatoes, beetroot) through the farmers' offers and keeps all of it (its reserve), as it keeps up to 16 of the fuel it bought to cook pork; it never sells pigs.
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 1 emerald > 12 raw_porkchop | 1.00 | 0.96 | 0.96 | buy from villager |
+| 1 | 1 emerald > 8 cooked_porkchop | 1.00 | 0.96 | 0.96 | buy from villager |
+| 1 | 20 carrot > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 1 | 20 potato > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 2 | 2 emerald > 15 cooked_porkchop | 2.00 | 1.80 | 0.90 | buy from villager |
+| 2 | 17 beetroot > 1 emerald | 1.19 | 1.00 | 0.84 | sell to villager |
+
+- **Its porkchops are wares, not meals** (js/market.js `spareOf` skips the food clamp for them), so its offers sell whatever else it holds to eat; it never eats its feed or raw pork.
+- **No round trip.** Raw porkchops 0.071 (butcher pays) < 0.083 (pig farmer charges); cooked 0.125 (butcher charges) vs 0.125-0.133 (pig farmer); feed 0.05-0.059 (pig farmer pays the player)
+  < 0.0625 (farmers' level 4 offers).
 
 ### cartographer
 

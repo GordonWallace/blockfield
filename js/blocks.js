@@ -351,6 +351,11 @@ const BLOCK_DEFS = [
   { name: "candle", tiles: { top: "candle_top", side: "candle", bottom: "candle_top" }, icon: "candle_icon", render: "model", model: "shape", solid: false, opaque: false, hardness: 0.1, emit: 3,
     boxes: [[6, 0, 6, 10, 6, 10], [7.5, 6, 7.5, 8.5, 8.5, 8.5, undefined, 0, 1]], box: [6, 0, 6, 10, 8, 10], creativeTab: "functional", color: "#e8d8a8" },
   // ---- end bees pack ----
+  // ---- pig farmer pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Pig farmers")
+  // feed trough: the pig farmer villager's jobsite (not vanilla): a low plank trough of carrots, potatoes and beetroot, beside the sty gate
+  { name: "feed_trough", jobsite: "pig_farmer", tiles: { top: "feed_trough_top", side: "feed_trough_side", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional",
+    render: "model", model: "shape", opaque: false, boxes: [[1, 0, 2, 15, 9, 14]], box: [1, 0, 2, 15, 9, 14], color: "#9a7240" },
+  // ---- end pig farmer pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);

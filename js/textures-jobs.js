@@ -536,6 +536,25 @@ T.glass_kiln_top = p => {
 };
 T.glass_kiln_bottom = p => { cobbleBase(p); p.relief(1.1); };
 
+// ---------- feed trough (pig farmer, not vanilla): a low plank trough on two dark cross boards, heaped with carrots, potatoes and beetroot ----------
+// Box model (blocks.js): the body spans y 0-9, rows 14-31 of the side tile; the top tile is the feed seen from above inside a plank rim.
+T.feed_trough_side = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  band(p, 14, 16, pal(["#2e2010", "#3a2a16", "#46331c", "#523d22", "#5e4728"]));
+  band(p, 28, 30, pal(["#2e2010", "#3a2a16", "#46331c", "#523d22", "#5e4728"]));
+  p.relief(1.2);
+};
+T.feed_trough_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  const FEED = [["#e8892a", "#c86a18"], ["#c8a85a", "#a88a40"], ["#a8323a", "#7a2028"]];   // carrot, potato, beetroot
+  rect(p, 4, 6, 27, 25, (x, y) => mix(hex("#4a3418"), hex("#5e4422"), p.noise(x, y, 8, 4, 361)), 0.2, 0.04);   // the inside
+  for (let k = 0; k < 26; k++) {
+    const cx = 6 + Math.floor(K.ihash(k, p.seed, 17) * 20), cy = 8 + Math.floor(K.ihash(k, p.seed, 19) * 16), [a, b] = FEED[k % 3];
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < (k % 3 === 0 ? 3 : 2); dx++) { p.set(cx + dx, cy + dy, jit(p, hex(dy ? b : a), 0.06)); p.setH(cx + dx, cy + dy, 0.6); }
+  }
+  p.relief(1.1);
+};
+
 // ---------- cake (vanilla): white icing with red berries on top, sponge and cream on the sides ----------
 T.cake_top = p => {
   p.fill((x, y) => { p.set(x, y, jit(p, mix(hex("#fbf8f2"), hex("#ece4d8"), p.noise(x, y, 8, 4, 311)), 0.02)); p.setH(x, y, 0.6); });
