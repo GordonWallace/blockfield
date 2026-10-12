@@ -1,4 +1,4 @@
-// @ci integration suite=world timeout=900
+// @ci integration suite=world soak timeout=900
 // Frame cost of mobs living in the world (idea-037): at night with 4 villages running (two pinned trips, as caravans do) and the player in a
 // fifth area, once the monsters have built up to their caps, the mob update may cost at most BUDGET ms a frame more than the same scene with
 // no wild mobs (the villages, their villagers, golems and stock only). Reports both, and the mob counts.
