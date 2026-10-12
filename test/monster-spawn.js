@@ -1,7 +1,7 @@
 // @ci integration suite=village timeout=600
 // Monsters spawn in any loaded chunk, not around the player (js/mobs.js spawnMonsters, js/wildlife.js mayHostile; idea-037): with the player
 // 300 blocks from a running village at night, zombies appear in the village's dark spots and none on lit ground; no area holds more than its
-// cap (20 per 28 chunks) and nothing spawns within 12 blocks of the player, a villager or an iron golem.
+// cap (10 per 28 chunks) and nothing spawns within 12 blocks of the player, a villager or an iron golem.
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ms test/monster-spawn.js
 module.exports = async (pg) => {
   const fails = [];

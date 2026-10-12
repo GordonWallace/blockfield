@@ -142,11 +142,11 @@ module.exports = async (pg) => {
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
       const calves = L.filter(m => m.type === "cow" && !m.dead && m.cow && m.cow.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).length;
       const pairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "cow").length, cows = [a, b].map(m => [m.dead ? "dead" : "", m.cow && m.cow.fed, +m.position.x.toFixed(1), +m.position.y.toFixed(1), +m.position.z.toFixed(1)]);
-      // a crowd: 7 cows together never pair up on their own
+      // a crowd: 9 cows together never pair up on their own
       for (const m of L.slice()) if (m.type === "cow") m.dead = true;
       for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
       const crowd = [];
-      for (let i = 0; i < 7; i++) { const m = BF.mobs.spawn("cow", x + 0.5 + (i % 3), y, z + 0.5 + Math.floor(i / 3)); m.wildB = { next: 0 }; crowd.push(m); }
+      for (let i = 0; i < 9; i++) { const m = BF.mobs.spawn("cow", x + 0.5 + (i % 3), y, z + 0.5 + Math.floor(i / 3)); m.wildB = { next: 0 }; crowd.push(m); }
       for (let i = 0; i < 100; i++) BF.mobs.update(0.05);
       const willing = crowd.filter(m => m.cow && m.cow.fed != null).length;
       for (const m of crowd) m.dead = true;
@@ -171,7 +171,7 @@ module.exports = async (pg) => {
     }, spot);
     ok("two wild cows on grass breed on their own", br.calves >= 1, br);
     ok("two wild horses breed on their own and the foal is wild", br.foals.length >= 1 && br.foals.every(f => !f.tamed && !f.owner), { foals: br.foals, horses: br.horses, pairs: br.hPairs });
-    ok("no wild breeding with 6 or more of a kind within 24 blocks", br.willing === 0, br);
+    ok("no wild breeding with 8 or more of a kind within 24 blocks", br.willing === 0, br);
     ok("fed pigs breed and a piglet appears (smaller)", br.fedOk && br.piglets >= 1 && br.pigScale.every(s => s < 0.9), br);
   }
   console.log(fails.length ? "FAILED: " + fails.length : "ALL PASSED");
