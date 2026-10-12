@@ -585,7 +585,7 @@ hooks) and `if (m.child) BF.breeding.childMove(m, dt, out)` after `wanderAI`; `r
   job (preferred professions weigh 3x); with no free jobsite it stays unemployed and jobs.js keeps retrying. Event `villagerGrewUp(m)`. From then on it is an ordinary adult
   (starving rules, trading, can breed).
 - **Persistence.** Newborns live in `rec.bred` (village record) as `{k, child, born, eaten, parents: [profA, profB], prof, cd, pos, bed, ...}` and use the existing villager map with
-  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+, added trades #1700 cowherd, #1800+k bakers, #1900 glassmaker, #2000 beekeeper (which shares the newborn range), #1960 pig farmer; never #2000+k): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
+  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+, added trades #1700 cowherd, #1800+k bakers, #1900 glassmaker, #1950 beekeeper, #1960 pig farmer; never #2000 or above): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
   breeding.js (not the roster) near their saved position when the player is within ~72 blocks; grown ones get `BF.jobs.onSpawn(m, rec, {prof, ...saved})`. Dead newborns
   are removed from `rec.bred` and their keys from the next save (and their death is not counted in `rec.killed`, so no roster slot is lost). Parents' cooldowns:
   `"breeding:cd": {villagerKey: day}`. Old saves have none of this and load unchanged.
