@@ -35,17 +35,14 @@ function isNight() {
   if (BF.sky && typeof BF.sky.isNight === "function") return !!BF.sky.isNight();
   return skyLight() < 0.4;
 }
-// Sky exposure at a world position, matching world.js' sky-shade model.
-// Returns {open, factor}: open = no light-blocking block above; factor = darkening under cover.
-const OPEN_SKY = { open: true, factor: 1 };
+// Sky light at a world position (js/skylight.js, the same levels the world is drawn with).
+// Returns {open, level, factor}: level 0..15; open = bright enough to burn the undead (SUN_BURN or more); factor = its brightness.
+const SUN_BURN = 12, CAVE_SKY = 7;
+const OPEN_SKY = { open: true, level: 15, factor: 1 };
 function skyAt(x, y, z) {
-  const w = BF.world, c = w.chunkAt ? w.chunkAt(Math.floor(x), Math.floor(z)) : null;
-  if (!c || !c.top) return OPEN_SKY;
-  const lx = Math.floor(x) - c.cx * BF.CS, lz = Math.floor(z) - c.cz * BF.CS;
-  const top = c.top[lz * BF.CS + lx];
-  const by = Math.floor(y);
-  if (by > top) return OPEN_SKY;
-  return { open: false, factor: Math.max(0.22, 0.92 - (top - by) * 0.07) };
+  if (!BF.skyLight) return OPEN_SKY;
+  const l = BF.skyLight.get(x, y, z);
+  return l === 15 ? OPEN_SKY : { open: l >= SUN_BURN, level: l, factor: BF.skyLight.bright(l) };
 }
 function isWater(id) { return BF.RENDER[id] === 3; }
 
@@ -53,8 +50,8 @@ function isWater(id) { return BF.RENDER[id] === 3; }
 // A monster spawns at a spot only after the spot has been dark enough for DARK_WAIT, half an in-game hour (plus a per-cell extra of up
 // to another half hour, so they trickle in): block light <= 7, and
 // under open sky a sky light <= SPAWN_LIGHT (a little before full night). The sky's light curve is known for any past time, so
-// "dark for half an hour" under open sky is just the light now and half an hour ago: no per-spot tracking. Spots under 5+ blocks
-// of cover (caves, dense forest) count as dark at any time, as before. What the curve can't know is a local change: a light
+// "dark for half an hour" under open sky is just the light now and half an hour ago: no per-spot tracking. Spots whose sky light
+// is CAVE_SKY or less (caves, deep inside dense forest or a windowless building) count as dark at any time. What the curve can't know is a local change: a light
 // source removed, or a block placed that shades the ground (a new roof). Those stamp a coarse cell (CELL x CELL columns, a light
 // source also the cells around it) and nothing spawns in a stamped cell until DARK_WAIT has passed.
 const SPAWN_LIGHT = 0.3, DARK_WAIT = 0.5 / 24, CELL = 8;
@@ -2056,7 +2053,7 @@ function tryCave(c) {
     if (!standable(x, y, z, T.hw, T.h)) continue;
     if (!BF.OPAQUE[w.getBlock(x, y - 1, z)]) continue;
     const s = skyAt(x, y, z);
-    if (s.open || s.factor > 0.6) continue;   // 5+ blocks of cover (caves, dense forest canopy): dark at any time of day, houses never
+    if (s.level > CAVE_SKY) continue;   // sky light 7 or less (caves, deep forest shade): dark at any time of day
     if (!darkLongEnough(x, z, 0)) continue;   // ...unless a light went out or the cover was just built
     if (w.getBlockLight(x, y, z) > 7) continue; // lit caves are safe
     spawnHostile(type, x + 0.5, y, z + 0.5);
@@ -2585,7 +2582,7 @@ BF.mobs = {
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
   isWild, spawnGroup, standable, findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
-  skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
+  skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
   aiTime: () => aiEma,

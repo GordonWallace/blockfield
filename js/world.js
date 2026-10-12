@@ -195,11 +195,13 @@ function extendDown(c, newLo) {
   const oldY0 = c.y0;
   c.secs = add.concat(c.secs);
   if (c.light) c.light = new Array(n).concat(c.light);
+  if (c.sky) c.sky = new Array(n).fill(0).concat(c.sky);
   c.lo = newLo; c.y0 = newLo * 16;
   const e = world.edits.get(c.key);       // edits are applied when the chunk is created; deeper ones are only possible if the band was shorter then
   if (e) for (const [i, id] of e) { const y = (i >> 8) + BF.MIN_Y; if (y >= c.y0 && y < oldY0) secSet(c, i & 15, y, (i >> 4) & 15, id); }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) if (c.top[z * CS + x] < oldY0) updateColumn(c, x, z);
   if (BF.light && c.light !== undefined) BF.light.onExtended(c, oldY0);
+  if (BF.skyLight) BF.skyLight.onExtended(c);   // a shaft may reach the new sections: recompute (js/skylight.js)
   markNeighboursDirty(c);
   if (c.mesh !== undefined) world._dirty.add(c.key);
 }
@@ -209,7 +211,9 @@ function extendUp(c, newHi) {
   if (newHi <= c.hi) return;
   for (let i = c.hi; i < newHi; i++) c.secs.push(0);
   if (c.light) for (let i = c.hi; i < newHi; i++) c.light.push(undefined);
+  const oldHi = c.hi;
   c.hi = newHi; c.y1 = newHi * 16;
+  if (BF.skyLight) BF.skyLight.onExtendedUp(c, oldHi);
 }
 function markNeighboursDirty(c) {
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
@@ -245,6 +249,7 @@ world.setBlock = function (x, y, z, id) {
   world._dirty.add(c.key);
   scheduleFluid(x, y, z, true);
   if (BF.light) { BF.light.onSet(x, y, z, oldId, id); BF.light.popUnsupported(x, y, z, id); } // block light + torches losing support
+  if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);   // sky light (js/skylight.js)
   if (BF.mobs && BF.mobs.onSet) BF.mobs.onSet(x, y, z, oldId, id); // monster spawn wait restarts where it got darker (js/mobs.js)
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
   if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
@@ -327,7 +332,7 @@ world.heightAt = function (x, z) {
 };
 
 function updateColumn(c, lx, lz) {
-  // light-blocking top (opaque blocks and leaves) for the simple sky-shade model
+  // light-blocking top (opaque blocks and leaves): rain and snow stop here (js/weather.js); sky light is js/skylight.js
   let y = c.y1 - 1;
   for (; y >= c.y0; y--) { const b = cblock(c, lx, y, lz); if (BF.OPAQUE[b] || BF.RENDER[b] === 2 || BF.LIGHTBLOCK[b]) break; }
   c.top[lz * CS + lx] = y;
@@ -341,7 +346,7 @@ function createChunk(cx, cz) {
   if (g.generateBand) { const r = g.generateBand(cx, cz); lo = r.lo; hi = r.hi; data = r.vox; }
   else { hi = BF.H >> 4; lo = 0; data = new Uint16Array(CS * CS * BF.H); g.generate(cx, cz, data); }
   const key = ckey(cx, cz);
-  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), mesh: undefined, meshes: [], light: undefined };
+  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), mesh: undefined, meshes: [], light: undefined, sky: undefined };
   const e = world.edits.get(key);
   if (e) {
     // the band must cover every edited cell (builds above it, tunnels below it)
@@ -354,6 +359,7 @@ function createChunk(cx, cz) {
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) updateColumn(c, x, z);
   world.chunks.set(key, c);
   if (BF.light) BF.light.onChunkCreated(c);
+  if (BF.skyLight) BF.skyLight.onChunkCreated(c);   // sky light spreading (js/skylight.js)
   if (e) for (const [i, id] of e) if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) {
     growing.add(fkey(cx * CS + (i & 15), (i >> 8) + BF.MIN_Y, cz * CS + ((i >> 4) & 15)));
   }
@@ -579,12 +585,6 @@ function buildMesh(c) {
     const s = ch.secs[(y >> 4) - ch.lo];
     return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)];
   };
-  const topAt = (x, z) => {
-    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
-    const ch = nb[iz * 3 + ix];
-    if (!ch) return -1;
-    return ch.top[(z - (iz - 1) * CS) * CS + (x - (ix - 1) * CS)];
-  };
   const occ = (x, y, z) => BF.OPAQUE[get(x, y, z)];
   // block light (0..15) from the neighbourhood's chunk.light arrays (0 where unloaded)
   const lget = (x, y, z) => {
@@ -659,10 +659,24 @@ function buildMesh(c) {
   const p = [0, 0, 0], p1 = [0, 0, 0], p2 = [0, 0, 0], p3 = [0, 0, 0];
   const lowUV = [[0, 0], [0, 0], [0, 0], [0, 0]], aoVals = [0, 0, 0, 0], vh = [0, 0, 0, 0];
 
-  const skyAt = (ax, ay, az) => {
-    const top = topAt(ax, az);
-    return ay > top ? 1 : Math.max(0.3, 0.92 - (top - ay) * 0.06);
+  // sky light (js/skylight.js): level 0..15 of a cell (15 where unloaded or above a band), brightness through BRIGHT
+  const SKB = BF.skyLight.BRIGHT, SATT = BF.skyLight.ATT;
+  const sgetN = (x, y, z) => {
+    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
+    const ch = nb[iz * 3 + ix];
+    if (!ch || !ch.sky || y >= ch.y1) return 15;
+    if (y < ch.y0) return 0;
+    const s = ch.sky[(y >> 4) - ch.lo];
+    return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)];
   };
+  // brightness of a cell; a cell that stops sky light (a slab, a stair, a solid block) takes its best neighbour
+  const skyAt = (x, y, z) => {
+    if (SATT[get(x, y, z)] !== 255) return SKB[sgetN(x, y, z)];
+    let v = 0;
+    for (let d = 0; d < 6; d++) { const n = sgetN(x + (d === 0) - (d === 1), y + (d === 2) - (d === 3), z + (d === 4) - (d === 5)); if (n > v) v = n; }
+    return SKB[v];
+  };
+  const skv = [0, 0, 0, 0];
 
   // Emits one quad. corners: 4 [x,y,z] local; uvs: 4 [u,v] in 0..1 of rect; shade per vertex; tintKind
   function quad(T, rect, cs, uvs, shades, sky, tintKind, flip, lx, lz) {
@@ -676,7 +690,7 @@ function buildMesh(c) {
         tintAtCorner(Math.max(0, Math.min(CS, Math.round(q[0]))), Math.max(0, Math.min(CS, Math.round(q[2]))), tintKind, tc);
         T.col.push(l * tc[0], l * tc[1], l * tc[2]);
       } else T.col.push(l, l, l);
-      T.sky.push(sky);
+      T.sky.push(sky < 0 ? skv[k] : sky);   // sky < 0: per-vertex (smooth) values in skv
       T.bl.push(blv[k]);
     }
     if (flip) T.ind.push(v0 + 1, v0 + 2, v0 + 3, v0 + 1, v0 + 3, v0);
@@ -800,6 +814,7 @@ function buildMesh(c) {
       }
 
       // solid / cutout cube face with ambient occlusion (paths and farmland sit 1/16 lower)
+      const fs = sky;
       const lowTop = (b === B_PATH || b === B_FARM || b === B_FARM_DRY) && !BF.SOLID[get(x, y + 1, z)];
       const ua = sideAxes[f][0], va = sideAxes[f][1];
       for (let k = 0; k < 4; k++) {
@@ -820,6 +835,12 @@ function buildMesh(c) {
         if (!o2) { ls += lget(p2[0], p2[1], p2[2]); ln++; }
         if (!o3 && !(o1 && o2)) { ls += lget(p3[0], p3[1], p3[2]); ln++; }
         blv[k] = ls / ln / 15;
+        // smooth sky light the same way (cells that stop sky light, like slabs, are left out)
+        let ss = fs, sn = 1;
+        if (!o1 && SATT[get(p1[0], p1[1], p1[2])] !== 255) { ss += SKB[sgetN(p1[0], p1[1], p1[2])]; sn++; }
+        if (!o2 && SATT[get(p2[0], p2[1], p2[2])] !== 255) { ss += SKB[sgetN(p2[0], p2[1], p2[2])]; sn++; }
+        if (!o3 && !(o1 && o2) && SATT[get(p3[0], p3[1], p3[2])] !== 255) { ss += SKB[sgetN(p3[0], p3[1], p3[2])]; sn++; }
+        skv[k] = ss / sn;
       }
       // a lowered block's sides crop the tile's top 1/16 (as vanilla does) instead of squeezing it, or the tile's top row shows as a strip
       if (lowTop && F.kind === "side") {
@@ -830,12 +851,12 @@ function buildMesh(c) {
       const tk = faceTint[b * 6 + f];
       if (tk === 4) {
         // grass side: plain dirt, then a tinted fringe overlay pushed out slightly
-        quad(S, world._dirtUV, cs4, uvs, sh4, sky, 0, flip);
+        quad(S, world._dirtUV, cs4, uvs, sh4, -1, 0, flip);
         const e = 0.002;
         for (let k = 0; k < 4; k++) { cs4[k][0] += F.n[0] * e; cs4[k][1] += F.n[1] * e; cs4[k][2] += F.n[2] * e; }
-        quad(S, world._overlayUV, cs4, uvs, sh4, sky, 1, flip);
+        quad(S, world._overlayUV, cs4, uvs, sh4, -1, 1, flip);
       } else {
-        quad(BF.blocks[b].translucent ? L : S, rect, cs4, uvs, sh4, sky, tk, flip); // stained glass: blended pass
+        quad(BF.blocks[b].translucent ? L : S, rect, cs4, uvs, sh4, -1, tk, flip); // stained glass: blended pass
       }
     }
   }
