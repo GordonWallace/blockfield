@@ -12,6 +12,8 @@ const BLOCK_T = [0.5, 0.8];       // seconds between two placed blocks (random p
 let reachNow = 4.0;
 const REACH = 4.0;                // blocks from the eye to the nearest point of the target cell
 const EYE = 1.62;
+const POST_REACH = 15;             // a bridge post is placed from the deck down to the river bed (js/blueprints.js bridge): long reach, no line of sight
+const isPost = (e, c) => e.type === "bridge" && c.y < e.oy && !!BF.blueprints.woodOf(c.id) && BF.blueprints.woodOf(c.id)[1] === "log";
 const BUILD_END = 0.47;           // sky time after which builders stop and go home (bedtime at sunset 0.5)
 const SITE_RANGE = 40;            // sites up to this far outside the village's bounding box
 const SITE_TRIES = 150, SITE_EVALS = 40, MAX_FILL = 2, MAX_SLOPE = 2;
@@ -611,7 +613,8 @@ function spotsFor(m, bs, c, e) {
   const N = nav(), [fx, fy, fz] = N.feetCell(m), bp = bpOf(e), out = [];
   const ahead = [];                                            // the next few cells: prefer spots that reach them too (fewer walks)
   for (let k = 1; k <= 10 && e.prog + k < e.n; k++) ahead.push(cellOf(e, e.prog + k));
-  for (let dy = -4; dy <= 1; dy++) for (let dz = -5; dz <= 5; dz++) for (let dx = -5; dx <= 5; dx++) {
+  const post = isPost(e, c);
+  for (let dy = -4; dy <= (post ? POST_REACH : 1); dy++) for (let dz = -5; dz <= 5; dz++) for (let dx = -5; dx <= 5; dx++) {
     const sx = c.x + dx, sy = c.y + dy, sz = c.z + dz;
     if (sx === c.x && sz === c.z && (sy === c.y || sy + 1 === c.y)) continue;
     const ex = sx + 0.5, ey = sy + EYE, ez = sz + 0.5;
@@ -628,7 +631,7 @@ function spotsFor(m, bs, c, e) {
   }
   out.sort((a, b) => a.s - b.s);
   const good = [];                                          // only spots with a free line to the block (a few ray casts, once per block)
-  for (let i = 0; i < out.length && i < 60 && good.length < 8; i++) if (losFrom(out[i].x + 0.5, out[i].y, out[i].z + 0.5, c)) good.push(out[i]);
+  for (let i = 0; i < out.length && i < 60 && good.length < 8; i++) if (post || losFrom(out[i].x + 0.5, out[i].y, out[i].z + 0.5, c)) good.push(out[i]);
   return good;
 }
 
@@ -809,10 +812,11 @@ function buildMode(m, bs, dt, out) {
     return false;
   }
   if (e.prog >= e.n) { finish(m, bs, e); return false; }
-  const c = cellOf(e, e.prog);
+  const c = cellOf(e, e.prog), post = isPost(e, c);
   if (!W().isLoaded(c.x, c.z)) return false;
+  if (post) reachNow = POST_REACH;
   const near = nearestDist(m, c) <= reachNow && !overlapsBody(m, c) && !(c.pair && overlapsBody(m, { x: c.x, y: c.y + 1, z: c.z }));
-  if (near && (bs.losFor !== e.prog || bs.losT <= 0)) { bs.losFor = e.prog; bs.los = losOK(m, c); bs.losT = 0.5; }
+  if (near && (bs.losFor !== e.prog || bs.losT <= 0)) { bs.losFor = e.prog; bs.los = post || losOK(m, c); bs.losT = 0.5; }
   bs.losT -= dt;
   if (near && bs.los) {
     ai.route = null; bs.goal = null;
@@ -843,7 +847,7 @@ function buildMode(m, bs, dt, out) {
   ai.mode = "idle"; ai.t = 2;
   if (st === "failed") { bs.goal = null; bs.ci++; }
   else if (st === "arrived") {
-    if (nearestDist(m, c) <= reachNow && losOK(m, c)) steer(m, bs.goal.x + 0.5, bs.goal.z + 0.5, 0.7, out);   // settle on the spot (the body must clear the target cell)
+    if (nearestDist(m, c) <= reachNow && (post || losOK(m, c))) steer(m, bs.goal.x + 0.5, bs.goal.z + 0.5, 0.7, out);   // settle on the spot (the body must clear the target cell)
     else { bs.goal = null; bs.ci++; }
   }
   return true;

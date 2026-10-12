@@ -8,7 +8,7 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const CELL = 8, RANGE = 64, WINDOW = 3, NEED = 12, BUSY = 30, WMIN = 3, WMAX = 24, SPACING = 32, MAXBUILT = 3, ROUTE_R = 48, MAXRAMP = 3;
+const CELL = 8, RANGE = 64, WINDOW = 3, NEED = 12, BUSY = 30, WMIN = 3, WMAX = 24, SPACING = 32, MAXBUILT = 3, ROUTE_R = 48, MAXRAMP = 3, MAXPOST = 14;
 const W = () => BF.world;
 const dayNow = () => (BF.sky ? BF.sky.day + BF.sky.time : 0);
 const counts = new Map();   // village key -> Map("gx,gz" -> [game days of each crossing, newest last])
@@ -148,6 +148,19 @@ function crossingNear(x, z) {
   }
   return false;
 }
+// Where the posts go and how deep: both ends, and on spans of 11 or more evenly between them, at least 5 apart (a boat is under 1.4 wide). Each post
+// runs from under the deck down to the bed on the two outer lanes. "u:d0:d2;..." for the blueprint (js/blueprints.js bridge).
+function postsFor(sp) {
+  const L = sp.L, k = Math.max(0, Math.floor((L - 1) / 5) - 1), us = [0];
+  for (let i = 1; i <= k; i++) us.push(Math.round(i * (L - 1) / (k + 1)));
+  us.push(L - 1);
+  const lane = (u, q) => {   // world column of deck block u, lane q (rot 0 runs along x with q = z - (f - 1); rot 1 along z with q = (f + 1) - x)
+    const p = sp.a + u, [x, z] = sp.axis === "x" ? [p, sp.f - 1 + q] : [sp.f + 1 - q, p], c = wcol(x, z);
+    const g = c ? c.bed : c === null ? W().heightAt(x, z) : sp.Dy - 2;
+    return Math.max(0, Math.min(MAXPOST, sp.Dy - 1 - g));
+  };
+  return us.map(u => u + ":" + lane(u, 0) + ":" + lane(u, 2)).join(";");
+}
 const bridgesOf = R => (BF.builder ? BF.builder.builtOf(R) : []).filter(e => e.type === "bridge" && e.state !== "abandoned");
 // The bridge this village wants now: {n (crossings in the busiest cell), rot, ox, oz, oy, opts, span} or null. Kept for a quarter of a game day.
 function plan(R, fresh) {
@@ -166,7 +179,7 @@ function plan(R, fresh) {
       if (!sp) continue;
       const mx = sp.axis === "x" ? (sp.a + sp.b) >> 1 : sp.f, mz = sp.axis === "x" ? sp.f : (sp.a + sp.b) >> 1;
       if (crossingNear(mx, mz)) continue;
-      const opts = { len: sp.L, r0: sp.r0, r1: sp.r1 };
+      const opts = { len: sp.L, r0: sp.r0, r1: sp.r1, posts: postsFor(sp) };
       found = {
         n: c.n, rot: sp.axis === "x" ? 0 : 1, oy: sp.Dy, opts,
         ox: sp.axis === "x" ? sp.a - sp.r0 : sp.f - 1, oz: sp.axis === "x" ? sp.f - 1 : sp.a - sp.r0,
