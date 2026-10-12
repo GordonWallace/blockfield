@@ -276,6 +276,13 @@ function occupiedBox(m, r) {   // player or another mob inside the rect (x0, z0,
 }
 function findSite(m, type, opts, haveFound, wood) {
   const R = m.village, wg = R.wg, w = W(), built = builtOf(R);
+  if (type === "bridge") {   // the span js/bridges.js chose at the busiest crossing: nothing to search for
+    const p = BF.bridges ? BF.bridges.plan(R, true) : null;
+    if (!p) return null;
+    const bp = BP().get("bridge", p.rot, styleIdx(R.style), 0.5, p.opts, wood);
+    if (!bp || occupiedBox(m, [p.ox, p.oz, p.ox + bp.w - 1, p.oz + bp.d - 1])) return null;
+    return { score: 0, bp, rot: p.rot, h: 0.5, ox: p.ox, oz: p.oz, oy: p.oy, fill: [], opts: p.opts, span: p.span };
+  }
   if (type === "pasture" && !(BF.cowherd && BF.cowherd.grassVillage(R))) return null;   // never off grass (js/cowherd.js)
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
   const attempt = (m.bs ? (m.bs.siteTry = (m.bs.siteTry || 0) + 1) : 0);
@@ -315,7 +322,8 @@ function findSite(m, type, opts, haveFound, wood) {
 
 // ---------------------------------------------------------------- plans
 const lamps = inv => (TR().inv.count(inv, BF.I.lantern) >= 3 ? { lantern: true } : null);
-function optsFor(type, inv) {
+function optsFor(type, inv, R) {
+  if (type === "bridge") { const p = BF.bridges && R ? BF.bridges.plan(R) : null; return p ? p.opts : null; }   // the span it would cross (js/bridges.js)
   if (type === "lamp_posts") return lamps(inv);
   if ((type === "garden" || type === "stable" || type === "pasture") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
   return null;
@@ -375,6 +383,7 @@ function weighTypes(m, bs) {
     for (const t in wt) if (!BEDS.includes(t) && !(bs.fail && bs.fail[t] > dayNow())) top = Math.max(top, wt[t]);
     for (const t of BEDS) wt[t] = Math.max(wt[t], top);
   }
+  wt.bridge = BF.bridges ? BF.bridges.weight(R) : 0;   // 1.2, 2 when busy; 0 with no crossing to bridge
   wt.small_house += 1.6 * Math.min(homeless, 3);      // and each villager with no bed makes them likelier still
   wt.medium_house += homeless >= 2 ? 1.2 : 0;
   wt.cottage += homeless >= 1 ? 0.6 : 0;
@@ -385,7 +394,8 @@ function weighTypes(m, bs) {
     if (t === "stable" && !wt.stable) continue;                  // never outside horse land
     if (t === "pasture" && !wt.pasture) continue;                // never off grass
     if (t === "glassworks" && !wt.glassworks) continue;          // never without sand nearby
-    const opts = optsFor(t, m.inv), wood = chooseWood(m, t, style, opts, stock);
+    if (t === "bridge" && !wt.bridge) continue;                  // only where villagers keep crossing water (js/bridges.js)
+    const opts = optsFor(t, m.inv, R), wood = chooseWood(m, t, style, opts, stock);
     const bp = BPr.get(t, 0, style, 0.5, opts, wood);
     const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
     const a = analyze(m.inv, req, wood);
@@ -425,7 +435,7 @@ function what(e, the) {   // "a spruce small house", "an oak cottage", "the spru
 function vlogBuild(m, e, verb) {
   if (!BF.vlog || !m || !m.village) return;
   const who = BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "builder") + ")";
-  BF.vlog.log(m.village, "build", who + " " + verb + " " + what(e, verb === "took over building") + " at " + e.ox + ", " + e.oy + ", " + e.oz +
+  BF.vlog.log(m.village, "build", who + " " + (e.type === "bridge" && verb === "built" ? "finished a bridge over the river" : verb + " " + what(e, verb === "took over building")) + " at " + e.ox + ", " + e.oy + ", " + e.oz +
     (verb === "built" ? " (" + e.n + " blocks)" : ""), [e.ox, e.oy, e.oz]);
 }
 
@@ -434,7 +444,7 @@ function vlogBuild(m, e, verb) {
 function beginPlan(m, bs, type, wood) {
   const R = m.village, built = builtOf(R), style = styleIdx(R.style);
   const found = BF.worldgen.palette(style).found;
-  const opts = optsFor(type, m.inv);
+  const opts = optsFor(type, m.inv, R);
   wood = wood || chooseWood(m, type, style, opts);
   const bp0 = BP().get(type, 0, style, 0.5, opts, wood);
   const req = Object.assign({}, bp0.req);
@@ -446,6 +456,7 @@ function beginPlan(m, bs, type, wood) {
   applyCrafts(m, a.crafts);
   const e = { id: nextId(built), type, label: site.bp.label, rot: site.rot, style, wood, h: site.h, opts: opts || undefined, ox: site.ox, oy: site.oy, oz: site.oz,
     w: site.bp.w, d: site.bp.d, prog: 0, skipped: 0, state: "building", owner: m.slot ? m.slot.idx : 0, fill: site.fill, start: +dayNow().toFixed(3) };
+  if (site.span) e.span = site.span;   // a bridge: the water it crosses (js/bridges.js walks villagers over it)
   e.n = nfill(e) + site.bp.n;
   built.push(e);
   logEvent("plan", m, { type, wood, at: [e.ox, e.oy, e.oz], rot: e.rot, blocks: e.n, fill: nfill(e) });
@@ -475,7 +486,7 @@ function pickNext(m, bs) {
   const type = pickType(m, bs);
   if (!type) return null;
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
-  const opts = optsFor(type, m.inv), wood = chooseWood(m, type, style, opts);
+  const opts = optsFor(type, m.inv, R), wood = chooseWood(m, type, style, opts);
   const req = Object.assign({}, BP().get(type, 0, style, 0.5, opts, wood).req); req[found] = (req[found] || 0) + FILL_SPARE;
   return { type, wood, req };
 }
@@ -518,7 +529,7 @@ function think(m, bs) {
   const type = nx && !(bs.fail[nx.type] > dayNow()) ? nx.type : pickType(m, bs);
   if (!type) return;
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
-  const opts = optsFor(type, m.inv), wood = nx && nx.type === type ? nx.wood : chooseWood(m, type, style, opts);
+  const opts = optsFor(type, m.inv, R), wood = nx && nx.type === type ? nx.wood : chooseWood(m, type, style, opts);
   const bp = BP().get(type, 0, style, 0.5, opts, wood);
   const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
   const a = analyze(m.inv, req, wood);
@@ -608,6 +619,8 @@ function spotsFor(m, bs, c, e) {
     const d = Math.hypot(nx - ex, ny - ey, nz - ez);
     if (d > reachNow - 0.2) continue;
     if (!N.walkCell(sx, sy, sz)) continue;
+    // a bridge is built at the feet layer of its banks and its deck: never stand where one of the next blocks goes
+    if (e.type === "bridge" && ahead.some(a => a.x === sx && a.z === sz && (a.y === sy || a.y === sy + 1))) continue;
     const inside = sx >= e.ox && sx < e.ox + bp.w && sz >= e.oz && sz < e.oz + bp.d && sy > e.oy;
     let cover = 0;
     for (const a of ahead) if (nearestDistFrom({ x: sx, y: sy, z: sz }, a) <= reachNow - 0.2) cover++;
@@ -778,8 +791,10 @@ function buildMode(m, bs, dt, out) {
   bs.placeT -= dt;
   reachNow = e.retried ? REACH + 1.6 : REACH;     // second pass: stretch a little for the last awkward cells (gable tops)
   // watchdog: a cell that cannot be placed for 15 s (unreachable, stuck, no free line) is skipped so the structure still gets finished
-  if (bs.stallP !== e.prog) { bs.stallP = e.prog; bs.stallT = 0; } else if ((bs.stallT += dt) > 15) {
-    const c0 = cellOf(e, e.prog);
+  const cStall = e.prog < e.n ? cellOf(e, e.prog) : null;
+  if (bs.stallP !== e.prog || !cStall || Math.hypot(cStall.x + 0.5 - m.position.x, cStall.z + 0.5 - m.position.z) > 16) { bs.stallP = e.prog; bs.stallT = 0; }   // the clock runs only near the block: a long walk to a far site is not a stall
+  else if ((bs.stallT += dt) > 15) {
+    const c0 = cStall;
     bs.stallT = 0; e.skipped++; (e.retry = e.retry || []).push(e.prog); advance(e, c0.pair ? 2 : 1); logEvent("stall", m, { at: [c0.x, c0.y, c0.z] }); ai.route = null; bs.goal = null;
     return false;
   }
@@ -813,7 +828,8 @@ function buildMode(m, bs, dt, out) {
     return true;
   }
   // walk to a spot that reaches the block
-  if (!bs.goal || nearestDistFrom(bs.goal, c) > reachNow - 0.1 || !nav().walkCell(bs.goal.x, bs.goal.y, bs.goal.z)) {
+  if (!bs.goal || nearestDistFrom(bs.goal, c) > reachNow - 0.1 || !nav().walkCell(bs.goal.x, bs.goal.y, bs.goal.z) ||
+    (e.type === "bridge" && bs.goal.x === c.x && bs.goal.z === c.z && (bs.goal.y === c.y || bs.goal.y + 1 === c.y))) {
     bs.goal = null;
     if (!bs.cands || bs.candFor !== e.prog) { bs.cands = spotsFor(m, bs, c, e); bs.ci = 0; bs.candFor = e.prog; }
     if (bs.ci >= bs.cands.length) {
