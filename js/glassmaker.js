@@ -27,7 +27,7 @@ const SAND_MAX = 64;              // ... and never holds more than this
 const SMELT_MIN = 8, SMELT_MAX = 20;   // a furnace load: at least 8 sand (fewer late in the day), at most 20 (200 s of fire)
 const GLASS_CAP = 48;             // it stops making glass while it holds this much (in glass: panes 6/16, bottles 1 each)
 const BOTTLE_STOCK = 9, PANE_STOCK = 16, BOTTLE_GAP_MAX = 27;
-const WORK_START = 0.02, WORK_END = 0.45, LATE = 0.36, CHECK = 3, TRADE_PAUSE = 1.6, CRAFT_T = 2.5;
+const DAY_SECS = 1200, WORK_START = 0.02, WORK_END = 0.45, LATE = 0.36, CHECK = 3, TRADE_PAUSE = 1.6, CRAFT_T = 2.5;
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
@@ -243,16 +243,16 @@ function nextJob(m) {
 const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
 function finishSmelt(m, job, all) {
   const got = FU().empty(m, job, all) || [];
-  const glass = got.filter(e => e.id === I("glass")).reduce((a, e) => a + e.n, 0);
+  const glass = got.filter(e => e.id === I("glass")).reduce((a, e) => a + e.n, 0), back = got.filter(e => e.id === SAND()).reduce((a, e) => a + e.n, 0);
   const S = st(m); S.made = S.made || { glass: 0, panes: 0, bottles: 0 }; S.made.glass += glass;
-  log("collect", { glass, loaded: job.loaded || 0, all: !!all });
+  log("collect", { glass, loaded: job.loaded || 0, all: !!all, back });
   if (glass > 0) vlog(m, "furnace", "smelted " + glass + " glass from sand in the furnace at " + pk(job.furnace.x, job.furnace.y, job.furnace.z), job.furnace);
 }
 function estimate(m, job) {
   const VS = BF.villageSim;
   const to = job.kind === "dig" ? [job.spots[0].x + 0.5, job.spots[0].z + 0.5] : job.kind === "smelt" ? [job.furnace.x + 0.5, job.furnace.z + 0.5]
     : job.kind === "craft" ? (job.at ? [job.at.x + 0.5, job.at.z + 0.5] : null) : job.other && job.other.position ? [job.other.position.x, job.other.position.z] : null;
-  const walk = to ? VS.walkSecs(m, [to]) : 0;
+  const walk = to && VS && VS.walkSecs ? VS.walkSecs(m, [to]) : 0;
   const work = job.kind === "dig" ? job.spots.length * (DIG_T + 1) : job.kind === "smelt" ? TRADE_PAUSE + FU().COOK * job.n : job.kind === "craft" ? CRAFT_T : TRADE_PAUSE;
   return walk + work;
 }
@@ -276,6 +276,10 @@ function ai(m, dt, out, cont) {
     if (S.cd > now()) return false;
     const job = nextJob(m);
     if (!job) { S.cd = now() + 0.02; return false; }
+    // only work that ends before the working day does: a smelt takes fewer sand, anything else waits for tomorrow
+    const left = (WORK_END - t) * DAY_SECS;
+    if (job.kind === "smelt" && estimate(m, job) > left) job.n = Math.floor((left - (estimate(m, job) - FU().COOK * job.n)) / FU().COOK);
+    if ((job.kind === "smelt" && job.n < 1) || estimate(m, job) > left) { S.cd = now() + 0.02; return false; }
     const VS = BF.villageSim;
     if (VS && VS.begin && !VS.begin(m, estimate(m, job), label(job))) return false;
     S.job = job; S.stage = "walk"; S.walkT = 0; S.navFail = 0; S.gx = null; S.si = 0; a.route = null;
