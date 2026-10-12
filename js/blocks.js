@@ -339,6 +339,11 @@ const BLOCK_DEFS = [
   // glass kiln: the glassmaker villager's jobsite (not vanilla): a squat stone kiln with a glowing glass-melt mouth and a chimney top
   { name: "glass_kiln", jobsite: "glassmaker", tiles: { top: "glass_kiln_top", side: "glass_kiln_side", front: "glass_kiln_front", bottom: "glass_kiln_bottom" }, hardness: 3.5, tool: "pickaxe", needsTool: true, creativeTab: "functional", color: "#7a7a80" },
   // ---- end glassmaker pack ----
+  // ---- pig farmer pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Pig farmers")
+  // feed trough: the pig farmer villager's jobsite (not vanilla): a low plank trough of carrots, potatoes and beetroot, beside the sty gate
+  { name: "feed_trough", jobsite: "pig_farmer", tiles: { top: "feed_trough_top", side: "feed_trough_side", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional",
+    render: "model", model: "shape", opaque: false, boxes: [[1, 0, 2, 15, 9, 14]], box: [1, 0, 2, 15, 9, 14], color: "#9a7240" },
+  // ---- end pig farmer pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);

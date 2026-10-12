@@ -35,6 +35,7 @@ const BF = (window.BF = window.BF || {});
   if (I.tent !== undefined) addShaped(I.tent, 1, ["WWW", "WWW", "S S"], { W: WOOL, S: I.stick }, "6 Wool (any colour) over 2 Sticks → Tent");
   if (I.nesting_box !== undefined && I.hay_bale !== undefined) addShaped(I.nesting_box, 1, [" P ", "PHP", " P "], { P: PLANKS, H: I.hay_bale }, "4 Planks around 1 Hay Bale → Nesting Box (poultry keeper)");
   if (I.milk_churn !== undefined) addShaped(I.milk_churn, 1, ["P P", "PIP"], { P: PLANKS, I: I.iron_ingot }, "4 Planks around 1 Iron Ingot (a U) → Milk Churn (cowherd)");
+  if (I.feed_trough !== undefined) addShaped(I.feed_trough, 1, ["P P", "P P", "PPP"], { P: PLANKS }, "7 Planks in a deep U → Feed Trough (pig farmer)");
   fuel(ids(["composter", "lectern", "barrel", "loom", "fletching_table", "smithing_table", "cartography_table", "drafting_table", "survey_table", "carpentry_bench", "merchant_counter", "nesting_box"]), 15);
 });
 })();

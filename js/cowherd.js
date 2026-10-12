@@ -1,4 +1,5 @@
-// Cows and the cowherd (BF.cowherd). Loaded after js/poultry.js; hooks live in mobs.js, villagelife.js, jobs.js, trading.js, worldgen.js,
+// Cows and the cowherd (BF.cowherd). Loaded after js/poultry.js and js/herd.js (breeding, crowding, calf growth and leading home are shared
+// with js/pigfarmer.js there); hooks live in mobs.js, villagelife.js, jobs.js, trading.js, worldgen.js,
 // blueprints.js / builder.js, inventory.js and player.js. See CONTRACT.md "Cowherds (js/cowherd.js)".
 //
 // Cows (every cow, wild or in a pasture; state in `m.cow`):
@@ -24,7 +25,6 @@ const FEED_DAYS = 1;          // a cow is willing to breed for this long after e
 const BREED_CD = 1;           // days before a cow that bred can breed again
 const CALF_DAYS = 3;          // days from birth to adult
 const MATE_R = 10, MEET = 2;  // a willing cow looks for a mate this far; they breed when this close
-const LOCAL_MAX = 24;         // no breeding when this many cows are already within 16 blocks
 const DENSITY = 8;            // one cow per this many pasture cells
 const MIN_ADULTS = 2;         // the cowherd never culls below this many adults
 const STOCK_TO = 2;           // the cowherd fetches wild cows until its pasture holds this many
@@ -59,9 +59,7 @@ const log = (kind, data) => { LOG.push(Object.assign({ kind, day: +now().toFixed
 const vlog = (m, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, "cattle", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Cowherd") + " (Cowherd) " + text, m); };
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 
-let ids = 0;
-const idOf = new WeakMap();
-const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };
+const H = () => BF.herd;   // shared herding helpers (js/herd.js)
 
 // ---------------------------------------------------------------- cow state
 function stOf(m) {
@@ -76,7 +74,7 @@ const milkable = m => live(m) && m.type === "cow" && !isCalf(m) && !milkedToday(
 
 function syncLook(m) {
   const s = stOf(m), t = now();
-  const k = s.growAt != null ? clamp(1 - (s.growAt - t) / CALF_DAYS, 0, 1) : 1;
+  const k = H().growK(s.growAt, t, CALF_DAYS);
   m.calf = k < 1;
   if (m._k == null || Math.abs(k - m._k) > 0.02 || (k >= 1 && m._k < 1)) { m._k = k; if (BF.mobs.setCowSize) BF.mobs.setCowSize(m, k); }
 }
@@ -131,17 +129,7 @@ const playerWheat = () => {
 };
 
 // ---------------------------------------------------------------- breeding
-function findMate(m, t) {
-  let best = null, bd = MATE_R * MATE_R, near = 0;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "cow" || !live(o)) continue;
-    const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
-    if (d2 < 256) near++;
-    if (o === m || o.pasture !== m.pasture || !willing(o, t) || Math.abs(o.position.y - m.position.y) > 2) continue;
-    if (d2 < bd) { bd = d2; best = o; }
-  }
-  return near >= LOCAL_MAX ? null : best;
-}
+const findMate = (m, t) => H().findMate(m, t, willing, o => o.pasture || null, MATE_R);   // none while 24 cows stand within 16 blocks
 function breed(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const calf = BF.mobs.spawn("cow", x, y, z);
@@ -162,59 +150,19 @@ function breed(a, b, t) {
 }
 
 // ---------------------------------------------------------------- cow movement (mobs.js, before its wander AI): led home, tempted, or to a mate
-function follow(m, dt, out, tx, tz, stop, speed) {
-  const dx = tx - m.position.x, dz = tz - m.position.z, d = Math.hypot(dx, dz);
-  m.ai.mode = "idle"; m.ai.t = 1;
-  if (d < stop) { out.faceX = tx; out.faceZ = tz; return true; }
-  out.x = dx / d * speed; out.z = dz / d * speed;
-  return true;
-}
+const follow = (m, dt, out, tx, tz, stop, speed) => H().follow(m, dt, out, tx, tz, stop, speed);
+const MATING = { willing, find: findMate, breed, mateR: MATE_R, meet: MEET };
 function cowAI(m, dt, out) {
   const t = now(), sp = m.def.speed;
-  const L = m.ledBy;
-  if (L) {
-    const S = L.cwk, tk = S && S.task;
-    if (!live(L) || !tk || tk.mob !== m || tk.kind !== "fetch" || S.stage === "walk") { m.ledBy = null; }
-    else {
-      // walk the cowherd's trail (through the gate) instead of straight at it: crumbs are dropped every 0.6 blocks
-      const tr = S.trail, k0 = S.trailBase;
-      let ci = Math.max(m.crumb || 0, k0);
-      while (ci < k0 + tr.length - 1 && Math.hypot(tr[ci - k0][0] - m.position.x, tr[ci - k0][2] - m.position.z) < 0.8) ci++;
-      m.crumb = ci;
-      const dk = Math.hypot(L.position.x - m.position.x, L.position.z - m.position.z);
-      if (S.stage === "pen") {   // the cowherd waits outside with the gate open: in through the gate, then to the middle of the field
-        const P = tk.pasture, [gx, gz] = P.gate, inG = Math.abs(m.position.x - gx - 0.5) < 0.6 && Math.abs(m.position.z - gz - 0.5) < 0.6;
-        m.penIn = m.penIn || inG || inRoom(P, m.position);
-        return m.penIn ? follow(m, dt, out, (P.x0 + P.x1) / 2, (P.z0 + P.z1) / 2, 0.8, sp) : follow(m, dt, out, gx + 0.5, gz + 0.5, 0.2, sp);
-      }
-      m.penIn = false;
-      m.lookAt = L;
-      if (ci >= k0 + tr.length - 1 || dk < 2.6) return follow(m, dt, out, L.position.x, L.position.z, 1.8, sp * 1.2);
-      const c = tr[ci - k0];
-      return follow(m, dt, out, c[0], c[2], 0.25, sp * 1.25);
-    }
+  if (m.ledBy) {   // walk the cowherd's trail (through the gate) instead of straight at it (js/herd.js)
+    const S = live(m.ledBy) ? m.ledBy.cwk : null;
+    if (H().ledStep(m, dt, out, S, S && S.task && S.task.pasture, inRoom)) return true;
   }
   if (!m.pasture && BF.player && BF.player.position && !BF.player.dead && playerWheat()) {
     const p = BF.player.position, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);
     if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 2, sp); }
   }
-  if (!willing(m, t)) { m.mate = null; return false; }
-  m.mateT = (m.mateT || 0) - dt;
-  if (m.mate && (!live(m.mate) || !willing(m.mate, t))) m.mate = null;
-  if (!m.mate) {
-    if (m.mateT > 0) return false;
-    m.mateT = rnd(1, 2);
-    m.mate = findMate(m, t);
-    if (!m.mate) return false;
-    m.mateSeek = 0;
-  }
-  const o = m.mate, dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d = Math.hypot(dx, dz);
-  m.mateSeek += dt;
-  if (d > MATE_R + 4 || m.mateSeek > 30) { m.mate = null; m.mateT = rnd(6, 10); return false; }
-  m.ai.mode = "idle"; m.ai.t = 1; m.lookAt = o;
-  if (d < MEET) { if (mid(m) < mid(o)) breed(m, o, t); return true; }
-  out.x = dx / d * sp; out.z = dz / d * sp;
-  return true;
+  return H().mateStep(m, dt, out, t, MATING);
 }
 
 // ---------------------------------------------------------------- pastures
@@ -395,7 +343,7 @@ function tick(dt) {
   if (pastureT <= 0 && BF.world) { pastureT = 1; try { tickPastures(); } catch (e) { console.error(e); } }
   if (acc < 0.5 || !BF.mobs) return;
   acc = 0;
-  if (toShut.length) shutGates();
+  if (H().toShut.length) H().shutGates();
   const t = now();
   for (const m of BF.mobs.list) {
     if (m.type !== "cow" || !live(m)) continue;
@@ -425,7 +373,7 @@ function importAll(o) {
   if (!o || typeof o !== "object") return;
   for (const k in o) if (k.slice(0, 9) === "pastures:" && Array.isArray(o[k])) pending.set(k.slice(9), o[k].filter(e => e && e.i != null && Array.isArray(e.c)));
 }
-function reset() { pending = new Map(); activePastures.length = 0; toShut.length = 0; acc = 0; pastureT = 0; LOG.length = 0; }
+function reset() { pending = new Map(); activePastures.length = 0; H().reset(); acc = 0; pastureT = 0; LOG.length = 0; }
 
 // ---------------------------------------------------------------- the hire kit
 // 1 bucket and 30 glass bottles, once per villager (`cowKit`, saved by trading.js pack), when it first becomes a cowherd: at village generation
@@ -552,21 +500,11 @@ function endTask(m, ok) {
   const S = cwk(m), tk = S.task;
   if (tk && !ok && tk.mob) S.avoid.set(tk.mob, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
   if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
-  if (S.gateHeld) { toShut.push({ at: S.gateHeld, m, t: BF.simNow() }); S.gateHeld = null; shutGates(); }
+  H().releaseGate(m, S);
   S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;
   vdone(m);
 }
 const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
-// Gates a cowherd held open for a cow are shut as soon as nothing stands in them (and the cowherd is out of the way); checked from tick().
-const toShut = [];
-function shutGates() {
-  for (let i = toShut.length - 1; i >= 0; i--) {
-    const g = toShut[i], [x, y, z] = g.at, bk = BF.world.isLoaded(x, z) ? BF.blocks[BF.world.getBlock(x, y, z)] : null;
-    if (!bk || !bk.gate || !bk.gate.open || BF.simNow() - g.t > 120) { toShut.splice(i, 1); continue; }
-    if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || (live(g.m) && Math.hypot(x + 0.5 - g.m.position.x, z + 0.5 - g.m.position.z) < 1.5)) continue;
-    BF.world.setGate(x, y, z, false); toShut.splice(i, 1);
-  }
-}
 function loot(m, id, n, where) {
   if (id == null || n <= 0) return 0;
   const left = TR().inv.add(m.inv, id, n);
@@ -642,44 +580,18 @@ function leave(m, S, dt, out) {
   return false;
 }
 // Leading a wild cow home: to the path in front of the gate, then into the middle of the field. The cow walks the cowherd's trail (cowAI); the
-// cowherd waits when it falls behind and holds the gate open until it is in.
+// cowherd waits when it falls behind and holds the gate open until it is in (js/herd.js lead).
 function lead(m, S, tk, dt, out) {
-  const o = tk.mob, P = tk.pasture, p = m.position;
-  const dk = Math.hypot(o.position.x - p.x, o.position.z - p.z);
-  S.lostT = dk > 16 ? (S.lostT || 0) + dt : 0;
-  if (S.lostT > 10 || S.t > LEAD_MAX) { log("leadFailed", { why: S.lostT > 10 ? "lost" : "slow", d: +dk.toFixed(1) }); endTask(m, false); return false; }
-  if (o.pasture === P) {
-    log("stocked", { pasture: P.key, herd: P.cows.length });
-    vlog(m, "brought a wild cow into the pasture (" + plural(P.cows.length, "cow") + ")");
-    endTask(m, true); S.cd = rnd(0.5, 1);
-    return false;
-  }
-  const last = S.trail[S.trail.length - 1];
-  if (!last || Math.hypot(last[0] - p.x, last[2] - p.z) > 0.6) { S.trail.push([p.x, p.y, p.z]); if (S.trail.length > 60) { S.trail.shift(); S.trailBase++; } }
-  if (P.gate) {   // hold the gate open while the cow is on its way in
-    const [gx, gz] = P.gate, gy = P.y + 1, bk = BF.blocks[BF.world.getBlock(gx, gy, gz)];
-    if (bk && bk.gate && Math.hypot(gx + 0.5 - p.x, gz + 0.5 - p.z) < 3) { if (!bk.gate.open) BF.world.setGate(gx, gy, gz, true); S.gateHeld = [gx, gy, gz]; }
-    if (bk && bk.gate && bk.gate.open) {   // not shut behind it: by its own walking (mobs.js villagerDoors) or an earlier fetch's pending close
-      S.gateHeld = [gx, gy, gz];
-      if (m.ai.doors) m.ai.doors = m.ai.doors.filter(([x, y, z]) => !(x === gx && y === gy && z === gz));
-      for (let i = toShut.length - 1; i >= 0; i--) { const a = toShut[i].at; if (a[0] === gx && a[1] === gy && a[2] === gz) toShut.splice(i, 1); }
-    }
-  }
-  if (S.stage === "pen") {   // at the gate: the cow walks in by itself (cowAI) while the cowherd holds the gate open
-    m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
-    if ((S.inT = (S.inT || 0) + dt) > 20) { S.stage = "lead"; S.inT = 0; S.trail = [[p.x, p.y, p.z]]; S.trailBase = 0; o.crumb = 0; }   // it wandered off: lead it back to the gate
-    return true;
-  }
-  if (dk > 5.5) {   // wait for it; if it doesn't come (caught behind something), go back for it and start the trail again from there
-    m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
-    if ((S.waitT = (S.waitT || 0) + dt) > 8) { S.waitT = 0; S.stage = "walk"; S.gx = null; o.ledBy = null; }
-    return true;
-  }
-  S.waitT = 0;
-  const st = BF.villageLife.travel(m, S, dt, out, P.out[0], P.y + 1, P.out[1], m.def.speed * 0.8);
-  if (st === "arrived") { m.ai.route = null; if (dk < 3.2) { S.stage = "pen"; S.inT = 0; } else { out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; } }
-  else if (st === "failed") { log("leadFailed", { why: "nopath" }); endTask(m, false); return false; }
-  return true;
+  const P = tk.pasture;
+  return H().lead(m, S, tk, dt, out, {
+    pen: P, max: LEAD_MAX, penned: o => o.pasture === P,
+    arrived: () => {
+      log("stocked", { pasture: P.key, herd: P.cows.length });
+      vlog(m, "brought a wild cow into the pasture (" + plural(P.cows.length, "cow") + ")");
+      endTask(m, true); S.cd = rnd(0.5, 1);
+    },
+    failed: (why, d) => { log("leadFailed", why === "nopath" ? { why } : { why, d: +d.toFixed(1) }); endTask(m, false); },
+  });
 }
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.tradingWith || !BF.mobs.nav || !BF.villageLife || m.sleeping) return false;
@@ -718,7 +630,7 @@ function ai(m, dt, out) {
   const close = d <= (tk.kind === "bottle" ? 2.2 : 2.3) && Math.abs(at.y - m.position.y) < 1.6;
   if (S.stage === "walk") {
     if (close) {
-      if (tk.kind === "fetch") { S.stage = "lead"; tk.mob.ledBy = m; tk.mob.crumb = 0; S.trail = [[m.position.x, m.position.y, m.position.z]]; S.trailBase = 0; ai.route = null; return true; }
+      if (tk.kind === "fetch") { H().startLead(m, S, tk); return true; }
       S.stage = "act"; S.actT = ACT[tk.kind]; ai.route = null; ai.swingT = 0.35; return true;
     }
     const g = { x: Math.floor(at.x), y: Math.floor(at.y + 0.01), z: Math.floor(at.z) };

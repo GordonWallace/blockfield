@@ -136,10 +136,14 @@ let GEN = 1, SC = 1;
 // 7 = as 6, and windows are glass panes instead of glass blocks; a village with natural sand within 64 blocks (sandNear) starts with a glassmaker,
 //     a glass kiln and a furnace 80% of the time (js/glassmaker.js, js/mobs.js villageRoster, js/jobs.js planVillage). Worlds saved with 6 keep 6:
 //     their buildings keep their glass blocks (builders build panes everywhere: recordBuilding).
+// 8 = as 7, and a village of 10 or more villagers on grass gets a pig farmer 60% of the time (js/mobs.js villageRoster, drawn from the village
+//     key), with a 7x8 sty added after every other plot (so nothing else moves) and its feed trough beside the gate (js/pigfarmer.js,
+//     js/jobs.js planVillage). Worlds saved with 7 keep 7: no sties appear in them.
 let VGEN = 1;
 let REC = false;          // recordBuilding is running (builders' blueprints): windows are panes whatever the world's village generator
 const winB = () => (VGEN >= 7 || REC ? BF.B.glass_pane : BF.B.glass);
 const BAKER_POP = 15;     // village generator 6: a baker per this many villagers (js/mobs.js villageRoster reads BF.worldgen.BAKER_POP)
+const PIG_POP = 10;       // village generator 8: villages of this many villagers on grass may get a pig farmer and a sty (js/mobs.js villageRoster reads BF.worldgen.PIG_POP)
 const COWHERD_POP = 10;   // village generator 5: villages of this many villagers on grass get a cowherd and a pasture (js/mobs.js villageRoster reads BF.worldgen.COWHERD_POP)
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
@@ -836,7 +840,7 @@ function villageAt(x, z, m) {
 
 const BTYPES = {
   house: [5, 5], house2: [5, 6], lhouse: [7, 7], big: [7, 7], library: [9, 7], church: [5, 10],
-  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11], coop: [7, 7], pasture: [11, 9],
+  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11], coop: [7, 7], pasture: [11, 9], sty: [7, 8],
 };
 const LIVABLE = { house: 1, house2: 1, lhouse: 1, big: 1, library: 1, church: 1, smith: 1 };
 // Beds of a building in its local coords (u along the road, q inward): [footU, footQ, axis the head lies along (+1)].
@@ -1176,6 +1180,39 @@ function layoutVillage(cx, cz, spawn, pop) {
     }
   }
 
+  // Sty (village generator 8): a village of PIG_POP (10) or more villagers on grass whose roster drew a pig farmer (js/mobs.js villageRoster, 60%)
+  // gets a fenced sty with the feed trough beside its gate (js/jobs.js planVillage, js/pigfarmer.js). Added last, after the pasture, so no other plot moves.
+  let pigs = 0;
+  if (VGEN >= 8 && (v.pop || 0) >= PIG_POP && v.ground === 0 && BF.jobs && BF.jobs.pigFarmerCount) { try { pigs = BF.jobs.pigFarmerCount(v); } catch (e) { pigs = 0; } }
+  if (pigs > 0) {
+    const [w, d] = BTYPES.sty;
+    const trySty = (road, side, t, back) => {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side, and the row in front of the fence: the trough stands beside the gate
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      if (!(Math.abs(box[0] - cx) < 80 && Math.abs(box[2] - cx) < 80 && Math.abs(box[1] - cz) < 80 && Math.abs(box[3] - cz) < 80) || overlaps(box) || covers(box, 1)) return false;
+      const du = w >> 1, door = P(du, 0), front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u++) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "sty", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 661) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    const passes = [[3, 0], [3, 1], [12, 0], [21, 0], [30, 1]];
+    found: for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 2, t1 = beyond ? road.end + 24 : road.end + 1 - w;
+      for (let t = t0; t <= t1; t += 2) if (trySty(road, side, t, back)) break found;
+    }
+  }
+
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
   for (const road of roads) {
@@ -1442,6 +1479,21 @@ function drawShell(b, P, S, style) {
       if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
       P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale);
       for (let u = w - 5; u <= w - 2; u++) P(u, y, d - 2, B.water);
+      P(du, y, -1, B.dirt_path);
+      return;
+    }
+    case "sty": {
+      // pig sty (js/pigfarmer.js): a fenced pen with a gate facing the road, a muddy coarse-dirt corner by the gate, a sunken water trough in
+      // the back row and a small plank-roofed shelter over the back corner; the feed trough beside the gate is the jobs plan's
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
+        if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
+        else if (!edge) P(u, y, q, (u <= 2 && q <= 2 && !(u === 2 && q === 2)) || (u === 1 && q === 3) ? B.coarse_dirt : v_ground(style));
+      }
+      if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
+      P(1, y, d - 2, B.water); P(2, y, d - 2, B.water);
+      for (const [u, q] of [[w - 1, d - 3], [w - 3, d - 1], [w - 1, d - 1]]) P(u, y + 2, q, B.oak_fence);   // the shelter's posts (on the fence; none in the pen)
+      for (let q = d - 3; q < d; q++) for (let u = w - 3; u < w; u++) P(u, y + 3, q, B.planks);
       P(du, y, -1, B.dirt_path);
       return;
     }
@@ -2389,6 +2441,7 @@ const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: 
 BF.worldgen = {
   COWHERD_POP,
   BAKER_POP,
+  PIG_POP,
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
