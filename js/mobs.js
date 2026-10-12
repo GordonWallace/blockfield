@@ -2006,7 +2006,7 @@ function pickHostileType() {
 // chunk count (a surface try per chunk every SURFACE_EVERY s while the sky is dark, a cave try per chunk every CAVE_EVERY s) and spreads them
 // over random loaded chunks. Only the spot decides (darkness, block light 7 or less, open sky or cave cover, the dark-long-enough rule);
 // js/wildlife.js adds the density cap of the spot's area and the buffer around the player, villagers and golems.
-const SURFACE_EVERY = 8, CAVE_EVERY = 8, MAX_TRIES = 64;
+const SURFACE_EVERY = 16, CAVE_EVERY = 16, MAX_TRIES = 64;   // halved from 8 s (Gordon, 2026-10-12: simulation speed)
 let surfAcc = 0, caveAcc = 0, chunkArr = [], chunkArrT = 0;
 function spawnMonsters(dt) {
   if (!playerAlive()) return;
