@@ -645,8 +645,10 @@ function cookAI(m, dt, out, cont) {
     const deal = nextTrip(m);
     if (!deal) { S.cd = now() + 0.03; return false; }
     const VS = BF.villageSim, o = deal.kind === "cook" ? deal.furnace : deal.other && deal.other.position;   // estimate: walk there, the pause, and (cooking) the furnace time
-    if (VS && VS.begin && o && !VS.begin(m, VS.walkSecs(m, [[o.x + (deal.kind === "cook" ? 0.5 : 0), o.z + (deal.kind === "cook" ? 0.5 : 0)]]) + TRADE_PAUSE + (deal.kind === "cook" ? FU().COOK * Math.min(deal.n || 1, 16) : 0), deal.kind === "cook" ? "Cooking pork" : "Buying fuel to cook pork")) return false;
+    const walk = VS && VS.walkSecs && o ? VS.walkSecs(m, [[o.x + (deal.kind === "cook" ? 0.5 : 0), o.z + (deal.kind === "cook" ? 0.5 : 0)]]) : 0;
+    if (VS && VS.begin && o && !VS.begin(m, walk + TRADE_PAUSE + (deal.kind === "cook" ? FU().COOK * Math.min(deal.n || 1, 16) : 0), deal.kind === "cook" ? "Cooking pork" : "Buying fuel to cook pork")) return false;
     S.deal = deal; S.stage = "walk"; S.walkT = 0; S.navFail = 0; S.gx = null; a.route = null;
+    S.walkMax = Math.max(deal.kind === "cook" ? 90 : 60, walk * 2 || 0);   // a big village: from its far side the walk takes longer than the usual limit
   }
   const deal = S.deal;
   const giveUp = (why, key) => {
@@ -661,7 +663,7 @@ function cookAI(m, dt, out, cont) {
     const s = deal.furnace, fkey = "f:" + F.pk(s.x, s.y, s.z), near = F.beside(s);
     const go = () => F.travel(m, S, dt, out, s.x, s.y, s.z, m.def.speed * 1.2, near, "pork");
     if (S.stage === "walk") {
-      if (S.walkT > 90) return giveUp("timeout", fkey);
+      if (S.walkT > (S.walkMax || 90)) return giveUp("timeout", fkey);
       if (!F.usable(m, s, deal.rawId, deal.outId)) return giveUp("furnace busy", fkey);
       const st = go();
       if (st === "failed") return giveUp("no path", fkey);
@@ -695,7 +697,7 @@ function cookAI(m, dt, out, cont) {
   if (!F.canSell(m, v2)) return giveUp(v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone", key);
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   if (S.stage === "walk") {
-    if (S.walkT > 60) return giveUp("timeout", key);
+    if (S.walkT > (S.walkMax || 60)) return giveUp("timeout", key);
     if (d <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) { S.stage = "trade"; S.tt = TRADE_PAUSE; a.route = null; return true; }
     const g = { x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z) };
     if (S.gx == null || Math.hypot(S.gx - g.x, S.gz - g.z) > 3) { if (a.routeKind === "pork") a.route = null; S.gx = g.x; S.gz = g.z; }

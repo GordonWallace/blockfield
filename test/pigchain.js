@@ -114,6 +114,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     R.end = window.__total();
     R.pfEnd = { feed: BF.pigFarmer.feedHeld(pf), fuel: window.__fuel(pf), alive: !pf.dead, inv: pf.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' ') };
     const FU = BF.furnaceUse, VR = BF.mobs.villages.get(R.key);
+    R.dead = (VR.deadInfo || []).map(d => [d.prof, d.cause, d.day]);   // who died in the village, and of what
     R.furnaces = [...FU.furnaces.values()].filter(f => Math.hypot(f.x + 0.5 - VR.x, f.z + 0.5 - VR.z) <= FU.reachOf(VR) + 8).length;
     R.sty = P ? { pigs: P.pigs.length, piglets: P.pigs.filter(c => c.growAt != null).length, limit: P.limit, culls: P.culls } : null;
     R.events = BF.pigFarmer.log.filter(e => e.kind === 'bred' || e.kind === 'culled' || e.kind === 'stocked' || e.kind === 'joined' || e.kind === 'left').map(e => e.kind[0] + (e.herd != null ? e.herd : '') + '@' + e.day.toFixed(2)).join(' ');
@@ -144,7 +145,8 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   console.log('pig farmer', JSON.stringify(R.pfStart), '->', JSON.stringify(R.pfEnd));
   console.log('holders', JSON.stringify(R.holders));
   console.log('herd events (b = bred, c = culled, s = stocked, j = walked in, l = got out; herd size after)', R.events);
-  ok('the pig farmer stayed alive', R.pfEnd.alive);
+  if (R.dead.length) console.log('died', JSON.stringify(R.dead));
+  ok('the pig farmer stayed alive', R.pfEnd.alive, R.dead.filter(d => d[0] === 'pig_farmer'));
   ok('the herd grew: piglets were born', piglets > 0 && Math.max(...sizes) > start, { start, max: Math.max(...sizes), piglets });
   ok('the herd reached the sty limit', firstFull >= 0, { limit: lim, max: Math.max(...sizes) });
   const bredOver = R.lines.map(l => /A piglet was born in the sty \((\d+) pigs?\)/.exec(l[2])).filter(Boolean).map(m => +m[1]).filter(n => n > lim + 1);

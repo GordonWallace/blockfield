@@ -1038,7 +1038,8 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
   culls adults while the herd is over the limit and more than 2 adults (`MIN_ADULTS`) remain, keeping 1-3 `raw_porkchop` (looted itself: a cull by a villager drops nothing); while its sty holds fewer than 2 pigs
   (`STOCK_TO`) it leads the nearest wild adult within 96 blocks (`FIND_R`) home with feed in hand (js/herd.js `lead`; none in range: tomorrow, `noWild`). With no task it walks out through the gate.
   It cooks the raw porkchops beyond `PORK_KEEP` (6) into cooked porkchops while it holds fewer than 24, in a real furnace of its village with fuel it holds or buys (js/furnaceuse.js; state `m.pgc`, route kind
-  `pork`, `busyWhen` stage `cook`, `forceStop` on a forced unload); never instantly, never without a furnace.
+  `pork`, `busyWhen` stage `cook`, `forceStop` on a forced unload); never instantly, never without a furnace. A walk to the furnace or a fuel seller
+  gives up after 90 s (60 s to a seller) or twice `villageSim.walkSecs` to it, whichever is longer (from the far side of a big village).
 - **Nothing from nothing.** `PRODUCE.pig_farmer = []`; its porkchops are never in its starting pack or restocked. A generated pig farmer starts with 6-10 carrots, 4-8 potatoes and emeralds (`BF.pigFarmer.seed`);
   one hired later gets an emerald for its first feed (`HIRE_NEEDS`, `hireKit`) and nothing else. Feed: through any villager's offer for carrots, potatoes or beetroot (farmers first; villagelife.js `shopAI` ->
   `findWheatSeller` over `shopItems`; `feedWanted`: below a feed per adult + 2 it tops up to 2 per adult + 4). **Reserve** (`BF.pigFarmer.reserve` in `market.reserve`): all its feed, and up to 16 of the fuel it holds (bought to cook pork, so not sold on as spare goods); it never eats its feed or raw
