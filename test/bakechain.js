@@ -4,7 +4,8 @@
 //    its bakes used (3 milk, 2 sugar, 1 egg, 3 wheat a cake; 1 pumpkin, 1 sugar, 1 egg a pie) never exceeds that;
 //  - nothing from nothing: the daily restock never gives anyone cakes, slices, pies, sugar, milk, bottles, buckets, eggs, wheat, pumpkins or cane;
 //    the village's treats never exceed the start plus what the ovens baked (a cake is 7 slices); its glass bottles (empty and full) never exceed
-//    the start plus 30 per cowherd hire kit; the baker never holds a bucket;
+//    the start plus 30 per cowherd hire kit, the beekeeper kits given during the run and the bottles a glassmaker made from sand; the baker
+//    never holds a bucket;
 //  - the farmer grows sugar cane beside its beds' water, the baker buys milk from the cowherd, villagers buy treats (the happiness term counts).
 // Usage: NODE_PATH=$(npm root -g) node test/bakechain.js [days=14] [seed=1]
 const path = require('path');
@@ -92,6 +93,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     const R = window.__rec, bk = window.__baker();
     R.lines.length = 0; R.restock.length = 0; R.trades.length = 0; R.baked = { cake: 0, pie: 0 }; R.kits = 0; R.soldTreats = 0;
     R.start = window.__total();
+    R.beeKit0 = new Set(window.__villagers().filter(m => m.beeKit));   // beekeepers' kits (js/beekeeper.js) given before the run
     R.bakerStart = {};
     for (const n of ['milk_bottle', 'sugar', 'sugar_cane', 'egg', 'wheat_item', 'pumpkin']) R.bakerStart[n] = window.__count(bk, n);
     R.bk = bk;
@@ -116,6 +118,9 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   const R = await pg.evaluate(() => {
     const R = window.__rec, bk = R.bk;
     R.end = window.__total();
+    R.beeKits = window.__villagers().filter(m => m.beeKit && !R.beeKit0.has(m)).length;   // ... and during it
+    R.beeKitBottles = BF.beekeeper ? BF.beekeeper.KIT_BOTTLES : 0;
+    delete R.beeKit0;
     R.bakerEnd = { alive: !bk.dead, inv: bk.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' '), holdings: BF.baker.holdings(bk) };
     R.log = Object.entries(BF.baker.log.reduce((a, e) => (a[e.kind] = (a[e.kind] || 0) + 1, a), {})).map(([k, n]) => k + ':' + n).join(' ');
     R.holders = {};
@@ -151,7 +156,9 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   ok('the restock created none of the watched items', R.restock.length === 0, R.restock.slice(0, 5));
   ok('no slices or cakes from nothing (a baked cake is 7 slices)', R.end.cake_slice + 7 * R.end.cake <= R.start.cake_slice + 7 * R.start.cake + 7 * cakes, [R.start.cake_slice + 7 * R.start.cake, cakes, R.end.cake_slice + 7 * R.end.cake]);
   ok('no pies from nothing', R.end.pumpkin_pie <= R.start.pumpkin_pie + pies, [R.start.pumpkin_pie, pies, R.end.pumpkin_pie]);
-  ok('no glass bottles from nothing (only hire kits)', R.end.glass_bottle + R.end.milk_bottle <= R.start.glass_bottle + R.start.milk_bottle + 30 * R.kits, [R.start.glass_bottle + R.start.milk_bottle, R.kits, R.end.glass_bottle + R.end.milk_bottle]);
+  const glassMade = R.lines.reduce((n, l) => { const m = /made (\d+) glass bottles? at the glass kiln/.exec(l[2]); return n + (m ? +m[1] : 0); }, 0);   // a village glassmaker makes them from sand (js/glassmaker.js)
+  ok('no glass bottles from nothing (only hire kits and the glassmaker)', R.end.glass_bottle + R.end.milk_bottle <= R.start.glass_bottle + R.start.milk_bottle + 30 * R.kits + R.beeKitBottles * R.beeKits + glassMade,
+    [R.start.glass_bottle + R.start.milk_bottle, R.kits, R.beeKits, glassMade, R.end.glass_bottle + R.end.milk_bottle]);
   const bucketsMade = sum(/\(Toolsmith\) made Bucket/), bucketsIn = traded(x => x[2] === 'bucket' && !x[4]);   // the toolsmith makes them from iron; a merchant may bring some
   ok('no buckets from nothing (start + kits + made by the toolsmith + brought from other villages)', R.end.bucket + R.end.milk_bucket <= R.start.bucket + R.start.milk_bucket + R.kits + bucketsMade + bucketsIn,
     [R.start.bucket + R.start.milk_bucket, R.kits, bucketsMade, bucketsIn, R.end.bucket + R.end.milk_bucket]);
