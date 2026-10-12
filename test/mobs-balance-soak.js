@@ -66,7 +66,7 @@ const RUN = 3;   // days each group of villages runs
     const live = m => !m.dead && !m.removed;
     window.__animals = keys => { const o = {}; for (const k of keys) { const v = window.__vs.get(k); let n = 0; for (const m of BF.mobs.list) if (live(m) && !m.hostile && m.type !== 'horse' && BF.mobs.isWild(m) && Math.hypot(m.position.x - v.x, m.position.z - v.z) <= 128) n++; o[k] = n; } return o; };
     window.__pops = keys => { const o = {}; for (const k of keys) { let n = 0, kp = 0; for (const m of BF.mobs.list) if (live(m) && m.type === 'villager' && m.village && m.village.key === k) { n++; if (/^(cowherd|poultry_keeper|stable_hand)$/.test(m.profession)) kp++; } o[k] = [n, kp]; } return o; };
-    // a pin with no merchant trip on it is dropped a game day after it was first seen (js/merchant.js), so the group is pinned again daily
+    // a pin with no merchant trip on it is dropped a game day after it was first seen (js/merchant.js), so the group is pinned again often
     window.__pin = (g, d) => {
       const V = R.groups[g].map(k => window.__vs.get(k));
       for (const id of [...BF.villageSim.pins().keys()]) BF.villageSim.unpin(id);
@@ -94,8 +94,10 @@ const RUN = 3;   // days each group of villages runs
     const run = { g, keys: ks, sim: st.sim, animals0: await pg.evaluate(k => window.__animals(k), ks), pops: [await pg.evaluate(k => window.__pops(k), ks)] };
     const d0 = await pg.evaluate(() => BF.sky.day);
     for (let d = 0; d < days; d++) {
-      if (d) await pg.evaluate(([g, d]) => window.__pin(g, d), [g, d]);
-      for (let s = 0; s < DAY; s += PER_CALL) await pg.evaluate(([n, h]) => window.__step(n, h), [PER_CALL, h]);
+      for (let s = 0; s < DAY; s += PER_CALL) {
+        await pg.evaluate(([g, k]) => window.__pin(g, k), [g, d + '-' + s]);   // pinned again every eighth of a day, well inside the one-day limit
+        await pg.evaluate(([n, h]) => window.__step(n, h), [PER_CALL, h]);
+      }
       run.pops.push(await pg.evaluate(k => window.__pops(k), ks));
     }
     run.animals1 = await pg.evaluate(k => window.__animals(k), ks);
