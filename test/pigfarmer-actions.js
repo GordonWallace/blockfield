@@ -136,10 +136,10 @@ module.exports = async (pg, out) => {
       const dd = BF.sky.day; BF.sky.day = dd + PF.PIGLET_DAYS + 1; run(1); const grown = piglet.pig.growAt == null && !piglet.piglet && piglet.model.scale.x > 0.95; BF.sky.day = dd;
       ok("and is an adult after 3 days", grown, piglet.model.scale.x);
     }
-    // the crowding rule: no breeding with 24 pigs within 16 blocks
+    // the crowding rule: no breeding with 24 pigs within 16 blocks (30 placed: a few wander off during the run)
     {
       const crowd = [];
-      for (let i = 0; i < 26; i++) crowd.push(wildAt(flat[0] + (i % 5) - 2, flat[1] + Math.floor(i / 5) - 2));
+      for (let i = 0; i < 30; i++) crowd.push(wildAt(flat[0] + (i % 5) - 2, flat[1] + Math.floor(i / 5) - 2));
       for (const m of [wa, wb]) { m.pig.cd = 0; PF.feed(m, "test"); }
       let crowdBorn = 0;
       const cb = () => crowdBorn++;
@@ -300,6 +300,7 @@ module.exports = async (pg, out) => {
       for (const n of ["raw_porkchop", "cooked_porkchop", "coal", "charcoal"]) T.inv.remove(pf.inv, I[n], c(n));
       { const FU0 = BF.furnaceUse; for (let i = 0; i < pf.inv.length; i++) { const st = pf.inv[i]; if (st && (FU0.isCoal(st.id) || FU0.isLog(st.id) || FU0.isPlanks(st.id))) pf.inv[i] = null; } }   // no fuel of its own at all
       T.inv.add(pf.inv, I.oak_log, 8);
+      delete pf._res;   // the market reserve is cached per game tick (js/market.js reserve): one taken this tick, before the logs, would miss them
       ok("fuel it holds is kept to cook with, not sold on as spare goods", BF.market.spareOf(pf, I.oak_log) === 0, BF.market.spareOf(pf, I.oak_log));
       T.inv.remove(pf.inv, I.oak_log, 8);
       T.inv.add(pf.inv, I.raw_porkchop, 14);
