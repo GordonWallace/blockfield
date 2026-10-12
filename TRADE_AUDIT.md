@@ -447,7 +447,7 @@ New profession (see CONTRACT.md "Bakers"). It sells what it bakes in its oven fr
 
 New profession (see CONTRACT.md "Pig farmers"). It sells what its sty gives: raw porkchops from the pigs it culls and porkchops it cooks from them in a real furnace with
 fuel it bought. Nothing is restocked (`PRODUCE.pig_farmer = []`) and no pork is in its starting pack (a generated one starts with a few carrots and potatoes and emeralds;
-one hired later with an emerald for its first feed). It buys its feed (carrots, potatoes, beetroot) through the farmers' offers and keeps all of it (its reserve); it never sells pigs.
+one hired later with an emerald for its first feed). It buys its feed (carrots, potatoes, beetroot) through the farmers' offers and keeps all of it (its reserve), as it keeps up to 16 of the fuel it bought to cook pork; it never sells pigs.
 
 | Lvl | Offer | In | Out | rho | Kind |
 |---:|---|---:|---:|---:|---|

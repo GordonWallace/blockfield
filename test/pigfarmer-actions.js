@@ -295,6 +295,9 @@ module.exports = async (pg, out) => {
     if (fpos) {
       for (const n of ["raw_porkchop", "cooked_porkchop", "coal", "charcoal"]) T.inv.remove(pf.inv, I[n], c(n));
       { const FU0 = BF.furnaceUse; for (let i = 0; i < pf.inv.length; i++) { const st = pf.inv[i]; if (st && (FU0.isCoal(st.id) || FU0.isLog(st.id) || FU0.isPlanks(st.id))) pf.inv[i] = null; } }   // no fuel of its own at all
+      T.inv.add(pf.inv, I.oak_log, 8);
+      ok("fuel it holds is kept to cook with, not sold on as spare goods", BF.market.spareOf(pf, I.oak_log) === 0, BF.market.spareOf(pf, I.oak_log));
+      T.inv.remove(pf.inv, I.oak_log, 8);
       T.inv.add(pf.inv, I.raw_porkchop, 14);
       for (const b of vill().filter(m => m.profession === "butcher")) T.inv.add(b.inv, I.cooked_porkchop, 12);   // the butcher is stocked: it buys no raw pork meanwhile
       if (c("emerald") < 4) T.inv.add(pf.inv, I.emerald, 4 - c("emerald"));
@@ -309,6 +312,7 @@ module.exports = async (pg, out) => {
       if (miner) { T.inv.add(miner.inv, I.coal, 16); T.syncFeed(miner); }
       pf.pgc = null;
       let loadedAt = -1, bought = 0, rawSold = 0;
+      const ctrace = [];   // where it walked, for a failure report
       const oTrade = BF.vlog.trade;
       BF.vlog.trade = function (buyer, seller, o, times) { if (seller === pf && o && o.sell && o.sell.id === I.raw_porkchop) rawSold += o.sell.n * (times || 1); if (buyer === pf && o && o.sell && (o.sell.id === I.coal || o.sell.id === I.charcoal || /log|planks/.test(BF.items[o.sell.id].name))) bought += o.sell.n * (times || 1); return oTrade.apply(this, arguments); };
       for (let i = 0; i < 9000 && c("cooked_porkchop") < 8; i++) {
@@ -316,10 +320,11 @@ module.exports = async (pg, out) => {
         if (BF.sky.time > 0.4) BF.sky.setTime(0.1);
         const st = BF.inventory.furnaceState(fpos.x, fpos.y, fpos.z);
         if (st && st.slots[0] && st.slots[0].id === I.raw_porkchop && loadedAt < 0) loadedAt = i;
+        if (i % 150 === 0) ctrace.push([pf.pgc && pf.pgc.stage, +pf.position.x.toFixed(1), +pf.position.y.toFixed(1), +pf.position.z.toFixed(1), pf.ai.route ? pf.ai.route.length : 0]);
       }
       BF.vlog.trade = oTrade;
       ok("with no fuel of its own it bought some", bought > 0 && PF.log.some(e => e.kind === "buyFuel"), { bought, log: PF.log.filter(e => /buyFuel|cookGiveup/.test(e.kind)).slice(-4) });
-      ok("and cooked the pork past the 6 it keeps in the furnace", c("cooked_porkchop") === 8 && c("raw_porkchop") + rawSold === 6 && loadedAt >= 0, [c("raw_porkchop"), rawSold, c("cooked_porkchop"), loadedAt, PF.log.filter(e => /cook|load|buyFuel/i.test(e.kind)).slice(-5), pf.pgc && pf.pgc.stage, PF.toCook(pf), BF.villagerStatus.text(pf), pf.pgk && pf.pgk.task && pf.pgk.task.kind]);
+      ok("and cooked the pork past the 6 it keeps in the furnace", c("cooked_porkchop") === 8 && c("raw_porkchop") + rawSold === 6 && loadedAt >= 0, [c("raw_porkchop"), rawSold, c("cooked_porkchop"), loadedAt, PF.log.filter(e => /cook|load|buyFuel/i.test(e.kind)).slice(-5), pf.pgc && pf.pgc.stage, PF.toCook(pf), BF.villagerStatus.text(pf), pf.pgk && pf.pgk.task && pf.pgk.task.kind, fpos, ctrace]);
       ok("the village log has the cooking", (BF.vlog.entries(rec.key) || []).some(e => /\(Pig Farmer\) cooked 8 porkchops in the furnace/.test(e[2])));
       BF.world.setBlock(fpos.x, fpos.y, fpos.z, 0); BF.emit("blockBroken", fpos.x, fpos.y, fpos.z, BF.B.furnace);
       for (const f of saved) { BF.world.setBlock(f[0], f[1], f[2], f[3]); BF.emit("blockPlaced", f[0], f[1], f[2], f[3]); }

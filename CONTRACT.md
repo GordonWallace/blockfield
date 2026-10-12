@@ -1041,7 +1041,7 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
   `pork`, `busyWhen` stage `cook`, `forceStop` on a forced unload); never instantly, never without a furnace.
 - **Nothing from nothing.** `PRODUCE.pig_farmer = []`; its porkchops are never in its starting pack or restocked. A generated pig farmer starts with 6-10 carrots, 4-8 potatoes and emeralds (`BF.pigFarmer.seed`);
   one hired later gets an emerald for its first feed (`HIRE_NEEDS`, `hireKit`) and nothing else. Feed: through any villager's offer for carrots, potatoes or beetroot (farmers first; villagelife.js `shopAI` ->
-  `findWheatSeller` over `shopItems`; `feedWanted`: below a feed per adult + 2 it tops up to 2 per adult + 4). **Reserve** (`BF.pigFarmer.reserve` in `market.reserve`): all its feed; it never eats its feed or raw
+  `findWheatSeller` over `shopItems`; `feedWanted`: below a feed per adult + 2 it tops up to 2 per adult + 4). **Reserve** (`BF.pigFarmer.reserve` in `market.reserve`): all its feed, and up to 16 of the fuel it holds (bought to cook pork, so not sold on as spare goods); it never eats its feed or raw
   porkchops (`reserveOf`), and its porkchops are wares, not meals (`market.spareOf` skips the food clamp, `BF.pigFarmer.isWare`).
 - **Trades** (`TRADES.pig_farmer`): level 1 `1 emerald > 12 raw_porkchop`, `1 emerald > 8 cooked_porkchop`, `20 carrot > 1 emerald`, `20 potato > 1 emerald`; level 2 `2 emerald > 15 cooked_porkchop`,
   `17 beetroot > 1 emerald`. It never sells pigs. The **butcher** buys raw porkchops from pig farmers' offers (`porkWanted`: an emerald's worth while it holds fewer than 9 porkchops) and cooks them as before.

@@ -383,11 +383,15 @@ function feedWanted(m) {
   if (have >= n + FEED_KEEP) return 0;
   return n * 2 + FEED_KEEP + 2 - have;
 }
-// Its market reserve (js/market.js reserve: nothing in it is sold, to villagers or the player): all its pig feed (and what it still wants).
+// Its market reserve (js/market.js reserve: nothing in it is sold, to villagers or the player): all its pig feed (and what it still wants), and up
+// to 16 of the fuel it holds (it bought it to cook pork).
 function reserve(m) {
   if (m.profession !== "pig_farmer" || !Array.isArray(m.inv)) return [];
-  const ids = new Set(feedIds());
-  return ids.size ? [{ ids, n: feedHeld(m) + feedWanted(m) }] : [];
+  const ids = new Set(feedIds()), out = ids.size ? [{ ids, n: feedHeld(m) + feedWanted(m) }] : [];
+  const F = BF.furnaceUse, fuel = new Set();   // the fuel it bought to cook its pork: never sold on as spare goods (js/market.js spareOf)
+  if (F) for (const s of m.inv) if (s && F.isFuel(s.id)) fuel.add(s.id);
+  if (fuel.size) out.push({ ids: fuel, n: 16 });
+  return out;
 }
 // Food it never eats (js/villagelife.js reserveOf): its pigs' feed and its raw porkchops (to sell or cook).
 // Its wares (js/market.js spareOf): raw and cooked porkchops sell whatever food it holds besides (they are not its meals).
