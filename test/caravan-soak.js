@@ -184,10 +184,11 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   const died = last.died || 0;
   if (died) console.log(`merchants killed on the road: ${died} of ${last.left} trips`);
   if (FAR && last.home > 0 && !(R.farTrades > 0)) F('far pair: the merchant made no trade at the far village');
-  // a trip cut short (a forced stop when the game gets heavy, js/villagesim.js) also ends it; a death or a cut may keep the merchant home for days
+  // a trip cut short (a forced stop when the game gets heavy, js/villagesim.js) also ends it; a death or a cut may keep the merchant home for days.
+  // Trips run longer with monsters about, so the second one may still be on the road when the run ends
   const cut = last.cut || 0, ended = last.home + died + cut;
   if (cut) console.log(`trips cut short: ${cut}`);
-  if (FAR && !(last.left >= 2 && ended >= 2) && !(died + cut > 0 && last.left >= 1 && ended >= 1)) F(`far pair: expected at least 2 trips out and ended, got ${last.left} out, ${last.home} home, ${died} died, ${cut} cut short`);
+  if (FAR && !(last.left >= 2 && ended >= 1) && !(died + cut > 0 && last.left >= 1 && ended >= 1)) F(`far pair: expected at least 2 trips out and one ended, got ${last.left} out, ${last.home} home, ${died} died, ${cut} cut short`);
   if (!FAR && !(allSells.there > 0)) F('no goods sold in the other village');
   if (!FAR && DAYS >= 7 && !(allSells.home > 0)) F('no goods brought home and sold');
   if (R.maxPins > 2) F('more than 2 trips on the road: ' + R.maxPins);

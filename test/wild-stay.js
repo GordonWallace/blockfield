@@ -28,6 +28,7 @@ module.exports = async (pg) => {
       if (i % 200 === 0) {
         for (const m of M.list) if (animal(m) && !seen.has(m)) {
           seen.add(m);
+          if (m.pen || m.penVillage || m.coop || m.pasture || m.sty || m.village) continue;   // a village's kept animals (a shepherd's pen stocking itself) aren't wild
           const st = m.sheep || m.hen || m.cow || m.pig || m.horse;
           if (m.__src === "wild" || m.__src === "back") { if (!chunks0.has(ck(m))) late++; else back++; continue; }   // a late chunk's roll, or mobs of a chunk that unloaded and came back
           if (st && st.growAt != null) born.push(m.type); else grown.push([m.type, Math.round(m.position.x), Math.round(m.position.z)]);
