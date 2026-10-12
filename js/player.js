@@ -1373,6 +1373,10 @@ function secondaryDown() {
     const r = BF.poultry.playerUse(mh.mob, selectedItem());
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
+  if (mh && mh.mob && mh.mob.type === "pig" && BF.pigs && (!target || mh.dist < target.dist)) {   // a carrot, potato or beetroot feeds a pig (js/pigs.js)
+    const r = BF.pigs.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
   if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
     const sel = selectedItem(), r = BF.horses.playerUse(mh.mob, sel, sneaking);
     if (r) {

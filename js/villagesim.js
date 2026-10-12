@@ -331,6 +331,26 @@ function onChunkLoad(cx, cz, c) {
   }
 }
 
+// The areas the kept chunks fall in, for js/wildlife.js's monster density cap: each running village with its margin, each trip's corridor, and
+// each group of touching villager windows. [{kind: "village" | "trip" | "window", key, keys: [chunk keys]}]
+function areas() {
+  const out = [];
+  for (const [k, e] of active) out.push({ kind: "village", key: k, keys: e.keys, v: e.v });
+  for (const [id, p] of pins) out.push({ kind: "trip", key: id, keys: p.keys });
+  const left = new Set(winKeys);
+  for (const k0 of winKeys) {
+    if (!left.has(k0)) continue;
+    left.delete(k0);
+    const keys = [k0];
+    for (let i = 0; i < keys.length; i++) {
+      const [cx, cz] = keys[i].split(",").map(Number);
+      for (const n of [(cx + 1) + "," + cz, (cx - 1) + "," + cz, cx + "," + (cz + 1), cx + "," + (cz - 1)]) if (left.delete(n)) keys.push(n);
+    }
+    out.push({ kind: "window", key: k0, keys });
+  }
+  return out;
+}
+
 // a saved village by its key: the worldgen village there
 function villageByKey(key) {
   const [x, z] = key.split(",").map(Number);
@@ -348,7 +368,7 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
+  areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);

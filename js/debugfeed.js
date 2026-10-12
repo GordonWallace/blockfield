@@ -136,6 +136,7 @@ function detail(rec) {
   d.pop7 = BF.vstats ? BF.vstats.popChange(rec.key) : null;
   const toolJobs = d.villagerList.length ? (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && m.position && !m.child && JOB_TOOL[m.profession]) : [];
   d.noTools = [toolJobs.filter(m => !(m.inv || []).some(s => s && BF.items[s.id] && JOB_TOOL[m.profession].test(BF.items[s.id].name))).length, toolJobs.length];
+  d.wild = BF.wildlife ? BF.wildlife.villageStats(rec) : null;   // hostiles in its area, wild animals within 128 blocks, the last 7 nights (js/wildlife.js)
   return d;
 }
 
@@ -184,6 +185,44 @@ function dayline() {
 }
 let hooked = false;
 
+// The Mobs map view (once a second): every loaded mob as [kind, x, z, y, village stock 0|1, doing], kinds and doings as tables, the loaded
+// chunks, the running villages and the player.
+const MOBMAP_EVERY = 1000;
+let mobMapT = 0;
+function doingOf(m) {
+  const ai = m.ai || {};
+  if (m.type === "villager") return status(m) || "";
+  if (m.hostile) {
+    if (ai.target) return "Chasing you";
+    if (ai.golemFoe) return "Fighting an iron golem";
+    if (ai.vTarget) return "Hunting a villager";
+    return ai.mode === "walk" ? "Wandering" : "Idle";
+  }
+  if (m.def && m.def.golem) return ai.provoked > 0 ? "Angry at you" : m.lookAt && m.lookAt.hostile ? "Fighting a monster" : m.village ? "Guarding its village" : "Wandering";
+  if (m.ledBy) return "Being led to a village";
+  if (m.mate) return "Going to a mate";
+  if (ai.fleeT > 0) return "Fleeing";
+  if (m.rider) return "Ridden";
+  const young = m.lamb || m.calf || m.chick || m.piglet || (m.horse && m.horse.growAt != null);
+  const act = ai.mode === "walk" ? "wandering" : "idle";
+  return young ? "Young, " + act : act[0].toUpperCase() + act.slice(1);
+}
+function mobMap(pp) {
+  const kinds = [], kIdx = new Map(), acts = [], aIdx = new Map(), mobs = [];
+  const idx = (map, arr, v) => { let i = map.get(v); if (i == null) { map.set(v, i = arr.length); arr.push(v); } return i; };
+  for (const m of BF.mobs.list) {
+    if (m.dead || m.removed || !m.position) continue;
+    const kind = m.type === "villager" ? (m.profession === "merchant" ? "merchant" : "villager") : m.type;
+    const stock = m.pen || m.coop || m.pasture || (m.horse && (m.horse.pen || (m.horse.owner && m.horse.owner !== "player"))) ? 1 : 0;   // pen, coop, pasture or paddock animals
+    mobs.push([idx(kIdx, kinds, kind), r1(m.position.x), r1(m.position.z), Math.round(m.position.y), stock, idx(aIdx, acts, doingOf(m))]);
+  }
+  const chunks = [];
+  for (const c of BF.world.chunks.values()) chunks.push(c.cx, c.cz);
+  const villages = [];
+  if (BF.villageSim && BF.villageSim.areas) for (const a of BF.villageSim.areas()) if (a.kind === "village" && a.v && a.v.minX != null) villages.push([a.v.minX, a.v.minZ, a.v.maxX, a.v.maxZ, nameOf(a.key)]);
+  return { kinds, acts, mobs, chunks, villages, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: BF.CS };
+}
+
 function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
@@ -192,6 +231,7 @@ function snapshot() {
   return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
     professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
+    mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
     loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), maxAiMs: BF.villageSim.LIMITS.aiMs, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
