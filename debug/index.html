@@ -785,6 +785,8 @@ function drawMap(s) {
     g.fillStyle = "rgba(242,198,109,0.5)";
     for (const [lx, lz] of L.lamps) { g.beginPath(); g.arc(X(lx + 0.5), Z(lz + 0.5), Math.max(1.5, sc * 0.35), 0, 7); g.fill(); }
   }
+  // river crossings (swims and long detours, last 3 days): a faint blue square per 8-block cell, darker the more there are; a bridge is built at 12 or more
+  for (const [hx, hz, n] of v.cross || []) { g.fillStyle = "rgba(90,170,235," + Math.min(0.5, 0.07 + n / 70).toFixed(2) + ")"; g.fillRect(X(hx), Z(hz), 8 * sc, 8 * sc); if (sc > 3) { g.fillStyle = "rgba(190,225,250,0.6)"; g.font = "9px IBM Plex Mono, monospace"; g.fillText(n, X(hx) + 2, Z(hz) + 9); } }
   // structures the builders made (a star on each; dashed while still going up)
   for (const b of v.built || []) {
     const k = STRUCT[structKind(b[4])];

@@ -221,6 +221,31 @@ const SPECS = {
       return { cells: c, beds: [], w: 13, d: 7, marks: { paddock: [[6, 1], [11, 5]], gate: [[8, 0], [9, 0]], out: [[8, -1], [9, -1]], rack: [[2, 3]] } };
     },
   },
+  // A wooden bridge (js/bridges.js picks the site and the span): a 3-wide plank deck running along local +x, fence rails on both edges, a torch on a fence
+  // post every 6 blocks, and log pillars at both ends. The deck stands three blocks above the water (y 0), so a boat with a rider passes under it; ramps of
+  // 1-3 planks, one lower each, join it to a low bank. opts: {len: deck length over the water, r0, r1: ramp planks before the first / after the last deck
+  // block}. Built from the first slice to the last, so the builder walks out on what it laid.
+  bridge: {
+    label: "bridge", weight: "other",
+    gen(st, h, opts) {
+      const B = BF.B, c = [], L = opts && opts.len ? opts.len : 6, n0 = opts && opts.r0 | 0, n1 = opts && opts.r1 | 0, ph = x => 10 + x;
+      const posts = new Set();
+      for (let u = 1; u < L; u += 6) posts.add(u);
+      if (L >= 4 && L - 2 - Math.max(...posts) >= 4) posts.add(L - 2);
+      for (let i = 1; i <= n0; i++) for (let q = 0; q < 3; q++) c.push([n0 - i, -i, q, B.planks, ph(n0 - i)]);
+      for (let u = 0; u < L; u++) {
+        const x = u + n0;
+        if (u === 0 || u === L - 1) for (const q of [0, 2]) c.push([x, -2, q, B.oak_log, ph(x)], [x, -1, q, B.oak_log, ph(x)]);
+        for (let q = 0; q < 3; q++) c.push([x, 0, q, B.planks, ph(x)]);
+        for (const q of [0, 2]) {
+          c.push([x, 1, q, B.oak_fence, ph(x)]);
+          if (posts.has(u)) c.push([x, 2, q, B.oak_fence, ph(x)], [x, 3, q, B.torch, ph(x)]);
+        }
+      }
+      for (let i = 1; i <= n1; i++) for (let q = 0; q < 3; q++) c.push([L + n0 - 1 + i, -i, q, B.planks, ph(L + n0 - 1 + i)]);
+      return { cells: c, beds: [], w: L + n0 + n1, d: 3 };
+    },
+  },
 };
 const TYPE_NAMES = Object.keys(SPECS);
 
@@ -242,7 +267,7 @@ function classify(spec, u, y, q, id) {
 function get(type, rot, style, h, opts, wood) {
   rot = rot & 3; style = style | 0; h = h == null ? 0.5 : h;
   if (!wood || !woodsAvailable().includes(wood)) wood = styleWood(style);
-  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, wood].join("|");
+  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, opts && opts.len ? [opts.len, opts.r0 | 0, opts.r1 | 0].join("/") : 0, wood].join("|");
   let bp = cache.get(ck);
   if (bp) return bp;
   const T = SPECS[type];

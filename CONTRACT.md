@@ -1001,6 +1001,14 @@ logmatch.js, debugfeed.js / debug/index.html, worldgen.js (`BAKER_POP`).
 - **Builders**: the `glassworks` blueprint (weight 1.5 at 12+ villagers with sand and no glassmaker or kiln, else 0.02); with no panes anywhere and no glassmaker, window cells are skipped into `entry.gaps` and
   `glaze` reopens the building later to fill them.
 
+## Bridges (js/bridges.js, loaded after builder.js)
+`BF.bridges`. Hooks: mobs.js (`nav.findPath` goes through `route`, a swimming villager calls `noteSwim`, saves "cross:<village key>"), builder.js (`weighTypes` weight, `findSite` for type "bridge", `beginPlan` stores `entry.span`), blueprints.js (`bridge`), debugfeed.js (`d.cross`) and the debug screen's village map (heat layer).
+- **Crossings**: a villager in water, or a walk with water in the way that has no route or one over twice as long as the straight line, is one crossing at that spot, counted per village on an 8-block grid within 64 blocks of its box. Only the last 3 game days count. One crossing per spot per 0.0015 game days.
+- **Offer**: a cell with 12+ crossings, a straight crossing 3 to 24 water columns wide with land at both ends, no bridge (or other walkable crossing) within 32 blocks, fewer than 3 bridges in the village. Weight 1.2, or 2 at 30+ crossings, times the usual materials multiplier. `plan(R)` is cached for a quarter of a game day.
+- **Shape** (`SPECS.bridge`, opts `{len, r0, r1}`): 3-wide plank deck at `ws + 3` (two clear blocks over the water, so a boat with a rider passes), plank ramps (up to 3, one lower each) to a low bank, fence rails on both edges, a torch post every 6 blocks, log pillars at the two ends. Built from one end to the other. A bridge needs no foundation, but builders still hold the usual 8 spare foundation blocks.
+- **Walking**: `route(fp, ...)` runs the plain A* first; with water in the way and no short route it records a crossing and, when a finished bridge lies within 48 blocks of the start and beats the detour, joins A* to one end, the deck cells, and A* from the other end.
+- **Saves**: the entry keeps `span` (`{axis, f, a, b, dy}`); counts are saved as "cross:<village key>" (`{c: {"gx,gz": [days]}}`).
+
 ## Villager status, food for the unemployed, claimed beds (js/villagerstatus.js, loaded after villagelog.js)
 - `BF.villagerStatus.text(m)`: the trade screen's status line for any villager. villageLife, builder and explorer statusText speak first;
   otherwise `routine(m)` reads the everyday AI (sleeping, heading to bed, walking to / working at the jobsite, looking for work, relaxing...).
