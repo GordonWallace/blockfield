@@ -42,6 +42,8 @@ const VALUE = {
   // come back as empties: .15 net) + 2 sugar .1 + egg .055 + 3 wheat .21 + fuel and work = 1.0, a slice a seventh of it (.14);
   // the oven 8 cobblestone .24 + 1 iron ingot .5; pumpkin seeds a quarter pumpkin
   sugar: .05, pumpkin_pie: .3, cake: 1.0, cake_slice: .14, pumpkin_seeds: .035, bakers_oven: .75,
+  // glassmaker goods (js/glassmaker.js): glass .08 (1 sand .03 + a furnace item's fuel and work); 6 glass -> 16 panes; the kiln 4 cobblestone + 1 iron ingot
+  glass_pane: .035, glass_kiln: .65,
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
   VALUE[sp + "planks"] = .03; VALUE[(sp || "oak_") + "log"] = .12;
@@ -58,9 +60,9 @@ const TRADES = {
     ["1 emerald > 16 carrot", "1 emerald > 16 potato"],
   ],
   librarian: [
-    ["22 paper > 1 emerald", "16 feather > 1 emerald", "1 emerald > 11 glass"],
+    ["22 paper > 1 emerald", "16 feather > 1 emerald"],   // no glass (1.3): the glassmaker makes it (js/glassmaker.js)
     ["7 book > 2 emerald", "2 emerald > 5 book"],
-    ["14 glass > 1 emerald", "5 emerald > 2 lantern"],
+    ["5 emerald > 2 lantern"],
     ["1 emerald > 18 paper", "1 lantern > 2 emerald"],
     ["5 emerald > 14 book"],
   ],
@@ -148,17 +150,17 @@ const TRADES = {
     ["3 emerald > 18 leather"],
   ],
   cartographer: [
-    ["22 paper > 1 emerald", "1 emerald > 11 glass", "28 sugar_cane > 1 emerald", "5 iron_ingot > 2 emerald"],
-    ["14 glass > 1 emerald", "1 emerald > 18 paper", "1 gold_ingot > 1 emerald"],
+    ["22 paper > 1 emerald", "28 sugar_cane > 1 emerald", "5 iron_ingot > 2 emerald"],   // no glass (1.3): the glassmaker makes it (js/glassmaker.js)
+    ["1 emerald > 18 paper", "1 gold_ingot > 1 emerald"],
     ["5 emerald > 2 lantern", "1 lantern > 2 emerald", "3 emerald > 1 compass", "2 compass > 5 emerald"],
-    ["2 emerald > 22 glass", "2 emerald > 36 paper", "4 emerald > 1 blank_map_1", "8 emerald > 1 blank_map_2"],
+    ["2 emerald > 36 paper", "4 emerald > 1 blank_map_1", "8 emerald > 1 blank_map_2"],
     ["7 emerald > 3 lantern", "16 emerald > 1 blank_map_3", "32 emerald > 1 blank_map_4", "64 emerald > 1 blank_map_5"],
   ],
   // The builder BUYS building materials from the player (rho 0.79-0.83 against VALUE) and sells a few finished goods it may hold.
   // Every unit price paid stays below the cheapest price any villager charges for the same item (glass, bricks, beds, sandstone_bricks, terracotta).
   builder: [
     ["40 cobblestone > 1 emerald", "40 planks > 1 emerald", "10 oak_log > 1 emerald", "40 spruce_planks > 1 emerald", "10 spruce_log > 1 emerald"],
-    ["40 birch_planks > 1 emerald", "10 birch_log > 1 emerald", "40 acacia_planks > 1 emerald", "10 acacia_log > 1 emerald", "14 glass > 1 emerald"],
+    ["40 birch_planks > 1 emerald", "10 birch_log > 1 emerald", "40 acacia_planks > 1 emerald", "10 acacia_log > 1 emerald", "36 glass_pane > 1 emerald"],
     ["40 jungle_planks > 1 emerald", "10 jungle_log > 1 emerald", "40 dark_oak_planks > 1 emerald", "10 dark_oak_log > 1 emerald", "22 stone > 1 emerald", "16 oak_door > 1 emerald"],
     ["40 mangrove_planks > 1 emerald", "10 mangrove_log > 1 emerald", "40 cherry_planks > 1 emerald", "10 cherry_log > 1 emerald", "4 bricks > 2 emerald", "3 red_bed > 1 emerald"],
     ["14 sandstone > 1 emerald", "14 sandstone_bricks > 1 emerald", "7 orange_terracotta > 1 emerald", "28 torch > 1 emerald", "1 emerald > 14 oak_door", "1 emerald > 24 torch"],
@@ -232,12 +234,21 @@ const TRADES = {
     [],
     [],
   ],
+  // The glassmaker (js/glassmaker.js) sells what it makes from sand it dug or bought, smelted with fuel it bought: glass, glass panes and glass
+  // bottles (prices 104-114% of VALUE). Nothing is restocked or part of its starting pack. It buys sand from the player too (93%).
+  glassmaker: [
+    ["1 emerald > 11 glass", "1 emerald > 26 glass_pane", "1 emerald > 9 glass_bottle", "36 sand > 1 emerald"],
+    ["2 emerald > 22 glass", "2 emerald > 52 glass_pane"],
+    [],
+    [],
+    [],
+  ],
 };
 
 // Wares a profession can plausibly make itself; only these are topped up by the daily restock.
 const PRODUCE = {
   farmer: [],          // food is never created by the restock: farmers harvest and bake it (js/villagelife.js), see TRADE_AUDIT.md
-  librarian: ["paper", "book", "glass"],
+  librarian: ["paper", "book"],   // no glass from nothing (1.3): the glassmaker makes it from sand (js/glassmaker.js)
   cleric: [],
   armorer: [],          // no free iron any more: it sells only the ingots it holds (Gordon, 1.1)
   weaponsmith: [],      // no free iron swords (board bug-032): it sells only the swords it holds
@@ -249,7 +260,7 @@ const PRODUCE = {
   mason: ["brick", "bricks", "stone", "terracotta", "orange_terracotta", "yellow_terracotta", "red_terracotta",
     "white_terracotta", "brown_terracotta", "sandstone_bricks"],
   leatherworker: [],   // no leather from nothing (1.3): it buys leather from the cowherd and the butcher (js/villagelife.js shopAI)
-  cartographer: ["paper", "glass"],
+  cartographer: ["paper"],
   nitwit: [],
   unemployed: [],
   builder: [],
@@ -262,6 +273,7 @@ const PRODUCE = {
   stable_hand: [],     // saddles and leads are made from leather, iron and string it bought; horses are caught or bred (js/stables.js)
   cowherd: [],         // milk, beef, leather and steak come only from its herd (js/cowherd.js)
   baker: [],           // cakes and pies come only from its oven, from ingredients it bought (js/baker.js)
+  glassmaker: [],      // glass, panes and bottles come only from sand it dug or bought, smelted in a furnace (js/glassmaker.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -359,7 +371,7 @@ function profile(prof) {
 // ---------------------------------------------------------------- stock and restock
 // Starting tools (Gordon's 1.1 list): villagers alive when their village is generated start with a rudimentary tool of their trade. Whoever takes
 // up one of these trades later gets no tools, only the emeralds to buy them (hireKit). These four never start with any other tool among their wares.
-const STARTER_TOOLS = { farmer: ["wooden_hoe", "bucket"], forester: ["wooden_axe"], miner: ["stone_pickaxe"], shepherd: ["shears"] };
+const STARTER_TOOLS = { farmer: ["wooden_hoe", "bucket"], forester: ["wooden_axe"], miner: ["stone_pickaxe"], shepherd: ["shears"], glassmaker: ["stone_shovel"] };
 // What a newly hired villager of these trades must buy to start work (any one of each group), and what else it is given.
 const HIRE_NEEDS = { farmer: [/_hoe$/, /^(water_)?bucket$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/], poultry_keeper: [/^wheat_seeds$/] };
 const isToolItem = id => { const it = BF.items[id]; return !!(it && ((it.tool && typeof it.tool === "object") || it.name === "shears")); };   // blocks carry tool: "axe" etc. (the tool that mines them)
@@ -376,6 +388,7 @@ function stockFor(prof, v) {
   if (prof === "poultry_keeper") for (const n of ["egg", "feather", "raw_chicken"]) noStart.add(I[n]);   // laid or culled, never given (js/poultry.js)
   if (prof === "cowherd") for (const n of ["milk_bottle", "raw_beef", "leather", "steak"]) noStart.add(I[n]);   // milked, culled or cooked, never given (js/cowherd.js)
   if (prof === "baker") for (const n of ["cake_slice", "pumpkin_pie", "cake"]) noStart.add(I[n]);   // baked, never given (js/baker.js)
+  if (prof === "glassmaker") for (const n of ["glass", "glass_pane", "glass_bottle"]) noStart.add(I[n]);   // made from sand, never given (js/glassmaker.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -387,7 +400,7 @@ function stockFor(prof, v) {
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
     // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js); nor the fletcher (js/fletcher.js seed gives a few)
-    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker" && prof !== "glassmaker") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));

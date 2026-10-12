@@ -20,7 +20,7 @@ const JOBSITE = {
   toolsmith: "smithing_table", butcher: "smoker", fisherman: "barrel", shepherd: "loom", fletcher: "fletching_table",
   mason: "stonecutter", leatherworker: "cauldron", cartographer: "cartography_table", builder: "drafting_table", explorer: "survey_table", forester: "band_saw",
   furniture_maker: "carpentry_bench", miner: "mining_bench", stable_hand: "tack_rack", merchant: "merchant_counter", poultry_keeper: "nesting_box", cowherd: "milk_churn",
-  baker: "bakers_oven",
+  baker: "bakers_oven", glassmaker: "glass_kiln",
 };
 // Professions with a say in who may take their block: the stable hand only in a village on horse land, one per village (js/stables.js).
 // Merchants: at most one per 20 villagers, at least one (js/merchant.js). Bakers: at most one per 15 villagers, at least one (js/baker.js).
@@ -139,7 +139,7 @@ function jobList(v) {
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   let n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
-  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "merchant" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || sl.prof === "baker" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
+  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "merchant" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || sl.prof === "baker" || sl.prof === "glassmaker" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
   const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer and toolsmith always get their blocks too
   for (const p of core ? ["farmer", "toolsmith"] : []) { const sl = needy.find(x => x.prof === p); if (sl && !special.includes(sl)) special.push(sl); }
   const rest = needy.filter(sl => !special.includes(sl));
@@ -208,6 +208,7 @@ function planVillage(v) {
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
     if ((job.prof === "builder" || job.prof === "furniture_maker" || job.prof === "merchant" || job.prof === "baker") && plaza(job)) continue;   // the baker's oven: on the square, else beside a house
     if (job.prof === "baker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;
+    if (job.prof === "glassmaker") { if (plaza(job) || (homes.length && beside(homes[Math.floor(r() * homes.length)], job))) kilnFurnace(v, out, used); continue; }   // the glass kiln with a furnace beside it (js/glassmaker.js)
     if (job.prof === "furniture_maker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;   // plaza full: beside a house
     const b = bOf(job.house) || ((job.slot < 0 || job.prof === "forester" || job.prof === "miner") && homes.length ? homes[Math.floor(r() * homes.length)] : null);
     if (b && (inside(b, job) || beside(b, job))) continue;
@@ -215,6 +216,21 @@ function planVillage(v) {
   }
   for (const j of out) if (j.slot >= 0 && !planIndex.has(pk(j.x, j.y, j.z))) planIndex.set(pk(j.x, j.y, j.z), { vkey: key, slot: j.slot });
   return out;
+}
+// A furnace beside the glass kiln just planned (the last entry of out): on the same level of the village's ground, off buildings and roads.
+function kilnFurnace(v, out, used) {
+  const k = out[out.length - 1], WG = BF.worldgen;
+  if (!k || k.prof !== "glassmaker" || !WG.padAt || BF.B.furnace == null) return false;
+  const inRect = (r, x, z) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const x = k.x + dx, z = k.z + dz, p = WG.padAt(v, x, z);
+    if (used.has(pk(x, k.y, z)) || !p || p.y !== k.y - 1) continue;
+    if ((v.buildings || []).some(b => inRect(b, x, z)) || (v.roads || []).some(r => inRect(r, x, z)) || (v.lamps || []).some(l => l[0] === x && l[1] === z)) continue;
+    used.add(pk(x, k.y, z));
+    out.push({ x, y: k.y, z, id: BF.furnaceId ? BF.furnaceId(BF.dirIndex(dx, dz)) : BF.B.furnace, prof: "furnace", slot: -1 });
+    return true;
+  }
+  return false;
 }
 // The plan of a mobs.js village record (rec.wg is the worldgen village).
 function planFor(rec) {
@@ -367,7 +383,8 @@ function hire(m, s) {
   if (s.prof === "cowherd") { if (BF.cowherd && m.inv) BF.cowherd.hireKit(m); }   // a bucket and 30 glass bottles, whenever a villager first becomes a cowherd (js/cowherd.js)
   else if (first && (m.xp || 0) === 0 && BF.trades && m.inv) { // first job: the profession's starting wares (once per villager)
     try {
-      if (BF.trades.STARTER_TOOLS && (BF.trades.STARTER_TOOLS[s.prof] || s.prof === "poultry_keeper")) BF.trades.hireKit(m, s.prof);   // farmer, forester, miner, shepherd: emeralds for its tools; a poultry keeper for its seeds
+      if (s.prof === "glassmaker") { if (BF.I.stone_shovel != null && !m.inv.some(x => x && /_shovel$/.test(BF.items[x.id].name))) BF.trades.inv.add(m.inv, BF.I.stone_shovel, 1); }   // its hire kit: a stone shovel to dig sand (js/glassmaker.js)
+      else if (BF.trades.STARTER_TOOLS && (BF.trades.STARTER_TOOLS[s.prof] || s.prof === "poultry_keeper")) BF.trades.hireKit(m, s.prof);   // farmer, forester, miner, shepherd: emeralds for its tools; a poultry keeper for its seeds
       else for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count);
     } catch (e) { console.error(e); }
   }

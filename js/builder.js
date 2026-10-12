@@ -74,6 +74,7 @@ function craftTable(wood) {
   if (I.nesting_box != null && I.hay_bale != null) t[I.nesting_box] = { n: 1, from: [[P, 4], [I.hay_bale, 1]] };   // the coop's jobsite (js/poultry.js)
   if (I.milk_churn != null) t[I.milk_churn] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the pasture's jobsite (js/cowherd.js)
   if (I.bakers_oven != null) t[I.bakers_oven] = { n: 1, from: [[I.cobblestone, 8], [I.iron_ingot, 1]] };   // the bakehouse's jobsite (js/baker.js)
+  if (I.glass_kiln != null) t[I.glass_kiln] = { n: 1, from: [[I.cobblestone, 4], [I.iron_ingot, 1]] };   // the glassworks' jobsite (js/glassmaker.js)
   return t;
 }
 const CRAFTS = {};
@@ -199,11 +200,12 @@ function cellOf(e, i) {
   const c = bpOf(e).cells[i - nf];
   return { x: e.ox + c.x, y: e.oy + c.y, z: e.oz + c.z, id: c.id, item: c.item, cost: c.cost, pair: c.pair, ph: c.ph };
 }
-// material still needed for the cells from index `from`
+// material still needed for the cells from index `from` (glazing a finished structure: only the cells still empty)
 function remainingReq(e, from) {
-  const req = {};
+  const req = {}, w = W();
   for (let i = from; i < e.n; i++) {
     const c = cellOf(e, i);
+    if (e.glaze && w.isLoaded(c.x, c.z) && w.getBlock(c.x, c.y, c.z) === c.id) continue;
     if (c.cost) req[c.item] = (req[c.item] || 0) + 1;
   }
   return req;
@@ -326,6 +328,18 @@ function stableWeight(R, has) {
   const pop = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length;
   return has ? 0.02 : pop >= 10 ? 2.5 : 0.15;
 }
+// Glassworks (js/glassmaker.js): only where there is natural sand within 64 blocks; wanted when the village has no glassmaker or glass kiln
+// (generated or built) and 12 or more villagers, hardly ever after that (as the bakehouse).
+function glassWeight(R, has) {
+  if (BF.B.glass_kiln == null || !BF.worldgen.sandNear || !BF.worldgen.sandNear(R.x, R.z, 64)) return 0;
+  if (has || R.members.some(x => x.profession === "glassmaker" && !x.dead)) return 0.02;
+  return R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 12 ? 1.5 : 0.05;
+}
+// Windows without glass (js/glassmaker.js): a village with no glassmaker where nobody has glass panes for sale builds its windows as open gaps
+// (entry.gaps), and fills them in once panes turn up (think: glaze). True when panes are all a structure lacks and none are to be had.
+const PANE = () => BF.I.glass_pane;
+const noPanes = (R, stock) => PANE() != null && !((stock || sellerStock(R))[PANE()] > 0) && !R.members.some(x => x.profession === "glassmaker" && !x.dead && !x.removed);
+const onlyPanes = (R, a, stock) => !a.ok && Object.keys(a.shortfall).every(k => +k === PANE()) && noPanes(R, stock);
 // The weight of each type the builder may pick now: [[type, weight]].
 function weighTypes(m, bs) {
   const R = m.village, built = builtOf(R), BPr = BP(), style = styleIdx(R.style);
@@ -353,6 +367,7 @@ function weighTypes(m, bs) {
     // a bakehouse (js/baker.js): wanted when the village has no baker's oven (planned or built) and 15 or more villagers, hardly ever after that
     bakehouse: (R.wg && (R.wg.jobsites || []).some(j => j.prof === "baker")) || cnt("bakehouse") > 0 || R.members.some(x => x.profession === "baker" && !x.dead) ? 0.02
       : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 15 ? 1.5 : 0.05,
+    glassworks: glassWeight(R, (R.wg && (R.wg.jobsites || []).some(j => j.prof === "glassmaker")) || cnt("glassworks") > 0),
   };
   const BEDS = ["small_house", "medium_house", "cottage"];
   if (full) {   // with every bed claimed they rise to the weight of the likeliest other type
@@ -369,12 +384,13 @@ function weighTypes(m, bs) {
     if (bs.fail && bs.fail[t] > dayNow()) continue;
     if (t === "stable" && !wt.stable) continue;                  // never outside horse land
     if (t === "pasture" && !wt.pasture) continue;                // never off grass
+    if (t === "glassworks" && !wt.glassworks) continue;          // never without sand nearby
     const opts = optsFor(t, m.inv), wood = chooseWood(m, t, style, opts, stock);
     const bp = BPr.get(t, 0, style, 0.5, opts, wood);
     const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
     const a = analyze(m.inv, req, wood);
     const buyable = Object.keys(a.shortfall).every(k => stock[k] > 0);   // some villager has it to sell right now
-    const mult = a.ok ? 3 : buyable ? 1.2 : 0.25;
+    const mult = a.ok || onlyPanes(R, a, stock) ? 3 : buyable ? 1.2 : 0.25;
     const x = (wt[t] || 0.3) * mult;
     ws.push([t, x]);
   }
@@ -423,7 +439,7 @@ function beginPlan(m, bs, type, wood) {
   const bp0 = BP().get(type, 0, style, 0.5, opts, wood);
   const req = Object.assign({}, bp0.req);
   const a = analyze(m.inv, req, wood);
-  if (!a.ok) return null;
+  if (!a.ok && !onlyPanes(R, a)) return null;
   const spare = Math.max(0, have0(m.inv, found) - (req[found] || 0));
   const site = findSite(m, type, opts, spare, wood);
   if (!site) { bs.fail[type] = dayNow() + 0.12; logEvent("nosite", m, { type }); return null; }
@@ -497,6 +513,7 @@ function think(m, bs) {
   }
   if (bs.cool > 0) return;
   if (!R.wg) return;
+  if (glaze(m, bs, built)) return;
   const nx = bs.next; bs.next = null;   // chosen when it started the last one
   const type = nx && !(bs.fail[nx.type] > dayNow()) ? nx.type : pickType(m, bs);
   if (!type) return;
@@ -505,7 +522,7 @@ function think(m, bs) {
   const bp = BP().get(type, 0, style, 0.5, opts, wood);
   const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
   const a = analyze(m.inv, req, wood);
-  if (a.ok) {
+  if (a.ok || onlyPanes(R, a)) {
     if (!beginBuild(m, bp.n, null, null, String(bp.label || BP().label(type)))) return;   // not started: no site chosen, nothing used
     const e = beginPlan(m, bs, type, wood);
     if (e) startBuild(m, bs, e); else if (BF.villageSim) BF.villageSim.done(m);
@@ -642,6 +659,7 @@ function placeCell(m, bs, e) {
     if (have0(m.inv, c.item) < 1) {                         // only the exact item: no other wood stands in
       const a = analyze(m.inv, remainingReq(e, e.prog), bpOf(e).wood);
       if (a.crafts.length) applyCrafts(m, a.crafts);
+      if (have0(m.inv, c.item) < 1 && c.item === PANE() && noPanes(m.village)) { e.gaps = e.gaps || []; if (!e.gaps.includes(e.prog)) e.gaps.push(e.prog); advance(e); logEvent("gap", m, { at: [c.x, c.y, c.z] }); return "skipped"; }   // a window left open
       if (have0(m.inv, c.item) < 1) return "missing";
     }
   }
@@ -665,7 +683,29 @@ function placeCell(m, bs, e) {
   return "placed";
 }
 
+// Glass panes for windows left open (entry.gaps): the finished structure with gaps nearest the builder is taken up again, from its first gap,
+// once the builder holds panes or someone sells them. Returns true when it started.
+function glaze(m, bs, built) {
+  const P = PANE();
+  if (P == null || !(have0(m.inv, P) > 0 || sellerStock(m.village)[P] > 0)) return false;
+  const e = built.filter(x => x.state === "done" && x.gaps && x.gaps.length).sort((a, b) => Math.hypot(a.ox - m.position.x, a.oz - m.position.z) - Math.hypot(b.ox - m.position.x, b.oz - m.position.z))[0];
+  if (!e) return false;
+  const from = Math.min(...e.gaps), left = e.gaps.length;
+  if (!beginBuild(m, left, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) return true;
+  e.state = "building"; e.glaze = true; e.prog = from; e.gaps = []; e.retry = []; e.retried = false; e.skipped = 0; e.owner = m.slot ? m.slot.idx : 0;
+  logEvent("glaze", m, { type: e.type, at: [e.ox, e.oy, e.oz], windows: left });
+  startBuild(m, bs, e, true);
+  return true;
+}
 function finish(m, bs, e) {
+  if (e.glaze) {   // windows filled in: the structure was already built
+    e.glaze = false; e.state = "done";
+    if (BF.villageSim) BF.villageSim.done(m);
+    bs.mode = "idle"; bs.entry = null; bs.cool = rnd(10, 20); bs.t = 3; m.ai.route = null;
+    logEvent("glazed", m, { type: e.type, at: [e.ox, e.oy, e.oz], left: (e.gaps || []).length });
+    if (BF.vlog && m.village) BF.vlog.log(m.village, "build", BF.vlog.nameOf(m) + " (Builder) put glass panes in the windows of " + what(e, true) + " at " + e.ox + ", " + e.oy + ", " + e.oz, [e.ox, e.oy, e.oz]);
+    return;
+  }
   e.state = "done"; e.end = +dayNow().toFixed(3);
   if (BF.villageSim) BF.villageSim.done(m);
   bs.mode = "idle"; bs.entry = null; bs.cool = rnd(40, 80); bs.t = 3; m.ai.route = null;
@@ -853,7 +893,7 @@ function shopMode(m, bs, dt, out) {
   if (bs.stage === "think" || (bs.stage === "wait" && bs.t <= 0)) {
     const req = e ? remainingReq(e, e.prog) : wnt.req, a = analyze(m.inv, req, e ? bpOf(e).wood : wnt.wood);
     wnt.short = a.shortfall;
-    if (a.ok) {
+    if (a.ok || onlyPanes(m.village, a)) {
       if (e) { applyCrafts(m, a.crafts); startBuild(m, bs, e); return false; }
       const ne = beginPlan(m, bs, wnt.type, wnt.wood);
       bs.want = null;

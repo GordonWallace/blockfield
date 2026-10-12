@@ -508,6 +508,34 @@ T.bakers_oven_front = p => {
 T.bakers_oven_top = p => { cobbleBase(p); frame(p, 2, "#6a2a1c", "#a64a30"); p.relief(1.1); };
 T.bakers_oven_bottom = p => { cobbleBase(p); p.relief(1.1); };
 
+// ---------- glass kiln (glassmaker, not vanilla): grey stone blocks, a round mouth glowing with molten glass in the front, a sooty chimney top ----------
+const KILN_S = pal(["#58585c", "#66666a", "#747478", "#828286", "#909094"]);
+T.glass_kiln_side = p => {
+  for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) {
+    const row = Math.floor(y / 8), off = row % 2 ? 6 : 0, mortar = y % 8 === 7 || (x + off) % 12 === 11;
+    const b = Math.floor((x + off) / 12) + row * 7;
+    p.set(x, y, jit(p, mortar ? hex("#3e3e42") : ramp(KILN_S, 0.25 + K.ihash(b, p.seed, 13) * 0.5 + p.noise(x, y, 8, 4, 331) * 0.25), 0.05));
+    p.setH(x, y, mortar ? 0.1 : 0.8);
+  }
+  p.relief(1.2);
+};
+T.glass_kiln_front = p => {
+  T.glass_kiln_side(p);
+  circle(p, 16, 18, 8.5, (x, y, d) => {
+    const rim = d > 6.8, glow = 1 - d / 6.8;
+    p.set(x, y, rim ? jit(p, hex("#2e2e32"), 0.05) : jit(p, mix(hex("#ff7a18"), hex("#ffe28a"), Math.max(0, glow * 1.3 - 0.2)), 0.05));
+    p.setH(x, y, rim ? 0.95 : 0.05);
+  });
+  for (const [x, y] of [[13, 16], [18, 19], [15, 21]]) { p.set(x, y, hex("#bfe8f2")); p.set(x + 1, y, hex("#9fd2e2")); }   // beads of glass in the melt
+  p.relief(1.0);
+};
+T.glass_kiln_top = p => {
+  cobbleBase(p);
+  circle(p, 16, 16, 6, (x, y, d) => { p.set(x, y, jit(p, d > 4.5 ? hex("#3a3a3e") : hex("#141416"), 0.05)); p.setH(x, y, d > 4.5 ? 0.9 : 0); });   // the chimney
+  p.relief(1.1);
+};
+T.glass_kiln_bottom = p => { cobbleBase(p); p.relief(1.1); };
+
 // ---------- cake (vanilla): white icing with red berries on top, sponge and cream on the sides ----------
 T.cake_top = p => {
   p.fill((x, y) => { p.set(x, y, jit(p, mix(hex("#fbf8f2"), hex("#ece4d8"), p.noise(x, y, 8, 4, 311)), 0.02)); p.setH(x, y, 0.6); });
