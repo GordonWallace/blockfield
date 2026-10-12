@@ -60,6 +60,7 @@ function reserve(v) {
   if (v.profession === "merchant" && BF.merchant) { const r = BF.merchant.reserve(v); for (const k in r) add(new Set([+k]), r[k]); }   // its tent, and its cargo on a trip
   if (v.profession === "cowherd" && BF.cowherd) for (const r of BF.cowherd.reserve(v)) add(r.ids, r.n);   // a pail, its milk, empties and feed (js/cowherd.js)
   if (v.profession === "baker" && BF.baker) for (const r of BF.baker.reserve(v)) add(r.ids, r.n);
+  if (v.profession === "pig_farmer" && BF.pigFarmer) for (const r of BF.pigFarmer.reserve(v)) add(r.ids, r.n);   // all its pig feed, the lure included (js/pigfarmer.js)
   if (v.profession === "glassmaker" && BF.glassmaker) for (const r of BF.glassmaker.reserve(v)) add(r.ids, r.n);   // sand and fuel for its next furnace load (js/glassmaker.js)
   if (v.profession === "farmer" && BF.baker) for (const r of BF.baker.farmerReserve(v)) add(r.ids, r.n);   // canes to plant, a pumpkin for seeds (js/baker.js)   // the ingredients and fuel it holds (js/baker.js)
   v._res = { t: now, list };
@@ -75,7 +76,8 @@ function spareOf(v, id) {
     n = Math.min(n, held - r.n);
   }
   const f = F();
-  if (f && f.isFood(id) && !(v.profession === "baker" && BF.baker && BF.baker.isTreat(id))) {   // the baker's slices and pies are its wares, not its meals
+  if (f && f.isFood(id) && !(v.profession === "baker" && BF.baker && BF.baker.isTreat(id))   // the baker's slices and pies are its wares, not its meals
+    && !(v.profession === "pig_farmer" && BF.pigFarmer && BF.pigFarmer.isWare(id))) {   // nor are the pig farmer's porkchops (js/pigfarmer.js)
     const e = f.breadEq(id);
     n = Math.min(n, Math.floor(f.surplus(v) / e + 1e-9));
   }

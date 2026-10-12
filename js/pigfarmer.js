@@ -150,7 +150,7 @@ function makeGenSty(rec, b, idx) {
   };
   const room = box(1, 1, b.w - 2, b.d - 3), foot = box(0, 0, b.w - 1, b.d - 1);   // the back row holds the water trough and the shelter's back
   const cells = (b.w - 2) * (b.d - 3);
-  return { key: rec.key + "|" + idx, idx: "g" + idx, gen: true, rec, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
+  return { key: rec.key + "|" + idx, idx: "g" + idx, gen: true, viaOut: true, rec, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
     y: b.y, cells, limit: limitOf(cells), pigs: null, culls: 0, gate: at(b.du, 0), out: at(b.du, -1) };
 }
 // A builder's sty (js/blueprints.js "sty"): read from the blueprint's marks (turned with the building).
@@ -161,7 +161,7 @@ function makeBuiltSty(rec, e) {
   const at = ([x, z]) => [e.ox + x, e.oz + z], R = M.room.map(at), F = M.fence.map(at);
   const x0 = Math.min(R[0][0], R[1][0]), z0 = Math.min(R[0][1], R[1][1]), x1 = Math.max(R[0][0], R[1][0]) + 1, z1 = Math.max(R[0][1], R[1][1]) + 1;
   const cells = (x1 - x0) * (z1 - z0);
-  return { key: rec.key + "|b" + e.id, idx: "b" + e.id, gen: false, rec, x0, z0, x1, z1,
+  return { key: rec.key + "|b" + e.id, idx: "b" + e.id, gen: false, viaOut: true, rec, x0, z0, x1, z1,
     fx0: Math.min(F[0][0], F[1][0]), fz0: Math.min(F[0][1], F[1][1]), fx1: Math.max(F[0][0], F[1][0]) + 1, fz1: Math.max(F[0][1], F[1][1]) + 1,
     y: e.oy - 1, cells, limit: limitOf(cells), pigs: null, culls: 0, gate: at(M.gate[0]), out: at(M.out[0]) };
 }
@@ -184,6 +184,18 @@ const inRoom = (p, pos) => pos.x > p.x0 && pos.x < p.x1 && pos.z > p.z0 && pos.z
 // Pig land: a village on grass (plains, forest, taiga, savanna; not desert or snow), as for pastures (js/cowherd.js grassVillage).
 const villageOK = R => !!(BF.cowherd && BF.cowherd.grassVillage(R));
 
+// The builder's wish for a sty (js/builder.js weighTypes): never off grass; hardly ever when the village has a sty (generated or built) or a pig
+// farmer; otherwise wanted (about as much as a pasture) by a village of 12 or more with wild pigs within FIND_R of it or a farmer selling feed
+// (a job offer or its spare carrots, potatoes or beetroot, js/market.js).
+function builderWeight(R, has) {
+  if (!villageOK(R)) return 0;
+  if (has || (R.wg && (R.wg.buildings || []).some(b => b.type === "sty")) || R.members.some(x => x.profession === "pig_farmer" && !x.dead && !x.removed)) return 0.02;
+  if (R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length < 12) return 0.05;
+  const T = TR(), ids = feedIds();
+  const feedSeller = R.members.some(v2 => v2 && v2.type === "villager" && live(v2) && v2.profession === "farmer" && (v2.trades || []).some(o => o && o.sell && ids.includes(o.sell.id) && !T.blockReason(v2, o)));
+  const pigs = (BF.mobs.list || []).some(o => o.type === "pig" && live(o) && Math.hypot(o.position.x - R.x, o.position.z - R.z) < FIND_R);
+  return feedSeller || pigs ? 2 : 0.05;
+}
 let pending = new Map();      // village key -> [{i, p: [packed], k: culls}] from a save, taken as each sty is first seen
 const activeSties = [];       // sties that are loaded and near the player (rebuilt by tickSties)
 let hooked = false;
@@ -362,13 +374,13 @@ function tended(m) {
 }
 const adults = a => a.filter(o => !isPiglet(o));
 const adultStates = p => (p && p.pigs ? p.pigs.filter(s => s.growAt == null).length : 0);
-// Feed it wants to buy now (0 = enough): under max(FEED_KEEP, adults) it tops up to ~2 days of feed plus the lure. None without a sty.
+// Feed it wants to buy now (0 = enough): under a feed per adult plus FEED_KEEP it tops up to ~2 days of feed plus the lure. None without a sty.
 function feedWanted(m) {
   if (m.profession !== "pig_farmer" || !m.inv || !BF.mobs) return 0;
   const p = styOf(m);
   if (!p) return 0;
   const n = Math.max(STOCK_TO, adultStates(p)), have = feedHeld(m);
-  if (have >= Math.max(FEED_KEEP, n)) return 0;
+  if (have >= n + FEED_KEEP) return 0;
   return n * 2 + FEED_KEEP + 2 - have;
 }
 // Its market reserve (js/market.js reserve: nothing in it is sold, to villagers or the player): all its pig feed (and what it still wants).
@@ -378,6 +390,8 @@ function reserve(m) {
   return ids.size ? [{ ids, n: feedHeld(m) + feedWanted(m) }] : [];
 }
 // Food it never eats (js/villagelife.js reserveOf): its pigs' feed and its raw porkchops (to sell or cook).
+// Its wares (js/market.js spareOf): raw and cooked porkchops sell whatever food it holds besides (they are not its meals).
+const isWare = id => id != null && (id === I("raw_porkchop") || id === I("cooked_porkchop"));
 const keepsFood = (m, id) => !!(m && m.profession === "pig_farmer" && (isFeed(id) || id === I("raw_porkchop")));
 // Whether feeding pig o now keeps the herd within one over its limit once the willing pigs have paired up (each pair gives one piglet); the
 // cull then takes it back to the limit. Fed strays near the sty count as if they had walked in (they can, and then breed in the herd).
@@ -404,7 +418,7 @@ function pickTask(m, S) {
   const nearest = a => { let best = null, bd = Infinity; for (const o of a) { const d = Math.hypot(o.position.x - px, o.position.z - pz); if (d < bd) { bd = d; best = o; } } return best; };
   const p = T.sty;
   if (!p) return null;   // without a sty it has no herd to keep
-  const have = feedHeld(m), spare = p.pigs && p.pigs.length < STOCK_TO ? have - 1 : have;   // one is always kept to lure a pig home
+  const have = feedHeld(m), spare = have - FEED_KEEP;   // FEED_KEEP are always kept to lure a wild pig home
   const ad = adults(T.pigs).filter(ok);
   if (spare > 0 && T.size <= T.limit) { const o = nearest(ad.filter(x => hungry(x, t) && feedOk(T, x, t))); if (o) return { kind: "feed", mob: o }; }
   if (T.size > T.limit && adults(T.herd).length > MIN_ADULTS && adultStates(p) > MIN_ADULTS) { const o = nearest(adults(T.herd).filter(ok)); if (o) return { kind: "cull", mob: o }; }
@@ -424,7 +438,7 @@ function stillWanted(m, tk) {
   if (tk.kind === "fetch") return !o.sty && feedHeld(m) > 0 && !(o.ledBy && o.ledBy !== m);
   if (isPiglet(o)) return false;
   const T = tended(m);
-  if (tk.kind === "feed") return hungry(o, now()) && feedHeld(m) > 0 && T.size <= T.limit && feedOk(T, o, now());
+  if (tk.kind === "feed") return hungry(o, now()) && feedHeld(m) > FEED_KEEP && T.size <= T.limit && feedOk(T, o, now());
   return T.size > T.limit && adults(T.herd).length > MIN_ADULTS && adultStates(T.sty) > MIN_ADULTS && T.herd.indexOf(o) >= 0;
 }
 const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
@@ -493,11 +507,14 @@ function leave(m, S, dt, out) {
   S.exit = null;
   return false;
 }
+// Where it waits while the pig goes in: a step further out than the cell in front of the gate, so that cell (the pig's way in, with the trough on
+// one side of it) stays free and the gate stays within reach (js/herd.js lead holds it open from 3 blocks).
+const standOf = P => [2 * P.out[0] - P.gate[0], 2 * P.out[1] - P.gate[1]];
 // Leading a wild pig home: to the path in front of the gate, then into the middle of the sty (js/herd.js lead; the pig walks the trail, pigAI).
 function lead(m, S, tk, dt, out) {
   const P = tk.sty;
   return H().lead(m, S, tk, dt, out, {
-    pen: P, max: LEAD_MAX, penned: o => o.sty === P,
+    pen: P, max: LEAD_MAX, penned: o => o.sty === P, stand: standOf(P),
     arrived: () => {
       log("stocked", { sty: P.key, herd: P.pigs.length });
       vlog(m, "brought a wild pig into the sty (" + plural(P.pigs.length, "pig") + ")");
@@ -693,6 +710,15 @@ function cookAI(m, dt, out, cont) {
   }
   return true;
 }
+// A forced unload (js/villagesim.js forceStop): the pork it loaded comes back out of the furnace, cooked or not. Returns what it did, or null.
+function forceStop(m) {
+  const S = m.pgc;
+  if (!S || !S.stage) return null;
+  const loaded = S.deal && S.deal.kind === "cook" && S.deal.loaded;
+  if (loaded) finishCook(m, S.deal, true);
+  S.stage = null; S.deal = null; if (m.ai) m.ai.route = null; vdone(m);
+  return loaded ? "emptied the furnace" : null;
+}
 if (BF.furnaceUse) BF.furnaceUse.busyWhen(u => !!(u.pgc && u.pgc.stage === "cook"));   // it holds the furnace while its pork cooks
 
 function statusText(m) {
@@ -718,8 +744,8 @@ function counts() {
 BF.pigFarmer = {
   FEED_DAYS, BREED_CD, PIGLET_DAYS, DENSITY, MIN_ADULTS, STOCK_TO, FIND_R, FEED_KEEP, PORK_KEEP, COOKED_CAP, WORK_END, FEED_NAMES,
   feed, playerUse, pigAI, syncLook, hungry, willing, isPiglet, breed, isFeed, feedIds, feedHeld,
-  stiesOf, styOf, tended, feedWanted, reserve, keepsFood, villageOK, seed,
-  ai, cookAI, toCook, tick, statusText, holdings, pickStyTarget, contain, counts,
+  stiesOf, styOf, tended, feedWanted, reserve, keepsFood, isWare, villageOK, builderWeight, seed,
+  ai, cookAI, toCook, forceStop, tick, statusText, holdings, pickStyTarget, contain, counts,
   exportAll, importAll, reset,
   sties: () => activeSties, log: LOG,
 };

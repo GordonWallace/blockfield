@@ -107,9 +107,14 @@ function ledStep(m, dt, out, S, P, inRoom) {
   if (S.stage === "pen") {   // the herder waits outside with the gate open: in through the gate, then to the middle of the pen
     const [gx, gz] = P.gate, inG = Math.abs(m.position.x - gx - 0.5) < 0.6 && Math.abs(m.position.z - gz - 0.5) < 0.6;
     m.penIn = m.penIn || inG || inRoom(P, m.position);
+    if (!m.penIn && P.viaOut && !m.atOut) {   // first onto the cell in front of the gate (a pen whose gate is in a fence corner's lee, js/pigfarmer.js)
+      const [ox, oz] = P.out;
+      if (Math.hypot(m.position.x - ox - 0.5, m.position.z - oz - 0.5) < 0.6) m.atOut = true;
+      else return follow(m, dt, out, ox + 0.5, oz + 0.5, 0.2, sp);
+    }
     return m.penIn ? follow(m, dt, out, (P.x0 + P.x1) / 2, (P.z0 + P.z1) / 2, 0.8, sp) : follow(m, dt, out, gx + 0.5, gz + 0.5, 0.2, sp);
   }
-  m.penIn = false;
+  m.penIn = false; m.atOut = false;
   m.lookAt = L;
   if (ci >= k0 + tr.length - 1 || dk < 2.6) return follow(m, dt, out, L.position.x, L.position.z, 1.8, sp * 1.2);
   const c = tr[ci - k0];
@@ -117,7 +122,7 @@ function ledStep(m, dt, out, S, P, inRoom) {
 }
 // The herder's step while leading tk.mob home to pen c.pen ({gate, out [x, z] the path cell in front of the gate, y ground}): to the path in
 // front of the gate, then it holds the gate open while the animal goes in. It waits when the animal falls behind and goes back for it when it
-// does not come. c = {pen, max (seconds), penned(o) (it is in), arrived(), failed(why, d)}: arrived / failed end the task. Returns true while
+// does not come. c = {pen, max (seconds), penned(o) (it is in), arrived(), failed(why, d), stand ([x, z], optional)}: arrived / failed end the task. Returns true while
 // it is leading (it set out), false once the task ended.
 function lead(m, S, tk, dt, out, c) {
   const o = tk.mob, P = c.pen, p = m.position;
@@ -147,7 +152,8 @@ function lead(m, S, tk, dt, out, c) {
     return true;
   }
   S.waitT = 0;
-  const st = BF.villageLife.travel(m, S, dt, out, P.out[0], P.y + 1, P.out[1], m.def.speed * 0.8);
+  const at = c.stand || P.out;   // where it waits: in front of the gate, or (c.stand) beside that cell so the animal has the way in to itself
+  const st = BF.villageLife.travel(m, S, dt, out, at[0], P.y + 1, at[1], m.def.speed * 0.8);
   if (st === "arrived") { m.ai.route = null; if (dk < 3.2) { S.stage = "pen"; S.inT = 0; } else { out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; } }
   else if (st === "failed") { c.failed("nopath", dk); return false; }
   return true;

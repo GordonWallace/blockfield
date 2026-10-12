@@ -12,13 +12,14 @@ module.exports = async (pg) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     BF.state.paused = true;
 
-    // ---- rosters (village generator 6 is the default for new worlds; 3 to 6 have the same rosters but 4 adds a coop and its poultry keeper,
-    // 5 a pasture and its cowherd in grass villages of 10+, 6 a baker per 15 villagers with its oven)
+    // ---- rosters (village generator 8 is the default for new worlds; 3 to 8 have the same rosters but 4 adds a coop and its poultry keeper,
+    // 5 a pasture and its cowherd in grass villages of 10+, 6 a baker per 15 villagers with its oven, 8 a pig farmer and sty in 60% of grass villages of 10+)
+    let pigFarmers = 0, pigOK = 0, styBad = [];
     let cowherds = 0, pastureBad = [], bakers = 0, bakerBad = [], bakerShort = 0;
     let villages = 0, minPop = Infinity, core = 0, planned = 0, deserts = 0, gardens = 0, bad = [], desertV = null;
     for (const seed of [1, 2, 3, 4, 5, 6]) {
       BF.newWorld(seed, { gen: 3 });
-      if (seed === 1) ok("new worlds use village generator 6", BF.state.villages >= 6, BF.state.villages);
+      if (seed === 1) ok("new worlds use village generator 8", BF.state.villages >= 8, BF.state.villages);
       const seen = new Set();
       for (let rz = -8; rz < 8; rz++) for (let rx = -8; rx < 8; rx++) for (const v of BF.worldgen.villagesNear(rx * 384, rz * 384, 200)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
@@ -40,6 +41,10 @@ module.exports = async (pg) => {
         const ch = has("cowherd"), pa = v.buildings.some(b => b.type === "pasture");
         if (ch) cowherds++;
         if (ch !== pa || (ch && (v.ground !== 0 || v.pop < 10 || !plan.some(j => j.prof === "cowherd" && slotOf("cowherd").includes(j.slot))))) pastureBad.push([seed, key, v.pop, v.ground, ch, pa]);
+        const pf = has("pig_farmer"), st = v.buildings.some(b => b.type === "sty");
+        if (v.ground === 0 && v.pop >= 10) pigOK++;
+        if (pf) pigFarmers++;
+        if (pf !== st || (pf && (v.ground !== 0 || v.pop < 10 || !plan.some(j => j.prof === "pig_farmer" && j.id === BF.B.feed_trough && slotOf("pig_farmer").includes(j.slot))))) styBad.push([seed, key, v.pop, v.ground, pf, st]);
         const nb = ro.filter(sl => sl.prof === "baker").length;
         bakers += nb;
         if (nb < Math.floor(v.pop / 15)) bakerShort++;   // every resident was someone it may not replace (core jobs, specials, the first shepherds)
@@ -53,6 +58,17 @@ module.exports = async (pg) => {
     ok("generator 5: grass villages of 10+ with a cowherd have a pasture and a churn, none without", cowherds > 5 && pastureBad.length === 0, { cowherds, bad: pastureBad.slice(0, 4) });
     ok("generator 6: a baker per 15 villagers at most (none below 15), each with its oven planned", bakers > 5 && bakerBad.length === 0, { bakers, bad: bakerBad.slice(0, 4) });
     ok("... and almost every village of 15+ gets its full count (a resident it may replace)", bakerShort <= villages * 0.02, { bakerShort, villages });
+    ok("generator 8: grass villages of 10+ with a pig farmer have a sty and a feed trough, none without", pigFarmers > 5 && styBad.length === 0, { pigFarmers, bad: styBad.slice(0, 4) });
+    ok("... in about 60% of the grass villages of 10+", pigOK > 10 && Math.abs(pigFarmers / pigOK - 0.6) < 0.15, { pigFarmers, of: pigOK });
+    {
+      BF.newWorld(1, { gen: 3, villages: 7 });
+      let n7 = 0, s7 = 0;
+      for (const v of BF.worldgen.villagesNear(0, 0, 1500)) {
+        n7 += BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground }).filter(sl => sl.prof === "pig_farmer").length;
+        s7 += v.buildings.filter(b => b.type === "sty").length;
+      }
+      ok("worlds saved with generator 7 keep 7: no pig farmers or sties", n7 === 0 && s7 === 0, { n7, s7 });
+    }
     {
       BF.newWorld(1, { gen: 3, villages: 5 });
       let n5 = 0;

@@ -74,6 +74,7 @@ function craftTable(wood) {
   if (I.nesting_box != null && I.hay_bale != null) t[I.nesting_box] = { n: 1, from: [[P, 4], [I.hay_bale, 1]] };   // the coop's jobsite (js/poultry.js)
   if (I.milk_churn != null) t[I.milk_churn] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the pasture's jobsite (js/cowherd.js)
   if (I.bakers_oven != null) t[I.bakers_oven] = { n: 1, from: [[I.cobblestone, 8], [I.iron_ingot, 1]] };   // the bakehouse's jobsite (js/baker.js)
+  if (I.feed_trough != null) t[I.feed_trough] = { n: 1, from: [[P, 7]] };   // the sty's jobsite (js/pigfarmer.js, recipes-jobs.js)
   if (I.glass_kiln != null) t[I.glass_kiln] = { n: 1, from: [[I.cobblestone, 4], [I.iron_ingot, 1]] };   // the glassworks' jobsite (js/glassmaker.js)
   return t;
 }
@@ -284,6 +285,7 @@ function findSite(m, type, opts, haveFound, wood) {
     return { score: 0, bp, rot: p.rot, h: 0.5, ox: p.ox, oz: p.oz, oy: p.oy, fill: [], opts: p.opts, span: p.span };
   }
   if (type === "pasture" && !(BF.cowherd && BF.cowherd.grassVillage(R))) return null;   // never off grass (js/cowherd.js)
+  if (type === "sty" && !(BF.pigFarmer && BF.pigFarmer.villageOK(R))) return null;      // nor a sty (js/pigfarmer.js)
   const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
   const attempt = (m.bs ? (m.bs.siteTry = (m.bs.siteTry || 0) + 1) : 0);
   const rng = mulberry(hash32(R.key + ":" + built.length + ":" + attempt + ":" + type) ^ ((BF.state && BF.state.seed) | 0));
@@ -309,6 +311,8 @@ function findSite(m, type, opts, haveFound, wood) {
     if (dist(px + bp.w / 2, pz + bp.d / 2) > SITE_RANGE) continue;
     if (type === "stable" && BF.horses && !BF.horses.isHorseBiome(px + bp.w / 2, pz + bp.d / 2)) continue;   // a stable stands on horse land itself
     if (type === "pasture" && BF.cowherd && !BF.cowherd.grassAt(px + bp.w / 2, pz + bp.d / 2)) continue;   // a pasture stands on grass itself
+    if (type === "sty" && BF.cowherd && !BF.cowherd.grassAt(px + bp.w / 2, pz + bp.d / 2)) continue;       // and a sty
+    if (type === "sty" && BF.jobs && bp.marks.trough && Math.hypot(px + bp.marks.trough[0][0] + 0.5 - R.x, pz + bp.marks.trough[0][1] + 0.5 - R.z) > Math.max(BF.jobs.RADIUS, (wg && wg.reach) || 0) - 1) continue;   // its trough within the jobless's reach (jobs.js unclaimed)
     evals++;
     if (occupiedBox(m, rect)) continue;
     const t = evalTerrain(bp, px, pz, found);
@@ -326,6 +330,7 @@ function optsFor(type, inv, R) {
   if (type === "bridge") { const p = BF.bridges && R ? BF.bridges.plan(R) : null; return p ? p.opts : null; }   // the span it would cross (js/bridges.js)
   if (type === "lamp_posts") return lamps(inv);
   if ((type === "garden" || type === "stable" || type === "pasture") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
+  if (type === "sty" && BF.I.coarse_dirt != null && TR().inv.count(inv, BF.I.coarse_dirt) >= 4) return { mud: true };   // the wallow (js/blueprints.js)
   return null;
 }
 // What a villager sells: its offers, job and spare goods (js/market.js). Leather for a stable's tack rack comes from a leatherworker's spare goods.
@@ -375,6 +380,7 @@ function weighTypes(m, bs) {
     // a bakehouse (js/baker.js): wanted when the village has no baker's oven (planned or built) and 15 or more villagers, hardly ever after that
     bakehouse: (R.wg && (R.wg.jobsites || []).some(j => j.prof === "baker")) || cnt("bakehouse") > 0 || R.members.some(x => x.profession === "baker" && !x.dead) ? 0.02
       : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 15 ? 1.5 : 0.05,
+    sty: BF.pigFarmer ? BF.pigFarmer.builderWeight(R, cnt("sty") > 0) : 0,   // js/pigfarmer.js: on grass, 12+ villagers, pigs or feed nearby
     glassworks: glassWeight(R, (R.wg && (R.wg.jobsites || []).some(j => j.prof === "glassmaker")) || cnt("glassworks") > 0),
   };
   const BEDS = ["small_house", "medium_house", "cottage"];
@@ -393,6 +399,7 @@ function weighTypes(m, bs) {
     if (bs.fail && bs.fail[t] > dayNow()) continue;
     if (t === "stable" && !wt.stable) continue;                  // never outside horse land
     if (t === "pasture" && !wt.pasture) continue;                // never off grass
+    if (t === "sty" && !wt.sty) continue;                        // never off grass (js/pigfarmer.js)
     if (t === "glassworks" && !wt.glassworks) continue;          // never without sand nearby
     if (t === "bridge" && !wt.bridge) continue;                  // only where villagers keep crossing water (js/bridges.js)
     const opts = optsFor(t, m.inv, R), wood = chooseWood(m, t, style, opts, stock);

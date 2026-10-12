@@ -19,8 +19,8 @@ const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci.json'), 'ut
 const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js']);
 
 // A test file can carry its own settings in a header line, so adding a test needs no edit to the shared ci.json (parallel PRs
-// kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>] [soak] [timeout=<s>] [args=<a,b,...>] [reason]`,
-// e.g. `// @ci integration suite=farming timeout=600`. For a test listed in ci.json, ci.json wins where both say something.
+// kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>[,<name>...]] [soak] [timeout=<s>] [args=<a,b,...>] [reason]`,
+// e.g. `// @ci integration suite=farming timeout=600`; a test in several suites (suite=farming,village) runs with any of them. For a test listed in ci.json, ci.json wins where both say something.
 const header = src => {
   const m = /^\/\/ @ci (baseline|integration|skip)\b(.*)$/m.exec(src);
   if (!m) return null;
@@ -51,7 +51,8 @@ for (const t of tests) if (!fs.existsSync(path.join(root, t.file))) t.missing = 
 
 // suites: name -> tests; each test's suite (ci.json's suite lists, else the file's header)
 const SUITES = manifest.suites || {};
-for (const [k, s] of Object.entries(SUITES)) for (const n of s.tests) { const t = tests.find(t => t.name === n); if (t) t.suite = k; }
+// (t.suite: the first; t.suites: all of them, a header may name several)
+for (const [k, s] of Object.entries(SUITES)) for (const n of s.tests) { const t = tests.find(t => t.name === n); if (t) { t.suite = t.suite || k; (t.suites = t.suites || []).push(k); } }
 // soak: the long tests of every suite. A named suite runs without them unless soak is named too (or all); soak alone runs them all
 const SOAK = manifest.soak || { tests: [] };
 for (const n of SOAK.tests) { const t = tests.find(t => t.name === n); if (t) t.soak = true; }
@@ -59,13 +60,13 @@ const badSuite = [];
 for (const t of tests) {
   const h = t.header;
   if (!h) continue;
-  if (h.suite && !t.suite) { if (SUITES[h.suite]) t.suite = h.suite; else badSuite.push(`${t.name} (suite=${h.suite})`); }
+  if (h.suite && !t.suite) for (const k of h.suite.split(',').filter(Boolean)) { if (SUITES[k]) { t.suite = t.suite || k; (t.suites = t.suites || []).push(k); } else badSuite.push(`${t.name} (suite=${k})`); }
   if (h.soak) t.soak = true;
   if (h.timeout && !t.timeout) t.timeout = h.timeout;
 }
 if (badSuite.length) { console.log(`FAIL unknown suite in a // @ci header: ${badSuite.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}`); process.exit(1); }
 if (tier === 'suites') {
-  const names = (k, soak) => tests.filter(t => t.suite === k && !t.missing && !!t.soak === soak).map(t => t.name).join(' ');
+  const names = (k, soak) => tests.filter(t => (t.suites || []).includes(k) && !t.missing && !!t.soak === soak).map(t => t.name).join(' ');
   for (const [k, s] of Object.entries(SUITES)) console.log(`${k}: ${s.about}\n  ${names(k, false)}\n  with soak: ${names(k, true) || '-'}\n`);
   console.log(`soak: ${SOAK.about}\n`);
   const none = tests.filter(t => !t.suite && !t.missing && t.tier !== 'skip');
@@ -79,7 +80,7 @@ let suites = picked.includes('all') ? Object.keys(SUITES) : picked.filter(s => s
 const unknown = suites.filter(s => !SUITES[s]);
 if (unknown.length) { console.log(`FAIL unknown CI suite(s): ${unknown.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}, soak, all`); process.exit(1); }
 if (withSoak && !suites.length) suites = Object.keys(SUITES);   // soak on its own: every suite's long tests (plus the suites)
-const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier || (t.tier !== 'skip' && suites.includes(t.suite) && (!t.soak || withSoak)));
+const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier || (t.tier !== 'skip' && (t.suites || []).some(k => suites.includes(k)) && (!t.soak || withSoak)));
 let run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
 // CI_SHARD=k/n (1-based): this job runs only its share of the tests, so a workflow can spread one tier across n runners at
 // once. Each runner is a machine of its own, so the games don't starve each other as they would side by side on one runner.

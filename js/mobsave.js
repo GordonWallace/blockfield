@@ -19,7 +19,7 @@ const MAX_WILD = 120;        // wild mobs saved (the ones nearest the player)
 const MAX_DEPTH = 7, MAX_ARR = 2500;
 // Fields a snapshot never holds: render objects, identity (set again by the spawn), what the modules restore from their own saves.
 const SKIP = new Set(["def", "position", "vel", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
-  "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
+  "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
   "tradingWith", "badge", "badgeLevel", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child"]);
 

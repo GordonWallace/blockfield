@@ -585,7 +585,7 @@ hooks) and `if (m.child) BF.breeding.childMove(m, dt, out)` after `wanderAI`; `r
   job (preferred professions weigh 3x); with no free jobsite it stays unemployed and jobs.js keeps retrying. Event `villagerGrewUp(m)`. From then on it is an ordinary adult
   (starving rules, trading, can breed).
 - **Persistence.** Newborns live in `rec.bred` (village record) as `{k, child, born, eaten, parents: [profA, profB], prof, cd, pos, bed, ...}` and use the existing villager map with
-  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
+  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+, added trades #1700 cowherd, #1800+k bakers, #1900 glassmaker, #2500 pig farmer; never #2000+k): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
   breeding.js (not the roster) near their saved position when the player is within ~72 blocks; grown ones get `BF.jobs.onSpawn(m, rec, {prof, ...saved})`. Dead newborns
   are removed from `rec.bred` and their keys from the next save (and their death is not counted in `rec.killed`, so no roster slot is lost). Parents' cooldowns:
   `"breeding:cd": {villagerKey: day}`. Old saves have none of this and load unchanged.
@@ -798,7 +798,7 @@ Villagers only exist while their chunks are loaded. `BF.villageSim` keeps the te
 - Starting tools (`trading.STARTER_TOOLS`): founding farmers a wooden hoe and an empty bucket, foresters a wooden axe, miners a stone pickaxe (+30-40 torches), shepherds shears (+8 wheat); these four never start with other tools among their wares.
 
 ## Village sizes (village generator 2; worldgen.js, mobs.js)
-- `BF.state.villages` (saved as `villages`; saves without it load as 1): 1 = classic villages (8-25 buildings, roster capped at 24, layouts byte-identical to before), 2 = sized villages (default for new worlds).
+- `BF.state.villages` (saved as `villages`; saves without it load as 1): 1 = classic villages (8-25 buildings, roster capped at 24, layouts byte-identical to before), 2 = sized villages; 3-8 add to them (see "Village generator 3", "Poultry keepers" (4), "Cowherds" (5), "Bakers" (6), "Glassmakers" (7), "Pig farmers" (8)). New worlds use 8 (main.js, save.js); a save keeps the generator it was made with.
 - **Population.** Each village draws `v.pop` = 2 + Gamma(k 2.5, theta 32/3), rounded, redrawn above 100 (`villagePop`, deterministic from the region, salt 530; spawn village from the spawn point, salt 540): mode 18, median 25, mean ~28.5, ~5% at 60+, 2 and 100 both possible (~1 in 5000).
 - **Layout.** `villageExtent(pop)` (56..150 blocks from the centre) bounds roads and plots; the candidate centre is pulled in so the village stays inside its 384 region, and region villages keep clear of the spawn village's box. Mains scale with `sqrt(pop / 18)`, side streets every ~16 blocks (both sides once pop > ~28), cross streets (pop > ~28) and a third level (pop > ~58). Plots fill from the plaza outward until the beds (houses without beds count 1) reach `pop`; streets are then trimmed to their last building and empty ones dropped. Special-building caps scale with `round(pop / 24)`. A site that cannot hold `pop` beds returns null and the next candidate is tried (almost never happens). `v.reach` = jobsite search radius.
 - **Roster.** `rec.pop` (from `v.pop`) replaces the cap of 24; every caller of `BF.mobs.roster` passes `pop`. Iron golems: `round(pop / 15)` (min 1), each patrolling around a house. Villagers whose home is over 28 blocks from the plaza wander around their home. Villagers of a sized village spawn when the player is within 24 blocks of its box. `villagesim` keeps up to 20 chunks per axis for sized villages, 640 chunks in total.
@@ -946,6 +946,9 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 - **Debug screen.** Mob counts split cows into `cow (pasture)` and `cow (wild)`; a cowherd's holdings (`BF.cowherd.holdings(m)`: `{kind: "cows", n, young, milked, culls, limit, coop}`) show the herd, calves, cows milked today,
   culls and the limit; pastures are drawn as pens on the map. Village log (kind `cattle`, logmatch action `cattle`): calf born, milked a cow, bottled N milk bottles, culled a cow (beef, leather), went to fetch / brought a wild cow,
   none in range, cooked N steak; sales are ordinary trade lines. `BF.cowherd.log` keeps the last 300 internal events.
+- **Shared herd code** (`js/herd.js`, `BF.herd`, loaded before cowherd.js): the crowding rule (`LOCAL_MAX` 24 within `LOCAL_R` 16), `findMate` / `mateStep` (willing adults walk together), `follow`
+  (an animal walking after the player), `growK` (young scaling), and leading an animal home: `startLead` / `lead` / `ledStep` (trail, wait, the gate held open and shut again, `toShut` / `shutGates` / `releaseGate`).
+  The cowherd and the pig farmer (js/pigfarmer.js) both use it; behaviour is the cowherd's as before.
 - Tests: `test/cowherd-actions.js`, `test/cowchain.js` (14-day soak: `node test/cowchain.js 14 1`).
 
 ## Bakers (js/baker.js, loaded after cowherd.js)
@@ -1000,6 +1003,45 @@ logmatch.js, debugfeed.js / debug/index.html, worldgen.js (`BAKER_POP`).
   Older saves keep generator 6 and their glass windows.
 - **Builders**: the `glassworks` blueprint (weight 1.5 at 12+ villagers with sand and no glassmaker or kiln, else 0.02); with no panes anywhere and no glassmaker, window cells are skipped into `entry.gaps` and
   `glaze` reopens the building later to fill them.
+
+## Pig farmers (js/pigfarmer.js, loaded after glassmaker.js; board idea-042)
+`BF.pigFarmer`. Pigs breed, live in sties and are raised by the pig farmer, the way cows, pastures and the cowherd work (js/cowherd.js), on the shared herd code (js/herd.js). Hooks: blocks.js (pig farmer pack after the
+glassmaker pack, `feed_trough`), textures-jobs.js, recipes-jobs.js (7 planks as `P P / P P / PPP`; burns as fuel), mobs.js (roster #2500, outfit, `pigAI` branch, `contain`, `pickWander`, no drops for piglets, `setYoungSize`,
+`countMobs`, villagerAI cook errand and `ai`, tick / export / import / reset), mobsave.js (`pig`, `sty` skipped; sty pigs are the sty's), jobs.js (jobsite, `pigFarmerCount`, trough beside the sty gate, hire),
+worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock, `HIRE_NEEDS`), market.js (reserve, wares), villagelife.js (shopping, butcher's pork, `reserveOf`, status), villagesim.js (`JOBS`), player.js
+(right click), storage.js (inputs), logmatch.js (`pigs`), debugfeed.js / debug/index.html, builder.js / blueprints.js (`sty`).
+- **Pigs.** Every pig carries `m.pig = {fed, cd, growAt, x, z, mob}` (absolute game days). A `carrot`, `potato` or `beetroot` (`FEED_NAMES`) from the player (right click; creative keeps it) or the pig farmer sets
+  `fed`: willing for 1 day. Two willing adults of the same sty (or both wild) within 10 blocks walk together and a piglet appears; both rest 1 day (`BREED_CD`). Piglets (`m.piglet`, `growAt`) are scaled 0.5
+  (`BF.mobs.setYoungSize`), drop nothing and grow up after 3 days (`PIGLET_DAYS`); feed ages one by 10%. No breeding while 24 pigs are within 16 blocks. Wild pigs within 10 blocks of a player holding feed follow
+  them (not sty pigs). Events: `pigFed(m, by)`, `pigBorn(piglet, a, b)`, `pigPenned(m, sty)`, `pigCulled(m, by, pork)`. idea-037 ("mobs live in the world") is to add wild pig breeding too; it was not merged when this
+  landed, so pig breeding lives here and the mobs.js hooks are marked for whichever lands second to share one version.
+- **Sties.** Village generator 8 (default for new worlds; worlds saved with 7 keep 7): a village of `PIG_POP` (10)+ villagers on grass (`v.ground === 0`) gets a pig farmer 60% of the time (`PIG_CHANCE`, its own seeded
+  stream `pigs:<village key>`, so it is the same every time and nothing else moves; roster slot `<village key>#2500`, taking the last plain resident's place as the cowherd does) and a `sty` plot (7x8: worldgen adds it
+  after every other plot, the pasture included, only when `BF.jobs.pigFarmerCount(v)` holds the pig farmer, so no other plot moves): fence ring with an oak gate facing the road, a coarse-dirt corner by the gate, a
+  2-water trough at the back, and a plank roof on fence posts over the back corner; the feed trough stands beside the gate (`jobs.planVillage`). Inside is 5x5 = 25 cells: `limit` = max(2, floor(cells / 8)) = 3.
+  `BF.pigFarmer.stiesOf(rec)`: `{key, idx ("g<n>" / "b<id>"), gen, rec, x0..z1 (room), fx0..fz1 (fence), y, gate, out, cells, limit, pigs: [state], culls}`. A generated sty starts with 2-4 pigs (seeded), a built one
+  empty. Sty pigs (`m.sty`, `m.penVillage`) root about inside only, are village stock in `countMobs`, go with their village when it unloads (`BF.mobs.unloadVillage`) and come back with it; a pig that walks into a sty
+  joins it (up to 24), one that gets out leaves it. Saved as `sties:<village key>` = `[{i, p: [[fed, cd, growAt, x, z]], k: culls}]` in `exportVillagers`.
+- **The pig farmer** (profession `pig_farmer`, jobsite `feed_trough`; outfit: brown smock, pink apron, straw sash and brim hat). Works from 0.02 to 0.5 of the day on the sty its trough stands beside (fence within 4.5
+  blocks) and strays within 12: feeds hungry adults while the herd is at or under its limit (no more willing pigs than keep it within one over the limit once they pair up), never its last `FEED_KEEP` (2) feed (the lure);
+  culls adults while the herd is over the limit and more than 2 adults (`MIN_ADULTS`) remain, keeping 1-3 `raw_porkchop` (looted itself: a cull by a villager drops nothing); while its sty holds fewer than 2 pigs
+  (`STOCK_TO`) it leads the nearest wild adult within 96 blocks (`FIND_R`) home with feed in hand (js/herd.js `lead`; none in range: tomorrow, `noWild`). With no task it walks out through the gate.
+  It cooks the raw porkchops beyond `PORK_KEEP` (6) into cooked porkchops while it holds fewer than 24, in a real furnace of its village with fuel it holds or buys (js/furnaceuse.js; state `m.pgc`, route kind
+  `pork`, `busyWhen` stage `cook`, `forceStop` on a forced unload); never instantly, never without a furnace.
+- **Nothing from nothing.** `PRODUCE.pig_farmer = []`; its porkchops are never in its starting pack or restocked. A generated pig farmer starts with 6-10 carrots, 4-8 potatoes and emeralds (`BF.pigFarmer.seed`);
+  one hired later gets an emerald for its first feed (`HIRE_NEEDS`, `hireKit`) and nothing else. Feed: through any villager's offer for carrots, potatoes or beetroot (farmers first; villagelife.js `shopAI` ->
+  `findWheatSeller` over `shopItems`; `feedWanted`: below a feed per adult + 2 it tops up to 2 per adult + 4). **Reserve** (`BF.pigFarmer.reserve` in `market.reserve`): all its feed; it never eats its feed or raw
+  porkchops (`reserveOf`), and its porkchops are wares, not meals (`market.spareOf` skips the food clamp, `BF.pigFarmer.isWare`).
+- **Trades** (`TRADES.pig_farmer`): level 1 `1 emerald > 12 raw_porkchop`, `1 emerald > 8 cooked_porkchop`, `20 carrot > 1 emerald`, `20 potato > 1 emerald`; level 2 `2 emerald > 15 cooked_porkchop`,
+  `17 beetroot > 1 emerald`. It never sells pigs. The **butcher** buys raw porkchops from pig farmers' offers (`porkWanted`: an emerald's worth while it holds fewer than 9 porkchops) and cooks them as before.
+- **Builders.** `sty` blueprint: a 7x9 fence ring with an oak gate, a 2-water trough in a plank rim, a plank roof on a log post and fences over the back corner, the feed trough beside the gate, and a 2x2 raised coarse-dirt
+  wallow by the gate when the builder holds 4 coarse dirt (`opts.mud`; builders cannot dig ground cells, so the generated sty's sunk corner is a raised one here). Inside 5x5 (limit 3). Weight `BF.pigFarmer.builderWeight`:
+  0 off grass (and `findSite` refuses it), 0.02 with a sty or a pig farmer, 2 with 12+ villagers and wild pigs within 96 blocks or a farmer offering feed, else 0.05. The builder crafts the trough from 7 planks.
+  A finished sty starts empty; an unemployed villager takes the trough.
+- **Debug screen.** Mob counts split pigs into `pig (sty)` / `pig (wild)`; a pig farmer's holdings (`BF.pigFarmer.holdings(m)`: `{kind: "pigs", n, young, culls, limit, coop}`) show the herd, piglets, culls and the
+  limit ("no sty" without one); sties are drawn as pens. Village log (kind `pigs`, logmatch action `pigs`): piglet born, culled a pig (pork), went to fetch / brought a wild pig, none in range, cooked N porkchops;
+  porkchop sales (pig farmer -> butcher, villagers, player) are ordinary trade lines and show in the economy view. `BF.pigFarmer.log` keeps the last 300 internal events.
+- Tests: `test/pigfarmer-actions.js` (suites farming and village), `test/pigchain.js` (14-day soak: `node test/pigchain.js 14 1`).
 
 ## Bridges (js/bridges.js, loaded after builder.js)
 `BF.bridges`. Hooks: mobs.js (`nav.findPath` goes through `route`, a swimming villager calls `noteSwim`, saves "cross:<village key>"), builder.js (`weighTypes` weight, `findSite` for type "bridge", `beginPlan` stores `entry.span`), blueprints.js (`bridge`), debugfeed.js (`d.cross`) and the debug screen's village map (heat layer).

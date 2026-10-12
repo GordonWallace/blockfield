@@ -288,7 +288,7 @@ function classify(spec, u, y, q, id) {
 function get(type, rot, style, h, opts, wood) {
   rot = rot & 3; style = style | 0; h = h == null ? 0.5 : h;
   if (!wood || !woodsAvailable().includes(wood)) wood = styleWood(style);
-  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, opts && opts.len ? [opts.len, opts.r0 | 0, opts.r1 | 0].join("/") : 0, wood].join("|");
+  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, opts && opts.mud ? 1 : 0, opts && opts.len ? [opts.len, opts.r0 | 0, opts.r1 | 0].join("/") : 0, wood].join("|");
   let bp = cache.get(ck);
   if (bp) return bp;
   const T = SPECS[type];

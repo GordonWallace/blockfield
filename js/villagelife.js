@@ -33,6 +33,7 @@ function breadEq(x) {
 const SEED_KEEP = 8;
 function reserveOf(m, id) {
   if (m && m.profession === "cowherd" && ((BF.I.milk_bucket != null && id === BF.I.milk_bucket) || (BF.I.raw_beef != null && id === BF.I.raw_beef))) return Infinity;   // it bottles its milk (never drinks the pail) and cooks or sells its beef (js/cowherd.js)
+  if (m && m.profession === "pig_farmer" && BF.pigFarmer && BF.pigFarmer.keepsFood(m, id)) return Infinity;   // its feed is for the sty, its raw pork for the butcher and its furnace (js/pigfarmer.js)
   if (m && m.profession === "baker" && BF.baker && (BF.baker.keepsFood(m, id) || BF.baker.isTreat(id))) return Infinity;   // its milk is for cakes, its slices and pies are its wares (js/baker.js)
   if (!m || m.profession !== "farmer") return 0;
   const it = BF.items[id];
@@ -1445,8 +1446,24 @@ const LEATHER_LOW = 12;
 const feedItem = m => (m.profession === "poultry_keeper" ? I("wheat_seeds") : m.profession === "butcher" ? I("raw_chicken") : m.profession === "leatherworker" ? I("leather") : ids().wheat);
 const leatherWanted = m => (BF.cowherd && cnt(m, I("leather")) < LEATHER_LOW ? LEATHER_LOW + 6 - cnt(m, I("leather")) : 0);
 const chickenWanted = m => { const n = cnt(m, I("raw_chicken")) + cnt(m, I("cooked_chicken")); return BF.poultry && n < 9 ? 15 : 0; };   // one emerald's worth while it holds fewer than 9
+// Butchers buy raw porkchops from the pig farmers too (js/pigfarmer.js), one emerald's worth while they hold fewer than 9 porkchops.
+const porkWanted = m => { const n = cnt(m, I("raw_porkchop")) + cnt(m, I("cooked_porkchop")); return BF.pigFarmer && n < 9 ? 14 : 0; };
 const feedWanted = m => (m.profession === "shepherd" && BF.shepherd ? BF.shepherd.wheatWanted(m) : m.profession === "poultry_keeper" && BF.poultry ? BF.poultry.seedsWanted(m)
-  : m.profession === "butcher" ? chickenWanted(m) : m.profession === "cowherd" && BF.cowherd ? BF.cowherd.wheatWanted(m) : m.profession === "leatherworker" ? leatherWanted(m) : 0);
+  : m.profession === "butcher" ? chickenWanted(m) + porkWanted(m) : m.profession === "cowherd" && BF.cowherd ? BF.cowherd.wheatWanted(m) : m.profession === "leatherworker" ? leatherWanted(m)
+  : m.profession === "pig_farmer" && BF.pigFarmer ? BF.pigFarmer.feedWanted(m) : 0);
+// What it shops for here, [item, how many, whose offers]: a pig farmer any of its feeds (carrot, potato, beetroot), a butcher raw chicken from
+// the poultry keepers and raw pork from the pig farmers, everyone else its one feed item from anyone.
+function shopItems(m) {
+  if (m.profession === "pig_farmer" && BF.pigFarmer) { const w = BF.pigFarmer.feedWanted(m); return w > 0 ? BF.pigFarmer.feedIds().map(id => [id, w, null]) : []; }
+  if (m.profession === "butcher") {
+    const r = [], c = chickenWanted(m), p = porkWanted(m);
+    if (c > 0) r.push([I("raw_chicken"), c, "poultry_keeper"]);
+    if (p > 0 && I("raw_porkchop") != null) r.push([I("raw_porkchop"), p, "pig_farmer"]);
+    return r;
+  }
+  const w = feedWanted(m);
+  return w > 0 ? [[feedItem(m), w, null]] : [];
+}
 function wheatDealWith(m, v2, want, item = feedItem(m)) {
   const T = TR(), c = ids();
   let best = null;
@@ -1460,16 +1477,18 @@ function wheatDealWith(m, v2, want, item = feedItem(m)) {
   return best;
 }
 function findWheatSeller(m) {
-  const R = m.village, want = feedWanted(m), now = dayNow(), sh = m.fshop;
-  if (!R || want <= 0) return null;
+  const R = m.village, now = dayNow(), sh = m.fshop, items = R ? shopItems(m) : [];
+  if (!items.length) return null;
   let best = null, bs = Infinity;
   for (const v2 of R.members || []) {
     if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
-    if (m.profession === "butcher" && v2.profession !== "poultry_keeper") continue;
-    const d = wheatDealWith(m, v2, want);
-    if (!d) continue;
-    const sc = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
-    if (sc < bs) { bs = sc; best = d; }
+    for (const [item, want, from] of items) {
+      if (from && v2.profession !== from) continue;
+      const d = wheatDealWith(m, v2, want, item);
+      if (!d) continue;
+      const sc = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
+      if (sc < bs) { bs = sc; best = d; }
+    }
   }
   return best;
 }
@@ -1522,6 +1541,7 @@ function shopAI(m, dt, out) {
     const bottles = hasEm && m.profession === "cowherd" && BF.cowherd && BF.cowherd.bottleWanted(m) > 0;
     const treat = hasEm && !hungry && !!BF.baker && BF.baker.treatWanted(m);   // a cake slice or a pie now and then (js/baker.js)
     if (sh.cd > now || m.child || !(hungry || wheat || tool || bottles || treat)) return false;
+    if ((m.pgk && m.pgk.task) || (m.cwk && m.cwk.task)) return false;   // a herder tending or leading an animal home finishes that first (js/pigfarmer.js, js/cowherd.js)
     // estimate (villageSim.begin): the walk to the seller and the trade pause; during a countdown the next candidate is tried when one is too long
     const VS = BF.villageSim, tries = [hungry && (() => findFoodSeller(m)), tool && (() => findToolSeller(m, tool)), wheat && (() => findWheatSeller(m)), bottles && (() => findBottleSeller(m)), treat && (() => BF.baker.findTreatSeller(m))];
     let deal = null, found = false;
@@ -1658,6 +1678,7 @@ function statusText(m) {
   if (m.profession === "cowherd" && BF.cowherd) { const t = BF.cowherd.statusText(m); if (t) return t; }
   if (m.profession === "baker" && BF.baker) { const t = BF.baker.statusText(m); if (t) return t; }
   if (m.profession === "glassmaker" && BF.glassmaker) { const t = BF.glassmaker.statusText(m); if (t) return t; }
+  if (m.profession === "pig_farmer" && BF.pigFarmer) { const t = BF.pigFarmer.statusText(m); if (t) return t; }
   if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
     const t = m.farm.task;
     if (t.kind === "craft" && t.hay) return "Making hay bales";

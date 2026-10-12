@@ -391,7 +391,7 @@ function hire(m, s) {
   if (s.prof === "cowherd") { if (BF.cowherd && m.inv) BF.cowherd.hireKit(m); }   // a bucket and 30 glass bottles, whenever a villager first becomes a cowherd (js/cowherd.js)
   else if (first && (m.xp || 0) === 0 && BF.trades && m.inv) { // first job: the profession's starting wares (once per villager)
     try {
-      if (s.prof === "pig_farmer") { /* nothing: it buys its feed (js/pigfarmer.js), no pig feed from nothing */ }
+      if (s.prof === "pig_farmer") BF.trades.hireKit(m, s.prof);   // no feed from nothing: an emerald to buy its first feed with (js/pigfarmer.js)
       else if (s.prof === "glassmaker") { if (BF.I.stone_shovel != null && !m.inv.some(x => x && /_shovel$/.test(BF.items[x.id].name))) BF.trades.inv.add(m.inv, BF.I.stone_shovel, 1); }   // its hire kit: a stone shovel to dig sand (js/glassmaker.js)
       else if (BF.trades.STARTER_TOOLS && (BF.trades.STARTER_TOOLS[s.prof] || s.prof === "poultry_keeper")) BF.trades.hireKit(m, s.prof);   // farmer, forester, miner, shepherd: emeralds for its tools; a poultry keeper for its seeds
       else for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count);
