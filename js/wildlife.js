@@ -11,7 +11,7 @@
 //    (PAIR_P, so about BREED_CHANCE a pair), never while CROWD_MAX of its kind are within CROWD_R blocks. A roll makes the pair willing,
 //    and the animal's own module walks them together (js/shepherd.js, poultry.js, cowherd.js, pigs.js).
 //  - Monsters (spawned by js/mobs.js spawnMonsters in any loaded chunk): mayHostile refuses a spot whose area already holds its cap (CAP
-//    per CAP_CHUNKS chunks, counted per area: each running village with its margin, each trip corridor, each group of villager windows,
+//    per CAP_CHUNKS chunks, counted per area: each running village with its margin, each trip corridor (cap 0: caravan routes get no spawns), each group of villager windows,
 //    and the player's surroundings), or within BUFFER blocks of the player, a villager or an iron golem.
 //  - Village nights: per village, whether a zombie got into the village, zombie attacks on its villagers and villager deaths, for the last
 //    NIGHTS nights (debug screen village panel; the balance soak).
@@ -194,7 +194,7 @@ function rebuildAreas() {
   const P = { kind: "player", key: "player", n: 0, h: 0, cap: 0 }, pi = areaList.length;
   for (const k of W.chunks.keys()) if (!areaOf.has(k)) { areaOf.set(k, pi); P.n++; }
   areaList.push(P);
-  for (const A of areaList) A.cap = Math.max(1, Math.round(CAP * A.n / CAP_CHUNKS));
+  for (const A of areaList) A.cap = A.kind === "trip" ? 0 : Math.max(1, Math.round(CAP * A.n / CAP_CHUNKS));   // trip routes: no spawns, so caravan merchants can travel (Gordon, 2026-10-12)
   for (const m of BF.mobs.list) if (m.hostile && live(m)) { const i = areaOf.get(ck(m.position.x, m.position.z)); if (i != null) areaList[i].h++; }
 }
 function rebuildTargets() {
