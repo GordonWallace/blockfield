@@ -7,7 +7,8 @@ const BF = (window.BF = window.BF || {});
 
 const PX = 1 / 16;
 const GRAVITY = 26;
-const DESPAWN_DIST = 100;   // horses and village stock of a stopped village only: wild mobs are never removed by distance (js/wildlife.js)
+const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or the view distance) update 4 times a game second (BF.mobs.update)
+const DESPAWN_DIST = 100;   // village stock of a stopped village only: wild mobs and horses are never removed by distance (they wait with their chunk)
 const TRAVELLER_SPEED = 1.5;   // merchants and explorers walk this much faster than other villagers (village loading plan)
 
 let scene = null;
@@ -2405,7 +2406,7 @@ function despawn(dt) {
     if (!BF.world.isLoaded(m.position.x, m.position.z)) { if (wild && BF.wildlife) BF.wildlife.stow(m); removeMob(m); continue; }   // a wild mob that walked off the loaded land waits with its chunk
     const d = m.position.distanceTo(pp);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
-    if (d > DESPAWN_DIST && !simmed && !m.village && !wild) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
+    if (d > DESPAWN_DIST && !simmed && !m.village && !wild && !m.def.herd) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
   }
 }
@@ -2462,9 +2463,22 @@ BF.mobs = {
     dt = Math.min(dt, 0.05);
     planBudget = 2; // A* searches per frame
     buildSepGrid();
+    // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
+    // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
+    const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     for (const m of list.slice()) {
       if (m.removed) continue;
-      try { updateMob(m, dt); } catch (e) { console.error(e); removeMob(m); }
+      let h = dt;
+      if (pp && !m.riding && (m.hostile || isWild(m))) {
+        const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
+        if (dx * dx + dz * dz > far2) {
+          if (m._farT == null) m._farT = Math.random() / FAR_HZ;
+          m._farT += dt;
+          if (m._farT < 1 / FAR_HZ) continue;
+          h = m._farT; m._farT = 0;
+        } else m._farT = null;
+      }
+      try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
     }
     updateArrows(dt);
     updatePuffs(dt);

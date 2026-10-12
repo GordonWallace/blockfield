@@ -4,8 +4,8 @@
 // save.js ("horses"), main.js (nothing: tick runs from mobs.update via BF.horses.tick).
 //
 // Stats are vanilla, rolled per horse: health 15-30, speed 4.7-14.2 blocks/s, jump height 1.1-5.3 blocks. A foal's are its parents'
-// average with a little variation. Every horse has a record (`m.horse`, id `hid`) that outlives the mob: a horse whose chunk unloads, or
-// that is left far behind, waits where it was and comes back when the player is near again. Tamed horses never despawn; nor do wild ones,
+// average with a little variation. Every horse has a record (`m.horse`, id `hid`) that outlives the mob: a horse whose chunk unloads
+// waits where it was and comes back when the chunk loads again. Tamed horses never despawn; nor do wild ones,
 // they just wait. Owners: null (wild), "player", or any string another module uses (js/stables.js: "stable:<village key>").
 // See CONTRACT.md "Horses".
 (() => {
@@ -20,7 +20,6 @@ const BREEDS = new Set(["wheat_item", "hay_bale"]);   // what makes a tamed adul
 const FEED_DAYS = 1, BREED_CD = 1, FOAL_DAYS = 1, MATE_R = 10, MEET = 2.2;
 const HERD_R = 9, HERD_SPEED = 100 / 1200;   // members keep within 9 blocks of the herd centre, which drifts ~100 blocks a game day (1200 s)
 const SPAWN_GAP = 96, HERD_ROLL = 0.04;   // at most one herd per 96 blocks; a chunk of horse land gets one at its first generation with this chance (js/wildlife.js)
-const BACK_IN = 80;            // a waiting horse comes back once the player is this near (mobs.js removes mobs beyond 100)
 const LEAD_SLACK = 3, LEAD_BREAK = 12, POST_R = 3.5;
 const GRAV = 32;
 const live = o => !!(o && !o.dead && !o.removed);
@@ -401,10 +400,10 @@ function tick(dt) {
     }
   }
   backT -= dt;
-  if (backT <= 0 && pp) {   // horses waiting where they were come back when the player is near and their chunk is loaded
+  if (backT <= 0 && pp) {   // horses waiting where they were come back as soon as their chunk is loaded, wherever the player is (idea-037)
     backT = 1;
     for (const r of recs.values()) {
-      if (r.mob || !BF.world.isLoaded(r.x, r.z) || Math.hypot(r.x - pp.x, r.z - pp.z) > BACK_IN) continue;
+      if (r.mob || !BF.world.isLoaded(r.x, r.z)) continue;
       const m = embody(r);
       if (m && r.rider && P && !P.vehicle && P.mount) P.mount(m, true);
     }

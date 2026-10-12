@@ -116,7 +116,7 @@ const owned = m => m.pen || m.penVillage || m.coop || m.pasture || m.horse || m.
 const ST_KEYS = ["sheep", "hen", "cow", "pig"];
 // what a wild mob keeps: its spot, health, young/shorn flags and breeding roll; motion, animation and AI timers start fresh (a third of the size)
 const WILD_DROP = new Set(["tradeCd", "hp", "yaw", "headYaw", "headPitch", "lookAt", "walkPhase", "walkAmt", "onGround", "inWater", "headInWater", "fallStart",
-  "hurtT", "invuln", "knockT", "ai", "age", "fire", "mate", "onLadder"]);
+  "hurtT", "invuln", "knockT", "ai", "age", "fire", "mate", "onLadder", "_farT"]);
 function packWild(m) {
   const snap = snapOf(m);
   for (const k of Object.keys(snap.s)) if (WILD_DROP.has(k)) delete snap.s[k];
