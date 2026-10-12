@@ -339,6 +339,18 @@ const BLOCK_DEFS = [
   // glass kiln: the glassmaker villager's jobsite (not vanilla): a squat stone kiln with a glowing glass-melt mouth and a chimney top
   { name: "glass_kiln", jobsite: "glassmaker", tiles: { top: "glass_kiln_top", side: "glass_kiln_side", front: "glass_kiln_front", bottom: "glass_kiln_bottom" }, hardness: 3.5, tool: "pickaxe", needsTool: true, creativeTab: "functional", color: "#7a7a80" },
   // ---- end glassmaker pack ----
+  // ---- bees pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Bees and beekeepers")
+  // bee nest (vanilla): hangs from oak and birch trunks; holds a counted colony (js/bees.js). Breaking it drops nothing and angers its bees.
+  { name: "bee_nest", beeHome: "nest", tiles: { top: "bee_nest_top", side: "bee_nest_side", front: "bee_nest_front", bottom: "bee_nest_bottom" }, hardness: 0.3, tool: "axe", drop: null, creativeTab: "natural", color: "#c8a038" },
+  // beehive (vanilla): 6 planks + 3 honeycomb; up to 30 bees (js/bees.js). Drops itself (vanilla needs silk touch), losing its honey.
+  { name: "beehive", beeHome: "hive", tiles: { top: "beehive_top", side: "beehive_side", front: "beehive_front", bottom: "beehive_bottom" }, hardness: 0.6, tool: "axe", creativeTab: "functional", color: "#b48a4a" },
+  // honey extractor: the beekeeper villager's jobsite (not vanilla): an oak drum with an iron crank
+  { name: "honey_extractor", jobsite: "beekeeper", tiles: { top: "honey_extractor_top", side: "honey_extractor_side", front: "honey_extractor_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#a07a40" },
+  // candle (vanilla look): a small lit wax candle, light level 3 (lit when placed). Its tiles hold the wax low down and the flame above it (the
+  // flame box samples the same tiles at its own height and is drawn at full brightness).
+  { name: "candle", tiles: { top: "candle_top", side: "candle", bottom: "candle_top" }, icon: "candle_icon", render: "model", model: "shape", solid: false, opaque: false, hardness: 0.1, emit: 3,
+    boxes: [[6, 0, 6, 10, 6, 10], [7.5, 6, 7.5, 8.5, 8.5, 8.5, undefined, 0, 1]], box: [6, 0, 6, 10, 8, 10], creativeTab: "functional", color: "#e8d8a8" },
+  // ---- end bees pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -650,6 +662,10 @@ const ITEM_DEFS = [
   { name: "pumpkin_pie", food: 8, color: "#d88a3a" },                                             // vanilla: pumpkin + sugar + egg, shapeless
   { name: "cake_slice", food: 2, color: "#f4ece0" },                                              // not vanilla: what the baker cuts a cake into (7) and sells; a slice of a placed cake gives the same
   // ---- end baker items ----
+  // ---- bees items (js/bees.js, js/beekeeper.js; append-only)
+  { name: "honeycomb", color: "#e8a828" },                                                        // vanilla: shears on a full nest or hive -> 3
+  { name: "honey_bottle", stack: 16, food: 6, container: "glass_bottle", color: "#f0a020" },      // vanilla: a glass bottle on a full nest or hive
+  // ---- end bees items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

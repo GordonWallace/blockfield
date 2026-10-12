@@ -61,6 +61,7 @@ function reserve(v) {
   if (v.profession === "cowherd" && BF.cowherd) for (const r of BF.cowherd.reserve(v)) add(r.ids, r.n);   // a pail, its milk, empties and feed (js/cowherd.js)
   if (v.profession === "baker" && BF.baker) for (const r of BF.baker.reserve(v)) add(r.ids, r.n);
   if (v.profession === "glassmaker" && BF.glassmaker) for (const r of BF.glassmaker.reserve(v)) add(r.ids, r.n);   // sand and fuel for its next furnace load (js/glassmaker.js)
+  if (v.profession === "beekeeper" && BF.beekeeper) for (const r of BF.beekeeper.reserve(v)) add(r.ids, r.n);   // bottles, shears, honeycomb for its next hive, string, planks, flowers (js/beekeeper.js)
   if (v.profession === "farmer" && BF.baker) for (const r of BF.baker.farmerReserve(v)) add(r.ids, r.n);   // canes to plant, a pumpkin for seeds (js/baker.js)   // the ingredients and fuel it holds (js/baker.js)
   v._res = { t: now, list };
   return list;

@@ -189,6 +189,17 @@ const SPECS = {
       return { cells: c, beds: [], w: 5, d: 3 };
     },
   },
+  // Apiary (js/beekeeper.js): the honey extractor between two fence posts, a torch on one. The extractor is a jobsite: an unemployed villager takes
+  // the beekeeper's job there. No hives and no flowers: the beekeeper makes its hives from honeycomb and plants flowers it picked.
+  apiary: {
+    label: "apiary", weight: "other",
+    gen(st) {
+      const B = BF.B, c = [];
+      c.push([0, 0, 0, B.oak_fence, PH.WALL], [2, 0, 0, B.oak_fence, PH.WALL], [0, 1, 0, B.torch, PH.LIGHT]);
+      if (B.honey_extractor != null) c.push([1, 0, 0, B.honey_extractor, PH.LIGHT]);
+      return { cells: c, beds: [], w: 3, d: 1 };
+    },
+  },
   market_stall: {
     label: "market stall", weight: "other",
     gen(st) {
