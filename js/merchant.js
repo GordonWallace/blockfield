@@ -35,6 +35,7 @@ const MIN_PROFIT = 0.5;         // emeralds a trip must be expected to make (hal
 const WEAR_N = 20;              // crossings that turn grass or dirt into a dirt path
 const WEAR_MAX = 6000;          // wear counts kept (oldest dropped)
 const WORK_START = 0.03, DUSK = 0.45, BEDTIME = 0.5, DAY_S = 1200;
+const CAMP_LEAVE = 0.1;   // a camping merchant packs up this far into the day (~2.4 game hours after sunrise): zombies left from the night have burned by then
 const HOME_R = 48;              // this close to its bed (or village centre) it is home and never camps
 const ARRIVE_R = 6, DEAL_R = 2.6, DEAL_TIMEOUT = 60, TRIP_MAX_DAYS = 3;
 const BOOST = 1.5, ROAD = 1.3, WIND = 1.3;   // merchants and explorers walk 1.5x a villager (js/mobs.js); on the road at 1.3x; roads wind: 1.3x the straight line
@@ -487,7 +488,8 @@ const hasTent = m => BF.I.tent != null && cnt(m, BF.I.tent) >= 1;
 function campAI(m, st, t) {
   const camp = m.ex && m.ex.camp;
   if (camp) {
-    if (!isNight(t) && !m.sleeping && t < DUSK) { BF.explorer.strike(m); return false; }
+    if (!isNight(t) && !m.sleeping && t >= CAMP_LEAVE && t < DUSK) { BF.explorer.strike(m); return false; }
+    if (!isNight(t) && (t < CAMP_LEAVE || t > BEDTIME)) { m.ai.mode = "idle"; m.ai.t = 2; return true; }   // morning: waits at its tent while the night's zombies burn off
     if (!isNight(t) && t >= DUSK) { m.ai.mode = "idle"; m.ai.t = 2; return true; }   // evening: waits at its tent
     return false;
   }
