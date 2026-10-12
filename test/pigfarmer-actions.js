@@ -300,6 +300,7 @@ module.exports = async (pg, out) => {
       for (const n of ["raw_porkchop", "cooked_porkchop", "coal", "charcoal"]) T.inv.remove(pf.inv, I[n], c(n));
       { const FU0 = BF.furnaceUse; for (let i = 0; i < pf.inv.length; i++) { const st = pf.inv[i]; if (st && (FU0.isCoal(st.id) || FU0.isLog(st.id) || FU0.isPlanks(st.id))) pf.inv[i] = null; } }   // no fuel of its own at all
       T.inv.add(pf.inv, I.oak_log, 8);
+      delete pf._res;   // the market reserve is cached per game tick (js/market.js reserve): one taken this tick, before the logs, would miss them
       ok("fuel it holds is kept to cook with, not sold on as spare goods", BF.market.spareOf(pf, I.oak_log) === 0, BF.market.spareOf(pf, I.oak_log));
       T.inv.remove(pf.inv, I.oak_log, 8);
       T.inv.add(pf.inv, I.raw_porkchop, 14);
