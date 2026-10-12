@@ -278,9 +278,9 @@ function stepBee(b, dt, lp, now) {
       const f = b.follow, a = now * 1.3 + b.phase;
       b.land = null;
       flyTo(b, f.x + Math.cos(a) * 0.9, f.y + Math.sin(a * 1.7) * 0.25, f.z + Math.sin(a) * 0.9, FOLLOW_SPEED, dt, true);
-      // led into another home with room
+      // led into another home with room (a villager leads only wild bees, from a nest, so its own hives never trade bees)
       for (const o of loaded.values()) {
-        if (o === h || o.bees >= MAX || Math.abs(o.y + 0.5 - b.y) > 3 || Math.hypot(o.x + 0.5 - b.x, o.z + 0.5 - b.z) > MOVE_IN_R) continue;
+        if (o === h || o.bees >= MAX || (f.who !== "player" && h && h.kind !== "nest") || Math.abs(o.y + 0.5 - b.y) > 3 || Math.hypot(o.x + 0.5 - b.x, o.z + 0.5 - b.z) > MOVE_IN_R) continue;
         if (Math.hypot(f.x - (o.x + 0.5), f.z - (o.z + 0.5)) > LURE_NEAR_HOME) continue;
         moveIn(b, o, f.who);
         return;

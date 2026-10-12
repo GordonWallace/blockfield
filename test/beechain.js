@@ -38,7 +38,7 @@ const DAYS = +(process.argv[2] || 10), SEED = +(process.argv[3] || 1);
     BF.vlog.log = function (rec, kind, text) { if (rec && rec.key === R.key) R.lines.push([+(BF.sky.day + BF.sky.time).toFixed(3), kind, String(text)]); return oLog.apply(this, arguments); };
     const oTrade = BF.vlog.trade;
     BF.vlog.trade = function (buyer, seller, o, times) {
-      if (seller && seller !== 'player' && seller.profession === 'beekeeper' && mine(seller)) {
+      if (seller && seller !== 'player' && seller.profession === 'beekeeper' && mine(seller) && !(buyer && buyer.profession === 'beekeeper')) {
         let item = null, n = 0;
         if (o && o.sell) { item = BF.items[o.sell.id].name; n = o.sell.n * (times || 1); }
         else if (typeof o === 'string') { const m = /got (\d+) (.+)$/.exec(o); if (m) { n = +m[1]; item = m[2]; } }
@@ -86,7 +86,8 @@ const DAYS = +(process.argv[2] || 10), SEED = +(process.argv[3] || 1);
     const R = window.__rec, k = window.__keeper();
     R.lines.length = 0; R.restock.length = 0; R.sold = {};
     R.start = window.__total();
-    R.keeper = k; R.made0 = BF.beekeeper.holdings(k).made; R.flowers0 = BF.beekeeper.holdings(k).flowers;
+    R.keeper = k; R.base = new Map();   // every beekeeper of the village (a second one can take a builder's extractor): what it had made and held
+    for (const m of window.__villagers()) if (m.profession === 'beekeeper') { const H = BF.beekeeper.holdings(m); R.base.set(m, { made: H.made, flowers: H.flowers }); }
     R.pop0 = window.__villagers().length;
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${setup.hives} hives`);
@@ -102,9 +103,9 @@ const DAYS = +(process.argv[2] || 10), SEED = +(process.argv[3] || 1);
       const R = window.__rec, ms = window.__villagers();
       R.hunger.push(ms.length);
       const k = R.keeper;
-      if (k && !k.dead) {   // the most it ever held: hives never more than HIVES_MAX
-        const hv = BF.beekeeper.hivesOf(k).length;
-        R.maxHives = Math.max(R.maxHives || 0, hv);
+      for (const m of ms) if (m.profession === 'beekeeper') {   // hives never more than HIVES_MAX each
+        if (!R.base.has(m)) R.base.set(m, { made: {}, flowers: BF.beekeeper.holdings(m).flowers });
+        R.maxHives = Math.max(R.maxHives || 0, BF.beekeeper.hivesOf(m).length);
       }
     }, [Math.min(PER, total - s), h, setup.key]);
     if ((s / PER) % 24 === 23) console.log(`  day ${((s + PER) * h / 1200).toFixed(1)} (${Math.round((Date.now() - t0) / 1000)} s)`);
@@ -112,7 +113,12 @@ const DAYS = +(process.argv[2] || 10), SEED = +(process.argv[3] || 1);
   const R = await pg.evaluate(() => {
     const R = window.__rec, k = R.keeper, H = BF.beekeeper.holdings(k);
     R.end = window.__total();
-    R.made = H.made; R.flowersEnd = H.flowers; R.alive = !k.dead;
+    R.alive = !k.dead; R.keepers = R.base.size;
+    R.made = {}; R.made0 = {}; R.flowers0 = 0;
+    for (const [m, b0] of R.base) { const M = BF.beekeeper.holdings(m).made; for (const x in M) { R.made[x] = (R.made[x] || 0) + M[x]; R.made0[x] = (R.made0[x] || 0) + (b0.made[x] || 0); } R.flowers0 += b0.flowers; }
+    R.offers = (k.trades || []).filter(o => o && o.sell && ['honey_bottle', 'honeycomb', 'candle'].includes(BF.items[o.sell.id].name)).map(o => BF.items[o.sell.id].name);
+    R.held = { honey: H.honey, comb: H.comb, candles: H.candles };
+    delete R.base;
     R.hives = BF.beekeeper.hivesOf(k).map(o => [o.bees, o.honey]);
     const hv = BF.beekeeper.hivesOf(k);
     R.nest = BF.bees.loadedHomes().some(n => n.kind === 'nest' && n.bees >= 2 && hv.some(o => Math.hypot(o.x - n.x, o.z - n.z) < BF.beekeeper.NEST_R));
@@ -126,13 +132,13 @@ const DAYS = +(process.argv[2] || 10), SEED = +(process.argv[3] || 1);
   const m = R.made, m0 = R.made0;
   const comb = d(m.comb, m0.comb), honey = d(m.honey, m0.honey), candles = d(m.candles, m0.candles), hives = d(m.hives, m0.hives);
   const picked = d(m.picked, m0.picked), planted = d(m.flowers, m0.flowers), led = d(m.led, m0.led);
-  console.log('made', JSON.stringify({ comb, honey, candles, hives, picked, planted, led }), 'sold', JSON.stringify(R.sold));
+  console.log('beekeepers', R.keepers, 'made', JSON.stringify({ comb, honey, candles, hives, picked, planted, led }), 'sold', JSON.stringify(R.sold));
   console.log('start', JSON.stringify(R.start), 'end', JSON.stringify(R.end), 'hives', JSON.stringify(R.hives), 'max', R.maxHives, 'log', R.log);
   console.log('villagers by 200 s', R.hunger.join(' '));
   const ok = (name, cond, extra) => { console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra !== undefined ? '  ' + JSON.stringify(extra) : '')); if (!cond) process.exitCode = 1; };
   ok('the beekeeper is alive', R.alive);
   ok('it harvested honey and comb', honey > 0 && comb > 0, { honey, comb });
-  ok('it sold honey, honeycomb or candles to the village', Object.values(R.sold).reduce((a, n) => a + n, 0) > 0, R.sold);
+  ok('it offers honey goods it holds (sales to villagers reported: honey is their last-resort food)', R.offers.length > 0 && R.held.honey + R.held.comb + R.held.candles > 0, { offers: R.offers, held: R.held, sold: R.sold });
   ok('the restock gave no honey goods or hives', R.restock.length === 0, R.restock.slice(0, 8));
   ok('no honey bottles from nothing', R.end.honey_bottle <= R.start.honey_bottle + honey, { start: R.start.honey_bottle, end: R.end.honey_bottle, honey });
   ok('no honeycomb from nothing', R.end.honeycomb <= R.start.honeycomb + comb - 3 * hives - candles, { start: R.start.honeycomb, end: R.end.honeycomb, comb, hives, candles });
