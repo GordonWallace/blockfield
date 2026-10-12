@@ -52,6 +52,7 @@ module.exports = async (pg) => {
     const K = rec && rec.members.find(m => m.profession === "beekeeper" && !m.dead);
     ok("the village has a beekeeper", !!K, rec && rec.members.map(m => m.profession));
     if (!K) return R;
+    ok("its roster key is not one breeding keeps for newborns (#2000+k)", K.slot && !K.slot.bred && K.slot.idx < BF.breeding.KEY_BASE, K.slot && K.slot.idx);
     const plan = rec.wg.jobsites.filter(j => ["beekeeper", "beehive", "flower"].includes(j.prof));
     const ext = plan.find(j => j.prof === "beekeeper"), hp = plan.filter(j => j.prof === "beehive"), fp = plan.filter(j => j.prof === "flower");
     ok("its extractor, 2 hives and a flower bed are in the world", ext && W.getBlock(ext.x, ext.y, ext.z) === B.honey_extractor && hp.length === 2 && hp.every(h => W.getBlock(h.x, h.y, h.z) === B.beehive)
