@@ -1451,8 +1451,9 @@ function nightAI(m, dt, out) {
   const n = ai.night || (ai.night = { fails: 0, retryT: 0 });
   claimBed(m, n, dt);
   const H = m.home;
-  if (ai.routeKind !== "bed") ai.route = null;
+  if (ai.routeKind !== "bed" && ai.routeKind !== "shelter") ai.route = null;   // a day route is dropped; the walk to bed or shelter carries on
   if (m.bed && bedOK(m.bed) && n.fails < 3) {
+    if (ai.routeKind !== "bed") ai.route = null;
     if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
       planBudget--;
       ai.route = pathToBed(m); ai.ri = 0; ai.stuckT = 0; ai.routeKind = "bed";
@@ -2327,7 +2328,7 @@ function villageRoster(rec) {
     }
     if (ordered.length < cap) ordered.push({ house: null, idx: 1900, bed: null, prof: "glassmaker" });
   }
-  // beekeeper: village generator 8 gives a village of BEE_POP (6) or more villagers on grass a beekeeper (own key <village key>#2000), its honey
+  // beekeeper: village generator 8 gives a village of BEE_POP (6) or more villagers on grass a beekeeper (own key <village key>#1950; not #2000, where js/breeding.js keys its newborns), its honey
   // extractor, 2 beehives and a flower bed placed by the jobs plan by the farms (js/beekeeper.js, js/jobs.js planVillage). It takes the place of
   // the last plain resident.
   if ((BF.state && BF.state.villages | 0) >= 8 && BF.beekeeper && (rec.pop || 0) >= BEE_POP && ground === 0) {
@@ -2339,7 +2340,7 @@ function villageRoster(rec) {
         ordered.splice(i, 1); break;
       }
     }
-    if (ordered.length < cap) ordered.push({ house: null, idx: 2000, bed: null, prof: "beekeeper" });
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1950, bed: null, prof: "beekeeper" });
   }
   return ordered;
 }
