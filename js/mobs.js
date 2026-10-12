@@ -1426,8 +1426,9 @@ function nightAI(m, dt, out) {
   const n = ai.night || (ai.night = { fails: 0, retryT: 0 });
   claimBed(m, n, dt);
   const H = m.home;
-  if (ai.routeKind !== "bed") ai.route = null;
+  if (ai.routeKind !== "bed" && ai.routeKind !== "shelter") ai.route = null;   // a day route is dropped; the walk to bed or shelter carries on
   if (m.bed && bedOK(m.bed) && n.fails < 3) {
+    if (ai.routeKind !== "bed") ai.route = null;
     if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
       planBudget--;
       ai.route = pathToBed(m); ai.ri = 0; ai.stuckT = 0; ai.routeKind = "bed";
