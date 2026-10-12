@@ -88,7 +88,7 @@ module.exports = async (pg, out) => {
     res.sleeping = A.sleeping; res.hidden = BF.tents.hidden(A); res.pos = [A.position.x.toFixed(1), A.position.y.toFixed(1), A.position.z.toFixed(1)];
     BF.sky.setTime(0.005);
     for (let i = 0; i < 100; i++) { BF.sky.setTime(0.005); BF.mobs.update(0.1); if (!A.sleeping) break; }
-    for (let i = 0; i < 30; i++) { BF.sky.setTime(0.01); BF.mobs.update(0.1); if (A.ex.camp && !A.sleeping) BF.explorer.ai(A, 0.1, {}); }   // morning chores can run before its own step
+    for (let i = 0; i < 30; i++) { BF.sky.setTime(0.11); BF.mobs.update(0.1); if (A.ex.camp && !A.sleeping) BF.explorer.ai(A, 0.1, {}); }   // once the morning is on (CAMP_LEAVE, js/explorer.js); morning chores can run before its own step
     res.awake = !A.sleeping; res.camp = A.ex.camp; res.tentBack = BF.trades.inv.count(A.inv, BF.I.tent); res.bedRestored = A.bed === window.__home || (A.bed && !A.bed.tent);
     return res;
   });

@@ -129,7 +129,10 @@ module.exports = async (pg) => {
   if (spot) {
     const br = await pg.evaluate(async ([x, y, z]) => {
       const L = BF.mobs.list;
+      // by day with no monsters about: a young one killed or chased off at night isn't a breeding failure
+      const calm = () => { if (BF.sky.time > 0.4) BF.sky.setTime(0.1); for (const m of L.slice()) if (m.hostile && Math.hypot(m.position.x - x, m.position.z - z) < 48) m.dead = true; };
       for (const m of L.slice()) if (BF.mobs.isWild(m) && Math.hypot(m.position.x - x, m.position.z - z) < 40) m.dead = true;
+      calm();
       for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
       BF.wildlife.tune.pairP = 1;
       const a = BF.mobs.spawn("cow", x + 0.5, y, z + 0.5), b = BF.mobs.spawn("cow", x + 2.5, y, z + 0.5);
@@ -137,7 +140,7 @@ module.exports = async (pg) => {
       for (let i = 0; i < 40; i++) BF.mobs.update(0.05);   // landed on the grass before their daily roll
       for (const m of [a, b]) m.wildB = { next: 0 };
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
-      const calves = L.filter(m => m.type === "cow" && !m.dead && m.cow && m.cow.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 20).length;
+      const calves = L.filter(m => m.type === "cow" && !m.dead && m.cow && m.cow.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).length;
       const pairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "cow").length, cows = [a, b].map(m => [m.dead ? "dead" : "", m.cow && m.cow.fed, +m.position.x.toFixed(1), +m.position.y.toFixed(1), +m.position.z.toFixed(1)]);
       // a crowd: 7 cows together never pair up on their own
       for (const m of L.slice()) if (m.type === "cow") m.dead = true;
@@ -149,12 +152,13 @@ module.exports = async (pg) => {
       for (const m of crowd) m.dead = true;
       for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
       // two wild horses breed on their own too, and their foal is wild
+      calm();
       const h1 = BF.horses.spawn(x + 0.5, y, z + 0.5), h2 = BF.horses.spawn(x + 2.5, y, z + 0.5);
       for (const m of [h1, h2]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
       for (let i = 0; i < 40; i++) BF.mobs.update(0.05);
       for (const m of [h1, h2]) m.wildB = { next: 0 };
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
-      const foals = L.filter(m => m.type === "horse" && !m.dead && m.horse && m.horse.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 20).map(m => ({ tamed: m.horse.tamed, owner: m.horse.owner }));
+      const foals = L.filter(m => m.type === "horse" && !m.dead && m.horse && m.horse.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).map(m => ({ tamed: m.horse.tamed, owner: m.horse.owner }));
       for (const m of L.slice()) if (m.type === "horse") m.dead = true;
       BF.wildlife.tune.pairP = 0.0513;
       // fed pigs
