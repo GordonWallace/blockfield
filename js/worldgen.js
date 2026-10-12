@@ -136,9 +136,12 @@ let GEN = 1, SC = 1;
 // 7 = as 6, and windows are glass panes instead of glass blocks; a village with natural sand within 64 blocks (sandNear) starts with a glassmaker,
 //     a glass kiln and a furnace 80% of the time (js/glassmaker.js, js/mobs.js villageRoster, js/jobs.js planVillage). Worlds saved with 6 keep 6:
 //     their buildings keep their glass blocks (builders build panes everywhere: recordBuilding).
-// 8 = as 7, and a village of 10 or more villagers on grass gets a pig farmer 60% of the time (js/mobs.js villageRoster, drawn from the village
+// 8 = as 7, and bees (js/bees.js): about 3% of oak and birch trees in forests, meadows and plains carry a bee nest; a grass village of 6 or more
+//     villagers starts with a beekeeper, its honey extractor, 2 beehives of 8-12 bees and a small flower bed by the farms (js/beekeeper.js,
+//     js/mobs.js villageRoster, js/jobs.js planVillage). Worlds saved with 7 keep 7: no nests appear in their trees.
+// 9 = as 8, and a village of 10 or more villagers on grass gets a pig farmer 60% of the time (js/mobs.js villageRoster, drawn from the village
 //     key), with a 7x8 sty added after every other plot (so nothing else moves) and its feed trough beside the gate (js/pigfarmer.js,
-//     js/jobs.js planVillage). Worlds saved with 7 keep 7: no sties appear in them.
+//     js/jobs.js planVillage). Worlds saved with 8 or less keep theirs: no sties appear in them.
 let VGEN = 1;
 let REC = false;          // recordBuilding is running (builders' blueprints): windows are panes whatever the world's village generator
 const winB = () => (VGEN >= 7 || REC ? BF.B.glass_pane : BF.B.glass);
@@ -1183,7 +1186,7 @@ function layoutVillage(cx, cz, spawn, pop) {
   // Sty (village generator 8): a village of PIG_POP (10) or more villagers on grass whose roster drew a pig farmer (js/mobs.js villageRoster, 60%)
   // gets a fenced sty with the feed trough beside its gate (js/jobs.js planVillage, js/pigfarmer.js). Added last, after the pasture, so no other plot moves.
   let pigs = 0;
-  if (VGEN >= 8 && (v.pop || 0) >= PIG_POP && v.ground === 0 && BF.jobs && BF.jobs.pigFarmerCount) { try { pigs = BF.jobs.pigFarmerCount(v); } catch (e) { pigs = 0; } }
+  if (VGEN >= 9 && (v.pop || 0) >= PIG_POP && v.ground === 0 && BF.jobs && BF.jobs.pigFarmerCount) { try { pigs = BF.jobs.pigFarmerCount(v); } catch (e) { pigs = 0; } }
   if (pigs > 0) {
     const [w, d] = BTYPES.sty;
     const trySty = (road, side, t, back) => {
@@ -2104,6 +2107,14 @@ function core(cx, cz, vox, Y0, NY) {
     disc(tx, top, tz, 1, leaf, 0.99);
     putLeaf(tx, top, tz, leaf);
   }
+  // Village generator 8 (js/bees.js): about 3% of the oak and birch trees of forests, birch forests, meadows and plains (biomes with flowers)
+  // carry a bee nest on one side of the trunk, just under the leaves. Older worlds keep their trees as they were.
+  function nestTree(tx, ty, tz, log, leaf, hgt, wide) {
+    oakTree(tx, ty, tz, log, leaf, hgt, wide);
+    if (VGEN < 8 || BF.B.bee_nest == null || noise.hash(tx, tz, 777) >= 0.03) return;
+    const [dx, dz] = BF.DIRS[(noise.hash(tx, tz, 778) * 4) | 0];
+    putLog(tx + dx, Math.max(ty + 1, ty + hgt - 4), tz + dz, BF.B.bee_nest);
+  }
   function spruceTree(tx, ty, tz, hgt) {
     const top = ty + hgt;
     for (let y = ty; y < top; y++) putLog(tx, y, tz, B.spruce_log);
@@ -2280,15 +2291,16 @@ function core(cx, cz, vox, Y0, NY) {
         case CHERRY: cherry(tx, ty, tz, 4 + ((r3 * 3) | 0)); break;
         case MUSHROOM: giantMushroom(tx, ty, tz, r2 < 0.5); break;
         case BIRCH: case MEADOW:
-          if (r2 < 0.85 || b === MEADOW) oakTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
-          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
+          if (r2 < 0.85 || b === MEADOW) nestTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
+          else nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
           break;
         case FOREST: case FLOWER_FOREST:
-          if (r2 < 0.3) oakTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
-          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
+          if (r2 < 0.3) nestTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
+          else nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
           break;
         default:
-          oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), b === SWAMP);
+          if (b === PLAINS) nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
+          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), b === SWAMP);
       }
     }
   // jungle undergrowth bushes on a 3-grid

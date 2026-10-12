@@ -20,7 +20,7 @@ const JOBSITE = {
   toolsmith: "smithing_table", butcher: "smoker", fisherman: "barrel", shepherd: "loom", fletcher: "fletching_table",
   mason: "stonecutter", leatherworker: "cauldron", cartographer: "cartography_table", builder: "drafting_table", explorer: "survey_table", forester: "band_saw",
   furniture_maker: "carpentry_bench", miner: "mining_bench", stable_hand: "tack_rack", merchant: "merchant_counter", poultry_keeper: "nesting_box", cowherd: "milk_churn",
-  baker: "bakers_oven", glassmaker: "glass_kiln", pig_farmer: "feed_trough",
+  baker: "bakers_oven", glassmaker: "glass_kiln", beekeeper: "honey_extractor", pig_farmer: "feed_trough",
 };
 // Professions with a say in who may take their block: the stable hand only in a village on horse land, one per village (js/stables.js).
 // Merchants: at most one per 20 villagers, at least one (js/merchant.js). Bakers: at most one per 15 villagers, at least one (js/baker.js).
@@ -139,7 +139,7 @@ function jobList(v) {
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   let n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
-  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "merchant" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || sl.prof === "baker" || sl.prof === "glassmaker" || sl.prof === "pig_farmer" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
+  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "merchant" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || sl.prof === "baker" || sl.prof === "glassmaker" || sl.prof === "beekeeper" || sl.prof === "pig_farmer" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
   const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer and toolsmith always get their blocks too
   for (const p of core ? ["farmer", "toolsmith"] : []) { const sl = needy.find(x => x.prof === p); if (sl && !special.includes(sl)) special.push(sl); }
   const rest = needy.filter(sl => !special.includes(sl));
@@ -216,6 +216,7 @@ function planVillage(v) {
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
     if ((job.prof === "builder" || job.prof === "furniture_maker" || job.prof === "merchant" || job.prof === "baker") && plaza(job)) continue;   // the baker's oven: on the square, else beside a house
     if (job.prof === "baker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;
+    if (job.prof === "beekeeper" && ((farms.length && beside(farms[0], job)) || plaza(job))) { apiary(v, out, used, r); continue; }   // the honey extractor by a farm, with 2 hives and a flower bed (js/beekeeper.js)
     if (job.prof === "glassmaker") { if (plaza(job) || (homes.length && beside(homes[Math.floor(r() * homes.length)], job))) kilnFurnace(v, out, used); continue; }   // the glass kiln with a furnace beside it (js/glassmaker.js)
     if (job.prof === "furniture_maker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;   // plaza full: beside a house
     const b = bOf(job.house) || ((job.slot < 0 || job.prof === "forester" || job.prof === "miner") && homes.length ? homes[Math.floor(r() * homes.length)] : null);
@@ -239,6 +240,34 @@ function kilnFurnace(v, out, used) {
     return true;
   }
   return false;
+}
+// Two beehives and a small flower bed (6 flowers) around the honey extractor just planned (the last entry of out), on the village's own ground
+// at the extractor's level, off buildings, roads and lamps (js/beekeeper.js; js/bees.js gives generated village hives 8-12 bees).
+function apiary(v, out, used, r) {
+  const k = out[out.length - 1], WG = BF.worldgen, B = BF.B;
+  if (!k || k.prof !== "beekeeper" || !WG.padAt || B.beehive == null) return;
+  const inRect = (q, x, z) => x >= q.x0 && x <= q.x1 && z >= q.z0 && z <= q.z1;
+  const free = (x, z) => {
+    const p = WG.padAt(v, x, z);
+    return !used.has(pk(x, k.y, z)) && p && p.y === k.y - 1 && !p.path && !(v.buildings || []).some(b => inRect(b, x, z)) && !(v.roads || []).some(q => inRect(q, x, z))
+      && !(v.lamps || []).some(l => l[0] === x && l[1] === z);
+  };
+  const ring = [];
+  for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) if ((dx || dz) && free(k.x + dx, k.z + dz)) ring.push([k.x + dx, k.z + dz, Math.hypot(dx, dz)]);
+  ring.sort((a, b) => a[2] - b[2]);
+  const take = (n, minD, id, prof) => {
+    let got = 0;
+    for (const c of ring) {
+      if (got >= n) break;
+      if (c[2] < minD || used.has(pk(c[0], k.y, c[1])) || out.some(o => (o.prof === "beehive") && Math.hypot(o.x - c[0], o.z - c[1]) < 2)) continue;
+      used.add(pk(c[0], k.y, c[1]));
+      out.push({ x: c[0], y: k.y, z: c[1], id: typeof id === "function" ? id() : id, prof, slot: -1 });
+      got++;
+    }
+  };
+  take(2, 1.5, B.beehive, "beehive");
+  const FL = [B.poppy, B.dandelion, B.cornflower].filter(x => x != null);
+  take(6, 2, () => FL[Math.floor(r() * FL.length)], "flower");
 }
 // The plan of a mobs.js village record (rec.wg is the worldgen village).
 function planFor(rec) {
@@ -389,6 +418,7 @@ function hire(m, s) {
   take(m, s, s.prof);
   m.jobMem = null;
   if (s.prof === "cowherd") { if (BF.cowherd && m.inv) BF.cowherd.hireKit(m); }   // a bucket and 30 glass bottles, whenever a villager first becomes a cowherd (js/cowherd.js)
+  else if (s.prof === "beekeeper") { if (BF.beekeeper && m.inv) BF.beekeeper.hireKit(m); }   // shears and 16 glass bottles, whenever a villager first becomes a beekeeper (js/beekeeper.js)
   else if (first && (m.xp || 0) === 0 && BF.trades && m.inv) { // first job: the profession's starting wares (once per villager)
     try {
       if (s.prof === "pig_farmer") BF.trades.hireKit(m, s.prof);   // no feed from nothing: an emerald to buy its first feed with (js/pigfarmer.js)

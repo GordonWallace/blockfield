@@ -10,7 +10,7 @@
 //  NOTE for "Mobs live in the world" (board idea-037), which adds wild pig breeding in js/mobs.js: whichever lands second should keep one
 //  version. Everything about pig breeding is in this file (feed, willing, findMate / breed via js/herd.js, piglet growth); mobs.js only calls
 //  pigAI, the drop rule for piglets (`m.piglet`) and setYoungSize.
-// Sties: a fenced pen (js/worldgen.js "sty" with village generator 8, or the builder's "sty" blueprint) with a gate, a coarse-dirt corner, a
+// Sties: a fenced pen (js/worldgen.js "sty" with village generator 9, or the builder's "sty" blueprint) with a gate, a coarse-dirt corner, a
 //  water trough and a small roofed shelter. Each sty holds a list of pig states that outlives the pig mobs: a generated sty starts with 2-4
 //  pigs, a builder's starts empty; respawned whenever the sty is loaded, saved as "sties:<village key>". Sty pigs root about only inside the
 //  pen. The sty holds one pig per DENSITY cells (`limit`).

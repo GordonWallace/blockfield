@@ -585,7 +585,7 @@ hooks) and `if (m.child) BF.breeding.childMove(m, dt, out)` after `wanderAI`; `r
   job (preferred professions weigh 3x); with no free jobsite it stays unemployed and jobs.js keeps retrying. Event `villagerGrewUp(m)`. From then on it is an ordinary adult
   (starving rules, trading, can breed).
 - **Persistence.** Newborns live in `rec.bred` (village record) as `{k, child, born, eaten, parents: [profA, profB], prof, cd, pos, bed, ...}` and use the existing villager map with
-  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+, added trades #1700 cowherd, #1800+k bakers, #1900 glassmaker, #2500 pig farmer; never #2000+k): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
+  keys `"<village key>#2000+k"` (roster slots < 1000, builders #1000+, added trades #1700 cowherd, #1800+k bakers, #1900 glassmaker, #2000 beekeeper (which shares the newborn range), #2500 pig farmer; never #2000+k): the entry is `trades.pack(m)` plus `bred: {...}` (meta above). Unloaded newborns are respawned by
   breeding.js (not the roster) near their saved position when the player is within ~72 blocks; grown ones get `BF.jobs.onSpawn(m, rec, {prof, ...saved})`. Dead newborns
   are removed from `rec.bred` and their keys from the next save (and their death is not counted in `rec.killed`, so no roster slot is lost). Parents' cooldowns:
   `"breeding:cd": {villagerKey: day}`. Old saves have none of this and load unchanged.
@@ -1004,9 +1004,20 @@ logmatch.js, debugfeed.js / debug/index.html, worldgen.js (`BAKER_POP`).
 - **Builders**: the `glassworks` blueprint (weight 1.5 at 12+ villagers with sand and no glassmaker or kiln, else 0.02); with no panes anywhere and no glassmaker, window cells are skipped into `entry.gaps` and
   `glaze` reopens the building later to fill them.
 
-## Pig farmers (js/pigfarmer.js, loaded after glassmaker.js; board idea-042)
+## Bees and beekeepers (js/bees.js and js/beekeeper.js, loaded after glassmaker.js; tiles in js/textures-bees.js)
+`BF.bees`, `BF.beekeeper`. Hooks: blocks.js (bees pack: `bee_nest`, `beehive`, `honey_extractor`, `candle`, items `honeycomb`, `honey_bottle`), world.js (`setBlock` calls `bees.onSet`; `growTick` times `bees.cropFactor`), save.js (`bees`), player.js (hive use), worldgen.js (nests), mobs.js (roster #2000, outfit, villagerAI), jobs.js (jobsite, extractor and apiary placement, hire kit), trading.js (table, values, kit in `stockFor`, `bk` in pack), market.js (reserve), storage.js, villagelife.js (status, honey as last-resort food beside milk, bottle sellers), villagesim.js (`JOBS`), builder.js / blueprints.js (`apiary`).
+- **Homes**: nests and hives keep a count of bees (max 30) and honey (0-5); bees are real objects only while out by day in dry weather (`canFly`), home at dusk (half a game hour before sunset) or in rain. They have no health. Dropped when the home's chunk unloads; reloaded by day they are scattered within 22 blocks, mostly on flowers. A placed hive starts empty; breaking a home drops the hive (a nest drops nothing) and loses its honey; its bees out rehome within 22 or vanish at dusk.
+- **Honey**: a flower visit (poppy, dandelion, cornflower) then home adds 1. Shears on a full home give 3 honeycomb, a glass bottle gives a honey bottle (6 hunger, leaves the bottle). Harvesting or breaking a home by day angers its bees out: each stings the player once (1 damage), for 20 s; never villagers.
+- **Growth and crops**: a home with bees and 6+ flowers within 22 gains a bee a game day. Crops within 8 blocks of a loaded home with bees grow 25% faster by day.
+- **Leading**: a held flower draws up to 10 bees within 8; passing within 2.5 of another home with room moves one from one count to the other.
+- **Cap**: at most 600 bees out, nearest the player first; one instanced mesh (wing flap in the vertex shader).
+- **Village generator 8** (worldgen `VGEN`): nests on about 3% of oak and birch trees in forests and plains; a grass village of 6+ gets a beekeeper, a honey extractor, 2 hives of 8-12 bees and a flower bed. Older saves keep generator 7 (no nests, no beekeeper).
+- **Beekeeper**: hire kit shears + 16 glass bottles. Harvests at dawn and dusk (bottles and comb in turn), picks wild flowers and replants them by its hives until 6+, builds hives from 3 harvested comb + 6 bought planks (max 4), leads bees from wild nests within 64 to hives under 10 bees, makes candles from bought string, sells honey, comb and candles and buys bottles back. Nothing from the restock.
+- **Saves**: `bees` is `[x, y, z, kind, bees, honey, day]` per home.
+
+## Pig farmers (js/pigfarmer.js, loaded after beekeeper.js; board idea-042)
 `BF.pigFarmer`. Pigs breed, live in sties and are raised by the pig farmer, the way cows, pastures and the cowherd work (js/cowherd.js), on the shared herd code (js/herd.js). Hooks: blocks.js (pig farmer pack after the
-glassmaker pack, `feed_trough`), textures-jobs.js, recipes-jobs.js (7 planks as `P P / P P / PPP`; burns as fuel), mobs.js (roster #2500, outfit, `pigAI` branch, `contain`, `pickWander`, no drops for piglets, `setYoungSize`,
+bees pack, `feed_trough`), textures-jobs.js, recipes-jobs.js (7 planks as `P P / P P / PPP`; burns as fuel), mobs.js (roster #2500, outfit, `pigAI` branch, `contain`, `pickWander`, no drops for piglets, `setYoungSize`,
 `countMobs`, villagerAI cook errand and `ai`, tick / export / import / reset), mobsave.js (`pig`, `sty` skipped; sty pigs are the sty's), jobs.js (jobsite, `pigFarmerCount`, trough beside the sty gate, hire),
 worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock, `HIRE_NEEDS`), market.js (reserve, wares), villagelife.js (shopping, butcher's pork, `reserveOf`, status), villagesim.js (`JOBS`), player.js
 (right click), storage.js (inputs), logmatch.js (`pigs`), debugfeed.js / debug/index.html, builder.js / blueprints.js (`sty`).
@@ -1015,7 +1026,7 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
   (`BF.mobs.setYoungSize`), drop nothing and grow up after 3 days (`PIGLET_DAYS`); feed ages one by 10%. No breeding while 24 pigs are within 16 blocks. Wild pigs within 10 blocks of a player holding feed follow
   them (not sty pigs). Events: `pigFed(m, by)`, `pigBorn(piglet, a, b)`, `pigPenned(m, sty)`, `pigCulled(m, by, pork)`. idea-037 ("mobs live in the world") is to add wild pig breeding too; it was not merged when this
   landed, so pig breeding lives here and the mobs.js hooks are marked for whichever lands second to share one version.
-- **Sties.** Village generator 8 (default for new worlds; worlds saved with 7 keep 7): a village of `PIG_POP` (10)+ villagers on grass (`v.ground === 0`) gets a pig farmer 60% of the time (`PIG_CHANCE`, its own seeded
+- **Sties.** Village generator 9 (default for new worlds; worlds saved with 8 or less keep theirs): a village of `PIG_POP` (10)+ villagers on grass (`v.ground === 0`) gets a pig farmer 60% of the time (`PIG_CHANCE`, its own seeded
   stream `pigs:<village key>`, so it is the same every time and nothing else moves; roster slot `<village key>#2500`, taking the last plain resident's place as the cowherd does) and a `sty` plot (7x8: worldgen adds it
   after every other plot, the pasture included, only when `BF.jobs.pigFarmerCount(v)` holds the pig farmer, so no other plot moves): fence ring with an oak gate facing the road, a coarse-dirt corner by the gate, a
   2-water trough at the back, and a plank roof on fence posts over the back corner; the feed trough stands beside the gate (`jobs.planVillage`). Inside is 5x5 = 25 cells: `limit` = max(2, floor(cells / 8)) = 3.

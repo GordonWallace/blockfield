@@ -1,4 +1,4 @@
-// Pigs, sties and the pig farmer (js/pigfarmer.js, board idea-042): village generator 8 (the default) gives about 60% of the grass villages of
+// Pigs, sties and the pig farmer (js/pigfarmer.js, board idea-042): village generator 9 (the default) gives about 60% of the grass villages of
 // 10+ a pig farmer and a sty (old saves none); the sty (gate, coarse dirt, water trough, roofed shelter, 2-4 pigs, one pig per 8 cells); its
 // starting pack (feed and emeralds only) and trades; breeding on carrots, potatoes and beetroot, piglets (no drops, grown in 3 days, feeding
 // ages them 10%), pigs following a player holding feed; feeding and culling to the sty's limit (never below 2 adults, 1-3 raw porkchops each)
@@ -16,7 +16,7 @@ module.exports = async (pg, out) => {
     const rosterOf = v => BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground });
     BF.state.paused = true;
 
-    // ---- generated villages: about 60% of the grass villages of 10+ (deterministic per village), none in a world saved with generator 7
+    // ---- generated villages: about 60% of the grass villages of 10+ (deterministic per village), none in a world saved with generator 8
     let elig = 0, withPF = 0, wrong = [], again = 0;
     for (const seed of [11, 12, 13, 14, 15, 16, 17, 18]) {
       BF.newWorld(seed, { gen: 3 });
@@ -29,16 +29,16 @@ module.exports = async (pg, out) => {
         if (pf && rosterOf(v).some(sl => sl.prof === "pig_farmer") !== pf) again++;
       }
     }
-    ok("generator 8: a pig farmer and a sty only in grass villages of 10+, one each", wrong.length === 0, wrong.slice(0, 4));
+    ok("generator 9: a pig farmer and a sty only in grass villages of 10+, one each", wrong.length === 0, wrong.slice(0, 4));
     ok("in about 60% of them", elig >= 40 && Math.abs(withPF / elig - 0.6) < 0.12, { withPF, elig, share: +(withPF / elig).toFixed(2) });
     ok("the same village always gets the same answer", again === 0);
-    BF.newWorld(1, { gen: 3, villages: 7 });
+    BF.newWorld(1, { gen: 3, villages: 8 });
     let old = 0;
     for (const v of BF.worldgen.villagesNear(0, 0, 2400)) old += rosterOf(v).filter(sl => sl.prof === "pig_farmer").length + v.buildings.filter(b => b.type === "sty").length;
-    ok("worlds saved with generator 7 get no pig farmers or sties", old === 0, old);
+    ok("worlds saved with generator 8 get no pig farmers or sties", old === 0, old);
 
     BF.newWorld(1, { gen: 3, gameMode: "survival" });
-    ok("new worlds use village generator 8", BF.state.villages === 8, BF.state.villages);
+    ok("new worlds use village generator 9", BF.state.villages === 9, BF.state.villages);
     BF.mobs.spawning = false;
     const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains with a pasture and a sty
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);

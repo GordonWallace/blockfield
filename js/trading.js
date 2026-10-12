@@ -44,6 +44,9 @@ const VALUE = {
   sugar: .05, pumpkin_pie: .3, cake: 1.0, cake_slice: .14, pumpkin_seeds: .035, bakers_oven: .75,
   // glassmaker goods (js/glassmaker.js): glass .08 (1 sand .03 + a furnace item's fuel and work); 6 glass -> 16 panes; the kiln 4 cobblestone + 1 iron ingot
   glass_pane: .035, glass_kiln: .65,
+  // beekeeper goods (js/beekeeper.js): honeycomb .1; a honey bottle is a glass bottle .1 + its honey .09; a candle 1 honeycomb + 1 string + work;
+  // a beehive 6 planks + 3 honeycomb; the extractor 4 planks + 1 iron ingot
+  honeycomb: .1, honey_bottle: .19, candle: .22, beehive: .5, honey_extractor: .62,
   feed_trough: .25,   // pig farmer's jobsite (js/pigfarmer.js): 7 planks (.21) + work
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
@@ -247,6 +250,15 @@ const TRADES = {
   ],
   // The glassmaker (js/glassmaker.js) sells what it makes from sand it dug or bought, smelted with fuel it bought: glass, glass panes and glass
   // bottles (prices 104-114% of VALUE). Nothing is restocked or part of its starting pack. It buys sand from the player too (93%).
+  // The beekeeper (js/beekeeper.js) sells what its hives give and what it makes from it: honey bottles, honeycomb and candles (prices 105-114% of
+  // VALUE). Nothing is restocked or part of its starting pack. It buys empty glass bottles back for its next harvest.
+  beekeeper: [
+    ["1 emerald > 5 honey_bottle", "1 emerald > 9 honeycomb", "1 emerald > 4 candle", "12 glass_bottle > 1 emerald"],
+    ["2 emerald > 10 honey_bottle", "2 emerald > 18 honeycomb"],
+    [],
+    [],
+    [],
+  ],
   glassmaker: [
     ["1 emerald > 11 glass", "1 emerald > 26 glass_pane", "1 emerald > 9 glass_bottle", "36 sand > 1 emerald"],
     ["2 emerald > 22 glass", "2 emerald > 52 glass_pane"],
@@ -285,6 +297,7 @@ const PRODUCE = {
   cowherd: [],         // milk, beef, leather and steak come only from its herd (js/cowherd.js)
   baker: [],           // cakes and pies come only from its oven, from ingredients it bought (js/baker.js)
   glassmaker: [],      // glass, panes and bottles come only from sand it dug or bought, smelted in a furnace (js/glassmaker.js)
+  beekeeper: [],       // honey and honeycomb come only from full hives, candles from honeycomb and string it bought (js/beekeeper.js)
   pig_farmer: [],      // pork only from the pigs it culls, cooked in a furnace with fuel it bought; feed only bought (js/pigfarmer.js)
 };
 
@@ -401,6 +414,7 @@ function stockFor(prof, v) {
   if (prof === "cowherd") for (const n of ["milk_bottle", "raw_beef", "leather", "steak"]) noStart.add(I[n]);   // milked, culled or cooked, never given (js/cowherd.js)
   if (prof === "baker") for (const n of ["cake_slice", "pumpkin_pie", "cake"]) noStart.add(I[n]);   // baked, never given (js/baker.js)
   if (prof === "glassmaker") for (const n of ["glass", "glass_pane", "glass_bottle"]) noStart.add(I[n]);   // made from sand, never given (js/glassmaker.js)
+  if (prof === "beekeeper") for (const n of ["honey_bottle", "honeycomb", "candle", "glass_bottle"]) noStart.add(I[n]);   // from its hives, never given; bottles come with its hire kit (js/beekeeper.js)
   if (prof === "pig_farmer") for (const n of ["raw_porkchop", "cooked_porkchop"]) noStart.add(I[n]);   // culled or cooked, never given (js/pigfarmer.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
@@ -413,7 +427,7 @@ function stockFor(prof, v) {
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
     // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js); nor the fletcher (js/fletcher.js seed gives a few)
-    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker" && prof !== "glassmaker" && prof !== "pig_farmer") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker" && prof !== "glassmaker" && prof !== "beekeeper" && prof !== "pig_farmer") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
@@ -437,6 +451,7 @@ function stockFor(prof, v) {
   if (prof === "poultry_keeper" && I.wheat_seeds != null && inv.count(a, I.wheat_seeds) < 12) inv.add(a, I.wheat_seeds, 12 - inv.count(a, I.wheat_seeds));   // chicken feed (js/poultry.js)
   if (prof === "pig_farmer" && BF.pigFarmer) BF.pigFarmer.seed(a);   // a few carrots and potatoes to feed the sty it starts with (js/pigfarmer.js)
   if (prof === "cowherd" && BF.cowherd) BF.cowherd.kitInto(a, v);   // 1 bucket + 30 glass bottles, once per villager (js/cowherd.js)
+  if (prof === "beekeeper" && BF.beekeeper) BF.beekeeper.kitInto(a, v);   // shears + 16 glass bottles, once per villager (js/beekeeper.js)
   return a;
 }
 // Emeralds' worth of the cheapest offer in any trade table selling an item `ok(name)` accepts (per piece), or null when nobody sells one.
@@ -575,7 +590,9 @@ function pack(v) {
     mi: BF.miner && v.profession === "miner" ? BF.miner.pack(v) : undefined,          // the miner's mineshaft (js/miner.js)
     ts: BF.toolsmith && v.profession === "toolsmith" ? BF.toolsmith.pack(v) : undefined,   // the tool on the toolsmith's table, its furnace (js/toolsmith.js)
     fl: BF.fletcher && v.profession === "fletcher" ? BF.fletcher.pack(v) : undefined,     // the arrows or bow on the fletcher's table (js/fletcher.js)
-    ck: v.cowKit ? 1 : undefined,                                                      // it was given the cowherd's bucket and bottles (js/cowherd.js)
+    ck: v.cowKit ? 1 : undefined,
+    bk: v.beeKit ? 1 : undefined,                                                      // it was given the beekeeper's shears and bottles (js/beekeeper.js)
+    ck_: undefined,                                                      // it was given the cowherd's bucket and bottles (js/cowherd.js)
     mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
   };
@@ -602,6 +619,7 @@ function unpack(v, o) {
   if (BF.toolsmith && o.ts) BF.toolsmith.unpack(v, o.ts);
   if (BF.fletcher && o.fl) BF.fletcher.unpack(v, o.fl);
   v.cowKit = !!o.ck;
+  v.beeKit = !!o.bk;
   if (BF.merchant && o.mc) BF.merchant.unpack(v, o.mc);
   if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;
