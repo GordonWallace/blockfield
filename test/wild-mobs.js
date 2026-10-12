@@ -133,9 +133,12 @@ module.exports = async (pg) => {
       for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
       BF.wildlife.tune.pairP = 1;
       const a = BF.mobs.spawn("cow", x + 0.5, y, z + 0.5), b = BF.mobs.spawn("cow", x + 2.5, y, z + 0.5);
-      for (const m of [a, b]) { m.ai.t = 999; m.wildB = { next: 0 }; }
+      for (const m of [a, b]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
+      for (let i = 0; i < 40; i++) BF.mobs.update(0.05);   // landed on the grass before their daily roll
+      for (const m of [a, b]) m.wildB = { next: 0 };
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
       const calves = L.filter(m => m.type === "cow" && !m.dead && m.cow && m.cow.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 20).length;
+      const pairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "cow").length, cows = [a, b].map(m => [m.dead ? "dead" : "", m.cow && m.cow.fed, +m.position.x.toFixed(1), +m.position.y.toFixed(1), +m.position.z.toFixed(1)]);
       // a crowd: 7 cows together never pair up on their own
       for (const m of L.slice()) if (m.type === "cow") m.dead = true;
       for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
@@ -150,7 +153,7 @@ module.exports = async (pg) => {
       const fedOk = BF.pigs.feed(p1, "player") && BF.pigs.feed(p2, "player");
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
       const piglets = L.filter(m => m.type === "pig" && !m.dead && m.pig && m.pig.growAt != null).length;
-      return { calves, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
+      return { calves, pairs, cows, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
     }, spot);
     ok("two wild cows on grass breed on their own", br.calves >= 1, br);
     ok("no wild breeding with 6 or more of a kind within 24 blocks", br.willing === 0, br);

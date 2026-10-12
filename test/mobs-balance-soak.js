@@ -27,8 +27,6 @@ const RUN = 3;   // days each group of villages runs
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  pg.on('console', m => { if (m.text().startsWith('SAMPLE')) console.log(m.text()); });
-  await pg.addInitScript(() => { window.__SAMPLE = 1; });
   await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForTimeout(3000);
   const setup = await pg.evaluate(([DAYS, RUN]) => {
@@ -114,7 +112,6 @@ const RUN = 3;   // days each group of villages runs
   }
   const end = await pg.evaluate(() => {
     const R = window.__rec, ws = JSON.stringify(BF.wildlife.serialize()), ms = JSON.stringify(BF.mobSave.serialize());
-    if (window.__SAMPLE) console.log("SAMPLE " + ws.slice(0, 3000));
     return { born: R.born, died: R.died, noWild: R.noWild, wildlifeBytes: ws.length, mobsBytes: ms.length, stored: BF.wildlife.stored ? BF.wildlife.stored() : null };
   });
   // ---- the checks

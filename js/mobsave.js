@@ -114,8 +114,15 @@ const owned = m => m.pen || m.penVillage || m.coop || m.pasture || m.horse || m.
 // A wild mob for a save: its snapshot plus its animal state (a sheep's wool, a calf's growth, breeding cooldowns), which the snapshot leaves out
 // because pen, coop and pasture stock keep theirs in their own saves.
 const ST_KEYS = ["sheep", "hen", "cow", "pig"];
+// what a wild mob keeps: its spot, health, young/shorn flags and breeding roll; motion, animation and AI timers start fresh (a third of the size)
+const WILD_DROP = new Set(["tradeCd", "hp", "yaw", "headYaw", "headPitch", "lookAt", "walkPhase", "walkAmt", "onGround", "inWater", "headInWater", "fallStart",
+  "hurtT", "invuln", "knockT", "ai", "age", "fire", "mate", "onLadder"]);
 function packWild(m) {
-  const e = { type: m.type, variant: m.variant, style: m.style, snap: snapOf(m) };
+  const snap = snapOf(m);
+  for (const k of Object.keys(snap.s)) if (WILD_DROP.has(k)) delete snap.s[k];
+  const e = { type: m.type, snap };
+  if (m.variant != null) e.variant = m.variant;
+  if (m.style != null) e.style = m.style;
   for (const k of ST_KEYS) if (m[k] && typeof m[k] === "object") { const st = ser(Object.assign({}, m[k], { mob: undefined }), 0, new Set()); if (st) e.st = st; break; }
   return e;
 }
