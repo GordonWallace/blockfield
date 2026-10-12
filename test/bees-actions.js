@@ -143,11 +143,17 @@ module.exports = async (pg) => {
     for (let i = 0; i < 40; i++) step();
 
     // ---- colony growth: one a day with 6+ flowers, up to 30
+    const planted = [];   // the beekeeper may have picked some by now: top them up to 6 on open grass near the hive, removed after
+    for (let r = 3; r <= 12 && BE.flowersNear(h0, true).length < 6; r++) for (let a = 0; a < 16 && BE.flowersNear(h0, true).length < 6; a++) {
+      const x = Math.round(h0.x + Math.cos(a / 16 * 6.283) * r), z = Math.round(h0.z + Math.sin(a / 16 * 6.283) * r), y = W.heightAt(x, z);
+      if (W.getBlock(x, y, z) === B.grass && W.getBlock(x, y + 1, z) === 0 && W.setBlock(x, y + 1, z, B.poppy)) planted.push([x, y + 1, z]);
+    }
     const gN = BE.flowersNear(h0, true).length;
     h0.bees = 29; h0.day = BF.sky.day - 1; BE.housekeeping();
-    ok("a home with 6+ flowers gains a bee a day", gN < 6 || h0.bees === 30, { gN, bees: h0.bees });
+    ok("a home with 6+ flowers gains a bee a day", gN >= 6 && h0.bees === 30, { gN, bees: h0.bees });
     h0.day = BF.sky.day - 1; BE.housekeeping();
-    ok("never more than 30", h0.bees === 30);
+    ok("never more than 30", h0.bees === 30, h0.bees);
+    for (const [x, y, z] of planted) if (W.getBlock(x, y, z) === B.poppy) W.setBlock(x, y, z, 0);
     h1.bees = 9;
 
     // ---- chunk unload and reload: dropped, then scattered near flowers
