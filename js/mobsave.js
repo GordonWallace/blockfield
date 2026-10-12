@@ -6,7 +6,7 @@
 // - A snapshot is the mob's own plain data: its ai table and any other plain fields (a job's stage, target, timers; routes too). Anything
 //   that is not plain (meshes, other mobs, villages, registries) is left out, and the fields job modules restore from their own saves
 //   (inventory, profession, bed, jobsite, village) are never touched. Everything else is read back as saved.
-// - Mobs owned by another module's save (pen sheep, coop hens, pasture cows, horses, boat riders) are left to that module.
+// - Mobs owned by another module's save (pen sheep, coop hens, pasture cows, sty pigs, horses, boat riders) are left to that module.
 // API: BF.mobSave = { SHORT, stash, fresh, EXACT, serialize(), deserialize(o), peek(key) -> snap | "wait" | null, golem(villageKey) -> snap | null,
 //                     apply(m, snap), done(key), update(dt), reset(), pending() }
 (() => {
@@ -19,7 +19,7 @@ const MAX_WILD = 120;        // wild mobs saved (the ones nearest the player)
 const MAX_DEPTH = 7, MAX_ARR = 2500;
 // Fields a snapshot never holds: render objects, identity (set again by the spawn), what the modules restore from their own saves.
 const SKIP = new Set(["def", "position", "vel", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
-  "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "coop", "hen", "cow", "pasture", "sheep", "horse", "riding", "ledBy",
+  "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
   "tradingWith", "badge", "badgeLevel", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child"]);
 
@@ -110,7 +110,7 @@ let golems = new Map();      // village key -> [snap]
 let wild = [];               // [{type, variant, style, snap}]
 let savedAt = -1, wildT = 0;
 
-const owned = m => m.pen || m.penVillage || m.coop || m.pasture || m.horse || m.riding || m.ledBy || m.removed || m.dead;
+const owned = m => m.pen || m.penVillage || m.coop || m.pasture || m.sty || m.horse || m.riding || m.ledBy || m.removed || m.dead;
 // A village unloading: its villagers and golems are written down where they stand, to come back exactly after a short absence.
 function stash(m) {
   if (!m || !m.position || owned(m) || !m.village) return;

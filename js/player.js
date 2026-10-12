@@ -1369,6 +1369,10 @@ function secondaryDown() {
     const r = BF.cowherd.playerUse(mh.mob, selectedItem());
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
+  if (mh && mh.mob && mh.mob.type === "pig" && BF.pigFarmer && (!target || mh.dist < target.dist)) {   // a carrot, potato or beetroot feeds a pig (js/pigfarmer.js)
+    const r = BF.pigFarmer.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
   if (mh && mh.mob && mh.mob.type === "chicken" && BF.poultry && (!target || mh.dist < target.dist)) {   // seeds feed a chicken (js/poultry.js)
     const r = BF.poultry.playerUse(mh.mob, selectedItem());
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }

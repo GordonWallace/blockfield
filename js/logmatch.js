@@ -33,6 +33,7 @@ function actorsOf(e) {
   if (k === "horse" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "horse"]] : null; }   // js/stables.js
   if (k === "caravan" && (m = /^(.*?\(Merchant\)) /.exec(tx))) return [["Merchant", "caravan"]];   // js/merchant.js
   if (k === "cattle" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "cattle"]] : null; }   // js/cowherd.js (a calf born in the pasture names no villager)
+  if (k === "pigs" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "pigs"]] : null; }   // js/pigfarmer.js (a piglet born in the sty names no villager)
   if (k === "bake" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "bake"]] : null; }   // js/baker.js: baked, bought milk, sold a treat
   if (k === "birth") return [["Child", "born"]];
   if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }

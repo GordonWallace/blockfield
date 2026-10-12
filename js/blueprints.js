@@ -161,6 +161,27 @@ const SPECS = {
       return { cells: c, beds: [], w: w + 1, d, marks: { room: [[1, 1], [9, 5]], gate: [[5, 0]], out: [[5, -1]], fence: [[0, 0], [10, 8]], churn: [[w, 1]] } };
     },
   },
+  // Sty (js/pigfarmer.js): a fenced pen (7x9 ring) with an oak gate in the front, a 2-water trough in a plank rim and a small plank-roofed
+  // shelter on a log post over the back corner, a 2x2 coarse-dirt wallow by the gate when the builder holds 4 coarse dirt (opts.mud), and the
+  // pig farmer's feed trough beside the gate. Only in villages on grass (builder.js weighTypes / findSite, BF.pigFarmer.villageOK). It starts
+  // empty: the pig farmer fetches wild pigs. `marks`: the pen the pigs keep to (inside corners), the gate, the cell in front of it, the fence's
+  // corners and the trough, turned with the building (get).
+  sty: {
+    label: "sty", weight: "other",
+    gen(st, h, opts) {
+      const B = BF.B, c = [], w = 7, d = 9, gate = BF.gateId("x", false, "oak");
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        if (!(u === 0 || u === w - 1 || q === 0 || q === d - 1)) continue;
+        c.push([u, 0, q, q === 0 && u === 3 ? gate : B.oak_fence, q === 0 && u === 3 ? PH.DOOR : PH.WALL]);
+      }
+      c.push([1, 0, 6, B.planks, PH.WALL], [2, 0, 6, B.planks, PH.WALL], [3, 0, 6, B.planks, PH.WALL], [3, 0, 7, B.planks, PH.WALL], [1, 0, 7, B.water, PH.WALL], [2, 0, 7, B.water, PH.WALL]);
+      c.push([4, 0, 6, B.oak_log, PH.WALL], [4, 1, 6, B.oak_log, PH.WALL], [6, 1, 6, B.oak_fence, PH.WALL], [4, 1, 8, B.oak_fence, PH.WALL], [6, 1, 8, B.oak_fence, PH.WALL]);
+      for (let q = 6; q < d; q++) for (let u = 4; u < w; u++) c.push([u, 2, q, B.planks, PH.ROOF]);
+      if (opts && opts.mud && B.coarse_dirt != null) c.push([1, 0, 1, B.coarse_dirt, PH.FLOOR], [2, 0, 1, B.coarse_dirt, PH.FLOOR], [1, 0, 2, B.coarse_dirt, PH.FLOOR], [2, 0, 2, B.coarse_dirt, PH.FLOOR]);
+      if (B.feed_trough != null) c.push([4, 0, -1, B.feed_trough, PH.LIGHT]);
+      return { cells: c, beds: [], w, d: d + 1, marks: { room: [[1, 1], [5, 5]], gate: [[3, 0]], out: [[3, -1]], fence: [[0, 0], [6, 8]], trough: [[4, -1]] } };
+    },
+  },
   // Bakehouse (js/baker.js): a small open shelter (3x3: four fence posts under a roof) over the baker's oven at the back. The oven is a jobsite:
   // an unemployed villager takes the baker's job there (one baker per 15 villagers, at least one).
   bakehouse: {
@@ -283,7 +304,7 @@ function classify(spec, u, y, q, id) {
 function get(type, rot, style, h, opts, wood) {
   rot = rot & 3; style = style | 0; h = h == null ? 0.5 : h;
   if (!wood || !woodsAvailable().includes(wood)) wood = styleWood(style);
-  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, opts && opts.len ? [opts.len, opts.r0 | 0, opts.r1 | 0, opts.posts || ""].join("/") : 0, wood].join("|");
+  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, opts && opts.mud ? 1 : 0, opts && opts.len ? [opts.len, opts.r0 | 0, opts.r1 | 0, opts.posts || ""].join("/") : 0, wood].join("|");
   let bp = cache.get(ck);
   if (bp) return bp;
   const T = SPECS[type];

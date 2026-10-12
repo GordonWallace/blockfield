@@ -47,6 +47,7 @@ const VALUE = {
   // beekeeper goods (js/beekeeper.js): honeycomb .1; a honey bottle is a glass bottle .1 + its honey .09; a candle 1 honeycomb + 1 string + work;
   // a beehive 6 planks + 3 honeycomb; the extractor 4 planks + 1 iron ingot
   honeycomb: .1, honey_bottle: .19, candle: .22, beehive: .5, honey_extractor: .62,
+  feed_trough: .25,   // pig farmer's jobsite (js/pigfarmer.js): 7 planks (.21) + work
 };
 for (const sp of ["", "spruce_", "birch_", "jungle_", "acacia_", "dark_oak_", "mangrove_", "cherry_"]) { // building wood: log 0.12 = 4 planks at 0.03
   VALUE[sp + "planks"] = .03; VALUE[(sp || "oak_") + "log"] = .12;
@@ -217,6 +218,16 @@ const TRADES = {
     [],
     [],
   ],
+  // The pig farmer (js/pigfarmer.js) sells what its sty gives: raw porkchops from the pigs it culls and porkchops it cooks from them in a furnace
+  // with fuel it bought (prices 96-104% of VALUE). Only what it holds can be bought: nothing is restocked or part of its starting pack. It buys
+  // the sty's feed (carrots, potatoes, beetroot) from the player too (83-84%).
+  pig_farmer: [
+    ["1 emerald > 12 raw_porkchop", "1 emerald > 8 cooked_porkchop", "20 carrot > 1 emerald", "20 potato > 1 emerald"],
+    ["2 emerald > 15 cooked_porkchop", "17 beetroot > 1 emerald"],
+    [],
+    [],
+    [],
+  ],
   stable_hand: [
     ["18 wheat_item > 1 emerald", "2 hay_bale > 1 emerald", "1 emerald > 3 lead"],
     ["2 emerald > 1 saddle"],
@@ -287,6 +298,7 @@ const PRODUCE = {
   baker: [],           // cakes and pies come only from its oven, from ingredients it bought (js/baker.js)
   glassmaker: [],      // glass, panes and bottles come only from sand it dug or bought, smelted in a furnace (js/glassmaker.js)
   beekeeper: [],       // honey and honeycomb come only from full hives, candles from honeycomb and string it bought (js/beekeeper.js)
+  pig_farmer: [],      // pork only from the pigs it culls, cooked in a furnace with fuel it bought; feed only bought (js/pigfarmer.js)
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -386,7 +398,7 @@ function profile(prof) {
 // up one of these trades later gets no tools, only the emeralds to buy them (hireKit). These four never start with any other tool among their wares.
 const STARTER_TOOLS = { farmer: ["wooden_hoe", "bucket"], forester: ["wooden_axe"], miner: ["stone_pickaxe"], shepherd: ["shears"], glassmaker: ["stone_shovel"] };
 // What a newly hired villager of these trades must buy to start work (any one of each group), and what else it is given.
-const HIRE_NEEDS = { farmer: [/_hoe$/, /^(water_)?bucket$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/], poultry_keeper: [/^wheat_seeds$/] };
+const HIRE_NEEDS = { farmer: [/_hoe$/, /^(water_)?bucket$/], forester: [/_axe$/], miner: [/_pickaxe$/], shepherd: [/^shears$/, /^wheat_item$/], poultry_keeper: [/^wheat_seeds$/], pig_farmer: [/^(carrot|potato|beetroot)$/] };
 const isToolItem = id => { const it = BF.items[id]; return !!(it && ((it.tool && typeof it.tool === "object") || it.name === "shears")); };   // blocks carry tool: "axe" etc. (the tool that mines them)
 function stockFor(prof, v) {
   if (prof === "builder" && BF.builder && BF.builder.startStock) return BF.builder.startStock(v);   // materials for the first house, see js/builder.js
@@ -403,6 +415,7 @@ function stockFor(prof, v) {
   if (prof === "baker") for (const n of ["cake_slice", "pumpkin_pie", "cake"]) noStart.add(I[n]);   // baked, never given (js/baker.js)
   if (prof === "glassmaker") for (const n of ["glass", "glass_pane", "glass_bottle"]) noStart.add(I[n]);   // made from sand, never given (js/glassmaker.js)
   if (prof === "beekeeper") for (const n of ["honey_bottle", "honeycomb", "candle", "glass_bottle"]) noStart.add(I[n]);   // from its hives, never given; bottles come with its hire kit (js/beekeeper.js)
+  if (prof === "pig_farmer") for (const n of ["raw_porkchop", "cooked_porkchop"]) noStart.add(I[n]);   // culled or cooked, never given (js/pigfarmer.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
     for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
@@ -414,7 +427,7 @@ function stockFor(prof, v) {
     for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
     // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js); nor the fletcher (js/fletcher.js seed gives a few)
-    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker" && prof !== "glassmaker" && prof !== "beekeeper") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker" && prof !== "glassmaker" && prof !== "beekeeper" && prof !== "pig_farmer") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
     entries.push({ id: em, n: rndInt(6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
@@ -436,6 +449,7 @@ function stockFor(prof, v) {
   for (const n of STARTER_TOOLS[prof] || []) if (I[n] != null && !a.some(s => s && s.id === I[n])) inv.add(a, I[n], 1);
   if (prof === "shepherd" && I.wheat_item != null) inv.add(a, I.wheat_item, 8);   // feed for the first days (it buys more when it runs low)
   if (prof === "poultry_keeper" && I.wheat_seeds != null && inv.count(a, I.wheat_seeds) < 12) inv.add(a, I.wheat_seeds, 12 - inv.count(a, I.wheat_seeds));   // chicken feed (js/poultry.js)
+  if (prof === "pig_farmer" && BF.pigFarmer) BF.pigFarmer.seed(a);   // a few carrots and potatoes to feed the sty it starts with (js/pigfarmer.js)
   if (prof === "cowherd" && BF.cowherd) BF.cowherd.kitInto(a, v);   // 1 bucket + 30 glass bottles, once per villager (js/cowherd.js)
   if (prof === "beekeeper" && BF.beekeeper) BF.beekeeper.kitInto(a, v);   // shears + 16 glass bottles, once per villager (js/beekeeper.js)
   return a;
@@ -460,7 +474,7 @@ function hireKit(m, prof) {
   for (const re of needs) {
     if (m.inv.some(s => s && re.test(BF.items[s.id].name))) continue;
     const p = cheapest(n => re.test(n));
-    want += re.source === "^wheat_item$" || re.source === "^wheat_seeds$" ? 1 : Math.max(1, Math.ceil(p == null ? 2 : p));
+    want += re.source === "^wheat_item$" || re.source === "^wheat_seeds$" || re.source === "^(carrot|potato|beetroot)$" ? 1 : Math.max(1, Math.ceil(p == null ? 2 : p));
   }
   const have = inv.count(m.inv, I.emerald), add = Math.max(0, want - have);
   if (add) inv.add(m.inv, I.emerald, add);
