@@ -1430,6 +1430,8 @@ const api = {
   levelNames: LEVELS,
   isCreative,
   iconURL,          // item id -> icon image URL, as the slots show it (js/debugfeed.js sends these to the debug screen)
+  creativeItems,    // [{id, cat, name}] in creative-menu order, and the tabs: Blockfieldpedia (wiki/) groups its block and item lists by them
+  creativeTabs: CRE_TABS,
   init() {
     buildRecipes();
     buildDOM();
