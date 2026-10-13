@@ -35,7 +35,7 @@ BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
   BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
-  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 9;         // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+ (default)
+  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
@@ -164,8 +164,8 @@ BF.boats.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
-const m = /^#seed(\d+)(?:gen(\d))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world
+const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world, #seed1337gen3v9 one with village generator 9
 if (m) seed = +m[1];
-BF.newWorld(seed, m && m[2] ? { gen: +m[2] } : undefined);
+BF.newWorld(seed, m && (m[2] || m[3]) ? Object.assign(m[2] ? { gen: +m[2] } : {}, m[3] ? { villages: +m[3] } : {}) : undefined);
 requestAnimationFrame(frame);
 })();

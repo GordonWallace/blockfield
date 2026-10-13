@@ -143,8 +143,8 @@ const SPECS = {
     },
   },
   // Pasture (js/cowherd.js): a fenced grass field (11x9 ring) with an oak gate in the front, a water trough (2 water in a plank rim) and two hay
-  // bales (when the builder holds them) along the back, and the cowherd's milk churn beside it. Only in villages on grass (builder.js pickType / findSite): cows spawn only on
-  // grass. It starts empty: the cowherd fetches wild cows. `marks`: the room the cows graze (inside corners), the gate, the cell in front of it,
+  // bales (when the builder holds them) along the back, and the cowherd's milk churn beside it. Any village (idea-044: builder.js chooseFood).
+  // It starts empty: the cowherd fetches wild cows. `marks`: the room the cows graze (inside corners), the gate, the cell in front of it,
   // the fence's corners and the churn, turned with the building (get).
   pasture: {
     label: "pasture", weight: "other",
@@ -158,12 +158,14 @@ const SPECS = {
       c.push([6, 0, 7, B.planks, PH.WALL], [9, 0, 7, B.planks, PH.WALL], [7, 0, 7, B.water, PH.WALL], [8, 0, 7, B.water, PH.WALL]);
       if (opts && opts.hay && B.hay_bale != null) c.push([1, 0, 7, B.hay_bale, PH.LIGHT], [2, 0, 7, B.hay_bale, PH.LIGHT]);
       if (B.milk_churn != null) c.push([w, 0, 1, B.milk_churn, PH.LIGHT]);
-      return { cells: c, beds: [], w: w + 1, d, marks: { room: [[1, 1], [9, 5]], gate: [[5, 0]], out: [[5, -1]], fence: [[0, 0], [10, 8]], churn: [[w, 1]] } };
+      const turf = [];   // the field is grass (idea-044): builder.js evalTerrain turfs whatever ground is not (sand, snow ...), with dirt it brings
+      for (let q = 1; q <= 5; q++) for (let u = 1; u <= 9; u++) turf.push([u, q]);
+      return { cells: c, beds: [], w: w + 1, d, marks: { room: [[1, 1], [9, 5]], gate: [[5, 0]], out: [[5, -1]], fence: [[0, 0], [10, 8]], churn: [[w, 1]], turf } };
     },
   },
   // Sty (js/pigfarmer.js): a fenced pen (7x9 ring) with an oak gate in the front, a 2-water trough in a plank rim and a small plank-roofed
   // shelter on a log post over the back corner, a 2x2 coarse-dirt wallow by the gate when the builder holds 4 coarse dirt (opts.mud), and the
-  // pig farmer's feed trough beside the gate. Only in villages on grass (builder.js weighTypes / findSite, BF.pigFarmer.villageOK). It starts
+  // pig farmer's feed trough beside the gate. Any village (idea-044: builder.js chooseFood, a food jobsite). It starts
   // empty: the pig farmer fetches wild pigs. `marks`: the pen the pigs keep to (inside corners), the gate, the cell in front of it, the fence's
   // corners and the trough, turned with the building (get).
   sty: {
@@ -180,6 +182,41 @@ const SPECS = {
       if (opts && opts.mud && B.coarse_dirt != null) c.push([1, 0, 1, B.coarse_dirt, PH.FLOOR], [2, 0, 1, B.coarse_dirt, PH.FLOOR], [1, 0, 2, B.coarse_dirt, PH.FLOOR], [2, 0, 2, B.coarse_dirt, PH.FLOOR]);
       if (B.feed_trough != null) c.push([4, 0, -1, B.feed_trough, PH.LIGHT]);
       return { cells: c, beds: [], w, d: d + 1, marks: { room: [[1, 1], [5, 5]], gate: [[3, 0]], out: [[3, -1]], fence: [[0, 0], [6, 8]], trough: [[4, -1]] } };
+    },
+  },
+  // Sheep pen (js/shepherd.js, idea-044): the generated village pen (9x8 ring) with an oak gate in the front, a water trough (2 water in a plank
+  // rim) and two hay bales (when the builder holds them) along the back, and the shepherd's loom beside it. It starts empty: the shepherd
+  // fetches wild sheep. `marks`: the room the sheep keep to (inside corners), the gate, the cell in front of it, the fence's corners, the loom.
+  pen: {
+    label: "sheep pen", weight: "other",
+    gen(st, h, opts) {
+      const B = BF.B, c = [], w = 9, d = 8, gate = BF.gateId("x", false, "oak");
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        if (!(u === 0 || u === w - 1 || q === 0 || q === d - 1)) continue;
+        c.push([u, 0, q, q === 0 && u === 4 ? gate : B.oak_fence, q === 0 && u === 4 ? PH.DOOR : PH.WALL]);
+      }
+      for (let u = 4; u <= 7; u++) c.push([u, 0, 5, B.planks, PH.WALL]);
+      c.push([4, 0, 6, B.planks, PH.WALL], [7, 0, 6, B.planks, PH.WALL], [5, 0, 6, B.water, PH.WALL], [6, 0, 6, B.water, PH.WALL]);
+      if (opts && opts.hay && B.hay_bale != null) c.push([1, 0, 6, B.hay_bale, PH.LIGHT], [2, 0, 6, B.hay_bale, PH.LIGHT]);
+      if (B.loom != null) c.push([w, 0, 1, B.loom, PH.LIGHT]);
+      return { cells: c, beds: [], w: w + 1, d, marks: { room: [[1, 1], [7, 4]], gate: [[4, 0]], out: [[4, -1]], fence: [[0, 0], [8, 7]], loom: [[w, 1]] } };
+    },
+  },
+  // Vegetable farm (idea-044): the generated village farm, built by a builder. A 7x5 bed ringed with logs set into the ground (the ground layer,
+  // y -1, replaces the grass or soil it stands on), a water channel down its middle, and the farmer's composter beside it. The bed's soil is the
+  // ground itself, levelled with dirt (builder.js evalTerrain: `soil` columns are filled up to the ring's level, and sand or gravel there is
+  // swapped for dirt). The builder does not till or plant: the farmer who takes the composter tills and plants it (js/villagelife.js beds).
+  veg_farm: {
+    label: "vegetable farm", weight: "other", ground: true,
+    gen() {
+      const B = BF.B, c = [], w = 9, d = 7, mid = w >> 1, soil = [];
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        if (u === 0 || u === w - 1 || q === 0 || q === d - 1) c.push([u, -1, q, B.oak_log, PH.FLOOR]);
+        else if (u === mid) c.push([u, -1, q, B.water, PH.WALL]);
+        else soil.push([u, q]);
+      }
+      if (B.composter != null) c.push([w, 0, 3, B.composter, PH.LIGHT]);
+      return { cells: c, beds: [], w: w + 1, d, ground: true, marks: { soil, ring: [[0, 0], [w - 1, d - 1]], composter: [[w, 3]] } };
     },
   },
   // Bakehouse (js/baker.js): a small open shelter (3x3: four fence posts under a roof) over the baker's oven at the back. The oven is a jobsite:
@@ -357,7 +394,8 @@ function get(type, rot, style, h, opts, wood) {
   // marks: named spots of the design ([u, q] in the local frame, js/stables.js reads the paddock's), in the same rotated, min-corner frame as the cells
   const marks = {};
   for (const k in spec.marks || {}) marks[k] = spec.marks[k].map(([u, q]) => { const [x, z] = rot90(u, q, rot); return [x - minX, z - minZ]; });
-  bp = { type, label: T.label, rot, style, h, opts: opts || null, wood, woody: cells.some(c => woodOf(c.id)), w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door, marks };
+  if (spec.ground) for (const c of cells) if (c.y < 0) c.dig = true;   // ground-layer cells take the place of the ground they stand on (builder.js placeCell)
+  bp = { type, label: T.label, rot, style, h, opts: opts || null, wood, woody: cells.some(c => woodOf(c.id)), w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door, marks, ground: !!spec.ground };
   cache.set(ck, bp);
   return bp;
 }

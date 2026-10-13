@@ -26,7 +26,7 @@ const CRAFT_KEEP = {
   cartographer: [["iron_ingot", 8], ["gold_ingot", 2], ["paper", 16], ["compass", 2]],                       // 2 compasses, 2 maps
   miner: [["torch", 64]],                                                                                  // lights its shaft
   explorer: [["tent", 1], ["compass", 1], [/^blank_map_\d$/, 2]],                                         // the map it is filling
-  farmer: [[LOGS, 8], ["wheat_item", 4]],                                                                   // a bed's edging, wheat for bread
+  farmer: [[LOGS, 8], ["wheat_item", 4], ["dirt", 8]],                                                      // a bed's edging, wheat for bread, dirt to raise a bed (the rest it digs is for sale, idea-044)
 };
 
 const T = () => BF.trades;

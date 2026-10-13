@@ -16,7 +16,7 @@ module.exports = async (pg) => {
       for (let i = 0; i < 300; i++) { W.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (W.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 8", BF.state.villages >= 8, BF.state.villages);
     BF.mobs.spawning = false;
     if (BF.weather && BF.weather.set) BF.weather.set("clear", 1e6);

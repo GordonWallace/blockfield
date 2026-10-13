@@ -9,7 +9,7 @@ module.exports = async (pg) => {
     const I = BF.I, T = BF.trades, inv = T.inv, W = BF.world, EC = BF.eggCook, FU = BF.furnaceUse;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     const V = { x: 26, z: 39 };   // seed 1: a village near spawn (test/shepherd-day.js)
     BF.player.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);

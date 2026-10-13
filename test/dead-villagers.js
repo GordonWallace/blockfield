@@ -14,7 +14,7 @@ module.exports = async (pg, out) => {
     const roster = () => BF.mobs.list.filter(m => m.type === "villager" && !m.dead && !m.removed && !m.bred && m.village && m.village.key === KEY);
     const settle = async () => { for (let k = 0; k < 60; k++) { BF.world.update(30, 43, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); } };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "creative" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     BF.sky.setTime(0.1);
     await load(30, 43); await settle();
@@ -43,7 +43,7 @@ module.exports = async (pg, out) => {
     const info = saved["dead:" + KEY] && saved["dead:" + KEY].info || [];
     ok("save keeps who died (name, profession, cause, day)", deadIdx.every(i => info.some(e => e.i === i && e.name && e.prof && /zombie/.test(e.cause) && Number.isFinite(e.day))), info);
     const vc0 = BF.breeding.villagerCount(rec), vb0 = (rec.bred || []).reduce((k, e) => Math.max(k, e.k + 1), 0);
-    BF.newWorld(1, { gen: 3, gameMode: "creative" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     BF.mobs.importVillagers(saved);
     BF.sky.setTime(0.1);

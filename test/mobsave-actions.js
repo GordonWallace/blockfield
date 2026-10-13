@@ -3,7 +3,7 @@
 // state (js/mobsave.js, village loading plan scenario 1). Usage: node test/run.js /tmp/ms test/mobsave-actions.js
 module.exports = async (pg, out) => {
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra));
-  const id = await pg.evaluate(async () => (await BF.save.create({ name: "mobsave", seed: 1337, gameMode: "creative" })).id);
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: "mobsave", seed: 1337, gameMode: "creative", villages: 9 })).id);
   await require('./lib').toVillage(pg);
   await pg.waitForFunction(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 4, null, { timeout: 60000 });
   const before = await pg.evaluate(async () => {

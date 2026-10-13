@@ -77,7 +77,7 @@ module.exports = async (pg) => {
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     window.__step = step;
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns or herds: the test brings the wild horses
     const V = { x: 26, z: 39 };                              // seed 1, gen 3: a plains village of 12
     ok("village is on horse land", BF.horses.isHorseBiome(V.x, V.z));
@@ -97,11 +97,10 @@ module.exports = async (pg) => {
     // builder weighting: a horse village wants a stable; a village that has one hardly does; never off horse land
     const B = BF.builder;
     ok("villageOK on horse land", BF.stables.villageOK(R));
-    ok("villageOK false off horse land", !BF.stables.villageOK({ x: 100000, z: 100000, members: [] }) || !BF.horses.isHorseBiome(100000, 100000));
     // place a stable the way a builder finishes one (findSite, then every cell), then mark it done
     const anyV = vill()[0];
     const site = B.findSite(anyV, "stable", { hay: true }, 999, "oak");
-    ok("found a stable site on horse land", !!site && BF.horses.isHorseBiome(site.ox + site.bp.w / 2, site.oz + site.bp.d / 2), site && [site.ox, site.oy, site.oz, site.rot]);
+    ok("found a stable site (any land since idea-044)", !!site, site && [site.ox, site.oy, site.oz, site.rot]);
     if (!site) return false;
     const found = BF.worldgen.palette(0).found;
     for (const [x, y, z] of site.fill) BF.world.setBlock(x, y, z, found);

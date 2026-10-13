@@ -10,7 +10,7 @@ module.exports = async (pg, out) => {
       const o = { bubbles: true, cancelable: true, button, shiftKey: shift, pointerType: "mouse", clientX: 10, clientY: 10 };
       el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o));
     };
-    const meta = await BF.save.create({ name: "open-screen-save", seed: 5, gameMode: "survival" });
+    const meta = await BF.save.create({ name: "open-screen-save", seed: 5, gameMode: "survival", villages: 9 });
     BF.mobs.spawning = false;
     inv.clear();
     inv.setSlot(0, { id: I.oak_log, count: 20 });

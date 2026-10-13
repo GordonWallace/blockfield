@@ -4,7 +4,7 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   for (const gen of [2, 1]) {
-    await pg.evaluate(g => BF.newWorld(1337, { gen: g, biomeScale: 1 }), gen);
+    await pg.evaluate(g => BF.newWorld(1337, { gen: g, villages: 9, biomeScale: 1 }), gen);
     const res = { gen };
     for (const k of [16, 4096]) {           // 2048 blocks (2 b/px, rivers) and 524288 blocks (512 b/px, the widest allowed)
       let best = 1e9;
