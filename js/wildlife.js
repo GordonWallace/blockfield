@@ -5,8 +5,10 @@
 //    within a game hour it comes back on the same spot doing what it was doing; after that, at a random standable spot of its kind within
 //    RELOCATE_R blocks (grass for animals, dark for monsters). A zombie or skeleton stored under open sky whose chunk stayed unloaded through
 //    daylight is gone: it would have burned. Nothing else is ever removed: wild mobs leave only by dying or being taken into a village.
-//  - Animals: a chunk rolls for animals once, the first time it loads (HABITAT, by the biome at its centre): groups of 2-4 on its grass.
-//    Chunks of saves from before this change roll the first time they load too. Nothing else spawns animals; they breed.
+//  - Animals: a chunk rolls for animals once, the first time it loads (HABITAT, by the biome at its centre): one group of GROUP on its grass
+//    with a quarter of the habitat's summed odds. Herds clump by kind: each ZONE x ZONE-chunk region favours one kind per habitat (picked
+//    from the seed and the region, weighted by the habitat's odds), and every group rolled there is of that kind, so finding each kind takes
+//    some travel. Chunks of saves from before this change roll the first time they load too. Nothing else spawns animals; they breed.
 //  - Wild breeding: two wild adults of a kind on grass within BREED_R blocks may breed on their own: each adult gets one roll a game day
 //    (PAIR_P, so about BREED_CHANCE a pair), never while CROWD_MAX of its kind are within CROWD_R blocks. A roll makes the pair willing,
 //    and the animal's own module walks them together (js/shepherd.js, poultry.js, cowherd.js, pigfarmer.js).
@@ -23,17 +25,20 @@ const BF = (window.BF = window.BF || {});
 
 const HOUR = 1 / 24;           // game days: a chunk back within this brings its mobs back exactly
 const RELOCATE_R = 8;          // blocks: how far a mob may have wandered by the time a chunk that was away longer comes back
-const GROUP = [2, 4];          // animals per first-generation group
+const GROUP = [4, 8];          // animals per first-generation group
+const ZONE = 4;                // chunks per side of a region whose groups are all of one kind
 const ROLLS_PER_STEP = 6;      // chunks rolled per update at most
-const BREED_R = 8, BREED_CHANCE = 0.1, CROWD_R = 24, CROWD_MAX = 6;
+const BREED_R = 8, BREED_CHANCE = 0.1, CROWD_R = 24, CROWD_MAX = 8;
 const PAIR_P = 1 - Math.sqrt(1 - BREED_CHANCE);   // each adult rolls once a day: about BREED_CHANCE for a pair
 const tune = { pairP: PAIR_P };                    // tests may raise it
-const CAP = 20, CAP_CHUNKS = 28, BUFFER = 12;
+const CAP = 10, CAP_CHUNKS = 28, BUFFER = 12;
 const NIGHTS = 7;
 // Starting odds per chunk of a group of each kind, by worldgen biome id (js/worldgen.js NAMES). Desert, ocean, beach, river, swamp, jungle,
 // badlands, mountain peaks and mushroom fields have none; wild horse herds are js/horses.js's own.
 // The spec's starting odds (plains 25% cows, 25% sheep, 20% chickens, 15% pigs; woods 20% pigs, 15% chickens, 10% sheep; snow 10% sheep) gave
-// about 2.5 animals a chunk, several hundred in a loaded area; tuned to a third of those (closer to vanilla's density).
+// about 2.5 animals a chunk, several hundred in a loaded area; tuned to a third of those (closer to vanilla's density). These are now relative
+// weights: a chunk gets one group of the region's kind with a quarter of the summed odds, groups twice as big, so half as many animals
+// (Gordon, 2026-10-12: simulation speed, and herds you have to look for).
 const OPEN = [["cow", 0.08], ["sheep", 0.08], ["chicken", 0.07], ["pig", 0.05], ["horse", 0.04]];
 const WOODS = [["pig", 0.07], ["chicken", 0.05], ["sheep", 0.03]];
 const SNOW = [["sheep", 0.03]];
@@ -143,7 +148,19 @@ function roll(k) {
   try { b = BF.worldgen.biomeAt(cx * CS + 8, cz * CS + 8); } catch (e) { return; }
   const tbl = b && HABITAT[b.id];
   if (!tbl) return;
-  for (const [type, p] of tbl) if (Math.random() < p) { const n = BF.mobs.spawnGroup(type, cx, cz, irnd(GROUP[0], GROUP[1])); if (n) log("rolled", { type, n, chunk: k, biome: b.name }); }
+  const sum = tbl.reduce((t, e) => t + e[1], 0);
+  if (Math.random() >= sum / 4) return;
+  const type = zoneKind(tbl, sum, Math.floor(cx / ZONE), Math.floor(cz / ZONE));
+  const n = BF.mobs.spawnGroup(type, cx, cz, irnd(GROUP[0], GROUP[1]));
+  if (n) log("rolled", { type, n, chunk: k, biome: b.name });
+}
+// The kind a region's groups of this habitat are: a fixed pick from the seed and the region, weighted by the habitat's odds.
+function zoneKind(tbl, sum, rx, rz) {
+  let h = (Math.imul(rx, 0x27d4eb2d) ^ Math.imul(rz, 0x165667b1) ^ Math.imul(((BF.state && BF.state.seed) | 0) + tbl.length, 0x61c88647)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0; h = (h ^ (h >>> 13)) >>> 0;
+  let r = (h / 4294967296) * sum;
+  for (const [type, p] of tbl) if ((r -= p) < 0) return type;
+  return tbl[tbl.length - 1][0];
 }
 
 // ---------------------------------------------------------------- wild breeding
@@ -320,7 +337,7 @@ function counts() {
 }
 
 BF.wildlife = {
-  HABITAT, HOUR, RELOCATE_R, tune, BREED_R, BREED_CHANCE, CROWD_R, CROWD_MAX, CAP, CAP_CHUNKS, BUFFER, NIGHTS,
+  HABITAT, GROUP, ZONE, zoneKind, HOUR, RELOCATE_R, tune, BREED_R, BREED_CHANCE, CROWD_R, CROWD_MAX, CAP, CAP_CHUNKS, BUFFER, NIGHTS,
   init, update, stow, adopt, bring, relocate, mayHostile, spawned, villageStats, daylightBetween,
   areas: () => { if (!areaList.length) rebuildAreas(); return areaList; }, areaOf: (x, z) => { const i = areaOf.get(ck(x, z)); return i != null ? areaList[i] : null; },
   stored: () => stored, isRolled: k => rolled.has(k), counts, log: LOG,
