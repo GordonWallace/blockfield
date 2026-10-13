@@ -2157,7 +2157,8 @@ function villageRoster(rec) {
   const special = slots.filter(sl => sl.house && SPECIAL_PROF[sl.house.type]);
   const rest = slots.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
-  const cap = rec.pop || VILLAGERS_PER_VILLAGE;   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
+  const cap = rec.pop || VILLAGERS_PER_VILLAGE;
+  const gen10 = (BF.state && BF.state.villages | 0) >= 10 && !!rec.pop;   // village generator 10: keepers come from the paddock plan (below), shepherds included   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
   // village generator 3: every village has a miner, a farmer, a forester and a toolsmith (stone and ore, food, wood, and the tools for all of
   // them), so nothing stalls
   const core = (BF.state && BF.state.villages | 0) >= 3 && !!rec.pop;
@@ -2172,7 +2173,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker" && p !== "glassmaker" && p !== "beekeeper" && p !== "pig_farmer");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker" && p !== "glassmaker" && p !== "beekeeper" && p !== "pig_farmer" && !(gen10 && p === "shepherd"));   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -2217,6 +2218,25 @@ function villageRoster(rec) {
   }
   // foresters: key range <village key>#1200+n (their places were reserved above, so the village never exceeds its cap)
   for (let k = 0; k < nF; k++) ordered.push({ house: null, idx: 1200 + k, bed: null, prof: "forester" });
+  // paddock keepers (village generator 10, idea-044): one per paddock of the village's plan (worldgen paddockPlan: count from size and native
+  // animals, a weighted roll per paddock), keys <village key>#1970+k (js/jobs.js KEEPER_IDX). Each takes the place of the last plain resident,
+  // never one of the core four or a special-building tradesperson; when none can make way, that paddock and its keeper are left out.
+  if (gen10 && BF.worldgen && BF.worldgen.paddockPlan) {
+    const kxz = String(rec.key || "").split(",").map(Number);
+    const plan = kxz.length === 2 ? BF.worldgen.paddockPlan(kxz[0], kxz[1], rec.pop, rec.biomeId != null ? rec.biomeId : rec.wg ? rec.wg.biomeId : null) : [];
+    plan.forEach((a, k) => {
+      if (ordered.length >= cap) {
+        let gone = false;
+        for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
+          const sl = ordered[i];
+          if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+          ordered.splice(i, 1); gone = true;
+        }
+        if (!gone) return;
+      }
+      ordered.push({ house: null, idx: 1970 + k, bed: null, prof: BF.worldgen.KEEPER_OF[a] });
+    });
+  }
   // furniture maker: a newly generated village with both a shepherd and a forester gets one with 80% probability (own seeded stream and key
   // <village key>#1300, so nothing else shifts). In a classic village it may take the village one past the cap of 24; in a sized village
   // it takes the place of the last plain resident (never the only shepherd), so the village keeps its size.
@@ -2257,7 +2277,7 @@ function villageRoster(rec) {
   }
   // poultry keeper: village generator 4 gives every village of 8 or more villagers one, with a coop beside its nesting box (js/poultry.js,
   // worldgen layoutVillage). Own key <village key>#1500, so nothing else shifts; it takes the place of the last plain resident, so the village keeps its size.
-  if ((BF.state && BF.state.villages | 0) >= 4 && (rec.pop || 0) >= 8) {
+  if (!gen10 && (BF.state && BF.state.villages | 0) >= 4 && (rec.pop || 0) >= 8) {
     if (ordered.length >= cap) {
       const count = p => ordered.filter(sl => sl.prof === p).length;
       for (let i = ordered.length - 1; i >= 0; i--) {
@@ -2287,7 +2307,7 @@ function villageRoster(rec) {
   // cowherd: village generator 5 gives every village of COWHERD_POP (10) or more villagers on grass (cows spawn only on grass) one, with a pasture
   // beside its milk churn (js/cowherd.js, worldgen layoutVillage). Own key <village key>#1700 (#1600+k are the trading caravans' merchants); it takes the place of the last plain resident.
   const ground = rec.ground != null ? rec.ground : rec.wg ? rec.wg.ground : null;
-  if ((BF.state && BF.state.villages | 0) >= 5 && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.COWHERD_POP) || 10) && ground === 0) {
+  if (!gen10 && (BF.state && BF.state.villages | 0) >= 5 && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.COWHERD_POP) || 10) && ground === 0) {
     if (ordered.length >= cap) {
       const count = p => ordered.filter(sl => sl.prof === p).length;
       for (let i = ordered.length - 1; i >= 0; i--) {
@@ -2349,7 +2369,7 @@ function villageRoster(rec) {
   // pig farmer PIG_CHANCE (60%) of the time, drawn from the village key (own seeded stream, so nothing else shifts), with a sty beside its feed
   // trough (js/pigfarmer.js, worldgen layoutVillage, js/jobs.js planVillage). Own key <village key>#1960 (keys #2000 and up are newborns, js/breeding.js);
   // it takes the place of the last plain resident.
-  if ((BF.state && BF.state.villages | 0) >= 9 && BF.pigFarmer && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.PIG_POP) || 10) && ground === 0
+  if (!gen10 && (BF.state && BF.state.villages | 0) >= 9 && BF.pigFarmer && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.PIG_POP) || 10) && ground === 0
     && seededRand("pigs:" + rec.key)() < PIG_CHANCE) {
     if (ordered.length >= cap) {
       const count = p => ordered.filter(sl => sl.prof === p).length;
@@ -2609,6 +2629,7 @@ BF.mobs = {
     if (BF.poultry) BF.poultry.exportAll(out);   // "coops:<village key>" -> the chickens and nest eggs of each coop
     if (BF.cowherd) BF.cowherd.exportAll(out);   // "pastures:<village key>" -> the cows of each pasture
     if (BF.pigFarmer) BF.pigFarmer.exportAll(out);   // "sties:<village key>" -> the pigs of each sty
+    if (BF.stables && BF.stables.exportAll) BF.stables.exportAll(out);   // "stables:stocked" -> villages whose generated stable got its starting horses
     if (BF.baker) BF.baker.exportAll(out);   // "ovens" -> what each baker's oven holds
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
     if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
@@ -2623,7 +2644,7 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked") villagerSaves.set(k, o[k]);
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [], g: Math.max(0, Math.floor(+o[k].g || 0)) });
     for (const rec of villages.values()) applyDead(rec);
@@ -2637,6 +2658,7 @@ BF.mobs = {
     if (BF.poultry) BF.poultry.importAll(o);
     if (BF.cowherd) BF.cowherd.importAll(o);
     if (BF.pigFarmer) BF.pigFarmer.importAll(o);
+    if (BF.stables && BF.stables.importAll) BF.stables.importAll(o);
     if (BF.baker) BF.baker.importAll(o);
     if (BF.merchant) BF.merchant.importAll(o);
   },

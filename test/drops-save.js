@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "creative" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     const px = 8, pz = 8;
     await load(px, pz);
@@ -26,7 +26,7 @@ module.exports = async (pg, out) => {
     const saved = JSON.parse(JSON.stringify(BF.drops.serialize()));
     ok("the save lists them with their age", saved.length === 2 && saved.every(e => e[5] >= 99), saved);
     // reload: a fresh world, then the saved drops, before the chunk has loaded again
-    BF.newWorld(1, { gen: 3, gameMode: "creative" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     ok("new world has no drops", BF.drops.list.length === 0);
     BF.drops.deserialize(saved);
@@ -51,7 +51,7 @@ module.exports = async (pg, out) => {
     BF.drops.deserialize(undefined);
     ok("old saves: no drops, no error", BF.drops.list.length === 0);
     // the real save: through IndexedDB and BF.save.load
-    const meta = await BF.save.create({ name: "drops", seed: 1, gameMode: "creative" });
+    const meta = await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9 });
     BF.mobs.spawning = false;
     await load(px - 21, pz);
     BF.drops.spawn(cobble, 7, gx + 0.5, gy + 2, gz + 0.5);

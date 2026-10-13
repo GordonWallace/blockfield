@@ -19,7 +19,7 @@ module.exports = async (pg, out) => {
     // ---- generated villages: about 60% of the grass villages of 10+ (deterministic per village), none in a world saved with generator 8
     let elig = 0, withPF = 0, wrong = [], again = 0;
     for (const seed of [11, 12, 13, 14, 15, 16, 17, 18]) {
-      BF.newWorld(seed, { gen: 3 });
+      BF.newWorld(seed, { gen: 3, villages: 9 });
       for (const v of BF.worldgen.villagesNear(0, 0, 2400)) {
         const pf = rosterOf(v).some(sl => sl.prof === "pig_farmer"), st = v.buildings.some(b => b.type === "sty");
         if (v.ground === 0 && v.pop >= 10) { elig++; if (pf) withPF++; }
@@ -37,7 +37,7 @@ module.exports = async (pg, out) => {
     for (const v of BF.worldgen.villagesNear(0, 0, 2400)) old += rosterOf(v).filter(sl => sl.prof === "pig_farmer").length + v.buildings.filter(b => b.type === "sty").length;
     ok("worlds saved with generator 8 get no pig farmers or sties", old === 0, old);
 
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 9", BF.state.villages === 9, BF.state.villages);
     BF.mobs.spawning = false;
     const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains with a pasture and a sty
@@ -364,24 +364,17 @@ module.exports = async (pg, out) => {
     const fake = { key: "test", wg: { buildings: [], ground: 0 }, built: [e] };
     const bst = PF.stiesOf(fake)[0];
     ok("a finished builder's sty: 5x5 inside (limit 3), a gate and the cell in front of it, empty", !!bst && !bst.gen && bst.cells === 25 && bst.limit === 3 && !!bst.gate && !!bst.out && Math.hypot(bst.gate[0] - bst.out[0], bst.gate[1] - bst.out[1]) === 1, bst && [bst.x0, bst.z0, bst.x1, bst.z1, bst.gate, bst.out]);
-    const pop = k => Array.from({ length: k }, () => ({ type: "villager", profession: "farmer", trades: [] }));
-    const wR = (ground, k, extra) => ({ x: 0, z: 0, wg: { ground, buildings: [] }, members: pop(k).concat(extra || []) });
-    const carrotFarmer = { type: "villager", profession: "farmer", inv: [{ id: I.carrot, count: 20 }], trades: [{ buy: [{ id: I.emerald, n: 1 }], sell: { id: I.carrot, n: 16 }, level: 1, xp: 0 }], position: { x: 0, y: 0, z: 0 } };
-    ok("the builder's wish: none off grass, ~2 in a village of 12+ with a feed seller, little without, hardly any with a pig farmer",
-      PF.builderWeight(wR(1, 14, [carrotFarmer])) === 0 && PF.builderWeight(wR(0, 14, [carrotFarmer])) === 2 && PF.builderWeight(wR(0, 8, [carrotFarmer])) === 0.05
-      && PF.builderWeight(wR(0, 14, [carrotFarmer, { type: "villager", profession: "pig_farmer" }])) === 0.02 && PF.builderWeight(wR(0, 14, [carrotFarmer]), true) === 0.02,
-      [PF.builderWeight(wR(1, 14, [carrotFarmer])), PF.builderWeight(wR(0, 14, [carrotFarmer])), PF.builderWeight(wR(0, 8, [carrotFarmer]))]);
     const builder = vill().find(m => m.profession === "builder");
     if (builder) {
       builder.bs = builder.bs || {};
       const ws = BF.builder.weighTypes(builder, builder.bs);
-      ok("a village with a pig farmer hardly ever wants another sty", !ws.some(w => w[0] === "sty" && w[1] > 0.1), ws.filter(w => w[0] === "sty"));
+      ok("a sty is never a structure of its own (idea-044: the food jobsite roll)", !ws.some(w => w[0] === "sty"), ws.filter(w => w[0] === "sty"));
       const wg0 = rec.wg.ground; rec.wg.ground = 1;
       let picked = 0;
       for (let i = 0; i < 200; i++) if (BF.builder.pickType(builder, builder.bs) === "sty") picked++;
       const site = BF.builder.findSite(builder, "sty", null, 99);
       rec.wg.ground = wg0;
-      ok("builders never pick or site a sty in a village off grass", picked === 0 && site === null, { picked, site: site && site.ox });
+      ok("off grass a builder may still site a sty (idea-044), and never picks one outside the food jobsite roll", picked === 0 && site !== null, { picked, site: site && site.ox });
     }
 
     // ---- a builder's sty in a village of 12+ with no pig farmer, and an unemployed villager takes the job
@@ -407,9 +400,7 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < 200 && !bm.bs; i++) step();   // its builder state
       // wild pigs near the village (the earlier tests killed them all)
       for (let i = 0; i < 2; i++) { const x = Math.floor(V2.x + 20 + i), z = Math.floor(V2.z + 20); BF.mobs.spawn("pig", x + 0.5, BF.world.heightAt(x, z) + 1, z + 0.5); }
-      const wsty = PF.builderWeight(R2);
-      const ws = BF.builder.weighTypes(bm, bm.bs);
-      ok("it wants a sty about as much as a pasture", wsty === 2 && ws.some(w => w[0] === "sty" && w[1] >= 0.4 && w[1] >= 0.8 * Math.max(0, ...ws.filter(x => x[0] === "pasture").map(x => x[1]))), { wsty, ws: ws.filter(w => /sty|pasture|coop/.test(w[0])) });
+      ok("2 wild pigs within 80 blocks count for the food jobsite roll", BF.builder.wildCount(R2, "pig") >= 2, BF.builder.wildCount(R2, "pig"));
       // the builder holds what a sty takes (bought, in a real game: test/builder-woods.js), two water buckets and 4 coarse dirt for the wallow
       T.inv.add(bm.inv, I.coarse_dirt, 4);
       const wood = "oak";   // a plains village

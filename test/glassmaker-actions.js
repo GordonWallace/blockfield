@@ -11,7 +11,7 @@ module.exports = async (pg) => {
     const I = BF.I, B = BF.B, T = BF.trades, inv = T.inv, W = BF.world, GM = BF.glassmaker;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 7", BF.state.villages >= 7, BF.state.villages);
     BF.mobs.spawning = false;
 

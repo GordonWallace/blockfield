@@ -29,6 +29,7 @@ const mayTake = (m, s) => !(s && s.prof === "stable_hand" && BF.stables && !BF.s
 const PROFESSION_OF = {};
 for (const p in JOBSITE) PROFESSION_OF[JOBSITE[p]] = p;
 const NO_JOB = { nitwit: 1, unemployed: 1 };
+const KEEPER_IDX = 1970;   // village generator 10: roster keys of the paddock keepers, <village key>#1970+k (js/mobs.js villageRoster)
 
 const RADIUS = 48;            // claim search radius around the villager's village centre (or the villager)
 // sized villages (village generator 2, up to ~120 blocks from the plaza) search their whole area instead
@@ -134,12 +135,12 @@ function freeCells(v, b, r) {
 // The roster counts the original layout's buildings (v.nb0), so pens added later for the shepherds never change who lives there.
 function jobList(v) {
   const key = Math.round(v.x) + "," + Math.round(v.z);
-  const roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0, ground: v.ground });   // callers catch
+  const roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0, ground: v.ground, biomeId: v.biomeId });   // callers catch
   const r = seeded("jobs:" + key);
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
   let n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
-  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "merchant" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || sl.prof === "baker" || sl.prof === "glassmaker" || sl.prof === "beekeeper" || sl.prof === "pig_farmer" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
+  const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || sl.prof === "merchant" || sl.prof === "poultry_keeper" || sl.prof === "cowherd" || sl.prof === "baker" || sl.prof === "glassmaker" || sl.prof === "beekeeper" || sl.prof === "pig_farmer" || (sl.idx >= KEEPER_IDX && sl.idx < KEEPER_IDX + 30) || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
   const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer and toolsmith always get their blocks too
   for (const p of core ? ["farmer", "toolsmith"] : []) { const sl = needy.find(x => x.prof === p); if (sl && !special.includes(sl)) special.push(sl); }
   const rest = needy.filter(sl => !special.includes(sl));
@@ -164,6 +165,14 @@ function cowherdCount(v) {
 function pigFarmerCount(v) {
   if (!v || !BF.mobs || !BF.mobs.roster) return 0;
   return jobList(v).jobs.filter(j => j.prof === "pig_farmer" && j.slot >= 0).length;
+}
+// Village generator 10 (idea-044): how many keepers of each kind the plan of village v holds, {shepherd, cowherd, ...}; worldgen lays out a
+// paddock for each (layoutVillage). The roster gives them keys KEEPER_IDX + k (js/mobs.js villageRoster), and they always get their blocks.
+function keeperCounts(v) {
+  const out = {};
+  if (!v || !BF.mobs || !BF.mobs.roster) return out;
+  for (const j of jobList(v).jobs) if (j.slot >= KEEPER_IDX && j.slot < KEEPER_IDX + 30) out[j.prof] = (out[j.prof] || 0) + 1;
+  return out;
 }
 // Planned jobsite blocks of a worldgen village v: [{x, y, z, id, prof, slot (roster idx, -1 = spare)}].
 function planVillage(v) {
@@ -203,6 +212,8 @@ function planVillage(v) {
   const coops = blds.filter(b => b.type === "coop");
   const pastures = blds.filter(b => b.type === "pasture");
   const sties = blds.filter(b => b.type === "sty");
+  const stables = blds.filter(b => b.type === "stable" && b.rack);   // village generator 10: the tack rack on the stable's rack mark
+  let ci = 0, wi = 0, si = 0;   // each keeper its own paddock, in turn (one of each before generator 10)
   const byGate = (b, job) => { for (const du of [1, -1]) { const [x, z] = W(b, b.du + du, -1); if (put(x, b.y + 1, z, job)) return true; } return beside(b, job); };   // the feed trough beside the sty gate
   for (const job of jobs) {
     if (job.prof === "shepherd" && pens.length && (BF.state && BF.state.gen | 0) >= 3) {   // gen 3+ only: older worlds keep their loom positions
@@ -210,9 +221,10 @@ function planVillage(v) {
       for (let k = 0; k < pens.length && !placed; k++) placed = beside(pens[(pi + k) % pens.length], job) && (pi += k + 1, true);
       if (placed) continue;
     }
-    if (job.prof === "poultry_keeper" && coops.length && beside(coops[0], job)) continue;   // the nesting box stands right outside the coop (js/poultry.js)
-    if (job.prof === "cowherd" && pastures.length && beside(pastures[0], job)) continue;   // the milk churn stands right outside the pasture (js/cowherd.js)
-    if (job.prof === "pig_farmer" && sties.length && byGate(sties[0], job)) continue;   // the feed trough stands beside the sty gate (js/pigfarmer.js)
+    if (job.prof === "poultry_keeper" && coops.length && beside(coops[ci++ % coops.length], job)) continue;   // the nesting box stands right outside the coop (js/poultry.js)
+    if (job.prof === "cowherd" && pastures.length && beside(pastures[wi++ % pastures.length], job)) continue;   // the milk churn stands right outside the pasture (js/cowherd.js)
+    if (job.prof === "pig_farmer" && sties.length && byGate(sties[si++ % sties.length], job)) continue;   // the feed trough stands beside the sty gate (js/pigfarmer.js)
+    if (job.prof === "stable_hand" && stables.length && put(stables[0].rack[0], stables[0].y + 2, stables[0].rack[1], job)) continue;   // against the stable's back wall
     if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
     if ((job.prof === "builder" || job.prof === "furniture_maker" || job.prof === "merchant" || job.prof === "baker") && plaza(job)) continue;   // the baker's oven: on the square, else beside a house
     if (job.prof === "baker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;
@@ -616,6 +628,6 @@ function reset() { sites.clear(); claims.clear(); planIndex.clear(); spawned.cle
 BF.jobs = {
   JOBSITE, PROFESSION_OF, RADIUS, sites, claims,
   profOfBlock, blockFor, claim, hire, release, unclaimed, isEmployed, setProfession,
-  planVillage, shepherdCount, cowherdCount, pigFarmerCount, planFor, drawCount, MEMORY_DAYS, memValid, onSpawn, tick, ai, importAll, reset,
+  planVillage, shepherdCount, cowherdCount, pigFarmerCount, keeperCounts, KEEPER_IDX, planFor, drawCount, MEMORY_DAYS, memValid, onSpawn, tick, ai, importAll, reset,
 };
 })();

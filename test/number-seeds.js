@@ -8,9 +8,9 @@ module.exports = async (pg, out) => {
     const ns = BF.save.numberSeed, r = {};
     const typed = ["0", "1", "2", "-1", "4294967295", "4294967296", "4294967297", "-4294967295", "12345678901234567890", "98765432109876543210", "-0", "007"];
     r.seeds = {}; for (const t of typed) r.seeds[t] = ns(t);
-    const sig = seed => { BF.newWorld(seed); const a = []; for (let x = -2000; x <= 2000; x += 500) for (let z = -2000; z <= 2000; z += 1000) a.push(BF.worldgen.heightAt(x, z)); return a.join(","); };
+    const sig = (seed, opts) => { BF.newWorld(seed, opts); const a = []; for (let x = -2000; x <= 2000; x += 500) for (let z = -2000; z <= 2000; z += 1000) a.push(BF.worldgen.heightAt(x, z)); return a.join(","); };
     r.t1 = sig(ns("1")); r.t0 = sig(ns("0")); r.tBig = sig(ns("4294967297")); r.tNeg = sig(ns("-1")); r.tMax = sig(ns("4294967295"));
-    r.saved0 = sig(0); r.saved1 = sig(1);          // a world saved with seed 0 before this fix (restored through BF.newWorld)
+    r.saved0 = sig(0, { villages: 9 }); r.saved1 = sig(1, { villages: 9 });   // a world saved with seed 0 before this fix (restored through BF.newWorld; such saves have village generator 9 or older)
     return r;
   });
   console.log(JSON.stringify(r.seeds));

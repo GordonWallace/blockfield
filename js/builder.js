@@ -45,6 +45,18 @@ const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.
 const allowed = () => skyT() < BUILD_END && !(skyT() > 0.5);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const styleIdx = s => (typeof s === "number" ? s : Math.max(0, STYLES.indexOf(s)));
+// The block a structure is levelled with: the village style's foundation, dirt under a vegetable farm (its soil, idea-044).
+const foundOf = (type, style) => (type === "veg_farm" && BF.B.dirt != null ? BF.B.dirt : BF.worldgen.palette(style).found);
+
+// ---------------------------------------------------------------- food jobsites (idea-044)
+// One entry of the builder's list, "food_jobsite", stands for the structures that feed the village: the vegetable farm and the sheep, cow,
+// chicken and pig paddocks. When it is picked a second roll picks the kind (chooseFood). The stable is not one of them (horses are not food).
+const FOOD = ["veg_farm", "pen", "pasture", "coop", "sty"];
+const FOOD_WEIGHT = 2.5, STABLE_WEIGHT = 0.3;
+const FOOD_PROF = { veg_farm: "farmer", pen: "shepherd", pasture: "cowherd", coop: "poultry_keeper", sty: "pig_farmer" };   // whose jobsite block it holds
+const FOOD_ANIMAL = { pen: "sheep", pasture: "cow", coop: "chicken", sty: "pig" };
+const ANIMAL_R = 80, ANIMAL_MIN = 2;   // a paddock is built only with this many wild animals of its kind within this many blocks of the village
+const isFood = t => FOOD.includes(t);
 
 function builtOf(rec) {
   if (!rec.built) rec.built = pending.get(rec.key) || [];
@@ -77,6 +89,8 @@ function craftTable(wood) {
   if (I.milk_churn != null) t[I.milk_churn] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the pasture's jobsite (js/cowherd.js)
   if (I.bakers_oven != null) t[I.bakers_oven] = { n: 1, from: [[I.cobblestone, 8], [I.iron_ingot, 1]] };   // the bakehouse's jobsite (js/baker.js)
   if (I.feed_trough != null) t[I.feed_trough] = { n: 1, from: [[P, 7]] };   // the sty's jobsite (js/pigfarmer.js, recipes-jobs.js)
+  if (I.composter != null) t[I.composter] = { n: 1, from: [[P, 4]] };       // the vegetable farm's jobsite: 7 slabs (recipes-jobs.js), idea-044
+  if (I.loom != null && I.string != null) t[I.loom] = { n: 1, from: [[P, 2], [I.string, 2]] };   // the sheep pen's jobsite (recipes-jobs.js), idea-044
   if (I.glass_kiln != null) t[I.glass_kiln] = { n: 1, from: [[I.cobblestone, 4], [I.iron_ingot, 1]] };   // the glassworks' jobsite (js/glassmaker.js)
   if (I.honey_extractor != null) t[I.honey_extractor] = { n: 1, from: [[P, 4], [I.iron_ingot, 1]] };   // the apiary's jobsite (js/beekeeper.js)
   return t;
@@ -198,11 +212,12 @@ const total = e => nfill(e) + bpOf(e).n;
 function cellOf(e, i) {
   const nf = nfill(e);
   if (i < nf) {
-    const f = e.fill[i], id = BF.worldgen.palette(e.style).found;
-    return { x: f[0], y: f[1], z: f[2], id, item: id, cost: 1, pair: false, ph: 0 };
+    // f[3]: 1 sand or gravel in a farm's soil, swapped for dirt; 2 a pasture's turf (a grass block from a dirt block); 3 dirt under turf
+    const f = e.fill[i], k = f[3] | 0, D = BF.B.dirt, id = k === 2 ? BF.B.grass : k ? D : foundOf(e.type, e.style);
+    return { x: f[0], y: f[1], z: f[2], id, item: k ? D : id, cost: 1, pair: false, ph: 0, dig: k === 1 || k === 2 };
   }
   const c = bpOf(e).cells[i - nf];
-  return { x: e.ox + c.x, y: e.oy + c.y, z: e.oz + c.z, id: c.id, item: c.item, cost: c.cost, pair: c.pair, ph: c.ph };
+  return { x: e.ox + c.x, y: e.oy + c.y, z: e.oz + c.z, id: c.id, item: c.item, cost: c.cost, pair: c.pair, ph: c.ph, dig: !!c.dig };
 }
 // material still needed for the cells from index `from` (glazing a finished structure: only the cells still empty)
 function remainingReq(e, from) {
@@ -237,6 +252,7 @@ const GROUND_OK = /^(grass|dirt|sand|red_sand|snow_grass|snow|podzol|coarse_dirt
 // Returns {oy, fill: [[x,y,z]], slope} or null. Plants and short grass in the way are cleared for free; gaps under the floor are filled from the inventory.
 function evalTerrain(bp, px, pz, found) {
   const w = W(), CSolid = BF.SOLID, REPL = BF.REPLACEABLE;
+  const natural = id => !!(BF.blocks[id] && GROUND_OK.test(BF.blocks[id].name));
   let gmin = 1e9, gmax = -1e9;
   const gs = new Map();
   for (let z = pz - 1; z <= pz + bp.d; z++) for (let x = px - 1; x <= px + bp.w; x++) {
@@ -255,18 +271,36 @@ function evalTerrain(bp, px, pz, found) {
   }
   if (gmax - gmin > MAX_SLOPE) return null;
   const oy = gmax + 1, fillCols = new Set();
+  const fill = [], low = new Set();
   for (const c of bp.cells) {
     const x = px + c.x, z = pz + c.z, y = oy + c.y, cur = w.getBlock(x, y, z);
+    if (c.dig) low.add(c.x + "," + c.z);   // a ground-layer cell (a farm's ring and channel): it is dug in where the ground is
     if (cur === c.id) continue;
     if (BF.RENDER[cur] === 3) return null;
-    if (CSolid[cur] && !REPL[cur]) return null;
-    if (c.y === 0) fillCols.add(c.x + "," + c.z);
+    if (CSolid[cur] && !REPL[cur] && !(c.dig && natural(cur))) return null;
+    if (c.y === 0 || c.dig) fillCols.add(c.x + "," + c.z);
   }
-  const fill = [];
+  // a farm's soil (marks.soil): filled with dirt up to the ring's level, and sand, gravel or the like at that level swapped for dirt
+  const TILL = /^(grass|dirt|podzol|coarse_dirt|snow_grass|mycelium)$/;
+  // a pasture's field (marks.turf): grass at the fence's ground level; other ground there is dug out and turfed (a dirt block that is grass
+  // already: f[3] 2), lower columns filled with dirt first (f[3] 3)
+  for (const [u, q] of bp.marks.turf || []) {
+    const x = px + u, z = pz + q, g = gs.get(x + "," + z);
+    if (g == null) continue;
+    for (let y = g + 1; y < oy - 1; y++) fill.push([x, y, z, 3]);
+    if (g < oy - 1 || w.getBlock(x, g, z) !== BF.B.grass) fill.push([x, oy - 1, z, 2]);
+  }
+  for (const [u, q] of (bp.ground && bp.marks.soil) || []) {
+    const x = px + u, z = pz + q, g = gs.get(x + "," + z);
+    if (g == null) continue;
+    for (let y = g + 1; y < oy - 1; y++) fill.push([x, y, z]);
+    if (g === oy - 1) { const b = BF.blocks[w.getBlock(x, g, z)]; if (!b || !TILL.test(b.name)) fill.push([x, g, z, 1]); }
+    else fill.push([x, oy - 1, z]);
+  }
   for (const k of fillCols) {
     const [cx, cz] = k.split(",").map(Number), x = px + cx, z = pz + cz;
     const g = gs.has(x + "," + z) ? gs.get(x + "," + z) : w.heightAt(x, z);
-    for (let y = g + 1; y < oy; y++) fill.push([x, y, z]);
+    for (let y = g + 1; y < (low.has(k) ? oy - 1 : oy); y++) fill.push([x, y, z]);
   }
   if (fill.length && fill.some(f => f[1] < oy - MAX_FILL - 1)) return null;
   return { oy, fill, slope: gmax - gmin };
@@ -287,9 +321,7 @@ function findSite(m, type, opts, haveFound, wood) {
     if (!bp || occupiedBox(m, [p.ox, p.oz, p.ox + bp.w - 1, p.oz + bp.d - 1])) return null;
     return { score: 0, bp, rot: p.rot, h: 0.5, ox: p.ox, oz: p.oz, oy: p.oy, fill: [], opts: p.opts, span: p.span };
   }
-  if (type === "pasture" && !(BF.cowherd && BF.cowherd.grassVillage(R))) return null;   // never off grass (js/cowherd.js)
-  if (type === "sty" && !(BF.pigFarmer && BF.pigFarmer.villageOK(R))) return null;      // nor a sty (js/pigfarmer.js)
-  const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
+  const style = styleIdx(R.style), found = foundOf(type, style);
   const attempt = (m.bs ? (m.bs.siteTry = (m.bs.siteTry || 0) + 1) : 0);
   const rng = mulberry(hash32(R.key + ":" + built.length + ":" + attempt + ":" + type) ^ ((BF.state && BF.state.seed) | 0));
   const obs = obstacles(R, built);
@@ -312,15 +344,12 @@ function findSite(m, type, opts, haveFound, wood) {
     const rect = [px, pz, px + bp.w - 1, pz + bp.d - 1];
     if (obs.some(o => rectsOverlap(o, rect))) continue;
     if (dist(px + bp.w / 2, pz + bp.d / 2) > SITE_RANGE) continue;
-    if (type === "stable" && BF.horses && !BF.horses.isHorseBiome(px + bp.w / 2, pz + bp.d / 2)) continue;   // a stable stands on horse land itself
-    if (type === "pasture" && BF.cowherd && !BF.cowherd.grassAt(px + bp.w / 2, pz + bp.d / 2)) continue;   // a pasture stands on grass itself
-    if (type === "sty" && BF.cowherd && !BF.cowherd.grassAt(px + bp.w / 2, pz + bp.d / 2)) continue;       // and a sty
     if (type === "sty" && BF.jobs && bp.marks.trough && Math.hypot(px + bp.marks.trough[0][0] + 0.5 - R.x, pz + bp.marks.trough[0][1] + 0.5 - R.z) > Math.max(BF.jobs.RADIUS, (wg && wg.reach) || 0) - 1) continue;   // its trough within the jobless's reach (jobs.js unclaimed)
     evals++;
     if (occupiedBox(m, rect)) continue;
     const t = evalTerrain(bp, px, pz, found);
     if (!t) continue;
-    if (t.fill.length > haveFound) continue;
+    if (t.fill.filter(f => !f[3]).length > haveFound) continue;   // turf and soil dirt is bought or dug as it goes
     const score = Math.abs(dist(px + bp.w / 2, pz + bp.d / 2) - 5) + rng() * 6 + t.fill.length * 0.5 + t.slope * 1.5;
     if (!best || score < best.score) best = { score, bp, rot, h, ox: px, oz: pz, oy: t.oy, fill: t.fill, opts };
   }
@@ -332,17 +361,83 @@ const lamps = inv => (TR().inv.count(inv, BF.I.lantern) >= 3 ? { lantern: true }
 function optsFor(type, inv, R) {
   if (type === "bridge") { const p = BF.bridges && R ? BF.bridges.plan(R) : null; return p ? p.opts : null; }   // the span it would cross (js/bridges.js)
   if (type === "lamp_posts") return lamps(inv);
-  if ((type === "garden" || type === "stable" || type === "pasture") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
+  if ((type === "garden" || type === "stable" || type === "pasture" || type === "pen") && TR().inv.count(inv, BF.I.hay_bale) >= 2) return { hay: true };
   if (type === "sty" && BF.I.coarse_dirt != null && TR().inv.count(inv, BF.I.coarse_dirt) >= 4) return { mud: true };   // the wallow (js/blueprints.js)
   return null;
 }
 // What a villager sells: its offers, job and spare goods (js/market.js). Leather for a stable's tack rack comes from a leatherworker's spare goods.
 const offersOf = v2 => v2.trades;
-// Stables: only in villages on horse land, wanted most by a village of 10 or more without one (js/stables.js decides what horse land is).
+// Stables (idea-044): a low weight of their own, and only with ANIMAL_MIN wild horses within ANIMAL_R blocks of the village. One per village
+// (js/stables.js has one stable hand per village).
 function stableWeight(R, has) {
-  if (!BF.stables || !BF.stables.villageOK(R)) return 0;
-  const pop = R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length;
-  return has ? 0.02 : pop >= 10 ? 2.5 : 0.15;
+  if (!BF.stables || has || (BF.stables.stableOf && BF.stables.stableOf(R))) return 0;
+  return wildCount(R, "horse") >= ANIMAL_MIN ? STABLE_WEIGHT : 0;
+}
+// Wild animals of a kind within ANIMAL_R blocks of the village centre: loaded, alive, and in nobody's pen (tamed horses are not wild).
+function wildCount(R, kind) {
+  if (kind === "horse") return BF.horses && BF.horses.wildCount ? BF.horses.wildCount(R.x, R.z, ANIMAL_R) : 0;
+  let n = 0;
+  for (const o of BF.mobs.list) {
+    if (o.type !== kind || o.dead || o.removed || o.pen || o.pasture || o.coop || o.sty || o.ledBy) continue;
+    if (Math.hypot(o.position.x - R.x, o.position.z - R.z) <= ANIMAL_R && ++n >= ANIMAL_MIN) break;
+  }
+  return n;
+}
+// How many of each food jobsite the village has, counted by their jobsite blocks (composter, loom, milk churn, nesting box, feed trough) in
+// the village and the ground its builders build on, so a farm or paddock the player built counts too; plus the ones being built.
+function foodCounts(R) {
+  const out = {}, wg = R.wg, J = BF.jobs, m = SITE_RANGE + 4;
+  for (const t of FOOD) out[t] = 0;
+  const box = wg ? [wg.minX - m, wg.minZ - m, wg.maxX + m, wg.maxZ + m] : [R.x - 60, R.z - 60, R.x + 60, R.z + 60];
+  if (J && J.sites) for (const s of J.sites.values()) {
+    if (s.x < box[0] || s.x > box[2] || s.z < box[1] || s.z > box[3]) continue;
+    for (const t of FOOD) if (FOOD_PROF[t] === s.prof) out[t]++;
+  }
+  for (const e of builtOf(R)) if (e.state === "building" && isFood(e.type)) out[e.type]++;
+  return out;
+}
+// The requirement a builder plans a structure by: its blueprint's, foundation (or dirt) to level it, and a bucket when it pours water.
+function planReq(m, bp, type, style) {
+  const req = Object.assign({}, bp.req), found = foundOf(type, style);
+  req[found] = (req[found] || 0) + FILL_SPARE;
+  if (bp.free && bp.free[BF.B.water] && BF.I.bucket != null && have0(m.inv, BF.I.bucket) + (BF.I.water_bucket != null ? have0(m.inv, BF.I.water_bucket) : 0) < 1) req[BF.I.bucket] = 1;
+  return req;
+}
+// Can the builder get what structure `type` needs? Everything missing is for sale in the village now (dirt it can always dig).
+function materialsOK(m, type, stock) {
+  const R = m.village, style = styleIdx(R.style), opts = optsFor(type, m.inv, R), wood = chooseWood(m, type, style, opts, stock);
+  const bp = BP().get(type, 0, style, 0.5, opts, wood);
+  if (!bp) return false;
+  const a = analyze(m.inv, planReq(m, bp, type, style), wood);
+  return a.ok || onlyPanes(R, a, stock) || Object.keys(a.shortfall).every(k => stock[k] > 0 || +k === BF.I.dirt || +k === PANE());
+}
+// The second roll when "food_jobsite" is picked (idea-044). First only the kinds the village has none of, at even odds: a paddock needs its
+// materials and ANIMAL_MIN wild animals of its kind within ANIMAL_R blocks, the farm only its materials; a kind that fails is out and the roll
+// is made again. When every missing kind is out, the rest that were not ruled out are rolled, favouring the kinds the village has fewest of
+// (weight 1 / (1 + count)), with the same checks. Returns the kind, or null when nothing passes.
+function chooseFood(m, bs) {
+  const R = m.village, counts = foodCounts(R), stock = sellerStock(R), out = new Set(), now = dayNow();
+  for (const t of FOOD) if (bs.fail && bs.fail[t] > now) out.add(t);
+  const check = t => {
+    if (!materialsOK(m, t, stock)) { logEvent("foodOut", m, { type: t, why: "materials" }); return false; }
+    if (FOOD_ANIMAL[t] && wildCount(R, FOOD_ANIMAL[t]) < ANIMAL_MIN) { logEvent("foodOut", m, { type: t, why: "no " + FOOD_ANIMAL[t] + " within " + ANIMAL_R }); return false; }
+    return true;
+  };
+  const roll = wt => {
+    for (;;) {
+      const pool = FOOD.filter(t => !out.has(t) && wt(t) > 0);
+      if (!pool.length) return null;
+      let sum = 0;
+      for (const t of pool) sum += wt(t);
+      let r = Math.random() * sum, pick = pool[pool.length - 1];
+      for (const t of pool) if ((r -= wt(t)) <= 0) { pick = t; break; }
+      if (check(pick)) return pick;
+      out.add(pick);
+    }
+  };
+  const t = roll(t => (counts[t] === 0 ? 1 : 0)) || roll(t => 1 / (1 + counts[t]));
+  logEvent("food", m, { pick: t, counts });
+  return t;
 }
 // Glassworks (js/glassmaker.js): only where there is natural sand within 64 blocks; wanted when the village has no glassmaker or glass kiln
 // (generated or built) and 12 or more villagers, hardly ever after that (as the bakehouse).
@@ -370,20 +465,14 @@ function weighTypes(m, bs) {
     cottage: 0.3,
     well: cnt("well") === 0 ? 1.2 : 0.15,
     lamp_posts: cnt("lamp_posts") < 2 ? 1.0 : 0.2,
-    garden: cnt("garden") < 2 ? 0.8 : 0.2,
     market_stall: cnt("market_stall") < 2 ? 0.7 : 0.15,
     workshop: cnt("workshop") < 1 ? 0.5 : 0.1,
     stable: stableWeight(R, cnt("stable") > 0),
-    // a coop (js/poultry.js): wanted when the village has none (generated or built) and 8 or more villagers, hardly ever after that
-    coop: (R.wg && (R.wg.buildings || []).some(b => b.type === "coop")) || cnt("coop") > 0 ? 0.02
-      : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 8 ? 2.4 : 0.05,
-    // a pasture (js/cowherd.js): only in a village on grass; wanted when it has none and 10 or more villagers, hardly ever after that
-    pasture: !(BF.cowherd && BF.cowherd.grassVillage(R)) ? 0 : (R.wg && (R.wg.buildings || []).some(b => b.type === "pasture")) || cnt("pasture") > 0 ? 0.02
-      : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 10 ? 2 : 0.05,
+    // the farm and the sheep, cow, chicken and pig paddocks (idea-044): one entry, its kind rolled when it is picked (chooseFood)
+    food_jobsite: FOOD_WEIGHT,
     // a bakehouse (js/baker.js): wanted when the village has no baker's oven (planned or built) and 15 or more villagers, hardly ever after that
     bakehouse: (R.wg && (R.wg.jobsites || []).some(j => j.prof === "baker")) || cnt("bakehouse") > 0 || R.members.some(x => x.profession === "baker" && !x.dead) ? 0.02
       : R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length >= 15 ? 1.5 : 0.05,
-    sty: BF.pigFarmer ? BF.pigFarmer.builderWeight(R, cnt("sty") > 0) : 0,   // js/pigfarmer.js: on grass, 12+ villagers, pigs or feed nearby
     glassworks: glassWeight(R, (R.wg && (R.wg.jobsites || []).some(j => j.prof === "glassmaker")) || cnt("glassworks") > 0),
     // an apiary (js/beekeeper.js): only in a village on grass; wanted when it has no beekeeper or extractor and 6 or more villagers, hardly ever after
     apiary: !(BF.cowherd && BF.cowherd.grassVillage(R)) || BF.B.honey_extractor == null ? 0
@@ -393,7 +482,7 @@ function weighTypes(m, bs) {
   const BEDS = ["small_house", "medium_house", "cottage"];
   if (full) {   // with every bed claimed they rise to the weight of the likeliest other type
     let top = 0;
-    for (const t in wt) if (!BEDS.includes(t) && !(bs.fail && bs.fail[t] > dayNow())) top = Math.max(top, wt[t]);
+    for (const t in wt) if (!BEDS.includes(t) && t !== "food_jobsite" && !(bs.fail && bs.fail[t] > dayNow())) top = Math.max(top, wt[t]);
     for (const t of BEDS) wt[t] = Math.max(wt[t], top);
   }
   wt.bridge = BF.bridges ? BF.bridges.weight(R) : 0;   // 1.2, 2 when busy; 0 with no crossing to bridge
@@ -402,18 +491,17 @@ function weighTypes(m, bs) {
   wt.cottage += homeless >= 1 ? 0.6 : 0;
   const stock = sellerStock(R);
   const ws = [];
+  if (!(bs.fail && bs.fail.food_jobsite > dayNow())) ws.push(["food_jobsite", FOOD_WEIGHT]);   // its materials are weighed with its kind (chooseFood)
   for (const t of BPr.TYPES) {
     if (bs.fail && bs.fail[t] > dayNow()) continue;
-    if (t === "stable" && !wt.stable) continue;                  // never outside horse land
-    if (t === "pasture" && !wt.pasture) continue;                // never off grass
-    if (t === "sty" && !wt.sty) continue;                        // never off grass (js/pigfarmer.js)
+    if (isFood(t) || t === "garden") continue;                   // food jobsites come through "food_jobsite"; the garden pen gave way to the farm
+    if (t === "stable" && !wt.stable) continue;                  // only with wild horses near
     if (t === "glassworks" && !wt.glassworks) continue;          // never without sand nearby
     if (t === "apiary" && !wt.apiary) continue;                  // never off grass
     if (t === "bridge" && !wt.bridge) continue;                  // only where villagers keep crossing water (js/bridges.js)
     const opts = optsFor(t, m.inv, R), wood = chooseWood(m, t, style, opts, stock);
     const bp = BPr.get(t, 0, style, 0.5, opts, wood);
-    const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
-    const a = analyze(m.inv, req, wood);
+    const a = analyze(m.inv, planReq(m, bp, t, style), wood);
     const buyable = Object.keys(a.shortfall).every(k => stock[k] > 0);   // some villager has it to sell right now
     const mult = a.ok || onlyPanes(R, a, stock) ? 3 : buyable ? 1.2 : 0.25;
     const x = (wt[t] || 0.3) * mult;
@@ -425,12 +513,18 @@ function pickType(m, bs) {
   const R = m.village;
   if (builtOf(R).length === 0 && !(bs.fail && bs.fail.small_house > dayNow())) return "small_house";
   const ws = weighTypes(m, bs);
-  if (!ws.length) return null;
-  let sum = 0;
-  for (const w of ws) sum += w[1];
-  let r = Math.random() * sum;
-  for (const [t, x] of ws) if ((r -= x) <= 0) return t;
-  return ws[ws.length - 1][0];
+  while (ws.length) {
+    let sum = 0;
+    for (const w of ws) sum += w[1];
+    let r = Math.random() * sum, t = ws[ws.length - 1][0];
+    for (const [k, x] of ws) if ((r -= x) <= 0) { t = k; break; }
+    if (t !== "food_jobsite") return t;
+    const sub = chooseFood(m, bs);
+    if (sub) return sub;
+    bs.fail.food_jobsite = dayNow() + 0.12;   // no farm or paddock can be had now: pick among the other types
+    ws.splice(ws.findIndex(w => w[0] === "food_jobsite"), 1);
+  }
+  return null;
 }
 
 function newState() { return { mode: "idle", t: rnd(1, 3), cool: 0, stage: null, fail: {}, avoid: {}, placeT: 0.6, entry: null, want: null, losT: 0, losFor: -1 }; }
@@ -458,7 +552,7 @@ function vlogBuild(m, e, verb) {
 // `wood`: the species chosen for it (chooseWood when omitted); the whole structure is built from it.
 function beginPlan(m, bs, type, wood) {
   const R = m.village, built = builtOf(R), style = styleIdx(R.style);
-  const found = BF.worldgen.palette(style).found;
+  const found = foundOf(type, style);
   const opts = optsFor(type, m.inv, R);
   wood = wood || chooseWood(m, type, style, opts);
   const bp0 = BP().get(type, 0, style, 0.5, opts, wood);
@@ -466,7 +560,7 @@ function beginPlan(m, bs, type, wood) {
   const a = analyze(m.inv, req, wood);
   if (!a.ok && !onlyPanes(R, a)) return null;
   const spare = Math.max(0, have0(m.inv, found) - (req[found] || 0));
-  const site = findSite(m, type, opts, spare, wood);
+  const site = findSite(m, type, opts, type === "veg_farm" ? Math.max(spare, 24) : spare, wood);   // a farm's levelling dirt it buys or digs as it goes
   if (!site) { bs.fail[type] = dayNow() + 0.12; logEvent("nosite", m, { type }); return null; }
   applyCrafts(m, a.crafts);
   const e = { id: nextId(built), type, label: site.bp.label, rot: site.rot, style, wood, h: site.h, opts: opts || undefined, ox: site.ox, oy: site.oy, oz: site.oz,
@@ -500,9 +594,9 @@ function pickNext(m, bs) {
   if (!R || !R.wg) return null;
   const type = pickType(m, bs);
   if (!type) return null;
-  const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
+  const style = styleIdx(R.style);
   const opts = optsFor(type, m.inv, R), wood = chooseWood(m, type, style, opts);
-  const req = Object.assign({}, BP().get(type, 0, style, 0.5, opts, wood).req); req[found] = (req[found] || 0) + FILL_SPARE;
+  const req = planReq(m, BP().get(type, 0, style, 0.5, opts, wood), type, style);
   return { type, wood, req };
 }
 // What the builder keeps for itself (js/market.js): the materials left on the structure it is building (or is buying for) and those of
@@ -543,10 +637,10 @@ function think(m, bs) {
   const nx = bs.next; bs.next = null;   // chosen when it started the last one
   const type = nx && !(bs.fail[nx.type] > dayNow()) ? nx.type : pickType(m, bs);
   if (!type) return;
-  const style = styleIdx(R.style), found = BF.worldgen.palette(style).found;
+  const style = styleIdx(R.style);
   const opts = optsFor(type, m.inv, R), wood = nx && nx.type === type ? nx.wood : chooseWood(m, type, style, opts);
   const bp = BP().get(type, 0, style, 0.5, opts, wood);
-  const req = Object.assign({}, bp.req); req[found] = (req[found] || 0) + FILL_SPARE;
+  const req = planReq(m, bp, type, style);
   const a = analyze(m.inv, req, wood);
   if (a.ok || onlyPanes(R, a)) {
     if (!beginBuild(m, bp.n, null, null, String(bp.label || BP().label(type)))) return;   // not started: no site chosen, nothing used
@@ -669,7 +763,8 @@ function placeCell(m, bs, e) {
   if (!w.isLoaded(c.x, c.z)) return "paused";
   const cur = w.getBlock(c.x, c.y, c.z);
   if (cur === c.id) { advance(e); return "skipped"; }
-  if (BF.SOLID[cur] && !BF.REPLACEABLE[cur]) { e.skipped++; advance(e, c.pair ? 2 : 1); logEvent("blocked", m, { at: [c.x, c.y, c.z], by: BF.blocks[cur].name }); return "skipped"; }
+  const dig = c.dig && BF.SOLID[cur] && !BF.REPLACEABLE[cur] && BF.blocks[cur] && GROUND_OK.test(BF.blocks[cur].name);   // a farm's ring, channel or soil goes in where the ground is
+  if (BF.SOLID[cur] && !BF.REPLACEABLE[cur] && !dig) { e.skipped++; advance(e, c.pair ? 2 : 1); logEvent("blocked", m, { at: [c.x, c.y, c.z], by: BF.blocks[cur].name }); return "skipped"; }
   const isWater = c.id === BF.B.water && BF.I.water_bucket != null;
   if (isWater && T.count(m.inv, BF.I.water_bucket) < 1) {      // water only comes out of a full bucket
     if (T.count(m.inv, BF.I.bucket) > 0) return "nowater";
@@ -691,6 +786,11 @@ function placeCell(m, bs, e) {
       if (have0(m.inv, c.item) < 1 && c.item === PANE() && noPanes(m.village)) { e.gaps = e.gaps || []; if (!e.gaps.includes(e.prog)) e.gaps.push(e.prog); advance(e); logEvent("gap", m, { at: [c.x, c.y, c.z] }); return "skipped"; }   // a window left open
       if (have0(m.inv, c.item) < 1) return "missing";
     }
+  }
+  if (dig) {   // the ground block comes out first; the builder keeps its drops (grass gives dirt)
+    const drops = BF.rollDrops ? BF.rollDrops(cur) : [];
+    if (!w.setBlock(c.x, c.y, c.z, 0)) return "paused";
+    for (const d of drops) T.add(m.inv, d.id, d.count);
   }
   if (!w.setBlock(c.x, c.y, c.z, use)) return "paused";
   if (c.cost) T.remove(m.inv, c.item, 1);                   // exactly one item per block
@@ -939,6 +1039,9 @@ function shopMode(m, bs, dt, out) {
       if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; return false; }
       bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0;
     }
+    else if (BF.I.dirt != null && a.shortfall[BF.I.dirt] && BF.villageLife && BF.villageLife.gatherFor && !(bs.noDirt > dayNow())) {   // nobody sells dirt: it digs its own (idea-044)
+      bs.stage = "dig"; bs.dig = { t: 0, n: have0(m.inv, BF.I.dirt) + a.shortfall[BF.I.dirt], task: null, cd: 0, bad: 0 }; ai.route = null; bs.goal = null;
+    }
     else {
       if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
       bs.stage = "wait"; bs.t = rnd(RECHECK[0], RECHECK[1]);
@@ -947,6 +1050,7 @@ function shopMode(m, bs, dt, out) {
     return false;
   }
   if (bs.stage === "wait") return false;                       // wander the village (normal villager AI)
+  if (bs.stage === "dig") return digDirt(m, bs, dt, out);
   const deal = bs.deal;
   if (!deal || !canSell(deal.seller)) { bs.stage = "think"; bs.deal = null; if (BF.villageSim) BF.villageSim.done(m); return false; }
   const v2 = deal.seller, d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
@@ -976,6 +1080,36 @@ function shopMode(m, bs, dt, out) {
     return true;
   }
   return false;
+}
+
+// Digging its own dirt (idea-044), by the farmers' rules (js/villagelife.js gatherFor): column by column until it holds bs.dig.n, for at most
+// 4 minutes; then it thinks again (and buys what else it lacks).
+function digDirt(m, bs, dt, out) {
+  const G = bs.dig, VL = BF.villageLife, ai = m.ai;
+  // nothing dug (none to dig near): for a while it waits for dirt like for any other material
+  const back = () => { if (G && !G.got) bs.noDirt = dayNow() + 0.1; bs.stage = "think"; bs.dig = null; ai.route = null; bs.goal = null; if (BF.villageSim) BF.villageSim.done(m); return false; };
+  if (!G || (G.t += dt) > 240 || G.bad >= 6 || have0(m.inv, BF.I.dirt) >= G.n) return back();
+  if (!G.task) {
+    if ((G.cd -= dt) > 0) return false;
+    G.cd = 2;
+    G.task = VL.gatherFor(m, m.village);
+    if (!G.task) return false;
+    G.act = 0;
+    const VS = BF.villageSim;
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [[G.task.x + 0.5, G.task.z + 0.5]]) + 1, "Gathering dirt")) { G.task = null; return back(); }
+  }
+  const t = G.task;
+  ai.mode = "idle"; ai.t = 2;
+  const st = travel(m, bs, dt, out, { x: t.x, y: t.ty, z: t.z }, 2.4, m.def.speed * 1.2);
+  if (st === "failed") { G.task = null; G.bad++; if (BF.villageSim) BF.villageSim.done(m); return true; }
+  if (st !== "arrived") return true;
+  out.faceX = t.x + 0.5; out.faceZ = t.z + 0.5;
+  m.lookAt = { position: { x: t.x + 0.5, y: t.y + 0.5, z: t.z + 0.5 }, height: 0 };
+  if ((G.act += dt) < 0.9) { if (ai.swingT <= 0) ai.swingT = 0.35; return true; }
+  if (VL.gatherAt(m, m.village, t)) { G.got = (G.got || 0) + 1; logEvent("dig", m, { at: [t.x, t.y, t.z], dirt: have0(m.inv, BF.I.dirt) }); } else G.bad++;
+  G.task = null;
+  if (BF.villageSim) BF.villageSim.done(m);
+  return true;
 }
 
 // ---------------------------------------------------------------- main entry (called from villagerAI after the sleep/morning logic)
@@ -1011,6 +1145,7 @@ function statusText(m) {
   if (bs.mode === "fill") return "Fetching water";
   if (bs.mode === "shop" && bs.want) {
     const t = reqText(bs.want.short || {});
+    if (bs.stage === "dig") return "Gathering dirt";
     if (bs.stage === "walk" || bs.stage === "trade") return "Fetching: " + (bs.deal ? bs.deal.times * bs.deal.offer.sell.n + " " + BF.itemName(bs.deal.item) : t);
     return "Looking for: " + t;
   }
@@ -1063,7 +1198,7 @@ function onSpawn(m, rec, saved) {
 
 BF.builder = {
   BLOCK_T, REACH, BUILD_END, SITE_RANGE, log, pending,
-  ai, tick, statusText, startStock, exportAll, importAll, onSpawn, builtOf,
+  ai, tick, statusText, startStock, exportAll, importAll, onSpawn, builtOf, FOOD, FOOD_WEIGHT, STABLE_WEIGHT, ANIMAL_R, ANIMAL_MIN, chooseFood, foodCounts, wildCount, planReq,
   analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, weighTypes, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome, reserve, shortfall, pickNext,
   reset() { pending.clear(); log.length = 0; for (const p of pool) BF.scene.remove(p.mesh); pool.length = 0; },
 };

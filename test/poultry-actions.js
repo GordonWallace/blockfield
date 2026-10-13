@@ -9,7 +9,7 @@ module.exports = async (pg, out) => {
     const day = () => BF.sky.day + BF.sky.time;
     const P = BF.poultry, I = BF.I;
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (4 + pastures + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
     const V = { x: 26, z: 39 };   // seed 1: a village of 12 with a coop

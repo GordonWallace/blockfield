@@ -5,7 +5,7 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   for (const gen of [3, 2, 1]) {
-    await pg.evaluate(g => BF.newWorld(1337, { gen: g, biomeScale: 1 }), gen);
+    await pg.evaluate(g => BF.newWorld(1337, { gen: g, villages: 9, biomeScale: 1 }), gen);
     const res = { gen };
     for (const k of [16, 128, 4096]) {   // 2048, 16384 (16 b/px, rivers) and 524288 blocks wide (512 b/px): the widest allowed map
       res["w" + k * 128] = await pg.evaluate(k => {

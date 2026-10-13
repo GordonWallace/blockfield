@@ -549,6 +549,16 @@ function tieToPost(x, y, z) {
 const recOf = m => (m && m.horse) || null;
 function horsesOf(owner) { const out = []; for (const r of recs.values()) if (r.owner === owner) out.push(r); return out; }
 // Nearest loaded wild horse within r blocks of (x, z), or null.
+// How many wild adult horses (untamed, unridden, not foals) stand within rad blocks of (x, z) (js/builder.js: a stable needs 2 within 80).
+function wildCount(x, z, rad) {
+  let n = 0;
+  for (const r of recs.values()) {
+    const m = r.mob;
+    if (!m || !live(m) || r.tamed || r.owner || m.rider || isFoal(r)) continue;
+    if (Math.hypot(m.position.x - x, m.position.z - z) <= rad) n++;
+  }
+  return n;
+}
 function wildNear(x, z, rad) {
   let best = null, bd = rad;
   for (const r of recs.values()) {
@@ -600,7 +610,7 @@ BF.horses = {
   HORSE_BIOMES, COATS, MARKS, FEED, SPEED_MIN, SPEED_MAX, JUMP_MIN, JUMP_MAX, HP_MIN, HP_MAX,
   isHorseBiome, rollStats, foalStats, jumpHeight, price: m => price(m.horse || m),
   spawn, tame, feed, breed, leash, setPen, willing: m => !!(m && m.horse && willing(m.horse, now())),
-  ai, tick, spawnHerdAt, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, herds, records: recs,
+  ai, tick, spawnHerdAt, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, wildCount, herds, records: recs,
   ride: RIDE, drawLeads,
   serialize, deserialize, reset,
 };

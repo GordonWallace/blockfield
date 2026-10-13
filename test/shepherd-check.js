@@ -9,7 +9,7 @@ module.exports = async (pg, out) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     BF.state.paused = true;                                  // the page's own loop stays out of the way
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns: only village stock
     const V = { x: 26, z: 39 };   // seed 1: a village whose shepherd has its loom from the start (with village generator 2 the spawn village's shepherds start unemployed)
     const gy = BF.worldgen.heightAt(V.x + 4, V.z + 4);

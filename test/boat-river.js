@@ -7,7 +7,7 @@ module.exports = async (pg, out) => {
     const R = { lines: [] }, ok = (name, cond, extra) => { const l = (cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""); R.lines.push(l); console.warn(l); };
     const tick = () => new Promise(r => setTimeout(r, 0));
     BF.state.paused = true;
-    BF.newWorld(seed, { gen: 3, gameMode: "creative" });
+    BF.newWorld(seed, { gen: 3, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     const G = BF.worldgen, W = BF.world, P = BF.player, o = {};
     const wet = (x, z) => G.waterLevelAt(Math.floor(x), Math.floor(z)) > G.heightAt(Math.floor(x), Math.floor(z));
