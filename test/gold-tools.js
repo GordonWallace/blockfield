@@ -57,7 +57,7 @@ module.exports = async (pg) => {
     // ---- in a running village: shears and hoe wear as they are used
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     const V = { x: 26, z: 39 };   // seed 1: a village whose shepherd has its loom (test/shepherd-day.js)
     P.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);

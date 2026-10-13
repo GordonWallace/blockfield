@@ -18,7 +18,7 @@ module.exports = async (pg) => {
     let cowherds = 0, pastureBad = [], bakers = 0, bakerBad = [], bakerShort = 0;
     let villages = 0, minPop = Infinity, core = 0, planned = 0, deserts = 0, gardens = 0, bad = [], desertV = null;
     for (const seed of [1, 2, 3, 4, 5, 6]) {
-      BF.newWorld(seed, { gen: 3 });
+      BF.newWorld(seed, { gen: 3, villages: 9 });
       if (seed === 1) ok("new worlds use village generator 9", BF.state.villages >= 9, BF.state.villages);
       const seen = new Set();
       for (let rz = -8; rz < 8; rz++) for (let rx = -8; rx < 8; rx++) for (const v of BF.worldgen.villagesNear(rx * 384, rz * 384, 200)) {
@@ -113,7 +113,7 @@ module.exports = async (pg) => {
 
     // ---- the desert garden, live
     if (desertV) {
-      BF.newWorld(1, { gen: 3, gameMode: "survival" });
+      BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
       BF.mobs.spawning = false;
       const g = desertV.g, gx = (g.x0 + g.x1) >> 1, gz = (g.z0 + g.z1) >> 1;
       BF.player.teleport(gx + 0.5, g.y + 12, gz + 0.5);
@@ -141,7 +141,7 @@ module.exports = async (pg) => {
     } else ok("seed 1 has a desert village to visit", false);
 
     // ---- a farmer with no hoe and no bucket buys both from the toolsmith
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     const V = BF.worldgen.nearestVillage(0, 0), vkey = Math.round(V.x) + "," + Math.round(V.z);
     BF.player.teleport(V.x + 4.5, V.y + 3, V.z + 4.5);

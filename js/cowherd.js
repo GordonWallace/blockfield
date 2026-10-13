@@ -28,7 +28,7 @@ const MATE_R = 10, MEET = 2;  // a willing cow looks for a mate this far; they b
 const DENSITY = 8;            // one cow per this many pasture cells
 const MIN_ADULTS = 2;         // the cowherd never culls below this many adults
 const STOCK_TO = 2;           // the cowherd fetches wild cows until its pasture holds this many
-const FIND_R = 96;            // how far it looks for a wild cow
+const FIND_R = 100;           // how far it looks for a wild cow (100 for every keeper, idea-044)
 const FOLLOW_R = 10;          // cows follow a player holding wheat from this far
 const ADOPT_MAX = 24;         // a pasture takes in wandering cows up to this many
 const FREE_RADIUS = 10;       // a cowherd without a pasture milks the free cows within 10 blocks of its churn

@@ -41,7 +41,7 @@ module.exports = async (pg, out) => {
     };
     const w1 = weights(fakeVillage(6, 0, 0), 2);
     const w2 = weights(fakeVillage(6, 0, 0), 0);
-    const top = Math.max(...Object.keys(w2).filter(t => !BEDS.includes(t)).map(t => w2[t]));
+    const top = Math.max(...Object.keys(w2).filter(t => !BEDS.includes(t) && t !== "food_jobsite").map(t => w2[t]));   // the food jobsite's weight has no materials factor (chooseFood checks them)
     ok("with a spare bed the houses keep their base weights", w1.small_house < w1.well && w1.cottage < w1.well, { small: w1.small_house, well: w1.well });
     ok("with every bed claimed each bed structure is as likely as the likeliest other type", BEDS.every(t => Math.abs(w2[t] - top) < 1e-9), { top, small: w2.small_house, medium: w2.medium_house, cottage: w2.cottage });
     const w3 = weights(fakeVillage(6, 2, 0), 0);
@@ -53,6 +53,7 @@ module.exports = async (pg, out) => {
       const Rv = fakeVillage(6, 0, 0);
       const sw = BF.blueprints.styleWood(0), wreq = Object.assign({}, BF.blueprints.get("well", 0, 0, 0.5, null, sw).req);
       wreq[BF.worldgen.palette(0).found] = 20;
+      if (I.bucket != null) wreq[I.bucket] = 1;   // the well's water is poured from a bucket (builder.js planReq)
       const seller = Rv.members[0], other = Rv.members[1];
       seller.profession = "toolsmith"; other.profession = "mason";
       seller.trades = [{ buy: [{ id: I.emerald, n: 1 }], sell: { id: I.coal, n: 2 } }];   // a coal offer, with or without coal behind it

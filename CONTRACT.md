@@ -1135,3 +1135,27 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
 - Path wear: every grass, dirt, coarse dirt or podzol block a merchant steps on during the walk there or back (with air above, outside every village's box + 4, never farmland) is counted; at WEAR_N (20) it becomes `dirt_path`. Counts (2 and up, at most 6000) and routes are saved under `"caravans"`.
 - Routes: `BF.merchant.routes()` -> `[{a, b (village keys), trips, items, emeralds (last 7 game days), total, road: [{who, stage}]}]`, sent by js/debugfeed.js as `routes` and shown in the debug screen's Routes panel.
 - Village log (kind `caravan`, logmatch action `caravan` for Merchants): "<name> (Merchant) set out for the village at x, z carrying ...", "... arrived at ... with ...", "<name> (Merchant) from the village at x, z sold ... here for N emeralds" and "... bought ... here to take home" (in the other village's log), "... left ... for home carrying ...", "... came home from ... and sold ... for N emeralds". Status text: "Buying goods for a trip", "Carrying goods to another village", "Selling goods in another village", "Buying goods to take home", "Walking home with goods", "Selling goods brought home", "Camping on the road". `BF.merchant.LOG` keeps the last 300 internal events (plan, buy, leave, arrive, sell, return, camp, home, died, lost).
+
+## Animal keepers and food jobsites (idea-044)
+- **Village generator 10** (default for new worlds; worlds saved with 9 or less keep theirs). `BF.worldgen.paddockPlan(x, z, pop, biomeId)` gives a village's paddocks in roll order:
+  native animals are the village biome's wild ones (`nativeAnimals`, js/wildlife.js `HABITAT`: open land chicken, sheep, pig, cow, horse; woods pig, chicken, sheep; snow sheep; else none);
+  count E = pop / 10 x (0.4 + 0.15 x native types) x a 0.6-1.4 factor (hash of the key), the fractional part rounding up by chance, no cap; each animal a weighted roll (4 native, 1 other,
+  halved per paddock of it already drawn; a horse at most once, since a village keeps one stable hand). The roster (`villageRoster`) adds a keeper per paddock (`KEEPER_OF`) at
+  `<village key>#1970+k` (`BF.jobs.KEEPER_IDX`), each taking the last plain resident's place (never the core four or a special-building tradesperson; none can make way: that paddock is left
+  out). Shepherds leave the shuffle; the old poultry (8+), cowherd (10+ grass) and pig farmer (10+ grass, 60%) rules are off. `BF.jobs.keeperCounts(v)` tells `layoutVillage` how many
+  pens, coops, pastures, sties and stables to lay out (any ground; plots reach the village extent, `PASSES10`); random pens are no longer rolled; a pasture's field is always grass.
+  A horse paddock is a `stable` plot drawn from the builder's blueprint (`b.rot` turns its gate to the road, `b.ox/oz` its corner, `b.rack` the tack rack the jobs plan puts there);
+  `BF.stables.stableOf` reads it as a finished builder entry (`genStable`) and it starts with 2 tamed horses once (saved `stables:stocked`). No spawn village (`spawnVillage()` is null):
+  every village is a region village on the strict site rules. Headless tests boot `#seed1337gen3v9` (test/run.js, `BF_HASH` overrides) and pin `villages: 9` where they make worlds.
+- **Builders' food jobsite.** One `food_jobsite` entry (weight `FOOD_WEIGHT` 2.5) stands for `veg_farm`, `pen`, `pasture`, `coop` and `sty` (none are separate entries; the garden pen
+  is gone). `chooseFood`: round 1 rolls evenly among kinds the village has none of (`foodCounts`: their jobsite blocks within the village box, plus ones being built); a paddock needs its
+  materials (`materialsOK`, sellerStock) and `ANIMAL_MIN` (2) wild loaded animals of its kind within `ANIMAL_R` (80) of the centre (`wildCount`), the farm only materials; failures drop
+  out. Round 2 weighs the rest 1 / (1 + count). Nothing passes: `food_jobsite` is out for 0.12 day. The `stable` stays separate (`STABLE_WEIGHT` 0.3) and needs 2 wild horses within 80.
+- **Vegetable farm** (`veg_farm`): a 7x5 log-ringed bed with a water channel, set into the ground (`dig` cells), a composter beside it; its soil (`marks.soil`) is filled and levelled with
+  dirt, sand or gravel at soil level swapped for dirt. The builder pours the channel from a bucket (fillMode), crafts the composter, never tills or plants (the farmer's repair project does).
+  A built pasture turfs its field (`marks.turf`). Dirt: farmers keep 8 (`CRAFT_KEEP`) and sell the rest as spare goods (`VALUE.dirt` .06: 16 per emerald); with none for sale a builder
+  digs its own by the farmers' `findGather` rules (`BF.villageLife.gatherFor/gatherAt`; nothing found: `bs.noDirt` for 0.1 day).
+- **Sheep pens by builders** (`pen`, a loom beside it): js/shepherd.js `makeBuiltPen`; the shepherd stocks it to 2 (`STOCK_TO`) by leading wild sheep within 100 blocks (js/herd.js).
+  Every keeper searches 100 blocks (`FIND_R` / `CATCH_R`).
+- **Grass spreading** (js/grass.js, `BF.grass`): `SAMPLES_PER_S` (120) random columns of loaded chunks a sim second; their top block turns from dirt to grass when nothing opaque
+  or fluid is on it, sky light above is at least 9 and a grass block is among its 26 neighbours. Farmland, paths and coarse dirt never change.

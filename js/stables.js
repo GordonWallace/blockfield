@@ -23,7 +23,7 @@ const BF = (window.BF = window.BF || {});
 
 const PROF = "stable_hand";
 const MIN_HORSES = 2, MAX_HORSES = 4;   // catch until 2, breed up to 4
-const CATCH_R = 128;                    // wild horses this far from the tack rack are worth the walk
+const CATCH_R = 100;                    // wild horses this far from the tack rack are worth the walk (100 for every keeper, idea-044)
 const WORK_START = 0.03, WORK_END = 0.47;
 const TASK_MAX = { catch: 240, home: 240, fetch: 90, feed: 60, shop: 70 };
 const FEED_DAYS = 1;                    // a fed adult stays willing this long (js/horses.js FEED_DAYS)
@@ -54,12 +54,12 @@ function log(kind, m, data) {
 const stats = r => "speed " + r.speed.toFixed(1) + " blocks/s, jump " + r.jump.toFixed(1) + " blocks, health " + r.maxHp;
 
 // ---------------------------------------------------------------- the stable of a village
-const villageOK = R => !!(R && BF.horses && BF.horses.isHorseBiome(R.x, R.z));
+const villageOK = R => !!(R && BF.horses);   // any village (idea-044: the horse-land rule gave way to builders' check for 2 wild horses within 80 blocks)
 // The village's finished stable: {e (builder entry), rec, owner, box (paddock inside, cells inclusive), gates [[x, z]], out [[x, z]] (in front of
 // the gate), y (floor level = the fence's level), rack {x, y, z}} or null. Read from the blueprint's marks (blueprints.js "stable").
 function stableOf(R) {
   if (!R || !BF.builder) return null;
-  const e = (R.built || BF.builder.builtOf(R) || []).find(x => x.type === "stable" && x.state === "done");
+  const e = (R.built || BF.builder.builtOf(R) || []).find(x => x.type === "stable" && x.state === "done") || genStable(R);
   if (!e) return null;
   const k = e.ox + "," + e.oy + "," + e.oz + "," + e.rot;
   if (e._st && e._stKey === k) { e._st.rec = R; return e._st; }
@@ -75,6 +75,36 @@ function stableOf(R) {
   e._stKey = k;
   return st;
 }
+// A generated stable (village generator 10, worldgen layoutVillage) as a finished builder entry, so the rest reads it the same way.
+function genStable(R) {
+  if (R._gst !== undefined) return R._gst;
+  const b = R.wg && (R.wg.buildings || []).find(x => x.type === "stable" && x.rot != null);
+  const e = b ? { id: 0, type: "stable", state: "done", gen: true, rot: b.rot, style: R.wg.style | 0, h: 0.5, wood: "oak", ox: b.ox, oy: b.y + 1, oz: b.oz } : null;
+  Object.defineProperty(R, "_gst", { value: e, writable: true, enumerable: false, configurable: true });
+  return e;
+}
+// A generated stable starts with 2 tamed horses of its own (idea-044), once: when the village first comes near with its paddock loaded.
+const stocked = new Set();   // village keys whose generated stable got its starting horses (saved: "stables:stocked")
+function stockGen() {
+  const pp = BF.player && BF.player.position, W = BF.world, H = BF.horses;
+  if (!pp || !H || !BF.mobs.villages) return;
+  for (const R of BF.mobs.villages.values()) {
+    if (!R.wg || stocked.has(R.key) || Math.hypot(R.x - pp.x, R.z - pp.z) > 80) continue;
+    const e = genStable(R), st = e && stableOf(R);
+    if (!st || st.e !== e) continue;
+    const b = st.box;
+    if (!W.isLoaded(b.x0, b.z0) || !W.isLoaded(b.x1, b.z1)) continue;
+    stocked.add(R.key);
+    if (horsesOf(st).length) continue;
+    for (let i = 0; i < MIN_HORSES; i++) {
+      const x = b.x0 + 1 + i * (b.x1 - b.x0 - 1), z = (b.z0 + b.z1 + 1) / 2;
+      const h = H.spawn(x + 0.5, st.y, z, { tamed: true, owner: st.owner });
+      if (h) H.setPen(h, b);
+    }
+  }
+}
+function exportAll(out) { if (stocked.size) out["stables:stocked"] = [...stocked]; }
+function importAll(o) { stocked.clear(); const a = o && o["stables:stocked"]; if (Array.isArray(a)) for (const k of a) stocked.add(String(k)); }
 const inBox = (b, x, z, m = 0) => x > b.x0 - m && x < b.x1 + 1 + m && z > b.z0 - m && z < b.z1 + 1 + m;
 const horsesOf = st => (st && BF.horses ? BF.horses.horsesOf(st.owner) : []);
 // The village of a horse record owned by a stable, or null.
@@ -84,7 +114,7 @@ function recOfOwner(owner) {
 }
 
 // ---------------------------------------------------------------- who may work the tack rack (js/jobs.js)
-// Only a villager of a village on horse land, and only while no other villager of that village is the stable hand (one per village, loaded or not).
+// Only while no other villager of that village is the stable hand (one per village, loaded or not).
 function mayHire(m, s) {
   const R = m && m.village;
   if (!villageOK(R)) return false;
@@ -520,6 +550,7 @@ function tick(dt) {
   hook();
   if ((offT -= dt) > 0 || !BF.mobs) return;
   offT = 2;
+  stockGen();
   for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && live(m) && !m.tradingWith) syncOffers(m);
 }
 // What a villager holds besides its pack, for the debug screen (js/debugfeed.js): a stable hand's paddock horses.
@@ -530,7 +561,7 @@ function holdings(m) {
   return { paddock: true, horses: horsesOf(st).map(r => ({ coat: r.coat, foal: isFoal(r) ? 1 : 0, speed: +r.speed.toFixed(1), jump: +r.jump.toFixed(1), hp: r.maxHp,
     price: BF.horses.price(r), penned: r.pen ? 1 : 0, led: r.lead ? 1 : 0, here: r.mob && live(r.mob) ? 1 : 0 })) };
 }
-function reset() { LOG.length = 0; offT = 0; }
+function reset() { LOG.length = 0; offT = 0; stocked.clear(); }
 
 // ---------------------------------------------------------------- the tamed horse icon (trade offers only)
 if (BF.texKit) {
@@ -552,6 +583,6 @@ if (BF.texKit) {
 BF.stables = {
   PROF, MIN_HORSES, MAX_HORSES, CATCH_R, LOG,
   villageOK, stableOf, mayHire, pickPenTarget, ai, work, wantsJob, statusText, syncOffers, horseReason, handOver, playerSells, tick, holdings, reset,
-  craftOne, findDeal, wants, breedTarget, horsesOf,
+  craftOne, findDeal, wants, breedTarget, horsesOf, genStable, exportAll, importAll,
 };
 })();

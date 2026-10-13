@@ -532,6 +532,15 @@ function fillBucket(m, x, y, z) {
   sound("splash", x + 0.5, y + 0.5, z + 0.5, 0.4);
   return true;
 }
+// For js/builder.js (idea-044): a builder with no dirt to buy digs its own, by the farmers' rules (findGather: natural edges first, then one
+// shallow pit, outside the village). gatherFor gives the next column ({x, y, z, ty}) or null (also while the village is still being scanned);
+// gatherAt takes it (true when the dirt is in its pack).
+function gatherFor(m, R) {
+  const D = vdata(R);
+  D.want = BF.simNow(); wantVillages.add(R);
+  return D.ready ? findGather(m, D, null) : null;
+}
+const gatherAt = (m, R, t) => { const D = vdata(R); return !!(D.ready && gatherBlock(m, D, t)); };
 const wantVillages = new Set();   // villages whose water ring is scanned for builders although no farmer works there
 // For js/builder.js: the nearest water source (within ~30 blocks of the village, wells included) with a stand cell, or null (also while the village is still being scanned).
 function findWater(m, R) {
@@ -1756,7 +1765,7 @@ if (BF.texKit) {
   addShaped(BF.I.bucket, 1, ["I I", " I "], { I: BF.I.iron_ingot }, "3 Iron Ingots in a V → Bucket");
 });
 
-BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket,
+BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket, gatherFor, gatherAt,
   exportAll, importAll, bedRects,
   villageAge: key => { const A = villageAges.get(key); return A ? A.lived : null; },   // game days loaded and active, or null if never
   _test: { doFoodDeal, detectBeds, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, digOf, findLogSeller, doLogDeal, doToolDeal, perform, dealWith, findFoodSeller, milkDeal, findBottleSeller, findWheatSeller, doWheatDeal, feedWanted, get MILK_KEEP() { return BF.cowherd ? BF.cowherd.MILK_KEEP : 3; }, scanStep, inRange } };

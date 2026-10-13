@@ -78,7 +78,7 @@ module.exports = async (pg) => {
   ok("after a day away: the zombie on open ground burned, the creeper is back", s.open[0] === true ? !t.zombie && !!t.creeper && !!t.cow : !!t.creeper, { open: s.open, t });
 
   // ---- quit and rejoin with more than 120 wild mobs loaded
-  const id = await pg.evaluate(async () => (await BF.save.create({ name: "wild", seed: 1337, gameMode: "creative" })).id);
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: "wild", seed: 1337, gameMode: "creative", villages: 9 })).id);
   await pg.waitForTimeout(8000);
   const before = await pg.evaluate(async () => {
     BF.mobs.spawning = false;

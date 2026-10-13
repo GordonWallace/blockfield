@@ -20,7 +20,7 @@ const VALUE = {
   emerald: 1,
   wheat_seeds: .025, beetroot_seeds: .03, wheat_item: .07, potato: .06, carrot: .06, beetroot: .07, baked_potato: .09, bread: .24,
   apple: .15, pumpkin: .14, hay_bale: .65, sugar_cane: .04,
-  stick: .02, cobblestone: .03, stone: .05, sand: .03, gravel: .03, clay_ball: .06, brick: .15, bricks: .62, glass: .08,
+  stick: .02, cobblestone: .03, stone: .05, sand: .03, dirt: .06, gravel: .03, clay_ball: .06, brick: .15, bricks: .62, glass: .08,
   sandstone: .08, sandstone_bricks: .09, mossy_cobblestone: .15, calcite: .12, terracotta: .15, orange_terracotta: .18,
   yellow_terracotta: .18, red_terracotta: .18, white_terracotta: .18, brown_terracotta: .18,
   flint: .12, coal: .12, charcoal: .1, iron_ingot: .5, gold_ingot: 1.2, diamond: 3.5,

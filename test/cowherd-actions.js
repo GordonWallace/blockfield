@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
     const day = () => BF.sky.day + BF.sky.time;
     const C = BF.cowherd, I = BF.I, T = BF.trades;
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (5 + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
     const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains with a pasture
@@ -363,11 +363,11 @@ module.exports = async (pg, out) => {
     if (builder) {
       builder.bs = builder.bs || {};
       rec.wg.ground = 1;
-      for (let i = 0; i < 300; i++) if (BF.builder.pickType(builder, builder.bs) === "pasture") picked++;
+      for (let i = 0; i < 300; i++) if (BF.builder.pickType(builder, builder.bs) === "pasture") picked++;   // only through the food jobsite roll (idea-044)
       site = BF.builder.findSite(builder, "pasture", null, 99);
       rec.wg.ground = wg0;
     }
-    ok("builders never pick or site a pasture in a village off grass", !!builder && picked === 0 && site === null, { builder: !!builder, picked, site: site && site.ox });
+    ok("off grass a builder may still site a pasture (idea-044), and never picks one outside the food jobsite roll", !!builder && picked === 0 && site !== null, { builder: !!builder, picked, site: site && site.ox });
 
     // ---- beef is cooked into steak only in a real furnace, with fuel, in game time
     BF.sky.setTime(0.1);

@@ -29,7 +29,7 @@ const MATE_R = 10, MEET = 2;  // a willing pig looks for a mate this far; they b
 const DENSITY = 8;            // one pig per this many sty cells
 const MIN_ADULTS = 2;         // the pig farmer never culls below this many adults
 const STOCK_TO = 2;           // it fetches wild pigs until its sty holds this many
-const FIND_R = 96;            // how far it looks for a wild pig
+const FIND_R = 100;           // how far it looks for a wild pig (100 for every keeper, idea-044)
 const FOLLOW_R = 10;          // pigs follow a player holding feed from this far
 const ADOPT_MAX = 24;         // a sty takes in wandering pigs up to this many
 const FREE_RADIUS = 10;       // a pig farmer without a sty feeds the free pigs within 10 blocks of its trough
@@ -180,21 +180,9 @@ function stiesOf(rec) {
 }
 const fenceDist = (p, x, z) => Math.hypot(Math.max(p.fx0 - x, 0, x - p.fx1), Math.max(p.fz0 - z, 0, z - p.fz1));   // 0 inside the fence
 const inRoom = (p, pos) => pos.x > p.x0 && pos.x < p.x1 && pos.z > p.z0 && pos.z < p.z1 && Math.abs(pos.y - (p.y + 1)) < 3;
-// Pig land: a village on grass (plains, forest, taiga, savanna; not desert or snow), as for pastures (js/cowherd.js grassVillage).
-const villageOK = R => !!(BF.cowherd && BF.cowherd.grassVillage(R));
+// Any village (idea-044: sties are no longer for grass villages only; builders weigh them through the food jobsite roll, js/builder.js chooseFood).
+const villageOK = R => !!R;
 
-// The builder's wish for a sty (js/builder.js weighTypes): never off grass; hardly ever when the village has a sty (generated or built) or a pig
-// farmer; otherwise wanted (about as much as a pasture) by a village of 12 or more with wild pigs within FIND_R of it or a farmer selling feed
-// (a job offer or its spare carrots, potatoes or beetroot, js/market.js).
-function builderWeight(R, has) {
-  if (!villageOK(R)) return 0;
-  if (has || (R.wg && (R.wg.buildings || []).some(b => b.type === "sty")) || R.members.some(x => x.profession === "pig_farmer" && !x.dead && !x.removed)) return 0.02;
-  if (R.members.filter(x => x.type === "villager" && !x.dead && !x.removed).length < 12) return 0.05;
-  const T = TR(), ids = feedIds();
-  const feedSeller = R.members.some(v2 => v2 && v2.type === "villager" && live(v2) && v2.profession === "farmer" && (v2.trades || []).some(o => o && o.sell && ids.includes(o.sell.id) && !T.blockReason(v2, o)));
-  const pigs = (BF.mobs.list || []).some(o => o.type === "pig" && live(o) && Math.hypot(o.position.x - R.x, o.position.z - R.z) < FIND_R);
-  return feedSeller || pigs ? 2 : 0.05;
-}
 let pending = new Map();      // village key -> [{i, p: [packed], k: culls}] from a save, taken as each sty is first seen
 const activeSties = [];       // sties that are loaded and near the player (rebuilt by tickSties)
 let hooked = false;
@@ -749,7 +737,7 @@ function counts() {
 BF.pigFarmer = {
   FEED_DAYS, BREED_CD, PIGLET_DAYS, DENSITY, MIN_ADULTS, STOCK_TO, FIND_R, FEED_KEEP, PORK_KEEP, COOKED_CAP, WORK_END, FEED_NAMES,
   feed, playerUse, pigAI, syncLook, hungry, willing, isPiglet, breed, isFeed, feedIds, feedHeld,
-  stiesOf, styOf, tended, feedWanted, reserve, keepsFood, isWare, villageOK, builderWeight, seed,
+  stiesOf, styOf, tended, feedWanted, reserve, keepsFood, isWare, villageOK, seed,
   ai, cookAI, toCook, forceStop, tick, statusText, holdings, pickStyTarget, contain, counts,
   exportAll, importAll, reset,
   sties: () => activeSties, log: LOG,
