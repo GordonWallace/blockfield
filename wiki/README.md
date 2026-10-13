@@ -42,3 +42,9 @@ reading 1.3 never leads to something added in 1.4. A link to something the versi
 `node wiki/version.js freeze 1.3` copies the game it documents (`index.html`, `js/`) into `versions/1.3/game/` and marks 1.3 released. Run it
 on the release branch just before it merges, so main and later releases keep the frozen copy; from then on changes go into the next
 version's pages.
+
+### Pictures
+Screenshots in `versions/<id>/images/` and the biome facts in `versions/<id>/biomes.json` come from the game itself:
+`NODE_PATH=$(npm root -g) node wiki/capture.js <id> [name-prefix]` drives a headless game on seed 1337 (biome views, terrain, one village
+per style, a portrait of every mob and profession). Rerun it, or just the affected prefix (`biome-`, `village-`, `mob-`, `villager-`),
+when a change alters how something looks or where biomes fall. Block and item pictures are the game's own icons and need nothing.

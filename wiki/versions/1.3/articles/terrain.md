@@ -4,6 +4,8 @@ category: World generation
 ---
 The shape of the land in a new world is built in layers: how far inland you are sets the base height, a long ramp lifts inland areas onto high plains, and mountain domes stand on top of the plains. Small hills are added last. This page describes each layer. For the list of limits, see [[page:world-generation]].
 
+![A coast: beach, shallow sea and the lowlands behind](images/terrain-coast.jpg)
+
 ## Lowlands
 
 Near the sea the ground follows the coast. Ocean floors lie between about y -58 and the shore, with deeper basins far out. On land the base height rises smoothly with distance from the sea, from sea level (y 0) at the beach to about y 100 deep in a continent.
@@ -17,6 +19,8 @@ Some terrain is reshaped by its biome:
 - **Mushroom Fields** are low islands, found only far out in the deep ocean.
 
 ## The escarpment
+
+![Rising ground: savanna, desert and badlands on a slope](images/terrain-escarpment.jpg)
 
 Inland, the land climbs onto the high plains over a ramp several thousand blocks long. It eases in at the foot, levels off at the top, and is broken by rolling foothills (up to some fifty blocks of extra relief). The foothills are also where rivers tumble downhill; see [[page:rivers]]. Because the ramp is so long, the climb is usually no steeper than a hill.
 

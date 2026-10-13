@@ -34,6 +34,12 @@ A village keeps one [[mob:iron_golem]] for every 15 villagers, at least one. Gol
 
 ## Styles by biome
 
+![Plains village](images/village-plains.jpg)
+![Desert village](images/village-desert.jpg)
+![Savanna village](images/village-savanna.jpg)
+![Taiga village](images/village-taiga.jpg)
+![Snowy village](images/village-snowy-plains.jpg)
+
 The biome sets the building materials. Every style uses a gabled roof except the desert one, which has flat roofs.
 
 | Biome | Walls | Corner posts | Roof | Foundation and wells | Ground |

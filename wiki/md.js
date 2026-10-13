@@ -1,5 +1,7 @@
 // A small Markdown renderer for Blockfieldpedia articles: front matter, ## / ### headings, paragraphs, - and 1. lists (two levels),
-// pipe tables, **bold**, *italic*, `code`, [text](url) and wiki links [[kind:name|label]]. link(kind, name, label) returns the HTML of a wiki link.
+// pipe tables, **bold**, *italic*, `code`, [text](url), wiki links [[kind:name|label]] and pictures: a line ![caption](images/x.jpg) is a
+// figure, several such lines in a row a gallery; relative picture paths resolve against WikiMD.base (the version's folder).
+// link(kind, name, label) returns the HTML of a wiki link.
 (() => {
 "use strict";
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -38,6 +40,17 @@ function render(src, link, slug) {
     const line = lines[i];
     let m;
     if (!line.trim()) { flush(); continue; }
+    if (/^!\[[^\]]*\]\([^)\s]+\)\s*$/.test(line)) {
+      flush();
+      const figs = [];
+      for (; i < lines.length && (m = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(lines[i])); i++) {
+        const src = /^(https?:|\/)/.test(m[2]) ? m[2] : (WikiMD.base || "") + m[2];
+        figs.push(`<figure><img src="${esc(src)}" alt="${esc(m[1])}" loading="lazy"><figcaption>${inline(m[1], link)}</figcaption></figure>`);
+      }
+      i--;
+      out.push(figs.length > 1 ? `<div class="gallery">${figs.join("")}</div>` : figs[0]);
+      continue;
+    }
     if ((m = /^(#{1,4})\s+(.*)$/.exec(line))) {
       flush();
       const lv = Math.max(2, m[1].length), id = slug ? slug(m[2]) : "";
@@ -81,5 +94,5 @@ function render(src, link, slug) {
   return out.join("\n");
 }
 
-window.WikiMD = { render, inline, frontMatter, esc };
+window.WikiMD = { render, inline, frontMatter, esc, base: "" };
 })();

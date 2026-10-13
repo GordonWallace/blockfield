@@ -98,3 +98,19 @@ details summary { cursor: pointer; color: var(--link); }
 }
 .article a.il img.ic, #beh a.il img.ic, p a.il img.ic { width: 20px; height: 20px; }
 p a.il, li a.il { margin-right: 0; vertical-align: bottom; }
+figure { margin: 10px 0 16px; max-width: 640px; }
+figure img { width: 100%; border: 1px solid var(--edge); border-radius: 3px; display: block; }
+figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 10px 0 16px; }
+.gallery figure { margin: 0; }
+.photo img { width: 100%; border-radius: 3px; display: block; margin-bottom: 10px; }
+.mt { display: inline-block; border-radius: 50%; overflow: hidden; border: 2px solid var(--panel2); vertical-align: middle; margin-right: -6px; background: var(--panel2); }
+.mt img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mt span { font-size: 9px; }
+.clusters { display: flex; flex-wrap: wrap; gap: 18px 26px; margin: 10px 0 16px; }
+.cl .crowd { display: flex; padding-left: 4px; }
+.cl .crowd .mt:nth-child(even) { transform: translateY(8px); }
+.cl .cap { margin-top: 10px; font-size: 13px; }
+table.biomes .mt { margin-right: -4px; }
+.chips a { white-space: nowrap; }
+.scroll { overflow-x: auto; }

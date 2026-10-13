@@ -60,8 +60,9 @@ server.listen(0, '127.0.0.1', async () => {
     // some generated facts, spot-checked
     const text = async h => (await go(h)).innerText;
     const iron = await text('#/item/iron_ore'), farmer = await text('#/villager/farmer'), cow = await text('#/mob/cow'), chest = await text('#/item/chest');
+    const pick = await text('#/tool/pickaxe'), forest = await text('#/biome/forest');
     const absent = await text('#/item/item_from_a_later_version');   // a page another version may have
-    return { absent, n: seen.size, bad, broken, iron, farmer, cow, chest, articles: [...document.querySelectorAll('#nav a[href^="#/page/"]')].length };
+    return { pick, forest, absent, n: seen.size, bad, broken, iron, farmer, cow, chest, articles: [...document.querySelectorAll('#nav a[href^="#/page/"]')].length };
   });
   console.log(`built ${r.n} pages, ${r.articles} articles`);
   check(r.articles >= 20, `articles listed (${r.articles})`);
@@ -72,6 +73,8 @@ server.listen(0, '127.0.0.1', async () => {
   check(/Composter/.test(r.farmer) && /Novice/.test(r.farmer) && /16 Wheat for 1 Emerald/.test(r.farmer), 'farmer: jobsite and trade table');
   check(/Plains/.test(r.cow) && /Raw Beef/.test(r.cow), 'cow: habitat and drops');
   check(/Crafting/.test(r.chest) && /Furniture maker/i.test(r.chest), 'chest: recipe and the villager selling it');
+  check(/Golden Pickaxe/.test(r.pick) && /1561 uses/.test(r.pick) && /Obsidian/.test(r.pick), 'pickaxe page: materials compared, durability, harvest levels');
+  check(/Wild animals/i.test(r.forest) && /Borders/i.test(r.forest), 'forest biome page: animals and borders');
   check(/Not in version/.test(r.absent), 'a page this version lacks says so instead of building');
   check(!errors.length, `no page errors${errors.length ? ': ' + errors.slice(0, 5).join('; ') : ''}`);
   console.log(fails ? `FAILED wiki (${fails})` : 'PASS wiki');

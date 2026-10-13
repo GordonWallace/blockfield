@@ -28,6 +28,8 @@ Wooden, stone, iron and diamond tools make up four tiers, and golden tools are a
 
 Golden tools are not as in Minecraft: they sit between iron and diamond, harvest like iron and last 800 uses. Shears last 238 uses and a bow 384.
 
+Each tool type has a page comparing its materials, with mining times on common blocks: [[tool:pickaxe]], [[tool:axe]], [[tool:shovel]], [[tool:hoe]] and [[tool:sword]].
+
 ## What drops
 
 Some blocks (stone, ores, obsidian and similar) give nothing if you break them with the wrong tool or too low a tier. They still break, just slowly. The tier a block needs:

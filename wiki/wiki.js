@@ -15,6 +15,7 @@ const D = {};              // derived indexes, built once
 const articles = new Map();   // id -> {id, title, category, body}
 const extra = new Map();      // "prof-farmer" / "mob-cow" -> markdown body | null
 let natural = { blocks: {}, rules: [] }, biomeNames = [];
+let biomeFacts = null, hostileWeights = [], villageBiomes = [];   // versions/<id>/biomes.json (wiki/capture.js), the game's monster mix and village biomes
 let ver = null, dir = "";     // the version shown and its folder ("versions/1.3/")
 const STORE = "blockfieldpedia.version";
 const store = { get() { try { return sessionStorage.getItem(STORE); } catch (e) { return null; } }, set(v) { try { sessionStorage.setItem(STORE, v); } catch (e) { /* private mode */ } } };
@@ -46,15 +47,21 @@ const push = (map, k, v) => { if (!map.has(k)) map.set(k, []); map.get(k).push(v
 
 // Everything a page links to must exist in the version being read (a 1.3 page never leads to something added in 1.4):
 // links are checked against this version's game data and articles, and a missing target is plain red text (test/wiki.js fails on it).
+// tool types made in more than one material (pickaxe, axe...): each gets a comparison page, #/tool/<type>
+const toolsOf = type => BF.items.filter(it => it && !it.isBlock && it.tool && it.tool.type === type);
+const toolTypes = () => [...new Set(BF.items.filter(it => it && !it.isBlock && it.tool).map(it => it.tool.type))].filter(t => toolsOf(t).length > 1);
 const mobTypes = () => BF.mobs.types.filter(t => t !== "villager").concat(BF.bees ? ["bee"] : []);
-const exists = (kind, name) => kind === "item" ? BF.I[name] !== undefined : kind === "villager" ? D.profs.includes(name) :
-  kind === "mob" ? name === "villager" || mobTypes().includes(name) : kind === "page" ? articles.has(name) : false;
+const biomeId = sl => biomeNames.findIndex(n => slug(n) === sl);
+const exists = (kind, name) => kind === "item" ? BF.I[name] !== undefined : kind === "biome" ? biomeId(name) >= 0 : kind === "villager" ? D.profs.includes(name) :
+  kind === "mob" ? name === "villager" || mobTypes().includes(name) : kind === "page" ? articles.has(name) : kind === "tool" ? toolTypes().includes(name) : false;
 const missing = (text, why) => `<span class="bad" title="${esc(why)}">${esc(text)}</span>`;
 function wikiLink(kind, name, label) {
   if (!exists(kind, name)) return missing(label || title(name), `not in version ${ver ? ver.id : ""}`);
   if (kind === "item") return itemLink(BF.I[name], label);
+  if (kind === "biome") return `<a href="#/biome/${name}">${esc(label || biomeNames[biomeId(name)])}</a>`;
   if (kind === "villager") return `<a href="#/villager/${name}">${esc(label || profName(name))}</a>`;
   if (kind === "mob") return `<a href="${name === "villager" ? "#/page/villagers" : "#/mob/" + name}">${esc(label || title(name))}</a>`;
+  if (kind === "tool") return `<a href="#/tool/${name}">${esc(label || title(name) + "s")}</a>`;
   return `<a href="#/page/${name}">${esc(label || articles.get(name).title)}</a>`;
 }
 // a page that is not in this version (an old link, a bookmark, or a page from another version after switching)
@@ -73,6 +80,7 @@ async function boot() {
   const gm = /VERSION\s*=\s*"([^"]+)"/.exec(gameSrc), gameVer = gm && gm[1];
   ver = vs.find(v => v.id === store.get()) || vs.find(v => v.id === gameVer) || vs[0] || { id: gameVer || "?", status: "development" };
   dir = `versions/${ver.id}/`;
+  MD.base = dir;
   const game = ver.status === "released" ? dir + "game/" : "../";
   const sel = document.getElementById("version");
   sel.innerHTML = vs.map(v => `<option value="${esc(v.id)}"${v.id === ver.id ? " selected" : ""}>Version ${esc(v.id)}${v.status === "development" ? " (in development)" : ""}${v.id === gameVer ? " \u2022 this game" : ""}</option>`).join("");
@@ -82,11 +90,13 @@ async function boot() {
   frame.hidden = true;
   const ready = new Promise(res => addEventListener("message", e => { if (e.data === "bf-data-ready") res(); }));
   document.body.appendChild(frame);
-  const [, idx, nat, wg] = await Promise.all([
+  const [, idx, nat, wg, bf, mobsSrc] = await Promise.all([
     ready,
     fetch(dir + "articles/index.json", { cache: "no-cache" }).then(r => r.json()).catch(() => []),
     fetch(dir + "natural.json", { cache: "no-cache" }).then(r => r.json()).catch(() => ({})),
     fetch(game + "js/worldgen.js", { cache: "no-cache" }).then(r => r.text()).catch(() => ""),
+    fetch(dir + "biomes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch(game + "js/mobs.js", { cache: "no-cache" }).then(r => r.text()).catch(() => ""),
   ]);
   W = frame.contentWindow;
   BF = W.BF;
@@ -94,6 +104,14 @@ async function boot() {
   natural = { blocks: (nat && nat.blocks) || {}, rules: ((nat && nat.rules) || []).map(r => ({ re: new RegExp(r.match), text: r.text })) };
   const m = /const NAMES = \[([^\]]+)\]/.exec(wg);   // biome names, in biome id order
   biomeNames = m ? [...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]) : [];
+  // biome constants (OCEAN = 0, ...) to read the village biome list by name
+  const ids = {};
+  for (const [, k, v] of wg.matchAll(/\b([A-Z_]+) = (\d+)[,;]/g)) if (!(k in ids)) ids[k] = +v;
+  const vb = /const VILLAGE_BIOMES = \[([^\]]+)\]/.exec(wg);
+  villageBiomes = vb ? vb[1].split(",").map(k => ids[k.trim()]).filter(v => v !== undefined) : [];
+  const hw = /const HOSTILE_WEIGHTS = (\[[^;]+\]);/.exec(mobsSrc);
+  try { hostileWeights = hw ? JSON.parse(hw[1]) : []; } catch (e) { hostileWeights = []; }
+  biomeFacts = bf && bf.biomes ? bf : null;
   const srcs = await Promise.all(idx.map(id => fetch(`${dir}articles/${id}.md`, { cache: "no-cache" }).then(r => r.ok ? r.text() : null).catch(() => null)));
   idx.forEach((id, i) => {   // in index.json order: the menu lists them that way
     if (!srcs[i]) return;
@@ -150,11 +168,12 @@ function index() {
 }
 
 // ---------------------------------------------------------------- layout
+const artHref = id => id === "biomes" ? "#/biomes" : `#/page/${id}`;   // the biome summary page wraps the biomes article
 function buildNav() {
   const byCat = CATS.map(c => [c, [...articles.values()].filter(a => a.category === c)]);
   nav.innerHTML = `<a class="home" href="#/">Home</a>` +
-    `<h3>Browse</h3><a href="#/items">Blocks and items</a><a href="#/villagers">Villagers</a><a href="#/mobs">Mobs</a>` +
-    byCat.filter(([, l]) => l.length).map(([c, l]) => `<h3>${esc(c)}</h3>` + l.map(a => `<a href="#/page/${a.id}">${esc(a.title)}</a>`).join("")).join("");
+    `<h3>Browse</h3><a href="#/items">Blocks and items</a><a href="#/villagers">Villagers</a><a href="#/mobs">Mobs</a><a href="#/tools">Tools</a>` +
+    byCat.filter(([, l]) => l.length).map(([c, l]) => `<h3>${esc(c)}</h3>` + l.map(a => `<a href="${artHref(a.id)}">${esc(a.title)}</a>`).join("")).join("");
 }
 
 function setPage(html, crumbs) {
@@ -177,6 +196,10 @@ function route() {
     if (kind === "mob") return mobPage(arg);
     if (kind === "page") return articlePage(arg);
     if (kind === "search") return searchPage(arg);
+    if (kind === "biomes") return biomesPage();
+    if (kind === "biome") return biomePage(arg);
+    if (kind === "tools") return toolsPage();
+    if (kind === "tool") return toolPage(arg);
   } catch (e) { console.error(e); setPage(`<p class="bad">This page failed to build: ${esc(e.message)}</p>`); return; }
   notFound(`The page ${esc(h)}`);
 }
@@ -237,6 +260,8 @@ function mobs() {
     <tr><td><a href="#/villagers">Villager</a></td><td>Villager</td><td>${hearts(BF.mobs.typeDef("villager").hp)}</td></tr></tbody></table>`, ["Mobs"]);
 }
 
+// a picture the capture script (wiki/capture.js) took for this version; hidden when the version has none
+const photo = (name, alt) => `<div class="photo"><img src="${dir}images/${name}.jpg" alt="${esc(alt)}" onerror="this.parentNode.remove()"></div>`;
 const hearts = hp => `${hp} <span class="muted">(${fmt(hp / 2, 1)} hearts)</span>`;
 
 // ---------------------------------------------------------------- crafting grids
@@ -288,7 +313,7 @@ function propsTable(it) {
   rows.push(["Stacks to", it.stack || 64]);
   if (it.isBlock) {
     rows.push(["Hardness", it.hardness == null ? "Unbreakable" : it.hardness < 0 ? "Unbreakable" : it.hardness]);
-    if (it.tool) rows.push(["Best tool", title(it.tool)]);
+    if (it.tool) rows.push(["Best tool", exists("tool", it.tool) ? `<a href="#/tool/${it.tool}">${esc(title(it.tool))}</a>` : title(it.tool)]);
     if (it.needsTool) rows.push(["Needs a tool to drop", it.minTier ? `Yes, ${["", "wooden", "stone", "iron", "diamond"][it.minTier] || "tier " + it.minTier} ${it.tool || "tool"} or better` : "Yes"]);
     const e = BF.EMIT && BF.EMIT[it.id];
     if (e) rows.push(["Light level", e]);
@@ -296,7 +321,7 @@ function propsTable(it) {
     if (it.opaque === false && it.solid !== false) rows.push(["Transparent", "Yes"]);
   }
   if (it.tool && !it.isBlock) {
-    rows.push(["Tool", `${title(it.tool.type || "")}${it.tool.tier ? `, tier ${it.tool.tier}` : ""}`]);
+    rows.push(["Tool", `${exists("tool", it.tool.type) ? `<a href="#/tool/${it.tool.type}">${esc(title(it.tool.type))}</a>` : title(it.tool.type || "")}${it.tool.tier ? `, tier ${it.tool.tier}` : ""}`]);
     if (it.tool.speed) rows.push(["Mining speed", it.tool.speed]);
     if (it.tool.damage) rows.push(["Attack damage", it.tool.damage]);
   }
@@ -380,7 +405,7 @@ async function villagerPage(prof) {
       pools.map((p, i) => p.map((o, j) => `<tr>${j === 0 ? `<td rowspan="${p.length}" class="lv">${LEVEL_NAMES[i]}</td>` : ""}<td>${offerHTML(o, prof, false)}</td></tr>`).join("")).join("") +
       `</tbody></table>`;
   } else trades = `<h2 id="trades">Trades</h2><p>No trade table.</p>`;
-  setPage(`<div class="infobox">${jid !== undefined && jid !== null ? `<div class="pic">${iconImg(jid, "huge")}</div>` : ""}<table class="props">${facts.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table></div>
+  setPage(`<div class="infobox">${photo("villager-" + prof, profName(prof))}<table class="props">${facts.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table></div>
     <h1>${esc(profName(prof))}</h1><div id="beh"></div>${trades}`, [`<a href="#/villagers">Villagers</a>`]);
   const body = await extraMd("prof-" + prof);
   const el = document.getElementById("beh");
@@ -416,10 +441,10 @@ async function mobPage(t) {
       const G = BF.wildlife.GROUP || [];
       habitat = `<h2 id="habitat">Where it lives</h2><p>Wild groups of ${G[0]}-${G[1]} spawn the first time a chunk loads, by the biome at its centre
         (see <a href="#/page/mob-spawning">mob spawning</a>). Odds per chunk:</p><table class="wt"><thead><tr><th>Biome</th><th>Chance of a group</th></tr></thead><tbody>` +
-        where.map(([b, p]) => `<tr><td>${esc(biomeNames[b] || "Biome " + b)}</td><td>${fmt(p * 100, 1)}%</td></tr>`).join("") + "</tbody></table>";
+        where.map(([b, p]) => `<tr><td>${biomeNames[b] ? `<a href="#/biome/${slug(biomeNames[b])}">${esc(biomeNames[b])}</a>` : "Biome " + b}</td><td>${fmt(p * 100, 1)}%</td></tr>`).join("") + "</tbody></table>";
     }
   }
-  setPage(`<div class="infobox"><table class="props">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table></div>
+  setPage(`<div class="infobox">${photo("mob-" + t, title(t))}<table class="props">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table></div>
     <h1>${esc(title(t))}</h1><div id="beh"></div>${habitat}`, [`<a href="#/mobs">Mobs</a>`]);
   const body = await extraMd("mob-" + t);
   const el = document.getElementById("beh");
@@ -427,8 +452,71 @@ async function mobPage(t) {
   if (el) el.dataset.done = 1;
 }
 
+// ---------------------------------------------------------------- biomes
+const pct = x => x >= 0.995 ? "100%" : x < 0.005 && x > 0 ? "under 1%" : Math.round(x * 100) + "%";
+const animalsOf = id => ((BF.wildlife && BF.wildlife.HABITAT && BF.wildlife.HABITAT[id]) || []).filter(([t]) => mobTypes().includes(t));
+const mobThumb = (t, size) => `<a class="mt" href="#/mob/${t}" title="${esc(title(t))}" style="width:${size}px;height:${size}px"><img src="${dir}images/mob-${t}.jpg" alt="${esc(title(t))}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'${esc(title(t)).replace(/'/g, "")}'}))"></a>`;
+// a little crowd: each kind as a cluster of portraits, more of them the likelier it is
+function cluster(list) {
+  const max = Math.max(...list.map(e => e[1]));
+  return `<div class="clusters">${list.map(([t, p]) => {
+    const k = Math.max(1, Math.round(4 * p / max));
+    return `<div class="cl"><div class="crowd">${Array.from({ length: k }, () => mobThumb(t, 44)).join("")}</div><div class="cap"><a href="#/mob/${t}">${esc(title(t))}</a> <span class="muted">${fmt(p * 100, 1)}%</span></div></div>`;
+  }).join("")}</div>`;
+}
+const precipText = f => !f ? "" : [f.rain && `rain ${pct(f.rain)}`, f.snow && `snow ${pct(f.snow)}`, f.none && `dry ${pct(f.none)}`].filter(Boolean).join(", ");
+
+function biomesPage() {
+  const a = articles.get("biomes");
+  const rows = biomeNames.map((n, id) => {
+    const f = biomeFacts && biomeFacts.biomes[id], an = animalsOf(id);
+    return `<tr><td><a href="#/biome/${slug(n)}">${esc(n)}</a></td><td>${f ? pct(f.share) : "?"}</td><td>${f ? `${f.height[1]} <span class="muted">(${f.height[0]} to ${f.height[2]})</span>` : "?"}</td>` +
+      `<td>${f ? precipText(f.precip) : "?"}</td><td>${an.length ? an.map(([t]) => mobThumb(t, 26)).join("") : `<span class="muted">none</span>`}</td><td>${villageBiomes.includes(id) ? "Yes" : "No"}</td></tr>`;
+  }).join("");
+  setPage(`<h1>Biomes</h1>
+    <p>Every biome has its own page. ${biomeFacts ? `Shares, heights and weather were measured over a ${biomeFacts.square}-block square around spawn of a world with seed ${biomeFacts.seed}.` : ""}</p>
+    <table class="wt biomes"><thead><tr><th>Biome</th><th>Share of the world</th><th>Ground height</th><th>Weather</th><th>Wild animals</th><th>Villages</th></tr></thead><tbody>${rows}</tbody></table>
+    ${a ? `<div class="article">${md(a.body)}</div>` : ""}`, ["World generation", "Biomes"]);
+}
+
+async function biomePage(sl) {
+  const id = biomeId(sl);
+  if (id < 0) return notFound(`The biome ${esc(sl)}`, [`<a href="#/biomes">Biomes</a>`]);
+  const name = biomeNames[id], f = biomeFacts && biomeFacts.biomes[id];
+  const rows = [];
+  if (f) {
+    rows.push(["Share of the world", pct(f.share)]);
+    rows.push(["Ground height", `${f.height[1]} <span class="muted">(mostly ${f.height[0]} to ${f.height[2]}; sea level is ${BF.SEA || 0})</span>`]);
+    rows.push(["Temperature", f.temperature]);
+    rows.push(["Humidity", f.humidity]);
+    rows.push(["Weather", precipText(f.precip) || "?"]);
+    rows.push(["Villages", villageBiomes.includes(id) ? `Yes${f.villages ? ` (${f.villages} in the sample)` : ""}` : "No"]);
+    if (f.near) rows.push(["Nearest to spawn (seed " + biomeFacts.seed + ")", `<code>/tp ${f.near[0]} ${f.near[1]}</code>`]);
+  } else rows.push(["Villages", villageBiomes.includes(id) ? "Yes" : "No"]);
+  const an = animalsOf(id);
+  const G = (BF.wildlife && BF.wildlife.GROUP) || [];
+  const animals = an.length ? `<p>Wild groups of ${G[0]}-${G[1]} animals of one kind; the chance that a chunk gets one, by kind (see <a href="#/page/mob-spawning">mob spawning</a>):</p>${cluster(an)}`
+    : `<p>No wild animals spawn here.</p>`;
+  const monsters = hostileWeights.length ? `<p>Monsters spawn in the dark here as everywhere, in this mix:</p>${cluster(hostileWeights.filter(([t]) => mobTypes().includes(t)))}` : "";
+  const borders = f ? Object.entries(f.borders).filter(([b]) => biomeNames[b]).sort((a, b) => b[1] - a[1]) : [];
+  const tot = borders.reduce((s, e) => s + e[1], 0);
+  const bordersHtml = borders.length ? `<div class="chips">${borders.filter(([, c]) => c / tot >= 0.01).map(([b, c]) => `<a href="#/biome/${slug(biomeNames[b])}">${esc(biomeNames[b])} <span class="muted">${pct(c / tot)}</span></a>`).join("")}</div>
+    <p class="muted">Share of this biome's edge each neighbour takes, in the sample world.</p>` : "";
+  setPage(`<div class="infobox">${photo("biome-" + sl, name)}<table class="props">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table></div>
+    <h1>${esc(name)}</h1><div id="beh"></div>
+    <div class="gallery"><figure><img src="${dir}images/biome-${sl}-ground.jpg" alt="" onerror="this.parentNode.remove()"><figcaption>On the ground</figcaption></figure></div>
+    <h2 id="animals">Wild animals</h2>${animals}
+    <h2 id="monsters">Monsters</h2>${monsters}
+    ${bordersHtml ? `<h2 id="borders">Borders</h2>${bordersHtml}` : ""}`, [`<a href="#/biomes">Biomes</a>`]);
+  const body = await extraMd("biome-" + sl);
+  const el = document.getElementById("beh");
+  if (el && body) el.innerHTML = md(body);
+  if (el) el.dataset.done = 1;
+}
+
 // ---------------------------------------------------------------- articles and search
 function articlePage(id) {
+  if (id === "biomes") { location.replace("#/biomes"); return; }
   const a = articles.get(id);
   if (!a) return notFound(`The article ${esc(id)}`);
   const html = md(a.body);
@@ -438,12 +526,62 @@ function articlePage(id) {
   for (const l of main.querySelectorAll(".toc a")) l.addEventListener("click", () => { const t = document.getElementById(l.dataset.to); if (t) t.scrollIntoView(); });
 }
 
+// ---------------------------------------------------------------- tool comparison pages
+// Blocks timed in each tool table (the first few that exist and are the tool's own); a sword is timed on the blocks it cuts faster.
+const TOOL_SAMPLES = { pickaxe: ["cobblestone", "stone", "iron_ore", "diamond_ore", "obsidian"], axe: ["oak_log", "planks", "chest"],
+  shovel: ["dirt", "sand", "gravel"], hoe: ["oak_leaves", "hay_bale"], sword: ["oak_leaves", "pumpkin", "melon"] };
+const tierTools = (type, tier) => toolsOf(type).filter(t => t.tool.tier === tier).map(t => nameOf(t.id).replace(new RegExp(" " + type + "$", "i"), "").toLowerCase());
+function toolsPage() {
+  const ts = toolTypes();
+  setPage(`<h1>Tools</h1><p>Each tool comes in several materials. A tool's page compares them: mining speed, durability, attack damage and how long each takes on common blocks.</p>
+    <div class="grid">${ts.map(t => `<a class="tile" href="#/tool/${t}">${iconImg(toolsOf(t).slice(-1)[0].id, "big")}<span>${esc(title(t))}s</span></a>`).join("")}</div>
+    <p>See also <a href="#/page/mining-and-tools">mining and tools</a>.</p>`);
+}
+function toolPage(type) {
+  if (!exists("tool", type)) return notFound(`The tool type <code>${esc(type)}</code>`, [`<a href="#/tools">Tools</a>`]);
+  const P = BF.player, plural = title(type) + "s";
+  const tools = toolsOf(type).sort((a, b) => a.tool.tier - b.tool.tier || a.tool.speed - b.tool.speed);
+  const own = b => b && b.isBlock && b.hardness > 0 && (type === "sword" ? b.swordSpeed : b.tool === type);
+  let samples = (TOOL_SAMPLES[type] || []).map(n => BF.I[n]).filter(id => id !== undefined && own(item(id)));
+  if (!samples.length) samples = D.cre.map(e => e.id).filter(id => own(item(id))).slice(0, 3);
+  samples = samples.slice(0, 4);
+  const cols = [["Mining speed", t => t.tool.speed], ["Durability", t => (BF.durability ? BF.durability(t.id) : t.durability) + " uses"], ["Attack damage", t => t.tool.damage]];
+  const same = cols.filter(([, f]) => tools.every(t => f(t) === f(tools[0])));   // a column every material shares becomes a sentence
+  const shown = cols.filter(c => !same.includes(c));
+  const time = (bid, tid) => {
+    if (!P || !P.mineSeconds) return "";
+    const s = P.mineSeconds(bid, tid), ok = P.minedDrops(bid, tid);
+    return (s === Infinity ? "Never" : fmt(s) + " s") + (ok ? "" : ` <span class="muted">(no drop)</span>`);
+  };
+  const head = `<tr><th>Tool</th><th>Tier</th>${shown.map(c => `<th>${c[0]}</th>`).join("")}${samples.map(id => `<th>${itemLink(id)}</th>`).join("")}</tr>`;
+  const hand = `<tr><td>Hand</td><td>&ndash;</td>${shown.map(c => `<td>${c[0] === "Attack damage" ? 1 : "&ndash;"}</td>`).join("")}${samples.map(id => `<td>${time(id, null)}</td>`).join("")}</tr>`;
+  const rows = tools.map(t => `<tr><td>${itemLink(t.id)}</td><td>${t.tool.tier}</td>${shown.map(c => `<td>${c[1](t)}</td>`).join("")}${samples.map(id => `<td>${time(id, t.id)}</td>`).join("")}</tr>`).join("");
+  const notes = same.map(([k, f]) => `Every ${type} has ${k.toLowerCase()} ${f(tools[0])}.`);
+  // harvest levels: blocks of this tool's kind that drop nothing below a tier (creative-menu blocks only, so stair shapes are not repeated)
+  const levels = new Map();
+  for (const e of D.cre) { const b = item(e.id); if (b && b.isBlock && b.needsTool && b.tool === type && b.minTier > 1) push(levels, b.minTier, e.id); }
+  const lv = [...levels.keys()].sort().map(tier => {
+    const names = tierTools(type, tier), more = tools.some(t => t.tool.tier > tier);
+    return `<tr><td>${esc(names.length ? names.join(" or ") : "tier " + tier)}${more ? " or better" : ""}</td><td><div class="chips">${levels.get(tier).map(id => itemLink(id)).join("")}</div></td></tr>`;
+  }).join("");
+  const wear = type === "sword" ? "A sword wears 1 use per hit and 2 per block broken." : `A ${type} wears 1 use per block broken and 2 per hit.`;
+  setPage(`<h1>${esc(plural)}</h1>
+    <p>Every ${type} in Blockfield ${esc(ver.id)}, side by side. Times are for the player standing on dry ground; a tool only speeds up blocks it is meant for${type === "sword" ? " (a sword cuts leaves, pumpkins and melons faster)" : ""}.
+    The tier decides what a tool can harvest: wooden 1, stone 2, iron 3, diamond 4.${notes.length ? " " + notes.join(" ") : ""} ${esc(wear)}</p>
+    <h2 id="compare">Comparison</h2><div class="scroll"><table class="wt">${head}${hand}${rows}</table></div>
+    ${lv ? `<h2 id="harvest">Harvest levels</h2><p>These blocks drop nothing unless mined with at least:</p><table class="wt"><thead><tr><th>${esc(title(type))}</th><th>Blocks</th></tr></thead><tbody>${lv}</tbody></table>` : ""}
+    <p>See also <a href="#/page/mining-and-tools">mining and tools</a>.</p>`,
+    [`<a href="#/tools">Tools</a>`]);
+}
+
 function searchAll(q) {
   q = q.trim().toLowerCase();
   if (!q) return [];
   const out = [];
   const score = s => { s = s.toLowerCase(); return s === q ? 0 : s.startsWith(q) ? 1 : s.includes(q) ? 2 : -1; };
   for (const a of articles.values()) { const s = score(a.title); if (s >= 0) out.push({ s, href: `#/page/${a.id}`, html: esc(a.title), kind: "Article" }); }
+  for (const t of toolTypes()) { const s = Math.min(...[score(title(t)), score(title(t) + "s")].map(x => x < 0 ? 9 : x)); if (s < 9) out.push({ s: s + 0.25, href: `#/tool/${t}`, html: iconImg(toolsOf(t).slice(-1)[0].id) + esc(title(t) + "s compared"), kind: "Tools" }); }
+  biomeNames.forEach(n => { const s = score(n); if (s >= 0) out.push({ s, href: `#/biome/${slug(n)}`, html: esc(n), kind: "Biome" }); });
   for (const p of D.profs) { const s = score(profName(p)); if (s >= 0) out.push({ s, href: `#/villager/${p}`, html: esc(profName(p)), kind: "Villager" }); }
   for (const t of mobTypes().concat(["villager"])) { const s = score(title(t)); if (s >= 0) out.push({ s, href: t === "villager" ? "#/page/villagers" : `#/mob/${t}`, html: esc(title(t)), kind: "Mob" }); }
   for (const e of D.cre) { const n = nameOf(e.id), s = Math.min(...[score(n), score(item(e.id).name)].map(x => x < 0 ? 9 : x)); if (s < 9) out.push({ s: s + 0.5, href: hrefItem(e.id), html: iconImg(e.id) + esc(n), kind: item(e.id).isBlock ? "Block" : "Item" }); }

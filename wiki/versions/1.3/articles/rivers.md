@@ -6,6 +6,8 @@ Every river in Blockfield starts in the highlands and runs all the way to the se
 
 ## How a river is made
 
+![A river near the coast, seen from above](images/terrain-river.jpg)
+
 The generator covers the land with a loose grid of points about 170 blocks apart. Each point flows to its lowest neighbour, so chains of points always run downhill and join into larger rivers. A point becomes a river source with a chance that grows with its height, so the high ground has the most sources, and nothing starts at the coast or below 8 blocks above sea level. A source only becomes a river if its chain actually reaches the sea within about eighty links (well over ten thousand blocks); otherwise it is dropped.
 
 Where the ground forms a basin with no way out, the water finds its lowest rim and spills over, cutting a channel through it. The channel also continues a couple of hundred blocks past the shoreline into open water, so a coastal ridge never dams a river's mouth.
