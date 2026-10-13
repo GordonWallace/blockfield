@@ -1,4 +1,4 @@
-// @ci integration suite=village timeout=480
+// @ci integration suite=village timeout=600
 // Where villagers appear when their village loads again (village loading plan, scenario 2): a short absence (under a game hour, no bedtime in
 // between) brings everyone back exactly where they stood; a longer one by day puts them at random spots within the leash of their bed; at bedtime
 // they are in their beds; an explorer comes back at its saved spot; a villager without a bed goes indoors at night.
@@ -24,10 +24,12 @@ module.exports = async (pg) => {
     }
     return false;
   };
-  // back, then waits until the village's villagers have all loaded (the count holds for 2 s): a busy runner loads them over several seconds
+  // back, then waits until the village's villagers have all loaded: as many as at the start (up to 90 s), then the count holds for 2 s.
+  // A busy runner loads them over many seconds and can stall for a few, so a steady count alone isn't enough.
+  let want = 4;
   const back = async () => {
     await tp(info.x, info.z);
-    await wait(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length >= 4, info.key, 60000);
+    await wait(([k, n]) => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length >= n, [info.key, want], 90000);
     let last = -1;
     for (let i = 0; i < 30; i++) {
       const n = await pg.evaluate(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length, info.key);
@@ -41,6 +43,7 @@ module.exports = async (pg) => {
   await setTime(0.3);
   await sleep(1500);
   const before = await snapshot();
+  want = Object.keys(before).length;
   ok("villagers are loaded to start with", Object.keys(before).length >= 6, Object.keys(before).length);
   ok("the village unloads when the player leaves", await leave());
   await back();
@@ -74,9 +77,17 @@ module.exports = async (pg) => {
   const night = await pg.evaluate(k => {
     const m = BF.mobs.list.find(x => x.type === "villager" && x.village && x.village.key === k && x.slot && !x.dead && x.profession !== "explorer" && x.profession !== "merchant" && x.home);
     if (!m) return null;
-    m.bed = null; m.slot.bed = null; m.homeBed = null;
+    m.bed = null; m.slot.bed = null; m.homeBed = null; m.ai.route = null;   // no route either: a sleeper wakes where it is put, not back at its bed
     const H = m.home;
-    m.position.set(H.outX + 0.5 + (H.outX - H.doorX) * 8, m.position.y, H.outZ + 0.5 + (H.outZ - H.doorZ) * 8);
+    // out in front of the door, on the ground: the first spot 8 to 3 blocks out that is open ground near the door's height (not a roof or a hillside)
+    const y0 = Math.floor(m.position.y);
+    let at = null;
+    for (let k = 8; k >= 3 && !at; k--) {
+      const x = Math.floor(H.outX + (H.outX - H.doorX) * k), z = Math.floor(H.outZ + (H.outZ - H.doorZ) * k), h = BF.world.heightAt(x, z);
+      if (Math.abs(h + 1 - y0) <= 2 && BF.world.getBlock(x, h + 1, z) === 0 && BF.world.getBlock(x, h + 2, z) === 0) at = [x + 0.5, h + 1, z + 0.5];
+    }
+    if (!at) at = [H.outX + 0.5, y0, H.outZ + 0.5];
+    m.position.set(at[0], at[1], at[2]);
     window.__bedless = m;
     return true;
   }, info.key);

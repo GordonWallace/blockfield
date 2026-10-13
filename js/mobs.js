@@ -1226,6 +1226,7 @@ function zombieBreakDoor(m, dt, out) {
 const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.5 && t < 0.985; };   // villagers head in at sunset, well before monsters can spawn (js/mobs.js)
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
 function bedOK(bed) {
+  if (!bed) return false;   // no bed (a sleeper's bed taken away): not usable, rather than a throw that removes the villager
   const k = blockAt(bed.x, bed.y, bed.z);
   if (bed.tent) return !!(k.tent && k.tent.r === 0 && k.tent.l === 1 && !k.tent.up && k.tent.f === bed.f);   // an explorer's tent: its foot centre cell (js/tents.js)
   const b = k.bed; return !!(b && !b.head && b.f === bed.f);
