@@ -1,7 +1,10 @@
 // Blockfieldpedia: a wiki for Blockfield that reads the game's own data. wiki/data.html loads the game scripts in a hidden iframe;
 // block, item, recipe, smelting, trade, jobsite and mob facts all come from there, so the pages follow the game as it changes.
-// Hand-written articles live in wiki/articles/*.md (listed in articles/index.json); prof-<profession>.md and mob-<type>.md add the
-// behaviour sections of the generated villager and mob pages, and natural.json says where blocks generate.
+// Versions (wiki/versions.json): one wiki per Blockfield release. Each has its own hand-written pages in wiki/versions/<id>/: articles/*.md
+// (listed in articles/index.json; prof-<profession>.md and mob-<type>.md add the behaviour sections of the generated villager and mob
+// pages) and natural.json (where blocks generate). The version under development reads the running game; a released one reads the copy of
+// the game frozen with it (versions/<id>/game/). The selector in the header picks the version: by default the game's (js/version.js),
+// then whatever the reader chose, kept for the browser session. See wiki/README.md.
 // Routes (hash): #/ home, #/items, #/item/<name>, #/villagers, #/villager/<profession>, #/mobs, #/mob/<type>, #/page/<article id>.
 (() => {
 "use strict";
@@ -12,6 +15,9 @@ const D = {};              // derived indexes, built once
 const articles = new Map();   // id -> {id, title, category, body}
 const extra = new Map();      // "prof-farmer" / "mob-cow" -> markdown body | null
 let natural = { blocks: {}, rules: [] }, biomeNames = [];
+let ver = null, dir = "";     // the version shown and its folder ("versions/1.3/")
+const STORE = "blockfieldpedia.version";
+const store = { get() { try { return sessionStorage.getItem(STORE); } catch (e) { return null; } }, set(v) { try { sessionStorage.setItem(STORE, v); } catch (e) { /* private mode */ } } };
 
 const CATS = ["World generation", "Villages", "Villagers", "Mobs", "Game rules", "Items and blocks"];
 const LEVEL_NAMES = ["Novice", "Apprentice", "Journeyman", "Expert", "Master"];
@@ -53,16 +59,28 @@ const md = src => MD.render(src || "", wikiLink, slug);
 // ---------------------------------------------------------------- boot
 async function boot() {
   main.innerHTML = `<p class="muted">Loading the game's data&hellip;</p>`;
+  // pick the version: the reader's choice this session, else the running game's, else the newest
+  const [vs, gameSrc] = await Promise.all([
+    fetch("versions.json", { cache: "no-cache" }).then(r => r.json()).then(o => o.versions || []).catch(() => []),
+    fetch("../js/version.js", { cache: "no-cache" }).then(r => r.text()).catch(() => ""),
+  ]);
+  const gm = /VERSION\s*=\s*"([^"]+)"/.exec(gameSrc), gameVer = gm && gm[1];
+  ver = vs.find(v => v.id === store.get()) || vs.find(v => v.id === gameVer) || vs[0] || { id: gameVer || "?", status: "development" };
+  dir = `versions/${ver.id}/`;
+  const game = ver.status === "released" ? dir + "game/" : "../";
+  const sel = document.getElementById("version");
+  sel.innerHTML = vs.map(v => `<option value="${esc(v.id)}"${v.id === ver.id ? " selected" : ""}>Version ${esc(v.id)}${v.status === "development" ? " (in development)" : ""}${v.id === gameVer ? " \u2022 this game" : ""}</option>`).join("");
+  sel.addEventListener("change", () => { store.set(sel.value); location.reload(); });
   const frame = document.createElement("iframe");
-  frame.src = "data.html";
+  frame.src = "data.html?game=" + encodeURIComponent(game);
   frame.hidden = true;
   const ready = new Promise(res => addEventListener("message", e => { if (e.data === "bf-data-ready") res(); }));
   document.body.appendChild(frame);
   const [, idx, nat, wg] = await Promise.all([
     ready,
-    fetch("articles/index.json", { cache: "no-cache" }).then(r => r.json()).catch(() => []),
-    fetch("natural.json", { cache: "no-cache" }).then(r => r.json()).catch(() => ({})),
-    fetch("../js/worldgen.js", { cache: "no-cache" }).then(r => r.text()).catch(() => ""),
+    fetch(dir + "articles/index.json", { cache: "no-cache" }).then(r => r.json()).catch(() => []),
+    fetch(dir + "natural.json", { cache: "no-cache" }).then(r => r.json()).catch(() => ({})),
+    fetch(game + "js/worldgen.js", { cache: "no-cache" }).then(r => r.text()).catch(() => ""),
   ]);
   W = frame.contentWindow;
   BF = W.BF;
@@ -70,7 +88,7 @@ async function boot() {
   natural = { blocks: (nat && nat.blocks) || {}, rules: ((nat && nat.rules) || []).map(r => ({ re: new RegExp(r.match), text: r.text })) };
   const m = /const NAMES = \[([^\]]+)\]/.exec(wg);   // biome names, in biome id order
   biomeNames = m ? [...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]) : [];
-  const srcs = await Promise.all(idx.map(id => fetch(`articles/${id}.md`, { cache: "no-cache" }).then(r => r.ok ? r.text() : null).catch(() => null)));
+  const srcs = await Promise.all(idx.map(id => fetch(`${dir}articles/${id}.md`, { cache: "no-cache" }).then(r => r.ok ? r.text() : null).catch(() => null)));
   idx.forEach((id, i) => {   // in index.json order: the menu lists them that way
     if (!srcs[i]) return;
     const { meta, body } = MD.frontMatter(srcs[i]);
@@ -83,7 +101,7 @@ async function boot() {
 }
 
 async function extraMd(key) {
-  if (!extra.has(key)) extra.set(key, await fetch(`articles/${key}.md`, { cache: "no-cache" }).then(r => r.ok ? r.text() : null).catch(() => null));
+  if (!extra.has(key)) extra.set(key, await fetch(`${dir}articles/${key}.md`, { cache: "no-cache" }).then(r => r.ok ? r.text() : null).catch(() => null));
   return extra.get(key);
 }
 
