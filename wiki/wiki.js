@@ -44,16 +44,22 @@ const slug = s => s.toLowerCase().replace(/<[^>]+>/g, "").replace(/[^a-z0-9]+/g,
 const listOr = (a, f) => a.length ? a.map(f).join("") : "";
 const push = (map, k, v) => { if (!map.has(k)) map.set(k, []); map.get(k).push(v); };
 
+// Everything a page links to must exist in the version being read (a 1.3 page never leads to something added in 1.4):
+// links are checked against this version's game data and articles, and a missing target is plain red text (test/wiki.js fails on it).
+const mobTypes = () => BF.mobs.types.filter(t => t !== "villager").concat(BF.bees ? ["bee"] : []);
+const exists = (kind, name) => kind === "item" ? BF.I[name] !== undefined : kind === "villager" ? D.profs.includes(name) :
+  kind === "mob" ? name === "villager" || mobTypes().includes(name) : kind === "page" ? articles.has(name) : false;
+const missing = (text, why) => `<span class="bad" title="${esc(why)}">${esc(text)}</span>`;
 function wikiLink(kind, name, label) {
-  if (kind === "item") {
-    const id = BF.I[name];
-    return id === undefined ? `<span class="bad" title="unknown item">${esc(label || name)}</span>` : itemLink(id, label);
-  }
+  if (!exists(kind, name)) return missing(label || title(name), `not in version ${ver ? ver.id : ""}`);
+  if (kind === "item") return itemLink(BF.I[name], label);
   if (kind === "villager") return `<a href="#/villager/${name}">${esc(label || profName(name))}</a>`;
-  if (kind === "mob") return `<a href="#/mob/${name}">${esc(label || title(name))}</a>`;
-  if (kind === "page") { const a = articles.get(name); return `<a href="#/page/${name}">${esc(label || (a ? a.title : title(name)))}</a>`; }
-  return esc(label || name);
+  if (kind === "mob") return `<a href="${name === "villager" ? "#/page/villagers" : "#/mob/" + name}">${esc(label || title(name))}</a>`;
+  return `<a href="#/page/${name}">${esc(label || articles.get(name).title)}</a>`;
 }
+// a page that is not in this version (an old link, a bookmark, or a page from another version after switching)
+const notFound = (what, crumbs) => setPage(`<h1>Not in version ${esc(ver.id)}</h1><p>${what} is not part of Blockfield ${esc(ver.id)}. ` +
+  `<a href="#/">Go to the home page</a>, or pick another version at the top.</p>`, crumbs);
 const md = src => MD.render(src || "", wikiLink, slug);
 
 // ---------------------------------------------------------------- boot
@@ -172,7 +178,7 @@ function route() {
     if (kind === "page") return articlePage(arg);
     if (kind === "search") return searchPage(arg);
   } catch (e) { console.error(e); setPage(`<p class="bad">This page failed to build: ${esc(e.message)}</p>`); return; }
-  setPage(`<h1>Not found</h1><p>No page called ${esc(h)}.</p>`);
+  notFound(`The page ${esc(h)}`);
 }
 
 // ---------------------------------------------------------------- home and indexes
@@ -221,7 +227,7 @@ function villagers() {
 }
 
 function mobs() {
-  const ts = BF.mobs.types.filter(t => t !== "villager").concat(BF.bees ? ["bee"] : []);
+  const ts = mobTypes();
   const row = t => {
     const d = BF.mobs.typeDef(t);
     return `<tr><td><a href="#/mob/${t}">${esc(title(t))}</a></td><td>${d ? (d.hostile ? "Hostile" : d.golem ? "Village guard" : "Passive") : "Passive"}</td><td>${d ? hearts(d.hp) : "None"}</td></tr>`;
@@ -306,7 +312,7 @@ function propsTable(it) {
 
 function itemPage(name) {
   const id0 = BF.I[name];
-  if (id0 === undefined) return setPage(`<h1>Not found</h1><p>No block or item called <code>${esc(name)}</code>.</p>`, ["Blocks and items"]);
+  if (id0 === undefined) return notFound(`The block or item <code>${esc(name)}</code>`, [`<a href="#/items">Blocks and items</a>`]);
   const id = pageId(id0), it = item(id);
   const sec = [];
   // ---- obtaining
@@ -356,7 +362,7 @@ function itemPage(name) {
 
 // ---------------------------------------------------------------- villager pages
 async function villagerPage(prof) {
-  if (!D.profs.includes(prof)) return setPage(`<h1>Not found</h1><p>No profession called ${esc(prof)}.</p>`, [`<a href="#/villagers">Villagers</a>`]);
+  if (!D.profs.includes(prof)) return notFound(`The profession ${esc(prof)}`, [`<a href="#/villagers">Villagers</a>`]);
   const T = BF.trades, b = BF.jobs.JOBSITE[prof], jid = b && BF.I[b];
   const facts = [];
   facts.push(["Jobsite", jid !== undefined && jid !== null ? itemLink(jid) : prof === "nitwit" ? "None: nitwits never work" : prof === "unemployed" ? "None: looks for an unclaimed jobsite" : "None"]);
@@ -386,7 +392,7 @@ async function villagerPage(prof) {
 async function mobPage(t) {
   if (t === "villager") { location.hash = "#/page/villagers"; return; }
   const d = BF.mobs.typeDef(t);
-  if (!d && t !== "bee") return setPage(`<h1>Not found</h1><p>No mob called ${esc(t)}.</p>`, [`<a href="#/mobs">Mobs</a>`]);
+  if (!mobTypes().includes(t)) return notFound(`The mob ${esc(t)}`, [`<a href="#/mobs">Mobs</a>`]);
   const rows = [];
   if (d) {
     rows.push(["Kind", d.hostile ? "Hostile" : d.golem ? "Village guard" : "Passive"]);
@@ -424,7 +430,7 @@ async function mobPage(t) {
 // ---------------------------------------------------------------- articles and search
 function articlePage(id) {
   const a = articles.get(id);
-  if (!a) return setPage(`<h1>Not found</h1><p>No article called ${esc(id)}.</p>`);
+  if (!a) return notFound(`The article ${esc(id)}`);
   const html = md(a.body);
   const heads = [...html.matchAll(/<h2 id="([^"]+)">(.*?)<\/h2>/g)];
   const toc = heads.length >= 3 ? `<nav class="toc"><b>Contents</b>${heads.map(h => `<a href="javascript:void 0" data-to="${h[1]}">${h[2].replace(/<[^>]+>/g, "")}</a>`).join("")}</nav>` : "";
@@ -439,7 +445,7 @@ function searchAll(q) {
   const score = s => { s = s.toLowerCase(); return s === q ? 0 : s.startsWith(q) ? 1 : s.includes(q) ? 2 : -1; };
   for (const a of articles.values()) { const s = score(a.title); if (s >= 0) out.push({ s, href: `#/page/${a.id}`, html: esc(a.title), kind: "Article" }); }
   for (const p of D.profs) { const s = score(profName(p)); if (s >= 0) out.push({ s, href: `#/villager/${p}`, html: esc(profName(p)), kind: "Villager" }); }
-  for (const t of BF.mobs.types.concat(["bee"])) { const s = score(title(t)); if (s >= 0) out.push({ s, href: t === "villager" ? "#/page/villagers" : `#/mob/${t}`, html: esc(title(t)), kind: "Mob" }); }
+  for (const t of mobTypes().concat(["villager"])) { const s = score(title(t)); if (s >= 0) out.push({ s, href: t === "villager" ? "#/page/villagers" : `#/mob/${t}`, html: esc(title(t)), kind: "Mob" }); }
   for (const e of D.cre) { const n = nameOf(e.id), s = Math.min(...[score(n), score(item(e.id).name)].map(x => x < 0 ? 9 : x)); if (s < 9) out.push({ s: s + 0.5, href: hrefItem(e.id), html: iconImg(e.id) + esc(n), kind: item(e.id).isBlock ? "Block" : "Item" }); }
   return out.sort((a, b) => a.s - b.s);
 }

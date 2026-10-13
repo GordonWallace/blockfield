@@ -25,6 +25,10 @@ being read; it opens on the running game's version (`js/version.js`) and keeps t
 
 Current: **1.3, in development**.
 
+Each version is self-contained: its pages, menu, search and links come only from its own game data and its own `versions/<id>/` pages, so
+reading 1.3 never leads to something added in 1.4. A link to something the version doesn't have renders as red text (and fails
+`test/wiki.js`); opening such a page (an old bookmark, or after switching versions) says it is not part of that version.
+
 ### Rules for every change
 - A change to game behaviour updates the affected pages of the version under development in the same PR (the article, the `prof-`/`mob-`
   page, `natural.json`). Pages of released versions are never edited.

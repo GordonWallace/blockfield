@@ -50,7 +50,7 @@ server.listen(0, '127.0.0.1', async () => {
       if (seen.has(h)) return;
       seen.add(h);
       const m = await go(h);
-      if (/Not found|failed to build/.test(m.querySelector('h1') ? m.querySelector('h1').textContent + m.textContent.slice(0, 400) : m.textContent)) broken.push(h);
+      if (/Not in version|failed to build/.test(m.querySelector('h1') ? m.querySelector('h1').textContent + m.textContent.slice(0, 400) : m.textContent)) broken.push(h);
       for (const s of m.querySelectorAll('.bad')) bad.push(h + ': ' + s.textContent);
       for (const a of m.querySelectorAll('a[href^="#/"]')) linked.add(a.getAttribute('href'));
     };
@@ -60,7 +60,8 @@ server.listen(0, '127.0.0.1', async () => {
     // some generated facts, spot-checked
     const text = async h => (await go(h)).innerText;
     const iron = await text('#/item/iron_ore'), farmer = await text('#/villager/farmer'), cow = await text('#/mob/cow'), chest = await text('#/item/chest');
-    return { n: seen.size, bad, broken, iron, farmer, cow, chest, articles: [...document.querySelectorAll('#nav a[href^="#/page/"]')].length };
+    const absent = await text('#/item/item_from_a_later_version');   // a page another version may have
+    return { absent, n: seen.size, bad, broken, iron, farmer, cow, chest, articles: [...document.querySelectorAll('#nav a[href^="#/page/"]')].length };
   });
   console.log(`built ${r.n} pages, ${r.articles} articles`);
   check(r.articles >= 20, `articles listed (${r.articles})`);
@@ -71,6 +72,7 @@ server.listen(0, '127.0.0.1', async () => {
   check(/Composter/.test(r.farmer) && /Novice/.test(r.farmer) && /16 Wheat for 1 Emerald/.test(r.farmer), 'farmer: jobsite and trade table');
   check(/Plains/.test(r.cow) && /Raw Beef/.test(r.cow), 'cow: habitat and drops');
   check(/Crafting/.test(r.chest) && /Furniture maker/i.test(r.chest), 'chest: recipe and the villager selling it');
+  check(/Not in version/.test(r.absent), 'a page this version lacks says so instead of building');
   check(!errors.length, `no page errors${errors.length ? ': ' + errors.slice(0, 5).join('; ') : ''}`);
   console.log(fails ? `FAILED wiki (${fails})` : 'PASS wiki');
   await b.close();
