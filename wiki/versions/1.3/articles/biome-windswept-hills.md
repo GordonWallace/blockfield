@@ -6,4 +6,4 @@ Windswept Hills are bare, steep hills on the mountain flanks in temperate countr
 - Grass is scattered, and flowers are very rare.
 
 ### Villages
-Villages do not generate on windswept hills, and sites near them are avoided. The first village near the spawn point may be built there if nothing better is available.
+Villages do not generate on windswept hills, and sites near them are avoided. In worlds made with village generator 9 or earlier, the first village near the spawn point may be built there if nothing better is available.

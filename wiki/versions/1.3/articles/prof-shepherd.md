@@ -1,4 +1,4 @@
-The shepherd looks after the sheep of the village's pen. Its workstation is the [[item:loom]], which is placed beside the pen, outside the fence. Every shepherd's village is given a fenced pen for its flock.
+The shepherd looks after the sheep of the village's pen. Its workstation is the [[item:loom]], which is placed beside the pen, outside the fence. Every shepherd is given a fenced pen for its flock. A village gets a shepherd for each of its sheep paddocks. Whether a village has one, and how many, comes from its paddock roll: bigger villages get more paddocks, and the animals native to the biome are likelier ([[page:village-structures]]). A [[villager:builder]] may also build a sheep pen in a village that has none, if at least 2 wild sheep live within 80 blocks. A built pen starts empty, and its shepherd fetches wild sheep from within 100 blocks until it holds two, luring them with wheat. A built pen's loom is crafted from string, so the village needs string for sale.
 
 ### The working day
 A shepherd walks between its pen and its loom:

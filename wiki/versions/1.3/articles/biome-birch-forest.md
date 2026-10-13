@@ -6,4 +6,4 @@ Birch Forest is a bright, tall forest of pale trunks, found in humid temperate c
 - Short grass is common. Ferns and flowers are rare. Pumpkin patches sometimes appear.
 
 ### Villages
-Villages do not generate in birch forests. The first village near the spawn point is the only exception, when it has no better site.
+Villages do not generate in birch forests. In worlds made with village generator 9 or earlier, the first village near the spawn point is the only exception, when it has no better site.

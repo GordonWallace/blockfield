@@ -48,3 +48,13 @@ How common each plant is varies by biome. Placing is deterministic from the seed
 Grass, ferns, flowers and mushrooms follow slow patch noise 15 to 36 blocks across. Inside a patch they are dense; between patches they are sparse, but the overall amount stays what the biome calls for. Flowers are one colour per patch: a slow second pattern chooses poppy, dandelion or cornflower, and the strip between two colour zones stays empty, so you see solid fields of red, yellow or blue with the odd stray of the local colour.
 
 None of these plants are placed on the ground of a village or beneath its buildings. Villages have their own flowers; see [[page:villages]].
+
+### Grass spreading
+
+Bare dirt turns into grass by itself. A dirt block becomes a grass block after a random delay, usually within a day or two, once all of these hold:
+
+- There is daylight above it.
+- Nothing solid sits on top of it.
+- A grass block is next to it, including diagonally and one level up or down.
+
+Dirt under a roof or a block stays dirt. [[item:farmland]], [[item:dirt_path]] and coarse dirt never change. This only happens in loaded chunks. It is why the dirt a builder or farmer leaves behind greens over.

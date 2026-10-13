@@ -8,10 +8,12 @@ A farmer only tends farmland within 12 blocks of its composter, in every directi
 3. **Build farm beds.** With fewer than 64 farmland cells to look after, it plans a project: widen one of its own beds by pushing one side out, or make a new bed. A bed is a rectangle ringed with logs set into the ground, with water channels every fourth line and three rows of crops between them. It digs and levels the ground, fetching dirt from outside the village if it has too little, edges the bed with logs, pours water from a bucket into each channel and tills the soil with a hoe. Nothing is built on top of buildings, roads or other beds, and a bed always leaves at least a block of room around it.
 4. **Tend** young crops by standing and looking at them.
 
+A vegetable farm that a [[villager:builder]] built is left with water in its channel and untilled soil, with a composter beside it. A farmer who takes that composter tills and plants the bed as one of its farm projects.
+
 The farmer takes a short break after about one task in twenty. Farmers also wander out to look at their fields.
 
 ### Where it gets its materials
-Farmers buy the logs for bed edges from a [[villager:forester]], up to 16 at a time, preferring the bed's own kind of log. It fills its bucket at any water source within about 30 blocks of the village. It gathers its dirt from open ground just outside the village, never from inside it. It keeps 8 of every seed and crop it plants.
+Farmers buy the logs for bed edges from a [[villager:forester]], up to 16 at a time, preferring the bed's own kind of log. It fills its bucket at any water source within about 30 blocks of the village. It gathers its dirt from open ground just outside the village, never from inside it. Dirt it digs beyond what its own projects need is sold as spare goods, 16 dirt for an emerald. Builders buy it to level a vegetable farm. It keeps 8 of every seed and crop it plants.
 
 ### What it sells and buys
 It sells crops and food baked from them: bread, baked potatoes, hay bales and more, and buys crops, sugar cane and pumpkins from you at better levels. It sells to the other villagers too, and they come to it first when hungry.

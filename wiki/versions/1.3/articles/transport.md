@@ -26,7 +26,7 @@ Wild horses can be tamed by riding them until they stop throwing you, and then s
 - W and S move, A and D sidestep, and Space held charges a jump. Shift dismounts.
 - The horse's health replaces your hunger bar while you ride. Falls hurt the horse, not you.
 - A **lead** (string and leather) walks a horse beside you. Right click a fence to tie it.
-- Villages on horse land may keep a stable. A stable hand sells tamed horses (8 to 24 emeralds), saddles and leads, and buys horses you bring.
+- A village may keep a stable, whether generated with it or built later where wild horses live. A stable hand sells tamed horses (8 to 24 emeralds), saddles and leads, and buys horses you bring.
 
 ## Flying
 

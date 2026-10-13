@@ -10,7 +10,7 @@ Right click with [[item:wheat_item]] to feed a sheep. A fed adult is willing for
 
 ### Villages
 
-Villages with a [[villager:shepherd]] have a fenced **pen** with a gate and a loom outside. A new pen starts with two to four sheep, and is full once it holds one sheep per six square blocks of its floor (six for the normal pen). The shepherd works through the day:
+Villages with a [[villager:shepherd]] have a fenced **pen** with a gate and a loom outside. A village gets a pen for each sheep paddock its roll draws, and builders can build one where there is none if at least 2 wild sheep live within 80 blocks. A built pen starts empty, and the shepherd fetches wild sheep from within 100 blocks. A new pen starts with two to four sheep, and is full once it holds one sheep per six square blocks of its floor (six for the normal pen). The shepherd works through the day:
 
 - feeds every hungry adult sheep, using wheat it bought from farmers;
 - shears every woolly adult;

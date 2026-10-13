@@ -6,4 +6,4 @@ Beach is the sandy strip where land meets a calm sea. It lies right at the water
 - [[item:sugar_cane]] grows where the sand touches water at sea level, in clumps one to three blocks tall.
 
 ### Villages
-Villages do not generate on beaches. Only if no better site can be found near the start can the first village (the one nearest the spawn point) end up on one.
+Villages do not generate on beaches. In worlds made with village generator 9 or earlier, the first village (the one nearest the spawn point) can end up on one if no better site can be found near the start.

@@ -13,7 +13,9 @@ The world is divided into squares 384 blocks across, and each square gets at mos
 - reasonably flat, with the ground within 9 blocks of the same height over the whole site;
 - not close to oceans, rivers, jungles, swamps, dark forests, badlands or mountains.
 
-So villages sit on open, level country, a few hundred blocks apart. The nearest village to where you start is found by searching outward from the spawn point, between about 80 and 320 blocks away. If no good site is near, the rules relax step by step, and the first village can end up in a forest, a snowy taiga or on a beach.
+So villages sit on open, level country, a few hundred blocks apart. Every village follows these rules, and there is no special village near where you start. The spawn point is a dry spot near the origin, and a village close to it happens only by chance, so a new world may have none in sight.
+
+Worlds made with village generator 9 or earlier work differently. They have a spawn village, found by searching outward from the spawn point, between about 80 and 320 blocks away. If no good site is near, the rules relax step by step, and that first village can end up in a forest, a snowy taiga or on a beach. The ordinary villages keep clear of it.
 
 ## Population and size
 
@@ -30,7 +32,7 @@ A village keeps one [[mob:iron_golem]] for every 15 villagers, at least one. Gol
 - **Roads.** Two to four main roads run out from the plaza in straight lines, 3 blocks wide, of [[item:dirt_path]]. They follow the terrain and stop at water or a sudden step. Main roads are 30 to 49 blocks long in a small village and grow with the population. Side streets branch off about every 16 blocks, and villages of 29 or more people also get cross streets, and those of 59 or more a third level.
 - **Plots.** Buildings are placed on both sides of every street, nearest the plaza first, until there are enough beds for the whole population. Each plot is levelled into a terrace with a cobblestone or sandstone foundation. Streets are then trimmed back to their last building.
 - **Lamps.** Every 9 blocks along the roads stands a fence-post lamp with a [[item:lantern]] on top.
-- **Extras.** Fenced pens for shepherds, the desert garden, the chicken coop, pasture and sty are added after the rest; see [[page:village-structures]].
+- **Extras.** The desert garden and the paddocks (pens for shepherds, coops, pastures, sties and stables) are added after the rest; see [[page:village-structures]]. How many a village gets depends on its size and the animals native to its biome.
 
 ## Styles by biome
 
@@ -72,4 +74,4 @@ Villagers need a workstation to hold a profession. The generator places about on
 
 ## Older worlds
 
-Worlds saved by earlier versions keep the village generator they were created with, so some newer features (chicken coops, pastures, sties, bakers, glassmakers, beekeepers, glass panes in windows) may be missing. The oldest villages are smaller, with 8 to 25 buildings and at most 24 villagers.
+Worlds saved by earlier versions keep the village generator they were created with, so some newer features (chicken coops, pastures, sties, bakers, glassmakers, beekeepers, glass panes in windows) may be missing. The newest is village generator 10, which new worlds use. It drops the spawn village and gives each village paddocks and keepers by its size and biome. Worlds made with generator 9 or earlier keep their villages as they were, spawn village included. The oldest villages are smaller, with 8 to 25 buildings and at most 24 villagers.

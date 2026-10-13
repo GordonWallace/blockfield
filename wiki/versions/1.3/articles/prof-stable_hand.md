@@ -1,14 +1,16 @@
 The stable hand catches, breeds and sells horses. Its workstation is the [[item:tack_rack]] in a stable.
 
 ### Where stable hands come from
-They are never part of a new village. A [[villager:builder]] puts up a stable, in a village on horse land (plains, savanna or meadow), most likely once it has 10 or more villagers, and a villager with no job takes the stable's tack rack. A village has at most one stable hand.
+A new village may be generated with a stable and its stable hand if the paddock roll draws a horse paddock. Whether a village has one, and how many, comes from its paddock roll: bigger villages get more paddocks, and the animals native to the biome are likelier ([[page:village-structures]]). Horses are native only to open land (plains, savanna and meadow), but any village can draw one. A generated stable starts with 2 tamed horses. A village has at most one stable, so at most one stable hand.
+
+A [[villager:builder]] may also put up a stable in a village that has none, but only if at least 2 wild horses live within 80 blocks, and rarely. A villager with no job takes the stable's tack rack. Worlds made with village generator 9 or earlier never generate stable hands with a village; there one appears only after a builder puts up a stable.
 
 ### The working day
 Its day, most urgent first:
 
 1. Lead a horse it has caught home: open the gates, put it in the paddock, close the gates.
 2. Fetch a paddock horse that is loose.
-3. While the paddock holds fewer than 2 horses, catch the nearest wild horse within 128 blocks of the rack. It walks to it and feeds it wheat or hay from its own pack until the horse accepts it, then leads it home. With no wild horse in range it waits until the next morning.
+3. While the paddock holds fewer than 2 horses, catch the nearest wild horse within 100 blocks of the rack. It walks to it and feeds it wheat or hay from its own pack until the horse accepts it, then leads it home. With no wild horse in range it waits until the next morning.
 4. With 2 or 3 horses, feed wheat or hay to a pair of ready adults so they breed. It keeps the paddock at 2 to 4 horses. It never lets foals take it past 4.
 5. Otherwise shop for supplies.
 

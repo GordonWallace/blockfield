@@ -24,4 +24,4 @@ Feed a tamed adult wheat or a hay bale to make it willing for a game day. Two wi
 
 ### In villages
 
-A village on horse land may build a **stable**, most often once it has ten or more villagers. A stable is an open shelter with a tack rack and a fenced paddock. Its [[villager:stable_hand]] catches wild horses within about 128 blocks by feeding them until they accept it, leads them to the paddock, breeds up to four, and sells them to the player for 8 to 24 emeralds, based on their stats. It also buys horses you lead to it.
+A village may be generated with a **stable**, and a builder may put one up where at least 2 wild horses live within 80 blocks. A stable is an open shelter with a tack rack and a fenced paddock. A generated stable starts with 2 tamed horses. Its [[villager:stable_hand]] catches wild horses within about 100 blocks by feeding them until they accept it, leads them to the paddock, breeds up to four, and sells them to the player for 8 to 24 emeralds, based on their stats. It also buys horses you lead to it.

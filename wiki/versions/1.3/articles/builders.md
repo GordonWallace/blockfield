@@ -19,27 +19,36 @@ Every few seconds an idle builder weighs the structures it could build and picks
 | Cottage | 0.3 |
 | Well | 1.2 until one is built, then 0.15 |
 | Lamp posts | 1 until two stand, then 0.2 |
-| Garden pen | 0.8 until two stand, then 0.2 |
 | Market stall | 0.7 until two stand, then 0.15 |
 | Workshop | 0.5 for the first, then 0.1 |
-| Chicken coop | 2.4 with 8 or more villagers and no coop, else almost never |
-| Pasture | 2 on grass with 10 or more villagers and no pasture |
-| Sty | 2 on grass with 12 or more villagers and no pig farmer, if a farmer sells pig feed or wild pigs live nearby |
+| Food jobsite | 2.5 always; its kind is rolled when it is picked (below) |
 | Bakehouse | 1.5 with 15 or more villagers and no baker |
 | Glassworks | 1.5 with 12 or more villagers and no glassmaker, only with natural sand within 64 blocks |
 | Apiary | 1.2 on grass with 6 or more villagers and no beekeeper |
-| Stable | 2.5 with 10 or more villagers and no stable, only on horse land (plains, savanna, meadow) |
+| Stable | 0.3, only with no stable and at least 2 wild horses within 80 blocks of the village |
 | Bridge | 1.2, or 2 at a busy crossing; only where villagers keep wading |
 
 Needs push these weights around:
 
 - Each villager with no bed adds 1.6 to the small house weight (counting up to three), two or more add 1.2 to the medium house, and one or more add 0.6 to the cottage.
-- If the village has no spare bed, so no child can be born, the houses rise to the weight of the likeliest other structure.
+- If the village has no spare bed, so no child can be born, the houses rise to the weight of the likeliest other structure. The food jobsite's 2.5 is left out of that comparison, so houses do not rise to it.
+- The food jobsite's materials are not weighed when it is picked. They are checked for the kind chosen (see Food jobsites below). A food jobsite that cannot be had is skipped for about three game hours, and the builder picks again among the others.
 - A structure that has just failed to find a site is skipped for about three game hours.
 
 The weight is then multiplied by what the builder can afford: **x3** if it already holds everything (or can craft the rest from what it holds), **x1.2** if some villager has the missing items for sale right now, and **x0.25** if not. A builder with the materials in hand therefore tends to build what it can build.
 
 It also keeps in mind the structure after the current one, so the materials for that are reserved too ([[page:village-economy]]).
+
+## Food jobsites
+A food jobsite is one entry in the list that stands for five structures: a vegetable farm, a sheep pen, a cow pasture, a chicken coop and a pig sty. When it is picked, a second roll chooses which. Villagers hold the jobsite blocks: a composter, a loom, a milk churn, a nesting box and a feed trough. The builder counts what the village has by those blocks inside the village, so a farm or paddock you built counts too.
+
+- **Round 1.** Only kinds the village has none of are rolled, all at even odds. A paddock needs its materials and at least 2 wild animals of its kind within 80 blocks of the village centre at that moment. Animals already penned do not count. The farm needs only its materials. A kind that fails is dropped and the roll is made again.
+- **Round 2.** If every missing kind was dropped, the kinds not yet dropped are rolled again, each weighted 1 divided by 1 plus the number the village has. The same checks apply.
+- If nothing passes, the food jobsite fails for now and the builder picks another structure.
+
+With no animals nearby, the farm is the usual result. A built paddock starts empty, and its keeper stocks it from wild animals within 100 blocks.
+
+The **vegetable farm** is a log-ringed bed with a water channel down the middle and a composter beside it. The builder levels the ground with dirt, lays the log ring, fills the channel from a bucket and crafts the composter from its own planks. It does not till or plant. A [[villager:farmer]] who takes the composter does that. The builder buys logs from a forester, a bucket from a toolsmith and dirt from a farmer. If nobody has dirt for sale it digs its own, as a last resort, by the farmers' rules: natural edges first, then one shallow pit. If it finds none, it waits about a tenth of a day and tries again, which can stall a farm in a desert. The **sheep pen** is laid out like the village's generated pen, and its loom is crafted from string, so a village needs string for sale. Garden pens built earlier stay where they are, but builders no longer build new ones.
 
 ## Which wood
 Each structure is built from a single wood: every plank, log and fence in it is that species. The builder picks the species whose blueprint it lacks least. Items that other villagers have for sale count as a fifth of a missing item, because they can be bought. Ties go to the wood the builder holds most of, then to the village's own style wood. The choice is fixed until the structure is finished. Doors are always oak, and crafting tables and chests are made from any planks.
@@ -54,12 +63,12 @@ The builder looks for open ground in and around the village:
 - It keeps 3 blocks clear of existing buildings and other built structures, 2 from plots, lamps, decorations, the entry arch and signposts, and 1 from roads and from farm beds.
 - The ground must be loaded, natural (grass, dirt, sand, stone and similar), dry, and the heights across the footprint may differ by no more than 2. There must be no water or ice, no trees or other solid blocks in the way, and nobody standing there. Plants are cleared. A gap of up to 2 blocks under the floor is filled with its foundation blocks, so it keeps 8 spare.
 - Among the spots that pass, it prefers flat ground about 5 blocks from the nearest building.
-- Some structures have extra rules: a stable stands on horse land, a pasture and a sty on grass, and a sty's trough within reach of a villager looking for a workstation.
+- Some structures have extra rules: a pasture lays its own grass floor, a sty's trough must be within reach of a villager looking for a workstation, and a vegetable farm is levelled with dirt. Pastures, sties and stables may stand in any village, on any ground.
 
 ## Building order
 The builder places any foundation fill first, then the structure in phases: the floor, the walls from the bottom up, the roof, the windows, the door, the beds and last the torches and furniture. It takes one item from its inventory for every block, one block every 0.5 to 0.8 seconds. It must be within reach, about 4 blocks, with a clear line to the spot, so it walks around the building to find standing places. It never places a block into a space where someone stands, and waits, then skips. It does not overwrite solid blocks and it does not climb, so structures are limited to what it can reach from the ground. A cell it cannot reach is retried at the end of the job with a longer reach.
 
-- A **well** needs a full water bucket. If the builder has only an empty one it walks to water within about 30 blocks and fills it.
+- A **well** needs a full water bucket, and so does any other structure with water in it. A builder counts a bucket among the materials it needs for these, and buys one if it has none. If it has only an empty one it walks to water within about 30 blocks and fills it.
 - **Windows** need glass panes. If nobody in the village has any and there is no glassmaker, the builder leaves the windows open and comes back to glaze them once panes turn up.
 - A house's first bed becomes the builder's own if it has none (see below).
 

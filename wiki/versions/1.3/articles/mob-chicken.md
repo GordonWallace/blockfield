@@ -10,13 +10,13 @@ Right click a chicken holding [[item:wheat_seeds]] to feed it. Chickens within 1
 
 ### Villages
 
-In villages of eight or more villagers, a [[villager:poultry_keeper]] looks after a **coop**, a 7 by 7 fenced run with a gate and hay bales, and a **nesting box** beside it. A generated coop starts with two to four chickens. A chicken that wanders into the run joins the flock, and the run takes in up to 24.
+A village with a chicken paddock has a [[villager:poultry_keeper]] who looks after a **coop**, a 7 by 7 fenced run with a gate and hay bales, and a **nesting box** beside it. A generated coop starts with two to four chickens. A chicken that wanders into the run joins the flock, and the run takes in up to 24.
 
 The keeper's day:
 
 - collects eggs from the nesting box once it has three or more;
 - feeds hungry hens with seeds while the flock is eight or fewer;
 - culls adults when the flock is over eight, always keeping two, and keeps a raw chicken and a few feathers;
-- walks out to a wild chicken within 128 blocks and leads it home when the coop holds fewer than two, holding the gate open for it.
+- walks out to a wild chicken within 100 blocks and leads it home when the coop holds fewer than two, holding the gate open for it.
 
-Keepers sell eggs, feathers and chicken. The feathers go to [[villager:fletcher|fletchers]] for arrows, and villagers also cook eggs for food (see [[page:villager-life]]). Builders can raise a new coop for a village that has none.
+Keepers sell eggs, feathers and chicken. The feathers go to [[villager:fletcher|fletchers]] for arrows, and villagers also cook eggs for food (see [[page:villager-life]]). Builders can raise a new coop for a village that has none, if at least 2 wild chickens live within 80 blocks.

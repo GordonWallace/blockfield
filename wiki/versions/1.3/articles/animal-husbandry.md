@@ -46,4 +46,4 @@ Villages keep their animals in fenced buildings: a **pen** for sheep, a **coop**
 - The [[villager:pig_farmer]] feeds, culls and cooks pork.
 - The [[villager:stable_hand]] tames and breeds horses.
 
-When their enclosure holds fewer than two animals, a keeper goes out and leads a wild one home. They never cull below two adults. Villagers cannot create animals from nothing: all their stock comes from the wild or from breeding. See [[page:village-structures]] for the buildings.
+When their enclosure holds fewer than two animals, a keeper goes out and leads a wild one within 100 blocks home. They never cull below two adults. Villagers cannot create animals from nothing: all their stock comes from the wild or from breeding. A village gets one paddock, and one keeper, for each draw of its paddock roll, so the number and kinds depend on the village's size and the animals native to its biome. [[villager:builder|Builders]] can add a pen, coop, pasture, sty or stable where a village has none and at least 2 wild animals of that kind live within 80 blocks. See [[page:village-structures]] for the buildings.

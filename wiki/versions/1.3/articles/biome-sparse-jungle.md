@@ -6,4 +6,4 @@ Sparse Jungle is the edge of the jungle: tropical woodland that lets the sun thr
 - Grass and ferns are common, and a few flowers appear. Melon patches ([[item:melon]]) grow on the grass in places.
 
 ### Villages
-Villages do not generate in sparse jungle. The first village near the spawn point may be built there only if no better site is available.
+Villages do not generate in sparse jungle. In worlds made with village generator 9 or earlier, the first village near the spawn point may be built there if no better site is available.
