@@ -36,8 +36,12 @@ module.exports = async (pg, out) => {
         while ((BF.lod.frames || 0) < f0 + 3 && performance.now() - t0 < maxS * 1000) await new Promise((r) => setTimeout(r, 100));   // (the rings see the new place)
         for (;;) {
           standIns(false);
-          const s = BF.lod.stats();
-          if (s.active && s.rings.some((r) => r.show) && s.rings.every((r) => !r.show || (r.built && !r.building)) && s.pending === 0) return (performance.now() - t0) / 1000;
+          const s = BF.lod.stats(), V = BF.lod.view;
+          // a shown ring is in place once it is centred within js/lod.js MOVE (0.2) of its radius from the player: built and idle isn't
+          // enough, as js/lod.js holds a ring back while the player's ground speed (measured over wall-clock time) is too fast for its last
+          // build, and a hop of a few hundred blocks reads as flight until enough frames decay it (a few at 60 fps, many more at 2-6 fps)
+          const placed = (r, L) => r.f === V.f && Math.max(Math.abs(r.cu - V.u), Math.abs(r.cv - V.v)) <= 0.2 * L.half;
+          if (s.active && s.rings.some((r) => r.show) && s.rings.every((r, i) => !r.show || (r.built && !r.building && placed(r, BF.lod.levels[i]))) && s.pending === 0) return (performance.now() - t0) / 1000;
           if (performance.now() - t0 > maxS * 1000) return -1;
           await new Promise((r) => setTimeout(r, 500));
         }
