@@ -8,7 +8,8 @@
 //   uses the rings' material (js/lod.js) and is drawn only once the view is partly round (k > 0).
 // - Cuts, per pixel as for the rings: a hole where the coarsest ring drawn is (inside its disc by two cells, an overlap on the same
 //   lattice), or where the loaded chunks are; the strip along the ring's corner wedge stays with the globe.
-// - Tiles beyond the horizon (and a mountain's height past it) are hidden.
+// - Tiles beyond the horizon (and a mountain's height past it) are hidden, and so are tiles wholly inside the coarsest ring's disc, so
+//   lower down, where the rings reach the horizon, the globe draws nothing.
 // - A tile's samples reach two cells past each edge (see index() below). The cube corner's own sample (both
 //   grid coordinates past the face) has no column; it is filled from its neighbour inside, with the corner's own direction, so the three
 //   faces meet at the corner with no gap (corners are open sea).
@@ -59,7 +60,7 @@ globe.reset = function (scene) {
       P.dir(f, (ti + a) * T * CELL, (tj + b) * T * CELL, d);
       radius = Math.max(radius, Math.acos(Math.min(1, d[0] * c[0] + d[1] * c[1] + d[2] * c[2])));
     }
-    const tile = { f, ti, tj, cu, cv, dir: c.slice(), radius: radius * 1.02, mesh: null };
+    const tile = { f, ti, tj, cu, cv, dir: c.slice(), radius: radius * 1.02, mesh: null, corner: (ti === 0 || ti === TILES - 1) && (tj === 0 || tj === TILES - 1) };
     globe.tiles.push(tile);
     request(tile, CELL);
   }
@@ -137,6 +138,18 @@ function finish(tile, anchor, m, own) {
 
 // Called as each frame is drawn (a js/view.js begin hook, so with the player where the camera is and the rings as they are now): shows
 // the globe once the view is partly round, hides tiles past the horizon, and sets the cuts.
+const ID = { A: [1, 0, 0, 1], t: [0, 0] };
+function inRing(t, top) {
+  const P = BF.planet, e = t.f === top.f ? ID : P.UNFOLD[top.f][t.f];
+  if (!e) return false;
+  const S = T * P.N / CELLS, r = top.half - 2 * top.cell;
+  for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const u = (t.ti + a) * S, v = (t.tj + b) * S;
+    const U = e.A[0] * u + e.A[1] * v + e.t[0], W = e.A[2] * u + e.A[3] * v + e.t[1];
+    if (Math.hypot(U - top.cu, W - top.cv) >= r) return false;
+  }
+  return true;
+}
 globe.update = function () {
   if (!globe.active) return;
   if (BF.sampler.inline && !BF.lodInline) { off(); return; }   // the workers failed: as the rings
@@ -145,17 +158,22 @@ globe.update = function () {
   const k = BF.view.kAt(p.x, p.y, p.z), on = k > 0 && !globe.hidden;   // hidden: for tests of the rings alone
   // the horizon from the eye, plus how far a mountain past it still shows
   const h = Math.max(eyeR, P.R), horizon = Math.acos(Math.min(1, P.R / h)) + Math.acos(Math.min(1, P.R / (P.R + PEAK))) + 0.01;
-  globe.shown = 0;
-  for (const t of globe.tiles) {
-    if (!t.mesh) continue;
-    t.mesh.visible = on && angle(t) < horizon + t.radius;
-    if (t.mesh.visible) globe.shown++;
-  }
-  if (!on || !cutU) return;
-  // the hole: the coarsest ring drawn, or else the loaded chunks
+  // the coarsest ring drawn: a tile wholly inside its disc isn't drawn at all (it would only be cut away, pixel by pixel), except a
+  // face's corner tiles, which keep the strip along the ring's corner wedge. The disc is measured in its face's grid, where a tile on the
+  // same face or an unfolded neighbour is a square: it is inside when its four corners are.
   const L = BF.lod, V = L.view;
   let top = null;
   for (const R of L.levels) if (R.mesh && R.show) top = R;
+  globe.shown = 0;
+  for (const t of globe.tiles) {
+    if (!t.mesh) continue;
+    let vis = on && angle(t) < horizon + t.radius;
+    if (vis && top && !t.corner && inRing(t, top)) vis = false;
+    t.mesh.visible = vis;
+    if (vis) globe.shown++;
+  }
+  if (!on || !cutU) return;
+  // the hole: the coarsest ring drawn, or else the loaded chunks
   L.cuts(cutU, V, L.eyeHole, top);
   if (top) cutU.hole2.value.z = top.half - 2 * top.cell;
   // (cuts() leaves the globe a strip along the ring's corner wedge, also for the coarsest ring: its own bridge across the wedge, made in

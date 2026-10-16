@@ -4,7 +4,7 @@
 //  - every tile of all six faces builds, sampled by the workers (time logged);
 //  - from 300,000 blocks up, over the middle of each face, the planet has no holes (a magenta background pass with the sky hidden);
 //  - over a cube corner from 100,000 up, and over land from 30,000 up, with the rings drawn too: no holes;
-//  - tiles past the horizon are hidden;
+//  - tiles past the horizon, or wholly inside the coarsest ring, are hidden (none drawn 1,000 up);
 //  - dragging the planet round from orbit, across face edges, and flying across a face edge 30,000 up change the picture smoothly;
 //  - no page errors.
 // Over 75 s in CI (the globe samples 2.7 million columns on 2 cores), so it is a soak test.
@@ -112,6 +112,20 @@ module.exports = async (pg, out) => {
       await pg.screenshot({ path: `${out}-${up}.png` });
       check(rt >= 0 && r.holes === 0 && r.land > (up > 50000 ? 0.03 : 0.3), `${what}: no holes (${(r.holes * 100).toFixed(3)}% of the screen, the planet ${(r.land * 100).toFixed(0)}%)`);
     }
+
+    // ---- lower down the rings reach the horizon, and the globe draws nothing there
+    const low = await pg.evaluate(async () => {
+      const s = BF.spawnPoint, g = BF.planet.grid(s.x, s.z);
+      goTo(g.f, g.u, g.v, 1000);
+      await ringsDone();
+      await new Promise((r) => setTimeout(r, 800));
+      const a = BF.globe.stats().shown;
+      goTo(g.f, g.u, g.v, 30000);
+      await ringsDone();
+      await new Promise((r) => setTimeout(r, 800));
+      return [a, BF.globe.stats().shown];
+    });
+    check(low[0] === 0 && low[1] < 200, `the globe draws ${low[0]} tiles 1,000 up, where the rings reach the horizon, and ${low[1]} of 600 at 30,000 up`);
 
     // ---- no jumps: flying across a face edge 30,000 up, and dragging the planet round from orbit across edges
     const fly = await pg.evaluate(async () => {
