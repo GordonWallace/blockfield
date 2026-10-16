@@ -79,7 +79,7 @@ const P = (BF.player = {
 // ---------- small helpers ----------
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const inv = () => BF.inventory || {};
-const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
+const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()) || !!(BF.coords && BF.coords.panel.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
 const selectedItem = () => {
   try { const s = inv().selected && inv().selected(); return s && s.count > 0 ? s : null; } catch (_) { return null; }
 };
@@ -103,6 +103,7 @@ const css = `
 .bfp-card{background:var(--panel);border:1px solid var(--panel-edge);border-radius:4px;padding:22px 24px;max-width:440px;width:100%;box-sizing:border-box;text-align:center;color:var(--ink);margin:auto}
 .bfp-title{font:400 44px/1 var(--display);letter-spacing:1px;margin:0 0 8px;color:var(--ink);text-shadow:3px 3px 0 #2d4a1a}
 .bfp-death .bfp-title{text-shadow:3px 3px 0 #3a0a06}
+.bfp-death .bfp-sub{white-space:pre-line}
 .bfp-sub{font:400 13px/1.3 var(--display);color:var(--accent);margin:0 0 14px}
 .bfp-card button{font:400 14px/1 var(--display);background:#3b4a35;color:var(--ink);border:1px solid var(--panel-edge);border-bottom:3px solid rgba(0,0,0,.45);padding:11px 14px;border-radius:3px;cursor:pointer;width:100%;margin:5px 0;box-sizing:border-box}
 .bfp-card button:hover,.bfp-card button:focus-visible{background:#4f6a3f;outline:none}
@@ -1659,8 +1660,10 @@ function die() {
     try { inv().close(); } catch (_) {}
     try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
     try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
+    try { if (BF.coords && BF.coords.panel.isOpen()) BF.coords.panel.close(); } catch (_) {}
   }
-  deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
+  const where = BF.coords && BF.coords.onPlanet() ? "\n" + BF.coords.describe(pos.x, pos.y, pos.z, { whole: true }) + "  " + (BF.coords.latLonText(pos.x, pos.z) || "") : "";   // planet: where it happened (spec r14-18)
+  deathEl.querySelector(".bfp-sub").textContent = (DEATH_MSG[lastCause] || "You died") + where;
   showScreen("death");
   BF.state.paused = true;
   exitLock();

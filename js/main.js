@@ -91,13 +91,24 @@ function debugInfo() {
     weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
     cloudCover: BF.sky.cloudCover, cloudHeight: BF.sky.cloudHeight, warp: BF.warp.speed,
     clicks: BF.player.clickLog ? BF.player.clickLog() : [],
+    planet: planetInfo(p),
   };
 }
+// On the planet (generator 4): the canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas
+// x / z stay internal. Null off the planet.
+function planetInfo(p) {
+  const C = BF.coords, c = C && C.here();
+  if (!c) return null;
+  const ll = BF.planet.latLonAt(p.x, p.z, {});
+  return { face: c.f, u: c.u, v: c.v, lat: ll.lat, lon: ll.lon, latLon: C.latLonText(p.x, p.z), facing: C.facing(BF.player.yaw, p.x, p.z) };
+}
 function debugText(d) {
-  const s = d.sections;
+  const s = d.sections, pl = d.planet;
+  const n1 = v => (Math.floor(v * 10) / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return `Blockfield  ${d.fps} fps\n` +
-    `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n` +
-    `Chunk ${d.chunkX}, ${d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
+    (pl ? `Face ${pl.face}  u ${n1(pl.u)}  v ${n1(pl.v)}  y ${n1(d.y)}\n${pl.latLon}  Facing ${pl.facing}\n`
+      : `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n`) +
+    `Chunk ${pl ? Math.floor(pl.u / BF.CS) + ", " + Math.floor(pl.v / BF.CS) : d.chunkX + ", " + d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
     `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
     `Mobs ${d.mobs}${d.boats ? `  Boats ${d.boats}` : ""}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +

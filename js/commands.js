@@ -182,10 +182,50 @@ function parseCoord(tok, base, axis, block) {
   return axis !== "y" && /^[+-]?\d+$/.test(tok) ? v + 0.5 : v;
 }
 function parsePos(args, i, block) {
-  if (args.length < i + 3) fail("Incomplete position (expected x y z)");
-  const p = pos();
-  return [parseCoord(args[i], p.x, "x", block), parseCoord(args[i + 1], p.y, "y", block), parseCoord(args[i + 2], p.z, "z", block)];
+  const b = userFrame();
+  if (args.length < i + 3) fail(b.f >= 0 ? "Incomplete position (expected u y v)" : "Incomplete position (expected x y z)");
+  const hx = b.f >= 0 ? "u" : "x", hz = b.f >= 0 ? "v" : "z";
+  return [parseCoord(args[i], b.x, hx, block) + b.ox, parseCoord(args[i + 1], b.y, "y", block), parseCoord(args[i + 2], b.z, hz, block) + b.oz];
 }
+
+// ---------- planet coordinates (spec r14-18) ----------
+// On the planet (generator 4) commands read and print u / v on the player's current face (BF.coords), never atlas x / z. Typed
+// positions may run past the face's edges into the margin (the neighbouring faces unfolded around it, out to one face width), so
+// "~10" works across an edge; they are resolved to the canonical point before anything is placed there.
+const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
+const ucan = {};
+// The frame typed coordinates are in: atlas = typed + (ox, oz); x / y / z are the player's own position in it (the ~ base).
+function userFrame() {
+  const p = pos();
+  if (onPlanet()) {
+    const c = BF.planet.canon(p.x, p.z, ucan);
+    if (!c.off) return { f: c.f, ox: BF.planet.W * c.f + BF.planet.N, oz: BF.planet.N, x: c.u, y: p.y, z: c.v };
+  }
+  return { f: -1, ox: 0, oz: 0, x: p.x, y: p.y, z: p.z };
+}
+// The world border: on the planet, within the current face's square (the face plus its margin); 30 million blocks out in 1.3.
+function checkBorder(x, z) {
+  if (onPlanet()) {
+    const f = userFrame().f;
+    if (BF.planet.face(x, z) !== f || f < 0) fail(`Invalid position: off the planet (u and v must be between ${(-BF.planet.N).toLocaleString("en-US")} and ${(2 * BF.planet.N - 1).toLocaleString("en-US")} on this face)`);
+  } else if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
+}
+// A position as the player reads it (BF.coords): "face 2  u 81,920  v 81,920  y 64" on the planet, "x, y, z" otherwise.
+const where = (x, y, z) => (BF.coords ? BF.coords.describe(x, y, z) : `${fmt(x)}, ${fmt(y)}, ${fmt(z)}`);
+function whereBlock(x, y, z) {
+  if (!onPlanet()) return `${x}, ${y}, ${z}`;
+  const c = BF.planet.canonCell(x, z, {});
+  return c.off ? `${x}, ${y}, ${z}` : `face ${c.f}  u ${c.u.toLocaleString("en-US")}  v ${c.v.toLocaleString("en-US")}  y ${y}`;
+}
+// The canonical point of a typed one (a corner wedge resolves to the nearest point on a face), with the quarter turns q from the
+// typed frame to the point's own: a yaw given in the typed frame is turned by q so the player faces the same way.
+function landing(x, z) {
+  if (!onPlanet()) return { x, z, q: 0 };
+  const c = BF.planet.canon(x, z, {});
+  return { x: c.x, z: c.z, q: (4 - c.turn) % 4 };
+}
+// The highest layer a teleport may reach: 1.3's build height + 832, and on the planet high enough to see the whole globe.
+const tpMaxY = () => (onPlanet() ? BF.SEA + 300000 : BF.H + 832);
 const isCoord = t => /^(~[+-]?(\d+\.?\d*|\.\d+)?|[+-]?(\d+\.?\d*|\.\d+))$/.test(t || "");
 
 // Ticks: "1000", "1000t", "50s", "1d" (vanilla time units).
@@ -253,7 +293,10 @@ const mobTypes = () => (BF.mobs && BF.mobs.types) || [];
 function markCheats() {
   try { if (BF.save && BF.save.current && !BF.save.current.cheats) BF.save.current.cheats = true; } catch (_) {}
 }
-function needLoaded(x, z) { if (!W().isLoaded(x, z)) fail("That position is not loaded"); }
+function needLoaded(x, z) {
+  if (onPlanet() && W().canonXZ && !W().canonXZ(x, z)) return;   // a corner wedge: nothing there to load (writes there are refused)
+  if (!W().isLoaded(x, z)) fail("That position is not loaded");
+}
 function surfaceY(x, z) {
   let h = W().isLoaded(x, z) ? W().heightAt(x, z) : BF.MIN_Y - 1;
   if (h < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) h = BF.worldgen.heightAt(Math.floor(x), Math.floor(z));
@@ -273,8 +316,10 @@ const usage = c => fail("Usage: " + [].concat(CMDS[c].usage).join("\n       "));
 
 // argument completers: (args, i, cur) -> candidates for token i
 const C_COORD3 = (args, i) => { // x y z at i..i+2 (relative to the first coordinate token)
-  const t = P().target, out = [];
+  const t0 = P().target, out = [];
   const k = args.slice(0, i).length;
+  let t = t0;
+  if (t0 && onPlanet()) { const b = userFrame(); t = { x: t0.x - b.ox, y: t0.y, z: t0.z - b.oz }; }   // typed coordinates are u / v
   if (k === 0) { out.push("~ ~ ~"); if (t) out.push(`${t.x} ${t.y} ${t.z}`); }
   else if (k === 1) { out.push("~ ~"); if (t) out.push(`${t.y} ${t.z}`); }
   else { out.push("~"); if (t) out.push(String(t.z)); }
@@ -297,22 +342,33 @@ def("help", {
   },
 });
 
+const TP_USAGE = ["/tp <x> <y> <z> [yaw] [pitch]", "/tp <x> <z>  (to the surface)"];
+const TP_PLANET = ["/tp <u> <y> <v> [yaw] [pitch]  (on your face)", "/tp <u> <v>  (to the surface)", "/tp face <0-5> <u> <v> [y]",
+  "/tp <lat> <lon> [y]  (e.g. 35.26N 45E)", "/tp corner <1-8>", "/tp up <blocks>  (above the ground here)", "/tp ground"];
+const LATLON = /^([+-]?(?:\d+\.?\d*|\.\d+))°?([nsew])$/i;
 def("tp", {
-  aliases: ["teleport"], usage: ["/tp <x> <y> <z> [yaw] [pitch]", "/tp <x> <z>  (to the surface)"], desc: "Teleports you. ~ is relative to your position.",
-  complete: (a, i) => { if (/^@/.test(a[0] || "")) { a = a.slice(1); i--; } return i < 3 ? C_COORD3(a, i) : null; },
+  aliases: ["teleport"], usage: TP_USAGE.concat(TP_PLANET.slice(2).map(u => u + "  (planet)")), desc: "Teleports you. ~ is relative to your position.",
+  complete: (a, i) => {
+    if (/^@/.test(a[0] || "")) { a = a.slice(1); i--; }
+    if (i === 0 && onPlanet()) return C_COORD3(a, i).concat(["face", "corner", "up", "ground"]);
+    if (onPlanet() && /^(face|corner|up|ground)$/i.test(a[0] || "")) return norm(a[0]) === "corner" && i === 1 ? ["1", "2", "3", "4", "5", "6", "7", "8"] : null;
+    return i < 3 ? C_COORD3(a, i) : null;
+  },
   run(a) {
     if (/^@[spa]$/.test(a[0] || "")) a = a.slice(1);
+    if (onPlanet()) { const r = planetTp(a); if (r) return r; }
     if (a.length === 2) {
-      const p = pos(), x = parseCoord(a[0], p.x, "x"), z = parseCoord(a[1], p.z, "z");
-      if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
-      const y = surfaceY(x, z);
-      teleport(x, y, z);
-      return `Teleported ${PLAYER} to ${fmt(x)}, ${fmt(y)}, ${fmt(z)}`;
+      const b = userFrame(), pl = b.f >= 0;
+      const x = parseCoord(a[0], b.x, pl ? "u" : "x") + b.ox, z = parseCoord(a[1], b.z, pl ? "v" : "z") + b.oz;
+      checkBorder(x, z);
+      const L = landing(x, z), y = surfaceY(L.x, L.z);
+      teleport(L.x, y, L.z, L.q ? BF.planet.turnYaw(L.q, P().yaw || 0) : null, P().pitch || 0);
+      return `Teleported ${PLAYER} to ${where(L.x, y, L.z)}`;
     }
     if (a.length !== 3 && a.length !== 5) usage("tp");
     const [x, y, z] = parsePos(a, 0, false);
-    if (y < BF.MIN_Y || y > BF.H + 832) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${BF.H + 832}`);   // below MIN_Y is solid bedrock with no way out
-    if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
+    if (y < BF.MIN_Y || y > tpMaxY()) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${tpMaxY()}`);   // below MIN_Y is solid bedrock with no way out
+    checkBorder(x, z);
     let yaw = null, pitch = null;
     if (a.length === 5) {
       const curYawMC = (Math.PI - (P().yaw || 0)) * 180 / Math.PI, curPitchMC = -(P().pitch || 0) * 180 / Math.PI;
@@ -320,10 +376,74 @@ def("tp", {
       const ym = ang(a[3], curYawMC, "yaw"), pm = Math.max(-90, Math.min(90, ang(a[4], curPitchMC, "pitch")));
       yaw = Math.PI - ym * Math.PI / 180; pitch = -pm * Math.PI / 180;     // vanilla yaw 0 = south (+z), pitch + = down
     }
-    teleport(x, y, z, yaw, pitch);
-    return `Teleported ${PLAYER} to ${fmt(x)}, ${fmt(y)}, ${fmt(z)}`;
+    const L = landing(x, z);
+    if (L.q) { if (yaw == null) { yaw = P().yaw || 0; pitch = P().pitch || 0; } yaw = BF.planet.turnYaw(L.q, yaw); }
+    teleport(L.x, y, L.z, yaw, pitch);
+    return `Teleported ${PLAYER} to ${where(L.x, y, L.z)}`;
   },
 });
+// The planet's own /tp forms (the round-planet prototype's teleport panel). Null when a is none of them (plain u y v / u v).
+function planetTp(a) {
+  const k = norm(a[0]), Pl = BF.planet, N = Pl.N;
+  const ground = (x, z) => (BF.mapview && BF.mapview.surfaceAt ? BF.mapview.surfaceAt(x, z) : surfaceY(x, z));   // on the water over the sea, as the prototype
+  const fly = on => { if (P().setFlying && P().gameMode === "creative") P().setFlying(on); };
+  if (k === "face") {
+    if (a.length < 4 || a.length > 5) usage("tp");
+    const f = parseNum(a[1], "face", { int: true, min: 0, max: 5 });
+    const u = parseNum(a[2], "u", { min: 0, max: N - 1e-6 }), v = parseNum(a[3], "v", { min: 0, max: N - 1e-6 });
+    const cu = /^[+-]?\d+$/.test(a[2]) ? u + 0.5 : u, cv = /^[+-]?\d+$/.test(a[3]) ? v + 0.5 : v;
+    const at = Pl.atlas(f, Math.min(cu, N - 1e-6), Math.min(cv, N - 1e-6), {});
+    const y = a[4] != null ? parseNum(a[4], "y", { min: BF.MIN_Y, max: tpMaxY() }) : ground(at.x, at.z);
+    if (a[4] != null) fly(y > ground(at.x, at.z) + 2);
+    teleport(at.x, y, at.z, turnTo(at.x, at.z), P().pitch || 0);
+    return `Teleported ${PLAYER} to ${where(at.x, y, at.z)}`;
+  }
+  if (k === "corner") {
+    if (a.length !== 2) usage("tp");
+    const n = parseNum(a[1], "corner", { int: true, min: 1, max: 8 });
+    const c = BF.coords.corner(n, 40);
+    const y = ground(c.x, c.z) + 30;
+    fly(true);
+    teleport(c.x, y, c.z, c.yaw, -0.35);
+    return `Teleported ${PLAYER} to corner ${n} (${BF.coords.latLonText(c.x, c.z)}), 40 blocks in from it: ${where(c.x, y, c.z)}`;
+  }
+  if (k === "up") {
+    if (a.length !== 2) usage("tp");
+    const h = parseNum(a[1], "blocks", { min: 0, max: tpMaxY() });
+    const p = pos(), y = Math.min(tpMaxY(), ground(p.x, p.z) + h);
+    fly(true);
+    teleport(p.x, y, p.z);
+    return `Teleported ${PLAYER} to ${where(p.x, y, p.z)} (${Math.round(h).toLocaleString("en-US")} above the ground)`;
+  }
+  if (k === "ground") {
+    if (a.length !== 1) usage("tp");
+    const p = pos(), y = ground(p.x, p.z);
+    fly(false);
+    teleport(p.x, y, p.z);
+    return `Teleported ${PLAYER} to ${where(p.x, y, p.z)}`;
+  }
+  const m1 = LATLON.exec(a[0] || ""), m2 = LATLON.exec(a[1] || "");
+  if (m1 || m2) {   // latitude / longitude need their hemisphere letters (plain numbers are u / v)
+    if (!m1 || !m2 || a.length > 3) fail("Usage: /tp <lat><N|S> <lon><E|W> [y], e.g. /tp 35.26N 45E");
+    const lat = +m1[1] * (/s/i.test(m1[2]) ? -1 : 1), lon = +m2[1] * (/w/i.test(m2[2]) ? -1 : 1);
+    if (!/[ns]/i.test(m1[2]) || !/[ew]/i.test(m2[2])) fail("Latitude comes first (N or S), then longitude (E or W)");
+    if (Math.abs(lat) > 90) fail(`Latitude must be between 90S and 90N, found ${a[0]}`);
+    if (Math.abs(lon) > 180) fail(`Longitude must be between 180W and 180E, found ${a[1]}`);
+    const at = Pl.atlasOfLatLon(lat, lon, {});
+    const y = a[2] != null ? parseNum(a[2], "y", { min: BF.MIN_Y, max: tpMaxY() }) : ground(at.x, at.z);
+    if (a[2] != null) fly(y > ground(at.x, at.z) + 2);
+    teleport(at.x, y, at.z, turnTo(at.x, at.z), P().pitch || 0);
+    return `Teleported ${PLAYER} to ${where(at.x, y, at.z)} (${BF.coords.latLonText(at.x, at.z)})`;
+  }
+  return null;
+}
+// A far teleport keeps the player's compass facing: the yaw that faces the same bearing at (x, z) as now.
+function turnTo(x, z) {
+  const p = pos(), C = BF.coords, yaw = P().yaw || 0;
+  if (!C) return yaw;
+  const b = C.bearing(-Math.sin(yaw), -Math.cos(yaw), p.x, p.z);
+  return b == null ? yaw : C.yawFor(b, x, z, yaw);
+}
 function teleport(x, y, z, yaw, pitch) {
   const p = P();
   if (W().ensureRange) W().ensureRange(x, z, Math.floor(y) - 24, Math.floor(y) + 4);   // lazily load the sections around the destination
@@ -434,8 +554,9 @@ def("summon", {
     const type = norm(a[0]);
     if (!BF.mobs || !mobTypes().includes(type)) fail(`Unknown entity '${a[0]}'`);
     const p = pos();
-    const [x, y, z] = a.length >= 4 ? parsePos(a, 1, false) : [p.x, p.y, p.z];
+    let [x, y, z] = a.length >= 4 ? parsePos(a, 1, false) : [p.x, p.y, p.z];
     if (y < BF.MIN_Y || y >= (BF.H || 192) + 64) fail("Invalid position for summon");
+    if (a.length >= 4) { checkBorder(x, z); const L = landing(x, z); x = L.x; z = L.z; }   // mobs live at canonical points
     needLoaded(x, z);
     let variant, child = false;
     if (a[4] != null) {
@@ -515,11 +636,12 @@ def("spawnpoint", {
   run(a) {
     if (a.length && /^@[spa]$/.test(a[0])) a = a.slice(1);
     if (a.length && a.length !== 3) usage("spawnpoint");
-    const [x, y, z] = a.length ? parsePos(a, 0, true) : [Math.floor(pos().x), Math.floor(pos().y), Math.floor(pos().z)];
-    if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
+    let [x, y, z] = a.length ? parsePos(a, 0, true) : [Math.floor(pos().x), Math.floor(pos().y), Math.floor(pos().z)];
+    checkBorder(x, z);
     if (y < BF.MIN_Y || y >= BF.H) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${BF.H - 1}`);
+    if (onPlanet()) { const c = BF.planet.canonCell(x, z, {}); x = c.x; z = c.z; }
     BF.spawnPoint = { x: x + 0.5, y, z: z + 0.5 };
-    return `Set spawn point to ${x}, ${y}, ${z} for ${PLAYER}`;
+    return `Set spawn point to ${whereBlock(x, y, z)} for ${PLAYER}`;
   },
 });
 
@@ -537,6 +659,8 @@ def("setblock", {
     const mode = norm(a[4] || "replace");
     if (!["replace", "keep", "destroy"].includes(mode)) usage("setblock");
     if (y < BF.MIN_Y || y >= BF.H) fail("Cannot place block outside of the world");
+    checkBorder(x, z);
+    if (onPlanet() && W().canonXZ && !W().canonXZ(x, z)) fail("Could not set the block (that spot is past a cube corner, between two faces)");
     needLoaded(x, z);
     const old = W().getBlock(x, y, z);
     if (old === id || (mode === "keep" && old !== 0)) fail("Could not set the block");
@@ -546,7 +670,7 @@ def("setblock", {
     }
     removeOld(x, y, z, old);
     if (!W().setBlock(x, y, z, id)) fail("Could not set the block");
-    return `Changed the block at ${x}, ${y}, ${z}`;
+    return `Changed the block at ${whereBlock(x, y, z)}`;
   },
 });
 
@@ -565,6 +689,7 @@ def("fill", {
     const vol = (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1);
     if (vol > MAX_FILL) fail(`Too many blocks in the specified area (maximum ${MAX_FILL}, specified ${vol})`);
     if (y0 < BF.MIN_Y || y1 >= BF.H) fail("Cannot place blocks outside of the world");
+    checkBorder(x0, z0); checkBorder(x1, z1);
     for (let x = x0; x <= x1; x += 16) for (let z = z0; z <= z1; z += 16) needLoaded(x, z);
     needLoaded(x1, z1); needLoaded(x0, z1); needLoaded(x1, z0);
     const w = W();
@@ -596,8 +721,13 @@ def("locate", {
     if (!G || !G.nearestVillage) fail("Villages not available");
     const p = pos(), v = G.nearestVillage(p.x, p.z);
     if (!v) fail("Could not find a village within reasonable distance");
-    const d = Math.round(Math.hypot(v.x - p.x, v.z - p.z));
     const nm = BF.signs && BF.signs.villageName ? BF.signs.villageName(v) : null;
+    if (onPlanet()) {   // planet distance, compass direction, and a /tp that works from anywhere
+      const Pl = BF.planet, d = Math.round(Pl.distance(p, v)), t = Pl.toward(p, v, {});
+      const dir = BF.coords.compass(BF.coords.bearing(t.x, t.z, p.x, p.z)), c = Pl.canonCell(v.x, v.z, {});
+      return `The nearest village${nm ? " (" + nm + ")" : ""} is ${d.toLocaleString("en-US")} blocks away to the ${dir}, at face ${c.f}  u ${c.u.toLocaleString("en-US")}  v ${c.v.toLocaleString("en-US")}. /tp face ${c.f} ${c.u} ${c.v} goes there.`;
+    }
+    const d = Math.round(Math.hypot(v.x - p.x, v.z - p.z));
     return `The nearest village${nm ? " (" + nm + ")" : ""} is at [${Math.round(v.x)}, ~, ${Math.round(v.z)}] (${d} blocks away). /tp ${Math.round(v.x)} ${Math.round(v.z)} goes there.`;
   },
 });

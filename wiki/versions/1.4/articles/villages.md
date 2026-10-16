@@ -15,6 +15,8 @@ The world is divided into squares 384 blocks across, and each square gets at mos
 
 So villages sit on open, level country, a few hundred blocks apart. Every village follows these rules, and there is no special village near where you start. The spawn point is a dry spot near the origin, and a village close to it happens only by chance, so a new world may have none in sight.
 
+On the [[page:the-planet|planet]], each face of the cube is a flat grid of its own, and the squares are laid out on each face from its corner, so no square ever spans two faces. A village, with its farms, pens, paths and everything its builders add, always stays on one face. The squares along a face's edges, in a band a few hundred blocks wide, never hold a village; that is about 1 percent of the planet's land. So two villages on either side of an edge are always at least several hundred blocks apart. Villagers, traders and you can still walk from one face to the next. Villages look exactly as skewed as the ground around them near the cube's corners, but the corners are open sea, so few villages are near them.
+
 Worlds made with village generator 9 or earlier work differently. They have a spawn village, found by searching outward from the spawn point, between about 80 and 320 blocks away. If no good site is near, the rules relax step by step, and that first village can end up in a forest, a snowy taiga or on a beach. The ordinary villages keep clear of it.
 
 ## Population and size

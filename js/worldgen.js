@@ -827,6 +827,35 @@ const villageCache = new Map();
 let spawnXZ = null;
 const regionOf = v => Math.floor((v + RHALF) / REGION);
 
+// Village regions on the planet (r14-12, the chart method: each face's grid is a flat world for village code). The region grid is laid
+// on each face's own grid (u, v) from its corner, so a region lines up with chunks and never spans two faces. Region (rx, rz) of face
+// f has rx = f * RF + ru and rz = rv, and covers u in [ru * REGION, (ru + 1) * REGION), v likewise. 384 doesn't divide N, so the last
+// row and column of a face are partial. A region whose square comes within EDGE_KEEP of an edge holds no village (the first and last
+// row and column: about 0.9% of regions). A village keeps 4 blocks inside its region, so it, its farms and paths, and its builders'
+// sites (js/builder.js SITE_RANGE outside its box) all stay well clear of the edge. Siting reads C.rv like generator 3, so villages
+// keep off rivers once the planet has them (r14-10).
+const RF = 1024, EDGE_KEEP = 64;
+let PN = 0, PW = 0;                // the planet's N and atlas face width (set by init)
+// The region (as [rx, rz]) holding canonical atlas column (x, z); null off every face's grid square (a margin address: callers
+// canonicalise first when they may be in a margin).
+function pRegion(x, z) {
+  const f = Math.floor(x / PW), u = x - PW * f - PN, v = z - PN;
+  if (f < 0 || f > 5 || u < 0 || u >= PN || v < 0 || v >= PN) return null;
+  return [f * RF + Math.floor(u / REGION), Math.floor(v / REGION)];
+}
+// The atlas centre of planet region (rx, rz), or null when the region is too near an edge to hold a village.
+function pRegionCentre(rx, rz) {
+  const f = Math.floor(rx / RF), ru = rx - f * RF;
+  if (f < 0 || f > 5) return null;
+  for (const r of [ru, rz]) if (r * REGION < EDGE_KEEP || (r + 1) * REGION > PN - EDGE_KEEP) return null;
+  return [PW * f + PN + ru * REGION + RHALF, PN + rz * REGION + RHALF];
+}
+const pc = {};
+function canonXZ(x, z) {
+  const c = BF.planet.canonCell(x, z, pc);
+  return c.off ? null : c;
+}
+
 // Mirrors main.js's spawn search (terrain only); main then moves the player to the nearest village.
 function findSpawn() {
   if (spawnXZ) return spawnXZ;
@@ -911,7 +940,8 @@ function villageRegion(rx, rz) {
   let v = villageCache.get(key);
   if (v !== undefined) return v;
   v = null;
-  const rcx = rx * REGION, rcz = rz * REGION;
+  let rcx = rx * REGION, rcz = rz * REGION;
+  if (PLANET) { const c = pRegionCentre(rx, rz); if (!c) { villageCache.set(key, v); return v; } [rcx, rcz] = c; }
   const sv = spawnVillage();
   if (noise.hash(rx, rz, 501) < 0.85) {
     const pop = VGEN >= 2 ? villagePop(rx, rz, 530) : 0;
@@ -931,7 +961,7 @@ let spawnV;
 function spawnVillage() {
   if (spawnV !== undefined) return spawnV;
   spawnV = null;
-  if (VGEN >= 10) return spawnV;   // village generator 10: no spawn village
+  if (VGEN >= 10 || PLANET) return spawnV;   // village generator 10 (and the planet): no spawn village
   const [sx, sz] = findSpawn();
   const pop = VGEN >= 2 ? villagePop(sx, sz, 540) : 0;
   outer: for (let r = 80; r <= 320; r += 8)  // a village somewhere nearby, but not on top of spawn
@@ -947,7 +977,12 @@ function spawnVillage() {
 }
 function inVillage(v, x, z, m) { return !!v && x >= v.minX - m && x <= v.maxX + m && z >= v.minZ - m && z <= v.maxZ + m; }
 function villageAt(x, z, m) {
-  if (PLANET) return null;   // (no villages on the planet until r14-12)
+  if (PLANET) {
+    let r = pRegion(x, z);
+    if (!r) { const c = canonXZ(x, z); if (!c) return null; x = c.x; z = c.z; r = pRegion(x, z); if (!r) return null; }
+    const v = villageRegion(r[0], r[1]);
+    return inVillage(v, x, z, m) ? v : null;
+  }
   const sv = spawnVillage();
   if (inVillage(sv, x, z, m)) return sv;
   const v = villageRegion(regionOf(x), regionOf(z));
@@ -1401,7 +1436,7 @@ function layoutVillage(cx, cz, spawn, pop) {
     [cx - 6, cz - 5, "flowers"], [cx + 6, cz + 1, "flowers"]);
   // entry arch + auto sign (js/signs.js): planned on the layout so its footprint is inside the village box (trees, caves, builders keep clear)
   if (BF.signs && BF.signs.planArch) {
-    try { v.arch = BF.signs.planArch(v, { climate: (x, z) => climate(x, z), spawn: !!spawn, region: [regionOf(cx), regionOf(cz)] }); } catch (e) { console.error(e); v.arch = null; }
+    try { v.arch = BF.signs.planArch(v, { climate: (x, z) => climate(x, z), spawn: !!spawn, region: (PLANET && pRegion(cx, cz)) || [regionOf(cx), regionOf(cz)] }); } catch (e) { console.error(e); v.arch = null; }
     if (v.arch) occ.push(v.arch.box);
   }
   for (const o of occ) {
@@ -1428,6 +1463,7 @@ function padAt(v, x, z) {
 }
 
 function villagesNear(x, z, radius) {
+  if (PLANET) return villagesNearP(x, z, radius);
   const out = [], sv = spawnVillage();
   if (sv && Math.hypot(sv.x - x, sv.z - z) <= radius) out.push(sv);
   for (let rz = regionOf(z - radius); rz <= regionOf(z + radius); rz++)
@@ -1437,10 +1473,28 @@ function villagesNear(x, z, radius) {
     }
   return out;
 }
+// The planet: regions are walked in the caller's face frame, past an edge into its margin, each sample mapped to its canonical face's
+// region; villages are canonical records, measured with the planet's distance (x, z may be a margin address).
+function villagesNearP(x, z, radius) {
+  const out = [], seen = new Set(), a = { x, z }, step = RHALF;
+  const n = Math.ceil(2 * radius / step);
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+    const sx = Math.floor(Math.min(x + radius, x - radius + i * step)), sz = Math.floor(Math.min(z + radius, z - radius + j * step));
+    let r = pRegion(sx, sz);
+    if (!r) { const c = canonXZ(sx, sz); if (!c || c.wedge) continue; r = pRegion(c.x, c.z); if (!r) continue; }
+    const key = r[0] + "," + r[1];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const v = villageRegion(r[0], r[1]);
+    if (v && BF.planet.distance(a, v) <= radius) out.push(v);
+  }
+  return out;
+}
+const vdist = (v, x, z) => PLANET ? BF.planet.distance({ x, z }, v) : Math.hypot(v.x - x, v.z - z);
 function nearestVillage(x, z) {
   let best = null, bd = Infinity;
   for (const v of villagesNear(x, z, REGION * 1.5)) {
-    const d = Math.hypot(v.x - x, v.z - z);
+    const d = vdist(v, x, z);
     if (d < bd) { bd = d; best = v; }
   }
   return best;
@@ -1915,7 +1969,8 @@ function prep(cx, cz) {
   }
   P.cx = cx; P.cz = cz; P.ox = ox; P.oz = oz; P.maxH = maxH; P.minH = minH; P.topY = topY; P.hc = hCache[(CS / 2 + 1) * HW + CS / 2 + 1];
   // villages touching this chunk (a chunk never straddles two regions; the spawn village may lie anywhere)
-  const vils = P.vils = PLANET ? [] : [villageRegion(regionOf(ox), regionOf(oz)), spawnVillage()].filter(v => v &&
+  const pr = PLANET && pRegion(ox, oz);   // (the planet: a chunk in a margin is past an edge, where villages never reach)
+  const vils = P.vils = (PLANET ? [pr && villageRegion(pr[0], pr[1])] : [villageRegion(regionOf(ox), regionOf(oz)), spawnVillage()]).filter(v => v &&
     v.maxX + 2 >= ox && v.minX - 2 < ox + CS && v.maxZ + 2 >= oz && v.minZ - 2 < oz + CS);
   // tree-grid candidates (4x4 cells, margin M around the chunk)
   const cands = P.cands = [];
@@ -2724,6 +2779,30 @@ function sandNear(x, z, r) {
   sandCache.set(k, found);
   return found;
 }
+// House and building rectangles of the planet's villages on face f inside the face grid area { u0, v0, u1, v1 }, without placing
+// blocks (r14-12, for r14-07's house stand-ins): [{ x0, z0, x1, z1 (atlas), y (floor), h (height above it), type, village }], from the
+// same cached layouts chunk generation draws. Each region in the area is sited once (siteOK's samples), so keep areas to what is needed.
+const FOOT_H = { house: 7, house2: 7, lhouse: 8, big: 9, library: 9, church: 13, smith: 7, farm: 1, bigfarm: 1, pen: 2, hay: 3, garden: 2, coop: 4, pasture: 2, sty: 2, stable: 6 };
+function villageFootprints(f, area) {
+  const out = [];
+  if (!PLANET) return out;
+  const r0 = Math.max(0, Math.floor(area.u0 / REGION)), r1 = Math.min(Math.ceil(PN / REGION) - 1, Math.floor(area.u1 / REGION));
+  const q0 = Math.max(0, Math.floor(area.v0 / REGION)), q1 = Math.min(Math.ceil(PN / REGION) - 1, Math.floor(area.v1 / REGION));
+  const ax0 = PW * f + PN + area.u0, ax1 = PW * f + PN + area.u1, az0 = PN + area.v0, az1 = PN + area.v1;
+  for (let rz = q0; rz <= q1; rz++) for (let ru = r0; ru <= r1; ru++) {
+    const v = villageRegion(f * RF + ru, rz);
+    if (!v || v.maxX < ax0 || v.minX > ax1 || v.maxZ < az0 || v.minZ > az1) continue;
+    for (const b of v.buildings) out.push({ x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, y: b.y, h: FOOT_H[b.type] || 5, type: b.type, village: v });
+  }
+  return out;
+}
+// Whether the atlas rectangle [x0, x1] x [z0, z1] lies on one face's grid, at least m blocks from every edge (always true off the
+// planet). Builders (js/builder.js) keep their sites to it, so nothing a village builds reaches past an edge.
+function insideFace(x0, z0, x1, z1, m) {
+  if (!PLANET) return true;
+  const f = Math.floor(x0 / PW), u0 = x0 - PW * f - PN, u1 = x1 - PW * f - PN, v0 = z0 - PN, v1 = z1 - PN;
+  return f >= 0 && f < 6 && u0 >= m && v0 >= m && u1 < PN - m && v1 < PN - m;
+}
 const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: h == null ? 0.5 : h });
 
 BF.worldgen = {
@@ -2735,6 +2814,7 @@ BF.worldgen = {
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
     PLANET = GEN === 4; PG = PLANET ? BF.planetgen : null;
+    if (PLANET) { PN = BF.planet.N; PW = BF.planet.W; }
     flatSampler();
     if (PLANET) {   // the planet: one size of biome (its continents are set by the planet's size), 3D noise, js/planetgen.js's continents
       SC = 1;
@@ -2757,9 +2837,13 @@ BF.worldgen = {
   surfaceAt(x, z, tint) { climate(Math.floor(x), Math.floor(z)); if (tint) tintK(tint, 0); return C; },
   TREE_DENSITY,
   biomeAt, tintAt,
-  villagesNear: (x, z, radius) => PLANET ? [] : villagesNear(x, z, radius),   // (no villages on the planet until r14-12)
-  nearestVillage: (x, z) => PLANET ? null : nearestVillage(x, z),
-  spawnVillage: () => PLANET ? null : spawnVillage(),   // the village by spawn (village generator 9 and older; null from 10)
+  villagesNear: (x, z, radius) => villagesNear(x, z, radius),   // the planet: across face edges, canonical records, planet distance
+  nearestVillage: (x, z) => nearestVillage(x, z),
+  spawnVillage: () => PLANET ? null : spawnVillage(),
+  villageAt: (x, z, m) => villageAt(Math.floor(x), Math.floor(z), m || 0),   // the village whose box holds column (x, z) (margin m), or null
+  villageFootprints, insideFace, EDGE_KEEP,
+  _planetRegion: (x, z) => PLANET ? pRegion(x, z) : null, _planetRegionCentre: (rx, rz) => PLANET ? pRegionCentre(rx, rz) : null,
+  _villageRegion: (rx, rz) => villageRegion(rx, rz),   // the village by spawn (village generator 9 and older; null from 10)
   padAt,
   sandNear,
   isPlanet: () => PLANET,
