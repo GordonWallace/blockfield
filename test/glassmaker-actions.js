@@ -11,7 +11,7 @@ module.exports = async (pg) => {
     const I = BF.I, B = BF.B, T = BF.trades, inv = T.inv, W = BF.world, GM = BF.glassmaker;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });   // the harness planet seed: its rivers are worked out in this page already
     ok("new worlds use village generator 7", BF.state.villages >= 7, BF.state.villages);
     BF.mobs.spawning = false;
 
@@ -35,7 +35,9 @@ module.exports = async (pg) => {
     ok("builders' houses have pane windows, no glass blocks", house.some(x => x[3] === B.glass_pane) && !house.some(x => x[3] === B.glass));
 
     // ---- the sand village near spawn: a glassmaker, its kiln and a furnace beside it
-    const V = { x: -1, z: -72 };
+    const vg = BFT.village(v => v.ground === 1);
+    if (!vg) { ok("a sand village within 3 km", false); return R; }
+    const V = { x: Math.round(vg.x), z: Math.round(vg.z) };
     ok("worldgen: sand within 64 blocks of the village", BF.worldgen.sandNear(V.x, V.z, 64));
     BF.player.teleport(V.x + 0.5, BF.worldgen.heightAt(V.x, V.z) + 2, V.z + 0.5);
     for (let i = 0; i < 400 && !W.isLoaded(V.x, V.z); i++) { W.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
@@ -149,9 +151,10 @@ module.exports = async (pg) => {
       const bld = vs.find(m => m.profession === "builder") || null;
       ok("the village has a builder", !!bld);
       if (bld) {
-        const bp = BP.get("small_house", 0, 0, 0.5, null, "oak");
+        const sty = rec.style | 0;   // the village's own building style (a desert village builds in sandstone on the planet)
+        const bp = BP.get("small_house", 0, sty, 0.5, null, "oak");
         const req = Object.assign({}, bp.req); delete req[I.glass_pane];
-        bld.inv = inv.create(); for (const k in req) inv.add(bld.inv, +k, req[k] + 4); inv.add(bld.inv, BF.worldgen.palette(0).found, 24); inv.add(bld.inv, I.bread, 20);
+        bld.inv = inv.create(); for (const k in req) inv.add(bld.inv, +k, req[k] + 4); inv.add(bld.inv, BF.worldgen.palette(sty).found, 24); inv.add(bld.inv, I.bread, 20);
         const a = stock(bld.inv, bp.req, "oak");
         ok("a house lacking only panes", !a.ok && Object.keys(a.shortfall).every(k => +k === I.glass_pane), a.shortfall);
         const built = BL.builtOf(rec);

@@ -2,8 +2,9 @@
 // Unit part: trade tables and daily restock (no arrows or iron swords from nothing), starting packs, the fletcher crafts arrows and bows only
 // from what it holds (exact recipe amounts, game-time crafting), buys string / flint / sticks / feathers from villagers who hold them at
 // their own offers, the shepherd spins 1 wool into 2 string and sells it, the miner keeps flint from gravel.
-// Live part, in a real village (seed 1, paused stepping): a fletcher with emeralds and no materials buys from the shepherd (string it spun
-// itself), a miner, a forester and a stand-in poultry keeper (feathers), makes arrows and a bow at its table, and both log to BF.vlog.
+// Live part, in a real village (planet seed 123, the nearest with a sheep pen; paused stepping): a fletcher with emeralds and no
+// materials buys from the shepherd (string it spun itself), a miner, a forester and a stand-in poultry keeper
+// (feathers), makes arrows and a bow at its table, and both log to BF.vlog.
 module.exports = async (pg, out) => {
   const res = await pg.evaluate(async () => {
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
@@ -14,7 +15,7 @@ module.exports = async (pg, out) => {
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });   // the harness planet seed: its rivers are worked out in this page already
     BF.mobs.spawning = false;
 
     // ---- trade tables and the daily restock
@@ -109,8 +110,11 @@ module.exports = async (pg, out) => {
     T.PRODUCE.leatherworker = svProd;
     ok("... but from the same seller when it is not restocked", !!FL.buyNeed(fn));
 
-    // ---- a live village (seed 1, the shepherd-day village)
-    const V = { x: 26, z: 39 };
+    // ---- a live village: the nearest grass village with a sheep pen (a shepherd), small enough (30 at most) to have one
+    // fletcher and one shepherd: in a bigger one the other fletchers and shepherds trade in between
+    const vg = BFT.village((v, k) => v.ground === 0 && k.pen > 0 && v.pop <= 30);
+    if (!vg) { ok("a grass village of 30 or fewer with a pen within 3 km", false); return R; }
+    const V = { x: Math.round(vg.x), z: Math.round(vg.z) };
     BF.player.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);
     for (let i = 0; i < 400 && !BF.world.isLoaded(V.x, V.z); i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
     for (let i = 0; i < 300; i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
@@ -198,11 +202,12 @@ module.exports = async (pg, out) => {
       }
     }
     const logs = BF.vlog.entries(rec.key).slice(logs0).map(e => e[2]);
+    R.info.shepherd = { name: BF.vlog.nameOf(shp), prof: shp.profession, jobsite: !!shp.jobsite, sellers: [Mn, Fo, Pk].map(m => BF.vlog.nameOf(m) + " " + m.profession) };
     R.info.live = { spunAt, arrowsAt, bowAt, fl: names(Fl.inv), shep: names(shp.inv), status: [...seenStatus], dbg: { need: FL.buyNeed(Fl), short: FL.shortfall(Fl), offers: FL.offersFor(Fl, id => id === I.string).length, shep: [shp.sleeping, !!shp.tradingWith, +(shp.position.y - Fl.position.y).toFixed(1)], job: Fl.job, t: BF.sky.time }, flog: FL.LOG.map(e => e.kind + ":" + (e.got || e.made || e.item || e.why || "") + (e.from ? " from " + e.from : "")).slice(-14) };
     ok("live: the shepherd spun string at its loom", spunAt != null, { wool: c(shp, "white_wool"), string: c(shp, "string") });
     ok("live: 'spun N string' is on the village log", logs.some(t => /\(Shepherd\) spun \d+ string$/.test(t)), logs.filter(t => /Shepherd/.test(t)).slice(-3));
     ok("live: the fletcher bought string, flint, feathers and sticks", Object.values(got).every(Boolean), got);
-    ok("live: the fletcher bought string from the shepherd", logs.some(t => /\(Fletcher\) traded with .*\(Shepherd\)/.test(t)), logs.filter(t => /Fletcher/.test(t)).slice(-6));
+    ok("live: the fletcher bought string from the shepherd", logs.some(t => /\(Fletcher\) traded with .*\(Shepherd\)/.test(t)), { log: logs.filter(t => /Fletcher/.test(t)).slice(-6), shepherd: R.info.shepherd });
     ok("live: the fletcher made arrows and a bow", arrowsAt != null && bowAt != null, { arrowsAt, bowAt });
     ok("live: 'made 4 arrows' and 'made a bow' are on the village log", logs.some(t => /\(Fletcher\) made 4 arrows$/.test(t)) && logs.some(t => /\(Fletcher\) made a bow$/.test(t)), logs.filter(t => /made/.test(t)));
     ok("live: its status says what it does", [...seenStatus].some(s => /^Buying /.test(s)) && [...seenStatus].some(s => /^Making /.test(s)), [...seenStatus]);
