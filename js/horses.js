@@ -235,6 +235,9 @@ function routeAround(p, gx, gz, R) {
 function setAvoid(m, box) { if (m && m.horse) m.horse.avoid = box ? { x0: box.x0, z0: box.z0, x1: box.x1, z1: box.z1, fp: box.fp } : null; }
 
 // ---------------------------------------------------------------- AI (called from mobs.js updateMob for unridden horses)
+// On the planet, positions kept in other frames (the lead holder, a mate, the herd centre) are seen from the horse's (BF.planet.local).
+const LQ = {};
+const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
 function walkTo(m, out, x, z, speed) {
   const dx = x - m.position.x, dz = z - m.position.z, d = Math.hypot(dx, dz) || 1;
   out.x = dx / d * speed; out.z = dz / d * speed;
@@ -247,9 +250,9 @@ function ai(m, dt, out) {
   // on a lead: follow the holder, keep near the post
   if (r.lead) {
     let hx, hz;
-    if (r.lead.kind === "player") { const P = BF.player; if (!P || P.dead) { dropLead(m); return false; } hx = P.position.x; hz = P.position.z; }
-    else if (r.lead.kind === "mob") { const h = r.lead.mob; if (!live(h)) { r.lead = null; return false; } hx = h.position.x; hz = h.position.z; }
-    else { hx = r.lead.x + 0.5; hz = r.lead.z + 0.5; }
+    if (r.lead.kind === "player") { const P = BF.player; if (!P || P.dead) { dropLead(m); return false; } const q = seenXZ(p, P.position); hx = q.x; hz = q.z; }
+    else if (r.lead.kind === "mob") { const h = r.lead.mob; if (!live(h)) { r.lead = null; return false; } const q = seenXZ(p, h.position); hx = q.x; hz = q.z; }
+    else { const q = seenXZ(p, { x: r.lead.x + 0.5, z: r.lead.z + 0.5 }); hx = q.x; hz = q.z; }
     const d = Math.hypot(hx - p.x, hz - p.z), slack = r.lead.kind === "post" ? POST_R : LEAD_SLACK;
     if (d > LEAD_BREAK && r.lead.kind !== "post") { dropLead(m); return false; }
     if (d > slack) {
@@ -265,12 +268,13 @@ function ai(m, dt, out) {
     let best = null, bd = MATE_R;
     for (const o of BF.mobs.list) {
       if (o === m || o.type !== "horse" || !live(o) || !o.horse || !willing(o.horse, t) || o.horse.owner !== r.owner) continue;
-      const d = Math.hypot(o.position.x - p.x, o.position.z - p.z);
+      const q = seenXZ(p, o.position), d = Math.hypot(q.x - p.x, q.z - p.z);
       if (d < bd) { bd = d; best = o; }
     }
     if (best) {
       if (bd < MEET) { breed(m, best); return false; }
-      walkTo(m, out, best.position.x, best.position.z, 1.4);
+      const q = seenXZ(p, best.position);
+      walkTo(m, out, q.x, q.z, 1.4);
       return true;
     }
   }
@@ -294,8 +298,8 @@ function ai(m, dt, out) {
   }
   // a wild herd: stay near its drifting centre
   if (!r.tamed && r.herd && herds.has(r.herd)) {
-    const h = herds.get(r.herd), d = Math.hypot(h.cx - p.x, h.cz - p.z);
-    if (d > HERD_R) { walkTo(m, out, h.cx, h.cz, 1.3); return true; }
+    const h = herds.get(r.herd), c = seenXZ(p, { x: h.cx, z: h.cz }), d = Math.hypot(c.x - p.x, c.z - p.z);
+    if (d > HERD_R) { walkTo(m, out, c.x, c.z, 1.3); return true; }
   }
   return false;
 }
@@ -310,7 +314,8 @@ function dropLead(m) {
 function moveHerds(dt) {
   for (const h of herds.values()) {
     let n = 0, sx = 0, sz = 0;
-    for (const r of recs.values()) if (r.herd === h.id && r.mob && live(r.mob)) { n++; sx += r.mob.position.x; sz += r.mob.position.z; }
+    const hc = { x: h.cx, z: h.cz };
+    for (const r of recs.values()) if (r.herd === h.id && r.mob && live(r.mob)) { const q = seenXZ(hc, r.mob.position); n++; sx += q.x; sz += q.z; }   // (seen from the centre's frame)
     if (!n) continue;   // waiting with its horses
     h.dir += rnd(-1, 1) * 0.4 * dt / 60;   // a slowly changing heading
     const nx = h.cx - Math.sin(h.dir) * HERD_SPEED * dt, nz = h.cz - Math.cos(h.dir) * HERD_SPEED * dt;
@@ -320,6 +325,10 @@ function moveHerds(dt) {
     // never leave the members far behind
     const mx = sx / n, mz = sz / n;
     if (Math.hypot(mx - h.cx, mz - h.cz) > HERD_R * 2) { h.cx = mx; h.cz = mz; }
+    if (BF.planet && BF.planet.reframe) {   // drifted past a face edge: onto the next face, its heading turned with it
+      const c = { x: h.cx, z: h.cz }, hd = { yaw: h.dir };
+      if (BF.planet.reframe(c, -1, hd) != null) { h.cx = c.x; h.cz = c.z; h.dir = hd.yaw; }
+    }
   }
 }
 // A wild herd of 2-6 (sometimes with foals) on the grass around (x, z). Returns the herd, or null when there was no room.

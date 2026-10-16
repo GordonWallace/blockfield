@@ -385,6 +385,38 @@ const climate = (x, z) => (GEN >= 3 ? (PLANET ? climateP(x, z) : climate3(x, z))
 // frame asks for it. Outside every face square there is nothing: deep sea.
 const CCELL = {};
 const ownCell = (x, z) => { const c = BF.planet.canonCell(x, z, CCELL); return !c.off && c.x === x && c.z === z; };
+// Features across face edges (r14-11). Trees, jungle bushes and pumpkin / melon patches are laid out on grids of the face they grow
+// on, and decided there, in that face's own coordinates; a chunk near an edge also draws those of the neighbouring face within reach,
+// turned into its own frame, so a tree that straddles an edge is the same tree on both sides. A map takes the neighbour's atlas blocks
+// into this face's frame: an integer quarter turn plus offset, X = m0 x + m1 z + m2, Z = m3 x + m4 z + m5 (the exact unfold of
+// js/planet.js EDGE). edgeMaps lists the neighbours whose margin the area [x0, x1) x [z0, z1) of face f reaches into, each with the box
+// of the neighbour's own blocks that maps into the area (corner wedges excluded: open sea).
+const mapX = (m, x, z) => m[0] * x + m[1] * z + m[2], mapZ = (m, x, z) => m[3] * x + m[4] * z + m[5];
+const unmapX = (m, X, Z) => m[0] * (X - m[2]) + m[3] * (Z - m[5]), unmapZ = (m, X, Z) => m[1] * (X - m[2]) + m[4] * (Z - m[5]);
+function edgeMaps(f, x0, x1, z0, z1) {
+  const Pl = BF.planet, N = Pl.N, W = Pl.W, out = [];
+  const u0 = x0 - W * f - N, u1 = x1 - W * f - N, v0 = z0 - N, v1 = z1 - N;
+  for (let s = 0; s < 4; s++) {
+    if (!(s === 0 ? u0 < 0 : s === 1 ? u1 > N : s === 2 ? v0 < 0 : v1 > N)) continue;
+    const e = Pl.EDGE[f][s], g = e.g, A = e.A, t = e.t;
+    const T = (xg, zg, o) => {
+      const ug = xg - W * g - N + 0.5, vg = zg - N + 0.5;
+      o[0] = Math.floor(W * f + N + A[0] * ug + A[1] * vg + t[0]); o[1] = Math.floor(N + A[2] * ug + A[3] * vg + t[1]); return o;
+    };
+    const bx = W * g + N, bz = N, p = T(bx, bz, [0, 0]), px = T(bx + 1, bz, [0, 0]), pz = T(bx, bz + 1, [0, 0]);
+    const m = [px[0] - p[0], pz[0] - p[0], 0, px[1] - p[1], pz[1] - p[1], 0];
+    m[2] = p[0] - m[0] * bx - m[1] * bz; m[5] = p[1] - m[3] * bx - m[4] * bz;
+    // the part of the area past this side only (not past two sides: a corner's wedge)
+    const a0 = s < 2 ? (s === 0 ? x0 : W * f + 2 * N) : Math.max(x0, W * f + N), a1 = s < 2 ? (s === 0 ? W * f + N : x1) : Math.min(x1, W * f + 2 * N);
+    const b0 = s >= 2 ? (s === 2 ? z0 : 2 * N) : Math.max(z0, N), b1 = s >= 2 ? (s === 2 ? N : z1) : Math.min(z1, 2 * N);
+    if (a1 <= a0 || b1 <= b0) continue;
+    const xs = [unmapX(m, a0, b0), unmapX(m, a1 - 1, b1 - 1)], zs = [unmapZ(m, a0, b0), unmapZ(m, a1 - 1, b1 - 1)];
+    out.push({ g, m, a0, a1, b0, b1, gx0: Math.min(xs[0], xs[1]), gx1: Math.max(xs[0], xs[1]) + 1, gz0: Math.min(zs[0], zs[1]), gz1: Math.max(zs[0], zs[1]) + 1 });
+  }
+  return out;
+}
+// whether a mapped position lies in a map's part of the area
+const inMap = (E, X, Z) => X >= E.a0 && X < E.a1 && Z >= E.b0 && Z < E.b1;
 function climateP(x, z) {
   const c = BF.planet.canonCell(x, z, CCELL);
   if (!c.off) return climate3(c.x, c.z);
@@ -1830,8 +1862,80 @@ const TREE_EXT = [];
   TREE_EXT[JUNGLE] = 36; TREE_EXT[OLD_TAIGA] = 36; TREE_EXT[ICE_SPIKES] = 38; TREE_EXT[MANGROVE] = 16; TREE_EXT[DARK_FOREST] = 15;
 })();
 
+// What a tree-grid candidate grows (null for nothing), in the candidate's own frame: { kind, x, y, z, a, b }. Shared by chunk
+// generation and treesIn (the planet's distant stand-ins, r14-07), so both agree. Kinds and their a, b: mangrove (height, ground y),
+// cactus (extra height 0-2), ice_spike (height, radius), boulder, jungle (height, big), jungle_oak / oak / swamp_oak
+// (height), oak_nest / birch_nest (height: bee-nest trees, js/bees.js), spruce (height), mega_spruce (height), acacia (height, branch
+// bits), giant_mushroom (red), dark_oak (height), cherry (height).
+const grassy = b => !(b === OCEAN || b === FROZEN_OCEAN || b === BEACH || b === SNOWY_BEACH || b === STONY_SHORE || b === DESERT || b === BADLANDS ||
+  b === RIVER || b === PEAKS || b === STONY_PEAKS || b === SNOWY_SLOPES);
+function treeOf(cd) {
+  const { gx, gz, tx, tz, r, h, b } = cd, SEA = BF.SEA;
+  const r2 = noise.hash(gx, gz, 104), r3 = noise.hash(gx, gz, 105);
+  const T = (kind, y, a, bb) => ({ kind, x: tx, y, z: tz, a, b: bb });
+  if (b === MANGROVE) return r < TREE_DENSITY[b] && h >= SEA - 3 ? T("mangrove", Math.max(h, SEA) + 1, 4 + ((r3 * 3) | 0), h + 1) : null;
+  if (h <= cd.wl) return null;
+  if (b === DESERT || b === BADLANDS) return r < (b === DESERT ? 0.14 : 0.03) ? T("cactus", h + 1, (r2 * 3) | 0) : null;
+  if (b === ICE_SPIKES) {
+    if (r >= 0.06) return null;
+    const big = r2 < 0.12;
+    return T("ice_spike", h + 1, big ? 22 + ((r3 * 10) | 0) : 6 + ((r3 * 8) | 0), big ? 2.6 : 1.3);
+  }
+  if (b === OLD_TAIGA && r >= 0.86 && r < 0.9 && !entranceAt(tx, tz)) return T("boulder", h + 1);
+  if (r >= TREE_DENSITY[b] || !grassy(b)) return null;
+  if (h <= SEA + 1 && b !== SWAMP) return null;                 // shore sand
+  if (b === MOUNTAINS && h > (GEN >= 3 ? 1800 : 90)) return null;
+  if (entranceAt(tx, tz)) return null;
+  const ty = h + 1;
+  switch (b) {
+    case JUNGLE:
+      if (r2 < 0.18) return T("jungle", ty, 18 + ((r3 * 9) | 0), true);
+      if (r2 < 0.6) return T("jungle", ty, 9 + ((r3 * 6) | 0), false);
+      return T("jungle_oak", ty, 4 + ((r3 * 2) | 0));
+    case SPARSE_JUNGLE:
+      if (r2 < 0.45) return T("jungle", ty, 7 + ((r3 * 4) | 0), false);
+      if (r2 < 0.75) return T("jungle_oak", ty, 4 + ((r3 * 2) | 0));
+      return T("oak", ty, 4 + ((r3 * 2) | 0));
+    case TAIGA: case SNOWY_TAIGA: case SNOWY_PLAINS: case MOUNTAINS:
+      return T("spruce", ty, 6 + ((r3 * 5) | 0));
+    case OLD_TAIGA:
+      return r2 < 0.45 ? T("mega_spruce", ty, 18 + ((r3 * 10) | 0)) : T("spruce", ty, 7 + ((r3 * 5) | 0));
+    case SAVANNA: return T("acacia", ty, 5 + ((r2 * 2) | 0), (r3 * 8) | 0);
+    case DARK_FOREST:
+      if (r2 < 0.07) return T("giant_mushroom", ty, 0, r3 < 0.5);
+      if (r2 < 0.85) return T("dark_oak", ty, 6 + ((r3 * 3) | 0));
+      return T("oak", ty, 5);
+    case CHERRY: return T("cherry", ty, 4 + ((r3 * 3) | 0));
+    case MUSHROOM: return T("giant_mushroom", ty, 0, r2 < 0.5);
+    case BIRCH: case MEADOW:
+      return r2 < 0.85 || b === MEADOW ? T("birch_nest", ty, 5 + ((r3 * 3) | 0)) : T("oak_nest", ty, 4 + ((r3 * 3) | 0));
+    case FOREST: case FLOWER_FOREST:
+      return r2 < 0.3 ? T("birch_nest", ty, 5 + ((r3 * 3) | 0)) : T("oak_nest", ty, 4 + ((r3 * 3) | 0));
+    default:
+      if (b === PLAINS) return T("oak_nest", ty, 4 + ((r3 * 3) | 0));
+      return T(b === SWAMP ? "swamp_oak" : "oak", ty, 4 + ((r3 * 3) | 0));
+  }
+}
+
+// The trees (and other tree-grid features) of face f's 4 x 4 cells cu0 <= cu < cu1, cv0 <= cv < cv1 (face grid u / 4, v / 4), as treeOf
+// gives them, at atlas positions (BF.planetgen.treesIn). Exactly the features chunk generation draws, without villages' clearings
+// (r14-12 adds those).
+function treesIn(f, cu0, cv0, cu1, cv1) {
+  const Pl = BF.planet, X0 = (Pl.W * f + Pl.N) >> 2, Z0 = Pl.N >> 2, n = Pl.N >> 2, out = [];
+  cu0 = Math.max(0, cu0); cv0 = Math.max(0, cv0); cu1 = Math.min(n, cu1); cv1 = Math.min(n, cv1);
+  for (let gz = Z0 + cv0; gz < Z0 + cv1; gz++) for (let gx = X0 + cu0; gx < X0 + cu1; gx++) {
+    const r = noise.hash(gx, gz, 101);
+    if (r >= 0.92) continue;
+    const tx = gx * 4 + ((noise.hash(gx, gz, 102) * 3) | 0), tz = gz * 4 + ((noise.hash(gx, gz, 103) * 3) | 0);
+    if (villageAt(tx, tz, 3)) continue;
+    const h = climate(tx, tz), t = treeOf({ gx, gz, tx, tz, r, h, b: C.biome, wl: C.wl });
+    if (t) out.push(t);
+  }
+  return out;
+}
+
 // Per-chunk data shared by the generation passes (filled by prep): column caches, villages and the tree-grid candidates.
-const P = { cx: 0, cz: 0, ox: 0, oz: 0, maxH: 0, minH: 0, topY: 0, hc: 0, vils: [], cands: [], ext: 0, vMin: 0, vMax: 0 };
+const P = { cx: 0, cz: 0, ox: 0, oz: 0, maxH: 0, minH: 0, topY: 0, hc: 0, vils: [], cands: [], maps: [], ext: 0, vMin: 0, vMax: 0 };
 let WY0 = 0, WY1 = 0;              // the vertical window being generated: absolute y in [WY0, WY1)
 function prep(cx, cz) {
   const { CS, SEA, B } = BF;
@@ -1867,19 +1971,31 @@ function prep(cx, cz) {
   const cands = P.cands = [];
   let ext = 0;
   const x0 = ox - M, x1 = ox + CS + M, z0 = oz - M, z1 = oz + CS + M;
+  // a candidate (cell gx, gz of the grid it grows on, at tx, tz in that grid's frame; m: the map into this chunk's frame, or null)
+  const add = (gx, gz, m, E) => {
+    const r = noise.hash(gx, gz, 101);
+    if (r >= 0.92) return;
+    const tx = gx * 4 + ((noise.hash(gx, gz, 102) * 3) | 0), tz = gz * 4 + ((noise.hash(gx, gz, 103) * 3) | 0);
+    if (m) { if (!inMap(E, mapX(m, tx, tz), mapZ(m, tx, tz))) return; }
+    else if (tx < x0 || tx >= x1 || tz < z0 || tz >= z1) return;
+    if (villageAt(tx, tz, 3)) return;
+    if (PLANET && !m && !ownCell(tx, tz)) return;   // (the neighbouring face's own cells come through its map)
+    const h = climate(tx, tz), b = C.biome, wl = C.wl;
+    cands.push({ gx, gz, tx, tz, r, h, b, wl, m });
+    if (GEN >= 3 && (r < TREE_DENSITY[b] || (b === DESERT && r < 0.14) || (b === BADLANDS && r < 0.03) || (b === ICE_SPIKES && r < 0.06) ||
+        (b === OLD_TAIGA && r >= 0.86 && r < 0.9))) ext = Math.max(ext, h + TREE_EXT[b]);
+  };
   for (let gz = Math.floor(z0 / 4); gz <= Math.floor((z1 - 1) / 4); gz++)
-    for (let gx = Math.floor(x0 / 4); gx <= Math.floor((x1 - 1) / 4); gx++) {
-      const r = noise.hash(gx, gz, 101);
-      if (r >= 0.92) continue;
-      const tx = gx * 4 + ((noise.hash(gx, gz, 102) * 3) | 0), tz = gz * 4 + ((noise.hash(gx, gz, 103) * 3) | 0);
-      if (tx < x0 || tx >= x1 || tz < z0 || tz >= z1) continue;
-      if (villageAt(tx, tz, 3)) continue;
-      if (PLANET && !ownCell(tx, tz)) continue;   // (trees across face edges: r14-11; until then a tree past the edge isn't drawn here)
-      const h = climate(tx, tz), b = C.biome, wl = C.wl;
-      cands.push({ gx, gz, tx, tz, r, h, b, wl });
-      if (GEN >= 3 && (r < TREE_DENSITY[b] || (b === DESERT && r < 0.14) || (b === BADLANDS && r < 0.03) || (b === ICE_SPIKES && r < 0.06) ||
-          (b === OLD_TAIGA && r >= 0.86 && r < 0.9))) ext = Math.max(ext, h + TREE_EXT[b]);
-    }
+    for (let gx = Math.floor(x0 / 4); gx <= Math.floor((x1 - 1) / 4); gx++) add(gx, gz, null, null);
+  P.maps = PLANET ? edgeMaps(BF.planet.face(ox, oz), x0 - 3, x1 + 3, z0 - 3, z1 + 3) : [];   // (3: the jungle bushes' reach, see core)
+  for (const E of P.maps) {
+    const F0 = BF.planet.W * E.g + BF.planet.N, F1 = F0 + BF.planet.N, N0 = BF.planet.N, N1 = 2 * N0;   // the neighbour's own square
+    const Ec = { a0: Math.max(E.a0, x0), a1: Math.min(E.a1, x1), b0: Math.max(E.b0, z0), b1: Math.min(E.b1, z1) };
+    for (let gz = Math.floor(Math.max(E.gz0, N0) / 4); gz <= Math.floor((Math.min(E.gz1, N1) - 1) / 4); gz++)
+      for (let gx = Math.floor(Math.max(E.gx0, F0) / 4); gx <= Math.floor((Math.min(E.gx1, F1) - 1) / 4); gx++) add(gx, gz, E.m, Ec);
+  }
+  // one drawing order whichever face's chunk draws them (overlapping crowns: the first one drawn keeps the block), by cell
+  if (P.maps.length) cands.sort((p, q) => (p.gz - q.gz) * 4194304 + (p.gx - q.gx));
   P.ext = ext;
   // vertical extent of the villages (pads, buildings, arch)
   let vMin = 1e9, vMax = -1e9;
@@ -2271,13 +2387,16 @@ function core(cx, cz, vox, Y0, NY) {
 
   // ---- trees and large features ----
   const RENDER = BF.RENDER;
+  let cm = null;   // the map of the feature being drawn (it is drawn in its own face's frame), or null
   const putLog = (x, y, z, id) => {
+    if (cm) { const X = mapX(cm, x, z); z = mapZ(cm, x, z); x = X; }
     const lx = x - ox, lz = z - oz;
     if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
     const vi = ((y - Y0) * CS + lz) * CS + lx, cur = vox[vi];
     if (cur === AIR || cur === WATER || RENDER[cur] === 2 || RENDER[cur] === 4) vox[vi] = id;
   };
   const putLeaf = (x, y, z, id) => {
+    if (cm) { const X = mapX(cm, x, z); z = mapZ(cm, x, z); x = X; }
     const lx = x - ox, lz = z - oz;
     if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
     const vi = ((y - Y0) * CS + lz) * CS + lx;
@@ -2434,88 +2553,77 @@ function core(cx, cz, vox, Y0, NY) {
   function boulder(tx, ty, tz) {
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > (noise.hash3(tx + dx, ty + dy, tz + dz, 91) < 0.5 ? 1 : 2)) continue;
-      const lx = tx + dx - ox, lz = tz + dz - oz, y = ty + dy;
+      const lx = (cm ? mapX(cm, tx + dx, tz + dz) : tx + dx) - ox, lz = (cm ? mapZ(cm, tx + dx, tz + dz) : tz + dz) - oz, y = ty + dy;
       if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y < Y0 || y >= Y1) continue;
       vox[((y - Y0) * CS + lz) * CS + lx] = noise.hash3(tx + dx, y, tz + dz, 92) < 0.7 ? B.mossy_cobblestone : B.cobblestone;
     }
   }
-  const grassy = b => !(b === OCEAN || b === FROZEN_OCEAN || b === BEACH || b === SNOWY_BEACH || b === STONY_SHORE || b === DESERT || b === BADLANDS ||
-    b === RIVER || b === PEAKS || b === STONY_PEAKS || b === SNOWY_SLOPES);
-
   const inChunk = (x, z) => x >= ox && x < ox + CS && z >= oz && z < oz + CS;
   if (!skipTop) for (const cd of P.cands) {
-      const { gx, gz, tx, tz, r, h, b } = cd;
-      const r2 = noise.hash(gx, gz, 104), r3 = noise.hash(gx, gz, 105);
-      if (b === MANGROVE) {
-        if (r < TREE_DENSITY[b] && h >= SEA - 3) mangrove(tx, Math.max(h, SEA) + 1, tz, 4 + ((r3 * 3) | 0), h + 1);
-        continue;
-      }
-      if (h <= cd.wl) continue;
-      if (b === DESERT || b === BADLANDS) {
-        if (r < (b === DESERT ? 0.14 : 0.03) && inChunk(tx, tz)) {
-          const top = h >= Y0 && h < Y1 ? vox[((h - Y0) * CS + tz - oz) * CS + tx - ox] : 0;
-          if (top === B.sand || top === B.red_sand) for (let y = h + 1; y <= h + 1 + ((r2 * 3) | 0); y++) putLog(tx, y, tz, B.cactus);
+    const t = treeOf(cd);
+    if (!t) continue;
+    cm = cd.m;
+    const tx = t.x, ty = t.y, tz = t.z, a = t.a;
+    switch (t.kind) {
+      case "mangrove": mangrove(tx, ty, tz, a, t.b); break;
+      case "cactus":
+        if (!cm && inChunk(tx, tz)) {   // (a cactus stands on its own column: never in a neighbouring face's chunk)
+          const h = ty - 1, top = h >= Y0 && h < Y1 ? vox[((h - Y0) * CS + tz - oz) * CS + tx - ox] : 0;
+          if (top === B.sand || top === B.red_sand) for (let y = ty; y <= ty + a; y++) putLog(tx, y, tz, B.cactus);
         }
-        continue;
-      }
-      if (b === ICE_SPIKES) {
-        if (r < 0.06) { const big = r2 < 0.12; iceSpike(tx, h + 1, tz, big ? 22 + ((r3 * 10) | 0) : 6 + ((r3 * 8) | 0), big ? 2.6 : 1.3); }
-        continue;
-      }
-      if (b === OLD_TAIGA && r >= 0.86 && r < 0.9 && !entranceAt(tx, tz)) { boulder(tx, h + 1, tz); continue; }
-      if (r >= TREE_DENSITY[b] || !grassy(b)) continue;
-      if (h <= SEA + 1 && b !== SWAMP) continue;                 // shore sand
-      if (b === MOUNTAINS && h > (G3 ? 1800 : 90)) continue;
-      if (entranceAt(tx, tz)) continue;
-      const ty = h + 1;
-      switch (b) {
-        case JUNGLE:
-          if (r2 < 0.18) jungleTree(tx, ty, tz, 18 + ((r3 * 9) | 0), true);
-          else if (r2 < 0.6) jungleTree(tx, ty, tz, 9 + ((r3 * 6) | 0), false);
-          else oakTree(tx, ty, tz, B.jungle_log, B.jungle_leaves, 4 + ((r3 * 2) | 0), false);
-          break;
-        case SPARSE_JUNGLE:
-          if (r2 < 0.45) jungleTree(tx, ty, tz, 7 + ((r3 * 4) | 0), false);
-          else if (r2 < 0.75) oakTree(tx, ty, tz, B.jungle_log, B.jungle_leaves, 4 + ((r3 * 2) | 0), false);
-          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 2) | 0), false);
-          break;
-        case TAIGA: case SNOWY_TAIGA: case SNOWY_PLAINS: case MOUNTAINS:
-          spruceTree(tx, ty, tz, 6 + ((r3 * 5) | 0)); break;
-        case OLD_TAIGA:
-          if (r2 < 0.45) megaSpruce(tx, ty, tz, 18 + ((r3 * 10) | 0)); else spruceTree(tx, ty, tz, 7 + ((r3 * 5) | 0));
-          break;
-        case SAVANNA: acacia(tx, ty, tz, 5 + ((r2 * 2) | 0), (r3 * 8) | 0); break;
-        case DARK_FOREST:
-          if (r2 < 0.07) giantMushroom(tx, ty, tz, r3 < 0.5);
-          else if (r2 < 0.85) darkOak(tx, ty, tz, 6 + ((r3 * 3) | 0));
-          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 5, false);
-          break;
-        case CHERRY: cherry(tx, ty, tz, 4 + ((r3 * 3) | 0)); break;
-        case MUSHROOM: giantMushroom(tx, ty, tz, r2 < 0.5); break;
-        case BIRCH: case MEADOW:
-          if (r2 < 0.85 || b === MEADOW) nestTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
-          else nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
-          break;
-        case FOREST: case FLOWER_FOREST:
-          if (r2 < 0.3) nestTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
-          else nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
-          break;
-        default:
-          if (b === PLAINS) nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
-          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), b === SWAMP);
-      }
+        break;
+      case "ice_spike": iceSpike(tx, ty, tz, a, t.b); break;
+      case "boulder": boulder(tx, ty, tz); break;
+      case "jungle": jungleTree(tx, ty, tz, a, t.b); break;
+      case "jungle_oak": oakTree(tx, ty, tz, B.jungle_log, B.jungle_leaves, a, false); break;
+      case "oak": oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, a, false); break;
+      case "swamp_oak": oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, a, true); break;
+      case "oak_nest": nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, a, false); break;
+      case "birch_nest": nestTree(tx, ty, tz, B.birch_log, B.birch_leaves, a, false); break;
+      case "spruce": spruceTree(tx, ty, tz, a); break;
+      case "mega_spruce": megaSpruce(tx, ty, tz, a); break;
+      case "acacia": acacia(tx, ty, tz, a, t.b); break;
+      case "giant_mushroom": giantMushroom(tx, ty, tz, t.b); break;
+      case "dark_oak": darkOak(tx, ty, tz, a); break;
+      case "cherry": cherry(tx, ty, tz, a); break;
     }
+  }
+  cm = null;
   // jungle undergrowth bushes on a 3-grid
-  if (!skipTop) for (let gz = Math.floor((oz - 3) / 3); gz <= Math.floor((oz + CS + 2) / 3); gz++)
-    for (let gx = Math.floor((ox - 3) / 3); gx <= Math.floor((ox + CS + 2) / 3); gx++) {
-      if (noise.hash(gx, gz, 121) >= 0.45) continue;
-      const tx = gx * 3 + ((noise.hash(gx, gz, 122) * 3) | 0), tz = gz * 3 + ((noise.hash(gx, gz, 123) * 3) | 0);
-      if (tx < ox - 3 || tx >= ox + CS + 3 || tz < oz - 3 || tz >= oz + CS + 3) continue;
-      const h = climate(tx, tz);
-      if (C.biome !== JUNGLE || h <= SEA + 1 || entranceAt(tx, tz) || villageAt(tx, tz, 3)) continue;
-      putLog(tx, h + 1, tz, B.jungle_log);
-      disc(tx, h + 1, tz, 2, B.jungle_leaves, 0.8); disc(tx, h + 2, tz, 1, B.jungle_leaves, 0.5);
+  // (on the planet: this face's own cells, then the neighbouring faces' cells within reach, through their maps; at an edge all of them
+  // are drawn in one order by cell, whichever face's chunk draws them)
+  const bushes = [];
+  const bush = (gx, gz, E) => {
+    if (noise.hash(gx, gz, 121) >= 0.45) return;
+    const tx = gx * 3 + ((noise.hash(gx, gz, 122) * 3) | 0), tz = gz * 3 + ((noise.hash(gx, gz, 123) * 3) | 0);
+    if (E) { if (!inMap(E, mapX(E.m, tx, tz), mapZ(E.m, tx, tz))) return; }
+    else if (tx < ox - 3 || tx >= ox + CS + 3 || tz < oz - 3 || tz >= oz + CS + 3 || (PLANET && !(ownCell(gx * 3, gz * 3) && ownCell(gx * 3 + 2, gz * 3 + 2)))) return;   // (cells cut by an edge: none, on either side)
+    const h = climate(tx, tz);
+    if (C.biome !== JUNGLE || h <= SEA + 1 || entranceAt(tx, tz) || villageAt(tx, tz, 3)) return;
+    if (P.maps.length) { bushes.push({ gx, gz, tx, h, tz, m: E ? E.m : null }); return; }
+    drawBush(tx, h, tz, null);
+  };
+  const drawBush = (tx, h, tz, m) => {
+    cm = m;
+    putLog(tx, h + 1, tz, B.jungle_log);
+    disc(tx, h + 1, tz, 2, B.jungle_leaves, 0.8); disc(tx, h + 2, tz, 1, B.jungle_leaves, 0.5);
+    cm = null;
+  };
+  if (!skipTop) {
+    for (let gz = Math.floor((oz - 3) / 3); gz <= Math.floor((oz + CS + 2) / 3); gz++)
+      for (let gx = Math.floor((ox - 3) / 3); gx <= Math.floor((ox + CS + 2) / 3); gx++) bush(gx, gz, null);
+    for (const E of P.maps) {
+      const F0 = BF.planet.W * E.g + BF.planet.N, F1 = F0 + BF.planet.N, N0 = BF.planet.N, N1 = 2 * N0;
+      const Eb = { m: E.m, a0: Math.max(E.a0, ox - 3), a1: Math.min(E.a1, ox + CS + 3), b0: Math.max(E.b0, oz - 3), b1: Math.min(E.b1, oz + CS + 3) };
+      for (let gz = Math.floor(Math.max(E.gz0, N0) / 3); gz <= Math.floor((Math.min(E.gz1, N1) - 1) / 3); gz++)
+        for (let gx = Math.floor(Math.max(E.gx0, F0) / 3); gx <= Math.floor((Math.min(E.gx1, F1) - 1) / 3); gx++) {
+          if (gx * 3 < F0 || gx * 3 + 2 >= F1 || gz * 3 < N0 || gz * 3 + 2 >= N1) continue;   // (cells cut by the edge: the 3-grid doesn't divide N)
+          bush(gx, gz, Eb);
+        }
     }
+    bushes.sort((p, q) => (p.gz - q.gz) * 4194304 + (p.gx - q.gx));
+    for (const u of bushes) drawBush(u.tx, u.h, u.tz, u.m);
+  }
 
   // ---- ground plants (per column, chunk-local) ----
   const FLOWERS = [B.poppy, B.dandelion, B.cornflower];
@@ -2525,12 +2633,28 @@ function core(cx, cz, vox, Y0, NY) {
   const patches = [];
   for (let kind = 1; kind <= 2; kind++) {
     const CELL = kind === 1 ? 40 : 36, salt = kind === 1 ? 631 : 641, pr = kind === 1 ? 0.2 : 0.34;
+    // (on the planet: a cell cut by a face edge has no patch, and the neighbouring faces' patches within reach come through their maps)
+    const cut = (gx, gz) => PLANET && !(ownCell(gx * CELL, gz * CELL) && ownCell(gx * CELL + CELL - 1, gz * CELL + CELL - 1));
+    const patch = (gx, gz, m) => {
+      if (noise.hash(gx, gz, salt) >= pr) return;
+      const R = 3.5 + noise.hash(gx, gz, salt + 3) * 2.5;
+      let px = gx * CELL + noise.hash(gx, gz, salt + 1) * CELL, pz = gz * CELL + noise.hash(gx, gz, salt + 2) * CELL;
+      if (m) { const qx = px - 0.5, qz = pz - 0.5; px = mapX(m, qx, qz) + 0.5; pz = mapZ(m, qx, qz) + 0.5; }   // (a point, not a block)
+      patches.push(px, pz, R, kind, 0.1 + noise.hash(gx, gz, salt + 4) * 0.1);
+    };
     for (let gz = Math.floor((oz - 8) / CELL); gz <= Math.floor((oz + CS + 7) / CELL); gz++)
-      for (let gx = Math.floor((ox - 8) / CELL); gx <= Math.floor((ox + CS + 7) / CELL); gx++) {
-        if (noise.hash(gx, gz, salt) >= pr) continue;
-        const R = 3.5 + noise.hash(gx, gz, salt + 3) * 2.5;
-        patches.push(gx * CELL + noise.hash(gx, gz, salt + 1) * CELL, gz * CELL + noise.hash(gx, gz, salt + 2) * CELL, R, kind, 0.1 + noise.hash(gx, gz, salt + 4) * 0.1);
-      }
+      for (let gx = Math.floor((ox - 8) / CELL); gx <= Math.floor((ox + CS + 7) / CELL); gx++) if (!cut(gx, gz)) patch(gx, gz, null);
+    for (const E of P.maps) {
+      // the neighbour's cells whose centres can fall within 8 blocks of this chunk: its box, widened by a cell
+      const X0 = Math.max(E.a0, ox - 8), X1 = Math.min(E.a1, ox + CS + 8), Z0 = Math.max(E.b0, oz - 8), Z1 = Math.min(E.b1, oz + CS + 8);
+      if (X1 <= X0 || Z1 <= Z0) continue;
+      const xs = [unmapX(E.m, X0, Z0), unmapX(E.m, X1 - 1, Z1 - 1)], zs = [unmapZ(E.m, X0, Z0), unmapZ(E.m, X1 - 1, Z1 - 1)];
+      for (let gz = Math.floor(Math.min(zs[0], zs[1]) / CELL); gz <= Math.floor(Math.max(zs[0], zs[1]) / CELL); gz++)
+        for (let gx = Math.floor(Math.min(xs[0], xs[1]) / CELL); gx <= Math.floor(Math.max(xs[0], xs[1]) / CELL); gx++) {
+          if (BF.planet.face(gx * CELL, gz * CELL) !== E.g || cut(gx, gz)) continue;
+          patch(gx, gz, E.m);
+        }
+    }
   }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
     const hi = (z + 1) * HW + x + 1, h = hCache[hi];
@@ -2713,6 +2837,7 @@ BF.worldgen = {
   padAt,
   sandNear,
   isPlanet: () => PLANET,
+  treesIn,
   bandAt: (x, z) => (climate(Math.floor(x), Math.floor(z)), C.tb),   // climate band of a column (0 coldest .. 4 hottest), after altitude
   NAMES,
   recordBuilding,
