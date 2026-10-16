@@ -1,15 +1,15 @@
-// @ci integration suite=jobs soak timeout=1800 args=15,1
+// @ci integration suite=jobs soak timeout=1800 args=15,123
 // Glassmaking soak (js/glassmaker.js): a sand village with a glassmaker runs for N game days (no rendering, like test/bakechain.js) and checks:
 //  - the glassmaker digs sand, smelts it into glass and makes panes or bottles; never more than a stack of sand dug in one day;
 //  - its glass came only from sand it held, dug or bought (1 glass a sand);
 //  - nothing from nothing: the daily restock never gives anyone sand, glass, panes or bottles; the village's glass (a pane is 6/16, a bottle
 //    or milk bottle is 1) never exceeds the start plus what was smelted, cowherd hire kits (30 bottles) and goods brought from other villages;
 //  - the dug spots stay walkable: air where the sand was, a solid block under it, no water in it.
-// Usage: NODE_PATH=$(npm root -g) node test/glasschain.js [days=15] [seed=1]
+// Usage: NODE_PATH=$(npm root -g) node test/glasschain.js [days=15] [seed=123]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
-const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 1);
+const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // seed 123: the planet of seed 1 has no sand village within 3 km of its spawn
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -20,14 +20,15 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 1);
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
   // the nearest sand villages
   const cands = await pg.evaluate(() => {
     window.__halt = true;
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    return BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop >= 8 && BF.worldgen.sandNear(Math.round(v.x), Math.round(v.z), 64))
-      .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 8).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
+    return BFT.villages(3000).filter(v => v && v.pop >= 8 && BF.worldgen.sandNear(Math.round(v.x), Math.round(v.z), 64)).slice(0, 8).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
   await pg.evaluate(() => {
     const WATCH = window.__WATCH = ['sand', 'glass', 'glass_pane', 'glass_bottle', 'milk_bottle'];

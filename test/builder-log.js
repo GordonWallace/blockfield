@@ -15,13 +15,15 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed + 'gen3');
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
+  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
 
   const vs = await pg.evaluate(() => {
     window.__halt = true;
     BF.player.setGameMode && BF.player.setGameMode('creative');
-    const vs = BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop && (v.buildings || []).length >= 6).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+    const vs = BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).length >= 6);
     return vs.slice(0, 8).map(v => ({ x: v.x, z: v.z, y: v.y }));
   });
   let vk = null;

@@ -2329,7 +2329,9 @@ function ores3(vox, Y0, Y1, cx, cz) {
     const sp = ORE3[q], id = B[sp[6]];
     if (id === undefined || (sp[9] === "mtn" && !mtn)) continue;
     if (sp[0] === 219 && mtn) continue;
-    const ds = sp[7] !== undefined ? B[sp[7]] : undefined, size = sp[2];
+    // (on the planet gravel also runs through deepslate, as in Minecraft: a village near sea level digs its shaft in deepslate, and its miner
+    // finds the gravel it sifts for the fletcher's flint there)
+    const ds = sp[7] !== undefined ? B[sp[7]] : PLANET && sp[6] === "gravel" ? id : undefined, size = sp[2];
     let lo, hi;
     if (sp[3] === "d") { lo = Math.max(MINY + 5, hc - sp[5]); hi = hc - sp[4]; } else { lo = sp[4]; hi = sp[5]; }
     const curve = sp[8] ? ORE_CURVE[sp[8]] : null;
