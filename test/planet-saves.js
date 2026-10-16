@@ -214,6 +214,20 @@ module.exports = async (pg, out) => {
   check(fb.respawn, "with no spawn point, respawning goes to the world spawn");
   check(fb.margin, "a saved position in a margin that shows a face is kept");
 
+  // ---- switching worlds: the drawing's ground height (view.groundAt, cached per 32-block cell) is the new world's, not the old one's
+  const gh = await pg.evaluate(async () => {
+    await BF.prepareWorld(1337, 4); BF.newWorld(1337, { gen: 4 });
+    const at = { x: BF.worldSpawn.x + 3000, z: BF.worldSpawn.z + 2000 };
+    const before = BF.view.groundAt(at.x, at.z);
+    await BF.prepareWorld(42, 4); BF.newWorld(42, { gen: 4 });
+    const after = BF.view.groundAt(at.x, at.z);
+    let s = 0, n = 0;
+    for (const [dx, dz] of [[0, 0], [48, 0], [-48, 0], [0, 48], [0, -48], [34, 34], [-34, 34], [34, -34], [-34, -34]]) { s += Math.max(BF.worldgen.heightAt(Math.floor(at.x + dx), Math.floor(at.z + dz)), BF.SEA); n++; }
+    return { before, after, want: s / n };
+  });
+  console.log("groundAt " + JSON.stringify(gh));
+  check(Math.abs(gh.before - gh.want) > 1 && Math.abs(gh.after - gh.want) < 0.01, "after a new world the view's ground height is the new world's (not cached from the old one)");
+
   // ---- #seed<n> boots a planet; #seed<n>gen3 a legacy world
   const url = pg.url().replace(/#.*$/, "");
   const booted = () => pg.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById("bf-loading"), null, { timeout: 120000 }).catch(() => {}).then(() => pg.waitForTimeout(1000));   // (a planet boot works out its rivers first)

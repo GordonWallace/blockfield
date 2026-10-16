@@ -100,10 +100,11 @@ view.roundAt = function (x, z) {
 };
 
 // The smoothed ground under atlas point (x, z): the mean of the terrain at the point and 8 points 48 blocks around it, and never
-// below sea level. Cached per 32-block cell.
+// below sea level. Cached per 32-block cell of the current world (the key names the world, so a new world never reuses the old one's
+// ground).
 let gKey = null, gVal = 0;
 view.groundAt = function (x, z) {
-  const key = Math.floor(x / 32) + "," + Math.floor(z / 32);
+  const S = BF.state || {}, key = S.seed + "/" + S.gen + "/" + S.biomeScale + ":" + Math.floor(x / 32) + "," + Math.floor(z / 32);
   if (key === gKey) return gVal;
   let sum = 0, n = 0;
   const G = BF.worldgen;
