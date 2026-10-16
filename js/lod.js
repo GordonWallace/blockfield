@@ -199,6 +199,10 @@ void main() {
   float px = max(max(b.x, b.y), max(a.x, a.y)) * pxScale / d;
   float show = NEAR(d) * (1.0 - smoothstep(edge.x, edge.y, length(base.xz))) * min(1.0, px * px);
   if (b.w >= 256.0 * show) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+#ifndef BOXES
+  // a point this big belongs to a finer ring still being built (the boxes come with it): not drawn meanwhile
+  if (px > 24.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+#endif
 #ifdef BOXES
   bool up = part > 0.5;
   vec2 wd = up ? b.xy * mix(1.0, a.w / 255.0, position.y) : a.xy;
@@ -555,8 +559,10 @@ function update(budgetMs) {
     // stand-ins fade out across the outer part of the last ring that has them
     if (L === lastStand) u.edge.value.set(L.half * 0.7, L.half * 0.95);
     if (L.si) {
-      // too far to show from this height (a 10-block patch under a pixel straight down), or all among the loaded chunks: not drawn at all
-      L.si.visible = 10 * pxScale.value > above && lod.eyeHole < L.half * 0.95;
+      // too far to show from this height (a 10-block patch under a pixel straight down), all of it beyond where any is shown (its inner
+      // edge, the finer ring's disc, past 10 blocks a pixel), or all among the loaded chunks: not drawn at all
+      const inner = fine ? fine.half * (HOLE - MOVE) : 0;
+      L.si.visible = 10 * pxScale.value > Math.max(above, inner) && lod.eyeHole < L.half * 0.95;
       const s = L.si.material.uniforms;
       s.hole.value.copy(u.hole.value); s.hole2.value.copy(u.hole2.value); s.seam2.value = u.seam2.value; s.outer.value.copy(u.outer.value);
       unfoldMatrix(s.toHole.value, V.f, L.f);

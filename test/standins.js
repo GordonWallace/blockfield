@@ -24,14 +24,18 @@ module.exports = async (pg, out) => {
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
   try {
     await pg.goto(url);
-    await pg.setViewportSize({ width: 480, height: 300 });   // small: swiftshader is slow (never judge frame rate here)
+    await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow (never judge frame rate here)
     await pg.waitForTimeout(4000);
     const forest = await pg.evaluate(() => {
       BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true);
+      // Software rendering draws a forest's stand-ins (hundreds of thousands) in seconds a frame, so they are hidden while rings build
+      // and the test works (as the frame loop moves the rings on), and shown for the screenshots.
+      window.standIns = (on) => { window.__stand = on; for (const L of BF.lod.levels) if (L.si) L.si.material.visible = on; };
       window.ringsDone = async (maxS) => {
         const t0 = performance.now();
         await new Promise((r) => setTimeout(r, 400));
         for (;;) {
+          standIns(false);
           const s = BF.lod.stats();
           if (s.rings.every((r) => !r.show || (r.built && !r.building)) && s.pending === 0) return (performance.now() - t0) / 1000;
           if (performance.now() - t0 > maxS * 1000) return -1;
@@ -43,22 +47,17 @@ module.exports = async (pg, out) => {
         BF.player.teleport(a.x, g + up, a.z); BF.player.setFlying(true);
         if (pitch !== undefined) BF.player.setLook(BF.player.yaw, pitch);
       };
-      // a big forest (dark forest or forest all round)
-      const P = BF.planet, W = BF.worldgen;
-      for (let k = 0; k < 40000; k++) {
-        const f = k % 6, u = 5000 + (k * 7919) % 150000, v = 5000 + (k * 104729) % 150000;
-        let n = 0;
-        for (const [du, dv] of [[0, 0], [600, 0], [-600, 0], [0, 600], [0, -600]]) { const a = P.atlas(f, u + du, v + dv), b = W.surfaceAt(a.x, a.z).biome; if (b === 6 || b === 9 || b === 8) n++; }
-        if (n === 5) return { f, u, v };
-      }
-      return null;
+      // a big forest on seed 1337 (forest and dark forest for 600 blocks each way)
+      return { f: 3, u: 148925, v: 59675 };
     });
     console.log("forest", JSON.stringify(forest));
     for (const h of [60, 300, 1000, 3000, 10000, 40000]) {
       await pg.evaluate(({ f, u, v, h }) => goTo(f, u, v, h, h > 5000 ? -1.2 : -0.5), { ...forest, h });
       const t = await pg.evaluate(() => ringsDone(600));
-      await pg.waitForTimeout(1500);
-      await pg.screenshot({ path: `${out}-h${h}.png` });
+      await pg.evaluate(() => standIns(true));
+      await pg.waitForTimeout(500);
+      await pg.screenshot({ path: `${out}-h${h}.png`, timeout: 180000 });
+      await pg.evaluate(() => standIns(false));
       const s = await pg.evaluate(() => BF.lod.stats());
       console.log("h", h, "built in", t, "s; stand-ins", JSON.stringify(s.rings.map((r) => r.stands + (r.standsShown ? "*" : ""))), "pxScale", s.pxScale.toFixed(0));
     }
