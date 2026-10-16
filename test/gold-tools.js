@@ -47,11 +47,14 @@ module.exports = async (pg) => {
       const f = { inv: T.create(), profession: "farmer", position: P.position.clone(), farm: {}, village: R };
       f.inv[0] = { id: I.stone_hoe, count: 1 };
       let tilled = 0;
+      const jobs = [];   // what each cell offered, so a failure says why nothing was tilled
       for (let x = px; x <= px + 4 && tilled < 5; x++) {
         const t = X.cellJob(Pj, x, pz + 2);
+        jobs.push(t && t.kind ? t.kind : t);
         if (t && t.kind === "till" && X.perform(f, { task: t }, R, D)) tilled++;
       }
-      ok("a farmer's hoe wears one use per block tilled", tilled > 0 && f.inv[0] && f.inv[0].wear === tilled, { tilled, wear: f.inv[0] && f.inv[0].wear });
+      ok("a farmer's hoe wears one use per block tilled", tilled > 0 && f.inv[0] && f.inv[0].wear === tilled, tilled > 0 ? { tilled, wear: f.inv[0] && f.inv[0].wear }
+        : { tilled, jobs, at: [px, y, pz], loaded: W.isLoaded(px, pz + 2), top: W.heightAt(px, pz + 2), cur: W.getBlock(px, y, pz + 2), above: W.getBlock(px, y + 1, pz + 2), player: [P.position.x, P.position.y, P.position.z].map(Math.round) });
     }
 
     // ---- in a running village: shears and hoe wear as they are used
