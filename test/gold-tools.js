@@ -40,7 +40,15 @@ module.exports = async (pg) => {
     // ---- a farmer tilling a planned bed (js/villagelife.js performBed): one use per block tilled
     {
       const W = BF.world, VL = BF.villageLife, X = VL._test;
-      const px = Math.floor(P.position.x) + 6, pz = Math.floor(P.position.z) + 6, y = W.heightAt(px, pz);
+      const px = Math.floor(P.position.x) + 6, pz = Math.floor(P.position.z) + 6;
+      // the bed's ground loaded first: test/run.js starts this 5 s after the planet's rivers are worked out, and on a slow runner
+      // (software GL, a frame every second or more) the page's frame loop has made only the player's chunk and a couple more by then;
+      // in an unloaded chunk heightAt is -65 and setBlock does nothing, so every cell was "blocked" and nothing was tilled.
+      // Loaded as the frame loop does (around the player, who stands 6 blocks off), so the two don't fight over chunks.
+      const bedLoaded = () => [[px - 1, pz - 1], [px + 5, pz - 1], [px - 1, pz + 5], [px + 5, pz + 5]].every(([x, z]) => W.isLoaded(x, z));
+      for (let i = 0; i < 600 && !bedLoaded(); i++) { W.update(P.position.x, P.position.z, 8); await new Promise(r => setTimeout(r, 10)); }
+      ok("the bed's ground is loaded", bedLoaded(), { at: [px, pz], chunks: W.chunks.size, queue: W.queueLength });
+      const y = W.heightAt(px, pz);
       for (let x = px - 1; x <= px + 5; x++) for (let z = pz - 1; z <= pz + 5; z++) { for (let yy = y + 1; yy < y + 4; yy++) W.setBlock(x, yy, z, 0); W.setBlock(x, y, z, B.dirt); }
       const L = { x0: px, z0: pz, x1: px + 4, z1: pz + 4, y, ax: "x", ch: [] }, Pj = { id: "gt", L };
       const R = { key: "gt-test", wg: {} }, D = VL.vdata(R); D.boxes = D.boxes || []; D.cells = D.cells || []; D.projects = [Pj];
