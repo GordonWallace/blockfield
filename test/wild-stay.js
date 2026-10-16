@@ -16,7 +16,7 @@ module.exports = async (pg) => {
     const sp = M.spawn;
     const sg = M.spawnGroup;
     M.spawnGroup = function () { const n0 = M.list.length, r = sg.apply(this, arguments); for (let i = n0; i < M.list.length; i++) M.list[i].__src = "wild"; return r; };
-    M.spawn = function () { const m = sp.apply(this, arguments); if (m) { const st = new Error().stack; m.__src = m.__src || (/wildlife\.js/.test(st) ? "wild" : /embody|mobsave\.js/.test(st) ? "back" : /spawnHen|spawnSheep|spawnPig|spawnCow/.test(st) ? "kept" : "other"); if (m.__src === "other") m.__st = st.split("\n").slice(2, 6).map(l => l.trim().split(" ")[1]).join("<"); } return m; };
+    M.spawn = function () { const m = sp.apply(this, arguments); if (m) { const st = new Error().stack; m.__src = m.__src || (/wildlife\.js/.test(st) ? "wild" : /embody|mobsave\.js/.test(st) ? "back" : /spawnHen|spawnSheep|spawnPig|spawnCow/.test(st) ? "kept" : "other"); if (m.__src === "other") { const s0 = m.sheep || m.hen || m.cow || m.pig; m.__born = [+(BF.sky.day + BF.sky.time).toFixed(3), M.list.includes(m), s0 ? s0.growAt : "none"]; } if (m.__src === "other") m.__st = st.split("\n").slice(2, 6).map(l => l.trim().split(" ")[1]).join("<"); } return m; };
     const seen = new Set(M.list.filter(animal)), start = seen.size, chunks0 = new Set(W.chunks.keys());
     const ck = m => Math.floor(m.position.x / BF.CS) + "," + Math.floor(m.position.z / BF.CS);
     const grown = [], born = [];
@@ -31,7 +31,7 @@ module.exports = async (pg) => {
           if (m.__src === "kept" || m.pen || m.penVillage || m.coop || m.pasture || m.sty || m.village) continue;   // a village's kept animals (a pen or coop stocking itself, even one that strays at once) aren't wild
           const st = m.sheep || m.hen || m.cow || m.pig || m.horse;
           if (m.__src === "wild" || m.__src === "back") { if (!chunks0.has(ck(m))) late++; else back++; continue; }   // a late chunk's roll, or mobs of a chunk that unloaded and came back
-          if (st && st.growAt != null) born.push(m.type); else grown.push([m.type, Math.round(m.position.x), Math.round(m.position.z), m.__src, m.__st || ""]);
+          if (st && st.growAt != null) born.push(m.type); else grown.push([m.type, Math.round(m.position.x), Math.round(m.position.z), m.__src, m.__st || "", m.__born || null, +(BF.sky.day + BF.sky.time).toFixed(3), st ? [st.growAt, st.cd] : "no state"]);   // when it spawned and its state, to tell a mis-stamped newborn from a real spawn
         }
         await new Promise(r => setTimeout(r, 0));
       }
