@@ -122,7 +122,11 @@ module.exports = async (pg, out) => {
     await pg.mouse.up();
   };
   const st = () => pg.evaluate(() => { const p = BF.player.position, l = BF.planet.latLonAt(p.x, p.z); return { yaw: BF.player.yaw, pitch: BF.player.pitch, x: p.x, y: p.y, z: p.z, lat: l.lat, lon: l.lon, off: BF.player.offPlanet, axis: !!(BF.view.axis() && BF.view.axis().visible) }; });
-  await pg.evaluate(() => { BF.player.position.y = 15000; BF.player.setLook(0.3, -0.5); });
+  // (down from off-planet mode first: leaving it turns the view straight down on the next frame, which would undo the look set here)
+  await pg.evaluate(() => { BF.player.position.y = 15000; });
+  await pg.waitForFunction(() => !BF.player.offPlanet, null, { timeout: 30000 });
+  await pg.waitForTimeout(400);
+  await pg.evaluate(() => BF.player.setLook(0.3, -0.5));
   await pg.waitForTimeout(400);
   let a = await st(); await drag(60, 20); let b = await st();
   check(!b.off && Math.abs(b.yaw - a.yaw) > 0.05, `at 15,000 the mouse turns the view (yaw ${a.yaw.toFixed(2)} -> ${b.yaw.toFixed(2)})`);
