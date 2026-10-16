@@ -64,14 +64,6 @@ for (const t of tests) {
   if (h.soak) t.soak = true;
   if (h.timeout && !t.timeout) t.timeout = h.timeout;
 }
-// Generator 3 pins (spec r14-22): until a suite moves to the planet, its action-script tests (and those in no suite) boot the old
-// generator 3 world (ci.json "gen3": hash, suites still on it). A test's own env.BF_HASH wins. Removed with the last suite (r14-24).
-const GEN3 = manifest.gen3 || null;
-if (GEN3) for (const t of tests) {
-  if (t.kind !== 'actions' || (t.env && t.env.BF_HASH != null)) continue;
-  const ss = t.suites || [];
-  if (!ss.length || ss.every(k => GEN3.suites.includes(k))) t.env = { ...(t.env || {}), BF_HASH: GEN3.hash };
-}
 if (badSuite.length) { console.log(`FAIL unknown suite in a // @ci header: ${badSuite.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}`); process.exit(1); }
 if (tier === 'suites') {
   const names = (k, soak) => tests.filter(t => (t.suites || []).includes(k) && !t.missing && !!t.soak === soak).map(t => t.name).join(' ');
