@@ -138,9 +138,12 @@ module.exports = async (pg) => {
       ok("desert village forester spawned", !!F);
       if (F) {
         bases.forEach(b => BF.forester.fell(F, BF.forester.treeAt(b[0], b[1], b[2])));
+        // the garden is the soil the check is about: a planet desert can have other grass or dirt round the village (gen 3 deserts were all sand), so it is sanded
+        { const W = BF.world, soil = new Set([BF.B.grass, BF.B.dirt, BF.B.coarse_dirt, BF.B.podzol].filter(v => v != null));
+          for (let x = g.x0 - 16; x <= g.x1 + 16; x++) for (let z = g.z0 - 16; z <= g.z1 + 16; z++) if (!(x >= g.x0 && x <= g.x1 && z >= g.z0 && z <= g.z1) && W.isLoaded(x, z)) for (let y = g.y - 4; y <= g.y + 6; y++) if (soil.has(W.getBlock(x, y, z))) W.setBlock(x, y, z, BF.B.sand); }
         let spot = null;
         for (let k = 0; k < 20 && !spot; k++) spot = BF.forester.findSpot(F, { x: gx + 0.5, y: g.y + 1, z: gz + 0.5 });
-        ok("forester finds a planting spot in the garden after felling", !!spot && spot.x >= g.x0 && spot.x <= g.x1 && spot.z >= g.z0 && spot.z <= g.z1, spot);
+        ok("forester finds a planting spot in the garden after felling", !!spot && spot.x >= g.x0 && spot.x <= g.x1 && spot.z >= g.z0 && spot.z <= g.z1, { spot, garden: [g.x0, g.x1, g.z0, g.z1, g.y], forester: [Math.round(F.position.x), Math.round(F.position.y), Math.round(F.position.z)] });
       }
     } else ok("seed 1 has a desert village to visit", false);
 
