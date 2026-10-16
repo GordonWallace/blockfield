@@ -1,4 +1,5 @@
-// Trading caravans soak (release 1.3): two villages between 60 and 200 blocks apart, both with merchants, for many game days.
+// Trading caravans soak (release 1.3): two villages between 200 and 400 blocks apart (the closest the planet's villages come: about 250
+// apart at least; caravan range is 600), both with merchants, for many game days. Runs on the planet (spec r14-22), measured from the spawn.
 // Usage: NODE_PATH=$(npm root -g) node test/caravan-soak.js [seed=1] [days=14] [out.json] [far]
 // far (or FAR=1): a pair 450-590 blocks apart (caravan range is 600), the player visits both, then stays at the one with a merchant. The home village's prices are pushed down to make a real price gap (the natural one takes many days to grow); checked: 2 or more trips out and home, and a trade at the far village.
 // Drives the simulation directly (no rendering), like test/prices-soak.js. The player stands between the two villages, then from day AWAY
@@ -14,7 +15,7 @@ const root = path.resolve(__dirname, '..');
 const SEED = +(process.argv[2] || 1);
 const DAYS = +(process.argv[3] || 14);
 const OUT = process.argv[4] || null;
-const FAR = !!process.env.FAR || process.argv[5] === 'far', LO = +(process.env.LO || (FAR ? 450 : 60)), HI = +(process.env.HI || (FAR ? 590 : 190));
+const FAR = !!process.env.FAR || process.argv[5] === 'far', LO = +(process.env.LO || (FAR ? 450 : 200)), HI = +(process.env.HI || (FAR ? 590 : 400));
 const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
 
 (async () => {
@@ -26,15 +27,16 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript(d => { window.__DIAG = d; }, !!process.env.DIAG);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
-  await pg.waitForTimeout(3000);
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').ready(pg);
   await pg.evaluate(c => { window.__C = c; }, { LO, HI, FAR });
   const setup = await pg.evaluate(() => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    const vs = BF.worldgen.villagesNear(0, 0, 4000).filter(v => v && v.pop >= 8).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+    const vs = BFT.villages(4000).filter(v => v && v.pop >= 8);   // nearest the spawn first
     let pair = null;
     for (let i = 0; i < vs.length && !pair; i++) for (let j = i + 1; j < vs.length && !pair; j++) {
-      const d = Math.hypot(vs[i].x - vs[j].x, vs[i].z - vs[j].z);
+      const d = BF.planet.distance(vs[i], vs[j]);
       if (d >= __C.LO && d <= __C.HI) pair = [vs[i], vs[j], d];
     }
     if (!pair) return { err: 'no pair of villages ' + __C.LO + '-' + __C.HI + ' blocks apart' };
