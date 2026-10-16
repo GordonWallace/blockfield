@@ -21,13 +21,15 @@ const OUT = process.argv[4] || null;
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript(n => { window.__NEED = n; }, process.env.NEED || 'builder');
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
   const setup = await pg.evaluate(() => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
     // the nearest village with every job in NEED (default: a builder, so building progress shows)
     const need = (window.__NEED || 'builder').split(',').filter(Boolean);
-    const cands = BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 10);
+    const cands = BFT.villages(3000).filter(v => v && v.pop).slice(0, 10);
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     let v = null, key = null;
     for (const c of cands) {

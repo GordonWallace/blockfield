@@ -27,6 +27,7 @@ const RUN = 3;   // days each group of villages runs
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
+  // stays on generator 3 (spec r14-22): on the planet 1 stable hand in 4 finds no wild horse within 100 blocks (keepers 0.75 < 0.8), see the r14-22 report
   await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
   await pg.waitForTimeout(3000);
   const setup = await pg.evaluate(([DAYS, RUN]) => {

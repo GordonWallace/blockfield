@@ -1,8 +1,8 @@
 // @ci skip suite=village
 // Bridge soak (idea-030): does a generated village by a river ever get a bridge, and do its villagers walk over it?
-// Usage: NODE_PATH=$(npm root -g) node test/bridge-soak.js [seed=1] [days=6] [out.json]   Env: SCAN=1 only lists villages near rivers;
+// Usage: NODE_PATH=$(npm root -g) node test/bridge-soak.js [seed=123] [days=6] [out.json]   Env: SCAN=1 only lists villages near rivers;
 //   FORCE=1 starts with 30 crossings at that river crossing, so a bridge is offered at once and the soak shows whether villagers then use it.
-// Picks the nearest generated village (of the 10 nearest the origin) with a builder and a river crossing js/bridges.js accepts within 48 blocks
+// Picks the nearest generated village (of the 10 nearest the spawn) with a builder and a river crossing js/bridges.js accepts within 48 blocks
 // of its box, then drives the simulation directly (no rendering) like test/market-soak.js. Once per game day: crossings counted (busiest cell and
 // total, from swims and from routes that met water), the bridges planned, under way and finished, villager swims, and villager visits to a
 // finished deck (a villager whose feet are on a deck cell, sampled every 2.5 s of game time).
@@ -10,7 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
-const SEED = +(process.argv[2] || 1);
+const SEED = +(process.argv[2] || 123);   // seed 123: on the planets of seeds 1 and 1337 none of the 10 villages nearest the spawn has a river crossing
 const DAYS = +(process.argv[3] || 6);
 const OUT = process.argv[4] || null;
 
@@ -23,12 +23,14 @@ const OUT = process.argv[4] || null;
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript(f => { window.__FORCE = f; }, !!process.env.FORCE);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
   const setup = await pg.evaluate(scanOnly => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    const cands = BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 10);
+    const cands = BFT.villages(3000).filter(v => v && v.pop).slice(0, 10);
     const seen = [];
     let v = null, key = null, setupSpan = null;
     for (const c of cands) {
