@@ -10,7 +10,7 @@ module.exports = async (pg, out) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const K = BF.baker, I = BF.I, T = BF.trades, W = BF.world;
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
 
@@ -41,11 +41,11 @@ module.exports = async (pg, out) => {
     ok("block ids appended after the cowherd pack", BF.B.bakers_oven > BF.B.milk_churn && BF.B.cake > BF.B.bakers_oven && I.sugar > I.milk_bottle && I.cake_slice > I.sugar);
 
     // ---- the village
-    const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains
+    const V = BFT.village(v => v.ground === 0 && v.pop >= 15);   // the planet: the nearest grass village of 15+
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
     const plan = BF.jobs.planVillage(wv);
     ok("a village of 15+ plans one baker's oven per 15 villagers", plan.filter(j => j.prof === "baker").length === Math.floor(wv.pop / 15), [wv.pop, plan.filter(j => j.prof === "baker").length]);
-    const small = BF.worldgen.villagesNear(26, 39, 40).find(v => Math.round(v.x) === 26 && Math.round(v.z) === 39);
+    const small = BFT.village(v => v.pop < 15);
     ok("a village of fewer than 15 plans none", small && small.pop < 15 && BF.jobs.planVillage(small).every(j => j.prof !== "baker"), small && small.pop);
     BF.player.teleport(V.x + 0.5, BF.worldgen.heightAt(V.x, V.z) + 3, V.z + 0.5);
     const load = async (x, z) => { for (let i = 0; i < 400; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0 && BF.world.isLoaded(x, z)) break; } };

@@ -90,7 +90,10 @@ BF.gridJob = {
   palette(p) { PAL = p; },
   alloc(job) {
     const n = job.nx * job.ny;
-    return { id: job.id, y: new Float32Array(n), col: new Uint8Array(3 * n), can: new Uint8Array(4 * n), ok: new Uint8Array(n), dir: new Float32Array(3 * n) };
+    const out = { id: job.id, y: new Float32Array(n), col: new Uint8Array(3 * n), can: new Uint8Array(4 * n), ok: new Uint8Array(n), dir: new Float32Array(3 * n) };
+    // stand-ins (job.stand): each sample's column (ground, water level, biome) and foliage tint, kept only until stand() has run
+    if (job.stand) out.cols = { h: new Float32Array(n), wl: new Float32Array(n), bio: new Uint8Array(n), fol: new Float32Array(3 * n) };
+    return out;
   },
   rows(job, out, j0, j1) {
     const P = BF.planet, N = P.N, WG = BF.worldgen, B = BF.B, SEA = BF.SEA, w = {}, d = [0, 0, 0];
@@ -137,14 +140,171 @@ BF.gridJob = {
       }
       out.can[4 * o + 3] = Math.round(cover * 255);
       out.ok[o] = 1;
+      if (out.cols) { const K = out.cols; K.h[o] = h; K.wl[o] = wl; K.bio[o] = b; K.fol[3 * o] = t[3]; K.fol[3 * o + 1] = t[4]; K.fol[3 * o + 2] = t[5]; }
       P.dir(g, gu + 0.5, gv + 0.5, d);
       out.dir[3 * o] = d[0]; out.dir[3 * o + 1] = d[1]; out.dir[3 * o + 2] = d[2];
     }
   },
-  buffers(out) { return [out.y.buffer, out.col.buffer, out.can.buffer, out.ok.buffer, out.dir.buffer]; },
+  buffers(out) {
+    const b = [out.y.buffer, out.col.buffer, out.can.buffer, out.ok.buffer, out.dir.buffer];
+    if (out.stand) for (const k of STAND) b.push(out.stand[k].buffer);
+    return b;
+  },
+  stand,
   mesh, meshBuffers: (m) => [m.pos, m.sph, m.col, m.mpos, m.msph, m.mcol, m.can, m.idx].filter(Boolean).map((a) => a.buffer),
   topOf, CROWNS,
 };
+
+// ---- stand-ins for trees and village buildings (spec r14-07; js/lod.js draws them) ----
+// With job.stand, after its rows: one stand-in per real tree (and other tree-grid feature) and village building in the job's area, for
+// distances where chunks aren't loaded. Each is two boxes, a trunk and a crown (walls and a roof for a building), sized and coloured by
+// kind as worldgen.js draws the real thing. Each sample stands for the 4 x 4 tree cells of its own area (from its grid point on, c blocks
+// each way). A cell's tree is decided by worldgen's own treeAt: exactly (its own column's climate) in ring 0, where stand-ins sit right
+// next to the real trees; with the sample's column in place of the tree's own further out. Far rings thin them out: one cell in each
+// square of 2^m x 2^m cells (picked at random, the same one every time); the canopy colour makes up the rest (lod.js). Squares past
+// the face's edge are decided on their own face, in its cells, and mapped back through the edge's unfold.
+// job.stand: { cu, cv, anchor, gu0, gv0, m, max, exact, houses, villages } (max: none further from (cu, cv); exact: ring 0; houses:
+// buildings too; villages: trees inside villages left out). out.stand holds, per stand-in:
+//   base: its foot in face f's grid relative to (cu, cv), and its layer; sph: the same point on the sphere relative to the anchor;
+//   top, low: crown (roof) and trunk (wall) colours; a: trunk width x and z, height, crown top width (of 255, of the crown's width);
+//   b: crown width x and z, height, a random byte; c: crown bottom above the foot; bin: its sample's column and row in the ring (from
+//   gu0, gv0), so a moved ring keeps it with its sample.
+const STAND = ["base", "sph", "top", "low", "a", "b", "c", "bin"];
+// [foot offset (0.5, or 1 for a 2 x 2 trunk), trunk width, trunk height, crown bottom, crown height, crown width, crown top width
+// (share), trunk block, crown block] of tree t (worldgen.js treeOf; heights in blocks above t.y). Crown sizes are the leaves' extent.
+function shapeOf(t, B, WG) {
+  const a = t.a;
+  switch (t.kind) {
+    case "oak": case "oak_nest": return [0.5, 1, a, a - 3, 4, 5, 0.6, B.oak_log, B.oak_leaves];
+    case "swamp_oak": return [0.5, 1, a, a - 3, 4, 7, 0.45, B.oak_log, B.oak_leaves];
+    case "jungle_oak": return [0.5, 1, a, a - 3, 4, 5, 0.6, B.jungle_log, B.jungle_leaves];
+    case "birch_nest": return [0.5, 1, a, a - 3, 4, 5, 0.6, B.birch_log, B.birch_leaves];
+    case "spruce": return [0.5, 1, a, 2, a, a > 7 ? 7 : 5, 0.2, B.spruce_log, B.spruce_leaves];
+    case "mega_spruce": { const s = Math.floor(a * 0.45); return [1, 2, a, s, a + 2 - s, 10, 0.25, B.spruce_log, B.spruce_leaves]; }
+    case "jungle": return t.b ? [1, 2, a, a - 2, 4, 9, 0.45, B.jungle_log, B.jungle_leaves] : [0.5, 1, a, a - 2, 4, 7, 0.5, B.jungle_log, B.jungle_leaves];
+    case "acacia": return [0.5, 1, a, a, 2, 7, 0.7, B.acacia_log, B.acacia_leaves];
+    case "dark_oak": return [1, 2, a, a - 3, 5, 9, 0.6, B.dark_oak_log, B.dark_oak_leaves];
+    case "cherry": return [0.5, 1, a, a - 1, 5, 7, 0.7, B.cherry_log, B.cherry_leaves];
+    case "mangrove": return [0.5, 1, a + 2, a, 5, 7, 0.6, B.mangrove_log, B.mangrove_leaves];
+    case "giant_mushroom": {
+      const h = 5 + ((WG.hash(t.x, t.z, 81) * 3) | 0);
+      return t.b ? [0.5, 1, h, h - 3, 4, 5, 0.6, B.mushroom_stem, B.red_mushroom_block] : [0.5, 1, h, h, 1, 7, 1, B.mushroom_stem, B.brown_mushroom_block];
+    }
+    case "ice_spike": return [0.5, 0, 0, -2, a + 2, Math.round(2 * t.b + 1), 0.1, B.packed_ice, B.packed_ice];
+    case "cactus": return [0.5, 1, a + 1, 0, 0, 0, 1, B.cactus, B.cactus];
+    case "boulder": return [0.5, 0, 0, -1, 3, 3, 0.6, B.mossy_cobblestone, B.mossy_cobblestone];
+  }
+  return null;
+}
+const STYLE_BLOCKS = [["planks", "spruce_planks"], ["sandstone", "sandstone_bricks"], ["spruce_planks", "planks"], ["acacia_planks", "orange_terracotta"], ["spruce_planks", "dark_oak_log"]];
+// biomes with tree-grid features (trees, cacti, ice spikes, boulders)
+const FEATURES = [];
+for (const b of [PLAINS, FOREST, FLOWER_FOREST, BIRCH, DARK_FOREST, SWAMP, MANGROVE, DESERT, BADLANDS, SAVANNA, SPARSE_JUNGLE, JUNGLE, TAIGA,
+  OLD_TAIGA, SNOWY_PLAINS, ICE_SPIKES, SNOWY_TAIGA, MEADOW, CHERRY, MOUNTAINS, MUSHROOM]) FEATURES[b] = 1;
+function stand(job, out) {
+  const P = BF.planet, N = P.N, W = P.W, WG = BF.worldgen, B = BF.B, R = job.stand, c = job.cell, nx = job.nx, ny = job.ny, f = job.f;
+  const K = {}, w = {}, d = [0, 0, 0], M = 1 << R.m, BS = 4 * M, cols = out.cols, col = { h: 0, biome: 0, wl: 0 };
+  for (const k of STAND) K[k] = [];
+  const C = (x) => Math.max(0, Math.min(255, Math.round(x * 255)));
+  const rgb = (id, tintK, fol, k) => {
+    const T = PAL[tintK === -1 ? "side" : "top"][id] || PAL.top[id];
+    tmp[0] = T[0] * k; tmp[1] = T[1] * k; tmp[2] = T[2] * k;
+    if (tintK > 0 && PAL.tint[id] === 2 && fol) { tmp[0] *= fol[0]; tmp[1] *= fol[1]; tmp[2] *= fol[2]; }
+    return [C(tmp[0]), C(tmp[1]), C(tmp[2])];
+  };
+  // g: the stand-in's own face, and its foot (gu, gv) in g's grid; (x, y): the same point in f's grid; e: the map from g's grid into
+  // f's (null on f), which turns x and z widths round with a quarter turn
+  const emit = (g, gu, gv, x, y, layer, e, top, low, lx, lz, lh, taper, ux, uz, uh, ub, r, i, j) => {
+    if (e && Math.abs(e.A[0]) < 0.5) { let t = lx; lx = lz; lz = t; t = ux; ux = uz; uz = t; }
+    K.base.push(x - R.cu, layer, y - R.cv); K.bin.push(i + (job.u0 - R.gu0) / c, j + (job.v0 - R.gv0) / c);
+    P.dir(g, gu, gv, d);
+    const rr = P.R + layer - BF.SEA;
+    K.sph.push(d[0] * rr - R.anchor[0], d[1] * rr - R.anchor[1], d[2] * rr - R.anchor[2]);
+    K.top.push(top[0], top[1], top[2]); K.low.push(low[0], low[1], low[2]);
+    K.a.push(lx, lz, Math.min(255, lh), Math.round(taper * 255)); K.b.push(ux, uz, Math.min(255, uh), Math.floor(r * 255.99)); K.c.push(Math.min(255, ub));
+  };
+  const lo = c > 4 ? c / 2 : 0;   // a sample's cells start this far before its grid point (whole cells: c is 4 or a multiple of 8)
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const o = j * nx + i;
+    if (!out.ok[o]) continue;
+    const U = job.u0 + i * c, V = job.v0 + j * c;
+    if (R.max && Math.hypot(U - R.cu, V - R.cv) > R.max) continue;
+    // nothing grows in this sample's biome or its neighbours' (the tree's own column can be in a neighbour's biome)
+    let any = false;
+    for (let dj = -1; dj <= 1 && !any; dj++) for (let di = -1; di <= 1; di++) {
+      const ii = i + di, jj = j + dj, q = jj * nx + ii;
+      if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && out.ok[q] && FEATURES[cols.bio[q]]) { any = true; break; }
+    }
+    if (!any) continue;
+    col.h = cols.h[o]; col.biome = cols.bio[o]; col.wl = cols.wl[o];
+    const fol = cols.fol.subarray(3 * o, 3 * o + 3);
+    for (let qv = V - lo; qv < V - lo + c; qv += BS) for (let qu = U - lo; qu < U - lo + c; qu += BS) {
+      // the square on its own face, one cell of it picked at random, and the map from there into face f's grid
+      let g = f, ci = qu / 4, cj = qv / 4, e = null;
+      if (qu < 0 || qu >= N || qv < 0 || qv >= N) {
+        if ((qu < 0 || qu >= N) && (qv < 0 || qv >= N)) continue;
+        P.wrap(f, qu + BS / 2, qv + BS / 2, w);
+        g = w.f; ci = Math.floor(w.u / BS) * M; cj = Math.floor(w.v / BS) * M; e = P.UNFOLD[f][g];
+        if (!e) continue;
+      }
+      if (M > 1) { const h1 = WG.hash(ci * 7 + g, cj, 11), h2 = WG.hash(ci * 7 + g, cj, 12); ci += Math.floor(h1 * M); cj += Math.floor(h2 * M); }
+      const gx = ((W * g + N) >> 2) + ci, gz = (N >> 2) + cj;
+      const t = R.exact ? WG.treeAt(gx, gz) : WG.treeAt(gx, gz, col, !R.villages);
+      if (!t) continue;
+      const sh = shapeOf(t, B, WG);
+      if (!sh) continue;
+      const [off, tw, th, cb0, ch, cw, taper, log, leaf] = sh;
+      const gu = t.x - W * g - N + off, gv = t.z - N + off;
+      let x = gu, y = gv;
+      if (e) { x = e.A[0] * gu + e.A[1] * gv + e.t[0]; y = e.A[2] * gu + e.A[3] * gv + e.t[1]; }
+      // (further out, on its sample's ground: the same whichever job or ring move made it)
+      let layer = t.y, cb = cb0, trunk = th;
+      if (cb < 0) { layer += cb; trunk = 0; cb = 0; }
+      const k = 0.85 + 0.15 * WG.hash(gx, gz, 108);   // a little variety in brightness
+      emit(g, gu, gv, x, y, layer, e, rgb(leaf, 1, fol, k), rgb(log, -1, null, 0.9), tw, tw, trunk, taper, cw, cw, ch, cb, WG.hash(gx, gz, 109), i, j);
+    }
+  }
+  // village buildings: walls and a roof (fields and other low plots as a patch), from the villages' own layouts; each belongs to the sample
+  // whose area holds its middle, so it comes out once where jobs meet
+  if (R.houses && WG.villageFootprints) {
+    const u0 = job.u0 - lo, v0 = job.v0 - lo, u1 = u0 + nx * c, v1 = v0 + ny * c;
+    for (let g = 0; g < 6; g++) {
+      const e = g === f ? null : P.UNFOLD[f][g], back = g === f ? null : P.UNFOLD[g][f];
+      if (g !== f && (!e || !back)) continue;
+      // the job's area in g's grid
+      let a0 = u0, b0 = v0, a1 = u1, b1 = v1;
+      if (back) {
+        const xs = [], ys = [];
+        for (const [p, q] of [[u0, v0], [u1, v0], [u0, v1], [u1, v1]]) { xs.push(back.A[0] * p + back.A[1] * q + back.t[0]); ys.push(back.A[2] * p + back.A[3] * q + back.t[1]); }
+        a0 = Math.min(...xs); a1 = Math.max(...xs); b0 = Math.min(...ys); b1 = Math.max(...ys);
+      }
+      a0 = Math.max(0, a0); b0 = Math.max(0, b0); a1 = Math.min(N, a1); b1 = Math.min(N, b1);
+      if (a0 >= a1 || b0 >= b1) continue;
+      for (const F of WG.villageFootprints(g, { u0: a0, v0: b0, u1: a1, v1: b1 })) {
+        if (F.h < 1 || (F.h === 2 && F.type !== "garden")) continue;   // pens, pastures and sties: fences round grass
+        const gu = (F.x0 + F.x1 + 1) / 2 - W * g - N, gv = (F.z0 + F.z1 + 1) / 2 - N;
+        let x = gu, y = gv;
+        if (e) { x = e.A[0] * gu + e.A[1] * gv + e.t[0]; y = e.A[2] * gu + e.A[3] * gv + e.t[1]; }
+        const i = Math.floor((x - u0) / c), j = Math.floor((y - v0) / c);
+        if (i < 0 || i >= nx || j < 0 || j >= ny || !out.ok[j * nx + i]) continue;
+        if (R.max && Math.hypot(x - R.cu, y - R.cv) > R.max) continue;
+        const wx = F.x1 - F.x0 + 1, wz = F.z1 - F.z0 + 1, S = STYLE_BLOCKS[(F.village && F.village.style) || 0] || STYLE_BLOCKS[0];
+        const r = WG.hash(F.x0, F.z0, 110);
+        if (F.h <= 2) {   // fields and gardens: a low patch of crops
+          const crop = rgb(B.wheat, 1, null, 0.85);
+          emit(g, gu, gv, x, y, F.y, e, crop, crop, wx, wz, 1, 1, 0, 0, 0, 0, r, i, j);
+          continue;
+        }
+        // walls to two blocks under the top, then a roof overhanging them by a block, rising to a ridge
+        const wh = Math.max(2, F.h - 3);
+        emit(g, gu, gv, x, y, F.y, e, rgb(B[S[1]], 0, null, 0.9), rgb(B[S[0]], -1, null, 0.95), wx, wz, wh, 0.3, wx + 2, wz + 2, F.h - wh + 1, wh - 1, r, i, j);
+      }
+    }
+  }
+  out.stand = { base: new Float32Array(K.base), sph: new Float32Array(K.sph), top: new Uint8Array(K.top), low: new Uint8Array(K.low),
+    a: new Uint8Array(K.a), b: new Uint8Array(K.b), c: new Uint8Array(K.c), bin: new Uint16Array(K.bin) };
+  out.cols = null;
+}
 
 // ---- a ring's mesh from its samples (js/lod.js; in a worker when there are workers, so the page doesn't stall) ----
 // Slope shading of sample (i, j) of an n x n grid, measured s samples either side, in true 3D so it agrees across faces: light from
@@ -219,17 +379,17 @@ function mesh(p, raw) {
       mcol[o * 3 + k] = (mcol[a * 3 + k] + mcol[e * 3 + k]) >> 1;
     }
   }
-  let idx = null;
+  // the cells within the ring's disc, nearest the centre first (see discIndex); a mesh missing samples (beyond a cube corner) indexes
+  // the cells that have all four, then the corner bridge
+  let idx = null, counts = null;
   if (!full) {
-    const q = [];
-    for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
-      const a = j * n + i;
-      if (raw.ok[a] && raw.ok[a + 1] && raw.ok[a + n] && raw.ok[a + n + 1]) q.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
-    }
+    const d = discIndex(n, p.ext, p.disc, (a) => raw.ok[a] && raw.ok[a + 1] && raw.ok[a + n] && raw.ok[a + n + 1]);
+    counts = d.counts;
+    const q = Array.from(d.idx);
     if (p.bridge) bridge(p, raw, pos, q);
     idx = new Uint32Array(q);
   }
-  return { pos, sph, col, mpos, msph, mcol, can, idx };
+  return { pos, sph, col, mpos, msph, mcol, can, idx, counts };
 }
 // The coarsest ring has no coarser ring to fill the strip along its corner wedge (see js/lod.js), so it closes the wedge itself: the
 // samples along one side of the wedge are joined to those the same distance along the other side, which are neighbours on the sphere,
@@ -254,17 +414,30 @@ function bridge(p, raw, pos, q) {
     }
   }
 }
-// The index of a full n x n grid (counter-clockwise seen from above: x = u, y up, z = v)
-function fullIndex(n) {
-  const q = new Uint32Array((n - 1) * (n - 1) * 6);
-  let k = 0;
+// The index of the cells of an n x n grid (counter-clockwise seen from above: x = u, y up, z = v) that reach within r cells of its centre
+// point (c, c), and pass has(a) if given (a: the cell's first corner). Sorted by how far the cell's furthest corner is from the centre, so
+// counts[k], the number of cells lying wholly within k cells of it, is where a draw that skips the middle out to k starts (js/lod.js).
+function discIndex(n, c, r, has) {
+  const R = r + 1, K = R + 2, band = new Uint32Array(K + 1), at = new Int32Array((n - 1) * (n - 1)).fill(-1);
   for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
-    const a = j * n + i;
-    q[k++] = a; q[k++] = a + n; q[k++] = a + 1; q[k++] = a + 1; q[k++] = a + n; q[k++] = a + n + 1;
+    const x0 = i - c, x1 = i + 1 - c, z0 = j - c, z1 = j + 1 - c;
+    const near = Math.hypot(x0 > 0 ? x0 : x1 < 0 ? x1 : 0, z0 > 0 ? z0 : z1 < 0 ? z1 : 0);
+    if (near > R || (has && !has(j * n + i))) continue;
+    const k = Math.min(K, Math.ceil(Math.hypot(Math.max(-x0, x1), Math.max(-z0, z1))));
+    at[j * (n - 1) + i] = k; band[k]++;
   }
-  return q;
+  const counts = new Uint32Array(K + 2);
+  for (let k = 0; k <= K; k++) counts[k + 1] = counts[k] + band[k];
+  const next = counts.slice(0, K + 1), q = new Uint32Array(counts[K + 1] * 6);
+  for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+    const k = at[j * (n - 1) + i];
+    if (k < 0) continue;
+    const a = j * n + i, o = 6 * next[k]++;
+    q[o] = a; q[o + 1] = a + n; q[o + 2] = a + 1; q[o + 3] = a + 1; q[o + 4] = a + n; q[o + 5] = a + n + 1;
+  }
+  return { idx: q, counts: counts.subarray(1) };
 }
-BF.gridJob.fullIndex = fullIndex;
+BF.gridJob.discIndex = discIndex;
 
 if (typeof document === "undefined") return;   // in a worker: only the sampling above is needed
 
@@ -338,7 +511,7 @@ S.tick = function (budgetMs) {
     }
     const it = S.running;
     BF.gridJob.rows(it.job, it.out, it.row, it.row + 1);
-    if (++it.row >= it.job.ny) { S.running = null; it.done(it.out); }
+    if (++it.row >= it.job.ny) { if (it.job.stand) BF.gridJob.stand(it.job, it.out); S.running = null; it.done(it.out); }
   }
 };
 })();

@@ -18,9 +18,10 @@ module.exports = async (pg, out) => {
 
     // ---- generated villages: about 60% of the grass villages of 10+ (deterministic per village), none in a world saved with generator 8
     let elig = 0, withPF = 0, wrong = [], again = 0;
-    for (const seed of [11, 12, 13, 14, 15, 16, 17, 18]) {
-      BF.newWorld(seed, { gen: 3, villages: 9 });
-      for (const v of BF.worldgen.villagesNear(0, 0, 2400)) {
+    { const seed = 123;   // the planet: one seed, its villages within 10 km of spawn, across face edges (other seeds would each solve their rivers)
+      BF.newWorld(seed, { gen: 4, villages: 9 });
+      const S = BFT.spawn();
+      for (const v of BF.worldgen.villagesNear(S.x, S.z, 10000)) {
         const pf = rosterOf(v).some(sl => sl.prof === "pig_farmer"), st = v.buildings.some(b => b.type === "sty");
         if (v.ground === 0 && v.pop >= 10) { elig++; if (pf) withPF++; }
         else if (pf || st) wrong.push([seed, v.x, v.z, v.pop, v.ground]);
@@ -32,15 +33,15 @@ module.exports = async (pg, out) => {
     ok("generator 9: a pig farmer and a sty only in grass villages of 10+, one each", wrong.length === 0, wrong.slice(0, 4));
     ok("in about 60% of them", elig >= 40 && Math.abs(withPF / elig - 0.6) < 0.12, { withPF, elig, share: +(withPF / elig).toFixed(2) });
     ok("the same village always gets the same answer", again === 0);
-    BF.newWorld(1, { gen: 3, villages: 8 });
+    BF.newWorld(123, { gen: 4, villages: 8 });
     let old = 0;
-    for (const v of BF.worldgen.villagesNear(0, 0, 2400)) old += rosterOf(v).filter(sl => sl.prof === "pig_farmer").length + v.buildings.filter(b => b.type === "sty").length;
+    for (const v of BFT.villages(2400)) old += rosterOf(v).filter(sl => sl.prof === "pig_farmer").length + v.buildings.filter(b => b.type === "sty").length;
     ok("worlds saved with generator 8 get no pig farmers or sties", old === 0, old);
 
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 9", BF.state.villages === 9, BF.state.villages);
     BF.mobs.spawning = false;
-    const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains with a pasture and a sty
+    const V = BFT.village((v, k) => k.sty && k.pasture && v.ground === 0 && v.pop >= 10);   // the planet: the nearest grass village of 10+ with a pasture and a sty
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
     const sb = wv && wv.buildings.find(b => b.type === "sty");
     ok("the village layout has a sty (grass, 10+ villagers)", !!sb && wv.ground === 0 && wv.pop >= 10, wv && [wv.pop, wv.ground]);
@@ -381,7 +382,7 @@ module.exports = async (pg, out) => {
 
     // ---- a builder's sty in a village of 12+ with no pig farmer, and an unemployed villager takes the job
     {
-      const V2 = { x: -317, z: -35 }, key2 = V2.x + "," + V2.z;   // seed 1: a grass village of 24 with builders, no pig farmer, no sty
+      const V2 = BFT.village((v, k) => !k.sty && v.ground === 0 && v.pop >= 12), key2 = V2.x + "," + V2.z;   // the planet: the nearest grass village of 12+ with no sty (so no pig farmer)
       BF.player.teleport(V2.x + 0.5, BF.worldgen.heightAt(V2.x, V2.z) + 3, V2.z + 0.5);
       await load(V2.x, V2.z);
       BF.sky.setTime(0.05);
@@ -396,6 +397,8 @@ module.exports = async (pg, out) => {
       // a villager out of work (its jobsite gone, its old trade forgotten), to take the trough
       const jl = v2().find(m => ["fisherman", "mason", "fletcher", "leatherworker", "librarian"].includes(m.profession) && m.jobsite);
       if (jl) { const j = jl.jobsite, id = BF.world.getBlock(j.x, j.y, j.z); BF.world.setBlock(j.x, j.y, j.z, 0); BF.emit("blockBroken", j.x, j.y, j.z, id); BF.jobs.release(jl); jl.jobMem = null; jl.xp = 0; }
+      // a bigger village has other free jobsites too: gone, so the trough is the one it can take
+      if (jl) for (const s of BF.jobs.unclaimed(jl, null, jl)) { const id = BF.world.getBlock(s.x, s.y, s.z); BF.world.setBlock(s.x, s.y, s.z, 0); BF.emit("blockBroken", s.x, s.y, s.z, id); }
       ok("and an unemployed villager", !!jl && jl.profession === "unemployed", jl && jl.profession);
       for (const m of v2()) if (m.profession === "builder" && m !== bm && m.bs) m.bs.cool = 1e9;   // the other builder stays out of the way
       T.inv.add(bm.inv, I.bread, 12);

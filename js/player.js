@@ -25,6 +25,7 @@ let lockWorked = false;       // pointer lock succeeded at least once
 let dragMode = false;         // fallback look mode (no pointer lock)
 let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
+let wasHigh = false;          // above the chunk ceiling last frame
 let onGround = false, inWater = false, headInWater = false;
 let flying = false, sprinting = false, sneaking = false, turbo = false;
 let lastSpaceTap = 0, lastWTap = 0, wTaps = 0;
@@ -44,7 +45,9 @@ let target = null;            // current block raycast hit
 // Shift held when it was boarded must be let go first.
 let vehicle = null, rideShift = false;
 let offPlanet = false;        // the planet, above layer 20,000: the camera faces the planet and dragging turns it (js/view.js)
-const VIEW_OPTS = [4, 6, 8, 10, 12, 16, 20, 24];
+// Render distances (chunks). The planet keeps block data only near the player and far chunks as meshes (js/world.js, spec r14-07), so the
+// largest is the default; automated browsers (the tests) start at world.js's 6, so their timings don't change.
+const VIEW_OPTS = [4, 6, 8, 10, 12, 16, 20, 24, 28, 32];
 const store = {
   get(k) { try { return localStorage.getItem("blockfield." + k); } catch (_) { return null; } },
   set(k, v) { try { localStorage.setItem("blockfield." + k, String(v)); } catch (_) {} },
@@ -2055,7 +2058,9 @@ P.init = function () {
   bindInput();
   showScreen("start");
   const vd = parseInt(store.get("viewDist"), 10);
-  if (VIEW_OPTS.includes(vd) && vd !== BF.world.viewDist) setViewDist(vd, false); else updateFar();
+  if (VIEW_OPTS.includes(vd)) { if (vd !== BF.world.viewDist) setViewDist(vd, false); else updateFar(); }
+  else if (!navigator.webdriver) setViewDist(VIEW_OPTS[VIEW_OPTS.length - 1], false);
+  else updateFar();
   updateModeUI();
   emit("gameModeChanged", gameMode);
   // breaking either half of a door or bed removes the other half (the broken half dropped the item)
@@ -2163,10 +2168,14 @@ P.update = function (dt) {
   if (hurtCd > 0) hurtCd -= dt;
   if (attackCd > 0) attackCd -= dt;
 
+  // coming down through the chunk ceiling (js/world.js) onto chunks not loaded yet, which read as solid again: hold still until they are
+  if (wasHigh && !BF.world.high && !BF.world.isLoaded(pos.x, pos.z)) waitingForChunk = true;
+  wasHigh = BF.world.high;
   // spawn: wait until the ground under the player is loaded, then lift out of terrain if needed
   if (waitingForChunk) {
     const W = BF.world;
-    if (W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
+    // (above the chunk ceiling no chunks load, and there is nothing to wait for: js/world.js)
+    if (W.high || W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
         W.isLoaded(pos.x + 1, pos.z - 1) && W.isLoaded(pos.x - 1, pos.z + 1)) {
       waitingForChunk = false;
       const bed = !vehicle && bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);

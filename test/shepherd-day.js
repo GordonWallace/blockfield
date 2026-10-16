@@ -6,9 +6,9 @@ module.exports = async (pg, out) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
-    const V = { x: 26, z: 39 };   // seed 1: a village whose shepherd has its loom from the start (with village generator 2 the spawn village's shepherds start unemployed)
+    const V = BFT.village((v, k) => k.pen);   // the planet: the village nearest to spawn with a pen, whose shepherd has its loom from the start
     BF.player.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);
     for (let i = 0; i < 400 && !BF.world.isLoaded(V.x, V.z); i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
     for (let i = 0; i < 300; i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
