@@ -133,6 +133,7 @@ module.exports = async (pg, out) => {
       goTo(4, N - 1500, N / 2, 30000);
       BF.player.setLook(-Math.PI / 2, -0.9);   // towards +u
       await new Promise((r) => setTimeout(r, 600));
+      await ringsDone();   // (the rings rebuilt after the hop here, so none swaps in during the steps: a slow worker on CI made a 17-point jump)
       BF.state.paused = true;
       const d = [], faces = new Set();
       let prev = null;
