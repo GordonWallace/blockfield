@@ -42,6 +42,7 @@ let renderDirty = true;
 // The plane of a sign: same block id (wood, kind, facing); neighbours to the viewer's left/right and above/below.
 // A connected run is split into rectangles (<= MAXW x MAXH) greedily: the largest area first, ties to the lowest row,
 // then the leftmost column, then the wider one. The anchor of a group is its bottom-left sign as seen from the front.
+const sameFace = (a, b) => { const k = W().canonXZ(b[0], b[2]); return !!k && k[0] === b[0] && k[1] === b[2] && BF.planet.face(a[0], a[2]) === BF.planet.face(b[0], b[2]); };
 function component(get, x, y, z) {
   const id = get(x, y, z), s = signOf(id);
   if (!s) return null;
@@ -55,6 +56,7 @@ function component(get, x, y, z) {
       if (vis.has(k)) continue;
       vis.add(k);
       if (n[1] < BF.MIN_Y || n[1] >= BF.H) continue;
+      if (W().isPlanet && W().isPlanet() && !sameFace(c, n)) continue;   // boards don't merge across a face edge (their cells and text are keyed canonically)
       if (get(n[0], n[1], n[2]) === id) q.push(n);
     }
   }

@@ -1,7 +1,7 @@
 // Block light: integer 0..15 per voxel (chunk.light[sectionIndex - chunk.lo] = Uint8Array(4096) or undefined = all dark, same
 // in-section index as the block sections, see world.js), flood-filled from
 // emitting blocks (block def field `emit` 0..15, table BF.EMIT) and attenuating 1 per step through non-opaque blocks.
-// Works across chunk borders (only through loaded chunks; a chunk that loads later pulls light in from its loaded
+// Works across chunk borders and, on the planet, face edges (only through loaded chunks; a chunk that loads later pulls light in from its loaded
 // neighbours' border cells). Light is derived data: it is never saved and is recomputed whenever a chunk is created.
 // Loaded after world.js; world.js calls the hooks below (createChunk -> onChunkCreated, setBlock -> onSet) and the
 // mesher reads chunk.light of the 3x3 chunk neighbourhood.
@@ -39,6 +39,20 @@ function chunkOf(x, z) {
   return cC;
 }
 const reset = () => { cCx = cCz = 1e9; cC = null; ah = at = rh = rt = 0; };
+// A step from canonical cell (x, z) to (nx, nz): the chunk it reaches, with the canonical cell in NX / NZ. On the planet a step out of
+// a chunk at a face edge lands in the margin, which is resolved to the cell on the next face (null in a corner wedge), so the fills
+// carry on across face edges and every queued cell is canonical.
+let NX = 0, NZ = 0;
+const NCELL = {};
+function stepTo(x, z, nx, nz) {
+  NX = nx; NZ = nz;
+  if (((nx >> 4) === (x >> 4) && (nz >> 4) === (z >> 4)) || !world().isPlanet()) return chunkOf(nx, nz);
+  const P = BF.planet, N = P.N, f = Math.floor(nx / P.W), u = nx - P.W * f - N, v = nz - N;
+  if (u >= 0 && u < N && v >= 0 && v < N) return chunkOf(nx, nz);
+  const cl = world().cell(nx, nz, NCELL);
+  NX = cl.x; NZ = cl.z;
+  return cl.c;
+}
 const idx = (x, y, z) => ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);   // index inside a section
 // light value / writer on chunk c at absolute y (y must be inside c's loaded band); sections without light arrays read 0
 function lget(c, x, y, z) { const s = c.light[(y >> 4) - c.lo]; return s ? s[idx(x, y, z)] : 0; }
@@ -67,7 +81,7 @@ function flush() {
     if (b) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dz) continue;
       if (dx === -1 && !(b & 1) || dx === 1 && !(b & 2) || dz === -1 && !(b & 4) || dz === 1 && !(b & 8)) continue;
-      const n = W.chunks.get((c.cx + dx) + "," + (c.cz + dz));
+      const n = W.chunkC(c.cx + dx, c.cz + dz);   // (across a face edge on the planet)
       if (n) W._dirty.add(n.key);
     }
   }
@@ -84,8 +98,7 @@ function propagate() {
     const L = lget(c, x, y, z);
     if (L <= 1) continue;
     for (let d = 0; d < 6; d++) {
-      const nx = x + DX[d], ny = y + DY[d], nz = z + DZ[d];
-      const nc = chunkOf(nx, nz);
+      const ny = y + DY[d], nc = stepTo(x, z, x + DX[d], z + DZ[d]), nx = NX, nz = NZ;
       if (!nc) continue;
       // above a chunk's loaded band is all air: make room so light can spread there (a tall build next door)
       if (ny >= nc.y1 && ny < BF.H && nc.light) world().ensureRange(nx, nz, ny, ny);
@@ -109,8 +122,7 @@ function removeFrom(x, y, z, v) {
   while (rh < rt) {
     const px = rx[rh], py = ry[rh], pz = rz[rh], pv = rv[rh]; rh++;
     for (let d = 0; d < 6; d++) {
-      const nx = px + DX[d], ny = py + DY[d], nz = pz + DZ[d];
-      const nc = chunkOf(nx, nz);
+      const ny = py + DY[d], nc = stepTo(px, pz, px + DX[d], pz + DZ[d]), nx = NX, nz = NZ;
       if (!nc || !inBand(nc, ny)) continue;
       const n = lget(nc, nx, ny, nz);
       if (!n) continue;
@@ -136,18 +148,17 @@ light.onChunkCreated = function (c) {
   const W = world();
   c.light = new Array(c.hi - c.lo);
   seedEmitters(c);
-  // light already present in loaded neighbours flows into this chunk through the shared border
-  for (let d = 0; d < 4; d++) {
-    const dx = d === 0 ? -1 : d === 1 ? 1 : 0, dz = d === 2 ? -1 : d === 3 ? 1 : 0;
-    const n = W.chunks.get((c.cx + dx) + "," + (c.cz + dz));
-    if (!n || !n.light) continue;
+  // light already present in loaded neighbours flows into this chunk through the shared border (column by column: across a face
+  // edge the neighbour is turned)
+  const ox = c.cx * CS, oz = c.cz * CS;
+  for (let d = 0; d < 4; d++) for (let t = 0; t < CS; t++) {
+    const cl = W.cell(ox + (d === 0 ? -1 : d === 1 ? CS : t), oz + (d === 2 ? -1 : d === 3 ? CS : t), NCELL), n = cl.c;
+    if (!n || !n.light || n === c) continue;
+    const bx = cl.x, bz = cl.z, li = (cl.lz << 4) | cl.lx;
     for (let si = 0; si < n.light.length; si++) {
       const ls = n.light[si];
       if (!ls) continue;
-      for (let t = 0; t < CS; t++) {
-        const lx = dx === -1 ? CS - 1 : dx === 1 ? 0 : t, lz = dz === -1 ? CS - 1 : dz === 1 ? 0 : t;
-        for (let ly = 0; ly < 16; ly++) if (ls[(ly << 8) | (lz << 4) | lx] > 1) pushAdd(n.cx * CS + lx, (n.lo + si) * 16 + ly, n.cz * CS + lz);
-      }
+      for (let ly = 0; ly < 16; ly++) if (ls[(ly << 8) | li] > 1) pushAdd(bx, (n.lo + si) * 16 + ly, bz);
     }
   }
   if (at > 0) { propagate(); flush(); }
@@ -205,9 +216,8 @@ light.onSet = function (x, y, z, oldId, newId) {
   if (!on) {                                           // otherwise light may flow in from the neighbours
     let m = 0;
     for (let d = 0; d < 6; d++) {
-      const nx = x + DX[d], ny = y + DY[d], nz = z + DZ[d];
-      const nc = chunkOf(nx, nz);
-      if (nc && nc.light && inBand(nc, ny)) { const v = lget(nc, nx, ny, nz); if (v > m) m = v; }
+      const ny = y + DY[d], nc = stepTo(x, z, x + DX[d], z + DZ[d]);
+      if (nc && nc.light && inBand(nc, ny)) { const v = lget(nc, NX, ny, NZ); if (v > m) m = v; }
     }
     if (m - 1 > nl) nl = m - 1;
   }
@@ -220,7 +230,7 @@ const CELL = {};
 // Light level 0..15 at integer world coords (0 in unloaded chunks / out of range).
 light.get = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  const cl = world().cell(x, z, CELL), c = cl.c;   // (through a face edge on the planet; the flood fills themselves stop at face edges for now)
+  const cl = world().cell(x, z, CELL), c = cl.c;   // (through a face edge on the planet)
   if (!c || !c.light || y < c.y0 || y >= c.y1) return 0;
   const s = c.light[(y >> 4) - c.lo];
   return s ? s[idx(cl.lx, y, cl.lz)] : 0;
