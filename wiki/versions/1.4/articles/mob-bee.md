@@ -27,3 +27,7 @@ A bee follows any player or beekeeper holding a flower within 8 blocks (up to te
 ### Bees and villagers
 
 The beekeeper picks and replants flowers, harvests at dawn and dusk, builds new hives, leads bees from wild nests within 64 blocks to its hives, and sells honey, honeycomb and candles.
+
+### On the planet
+
+Bees work across a face edge like anywhere else. A home near an edge counts flowers on the next face, its bees fly over to them and back, crops past the edge get the faster growth, and bees led or rehomed to a home on the other side follow it there.
