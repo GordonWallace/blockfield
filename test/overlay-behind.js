@@ -2,7 +2,7 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => {
     BF.player.start();
-    const v = BF.worldgen.nearestVillage(0, 0);
+    const v = BFT.village();   // the nearest village to spawn
     BF.player.spawn(v.x + 0.5, (v.y || BF.world.heightAt(v.x, v.z)) + 3, v.z + 0.5);
   });
   await pg.keyboard.press('F3');

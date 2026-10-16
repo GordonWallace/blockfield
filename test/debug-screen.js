@@ -21,10 +21,7 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  // no distant terrain (js/lod.js), as on the file:// test pages: without workers it stays off. Served over http it would draw seven
-  // rings in software rendering, which slows every frame of the game page to a crawl here
-  await game.addInitScript(() => { window.Worker = undefined; });
-  await game.goto(`http://localhost:${GAME}/#seed1337gen4`);
+  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   // a planet boot works out its rivers first (r14-10): wait for that loading step
   await game.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById('bf-loading'), null, { timeout: 120000 }).catch(() => {});
   await game.waitForTimeout(5000);
