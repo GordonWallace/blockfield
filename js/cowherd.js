@@ -281,7 +281,7 @@ function tickPastures() {
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
     if (!rec.wg && !(rec.built || []).some(e => e.type === "pasture")) continue;
-    if (Math.hypot(rec.x - pp.x, rec.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
+    if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const p of pasturesOf(rec)) {
       if (!W.isLoaded(p.fx0, p.fz0) || !W.isLoaded(p.fx1, p.fz1) || !W.isLoaded(p.fx0, p.fz1) || !W.isLoaded(p.fx1, p.fz0)) continue;
       if (!p.cows) initPasture(p);

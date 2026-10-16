@@ -8,6 +8,8 @@ Maps record the land you have walked across, and a compass points you home. Both
 
 A [[item:compass]] shows a small dial when held, with a red needle that points at the **world spawn**, relative to the way you are looking. Setting a bed does not move it: the needle still points to where the world began. It is crafted from four iron ingots around a gold ingot.
 
+On the planet the needle points the shortest way home around the planet, even from another face, so following it walks you along a great circle back to the spawn.
+
 ## Maps
 
 A map covers a square of the world and fills in as you move across it.
@@ -17,6 +19,12 @@ A map covers a square of the world and fills in as you move across it.
 3. Hold the filled map while you walk. Only the land near you is drawn, as it is loaded: the map fills in around you, not from afar. Unexplored land stays blank parchment.
 
 A white arrow shows where you are and which way you face. If you are outside the map, a smaller grey arrow clamps to the edge and still shows your heading.
+
+### North on the planet
+
+**North is toward the North Pole.** The planet is a cube whose six faces are each a flat grid of blocks, and a face's own "up the map" direction only matches north near the middle of the four faces around the equator. A map is drawn in its face's grid, so it lines up with the land as you see it around you. When the map's up is not north, a small red arrow in the top right corner of the frame points to true north.
+
+A map belongs to the face its zone is on. Near an edge it carries on over the edge, showing the next face laid out flat beside it, as the land looks when you stand there. Near the eight cube corners, the gap where three faces meet stays blank. If you walk over the edge, the map keeps filling in and your arrow stays on it.
 
 ### Sizes
 
