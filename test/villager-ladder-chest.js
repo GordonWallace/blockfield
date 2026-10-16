@@ -4,6 +4,9 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
   await require('./lib').toVillage(pg);
+  // the planet's villagers come out over a while: wait for one whose only usable chest is upstairs
+  await pg.waitForFunction(() => { const S = BF.storage; return BF.mobs.list.some(m => { if (m.type !== "villager" || m.dead || m.child || !m.inv || !S.bedHouse(m)) return false;
+    const cs = S.chestsIn(S.bedHouse(m), m.bed).filter(p => S.usable(p, S.keyOf(m))), up = cs.filter(p => p.y >= m.bed.y + 3); return up.length && up.length === cs.length; }); }, null, { timeout: 60000 }).catch(() => {});
   const step = (t0, t1, secs, k, fill) => pg.evaluate(async ([t0, t1, secs, k, fill]) => {
     const dt = 0.05, n = Math.round(secs / dt), m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
     let top = -1e9;

@@ -17,14 +17,14 @@ module.exports = async (pg) => {
   check(fit, "every village name fits a 30-character line with its distance");
   // 36 villages from the fixed test seed
   const r = await pg.evaluate(() => {
-    const G = BF.worldgen, S = BF.signs, vs = G.villagesNear(0, 0, 3600).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 36);
+    const G = BF.worldgen, S = BF.signs, vs = BFT.villages(3600).slice(0, 36), dist = BF.planet.distance;   // around the spawn, all on its face
     const errs = [];
     let posts = 0, used = 0, lines = 0;
     const inB = (x, z, b) => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1;
     for (const v of vs) {
       S.assignPosts(v);
-      const near = G.villagesNear(v.x, v.z, 800).filter(o => !(o.x === v.x && o.z === v.z)).sort((a, b) => Math.hypot(a.x - v.x, a.z - v.z) - Math.hypot(b.x - v.x, b.z - v.z)).slice(0, 4);
-      const want = near.map(o => o.name + " " + Math.round(Math.hypot(o.x - v.x, o.z - v.z) / 10) * 10);
+      const near = G.villagesNear(v.x, v.z, 800).filter(o => !(o.x === v.x && o.z === v.z)).sort((a, b) => dist(v, a) - dist(v, b)).slice(0, 4);
+      const want = near.map(o => o.name + " " + Math.round(dist(v, o) / 10) * 10);
       for (const p of v.posts || []) {
         posts++;
         for (const [x, , z] of p.cells) {
@@ -52,6 +52,8 @@ module.exports = async (pg) => {
   // in game: the nearest village's signposts stand, carry their text, and breaking one is final
   await toVillage(pg);
   await pg.waitForTimeout(3000);
+  // a signpost gets its text on the frame after its chunks load (js/signs.js tick): at the planet's low frame rates, wait for that frame
+  await pg.waitForFunction(() => ![...BF.signs._state.autoPlan.values()].some(p => p.cells.every(c => BF.world.isLoaded(c[0], c[2]))), null, { timeout: 30000 }).catch(() => {});
   const g = await pg.evaluate(() => {
     const v = BF.worldgen.nearestVillage(BF.player.position.x, BF.player.position.z), out = [];
     for (const p of (v.posts || []).filter(p => p.used)) {

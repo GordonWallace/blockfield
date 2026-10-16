@@ -5,7 +5,7 @@ const toVillage = async pg => {
   for (let i = 0; i < 30 && (await pg.evaluate(() => BF.mobs.list.filter(m => m.type === 'villager').length)) < 3; i++) await pg.waitForTimeout(2000);
 };
 module.exports = async (pg) => {
-  const id = await pg.evaluate(async () => { BF.player.start(); const m = await BF.save.create({ name: "dvj", seed: "1337", gameMode: "creative", villages: 9, gen: 3 }); return m.id; });
+  const id = await pg.evaluate(async () => { BF.player.start(); const m = await BF.save.create({ name: "dvj", seed: "123", gameMode: "creative", villages: 9, gen: 4 }); return m.id; });
   await toVillage(pg);
   const r = await pg.evaluate(() => {
     BF.mobs.spawning = false;

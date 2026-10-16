@@ -1,6 +1,7 @@
 // Tent checks: node test/run.js /tmp/tent test/tent-actions.js
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => BF.player.start());
+  // no pointer lock (drag mode): with the mouse locked, headless Chromium piles up memory during the long evaluates below
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
   const r1 = await pg.evaluate(() => {
     const W = BF.world, p = BF.player.position, res = {};
@@ -71,7 +72,9 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.47);
     BF.sky.setTime(0.2); BF.explorer.ai(A, 0.1, {});   // a new day: tonight's camping decision is still to be made
     BF.sky.setTime(0.47);
-    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) BF.explorer.ai(A, 0.1, {}); if (A.ex && A.ex.camp) break; }
+    // held on the open ground cleared above (left to walk, the planet village's houses round it can leave no room for a tent)
+    const at = A.position.clone();
+    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) { A.position.copy(at); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); } if (A.ex && A.ex.camp) break; }
     res.camp = A.ex && A.ex.camp; res.bed = A.bed && A.bed.tent; res.tentLeft = T.inv.count(A.inv, I.tent);
     window.__A = A; window.__home = A.homeBed;
     // a zombie nearby

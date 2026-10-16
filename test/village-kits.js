@@ -18,10 +18,14 @@ module.exports = async (pg) => {
     let cowherds = 0, pastureBad = [], bakers = 0, bakerBad = [], bakerShort = 0;
     let villages = 0, minPop = Infinity, core = 0, planned = 0, deserts = 0, gardens = 0, bad = [], desertV = null;
     for (const seed of [1, 2, 3, 4, 5, 6]) {
-      BF.newWorld(seed, { gen: 3, villages: 9 });
+      BF.newWorld(seed, { gen: 4, villages: 9 });
+      const o = BFT.spawn();   // sampled around the spawn, on its face
       if (seed === 1) ok("new worlds use village generator 9", BF.state.villages >= 9, BF.state.villages);
-      const seen = new Set();
-      for (let rz = -8; rz < 8; rz++) for (let rx = -8; rx < 8; rx++) for (const v of BF.worldgen.villagesNear(rx * 384, rz * 384, 200)) {
+      const seen = new Set(), P = BF.planet, N = P.N, sample = [];
+      for (let rz = -8; rz < 8; rz++) for (let rx = -8; rx < 8; rx++) sample.push(...BF.worldgen.villagesNear(o.x + rx * 384, o.z + rz * 384, 200));
+      // the spawn is temperate: desert villages (and their gardens) are looked for over all six faces
+      for (let f = 0; f < 6; f++) for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) { const a = P.atlas(f, N * (i + 0.5) / 6, N * (j + 0.5) / 6); sample.push(...BF.worldgen.villagesNear(a.x, a.z, 600).filter(v => v.style === 1)); }
+      for (const v of sample) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
         if (seen.has(key)) continue;
         seen.add(key); villages++;
@@ -61,18 +65,18 @@ module.exports = async (pg) => {
     ok("generator 9: grass villages of 10+ with a pig farmer have a sty and a feed trough, none without", pigFarmers > 5 && styBad.length === 0, { pigFarmers, bad: styBad.slice(0, 4) });
     ok("... in about 60% of the grass villages of 10+", pigOK > 10 && Math.abs(pigFarmers / pigOK - 0.6) < 0.15, { pigFarmers, of: pigOK });
     {
-      BF.newWorld(1, { gen: 3, villages: 8 });
+      BF.newWorld(1, { gen: 4, villages: 8 });
       let n7 = 0, s7 = 0;
-      for (const v of BF.worldgen.villagesNear(0, 0, 1500)) {
+      for (const v of BFT.villages(1500)) {
         n7 += BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground }).filter(sl => sl.prof === "pig_farmer").length;
         s7 += v.buildings.filter(b => b.type === "sty").length;
       }
       ok("worlds saved with generator 8 keep 8: no pig farmers or sties", n7 === 0 && s7 === 0, { n7, s7 });
     }
     {
-      BF.newWorld(1, { gen: 3, villages: 5 });
+      BF.newWorld(1, { gen: 4, villages: 5 });
       let n5 = 0;
-      for (const v of BF.worldgen.villagesNear(0, 0, 1500)) n5 += BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground }).filter(sl => sl.prof === "baker").length;
+      for (const v of BFT.villages(1500)) n5 += BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground }).filter(sl => sl.prof === "baker").length;
       ok("worlds saved with generator 5 keep 5: no bakers planned", n5 === 0, n5);
     }
     ok("every desert village has a garden", deserts > 0 && gardens === deserts, { deserts, gardens });
@@ -113,7 +117,7 @@ module.exports = async (pg) => {
 
     // ---- the desert garden, live
     if (desertV) {
-      BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+      BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
       BF.mobs.spawning = false;
       const g = desertV.g, gx = (g.x0 + g.x1) >> 1, gz = (g.z0 + g.z1) >> 1;
       BF.player.teleport(gx + 0.5, g.y + 12, gz + 0.5);
@@ -141,9 +145,9 @@ module.exports = async (pg) => {
     } else ok("seed 1 has a desert village to visit", false);
 
     // ---- a farmer with no hoe and no bucket buys both from the toolsmith
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
-    const V = BF.worldgen.nearestVillage(0, 0), vkey = Math.round(V.x) + "," + Math.round(V.z);
+    const V = BFT.village(), vkey = Math.round(V.x) + "," + Math.round(V.z);
     BF.player.teleport(V.x + 4.5, V.y + 3, V.z + 4.5);
     for (let i = 0; i < 600; i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (i > 50 && BF.world.queueLength === 0) break; }
     BF.sky.setTime(0.08);

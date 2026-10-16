@@ -32,13 +32,15 @@ module.exports = async (pg) => {
   // 2. one villager out on an errand beyond the village edge, then the player leaves
   await tp(info.x, info.z);
   await wait(k => BF.mobs.list.filter(m => m.village && m.village.key === k && m.type === "villager").length >= 4, info.key);
-  const pin = k => pg.evaluate(k => {   // a villager held out beyond the village edge until the test lets go
+  // (the planet's chunks load slowly: a villager put in a chunk that isn't loaded yet is taken off and respawns at home)
+  const outLoaded = k => wait(k => { const r = BF.mobs.villages.get(k); return !!r && BF.world.isLoaded(r.wg.maxX + 50, r.z); }, k, 60000);
+  const pin = async k => (await outLoaded(k), pg.evaluate(k => {   // a villager held out beyond the village edge until the test lets go
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
     const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
     Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
     put(); clearInterval(window.__pin); window.__pin = setInterval(put, 150);
     return BF.vlog.nameOf(m);
-  }, k);
+  }, k));
   const heldOut = (k, who) => wait(a => BF.villageSim.estimates(a.k).list.some(e => e.who === a.who && e.errand), { k, who }, 15000);   // the village sees it out on an errand
   const unpin = () => pg.evaluate(() => clearInterval(window.__pin));
   const who = await pin(info.key);
