@@ -23,7 +23,9 @@ module.exports = async (pg, out) => {
     return res;
   });
   console.log(JSON.stringify(r));
-  await pg.evaluate(() => BF.player.start());
+  // no pointer lock (the game's drag mode, js/player.js requestLock): with the mouse locked, headless Chromium piles up memory
+  // (~50 MB/s) while the long evaluates below keep the page busy, past CI's 10 GB cap on the planet (as test/explorer-far.js)
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
 
   // 1. every sapling grows into a tree, in open ground away from the village
