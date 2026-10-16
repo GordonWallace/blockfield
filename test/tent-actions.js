@@ -37,10 +37,11 @@ module.exports = async (pg, out) => {
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     // a big planet village can have a jobless ex-explorer: a new survey table would go straight to it (and is kept for it)
     for (const v of BF.mobs.list) if (v !== A && v.type === "villager" && v.jobMem && v.jobMem.prof === "explorer") v.jobMem = null;
-    BF.world.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);
+    BF.world.setBlock(tx, ty, tz, BF.B.survey_table);
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
     res.hasTent = T.inv.count(A.inv, I.tent);
     res.claimed = !!BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
+    BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);   // announced once it is A's: placing a jobsite hands it at once to a jobless villager nearby
     T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2);   // lost its tent: collects a spare at home by day
     { const h0 = A.bed || A.village, hx = Math.floor(h0.x) + 4, hz = Math.floor(h0.z); A.position.set(hx + 0.5, BF.world.heightAt(hx, hz) + 1, hz + 0.5);   // at home: villagers load scattered up to 40 blocks from their bed, and the spare is only handed over within 30
     }
