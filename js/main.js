@@ -123,7 +123,28 @@ function riverWorkers(seed, show) {
 // ---------- debug overlay (F3) ----------
 const dbg = document.getElementById("debug");
 let showDebug = false;
-addEventListener("keydown", e => { if (e.code === "F3") { e.preventDefault(); showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; } });
+// F3 shows or hides it when released. Held with B, C or R on the planet it flips a planet debug toggle instead (js/view.js setDebug,
+// spec r14-21): B face tints, C the open corner wedge (no round drawing near the cube corners), R the true sphere everywhere.
+let f3Held = false, f3Combo = false;
+const F3_COMBO = { KeyB: "tints", KeyC: "wedge", KeyR: "sphere" };
+addEventListener("keydown", e => {
+  if (e.code === "F3") { e.preventDefault(); if (!e.repeat) { f3Held = true; f3Combo = false; } return; }
+  const k = f3Held && F3_COMBO[e.code];
+  if (!k || !BF.view || !BF.planet || !BF.planet.isPlanet()) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.repeat) return;
+  f3Combo = true;
+  const on = BF.view.setDebug({ [k]: !BF.view.debug[k] })[k];
+  if (BF.player.actionBar) BF.player.actionBar(PLANET_TOGGLE[k] + (on ? ": on" : ": off"));
+}, true);
+addEventListener("keyup", e => {
+  if (e.code !== "F3") return;
+  e.preventDefault();
+  if (f3Held && !f3Combo) { showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; }
+  f3Held = false;
+});
+addEventListener("blur", () => { f3Held = false; });
+const PLANET_TOGGLE = { tints: "Face tints", wedge: "Open corner wedge", sphere: "True sphere everywhere" };
 let frames = 0, fpsT = performance.now(), fps = 0;
 let screenWas = false;
 function updateDebug(now) {
@@ -159,13 +180,16 @@ function planetInfo(p) {
   const C = BF.coords, c = C && C.here();
   if (!c) return null;
   const ll = BF.planet.latLonAt(p.x, p.z, {});
-  return { face: c.f, u: c.u, v: c.v, lat: ll.lat, lon: ll.lon, latLon: C.latLonText(p.x, p.z), facing: C.facing(BF.player.yaw, p.x, p.z) };
+  return { face: c.f, u: c.u, v: c.v, lat: ll.lat, lon: ll.lon, latLon: C.latLonText(p.x, p.z), facing: C.facing(BF.player.yaw, p.x, p.z),
+    debug: BF.view && BF.view.debug ? { ...BF.view.debug } : null };
 }
+// "Planet debug: face tints, true sphere" when any F3 + B / C / R toggle is on
+const planetToggles = pl => { const on = pl.debug ? Object.keys(PLANET_TOGGLE).filter(k => pl.debug[k]) : []; return on.length ? "Planet debug: " + on.map(k => PLANET_TOGGLE[k].toLowerCase()).join(", ") + "\n" : ""; };
 function debugText(d) {
   const s = d.sections, pl = d.planet;
   const n1 = v => (Math.floor(v * 10) / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return `Blockfield  ${d.fps} fps\n` +
-    (pl ? `Face ${pl.face}  u ${n1(pl.u)}  v ${n1(pl.v)}  y ${n1(d.y)}\n${pl.latLon}  Facing ${pl.facing}\n`
+    (pl ? `Face ${pl.face}  u ${n1(pl.u)}  v ${n1(pl.v)}  y ${n1(d.y)}\n${pl.latLon}  Facing ${pl.facing}\n` + planetToggles(pl)
       : `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n`) +
     `Chunk ${pl ? Math.floor(pl.u / BF.CS) + ", " + Math.floor(pl.v / BF.CS) : d.chunkX + ", " + d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
     `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
