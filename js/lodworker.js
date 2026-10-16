@@ -11,9 +11,9 @@ onmessage = (e) => {
     BF.state = { gen: m.init.gen, seed: m.init.seed, villages: m.init.villages, biomeScale: m.init.biomeScale };
     BF.worldgen.init(BF.makeNoise(m.init.seed), { gen: m.init.gen, biomeScale: m.init.biomeScale, villages: m.init.villages });
     BF.gridJob.palette(m.palette);
-    // the planet's river network (r14-10), solved here once from the node samples the page worked out for it (js/main.js prepareWorld),
-    // or from scratch without them
-    if (m.init.gen === 4 && BF.worldgen.solveRivers) { let pre = m.init.pre || null; while (BF.worldgen.solveRivers(pre) < 1) pre = null; }
+    // the planet's river network (r14-10): a copy of the page's, replayed from its node samples and ground samples (r14-23), or solved
+    // from scratch without them
+    if (m.init.gen === 4 && !(m.init.rivers && BF.worldgen.adoptRivers(m.init.rivers))) BF.worldgen.planetRivers();
     return;
   }
   if (m.mesh) { const r = BF.gridJob.mesh(m.p, m.raw); postMessage(r, BF.gridJob.meshBuffers(r)); return; }

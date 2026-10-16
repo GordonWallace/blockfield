@@ -53,6 +53,7 @@ BF.newWorld = function (seed, opts) {
   }
   // (worldgen's findSpawn() mirrors the search above; keep them in sync.)
   BF.spawnPoint = { x: sx + 0.5, z: sz + 0.5 };
+  BF.worldSpawn = { x: sx + 0.5, z: sz + 0.5 };   // kept apart: the fallback when a spawn point or saved position is off the world (js/player.js)
   BF.player.spawn(sx + 0.5, BF.worldgen.heightAt(sx, sz) + 1.01, sz + 0.5);
   // every world starts at sunrise on day 0; loading a save restores its own time afterwards
   BF.sky.day = 0; BF.sky.setTime(0.05);
@@ -83,7 +84,6 @@ BF.prepareWorld = function (seed, gen) {
   // the terrain at the network's nodes (the slow first part) in a few workers at once where the page may start them (served over
   // http, as run.sh does; a page opened as a file can't), else here in slices with the rest
   return riverWorkers(seed, show).then(pre => new Promise(resolve => {
-    BF.riverPre = pre ? { seed: seed >>> 0, pre } : null;   // (distant terrain's workers solve the network from these too, js/lod.js)
     let first = pre;
     const step = () => {
       const t0 = performance.now();

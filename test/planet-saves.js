@@ -167,6 +167,53 @@ module.exports = async (pg, out) => {
   console.log("climate-latitude wander along 35N (total degrees): " + JSON.stringify(bs));
   check(bs.vast < bs.small * 0.6, "a bigger biome size gives broader climate patterns on the planet");
 
+  // ---- a spawn point or saved position off the planet (past the atlas, or in a corner wedge) falls back to the world spawn
+  const fb = await pg.evaluate(async () => {
+    const P = BF.planet, N = P.N, W = BF.world;
+    await BF.prepareWorld(1337, 4); BF.newWorld(1337, { gen: 4 }); BF.player.start();
+    const ws = BF.worldSpawn ? { x: BF.worldSpawn.x, z: BF.worldSpawn.z } : null;
+    const near = (p, q) => Math.hypot(p.x - q.x, p.z - q.z) < 2;
+    const r = { ws, wsOk: !!ws && BF.planetgen.spawnOK(Math.floor(ws.x), Math.floor(ws.z), true) };
+    const at = async (sp, o) => {
+      BF.spawnPoint = sp;
+      BF.player.deserialize(Object.assign({ health: 20 }, o));
+      await new Promise(res => setTimeout(res, 300));
+      const p = BF.player.position;
+      return { p: { x: p.x, z: p.z }, sp: BF.spawnPoint && { x: BF.spawnPoint.x, z: BF.spawnPoint.z } };
+    };
+    // past the atlas (the old world border is 3e7, the atlas ends near 2.9 million)
+    const far = await at({ x: 2.95e6 + 0.5, y: 64, z: 0.5 }, { x: 2.95e6 + 0.5, y: 70, z: 0.5 });
+    r.far = { pos: near(far.p, ws), sp: near(far.sp, ws), at: far };
+    // in the wedge past a cube corner (face 0's -u,-v corner, through its margin)
+    const wg = P.atlas(0, -20, -20, {});
+    const wedge = await at({ x: wg.x + 0.5, y: 64, z: wg.z + 0.5 }, { x: wg.x + 0.5, y: 70, z: wg.z + 0.5 });
+    r.wedgeIsOff = !W.canonXZ(wg.x, wg.z);
+    r.wedge = { pos: near(wedge.p, ws), sp: near(wedge.sp, ws) };
+    // the old fallback spot, atlas 8.5, 8.5: face 0's corner margin, not land
+    const old = await at({ x: 8.5, z: 8.5 }, { x: 8.5, y: 70, z: 8.5 });
+    r.old = { pos: near(old.p, ws), sp: near(old.sp, ws) };
+    // no spawn point at all: dying sends you to the world spawn
+    BF.spawnPoint = null;
+    BF.player.deserialize({ x: ws.x + 300, y: 200, z: ws.z, health: 20 });
+    BF.player.kill(); await new Promise(res => setTimeout(res, 300));
+    const btn = document.querySelector('[data-act="respawn"]'); if (btn) btn.click();
+    await new Promise(res => setTimeout(res, 800));
+    r.respawn = near(BF.player.position, ws);
+    // a position in a margin that shows a face is kept (still in the world)
+    const mg = P.atlas(4, N + 30, N / 2, {});
+    const keep = await at({ x: ws.x, y: 64, z: ws.z }, { x: mg.x + 0.5, y: 900, z: mg.z + 0.5 });
+    const c = P.canon(mg.x + 0.5, mg.z + 0.5, {});
+    r.margin = Math.hypot(keep.p.x - (mg.x + 0.5), keep.p.z - (mg.z + 0.5)) < 1 || Math.hypot(keep.p.x - c.x, keep.p.z - c.z) < 1;
+    return r;
+  });
+  console.log("fallback " + JSON.stringify(fb));
+  check(fb.wsOk, "the world spawn is kept as BF.worldSpawn, on dry temperate or subtropical land");
+  check(fb.far.pos && fb.far.sp, "a saved position and spawn point past the atlas fall back to the world spawn");
+  check(fb.wedgeIsOff && fb.wedge.pos && fb.wedge.sp, "a saved position and spawn point in a corner wedge fall back to the world spawn");
+  check(fb.old.pos && fb.old.sp, "atlas 8.5, 8.5 (the old fallback, a corner margin) is off the world too");
+  check(fb.respawn, "with no spawn point, respawning goes to the world spawn");
+  check(fb.margin, "a saved position in a margin that shows a face is kept");
+
   // ---- #seed<n> boots a planet; #seed<n>gen3 a legacy world
   const url = pg.url().replace(/#.*$/, "");
   const booted = () => pg.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById("bf-loading"), null, { timeout: 120000 }).catch(() => {}).then(() => pg.waitForTimeout(1000));   // (a planet boot works out its rivers first)
