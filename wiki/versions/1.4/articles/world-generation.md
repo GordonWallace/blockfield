@@ -35,9 +35,9 @@ Height depends first on how far inland you are:
 
 ## Climate and biomes
 
-Two slow maps, temperature and humidity, divide the land into climate bands. Each band is about two thousand blocks across, so a walk of several minutes usually keeps you in one biome. Edges between biomes are ragged rather than straight. Height cools the air only a little on the plains, but strongly in the high ranges, which is why the tops of mountains turn to snow. On the planet the continents and climate bands have one size, set by the size of the planet.
+Two slow maps, temperature and humidity, divide the land into climate bands. Each band is about two thousand blocks across, so a walk of several minutes usually keeps you in one biome. Edges between biomes are ragged rather than straight. Height cools the air only a little on the plains, but strongly in the high ranges, which is why the tops of mountains turn to snow. On the planet, temperature comes from latitude instead: five climate bands run from the equator to the poles, with ragged, wandering edges, and humidity follows rainfall, which is heaviest at the equator and in the middle latitudes. See [[page:biomes]].
 
-Special biomes are laid over the climate map: beaches and stony shores where land meets sea, swamps in wet lowlands, badlands in hot dry country with odd terrain, mountain biomes by altitude, mushroom islands far out at sea, and rivers. All 29 are listed on [[page:biomes]].
+Special biomes are laid over the climate map: beaches and stony shores where land meets sea, swamps in wet lowlands, badlands in hot dry country with odd terrain, mountain biomes by altitude, mushroom islands far out at sea, rivers, and on the planet frozen arctic seas. All 30 are listed on [[page:biomes]].
 
 ## What is added to the land
 

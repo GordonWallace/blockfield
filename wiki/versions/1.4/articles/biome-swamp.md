@@ -1,5 +1,8 @@
 Swamp is wet, low-lying ground in humid, mild country: shallow, murky pools between mud banks, with leaning trees. It forms only in flat lowlands near sea level, so it is often next to rivers or the coast. The water here is tinted a murky green. Rain falls.
 
+### On the planet
+On the planet, Swamp fills low, wet ground in the temperate band.
+
 ### Ground and plants
 - The surface is [[item:grass]] over [[item:dirt]]. Under the water the floor is [[item:clay]] or dirt.
 - Trees are [[item:oak_log|oak]] with a wide, spreading crown of leaves, and they may stand in the shallows.

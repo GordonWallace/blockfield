@@ -30,7 +30,7 @@ function run(seeds, ok, log) {
     // ---- corners ----
     for (let f = 0; f < 6; f++) for (const [u, v] of [[2, 2], [N - 3, 2], [2, N - 3], [N - 3, N - 3]]) {
       const a = P.atlas(f, u, v), h = W.heightAt(a.x, a.z), b = W.biomeAt(a.x, a.z);
-      ok(h < BF.SEA - 10 && W.waterLevelAt(a.x, a.z) === BF.SEA && b.id === 0, `seed ${seed}: corner of face ${f} at ${u},${v} is open sea (height ${h}, ${b.name})`);
+      ok(h < BF.SEA - 10 && W.waterLevelAt(a.x, a.z) === BF.SEA && (b.id === 0 || b.id === 29), `seed ${seed}: corner of face ${f} at ${u},${v} is open sea (height ${h}, ${b.name})`);
     }
     ok(PG.corners().every(c => c.reach === 0 || c.gulf), `seed ${seed}: every corner is in open sea or has a gulf to it`);
     // gulfs: with the continents left unturned (one try), corners short of open sea get a gulf; walk out along each one, the sea

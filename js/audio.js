@@ -667,6 +667,19 @@ function applyVolumes(G) {
 
 // ---------- voices ----------
 const listener = { x: 0, y: 0, z: 0, rx: 1, rz: 0 };
+// A point's x / z in the listener's face frame (RX, RZ): on the planet a sound on the next face is canonical there, far away in
+// atlas x / z, and BF.planet.rel unfolds it beside the listener. False when it isn't near (the opposite face). Off the planet: itself.
+let RX = 0, RZ = 0;
+const relOut = {}, relB = { x: 0, z: 0 };
+function relXZ(x, z) {
+  const P = BF.planet;
+  if (!P || !P.isPlanet()) { RX = x; RZ = z; return true; }
+  relB.x = x; relB.z = z;
+  const r = P.rel(listener, relB, relOut);
+  if (!r) return false;
+  RX = r.x; RZ = r.z;
+  return true;
+}
 const EMPTY = {};
 function startVoice(G, name, o, when) {
   const d = DEFS[name];
@@ -676,7 +689,12 @@ function startVoice(G, name, o, when) {
   let vol = (o.volume == null ? 1 : o.volume) * d.vol, pan = 0;
   const maxD = o.dist || d.dist;
   if (o.x != null && maxD) {
-    const dx = o.x - listener.x, dy = (o.y == null ? listener.y : o.y) - listener.y, dz = o.z - listener.z;
+    let dx = o.x - listener.x, dz = o.z - listener.z;
+    const dy = (o.y == null ? listener.y : o.y) - listener.y;
+    if (Math.abs(dx) > maxD || Math.abs(dz) > maxD) {   // on the planet: maybe just across a face edge (canonical on the next face)
+      if (!relXZ(o.x, o.z)) return null;
+      dx = RX - listener.x; dz = RZ - listener.z;
+    }
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (dist >= maxD) return null;
     const g = 1 - dist / maxD;
@@ -903,7 +921,9 @@ function updateMobs(dt, now) {
   for (let i = 0; i < L.length; i++) {
     const m = L[i];
     if (m.dead || m.removed || !m.position) continue;
-    const dx = m.position.x - listener.x, dy = m.position.y - listener.y, dz = m.position.z - listener.z;
+    let dx = m.position.x - listener.x, dz = m.position.z - listener.z;
+    const dy = m.position.y - listener.y;
+    if ((Math.abs(dx) > 26 || Math.abs(dz) > 26) && relXZ(m.position.x, m.position.z)) { dx = RX - listener.x; dz = RZ - listener.z; }
     if (dx * dx + dy * dy + dz * dz > R2) { m._sndT = 0; continue; }
     const s = MOB_SND[m.type];
     if (!s) continue;
@@ -1257,6 +1277,8 @@ BF.audio = {
   get voices() { return G ? G.voices.length : 0; },
   maxVoices: MAX_VOICES,
   stats, env,
+  listener,                                            // where sounds are heard from (the camera, in atlas x / z)
+  relXZ: (x, z) => (relXZ(x, z) ? [RX, RZ] : null),    // a point beside the listener in its face frame (planet; tests)
   renderOffline, renderMusic, encodeWav,
   samples: name => buffers(name, ctx),   // generated AudioBuffers of a sound (tests)
 };

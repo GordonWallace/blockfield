@@ -1,5 +1,8 @@
 Taiga is cool conifer forest in the cold climate band, with spruce trees over a floor of ferns. It lies between the snowy taiga of the frozen north and the temperate forests, and also appears on the foothills of cold mountains. Rain falls in it, turning to snow high up.
 
+### On the planet
+On the planet, Taiga is the forest of the subarctic band. It also covers cooler temperate high plains and the cold edge of the arctic.
+
 ### Ground and plants
 - The surface is [[item:grass]] with patches of [[item:podzol]].
 - The trees are [[item:spruce_log|spruce]], moderately dense, and pointed.
