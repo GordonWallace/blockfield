@@ -282,7 +282,7 @@ S.reset = function (world) {
     let w;
     try { w = new Worker("js/lodworker.js"); } catch (e) { S.inline = true; break; }
     w.busy = [];   // jobs posted to this worker, oldest first (it answers in order)
-    w.postMessage({ init: world, palette: PAL, rivers: BF.worldgen.riverState ? BF.worldgen.riverState() : null });
+    w.postMessage({ init: world, palette: PAL });
     w.onmessage = (e) => { const it = w.busy.shift(); if (e.data.ms) { S.workMs += e.data.ms; S.samples += e.data.ok.length; } if (it && !it.dead) it.done(e.data); pump(); };
     w.onerror = (e) => {
       // a worker that can't load: sample in the page instead
