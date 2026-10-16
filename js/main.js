@@ -44,6 +44,7 @@ BF.newWorld = function (seed, opts) {
   BF.world.reset();
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   if (BF.lod) BF.lod.reset(scene);   // distant terrain on the planet (js/lod.js): fresh rings and sampling workers for this seed
+  if (BF.globe) BF.globe.reset(scene);   // the whole planet as a globe (js/globe.js), sampled by the same workers
   // pick a dry spawn column near the origin
   let sx = 8, sz = 8;
   if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry temperate / subtropical land near 35 N on face 4, away from edges and corners (r14-19)

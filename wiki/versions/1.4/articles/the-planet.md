@@ -84,6 +84,8 @@ Blocks themselves are only loaded while they are big enough to see. Fly higher t
 
 Distant terrain is there at every height, from standing on the ground to high above the planet, and fills in as you travel: the land far ahead is worked out in the background, coarse rings first, without slowing the game down. It is worked out by background workers, which browsers allow only when the game is started with run.sh; opened straight from its file, the game shows the land only as far as the loaded chunks.
 
+Past the distant terrain, the rest of the planet is drawn as a whole globe, with a point every 256 columns everywhere. It is worked out in the background from the moment a world starts, nearest first, and is what you see from orbit: every continent, sea and ice cap on all six faces, with the part beyond the horizon left out.
+
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]). Flying very high, the distant land reaches about 65 kilometres; the whole globe below is still to come (the planet map already shows the whole globe).
+The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]).

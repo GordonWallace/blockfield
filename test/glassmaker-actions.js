@@ -11,7 +11,7 @@ module.exports = async (pg) => {
     const I = BF.I, B = BF.B, T = BF.trades, inv = T.inv, W = BF.world, GM = BF.glassmaker;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });   // the harness planet seed: its rivers are worked out in this page already
     ok("new worlds use village generator 7", BF.state.villages >= 7, BF.state.villages);
     BF.mobs.spawning = false;
 
@@ -35,7 +35,10 @@ module.exports = async (pg) => {
     ok("builders' houses have pane windows, no glass blocks", house.some(x => x[3] === B.glass_pane) && !house.some(x => x[3] === B.glass));
 
     // ---- the sand village near spawn: a glassmaker, its kiln and a furnace beside it
-    const V = { x: -1, z: -72 };
+    // an inland one: by the sea most of a desert village's sand lies beside water, which is never dug
+    const vg = BFT.village(v => v.ground === 1 && BF.worldgen.heightAt(v.x, v.z) >= BF.SEA + 20, 6000);
+    if (!vg) { ok("an inland sand village within 6 km", false); return R; }
+    const V = { x: Math.round(vg.x), z: Math.round(vg.z) };
     ok("worldgen: sand within 64 blocks of the village", BF.worldgen.sandNear(V.x, V.z, 64));
     BF.player.teleport(V.x + 0.5, BF.worldgen.heightAt(V.x, V.z) + 2, V.z + 0.5);
     for (let i = 0; i < 400 && !W.isLoaded(V.x, V.z); i++) { W.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
@@ -122,8 +125,13 @@ module.exports = async (pg) => {
       kit(G, [["bread", 12], ["sand", 16]]);
       G.gls = { stage: null, job: null, checkT: 0, avoid: {}, cd: 0, day: Math.floor(BF.sky.day + BF.sky.time), dug: 64, wait: "" };
       kit(sellerC, [["bread", 12]]);
-      for (let i = 0; i < 100; i++) step(0.1);
-      ok("sand but no fuel to be had: Waiting for fuel", BF.villagerStatus.text(G) === "Waiting for fuel", BF.villagerStatus.text(G));
+      // and no fuel left in any of the village's furnaces (the planet's bigger villages have other furnace users, who may have left some)
+      const fuelLeft = () => BF.furnaceUse.near(G, I.sand, I.glass).filter(f => BF.furnaceUse.fuelIn(f) > 0).map(f => [f.x, f.y, f.z]);
+      for (let i = 0; i < 100; i++) {
+        if (i % 10 === 0) for (const f of BF.furnaceUse.near(G, I.sand, I.glass)) { const fs = BF.inventory.furnaceState(f.x, f.y, f.z); if (fs) { fs.slots[1] = null; fs.burn = 0; } }
+        step(0.1);
+      }
+      ok("sand but no fuel to be had: Waiting for fuel", BF.villagerStatus.text(G) === "Waiting for fuel", { status: BF.villagerStatus.text(G), fuelLeft: fuelLeft() });
     }
 
     // ---- a cowherd short of bottles buys new ones from the glassmaker
@@ -149,9 +157,10 @@ module.exports = async (pg) => {
       const bld = vs.find(m => m.profession === "builder") || null;
       ok("the village has a builder", !!bld);
       if (bld) {
-        const bp = BP.get("small_house", 0, 0, 0.5, null, "oak");
+        const sty = rec.style | 0;   // the village's own building style (a desert village builds in sandstone on the planet)
+        const bp = BP.get("small_house", 0, sty, 0.5, null, "oak");
         const req = Object.assign({}, bp.req); delete req[I.glass_pane];
-        bld.inv = inv.create(); for (const k in req) inv.add(bld.inv, +k, req[k] + 4); inv.add(bld.inv, BF.worldgen.palette(0).found, 24); inv.add(bld.inv, I.bread, 20);
+        bld.inv = inv.create(); for (const k in req) inv.add(bld.inv, +k, req[k] + 4); inv.add(bld.inv, BF.worldgen.palette(sty).found, 24); inv.add(bld.inv, I.bread, 20);
         const a = stock(bld.inv, bp.req, "oak");
         ok("a house lacking only panes", !a.ok && Object.keys(a.shortfall).every(k => +k === I.glass_pane), a.shortfall);
         const built = BL.builtOf(rec);
