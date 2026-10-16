@@ -1,7 +1,8 @@
 // Seeded 2D/3D simplex noise, fbm, and integer hashing.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const BF = (G.BF = G.BF || {});
 
 BF.makeNoise = function makeNoise(seed) {
   const perm = new Uint8Array(512), perm12 = new Uint8Array(512);
