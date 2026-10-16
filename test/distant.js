@@ -155,11 +155,13 @@ module.exports = async (pg, out) => {
       await pg.evaluate((h) => { goTo(4, 163840 - 900, 163840 - 700, h, -1.55); }, h);
       await pg.evaluate(() => ringsDone(400));
       const m0 = await pg.evaluate((r) => cover(r), r);
+      if (m0) await savePng("corner-before" + h);
       // across the corner onto the neighbouring face (+u from face 4), then a moment later, then once the rings have rebuilt
       await pg.evaluate((h) => { const P = BF.planet, e = P.EDGE[4][1], A = e.A, x = 163840 + 300 - e.t[0], y = 163840 - 700 - e.t[1];
         goTo(e.g, A[0] * x + A[2] * y, A[1] * x + A[3] * y, h, -1.55); }, h);
       await pg.waitForTimeout(500);
       const m1 = await pg.evaluate((r) => cover(r), r);
+      if (m1) await savePng("corner-step" + h);
       await pg.evaluate(() => ringsDone(400));
       const m2 = await pg.evaluate((r) => cover(r), r);
       if (m2) await savePng("corner" + h);

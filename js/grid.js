@@ -226,9 +226,33 @@ function mesh(p, raw) {
       const a = j * n + i;
       if (raw.ok[a] && raw.ok[a + 1] && raw.ok[a + n] && raw.ok[a + n + 1]) q.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
     }
+    if (p.bridge) bridge(p, raw, pos, q);
     idx = new Uint32Array(q);
   }
   return { pos, sph, col, mpos, msph, mcol, can, idx };
+}
+// The coarsest ring has no coarser ring to fill the strip along its corner wedge (see js/lod.js), so it closes the wedge itself: the
+// samples along one side of the wedge are joined to those the same distance along the other side, which are neighbours on the sphere,
+// and the three samples round the corner point make one triangle. In the flat view these triangles fan across the open wedge.
+function bridge(p, raw, pos, q) {
+  const N = BF.planet.N, n = p.n, c = p.c;
+  const at = (u, v) => { const i = (u - p.gu0) / c, j = (v - p.gv0) / c; return i >= 0 && j >= 0 && i < n && j < n && raw.ok[j * n + i] ? j * n + i : -1; };
+  const tri = (a, b, d) => {
+    if (a < 0 || b < 0 || d < 0) return;
+    const x1 = pos[b * 3] - pos[a * 3], z1 = pos[b * 3 + 2] - pos[a * 3 + 2], x2 = pos[d * 3] - pos[a * 3], z2 = pos[d * 3 + 2] - pos[a * 3 + 2];
+    if (z1 * x2 - x1 * z2 >= 0) q.push(a, b, d); else q.push(a, d, b);   // counter-clockwise seen from above, as the grid's own
+  };
+  for (const su of [-1, 1]) for (const sv of [-1, 1]) {
+    const cu = su > 0 ? N : 0, cv = sv > 0 ? N : 0;
+    if (Math.abs(cu - p.cu) > c * n || Math.abs(cv - p.cv) > c * n) continue;
+    const uIn = su > 0 ? N - c : 0, uOut = su > 0 ? N : -c, vIn = sv > 0 ? N - c : 0, vOut = sv > 0 ? N : -c;
+    tri(at(uIn, vIn), at(uOut, vIn), at(uIn, vOut));
+    for (let k = 0; k < n; k++) {
+      const r0 = at(uOut + su * k * c, vIn), r1 = at(uOut + su * (k + 1) * c, vIn), d0 = at(uIn, vOut + sv * k * c), d1 = at(uIn, vOut + sv * (k + 1) * c);
+      if (r0 < 0 && d0 < 0) break;
+      tri(r0, r1, d1); tri(r0, d1, d0);
+    }
+  }
 }
 // The index of a full n x n grid (counter-clockwise seen from above: x = u, y up, z = v)
 function fullIndex(n) {

@@ -229,7 +229,7 @@ function start(L, f, cu, cv) {
 
 // Builds ring L's mesh from its samples (in a worker), then swaps it in.
 function build(L, b) {
-  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor };
+  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor, bridge: L.lv === CELLS.length - 1 };
   const raw = b.raw;
   b.tm = performance.now();
   const copy = BF.sampler.inline ? raw : { y: raw.y.slice(), col: raw.col.slice(), can: raw.can.slice(), ok: raw.ok.slice(), dir: raw.dir.slice() };
