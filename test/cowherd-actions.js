@@ -11,10 +11,10 @@ module.exports = async (pg, out) => {
     const day = () => BF.sky.day + BF.sky.time;
     const C = BF.cowherd, I = BF.I, T = BF.trades;
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (5 + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
-    const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains with a pasture
+    const V = BFT.village((v, k) => k.pasture && v.ground === 0 && v.pop >= 10);   // the planet: the nearest grass village of 10+ with a pasture
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
     const pb = wv && wv.buildings.find(b => b.type === "pasture");
     ok("the village layout has a pasture (grass, 10+ villagers)", !!pb && wv.ground === 0 && wv.pop >= 10, wv && [wv.pop, wv.ground]);
@@ -208,11 +208,14 @@ module.exports = async (pg, out) => {
     // ---- breeding needs wheat and two willing adults
     const spot = (dx, dz) => { const x = Math.floor(P.out[0] + dx), z = Math.floor(P.out[1] + dz), y = BF.world.heightAt(x, z) + 1; return [x + 0.5, y, z + 0.5]; };
     const wildAt = (dx, dz) => { const [x, y, z] = spot(dx, dz); return BF.mobs.spawn("cow", x, y, z); };
-    // a flat 5x5 patch of ground outside the pasture (cows only mate within 2 blocks of height: a pit or a roof between them would stop them)
+    // a flat 5x5 patch of ground outside the pasture (cows only mate within 2 blocks of height: a pit or a roof between them would stop them),
+    // well clear of the churn: the cowherd feeds strays within 12 of it (js/cowherd.js TEND_R)
+    const churn = herder.jobsite || { x: P.out[0], z: P.out[1] };
     const flat = (() => {
-      for (let r = 9; r < 30; r++) for (let dx = -r; dx <= r; dx++) for (const dz of [-r, r]) {
+      for (let r = 9; r < 40; r++) for (let dx = -r; dx <= r; dx++) for (const dz of [-r, r]) {
         const x0 = Math.floor(P.out[0] + dx), z0 = Math.floor(P.out[1] + dz), h = BF.world.heightAt(x0, z0);
         if (x0 > P.fx0 - 3 && x0 < P.fx1 + 3 && z0 > P.fz0 - 3 && z0 < P.fz1 + 3) continue;
+        if (Math.hypot(x0 - churn.x, z0 - churn.z) < 20) continue;
         let ok2 = true;
         for (let a = -2; a <= 2 && ok2; a++) for (let b = -2; b <= 2 && ok2; b++) if (BF.world.heightAt(x0 + a, z0 + b) !== h) ok2 = false;
         if (ok2) return [dx, dz];
@@ -224,10 +227,10 @@ module.exports = async (pg, out) => {
     const onBorn = (cf, a, b) => { if (a === wa || a === wb || b === wa || b === wb) wildBorn++; };
     BF.on("cowBorn", onBorn);
     run(6);
-    ok("two unfed cows side by side do not breed", wildBorn === 0 && !C.willing(wa, day()));
+    ok("two unfed cows side by side do not breed", wildBorn === 0 && !C.willing(wa, day()), { wildBorn, willing: C.willing(wa, day()), flat });
     C.feed(wa, "test");
     run(6);
-    ok("one fed cow alone does not breed", wildBorn === 0 && C.willing(wa, day()) && !C.willing(wb, day()));
+    ok("one fed cow alone does not breed", wildBorn === 0 && C.willing(wa, day()) && !C.willing(wb, day()), { wildBorn, willing: [C.willing(wa, day()), C.willing(wb, day())] });
     C.feed(wb, "test");
     for (let i = 0; i < 600 && !wildBorn; i++) step();
     ok("two fed adults breed: a calf", wildBorn === 1, { wildBorn, d: +Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z).toFixed(2), dy: +(wa.position.y - wb.position.y).toFixed(2),
