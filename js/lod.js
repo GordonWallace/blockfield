@@ -19,7 +19,7 @@
 // Each ring is a top-level scene object at its centre's atlas position with userData.anchor, so js/view.js places it like a chunk mesh
 // (its face's unfold near the ground, the sphere by world.roundK); the shader mixes flat and round positions the same way.
 //
-// API: BF.lod = { reset(scene), update(), radius(), levels, stats() }
+// API: BF.lod = { reset(scene), update(), radius(), levels, stats(), material, cuts }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -433,9 +433,13 @@ function ribbons(V, top) {
   lod.scene.add(mesh);
 }
 
+// for the globe (js/globe.js): the same material and cuts
+lod.material = material; lod.cuts = cuts; lod.HIDE = HIDE;
+
 // Numbers for tests and the debug overlay.
 lod.stats = () => ({
-  active: lod.active, above: lod.above, eyeHole: lod.eyeHole, pending: BF.sampler ? BF.sampler.pending() : 0, inline: BF.sampler && BF.sampler.inline,
+  active: lod.active, above: lod.above, eyeHole: lod.eyeHole, pending: BF.sampler ? BF.sampler.pending(BF.globe) : 0, inline: BF.sampler && BF.sampler.inline,
+  // (pending leaves out the globe's tiles: js/globe.js)
   rings: lod.levels.map((L) => ({ cell: L.cell, show: L.show, built: !!L.mesh, building: !!L.building, builds: L.builds || 0, f: L.f, cu: L.cu, cv: L.cv, buildMs: Math.round(L.buildMs), meshMs: Math.round(L.meshMs) })),
   mainMs: lod.mainMs || 0, frames: lod.frames || 0, slowFrames: lod.slowFrames || 0, swaps: lod.swaps || [], maxFrameMs: lod.maxFrameMs || 0, workers: BF.sampler ? BF.sampler.workers.length : 0,
   samples: BF.sampler ? BF.sampler.samples : 0, msPerSample: BF.sampler && BF.sampler.samples ? BF.sampler.workMs / BF.sampler.samples : 0,

@@ -175,11 +175,12 @@ const FLAT = 0.6 + 0.4 * 0.8 / Math.hypot(0.8, 0.45, 0.4);
 // p: { n (samples across), c (cell), gu0, gv0 (the first sample's grid point), cu, cv (the ring's centre), anchor (its centre on the sphere,
 // at sea level) }. Positions are flat ones relative to the centre in the ring's face grid (x = u, y = layer, z = v) and round ones relative
 // to the anchor. Morph targets (m*): where the next coarser ring (every other sample) puts each vertex. idx is null when every sample is
-// there (the ring uses the shared index of a full grid).
+// there (the ring uses the shared index of a full grid). The globe (js/globe.js) passes noMorph: no morph targets, and no idx (its tiles
+// draw only part of their samples, with an index of their own).
 function mesh(p, raw) {
   const n = p.n, c = p.c, NV = n * n, A = p.anchor, R = BF.planet.R, SEA = BF.SEA;
   const pos = new Float32Array(NV * 3), sph = new Float32Array(NV * 3), col = new Uint8Array(NV * 3), can = new Uint8Array(NV * 4);
-  const mpos = new Float32Array(NV * 3), msph = new Float32Array(NV * 3), mcol = new Uint8Array(NV * 3);
+  const mpos = p.noMorph ? null : new Float32Array(NV * 3), msph = p.noMorph ? null : new Float32Array(NV * 3), mcol = p.noMorph ? null : new Uint8Array(NV * 3);
   const C = (v) => Math.min(255, Math.round(v));
   let full = true;
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
@@ -193,6 +194,7 @@ function mesh(p, raw) {
     for (let k = 0; k < 3; k++) can[o * 4 + k] = C(raw.can[o * 4 + k] * sh);
     can[o * 4 + 3] = raw.can[o * 4 + 3];
   }
+  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, idx: null };
   // a point on the coarser grid (even i and j) stays put and takes the coarser ring's shading; any other point goes to the middle of the
   // coarser triangle edge it lies on (that ring splits its cells along the same diagonal)
   for (let j = 0; j < n; j += 2) for (let i = 0; i < n; i += 2) {
@@ -269,8 +271,9 @@ BF.gridJob.fullIndex = fullIndex;
 if (typeof document === "undefined") return;   // in a worker: only the sampling above is needed
 
 // ---- the job queue ----
-// request(job, prio, done, tag): prio is a number (lower first); done(result) gets the arrays from BF.gridJob.alloc. cancel(tag) drops
-// queued jobs with that tag (and ignores the answers of running ones).
+// request(job, prio, done, tag): prio is a number (lower first), or a function giving one each time the queue is looked at; done(result)
+// gets the arrays from BF.gridJob.alloc. cancel(tag) drops queued jobs with that tag (and ignores the answers of running ones).
+// pending(skip) counts the jobs queued or running, leaving out those tagged skip.
 const S = (BF.sampler = { workers: [], queue: [], world: null, inline: false, running: null, seq: 0, workMs: 0, samples: 0 });
 S.reset = function (world) {
   for (const w of S.workers) w.terminate();
@@ -296,7 +299,7 @@ S.reset = function (world) {
 };
 function next() {
   let b = -1, bp = Infinity;
-  for (let i = 0; i < S.queue.length; i++) { const p = S.queue[i].prio; if (p < bp) { bp = p; b = i; } }
+  for (let i = 0; i < S.queue.length; i++) { const q = S.queue[i].prio, p = typeof q === "function" ? q() : q; if (p < bp) { bp = p; b = i; } }
   if (b < 0) return null;
   const it = S.queue[b];
   S.queue[b] = S.queue[S.queue.length - 1]; S.queue.pop();
@@ -323,7 +326,10 @@ S.cancel = function (tag) {
   for (const w of S.workers) for (const it of w.busy) if (it.tag === tag) it.dead = true;
   if (S.running && S.running.tag === tag) S.running = null;
 };
-S.pending = () => S.queue.length + S.workers.reduce((n, w) => n + w.busy.length, 0) + (S.running ? 1 : 0);
+S.pending = (skip) => {
+  const k = (it) => (it.tag === skip && skip !== undefined ? 0 : 1);
+  return S.queue.reduce((n, it) => n + k(it), 0) + S.workers.reduce((n, w) => n + w.busy.reduce((m, it) => m + k(it), 0), 0) + (S.running ? k(S.running) : 0);
+};
 // Called each frame: hands out work, or (without workers) samples rows in the page within the budget.
 S.tick = function (budgetMs) {
   if (!S.inline) { pump(); return; }
