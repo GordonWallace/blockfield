@@ -4,7 +4,7 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.mobs.spawning = false; if (BF.sky && BF.sky.setTime) BF.sky.setTime(0.3); });
   const house = await pg.evaluate(() => {
-    for (const v of BF.worldgen.villagesNear(0, 0, 3000).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))) {
+    for (const v of BFT.villages(3000)) {
       const b = v.buildings.find(b => b.type === "house2");
       if (!b) continue;
       const at = (u, q) => [b.bx + b.ax * u + b.sx * q, b.bz + b.az * u + b.sz * q];

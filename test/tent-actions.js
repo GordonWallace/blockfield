@@ -1,6 +1,7 @@
 // Tent checks: node test/run.js /tmp/tent test/tent-actions.js
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => BF.player.start());
+  // no pointer lock (drag mode): with the mouse locked, headless Chromium piles up memory during the long evaluates below
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
   const r1 = await pg.evaluate(() => {
     const W = BF.world, p = BF.player.position, res = {};
@@ -34,10 +35,13 @@ module.exports = async (pg, out) => {
     const open = m => { const c = BF.world.chunkAt(m.position.x, m.position.z); return c && c.top[(Math.floor(m.position.z) - c.cz * 16) * 16 + Math.floor(m.position.x) - c.cx * 16] < m.position.y; };
     const T = BF.trades, I = BF.I, A = vs.find(open) || vs[0], res = {};   // a villager outdoors (one inside a house would pitch on its roof)
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
-    BF.world.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);
+    // a big planet village can have a jobless ex-explorer: a new survey table would go straight to it (and is kept for it)
+    for (const v of BF.mobs.list) if (v !== A && v.type === "villager" && v.jobMem && v.jobMem.prof === "explorer") v.jobMem = null;
+    BF.world.setBlock(tx, ty, tz, BF.B.survey_table);
     BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
     res.hasTent = T.inv.count(A.inv, I.tent);
-    BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
+    res.claimed = !!BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
+    BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);   // announced once it is A's: placing a jobsite hands it at once to a jobless villager nearby
     T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2);   // lost its tent: collects a spare at home by day
     { const h0 = A.bed || A.village, hx = Math.floor(h0.x) + 4, hz = Math.floor(h0.z); A.position.set(hx + 0.5, BF.world.heightAt(hx, hz) + 1, hz + 0.5);   // at home: villagers load scattered up to 40 blocks from their bed, and the spare is only handed over within 30
     }
@@ -51,7 +55,8 @@ module.exports = async (pg, out) => {
     // to walk home shrank to nothing just before dark, so explorers pitched beside their houses)
     const home = A.bed; A.homeBed0 = home;
     { const W = BF.world, cx = Math.floor(A.position.x), cz = Math.floor(A.position.z), cy = Math.floor(A.position.y);
-      for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) { W.setBlock(cx + dx, cy - 1, cz + dz, BF.B.grass || BF.B.dirt); for (let k = 0; k < 40; k++) W.setBlock(cx + dx, cy + k, cz + dz, 0); }   // open sky: nothing overhead
+      const js = A.jobsite, keep = (x, y, z) => js && x === js.x && y === js.y && z === js.z;   // its survey table can stand inside the cleared square (villagers stand near their beds on the planet): clearing it would make the explorer jobless
+      for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) { if (!keep(cx + dx, cy - 1, cz + dz)) W.setBlock(cx + dx, cy - 1, cz + dz, BF.B.grass || BF.B.dirt); for (let k = 0; k < 40; k++) if (!keep(cx + dx, cy + k, cz + dz)) W.setBlock(cx + dx, cy + k, cz + dz, 0); }   // open sky: nothing overhead
       A.position.set(cx + 0.5, cy, cz + 0.5);
       res.inVillageSite = !!BF.tents.findSite(A.position.x, A.position.z, 7);   // there is room for a tent: not pitching is a choice
       BF.sky.setTime(0.2); BF.mobs.update(0.1);
@@ -71,7 +76,9 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.47);
     BF.sky.setTime(0.2); BF.explorer.ai(A, 0.1, {});   // a new day: tonight's camping decision is still to be made
     BF.sky.setTime(0.47);
-    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) BF.explorer.ai(A, 0.1, {}); if (A.ex && A.ex.camp) break; }
+    // held on the open ground cleared above (left to walk, the planet village's houses round it can leave no room for a tent)
+    const at = A.position.clone();
+    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) { A.position.copy(at); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); } if (A.ex && A.ex.camp) break; }
     res.camp = A.ex && A.ex.camp; res.bed = A.bed && A.bed.tent; res.tentLeft = T.inv.count(A.inv, I.tent);
     window.__A = A; window.__home = A.homeBed;
     // a zombie nearby
@@ -79,6 +86,7 @@ module.exports = async (pg, out) => {
     return res;
   });
   console.log(JSON.stringify(r2));
+  if (!r2.claimed) console.log("FAIL: the test villager did not take the survey table (setup)");
   if (r2.inVillageCamp) console.log("FAIL: explorer pitched its tent inside its own village");
   if (!r2.camp) console.log("FAIL: explorer far from home at dusk did not pitch its tent " + JSON.stringify(r2));
   const r3 = await pg.evaluate(async () => {

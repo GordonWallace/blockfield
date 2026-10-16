@@ -19,6 +19,8 @@ module.exports = async (pg) => {
   const near = await pg.evaluate(k => ({ active: BF.villageSim.isActive(k), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").length }), info.key);
   ok("a village the player stands in is never forced off", near.active && near.errs === 0, near);
   // 2. out on a task, 300 blocks away, over the village-count limit: stopped at once, the villager sent home first, and logged
+  // the spot 50 blocks out loaded first (the planet's chunks load slowly: a villager put in a chunk that isn't loaded is taken off and respawns at home)
+  await wait(k => { const r = BF.mobs.villages.get(k); return !!r && BF.world.isLoaded(r.wg.maxX + 50, r.z); }, info.key, 60000);
   await pg.evaluate(k => {
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
     const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };

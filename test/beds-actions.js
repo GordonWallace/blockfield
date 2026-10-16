@@ -1,7 +1,8 @@
 // Claimed beds: node test/run.js /tmp/beds test/beds-actions.js
 // Runs a village through several nights and reports, per villager, the bed it slept in each night (and who slept nowhere).
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
+  // no pointer lock (drag mode): with the mouse locked, headless Chromium piles up memory during the long evaluates below
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); BF.player.gameMode = "creative"; });
   await require('./lib').toVillage(pg);
   const nights = +(process.env.NIGHTS || 3);
   const res = await pg.evaluate(async (nights) => {

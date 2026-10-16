@@ -1,7 +1,7 @@
 // Village action log test: node test/run.js /tmp/vl test/villagelog.js
 module.exports = async (pg) => {
   await pg.evaluate(() => {
-    const v = BF.worldgen.nearestVillage(0, 0);
+    const v = BFT.village();
     window.__v = v;
     BF.player.spawn(v.x + 0.5, (v.y || BF.world.heightAt(v.x, v.z)) + 3, v.z + 0.5);
   });
@@ -17,7 +17,7 @@ module.exports = async (pg) => {
     // profession
     const u = vs.find(m => m.profession !== "unemployed" && m.profession !== "nitwit") || vs[0];
     BF.jobs.release(u);
-    const x = Math.floor(p.x) + 2, z = Math.floor(p.z) + 2; let y = 100; while (y > 0 && !BF.world.getBlock(x, y, z)) y--; y++;
+    const x = Math.floor(p.x) + 2, z = Math.floor(p.z) + 2; let y = Math.floor(p.y) + 30; while (y > p.y - 60 && !BF.world.getBlock(x, y, z)) y--; y++;
     BF.world.setBlock(x, y, z, BF.B.composter); BF.emit("blockPlaced", x, y, z, BF.B.composter);
     BF.jobs.hire(u, BF.jobs.sites.get(x + "," + y + "," + z));
     // player bed
@@ -28,7 +28,7 @@ module.exports = async (pg) => {
     const tv = vs.find(m => m.trades && m.trades.length && !BF.trades.blockReason(m, m.trades[0])) || vs[1];
     BF.emit("villagerTrade", tv, tv.trades[0]);
     // tents: a player's, then an explorer's (logged under its name)
-    const tz = Math.floor(p.z) + 6, tx = Math.floor(p.x) - 6; let ty = 100; while (ty > 0 && !BF.world.getBlock(tx, ty, tz)) ty--; ty++;
+    const tz = Math.floor(p.z) + 6, tx = Math.floor(p.x) - 6; let ty = Math.floor(p.y) + 30; while (ty > p.y - 60 && !BF.world.getBlock(tx, ty, tz)) ty--; ty++;
     const site = BF.tents.findSite(tx, tz, 6);
     ok("tent site", !!site);
     BF.tents.place(site.x, site.y, site.z, site.f);

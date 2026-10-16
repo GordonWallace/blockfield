@@ -10,14 +10,15 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < 400 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     };
-    const KEY = "26,39";
+    let KEY, X, Z, FX, FZ;   // the village nearest the spawn, a point by its centre, and one 1500 blocks off on the same face
     const roster = () => BF.mobs.list.filter(m => m.type === "villager" && !m.dead && !m.removed && !m.bred && m.village && m.village.key === KEY);
-    const settle = async () => { for (let k = 0; k < 60; k++) { BF.world.update(30, 43, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); } };
+    const settle = async () => { for (let k = 0; k < 60; k++) { BF.world.update(X, Z, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); } };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "creative" });
+    { const v = BFT.village(); KEY = Math.round(v.x) + "," + Math.round(v.z); X = Math.round(v.x) + 4; Z = Math.round(v.z) + 4; FX = X + 1500; FZ = Z + 1500; }
     BF.mobs.spawning = false;
     BF.sky.setTime(0.1);
-    await load(30, 43); await settle();
+    await load(X, Z); await settle();
     const rec = BF.mobs.villages.get(KEY);
     const n0 = roster().length;
     ok("village loaded with its roster", !!rec && n0 === rec.roster.length, [n0, rec && rec.roster.length]);
@@ -30,9 +31,9 @@ module.exports = async (pg, out) => {
     ok("three villagers killed", victims.length === 3 && roster().length === n0 - 3, [victims.length, roster().length]);
     ok("their slots are recorded as dead", deadIdx.every(i => rec.dead && rec.dead.has(i)), rec.dead && [...rec.dead]);
     // walk away (the village unloads) and come back
-    await load(1500, 1500); for (let k = 0; k < 20; k++) { BF.world.update(1500, 1500, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); if (k >= 5 && roster().length) { const t = BF.villageSim.timeLeft(KEY); BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200); } }   // (the clock jumps past the unload countdown, which lasts as long as the longest task: frames are slow here)
+    await load(FX, FZ); for (let k = 0; k < 20; k++) { BF.world.update(FX, FZ, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); if (k >= 5 && roster().length) { const t = BF.villageSim.timeLeft(KEY); BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200); } }   // (the clock jumps past the unload countdown, which lasts as long as the longest task: frames are slow here)
     ok("villagers unloaded while away", roster().length === 0, roster().length);
-    await load(30, 43); await settle();
+    await load(X, Z); await settle();
     const back = roster().map(m => m.slot.idx).sort((a, b) => a - b);
     ok("after coming back: same count", back.length === n0 - 3, [back.length, n0 - 3]);
     ok("after coming back: the living ones, none of the dead", JSON.stringify(back) === JSON.stringify(living) && !back.some(i => deadIdx.includes(i)), { back, living, deadIdx });
@@ -43,11 +44,11 @@ module.exports = async (pg, out) => {
     const info = saved["dead:" + KEY] && saved["dead:" + KEY].info || [];
     ok("save keeps who died (name, profession, cause, day)", deadIdx.every(i => info.some(e => e.i === i && e.name && e.prof && /zombie/.test(e.cause) && Number.isFinite(e.day))), info);
     const vc0 = BF.breeding.villagerCount(rec), vb0 = (rec.bred || []).reduce((k, e) => Math.max(k, e.k + 1), 0);
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     BF.mobs.importVillagers(saved);
     BF.sky.setTime(0.1);
-    await load(30, 43); await settle();
+    await load(X, Z); await settle();
     const rec2 = BF.mobs.villages.get(KEY);
     const re = roster().map(m => m.slot.idx).sort((a, b) => a - b);
     ok("after reload: same count", re.length === n0 - 3, [re.length, n0 - 3]);
