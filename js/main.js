@@ -53,6 +53,7 @@ BF.newWorld = function (seed, opts) {
   }
   // (worldgen's findSpawn() mirrors the search above; keep them in sync.)
   BF.spawnPoint = { x: sx + 0.5, z: sz + 0.5 };
+  BF.worldSpawn = { x: sx + 0.5, z: sz + 0.5 };   // kept apart: the fallback when a spawn point or saved position is off the world (js/player.js)
   BF.player.spawn(sx + 0.5, BF.worldgen.heightAt(sx, sz) + 1.01, sz + 0.5);
   // every world starts at sunrise on day 0; loading a save restores its own time afterwards
   BF.sky.day = 0; BF.sky.setTime(0.05);

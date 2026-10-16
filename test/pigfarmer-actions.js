@@ -250,7 +250,9 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.06);
     let leads = 0;
     const trace = [];
-    for (let i = 0; i < 30000 && P.pigs.length < 1; i++) { step(); if (S.task && S.task.kind === "fetch" && S.stage !== "walk" && i % 20 === 0) leads++; if (BF.sky.time > 0.45) BF.sky.setTime(0.06);
+    // working hours only, and the next morning comes: a failed fetch is tried again at a time of day (js/pigfarmer.js pickTask stockAt, a
+    // tenth of a day later or the next morning), so a clock put back on the same day never reached it and one failed lead failed the test
+    for (let i = 0; i < 30000 && P.pigs.length < 1; i++) { step(); if (S.task && S.task.kind === "fetch" && S.stage !== "walk" && i % 20 === 0) leads++; if (BF.sky.time > 0.45) { BF.sky.day += 1; BF.sky.setTime(0.06); }
       if (i % 200 === 0 && wild) trace.push([S.stage, +pf.position.x.toFixed(1), +pf.position.z.toFixed(1), +wild.position.x.toFixed(1), +wild.position.z.toFixed(1), wild.ledBy === pf ? 1 : 0]); }
     R.trace = trace;
     ok("the pig farmer led the wild pig into the sty", !!wild && wild.sty === P && leads > 0, { pigs: P.pigs.length, leads, log: PF.log.filter(e => /lead|stock|fetch|noWild/.test(e.kind)).slice(-6) });

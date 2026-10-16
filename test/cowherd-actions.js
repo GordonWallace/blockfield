@@ -288,7 +288,9 @@ module.exports = async (pg, out) => {
     ok("two wild cows spawned outside the village pasture", wild.length === 2 && wild.every(m => !m.pasture), wild.map(m => [m.position.x.toFixed(0), m.position.z.toFixed(0)]));
     BF.sky.setTime(0.06);
     let leads = 0;
-    for (let i = 0; i < 30000 && P.cows.length < 2; i++) { step(); if (S.task && S.task.kind === "fetch" && S.stage !== "walk" && i % 20 === 0) leads++; if (BF.sky.time > 0.45) BF.sky.setTime(0.06); }
+    // working hours only, and the next morning comes: a failed fetch is tried again at a time of day (js/cowherd.js pickTask stockAt, a
+    // tenth of a day later or the next morning), so a clock put back on the same day never reached it and one failed lead failed the test
+    for (let i = 0; i < 30000 && P.cows.length < 2; i++) { step(); if (S.task && S.task.kind === "fetch" && S.stage !== "walk" && i % 20 === 0) leads++; if (BF.sky.time > 0.45) { BF.sky.day += 1; BF.sky.setTime(0.06); } }
     ok("the cowherd led wild cows into the empty pasture until it held 2", P.cows.length >= 2, { cows: P.cows.length, wild: wild.map(m => !!m.pasture), log: C.log.filter(e => /lead|stock|fetch|noWild/.test(e.kind)).slice(-6) });
     ok("it led them (it walked with a cow behind it)", leads > 0, leads);
     ok("they are inside the field", wild.filter(m => m.pasture === P).every(m => m.position.x > P.fx0 && m.position.x < P.fx1 && m.position.z > P.fz0 && m.position.z < P.fz1));

@@ -83,7 +83,19 @@ const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF
 const selectedItem = () => {
   try { const s = inv().selected && inv().selected(); return s && s.count > 0 ? s : null; } catch (_) { return null; }
 };
-const emit = (...a) => { if (BF.emit) BF.emit(...a); };
+// A cell the player reached across a face edge has a margin address (the raycast walks the unfolded neighbour). Block entities
+// (chests, furnaces, jobsites, signs) and every blockPlaced / blockBroken listener key by the canonical cell, so these hand that on,
+// with a block id turned back to the canonical face's frame. Off the planet (and in a corner wedge) they are the identity.
+const canonCell = (x, y, z, id) => {
+  const W = BF.world, c = W.cell ? W.cell(x, z, {}) : null;
+  if (!c || (c.x === x && c.z === z)) return { x, y, z, id };
+  return { x: c.x, y, z: c.z, id: id != null && c.turn ? W.turnId(id, (4 - c.turn) % 4) : id };
+};
+const emit = (...a) => {
+  if (!BF.emit) return;
+  if (a[0] === "blockPlaced" || a[0] === "blockBroken") { const c = canonCell(a[1], a[2], a[3], a[4]); a[1] = c.x; a[3] = c.z; a[4] = c.id; }
+  BF.emit(...a);
+};
 const canvas = () => BF.renderer.domElement;
 
 // ---------- CSS ----------
@@ -1320,8 +1332,18 @@ function wakeUp() {
   if (S.time > 0.01) S.day = (S.day || 0) + 1;
   S.setTime(0.01);
 }
-const inWorld = (x, z) => Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7;   // inside the world border (false for NaN)
-const worldSpawn = () => ({ x: 8.5, z: 8.5 });   // the fallback respawnPoint uses when there is no spawn point
+// Inside the world (false for NaN): within the border on a flat world; on the planet, a point on a face or in a margin that shows
+// one (not past the atlas, nor in a corner wedge).
+const inWorld = (x, z) => {
+  if (!(Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7)) return false;
+  return !(BF.world.isPlanet && BF.world.isPlanet()) || !!BF.world.canonXZ(x, z);
+};
+// The fallback respawnPoint uses when there is no spawn point or it is off the world. On the planet that is the spawn newWorld chose
+// (BF.worldSpawn: dry temperate land on face 4, js/planetgen.js spawnSearch); on a flat world 8.5, 8.5, as before.
+const worldSpawn = () => {
+  const w = BF.worldSpawn, planet = BF.world.isPlanet && BF.world.isPlanet();
+  return planet && w && inWorld(w.x, w.z) ? { x: w.x, z: w.z } : { x: 8.5, z: 8.5 };
+};
 // Where to stand when respawning at a bed: on it if there is headroom, else on the floor beside it (either half), as in vanilla.
 // A bed in a room with a 2-high ceiling has no headroom on top, and the spawn lift would otherwise put you on the roof. Null if
 // nowhere near the bed fits.
@@ -1340,7 +1362,7 @@ function bedStandSpot(sp) {
 let bedRespawn = null;   // the bed spawn point while its chunk loads (P.update picks the standing spot then)
 // Where to respawn: at the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
 function respawnPoint() {
-  let sp = BF.spawnPoint || { x: 8.5, z: 8.5 };
+  let sp = BF.spawnPoint || worldSpawn();
   if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();   // a spawn point past the border (older saves): back to the world spawn
   bedRespawn = null;
   if (sp.bed) {
@@ -1348,7 +1370,7 @@ function respawnPoint() {
     if (!BF.world.isLoaded(bx, bz)) { bedRespawn = sp; return [sp.x, sp.y + 0.01, sp.z]; }
     if (b && (b.bed || b.tent)) return bedStandSpot(sp) || [sp.x, sp.y + 0.01, sp.z];
     setTimeout(() => actionBar("You have no home bed"), 300);
-    BF.spawnPoint = sp = sp.world && sp.world.x != null ? sp.world : { x: 8.5, z: 8.5 };
+    BF.spawnPoint = sp = sp.world && sp.world.x != null && inWorld(sp.world.x, sp.world.z) ? sp.world : worldSpawn();
   }
   if (sp.y != null && sp.y >= BF.MIN_Y && sp.y < BF.H) return [sp.x, sp.y + 0.01, sp.z];   // /spawnpoint x y z (lifted out if it's inside blocks)
   return [sp.x, surfaceY(sp.x, sp.z), sp.z];
@@ -1431,12 +1453,12 @@ function secondaryDown() {
     }
   }
   if (target && BF.isFurnace(target.id) && useBlk) {
-    openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
+    openInventory("furnace", canonCell(target.x, target.y, target.z)); mouseR = false; return true;
   }
   if (target && BF.isChest(target.id) && useBlk) {
-    openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
+    openInventory("chest", canonCell(target.x, target.y, target.z)); swing(); mouseR = false; return true;
   }
-  if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
+  if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(Object.assign({}, target, canonCell(target.x, target.y, target.z, target.id))); mouseR = false; return true; } // sign editor (js/signs.js)
   if (isBow(selectedItem()) && (creative() || inv().count(BF.I.arrow) > 0)) {   // bow with arrows: start drawing (released in updateDraw); never places or uses a block
     if (drawT <= 0) { drawT = 1e-4; drawStack = selectedItem(); }
     return true;
