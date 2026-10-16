@@ -313,7 +313,7 @@ world.isSolid = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
   if (PLN) { if (!res(x, z)) return true; x = RX; z = RZ; }   // (solidity doesn't depend on facing)
   const c = rawChunk(x, z);
-  if (!c) return true;
+  if (!c) return !world.high;   // not loaded: solid (nothing falls into it), except above the chunk ceiling, where nothing loads
   return BF.SOLID[cblock(c, x - c.cx * CS, y, z - c.cz * CS)] === 1;
 };
 

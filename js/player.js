@@ -25,6 +25,7 @@ let lockWorked = false;       // pointer lock succeeded at least once
 let dragMode = false;         // fallback look mode (no pointer lock)
 let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
+let wasHigh = false;          // above the chunk ceiling last frame
 let onGround = false, inWater = false, headInWater = false;
 let flying = false, sprinting = false, sneaking = false, turbo = false;
 let lastSpaceTap = 0, lastWTap = 0, wTaps = 0;
@@ -2167,10 +2168,14 @@ P.update = function (dt) {
   if (hurtCd > 0) hurtCd -= dt;
   if (attackCd > 0) attackCd -= dt;
 
+  // coming down through the chunk ceiling (js/world.js) onto chunks not loaded yet, which read as solid again: hold still until they are
+  if (wasHigh && !BF.world.high && !BF.world.isLoaded(pos.x, pos.z)) waitingForChunk = true;
+  wasHigh = BF.world.high;
   // spawn: wait until the ground under the player is loaded, then lift out of terrain if needed
   if (waitingForChunk) {
     const W = BF.world;
-    if (W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
+    // (above the chunk ceiling no chunks load, and there is nothing to wait for: js/world.js)
+    if (W.high || W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
         W.isLoaded(pos.x + 1, pos.z - 1) && W.isLoaded(pos.x - 1, pos.z + 1)) {
       waitingForChunk = false;
       const bed = !vehicle && bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);

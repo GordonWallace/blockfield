@@ -540,8 +540,9 @@ function update(budgetMs) {
   lod.sampleMs = performance.now() - ts;
   // speed over the ground (blocks per second), to leave rings alone while the player outruns them
   if (last && last.f === V.f && now > last.t) {
-    const dt = (now - last.t) / 1000;
-    speed += (Math.hypot(V.u - last.u, V.v - last.v) / dt - speed) * Math.min(1, dt * 2);
+    const dt = (now - last.t) / 1000, d = Math.hypot(V.u - last.u, V.v - last.v);
+    if (d > 2000) speed = 0;   // a teleport, not flight
+    else speed += (d / dt - speed) * Math.min(1, dt * 2);
   }
   last = { f: V.f, u: V.u, v: V.v, t: now };
   // height above the ground
@@ -558,7 +559,8 @@ function update(budgetMs) {
     L.show = above < HIDE * L.cell;
     if (!L.show) { if (L.building) { BF.sampler.cancel(L); L.building = null; } if (L.si) L.si.visible = false; continue; }
     if (L.building || (L.mesh && (ff || offset(L, V.f, V.u, V.v) <= MOVE * L.half))) continue;
-    if (L.mesh && speed * L.buildMs / 1000 > 0.5 * L.half) continue;   // too fast for this ring: coarser rings cover until the player slows
+    // too fast for this ring: coarser rings cover until the player slows (while the player is still over it)
+    if (L.mesh && speed * L.buildMs / 1000 > 0.5 * L.half && offset(L, V.f, V.u, V.v) < L.half) continue;
     const c = L.cell * 4;
     start(L, V.f, Math.round(V.u / c) * c, Math.round(V.v / c) * c);
   }
