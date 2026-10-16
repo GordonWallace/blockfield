@@ -372,9 +372,10 @@ function drawLeads() {
     else b = [r.lead.x + 0.5, r.lead.y + 0.75, r.lead.z + 0.5];
     const arr = line.geometry.attributes.position.array;
     const sag = Math.max(0, 1.2 - Math.hypot(a[0] - b[0], a[2] - b[2]) * 0.2);
+    line.position.set(a[0], 0, a[2]);   // the rope's points are relative to the horse end (floating origin, js/view.js)
     for (let i = 0; i < 9; i++) {
       const t = i / 8;
-      arr[i * 3] = a[0] + (b[0] - a[0]) * t; arr[i * 3 + 1] = a[1] + (b[1] - a[1]) * t - Math.sin(t * Math.PI) * sag; arr[i * 3 + 2] = a[2] + (b[2] - a[2]) * t;
+      arr[i * 3] = (b[0] - a[0]) * t; arr[i * 3 + 1] = a[1] + (b[1] - a[1]) * t - Math.sin(t * Math.PI) * sag; arr[i * 3 + 2] = (b[2] - a[2]) * t;
     }
     line.geometry.attributes.position.needsUpdate = true;
   }

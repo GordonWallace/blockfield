@@ -155,6 +155,60 @@ world.init = function (sceneRef) {
   world.solidMat = solidMat; world.liquidMat = liquidMat;
 };
 
+// ---------- the round drawing (planet only) ----------
+// On the planet every chunk mesh also carries where each vertex really is on the sphere ("sphere", relative to the chunk's
+// anchor: its centre at sea level), and the shader mixes the flat and round positions by world.roundK (0 near the ground; near
+// the cube corners js/view.js raises it so the three faces close up). The round position goes through a per-mesh matrix sphM
+// (js/view.js sets it each frame, mapping the anchor-relative sphere into the mesh's own flat frame), so each planet mesh has
+// its own copy of the material; the copies share one shader program.
+const roundK = { value: 0 };
+world.roundK = roundK;
+function planetMaterial(base) {
+  const m = base.clone();
+  m.userData.planet = true;
+  const sphM = { value: new THREE.Matrix4() };
+  m.userData.sphM = sphM.value;
+  const inner = base.onBeforeCompile;
+  m.onBeforeCompile = sh => {
+    inner(sh);
+    sh.uniforms.uK = roundK; sh.uniforms.sphM = sphM;
+    sh.vertexShader = "attribute vec3 sphere;\nuniform float uK;\nuniform mat4 sphM;\n" + sh.vertexShader.replace("#include <begin_vertex>",
+      "vec3 transformed = vec3(position);\nif (uK > 0.0) transformed = mix(transformed, (sphM * vec4(sphere, 1.0)).xyz, uK);");
+  };
+  m.customProgramCacheKey = () => "bf-planet-" + (base === liquidMat ? "l" : "s");
+  return m;
+}
+// Unit directions at the 17 x 17 block corners of the chunk at atlas (ox, oz), and its anchor (centre, sea level) on the sphere.
+function sphereFrame(ox, oz) {
+  const P = BF.planet, f = P.face(ox, oz), u0 = ox - PW * f - PN, v0 = oz - PN, dirs = new Float64Array(17 * 17 * 3), d = [0, 0, 0];
+  for (let z = 0; z <= CS; z++) for (let x = 0; x <= CS; x++) {
+    P.dir(f, u0 + x, v0 + z, d);
+    const o = (z * 17 + x) * 3; dirs[o] = d[0]; dirs[o + 1] = d[1]; dirs[o + 2] = d[2];
+  }
+  return { dirs, anchor: P.pos(f, u0 + 8, v0 + 8, BF.SEA, [0, 0, 0]) };
+}
+// Each chunk-local vertex (x, y, z) at its place on the sphere, relative to the anchor: the corner directions blended across
+// its block (quads can sit at fractions of a block), at radius R + (y - SEA).
+function spherePositions(pos, ox, oz, sph) {
+  const out = new Float32Array(pos.length), D = sph.dirs, A = sph.anchor, R = BF.planet.R, sea = BF.SEA;
+  for (let i = 0; i < pos.length; i += 3) {
+    const x = pos[i], z = pos[i + 2];
+    const ix = Math.max(0, Math.min(CS - 1, Math.floor(x))), iz = Math.max(0, Math.min(CS - 1, Math.floor(z))), fx = x - ix, fz = z - iz;
+    const a = (iz * 17 + ix) * 3, b = a + 3, c = a + 51, e = c + 3;
+    let dx = 0, dy = 0, dz = 0;
+    for (let k = 0; k < 3; k++) {
+      const v = (D[a + k] * (1 - fx) + D[b + k] * fx) * (1 - fz) + (D[c + k] * (1 - fx) + D[e + k] * fx) * fz;
+      if (k === 0) dx = v; else if (k === 1) dy = v; else dz = v;
+    }
+    const r = (R + pos[i + 1] - sea) / Math.hypot(dx, dy, dz);
+    out[i] = dx * r - A[0]; out[i + 1] = dy * r - A[1]; out[i + 2] = dz * r - A[2];
+  }
+  return out;
+}
+
+// Render-space position of an atlas point this frame (js/view.js; the point itself off the planet).
+world.toRender = (x, y, z, out) => BF.view.toRender(x, y, z, out);
+
 world.getBlockLight = (x, y, z) => (BF.light ? BF.light.get(x, y, z) : 0); // block light 0..15 (see light.js)
 
 world.setDaylight = function (l) {
@@ -477,7 +531,7 @@ function unload(key) {
 }
 
 function disposeMeshes(c) {
-  for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); }
+  for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   c.meshes = [];
 }
 
@@ -493,6 +547,7 @@ function neighboursReady(cx, cz) {
 let lastCenter = null, genList = [], meshList = [], simList = [];
 const TW = {};
 let fwdX = 0, fwdZ = -1, lastPlanT = 0;
+let roundPlan = false;
 function plan(pcx, pcz) {
   const R = world.viewDist;
   lastPlanT = performance.now();
@@ -508,8 +563,13 @@ function plan(pcx, pcz) {
     if (d2 > (R + 1.5) * (R + 1.5)) continue;
     let cx = pcx + dx, cz = pcz + dz;
     if (PLN) {   // the wanted set is built in the player's face frame, extended into the margin; each spot is a canonical chunk
-      const ck = resChunk(cx, cz);
-      if (!ck) continue;   // corner wedge
+      let ck = resChunk(cx, cz);
+      if (!ck) {   // corner wedge: nothing to draw flat, but near a corner the round view fills it from the nearest face (js/view.js)
+        if (!roundPlan) continue;
+        const w = BF.planet.canonCell(cx * CS + 8, cz * CS + 8, CCELL);
+        if (w.off) continue;
+        ck = CCH; CCH[0] = Math.floor(w.x / CS); CCH[1] = Math.floor(w.z / CS);
+      }
       cx = ck[0]; cz = ck[1];
     }
     const k = ckey(cx, cz);
@@ -547,7 +607,8 @@ function plan(pcx, pcz) {
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
   if (BF.villageSim && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
-  const center = pcx + "," + pcz + "," + world.viewDist;
+  roundPlan = !!(PLN && BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
+  const center = pcx + "," + pcz + "," + world.viewDist + "," + roundPlan;
   // re-plan on chunk change, and periodically while loading so turning re-prioritises
   if (center !== lastCenter || (world.queueLength > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
   if (world.queueLength > 40) budgetMs = Math.max(budgetMs, 12);
@@ -797,7 +858,7 @@ function buildMesh(c) {
     const v0 = T.pos.length / 3;
     for (let k = 0; k < 4; k++) {
       const q = cs[k];
-      T.pos.push(ox + q[0], q[1], oz + q[2]);
+      T.pos.push(q[0], q[1], q[2]);   // chunk-local: the mesh is placed at the chunk's corner (floating origin, js/view.js)
       T.uv.push(rect[0] + (rect[2] - rect[0]) * uvs[k][0], rect[1] + (rect[3] - rect[1]) * uvs[k][1]);
       const l = shades[k];
       if (tintKind) {
@@ -985,14 +1046,19 @@ function buildMesh(c) {
     g.setAttribute("color", new THREE.Float32BufferAttribute(T.col, 3));
     g.setAttribute("skyl", new THREE.Float32BufferAttribute(T.sky, 1));
     g.setAttribute("bl", new THREE.Float32BufferAttribute(T.bl, 1));
+    if (PLN) g.setAttribute("sphere", new THREE.Float32BufferAttribute(spherePositions(T.pos, ox, oz, sph), 3));
     g.setIndex(T.ind);
     g.computeBoundingSphere();
-    const m = new THREE.Mesh(g, mat);
+    const m = new THREE.Mesh(g, PLN ? planetMaterial(mat) : mat);
     m.renderOrder = order;
     m.matrixAutoUpdate = false;
+    m.position.set(ox, 0, oz); m.updateMatrix();
+    m.userData.chunk = c;
+    if (PLN) m.userData.anchor = sph.anchor;
     scene.add(m);
     c.meshes.push(m);
   };
+  const sph = PLN ? sphereFrame(ox, oz) : null;
   make(S, solidMat, 0);
   make(L, liquidMat, 1);
   c.mesh = true;
