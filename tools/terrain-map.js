@@ -6,17 +6,20 @@
 //      Q=<n> quantizes to an n-colour palette PNG (default 48; Q=0 for full colour) to keep files small;
 //      HS=<k> hill-shade strength multiplier (default 1); EL=1 tints land above the plateau threshold.
 // Generator 3 uses BF.setLimits(gen) (MIN_Y -64, H 3072, SEA 0); heights, the ocean-depth tint and the shading scale with the generator.
+// Generator 4 (the planet): centreX / centreZ are atlas coordinates (js/planet.js), or "spawn" for the world's spawn; a map that runs past a
+// face edge shows the neighbouring face unfolded, as the game reads it there.
 const fs = require("fs"), vm = require("vm"), zlib = require("zlib"), path = require("path");
 const R = path.join(__dirname, "..", "js") + path.sep;
 global.window = global; global.THREE = {}; global.document = {};
 const load = f => vm.runInThisContext(fs.readFileSync(R + f, "utf8"), { filename: f });
 load("blocks.js"); load("noise.js");
 BF.CS = 16;
-load("rivers.js"); load("worldgen.js");
-const [, , out, seed, scale, cx, cz, span, px, gen] = process.argv;
+load("planet.js"); load("planetgen.js"); load("rivers.js"); load("worldgen.js");
+let [, , out, seed, scale, cx, cz, span, px, gen] = process.argv;
 const G = +(gen || 2);
-BF.setLimits(G);
+BF.setLimits(G); BF.state = { gen: G };
 BF.noise = BF.makeNoise(+seed); BF.worldgen.init(BF.noise, { gen: G, biomeScale: +scale });   // (init sets the limits too)
+if (cx === "spawn") [cx, cz] = G === 4 ? BF.planetgen.spawnSearch() : [0, 0];
 const w = BF.worldgen, SEA = BF.SEA, g3 = G >= 3;
 // per-generator height scales: ocean depth tint range, land shading range, plateau tint threshold
 const OCEAN_D = g3 ? 60 : 30, SH_LO = g3 ? 0 : 40, SH_RNG = g3 ? 2400 : 150, EL_T = g3 ? 900 : 100;
@@ -87,4 +90,4 @@ if (!Q) {
   png = Buffer.concat([SIG, chunk("IHDR", ih), chunk("PLTE", Buffer.from(pal.flat())), chunk("IDAT", zlib.deflateSync(buf, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
 }
 fs.writeFileSync(out, png);
-console.log(JSON.stringify(stats), JSON.stringify(BF.rivers._debug()), (png.length / 1024).toFixed(0) + " KB");
+console.log(JSON.stringify(stats), G === 4 ? "" : JSON.stringify(BF.rivers._debug()), (png.length / 1024).toFixed(0) + " KB");

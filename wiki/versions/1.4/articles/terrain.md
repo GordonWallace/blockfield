@@ -28,7 +28,7 @@ Inland, the land climbs onto the high plains over a ramp several thousand blocks
 
 Most continents have a vast, almost flat plateau at roughly y 900 to 1300, with only slow swells of a few blocks. The exact level changes very gently from place to place. Some regions sit on a lower plateau at about y 400 to 600 instead.
 
-Around the world origin the generator always makes a high plain, at about y 1070, so the spawn area is flat, wide and dry. Mountain domes are held back near the origin and only reach full height several thousand blocks out. Climate on the plains is almost the same as at sea level, but a little drier than the lowlands, so there are more grasslands and savannas and fewer forests.
+On the flat mile-high worlds of 1.3 the generator always made a high plain around the world origin, at about y 1070, so the spawn area was flat, wide and dry; the planet has no such special place (see [[page:the-planet]]). Climate on the plains is almost the same as at sea level, but a little drier than the lowlands, so there are more grasslands and savannas and fewer forests.
 
 ## Mountains
 

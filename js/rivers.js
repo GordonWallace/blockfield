@@ -9,7 +9,8 @@
 // API: BF.rivers = { init(noise, macro, opts), at(x, z, out) -> bool }; macro(x, z, o) must fill o.p (height) and o.c (continentalness).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const BF = (G.BF = G.BF || {});
 
 const SPILL_R = 6, RAD = 2, JIT = 0.34, SUPER = 8, CELL = 192;
 // Per-world scale constants (init opts override; the defaults are generator v2's). Generator v3 stretches heights to 0..~1000.
