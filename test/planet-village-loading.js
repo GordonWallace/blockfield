@@ -1,16 +1,19 @@
-// @ci baseline suite=village timeout=300
+// @ci baseline suite=village timeout=420
 // Village loading on the planet (spec r14-15): on a generator-4 world (seed 1337), the player starts on face 4 next to an edge, with a
 // village of the neighbouring face beyond it, and walks across the edge toward the village: it is simulated once its box is within 200 blocks
 // (measured on the planet) and its villagers come out; walking back, it keeps running at 210 (DROP 216) and stops past it (countdown or
 // unload). The village's edge distance reads the same from a point and from that point's margin address (a villager kept in its village's
 // frame past an edge), and a trip corridor between villages on two faces is made of canonical chunk keys joining both villages.
+// (A simulated village's chunks load as data only once every chunk in view is ready (js/world.js simList), and the jump to 195 blocks
+// leaves a fresh view to load first; under CI's software rendering at 1 to 2 fps that alone can take over a minute. The test waits for the
+// village's kept chunks before it looks for villagers.)
 // node test/run.js /tmp/pvl test/planet-village-loading.js
 module.exports = async (pg) => {
   await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
   await pg.waitForTimeout(2000);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
-  const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t }).then(() => true, () => false);
+  const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 500 }).then(() => true, () => false);
   // a village on another face, nearest to one of face 4's edges, and the walk line toward it from face 4 (face 4's frame, perpendicular to
   // the edge), sampled every 4 blocks with the planet edge distance of each canonical point
   const plan = await pg.evaluate(() => {
@@ -48,6 +51,7 @@ module.exports = async (pg) => {
   check(!(await pg.evaluate(k => BF.villageSim.isActive(k), plan.key)), "past the edge, 230 blocks from the village's box, it is not simulated");
   await tp(at(195));
   check(await wait(k => BF.villageSim.isActive(k), plan.key), "195 blocks from its box (measured on the planet) the village is simulated");
+  check(await wait(() => { const K = BF.villageSim.keepKeys; return K.size > 0 && [...K].every(k => BF.world.chunks.has(k)); }, null, 200000), "its kept chunks load (as data, once the view is ready)");
   check(await wait(k => BF.mobs.list.some(m => m.type === "villager" && m.village && m.village.key === k && !m.dead), plan.key, 60000), "its villagers come out");
   // walking back toward the edge: still running at 210, stops past 216
   const back = plan.pts.slice().reverse().find(p => p.d >= 210);
