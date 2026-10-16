@@ -343,6 +343,7 @@ function findSite(m, type, opts, haveFound, wood) {
     if (!bp) return null;
     const rect = [px, pz, px + bp.w - 1, pz + bp.d - 1];
     if (obs.some(o => rectsOverlap(o, rect))) continue;
+    if (BF.worldgen.insideFace && !BF.worldgen.insideFace(rect[0], rect[1], rect[2], rect[3], BF.worldgen.EDGE_KEEP)) continue;   // the planet: never past a face edge
     if (dist(px + bp.w / 2, pz + bp.d / 2) > SITE_RANGE) continue;
     if (type === "sty" && BF.jobs && bp.marks.trough && Math.hypot(px + bp.marks.trough[0][0] + 0.5 - R.x, pz + bp.marks.trough[0][1] + 0.5 - R.z) > Math.max(BF.jobs.RADIUS, (wg && wg.reach) || 0) - 1) continue;   // its trough within the jobless's reach (jobs.js unclaimed)
     evals++;
