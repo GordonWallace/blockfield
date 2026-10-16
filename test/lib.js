@@ -1,4 +1,5 @@
-// Shared test helpers. toVillage: moves the player into the nearest village (mile-high worlds usually don't start next to one) and waits for it to load.
+// Shared test helpers. toVillage: moves the player into the village nearest to where they are (spawn, on a fresh planet; mile-high
+// worlds usually don't start next to one) and waits for it to load. On a generator 3 world it keeps measuring from 0,0, as before.
 exports.toVillage = async pg => {
   const planet = await pg.evaluate(() => {
     const P = BF.planet, p = BF.player.position, on = !!(P && P.isPlanet());
