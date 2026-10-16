@@ -169,7 +169,11 @@ world.init = function (sceneRef) {
 const roundK = { value: 0 };
 world.roundK = roundK;
 world.dayUniform = dayUniform;   // distant terrain (js/lod.js) is lit like an open-sky block
-function planetMaterial(base) {
+// Debug face tints (js/view.js setDebug, the debug screen's Planet section): each face's chunks drawn in its own colour.
+const faceTintOn = { value: 0 };
+world.faceTintOn = faceTintOn;
+const FACE_TINT = [[1, 0.55, 0.55], [0.55, 1, 0.55], [0.6, 0.7, 1], [1, 1, 0.5], [1, 0.6, 1], [0.5, 1, 1]];
+function planetMaterial(base, face) {
   const m = base.clone();
   m.userData.planet = true;
   const sphM = { value: new THREE.Matrix4() };
@@ -178,6 +182,9 @@ function planetMaterial(base) {
   m.onBeforeCompile = sh => {
     inner(sh);
     sh.uniforms.uK = roundK; sh.uniforms.sphM = sphM;
+    sh.uniforms.uTintOn = faceTintOn; sh.uniforms.uFaceCol = { value: new THREE.Vector3(...(FACE_TINT[face] || [1, 1, 1])) };
+    sh.fragmentShader = "uniform float uTintOn;\nuniform vec3 uFaceCol;\n" + sh.fragmentShader.replace("#include <color_fragment>",
+      "#include <color_fragment>\nif (uTintOn > 0.5) diffuseColor.rgb *= uFaceCol;");
     sh.vertexShader = "attribute vec3 sphere;\nuniform float uK;\nuniform mat4 sphM;\n" + sh.vertexShader.replace("#include <begin_vertex>",
       "vec3 transformed = vec3(position);\nif (uK > 0.0) transformed = mix(transformed, (sphM * vec4(sphere, 1.0)).xyz, uK);");
   };
@@ -1142,7 +1149,7 @@ function buildMesh(c) {
     g.setIndex(T.ind);
     g.computeBoundingSphere();
     if (PLN) for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(markUploaded);   // (see purge)
-    const m = new THREE.Mesh(g, PLN ? planetMaterial(mat) : mat);
+    const m = new THREE.Mesh(g, PLN ? planetMaterial(mat, BF.planet.face(ox, oz)) : mat);
     m.renderOrder = order;
     m.matrixAutoUpdate = false;
     m.position.set(ox, 0, oz); m.updateMatrix();

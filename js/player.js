@@ -85,7 +85,19 @@ const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF
 const selectedItem = () => {
   try { const s = inv().selected && inv().selected(); return s && s.count > 0 ? s : null; } catch (_) { return null; }
 };
-const emit = (...a) => { if (BF.emit) BF.emit(...a); };
+// A cell the player reached across a face edge has a margin address (the raycast walks the unfolded neighbour). Block entities
+// (chests, furnaces, jobsites, signs) and every blockPlaced / blockBroken listener key by the canonical cell, so these hand that on,
+// with a block id turned back to the canonical face's frame. Off the planet (and in a corner wedge) they are the identity.
+const canonCell = (x, y, z, id) => {
+  const W = BF.world, c = W.cell ? W.cell(x, z, {}) : null;
+  if (!c || (c.x === x && c.z === z)) return { x, y, z, id };
+  return { x: c.x, y, z: c.z, id: id != null && c.turn ? W.turnId(id, (4 - c.turn) % 4) : id };
+};
+const emit = (...a) => {
+  if (!BF.emit) return;
+  if (a[0] === "blockPlaced" || a[0] === "blockBroken") { const c = canonCell(a[1], a[2], a[3], a[4]); a[1] = c.x; a[3] = c.z; a[4] = c.id; }
+  BF.emit(...a);
+};
 const canvas = () => BF.renderer.domElement;
 
 // ---------- CSS ----------
@@ -461,9 +473,12 @@ function createWorld() {
   if (hasSave() && BF.save.create) {
     Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale })).catch(e => { console.error(e); }).then(done);
   } else {
-    try { BF.newWorld(parseSeed(seedText), { gameMode: mode, biomeScale, gen: 4 }); } catch (e) { console.error(e); }
-    setGameMode(mode);
-    done();
+    const sd = parseSeed(seedText);
+    BF.prepareWorld(sd, 4).then(() => {   // (the planet works out its rivers first)
+      try { BF.newWorld(sd, { gameMode: mode, biomeScale, gen: 4 }); } catch (e) { console.error(e); }
+      setGameMode(mode);
+      done();
+    });
   }
 }
 function savePause() {
@@ -1430,12 +1445,12 @@ function secondaryDown() {
     }
   }
   if (target && BF.isFurnace(target.id) && useBlk) {
-    openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
+    openInventory("furnace", canonCell(target.x, target.y, target.z)); mouseR = false; return true;
   }
   if (target && BF.isChest(target.id) && useBlk) {
-    openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
+    openInventory("chest", canonCell(target.x, target.y, target.z)); swing(); mouseR = false; return true;
   }
-  if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
+  if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(Object.assign({}, target, canonCell(target.x, target.y, target.z, target.id))); mouseR = false; return true; } // sign editor (js/signs.js)
   if (isBow(selectedItem()) && (creative() || inv().count(BF.I.arrow) > 0)) {   // bow with arrows: start drawing (released in updateDraw); never places or uses a block
     if (drawT <= 0) { drawT = 1e-4; drawStack = selectedItem(); }
     return true;

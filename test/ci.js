@@ -16,7 +16,7 @@ const tier = process.argv[2] || 'baseline';
 const outDir = path.resolve(process.argv[3] || 'ci-out');
 const only = process.argv.slice(4);
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci.json'), 'utf8'));
-const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js']);
+const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js', 'bft.js']);
 
 // A test file can carry its own settings in a header line, so adding a test needs no edit to the shared ci.json (parallel PRs
 // kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>[,<name>...]] [soak] [timeout=<s>] [args=<a,b,...>] [reason]`,
