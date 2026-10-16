@@ -4,14 +4,12 @@
 const BF = (window.BF = window.BF || {});
 
 const CS = 16;      // chunk width/depth
-// World limits are per world (BF.MIN_Y lowest y, BF.H exclusive top, BF.SEA sea level, BF.SY0/SY1 section range) and are set by
-// BF.setLimits(gen) (worldgen.init). Legacy generators (1, 2): 0 / 192 / 48; generator 3 (mile-high): -64 / 3072 / 0.
-// Never cache them at load time. See docs/MILE_HIGH_CONTRACT.md.
-if (!BF.setLimits) BF.setLimits = gen => {
-  const L = gen >= 3 ? [-64, 3072, 0] : [0, 192, 48];
-  BF.MIN_Y = L[0]; BF.H = L[1]; BF.SEA = L[2]; BF.SY0 = L[0] >> 4; BF.SY1 = L[1] >> 4;
+// World limits (BF.MIN_Y lowest y, BF.H exclusive top, BF.SEA sea level, BF.SY0/SY1 section range) are the mile-high ones,
+// -64 / 3072 / 0, set by BF.setLimits() (js/worldgen.js, again by worldgen.init). Read them at call time. See docs/MILE_HIGH_CONTRACT.md.
+if (!BF.setLimits) BF.setLimits = () => {
+  BF.MIN_Y = -64; BF.H = 3072; BF.SEA = 0; BF.SY0 = BF.MIN_Y >> 4; BF.SY1 = BF.H >> 4;
 };
-if (BF.H == null) BF.setLimits(1);
+if (BF.H == null) BF.setLimits();
 BF.CS = CS;
 
 // A chunk is a 16x16 column of 16-high sections. c.secs[sy - c.lo] is a Uint16Array(4096) (index (ly << 8 | lz << 4 | lx)) or a
@@ -510,9 +508,7 @@ function updateColumn(c, lx, lz) {
 function createChunk(cx, cz) {
   if (!STONE_ID) { STONE_ID = BF.B.stone; BEDROCK_ID = BF.B.bedrock; }
   const g = BF.worldgen;
-  let lo, hi, data;
-  if (g.generateBand) { const r = g.generateBand(cx, cz); lo = r.lo; hi = r.hi; data = r.vox; }
-  else { hi = BF.H >> 4; lo = 0; data = new Uint16Array(CS * CS * BF.H); g.generate(cx, cz, data); }
+  const r = g.generateBand(cx, cz), lo = r.lo, hi = r.hi, data = r.vox;
   const key = ckey(cx, cz);
   const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), mesh: undefined, meshes: [], light: undefined, sky: undefined };
   const e = world.edits.get(key);

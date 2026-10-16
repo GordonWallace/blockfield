@@ -21,7 +21,7 @@
 // valley, with all of their water.
 //
 // at(f, u, v, out) returns the nearest river to a column: d (distance to the centre line), w (half width),
-// rs (water surface), the same fields Blockfield's rivers.at() fills, so terrain carving ports across.
+// rs (water surface). BF.rivers (at the end of this file) answers the same for atlas columns, for terrain carving and maps.
 (() => {
 "use strict";
 const G = typeof window !== "undefined" ? window : self;   // self: also loaded in the sampling workers (r14-05)
@@ -933,4 +933,38 @@ BF.planetRivers.steps = function* (seed, sample, ground, pre) {
   return { at, lakeAt, lakeRim, lakes, isLake, entry, geom, link, down, main, acc, rs, p, filled, rank, order: ord, sea, U, V, D, nb, curve, view, halfWidth, inFace, faceOf, stats, M, NS, NN,
     pre };   // (pre: the node samples, as handed in or worked out: a copy of the network can start from them)
 };
+
+// ---------- BF.rivers: the world's rivers and lakes by atlas column ----------
+// js/worldgen.js hands over the network (usePlanet(fn), fn returning the solved network, solving it on first use); atlas columns are
+// looked up at the centre of the canonical cell they show, so a column reads the same river through either face of an edge.
+// API: BF.rivers = { at(x, z, out) -> bool, lakeAt(x, z), lakeRim(x, z), usePlanet(fn), planet(), setEnabled(v), REACH }
+let PNET = null, enabled = true;
+const PC = {}, PR = { d: 0, w: 0, rs: 0, li: -1 };
+function usePlanet(net) { PNET = net || null; }
+// Nearest river influence at (x, z). out: d (distance from the centre line), w (half width), rs (water surface), sd = d - w.
+// Returns false when no river is within REACH blocks of the bank.
+function riverAt(x, z, out) {
+  if (!enabled || !PNET) return false;
+  const c = BF.planet.canon(x + 0.5, z + 0.5, PC);
+  if (c.off) return false;
+  const r = PNET().at(c.f, c.u, c.v, PR);
+  if (r.li < 0 || r.d - r.w > REACH) return false;
+  out.d = r.d; out.w = r.w; out.rs = r.rs; out.sd = r.d - r.w;
+  return true;
+}
+// The water level of the lake at or next to atlas column (x, z), or -1 (the column holds water only where its ground is below it).
+function lakeAt(x, z) {
+  if (!PNET || !enabled) return -1;
+  const c = BF.planet.canon(x + 0.5, z + 0.5, PC);
+  return c.off ? -1 : PNET().lakeAt(c.f, c.u, c.v);
+}
+// The level of a lake whose drawn water ends just short of atlas column (x, z), or -1 (see lakeRim above).
+function lakeRim(x, z) {
+  if (!PNET || !enabled) return -1;
+  const c = BF.planet.canon(x + 0.5, z + 0.5, PC);
+  return c.off ? -1 : PNET().lakeRim(c.f, c.u, c.v);
+}
+// setEnabled(false) makes at() report no river and no lake (used by overview maps wider than a few km, where a river is under a pixel);
+// it does not change the network, so chunk generation is unaffected.
+BF.rivers = { at: riverAt, lakeAt, lakeRim, usePlanet, planet: () => (PNET ? PNET() : null), setEnabled(v) { enabled = !!v; }, REACH };
 })();

@@ -2,7 +2,7 @@
 // the slow part of the solve. js/main.js prepareWorld splits the nodes between a few of these and hands the samples to
 // BF.worldgen.solveRivers. Message in: { seed, villages, from, to }; out: { from, to, e, p, sea, rain } (arrays over all nodes, filled
 // from `from` to `to`).
-importScripts("blocks.js", "noise.js", "planet.js", "planetgen.js", "rivers.js", "planetrivers.js", "worldgen.js");
+importScripts("blocks.js", "noise.js", "planet.js", "planetgen.js", "planetrivers.js", "worldgen.js");
 onmessage = ev => {
   const { seed, villages, from, to } = ev.data;
   BF.CS = 16; BF.state = { gen: 4 };

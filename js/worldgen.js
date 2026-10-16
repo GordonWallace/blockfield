@@ -1,30 +1,21 @@
 // Terrain generation: continuous climate (temperature, humidity, continentalness, erosion, weirdness)
 // drives smoothly blended heights and climate-adjacent biomes; caves, ores, trees, plants and villages.
-// API: BF.worldgen = { init(noise, {gen, biomeScale}), generate(cx, cz, vox) (gen 1/2, 192-high column), generateBand(cx, cz) -> {lo, hi, vox},
+// API: BF.worldgen = { init(noise, {biomeScale, villages}), generateBand(cx, cz) -> {lo, hi, vox},
 //                      generateRange(cx, cz, sy0, sy1) -> Uint16Array, heightAt(x, z), biomeAt(x, z), tintAt(x, z),
 //                      villagesNear(x, z, r), nearestVillage(x, z) }
-// Generator 3 ("mile high") works in absolute signed y with limits BF.MIN_Y = -64, BF.H = 3072, BF.SEA = 0 (BF.setLimits(gen)).
+// One world: the planet (generator 4, js/planet.js atlas coordinates). It works in absolute signed y with the mile-high limits
+// BF.MIN_Y = -64, BF.H = 3072, BF.SEA = 0. The flat generators 1 to 3 were retired in 1.4 (spec r14-24); the terrain they left is
+// generator 3's ("mile high"), which the planet samples on the sphere, so its functions keep their names (relief3, climate3, caves3...).
 (() => {
 "use strict";
 const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
 const BF = (G.BF = G.BF || {});
 let noise;
-// Generator 3's noise fields at a world position (x, z). N2 / FB: 2D simplex noise and fbm with wavelength L and offsets a, b. WARP: the
+// The terrain's noise fields at an atlas position (x, z), from js/planetgen.js (set by init): they sample 3D noise at the point on the
+// sphere, so the terrain is seamless across face edges. N2 / FB: simplex noise and fbm with wavelength L and offsets a, b. WARP: the
 // position (x, z) moved by a domain warp of two terms (wavelength L, amplitude A, fields at offsets ax, az for x and bx, bz for z; then
-// the same with L2, A2), into out. C3: a 3D field at block height y,
-// wavelength LH across and LV up, offsets a, b, c. These are exactly the expressions they stand for, so generators 1 to 3 are unchanged;
-// generator 4 (the planet) swaps in js/planetgen.js's versions, which sample 3D noise at the point on the sphere: the same formulas,
-// wavelengths and amplitudes make the planet's terrain, seamless across face edges.
+// the same with L2, A2), into out. C3: a 3D field at block height y, wavelength LH across and LV up, offsets a, b, c.
 let N2, FB, WARP, C3;
-function flatSampler() {
-  N2 = (x, z, L, a, b) => noise.n2(x / L + a, z / L + b);
-  FB = (x, z, L, a, b, o) => noise.fbm(x / L + a, z / L + b, o);
-  WARP = (x, z, L, A, ax, az, bx, bz, L2, A2, ax2, az2, bx2, bz2, out) => {
-    out[0] = x + noise.n2(x / L + ax, z / L + az) * A + noise.n2(x / L2 + ax2, z / L2 + az2) * A2;
-    out[1] = z + noise.n2(x / L + bx, z / L + bz) * A + noise.n2(x / L2 + bx2, z / L2 + bz2) * A2;
-  };
-  C3 = (x, y, z, LH, LV, a, b, c) => noise.n3(x / LH + a, y / LV + b, z / LH + c);
-}
 
 // ---------- biomes ----------
 const OCEAN = 0, BEACH = 1, SNOWY_BEACH = 2, STONY_SHORE = 3, RIVER = 4, PLAINS = 5, FOREST = 6, FLOWER_FOREST = 7,
@@ -125,22 +116,12 @@ const smooth = (a, b, x) => {
 };
 const lerp = (a, b, t) => a + (b - a) * t;
 
-// continentalness -> base height (piecewise linear)
-const CONT_X = [-1.2, -0.4, -0.25, -0.15, -0.09, -0.02, 0.2, 0.5, 1.2];
-const CONT_Y = [24, 29, 37, 44, 48.2, 50.5, 54, 60, 64];
-function contBase(c) {
-  if (c <= CONT_X[0]) return CONT_Y[0];
-  for (let i = 1; i < CONT_X.length; i++)
-    if (c < CONT_X[i]) return lerp(CONT_Y[i - 1], CONT_Y[i], (c - CONT_X[i - 1]) / (CONT_X[i] - CONT_X[i - 1]));
-  return CONT_Y[CONT_Y.length - 1];
-}
 // temperature / humidity band thresholds (fbm units; roughly 16/22/27/19/16 % of the world)
 const BANDS = [-0.3, -0.1, 0.12, 0.3];
 const band = v => (v < BANDS[0] ? 0 : v < BANDS[1] ? 1 : v < BANDS[2] ? 2 : v < BANDS[3] ? 3 : 4);
 
-// Generator version of the current world (BF.state.gen; 1 = the original generator, kept so saved worlds have no seams) and the
-// relative biome size (1 = original size). Set by init().
-let GEN = 1, SC = 1;
+// The relative biome size of the current world (1 = original size; it scales the climate noise). Set by init().
+let SC = 1;
 // Village generator of the current world (BF.state.villages): 1 = classic (8-25 buildings, roster capped at 24, kept for saved worlds),
 // 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
 // 3 = as 2, with at least 4 villagers (a miner, a farmer, a forester and a toolsmith, js/mobs.js villageRoster) and a garden with trees in desert villages.
@@ -163,23 +144,21 @@ let GEN = 1, SC = 1;
 //     a pasture always has a grass floor, a horse paddock is a stable laid out as the builder's (blueprints.js "stable"). There is no spawn
 //     village: every village is a region village on the strict site rules. Worlds saved with 9 or less keep theirs.
 let VGEN = 1;
-let PG = null;            // generator 4: BF.planetgen (js/planetgen.js): the 3D noise sampler, the continents and the spawn search
-let PLANET = false;       // generator 4, the planet: generator 3's terrain sampled on the sphere (columns are canonical atlas cells)
+let PG = null;            // BF.planetgen (js/planetgen.js): the 3D noise sampler, the continents, the climate bands and the spawn search
 let REC = false;          // recordBuilding is running (builders' blueprints): windows are panes whatever the world's village generator
 const winB = () => (VGEN >= 7 || REC ? BF.B.glass_pane : BF.B.glass);
 const BAKER_POP = 15;     // village generator 6: a baker per this many villagers (js/mobs.js villageRoster reads BF.worldgen.BAKER_POP)
 const PIG_POP = 10;       // village generator 8: villages of this many villagers on grass may get a pig farmer and a sty (js/mobs.js villageRoster reads BF.worldgen.PIG_POP)
 const COWHERD_POP = 10;   // village generator 5: villages of this many villagers on grass get a cowherd and a pasture (js/mobs.js villageRoster reads BF.worldgen.COWHERD_POP)
-// World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
-BF.setLimits = function (gen) {
-  const L = gen >= 3 ? [-64, 3072, 0] : [0, 192, 48];
-  BF.MIN_Y = L[0]; BF.H = L[1]; BF.SEA = L[2]; BF.SY0 = L[0] >> 4; BF.SY1 = L[1] >> 4;
+// World limits (see docs/MILE_HIGH_CONTRACT.md): MIN_Y, H (exclusive top), SEA, and the section range SY0 .. SY1
+BF.setLimits = function () {
+  BF.MIN_Y = -64; BF.H = 3072; BF.SEA = 0; BF.SY0 = BF.MIN_Y >> 4; BF.SY1 = BF.H >> 4;
 };
 // Slow climate fields at a (warped) position. Writes into K.
 const WA1 = [0, 0];
 const K = { t: 0, hu: 0, c: 0, e: 0, wd: 0, wx: 0, wz: 0, u: 0, p: 0, pm: 0, lo: 0, mt: 0, sp: 0, mp: 0, el: 0 };
-// v2 fields: climate zones and continents scale with SC, continents are big (thousands of blocks) and separated by open ocean.
-function rawFields2(x, z) {
+// The slow fields: climate zones scale with SC; the continents are js/planetgen.js's, and so are temperature and humidity (its climate bands).
+function rawFields(x, z) {
   const q = Math.sqrt(SC), wl = 230 * q, wa = 48 * q;
   WARP(x, z, wl, wa, 11.1, -7.7, -31.3, 5.5, 60, 8, 3.3, 0, 0, -9.9, WA1);
   const wx = WA1[0], wz = WA1[1];
@@ -187,59 +166,24 @@ function rawFields2(x, z) {
   const LT = 2400 * SC, LH = 2000 * SC;
   K.t = FB(wx, wz, LT, 41.37, -17.71, 2) * 0.85;
   K.hu = FB(wx, wz, LH, 311.7, -173.3, 2) * 0.85;
-  // continentalness: its own big warp gives coastlines that wander; contrast keeps the oceans wide and the continents solid
-  const d2 = x * x + z * z;     // land is forced around the origin so the default spawn is on a continent
-  if (GEN >= 3) {
-    K.c = cont3(x, z);
-    if (PLANET) PG.climate(wx, wz, K.c, K);   // the planet: temperature and humidity from its climate bands (K.el: climate latitude)
-  } else {
-    const LC = CONT_L * (1 + 0.12 * (SC - 1));
-    const cx = x + noise.n2(x / (LC * 0.45) + 7.7, z / (LC * 0.45) - 3.1) * LC * 0.09, cz = z + noise.n2(x / (LC * 0.45) - 13.9, z / (LC * 0.45) + 21.3) * LC * 0.09;
-    K.c = noise.fbm(cx / LC - 517.1, cz / LC + 229.9, 5) * 2.0 - 0.15 + 1.3 * (1 - smooth(62500, 5760000, d2));
-  }
+  K.c = cont3(x, z);
+  PG.climate(wx, wz, K.c, K);   // temperature and humidity from the planet's climate bands (K.el: climate latitude)
   const LE = 1700 * q, LW = 600 * Math.pow(SC, 0.6), LU = 3600 * q;
   K.e = FB(wx, wz, LE, 77.7, 901.3, 3);
   K.wd = FB(wx, wz, LW, -201.1, 44.4, 2);
   K.u = FB(wx, wz, LU, 613.3, -88.8, 3);
-  if (GEN >= 3) {       // v3: plateau level selector and plateau coverage mask (very long wavelengths)
-    // unwarped coordinates: the short-wavelength biome warp would squeeze these slow fields into steep steps
-    const LL = 12000 * q;
-    K.p = FB(x, z, LL, 905.1, -311.3, 2);
-    K.pm = 0; K.mt = 0;
-    if (OPEN_SEA && K.c <= -0.13) K.sp = K.mp = K.lo = 0;   // (open sea: relief3 doesn't read them there, see riverCol)
-    else limWeights(x, z);     // K.sp plateau weight, K.mp massif weight, K.lo low-plateau weight (all slope limited)
-  }
+  // plateau level selector and plateau coverage mask (very long wavelengths)
+  // unwarped coordinates: the short-wavelength biome warp would squeeze these slow fields into steep steps
+  const LL = 12000 * q;
+  K.p = FB(x, z, LL, 905.1, -311.3, 2);
+  K.pm = 0; K.mt = 0;
+  if (OPEN_SEA && K.c <= -0.13) K.sp = K.mp = K.lo = 0;   // (open sea: relief3 doesn't read them there, see riverCol)
+  else limWeights(x, z);     // K.sp plateau weight, K.mp massif weight, K.lo low-plateau weight (all slope limited)
 }
-const CONT_L = 14000;    // continent wavelength at biome scale 1
-// v3 continents: wavelength (biome scale 1), contrast, bias (about 30% land), coast roughness, warp wavelength and amplitude (x wavelength), octaves
-const CONT3_L = 90000, CONT3_K = 5.0, CONT3_BIAS = -0.875, CONT3_ROUGH = 0.15, CONT3_WL = 1.2, CONT3_WA = 0.12, CONT3_OCT = 3;
-// v3: continentalness alone (same formula as rawFields2), for the coarse slope-limiter grid
+// continentalness alone (as rawFields), for the coarse slope-limiter grid
 function contOnly(x, z) { return cont3(x, z); }
-// v3 continents: broad landmasses (Earth-like shapes, smaller): a smooth 3-octave field on a long wavelength with a large slow
-// warp gives big bodies with a few peninsulas and bays; a weak short octave roughens the coastline without breaking it into
-// arms and islands. Contrast is low so continentalness rises gently inland (wide lowlands before the plateau ramps).
-// On the planet the continents are js/planetgen.js's (this field in 3D, turned per seed to keep the cube corners in open sea).
-function cont3(x, z) { return PLANET ? PG.cont(x, z) : contRaw3(x + CONT3_OX, z + CONT3_OZ) + 1.3 * (1 - smooth(62500, 5760000, x * x + z * z)); }
-// The continent field is shifted so the origin (default spawn) lies well inside a big landmass: init() searches for the point
-// farthest inland (highest field) within one wavelength and moves it to the origin.
-let CONT3_OX = 0, CONT3_OZ = 0;
-function placeHome3() {
-  CONT3_OX = CONT3_OZ = 0;
-  const LC = CONT3_L * (1 + 0.12 * (SC - 1)), st = LC / 16;
-  let best = -1e9, bx = 0, bz = 0;
-  for (let j = -16; j <= 16; j++) for (let i = -16; i <= 16; i++) {
-    const x = i * st, z = j * st, v = contRaw3(x, z) - 0.15 * (i * i + j * j) / 256;   // prefer nearby
-    if (v > best) { best = v; bx = x; bz = z; }
-  }
-  CONT3_OX = Math.round(bx); CONT3_OZ = Math.round(bz);
-}
-function contRaw3(x, z) {
-  const LC = CONT3_L * (1 + 0.12 * (SC - 1)), WL = LC * CONT3_WL, WA = LC * CONT3_WA;
-  const cx = x + noise.n2(x / WL + 7.7, z / WL - 3.1) * WA, cz = z + noise.n2(x / WL - 13.9, z / WL + 21.3) * WA;
-  const big = noise.fbm(cx / LC - 517.1, cz / LC + 229.9, CONT3_OCT);
-  const rough = noise.n2(cx / (LC * 0.11) + 91.3, cz / (LC * 0.11) - 37.7) * CONT3_ROUGH;
-  return big * CONT3_K + rough + CONT3_BIAS;
-}
+// The continents are js/planetgen.js's (generator 3's continent field in 3D, turned per seed to keep the cube corners in open sea).
+function cont3(x, z) { return PG.cont(x, z); }
 // Slope-limited plateau and massif weights on a coarse grid (CG blocks). Raw weights at the nodes may change abruptly (continent
 // edges are steep in continentalness); each node then takes min over a disc of (raw weight + slope * distance), which caps
 // how fast the weight (and so the height) can rise anywhere, so escarpments become long ramps and massifs broad domes.
@@ -270,12 +214,12 @@ function tileCache(width, limit, extra = 0) {   // (extra: more values after the
 const CRAW = tileCache(3, 1600, 2 * (TN / 16)), CLIS = tileCache(2, 600), CLIM = tileCache(3, 400);
 function rawFill(A, o, i, j) {
   const x = i * CG, z = j * CG, q = Math.sqrt(SC);
-  const c = contOnly(x, z), d2 = x * x + z * z, home = PLANET ? 0 : 1 - smooth(360000, 9000000, d2);   // (no home plateau on the planet)
+  const c = contOnly(x, z);
   const pm = FB(x, z, 18000 * q, 1234.5, -777.7, 2), mt = FB(x, z, 14000 * q, 333.3, -444.4, 2);
   const inland = smooth(0.15, 0.3, c);   // a coastal plain before the ramps start
-  const pl = inland * Math.max(smooth(-0.75, -0.3, pm), home);
+  const pl = inland * smooth(-0.75, -0.3, pm);
   const lo = FB(x, z, 14000 * q, 55.5, -99.9, 2);
-  A[o] = pl; A[o + 1] = pl * smooth(0.05, 0.45, mt) * (1 - 0.97 * home); A[o + 2] = smooth(-0.03, -0.22, lo);
+  A[o] = pl; A[o + 1] = pl * smooth(0.05, 0.45, mt); A[o + 2] = smooth(-0.03, -0.22, lo);
 }
 // offset in CRAW.A of node (i, j)'s raw weights [plateau, massif, low plateau]
 function rawAt(i, j) {
@@ -393,20 +337,6 @@ function limWeights(x, z) {
   K.mp = lerp(lerp(a1, b1, tu), lerp(c1, d1, tu), tw);
   K.lo = lerp(lerp(a2, b2, tu), lerp(c2, d2, tu), tw);
 }
-function rawFields(x, z) {
-  if (GEN >= 2) return rawFields2(x, z);
-  // domain warp: organic, wiggly biome borders
-  const wx = x + noise.n2(x / 230 + 11.1, z / 230 - 7.7) * 48 + noise.n2(x / 60 + 3.3, z / 60) * 8;
-  const wz = z + noise.n2(x / 230 - 31.3, z / 230 + 5.5) * 48 + noise.n2(x / 60, z / 60 - 9.9) * 8;
-  K.wx = wx; K.wz = wz;
-  K.t = noise.fbm(wx / 2400 + 41.37, wz / 2400 - 17.71, 2) * 0.85;
-  K.hu = noise.fbm(wx / 2000 + 311.7, wz / 2000 - 173.3, 2) * 0.85;
-  // continentalness, biased toward land around the origin so the default spawn lands on a continent
-  const d2 = x * x + z * z;
-  K.c = noise.fbm(wx / 2600 - 517.1, wz / 2600 + 229.9, 4) + (d2 < 2250000 ? 0.32 * (1 - smooth(160000, 2250000, d2)) : 0);
-  K.e = noise.fbm(wx / 1100 + 77.7, wz / 1100 + 901.3, 3);
-  K.wd = noise.fbm(wx / 600 - 201.1, wz / 600 + 44.4, 2);
-}
 // The slow fields are sampled on a 4-block lattice (cached) and bilinearly interpolated: identical results
 // for any call order, and ~10x cheaper per column. Nodes live in one preallocated buffer (LAT maps key -> offset): wide auto maps touch
 // millions of fresh nodes, and a typed array per node let the browser grow by gigabytes of short-lived buffers before freeing them.
@@ -418,7 +348,7 @@ function lattice(lx, lz) {
     rawFields(lx * 4, lz * 4);
     o = LAT.size * LAT_W;
     LATB[o] = K.t; LATB[o + 1] = K.hu; LATB[o + 2] = K.c; LATB[o + 3] = K.e; LATB[o + 4] = K.wd; LATB[o + 5] = K.wx - lx * 4; LATB[o + 6] = K.wz - lz * 4;
-    LATB[o + 7] = K.u; LATB[o + 8] = K.p; LATB[o + 9] = K.pm; LATB[o + 10] = K.lo; LATB[o + 11] = K.mt; LATB[o + 12] = K.sp; LATB[o + 13] = K.mp; LATB[o + 14] = PLANET ? K.el : 0;
+    LATB[o + 7] = K.u; LATB[o + 8] = K.p; LATB[o + 9] = K.pm; LATB[o + 10] = K.lo; LATB[o + 11] = K.mt; LATB[o + 12] = K.sp; LATB[o + 13] = K.mp; LATB[o + 14] = K.el;
     LAT.set(key, o);
   }
   return o;
@@ -447,10 +377,9 @@ function fields(x, z) {
 }
 
 // Full column climate. Writes into C (no allocation) and returns the terrain surface height.
-// C.wl is the water level of the column (sea level, or the surface of a v2 river), C.rv is 1 inside a river channel and its banks.
+// C.wl is the water level of the column (sea level, or the surface of a river or lake), C.rv is 1 inside a river channel and its banks.
 const C = { S: 0, h: 0, t: 0, hu: 0, c: 0, e: 0, wd: 0, m: 0, rf: 0, sw: 0, bw: 0, mi: 0, biome: 0, tb: 0, hb: 0, wl: 48, rv: 0, lk: 0 };
-const climate = (x, z) => (GEN >= 3 ? (PLANET ? climateP(x, z) : climate3(x, z)) : GEN >= 2 ? climate2(x, z) : climate1(x, z));
-// The planet: a margin address (the unfolded neighbouring face) is the canonical cell it shows, so a column is the same whichever face's
+// A margin address (the unfolded neighbouring face) is the canonical cell it shows, so a column is the same whichever face's
 // frame asks for it. Outside every face square there is nothing: deep sea.
 const CCELL = {};
 const ownCell = (x, z) => { const c = BF.planet.canonCell(x, z, CCELL); return !c.off && c.x === x && c.z === z; };
@@ -487,202 +416,16 @@ function edgeMaps(f, x0, x1, z0, z1) {
 }
 // whether a mapped position lies in a map's part of the area
 const inMap = (E, X, Z) => X >= E.a0 && X < E.a1 && Z >= E.b0 && Z < E.b1;
-function climateP(x, z) {
+function climate(x, z) {
   const c = BF.planet.canonCell(x, z, CCELL);
   if (!c.off) return climate3(c.x, c.z);
   C.h = BF.MIN_Y + 6; C.t = C.hu = C.e = C.wd = C.m = C.rf = C.sw = C.bw = C.mi = C.rv = C.S = 0; C.c = -1.4;
   C.biome = OCEAN; C.tb = 2; C.hb = 2; C.wl = BF.SEA; C.lk = 0;
   return C.h;
 }
-function climate1(x, z) {
-  const SEA = BF.SEA;
-  C.wl = SEA; C.rv = 0;
-  fields(x, z);
-  const { t, hu, c, e, wd } = K;
-  const hills = noise.fbm(x / 150 + 71.3, z / 150 - 33.1, 4);
-  const land = smooth(-0.13, -0.02, c);
-
-  // continuous terrain shape from climate (no per-biome steps -> no cliffs at borders)
-  const wet = smooth(-0.35, 0.45, hu), hot = smooth(-0.1, 0.45, t);
-  const amp = 6 + 9 * wet + 10 * wet * hot + 4 * smooth(-0.2, 0.2, e < 0 ? -e : 0);
-  let h = contBase(c) + hills * lerp(5, amp, land) + 2.5 * wet * land;
-
-  // mountains where erosion is low, inland
-  const m = smooth(-0.18, -0.45, e) * smooth(-0.06, 0.1, c);
-  if (m > 0) {
-    const r = 1 - Math.abs(noise.fbm(x / 260 - 401.2, z / 260 + 133.4, 5));
-    h += m * (r * r * r * 66 + 12 + hills * 6);
-  }
-  // badlands plateaus (hot, dry, weird)
-  const bw = smooth(0.26, 0.36, t) * (1 - smooth(-0.14, -0.04, hu)) * smooth(0.0, 0.18, wd) * land * (1 - m);
-  if (bw > 0) {
-    const p = 60 + (noise.fbm(x / 110 + 5.5, z / 110 - 8.8, 2) + 0.3) * 26;
-    const step = Math.floor(p / 6) * 6, f = p - step;
-    const terr = step + (f > 4.5 ? (f - 4.5) * 4 : 0);
-    if (terr > h) h = lerp(h, terr, bw);
-  }
-  // swamps / mangroves: low, wet, warm-ish coasts and lowlands
-  const sw = smooth(0.2, 0.36, hu) * smooth(-0.2, -0.06, t) * (1 - smooth(0.02, 0.3, c)) * land * (1 - m);
-  if (sw > 0) h = lerp(h, SEA + 0.35 + hills * 2.6, sw);
-  // mushroom islands, only far out in deep ocean
-  let mi = 0;
-  if (c < -0.34) {
-    mi = smooth(0.6, 0.72, noise.n2(x / 520 + 77.7, z / 520 - 55.5)) * smooth(-0.34, -0.46, c);
-    if (mi > 0) h = lerp(h, SEA + 3 + hills * 7, mi);
-  }
-  // rivers
-  const rv = Math.abs(noise.fbm(K.wx / 640 + 1000.3, K.wz / 640 - 1000.7, 3));
-  const rf = (1 - smooth(0.01, 0.035, rv)) * land * (1 - m * 0.75) * (1 - mi);
-  if (rf > 0 && h > SEA - 3) h -= (h - (SEA - 3)) * rf;
-
-  if (h > 96) h = 96 + (h - 96) * 0.55;
-  h = Math.floor(h);
-  if (h < 4) h = 4; else if (h > BF.H - 10) h = BF.H - 10;
-
-  // ---- discrete biome (dithered borders) ----
-  // border jitter: wavy at ~20-block scale plus a little per-block dither
-  const dj = noise.n2(x / 22 + 7.1, z / 22) * 0.02 + (noise.hash(x, z, 77) - 0.5) * 0.008;
-  const tb = band(t + dj), hb = band(hu - dj);
-  let b;
-  if (mi > 0.5 && h >= SEA - 1) b = MUSHROOM;
-  else if (h < SEA - 1 && c < -0.08) b = OCEAN;
-  else if (rf > 0.5 && h < SEA) b = RIVER;
-  else if (c < -0.03 + dj && h <= SEA + 2 && sw < 0.5) b = smooth(-0.18, -0.45, e) > 0.45 ? STONY_SHORE : tb === 0 ? SNOWY_BEACH : BEACH;
-  else if (c < 0.0 && m > 0.25 && h <= SEA + 7) b = STONY_SHORE;
-  else if (bw > 0.5 + dj * 2) b = BADLANDS;
-  else if (m > 0.3 + dj * 2 && h >= 68) {
-    if (h >= 100) b = tb <= 2 ? PEAKS : STONY_PEAKS;
-    else if (h >= 84) b = tb <= 1 ? SNOWY_SLOPES : tb === 2 ? MOUNTAINS : STONY_PEAKS;
-    else if (tb <= 1) b = tb === 0 ? SNOWY_TAIGA : TAIGA;
-    else if (tb >= 4) b = SAVANNA;
-    else if (wd > 0.22) b = CHERRY;
-    else b = hb <= 2 ? MEADOW : FOREST;
-  } else if (sw > 0.5 + dj * 2) b = tb >= 3 && t > 0.0 ? MANGROVE : SWAMP;
-  else if (tb === 0) b = hb <= 1 ? (wd > 0.3 ? ICE_SPIKES : SNOWY_PLAINS) : SNOWY_TAIGA;
-  else if (tb === 1) b = hb === 4 ? OLD_TAIGA : TAIGA;
-  else if (tb === 2) b = hb <= 1 ? PLAINS : hb === 2 ? (wd > 0.28 ? FLOWER_FOREST : FOREST) : hb === 3 ? BIRCH : DARK_FOREST;
-  else if (tb === 3) b = hb === 0 ? SAVANNA : hb === 1 ? PLAINS : hb === 2 ? FOREST : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
-  else b = hb <= 1 ? DESERT : hb === 2 ? SAVANNA : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
-
-  C.h = h; C.t = t; C.hu = hu; C.c = c; C.e = e; C.wd = wd; C.m = m; C.rf = rf; C.sw = sw; C.bw = bw; C.mi = mi;
-  C.biome = b; C.tb = tb; C.hb = hb;
-  return h;
-}
-
-// ---------- generator v2 ----------
-// continentalness -> base height: wide continental shelf, deep ocean basins, a long gentle rise inland
-const CONT2_X = [-1.4, -0.6, -0.3, -0.12, -0.04, 0.03, 0.2, 0.5, 0.9, 1.6];
-const CONT2_Y = [18, 22, 31, 42, 48.5, 51, 56, 63, 70, 78];
-function contBase2(c) {
-  if (c <= CONT2_X[0]) return CONT2_Y[0];
-  for (let i = 1; i < CONT2_X.length; i++)
-    if (c < CONT2_X[i]) return lerp(CONT2_Y[i - 1], CONT2_Y[i], (c - CONT2_X[i - 1]) / (CONT2_X[i] - CONT2_X[i - 1]));
-  return CONT2_Y[CONT2_Y.length - 1];
-}
-// Uplands: broad, gently tilted plateaus on continental interiors (not mountains), up to ~y125.
-const upland = (x, z) => 82 * smooth(-0.08, 0.5, K.u * 2.1) * smooth(0.05, 0.55, K.c) * (0.3 + 0.7 * smooth(250, 1500, Math.sqrt(x * x + z * z)));  // gentle lowlands around spawn
-// soft ceiling: ~linear below 140, asymptote at the top of the world
-function ceil2(h) {
-  const top = BF.H - 8;
-  return h <= 140 ? h : 140 + (top - 140) * Math.tanh((h - 140) / (top - 140));
-}
-// Terrain height without rivers (K must hold the fields at x, z). `detail`: local hills and the full ridged-noise mountains.
-function relief2(x, z, detail) {
-  const SEA = BF.SEA, { t, hu, c, e, wd } = K;
-  const hills = detail ? noise.fbm(x / 150 + 71.3, z / 150 - 33.1, 4) : 0;
-  const land = smooth(-0.13, -0.02, c);
-  const wet = smooth(-0.35, 0.45, hu), hot = smooth(-0.1, 0.45, t);
-  const hl = upland(x, z);
-  const amp = 6 + 9 * wet + 10 * wet * hot + 4 * smooth(-0.2, 0.2, e < 0 ? -e : 0) + hl * 0.12;
-  let h = contBase2(c) + hills * lerp(5, amp, land) + 2.5 * wet * land + hl;
-  const m = smooth(-0.14, -0.42, e) * smooth(-0.06, 0.1, c);
-  if (m > 0) {
-    const r = 1 - Math.abs(noise.fbm(x / 300 - 401.2, z / 300 + 133.4, detail ? 5 : 3));
-    h += m * (r * r * r * 96 + 14 + hills * 8);
-  }
-  return { h, m, land, hills, hl };
-}
-const MAC = { h: 0 };
-// Smooth height (no local hills, 3-octave ridges) and continentalness for the river network.
-function macro2(x, z, o) {
-  fields(x, z);
-  o.p = ceil2(relief2(x, z, false).h);
-  o.c = K.c;
-}
 const RV = { d: 0, w: 0, rs: 0, sd: 0 };
-function climate2(x, z) {
-  const SEA = BF.SEA;
-  fields(x, z);
-  const { t, hu, c, e, wd } = K;
-  const R = relief2(x, z, true), m = R.m, land = R.land, hills = R.hills;
-  let h = R.h;
-  const wet = smooth(-0.35, 0.45, hu);
-  // badlands plateaus (hot, dry, weird)
-  const bw = smooth(0.26, 0.36, t) * (1 - smooth(-0.14, -0.04, hu)) * smooth(0.0, 0.18, wd) * land * (1 - m);
-  if (bw > 0) {
-    const p = 60 + R.hl * 0.8 + (noise.fbm(x / 110 + 5.5, z / 110 - 8.8, 2) + 0.3) * 26;
-    const step = Math.floor(p / 6) * 6, f = p - step;
-    const terr = step + (f > 4.5 ? (f - 4.5) * 4 : 0);
-    if (terr > h) h = lerp(h, terr, bw);
-  }
-  // swamps / mangroves: low, wet, warm-ish coasts and lowlands
-  const sw = smooth(0.2, 0.36, hu) * smooth(-0.2, -0.06, t) * (1 - smooth(0.02, 0.3, c)) * land * (1 - m);
-  if (sw > 0) h = lerp(h, SEA + 0.35 + hills * 2.6, sw);
-  let mi = 0;
-  if (c < -0.8) {
-    mi = smooth(0.7, 0.8, noise.n2(x / 520 + 77.7, z / 520 - 55.5)) * smooth(-0.8, -0.95, c);
-    if (mi > 0) h = lerp(h, SEA + 3 + hills * 7, mi);
-  }
-  h = ceil2(h);
-  // rivers: a valley floor at the water surface with a flat floodplain, blended into the surrounding terrain
-  let wl = SEA, rv = 0, chan = false;
-  if (land > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
-    const rs = Math.max(SEA, Math.floor(RV.rs)), sd = RV.sd, w = RV.w;
-    const fp = (1 - smooth(w + 3, w + 30, RV.d)) * land;
-    let hr;
-    if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - 3.2 * (1 - q * q); }
-    else hr = rs + 1.4 + smooth(0, 14, sd) * 1.5;
-    h = h + (hr - h) * fp;
-    if (sd < 0 && fp > 0.9) { chan = true; wl = rs; if (h > rs - 1) h = rs - 1; }
-    else if (sd < 3 && h < rs + 1) h = rs + 1;
-    if (sd < 6) rv = 1;
-  }
-  h = Math.floor(h);
-  if (h < 4) h = 4; else if (h > BF.H - 6) h = BF.H - 6;
 
-  // ---- discrete biome (dithered borders) ----
-  // border jitter: wavy plus per-block dither; the dither band widens with biome size (gradients get shallower), so big biomes blend softly
-  const sc = Math.pow(SC, 0.7);
-  const dj = noise.n2(x / (22 * sc) + 7.1, z / (22 * sc)) * 0.02 + (noise.hash(x, z, 77) - 0.5) * 0.008 * (1 + 0.45 * (SC - 1));
-  // thinner air up high: cooler bands, so tall plateaus and ranges turn to taiga and snow
-  const tb = band(t - 0.5 * smooth(70, 175, h) + dj), hb = band(hu - dj);
-  let b;
-  if (mi > 0.5 && h >= SEA - 1) b = MUSHROOM;
-  else if (h < SEA - 1 && c < -0.08) b = OCEAN;
-  else if (chan) b = RIVER;
-  else if (c < -0.03 + dj && h <= SEA + 2 && sw < 0.5) b = smooth(-0.18, -0.45, e) > 0.45 ? STONY_SHORE : tb === 0 ? SNOWY_BEACH : BEACH;
-  else if (c < 0.0 && m > 0.25 && h <= SEA + 7) b = STONY_SHORE;
-  else if (bw > 0.5 + dj * 2) b = BADLANDS;
-  else if (m > 0.3 + dj * 2 && h >= 90) {
-    if (h >= 135) b = tb <= 2 ? PEAKS : STONY_PEAKS;
-    else if (h >= 115) b = tb <= 1 ? SNOWY_SLOPES : tb === 2 ? MOUNTAINS : STONY_PEAKS;
-    else if (tb <= 1) b = tb === 0 ? SNOWY_TAIGA : TAIGA;
-    else if (tb >= 4) b = SAVANNA;
-    else if (wd > 0.22) b = CHERRY;
-    else b = hb <= 2 ? MEADOW : FOREST;
-  } else if (sw > 0.5 + dj * 2) b = tb >= 3 && t > 0.0 ? MANGROVE : SWAMP;
-  else if (tb === 0) b = hb <= 1 ? (wd > 0.3 ? ICE_SPIKES : SNOWY_PLAINS) : SNOWY_TAIGA;
-  else if (tb === 1) b = hb === 4 ? OLD_TAIGA : TAIGA;
-  else if (tb === 2) b = hb <= 1 ? PLAINS : hb === 2 ? (wd > 0.28 ? FLOWER_FOREST : FOREST) : hb === 3 ? BIRCH : DARK_FOREST;
-  else if (tb === 3) b = hb === 0 ? SAVANNA : hb === 1 ? PLAINS : hb === 2 ? FOREST : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
-  else b = hb <= 1 ? DESERT : hb === 2 ? SAVANNA : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
-
-  C.h = h; C.t = t; C.hu = hu; C.c = c; C.e = e; C.wd = wd; C.m = m; C.rf = chan ? 1 : 0; C.sw = sw; C.bw = bw; C.mi = mi;
-  C.biome = b; C.tb = tb; C.hb = hb; C.wl = wl; C.rv = rv;
-  return h;
-}
-
-// ---------- generator v3 ("mile high"): sea level y = 0, ocean floors down to -58, high plains around y 900-1300, ranges up to ~2500 ----------
+// ---------- the terrain (generator 3's, "mile high"): sea level y = 0, ocean floors down to -58, high plains around y 900-1300, ranges up to ~2500 ----------
 // continentalness -> lowland base height: continental shelf, deep basins, coastal lowlands rising to ~100 in the interior
 const CONT3_X = [-1.4, -0.7, -0.35, -0.15, -0.05, 0.03, 0.25, 0.6, 1.0, 1.7];
 const CONT3_Y = [-58, -50, -34, -15, -4, 2.5, 18, 48, 80, 105];
@@ -694,17 +437,14 @@ function contBase3(c) {
 }
 // soft ceiling: linear to 2000, then an asymptote at 2700 (the world is 3072 high; trees need ~40)
 const ceil3 = h => (h <= 2000 ? h : 2000 + 700 * Math.tanh((h - 2000) / 700));
-// thin air: the temperature band shifts down gently with altitude (a thousand blocks up is still cool-temperate)
-const cool3 = h => 0.05 * smooth(0, 1300, h) + 0.6 * smooth(1300, 2600, h);
 // Terrain height without rivers (K must hold the fields at x, z). `detail`: local hills and the full ridged-noise mountains.
 // Plateau weight S, massif weight m and low-plateau weight K.lo come from the slope-limited coarse grid (see nodeLim), so
-// escarpments are ramps ~5 km long (after a 1-2 km coastal plain) and massifs domes ~5 km across. Near the origin a plateau is forced (default spawn).
+// escarpments are ramps ~5 km long (after a 1-2 km coastal plain) and massifs domes ~5 km across.
 function relief3(x, z, detail) {
   const { t, hu, c, e } = K;
   const hills = detail ? FB(x, z, 170, 71.3, -33.1, 4) : 0;
   const land = smooth(-0.13, -0.02, c);
   const wet = smooth(-0.35, 0.45, hu), hot = smooth(-0.1, 0.45, t);
-  const d2 = x * x + z * z, home = PLANET ? 0 : 1 - smooth(360000, 9000000, d2);
   const S = Math.min(1, K.sp) * land;
   const amp = 4 + 6 * wet + 6 * wet * hot + 3 * smooth(-0.2, 0.2, e < 0 ? -e : 0);
   const hA = lerp(4, amp, land);
@@ -712,7 +452,7 @@ function relief3(x, z, detail) {
   const bz = contBase3(c), hk = 0.12 + 0.88 * smooth(0, 12, Math.abs(bz - BF.SEA));
   const low = bz + hills * hA * hk + 2.5 * wet * land;
   // plateau top: level ~910..1110 (the p field tilts it very gently), some regions are lower plateaus (~390..590), plus long low swells
-  const lvl = lerp(1010 + 100 * Math.tanh(K.p / 0.45) - 520 * smooth(0, 1, Math.min(1, K.lo)), 1070, home);
+  const lvl = 1010 + 100 * Math.tanh(K.p / 0.45) - 520 * smooth(0, 1, Math.min(1, K.lo));
   const swell = 5 * N2(x, z, 520, 19.7, -4.4) + (detail ? 0.3 * N2(x, z, 90, -8.2, 13.1) : 0);
   const top = lvl + swell + hills * hA * 0.03;
   const Sn = Math.min(1, S / 0.88), Ss = Sn * Sn * (3 - 2 * Sn);   // the ramp eases in at the foot and levels off into the plain
@@ -721,7 +461,7 @@ function relief3(x, z, detail) {
   const fa = 4 * Ss * (1 - Ss);
   if (fa > 0.02) h += fa * (45 * (FB(x, z, 700, 3.3, -8.8, 2) + 0.15) + hills * 6);
   // mountain massifs on the plateaus: domes rising as m^2 (gentle foot, steeper summit) up to ~2000 above the plain (ceil3 compresses)
-  const m = Math.min(1, K.mp) * land * (1 - 0.97 * home);
+  const m = Math.min(1, K.mp) * land;
   if (m > 0) {
     const q = Math.sqrt(SC);
     let r = 0.7 * (1 - Math.abs(N2(x, z, 2600 * q, -401.2, 133.4)));
@@ -730,12 +470,6 @@ function relief3(x, z, detail) {
     h += g * (2100 * (0.75 + 0.25 * r) + (detail ? hills * 10 : 0));
   }
   return { h, m, land, hills, S };
-}
-// Smooth height (no local hills, 2-octave ridges) and continentalness for the river network.
-function macro3(x, z, o) {
-  rawFields2(x, z);       // nodes are sparse: the raw fields are cheaper than the 4-block lattice (and equal up to interpolation error)
-  o.p = ceil3(relief3(x, z, true).h);
-  o.c = K.c / 2.5;   // the river network's continentalness thresholds were tuned for the v2 contrast (cont3 is 2.5x steeper)
 }
 // Ground height before rivers (K must hold the fields at x, z): relief3 plus badlands mesas, swamps and mushroom islands. Writes the
 // weights climate3 goes on with into G3S.
@@ -758,7 +492,7 @@ function ground3(x, z) {
   const sw = smooth(0.2, 0.36, hu) * smooth(-0.2, -0.06, t) * (1 - smooth(0.02, 0.3, c)) * land * (1 - m) * (1 - S) * (1 - smooth(SEA + 12, SEA + 45, h));
   if (sw > 0) h = lerp(h, SEA + 0.35 + hills * 2.6, sw);
   let mi = 0;
-  if (c < -0.8 && !(PLANET && (PG.nearCorner(x, z) || t < -0.1))) {   // (the planet: not at its cube corners, which stay open sea, nor in cold seas)
+  if (c < -0.8 && !(PG.nearCorner(x, z) || t < -0.1)) {   // (not at the cube corners, which stay open sea, nor in cold seas)
     mi = smooth(0.7, 0.8, N2(x, z, 520, 77.7, -55.5)) * smooth(-0.8, -0.95, c);
     if (mi > 0) h = lerp(h, SEA + 3 + hills * 7, mi);
   }
@@ -784,7 +518,7 @@ function riverCol(dx, dy, dz) {
   const P = BF.planet, g = P.fromDir(dx, dy, dz, RG);
   P.atlas(g.f, g.u, g.v, RA);
   OPEN_SEA = true;
-  try { rawFields2(Math.floor(RA.x), Math.floor(RA.z)); } finally { OPEN_SEA = false; }
+  try { rawFields(Math.floor(RA.x), Math.floor(RA.z)); } finally { OPEN_SEA = false; }
   return RA;
 }
 let INSLICE = false;   // inside a solve slice, which keeps K and G3S once for all its samples
@@ -841,15 +575,14 @@ function solveRivers(pre) {
   }
   return Math.min(0.99, r.value);
 }
-// the network's starting state for a copy in a worker (solving it here first if needed), or null off the planet
+// the network's starting state for a copy in a worker (solving it here first if needed)
 function riverState() {
-  if (!PLANET) return null;
   planetRivers();
   return TAPE && TAPE.v instanceof Float64Array ? { seed: PSEED, pre: PRIV.pre, v: TAPE.v, c: TAPE.c } : null;
 }
 // solve the network from riverState() (in a worker, after init with the same seed); false if it isn't for this world
 function adoptRivers(st) {
-  if (!PLANET || !st || st.seed !== PSEED) return false;
+  if (!st || st.seed !== PSEED) return false;
   if (PRIV) return true;
   PSOLVE = null; TAPE = { v: st.v, c: st.c, miss: -1 }; TMODE = 2; TK = 0;
   while (solveRivers(st.pre) < 1);
@@ -876,8 +609,8 @@ function climate3(x, z) {
     else if (sd < 3 && h < rs + 1 && h >= SEA - 1) h = rs + 1;   // banks, but no levees out into the sea (they would dam the mouth)
     if (sd < 6) rv = 1;
   }
-  // the planet's lakes: water up to the lake's level wherever the ground (before river valleys were cut) is below it
-  if (PLANET && mi === 0 && h < BF.H) {
+  // lakes: water up to the lake's level wherever the ground (before river valleys were cut) is below it
+  if (mi === 0 && h < BF.H) {
     const lw = BF.rivers.lakeAt(x, z);
     if (lw >= SEA && h0 < lw && h < lw) { lake = true; rv = 1; if (lw > wl) wl = lw; }
     else if (lw < 0 && !chan) {   // just past the drawn water, ground a little below the lake is its rim, raised to the water
@@ -892,10 +625,10 @@ function climate3(x, z) {
   const sc = Math.pow(SC, 0.7);
   const dj = N2(x, z, 22 * sc, 7.1, 0) * 0.02 + (noise.hash(x, z, 77) - 0.5) * 0.008 * (1 + 0.45 * (SC - 1));
   // altitude cools slowly; the high plains are a little drier (rain shadow of the escarpment): more steppe and savanna, fewer forests
-  const tb = band(t - (PLANET ? PG.cool(K.el, h) : cool3(h)) + dj), hb = band(hu - 0.16 * S - dj);
+  const tb = band(t - PG.cool(K.el, h) + dj), hb = band(hu - 0.16 * S - dj);
   let b;
   if (mi > 0.5 && h >= SEA - 1) b = MUSHROOM;
-  else if (h < SEA - 1 && c < -0.08) b = PLANET && tb === 0 ? FROZEN_OCEAN : OCEAN;   // (the planet's arctic seas)
+  else if (h < SEA - 1 && c < -0.08) b = tb === 0 ? FROZEN_OCEAN : OCEAN;   // (arctic seas)
   else if (chan || lake) b = RIVER;
   else if (c < -0.03 + dj && h <= SEA + 2 && sw < 0.5) b = smooth(-0.18, -0.45, e) > 0.45 ? STONY_SHORE : tb === 0 ? SNOWY_BEACH : BEACH;
   else if (c < 0.0 && m > 0.25 && h <= SEA + 7) b = STONY_SHORE;
@@ -913,10 +646,9 @@ function climate3(x, z) {
   else if (tb === 2) b = hb <= 1 ? PLAINS : hb === 2 ? (wd > 0.28 ? FLOWER_FOREST : FOREST) : hb === 3 ? BIRCH : DARK_FOREST;
   else if (tb === 3) b = hb === 0 ? SAVANNA : hb === 1 ? PLAINS : hb === 2 ? FOREST : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
   else b = hb <= 1 ? DESERT : hb === 2 ? SAVANNA : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
-  if (PLANET) {   // the planet's bands are wide: meadows on temperate high plains, cherry groves in mild subtropical forest
-    if (b === PLAINS && tb === 2 && h >= 900 + dj * 2000) b = MEADOW;
-    else if (b === FOREST && tb === 3 && wd > 0.24) b = CHERRY;
-  }
+  // the planet's bands are wide: meadows on temperate high plains, cherry groves in mild subtropical forest
+  if (b === PLAINS && tb === 2 && h >= 900 + dj * 2000) b = MEADOW;
+  else if (b === FOREST && tb === 3 && wd > 0.24) b = CHERRY;
 
   C.h = h; C.t = t; C.hu = hu; C.c = c; C.e = e; C.wd = wd; C.m = m; C.rf = chan ? 1 : 0; C.sw = sw; C.bw = bw; C.mi = mi;
   C.biome = b; C.tb = tb; C.hb = hb; C.wl = wl; C.rv = rv; C.S = S; C.lk = lake ? 1 : 0;
@@ -928,7 +660,7 @@ function biomeAt(x, z) {
   const id = C.biome;
   let name = NAMES[id];
   if (id === FROZEN_OCEAN) name = (C.h < -30 ? "Deep " : "") + "Frozen Ocean";
-  else if (id === OCEAN) name = (C.h < (GEN >= 3 ? -30 : 36) ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
+  else if (id === OCEAN) name = (C.h < -30 ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
   else if (id === RIVER && C.lk) name = C.tb === 0 ? "Frozen Lake" : "Lake";   // (the planet's lakes)
   else if (id === RIVER && C.tb === 0) name = "Frozen River";
   return { name, id, height: C.h, temperature: +C.t.toFixed(2), humidity: +C.hu.toFixed(2) };
@@ -969,7 +701,7 @@ function tintK(out, o) {
 const tintTmp = new Float32Array(9);
 function tintAt(x, z) {
   x = Math.floor(x); z = Math.floor(z);
-  if (PLANET) { const c = BF.planet.canonCell(x, z, CCELL); if (!c.off) { x = c.x; z = c.z; } }
+  { const c = BF.planet.canonCell(x, z, CCELL); if (!c.off) { x = c.x; z = c.z; } }
   const CS = BF.CS, cx = Math.floor(x / CS), cz = Math.floor(z / CS);
   const arr = tintCache.get(cx + "," + cz);
   let a = tintTmp, o = 0;
@@ -997,21 +729,18 @@ function fillTint(cx, cz) {
 const entranceAt = (x, z) => N2(x, z, 90, 33.3, -71.1) > 0.62;
 
 // ---------- villages ----------
-// One candidate per REGION x REGION area (regions centred on multiples of REGION, so a region village
-// never crosses a region border). The spawn village is searched outward from the spawn point.
+// One candidate per REGION x REGION area, so a village never crosses a region border. There is no spawn village.
 const REGION = 384, RHALF = 192, VLIM = 70;
 const VILLAGE_BIOMES = [PLAINS, SAVANNA, DESERT, SNOWY_PLAINS, TAIGA, MEADOW];
 const villageCache = new Map();
-let spawnXZ = null;
-const regionOf = v => Math.floor((v + RHALF) / REGION);
 
 // Village regions on the planet (r14-12, the chart method: each face's grid is a flat world for village code). The region grid is laid
 // on each face's own grid (u, v) from its corner, so a region lines up with chunks and never spans two faces. Region (rx, rz) of face
 // f has rx = f * RF + ru and rz = rv, and covers u in [ru * REGION, (ru + 1) * REGION), v likewise. 384 doesn't divide N, so the last
 // row and column of a face are partial. A region whose square comes within EDGE_KEEP of an edge holds no village (the first and last
 // row and column: about 0.9% of regions). A village keeps 4 blocks inside its region, so it, its farms and paths, and its builders'
-// sites (js/builder.js SITE_RANGE outside its box) all stay well clear of the edge. Siting reads C.rv like generator 3, so villages
-// keep off rivers once the planet has them (r14-10).
+// sites (js/builder.js SITE_RANGE outside its box) all stay well clear of the edge. Siting reads C.rv, so villages keep off rivers
+// and lakes (r14-10).
 const RF = 1024, EDGE_KEEP = 64;
 let PN = 0, PW = 0;                // the planet's N and atlas face width (set by init)
 // The region (as [rx, rz]) holding canonical atlas column (x, z); null off every face's grid square (a margin address: callers
@@ -1034,18 +763,7 @@ function canonXZ(x, z) {
   return c.off ? null : c;
 }
 
-// Mirrors main.js's spawn search (terrain only); main then moves the player to the nearest village.
-function findSpawn() {
-  if (spawnXZ) return spawnXZ;
-  let sx = 8, sz = 8;
-  for (let r = 0; r < 400; r += 8) {
-    const a = r * 0.7, x = Math.round(Math.cos(a) * r) + 8, z = Math.round(Math.sin(a) * r) + 8;
-    if (climate(x, z) > BF.SEA + 1 && !C.rv) { sx = x; sz = z; break; }
-  }
-  return (spawnXZ = [sx, sz]);
-}
-
-// relaxed: 0 strict, 1 also forests/snowy taiga, 2 (spawn village only) also beaches, hills, cherry groves
+// relaxed: 0 strict (region villages), 1 also forests/snowy taiga, 2 also beaches, hills, cherry groves, 3 almost anywhere
 function siteOK(x, z, relaxed) {
   const SEA = BF.SEA;
   const h0 = climate(x, z), b = C.biome;
@@ -1096,7 +814,7 @@ function nativeAnimals(biomeId) {
 }
 // The planet: is there wild-horse land within HORSE_R blocks of (x, z), a chunk whose herd region (js/wildlife.js ZONE, zoneKind) is a horse
 // one? Only a village there may draw a stable: elsewhere its stable hand would find no wild horse in reach and give up every day (as a builder
-// only puts up a stable where wild horses live). Generators 1 to 3 keep 1.3's rule. Cached per village centre.
+// only puts up a stable where wild horses live). Cached per village centre.
 const HORSE_R = 100;   // js/stables.js CATCH_R
 const horseCache = new Map();
 function horseLand(x, z) {
@@ -1121,7 +839,7 @@ function paddockPlan(x, z, pop, biomeId) {
   if (!pop || !noise) return [];
   if (biomeId == null) { climate(Math.floor(x), Math.floor(z)); biomeId = C.biome; }
   const nat = nativeAnimals(biomeId);
-  const noHorse = PLANET && !horseLand(x, z);
+  const noHorse = !horseLand(x, z);
   const E = pop / 10 * (0.4 + 0.15 * nat.length) * (0.6 + 0.8 * noise.hash(x, z, 701));
   let n = Math.floor(E);
   if (noise.hash(x, z, 702) < E - n) n++;
@@ -1142,52 +860,26 @@ function villageRegion(rx, rz) {
   let v = villageCache.get(key);
   if (v !== undefined) return v;
   v = null;
-  let rcx = rx * REGION, rcz = rz * REGION;
-  if (PLANET) { const c = pRegionCentre(rx, rz); if (!c) { villageCache.set(key, v); return v; } [rcx, rcz] = c; }
-  const sv = spawnVillage();
+  const c = pRegionCentre(rx, rz);
+  if (!c) { villageCache.set(key, v); return v; }
+  const [rcx, rcz] = c;
   if (noise.hash(rx, rz, 501) < 0.85) {
     const pop = VGEN >= 2 ? villagePop(rx, rz, 530) : 0;
     const E = pop ? villageExtent(pop) : 72, lim = pop ? Math.min(VLIM, RHALF - 4 - E) : VLIM;   // the village stays inside its region
     for (let k = 0; k < 12 && !v; k++) {
       const x = rcx + Math.round((noise.hash(rx, rz, 510 + k) * 2 - 1) * lim);
       const z = rcz + Math.round((noise.hash(rx, rz, 520 + k) * 2 - 1) * lim);
-      if (sv && !pop && Math.abs(x - sv.x) < 260 && Math.abs(z - sv.z) < 260) continue;   // keep clear of the spawn village
-      if (sv && pop && x + E + 16 > sv.minX && x - E - 16 < sv.maxX && z + E + 16 > sv.minZ && z - E - 16 < sv.maxZ) continue;
-      if (siteOK(x, z, 0)) v = layoutVillage(x, z, null, pop);
+      if (siteOK(x, z, 0)) v = layoutVillage(x, z, pop);
     }
   }
   villageCache.set(key, v);
   return v;
 }
-let spawnV;
-function spawnVillage() {
-  if (spawnV !== undefined) return spawnV;
-  spawnV = null;
-  if (VGEN >= 10 || PLANET) return spawnV;   // village generator 10 (and the planet): no spawn village
-  const [sx, sz] = findSpawn();
-  const pop = VGEN >= 2 ? villagePop(sx, sz, 540) : 0;
-  outer: for (let r = 80; r <= 320; r += 8)  // a village somewhere nearby, but not on top of spawn
-    for (const relaxed of r < 120 ? [0, 1, 2] : [0, 1, 2, 3]) {
-      const n = Math.max(8, Math.round(r / 3));
-      for (let k = 0; k < n; k++) {
-        const a = (k / n) * Math.PI * 2 + r;
-        const x = Math.round(sx + Math.cos(a) * r), z = Math.round(sz + Math.sin(a) * r);
-        if (siteOK(x, z, relaxed) && (spawnV = layoutVillage(x, z, [sx, sz], pop))) break outer;
-      }
-    }
-  return spawnV;
-}
 function inVillage(v, x, z, m) { return !!v && x >= v.minX - m && x <= v.maxX + m && z >= v.minZ - m && z <= v.maxZ + m; }
 function villageAt(x, z, m) {
-  if (PLANET) {
-    let r = pRegion(x, z);
-    if (!r) { const c = canonXZ(x, z); if (!c) return null; x = c.x; z = c.z; r = pRegion(x, z); if (!r) return null; }
-    const v = villageRegion(r[0], r[1]);
-    return inVillage(v, x, z, m) ? v : null;
-  }
-  const sv = spawnVillage();
-  if (inVillage(sv, x, z, m)) return sv;
-  const v = villageRegion(regionOf(x), regionOf(z));
+  let r = pRegion(x, z);
+  if (!r) { const c = canonXZ(x, z); if (!c) return null; x = c.x; z = c.z; r = pRegion(x, z); if (!r) return null; }
+  const v = villageRegion(r[0], r[1]);
   return inVillage(v, x, z, m) ? v : null;
 }
 
@@ -1217,7 +909,7 @@ const bedFacing = (b, axis) => axis === "u" ? BF.dirIndex(b.ax, b.az) : BF.dirIn
 // Classic (pop = 0): 8-25 buildings. Sized (pop > 0, village generator 2): the street network is laid out for the village's extent
 // (villageExtent), plots are filled from the plaza outward until there is a bed for each of the pop villagers, then streets are trimmed
 // back to their last building; null when the site cannot hold them all.
-function layoutVillage(cx, cz, spawn, pop) {
+function layoutVillage(cx, cz, pop) {
   const SEA = BF.SEA;
   const y0 = climate(cx, cz), biome = C.biome;
   const style = biome === DESERT ? 1 : (biome === SNOWY_PLAINS || biome === SNOWY_TAIGA || C.tb === 0) ? 2 :
@@ -1233,9 +925,7 @@ function layoutVillage(cx, cz, spawn, pop) {
   const sc = pop ? Math.max(1, Math.sqrt(pop / 18)) : 1; // street length scale
   let occ = [];
   const overlaps = a => occ.some(o => a[0] <= o[2] && a[2] >= o[0] && a[1] <= o[3] && a[3] >= o[1]);
-  const covers = (a, m) => spawn && spawn[0] >= a[0] - m && spawn[0] <= a[2] + m && spawn[1] >= a[1] - m && spawn[1] <= a[3] + m;
   const plaza = [cx - 7, cz - 7, cx + 7, cz + 7];
-  if (covers(plaza, 1)) return null;
   occ.push(plaza);
   v.pads.push({ x0: plaza[0], z0: plaza[1], x1: plaza[2], z1: plaza[3], y: y0, path: true });
 
@@ -1323,7 +1013,7 @@ function layoutVillage(cx, cz, spawn, pop) {
     const c0 = P(0, 0), c1 = P(w - 1, d - 1);
     const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
     let ok = Math.abs(box[0] - cx) < E && Math.abs(box[2] - cx) < E && Math.abs(box[1] - cz) < E && Math.abs(box[3] - cz) < E &&
-      !overlaps(box) && !covers(box, 1);
+      !overlaps(box);
     const du = w >> 1, door = P(du, 0), front = P(du, -1);
     const y = ok ? climate(front[0], front[1]) : 0;
     if (ok && (y < SEA || C.rv)) ok = false;
@@ -1399,7 +1089,7 @@ function layoutVillage(cx, cz, spawn, pop) {
     occ = [plaza].concat(roads.map(r => [r.x0, r.z0, r.x1, r.z1]), v.pads.slice(1).map(p => [p.x0, p.z0, p.x1, p.z1]));
   }
 
-  // Shepherd pens (gen 3+): the jobs plan (js/jobs.js) makes some villagers shepherds, and each one is given a fenced pen with its loom
+  // Shepherd pens: the jobs plan (js/jobs.js) makes some villagers shepherds, and each one is given a fenced pen with its loom
   // beside it. Pens the layout already rolled are used first; missing ones are added here, after everything else, so no other plot moves.
   // v.nb0 keeps the building count of the original layout: the villager roster keys off it (js/mobs.js), so these pens never change it.
   v.nb0 = v.buildings.length;
@@ -1407,7 +1097,7 @@ function layoutVillage(cx, cz, spawn, pop) {
   let keepers = null;
   if (VGEN >= 10 && BF.jobs && BF.jobs.keeperCounts) { try { keepers = BF.jobs.keeperCounts(v); } catch (e) { keepers = {}; } }
   const K10 = p => (keepers && keepers[p]) || 0, RCH = keepers ? Math.max(80, E + 8) : 0;
-  if (GEN >= 3 && BF.jobs && BF.jobs.shepherdCount) {
+  if (BF.jobs && BF.jobs.shepherdCount) {
     let need = 0;
     if (keepers) need = K10("shepherd");
     else try { need = Math.min(BF.jobs.shepherdCount(v), 4); } catch (e) { need = 0; }
@@ -1421,7 +1111,7 @@ function layoutVillage(cx, cz, spawn, pop) {
       const c0 = P(0, 0), c1 = P(w - 1, d - 1);
       const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
       const lim = RCH || 72;
-      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box)) return false;
       const du = w >> 1, door = P(du, 0), front = P(du, -1);
       const y = climate(front[0], front[1]);
       if (y < SEA || C.rv) return false;
@@ -1459,7 +1149,7 @@ function layoutVillage(cx, cz, spawn, pop) {
       const c0 = P(0, 0), c1 = P(w - 1, d - 1);
       const box = [Math.min(c0[0], c1[0]), Math.min(c0[1], c1[1]), Math.max(c0[0], c1[0]), Math.max(c0[1], c1[1])];
       if (Math.max(Math.abs(box[0] - cx), Math.abs(box[2] - cx), Math.abs(box[1] - cz), Math.abs(box[3] - cz)) > E + 16) return false;
-      if (overlaps([box[0] - M, box[1] - M, box[2] + M, box[3] + M]) || covers(box, 2)) return false;
+      if (overlaps([box[0] - M, box[1] - M, box[2] + M, box[3] + M])) return false;
       const mid = P(w >> 1, d >> 1), y = climate(mid[0], mid[1]);
       if (y < SEA || C.rv) return false;
       for (let q = 0; q < d; q += 2) for (let u = 0; u < w; u += 2) {
@@ -1490,7 +1180,7 @@ function layoutVillage(cx, cz, spawn, pop) {
       const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side: the nesting box stands beside the fence
       const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
       const lim = RCH || 72;
-      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box)) return false;
       const du = w >> 1, door = P(du, 0), front = P(du, -1);
       const y = climate(front[0], front[1]);
       if (y < SEA || C.rv) return false;
@@ -1526,7 +1216,7 @@ function layoutVillage(cx, cz, spawn, pop) {
       const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side: the churn stands beside the fence
       const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
       const lim = RCH || 80;
-      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box)) return false;
       const du = w >> 1, door = P(du, 0), front = P(du, -1);
       const y = climate(front[0], front[1]);
       if (y < SEA || C.rv) return false;
@@ -1562,7 +1252,7 @@ function layoutVillage(cx, cz, spawn, pop) {
       const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side, and the row in front of the fence: the trough stands beside the gate
       const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
       const lim = RCH || 80;
-      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box)) return false;
       const du = w >> 1, door = P(du, 0), front = P(du, -1);
       const y = climate(front[0], front[1]);
       if (y < SEA || C.rv) return false;
@@ -1594,7 +1284,7 @@ function layoutVillage(cx, cz, spawn, pop) {
       const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
       const c0 = P(0, 0), c1 = P(w - 1, d - 1);
       const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
-      if (!(Math.abs(box[0] - cx) < RCH && Math.abs(box[2] - cx) < RCH && Math.abs(box[1] - cz) < RCH && Math.abs(box[3] - cz) < RCH) || overlaps(box) || covers(box, 1)) return false;
+      if (!(Math.abs(box[0] - cx) < RCH && Math.abs(box[2] - cx) < RCH && Math.abs(box[1] - cz) < RCH && Math.abs(box[3] - cz) < RCH) || overlaps(box)) return false;
       const du = 8, front = P(du, -1);
       const y = climate(front[0], front[1]);
       if (y < SEA || C.rv) return false;
@@ -1638,7 +1328,7 @@ function layoutVillage(cx, cz, spawn, pop) {
     [cx - 6, cz - 5, "flowers"], [cx + 6, cz + 1, "flowers"]);
   // entry arch + auto sign (js/signs.js): planned on the layout so its footprint is inside the village box (trees, caves, builders keep clear)
   if (BF.signs && BF.signs.planArch) {
-    try { v.arch = BF.signs.planArch(v, { climate: (x, z) => climate(x, z), spawn: !!spawn, region: (PLANET && pRegion(cx, cz)) || [regionOf(cx), regionOf(cz)] }); } catch (e) { console.error(e); v.arch = null; }
+    try { v.arch = BF.signs.planArch(v, { climate: (x, z) => climate(x, z), region: pRegion(cx, cz) || [0, 0] }); } catch (e) { console.error(e); v.arch = null; }
     if (v.arch) occ.push(v.arch.box);
   }
   for (const o of occ) {
@@ -1664,20 +1354,9 @@ function padAt(v, x, z) {
   return null;
 }
 
-function villagesNear(x, z, radius) {
-  if (PLANET) return villagesNearP(x, z, radius);
-  const out = [], sv = spawnVillage();
-  if (sv && Math.hypot(sv.x - x, sv.z - z) <= radius) out.push(sv);
-  for (let rz = regionOf(z - radius); rz <= regionOf(z + radius); rz++)
-    for (let rx = regionOf(x - radius); rx <= regionOf(x + radius); rx++) {
-      const v = villageRegion(rx, rz);
-      if (v && Math.hypot(v.x - x, v.z - z) <= radius) out.push(v);
-    }
-  return out;
-}
-// The planet: regions are walked in the caller's face frame, past an edge into its margin, each sample mapped to its canonical face's
+// Regions are walked in the caller's face frame, past an edge into its margin, each sample mapped to its canonical face's
 // region; villages are canonical records, measured with the planet's distance (x, z may be a margin address).
-function villagesNearP(x, z, radius) {
+function villagesNear(x, z, radius) {
   const out = [], seen = new Set(), a = { x, z }, step = RHALF;
   const n = Math.ceil(2 * radius / step);
   for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
@@ -1692,7 +1371,7 @@ function villagesNearP(x, z, radius) {
   }
   return out;
 }
-const vdist = (v, x, z) => PLANET ? BF.planet.distance({ x, z }, v) : Math.hypot(v.x - x, v.z - z);
+const vdist = (v, x, z) => BF.planet.distance({ x, z }, v);
 function nearestVillage(x, z) {
   let best = null, bd = Infinity;
   for (const v of villagesNear(x, z, REGION * 1.5)) {
@@ -1888,12 +1567,12 @@ function drawShell(b, P, S, style) {
       }
       return;
     case "pen": {
-      // fenced animal pen with a gate facing the road (a gap before gen 3), a trough and hay
+      // fenced animal pen with a gate facing the road, a trough and hay
       for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
         const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
         if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
       }
-      if (GEN >= 3 && BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
+      if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
       P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale); P(w - 2, y, d - 2, B.water);
       P(du, y, -1, B.dirt_path);
       return;
@@ -2091,7 +1770,7 @@ function treeOf(cd) {
   if (b === OLD_TAIGA && r >= 0.86 && r < 0.9 && !entranceAt(tx, tz)) return T("boulder", h + 1);
   if (r >= TREE_DENSITY[b] || !grassy(b)) return null;
   if (h <= SEA + 1 && b !== SWAMP) return null;                 // shore sand
-  if (b === MOUNTAINS && h > (GEN >= 3 ? 1800 : 90)) return null;
+  if (b === MOUNTAINS && h > 1800) return null;
   if (entranceAt(tx, tz)) return null;
   const ty = h + 1;
   switch (b) {
@@ -2178,9 +1857,9 @@ function prep(cx, cz) {
     if (t > topY) topY = t;
   }
   P.cx = cx; P.cz = cz; P.ox = ox; P.oz = oz; P.maxH = maxH; P.minH = minH; P.topY = topY; P.hc = hCache[(CS / 2 + 1) * HW + CS / 2 + 1];
-  // villages touching this chunk (a chunk never straddles two regions; the spawn village may lie anywhere)
-  const pr = PLANET && pRegion(ox, oz);   // (the planet: a chunk in a margin is past an edge, where villages never reach)
-  const vils = P.vils = (PLANET ? [pr && villageRegion(pr[0], pr[1])] : [villageRegion(regionOf(ox), regionOf(oz)), spawnVillage()]).filter(v => v &&
+  // villages touching this chunk (a chunk never straddles two regions)
+  const pr = pRegion(ox, oz);   // (a chunk in a margin is past an edge, where villages never reach)
+  const vils = P.vils = [pr && villageRegion(pr[0], pr[1])].filter(v => v &&
     v.maxX + 2 >= ox && v.minX - 2 < ox + CS && v.maxZ + 2 >= oz && v.minZ - 2 < oz + CS);
   // tree-grid candidates (4x4 cells, margin M around the chunk)
   const cands = P.cands = [];
@@ -2194,15 +1873,15 @@ function prep(cx, cz) {
     if (m) { if (!inMap(E, mapX(m, tx, tz), mapZ(m, tx, tz))) return; }
     else if (tx < x0 || tx >= x1 || tz < z0 || tz >= z1) return;
     if (villageAt(tx, tz, 3)) return;
-    if (PLANET && !m && !ownCell(tx, tz)) return;   // (the neighbouring face's own cells come through its map)
+    if (!m && !ownCell(tx, tz)) return;   // (the neighbouring face's own cells come through its map)
     const h = climate(tx, tz), b = C.biome, wl = C.wl;
     cands.push({ gx, gz, tx, tz, r, h, b, wl, m });
-    if (GEN >= 3 && (r < TREE_DENSITY[b] || (b === DESERT && r < 0.14) || (b === BADLANDS && r < 0.03) || (b === ICE_SPIKES && r < 0.06) ||
+    if ((r < TREE_DENSITY[b] || (b === DESERT && r < 0.14) || (b === BADLANDS && r < 0.03) || (b === ICE_SPIKES && r < 0.06) ||
         (b === OLD_TAIGA && r >= 0.86 && r < 0.9))) ext = Math.max(ext, h + TREE_EXT[b]);
   };
   for (let gz = Math.floor(z0 / 4); gz <= Math.floor((z1 - 1) / 4); gz++)
     for (let gx = Math.floor(x0 / 4); gx <= Math.floor((x1 - 1) / 4); gx++) add(gx, gz, null, null);
-  P.maps = PLANET ? edgeMaps(BF.planet.face(ox, oz), x0 - 3, x1 + 3, z0 - 3, z1 + 3) : [];   // (3: the jungle bushes' reach, see core)
+  P.maps = edgeMaps(BF.planet.face(ox, oz), x0 - 3, x1 + 3, z0 - 3, z1 + 3);   // (3: the jungle bushes' reach, see core)
   for (const E of P.maps) {
     const F0 = BF.planet.W * E.g + BF.planet.N, F1 = F0 + BF.planet.N, N0 = BF.planet.N, N1 = 2 * N0;   // the neighbour's own square
     const Ec = { a0: Math.max(E.a0, x0), a1: Math.min(E.a1, x1), b0: Math.max(E.b0, z0), b1: Math.min(E.b1, z1) };
@@ -2329,9 +2008,9 @@ function ores3(vox, Y0, Y1, cx, cz) {
     const sp = ORE3[q], id = B[sp[6]];
     if (id === undefined || (sp[9] === "mtn" && !mtn)) continue;
     if (sp[0] === 219 && mtn) continue;
-    // (on the planet gravel also runs through deepslate, as in Minecraft: a village near sea level digs its shaft in deepslate, and its miner
+    // (gravel also runs through deepslate, as in Minecraft: a village near sea level digs its shaft in deepslate, and its miner
     // finds the gravel it sifts for the fletcher's flint there)
-    const ds = sp[7] !== undefined ? B[sp[7]] : PLANET && sp[6] === "gravel" ? id : undefined, size = sp[2];
+    const ds = sp[7] !== undefined ? B[sp[7]] : sp[6] === "gravel" ? id : undefined, size = sp[2];
     let lo, hi;
     if (sp[3] === "d") { lo = Math.max(MINY + 5, hc - sp[5]); hi = hc - sp[4]; } else { lo = sp[4]; hi = sp[5]; }
     const curve = sp[8] ? ORE_CURVE[sp[8]] : null;
@@ -2363,14 +2042,9 @@ function ores3(vox, Y0, Y1, cx, cz) {
   }
 }
 
-// Generator 3 band of a column: the sections [lo, hi) that hold everything non-trivial (terrain surface, water, trees, plants, villages and
+// The band of a column: the sections [lo, hi) that hold everything non-trivial (terrain surface, water, trees, plants, villages and
 // ~3 sections of stone below the lowest ground); everything above is air, everything below is what generateRange produces.
 function generateBand(cx, cz) {
-  const { CS } = BF;
-  if (GEN < 3) {
-    const vox = new Uint16Array(CS * CS * BF.H); generate(cx, cz, vox);
-    return { lo: 0, hi: BF.H >> 4, vox };
-  }
   prep(cx, cz);
   let top = P.topY + 4;                     // plants, bushes, lamps
   if (P.ext > 0) top = Math.max(top, P.ext);
@@ -2383,31 +2057,21 @@ function generateBand(cx, cz) {
 }
 // Terrain (and everything else the generator makes) for an arbitrary section range [sy0, sy1); agrees with generateBand on overlaps.
 function generateRange(cx, cz, sy0, sy1) {
-  const { CS } = BF;
   sy0 = Math.max(sy0, BF.SY0); sy1 = Math.min(sy1, BF.SY1);
   if (sy1 <= sy0) return new Uint16Array(0);
-  if (GEN < 3) {
-    const full = new Uint16Array(CS * CS * BF.H); generate(cx, cz, full);
-    return full.slice(sy0 * 4096, sy1 * 4096);
-  }
   prep(cx, cz);
   const vox = new Uint16Array((sy1 - sy0) * 4096);
   core(cx, cz, vox, sy0 * 16, (sy1 - sy0) * 16);
   return vox;
 }
 
-// Legacy full-column generation (generator 1/2: the 192-high column; generator 3: the window y 0..191).
-function generate(cx, cz, vox) {
-  prep(cx, cz);
-  core(cx, cz, vox, 0, 192);
-}
 // Fills `vox` (zeroed, window-indexed: ((y - Y0) * 16 + z) * 16 + x) with absolute y in [Y0, Y0 + NY). Everything written outside the window is skipped.
 function core(cx, cz, vox, Y0, NY) {
   const { CS, H, SEA, B } = BF;
   const ox = cx * CS, oz = cz * CS;
   const STONE = B.stone, WATER = B.water, AIR = 0;
   const step = CS * CS;
-  const Y1 = Y0 + NY, G3 = GEN >= 3, MINY = BF.MIN_Y;
+  const Y1 = Y0 + NY, MINY = BF.MIN_Y;
   WY0 = Y0; WY1 = Y1;
   const maxH = P.maxH;
 
@@ -2447,14 +2111,13 @@ function core(cx, cz, vox, Y0, NY) {
       case DARK_FOREST: if (patch > 0.6) top = B.podzol; break;
       case SAVANNA: if (patch > 0.62) top = B.coarse_dirt; break;
       case MOUNTAINS: case SNOWY_SLOPES: case PEAKS: case STONY_PEAKS: {
-        const snowLine = G3 ? (b === SNOWY_SLOPES ? 1450 : b === PEAKS ? 1800 : 1950) + N2(wx, wz, 23, 0, 0) * 30
-          : (b === SNOWY_SLOPES ? 74 : b === PEAKS ? 92 : 100) + N2(wx, wz, 23, 0, 0) * 4;
+        const snowLine = (b === SNOWY_SLOPES ? 1450 : b === PEAKS ? 1800 : 1950) + N2(wx, wz, 23, 0, 0) * 30;
         const snowy = b !== STONY_PEAKS && h >= snowLine;
         if (snowy) {
           top = slope >= 4 ? STONE : B.snow; fill = slope >= 3 ? STONE : B.snow; depth = 1 + (r * 2 | 0);
           if (b === PEAKS && patch > 0.5 && slope < 3) top = B.packed_ice;
         } else if (b === STONY_PEAKS) top = fill = ((h + (patch * 3 | 0)) % 7 === 0) ? B.calcite : STONE;
-        else if (G3 ? (slope >= 2 || h > 1850 + r * 30) : (slope >= 3 || h > 90 + r * 4)) { top = STONE; fill = STONE; }
+        else if (slope >= 2 || h > 1850 + r * 30) { top = STONE; fill = STONE; }
         else if (b === SNOWY_SLOPES) top = B.snow_grass;
         else if (slope >= 2 && r < 0.3) top = B.gravel;
         break;
@@ -2471,133 +2134,34 @@ function core(cx, cz, vox, Y0, NY) {
     const topY = Math.max(h, wl);
     const yStart = Y0 > MINY ? Y0 : MINY, yEnd = topY < Y1 - 1 ? topY : Y1 - 1;
     let i = x + z * CS + (yStart - Y0) * step;
-    const strataY = G3 ? h - 36 + r * 4 : 40 + r * 4;
+    const strataY = h - 36 + r * 4;
     for (let y = yStart; y <= yEnd; y++, i += step) {
       let v;
       if (y === MINY) v = B.bedrock;
-      else if (!G3 && y <= 3 && noise.hash3(wx, y, wz, 9) < 0.75 - y * 0.22) v = B.bedrock;
-      else if (G3 && y - MINY <= 4 && noise.hash3(wx, y, wz, 9) < 0.85 - (y - MINY) * 0.17) v = B.bedrock;
+      else if (y - MINY <= 4 && noise.hash3(wx, y, wz, 9) < 0.85 - (y - MINY) * 0.17) v = B.bedrock;
       else if (y > h) v = (y === wl && ice) ? B.ice : WATER;
       else if (strata) {
         if (y > h - depth) v = y === h ? top : fill;
         else if (y > strataY) v = STRATA[(y + ((N2(wx, wz, 160, 0, 0) * 3) | 0) + 64) & 63];
-        else v = G3 ? stone3(wx, y, wz) : STONE;
+        else v = stone3(wx, y, wz);
       }
       else if (y === h) v = top;
       else if (y > h - depth) v = fill;
       else if (y > h - depth - depth2) v = under;
-      else v = G3 ? stone3(wx, y, wz) : STONE;
+      else v = stone3(wx, y, wz);
       vox[i] = v;
     }
   }
 
   const vils = P.vils;
   // structures (villages, trees, plants) cannot reach a window that lies far below the lowest ground of the chunk
-  const skipTop = G3 && Y1 <= P.minH - 48;
+  const skipTop = Y1 <= P.minH - 48;
 
   // ---- caves (coarse 3D noise grid, interpolated) ----
-  if (G3) caves3(vox, Y0, Y1, cx, cz); else {
-  const NY = Math.min(GY_MAX, ((maxH + 4) >> 2) + 1);
-  for (let iy = 0; iy < NY; iy++) for (let iz = 0; iz < GX; iz++) for (let ix = 0; ix < GX; ix++) {
-    const wx = ox + ix * 4, wy = iy * 4, wz = oz + iz * 4, gi = (iy * GX + iz) * GX + ix;
-    gA[gi] = noise.n3(wx / 44, wy / 22, wz / 44);
-    gB[gi] = noise.n3(wx / 44 + 57.3, wy / 22 + 11.1, wz / 44 - 33.7);
-    gC[gi] = noise.n3(wx / 72 - 91.7, wy / 36, wz / 72 + 19.3);
-  }
-  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
-    const hi = (z + 1) * HW + x + 1, h = hCache[hi];
-    const minN = Math.min(hCache[hi - 1], hCache[hi + 1], hCache[hi - HW], hCache[hi + HW], h);
-    let limit;
-    if (minN <= SEA + 1 || wlCache[hi] > SEA || wlCache[hi - 1] > SEA || wlCache[hi + 1] > SEA || wlCache[hi - HW] > SEA || wlCache[hi + HW] > SEA)
-      limit = minN - 5;                                        // near water (sea or a river): keep a thick seal
-    else limit = entranceAt(ox + x, oz + z) ? h : h - 4;
-    for (const vil of vils) if (inVillage(vil, ox + x, oz + z, 2)) limit = Math.min(limit, h - 8, vil.minY - 6);
-    if (limit < 5) continue;
-    const ix = x >> 2, iz = z >> 2, fx = (x & 3) / 4, fz = (z & 3) / 4;
-    const w00 = (1 - fx) * (1 - fz), w10 = fx * (1 - fz), w01 = (1 - fx) * fz, w11 = fx * fz;
-    const ny = Math.min(NY, (limit >> 2) + 2);
-    for (let iy = 0; iy < ny; iy++) {
-      const g = (iy * GX + iz) * GX + ix;
-      colA[iy] = gA[g] * w00 + gA[g + 1] * w10 + gA[g + GX] * w01 + gA[g + GX + 1] * w11;
-      colB[iy] = gB[g] * w00 + gB[g + 1] * w10 + gB[g + GX] * w01 + gB[g + GX + 1] * w11;
-      colC[iy] = gC[g] * w00 + gC[g + 1] * w10 + gC[g + GX] * w01 + gC[g + GX + 1] * w11;
-    }
-    let i = x + z * CS + 4 * step;
-    for (let y = 4; y <= limit; y++, i += step) {
-      const iy = y >> 2, fy = (y & 3) / 4;
-      const a = colA[iy] + (colA[iy + 1] - colA[iy]) * fy;
-      const bb = colB[iy] + (colB[iy + 1] - colB[iy]) * fy;
-      // spaghetti tunnels (intersection of two noise zero-sets), wider deeper down
-      let carve = a * a + bb * bb < (y < 30 ? 0.0105 : 0.0075);
-      if (!carve && y > 6 && y < 56) {
-        const c3 = colC[iy] + (colC[iy + 1] - colC[iy]) * fy;           // large caverns
-        carve = c3 > 0.56 + (y > 36 ? (y - 36) * 0.02 : 0) + (y < 12 ? (12 - y) * 0.03 : 0);
-      }
-      if (carve) {
-        const v = vox[i];
-        if (v !== WATER && v !== B.bedrock && v !== B.ice) vox[i] = AIR;
-      }
-    }
-  }
+  caves3(vox, Y0, Y1, cx, cz);
 
-  // ---- deepslate layer (below ~y16, noisy transition 12..20) and rare magma on deep cave floors ----
-  const DEEP = B.deepslate, MAGMA = B.magma_block;
-  if (DEEP !== undefined) {
-    for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
-      const wx = ox + x, wz = oz + z;
-      let i = x + z * CS + step;
-      for (let y = 1; y < 20; y++, i += step) {
-        let v = vox[i];
-        if (v === STONE && (y < 12 || noise.hash3(wx, y, wz, 77) < (20 - y) / 8)) { v = DEEP; vox[i] = DEEP; }
-        if ((v === STONE || v === DEEP) && y >= 5 && y <= 16 && vox[i + step] === AIR && MAGMA !== undefined && noise.hash3(wx, y, wz, 78) < 0.03) vox[i] = MAGMA;
-      }
-    }
-  }
-  }   // end of the legacy (generator 1/2) caves and deepslate
-
-  // ---- ores and pockets (random-walk veins, chunk-local) ----
-  // dsId: block used instead of `id` where the vein passes through deepslate (ore variants; tuff blobs replace deepslate too)
-  const DEEP = B.deepslate;
-  function vein(salt, count, size, ymin, ymax, id, dsId) {
-    rs = (noise.hash(cx, cz, salt) * 4294967296) >>> 0 || 1;
-    let n = count | 0; if (rnd() < count - n) n++;
-    for (let k = 0; k < n; k++) {
-      let px = (rnd() * CS) | 0, pz = (rnd() * CS) | 0, py = ymin + ((rnd() * (ymax - ymin)) | 0);
-      const sz = size * (0.6 + rnd() * 0.6);
-      for (let s = 0; s < sz; s++) {
-        if (px >= 0 && px < CS && pz >= 0 && pz < CS && py > 0 && py < H) {
-          const vi = (py * CS + pz) * CS + px;
-          const cur = vox[vi];
-          if (cur === STONE) vox[vi] = id; else if (dsId !== undefined && cur === DEEP) vox[vi] = dsId;
-        }
-        const d = (rnd() * 6) | 0;
-        if (d === 0) px++; else if (d === 1) px--; else if (d === 2) pz++; else if (d === 3) pz--; else if (d === 4) py++; else py--;
-      }
-    }
-  }
-  if (G3) ores3(vox, Y0, Y1, cx, cz); else {
-  vein(201, 3.5, 30, 6, Math.min(90, maxH), B.gravel);
-  vein(202, 0.7, 18, 20, 58, B.clay);
-  vein(203, 3, 22, 8, 70, B.dirt);
-  vein(211, 20, 9, 5, Math.min(100, maxH), B.coal_ore, B.deepslate_coal_ore);
-  vein(212, 13, 7, 3, 64, B.iron_ore, B.deepslate_iron_ore);
-  vein(213, 3, 6, 2, 32, B.gold_ore, B.deepslate_gold_ore);
-  vein(214, 1.4, 5, 2, 16, B.diamond_ore, B.deepslate_diamond_ore);
-  if (B.lapis_ore !== undefined) {
-    vein(215, 1.5, 6, 2, 40, B.lapis_ore, B.deepslate_lapis_ore);
-    vein(216, 4, 6, 2, 24, B.redstone_ore, B.deepslate_redstone_ore);
-    vein(217, 8, 9, 20, 60, B.copper_ore, B.deepslate_copper_ore);
-    // emerald: single blocks, common-ish in mountain biomes, very rare elsewhere
-    const eb = bCache[((CS >> 1) + 1) * HW + (CS >> 1) + 1], mtn = eb === MOUNTAINS || eb === SNOWY_SLOPES || eb === PEAKS || eb === STONY_PEAKS;
-    vein(218, mtn ? 3 : 0.12, 1, mtn ? 8 : 20, mtn ? Math.min(110, maxH - 3) : 60, B.emerald_ore, B.deepslate_emerald_ore);
-    // stone variety blobs (granite / diorite / andesite in stone, tuff in the deep, dripstone in mid caves)
-    vein(221, 4, 70, 5, 85, B.granite);
-    vein(222, 4, 70, 5, 85, B.diorite);
-    vein(223, 4, 70, 5, 85, B.andesite);
-    vein(224, 2.5, 60, 2, 26, B.tuff, B.tuff);
-    vein(225, 0.7, 40, 25, 55, B.dripstone_block);
-  }
-  }   // end of the legacy ores
+  // ---- ores and pockets ----
+  ores3(vox, Y0, Y1, cx, cz);
 
   // ---- villages ----
   if (!skipTop) for (const vil of vils) drawVillage(vil, ox, oz, vox, (x, z) => hCache[(z - oz + 1) * HW + x - ox + 1]);
@@ -2814,7 +2378,7 @@ function core(cx, cz, vox, Y0, NY) {
     if (noise.hash(gx, gz, 121) >= 0.45) return;
     const tx = gx * 3 + ((noise.hash(gx, gz, 122) * 3) | 0), tz = gz * 3 + ((noise.hash(gx, gz, 123) * 3) | 0);
     if (E) { if (!inMap(E, mapX(E.m, tx, tz), mapZ(E.m, tx, tz))) return; }
-    else if (tx < ox - 3 || tx >= ox + CS + 3 || tz < oz - 3 || tz >= oz + CS + 3 || (PLANET && !(ownCell(gx * 3, gz * 3) && ownCell(gx * 3 + 2, gz * 3 + 2)))) return;   // (cells cut by an edge: none, on either side)
+    else if (tx < ox - 3 || tx >= ox + CS + 3 || tz < oz - 3 || tz >= oz + CS + 3 || !(ownCell(gx * 3, gz * 3) && ownCell(gx * 3 + 2, gz * 3 + 2))) return;   // (cells cut by an edge: none, on either side)
     const h = climate(tx, tz);
     if (C.biome !== JUNGLE || h <= SEA + 1 || entranceAt(tx, tz) || villageAt(tx, tz, 3)) return;
     if (P.maps.length) { bushes.push({ gx, gz, tx, h, tz, m: E ? E.m : null }); return; }
@@ -2851,7 +2415,7 @@ function core(cx, cz, vox, Y0, NY) {
   for (let kind = 1; kind <= 2; kind++) {
     const CELL = kind === 1 ? 40 : 36, salt = kind === 1 ? 631 : 641, pr = kind === 1 ? 0.2 : 0.34;
     // (on the planet: a cell cut by a face edge has no patch, and the neighbouring faces' patches within reach come through their maps)
-    const cut = (gx, gz) => PLANET && !(ownCell(gx * CELL, gz * CELL) && ownCell(gx * CELL + CELL - 1, gz * CELL + CELL - 1));
+    const cut = (gx, gz) => !(ownCell(gx * CELL, gz * CELL) && ownCell(gx * CELL + CELL - 1, gz * CELL + CELL - 1));
     const patch = (gx, gz, m) => {
       if (noise.hash(gx, gz, salt) >= pr) return;
       const R = 3.5 + noise.hash(gx, gz, salt + 3) * 2.5;
@@ -2945,15 +2509,6 @@ function core(cx, cz, vox, Y0, NY) {
       }
     }
   }
-  // rare mushrooms on cave floors
-  rs = (noise.hash(cx, cz, 151) * 4294967296) >>> 0 || 1;
-  if (!G3) for (let k = 0; k < 6; k++) {
-    const x = (rnd() * CS) | 0, z = (rnd() * CS) | 0, pick = rnd(), kind = rnd();
-    for (let y = 40; y > 6; y--) {
-      const vi = (y * CS + z) * CS + x;
-      if (vox[vi] === AIR && vox[vi - step] === STONE) { if (pick < 0.5) vox[vi] = kind < 0.5 ? B.red_mushroom : B.brown_mushroom; break; }
-    }
-  }
 }
 
 // ---------- blueprints (builder villagers, js/blueprints.js) ----------
@@ -2997,7 +2552,6 @@ function sandNear(x, z, r) {
 const FOOT_H = { house: 7, house2: 7, lhouse: 8, big: 9, library: 9, church: 13, smith: 7, farm: 1, bigfarm: 1, pen: 2, hay: 3, garden: 2, coop: 4, pasture: 2, sty: 2, stable: 6 };
 function villageFootprints(f, area) {
   const out = [];
-  if (!PLANET) return out;
   const r0 = Math.max(0, Math.floor(area.u0 / REGION)), r1 = Math.min(Math.ceil(PN / REGION) - 1, Math.floor(area.u1 / REGION));
   const q0 = Math.max(0, Math.floor(area.v0 / REGION)), q1 = Math.min(Math.ceil(PN / REGION) - 1, Math.floor(area.v1 / REGION));
   const ax0 = PW * f + PN + area.u0, ax1 = PW * f + PN + area.u1, az0 = PN + area.v0, az1 = PN + area.v1;
@@ -3008,10 +2562,8 @@ function villageFootprints(f, area) {
   }
   return out;
 }
-// Whether the atlas rectangle [x0, x1] x [z0, z1] lies on one face's grid, at least m blocks from every edge (always true off the
-// planet). Builders (js/builder.js) keep their sites to it, so nothing a village builds reaches past an edge.
+// Whether the atlas rectangle [x0, x1] x [z0, z1] lies on one face's grid, at least m blocks from every edge. Builders (js/builder.js) keep their sites to it, so nothing a village builds reaches past an edge.
 function insideFace(x0, z0, x1, z1, m) {
-  if (!PLANET) return true;
   const f = Math.floor(x0 / PW), u0 = x0 - PW * f - PN, u1 = x1 - PW * f - PN, v0 = z0 - PN, v1 = z1 - PN;
   return f >= 0 && f < 6 && u0 >= m && v0 >= m && u1 < PN - m && v1 < PN - m;
 }
@@ -3024,31 +2576,25 @@ BF.worldgen = {
   PIG_POP,
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
-    noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
-    PLANET = GEN === 4; PG = PLANET ? BF.planetgen : null;
-    if (PLANET) { PN = BF.planet.N; PW = BF.planet.W; }
-    flatSampler();
-    if (PLANET) {   // the planet: 3D noise and js/planetgen.js's continents (set by the planet's size); biome size (SC) scales its climate noise
-      const S = PG.init(n, SC);   // and generator 3's biome-scale fields as it does on generator 3 (spec r14-19)
-      N2 = S.N2; FB = S.FB; WARP = S.WARP; C3 = S.C3;
-    }
-    if (GEN === 3) placeHome3();
-    const pkey = PLANET ? n.seed + ":" + SC : null;
+    noise = n; VGEN = (opts && opts.villages) || 1; BF.setLimits(); SC = Math.max(1, (opts && opts.biomeScale) || 1);
+    PG = BF.planetgen; PN = BF.planet.N; PW = BF.planet.W;
+    // 3D noise and js/planetgen.js's continents (set by the planet's size); biome size (SC) scales its climate noise and the
+    // biome-scale fields (spec r14-19)
+    const S = PG.init(n, SC);
+    N2 = S.N2; FB = S.FB; WARP = S.WARP; C3 = S.C3;
+    const pkey = n.seed + ":" + SC;
     if (pkey !== PSEED) {   // (a network solved for this seed and biome size is kept)
-      const c = pkey !== null ? PCACHE.get(pkey) : null;
+      const c = PCACHE.get(pkey);
       if (c) PCACHE.delete(pkey);
       if (PRIV && PSEED !== null) { PCACHE.set(PSEED, { net: PRIV, tape: TAPE }); while (PCACHE.size > PCACHE_N) PCACHE.delete(PCACHE.keys().next().value); }
       PRIV = c ? c.net : null; TAPE = c ? c.tape : null; PSOLVE = null; PSEED = pkey; TMODE = 0;
     }
-    C.lk = 0; BF.rivers.usePlanet(PLANET ? planetRivers : null);
-    if (PLANET) { /* the planet's rivers: planetRivers(), solved the first time they are needed */ }
-    else if (GEN === 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
-    else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
-    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); horseCache.clear(); tintCache.clear(); sandCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
-  generate, generateBand, generateRange, heightAt,
-  _layoutVillage: (x, z, pop) => layoutVillage(x, z, null, pop),   // tools / tests: lay out a village of pop villagers at (x, z)
+    C.lk = 0; BF.rivers.usePlanet(planetRivers);   // (the network: planetRivers(), solved the first time it is needed)
+    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); horseCache.clear(); tintCache.clear(); sandCache.clear(); STRATA = null; },
+  generateBand, generateRange, heightAt,
+  _layoutVillage: (x, z, pop) => layoutVillage(x, z, pop),   // tools / tests: lay out a village of pop villagers at (x, z)
   _villagePop: (a, b, salt) => villagePop(a, b, salt),
-  _fields(x, z) { fields(x, z); const R = GEN >= 3 ? relief3(x, z, false) : null; return { cd: K.sp, cl: K.mp, mt: K.mt, c: K.c, pm: K.pm, p: K.p, e: K.e, t: K.t, hu: K.hu, S: R && R.S, m: R && R.m, rh: R && R.h, lo: K.lo }; },
+  _fields(x, z) { fields(x, z); const R = relief3(x, z, false); return { cd: K.sp, cl: K.mp, mt: K.mt, c: K.c, pm: K.pm, p: K.p, e: K.e, t: K.t, hu: K.hu, S: R.S, m: R.m, rh: R.h, lo: K.lo }; },
   waterLevelAt(x, z) { climate(Math.floor(x), Math.floor(z)); return C.wl; },
   // distant terrain (js/grid.js, spec r14-05): a column's climate in one pass (h, wl, biome, tb, t, hu...; read it before the next call),
   // and the tree probability per 4x4 cell of each biome
@@ -3058,22 +2604,20 @@ BF.worldgen = {
   biomeAt, tintAt,
   villagesNear: (x, z, radius) => villagesNear(x, z, radius),   // the planet: across face edges, canonical records, planet distance
   nearestVillage: (x, z) => nearestVillage(x, z),
-  spawnVillage: () => PLANET ? null : spawnVillage(),
   villageAt: (x, z, m) => villageAt(Math.floor(x), Math.floor(z), m || 0),   // the village whose box holds column (x, z) (margin m), or null
   villageFootprints, insideFace, EDGE_KEEP,
-  _planetRegion: (x, z) => PLANET ? pRegion(x, z) : null, _planetRegionCentre: (rx, rz) => PLANET ? pRegionCentre(rx, rz) : null,
-  _villageRegion: (rx, rz) => villageRegion(rx, rz),   // the village by spawn (village generator 9 and older; null from 10)
+  _planetRegion: (x, z) => pRegion(x, z), _planetRegionCentre: (rx, rz) => pRegionCentre(rx, rz),
+  _villageRegion: (rx, rz) => villageRegion(rx, rz),   // the village of region (rx, rz) (see pRegion), or null
   padAt,
   sandNear,
-  isPlanet: () => PLANET,
   treesIn, treeAt,
   hash: (x, z, salt) => noise.hash(x, z, salt),   // the world's 2D hash (distant stand-ins pick and vary trees with it)
-  solveRivers: pre => (PLANET ? solveRivers(pre) : 1),   // the planet's river network, one slice per call: the fraction done (1: ready); pre: node samples (riverNodes) for the first call
-  riversReady: () => !PLANET || !!PRIV,
+  solveRivers: pre => solveRivers(pre),   // the planet's river network, one slice per call: the fraction done (1: ready); pre: node samples (riverNodes) for the first call
+  riversReady: () => !!PRIV,
   riverState, adoptRivers,   // a copy of the solved network for a worker (js/lodworker.js)
   tapeMiss: () => (TAPE ? TAPE.miss : null),
   riverNodes: (from, to, out) => BF.planetRivers.nodeSamples(noise.seed, riverSample, from, to, out),   // the network's terrain samples (js/riverworker.js)
-  planetRivers: () => (PLANET ? planetRivers() : null),
+  planetRivers: () => planetRivers(),
   bandAt: (x, z) => (climate(Math.floor(x), Math.floor(z)), C.tb),   // climate band of a column (0 coldest .. 4 hottest), after altitude
   NAMES,
   recordBuilding,
