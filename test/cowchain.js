@@ -26,14 +26,15 @@ const LEAN = 3;
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
-  // the nearest villages (within 3000 blocks of 0,0) that have a pasture
+  // the nearest villages (within 3000 blocks of the spawn) that have a pasture
   const cands = await pg.evaluate(() => {
     window.__halt = true;
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    return BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'pasture'))
-      .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
+    return BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'pasture')).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
   await pg.evaluate(() => {
     const WATCH = window.__WATCH = ['raw_beef', 'steak', 'leather', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'honey_bottle', 'bucket', 'wheat_item'];
