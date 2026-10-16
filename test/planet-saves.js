@@ -130,7 +130,8 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => document.querySelector('[data-act="show-create"]').click());
   await pg.waitForTimeout(200);
   await pg.evaluate(() => { const f = document.querySelector(".bfp-view-create"); f.elements.name.value = "From the menu"; f.elements.seed.value = "31337"; f.querySelector('button[type="submit"]').click(); });
-  await pg.waitForTimeout(4000);
+  // (a new seed works out its rivers first: wait for the loading step and the save)
+  await pg.waitForFunction(() => !BF.preparing && BF.save.current && BF.save.current.name === "From the menu", null, { timeout: 120000 }).catch(() => {});
   const made = await pg.evaluate(() => ({ gen: BF.state.gen, metaGen: BF.save.current && BF.save.current.gen, name: BF.save.current && BF.save.current.name, scale: BF.state.biomeScale }));
   console.log("created " + JSON.stringify(made));
   check(made.gen === 4 && made.metaGen === 4 && made.name === "From the menu", "creating a world from the menu makes a planet");
@@ -155,11 +156,12 @@ module.exports = async (pg, out) => {
 
   // ---- #seed<n> boots a planet; #seed<n>gen3 a legacy world
   const url = pg.url().replace(/#.*$/, "");
-  await pg.goto(url + "#seed42"); await pg.reload(); await pg.waitForTimeout(5000);
+  const booted = () => pg.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById("bf-loading"), null, { timeout: 120000 }).catch(() => {}).then(() => pg.waitForTimeout(1000));   // (a planet boot works out its rivers first)
+  await pg.goto(url + "#seed42"); await pg.reload(); await booted();
   const h1 = await pg.evaluate(() => ({ gen: BF.state.gen, seed: BF.state.seed }));
-  await pg.goto(url); await pg.reload(); await pg.waitForTimeout(5000);
+  await pg.goto(url); await pg.reload(); await booted();
   const h0 = await pg.evaluate(() => BF.state.gen);
-  await pg.goto(url + "#seed42gen3"); await pg.reload(); await pg.waitForTimeout(5000);
+  await pg.goto(url + "#seed42gen3"); await pg.reload(); await booted();
   const h3 = await pg.evaluate(() => BF.state.gen);
   console.log("hash " + JSON.stringify({ h1, h0, h3 }));
   check(h1.gen === 4 && h1.seed === 42 && h0 === 4 && h3 === 3, "#seed42 and no hash boot planets; #seed42gen3 boots generator 3");
