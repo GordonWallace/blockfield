@@ -216,13 +216,14 @@ light.onSet = function (x, y, z, oldId, newId) {
   flush();
 };
 
+const CELL = {};
 // Light level 0..15 at integer world coords (0 in unloaded chunks / out of range).
 light.get = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  const c = world().chunks.get((x >> 4) + "," + (z >> 4));
+  const cl = world().cell(x, z, CELL), c = cl.c;   // (through a face edge on the planet; the flood fills themselves stop at face edges for now)
   if (!c || !c.light || y < c.y0 || y >= c.y1) return 0;
   const s = c.light[(y >> 4) - c.lo];
-  return s ? s[idx(x, y, z)] : 0;
+  return s ? s[idx(cl.lx, y, cl.lz)] : 0;
 };
 
 // Throws everything away and recomputes all loaded chunks from scratch (tests / debugging); returns ms taken.

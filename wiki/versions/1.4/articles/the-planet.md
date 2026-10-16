@@ -21,3 +21,7 @@ Two of the faces sit over the poles and four go round the equator. Latitude and 
 ## Coordinates
 
 Each face has its own block of x and z coordinates, so every place on the planet still has a single x and z. Coordinates jump when you cross from one face to the next.
+
+## While 1.4 is being built
+
+The planet is being brought into the game step by step. For now its ground is a simple stand-in (grass, sand, snow and stone over the planet's continents and oceans, with the climate bands deciding the biome), with no caves, ores, trees, rivers or villages yet, and the eight corners of the cube are always open ocean.

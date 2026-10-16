@@ -331,8 +331,8 @@ function onChunkLoad(cx, cz, c) {
   if (edge) { // groups crossing the border may have changed shape: remesh the neighbours
     const w = W();
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-      const k = (cx + dx) + "," + (cz + dz), ch = w.chunks.get(k);
-      if ((dx || dz) && ch && ch.mesh !== undefined) w._dirty.add(k);
+      const ch = w.chunkC(cx + dx, cz + dz);   // (through a face edge on the planet)
+      if ((dx || dz) && ch && ch.mesh !== undefined) w._dirty.add(ch.key);
     }
   }
   pendingAuto = true;

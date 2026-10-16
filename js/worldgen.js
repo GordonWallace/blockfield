@@ -148,6 +148,7 @@ let GEN = 1, SC = 1;
 //     a pasture always has a grass floor, a horse paddock is a stable laid out as the builder's (blueprints.js "stable"). There is no spawn
 //     village: every village is a region village on the strict site rules. Worlds saved with 9 or less keep theirs.
 let VGEN = 1;
+let PG = null;            // generator 4: BF.planetgen (js/planetgen.js), which every terrain call is handed to
 let REC = false;          // recordBuilding is running (builders' blueprints): windows are panes whatever the world's village generator
 const winB = () => (VGEN >= 7 || REC ? BF.B.glass_pane : BF.B.glass);
 const BAKER_POP = 15;     // village generator 6: a baker per this many villagers (js/mobs.js villageRoster reads BF.worldgen.BAKER_POP)
@@ -2564,25 +2565,28 @@ BF.worldgen = {
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
-    if (GEN >= 3) placeHome3();
-    if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
+    PG = GEN === 4 ? BF.planetgen : null;   // generator 4, the planet: js/planetgen.js makes the terrain
+    if (PG) PG.init(n.seed);
+    if (GEN === 3) placeHome3();
+    if (GEN === 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); sandCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
-  generate,
-  generateBand,
-  generateRange,
-  heightAt,
+  generate: (cx, cz, vox) => PG ? PG.generate(cx, cz, vox) : generate(cx, cz, vox),
+  generateBand: (cx, cz) => PG ? PG.generateBand(cx, cz) : generateBand(cx, cz),
+  generateRange: (cx, cz, sy0, sy1) => PG ? PG.generateRange(cx, cz, sy0, sy1) : generateRange(cx, cz, sy0, sy1),
+  heightAt: (x, z) => PG ? PG.heightAt(x, z) : heightAt(x, z),
   _layoutVillage: (x, z, pop) => layoutVillage(x, z, null, pop),   // tools / tests: lay out a village of pop villagers at (x, z)
   _villagePop: (a, b, salt) => villagePop(a, b, salt),
   _fields(x, z) { fields(x, z); const R = GEN >= 3 ? relief3(x, z, false) : null; return { cd: K.sp, cl: K.mp, mt: K.mt, c: K.c, pm: K.pm, p: K.p, e: K.e, t: K.t, hu: K.hu, S: R && R.S, m: R && R.m, rh: R && R.h, lo: K.lo }; },
-  waterLevelAt(x, z) { climate(Math.floor(x), Math.floor(z)); return C.wl; },
-  biomeAt,
-  tintAt,
-  villagesNear,
-  nearestVillage,
-  spawnVillage,   // the village by spawn (village generator 9 and older; null from 10)
+  waterLevelAt(x, z) { if (PG) return PG.waterLevelAt(x, z); climate(Math.floor(x), Math.floor(z)); return C.wl; },
+  biomeAt: (x, z) => PG ? PG.biomeAt(x, z) : biomeAt(x, z),
+  tintAt: (x, z) => PG ? PG.tintAt(x, z) : tintAt(x, z),
+  villagesNear: (x, z, radius) => PG ? [] : villagesNear(x, z, radius),   // (no villages on the planet until r14-12)
+  nearestVillage: (x, z) => PG ? null : nearestVillage(x, z),
+  spawnVillage: () => PG ? null : spawnVillage(),   // the village by spawn (village generator 9 and older; null from 10)
   padAt,
-  sandNear,
+  sandNear: (x, z, r) => PG ? PG.sandNear(x, z, r) : sandNear(x, z, r),
+  isPlanet: () => !!PG,
   recordBuilding,
   bedPlan: bedPlanOf,
   palette: style => styles()[style | 0] || styles()[0],

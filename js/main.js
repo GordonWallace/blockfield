@@ -33,7 +33,7 @@ resize();
 // Starts (or restarts) a world from a seed and places the player on solid ground near the origin.
 BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
-  BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
+  BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default), 4 = the planet (#seed<n>gen4 for now)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
   BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
   BF.noise = BF.makeNoise(BF.state.seed);
@@ -45,7 +45,8 @@ BF.newWorld = function (seed, opts) {
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   // pick a dry spawn column near the origin
   let sx = 8, sz = 8;
-  for (let r = 0; r < 400; r += 8) {
+  if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry land at 35 N on face 4, far from edges (r14-19 brings real spawn rules)
+  else for (let r = 0; r < 400; r += 8) {
     const a = r * 0.7, x = Math.round(Math.cos(a) * r) + 8, z = Math.round(Math.sin(a) * r) + 8;
     if (BF.worldgen.heightAt(x, z) > BF.SEA + 1 && BF.worldgen.heightAt(x, z) > BF.worldgen.waterLevelAt(x, z)) { sx = x; sz = z; break; }
   }

@@ -6,6 +6,7 @@ Limits are per world and live on `BF`: `BF.MIN_Y` (lowest y, bedrock), `BF.H` (e
 |---|---|---|---|---|
 | gen 1, gen 2 (every old world) | 0 | 192 | 48 | byte-identical terrain to PR #10 |
 | gen 3 (new worlds) | -64 | 3072 | 0 | mile-high terrain |
+| gen 4 (the planet, 1.4) | -64 | 3072 | 0 | the round planet: atlas x/z (js/planet.js), terrain in js/planetgen.js |
 
 `BF.setLimits(gen)` (defined in worldgen.js, called by `worldgen.init`) assigns all five values.
 

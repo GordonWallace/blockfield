@@ -44,10 +44,11 @@ function rgbOf(id) {
 }
 const WATER = [63, 118, 228];
 // Top visible block of a column: {id, y} or {water: true, depth, bottom, y}; null when the chunk is not loaded.
+const CELL = {};
 function column(wx, wz) {
-  const c = BF.world.chunkAt(wx, wz);
+  const cl = BF.world.cell(wx, wz, CELL), c = cl.c;   // (through a face edge on the planet)
   if (!c) return null;
-  const lx = wx - c.cx * 16, lz = wz - c.cz * 16;
+  const lx = cl.lx, lz = cl.lz;
   const W = BF.world, MIN_Y = BF.MIN_Y;
   for (let y = c.y1 - 1; y >= c.y0; y--) {
     const id = W.chunkBlock(c, lx, y, lz);
