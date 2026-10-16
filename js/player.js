@@ -44,7 +44,9 @@ let target = null;            // current block raycast hit
 // Shift held when it was boarded must be let go first.
 let vehicle = null, rideShift = false;
 let offPlanet = false;        // the planet, above layer 20,000: the camera faces the planet and dragging turns it (js/view.js)
-const VIEW_OPTS = [4, 6, 8, 10, 12, 16, 20, 24];
+// Render distances (chunks). The planet keeps block data only near the player and far chunks as meshes (js/world.js, spec r14-07), so the
+// largest is the default; automated browsers (the tests) start at world.js's 6, so their timings don't change.
+const VIEW_OPTS = [4, 6, 8, 10, 12, 16, 20, 24, 28, 32];
 const store = {
   get(k) { try { return localStorage.getItem("blockfield." + k); } catch (_) { return null; } },
   set(k, v) { try { localStorage.setItem("blockfield." + k, String(v)); } catch (_) {} },
@@ -2030,7 +2032,9 @@ P.init = function () {
   bindInput();
   showScreen("start");
   const vd = parseInt(store.get("viewDist"), 10);
-  if (VIEW_OPTS.includes(vd) && vd !== BF.world.viewDist) setViewDist(vd, false); else updateFar();
+  if (VIEW_OPTS.includes(vd)) { if (vd !== BF.world.viewDist) setViewDist(vd, false); else updateFar(); }
+  else if (!navigator.webdriver) setViewDist(VIEW_OPTS[VIEW_OPTS.length - 1], false);
+  else updateFar();
   updateModeUI();
   emit("gameModeChanged", gameMode);
   // breaking either half of a door or bed removes the other half (the broken half dropped the item)
