@@ -16,7 +16,7 @@ module.exports = async (pg) => {
     const invWear = () => { const s = inv.slots.find(s => s && s.id === pk); return s ? s.wear || 0 : "none"; };
 
     place(40); BF.drops.clear(); inv.clear();
-    BF.commands.execute(`/setblock ${x} ${y} ${z} air`); await tick();
+    BF.commands.execute(`/setblock ~2 ~1 ~0 air`); await tick();   // relative: commands read u y v on the planet (r14-18)
     res.setblock = dropWear();
 
     place(40); BF.drops.clear(); inv.clear();
