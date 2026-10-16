@@ -82,7 +82,9 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.06);
     let fetches = 0;
     const seeds0 = c("wheat_seeds");
-    for (let i = 0; i < 24000 && coop.hens.length < 2; i++) { step(); if (pkp.task && pkp.task.kind === "fetch" && pkp.stage !== "walk" && i % 20 === 0) fetches++; if (BF.sky.time > 0.45) BF.sky.setTime(0.06); }
+    // working hours only, and the next morning comes: a failed fetch is tried again at a time of day (js/poultry.js pickTask stockAt, a
+    // tenth of a day later or the next morning), so a clock put back on the same day never reached it and one failed lead failed the test
+    for (let i = 0; i < 24000 && coop.hens.length < 2; i++) { step(); if (pkp.task && pkp.task.kind === "fetch" && pkp.stage !== "walk" && i % 20 === 0) fetches++; if (BF.sky.time > 0.45) { BF.sky.day += 1; BF.sky.setTime(0.06); } }
     ok("the keeper led wild chickens into the empty coop until it held 2", coop.hens.length >= 2, { hens: coop.hens.length, wild: wild.map(h => !!h.coop), log: P.log.filter(e => /lead|stock|fetch|noWild/.test(e.kind)).slice(-6) });
     ok("it led them (it walked with a chicken behind it)", fetches > 0, fetches);
     ok("they are inside the run", wild.filter(h => h.coop === coop).every(h => h.position.x > coop.fx0 && h.position.x < coop.fx1 && h.position.z > coop.fz0 && h.position.z < coop.fz1));
