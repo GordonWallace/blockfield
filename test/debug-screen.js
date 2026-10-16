@@ -1,4 +1,5 @@
 // Second-screen debug test: NODE_PATH=$(npm root -g) node test/debug-screen.js [outPrefix]
+// On a planet world (generator 4, spec r14-21; test/debug-planet.js covers what is new there).
 // Starts debug/server.js on spare ports, opens the game and the debug screen, checks the screen matches the game,
 // restarts the server mid-village (the game must resend the layout and log), and screenshots the screen.
 const path = require('path'), { spawn } = require('child_process');
@@ -20,7 +21,7 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/`);
+  await game.goto(`http://localhost:${GAME}/#seed1337gen4`);
   await game.waitForTimeout(5000);
   ok('feed is on when served by the debug server', await game.evaluate(() => !!BF.debugFeed));
   await require('./lib').toVillage(game);
@@ -55,7 +56,7 @@ const start = async () => {
   g = await got();
   ok('log entries ' + g.log + '/' + want.log, g.log >= want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
-  ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nXYZ /.test((await got()).f3));
+  ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nFace \d {2}u /.test((await got()).f3));
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // server restart: a fresh server has no layout/log; the game must resend both
   srv.kill(); await new Promise(r => srv.once('exit', r));
@@ -138,7 +139,7 @@ const start = async () => {
   const second = await game.evaluate(() => {
     const p = BF.player.position, here = BF.vlog.villageAt(p.x, p.z);
     const vs = BF.worldgen.villagesNear(p.x, p.z, 1500).filter(v => Math.round(v.x) + "," + Math.round(v.z) !== here.key)
-      .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+      .sort((a, b) => BF.planet.distance(p, a) - BF.planet.distance(p, b));
     const v = vs[0];
     BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
     return BF.signs.villageName(Math.round(v.x) + "," + Math.round(v.z));
