@@ -367,8 +367,8 @@ function taskStep(m, S, dt, out) {
   }
   out.faceX = (st.box.x0 + st.box.x1 + 1) / 2; out.faceZ = (st.box.z0 + st.box.z1 + 1) / 2;
   S.penT += dt;
-  if (S.penT > 25 && !inBox(st.box, h.position.x, h.position.z, 0) && (tk.retry = (tk.retry || 0) + 1) <= 2) {
-    H.setPen(h, null); H.leash(h, m); S.stage = null;     // it never got in: lead it to the gate again
+  if (S.penT > 20 && !inBox(st.box, h.position.x, h.position.z, 0) && (tk.retry = (tk.retry || 0) + 1) <= 2) {
+    H.setPen(h, null); H.leash(h, m); S.stage = null;     // it never got in: lead it to the gate again (checked before the 20 s give-up below, or it could never run)
     return true;
   }
   if (inBox(st.box, h.position.x, h.position.z, -0.3) || S.penT > 20) {
