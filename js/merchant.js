@@ -57,6 +57,14 @@ const keyOf = m => (m && m.village && m.slot && m.slot.idx != null ? m.village.k
 const live = o => o && o.type === "villager" && !o.dead && !o.removed;
 const who = m => (BF.vlog ? BF.vlog.nameOf(m) : "Merchant") + " (Merchant)";
 const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: keyOf(m), t: +dayNow().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+// The planet (spec r14-16): a merchant is kept in its home village's frame even past a face edge (js/mobs.js frames), village records and the
+// trip's destination are canonical. Every point it steers for is first seen from where it stands (BF.planet.local), the road line lies in
+// its lower-keyed village's frame, distances between places are BF.planet.distance, and path wear is keyed by canonical cells. RANGE (600)
+// is within BF.planet.LOCAL, so a destination on another face is always reached through one edge's unfold. Identity off the planet.
+const PL = () => BF.planet;
+const pdist = (a, b) => PL().distance(a, b);
+const LQ = {};
+const seenFrom = (a, x, z) => { LQ.x = x; LQ.z = z; return PL().local(a, LQ, LQ); };
 const state = m => m.mc || (m.mc = { stage: null, trip: null, last: -1e9, cd: 3 + Math.random() * 5, nav: {} });
 
 // ---------------------------------------------------------------- who may work the counter (js/jobs.js)
@@ -157,7 +165,7 @@ function candidates(m) {
     if (rec === home || !rec.wg || !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     if (!BF.world.isLoaded(rec.x, rec.z) || !traders(rec, m).length) continue;
     seenK.add(rec.key);
-    const d = Math.hypot(rec.x - home.x, rec.z - home.z);
+    const d = pdist(home, rec);
     if (d <= RANGE && tripDays(m, d) <= MAX_PLAN_DAYS && !blocked(home.key, rec.key)) out.push({ rec, d });
   }
   let near = [];
@@ -166,7 +174,7 @@ function candidates(m) {
     if (!v || v.x == null) continue;
     const key = vKey(v), sum = market.get(key);
     if (key === home.key || seenK.has(key) || !sum || blocked(home.key, key)) continue;
-    const d = Math.hypot(v.x - home.x, v.z - home.z);
+    const d = pdist(home, v);
     if (d <= RANGE && tripDays(m, d) <= MAX_PLAN_DAYS) out.push({ rec: { key, x: v.x, z: v.z, wg: v, sum }, d });
   }
   return out.sort((a, b) => a.d - b.d);
@@ -245,7 +253,18 @@ function waypoint(px, pz, tx, tz, line) {
   t = Math.max(0, Math.min(L, t));
   return [Math.floor(line.ax + dx / L * t), Math.floor(line.az + dz / L * t)];
 }
+// waypoint() worked in the road line's frame (its lower-keyed village's face) and handed back in the merchant's frame.
+function waypointFrom(m, px, pz, tx, tz, line) {
+  const A = { x: line.ax, z: line.az };
+  let q = seenFrom(A, px, pz); const qx = q.x, qz = q.z;
+  q = seenFrom(A, tx, tz);
+  const wp = waypoint(qx, qz, q.x, q.z, line);
+  if (!wp) return null;
+  q = seenFrom(m.position, wp[0] + 0.5, wp[1] + 0.5);
+  return [Math.floor(q.x), Math.floor(q.z)];
+}
 function travel(m, st, dt, out, tx, tz, radius, line) {
+  const tl = seenFrom(m.position, tx, tz); tx = tl.x; tz = tl.z;   // (the planet: the goal seen from where the merchant stands)
   const ai = m.ai, N = BF.mobs.nav, px = m.position.x, pz = m.position.z, d = Math.hypot(tx - px, tz - pz), nv = st.nav;
   if (d <= radius) { ai.route = null; return "arrived"; }
   if (!ai.route || ai.routeKind !== "mc") {
@@ -253,7 +272,7 @@ function travel(m, st, dt, out, tx, tz, radius, line) {
     if (nv.wait > 0) { nv.wait -= dt; return "going"; }
     if (!N.takePlan()) return "going";
     const [fx, fy, fz] = N.feetCell(m);
-    const wp = d > 22 && line && !nv.fail ? waypoint(px, pz, tx, tz, line) : null;   // a failed attempt falls back to plain hops
+    const wp = d > 22 && line && !nv.fail ? waypointFrom(m, px, pz, tx, tz, line) : null;   // a failed attempt falls back to plain hops
     const hop = wp || (d > 22 ? [Math.floor(px + (tx - px) * 20 / d), Math.floor(pz + (tz - pz) * 20 / d)] : [Math.floor(tx), Math.floor(tz)]);
     const goal = { x: hop[0], z: hop[1], at: (x, y, z) => Math.abs(x - hop[0]) + Math.abs(z - hop[1]) <= 2 };
     const path = N.findPath(fx, fy, fz, goal, 2500);
@@ -279,12 +298,15 @@ function inVillage(x, z) {
   for (const rec of BF.mobs.villages.values()) {
     const v = rec.wg;
     if (v && v.minX != null) { if (x >= v.minX - 4 && x <= v.maxX + 4 && z >= v.minZ - 4 && z <= v.maxZ + 4) return true; }
-    else if (Math.hypot(x - rec.x, z - rec.z) < 40) return true;
+    else if (pdist(rec, { x, z }) < 40) return true;
   }
   return false;
 }
+const WC = {};
 function step(m, st) {
-  const x = Math.floor(m.position.x), z = Math.floor(m.position.z), y = Math.floor(m.position.y + 0.01) - 1;
+  let x = Math.floor(m.position.x), z = Math.floor(m.position.z);
+  const y = Math.floor(m.position.y + 0.01) - 1;
+  if (PL().isPlanet()) { const c = PL().canonCell(x, z, WC); if (!c.off) { x = c.x; z = c.z; } }   // (wear is keyed by the canonical cell)
   const k = x + "," + y + "," + z;
   if (st.cell === k) return;
   st.cell = k;
@@ -329,8 +351,8 @@ function leftSecs(m) {
   const st = m.mc, tr = st && st.trip;
   if (!tr) return 0;
   const speed = ((m.def && m.def.speed) || 0.9) * ROAD * BOOST, walkSecs = (DUSK - WORK_START) * DAY_S;
-  const toDest = Math.hypot(tr.dx - m.position.x, tr.dz - m.position.z), a = recOf(tr.home) || m.village;
-  const homeD = a ? Math.hypot(a.x - m.position.x, a.z - m.position.z) : 0, legD = a ? Math.hypot(tr.dx - a.x, tr.dz - a.z) : toDest;
+  const D = { x: tr.dx, z: tr.dz }, toDest = pdist(m.position, D), a = recOf(tr.home) || m.village;
+  const homeD = a ? pdist(m.position, a) : 0, legD = a ? pdist(a, D) : toDest;
   const dist = st.stage === "buy" ? 2 * legD : st.stage === "go" ? toDest + legD : st.stage === "sell" || st.stage === "shop" ? legD : homeD;
   return (dist * WIND / (speed * walkSecs) + (st.stage === "unload" ? 0.02 : DEAL_DAYS)) * DAY_S;
 }
@@ -401,9 +423,10 @@ function vlogLine(m, text) { if (BF.vlog && m.village) BF.vlog.log(m.village, "c
 function destName(key) { const r = recOf(key); return r ? "the village at " + Math.round(r.x) + ", " + Math.round(r.z) : "the village at " + key; }
 
 // The road of a trip as a line from the lower-keyed village to the other, so both ways use the same waypoints.
+// (The planet: the far end is seen from the lower-keyed village, so the line lies in that village's frame.)
 function roadLine(tr, home) {
-  const a = { x: home.x, z: home.z }, b = { x: tr.dx, z: tr.dz };
-  return tr.home < tr.dest ? { ax: a.x, az: a.z, bx: b.x, bz: b.z } : { ax: b.x, az: b.z, bx: a.x, bz: a.z };
+  const a = { x: home.x, z: home.z }, b = { x: tr.dx, z: tr.dz }, lo = tr.home < tr.dest ? a : b, hi = lo === a ? b : a, h = seenFrom(lo, hi.x, hi.z);
+  return { ax: lo.x, az: lo.z, bx: h.x, bz: h.z };
 }
 function tripAI(m, st, dt, out) {
   const tr = st.trip, home = recOf(tr.home) || m.village, dest = recOf(tr.dest);
@@ -481,7 +504,7 @@ function tripAI(m, st, dt, out) {
 const isNight = t => t > BEDTIME && t < 0.985;
 function homeDistance(m) {
   const b = m.homeBed || m.bed, h = b && !b.tent ? { x: b.x, z: b.z } : m.village ? { x: m.village.x, z: m.village.z } : null;
-  return h ? Math.hypot(h.x + 0.5 - m.position.x, h.z + 0.5 - m.position.z) : 0;
+  return h ? pdist(m.position, { x: h.x + 0.5, z: h.z + 0.5 }) : 0;
 }
 const hasTent = m => BF.I.tent != null && cnt(m, BF.I.tent) >= 1;
 function campAI(m, st, t) {
