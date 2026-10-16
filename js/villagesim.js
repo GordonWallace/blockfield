@@ -367,21 +367,27 @@ function onChunkLoad(cx, cz, c) {
 }
 
 // The areas the kept chunks fall in, for js/wildlife.js's monster density cap: each running village with its margin, each trip's corridor, and
-// each group of touching villager windows. [{kind: "village" | "trip" | "window", key, keys: [chunk keys]}]
+// each group of touching villager windows. A window group that overlaps or touches a village or a trip belongs to that area: it is the ground
+// its villagers walk at the village's edge, and as a separate area of its own the monsters spawned in the village drifted into it (zombies
+// after villagers walking the edge at dusk) and took it over its cap. Kept together, nothing loaded lies around the village to drift in from.
+// [{kind: "village" | "trip" | "window", key, keys: [chunk keys]}]
 function areas() {
-  const out = [];
-  for (const [k, e] of active) out.push({ kind: "village", key: k, keys: e.keys, v: e.v });
-  for (const [id, p] of pins) out.push({ kind: "trip", key: id, keys: p.keys });
+  const out = [], own = new Map();   // chunk key -> the village or trip area it is in
+  for (const [k, e] of active) out.push({ kind: "village", key: k, keys: e.keys.slice(), v: e.v });
+  for (const [id, p] of pins) out.push({ kind: "trip", key: id, keys: p.keys.slice() });
+  for (const a of out) for (const k of a.keys) if (!own.has(k)) own.set(k, a);
   const left = new Set(winKeys);
   for (const k0 of winKeys) {
-    if (!left.has(k0)) continue;
-    left.delete(k0);
+    if (!left.delete(k0)) continue;
     const keys = [k0];
+    let to = null;
     for (let i = 0; i < keys.length; i++) {
       const [cx, cz] = keys[i].split(",").map(Number);
-      for (const n of [(cx + 1) + "," + cz, (cx - 1) + "," + cz, cx + "," + (cz + 1), cx + "," + (cz - 1)]) if (left.delete(n)) keys.push(n);
+      to = to || own.get(keys[i]);
+      for (const n of [(cx + 1) + "," + cz, (cx - 1) + "," + cz, cx + "," + (cz + 1), cx + "," + (cz - 1)]) { to = to || own.get(n); if (left.delete(n)) keys.push(n); }
     }
-    out.push({ kind: "window", key: k0, keys });
+    if (to) { for (const k of keys) if (!own.has(k)) { own.set(k, to); to.keys.push(k); } }
+    else out.push({ kind: "window", key: k0, keys });
   }
   return out;
 }
