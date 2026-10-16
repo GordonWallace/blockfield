@@ -9,4 +9,4 @@ On the planet, Snowy Taiga covers the wetter arctic and the cold edge of the sub
 - Because the ground is snow-covered, no ferns, grass or flowers grow here.
 
 ### Villages
-Villages do not generate in snowy taiga. In worlds made with village generator 9 or earlier, the first village near the spawn point is the only exception: if it lands here it uses the snowy village style (see [[biome:snowy-plains]]).
+Villages do not generate in snowy taiga.

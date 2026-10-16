@@ -2,7 +2,7 @@
 title: Biomes
 category: World generation
 ---
-Blockfield has 30 biomes: the 29 of flat worlds and Frozen Ocean, which only the planet has. Most are decided by two climate values, temperature and humidity; the rest depend on the shape of the land (coasts, swamps, mountains and rivers). Which wild animals live in each is shown on the mob pages.
+Blockfield has 30 biomes: the 29 of the flat worlds of 1.3 and Frozen Ocean, which only the planet has. Most are decided by two climate values, temperature and humidity; the rest depend on the shape of the land (coasts, swamps, mountains and rivers). Which wild animals live in each is shown on the mob pages.
 
 ## Climate bands on the planet
 
@@ -14,7 +14,7 @@ On the planet, temperature comes from latitude. Five climate bands run from the 
 
 Humidity comes from rainfall, which follows latitude the way Earth's does: a wet equator (jungles and mangroves), dry belts toward the edge of the tropics (deserts, badlands and savannas), wetter middle latitudes (forests) and dry polar regions (snowy plains). Rainfall also varies from place to place, and the deep interiors of continents are drier.
 
-The climate values then pick biomes with the table below, the same as on flat worlds. Two picks are the planet's own:
+The climate values then pick biomes with the table below, the same as on the flat worlds of 1.3. Two picks are the planet's own:
 - Dry temperate high plains (around y 900 and up) are Meadow.
 - Mild subtropical forest is sometimes Cherry Grove.
 
@@ -34,7 +34,7 @@ Mountain biomes go by height and the cooled climate, so Windswept Hills and snow
 
 ## How land biomes are chosen
 
-On flat worlds, temperature and humidity are two climate maps, each cut into five bands. Each band covers a share of the world (about 16, 22, 27, 19 and 16 percent from the coldest to the hottest). The table shows the biome for each pair. On the high plains the air is a little drier, so results shift slightly toward the dry side.
+Temperature and humidity are each cut into five bands; on the planet the temperature bands are the climate bands above. (On the flat worlds of 1.3 they were two climate maps, each band covering a share of the world: about 16, 22, 27, 19 and 16 percent from the coldest to the hottest.) The table shows the biome for each pair. On the high plains the air is a little drier, so results shift slightly toward the dry side.
 
 | Temperature | Driest | Dry | Middle | Humid | Wettest |
 |---|---|---|---|---|---|

@@ -9,4 +9,4 @@ On the planet, beaches line coasts from the tropics to the subarctic. In the arc
 - [[item:sugar_cane]] grows where the sand touches water at sea level, in clumps one to three blocks tall.
 
 ### Villages
-Villages do not generate on beaches. In worlds made with village generator 9 or earlier, the first village (the one nearest the spawn point) can end up on one if no better site can be found near the start.
+Villages do not generate on beaches.
