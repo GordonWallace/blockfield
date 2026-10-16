@@ -31,7 +31,8 @@ module.exports = async (pg, out) => {
   try {
     await pg.goto(url);
     await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow (never judge frame rate here)
-    await pg.waitForTimeout(4000);
+    await require("./lib").ready(pg);   // the planet's rivers worked out and the world (and its rings) started
+    await pg.waitForTimeout(2000);
     await pg.evaluate(() => {
       BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true);
       // cover(): this frame drawn off screen with the sky hidden and a magenta background; the share of magenta pixels within r
