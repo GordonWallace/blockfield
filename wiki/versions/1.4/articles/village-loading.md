@@ -13,6 +13,8 @@ Villagers only exist while the ground under them is loaded. To keep villages ali
 
 A running village keeps the terrain of its area and 16 blocks around it loaded as data only. Its villagers follow their normal day: [[villager:farmer|farmers]] farm, [[villager:builder|builders]] build, everybody eats, trades and sleeps. A villager who walks out of the village, such as a [[villager:forester]] or a [[villager:shepherd]] leading a sheep, keeps a window of 5 by 5 chunks around itself loaded, so it always has ground to walk on.
 
+On the [[page:the-planet|planet]] these distances are measured on the planet itself, across the edges between the cube's faces. A villager who walks over an edge keeps its ground loaded on the far side, and a caravan's road is kept loaded the whole way, whichever faces it crosses. Villages always sit several hundred blocks from a face edge (see [[page:villages]]), so the 200 and 216 block limits are always reached on the village's own face.
+
 ## The countdown before a village stops
 When a village would stop, because you moved away or because other villages pushed it out of the nearest four, it does not stop at once. It counts down.
 

@@ -2456,6 +2456,7 @@ function scatterAt(rec, sl, v) {
   }
   return null;
 }
+const VQ = {};
 function updateVillages(dt) {
   for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
   villageT -= dt;
@@ -2472,8 +2473,9 @@ function updateVillages(dt) {
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
     if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); applyDead(rec); }
-    const away = v.pop ? Math.hypot(Math.max(0, v.minX - pp.x, pp.x - v.maxX), Math.max(0, v.minZ - pp.z, pp.z - v.maxZ)) > 24   // sized villages: near any part of it
-      : Math.hypot(v.x - pp.x, v.z - pp.z) > 80;
+    const lp = onPlanet() ? BF.planet.local(v, pp, VQ) : pp;   // (the planet: the player seen from the village, across a face edge)
+    const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
+      : Math.hypot(v.x - lp.x, v.z - lp.z) > 80;
     if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
     if (!BF.world.isLoaded(v.x, v.z)) continue;
     const loadedHouse = h => BF.world.isLoaded(h.x, h.z) && BF.world.isLoaded(h.x + (h.w || 1), h.z + (h.d || 1));
