@@ -15,7 +15,7 @@ const root = path.resolve(__dirname, '..');
   await pg.route('https://fonts.**', r => r.abort());
   // The boot world: seed 1337 with village generator 9 (BF_HASH overrides), so the tests keep the villages they were written for; village
   // generator 10 (idea-044) has no spawn village and other paddocks, and its own tests (paddocks-gen10, food-jobsites) make their worlds.
-  await pg.goto('file://' + path.join(root, 'index.html') + (process.env.BF_HASH != null ? process.env.BF_HASH : '#seed1337gen3v9'));
+  await pg.goto('file://' + path.join(root, 'index.html') + (process.env.BF_HASH != null ? process.env.BF_HASH : '#seed123gen4v10'));
   await pg.waitForTimeout(5000);
   if (actions) await actions(pg, out);
   await pg.keyboard.press('F3');

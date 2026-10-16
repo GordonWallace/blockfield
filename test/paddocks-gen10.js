@@ -8,7 +8,7 @@
 // 3. Walks into a village with a generated stable: it starts with 2 tamed horses in its paddock.
 module.exports = async (pg) => {
   const out = await pg.evaluate(() => {
-    BF.newWorld(1, { gen: 3, villages: 10 });
+    BF.newWorld(1, { gen: 4, villages: 10 });
     const WG = BF.worldgen, res = { fails: [], biomes: {} };
     const BIOMES = { plains: 5, forest: 6, snowy: 19, desert: 12 };
     for (const [name, id] of Object.entries(BIOMES)) {
@@ -38,7 +38,7 @@ module.exports = async (pg) => {
     const BLOCK = { shepherd: "loom", cowherd: "milk_churn", poultry_keeper: "nesting_box", pig_farmer: "feed_trough", stable_hand: "tack_rack" };
     res.villages = 0; res.keepers = 0; res.plots = 0; res.missingPlots = 0; res.stable = null;
     for (const seed of [1, 2, 3]) {
-      BF.newWorld(seed, { gen: 3, villages: 10 });
+      BF.newWorld(seed, { gen: 4, villages: 10 });
       if (WG.spawnVillage()) res.fails.push("seed " + seed + ": a spawn village");
       const seen = new Set();
       for (let rz = -4; rz <= 4; rz++) for (let rx = -4; rx <= 4; rx++) for (const v of WG.villagesNear(rx * 600, rz * 600, 300)) {
@@ -66,7 +66,7 @@ module.exports = async (pg) => {
         if (st && seed === 1 && (!res.stable || Math.hypot(v.x, v.z) < Math.hypot(res.stable.x, res.stable.z))) res.stable = { x: v.x, y: v.y, z: v.z, key };
       }
     }
-    BF.newWorld(1, { gen: 3, villages: 9 });
+    BF.newWorld(1, { gen: 4, villages: 9 });
     if (!WG.spawnVillage()) res.fails.push("generator 9: no spawn village");
     return res;
   });
@@ -76,7 +76,7 @@ module.exports = async (pg) => {
   if (out.missingPlots > out.keepers * 0.1) fails.push("too many keepers without a plot: " + out.missingPlots + " of " + out.keepers);
   if (!out.stable) console.log("no generated stable near seed 1's origin: stable stocking not checked");
   else {
-    await pg.evaluate(v => { BF.newWorld(1, { gen: 3, villages: 10 }); BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5); }, out.stable);
+    await pg.evaluate(v => { BF.newWorld(1, { gen: 4, villages: 10 }); BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5); }, out.stable);
     await pg.waitForTimeout(15000);
     const h = await pg.evaluate(key => {
       const R = BF.mobs.villages.get(key), st = R && BF.stables.stableOf(R);

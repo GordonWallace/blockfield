@@ -20,7 +20,7 @@ module.exports = async (pg, out) => {
     ok("shears have an icon", typeof BF.textures.icon(I.shears) === "string" && BF.textures.icon(I.shears).startsWith("data:"));
     ok("shears speed up leaves", BF.items[I.shears].tool.speed > 1 && BF.player.mineSeconds(BF.B.oak_leaves, I.shears) < BF.player.mineSeconds(BF.B.oak_leaves, null), BF.player.mineSeconds(BF.B.oak_leaves, I.shears) + "s vs " + BF.player.mineSeconds(BF.B.oak_leaves, null) + "s by hand");   // leaves are a hoe block (#44); shears are special-cased
     // ---- wild sheep, player use
-    BF.newWorld(5, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(5, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     await load(300, 300);
     BF.sky.setTime(0.1);
@@ -44,7 +44,7 @@ module.exports = async (pg, out) => {
     ok("lamb gives nothing and cannot be sheared", !!lamb && BF.shepherd.playerUse(lamb, shears) === "Lambs are too small to shear");
     ok("wild sheep are not pen stock", !a.pen && !lamb.pen);
     // ---- pens survive a save and load
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     await load(26 + 4, 39 + 4);
     BF.sky.setTime(0.1); run(10);
@@ -56,7 +56,7 @@ module.exports = async (pg, out) => {
     const saved = JSON.parse(JSON.stringify(BF.mobs.exportVillagers()));
     ok("export has pens:<village>", !!saved["pens:26,39"], saved["pens:26,39"] && saved["pens:26,39"][0].s.length);
     const dayNow = BF.sky.day, tNow = BF.sky.time;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     BF.mobs.importVillagers(saved);
     BF.sky.day = dayNow; BF.sky.setTime(tNow);

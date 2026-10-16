@@ -20,7 +20,7 @@ const start = async () => {
   game.on('pageerror', e => console.log('PAGEERROR game', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/#seed1337gen3`);   // generator 3 until r14-22 (no hash boots a planet since r14-19)
+  await game.goto(`http://localhost:${GAME}/#seed123`);   // generator 3 until r14-22 (no hash boots a planet since r14-19)
   await game.waitForTimeout(5000);
   await require('./lib').toVillage(game);
   // hold the mobs still so the game and the screen can be compared

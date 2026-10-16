@@ -12,7 +12,7 @@ module.exports = async (pg, out) => {
     };
     const W = BF.world, B = BF.B, I = BF.I, P = BF.player, H = BF.horses;
     BF.state.paused = true;
-    BF.newWorld(5, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(5, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     W.setViewDist(8);
     await load(8, 8);

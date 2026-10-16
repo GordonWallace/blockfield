@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
     const day = () => BF.sky.day + BF.sky.time;
     const C = BF.cowherd, I = BF.I, T = BF.trades;
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (5 + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
     const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains with a pasture

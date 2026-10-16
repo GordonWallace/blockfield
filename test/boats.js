@@ -13,7 +13,7 @@ module.exports = async (pg, out) => {
     const W = BF.world, B = BF.B, I = BF.I, P = BF.player, boats = BF.boats;
     const fresh = async mode => {
       BF.state.paused = true;
-      BF.newWorld(5, { gen: 3, villages: 9, gameMode: mode || "survival" });
+      BF.newWorld(5, { gen: 4, villages: 9, gameMode: mode || "survival" });
       BF.mobs.spawning = false;
       W.setViewDist(8);
       await load(8, 8);
@@ -165,7 +165,7 @@ module.exports = async (pg, out) => {
     ok("creative: one hit, no item", boats.hit(bc, true) === "broken" && !boats.list.includes(bc) && BF.drops.list.length === n0);
 
     // ---- the real save, through IndexedDB ----
-    const meta = await BF.save.create({ name: "boats", seed: 5, gameMode: "survival", villages: 9, gen: 3 });
+    const meta = await BF.save.create({ name: "boats", seed: 5, gameMode: "survival", villages: 9, gen: 4 });
     BF.mobs.spawning = false;
     W.setViewDist(8);
     await load(x0, z0 - 20);

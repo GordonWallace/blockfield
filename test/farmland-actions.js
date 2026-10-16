@@ -12,7 +12,7 @@ module.exports = async (pg) => {
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     const B = BF.B, W = BF.world, F = BF.farmland, WET = B.farmland, DRY = B.farmland_dry;
     ok("dehydrated farmland block exists", DRY != null && DRY !== WET && BF.blocks[DRY].drop === BF.blocks[WET].drop);

@@ -77,7 +77,7 @@ module.exports = async (pg) => {
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     window.__step = step;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns or herds: the test brings the wild horses
     const V = { x: 26, z: 39 };                              // seed 1, gen 3: a plains village of 12
     ok("village is on horse land", BF.horses.isHorseBiome(V.x, V.z));

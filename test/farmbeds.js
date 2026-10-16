@@ -20,7 +20,7 @@ async function openWorld(seed) {
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.__raf = raf; window.requestAnimationFrame = cb => (window.__halt ? (window.__pending = cb, 0) : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed + 'gen3');
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
   await pg.waitForTimeout(3000);
   await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
   return pg;

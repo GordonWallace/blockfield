@@ -26,7 +26,7 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript(d => { window.__DIAG = d; }, !!process.env.DIAG);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForTimeout(3000);
   await pg.evaluate(c => { window.__C = c; }, { LO, HI, FAR });
   const setup = await pg.evaluate(() => {

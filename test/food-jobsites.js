@@ -10,7 +10,7 @@ module.exports = async (pg) => {
     const out = { fails: [], notes: [] }, ok = (c, msg, d) => { if (!c) out.fails.push(msg + (d !== undefined ? " " + JSON.stringify(d) : "")); else out.notes.push("ok " + msg); };
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 10, gameMode: "creative" });
+    BF.newWorld(1, { gen: 4, villages: 10, gameMode: "creative" });
     BF.mobs.spawning = false;
     // the nearest village with a builder
     const vs = BF.worldgen.villagesNear(0, 0, 1500).filter(v => v.pop >= 10).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));

@@ -27,7 +27,7 @@ const RUN = 3;   // days each group of villages runs
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForTimeout(3000);
   const setup = await pg.evaluate(([DAYS, RUN]) => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
