@@ -451,7 +451,8 @@ const sky = {
 
     scene.background.copy(horizon);
     scene.fog.color.copy(horizon);
-    const d = ((BF.world && BF.world.viewDist) || 6) * BF.CS;
+    // on the planet the distant terrain (js/lod.js) carries the view on past the loaded chunks, so the fog moves out to its edge
+    const d = Math.max(((BF.world && BF.world.viewDist) || 6) * BF.CS, BF.lod ? BF.lod.radius() : 0);
     // high above the ground (peaks, flying over the mile-high plains) the fog moves out by the height above the ground, so the land below stays visible
     let above = 0;
     if (cam && BF.world && BF.world.heightAt) {

@@ -361,7 +361,8 @@ function lattice(lx, lz) {
 function fields(x, z) {
   const lx = Math.floor(x / 4), lz = Math.floor(z / 4), fx = (x - lx * 4) / 4, fz = (z - lz * 4) / 4;
   if (LAT.size > LAT_MAX - 4) LAT.clear();   // here, not in lattice(): the four nodes below must not be overwritten while in use
-  const L = LATB, a = lattice(lx, lz), b = lattice(lx + 1, lz), c = lattice(lx, lz + 1), d = lattice(lx + 1, lz + 1);
+  // a node with no weight isn't computed (exactly the same result; distant terrain samples whole columns on lattice points, js/grid.js)
+  const L = LATB, a = lattice(lx, lz), b = fx ? lattice(lx + 1, lz) : a, c = fz ? lattice(lx, lz + 1) : a, d = fx && fz ? lattice(lx + 1, lz + 1) : fx ? b : c;
   const w00 = (1 - fx) * (1 - fz), w10 = fx * (1 - fz), w01 = (1 - fx) * fz, w11 = fx * fz;
   K.t = L[a + 0] * w00 + L[b + 0] * w10 + L[c + 0] * w01 + L[d + 0] * w11;
   K.hu = L[a + 1] * w00 + L[b + 1] * w10 + L[c + 1] * w01 + L[d + 1] * w11;
@@ -833,6 +834,10 @@ const tintCache = new Map();   // chunk key -> Float32Array(256 * 9), filled by 
 const TINT_MAX = 1500;
 function tintCompute(x, z, out, o) {
   fields(x, z);
+  tintK(out, o);
+}
+// the tints of the fields last computed (K)
+function tintK(out, o) {
   const { t, hu, c } = K;
   const hot = smooth(-0.35, 0.45, t), wet = smooth(-0.35, 0.45, hu);
   const cold = 1 - smooth(-0.42, -0.12, t);
@@ -2899,6 +2904,11 @@ BF.worldgen = {
   _villagePop: (a, b, salt) => villagePop(a, b, salt),
   _fields(x, z) { fields(x, z); const R = GEN >= 3 ? relief3(x, z, false) : null; return { cd: K.sp, cl: K.mp, mt: K.mt, c: K.c, pm: K.pm, p: K.p, e: K.e, t: K.t, hu: K.hu, S: R && R.S, m: R && R.m, rh: R && R.h, lo: K.lo }; },
   waterLevelAt(x, z) { climate(Math.floor(x), Math.floor(z)); return C.wl; },
+  // distant terrain (js/grid.js, spec r14-05): a column's climate in one pass (h, wl, biome, tb, t, hu...; read it before the next call),
+  // and the tree probability per 4x4 cell of each biome
+  // (with tint, a Float32Array(9): also its grass, foliage and water tints, as tintAt)
+  surfaceAt(x, z, tint) { climate(Math.floor(x), Math.floor(z)); if (tint) tintK(tint, 0); return C; },
+  TREE_DENSITY,
   biomeAt, tintAt,
   villagesNear: (x, z, radius) => villagesNear(x, z, radius),   // the planet: across face edges, canonical records, planet distance
   nearestVillage: (x, z) => nearestVillage(x, z),
