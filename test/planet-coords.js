@@ -18,7 +18,7 @@ module.exports = async (pg, out) => {
     window.tp = s => BF.commands.execute(s);
     BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 3; BF.player.start(); BF.player.setGameMode("creative");
   });
-  await pg.evaluate(() => settle(2500));
+  await pg.evaluate(() => { const p = BF.player.position; window.__start = { x: p.x, y: p.y, z: p.z }; return settle(2500); });
   const N = await pg.evaluate(() => BF.planet.N);
 
   // ---- F3: face / u / v / y, lat / lon, facing; no atlas x / z
@@ -159,14 +159,25 @@ module.exports = async (pg, out) => {
     const pc = pig ? P.canon(pig.position.x, pig.position.z, {}) : null;
     r.pig = pc ? { f: pc.f, canonical: pc.x === pig.position.x } : null;
     r.fill = tp(`/fill ${N - 2} ${y + 5} 81918 ${N + 2} ${y + 5} 81922 stone`);
+    // stand 300 blocks from a village near spawn (the nearest is 835 blocks out on seed 1337, past /locate's 1.5-region reach)
+    const v0 = BF.worldgen.villagesNear(__start.x, __start.z, 4000)[0];
+    r.v0 = !!v0;
+    if (v0) BF.player.teleport(v0.x + 300, 1500, v0.z + 120);
+    const here = { x: BF.player.position.x, z: BF.player.position.z };
     r.loc = tp("/locate village");
+    const v = BF.worldgen.nearestVillage(here.x, here.z), m = /(\/tp face \d \d+ \d+)/.exec(r.loc.msg || "");
+    if (v && m) {
+      const t = BF.planet.toward(here, v, {}), dir = BF.planet.compassPoint(BF.planet.bearing(here.x, here.z, t.x, t.z));
+      r.locDir = r.loc.msg.includes("to the " + dir + ",");
+      tp(m[1]); r.locArrive = BF.planet.distance(BF.player.position, v) < 2;
+    }
     return r;
   }, N);
   console.log("setblock " + JSON.stringify(sb));
   check(sb.set.ok && sb.got && sb.viaMargin && sb.cell[0] !== 4 && /face \d {2}u [\d,]+ {2}v [\d,]+ {2}y \d+/.test(sb.set.msg), "/setblock past the edge writes the neighbouring face's canonical cell");
   check(sb.sum.ok && sb.pig && sb.pig.f !== 4 && sb.pig.canonical, "/summon past the edge puts the mob at its canonical point");
   check(sb.fill.ok && /25 blocks/.test(sb.fill.msg), "/fill across the edge fills both sides");
-  check(!sb.loc.ok || /blocks away to the (north|south|east|west|north-east|north-west|south-east|south-west), at face \d {2}u [\d,]+ {2}v [\d,]+\. \/tp face \d \d+ \d+ goes there\./.test(sb.loc.msg), "/locate village prints planet distance, direction and a /tp face");
+  check(sb.loc.ok && /blocks away to the (north|south|east|west|north-east|north-west|south-east|south-west), at face \d {2}u [\d,]+ {2}v [\d,]+\. \/tp face \d \d+ \d+ goes there\./.test(sb.loc.msg) && sb.locDir && sb.locArrive, "/locate village prints planet distance, direction and a /tp face that goes there");
   console.log("locate: " + sb.loc.msg);
 
   // ---- the teleport panel: creative only, runs /tp
