@@ -6,7 +6,7 @@ A day in the game lasts 20 minutes. The clock times below follow the F3 clock, w
 
 ## A villager's day
 - **Morning.** A villager that slept indoors walks out through the door and shuts it behind it.
-- **Working hours, about 07:00 to 16:50.** Villagers with a workstation walk to it now and then and stand beside it for 8 to 20 seconds, which is when many crafters actually craft. In between, each does the job described on its profession page: the [[villager:farmer]] tends fields, the [[villager:builder]] builds, the [[villager:miner]] digs. A villager with nothing to do wanders within about 40 blocks of its bed, or the village centre, opening and closing doors as it goes.
+- **Working hours, about 07:00 to 16:50.** Villagers with a workstation walk to it now and then and stand beside it for 8 to 20 seconds, which is when many crafters actually craft. In between, each does the job described on its profession page: the [[villager:farmer]] tends fields, the [[villager:builder]] builds, the [[villager:miner]] digs. A villager with nothing to do wanders within about 40 blocks of its bed, or the village centre, opening and closing doors as it goes. One that finds itself standing in a closed doorway opens that door too before it sets off.
 - **Meals** at about 07:00, 11:15 and 16:05.
 - **Shopping and farming** carry on until sunset. Builders stop a little earlier, at about 17:15.
 - **Evening, from 18:00 to the next dawn.** Everyone heads for bed and sleeps.
