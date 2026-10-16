@@ -50,4 +50,4 @@ Climate follows latitude. Five bands run from the equator to the poles: tropical
 
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. There are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it. Flying high you only see the patch of ground around you for now: the distant land and the whole globe below are still to come.
+The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]). There are no rivers yet. A tree right next to a face edge can be cut off where the edge runs through it. Flying high you only see the patch of ground around you for now: the distant land and the whole globe below are still to come.
