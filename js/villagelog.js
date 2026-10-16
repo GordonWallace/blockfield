@@ -133,7 +133,7 @@ function updateLabels(on) {
   const seen = new Set();
   for (const m of BF.mobs.list) {
     if (m.type !== "villager" || m.dead || m.removed || !m.position) continue;
-    if (Math.hypot(m.position.x - pp.x, m.position.z - pp.z) > LABEL_R) continue;
+    if (BF.planet.distance(m.position, pp) > LABEL_R) continue;
     seen.add(m);
     const prof = m.child ? "Child" : pretty(m.profession), key = nameOf(m) + "|" + prof;
     let l = labels.get(m);

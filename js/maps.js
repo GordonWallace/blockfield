@@ -30,6 +30,15 @@ function getData(s, zx, zz, create = true) {
   return d || null;
 }
 const zoneOf = v => Math.floor(v / ZONE);
+// On the planet a map belongs to the face its zone lies on (zones are whole 128-block squares of a face's grid, as 128 divides N) and is
+// drawn in that face's grid orientation; past the face's edges it shows the neighbouring faces unfolded, as the world is drawn near the
+// ground (js/world.js cell() reads through the edge), and a corner's wedge stays blank. Anything placed on it (the player's arrow, what an
+// explorer walks over) is first expressed in that face's frame.
+const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
+const IF = {}, CA = {};
+// The canonical point of (x, z) (a position kept in a neighbouring face's frame names the zone it really stands in).
+const canonAt = (x, z) => (onPlanet() ? BF.planet.canon(x, z, CA) : (CA.x = x, CA.z = z, CA));
+const faceOf = d => (d.face != null ? d.face : (d.face = BF.planet.face(centre(d.zx), centre(d.zz))));
 const dataOfItem = it => (it && it.map ? getData(it.map.size, it.map.zx, it.map.zz) : null);
 
 // ---------------------------------------------------------------- sampling the world
@@ -90,6 +99,7 @@ function sample(wx, wz, s) {
 
 // Samples the pixels of `d` around the world position (x, z). Returns true when something changed.
 function explore(d, x, z, budget) {
+  if (onPlanet()) { const q = BF.planet.inFrame(faceOf(d), x, z, IF); if (!q) return false; x = q.x; z = q.z; }   // (x, z) in the map's face frame
   const s = scale(d.size), ox = originX(d.size, d.zx), oz = originX(d.size, d.zz);
   const pi = (x - ox) / s, pj = (z - oz) / s, R = revealPx(d.size), RI = Math.ceil(R);
   if (pi < -R || pj < -R || pi > PX + R || pj > PX + R) return false;
@@ -150,7 +160,7 @@ function craftHook(grid, gw) {
 // Right click with a blank map: it becomes a filled map of the player's zone. Returns an action-bar message or null.
 function use(sel, it) {
   if (!it || !it.mapSize) return null;
-  const p = BF.player.position, zx = zoneOf(p.x), zz = zoneOf(p.z);
+  const p = BF.player.position, c = canonAt(p.x, p.z), zx = zoneOf(c.x), zz = zoneOf(c.z);
   const id = BF.resolveItem(nameOf(it.mapSize, zx, zz));
   const d = getData(it.mapSize, zx, zz);
   const inv = BF.inventory, slots = inv.slots;
@@ -190,14 +200,41 @@ function marker(g, x, y, ang, onMap) {
   g.restore();
 }
 function drawView(d) {
-  const p = BF.player.position, s = scale(d.size);
+  const s = scale(d.size), at = mapPos(d);
   if (d.ver !== last.paint || last.key !== d) { paintMap(d); last.paint = d.ver; }
-  drawFrame(mapC, (p.x - originX(d.size, d.zx)) / s, (p.z - originX(d.size, d.zz)) / s, false);
+  drawFrame(mapC, (at.x - originX(d.size, d.zx)) / s, (at.z - originX(d.size, d.zz)) / s, false, at.yaw, northOn(d));
+}
+// The player's position and yaw in a map's frame (on the planet: its face's frame, through an edge if the player has crossed one).
+const MP = { x: 0, z: 0, yaw: 0 };
+function mapPos(d) {
+  const P = BF.player, p = P.position;
+  MP.x = p.x; MP.z = p.z; MP.yaw = P.yaw;
+  if (onPlanet()) {
+    const q = BF.planet.inFrame(faceOf(d), p.x, p.z, IF);
+    if (q) { MP.x = q.x; MP.z = q.z; MP.yaw = BF.planet.turnYaw(q.turn, P.yaw); }
+    else { MP.x = MP.z = -1e9; }   // on the far side of the planet: off the map
+  }
+  return MP;
+}
+// The way to true north on a map (an angle on the map, 0 = up), or null when the map's up is north already (within 4 degrees).
+function northOn(d) {
+  if (!onPlanet()) return null;
+  const c = side(d.size) / 2, n = BF.planet.north(originX(d.size, d.zx) + c, originX(d.size, d.zz) + c);
+  if (!n) return null;   // a map centred on a pole
+  const a = Math.atan2(n[0], -n[1]);
+  return Math.abs(a) < 4 * Math.PI / 180 ? null : a;
 }
 // Draws the framed held map: `src` (a canvas of any size, shown in the 128 px map area) and the player arrow at (mx, mz) in map pixels.
-function drawFrame(src, mx, mz, smooth) {
-  const P = BF.player;
-  const ang = Math.atan2(-Math.cos(P.yaw), -Math.sin(P.yaw));         // heading on the map: +x right, +z down
+// A small "N" arrow in the frame's corner pointing to true north, on planet maps whose up is not north.
+function northArrow(g, x, y, ang) {
+  g.save(); g.translate(x, y); g.rotate(ang);
+  g.beginPath(); g.moveTo(0, -6); g.lineTo(3, 2); g.lineTo(0, 0.5); g.lineTo(-3, 2); g.closePath();
+  g.fillStyle = "#b8281e"; g.strokeStyle = "#3f2f18"; g.lineWidth = 1; g.stroke(); g.fill();
+  g.restore();
+}
+function drawFrame(src, mx, mz, smooth, yaw, north) {
+  if (yaw == null) yaw = BF.player.yaw;
+  const ang = Math.atan2(-Math.cos(yaw), -Math.sin(yaw));             // heading on the map: +x right, +z down
   vg.imageSmoothingEnabled = !!smooth; if (smooth) vg.imageSmoothingQuality = "high";
   vg.fillStyle = "#3f2f18"; vg.fillRect(0, 0, T, T);
   vg.fillStyle = "#a88f58"; vg.fillRect(2, 2, T - 4, T - 4);
@@ -208,20 +245,26 @@ function drawFrame(src, mx, mz, smooth) {
   const inside = mx >= 0 && mz >= 0 && mx < PX && mz < PX;
   const ex = Math.max(7, Math.min(T - 7, M0 + mx)), ez = Math.max(7, Math.min(T - 7, M0 + mz));
   marker(vg, inside ? M0 + mx : ex, inside ? M0 + mz : ez, ang, inside);
+  if (north != null) northArrow(vg, T - 9, 9, north);
   viewTex.needsUpdate = true;
 }
 // The compass: a small dial whose red needle points at the world spawn, relative to where the player looks.
-const CT = 32;
+const CT = 32, TW = {};
 let cView = null, cTex = null, cg = null, cLast = "";
+// The needle's angle: 0 straight ahead, clockwise positive; it spins when the player stands at the spawn.
+function compassAngle() {
+  const P = BF.player, p = P.position, sp0 = BF.spawnPoint || { x: 8.5, z: 8.5 }, sp = sp0.bed && sp0.world ? sp0.world : sp0;
+  const tw = BF.planet ? BF.planet.toward(p, sp, TW) : { x: sp.x - p.x, z: sp.z - p.z };   // the way home in the player's grid frame (round the planet)
+  const dx = tw.x, dz = tw.z, y = P.yaw;
+  const sx = dx * Math.cos(y) + dz * -Math.sin(y), su = dx * -Math.sin(y) + dz * -Math.cos(y);   // right / forward components
+  return Math.hypot(dx, dz) < 1.5 ? performance.now() / 400 : Math.atan2(sx, su);
+}
 function drawCompass() {
   if (!cView) {
     cView = document.createElement("canvas"); cView.width = cView.height = CT; cg = cView.getContext("2d");
     cTex = new THREE.CanvasTexture(cView); cTex.magFilter = cTex.minFilter = THREE.NearestFilter; cTex.generateMipmaps = false;
   }
-  const P = BF.player, p = P.position, sp0 = BF.spawnPoint || { x: 8.5, z: 8.5 }, sp = sp0.bed && sp0.world ? sp0.world : sp0;
-  const dx = sp.x - p.x, dz = sp.z - p.z, y = P.yaw;
-  const sx = dx * Math.cos(y) + dz * -Math.sin(y), su = dx * -Math.sin(y) + dz * -Math.cos(y);   // right / forward components
-  const a = Math.round((Math.hypot(dx, dz) < 1.5 ? performance.now() / 400 : Math.atan2(sx, su)) * 16 / Math.PI) / 16 * Math.PI;
+  const a = Math.round(compassAngle() * 16 / Math.PI) / 16 * Math.PI;
   const k = a.toFixed(3);
   if (k === cLast) return cTex;
   cLast = k;
@@ -242,11 +285,11 @@ function drawCompass() {
 
 const api = {
   // Non-player use (e.g. explorer villagers): item id of the filled map a blank map of `size` becomes at world position (x, z).
-  filledIdAt(size, x, z) { return BF.resolveItem(nameOf(size, zoneOf(x), zoneOf(z))); },
+  filledIdAt(size, x, z) { const c = canonAt(x, z); return BF.resolveItem(nameOf(size, zoneOf(c.x), zoneOf(c.z))); },
   // Fraction of a map's pixels that are explored (0..1); `filled(it)` is true once all of them are.
   progress(it) { const d = dataOfItem(it); if (!d) return 0; let n = 0; for (let k = 0; k < d.px.length; k++) if (d.px[k]) n++; return n / d.px.length; },
   filled(it) { return api.progress(it) >= 1; },
-  PX, ZONE, MAX_SIZE, side, scale, zoneOf, nameOf, centre, originX, getData, dataOfItem, explore, revealBlocks, revealPx, upgradeData, use, craftHook, sample, column,
+  PX, ZONE, MAX_SIZE, side, scale, zoneOf, nameOf, faceOf, mapPos, northOn, compassAngle, centre, originX, getData, dataOfItem, explore, revealBlocks, revealPx, upgradeData, use, craftHook, sample, column,
   // bounds of a map in world blocks: {x0, z0, x1, z1}
   bounds(s, zx, zz) { const o = originX(s, zx), p = originX(s, zz); return { x0: o, z0: p, x1: o + side(s), z1: p + side(s) }; },
   // Per-frame work for the held item (called by player.js). Returns the texture to show, or null when the item has no dynamic view.

@@ -3,7 +3,7 @@
 // since map item ids are handed out fresh each session. Usage: node test/run.js /tmp/dmi test/drops-map-ids.js
 module.exports = async (pg, out) => {
   const id = await pg.evaluate(async () => {
-    const meta = await BF.save.create({ name: "drops-map-ids", seed: 7, gameMode: "survival", villages: 9 });
+    const meta = await BF.save.create({ name: "drops-map-ids", seed: 7, gameMode: "survival", villages: 9, gen: 4 });
     BF.mobs.spawning = false;
     const A = BF.resolveItem("filled_map_1_0_0"), B = BF.resolveItem("filled_map_1_5_5"), C = BF.resolveItem("auto_map_2_3_-4");
     const p = BF.player.position;
@@ -18,7 +18,8 @@ module.exports = async (pg, out) => {
     return meta.id;
   });
   await pg.reload();
-  await pg.waitForTimeout(6000);
+  await require("./lib").ready(pg);   // the planet works out its rivers before the boot world starts (a load before then is wiped by it)
+  await pg.waitForTimeout(1000);
   const res = await pg.evaluate(async id => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     // a map made this session takes the first dynamic id, as map B would have when the inventory loads first

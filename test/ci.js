@@ -16,7 +16,7 @@ const tier = process.argv[2] || 'baseline';
 const outDir = path.resolve(process.argv[3] || 'ci-out');
 const only = process.argv.slice(4);
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci.json'), 'utf8'));
-const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js']);
+const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js', 'bft.js']);
 
 // A test file can carry its own settings in a header line, so adding a test needs no edit to the shared ci.json (parallel PRs
 // kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>[,<name>...]] [soak] [timeout=<s>] [args=<a,b,...>] [reason]`,
@@ -63,6 +63,14 @@ for (const t of tests) {
   if (h.suite && !t.suite) for (const k of h.suite.split(',').filter(Boolean)) { if (SUITES[k]) { t.suite = t.suite || k; (t.suites = t.suites || []).push(k); } else badSuite.push(`${t.name} (suite=${k})`); }
   if (h.soak) t.soak = true;
   if (h.timeout && !t.timeout) t.timeout = h.timeout;
+}
+// Generator 3 pins (spec r14-22): until a suite moves to the planet, its action-script tests (and those in no suite) boot the old
+// generator 3 world (ci.json "gen3": hash, suites still on it). A test's own env.BF_HASH wins. Removed with the last suite (r14-24).
+const GEN3 = manifest.gen3 || null;
+if (GEN3) for (const t of tests) {
+  if (t.kind !== 'actions' || (t.env && t.env.BF_HASH != null)) continue;
+  const ss = t.suites || [];
+  if (!ss.length || ss.every(k => GEN3.suites.includes(k))) t.env = { ...(t.env || {}), BF_HASH: GEN3.hash };
 }
 if (badSuite.length) { console.log(`FAIL unknown suite in a // @ci header: ${badSuite.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}`); process.exit(1); }
 if (tier === 'suites') {

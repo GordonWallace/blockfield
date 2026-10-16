@@ -1,6 +1,9 @@
 // Far-village explorer (needs js/villagesim.js): node test/run.js /tmp/far test/explorer-far.js
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => BF.player.start());
+  // No pointer lock (the game's drag-mode path, js/player.js requestLock): with the mouse locked, headless Chromium piles up
+  // memory in the browser and renderer processes (~50 MB/s) while the long evaluates below keep the page's main thread busy,
+  // which took this test past CI's 10 GB cap.
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await pg.waitForTimeout(2000);
   console.log(JSON.stringify(await pg.evaluate(async () => {
     const wg = BF.worldgen, vs = wg.villagesNear(0, 0, 300).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
@@ -18,10 +21,11 @@ module.exports = async (pg, out) => {
     const T = BF.trades, I = BF.I;
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     BF.world.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);
-    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.inv.create(); T.inv.add(A.inv, I.emerald, 20); BF.jobs.claim(A);
+    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.inv.create(); T.inv.add(A.inv, I.emerald, 20);
+    BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });   // this survey table: a bare claim() picks any free jobsite (xp 0) and could make A a forester
     T.inv.add(A.inv, BF.maps.filledIdAt(1, A.position.x, A.position.z), 1);
     window.__A = A; window.__P = [P.x, P.z];
-    res.start = [A.position.x | 0, A.position.z | 0];
+    res.start = [A.position.x | 0, A.position.z | 0]; res.prof = A.profession;
     return res;
   })));
   for (let k = 0; k < 12; k++) {

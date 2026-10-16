@@ -18,7 +18,7 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/`);
+  await game.goto(`http://localhost:${GAME}/#seed1337gen3`);   // generator 3 until r14-22 (no hash boots a planet since r14-19)
   await game.waitForTimeout(5000);
   await require('./lib').toVillage(game);
   // a known inventory: 7 diamonds in slot 0, a half-worn iron pickaxe in slot 2, 64 bread in slot 5, the rest empty

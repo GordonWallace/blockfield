@@ -163,7 +163,12 @@ world.init = function (sceneRef) {
 // its own copy of the material; the copies share one shader program.
 const roundK = { value: 0 };
 world.roundK = roundK;
-function planetMaterial(base) {
+world.dayUniform = dayUniform;   // distant terrain (js/lod.js) is lit like an open-sky block
+// Debug face tints (js/view.js setDebug, the debug screen's Planet section): each face's chunks drawn in its own colour.
+const faceTintOn = { value: 0 };
+world.faceTintOn = faceTintOn;
+const FACE_TINT = [[1, 0.55, 0.55], [0.55, 1, 0.55], [0.6, 0.7, 1], [1, 1, 0.5], [1, 0.6, 1], [0.5, 1, 1]];
+function planetMaterial(base, face) {
   const m = base.clone();
   m.userData.planet = true;
   const sphM = { value: new THREE.Matrix4() };
@@ -172,6 +177,9 @@ function planetMaterial(base) {
   m.onBeforeCompile = sh => {
     inner(sh);
     sh.uniforms.uK = roundK; sh.uniforms.sphM = sphM;
+    sh.uniforms.uTintOn = faceTintOn; sh.uniforms.uFaceCol = { value: new THREE.Vector3(...(FACE_TINT[face] || [1, 1, 1])) };
+    sh.fragmentShader = "uniform float uTintOn;\nuniform vec3 uFaceCol;\n" + sh.fragmentShader.replace("#include <color_fragment>",
+      "#include <color_fragment>\nif (uTintOn > 0.5) diffuseColor.rgb *= uFaceCol;");
     sh.vertexShader = "attribute vec3 sphere;\nuniform float uK;\nuniform mat4 sphM;\n" + sh.vertexShader.replace("#include <begin_vertex>",
       "vec3 transformed = vec3(position);\nif (uK > 0.0) transformed = mix(transformed, (sphM * vec4(sphere, 1.0)).xyz, uK);");
   };
@@ -544,7 +552,7 @@ function neighboursReady(cx, cz) {
   return true;
 }
 
-let lastCenter = null, genList = [], meshList = [], simList = [];
+let lastCenter = null, genList = [], meshList = [], simList = [], edgeList = [];
 const TW = {};
 let fwdX = 0, fwdZ = -1, lastPlanT = 0;
 let roundPlan = false;
@@ -556,7 +564,7 @@ function plan(pcx, pcz) {
     const fx = -e[8], fz = -e[10], l = Math.hypot(fx, fz);
     if (l > 1e-3) { fwdX = fx / l; fwdZ = fz / l; }
   }
-  genList = []; meshList = [];
+  genList = []; meshList = []; edgeList = [];
   const keep = new Set();
   for (let dz = -R - 1; dz <= R + 1; dz++) for (let dx = -R - 1; dx <= R + 1; dx++) {
     const d2 = dx * dx + dz * dz;
@@ -580,7 +588,8 @@ function plan(pcx, pcz) {
     const dot = (dx * fwdX + dz * fwdZ) / len;
     const score = d2 <= 2 ? d2 : d2 * (1 + 1.5 * Math.max(0, -dot) + 0.5 * (1 - Math.abs(dot)));
     if (!world.chunks.has(k)) genList.push([cx, cz, score]);
-    if (d2 <= R * R) meshList.push([cx, cz, score]);
+    if (d2 <= R * R) meshList.push([cx, cz, score, d2]);
+    edgeList.push([cx, cz, dx, dz, d2 <= R * R]);
   }
   genList.sort((a, b) => a[2] - b[2]);
   meshList.sort((a, b) => a[2] - b[2]);
@@ -659,6 +668,16 @@ world.update = function (px, pz, budgetMs = 8) {
     }
   }
   world.queueLength = genList.length + meshList.filter(m => { const c = world.chunks.get(ckey(m[0], m[1])); return !c || c.mesh === undefined; }).length;
+  // how far out every wanted chunk has a mesh, in blocks: distant terrain (js/lod.js) leaves its hole only that far while chunks load
+  // (the distance from the player to the nearest chunk square, in the planned set or just past it, that has no mesh)
+  const lx = px - pcx * CS, lz = pz - pcz * CS;
+  let gap = Infinity;
+  for (const e of edgeList) {
+    if (e[4]) { const c = world.chunks.get(ckey(e[0], e[1])); if (c && c.mesh !== undefined) continue; }
+    const ex = Math.max(e[2] * CS - lx, 0, lx - (e[2] + 1) * CS), ez = Math.max(e[3] * CS - lz, 0, lz - (e[3] + 1) * CS);
+    if (ex * ex + ez * ez < gap) gap = ex * ex + ez * ez;
+  }
+  world.covered = gap === Infinity ? world.viewDist * CS : Math.sqrt(gap);
 };
 
 world.setViewDist = function (d) { world.viewDist = d; lastCenter = null; };
@@ -1049,7 +1068,7 @@ function buildMesh(c) {
     if (PLN) g.setAttribute("sphere", new THREE.Float32BufferAttribute(spherePositions(T.pos, ox, oz, sph), 3));
     g.setIndex(T.ind);
     g.computeBoundingSphere();
-    const m = new THREE.Mesh(g, PLN ? planetMaterial(mat) : mat);
+    const m = new THREE.Mesh(g, PLN ? planetMaterial(mat, BF.planet.face(ox, oz)) : mat);
     m.renderOrder = order;
     m.matrixAutoUpdate = false;
     m.position.set(ox, 0, oz); m.updateMatrix();

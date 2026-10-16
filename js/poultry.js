@@ -282,7 +282,7 @@ function tickCoops() {
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
     if (!rec.wg) continue;
-    if (Math.hypot(rec.x - pp.x, rec.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
+    if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const coop of coopsOf(rec)) {
       if (!W.isLoaded(coop.fx0, coop.fz0) || !W.isLoaded(coop.fx1, coop.fz1) || !W.isLoaded(coop.fx0, coop.fz1) || !W.isLoaded(coop.fx1, coop.fz0)) continue;
       if (!coop.hens) initCoop(coop);

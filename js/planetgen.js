@@ -205,31 +205,48 @@ function rainLat(a) {
   }
   return 0.2;
 }
-let nK = null;
+let nK = null, CSC = 1;   // CSC: the world's biome size, stretching the climate noise (band wander, anomalies, rainfall noise)
 // Climate of the (warped) point x, z with continentalness c: writes o.t (temperature), o.hu (humidity) and o.el (climate latitude).
 function climate(x, z, c, o) {
   const i = pt(x, z), X = CD[i] * R, Y = CD[i + 1] * R, Z = CD[i + 2] * R;
   const alat = Math.abs(Math.asin(Math.max(-1, Math.min(1, CD[i + 1])))) * 180 / Math.PI;
-  const wander = nK.fbm3(X / 60000, Y / 60000, Z / 60000, 3) * 11 + nK.fbm3(X / 9000 + 40, Y / 9000, Z / 9000, 2) * 3;
-  const an = nK.n3(X / 30000 - 61.3, Y / 30000 + 12.7, Z / 30000 + 5.1);
+  const s = CSC, L1 = 60000 * s, L2 = 9000 * s, LA = 30000 * s, LR = 25000 * s;
+  const wander = nK.fbm3(X / L1, Y / L1, Z / L1, 3) * 11 + nK.fbm3(X / L2 + 40, Y / L2, Z / L2, 2) * 3;
+  const an = nK.n3(X / LA - 61.3, Y / LA + 12.7, Z / LA + 5.1);
   const el = Math.max(0, alat + wander + 12 * Math.sign(an) * smooth(0.65, 0.85, Math.abs(an)));
-  const rain = rainLat(Math.max(0, alat + wander * 0.5)) + nK.fbm3(X / 25000 + 90, Y / 25000, Z / 25000, 3) * 0.6 - 0.22 * smooth(0.4, 1.6, c);
+  const rain = rainLat(Math.max(0, alat + wander * 0.5)) + nK.fbm3(X / LR + 90, Y / LR, Z / LR, 3) * 0.6 - 0.22 * smooth(0.4, 1.6, c);
   o.el = el; o.t = tOfLat(el); o.hu = 1.1 * (rain - 0.37);
 }
 // How much colder (in temperature) ground at height h is than sea level at climate latitude el: up to 22 degrees, from 300 to 2200 up
 // (the high plains around 1000 are about 7 degrees colder, so they mostly keep their band's biomes; the ranges are much colder).
 const cool = (el, h) => { const s = smooth(300, 2200, h); return s > 0 ? tOfLat(el) - tOfLat(el + 22 * s) : 0; };
 
-// Where a new world starts (until r14-19's spawn rules): a spiral search for dry land from latitude 35 N on face 4's middle meridian,
-// far from every face edge and corner. The continent field picks candidates cheaply; the full height confirms one.
+// The world spawn (spec r14-19): dry land in the temperate or subtropical band (after altitude: worldgen bandAt 2 or 3), on a
+// continent (not a speck of an island), at least SPAWN_EDGE blocks from every face edge and SPAWN_CORNER from every cube corner.
+// Searched on a spiral from 35 N on face 4's middle meridian (the band nearest face 4's centre that is neither tropical nor cold),
+// so the same seed always spawns in the same place. Falls back to the spiral's best dry point, then to its start.
+const SPAWN_EDGE = 5000, SPAWN_CORNER = 20000, sd = [0, 0, 0];
+function spawnOK(x, z, needBand) {
+  const W = BF.worldgen, f = Math.floor(x / P.W), u = x - P.W * f - P.N, v = z - P.N;
+  if (f < 0 || f > 5 || Math.min(u, v, P.N - 1 - u, P.N - 1 - v) < SPAWN_EDGE) return false;
+  P.dir(f, u, v, sd);
+  if (cornerDist(sd[0], sd[1], sd[2]) < SPAWN_CORNER) return false;
+  if (cont(x, z) < 0.1) return false;
+  const h = W.heightAt(x, z);
+  if (!(h > BF.SEA + 1 && h >= W.waterLevelAt(x, z))) return false;
+  if (needBand) { const b = W.bandAt(x, z); if (b !== 2 && b !== 3) return false; }
+  return true;
+}
 function spawnSearch() {
-  const W = BF.worldgen, a = P.atlasOfLatLon(35, 0, {}), x0 = Math.floor(a.x), z0 = Math.floor(a.z);
+  const a = P.atlasOfLatLon(35, 0, {}), x0 = Math.floor(a.x), z0 = Math.floor(a.z);
+  let dry = null;
   for (let r = 0; r < 60000; r += 32) {
     const t = r * 0.0137, x = x0 + Math.round(Math.cos(t) * r), z = z0 + Math.round(Math.sin(t) * r);
-    if (cont(x, z) < 0.1) continue;
-    if (W.heightAt(x, z) > BF.SEA + 1 && W.heightAt(x, z) >= W.waterLevelAt(x, z)) return [x, z];
+    if (!spawnOK(x, z, false)) continue;
+    if (BF.worldgen.bandAt(x, z) === 2 || BF.worldgen.bandAt(x, z) === 3) return [x, z];
+    if (!dry) dry = [x, z];
   }
-  return [x0, z0];
+  return dry || [x0, z0];
 }
 
 // Trees on face f's 4 x 4 cells [cu0, cu1) x [cv0, cv1) (face grid u / 4, v / 4): the very trees chunk generation draws, as
@@ -237,8 +254,8 @@ function spawnSearch() {
 const treesIn = (f, cu0, cv0, cu1, cv1) => BF.worldgen.treesIn(f, cu0, cv0, cu1, cv1);
 
 // Called by worldgen.init for generator 4 with the world's noise; returns the sampler worldgen's generator-3 code runs on.
-function init(n) {
-  noise = n; seedv = n.seed | 0;
+function init(n, scale) {
+  noise = n; seedv = n.seed | 0; CSC = Math.max(1, scale || 1);
   nR = BF.makeNoise(seedv ^ 0x2c1b3c6d); nC = BF.makeNoise(seedv + 7777); nK = BF.makeNoise(seedv ^ 0x1b873593);
   CX.fill(NaN);
   placeCorners();
@@ -246,7 +263,7 @@ function init(n) {
 }
 
 BF.planetgen = {
-  init, cont, contDir, contRaw, cornerDist, nearCorner, spawnSearch, SEA_C, ray, placeCorners, treesIn, climate, cool, tOfLat, rainLat,
+  init, cont, contDir, contRaw, cornerDist, nearCorner, spawnSearch, spawnOK, SPAWN_EDGE, SPAWN_CORNER, SEA_C, ray, placeCorners, treesIn, climate, cool, tOfLat, rainLat,
   corners: () => KS.map(K => ({ c: K.c.slice(), gulf: !!K.g, reach: K.reach, heading: K.heading, n: K.n && K.n.slice() })),
   get cornerSea() { return cornerSea; }, get searchMs() { return searchMs; }, get rotation() { return RM.slice(); }, get seed() { return seedv; },
 };

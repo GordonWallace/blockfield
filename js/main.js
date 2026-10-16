@@ -43,15 +43,17 @@ BF.newWorld = function (seed, opts) {
   if (BF.horses) BF.horses.reset();
   BF.world.reset();
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
+  if (BF.lod) BF.lod.reset(scene);   // distant terrain on the planet (js/lod.js): fresh rings and sampling workers for this seed
   // pick a dry spawn column near the origin
   let sx = 8, sz = 8;
-  if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry land at 35 N on face 4, far from edges (r14-19 brings real spawn rules)
+  if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry temperate / subtropical land near 35 N on face 4, away from edges and corners (r14-19)
   else for (let r = 0; r < 400; r += 8) {
     const a = r * 0.7, x = Math.round(Math.cos(a) * r) + 8, z = Math.round(Math.sin(a) * r) + 8;
     if (BF.worldgen.heightAt(x, z) > BF.SEA + 1 && BF.worldgen.heightAt(x, z) > BF.worldgen.waterLevelAt(x, z)) { sx = x; sz = z; break; }
   }
   // (worldgen's findSpawn() mirrors the search above; keep them in sync.)
   BF.spawnPoint = { x: sx + 0.5, z: sz + 0.5 };
+  BF.worldSpawn = { x: sx + 0.5, z: sz + 0.5 };   // kept apart: the fallback when a spawn point or saved position is off the world (js/player.js)
   BF.player.spawn(sx + 0.5, BF.worldgen.heightAt(sx, sz) + 1.01, sz + 0.5);
   // every world starts at sunrise on day 0; loading a save restores its own time afterwards
   BF.sky.day = 0; BF.sky.setTime(0.05);
@@ -60,10 +62,91 @@ BF.newWorld = function (seed, opts) {
   BF.emit("newWorld", BF.state.seed);
 };
 
+// The planet's rivers and lakes are worked out for the whole planet before its world starts (js/planetrivers.js, spec r14-10): several
+// seconds, once per seed per session. prepareWorld(seed, gen) runs that in slices behind a loading screen with progress and resolves
+// when it's done (at once for other generators); newWorld then finds the network ready. newWorld on its own still works (it solves the
+// network in one go, as tests do).
+BF.prepareWorld = function (seed, gen) {
+  if ((gen | 0) !== 4) return Promise.resolve();
+  BF.state.gen = 4;
+  BF.worldgen.init(BF.makeNoise(seed >>> 0), { gen: 4, villages: BF.state.villages || 10 });
+  if (BF.worldgen.riversReady()) return Promise.resolve();
+  const el = document.createElement("div");
+  el.id = "bf-loading";
+  el.style.cssText = "position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;" +
+    "background:#0e1310;color:var(--ink);font:13px var(--mono)";
+  el.innerHTML = '<div style="font:18px var(--display);color:var(--accent)">Blockfield</div><div class="t">Working out the rivers and lakes</div>' +
+    '<div style="width:260px;height:8px;border:1px solid var(--panel-edge);border-radius:2px"><div class="b" style="height:100%;width:0;background:var(--accent)"></div></div>';
+  document.body.appendChild(el);
+  BF.preparing = true;   // the frame loop waits (the old world is gone: worldgen is the planet's now)
+  const bar = el.querySelector(".b"), t = el.querySelector(".t");
+  const show = f => { bar.style.width = Math.round(f * 100) + "%"; t.textContent = "Working out the rivers and lakes · " + Math.round(f * 100) + "%"; };
+  // the terrain at the network's nodes (the slow first part) in a few workers at once where the page may start them (served over
+  // http, as run.sh does; a page opened as a file can't), else here in slices with the rest
+  return riverWorkers(seed, show).then(pre => new Promise(resolve => {
+    BF.riverPre = pre ? { seed: seed >>> 0, pre } : null;   // (distant terrain's workers solve the network from these too, js/lod.js)
+    let first = pre;
+    const step = () => {
+      const t0 = performance.now();
+      let f = 0;
+      do { f = BF.worldgen.solveRivers(first); first = null; } while (f < 1 && performance.now() - t0 < 60);
+      show(pre ? 0.4 + 0.6 * f : f);
+      if (f < 1) setTimeout(step, 0);
+      else { el.remove(); BF.preparing = false; resolve(); }
+    };
+    setTimeout(step, 30);
+  }));
+};
+function riverWorkers(seed, show) {
+  const K = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 1)), NN = 6 * BF.planetRivers.M * BF.planetRivers.M;
+  if (typeof Worker === "undefined" || !/^https?:$/.test(location.protocol)) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const pre = BF.planetRivers.newSamples(), workers = [];
+    let left = K, done = 0, failed = false;
+    const finish = ok => { workers.forEach(w => w.terminate()); resolve(ok ? pre : null); };
+    for (let k = 0; k < K; k++) {
+      let w;
+      try { w = new Worker("js/riverworker.js"); } catch (e) { failed = true; break; }
+      workers.push(w);
+      const from = Math.floor(NN * k / K), to = Math.floor(NN * (k + 1) / K);
+      w.onmessage = ev => {
+        const r = ev.data;
+        for (const a of ["e", "p", "sea", "rain"]) pre[a].set(r[a].subarray(r.from, r.to), r.from);
+        done += r.to - r.from; show(0.4 * done / NN);
+        if (--left === 0) finish(true);
+      };
+      w.onerror = ev => { console.warn("river worker failed, working the rivers out here instead", ev.message); if (!failed) { failed = true; finish(false); } };
+      w.postMessage({ seed: seed >>> 0, villages: BF.state.villages || 10, from, to });
+    }
+    if (failed) finish(false);
+  });
+}
+
 // ---------- debug overlay (F3) ----------
 const dbg = document.getElementById("debug");
 let showDebug = false;
-addEventListener("keydown", e => { if (e.code === "F3") { e.preventDefault(); showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; } });
+// F3 shows or hides it when released. Held with B, C or R on the planet it flips a planet debug toggle instead (js/view.js setDebug,
+// spec r14-21): B face tints, C the open corner wedge (no round drawing near the cube corners), R the true sphere everywhere.
+let f3Held = false, f3Combo = false;
+const F3_COMBO = { KeyB: "tints", KeyC: "wedge", KeyR: "sphere" };
+addEventListener("keydown", e => {
+  if (e.code === "F3") { e.preventDefault(); if (!e.repeat) { f3Held = true; f3Combo = false; } return; }
+  const k = f3Held && F3_COMBO[e.code];
+  if (!k || !BF.view || !BF.planet || !BF.planet.isPlanet()) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.repeat) return;
+  f3Combo = true;
+  const on = BF.view.setDebug({ [k]: !BF.view.debug[k] })[k];
+  if (BF.player.actionBar) BF.player.actionBar(PLANET_TOGGLE[k] + (on ? ": on" : ": off"));
+}, true);
+addEventListener("keyup", e => {
+  if (e.code !== "F3") return;
+  e.preventDefault();
+  if (f3Held && !f3Combo) { showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; }
+  f3Held = false;
+});
+addEventListener("blur", () => { f3Held = false; });
+const PLANET_TOGGLE = { tints: "Face tints", wedge: "Open corner wedge", sphere: "True sphere everywhere" };
 let frames = 0, fpsT = performance.now(), fps = 0;
 let screenWas = false;
 function updateDebug(now) {
@@ -99,13 +182,16 @@ function planetInfo(p) {
   const C = BF.coords, c = C && C.here();
   if (!c) return null;
   const ll = BF.planet.latLonAt(p.x, p.z, {});
-  return { face: c.f, u: c.u, v: c.v, lat: ll.lat, lon: ll.lon, latLon: C.latLonText(p.x, p.z), facing: C.facing(BF.player.yaw, p.x, p.z) };
+  return { face: c.f, u: c.u, v: c.v, lat: ll.lat, lon: ll.lon, latLon: C.latLonText(p.x, p.z), facing: C.facing(BF.player.yaw, p.x, p.z),
+    debug: BF.view && BF.view.debug ? { ...BF.view.debug } : null };
 }
+// "Planet debug: face tints, true sphere" when any F3 + B / C / R toggle is on
+const planetToggles = pl => { const on = pl.debug ? Object.keys(PLANET_TOGGLE).filter(k => pl.debug[k]) : []; return on.length ? "Planet debug: " + on.map(k => PLANET_TOGGLE[k].toLowerCase()).join(", ") + "\n" : ""; };
 function debugText(d) {
   const s = d.sections, pl = d.planet;
   const n1 = v => (Math.floor(v * 10) / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return `Blockfield  ${d.fps} fps\n` +
-    (pl ? `Face ${pl.face}  u ${n1(pl.u)}  v ${n1(pl.v)}  y ${n1(d.y)}\n${pl.latLon}  Facing ${pl.facing}\n`
+    (pl ? `Face ${pl.face}  u ${n1(pl.u)}  v ${n1(pl.v)}  y ${n1(d.y)}\n${pl.latLon}  Facing ${pl.facing}\n` + planetToggles(pl)
       : `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n`) +
     `Chunk ${pl ? Math.floor(pl.u / BF.CS) + ", " + Math.floor(pl.v / BF.CS) : d.chunkX + ", " + d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
     `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
@@ -122,10 +208,12 @@ BF.debugText = debugText;
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
+  if (BF.preparing) { last = now; return; }
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const p = BF.player.position;
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
+  if (BF.lod) BF.lod.update();   // distant terrain rings on the planet (js/lod.js)
   const W = BF.warp;
   if (!BF.state.paused) {
     // Fast-forward (arrow keys, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
@@ -178,8 +266,11 @@ BF.boats.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
-const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world, #seed1337gen3v9 one with village generator 9
+// The boot world (behind the title screen) and #seed<n> are planets (spec r14-19). #seed1337gen3 / gen1 / gen2 start a legacy-generator
+// world (tests, until r14-24), #seed1337gen3v9 one with village generator 9.
+const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);
 if (m) seed = +m[1];
-BF.newWorld(seed, m && (m[2] || m[3]) ? Object.assign(m[2] ? { gen: +m[2] } : {}, m[3] ? { villages: +m[3] } : {}) : undefined);
-requestAnimationFrame(frame);
+const startOpts = Object.assign({ gen: m && m[2] ? +m[2] : 4 }, m && m[3] ? { villages: +m[3] } : {});
+if (startOpts.gen === 4) BF.prepareWorld(seed, 4).then(() => { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); });   // (the planet: rivers first)
+else { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); }
 })();

@@ -25,7 +25,7 @@ const LEAN = 3;
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
   await pg.waitForTimeout(3000);
   // the nearest villages (within 3000 blocks of 0,0) that have a pasture
   const cands = await pg.evaluate(() => {

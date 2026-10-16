@@ -70,6 +70,8 @@ The name is one of 200 New Zealand town names such as Kaitaia, Rotorua or Hokiti
 
 Each village also has signposts: one at the outer end of every main road, and one on the plaza beside the well. A signpost lists up to the four nearest villages within 800 blocks, each as an arrow, the name and the distance, rounded to the nearest 10 blocks. A road signpost only lists villages that lie in roughly the direction of that road (within 45 degrees); the plaza one lists all four. A village with no neighbours in range has no posts.
 
+On the planet, distances are measured over the ground around the planet, and a village on the next face is listed like any other, with its arrow pointing the way you would walk over the edge. Villages keep a few hundred blocks back from face edges, so a neighbour on another face is seldom within range.
+
 ## Workstations
 
 Villagers need a workstation to hold a profession. The generator places about one for each villager who needs one, give or take a few. Most stand inside the house of the villager they belong to: a [[item:lectern]] in the library, a [[item:brewing_stand]] in the church, the armorer's, weaponsmith's and toolsmith's blocks in the smithy. Others go beside the thing they serve (a [[item:composter]] by a farm, a [[item:loom]] by a pen, a nesting box by the coop, a milk churn by the pasture, a feed trough by the sty gate, a honey extractor by a farm with two beehives and a flower bed), and the builders', furniture makers', merchants' and bakers' workstations stand on the plaza. A workstation with no villager is free for an unemployed villager to take. See [[page:villager-life]].

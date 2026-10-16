@@ -11,9 +11,9 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
-    const px = 8, pz = 8;
+    const px = Math.floor(BF.spawnPoint.x), pz = Math.floor(BF.spawnPoint.z);   // the planet's spawn (spec r14-22; was 8, 8 on generator 3)
     await load(px, pz);
     const cobble = BF.I.cobblestone, dirt = BF.I.dirt;
     const gx = px + 4, gz = pz + 4, gy = BF.worldgen.heightAt(gx, gz);
@@ -26,7 +26,7 @@ module.exports = async (pg, out) => {
     const saved = JSON.parse(JSON.stringify(BF.drops.serialize()));
     ok("the save lists them with their age", saved.length === 2 && saved.every(e => e[5] >= 99), saved);
     // reload: a fresh world, then the saved drops, before the chunk has loaded again
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     ok("new world has no drops", BF.drops.list.length === 0);
     BF.drops.deserialize(saved);
@@ -39,8 +39,8 @@ module.exports = async (pg, out) => {
     const still = BF.drops.list.map(d => ({ y: d.pos.y, age: d.age }));
     ok("after the chunk loads they stay put and age again", still.length === 2 && still.every((d, i) => Math.abs(d.y - before[i].y) < 0.05 && d.age > before[i].age + 4), { before, still });
     // walk away so the chunk unloads: the drops wait instead of falling out of the world
-    await load(1500, 1500);
-    for (let k = 0; k < 20; k++) { BF.world.update(1500, 1500, 8); await new Promise(r => setTimeout(r, 0)); }
+    await load(px + 1500, pz + 1500);
+    for (let k = 0; k < 20; k++) { BF.world.update(px + 1500, pz + 1500, 8); await new Promise(r => setTimeout(r, 0)); }
     const unloaded = !BF.world.isLoaded(gx, gz);
     run(400);
     ok("in an unloaded chunk they neither despawn nor fall", unloaded && BF.drops.list.length === 2, { unloaded, n: BF.drops.list.length });
@@ -51,7 +51,7 @@ module.exports = async (pg, out) => {
     BF.drops.deserialize(undefined);
     ok("old saves: no drops, no error", BF.drops.list.length === 0);
     // the real save: through IndexedDB and BF.save.load
-    const meta = await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9 });
+    const meta = await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9, gen: 4 });
     BF.mobs.spawning = false;
     await load(px - 21, pz);
     BF.drops.spawn(cobble, 7, gx + 0.5, gy + 2, gz + 0.5);

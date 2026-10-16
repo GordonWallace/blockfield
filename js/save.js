@@ -51,7 +51,7 @@ function snapshot() {
     health: P.health, hunger: P.hunger, gameMode: P.gameMode,
   };
   return {
-    version: 1,
+    version: BF.state.gen === 4 ? 2 : 1,                   // 2: a planet (Blockfield 1.4); 1: a flat world from 1.3 or earlier, which 1.4's world list won't open
     seed: BF.state.seed,
     gen: BF.state.gen, biomeScale: BF.state.biomeScale,   // worldgen version + biome size (old saves have neither => gen 1)
     villages: BF.state.villages,                           // village generator (old saves have none => 1, the classic villages)
@@ -128,8 +128,13 @@ function numberSeed(text) {
 }
 
 // ---------- public API ----------
+// Worlds 1.4 can open: planets (generator 4, snapshot version 2). Older worlds (version 1: generators 1 to 3, made with 1.3 or before)
+// are listed greyed with only Delete (Gordon, 2026-10-15: no old saves in 1.4, no conversion). load() itself still opens them, for
+// the legacy-generator tests (until r14-24).
+const playable = meta => !!meta && (meta.gen === 4 || meta.version >= 2);
 const save = {
-  current: null,          // meta of the world being played, or null (unsaved demo world)
+  current: null,
+  playable,          // meta of the world being played, or null (unsaved demo world)
   lastSaved: 0,
   supported: typeof indexedDB !== "undefined",
   numberSeed,             // exposed for tests
@@ -141,18 +146,22 @@ const save = {
       .catch(() => []);
   },
 
-  // Starts a brand-new saved world. opts: {name, seed (number|string|blank), gameMode, biomeScale (>=1, default 1), gen (default 3)}
+  // Starts a brand-new saved world. opts: {name, seed (number|string|blank), gameMode, biomeScale (>=1, default 1), gen (default 4, the
+  // planet; tests may still ask for 1 to 3 until r14-24)}
   create(opts = {}) {
     let seed = opts.seed;
     if (seed === undefined || seed === null || seed === "") seed = 1 + Math.floor(Math.random() * 4294967295);
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, created: now, lastPlayed: now };
-    BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
-    save.current = meta;
-    BF.emit("worldLoaded", meta);
-    return save.saveNow().then(() => meta);
+    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 4, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, created: now, lastPlayed: now };
+    const start = () => {
+      BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
+      save.current = meta;
+      BF.emit("worldLoaded", meta);
+      return save.saveNow().then(() => meta);
+    };
+    return meta.gen === 4 ? BF.prepareWorld(seed, 4).then(start) : start();   // (the planet works out its rivers first)
   },
 
   // Loads a saved world by id. Resolves to its meta.
@@ -160,6 +169,9 @@ const save = {
     return tx(["worlds", "data"], "readonly", t => Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(t.objectStore("data").get(id))]))
       .then(([meta, data]) => {
         if (!meta || !data) throw new Error("World not found");
+        return BF.prepareWorld(data.seed, data.gen || 1).then(() => [meta, data]);   // (the planet works out its rivers first)
+      })
+      .then(([meta, data]) => {
         restore(data);
         meta.lastPlayed = Date.now();
         save.current = meta;
@@ -186,7 +198,7 @@ const save = {
     if (!save.current || !save.supported) return Promise.resolve(false);
     let data;
     try { data = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
-    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen || 1, biomeScale: data.biomeScale || 1, villages: data.villages || 1 });
+    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen || 1, biomeScale: data.biomeScale || 1, villages: data.villages || 1, version: data.version });
     save.current = meta;
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").put(meta); t.objectStore("data").put(data, meta.id); })
       .then(() => { save.lastSaved = Date.now(); BF.emit("worldSaved", meta); return true; })
