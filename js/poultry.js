@@ -163,7 +163,7 @@ function chickenAI(m, dt, out) {
     }
   }
   if (!m.coop && BF.player && BF.player.position && !BF.player.dead && playerSeeds()) {
-    const p = BF.player.position, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);
+    const p0 = BF.player.position, q = BF.planet && BF.planet.isPlanet() ? BF.planet.local(m.position, p0) : p0, p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
     if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 1.6, sp); }
   }
   if (!willing(m, t)) { m.mate = null; return false; }

@@ -20,6 +20,8 @@ Only where three faces meet at one of the planet's eight corners is there no fla
 
 Everything that spreads from block to block carries on across an edge too. A torch lights the ground on the next face, a roof shades both sides, water flows over and stops where it would anywhere else, water on one face keeps farmland on the other hydrated, grass spreads across, and a tree can grow astride an edge. Signs placed side by side across an edge stay two separate boards.
 
+Things that move cross edges the same way. Animals, villagers and monsters walk across and keep going; a zombie chasing you follows you over, and a cow follows wheat across. Dropped items slide over and can be picked up on the other side, arrows fly across, and a boat or horse carries its rider over, still heading the same way. Animals that belong to a village or a pen stay counted with it even when they wander over the edge.
+
 Two of the faces sit over the poles and four go round the equator. Latitude and longitude are measured on the true sphere, with longitude 0 through the middle of one of the equator faces.
 
 ## Flying high
@@ -38,7 +40,7 @@ Each face has its own block of x and z coordinates, so every place on the planet
 
 ## Continents and corners
 
-The planet's ground is made by the same generator as the mile-high worlds of 1.3, so its land looks the same: coastal lowlands, long escarpments up to high plains about a mile up, mountain massifs, badlands mesas, swamps, mushroom islands far out at sea, and caves, ores, trees and plants (see [[page:terrain]]). Every pattern is laid on the sphere itself, so continents, hills and caves carry straight on across the edges between faces.
+The planet's ground is made by the same generator as the mile-high worlds of 1.3, so its land looks the same: coastal lowlands, long escarpments up to high plains about a mile up, mountain massifs, badlands mesas, swamps, mushroom islands far out at sea, and caves, ores, trees and plants (see [[page:terrain]]). Every pattern is laid on the sphere itself, so continents, hills and caves carry straight on across the edges between faces. A tree that grows right at an edge is whole on both sides: the face it grows on decides it, and the next face draws the part that reaches over.
 
 The continents are big enough that several of them fit around the planet, and about a third of the surface is land.
 
@@ -58,4 +60,4 @@ Distant terrain is there at every height, from standing on the ground to high ab
 
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. There are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it. Flying very high, the distant land reaches about 65 kilometres; the whole globe below is still to come.
+The planet is being brought into the game step by step. There are no rivers or villages yet. Flying very high, the distant land reaches about 65 kilometres; the whole globe below is still to come.

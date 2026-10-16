@@ -27,6 +27,57 @@ function hash(a, b, c, d) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 function wrapAngle(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+
+// ---------- face edges on the planet (spec r14-13) ----------
+// Coordinates are kept in a frame (js/planet.js "frames"): a villager, golem or penned animal in its village's frame (so home, bed and pen
+// coordinates stay plain x / z maths when it walks past a face edge; they are margin addresses there), everything else on the canonical
+// square of the face it stands on. keepFrame runs after every move step. Anything compared with something that may be kept in another
+// frame (the player, other mobs, arrows) is first seen from this one: seen(a, o) is o's position expressed in a's frame, so dx / dz / a
+// distance are true local offsets across an edge. Off the planet both are the identity.
+const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
+const LQ = {};
+function seen(a, o, out) {
+  if (!onPlanet()) return o;
+  BF.planet.local(a, o, LQ);
+  if (LQ.x === o.x && LQ.z === o.z) return o;
+  out = out || new THREE.Vector3();
+  out.set(LQ.x, o.y, LQ.z);
+  return out;
+}
+const _pAt = new THREE.Vector3(), _sA = new THREE.Vector3(), _sB = new THREE.Vector3(), _sEye = new THREE.Vector3();
+const pAt = m => seen(m.position, player().position, _pAt);          // the player's position in m's frame
+const mdist = (a, b) => seen(a.position, b.position, _sB).distanceTo(a.position);   // distance between two mobs (any frames)
+// The face whose frame a mob is kept in, or -1: its own face's canonical square. Anything ridden or riding goes with its rider or boat,
+// which keep to the canonical square (js/player.js crossEdge, js/boats.js).
+function frameFace(m) {
+  if (m.rider || m.riding) return -1;
+  const V = m.village || m.penVillage || (m.coop && m.coop.rec) || (m.pen && m.pen.rec);
+  if (V && typeof V.x === "number") return BF.planet.face(V.x, V.z);
+  const hp = m.horse && m.horse.pen;
+  return hp && typeof hp.x0 === "number" ? BF.planet.face(hp.x0, hp.z0) : -1;
+}
+const FR = {};
+// After a move step: puts the mob back in its frame when it left it (turning its yaw and velocity) and re-expresses the points its AI
+// holds (wander target, route cells) in the new frame.
+function keepFrame(m) {
+  if (!onPlanet() || m.rider) return;   // a ridden mob crosses with its rider (player.js crossEdge)
+  const q = BF.planet.reframe(m.position, frameFace(m), m, m.vel);
+  if (q == null) return;
+  m.model.rotation.y = m.yaw;
+  const P = BF.planet, F = P.face(m.position.x, m.position.z), ai = m.ai;
+  if (typeof ai.tx === "number" && P.inFrame(F, ai.tx, ai.tz, FR)) { ai.tx = FR.x; ai.tz = FR.z; }
+  if (ai.route) for (const c of ai.route) if (P.inFrame(F, c[0] + 0.5, c[2] + 0.5, FR)) { c[0] = Math.floor(FR.x); c[2] = Math.floor(FR.z); }
+  if (BF.emit) BF.emit("mobCrossedEdge", m, q);
+}
+// Spatial grid key of the cell (gx, gz) of size s, seen from any frame: the canonical cell it shows (grid cells line up across edges).
+const GC = {};
+function gridKey(gx, gz, s) {
+  if (onPlanet()) {
+    const c = BF.planet.canon(gx * s + s / 2, gz * s + s / 2, GC);
+    if (!c.off) { gx = Math.floor(c.x / s); gz = Math.floor(c.z / s); }
+  }
+  return sepKey(gx, gz);
+}
 const player = () => BF.player;
 function playerAlive() { const p = BF.player; return !!(p && p.position && !p.dead); }
 function creative() { const p = BF.player; return !!(p && p.gameMode === "creative"); }
@@ -623,7 +674,7 @@ function noiseSound(dur, freq, vol, pos) {
   if (BF.audio) return; // js/audio.js plays these through events
   const ac = audio(); if (!ac) return;
   let v = vol;
-  if (pos && playerAlive()) { const d = pos.distanceTo(player().position); v *= Math.max(0, 1 - d / 24); }
+  if (pos && playerAlive()) { const d = seen(pos, player().position, _sA).distanceTo(pos); v *= Math.max(0, 1 - d / 24); }
   if (v <= 0.01) return;
   try {
     const src = ac.createBufferSource(); src.buffer = noiseBuf;
@@ -878,7 +929,7 @@ function playerArrowStep(a, p) {
   if (a.stuck) {   // stuck: falls when its block goes; walking over it picks it up
     if (!BF.world.isSolid(a.cell[0] + 0.5, a.cell[1] + 0.5, a.cell[2] + 0.5)) { a.stuck = false; a.pos.addScaledVector(a.dir, -0.1); a.vel.set(0, 0, 0); return false; }   // out of the freed cell, then down
     if (!a.pickup || !p) return false;
-    const pp = p.position, hw = (p.halfWidth || 0.3) + 0.6, h = p.height || 1.8;
+    const pp = seen(a.pos, p.position, _sA), hw = (p.halfWidth || 0.3) + 0.6, h = p.height || 1.8;
     if (Math.abs(a.pos.x - pp.x) > hw || Math.abs(a.pos.z - pp.z) > hw || a.pos.y < pp.y - 0.6 || a.pos.y > pp.y + h + 0.3) return false;
     if (a.pickup === 1 && BF.inventory && BF.I) { try { if (BF.inventory.add(BF.I.arrow, 1) > 0) return false; } catch (e) { console.error(e); return false; } }   // a full inventory leaves it there
     if (BF.emit) BF.emit("arrowPickedUp", a.pickup === 1);
@@ -890,7 +941,7 @@ function playerArrowStep(a, p) {
 function mobAt(q) {
   for (const m of list) {
     if (m.dead || m.removed) continue;
-    const vp = m.position, hw = m.halfWidth + 0.1;
+    const vp = seen(q, m.position, _sA), hw = m.halfWidth + 0.1;
     if (Math.abs(q.x - vp.x) < hw && Math.abs(q.z - vp.z) < hw && q.y > vp.y && q.y < vp.y + m.height) return m;
   }
   return null;
@@ -910,6 +961,7 @@ function updateArrows(dt) {
     let hitPlayer = false;
     for (let s = 0; s < steps; s++) {
       a.pos.addScaledVector(a.vel, dt / steps);
+      if (onPlanet()) BF.planet.reframe(a.pos, -1, null, a.vel);   // past a face edge: back on the canonical square, turned
       if (BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z)) {
         if (a.byPlayer) {   // back up and creep in 5 cm steps, so the tip sits just inside the first solid block on the path
           const sp = a.vel.length(), back = sp * dt / steps;
@@ -937,7 +989,7 @@ function updateArrows(dt) {
       }
       const v = a.victim;
       if (v && !v.dead && !v.removed) {
-        const vp = v.position, hw = v.halfWidth + 0.1;
+        const vp = seen(a.pos, v.position, _sB), hw = v.halfWidth + 0.1;
         if (Math.abs(a.pos.x - vp.x) < hw && Math.abs(a.pos.z - vp.z) < hw && a.pos.y > vp.y && a.pos.y < vp.y + v.height) {
           const owner = a.owner && !a.owner.removed && !a.owner.dead ? a.owner : null;
           damageMob(v, irnd(GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton");
@@ -947,9 +999,9 @@ function updateArrows(dt) {
         }
       }
       if (p) {
-        const pp = p.position, hw = (p.halfWidth || 0.3) + 0.1, h = p.height || 1.8;
+        const pp = seen(a.pos, p.position, _sB), hw = (p.halfWidth || 0.3) + 0.1, h = p.height || 1.8;
         if (a.pos.x > pp.x - hw && a.pos.x < pp.x + hw && a.pos.z > pp.z - hw && a.pos.z < pp.z + hw && a.pos.y > pp.y && a.pos.y < pp.y + h) {
-          if (p.damage) p.damage(irnd(2, 4), a.owner && !a.owner.removed ? a.owner.position.clone() : a.pos.clone().sub(a.vel));
+          if (p.damage) p.damage(irnd(2, 4), seen(p.position, a.owner && !a.owner.removed ? a.owner.position : a.pos.clone().sub(a.vel), new THREE.Vector3()).clone());
           hitPlayer = true;
           break;
         }
@@ -1003,7 +1055,7 @@ function wanderAI(m, dt, out) {
   ai.lookT -= dt;
   if (ai.lookT <= 0) {
     ai.lookT = rnd(1.5, 4);
-    if (playerAlive() && player().position.distanceTo(m.position) < 8 && Math.random() < 0.6) m.lookAt = "player";
+    if (playerAlive() && pAt(m).distanceTo(m.position) < 8 && Math.random() < 0.6) m.lookAt = "player";
     else m.lookAt = { yaw: rnd(-1, 1), pitch: rnd(-0.4, 0.3) };
   }
   if (ai.mode === "walk") {
@@ -1022,8 +1074,8 @@ function hostileAI(m, dt, out) {
   ai.aiming = false;
   if (golemFight(m, dt, out)) { ai.fuse = 0; return; }
   if (!p) { ai.target = false; ai.fuse = Math.max(0, ai.fuse - dt); if (!zombieHuntVillagers(m, dt, out)) wanderAI(m, dt, out); return; }
-  const eye = p.eyePos ? p.eyePos() : new THREE.Vector3(p.position.x, p.position.y + 1.6, p.position.z);
-  const dx = p.position.x - m.position.x, dz = p.position.z - m.position.z, dy = p.position.y - m.position.y;
+  const pp = pAt(m), eye = seen(m.position, p.eyePos ? p.eyePos() : new THREE.Vector3(p.position.x, p.position.y + 1.6, p.position.z), _sEye);   // (seen from the mob's frame)
+  const dx = pp.x - m.position.x, dz = pp.z - m.position.z, dy = pp.y - m.position.y;
   const hd = Math.hypot(dx, dz), dist = Math.hypot(hd, dy);
   ai.losT -= dt;
   if (ai.losT <= 0) { ai.losT = rnd(0.25, 0.4); ai.los = dist < 24 && hasLineOfSight(m, eye); }
@@ -1062,7 +1114,7 @@ function hostileAI(m, dt, out) {
     ai.aiming = ai.los && dist < 16;
     if (ai.aiming && ai.shootCd <= 0) {
       ai.shootCd = rnd(1.6, 2.4);
-      shootArrow(m, new THREE.Vector3(p.position.x, p.position.y + (p.height || 1.8) * 0.6, p.position.z));
+      shootArrow(m, new THREE.Vector3(pp.x, pp.y + (p.height || 1.8) * 0.6, pp.z));
     }
     return;
   }
@@ -1075,7 +1127,7 @@ function hostileAI(m, dt, out) {
   if (hd < reach && Math.abs(dy + (p.height || 1.8) / 2 - m.height / 2) < 1.6 && ai.attackCd <= 0) {
     ai.attackCd = 1.0;
     ai.swingT = 0.35;
-    if (p.damage) p.damage(T.attack || 2, m.position.clone());
+    if (p.damage) p.damage(T.attack || 2, seen(p.position, m.position, new THREE.Vector3()).clone());
   }
 }
 
@@ -1085,10 +1137,10 @@ function nearestMob(m, r, pred) {
   if (r <= 32 && chunkGrid.size) {   // only the 16-block cells within r (the grid is rebuilt every update)
     const gx = Math.floor(m.position.x / 16), gz = Math.floor(m.position.z / 16), n = Math.ceil(r / 16);
     for (let cz = gz - n; cz <= gz + n; cz++) for (let cx = gx - n; cx <= gx + n; cx++) {
-      const cell = chunkGrid.get(sepKey(cx, cz));
+      const cell = chunkGrid.get(gridKey(cx, cz, 16));
       if (cell) for (const o of cell) {
         if (o === m || o.dead || o.removed || !pred(o)) continue;
-        const d = o.position.distanceTo(m.position);
+        const d = mdist(m, o);
         if (d < bd) { bd = d; best = o; }
       }
     }
@@ -1096,7 +1148,7 @@ function nearestMob(m, r, pred) {
   }
   for (const o of list) {
     if (o === m || o.dead || o.removed || !pred(o)) continue;
-    const d = o.position.distanceTo(m.position);
+    const d = mdist(m, o);
     if (d < bd) { bd = d; best = o; }
   }
   return best;
@@ -1105,15 +1157,15 @@ function nearestMob(m, r, pred) {
 function chaseAndHit(m, o, dt, out, dmg, cd, speed) {
   const ai = m.ai, T = m.def;
   if (!o || o.dead || o.removed) return false;
-  const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, hd = Math.hypot(dx, dz);
+  const op = seen(m.position, o.position, _sA), dx = op.x - m.position.x, dz = op.z - m.position.z, hd = Math.hypot(dx, dz);
   const nx = hd > 0.01 ? dx / hd : 0, nz = hd > 0.01 ? dz / hd : 0;
   const reach = m.halfWidth + o.halfWidth + 0.55;
   const sp = speed || T.speed;
   if (hd > reach * 0.8) { out.x = nx * sp; out.z = nz * sp; }
-  out.faceX = o.position.x; out.faceZ = o.position.z;
+  out.faceX = op.x; out.faceZ = op.z;
   m.lookAt = o;
   ai.attackCd -= dt;
-  if (hd < reach && Math.abs(o.position.y - m.position.y) < 1.6 && ai.attackCd <= 0) {
+  if (hd < reach && Math.abs(op.y - m.position.y) < 1.6 && ai.attackCd <= 0) {
     ai.attackCd = cd;
     ai.swingT = 0.35;
     const k = new THREE.Vector3(nx, 0, nz);
@@ -1139,13 +1191,13 @@ function villagerInDanger(g) {
   const consider = (v, h) => {
     if (!h || h.dead || h.removed || !h.hostile) return;
     if (g.village && v.village && v.village !== g.village) return;
-    const d = h.position.distanceTo(g.position);
+    const d = mdist(g, h);
     if (d < bd) { bd = d; best = h; }
   };
   for (const o of list) {
     if (o.dead || o.removed) continue;
     if (o.type === "villager" && o.attacker && o.age - o.attackedAt < 6) consider(o, o.attacker);
-    else if (o.type === "zombie" && o.ai.vTarget && !o.ai.vTarget.dead && o.ai.vTarget.position.distanceTo(o.position) < 6) consider(o.ai.vTarget, o);
+    else if (o.type === "zombie" && o.ai.vTarget && !o.ai.vTarget.dead && mdist(o, o.ai.vTarget) < 6) consider(o.ai.vTarget, o);
   }
   return best;
 }
@@ -1165,18 +1217,18 @@ function golemFight(m, dt, out) {
     }
   }
   const g = ai.golemFoe;
-  if (!g || g.dead || g.removed || ai.golemFoeT <= 0 || g.position.distanceTo(m.position) > 24) { ai.golemFoe = null; return false; }
+  if (!g || g.dead || g.removed || ai.golemFoeT <= 0 || mdist(m, g) > 24) { ai.golemFoe = null; return false; }
   if (m.type === "skeleton") {
-    const dx = g.position.x - m.position.x, dz = g.position.z - m.position.z, d = Math.hypot(dx, dz);
+    const gp = seen(m.position, g.position, new THREE.Vector3()), dx = gp.x - m.position.x, dz = gp.z - m.position.z, d = Math.hypot(dx, dz);
     const nx = dx / (d || 1), nz = dz / (d || 1);
-    const chest = new THREE.Vector3(g.position.x, g.position.y + g.height * 0.6, g.position.z);
+    const chest = new THREE.Vector3(gp.x, gp.y + g.height * 0.6, gp.z);
     ai.losT -= dt;
     if (ai.losT <= 0) { ai.losT = rnd(0.25, 0.4); ai.gLos = hasLineOfSight(m, chest); }
     let sp = 0;
     if (d > 12 || !ai.gLos) sp = T.speed; else if (d < 6) sp = -T.speed * 0.8;
     if (sp && !m.inWater && dropAhead(m, nx * Math.sign(sp), nz * Math.sign(sp)) > 3) sp = 0;
     out.x = nx * sp; out.z = nz * sp;
-    out.faceX = g.position.x; out.faceZ = g.position.z; m.lookAt = g;
+    out.faceX = gp.x; out.faceZ = gp.z; m.lookAt = g;
     ai.shootCd -= dt;
     ai.aiming = ai.gLos && d < 16;
     if (ai.aiming && ai.shootCd <= 0) { ai.shootCd = rnd(1.6, 2.4); shootArrow(m, chest, g); }
@@ -1316,8 +1368,9 @@ function followRoute(m, dt, out, speed) {
 }
 function isOccupied(x, y, z) {
   const hit = (p, hw, h) => p.x + hw > x && p.x - hw < x + 1 && p.z + hw > z && p.z - hw < z + 1 && p.y < y + 2 && p.y + h > y;
-  if (playerAlive() && hit(player().position, 0.3, 1.8)) return true;
-  return list.some(o => !o.dead && !o.removed && hit(o.position, o.halfWidth, o.height));
+  const c = { x: x + 0.5, z: z + 0.5 };   // (seen from the cell's frame)
+  if (playerAlive() && hit(seen(c, player().position, _sA), 0.3, 1.8)) return true;
+  return list.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
 }
 // Villagers open closed doors just ahead on their route and close the ones they opened once clear of them.
 function villagerDoors(m) {
@@ -1520,7 +1573,7 @@ function villagerAI(m, dt, out) {
   if (m.tradingWith) {
     // auto-release if the trade screen closed without telling us
     const inv = BF.inventory;
-    if (m.dead || !playerAlive() || (inv && typeof inv.isOpen === "function" && !inv.isOpen()) || m.position.distanceTo(player().position) > 8) m.tradingWith = null;
+    if (m.dead || !playerAlive() || (inv && typeof inv.isOpen === "function" && !inv.isOpen()) || pAt(m).distanceTo(m.position) > 8) m.tradingWith = null;
     else { out.faceTarget = true; m.lookAt = "player"; ai.mode = "idle"; ai.t = 2; ai.fleeT = 0; return; }
   }
   // flee nearby zombies
@@ -1529,7 +1582,7 @@ function villagerAI(m, dt, out) {
   if (ai.threat && !ai.threat.dead && !ai.threat.removed) ai.fleeT = Math.max(ai.fleeT, 1);
   if (ai.fleeT > 0) {
     ai.fleeT -= dt;
-    const src = ai.threat && !ai.threat.removed ? ai.threat.position : (playerAlive() ? player().position : null);
+    const src = ai.threat && !ai.threat.removed ? seen(m.position, ai.threat.position, _sA) : (playerAlive() ? pAt(m) : null);
     let fx = Math.cos(m.yaw), fz = Math.sin(m.yaw);
     if (src) { fx = m.position.x - src.x; fz = m.position.z - src.z; }
     ai.fleeJitter = (ai.fleeJitter || Math.random() * 6) + rnd(-3, 3) * dt;
@@ -1579,7 +1632,7 @@ function golemAI(m, dt, out) {
     ai.hScanT = 0.5;
     // a villager under attack comes first (sprint), then whatever is hurting the golem, then the nearest hostile
     ai.rescue = villagerInDanger(m);
-    const rv = ai.revenge && !ai.revenge.dead && !ai.revenge.removed && ai.revenge.position.distanceTo(m.position) < 32 ? ai.revenge : null;
+    const rv = ai.revenge && !ai.revenge.dead && !ai.revenge.removed && mdist(m, ai.revenge) < 32 ? ai.revenge : null;
     if (!rv) ai.revenge = null;
     ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile);
   }
@@ -1588,16 +1641,16 @@ function golemAI(m, dt, out) {
   if (creative()) ai.provoked = 0;
   if (ai.provoked > 0 && playerAlive()) {
     const p = player();
-    const dx = p.position.x - m.position.x, dz = p.position.z - m.position.z, hd = Math.hypot(dx, dz);
+    const pp = pAt(m), dx = pp.x - m.position.x, dz = pp.z - m.position.z, hd = Math.hypot(dx, dz);
     if (hd < 24) {
       const nx = dx / (hd || 1), nz = dz / (hd || 1);
       const reach = m.halfWidth + (p.halfWidth || 0.3) + 0.6;
       if (hd > reach * 0.8) { out.x = nx * T.speed * 1.2; out.z = nz * T.speed * 1.2; }
       out.faceTarget = true; m.lookAt = "player";
       ai.attackCd -= dt;
-      if (hd < reach && Math.abs(p.position.y - m.position.y) < 2 && ai.attackCd <= 0) {
+      if (hd < reach && Math.abs(pp.y - m.position.y) < 2 && ai.attackCd <= 0) {
         ai.attackCd = 1.3; ai.swingT = 0.35;
-        if (p.damage) p.damage(irnd(5, 9), m.position.clone());
+        if (p.damage) p.damage(irnd(5, 9), seen(p.position, m.position, new THREE.Vector3()).clone());
       }
       return;
     }
@@ -1636,6 +1689,7 @@ function updateMob(m, dt) {
     m.material.color.setRGB(light * 1.5, light * 0.35, light * 0.35);
     m.vel.x *= 0.8; m.vel.z *= 0.8; m.vel.y -= GRAVITY * dt;
     BF.world.moveBox(m.position, m.vel, m.halfWidth, Math.min(m.height, 0.5), dt, { stepUp: 0 });
+    keepFrame(m);
     if (m.deathT > 1.0) {
       puff(new THREE.Vector3(m.position.x, m.position.y + 0.2, m.position.z), 8, 0.4, false, 1);
       removeMob(m);
@@ -1658,7 +1712,7 @@ function updateMob(m, dt) {
   else if (ai.fleeT > 0) {
     ai.fleeT -= dt;
     let fx = Math.cos(m.yaw), fz = Math.sin(m.yaw);
-    if (playerAlive()) { fx = m.position.x - player().position.x; fz = m.position.z - player().position.z; }
+    if (playerAlive()) { const pp = pAt(m); fx = m.position.x - pp.x; fz = m.position.z - pp.z; }
     ai.fleeJitter = (ai.fleeJitter || Math.random() * 6) + rnd(-3, 3) * dt;
     const a = Math.atan2(fz, fx) + Math.sin(ai.fleeJitter) * 0.8;
     _desired.x = Math.cos(a) * T.flee; _desired.z = Math.sin(a) * T.flee;
@@ -1730,6 +1784,7 @@ function updateMob(m, dt) {
   } else if (m.position.y > m.fallStart) m.fallStart = m.position.y;
   }
   }
+  keepFrame(m);   // (ridden and boat-borne ones are kept on the canonical square by their rider or boat; this is then a no-op)
   if (m.dead) return;
 
   // ---- daylight burning ----
@@ -1750,7 +1805,7 @@ function updateMob(m, dt) {
   let targetYaw = m.yaw;
   if (m.rider) targetYaw = m.yaw;
   else if (_desired.faceTarget && playerAlive()) {
-    const p = player().position;
+    const p = pAt(m);
     targetYaw = Math.atan2(p.x - m.position.x, p.z - m.position.z);
   } else if (_desired.faceX != null) targetYaw = Math.atan2(_desired.faceX - m.position.x, _desired.faceZ - m.position.z);
   else if (hs > 0.3 && m.knockT <= 0) targetYaw = Math.atan2(m.vel.x, m.vel.z);
@@ -1762,13 +1817,13 @@ function updateMob(m, dt) {
   let hy = 0, hp = 0;
   if (m.rider) hp = -0.35;   // a ridden horse holds its head a little low, out of the rider's view
   else if (m.lookAt === "player" && playerAlive()) {
-    const p = player(), e = p.eyePos ? p.eyePos() : p.position;
+    const p = player(), e = seen(m.position, p.eyePos ? p.eyePos() : p.position, _sA);
     const dx = e.x - m.position.x, dz = e.z - m.position.z, dy = e.y - (m.position.y + m.height * 0.85);
     hy = wrapAngle(Math.atan2(dx, dz) - m.yaw);
     hp = Math.atan2(dy, Math.hypot(dx, dz));
   } else if (m.lookAt && m.lookAt.position) {
-    const o = m.lookAt, dx = o.position.x - m.position.x, dz = o.position.z - m.position.z;
-    const dy = o.position.y + o.height * 0.85 - (m.position.y + m.height * 0.85);
+    const o = m.lookAt, op = seen(m.position, o.position, _sA), dx = op.x - m.position.x, dz = op.z - m.position.z;
+    const dy = op.y + o.height * 0.85 - (m.position.y + m.height * 0.85);
     hy = wrapAngle(Math.atan2(dx, dz) - m.yaw);
     hp = Math.atan2(dy, Math.hypot(dx, dz));
   } else if (m.lookAt && typeof m.lookAt === "object") { hy = m.lookAt.yaw; hp = m.lookAt.pitch; }
@@ -1915,10 +1970,10 @@ function buildSepGrid() {
   sepGrid.clear(); chunkGrid.clear();
   for (const o of list) {
     if (o.dead || o.removed) continue;
-    const k = sepKey(Math.floor(o.position.x / 2), Math.floor(o.position.z / 2));
+    const k = gridKey(Math.floor(o.position.x / 2), Math.floor(o.position.z / 2), 2);   // (by the canonical cell: mobs may be kept in other frames)
     const a = sepGrid.get(k);
     if (a) a.push(o); else sepGrid.set(k, [o]);
-    const k2 = sepKey(Math.floor(o.position.x / 16), Math.floor(o.position.z / 16));
+    const k2 = gridKey(Math.floor(o.position.x / 16), Math.floor(o.position.z / 16), 16);
     const b = chunkGrid.get(k2);
     if (b) b.push(o); else chunkGrid.set(k2, [o]);
   }
@@ -1926,10 +1981,10 @@ function buildSepGrid() {
 function separate(m, dt) {
   const gx = Math.floor(m.position.x / 2), gz = Math.floor(m.position.z / 2);
   for (let cz = gz - 1; cz <= gz + 1; cz++) for (let cx = gx - 1; cx <= gx + 1; cx++) {
-  const cell = sepGrid.get(sepKey(cx, cz));
+  const cell = sepGrid.get(gridKey(cx, cz, 2));
   if (cell) for (const o of cell) {
     if (o === m || o.dead) continue;
-    const dx = m.position.x - o.position.x, dz = m.position.z - o.position.z;
+    const op = seen(m.position, o.position, _sA), dx = m.position.x - op.x, dz = m.position.z - op.z;
     const min = m.halfWidth + o.halfWidth;
     if (Math.abs(dx) > min || Math.abs(dz) > min) continue;
     if (m.position.y > o.position.y + o.height || o.position.y > m.position.y + m.height) continue;
@@ -1938,8 +1993,8 @@ function separate(m, dt) {
   }
   }
   if (playerAlive()) {
-    const p = player();
-    const dx = m.position.x - p.position.x, dz = m.position.z - p.position.z;
+    const p = player(), pp = pAt(m);
+    const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
     const min = m.halfWidth + (p.halfWidth || 0.3);
     if (Math.abs(dx) < min && Math.abs(dz) < min && m.position.y < p.position.y + (p.height || 1.8) && p.position.y < m.position.y + m.height) {
       const d = Math.hypot(dx, dz) || 0.01;
@@ -2477,7 +2532,7 @@ function despawn(dt) {
     if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
     const wild = isWild(m);
     if (!BF.world.isLoaded(m.position.x, m.position.z)) { if (wild && BF.wildlife) BF.wildlife.stow(m); removeMob(m); continue; }   // a wild mob that walked off the loaded land waits with its chunk
-    const d = m.position.distanceTo(pp);
+    const d = seen(m.position, pp, _sA).distanceTo(m.position);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
     if (d > DESPAWN_DIST && !simmed && !m.village && !wild && !m.def.herd) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
@@ -2522,7 +2577,9 @@ BF.mobs = {
     BF.world.onChunkUnload((cx, cz) => {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
-        if (Math.floor(m.position.x / BF.CS) === cx && Math.floor(m.position.z / BF.CS) === cz) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
+        let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
+        if (onPlanet()) { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
+        if (Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];
@@ -2543,7 +2600,7 @@ BF.mobs = {
       if (m.removed) continue;
       let h = dt;
       if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
-        const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
+        const q = seen(m.position, pp, _sA), dx = m.position.x - q.x, dz = m.position.z - q.z;
         if (dx * dx + dz * dz > far2) {
           if (m._farT == null) m._farT = Math.random() / FAR_HZ;
           m._farT += dt;
@@ -2582,7 +2639,7 @@ BF.mobs = {
     const mn = [0, 0, 0], mx = [0, 0, 0];
     for (const m of list) {
       if (m.dead || m.removed || m === skip) continue;
-      const p = m.position, hw = m.halfWidth;
+      const p = seen(origin, m.position, _sA), hw = m.halfWidth;
       mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
       mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
       const t = rayAABB(origin, dir, mn, mx);
@@ -2602,7 +2659,8 @@ BF.mobs = {
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
-  isWild, spawnGroup, standable, findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
+  isWild, spawnGroup, standable, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
+  findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
