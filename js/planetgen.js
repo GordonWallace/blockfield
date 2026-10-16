@@ -11,7 +11,7 @@
 //    near each corner (the round-planet prototype's method, GordonWallace/blockfield-round js/terrain.js). The climate isn't turned.
 //  - the climate (spec r14-09): temperature and humidity from latitude bands and rainfall instead of generator 3's noise fields.
 //  - the spawn search (until r14-19's spawn rules).
-// The sampling path uses no window or document, so it also runs in a Web Worker (r14-05); it needs BF.state.gen = 4 for BF.planet.canon.
+// The sampling path uses no window or document, so it also runs in a Web Worker (r14-05); it needs BF.planet (js/planet.js).
 (() => {
 "use strict";
 const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)

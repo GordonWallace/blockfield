@@ -30,11 +30,12 @@ addEventListener("resize", resize);
 resize();
 
 // ---------- world lifecycle ----------
-// Starts (or restarts) a world from a seed and places the player on solid ground near the origin.
+// Starts (or restarts) a world from a seed and places the player on solid ground at the planet's spawn. Every world is the planet
+// (generator 4): the flat generators 1 to 3 were retired in 1.4 (spec r14-24), so opts.gen is not read.
 BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
-  BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default), 4 = the planet (#seed<n>gen4 for now)
-  BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
+  BF.state.gen = 4;                                                          // worldgen version: 4 = the planet (saves keep it)
+  BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier
   BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
@@ -42,17 +43,11 @@ BF.newWorld = function (seed, opts) {
   if (BF.boats) BF.boats.clear();
   if (BF.horses) BF.horses.reset();
   BF.world.reset();
-  BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
+  BF.worldgen.init(BF.noise, { biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   if (BF.lod) BF.lod.reset(scene);   // distant terrain on the planet (js/lod.js): fresh rings and sampling workers for this seed
   if (BF.globe) BF.globe.reset(scene);   // the whole planet as a globe (js/globe.js), sampled by the same workers
-  // pick a dry spawn column near the origin
-  let sx = 8, sz = 8;
-  if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry temperate / subtropical land near 35 N on face 4, away from edges and corners (r14-19)
-  else for (let r = 0; r < 400; r += 8) {
-    const a = r * 0.7, x = Math.round(Math.cos(a) * r) + 8, z = Math.round(Math.sin(a) * r) + 8;
-    if (BF.worldgen.heightAt(x, z) > BF.SEA + 1 && BF.worldgen.heightAt(x, z) > BF.worldgen.waterLevelAt(x, z)) { sx = x; sz = z; break; }
-  }
-  // (worldgen's findSpawn() mirrors the search above; keep them in sync.)
+  // the spawn: dry temperate / subtropical land near 35 N on face 4, away from edges and corners (r14-19)
+  const [sx, sz] = BF.planetgen.spawnSearch();
   BF.spawnPoint = { x: sx + 0.5, z: sz + 0.5 };
   BF.worldSpawn = { x: sx + 0.5, z: sz + 0.5 };   // kept apart: the fallback when a spawn point or saved position is off the world (js/player.js)
   BF.player.spawn(sx + 0.5, BF.worldgen.heightAt(sx, sz) + 1.01, sz + 0.5);
@@ -64,13 +59,11 @@ BF.newWorld = function (seed, opts) {
 };
 
 // The planet's rivers and lakes are worked out for the whole planet before its world starts (js/planetrivers.js, spec r14-10): several
-// seconds, once per seed per session. prepareWorld(seed, gen) runs that in slices behind a loading screen with progress and resolves
-// when it's done (at once for other generators); newWorld then finds the network ready. newWorld on its own still works (it solves the
-// network in one go, as tests do).
-BF.prepareWorld = function (seed, gen) {
-  if ((gen | 0) !== 4) return Promise.resolve();
+// seconds, once per seed per session. prepareWorld(seed) runs that in slices behind a loading screen with progress and resolves
+// when it's done; newWorld then finds the network ready. newWorld on its own still works (it solves the network in one go, as tests do).
+BF.prepareWorld = function (seed) {
   BF.state.gen = 4;
-  BF.worldgen.init(BF.makeNoise(seed >>> 0), { gen: 4, villages: BF.state.villages || 10 });
+  BF.worldgen.init(BF.makeNoise(seed >>> 0), { villages: BF.state.villages || 10 });
   if (BF.worldgen.riversReady()) return Promise.resolve();
   const el = document.createElement("div");
   el.id = "bf-loading";
@@ -267,11 +260,11 @@ BF.boats.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
-// The boot world (behind the title screen) and #seed<n> are planets (spec r14-19). #seed1337gen3 / gen1 / gen2 start a legacy-generator
-// world (tests, until r14-24), #seed1337gen3v9 one with village generator 9.
-const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);
+// The boot world (behind the title screen) is a planet, seed 1337 or #seed<n> (spec r14-19); #seed<n>v9 has village generator 9. The
+// old "gen4" in a test hash (#seed123gen4v10) is still accepted and changes nothing; the flat generators' gen1 to gen3 are gone (r14-24),
+// so such a hash is not read and the default world boots.
+const m = /^#seed(\d+)(?:gen4)?(?:v(\d+))?$/.exec(location.hash);
 if (m) seed = +m[1];
-const startOpts = Object.assign({ gen: m && m[2] ? +m[2] : 4 }, m && m[3] ? { villages: +m[3] } : {});
-if (startOpts.gen === 4) BF.prepareWorld(seed, 4).then(() => { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); });   // (the planet: rivers first)
-else { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); }
+const startOpts = m && m[2] ? { villages: +m[2] } : {};
+BF.prepareWorld(seed).then(() => { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); });   // (rivers first)
 })();

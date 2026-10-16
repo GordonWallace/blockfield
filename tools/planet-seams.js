@@ -2,10 +2,10 @@
 //  - edges: along all 12 cube edges (from both faces, so every turned edge too), the columns either side of the edge differ no more
 //    than neighbouring columns on one face do, in height and in the slow fields (continentalness, temperature, humidity, erosion);
 //    the fields are continuous there (no step from a warp or lattice laid out in the wrong frame)
-//  - consistency (as tools/gen3-seams.js for generator 3): generateBand and generateRange agree, windows split anywhere concatenate to
+//  - consistency (as the retired tools/gen3-seams.js did for generator 3): generateBand and generateRange agree, windows split anywhere concatenate to
 //    the same blocks, the surface at heightAt is solid, water levels match waterLevelAt; chunks at face edges, on land, mountains, coasts
 //  - corners: every cube corner is open sea; the seed's continent turn put every corner within reach of open sea or gave it a gulf
-//  - statistics (as tools/terrain-stats.js): land fraction, land by height band, plateaus, peaks, sampled evenly over the sphere
+//  - statistics (as the retired tools/terrain-stats.js): land fraction, land by height band, plateaus, peaks, sampled evenly over the sphere
 // Exits non-zero on a failed check. Also used by test/planet-terrain.js.
 const fs = require("fs"), vm = require("vm"), path = require("path"), crypto = require("crypto");
 const ROOT = path.join(__dirname, "..");

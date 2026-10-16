@@ -1,4 +1,4 @@
-// The round planet (generator 4): cube-sphere maths and atlas coordinates. Brought over from the round-planet prototype
+// The round planet (generator 4, the only world since 1.4): cube-sphere maths and atlas coordinates. Brought over from the round-planet prototype
 // (GordonWallace/blockfield-round, js/planet.js); see /wiki "The planet" and specs r14-01 / release-1.4-plan.
 //
 // The planet is six square faces of N x N block columns, each projected onto a sphere. A column is addressed on its face by
@@ -11,7 +11,7 @@
 // unfolded continuation of the face past each edge, exactly as the flat view draws it. Stored things use canonical points
 // (inside a face's middle square). canon() maps a margin point to the canonical point it shows.
 //
-// Every atlas helper is the identity (or plain x/z maths) when the world is not the planet (generators 1 to 3).
+// The flat generators 1 to 3, on which every helper was the identity, were retired in spec r14-24: isPlanet() is always true.
 (() => {
 "use strict";
 const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
@@ -181,7 +181,7 @@ function fromLatLon(lat, lon, out) {
 const W = 3 * N;                 // width of a face's atlas square
 const LOCAL = 4096;              // within this many blocks (through at most one edge) distance / toward are plain grid maths
 
-const isPlanet = () => !!(BF.state && BF.state.gen === 4);
+const isPlanet = () => true;   // (kept for callers: every world is the planet)
 
 // Atlas x/z of grid point (f, u, v), and back. face() is -1 outside every face square.
 const atlas = (f, u, v, out) => { out = out || {}; out.x = W * f + N + u; out.z = N + v; return out; };
@@ -202,12 +202,11 @@ function grid(x, z, out) {
 // The canonical point an atlas point shows: out = { x, z, f, u, v, turn, wedge, off }. turn (0 to 3) is the number of quarter
 // turns from the point's own frame to the canonical one: turnVec(-turn, ...) turns a margin direction into the canonical face's
 // frame. wedge: the point is past two edges at once (inside a corner's wedge, where the flat view leaves a gap); the nearest point
-// by direction is returned. off: outside every face square (nothing there; x, z are returned unchanged). Identity off the planet.
+// by direction is returned. off: outside every face square (nothing there; x, z are returned unchanged).
 const go = {};
 function canon(x, z, out) {
   out = out || {};
   out.turn = 0; out.wedge = false; out.off = false;
-  if (!isPlanet()) { out.x = x; out.z = z; out.f = 0; out.u = x; out.v = z; return out; }
   const f = face(x, z);
   if (f < 0) { out.x = x; out.z = z; out.f = -1; out.u = NaN; out.v = NaN; out.off = true; return out; }
   const u = x - W * f - N, v = z - N;
@@ -256,11 +255,10 @@ function turnYaw(q, yaw) {
 // b's position in a's face frame: b unfolded into a's margin when it is on a face next to a's, so that b.x - a.x / b.z - a.z is a
 // true local offset (exact for points within N of each other across one edge). out = { x, z, turn } where turn takes a direction
 // in b's canonical frame into a's frame (turnVec(turn, ...)). Null when b is on the face opposite a's, or either point is off
-// the atlas. Off the planet, b itself.
+// the atlas.
 const ra = {}, rb = {};
 function rel(a, b, out) {
   out = out || {};
-  if (!isPlanet()) { out.x = b.x; out.z = b.z; out.turn = 0; return out; }
   canon(a.x, a.z, ra); canon(b.x, b.z, rb);
   if (ra.off || rb.off) return null;
   if (ra.f === rb.f) { out.x = rb.x; out.z = rb.z; out.turn = 0; return out; }
@@ -272,21 +270,19 @@ function rel(a, b, out) {
 }
 
 // Distance in blocks between two atlas points {x, z}: plain hypot when they are close (same face, or a neighbour's unfolded into
-// a's frame, within LOCAL blocks), the great-circle distance at sea level otherwise. Plain hypot off the planet.
+// a's frame, within LOCAL blocks), the great-circle distance at sea level otherwise.
 const rr = {};
 function distance(a, b) {
-  if (!isPlanet()) return Math.hypot(b.x - a.x, b.z - a.z);
   const r = rel(a, b, rr);
   if (r) { const d = Math.hypot(r.x - ra.x, r.z - ra.z); if (d <= LOCAL) return d; }   // (ra: a canonical, as rel measures from it; a may be a margin address)
   if (ra.off || rb.off) return Infinity;
   return gridDistance(ra, rb);
 }
 // The offset from a toward b in a's grid frame: out = { x: dx, z: dz, d }. Close points: plain dx / dz (through the unfold);
-// far ones: the great circle's starting direction at a, scaled to the great-circle distance. Plain dx / dz off the planet.
+// far ones: the great circle's starting direction at a, scaled to the great-circle distance.
 const fr0 = {};
 function toward(a, b, out) {
   out = out || {};
-  if (!isPlanet()) { out.x = b.x - a.x; out.z = b.z - a.z; out.d = Math.hypot(out.x, out.z); return out; }
   const r = rel(a, b, rr);
   if (r) {
     const dx = r.x - ra.x, dz = r.z - ra.z, d = Math.hypot(dx, dz);
@@ -300,11 +296,9 @@ function toward(a, b, out) {
 }
 
 // Moves something that left its face's square back to the canonical point and turns its direction with it. Reads and writes
-// e.x / e.z, and when present e.yaw and e.vx / e.vz. Returns the quarter turns applied (0 when nothing changed, and always off the
-// planet). A point in a corner wedge or off the atlas is left where it is (-1): the caller keeps it out of there.
+// e.x / e.z, and when present e.yaw and e.vx / e.vz. Returns the quarter turns applied (0 when nothing changed). A point in a corner wedge or off the atlas is left where it is (-1): the caller keeps it out of there.
 const rc = {}, tv = [0, 0];
 function recanon(e) {
-  if (!isPlanet()) return 0;
   canon(e.x, e.z, rc);
   if (rc.off || rc.wedge) return -1;
   if (rc.x === e.x && rc.z === e.z) return 0;
@@ -324,11 +318,10 @@ function recanon(e) {
 // keeps to its own face's canonical square.
 
 // Point (x, z) expressed in the frame of face F: out = { x, z, turn } (turn: quarter turns taking a direction in the point's own frame
-// into F's, for turnVec / turnYaw). Null when the point is on the face opposite F or off the atlas. Off the planet, the point itself.
+// into F's, for turnVec / turnYaw). Null when the point is on the face opposite F or off the atlas.
 const rf = {};
 function inFrame(F, x, z, out) {
   out = out || {};
-  if (!isPlanet()) { out.x = x; out.z = z; out.turn = 0; return out; }
   canon(x, z, rf);
   if (rf.off || F < 0 || F > 5) return null;
   const q0 = (4 - rf.turn) % 4;    // own frame -> canonical
@@ -340,20 +333,20 @@ function inFrame(F, x, z, out) {
   return out;
 }
 // b ({x, z}) as seen from a: b expressed in the frame a is expressed in, so b.x - a.x / b.z - a.z is a true local offset whichever
-// frames the two are kept in. Far apart (b on the face opposite a's frame) it is b unchanged. out = { x, z, turn }; off the planet, b.
+// frames the two are kept in. Far apart (b on the face opposite a's frame) it is b unchanged. out = { x, z, turn }.
 function local(a, b, out) {
   out = out || {};
-  if (isPlanet()) { const F = face(a.x, a.z); if (F >= 0 && inFrame(F, b.x, b.z, out)) return out; }
+  const F = face(a.x, a.z);
+  if (F >= 0 && inFrame(F, b.x, b.z, out)) return out;
   out.x = b.x; out.z = b.z; out.turn = 0;
   return out;
 }
 // Puts a moving thing into the frame of face F, or (F < 0 / undefined) back onto the canonical square of the face it stands on: moves
 // p.x / p.z and turns holder.yaw and vel.x / vel.z with it. Returns the quarter turns applied (0 to 3), or null when nothing changed
-// (already in that frame, off the planet, or no way to get there: F opposite, off the atlas). A point in a corner wedge is moved to the
+// (already in that frame, or no way to get there: F opposite, off the atlas). A point in a corner wedge is moved to the
 // nearest face (as the player is). Callers re-express any points they keep in the old frame with inFrame(face(p.x, p.z), ...).
 const rg = {}, tw = [0, 0];
 function reframe(p, F, holder, vel) {
-  if (!isPlanet()) return null;
   if (F == null || F < 0) {
     canon(p.x, p.z, rg);
     if (rg.off || (rg.x === p.x && rg.z === p.z)) return null;
@@ -369,9 +362,8 @@ function reframe(p, F, holder, vel) {
   return q;
 }
 
-// Latitude / longitude of an atlas point (null off the planet or off the atlas), and the atlas point of a latitude / longitude.
+// Latitude / longitude of an atlas point (null off the atlas), and the atlas point of a latitude / longitude.
 function latLonAt(x, z, out) {
-  if (!isPlanet()) return null;
   canon(x, z, rc);
   if (rc.off) return null;
   return latLon(rc.f, rc.u, rc.v, out);
@@ -382,8 +374,7 @@ function atlasOfLatLon(lat, lon, out) {
 }
 
 // ---------- geographic directions (shared with r14-17; the F3 facing, /locate and maps use these) ----------
-// Grid directions at an atlas point are in that point's own frame (a margin address: the frame it is seen in). Off the planet north is
-// -z, as in 1.3. At a pole north is undefined: bearing / facingBearing return null and north() returns null.
+// Grid directions at an atlas point are in that point's own frame (a margin address: the frame it is seen in). At a pole north is undefined: bearing / facingBearing return null and north() returns null.
 const gfr = {}, gc = {};
 function geo(x, z) {   // canonical frame at (x, z): { c, east, north } as 3D unit vectors, or null (off the atlas, or at a pole)
   canon(x, z, gc);
@@ -397,7 +388,6 @@ function geo(x, z) {   // canonical frame at (x, z): { c, east, north } as 3D un
 }
 // Unit grid vector [dx, dz] toward the north pole at (x, z).
 function north(x, z) {
-  if (!isPlanet()) return [0, -1];
   const g = geo(x, z);
   if (!g) return null;
   const t = toGrid(g.north, gfr), r = turnVec(g.c.turn, t[0], t[1]), l = Math.hypot(r[0], r[1]) || 1;   // canonical frame -> the address's frame
@@ -405,7 +395,6 @@ function north(x, z) {
 }
 // Bearing in degrees clockwise from north (0 to 360) of grid direction (dx, dz) at (x, z).
 function bearing(x, z, dx, dz) {
-  if (!isPlanet()) return ((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360;
   const g = geo(x, z);
   if (!g) return null;
   const t = turnVec((4 - g.c.turn) % 4, dx, dz), eu = gfr.eu, ev = gfr.ev;   // the address's frame -> canonical

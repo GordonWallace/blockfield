@@ -85,8 +85,8 @@ function freeCells(v, b, r) {
   const beds = new Set();
   for (const [u, q, a] of wg.bedPlan(b.type, b.w, b.d, b.h)) { beds.add(u + "," + q); beds.add(a === "u" ? (u + 1) + "," + q : u + "," + (q + 1)); }
   const walk = (u, q) => at(u, 1, q) === 0 && at(u, 2, q) === 0 && !!at(u, 0, q) && !beds.has(u + "," + q);
-  const fronts = new Set();   // village generator 3: no jobsite in front of a chest or furnace (blocks.js facing pack)
-  if ((BF.state && BF.state.gen | 0) >= 3) for (const [k, id] of rec) {
+  const fronts = new Set();   // no jobsite in front of a chest or furnace (blocks.js facing pack)
+  for (const [k, id] of rec) {
     const b = BF.blocks[id], f = b && (b.chestFacing != null ? b.chestFacing : b.furnaceFacing);
     if (f == null) continue;
     const [u, y, q] = k.split(",").map(Number);
@@ -216,7 +216,7 @@ function planVillage(v) {
   let ci = 0, wi = 0, si = 0;   // each keeper its own paddock, in turn (one of each before generator 10)
   const byGate = (b, job) => { for (const du of [1, -1]) { const [x, z] = W(b, b.du + du, -1); if (put(x, b.y + 1, z, job)) return true; } return beside(b, job); };   // the feed trough beside the sty gate
   for (const job of jobs) {
-    if (job.prof === "shepherd" && pens.length && (BF.state && BF.state.gen | 0) >= 3) {   // gen 3+ only: older worlds keep their loom positions
+    if (job.prof === "shepherd" && pens.length) {   // the loom beside the shepherd's pen
       let placed = false;
       for (let k = 0; k < pens.length && !placed; k++) placed = beside(pens[(pi + k) % pens.length], job) && (pi += k + 1, true);
       if (placed) continue;

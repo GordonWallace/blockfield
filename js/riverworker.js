@@ -6,7 +6,7 @@ importScripts("blocks.js", "noise.js", "planet.js", "planetgen.js", "planetriver
 onmessage = ev => {
   const { seed, villages, from, to } = ev.data;
   BF.CS = 16; BF.state = { gen: 4 };
-  BF.worldgen.init(BF.makeNoise(seed >>> 0), { gen: 4, villages: villages || 10 });
+  BF.worldgen.init(BF.makeNoise(seed >>> 0), { villages: villages || 10 });
   const out = BF.worldgen.riverNodes(from, to, BF.planetRivers.newSamples());
   postMessage({ from, to, e: out.e, p: out.p, sea: out.sea, rain: out.rain }, [out.e.buffer, out.p.buffer, out.sea.buffer, out.rain.buffer]);
 };

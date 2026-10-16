@@ -3,7 +3,7 @@
 // sits at the render origin, so float32 drawing stays precise at the largest atlas x); the picture doesn't move when the view
 // switches to the next face (a margin view and the canonical view of the same spot match, across an edge that turns and one that
 // doesn't); a straight flight across a turned edge stays straight; near two cube corners the round drawing fills the wedge the
-// flat drawing leaves empty; and flat worlds still draw their chunks in place.
+// flat drawing leaves empty. (The check that flat worlds draw their chunks in place went with the flat generators, r14-24.)
 // node test/run.js /tmp/pv test/planet-view.js
 module.exports = async (pg) => {
   await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow (never judge frame rate here)
@@ -167,19 +167,6 @@ module.exports = async (pg) => {
     check(r.k === 1, `near the corner of face ${f} (${Math.round(r.corner)} blocks) the view is fully round`);
     check(r.gap > 80 && r.round < 45, `corner of face ${f}: the round drawing closes the wedge (widest empty angle around the corner ${r.round.toFixed(0)} degrees round, ${r.gap.toFixed(0)} with the gap)`);
   }
-
-  // ---- a flat world (generator 3) still draws its chunks in place
-  const flat = await pg.evaluate(async () => {
-    BF.newWorld(1337, { gen: 3, villages: 9 }); BF.world.viewDist = 4; BF.player.start();
-    await settle(2500);
-    let ok = true, n = 0;
-    for (const c of BF.world.chunks.values()) for (const m of c.meshes || []) {
-      n++;
-      if (m.position.x !== c.cx * 16 || m.position.z !== c.cz * 16 || m.matrixWorld.elements[12] !== c.cx * 16) ok = false;
-    }
-    return { ok, n, on: BF.view.state.on, k: BF.world.roundK.value };
-  });
-  check(flat.n > 10 && flat.ok && !flat.on && flat.k === 0, `a flat world's ${flat.n} chunk meshes sit at their chunk corners, drawn without the planet pass`);
 
   const errs = await pg.evaluate(() => window.__errs);
   check(!errs.length, "no page errors " + JSON.stringify(errs.slice(0, 3)));

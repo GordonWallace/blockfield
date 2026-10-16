@@ -4,7 +4,8 @@
 //    (the 0.6-1.4 factor averages 1); where wild-horse land lies within 100 blocks (worldgen horseLand), native animals are drawn about 4x
 //    as often as others at first, every type can be drawn (desert too), and a village never gets a second stable; elsewhere no stable.
 // 2. Real villages of a few seeds: one keeper per paddock (roster keys #1970+k), a paddock plot for each keeper whose plot fitted, a jobsite
-//    block for each keeper, no old fixed-rule keepers, no shepherd in the shuffle, and no spawn village; a generator 9 world on generator 3 keeps its spawn village.
+//    block for each keeper, no old fixed-rule keepers and no shepherd in the shuffle. (The spawn village, which only the flat generator 3
+//    had, went with it in r14-24: every village is a region village, so there is no spawn village left to check for.)
 // 3. Walks into a village with a generated stable: it starts with 2 tamed horses in its paddock.
 module.exports = async (pg) => {
   const out = await pg.evaluate(() => {
@@ -45,7 +46,6 @@ module.exports = async (pg) => {
     res.villages = 0; res.keepers = 0; res.plots = 0; res.missingPlots = 0; res.stable = null;
     for (const seed of [1, 2, 3]) {
       BF.newWorld(seed, { gen: 4, villages: 10 });
-      if (WG.spawnVillage()) res.fails.push("seed " + seed + ": a spawn village");
       const seen = new Set(), o = BFT.spawn(), d = v => BF.planet.distance(o, v);   // sampled around the spawn
       for (let rz = -4; rz <= 4; rz++) for (let rx = -4; rx <= 4; rx++) for (const v of WG.villagesNear(o.x + rx * 600, o.z + rz * 600, 300)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
@@ -72,8 +72,6 @@ module.exports = async (pg) => {
         if (st && seed === 1 && (!res.stable || d(v) < res.stable.d)) res.stable = { x: v.x, y: v.y, z: v.z, key, d: d(v) };
       }
     }
-    BF.newWorld(1, { gen: 3, villages: 9 });   // the spawn village is a generator 3 thing: the planet has none at any village generator
-    if (!WG.spawnVillage()) res.fails.push("generator 9: no spawn village");
     return res;
   });
   console.log(JSON.stringify(out.biomes, null, 1));

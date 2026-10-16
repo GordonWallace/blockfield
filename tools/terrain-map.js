@@ -1,12 +1,11 @@
-// Top-down overview map of the terrain generator, rendered in node (no browser needed).
-// Usage: node tools/terrain-map.js out.png seed biomeScale centreX centreZ spanBlocks pixels [gen]
-//   e.g. node tools/terrain-map.js /tmp/map.png 1337 2 0 0 30000 700 3
+// Top-down overview map of the planet's terrain, rendered in node (no browser needed).
+// Usage: node tools/terrain-map.js out.png seed biomeScale centreX centreZ spanBlocks pixels
+//   e.g. node tools/terrain-map.js /tmp/map.png 1337 2 spawn - 30000 700
 // Colours are biomes, shaded by height; rivers are drawn thicker than they are when RV=<blocks> is set (e.g. RV=14).
-// Env: ELEV=1 draws an elevation (hypsometric) map instead of biome colours (gen 3: bands 0/100/500/900/1400/2000, plateaus stand out);
+// Env: ELEV=1 draws an elevation (hypsometric) map instead of biome colours (bands 0/100/500/900/1400/2000, plateaus stand out);
 //      Q=<n> quantizes to an n-colour palette PNG (default 48; Q=0 for full colour) to keep files small;
 //      HS=<k> hill-shade strength multiplier (default 1); EL=1 tints land above the plateau threshold.
-// Generator 3 uses BF.setLimits(gen) (MIN_Y -64, H 3072, SEA 0); heights, the ocean-depth tint and the shading scale with the generator.
-// Generator 4 (the planet): centreX / centreZ are atlas coordinates (js/planet.js), or "spawn" for the world's spawn; a map that runs past a
+// centreX / centreZ are atlas coordinates (js/planet.js), or "spawn" (and any centreZ) for the world's spawn; a map that runs past a
 // face edge shows the neighbouring face unfolded, as the game reads it there.
 const fs = require("fs"), vm = require("vm"), zlib = require("zlib"), path = require("path");
 const R = path.join(__dirname, "..", "js") + path.sep;
@@ -15,21 +14,19 @@ const load = f => vm.runInThisContext(fs.readFileSync(R + f, "utf8"), { filename
 load("blocks.js"); load("noise.js");
 BF.CS = 16;
 load("planet.js"); load("planetgen.js"); load("planetrivers.js"); load("worldgen.js");
-let [, , out, seed, scale, cx, cz, span, px, gen] = process.argv;
-const G = +(gen || 2);
-BF.setLimits(G); BF.state = { gen: G };
-BF.noise = BF.makeNoise(+seed); BF.worldgen.init(BF.noise, { gen: G, biomeScale: +scale });   // (init sets the limits too)
-if (cx === "spawn") [cx, cz] = G === 4 ? BF.planetgen.spawnSearch() : [0, 0];
-const w = BF.worldgen, SEA = BF.SEA, g3 = G >= 3;
-// per-generator height scales: ocean depth tint range, land shading range, plateau tint threshold
-const OCEAN_D = g3 ? 60 : 30, SH_LO = g3 ? 0 : 40, SH_RNG = g3 ? 2400 : 150, EL_T = g3 ? 900 : 100;
+let [, , out, seed, scale, cx, cz, span, px] = process.argv;
+BF.state = { gen: 4, seed: +seed };
+BF.noise = BF.makeNoise(+seed); BF.worldgen.init(BF.noise, { biomeScale: +scale, villages: 10 });   // (init sets the limits too)
+if (cx === "spawn") [cx, cz] = BF.planetgen.spawnSearch();
+const w = BF.worldgen, SEA = BF.SEA;
+// height scales: ocean depth tint range, land shading range, plateau tint threshold
+const OCEAN_D = 60, SH_LO = 0, SH_RNG = 2400, EL_T = 900;
 const HSM = +(process.env.HS || 1);
 const N = +px, S = +span / N, x0 = +cx - +span / 2, z0 = +cz - +span / 2;
 const col = {0:[40,70,160],1:[230,215,150],2:[235,235,220],3:[130,130,130],4:[60,120,220],5:[130,190,80],6:[50,130,40],7:[200,120,200],8:[110,170,70],9:[30,80,30],10:[80,110,60],11:[90,90,50],12:[235,210,130],13:[200,110,60],14:[180,170,70],15:[100,170,50],16:[20,150,40],17:[40,110,80],18:[30,90,70],19:[235,240,250],20:[170,220,255],21:[160,200,200],22:[150,210,120],23:[250,170,200],24:[150,150,150],25:[220,230,240],26:[255,255,255],27:[170,170,170],28:[170,100,170],29:[205,222,238]};
-// hypsometric ramp for ELEV=1 (gen 3 heights; gen 2 is stretched to the same colours)
+// hypsometric ramp for ELEV=1
 const RAMP = [[0, [90, 170, 90]], [100, [140, 200, 100]], [500, [215, 200, 110]], [900, [225, 150, 70]], [1400, [170, 90, 60]], [2000, [140, 130, 135]], [2500, [255, 255, 255]]];
 function ramp(h) {
-  if (!g3) h = h < SEA ? h : (h - SEA) * (2500 / 130);
   if (h <= RAMP[0][0]) return RAMP[0][1];
   for (let i = 1; i < RAMP.length; i++) if (h < RAMP[i][0]) { const t = (h - RAMP[i - 1][0]) / (RAMP[i][0] - RAMP[i - 1][0]); return RAMP[i - 1][1].map((v, k) => v + (RAMP[i][1][k] - v) * t); }
   return RAMP[RAMP.length - 1][1];
@@ -42,7 +39,7 @@ for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
   if (b.id === 0) { const d = Math.max(0, Math.min(1, (SEA - h) / OCEAN_D)); c = [40 - d * 25, 80 - d * 40, 170 - d * 70]; }
   else if (b.id === 4 && !process.env.ELEV) c = [70, 130, 230];
   else {
-    const sh = Math.max(-0.35, Math.min(0.35, (h - hE) / (S * 0.9 + 6) * (g3 ? 0.5 * 0.05 : 0.5) * HSM));
+    const sh = Math.max(-0.35, Math.min(0.35, (h - hE) / (S * 0.9 + 6) * 0.5 * 0.05 * HSM));
     if (process.env.ELEV) { const r = ramp(h); c = r.map(v => Math.max(0, Math.min(255, v * (0.85 + sh * 1.4)))); }
     else {
       const k = 0.7 + 0.45 * Math.max(0, Math.min(1, (h - SH_LO) / SH_RNG)) + sh;
@@ -90,4 +87,4 @@ if (!Q) {
   png = Buffer.concat([SIG, chunk("IHDR", ih), chunk("PLTE", Buffer.from(pal.flat())), chunk("IDAT", zlib.deflateSync(buf, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
 }
 fs.writeFileSync(out, png);
-console.log(JSON.stringify(stats), G === 4 ? "" : JSON.stringify(BF.rivers._debug()), (png.length / 1024).toFixed(0) + " KB");
+console.log(JSON.stringify(stats), (png.length / 1024).toFixed(0) + " KB");

@@ -413,7 +413,7 @@ function renderWorlds(st) {
     return;
   }
   worldsEl.innerHTML = worldsCache.map(w => {
-    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}<button type="button" class="bfp-copy" data-act="copy-seed" title="Copy seed to clipboard" aria-label="Copy seed ${esc(w.seed)}">⧉</button>${w.gen >= 2 ? " · " + biomeLabel(w.biomeScale) + " biomes" : ""}`;
+    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}<button type="button" class="bfp-copy" data-act="copy-seed" title="Copy seed to clipboard" aria-label="Copy seed ${esc(w.seed)}">⧉</button> · ${biomeLabel(w.biomeScale)} biomes`;
     if (st.renaming === w.id) return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><input value="${esc(w.name)}" maxlength="40" aria-label="New world name"></div>
       <div class="bfp-wbtns"><button class="primary" data-act="rename-ok">Save</button><button data-act="cancel">Cancel</button></div></div>`;
@@ -475,8 +475,8 @@ function createWorld() {
     Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale })).catch(e => { console.error(e); }).then(done);
   } else {
     const sd = parseSeed(seedText);
-    BF.prepareWorld(sd, 4).then(() => {   // (the planet works out its rivers first)
-      try { BF.newWorld(sd, { gameMode: mode, biomeScale, gen: 4 }); } catch (e) { console.error(e); }
+    BF.prepareWorld(sd).then(() => {   // (the planet works out its rivers first)
+      try { BF.newWorld(sd, { gameMode: mode, biomeScale }); } catch (e) { console.error(e); }
       setGameMode(mode);
       done();
     });
