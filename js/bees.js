@@ -581,6 +581,13 @@ function initMesh() {
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.onBeforeRender = draw;
   BF.scene.add(mesh);
+  // floating origin (js/view.js): instance positions are stored relative to the mesh, which sits on a coarse grid near the player
+  if (BF.view) BF.view.onBegin(() => {
+    const p = BF.player && BF.player.position;
+    if (!p) return;
+    const rx = Math.floor(p.x / 256) * 256, rz = Math.floor(p.z / 256) * 256;
+    if (rx !== mesh.position.x || rz !== mesh.position.z) { mesh.position.set(rx, 0, rz); dirty = true; }
+  });
 }
 const _m = typeof THREE !== "undefined" ? new THREE.Matrix4() : null;
 const _r = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _u = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _f = typeof THREE !== "undefined" ? new THREE.Vector3() : null;
@@ -598,11 +605,11 @@ function draw() {
       if (s.ny > 0.5) _f.set(Math.sin(b.landYaw), 0, Math.cos(b.landYaw));
       else { const a = (b.landYaw % 1.2) - 0.6; _f.set(Math.sin(a) * s.nz, Math.cos(a), -Math.sin(a) * s.nx); }   // on a wall: head up, a little askew
       _r.crossVectors(_u, _f).normalize(); _f.crossVectors(_r, _u).normalize();
-      _m.makeBasis(_r, _u, _f).setPosition(b.x + s.nx * 0.045, b.y + s.ny * 0.045, b.z + s.nz * 0.045);
+      _m.makeBasis(_r, _u, _f).setPosition(b.x + s.nx * 0.045 - mesh.position.x, b.y + s.ny * 0.045, b.z + s.nz * 0.045 - mesh.position.z);
     } else {
       const c = Math.cos(b.yaw), sn = Math.sin(b.yaw);
       _f.set(sn, 0, c); _u.set(0, 1, 0); _r.set(c, 0, -sn);
-      _m.makeBasis(_r, _u, _f).setPosition(b.x, b.y, b.z);
+      _m.makeBasis(_r, _u, _f).setPosition(b.x - mesh.position.x, b.y, b.z - mesh.position.z);
     }
     mesh.setMatrixAt(i, _m);
     A.setXY(i, b.phase, s ? 0 : 1);

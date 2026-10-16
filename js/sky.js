@@ -222,7 +222,7 @@ function makeClouds() {
       radius: { value: CLOUD_R }, under: { value: 0 },
     },
     vertexShader: `attribute float shade; varying vec2 vW; varying float vS;
-      void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xz; vS = shade; gl_Position = projectionMatrix * viewMatrix * w; }`,
+      void main() { vW = position.xz; vS = shade; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,   // cam: relative to the mesh
     fragmentShader: `uniform vec2 cam; uniform vec3 color; uniform vec3 fogCol; uniform float radius; uniform float under;
       varying vec2 vW; varying float vS;
       void main() {
@@ -370,7 +370,7 @@ const sky = {
     clouds.userData.setCoverage(cover < 0.06 ? 1 : 0.96 - 0.62 * cover);
     clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift, cloudY);
     const cu = clouds.material.uniforms;
-    cu.cam.value.set(cam.position.x, cam.position.z);
+    cu.cam.value.set(cam.position.x - clouds.position.x, cam.position.z - clouds.position.z);
     cloudCol.copy(CLOUD_NIGHT).lerp(CLOUD_DAY, dayness).lerp(tmpC.copy(CLOUD_DUSK).multiplyScalar(0.25 + 0.75 * dayness), dusk * 0.45);
     if (wr > 0) cloudCol.lerp(tmpC.setRGB(wg * 1.05, wg * 1.08, wg * 1.12), wr * 0.85);
     if (wf > 0) cloudCol.lerp(tmpC.setRGB(0.9, 0.92, 1), wf * 0.7);

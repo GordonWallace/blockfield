@@ -1837,6 +1837,39 @@ function physics(dt) {
   return moved;
 }
 
+// The planet (generator 4): when the player (or the boat or horse they ride) leaves their face's square, they carry on from the
+// same spot on the next face, with facing and speed turned by that edge's quarter turns (spec r14-03). The view switches faces in
+// the same frame (js/view.js), so the picture doesn't move. Past two edges at once (a corner's wedge, deep in the ocean) the
+// nearest face takes them.
+const cc = {}, ct = [0, 0];
+function recanonAt(p, holder, v) {   // p: {x, z}; holder: has a yaw (or null); v: {x, z} velocity (or null). True if moved.
+  const PL = BF.planet, c = PL.canon(p.x, p.z, cc);
+  if (c.off || (c.x === p.x && c.z === p.z)) return false;
+  p.x = c.x; p.z = c.z;
+  const q = (4 - c.turn) % 4;
+  if (q) {
+    if (holder) holder.yaw = PL.turnYaw(q, holder.yaw);
+    if (v) { PL.turnVec(q, v.x, v.z, ct); v.x = ct[0]; v.z = ct[1]; }
+  }
+  return true;
+}
+const me = { yaw: 0 };
+function crossEdge() {
+  if (!BF.planet || !BF.planet.isPlanet()) return;
+  if (vehicle) {
+    const vp = vehicle.pos || vehicle.position;
+    if (vp && recanonAt(vp, vehicle, vehicle.vel)) {
+      if (vehicle.ctl.seatOf) { const st = vehicle.ctl.seatOf(vehicle, "player"); pos.set(st.x, st.y, st.z); }
+    }
+  }
+  me.yaw = yaw;
+  if (recanonAt(pos, me, vel)) {
+    yaw = me.yaw;
+    if (breakTarget) resetBreak();
+    emit("crossedEdge", { x: pos.x, z: pos.z });
+  }
+}
+
 // ---------- camera ----------
 function syncCamera(dt) {
   const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
@@ -1918,6 +1951,7 @@ P.spawn = function (x, y, z) {
 P.eyePos = () => eyeVec();
 P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
+P.setFlying = function (on) { flying = !!on; vel.y = 0; };   // tests
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
 P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
@@ -2024,6 +2058,7 @@ P.update = function (dt) {
     if (isTouch) touchUpdate();
     if (invOpen() && keys.size) keys.clear();
     moved = physics(dt);
+    crossEdge();
     updateTarget();
     updateBreaking(dt);
     updateUse(dt);

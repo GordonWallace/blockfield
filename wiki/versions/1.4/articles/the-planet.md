@@ -14,13 +14,15 @@ Height works exactly as on the mile-high worlds of 1.3: bedrock at -64, sea leve
 
 ## Faces, edges and corners
 
-Two faces that meet along an edge lie flat against each other: block rows on either side line up one to one, so the ground carries on across an edge with no seam, and a straight walk stays straight. Only where three faces meet at one of the planet's eight corners is there no flat way to join them.
+Two faces that meet along an edge lie flat against each other: block rows on either side line up one to one, so the ground carries on across an edge with no seam, and a straight walk stays straight. Near the ground you see the world exactly as on a flat world: the face you are on is drawn flat, and the faces beside it are laid out flat beyond its edges, so every block is square. When you step over an edge you simply carry on, facing the same way, and the picture doesn't move; only your coordinates change (see below).
+
+Only where three faces meet at one of the planet's eight corners is there no flat way to join them: laid flat, three squares leave a quarter-circle gap. So within about a kilometre of a corner the game draws the world as it really is, on the round planet, and the gap closes up. Close to a corner the ground can look slightly twisted compared with your steps, because the grid itself bends there. The corners are always out in the open ocean.
 
 Two of the faces sit over the poles and four go round the equator. Latitude and longitude are measured on the true sphere, with longitude 0 through the middle of one of the equator faces.
 
 ## Coordinates
 
-Each face has its own block of x and z coordinates, so every place on the planet still has a single x and z. Coordinates jump when you cross from one face to the next.
+Each face has its own block of x and z coordinates, so every place on the planet still has a single x and z. Coordinates jump when you cross from one face to the next, and on some edges the directions turn too: what was "towards +x" on one face can be "towards -z" on the next. The game keeps drawing the world from your own position, so it stays sharp and steady however large the numbers get.
 
 ## While 1.4 is being built
 

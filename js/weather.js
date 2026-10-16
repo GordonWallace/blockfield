@@ -127,14 +127,17 @@ function makeParticles() {
     uniforms: {
       uTime: { value: 0 }, uIntensity: { value: 0 }, uLight: { value: 1 },
       uHeight: { value: hmTex }, uOrigin: { value: new THREE.Vector2() }, uHide: { value: 0 }, uMinY: { value: 0 },
+      uCam: { value: new THREE.Vector3() },
     },
     vertexShader: `
       attribute vec4 seed; attribute vec2 corner;
-      uniform float uTime, uIntensity, uHide, uMinY; uniform sampler2D uHeight; uniform vec2 uOrigin;
+      uniform float uTime, uIntensity, uHide, uMinY; uniform sampler2D uHeight; uniform vec2 uOrigin; uniform vec3 uCam;
       varying vec2 vUv; varying float vA; varying float vSnow;
       const float R = ${R.toFixed(1)}, BAND = ${BAND.toFixed(1)}, LO = ${BAND_LO.toFixed(1)}, HM = ${HM.toFixed(1)};
       void main() {
-        vec3 cam = cameraPosition;
+        // everything here is relative to the mesh's own position, a whole number of spans (floating origin, js/view.js): uCam is
+        // the camera relative to it and uOrigin the height map's corner relative to it
+        vec3 cam = uCam;
         float span = 2.0 * R;
         float x = cam.x + mod(seed.x * span - cam.x, span) - R;
         float z = cam.z + mod(seed.y * span - cam.z, span) - R;
@@ -156,13 +159,13 @@ function makeParticles() {
         }
         vec4 mv;
         if (snow > 0.5) {
-          mv = viewMatrix * vec4(x, y, z, 1.0);
+          mv = modelViewMatrix * vec4(x, y, z, 1.0);
           mv.xy += corner.xy * 2.0 * wid - vec2(0.0, wid);
         } else {
           // cylindrical billboard: vertical streak facing the camera around the y axis
           vec2 side = normalize(vec2(-(z - cam.z), x - cam.x) + 1e-4);
           vec3 p = vec3(x + side.x * corner.x * wid, y + corner.y * len, z + side.y * corner.x * wid);
-          mv = viewMatrix * vec4(p, 1.0);
+          mv = modelViewMatrix * vec4(p, 1.0);
         }
         gl_Position = projectionMatrix * mv;
         vUv = corner; vSnow = snow;
@@ -211,12 +214,14 @@ function makeBolt() {
     uniforms: { uW: { value: width }, uCol: { value: new THREE.Color(col) }, uA: { value: alpha }, uO: { value: 0 } },
     vertexShader: `attribute vec3 pa; attribute vec3 pb; attribute vec3 cr; uniform float uW; varying float vE;
       void main() {
-        vec3 p = mix(pa, pb, cr.y);
-        vec3 d = normalize(pb - pa + 1e-5), v = normalize(cameraPosition - p);
+        // in view space: the segment ends are relative to the mesh (placed at the strike), so they stay precise anywhere
+        vec3 a = (modelViewMatrix * vec4(pa, 1.0)).xyz, b = (modelViewMatrix * vec4(pb, 1.0)).xyz;
+        vec3 p = mix(a, b, cr.y);
+        vec3 d = normalize(b - a + 1e-5), v = normalize(-p);
         vec3 s = normalize(cross(d, v) + 1e-5);
-        float w = uW * cr.z * max(1.0, length(cameraPosition - p) * 0.012);
+        float w = uW * cr.z * max(1.0, length(p) * 0.012);
         vE = cr.x;
-        gl_Position = projectionMatrix * viewMatrix * vec4(p + s * cr.x * w, 1.0);
+        gl_Position = projectionMatrix * vec4(p + s * cr.x * w, 1.0);
       }`,
     fragmentShader: `uniform vec3 uCol; uniform float uA; uniform float uO; varying float vE;
       void main() { gl_FragColor = vec4(uCol, uA * uO * (1.0 - vE * vE)); }`,
@@ -227,9 +232,10 @@ function makeBolt() {
   for (const m of [bolt, boltGlow]) { m.frustumCulled = false; m.renderOrder = 7; m.visible = false; }
   bolt.renderOrder = 8;
 }
-let segN = 0;
+let segN = 0, boltOX = 0, boltOZ = 0;   // the bolt's segments are stored relative to the strike column (floating origin)
 function seg(ax, ay, az, bx, by, bz, wa) {
   if (segN >= BOLT_SEGS) return;
+  ax -= boltOX; bx -= boltOX; az -= boltOZ; bz -= boltOZ;
   for (let v = 0; v < 6; v++) {
     const o = (segN * 6 + v) * 3;
     boltA[o] = ax; boltA[o + 1] = ay; boltA[o + 2] = az; boltB[o] = bx; boltB[o + 1] = by; boltB[o + 2] = bz;
@@ -238,7 +244,8 @@ function seg(ax, ay, az, bx, by, bz, wa) {
   segN++;
 }
 function buildBolt(x, y, z) {
-  segN = 0;
+  segN = 0; boltOX = x; boltOZ = z;
+  bolt.position.set(x, 0, z); boltGlow.position.set(x, 0, z);
   const y0 = Math.max(BF.sky && BF.sky.cloudHeight != null ? BF.sky.cloudHeight + 4 : BF.H + 4, y + 30), n = 26, M = Math.random;
   let px = x + (M() - 0.5) * 8, pz = z + (M() - 0.5) * 8, py = y0;
   let ox = px - x, oz = pz - z;
@@ -375,7 +382,10 @@ const weather = {
       const u = pMat.uniforms;
       u.uTime.value = (u.uTime.value + dt) % 7200;
       u.uIntensity.value = weather.intensity;
-      u.uOrigin.value.set(hmOX, hmOZ);
+      const span = 2 * R, rx = Math.floor(cam.x / span) * span, rz = Math.floor(cam.z / span) * span;
+      points.position.set(rx, 0, rz);
+      u.uCam.value.set(cam.x - rx, cam.y, cam.z - rz);
+      u.uOrigin.value.set(hmOX - rx, hmOZ - rz);
       u.uMinY.value = BF.MIN_Y;
       u.uLight.value = Math.min(1.3, 0.22 + 0.85 * (BF.sky ? BF.sky.light : 1));
       u.uHide.value = BF.player && BF.player.headInWater ? 1 : 0;
