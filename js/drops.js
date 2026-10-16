@@ -5,6 +5,10 @@
 "use strict";
 const BF = (window.BF = window.BF || {});
 
+// On the planet items keep to the canonical square of the face they lie on (BF.planet.reframe after each move), and the player is
+// seen from the item's frame (BF.planet.local), so an item slides across a face edge and is picked up from either side of it.
+const LQ = {};
+const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
 const HW = 0.125, H = 0.25, GRAV = 18, PICKUP_R = 1.6, PICKUP_DELAY = 0.5, LIFE = 300, MAX = 300;
 const loader = new THREE.TextureLoader(), mats = new Map();
 let scene = null;
@@ -98,7 +102,7 @@ const drops = {
       if (d.age > LIFE) { drops.remove(d); continue; }
       // pulled toward the player once close enough, then collected
       if (alive && d.age > d.pickupDelay && pp) {
-        const dx = pp.x - d.pos.x, dy = pp.y + 0.6 - d.pos.y, dz = pp.z - d.pos.z, dist = Math.hypot(dx, dy, dz);
+        const q = seenXZ(d.pos, pp), dx = q.x - d.pos.x, dy = pp.y + 0.6 - d.pos.y, dz = q.z - d.pos.z, dist = Math.hypot(dx, dy, dz);
         if (dist < 0.6) {
           const left = BF.inventory.add(d.id, d.count, d.wear);
           if (left <= 0) { drops.remove(d); continue; }
@@ -107,17 +111,19 @@ const drops = {
           const k = 10 / dist;
           d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
           d.pos.addScaledVector(d.vel, dt);
+          if (BF.planet && BF.planet.reframe) BF.planet.reframe(d.pos, -1, null, d.vel);
           d.sprite.position.copy(d.pos);
           continue;
         }
       }
       // merge with an identical stack lying nearby
       if (d.age > 1 && (Math.floor(d.age * 4) % 4 === 0)) {
-        const o = drops.list.find(o => o !== d && o.id === d.id && o.age > 1 && o.pos.distanceToSquared(d.pos) < 1);
+        const o = drops.list.find(o => o !== d && o.id === d.id && o.age > 1 && (q => (q.x - d.pos.x) ** 2 + (o.pos.y - d.pos.y) ** 2 + (q.z - d.pos.z) ** 2)(seenXZ(d.pos, o.pos)) < 1);
         if (o && o.count + d.count <= (BF.items[d.id].stack || 64)) { o.count += d.count; drops.remove(d); continue; }
       }
       d.vel.y -= GRAV * dt;
       const res = BF.world.moveBox(d.pos, d.vel, HW, H, dt);
+      if (BF.planet && BF.planet.reframe) BF.planet.reframe(d.pos, -1, null, d.vel);   // past a face edge: onto the next face's square
       if (res.onGround) { d.vel.x *= Math.pow(0.02, dt); d.vel.z *= Math.pow(0.02, dt); }
       if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
       d.sprite.position.set(d.pos.x, d.pos.y + 0.22 + Math.sin(d.age * 2.5 + d.phase) * 0.06, d.pos.z);
