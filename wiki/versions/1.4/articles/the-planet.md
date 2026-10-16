@@ -24,6 +24,16 @@ Things that move cross edges the same way. Animals, villagers and monsters walk 
 
 Two of the faces sit over the poles and four go round the equator. Latitude and longitude are measured on the true sphere, with longitude 0 through the middle of one of the equator faces.
 
+## Flying high
+
+In creative mode you can fly far above the planet. Flying gets faster the higher you are: hold Space, with R for the boost, and you reach orbit in a few seconds.
+
+As you climb, the view slowly changes from the flat drawing to the true round planet. It starts about 250 blocks above the ground (or above the sea, whichever is higher) and is fully round by 2,500. Up there you fly along great circles, so a straight flight carries on straight around the planet, even across face edges. From about 3,000 blocks up the sky starts to darken, and it is black space with stars by 60,000.
+
+Above layer 20,000 you are off the planet. The view looks straight down at the planet with north at the top of the screen, and a thin red line marks the axis through the poles. The mouse is let go: drag with it to turn the planet under you, at the same height. Fly back down below 19,400 and the mouse looks around again, starting from straight down.
+
+Survival players can't fly, so none of this changes survival play.
+
 ## Coordinates
 
 Each face has its own block of x and z coordinates, so every place on the planet still has a single x and z. Coordinates jump when you cross from one face to the next, and on some edges the directions turn too: what was "towards +x" on one face can be "towards -z" on the next. The game keeps drawing the world from your own position, so it stays sharp and steady however large the numbers get.
@@ -38,4 +48,4 @@ The eight corners of the cube are always open sea. Each seed's continents are tu
 
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. For now the biomes are still placed by the flat worlds' temperature and humidity patterns rather than by latitude, and there are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it.
+The planet is being brought into the game step by step. For now the biomes are still placed by the flat worlds' temperature and humidity patterns rather than by latitude, and there are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it. Flying high you only see the patch of ground around you for now: the distant land and the whole globe below are still to come.

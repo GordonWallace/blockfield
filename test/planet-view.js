@@ -76,17 +76,17 @@ module.exports = async (pg) => {
       const u = h[0] ? (h[0] < 0 ? -2.5 : N + 2.5) : N / 2 + 0.5, v = h[1] ? (h[1] < 0 ? -2.5 : N + 2.5) : N / 2 + 0.5;
       const m = P.atlas(f, u, v), c = P.canon(m.x, m.z, {});
       const yawOut = Math.atan2(-h[0], -h[1]);   // forward (-sin yaw, -cos yaw) = h: looking out across the edge
-      const y = Math.max(BF.worldgen.heightAt(c.x, c.z), BF.SEA) + 40;   // above the ground, whatever the terrain there
-      BF.player.teleport(c.x, y, c.z); BF.player.setFlying(true);
+      const Y = Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(c.x), Math.floor(c.z))) + 30;   // above the ground, wherever it is
+      BF.player.teleport(c.x, Y, c.z); BF.player.setFlying(true);
       await settle();
       BF.state.paused = true;
       // the margin view: the player held at the margin point, looking out (no edge crossing while paused)
-      BF.player.position.set(m.x, y, m.z); BF.player.setLook(yawOut + Math.PI * 0.15, -0.35);
+      BF.player.position.set(m.x, Y, m.z); BF.player.setLook(yawOut + Math.PI * 0.15, -0.35);
       await new Promise(r => setTimeout(r, 400));
       const fa = BF.view.state.f, A = grab();
       // the canonical view: the same point on the next face, facing turned by the edge
       const q = (4 - c.turn) % 4;
-      BF.player.position.set(c.x, y, c.z); BF.player.setLook(P.turnYaw(q, yawOut + Math.PI * 0.15), -0.35);
+      BF.player.position.set(c.x, Y, c.z); BF.player.setLook(P.turnYaw(q, yawOut + Math.PI * 0.15), -0.35);
       await new Promise(r => setTimeout(r, 400));
       const fb = BF.view.state.f, B = grab();
       BF.state.paused = false;

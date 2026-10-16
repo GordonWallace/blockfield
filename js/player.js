@@ -43,6 +43,7 @@ let target = null;            // current block raycast hit
 //   canBoard(v), exitSpot(v, hw, h) -> {x, y, z}, onLeave(v) (e.g. a boat lets its mob passenger out too).
 // Shift held when it was boarded must be let go first.
 let vehicle = null, rideShift = false;
+let offPlanet = false;        // the planet, above layer 20,000: the camera faces the planet and dragging turns it (js/view.js)
 const VIEW_OPTS = [4, 6, 8, 10, 12, 16, 20, 24];
 const store = {
   get(k) { try { return localStorage.getItem("blockfield." + k); } catch (_) { return null; } },
@@ -71,6 +72,7 @@ const P = (BF.player = {
   set gameMode(m) { setGameMode(m); },
   get pitch() { return pitch; },
   get vehicle() { return vehicle; },
+  get offPlanet() { return offPlanet; },
   get boat() { return vehicle && vehicle.kind === "boat" ? vehicle : null; },
 });
 
@@ -625,7 +627,7 @@ function bindInput() {
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
       keys.clear(); mouseL = mouseR = false; resetBreak();
-      if (mouseFreed) { mouseFreed = false; actionBar("Mouse free: click the game to take it back"); }
+      if (mouseFreed) { mouseFreed = false; actionBar(offPlanet ? "Off the planet: drag to turn it, fly down below 19,400 to look around" : "Mouse free: click the game to take it back"); }
       else if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
       else if (!invOpen() && !P.dead && started && !menuOpen && !inEscGrace()) pause();
     }
@@ -633,7 +635,7 @@ function bindInput() {
   document.addEventListener("pointerlockerror", onLockError);
   if (BF.on) BF.on("inventoryClosed", () => {
     screenClosed();
-    if (started && !menuOpen && !P.dead && !dragMode && !isTouch && !locked) requestLock();
+    if (started && !menuOpen && !P.dead && !dragMode && !isTouch && !locked && !offPlanet) requestLock();
   });
 
   document.addEventListener("mousemove", e => { if (locked) look(e.movementX, e.movementY); });
@@ -643,12 +645,13 @@ function bindInput() {
   cv.addEventListener("pointerdown", e => {
     if (e.pointerType === "touch" || !started || menuOpen || invOpen()) return;
     if (e.button !== 0 && locked === false && dragMode) return; // right / middle click must not start a look-drag
-    if (!locked && !dragMode) requestLock();
+    if (!locked && !dragMode && !offPlanet) requestLock();
     if (!locked) drag = { x: e.clientX, y: e.clientY, id: e.pointerId };
   });
   addEventListener("pointermove", e => {
     if (!drag || e.pointerId !== drag.id || locked) return;
-    look(e.clientX - drag.x, e.clientY - drag.y);
+    if (offPlanet) turnPlanet(e.clientX - drag.x, e.clientY - drag.y);
+    else look(e.clientX - drag.x, e.clientY - drag.y);
     drag.x = e.clientX; drag.y = e.clientY;
   });
   addEventListener("pointerup", e => { if (drag && e.pointerId === drag.id) drag = null; });
@@ -693,6 +696,7 @@ function logClick(e, action, aim) {
 }
 
 function look(dx, dy) {
+  if (offPlanet) return;   // off-planet the mouse drags the planet instead
   yaw -= dx * 0.0024;
   pitch = clamp(pitch - dy * 0.0024, -1.55, 1.55);
 }
@@ -950,7 +954,7 @@ function updateViewModel(dt) {
     const c = Math.cos(pitch), n = Math.sin(pitch), wy = -MAP_VM.down - by * 0.5, wz = -MAP_VM.fwd;
     vm.position.set(MAP_VM.side + bx * 0.5, wy * c + wz * n, -wy * n + wz * c);
     vm.rotation.set(-MAP_VM.tilt - pitch, 0, 0);
-    vm.visible = started && !P.dead;
+    vm.visible = started && !P.dead && !offPlanet;
     return;
   }
   // drawing a bow: the drawn sprite, turned so the arrow points ahead towards the crosshair, brought in and up a little
@@ -964,7 +968,7 @@ function updateViewModel(dt) {
   const dr = bowSt >= 0 ? Math.min(1, drawT * 6) : 0, shake = bowSt === 2 ? Math.sin(drawT * 40) * 0.003 : 0;   // a full draw trembles slightly
   vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0) - dr * 0.2, -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0) + dr * 0.1 + shake, -0.72 - s * 0.12 + dr * 0.08);
   vm.rotation.set(-s * 0.9, s * 0.4, 0);
-  vm.visible = started && !P.dead;
+  vm.visible = started && !P.dead && !offPlanet;
 }
 function swing() { if (swingT <= 0.08) swingT = 0.25; }
 
@@ -1774,6 +1778,15 @@ function physics(dt) {
   }
   else if (inWater) speed = SWIM * (sprinting ? 1.4 : 1);
   else speed = sneaking ? SNEAK : sprinting ? SPRINT : WALK;
+  // the planet, creative flight: speed grows with the height above the ground, so a few seconds of Space (with R for the boost)
+  // reach orbit (spec r14-04). R alone boosts vertical flight too up there, where there's no terrain to outrun.
+  if (flying && creative() && BF.view && BF.planet && BF.planet.isPlanet()) {
+    const above = pos.y - BF.view.groundAt(pos.x, pos.z);
+    if (above > 150) {
+      if (k.has("KeyR") && !turbo) speed = CFLY * TURBO_MULT;
+      speed *= above / 150;
+    }
+  }
   if ((eatT > 0 || drawT > 0) && !flying) speed *= 0.35;   // eating or drawing a bow: slowed, as in vanilla
 
   const climbing = !flying && !inWater && onLadder();   // body in a ladder cell: gravity is replaced by climbing
@@ -1880,6 +1893,73 @@ function crossEdge() {
   }
 }
 
+// High up on the planet (the view more than half round) facing is kept as a direction on the sphere across each step, so long
+// flights follow great circles and don't bend where grid lines do (spec r14-04). yaw stays the one source of truth: the 3D facing is
+// derived from it before the step and yaw is derived back after.
+function frameHere() {
+  const PL = BF.planet, c = PL.canon(pos.x, pos.z, cc);
+  return c.off ? null : PL.frame(c.f, c.u, c.v, pos.y, {});
+}
+function roundHeading() {
+  if (!BF.view || !BF.planet || !BF.planet.isPlanet() || BF.view.kAt(pos.x, pos.y, pos.z) <= 0.5) return null;
+  const fr = frameHere();
+  if (!fr) return null;
+  const du = -Math.sin(yaw), dv = -Math.cos(yaw), up = fr.up;
+  const h = [fr.eu[0] * du + fr.ev[0] * dv, fr.eu[1] * du + fr.ev[1] * dv, fr.eu[2] * du + fr.ev[2] * dv];
+  const d = h[0] * up[0] + h[1] * up[1] + h[2] * up[2];
+  return [h[0] - up[0] * d, h[1] - up[1] * d, h[2] - up[2] * d];
+}
+function yawToward(h) {   // yaw facing 3D tangent direction h at the player's position (h is projected onto the tangent plane)
+  const fr = frameHere();
+  if (!fr) return yaw;
+  const up = fr.up, d = h[0] * up[0] + h[1] * up[1] + h[2] * up[2];
+  const g = BF.planet.toGrid([h[0] - up[0] * d, h[1] - up[1] * d, h[2] - up[2] * d], fr);
+  return Math.hypot(g[0], g[1]) > 1e-9 ? Math.atan2(-g[0], -g[1]) : yaw;
+}
+function keepHeading(h3) {
+  if (!h3) return;
+  const y = yawToward(h3);
+  // turn the velocity with the facing, so the flight carries on along the great circle
+  const dq = y - yaw, c = Math.cos(dq), sn = Math.sin(dq), vx = vel.x, vz = vel.z;
+  vel.x = vx * c + vz * sn; vel.z = -vx * sn + vz * c;
+  yaw = y;
+}
+
+// Off-planet mode (spec r14-04, Gordon's design from the prototype): above layer 20,000 the camera looks straight down at the
+// planet's centre with north at the top, the pointer lock is let go, and dragging turns the planet under the player at the same
+// height. Back below 19,400 the mouse looks around again, starting from straight down.
+function updateOffPlanet() {
+  const V = BF.view, on = !!(V && BF.planet && BF.planet.isPlanet()) && pos.y > (offPlanet ? V.OFF_BACK : V.OFF);
+  if (on === offPlanet) { if (on) faceNorth(); return; }
+  offPlanet = on;
+  if (on) { resetBreak(); if (locked) releaseMouse(); faceNorth(); }
+  else { pitch = -1.5; }
+}
+function faceNorth() {
+  const fr = frameHere();
+  if (!fr) return;
+  const u = fr.up, n = [-u[0] * u[1], 1 - u[1] * u[1], -u[2] * u[1]];   // the planet's axis (y), flattened onto the ground
+  if (Math.hypot(n[0], n[1], n[2]) > 1e-4) yaw = yawToward(n);
+  pitch = -1.5;
+}
+// Drags by (dx, dy) pixels: the ground under the middle of the screen follows the mouse. Radians per pixel min(h, R + h) / (pxScale R),
+// longitude scaled by 1 / cos(latitude), latitude kept within 89 degrees.
+function turnPlanet(dx, dy) {
+  const PL = BF.planet, c = PL.canon(pos.x, pos.z, cc);
+  if (c.off) return;
+  const d = PL.dir(c.f, c.u, c.v, [0, 0, 0]), h = Math.max(1, pos.y - BF.SEA);
+  let lat = Math.asin(d[1]), lon = Math.atan2(d[0], d[2]);
+  const pxScale = BF.renderer.getDrawingBufferSize(new THREE.Vector2()).y / (2 * Math.tan(BF.camera.fov * Math.PI / 360));
+  const a = Math.min(h, PL.R + h) / (pxScale * PL.R), lim = 89 * Math.PI / 180;
+  lon -= dx * a / Math.max(0.05, Math.cos(lat));
+  lat = Math.max(-lim, Math.min(lim, lat + dy * a));
+  const g = PL.fromDir(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon), {}), at = PL.atlas(g.f, g.u, g.v);
+  pos.x = at.x; pos.z = at.z; vel.x = vel.z = 0;
+  flying = true;
+  faceNorth();
+}
+P.turnPlanet = turnPlanet;   // tests
+
 // ---------- camera ----------
 function syncCamera(dt) {
   const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
@@ -1908,7 +1988,7 @@ function updateOverlays(dt) {
 }
 
 function updateTarget() {
-  target = P.dead ? null : BF.world.raycast(eyeVec(), dirVec(), REACH);
+  target = P.dead || offPlanet ? null : BF.world.raycast(eyeVec(), dirVec(), REACH);
   if (target) {
     outline.visible = true;
     const ob = BF.blocks[target.id], bb = ob && ob.shape ? ob.cboxes.reduce((m, c) => [Math.min(m[0], c[0]), Math.min(m[1], c[1]), Math.min(m[2], c[2]), Math.max(m[3], c[3]), Math.max(m[4], c[4]), Math.max(m[5], c[5])], [16, 16, 16, 0, 0, 0]) : null;
@@ -2068,8 +2148,11 @@ P.update = function (dt) {
   if (!P.dead) {
     if (isTouch) touchUpdate();
     if (invOpen() && keys.size) keys.clear();
+    const h3 = roundHeading();
     moved = physics(dt);
     crossEdge();
+    keepHeading(h3);
+    updateOffPlanet();
     updateTarget();
     updateBreaking(dt);
     updateUse(dt);
