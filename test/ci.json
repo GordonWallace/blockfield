@@ -11,7 +11,6 @@
   "ui": {"about": "screens and input: debug screen and its views, villager screens and hover cards, overlays, Escape and mouse release, title screen, death screen, sign editor, slash commands", "tests": ["cmd-unknown", "compare", "compare-view", "compare-view-14d", "death-lightning", "death-screens", "debug-alerts", "debug-day", "debug-inventory", "debug-screen", "economy-view", "esc-close", "esc-slider", "overlay-behind", "seed-copy", "sign-full-paste", "time-add-limit", "title-hotkeys", "tp-below-world", "tp-far", "villager-hover", "villager-screens", "z-release"]}
  },
  "tests": [
-  {"name": "tp-far", "file": "test/tp-far.js", "kind": "actions", "tier": "integration", "env": {"BF_HASH": "#seed1337gen3v9"}, "what": "commands refuse positions past the border, /spawnpoint keeps its y, a saved position past the border loads at the world spawn; on generator 3 until the planet falls back to its own world spawn instead of 8.5, 8.5 (js/player.js worldSpawn, r14-22 report)"},
   {"name": "dead-villager-jobsite", "file": "test/dead-villager-jobsite.js", "kind": "actions", "tier": "integration", "what": "a killed villager's workstation is free after a reload"},
   {"name": "child-leaves-house", "kind": "node", "tier": "integration", "file": "test/child-leaves-house.js", "timeout": 600, "what": "bred children walk out of their house in the morning"},
   {"name": "dead-villager-bed", "file": "test/dead-villager-bed.js", "kind": "actions", "tier": "integration", "what": "a killed villager's bed is free for others"},

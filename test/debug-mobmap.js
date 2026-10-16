@@ -81,7 +81,7 @@ const start = async () => {
   if (xy) await dbg.mouse.move(box2.x + xy[0], box2.y + xy[1]);
   await dbg.waitForTimeout(200);
   const tip = await dbg.evaluate(() => { const t = document.getElementById('mtip'); return { shown: t.style.display === 'block', text: t.textContent }; });
-  ok('hovering a dot shows its type, position and what it is doing', !!xy && tip.shown && /\d+, \d+, -?\d+|-?\d+, -?\d+, -?\d+/.test(tip.text), tip);
+  ok('hovering a dot shows its type, position and what it is doing', !!xy && tip.shown && /\d+, \d+, -?\d+|-?\d+, -?\d+, -?\d+|\d+ blocks? [NSEW]{1,2}, y -?\d+/.test(tip.text), tip);   // on the planet the position reads as distance and direction from the player, and y (r14-21)
   await dbg.locator('#mpanel').screenshot({ path: out + '.png' });
   await game.evaluate(() => { BF.mobs.update = window.__upd; });
   await b.close();
