@@ -49,13 +49,14 @@ function resChunk(cx, cz) {
   CCH[0] = Math.floor(RX / CS); CCH[1] = Math.floor(RZ / CS);
   return CCH;
 }
-// Block ids turned by k quarter turns (doors, beds, stairs, ladders, wall torches, gates, furnaces, chests, signs), built on first use.
+// Block ids turned by k quarter turns (doors, beds, stairs, ladders, wall torches, gates, furnaces, chests, signs, tents), built on first use.
 let TURN = null;
 function turnOnce(id, k) {
   const b = BF.blocks[id];
   if (!b) return id;
   if (b.shape && b.shape.kind === "stairs") { const fam = BF.SHAPES && BF.SHAPES[b.shape.base]; const t = fam && fam.stairs[b.shape.top ? 1 : 0][(b.shape.f + k) & 3]; return t != null ? t : id; }
   if (b.sign) { const t = BF.B[b.sign.wood + (b.sign.wall ? "_wall_sign_" : "_sign_") + "nesw"[(b.sign.f + k) & 3]]; return t != null ? t : id; }
+  if (b.tent) { const t = BF.B["tent_" + (b.tent.up ? "up_" : "") + b.tent.r + "_" + b.tent.l + "_" + "nesw"[(b.tent.f + k) & 3]]; return t != null ? t : id; }
   return BF.blueprints && BF.blueprints.rotId ? BF.blueprints.rotId(id, k) : id;
 }
 function turnId(id, k) {

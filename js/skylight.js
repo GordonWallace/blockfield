@@ -4,7 +4,7 @@
 // (lit from the side), a room with a doorway grades from 14 at the door to dark at the back, and a deep cave is 0.
 // Storage: chunk.sky[sectionIndex - chunk.lo] = a number (the whole section is that value) or Uint8Array(4096), same
 // in-section index as the block sections (world.js). Above a chunk's loaded band is open air (15), below it is 0.
-// Works across chunk borders through loaded chunks (a chunk that loads later pulls light in from its loaded neighbours and
+// Works across chunk borders (and face edges on the planet) through loaded chunks (a chunk that loads later pulls light in from its loaded neighbours and
 // pushes its own out). Derived data: never saved, recomputed when a chunk is created.
 // The mesher (world.js) turns levels into per-vertex brightness (bright()); js/mobs.js reads levels for monster spawning
 // (a cave spot at 7 or less) and burning (12 or more at the head).
@@ -53,6 +53,20 @@ function chunkOf(x, z) {
   return cC;
 }
 const reset = () => { cCx = cCz = 1e9; cC = null; ah = at = rh = rt = 0; };
+// A step from canonical cell (x, z) to (nx, nz): the chunk it reaches, with the canonical cell in NX / NZ. On the planet a step out of
+// a chunk at a face edge lands in the margin, which is resolved to the cell on the next face (null in a corner wedge), so the fills
+// carry on across face edges and every queued cell is canonical.
+let NX = 0, NZ = 0;
+const NCELL = {};
+function stepTo(x, z, nx, nz) {
+  NX = nx; NZ = nz;
+  if (((nx >> 4) === (x >> 4) && (nz >> 4) === (z >> 4)) || !world().isPlanet()) return chunkOf(nx, nz);
+  const P = BF.planet, N = P.N, f = Math.floor(nx / P.W), u = nx - P.W * f - N, v = nz - N;
+  if (u >= 0 && u < N && v >= 0 && v < N) return chunkOf(nx, nz);
+  const cl = world().cell(nx, nz, NCELL);
+  NX = cl.x; NZ = cl.z;
+  return cl.c;
+}
 const idx = (x, y, z) => ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
 // level on chunk c (with c.sky) at absolute y: 15 above the band, 0 below
 function sget(c, x, y, z) {
@@ -92,7 +106,7 @@ function flush() {
     if (b) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dz) continue;
       if (dx === -1 && !(b & 1) || dx === 1 && !(b & 2) || dz === -1 && !(b & 4) || dz === 1 && !(b & 8)) continue;
-      const n = W.chunks.get((c.cx + dx) + "," + (c.cz + dz));
+      const n = W.chunkC(c.cx + dx, c.cz + dz);   // (across a face edge on the planet)
       if (n && n.mesh !== undefined) W._dirty.add(n.key);
     }
   }
@@ -112,8 +126,7 @@ function propagate() {
     const L = sget(c, x, y, z);
     if (L <= 1) continue;
     for (let d = 0; d < 6; d++) {
-      const nx = x + DX[d], ny = y + DY[d], nz = z + DZ[d];
-      const nc = chunkOf(nx, nz);
+      const ny = y + DY[d], nc = stepTo(x, z, x + DX[d], z + DZ[d]), nx = NX, nz = NZ;
       if (!nc || !nc.sky || ny < nc.y0 || ny >= nc.y1) continue;   // above a band is open sky already
       const a = ATT[blockAt(nc, nx, ny, nz)];
       if (a === 255) continue;
@@ -134,8 +147,7 @@ function removeFrom(c, x, y, z, v) {
   while (rh < rt) {
     const px = rx[rh], py = ry[rh], pz = rz[rh], pv = rv[rh]; rh++;
     for (let d = 0; d < 6; d++) {
-      const nx = px + DX[d], ny = py + DY[d], nz = pz + DZ[d];
-      const nc = chunkOf(nx, nz);
+      const ny = py + DY[d], nc = stepTo(px, pz, px + DX[d], pz + DZ[d]), nx = NX, nz = NZ;
       if (!nc || !nc.sky || ny < nc.y0) continue;
       if (ny >= nc.y1) { pushAdd(nx, ny, nz); continue; }   // open sky above the band
       const n = sget(nc, nx, ny, nz);
@@ -202,7 +214,16 @@ function floorAt(c, x, z) {
 // coming in from loaded neighbours across the border.
 function seed(c) {
   const ox = c.cx * CS, oz = c.cz * CS, W = world();
-  const nbs = [W.chunks.get((c.cx - 1) + "," + c.cz), W.chunks.get((c.cx + 1) + "," + c.cz), W.chunks.get(c.cx + "," + (c.cz - 1)), W.chunks.get(c.cx + "," + (c.cz + 1))];
+  // the columns just outside each side (column by column through world.cell: across a face edge the neighbour is turned)
+  const side = [];
+  for (let d = 0; d < 4; d++) {
+    const a = [];
+    for (let t = 0; t < CS; t++) {
+      const cl = W.cell(ox + (d === 0 ? -1 : d === 1 ? CS : t), oz + (d === 2 ? -1 : d === 3 ? CS : t), {});
+      a.push(cl.c && cl.c.sky && cl.c !== c ? cl : null);
+    }
+    side.push(a);
+  }
   for (let lz = 0; lz < CS; lz++) for (let lx = 0; lx < CS; lx++) {
     const fl = floorOf[lz * CS + lx], x = ox + lx, z = oz + lz;
     let hi = fl;
@@ -211,11 +232,12 @@ function seed(c) {
       let nf;
       if (nx >= 0 && nx < CS && nz >= 0 && nz < CS) nf = floorOf[nz * CS + nx];
       else {
-        const n = nbs[nx < 0 ? 0 : nx >= CS ? 1 : nz < 0 ? 2 : 3];
-        if (!n || !n.sky) continue;
-        nf = Math.min(floorAt(n, (nx + CS) & 15, (nz + CS) & 15), n.y1);
+        const cl = nx < 0 ? side[0][nz] : nx >= CS ? side[1][nz] : nz < 0 ? side[2][nx] : side[3][nx];
+        if (!cl) continue;
+        const n = cl.c;
+        nf = Math.min(floorAt(n, cl.lx, cl.lz), n.y1);
         // the neighbour's own 15-cells next to our shaded ones light us
-        for (let y = Math.max(nf, c.y0); y < fl && y < n.y1; y++) pushAdd(n.cx * CS + ((nx + CS) & 15), y, n.cz * CS + ((nz + CS) & 15));
+        for (let y = Math.max(nf, c.y0); y < fl && y < n.y1; y++) pushAdd(cl.x, y, cl.z);
       }
       if (nf > hi) hi = nf;
     }
@@ -224,18 +246,15 @@ function seed(c) {
     for (let y = fl - 1; y >= c.y0; y--) { const v = sget(c, x, y, z); if (v <= 1) break; pushAdd(x, y, z); }
   }
   // shaded light (below 15) in the neighbours' border cells flows in too
-  for (let d = 0; d < 4; d++) {
-    const n = nbs[d];
-    if (!n || !n.sky) continue;
-    const blx = d === 0 ? CS - 1 : d === 1 ? 0 : -1, blz = d === 2 ? CS - 1 : d === 3 ? 0 : -1;
+  for (let d = 0; d < 4; d++) for (let t = 0; t < CS; t++) {
+    const cl = side[d][t];
+    if (!cl) continue;
+    const n = cl.c, li = (cl.lz << 4) | cl.lx;
     for (let si = 0; si < n.sky.length; si++) {
       const s = n.sky[si];
       if (typeof s === "number") continue;   // uniform: all 15 (handled above) or all dark
       const by = (n.lo + si) * 16;
-      for (let t = 0; t < CS; t++) {
-        const lx = blx >= 0 ? blx : t, lz = blz >= 0 ? blz : t;
-        for (let ly = 0; ly < 16; ly++) { const v = s[(ly << 8) | (lz << 4) | lx]; if (v > 1 && v < 15) pushAdd(n.cx * CS + lx, by + ly, n.cz * CS + lz); }
-      }
+      for (let ly = 0; ly < 16; ly++) { const v = s[(ly << 8) | li]; if (v > 1 && v < 15) pushAdd(cl.x, by + ly, cl.z); }
     }
   }
 }
@@ -271,10 +290,9 @@ sky.onSet = function (x, y, z, oldId, newId) {
   if (an !== 255) {
     let nl = 0;
     for (let d = 0; d < 6; d++) {
-      const nx = x + DX[d], ny = y + DY[d], nz = z + DZ[d];
-      const nc = chunkOf(nx, nz);
+      const ny = y + DY[d], nc = stepTo(x, z, x + DX[d], z + DZ[d]);
       if (!nc || !nc.sky || ny < nc.y0) continue;
-      const v = step(sget(nc, nx, ny, nz), an, d === 2);
+      const v = step(sget(nc, NX, ny, NZ), an, d === 2);
       if (v > nl) nl = v;
     }
     if (nl > sget(c, x, y, z)) { sset(c, x, y, z, nl); mark(c, x, z); pushAdd(x, y, z); }
@@ -287,7 +305,7 @@ const CELL = {};
 // Level 0..15 at world coords: 15 in unloaded chunks and above a band, 0 below it.
 sky.get = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  const cl = world().cell(x, z, CELL), c = cl.c;   // (through a face edge on the planet; the spreading itself stops at face edges for now)
+  const cl = world().cell(x, z, CELL), c = cl.c;   // (through a face edge on the planet)
   if (!c || !c.sky) return 15;
   return sget(c, cl.lx, y, cl.lz);
 };

@@ -86,7 +86,11 @@ function canSurvive(x, y, z) {
 const saps = new Map();      // "x,y,z" -> {x, y, z}
 const pk = (x, y, z) => x + "," + y + "," + z;
 let hooked = false, growLast = 0, sawT = 0, SCANF = null;
-function addSap(x, y, z, id) { if (isSap(id)) saps.set(pk(x, y, z), { x, y, z }); }
+function addSap(x, y, z, id) {
+  if (!isSap(id)) return;
+  const c = BF.world.canonXZ ? BF.world.canonXZ(x, z) : [x, z];   // kept by canonical cell (a sapling placed across a face edge)
+  if (c) saps.set(pk(c[0], y, c[1]), { x: c[0], y, z: c[1] });
+}
 function hook() {
   if (hooked || !BF.world || !BF.on) return;
   hooked = true;

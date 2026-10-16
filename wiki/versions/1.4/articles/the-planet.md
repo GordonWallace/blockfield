@@ -16,6 +16,8 @@ Height works exactly as on the mile-high worlds of 1.3: bedrock at -64, sea leve
 
 Two faces that meet along an edge lie flat against each other: block rows on either side line up one to one, so the ground carries on across an edge with no seam, and a straight walk stays straight. Only where three faces meet at one of the planet's eight corners is there no flat way to join them.
 
+Everything that spreads from block to block carries on across an edge too. A torch lights the ground on the next face, a roof shades both sides, water flows over and stops where it would anywhere else, water on one face keeps farmland on the other hydrated, grass spreads across, and a tree can grow astride an edge. Signs placed side by side across an edge stay two separate boards.
+
 Two of the faces sit over the poles and four go round the equator. Latitude and longitude are measured on the true sphere, with longitude 0 through the middle of one of the equator faces.
 
 ## Coordinates
