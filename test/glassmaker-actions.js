@@ -35,8 +35,9 @@ module.exports = async (pg) => {
     ok("builders' houses have pane windows, no glass blocks", house.some(x => x[3] === B.glass_pane) && !house.some(x => x[3] === B.glass));
 
     // ---- the sand village near spawn: a glassmaker, its kiln and a furnace beside it
-    const vg = BFT.village(v => v.ground === 1);
-    if (!vg) { ok("a sand village within 3 km", false); return R; }
+    // an inland one: by the sea most of a desert village's sand lies beside water, which is never dug
+    const vg = BFT.village(v => v.ground === 1 && BF.worldgen.heightAt(v.x, v.z) >= BF.SEA + 20, 6000);
+    if (!vg) { ok("an inland sand village within 6 km", false); return R; }
     const V = { x: Math.round(vg.x), z: Math.round(vg.z) };
     ok("worldgen: sand within 64 blocks of the village", BF.worldgen.sandNear(V.x, V.z, 64));
     BF.player.teleport(V.x + 0.5, BF.worldgen.heightAt(V.x, V.z) + 2, V.z + 0.5);

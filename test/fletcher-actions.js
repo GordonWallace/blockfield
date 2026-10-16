@@ -195,6 +195,8 @@ module.exports = async (pg, out) => {
         // the village's furniture maker buys wool too: when it got there first the shepherd was left at WOOL_KEEP with too little
         // string for its "1 emerald > 9 string" offer, and the fletcher never got any. Keep the shepherd's spare wool topped up.
         if (c(shp, "white_wool") < 28) inv.add(shp.inv, I.white_wool, 28 - c(shp, "white_wool"));
+        // the shepherd is the village's only string: on the planet a fisherman can come home with some and sell it first
+        for (const v of vs) if (v !== shp && v !== Fl && c(v, "string")) inv.remove(v.inv, I.string, 999);
         const st = BF.villagerStatus.text(Fl); if (st) seenStatus.add(st);
         if (spunAt == null && c(shp, "string") > 0) spunAt = +BF.sky.time.toFixed(3);
         if (arrowsAt == null && c(Fl, "arrow") > 0) arrowsAt = +BF.sky.time.toFixed(3);
