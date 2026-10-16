@@ -5,7 +5,7 @@
 // on the far face: a map of the zone beside the edge, explored from both sides (the far side from its canonical position), shows the gold
 // line straight across the edge with no seam and the lapis line straight; the player's arrow stays on the line, heading the same way, when
 // the player stands across the edge. A map off a face's middle lines shows a north arrow pointing to the pole; the compass points home
-// from another face.
+// from another face. An explorer kept in face A's frame across the edge maps the zone it stands in on face B.
 // node test/run.js /tmp/pw test/planet-maps.js
 module.exports = async (pg) => {
   await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
@@ -99,6 +99,19 @@ module.exports = async (pg) => {
       const mp = M.mapPos(d), want = at(6, 0);
       out.arrow = { dx: +(mp.x - want.x - 0.5).toFixed(2), dz: +(mp.z - want.z - 0.5).toFixed(2), fwd: +(-Math.sin(mp.yaw) * h[0] - Math.cos(mp.yaw) * h[1]).toFixed(3) };
       out.northOn = M.northOn(d);
+      // an explorer kept in face A's frame (as a village's villagers are) standing across the edge: the blank map it uses becomes the
+      // map of the zone it really stands in on face B, and the patch it walks to next is given in its own frame, near it
+      const ex = BF.mobs.spawn("villager", cc(-3, 0).x, y, cc(-3, 0).z), ep = at(6, 0);
+      ex.position.set(ep.x + 0.5, y, ep.z + 0.5);   // a margin address of face A (where a village on A keeps its villagers)
+      ex.inv = BF.trades.stockFor("explorer", ex); BF.trades.inv.add(ex.inv, BF.I.blank_map_1, 1);
+      const X = BF.explorer, used = X.useBlank(ex), c = X.carried(ex)[0];
+      const zc = P.canonCell(ep.x, ep.z);
+      out.explorer = { used, zone: c ? [c.it.map.zx, c.it.map.zz] : null, want: [M.zoneOf(zc.x), M.zoneOf(zc.z)] };
+      if (c) {
+        const t = X.pickTarget(ex, c).best;
+        out.explorer.target = t ? +Math.hypot(t.wx - ex.position.x, t.wz - ex.position.z).toFixed(1) : null;
+      }
+      BF.mobs.kill(ex);
       return out;
     }, [setup.y]);
     check(r.face === f, `${tag}: the map belongs to face ${r.face}`);
@@ -106,6 +119,8 @@ module.exports = async (pg) => {
     check(r.distinct && r.line === "1".repeat(29), `${tag}: the gold line runs straight across the edge with no seam ${r.line} ${JSON.stringify(r.cols)}`);
     check(r.lap === "1".repeat(33), `${tag}: the lapis line on the far face is straight ${r.lap}`);
     check(Math.abs(r.arrow.dx) < 0.01 && Math.abs(r.arrow.dz) < 0.01 && r.arrow.fwd > 0.999, `${tag}: standing across the edge, the player's arrow is in place and heads the same way ${JSON.stringify(r.arrow)}`);
+    check(r.explorer.used && JSON.stringify(r.explorer.zone) === JSON.stringify(r.explorer.want) && r.explorer.target !== null && r.explorer.target < 200,
+      `${tag}: an explorer across the edge maps the zone it stands in and walks to a patch near it ${JSON.stringify(r.explorer)}`);
     check(r.northOn === null, `${tag}: on a face's middle line the map's up is north (no north arrow) ${r.northOn}`);
   }
 

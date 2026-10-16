@@ -801,10 +801,10 @@ function arrowFor(dx, dz, r) {
   return ARROWS[(((Math.round(Math.atan2(right, fwd) / (Math.PI / 4))) % 8) + 8) % 8];
 }
 function postLine(o, r) { return arrowFor(o.dx, o.dz, r) + " " + String(o.name).slice(0, 16).padEnd(16) + " " + String(o.dist).padStart(3); }
-function postNeighbours(v) {
+function postNeighbours(v, range = POST_RANGE) {
   const G = BF.worldgen;
   if (!G || !G.villagesNear) return [];
-  return G.villagesNear(v.x, v.z, POST_RANGE).filter(o => o && !(o.x === v.x && o.z === v.z))
+  return G.villagesNear(v.x, v.z, range).filter(o => o && !(o.x === v.x && o.z === v.z))
     .map(o => {   // on the planet: the way there in the village's face frame (through an edge, or round the planet) and planet distance
       const t = BF.planet ? BF.planet.toward(v, o, {}) : { x: o.x - v.x, z: o.z - v.z, d: Math.hypot(o.x - v.x, o.z - v.z) };
       return { name: o.name || villageName(o) || "Village", dx: t.x, dz: t.z, d: t.d, dist: Math.round(t.d / 10) * 10 };

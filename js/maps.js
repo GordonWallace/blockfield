@@ -220,6 +220,7 @@ function mapPos(d) {
 function northOn(d) {
   if (!onPlanet()) return null;
   const c = side(d.size) / 2, n = BF.planet.north(originX(d.size, d.zx) + c, originX(d.size, d.zz) + c);
+  if (!n) return null;   // a map centred on a pole
   const a = Math.atan2(n[0], -n[1]);
   return Math.abs(a) < 4 * Math.PI / 180 ? null : a;
 }
