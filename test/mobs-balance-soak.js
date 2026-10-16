@@ -1,7 +1,7 @@
 // @ci integration suite=village soak timeout=5400 args={out}
 // Mobs live in the world (idea-037) balance soak, on the planet (spec r14-22): 14 game days, 20 villages near the spawn. Villages run in
-// groups of 4 for 3 days each (two pins of two villages, as caravan trips keep villages running) while the player stands in a fifth area with no village near, so no monster spawns
-// because of the player. Drives the simulation directly (no rendering), like test/caravan-soak.js.
+// groups of 4 for 3 days each (two pins of two villages, as caravan trips keep villages running) while the player stands in a fifth area
+// with no village near, so no monster spawns because of the player. Drives the simulation directly (no rendering), like test/caravan-soak.js.
 // Checks (the spec's numbers):
 //  - at least 20 villages run;
 //  - a zombie gets into the average running village on at least one night in three;
