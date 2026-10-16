@@ -12,6 +12,6 @@ module.exports = async (pg) => {
     return { dead: BF.player.dead, text: [...document.querySelectorAll(".bfp-sub")].map(e => e.textContent).filter(Boolean) };
   });
   console.log(JSON.stringify(r));
-  const ok = r.dead && r.text.includes("You were struck by lightning");
+  const ok = r.dead && r.text.some(t => t.split("\n")[0] === "You were struck by lightning");   // the line under it is where you died (face, u, v, y, latitude and longitude on the planet)
   console.log(ok ? "PASS death-lightning" : "FAIL death-lightning");
 };

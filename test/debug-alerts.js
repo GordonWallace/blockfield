@@ -22,7 +22,7 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/#seed1337gen3`);   // generator 3 until r14-22 (no hash boots a planet since r14-19)
+  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(4000);
   // simulated pointer lock (headless Chromium has none), as in test/z-release.js
   await game.evaluate(() => {

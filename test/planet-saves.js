@@ -3,7 +3,7 @@
 // player, a boat and mobs on face 0 and edits on both sides of a face edge comes back exactly; the spawn is dry temperate or
 // subtropical land at least 5 km from every face edge and 20 km from every corner, the same each time; a 1.3 (version 1) world is
 // listed greyed with only Delete and won't open from the list; creating a world from the menu makes a planet; #seed<n> boots a
-// planet and #seed<n>gen3 a legacy world.
+// planet and #seed<n>gen3 a legacy world (until r14-24).
 // node test/run.js /tmp/ps test/planet-saves.js
 module.exports = async (pg, out) => {
   let bad = 0;
@@ -116,7 +116,7 @@ module.exports = async (pg, out) => {
   const old = list.rows.find(r => /My 1\.3 world/.test(r.text)), mine = list.rows.find(r => /planet save/.test(r.text));
   check(old && old.old && /Made with Blockfield 1\.3, can't be opened in 1\.4/.test(old.text) && old.btns.join() === "delete", "a 1.3 world is listed greyed, with only Delete");
   check(mine && !mine.old && mine.btns.includes("play"), "a planet world is listed normally");
-  check(list.gen === 3, "the test page (#seed1337gen3v9) still boots a generator 3 world");
+  check(list.gen === 4, "the test page (#seed123gen4v10 since r14-22) boots a planet");
   if (out) await pg.screenshot({ path: `${out}-worlds.png` });
   // Delete still works on it
   await pg.evaluate(() => document.querySelector('.bfp-world.old [data-act="delete"]').click());
