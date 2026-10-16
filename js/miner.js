@@ -51,6 +51,7 @@ const FLOOR_BELOW = 12;                     // the surface quarry never goes dee
 const REACH = 4.2;                          // eye to block centre
 const VILLAGER_SLOW = 2.5;                  // a villager digs this many times slower than the player's breakTime formula
 const KEEP_COBBLE = 256, SELL_MIN = 32, BUILDER_RESERVE = 32;
+const KEEP_DEEPSLATE = 64;                  // cobbled deepslate kept (no one buys it): a stack, the rest left behind so it never fills the pack
 const DIG_DEPTH = [20, 40, 60, 60, 60];     // staircase depth below the entrance, by villager level 1..5
 const DEEP_TIER = 3;                        // pickaxe tier (iron) needed to dig below DIG_DEPTH[0]: gold, diamonds and redstone need it
 const MAX_STAIRS = 64, CORRIDOR = 64, BRANCH_EVERY = 4, BRANCH_LEN = 8, TORCH_EVERY = 6;
@@ -346,7 +347,7 @@ function dig(m, x, y, z) {
   if (!isFinite(b.hardness)) return false;
   W().setBlock(x, y, z, 0);
   const keepGravel = id === BF.B.gravel && count(m, I("gravel")) < GRAVEL_KEEP && wantsFlint(m);   // to sift for flint later
-  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if ((keeps(d.id) || keepGravel && d.id === I("gravel")) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
+  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if ((keeps(d.id) || keepGravel && d.id === I("gravel")) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE) && !(d.id === I("cobbled_deepslate") && count(m, d.id) >= KEEP_DEEPSLATE)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
   wearPick(m, p, BF.toolWear.forBlock(id, p));
   if (BF.emit) BF.emit("blockBroken", x, y, z, id);
   return true;
