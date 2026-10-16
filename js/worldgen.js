@@ -30,16 +30,16 @@ function flatSampler() {
 const OCEAN = 0, BEACH = 1, SNOWY_BEACH = 2, STONY_SHORE = 3, RIVER = 4, PLAINS = 5, FOREST = 6, FLOWER_FOREST = 7,
   BIRCH = 8, DARK_FOREST = 9, SWAMP = 10, MANGROVE = 11, DESERT = 12, BADLANDS = 13, SAVANNA = 14, SPARSE_JUNGLE = 15,
   JUNGLE = 16, TAIGA = 17, OLD_TAIGA = 18, SNOWY_PLAINS = 19, ICE_SPIKES = 20, SNOWY_TAIGA = 21, MEADOW = 22,
-  CHERRY = 23, MOUNTAINS = 24, SNOWY_SLOPES = 25, PEAKS = 26, STONY_PEAKS = 27, MUSHROOM = 28;
+  CHERRY = 23, MOUNTAINS = 24, SNOWY_SLOPES = 25, PEAKS = 26, STONY_PEAKS = 27, MUSHROOM = 28, FROZEN_OCEAN = 29;
 const NAMES = ["Ocean", "Beach", "Snowy Beach", "Stony Shore", "River", "Plains", "Forest", "Flower Forest",
   "Birch Forest", "Dark Forest", "Swamp", "Mangrove Swamp", "Desert", "Badlands", "Savanna", "Sparse Jungle",
   "Jungle", "Taiga", "Old Growth Taiga", "Snowy Plains", "Ice Spikes", "Snowy Taiga", "Meadow",
-  "Cherry Grove", "Windswept Hills", "Snowy Slopes", "Jagged Peaks", "Stony Peaks", "Mushroom Fields"];
+  "Cherry Grove", "Windswept Hills", "Snowy Slopes", "Jagged Peaks", "Stony Peaks", "Mushroom Fields", "Frozen Ocean"];   // (29: the planet only)
 // Tree probability per 4x4 cell, and ground plants per column: [short_grass, fern, flowers, dead_bush, mushrooms]
 const TREE_DENSITY = [], PLANTS = [];
 (function () {
   const t = (b, d, g, f, fl, db, m) => { TREE_DENSITY[b] = d; PLANTS[b] = [g, f, fl, db, m]; };
-  for (let b = 0; b <= MUSHROOM; b++) t(b, 0, 0, 0, 0, 0, 0);
+  for (let b = 0; b <= FROZEN_OCEAN; b++) t(b, 0, 0, 0, 0, 0, 0);
   t(PLAINS, 0.03, 0.28, 0, 0.03, 0, 0);
   t(FOREST, 0.6, 0.18, 0.02, 0.012, 0, 0.004);
   t(FLOWER_FOREST, 0.35, 0.1, 0, 0.22, 0, 0);
@@ -177,7 +177,7 @@ BF.setLimits = function (gen) {
 };
 // Slow climate fields at a (warped) position. Writes into K.
 const WA1 = [0, 0];
-const K = { t: 0, hu: 0, c: 0, e: 0, wd: 0, wx: 0, wz: 0, u: 0, p: 0, pm: 0, lo: 0, mt: 0, sp: 0, mp: 0 };
+const K = { t: 0, hu: 0, c: 0, e: 0, wd: 0, wx: 0, wz: 0, u: 0, p: 0, pm: 0, lo: 0, mt: 0, sp: 0, mp: 0, el: 0 };
 // v2 fields: climate zones and continents scale with SC, continents are big (thousands of blocks) and separated by open ocean.
 function rawFields2(x, z) {
   const q = Math.sqrt(SC), wl = 230 * q, wa = 48 * q;
@@ -189,8 +189,10 @@ function rawFields2(x, z) {
   K.hu = FB(wx, wz, LH, 311.7, -173.3, 2) * 0.85;
   // continentalness: its own big warp gives coastlines that wander; contrast keeps the oceans wide and the continents solid
   const d2 = x * x + z * z;     // land is forced around the origin so the default spawn is on a continent
-  if (GEN >= 3) K.c = cont3(x, z);
-  else {
+  if (GEN >= 3) {
+    K.c = cont3(x, z);
+    if (PLANET) PG.climate(wx, wz, K.c, K);   // the planet: temperature and humidity from its climate bands (K.el: climate latitude)
+  } else {
     const LC = CONT_L * (1 + 0.12 * (SC - 1));
     const cx = x + noise.n2(x / (LC * 0.45) + 7.7, z / (LC * 0.45) - 3.1) * LC * 0.09, cz = z + noise.n2(x / (LC * 0.45) - 13.9, z / (LC * 0.45) + 21.3) * LC * 0.09;
     K.c = noise.fbm(cx / LC - 517.1, cz / LC + 229.9, 5) * 2.0 - 0.15 + 1.3 * (1 - smooth(62500, 5760000, d2));
@@ -340,7 +342,7 @@ function rawFields(x, z) {
 // The slow fields are sampled on a 4-block lattice (cached) and bilinearly interpolated: identical results
 // for any call order, and ~10x cheaper per column. Nodes live in one preallocated buffer (LAT maps key -> offset): wide auto maps touch
 // millions of fresh nodes, and a typed array per node let the browser grow by gigabytes of short-lived buffers before freeing them.
-const LAT = new Map(), LAT_MAX = 60000, LAT_W = 14, LATB = new Float64Array(LAT_MAX * LAT_W);
+const LAT = new Map(), LAT_MAX = 60000, LAT_W = 15, LATB = new Float64Array(LAT_MAX * LAT_W);
 function lattice(lx, lz) {
   const key = lx * 1048576 + lz;
   let o = LAT.get(key);
@@ -348,7 +350,7 @@ function lattice(lx, lz) {
     rawFields(lx * 4, lz * 4);
     o = LAT.size * LAT_W;
     LATB[o] = K.t; LATB[o + 1] = K.hu; LATB[o + 2] = K.c; LATB[o + 3] = K.e; LATB[o + 4] = K.wd; LATB[o + 5] = K.wx - lx * 4; LATB[o + 6] = K.wz - lz * 4;
-    LATB[o + 7] = K.u; LATB[o + 8] = K.p; LATB[o + 9] = K.pm; LATB[o + 10] = K.lo; LATB[o + 11] = K.mt; LATB[o + 12] = K.sp; LATB[o + 13] = K.mp;
+    LATB[o + 7] = K.u; LATB[o + 8] = K.p; LATB[o + 9] = K.pm; LATB[o + 10] = K.lo; LATB[o + 11] = K.mt; LATB[o + 12] = K.sp; LATB[o + 13] = K.mp; LATB[o + 14] = PLANET ? K.el : 0;
     LAT.set(key, o);
   }
   return o;
@@ -372,6 +374,7 @@ function fields(x, z) {
   K.mt = L[a + 11] * w00 + L[b + 11] * w10 + L[c + 11] * w01 + L[d + 11] * w11;
   K.sp = L[a + 12] * w00 + L[b + 12] * w10 + L[c + 12] * w01 + L[d + 12] * w11;
   K.mp = L[a + 13] * w00 + L[b + 13] * w10 + L[c + 13] * w01 + L[d + 13] * w11;
+  K.el = L[a + 14] * w00 + L[b + 14] * w10 + L[c + 14] * w01 + L[d + 14] * w11;
 }
 
 // Full column climate. Writes into C (no allocation) and returns the terrain surface height.
@@ -652,7 +655,7 @@ function climate3(x, z) {
   const sw = smooth(0.2, 0.36, hu) * smooth(-0.2, -0.06, t) * (1 - smooth(0.02, 0.3, c)) * land * (1 - m) * (1 - S) * (1 - smooth(SEA + 12, SEA + 45, h));
   if (sw > 0) h = lerp(h, SEA + 0.35 + hills * 2.6, sw);
   let mi = 0;
-  if (c < -0.8 && !(PLANET && PG.nearCorner(x, z))) {   // (the planet's cube corners stay open sea)
+  if (c < -0.8 && !(PLANET && (PG.nearCorner(x, z) || t < -0.1))) {   // (the planet: not at its cube corners, which stay open sea, nor in cold seas)
     mi = smooth(0.7, 0.8, N2(x, z, 520, 77.7, -55.5)) * smooth(-0.8, -0.95, c);
     if (mi > 0) h = lerp(h, SEA + 3 + hills * 7, mi);
   }
@@ -679,10 +682,10 @@ function climate3(x, z) {
   const sc = Math.pow(SC, 0.7);
   const dj = N2(x, z, 22 * sc, 7.1, 0) * 0.02 + (noise.hash(x, z, 77) - 0.5) * 0.008 * (1 + 0.45 * (SC - 1));
   // altitude cools slowly; the high plains are a little drier (rain shadow of the escarpment): more steppe and savanna, fewer forests
-  const tb = band(t - cool3(h) + dj), hb = band(hu - 0.16 * S - dj);
+  const tb = band(t - (PLANET ? PG.cool(K.el, h) : cool3(h)) + dj), hb = band(hu - 0.16 * S - dj);
   let b;
   if (mi > 0.5 && h >= SEA - 1) b = MUSHROOM;
-  else if (h < SEA - 1 && c < -0.08) b = OCEAN;
+  else if (h < SEA - 1 && c < -0.08) b = PLANET && tb === 0 ? FROZEN_OCEAN : OCEAN;   // (the planet's arctic seas)
   else if (chan) b = RIVER;
   else if (c < -0.03 + dj && h <= SEA + 2 && sw < 0.5) b = smooth(-0.18, -0.45, e) > 0.45 ? STONY_SHORE : tb === 0 ? SNOWY_BEACH : BEACH;
   else if (c < 0.0 && m > 0.25 && h <= SEA + 7) b = STONY_SHORE;
@@ -700,6 +703,10 @@ function climate3(x, z) {
   else if (tb === 2) b = hb <= 1 ? PLAINS : hb === 2 ? (wd > 0.28 ? FLOWER_FOREST : FOREST) : hb === 3 ? BIRCH : DARK_FOREST;
   else if (tb === 3) b = hb === 0 ? SAVANNA : hb === 1 ? PLAINS : hb === 2 ? FOREST : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
   else b = hb <= 1 ? DESERT : hb === 2 ? SAVANNA : hb === 3 ? SPARSE_JUNGLE : JUNGLE;
+  if (PLANET) {   // the planet's bands are wide: meadows on temperate high plains, cherry groves in mild subtropical forest
+    if (b === PLAINS && tb === 2 && h >= 900 + dj * 2000) b = MEADOW;
+    else if (b === FOREST && tb === 3 && wd > 0.24) b = CHERRY;
+  }
 
   C.h = h; C.t = t; C.hu = hu; C.c = c; C.e = e; C.wd = wd; C.m = m; C.rf = chan ? 1 : 0; C.sw = sw; C.bw = bw; C.mi = mi;
   C.biome = b; C.tb = tb; C.hb = hb; C.wl = wl; C.rv = rv; C.S = S;
@@ -710,7 +717,8 @@ function biomeAt(x, z) {
   climate(Math.floor(x), Math.floor(z));
   const id = C.biome;
   let name = NAMES[id];
-  if (id === OCEAN) name = (C.h < (GEN >= 3 ? -30 : 36) ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
+  if (id === FROZEN_OCEAN) name = (C.h < -30 ? "Deep " : "") + "Frozen Ocean";
+  else if (id === OCEAN) name = (C.h < (GEN >= 3 ? -30 : 36) ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
   else if (id === RIVER && C.tb === 0) name = "Frozen River";
   return { name, id, height: C.h, temperature: +C.t.toFixed(2), humidity: +C.hu.toFixed(2) };
 }
@@ -800,13 +808,13 @@ function siteOK(x, z, relaxed) {
   if (h0 <= SEA || C.rv) return false;
   if (!(VILLAGE_BIOMES.includes(b) || (relaxed && (b === FOREST || b === BIRCH || b === SNOWY_TAIGA || b === FLOWER_FOREST)) ||
       (relaxed > 1 && (b === BEACH || b === MOUNTAINS || b === CHERRY || b === SPARSE_JUNGLE)) ||
-      (relaxed > 2 && b !== OCEAN && b !== RIVER && b !== PEAKS && b !== STONY_PEAKS && b !== MUSHROOM))) return false;
+      (relaxed > 2 && b !== OCEAN && b !== FROZEN_OCEAN && b !== RIVER && b !== PEAKS && b !== STONY_PEAKS && b !== MUSHROOM))) return false;
   let lo = h0, hi = h0, wet = 0, bad = 0;
   for (let dz = -28; dz <= 28; dz += 7) for (let dx = -28; dx <= 28; dx += 7) {
     const h = climate(x + dx, z + dz), bb = C.biome;
     if (h <= SEA || C.rv) wet++;
     if (h < lo) lo = h; if (h > hi) hi = h;
-    if ((bb === MOUNTAINS && relaxed < 2) || bb === PEAKS || bb === STONY_PEAKS || bb === SNOWY_SLOPES || bb === OCEAN ||
+    if ((bb === MOUNTAINS && relaxed < 2) || bb === PEAKS || bb === STONY_PEAKS || bb === SNOWY_SLOPES || bb === OCEAN || bb === FROZEN_OCEAN ||
         bb === RIVER || bb === JUNGLE || bb === SWAMP || bb === MANGROVE || bb === DARK_FOREST || bb === BADLANDS) bad++;
   }
   return wet <= [4, 8, 10, 14][relaxed] && hi - lo <= [9, 12, 15, 18][relaxed] && bad <= [3, 8, 12, 81][relaxed];
@@ -2376,7 +2384,7 @@ function core(cx, cz, vox, Y0, NY) {
       vox[((y - Y0) * CS + lz) * CS + lx] = noise.hash3(tx + dx, y, tz + dz, 92) < 0.7 ? B.mossy_cobblestone : B.cobblestone;
     }
   }
-  const grassy = b => !(b === OCEAN || b === BEACH || b === SNOWY_BEACH || b === STONY_SHORE || b === DESERT || b === BADLANDS ||
+  const grassy = b => !(b === OCEAN || b === FROZEN_OCEAN || b === BEACH || b === SNOWY_BEACH || b === STONY_SHORE || b === DESERT || b === BADLANDS ||
     b === RIVER || b === PEAKS || b === STONY_PEAKS || b === SNOWY_SLOPES);
 
   const inChunk = (x, z) => x >= ox && x < ox + CS && z >= oz && z < oz + CS;
@@ -2497,7 +2505,7 @@ function core(cx, cz, vox, Y0, NY) {
       for (let k = 0; k < patches.length; k += 5) {
         const dx = wx - patches[k], dz = wz - patches[k + 1], R = patches[k + 2];
         const d2 = dx * dx + dz * dz;
-        if (d2 < R * R && (patches[k + 3] === 2 ? b === JUNGLE || b === SPARSE_JUNGLE : b !== OCEAN) &&
+        if (d2 < R * R && (patches[k + 3] === 2 ? b === JUNGLE || b === SPARSE_JUNGLE : b !== OCEAN && b !== FROZEN_OCEAN) &&
             noise.hash(wx, wz, 633) < patches[k + 4] * (1.15 - d2 / (R * R))) { hit = patches[k + 3]; break; }
       }
       if (hit) { vox[vi + step] = hit === 2 ? B.melon : B.pumpkin; continue; }
@@ -2621,6 +2629,7 @@ BF.worldgen = {
   padAt,
   sandNear,
   isPlanet: () => PLANET,
+  bandAt: (x, z) => (climate(Math.floor(x), Math.floor(z)), C.tb),   // climate band of a column (0 coldest .. 4 hottest), after altitude
   NAMES,
   recordBuilding,
   bedPlan: bedPlanOf,

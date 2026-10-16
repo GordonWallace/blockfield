@@ -10,3 +10,6 @@ The sea has several variants named by the climate above it: **Frozen**, **Cold**
 
 ### Villages
 Villages do not generate in the ocean.
+
+### On the planet
+On the planet, about 60% of the surface is ocean. Its arctic seas are the separate Frozen Ocean biome.

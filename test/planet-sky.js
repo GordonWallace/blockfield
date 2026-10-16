@@ -92,12 +92,14 @@ module.exports = async (pg) => {
       const P = BF.planet, N = P.N, e = P.EDGE[f][s], h = [[-1, 0], [1, 0], [0, -1], [0, 1]][s];
       const u = h[0] ? (h[0] < 0 ? -2.5 : N + 2.5) : N / 2 + 0.5, v = h[1] ? (h[1] < 0 ? -2.5 : N + 2.5) : N / 2 + 0.5;
       const m = P.atlas(f, u, v), c = P.canon(m.x, m.z, {});
-      BF.player.teleport(c.x, 60, c.z); BF.player.setFlying(true);
+      // above the ground (the planet's terrain stands well above y 60 in places; from inside the rock the clouds are hidden)
+      const Y = Math.max(60, Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(c.x), Math.floor(c.z))) + 30);
+      BF.player.teleport(c.x, Y, c.z); BF.player.setFlying(true);
       await settle();
       BF.state.paused = true;
       BF.sky.setTime(0.07);   // morning: the sun low in the east
       BF.weather.set("clear"); BF.weather.intensity = 0; BF.weather.thunder = 0;
-      BF.player.position.set(m.x, 60, m.z); BF.player.setLook(0, 0);
+      BF.player.position.set(m.x, Y, m.z); BF.player.setLook(0, 0);
       await new Promise(r => setTimeout(r, 300));
       BF.sky.update(0);
       const fy = BF.sky.sunYaw, look = Math.atan2(-Math.cos(fy), Math.sin(fy)) + 0.25;   // facing the sun, a little to its left
@@ -107,7 +109,7 @@ module.exports = async (pg) => {
       const fa = BF.view.state.f, A = grab(), ya = BF.sky.sunYaw, ha = BF.sky.cloudHeight;
       BF.sky.cloudMesh.visible = false; const A0 = grab(); BF.sky.cloudMesh.visible = true;
       const q = (4 - c.turn) % 4;
-      BF.player.position.set(c.x, 60, c.z); BF.player.setLook(P.turnYaw(q, look), 0.45);
+      BF.player.position.set(c.x, Y, c.z); BF.player.setLook(P.turnYaw(q, look), 0.45);
       await new Promise(r => setTimeout(r, 300));
       BF.sky.update(0);
       const fb = BF.view.state.f, B = grab(), yb = BF.sky.sunYaw, hb = BF.sky.cloudHeight;

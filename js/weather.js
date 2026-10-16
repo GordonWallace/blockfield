@@ -31,7 +31,7 @@ const rainSpell = () => range(0.3, 1) * DAY;
 
 // ---------- biome classification (cached per 4x4 column cell) ----------
 // kind: 0 dry, 1 rain, 2 snow, 3 snow above the cold snow line, 4 snow above the cool snow line (see snowLines)
-const SNOW_IDS = new Set([2, 19, 20, 21, 25, 26]);   // snowy beach/plains, ice spikes, snowy taiga/slopes, jagged peaks
+const SNOW_IDS = new Set([2, 19, 20, 21, 25, 26, 29]);   // snowy beach/plains, ice spikes, snowy taiga/slopes, jagged peaks, frozen ocean
 const DRY_IDS = new Set([12, 13, 14]);               // desert, badlands, savanna
 const biomeCache = new Map();
 function biomeKind(x, z) {
