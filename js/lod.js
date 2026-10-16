@@ -37,11 +37,12 @@ const STAND_LEVELS = 6;        // rings with tree and building stand-ins (cells 
 const STAND_MAX = 14000;       // blocks from the player: stand-ins further out are never shown (a 10-block patch is under a pixel on any
                                // screen up to 4K), so none are made past that plus how far a ring moves (MOVE)
 const BOX_LEVELS = 1;          // of those, the ones drawn as boxes (the rest as points)
-const THIN = [0, 0, 1, 2, 3, 4];   // ring by ring: one tree cell kept in each square of 2^m x 2^m (js/grid.js)
+const THIN = [0, 1, 2, 3, 4, 5];   // ring by ring: one tree cell kept in each square of 2^m x 2^m (js/grid.js): each ring draws about as many
+                                   // stand-ins as the last (the ground's canopy colour stands in for the rest)
 const HOUSE_LEVELS = 5;        // rings with village buildings, out to 8 km (beyond, a building is under a pixel before the ring starts)
 const pxScale = { value: 900 };   // pixels per radian at the middle of the screen: drawing-buffer height / (2 tan(fov / 2))
 
-const lod = (BF.lod = { EXT, levels: [], active: false, eyeHole: 0, ribbon: null, scene: null, view: { f: 0, u: 0, v: 0 }, standIns: true });
+const lod = (BF.lod = { EXT, THIN, levels: [], active: false, eyeHole: 0, ribbon: null, scene: null, view: { f: 0, u: 0, v: 0 }, standIns: true });
 
 // ---- materials ----
 const P = () => BF.planet;
@@ -234,7 +235,7 @@ void main() {
 function standMaterial(boxes) {
   const sphM = new THREE.Matrix4();
   const m = new THREE.ShaderMaterial({
-    vertexShader: STAND_VERT, fragmentShader: STAND_FRAG, fog: true, side: boxes ? THREE.DoubleSide : THREE.FrontSide,
+    vertexShader: STAND_VERT, fragmentShader: STAND_FRAG, fog: true,
     defines: Object.assign({ FACE_N: P().N.toFixed(1) }, boxes ? { BOXES: 1 } : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform, pxScale, frame: { value: new THREE.Matrix3() },
@@ -255,20 +256,26 @@ function box() {
   const face = (q, s, pt) => { const n = pos.length / 3; for (const v of q) pos.push(...v); for (let i = 0; i < 4; i++) { part.push(pt); shade.push(s); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); };
   for (const pt of [0, 1]) {
     face([[-0.5, 1, -0.5], [-0.5, 1, 0.5], [0.5, 1, 0.5], [0.5, 1, -0.5]], 1, pt);
-    for (const x of [-0.5, 0.5]) face([[x, 0, -0.5], [x, 1, -0.5], [x, 1, 0.5], [x, 0, 0.5]], 0.8, pt);
-    for (const z of [-0.5, 0.5]) face([[-0.5, 0, z], [-0.5, 1, z], [0.5, 1, z], [0.5, 0, z]], 0.65, pt);
+    // (each face counter-clockwise seen from outside, so the back faces are culled)
+    for (const x of [-0.5, 0.5]) { const q = [[x, 0, -0.5], [x, 1, -0.5], [x, 1, 0.5], [x, 0, 0.5]]; face(x < 0 ? q.reverse() : q, 0.8, pt); }
+    for (const z of [-0.5, 0.5]) { const q = [[-0.5, 0, z], [-0.5, 1, z], [0.5, 1, z], [0.5, 0, z]]; face(z > 0 ? q.reverse() : q, 0.65, pt); }
   }
   BOX = { pos: new THREE.Float32BufferAttribute(pos, 3), part: new THREE.Float32BufferAttribute(part, 1), shade: new THREE.Float32BufferAttribute(shade, 1), idx: new THREE.Uint16BufferAttribute(idx, 1) };
   return BOX;
 }
-let ONE = null;
 // the stand-ins S (joined arrays, see keep) as boxes or points, one instance each
 const SK = { base: 3, sph: 3, top: 3, low: 3, a: 4, b: 4, c: 1, bin: 2 };
 const SA = { base: Float32Array, sph: Float32Array, bin: Uint16Array };
+// (points as plain vertices: software rendering draws instances one by one, tens of times slower)
 function standGeometry(S, boxes) {
-  const g = new THREE.InstancedBufferGeometry();
-  if (boxes) { const B = box(); g.setAttribute("position", B.pos); g.setAttribute("part", B.part); g.setAttribute("shade", B.shade); g.setIndex(B.idx); }
-  else g.setAttribute("position", ONE || (ONE = new THREE.Float32BufferAttribute([0, 0, 0], 3)));
+  if (!boxes) {
+    const g = new THREE.BufferGeometry();
+    for (const k in SK) if (k !== "bin") g.setAttribute(k, new THREE.BufferAttribute(S[k], SK[k], k === "top" || k === "low"));
+    g.setAttribute("position", g.getAttribute("base"));
+    return g;
+  }
+  const g = new THREE.InstancedBufferGeometry(), B = box();
+  g.setAttribute("position", B.pos); g.setAttribute("part", B.part); g.setAttribute("shade", B.shade); g.setIndex(B.idx);
   for (const k in SK) if (k !== "bin") g.setAttribute(k, new THREE.InstancedBufferAttribute(S[k], SK[k], k === "top" || k === "low"));
   g.instanceCount = S.c.length;
   return g;

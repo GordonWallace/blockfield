@@ -72,7 +72,7 @@ module.exports = async (pg, out) => {
     const exact = await pg.evaluate(() => {
       const L = BF.lod.levels[0], S = L.stand, P = BF.planet, n = 2 * BF.lod.EXT + 1;
       // the trees of a block of 60 x 60 cells in the middle of the ring, against the stand-ins on those samples
-      const i0 = 240, j0 = 240, k = 60;
+      const k = 60, i0 = BF.lod.EXT - k / 2, j0 = i0;
       const tr = BF.worldgen.treesIn(L.f, (L.gu0 >> 2) + i0, (L.gv0 >> 2) + j0, (L.gu0 >> 2) + i0 + k, (L.gv0 >> 2) + j0 + k);
       const want = new Set(tr.map((t) => (t.x - P.W * L.f - P.N) + "," + (t.z - P.N) + "," + t.kind));
       let got = 0, stray = 0;
@@ -96,9 +96,9 @@ module.exports = async (pg, out) => {
       for (const lv of [0, 1]) {
         const L = BF.lod.levels[lv];
         if (L.builds === b0[lv]) { res.push("ring " + lv + " not rebuilt"); continue; }
-        // a fresh job over 40 x 40 of the ring's samples kept from the old ring (its middle), compared on the inner 38 x 38
-        const c = L.cell, i0 = 250, j0 = 250, k = 40;
-        const st = { cu: L.cu, cv: L.cv, anchor: L.anchor, gu0: L.gu0, gv0: L.gv0, m: [0, 0, 1, 2, 3, 4][lv], max: 0, exact: lv === 0, houses: true, villages: true };
+        // a fresh job over 40 x 40 of the ring's samples kept from the old ring, compared on the inner 38 x 38
+        const c = L.cell, i0 = 60, j0 = 60, k = 40;   // (the ring moved by +u +v: these samples were kept)
+        const st = { cu: L.cu, cv: L.cv, anchor: L.anchor, gu0: L.gu0, gv0: L.gv0, m: BF.lod.THIN[lv], max: 0, exact: lv === 0, houses: true, villages: true };
         const job = { f: L.f, u0: L.gu0 + i0 * c, v0: L.gv0 + j0 * c, cell: c, nx: k, ny: k, stand: st }, r = BF.gridJob.alloc(job);
         BF.gridJob.rows(job, r, 0, k); BF.gridJob.stand(job, r);
         const key = (S, q) => [S.base[3 * q].toFixed(2), S.base[3 * q + 1].toFixed(1), S.base[3 * q + 2].toFixed(2), S.top[3 * q], S.low[3 * q], S.a[4 * q + 2], S.b[4 * q], S.b[4 * q + 3]].join();
@@ -150,17 +150,20 @@ module.exports = async (pg, out) => {
     check(ceil.high && ceil.covered === 0 && ceil.after <= ceil.chunks && ceil.chunks < ceil.n0, `above the chunk ceiling no chunks load (${JSON.stringify(ceil)})`);
     const purge = await pg.evaluate(async () => {
       const W = BF.world;
-      W.setViewDist(16);
+      // (chunks are purged past 15 chunks: a view of 20 has plenty; the rings are hidden meanwhile, as software rendering draws them slowly)
+      for (const L of BF.lod.levels) if (L.mesh) L.mesh.material.visible = false;
+      W.setViewDist(20);
       const t0 = performance.now();
       while (W.high && performance.now() - t0 < 60000) await new Promise((r) => setTimeout(r, 500));
       await new Promise((r) => setTimeout(r, 3000));
-      while (W.queueLength > 0 && performance.now() - t0 < 300000) await new Promise((r) => setTimeout(r, 500));
+      while (W.queueLength > 0 && W.farMeshes.size <= 100 && performance.now() - t0 < 400000) await new Promise((r) => setTimeout(r, 500));
+      for (const L of BF.lod.levels) if (L.mesh) L.mesh.material.visible = true;
       let data = 0;
       for (const c of W.chunks.values()) for (const s of c.secs) if (typeof s !== "number") data += s.byteLength;
       // a far chunk's mesh is taken back when its data comes back, and isn't meshed again
       return { chunks: W.chunks.size, far: W.farMeshes.size, dataMB: +(data / 1048576).toFixed(1), meshed: W.meshedCount(), queue: W.queueLength };
     });
-    check(purge.far > 100 && purge.chunks < (2 * 12 + 4) ** 2, `far chunks keep only their meshes (${JSON.stringify(purge)})`);
+    check(purge.far > 100 && purge.chunks < (2 * 15 + 2) ** 2, `far chunks keep only their meshes (${JSON.stringify(purge)})`);
     const errs = await pg.evaluate(() => (window.__errs || []).length);
     check(!errs, "no page errors");
   } finally {
