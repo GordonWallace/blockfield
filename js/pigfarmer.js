@@ -351,13 +351,16 @@ function styOf(m) {
   return best;
 }
 // What the pig farmer looks after: {sty, herd (live sty pigs, counted for culling), pigs (live pigs to feed: the herd and strays near it, or
-// without a sty the free pigs near the trough), size (the herd, unloaded ones too), limit}.
+// without a sty the free pigs near the trough), strays (free adult pigs that can walk into the sty: those it tends and those within TEND_R of
+// the fence, fed or not), size (the herd, unloaded ones too), limit}.
 function tended(m) {
   const p = styOf(m), list = BF.mobs.list;
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
-  const near = o => o.type === "pig" && live(o) && !o.ledBy && !o.sty && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (p ? TEND_R : FREE_RADIUS) && Math.abs(o.position.y - m.position.y) < 6;
+  const free = o => o.type === "pig" && live(o) && !o.ledBy && !o.sty && Math.abs(o.position.y - m.position.y) < 6;
+  const near = o => free(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (p ? TEND_R : FREE_RADIUS);
   const herd = p && p.pigs ? p.pigs.map(s => s.mob).filter(live) : [];
-  return { sty: p, herd, pigs: herd.concat(list.filter(near)), size: p && p.pigs ? p.pigs.length : 0, limit: p ? p.limit : 0 };
+  const strays = p ? adults(list.filter(o => free(o) && (near(o) || fenceDist(p, o.position.x, o.position.z) <= TEND_R))) : [];
+  return { sty: p, herd, pigs: herd.concat(list.filter(near)), strays, size: p && p.pigs ? p.pigs.length : 0, limit: p ? p.limit : 0 };
 }
 const adults = a => a.filter(o => !isPiglet(o));
 const adultStates = p => (p && p.pigs ? p.pigs.filter(s => s.growAt == null).length : 0);
@@ -385,13 +388,14 @@ function reserve(m) {
 const isWare = id => id != null && (id === I("raw_porkchop") || id === I("cooked_porkchop"));
 const keepsFood = (m, id) => !!(m && m.profession === "pig_farmer" && (isFeed(id) || id === I("raw_porkchop")));
 // Whether feeding pig o now keeps the herd within one over its limit once the willing pigs have paired up (each pair gives one piglet); the
-// cull then takes it back to the limit. Fed strays near the sty count as if they had walked in (they can, and then breed in the herd).
+// cull then takes it back to the limit. Every adult stray near the sty counts as if it had walked in, fed or not (any of them can, before the
+// piglets come: a hungry one swells the herd, a fed one breeds in it too), and so does o when it is a stray.
 function feedOk(T, o, t) {
   if (!T.sty) return true;
-  const strays = adults(T.pigs).filter(x => x.sty !== T.sty);
+  const strays = T.strays;
   const willingHerd = adults(T.herd).filter(x => !hungry(x, t)).length, willingStray = strays.filter(x => !hungry(x, t)).length;
-  const join = o.sty !== T.sty ? 1 : 0;
-  return T.size + willingStray + join + Math.floor((willingHerd + willingStray + 1) / 2) <= T.limit + 1;
+  const join = o.sty !== T.sty && strays.indexOf(o) < 0 ? 1 : 0;
+  return T.size + strays.length + join + Math.floor((willingHerd + willingStray + 1) / 2) <= T.limit + 1;
 }
 function wildPig(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();

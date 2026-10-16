@@ -10,7 +10,7 @@ How deep it goes depends on its level, because ores lie at depth: a Novice's sta
 **Flint.** While a [[villager:fletcher]] in the village is short of flint, the miner also digs gravel, in its shaft and on the surface, and sifts it by placing and breaking it again until it drops flint, as you would.
 
 ### What it keeps
-Cobblestone, coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis, emeralds and flint. Dirt, plain gravel and other blocks it digs through are left behind. A miner with a full pack and goods no one buys stores them in a chest in its house, ordering one from the [[villager:furniture_maker]] if needed.
+Cobblestone, coal, raw iron, raw gold, raw copper, diamonds, redstone, lapis, emeralds and flint, and up to a stack (64) of cobbled deepslate, which no one buys. Dirt, plain gravel and other blocks it digs through are left behind. A miner with a full pack and goods no one buys stores them in a chest in its house, ordering one from the [[villager:furniture_maker]] if needed.
 
 ### Tools
 The pickaxe wears out like yours, one use per block. A villager digs about two and a half times slower than you do with the same pickaxe. The miner never makes tools: it buys a new pickaxe from the [[villager:toolsmith]].
