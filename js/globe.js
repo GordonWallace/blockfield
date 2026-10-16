@@ -1,5 +1,6 @@
-// The whole planet at planet scale (spec r14-06): every face as 10 x 10 tiles of 64 x 64 cells, a cell every 256 blocks (the detail of
-// the coarsest distant-terrain ring, on the same lattice, so the two meet without a seam). Brought over from the round-planet prototype
+// The whole planet at planet scale (spec r14-06): every face as 10 x 10 tiles of 64 x 64 cells, a cell every 256 blocks (the spec's even
+// planet-scale detail; the coarsest distant-terrain ring is a cell every 512, so the two overlap by two of its cells at the ring's edge, as
+// the rings overlap each other). Brought over from the round-planet prototype
 // (GordonWallace/blockfield-round js/globe.js); see /mnt/project-files/notes/round-planet-lessons.md.
 //
 // - Tiles are sampled by the distant-terrain workers (js/grid.js) from the moment a world starts, after the rings' first build, nearest the
