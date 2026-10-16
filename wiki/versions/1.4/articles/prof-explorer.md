@@ -5,7 +5,7 @@ An explorer only appears in a village that has a cartographer. Each [[villager:c
 
 ### The working day
 - **Buying a map.** With at least 4 emeralds and fewer than 2 finished maps, the explorer walks to a cartographer in its village that has a blank map and buys one for the cartographer's price (4, 8, 16, 32 or 64 emeralds by size). It takes a size it can pay for, mostly small ones, which it can finish.
-- **Using it.** It uses the blank map where it stands. The map becomes the filled map of the 8-by-8-chunk zone it is in, or the nearest zone that is not mapped yet.
+- **Using it.** It uses the blank map where it stands. The map becomes the filled map of the 8-by-8-chunk zone it is in, or the nearest zone that is not mapped yet. On the planet the zones near it may lie on the next face; it maps them and walks over the edge to fill them in.
 - **Exploring.** It walks from one unexplored patch of the zone to the next, and the map fills in exactly as if you had carried it. It counts a patch as explored when 90 percent of it is, and the map as filled at 97 percent coverage, or when everything left is out of reach (water, cliffs), or after about 25 minutes of walking one map, or after waiting 3 minutes for patches that nobody has loaded. Only loaded chunks can be mapped, so patches far from you wait until you are near.
 - **Camping.** If dusk catches it too far from home to get back, it pitches its tent and sleeps in it.
 
