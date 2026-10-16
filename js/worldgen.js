@@ -2811,9 +2811,8 @@ BF.worldgen = {
     PLANET = GEN === 4; PG = PLANET ? BF.planetgen : null;
     if (PLANET) { PN = BF.planet.N; PW = BF.planet.W; }
     flatSampler();
-    if (PLANET) {   // the planet: one size of biome (its continents are set by the planet's size), 3D noise, js/planetgen.js's continents
-      SC = 1;
-      const S = PG.init(n);
+    if (PLANET) {   // the planet: 3D noise and js/planetgen.js's continents (set by the planet's size); biome size (SC) scales its climate noise
+      const S = PG.init(n, SC);   // and generator 3's biome-scale fields as it does on generator 3 (spec r14-19)
       N2 = S.N2; FB = S.FB; WARP = S.WARP; C3 = S.C3;
     }
     if (GEN === 3) placeHome3();

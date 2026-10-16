@@ -165,7 +165,7 @@ module.exports = async (pg, out) => {
     ok("creative: one hit, no item", boats.hit(bc, true) === "broken" && !boats.list.includes(bc) && BF.drops.list.length === n0);
 
     // ---- the real save, through IndexedDB ----
-    const meta = await BF.save.create({ name: "boats", seed: 5, gameMode: "survival", villages: 9 });
+    const meta = await BF.save.create({ name: "boats", seed: 5, gameMode: "survival", villages: 9, gen: 3 });
     BF.mobs.spawning = false;
     W.setViewDist(8);
     await load(x0, z0 - 20);

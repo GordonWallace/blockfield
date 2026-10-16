@@ -45,7 +45,7 @@ BF.newWorld = function (seed, opts) {
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   // pick a dry spawn column near the origin
   let sx = 8, sz = 8;
-  if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry land at 35 N on face 4, far from edges (r14-19 brings real spawn rules)
+  if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry temperate / subtropical land near 35 N on face 4, away from edges and corners (r14-19)
   else for (let r = 0; r < 400; r += 8) {
     const a = r * 0.7, x = Math.round(Math.cos(a) * r) + 8, z = Math.round(Math.sin(a) * r) + 8;
     if (BF.worldgen.heightAt(x, z) > BF.SEA + 1 && BF.worldgen.heightAt(x, z) > BF.worldgen.waterLevelAt(x, z)) { sx = x; sz = z; break; }
@@ -202,8 +202,10 @@ BF.boats.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
-const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world, #seed1337gen3v9 one with village generator 9
+// The boot world (behind the title screen) and #seed<n> are planets (spec r14-19). #seed1337gen3 / gen1 / gen2 start a legacy-generator
+// world (tests, until r14-24), #seed1337gen3v9 one with village generator 9.
+const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);
 if (m) seed = +m[1];
-BF.newWorld(seed, m && (m[2] || m[3]) ? Object.assign(m[2] ? { gen: +m[2] } : {}, m[3] ? { villages: +m[3] } : {}) : undefined);
+BF.newWorld(seed, Object.assign({ gen: m && m[2] ? +m[2] : 4 }, m && m[3] ? { villages: +m[3] } : {}));
 requestAnimationFrame(frame);
 })();
