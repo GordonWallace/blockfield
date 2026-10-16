@@ -25,7 +25,8 @@ module.exports = async (pg, out) => {
   try {
     await pg.goto(`http://127.0.0.1:${server.address().port}/index.html#seed1337gen4`);
     await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow
-    await pg.waitForTimeout(4000);
+    await require("./lib").ready(pg);   // the planet's rivers worked out and the world started
+    await pg.waitForTimeout(2000);
     await pg.evaluate(() => {
       window.__errs = []; addEventListener("error", (e) => window.__errs.push(e.message));
       BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true);
