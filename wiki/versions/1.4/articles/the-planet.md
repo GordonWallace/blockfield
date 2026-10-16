@@ -22,6 +22,14 @@ Two of the faces sit over the poles and four go round the equator. Latitude and 
 
 Each face has its own block of x and z coordinates, so every place on the planet still has a single x and z. Coordinates jump when you cross from one face to the next.
 
+## Continents and corners
+
+The planet's ground is made by the same generator as the mile-high worlds of 1.3, so its land looks the same: coastal lowlands, long escarpments up to high plains about a mile up, mountain massifs, badlands mesas, swamps, mushroom islands far out at sea, and caves, ores, trees and plants (see [[page:terrain]]). Every pattern is laid on the sphere itself, so continents, hills and caves carry straight on across the edges between faces.
+
+The continents are big enough that several of them fit around the planet, and about a third of the surface is land.
+
+The eight corners of the cube are always open sea. Each seed's continents are turned to the position, out of a few hundred tried, that leaves every corner in open ocean: not a lake, but sea that runs on for tens of kilometres. If a corner were still short of it, a winding gulf a few kilometres wide would be cut from the corner out to the ocean. Any land left within a few kilometres of a corner sinks beneath the waves.
+
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. For now its ground is a simple stand-in (grass, sand, snow and stone over the planet's continents and oceans, with the climate bands deciding the biome), with no caves, ores, trees, rivers or villages yet, and the eight corners of the cube are always open ocean.
+The planet is being brought into the game step by step. For now the biomes are still placed by the flat worlds' temperature and humidity patterns rather than by latitude, and there are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it.

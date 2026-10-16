@@ -14,7 +14,7 @@ New worlds use the "mile high" generator. Sea level is at y=0, ground can be far
 | Sea level | y 0 |
 | Deepest ocean floor | about y -58 |
 | Coastal lowlands | y 0 to about 100 |
-| High plains (the spawn area is about y 1070) | y 900 to 1300; a few regions only about 400 to 600 |
+| High plains | y 900 to 1300; a few regions only about 400 to 600 |
 | Highest mountains | about y 2500 |
 | Build limit | y 3071 (the world is 3072 blocks high) |
 
@@ -24,7 +24,7 @@ Worlds created with earlier releases keep their original, much shorter terrain (
 
 ## Continents and oceans
 
-The world is made of enormous continents separated by open ocean. A continent is tens of thousands of blocks across, and roughly 30 percent of the world is land. The generator always puts a continent under the starting point, well inland, so you never begin on a small island.
+The world is made of enormous continents separated by open ocean. A continent is tens of thousands of blocks across, and roughly a third of the planet is land, with several continents around it. You always start on dry land well inland. The eight corners of the planet's cube are always open sea; see [[page:the-planet]].
 
 Height depends first on how far inland you are:
 
@@ -35,7 +35,7 @@ Height depends first on how far inland you are:
 
 ## Climate and biomes
 
-Two slow maps, temperature and humidity, divide the land into climate bands. Each band is about two thousand blocks across, so a walk of several minutes usually keeps you in one biome. Edges between biomes are ragged rather than straight. Height cools the air only a little on the plains, but strongly in the high ranges, which is why the tops of mountains turn to snow. The world-creation slider for biome size makes continents and climate bands larger.
+Two slow maps, temperature and humidity, divide the land into climate bands. Each band is about two thousand blocks across, so a walk of several minutes usually keeps you in one biome. Edges between biomes are ragged rather than straight. Height cools the air only a little on the plains, but strongly in the high ranges, which is why the tops of mountains turn to snow. On the planet the continents and climate bands have one size, set by the size of the planet.
 
 Special biomes are laid over the climate map: beaches and stony shores where land meets sea, swamps in wet lowlands, badlands in hot dry country with odd terrain, mountain biomes by altitude, mushroom islands far out at sea, and rivers. All 29 are listed on [[page:biomes]].
 

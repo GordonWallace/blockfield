@@ -1,237 +1,208 @@
-// Generator 4, the planet: terrain on the cube-sphere (spec r14-02). This first version is the round-planet prototype's terrain and
-// climate (GordonWallace/blockfield-round js/terrain.js and js/climate.js) as a stand-in, so the game runs on the planet until r14-08
-// brings Blockfield's own terrain onto the sphere: no caves, ores, trees, plants, rivers or villages yet.
-//
-// Every value is a function of the column's direction from the planet's centre, sampled with 3D noise, so continents, coasts and
-// climate run on seamlessly across face edges. Heights are rescaled to Blockfield's sea level 0, with the land's relief doubled so it
-// isn't flat under the mile-high limits (the climate still reads the prototype's heights). The 8 cube corners are always open ocean
-// (land fades out between 4 and 1.5 km from a corner). Chunk and column coordinates are atlas coordinates (js/planet.js); a margin
-// address reads the canonical column. worldgen.js hands every call over here when the world's generator is 4.
+// Generator 4, the planet (spec r14-08): Blockfield's generator-3 terrain on the cube-sphere. worldgen.js runs generator 3's own code
+// for the planet (relief, plateaus and escarpments, massifs, badlands, swamps, mushroom islands, caves, ores, trees and plants); this
+// file supplies what differs on a sphere:
+//  - the noise sampler. Every 2D field of generator 3 keeps its wavelength, amplitude and offsets but is 3D noise at the column's
+//    sea-level point on the sphere, R * dir(f, u, v); a domain warp is a 3D noise vector laid along the ground in the asking face's grid
+//    frame; 3D fields (caves) are sampled at R + y along the column's direction. An atlas position in a face's margin reads the canonical
+//    point, so every field runs on seamlessly across face edges. Generator 3's 4-block lattice and 320-block slope-limiter grid both
+//    divide N, so the unfold maps lattice nodes onto lattice nodes.
+//  - the continents: generator 3's continent field in 3D, turned per seed by one rotation (the best of up to 300) so that every cube
+//    corner lies in open sea that is part of a real ocean; a corner still short of it gets a gulf out to the sea, and land fades out
+//    near each corner (the round-planet prototype's method, GordonWallace/blockfield-round js/terrain.js). The climate isn't turned.
+//  - the spawn search (until r14-19's spawn rules).
+// The sampling path uses no window or document, so it also runs in a Web Worker (r14-05); it needs BF.state.gen = 4 for BF.planet.canon.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const BF = (G.BF = G.BF || {});
 const P = BF.planet;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-const lerp = (a, b, t) => a + (b - a) * t;
+const R = P.R;
+let noise = null, nR = null, nC = null, seedv = 0;
 
-// biome ids are Blockfield's (worldgen.js); the prototype's Frozen Ocean (29) shows as an ocean here until r14-09 adds it
-const OCEAN = 0, BEACH = 1, SNOWY_BEACH = 2, PLAINS = 5, FOREST = 6, FLOWER_FOREST = 7, BIRCH = 8, DARK_FOREST = 9, SWAMP = 10,
-  MANGROVE = 11, DESERT = 12, BADLANDS = 13, SAVANNA = 14, SPARSE_JUNGLE = 15, JUNGLE = 16, TAIGA = 17, OLD_TAIGA = 18,
-  SNOWY_PLAINS = 19, ICE_SPIKES = 20, SNOWY_TAIGA = 21, MEADOW = 22, CHERRY = 23, MOUNTAINS = 24, SNOWY_SLOPES = 25,
-  STONY_PEAKS = 27, FROZEN_OCEAN = 29;
-const NAMES = ["Ocean", "Beach", "Snowy Beach", "Stony Shore", "River", "Plains", "Forest", "Flower Forest",
-  "Birch Forest", "Dark Forest", "Swamp", "Mangrove Swamp", "Desert", "Badlands", "Savanna", "Sparse Jungle",
-  "Jungle", "Taiga", "Old Growth Taiga", "Snowy Plains", "Ice Spikes", "Snowy Taiga", "Meadow",
-  "Cherry Grove", "Windswept Hills", "Snowy Slopes", "Jagged Peaks", "Stony Peaks", "Mushroom Fields", "Frozen Ocean"];
-const BANDS = ["arctic", "subarctic", "temperate", "subtropical", "tropical"];
-// Band edges in effective latitude (degrees): arctic above 66, subarctic 55-66, temperate 35-55, subtropical 23-35, tropical below 23.
-const EDGES = [66, 55, 35, 23];
-// Rainfall by latitude (degrees): Earth's zonal pattern.
-const RAIN_LAT = [[0, 0.88], [8, 0.78], [15, 0.45], [22, 0.14], [29, 0.22], [38, 0.48], [48, 0.62], [58, 0.58], [68, 0.42], [80, 0.25], [90, 0.2]];
-function rainLat(a) {
-  for (let k = 1; k < RAIN_LAT.length; k++) if (a <= RAIN_LAT[k][0]) {
-    const [a0, r0] = RAIN_LAT[k - 1], [a1, r1] = RAIN_LAT[k], s = (a - a0) / (a1 - a0);
-    return r0 + (r1 - r0) * s * s * (3 - 2 * s);
-  }
-  return 0.2;
+// ---------- the point on the sphere of an atlas position ----------
+// A small cache: generator 3 asks for the same few positions over and over (a column, its lattice nodes, a cave grid).
+const CN = 64, CX = new Float64Array(CN).fill(NaN), CZ = new Float64Array(CN), CD = new Float64Array(CN * 3);
+const cc = {}, dv = [0, 0, 0];
+function pt(x, z) {
+  const s = ((x * 7 + z * 13) | 0) & (CN - 1);
+  if (CX[s] === x && CZ[s] === z) return s * 3;
+  const c = P.canon(x, z, cc);
+  if (c.off) { dv[0] = 1; dv[1] = 0; dv[2] = 0; }   // outside every face square (never asked for in practice)
+  else P.dir(c.f, c.u, c.v, dv);
+  CX[s] = x; CZ[s] = z;
+  CD[s * 3] = dv[0]; CD[s * 3 + 1] = dv[1]; CD[s * 3 + 2] = dv[2];
+  return s * 3;
+}
+// a third offset for the third axis, so fields that differ only by their 2D offsets stay independent
+const third = (a, b) => 0.61 * a - 0.37 * b + 17.3;
+function N2(x, z, L, a, b) {
+  const i = pt(x, z), s = R / L;
+  return noise.n3(CD[i] * s + a, CD[i + 1] * s + b, CD[i + 2] * s + third(a, b));
+}
+function FB(x, z, L, a, b, o) {
+  const i = pt(x, z), s = R / L;
+  return noise.fbm3(CD[i] * s + a, CD[i + 1] * s + b, CD[i + 2] * s + third(a, b), o);
+}
+// A warp: the point moved along the ground by 3D noise vectors (each term's component across the ground has the spread of one 2D warp
+// field), as an atlas position in the asking position's own face frame. The moved point is a point on the sphere, so the warp is the
+// same whichever face's frame asks (a lattice node on an edge line belongs to both faces), and the noise sampled there agrees.
+const wq = [0, 0, 0], wg = {};
+function warpTerm(i, L, A, a, b) {
+  const s = R / L, X = CD[i] * s, Y = CD[i + 1] * s, Z = CD[i + 2] * s;
+  const g0 = noise.n3(X + a, Y + b, Z + third(a, b)), g1 = noise.n3(X + b + 5.3, Y - a + 2.9, Z + a - 7.1), g2 = noise.n3(X - a + 1.9, Y + b - 3.7, Z - b + 9.4);
+  const k = g0 * CD[i] + g1 * CD[i + 1] + g2 * CD[i + 2];   // along the ground: the vertical part taken out
+  wq[0] += (g0 - k * CD[i]) * A; wq[1] += (g1 - k * CD[i + 1]) * A; wq[2] += (g2 - k * CD[i + 2]) * A;
+}
+function WARP(x, z, L, A, ax, az, bx, bz, L2, A2, ax2, az2, bx2, bz2, out) {
+  const i = pt(x, z);
+  wq[0] = CD[i] * R; wq[1] = CD[i + 1] * R; wq[2] = CD[i + 2] * R;
+  warpTerm(i, L, A, ax + bx, az - bz); warpTerm(i, L2, A2, ax2 + bx2, az2 - bz2);
+  // the moved point in the frame of the face square that (x, z) lies in
+  const f0 = P.face(x, z), g = P.fromDir(wq[0], wq[1], wq[2], wg);
+  if (f0 < 0 || g.f === f0) { const a = P.atlas(g.f, g.u, g.v, wg); out[0] = a.x; out[1] = a.z; return; }
+  const e = P.UNFOLD[f0][g.f];
+  if (!e) { const a = P.atlas(g.f, g.u, g.v, wg); out[0] = a.x; out[1] = a.z; return; }   // (only next to a corner: open sea)
+  const U = e.A[0] * g.u + e.A[1] * g.v + e.t[0], V = e.A[2] * g.u + e.A[3] * g.v + e.t[1];
+  out[0] = P.W * f0 + P.N + U; out[1] = P.N + V;
+}
+function C3(x, y, z, LH, LV, a, b, c) {
+  const i = pt(x, z), s = R / LH + y / LV;
+  return noise.n3(CD[i] * s + a, CD[i + 1] * s + b, CD[i + 2] * s + c);
 }
 
-const LAND = 0.1;    // continent noise threshold: about a third of the surface is land
-let nA, nB, nC, nK, seedv = 0;
-const R = P.R, SC = R / 10430, CONT = SC * 9000, WP = SC * 5000, WA = SC * 2600, MSK = SC * 6000, RG = 1600 * Math.sqrt(SC);
-
-// The surface at unit direction (x, y, z) in prototype units (hp: height above sea level as the prototype made it).
-const S = { hp: 0, h: 0, land: 0, lat: 0, elat: 0, band: 0, rain: 0, temp: 0, biome: 0, ice: false };
-function sample(x, y, z) {
-  const X = x * R, Y = y * R, Z = z * R;
-  const wx = nB.fbm3(X / WP, Y / WP, Z / WP, 3) * WA;
-  const wy = nB.fbm3(X / WP + 31.7, Y / WP, Z / WP, 3) * WA;
-  const wz = nB.fbm3(X / WP + 57.3, Y / WP, Z / WP, 3) * WA;
-  const c = nA.fbm3((X + wx) / CONT, (Y + wy) / CONT, (Z + wz) / CONT, 9);
-  const corner = Math.acos(Math.min(1, (Math.abs(x) + Math.abs(y) + Math.abs(z)) / Math.sqrt(3))) * R;
-  const land = c - LAND - 1.2 * smooth(4000, 1500, corner);
-  let hp;
-  if (land < 0) hp = -3 - 55 * smooth(0, 0.12, -land) + nC.n3(X / 60, Y / 60, Z / 60) * 3;
-  else {
-    const inland = smooth(0, 0.12, land);
-    const hills = nC.fbm3(X / 400, Y / 400, Z / 400, 3) * 22 * inland;
-    const ridge = 1 - Math.abs(nA.fbm3(X / RG + 100, Y / RG, Z / RG, 5));
-    const mask = smooth(0, 0.3, nB.fbm3(X / MSK + 200, Y / MSK, Z / MSK, 3)) * smooth(0.03, 0.2, land);
-    hp = 1 + 60 * smooth(0, 0.3, land) + hills + ridge * ridge * ridge * mask * 150;
-  }
-  hp = Math.floor(hp);
-  S.hp = hp; S.land = land;
-  // Blockfield's heights: sea level 0, the land's relief above the shore doubled, the sea floor above bedrock
-  S.h = Math.max(BF.MIN_Y + 6, hp <= 1 ? hp : 1 + (hp - 1) * 2);
-  climate(X, Y, Z, y, hp, land);
-  return S;
+// ---------- continents ----------
+// Generator 3's continent field (worldgen.js contRaw3: wavelength 90,000, contrast 5, a slow warp of 0.12 wavelengths at 1.2 wavelengths,
+// a weak rough octave, the same bias) in 3D: about 30 to 35% of the planet is land.
+const LC = 90000, CK = 5.0, WL = LC * 1.2, WAMP = LC * 0.12, ROUGH = 0.15, BIAS = -0.875;
+const SEA_C = -0.1;      // continentalness below this is open water (generator 3's coast runs from about -0.08 to 0)
+let RM = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+// continentalness at unit direction (x, y, z), before the corner rules
+function contRaw(x, y, z) {
+  const X = (RM[0] * x + RM[1] * y + RM[2] * z) * R, Y = (RM[3] * x + RM[4] * y + RM[5] * z) * R, Z = (RM[6] * x + RM[7] * y + RM[8] * z) * R;
+  const wx = noise.n3(X / WL + 7.7, Y / WL - 3.1, Z / WL + 2.9) * WAMP;
+  const wy = noise.n3(X / WL - 13.9, Y / WL + 21.3, Z / WL - 5.3) * WAMP;
+  const wz = noise.n3(X / WL + 31.1, Y / WL + 4.4, Z / WL + 11.7) * WAMP;
+  const cx = X + wx, cy = Y + wy, cz = Z + wz;
+  const big = noise.fbm3(cx / LC - 517.1, cy / LC + 229.9, cz / LC + 61.3, 3);
+  const rough = noise.n3(cx / (LC * 0.11) + 91.3, cy / (LC * 0.11) - 37.7, cz / (LC * 0.11) + 12.9) * ROUGH;
+  return big * CK + rough + BIAS;
 }
+// distance (blocks along the ground) from unit direction (x, y, z) to the nearest cube corner
+const cornerDist = (x, y, z) => Math.acos(Math.min(1, (Math.abs(x) + Math.abs(y) + Math.abs(z)) / Math.sqrt(3))) * R;
 
-// Climate and biome (the prototype's climate.js): five bands from the equator to the poles by "effective latitude" (latitude wandered
-// by slow noise and raised by altitude), rainfall by latitude plus noise and a drier continental interior; the biome is picked within
-// the band by rainfall and altitude, with no strict band-to-biome rule.
-function climate(X, Y, Z, y, hp, land) {
-  const lat = Math.asin(Math.max(-1, Math.min(1, y))) * 180 / Math.PI, alat = Math.abs(lat);
-  const wander = nK.fbm3(X / 60000, Y / 60000, Z / 60000, 3) * 11 + nK.fbm3(X / 9000 + 40, Y / 9000, Z / 9000, 2) * 3;
-  const alt = Math.max(0, hp);
-  const elat = Math.max(0, alat + wander + 22 * smooth(20, 220, alt));
-  let band = 4;
-  for (let k = 0; k < 4; k++) if (elat >= EDGES[k]) { band = k; break; }
-  const dj = (nK.hash(Math.floor(X), Math.floor(Z), 77) - 0.5) * 0.03;
-  const rain = Math.max(0, Math.min(1, rainLat(alat + wander * 0.5) + nK.fbm3(X / 25000 + 90, Y / 25000, Z / 25000, 3) * 0.35
-    - 0.22 * smooth(0.12, 0.45, land) + dj));
-  let b;
-  if (hp < -1) b = band === 0 ? FROZEN_OCEAN : OCEAN;
-  else if (hp <= 1 && land < 0.025) b = band === 0 ? SNOWY_BEACH : BEACH;
-  else if (alt > 150) b = band <= 2 ? SNOWY_SLOPES : STONY_PEAKS;
-  else if (alt > 105 && band <= 1) b = SNOWY_SLOPES;
-  else if (alt > 105) b = MOUNTAINS;
-  else if (band === 4) b = rain < 0.22 ? DESERT : rain < 0.4 ? SAVANNA : rain < 0.6 ? SPARSE_JUNGLE : alt < 6 && land < 0.08 ? MANGROVE : JUNGLE;
-  else if (band === 3) b = rain < 0.25 ? (alt > 35 ? BADLANDS : DESERT) : rain < 0.42 ? SAVANNA : rain < 0.6 ? PLAINS :
-    rain < 0.78 ? (nK.fbm3(X / 7000, Y / 7000, Z / 7000 + 33, 2) > 0.3 ? CHERRY : FOREST) : alt < 12 ? SWAMP : SPARSE_JUNGLE;
-  else if (band === 2) b = rain < 0.3 ? PLAINS : rain < 0.45 ? (alt > 40 ? MEADOW : PLAINS) :
-    rain < 0.62 ? (nK.fbm3(X / 6000 + 7, Y / 6000, Z / 6000, 2) > 0.25 ? FLOWER_FOREST : FOREST) : rain < 0.8 ? BIRCH : alt < 10 ? SWAMP : DARK_FOREST;
-  else if (band === 1) b = rain < 0.25 ? SNOWY_PLAINS : elat > 61 ? SNOWY_TAIGA : rain > 0.7 ? OLD_TAIGA : TAIGA;
-  else b = elat > 80 ? ICE_SPIKES : elat < 70 && rain > 0.55 ? SNOWY_TAIGA : SNOWY_PLAINS;
-  S.lat = lat; S.elat = elat; S.band = band; S.rain = rain; S.temp = 1 - elat / 90; S.biome = b;
-  S.ice = band === 0 || elat > 62;
+// Corners in the sea. Open sea: 40 km of unbroken sea along a straight line from the corner, too long for an inland lake.
+const KS = [];   // per corner: unit direction c, its gulf's end g, the gulf's plane normal n and length a (as an angle); g null for none
+for (let k = 0; k < 8; k++) { const l = Math.sqrt(3); KS.push({ c: [(k & 1 ? -1 : 1) / l, (k & 2 ? -1 : 1) / l, (k & 4 ? -1 : 1) / l], g: null, n: null, a: 0, reach: 0 }); }
+const DIRS = 12, STEP = 2000, OPEN = 40000;
+function ray(c, i, r) {   // direction at distance r from corner c, heading i of DIRS
+  let ex = -c[1], ey = c[0]; const el = Math.hypot(ex, ey) || 1; ex /= el; ey /= el;
+  const fx = -c[2] * ey, fy = c[2] * ex, fz = c[0] * ey - c[1] * ex;
+  const t = r / R, cs = Math.cos(t), sn = Math.sin(t), a = i * 2 * Math.PI / DIRS, ca = Math.cos(a), sa = Math.sin(a);
+  return [c[0] * cs + (ex * ca + fx * sa) * sn, c[1] * cs + (ey * ca + fy * sa) * sn, c[2] * cs + fz * sa * sn];
 }
-
-// Ground blocks of a biome: [top, under the top]
-function ground(b, hp, X, Y, Z, out) {
-  const B = BF.B;
-  if (hp < -1) { out[0] = out[1] = hp < -20 ? B.gravel : B.sand; return; }
-  switch (b) {
-    case BEACH: out[0] = out[1] = B.sand; return;
-    case SNOWY_BEACH: out[0] = B.snow; out[1] = B.sand; return;
-    case DESERT: out[0] = B.sand; out[1] = B.sandstone; return;
-    case BADLANDS: out[0] = B.red_sand; out[1] = B.terracotta; return;
-    case ICE_SPIKES: out[0] = B.snow; out[1] = B.ice; return;
-    case SNOWY_PLAINS: case SNOWY_TAIGA: out[0] = B.snow_grass; out[1] = B.dirt; return;
-    case SNOWY_SLOPES: out[0] = B.snow; out[1] = B.stone; return;
-    case STONY_PEAKS: out[0] = out[1] = B.stone; return;
-    case MOUNTAINS: if (nC.n3(X / 23, Y / 23, Z / 23) > 0.25) { out[0] = out[1] = B.stone; return; } break;
-  }
-  out[0] = B.grass; out[1] = B.dirt;
-}
-
-// ---------- columns, per chunk ----------
-// The columns of a chunk, computed once and kept (a few hundred chunks): ground height, water level (SEA, or NOWATER on land), top and
-// under-top blocks, biome, ice, temperature / rain for tints.
-const NOWATER = -32768, CS = 16;
-const cache = new Map(), CACHE_MAX = 1024;
-const d3 = [0, 0, 0], cc = {}, gb = [0, 0];
-function chunkData(cx, cz) {
-  const key = cx + "," + cz;
-  let D = cache.get(key);
-  if (D) return D;
-  D = { h: new Int16Array(256), wl: new Int16Array(256), top: new Uint16Array(256), sub: new Uint16Array(256), biome: new Uint8Array(256),
-    ice: new Uint8Array(256), temp: new Float32Array(256), rain: new Float32Array(256), minH: 1e9, maxTop: -1e9 };
-  const SEA = BF.SEA;
-  for (let lz = 0; lz < CS; lz++) for (let lx = 0; lx < CS; lx++) {
-    const i = lz * CS + lx;
-    const c = P.canon(cx * CS + lx + 0.5, cz * CS + lz + 0.5, cc);
-    if (c.off) { D.h[i] = BF.MIN_Y + 6; D.wl[i] = SEA; D.top[i] = D.sub[i] = BF.B.gravel; D.biome[i] = OCEAN; continue; }
-    P.dir(c.f, c.u, c.v, d3);
-    const s = sample(d3[0], d3[1], d3[2]);
-    ground(s.biome, s.hp, d3[0] * R, d3[1] * R, d3[2] * R, gb);
-    D.h[i] = s.h; D.wl[i] = s.h < SEA ? SEA : NOWATER; D.top[i] = gb[0]; D.sub[i] = gb[1];
-    D.biome[i] = s.biome; D.ice[i] = s.ice ? 1 : 0; D.temp[i] = s.temp; D.rain[i] = s.rain;
-    if (s.h < D.minH) D.minH = s.h;
-    const t = Math.max(s.h, D.wl[i]);
-    if (t > D.maxTop) D.maxTop = t;
-  }
-  cache.set(key, D);
-  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
-  return D;
-}
-// The column data of world column (x, z) (margin addresses read the canonical column): [D, index].
-const cell = {};
-function columnAt(x, z) {
-  x = Math.floor(x); z = Math.floor(z);
-  const c = P.canonCell(x, z, cell);
-  const X = c.off ? x : c.x, Z = c.off ? z : c.z, cx = Math.floor(X / CS), cz = Math.floor(Z / CS);
-  colOut[0] = chunkData(cx, cz); colOut[1] = (Z - cz * CS) * CS + (X - cx * CS);
-  return colOut;
-}
-const colOut = [null, 0];
-
-// Fills the window of vox (zeroed, index ((y - Y0) * 16 + z) * 16 + x) for absolute y in [Y0, Y0 + NY) of chunk (cx, cz).
-function fill(cx, cz, vox, Y0, NY) {
-  const B = BF.B, D = chunkData(cx, cz), MIN_Y = BF.MIN_Y, Y1 = Y0 + NY;
-  for (let lz = 0; lz < CS; lz++) for (let lx = 0; lx < CS; lx++) {
-    const i = lz * CS + lx, h = D.h[i], wl = D.wl[i], top = D.top[i], sub = D.sub[i], ice = D.ice[i];
-    const ya = Math.max(Y0, MIN_Y), yb = Math.min(Y1 - 1, Math.max(h, wl));
-    for (let y = ya; y <= yb; y++) {
-      let b;
-      if (y === MIN_Y) b = B.bedrock;
-      else if (y < h - 3) b = B.stone;
-      else if (y < h) b = sub;
-      else if (y === h) b = top;
-      else b = y === wl && ice ? B.ice : B.water;
-      vox[((y - Y0) * CS + lz) * CS + lx] = b;
+// distance (under limit) from corner c to where open sea starts along the best heading, and that heading
+function reach(c, limit) {
+  let best = Infinity, bi = 0;
+  for (let i = 0; i < DIRS; i++) {
+    let run = 0;
+    for (let r = 0; r < Math.min(best, limit) + OPEN; r += STEP) {
+      const d = ray(c, i, r);
+      if (contRaw(d[0], d[1], d[2]) < SEA_C) { run += STEP; if (run >= OPEN) { best = r - OPEN + STEP; bi = i; break; } }
+      else { run = 0; if (r >= Math.min(best, limit)) break; }
     }
   }
+  return [best, bi];
 }
-
-// ---------- the worldgen API (docs/MILE_HIGH_CONTRACT.md) ----------
-function generateBand(cx, cz) {
-  const D = chunkData(cx, cz);
-  const lo = Math.max(BF.SY0, (D.minH >> 4) - 3), hi = Math.min(BF.SY1, Math.max(lo + 1, (D.maxTop >> 4) + 1));
-  const vox = new Uint16Array((hi - lo) * 4096);
-  fill(cx, cz, vox, lo * 16, (hi - lo) * 16);
-  return { lo, hi, vox };
+let cornerSea = 0, searchMs = 0;
+function placeCorners(tries = 300) {   // (tries: tests force gulfs with fewer)
+  const t0 = Date.now();
+  RM = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  let best = 80000, bestM = RM, order = [0, 1, 2, 3, 4, 5, 6, 7];
+  for (let i = 0; i < tries && best > 0; i++) {
+    // a uniformly random rotation (Shoemake's quaternion)
+    const u1 = nR.hash(i, 1), u2 = nR.hash(i, 2) * 2 * Math.PI, u3 = nR.hash(i, 3) * 2 * Math.PI;
+    const a = Math.sqrt(1 - u1), b = Math.sqrt(u1), qx = a * Math.sin(u2), qy = a * Math.cos(u2), qz = b * Math.sin(u3), qw = b * Math.cos(u3);
+    RM = [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw),
+      2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw),
+      2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)];
+    let worst = 0;
+    for (let n = 0; n < 8 && worst < best; n++) {
+      const d = reach(KS[order[n]].c, best)[0];
+      if (d > worst) { worst = d; if (d >= best) order = [order[n], ...order.filter((o) => o !== order[n])]; }   // the hard corner first next time
+    }
+    if (worst < best) { best = worst; bestM = RM; }
+  }
+  RM = bestM;
+  cornerSea = best;
+  for (const K of KS) {
+    K.g = null; K.n = null; K.a = 0;
+    const [d, i] = reach(K.c, Infinity);
+    K.reach = d; K.heading = i;
+    if (!(d > 0) || d === Infinity) continue;
+    K.g = ray(K.c, i, d + 3000);
+    const n = [K.c[1] * K.g[2] - K.c[2] * K.g[1], K.c[2] * K.g[0] - K.c[0] * K.g[2], K.c[0] * K.g[1] - K.c[1] * K.g[0]], nl = Math.hypot(n[0], n[1], n[2]);
+    K.n = n.map((v) => v / nl); K.a = (d + 3000) / R;
+  }
+  searchMs = Date.now() - t0;
 }
-function generateRange(cx, cz, sy0, sy1) {
-  sy0 = Math.max(sy0, BF.SY0); sy1 = Math.min(sy1, BF.SY1);
-  if (sy1 <= sy0) return new Uint16Array(0);
-  const vox = new Uint16Array((sy1 - sy0) * 4096);
-  fill(cx, cz, vox, sy0 * 16, (sy1 - sy0) * 16);
-  return vox;
+// How far (blocks) direction (x, y, z), next to corner K, is from K's gulf (Infinity without one). The centre line wanders.
+function gulf(K, x, y, z) {
+  if (!K.g) return Infinity;
+  const c = K.c, n = K.n, off = x * n[0] + y * n[1] + z * n[2];
+  const t = [n[1] * c[2] - n[2] * c[1], n[2] * c[0] - n[0] * c[2], n[0] * c[1] - n[1] * c[0]];
+  const along = Math.atan2(x * t[0] + y * t[1] + z * t[2], x * c[0] + y * c[1] + z * c[2]);
+  const side = Math.abs(off * R + nC.n3(x * R / 9000, y * R / 9000, z * R / 9000) * 2500);
+  if (along < 0) return Math.hypot(side, along * R);
+  if (along > K.a) return Math.hypot(side, (along - K.a) * R);
+  return side;
 }
-function generate(cx, cz, vox) { fill(cx, cz, vox, 0, 192); }
-function heightAt(x, z) { const [D, i] = columnAt(x, z); return D.h[i]; }
-function waterLevelAt(x, z) { const [D, i] = columnAt(x, z); return D.wl[i] === NOWATER ? BF.SEA : D.wl[i]; }
-function biomeAt(x, z) {
-  const [D, i] = columnAt(x, z), id = D.biome[i];
-  const t = D.temp[i] * 2 - 1, hu = D.rain[i] * 2 - 1;
-  return { name: NAMES[id], id: id === FROZEN_OCEAN ? OCEAN : id, height: D.h[i], temperature: +t.toFixed(2), humidity: +hu.toFixed(2) };
+// Continentalness at unit direction (x, y, z) with the corner rules: land fades out from 4 km to 1.5 km of a corner, and a gulf 3 to 6 km
+// wide runs from a corner that needs one out to the open sea. Both blend the field towards deep sea (generator 3's continentalness
+// reaches 2 and more inland, so lowering it by a fixed amount would leave a high interior standing).
+const DEEP = -0.6;
+function contDir(x, y, z) {
+  let c = contRaw(x, y, z);
+  const cd = cornerDist(x, y, z);
+  if (cd < 4000) c = Math.min(c, c + (DEEP - 0.4 - c) * smooth(4000, 1500, cd));
+  if (cd < 90000) {
+    const K = KS[(x < 0 ? 1 : 0) + (y < 0 ? 2 : 0) + (z < 0 ? 4 : 0)];
+    if (K.g) {
+      const g = gulf(K, x, y, z), w = 2200 + 1200 * nC.n3(x * R / 7000 + 50, y * R / 7000, z * R / 7000);
+      if (g < w + 2000) c = Math.min(c, c + (DEEP - c) * smooth(w + 2000, w, g));
+    }
+  }
+  return c;
 }
-// Grass / foliage / water multipliers from temperature and rain (the same colour model as worldgen.js tintCompute).
-function tintAt(x, z) {
-  const [D, i] = columnAt(x, z);
-  const t = (D.temp[i] - 0.6) * 2.2, hu = (D.rain[i] - 0.45) * 1.6;
-  const hot = smooth(-0.35, 0.45, t), wet = smooth(-0.35, 0.45, hu), cold = 1 - smooth(-0.42, -0.12, t);
-  let gr = 0.78, gg = 1.0, gbl = 0.62;
-  const dry = hot * (1 - wet), jung = hot * wet;
-  gr += dry * 0.32 - jung * 0.18 - cold * 0.12; gg += -dry * 0.1 + jung * 0.12 - cold * 0.08; gbl += -dry * 0.22 - jung * 0.14 + cold * 0.22;
-  const sw = D.biome[i] === SWAMP || D.biome[i] === MANGROVE ? 1 : 0;
-  gr = lerp(gr, 0.62, sw); gg = lerp(gg, 0.72, sw); gbl = lerp(gbl, 0.4, sw);
-  let wr = 0.85, wg = 0.95, wb = 1.0;
-  const warm = smooth(0.1, 0.45, t);
-  wr += -warm * 0.25 - cold * 0.2; wg += warm * 0.2 - cold * 0.12; wb += -warm * 0.05 + cold * 0.05;
-  return { grass: [gr, gg, gbl], foliage: [gr * 0.9, gg * 0.95, gbl * 0.88], water: [wr, wg, wb] };
-}
-// Natural sand open to the sky near (x, z) (glassmakers; no villages on the planet yet)
-function sandNear() { return false; }
+// worldgen.js cont3 on the planet: continentalness at atlas position (x, z)
+function cont(x, z) { const i = pt(x, z); return contDir(CD[i], CD[i + 1], CD[i + 2]); }
+// within 8 km of a cube corner (no mushroom islands there: the corners stay open sea)
+function nearCorner(x, z) { const i = pt(x, z); return cornerDist(CD[i], CD[i + 1], CD[i + 2]) < 8000; }
 
 // Where a new world starts (until r14-19's spawn rules): a spiral search for dry land from latitude 35 N on face 4's middle meridian,
-// far from every face edge and corner.
+// far from every face edge and corner. The continent field picks candidates cheaply; the full height confirms one.
 function spawnSearch() {
-  const a = P.atlasOfLatLon(35, 0, {}), x0 = Math.floor(a.x), z0 = Math.floor(a.z);
+  const W = BF.worldgen, a = P.atlasOfLatLon(35, 0, {}), x0 = Math.floor(a.x), z0 = Math.floor(a.z);
   for (let r = 0; r < 60000; r += 32) {
     const t = r * 0.0137, x = x0 + Math.round(Math.cos(t) * r), z = z0 + Math.round(Math.sin(t) * r);
-    if (heightAt(x, z) > BF.SEA + 1) return [x, z];
+    if (cont(x, z) < 0.1) continue;
+    if (W.heightAt(x, z) > BF.SEA + 1 && W.heightAt(x, z) >= W.waterLevelAt(x, z)) return [x, z];
   }
   return [x0, z0];
 }
 
-function init(seed) {
-  seedv = seed | 0;
-  nA = BF.makeNoise(seed); nB = BF.makeNoise(seed ^ 0x5bd1e995); nC = BF.makeNoise(seed + 7777); nK = BF.makeNoise(seed ^ 0x1b873593);
-  cache.clear();
+// Called by worldgen.init for generator 4 with the world's noise; returns the sampler worldgen's generator-3 code runs on.
+function init(n) {
+  noise = n; seedv = n.seed | 0;
+  nR = BF.makeNoise(seedv ^ 0x2c1b3c6d); nC = BF.makeNoise(seedv + 7777);
+  CX.fill(NaN);
+  placeCorners();
+  return { N2, FB, WARP, C3 };
 }
 
-BF.planetgen = { init, generateBand, generateRange, generate, heightAt, waterLevelAt, biomeAt, tintAt, sandNear, spawnSearch, sample,
-  NAMES, BANDS, columnAt, get seed() { return seedv; } };
+BF.planetgen = {
+  init, cont, contDir, contRaw, cornerDist, nearCorner, spawnSearch, SEA_C, ray, placeCorners,
+  corners: () => KS.map(K => ({ c: K.c.slice(), gulf: !!K.g, reach: K.reach, heading: K.heading, n: K.n && K.n.slice() })),
+  get cornerSea() { return cornerSea; }, get searchMs() { return searchMs; }, get rotation() { return RM.slice(); }, get seed() { return seedv; },
+};
 })();
