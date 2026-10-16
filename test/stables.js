@@ -77,9 +77,12 @@ module.exports = async (pg) => {
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     window.__step = step;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns or herds: the test brings the wild horses
-    const V = { x: 26, z: 39 };                              // seed 1, gen 3: a plains village of 12
+    // the nearest village on horse land with room for 8 villagers (generator 3 used the plains village of 12 at 26, 39)
+    const V = BFT.village((v, k) => BF.horses.isHorseBiome(v.x, v.z) && (k.house || 0) >= 4, 6000);
+    ok("found a horse-land village near the spawn", !!V, V && [V.x, V.z]);
+    if (!V) return false;
     ok("village is on horse land", BF.horses.isHorseBiome(V.x, V.z));
     const gy = BF.worldgen.heightAt(V.x + 4, V.z + 4);
     BF.player.teleport(V.x + 4.5, gy + 2, V.z + 4.5);

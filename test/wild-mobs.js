@@ -118,15 +118,21 @@ module.exports = async (pg) => {
   await pg.evaluate(id => BF.save.remove(id), id);
 
   // ---- breeding: two wild cows on grass (chance raised so it happens now), crowded herds don't, fed pigs breed
-  const spot = await pg.evaluate(() => {
+  const spot = await pg.evaluate(async () => {
     const p = BF.player.position, W = BF.world;
+    // the reloaded save's ground around the player loads first (on the planet's hills a flat 7x7 of grass can be a few chunks off)
+    for (let i = 0; i < 600 && W.queueLength > 4; i++) await new Promise(r => setTimeout(r, 100));
     for (let r = 0; r < 60; r++) for (let a = 0; a < 16; a++) {
       const x = Math.floor(p.x + Math.cos(a / 16 * 6.283) * r), z = Math.floor(p.z + Math.sin(a / 16 * 6.283) * r), y = W.heightAt(x, z);
       let flat = true;
       for (let dx = -3; dx <= 3 && flat; dx++) for (let dz = -3; dz <= 3 && flat; dz++) if (W.heightAt(x + dx, z + dz) !== y || W.getBlock(x + dx, y, z + dz) !== BF.B.grass || W.getBlock(x + dx, y + 1, z + dz) !== 0) flat = false;
       if (flat) return [x, y + 1, z];
     }
-    return null;
+    // none on these hills (generator 3's plains had plenty): lay a 9x9 of grass at the player's column, clear above
+    const x = Math.floor(p.x), z = Math.floor(p.z), y = W.heightAt(x, z);
+    if (!W.isLoaded(x, z)) return null;
+    for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) { W.setBlock(x + dx, y, z + dz, BF.B.grass); for (let k = 1; k <= 4; k++) W.setBlock(x + dx, y + k, z + dz, 0); }
+    return [x, y + 1, z];
   });
   ok("found flat grass for breeding", !!spot, spot);
   if (spot) {

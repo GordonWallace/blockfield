@@ -7,8 +7,11 @@ module.exports = async (pg, out) => {
     const R = { lines: [] }, ok = (name, cond, extra) => { const l = (cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""); R.lines.push(l); console.warn(l); };
     const tick = () => new Promise(r => setTimeout(r, 10));
     const load = async (x, z) => {
-      for (let i = 0; i < 600 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 8); await tick(); }
-      for (let i = 0; i < 600; i++) { BF.world.update(x, z, 8); await tick(); if (BF.world.queueLength === 0) break; }
+      // the page's own frame loop keeps the chunks around the player: stand over the place first, or the two fight over the far chunks
+      const p = BF.player.position;
+      if (Math.hypot(p.x - x, p.z - z) > 32) BF.player.teleport(x + 0.5, Math.max(p.y, BF.worldgen.heightAt(x, z) + 2), z + 0.5);
+      for (let i = 0; i < 600 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 60); await tick(); }
+      for (let i = 0; i < 600; i++) { BF.world.update(x, z, 60); await tick(); if (BF.world.queueLength === 0) break; }
     };
     const W = BF.world, B = BF.B, I = BF.I, P = BF.player, boats = BF.boats;
     const fresh = async mode => {
