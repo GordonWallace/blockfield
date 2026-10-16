@@ -6,7 +6,7 @@ Every Blockfield world is built from a single seed. The same seed always gives t
 
 ## A mile high
 
-New worlds use the "mile high" generator. Sea level is at y=0, ground can be far below it, and the main inland plains lie about a mile up, at roughly y 900 to 1300. Mountain ranges rise from those plains to around y 2500.
+Every new world is a round planet (see [[page:the-planet]]) with the "mile high" heights. Sea level is at y=0, ground can be far below it, and the main inland plains lie about a mile up, at roughly y 900 to 1300. Mountain ranges rise from those plains to around y 2500.
 
 | Limit | Value |
 |---|---|
@@ -20,11 +20,11 @@ New worlds use the "mile high" generator. Sea level is at y=0, ground can be far
 
 Only the layer around the surface is generated at first. Everything below it is plain stone until you dig down, when the deeper layers (stone, deepslate, caves, ores) are generated to match. Digging or building above the generated band simply extends it.
 
-Worlds created with earlier releases keep their original, much shorter terrain (sea level at y 48, ceiling at y 192).
+Worlds made with Blockfield 1.3 or earlier were flat, and they can't be opened in 1.4. They stay in the world list, greyed out, so that you can delete them.
 
 ## Continents and oceans
 
-The world is made of enormous continents separated by open ocean. A continent is tens of thousands of blocks across, and roughly a third of the planet is land, with several continents around it. You always start on dry land well inland. The eight corners of the planet's cube are always open sea; see [[page:the-planet]].
+The world is made of enormous continents separated by open ocean. A continent is tens of thousands of blocks across, and roughly a third of the planet is land, with several continents around it. You always start on dry land on a continent, in the temperate or subtropical band, at least 5 km from any face edge and 20 km from any corner of the cube. Where it can, the game picks a spot near 35°N on face 4, and the same seed always starts you in the same place. There may not be a village nearby. The eight corners of the planet's cube are always open sea; see [[page:the-planet]].
 
 Height depends first on how far inland you are:
 
@@ -36,6 +36,8 @@ Height depends first on how far inland you are:
 ## Climate and biomes
 
 Two slow maps, temperature and humidity, divide the land into climate bands. Each band is about two thousand blocks across, so a walk of several minutes usually keeps you in one biome. Edges between biomes are ragged rather than straight. Height cools the air only a little on the plains, but strongly in the high ranges, which is why the tops of mountains turn to snow. On the planet, temperature comes from latitude instead: five climate bands run from the equator to the poles, with ragged, wandering edges, and humidity follows rainfall, which is heaviest at the equator and in the middle latitudes. See [[page:biomes]].
+
+The **biome size** you choose when creating a world stretches these patterns: at larger sizes the band edges wander more slowly, rainfall changes over longer distances, and biomes are broader. It doesn't change the size of the planet or its continents.
 
 Special biomes are laid over the climate map: beaches and stony shores where land meets sea, swamps in wet lowlands, badlands in hot dry country with odd terrain, mountain biomes by altitude, mushroom islands far out at sea, rivers, and on the planet frozen arctic seas. All 30 are listed on [[page:biomes]].
 

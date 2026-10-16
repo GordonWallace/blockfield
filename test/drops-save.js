@@ -51,7 +51,7 @@ module.exports = async (pg, out) => {
     BF.drops.deserialize(undefined);
     ok("old saves: no drops, no error", BF.drops.list.length === 0);
     // the real save: through IndexedDB and BF.save.load
-    const meta = await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9 });
+    const meta = await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9, gen: 3 });
     BF.mobs.spawning = false;
     await load(px - 21, pz);
     BF.drops.spawn(cobble, 7, gx + 0.5, gy + 2, gz + 0.5);

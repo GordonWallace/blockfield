@@ -13,6 +13,8 @@ A merchant works out where carrying goods pays best. Prices tell it:
 
 It can choose any village within 600 blocks whose prices it has seen, whether or not that village is loaded right now. A village's prices are written down when it is first loaded and again as it unloads. Setting out loads the destination. The trip must be expected to be over within 2 game days, and a merchant that has no tent must be able to get back the same day. Villages are often more than 600 blocks apart, so some merchants have nowhere to go.
 
+On the [[page:the-planet|planet]] the 600 blocks are measured on the planet. Villages always keep several hundred blocks back from the edges between the cube's faces, so two villages on different faces are never within 600 blocks of each other, and a caravan's trip stays on its own face. The merchants still know how to find their way over an edge.
+
 A merchant sets out at most once every 2 game days, and only one trip at a time per merchant. At most 2 trips are on the road in the whole world; other merchants wait.
 
 ## The trip

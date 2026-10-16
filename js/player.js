@@ -139,6 +139,7 @@ const css = `
 .bfp-card .bfp-wbtns button.danger{background:var(--danger);color:#fff}
 .bfp-world input{width:100%;box-sizing:border-box;font:13px var(--mono);background:rgba(0,0,0,.4);color:var(--ink);border:1px solid var(--accent);border-radius:3px;padding:6px 8px}
 .bfp-world.confirm{background:rgba(224,83,61,.14)}
+.bfp-world.old .bfp-info{opacity:.5}
 .bfp-empty{font:12px var(--mono);color:var(--muted);padding:16px 12px;margin:0;text-align:center}
 .bfp-savenote{font:12px var(--mono);color:var(--muted);margin:8px 0 0;min-height:0}
 .bfp-savenote:empty{display:none}
@@ -404,6 +405,9 @@ function renderWorlds(st) {
     if (st.deleting === w.id) return `<div class="bfp-world confirm" role="listitem" data-id="${id}">
       <div class="bfp-info"><div class="bfp-wname">Delete “${esc(w.name)}”?</div><div class="bfp-wmeta">This can't be undone.</div></div>
       <div class="bfp-wbtns"><button class="danger" data-act="delete-ok">Delete</button><button data-act="cancel">Cancel</button></div></div>`;
+    if (BF.save.playable && !BF.save.playable(w)) return `<div class="bfp-world old" role="listitem" data-id="${id}" aria-disabled="true">
+      <div class="bfp-info"><div class="bfp-wname">${esc(w.name)}</div><div class="bfp-wmeta">Made with Blockfield 1.3, can't be opened in 1.4</div></div>
+      <div class="bfp-wbtns"><button data-act="delete">Delete</button></div></div>`;   // spec r14-19: no old saves in 1.4 (Delete only)
     return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><div class="bfp-wname">${esc(w.name)}</div><div class="bfp-wmeta">${meta}</div></div>
       <div class="bfp-wbtns"><button class="primary" data-act="play">Play</button><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div></div>`;
@@ -434,6 +438,8 @@ function finishRename(row) {
 function startNote(t) { for (const n of startEl.querySelectorAll(".bfp-savenote")) n.textContent = t; }
 function playWorld(id, btn) {
   if (!hasSave() || !id) return;
+  const w = worldsCache.find(x => x.id === id);
+  if (w && BF.save.playable && !BF.save.playable(w)) { startNote("That world was made with Blockfield 1.3 and can't be opened in 1.4"); return; }
   requestLock();                       // inside the click so the browser allows it
   if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
   Promise.resolve(BF.save.load(id)).then(() => beginPlay()).catch(e => {
@@ -453,7 +459,7 @@ function createWorld() {
   if (hasSave() && BF.save.create) {
     Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale })).catch(e => { console.error(e); }).then(done);
   } else {
-    try { BF.newWorld(parseSeed(seedText), { gameMode: mode, biomeScale }); } catch (e) { console.error(e); }
+    try { BF.newWorld(parseSeed(seedText), { gameMode: mode, biomeScale, gen: 4 }); } catch (e) { console.error(e); }
     setGameMode(mode);
     done();
   }

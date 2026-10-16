@@ -31,7 +31,7 @@ server.listen(0, "127.0.0.1", async () => {
   const three = path.join(ROOT, ".three-test.min.js");   // the CDN may be out of reach (CI, sandboxes): use the local copy when there is one
   if (fs.existsSync(three)) await pg.route("**/three.min.js", r => r.fulfill({ path: three, contentType: "text/javascript" }));
   await pg.route("https://fonts.**", r => r.abort());
-  await pg.goto(`http://127.0.0.1:${server.address().port}/index.html#seed1337`);
+  await pg.goto(`http://127.0.0.1:${server.address().port}/index.html#seed1337gen3`);   // generator 3 until r14-22 moves capture to the planet (#seed1337 is a planet since r14-19)
   await pg.waitForFunction(() => window.BF && BF.player && BF.player.start, null, { timeout: 60000 });
   await pg.waitForTimeout(2000);
   await pg.evaluate(() => {

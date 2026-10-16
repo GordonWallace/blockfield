@@ -278,7 +278,7 @@ function villageStats(rec) {
   for (const m of BF.mobs.list) {
     if (!live(m)) continue;
     if (m.hostile) { if (keys.has(ck(m.position.x, m.position.z))) hostiles++; continue; }
-    if (ST[m.type] && wildAnimal(m) && Math.hypot(m.position.x - rec.x, m.position.z - rec.z) <= 128) animals[m.type] = (animals[m.type] || 0) + 1;
+    if (ST[m.type] && wildAnimal(m) && BF.planet.distance(m.position, rec) <= 128) animals[m.type] = (animals[m.type] || 0) + 1;
   }
   const v = nights.get(rec.key), cur = Math.floor(dayNow() - 0.5), out = [];
   for (let n = cur; n > cur - NIGHTS; n--) { const r = v && v.get(n); out.push([n, r ? r[0] : 0, r ? r[1] : 0, r ? r[2] : 0]); }
