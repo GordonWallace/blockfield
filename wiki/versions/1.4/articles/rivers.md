@@ -30,7 +30,7 @@ On the high plains the water sits at plateau level, and rivers come down the esc
 ## Valleys, beds and ice
 
 - The channel is a rounded bed a few blocks deep, deeper in wide rivers. Each bank has a flat floodplain a block or two above the water, blending into the land around it. Where the land stands higher, the valley sides are cut down towards the river, up to about 150 blocks away.
-- Riverbeds are sand, with patches of clay and gravel. The biome is River, or Frozen River in the coldest climate band; rivers also ice over in the subarctic band. See [[page:biome-river]].
+- Riverbeds are sand, with patches of clay and gravel. The biome is River, or Frozen River in the coldest climate band; rivers also ice over in the subarctic band. See [[biome:river]].
 - A river ends where it reaches the sea; its channel runs on a little way into the water so a coastal ridge never dams its mouth.
 - Caves stay a good way from rivers: the ground under and beside a river is kept sealed, so rivers do not drain into caverns ([[page:caves-and-ores]]).
 
