@@ -49,7 +49,7 @@ A bow is drawn by holding right click: a full draw takes a second, and a full-po
 
 ## Dying and respawning
 
-When your health reaches zero you die, and the death screen tells you how. **You keep your inventory.** Respawning restores full health and hunger and gives you about a second of protection from hits. You return to:
+When your health reaches zero you die, and the death screen tells you how, and on the planet where (face, u, v, layer, latitude and longitude). **You keep your inventory.** Respawning restores full health and hunger and gives you about a second of protection from hits. You return to:
 
 1. your **home bed**, if you have slept in one that still stands, or
 2. the world spawn.
@@ -61,6 +61,6 @@ If your bed was destroyed, you see "You have no home bed" and start at the world
 Choose a mode when you create a world; you can switch it at any time from the pause menu or with the `/gamemode` command.
 
 - **Survival:** you can be hurt and go hungry. Blocks take time to break and need the right tool to drop items. Items are used up.
-- **Creative:** you cannot be damaged and never get hungry. Blocks break instantly, placing blocks does not use them up, and you fly faster (16 blocks a second, 32 sprinting). Hostile mobs ignore you, and golems are never angry at you. A creative menu holds every block and item. Maps can teleport you in this mode only (see [[page:maps-and-compasses]]).
+- **Creative:** you cannot be damaged and never get hungry. Blocks break instantly, placing blocks does not use them up, and you fly faster (16 blocks a second, 32 sprinting). Hostile mobs ignore you, and golems are never angry at you. A creative menu holds every block and item. Maps can teleport you in this mode only (see [[page:maps-and-compasses]]). On the planet, P opens a teleport panel: type a place as you would after `/tp` (such as `face 2 81920 81920` or `35.26N 45E`), or press one of the eight corner buttons or a height button (Ground, Up 1,000, Up 10,000, Up 25,000). It is not available in survival; `/tp` still is (see [[page:commands]]).
 
 Using commands marks a world as having used cheats. See [[page:commands]].
