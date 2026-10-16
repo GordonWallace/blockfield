@@ -96,7 +96,10 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     R.start = window.__total();
     R.beeKit0 = new Set(window.__villagers().filter(m => m.beeKit));   // beekeepers' kits (js/beekeeper.js) given before the run
     R.bakerStart = {};
-    for (const n of ['milk_bottle', 'sugar', 'sugar_cane', 'egg', 'wheat_item', 'pumpkin']) R.bakerStart[n] = window.__count(bk, n);
+    // every baker's stock: a planet village can have two, and the trade and bake ledgers count them all
+    const bakers = window.__villagers().filter(m => m.profession === 'baker');
+    for (const n of ['milk_bottle', 'sugar', 'sugar_cane', 'egg', 'wheat_item', 'pumpkin']) R.bakerStart[n] = bakers.reduce((a, m) => a + window.__count(m, n), 0);
+    R.bakerStart.n = bakers.length;
     R.bk = bk;
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}`);
