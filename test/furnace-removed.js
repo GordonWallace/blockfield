@@ -9,6 +9,8 @@ module.exports = async (pg) => {
     const x = Math.floor(P.position.x) + 2, y = Math.floor(P.position.y) + 1, z = Math.floor(P.position.z);
     const fill = () => { const f = inv.furnaceRecord(x, y, z); f.slots = [{ id: I.raw_beef, count: 10 }, { id: I.coal, count: 7 }, { id: I.iron_ingot, count: 3 }]; return f; };
     const dropsHere = () => BF.drops.list.filter(d => Math.abs(d.position ? d.position.x - x - 0.5 : 0) < 3).map(d => BF.items[d.id].name + "x" + d.count).sort();
+    // commands read u y v on the player's face on the planet (spec r14-18): give them the cell relative to the player
+    const at = (cx, cy, cz) => `~${cx - Math.floor(P.position.x)} ~${cy - Math.floor(P.position.y)} ~${cz - Math.floor(P.position.z)}`;
     const res = {};
     const way = async (name, remove) => {
       W.setBlock(x, y, z, B.furnace); fill();
@@ -20,8 +22,8 @@ module.exports = async (pg) => {
       res[name] = { gone: !BF.isFurnace(W.getBlock(x, y, z)), drops: dropsHere(), record: !!left, invItems: inv.slots.filter(Boolean).length };
     };
     await way("setBlock", () => W.setBlock(x, y, z, 0));   // what a creeper explosion does to the cell (js/mobs.js explode)
-    await way("setblockCmd", () => BF.commands.execute(`/setblock ${x} ${y} ${z} air`));
-    await way("fillCmd", () => BF.commands.execute(`/fill ${x} ${y} ${z} ${x} ${y} ${z} stone`));
+    await way("setblockCmd", () => BF.commands.execute(`/setblock ${at(x, y, z)} air`));
+    await way("fillCmd", () => BF.commands.execute(`/fill ${at(x, y, z)} ${at(x, y, z)} stone`));
     // the player mining it: setBlock then blockBroken in the same task (js/player.js)
     await way("mined", () => { W.setBlock(x, y, z, 0); BF.emit("blockBroken", x, y, z, B.furnace); });
     // a fresh furnace in the same cell is empty

@@ -160,17 +160,21 @@ lod.reset = function (scene) {
   if (lod.ribbon) dispose(lod.ribbon);
   lod.ribbon = null; lod.ribbonAt = null;
   lod.levels = CELLS.map((cell, lv) => ({ lv, cell, half: cell * HALF, mesh: null, raw: null, building: null, f: -1, cu: 0, cv: 0, gu0: 0, gv0: 0, buildMs: 0, meshMs: 0, show: false }));
-  lod.active = !!(BF.planet && BF.planet.isPlanet());
+  // off by switch: ?nolod in the page's address, or BF.lodOff set before the game starts (tests served over http that time things under
+  // software rendering, where seven rings slow every frame)
+  lod.active = !!(BF.planet && BF.planet.isPlanet()) && !lod.disabled();
   last = null; speed = 0;
   if (!lod.active) { if (BF.sampler) BF.sampler.reset(null); return; }
   if (!lod.pal) lod.pal = palette();
   if (!fullIdx) fullIdx = new THREE.BufferAttribute(BF.gridJob.fullIndex(2 * EXT + 1), 1);   // made once here: it takes tens of ms
   BF.gridJob.palette(lod.pal);
-  BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale });
+  const rp = BF.riverPre && BF.riverPre.seed === BF.state.seed >>> 0 ? BF.riverPre.pre : null;
+  BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale, pre: rp });
   // Without workers (a page opened as a file rather than through run.sh, where browsers refuse them) there is no distant terrain: sampling
   // in the page fills one ring in minutes, and seven rings drawn in software rendering slow every frame. BF.lodInline forces it on.
   if (BF.sampler.inline && !BF.lodInline) off();
 };
+lod.disabled = () => !!BF.lodOff || (typeof location !== "undefined" && /(^|[?&])nolod(=|&|$)/.test(location.search.slice(1)));
 function off() {
   lod.active = false;
   for (const L of lod.levels) if (L.mesh) { dispose(L.mesh); L.mesh = null; }
