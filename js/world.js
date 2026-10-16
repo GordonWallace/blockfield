@@ -163,6 +163,7 @@ world.init = function (sceneRef) {
 // its own copy of the material; the copies share one shader program.
 const roundK = { value: 0 };
 world.roundK = roundK;
+world.dayUniform = dayUniform;   // distant terrain (js/lod.js) is lit like an open-sky block
 function planetMaterial(base) {
   const m = base.clone();
   m.userData.planet = true;
@@ -580,7 +581,7 @@ function plan(pcx, pcz) {
     const dot = (dx * fwdX + dz * fwdZ) / len;
     const score = d2 <= 2 ? d2 : d2 * (1 + 1.5 * Math.max(0, -dot) + 0.5 * (1 - Math.abs(dot)));
     if (!world.chunks.has(k)) genList.push([cx, cz, score]);
-    if (d2 <= R * R) meshList.push([cx, cz, score]);
+    if (d2 <= R * R) meshList.push([cx, cz, score, d2]);
   }
   genList.sort((a, b) => a[2] - b[2]);
   meshList.sort((a, b) => a[2] - b[2]);
@@ -659,6 +660,10 @@ world.update = function (px, pz, budgetMs = 8) {
     }
   }
   world.queueLength = genList.length + meshList.filter(m => { const c = world.chunks.get(ckey(m[0], m[1])); return !c || c.mesh === undefined; }).length;
+  // how far out every wanted chunk has a mesh, in blocks: distant terrain (js/lod.js) leaves its hole only that far while chunks load
+  let gap = Infinity;
+  for (const m of meshList) { const c = world.chunks.get(ckey(m[0], m[1])); if ((!c || c.mesh === undefined) && m[3] < gap) gap = m[3]; }
+  world.covered = gap === Infinity ? world.viewDist * CS : Math.max(0, Math.sqrt(gap) - 1) * CS;
 };
 
 world.setViewDist = function (d) { world.viewDist = d; lastCenter = null; };

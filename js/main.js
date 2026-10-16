@@ -43,6 +43,7 @@ BF.newWorld = function (seed, opts) {
   if (BF.horses) BF.horses.reset();
   BF.world.reset();
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
+  if (BF.lod) BF.lod.reset(scene);   // distant terrain on the planet (js/lod.js): fresh rings and sampling workers for this seed
   // pick a dry spawn column near the origin
   let sx = 8, sz = 8;
   if (BF.state.gen === 4) [sx, sz] = BF.planetgen.spawnSearch();   // the planet: dry land at 35 N on face 4, far from edges (r14-19 brings real spawn rules)
@@ -115,6 +116,7 @@ function frame(now) {
   last = now;
   const p = BF.player.position;
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
+  if (BF.lod) BF.lod.update();   // distant terrain rings on the planet (js/lod.js)
   const W = BF.warp;
   if (!BF.state.paused) {
     // Fast-forward (arrow keys, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so

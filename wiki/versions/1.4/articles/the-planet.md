@@ -34,6 +34,14 @@ The continents are big enough that several of them fit around the planet, and ab
 
 The eight corners of the cube are always open sea. Each seed's continents are turned to the position, out of a few hundred tried, that leaves every corner in open ocean: not a lake, but sea that runs on for tens of kilometres. If a corner were still short of it, a winding gulf a few kilometres wide would be cut from the corner out to the ocean. Any land left within a few kilometres of a corner sinks beneath the waves.
 
+## Seeing far
+
+Beyond the loaded chunks, the land carries on to the horizon as distant terrain: the true shape of the ground, its colours, its seas and its forests, out to about 65 kilometres. It is drawn in rings around you, each half as detailed as the one inside it, a block every 4 columns within a kilometre and a block every 256 columns at the far edge. Each ring's cells look about the same size on screen, so nearby hills and far-off coasts are equally sharp, and the detail fades gently from one ring to the next rather than stepping.
+
+The colours come from the blocks themselves: grass, sand, snow and stone take the average colour of their textures, tinted by biome just as the blocks are, and the sea darkens with depth. Where trees grow, the ground takes the colour of their leaves over the share of it the crowns cover, so forests keep their colour however far away they are.
+
+Distant terrain is there at every height, from standing on the ground to high above the planet, and fills in as you travel: the land far ahead is worked out in the background, coarse rings first, without slowing the game down.
+
 ## While 1.4 is being built
 
 The planet is being brought into the game step by step. For now the biomes are still placed by the flat worlds' temperature and humidity patterns rather than by latitude, and there are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it.
