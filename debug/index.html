@@ -99,6 +99,7 @@
   .wild b { color: var(--ink); font-weight: 500; }
   .wild table { width: auto; font-size: 11px; } .wild td, .wild th { padding: 1px 8px 1px 0; border: 0; text-align: right; } .wild th { color: var(--faint); font-weight: 400; } .wild td:first-child, .wild th:first-child { text-align: left; }
   .wild td.hit { color: var(--warn); } .wild td.dead { color: var(--danger); }
+  .ptog { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; } .ptog kbd { font: 10px var(--mono, monospace); opacity: 0.6; margin-left: 4px; }
   #mmap { display: block; width: 100%; height: 460px; cursor: grab; touch-action: none; } #mmap.drag { cursor: grabbing; }
   .mleg { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 8px 16px 12px; font-size: 11px; align-items: center; }
   .mleg .item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--edge2); background: none; color: var(--muted); cursor: pointer; font-size: 11px; }
@@ -208,7 +209,7 @@
   .ent .at { color: var(--faint); margin-left: 8px; white-space: nowrap; }
 
   /* ---------- compare villages (the village list's table) ---------- */
-  #vl-cmp.on, #vl-wide.on { background: rgba(127, 191, 77, 0.14); color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); }
+  #vl-cmp.on, #vl-wide.on, .ptog .fbtn.on { background: rgba(127, 191, 77, 0.14); color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); }
   .cneed { padding: 8px 16px; font-size: 12px; color: var(--warn); border-bottom: 1px solid var(--edge); } .cneed b { font-weight: 600; } .cneed.ok { color: var(--muted); }
   .ctable { max-height: 420px; overflow: auto; }
   .ctable th.r, .ctable td.r { text-align: right; }
@@ -314,6 +315,11 @@
       <div class="row"><span>Sky</span><span id="c-sky">-</span></div><div class="bar"><i id="b-sky"></i></div>
       <div class="row" style="margin-top:8px"><span>Block light here</span><span id="c-bl">-</span></div><div class="bar"><i id="b-bl" style="background:var(--warn)"></i></div>
     </div>
+    <div class="card" id="c-planet" hidden><h3>Planet <span class="sub">debug views</span></h3>
+      <div class="ptog"><button class="fbtn" data-pt="tints" title="Each face's chunks tinted its own colour (F3 + B in the game)">Face tints <kbd>B</kbd></button>
+        <button class="fbtn" data-pt="wedge" title="No round drawing near the cube corners, so the open wedge where three faces meet shows (F3 + C)">Corner wedge <kbd>C</kbd></button>
+        <button class="fbtn" data-pt="sphere" title="Draw the true sphere everywhere, for comparison (F3 + R)">True sphere <kbd>R</kbd></button></div>
+      <div class="sub">Also F3 + B, C or R in the game. Off when the game starts.</div></div>
     <div class="card"><h3>Weather</h3><div id="c-weather" class="sub" style="color:var(--ink);white-space:pre-wrap">-</div><div class="sub" id="c-clouds"></div></div>
   </section>
 
@@ -509,11 +515,11 @@ function renderVillages(s) {
   $("vl-count").textContent = list.length ? `${nLoaded} loaded \u00B7 ${list.length} known` : "";
   $("vl-auto").classList.toggle("on", !pinned);
   const row = v => {
-    const det = details[v.key], b = bearing(v.x - d.x, v.z - d.z);
+    const det = details[v.key], b = brgOf(v);
     const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.unload ? " \u00B7 unloads in " + gameLeft(v.unload.left) : "") + (v.age != null ? " \u00B7 age " + days(v.age) : "") + (v.happy ? " \u00B7 happiness " + v.happy.score : "");
     return `<div class="vrow${v.loaded ? " on" : ""}${v.key === viewKey ? " sel" : ""}" data-k="${esc(v.key)}"><i class="ld"></i>` +
       `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs"${v.unload ? ` title="${esc(v.unload.est.map(x => x.who + ": " + x.task + " (" + gameLeft(x.secs) + ")").join("\n"))}"` : ""}>${esc(extra)}</div>` +
-      `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 ? dirName(b) : ""}</div></div>`;
+      `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 && b != null ? dirName(b) : ""}</div></div>`;
   };
   const on = list.filter(v => v.loaded), off = list.filter(v => !v.loaded);
   $("vlist").innerHTML = list.length ? on.map(row).join("") + (off.length ? `<div class="vsep">Not loaded</div>` + off.map(row).join("") : "")
@@ -657,6 +663,25 @@ const DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 // angle in the x/z plane, north = -z, clockwise
 const bearing = (dx, dz) => (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
 const dirName = deg => DIRS[Math.round(deg / 45) % 8];
+// The way to a village from the feed (js/debugfeed.js seen): its geographic bearing (true north on the planet), else from dx / dz.
+const brgOf = r => r.brg != null ? r.brg : r.dx != null ? bearing(r.dx, r.dz) : null;
+
+// ---------------------------------------------------------------- planet debug toggles (js/view.js setDebug)
+// The buttons show the game's toggles from its snapshots (s.pt); a click asks the server (POST /planet), which passes it to the game.
+let ptWant = null;
+function renderPlanetToggles(pt) {
+  $("c-planet").hidden = !pt;
+  if (!pt) return;
+  if (ptWant && Object.keys(ptWant).every(k => pt[k] === ptWant[k])) ptWant = null;   // the game has it now
+  for (const b of document.querySelectorAll("[data-pt]")) { const k = b.dataset.pt, on = ptWant && k in ptWant ? ptWant[k] : pt[k]; b.classList.toggle("on", !!on); }
+}
+$("c-planet").addEventListener("click", e => {
+  const b = e.target.closest("[data-pt]"); if (!b || !snap || !snap.pt) return;
+  const k = b.dataset.pt, o = { [k]: !b.classList.contains("on") };
+  ptWant = Object.assign(ptWant || {}, o);
+  b.classList.toggle("on", o[k]);
+  fetch("planet", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(o) }).catch(() => { ptWant = null; });
+});
 
 function renderTop(s) {
   const d = s.info;
@@ -665,11 +690,20 @@ function renderTop(s) {
   const w = $("h-warp"); w.hidden = d.warp === 1 || d.warp == null; w.textContent = d.warp === 0 ? "❚❚ 0x frozen" : "⏩ " + d.warp + "x";
   $("c-fps").innerHTML = `${d.fps} <small>fps</small>`;
   $("c-calls").textContent = d.calls + " draw calls";
-  $("c-xyz").textContent = `${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}`;
-  const face = (-d.yaw * 180 / Math.PI + 360 * 4) % 360;   // yaw 0 looks toward -z (north); turning right lowers yaw
-  $("c-facing").textContent = "facing " + dirName(face);
-  $("c-chunk").textContent = `Chunk ${d.chunkX}, ${d.chunkZ}`;
-  $("c-sections").textContent = d.sections ? `Sections ${d.sections.lo}..${d.sections.hi} (y ${d.sections.y0}..${d.sections.y1})` : "";
+  const pl = d.planet;   // on the planet (js/main.js planetInfo): face / u / v / y and latitude / longitude, never atlas x / z
+  if (pl) {
+    $("c-xyz").textContent = `${pl.u.toFixed(1)} / ${pl.v.toFixed(1)} / ${d.y.toFixed(1)}`;
+    $("c-facing").textContent = "facing " + pl.facing.replace(/ \(.*$/, "");
+    $("c-facing").title = pl.facing;
+    $("c-chunk").textContent = `Face ${pl.face} (u / v / y) \u00B7 ${pl.latLon}`;
+  } else {
+    $("c-xyz").textContent = `${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}`;
+    const face = (-d.yaw * 180 / Math.PI + 360 * 4) % 360;   // yaw 0 looks toward -z (north); turning right lowers yaw
+    $("c-facing").textContent = "facing " + dirName(face);
+    $("c-chunk").textContent = `Chunk ${d.chunkX}, ${d.chunkZ}`;
+  }
+  renderPlanetToggles(s.pt);
+  $("c-sections").textContent = (pl ? `Chunk ${Math.floor(pl.u / 16)}, ${Math.floor(pl.v / 16)} \u00B7 ` : "") + (d.sections ? `Sections ${d.sections.lo}..${d.sections.hi} (y ${d.sections.y0}..${d.sections.y1})` : "");
   $("c-biome").textContent = pretty(d.biome);
   $("c-sim").textContent = d.sim;
   $("c-chunks").innerHTML = `${fmt(d.chunksDrawn)} <small>/ ${fmt(d.chunksLoaded)}</small>`;
@@ -711,10 +745,10 @@ function renderVillage(s) {
   if (!v) {
     $("v-name").textContent = row ? row.name : "No village loaded";
     // a known village with no numbers yet, or none at all: point the way
-    const n = row ? { name: row.name, dist: row.dist, dx: row.x - s.info.x, dz: row.z - s.info.z } : s.nearest;
+    const n = row || s.nearest;   // distance round the planet, geographic bearing (js/debugfeed.js seen)
     $("v-sub").textContent = row ? "Not loaded while the debug screen was open, so no numbers yet" : "";
     if (n) {
-      const b = bearing(n.dx, n.dz);
+      const b = brgOf(n) || 0;
       $("a-dist").innerHTML = `${fmt(n.dist)} <small>blocks ${dirName(b)}</small>`;
       $("a-name").textContent = "to " + n.name;
       $("needle").style.transform = `rotate(${b}deg)`;
@@ -793,11 +827,11 @@ function drawMap(s) {
   if (!w) return;
   if (mapCv.width !== w * r || mapCv.height !== h * r) { mapCv.width = w * r; mapCv.height = h * r; }
   const g = mapCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
-  const L = layout && layout.key === v.key ? layout : null, d = s.info;
+  const L = layout && layout.key === v.key ? layout : null, d = meOn(s, v.key);
   // frame the village bounds, plus the player when they're near enough not to shrink the village to a dot
-  let [x0, z0, x1, z1] = L && L.bounds[0] != null ? L.bounds : v.villagerList.length ? [Math.min(...v.villagerList.map(m => m.x)), Math.min(...v.villagerList.map(m => m.z)), Math.max(...v.villagerList.map(m => m.x)), Math.max(...v.villagerList.map(m => m.z))] : [d.x - 40, d.z - 40, d.x + 40, d.z + 40];
+  let [x0, z0, x1, z1] = L && L.bounds[0] != null ? L.bounds : v.villagerList.length ? [Math.min(...v.villagerList.map(m => m.x)), Math.min(...v.villagerList.map(m => m.z)), Math.max(...v.villagerList.map(m => m.x)), Math.max(...v.villagerList.map(m => m.z))] : d ? [d.x - 40, d.z - 40, d.x + 40, d.z + 40] : [v.x - 40, v.z - 40, v.x + 40, v.z + 40];
   for (const b of v.built || []) { x0 = Math.min(x0, b[0]); z0 = Math.min(z0, b[1]); x1 = Math.max(x1, b[2] + 1); z1 = Math.max(z1, b[3] + 1); }   // builders may build past the generated village
-  const near = d.x > x0 - 80 && d.x < x1 + 80 && d.z > z0 - 80 && d.z < z1 + 80;
+  const near = !!d && d.x > x0 - 80 && d.x < x1 + 80 && d.z > z0 - 80 && d.z < z1 + 80;
   if (near) { x0 = Math.min(x0, d.x); x1 = Math.max(x1, d.x); z0 = Math.min(z0, d.z); z1 = Math.max(z1, d.z); }
   x0 -= 6; x1 += 6; z0 -= 6; z1 += 6;
   const sc = Math.min((w - 24) / (x1 - x0), (h - 24) / (z1 - z0)), ox = w / 2 - (x0 + x1) / 2 * sc, oz = h / 2 - (z0 + z1) / 2 * sc;
@@ -847,6 +881,31 @@ function drawMap(s) {
     g.strokeStyle = "rgba(255,255,255,0.5)"; g.lineWidth = 1; g.beginPath(); g.moveTo(cx - 14, cz); g.lineTo(cx - 5, cz); g.moveTo(cx + 5, cz); g.lineTo(cx + 14, cz); g.moveTo(cx, cz - 14); g.lineTo(cx, cz - 5); g.moveTo(cx, cz + 5); g.lineTo(cx, cz + 14); g.stroke();
   }
   // player: arrow pointing where they look; when off the map, a marker on its edge in the player's direction
+  if (d) drawMe(g, w, h, X, Z, d, near);
+  // scale bar
+  const blocks = sc > 6 ? 10 : sc > 2.5 ? 25 : 50;
+  g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.font = "11px IBM Plex Mono, monospace"; g.fillText(blocks + " blocks", 12, h - 20);
+  northMark(g, w, (s.villages || []).find(r => r.key === v.key));
+}
+// The player on a village's map: [x, z, yaw] in the village's face frame (js/debugfeed.js meIn), so the map stays local on the
+// planet; null on the opposite face. Off the planet (or an older feed) the player's own position.
+function meOn(s, key) {
+  const r = (s.villages || []).find(o => o.key === key), me = r && r.me !== undefined ? r.me : [s.info.x, s.info.z, s.info.yaw];
+  return me ? { x: me[0], z: me[1], yaw: me[2] } : null;
+}
+// "N ↑" at the top right, or on the planet an arrow toward true north (n: unit [dx, dz] in the map's frame; null at a pole).
+function northMark(g, w, r) {
+  const n = r && r.north !== undefined ? r.north : [0, -1];
+  g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "rgba(238,243,234,0.7)";
+  if (!n) { g.fillText("pole", w - 40, 18); return; }
+  if (Math.abs(n[0]) < 0.07 && n[1] < 0) { g.fillText("N ↑", w - 34, 18); return; }
+  const cx = w - 22, cy = 24, a = Math.atan2(n[0], -n[1]);
+  g.save(); g.translate(cx, cy); g.rotate(a);
+  g.strokeStyle = "rgba(238,243,234,0.7)"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(0, 9); g.lineTo(0, -9); g.moveTo(-4, -4); g.lineTo(0, -9); g.lineTo(4, -4); g.stroke();
+  g.restore();
+  g.fillText("N", cx - 3 + Math.sin(a) * 18, cy + 4 - Math.cos(a) * 18);
+}
+function drawMe(g, w, h, X, Z, d, near) {
   let px = X(d.x), pz = Z(d.z), a = -d.yaw;
   if (!near) {
     const cx = w / 2, cz = h / 2, dx = px - cx, dz = pz - cz, k = Math.min((w / 2 - 14) / Math.abs(dx || 1e-9), (h / 2 - 14) / Math.abs(dz || 1e-9));
@@ -857,10 +916,6 @@ function drawMap(s) {
   g.save(); g.translate(px, pz); g.rotate(a);
   g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
   g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
-  // scale bar
-  const blocks = sc > 6 ? 10 : sc > 2.5 ? 25 : 50;
-  g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.font = "11px IBM Plex Mono, monospace"; g.fillText(blocks + " blocks", 12, h - 20);
-  g.fillText("N ↑", w - 34, 18);
 }
 mapCv.addEventListener("mousemove", e => {
   if (!snap || !curV || !mapView) return;
@@ -936,6 +991,15 @@ function renderMobMap() {
   g.setLineDash([4, 4]); g.strokeStyle = "rgba(242,198,109,0.35)"; g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "rgba(242,198,109,0.6)";
   for (const v of mm.villages) { g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText(v[4] || "", X(v[0]) + 3, Z(v[1]) - 4); }
   g.setLineDash([]);
+  // on the planet: the edges of the player's face (mm.sq, in its frame); past them the neighbouring faces are unfolded, and the corner
+  // wedges between two neighbours hold nothing, so they stay hatched
+  if (mm.sq) {
+    const [qx0, qz0, qx1, qz1] = mm.sq, ex0 = X(qx0), ez0 = Z(qz0), ex1 = X(qx1), ez1 = Z(qz1);
+    g.strokeStyle = "rgba(120,180,240,0.55)"; g.lineWidth = 1.5; g.setLineDash([6, 4]); g.beginPath();
+    for (const [x, on] of [[ex0, ex0 > -2 && ex0 < w + 2], [ex1, ex1 > -2 && ex1 < w + 2]]) if (on) { g.moveTo(Math.round(x) + 0.5, 0); g.lineTo(Math.round(x) + 0.5, h); }
+    for (const [z, on] of [[ez0, ez0 > -2 && ez0 < h + 2], [ez1, ez1 > -2 && ez1 < h + 2]]) if (on) { g.moveTo(0, Math.round(z) + 0.5); g.lineTo(w, Math.round(z) + 0.5); }
+    g.stroke(); g.setLineDash([]);
+  }
   // mobs
   const rad = Math.max(2, Math.min(5, sc * 0.5));
   mdots = [];
@@ -956,8 +1020,9 @@ function renderMobMap() {
   g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
   // scale bar
   const blocks = [8, 16, 32, 64, 128, 256, 512].find(b => b * sc >= 60) || 512;
-  g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.fillText(blocks + " blocks", 12, h - 20); g.fillText("N ↑", w - 34, 18);
-  $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded`;
+  g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.fillText(blocks + " blocks", 12, h - 20);
+  northMark(g, w, mm);
+  $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded` + (mm.face != null ? ` · face ${mm.face}` : "");
   renderMobLegend();
 }
 let legSig = "";
@@ -1007,17 +1072,26 @@ mCv.addEventListener("pointermove", e => {
   if (best) {
     const kind = mm.kinds[best[0]];
     mTip.style.display = "block"; mTip.style.left = mx + "px"; mTip.style.top = my + "px";
-    mTip.innerHTML = `<b style="color:${mobColor(kind)}">${esc(pretty(kind))}</b>${best[4] ? ' <span class="sub">village animal</span>' : ""}<div class="sub">${fmt(Math.round(best[1]))}, ${fmt(best[3])}, ${fmt(Math.round(best[2]))}</div><div>${esc(mm.acts[best[5]] || "")}</div>`;
+    mTip.innerHTML = `<b style="color:${mobColor(kind)}">${esc(pretty(kind))}</b>${best[4] ? ' <span class="sub">village animal</span>' : ""}<div class="sub">${esc(mobWhere(best))}</div><div>${esc(mm.acts[best[5]] || "")}</div>`;
   } else mTip.style.display = "none";
   renderMobMap();
 });
 mCv.addEventListener("mouseleave", () => { mHover = null; mTip.style.display = "none"; if (mm) renderMobMap(); });
 addEventListener("resize", () => { if (mm) renderMobMap(); });
-window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], scale: () => mview.sc, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
+// Where a mob on the map is: on the planet its distance and compass point from the player (positions are frame ones there), else x, y, z.
+function mobWhere(m) {
+  if (mm.face == null) return `${fmt(Math.round(m[1]))}, ${fmt(m[3])}, ${fmt(Math.round(m[2]))}`;
+  const dx = m[1] - mm.player[0], dz = m[2] - mm.player[1], d = Math.hypot(dx, dz), n = mm.north;
+  if (d < 1 || !n) return `${fmt(Math.round(d))} blocks away, y ${fmt(m[3])}`;
+  const b = (Math.atan2(n[0] * dz - n[1] * dx, n[0] * dx + n[1] * dz) * 180 / Math.PI + 360) % 360;   // clockwise from north (the grid's x right, z down)
+  return `${fmt(Math.round(d))} blocks ${dirName(b)}, y ${fmt(m[3])}`;
+}
+window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], dotData: () => mdots.map(d => [d[0], d[1], d[2][1], d[2][2]]), scale: () => mview.sc, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
+window.BFPlanet = { me: key => snap && meOn(snap, key) };   // for tests (test/debug-planet.js): the player as a village's map draws them
 
 // ---------------------------------------------------------------- roster
 function renderRoster(s) {
-  const v = curV, q = $("r-q").value.trim().toLowerCase(), d = s.info;
+  const v = curV, q = $("r-q").value.trim().toLowerCase(), d = meOn(s, v.key) || { x: Infinity, z: Infinity };   // villagers keep their village's frame
   let rows = v.villagerList.map(m => ({ ...m, dist: Math.hypot(m.x - d.x, m.z - d.z), hpf: m.hp / (m.maxHp || 20), emT: (m.em || 0) + (m.emChests || 0), foodT: (m.food || 0) + (m.foodChests || 0) }));
   if (q) rows = rows.filter(m => (m.name + " " + m.prof + " " + m.status).toLowerCase().includes(q));
   const k = rosterSort.k, dir = rosterSort.dir;

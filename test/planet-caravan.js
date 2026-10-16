@@ -12,6 +12,9 @@ module.exports = async (pg) => {
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
   const wait = (fn, arg, t = 60000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 500 }).then(() => true, () => false);
+  // The merchant is only put somewhere once the ground around it has loaded: the simulation is paused (chunks keep loading) from the
+  // player's jump until then, or its path search fails on missing chunks and it gives the trip up as lost, as on a slow CI runner.
+  const loadedAround = (x, z) => wait(([x, z]) => { const w = BF.world; for (let d = -32; d <= 32; d += 16) for (let e = -32; e <= 32; e += 16) if (!w.isLoaded(x + d, z + e)) return false; return true; }, [x, z], 90000);
   // the closest pair of villages across one of face 4's edges where one of them has merchants (8 villagers or more)
   const pair = await pg.evaluate(() => {
     const P = BF.planet, N = P.N, W = BF.worldgen;
@@ -48,14 +51,18 @@ module.exports = async (pg) => {
     let t = 0;
     while (t < L && P.face(A.x + ux * (t + 12), A.z + uz * (t + 12)) === P.face(A.x, A.z) && P.canon(A.x + ux * (t + 12), A.z + uz * (t + 12), {}).f === P.face(A.x, A.z)) t += 2;
     const sx = Math.floor(A.x + ux * t), sz = Math.floor(A.z + uz * t), y = BF.worldgen.heightAt(sx, sz) + 1;
+    BF.state.paused = true;
     BF.player.spawn(sx + 0.5, y + 2, sz + 0.5);
     m.position.set(sx + 0.5, y + 0.1, sz + 0.5); m.vel.set(0, 0, 0); m.ai.route = null;
-    window.__m = m;
+    window.__m = m; window.__start = { x: sx + 0.5, y: y + 0.1, z: sz + 0.5 };
     BF.warp.set(BF.warp.SPEEDS.indexOf(10));   // (10 simulation steps a frame: software rendering is slow)
     const keys = BF.villageSim.pins().get(st.trip.id).keys;
     const canonKeys = keys.every(k => { const [cx, cz] = k.split(",").map(Number), c = P.canonCell(cx * 16 + 8, cz * 16 + 8, {}); return !c.off && c.x === cx * 16 + 8 && c.z === cz * 16 + 8; });
     return { pinned, keys: keys.length, canonKeys, start: [sx, sz], d0: P.distance(m.position, B), left: M.leftSecs(m), legD: P.distance(A, B), speed: ((m.def && m.def.speed) || 0.9) };
   }, pair);
+  const ok1 = await loadedAround(set.start[0], set.start[1]);
+  await pg.evaluate(() => { const m = window.__m, s = window.__start; m.position.set(s.x, s.y, s.z); m.vel.set(0, 0, 0); m.ai.route = null; BF.merchant._state(m).nav = {}; BF.state.paused = false; });
+  check(ok1, "the ground around the merchant's start loaded");
   check(set.pinned && set.canonKeys, `the trip pins both villages and a road of ${set.keys} canonical chunk keys`);
   const want = ((set.d0 + set.legD) * 1.3 / (set.speed * 1.3 * 1.5 * 504) + 0.1) * 1200;   // merchant.js leftSecs on the way out
   check(Math.abs(set.left - want) < 1, `the trip's time left (${Math.round(set.left)} s) comes from planet distances (${Math.round(set.d0)} to go, ${Math.round(set.legD)} back)`);
@@ -75,9 +82,14 @@ module.exports = async (pg) => {
     const P = BF.planet, m = window.__m, B = BF.worldgen.villageAt(pair.dest.x, pair.dest.z), A = { x: pair.home.x, z: pair.home.z };
     const ab = P.local(B, A, {}), L = Math.hypot(ab.x - B.x, ab.z - B.z), x = Math.floor(B.x + (ab.x - B.x) / L * (B.maxX - B.minX) / 2 + (ab.x - B.x) / L * 8), z = Math.floor(B.z + (ab.z - B.z) / L * (B.maxZ - B.minZ) / 2 + (ab.z - B.z) / L * 8);
     const c = P.local(m.position, { x: x + 0.5, z: z + 0.5 }, {}), y = BF.worldgen.heightAt(x, z) + 1;   // (the merchant keeps its home's frame)
+    BF.state.paused = true;
     BF.player.spawn(x + 0.5, y + 2, z + 0.5);
-    m.position.set(c.x, y + 0.1, c.z); m.vel.set(0, 0, 0); m.ai.route = null; BF.sky.setTime(0.08);
+    window.__near = { x, z, at: { x: c.x, y: y + 0.1, z: c.z } };
   }, pair);
+  const near = await pg.evaluate(() => window.__near);
+  const ok2 = await loadedAround(near.x, near.z);
+  await pg.evaluate(() => { const m = window.__m, s = window.__near.at; m.position.set(s.x, s.y, s.z); m.vel.set(0, 0, 0); m.ai.route = null; BF.merchant._state(m).nav = {}; BF.sky.setTime(0.08); BF.state.paused = false; });
+  check(ok2, "the ground just outside the other village loaded");
   const arrived = await wait(() => { const st = BF.merchant._state(window.__m); return !window.__m.dead && st.stage !== "go"; }, null, 150000);
   const r2 = await pg.evaluate(() => ({ stage: BF.merchant._state(window.__m).stage, log: BF.merchant.LOG.filter(l => l.kind === "arrive" || l.kind === "lost").map(l => l.kind) }));
   check(arrived && r2.log.includes("arrive") && !r2.log.includes("lost"), `it arrives at the other village (stage ${r2.stage}, log ${r2.log.join(", ")})`);

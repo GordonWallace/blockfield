@@ -18,6 +18,9 @@
 //   room, it moves in: one from the old count to the new.
 // - Crops within CROP_R blocks of a home with bees grow CROP_BOOST times faster by day (world.js growTick reads cropFactor).
 // Bees are drawn with one instanced mesh (wings flicker in the vertex shader) and fly straight with a hop over obstacles: no pathfinding.
+// On the planet (spec r14-13 frames) homes are kept at canonical addresses and a bee flies in its home's face frame, past an edge too (a
+// margin address there; the world reads those through to the canonical cell). Flowers, crops, the player and lures are seen from the home
+// or the bee (BF.planet.local) before any distance is taken; a bee that moves to a home on another face is put into that home's frame.
 // API: BF.bees = { isHome(id), isFlower(id), homeAt(x, y, z), homes(), loadedHomes(), list, flowersNear(h), cropFactor(x, y, z), harvest(x, y, z,
 //   how, who), playerUse(target, stack), lure(m, on), out(), stats(), serialize(), deserialize(a), reset(), MAX, CAP, R, FULL, ... }
 (() => {
@@ -47,6 +50,14 @@ const pk = (x, y, z) => x + "," + y + "," + z;
 const ck = (cx, cz) => cx + "," + cz;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const CS = () => BF.CS || 16;
+// the planet: q seen from p (its x / z in p's frame, with the quarter turns taking q's directions into it); q itself off the planet
+const onPlanet = () => !!(BF.planet && BF.planet.isPlanet && BF.planet.isPlanet());
+const seen = (p, q, out) => (onPlanet() ? BF.planet.local(p, q, out || {}) : q);
+// the canonical key of block (x, y, z), however it was addressed
+const CC = {};
+const ckey = (x, y, z) => { if (!onPlanet()) return pk(x, y, z); const c = BF.planet.canonCell(x, z, CC); return c.off ? pk(x, y, z) : pk(c.x, y, c.z); };
+// the canonical chunk key of chunk (cx, cz) in some face frame
+const cck = (cx, cz) => { if (!onPlanet()) return ck(cx, cz); const c = BF.planet.canonCell(cx * CS() + 8, cz * CS() + 8, CC); return c.off ? null : ck(Math.floor(c.x / CS()), Math.floor(c.z / CS())); };
 function hash(x, y, z, salt) {
   let h = (Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663) ^ Math.imul(z | 0, 83492791) ^ Math.imul(salt | 0, 40503)) >>> 0;
   h ^= h >>> 16; h = Math.imul(h, 0x45d9f3b) >>> 0; h ^= h >>> 16;
@@ -90,7 +101,7 @@ function track(x, y, z, id) {
   loaded.set(k, h);
   return h;
 }
-function homeAt(x, y, z) { return recs.get(pk(x, y, z)) || null; }
+function homeAt(x, y, z) { return recs.get(ckey(x, y, z)) || null; }
 
 // Flowers (poppies, dandelions, cornflowers) in loaded chunks, kept per chunk.
 function addFlower(x, y, z) {
@@ -103,16 +114,20 @@ function delFlower(x, y, z) {
   const cs = CS(), s = flowers.get(ck(Math.floor(x / cs), Math.floor(z / cs)));
   if (s) s.delete(pk(x, y, z));
 }
-// Flowers within R blocks of home h (horizontally, and within 12 up or down): [[x, y, z], ...]. Cached for a few seconds.
+// Flowers within R blocks of home h (horizontally, and within 12 up or down): [[x, y, z], ...], in h's frame (past a face edge: margin
+// addresses). Cached for a few seconds.
+const FQ = {};
 function flowersNear(h, fresh) {
   const now = simNow();
   if (!fresh && h.fl && now - h.flT < 8) return h.fl;
-  const cs = CS(), out = [];
+  const cs = CS(), out = [], pl = onPlanet();
   for (let cz = Math.floor((h.z - R) / cs); cz <= Math.floor((h.z + R) / cs); cz++) for (let cx = Math.floor((h.x - R) / cs); cx <= Math.floor((h.x + R) / cs); cx++) {
-    const s = flowers.get(ck(cx, cz));
+    const key = cck(cx, cz), s = key && flowers.get(key);
     if (!s) continue;
+    const turned = pl && key !== ck(cx, cz);   // a chunk past an edge: its cells seen from h
     for (const k of s) {
       const p = k.split(",").map(Number);
+      if (turned) { const q = BF.planet.local(h, { x: p[0] + 0.5, z: p[2] + 0.5 }, FQ); p[0] = Math.floor(q.x); p[2] = Math.floor(q.z); }
       if (Math.hypot(p[0] - h.x, p[2] - h.z) <= R && Math.abs(p[1] - h.y) <= 12) out.push(p);
     }
   }
@@ -254,7 +269,8 @@ function stepBee(b, dt, lp, now) {
   // angry bees go for the player
   if (b.angry > now && !b.stung) {
     const pp = playerPos();
-    if (pp && !(BF.player && BF.player.dead) && BF.planet.distance(b, pp) < R + 6) {
+    if (pp) { const q = seen(b, pp); pp.x = q.x; pp.z = q.z; }   // (the player seen from the bee's frame)
+    if (pp && !(BF.player && BF.player.dead) && Math.hypot(pp.x - b.x, pp.z - b.z) < R + 6) {
       b.mode = "sting"; b.land = null;
       const d = flyTo(b, pp.x, pp.y + 1.1, pp.z, STING_SPEED, dt, true);
       if (d < 0.7) {
@@ -271,18 +287,19 @@ function stepBee(b, dt, lp, now) {
   if (b.mode !== "home" || b.follow) {
     if (b.follow && (b.followT -= dt) <= 0) {
       b.followT = 0.5;
-      const f = lp.find(p => p.who === b.follow.who);
-      if (!f || Math.hypot(f.x - b.x, f.z - b.z) > FOLLOW_R + 3) b.follow = null; else b.follow = f;
+      const f = lp.find(p => p.who === b.follow.who), q = f && seen(b, f);
+      if (!f || Math.hypot(q.x - b.x, q.z - b.z) > FOLLOW_R + 3) b.follow = null; else b.follow = f;
     }
     if (b.follow) {
-      const f = b.follow, a = now * 1.3 + b.phase;
+      const f0 = b.follow, q = seen(b, f0), f = { who: f0.who, x: q.x, y: f0.y, z: q.z }, a = now * 1.3 + b.phase;   // (followed in the bee's frame)
       b.land = null;
       flyTo(b, f.x + Math.cos(a) * 0.9, f.y + Math.sin(a * 1.7) * 0.25, f.z + Math.sin(a) * 0.9, FOLLOW_SPEED, dt, true);
       // led into another home with room (a villager leads only wild bees, from a nest, so its own hives never trade bees)
-      for (const o of loaded.values()) {
-        if (o === h || o.bees >= MAX || (f.who !== "player" && h && h.kind !== "nest") || Math.abs(o.y + 0.5 - b.y) > 3 || Math.hypot(o.x + 0.5 - b.x, o.z + 0.5 - b.z) > MOVE_IN_R) continue;
-        if (Math.hypot(f.x - (o.x + 0.5), f.z - (o.z + 0.5)) > LURE_NEAR_HOME) continue;
-        moveIn(b, o, f.who);
+      for (const o0 of loaded.values()) {
+        if (o0 === h || o0.bees >= MAX || (f.who !== "player" && h && h.kind !== "nest") || Math.abs(o0.y + 0.5 - b.y) > 3) continue;
+        const o = seen(b, o0);
+        if (Math.hypot(o.x + 0.5 - b.x, o.z + 0.5 - b.z) > MOVE_IN_R || Math.hypot(f.x - (o.x + 0.5), f.z - (o.z + 0.5)) > LURE_NEAR_HOME) continue;
+        moveIn(b, o0, f.who);
         return;
       }
       return;
@@ -371,7 +388,8 @@ function housekeeping() {
   for (const h of list) {
     if (h.bees <= 0) continue;
     for (let gz = Math.floor((h.z - CROP_R) / 16); gz <= Math.floor((h.z + CROP_R) / 16); gz++) for (let gx = Math.floor((h.x - CROP_R) / 16); gx <= Math.floor((h.x + CROP_R) / 16); gx++) {
-      const k = ck(gx, gz);
+      const k = cck(gx, gz);   // (canonical: crops grow at canonical cells)
+      if (!k) continue;
       if (!cropGrid.has(k)) cropGrid.set(k, []);
       cropGrid.get(k).push(h);
     }
@@ -422,7 +440,9 @@ function update(dt) {
       for (const b of bees) {
         if (b.follow || b.angry > now || b.mode === "home" && b.hurry) continue;
         for (const f of lp) {
-          if ((cnt.get(f.who) || 0) >= FOLLOW_MAX || Math.hypot(f.x - b.x, f.y - b.y, f.z - b.z) > FOLLOW_R) continue;
+          if ((cnt.get(f.who) || 0) >= FOLLOW_MAX) continue;
+          const q = seen(b, f);
+          if (Math.hypot(q.x - b.x, f.y - b.y, q.z - b.z) > FOLLOW_R) continue;
           b.follow = f; b.followT = 0.5; b.mode = "fly"; cnt.set(f.who, (cnt.get(f.who) || 0) + 1);
           break;
         }
@@ -469,8 +489,8 @@ function onSet(x, y, z, old, id) {
     for (const b of outB) {
       b.home = null; b.nectar = false; ang.push(b);
       let best = null, bd = R;
-      for (const o of loaded.values()) { const d = Math.hypot(o.x - x, o.y - y, o.z - z); if (o.bees < MAX && d <= bd) { bd = d; best = o; } }
-      if (best) { best.bees++; best.out++; b.home = best; }
+      for (const o of loaded.values()) { const q = seen(h, o), d = Math.hypot(q.x - x, o.y - y, q.z - z); if (o.bees < MAX && d <= bd) { bd = d; best = o; } }
+      if (best) { best.bees++; best.out++; b.home = best; toFrameOf(b, best); }
     }
     lastBroken = { x, y, z, bees: ang, t: simNow() };
     if (BF.emit) BF.emit("beeHomeGone", h);
@@ -481,27 +501,42 @@ function onSet(x, y, z, old, id) {
     recs.set(k, h); h.scatter = false; loaded.set(k, h);
   }
 }
+// The planet: bee b, now belonging to home o, flies on in o's frame (a home on another face: its position and heading turned with it,
+// its errand dropped, since its landing spot was in the old frame).
+function toFrameOf(b, o) {
+  if (!onPlanet()) return;
+  const v = { x: b.vx, z: b.vz }, hd = { yaw: 0 };
+  const q = BF.planet.reframe(b, BF.planet.face(o.x, o.z), hd, v);
+  if (q == null) return;
+  b.vx = v.x; b.vz = v.z;
+  if (Math.abs(b.vx) + Math.abs(b.vz) > 0.05) b.yaw = Math.atan2(b.vx, b.vz);
+  b.follow = null; b.mode = "home"; b.tgt = null; b.land = null; b.stuck = 0; b.lastD = Infinity;
+}
 // Bees out of home h (or the bees of a home just broken) go for the player for ANGRY seconds.
 function anger(list, h) {
   const until = simNow() + ANGRY;
   if (h) h.angry = until;
   for (const b of list) { b.angry = until; b.stung = false; }
 }
-function playerNear(x, y, z, r) { const p = playerPos(); return !!(p && Math.hypot(p.x - x - 0.5, p.y - y, p.z - z - 0.5) <= r); }
+function playerNear(x, y, z, r) { const p = playerPos(), q = p && seen({ x, z }, p); return !!(p && Math.hypot(q.x - x - 0.5, p.y - y, q.z - z - 0.5) <= r); }
 
 // Crops within CROP_R blocks of a loaded home with bees grow CROP_BOOST times faster by day (js/world.js growTick).
 function cropFactor(x, y, z) {
   if (skyT() >= 0.5 || !cropGrid.size) return 1;
   const hs = cropGrid.get(ck(Math.floor(x / 16), Math.floor(z / 16)));
   if (!hs) return 1;
-  for (const h of hs) if (h.bees > 0 && Math.abs(h.x - x) <= CROP_R && Math.abs(h.z - z) <= CROP_R && Math.hypot(h.x - x, h.z - z) <= CROP_R && Math.abs(h.y - y) <= CROP_R) return CROP_BOOST;
+  for (const h of hs) {
+    if (h.bees <= 0 || Math.abs(h.y - y) > CROP_R) continue;
+    const q = seen(h, { x, z });   // (the crop seen from the home, across a face edge)
+    if (Math.hypot(h.x - q.x, h.z - q.z) <= CROP_R) return CROP_BOOST;
+  }
   return 1;
 }
 
 // Harvests the full home at (x, y, z): how = "shears" (3 honeycomb) or "bottle" (1 honey bottle, using up a glass bottle). Returns
 // {id, n} of what it gives, or null when the home is not full. `who` = "player" angers its bees that are out (by day).
 function harvest(x, y, z, how, who) {
-  const h = recs.get(pk(x, y, z));
+  const h = recs.get(ckey(x, y, z));
   if (!h || h.honey < FULL) return null;
   h.honey = 0;
   if (who === "player") { const out = bees.filter(b => b.home === h); if (out.length) anger(out, h); }
@@ -510,7 +545,7 @@ function harvest(x, y, z, how, who) {
 }
 // The player right-clicks a nest or hive with stack in hand: {give: {id, n}, consume, wear, msg} or {msg}.
 function playerUse(target, stack) {
-  const h = recs.get(pk(target.x, target.y, target.z));
+  const h = recs.get(ckey(target.x, target.y, target.z));
   if (!h) return null;
   const nm = stack && BF.items[stack.id] ? BF.items[stack.id].name : "";
   const what = () => (h.kind === "nest" ? "Bee nest" : "Beehive") + ": " + h.bees + " bee" + (h.bees === 1 ? "" : "s") + ", honey " + h.honey + "/" + FULL;
@@ -530,7 +565,7 @@ function hook() {
   W().onChunkUnload(unloadChunk);
   for (const c of W().chunks.values()) scanChunk(c.cx, c.cz, c);
   if (BF.on) BF.on("blockBroken", (x, y, z, id) => {   // the player broke a home: its bees that were out sting
-    if (!isHome(id) || !lastBroken || lastBroken.x !== x || lastBroken.y !== y || lastBroken.z !== z) return;
+    if (!isHome(id) || !lastBroken || ckey(x, y, z) !== pk(lastBroken.x, lastBroken.y, lastBroken.z)) return;
     if (playerNear(x, y, z, 8) && (dayOut() || lastBroken.bees.length)) anger(lastBroken.bees, null);
     lastBroken = null;
   });
@@ -591,25 +626,33 @@ function initMesh() {
 }
 const _m = typeof THREE !== "undefined" ? new THREE.Matrix4() : null;
 const _r = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _u = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _f = typeof THREE !== "undefined" ? new THREE.Vector3() : null;
+const DQ = {}, DV = [0, 0];
 function draw() {
   uTime.value = simNow();
   const light = BF.sky && typeof BF.sky.light === "number" ? Math.max(0.3, Math.min(1, BF.sky.light)) : 1;
   mesh.material.color.setRGB(light, light, light);
   if (!dirty) return;
   dirty = false;
-  const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee");
+  const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee"), pl = onPlanet();
   for (let i = 0; i < n; i++) {
     const b = bees[i], s = b.mode === "land" && b.land ? b.land : null;
+    // the planet: the bee seen from the mesh (in the player's frame), its directions turned with it
+    let bx = b.x, bz = b.z, q = 0;
+    if (pl) { const r = BF.planet.local(mesh.position, b, DQ); bx = r.x; bz = r.z; q = r.turn; }
     if (s) {   // landed: belly on the surface, back along its normal
-      _u.set(s.nx, s.ny, s.nz);
+      let nx = s.nx, nz = s.nz;
+      if (q) { BF.planet.turnVec(q, nx, nz, DV); nx = DV[0]; nz = DV[1]; }
+      _u.set(nx, s.ny, nz);
       if (s.ny > 0.5) _f.set(Math.sin(b.landYaw), 0, Math.cos(b.landYaw));
-      else { const a = (b.landYaw % 1.2) - 0.6; _f.set(Math.sin(a) * s.nz, Math.cos(a), -Math.sin(a) * s.nx); }   // on a wall: head up, a little askew
+      else { const a = (b.landYaw % 1.2) - 0.6; _f.set(Math.sin(a) * nz, Math.cos(a), -Math.sin(a) * nx); }   // on a wall: head up, a little askew
       _r.crossVectors(_u, _f).normalize(); _f.crossVectors(_r, _u).normalize();
-      _m.makeBasis(_r, _u, _f).setPosition(b.x + s.nx * 0.045 - mesh.position.x, b.y + s.ny * 0.045, b.z + s.nz * 0.045 - mesh.position.z);
+      _m.makeBasis(_r, _u, _f).setPosition(bx + nx * 0.045 - mesh.position.x, b.y + s.ny * 0.045, bz + nz * 0.045 - mesh.position.z);
     } else {
-      const c = Math.cos(b.yaw), sn = Math.sin(b.yaw);
+      let yaw = b.yaw;
+      if (q) { BF.planet.turnVec(q, Math.sin(yaw), Math.cos(yaw), DV); yaw = Math.atan2(DV[0], DV[1]); }
+      const c = Math.cos(yaw), sn = Math.sin(yaw);
       _f.set(sn, 0, c); _u.set(0, 1, 0); _r.set(c, 0, -sn);
-      _m.makeBasis(_r, _u, _f).setPosition(b.x - mesh.position.x, b.y, b.z - mesh.position.z);
+      _m.makeBasis(_r, _u, _f).setPosition(bx - mesh.position.x, b.y, bz - mesh.position.z);
     }
     mesh.setMatrixAt(i, _m);
     A.setXY(i, b.phase, s ? 0 : 1);

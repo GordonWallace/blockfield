@@ -22,7 +22,7 @@ Two faces that meet along an edge lie flat against each other: block rows on eit
 
 Only where three faces meet at one of the planet's eight corners is there no flat way to join them: laid flat, three squares leave a quarter-circle gap. So within about a kilometre of a corner the game draws the world as it really is, on the round planet, and the gap closes up. Close to a corner the ground can look slightly twisted compared with your steps, because the grid itself bends there. The corners are always out in the open ocean.
 
-Everything that spreads from block to block carries on across an edge too. A torch lights the ground on the next face, a roof shades both sides, water flows over and stops where it would anywhere else, water on one face keeps farmland on the other hydrated, grass spreads across, and a tree can grow astride an edge. Signs placed side by side across an edge stay two separate boards.
+Everything that spreads from block to block carries on across an edge too. A torch lights the ground on the next face, a roof shades both sides, water flows over and stops where it would anywhere else, water on one face keeps farmland on the other hydrated, grass spreads across, and a tree can grow astride an edge. Signs placed side by side across an edge stay two separate boards. A chest or furnace placed, opened or broken from across an edge is the same one you find from its own face, with the same things inside.
 
 Things that move cross edges the same way. Animals, villagers and monsters walk across and keep going; a zombie chasing you follows you over, and a cow follows wheat across. Dropped items slide over and can be picked up on the other side, arrows fly across, and a boat or horse carries its rider over, still heading the same way. Animals that belong to a village or a pen stay counted with it even when they wander over the edge.
 
@@ -46,6 +46,16 @@ When you cross an edge your face number changes and `u` and `v` start again from
 
 Commands take `u y v` on the face you are on, and you can type past its edges onto the neighbouring faces; you can also give a face, a latitude and longitude, or one of the corners. See [[page:commands]]. In creative mode P opens a teleport panel, and in any mode M opens a map of the whole planet (see [[page:maps-and-compasses]]).
 
+## Debug views
+
+Hold F3 and press B, C or R to switch a debug view of the planet on or off. All three are off when the game starts, and the F3 overlay lists any that are on:
+
+- B tints each face's ground its own colour, so you can see where the edges run.
+- C turns off the round drawing near the corners, so the open quarter-circle gap where three faces meet shows.
+- R draws the true round planet everywhere, to compare with the flat drawing.
+
+The second-screen debug screen has the same three switches in its Planet section. It shows your position as face, `u`, `v` and `y` with the latitude and longitude. Village distances there are measured round the planet, with compass directions towards true north. Its mobs map is drawn in your own face's grid: the faces beside it are laid out flat beyond a dashed line at the edge, and an arrow points to true north. Each village's own map stays in that village's face grid.
+
 ## Continents and corners
 
 The planet's ground is made by the same generator as the mile-high worlds of 1.3, so its land looks the same: coastal lowlands, long escarpments up to high plains about a mile up, mountain massifs, badlands mesas, swamps, mushroom islands far out at sea, and caves, ores, trees and plants (see [[page:terrain]]). Every pattern is laid on the sphere itself, so continents, hills and caves carry straight on across the edges between faces. A tree that grows right at an edge is whole on both sides: the face it grows on decides it, and the next face draws the part that reaches over.
@@ -57,6 +67,10 @@ The eight corners of the cube are always open sea. Each seed's continents are tu
 ## Climate bands
 
 Climate follows latitude. Five bands run from the equator to the poles: tropical, subtropical, temperate, subarctic and arctic. Their edges wander, high ground is colder, and now and then a biome turns up a band away from home. The arctic seas freeze over (Frozen Ocean). See [[page:biomes]] for which biomes each band holds.
+
+## Rivers and lakes
+
+The planet's rivers are worked out for the whole world at once when it starts (the loading screen shows **Working out the rivers and lakes** for several seconds). Every river runs down to the sea or into a lake, never crosses another and never splits, and lakes sit in inland hollows and highland basins, each with one river flowing out. See [[page:rivers]].
 
 ## Seeing far
 
@@ -70,4 +84,4 @@ Past the distant terrain, the rest of the planet is drawn as a whole globe, a bl
 
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]). There are no rivers yet.
+The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]).

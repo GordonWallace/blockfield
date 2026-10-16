@@ -69,6 +69,9 @@ let latest = null, lastPush = 0, pushes = 0, seed = null;
 // The villager picked on the debug screen (its village key#slot, js/daytimeline.js): passed to the game in the answer to its next
 // snapshot, like the alerts; the game then adds that villager's day timeline to its snapshots. day: the last timeline it sent.
 let pick = null, pv = "0", day = null;
+// A planet debug toggle clicked on the debug screen ({tints | wedge | sphere: bool}, js/view.js setDebug): passed to the game the same
+// way. The game's snapshots carry the toggles as they are (pt), which is what the screen shows.
+let ptReq = null, ptv = "0";
 const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map(), econ = new Map();   // econ: each village's Economy tallies (js/economy.js)   // icons: item id -> {url, name}, sent once by the game
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
@@ -112,7 +115,8 @@ function push(body, res) {
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
   const staleP = !!s.pick && s.pick.pv !== pv;                                 // so is its picked villager
-  const o = stale || staleP ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}) : null;
+  const staleT = !!ptReq && !!s.pt && s.pt.tv !== ptv;                         // and a planet toggle it hasn't applied
+  const o = stale || staleP || staleT ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleT ? { pt: ptReq, ptv } : {}) : null;
   res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(o ? JSON.stringify(o) : resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
@@ -158,6 +162,20 @@ function serveDebug(req, res) {
       const k = o && typeof o.key === "string" ? o.key.slice(0, 80) : null;
       if (k !== pick) { pick = k; pv = String(Date.now()); if (!k) day = null; }
       res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ pick, pv }));
+    }).bind(null, req, res));
+    return;
+  }
+  if (url.pathname === "/planet" && req.method === "POST") {   // the debug screen flipped a planet toggle ({tints | wedge | sphere: bool})
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", c => { body += c; if (body.length > 1e3) req.destroy(); });
+    req.on("end", safe(() => {
+      let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+      const t = {};
+      for (const k of ["tints", "wedge", "sphere"]) if (o && typeof o[k] === "boolean") t[k] = o[k];
+      if (!Object.keys(t).length) { res.writeHead(400, cors()).end("no toggle"); return; }
+      ptReq = t; ptv = String(Date.now());
+      res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ pt: ptReq, ptv }));
     }).bind(null, req, res));
     return;
   }

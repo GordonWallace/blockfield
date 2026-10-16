@@ -38,6 +38,10 @@ const FU = () => BF.furnaceUse;
 const BE = () => BF.bees;
 const W = () => BF.world;
 const I = n => BF.I[n];
+// the planet: q seen from p (its x / z in p's frame), so hives and nests (kept at canonical addresses) measure true against the beekeeper
+// and its jobsite (kept in the village's frame) across a face edge; q itself off the planet
+const seen = (p, q) => (BF.planet && BF.planet.isPlanet && BF.planet.isPlanet() ? BF.planet.local(p, q, {}) : q);
+const far = (p, q) => { const r = seen(p, q); return Math.hypot(r.x - p.x, r.z - p.z); };
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const cnt = (m, id) => (id == null || !m || !Array.isArray(m.inv) ? 0 : TR().inv.count(m.inv, id));
 const sumOf = (m, f) => { let n = 0; for (const s of m.inv || []) if (s && f(s.id)) n += s.count; return n; };
@@ -68,7 +72,7 @@ const hireKit = m => !!(m && Array.isArray(m.inv) && kitInto(m.inv, m));
 function hivesOf(m) {
   const j = m.jobsite;
   if (!j || !BE()) return [];
-  return BE().loadedHomes().filter(h => h.kind === "hive" && Math.hypot(h.x - j.x, h.z - j.z) <= HIVE_R && Math.abs(h.y - j.y) <= 8);
+  return BE().loadedHomes().filter(h => h.kind === "hive" && far(j, h) <= HIVE_R && Math.abs(h.y - j.y) <= 8);
 }
 function edited(x, y, z) {
   const CS = BF.CS, cx = Math.floor(x / CS), cz = Math.floor(z / CS), e = W().edits.get(cx + "," + cz);
@@ -109,7 +113,7 @@ function hiveSpot(m) {
     if (Math.hypot(x - j.x, z - j.z) > HIVE_R - 2) return;
     const y = w.heightAt(x, z) + 1;
     if (Math.abs(y - j.y) > 4 || !openCell(R, x, y, z, true, keep)) return;
-    if (homes.some(h => Math.hypot(h.x - x, h.z - z) < 3)) return;
+    if (homes.some(h => far({ x, z }, h) < 3)) return;
     out.push({ x, y, z, d: Math.hypot(x - j.x, z - j.z) });
   };
   for (const b of farms) for (let z = b.z0 - 4; z <= b.z1 + 4; z++) for (let x = b.x0 - 4; x <= b.x1 + 4; x++) {
@@ -145,7 +149,7 @@ function pickSpot(m) {
     const top = w.heightAt(x, z);
     for (let y = top + 1; y >= top - 6; y--) {
       if (!isFlowerItem(w.getBlock(x, y, z))) continue;
-      if (hives.some(h => Math.hypot(h.x - x, h.z - z) <= BE().R + 1)) break;
+      if (hives.some(h => far({ x, z }, h) <= BE().R + 1)) break;
       best.push({ x, y, z, d: Math.hypot(x - m.position.x, z - m.position.z) });
       break;
     }
@@ -159,7 +163,7 @@ function nestFor(h) {
   let best = null, bd = NEST_R;
   for (const o of BE().loadedHomes()) {
     if (o.kind !== "nest" || o.bees < 2) continue;
-    const d = Math.hypot(o.x - h.x, o.z - h.z);
+    const d = far(h, o);
     if (d < bd && BE().out(o).length > 0) { bd = d; best = o; }
   }
   return best;
@@ -406,10 +410,12 @@ function ai(m, dt, out, cont) {
   }
   // ---- leading wild bees home with a flower in hand
   if (job.kind === "lead") {
-    const n = job.nest, h = job.hive, nk = "nest:" + pk(n.x, n.y, n.z);
-    if (BE().homeAt(h.x, h.y, h.z) !== h) return giveUp("hive gone");
+    const n0 = job.nest, h0 = job.hive, nk = "nest:" + pk(n0.x, n0.y, n0.z);
+    const nq = seen(m.position, { x: n0.x + 0.5, z: n0.z + 0.5 }), hq = seen(m.position, { x: h0.x + 0.5, z: h0.z + 0.5 });   // (the nest and hive cells in the beekeeper's frame, across a face edge)
+    const n = { x: Math.floor(nq.x), y: n0.y, z: Math.floor(nq.z) }, h = { x: Math.floor(hq.x), y: h0.y, z: Math.floor(hq.z) };
+    if (BE().homeAt(h0.x, h0.y, h0.z) !== h0) return giveUp("hive gone");
     if (flowerCount(m) < 1) return giveUp("no flower");
-    if (!BE().canFly(h)) return giveUp("bees inside");
+    if (!BE().canFly(h0)) return giveUp("bees inside");
     const followers = () => BE().list.filter(b => b.follow && b.follow.who === m).length;
     if (S.stage === "walk") {
       if (S.walkT > 90) return giveUp("timeout", nk);
@@ -438,8 +444,8 @@ function ai(m, dt, out, cont) {
     BE().lure(m, true);
     out.faceX = h.x + 0.5; out.faceZ = h.z + 0.5;
     if ((S.tt -= dt) > 0 && followers() > 0) return true;
-    if (S.movedIn) vlog(m, "bees", "led " + plural(S.movedIn, "wild bee") + " home to the beehive at " + pk(h.x, h.y, h.z), [h.x, h.y, h.z]);
-    log("lead", { n: S.movedIn || 0, to: pk(h.x, h.y, h.z) });
+    if (S.movedIn) vlog(m, "bees", "led " + plural(S.movedIn, "wild bee") + " home to the beehive at " + pk(h0.x, h0.y, h0.z), [h0.x, h0.y, h0.z]);
+    log("lead", { n: S.movedIn || 0, to: pk(h0.x, h0.y, h0.z) });
     return done();
   }
   // ---- buying planks or string at the seller's own offer
