@@ -33,6 +33,24 @@ module.exports = async (pg, out) => {
     BF.mobs.setProfession(A, "forester"); A.xp = 0; A.level = 1; A.trades = T.offers("forester", 1); A.inv = T.inv.create();
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: B.band_saw, prof: "forester" } });
     window.__A = A;
+    // fells every tree it could pick but `keep` ("x,y,z" of its base), by a scan of the ground it searches (js/forester.js findTree: the
+    // village's box and 40 blocks round it, or 40 round itself). Clearing with findTree until it returns null left natural trees: it
+    // gives up after 40 log bases that are no tree (the planet village's log walls and beams), so null came back while several trees (7 in a probe)
+    // stood in its range; and on the planet more ground loads between evaluates. A later pick (nearer trees are only favoured) then
+    // went to one of those: starting on it drops the interrupted tree's saved progress (it is felled afresh, 17.95 s for 6 logs), and
+    // one it can't reach ("no path") eats a whole run. Called before every run as well, as no chunk loads within one evaluate.
+    window.__clearOthers = keep => {
+      const W = BF.world, F = BF.forester, w = A.village && A.village.wg, b = w && w.minX != null ? w : null, R = 45;
+      const x0 = Math.floor(Math.min(A.position.x, b ? b.minX : Infinity) - R), x1 = Math.ceil(Math.max(A.position.x, b ? b.maxX : -Infinity) + R);
+      const z0 = Math.floor(Math.min(A.position.z, b ? b.minZ : Infinity) - R), z1 = Math.ceil(Math.max(A.position.z, b ? b.maxZ : -Infinity) + R);
+      const y0 = Math.floor(A.position.y) - 20, y1 = Math.floor(A.position.y) + 24;   // findTree: 10 down to 14 up from where it stands then
+      let n = 0;
+      for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+        if (!W.isLoaded(x, z)) continue;
+        for (let y = y0; y <= y1; y++) { const t = F.treeAt(x, y, z); if (t && t.base.join() !== keep) { F._test.fell(null, t, false); n++; } }
+      }
+      return n;
+    };
     // chest trips (js/storage.js) and food shopping (js/villagelife.js) can pull it away from the tree for minutes or spend its emeralds: off
     A.store = { stage: null, checkT: 1e9, avoid: {}, stored: {}, order: null }; A.fshop = { stage: null, deal: null, checkT: 1e9, avoid: {}, cd: 0 };
     // no other trees near: only the one we grow
@@ -42,22 +60,28 @@ module.exports = async (pg, out) => {
   console.log("setup", JSON.stringify(setup));
   if (typeof setup === "string") return;
 
-  // grows an oak about 6-12 blocks from the forester; clears every other natural tree within 70 blocks so it has to fell this one
+  // grows an oak about 6-30 blocks from the forester; clears every other natural tree in its reach first so it has to fell this one
   const grow = () => pg.evaluate(() => {
     const A = window.__A, B = BF.B, W = BF.world, F = BF.forester;
-    for (let i = 0; i < 400; i++) { const t = F.findTree(A); if (!t) break; F._test.fell(null, t, false); }
+    window.__clearOthers(null);
+    let tries = 0;
     for (let r = 6; r < 30; r++) for (let a = 0; a < 6.28; a += 0.2) {
       const x = Math.floor(A.position.x + Math.cos(a) * r), z = Math.floor(A.position.z + Math.sin(a) * r), y = W.heightAt(x, z);
       if (W.getBlock(x, y, z) !== B.grass || ![1, 2, 3, 4, 5, 6, 7, 8, 9].every(k => W.getBlock(x, y + k, z) === 0)) continue;
+      // what is there now, to put back when the oak grows but is no tree to the forester (a log touching a building, or its crown
+      // claimed by a neighbour's): left standing, the trunk and crown (less the sapling's log) would spoil the next spots too
+      const snap = [];
+      for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) for (let dy = 1; dy <= 12; dy++) snap.push([x + dx, y + dy, z + dz, W.getBlock(x + dx, y + dy, z + dz)]);
       W.setBlock(x, y + 1, z, B.oak_sapling);
-      if (F.growTree(x, y + 1, z)) { const t = F.treeAt(x, y + 1, z); return t ? { at: t.base, logs: t.logs.length } : null; }
-      W.setBlock(x, y + 1, z, 0);
+      if (F.growTree(x, y + 1, z)) { const t = F.treeAt(x, y + 1, z); if (t) { window.__T = t.base.join(); return { at: t.base, logs: t.logs.length, tries }; } }
+      for (const [sx, sy, sz, id] of snap) if (W.getBlock(sx, sy, sz) !== id) W.setBlock(sx, sy, sz, id);
+      tries++;
     }
     return null;
   });
   // runs the forester until it fells a tree (or `limit` seconds): seconds spent chopping (task cut, within reach) and the fell log entry
   const watch = (limit, opts) => pg.evaluate(([limit, opts]) => {
-    const A = window.__A, F = BF.forester, n0 = F.LOG.length, dt = 0.05;
+    const A = window.__A, F = BF.forester, n0 = F.LOG.length, dt = 0.05, others = window.__clearOthers(window.__T);
     A.fo = A.fo || null; const st = A.fo || (BF.forester._test.state(A));
     st.cutCd = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.thinkT = 0; st.sweep = null; if (!opts || !opts.keep) st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
@@ -79,7 +103,7 @@ module.exports = async (pg, out) => {
       lastSw = A.ai.swingT;
       for (let i = n0; i < F.LOG.length; i++) if (F.LOG[i].kind === "fell") fell = F.LOG[i];
     }
-    return { chop: +chop.toFixed(2), t: +t.toFixed(1), fell, swings, held, stop, saved: A.fo && A.fo.saved, log: fell ? undefined : F.LOG.slice(-4), task: A.fo && A.fo.task && A.fo.task.kind, pos: [A.position.x, A.position.y, A.position.z].map(Math.floor) };
+    return { chop: +chop.toFixed(2), t: +t.toFixed(1), fell, swings, held, stop, saved: A.fo && A.fo.saved, log: fell ? undefined : F.LOG.slice(-4), others, tasks: F.LOG.slice(n0).filter(e => e.kind === "start" || e.kind === "giveup").slice(0, 8), task: A.fo && A.fo.task && A.fo.task.kind, pos: [A.position.x, A.position.y, A.position.z].map(Math.floor) };
   }, [limit, opts || null]);
 
   // 2a. by hand
@@ -115,6 +139,7 @@ module.exports = async (pg, out) => {
   const t5 = await grow();
   const part = await pg.evaluate(() => {   // chop 7 s, then interrupt it
     const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
+    window.__clearOthers(window.__T);
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
     // the sim clock and drops must move too: with them frozen, a forester waiting for items to land after a felling waits for good
     let chop = 0, pk = null, pc = 0, pd = 0;
@@ -130,7 +155,7 @@ module.exports = async (pg, out) => {
   console.log("part", JSON.stringify(part));
   const r5 = await watch(240);
   console.log("resume", JSON.stringify(r5));
-  ok("interrupted felling resumes", part.saved && part.saved.done >= 2 && r5.fell && r5.fell.at.join() === part.saved.key && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop });
+  ok("interrupted felling resumes", part.saved && part.saved.done >= 2 && r5.fell && r5.fell.at.join() === part.saved.key && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop, tasks: r5.tasks });
 
   // 4. axe shopping: a toolsmith sells iron and diamond axes at its own offers (prices from TRADES.toolsmith)
   const shop = await pg.evaluate(() => {
