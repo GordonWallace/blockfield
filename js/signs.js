@@ -805,7 +805,10 @@ function postNeighbours(v) {
   const G = BF.worldgen;
   if (!G || !G.villagesNear) return [];
   return G.villagesNear(v.x, v.z, POST_RANGE).filter(o => o && !(o.x === v.x && o.z === v.z))
-    .map(o => { const dx = o.x - v.x, dz = o.z - v.z, d = Math.hypot(dx, dz); return { name: o.name || villageName(o) || "Village", dx, dz, d, dist: Math.round(d / 10) * 10 }; })
+    .map(o => {   // on the planet: the way there in the village's face frame (through an edge, or round the planet) and planet distance
+      const t = BF.planet ? BF.planet.toward(v, o, {}) : { x: o.x - v.x, z: o.z - v.z, d: Math.hypot(o.x - v.x, o.z - v.z) };
+      return { name: o.name || villageName(o) || "Village", dx: t.x, dz: t.z, d: t.d, dist: Math.round(t.d / 10) * 10 };
+    })
     .sort((p, q) => p.d - q.d).slice(0, POST_MAX);
 }
 // Decides which planned signposts stand (once per village) and queues their auto text.
