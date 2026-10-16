@@ -13,9 +13,17 @@ module.exports = async (pg, out) => {
     res["w" + k * 128] = await pg.evaluate(([k, zx, zz]) => {
       const d = BF.mapview.getAuto(k, zx, zz), t0 = performance.now();
       BF.mapview.finish(d);
-      let unknown = 0, rivers = 0; for (let i = 0; i < d.bio.length; i++) { if (d.bio[i] === 255) unknown++; if (d.bio[i] === 4) rivers++; }
+      // unknown pixels: only past a cube corner (the wedge between two faces, or off the atlas), where there is nothing to draw
+      let unknown = 0, rivers = 0, unknownOn = 0;
+      for (let i = 0; i < d.bio.length; i++) {
+        if (d.bio[i] === 4) rivers++;
+        if (d.bio[i] !== 255) continue;
+        unknown++;
+        const px = i % d.N, pz = (i / d.N) | 0;
+        if (BF.world.canonXZ(Math.floor(d.x0 + (px + .5) * d.scale), Math.floor(d.z0 + (pz + .5) * d.scale))) unknownOn++;
+      }
       const i = 300, j = 200, x = Math.floor(d.x0 + (i + .5) * d.scale), z = Math.floor(d.z0 + (j + .5) * d.scale);
-      const b = BF.worldgen.biomeAt(x, z), r = { ms: Math.round(performance.now() - t0), N: d.N, scale: d.scale, unknown, riverPx: rivers, match: b.id === d.bio[j * d.N + i] || (b.id === 4 && d.scale > 16) };
+      const b = BF.worldgen.biomeAt(x, z), r = { ms: Math.round(performance.now() - t0), N: d.N, scale: d.scale, unknown, unknownOn, riverPx: rivers, match: b.id === d.bio[j * d.N + i] || (b.id === 4 && d.scale > 16) };
       BF.mapview.paint(d);
       return r;
     }, [k, z.zx, z.zz]);
@@ -30,7 +38,8 @@ module.exports = async (pg, out) => {
   console.log(JSON.stringify(res));
   const bad = [];
   if (res.gen !== 4) bad.push("not a planet");
-  for (const k of [16, 128, z.kMax]) { const m = res["w" + k * 128]; if (m.unknown || !m.match) bad.push("map " + k * 128 + ": " + m.unknown + " unknown pixels, sample match " + m.match); }
+  // (above 64 blocks per pixel the map samples approximate plateau weights, mapview COARSE_SCALE, so its biome may differ from biomeAt's there)
+  for (const k of [16, 128, z.kMax]) { const m = res["w" + k * 128]; if (m.unknownOn || (m.scale <= 64 && !m.match)) bad.push("map " + k * 128 + ": " + m.unknownOn + " unknown pixels on the planet, sample match " + m.match); }
   if (!res.clamped || !res.oldSave) bad.push("wider maps should be clamped to the widest allowed (clamped " + res.clamped + ", old save " + res.oldSave + ")");
   for (const b of bad) console.log("FAIL " + b);
 };
