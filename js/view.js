@@ -10,7 +10,11 @@
 // Nothing is moved for good: positions stay canonical atlas coordinates, and only the world matrices used for this frame's
 // drawing change (begin() before renderer.render, end() after). Off the planet only the onBegin hooks run.
 //
-// API: BF.view = { begin(scene, camera), end(), onBegin(fn), toRender(x, y, z, out), state, cornerRound }
+// Debug toggles (spec r14-21; the prototype's B / C / R keys), all off by default: F3 + B, F3 + C, F3 + R in the game, or the debug
+// screen's Planet section. tints: each face's chunks tinted its own colour; wedge: no round drawing near the cube corners, so the
+// open wedge where three faces meet shows (cornerRound off); sphere: the true sphere everywhere (k = 1) for comparison.
+//
+// API: BF.view = { begin(scene, camera), end(), onBegin(fn), toRender(x, y, z, out), state, cornerRound, debug, setDebug(o) }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -30,6 +34,16 @@ const state = { on: false, f: 0, eyeU: 0, eyeV: 0, eyeY: 0, eye: [0, 0, 0], M: [
   ground: 0, above: 0, kAlt: 0, offPlanet: false };
 const view = { state, cornerRound: true, CORNER0, CORNER1, ALT0, ALT1, OFF, OFF_BACK, SPACE0, SPACE1 };
 BF.view = view;
+
+view.debug = { tints: false, wedge: false, sphere: false };
+// Sets any of the debug toggles ({tints, wedge, sphere}: true / false); returns the toggles now.
+view.setDebug = function (o) {
+  const d = view.debug;
+  for (const k of ["tints", "wedge", "sphere"]) if (o && typeof o[k] === "boolean") d[k] = o[k];
+  view.cornerRound = !d.wedge;
+  if (BF.world && BF.world.faceTintOn) BF.world.faceTintOn.value = d.tints ? 1 : 0;
+  return { ...d };
+};
 
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -133,7 +147,7 @@ view.begin = function (scene, camera) {
   s.corner = Math.hypot(du, dv);
   s.ground = view.groundAt(cam.x, cam.z); s.above = s.eyeY - s.ground;
   s.kAlt = smooth(ALT0, ALT1, s.above);
-  s.k = Math.max(view.roundAt(cam.x, cam.z), s.kAlt);
+  s.k = view.debug.sphere ? 1 : Math.max(view.roundAt(cam.x, cam.z), s.kAlt);
   s.offPlanet = !!(BF.player.offPlanet);
   BF.world.roundK.value = s.k;
   setPlacements();

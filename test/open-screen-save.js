@@ -10,7 +10,7 @@ module.exports = async (pg, out) => {
       const o = { bubbles: true, cancelable: true, button, shiftKey: shift, pointerType: "mouse", clientX: 10, clientY: 10 };
       el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o));
     };
-    const meta = await BF.save.create({ name: "open-screen-save", seed: 5, gameMode: "survival", villages: 9, gen: 3 });
+    const meta = await BF.save.create({ name: "open-screen-save", seed: 5, gameMode: "survival", villages: 9, gen: 4 });
     BF.mobs.spawning = false;
     inv.clear();
     inv.setSlot(0, { id: I.oak_log, count: 20 });
@@ -25,7 +25,8 @@ module.exports = async (pg, out) => {
     return meta.id;
   });
   await pg.reload();                           // the tab closes with the screen still open
-  await pg.waitForTimeout(6000);
+  await require("./lib").ready(pg);   // the planet works out its rivers before the boot world starts (a load before then is wiped by it)
+  await pg.waitForTimeout(1000);
   const res = await pg.evaluate(async id => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const I = BF.I, inv = BF.inventory;
