@@ -13,7 +13,7 @@ The beekeeper looks after the beehives within 24 blocks of its extractor, up to 
 - **Makes candles** from honeycomb and string at its extractor, until it holds 16.
 
 ### Where it gets its materials
-Honey and honeycomb come only from full hives, flowers only from picking, hives from honeycomb and planks, candles from honeycomb and string. It buys planks, string and empty bottles from the other villagers. It keeps honeycomb for its next hive and bottles for its next harvest.
+Honey and honeycomb come only from full hives, flowers only from picking, hives from honeycomb and planks, candles from honeycomb and string. It buys planks, string and empty bottles from the other villagers, the bottles only while it holds fewer than 4, counting its unsold honey. It keeps honeycomb for its next hive and bottles for its next harvest.
 
 ### What it sells
 Honey bottles, honeycomb and candles. It buys empty glass bottles from you. Honey is a last-resort food for a hungry villager.

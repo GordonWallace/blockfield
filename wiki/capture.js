@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Takes Blockfieldpedia's pictures with the game itself: a portrait of every mob and villager profession, and a view of every biome,
-// rivers, mountains, the coast and villages, in a fresh world (seed 1337, the default generators). Writes JPEGs to
+// rivers, mountains, the coast and villages, in a fresh world (seed 1337, the planet; places are found around its spawn on face 4). Writes JPEGs to
 // wiki/versions/<version>/images/ (the version under development by default). Rerun it when a release changes how things look.
 // Needs Playwright with Chromium: NODE_PATH=$(npm root -g) node wiki/capture.js [version] [only-prefix]
 // (e.g. `node wiki/capture.js 1.3 mob-` retakes only the mob portraits). Takes several minutes: each view waits for its terrain to load.
@@ -31,8 +31,8 @@ server.listen(0, "127.0.0.1", async () => {
   const three = path.join(ROOT, ".three-test.min.js");   // the CDN may be out of reach (CI, sandboxes): use the local copy when there is one
   if (fs.existsSync(three)) await pg.route("**/three.min.js", r => r.fulfill({ path: three, contentType: "text/javascript" }));
   await pg.route("https://fonts.**", r => r.abort());
-  await pg.goto(`http://127.0.0.1:${server.address().port}/index.html#seed1337gen3`);   // generator 3 until r14-22 moves capture to the planet (#seed1337 is a planet since r14-19)
-  await pg.waitForFunction(() => window.BF && BF.player && BF.player.start, null, { timeout: 60000 });
+  await pg.goto(`http://127.0.0.1:${server.address().port}/index.html#seed1337`);   // the planet (spec r14-22)
+  await pg.waitForFunction(() => window.BF && BF.player && BF.player.start && !BF.preparing, null, { timeout: 180000 });   // after its river step
   await pg.waitForTimeout(2000);
   await pg.evaluate(() => {
     BF.player.start();
@@ -65,41 +65,42 @@ server.listen(0, "127.0.0.1", async () => {
 
   // ---- places, found from the world generator (deterministic for the seed)
   const P = await pg.evaluate(() => {
-    const W = BF.worldgen, found = {};
+    // around the spawn: (0, 0) is off the planet's atlas. Atlas points within N of a face run on into its neighbours (the unfold)
+    const W = BF.worldgen, found = {}, s = BF.spawnPoint || BF.player.position, sx = Math.floor(s.x), sz = Math.floor(s.z);
     const same = (x, z, name) => [[48, 0], [-48, 0], [0, 48], [0, -48], [34, 34], [-34, -34]].every(([dx, dz]) => W.biomeAt(x + dx, z + dz).name === name);
     for (let r = 0; r < 14000; r += 96) {
       const n = Math.max(1, Math.round(r / 96 * 6));
       for (let a = 0; a < n; a++) {
-        const x = Math.round(Math.cos(a / n * 2 * Math.PI) * r), z = Math.round(Math.sin(a / n * 2 * Math.PI) * r), b = W.biomeAt(x, z);
+        const x = sx + Math.round(Math.cos(a / n * 2 * Math.PI) * r), z = sz + Math.round(Math.sin(a / n * 2 * Math.PI) * r), b = W.biomeAt(x, z);
         if (!found[b.name] && same(x, z, b.name)) found[b.name] = [x, z];
       }
     }
     // the steepest step of the escarpment near the first mountains found: the biggest height change over 64 blocks
     let esc = null, best = 0;
-    for (let x = -4000; x <= 4000; x += 64) for (let z = -4000; z <= 4000; z += 64) {
+    for (let x = sx - 4000; x <= sx + 4000; x += 64) for (let z = sz - 4000; z <= sz + 4000; z += 64) {
       const d = W.heightAt(x + 64, z) - W.heightAt(x, z);
-      if (Math.abs(d) > best && W.heightAt(x, z) > 0) { best = Math.abs(d); esc = [x, z, d > 0 ? 1 : -1]; }
+      if (Math.abs(d) > best && W.heightAt(x, z) > BF.SEA) { best = Math.abs(d); esc = [x, z, d > 0 ? 1 : -1]; }
     }
     const vs = [];
-    for (const v of W.villagesNear(0, 0, 6000)) vs.push({ x: v.x, z: v.z, biome: W.biomeAt(v.x, v.z).name, r: Math.max(v.maxX - v.minX, v.maxZ - v.minZ) || 120 });
+    for (const v of W.villagesNear(sx, sz, 6000).sort((a, b) => BF.planet.distance(s, a) - BF.planet.distance(s, b))) vs.push({ x: v.x, z: v.z, biome: W.biomeAt(v.x, v.z).name, r: Math.max(v.maxX - v.minX, v.maxZ - v.minZ) || 120 });
     return { found, esc, vs };
   });
   // ---- biome facts for the biome pages (versions/<id>/biomes.json): over a 16000-block square around spawn, sampled every 64 blocks:
   // share of the area, ground height, climate, precipitation at ground level, which biomes it borders (checked 16 blocks over) and villages
   if (want("biomes")) {
     const facts = await pg.evaluate(() => {
-      const W = BF.worldgen, out = {}, R = 8000, S = 64;
+      const W = BF.worldgen, out = {}, R = 8000, S = 64, s = BF.spawnPoint || BF.player.position, sx = Math.floor(s.x / S) * S, sz = Math.floor(s.z / S) * S;
       let n = 0;
       const rec = id => out[id] || (out[id] = { n: 0, hs: [], t: 0, hu: 0, precip: [0, 0, 0], next: {}, villages: 0, at: null });
-      for (let x = -R; x < R; x += S) for (let z = -R; z < R; z += S) {
+      for (let x = sx - R; x < sx + R; x += S) for (let z = sz - R; z < sz + R; z += S) {
         const b = W.biomeAt(x, z), r = rec(b.id), h = Math.round(b.height);
         r.n++; n++; r.t += b.temperature; r.hu += b.humidity;
         r.hs.push(h);
         r.precip[BF.weather.precipAt(x, z, Math.max(h, BF.SEA) + 1)]++;
         for (const [dx, dz] of [[16, 0], [0, 16]]) { const o = W.biomeAt(x + dx, z + dz).id; if (o !== b.id) { r.next[o] = (r.next[o] || 0) + 1; rec(o).next[b.id] = (rec(o).next[b.id] || 0) + 1; } }
-        if (!r.at || Math.hypot(x, z) < Math.hypot(r.at[0], r.at[1])) r.at = [x, z];
+        if (!r.at || Math.hypot(x - sx, z - sz) < Math.hypot(r.at[0] - sx, r.at[1] - sz)) r.at = [x, z];
       }
-      for (const v of W.villagesNear(0, 0, R)) rec(W.biomeAt(v.x, v.z).id).villages++;
+      for (const v of W.villagesNear(sx, sz, R)) rec(W.biomeAt(v.x, v.z).id).villages++;
       const res = {};
       for (const [id, r] of Object.entries(out)) {
         if (!r.n) continue;
@@ -150,7 +151,7 @@ server.listen(0, "127.0.0.1", async () => {
 
   // ---- portraits on a grass platform in the sky over the spawn area, one mob or villager each, the sky behind
   const port = await pg.evaluate(() => {
-    const y = Math.round(BF.worldgen.heightAt(64, 64)) + 60, ox = 64, oz = 64;
+    const s = BF.spawnPoint || BF.player.position, ox = Math.floor(s.x) + 64, oz = Math.floor(s.z) + 64, y = Math.round(BF.worldgen.heightAt(ox, oz)) + 60;
     BF.state.paused = false;
     BF.player.teleport(ox, y + 3, oz - 6);
     return { ox, oz, y };
@@ -164,7 +165,8 @@ server.listen(0, "127.0.0.1", async () => {
     const big = type === "iron_golem" || type === "horse", x = port.ox + (i++ % 20) * 24, z = port.oz;
     await pg.evaluate(([x, z, y, type, prof, big, YAW]) => {
       BF.state.paused = false;
-      BF.commands.execute(`/fill ${x - 3} ${y} ${z - 3} ${x + 3} ${y} ${z + 3} grass`);
+      const p = BF.player.position, c = (n, at) => "~" + (n - Math.floor(at));   // relative: commands read u y v on the planet's faces (spec r14-18)
+      BF.commands.execute(`/fill ${c(x - 3, p.x)} ${c(y, p.y)} ${c(z - 3, p.z)} ${c(x + 3, p.x)} ${c(y, p.y)} ${c(z + 3, p.z)} grass`);
       const m = BF.mobs.spawn(type, x + 0.5, y + 1, z + 0.5, prof || undefined);
       if (m) { m.yaw = YAW; if (m.model) m.model.rotation.set(0, m.yaw, 0); }
       const back = big ? 5 : 3.1;

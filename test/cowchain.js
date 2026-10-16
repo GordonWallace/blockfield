@@ -8,7 +8,8 @@
 //  - the cowherd's buckets and wheat come only from its kit and what it bought: it never holds more than that, minus the wheat it fed;
 //  - empty bottles flow back: bottles villagers emptied (milk they drank) are bought back by the cowherd, and none pile up while it is short.
 // A lean day: from day LEAN to LEAN + 1 every villager but the cowherd has its food (all but milk) put away, as after a bad harvest, so hungry
-// villagers turn to the cowherd's milk (their last resort); what was put away comes back the next day (no more than was taken).
+// villagers turn to the cowherd's milk (their last resort); what was put away comes back the next day (no more than was taken), except to a
+// villager holding milk it bought: it gets its food back once it has drunk the milk (by LEAN + 4), so the empties exist to flow back.
 // Usage: NODE_PATH=$(npm root -g) node test/cowchain.js [days=14] [seed=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -25,14 +26,15 @@ const LEAN = 3;
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
-  // the nearest villages (within 3000 blocks of 0,0) that have a pasture
+  // the nearest villages (within 3000 blocks of the spawn) that have a pasture
   const cands = await pg.evaluate(() => {
     window.__halt = true;
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    return BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'pasture'))
-      .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
+    return BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'pasture')).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
   await pg.evaluate(() => {
     const WATCH = window.__WATCH = ['raw_beef', 'steak', 'leather', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'honey_bottle', 'bucket', 'wheat_item'];
@@ -85,8 +87,12 @@ const LEAN = 3;
       for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
       BF.sky.setTime(0.02);
       for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+      // the whole village before the snapshot: a planet village's villagers keep arriving for a while, each with its starting pack (a
+      // cowherd's has a bucket and 30 glass bottles), and one arriving after it would look like stock from nothing
+      for (let i = 0; i < 2400 && window.__villagers().length < v.pop; i++) { if (i % 10 === 0) BF.world.update(v.x, v.z, 30); step(0.05); }
+      BF.sky.setTime(0.02);
       const h = window.__herder(), P = h && BF.cowherd.pastureOf(h);
-      return { key, pop: v.pop, herder: !!h, pasture: P ? { cows: P.cows ? P.cows.length : null, limit: P.limit, cells: P.cells } : null };
+      return { key, pop: v.pop, here: window.__villagers().length, herder: !!h, pasture: P ? { cows: P.cows ? P.cows.length : null, limit: P.limit, cells: P.cells } : null };
     }, v);
     if (r.herder && r.pasture && r.pasture.cows >= 2) { setup = r; break; }
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r)}`);
@@ -96,11 +102,14 @@ const LEAN = 3;
     const R = window.__rec, h = window.__herder();
     R.lines.length = 0; R.restock.length = 0; R.trades.length = 0; R.fed = 0; R.milked = 0; R.kits = 0;
     R.start = window.__total();
-    R.herderStart = { bucket: window.__count(h, 'bucket') + window.__count(h, 'milk_bucket'), wheat: window.__count(h, 'wheat_item') };
+    // every cowherd's stock: a planet village can have two, and the trade and feeding ledgers count them all
+    R.herders0 = window.__villagers().filter(m => m.profession === 'cowherd');
+    const stock = (ms, n) => ms.reduce((a, m) => a + window.__count(m, n), 0);
+    R.herderStart = { bucket: stock(R.herders0, 'bucket') + stock(R.herders0, 'milk_bucket'), wheat: stock(R.herders0, 'wheat_item'), n: R.herders0.length };
     R.herder = h;
     R.beeKit0 = new Set(window.__villagers().filter(m => m.beeKit));   // beekeepers' kits (16 glass bottles each, js/beekeeper.js) given before the run
   });
-  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: pasture ${JSON.stringify(setup.pasture)}`);
+  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop} (${setup.here} here): pasture ${JSON.stringify(setup.pasture)}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
@@ -116,9 +125,10 @@ const LEAN = 3;
         const milk = id => id === BF.I.milk_bottle || id === BF.I.milk_bucket;
         for (const m of window.__villagers()) if (m.profession !== 'cowherd') for (let i = 0; i < m.inv.length; i++) { const st = m.inv[i]; if (st && BF.food.isFood(st.id) && !milk(st.id)) { R.lean.push([m, st.id, st.count]); m.inv[i] = null; } }
         R.leanN = R.lean.reduce((a, x) => a + x[2], 0);
-      } else if (R.lean && !R.leanBack && d >= LEAN + 1) {   // ... and comes back
-        R.leanBack = true;
-        for (const [m, id, n] of R.lean) if (!m.dead) BF.trades.inv.add(m.inv, id, n);
+      } else if (R.lean && R.lean.length && d >= LEAN + 1) {   // ... and comes back the next day; to a villager that bought milk once it has
+        // drunk it (LEAN + 4 at the latest): with its own cheaper food back it would leave the milk in its pack, and no empties would come back
+        const milkLeft = m => m.profession !== 'baker' && window.__count(m, 'milk_bottle') > 0;   // the baker keeps its milk for cakes
+        R.lean = R.lean.filter(([m, id, n]) => { if (m.dead) return false; if (milkLeft(m) && d < LEAN + 4) return true; BF.trades.inv.add(m.inv, id, n); return false; });
       }
       // the herd, and empty bottles other villagers hold while the cowherd is short of them (not the beekeeper's, kept for honey, nor the
       // glassmaker's, made to sell), counted only while both are awake: nobody trades at night, and the cowherd bottles its evening milk
@@ -134,7 +144,9 @@ const LEAN = 3;
     R.beeKits = window.__villagers().filter(m => m.beeKit && !R.beeKit0.has(m)).length;   // ... and during it
     R.beeKitBottles = BF.beekeeper ? BF.beekeeper.KIT_BOTTLES : 0;
     delete R.beeKit0;
-    R.herderEnd = { bucket: window.__count(hd, 'bucket') + window.__count(hd, 'milk_bucket'), wheat: window.__count(hd, 'wheat_item'), alive: !hd.dead,
+    const herders = [...new Set([...R.herders0.filter(m => !m.dead), ...window.__villagers().filter(m => m.profession === 'cowherd')])], stock = (ms, n) => ms.reduce((a, m) => a + window.__count(m, n), 0);
+    delete R.herders0;
+    R.herderEnd = { bucket: stock(herders, 'bucket') + stock(herders, 'milk_bucket'), wheat: stock(herders, 'wheat_item'), n: herders.length, alive: !hd.dead,
       inv: hd.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' ') };
     const FU = BF.furnaceUse, VR = BF.mobs.villages.get(R.key);
     R.furnaces = [...FU.furnaces.values()].filter(f => Math.hypot(f.x + 0.5 - VR.x, f.z + 0.5 - VR.z) <= FU.reachOf(VR) + 8).length;   // furnaces the village's villagers may use
@@ -186,8 +198,8 @@ const LEAN = 3;
   const glassMade = sum(/made (\d+) glass bottles? at the glass kiln/);   // a village glassmaker makes them from sand (js/glassmaker.js)
   const bottles = t => t.glass_bottle + t.milk_bottle + (t.honey_bottle || 0);   // empty, milk and honey (a beekeeper fills its kit bottles with honey)
   ok('no glass bottles from nothing (only hire kits and the glassmaker)', bottles(R.end) <= bottles(R.start) + 30 * R.kits + R.beeKitBottles * R.beeKits + glassMade, [bottles(R.start), R.kits, R.beeKits, glassMade, bottles(R.end)]);
-  ok("no buckets from nothing for the cowherd (kit and purchases only)", R.herderEnd.bucket <= R.herderStart.bucket + bucketsBought + R.kits, [R.herderStart.bucket, bucketsBought, R.herderEnd.bucket]);
-  ok('no wheat from nothing for the cowherd (bought, then fed)', R.herderEnd.wheat <= R.herderStart.wheat + wheatBought - R.fed, [R.herderStart.wheat, wheatBought, R.fed, R.herderEnd.wheat]);
+  ok("no buckets from nothing for the cowherd (kit and purchases only)", R.herderEnd.bucket <= R.herderStart.bucket + bucketsBought + R.kits, [R.herderStart.bucket, bucketsBought, R.herderEnd.bucket, R.herderStart.n, R.herderEnd.n]);
+  ok('no wheat from nothing for the cowherd (bought, then fed)', R.herderEnd.wheat <= R.herderStart.wheat + wheatBought - R.fed, [R.herderStart.wheat, wheatBought, R.fed, R.herderEnd.wheat, R.herderStart.n, R.herderEnd.n]);
   ok('the cowherd fed its cows wheat it bought', R.fed > 0 && wheatBought > 0, { fed: R.fed, wheatBought });
   ok('empty bottles flow back: none pile up with a villager while the cowherd is short', stuck <= 1, { stuck, bottlesBack, milkSold });
   ok('on the lean day hungry villagers bought milk from the cowherd', milkSold > 0, { milkSold, putAway: R.leanN });

@@ -7,7 +7,7 @@ A village gets a cowherd for each of its cow paddocks, with a pasture beside the
 During working hours the cowherd:
 
 - **Milks** every adult cow once a day, and bottles the milk at the churn: 1 bucket of milk and 3 glass bottles make 3 milk bottles, and the bucket comes back.
-- **Feeds** wheat to hungry adults while the herd is at or under its limit (one cow for every 8 cells of pasture).
+- **Feeds** wheat to hungry adults while the herd is at or under its limit (one cow for every 8 cells of pasture). It feeds only as many as keep the herd within one over the limit once the calves come, counting every wild adult cow within 12 blocks of the pasture as if it had already walked in, fed or not.
 - **Culls** adults when the herd is over the limit, never below 2 adults. Each yields raw beef and leather, kept to sell.
 - **Stocks the pasture** if it holds fewer than 2 cows, by leading a wild cow home from within 100 blocks.
 - **Cooks steak** from raw beef in a real furnace with fuel it has bought, keeping 6 raw beef to sell and cooking the rest until it holds 24 steaks.

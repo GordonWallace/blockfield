@@ -5,12 +5,19 @@
 //  - the daily restock never gives anyone arrows, bows, feathers, string, flint, eggs or raw chicken;
 //  - no arrows, feathers or string appear from nothing: the village's totals (packs and chests within 80 blocks) never exceed what it held at the start
 //    plus what was made (arrows crafted, feathers from culls, string spun) minus what was used up (feathers in arrows, string in bows).
+// Surface gravel: the village the test uses (seed 1, -53,450) has no dry gravel on the surface, so the miner's only flint was gravel in the walls
+// of its shaft, which it reached late (day 8-10) or never, and it was underground whenever the fletcher could shop (the fletcher buys only from a
+// seller near its own level, before WORK_END: js/fletcher.js canSell). With its starting 4 flint used up the fletcher then seldom bought flint
+// unless another villager happened to start with some (a random starting kit), and the check failed (every CI run of #332 and #344).
+// The setup now lays GRAVEL blocks of gravel on open ground beside the village, as on a riverbank or scree: the miner digs them and sifts them
+// into flint on the surface (js/miner.js findGravel, sift), where the fletcher can buy it. The check itself is unchanged.
 // Usage: NODE_PATH=$(npm root -g) node test/bowchain.js [days=14] [seed=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
 const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
 const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
+const GRAVEL = 32;   // blocks of surface gravel laid beside the village for the miner's flint (see the header)
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -21,14 +28,14 @@ const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
-  await pg.waitForTimeout(3000);
-  // the nearest village (within 3000 blocks of 0,0) whose villagers include every trade of the chain and that has a coop
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').ready(pg);
+  // the nearest village (within 3000 blocks of the spawn) whose villagers include every trade of the chain and that has a coop
   const cands = await pg.evaluate(() => {
     window.__halt = true;
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    return BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'coop'))
-      .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z)).slice(0, 8).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
+    return BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'coop')).slice(0, 8).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
   await pg.evaluate(() => {
     const WATCH = window.__WATCH = ['arrow', 'bow', 'feather', 'string', 'flint', 'egg', 'raw_chicken'];
@@ -85,9 +92,33 @@ const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r.profs)}`);
   }
   if (!setup) setup = { err: 'no village with ' + NEED.join(', ') + ' and a coop among the nearest ' + cands.length };
-  else await pg.evaluate(() => { const R = window.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = window.__total(); });
+  else {
+    // surface gravel for the miner's flint (see the header): GRAVEL single blocks of gravel laid on flat open ground beside the village, two
+    // blocks apart, clear of anything built: each is a step above the ground around it, which is what the miner digs (js/miner.js quarryable)
+    setup.gravelPlaced = await pg.evaluate(n => {
+      const R = window.__rec, W = BF.world, T = BF.miner._test;
+      const mn = BF.mobs.list.find(m => m.type === 'villager' && m.profession === 'miner' && m.village && m.village.key === R.key && !m.dead);
+      const A = T.area(mn), b = A.box, floor = Math.floor(mn.village.wg && mn.village.wg.y != null ? mn.village.wg.y : mn.village.y) - 12;
+      const out = (x, z) => Math.hypot(Math.max(0, b.minX - x, x - b.maxX), Math.max(0, b.minZ - z, z - b.maxZ));
+      const cols = [];
+      for (let x = A.x0; x <= A.x1; x++) for (let z = A.z0; z <= A.z1; z++) if (!(x & 1) && !(z & 1) && A.inside(x + 0.5, z + 0.5) && out(x, z) >= 3 && W.isLoaded(x, z)) cols.push([x, z, out(x, z)]);
+      cols.sort((p, q) => p[2] - q[2]);
+      const flat = (x, z, y) => [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].every(([dx, dz]) => W.heightAt(x + dx, z + dz) === y);
+      const clear = (x, y, z) => { for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) if (!T.checkCell({ x: x + dx, y: y - 1, z: z + dz, h: 6 }).ok) return false; return true; };
+      let placed = 0;
+      for (const [x, z] of cols) {
+        if (placed >= n) break;
+        const y = W.heightAt(x, z);
+        if (y + 1 < floor || !BF.SOLID[W.getBlock(x, y, z)] || W.getBlock(x, y + 1, z) !== 0 || W.getBlock(x, y + 2, z) !== 0 || !flat(x, z, y) || !clear(x, y, z)) continue;
+        W.setBlock(x, y + 1, z, BF.B.gravel); placed++;
+      }
+      return placed;
+    }, GRAVEL);
+    if (setup.gravelPlaced < GRAVEL) setup = { err: 'room for only ' + setup.gravelPlaced + ' of ' + GRAVEL + ' surface gravel by village ' + setup.key };
+    else await pg.evaluate(() => { const R = window.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = window.__total(); });
+  }
   if (setup.err) { console.log('FAIL ' + setup.err); await b.close(); process.exitCode = 1; return; }
-  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}`);
+  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}, surface gravel ${setup.gravelPlaced}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {

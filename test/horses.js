@@ -12,10 +12,11 @@ module.exports = async (pg, out) => {
     };
     const W = BF.world, B = BF.B, I = BF.I, P = BF.player, H = BF.horses;
     BF.state.paused = true;
-    BF.newWorld(5, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(5, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     W.setViewDist(8);
-    await load(8, 8);
+    const SX = Math.floor(BF.spawnPoint.x), SZ = Math.floor(BF.spawnPoint.z);   // the world spawn (generator 3 used 8, 8)
+    await load(SX, SZ);
 
     // ---- recipes and items ----
     const recipes = BF.inventory.recipes;
@@ -50,7 +51,7 @@ module.exports = async (pg, out) => {
     ok("a foal of two perfect parents stays inside the ranges", top.hp <= H.HP_MAX && top.speed <= H.SPEED_MAX + 1e-9 && top.jump <= H.JUMP_MAX + 1e-9, top);
 
     // ---- a flat test field high above the spawn ----
-    const x0 = 8, z0 = 8, y0 = BF.worldgen.heightAt(x0, z0) + 30;
+    const x0 = SX, z0 = SZ, y0 = BF.worldgen.heightAt(x0, z0) + 30;
     const fill = (xa, xb, y, za, zb, id) => { for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) W.setBlock(x, y, z, id); };
     fill(x0 - 6, x0 + 6, y0, z0 - 60, z0 + 6, B.stone);
     const settle = async m => { for (let i = 0; i < 40; i++) { BF.mobs.update(0.05); if (i % 10 === 0) await tick(); } };

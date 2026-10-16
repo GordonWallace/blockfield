@@ -20,7 +20,9 @@ async function openWorld(seed) {
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.__raf = raf; window.requestAnimationFrame = cb => (window.__halt ? (window.__pending = cb, 0) : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed + 'gen3');
+  await require('./lib').install(pg);
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
+  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
   await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
   return pg;
@@ -80,7 +82,7 @@ function survey(key) {
   for (const seed of seeds) {
     let pg = await openWorld(seed);
     const villages = await pg.evaluate(n => {
-      const vs = BF.worldgen.villagesNear(0, 0, 3000).filter(Boolean).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+      const vs = BFT.villages(3000).filter(Boolean);
       return vs.slice(0, n * 3).map(v => ({ x: v.x, z: v.z, y: v.y }));
     }, PER_SEED);
     let done = 0;

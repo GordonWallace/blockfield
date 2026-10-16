@@ -91,12 +91,19 @@ module.exports = async (pg) => {
     kit(B, [["egg", 6], ["coal", 2], ["bread", 12]]); kit(C, [["egg", 6], ["coal", 2], ["bread", 12]]);
     for (const m of [B, C]) { m.position.set(F1.x + 0.5 + (m === B ? 2 : -2), F1.y, F1.z + 2.5); m.vel.set(0, 0, 0); }
     BF.sky.setTime(0.06);
+    // their cooked eggs stay in their packs while this runs: meals and a child's cost take the cheapest food first, and that is cooked egg
+    // (js/villagelife.js edible), so B and C have eaten ahead (satiation) and no one courts meanwhile (a big village has births)
+    for (const m of [B, C]) if (m.life) m.life.sat = Math.max(m.life.sat || 0, 3);
+    const breedTick = BF.breeding.tick;
+    BF.breeding.tick = () => {};
     let maxAt = 0, bothSeen = 0;
-    for (let i = 0; i < 16000 && !(c(B, "cooked_egg") + c(C, "cooked_egg") === 12 && !(B.eggc && B.eggc.stage) && !(C.eggc && C.eggc.stage)); i++) {
-      step();
-      const n = sampleCooks(F1); maxAt = Math.max(maxAt, n);
-      if (B.eggc && B.eggc.stage && C.eggc && C.eggc.stage) bothSeen++;
-    }
+    try {
+      for (let i = 0; i < 16000 && !(c(B, "cooked_egg") + c(C, "cooked_egg") === 12 && !(B.eggc && B.eggc.stage) && !(C.eggc && C.eggc.stage)); i++) {
+        step();
+        const n = sampleCooks(F1); maxAt = Math.max(maxAt, n);
+        if (B.eggc && B.eggc.stage && C.eggc && C.eggc.stage) bothSeen++;
+      }
+    } finally { BF.breeding.tick = breedTick; }
     R.info.BC = { B: [c(B, "egg"), c(B, "cooked_egg"), B.eggc && B.eggc.stage], C: [c(C, "egg"), c(C, "cooked_egg"), C.eggc && C.eggc.stage], bothBusy: bothSeen, t: +BF.sky.time.toFixed(3),
       log: EC.LOG.filter(e => e.kind === "giveup").slice(-5) };
     ok("never two villagers cooking at one furnace", maxAt <= 1, maxAt);
@@ -152,14 +159,22 @@ module.exports = async (pg) => {
     }
     const ate = [];
     BF.food.onEat((m, got, ids) => { if (m === H) ate.push(...ids.map(id => BF.items[id].name)); });
+    // what S sold, as each food trade happens (js/villagelife.js doFoodDeal logs it, then emits villagerFoodTrade): S's own stock is no
+    // measure of what H bought, as S's egg offer is open to the whole village, and in a big one another hungry villager with emeralds may buy
+    // S's other 16 eggs to cook in the same furnace meanwhile (the village log keeps only its last 300 entries: copied here)
+    const sold = [], eggs0 = c(S, "egg");
+    BF.on("villagerFoodTrade", (buyer, seller) => { if (seller === S) sold.push({ toH: buyer === H, ...BF.villageLife.log[BF.villageLife.log.length - 1] }); });
     let bought = 0, hStat = new Set();
     for (let i = 0; i < 16000 && !ate.includes("cooked_egg"); i++) {
       if (i % 20 === 0) { S.position.set(H.position.x + 2, H.position.y, H.position.z); S.vel.set(0, 0, 0); hStat.add(BF.villagerStatus.text(H)); }
       step(); bought = Math.max(bought, c(H, "egg") + c(H, "cooked_egg"));
       if (BF.sky.time > 0.44) BF.sky.setTime(0.2);
     }
-    R.info.H = { inv: H.inv.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count), ate, statuses: [...hStat], seller: [c(S, "egg"), c(S, "emerald")] };
-    ok("hungry H bought 16 eggs from the egg seller", bought >= 16 && c(S, "egg") === 16 && c(S, "emerald") >= 1, R.info.H);   // S may sell other things meanwhile
+    const toH = sold.filter(l => l.toH);
+    R.info.H = { inv: H.inv.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count), ate, statuses: [...hStat], seller: [c(S, "egg"), c(S, "emerald")],
+      fromS: toH.map(l => l.got + " for " + l.paid), sOthers: sold.filter(l => !l.toH).map(l => l.who + ": " + l.got) };
+    // H bought exactly 16 eggs from S for 1 emerald, out of S's stock (S may sell other things, and eggs to others, meanwhile)
+    ok("hungry H bought 16 eggs from the egg seller", bought >= 16 && toH.length === 1 && toH[0].got === "16 egg" && toH[0].paid === "1 emerald" && eggs0 - c(S, "egg") >= 16, R.info.H);
     ok("H cooked them in the furnace and ate cooked eggs", ate.includes("cooked_egg") && !ate.includes("egg"), R.info.H);
     ok("H never ate a raw egg; eggs conserved (16 bought = raw + cooked + eaten)", c(H, "egg") + c(H, "cooked_egg") + ate.filter(n => n === "cooked_egg").length === 16, R.info.H);
     R.info.F3 = F3;
