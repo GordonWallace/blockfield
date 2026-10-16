@@ -45,9 +45,11 @@ module.exports = async (pg, out) => {
         for (const c of sc.children) if (c.visible && !(c.userData && (c.userData.lod !== undefined || c.userData.chunk))) { c.visible = false; hidden.push(c); }
         const bg = sc.background, fog = sc.fog;
         sc.background = new THREE.Color(1, 0, 1); sc.fog = null;
+        if (BF.globe) BF.globe.hidden = true;   // the rings alone (the globe, js/globe.js, has its own test)
         BF.view.begin(sc, BF.camera);
         R.setRenderTarget(window.__rt); R.render(sc, BF.camera); R.setRenderTarget(null);
         BF.view.end();
+        if (BF.globe) BF.globe.hidden = false;
         sc.background = bg; sc.fog = fog;
         for (const c of hidden) c.visible = true;
         const px = new Uint8Array(s.x * s.y * 4);
