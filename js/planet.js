@@ -329,9 +329,48 @@ function atlasOfLatLon(lat, lon, out) {
   return atlas(g.f, g.u, g.v, out);
 }
 
+// ---------- geographic directions (shared with r14-17; the F3 facing, /locate and maps use these) ----------
+// Grid directions at an atlas point are in that point's own frame (a margin address: the frame it is seen in). Off the planet north is
+// -z, as in 1.3. At a pole north is undefined: bearing / facingBearing return null and north() returns null.
+const gfr = {}, gc = {};
+function geo(x, z) {   // canonical frame at (x, z): { c, east, north } as 3D unit vectors, or null (off the atlas, or at a pole)
+  canon(x, z, gc);
+  if (gc.off) return null;
+  frame(gc.f, gc.u, gc.v, sea(), gfr);
+  const up = gfr.up, el = Math.hypot(up[2], up[0]);
+  if (el < 1e-9) return null;
+  const east = [up[2] / el, 0, -up[0] / el];
+  const north = [up[1] * east[2] - up[2] * east[1], up[2] * east[0] - up[0] * east[2], up[0] * east[1] - up[1] * east[0]];   // up x east
+  return { c: gc, east, north };
+}
+// Unit grid vector [dx, dz] toward the north pole at (x, z).
+function north(x, z) {
+  if (!isPlanet()) return [0, -1];
+  const g = geo(x, z);
+  if (!g) return null;
+  const t = toGrid(g.north, gfr), r = turnVec(g.c.turn, t[0], t[1]), l = Math.hypot(r[0], r[1]) || 1;   // canonical frame -> the address's frame
+  return [r[0] / l, r[1] / l];
+}
+// Bearing in degrees clockwise from north (0 to 360) of grid direction (dx, dz) at (x, z).
+function bearing(x, z, dx, dz) {
+  if (!isPlanet()) return ((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360;
+  const g = geo(x, z);
+  if (!g) return null;
+  const t = turnVec((4 - g.c.turn) % 4, dx, dz), eu = gfr.eu, ev = gfr.ev;   // the address's frame -> canonical
+  const d = [eu[0] * t[0] + ev[0] * t[1], eu[1] * t[0] + ev[1] * t[1], eu[2] * t[0] + ev[2] * t[1]];
+  const de = d[0] * g.east[0] + d[2] * g.east[2], dn = d[0] * g.north[0] + d[1] * g.north[1] + d[2] * g.north[2];
+  return ((Math.atan2(de, dn) * 180 / Math.PI) + 360) % 360;
+}
+// The bearing the player faces with yaw `yaw` (Blockfield's: forward = (-sin yaw, -cos yaw)).
+const facingBearing = (x, z, yaw) => bearing(x, z, -Math.sin(yaw), -Math.cos(yaw));
+const POINTS = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"], SHORT = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+// The nearest of the eight compass points: "north-east", or "NE" when short.
+const compassPoint = (deg, short) => (short ? SHORT : POINTS)[((Math.round(deg / 45) % 8) + 8) % 8];
+
 BF.planet = {
   N, R, W, LOCAL, FACES, EDGE, UNFOLD,
   dir, fromDir, onFace, pos, wrap, frame, toGrid, gridDistance, gridToward, latLon, fromLatLon,
   isPlanet, atlas, face, grid, canon, canonCell, turnVec, turnYaw, rel, distance, toward, recanon, latLonAt, atlasOfLatLon,
+  north, bearing, facingBearing, compassPoint,
 };
 })();

@@ -43,12 +43,19 @@ module.exports = async (pg, out) => {
     const llE = BF.planet.latLonAt(p.x + 100 * dE, p.z);
     const dN = Math.abs(C.bearing(0, -1, p.x, p.z)) < 1 || Math.abs(C.bearing(0, -1, p.x, p.z) - 360) < 1 ? -1 : 1;
     const llN = BF.planet.latLonAt(p.x, p.z + 100 * dN);
+    // BF.planet.north points along bearing 0, also through a turned margin address; compassPoint names
+    const n = BF.planet.north(p.x, p.z);
+    out.northVec = Math.abs(BF.planet.bearing(p.x, p.z, n[0], n[1])) < 1e-6 || Math.abs(BF.planet.bearing(p.x, p.z, n[0], n[1]) - 360) < 1e-6;
+    const mx = BF.planet.W * 4 + BF.planet.N + BF.planet.N + 50, mz = BF.planet.N + 9000, nm = BF.planet.north(mx, mz), bm = BF.planet.bearing(mx, mz, nm[0], nm[1]);
+    out.northMargin = bm < 1e-6 || 360 - bm < 1e-6;
+    out.points = [BF.planet.compassPoint(44), BF.planet.compassPoint(46, true), BF.planet.compassPoint(359)].join();
     out.eastOk = llE.lon > ll0.lon && Math.abs(llE.lat - ll0.lat) < 1e-3;
     out.northOk = llN.lat > ll0.lat && Math.abs(llN.lon - ll0.lon) < 1e-3;
     return out;
   });
   console.log("facing " + JSON.stringify(facing));
   check(facing.eastOk && facing.northOk, "compass bearings agree with latitude and longitude");
+  check(facing.northVec && facing.northMargin && facing.points === "north-east,NE,north", "BF.planet.north / bearing / compassPoint agree (also at a margin address)");
   check(new Set([facing.yaw0, facing.yaw90, facing.yaw180, facing.yaw270].map(s => s.split(" ")[0])).size === 4, "four quarter turns give four compass facings");
 
   // ---- /tp forms

@@ -36,27 +36,10 @@ function llText(lat, lon) {
   return `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"} ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
 }
 
-// Compass bearing (degrees clockwise from north) of a grid direction (dx, dz) at atlas point (x, z). Off the planet north is -z, as in
-// Minecraft (and Blockfield 1.3's maps). Null at a pole, where north is undefined.
-const fr = {};
-function bearing(dx, dz, x, z) {
-  if (!onPlanet()) return ((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360;
-  const P = BF.planet, c = P.canon(x, z, cc);
-  if (c.off) return null;
-  // the direction is in (x, z)'s own frame; turn it into the canonical face's frame
-  const t = P.turnVec((4 - c.turn) % 4, dx, dz);
-  P.frame(c.f, c.u, c.v, BF.SEA, fr);
-  const up = fr.up, eu = fr.eu, ev = fr.ev;
-  const d = [eu[0] * t[0] + ev[0] * t[1], eu[1] * t[0] + ev[1] * t[1], eu[2] * t[0] + ev[2] * t[1]];
-  const east = [up[2], 0, -up[0]], el = Math.hypot(east[0], east[2]);
-  if (el < 1e-6) return null;
-  east[0] /= el; east[2] /= el;
-  const north = [up[1] * east[2] - up[2] * east[1], up[2] * east[0] - up[0] * east[2], up[0] * east[1] - up[1] * east[0]];   // up x east
-  const de = d[0] * east[0] + d[2] * east[2], dn = d[0] * north[0] + d[1] * north[1] + d[2] * north[2];
-  return ((Math.atan2(de, dn) * 180 / Math.PI) + 360) % 360;
-}
-const NAMES = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
-const compass = deg => (deg == null ? "at the pole" : NAMES[Math.round(deg / 45) % 8]);
+// Compass bearing (degrees clockwise from north) of a grid direction (dx, dz) at atlas point (x, z): BF.planet.bearing (north is -z off
+// the planet, as in 1.3). Null at a pole.
+const bearing = (dx, dz, x, z) => BF.planet.bearing(x, z, dx, dz);
+const compass = deg => (deg == null ? "at the pole" : BF.planet.compassPoint(deg));
 // The player's facing (yaw: forward = (-sin yaw, -cos yaw)) as "north-east (37°)".
 function facing(yaw, x, z) {
   const b = bearing(-Math.sin(yaw), -Math.cos(yaw), x, z);
