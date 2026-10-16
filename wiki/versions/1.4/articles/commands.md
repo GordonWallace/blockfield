@@ -12,7 +12,7 @@ Commands let you change the world and yourself. They are meant for building, tes
 - While it is open, keys go to the box and not to the game. Replies appear in a log that fades after 10 seconds.
 - Bad input prints an error or the usage line. Commands never crash the game.
 
-**Coordinates** can be plain numbers, `~` for your position, or `~5` for five blocks from it. Item names can be written with or without a `minecraft:` prefix, and some familiar vanilla names such as `grass_block`, `oak_planks` and `cooked_beef` also work.
+**Coordinates** can be plain numbers, `~` for your position, or `~5` for five blocks from it. On the planet they are `u y v` on the face you are standing on (see [[page:the-planet]]), in the same order as x y z. You can go past the face's edges: up to one face width beyond them is the neighbouring face, laid out flat, so `~10` works across an edge, and whatever you place or summon there lands on the right face. Further out than that is off the planet. Replies give places as `face 2  u 81,920  v 81,920  y 64`. Item names can be written with or without a `minecraft:` prefix, and some familiar vanilla names such as `grass_block`, `oak_planks` and `cooked_beef` also work.
 
 **Cheats.** Using any command other than `/help`, `/seed` and `/say` marks the saved world as having used cheats.
 
@@ -21,6 +21,13 @@ Commands let you change the world and yourself. They are meant for building, tes
 - `/help [command]`: Lists the commands, or shows one command's syntax. `/?` does the same.
 - `/tp <x> <y> <z> [yaw] [pitch]`: Teleports you. Height must be within the world. Also `/teleport`.
 - `/tp <x> <z>`: Teleports you to the surface at that spot.
+- On the planet there are more ways to say where:
+  - `/tp face <0-5> <u> <v> [y]`: to a point on any face, on the surface unless you give a layer.
+  - `/tp <lat> <lon> [y]`: to a latitude and longitude, written with their letters, as in `/tp 35.26N 45E` or `/tp 10.5S 120W 2000`.
+  - `/tp corner <1-8>`: to one of the planet's eight corners, 40 blocks in from it, 30 above the ground, flying and facing it.
+  - `/tp up <blocks>`: straight up, that many blocks above the ground (or sea) where you are, flying. `/tp up 25000` takes you off the planet.
+  - `/tp ground`: back down to the surface where you are.
+  - A teleport keeps the compass direction you face. A spot past a corner, where no face lies flat, lands on the nearest point.
 - `/time set <day|noon|sunset|night|midnight|sunrise|ticks>`: Sets the time of day.
 - `/time add <ticks>`: Moves the clock on, rolling over into new days.
 - `/time query <daytime|day|gametime>`: Prints the time of day in ticks, the day number, or the total time.
@@ -36,7 +43,7 @@ Commands let you change the world and yourself. They are meant for building, tes
 - `/spawnpoint [x y z]`: Sets your respawn point, by default where you stand. Also `/setworldspawn`.
 - `/setblock <x> <y> <z> <block> [replace|keep|destroy]`: Places one block. `keep` only fills air; `destroy` drops the old block as if mined.
 - `/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [mode]`: Fills a box with a block, at most 32768 blocks.
-- `/locate village`: Reports the nearest village, its name and distance.
+- `/locate village`: Reports the nearest village, its name and distance. On the planet it also gives the compass direction and the `/tp face` command that goes there.
 - `/heal [amount]`: Restores health: full by default, or the number of half-hearts you give.
 - `/feed`: Fills your hunger and saturation.
 - `/say <message>`: Prints a message.

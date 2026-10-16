@@ -29,6 +29,18 @@ const pins = new Map();          // trip id -> { a, b (worldgen villages), keys:
 let t = 0, lastT = 0, pinDirty = false;
 
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
+// The planet (spec r14-15): villages are canonical records, and villagers are kept in their village's frame even past a face edge (js/mobs.js
+// frames), so a point is first seen from the village (BF.planet.local) before it is measured against the village's box; distances between
+// two places use BF.planet.distance; chunk keys are always canonical (canonKey). All of these are the identity off the planet.
+const PL = () => BF.planet;
+const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
+const LQ = {}, CQ = {};
+function canonKey(x, z) {
+  const CS = BF.CS;
+  if (onPlanet()) { const c = PL().canonCell(Math.floor(x), Math.floor(z), CQ); if (!c.off) { x = c.x; z = c.z; } }
+  return Math.floor(x / CS) + "," + Math.floor(z / CS);
+}
+const pdist = (a, b) => onPlanet() ? PL().distance(a, b) : Math.hypot(b.x - a.x, b.z - a.z);
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 
 function footprint(v) {
@@ -79,11 +91,30 @@ function rebuild() {
 }
 // The chunks a walk from village a to village b crosses, plus one chunk either side.
 function corridor(a, b) {
-  const CS = BF.CS, out = new Set(), d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(d / 4));
+  const CS = BF.CS, out = new Set();
+  if (onPlanet()) return corridorP(a, b);
+  const d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(d / 4));
   for (let i = 0; i <= n; i++) {
     const cx = Math.floor((a.x + (b.x - a.x) * i / n) / CS), cz = Math.floor((a.z + (b.z - a.z) * i / n) / CS);
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) out.add((cx + dx) + "," + (cz + dz));
   }
+  return [...out];
+}
+// The planet: walk from a toward b in 4-block steps (BF.planet.toward: straight through an edge's unfold when close, along the great circle
+// when far), keeping the walker on its canonical square, and add each step's chunk and the chunks either side in the walker's frame, mapped
+// to their canonical keys.
+function corridorP(a, b) {
+  const P = PL(), CS = BF.CS, out = new Set(), p = { x: a.x, z: a.z }, t = {}, c = {};
+  for (let i = 0; i < 100000; i++) {
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) out.add(canonKey(p.x + dx * CS, p.z + dz * CS));
+    P.toward(p, b, t);
+    if (!(t.d > 4)) break;
+    p.x += t.x / t.d * 4; p.z += t.z / t.d * 4;
+    P.canon(p.x, p.z, c);
+    if (c.off) break;
+    p.x = c.x; p.z = c.z;
+  }
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) out.add(canonKey(b.x + dx * CS, b.z + dz * CS));
   return [...out];
 }
 function pin(id, a, b, keys) {
@@ -96,7 +127,11 @@ function unpin(id) { if (pins.delete(id)) { pinDirty = true; lastT = 0; } }
 const pinnedKeys = () => { const s = new Set(); for (const p of pins.values()) { s.add(vKey(p.a)); s.add(vKey(p.b)); } return s; };
 
 // Distance from a point to the village's edge (its bounds), 0 inside.
-const edgeDist = (v, px, pz) => Math.hypot(Math.max(0, v.minX - px, px - v.maxX), Math.max(0, v.minZ - pz, pz - v.maxZ));
+// (The planet: the point is seen from the village first, so a player or villager just across a face edge measures true.)
+function edgeDist(v, px, pz) {
+  if (onPlanet()) { LQ.x = px; LQ.z = pz; PL().local(v, LQ, LQ); px = LQ.x; pz = LQ.z; }
+  return Math.hypot(Math.max(0, v.minX - px, px - v.maxX), Math.max(0, v.minZ - pz, pz - v.maxZ));
+}
 
 // ---- the unload countdown
 // A village that would stop (the player is too far, or it lost its place among the nearest few) keeps running until its villagers' tasks are
@@ -114,7 +149,7 @@ function taskLeft(m, rec) {
   if (m.profession === "explorer") return 0;                         // explorers are carved out: they unload with their village wherever they are
   if (m.profession === "merchant" && m.mc && m.mc.trip && BF.merchant && BF.merchant.leftSecs) { taskLeft.errand = true; return Math.min(MAXT, BF.merchant.leftSecs(m)); }
   const v = rec.wg;
-  const out = v && v.minX != null ? edgeDist(v, m.position.x, m.position.z) : Math.max(0, Math.hypot(m.position.x - rec.x, m.position.z - rec.z) - 40);
+  const out = v && v.minX != null ? edgeDist(v, m.position.x, m.position.z) : Math.max(0, pdist(rec, m.position) - 40);
   const t = m.vtask, left = t && t.end > nowDay() ? (t.end - nowDay()) * DAY_S : 0;   // what its task's estimate says is left (begin)
   if (out > 4) { taskLeft.errand = true; return Math.min(MAXT, Math.max(left, out * 1.3 / (((m.def && m.def.speed) || 0.9) * travellerSpeed(m)))); }   // out beyond the edge: at least the walk back
   return Math.min(MAXT, left);
@@ -126,7 +161,7 @@ const travellerSpeed = m => (m.profession === "merchant" || m.profession === "ex
 function walkSecs(m, pts) {
   const sp = ((m.def && m.def.speed) || 0.9) * travellerSpeed(m);
   let x = m.position.x, z = m.position.z, d = 0;
-  for (const p of pts || []) { if (!p) continue; const px = p.x != null ? p.x : p[0], pz = p.z != null ? p.z : p[1]; d += Math.hypot(px - x, pz - z); x = px; z = pz; }
+  for (const p of pts || []) { if (!p) continue; const px = p.x != null ? p.x : p[0], pz = p.z != null ? p.z : p[1]; d += pdist({ x, z }, { x: px, z: pz }); x = px; z = pz; }
   return d * 1.3 / sp;
 }
 // The villager is about to start a task of `secs` game seconds (`what` names it for the debug screen). Returns false, and the task must not
@@ -228,9 +263,9 @@ function windows() {
     const ent = active.get(rec.key);
     if (!ent) continue;
     if (!ent.set) ent.set = new Set(ent.keys);
-    const cx = Math.floor(m.position.x / CS), cz = Math.floor(m.position.z / CS);
-    if (ent.set.has((cx - WIN) + "," + (cz - WIN)) && ent.set.has((cx + WIN) + "," + (cz + WIN)) && ent.set.has((cx - WIN) + "," + (cz + WIN)) && ent.set.has((cx + WIN) + "," + (cz - WIN))) continue;   // well inside its village
-    for (let dz = -WIN; dz <= WIN; dz++) for (let dx = -WIN; dx <= WIN; dx++) next.add((cx + dx) + "," + (cz + dz));
+    const x = m.position.x, z = m.position.z, K = (dx, dz) => canonKey(x + dx * CS, z + dz * CS);   // (canonical: a villager past an edge is kept in its village's frame)
+    if (ent.set.has(K(-WIN, -WIN)) && ent.set.has(K(WIN, WIN)) && ent.set.has(K(-WIN, WIN)) && ent.set.has(K(WIN, -WIN))) continue;   // well inside its village
+    for (let dz = -WIN; dz <= WIN; dz++) for (let dx = -WIN; dx <= WIN; dx++) next.add(K(dx, dz));
   }
   let same = next.size === winKeys.size;
   if (same) for (const k of next) if (!winKeys.has(k)) { same = false; break; }
@@ -368,7 +403,8 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
+  areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, DROP,
+  _edgeDist: edgeDist,
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);

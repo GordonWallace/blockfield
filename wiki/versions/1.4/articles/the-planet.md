@@ -20,6 +20,8 @@ Only where three faces meet at one of the planet's eight corners is there no fla
 
 Everything that spreads from block to block carries on across an edge too. A torch lights the ground on the next face, a roof shades both sides, water flows over and stops where it would anywhere else, water on one face keeps farmland on the other hydrated, grass spreads across, and a tree can grow astride an edge. Signs placed side by side across an edge stay two separate boards.
 
+Things that move cross edges the same way. Animals, villagers and monsters walk across and keep going; a zombie chasing you follows you over, and a cow follows wheat across. Dropped items slide over and can be picked up on the other side, arrows fly across, and a boat or horse carries its rider over, still heading the same way. Animals that belong to a village or a pen stay counted with it even when they wander over the edge.
+
 Two of the faces sit over the poles and four go round the equator. Latitude and longitude are measured on the true sphere, with longitude 0 through the middle of one of the equator faces.
 
 ## Flying high
@@ -34,7 +36,11 @@ Survival players can't fly, so none of this changes survival play.
 
 ## Coordinates
 
-Each face has its own block of x and z coordinates, so every place on the planet still has a single x and z. Coordinates jump when you cross from one face to the next, and on some edges the directions turn too: what was "towards +x" on one face can be "towards -z" on the next. The game keeps drawing the world from your own position, so it stays sharp and steady however large the numbers get.
+A place on the planet is written as its face (0 to 5), its position on that face's grid, `u` and `v` (each from 0 to 163,839), and its layer `y`, as in `face 2  u 81,920  v 81,920  y 64`. The debug screen (F3) shows this, with the latitude and longitude (`35.26°N 45.00°E`) and the compass direction you face, from north through east. Faces 2 and 3 sit over the north and south poles; the middle of face 4 is 0°N 0°E.
+
+When you cross an edge your face number changes and `u` and `v` start again from the new face's corner. On some edges the grid also turns, so walking "towards +u" on one face can be walking "towards -v" on the next. Compass directions never jump: north is always towards the north pole.
+
+Commands take `u y v` on the face you are on, and you can type past its edges onto the neighbouring faces; you can also give a face, a latitude and longitude, or one of the corners. See [[page:commands]]. In creative mode P opens a teleport panel, and in any mode M opens a map of the whole planet (see [[page:maps-and-compasses]]).
 
 ## Continents and corners
 
@@ -54,4 +60,4 @@ The planet's rivers are worked out for the whole world at once when it starts (t
 
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. There are no villages yet. Flying high you only see the patch of ground around you for now: the distant land and the whole globe below are still to come.
+The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]). Flying high you only see the patch of ground around you for now: the distant land and the whole globe below are still to come (the planet map already shows the whole globe).

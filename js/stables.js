@@ -89,7 +89,7 @@ function stockGen() {
   const pp = BF.player && BF.player.position, W = BF.world, H = BF.horses;
   if (!pp || !H || !BF.mobs.villages) return;
   for (const R of BF.mobs.villages.values()) {
-    if (!R.wg || stocked.has(R.key) || Math.hypot(R.x - pp.x, R.z - pp.z) > 80) continue;
+    if (!R.wg || stocked.has(R.key) || BF.planet.distance(R, pp) > 80) continue;
     const e = genStable(R), st = e && stableOf(R);
     if (!st || st.e !== e) continue;
     const b = st.box;

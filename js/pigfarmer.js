@@ -129,7 +129,7 @@ function pigAI(m, dt, out) {
     if (H().ledStep(m, dt, out, S, S && S.task && S.task.sty, inRoom)) return true;
   }
   if (!m.sty && BF.player && BF.player.position && !BF.player.dead && playerFeed()) {
-    const p = BF.player.position, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);
+    const p0 = BF.player.position, q = BF.planet && BF.planet.isPlanet() ? BF.planet.local(m.position, p0) : p0, p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
     if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return H().follow(m, dt, out, p.x, p.z, 2, sp); }
   }
   return H().mateStep(m, dt, out, t, MATING);
@@ -235,7 +235,7 @@ function tickSties() {
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
     if (!(rec.wg && (rec.wg.buildings || []).some(b => b.type === "sty")) && !(rec.built || []).some(e => e.type === "sty")) continue;
-    if (Math.hypot(rec.x - pp.x, rec.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
+    if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const p of stiesOf(rec)) {
       if (!W.isLoaded(p.fx0, p.fz0) || !W.isLoaded(p.fx1, p.fz1) || !W.isLoaded(p.fx0, p.fz1) || !W.isLoaded(p.fx1, p.fz0)) continue;
       if (!p.pigs) initSty(p);

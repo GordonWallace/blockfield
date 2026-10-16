@@ -79,7 +79,7 @@ const P = (BF.player = {
 // ---------- small helpers ----------
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const inv = () => BF.inventory || {};
-const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
+const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()) || !!(BF.coords && BF.coords.panel.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
 const selectedItem = () => {
   try { const s = inv().selected && inv().selected(); return s && s.count > 0 ? s : null; } catch (_) { return null; }
 };
@@ -103,6 +103,7 @@ const css = `
 .bfp-card{background:var(--panel);border:1px solid var(--panel-edge);border-radius:4px;padding:22px 24px;max-width:440px;width:100%;box-sizing:border-box;text-align:center;color:var(--ink);margin:auto}
 .bfp-title{font:400 44px/1 var(--display);letter-spacing:1px;margin:0 0 8px;color:var(--ink);text-shadow:3px 3px 0 #2d4a1a}
 .bfp-death .bfp-title{text-shadow:3px 3px 0 #3a0a06}
+.bfp-death .bfp-sub{white-space:pre-line}
 .bfp-sub{font:400 13px/1.3 var(--display);color:var(--accent);margin:0 0 14px}
 .bfp-card button{font:400 14px/1 var(--display);background:#3b4a35;color:var(--ink);border:1px solid var(--panel-edge);border-bottom:3px solid rgba(0,0,0,.45);padding:11px 14px;border-radius:3px;cursor:pointer;width:100%;margin:5px 0;box-sizing:border-box}
 .bfp-card button:hover,.bfp-card button:focus-visible{background:#4f6a3f;outline:none}
@@ -1659,8 +1660,10 @@ function die() {
     try { inv().close(); } catch (_) {}
     try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
     try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
+    try { if (BF.coords && BF.coords.panel.isOpen()) BF.coords.panel.close(); } catch (_) {}
   }
-  deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
+  const where = BF.coords && BF.coords.onPlanet() ? "\n" + BF.coords.describe(pos.x, pos.y, pos.z, { whole: true }) + "  " + (BF.coords.latLonText(pos.x, pos.z) || "") : "";   // planet: where it happened (spec r14-18)
+  deathEl.querySelector(".bfp-sub").textContent = (DEATH_MSG[lastCause] || "You died") + where;
   showScreen("death");
   BF.state.paused = true;
   exitLock();
@@ -1855,28 +1858,38 @@ function physics(dt) {
 // the same frame (js/view.js), so the picture doesn't move. Past two edges at once (a corner's wedge, deep in the ocean) the
 // nearest face takes them.
 const cc = {}, ct = [0, 0];
-function recanonAt(p, holder, v) {   // p: {x, z}; holder: has a yaw (or null); v: {x, z} velocity (or null). True if moved.
-  const PL = BF.planet, c = PL.canon(p.x, p.z, cc);
-  if (c.off || (c.x === p.x && c.z === p.z)) return false;
+function turnBy(q, holder, v) {
+  if (!q) return;
+  const PL = BF.planet;
+  if (holder) holder.yaw = PL.turnYaw(q, holder.yaw);
+  if (v) { PL.turnVec(q, v.x, v.z, ct); v.x = ct[0]; v.z = ct[1]; }
+}
+function recanonAt(p, holder, v) {   // p: {x, z}; holder: has a yaw (or null); v: {x, z} velocity (or null). The quarter turns applied, or -1 if not moved.
+  const c = BF.planet.canon(p.x, p.z, cc);
+  if (c.off || (c.x === p.x && c.z === p.z)) return -1;
   p.x = c.x; p.z = c.z;
   const q = (4 - c.turn) % 4;
-  if (q) {
-    if (holder) holder.yaw = PL.turnYaw(q, holder.yaw);
-    if (v) { PL.turnVec(q, v.x, v.z, ct); v.x = ct[0]; v.z = ct[1]; }
-  }
-  return true;
+  turnBy(q, holder, v);
+  return q;
 }
 const me = { yaw: 0 };
 function crossEdge() {
   if (!BF.planet || !BF.planet.isPlanet()) return;
   if (vehicle) {
     const vp = vehicle.pos || vehicle.position;
-    if (vp && recanonAt(vp, vehicle, vehicle.vel)) {
+    const q = vp ? recanonAt(vp, vehicle, vehicle.vel) : -1;
+    if (q >= 0) {   // the rider crosses with it: the view and velocity turn by the same quarter turns
+      if (vehicle.model && vehicle.model.rotation) vehicle.model.rotation.y = vehicle.yaw;
+      me.yaw = yaw; turnBy(q, me, vel); yaw = me.yaw;
       if (vehicle.ctl.seatOf) { const st = vehicle.ctl.seatOf(vehicle, "player"); pos.set(st.x, st.y, st.z); }
+      else recanonAt(pos, null, null);
+      if (breakTarget) resetBreak();
+      emit("crossedEdge", { x: pos.x, z: pos.z });
+      return;
     }
   }
   me.yaw = yaw;
-  if (recanonAt(pos, me, vel)) {
+  if (recanonAt(pos, me, vel) >= 0) {
     yaw = me.yaw;
     if (breakTarget) resetBreak();
     emit("crossedEdge", { x: pos.x, z: pos.z });
@@ -2064,6 +2077,7 @@ P.dismount = () => dismount();       // get off (Shift); also when the boat brea
 P.ride = function (fwd, turn, dt, jump) {  // tests: one real-time step of what the player rides with this input; false when riding nothing
   if (!vehicle) return false;
   rideStep(dt, { fwd, turn, strafe: -turn, jump: !!jump, yaw });
+  crossEdge();   // as the real frame does after physics (a face edge on the planet)
   return true;
 };
 // Save-game state. deserialize() expects the world (seed) to be set up already, e.g. right after BF.newWorld.

@@ -163,7 +163,7 @@ function chickenAI(m, dt, out) {
     }
   }
   if (!m.coop && BF.player && BF.player.position && !BF.player.dead && playerSeeds()) {
-    const p = BF.player.position, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);
+    const p0 = BF.player.position, q = BF.planet && BF.planet.isPlanet() ? BF.planet.local(m.position, p0) : p0, p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
     if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 1.6, sp); }
   }
   if (!willing(m, t)) { m.mate = null; return false; }
@@ -282,7 +282,7 @@ function tickCoops() {
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
     if (!rec.wg) continue;
-    if (Math.hypot(rec.x - pp.x, rec.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
+    if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const coop of coopsOf(rec)) {
       if (!W.isLoaded(coop.fx0, coop.fz0) || !W.isLoaded(coop.fx1, coop.fz1) || !W.isLoaded(coop.fx0, coop.fz1) || !W.isLoaded(coop.fx1, coop.fz0)) continue;
       if (!coop.hens) initCoop(coop);

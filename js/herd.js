@@ -21,6 +21,11 @@ let ids = 0;
 const idOf = new WeakMap();
 const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };   // a stable order between two animals (which one breeds)
 
+// On the planet animals and their herders may be kept in different frames near a face edge (js/mobs.js keepFrame): positions are compared
+// as seen from the animal (BF.planet.local), so offsets are true local ones across an edge.
+const LQ = {};
+const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
+
 // ---------------------------------------------------------------- walking
 // Sets out to walk m towards (tx, tz) at `speed`, facing it once within `stop`. Always true (the caller's AI handled this step).
 function follow(m, dt, out, tx, tz, stop, speed) {
@@ -39,7 +44,7 @@ function findMate(m, t, willing, pen, r) {
   const mp = pen(m);
   for (const o of BF.mobs.list) {
     if (o.type !== m.type || !live(o)) continue;
-    const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
+    const q = seenXZ(m.position, o.position), dx = q.x - m.position.x, dz = q.z - m.position.z, d2 = dx * dx + dz * dz;
     if (d2 < LOCAL_R * LOCAL_R) near++;
     if (o === m || pen(o) !== mp || !willing(o, t) || Math.abs(o.position.y - m.position.y) > 2) continue;
     if (d2 < bd) { bd = d2; best = o; }
@@ -49,7 +54,7 @@ function findMate(m, t, willing, pen, r) {
 // How many of m's kind stand within LOCAL_R blocks of it (m too).
 function crowd(m) {
   let n = 0;
-  for (const o of BF.mobs.list) if (o.type === m.type && live(o) && Math.hypot(o.position.x - m.position.x, o.position.z - m.position.z) < LOCAL_R) n++;
+  for (const o of BF.mobs.list) if (o.type === m.type && live(o) && (q => Math.hypot(q.x - m.position.x, q.z - m.position.z))(seenXZ(m.position, o.position)) < LOCAL_R) n++;
   return n;
 }
 // One AI step of a willing adult: looks for a mate now and then (c.find(m, t)), walks to it and breeds (c.breed(a, b, t)) once within c.meet.
@@ -66,7 +71,7 @@ function mateStep(m, dt, out, t, c) {
     if (!m.mate) return false;
     m.mateSeek = 0;
   }
-  const o = m.mate, dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d = Math.hypot(dx, dz), sp = m.def.speed;
+  const o = m.mate, q = seenXZ(m.position, o.position), dx = q.x - m.position.x, dz = q.z - m.position.z, d = Math.hypot(dx, dz), sp = m.def.speed;
   m.mateSeek += dt;
   if (d > c.mateR + 4 || m.mateSeek > 30) { m.mate = null; m.mateT = rnd(6, 10); return false; }
   m.ai.mode = "idle"; m.ai.t = 1; m.lookAt = o;
@@ -101,9 +106,10 @@ function ledStep(m, dt, out, S, P, inRoom) {
   if (!live(L) || !tk || tk.mob !== m || tk.kind !== "fetch" || S.stage === "walk" || !P) { m.ledBy = null; return false; }
   const tr = S.trail, k0 = S.trailBase;
   let ci = Math.max(m.crumb || 0, k0);
-  while (ci < k0 + tr.length - 1 && Math.hypot(tr[ci - k0][0] - m.position.x, tr[ci - k0][2] - m.position.z) < 0.8) ci++;
+  const crumb = c => seenXZ(m.position, { x: c[0], z: c[2] });   // trail crumbs are in the herder's frame
+  while (ci < k0 + tr.length - 1 && (q => Math.hypot(q.x - m.position.x, q.z - m.position.z))(crumb(tr[ci - k0])) < 0.8) ci++;
   m.crumb = ci;
-  const dk = Math.hypot(L.position.x - m.position.x, L.position.z - m.position.z);
+  const lp = { ...seenXZ(m.position, L.position) }, dk = Math.hypot(lp.x - m.position.x, lp.z - m.position.z);
   if (S.stage === "pen") {   // the herder waits outside with the gate open: in through the gate, then to the middle of the pen
     const [gx, gz] = P.gate, inG = Math.abs(m.position.x - gx - 0.5) < 0.6 && Math.abs(m.position.z - gz - 0.5) < 0.6;
     m.penIn = m.penIn || inG || inRoom(P, m.position);
@@ -116,17 +122,17 @@ function ledStep(m, dt, out, S, P, inRoom) {
   }
   m.penIn = false; m.atOut = false;
   m.lookAt = L;
-  if (ci >= k0 + tr.length - 1 || dk < 2.6) return follow(m, dt, out, L.position.x, L.position.z, 1.8, sp * 1.2);
-  const c = tr[ci - k0];
-  return follow(m, dt, out, c[0], c[2], 0.25, sp * 1.25);
+  if (ci >= k0 + tr.length - 1 || dk < 2.6) return follow(m, dt, out, lp.x, lp.z, 1.8, sp * 1.2);
+  const c = crumb(tr[ci - k0]);
+  return follow(m, dt, out, c.x, c.z, 0.25, sp * 1.25);
 }
 // The herder's step while leading tk.mob home to pen c.pen ({gate, out [x, z] the path cell in front of the gate, y ground}): to the path in
 // front of the gate, then it holds the gate open while the animal goes in. It waits when the animal falls behind and goes back for it when it
 // does not come. c = {pen, max (seconds), penned(o) (it is in), arrived(), failed(why, d), stand ([x, z], optional)}: arrived / failed end the task. Returns true while
 // it is leading (it set out), false once the task ended.
 function lead(m, S, tk, dt, out, c) {
-  const o = tk.mob, P = c.pen, p = m.position;
-  const dk = Math.hypot(o.position.x - p.x, o.position.z - p.z);
+  const o = tk.mob, P = c.pen, p = m.position, op = { ...seenXZ(p, o.position) };
+  const dk = Math.hypot(op.x - p.x, op.z - p.z);
   S.lostT = dk > 16 ? (S.lostT || 0) + dt : 0;
   if (S.lostT > 10 || S.t > c.max) { c.failed(S.lostT > 10 ? "lost" : "slow", dk); return false; }
   if (c.penned(o)) { c.arrived(); return false; }
@@ -142,19 +148,19 @@ function lead(m, S, tk, dt, out, c) {
     }
   }
   if (S.stage === "pen") {   // at the gate: the animal walks in by itself (ledStep) while the herder holds the gate open
-    m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
+    m.ai.route = null; out.faceX = op.x; out.faceZ = op.z; m.lookAt = o;
     if ((S.inT = (S.inT || 0) + dt) > 20) { S.stage = "lead"; S.inT = 0; S.trail = [[p.x, p.y, p.z]]; S.trailBase = 0; o.crumb = 0; }   // it wandered off: lead it back to the gate
     return true;
   }
   if (dk > 5.5) {   // wait for it; if it doesn't come (caught behind something), go back for it and start the trail again from there
-    m.ai.route = null; out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o;
+    m.ai.route = null; out.faceX = op.x; out.faceZ = op.z; m.lookAt = o;
     if ((S.waitT = (S.waitT || 0) + dt) > 8) { S.waitT = 0; S.stage = "walk"; S.gx = null; o.ledBy = null; }
     return true;
   }
   S.waitT = 0;
   const at = c.stand || P.out;   // where it waits: in front of the gate, or (c.stand) beside that cell so the animal has the way in to itself
   const st = BF.villageLife.travel(m, S, dt, out, at[0], P.y + 1, at[1], m.def.speed * 0.8);
-  if (st === "arrived") { m.ai.route = null; if (dk < 3.2) { S.stage = "pen"; S.inT = 0; } else { out.faceX = o.position.x; out.faceZ = o.position.z; m.lookAt = o; } }
+  if (st === "arrived") { m.ai.route = null; if (dk < 3.2) { S.stage = "pen"; S.inT = 0; } else { out.faceX = op.x; out.faceZ = op.z; m.lookAt = o; } }
   else if (st === "failed") { c.failed("nopath", dk); return false; }
   return true;
 }

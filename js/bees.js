@@ -254,7 +254,7 @@ function stepBee(b, dt, lp, now) {
   // angry bees go for the player
   if (b.angry > now && !b.stung) {
     const pp = playerPos();
-    if (pp && !(BF.player && BF.player.dead) && Math.hypot(pp.x - b.x, pp.z - b.z) < R + 6) {
+    if (pp && !(BF.player && BF.player.dead) && BF.planet.distance(b, pp) < R + 6) {
       b.mode = "sting"; b.land = null;
       const d = flyTo(b, pp.x, pp.y + 1.1, pp.z, STING_SPEED, dt, true);
       if (d < 0.7) {
@@ -350,7 +350,7 @@ function housekeeping() {
   for (const h of list) {
     if (h.day < day) { if (h.bees > 0 && h.bees < MAX && flowersNear(h, true).length >= GROW_FLOWERS) h.bees++; h.day = day; }   // one bee a game day it is loaded
     h.rest = h.rest.filter(t => t > now);
-    h.dist = Math.hypot(h.x - pp.x, h.z - pp.z);
+    h.dist = BF.planet.distance(h, pp);
   }
   list.sort((a, b) => a.dist - b.dist);
   let left = CAP;

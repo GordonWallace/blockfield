@@ -94,14 +94,22 @@ function useBlank(m) {
   const M = BF.maps, inv = T().inv, X = state(m), slot = blankSlots(m)[0];
   if (!slot) return false;
   const size = BF.items[slot.id].mapSize, held = carriedNames(m);
-  const zones = [];
+  const zones = [], PL = onPlanet() ? BF.planet : null, seenZ = new Set();
   const zx0 = M.zoneOf(m.position.x), zz0 = M.zoneOf(m.position.z);
   for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
-    const zx = zx0 + dx, zz = zz0 + dz, nm = M.nameOf(size, zx, zz);
-    if (held.has(nm) || X.fin[nm]) continue;
+    let zx = zx0 + dx, zz = zz0 + dz;
+    if (PL) {   // zones around it in its own frame, named by the face they really lie on (across an edge: the next face's zone)
+      const c = PL.canon(M.centre(zx), M.centre(zz), ZC);
+      if (c.off || c.wedge) continue;
+      zx = M.zoneOf(c.x); zz = M.zoneOf(c.z);
+    }
+    const nm = M.nameOf(size, zx, zz);
+    if (seenZ.has(nm) || held.has(nm) || X.fin[nm]) continue;
+    seenZ.add(nm);
     const d = M.getData(size, zx, zz, false);
     if (d && coverage(d) >= FILLED) continue;
-    zones.push({ zx, zz, nm, dist: Math.hypot(M.centre(zx) - m.position.x, M.centre(zz) - m.position.z) });
+    const cz = { x: M.centre(zx), z: M.centre(zz) };
+    zones.push({ zx, zz, nm, dist: PL ? PL.distance(m.position, cz) : Math.hypot(cz.x - m.position.x, cz.z - m.position.z) });
   }
   if (!zones.length) { X.cd = 60; return false; }
   zones.sort((a, b) => a.dist - b.dist);
@@ -139,6 +147,8 @@ function travel(m, st, dt, out, tx, tz, speed, radius) {
 }
 
 // ---------------------------------------------------------------- exploring
+const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
+const ZC = {}, TF = {};
 const inLoaded = (x, z) => { const W = BF.world; return W.isLoaded(x, z) && W.isLoaded(x + EDGE, z) && W.isLoaded(x - EDGE, z) && W.isLoaded(x, z + EDGE) && W.isLoaded(x, z - EDGE); };
 // Next patch of map `c` to visit: the nearest unexplored, loaded one near the player that has not been given up. null + reason otherwise.
 function pickTarget(m, c) {
@@ -149,9 +159,14 @@ function pickTarget(m, c) {
     if (cellFill(d, ci, cj) >= CELL_DONE) continue;
     const k = c.it.name + ":" + ci + "," + cj;
     if ((X.avoid[k] || 0) >= 2) { avoided++; continue; }
-    const wx = Math.floor(ox + (ci * CELL + CELL / 2) * s), wz = Math.floor(oz + (cj * CELL + CELL / 2) * s);
+    let wx = Math.floor(ox + (ci * CELL + CELL / 2) * s), wz = Math.floor(oz + (cj * CELL + CELL / 2) * s);
     open++;
-    if (!inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE)) continue;
+    if (onPlanet()) {   // the patch (in the map's face frame) in the explorer's own frame, which may be the next face's
+      const q = BF.planet.inFrame(BF.planet.face(m.position.x, m.position.z), wx + 0.5, wz + 0.5, TF);
+      if (!q) continue;
+      wx = Math.floor(q.x); wz = Math.floor(q.z);
+    }
+    if (!inLoaded(wx, wz) || (!BF.villageSim && (onPlanet() ? BF.planet.distance(pp, { x: wx, z: wz }) : Math.hypot(wx - pp.x, wz - pp.z)) > PLAYER_RANGE)) continue;
     const dist = Math.hypot(wx + 0.5 - m.position.x, wz + 0.5 - m.position.z);
     if (dist < bd) { bd = dist; best = { ci, cj, wx, wz, k }; }
   }
