@@ -12,6 +12,10 @@ Light changes gradually rather than switching:
 - After sunset, dusk takes an hour and a half to darken to full night, which is dim but never black.
 - Dawn mirrors this before sunrise.
 
+### One clock for the whole planet
+
+The world is a round planet (see [[page:the-planet]]), but it has **one clock**: it is the same time of day everywhere, wherever you travel, so villagers everywhere keep the same hours. The sun and moon rise in the east and set in the west wherever you are; at a given time they stand at the same height above the horizon everywhere on the planet.
+
 Many things in the game are measured in game days: crops, animal growth and breeding, restocking by traders, weather spells. See [[page:farming]], [[page:animal-husbandry]] and [[page:village-economy]].
 
 ## Sleeping
@@ -35,6 +39,10 @@ Weather comes in spells of **clear**, **rain** and **thunder**, on a schedule fi
 - Rain and snow build up over about fifteen seconds when a spell begins.
 
 Where precipitation falls depends on the biome: deserts, badlands and savannas stay dry under grey skies, snowy biomes get snow, and cold mountain heights get snow while the lowlands below get rain. Nothing falls where there is cover overhead, so it does not rain indoors, in caves or under thick trees.
+
+### Clouds
+
+Clouds drift slowly east, about a block a second near the equator and hardly at all near the poles. They are one pattern over the whole planet, so they carry on unbroken across the edges between the planet's faces. Their height follows the land below: you walk under them on plains and hills and climb above them only on high peaks.
 
 ### What weather does
 
