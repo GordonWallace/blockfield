@@ -14,7 +14,8 @@
 // Every atlas helper is the identity (or plain x/z maths) when the world is not the planet (generators 1 to 3).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const BF = (G.BF = G.BF || {});
 
 const N = 163840;                // columns along a face edge; the equator is 4N = 655,360 blocks around
 const R = (2 * N) / Math.PI;     // sea-level radius, so a column at a face centre is one block wide
