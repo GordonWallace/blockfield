@@ -78,10 +78,13 @@ module.exports = async (pg) => {
     const wedge = { x: a.x - 10, z: a.z - 10 };   // past two edges of face 4 at once
     return {
       air: W.getBlock(wedge.x, 0, wedge.z) === 0, refused: W.setBlock(wedge.x, 0, wedge.z, BF.B.stone) === false,
+      // chunks off the atlas (x < 0 at the face-0 corner, z < 0, past face 5) still generate: open sea, no neighbouring face's features
+      offAtlas: [[-1, 0], [-1, -1], [0, -1], [6 * P.W / 16, 3]].every(([cx, cz]) => { try { return BF.worldgen.generateRange(cx, cz, 0, 1).length > 0; } catch (e) { return false; } }),
       sea: [[4, 3, 3], [4, N - 3, N - 3], [2, 10, 10], [0, N - 2, 5], [3, N / 2 + 0, 2]].slice(0, 4).every(([f, u, v]) => { const q = P.atlas(f, u, v); return BF.worldgen.heightAt(q.x, q.z) < BF.SEA && BF.worldgen.waterLevelAt(q.x, q.z) === BF.SEA; }),
     };
   });
   check(corner.air && corner.refused, "a corner wedge reads air and refuses writes");
+  check(corner.offAtlas, "chunks off the atlas (around 0, 0 and past the last face) generate without errors");
   check(corner.sea, "the cube corners are open ocean");
 
   const errs = await pg.evaluate(() => window.__errs);
