@@ -36,9 +36,9 @@ const RIBBON_HIDE = 9000, MINW = 3;   // river ribbons: hidden above this height
 const STAND_LEVELS = 6;        // rings with tree and building stand-ins (cells of 4 to 128 blocks)
 const STAND_MAX = 14000;       // blocks from the player: stand-ins further out are never shown (a 10-block patch is under a pixel on any
                                // screen up to 4K), so none are made past that plus how far a ring moves (MOVE)
-const BOX_LEVELS = 1;          // of those, the ones drawn as boxes (the rest as points)
-const THIN = [0, 1, 2, 3, 4, 5];   // ring by ring: one tree cell kept in each square of 2^m x 2^m (js/grid.js): each ring draws about as many
-                                   // stand-ins as the last (the ground's canopy colour stands in for the rest)
+const BOX_LEVELS = 2;          // of those, the ones drawn as boxes, out to 1 km (the rest as points drawn like small boxes)
+const THIN = [0, 0, 0, 1, 2, 3];   // ring by ring: one tree cell kept in each square of 2^m x 2^m (js/grid.js): every tree out to 2 km, then
+                                   // one in 4, 16 and 64 per ring, as the prototype (the ground's canopy colour stands in for the rest)
 const HOUSE_LEVELS = 5;        // rings with village buildings, out to 8 km (beyond, a building is under a pixel before the ring starts)
 const pxScale = { value: 900 };   // pixels per radian at the middle of the screen: drawing-buffer height / (2 tan(fov / 2))
 
@@ -183,6 +183,12 @@ uniform mat3 toHole;   // the ring's face grid into the view face's (the loaded 
 uniform mat3 toHole2;  // into the finer ring's face
 uniform float seam2;
 varying vec3 vColor;
+#ifndef BOXES
+varying vec3 vSide;    // the crown's (or roof's) sides, and the trunk's (or walls')
+varying vec3 vLow;
+varying vec4 vRows;    // where the top face, crown sides and trunk end, down the point (0 at its top)
+varying vec2 vHalf;    // half-widths of the crown and the trunk, across the point
+#endif
 #include <fog_pars_vertex>
 #define NEAR(d) clamp(10.0 * pxScale / (d) - 1.0, 0.0, 1.0)
 void main() {
@@ -214,9 +220,28 @@ void main() {
   vec3 l = vec3(position.x * wd.x, up ? c + position.y * b.z : position.y * a.z, position.z * wd.y);
   vColor = (up ? top : low) * shade;
 #else
-  vec3 l = vec3(0.0, b.z > 0.0 ? c + 0.5 * b.z : 0.5 * a.z, 0.0);
-  vColor = (b.x > 0.0 ? top : low) * 0.85;
-  gl_PointSize = max(px, 1.0);
+  // a point drawn like the two boxes seen from here: the crown's (or roof's) top face, its sides below, then the trunk (or walls), each
+  // shaded as the boxes' faces are. sn is how steeply the view looks down on it.
+  bool crown = b.z > 0.0;
+  float cw = crown ? max(b.x, b.y) : max(a.x, a.y), ch = crown ? b.z : 0.0, tw = max(a.x, a.y), th = crown ? c : a.z, tall = th + ch;
+  vec3 upM = vec3(0.0, 1.0, 0.0);
+  if (uK > 0.0) upM = normalize(mix(upM, mat3(sphM) * (frame * upM), uK));
+  vec3 mid = w0 + upM * (0.5 * tall);
+  vec4 mvMid = modelViewMatrix * vec4(mid, 1.0);
+  float sn = clamp(dot(normalize(-mvMid.xyz), normalize((modelViewMatrix * vec4(upM, 0.0)).xyz)), 0.0, 1.0), cs = sqrt(1.0 - sn * sn);
+  float k = pxScale / d, hTop = cw * sn * k, hSide = ch * cs * k, hLow = th * cs * k, wMax = max(cw, tw) * k;
+  float size = clamp(max(wMax, hTop + hSide + hLow), 1.0, 64.0);
+  float y0 = 0.5 - 0.5 * (hTop + hSide + hLow) / size;
+  vRows = vec4(y0, y0 + hTop / size, y0 + (hTop + hSide) / size, y0 + (hTop + hSide + hLow) / size);
+  vHalf = vec2(cw, tw) * k / size * 0.5;
+  vec3 tc = crown ? top : low;
+  vSide = tc * 0.8; vLow = low * 0.72;
+  vColor = tc;
+  // under about 2 pixels the shapes don't show: one colour, the faces' average by the area each covers
+  float aTop = hTop * cw * k, aSide = hSide * cw * k, aLow = hLow * tw * k;
+  if (size < 2.0) { vColor = (tc * aTop + vSide * aSide + vLow * aLow) / max(1e-6, aTop + aSide + aLow); vRows = vec4(0.0); }
+  gl_PointSize = size;
+  vec3 l = vec3(0.0, 0.5 * tall, 0.0);
 #endif
   vec3 t = base + l;
   if (uK > 0.0) t = mix(t, (sphM * vec4(sph + frame * l, 1.0)).xyz, uK);
@@ -227,9 +252,25 @@ void main() {
 const STAND_FRAG = `
 uniform float uDay;
 varying vec3 vColor;
+#ifndef BOXES
+varying vec3 vSide;
+varying vec3 vLow;
+varying vec4 vRows;
+varying vec2 vHalf;
+#endif
 #include <fog_pars_fragment>
 void main() {
-  gl_FragColor = vec4(vColor * max(0.1, uDay), 1.0);
+  vec3 col = vColor;
+#ifndef BOXES
+  if (vRows.w > vRows.x) {
+    vec2 q = gl_PointCoord;
+    float x = abs(q.x - 0.5);
+    if (q.y < vRows.x || q.y > vRows.w) discard;
+    if (q.y < vRows.z) { if (x > max(vHalf.x, 0.5 / 64.0)) discard; col = q.y < vRows.y ? vColor : vSide; }
+    else { if (x > max(vHalf.y, 0.5 / 64.0)) discard; col = vLow; }
+  }
+#endif
+  gl_FragColor = vec4(col * max(0.1, uDay), 1.0);
 #include <fog_fragment>
 }`;
 function standMaterial(boxes) {
