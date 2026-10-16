@@ -167,7 +167,16 @@ lod.reset = function (scene) {
   if (!fullIdx) fullIdx = new THREE.BufferAttribute(BF.gridJob.fullIndex(2 * EXT + 1), 1);   // made once here: it takes tens of ms
   BF.gridJob.palette(lod.pal);
   BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale });
+  // Without workers (a page opened as a file rather than through run.sh, where browsers refuse them) there is no distant terrain: sampling
+  // in the page fills one ring in minutes, and seven rings drawn in software rendering slow every frame. BF.lodInline forces it on.
+  if (BF.sampler.inline && !BF.lodInline) off();
 };
+function off() {
+  lod.active = false;
+  for (const L of lod.levels) if (L.mesh) { dispose(L.mesh); L.mesh = null; }
+  if (lod.ribbon) { dispose(lod.ribbon); lod.ribbon = null; }
+  BF.sampler.reset(null);
+}
 function dispose(m) {
   if (m.parent) m.parent.remove(m);
   m.geometry.dispose(); m.material.dispose();
@@ -295,6 +304,7 @@ function unfoldMatrix(m, f, g) {
 let last = null, speed = 0;
 lod.update = function (budgetMs = 4) {
   if (!lod.active || !BF.player || !BF.player.position) return;
+  if (BF.sampler.inline && !BF.lodInline) { off(); return; }   // the workers failed to load
   const t0 = performance.now();
   update(budgetMs);
   // main-thread time per frame (without inline sampling, which has its own budget): for the budget test

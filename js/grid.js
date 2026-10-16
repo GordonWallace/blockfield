@@ -276,7 +276,7 @@ S.reset = function (world) {
   for (const w of S.workers) w.terminate();
   S.workers = []; S.queue = []; S.running = null; S.world = world;
   S.inline = !!BF.lodInline || typeof Worker === "undefined" || location.protocol === "file:";
-  if (S.inline) return;
+  if (S.inline || !world) return;   // (no world: just stopped)
   const k = Math.max(1, Math.min(6, (navigator.hardwareConcurrency || 2) - 1));   // every core but the page's, up to 6
   for (let i = 0; i < k; i++) {
     let w;

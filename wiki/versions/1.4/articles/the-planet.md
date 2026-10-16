@@ -56,7 +56,7 @@ Beyond the loaded chunks, the land carries on to the horizon as distant terrain:
 
 The colours come from the blocks themselves: grass, sand, snow and stone take the average colour of their textures, tinted by biome just as the blocks are, and the sea darkens with depth. Where trees grow, the ground takes the colour of their leaves over the share of it the crowns cover, so forests keep their colour however far away they are.
 
-Distant terrain is there at every height, from standing on the ground to high above the planet, and fills in as you travel: the land far ahead is worked out in the background, coarse rings first, without slowing the game down.
+Distant terrain is there at every height, from standing on the ground to high above the planet, and fills in as you travel: the land far ahead is worked out in the background, coarse rings first, without slowing the game down. It is worked out by background workers, which browsers allow only when the game is started with run.sh; opened straight from its file, the game shows the land only as far as the loaded chunks.
 
 ## While 1.4 is being built
 
