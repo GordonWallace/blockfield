@@ -164,6 +164,7 @@ lod.reset = function (scene) {
   last = null; speed = 0;
   if (!lod.active) { if (BF.sampler) BF.sampler.reset(null); return; }
   if (!lod.pal) lod.pal = palette();
+  if (!fullIdx) fullIdx = new THREE.BufferAttribute(BF.gridJob.fullIndex(2 * EXT + 1), 1);   // made once here: it takes tens of ms
   BF.gridJob.palette(lod.pal);
   BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale });
 };
@@ -204,7 +205,8 @@ function start(L, f, cu, cv) {
   // moving with the player: the finest first
   const prio = b.fresh ? -1 - L.lv : L.lv;
   for (const [j0, j1, i0, i1] of rects) {
-    const w = i1 - i0, step = Math.max(1, Math.floor(4000 / w));
+    // about 12,000 samples a job (a few hundred ms in a worker): few enough answers that a slow frame doesn't leave workers idle
+    const w = i1 - i0, step = Math.max(1, Math.floor(12000 / w));
     for (let j = j0; j < j1; j += step) {
       const job = { f, u0: gu0 + i0 * c, v0: gv0 + j * c, cell: c, nx: w, ny: Math.min(step, j1 - j) };
       b.pending++;

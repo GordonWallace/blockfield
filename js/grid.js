@@ -257,14 +257,14 @@ S.reset = function (world) {
   for (let i = 0; i < k; i++) {
     let w;
     try { w = new Worker("js/lodworker.js"); } catch (e) { S.inline = true; break; }
-    w.busy = null;
+    w.busy = [];   // jobs posted to this worker, oldest first (it answers in order)
     w.postMessage({ init: world, palette: PAL });
-    w.onmessage = (e) => { const it = w.busy; w.busy = null; if (e.data.ms) { S.workMs += e.data.ms; S.samples += e.data.ok.length; } if (it && !it.dead) it.done(e.data); pump(); };
+    w.onmessage = (e) => { const it = w.busy.shift(); if (e.data.ms) { S.workMs += e.data.ms; S.samples += e.data.ok.length; } if (it && !it.dead) it.done(e.data); pump(); };
     w.onerror = (e) => {
       // a worker that can't load: sample in the page instead
       console.warn("distant terrain: worker failed, sampling in the page", e && e.message);
       S.inline = true;
-      for (const x of S.workers) { if (x.busy && !x.busy.dead) S.queue.push(x.busy); x.terminate(); }
+      for (const x of S.workers) { for (const it of x.busy) if (!it.dead) S.queue.push(it); x.terminate(); }
       S.workers = [];
     };
     S.workers.push(w);
@@ -280,11 +280,12 @@ function next() {
 }
 function pump() {
   if (S.inline) return;
-  for (const w of S.workers) {
-    if (w.busy) continue;
+  // two jobs a worker, so it starts the next one at once instead of waiting for the page to take the last answer (a slow frame)
+  for (let k = 0; k < 2; k++) for (const w of S.workers) {
+    if (w.busy.length > k) continue;
     const it = next();
     if (!it) return;
-    w.busy = it;
+    w.busy.push(it);
     w.postMessage(it.job);
   }
 }
@@ -295,10 +296,10 @@ S.request = function (job, prio, done, tag = null) {
 };
 S.cancel = function (tag) {
   S.queue = S.queue.filter((it) => it.tag !== tag);
-  for (const w of S.workers) if (w.busy && w.busy.tag === tag) w.busy.dead = true;
+  for (const w of S.workers) for (const it of w.busy) if (it.tag === tag) it.dead = true;
   if (S.running && S.running.tag === tag) S.running = null;
 };
-S.pending = () => S.queue.length + S.workers.filter((w) => w.busy).length + (S.running ? 1 : 0);
+S.pending = () => S.queue.length + S.workers.reduce((n, w) => n + w.busy.length, 0) + (S.running ? 1 : 0);
 // Called each frame: hands out work, or (without workers) samples rows in the page within the budget.
 S.tick = function (budgetMs) {
   if (!S.inline) { pump(); return; }
