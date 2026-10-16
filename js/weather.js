@@ -69,18 +69,26 @@ function columnTop(c, lx, lz) {
   while (y + 1 < c.y1 && BF.RENDER[BF.world.chunkBlock(c, lx, y + 1, lz)] === 3) y++;
   return y;
 }
+// columnTop of world column (x, z) through world.cell (on the planet, x / z may be a margin address), or null when not loaded.
+const CL = {};
+function columnTopAt(x, z) {
+  const cl = BF.world.cell ? BF.world.cell(x, z, CL) : null;
+  if (cl) return cl.c ? columnTop(cl.c, cl.lx, cl.lz) : null;
+  const c = BF.world.chunkAt(x, z);
+  return c ? columnTop(c, x - c.cx * BF.CS, z - c.cz * BF.CS) : null;
+}
 function rebuildHeightMap(ox, oz) {
   const CS = BF.CS, w = BF.world;
   hmOX = ox; hmOZ = oz;
   const cx0 = Math.floor(ox / CS), cz0 = Math.floor(oz / CS), cx1 = Math.floor((ox + HM - 1) / CS), cz1 = Math.floor((oz + HM - 1) / CS);
   for (let ccz = cz0; ccz <= cz1; ccz++) for (let ccx = cx0; ccx <= cx1; ccx++) {
-    const c = w.chunks.get(ccx + "," + ccz);
+    const c = w.chunkC ? w.chunkC(ccx, ccz) : w.chunks.get(ccx + "," + ccz), viaEdge = c && (c.cx !== ccx || c.cz !== ccz);   // (a chunk across a face edge: read column by column)
     const x0 = Math.max(ox, ccx * CS), x1 = Math.min(ox + HM, ccx * CS + CS);
     const z0 = Math.max(oz, ccz * CS), z1 = Math.min(oz + HM, ccz * CS + CS);
     for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) {
       const o = ((z - oz) * HM + (x - ox)) * 4;
       if (!c) { hmData[o] = 0; hmData[o + 1] = 0; hmData[o + 2] = 0; continue; }   // unloaded: no precipitation
-      const top = columnTop(c, x - ccx * CS, z - ccz * CS), sv = Math.max(0, top + 1 - BF.MIN_Y);
+      const top = viaEdge ? columnTopAt(x, z) : columnTop(c, x - ccx * CS, z - ccz * CS), sv = Math.max(0, top + 1 - BF.MIN_Y);
       hmData[o] = sv & 255; hmData[o + 2] = sv >> 8;              // surface y - MIN_Y, 16 bits in r + b (particles stop here)
       hmData[o + 1] = kindToPrecip(biomeKind(x, z), top + 1);
     }
@@ -278,10 +286,9 @@ const weather = {
   rainingAt(x, y, z) {
     if (weather.intensity < 0.2) return false;
     if (!weather.precipAt(x, z, y)) return false;
-    const c = BF.world.chunkAt ? BF.world.chunkAt(Math.floor(x), Math.floor(z)) : null;
-    if (!c) return true;
-    const lx = Math.floor(x) - c.cx * BF.CS, lz = Math.floor(z) - c.cz * BF.CS;
-    return columnTop(c, lx, lz) < y;
+    const top = columnTopAt(Math.floor(x), Math.floor(z));
+    if (top == null) return true;
+    return top < y;
   },
   get raining() { return weather.type !== "clear" && weather.intensity > 0.2; },
 
@@ -384,9 +391,9 @@ function strike() {
   for (let tries = 0; tries < 8; tries++) {
     const a = Math.random() * Math.PI * 2, d = 6 + Math.random() * 58;
     const x = Math.floor(p.x + Math.cos(a) * d), z = Math.floor(p.z + Math.sin(a) * d);
-    const c = BF.world.chunkAt(x, z);
+    const top = columnTopAt(x, z);
     let y;
-    if (c) y = columnTop(c, x - c.cx * BF.CS, z - c.cz * BF.CS) + 1;
+    if (top != null) y = top + 1;
     else y = Math.floor(BF.worldgen.heightAt(x, z)) + 1;
     if (!kindToPrecip(biomeKind(x, z), y)) continue;      // no lightning over dry biomes
     weather.strikeAt(x, y, z);

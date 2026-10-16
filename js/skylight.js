@@ -283,12 +283,13 @@ sky.onSet = function (x, y, z, oldId, newId) {
   flush();
 };
 
+const CELL = {};
 // Level 0..15 at world coords: 15 in unloaded chunks and above a band, 0 below it.
 sky.get = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  const c = world().chunks.get((x >> 4) + "," + (z >> 4));
+  const cl = world().cell(x, z, CELL), c = cl.c;   // (through a face edge on the planet; the spreading itself stops at face edges for now)
   if (!c || !c.sky) return 15;
-  return sget(c, x, y, z);
+  return sget(c, cl.lx, y, cl.lz);
 };
 
 // Throws everything away and recomputes all loaded chunks (tests / debugging); returns ms taken.

@@ -63,12 +63,13 @@ function waterNear(x, y, z) {
   return unknown ? null : false;
 }
 // Rain (not snow) reaches the block: a rainy biome at this height and nothing light-blocking above (crops don't count).
+const CELL = {};
 function rainExposed(x, y, z) {
   const Wt = BF.weather;
   if (!Wt || !Wt.precipAt || Wt.precipAt(x, z, y + 1) !== 1) return false;
-  const c = BF.world.chunkAt(x, z);
+  const cl = BF.world.cell(x, z, CELL), c = cl.c;   // (through a face edge on the planet)
   if (!c || !c.top) return false;
-  return c.top[(z - c.cz * BF.CS) * BF.CS + (x - c.cx * BF.CS)] <= y;
+  return c.top[cl.lz * BF.CS + cl.lx] <= y;
 }
 const rainingNow = () => !!(BF.weather && BF.weather.raining);
 function hydrated(x, y, z) {

@@ -21,6 +21,54 @@ const vIdx = (x, y, z) => (y * CS + z) * CS + x;      // index inside a legacy f
 BF.vIdx = vIdx;
 const ckey = (cx, cz) => cx + "," + cz;
 
+// ---------- the planet (generator 4): atlas coordinates (js/planet.js, specs r14-01 / r14-02) ----------
+// On the planet every x/z is an atlas address: each face owns a square of the plane with its real grid in the middle and the unfolded
+// neighbouring faces in the margin around it. Chunks, edits and every key are stored at canonical addresses only; the public block
+// functions accept margin addresses and resolve them to the canonical cell (res), so neighbour walks, collision and meshing carry on
+// across face edges. A block with a facing read through a margin address is turned by the edge's turn, so it looks and collides the
+// same from both sides; written through one, it is turned back. Corner wedges (past two edges at once) read as air and refuse writes.
+// Off the planet PLN is false and everything below is the identity.
+let PLN = false, PN = 0, PW = 0;
+let RX = 0, RZ = 0, RT = 0;          // res() output: canonical cell and quarter turns (margin frame = canonical frame turned by RT)
+const CCELL = {};
+function res(x, z) {                 // x, z integers
+  RT = 0;
+  if (!PLN) { RX = x; RZ = z; return true; }
+  const f = Math.floor(x / PW), u = x - PW * f - PN, v = z - PN;
+  if (f >= 0 && f < 6 && u >= 0 && u < PN && v >= 0 && v < PN) { RX = x; RZ = z; return true; }
+  const c = BF.planet.canonCell(x, z, CCELL);
+  if (c.wedge || c.off) return false;
+  RX = c.x; RZ = c.z; RT = c.turn;
+  return true;
+}
+// The canonical chunk coordinates of chunk (cx, cz) (chunks line up across face edges, so a margin chunk shows one whole canonical
+// chunk, turned), or null inside a corner wedge / off the atlas. Sets RT like res().
+const CCH = [0, 0];
+function resChunk(cx, cz) {
+  if (!res(cx * CS + 8, cz * CS + 8)) return null;
+  CCH[0] = Math.floor(RX / CS); CCH[1] = Math.floor(RZ / CS);
+  return CCH;
+}
+// Block ids turned by k quarter turns (doors, beds, stairs, ladders, wall torches, gates, furnaces, chests, signs), built on first use.
+let TURN = null;
+function turnOnce(id, k) {
+  const b = BF.blocks[id];
+  if (!b) return id;
+  if (b.shape && b.shape.kind === "stairs") { const fam = BF.SHAPES && BF.SHAPES[b.shape.base]; const t = fam && fam.stairs[b.shape.top ? 1 : 0][(b.shape.f + k) & 3]; return t != null ? t : id; }
+  if (b.sign) { const t = BF.B[b.sign.wood + (b.sign.wall ? "_wall_sign_" : "_sign_") + "nesw"[(b.sign.f + k) & 3]]; return t != null ? t : id; }
+  return BF.blueprints && BF.blueprints.rotId ? BF.blueprints.rotId(id, k) : id;
+}
+function turnId(id, k) {
+  k &= 3;
+  if (!k || !id) return id;
+  if (!TURN) {
+    if (!BF.blueprints) return turnOnce(id, k);   // (only before every pack has loaded)
+    TURN = [null];
+    for (let q = 1; q < 4; q++) { const a = new Uint16Array(BF.MAX_BLOCK + 1); for (let i = 0; i <= BF.MAX_BLOCK; i++) a[i] = turnOnce(i, q); TURN.push(a); }
+  }
+  return TURN[k][id];
+}
+
 // Faces: normal, tangent axes (u, v) and the 4 corners in CCW order seen from outside.
 const FACES = [
   { n: [0, 1, 0],  c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]], shade: 1.0,  kind: "top" },
@@ -118,6 +166,7 @@ world.onChunkUnload = fn => world._unloadL.push(fn);
 
 // Removes every chunk, edit and mesh (used for a new world / new seed).
 world.reset = function () {
+  PLN = !!(BF.planet && BF.planet.isPlanet()); PN = PLN ? BF.planet.N : 0; PW = 3 * PN;
   for (const k of [...world.chunks.keys()]) unload(k);
   world.edits.clear();
   world._dirty.clear();
@@ -129,9 +178,37 @@ world.reset = function () {
 };
 
 // ---------- block access ----------
-function chunkAt(x, z) { return world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS))); }
+// chunkAt: the chunk holding column (x, z), through the margin on the planet (its own cx / cz are canonical: index it with world.cell
+// when x / z may be a margin address). rawChunk: canonical coordinates only.
+const rawChunk = (x, z) => world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS)));
+function chunkAt(x, z) {
+  if (!PLN) return rawChunk(x, z);
+  return res(Math.floor(x), Math.floor(z)) ? rawChunk(RX, RZ) : undefined;
+}
 world.chunkAt = chunkAt;
 world.isLoaded = (x, z) => !!chunkAt(Math.floor(x), Math.floor(z));
+// The cell at column (x, z): out = { c (the chunk, or null when not loaded or in a corner wedge), lx, lz (local in c), x, z (canonical
+// column), turn (quarter turns from c's frame to the frame of the address: turnId(id, turn) shows a canonical block there) }.
+world.cell = function (x, z, out) {
+  out = out || {};
+  x = Math.floor(x); z = Math.floor(z);
+  if (!res(x, z)) { out.c = null; out.lx = out.lz = 0; out.x = x; out.z = z; out.turn = 0; return out; }
+  const c = rawChunk(RX, RZ) || null;
+  out.c = c; out.x = RX; out.z = RZ; out.turn = RT;
+  out.lx = RX - Math.floor(RX / CS) * CS; out.lz = RZ - Math.floor(RZ / CS) * CS;
+  return out;
+};
+// The chunk at chunk coordinates (cx, cz), through the margin (canonical coordinates are a plain lookup).
+world.chunkC = (cx, cz) => {
+  if (!PLN) return world.chunks.get(ckey(cx, cz));
+  const k = resChunk(cx, cz);
+  return k ? world.chunks.get(ckey(k[0], k[1])) : undefined;
+};
+// The canonical column of (x, z) as [x, z] (x, z themselves off the planet), or null in a corner wedge. Block entities (chests,
+// furnaces, signs...) are keyed by canonical cells.
+world.canonXZ = (x, z) => res(Math.floor(x), Math.floor(z)) ? [RX, RZ] : null;
+world.turnId = turnId;
+world.isPlanet = () => PLN;
 
 let STONE_ID = 0, BEDROCK_ID = 0;
 // Block in chunk c at local (lx, lz) and absolute y: below the loaded band stone (bedrock below MIN_Y), above it air.
@@ -148,7 +225,14 @@ world.getBlock = function (x, y, z) {
   if (y < BF.MIN_Y) return BEDROCK_ID;
   if (y >= BF.H) return 0;
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  const c = chunkAt(x, z);
+  if (PLN) {
+    if (!res(x, z)) return 0;
+    const c = rawChunk(RX, RZ);
+    if (!c) return 0;
+    const id = cblock(c, RX - c.cx * CS, y, RZ - c.cz * CS);
+    return RT ? turnId(id, RT) : id;
+  }
+  const c = rawChunk(x, z);
   if (!c) return 0;
   return cblock(c, x - c.cx * CS, y, z - c.cz * CS);
 };
@@ -158,7 +242,8 @@ world.isSolid = function (x, y, z) {
   if (y < BF.MIN_Y) return true;
   if (y >= BF.H) return false;
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  const c = chunkAt(x, z);
+  if (PLN) { if (!res(x, z)) return true; x = RX; z = RZ; }   // (solidity doesn't depend on facing)
+  const c = rawChunk(x, z);
   if (!c) return true;
   return BF.SOLID[cblock(c, x - c.cx * CS, y, z - c.cz * CS)] === 1;
 };
@@ -218,13 +303,13 @@ function extendUp(c, newHi) {
 function markNeighboursDirty(c) {
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dz) continue;
-    const n = world.chunks.get(ckey(c.cx + dx, c.cz + dz));
+    const n = world.chunkC(c.cx + dx, c.cz + dz);
     if (n && n.mesh !== undefined) world._dirty.add(n.key);
   }
 }
 // Makes sure the sections covering y0..y1 are loaded in the chunk holding (x, z). False if that chunk is not loaded.
 world.ensureRange = function (x, z, y0, y1) {
-  const c = chunkAt(x, z);
+  const c = chunkAt(x, z);   // (sections are whole-chunk, so the local column doesn't matter)
   if (!c) return false;
   if (y0 < c.y0) extendDown(c, Math.max(BF.MIN_Y, y0) >> 4);
   if (y1 >= c.y1) extendUp(c, (Math.min(BF.H - 1, y1) >> 4) + 1);
@@ -235,7 +320,12 @@ world.ensureRange = function (x, z, y0, y1) {
 world.setBlock = function (x, y, z, id) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
   if (y < BF.MIN_Y || y >= BF.H) return false;
-  const c = chunkAt(x, z);
+  if (PLN) {   // a margin address writes the canonical cell (turned back into its frame); hooks below see canonical coordinates
+    if (!res(x, z)) return false;
+    if (RT) id = turnId(id, 4 - RT);
+    x = RX; z = RZ;
+  }
+  const c = rawChunk(x, z);
   if (!c) return false;
   if (y < c.y0) extendDown(c, y >> 4); else if (y >= c.y1) extendUp(c, (y >> 4) + 1);
   const lx = x - c.cx * CS, lz = z - c.cz * CS, i = ((y - BF.MIN_Y) * CS + lz) * CS + lx;   // edit index (legacy limits: the old vIdx)
@@ -290,7 +380,7 @@ world.setBlock = function (x, y, z, id) {
     if (!dx && !dz) continue;
     const nx = lx + dx, nz = lz + dz;
     if (nx >= 0 && nx < CS && nz >= 0 && nz < CS) continue;
-    const n = world.chunks.get(ckey(c.cx + dx, c.cz + dz));
+    const n = world.chunkC(c.cx + dx, c.cz + dz);
     if (n && n.mesh !== undefined) world._dirty.add(n.key);
   }
   return true;
@@ -320,7 +410,8 @@ world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
 // Highest solid y at column (x, z) in the loaded band, or BF.MIN_Y - 1 (-1 for legacy worlds) when the column is not loaded.
 world.heightAt = function (x, z) {
   x = Math.floor(x); z = Math.floor(z);
-  const c = chunkAt(x, z);
+  if (PLN) { if (!res(x, z)) return BF.MIN_Y - 1; x = RX; z = RZ; }
+  const c = rawChunk(x, z);
   if (!c) return BF.MIN_Y - 1;
   const lx = x - c.cx * CS, lz = z - c.cz * CS, SOLID = BF.SOLID;
   for (let si = c.hi - c.lo - 1; si >= 0; si--) {
@@ -390,12 +481,16 @@ function disposeMeshes(c) {
 }
 
 function neighboursReady(cx, cz) {
-  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
-    if (!world.chunks.has(ckey(cx + dx, cz + dz))) return false;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    if (!PLN) { if (!world.chunks.has(ckey(cx + dx, cz + dz))) return false; continue; }
+    const k = resChunk(cx + dx, cz + dz);   // a corner wedge has nothing to wait for
+    if (k && !world.chunks.has(ckey(k[0], k[1]))) return false;
+  }
   return true;
 }
 
 let lastCenter = null, genList = [], meshList = [], simList = [];
+const TW = {};
 let fwdX = 0, fwdZ = -1, lastPlanT = 0;
 function plan(pcx, pcz) {
   const R = world.viewDist;
@@ -410,7 +505,14 @@ function plan(pcx, pcz) {
   for (let dz = -R - 1; dz <= R + 1; dz++) for (let dx = -R - 1; dx <= R + 1; dx++) {
     const d2 = dx * dx + dz * dz;
     if (d2 > (R + 1.5) * (R + 1.5)) continue;
-    const cx = pcx + dx, cz = pcz + dz, k = ckey(cx, cz);
+    let cx = pcx + dx, cz = pcz + dz;
+    if (PLN) {   // the wanted set is built in the player's face frame, extended into the margin; each spot is a canonical chunk
+      const ck = resChunk(cx, cz);
+      if (!ck) continue;   // corner wedge
+      cx = ck[0]; cz = ck[1];
+    }
+    const k = ckey(cx, cz);
+    if (keep.has(k)) continue;
     keep.add(k);
     // chunks in front of the camera load first; behind ones are weighted as further away
     const len = Math.sqrt(d2) || 1;
@@ -434,7 +536,8 @@ function plan(pcx, pcz) {
     if (keep.has(k)) continue;
     // hysteresis: only unload chunks clearly out of range
     const c = world.chunks.get(k);
-    const dx = c.cx - pcx, dz = c.cz - pcz;
+    let dx = c.cx - pcx, dz = c.cz - pcz;
+    if (PLN) { const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: c.cx * CS + 8, z: c.cz * CS + 8 }, TW); dx = t.x / CS; dz = t.z / CS; }
     if (dx * dx + dz * dz > (R + 3) * (R + 3)) unload(k);
   }
 }
@@ -453,7 +556,7 @@ world.update = function (px, pz, budgetMs = 8) {
     const want = Math.max(BF.SY0, (Math.floor(BF.player.position.y) - 40) >> 4);
     let budget = 3;
     for (let dz = -2; dz <= 2 && budget > 0; dz++) for (let dx = -2; dx <= 2 && budget > 0; dx++) {
-      const c = world.chunks.get(ckey(pcx + dx, pcz + dz));
+      const c = world.chunkC(pcx + dx, pcz + dz);
       if (c && c.lo > want) { extendDown(c, dx || dz ? Math.max(want, c.lo - 8) : want); budget--; }
     }
   }
@@ -565,14 +668,21 @@ BF.DYNBOXES = BF.DYNBOXES || []; // id -> fn(get, x, y, z, id) -> collision boxe
 for (const b of BF.blocks) if (b && b.model === "pane") BF.DYNBOXES[b.id] = (get, x, y, z) => paneBoxes(get, x, y, z).map(q => [q[0] / 16, q[1] / 16, q[2] / 16, q[3] / 16, q[4] / 16, q[5] / 16]);
 // A ladder needs a full solid opaque block behind it (the cell at pos + DIRS[f]).
 BF.ladderSupport = id => BF.SOLID[id] === 1 && BF.OPAQUE[id] === 1;
+const EDGE_NB = { edge: true };   // buildMesh: a neighbour chunk across a face edge
 const tileRects = {};
 const tileRect = n => tileRects[n] || (tileRects[n] = BF.textures.uv(n));
 
 function buildMesh(c) {
   const ox = c.cx * CS, oz = c.cz * CS;
   // 3x3 neighbourhood for border lookups
+  // On the planet a neighbour across a face edge is EDGE_NB: its cells are read through the world (resolved and turned into this face's
+  // frame) rather than by local index.
   const nb = [];
-  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) nb.push(world.chunks.get(ckey(c.cx + dx, c.cz + dz)));
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    if (!PLN) { nb.push(world.chunks.get(ckey(c.cx + dx, c.cz + dz))); continue; }
+    const k = resChunk(c.cx + dx, c.cz + dz);
+    nb.push(!k ? undefined : k[0] === c.cx + dx && k[1] === c.cz + dz ? world.chunks.get(ckey(k[0], k[1])) : EDGE_NB);
+  }
   const MINY = BF.MIN_Y, HTOP = BF.H;
   const get = (x, y, z) => {
     if (y < MINY) return BEDROCK_ID;
@@ -580,6 +690,7 @@ function buildMesh(c) {
     const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
     const ch = nb[iz * 3 + ix];
     if (!ch) return 0;
+    if (ch === EDGE_NB) return world.getBlock(ox + x, y, oz + z);
     if (y < ch.y0) return STONE_ID;
     if (y >= ch.y1) return 0;
     const s = ch.secs[(y >> 4) - ch.lo];
@@ -591,6 +702,7 @@ function buildMesh(c) {
     if (y < MINY || y >= HTOP) return 0;
     const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
     const ch = nb[iz * 3 + ix];
+    if (ch === EDGE_NB) return world.getBlockLight(ox + x, y, oz + z);
     if (!ch || !ch.light || y < ch.y0 || y >= ch.y1) return 0;
     const ls = ch.light[(y >> 4) - ch.lo];
     return ls ? ls[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)] : 0;
@@ -664,6 +776,7 @@ function buildMesh(c) {
   const sgetN = (x, y, z) => {
     const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
     const ch = nb[iz * 3 + ix];
+    if (ch === EDGE_NB) return BF.skyLight.get(ox + x, y, oz + z);
     if (!ch || !ch.sky || y >= ch.y1) return 15;
     if (y < ch.y0) return 0;
     const s = ch.sky[(y >> 4) - ch.lo];
@@ -894,14 +1007,19 @@ let fluidLast = 0;
 const FLUID_TICK = 0.25; // seconds per spread step
 const fkey = (x, y, z) => x + "," + y + "," + z;
 
+// queued by canonical cell (neighbours of a cell by a face edge are margin addresses)
+function qf(x, y, z) {
+  if (PLN) { if (!res(x, z)) return; x = RX; z = RZ; }
+  fluidQ.add(fkey(x, y, z));
+}
 function scheduleFluid(x, y, z, withNeighbours) {
   if (y < BF.MIN_Y || y >= BF.H) return;
-  fluidQ.add(fkey(x, y, z));
+  qf(x, y, z);
   if (withNeighbours) {
-    fluidQ.add(fkey(x + 1, y, z)); fluidQ.add(fkey(x - 1, y, z));
-    fluidQ.add(fkey(x, y, z + 1)); fluidQ.add(fkey(x, y, z - 1));
-    if (y + 1 < BF.H) fluidQ.add(fkey(x, y + 1, z));
-    if (y > BF.MIN_Y) fluidQ.add(fkey(x, y - 1, z));
+    qf(x + 1, y, z); qf(x - 1, y, z);
+    qf(x, y, z + 1); qf(x, y, z - 1);
+    if (y + 1 < BF.H) qf(x, y + 1, z);
+    if (y > BF.MIN_Y) qf(x, y - 1, z);
   }
 }
 world.scheduleFluid = scheduleFluid;
