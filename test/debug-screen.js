@@ -25,6 +25,8 @@ const start = async () => {
   // rings in software rendering, which slows every frame of the game page to a crawl here
   await game.addInitScript(() => { window.Worker = undefined; });
   await game.goto(`http://localhost:${GAME}/#seed1337gen4`);
+  // a planet boot works out its rivers first (r14-10): wait for that loading step
+  await game.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById('bf-loading'), null, { timeout: 120000 }).catch(() => {});
   await game.waitForTimeout(5000);
   ok('feed is on when served by the debug server', await game.evaluate(() => !!BF.debugFeed));
   await require('./lib').toVillage(game);
