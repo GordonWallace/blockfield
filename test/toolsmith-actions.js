@@ -53,7 +53,9 @@ module.exports = async (pg, out) => {
   });
   console.log(JSON.stringify(r, null, 1));
 
-  await pg.evaluate(() => BF.player.start());
+  // no pointer lock (the game's drag mode, js/player.js requestLock): with the mouse locked, headless Chromium piles up memory
+  // (~50 MB/s) while the long evaluates below keep the page busy, past CI's 10 GB cap on the planet (as test/explorer-far.js)
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
   // ---- fuel rules at one furnace beside the player
   const fuel = await pg.evaluate(() => {
