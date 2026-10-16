@@ -534,7 +534,7 @@ function screenClosed() {
   if (ev && ev.type === "keydown" && ev.key === "Escape") { markEsc(); escCloseEvent = ev; escCloseHeld = true; }
 }
 function requestLock() {
-  if (isTouch) return;
+  if (isTouch || offPlanet) return;   // off the planet the mouse stays free to drag it (closing a screen or the teleport panel up there must not take it)
   const ev = window.event;
   lockOnEscUp = escRelock = false;
   if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
@@ -562,7 +562,7 @@ function beginPlay() {
 }
 function resume() {
   if (P.dead) return;
-  if (!dragMode && !isTouch) {
+  if (!dragMode && !isTouch && !offPlanet) {
     requestLock();
     // the pause menu stays until the lock arrives (pointerlockchange hides it)
     setTimeout(() => {
@@ -663,7 +663,9 @@ function bindInput() {
     if (started && !menuOpen && !P.dead && !dragMode && !isTouch && !locked && !offPlanet) requestLock();
   });
 
-  document.addEventListener("mousemove", e => { if (locked) look(e.movementX, e.movementY); });
+  // (a lock that lands off the planet anyway, say one requested just before climbing past 20,000, is let go next frame; until then
+  // a drag with the button held still turns the planet)
+  document.addEventListener("mousemove", e => { if (!locked) return; if (!offPlanet) look(e.movementX, e.movementY); else if (e.buttons & 1) turnPlanet(e.movementX, e.movementY); });
 
   // Drag-to-look fallback when there is no pointer lock (mouse or pen; touch handled separately)
   let drag = null;
@@ -1980,7 +1982,7 @@ function keepHeading(h3) {
 // height. Back below 19,400 the mouse looks around again, starting from straight down.
 function updateOffPlanet() {
   const V = BF.view, on = !!(V && BF.planet && BF.planet.isPlanet()) && pos.y > (offPlanet ? V.OFF_BACK : V.OFF);
-  if (on === offPlanet) { if (on) faceNorth(); return; }
+  if (on === offPlanet) { if (on) { faceNorth(); if (locked) { mouseFreed = true; exitLock(); } } return; }
   offPlanet = on;
   if (on) { resetBreak(); if (locked) releaseMouse(); faceNorth(); }
   else { pitch = -1.5; }
