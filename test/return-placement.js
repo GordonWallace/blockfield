@@ -45,11 +45,28 @@ module.exports = async (pg) => {
   const before = await snapshot();
   want = Object.keys(before).length;
   ok("villagers are loaded to start with", Object.keys(before).length >= 6, Object.keys(before).length);
+  // Where each villager stood is read every frame until it unloads, and where it came back the first frame it is there again. (The snapshot
+  // above is taken before the leaving: villagers on a task work on through the village's countdown, and loaded ones walk on while the rest
+  // load, both for longer on a faster runner, so comparing it with a snapshot after loading counted walkers as misplaced.)
+  await pg.evaluate(k => {
+    const w = window.__rpw = { back: false, stop: false, last: {}, first: {} };
+    const tick = () => {
+      if (w.stop) return;
+      for (const m of BF.mobs.list) if (m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead && !m.removed) {
+        const p = [m.position.x, m.position.z];
+        if (!w.back) w.last[m.slot.idx] = p; else if (!w.first[m.slot.idx]) w.first[m.slot.idx] = p;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, info.key);
   ok("the village unloads when the player leaves", await leave());
+  await pg.evaluate(() => { window.__rpw.back = true; });
   await back();
   const after1 = await snapshot();
-  const same = Object.keys(before).filter(k => after1[k] && dist(before[k], after1[k]) < 4).length;
-  ok("after a short absence the villagers are where they stood", Object.keys(after1).length >= 20 && same >= Math.floor(Object.keys(after1).length * 0.8), { same, present: Object.keys(after1).length, of: Object.keys(before).length });
+  const seen = await pg.evaluate(() => { const w = window.__rpw; w.stop = true; return { last: w.last, first: w.first }; });
+  const same = Object.keys(seen.last).filter(k => seen.first[k] && dist(seen.last[k], seen.first[k]) < 4).length;
+  ok("after a short absence the villagers are where they stood", Object.keys(after1).length >= 20 && same >= Math.floor(Object.keys(after1).length * 0.8), { same, present: Object.keys(after1).length, of: Object.keys(seen.last).length });
   // 2. a longer absence by day: scattered within the leash
   await setTime(0.2);
   const before2 = await snapshot();

@@ -13,6 +13,9 @@ module.exports = async (pg) => {
       const x = Math.round(v.x + Math.cos(a * 0.785) * 300), z = Math.round(v.z + Math.sin(a * 0.785) * 300);
       const near = (BF.worldgen.villagesNear(x, z, 600) || []).filter(o => o.minX != null && Math.hypot(o.x - x, o.z - z) < 260);
       if (near.length) continue;
+      // the clock goes to day 6 (as the night below wants) before the pin: js/merchant.js tick drops a pin no merchant's trip has held for a
+      // game day, so a jump of 6 days after pinning lost the pin at the night's first tick and the village unloaded (300 blocks is past DROP)
+      BF.sky.day = 6;
       BF.villageSim.pin("test", v, v, []);
       BF.player.spawn(x + 0.5, BF.worldgen.heightAt(x, z) + 2, z + 0.5);
       return { v: [v.x, v.z], key: Math.round(v.x) + "," + Math.round(v.z), at: [x, z] };
@@ -21,9 +24,14 @@ module.exports = async (pg) => {
   });
   ok("found a village with a spot 300 blocks away", !!setup, setup);
   if (!setup) { console.log("FAILED: 1"); return; }
+  // The village sim's frame-time guard (js/villagesim.js overLimit "AI time", LIMITS.aiMs) stops villages beyond ALWAYS of the player, pinned
+  // ones too, when villager AI averages over 6 ms a frame. A headless software-rendered runner gets there with this village's 44 villagers, so
+  // the village (and its villagers) dropped out before or during the night and no monster could spawn in it. The guard is not what this
+  // test checks (test/force-unload.js does), so it is lifted here and put back at the end.
+  const aiMs = await pg.evaluate(() => { const L = BF.villageSim.LIMITS, was = L.aiMs; L.aiMs = Infinity; return was; });
   await pg.waitForFunction(k => BF.villageSim.isActive(k) && BF.mobs.villages.get(k) && (BF.mobs.villages.get(k).members || []).some(m => m.type === "villager"), setup.key, { timeout: 90000 }).catch(() => {});
   await pg.waitForTimeout(4000);
-  const r = await pg.evaluate(async key => {
+  const r = await pg.evaluate(async ([key, aiMs]) => {
     const W = BF.world, L = BF.wildlife, M = BF.mobs, S = BF.sky, rec = M.villages.get(key);
     for (const m of M.list.slice()) if (m.hostile) m.dead = true;
     S.day = 6; S.setTime(0.56);
@@ -46,16 +54,18 @@ module.exports = async (pg) => {
       }
       if (i % 200 === 0) await new Promise(r => setTimeout(r, 0));
     }
+    const active = BF.villageSim.isActive(key);   // (still running at the end: the pin held)
     L.spawned = orig;
     BF.villageSim.unpin("test");
+    BF.villageSim.LIMITS.aiMs = aiMs;
     return {
       n: spawns.length, inVillage: spawns.filter(s => s.inVillage).length, zombiesInVillage: spawns.filter(s => s.inVillage && s.type === "zombie").length,
       lit: spawns.filter(s => s.light > 7).length, atCap: spawns.filter(s => s.h >= s.cap).length, close: spawns.filter(s => s.player < 12 || s.near < 12).map(s => [s.player, s.near].map(Math.round)),
-      areas: [...new Set(spawns.map(s => s.area))].length, over: over.slice(0, 5), overN: over.length, minPlayer: Math.round(Math.min(...spawns.map(s => s.player)))
+      areas: [...new Set(spawns.map(s => s.area))].length, over: over.slice(0, 5), overN: over.length, minPlayer: Math.round(Math.min(...spawns.map(s => s.player))), active
     };
-  }, setup.key);
+  }, [setup.key, aiMs]);
   ok("monsters spawn with the player 300 blocks away", r.n > 0, r);
-  ok("zombies appear in the running village", r.zombiesInVillage >= 1, r);
+  ok("zombies appear in the running village", r.active && r.zombiesInVillage >= 1, r);
   ok("nothing spawns on lit ground (block light over 7)", r.lit === 0, r);
   ok("no spawn into an area already at its cap", r.atCap === 0, r);
   ok("no area holds more hostiles than its cap (2 of slack for ones walking in)", r.overN === 0, r.over);
