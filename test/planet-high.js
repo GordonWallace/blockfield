@@ -30,17 +30,19 @@ module.exports = async (pg, out) => {
     BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative");
   });
   await pg.evaluate(() => settle(3000));
+  // heights near the ground count from the ground at the spawn (generator 4 terrain reaches hundreds of blocks up)
+  const G = await pg.evaluate(() => Math.round(BF.view.groundAt(BF.player.position.x, BF.player.position.z)));
 
   // ---- the climb: blend, clip planes, fog and sky at set heights (screenshots kept beside the test output)
   const rows = [];
   for (const h of [100, 600, 1400, 2600, 12000, 60000, 300000]) {
-    const r = await pg.evaluate(async (h) => {
-      BF.player.setFlying(true); BF.player.position.y = h; BF.player.velocity.y = 0; BF.player.setLook(BF.player.yaw, -1.5);
+    const r = await pg.evaluate(async ([h, G]) => {
+      BF.player.setFlying(true); BF.player.position.y = h < 10000 ? G + h : h; BF.player.velocity.y = 0; BF.player.setLook(BF.player.yaw, -1.5);
       BF.state.time = BF.state.time;   // keep the clock running: the sky updates with the simulation
       await new Promise(r => setTimeout(r, 1500));
       const s = BF.view.state, bg = BF.scene.background;
       return { h, k: s.k, above: s.above, near: BF.camera.near, far: BF.camera.far, bg: (bg.r + bg.g + bg.b) / 3, off: BF.player.offPlanet };
-    }, h);
+    }, [h, G]);
     rows.push(r);
     if (out) await pg.screenshot({ path: `${out}-climb-${h}.png` });
   }
@@ -53,14 +55,14 @@ module.exports = async (pg, out) => {
   check(!at(12000).off && at(60000).off && at(300000).off, "off-planet mode is on above layer 20,000 and off below");
 
   // ---- no jumps through the blend: small climbs change the picture a little at a time (looking straight down)
-  const steps = await pg.evaluate(async () => {
-    BF.player.position.y = 200; BF.player.setLook(0, -1.5);
+  const steps = await pg.evaluate(async (G) => {
+    BF.player.position.y = G + 200; BF.player.setLook(0, -1.5);
     await settle(1000);
     BF.state.paused = true;
     const clouds = BF.scene.children.filter(c => c.userData && c.userData.sync);   // climbing through the cloud layer is a real change
     for (const c of clouds) c.visible = false;
     const d = []; let prev = null;
-    for (let y = 200; y <= 3000; y += 100) {
+    for (let y = G + 200; y <= G + 3000; y += 100) {
       BF.player.position.y = y; BF.player.setLook(0, -1.5);
       await new Promise(r => setTimeout(r, 120));
       const px = grab();
@@ -70,7 +72,7 @@ module.exports = async (pg, out) => {
     for (const c of clouds) c.visible = true;
     BF.state.paused = false;
     return d;
-  });
+  }, G);
   console.log("blend steps " + JSON.stringify(steps));
   check(Math.max(...steps) < 12, `climbing 100 blocks at a time through the blend changes the picture smoothly (largest mean change ${Math.max(...steps)} of 255)`);
 
