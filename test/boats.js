@@ -13,10 +13,10 @@ module.exports = async (pg, out) => {
     const W = BF.world, B = BF.B, I = BF.I, P = BF.player, boats = BF.boats;
     const fresh = async mode => {
       BF.state.paused = true;
-      BF.newWorld(5, { gen: 3, villages: 9, gameMode: mode || "survival" });
+      BF.newWorld(5, { gen: 4, villages: 9, gameMode: mode || "survival" });
       BF.mobs.spawning = false;
       W.setViewDist(8);
-      await load(8, 8);
+      await load(Math.floor(BF.spawnPoint.x), Math.floor(BF.spawnPoint.z));
     };
     const runBoats = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) { BF.mobs.update(h); boats.update(h); } };
 
@@ -32,7 +32,7 @@ module.exports = async (pg, out) => {
 
     // ---- a test course high above the spawn: a long water channel, an ice strip, a stone strip ----
     await fresh();
-    const x0 = 8, z0 = 8, y0 = BF.worldgen.heightAt(x0, z0) + 24;
+    const x0 = Math.floor(BF.spawnPoint.x), z0 = Math.floor(BF.spawnPoint.z), y0 = BF.worldgen.heightAt(x0, z0) + 24;   // the world spawn (generator 3 used 8, 8)
     const fill = (xa, xb, y, za, zb, id) => { for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) W.setBlock(x, y, z, id); };
     const LEN = 150;
     fill(x0 - 2, x0 + 2, y0, z0 - LEN, z0 + 10, B.stone);            // floor
@@ -165,7 +165,7 @@ module.exports = async (pg, out) => {
     ok("creative: one hit, no item", boats.hit(bc, true) === "broken" && !boats.list.includes(bc) && BF.drops.list.length === n0);
 
     // ---- the real save, through IndexedDB ----
-    const meta = await BF.save.create({ name: "boats", seed: 5, gameMode: "survival", villages: 9, gen: 3 });
+    const meta = await BF.save.create({ name: "boats", seed: 5, gameMode: "survival", villages: 9, gen: 4 });
     BF.mobs.spawning = false;
     W.setViewDist(8);
     await load(x0, z0 - 20);

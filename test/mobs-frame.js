@@ -8,17 +8,22 @@ module.exports = async (pg) => {
   const fails = [];
   const ok = (name, cond, extra) => { console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra === undefined ? "" : extra)); if (!cond) fails.push(name); };
   const setup = await pg.evaluate(() => {
-    // a spot in the default world with 4 villages within about 600 blocks, none of them around it
-    const best = { x: 2512, z: -2512 };
-    const vs = (BF.worldgen.villagesNear(best.x, best.z, 700) || []).filter(v => v.minX != null).sort((a, b) => Math.hypot(a.x - best.x, a.z - best.z) - Math.hypot(b.x - best.x, b.z - best.z)).slice(0, 4);
-    if (vs.length < 4) return null;
+    // a spot near the spawn with 4 villages within about 600 blocks, none of them around it (generator 3 used 2512, -2512 of seed 1337)
+    const D = (a, b) => BF.planet.distance(a, b), sp = BFT.spawn();
+    let best = null, vs = [];
+    for (let r = 0; !best && r <= 4000; r += 250) for (let k = 0, n = Math.max(1, Math.round(r / 125)); !best && k < n; k++) {
+      const p = { x: Math.round(sp.x + r * Math.cos(2 * Math.PI * k / n)), z: Math.round(sp.z + r * Math.sin(2 * Math.PI * k / n)) };
+      const near = (BF.worldgen.villagesNear(p.x, p.z, 700) || []).filter(v => v.minX != null).sort((a, b) => D(a, p) - D(b, p));
+      if (near.length >= 4 && D(near[0], p) > 200 && BF.worldgen.heightAt(p.x, p.z) > BF.worldgen.waterLevelAt(p.x, p.z)) { best = p; vs = near.slice(0, 4); }
+    }
+    if (!best) return null;
     const VS = BF.villageSim;
     BF.sky.day = 3; BF.sky.setTime(0.3);   // set the day first: a pin with no trip is dropped a game day after it was first seen
     VS.pin("frame-a", vs[0], vs[1], VS.corridor(vs[0], vs[1]));
     VS.pin("frame-b", vs[2], vs[3], VS.corridor(vs[2], vs[3]));
     BF.player.spawn(best.x + 0.5, BF.worldgen.heightAt(best.x, best.z) + 2, best.z + 0.5);
     if (BF.player.setGameMode) BF.player.setGameMode("creative");
-    return { at: [best.x, best.z], dist: vs.map(v => Math.round(Math.hypot(v.x - best.x, v.z - best.z))) };
+    return { at: [best.x, best.z], dist: vs.map(v => Math.round(D(v, best))) };
   });
   ok("found a spot with 4 villages to run", !!setup, setup);
   if (!setup) { console.log("FAILED: 1"); return; }

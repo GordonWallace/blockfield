@@ -28,8 +28,11 @@ module.exports = async (pg) => {
 
   // ---- chunk unload and reload, away from villages
   const Q = await pg.evaluate(() => {
-    for (let x = 3000; x < 9000; x += 400) { const vs = (BF.worldgen.villagesNear(x, 0, 700) || []).filter(v => v.minX != null); if (!vs.some(v => Math.hypot(v.x - x, v.z) < 600)) return [x, 0]; }
-    return [3000, 0];
+    // dry land east of the spawn with no village within 600 blocks (generator 3 scanned x 3000 to 9000 from the origin); with the
+    // 1600-block walk away below it stays on the spawn's face, which is at least 5 km from any edge
+    const sp = BFT.spawn();
+    for (let d = 1000; d < 3400; d += 200) { const q = { x: sp.x + d, z: sp.z }, vs = (BF.worldgen.villagesNear(q.x, q.z, 700) || []).filter(v => v.minX != null); if (BF.worldgen.heightAt(q.x, q.z) > BF.worldgen.waterLevelAt(q.x, q.z) && !vs.some(v => BF.planet.distance(v, q) < 600)) return [q.x, q.z]; }
+    return [sp.x + 1000, sp.z];
   });
   await goTo(Q[0], Q[1], 9000);
   const placed = await pg.evaluate(([qx, qz]) => {
@@ -78,7 +81,7 @@ module.exports = async (pg) => {
   ok("after a day away: the zombie on open ground burned, the creeper is back", s.open[0] === true ? !t.zombie && !!t.creeper && !!t.cow : !!t.creeper, { open: s.open, t });
 
   // ---- quit and rejoin with more than 120 wild mobs loaded
-  const id = await pg.evaluate(async () => (await BF.save.create({ name: "wild", seed: 1337, gameMode: "creative", villages: 9, gen: 3 })).id);
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: "wild", seed: 1337, gameMode: "creative", villages: 9, gen: 4 })).id);
   await pg.waitForTimeout(8000);
   const before = await pg.evaluate(async () => {
     BF.mobs.spawning = false;
@@ -95,7 +98,7 @@ module.exports = async (pg) => {
     return { tagged: n, wild };
   });
   await pg.reload();
-  await pg.waitForTimeout(5000);
+  await require('./lib').ready(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
   await pg.evaluate(async id => { await BF.save.load(id); BF.mobs.spawning = false; }, id);
   await pg.waitForTimeout(9000);
   await step(4);

@@ -1,4 +1,4 @@
-// Boats on a real river: finds a generated river (generator 3) near the spawn, puts the player in a boat on it and rows 500 blocks
+// Boats on a real river: finds a generated river (the planet's, spec r14-10) near the spawn, puts the player in a boat on it and rows 500 blocks
 // downstream with a simple autopilot (steer towards the heading with the longest run of water that doesn't rise). Checks the boat never
 // ends up inside a solid block or below the world, and that it gets the whole way. Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/br test/boat-river.js [seed]
 module.exports = async (pg, out) => {
@@ -7,17 +7,19 @@ module.exports = async (pg, out) => {
     const R = { lines: [] }, ok = (name, cond, extra) => { const l = (cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""); R.lines.push(l); console.warn(l); };
     const tick = () => new Promise(r => setTimeout(r, 0));
     BF.state.paused = true;
-    BF.newWorld(seed, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(seed, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     const G = BF.worldgen, W = BF.world, P = BF.player, o = {};
     const wet = (x, z) => G.waterLevelAt(Math.floor(x), Math.floor(z)) > G.heightAt(Math.floor(x), Math.floor(z));
     const level = (x, z) => G.waterLevelAt(Math.floor(x), Math.floor(z));
-    // a river spot: well inside a channel, above the sea, with water in a 5x5 square around it
+    // a river spot: in a river channel (not a lake), 20 above the sea, with water in a 5x5 square around it, spiralling out from the spawn
     let spot = null;
+    const sx = Math.floor(BF.spawnPoint.x), sz = Math.floor(BF.spawnPoint.z);
     for (let k = 0; !spot && k < 60000; k++) {
       const r = 200 + k * 0.08, a = k * 2.399;
-      const x = Math.floor(Math.cos(a) * r), z = Math.floor(Math.sin(a) * r);
-      if (!BF.rivers.at(x, z, o) || o.sd > -3 || o.rs < BF.SEA + 20) continue;
+      const x = sx + Math.floor(Math.cos(a) * r), z = sz + Math.floor(Math.sin(a) * r);
+      const c = G.surfaceAt(x, z);
+      if (!c.rf || c.wl < BF.SEA + 20) continue;
       let all = true;
       for (let dz = -2; dz <= 2 && all; dz++) for (let dx = -2; dx <= 2 && all; dx++) if (!wet(x + dx, z + dz)) all = false;
       if (all) spot = { x, z };
