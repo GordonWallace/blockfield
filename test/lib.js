@@ -1,6 +1,7 @@
 // Shared test helpers. toVillage: moves the player into the village nearest to where they are (spawn, on a fresh planet; mile-high
 // worlds usually don't start next to one) and waits for it to load. On a generator 3 world it keeps measuring from 0,0, as before.
 exports.toVillage = async pg => {
+  await exports.ready(pg);
   const planet = await pg.evaluate(() => {
     const P = BF.planet, p = BF.player.position, on = !!(P && P.isPlanet());
     // the planet: (0, 0) is off the atlas, so the village nearest the player (spawn), within 6 km round the planet
@@ -15,3 +16,7 @@ exports.toVillage = async pg => {
     await pg.waitForTimeout(1000);
   }
 };
+// ready: waits until a planet's river step (spec r14-10) is done, after a boot or a newWorld on a new seed.
+exports.ready = pg => pg.waitForFunction(() => window.BF && !BF.preparing, null, { timeout: 180000, polling: 200 });
+// install: puts window.BFT (test/bft.js, the in-page test helpers) into a page a node test made; call it before the page's goto.
+exports.install = pg => pg.addInitScript({ path: require('path').join(__dirname, 'bft.js') });
