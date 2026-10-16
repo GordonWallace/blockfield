@@ -8,7 +8,7 @@
 //  - bees are drawn where they are: each bee's instance sits by the player, seen from the player's frame;
 //  - with a second hive across the edge, breaking the first sends its bees that are out to the second, put into its face's frame, and
 //    they get home.
-// node test/run.js /tmp/pb test/planet-bees.js (BF_HASH='#seed1337gen3v9' as CI runs it)
+// node test/run.js /tmp/pb test/planet-bees.js
 module.exports = async (pg) => {
   // (the farming suite still boots generator 3 in CI: the planet is made here)
   await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); if (!BF.planet.isPlanet() || BF.state.seed !== 123) { BF.newWorld(123, { gen: 4 }); BF.player.start(); } });

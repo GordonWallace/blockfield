@@ -16,7 +16,7 @@ const root = path.resolve(__dirname, '..');
   await pg.addInitScript({ path: path.join(__dirname, 'bft.js') });   // window.BFT, the in-page test helpers
   // The boot world (spec r14-22): planet seed 123 (generator 4, village generator 10), whose nearest village to spawn is a plains village
   // of 59 villagers 89 blocks away (with pen, coop, pasture, sty and stable), as the tests written on generator 3 assumed. BF_HASH
-  // overrides it; test/ci.js sets it to the old #seed1337gen3v9 for the suites not yet moved to the planet (ci.json "gen3").
+  // overrides it.
   await pg.goto('file://' + path.join(root, 'index.html') + (process.env.BF_HASH != null ? process.env.BF_HASH : '#seed123gen4v10'));
   await pg.waitForTimeout(5000);
   // a planet boot first works out its rivers (spec r14-10): wait for that step, then the same 5 s for the world to settle
