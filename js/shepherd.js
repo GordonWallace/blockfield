@@ -282,7 +282,7 @@ function tickPens() {
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
     if (!(rec.wg && rec.wg.buildings) && !(rec.built && rec.built.some(e => e.type === "pen"))) continue;
-    if (Math.hypot(rec.x - pp.x, rec.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
+    if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const pen of pensOf(rec)) {
       if (!W.isLoaded(pen.fx0, pen.fz0) || !W.isLoaded(pen.fx1, pen.fz1) || !W.isLoaded(pen.fx0, pen.fz1) || !W.isLoaded(pen.fx1, pen.fz0)) continue;
       if (!pen.sheep) initPen(pen);
