@@ -2,6 +2,9 @@
 // Dirt is taken neatly from outside the village: off natural edges of the land (a bank, a step) first, else from one shallow
 // rectangular pit dug out row by row; never scattered single holes. The pit and the dug columns survive a save round trip.
 module.exports = async (pg) => {
+  // the ground it works on reaches 68 blocks from the player: wait for those chunks (on the planet the spawn's ground may still be loading)
+  await pg.waitForFunction(() => { const p = BF.player.position, x = Math.floor(p.x), z = Math.floor(p.z);
+    return [[5, -25], [68, -25], [5, 25], [68, 25], [36, 0]].every(([dx, dz]) => BF.world.isLoaded(x + dx, z + dz)); }, null, { timeout: 120000, polling: 250 });
   const r = await pg.evaluate(() => {
     const out = [], ok = (name, c, info) => out.push((c ? "PASS " : "FAIL ") + name + (c || info === undefined ? "" : " " + JSON.stringify(info)));
     const B = BF.B, W = BF.world, VL = BF.villageLife, X = VL._test, inv = BF.trades.inv;

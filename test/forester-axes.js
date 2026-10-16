@@ -15,13 +15,19 @@ module.exports = async (pg, out) => {
   ok("break times match the player's", unit.secs.hand === 3 && unit.secs.wooden_axe === 1.5 && unit.secs.iron_axe === 0.5 && unit.secs.iron_axe === unit.player, unit.secs);
   ok("axe ranking", unit.rank[0] === "wooden_axe" && unit.rank[unit.rank.length - 1] === "diamond_axe", unit.rank);
 
-  await pg.evaluate(() => BF.player.start());
+  // no pointer lock (the game's drag mode, js/player.js requestLock): with the mouse locked, headless Chromium piles up memory
+  // (~50 MB/s) while the long evaluates below keep the page busy, past CI's 10 GB cap on the planet (as test/explorer-far.js)
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
   const setup = await pg.evaluate(() => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     if (vs.length < 2) return "no villagers";
     const T = BF.trades, I = BF.I, B = BF.B, W = BF.world;
-    const A = vs[0];
+    // a villager out in the open, not a paddock keeper: one standing in a building or a fenced paddock (a smithy, a pen) finds no
+    // path out to the tree (the planet's generator 10 villages have paddocks and keepers)
+    const KEEP = ["shepherd", "cowherd", "pig_farmer", "poultry_keeper", "stable_hand"];
+    const open = m => W.heightAt(Math.floor(m.position.x), Math.floor(m.position.z)) < Math.floor(m.position.y);
+    const A = vs.find(m => open(m) && !KEEP.includes(m.profession)) || vs[0], was = A.profession;
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     W.setBlock(tx, ty, tz, B.band_saw); BF.emit('blockPlaced', tx, ty, tz, B.band_saw);
     BF.mobs.setProfession(A, "forester"); A.xp = 0; A.level = 1; A.trades = T.offers("forester", 1); A.inv = T.inv.create();
@@ -31,7 +37,7 @@ module.exports = async (pg, out) => {
     A.store = { stage: null, checkT: 1e9, avoid: {}, stored: {}, order: null }; A.fshop = { stage: null, deal: null, checkT: 1e9, avoid: {}, cd: 0 };
     // no other trees near: only the one we grow
     for (const m of BF.mobs.list) if (m !== A && m.type === "villager" && m.profession === "forester") BF.mobs.setProfession(m, "nitwit");
-    return { prof: A.profession, jobsite: !!A.jobsite };
+    return { prof: A.profession, jobsite: !!A.jobsite, was, at: [A.position.x, A.position.y, A.position.z].map(Math.floor), villagers: vs.length };
   });
   console.log("setup", JSON.stringify(setup));
   if (typeof setup === "string") return;
@@ -73,7 +79,7 @@ module.exports = async (pg, out) => {
       lastSw = A.ai.swingT;
       for (let i = n0; i < F.LOG.length; i++) if (F.LOG[i].kind === "fell") fell = F.LOG[i];
     }
-    return { chop: +chop.toFixed(2), t: +t.toFixed(1), fell, swings, held, stop, saved: A.fo && A.fo.saved };
+    return { chop: +chop.toFixed(2), t: +t.toFixed(1), fell, swings, held, stop, saved: A.fo && A.fo.saved, log: fell ? undefined : F.LOG.slice(-4), task: A.fo && A.fo.task && A.fo.task.kind, pos: [A.position.x, A.position.y, A.position.z].map(Math.floor) };
   }, [limit, opts || null]);
 
   // 2a. by hand
@@ -105,7 +111,7 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => { const A = window.__A; A.inv = BF.trades.inv.create(); });
   const t4 = await grow();
   const r4 = await watch(400, { stopAfter: 7, offAt: null });
-  ok("hand felling again (control)", r4.fell, r4.chop);
+  ok("hand felling again (control)", r4.fell, r4.fell ? r4.chop : { chop: r4.chop, tree: t4, t: r4.t, task: r4.task, log: r4.log, pos: r4.pos });
   const t5 = await grow();
   const part = await pg.evaluate(() => {   // chop 7 s, then interrupt it
     const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
