@@ -91,12 +91,19 @@ module.exports = async (pg) => {
     kit(B, [["egg", 6], ["coal", 2], ["bread", 12]]); kit(C, [["egg", 6], ["coal", 2], ["bread", 12]]);
     for (const m of [B, C]) { m.position.set(F1.x + 0.5 + (m === B ? 2 : -2), F1.y, F1.z + 2.5); m.vel.set(0, 0, 0); }
     BF.sky.setTime(0.06);
+    // their cooked eggs stay in their packs while this runs: meals and a child's cost take the cheapest food first, and that is cooked egg
+    // (js/villagelife.js edible), so B and C have eaten ahead (satiation) and no one courts meanwhile (a big village has births)
+    for (const m of [B, C]) if (m.life) m.life.sat = Math.max(m.life.sat || 0, 3);
+    const breedTick = BF.breeding.tick;
+    BF.breeding.tick = () => {};
     let maxAt = 0, bothSeen = 0;
-    for (let i = 0; i < 16000 && !(c(B, "cooked_egg") + c(C, "cooked_egg") === 12 && !(B.eggc && B.eggc.stage) && !(C.eggc && C.eggc.stage)); i++) {
-      step();
-      const n = sampleCooks(F1); maxAt = Math.max(maxAt, n);
-      if (B.eggc && B.eggc.stage && C.eggc && C.eggc.stage) bothSeen++;
-    }
+    try {
+      for (let i = 0; i < 16000 && !(c(B, "cooked_egg") + c(C, "cooked_egg") === 12 && !(B.eggc && B.eggc.stage) && !(C.eggc && C.eggc.stage)); i++) {
+        step();
+        const n = sampleCooks(F1); maxAt = Math.max(maxAt, n);
+        if (B.eggc && B.eggc.stage && C.eggc && C.eggc.stage) bothSeen++;
+      }
+    } finally { BF.breeding.tick = breedTick; }
     R.info.BC = { B: [c(B, "egg"), c(B, "cooked_egg"), B.eggc && B.eggc.stage], C: [c(C, "egg"), c(C, "cooked_egg"), C.eggc && C.eggc.stage], bothBusy: bothSeen, t: +BF.sky.time.toFixed(3),
       log: EC.LOG.filter(e => e.kind === "giveup").slice(-5) };
     ok("never two villagers cooking at one furnace", maxAt <= 1, maxAt);
