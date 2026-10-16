@@ -300,6 +300,7 @@ lod.update = function (budgetMs = 4) {
   // main-thread time per frame (without inline sampling, which has its own budget): for the budget test
   const ms = performance.now() - t0 - (BF.sampler.inline ? Math.min(budgetMs, lod.sampleMs || 0) : 0);
   lod.frameMs = ms; if (ms > (lod.maxFrameMs || 0)) lod.maxFrameMs = ms;
+  lod.frames = (lod.frames || 0) + 1; if (ms > 25) lod.slowFrames = (lod.slowFrames || 0) + 1;
 };
 function update(budgetMs) {
   const Pl = P(), pp = BF.player.position, gr = Pl.grid(pp.x, pp.z);
@@ -426,7 +427,7 @@ function ribbons(V, top) {
 lod.stats = () => ({
   active: lod.active, above: lod.above, eyeHole: lod.eyeHole, pending: BF.sampler ? BF.sampler.pending() : 0, inline: BF.sampler && BF.sampler.inline,
   rings: lod.levels.map((L) => ({ cell: L.cell, show: L.show, built: !!L.mesh, building: !!L.building, builds: L.builds || 0, f: L.f, cu: L.cu, cv: L.cv, buildMs: Math.round(L.buildMs), meshMs: Math.round(L.meshMs) })),
-  mainMs: lod.mainMs || 0, swaps: lod.swaps || [], maxFrameMs: lod.maxFrameMs || 0, workers: BF.sampler ? BF.sampler.workers.length : 0,
+  mainMs: lod.mainMs || 0, frames: lod.frames || 0, slowFrames: lod.slowFrames || 0, swaps: lod.swaps || [], maxFrameMs: lod.maxFrameMs || 0, workers: BF.sampler ? BF.sampler.workers.length : 0,
   samples: BF.sampler ? BF.sampler.samples : 0, msPerSample: BF.sampler && BF.sampler.samples ? BF.sampler.workMs / BF.sampler.samples : 0,
 });
 })();
