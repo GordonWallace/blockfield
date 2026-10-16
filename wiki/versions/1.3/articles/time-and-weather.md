@@ -1,0 +1,54 @@
+---
+title: Time and weather
+category: Game rules
+---
+## The day
+
+One game day lasts **20 minutes** of real time: ten minutes of day and ten of night. The clock is the usual 24 hours, with sunrise at 6:00, noon at 12:00, sunset at 18:00 and midnight at 0:00. The debug overlay shows the time of day. Night begins exactly at sunset and ends at sunrise.
+
+Light changes gradually rather than switching:
+
+- The last hour before sunset is slightly dimmer (the golden hour).
+- After sunset, dusk takes an hour and a half to darken to full night, which is dim but never black.
+- Dawn mirrors this before sunrise.
+
+Many things in the game are measured in game days: crops, animal growth and breeding, restocking by traders, weather spells. See [[page:farming]], [[page:animal-husbandry]] and [[page:village-economy]].
+
+## Sleeping
+
+Right click a bed at night, or during a thunderstorm, to sleep. You cannot rest while a hostile mob is within 8 blocks ("You may not rest now, there are monsters nearby"), and by day the bed refuses ("You can only sleep at night").
+
+Sleeping:
+
+- fades the screen and skips to the next morning, just after sunrise;
+- sets your respawn point at that bed (see [[page:player]]);
+- clears any weather.
+
+A tent, a three-wide, two-long bed that monsters cannot see through, does the same, and nearby monsters do not stop you sleeping in one. Villagers sleep in their own beds from sunset until sunrise; see [[page:villager-life]].
+
+## Weather
+
+Weather comes in spells of **clear**, **rain** and **thunder**, on a schedule fixed by the world's seed.
+
+- A clear spell lasts one to three game days.
+- A rain spell lasts a third of a day to a full day, and one in four rain spells is a thunderstorm.
+- Rain and snow build up over about fifteen seconds when a spell begins.
+
+Where precipitation falls depends on the biome: deserts, badlands and savannas stay dry under grey skies, snowy biomes get snow, and cold mountain heights get snow while the lowlands below get rain. Nothing falls where there is cover overhead, so it does not rain indoors, in caves or under thick trees.
+
+### What weather does
+
+- The world gets darker: noon in rain is about 70% as bright, in a thunderstorm about 40%, and the sky greys, the fog closes in and the clouds thicken.
+- **Crops** grow 1.5 times faster while it rains, saplings 1.3 times, and rain hydrates exposed farmland (see [[page:farming]]).
+- **Zombies and skeletons** do not burn where rain or snow falls on them, and not in a thunderstorm at all.
+- A **thunderstorm** counts as night for monsters: they spawn on the surface and you may sleep through it (see [[page:mob-spawning]]).
+- **Bees** stay home in rain (see [[mob:bee]]).
+- **Lightning** strikes every 10 to 40 seconds in a storm, at a random wet spot 6 to 64 blocks away, with a flash and thunder. It hurts for 5 points anything within 2.5 blocks, and does not set fires. Dry biomes are never struck.
+
+## Fast-forward
+
+The right arrow key makes the whole world run faster; the left arrow slows it again. The speeds are 1x, 3x, 5x, 10x, 100x and 1000x, and one step further down from 1x is **0x**, which freezes everything: mobs, sky, weather, crops, water and furnaces. You yourself always move at normal speed, so you can look around while time races or stops. An indicator shows the current speed, and the real speed when your computer cannot keep up.
+
+## Commands
+
+`/time set` jumps the clock, `/time add` moves it on and `/weather` switches the weather; see [[page:commands]].
