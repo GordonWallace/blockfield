@@ -6,7 +6,7 @@ A village gets a pig farmer for each of its pig paddocks, with a sty beside the 
 ### The working day
 During working hours the pig farmer:
 
-- **Feeds** hungry adult pigs a carrot, potato or beetroot, so they will breed, while the herd is at or under its limit of one pig per 8 cells of sty (see [[page:animal-husbandry]]). It keeps 2 back to lure a wild pig home. Piglets take 3 days to grow up.
+- **Feeds** hungry adult pigs a carrot, potato or beetroot, so they will breed, while the herd is at or under its limit of one pig per 8 cells of sty (see [[page:animal-husbandry]]). It feeds only as many as keep the herd within one over the limit once the piglets come, counting every wild adult pig within 12 blocks of the sty as if it had already walked in, fed or not. It keeps 2 back to lure a wild pig home. Piglets take 3 days to grow up.
 - **Culls** adults while the herd is over the limit, never below 2 adults. Each yields 1 to 3 raw porkchops.
 - **Stocks the sty**: if it holds fewer than 2 pigs it fetches a wild pig from within 100 blocks, once a day at most.
 - **Cooks pork**: it keeps 6 raw porkchops to sell and cooks the rest in a furnace, with fuel it bought, until it holds 24 cooked.
