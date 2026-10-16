@@ -9,9 +9,9 @@ module.exports = async (pg) => {
     const I = BF.I, T = BF.trades, inv = T.inv, W = BF.world, EC = BF.eggCook, FU = BF.furnaceUse;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
-    const V = { x: 26, z: 39 };   // seed 1: a village near spawn (test/shepherd-day.js)
+    const V = BFT.village(v => v.pop >= 10);   // the planet: the village nearest to spawn of 10+
     BF.player.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);
     for (let i = 0; i < 400 && !W.isLoaded(V.x, V.z); i++) { W.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
     for (let i = 0; i < 300; i++) { W.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (W.queueLength === 0) break; }

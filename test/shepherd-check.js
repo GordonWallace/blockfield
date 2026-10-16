@@ -1,5 +1,5 @@
 // Shepherd checks for test/run.js: NODE_PATH=$(npm root -g) node test/run.js /tmp/shep test/shepherd-check.js
-// Loads a seed-1 world next to a village, steps the simulation by hand (the headless browser renders too slowly to fast-forward)
+// Loads the planet world (seed 123) next to a village, steps the simulation by hand (the headless browser renders too slowly to fast-forward)
 // and prints PASS / FAIL lines for the sheep rules and the shepherd's work. Exit code is not used; read the output.
 module.exports = async (pg, out) => {
   const log = (...a) => console.log(...a);
@@ -9,9 +9,9 @@ module.exports = async (pg, out) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     BF.state.paused = true;                                  // the page's own loop stays out of the way
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns: only village stock
-    const V = { x: 26, z: 39 };   // seed 1: a village whose shepherd has its loom from the start (with village generator 2 the spawn village's shepherds start unemployed)
+    const V = BFT.village((v, k) => k.pen);   // the planet: the village nearest to spawn with a pen, whose shepherd has its loom from the start
     const gy = BF.worldgen.heightAt(V.x + 4, V.z + 4);
     BF.player.teleport(V.x + 4.5, gy + 2, V.z + 4.5);
     for (let i = 0; i < 400 && !BF.world.isLoaded(V.x, V.z); i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); }
@@ -59,14 +59,15 @@ module.exports = async (pg, out) => {
     ok("wool regrows after ~a week", !a.sheep.shorn);
     // feeding + breeding
     BF.sky.setTime(0.1);
-    const n0 = BF.mobs.list.filter(m => m.type === "sheep" && !m.dead).length;
+    const penSheep = () => BF.mobs.list.filter(m => m.type === "sheep" && !m.dead && m.pen === pen);   // this pen's: other shepherds of a big village breed theirs meanwhile
+    const n0 = penSheep().length;
     ok("feed a", BF.shepherd.feed(a, "test")); ok("feed b", BF.shepherd.feed(b, "test"));
     ok("fed sheep is willing", BF.shepherd.willing(a, day()));
     ok("fed sheep refuses more wheat", BF.shepherd.feed(a, "test") === false);
     run(40);
-    const n1 = BF.mobs.list.filter(m => m.type === "sheep" && !m.dead).length;
+    const n1 = penSheep().length;
     ok("two fed sheep breed (lamb appears)", n1 === n0 + 1, [n0, n1]);
-    const lamb = BF.mobs.list.find(m => m.type === "sheep" && m.lamb);
+    const lamb = penSheep().find(m => m.lamb) || BF.mobs.list.find(m => m.type === "sheep" && m.lamb);
     ok("lamb is small and in the pen", !!lamb && lamb.model.scale.x < 0.7 && lamb.pen === pen, lamb && lamb.model.scale.x);
     ok("parents rest after breeding", a.sheep.cd > day() && !BF.shepherd.willing(a, day()));
     BF.sky.day += 1.5;

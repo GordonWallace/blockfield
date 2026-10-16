@@ -12,7 +12,7 @@ module.exports = async (pg) => {
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     const B = BF.B, W = BF.world, F = BF.farmland, WET = B.farmland, DRY = B.farmland_dry;
     ok("dehydrated farmland block exists", DRY != null && DRY !== WET && BF.blocks[DRY].drop === BF.blocks[WET].drop);
@@ -21,7 +21,7 @@ module.exports = async (pg) => {
     const day = () => BF.sky.day + BF.sky.time;
     const setDay = d => { BF.sky.day = Math.floor(d); BF.sky.time = d - Math.floor(d); };
     // a flat stone pad of 40 x 40 well above the ground, so no natural water is near; covered later where needed
-    const px = 8, pz = 8;
+    const S = BFT.spawn(), px = S.x - 100, pz = S.z + 100;   // the planet: open plains off spawn, clear of its village
     await load(px, pz);
     const y = Math.max(...[0, 10, 20, 30, 39].flatMap(a => [0, 39].map(b => BF.worldgen.heightAt(px + a, pz + b)))) + 6;
     for (let x = px - 2; x < px + 42; x++) for (let z = pz - 2; z < pz + 42; z++) { W.setBlock(x, y - 1, z, B.stone); W.setBlock(x, y, z, B.dirt); for (let yy = y + 1; yy < y + 4; yy++) W.setBlock(x, yy, z, 0); }
