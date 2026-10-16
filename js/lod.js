@@ -36,9 +36,9 @@ const RIBBON_HIDE = 9000, MINW = 3;   // river ribbons: hidden above this height
 const STAND_LEVELS = 6;        // rings with tree and building stand-ins (cells of 4 to 128 blocks)
 const STAND_MAX = 14000;       // blocks from the player: stand-ins further out are never shown (a 10-block patch is under a pixel on any
                                // screen up to 4K), so none are made past that plus how far a ring moves (MOVE)
-const BOX_LEVELS = 1;          // of those, the ones drawn as boxes (the rest as points)
-const THIN = [0, 1, 2, 3, 4, 5];   // ring by ring: one tree cell kept in each square of 2^m x 2^m (js/grid.js): each ring draws about as many
-                                   // stand-ins as the last (the ground's canopy colour stands in for the rest)
+const BOX_LEVELS = 2;          // of those, the ones drawn as boxes, out to 1 km (the rest as points drawn like small boxes)
+const THIN = [0, 0, 0, 1, 2, 3];   // ring by ring: one tree cell kept in each square of 2^m x 2^m (js/grid.js): every tree out to 2 km, then
+                                   // one in 4, 16 and 64 per ring, as the prototype (the ground's canopy colour stands in for the rest)
 const HOUSE_LEVELS = 5;        // rings with village buildings, out to 8 km (beyond, a building is under a pixel before the ring starts)
 const pxScale = { value: 900 };   // pixels per radian at the middle of the screen: drawing-buffer height / (2 tan(fov / 2))
 
@@ -183,6 +183,12 @@ uniform mat3 toHole;   // the ring's face grid into the view face's (the loaded 
 uniform mat3 toHole2;  // into the finer ring's face
 uniform float seam2;
 varying vec3 vColor;
+#ifndef BOXES
+varying vec3 vSide;    // the crown's (or roof's) sides, and the trunk's (or walls')
+varying vec3 vLow;
+varying vec4 vRows;    // where the top face, crown sides and trunk end, down the point (0 at its top)
+varying vec2 vHalf;    // half-widths of the crown and the trunk, across the point
+#endif
 #include <fog_pars_vertex>
 #define NEAR(d) clamp(10.0 * pxScale / (d) - 1.0, 0.0, 1.0)
 void main() {
@@ -214,9 +220,28 @@ void main() {
   vec3 l = vec3(position.x * wd.x, up ? c + position.y * b.z : position.y * a.z, position.z * wd.y);
   vColor = (up ? top : low) * shade;
 #else
-  vec3 l = vec3(0.0, b.z > 0.0 ? c + 0.5 * b.z : 0.5 * a.z, 0.0);
-  vColor = (b.x > 0.0 ? top : low) * 0.85;
-  gl_PointSize = max(px, 1.0);
+  // a point drawn like the two boxes seen from here: the crown's (or roof's) top face, its sides below, then the trunk (or walls), each
+  // shaded as the boxes' faces are. sn is how steeply the view looks down on it.
+  bool crown = b.z > 0.0;
+  float cw = crown ? max(b.x, b.y) : max(a.x, a.y), ch = crown ? b.z : 0.0, tw = max(a.x, a.y), th = crown ? c : a.z, tall = th + ch;
+  vec3 upM = vec3(0.0, 1.0, 0.0);
+  if (uK > 0.0) upM = normalize(mix(upM, mat3(sphM) * (frame * upM), uK));
+  vec3 mid = w0 + upM * (0.5 * tall);
+  vec4 mvMid = modelViewMatrix * vec4(mid, 1.0);
+  float sn = clamp(dot(normalize(-mvMid.xyz), normalize((modelViewMatrix * vec4(upM, 0.0)).xyz)), 0.0, 1.0), cs = sqrt(1.0 - sn * sn);
+  float k = pxScale / d, hTop = cw * sn * k, hSide = ch * cs * k, hLow = th * cs * k, wMax = max(cw, tw) * k;
+  float size = clamp(max(wMax, hTop + hSide + hLow), 1.0, 64.0);
+  float y0 = 0.5 - 0.5 * (hTop + hSide + hLow) / size;
+  vRows = vec4(y0, y0 + hTop / size, y0 + (hTop + hSide) / size, y0 + (hTop + hSide + hLow) / size);
+  vHalf = vec2(cw, tw) * k / size * 0.5;
+  vec3 tc = crown ? top : low;
+  vSide = tc * 0.8; vLow = low * 0.72;
+  vColor = tc;
+  // under about 2 pixels the shapes don't show: one colour, the faces' average by the area each covers
+  float aTop = hTop * cw * k, aSide = hSide * cw * k, aLow = hLow * tw * k;
+  if (size < 2.0) { vColor = (tc * aTop + vSide * aSide + vLow * aLow) / max(1e-6, aTop + aSide + aLow); vRows = vec4(0.0); }
+  gl_PointSize = size;
+  vec3 l = vec3(0.0, 0.5 * tall, 0.0);
 #endif
   vec3 t = base + l;
   if (uK > 0.0) t = mix(t, (sphM * vec4(sph + frame * l, 1.0)).xyz, uK);
@@ -227,9 +252,25 @@ void main() {
 const STAND_FRAG = `
 uniform float uDay;
 varying vec3 vColor;
+#ifndef BOXES
+varying vec3 vSide;
+varying vec3 vLow;
+varying vec4 vRows;
+varying vec2 vHalf;
+#endif
 #include <fog_pars_fragment>
 void main() {
-  gl_FragColor = vec4(vColor * max(0.1, uDay), 1.0);
+  vec3 col = vColor;
+#ifndef BOXES
+  if (vRows.w > vRows.x) {
+    vec2 q = gl_PointCoord;
+    float x = abs(q.x - 0.5);
+    if (q.y < vRows.x || q.y > vRows.w) discard;
+    if (q.y < vRows.z) { if (x > max(vHalf.x, 0.5 / 64.0)) discard; col = q.y < vRows.y ? vColor : vSide; }
+    else { if (x > max(vHalf.y, 0.5 / 64.0)) discard; col = vLow; }
+  }
+#endif
+  gl_FragColor = vec4(col * max(0.1, uDay), 1.0);
 #include <fog_fragment>
 }`;
 function standMaterial(boxes) {
@@ -373,7 +414,7 @@ function off() {
 }
 function dispose(m) {
   if (m.parent) m.parent.remove(m);
-  m.geometry.dispose(); m.material.dispose();
+  m.geometry.dispose(); for (const x of [].concat(m.material)) x.dispose();
 }
 
 // Starts rebuilding ring L around grid point (cu, cv) of face f: copies what the old ring already has and asks the workers for the rest.
@@ -456,19 +497,21 @@ function finish(L, b, m) {
   g.setAttribute("canopy", attr(m.can, 4, true));
   if (m.idx) g.setIndex(attr(m.idx, 1));
   else g.setIndex(fullIdx);
-  L.counts = m.idx ? m.counts : fullCounts;
+  L.counts = m.idx ? m.counts : fullCounts; L.bounds = m.bounds;
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), L.cell * EXT * 1.5 + 4000);
-  // the ring keeps its material: freeing it would drop its shader program, compiled again for the new mesh (tens of ms)
-  const mesh = new THREE.Mesh(g, L.mesh ? L.mesh.material : material(L.lv < CELLS.length - 1));
+  // the ring keeps its material: freeing it would drop its shader program, compiled again for the new mesh (tens of ms). It is the only
+  // entry of the mesh's material list, which lets the mesh draw just the sectors in view as groups (cull)
+  if (!L.mat) L.mat = material(L.lv < CELLS.length - 1);
+  const mesh = new THREE.Mesh(g, [L.mat]);
   const a = Pl.atlas(b.f, b.cu, b.cv);
   mesh.matrixAutoUpdate = false;
   mesh.position.set(a.x, 0, a.z); mesh.updateMatrix();
   mesh.userData = { anchor: b.anchor, lod: L.lv };
-  mesh.material.uniforms.anchor.value.set(b.anchor[0], b.anchor[1], b.anchor[2]);
+  L.mat.uniforms.anchor.value.set(b.anchor[0], b.anchor[1], b.anchor[2]);
   if (L.mesh) { L.mesh.parent && L.mesh.parent.remove(L.mesh); L.mesh.geometry.dispose(); }
   // the stand-ins: their own object, placed the same way (kept with their material, like the ring)
   const S = b.parts ? join(b.parts) : null;
-  mesh.material.uniforms.stand.value = S ? 1 / (1 << 2 * THIN[L.lv]) : 0;   // the share of tree cells drawn as stand-ins
+  L.mat.uniforms.stand.value = S ? 1 / (1 << 2 * THIN[L.lv]) : 0;   // the share of tree cells drawn as stand-ins
   if (L.si) { L.si.parent && L.si.parent.remove(L.si); L.si.geometry.dispose(); }
   if (S) {
     const boxes = L.lv < BOX_LEVELS, mat = L.si ? L.si.material : standMaterial(boxes), geo = standGeometry(S, boxes);
@@ -502,6 +545,55 @@ function offset(L, f, u, v) {
   return Math.max(Math.abs(U - u), Math.abs(W - v));
 }
 const ID = { A: [1, 0, 0, 1], t: [0, 0] };
+
+// Which sectors of each ring are drawn this frame (js/main.js calls it after js/view.js has placed everything for the frame): those whose
+// bounds (js/grid.js sectorBounds) aren't wholly outside the view, each from where the finer ring or the loaded chunks stop covering it
+// (L.skip cells out). Every vertex the shader draws lies between a point of the sector's flat box and one of its round box (mapped by
+// sphM), mixed by world.roundK, so a sector is left out only when all the corners of the boxes it uses are outside one side of the view.
+const cullM = new THREE.Matrix4(), cullS = new THREE.Matrix4(), cullE = new Float32Array(16 * 4);
+lod.cull = function (camera) {
+  if (!lod.active) return;
+  const k = BF.world.roundK ? BF.world.roundK.value : 0, NS = BF.gridJob.SECTORS;
+  for (const L of lod.levels) {
+    const mesh = L.mesh;
+    if (!mesh || !mesh.visible || !L.bounds) { L.tris = 0; continue; }
+    const g = mesh.geometry, C = L.counts, K1 = (C.length - 1) / NS, b = L.bounds, skip = Math.min(K1, (L.skip || 0) + 1);
+    cullM.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(mesh.matrixWorld);
+    cullS.multiplyMatrices(cullM, L.mat.userData.sphM);
+    const m = cullM.elements, ms = cullS.elements, e = cullE;
+    g.clearGroups();
+    let tris = 0, open = -1, end = -1;
+    for (let s = 0; s < NS; s++) {
+      const a = C[s * K1 + skip], z = C[(s + 1) * K1];
+      if (z <= a) continue;
+      // the corners in clip space: the flat box (unless fully round) and the round box (once partly round)
+      let np = 0;
+      for (let h = 0; h < 2; h++) {
+        if (h === 0 ? k >= 1 : k <= 0) continue;
+        const M = h === 0 ? m : ms, o = s * 12 + 6 * h;
+        for (let c = 0; c < 8; c++) {
+          const x = b[o + (c & 1 ? 3 : 0)], y = b[o + 1 + (c & 2 ? 3 : 0)], w0 = b[o + 2 + (c & 4 ? 3 : 0)], q = 4 * np++;
+          e[q] = M[0] * x + M[4] * y + M[8] * w0 + M[12]; e[q + 1] = M[1] * x + M[5] * y + M[9] * w0 + M[13];
+          e[q + 2] = M[2] * x + M[6] * y + M[10] * w0 + M[14]; e[q + 3] = M[3] * x + M[7] * y + M[11] * w0 + M[15];
+        }
+      }
+      let out = false;
+      for (let pl = 0; pl < 6 && !out; pl++) {
+        const ax = pl >> 1, sg = pl & 1 ? 1 : -1;
+        out = true;
+        for (let p = 0; p < np && out; p++) if (sg * e[4 * p + ax] <= e[4 * p + 3]) out = false;   // inside this side: -w <= x (or x <= w)
+      }
+      if (out) continue;
+      if (a !== end) { if (open >= 0) g.addGroup(6 * open, 6 * (end - open), 0); open = a; }
+      end = z; tris += 2 * (z - a);
+    }
+    if (open >= 0) g.addGroup(6 * open, 6 * (end - open), 0);
+    // the corner bridge (the coarsest ring), after the cells: always drawn
+    const cells = C[NS * K1] * 6, all = g.index.count;
+    if (all > cells) { g.addGroup(cells, all - cells, 0); tris += (all - cells) / 3; }
+    L.tris = tris;
+  }
+};
 
 // The radius covered by the coarsest ring drawn (0 if none), for fog and the far clip plane.
 lod.radius = function () {
@@ -573,13 +665,11 @@ function update(budgetMs) {
     if (!L.mesh) continue;
     L.mesh.visible = L.show;
     if (!L.show) continue;
-    const u = L.mesh.material.uniforms, fine = prev && prev.mesh && prev.show ? prev : null;
+    const u = L.mat.uniforms, fine = prev && prev.mesh && prev.show ? prev : null;
     cuts(u, V, lod.eyeHole, fine);
     u.outer.value.set(0, 0, L.half);
     // the middle that the finer ring or the loaded chunks certainly cover isn't drawn at all (its cells come first in the index)
-    const g = L.mesh.geometry, idx = g.index;
-    g.setDrawRange(6 * L.counts[Math.min(L.counts.length - 1, Math.floor(covered(L, V, fine) / L.cell))], Infinity);
-    L.tris = Math.max(0, idx.count - g.drawRange.start) / 3;
+    L.skip = Math.floor(covered(L, V, fine) / L.cell);
     u.morph.value.set(L === top ? 1e30 : L.half * MORPH0, L === top ? 2e30 : L.half * MORPH1);
     // stand-ins fade out across the outer part of the last ring that has them
     if (L === lastStand) u.edge.value.set(L.half * 0.7, L.half * 0.95);

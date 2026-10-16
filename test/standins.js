@@ -36,8 +36,12 @@ module.exports = async (pg, out) => {
         while ((BF.lod.frames || 0) < f0 + 3 && performance.now() - t0 < maxS * 1000) await new Promise((r) => setTimeout(r, 100));   // (the rings see the new place)
         for (;;) {
           standIns(false);
-          const s = BF.lod.stats();
-          if (s.active && s.rings.some((r) => r.show) && s.rings.every((r) => !r.show || (r.built && !r.building)) && s.pending === 0) return (performance.now() - t0) / 1000;
+          const s = BF.lod.stats(), V = BF.lod.view;
+          // a shown ring is in place once it is centred within js/lod.js MOVE (0.2) of its radius from the player: built and idle isn't
+          // enough, as js/lod.js holds a ring back while the player's ground speed (measured over wall-clock time) is too fast for its last
+          // build, and a hop of a few hundred blocks reads as flight until enough frames decay it (a few at 60 fps, many more at 2-6 fps)
+          const placed = (r, L) => r.f === V.f && Math.max(Math.abs(r.cu - V.u), Math.abs(r.cv - V.v)) <= 0.2 * L.half;
+          if (s.active && s.rings.some((r) => r.show) && s.rings.every((r, i) => !r.show || (r.built && !r.building && placed(r, BF.lod.levels[i]))) && s.pending === 0) return (performance.now() - t0) / 1000;
           if (performance.now() - t0 > maxS * 1000) return -1;
           await new Promise((r) => setTimeout(r, 500));
         }
@@ -151,13 +155,13 @@ module.exports = async (pg, out) => {
     const purge = await pg.evaluate(async () => {
       const W = BF.world;
       // (chunks are purged past 15 chunks: a view of 20 has plenty; the rings are hidden meanwhile, as software rendering draws them slowly)
-      for (const L of BF.lod.levels) if (L.mesh) L.mesh.material.visible = false;
+      for (const L of BF.lod.levels) if (L.mat) L.mat.visible = false;
       W.setViewDist(20);
       const t0 = performance.now();
       while (W.high && performance.now() - t0 < 60000) await new Promise((r) => setTimeout(r, 500));
       await new Promise((r) => setTimeout(r, 3000));
       while (W.queueLength > 0 && W.farMeshes.size <= 100 && performance.now() - t0 < 400000) await new Promise((r) => setTimeout(r, 500));
-      for (const L of BF.lod.levels) if (L.mesh) L.mesh.material.visible = true;
+      for (const L of BF.lod.levels) if (L.mat) L.mat.visible = true;
       let data = 0;
       for (const c of W.chunks.values()) for (const s of c.secs) if (typeof s !== "number") data += s.byteLength;
       // a far chunk's mesh is taken back when its data comes back, and isn't meshed again
