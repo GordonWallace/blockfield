@@ -1,17 +1,17 @@
 // Village sizes (village generator 2): node test/run.js /tmp/vs test/village-sizes.js
 // Samples the rosters of every village in a large area for several seeds and prints the size distribution and per-profession
-// frequencies (VS_SEEDS, VS_R regions per side / 2, VS_GEN; VS_VG=1 for the classic villages), then walks into the biggest village of the
+// frequencies (VS_SEEDS, VS_R regions per side / 2 around the spawn, VS_GEN; VS_VG=1 for the classic villages), then walks into the biggest village of the
 // last seed and checks its villagers spawn.
 module.exports = async (pg) => {
   const seeds = (process.env.VS_SEEDS || "1,2,3,4,5,6,7,8").split(",").map(Number), R = +(process.env.VS_R || 14);
-  const gen = +(process.env.VS_GEN || 2), vg = +(process.env.VS_VG || 2);
+  const gen = +(process.env.VS_GEN || 4), vg = +(process.env.VS_VG || 2);
   const stats = await pg.evaluate(({ seeds, R, gen, vg }) => {
     const sizes = [], prof = {}, has = {}, slots = { explorer: 0, cart: 0 }, golems = [], jobs = [], fails = [];
     let villages = 0, total = 0, maxV = null;
     for (const seed of seeds) {
       BF.newWorld(seed, { gen, villages: vg });
-      const seen = new Set();
-      for (let rz = -R; rz < R; rz++) for (let rx = -R; rx < R; rx++) for (const v of BF.worldgen.villagesNear(rx * 384, rz * 384, 200)) {
+      const seen = new Set(), o = BFT.spawn();
+      for (let rz = -R; rz < R; rz++) for (let rx = -R; rx < R; rx++) for (const v of BF.worldgen.villagesNear(o.x + rx * 384, o.z + rz * 384, 200)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
         if (seen.has(key)) continue;
         seen.add(key);

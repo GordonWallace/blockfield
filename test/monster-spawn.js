@@ -8,10 +8,10 @@ module.exports = async (pg) => {
   const ok = (name, cond, extra) => { console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra === undefined ? "" : extra)); if (!cond) fails.push(name); };
   // a village with a spot 300 blocks off that no other village is near; the village kept running by a pin (as a caravan trip does)
   const setup = await pg.evaluate(() => {
-    const vs = (BF.worldgen.villagesNear(0, 0, 3000) || []).filter(v => v && v.minX != null && v.pop >= 6).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+    const vs = BFT.villages(3000).filter(v => v && v.minX != null && v.pop >= 6);   // nearest the spawn first
     for (const v of vs) for (let a = 0; a < 8; a++) {
       const x = Math.round(v.x + Math.cos(a * 0.785) * 300), z = Math.round(v.z + Math.sin(a * 0.785) * 300);
-      const near = (BF.worldgen.villagesNear(x, z, 600) || []).filter(o => o.minX != null && Math.hypot(o.x - x, o.z - z) < 260);
+      const near = (BF.worldgen.villagesNear(x, z, 600) || []).filter(o => o.minX != null && BF.planet.distance(o, { x, z }) < 260);
       if (near.length) continue;
       // the clock goes to day 6 (as the night below wants) before the pin: js/merchant.js tick drops a pin no merchant's trip has held for a
       // game day, so a jump of 6 days after pinning lost the pin at the night's first tick and the village unloaded (300 blocks is past DROP)

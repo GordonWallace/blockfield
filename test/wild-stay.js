@@ -13,10 +13,13 @@ module.exports = async (pg) => {
     for (let i = 0; i < 200; i++) M.update(0.05);   // the first-generation rolls of the loaded chunks
     // where each new mob came from: a chunk's first-generation roll or stored mobs coming back (js/wildlife.js), a saved horse coming back,
     // or anything else (which, for a grown animal, is a spontaneous spawn)
+    // (kept in a WeakMap, not on the mob: js/mobsave.js snapOf copies a mob's own fields into a stored wild mob's snapshot, so a tag on
+    // the mob would come back on the new mob of a chunk that unloaded and loaded again, and a lamb that grew up away would read as "other")
+    const src = new WeakMap(), stk = new WeakMap();
     const sp = M.spawn;
     const sg = M.spawnGroup;
-    M.spawnGroup = function () { const n0 = M.list.length, r = sg.apply(this, arguments); for (let i = n0; i < M.list.length; i++) M.list[i].__src = "wild"; return r; };
-    M.spawn = function () { const m = sp.apply(this, arguments); if (m) { const st = new Error().stack; m.__src = m.__src || (/wildlife\.js/.test(st) ? "wild" : /embody|mobsave\.js/.test(st) ? "back" : /spawnHen|spawnSheep|spawnPig|spawnCow/.test(st) ? "kept" : "other"); if (m.__src === "other") m.__st = st.split("\n").slice(2, 6).map(l => l.trim().split(" ")[1]).join("<"); } return m; };
+    M.spawnGroup = function () { const n0 = M.list.length, r = sg.apply(this, arguments); for (let i = n0; i < M.list.length; i++) src.set(M.list[i], "wild"); return r; };
+    M.spawn = function () { const m = sp.apply(this, arguments); if (m) { const st = new Error().stack; if (!src.has(m)) src.set(m, /wildlife\.js/.test(st) ? "wild" : /embody|mobsave\.js/.test(st) ? "back" : /spawnHen|spawnSheep|spawnPig|spawnCow/.test(st) ? "kept" : "other"); if (src.get(m) === "other") stk.set(m, st.split("\n").slice(2, 6).map(l => l.trim().split(" ")[1]).join("<")); } return m; };
     const seen = new Set(M.list.filter(animal)), start = seen.size, chunks0 = new Set(W.chunks.keys());
     const ck = m => Math.floor(m.position.x / BF.CS) + "," + Math.floor(m.position.z / BF.CS);
     const grown = [], born = [];
@@ -28,10 +31,10 @@ module.exports = async (pg) => {
       if (i % 200 === 0) {
         for (const m of M.list) if (animal(m) && !seen.has(m)) {
           seen.add(m);
-          if (m.__src === "kept" || m.pen || m.penVillage || m.coop || m.pasture || m.sty || m.village) continue;   // a village's kept animals (a pen or coop stocking itself, even one that strays at once) aren't wild
+          if (src.get(m) === "kept" || m.pen || m.penVillage || m.coop || m.pasture || m.sty || m.village) continue;   // a village's kept animals (a pen or coop stocking itself, even one that strays at once) aren't wild
           const st = m.sheep || m.hen || m.cow || m.pig || m.horse;
-          if (m.__src === "wild" || m.__src === "back") { if (!chunks0.has(ck(m))) late++; else back++; continue; }   // a late chunk's roll, or mobs of a chunk that unloaded and came back
-          if (st && st.growAt != null) born.push(m.type); else grown.push([m.type, Math.round(m.position.x), Math.round(m.position.z), m.__src, m.__st || ""]);
+          if (src.get(m) === "wild" || src.get(m) === "back") { if (!chunks0.has(ck(m))) late++; else back++; continue; }   // a late chunk's roll, or mobs of a chunk that unloaded and came back
+          if (st && st.growAt != null) born.push(m.type); else grown.push([m.type, Math.round(m.position.x), Math.round(m.position.z), src.get(m), stk.get(m) || ""]);
         }
         await new Promise(r => setTimeout(r, 0));
       }

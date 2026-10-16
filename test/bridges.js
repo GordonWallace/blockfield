@@ -18,6 +18,9 @@ module.exports = async (pg) => {
     const rec = bm.village, key = rec.key;
     // ---- a river: x0 .. x0+wd-1 over z0-30 .. z0+30, banks flattened 8 blocks either side, water 7 deep, its top level with the bank's top block
     const wg = rec.wg, x0 = Math.floor(wg ? wg.maxX : rec.x) + 14, z0 = Math.floor(rec.z);
+    // the river runs past the village's edge: wait for those chunks (on the planet they are not loaded yet, and the carve would land in nothing)
+    const loaded = () => [[x0 - 10, z0 - 31], [x0 + 40, z0 - 31], [x0 - 10, z0 + 31], [x0 + 40, z0 + 31], [x0 + 15, z0]].every(([x, z]) => W.isLoaded(x, z));
+    for (let i = 0; i < 600 && !loaded(); i++) { W.update(x0 + 15, z0, 30); await new Promise(r => setTimeout(r, 20)); }
     const gref = W.heightAt(x0 - 9, z0);
     const carve = (x0, wd) => {
       for (let z = z0 - 30; z <= z0 + 30; z++) for (let x = x0 - 9; x < x0 + wd + 9; x++) {
@@ -65,6 +68,7 @@ module.exports = async (pg) => {
       }
       return swims;
     };
+    BF.sky.setTime(0.2 + 31 * 0.004);   // a moment after the last recorded crossing: walks in the same instant and cell are one crossing (where the walks cross depends on where the village is)
     const before = Br.count(rec, gx, gz), swimsBefore = trips();
     ok("before the bridge every one of 10 walks across the river is a swim", swimsBefore === 10, swimsBefore);
     ok("and walks that find no way round count as crossings", Br.heat(rec).reduce((a, h) => a + h[2], 0) > before, { before, heat: Br.heat(rec) });

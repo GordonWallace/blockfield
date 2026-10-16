@@ -534,7 +534,7 @@ function screenClosed() {
   if (ev && ev.type === "keydown" && ev.key === "Escape") { markEsc(); escCloseEvent = ev; escCloseHeld = true; }
 }
 function requestLock() {
-  if (isTouch) return;
+  if (isTouch || offPlanet) return;   // off the planet the mouse stays free to drag it (closing a screen or the teleport panel up there must not take it)
   const ev = window.event;
   lockOnEscUp = escRelock = false;
   if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
@@ -562,7 +562,7 @@ function beginPlay() {
 }
 function resume() {
   if (P.dead) return;
-  if (!dragMode && !isTouch) {
+  if (!dragMode && !isTouch && !offPlanet) {
     requestLock();
     // the pause menu stays until the lock arrives (pointerlockchange hides it)
     setTimeout(() => {
@@ -663,7 +663,9 @@ function bindInput() {
     if (started && !menuOpen && !P.dead && !dragMode && !isTouch && !locked && !offPlanet) requestLock();
   });
 
-  document.addEventListener("mousemove", e => { if (locked) look(e.movementX, e.movementY); });
+  // (a lock that lands off the planet anyway, say one requested just before climbing past 20,000, is let go next frame; until then
+  // a drag with the button held still turns the planet)
+  document.addEventListener("mousemove", e => { if (!locked) return; if (!offPlanet) look(e.movementX, e.movementY); else if (e.buttons & 1) turnPlanet(e.movementX, e.movementY); });
 
   // Drag-to-look fallback when there is no pointer lock (mouse or pen; touch handled separately)
   let drag = null;
@@ -1816,12 +1818,24 @@ function physics(dt) {
   else if (inWater) speed = SWIM * (sprinting ? 1.4 : 1);
   else speed = sneaking ? SNEAK : sprinting ? SPRINT : WALK;
   // the planet, creative flight: speed grows with the height above the ground, so a few seconds of Space (with R for the boost)
-  // reach orbit (spec r14-04). R alone boosts vertical flight too up there, where there's no terrain to outrun.
+  // reach orbit and you can get around the planet from high up (spec r14-04, the prototype's curve: the boost times height / 150).
+  // Above 150 R alone boosts vertical flight too, and climbing is as fast as flying forward. (Not the prototype's Ctrl for double:
+  // Ctrl+R reloads the page and Ctrl+W closes it in a browser.)
+  let vert = 0.75;
   if (flying && creative() && BF.view && BF.planet && BF.planet.isPlanet()) {
     const above = pos.y - BF.view.groundAt(pos.x, pos.z);
     if (above > 150) {
-      if (k.has("KeyR") && !turbo) speed = CFLY * TURBO_MULT;
+      if (k.has("KeyR")) speed = CFLY * TURBO_MULT;
       speed *= above / 150;
+      vert = 1;
+      // below the chunk ceiling (js/world.js) chunks still load, and ones not loaded yet read as solid: don't outrun them
+      if (!BF.world.high && speed > CFLY * 2) {
+        const sp = Math.hypot(vel.x, vel.z);
+        if (sp > 1) {
+          const ahead = Math.max(TURBO_LOOKAHEAD * 16, sp * 0.5);
+          if (!BF.world.chunks.has(Math.floor((pos.x + vel.x / sp * ahead) / 16) + "," + Math.floor((pos.z + vel.z / sp * ahead) / 16))) speed = CFLY * 2;
+        }
+      }
     }
   }
   if ((eatT > 0 || drawT > 0) && !flying) speed *= 0.35;   // eating or drawing a bow: slowed, as in vanilla
@@ -1834,7 +1848,8 @@ function physics(dt) {
 
   if (flying) {
     const vy = (wantJump ? 1 : 0) - (shift ? 1 : 0);
-    vel.y += (vy * speed * 0.75 - vel.y) * (1 - Math.exp(-10 * dt));
+    vel.y += (vy * speed * vert - vel.y) * (1 - Math.exp(-10 * dt));
+    if (vert === 1 && pos.y > 3 * BF.planet.R && vel.y > 0) vel.y = 0;   // flight tops out at three planet radii up, as in the prototype
   } else if (inWater) {
     // standing in shallow water: a normal jump works (otherwise you can't hop out of a 1-deep pool)
     if (wantJump && onGround) vel.y = JUMP_V;
@@ -1967,7 +1982,7 @@ function keepHeading(h3) {
 // height. Back below 19,400 the mouse looks around again, starting from straight down.
 function updateOffPlanet() {
   const V = BF.view, on = !!(V && BF.planet && BF.planet.isPlanet()) && pos.y > (offPlanet ? V.OFF_BACK : V.OFF);
-  if (on === offPlanet) { if (on) faceNorth(); return; }
+  if (on === offPlanet) { if (on) { faceNorth(); if (locked) { mouseFreed = true; exitLock(); } } return; }
   offPlanet = on;
   if (on) { resetBreak(); if (locked) releaseMouse(); faceNorth(); }
   else { pitch = -1.5; }

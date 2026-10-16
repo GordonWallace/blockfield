@@ -1,7 +1,7 @@
 // @ci integration suite=world timeout=600
 // Round from high up on the planet (generator 4, spec r14-04): the blend k from the ground to fully round, fog and clip planes by
 // height, the sky fading to space, no jumps in the picture through the blend, flight high up following a great circle (also across
-// a face edge), creative fast flight speeding up with height, mouse look working at 15,000 and off-planet mode above 20,000 (the
+// a face edge), creative fast flight speeding up with height (with R, as fast as the prototype's: 160 x height / 150), mouse look working at 15,000 and off-planet mode above 20,000 (the
 // view turns no more, dragging turns the planet at the same height, the axis line shows), and looking around again below 19,400.
 // node test/run.js /tmp/ph test/planet-high.js
 module.exports = async (pg, out) => {
@@ -113,7 +113,21 @@ module.exports = async (pg, out) => {
   for (let i = 0; i < 1200 && await pg.evaluate((t0) => BF.state.time - t0 < 8, t0); i++) await pg.waitForTimeout(100);
   await pg.keyboard.up("Space"); await pg.keyboard.up("KeyR");
   const top = await pg.evaluate(() => BF.player.position.y);
-  check(top > 20000, `8 s of Space with R in creative flight climbs from ${Math.round(rise)} to ${Math.round(top)}`);
+  check(top > 20000 && top < 3.05 * (await pg.evaluate(() => BF.planet.R)), `8 s of Space with R in creative flight climbs from ${Math.round(rise)} to ${Math.round(top)} (flight tops out at three planet radii)`);
+
+  // ---- and flying forward with R high up is fast enough to get around the planet (the prototype's curve: 160 x height / 150)
+  await pg.evaluate(() => { const p = BF.player.position; p.y = 5000; const v = BF.player.velocity; v.x = v.y = v.z = 0; });
+  await pg.waitForFunction(() => !BF.player.offPlanet, null, { timeout: 30000 });
+  const g0 = await pg.evaluate(() => { BF.player.setLook(0.4, 0); const p = BF.player.position, c = BF.planet.canon(p.x, p.z, {}); return { t: BF.state.time, d: BF.planet.dir(c.f, c.u, c.v, [0, 0, 0]) }; });
+  await pg.keyboard.down("KeyR"); await pg.keyboard.down("KeyW");
+  for (let i = 0; i < 600 && await pg.evaluate((t0) => BF.state.time - t0 < 2, g0.t); i++) await pg.waitForTimeout(100);
+  await pg.keyboard.up("KeyW"); await pg.keyboard.up("KeyR");
+  const fast = await pg.evaluate((g0) => {
+    const p = BF.player.position, c = BF.planet.canon(p.x, p.z, {}), d = BF.planet.dir(c.f, c.u, c.v, [0, 0, 0]);
+    const ang = Math.acos(Math.min(1, d[0] * g0.d[0] + d[1] * g0.d[1] + d[2] * g0.d[2]));
+    return ang * BF.planet.R / (BF.state.time - g0.t);
+  }, g0);
+  check(fast > 3000, `W with R 5,000 blocks up flies ${Math.round(fast)} blocks a second over the ground`);
 
   // ---- mouse look at 15,000 and off-planet mode above 20,000 (drag-to-look: the test turns pointer lock off above, as headless Chromium
   // grants it, and a lock landing mid-drag sent the moves to the locked-mouse handler, whose synthetic movementX is 0)

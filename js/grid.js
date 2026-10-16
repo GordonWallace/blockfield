@@ -391,7 +391,8 @@ function mesh(p, raw) {
     if (p.bridge) bridge(p, raw, pos, q);
     idx = new Uint32Array(q);
   }
-  return { pos, sph, col, mpos, msph, mcol, can, idx, counts };
+  const bounds = sectorBounds(n, p.ext, p.disc, raw.ok, pos, mpos, sph, msph);
+  return { pos, sph, col, mpos, msph, mcol, can, idx, counts, bounds };
 }
 // The coarsest ring has no coarser ring to fill the strip along its corner wedge (see js/lod.js), so it closes the wedge itself: the
 // samples along one side of the wedge are joined to those the same distance along the other side, which are neighbours on the sphere,
@@ -417,29 +418,53 @@ function bridge(p, raw, pos, q) {
   }
 }
 // The index of the cells of an n x n grid (counter-clockwise seen from above: x = u, y up, z = v) that reach within r cells of its centre
-// point (c, c), and pass has(a) if given (a: the cell's first corner). Sorted by how far the cell's furthest corner is from the centre, so
-// counts[k], the number of cells lying wholly within k cells of it, is where a draw that skips the middle out to k starts (js/lod.js).
+// point (c, c), and pass has(a) if given (a: the cell's first corner). Grouped by sector (SECTORS equal angles round the centre, by the
+// cell's middle), and within a sector sorted by how far the cell's furthest corner is from the centre: counts[s * K1 + k + 1] is where a
+// draw of sector s that skips its middle out to k cells starts, and counts[(s + 1) * K1] where the sector ends (js/lod.js draws only
+// the sectors in view, each without the middle the finer ring covers).
+const SECTORS = 16;
+const sectorOf = (x, z) => Math.min(SECTORS - 1, Math.floor((Math.atan2(z, x) + Math.PI) * SECTORS / (2 * Math.PI)));
 function discIndex(n, c, r, has) {
-  const R = r + 1, K = R + 2, band = new Uint32Array(K + 1), at = new Int32Array((n - 1) * (n - 1)).fill(-1);
+  const R = r + 1, K = R + 2, K1 = K + 1, band = new Uint32Array(SECTORS * K1 + 1), at = new Int32Array((n - 1) * (n - 1)).fill(-1);
   for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
     const x0 = i - c, x1 = i + 1 - c, z0 = j - c, z1 = j + 1 - c;
     const near = Math.hypot(x0 > 0 ? x0 : x1 < 0 ? x1 : 0, z0 > 0 ? z0 : z1 < 0 ? z1 : 0);
     if (near > R || (has && !has(j * n + i))) continue;
     const k = Math.min(K, Math.ceil(Math.hypot(Math.max(-x0, x1), Math.max(-z0, z1))));
-    at[j * (n - 1) + i] = k; band[k]++;
+    const key = sectorOf(i + 0.5 - c, j + 0.5 - c) * K1 + k;
+    at[j * (n - 1) + i] = key; band[key]++;
   }
-  const counts = new Uint32Array(K + 2);
-  for (let k = 0; k <= K; k++) counts[k + 1] = counts[k] + band[k];
-  const next = counts.slice(0, K + 1), q = new Uint32Array(counts[K + 1] * 6);
+  const counts = new Uint32Array(SECTORS * K1 + 1);
+  for (let q = 0; q < SECTORS * K1; q++) counts[q + 1] = counts[q] + band[q];
+  const next = counts.slice(0, SECTORS * K1), q = new Uint32Array(counts[SECTORS * K1] * 6);
   for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
-    const k = at[j * (n - 1) + i];
-    if (k < 0) continue;
-    const a = j * n + i, o = 6 * next[k]++;
+    const key = at[j * (n - 1) + i];
+    if (key < 0) continue;
+    const a = j * n + i, o = 6 * next[key]++;
     q[o] = a; q[o + 1] = a + n; q[o + 2] = a + 1; q[o + 3] = a + 1; q[o + 4] = a + n; q[o + 5] = a + n + 1;
   }
-  return { idx: q, counts: counts.subarray(1) };
+  return { idx: q, counts, K1, sectors: SECTORS };
 }
-BF.gridJob.discIndex = discIndex;
+// Each sector's bounds for culling it (js/lod.js): the box round its cells' flat positions and flat morph targets, then the box round
+// their sphere positions and sphere morph targets (6 numbers each: min x, y, z, max x, y, z). Every vertex the shader draws lies between
+// a point of the first box and one of the second.
+function sectorBounds(n, c, r, ok, pos, mpos, sph, msph) {
+  const R = r + 1, b = new Float32Array(SECTORS * 12);
+  for (let s = 0; s < SECTORS; s++) for (const o of [0, 6]) for (let k = 0; k < 3; k++) { b[s * 12 + o + k] = Infinity; b[s * 12 + o + 3 + k] = -Infinity; }
+  const add = (s, o, A, v) => { for (let k = 0; k < 3; k++) { const x = A[3 * v + k]; if (x < b[s + o + k]) b[s + o + k] = x; if (x > b[s + o + 3 + k]) b[s + o + 3 + k] = x; } };
+  for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+    const x0 = i - c, x1 = i + 1 - c, z0 = j - c, z1 = j + 1 - c;
+    if (Math.hypot(x0 > 0 ? x0 : x1 < 0 ? x1 : 0, z0 > 0 ? z0 : z1 < 0 ? z1 : 0) > R) continue;
+    const s = sectorOf(i + 0.5 - c, j + 0.5 - c) * 12;
+    for (const v of [j * n + i, j * n + i + 1, (j + 1) * n + i, (j + 1) * n + i + 1]) {
+      if (ok && !ok[v]) continue;
+      add(s, 0, pos, v); add(s, 6, sph, v);
+      if (mpos) { add(s, 0, mpos, v); add(s, 6, msph, v); }
+    }
+  }
+  return b;
+}
+BF.gridJob.discIndex = discIndex; BF.gridJob.SECTORS = SECTORS;
 
 if (typeof document === "undefined") return;   // in a worker: only the sampling above is needed
 

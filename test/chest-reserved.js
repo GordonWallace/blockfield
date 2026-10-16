@@ -7,6 +7,8 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "survival"; });
   await require('./lib').toVillage(pg);
+  // the planet's villagers come out over a while: wait for one at home with no chest yet
+  await pg.waitForFunction(() => { const S = BF.storage; return BF.mobs.list.some(m => m.type === "villager" && !m.dead && !m.child && m.inv && S.keyOf(m) && S.bedHouse(m) && !S.chestsIn(S.bedHouse(m), m.bed).length && S.chestSpot(m)); }, null, { timeout: 60000 }).catch(() => {});
   const ok = (cond, what) => console.log((cond ? "PASS " : "FAIL ") + what);
   const slot = (c, i) => `.bf-slot[data-c="${c}"][data-i="${i}"]`;
   const title = () => pg.evaluate(() => [...document.querySelectorAll(".bf-inv h2")].map(h => h.textContent).find(t => /^Chest/.test(t)) || "");

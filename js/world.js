@@ -249,7 +249,15 @@ world.reset = function () {
 // ---------- block access ----------
 // chunkAt: the chunk holding column (x, z), through the margin on the planet (its own cx / cz are canonical: index it with world.cell
 // when x / z may be a margin address). rawChunk: canonical coordinates only.
-const rawChunk = (x, z) => world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS)));
+// The last chunk looked up is kept (most lookups land in the same chunk as the one before; on the planet the keys are long atlas
+// strings, so building and hashing one costs more than on a flat world), until a chunk is added or removed (CGEN).
+let LCX = NaN, LCZ = NaN, LC, LGEN = -1, CGEN = 0;
+const rawChunk = (x, z) => {
+  const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
+  if (cx === LCX && cz === LCZ && LGEN === CGEN) return LC;
+  LCX = cx; LCZ = cz; LGEN = CGEN;
+  return (LC = world.chunks.get(ckey(cx, cz)));
+};
 function chunkAt(x, z) {
   if (!PLN) return rawChunk(x, z);
   return res(Math.floor(x), Math.floor(z)) ? rawChunk(RX, RZ) : undefined;
@@ -517,7 +525,7 @@ function createChunk(cx, cz) {
     for (const [i, id] of e) secSet(c, i & 15, (i >> 8) + BF.MIN_Y, (i >> 4) & 15, id);
   }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) updateColumn(c, x, z);
-  world.chunks.set(key, c);
+  world.chunks.set(key, c); CGEN++;
   if (BF.light) BF.light.onChunkCreated(c);
   if (BF.skyLight) BF.skyLight.onChunkCreated(c);   // sky light spreading (js/skylight.js)
   if (e) for (const [i, id] of e) if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) {
@@ -548,7 +556,7 @@ function unload(key) {
   const c = world.chunks.get(key);
   if (!c) return;
   disposeMeshes(c);
-  world.chunks.delete(key);
+  world.chunks.delete(key); CGEN++;
   world._dirty.delete(key);
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
 }
@@ -566,7 +574,7 @@ function purge(key) {
     for (const a of [...Object.values(g.attributes), g.index]) if (a) { if (a.uploaded) a.array = NOARR; else a.onUpload(freeArray); }
   }
   c.meshes = [];
-  world.chunks.delete(key);
+  world.chunks.delete(key); CGEN++;
   world._dirty.delete(key);
   world.purged = (world.purged || 0) + 1;
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }

@@ -61,7 +61,7 @@ Changing a place resets its clock. Taking away a light source, or building somet
 Monsters are limited by area, so a busy night cannot flood a place:
 
 - An area allows **10 monsters per 28 chunks**, never fewer than one.
-- Each running village counts as its own area, together with 16 blocks of margin around it. So does the corridor along a caravan's trip, and so does each patch of land kept loaded around villagers who have walked out of their village.
+- Each running village counts as its own area, together with 16 blocks of margin around it and the land kept loaded around its villagers at its edge. So does the corridor along a caravan's trip, and so does each patch of land kept loaded around villagers who have walked well away from their village.
 - Everything else loaded around you is one big area.
 - When an area is full, no more spawn there until some die.
 

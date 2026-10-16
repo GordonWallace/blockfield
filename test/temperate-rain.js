@@ -7,9 +7,10 @@ module.exports = async (pg, out) => {
   const fails = [];
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
   const r = await pg.evaluate(() => {
-    const stats = {};
+    const stats = {}, sx = Math.floor(BF.spawnPoint.x), sz = Math.floor(BF.spawnPoint.z);
+    // columns up to 20 km round the spawn (on the planet, face 4 near 35 N, at least 5 km from its edges; generator 3 used the origin)
     for (let i = 0; i < 3000; i++) {
-      const x = Math.round((Math.sin(i * 12.9898) * 43758.5453 % 1) * 20000), z = Math.round((Math.sin(i * 78.233) * 12543.123 % 1) * 20000);
+      const x = sx + Math.round((Math.sin(i * 12.9898) * 43758.5453 % 1) * 20000), z = sz + Math.round((Math.sin(i * 78.233) * 12543.123 % 1) * 20000);
       const h = BF.worldgen.heightAt(x, z);
       if (h < 1) continue;
       const s = stats[BF.worldgen.biomeAt(x, z).name] || (stats[BF.worldgen.biomeAt(x, z).name] = [0, 0, 0]);   // dry, rain, snow
