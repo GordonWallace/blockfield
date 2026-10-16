@@ -98,7 +98,7 @@
   {"name": "miner-actions", "file": "test/miner-actions.js", "kind": "actions", "tier": "integration"},
   {"name": "compare-view-14d", "kind": "node", "tier": "integration", "file": "test/compare-view.js", "args": ["{out}", "14"], "timeout": 2400, "what": "Compare table after 14 game days fast-forwarded"},
   {"name": "dead-villagers", "file": "test/dead-villagers.js", "kind": "actions", "tier": "integration", "timeout": 600},
-  {"name": "monster-spawn", "file": "test/monster-spawn.js", "kind": "actions", "tier": "integration", "timeout": 600, "env": {"BF_HASH": "#seed1337gen3v9"}},
+  {"name": "monster-spawn", "file": "test/monster-spawn.js", "kind": "actions", "tier": "integration", "timeout": 600},
   {"name": "shepherd-misc", "file": "test/shepherd-misc.js", "kind": "actions", "tier": "integration"},
   {"name": "toolsmith-actions", "file": "test/toolsmith-actions.js", "kind": "actions", "tier": "integration", "timeout": 900},
   {"name": "village-sizes", "file": "test/village-sizes.js", "kind": "actions", "tier": "integration"},
