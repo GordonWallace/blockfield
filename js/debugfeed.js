@@ -143,6 +143,30 @@ function detail(rec) {
   return d;
 }
 
+// Where (x, z) is from the player (spec r14-21): { dist, dx, dz, brg }. On the planet the distance is round the planet
+// (BF.planet.toward / distance), dx / dz the way there in the player's grid frame (the great circle's first step when far), and
+// brg the geographic bearing (degrees clockwise from true north; null at a pole). Off the planet: plain offsets, north = -z.
+const tw = {};
+function seen(pp, x, z) {
+  const P = BF.planet, t = P.toward(pp, { x, z }, tw), b = P.bearing(pp.x, pp.z, t.x, t.z);
+  return { dist: Math.round(t.d), dx: Math.round(t.x), dz: Math.round(t.z), brg: b == null ? null : Math.round(b) };
+}
+// The player as drawn on a village's map: [x, z, yaw] in the frame of the village's face (its villagers and buildings keep that
+// frame, r14-13), so the map stays local; null when the player is on the face opposite. Off the planet, the player's own.
+function meIn(x, z, pp) {
+  const P = BF.planet, yaw = BF.player.yaw || 0, F = P.isPlanet() ? P.face(x, z) : -1;
+  const r = F >= 0 ? P.inFrame(F, pp.x, pp.z, {}) : { x: pp.x, z: pp.z, turn: 0 };
+  return r ? [r1(r.x), r1(r.z), +P.turnYaw(r.turn, yaw).toFixed(2)] : null;
+}
+
+// The unit grid [dx, dz] toward true north at (x, z), for a map's north arrow; null at a pole, undefined off the planet (north is up).
+function northAt(x, z) {
+  const P = BF.planet;
+  if (!P.isPlanet()) return undefined;
+  const n = P.north(x, z);
+  return n ? [+n[0].toFixed(3), +n[1].toFixed(3)] : null;
+}
+
 // Every village this world has loaded: the ones the mob system knows this session, plus any with a saved log (earlier
 // sessions). Each snapshot carries the list with distances, full detail for the loaded ones, new layouts and changed logs.
 function villages(pp) {
@@ -155,7 +179,7 @@ function villages(pp) {
     const x = rec ? rec.x : kx, z = rec ? rec.z : kz, loaded = !!rec && isLoaded(rec);
     const va = BF.villageLife && BF.villageLife.villageAge ? BF.villageLife.villageAge(key) : null;   // game days loaded and active
     const H = BF.happiness, happy = H ? (loaded ? H.score(rec) : H.last(key)) : null;   // js/happiness.js; an unloaded village keeps its last score
-    out.villages.push({ key, name: nameOf(key), x: Math.round(x), z: Math.round(z), dist: Math.round(Math.hypot(x - pp.x, z - pp.z)), loaded, unload: BF.villageSim && BF.villageSim.countdown ? BF.villageSim.countdown(key) : null, age: va == null ? null : Math.round(va * 10) / 10, happy });
+    out.villages.push({ key, name: nameOf(key), x: Math.round(x), z: Math.round(z), ...seen(pp, x, z), me: meIn(x, z, pp), north: northAt(x, z), loaded, unload: BF.villageSim && BF.villageSim.countdown ? BF.villageSim.countdown(key) : null, age: va == null ? null : Math.round(va * 10) / 10, happy });
     if (loaded) out.detail[key] = detail(rec);
     if (rec && rec.wg && !sentLayouts.has(key)) { out.layouts[key] = layout(rec); sentLayouts.add(key); }
     const a = L.entries(key), last = a[a.length - 1], sig = a.length + "|" + (last ? last[0] + last[2] : "");
@@ -169,7 +193,7 @@ function villages(pp) {
   out.inside = inside ? inside.key : null;
   if (!out.villages.length) {   // nothing loaded yet: point the way to the nearest generated village
     const v = BF.worldgen.nearestVillage && BF.worldgen.nearestVillage(pp.x, pp.z);
-    if (v) { const key = Math.round(v.x) + "," + Math.round(v.z); out.nearest = { key, name: nameOf(key), dist: Math.round(Math.hypot(v.x - pp.x, v.z - pp.z)), dx: Math.round(v.x - pp.x), dz: Math.round(v.z - pp.z) }; }
+    if (v) { const key = Math.round(v.x) + "," + Math.round(v.z); out.nearest = { key, name: nameOf(key), ...seen(pp, v.x, v.z) }; }
   }
   return out;
 }
@@ -187,6 +211,7 @@ function dayline() {
   return k ? D.view(k) || { key: k, none: true } : null;
 }
 let hooked = false;
+let ptv = "0";   // the last planet-toggle request from the debug screen this game has applied (debug/server.js /planet)
 
 // The Mobs map view (once a second): every loaded mob as [kind, x, z, y, village stock 0|1, doing], kinds and doings as tables, the loaded
 // chunks, the running villages and the player.
@@ -210,20 +235,40 @@ function doingOf(m) {
   const act = ai.mode === "walk" ? "wandering" : "idle";
   return young ? "Young, " + act : act[0].toUpperCase() + act.slice(1);
 }
+// On the planet everything is sent in the player's face frame (spec r14-21): a mob, chunk or village on a neighbouring face comes
+// unfolded beside the player's face (BF.planet.inFrame), so the map reads straight across an edge; nothing is ever on the opposite
+// face or in a corner wedge, so those stay blank. face: the player's face, sq: its square in that frame, north: the unit [dx, dz]
+// toward the North Pole at the player (null at a pole).
 function mobMap(pp) {
   const kinds = [], kIdx = new Map(), acts = [], aIdx = new Map(), mobs = [];
+  const P = BF.planet, F = P.isPlanet() ? P.face(pp.x, pp.z) : -1, at = {}, CS = BF.CS;
+  const inF = (x, z) => F < 0 ? (at.x = x, at.z = z, at) : P.inFrame(F, x, z, at);
   const idx = (map, arr, v) => { let i = map.get(v); if (i == null) { map.set(v, i = arr.length); arr.push(v); } return i; };
   for (const m of BF.mobs.list) {
     if (m.dead || m.removed || !m.position) continue;
     const kind = m.type === "villager" ? (m.profession === "merchant" ? "merchant" : "villager") : m.type;
     const stock = m.pen || m.coop || m.pasture || (m.horse && (m.horse.pen || (m.horse.owner && m.horse.owner !== "player"))) ? 1 : 0;   // pen, coop, pasture or paddock animals
-    mobs.push([idx(kIdx, kinds, kind), r1(m.position.x), r1(m.position.z), Math.round(m.position.y), stock, idx(aIdx, acts, doingOf(m))]);
+    const q = inF(m.position.x, m.position.z);
+    if (!q) continue;
+    mobs.push([idx(kIdx, kinds, kind), r1(q.x), r1(q.z), Math.round(m.position.y), stock, idx(aIdx, acts, doingOf(m))]);
   }
   const chunks = [];
-  for (const c of BF.world.chunks.values()) chunks.push(c.cx, c.cz);
+  for (const c of BF.world.chunks.values()) {
+    const q = inF(c.cx * CS + CS / 2, c.cz * CS + CS / 2);   // the chunk's centre: chunks line up with face edges, so it maps to a whole chunk
+    if (q) chunks.push(Math.floor(q.x / CS), Math.floor(q.z / CS));
+  }
   const villages = [];
-  if (BF.villageSim && BF.villageSim.areas) for (const a of BF.villageSim.areas()) if (a.kind === "village" && a.v && a.v.minX != null) villages.push([a.v.minX, a.v.minZ, a.v.maxX, a.v.maxZ, nameOf(a.key)]);
-  return { kinds, acts, mobs, chunks, villages, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: BF.CS };
+  if (BF.villageSim && BF.villageSim.areas) for (const a of BF.villageSim.areas()) {
+    if (a.kind !== "village" || !a.v || a.v.minX == null) continue;
+    const p = inF(a.v.minX, a.v.minZ), x0 = p && p.x, z0 = p && p.z, q = p && inF(a.v.maxX + 1, a.v.maxZ + 1);   // block corners, so a turned box stays whole
+    if (q) villages.push([Math.min(x0, q.x), Math.min(z0, q.z), Math.max(x0, q.x) - 1, Math.max(z0, q.z) - 1, nameOf(a.key)]);
+  }
+  const out = { kinds, acts, mobs, chunks, villages, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: CS };
+  if (F >= 0) {
+    const x0 = P.W * F + P.N;
+    Object.assign(out, { face: F, sq: [x0, P.N, x0 + P.N, 2 * P.N], north: northAt(pp.x, pp.z) });
+  }
+  return out;
 }
 
 function snapshot() {
@@ -236,6 +281,9 @@ function snapshot() {
     gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
     mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
+    // the planet debug toggles (js/view.js setDebug: F3 + B / C / R, or the debug screen's Planet section) and which request from the
+    // screen they include (tv)
+    pt: BF.view && BF.view.debug && BF.planet.isPlanet() ? { tv: ptv, ...BF.view.debug } : null,
     loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), maxAiMs: BF.villageSim.LIMITS.aiMs, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
@@ -265,6 +313,7 @@ function update() {
         const o = JSON.parse(t);
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
         if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
+        if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }   // a toggle clicked on the debug screen
         t = o.resync ? "resync" : "ok";
       }
       if (t === "resync") resync();   // a restarted server asks for the layouts and logs again
