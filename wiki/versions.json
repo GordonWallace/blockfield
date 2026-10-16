@@ -1,0 +1,13 @@
+{
+  "about": "Blockfieldpedia versions, newest first. One per Blockfield release. development: the release being built; its generated pages read the running game. released: frozen when the release merged to main; its pages read the copy of the game in versions/<id>/game/. Change with node wiki/version.js (see wiki/README.md).",
+  "versions": [
+    {
+      "id": "1.4",
+      "status": "development"
+    },
+    {
+      "id": "1.3",
+      "status": "development"
+    }
+  ]
+}

@@ -7,7 +7,7 @@ A Minecraft-style voxel game that runs in the browser. Plain JavaScript modules 
     ./run.sh          (macOS / Linux)
     run.cmd           (Windows)
 
-This serves the game on http://localhost:8000 and the debug screen on http://localhost:8001 (it runs `node debug/server.js`, so it needs Node.js, but no packages). Open the game in your browser and, if you want it, the debug screen on a second monitor. Ctrl+C stops it. Worlds save in the browser (IndexedDB).
+This serves the game on http://localhost:8000, Blockfieldpedia (the Blockfield wiki) on http://localhost:8000/wiki/ and the debug screen on http://localhost:8001 (it runs `node debug/server.js`, so it needs Node.js, but no packages). Open the game in your browser and, if you want it, the debug screen on a second monitor. Ctrl+C stops it. Worlds save in the browser (IndexedDB).
 
 You can also open `index.html` directly or serve the folder some other way (`python3 -m http.server 8000`); the game works the same, but the debug screen only exists while the run script or `node debug/server.js` is running.
 
