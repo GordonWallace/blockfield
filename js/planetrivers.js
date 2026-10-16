@@ -930,6 +930,7 @@ BF.planetRivers.steps = function* (seed, sample, ground, pre) {
     }
     return -1;
   }
-  return { at, lakeAt, lakeRim, lakes, isLake, entry, geom, link, down, main, acc, rs, p, filled, rank, order: ord, sea, U, V, D, nb, curve, view, halfWidth, inFace, faceOf, stats, M, NS, NN };
+  return { at, lakeAt, lakeRim, lakes, isLake, entry, geom, link, down, main, acc, rs, p, filled, rank, order: ord, sea, U, V, D, nb, curve, view, halfWidth, inFace, faceOf, stats, M, NS, NN,
+    pre };   // (pre: the node samples, as handed in or worked out: a copy of the network can start from them)
 };
 })();
