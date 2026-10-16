@@ -8,7 +8,8 @@
 //  - the cowherd's buckets and wheat come only from its kit and what it bought: it never holds more than that, minus the wheat it fed;
 //  - empty bottles flow back: bottles villagers emptied (milk they drank) are bought back by the cowherd, and none pile up while it is short.
 // A lean day: from day LEAN to LEAN + 1 every villager but the cowherd has its food (all but milk) put away, as after a bad harvest, so hungry
-// villagers turn to the cowherd's milk (their last resort); what was put away comes back the next day (no more than was taken).
+// villagers turn to the cowherd's milk (their last resort); what was put away comes back the next day (no more than was taken), except to a
+// villager holding milk it bought: it gets its food back once it has drunk the milk (by LEAN + 4), so the empties exist to flow back.
 // Usage: NODE_PATH=$(npm root -g) node test/cowchain.js [days=14] [seed=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -116,9 +117,10 @@ const LEAN = 3;
         const milk = id => id === BF.I.milk_bottle || id === BF.I.milk_bucket;
         for (const m of window.__villagers()) if (m.profession !== 'cowherd') for (let i = 0; i < m.inv.length; i++) { const st = m.inv[i]; if (st && BF.food.isFood(st.id) && !milk(st.id)) { R.lean.push([m, st.id, st.count]); m.inv[i] = null; } }
         R.leanN = R.lean.reduce((a, x) => a + x[2], 0);
-      } else if (R.lean && !R.leanBack && d >= LEAN + 1) {   // ... and comes back
-        R.leanBack = true;
-        for (const [m, id, n] of R.lean) if (!m.dead) BF.trades.inv.add(m.inv, id, n);
+      } else if (R.lean && R.lean.length && d >= LEAN + 1) {   // ... and comes back the next day; to a villager that bought milk once it has
+        // drunk it (LEAN + 4 at the latest): with its own cheaper food back it would leave the milk in its pack, and no empties would come back
+        const milkLeft = m => m.profession !== 'baker' && window.__count(m, 'milk_bottle') > 0;   // the baker keeps its milk for cakes
+        R.lean = R.lean.filter(([m, id, n]) => { if (m.dead) return false; if (milkLeft(m) && d < LEAN + 4) return true; BF.trades.inv.add(m.inv, id, n); return false; });
       }
       // the herd, and empty bottles other villagers hold while the cowherd is short of them (not the beekeeper's, kept for honey, nor the
       // glassmaker's, made to sell), counted only while both are awake: nobody trades at night, and the cowherd bottles its evening milk

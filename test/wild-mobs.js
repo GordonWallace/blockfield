@@ -28,8 +28,11 @@ module.exports = async (pg) => {
 
   // ---- chunk unload and reload, away from villages
   const Q = await pg.evaluate(() => {
-    for (let x = 3000; x < 9000; x += 400) { const vs = (BF.worldgen.villagesNear(x, 0, 700) || []).filter(v => v.minX != null); if (!vs.some(v => Math.hypot(v.x - x, v.z) < 600)) return [x, 0]; }
-    return [3000, 0];
+    // dry land east of the spawn with no village within 600 blocks (generator 3 scanned x 3000 to 9000 from the origin); with the
+    // 1600-block walk away below it stays on the spawn's face, which is at least 5 km from any edge
+    const sp = BFT.spawn();
+    for (let d = 1000; d < 3400; d += 200) { const q = { x: sp.x + d, z: sp.z }, vs = (BF.worldgen.villagesNear(q.x, q.z, 700) || []).filter(v => v.minX != null); if (BF.worldgen.heightAt(q.x, q.z) > BF.worldgen.waterLevelAt(q.x, q.z) && !vs.some(v => BF.planet.distance(v, q) < 600)) return [q.x, q.z]; }
+    return [sp.x + 1000, sp.z];
   });
   await goTo(Q[0], Q[1], 9000);
   const placed = await pg.evaluate(([qx, qz]) => {
@@ -78,7 +81,7 @@ module.exports = async (pg) => {
   ok("after a day away: the zombie on open ground burned, the creeper is back", s.open[0] === true ? !t.zombie && !!t.creeper && !!t.cow : !!t.creeper, { open: s.open, t });
 
   // ---- quit and rejoin with more than 120 wild mobs loaded
-  const id = await pg.evaluate(async () => (await BF.save.create({ name: "wild", seed: 1337, gameMode: "creative", villages: 9, gen: 3 })).id);
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: "wild", seed: 1337, gameMode: "creative", villages: 9, gen: 4 })).id);
   await pg.waitForTimeout(8000);
   const before = await pg.evaluate(async () => {
     BF.mobs.spawning = false;
@@ -95,7 +98,7 @@ module.exports = async (pg) => {
     return { tagged: n, wild };
   });
   await pg.reload();
-  await pg.waitForTimeout(5000);
+  await require('./lib').ready(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
   await pg.evaluate(async id => { await BF.save.load(id); BF.mobs.spawning = false; }, id);
   await pg.waitForTimeout(9000);
   await step(4);
@@ -115,15 +118,21 @@ module.exports = async (pg) => {
   await pg.evaluate(id => BF.save.remove(id), id);
 
   // ---- breeding: two wild cows on grass (chance raised so it happens now), crowded herds don't, fed pigs breed
-  const spot = await pg.evaluate(() => {
+  const spot = await pg.evaluate(async () => {
     const p = BF.player.position, W = BF.world;
+    // the reloaded save's ground around the player loads first (on the planet's hills a flat 7x7 of grass can be a few chunks off)
+    for (let i = 0; i < 600 && W.queueLength > 4; i++) await new Promise(r => setTimeout(r, 100));
     for (let r = 0; r < 60; r++) for (let a = 0; a < 16; a++) {
       const x = Math.floor(p.x + Math.cos(a / 16 * 6.283) * r), z = Math.floor(p.z + Math.sin(a / 16 * 6.283) * r), y = W.heightAt(x, z);
       let flat = true;
       for (let dx = -3; dx <= 3 && flat; dx++) for (let dz = -3; dz <= 3 && flat; dz++) if (W.heightAt(x + dx, z + dz) !== y || W.getBlock(x + dx, y, z + dz) !== BF.B.grass || W.getBlock(x + dx, y + 1, z + dz) !== 0) flat = false;
       if (flat) return [x, y + 1, z];
     }
-    return null;
+    // none on these hills (generator 3's plains had plenty): lay a 9x9 of grass at the player's column, clear above
+    const x = Math.floor(p.x), z = Math.floor(p.z), y = W.heightAt(x, z);
+    if (!W.isLoaded(x, z)) return null;
+    for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) { W.setBlock(x + dx, y, z + dz, BF.B.grass); for (let k = 1; k <= 4; k++) W.setBlock(x + dx, y + k, z + dz, 0); }
+    return [x, y + 1, z];
   });
   ok("found flat grass for breeding", !!spot, spot);
   if (spot) {
@@ -157,9 +166,19 @@ module.exports = async (pg) => {
       for (const m of [h1, h2]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
       for (let i = 0; i < 40; i++) BF.mobs.update(0.05);
       for (const m of [h1, h2]) m.wildB = { next: 0 };
-      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
+      // one roll a game day, and calm() keeps it the same day: a horse caught mid-jump at its roll isn't on grass, so give it the next
+      // day's roll, as the game would, until the pair is willing (the roll itself still has to pick the pair)
+      const hRolls = [], ground = m => BF.world.getBlock(Math.floor(m.position.x), Math.floor(m.position.y + 0.01) - 1, Math.floor(m.position.z));
+      for (let i = 0; i < 1200; i++) {
+        BF.sky.update(0.05); BF.mobs.update(0.05);
+        if (i % 200 === 0) {
+          calm();
+          if (h1.horse.fed == null && i < 1000) { hRolls.push([h1, h2].map(ground)); for (const m of [h1, h2]) m.wildB = { next: 0 }; }
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
       const foals = L.filter(m => m.type === "horse" && !m.dead && m.horse && m.horse.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).map(m => ({ tamed: m.horse.tamed, owner: m.horse.owner }));
-      const horses = [h1, h2].map(m => [m.dead ? "dead" : "", m.horse && m.horse.fed, +m.position.x.toFixed(1), +m.position.z.toFixed(1)]), hPairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "horse").length;
+      const horses = [h1, h2].map(m => [m.dead ? "dead" : "", m.horse && m.horse.fed, +m.position.x.toFixed(1), +m.position.z.toFixed(1)]), hPairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "horse").length, wildHorses = L.filter(m => m.type === "horse" && !m.dead && m !== h1 && m !== h2 && Math.hypot(m.position.x - x, m.position.z - z) < 24).length;
       for (const m of L.slice()) if (m.type === "horse") m.dead = true;
       BF.wildlife.tune.pairP = 0.0513;
       // fed pigs
@@ -167,10 +186,10 @@ module.exports = async (pg) => {
       const fedOk = BF.pigFarmer.feed(p1, "player") && BF.pigFarmer.feed(p2, "player");
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
       const piglets = L.filter(m => m.type === "pig" && !m.dead && m.pig && m.pig.growAt != null).length;
-      return { calves, pairs, cows, foals, horses, hPairs, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
+      return { calves, pairs, cows, foals, horses, hPairs, hRolls, wildHorses, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
     }, spot);
     ok("two wild cows on grass breed on their own", br.calves >= 1, br);
-    ok("two wild horses breed on their own and the foal is wild", br.foals.length >= 1 && br.foals.every(f => !f.tamed && !f.owner), { foals: br.foals, horses: br.horses, pairs: br.hPairs });
+    ok("two wild horses breed on their own and the foal is wild", br.foals.length >= 1 && br.foals.every(f => !f.tamed && !f.owner), { foals: br.foals, horses: br.horses, pairs: br.hPairs, rolls: br.hRolls, others: br.wildHorses });
     ok("no wild breeding with 8 or more of a kind within 24 blocks", br.willing === 0, br);
     ok("fed pigs breed and a piglet appears (smaller)", br.fedOk && br.piglets >= 1 && br.pigScale.every(s => s < 0.9), br);
   }
