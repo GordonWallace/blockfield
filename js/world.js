@@ -93,6 +93,11 @@ const world = {
   _dirty: new Set(),
   _faceUV: null,
   daylight: 1,
+  // The planet (spec r14-07): far chunks keep only their meshes (key -> meshes), and chunks load only while blocks are big enough to see:
+  // up to chunkCeiling blocks above the ground, or less where a block is under a pixel (pxScale blocks: the screen's pixels per radian).
+  farMeshes: new Map(),
+  chunkCeiling: 1500,
+  high: false,
 };
 BF.world = world;
 
@@ -231,6 +236,7 @@ world.onChunkUnload = fn => world._unloadL.push(fn);
 world.reset = function () {
   PLN = !!(BF.planet && BF.planet.isPlanet()); PN = PLN ? BF.planet.N : 0; PW = 3 * PN;
   for (const k of [...world.chunks.keys()]) unload(k);
+  for (const k of [...world.farMeshes.keys()]) dropFar(k);
   world.edits.clear();
   world._dirty.clear();
   fluidQ.clear();
@@ -307,7 +313,7 @@ world.isSolid = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
   if (PLN) { if (!res(x, z)) return true; x = RX; z = RZ; }   // (solidity doesn't depend on facing)
   const c = rawChunk(x, z);
-  if (!c) return true;
+  if (!c) return !world.high;   // not loaded: solid (nothing falls into it), except above the chunk ceiling, where nothing loads
   return BF.SOLID[cblock(c, x - c.cx * CS, y, z - c.cz * CS)] === 1;
 };
 
@@ -518,6 +524,15 @@ function createChunk(cx, cz) {
     growing.add(fkey(cx * CS + (i & 15), (i >> 8) + BF.MIN_Y, cz * CS + ((i >> 4) & 15)));
   }
   for (const fn of world._loadL) { try { fn(cx, cz, c); } catch (err) { console.error(err); } }
+  // a far chunk's data again (it came near, or a neighbour needs it for its mesh): it takes back its mesh, which is still right (pitfall 9:
+  // left dirty, it would be meshed again every frame)
+  const fm = world.farMeshes.get(key);
+  if (fm) {
+    world.farMeshes.delete(key);
+    c.meshes = fm; c.mesh = true;
+    for (const m of fm) m.userData.chunk = c;
+    world._dirty.delete(key);
+  }
   return c;
 }
 // extendDown for a chunk that is not registered yet (no light, no meshes, no neighbours to notify).
@@ -538,6 +553,32 @@ function unload(key) {
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
 }
 
+// Keeps only chunk key's meshes (its block data goes, as on unloading): it is far from the player, meshed and unchanged. The meshes' arrays
+// are freed once they are on the GPU.
+const FAR = { far: true };
+function purge(key) {
+  const c = world.chunks.get(key);
+  if (!c) return;
+  world.farMeshes.set(key, c.meshes);
+  for (const m of c.meshes) {
+    m.userData.chunk = FAR;
+    const g = m.geometry;
+    for (const a of [...Object.values(g.attributes), g.index]) if (a) { if (a.uploaded) a.array = NOARR; else a.onUpload(freeArray); }
+  }
+  c.meshes = [];
+  world.chunks.delete(key);
+  world._dirty.delete(key);
+  world.purged = (world.purged || 0) + 1;
+  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
+}
+const NOARR = new Float32Array(0);
+function freeArray() { this.array = NOARR; }
+function markUploaded() { this.uploaded = true; }
+function dropFar(key) {
+  for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
+  world.farMeshes.delete(key);
+}
+
 function disposeMeshes(c) {
   for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   c.meshes = [];
@@ -556,6 +597,7 @@ let lastCenter = null, genList = [], meshList = [], simList = [], edgeList = [];
 const TW = {};
 let fwdX = 0, fwdZ = -1, lastPlanT = 0;
 let roundPlan = false;
+const TV2 = new THREE.Vector2();
 function plan(pcx, pcz) {
   const R = world.viewDist;
   lastPlanT = performance.now();
@@ -565,8 +607,10 @@ function plan(pcx, pcz) {
     if (l > 1e-3) { fwdX = fx / l; fwdZ = fz / l; }
   }
   genList = []; meshList = []; edgeList = [];
-  const keep = new Set();
-  for (let dz = -R - 1; dz <= R + 1; dz++) for (let dx = -R - 1; dx <= R + 1; dx++) {
+  const keep = new Set(), spots = PLN ? new Map() : null;
+  // the planet: above the chunk ceiling nothing is wanted (distant terrain shows the ground, js/lod.js)
+  const RL = PLN && world.high ? -2 : R;
+  for (let dz = -RL - 1; dz <= RL + 1; dz++) for (let dx = -RL - 1; dx <= RL + 1; dx++) {
     const d2 = dx * dx + dz * dz;
     if (d2 > (R + 1.5) * (R + 1.5)) continue;
     let cx = pcx + dx, cz = pcz + dz;
@@ -587,9 +631,25 @@ function plan(pcx, pcz) {
     const len = Math.sqrt(d2) || 1;
     const dot = (dx * fwdX + dz * fwdZ) / len;
     const score = d2 <= 2 ? d2 : d2 * (1 + 1.5 * Math.max(0, -dot) + 0.5 * (1 - Math.abs(dot)));
+    edgeList.push([cx, cz, dx, dz, d2 <= R * R]);
+    if (PLN) { spots.set(dx + "," + dz, [cx, cz, score, d2, k]); continue; }
     if (!world.chunks.has(k)) genList.push([cx, cz, score]);
     if (d2 <= R * R) meshList.push([cx, cz, score, d2]);
-    edgeList.push([cx, cz, dx, dz, d2 <= R * R]);
+  }
+  // the planet: block data only within KEEP chunks, and where a chunk still to be meshed needs it (itself and its neighbours); further
+  // chunks that already have meshes keep only those (purged below)
+  const data = PLN ? new Set() : null;
+  if (PLN) {
+    const K = Math.min(R, KEEP) + 1.5;
+    for (const [dk, sp] of spots) {
+      const [cx, cz, score, d2, k] = sp, c = world.chunks.get(k);
+      if (d2 <= K * K) data.add(k);
+      if (d2 > R * R || (c ? c.mesh !== undefined : world.farMeshes.has(k))) continue;
+      meshList.push([cx, cz, score, d2]);
+      const [dx, dz] = dk.split(",").map(Number);
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const n = spots.get((dx + i) + "," + (dz + j)); if (n) data.add(n[4]); }
+    }
+    for (const sp of spots.values()) if (data.has(sp[4]) && !world.chunks.has(sp[4])) genList.push([sp[0], sp[1], sp[2]]);
   }
   genList.sort((a, b) => a[2] - b[2]);
   meshList.sort((a, b) => a[2] - b[2]);
@@ -602,22 +662,42 @@ function plan(pcx, pcz) {
     simList.push([cx, cz, (cx - pcx) * (cx - pcx) + (cz - pcz) * (cz - pcz)]);
   }
   simList.sort((a, b) => a[2] - b[2]);
+  const far = (cx, cz, r) => {   // hysteresis: only chunks clearly out of range
+    let dx = cx - pcx, dz = cz - pcz;
+    if (PLN) { const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: cx * CS + 8, z: cz * CS + 8 }, TW); dx = t.x / CS; dz = t.z / CS; }
+    return dx * dx + dz * dz > r * r;
+  };
+  const RU = world.high ? -1 : R;
   for (const k of [...world.chunks.keys()]) {
-    if (keep.has(k)) continue;
-    // hysteresis: only unload chunks clearly out of range
     const c = world.chunks.get(k);
-    let dx = c.cx - pcx, dz = c.cz - pcz;
-    if (PLN) { const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: c.cx * CS + 8, z: c.cz * CS + 8 }, TW); dx = t.x / CS; dz = t.z / CS; }
-    if (dx * dx + dz * dz > (R + 3) * (R + 3)) unload(k);
+    if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) unload(k); continue; }
+    if (PLN && !data.has(k) && c.mesh !== undefined && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
+      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) purge(k);
+  }
+  for (const k of [...world.farMeshes.keys()]) {
+    if (keep.has(k)) continue;
+    const [cx, cz] = k.split(",").map(Number);
+    if (far(cx, cz, RU + 3)) dropFar(k);
   }
 }
+const KEEP = 12;   // chunks from the player that keep their block data on the planet (the spec's 8 would shrink wild mobs' range below 1.3's)
 
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
   if (BF.villageSim && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
   roundPlan = !!(PLN && BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
-  const center = pcx + "," + pcz + "," + world.viewDist + "," + roundPlan;
+  // the chunk ceiling (the planet): above min(pxScale, chunkCeiling) over the ground no chunks load; back below 90% of it they do
+  if (PLN && BF.player && BF.player.position) {
+    let g = BF.SEA;
+    try { g = Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(px), Math.floor(pz))); } catch (_) {}
+    let ceil = world.chunkCeiling;
+    if (BF.renderer && BF.camera) ceil = Math.min(ceil, BF.renderer.getDrawingBufferSize(TV2).y / (2 * Math.tan(BF.camera.fov * Math.PI / 360)));
+    const above = BF.player.position.y - g;
+    if (!world.high && above > ceil) world.high = true;
+    else if (world.high && above < 0.9 * ceil) world.high = false;
+  } else world.high = false;
+  const center = pcx + "," + pcz + "," + world.viewDist + "," + roundPlan + "," + world.high;
   // re-plan on chunk change, and periodically while loading so turning re-prioritises
   if (center !== lastCenter || (world.queueLength > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
   if (world.queueLength > 40) budgetMs = Math.max(budgetMs, 12);
@@ -644,7 +724,7 @@ world.update = function (px, pz, budgetMs = 8) {
       const [cx, cz] = meshList[mi];
       const c = world.chunks.get(ckey(cx, cz));
       if (c && c.mesh === undefined && neighboursReady(cx, cz)) break;
-      if (c && c.mesh !== undefined) { meshList.splice(mi, 1); continue; }
+      if ((c && c.mesh !== undefined) || (!c && world.farMeshes.has(ckey(cx, cz)))) { meshList.splice(mi, 1); continue; }
       mi++;
     }
     while (gi < genList.length && world.chunks.has(ckey(genList[gi][0], genList[gi][1]))) genList.splice(gi, 1);
@@ -667,17 +747,17 @@ world.update = function (px, pz, budgetMs = 8) {
       mi = 0; // newly generated data may unblock a nearer mesh
     }
   }
-  world.queueLength = genList.length + meshList.filter(m => { const c = world.chunks.get(ckey(m[0], m[1])); return !c || c.mesh === undefined; }).length;
+  world.queueLength = genList.length + meshList.filter(m => { const k = ckey(m[0], m[1]), c = world.chunks.get(k); return c ? c.mesh === undefined : !world.farMeshes.has(k); }).length;
   // how far out every wanted chunk has a mesh, in blocks: distant terrain (js/lod.js) leaves its hole only that far while chunks load
   // (the distance from the player to the nearest chunk square, in the planned set or just past it, that has no mesh)
   const lx = px - pcx * CS, lz = pz - pcz * CS;
   let gap = Infinity;
   for (const e of edgeList) {
-    if (e[4]) { const c = world.chunks.get(ckey(e[0], e[1])); if (c && c.mesh !== undefined) continue; }
+    if (e[4]) { const k = ckey(e[0], e[1]), c = world.chunks.get(k); if (c ? c.mesh !== undefined : world.farMeshes.has(k)) continue; }
     const ex = Math.max(e[2] * CS - lx, 0, lx - (e[2] + 1) * CS), ez = Math.max(e[3] * CS - lz, 0, lz - (e[3] + 1) * CS);
     if (ex * ex + ez * ez < gap) gap = ex * ex + ez * ez;
   }
-  world.covered = gap === Infinity ? world.viewDist * CS : Math.sqrt(gap);
+  world.covered = world.high ? 0 : gap === Infinity ? world.viewDist * CS : Math.sqrt(gap);
 };
 
 world.setViewDist = function (d) { world.viewDist = d; lastCenter = null; };
@@ -1068,6 +1148,7 @@ function buildMesh(c) {
     if (PLN) g.setAttribute("sphere", new THREE.Float32BufferAttribute(spherePositions(T.pos, ox, oz, sph), 3));
     g.setIndex(T.ind);
     g.computeBoundingSphere();
+    if (PLN) for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(markUploaded);   // (see purge)
     const m = new THREE.Mesh(g, PLN ? planetMaterial(mat, BF.planet.face(ox, oz)) : mat);
     m.renderOrder = order;
     m.matrixAutoUpdate = false;
