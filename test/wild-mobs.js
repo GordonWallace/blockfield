@@ -166,9 +166,19 @@ module.exports = async (pg) => {
       for (const m of [h1, h2]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
       for (let i = 0; i < 40; i++) BF.mobs.update(0.05);
       for (const m of [h1, h2]) m.wildB = { next: 0 };
-      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
+      // one roll a game day, and calm() keeps it the same day: a horse caught mid-jump at its roll isn't on grass, so give it the next
+      // day's roll, as the game would, until the pair is willing (the roll itself still has to pick the pair)
+      const hRolls = [], ground = m => BF.world.getBlock(Math.floor(m.position.x), Math.floor(m.position.y + 0.01) - 1, Math.floor(m.position.z));
+      for (let i = 0; i < 1200; i++) {
+        BF.sky.update(0.05); BF.mobs.update(0.05);
+        if (i % 200 === 0) {
+          calm();
+          if (h1.horse.fed == null && i < 1000) { hRolls.push([h1, h2].map(ground)); for (const m of [h1, h2]) m.wildB = { next: 0 }; }
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
       const foals = L.filter(m => m.type === "horse" && !m.dead && m.horse && m.horse.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).map(m => ({ tamed: m.horse.tamed, owner: m.horse.owner }));
-      const horses = [h1, h2].map(m => [m.dead ? "dead" : "", m.horse && m.horse.fed, +m.position.x.toFixed(1), +m.position.z.toFixed(1)]), hPairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "horse").length;
+      const horses = [h1, h2].map(m => [m.dead ? "dead" : "", m.horse && m.horse.fed, +m.position.x.toFixed(1), +m.position.z.toFixed(1)]), hPairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "horse").length, wildHorses = L.filter(m => m.type === "horse" && !m.dead && m !== h1 && m !== h2 && Math.hypot(m.position.x - x, m.position.z - z) < 24).length;
       for (const m of L.slice()) if (m.type === "horse") m.dead = true;
       BF.wildlife.tune.pairP = 0.0513;
       // fed pigs
@@ -176,10 +186,10 @@ module.exports = async (pg) => {
       const fedOk = BF.pigFarmer.feed(p1, "player") && BF.pigFarmer.feed(p2, "player");
       for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
       const piglets = L.filter(m => m.type === "pig" && !m.dead && m.pig && m.pig.growAt != null).length;
-      return { calves, pairs, cows, foals, horses, hPairs, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
+      return { calves, pairs, cows, foals, horses, hPairs, hRolls, wildHorses, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.model.scale.x.toFixed(2)) };
     }, spot);
     ok("two wild cows on grass breed on their own", br.calves >= 1, br);
-    ok("two wild horses breed on their own and the foal is wild", br.foals.length >= 1 && br.foals.every(f => !f.tamed && !f.owner), { foals: br.foals, horses: br.horses, pairs: br.hPairs });
+    ok("two wild horses breed on their own and the foal is wild", br.foals.length >= 1 && br.foals.every(f => !f.tamed && !f.owner), { foals: br.foals, horses: br.horses, pairs: br.hPairs, rolls: br.hRolls, others: br.wildHorses });
     ok("no wild breeding with 8 or more of a kind within 24 blocks", br.willing === 0, br);
     ok("fed pigs breed and a piglet appears (smaller)", br.fedOk && br.piglets >= 1 && br.pigScale.every(s => s < 0.9), br);
   }
