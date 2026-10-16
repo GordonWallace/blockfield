@@ -52,8 +52,14 @@ module.exports = async (pg) => {
   // in game: the nearest village's signposts stand, carry their text, and breaking one is final
   await toVillage(pg);
   await pg.waitForTimeout(3000);
-  // a signpost gets its text on the frame after its chunks load (js/signs.js tick): at the planet's low frame rates, wait for that frame
-  await pg.waitForFunction(() => ![...BF.signs._state.autoPlan.values()].some(p => p.cells.every(c => BF.world.isLoaded(c[0], c[2]))), null, { timeout: 30000 }).catch(() => {});
+  // a signpost gets its text on the frame after its chunks load (js/signs.js tick). At the planet's low frame rates more chunks keep
+  // loading while the test looks, so wait until every used signpost whose chunks are loaded has had that frame, not just the ones
+  // that were loaded a moment ago
+  await pg.waitForFunction(() => {
+    const v = BF.worldgen.nearestVillage(BF.player.position.x, BF.player.position.z);
+    return (v.posts || []).filter(p => p.used && p.cells.every(q => BF.world.isLoaded(q[0], q[2])))
+      .every(p => { const s = BF.signs.get(p.cells[0][0], p.cells[0][1], p.cells[0][2]); return s && s.autoKey === p.ak; });
+  }, null, { timeout: 30000, polling: 500 }).catch(() => {});
   const g = await pg.evaluate(() => {
     const v = BF.worldgen.nearestVillage(BF.player.position.x, BF.player.position.z), out = [];
     for (const p of (v.posts || []).filter(p => p.used)) {
