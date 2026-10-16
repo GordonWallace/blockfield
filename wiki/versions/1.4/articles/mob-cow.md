@@ -13,7 +13,7 @@ Right click an adult cow with an empty bucket to get a bucket of milk. Each cow 
 A village with a cow paddock has a [[villager:cowherd]] who works at a **milk churn** beside a **pasture**, an 11 by 9 fenced field with a gate, hay bales and a water trough. The pasture starts with two to four cows and holds up to six. The cowherd:
 
 - milks every adult cow once a day, bottling the milk;
-- feeds the herd wheat so that it stays near the limit, and keeps a piece of wheat as a lure;
+- feeds the herd wheat so that it stays near the limit, counting wild cows grazing near the pasture as part of the herd since they may wander in, and keeps a piece of wheat as a lure;
 - culls adults when the pasture is over its limit, always keeping at least two adults, and sells the beef and leather;
 - leads a wild cow home from up to 100 blocks when the pasture holds fewer than two;
 - cooks surplus beef into steak in a village furnace.
