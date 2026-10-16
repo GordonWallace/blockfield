@@ -23,7 +23,7 @@ being read; it opens on the running game's version (`js/version.js`) and keeps t
 - **released**: frozen when its release branch merged into main. Its pages read the copy of the game in `versions/<id>/game/`, and nothing
   in `versions/<id>/` is edited again.
 
-Current: **1.3, in development**.
+Current: **1.4, in development** (1.3 is capped and waits to merge into main).
 
 Each version is self-contained: its pages, menu, search and links come only from its own game data and its own `versions/<id>/` pages, so
 reading 1.3 never leads to something added in 1.4. A link to something the version doesn't have renders as red text (and fails
