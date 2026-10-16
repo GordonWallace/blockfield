@@ -1,7 +1,7 @@
 The stable hand catches, breeds and sells horses. Its workstation is the [[item:tack_rack]] in a stable.
 
 ### Where stable hands come from
-A new village may be generated with a stable and its stable hand if the paddock roll draws a horse paddock. Whether a village has one, and how many, comes from its paddock roll: bigger villages get more paddocks, and the animals native to the biome are likelier ([[page:village-structures]]). Horses are native only to open land (plains, savanna and meadow), but any village can draw one. A generated stable starts with 2 tamed horses. A village has at most one stable, so at most one stable hand.
+A new village within 100 blocks of wild-horse land may be generated with a stable and its stable hand if the paddock roll draws a horse paddock. Whether a village has one, and how many, comes from its paddock roll: bigger villages get more paddocks, and the animals native to the biome are likelier ([[page:village-structures]]). Horses are native only to open land (plains, savanna and meadow), but any village can draw one. A generated stable starts with 2 tamed horses. A village has at most one stable, so at most one stable hand.
 
 A [[villager:builder]] may also put up a stable in a village that has none, but only if at least 2 wild horses live within 80 blocks, and rarely. A villager with no job takes the stable's tack rack. Worlds made with village generator 9 or earlier never generate stable hands with a village; there one appears only after a builder puts up a stable.
 

@@ -1,7 +1,7 @@
 // @ci integration suite=village soak timeout=5400 args={out}
-// Mobs live in the world (idea-037) balance soak: 14 game days, 20 villages. Villages run in groups of 4 for 3 days each (two pins of two
-// villages, as caravan trips keep villages running) while the player stands in a fifth area with no village near, so no monster spawns
-// because of the player. Drives the simulation directly (no rendering), like test/caravan-soak.js.
+// Mobs live in the world (idea-037) balance soak, on the planet (spec r14-22): 14 game days, 20 villages near the spawn. Villages run in
+// groups of 4 for 3 days each (two pins of two villages, as caravan trips keep villages running) while the player stands in a fifth area
+// with no village near, so no monster spawns because of the player. Drives the simulation directly (no rendering), like test/caravan-soak.js.
 // Checks (the spec's numbers):
 //  - at least 20 villages run;
 //  - a zombie gets into the average running village on at least one night in three;
@@ -27,21 +27,23 @@ const RUN = 3;   // days each group of villages runs
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  // stays on generator 3 (spec r14-22): on the planet 1 stable hand in 4 finds no wild horse within 100 blocks (keepers 0.75 < 0.8), see the r14-22 report
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED + 'gen3');
+  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForTimeout(3000);
+  await pg.waitForFunction(() => window.BF && !BF.preparing, null, { timeout: 300000, polling: 500 });
   const setup = await pg.evaluate(([DAYS, RUN]) => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    const all = BF.worldgen.villagesNear(0, 0, 3000).filter(v => v && v.minX != null);
+    const P = BF.planet, O = { x: BF.player.position.x, z: BF.player.position.z };
+    const all = BF.worldgen.villagesNear(O.x, O.z, 3000).filter(v => v && v.minX != null);
     // the player's spot: no village within 300 blocks
     let spot = null;
     for (let r = 400; r < 3000 && !spot; r += 150) for (let a = 0; a < 16 && !spot; a++) {
-      const x = Math.round(Math.cos(a * Math.PI / 8) * r), z = Math.round(Math.sin(a * Math.PI / 8) * r);
-      if (!all.some(v => Math.hypot(v.x - x, v.z - z) < 300 + Math.max(v.maxX - v.minX, v.maxZ - v.minZ) / 2)) spot = [x, z];
+      const c = P.canon(O.x + Math.cos(a * Math.PI / 8) * r, O.z + Math.sin(a * Math.PI / 8) * r, {}); if (c.off) continue;
+      const x = Math.round(c.x), z = Math.round(c.z);
+      if (!all.some(v => P.distance(v, { x, z }) < 300 + Math.max(v.maxX - v.minX, v.maxZ - v.minZ) / 2)) spot = [x, z];
     }
     if (!spot) return { err: 'no spot 300 blocks from every village' };
     const groups = Math.ceil(DAYS / RUN), need = groups * 4;
-    const vs = all.filter(v => v.pop >= 4 && Math.hypot(v.x - spot[0], v.z - spot[1]) > 320).sort((a, b) => Math.hypot(a.x - spot[0], a.z - spot[1]) - Math.hypot(b.x - spot[0], b.z - spot[1])).slice(0, need);
+    const vs = all.filter(v => v.pop >= 4 && P.distance(v, { x: spot[0], z: spot[1] }) > 320).sort((a, b) => P.distance(a, { x: spot[0], z: spot[1] }) - P.distance(b, { x: spot[0], z: spot[1] })).slice(0, need);
     if (vs.length < need) return { err: 'only ' + vs.length + ' villages' };
     const key = v => Math.round(v.x) + ',' + Math.round(v.z);
     const R = window.__rec = { spot, groups: [], born: 0, died: 0, noWild: {}, days: [], pops: {}, animals: {}, nights: {}, keepers: {}, bad: [] };

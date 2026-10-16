@@ -1,28 +1,34 @@
 // @ci integration suite=village,world timeout=400
 // Village generator 10 (idea-044): node test/run.js /tmp/pd test/paddocks-gen10.js
 // 1. The paddock plan (worldgen paddockPlan) for 200 village keys per biome: the mean count follows E = pop / 10 x (0.4 + 0.15 x native types)
-//    (the 0.6-1.4 factor averages 1), native animals are drawn about 4x as often as others at first, every type can be drawn (desert too),
-//    and a village never gets a second stable.
+//    (the 0.6-1.4 factor averages 1); where wild-horse land lies within 100 blocks (worldgen horseLand), native animals are drawn about 4x
+//    as often as others at first, every type can be drawn (desert too), and a village never gets a second stable; elsewhere no stable.
 // 2. Real villages of a few seeds: one keeper per paddock (roster keys #1970+k), a paddock plot for each keeper whose plot fitted, a jobsite
 //    block for each keeper, no old fixed-rule keepers, no shepherd in the shuffle, and no spawn village; a generator 9 world on generator 3 keeps its spawn village.
 // 3. Walks into a village with a generated stable: it starts with 2 tamed horses in its paddock.
 module.exports = async (pg) => {
   const out = await pg.evaluate(() => {
     BF.newWorld(1, { gen: 4, villages: 10 });
-    const WG = BF.worldgen, res = { fails: [], biomes: {} };
+    const WG = BF.worldgen, res = { fails: [], biomes: {} }, o0 = BFT.spawn();
     const BIOMES = { plains: 5, forest: 6, snowy: 19, desert: 12 };
     for (const [name, id] of Object.entries(BIOMES)) {
       const nat = WG.nativeAnimals(id), pop = 40;
-      let n = 0, first = {}, all = {}, twoStables = 0;
+      let n = 0, first = {}, all = {}, twoStables = 0, land = 0, strayHorse = 0;
       for (let k = 0; k < 200; k++) {
-        const plan = WG.paddockPlan(1000 + k * 37, -500 + k * 53, pop, id);
+        // (keys on the spawn face; on the planet a stable is drawn only near wild-horse land, worldgen horseLand, so the odds are counted there)
+        const c = BF.planet.canon(o0.x - 3000 + (k % 20) * 300 + 7, o0.z - 1500 + Math.floor(k / 20) * 300 + 11, {}), hl = WG.horseLand(c.x, c.z);
+        const plan = WG.paddockPlan(c.x, c.z, pop, id);
         n += plan.length;
+        if (!hl) { if (plan.includes("horse")) strayHorse++; continue; }
+        land++;
         if (plan.length) first[plan[0]] = (first[plan[0]] || 0) + 1;
         for (const a of plan) all[a] = (all[a] || 0) + 1;
         if (plan.filter(a => a === "horse").length > 1) twoStables++;
       }
+      if (strayHorse) res.fails.push(name + ": " + strayHorse + " villages with no wild-horse land within 100 blocks drew a stable");
+      if (land < 40) res.fails.push(name + ": only " + land + " of 200 keys near wild-horse land");
       const E = pop / 10 * (0.4 + 0.15 * nat.length);
-      res.biomes[name] = { native: nat, mean: +(n / 200).toFixed(2), E: +E.toFixed(2), first, all, twoStables };
+      res.biomes[name] = { native: nat, mean: +(n / 200).toFixed(2), E: +E.toFixed(2), first, all, twoStables, land };
       if (Math.abs(n / 200 - E) > 0.15 * E + 0.2) res.fails.push(name + ": mean " + (n / 200).toFixed(2) + " vs E " + E.toFixed(2));
       if (twoStables) res.fails.push(name + ": " + twoStables + " villages drew two stables");
       for (const a of WG.PADDOCK_ANIMALS) if (!all[a]) res.fails.push(name + ": never drew " + a);
