@@ -2104,14 +2104,22 @@ function treesIn(f, cu0, cv0, cu1, cv1) {
   const Pl = BF.planet, X0 = (Pl.W * f + Pl.N) >> 2, Z0 = Pl.N >> 2, n = Pl.N >> 2, out = [];
   cu0 = Math.max(0, cu0); cv0 = Math.max(0, cv0); cu1 = Math.min(n, cu1); cv1 = Math.min(n, cv1);
   for (let gz = Z0 + cv0; gz < Z0 + cv1; gz++) for (let gx = X0 + cu0; gx < X0 + cu1; gx++) {
-    const r = noise.hash(gx, gz, 101);
-    if (r >= 0.92) continue;
-    const tx = gx * 4 + ((noise.hash(gx, gz, 102) * 3) | 0), tz = gz * 4 + ((noise.hash(gx, gz, 103) * 3) | 0);
-    if (villageAt(tx, tz, 3)) continue;
-    const h = climate(tx, tz), t = treeOf({ gx, gz, tx, tz, r, h, b: C.biome, wl: C.wl });
+    const t = treeAt(gx, gz);
     if (t) out.push(t);
   }
   return out;
+}
+// The tree-grid feature of atlas cell (gx, gz) (cells are 4 x 4 blocks), as treesIn gives it, or null. With col ({ h, biome, wl }: a
+// nearby column standing in for the tree's own), the column's climate isn't worked out: distant stand-ins far out (js/grid.js) use
+// the sample they belong to (and with noVillages, villages' clearings aren't looked up either: far out, where stand-ins are a pixel).
+function treeAt(gx, gz, col, noVillages) {
+  const r = noise.hash(gx, gz, 101);
+  if (r >= 0.92) return null;
+  const tx = gx * 4 + ((noise.hash(gx, gz, 102) * 3) | 0), tz = gz * 4 + ((noise.hash(gx, gz, 103) * 3) | 0);
+  if (!noVillages && villageAt(tx, tz, 3)) return null;
+  if (col) return treeOf({ gx, gz, tx, tz, r, h: col.h, b: col.biome, wl: col.wl });
+  const h = climate(tx, tz);
+  return treeOf({ gx, gz, tx, tz, r, h, b: C.biome, wl: C.wl });
 }
 
 // Per-chunk data shared by the generation passes (filled by prep): column caches, villages and the tree-grid candidates.
@@ -3023,7 +3031,8 @@ BF.worldgen = {
   padAt,
   sandNear,
   isPlanet: () => PLANET,
-  treesIn,
+  treesIn, treeAt,
+  hash: (x, z, salt) => noise.hash(x, z, salt),   // the world's 2D hash (distant stand-ins pick and vary trees with it)
   solveRivers: pre => (PLANET ? solveRivers(pre) : 1),   // the planet's river network, one slice per call: the fraction done (1: ready); pre: node samples (riverNodes) for the first call
   riversReady: () => !PLANET || !!PRIV,
   riverState, adoptRivers,   // a copy of the solved network for a worker (js/lodworker.js)
