@@ -78,16 +78,8 @@ BF.prepareWorld = function (seed, gen) {
     '<div style="width:260px;height:8px;border:1px solid var(--panel-edge);border-radius:2px"><div class="b" style="height:100%;width:0;background:var(--accent)"></div></div>';
   document.body.appendChild(el);
   BF.preparing = true;   // the frame loop waits (the old world is gone: worldgen is the planet's now)
-  // the game's canvas is hidden behind the loading screen: hidden, the browser doesn't composite it every time the progress bar moves
-  const cv = BF.renderer && BF.renderer.domElement;
-  if (cv) cv.style.display = "none";
   const bar = el.querySelector(".b"), t = el.querySelector(".t");
-  let shown = -1;
-  const show = f => {   // (whole percents only: each change repaints the screen)
-    const pc = Math.round(f * 100);
-    if (pc === shown) return;
-    shown = pc; bar.style.width = pc + "%"; t.textContent = "Working out the rivers and lakes · " + pc + "%";
-  };
+  const show = f => { bar.style.width = Math.round(f * 100) + "%"; t.textContent = "Working out the rivers and lakes · " + Math.round(f * 100) + "%"; };
   // the terrain at the network's nodes (the slow first part) in a few workers at once where the page may start them (served over
   // http, as run.sh does; a page opened as a file can't), else here in slices with the rest
   return riverWorkers(seed, show).then(pre => new Promise(resolve => {
@@ -98,7 +90,7 @@ BF.prepareWorld = function (seed, gen) {
       do { f = BF.worldgen.solveRivers(first); first = null; } while (f < 1 && performance.now() - t0 < 60);
       show(pre ? 0.4 + 0.6 * f : f);
       if (f < 1) setTimeout(step, 0);
-      else { el.remove(); if (cv) cv.style.display = ""; BF.preparing = false; resolve(); }
+      else { el.remove(); BF.preparing = false; resolve(); }
     };
     setTimeout(step, 30);
   }));
