@@ -1,5 +1,8 @@
 Desert is hot, dry country of open sand and dunes, found in the hottest and driest part of the climate map. It borders savannas, badlands and, toward the coast, beaches. There is no rain and no snow here.
 
+### On the planet
+On the planet, deserts fill the dry belt near the edge of the tropics, around 15 to 25 degrees from the equator, and reach a little into the subtropics.
+
 ### Ground and plants
 - The surface and the first blocks below are [[item:sand]], over a layer of [[item:sandstone]].
 - No trees grow. Tall, thin [[item:cactus]] stands here and there, one to three blocks high.

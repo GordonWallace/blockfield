@@ -1,5 +1,8 @@
 Forest is dense temperate woodland, with a thick roof of leaves and light patches of grass underneath. It lies between plains and the wetter birch and dark forests, and it grows on the lower foothills of the mountain ranges as well. Rain falls here.
 
+### On the planet
+On the planet, Forest is the common woodland of the temperate band and the wetter subtropics.
+
 ### Ground and plants
 - The surface is [[item:grass]] over [[item:dirt]].
 - The trees are mostly [[item:oak_log|oak]] (about two in three) with [[item:birch_log|birch]] among them. A few carry a bee nest ([[item:bee_nest]]).

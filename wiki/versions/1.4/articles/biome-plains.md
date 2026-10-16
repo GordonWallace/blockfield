@@ -1,5 +1,8 @@
 Plains are open, level grassland: the broad, gently rolling heart of the temperate lowlands, with few trees and a wide sky. Plains lie between forests and deserts and savannas. In the warm band they appear in drier country, and they are the biome where most villages stand. Rain falls here.
 
+### On the planet
+On the planet, plains are common in the subtropical and temperate bands, and in drier parts of the tropics.
+
 ### Ground and plants
 - The surface is [[item:grass]] over [[item:dirt]].
 - A tree stands here and there: a lone [[item:oak_log|oak]], and a few of them carry a bee nest ([[item:bee_nest]]) tucked under the leaves, with [[mob:bee]] around it.

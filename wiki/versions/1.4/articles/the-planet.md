@@ -34,6 +34,10 @@ The continents are big enough that several of them fit around the planet, and ab
 
 The eight corners of the cube are always open sea. Each seed's continents are turned to the position, out of a few hundred tried, that leaves every corner in open ocean: not a lake, but sea that runs on for tens of kilometres. If a corner were still short of it, a winding gulf a few kilometres wide would be cut from the corner out to the ocean. Any land left within a few kilometres of a corner sinks beneath the waves.
 
+## Climate bands
+
+Climate follows latitude. Five bands run from the equator to the poles: tropical, subtropical, temperate, subarctic and arctic. Their edges wander, high ground is colder, and now and then a biome turns up a band away from home. The arctic seas freeze over (Frozen Ocean). See [[page:biomes]] for which biomes each band holds.
+
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. For now the biomes are still placed by the flat worlds' temperature and humidity patterns rather than by latitude, and there are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it.
+The planet is being brought into the game step by step. There are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it.

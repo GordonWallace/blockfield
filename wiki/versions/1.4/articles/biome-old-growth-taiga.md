@@ -1,5 +1,8 @@
 Old Growth Taiga is the oldest part of the cold forest: crowded, with giant spruces and boulders under them. It forms in the wettest part of the cold climate band, next to ordinary taiga. Rain falls here, turning to snow high up.
 
+### On the planet
+On the planet, Old Growth Taiga grows in the wetter subarctic, and in cool, wet country at the cold edge of the temperate band.
+
 ### Ground and plants
 - The surface is a mix of [[item:podzol]], [[item:coarse_dirt]] and [[item:grass]].
 - Trees are [[item:spruce_log|spruce]], and almost half are giants with 2x2 trunks and wide skirts of leaves.

@@ -34,7 +34,7 @@ const tune = { pairP: PAIR_P };                    // tests may raise it
 const CAP = 10, CAP_CHUNKS = 28, BUFFER = 12;
 const NIGHTS = 7;
 // Starting odds per chunk of a group of each kind, by worldgen biome id (js/worldgen.js NAMES). Desert, ocean, beach, river, swamp, jungle,
-// badlands, mountain peaks and mushroom fields have none; wild horse herds are js/horses.js's own.
+// badlands, mountain peaks, mushroom fields and frozen ocean have none; wild horse herds are js/horses.js's own.
 // The spec's starting odds (plains 25% cows, 25% sheep, 20% chickens, 15% pigs; woods 20% pigs, 15% chickens, 10% sheep; snow 10% sheep) gave
 // about 2.5 animals a chunk, several hundred in a loaded area; tuned to a third of those (closer to vanilla's density). These are now relative
 // weights: a chunk gets one group of the region's kind with a quarter of the summed odds, groups twice as big, so half as many animals

@@ -9,6 +9,7 @@
 //  - the continents: generator 3's continent field in 3D, turned per seed by one rotation (the best of up to 300) so that every cube
 //    corner lies in open sea that is part of a real ocean; a corner still short of it gets a gulf out to the sea, and land fades out
 //    near each corner (the round-planet prototype's method, GordonWallace/blockfield-round js/terrain.js). The climate isn't turned.
+//  - the climate (spec r14-09): temperature and humidity from latitude bands and rainfall instead of generator 3's noise fields.
 //  - the spawn search (until r14-19's spawn rules).
 // The sampling path uses no window or document, so it also runs in a Web Worker (r14-05); it needs BF.state.gen = 4 for BF.planet.canon.
 (() => {
@@ -179,6 +180,46 @@ function cont(x, z) { const i = pt(x, z); return contDir(CD[i], CD[i + 1], CD[i 
 // within 8 km of a cube corner (no mushroom islands there: the corners stay open sea)
 function nearCorner(x, z) { const i = pt(x, z); return cornerDist(CD[i], CD[i + 1], CD[i + 2]) < 8000; }
 
+// ---------- climate (spec r14-09) ----------
+// Five bands run from the equator to the poles (the round-planet prototype's js/climate.js): tropical below 23 degrees, subtropical
+// to 35, temperate to 55, subarctic to 66, arctic above. A column's climate latitude is its latitude wandered by slow noise (ragged
+// band edges) plus rare anomalies (a band's biome turning up one band away); generator 3's temperature field becomes that latitude,
+// mapped so the band edges fall on generator 3's temperature bands, and its humidity becomes rainfall: Earth's zonal profile (wet
+// equator, dry belts near 25 degrees, wet mid-latitudes, dry poles), plus noise, drier deep inland. Biomes are then picked by
+// generator 3's own rules, so borders dither and blend as they do there; altitude cools by up to 22 degrees (cool()).
+// worldgen.js adds two planet-only picks: meadows on temperate high plains and cherry groves in mild subtropical forest.
+const T_LAT = [[0, 0.5], [23, 0.3], [35, 0.12], [55, -0.1], [66, -0.3], [90, -0.62]];   // band edges = worldgen.js BANDS
+function tOfLat(a) {
+  if (a <= 0) return T_LAT[0][1];
+  for (let k = 1; k < T_LAT.length; k++) if (a <= T_LAT[k][0]) {
+    const [a0, t0] = T_LAT[k - 1], [a1, t1] = T_LAT[k];
+    return t0 + (t1 - t0) * (a - a0) / (a1 - a0);
+  }
+  return T_LAT[T_LAT.length - 1][1] + (a - 90) * -0.012;
+}
+const RAIN_LAT = [[0, 0.88], [8, 0.78], [15, 0.45], [22, 0.14], [29, 0.22], [38, 0.4], [48, 0.52], [58, 0.52], [68, 0.42], [80, 0.25], [90, 0.2]];
+function rainLat(a) {
+  for (let k = 1; k < RAIN_LAT.length; k++) if (a <= RAIN_LAT[k][0]) {
+    const [a0, r0] = RAIN_LAT[k - 1], [a1, r1] = RAIN_LAT[k], s = (a - a0) / (a1 - a0);
+    return r0 + (r1 - r0) * s * s * (3 - 2 * s);
+  }
+  return 0.2;
+}
+let nK = null;
+// Climate of the (warped) point x, z with continentalness c: writes o.t (temperature), o.hu (humidity) and o.el (climate latitude).
+function climate(x, z, c, o) {
+  const i = pt(x, z), X = CD[i] * R, Y = CD[i + 1] * R, Z = CD[i + 2] * R;
+  const alat = Math.abs(Math.asin(Math.max(-1, Math.min(1, CD[i + 1])))) * 180 / Math.PI;
+  const wander = nK.fbm3(X / 60000, Y / 60000, Z / 60000, 3) * 11 + nK.fbm3(X / 9000 + 40, Y / 9000, Z / 9000, 2) * 3;
+  const an = nK.n3(X / 30000 - 61.3, Y / 30000 + 12.7, Z / 30000 + 5.1);
+  const el = Math.max(0, alat + wander + 12 * Math.sign(an) * smooth(0.65, 0.85, Math.abs(an)));
+  const rain = rainLat(Math.max(0, alat + wander * 0.5)) + nK.fbm3(X / 25000 + 90, Y / 25000, Z / 25000, 3) * 0.6 - 0.22 * smooth(0.4, 1.6, c);
+  o.el = el; o.t = tOfLat(el); o.hu = 1.1 * (rain - 0.37);
+}
+// How much colder (in temperature) ground at height h is than sea level at climate latitude el: up to 22 degrees, from 300 to 2200 up
+// (the high plains around 1000 are about 7 degrees colder, so they mostly keep their band's biomes; the ranges are much colder).
+const cool = (el, h) => { const s = smooth(300, 2200, h); return s > 0 ? tOfLat(el) - tOfLat(el + 22 * s) : 0; };
+
 // Where a new world starts (until r14-19's spawn rules): a spiral search for dry land from latitude 35 N on face 4's middle meridian,
 // far from every face edge and corner. The continent field picks candidates cheaply; the full height confirms one.
 function spawnSearch() {
@@ -194,14 +235,14 @@ function spawnSearch() {
 // Called by worldgen.init for generator 4 with the world's noise; returns the sampler worldgen's generator-3 code runs on.
 function init(n) {
   noise = n; seedv = n.seed | 0;
-  nR = BF.makeNoise(seedv ^ 0x2c1b3c6d); nC = BF.makeNoise(seedv + 7777);
+  nR = BF.makeNoise(seedv ^ 0x2c1b3c6d); nC = BF.makeNoise(seedv + 7777); nK = BF.makeNoise(seedv ^ 0x1b873593);
   CX.fill(NaN);
   placeCorners();
   return { N2, FB, WARP, C3 };
 }
 
 BF.planetgen = {
-  init, cont, contDir, contRaw, cornerDist, nearCorner, spawnSearch, SEA_C, ray, placeCorners,
+  init, cont, contDir, contRaw, cornerDist, nearCorner, spawnSearch, SEA_C, ray, placeCorners, climate, cool, tOfLat, rainLat,
   corners: () => KS.map(K => ({ c: K.c.slice(), gulf: !!K.g, reach: K.reach, heading: K.heading, n: K.n && K.n.slice() })),
   get cornerSea() { return cornerSea; }, get searchMs() { return searchMs; }, get rotation() { return RM.slice(); }, get seed() { return seedv; },
 };

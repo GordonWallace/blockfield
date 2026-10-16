@@ -1,5 +1,8 @@
 Snowy Plains are cold, open and white: a flat, treeless plain under permanent snow, in the coldest and driest part of the map. It borders snowy taiga, snowy beaches and frozen oceans. Snow falls here instead of rain.
 
+### On the planet
+On the planet, Snowy Plains are the drier ground of the arctic, with a little in the subarctic.
+
 ### Ground and plants
 - The surface is [[item:snow_grass]]: grass with a snow cover.
 - Very few trees grow, only single [[item:spruce_log|spruce]] trees far apart.
