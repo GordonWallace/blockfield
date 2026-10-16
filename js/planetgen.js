@@ -232,6 +232,10 @@ function spawnSearch() {
   return [x0, z0];
 }
 
+// Trees on face f's 4 x 4 cells [cu0, cu1) x [cv0, cv1) (face grid u / 4, v / 4): the very trees chunk generation draws, as
+// { kind, x, y, z, a, b } (worldgen.js treeOf), at atlas positions. For the distant stand-ins (r14-07) and village footprints (r14-12).
+const treesIn = (f, cu0, cv0, cu1, cv1) => BF.worldgen.treesIn(f, cu0, cv0, cu1, cv1);
+
 // Called by worldgen.init for generator 4 with the world's noise; returns the sampler worldgen's generator-3 code runs on.
 function init(n) {
   noise = n; seedv = n.seed | 0;
@@ -242,7 +246,7 @@ function init(n) {
 }
 
 BF.planetgen = {
-  init, cont, contDir, contRaw, cornerDist, nearCorner, spawnSearch, SEA_C, ray, placeCorners, climate, cool, tOfLat, rainLat,
+  init, cont, contDir, contRaw, cornerDist, nearCorner, spawnSearch, SEA_C, ray, placeCorners, treesIn, climate, cool, tOfLat, rainLat,
   corners: () => KS.map(K => ({ c: K.c.slice(), gulf: !!K.g, reach: K.reach, heading: K.heading, n: K.n && K.n.slice() })),
   get cornerSea() { return cornerSea; }, get searchMs() { return searchMs; }, get rotation() { return RM.slice(); }, get seed() { return seedv; },
 };

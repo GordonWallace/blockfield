@@ -28,7 +28,7 @@ Each face has its own block of x and z coordinates, so every place on the planet
 
 ## Continents and corners
 
-The planet's ground is made by the same generator as the mile-high worlds of 1.3, so its land looks the same: coastal lowlands, long escarpments up to high plains about a mile up, mountain massifs, badlands mesas, swamps, mushroom islands far out at sea, and caves, ores, trees and plants (see [[page:terrain]]). Every pattern is laid on the sphere itself, so continents, hills and caves carry straight on across the edges between faces.
+The planet's ground is made by the same generator as the mile-high worlds of 1.3, so its land looks the same: coastal lowlands, long escarpments up to high plains about a mile up, mountain massifs, badlands mesas, swamps, mushroom islands far out at sea, and caves, ores, trees and plants (see [[page:terrain]]). Every pattern is laid on the sphere itself, so continents, hills and caves carry straight on across the edges between faces. A tree that grows right at an edge is whole on both sides: the face it grows on decides it, and the next face draws the part that reaches over.
 
 The continents are big enough that several of them fit around the planet, and about a third of the surface is land.
 
@@ -40,4 +40,4 @@ Climate follows latitude. Five bands run from the equator to the poles: tropical
 
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. There are no rivers or villages yet. A tree right next to a face edge can be cut off where the edge runs through it.
+The planet is being brought into the game step by step. There are no rivers or villages yet.
