@@ -27,7 +27,7 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < 120 && BF.world.queueLength > 0; i++) await new Promise(r => setTimeout(r, 250));
       await new Promise(r => setTimeout(r, 500));
     };
-    BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative");
+    BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 4; document.getElementById("view").requestPointerLock = null; BF.player.start(); BF.player.setGameMode("creative");
   });
   await pg.evaluate(() => settle(3000));
   // heights near the ground count from the ground at the spawn (generator 4 terrain reaches hundreds of blocks up)
@@ -115,7 +115,8 @@ module.exports = async (pg, out) => {
   const top = await pg.evaluate(() => BF.player.position.y);
   check(top > 20000, `8 s of Space with R in creative flight climbs from ${Math.round(rise)} to ${Math.round(top)}`);
 
-  // ---- mouse look at 15,000 and off-planet mode above 20,000 (drag-to-look: there is no pointer lock headless)
+  // ---- mouse look at 15,000 and off-planet mode above 20,000 (drag-to-look: the test turns pointer lock off above, as headless Chromium
+  // grants it, and a lock landing mid-drag sent the moves to the locked-mouse handler, whose synthetic movementX is 0)
   const drag = async (dx, dy) => {
     await pg.mouse.move(160, 100); await pg.mouse.down();
     for (let i = 1; i <= 5; i++) await pg.mouse.move(160 + dx * i / 5, 100 + dy * i / 5);
