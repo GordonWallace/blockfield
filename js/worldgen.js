@@ -1094,16 +1094,40 @@ function nativeAnimals(biomeId) {
   const tbl = (BF.wildlife && BF.wildlife.HABITAT && BF.wildlife.HABITAT[biomeId]) || [];
   return PADDOCK_ANIMALS.filter(a => tbl.some(t => t[0] === a));
 }
+// The planet: is there wild-horse land within HORSE_R blocks of (x, z), a chunk whose herd region (js/wildlife.js ZONE, zoneKind) is a horse
+// one? Only a village there may draw a stable: elsewhere its stable hand would find no wild horse in reach and give up every day (as a builder
+// only puts up a stable where wild horses live). Generators 1 to 3 keep 1.3's rule. Cached per village centre.
+const HORSE_R = 100;   // js/stables.js CATCH_R
+const horseCache = new Map();
+function horseLand(x, z) {
+  const W = BF.wildlife;
+  if (!W || !W.zoneKind) return true;
+  const key = Math.round(x) + "," + Math.round(z);
+  let ok = horseCache.get(key);
+  if (ok !== undefined) return ok;
+  ok = false;
+  const CS = 16, Z = W.ZONE, c0x = Math.floor((x - HORSE_R) / CS), c1x = Math.floor((x + HORSE_R) / CS), c0z = Math.floor((z - HORSE_R) / CS), c1z = Math.floor((z + HORSE_R) / CS);
+  for (let cz = c0z; cz <= c1z && !ok; cz++) for (let cx = c0x; cx <= c1x && !ok; cx++) {
+    const bx = cx * CS + 8, bz = cz * CS + 8;
+    if (Math.hypot(bx - x, bz - z) > HORSE_R) continue;
+    const tbl = W.HABITAT[biomeAt(bx, bz).id];
+    if (!tbl || !tbl.some(t => t[0] === "horse")) continue;
+    if (W.zoneKind(tbl, tbl.reduce((s, t) => s + t[1], 0), Math.floor(cx / Z), Math.floor(cz / Z)) === "horse") ok = true;
+  }
+  horseCache.set(key, ok);
+  return ok;
+}
 function paddockPlan(x, z, pop, biomeId) {
   if (!pop || !noise) return [];
   if (biomeId == null) { climate(Math.floor(x), Math.floor(z)); biomeId = C.biome; }
   const nat = nativeAnimals(biomeId);
+  const noHorse = PLANET && !horseLand(x, z);
   const E = pop / 10 * (0.4 + 0.15 * nat.length) * (0.6 + 0.8 * noise.hash(x, z, 701));
   let n = Math.floor(E);
   if (noise.hash(x, z, 702) < E - n) n++;
   const have = {}, out = [];
   for (let k = 0; k < n; k++) {
-    const w = PADDOCK_ANIMALS.map(a => (a === "horse" && have.horse) ? 0 : (nat.includes(a) ? 4 : 1) / Math.pow(2, have[a] || 0));
+    const w = PADDOCK_ANIMALS.map(a => (a === "horse" && (have.horse || noHorse)) ? 0 : (nat.includes(a) ? 4 : 1) / Math.pow(2, have[a] || 0));
     let r = noise.hash(x + 7 * k, z, 703) * w.reduce((s, q) => s + q, 0), i = 0;
     while (i < w.length - 1 && (r -= w[i]) >= 0) i++;
     while (!w[i]) i--;   // float edge: never the horse a second time
@@ -2994,7 +3018,7 @@ const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: 
 BF.worldgen = {
   COWHERD_POP,
   BAKER_POP,
-  paddockPlan, nativeAnimals, KEEPER_OF, PADDOCK_ANIMALS,
+  paddockPlan, horseLand, nativeAnimals, KEEPER_OF, PADDOCK_ANIMALS,
   PIG_POP,
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
@@ -3018,7 +3042,7 @@ BF.worldgen = {
     if (PLANET) { /* the planet's rivers: planetRivers(), solved the first time they are needed */ }
     else if (GEN === 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
-    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); sandCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
+    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); horseCache.clear(); tintCache.clear(); sandCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate, generateBand, generateRange, heightAt,
   _layoutVillage: (x, z, pop) => layoutVillage(x, z, null, pop),   // tools / tests: lay out a village of pop villagers at (x, z)
   _villagePop: (a, b, salt) => villagePop(a, b, salt),

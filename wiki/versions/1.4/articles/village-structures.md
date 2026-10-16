@@ -65,6 +65,7 @@ In generator 10 worlds the pens, coops, pastures, sties and stables are decided 
 - Native animals are the wild animals of the biome. Open land (plains, meadow, savanna) has chickens, sheep, pigs, cows and horses. Woods have pigs, chickens and sheep. Snowy land has sheep. Desert and everything else has none.
 - Each paddock gets an animal by a weighted roll. A native animal starts at weight 4 and another at 1, and the weight halves for each paddock of that animal the village already has. Every animal can be drawn in every biome, deserts included.
 - A village has at most one stable, so once a horse paddock is drawn horses are not drawn again.
+- A village draws a stable only if wild-horse land lies within 100 blocks of its centre: open land where the herds are horses. Elsewhere its stable hand would never find a horse to catch, so horses are left out of its roll.
 - Each paddock gets its own keeper with their jobsite block. The keeper takes the place of an ordinary resident. If only the core four are left, that paddock is left out.
 - A paddock can stand on any ground. A pasture always gets a grass floor, in a desert village too. Plots can reach out to the edge of the village.
 
