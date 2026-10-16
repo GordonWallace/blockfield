@@ -245,24 +245,45 @@ function contRaw3(x, z) {
 // how fast the weight (and so the height) can rise anywhere, so escarpments become long ramps and massifs broad domes.
 // Pure function of the seed: nodes are cached, any order gives the same values.
 const CG = 320, SL_P = 1 / 6000, SL_M = 1 / 2600, SL_L = 1 / 2600, LIM_R = Math.ceil(6000 / CG);
-const CRAW = new Map(), CLIM = new Map(), CLIS = new Map();
-// cache key of coarse node (i, j); on the planet (i < 2^14, j within -256 .. 3840) a small integer, which maps hash much faster
-const ckey = (i, j) => (PLANET ? i * 4096 + j + 256 : i * 1048576 + j);
-function nodeRaw(i, j) {
-  const k = ckey(i, j); let v = CRAW.get(k);
-  if (v === undefined) {
-    if (CRAW.size > 400000) CRAW.clear();
-    const x = i * CG, z = j * CG, q = Math.sqrt(SC);
-    const c = contOnly(x, z), d2 = x * x + z * z, home = PLANET ? 0 : 1 - smooth(360000, 9000000, d2);   // (no home plateau on the planet)
-    const pm = FB(x, z, 18000 * q, 1234.5, -777.7, 2), mt = FB(x, z, 14000 * q, 333.3, -444.4, 2);
-    const inland = smooth(0.15, 0.3, c);   // a coastal plain before the ramps start
-    const pl = inland * Math.max(smooth(-0.75, -0.3, pm), home);
-    const lo = FB(x, z, 14000 * q, 55.5, -99.9, 2);
-    v = [pl, pl * smooth(0.05, 0.45, mt) * (1 - 0.97 * home), smooth(-0.03, -0.22, lo)];
-    CRAW.set(k, v);
-  }
-  return v;
+// Node values are cached in 32 x 32 tiles of a Float64Array (NaN = not worked out yet): the disc scans read ~1000 nodes each, and
+// typed-array reads are far quicker than map lookups (r14-23). A cache past its tile limit starts over.
+const TS = 32, TN = TS * TS;
+function tileCache(width, limit, extra = 0) {   // (extra: more values after the nodes')
+  const tiles = new Map();
+  let lastK = NaN, lastA = null;
+  const c = {
+    A: null,   // the tile array of the last at()
+    at(i, j) {   // offset of node (i, j) in c.A
+      const ti = Math.floor(i / TS), tj = Math.floor(j / TS), k = ti * 1048576 + tj;
+      if (k !== lastK) {
+        lastA = tiles.get(k);
+        if (!lastA) { if (tiles.size >= limit) tiles.clear(); lastA = new Float64Array(TN * width + extra).fill(NaN); tiles.set(k, lastA); }
+        lastK = k;
+      }
+      c.A = lastA;
+      return ((i - ti * TS) * TS + (j - tj * TS)) * width;
+    },
+    clear() { tiles.clear(); lastK = NaN; lastA = null; c.A = null; },
+  };
+  return c;
 }
+const CRAW = tileCache(3, 1600, 2 * (TN / 16)), CLIS = tileCache(2, 600), CLIM = tileCache(3, 400);
+function rawFill(A, o, i, j) {
+  const x = i * CG, z = j * CG, q = Math.sqrt(SC);
+  const c = contOnly(x, z), d2 = x * x + z * z, home = PLANET ? 0 : 1 - smooth(360000, 9000000, d2);   // (no home plateau on the planet)
+  const pm = FB(x, z, 18000 * q, 1234.5, -777.7, 2), mt = FB(x, z, 14000 * q, 333.3, -444.4, 2);
+  const inland = smooth(0.15, 0.3, c);   // a coastal plain before the ramps start
+  const pl = inland * Math.max(smooth(-0.75, -0.3, pm), home);
+  const lo = FB(x, z, 14000 * q, 55.5, -99.9, 2);
+  A[o] = pl; A[o + 1] = pl * smooth(0.05, 0.45, mt) * (1 - 0.97 * home); A[o + 2] = smooth(-0.03, -0.22, lo);
+}
+// offset in CRAW.A of node (i, j)'s raw weights [plateau, massif, low plateau]
+function rawAt(i, j) {
+  const o = CRAW.at(i, j), A = CRAW.A;
+  if (A[o] !== A[o]) rawFill(A, o, i, j);
+  return o;
+}
+function nodeRaw(i, j) { const o = rawAt(i, j), A = CRAW.A; return [A[o], A[o + 1], A[o + 2]]; }
 // disc offsets sorted by distance: a scan stops once slope * distance exceeds the current minimum (raw weights are >= 0)
 const LIM_OFF = (() => {
   const o = [];
@@ -270,32 +291,72 @@ const LIM_OFF = (() => {
   o.sort((p, q) => p[2] - q[2] || p[1] - q[1] || p[0] - q[0]);
   return [].concat(...o);
 })();
-// pass 1: plateau and low-plateau weights
-function nodeLimS(i, j) {
-  const k = ckey(i, j); let v = CLIS.get(k);
-  if (v === undefined) {
-    if (CLIS.size > 400000) CLIS.clear();
-    const r0 = nodeRaw(i, j);
-    let sp = r0[0], lw = r0[2];
-    for (let n = 0; n < LIM_OFF.length; n += 3) {
-      const d = LIM_OFF[n + 2];
-      if (d * SL_P >= sp && d * SL_L >= lw) break;
-      const r = nodeRaw(i + LIM_OFF[n], j + LIM_OFF[n + 1]);
-      const a = r[0] + d * SL_P, l = r[2] + d * SL_L;
-      if (a < sp) sp = a;
-      if (l < lw) lw = l;
+// The disc scan of pass 1 goes by 4 x 4 blocks of nodes, nearest first, and skips a block when even its lowest raw weights plus the
+// slope from its nearest node can't lower the minimum: the same nodes decide the result, so the values are exactly the plain scan's.
+// Inside plateaus, where every node in the disc has to be ruled out, this reads ~100 block minimums instead of ~1100 nodes.
+// BLK[p]: for a node at position p = (i & 3) * 4 + (j & 3) within its block, the blocks touching its disc as
+// [block offset i, block offset j, nearest distance, first node, node count], nodes in BLKN[p] as [offset i, offset j, distance]
+const BLK = [], BLKN = [];
+for (let pi = 0; pi < 4; pi++) for (let pj = 0; pj < 4; pj++) {
+  const bl = [];
+  for (let bi = Math.floor((pi - LIM_R) / 4); bi <= Math.floor((pi + LIM_R) / 4); bi++) for (let bj = Math.floor((pj - LIM_R) / 4); bj <= Math.floor((pj + LIM_R) / 4); bj++) {
+    const nodes = [];
+    for (let u = 0; u < 4; u++) for (let v = 0; v < 4; v++) {
+      const a = bi * 4 + u - pi, b = bj * 4 + v - pj, d = Math.hypot(a, b) * CG;
+      if (d <= LIM_R * CG + 1) nodes.push(a, b, d);
     }
-    v = [sp, lw]; CLIS.set(k, v);
+    if (nodes.length) bl.push({ bi, bj, dmin: Math.min(...nodes.filter((_, k) => k % 3 === 2)), nodes });
   }
-  return v;
+  bl.sort((p, q) => p.dmin - q.dmin);
+  const B = [], Nd = [];
+  for (const k of bl) { B.push(k.bi, k.bj, k.dmin, Nd.length, k.nodes.length / 3); Nd.push(...k.nodes); }
+  BLK.push(Float64Array.from(B)); BLKN.push(Float64Array.from(Nd));
+}
+// offset in CRAW.A of block (bi, bj)'s lowest plateau and low-plateau raw weights (filling its 16 nodes the first time)
+function blockMinAt(bi, bj) {
+  const i0 = bi * 4, j0 = bj * 4;
+  CRAW.at(i0, j0);
+  const li = i0 - Math.floor(i0 / TS) * TS, lj = j0 - Math.floor(j0 / TS) * TS, m = TN * 3 + ((li >> 2) * (TS >> 2) + (lj >> 2)) * 2;
+  let A = CRAW.A;
+  if (A[m] !== A[m]) {
+    let m0 = Infinity, m2 = Infinity;
+    for (let u = 0; u < 4; u++) for (let v = 0; v < 4; v++) { const o = rawAt(i0 + u, j0 + v); A = CRAW.A; if (A[o] < m0) m0 = A[o]; if (A[o + 2] < m2) m2 = A[o + 2]; }
+    A[m] = m0; A[m + 1] = m2;
+  }
+  return m;
+}
+// pass 1: plateau and low-plateau weights; offset in CLIS.A
+function limSAt(i, j) {
+  let o = CLIS.at(i, j), V = CLIS.A;
+  if (V[o] !== V[o]) {
+    let r = rawAt(i, j), A = CRAW.A;
+    let sp = A[r], lw = A[r + 2];
+    const p = (i & 3) * 4 + (j & 3), B = BLK[p], Nd = BLKN[p], bi = i >> 2, bj = j >> 2;
+    for (let k = 0; k < B.length; k += 5) {
+      const dm = B[k + 2];
+      if (dm * SL_P >= sp && dm * SL_L >= lw) break;
+      const m = blockMinAt(bi + B[k], bj + B[k + 1]); A = CRAW.A;
+      if (A[m] + dm * SL_P >= sp && A[m + 1] + dm * SL_L >= lw) continue;
+      for (let n = B[k + 3], e = n + B[k + 4] * 3; n < e; n += 3) {
+        const d = Nd[n + 2];
+        r = rawAt(i + Nd[n], j + Nd[n + 1]); A = CRAW.A;
+        const a = A[r] + d * SL_P, l = A[r + 2] + d * SL_L;
+        if (a < sp) sp = a;
+        if (l < lw) lw = l;
+      }
+    }
+    o = CLIS.at(i, j); V = CLIS.A;
+    V[o] = sp; V[o + 1] = lw;
+  }
+  return o;
 }
 // pass 2: massifs only start where the plateau is (nearly) complete, so their flanks never add to an escarpment
-const mRaw = (i, j) => { const r = nodeRaw(i, j)[1]; return r > 0 ? r * smooth(0.85, 1.0, nodeLimS(i, j)[0]) : 0; };
-function nodeLim(i, j) {
-  const k = ckey(i, j); let v = CLIM.get(k);
-  if (v === undefined) {
-    if (CLIM.size > 200000) CLIM.clear();
-    const s = nodeLimS(i, j);
+const mRaw = (i, j) => { const o = rawAt(i, j), r = CRAW.A[o + 1]; if (!(r > 0)) return 0; const so = limSAt(i, j); return r * smooth(0.85, 1.0, CLIS.A[so]); };
+// [plateau, massif, low plateau] limited weights of node (i, j): offset in CLIM.A
+function limAt(i, j) {
+  let o = CLIM.at(i, j), V = CLIM.A;
+  if (V[o] !== V[o]) {
+    const so = limSAt(i, j), s0 = CLIS.A[so], s1 = CLIS.A[so + 1];
     let mp = mRaw(i, j);
     for (let n = 0; n < LIM_OFF.length; n += 3) {
       const d = LIM_OFF[n + 2];
@@ -303,9 +364,10 @@ function nodeLim(i, j) {
       const b = mRaw(i + LIM_OFF[n], j + LIM_OFF[n + 1]) + d * SL_M;
       if (b < mp) mp = b;
     }
-    v = [s[0], mp, s[1]]; CLIM.set(k, v);
+    o = CLIM.at(i, j); V = CLIM.A;
+    V[o] = s0; V[o + 1] = mp; V[o + 2] = s1;
   }
-  return v;
+  return o;
 }
 // smooth interpolation of the limited node weights -> K.sp (plateau), K.mp (massif)
 // Coarse mode (overview maps, setCoarse): the raw node weights without the disc scan, which is too slow when every pixel lands
@@ -323,10 +385,13 @@ function limWeights(x, z) {
   }
   const fi = x / CG, fj = z / CG, i = Math.floor(fi), j = Math.floor(fj), u = fi - i, w = fj - j;
   const tu = u, tw = w;
-  const a = nodeLim(i, j), b = nodeLim(i + 1, j), c = nodeLim(i, j + 1), d = nodeLim(i + 1, j + 1);
-  K.sp = lerp(lerp(a[0], b[0], tu), lerp(c[0], d[0], tu), tw);
-  K.mp = lerp(lerp(a[1], b[1], tu), lerp(c[1], d[1], tu), tw);
-  K.lo = lerp(lerp(a[2], b[2], tu), lerp(c[2], d[2], tu), tw);
+  let o = limAt(i, j), V = CLIM.A; const a0 = V[o], a1 = V[o + 1], a2 = V[o + 2];
+  o = limAt(i + 1, j); V = CLIM.A; const b0 = V[o], b1 = V[o + 1], b2 = V[o + 2];
+  o = limAt(i, j + 1); V = CLIM.A; const c0 = V[o], c1 = V[o + 1], c2 = V[o + 2];
+  o = limAt(i + 1, j + 1); V = CLIM.A; const d0 = V[o], d1 = V[o + 1], d2 = V[o + 2];
+  K.sp = lerp(lerp(a0, b0, tu), lerp(c0, d0, tu), tw);
+  K.mp = lerp(lerp(a1, b1, tu), lerp(c1, d1, tu), tw);
+  K.lo = lerp(lerp(a2, b2, tu), lerp(c2, d2, tu), tw);
 }
 function rawFields(x, z) {
   if (GEN >= 2) return rawFields2(x, z);
@@ -718,20 +783,21 @@ function riverCol(dx, dy, dz) {
   try { rawFields2(Math.floor(RA.x), Math.floor(RA.z)); } finally { OPEN_SEA = false; }
   return RA;
 }
+let INSLICE = false;   // inside a solve slice, which keeps K and G3S once for all its samples
 function riverSample(dx, dy, dz) {
-  Object.assign(KSV, K); Object.assign(GSV, G3S);
+  if (!INSLICE) { Object.assign(KSV, K); Object.assign(GSV, G3S); }
   const a = riverCol(dx, dy, dz), x = Math.floor(a.x), z = Math.floor(a.z);
   RT.hf = ground3(x, z);
   RT.e = ceil3(relief3(x, z, false).h) + 250 * Math.max(0, K.c / 2.5);
   RT.land = RT.hf < BF.SEA - 1 && K.c < -0.08 ? -1 : 1;
   RT.rain = Math.max(0, K.hu / 1.1 + 0.37); RT.elat = K.el;
-  Object.assign(K, KSV); Object.assign(G3S, GSV);
+  if (!INSLICE) { Object.assign(K, KSV); Object.assign(G3S, GSV); }
   return RT;
 }
 function riverGround(dx, dy, dz) {
-  Object.assign(KSV, K); Object.assign(GSV, G3S);
+  if (!INSLICE) { Object.assign(KSV, K); Object.assign(GSV, G3S); }
   const a = riverCol(dx, dy, dz), h = ground3(Math.floor(a.x), Math.floor(a.z));
-  Object.assign(K, KSV); Object.assign(G3S, GSV);
+  if (!INSLICE) { Object.assign(K, KSV); Object.assign(G3S, GSV); }
   return h;
 }
 // The network, solving it now if it isn't yet. solveRivers() solves it in slices instead: each call runs one slice and returns the
@@ -742,12 +808,48 @@ function planetRivers() {
   while (solveRivers() < 1);
   return PRIV;
 }
+// Copies of the network in workers (the distant land's, js/lodworker.js) start from riverState(): the node samples and a tape of every
+// ground sample the solve took, in order, which adoptRivers replays (each checked against the direction asked for; a mismatch goes
+// back to sampling). The worker then only redoes the solve's own sums, about a fifth of its time, and gets the same network.
+let TAPE = null, TMODE = 0, TK = 0;   // TMODE 1: recording, 2: replaying, 0: sampling
+const tapeKey = (dx, dy, dz) => Math.fround(dx + 2 * dy + 3 * dz);
+function groundT(dx, dy, dz) {
+  if (TMODE === 2) {
+    if (TK < TAPE.v.length && TAPE.c[TK] === tapeKey(dx, dy, dz)) return TAPE.v[TK++];
+    TMODE = 0; TAPE.miss = TK;
+  }
+  const h = riverGround(dx, dy, dz);
+  if (TMODE === 1) { TAPE.v.push(h); TAPE.c.push(tapeKey(dx, dy, dz)); }
+  return h;
+}
 function solveRivers(pre) {
   if (PRIV) return 1;
-  if (!PSOLVE) PSOLVE = BF.planetRivers.steps(noise.seed, riverSample, riverGround, pre || null);
-  const r = PSOLVE.next();
-  if (r.done) { PRIV = r.value; PSOLVE = null; return 1; }
+  if (!PSOLVE) { PSOLVE = BF.planetRivers.steps(noise.seed, riverSample, groundT, pre || null); if (TMODE !== 2) { TAPE = { v: [], c: [] }; TMODE = 1; } }
+  const ks = Object.assign({}, K), gs = Object.assign({}, G3S);
+  let r;
+  INSLICE = true;
+  try { r = PSOLVE.next(); } finally { INSLICE = false; Object.assign(K, ks); Object.assign(G3S, gs); }
+  if (r.done) {
+    PRIV = r.value; PSOLVE = null;
+    if (TMODE === 1) { TAPE = { v: Float64Array.from(TAPE.v), c: Float32Array.from(TAPE.c) }; }
+    TMODE = 0;   // (later samples, a river's profile read on first use, aren't on the tape)
+    return 1;
+  }
   return Math.min(0.99, r.value);
+}
+// the network's starting state for a copy in a worker (solving it here first if needed), or null off the planet
+function riverState() {
+  if (!PLANET) return null;
+  planetRivers();
+  return TAPE && TAPE.v instanceof Float64Array ? { seed: PSEED, pre: PRIV.pre, v: TAPE.v, c: TAPE.c } : null;
+}
+// solve the network from riverState() (in a worker, after init with the same seed); false if it isn't for this world
+function adoptRivers(st) {
+  if (!PLANET || !st || st.seed !== PSEED) return false;
+  if (PRIV) return true;
+  PSOLVE = null; TAPE = { v: st.v, c: st.c, miss: -1 }; TMODE = 2; TK = 0;
+  while (solveRivers(st.pre) < 1);
+  return true;
 }
 function climate3(x, z) {
   const SEA = BF.SEA, MINY = BF.MIN_Y;
@@ -2893,7 +2995,7 @@ BF.worldgen = {
       N2 = S.N2; FB = S.FB; WARP = S.WARP; C3 = S.C3;
     }
     if (GEN === 3) placeHome3();
-    if (!PLANET || PSEED !== n.seed) { PRIV = null; PSOLVE = null; PSEED = PLANET ? n.seed : null; }   // (a network solved for this seed is kept)
+    if (!PLANET || PSEED !== n.seed) { PRIV = null; PSOLVE = null; PSEED = PLANET ? n.seed : null; TAPE = null; TMODE = 0; }   // (a network solved for this seed is kept)
     C.lk = 0; BF.rivers.usePlanet(PLANET ? planetRivers : null);
     if (PLANET) { /* the planet's rivers: planetRivers(), solved the first time they are needed */ }
     else if (GEN === 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
@@ -2923,6 +3025,8 @@ BF.worldgen = {
   treesIn,
   solveRivers: pre => (PLANET ? solveRivers(pre) : 1),   // the planet's river network, one slice per call: the fraction done (1: ready); pre: node samples (riverNodes) for the first call
   riversReady: () => !PLANET || !!PRIV,
+  riverState, adoptRivers,   // a copy of the solved network for a worker (js/lodworker.js)
+  tapeMiss: () => (TAPE ? TAPE.miss : null),
   riverNodes: (from, to, out) => BF.planetRivers.nodeSamples(noise.seed, riverSample, from, to, out),   // the network's terrain samples (js/riverworker.js)
   planetRivers: () => (PLANET ? planetRivers() : null),
   bandAt: (x, z) => (climate(Math.floor(x), Math.floor(z)), C.tb),   // climate band of a column (0 coldest .. 4 hottest), after altitude

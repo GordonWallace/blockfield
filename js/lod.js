@@ -168,8 +168,8 @@ lod.reset = function (scene) {
   if (!lod.pal) lod.pal = palette();
   if (!fullIdx) fullIdx = new THREE.BufferAttribute(BF.gridJob.fullIndex(2 * EXT + 1), 1);   // made once here: it takes tens of ms
   BF.gridJob.palette(lod.pal);
-  const rp = BF.riverPre && BF.riverPre.seed === BF.state.seed >>> 0 ? BF.riverPre.pre : null;
-  BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale, pre: rp });
+  // (rivers: the page's river network, for the workers' copies: js/worldgen.js riverState)
+  BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale, rivers: BF.worldgen.riverState() });
   // Without workers (a page opened as a file rather than through run.sh, where browsers refuse them) there is no distant terrain: sampling
   // in the page fills one ring in minutes, and seven rings drawn in software rendering slow every frame. BF.lodInline forces it on.
   if (BF.sampler.inline && !BF.lodInline) off();
