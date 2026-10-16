@@ -87,8 +87,12 @@ const LEAN = 3;
       for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
       BF.sky.setTime(0.02);
       for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+      // the whole village before the snapshot: a planet village's villagers keep arriving for a while, each with its starting pack (a
+      // cowherd's has a bucket and 30 glass bottles), and one arriving after it would look like stock from nothing
+      for (let i = 0; i < 2400 && window.__villagers().length < v.pop; i++) { if (i % 10 === 0) BF.world.update(v.x, v.z, 30); step(0.05); }
+      BF.sky.setTime(0.02);
       const h = window.__herder(), P = h && BF.cowherd.pastureOf(h);
-      return { key, pop: v.pop, herder: !!h, pasture: P ? { cows: P.cows ? P.cows.length : null, limit: P.limit, cells: P.cells } : null };
+      return { key, pop: v.pop, here: window.__villagers().length, herder: !!h, pasture: P ? { cows: P.cows ? P.cows.length : null, limit: P.limit, cells: P.cells } : null };
     }, v);
     if (r.herder && r.pasture && r.pasture.cows >= 2) { setup = r; break; }
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r)}`);
@@ -105,7 +109,7 @@ const LEAN = 3;
     R.herder = h;
     R.beeKit0 = new Set(window.__villagers().filter(m => m.beeKit));   // beekeepers' kits (16 glass bottles each, js/beekeeper.js) given before the run
   });
-  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: pasture ${JSON.stringify(setup.pasture)}`);
+  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop} (${setup.here} here): pasture ${JSON.stringify(setup.pasture)}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {

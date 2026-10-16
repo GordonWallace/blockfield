@@ -83,8 +83,12 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
       for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
       BF.sky.setTime(0.02);
       for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+      // the whole village before the snapshot: a planet village's villagers keep arriving for a while, each with its starting pack (a
+      // cowherd's has a bucket and 30 glass bottles), and one arriving after it would look like stock from nothing
+      for (let i = 0; i < 2400 && window.__villagers().length < v.pop; i++) { if (i % 10 === 0) BF.world.update(v.x, v.z, 30); step(0.05); }
+      BF.sky.setTime(0.02);
       const ms = window.__villagers(), has = p => ms.some(m => m.profession === p && m.jobsite);
-      return { key, pop: v.pop, baker: has('baker'), farmer: has('farmer'), poultry: has('poultry_keeper'), cowherd: has('cowherd') };
+      return { key, pop: v.pop, here: ms.length, baker: has('baker'), farmer: has('farmer'), poultry: has('poultry_keeper'), cowherd: has('cowherd') };
     }, v);
     if (r.baker && r.farmer && r.poultry && r.cowherd) { setup = r; break; }
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r)}`);
@@ -102,7 +106,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     R.bakerStart.n = bakers.length;
     R.bk = bk;
   });
-  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}`);
+  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop} (${setup.here} here)`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
