@@ -3,6 +3,8 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
   await require('./lib').toVillage(pg);
+  // the planet's village spawns its golems one at a time, after its villagers: wait for one
+  await pg.waitForFunction(() => BF.mobs.list.some(m => m.type === "iron_golem" && m.village), null, { timeout: 60000 }).catch(() => {});
   const res = await pg.evaluate(() => {
     const M = BF.mobs, W = BF.world, r = {};
     BF.sky.setTime(0.75);

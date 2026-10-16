@@ -183,7 +183,7 @@ view.begin = function (scene, camera) {
           M[3], M[4], M[5], M[3] * ax + M[4] * ay + M[5] * az,
           M[6], M[7], M[8], M[6] * ax + M[7] * ay + M[8] * az,
           0, 0, 0, 1);
-        c.material.userData.sphM.multiplyMatrices(tmpM.copy(c.matrixWorld).invert(), sphR);
+        (Array.isArray(c.material) ? c.material[0] : c.material).userData.sphM.multiplyMatrices(tmpM.copy(c.matrixWorld).invert(), sphR);
       }
     } else {
       if (k > 0 && view.toRender(m.elements[12], m.elements[13], m.elements[14], tr)) {

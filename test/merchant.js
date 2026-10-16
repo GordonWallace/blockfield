@@ -34,19 +34,22 @@ module.exports = async (pg) => {
     g = M.goods(A, Bv, merch, 10);
     ok(`marked down here, risen there: carry cobblestone (${g.list.map(x => x.n + " at " + x.buy.toFixed(3) + " -> " + x.sell.toFixed(3))})`, g.list.length === 1 && g.list[0].id === I.cobblestone && g.profit > 0, g);
     ok("not the other way", M.goods(Bv, A, merch, 10).list.length === 0);
-    // ---- pins
+    // ---- pins (synthetic village boxes around a chunk corner by the spawn, on one face; the player 4 km away)
     VS.reset();
-    const v0 = { x: 0, z: 0, minX: -10, maxX: 10, minZ: -10, maxZ: 10 }, v1 = { x: 160, z: 40, minX: 150, maxX: 170, minZ: 30, maxZ: 50 }, v2 = { x: -100, z: 100, minX: -110, maxX: -90, minZ: 90, maxZ: 110 };
+    const o = BFT.spawn(), bx = Math.floor(o.x / 16) * 16, bz = Math.floor(o.z / 16) * 16, cx = bx / 16, cz = bz / 16;
+    const box = (x, z) => ({ x: bx + x, z: bz + z, minX: bx + x - 10, maxX: bx + x + 10, minZ: bz + z - 10, maxZ: bz + z + 10 });
+    const key = (x, z) => (bx + x) + "," + (bz + z), ck = (x, z) => (cx + x) + "," + (cz + z);
+    const v0 = box(0, 0), v1 = box(160, 40), v2 = box(-100, 100), far = [bx + 4000, bz + 4000];
     const cor = VS.corridor(v0, v1);
-    ok("corridor covers the walk and one chunk either side", cor.includes("0,0") && cor.includes("10,2") && cor.includes("5,2") && cor.length < 70, cor.length);
+    ok("corridor covers the walk and one chunk either side", cor.includes(ck(0, 0)) && cor.includes(ck(10, 2)) && cor.includes(ck(5, 2)) && cor.length < 70, cor.length);
     ok("pin 1", VS.pin("t1", v0, v1)); ok("pin 2", VS.pin("t2", v0, v2)); ok("a third trip waits", !VS.pin("t3", v1, v2));
-    VS.update(5000, 5000);
-    ok("pinned villages are simulated far from the player", VS.isActive("0,0") && VS.isActive("160,40") && VS.isActive("-100,100"));
+    VS.update(...far);
+    ok("pinned villages are simulated far from the player", VS.isActive(key(0, 0)) && VS.isActive(key(160, 40)) && VS.isActive(key(-100, 100)));
     ok("corridor chunks are kept", cor.every(k => VS.keepKeys.has(k)));
     const sv = {}; VS.exportSeen(sv);
-    ok("pins are saved", sv["pin:t1"] && sv["pin:t1"].a === "0,0" && sv["pin:t1"].b === "160,40");
-    VS.unpin("t1"); VS.unpin("t2"); VS.update(5000, 5000);
-    ok("unpinned: nothing kept out here", !VS.isActive("160,40") && !VS.keepKeys.has("5,2"));
+    ok("pins are saved", sv["pin:t1"] && sv["pin:t1"].a === key(0, 0) && sv["pin:t1"].b === key(160, 40));
+    VS.unpin("t1"); VS.unpin("t2"); VS.update(...far);
+    ok("unpinned: nothing kept out here", !VS.isActive(key(160, 40)) && !VS.keepKeys.has(ck(5, 2)));
     VS.reset();
     // ---- path wear: 20 crossings of grass make a dirt path; farmland never changes
     const saved = new Map(BF.mobs.villages); BF.mobs.villages.clear();   // away from every village box

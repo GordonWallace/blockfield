@@ -18,7 +18,7 @@ const { chromium } = require(process.env.PW || "playwright");
 const here = path.resolve(__dirname, "..");
 const args = process.argv.slice(2), flag = (n, d) => { const i = args.indexOf(n); if (i < 0) return d; const v = args[i + 1]; args.splice(i, 2); return v; };
 const MIN = +flag("--min", 10), JSON_OUT = flag("--json", null), QUERY = flag("--query", "");   // --query nolod: without distant terrain
-const root = path.resolve(args[0] || "."), only = (args[1] || "start,ground,fly300,fly2000,planet,sim,mem").split(",");
+const root = path.resolve(args[0] || "."), only = (args[1] || "start,ground,fly300,fly2000,planet,sim,mem").replace(/^only=/, "").split(",");
 const planet = fs.existsSync(path.join(root, "js/planetrivers.js"));   // 1.4 and later: the round world
 const HASH = planet ? "#seed123gen4v10" : "#seed1337gen3v9";             // the test boot worlds (a village near the spawn in both)
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".json": "application/json" };
@@ -41,7 +41,7 @@ const stats = a => {
   const srv = await serve(), url = `http://127.0.0.1:${srv.address().port}/index.html${QUERY ? "?" + QUERY : ""}`;
   const b = await chromium.launch({ args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-precise-memory-info"] });
   // a small window: SwiftShader's cost grows with the pixels drawn, which a real GPU barely notices; the simulation runs at 320 x 200
-  const VW = { width: 640, height: 360 }, SIMW = { width: 320, height: 200 };
+  const VW = process.env.PERF_VW ? { width: +process.env.PERF_VW.split("x")[0], height: +process.env.PERF_VW.split("x")[1] } : { width: 640, height: 360 }, SIMW = { width: 320, height: 200 };
   const pg = await b.newPage({ viewport: VW });
   pg.on("pageerror", e => console.log("PAGEERROR", e.message));
   await pg.route("**/three.min.js", r => r.fulfill({ path: path.join(here, ".three-test.min.js"), contentType: "text/javascript" }));
@@ -67,17 +67,27 @@ const stats = a => {
     for (let i = 0; i < 160 && BF.world.queueLength > 0; i++) await new Promise(r => setTimeout(r, 250));
   }, ms);
   const frames = async (ms) => {
-    await pg.evaluate(() => { window.__ft = []; window.__ftOn = true; });
+    await pg.evaluate(() => {
+      // the share of each frame spent handing the scene to WebGL (BF.renderer.render)
+      const R = BF.renderer;
+      if (!R.__timed) { const o = R.render.bind(R); R.render = (s, c) => { const t = performance.now(); try { o(s, c); } finally { window.__rt += performance.now() - t; } }; R.__timed = true; }
+      window.__ft = []; window.__rt = 0; window.__ftOn = true;
+    });
     await pg.waitForTimeout(ms);
     const ft = await pg.evaluate(() => { window.__ftOn = false; return window.__ft; });
+    const renderMs = await pg.evaluate((n) => +(window.__rt / Math.max(1, n)).toFixed(2), ft.length);
+    if (process.env.PERF_SHOTS) { fs.mkdirSync(process.env.PERF_SHOTS, { recursive: true }); await pg.screenshot({ path: path.join(process.env.PERF_SHOTS, (frames.n = (frames.n || 0) + 1) + ".png") }); }   // PERF_SHOTS=dir: the view at the end of each measurement
     // what the last frame drew: triangles and draw calls (independent of the GPU), and distant-terrain triangles where there are any
     const info = await pg.evaluate(() => {
       const r = BF.renderer.info.render;
       let lodTris = 0;
       if (BF.lod && BF.lod.levels) for (const L of BF.lod.levels) if (L.mesh && L.mesh.visible !== false) { const g = L.mesh.geometry; lodTris += g && g.index ? g.index.count / 3 : 0; }
-      return { tris: r.triangles, calls: r.calls, lodTris: Math.round(lodTris) };
+      const rings = BF.lod && BF.lod.stats ? BF.lod.stats().rings.map((R) => R.cell + ":" + Math.round(R.tris / 1000) + "k" + (R.standsShown ? "+" + Math.round(R.stands / 1000) + "k" : "")) .join(" ") : "";
+      // distant-terrain work still queued and samples taken so far (workers busy sampling share the CPU with software drawing)
+      const st = BF.lod && BF.lod.active && BF.lod.stats ? BF.lod.stats() : null;
+      return { tris: r.triangles, calls: r.calls, lodTris: Math.round(lodTris), rings, pending: st ? st.pending : 0, samples: st ? st.samples : 0 };
     });
-    return Object.assign(stats(ft), { fps: +(ft.length / (ms / 1000)).toFixed(1) }, info);
+    return Object.assign(stats(ft), { renderMs, fps: +(ft.length / (ms / 1000)).toFixed(1) }, info);
   };
   const ground = () => pg.evaluate(() => {
     const p = BF.player.position;
@@ -90,6 +100,7 @@ const stats = a => {
     const o = P.serialize(); o.flying = true; o.y = y; o.x = P.position.x; o.z = P.position.z; P.deserialize(o);
   }; };
   await pg.addInitScript(FLY);
+  if (process.env.PERF_EVAL) await pg.addInitScript(`window.addEventListener("load", () => { ${process.env.PERF_EVAL} })`);   // PERF_EVAL=js: run in the page once it loads (experiments)
   await boot();
   res.version = await pg.evaluate(() => (BF.VERSION || (BF.version && BF.version.game) || null));
 
@@ -131,16 +142,20 @@ const stats = a => {
   if (only.includes("ground") || only.includes("sim")) {
     await pg.evaluate(v => {
       BF.player.start && BF.player.start();
-      if (v) { const P = BF.player.position; P.x = v.x + 0.5; P.z = v.z + 0.5; }
+      // (10 blocks from its centre, which is often the well: standing in it, the view is the water close up)
+      if (v) { const P = BF.player.position; P.x = v.x + 10.5; P.z = v.z + 0.5; }
       BF.player.setGameMode && BF.player.setGameMode("creative");
       BF.player.setFlying && BF.player.setFlying(false);   // (1.3 starts on foot)
     }, village);
     await settle(6000);
-    await pg.evaluate(async () => { const P = BF.player.position; P.y = (BF.view && BF.view.groundAt ? BF.view.groundAt(P.x, P.z) : BF.worldgen.heightAt(Math.floor(P.x), Math.floor(P.z))) + 2; });
+    await pg.evaluate(async () => { const P = BF.player.position; P.y = (BF.view && BF.view.groundAt ? BF.view.groundAt(P.x, P.z) : BF.worldgen.heightAt(Math.floor(P.x), Math.floor(P.z))) + 2; BF.player.setLook && BF.player.setLook(BF.player.yaw, 0); });
     await settle(3000);
   }
   if (only.includes("ground")) {
+    let cdp = null;   // PERF_PROFILE_GROUND=out.cpuprofile: the page's profile while standing in the village
+    if (process.env.PERF_PROFILE_GROUND) { cdp = await pg.context().newCDPSession(pg); await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 500 }); await cdp.send("Profiler.start"); }
     res.ground = await frames(15000);
+    if (cdp) { const { profile } = await cdp.send("Profiler.stop"); fs.writeFileSync(process.env.PERF_PROFILE_GROUND, JSON.stringify(profile)); }
     res.ground.chunks = await pg.evaluate(() => BF.world.meshedCount());
     console.log("ground", JSON.stringify(res.ground));
   }

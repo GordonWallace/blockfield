@@ -151,13 +151,13 @@ module.exports = async (pg, out) => {
     const purge = await pg.evaluate(async () => {
       const W = BF.world;
       // (chunks are purged past 15 chunks: a view of 20 has plenty; the rings are hidden meanwhile, as software rendering draws them slowly)
-      for (const L of BF.lod.levels) if (L.mesh) L.mesh.material.visible = false;
+      for (const L of BF.lod.levels) if (L.mat) L.mat.visible = false;
       W.setViewDist(20);
       const t0 = performance.now();
       while (W.high && performance.now() - t0 < 60000) await new Promise((r) => setTimeout(r, 500));
       await new Promise((r) => setTimeout(r, 3000));
       while (W.queueLength > 0 && W.farMeshes.size <= 100 && performance.now() - t0 < 400000) await new Promise((r) => setTimeout(r, 500));
-      for (const L of BF.lod.levels) if (L.mesh) L.mesh.material.visible = true;
+      for (const L of BF.lod.levels) if (L.mat) L.mat.visible = true;
       let data = 0;
       for (const c of W.chunks.values()) for (const s of c.secs) if (typeof s !== "number") data += s.byteLength;
       // a far chunk's mesh is taken back when its data comes back, and isn't meshed again
