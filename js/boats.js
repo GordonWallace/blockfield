@@ -174,6 +174,9 @@ function lightAt(p) {
   try { bl = BF.world.getBlockLight(p.x, p.y + 0.5, p.z) / 15; } catch (_) {}
   return Math.max(0.12, sky, Math.pow(bl, 1.5));
 }
+// On the planet a boat keeps to the canonical square of the face it floats on; the player and mobs are seen from its frame.
+const LQ = {};
+const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
 function syncMesh(b) {
   if (!b.mesh) return;
   const here = loadedAt(b.pos.x, b.pos.z);
@@ -238,7 +241,7 @@ function step(b, dt, input) {
 function pushByPlayer(b, dt) {
   const P = BF.player;
   if (!P || P.dead || P.vehicle) return;
-  const pp = P.position, dx = b.pos.x - pp.x, dz = b.pos.z - pp.z, reach = HW + P.halfWidth;
+  const pp = P.position, q = seenXZ(b.pos, pp), dx = b.pos.x - q.x, dz = b.pos.z - q.z, reach = HW + P.halfWidth;
   if (Math.abs(dx) > reach || Math.abs(dz) > reach || pp.y > b.pos.y + H || pp.y + P.height < b.pos.y) return;
   const d = Math.hypot(dx, dz) || 1;
   b.vel.x += dx / d * 6 * dt; b.vel.z += dz / d * 6 * dt;
@@ -330,8 +333,8 @@ function pickUpMobs(b) {
   if (b.mob || b.stowed || !BF.mobs) return;
   for (const m of BF.mobs.list) {
     if (m.dead || m.removed || m.riding || m.rider || m.sleeping || m.tradingWith || (m.def && (m.def.golem || m.def.herd)) || (m.boatCd || 0) > 0) continue;
-    const r = HW + m.halfWidth - 0.1;
-    if (Math.abs(m.position.x - b.pos.x) > r || Math.abs(m.position.z - b.pos.z) > r) continue;
+    const r = HW + m.halfWidth - 0.1, q = seenXZ(b.pos, m.position);
+    if (Math.abs(q.x - b.pos.x) > r || Math.abs(q.z - b.pos.z) > r) continue;
     if (m.position.y > b.pos.y + H || m.position.y + m.height < b.pos.y) continue;
     if (takeMob(b, m)) return;
   }
@@ -460,6 +463,7 @@ const boats = {
       if (!b.rider) {
         pushByPlayer(b, dt);
         step(b, dt, null);
+        if (BF.planet && BF.planet.reframe) BF.planet.reframe(b.pos, -1, b, b.vel);   // drifted past a face edge: onto the next face, turned (the player's boat: js/player.js crossEdge)
       }
       if (b.stowed) restoreStowed(b, dt);
       pickUpMobs(b);

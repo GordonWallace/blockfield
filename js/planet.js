@@ -316,6 +316,58 @@ function recanon(e) {
   return q;
 }
 
+// ---------- frames (spec r14-13) ----------
+// Every atlas point is expressed in the frame of the face whose atlas square (its grid plus the margin around it) holds it: face(x, z).
+// A thing that belongs to a place (a villager to its village) keeps its coordinates in that place's frame even past an edge, where they
+// are margin addresses, so the coordinates it compares itself with (home, bed, pen) stay plain x / z maths; a thing that belongs nowhere
+// keeps to its own face's canonical square.
+
+// Point (x, z) expressed in the frame of face F: out = { x, z, turn } (turn: quarter turns taking a direction in the point's own frame
+// into F's, for turnVec / turnYaw). Null when the point is on the face opposite F or off the atlas. Off the planet, the point itself.
+const rf = {};
+function inFrame(F, x, z, out) {
+  out = out || {};
+  if (!isPlanet()) { out.x = x; out.z = z; out.turn = 0; return out; }
+  canon(x, z, rf);
+  if (rf.off || F < 0 || F > 5) return null;
+  const q0 = (4 - rf.turn) % 4;    // own frame -> canonical
+  if (rf.f === F) { out.x = rf.x; out.z = rf.z; out.turn = q0; return out; }
+  const e = UNFOLD[F][rf.f];
+  if (!e) return null;
+  out.x = W * F + N + e.A[0] * rf.u + e.A[1] * rf.v + e.t[0]; out.z = N + e.A[2] * rf.u + e.A[3] * rf.v + e.t[1];
+  out.turn = (q0 + e.turn) % 4;
+  return out;
+}
+// b ({x, z}) as seen from a: b expressed in the frame a is expressed in, so b.x - a.x / b.z - a.z is a true local offset whichever
+// frames the two are kept in. Far apart (b on the face opposite a's frame) it is b unchanged. out = { x, z, turn }; off the planet, b.
+function local(a, b, out) {
+  out = out || {};
+  if (isPlanet()) { const F = face(a.x, a.z); if (F >= 0 && inFrame(F, b.x, b.z, out)) return out; }
+  out.x = b.x; out.z = b.z; out.turn = 0;
+  return out;
+}
+// Puts a moving thing into the frame of face F, or (F < 0 / undefined) back onto the canonical square of the face it stands on: moves
+// p.x / p.z and turns holder.yaw and vel.x / vel.z with it. Returns the quarter turns applied (0 to 3), or null when nothing changed
+// (already in that frame, off the planet, or no way to get there: F opposite, off the atlas). A point in a corner wedge is moved to the
+// nearest face (as the player is). Callers re-express any points they keep in the old frame with inFrame(face(p.x, p.z), ...).
+const rg = {}, tw = [0, 0];
+function reframe(p, F, holder, vel) {
+  if (!isPlanet()) return null;
+  if (F == null || F < 0) {
+    canon(p.x, p.z, rg);
+    if (rg.off || (rg.x === p.x && rg.z === p.z)) return null;
+    F = rg.f;
+  } else if (face(p.x, p.z) === F) return null;
+  if (!inFrame(F, p.x, p.z, rg)) return null;
+  p.x = rg.x; p.z = rg.z;
+  const q = rg.turn;
+  if (q) {
+    if (holder && typeof holder.yaw === "number") holder.yaw = turnYaw(q, holder.yaw);
+    if (vel && typeof vel.x === "number") { turnVec(q, vel.x, vel.z, tw); vel.x = tw[0]; vel.z = tw[1]; }
+  }
+  return q;
+}
+
 // Latitude / longitude of an atlas point (null off the planet or off the atlas), and the atlas point of a latitude / longitude.
 function latLonAt(x, z, out) {
   if (!isPlanet()) return null;
@@ -332,5 +384,6 @@ BF.planet = {
   N, R, W, LOCAL, FACES, EDGE, UNFOLD,
   dir, fromDir, onFace, pos, wrap, frame, toGrid, gridDistance, gridToward, latLon, fromLatLon,
   isPlanet, atlas, face, grid, canon, canonCell, turnVec, turnYaw, rel, distance, toward, recanon, latLonAt, atlasOfLatLon,
+  inFrame, local, reframe,
 };
 })();
