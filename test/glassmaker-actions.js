@@ -124,8 +124,13 @@ module.exports = async (pg) => {
       kit(G, [["bread", 12], ["sand", 16]]);
       G.gls = { stage: null, job: null, checkT: 0, avoid: {}, cd: 0, day: Math.floor(BF.sky.day + BF.sky.time), dug: 64, wait: "" };
       kit(sellerC, [["bread", 12]]);
-      for (let i = 0; i < 100; i++) step(0.1);
-      ok("sand but no fuel to be had: Waiting for fuel", BF.villagerStatus.text(G) === "Waiting for fuel", BF.villagerStatus.text(G));
+      // and no fuel left in any of the village's furnaces (the planet's bigger villages have other furnace users, who may have left some)
+      const fuelLeft = () => BF.furnaceUse.near(G, I.sand, I.glass).filter(f => BF.furnaceUse.fuelIn(f) > 0).map(f => [f.x, f.y, f.z]);
+      for (let i = 0; i < 100; i++) {
+        if (i % 10 === 0) for (const f of BF.furnaceUse.near(G, I.sand, I.glass)) { const fs = BF.inventory.furnaceState(f.x, f.y, f.z); if (fs) { fs.slots[1] = null; fs.burn = 0; } }
+        step(0.1);
+      }
+      ok("sand but no fuel to be had: Waiting for fuel", BF.villagerStatus.text(G) === "Waiting for fuel", { status: BF.villagerStatus.text(G), fuelLeft: fuelLeft() });
     }
 
     // ---- a cowherd short of bottles buys new ones from the glassmaker
