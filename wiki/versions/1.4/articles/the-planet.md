@@ -30,7 +30,7 @@ Two of the faces sit over the poles and four go round the equator. Latitude and 
 
 ## Flying high
 
-In creative mode you can fly far above the planet. Flying gets faster the higher you are: hold Space, with R for the boost, and you reach orbit in a few seconds.
+In creative mode you can fly far above the planet. More than 150 blocks above the ground, flying gets faster the higher you are. Hold R for the boost, which is 160 blocks a second times your height divided by 150, so about 1,600 a second at 1,500 up and 16,000 a second at 15,000 up. Up there R works without W, so R and Space reach orbit in a few seconds. You can climb as fast as you fly forward, and flying tops out at three times the planet's radius, about 313,000 blocks up. Closer to the ground, flying is as described in [[page:transport]].
 
 As you climb, the view slowly changes from the flat drawing to the true round planet. It starts about 250 blocks above the ground (or above the sea, whichever is higher) and is fully round by 2,500. Up there you fly along great circles, so a straight flight carries on straight around the planet, even across face edges. From about 3,000 blocks up the sky starts to darken, and it is black space with stars by 60,000.
 
