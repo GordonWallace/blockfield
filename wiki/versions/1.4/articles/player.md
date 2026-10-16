@@ -54,7 +54,7 @@ When your health reaches zero you die, and the death screen tells you how, and o
 1. your **home bed**, if you have slept in one that still stands, or
 2. the world spawn.
 
-If your bed was destroyed, you see "You have no home bed" and start at the world spawn. Tents set your home the same way. You can only sleep at night; see [[page:time-and-weather]].
+If your bed was destroyed, you see "You have no home bed" and start at the world spawn. A saved position or spawn point that is off the planet (past the atlas or in a corner wedge) also brings you back to the world spawn. Tents set your home the same way. You can only sleep at night; see [[page:time-and-weather]].
 
 ## Game modes
 

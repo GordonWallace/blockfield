@@ -25,7 +25,8 @@ module.exports = async (pg, out) => {
     return meta.id;
   });
   await pg.reload();                           // the tab closes with the screen still open
-  await pg.waitForTimeout(6000);
+  await require("./lib").ready(pg);   // the planet works out its rivers before the boot world starts (a load before then is wiped by it)
+  await pg.waitForTimeout(1000);
   const res = await pg.evaluate(async id => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const I = BF.I, inv = BF.inventory;

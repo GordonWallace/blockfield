@@ -106,8 +106,11 @@ module.exports = async (pg, out) => {
     BF.player.setFlying(true); BF.player.position.y = BF.view.groundAt(BF.player.position.x, BF.player.position.z) + 200; BF.player.velocity.y = 0;
     return BF.player.position.y;
   });
+  // 8 s of game time, not of the wall clock: a frame steps the player by at most 0.05 s (js/main.js), so under software rendering
+  // at a few frames a second 8 wall-clock seconds are only 1 to 2 s of flight
+  const t0 = await pg.evaluate(() => BF.state.time);
   await pg.keyboard.down("KeyR"); await pg.keyboard.down("Space");
-  await pg.waitForTimeout(8000);
+  for (let i = 0; i < 1200 && await pg.evaluate((t0) => BF.state.time - t0 < 8, t0); i++) await pg.waitForTimeout(100);
   await pg.keyboard.up("Space"); await pg.keyboard.up("KeyR");
   const top = await pg.evaluate(() => BF.player.position.y);
   check(top > 20000, `8 s of Space with R in creative flight climbs from ${Math.round(rise)} to ${Math.round(top)}`);

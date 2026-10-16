@@ -160,13 +160,20 @@ function lead(m, S, tk, dt, out, c) {
   S.waitT = 0;
   const at = c.stand || P.out;   // where it waits: in front of the gate, or (c.stand) beside that cell so the animal has the way in to itself
   const st = BF.villageLife.travel(m, S, dt, out, at[0], P.y + 1, at[1], m.def.speed * 0.8);
-  if (st === "arrived") { m.ai.route = null; if (dk < 3.2) { S.stage = "pen"; S.inT = 0; } else { out.faceX = op.x; out.faceZ = op.z; m.lookAt = o; } }
+  if (st === "arrived" && c.stand && (Math.floor(p.x) !== at[0] || Math.floor(p.z) !== at[1]) && (S.standT = (S.standT || 0) + dt) < 3) {
+    // travel stops within a cell of the goal, which can be beside the gate's front cell, in the animal's way: step onto the stand itself
+    m.ai.route = null;
+    const dx = at[0] + 0.5 - p.x, dz = at[1] + 0.5 - p.z, d = Math.hypot(dx, dz) || 1, sp = m.def.speed * 0.6;
+    out.x = dx / d * sp; out.z = dz / d * sp;
+    return true;
+  }
+  if (st === "arrived") { m.ai.route = null; S.standT = 0; if (dk < 3.2) { S.stage = "pen"; S.inT = 0; } else { out.faceX = op.x; out.faceZ = op.z; m.lookAt = o; } }
   else if (st === "failed") { c.failed("nopath", dk); return false; }
   return true;
 }
 // Starts leading: the herder reached the animal (tk.mob).
 function startLead(m, S, tk) {
-  S.stage = "lead"; tk.mob.ledBy = m; tk.mob.crumb = 0; S.trail = [[m.position.x, m.position.y, m.position.z]]; S.trailBase = 0; m.ai.route = null;
+  S.stage = "lead"; S.standT = 0; tk.mob.ledBy = m; tk.mob.crumb = 0; S.trail = [[m.position.x, m.position.y, m.position.z]]; S.trailBase = 0; m.ai.route = null;
 }
 function reset() { toShut.length = 0; }
 
