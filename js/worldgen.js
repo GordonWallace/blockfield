@@ -464,6 +464,7 @@ const mapX = (m, x, z) => m[0] * x + m[1] * z + m[2], mapZ = (m, x, z) => m[3] *
 const unmapX = (m, X, Z) => m[0] * (X - m[2]) + m[3] * (Z - m[5]), unmapZ = (m, X, Z) => m[1] * (X - m[2]) + m[4] * (Z - m[5]);
 function edgeMaps(f, x0, x1, z0, z1) {
   const Pl = BF.planet, N = Pl.N, W = Pl.W, out = [];
+  if (!(f >= 0 && f < 6)) return out;   // off the atlas (no face: x < 0, z < 0 or past the last face): open sea, no neighbours
   const u0 = x0 - W * f - N, u1 = x1 - W * f - N, v0 = z0 - N, v1 = z1 - N;
   for (let s = 0; s < 4; s++) {
     if (!(s === 0 ? u0 < 0 : s === 1 ? u1 > N : s === 2 ? v0 < 0 : v1 > N)) continue;
