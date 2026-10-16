@@ -28,6 +28,9 @@ const start = async () => {
   game.on('pageerror', e => { console.log('PAGEERROR game', e.message); errs.push(e.message); });
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
+  // no distant terrain (js/lod.js), as on the file:// test pages: without workers it stays off. Served over http it would draw seven
+  // rings in software rendering, which slows every frame of the game page to a crawl here
+  await game.addInitScript(() => { window.Worker = undefined; });
   await game.goto(`http://localhost:${GAME}/#seed1337gen4`);
   await game.waitForTimeout(5000);
   ok('a planet world, fed to the debug server', await game.evaluate(() => BF.planet.isPlanet() && !!BF.debugFeed));

@@ -21,6 +21,9 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
+  // no distant terrain (js/lod.js), as on the file:// test pages: without workers it stays off. Served over http it would draw seven
+  // rings in software rendering, which slows every frame of the game page to a crawl here
+  await game.addInitScript(() => { window.Worker = undefined; });
   await game.goto(`http://localhost:${GAME}/#seed1337gen4`);
   await game.waitForTimeout(5000);
   ok('feed is on when served by the debug server', await game.evaluate(() => !!BF.debugFeed));
@@ -145,6 +148,9 @@ const start = async () => {
     return BF.signs.villageName(Math.round(v.x) + "," + Math.round(v.z));
   });
   await game.waitForTimeout(12000);
+  // the planet's chunks (and the distant terrain) can take longer: wait up to 40 s more for the village's villagers to be out, then a snapshot
+  for (let i = 0; i < 40 && !(await game.evaluate(() => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); return !!(r && r.members && r.members.some(m => m.type === 'villager')); })); i++) await game.waitForTimeout(1000);
+  await game.waitForTimeout(2500);
   const list = () => dbg.evaluate(() => [...document.querySelectorAll('#vlist .vrow')].map(r => ({ name: r.querySelector('.vn').firstChild.textContent, on: r.classList.contains('on'), sel: r.classList.contains('sel'), dist: +r.querySelector('.vd b').textContent.replace(/,/g, '') })));
   let L = await list();
   console.log('villages:', JSON.stringify(L));
