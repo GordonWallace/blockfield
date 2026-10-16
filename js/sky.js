@@ -151,11 +151,46 @@ function makeStars() {
   return p;
 }
 
+// ---------- clouds on the planet (generator 4, spec r14-20) ----------
+// A cell is cloudy where 3D noise at the sphere point under it is above the cover threshold, so the pattern is one field over the
+// whole planet and has no seam at a face edge. The wind turns that field about the pole axis (clouds blow east, CLOUD_WIND blocks
+// a second at the equator, none at the poles); it is a pure function of game time, so clouds survive save and load.
+// The cells form a lattice in the camera's face frame, offset by the sub-cell drift D (planetD). PCELL divides N and every unfold
+// offset is a multiple of N, so the lattices of two faces line up exactly across their edge: crossing an edge turns D into the
+// new face's frame and the rebuilt cells sit on the same ground with the same content. Between rebuilds the mesh only slides by
+// the local wind (a few thousandths of a block off the true turning field across the window).
+const PCELL = 10, CLOUD_WIND = 1.2;
+let cloudNoise = null, cloudNoiseSeed = NaN, cloudSorted = null;
+const planetD = [0, 0];
+let planetFace = -1, sunYaw = 0;
+const cg = {}, cq = [0, 0, 0];
+function cloudField(x, y, z) {   // x, y, z: a unit direction, already turned back by the wind
+  const k1 = BF.planet.R / 56, k2 = BF.planet.R / 24;
+  return cloudNoise.n3(x * k1, y * k1, z * k1) + 0.4 * cloudNoise.n3(x * k2 + 71.3, y * k2, z * k2);
+}
+function planetClouds() {
+  const seed = ((BF.state && BF.state.seed) | 0) ^ 0x3c10d5;
+  if (cloudNoise && cloudNoiseSeed === seed) return;
+  cloudNoise = BF.makeNoise(seed); cloudNoiseSeed = seed;
+  // the field's distribution, so cover maps to a threshold (as the flat mask's quantiles do)
+  let s = 4242;
+  const r = () => ((s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296);
+  cloudSorted = new Float32Array(4096);
+  for (let i = 0; i < 4096; i++) {
+    const u = r() * 2 - 1, a = r() * Math.PI * 2, q = Math.sqrt(1 - u * u);
+    cloudSorted[i] = cloudField(Math.cos(a) * q, u, Math.sin(a) * q);
+  }
+  cloudSorted.sort();
+  if (clouds) clouds.userData.invalidate();
+}
+const windAngle = () => CLOUD_WIND / BF.planet.R * (sky.day + sky.time) * sky.dayLength;
+
 function makeClouds() {
   // Volumetric ("fancy") clouds: a periodic 64x64 cell mask (each cell = CLOUD_CELL blocks, deterministic) is meshed
   // into flat-topped slabs over a WxW window of cells around the camera. Only exposed faces are emitted (internal
   // faces culled). The mesh is rebuilt only when the window's first cell index changes (camera or drift crosses a
   // cell boundary); in between it is just translated (sub-cell scroll). Buffers are preallocated, no per-rebuild allocs.
+  // On the planet the cells are PCELL blocks and their content comes from cloudField (see above).
   let s = 777;
   const r = () => ((s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296);
   let f = new Float32Array(CLOUD_N * CLOUD_N).map(() => r());
@@ -181,11 +216,29 @@ function makeClouds() {
   };
   setMask(0.7);
   const M = CLOUD_N - 1;
-  const cell = (i, j) => mask[(j & M) * CLOUD_N + (i & M)];
+  const flatCell = (i, j) => mask[(j & M) * CLOUD_N + (i & M)];
 
-  const W = Math.ceil(CLOUD_R / CLOUD_CELL) * 2 + 2, CS = CLOUD_CELL, CH = CLOUD_H;
+  // the planet's cells for the current window (pmask[b * W + a], with a one-cell border), filled by fillPlanet
+  const W0 = Math.ceil(CLOUD_R / CLOUD_CELL) * 2 + 2, WP = Math.ceil(CLOUD_R / PCELL) * 2 + 2;
+  const pmask = new Uint8Array((WP + 2) * (WP + 2));
+  let planet = false, pci = 0, pcj = 0, pThr = 0;
+  const cell = (i, j) => planet ? pmask[(j - pcj + 1) * (WP + 2) + (i - pci + 1)] : flatCell(i, j);
+  function fillPlanet(ci, cj, f, dx, dz) {
+    const P = BF.planet, N = P.N, x0 = P.W * f + N, al = windAngle(), ca = Math.cos(al), sa = Math.sin(al);
+    pci = ci; pcj = cj;
+    for (let b = -1; b <= WP; b++) for (let a = -1; a <= WP; a++) {
+      const u = (ci + a + 0.5) * PCELL + dx - x0, v = (cj + b + 0.5) * PCELL + dz - N;
+      P.wrap(f, u, v, cg);
+      P.dir(cg.f, cg.u, cg.v, cq);
+      const x = cq[0] * ca - cq[2] * sa, z = cq[0] * sa + cq[2] * ca;   // turned back by the wind
+      pmask[(b + 1) * (WP + 2) + a + 1] = cloudField(x, cq[1], z) > pThr ? 1 : 0;
+    }
+  }
+
+  let W = W0, CS = CLOUD_CELL;
+  const CH = CLOUD_H;
   // worst case 6 quads per cell is impossible for neighbours; bound by cells * 6 anyway only if checkerboard (<= 5 faces)
-  const maxVerts = W * W * 6 * 6;
+  const maxVerts = WP * WP * 6 * 6;
   const pos = new Float32Array(maxVerts * 3), shade = new Float32Array(maxVerts);
   const geo = new THREE.BufferGeometry();
   const pa = new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage);
@@ -201,16 +254,18 @@ function makeClouds() {
   };
   function rebuild(ci, cj) {
     nv = 0;
+    // side shades: x sides a little darker than z sides; on the planet both alike, since a face edge can turn x into z
+    const SX = planet ? 0.85 : 0.8, SZ = planet ? 0.85 : 0.9;
     for (let b = 0; b < W; b++) for (let a = 0; a < W; a++) {
       const i = ci + a, j = cj + b;
       if (!cell(i, j)) continue;
       const x0 = a * CS, x1 = x0 + CS, z0 = b * CS, z1 = z0 + CS;
       quad(1.0, x0, CH, z0, x0, CH, z1, x1, CH, z1, x1, CH, z0);       // top
       quad(0.7, x0, 0, z0, x1, 0, z0, x1, 0, z1, x0, 0, z1);           // bottom
-      if (!cell(i + 1, j)) quad(0.8, x1, 0, z0, x1, CH, z0, x1, CH, z1, x1, 0, z1);
-      if (!cell(i - 1, j)) quad(0.8, x0, 0, z1, x0, CH, z1, x0, CH, z0, x0, 0, z0);
-      if (!cell(i, j + 1)) quad(0.9, x1, 0, z1, x1, CH, z1, x0, CH, z1, x0, 0, z1);
-      if (!cell(i, j - 1)) quad(0.9, x0, 0, z0, x0, CH, z0, x1, CH, z0, x1, 0, z0);
+      if (!cell(i + 1, j)) quad(SX, x1, 0, z0, x1, CH, z0, x1, CH, z1, x1, 0, z1);
+      if (!cell(i - 1, j)) quad(SX, x0, 0, z1, x0, CH, z1, x0, CH, z0, x0, 0, z0);
+      if (!cell(i, j + 1)) quad(SZ, x1, 0, z1, x1, CH, z1, x0, CH, z1, x0, 0, z1);
+      if (!cell(i, j - 1)) quad(SZ, x0, 0, z0, x0, CH, z0, x1, CH, z0, x1, 0, z0);
     }
     pa.needsUpdate = true; sa.needsUpdate = true;
     geo.setDrawRange(0, nv);
@@ -237,16 +292,71 @@ function makeClouds() {
   const m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
   m.renderOrder = 5;
-  let kx = 1e9, kz = 1e9;
+  let kx = 1e9, kz = 1e9, kf = -1;
   m.userData.sync = (camX, camZ, drift, y) => {
+    if (planet) { planet = false; W = W0; CS = CLOUD_CELL; kx = 1e9; }
     // window's first cell index; world x of cell i's left edge is i * CS - drift
     const ci = Math.floor((camX + drift) / CS) - (W >> 1), cj = Math.floor(camZ / CS) - (W >> 1);
     if (ci !== kx || cj !== kz) { kx = ci; kz = cj; rebuild(ci, cj); }
     m.position.set(ci * CS - drift, y, cj * CS);
   };
+  // the planet: cell (i, j) of face f's lattice covers atlas x from i * PCELL + dx, z from j * PCELL + dz
+  m.userData.syncPlanet = (camX, camZ, f, dx, dz, y) => {
+    if (!planet) { planet = true; W = WP; CS = PCELL; kx = 1e9; }
+    const ci = Math.floor((camX - dx) / CS) - (W >> 1), cj = Math.floor((camZ - dz) / CS) - (W >> 1);
+    if (ci !== kx || cj !== kz || f !== kf) { kx = ci; kz = cj; kf = f; fillPlanet(ci, cj, f, dx, dz); rebuild(ci, cj); }
+    m.position.set(ci * CS + dx, y, cj * CS + dz);
+  };
+  m.userData.invalidate = () => { kx = 1e9; };
+  m.userData.cell = (i, j) => cell(i, j);
+  m.userData.cellSize = () => CS;
   m.userData.triangles = () => nv / 3;
-  m.userData.setCoverage = q => { if (setMask(Math.round(q * 20) / 20)) kx = 1e9; };
+  m.userData.setCoverage = q => {
+    q = Math.round(q * 20) / 20;
+    if (setMask(q)) kx = 1e9;
+    if (cloudSorted) { const t = q >= 1 ? Infinity : cloudSorted[Math.min(4095, Math.floor(4096 * q))]; if (t !== pThr) { pThr = t; if (planet) kx = 1e9; } }
+  };
   return m;
+}
+
+// The sun's path on the planet: east to west in true directions (as 1.3's sun runs along +x, which is east at face 4's centre), so
+// it doesn't swing round when the player crosses an edge that turns the grid. One global clock: the sun's height is the same
+// everywhere at a given time of day (spec r14-20). Returns the yaw from the face's +x axis to local east (0 off the planet).
+const sf = {};
+function planetSunYaw(cam) {
+  const P = BF.planet;
+  if (!P || !P.isPlanet()) return 0;
+  const f = P.face(cam.position.x, cam.position.z);
+  if (f < 0) return sunYaw;
+  const N = P.N, u = cam.position.x - P.W * f - N, v = cam.position.z - N;
+  P.frame(f, u, v, cam.position.y, sf);
+  const up = sf.up, ex = up[2], ez = -up[0];   // east = pole axis x up
+  if (Math.hypot(ex, ez) < 1e-6) return sunYaw;   // at a pole: keep the last heading
+  const g = P.toGrid([ex, 0, ez], sf);
+  return (sunYaw = Math.atan2(-g[1], g[0]));
+}
+// Clouds on the planet: the drift D slides by the local wind in the camera's face frame and is turned with the frame at an edge.
+const wf = {}, ws = [0, 0, 0];
+function planetCloudSync(cam, dt) {
+  const P = BF.planet, x = cam.position.x, z = cam.position.z, f = P.face(x, z), N = P.N, CS = PCELL;
+  if (planetFace >= 0 && f !== planetFace) {
+    const e = P.UNFOLD[planetFace][f];
+    if (e) {   // u_g = A^T (U_f - t): directions turn by A^T
+      const A = e.A, dx = planetD[0], dz = planetD[1];
+      planetD[0] = A[0] * dx + A[2] * dz; planetD[1] = A[1] * dx + A[3] * dz;
+    }
+  }
+  planetFace = f;
+  if (dt > 0) {
+    const u = x - P.W * f - N, v = z - N, y = cloudY;
+    P.pos(f, u, v, y, ws);
+    P.frame(f, u, v, y, wf);
+    const w = CLOUD_WIND / P.R;   // the field's turn rate (radians a second); velocity = w (pole axis x position)
+    const g = P.toGrid([w * ws[2], 0, -w * ws[0]], wf);
+    planetD[0] += g[0] * dt; planetD[1] += g[1] * dt;
+  }
+  planetD[0] = ((planetD[0] % CS) + CS) % CS; planetD[1] = ((planetD[1] % CS) + CS) % CS;
+  clouds.userData.syncPlanet(x, z, f, planetD[0], planetD[1], cloudY);
 }
 
 const sky = {
@@ -276,6 +386,12 @@ const sky = {
   setTime(t) { sky.time = ((t % 1) + 1) % 1; if (scene) sky.update(0); },
 
   get cloudY() { return cloudY; },   // alias of cloudHeight
+  // tests and the debug screen: cloud cover at a cell of the current window, the cell size, and the planet drift
+  cloudCell(i, j) { return clouds.userData.cell(i, j); },
+  get cloudCellSize() { return clouds.userData.cellSize(); },
+  get cloudMesh() { return clouds; },
+  planetDrift: planetD,
+  get sunYaw() { return celestial ? celestial.rotation.y : 0.35; },   // the sun path's heading in the face frame (0.35 at face 4's centre)
 
   HOUR, DUSK_LEN,
   SUNSET: 0.5,
@@ -318,6 +434,7 @@ const sky = {
     const cam = BF.camera;
     root.position.copy(cam.position);
     celestial.rotation.z = a;
+    celestial.rotation.y = 0.35 + planetSunYaw(cam);
     root.updateMatrixWorld(true);
     sun.getWorldPosition(tmpV).sub(cam.position).normalize();
 
@@ -367,8 +484,11 @@ const sky = {
     const cover = wanted + (1 - wanted) * wr;
     const rise = smooth(0.4, 0.9, vnoise(T / 2.1 + 31.7, cs + 1)) * CLOUD_RISE * (1 - 0.8 * wr);
     sky.cloudCover = cover; sky.cloudHeight = cloudY = sky.cloudBase + rise;
+    const onPlanet = !!(BF.planet && BF.planet.isPlanet() && BF.planet.face(cam.position.x, cam.position.z) >= 0);
+    if (onPlanet) planetClouds();
     clouds.userData.setCoverage(cover < 0.06 ? 1 : 0.96 - 0.62 * cover);
-    clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift, cloudY);
+    if (onPlanet) planetCloudSync(cam, dt);
+    else { planetFace = -1; clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift, cloudY); }
     const cu = clouds.material.uniforms;
     cu.cam.value.set(cam.position.x - clouds.position.x, cam.position.z - clouds.position.z);
     cloudCol.copy(CLOUD_NIGHT).lerp(CLOUD_DAY, dayness).lerp(tmpC.copy(CLOUD_DUSK).multiplyScalar(0.25 + 0.75 * dayness), dusk * 0.45);
