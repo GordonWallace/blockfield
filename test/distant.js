@@ -79,8 +79,9 @@ module.exports = async (pg, out) => {
       };
       // until every shown ring is built and nothing is queued
       window.ringsDone = async (maxS) => {
-        const t0 = performance.now();
-        await new Promise((r) => setTimeout(r, 400));   // a few frames: the rings see where the player is now
+        const t0 = performance.now(), f0 = BF.lod.frames || 0;
+        // a few frames first, so the rings see where the player is now (a fast machine can otherwise find the old rings all built)
+        while ((BF.lod.frames || 0) < f0 + 3 && performance.now() - t0 < maxS * 1000) await new Promise((r) => setTimeout(r, 100));
         for (;;) {
           const s = BF.lod.stats();
           if (s.rings.every((r) => !r.show || (r.built && !r.building)) && s.pending === 0) return (performance.now() - t0) / 1000;
@@ -171,6 +172,7 @@ module.exports = async (pg, out) => {
       const m2 = await pg.evaluate((r) => cover(r), r);
       if (m2) await savePng("corner" + h);
       await pg.screenshot({ path: `${out}-corner${h}.png` });
+      if (m0 || m1 || m2) console.log("rings:", await pg.evaluate(() => { const s = BF.lod.stats(), V = BF.lod.view; return JSON.stringify({ view: [V.f, Math.round(V.u), Math.round(V.v)], above: Math.round(s.above), eye: s.eyeHole, rings: s.rings.map((r) => [r.f, r.cu, r.cv, r.show, r.built, r.building, r.tris]) }); }));
       check(m0 === 0 && m1 === 0 && m2 === 0, `a step across a cube corner at ${h} up leaves nothing uncovered (${[m0, m1, m2].map((m) => (m * 100).toFixed(2) + "%").join(", ")})`);
     }
 

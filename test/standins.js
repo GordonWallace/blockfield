@@ -32,8 +32,8 @@ module.exports = async (pg, out) => {
       // and the test works (as the frame loop moves the rings on), and shown for the screenshots.
       window.standIns = (on) => { window.__stand = on; for (const L of BF.lod.levels) if (L.si) L.si.material.visible = on; };
       window.ringsDone = async (maxS) => {
-        const t0 = performance.now();
-        await new Promise((r) => setTimeout(r, 400));
+        const t0 = performance.now(), f0 = BF.lod.frames || 0;
+        while ((BF.lod.frames || 0) < f0 + 3 && performance.now() - t0 < maxS * 1000) await new Promise((r) => setTimeout(r, 100));   // (the rings see the new place)
         for (;;) {
           standIns(false);
           const s = BF.lod.stats();
