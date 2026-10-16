@@ -771,7 +771,10 @@ function ground3(x, z) {
 // from the coast inland is what gathers tributaries into trunk rivers. A node is sea where the ground is ocean floor (climate3's rule).
 // Ground is ground3, the height before rivers. Both read the raw fields (exact, and no lattice cache filled with scattered points);
 // K and G3S are kept, since ground is also sampled lazily from inside climate3 (a river's full profile is read on first use).
-let PRIV = null, PSOLVE = null, PSEED = null;
+let PRIV = null, PSOLVE = null, PSEED = null;   // (PSEED: the network's key, seed and biome size, which both shape the terrain)
+// networks solved earlier in this session, by key, most recent last: switching back to one of the last few worlds (the title screen,
+// tests) doesn't solve it again (each is about 50 MB, so two besides the current one)
+const PCACHE = new Map(), PCACHE_N = 2;
 const RIM = 6;   // a lake's rim is raised by at most this much (lower ground past it stays: rare, where a gap runs on below the water)
 const RT = { e: 0, hf: 0, land: 0, rain: 0, elat: 0 }, RG = {}, RA = {}, KSV = {}, GSV = {};
 // The river samplers skip the plateau weights at sea (continentalness up to -0.13, where relief3's land weight is 0 and the weights
@@ -3004,7 +3007,13 @@ BF.worldgen = {
       N2 = S.N2; FB = S.FB; WARP = S.WARP; C3 = S.C3;
     }
     if (GEN === 3) placeHome3();
-    if (!PLANET || PSEED !== n.seed) { PRIV = null; PSOLVE = null; PSEED = PLANET ? n.seed : null; TAPE = null; TMODE = 0; }   // (a network solved for this seed is kept)
+    const pkey = PLANET ? n.seed + ":" + SC : null;
+    if (pkey !== PSEED) {   // (a network solved for this seed and biome size is kept)
+      const c = pkey !== null ? PCACHE.get(pkey) : null;
+      if (c) PCACHE.delete(pkey);
+      if (PRIV && PSEED !== null) { PCACHE.set(PSEED, { net: PRIV, tape: TAPE }); while (PCACHE.size > PCACHE_N) PCACHE.delete(PCACHE.keys().next().value); }
+      PRIV = c ? c.net : null; TAPE = c ? c.tape : null; PSOLVE = null; PSEED = pkey; TMODE = 0;
+    }
     C.lk = 0; BF.rivers.usePlanet(PLANET ? planetRivers : null);
     if (PLANET) { /* the planet's rivers: planetRivers(), solved the first time they are needed */ }
     else if (GEN === 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });

@@ -7,7 +7,7 @@
 //  - ground: frame cost standing in the boot world's nearest village, at ground level, for 15 s;
 //  - fly300 / fly2000: frame cost flying forward (creative, W held) 300 and 2,000 blocks above the ground, for 20 s;
 //  - planet: frame cost 60,000 blocks up (the whole planet in view; generator 4 only);
-//  - sim: simulation speed at the top time warp in that village (window 320 x 200): game seconds per real second, villages loaded counted;
+//  - sim: simulation speed at the top time warp in that village, with nothing drawn: game seconds per real second, villages loaded counted;
 //  - mem: JS heap after `--min` minutes of flight 300 blocks up (default 10).
 // Frame cost is the time spent inside each requestAnimationFrame callback (the game's whole frame: simulation, chunk work, drawing
 // calls), so it doesn't depend on vsync; mean, 95th percentile, frames counted and frames per second (window 640 x 360). Headless Chromium draws with SwiftShader (the CPU),
@@ -52,7 +52,9 @@ const stats = a => {
   await pg.addInitScript(() => {   // frame cost: time inside each animation-frame callback
     const raf = window.requestAnimationFrame.bind(window);
     window.__ft = []; window.__ftOn = false;
-    window.requestAnimationFrame = cb => raf(t => { const s = performance.now(); try { cb(t); } finally { if (window.__ftOn) window.__ft.push(performance.now() - s); } });
+    // only the game's own loop (main.js, the one that updates the world) counts: audio and other modules run their own
+    const isGame = new WeakMap(), game = cb => { let g = isGame.get(cb); if (g === undefined) isGame.set(cb, g = /BF\.world\.update\(/.test(String(cb))); return g; };
+    window.requestAnimationFrame = cb => raf(t => { if (!game(cb)) return cb(t); const s = performance.now(); try { cb(t); } finally { if (window.__ftOn) window.__ft.push(performance.now() - s); } });
   });
   const res = { root, version: null, hash: HASH, when: new Date().toISOString() };
   const boot = async () => {
@@ -144,18 +146,28 @@ const stats = a => {
   }
   if (only.includes("sim")) {
     await pg.setViewportSize(SIMW);
+    let cdp = null;
+    if (process.env.PERF_PROFILE) { cdp = await pg.context().newCDPSession(pg); await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 500 }); await pg.evaluate(() => { window.__simProbe = () => console.log("probe"); }); setTimeout(() => cdp.send("Profiler.start"), 6000); }
     const r = await pg.evaluate(async () => {
+      // the simulation alone: nothing drawn (headless drawing is so slow it would set the pace, which a real GPU doesn't)
       const W = BF.warp;
+      BF.scene.visible = false;
       W.set(W.SPEEDS.length - 1);
       await new Promise(r => setTimeout(r, 5000));   // warm up
+      if (window.__simProbe) window.__simProbe();
       const s0 = BF.simNow(), t0 = performance.now();
+      window.__ft = []; window.__ftOn = true;
       await new Promise(r => setTimeout(r, 30000));
+      window.__ftOn = false;
       const sim = BF.simNow() - s0, wall = (performance.now() - t0) / 1000;
+      const busy = window.__ft.reduce((a, b) => a + b, 0) / 1000;   // time inside the game's frames (the simulation is most of it)
       W.set(0);
+      BF.scene.visible = true;
       const st = BF.villageSim && BF.villageSim.status ? BF.villageSim.status() : "";
-      return { speed: +(sim / wall).toFixed(1), top: W.SPEEDS[W.SPEEDS.length - 1], villages: +(/^(\d+)/.exec(st) || [0, 0])[1], status: st, mobs: BF.mobs.list.length };
+      return { speed: +(sim / wall).toFixed(1), fps: +(window.__ft.length / wall).toFixed(1), inFrames: +(busy / wall).toFixed(2), top: W.SPEEDS[W.SPEEDS.length - 1], villages: +(/^(\d+)/.exec(st) || [0, 0])[1], status: st, mobs: BF.mobs.list.length };
     });
     await pg.setViewportSize(VW);
+    if (cdp) { const { profile } = await cdp.send("Profiler.stop"); fs.writeFileSync(process.env.PERF_PROFILE, JSON.stringify(profile)); }   // PERF_PROFILE=out.cpuprofile: the page's profile during the sim run
     res.sim = r;
     console.log("sim", JSON.stringify(r));
   }
