@@ -1372,11 +1372,12 @@ function isOccupied(x, y, z) {
   if (playerAlive() && hit(seen(c, player().position, _sA), 0.3, 1.8)) return true;
   return list.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
 }
-// Villagers open closed doors just ahead on their route and close the ones they opened once clear of them.
+// Villagers open closed doors just ahead on their route, and the one they stand in (spawned or scattered into a doorway: its panel would hold
+// them there for good), and close the ones they opened once clear of them.
 function villagerDoors(m) {
   const ai = m.ai, W = BF.world;
-  if (ai.route && !m.sleeping) for (let k = ai.ri; k < Math.min(ai.route.length, ai.ri + 2); k++) {
-    const [x, y, z] = ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
+  if (ai.route && !m.sleeping) for (let k = ai.ri - 1; k < Math.min(ai.route.length, ai.ri + 2); k++) {
+    const [x, y, z] = k < ai.ri ? feetCell(m) : ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
     if (d && !d.open && Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.7) {
       if (bk.gate) W.setGate(x, y, z, true); else W.setDoor(x, y, z, true);
       (ai.doors || (ai.doors = [])).push([x, y, z]);
