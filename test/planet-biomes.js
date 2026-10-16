@@ -1,15 +1,15 @@
 // @ci baseline suite=world
 // The planet's climate bands and biomes (spec r14-09), plain node, no browser: node test/planet-biomes.js
 // On two seeds (tools/planet-map.js survey: shares sampled evenly over the sphere with the full generator, plus a search for each biome):
-//  - every biome Blockfield 1.3 has (ids 0 to 28) occurs, and so does Frozen Ocean (29). River (4) is the exception until the planet has
-//    rivers (r14-10), which should then add it here.
+//  - every biome Blockfield 1.3 has (ids 0 to 28) occurs, River (4) included since the planet has rivers (r14-10), and so does Frozen
+//    Ocean (29)
 //  - each village biome (Plains, Savanna, Desert, Snowy Plains, Taiga, Meadow) covers at least 1% of land
 //  - the bands guide the biomes: the arctic's land is snowy country, the tropics have no snowy lowlands, the temperate band is mostly
 //    plains and forests
 const { survey } = require("../tools/planet-map.js");
 let fails = 0;
 const ok = (c, msg) => { if (!c) { fails++; console.log("FAIL " + msg); } else console.log("ok " + msg); return c; };
-const LATER = [4];   // River: r14-10
+const LATER = [];   // biomes the planet doesn't have yet (none since r14-10 brought River)
 const VILLAGE = [5, 14, 12, 19, 17, 22];
 for (const seed of [1337, 42]) {
   const t0 = Date.now(), s = survey(seed), NM = s.names;

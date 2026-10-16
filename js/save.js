@@ -155,10 +155,13 @@ const save = {
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
     const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 4, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, created: now, lastPlayed: now };
-    BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
-    save.current = meta;
-    BF.emit("worldLoaded", meta);
-    return save.saveNow().then(() => meta);
+    const start = () => {
+      BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
+      save.current = meta;
+      BF.emit("worldLoaded", meta);
+      return save.saveNow().then(() => meta);
+    };
+    return meta.gen === 4 ? BF.prepareWorld(seed, 4).then(start) : start();   // (the planet works out its rivers first)
   },
 
   // Loads a saved world by id. Resolves to its meta.
@@ -166,6 +169,9 @@ const save = {
     return tx(["worlds", "data"], "readonly", t => Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(t.objectStore("data").get(id))]))
       .then(([meta, data]) => {
         if (!meta || !data) throw new Error("World not found");
+        return BF.prepareWorld(data.seed, data.gen || 1).then(() => [meta, data]);   // (the planet works out its rivers first)
+      })
+      .then(([meta, data]) => {
         restore(data);
         meta.lastPlayed = Date.now();
         save.current = meta;

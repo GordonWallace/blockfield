@@ -7,6 +7,7 @@
 // Generator 3 (opts.planar, opts.wcap) keeps the network free of downstream splits: links never cross, and nodes on a lake's spill route
 // follow it; a river's width is the sum of the widths of the sources above it (so it widens at each confluence), up to wcap.
 // API: BF.rivers = { init(noise, macro, opts), at(x, z, out) -> bool }; macro(x, z, o) must fill o.p (height) and o.c (continentalness).
+// On the planet, usePlanet(network) makes at() read js/planetrivers.js's network instead.
 (() => {
 "use strict";
 const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
@@ -28,6 +29,7 @@ let nodes, edges, cells, traced, ensured, tmp;
 
 function init(n, macroFn, opts) {
   const o = opts || {};
+  PNET = null;
   noise = n; macro = macroFn; SEA = o.sea != null ? o.sea : (BF.SEA != null ? BF.SEA : 48); density = o.density != null ? o.density : 0.03;
   NS = o.ns || 96; NMAX = o.nmax || 80; REACH = o.reach || 34; W0 = o.w0 != null ? o.w0 : 1.6; W1 = o.w1 != null ? o.w1 : 4.6;
   WLO = o.wlo != null ? o.wlo : 2; WHI = o.whi || 95; SLO = o.slo != null ? o.slo : 15; SHI = o.shi || 85; HS = o.hs || 1; MARG = o.marg || 74;
@@ -319,6 +321,7 @@ function exact(e, tw, x, z) {
 // Returns false when no river is within REACH blocks of the bank.
 function at(x, z, out) {
   if (!enabled) return false;
+  if (PNET) return planetAt(x, z, out);
   ensure(x, z);
   const l = cells.get(Math.floor(x / CELL) * 4194304 + Math.floor(z / CELL));
   if (!l) return false;
@@ -356,7 +359,38 @@ function at(x, z, out) {
   return true;
 }
 
+// The planet (generator 4): the whole-planet network of js/planetrivers.js, solved once per world, answers instead. Atlas columns are
+// looked up at the centre of the canonical cell they show, so a column reads the same river through either face of an edge.
+let PNET = null;   // a function returning the network (solving it on first use)
+const PC = {}, PR = { d: 0, w: 0, rs: 0, li: -1 };
+function usePlanet(net) {
+  PNET = net || null;
+  if (PNET) BF.rivers.REACH = REACH = BF.planetRivers.REACH;
+}
+function planetAt(x, z, out) {
+  const c = BF.planet.canon(x + 0.5, z + 0.5, PC);
+  if (c.off) return false;
+  const r = PNET().at(c.f, c.u, c.v, PR);
+  if (r.li < 0 || r.d - r.w > REACH) return false;
+  out.d = r.d; out.w = r.w; out.rs = r.rs; out.sd = r.d - r.w;
+  return true;
+}
+
+// The water level of the planet's lake at or next to atlas column (x, z), or -1 (the column holds water only where its ground is below it).
+function lakeAt(x, z) {
+  if (!PNET || !enabled) return -1;
+  const c = BF.planet.canon(x + 0.5, z + 0.5, PC);
+  return c.off ? -1 : PNET().lakeAt(c.f, c.u, c.v);
+}
+
+// The level of a planet lake whose drawn water ends just short of atlas column (x, z), or -1 (see planetrivers.js lakeRim).
+function lakeRim(x, z) {
+  if (!PNET || !enabled) return -1;
+  const c = BF.planet.canon(x + 0.5, z + 0.5, PC);
+  return c.off ? -1 : PNET().lakeRim(c.f, c.u, c.v);
+}
+
 // setEnabled(false) makes at() report no river (used by overview maps wider than a few km, where a river is under a pixel and tracing the whole
 // network would cost seconds and hundreds of MB); it does not change what is cached, so chunk generation is unaffected.
-BF.rivers = { init, at, setEnabled(v) { enabled = !!v; }, REACH, _debug: () => ({ stats: STATS, nodes: nodes.size, edges: edges.size, cells: cells.size }), _internals: () => ({ nodes, cells }) };
+BF.rivers = { init, at, lakeAt, lakeRim, usePlanet, planet: () => (PNET ? PNET() : null), setEnabled(v) { enabled = !!v; }, REACH, _debug: () => ({ stats: STATS, nodes: nodes.size, edges: edges.size, cells: cells.size }), _internals: () => ({ nodes, cells }) };
 })();
