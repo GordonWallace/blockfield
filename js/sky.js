@@ -9,7 +9,7 @@ const BF = (window.BF = window.BF || {});
 
 const C = h => new THREE.Color(h);
 const DAY_TOP = C("#5d93ef"), DAY_HOR = C("#b6d2f5");
-const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328");
+const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328"), SPACE = C("#05070f");
 const DUSK_HOR = C("#f08a50"), DUSK_GLOW = C("#ff7a3c"), DUSK_PINK = C("#d86a86");
 const CLOUD_DAY = C("#ffffff"), CLOUD_NIGHT = C("#1c2234"), CLOUD_DUSK = C("#f6b49a");
 
@@ -270,6 +270,9 @@ const sky = {
     celestial.add(sun, moon, stars);
     root.add(dome, celestial);
     scene.add(root, clouds);
+    // the dome follows the camera every frame, also while paused or when the camera moves fast (high up on the planet the view
+    // climbs hundreds of blocks a frame, and a dome left behind shows as a sphere)
+    if (BF.view) BF.view.onBegin(() => { if (BF.camera) root.position.copy(BF.camera.position); });
     sky.update(0);
   },
 
@@ -314,6 +317,9 @@ const sky = {
       horizon.lerp(tmpC.setRGB(wg * 1.12, wg * 1.15, wg * 1.2), wr * 0.88);
     }
     if (wf > 0) { zenith.lerp(tmpC.setRGB(0.75, 0.8, 0.95), wf * 0.55); horizon.lerp(tmpC.setRGB(0.85, 0.88, 1), wf * 0.65); }
+    // high above the planet the sky fades to space (js/view.js: 3,000 to 60,000 blocks above the ground)
+    const space = BF.view && BF.view.spaceFade ? BF.view.spaceFade() : 0;
+    if (space > 0) { zenith.lerp(SPACE, space); horizon.lerp(SPACE, space); }
 
     const cam = BF.camera;
     root.position.copy(cam.position);
@@ -353,7 +359,7 @@ const sky = {
     moon.material.opacity = (0.25 + 0.75 * smooth(-0.02, 0.15, -sh)) * (1 - wr);
     moon.visible = sh < 0.25 && wr < 0.99;
     sun.visible = sh > -0.15 && wr < 0.99;
-    const so = (1 - smooth(0.05, 0.45, dayness)) * (1 - wr);   // stars come out as dusk darkens
+    const so = Math.max((1 - smooth(0.05, 0.45, dayness)) * (1 - wr), space);   // stars come out as dusk darkens, and in space
     stars.material.uniforms.opacity.value = so;
     stars.material.uniforms.size.value = Math.max(1, Math.round(BF.renderer.getPixelRatio() * 2));
     stars.visible = so > 0.01;
