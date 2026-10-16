@@ -48,6 +48,10 @@ The eight corners of the cube are always open sea. Each seed's continents are tu
 
 Climate follows latitude. Five bands run from the equator to the poles: tropical, subtropical, temperate, subarctic and arctic. Their edges wander, high ground is colder, and now and then a biome turns up a band away from home. The arctic seas freeze over (Frozen Ocean). See [[page:biomes]] for which biomes each band holds.
 
+## Rivers and lakes
+
+The planet's rivers are worked out for the whole world at once when it starts (the loading screen shows **Working out the rivers and lakes** for several seconds). Every river runs down to the sea or into a lake, never crosses another and never splits, and lakes sit in inland hollows and highland basins, each with one river flowing out. See [[page:rivers]].
+
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. There are no rivers or villages yet. Flying high you only see the patch of ground around you for now: the distant land and the whole globe below are still to come.
+The planet is being brought into the game step by step. There are no villages yet. Flying high you only see the patch of ground around you for now: the distant land and the whole globe below are still to come.

@@ -206,7 +206,8 @@ function rawFields2(x, z) {
     const LL = 12000 * q;
     K.p = FB(x, z, LL, 905.1, -311.3, 2);
     K.pm = 0; K.mt = 0;
-    limWeights(x, z);     // K.sp plateau weight, K.mp massif weight, K.lo low-plateau weight (all slope limited)
+    if (OPEN_SEA && K.c <= -0.13) K.sp = K.mp = K.lo = 0;   // (open sea: relief3 doesn't read them there, see riverCol)
+    else limWeights(x, z);     // K.sp plateau weight, K.mp massif weight, K.lo low-plateau weight (all slope limited)
   }
 }
 const CONT_L = 14000;    // continent wavelength at biome scale 1
@@ -245,8 +246,10 @@ function contRaw3(x, z) {
 // Pure function of the seed: nodes are cached, any order gives the same values.
 const CG = 320, SL_P = 1 / 6000, SL_M = 1 / 2600, SL_L = 1 / 2600, LIM_R = Math.ceil(6000 / CG);
 const CRAW = new Map(), CLIM = new Map(), CLIS = new Map();
+// cache key of coarse node (i, j); on the planet (i < 2^14, j within -256 .. 3840) a small integer, which maps hash much faster
+const ckey = (i, j) => (PLANET ? i * 4096 + j + 256 : i * 1048576 + j);
 function nodeRaw(i, j) {
-  const k = i * 1048576 + j; let v = CRAW.get(k);
+  const k = ckey(i, j); let v = CRAW.get(k);
   if (v === undefined) {
     if (CRAW.size > 400000) CRAW.clear();
     const x = i * CG, z = j * CG, q = Math.sqrt(SC);
@@ -269,7 +272,7 @@ const LIM_OFF = (() => {
 })();
 // pass 1: plateau and low-plateau weights
 function nodeLimS(i, j) {
-  const k = i * 1048576 + j; let v = CLIS.get(k);
+  const k = ckey(i, j); let v = CLIS.get(k);
   if (v === undefined) {
     if (CLIS.size > 400000) CLIS.clear();
     const r0 = nodeRaw(i, j);
@@ -289,7 +292,7 @@ function nodeLimS(i, j) {
 // pass 2: massifs only start where the plateau is (nearly) complete, so their flanks never add to an escarpment
 const mRaw = (i, j) => { const r = nodeRaw(i, j)[1]; return r > 0 ? r * smooth(0.85, 1.0, nodeLimS(i, j)[0]) : 0; };
 function nodeLim(i, j) {
-  const k = i * 1048576 + j; let v = CLIM.get(k);
+  const k = ckey(i, j); let v = CLIM.get(k);
   if (v === undefined) {
     if (CLIM.size > 200000) CLIM.clear();
     const s = nodeLimS(i, j);
@@ -379,7 +382,7 @@ function fields(x, z) {
 
 // Full column climate. Writes into C (no allocation) and returns the terrain surface height.
 // C.wl is the water level of the column (sea level, or the surface of a v2 river), C.rv is 1 inside a river channel and its banks.
-const C = { S: 0, h: 0, t: 0, hu: 0, c: 0, e: 0, wd: 0, m: 0, rf: 0, sw: 0, bw: 0, mi: 0, biome: 0, tb: 0, hb: 0, wl: 48, rv: 0 };
+const C = { S: 0, h: 0, t: 0, hu: 0, c: 0, e: 0, wd: 0, m: 0, rf: 0, sw: 0, bw: 0, mi: 0, biome: 0, tb: 0, hb: 0, wl: 48, rv: 0, lk: 0 };
 const climate = (x, z) => (GEN >= 3 ? (PLANET ? climateP(x, z) : climate3(x, z)) : GEN >= 2 ? climate2(x, z) : climate1(x, z));
 // The planet: a margin address (the unfolded neighbouring face) is the canonical cell it shows, so a column is the same whichever face's
 // frame asks for it. Outside every face square there is nothing: deep sea.
@@ -421,7 +424,7 @@ function climateP(x, z) {
   const c = BF.planet.canonCell(x, z, CCELL);
   if (!c.off) return climate3(c.x, c.z);
   C.h = BF.MIN_Y + 6; C.t = C.hu = C.e = C.wd = C.m = C.rf = C.sw = C.bw = C.mi = C.rv = C.S = 0; C.c = -1.4;
-  C.biome = OCEAN; C.tb = 2; C.hb = 2; C.wl = BF.SEA;
+  C.biome = OCEAN; C.tb = 2; C.hb = 2; C.wl = BF.SEA; C.lk = 0;
   return C.h;
 }
 function climate1(x, z) {
@@ -667,13 +670,14 @@ function macro3(x, z, o) {
   o.p = ceil3(relief3(x, z, true).h);
   o.c = K.c / 2.5;   // the river network's continentalness thresholds were tuned for the v2 contrast (cont3 is 2.5x steeper)
 }
-function climate3(x, z) {
-  const SEA = BF.SEA, MINY = BF.MIN_Y;
-  fields(x, z);
-  const { t, hu, c, e, wd } = K;
+// Ground height before rivers (K must hold the fields at x, z): relief3 plus badlands mesas, swamps and mushroom islands. Writes the
+// weights climate3 goes on with into G3S.
+const G3S = { m: 0, land: 0, hills: 0, S: 0, bw: 0, sw: 0, mi: 0 };
+function ground3(x, z) {
+  const SEA = BF.SEA;
+  const { t, hu, c, wd } = K;
   const R = relief3(x, z, true), m = R.m, land = R.land, hills = R.hills, S = R.S;
   let h = R.h;
-  const wet = smooth(-0.35, 0.45, hu);
   // badlands mesas (hot, dry, weird): terraced bumps on top of the local ground
   const bw = smooth(0.26, 0.36, t) * (1 - smooth(-0.14, -0.04, hu)) * smooth(0.0, 0.18, wd) * land * (1 - m);
   if (bw > 0) {
@@ -691,11 +695,69 @@ function climate3(x, z) {
     mi = smooth(0.7, 0.8, N2(x, z, 520, 77.7, -55.5)) * smooth(-0.8, -0.95, c);
     if (mi > 0) h = lerp(h, SEA + 3 + hills * 7, mi);
   }
-  h = ceil3(h);
+  G3S.m = m; G3S.land = land; G3S.hills = hills; G3S.S = S; G3S.bw = bw; G3S.sw = sw; G3S.mi = mi;
+  return ceil3(h);
+}
+// The planet's rivers (js/planetrivers.js, spec r14-10): one drainage network for the whole planet, solved once per world the first time
+// a river is looked up (or by solveRivers, a step of the loading screen). Its samplers take a unit direction. Routing height is
+// relief3 without local hills plus 250 x continentalness (generator 3's phi = p + 150c, at the prototype's weight): the gentle rise
+// from the coast inland is what gathers tributaries into trunk rivers. A node is sea where the ground is ocean floor (climate3's rule).
+// Ground is ground3, the height before rivers. Both read the raw fields (exact, and no lattice cache filled with scattered points);
+// K and G3S are kept, since ground is also sampled lazily from inside climate3 (a river's full profile is read on first use).
+let PRIV = null, PSOLVE = null, PSEED = null;
+const RIM = 6;   // a lake's rim is raised by at most this much (lower ground past it stays: rare, where a gap runs on below the water)
+const RT = { e: 0, hf: 0, land: 0, rain: 0, elat: 0 }, RG = {}, RA = {}, KSV = {}, GSV = {};
+// The river samplers skip the plateau weights at sea (continentalness up to -0.13, where relief3's land weight is 0 and the weights
+// change nothing): most of the planet is sea, and its slope-limited grid would be most of the solve's time.
+let OPEN_SEA = false;
+function riverCol(dx, dy, dz) {
+  const P = BF.planet, g = P.fromDir(dx, dy, dz, RG);
+  P.atlas(g.f, g.u, g.v, RA);
+  OPEN_SEA = true;
+  try { rawFields2(Math.floor(RA.x), Math.floor(RA.z)); } finally { OPEN_SEA = false; }
+  return RA;
+}
+function riverSample(dx, dy, dz) {
+  Object.assign(KSV, K); Object.assign(GSV, G3S);
+  const a = riverCol(dx, dy, dz), x = Math.floor(a.x), z = Math.floor(a.z);
+  RT.hf = ground3(x, z);
+  RT.e = ceil3(relief3(x, z, false).h) + 250 * Math.max(0, K.c / 2.5);
+  RT.land = RT.hf < BF.SEA - 1 && K.c < -0.08 ? -1 : 1;
+  RT.rain = Math.max(0, K.hu / 1.1 + 0.37); RT.elat = K.el;
+  Object.assign(K, KSV); Object.assign(G3S, GSV);
+  return RT;
+}
+function riverGround(dx, dy, dz) {
+  Object.assign(KSV, K); Object.assign(GSV, G3S);
+  const a = riverCol(dx, dy, dz), h = ground3(Math.floor(a.x), Math.floor(a.z));
+  Object.assign(K, KSV); Object.assign(G3S, GSV);
+  return h;
+}
+// The network, solving it now if it isn't yet. solveRivers() solves it in slices instead: each call runs one slice and returns the
+// fraction done (1 when ready), for the loading screen (js/main.js prepareWorld, which may hand the first call the node samples, worked
+// out in workers).
+function planetRivers() {
+  if (PRIV) return PRIV;
+  while (solveRivers() < 1);
+  return PRIV;
+}
+function solveRivers(pre) {
+  if (PRIV) return 1;
+  if (!PSOLVE) PSOLVE = BF.planetRivers.steps(noise.seed, riverSample, riverGround, pre || null);
+  const r = PSOLVE.next();
+  if (r.done) { PRIV = r.value; PSOLVE = null; return 1; }
+  return Math.min(0.99, r.value);
+}
+function climate3(x, z) {
+  const SEA = BF.SEA, MINY = BF.MIN_Y;
+  fields(x, z);
+  const { t, hu, c, e, wd } = K;
+  let h = ground3(x, z);
+  const { m, land, S, bw, sw, mi } = G3S, h0 = h;
   // rivers: a valley floor at the water surface with a flat floodplain, blended into the surrounding terrain
-  let wl = SEA, rv = 0, chan = false;
+  let wl = SEA, rv = 0, chan = false, lake = false;
   const rl = Math.max(land, smooth(SEA - 3, SEA + 1, h));   // dry shore ground counts as land for rivers (outlets cut through coastal ridges)
-  if (rl > 0.3 && mi === 0 && !PLANET && BF.rivers.at(x, z, RV)) {   // (no rivers on the planet until r14-10)
+  if (rl > 0.3 && mi === 0 && BF.rivers.at(x, z, RV)) {
     const rs = Math.max(SEA, Math.floor(RV.rs)), sd = RV.sd, w = RV.w;
     let hr;
     if (sd < 0) { const q = RV.d / w; hr = rs - 1.4 - (3.2 + Math.min(4, Math.max(0, w - 7) * 0.15)) * (1 - q * q); }   // wide rivers run a little deeper
@@ -706,6 +768,15 @@ function climate3(x, z) {
     if (sd < 0 && fp > 0.9) { chan = true; wl = rs; if (h > rs - 1) h = rs - 1; }
     else if (sd < 3 && h < rs + 1 && h >= SEA - 1) h = rs + 1;   // banks, but no levees out into the sea (they would dam the mouth)
     if (sd < 6) rv = 1;
+  }
+  // the planet's lakes: water up to the lake's level wherever the ground (before river valleys were cut) is below it
+  if (PLANET && mi === 0 && h < BF.H) {
+    const lw = BF.rivers.lakeAt(x, z);
+    if (lw >= SEA && h0 < lw && h < lw) { lake = true; rv = 1; if (lw > wl) wl = lw; }
+    else if (lw < 0 && !chan) {   // just past the drawn water, ground a little below the lake is its rim, raised to the water
+      const rim = BF.rivers.lakeRim(x, z);
+      if (rim > SEA && h < rim && rim - h <= RIM) h = rim;
+    }
   }
   h = Math.floor(h);
   if (h < MINY + 6) h = MINY + 6; else if (h > BF.H - 6) h = BF.H - 6;
@@ -718,7 +789,7 @@ function climate3(x, z) {
   let b;
   if (mi > 0.5 && h >= SEA - 1) b = MUSHROOM;
   else if (h < SEA - 1 && c < -0.08) b = PLANET && tb === 0 ? FROZEN_OCEAN : OCEAN;   // (the planet's arctic seas)
-  else if (chan) b = RIVER;
+  else if (chan || lake) b = RIVER;
   else if (c < -0.03 + dj && h <= SEA + 2 && sw < 0.5) b = smooth(-0.18, -0.45, e) > 0.45 ? STONY_SHORE : tb === 0 ? SNOWY_BEACH : BEACH;
   else if (c < 0.0 && m > 0.25 && h <= SEA + 7) b = STONY_SHORE;
   else if (bw > 0.5 + dj * 2) b = BADLANDS;
@@ -741,7 +812,7 @@ function climate3(x, z) {
   }
 
   C.h = h; C.t = t; C.hu = hu; C.c = c; C.e = e; C.wd = wd; C.m = m; C.rf = chan ? 1 : 0; C.sw = sw; C.bw = bw; C.mi = mi;
-  C.biome = b; C.tb = tb; C.hb = hb; C.wl = wl; C.rv = rv; C.S = S;
+  C.biome = b; C.tb = tb; C.hb = hb; C.wl = wl; C.rv = rv; C.S = S; C.lk = lake ? 1 : 0;
   return h;
 }
 
@@ -751,6 +822,7 @@ function biomeAt(x, z) {
   let name = NAMES[id];
   if (id === FROZEN_OCEAN) name = (C.h < -30 ? "Deep " : "") + "Frozen Ocean";
   else if (id === OCEAN) name = (C.h < (GEN >= 3 ? -30 : 36) ? "Deep " : "") + ["Frozen ", "Cold ", "", "Lukewarm ", "Warm "][C.tb] + "Ocean";
+  else if (id === RIVER && C.lk) name = C.tb === 0 ? "Frozen Lake" : "Lake";   // (the planet's lakes)
   else if (id === RIVER && C.tb === 0) name = "Frozen River";
   return { name, id, height: C.h, temperature: +C.t.toFixed(2), humidity: +C.hu.toFixed(2) };
 }
@@ -2737,7 +2809,9 @@ BF.worldgen = {
       N2 = S.N2; FB = S.FB; WARP = S.WARP; C3 = S.C3;
     }
     if (GEN === 3) placeHome3();
-    if (PLANET) { /* rivers on the planet: r14-10 */ }
+    if (!PLANET || PSEED !== n.seed) { PRIV = null; PSOLVE = null; PSEED = PLANET ? n.seed : null; }   // (a network solved for this seed is kept)
+    C.lk = 0; BF.rivers.usePlanet(PLANET ? planetRivers : null);
+    if (PLANET) { /* the planet's rivers: planetRivers(), solved the first time they are needed */ }
     else if (GEN === 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
     LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); sandCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
@@ -2754,6 +2828,10 @@ BF.worldgen = {
   sandNear,
   isPlanet: () => PLANET,
   treesIn,
+  solveRivers: pre => (PLANET ? solveRivers(pre) : 1),   // the planet's river network, one slice per call: the fraction done (1: ready); pre: node samples (riverNodes) for the first call
+  riversReady: () => !PLANET || !!PRIV,
+  riverNodes: (from, to, out) => BF.planetRivers.nodeSamples(noise.seed, riverSample, from, to, out),   // the network's terrain samples (js/riverworker.js)
+  planetRivers: () => (PLANET ? planetRivers() : null),
   bandAt: (x, z) => (climate(Math.floor(x), Math.floor(z)), C.tb),   // climate band of a column (0 coldest .. 4 hottest), after altitude
   NAMES,
   recordBuilding,

@@ -60,6 +60,65 @@ BF.newWorld = function (seed, opts) {
   BF.emit("newWorld", BF.state.seed);
 };
 
+// The planet's rivers and lakes are worked out for the whole planet before its world starts (js/planetrivers.js, spec r14-10): several
+// seconds, once per seed per session. prepareWorld(seed, gen) runs that in slices behind a loading screen with progress and resolves
+// when it's done (at once for other generators); newWorld then finds the network ready. newWorld on its own still works (it solves the
+// network in one go, as tests do).
+BF.prepareWorld = function (seed, gen) {
+  if ((gen | 0) !== 4) return Promise.resolve();
+  BF.state.gen = 4;
+  BF.worldgen.init(BF.makeNoise(seed >>> 0), { gen: 4, villages: BF.state.villages || 10 });
+  if (BF.worldgen.riversReady()) return Promise.resolve();
+  const el = document.createElement("div");
+  el.id = "bf-loading";
+  el.style.cssText = "position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;" +
+    "background:#0e1310;color:var(--ink);font:13px var(--mono)";
+  el.innerHTML = '<div style="font:18px var(--display);color:var(--accent)">Blockfield</div><div class="t">Working out the rivers and lakes</div>' +
+    '<div style="width:260px;height:8px;border:1px solid var(--panel-edge);border-radius:2px"><div class="b" style="height:100%;width:0;background:var(--accent)"></div></div>';
+  document.body.appendChild(el);
+  BF.preparing = true;   // the frame loop waits (the old world is gone: worldgen is the planet's now)
+  const bar = el.querySelector(".b"), t = el.querySelector(".t");
+  const show = f => { bar.style.width = Math.round(f * 100) + "%"; t.textContent = "Working out the rivers and lakes · " + Math.round(f * 100) + "%"; };
+  // the terrain at the network's nodes (the slow first part) in a few workers at once where the page may start them (served over
+  // http, as run.sh does; a page opened as a file can't), else here in slices with the rest
+  return riverWorkers(seed, show).then(pre => new Promise(resolve => {
+    let first = pre;
+    const step = () => {
+      const t0 = performance.now();
+      let f = 0;
+      do { f = BF.worldgen.solveRivers(first); first = null; } while (f < 1 && performance.now() - t0 < 60);
+      show(pre ? 0.4 + 0.6 * f : f);
+      if (f < 1) setTimeout(step, 0);
+      else { el.remove(); BF.preparing = false; resolve(); }
+    };
+    setTimeout(step, 30);
+  }));
+};
+function riverWorkers(seed, show) {
+  const K = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 1)), NN = 6 * BF.planetRivers.M * BF.planetRivers.M;
+  if (typeof Worker === "undefined" || !/^https?:$/.test(location.protocol)) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const pre = BF.planetRivers.newSamples(), workers = [];
+    let left = K, done = 0, failed = false;
+    const finish = ok => { workers.forEach(w => w.terminate()); resolve(ok ? pre : null); };
+    for (let k = 0; k < K; k++) {
+      let w;
+      try { w = new Worker("js/riverworker.js"); } catch (e) { failed = true; break; }
+      workers.push(w);
+      const from = Math.floor(NN * k / K), to = Math.floor(NN * (k + 1) / K);
+      w.onmessage = ev => {
+        const r = ev.data;
+        for (const a of ["e", "p", "sea", "rain"]) pre[a].set(r[a].subarray(r.from, r.to), r.from);
+        done += r.to - r.from; show(0.4 * done / NN);
+        if (--left === 0) finish(true);
+      };
+      w.onerror = ev => { console.warn("river worker failed, working the rivers out here instead", ev.message); if (!failed) { failed = true; finish(false); } };
+      w.postMessage({ seed: seed >>> 0, villages: BF.state.villages || 10, from, to });
+    }
+    if (failed) finish(false);
+  });
+}
+
 // ---------- debug overlay (F3) ----------
 const dbg = document.getElementById("debug");
 let showDebug = false;
@@ -111,6 +170,7 @@ BF.debugText = debugText;
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
+  if (BF.preparing) { last = now; return; }
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const p = BF.player.position;
@@ -169,6 +229,7 @@ BF.inventory.init();
 let seed = 1337;
 const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world, #seed1337gen3v9 one with village generator 9
 if (m) seed = +m[1];
-BF.newWorld(seed, m && (m[2] || m[3]) ? Object.assign(m[2] ? { gen: +m[2] } : {}, m[3] ? { villages: +m[3] } : {}) : undefined);
-requestAnimationFrame(frame);
+const startOpts = m && (m[2] || m[3]) ? Object.assign(m[2] ? { gen: +m[2] } : {}, m[3] ? { villages: +m[3] } : {}) : undefined;
+if (startOpts && startOpts.gen === 4) BF.prepareWorld(seed, 4).then(() => { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); });   // (the planet: rivers first)
+else { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); }
 })();

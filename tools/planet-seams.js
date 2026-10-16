@@ -12,7 +12,7 @@ const ROOT = path.join(__dirname, "..");
 function env(seed) {
   delete global.BF;
   global.window = global; global.THREE = {}; global.document = {};
-  for (const f of ["blocks.js", "noise.js", "planet.js", "planetgen.js", "rivers.js", "worldgen.js"])
+  for (const f of ["blocks.js", "noise.js", "planet.js", "planetgen.js", "rivers.js", "planetrivers.js", "worldgen.js"])
     vm.runInThisContext(fs.readFileSync(path.join(ROOT, "js", f), "utf8"), { filename: f });
   BF.CS = 16; BF.state = { gen: 4 }; BF.noise = BF.makeNoise(seed);
   BF.worldgen.init(BF.noise, { gen: 4, villages: 10 });

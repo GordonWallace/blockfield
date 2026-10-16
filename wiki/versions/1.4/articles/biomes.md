@@ -83,7 +83,7 @@ Meadows and cherry groves occur on the foothills of mountain massifs rather than
 | Beach | Sand over sandstone along ordinary coasts. |
 | Snowy Beach | The frozen-climate beach: sand, with snowy grass above the waterline. |
 | Stony Shore | Stone and gravel patches, on rugged coasts. |
-| River | A channel cut into the land with a bed of sand, clay and gravel; Frozen River in the frozen band (rivers also ice over in the cold band). See [[page:rivers]]. |
+| River | A channel cut into the land with a bed of sand, clay and gravel; Frozen River in the frozen band (rivers also ice over in the cold band). On the planet, lakes are River too and read as Lake or Frozen Lake. See [[page:rivers]]. |
 | Mushroom Fields | Low islands far out at sea. Surface [[item:mycelium]], giant red and brown mushrooms, mushrooms on the ground. |
 
 ## Mountain biomes

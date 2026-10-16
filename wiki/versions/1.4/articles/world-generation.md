@@ -41,7 +41,7 @@ Special biomes are laid over the climate map: beaches and stony shores where lan
 
 ## What is added to the land
 
-- **Rivers** start in the highlands and always run down to the sea. See [[page:rivers]].
+- **Rivers** always run down to the sea. On the planet they form one network over the whole world, with lakes in hollows and highland basins. See [[page:rivers]].
 - **Caves** thread through the rock below the surface and open to the air only in a few patches; **ores** and rock varieties are scattered by depth. See [[page:caves-and-ores]].
 - **Trees, flowers and other plants** are placed by biome, with flowers and grass growing in patches rather than evenly. See [[page:trees-and-plants]].
 - **Villages** are placed on flat land in six biomes. See [[page:villages]] and [[page:village-structures]].
