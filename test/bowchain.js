@@ -7,8 +7,8 @@
 //    plus what was made (arrows crafted, feathers from culls, string spun) minus what was used up (feathers in arrows, string in bows).
 // Surface gravel: the village the test uses (seed 1, -53,450) has no dry gravel on the surface, so the miner's only flint was gravel in the walls
 // of its shaft, which it reached late (day 8-10) or never, and it was underground whenever the fletcher could shop (the fletcher buys only from a
-// seller near its own level, before WORK_END: js/fletcher.js canSell). With its starting 4 flint used up the fletcher then bought flint only when
-// another villager happened to start with some (a random starting kit); in the other runs the check failed (every CI run of #332 and #344).
+// seller near its own level, before WORK_END: js/fletcher.js canSell). With its starting 4 flint used up the fletcher then seldom bought flint
+// unless another villager happened to start with some (a random starting kit), and the check failed (every CI run of #332 and #344).
 // The setup now lays GRAVEL blocks of gravel on open ground beside the village, as on a riverbank or scree: the miner digs them and sifts them
 // into flint on the surface (js/miner.js findGravel, sift), where the fletcher can buy it. The check itself is unchanged.
 // Usage: NODE_PATH=$(npm root -g) node test/bowchain.js [days=14] [seed=1]
