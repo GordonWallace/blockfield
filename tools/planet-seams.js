@@ -147,7 +147,7 @@ function run(seeds, ok, log) {
           const sb = blk(lx, hh, lz);
           samples++;
           if (sb === 0) airTops++;   // cave mouths may open the surface
-          else ok(solid(sb) || sb === B.ice, `${tag}: no solid block at heightAt ${hh} (${x},${z}) id ${sb}`);
+          else ok(solid(sb) || sb === B.ice || (sb === B.water && W.villagesNear(x, z, 70).length > 0), `${tag}: no solid block at heightAt ${hh} (${x},${z}) id ${sb}`);   // (a village well holds water at pad level)
           if (wl > hh) {
             const wet = id => id === B.water || id === B.ice || LOGS.has(id) || id === B.mangrove_leaves || id === B.packed_ice;
             ok(wl < hi * 16 && wet(blk(lx, wl, lz)), `${tag}: water level ${wl} not water at ${x},${z}`);

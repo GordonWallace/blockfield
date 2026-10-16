@@ -277,7 +277,7 @@ const rr = {};
 function distance(a, b) {
   if (!isPlanet()) return Math.hypot(b.x - a.x, b.z - a.z);
   const r = rel(a, b, rr);
-  if (r) { const d = Math.hypot(r.x - a.x, r.z - a.z); if (d <= LOCAL) return d; }
+  if (r) { const d = Math.hypot(r.x - ra.x, r.z - ra.z); if (d <= LOCAL) return d; }   // (ra: a canonical, as rel measures from it; a may be a margin address)
   if (ra.off || rb.off) return Infinity;
   return gridDistance(ra, rb);
 }
