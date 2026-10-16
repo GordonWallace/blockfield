@@ -28,6 +28,8 @@ Density (share of cells that hold a tree): Dark Forest and Jungle 92%, Birch For
 - **Ice spikes** of [[item:packed_ice]] stand in the Ice Spikes biome: slim ones 6 to 13 blocks tall and, rarely, towers up to about 31.
 - **Boulders** of mossy cobblestone (mostly) and cobblestone, about 3 blocks across, lie among the trees of Old Growth Taiga.
 
+On the planet each face has its own grid of cells, and a tree, bush or pumpkin patch belongs to the face its cell is on. One that stands at the edge between two faces is still whole: its crown reaches over onto the next face, turned with that face. Cells that the edge cuts through (the jungle bushes' 3-block grid and the melon patches' cells don't divide a face evenly) have nothing in them.
+
 ## Ground plants
 
 How common each plant is varies by biome. Placing is deterministic from the seed.
