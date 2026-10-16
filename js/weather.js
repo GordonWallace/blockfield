@@ -35,7 +35,8 @@ const SNOW_IDS = new Set([2, 19, 20, 21, 25, 26, 29]);   // snowy beach/plains, 
 const DRY_IDS = new Set([12, 13, 14]);               // desert, badlands, savanna
 const biomeCache = new Map();
 function biomeKind(x, z) {
-  const cx = x >> 2, cz = z >> 2, key = (cx + 40000) * 80000 + (cz + 40000);
+  // (planet atlas x reaches 2.9 million, so cx up to about 740,000: the key leaves 2^21 for each)
+  const cx = Math.floor(x / 4), cz = Math.floor(z / 4), key = (cx + 1048576) * 2097152 + (cz + 1048576);
   let k = biomeCache.get(key);
   if (k !== undefined) return k;
   const b = BF.worldgen && BF.worldgen.biomeAt ? BF.worldgen.biomeAt(cx * 4 + 2, cz * 4 + 2) : null;
@@ -410,21 +411,30 @@ function strike() {
     return;
   }
 }
+// On the planet (x, z) may be a margin address (a strike next to the player across a face edge): the bolt is drawn there, and
+// everything else (the event, lastStrike, who is hit) uses the canonical column. Distances go through BF.planet.rel.
+const sc = {}, sr = {};
 weather.strikeAt = function (x, y, z) {
   if (!bolt) init();
   buildBolt(x, y, z);
   boltT = BOLT_LIFE; flashT = 0;
   weather.strikes++;
+  const P = BF.planet, c = P ? P.canonCell(x, z, sc) : { x, z };
+  const at = { x: c.x + 0.5, z: c.z + 0.5 };
+  const near = (q) => {   // q's offset from the strike, in the strike's frame
+    const r = P ? P.rel(at, q, sr) : q;
+    return r ? Math.hypot(r.x - at.x, q.y - y, r.z - at.z) : Infinity;
+  };
   const p = BF.player.position;
-  const dist = Math.hypot(x + 0.5 - p.x, y - p.y, z + 0.5 - p.z);
-  weather.lastStrike = { x: x + 0.5, y, z: z + 0.5, dist };
+  const dist = near(p);
+  weather.lastStrike = { x: at.x, y, z: at.z, dist };
   // small damage only right next to the strike
   if (dist < 2.5 && BF.player.damage) BF.player.damage(5, null, "lightning");
   if (BF.mobs && BF.mobs.list) for (const m of BF.mobs.list) {
     if (m.dead || m.removed) continue;
-    if (Math.hypot(m.position.x - x - 0.5, m.position.y - y, m.position.z - z - 0.5) < 2.5) BF.mobs.hit(m, 5, null);
+    if (near(m.position) < 2.5) BF.mobs.hit(m, 5, null);
   }
-  BF.emit("lightning", { x: x + 0.5, y, z: z + 0.5, dist });
+  BF.emit("lightning", { x: at.x, y, z: at.z, dist });
 };
 
 let inited = false;

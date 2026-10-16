@@ -17,10 +17,18 @@ const BF = (window.BF = window.BF || {});
 
 // the corner blend: fully round within CORNER1 blocks of a cube corner, flat beyond CORNER0
 const CORNER0 = 1200, CORNER1 = 500;
+// the height blend (spec r14-04, Gordon's prototype heights): flat up to ALT0 blocks above the ground, fully round from ALT1. The
+// ground is the higher of sea level and the smoothed terrain under the player, so a player on a plateau is still drawn flat.
+const ALT0 = 250, ALT1 = 2500;
+// off-planet mode above layer OFF (camera at the planet's centre, north up, drag to turn the planet), back below OFF_BACK
+const OFF = 20000, OFF_BACK = 19400;
+// the sky fades to space between these heights above the ground
+const SPACE0 = 3000, SPACE1 = 60000;
 
 const hooks = [];
-const state = { on: false, f: 0, eyeU: 0, eyeV: 0, eyeY: 0, eye: [0, 0, 0], M: [1, 0, 0, 0, 1, 0, 0, 0, 1], k: 0, corner: Infinity };
-const view = { state, cornerRound: true, CORNER0, CORNER1 };
+const state = { on: false, f: 0, eyeU: 0, eyeV: 0, eyeY: 0, eye: [0, 0, 0], M: [1, 0, 0, 0, 1, 0, 0, 0, 1], k: 0, corner: Infinity,
+  ground: 0, above: 0, kAlt: 0, offPlanet: false };
+const view = { state, cornerRound: true, CORNER0, CORNER1, ALT0, ALT1, OFF, OFF_BACK, SPACE0, SPACE1 };
 BF.view = view;
 
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -77,6 +85,33 @@ view.roundAt = function (x, z) {
   return smooth(CORNER0, CORNER1, Math.hypot(Math.min(Math.abs(u), Math.abs(N - u)), Math.min(Math.abs(v), Math.abs(N - v))));
 };
 
+// The smoothed ground under atlas point (x, z): the mean of the terrain at the point and 8 points 48 blocks around it, and never
+// below sea level. Cached per 32-block cell.
+let gKey = null, gVal = 0;
+view.groundAt = function (x, z) {
+  const key = Math.floor(x / 32) + "," + Math.floor(z / 32);
+  if (key === gKey) return gVal;
+  let sum = 0, n = 0;
+  const G = BF.worldgen;
+  for (const [dx, dz] of [[0, 0], [48, 0], [-48, 0], [0, 48], [0, -48], [34, 34], [-34, 34], [34, -34], [-34, -34]]) {
+    const c = BF.planet.canonCell(Math.floor(x + dx), Math.floor(z + dz), {});
+    if (c.off) continue;
+    let h = BF.SEA;
+    try { h = G.heightAt(c.x, c.z); } catch (_) { /* before the world exists */ }
+    sum += Math.max(BF.SEA, h); n++;
+  }
+  gKey = key; gVal = n ? sum / n : BF.SEA;
+  return gVal;
+};
+// The whole blend k for an eye at atlas (x, y, z): the larger of the corner blend and the height blend (0 off the planet).
+view.kAt = function (x, y, z) {
+  const P = BF.planet;
+  if (!P || !P.isPlanet()) return 0;
+  return Math.max(view.roundAt(x, z), smooth(ALT0, ALT1, y - view.groundAt(x, z)));
+};
+// How far the sky has faded to space (0 to 1) for the last frame drawn (js/sky.js).
+view.spaceFade = () => (state.on ? smooth(SPACE0, SPACE1, state.above) : 0);
+
 // Runs fn at the start of every frame's drawing, before world matrices are worked out (on any world): for modules that keep
 // their geometry relative to a moving reference point.
 view.onBegin = function (fn) { hooks.push(fn); };
@@ -87,7 +122,7 @@ view.begin = function (scene, camera) {
   for (const fn of hooks) { try { fn(); } catch (err) { console.error(err); } }
   const P = BF.planet, s = state;
   s.on = !!(P && P.isPlanet() && BF.player && BF.player.position);
-  if (!s.on) { if (BF.world.roundK) BF.world.roundK.value = 0; return; }
+  if (!s.on) { if (BF.world.roundK) BF.world.roundK.value = 0; if (axis) axis.visible = false; return; }
   if (!tmpM) { tmpM = new THREE.Matrix4(); sphR = new THREE.Matrix4(); }
   const pp = BF.player.position, f = P.face(pp.x, pp.z);
   if (f < 0) { s.on = false; return; }
@@ -96,9 +131,13 @@ view.begin = function (scene, camera) {
   // the nearest cube corner is one of this face's own four
   const du = Math.min(Math.abs(s.eyeU), Math.abs(N - s.eyeU)), dv = Math.min(Math.abs(s.eyeV), Math.abs(N - s.eyeV));
   s.corner = Math.hypot(du, dv);
-  s.k = view.roundAt(cam.x, cam.z);
+  s.ground = view.groundAt(cam.x, cam.z); s.above = s.eyeY - s.ground;
+  s.kAlt = smooth(ALT0, ALT1, s.above);
+  s.k = Math.max(view.roundAt(cam.x, cam.z), s.kAlt);
+  s.offPlanet = !!(BF.player.offPlanet);
   BF.world.roundK.value = s.k;
   setPlacements();
+  setupClip(scene, camera);
   // the round frame: rows are render x, y, z in planet space (grid u, up, grid v at the eye; x x up = v, see planet.js FACES)
   P.pos(f, s.eyeU, s.eyeV, s.eyeY, s.eye);
   const fr = P.frame(f, s.eyeU, s.eyeV, s.eyeY, {}), up = fr.up, e = fr.eu, d = e[0] * up[0] + e[1] * up[1] + e[2] * up[2];
@@ -113,6 +152,7 @@ view.begin = function (scene, camera) {
   for (const c of scene.children) {
     if (c === camera) continue;
     const m = c.matrix, ud = c.userData;
+    if (ud.renderSpace) { c.matrixWorld.copy(m); continue; }   // already in render space (the planet's axis)
     const g = ud.anchor ? P.face(m.elements[12] + 1, m.elements[14] + 1) : P.face(m.elements[12], m.elements[14]);
     if (g < 0) continue;   // off the atlas: left as it is
     if (!Lok[g] && k < 1) { if (c.visible) { c.visible = false; hidden.push(c); } continue; }
@@ -137,13 +177,86 @@ view.begin = function (scene, camera) {
       for (const ch of c.children) ch.updateMatrixWorld(true);
     }
   }
-  // the camera: at the origin, turned like everything on its own face (not at all)
+  // the camera: at the origin, turned like everything on its own face (not at all). Once the view is partly round it is aimed
+  // along the facing as drawn: the grid direction flat, the true direction on the sphere round (the two differ where the grid is
+  // skewed, near the cube corners), mixed by k. Off-planet it looks straight down at the planet's centre with the facing (north)
+  // at the top of the screen.
   camera.matrixWorld.multiplyMatrices(L[f], camera.matrix);
+  if (k > 0 || s.offPlanet) aimCamera(camera, fr);
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
   for (const ch of camera.children) ch.updateMatrixWorld(true);
+  drawAxis(scene);
   scene.autoUpdate = false;
   live = true;
 };
+// Fog, clip planes and the far view by height (the prototype's setupView). Near the ground sky.js's fog stands. From ALT0 up the
+// fog is pushed out towards the horizon (sqrt(h (2R + h))) and, high up, away entirely; the near plane grows with height so depth
+// precision holds, and the far plane reaches the horizon once the view is round.
+const lerpLog = (a, b, t) => Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t);
+function setupClip(scene, camera) {
+  const s = state, h = Math.max(0, s.eyeY - BF.SEA), above = Math.max(0, s.above);
+  const horizon = Math.sqrt(h * (2 * BF.planet.R + h)), r = ((BF.world && BF.world.viewDist) || 6) * 16;
+  const kf = smooth(ALT0, ALT0 + 500, above);
+  if (kf > 0 && scene.fog && !(BF.player && BF.player.headInWater)) {
+    const far = lerpLog(r * 0.95 + above, horizon * 1.25 + 1, kf) * (1 + 1e4 * smooth(ALT1, 4 * ALT1, above));
+    scene.fog.far = far; scene.fog.near = far * (0.58 - 0.18 * kf);
+  }
+  const near = Math.max(0.05, Math.min(500, (above - 200) * 0.01));
+  // the far plane: past the fog low down; the loaded area or, once round, the horizon (never the fog's far, which runs off to
+  // nearly infinity high up, where it would ruin depth precision)
+  const want = s.k > 0 ? Math.max(r * 1.6 + 400 + above, horizon * 1.2 + 2000) : Math.max(scene.fog ? scene.fog.far + 64 : 1000, r * 1.6 + 400 + above);
+  if (Math.abs(camera.near - near) > 1e-6 || Math.abs(camera.far - want) > 1) { camera.near = near; camera.far = want; camera.updateProjectionMatrix(); }
+}
+
+// Off-planet mode: a thin red line along the planet's axis, 1.25 R out past each pole (drawn straight in render space).
+let axis = null;
+function drawAxis(scene) {
+  const s = state;
+  if (!s.offPlanet) { if (axis) axis.visible = false; return; }
+  if (!axis) {
+    axis = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xff2a2a, fog: false }));
+    axis.geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+    axis.frustumCulled = false; axis.userData.renderSpace = true; axis.matrixAutoUpdate = false;
+    scene.add(axis);
+    axis.updateMatrixWorld(true);
+  }
+  axis.visible = true;
+  const M = s.M, e = s.eye, a = axis.geometry.attributes.position, R = BF.planet.R;
+  [1.25, -1.25].forEach((q, i) => {
+    const dx = -e[0], dy = q * R - e[1], dz = -e[2];
+    a.array[i * 3] = M[0] * dx + M[1] * dy + M[2] * dz;
+    a.array[i * 3 + 1] = M[3] * dx + M[4] * dy + M[5] * dz;
+    a.array[i * 3 + 2] = M[6] * dx + M[7] * dy + M[8] * dz;
+  });
+  a.needsUpdate = true;
+}
+view.axis = () => axis;
+
+const v3a = typeof THREE !== "undefined" ? new THREE.Vector3() : null, v3b = v3a && new THREE.Vector3();
+function aimCamera(camera, fr) {
+  const s = state, k = s.k, M = s.M, yaw = BF.player.yaw, pitch = BF.player.pitch;
+  const du = -Math.sin(yaw), dv = -Math.cos(yaw);
+  // the facing on the sphere: grid step (du, dv) in the tangent plane, then into render space
+  const up = fr.up, h = [fr.eu[0] * du + fr.ev[0] * dv, fr.eu[1] * du + fr.ev[1] * dv, fr.eu[2] * du + fr.ev[2] * dv];
+  const hd = h[0] * up[0] + h[1] * up[1] + h[2] * up[2];
+  h[0] -= up[0] * hd; h[1] -= up[1] * hd; h[2] -= up[2] * hd;
+  const sx = M[0] * h[0] + M[1] * h[1] + M[2] * h[2], sz = M[6] * h[0] + M[7] * h[1] + M[8] * h[2], sl = Math.hypot(sx, sz) || 1;
+  let fx = du + (sx / sl - du) * k, fz = dv + (sz / sl - dv) * k;
+  const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+  const e = camera.matrixWorld.elements, px = e[12], py = e[13], pz = e[14];
+  if (s.offPlanet) {
+    camera.up.set(fx, 0, fz);
+    v3a.set(px, py - 1, pz);
+  } else {
+    camera.up.set(0, 1, 0);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    v3a.set(px + fx * cp, py + sp, pz + fz * cp);
+  }
+  tmpM.lookAt(v3b.set(px, py, pz), v3a, camera.up);
+  camera.matrixWorld.extractRotation(tmpM);
+  e[12] = px; e[13] = py; e[14] = pz;
+  camera.up.set(0, 1, 0);
+}
 view.end = function () {
   if (!live) return;
   live = false;
