@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
     const projects = () => Object.keys(BF.villageLife.exportAll({})).filter(k => k.startsWith("farmbeds:"));
     BF.player.start();
     // world A, saved with a farm-bed project for a village far from the player
-    const A = await BF.save.create({ name: "A", seed: "1337", gameMode: "creative", villages: 9 });
+    const A = await BF.save.create({ name: "A", seed: "1337", gameMode: "creative", villages: 9, gen: 3 });
     const proj = { id: "pX", kind: "new", dir: null, L: { x0: 500, z0: 500, x1: 503, z1: 504, y: 70, ax: "x", ch: [501] }, old: null, owner: 3, fails: 0 };
     const data = await getData(A.id);
     data.villagers = Object.assign(BF.mobs.exportVillagers(), { "farmbeds:9999,9999": [proj] });
@@ -20,7 +20,7 @@ module.exports = async (pg, out) => {
     ok("world A has its saved project after loading", projects().includes("farmbeds:9999,9999"), projects());
     // Save and Quit to Title, then create world B
     BF.save.current = null;
-    const B = await BF.save.create({ name: "B", seed: "4242", gameMode: "creative", villages: 9 });
+    const B = await BF.save.create({ name: "B", seed: "4242", gameMode: "creative", villages: 9, gen: 3 });
     ok("the new world has no projects from world A", !projects().includes("farmbeds:9999,9999"), projects());
     await BF.save.saveNow();
     const saved = Object.keys((await getData(B.id)).villagers || {}).filter(k => k.startsWith("farmbeds:9999"));

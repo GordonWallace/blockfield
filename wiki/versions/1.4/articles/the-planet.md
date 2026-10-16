@@ -4,6 +4,10 @@ category: World generation
 ---
 From 1.4, a Blockfield world is a round planet rather than an endless flat plane. This page describes its shape; how the ground on it is made is on the [[page:world-generation|World generation]] pages.
 
+## Creating a world
+
+Every new world is a planet: the create-world screen asks for a name, a seed, a game mode and a biome size, as before, and there is no flat-world option. Worlds made with Blockfield 1.3 can't be opened in 1.4. They appear greyed out in the world list, marked "Made with Blockfield 1.3, can't be opened in 1.4", with only a Delete button. Where you start is described on [[page:world-generation]].
+
 ## Size and shape
 
 The planet is a cube whose six faces are puffed out into a sphere. Each face is a square grid of 163,840 by 163,840 block columns, so walking once around the equator is 655,360 blocks. Columns stand straight up from the planet's centre, which means "up" is always away from the middle of the planet, wherever you are.
