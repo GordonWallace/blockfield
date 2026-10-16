@@ -111,7 +111,7 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => { const A = window.__A; A.inv = BF.trades.inv.create(); });
   const t4 = await grow();
   const r4 = await watch(400, { stopAfter: 7, offAt: null });
-  ok("hand felling again (control)", r4.fell, r4.chop);
+  ok("hand felling again (control)", r4.fell, r4.fell ? r4.chop : { chop: r4.chop, tree: t4, t: r4.t, task: r4.task, log: r4.log, pos: r4.pos });
   const t5 = await grow();
   const part = await pg.evaluate(() => {   // chop 7 s, then interrupt it
     const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
