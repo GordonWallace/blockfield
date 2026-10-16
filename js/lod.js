@@ -2,9 +2,13 @@
 // land beyond the loaded chunks shows its true shape and colours out to the horizon, at every height. Brought over from the round-planet
 // prototype (GordonWallace/blockfield-round js/lod.js); see /mnt/project-files/notes/round-planet-lessons.md sections 6 and 8.
 //
-// - Seven rings have a cell every 4, 8, 16, 32, 64, 128 and 256 blocks, each reaching HALF = 256 cells from its own centre (its mesh
-//   reaches 272, so moving rings and morph targets always have samples): ring 0 reaches 1 km and ring 6 65 km. A cell is 1/128 to
-//   1/256 of its distance, so every ring's cells are a few pixels across.
+// - Eight rings have a cell every 4, 8, 16, ... 512 blocks, each reaching HALF = 128 cells from its own centre (its mesh reaches 136,
+//   so moving rings and morph targets always have samples): ring 0 reaches 512 blocks and ring 7 65 km. A cell is 1/64 to 1/128 of
+//   its distance, so every ring's cells are under 15 pixels across on a 1080p screen (r14-07 halved HALF from the 256 of r14-05: 4.1
+//   million triangles took most of the frame in software rendering; now about 0.8 million, fewer once the covered middles are skipped).
+// - Only the cells within a ring's disc are indexed, nearest the centre first, and the middle that the finer ring or the loaded chunks
+//   certainly cover is skipped (covered()); the per-pixel cuts below do the rest.
+// - From 10x fast-forward rings that are built aren't moved (the frame goes to the simulation).
 // - Each ring is drawn as a disc around its own centre, minus the next finer ring's disc and the loaded chunks' disc, so a ring still
 //   being rebuilt never leaves a gap: the coarser one shows there instead. The cuts are measured per pixel: the fragment shader finds the
 //   pixel's own face and grid position from its direction and maps it into the grid each cut belongs to (CHARTS below). Near a cube
@@ -23,8 +27,8 @@
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
-const CELLS = [4, 8, 16, 32, 64, 128, 256];
-const HALF = 256, EXT = 272;   // cells from a ring's centre to the edge of its disc, and of its mesh
+const CELLS = [4, 8, 16, 32, 64, 128, 256, 512];
+const HALF = 128, EXT = 136;   // cells from a ring's centre to the edge of its disc, and of its mesh
 const HIDE = 1500;             // a ring is hidden above this many times its cell size (its cells are then about 2 pixels)
 const MOVE = 0.2;              // a ring is rebuilt once the player is this fraction of its radius from its centre
 const HOLE = 0.97, MORPH0 = 0.6, MORPH1 = 0.95;   // fractions of a ring's radius
@@ -34,10 +38,10 @@ const STAND_MAX = 14000;       // blocks from the player: stand-ins further out 
                                // screen up to 4K), so none are made past that plus how far a ring moves (MOVE)
 const BOX_LEVELS = 1;          // of those, the ones drawn as boxes (the rest as points)
 const THIN = [0, 0, 1, 2, 3, 4];   // ring by ring: one tree cell kept in each square of 2^m x 2^m (js/grid.js)
-const HOUSE_LEVELS = 4;        // rings with village buildings (beyond, a building is under a pixel before the ring starts)
+const HOUSE_LEVELS = 5;        // rings with village buildings, out to 8 km (beyond, a building is under a pixel before the ring starts)
 const pxScale = { value: 900 };   // pixels per radian at the middle of the screen: drawing-buffer height / (2 tan(fov / 2))
 
-const lod = (BF.lod = { levels: [], active: false, eyeHole: 0, ribbon: null, scene: null, view: { f: 0, u: 0, v: 0 }, standIns: true });
+const lod = (BF.lod = { EXT, levels: [], active: false, eyeHole: 0, ribbon: null, scene: null, view: { f: 0, u: 0, v: 0 }, standIns: true });
 
 // ---- materials ----
 const P = () => BF.planet;
@@ -345,7 +349,7 @@ lod.reset = function (scene) {
   last = null; speed = 0;
   if (!lod.active) { if (BF.sampler) BF.sampler.reset(null); return; }
   if (!lod.pal) lod.pal = palette();
-  if (!fullIdx) fullIdx = new THREE.BufferAttribute(BF.gridJob.fullIndex(2 * EXT + 1), 1);   // made once here: it takes tens of ms
+  if (!fullIdx) { const d = BF.gridJob.discIndex(2 * EXT + 1, EXT, HALF); fullIdx = new THREE.BufferAttribute(d.idx, 1); fullCounts = d.counts; }   // made once here
   BF.gridJob.palette(lod.pal);
   const rp = BF.riverPre && BF.riverPre.seed === BF.state.seed >>> 0 ? BF.riverPre.pre : null;
   BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale, pre: rp });
@@ -425,13 +429,13 @@ function start(L, f, cu, cv) {
 
 // Builds ring L's mesh from its samples (in a worker), then swaps it in.
 function build(L, b) {
-  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor, bridge: L.lv === CELLS.length - 1 };
+  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor, bridge: L.lv === CELLS.length - 1, ext: EXT, disc: HALF };
   const raw = b.raw;
   b.tm = performance.now();
   const copy = BF.sampler.inline ? raw : { y: raw.y.slice(), col: raw.col.slice(), can: raw.can.slice(), ok: raw.ok.slice(), dir: raw.dir.slice() };
   BF.sampler.request({ mesh: true, p, raw: copy }, -100, (m) => { if (L.building === b) finish(L, b, m); }, L);
 }
-let fullIdx = null;
+let fullIdx = null, fullCounts = null;
 function finish(L, b, m) {
   const t0 = performance.now(), Pl = P();
   const g = new THREE.BufferGeometry();
@@ -444,7 +448,8 @@ function finish(L, b, m) {
   g.setAttribute("mcol", attr(m.mcol, 3, true));
   g.setAttribute("canopy", attr(m.can, 4, true));
   if (m.idx) g.setIndex(attr(m.idx, 1));
-  else { if (!fullIdx || fullIdx.count !== (b.n - 1) * (b.n - 1) * 6) fullIdx = new THREE.BufferAttribute(BF.gridJob.fullIndex(b.n), 1); g.setIndex(fullIdx); }
+  else g.setIndex(fullIdx);
+  L.counts = m.idx ? m.counts : fullCounts;
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), L.cell * EXT * 1.5 + 4000);
   // the ring keeps its material: freeing it would drop its shader program, compiled again for the new mesh (tens of ms)
   const mesh = new THREE.Mesh(g, L.mesh ? L.mesh.material : material(L.lv < CELLS.length - 1));
@@ -539,15 +544,18 @@ function update(budgetMs) {
   lod.above = above;
   if (BF.renderer && BF.camera) pxScale.value = BF.renderer.getDrawingBufferSize(tmpV2).y / (2 * Math.tan(BF.camera.fov * Math.PI / 360));
   const top = lod.levels[lod.levels.length - 1];
+  // fast-forward from 10x: built rings stay where they are and rivers aren't re-laid, leaving the frame to the simulation (a ring the
+  // player leaves behind is still drawn; the coarser rings cover beyond it)
+  const ff = !!(BF.warp && BF.warp.speed >= 10);
   for (const L of lod.levels) {
     L.show = above < HIDE * L.cell;
     if (!L.show) { if (L.building) { BF.sampler.cancel(L); L.building = null; } if (L.si) L.si.visible = false; continue; }
-    if (L.building || (L.mesh && offset(L, V.f, V.u, V.v) <= MOVE * L.half)) continue;
+    if (L.building || (L.mesh && (ff || offset(L, V.f, V.u, V.v) <= MOVE * L.half))) continue;
     if (L.mesh && speed * L.buildMs / 1000 > 0.5 * L.half) continue;   // too fast for this ring: coarser rings cover until the player slows
     const c = L.cell * 4;
     start(L, V.f, Math.round(V.u / c) * c, Math.round(V.v / c) * c);
   }
-  if (above < RIBBON_HIDE) ribbons(V, top);
+  if (above < RIBBON_HIDE && !(ff && lod.ribbon)) ribbons(V, top);
   // cut each ring to its disc, minus the next finer ring's disc and the loaded chunks
   lod.eyeHole = Math.min(BF.world.viewDist * BF.CS, BF.world.covered || 0) * 0.95;
   let prev = null;
@@ -559,6 +567,10 @@ function update(budgetMs) {
     const u = L.mesh.material.uniforms, fine = prev && prev.mesh && prev.show ? prev : null;
     cuts(u, V, lod.eyeHole, fine);
     u.outer.value.set(0, 0, L.half);
+    // the middle that the finer ring or the loaded chunks certainly cover isn't drawn at all (its cells come first in the index)
+    const g = L.mesh.geometry, idx = g.index;
+    g.setDrawRange(6 * L.counts[Math.min(L.counts.length - 1, Math.floor(covered(L, V, fine) / L.cell))], Infinity);
+    L.tris = Math.max(0, idx.count - g.drawRange.start) / 3;
     u.morph.value.set(L === top ? 1e30 : L.half * MORPH0, L === top ? 2e30 : L.half * MORPH1);
     // stand-ins fade out across the outer part of the last ring that has them
     if (L === lastStand) u.edge.value.set(L.half * 0.7, L.half * 0.95);
@@ -583,6 +595,18 @@ function update(budgetMs) {
   }
 }
 const tmpV2 = new THREE.Vector2();
+// How far from ring L's centre it is certainly covered by the loaded chunks or the finer ring (blocks; 0 if unsure): measured only within
+// one face's grid, and not near a cube corner, where the finer ring leaves a strip along its wedge and unfolding depends on the route.
+function covered(L, V, fine) {
+  const N = P().N, c = L.cell;
+  let r = 0;
+  if (L.f === V.f) r = lod.eyeHole - Math.hypot(V.u - L.cu, V.v - L.cv);
+  if (fine && fine.f === L.f) r = Math.max(r, fine.half * HOLE - Math.hypot(fine.cu - L.cu, fine.cv - L.cv));
+  r -= 2 * c;
+  if (r <= 0) return 0;
+  const corner = Math.hypot(Math.min(L.cu, N - L.cu), Math.min(L.cv, N - L.cv));
+  return corner < r + (fine ? 2 * fine.cell + 8 : 0) + 4 * c ? 0 : r;
+}
 // The cuts of a ring material: the loaded chunks' disc around the player in the view face's grid, and the finer ring's disc in its grid.
 function cuts(u, V, r, fine) {
   u.hole.value.set(V.u, V.v, r);
@@ -659,7 +683,7 @@ function ribbons(V, top) {
 lod.stats = () => ({
   active: lod.active, above: lod.above, eyeHole: lod.eyeHole, pending: BF.sampler ? BF.sampler.pending() : 0, inline: BF.sampler && BF.sampler.inline,
   rings: lod.levels.map((L) => ({ cell: L.cell, show: L.show, built: !!L.mesh, building: !!L.building, builds: L.builds || 0, f: L.f, cu: L.cu, cv: L.cv, buildMs: Math.round(L.buildMs), meshMs: Math.round(L.meshMs),
-    stands: L.stand ? L.stand.c.length : 0, standsShown: !!(L.si && L.si.visible) })),
+    stands: L.stand ? L.stand.c.length : 0, standsShown: !!(L.si && L.si.visible), tris: L.mesh && L.mesh.visible ? L.tris || 0 : 0 })),
   pxScale: pxScale.value,
   mainMs: lod.mainMs || 0, frames: lod.frames || 0, slowFrames: lod.slowFrames || 0, swaps: lod.swaps || [], maxFrameMs: lod.maxFrameMs || 0, workers: BF.sampler ? BF.sampler.workers.length : 0,
   samples: BF.sampler ? BF.sampler.samples : 0, msPerSample: BF.sampler && BF.sampler.samples ? BF.sampler.workMs / BF.sampler.samples : 0,

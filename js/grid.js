@@ -379,17 +379,17 @@ function mesh(p, raw) {
       mcol[o * 3 + k] = (mcol[a * 3 + k] + mcol[e * 3 + k]) >> 1;
     }
   }
-  let idx = null;
+  // the cells within the ring's disc, nearest the centre first (see discIndex); a mesh missing samples (beyond a cube corner) indexes
+  // the cells that have all four, then the corner bridge
+  let idx = null, counts = null;
   if (!full) {
-    const q = [];
-    for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
-      const a = j * n + i;
-      if (raw.ok[a] && raw.ok[a + 1] && raw.ok[a + n] && raw.ok[a + n + 1]) q.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
-    }
+    const d = discIndex(n, p.ext, p.disc, (a) => raw.ok[a] && raw.ok[a + 1] && raw.ok[a + n] && raw.ok[a + n + 1]);
+    counts = d.counts;
+    const q = Array.from(d.idx);
     if (p.bridge) bridge(p, raw, pos, q);
     idx = new Uint32Array(q);
   }
-  return { pos, sph, col, mpos, msph, mcol, can, idx };
+  return { pos, sph, col, mpos, msph, mcol, can, idx, counts };
 }
 // The coarsest ring has no coarser ring to fill the strip along its corner wedge (see js/lod.js), so it closes the wedge itself: the
 // samples along one side of the wedge are joined to those the same distance along the other side, which are neighbours on the sphere,
@@ -414,17 +414,30 @@ function bridge(p, raw, pos, q) {
     }
   }
 }
-// The index of a full n x n grid (counter-clockwise seen from above: x = u, y up, z = v)
-function fullIndex(n) {
-  const q = new Uint32Array((n - 1) * (n - 1) * 6);
-  let k = 0;
+// The index of the cells of an n x n grid (counter-clockwise seen from above: x = u, y up, z = v) that reach within r cells of its centre
+// point (c, c), and pass has(a) if given (a: the cell's first corner). Sorted by how far the cell's furthest corner is from the centre, so
+// counts[k], the number of cells lying wholly within k cells of it, is where a draw that skips the middle out to k starts (js/lod.js).
+function discIndex(n, c, r, has) {
+  const R = r + 1, K = R + 2, band = new Uint32Array(K + 1), at = new Int32Array((n - 1) * (n - 1)).fill(-1);
   for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
-    const a = j * n + i;
-    q[k++] = a; q[k++] = a + n; q[k++] = a + 1; q[k++] = a + 1; q[k++] = a + n; q[k++] = a + n + 1;
+    const x0 = i - c, x1 = i + 1 - c, z0 = j - c, z1 = j + 1 - c;
+    const near = Math.hypot(x0 > 0 ? x0 : x1 < 0 ? x1 : 0, z0 > 0 ? z0 : z1 < 0 ? z1 : 0);
+    if (near > R || (has && !has(j * n + i))) continue;
+    const k = Math.min(K, Math.ceil(Math.hypot(Math.max(-x0, x1), Math.max(-z0, z1))));
+    at[j * (n - 1) + i] = k; band[k]++;
   }
-  return q;
+  const counts = new Uint32Array(K + 2);
+  for (let k = 0; k <= K; k++) counts[k + 1] = counts[k] + band[k];
+  const next = counts.slice(0, K + 1), q = new Uint32Array(counts[K + 1] * 6);
+  for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+    const k = at[j * (n - 1) + i];
+    if (k < 0) continue;
+    const a = j * n + i, o = 6 * next[k]++;
+    q[o] = a; q[o + 1] = a + n; q[o + 2] = a + 1; q[o + 3] = a + 1; q[o + 4] = a + n; q[o + 5] = a + n + 1;
+  }
+  return { idx: q, counts: counts.subarray(1) };
 }
-BF.gridJob.fullIndex = fullIndex;
+BF.gridJob.discIndex = discIndex;
 
 if (typeof document === "undefined") return;   // in a worker: only the sampling above is needed
 

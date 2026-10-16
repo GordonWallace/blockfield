@@ -25,7 +25,7 @@ module.exports = async (pg, out) => {
   try {
     await pg.goto(url);
     await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow (never judge frame rate here)
-    await pg.waitForTimeout(4000);
+    await pg.waitForFunction(() => window.BF && BF.lod && !BF.preparing, null, { timeout: 180000 });   // (the planet's rivers first)
     const forest = await pg.evaluate(() => {
       BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true);
       // Software rendering draws a forest's stand-ins (hundreds of thousands) in seconds a frame, so they are hidden while rings build
@@ -37,7 +37,7 @@ module.exports = async (pg, out) => {
         for (;;) {
           standIns(false);
           const s = BF.lod.stats();
-          if (s.rings.every((r) => !r.show || (r.built && !r.building)) && s.pending === 0) return (performance.now() - t0) / 1000;
+          if (s.active && s.rings.some((r) => r.show) && s.rings.every((r) => !r.show || (r.built && !r.building)) && s.pending === 0) return (performance.now() - t0) / 1000;
           if (performance.now() - t0 > maxS * 1000) return -1;
           await new Promise((r) => setTimeout(r, 500));
         }
@@ -54,8 +54,9 @@ module.exports = async (pg, out) => {
     for (const h of [60, 300, 1000, 3000, 10000, 40000]) {
       await pg.evaluate(({ f, u, v, h }) => goTo(f, u, v, h, h > 5000 ? -1.2 : -0.5), { ...forest, h });
       const t = await pg.evaluate(() => ringsDone(600));
-      await pg.evaluate(() => standIns(true));
-      await pg.waitForTimeout(500);
+      // (the camera follows the look over a few frames; then two whole frames drawn with the stand-ins: a frame takes seconds here)
+      await pg.evaluate(() => new Promise((r) => { let n = 0; const f = () => (++n < 10 ? requestAnimationFrame(f) : r()); requestAnimationFrame(f); }));
+      await pg.evaluate(() => { standIns(true); return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))); });
       await pg.screenshot({ path: `${out}-h${h}.png`, timeout: 180000 });
       await pg.evaluate(() => standIns(false));
       const s = await pg.evaluate(() => BF.lod.stats());
@@ -69,7 +70,7 @@ module.exports = async (pg, out) => {
     await pg.evaluate(({ f, u, v }) => goTo(f, u, v, 60, -0.5), forest);
     await pg.evaluate(() => ringsDone(600));
     const exact = await pg.evaluate(() => {
-      const L = BF.lod.levels[0], S = L.stand, P = BF.planet, n = 2 * 272 + 1;
+      const L = BF.lod.levels[0], S = L.stand, P = BF.planet, n = 2 * BF.lod.EXT + 1;
       // the trees of a block of 60 x 60 cells in the middle of the ring, against the stand-ins on those samples
       const i0 = 240, j0 = 240, k = 60;
       const tr = BF.worldgen.treesIn(L.f, (L.gu0 >> 2) + i0, (L.gv0 >> 2) + j0, (L.gu0 >> 2) + i0 + k, (L.gv0 >> 2) + j0 + k);
@@ -89,7 +90,7 @@ module.exports = async (pg, out) => {
     // ---- a moved ring keeps its stand-ins, and they match a fresh build (rings 0 and 1)
     const moved = await pg.evaluate(async ({ f, u, v }) => {
       const b0 = BF.lod.levels.map((L) => L.builds);
-      goTo(f, u + 260, v + 120, 60, -0.5);
+      goTo(f, u + 520, v + 200, 60, -0.5);   // (past a fifth of ring 1's radius: both rings move)
       await ringsDone(600);
       const res = [];
       for (const lv of [0, 1]) {
@@ -136,7 +137,7 @@ module.exports = async (pg, out) => {
 
     // ---- the chunk ceiling, and far chunks keep only their meshes
     const ceil = await pg.evaluate(async () => {
-      const W = BF.world, p = BF.player.position, n0 = W.chunks.size, px = BF.lod.stats().pxScale;
+      const W = BF.world, pp = BF.player.position, p = { x: pp.x, y: pp.y, z: pp.z }, n0 = W.chunks.size, px = BF.lod.stats().pxScale;
       BF.player.teleport(p.x, p.y + Math.min(px, W.chunkCeiling) * 1.2, p.z);
       await new Promise((r) => setTimeout(r, 1500));
       const high = { high: W.high, chunks: W.chunks.size, covered: W.covered };
@@ -146,11 +147,13 @@ module.exports = async (pg, out) => {
       BF.player.teleport(p.x, p.y, p.z);
       return { n0, px, ...high };
     });
-    check(ceil.high && ceil.covered === 0 && ceil.after <= ceil.n0 && ceil.after === ceil.chunks, `above the chunk ceiling no chunks load (${JSON.stringify(ceil)})`);
+    check(ceil.high && ceil.covered === 0 && ceil.after <= ceil.chunks && ceil.chunks < ceil.n0, `above the chunk ceiling no chunks load (${JSON.stringify(ceil)})`);
     const purge = await pg.evaluate(async () => {
       const W = BF.world;
       W.setViewDist(16);
       const t0 = performance.now();
+      while (W.high && performance.now() - t0 < 60000) await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 3000));
       while (W.queueLength > 0 && performance.now() - t0 < 300000) await new Promise((r) => setTimeout(r, 500));
       let data = 0;
       for (const c of W.chunks.values()) for (const s of c.secs) if (typeof s !== "number") data += s.byteLength;
