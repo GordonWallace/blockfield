@@ -48,13 +48,18 @@ module.exports = async (pg, out) => {
     R.tasks = tasks;
     ok("pen still had room, nothing was culled", pen.sheep.length < pen.threshold && !tasks.cull, [pen.sheep.length, pen.threshold, tasks.cull]);
     // ---- overcrowding: shepherd culls adults down to below the threshold, never below two
+    // The cull comes last in the shepherd's order (feed, then shear, then cull: js/shepherd.js pickTask), and the bigger flock wants more
+    // wheat than it holds (wheatWanted: a trip to a farmer and back). Six hungry, woolly newcomers and a wheat run took most of the 6000
+    // steps before the first cull (up to 5400 of them in local runs; none culled in time in CI), so the newcomers come fed today and shorn
+    // (the morning above covers feeding and shearing, the wheat section below buying) and the shepherd holds the wheat it wants.
+    BF.sky.setTime(0.08);
     for (const s of pen.sheep) s.cd = day() + 5;   // no more lambs while the cull is measured
     for (let i = 0; i < 6; i++) {
-      const s = { fed: null, shorn: false, woolAt: null, growAt: null, cd: day() + 5, x: pen.x0 + 1 + (i % 4), z: pen.z0 + 1 + (i >> 2), mob: null };
+      const s = { fed: day(), shorn: true, woolAt: day() + 5, growAt: null, cd: day() + 5, x: pen.x0 + 1 + (i % 4), z: pen.z0 + 1 + (i >> 2), mob: null };
       pen.sheep.push(s);
     }
-    BF.sky.setTime(0.08);
     run(5);
+    { const w = BF.shepherd.wheatWanted(shep); if (w > 0) BF.trades.inv.add(shep.inv, I.wheat_item, w); }
     const crowded = pen.sheep.length;
     ok("pen is over the threshold", crowded >= pen.threshold, [crowded, pen.threshold]);
     const mut0 = c("raw_mutton") + c("cooked_mutton");
