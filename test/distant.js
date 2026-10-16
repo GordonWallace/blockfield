@@ -35,7 +35,8 @@ module.exports = async (pg, out) => {
     await pg.evaluate(() => {
       BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true);
       // cover(): this frame drawn off screen with the sky hidden and a magenta background; the share of magenta pixels within r
-      // (a fraction of the screen's half diagonal) of the middle
+      // (a fraction of the screen's half diagonal) of the middle, or with r = 0, of magenta pixels with ground on all four sides
+      // (holes inside the land, not the space round it)
       window.__rt = null;
       window.cover = (r) => {
         const R = BF.renderer, s = R.getSize(new THREE.Vector2()), sc = BF.scene;
@@ -53,11 +54,15 @@ module.exports = async (pg, out) => {
         R.readRenderTargetPixels(window.__rt, 0, 0, s.x, s.y, px);
         let n = 0, m = 0;
         const lim = (r || 2) * Math.hypot(s.x, s.y) / 2;
+        const mag = (x, y) => { const o = (y * s.x + x) * 4; return px[o] > 240 && px[o + 1] < 15 && px[o + 2] > 240; };
+        const lo = new Int32Array(s.y).fill(s.x), hi = new Int32Array(s.y).fill(-1), top = new Int32Array(s.x).fill(s.y), bot = new Int32Array(s.x).fill(-1);
+        for (let y = 0; y < s.y; y++) for (let x = 0; x < s.x; x++) if (!mag(x, y)) {
+          lo[y] = Math.min(lo[y], x); hi[y] = Math.max(hi[y], x); top[x] = Math.min(top[x], y); bot[x] = Math.max(bot[x], y);
+        }
         for (let y = 0; y < s.y; y++) for (let x = 0; x < s.x; x++) {
           if (Math.hypot(x - s.x / 2, y - s.y / 2) > lim) continue;
           n++;
-          const o = (y * s.x + x) * 4;
-          if (px[o] > 240 && px[o + 1] < 15 && px[o + 2] > 240) m++;
+          if (mag(x, y) && (r || (x > lo[y] && x < hi[y] && y > top[x] && y < bot[x]))) m++;
         }
         window.__lastCover = m ? { px, w: s.x, h: s.y } : null;
         return m / n;
@@ -151,7 +156,7 @@ module.exports = async (pg, out) => {
 
     // ---- a step across a cube corner, at 3,000 and 95,000 up: nothing uncovered
     for (const h of [3000, 95000]) {
-      const r = h > 50000 ? 0.45 : 2;   // high up only the middle: the globe (r14-06) fills the view beyond the coarsest ring
+      const r = h > 50000 ? 0 : 2;   // high up, holes inside the land only: the globe (r14-06) fills the view beyond the coarsest ring
       await pg.evaluate((h) => { goTo(4, 163840 - 900, 163840 - 700, h, -1.55); }, h);
       await pg.evaluate(() => ringsDone(400));
       const m0 = await pg.evaluate((r) => cover(r), r);
@@ -171,7 +176,7 @@ module.exports = async (pg, out) => {
 
     // ---- main-thread time
     const st = await pg.evaluate(() => BF.lod.stats());
-    console.log("main thread: worst frame of lod.update", st.maxFrameMs.toFixed(1), "ms; worst mesh swap", st.mainMs.toFixed(1), "ms");
+    console.log("main thread: worst frame of lod.update", st.maxFrameMs.toFixed(1), "ms; worst mesh swap", st.mainMs.toFixed(1), "ms", JSON.stringify(st.swaps));
     check(st.maxFrameMs < 25 && st.mainMs < 25, "ring rebuilds take only a few ms of main-thread time a frame (under swiftshader)");
     const errs = await pg.evaluate(() => (window.__errs || []).length);
     check(!errs, "no page errors");

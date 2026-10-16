@@ -250,17 +250,19 @@ function finish(L, b, m) {
   if (m.idx) g.setIndex(attr(m.idx, 1));
   else { if (!fullIdx || fullIdx.count !== (b.n - 1) * (b.n - 1) * 6) fullIdx = new THREE.BufferAttribute(BF.gridJob.fullIndex(b.n), 1); g.setIndex(fullIdx); }
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), L.cell * EXT * 1.5 + 4000);
-  const mesh = new THREE.Mesh(g, material(L.lv < CELLS.length - 1));
+  // the ring keeps its material: freeing it would drop its shader program, compiled again for the new mesh (tens of ms)
+  const mesh = new THREE.Mesh(g, L.mesh ? L.mesh.material : material(L.lv < CELLS.length - 1));
   const a = Pl.atlas(b.f, b.cu, b.cv);
   mesh.matrixAutoUpdate = false;
   mesh.position.set(a.x, 0, a.z); mesh.updateMatrix();
   mesh.userData = { anchor: b.anchor, lod: L.lv };
   mesh.material.uniforms.anchor.value.set(b.anchor[0], b.anchor[1], b.anchor[2]);
-  if (L.mesh) dispose(L.mesh);
+  if (L.mesh) { L.mesh.parent && L.mesh.parent.remove(L.mesh); L.mesh.geometry.dispose(); }
   L.mesh = mesh; L.raw = b.raw; L.f = b.f; L.cu = b.cu; L.cv = b.cv; L.gu0 = b.gu0; L.gv0 = b.gv0;
   L.buildMs = performance.now() - b.t0; L.meshMs = b.tm ? t0 - b.tm : 0; L.building = null; L.builds = (L.builds || 0) + 1;
   lod.scene.add(mesh);
   lod.mainMs = Math.max(lod.mainMs || 0, performance.now() - t0);
+  (lod.swaps || (lod.swaps = [])).push(Math.round(performance.now() - t0)); if (lod.swaps.length > 64) lod.swaps.shift();
 }
 function free() { if (this.array !== (fullIdx && fullIdx.array)) this.array = null; }
 
@@ -424,7 +426,7 @@ function ribbons(V, top) {
 lod.stats = () => ({
   active: lod.active, above: lod.above, eyeHole: lod.eyeHole, pending: BF.sampler ? BF.sampler.pending() : 0, inline: BF.sampler && BF.sampler.inline,
   rings: lod.levels.map((L) => ({ cell: L.cell, show: L.show, built: !!L.mesh, building: !!L.building, builds: L.builds || 0, f: L.f, cu: L.cu, cv: L.cv, buildMs: Math.round(L.buildMs), meshMs: Math.round(L.meshMs) })),
-  mainMs: lod.mainMs || 0, maxFrameMs: lod.maxFrameMs || 0, workers: BF.sampler ? BF.sampler.workers.length : 0,
+  mainMs: lod.mainMs || 0, swaps: lod.swaps || [], maxFrameMs: lod.maxFrameMs || 0, workers: BF.sampler ? BF.sampler.workers.length : 0,
   samples: BF.sampler ? BF.sampler.samples : 0, msPerSample: BF.sampler && BF.sampler.samples ? BF.sampler.workMs / BF.sampler.samples : 0,
 });
 })();
