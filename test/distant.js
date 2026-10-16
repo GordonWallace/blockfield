@@ -1,7 +1,7 @@
 // @ci integration suite=world soak timeout=900
 // Distant terrain on the planet (spec r14-05): rings of height-field meshes out to the horizon, sampled by Web Workers. The page is
 // served over http here (workers can't start from a file:// page). Checks:
-//  - the workers sample (not the in-page fallback), all seven rings build, and their samples match the generator's own columns;
+//  - the workers sample (not the in-page fallback), all eight rings build, and their samples match the generator's own columns;
 //  - views from the ground, 600, 2,500 and 10,000 blocks up show land to the horizon (screenshots), and no ground pixel is left
 //    uncovered looking straight down (a magenta background pass with the sky hidden);
 //  - a ring moved by the player (reusing what it already had) matches a fresh build of the same place;
@@ -31,7 +31,7 @@ module.exports = async (pg, out) => {
   try {
     await pg.goto(url);
     await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow (never judge frame rate here)
-    await pg.waitForTimeout(4000);
+    await pg.waitForFunction(() => window.BF && BF.lod && !BF.preparing, null, { timeout: 180000 });   // (the planet's rivers first)
     await pg.evaluate(() => {
       BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true);
       // cover(): this frame drawn off screen with the sky hidden and a magenta background; the share of magenta pixels within r
@@ -79,8 +79,9 @@ module.exports = async (pg, out) => {
       };
       // until every shown ring is built and nothing is queued
       window.ringsDone = async (maxS) => {
-        const t0 = performance.now();
-        await new Promise((r) => setTimeout(r, 400));   // a few frames: the rings see where the player is now
+        const t0 = performance.now(), f0 = BF.lod.frames || 0;
+        // a few frames first, so the rings see where the player is now (a fast machine can otherwise find the old rings all built)
+        while ((BF.lod.frames || 0) < f0 + 3 && performance.now() - t0 < maxS * 1000) await new Promise((r) => setTimeout(r, 100));
         for (;;) {
           const s = BF.lod.stats();
           if (s.rings.every((r) => !r.show || (r.built && !r.building)) && s.pending === 0) return (performance.now() - t0) / 1000;
@@ -100,12 +101,12 @@ module.exports = async (pg, out) => {
     const s0 = await pg.evaluate(() => BF.lod.stats());
     console.log("first build", t, "s;", s0.workers, "workers,", s0.samples, "samples,", s0.msPerSample.toFixed(3), "ms each;", JSON.stringify(s0.rings.map((r) => r.cell + ":" + r.buildMs + "/" + r.meshMs)));
     check(!s0.inline, "the rings are sampled by workers");
-    check(t > 0 && s0.rings.every((r) => r.built), `all seven rings built (${t.toFixed(0)} s)`);
+    check(t > 0 && s0.rings.every((r) => r.built), `all rings built (${t.toFixed(0)} s)`);
     // samples match the generator's own columns (sampled again in the page)
     const same = await pg.evaluate(() => {
       let n = 0, ok = 0;
       for (const L of BF.lod.levels) {
-        const n1 = 2 * 272 + 1;
+        const n1 = 2 * BF.lod.EXT + 1;
         for (let k = 0; k < 40; k++) {
           const i = (k * 131) % n1, j = (k * 197 + 17) % n1, o = j * n1 + i;
           if (!L.raw.ok[o]) continue;
@@ -141,7 +142,7 @@ module.exports = async (pg, out) => {
       goTo(g.f, g.u + 300, g.v + 120, 300);
       await ringsDone(300);
       if (L.builds === b0) return "not rebuilt";
-      const n1 = 2 * 272 + 1;
+      const n1 = 2 * BF.lod.EXT + 1;
       let bad = 0, n = 0;
       for (let k = 0; k < 400; k++) {
         const i = (k * 37) % n1, j = (k * 53 + 5) % n1, o = j * n1 + i;
@@ -171,6 +172,7 @@ module.exports = async (pg, out) => {
       const m2 = await pg.evaluate((r) => cover(r), r);
       if (m2) await savePng("corner" + h);
       await pg.screenshot({ path: `${out}-corner${h}.png` });
+      if (m0 || m1 || m2) console.log("rings:", await pg.evaluate(() => { const s = BF.lod.stats(), V = BF.lod.view; return JSON.stringify({ view: [V.f, Math.round(V.u), Math.round(V.v)], above: Math.round(s.above), eye: s.eyeHole, rings: s.rings.map((r) => [r.f, r.cu, r.cv, r.show, r.built, r.building, r.tris]) }); }));
       check(m0 === 0 && m1 === 0 && m2 === 0, `a step across a cube corner at ${h} up leaves nothing uncovered (${[m0, m1, m2].map((m) => (m * 100).toFixed(2) + "%").join(", ")})`);
     }
 

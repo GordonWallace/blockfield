@@ -20,12 +20,16 @@ module.exports = async (pg, out) => {
     ok("shears have an icon", typeof BF.textures.icon(I.shears) === "string" && BF.textures.icon(I.shears).startsWith("data:"));
     ok("shears speed up leaves", BF.items[I.shears].tool.speed > 1 && BF.player.mineSeconds(BF.B.oak_leaves, I.shears) < BF.player.mineSeconds(BF.B.oak_leaves, null), BF.player.mineSeconds(BF.B.oak_leaves, I.shears) + "s vs " + BF.player.mineSeconds(BF.B.oak_leaves, null) + "s by hand");   // leaves are a hoe block (#44); shears are special-cased
     // ---- wild sheep, player use
-    BF.newWorld(5, { gen: 3, villages: 9, gameMode: "creative" });
+    BF.newWorld(5, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
-    await load(300, 300);
+    // the planet: dry land a few hundred blocks from spawn
+    const S5 = BFT.spawn();
+    let WX = S5.x + 300, WZ = S5.z + 300;
+    for (let r = 300; r < 3000 && !(BF.worldgen.heightAt(WX, WZ) > 2 && BF.worldgen.heightAt(WX + 3, WZ) > 2); r += 50) { WX = S5.x + r; WZ = S5.z + r; }
+    await load(WX, WZ);
     BF.sky.setTime(0.1);
-    const gy = BF.worldgen.heightAt(300, 300) + 1;
-    const a = BF.mobs.spawn("sheep", 300.5, gy, 300.5), b = BF.mobs.spawn("sheep", 303.5, gy, 300.5);
+    const gy = BF.worldgen.heightAt(WX, WZ) + 1;
+    const a = BF.mobs.spawn("sheep", WX + 0.5, gy, WZ + 0.5), b = BF.mobs.spawn("sheep", WX + 3.5, BF.worldgen.heightAt(WX + 3, WZ) + 1, WZ + 0.5);
     run(1);
     const wheat = { id: I.wheat_item, count: 3 }, shears = { id: I.shears, count: 1 };
     ok("wheat feeds a hungry sheep", BF.shepherd.playerUse(a, wheat) === true && BF.shepherd.willing(a, day()));
@@ -44,26 +48,27 @@ module.exports = async (pg, out) => {
     ok("lamb gives nothing and cannot be sheared", !!lamb && BF.shepherd.playerUse(lamb, shears) === "Lambs are too small to shear");
     ok("wild sheep are not pen stock", !a.pen && !lamb.pen);
     // ---- pens survive a save and load
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
-    await load(26 + 4, 39 + 4);
+    const PV = BFT.village((v, k) => k.pen), PK = PV.x + "," + PV.z;   // the planet: the village nearest to spawn with a pen
+    await load(PV.x + 4, PV.z + 4);
     BF.sky.setTime(0.1); run(10);
-    for (let k = 0; k < 120 && !(BF.mobs.villages.get("26,39") && BF.shepherd.pensOf(BF.mobs.villages.get("26,39")).some(p => p.sheep.length >= 2 && p.sheep.every(s => s.mob))); k++) { BF.world.update(30, 43, 8); run(0.5); }   // sized village: wait for its stocked pen
-    const rec = BF.mobs.villages.get("26,39"), pen = BF.shepherd.pensOf(rec).find(p => p.sheep.length >= 2) || BF.shepherd.pensOf(rec)[0];
+    for (let k = 0; k < 120 && !(BF.mobs.villages.get(PK) && BF.shepherd.pensOf(BF.mobs.villages.get(PK)).some(p => p.sheep.length >= 2 && p.sheep.every(s => s.mob))); k++) { BF.world.update(PV.x + 4, PV.z + 4, 8); run(0.5); }   // sized village: wait for its stocked pen
+    const rec = BF.mobs.villages.get(PK), pen = BF.shepherd.pensOf(rec).find(p => p.sheep.length >= 2) || BF.shepherd.pensOf(rec)[0];
     const shorn = pen.sheep[0].mob; BF.shepherd.shear(shorn, "t"); BF.shepherd.feed(pen.sheep[1].mob, "t");
     const want = pen.sheep.map(s => [!!s.shorn, s.fed != null]);
     const wantN = pen.sheep.length, key = pen.key;
     const saved = JSON.parse(JSON.stringify(BF.mobs.exportVillagers()));
-    ok("export has pens:<village>", !!saved["pens:26,39"], saved["pens:26,39"] && saved["pens:26,39"][0].s.length);
+    ok("export has pens:<village>", !!saved["pens:" + PK], saved["pens:" + PK] && saved["pens:" + PK][0].s.length);
     const dayNow = BF.sky.day, tNow = BF.sky.time;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     BF.mobs.importVillagers(saved);
     BF.sky.day = dayNow; BF.sky.setTime(tNow);
-    await load(26 + 4, 39 + 4);
+    await load(PV.x + 4, PV.z + 4);
     run(10);
-    for (let k = 0; k < 120 && !(BF.mobs.villages.get("26,39") && (BF.shepherd.pensOf(BF.mobs.villages.get("26,39")).find(p => p.key === key) || { sheep: [] }).sheep.every(s => s.mob && !s.mob.removed) && BF.shepherd.pensOf(BF.mobs.villages.get("26,39")).some(p => p.key === key)); k++) { BF.world.update(30, 43, 8); run(0.5); }
-    const rec2 = BF.mobs.villages.get("26,39"), pen2 = BF.shepherd.pensOf(rec2).find(p => p.key === key);
+    for (let k = 0; k < 120 && !(BF.mobs.villages.get(PK) && (BF.shepherd.pensOf(BF.mobs.villages.get(PK)).find(p => p.key === key) || { sheep: [] }).sheep.every(s => s.mob && !s.mob.removed) && BF.shepherd.pensOf(BF.mobs.villages.get(PK)).some(p => p.key === key)); k++) { BF.world.update(PV.x + 4, PV.z + 4, 8); run(0.5); }
+    const rec2 = BF.mobs.villages.get(PK), pen2 = BF.shepherd.pensOf(rec2).find(p => p.key === key);
     ok("pen restored with the same sheep count", pen2 && pen2.sheep.length === wantN, [pen2 && pen2.sheep.length, wantN]);
     ok("shorn / fed state restored", pen2 && JSON.stringify(pen2.sheep.map(s => [!!s.shorn, s.fed != null])) === JSON.stringify(want), pen2 && pen2.sheep.map(s => [!!s.shorn, s.fed != null]));
     ok("restored sheep are live again", pen2 && pen2.sheep.every(s => s.mob && !s.mob.removed));
