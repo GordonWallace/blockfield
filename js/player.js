@@ -459,9 +459,12 @@ function createWorld() {
   if (hasSave() && BF.save.create) {
     Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale })).catch(e => { console.error(e); }).then(done);
   } else {
-    try { BF.newWorld(parseSeed(seedText), { gameMode: mode, biomeScale, gen: 4 }); } catch (e) { console.error(e); }
-    setGameMode(mode);
-    done();
+    const sd = parseSeed(seedText);
+    BF.prepareWorld(sd, 4).then(() => {   // (the planet works out its rivers first)
+      try { BF.newWorld(sd, { gameMode: mode, biomeScale, gen: 4 }); } catch (e) { console.error(e); }
+      setGameMode(mode);
+      done();
+    });
   }
 }
 function savePause() {

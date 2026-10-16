@@ -18,6 +18,11 @@ const root = path.resolve(__dirname, '..');
   // overrides it; test/ci.js sets it to the old #seed1337gen3v9 for the suites not yet moved to the planet (ci.json "gen3").
   await pg.goto('file://' + path.join(root, 'index.html') + (process.env.BF_HASH != null ? process.env.BF_HASH : '#seed123gen4v10'));
   await pg.waitForTimeout(5000);
+  // a planet boot first works out its rivers (spec r14-10): wait for that step, then the same 5 s for the world to settle
+  if (await pg.evaluate(() => !!(window.BF && BF.preparing))) {
+    await pg.waitForFunction(() => !BF.preparing, null, { timeout: 180000 }).catch(() => {});
+    await pg.waitForTimeout(5000);
+  }
   if (actions) await actions(pg, out);
   await pg.keyboard.press('F3');
   await pg.waitForTimeout(300);

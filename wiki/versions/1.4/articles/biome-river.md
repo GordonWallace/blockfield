@@ -1,7 +1,7 @@
 River is a channel cut into the land, running down from the high ground to the sea. It borders almost every land biome and meets the ocean at a mouth. Its course and how it falls from the mountains are described on [[page:rivers]]. Rivers shift with the climate: in the frozen band the biome is called **Frozen River**, and in both the frozen and the cold band the water freezes over with [[item:ice]]. In warmer country it stays open.
 
 ### On the planet
-Rivers don't run on the planet yet; they arrive later in 1.4.
+The planet's rivers form one network over the whole world, worked out when it starts, and every river runs down to the sea or into a lake. Lakes in hollows and highland basins also count as this biome; their columns read as **Lake**, or **Frozen Lake** in the frozen band, and they ice over like rivers. See [[page:rivers]].
 
 ### Ground and plants
 - The bed is [[item:sand]], [[item:clay]] or [[item:gravel]], in irregular patches, and the banks are sand over [[item:sandstone]].

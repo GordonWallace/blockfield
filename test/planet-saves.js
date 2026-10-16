@@ -60,6 +60,9 @@ module.exports = async (pg, out) => {
     W.setBlock(x0 + 14, y0 + 4, z0, B.bricks);         // u N+2: the neighbouring face, through the margin
     const far = P.canonCell(x0 + 14, z0, {});
     r.farFace = far.f;
+    // freeze the world (0x) so the mobs can't wander between the save and the checks; a pig walking off this
+    // raised platform and falling 6 blocks made the check flaky under CI load
+    BF.warp.freeze();
     const boat = BF.boats.spawn("birch", x0 + 0.5, y0 + 1.739, z0 + 0.5, 0.7);
     const pig = BF.mobs.spawn("pig", x0 + 2.5, y0 + 1, z0 - 2.5), cow = BF.mobs.spawn("cow", x0 - 2.5, y0 + 1, z0 + 2.5);
     pig.ai = pig.ai || {}; cow.ai = cow.ai || {};
@@ -74,9 +77,17 @@ module.exports = async (pg, out) => {
     // somewhere else, then back
     BF.newWorld(1, { gen: 3 });
     await settle(500);
+    let refreeze = true;
+    BF.on("worldLoaded", () => { if (refreeze) BF.warp.freeze(); });   // straight after restore (which resets the speed), before any frame runs
     await BF.save.load(meta.id);
+    refreeze = false;
+    r.frozen = BF.warp.frozen;
     BF.mobs.spawning = false;
-    await settle(2500);
+    // wild mobs come back with their chunks, in the wildlife step; still frozen, wait for the chunks (up to 20 s on a slow
+    // machine) and run that step once by hand, so they are checked where they were put, before any AI step
+    for (let i = 0; i < 40 && !(W.isLoaded(Math.floor(before.pig.x), Math.floor(before.pig.z)) && W.isLoaded(Math.floor(before.cow.x), Math.floor(before.cow.z))); i++) await settle(500);
+    BF.wildlife.update(0);
+    await settle(500);
     const p = BF.player.position, pc = P.canon(p.x, p.z, {});
     r.player = { face: pc.f, d: Math.hypot(p.x - before.p.x, p.y - before.p.y, p.z - before.p.z), dyaw: Math.abs(BF.player.yaw - before.p.yaw) };
     r.gen2 = BF.state.gen;
@@ -87,6 +98,7 @@ module.exports = async (pg, out) => {
     const near = (t, q) => BF.mobs.list.filter(m => m.type === t && !m.dead).map(m => Math.hypot(m.position.x - q.x, m.position.z - q.z)).sort((a, b) => a - b)[0];
     r.pig = near("pig", before.pig); r.cow = near("cow", before.cow);
     r.meta = meta.id;
+    BF.warp.reset();
     return r;
   });
   console.log("save " + JSON.stringify(sv));
@@ -96,7 +108,7 @@ module.exports = async (pg, out) => {
   check(sv.gen2 === 4 && sv.player.face === 0 && sv.player.d < 0.5 && sv.player.dyaw < 0.01, "the player comes back on face 0 where they were, facing the same way");
   check(sv.farFace !== 0 && sv.glass && sv.bricks, "edits on both sides of the face edge come back");
   check(sv.boat && sv.boat.d < 0.6 && sv.boat.face === 0, "the boat comes back");
-  check(sv.pig < 1.5 && sv.cow < 1.5, "the mobs come back where they were");
+  check(sv.frozen && sv.pig < 0.1 && sv.cow < 0.1, "the mobs come back where they were");
 
   // ---- a 1.3 world in the list: greyed, Delete only, won't open
   await pg.evaluate(async () => {
@@ -110,13 +122,14 @@ module.exports = async (pg, out) => {
   await pg.waitForTimeout(5000);
   const list = await pg.evaluate(() => {
     const rows = [...document.querySelectorAll(".bfp-world")].map(r => ({ id: r.dataset.id, old: r.classList.contains("old"), text: r.textContent, btns: [...r.querySelectorAll("button")].map(b => b.dataset.act).filter(a => a !== "copy-seed") }));
-    return { rows, gen: BF.state.gen };
+    const m = /gen(\d)/.exec(location.hash);
+    return { rows, gen: BF.state.gen, want: m ? +m[1] : 4, hash: location.hash };
   });
   console.log("list " + JSON.stringify(list.rows.map(r => [r.old, r.btns.join("/"), r.text.slice(0, 80)])));
   const old = list.rows.find(r => /My 1\.3 world/.test(r.text)), mine = list.rows.find(r => /planet save/.test(r.text));
   check(old && old.old && /Made with Blockfield 1\.3, can't be opened in 1\.4/.test(old.text) && old.btns.join() === "delete", "a 1.3 world is listed greyed, with only Delete");
   check(mine && !mine.old && mine.btns.includes("play"), "a planet world is listed normally");
-  check(list.gen === 3, "the test page (#seed1337gen3v9) still boots a generator 3 world");
+  check(list.gen === list.want, "the test page boots the generator its hash names (" + list.hash + ")");
   if (out) await pg.screenshot({ path: `${out}-worlds.png` });
   // Delete still works on it
   await pg.evaluate(() => document.querySelector('.bfp-world.old [data-act="delete"]').click());
@@ -130,7 +143,8 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => document.querySelector('[data-act="show-create"]').click());
   await pg.waitForTimeout(200);
   await pg.evaluate(() => { const f = document.querySelector(".bfp-view-create"); f.elements.name.value = "From the menu"; f.elements.seed.value = "31337"; f.querySelector('button[type="submit"]').click(); });
-  await pg.waitForTimeout(4000);
+  // (a new seed works out its rivers first: wait for the loading step and the save)
+  await pg.waitForFunction(() => !BF.preparing && BF.save.current && BF.save.current.name === "From the menu", null, { timeout: 120000 }).catch(() => {});
   const made = await pg.evaluate(() => ({ gen: BF.state.gen, metaGen: BF.save.current && BF.save.current.gen, name: BF.save.current && BF.save.current.name, scale: BF.state.biomeScale }));
   console.log("created " + JSON.stringify(made));
   check(made.gen === 4 && made.metaGen === 4 && made.name === "From the menu", "creating a world from the menu makes a planet");
@@ -155,11 +169,12 @@ module.exports = async (pg, out) => {
 
   // ---- #seed<n> boots a planet; #seed<n>gen3 a legacy world
   const url = pg.url().replace(/#.*$/, "");
-  await pg.goto(url + "#seed42"); await pg.reload(); await pg.waitForTimeout(5000);
+  const booted = () => pg.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById("bf-loading"), null, { timeout: 120000 }).catch(() => {}).then(() => pg.waitForTimeout(1000));   // (a planet boot works out its rivers first)
+  await pg.goto(url + "#seed42"); await pg.reload(); await booted();
   const h1 = await pg.evaluate(() => ({ gen: BF.state.gen, seed: BF.state.seed }));
-  await pg.goto(url); await pg.reload(); await pg.waitForTimeout(5000);
+  await pg.goto(url); await pg.reload(); await booted();
   const h0 = await pg.evaluate(() => BF.state.gen);
-  await pg.goto(url + "#seed42gen3"); await pg.reload(); await pg.waitForTimeout(5000);
+  await pg.goto(url + "#seed42gen3"); await pg.reload(); await booted();
   const h3 = await pg.evaluate(() => BF.state.gen);
   console.log("hash " + JSON.stringify({ h1, h0, h3 }));
   check(h1.gen === 4 && h1.seed === 42 && h0 === 4 && h3 === 3, "#seed42 and no hash boot planets; #seed42gen3 boots generator 3");

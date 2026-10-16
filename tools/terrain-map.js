@@ -14,7 +14,7 @@ global.window = global; global.THREE = {}; global.document = {};
 const load = f => vm.runInThisContext(fs.readFileSync(R + f, "utf8"), { filename: f });
 load("blocks.js"); load("noise.js");
 BF.CS = 16;
-load("planet.js"); load("planetgen.js"); load("rivers.js"); load("worldgen.js");
+load("planet.js"); load("planetgen.js"); load("rivers.js"); load("planetrivers.js"); load("worldgen.js");
 let [, , out, seed, scale, cx, cz, span, px, gen] = process.argv;
 const G = +(gen || 2);
 BF.setLimits(G); BF.state = { gen: G };

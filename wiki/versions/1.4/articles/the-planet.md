@@ -68,6 +68,10 @@ The eight corners of the cube are always open sea. Each seed's continents are tu
 
 Climate follows latitude. Five bands run from the equator to the poles: tropical, subtropical, temperate, subarctic and arctic. Their edges wander, high ground is colder, and now and then a biome turns up a band away from home. The arctic seas freeze over (Frozen Ocean). See [[page:biomes]] for which biomes each band holds.
 
+## Rivers and lakes
+
+The planet's rivers are worked out for the whole world at once when it starts (the loading screen shows **Working out the rivers and lakes** for several seconds). Every river runs down to the sea or into a lake, never crosses another and never splits, and lakes sit in inland hollows and highland basins, each with one river flowing out. See [[page:rivers]].
+
 ## Seeing far
 
 Beyond the loaded chunks, the land carries on to the horizon as distant terrain: the true shape of the ground, its colours, its seas and its forests, out to about 65 kilometres. It is drawn in rings around you, each half as detailed as the one inside it, a block every 4 columns within a kilometre and a block every 256 columns at the far edge. Each ring's cells look about the same size on screen, so nearby hills and far-off coasts are equally sharp, and the detail fades gently from one ring to the next rather than stepping.
@@ -78,4 +82,4 @@ Distant terrain is there at every height, from standing on the ground to high ab
 
 ## While 1.4 is being built
 
-The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]). There are no rivers yet. Flying very high, the distant land reaches about 65 kilometres; the whole globe below is still to come (the planet map already shows the whole globe).
+The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]). Flying very high, the distant land reaches about 65 kilometres; the whole globe below is still to come (the planet map already shows the whole globe).
