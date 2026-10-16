@@ -1,9 +1,13 @@
 // @ci integration suite=farming
 // Bees and beekeepers (js/bees.js, js/beekeeper.js): NODE_PATH=$(npm root -g) node test/run.js /tmp/bees test/bees-actions.js
-// Recipes (beehive, candle, honey extractor) and the trade table; village generator 8: a grass village with a beekeeper, its extractor, 2 hives of
+// On the planet (spec r14-22): planet seed 123 (generator 4, village generator 10), whose plains village nearest spawn has beekeepers; the test
+// makes that world itself, whatever the page booted.
+// Recipes (beehive, candle, honey extractor) and the trade table; village generator 8+: a grass village with a beekeeper, its extractor, 2 hives of
 // 8-12 bees and a flower bed; bees come out by day and only in dry weather, go home at dusk and in rain, are dropped when their chunk unloads and
 // scattered near flowers when it loads again; honey rises only after flower visits (none without flowers); harvesting with shears and bottles;
-// the 25% crop boost within 8 blocks by day; stings only on players; colony growth to 30; the 600-bee cap; save and load of hive state; bees led
+// the 25% crop boost within 8 blocks by day; stings only on players; colony growth to 30; the 600-bee cap (the allowances share out exactly 600,
+// nearest homes first, and homes past it keep their bees in; on open planet ground bees rest at home between trips, so the bees out at once stay
+// well under 600 even with 700+ to share); save and load of hive state; bees led
 // into a hive by a held flower; the beekeeper harvests, plants picked flowers, builds a hive from real honeycomb and planks, and makes candles.
 module.exports = async (pg) => {
   const res = await pg.evaluate(async () => {
@@ -16,8 +20,11 @@ module.exports = async (pg) => {
       for (let i = 0; i < 300; i++) { W.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (W.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
-    ok("new worlds use village generator 8", BF.state.villages >= 8, BF.state.villages);
+    BF.newWorld(123, { gen: 4, villages: 10, gameMode: "survival" });
+    for (let i = 0; i < 1800 && BF.preparing; i++) await new Promise(r => setTimeout(r, 100));   // a planet first works out its rivers
+    BF.state.paused = true;
+    ok("new worlds use village generator 8 or later", BF.state.villages >= 8, BF.state.villages);
+    const P = BF.planet;
     BF.mobs.spawning = false;
     if (BF.weather && BF.weather.set) BF.weather.set("clear", 1e6);
 
@@ -40,8 +47,12 @@ module.exports = async (pg) => {
     ok("a generated beekeeper starts with no honey goods", !kStart.some(x => x && [I.honey_bottle, I.honeycomb, I.candle].includes(x.id)), kStart.map(x => x && BF.items[x.id].name));
     ok("nest drops nothing, a hive drops itself", BF.blocks[B.bee_nest].drop == null && BF.blocks[B.beehive].drop === B.beehive);
 
-    // ---- the grass village near spawn: a beekeeper, its extractor, 2 hives and a flower bed
-    const V = { x: -1, z: -72 };
+    // ---- the grass village nearest spawn with a beekeeper: a beekeeper, its extractor, 2 hives and a flower bed
+    const sp0 = BF.player.position, vnear = BF.worldgen.villagesNear(sp0.x, sp0.z, 3000).sort((a, b) => P.distance(sp0, a) - P.distance(sp0, b));
+    const vb = vnear.find(v => BF.jobs.planVillage(v).some(j => j.prof === "beekeeper"));
+    ok("a village near spawn plans a beekeeper", !!vb, vnear.slice(0, 4).map(v => [v.x, v.z, v.pop]));
+    if (!vb) return R;
+    const V = { x: Math.round(vb.x), z: Math.round(vb.z) };
     BF.player.teleport(V.x + 0.5, BF.worldgen.heightAt(V.x, V.z) + 2, V.z + 0.5);
     await settle(V.x, V.z);
     BF.player.invulnerable = true;
@@ -53,15 +64,19 @@ module.exports = async (pg) => {
     ok("the village has a beekeeper", !!K, rec && rec.members.map(m => m.profession));
     if (!K) return R;
     ok("its roster key is not one breeding keeps for newborns (#2000+k)", K.slot && !K.slot.bred && K.slot.idx < BF.breeding.KEY_BASE, K.slot && K.slot.idx);
-    const plan = rec.wg.jobsites.filter(j => ["beekeeper", "beehive", "flower"].includes(j.prof));
-    const ext = plan.find(j => j.prof === "beekeeper"), hp = plan.filter(j => j.prof === "beehive"), fp = plan.filter(j => j.prof === "flower");
-    ok("its extractor, 2 hives and a flower bed are in the world", ext && W.getBlock(ext.x, ext.y, ext.z) === B.honey_extractor && hp.length === 2 && hp.every(h => W.getBlock(h.x, h.y, h.z) === B.beehive)
+    // (a big village can plan two apiaries, each an extractor with 2 hives; this beekeeper's is the one at its own extractor, and an apiary
+    // planned within HIVE_R (24 blocks) of it shares its hives, as the beekeeper's hives are all the hives within that reach)
+    const ext = K.jobsite && rec.wg.jobsites.find(j => j.prof === "beekeeper" && j.x === K.jobsite.x && j.z === K.jobsite.z);
+    const near = j => ext && Math.hypot(j.x - ext.x, j.z - ext.z) <= 24;
+    const plan = rec.wg.jobsites.filter(j => ["beekeeper", "beehive", "flower"].includes(j.prof) && near(j));
+    const hp = plan.filter(j => j.prof === "beehive"), fp = plan.filter(j => j.prof === "flower"), nApi = plan.filter(j => j.prof === "beekeeper").length;
+    ok("its extractor, 2 hives (per apiary in reach) and a flower bed are in the world", ext && W.getBlock(ext.x, ext.y, ext.z) === B.honey_extractor && hp.length === 2 * nApi && hp.every(h => W.getBlock(h.x, h.y, h.z) === B.beehive)
       && fp.length >= 4 && fp.every(f => BE.isFlower(W.getBlock(f.x, f.y, f.z))), plan.map(j => [j.prof, j.x, j.y, j.z, BF.blocks[W.getBlock(j.x, j.y, j.z)].name]));
     ok("the beekeeper works at that extractor", K.jobsite && K.jobsite.x === ext.x && K.jobsite.z === ext.z, K.jobsite);
     ok("its hire kit: shears and glass bottles", c(K, "shears") >= 1 && c(K, "glass_bottle") >= 16, { shears: c(K, "shears"), bottles: c(K, "glass_bottle") });
     const H = hp.map(h => BE.homeAt(h.x, h.y, h.z));
     ok("generated village hives hold 8-12 bees", H.every(h => h && h.kind === "hive" && h.bees >= 8 && h.bees <= 12), H.map(h => h && h.bees));
-    ok("they are the beekeeper's hives", BK.hivesOf(K).length === 2, BK.hivesOf(K).length);
+    ok("they are the beekeeper's hives", BK.hivesOf(K).length === hp.length, { hives: BK.hivesOf(K).length, apiaries: nApi });
     R.info.village = { ext, hives: H.map(h => [h.x, h.y, h.z, h.bees]) };
 
     // ---- bees out by day, home at dusk and in rain
@@ -170,7 +185,7 @@ module.exports = async (pg) => {
 
     // ---- chunk unload and reload: dropped, then scattered near flowers
     const nOut = BE.out(h0).length;
-    const far = { x: V.x + 900, z: V.z };
+    const gV = P.grid(V.x, V.z), far = { x: V.x + (gV.u < P.N / 2 ? 900 : -900), z: V.z };   // (900 blocks toward the middle of the village's face)
     BF.player.teleport(far.x + 0.5, BF.worldgen.heightAt(far.x, far.z) + 2, far.z + 0.5);
     const vl = BF.villageSim.LIMITS.villages; BF.villageSim.LIMITS.villages = 0; BF.villageSim.reset();   // the village sim would keep its chunks
     for (let i = 0; i < 300 && W.isLoaded(h0.x, h0.z); i++) { W.update(far.x, far.z, 8); step(); await new Promise(r => setTimeout(r, 20)); }
@@ -222,20 +237,34 @@ module.exports = async (pg) => {
     W.setBlock(spot.x, spot.y, spot.z, 0);
     ok("breaking a hive drops its record", !BE.homeAt(spot.x, spot.y, spot.z));
 
-    // ---- the 600-bee cap
+    // ---- the 600-bee cap: 700+ bees in loaded homes (extra hives on open ground near the village), in dry daylight
+    if (BF.weather && BF.weather.set) BF.weather.set("clear", 1e6);
+    BF.sky.setTime(0.12);
     const all = BE.loadedHomes();
     for (const h of all) h.bees = 30;
     const needed = Math.ceil(700 / 30) - all.length;
     const extra = [];
-    for (let i = 0; i < needed; i++) {
-      const x = V.x - 30 + (i % 6) * 4, z = V.z + 30 + Math.floor(i / 6) * 4, y = W.heightAt(x, z) + 1;
-      if (!W.isLoaded(x, z) || BF.SOLID[W.getBlock(x, y, z)]) continue;
+    for (let i = 0; i < 400 && extra.length < needed; i++) {   // a 4-block grid outward from the village's corner, on dry open ground
+      const x = V.x - 30 + (i % 20) * 4, z = V.z + 30 + Math.floor(i / 20) * 4, y = W.heightAt(x, z) + 1;
+      if (!W.isLoaded(x, z) || W.getBlock(x, y, z) !== 0 || !BF.SOLID[W.getBlock(x, y - 1, z)] || BF.FLUID[W.getBlock(x, y - 1, z)]) continue;
+      if (BE.loadedHomes().some(o => Math.hypot(o.x - x, o.z - z) < 3)) continue;
       W.setBlock(x, y, z, B.beehive); const h = BE.homeAt(x, y, z); if (h) { h.bees = 30; extra.push([x, y, z]); }
     }
     BE.housekeeping();
-    let peak = 0;
-    for (let i = 0; i < 1800; i++) { step(); peak = Math.max(peak, BE.list.length); }
-    ok("never more than 600 bees out at once", peak <= BE.CAP && peak > 450, { peak, homes: BE.loadedHomes().length });
+    const homes = BE.loadedHomes(), have = homes.reduce((n, h) => n + h.bees, 0), allowed = homes.reduce((n, h) => n + h.allow, 0);
+    const byDist = homes.slice().sort((a, b) => a.dist - b.dist), firstShut = byDist.findIndex(h => h.allow < h.bees);
+    const nearestFirst = firstShut >= 0 && byDist.slice(firstShut + 1).every(h => h.allow === 0);
+    ok("with more than 600 bees to share, the allowances add up to exactly 600, nearest homes first", have > BE.CAP && allowed === BE.CAP && nearestFirst,
+      { have, allowed, homes: homes.length, extra: extra.length, shut: byDist.filter(h => h.allow === 0).length });
+    const shut = byDist.filter(h => h.allow === 0);
+    let peak = 0, shutOut = 0, overAllow = 0;
+    for (let i = 0; i < 1800; i++) {
+      step(); peak = Math.max(peak, BE.list.length);
+      for (const h of shut) shutOut = Math.max(shutOut, BE.out(h).length);
+      if (i % 20 === 19) for (const h of BE.loadedHomes()) overAllow = Math.max(overAllow, BE.out(h).length - h.allow);
+    }
+    ok("never more than 600 bees out at once, the homes past the cap keep theirs in, and none has more out than its allowance", peak <= BE.CAP && peak > 150 && shut.length > 0 && shutOut === 0 && overAllow <= 0,
+      { peak, shut: shut.length, shutOut, overAllow, homes: BE.loadedHomes().length });
     for (const [x, y, z] of extra) W.setBlock(x, y, z, 0);
     R.info.stats = BE.stats();
     return R;

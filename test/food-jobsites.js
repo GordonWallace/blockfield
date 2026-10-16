@@ -10,10 +10,10 @@ module.exports = async (pg) => {
     const out = { fails: [], notes: [] }, ok = (c, msg, d) => { if (!c) out.fails.push(msg + (d !== undefined ? " " + JSON.stringify(d) : "")); else out.notes.push("ok " + msg); };
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, villages: 10, gameMode: "creative" });
+    BF.newWorld(123, { gen: 4, villages: 10, gameMode: "creative" });
     BF.mobs.spawning = false;
-    // the nearest village with a builder
-    const vs = BF.worldgen.villagesNear(0, 0, 1500).filter(v => v.pop >= 10).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+    // the nearest village to spawn with a builder
+    const vs = BFT.villages(1500).filter(v => v.pop >= 10);
     let R = null, bl = null;
     for (const v of vs.slice(0, 6)) {
       BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5);
@@ -104,6 +104,7 @@ module.exports = async (pg) => {
       BF.jobs.release(other);
       other.jobMem = null;   // a plain jobless villager (no remembered trade)
       if (js0) W.setBlock(js0.x, js0.y, js0.z, 0);   // and its old block gone, so the new composter is the free jobsite
+      for (const j of BF.jobs.unclaimed(other, null, other)) if (!(j.id === BF.B.composter && Math.abs(j.x - entry.ox) < bp.w + 3 && Math.abs(j.z - entry.oz) < bp.d + 3)) W.setBlock(j.x, j.y, j.z, 0);   // a big village has other free jobsites too
       for (let s = 0; s < 20 * 60 && other.profession === "unemployed"; s++) { BF.world.update(entry.ox, entry.oz, 30); step(0.05); if (BF.sky.time > 0.45) BF.sky.setTime(0.03); }
       ok(R.members.some(o => o.profession === "farmer" && o.jobsite && W.getBlock(o.jobsite.x, o.jobsite.y, o.jobsite.z) === BF.B.composter && Math.abs(o.jobsite.x - entry.ox) < bp.w + 3 && Math.abs(o.jobsite.z - entry.oz) < bp.d + 3), "a jobless villager took the new composter", { prof: other.profession, js: other.jobsite });
     }

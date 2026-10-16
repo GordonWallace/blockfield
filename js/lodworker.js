@@ -19,6 +19,7 @@ onmessage = (e) => {
   if (m.mesh) { const r = BF.gridJob.mesh(m.p, m.raw); postMessage(r, BF.gridJob.meshBuffers(r)); return; }
   const t0 = performance.now(), out = BF.gridJob.alloc(m);
   BF.gridJob.rows(m, out, 0, m.ny);
+  if (m.stand) BF.gridJob.stand(m, out);
   out.ms = performance.now() - t0;
   postMessage(out, BF.gridJob.buffers(out));
 };
