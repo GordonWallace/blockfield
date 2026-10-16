@@ -56,7 +56,7 @@ A rule of thumb on the spawn plateau, where the ground is near y 1070: coal, iro
 - [[item:granite]], [[item:diorite]] and [[item:andesite]] each form huge blobs (dozens of blocks across) from 5 blocks below the surface downward, about 1.6 blobs per band.
 - [[item:tuff]] blobs sit in the deep, between y -64 and y 16 (absolute height), replacing both stone and deepslate.
 - [[item:dripstone_block]] blobs lie 30 to 250 blocks below the surface.
-- [[item:gravel]] (from 8 blocks down), [[item:dirt]] (from 6 down) and [[item:clay]] (20 to 300 down) occur in underground pockets.
+- [[item:gravel]] (from 8 blocks down), [[item:dirt]] (from 6 down) and [[item:clay]] (20 to 300 down) occur in underground pockets. Gravel pockets run through deepslate as well as stone; dirt and clay only replace stone.
 - Small pockets of [[item:water]] (from 10 blocks down) and magma blocks (from y -8 down, and some from 40 blocks down) are buried in the rock.
 
 See [[page:mining-and-tools]] for what you need to dig each of these.
