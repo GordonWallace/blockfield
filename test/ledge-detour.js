@@ -7,14 +7,26 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await require('./lib').toVillage(pg);
+  // the test floor: 60 blocks east of the village, 20 above the ground; the player stands by it until its chunks are loaded
+  const A = await pg.evaluate(() => {
+    const m = BF.mobs.list.find(v => v.type === "villager" && !v.child && v.village && !v.dead), V = m && m.village;
+    if (!V) return null;
+    const X0 = Math.floor(V.x) + 60, Z0 = Math.floor(V.z) - 12;
+    BF.player.position.set(X0 + 25, BF.player.position.y, Z0 + 25);
+    return { X0, Z0 };
+  });
+  for (let i = 0; A && i < 90; i++) {
+    if (await pg.evaluate(A => [[-40, -2], [-40, 32], [32, -2], [32, 32], [15, 15]].every(([x, z]) => BF.world.isLoaded(A.X0 + x, A.Z0 + z)), A)) break;
+    await pg.waitForTimeout(1000);
+  }
   let bad = 0;
   for (const kind of ["villager", "iron_golem", "boxed"]) {
-    const r = await pg.evaluate((kind) => {
+    const r = await pg.evaluate(([kind, A]) => {
       const W = BF.world, P = BF.player.position, type = kind === "boxed" ? "villager" : kind;
-      const m = BF.mobs.list.find(v => v.type === type && !v.child && v.village && !v.dead);
+      const m = A && BF.mobs.list.find(v => v.type === type && !v.child && v.village && !v.dead);
       if (!m) return { kind, error: "no " + type };
-      const V = m.village;
-      const X0 = Math.floor(V.x) + 60, Z0 = Math.floor(V.z) - 12, Y0 = Math.floor(P.y) + 30, N = 30;
+      const { X0, Z0 } = A, Y0 = W.heightAt(X0 + 15, Z0 + 15) + 20, N = 30;
+      if (!W.isLoaded(X0 - 40, Z0) || !W.isLoaded(X0 + 32, Z0 + 32)) return { kind, error: "test floor not loaded" };
       const stone = BF.B.stone, leaf = BF.B.spruce_leaves != null ? BF.B.spruce_leaves : BF.B.oak_leaves;
       // a floor high above the ground, open towards the village (-x); a one-block step at x <= 15; walls on the other sides
       for (let x = -40; x < N + 2; x++) for (let z = -2; z < N + 2; z++) for (let y = Y0 - 1; y < Y0 + 8; y++) {
@@ -28,21 +40,23 @@ module.exports = async (pg, out) => {
       const mb = W.moveBox; let ceil = 0;
       W.moveBox = function (pos) { const res = mb.apply(this, arguments); if (pos === m.position && res.hitCeil) ceil++; return res; };
       const old = new Set(BF.glog ? BF.glog.recent(400) : []);
-      const logged = () => (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !old.has(e)).map(e => e.l + " " + e.x);
+      const here = e => e.p && e.p[0] >= X0 - 2 && e.p[0] <= X0 + N && e.p[2] >= Z0 - 2 && e.p[2] <= Z0 + N;   // this mob's lines, not the village's own golems'
+      const logged = () => (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !old.has(e) && here(e)).map(e => e.l + " " + e.x);
       let T = 0, past = null, stuckAt = null;
       const step = () => { BF.sky.setTime(0.1); BF.mobs.update(0.05); P.set(X0 + 25, Y0 + 1, Z0 + 25); T += 0.05; };
       try {
         if (kind !== "boxed") {
           while (T < 60 && past == null) { step(); if (m.position.x < X0 + 15.5) past = +T.toFixed(1); }
         } else {
-          while (T < 40 && stuckAt == null) { step(); if (logged().some(t => /^ERROR .* stuck at/.test(t))) stuckAt = +T.toFixed(1); }
+          while (T < 50 && stuckAt == null) { step(); if (logged().some(t => /^ERROR .* stuck at/.test(t))) stuckAt = +T.toFixed(1); }
           for (let z = 10; z <= 11; z++) W.setBlock(X0 + 18, Y0, Z0 + z, 0), W.setBlock(X0 + 18, Y0 + 1, Z0 + z, 0);   // let it out
+          var held = m.ai.held && +m.ai.held.t.toFixed(1), mode = m.ai.mode;
           const t0 = T;
           while (T < t0 + 30 && past == null) { step(); if (m.position.x < X0 + 15.5) past = +T.toFixed(1); }
         }
       } finally { W.moveBox = mb; }
-      return { kind, ceil, past, stuckAt, log: logged(), at: [m.position.x - X0, m.position.y - Y0, m.position.z - Z0].map(v => +v.toFixed(1)) };
-    }, kind);
+      return { kind, ceil, past, stuckAt, held: typeof held === 'undefined' ? null : held, mode: typeof mode === 'undefined' ? null : mode, log: logged(), at: [m.position.x - X0, m.position.y - Y0, m.position.z - Z0].map(v => +v.toFixed(1)) };
+    }, [kind, A]);
     console.log(JSON.stringify(r));
     if (r.error) { console.log("FAIL " + r.error); bad++; continue; }
     if (r.ceil > 0) { console.log("FAIL " + kind + " jumped into the leaves " + r.ceil + " times"); bad++; }
