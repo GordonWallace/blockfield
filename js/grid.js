@@ -468,6 +468,15 @@ BF.gridJob.discIndex = discIndex; BF.gridJob.SECTORS = SECTORS;
 
 if (typeof document === "undefined") return;   // in a worker: only the sampling above is needed
 
+// A worker's URL, stamped like the page's scripts (debug/server.js adds ?v=<file time> to each script tag; the newest is used here, and
+// the worker passes it on to the scripts it imports), so a browser fetches new worker scripts after an update instead of running copies
+// it kept, perhaps from another server on the same port (blockfield-round also has a js/lodworker.js and js/grid.js on localhost:8000).
+BF.workerUrl = function (file) {
+  let v = 0;
+  for (const s of document.querySelectorAll("script[src]")) { const m = /[?&]v=(\d+)/.exec(s.getAttribute("src")); if (m) v = Math.max(v, +m[1]); }
+  return v ? file + "?v=" + v : file;
+};
+
 // ---- the job queue ----
 // request(job, prio, done, tag): prio is a number (lower first), or a function giving one each time the queue is looked at; done(result)
 // gets the arrays from BF.gridJob.alloc. cancel(tag) drops queued jobs with that tag (and ignores the answers of running ones).
@@ -481,7 +490,7 @@ S.reset = function (world) {
   const k = Math.max(1, Math.min(6, (navigator.hardwareConcurrency || 2) - 1));   // every core but the page's, up to 6
   for (let i = 0; i < k; i++) {
     let w;
-    try { w = new Worker("js/lodworker.js"); } catch (e) { S.inline = true; break; }
+    try { w = new Worker(BF.workerUrl("js/lodworker.js")); } catch (e) { S.inline = true; break; }
     w.busy = [];   // jobs posted to this worker, oldest first (it answers in order)
     w.postMessage({ init: world, palette: PAL });
     w.onmessage = (e) => { const it = w.busy.shift(); if (e.data.ms) { S.workMs += e.data.ms; S.samples += e.data.ok.length; } if (it && !it.dead) it.done(e.data); pump(); };
