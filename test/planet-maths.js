@@ -5,7 +5,8 @@
 //  - handedness: grid u, up and grid v form a right-handed frame on the sphere, as Blockfield draws x, y, z (not mirrored)
 //  - atlas: canon of every edge's margin agrees with wrap, block cells map to cells and back, rel / distance agree with the great
 //    circle near edges, wedges and opposite faces are flagged, lat/lon round-trips, recanon keeps a walk straight
-//  - identity: every helper is the identity off the planet (generators 1 to 3)
+//  - one world: the helpers' identity branches for the flat generators 1 to 3 were removed with them (r14-24); isPlanet() is always
+//    true and the helpers treat any point as an atlas point, whatever BF.state.gen says
 global.window = {};
 require(__dirname + "/../js/planet.js");
 const BF = window.BF, P = BF.planet, N = P.N;
@@ -134,13 +135,12 @@ BF.state = { gen: 4 }; BF.SEA = 0;
   check(P.recanon({ x: P.W * 2 + N + 5, z: N + 5 }) === 0, "recanon leaves a canonical point alone");
 }
 
-// identity off the planet
+// no flat worlds any more (r14-24): the helpers no longer read BF.state.gen
 {
   BF.state.gen = 3;
-  const c = P.canon(-12.5, 99, {}), cc = P.canonCell(-13, 99, {}), r = P.rel({ x: 0, z: 0 }, { x: 3e6, z: -4 }, {}), e = { x: -9e5, z: 4, yaw: 1 };
-  check(c.x === -12.5 && c.z === 99 && c.turn === 0 && !c.off && cc.x === -13 && cc.z === 99, "canon is the identity in flat worlds");
-  check(r.x === 3e6 && r.z === -4 && P.distance({ x: 0, z: 0 }, { x: 3, z: 4 }) === 5 && P.toward({ x: 1, z: 1 }, { x: 4, z: 5 }, {}).d === 5, "rel, distance and toward are plain x/z maths in flat worlds");
-  check(P.recanon(e) === 0 && e.x === -9e5 && e.yaw === 1 && P.latLonAt(0, 0) === null, "recanon and latLonAt do nothing in flat worlds");
+  const c = P.canon(-12.5, 99, {}), m = P.canon(P.W * 4 + N - 10, N + 5, {});
+  check(P.isPlanet() && c.off && m.f !== 4 && !m.off, "isPlanet() is always true: an old generator number changes nothing, a point left of the atlas is off it and a margin point is mapped");
+  BF.state.gen = 4;
 }
 
 console.log(fails ? "FAIL planet-maths: " + fails + " checks failed" : "PASS planet-maths");

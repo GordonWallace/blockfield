@@ -2,8 +2,8 @@
 // New worlds are planets, and saves (spec r14-19): save.create makes a generator 4 world saved as version 2; a save made with the
 // player, a boat and mobs on face 0 and edits on both sides of a face edge comes back exactly; the spawn is dry temperate or
 // subtropical land at least 5 km from every face edge and 20 km from every corner, the same each time; a 1.3 (version 1) world is
-// listed greyed with only Delete and won't open from the list; creating a world from the menu makes a planet; #seed<n> boots a
-// planet and #seed<n>gen3 a legacy world.
+// listed greyed with only Delete, won't open from the list and save.load refuses it; creating a world from the menu makes a planet;
+// #seed<n> boots a planet, and since the flat generators were retired (r14-24) a #seed<n>gen3 hash is not read: the default planet boots.
 // node test/run.js /tmp/ps test/planet-saves.js
 module.exports = async (pg, out) => {
   let bad = 0;
@@ -74,8 +74,8 @@ module.exports = async (pg, out) => {
     const raw = await new Promise((res, rej) => { const q = indexedDB.open("blockfield"); q.onsuccess = () => { const t = q.result.transaction(["data", "worlds"], "readonly"); const a = t.objectStore("data").get(meta.id), m = t.objectStore("worlds").get(meta.id); t.oncomplete = () => res({ data: a.result, meta: m.result }); t.onerror = () => rej(t.error); }; q.onerror = () => rej(q.error); });
     r.version = raw.data.version; r.dataGen = raw.data.gen; r.metaVersion = raw.meta.version; r.metaGen2 = raw.meta.gen;
     r.playerCanonical = (() => { const c = P.canon(raw.data.player.x, raw.data.player.z, {}); return c.x === raw.data.player.x && c.z === raw.data.player.z && c.f === 0; })();
-    // somewhere else, then back
-    BF.newWorld(1, { gen: 3 });
+    // somewhere else (another planet), then back
+    BF.newWorld(1);
     await settle(500);
     let refreeze = true;
     BF.on("worldLoaded", () => { if (refreeze) BF.warp.freeze(); });   // straight after restore (which resets the speed), before any frame runs
@@ -111,13 +111,18 @@ module.exports = async (pg, out) => {
   check(sv.frozen && sv.pig < 0.1 && sv.cow < 0.1, "the mobs come back where they were");
 
   // ---- a 1.3 world in the list: greyed, Delete only, won't open
-  await pg.evaluate(async () => {
+  const oldLoad = await pg.evaluate(async () => {
     const now = Date.now(), id = "wold" + now.toString(36);
     const meta = { id, name: "My 1.3 world", seed: 77, gameMode: "survival", gen: 3, biomeScale: 2, villages: 10, created: now - 1000, lastPlayed: now + 1000 };
     const data = { version: 1, seed: 77, gen: 3, biomeScale: 2, villages: 10, time: { t: 0.3, day: 2 }, player: { x: 8, y: 80, z: 8 }, edits: {} };
     await new Promise((res, rej) => { const q = indexedDB.open("blockfield"); q.onsuccess = () => { const t = q.result.transaction(["data", "worlds"], "readwrite"); t.objectStore("worlds").put(meta); t.objectStore("data").put(data, id); t.oncomplete = res; t.onerror = () => rej(t.error); }; q.onerror = () => rej(q.error); });
     window.__oldId = id;
+    // save.load refuses it too (there is no flat generator to open it with), and leaves the world as it was
+    const seed0 = BF.state.seed;
+    const msg = await BF.save.load(id).then(() => "opened", e => e.message);
+    return { msg, kept: BF.state.seed === seed0 && BF.state.gen === 4 };
   });
+  check(/can't be opened in 1\.4/.test(oldLoad.msg) && oldLoad.kept, "save.load refuses a 1.3 world (" + oldLoad.msg + ") and the world stays as it was");
   await pg.reload();
   await pg.waitForTimeout(5000);
   const list = await pg.evaluate(() => {
@@ -228,7 +233,7 @@ module.exports = async (pg, out) => {
   console.log("groundAt " + JSON.stringify(gh));
   check(Math.abs(gh.before - gh.want) > 1 && Math.abs(gh.after - gh.want) < 0.01, "after a new world the view's ground height is the new world's (not cached from the old one)");
 
-  // ---- #seed<n> boots a planet; #seed<n>gen3 a legacy world
+  // ---- #seed<n> boots a planet; #seed<n>gen3 is no longer read (the flat generators are gone): the default planet, seed 1337
   const url = pg.url().replace(/#.*$/, "");
   const booted = () => pg.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById("bf-loading"), null, { timeout: 120000 }).catch(() => {}).then(() => pg.waitForTimeout(1000));   // (a planet boot works out its rivers first)
   await pg.goto(url + "#seed42"); await pg.reload(); await booted();
@@ -236,9 +241,10 @@ module.exports = async (pg, out) => {
   await pg.goto(url); await pg.reload(); await booted();
   const h0 = await pg.evaluate(() => BF.state.gen);
   await pg.goto(url + "#seed42gen3"); await pg.reload(); await booted();
-  const h3 = await pg.evaluate(() => BF.state.gen);
+  const h3 = await pg.evaluate(() => ({ gen: BF.state.gen, seed: BF.state.seed }));
   console.log("hash " + JSON.stringify({ h1, h0, h3 }));
-  check(h1.gen === 4 && h1.seed === 42 && h0 === 4 && h3 === 3, "#seed42 and no hash boot planets; #seed42gen3 boots generator 3");
+  check(h1.gen === 4 && h1.seed === 42 && h0 === 4, "#seed42 and no hash boot planets");
+  check(h3.gen === 4 && h3.seed === 1337, "#seed42gen3 (a retired flat generator) is not read: the default planet, seed 1337, boots");
 
   await pg.evaluate(async () => { for (const w of await BF.save.list()) await BF.save.remove(w.id); });
   const errs = await pg.evaluate(() => window.__errs || []);

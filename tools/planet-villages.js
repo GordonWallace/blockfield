@@ -1,39 +1,35 @@
 // Villages on the planet (spec r14-12), node, no browser. Usage: node tools/planet-villages.js [seeds=1337,42] [regions=1200]
 //  - regions: a sample of village regions spread evenly over all six faces; how many the edge rule leaves without a village, and how
-//    many of the rest hold one per region with its centre on land, against generator 3's rate over regions spread across ~400 km
+//    many of the rest hold one per region with its centre on land, against generator 3's rate (G3_RATE, measured before r14-24 retired it)
 //  - footprints: every village found stays on its own face, inside its region, at least EDGE_KEEP from every edge
 //  - lookups across an edge: from a point by a face edge with villages on both sides near it, villagesNear finds villages on both faces,
 //    as canonical records, and nearestVillage agrees with villagesNear; villageFootprints lists a village's buildings
 // Exits non-zero on a failed check. Also used by test/planet-villages.js.
 const fs = require("fs"), vm = require("vm"), path = require("path");
 const ROOT = path.join(__dirname, "..");
-function env(seed, gen) {
+function env(seed) {
   delete global.BF;
   global.window = global; global.THREE = {}; global.document = {};
-  for (const f of ["blocks.js", "noise.js", "planet.js", "planetgen.js", "rivers.js", "planetrivers.js", "worldgen.js"])
+  for (const f of ["blocks.js", "noise.js", "planet.js", "planetgen.js", "planetrivers.js", "worldgen.js"])
     vm.runInThisContext(fs.readFileSync(path.join(ROOT, "js", f), "utf8"), { filename: f });
-  BF.CS = 16; BF.state = { gen, seed }; BF.noise = BF.makeNoise(seed);
-  BF.worldgen.init(BF.noise, { gen, villages: 10 });
+  BF.CS = 16; BF.state = { gen: 4, seed }; BF.noise = BF.makeNoise(seed);
+  BF.worldgen.init(BF.noise, { villages: 10 });
   return BF;
 }
 const REGION = 384;
+// Generator 3's villages per land region (centre above sea level), the reference the planet's rate is held to. Generator 3 (the flat
+// mile-high world) was retired in spec r14-24; these are its rates over 35 x 35 regions spread across ~500 km (regions 20 + 37 i,
+// village generator 10), measured on the last code that had it: seed 1337 86 villages in 358 land regions, seed 42 109 in 388. Other
+// seeds are held to the mean of the two.
+const G3_RATE = { 1337: 86 / 358, 42: 109 / 388 }, G3_MEAN = (G3_RATE[1337] + G3_RATE[42]) / 2;
 
 function run(seeds, nRegions, ok, log) {
   const stats = [];
   for (const seed of seeds) {
-    // ---- generator 3: the rate over a square of regions away from the home plateau ----
-    let BF = env(seed, 3), W = BF.worldgen;
-    const side = Math.round(Math.sqrt(nRegions));
-    let g3 = 0, g3land = 0;
-    for (let j = 0; j < side; j++) for (let i = 0; i < side; i++) {   // spread over about 400 km, so continents and oceans average out
-      const rx = 20 + i * 37, rz = 20 + j * 37;
-      if (W.heightAt(rx * REGION, rz * REGION) > BF.SEA) g3land++;
-      if (W._villageRegion(rx, rz)) g3++;
-    }
-    const g3rate = g3 / g3land;
+    const g3rate = G3_RATE[seed] || G3_MEAN, side = Math.round(Math.sqrt(nRegions));
 
     // ---- the planet ----
-    BF = env(seed, 4); W = BF.worldgen;
+    const BF = env(seed), W = BF.worldgen;
     const P = BF.planet, N = P.N, RPF = Math.ceil(N / REGION), KEEP = W.EDGE_KEEP;
     let excluded = 0, total = 0, vils = 0, footBad = 0, land = 0;
     const perFace = Math.ceil(side * side / 6), s = Math.round(Math.sqrt(perFace));
@@ -58,7 +54,7 @@ function run(seeds, nRegions, ok, log) {
     for (let r = 0; r < RPF; r++) if (W._planetRegionCentre(r, 200)) keep++;
     const exFrac = 1 - (keep / RPF) ** 2;
     const rate = vils / land;
-    log(`seed ${seed}: edge rule leaves ${(100 * exFrac).toFixed(2)}% of regions empty (${excluded} of ${total} sampled); ${vils} villages, ${(100 * rate).toFixed(1)} per 100 land regions (centre on land: ${(100 * land / (total - excluded)).toFixed(0)}%), generator 3 ${(100 * g3rate).toFixed(1)} (${(100 * g3land / (side * side)).toFixed(0)}% land)`);
+    log(`seed ${seed}: edge rule leaves ${(100 * exFrac).toFixed(2)}% of regions empty (${excluded} of ${total} sampled); ${vils} villages, ${(100 * rate).toFixed(1)} per 100 land regions (centre on land: ${(100 * land / (total - excluded)).toFixed(0)}%), generator 3 ${(100 * g3rate).toFixed(1)}`);
     ok(exFrac < 0.02, `seed ${seed}: the edge rule excludes under 2% of regions (${(100 * exFrac).toFixed(2)}%)`);
     ok(footBad === 0, `seed ${seed}: all ${vils} sampled villages stay inside their region on their own face, clear of every edge`);
     ok(rate > g3rate * 0.5 && rate < g3rate * 2, `seed ${seed}: villages per land region (${(100 * rate).toFixed(1)}%) are close to generator 3's (${(100 * g3rate).toFixed(1)}%)`);

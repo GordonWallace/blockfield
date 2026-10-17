@@ -1,14 +1,16 @@
-// Gen 3 ore census by depth below the surface: node tools/ore-depth.js [seed] [chunks]   (DEPTH=<blocks> BIN=<blocks>, default 150 and 10;
+// Ore census by depth below the surface, on the planet: node tools/ore-depth.js [seed] [chunks]   (DEPTH=<blocks> BIN=<blocks>, default 150 and 10;
 // MINH=<y> samples only higher land whose surface is at least that high, so deep bins are not short of chunks that hit bedrock)
-// Samples land chunks on a coarse grid around the origin, generates each column from DEPTH below its surface to the surface and counts ore
+// Samples land chunks on a coarse grid within about 24 km of the world spawn, generates each column from DEPTH below its surface to the surface and counts ore
 // blocks per 10-block depth bin, split into low land (surface below y 40) and the rest. With REF=<rev> it reads js/ from that revision.
-const path = require("path"), cp = require("child_process");
-const { env, cur } = require("./gen3-check.js");
+const fs = require("fs"), vm = require("vm"), path = require("path"), cp = require("child_process");
 const ROOT = path.join(__dirname, "..");
-const srcOf = process.env.REF ? f => cp.execFileSync("git", ["show", process.env.REF + ":js/" + f], { cwd: ROOT, maxBuffer: 1 << 26 }).toString() : cur;
+const srcOf = process.env.REF ? f => cp.execFileSync("git", ["show", process.env.REF + ":js/" + f], { cwd: ROOT, maxBuffer: 1 << 26 }).toString() : f => fs.readFileSync(path.join(ROOT, "js", f), "utf8");
 const seed = +(process.argv[2] || 1337), want = +(process.argv[3] || 120);
-const BF = env(srcOf);
-BF.noise = BF.makeNoise(seed); BF.worldgen.init(BF.noise, { gen: 3, biomeScale: 1 });
+global.window = global; global.THREE = {}; global.document = {};
+for (const f of ["blocks.js", "noise.js", "planet.js", "planetgen.js", "planetrivers.js", "worldgen.js"]) vm.runInThisContext(srcOf(f), { filename: f });
+BF.CS = 16; BF.state = { gen: 4, seed };
+BF.noise = BF.makeNoise(seed); BF.worldgen.init(BF.noise, { biomeScale: 1, villages: 10 });
+const [SX, SZ] = BF.planetgen.spawnSearch(), SCX = Math.floor(SX / 16), SCZ = Math.floor(SZ / 16);
 const ORES = ["coal", "iron", "copper", "lapis", "gold", "redstone", "diamond", "emerald"];
 const idOre = new Map();
 for (const o of ORES) for (const n of [o + "_ore", "deepslate_" + o + "_ore"]) if (BF.B[n] !== undefined) idOre.set(BF.B[n], o);
@@ -16,7 +18,7 @@ const DEPTH = +(process.env.DEPTH || 150), BIN = +(process.env.BIN || 10);
 const tab = { low: { n: 0, bins: {} }, high: { n: 0, bins: {} } };
 let found = 0;
 for (let r = 0; found < want && r < 40000; r++) {
-  const cx = ((r * 7919) % 6000) - 3000, cz = (((r * 104729) >> 3) % 6000) - 3000;
+  const cx = SCX + ((r * 7919) % 3000) - 1500, cz = SCZ + (((r * 104729) >> 3) % 3000) - 1500;
   const hc = BF.worldgen.heightAt(cx * 16 + 8, cz * 16 + 8);
   const wl = BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(cx * 16 + 8, cz * 16 + 8) : null;
   if (hc < 2 || (wl != null && wl > hc)) continue;      // land only

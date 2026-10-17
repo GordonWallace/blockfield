@@ -9,6 +9,6 @@ On the planet, Forest is the common woodland of the temperate band and the wette
 - Short grass is common, in patches. Ferns, flowers ([[item:poppy]], [[item:dandelion]], [[item:cornflower]]) and mushrooms ([[item:red_mushroom]], [[item:brown_mushroom]]) are rare. Pumpkin patches may appear in clearings.
 
 ### Villages
-Villages do not generate in forests. The only exception is in worlds made with village generator 9 or earlier, where the first village near the spawn point can be built in one if the land around the start has no better site.
+Villages do not generate in forests.
 
 Where the terrain is "weird" a forest turns into [[biome:flower-forest|Flower Forest]].
