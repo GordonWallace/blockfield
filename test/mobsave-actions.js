@@ -24,6 +24,7 @@ module.exports = async (pg, out) => {
   const n = Object.keys(before.vs).length;
   ok("villagers were loaded to save", n >= 4, { n });
   await pg.reload();
+  await require('./lib').ready(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
   await pg.waitForTimeout(6000);
   await pg.evaluate(async id => { await BF.save.load(id); BF.mobs.spawning = false; }, id);
   await pg.waitForFunction(() => BF.mobs.list.filter(m => m.restored && m.type === "villager").length >= 3, null, { timeout: 60000 }).catch(() => {});
