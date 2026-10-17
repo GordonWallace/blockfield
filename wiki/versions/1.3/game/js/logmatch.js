@@ -9,7 +9,7 @@
 (() => {
 "use strict";
 
-const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", build: "Building", born: "Being born", death: "Dying", horse: "Handling horses", caravan: "Travelling with goods", cattle: "Tending cattle", bake: "Baking" };
+const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", build: "Building", born: "Being born", death: "Dying", horse: "Handling horses", caravan: "Travelling with goods", cattle: "Tending cattle", bake: "Baking", loading: "Village loading" };
 const ACTS_FOR = t => t === "Player" ? ["buy", "bed", "chest"] : t === "Child" ? ["born", "death"] :
   t === "Farmer" ? ["buy", "sell", "bed", "chest", "job", "tool", "harvest", "death"] : t === "Builder" ? ["buy", "sell", "bed", "chest", "job", "tool", "build", "death"] : t === "Stable Hand" ? ["buy", "sell", "bed", "chest", "job", "tool", "horse", "death"] : t === "Merchant" ? ["buy", "sell", "bed", "job", "caravan", "death"] : t === "Cowherd" ? ["buy", "sell", "bed", "chest", "job", "tool", "cattle", "death"] : t === "Baker" ? ["buy", "sell", "bed", "chest", "job", "tool", "bake", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
 const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", farm: "Harvests", build: "Building", birth: "Births", death: "Deaths", horse: "Horses", caravan: "Caravans", cattle: "Cattle", bake: "Baking" };

@@ -105,6 +105,9 @@ const ending = new Map();        // village key -> {t0, until (game day), est: [
 const errors = [];               // loading errors, newest last (shown on the debug screen)
 const nowDay = () => dayNow();
 function logError(kind, data) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }
+// At leisure: no task begun (begin) and doing one of the leisure things in js/villagerstatus.js. A task that runs past its estimate still counts.
+const isLeisure = m => !m.vtask && !!(BF.villagerStatus && BF.villagerStatus.leisure && BF.villagerStatus.leisure(m));
+const vlogLine = (rec, text, where) => { if (BF.vlog && rec) BF.vlog.log(rec, "loading", text, where); };
 const nameOf = m => (BF.vlog && BF.vlog.nameOf ? BF.vlog.nameOf(m) : "villager");
 // Seconds of game time the villager still needs to finish what it is doing (0 = nothing that must finish). Sets taskLeft.errand when the
 // task is an errand beyond the village (or a caravan trip): only those are errors if they are still running when the timer ends.
@@ -113,6 +116,7 @@ function taskLeft(m, rec) {
   if (m.dead || m.removed || m.child || m.sleeping || m.type !== "villager") return 0;
   if (m.profession === "explorer") return 0;                         // explorers are carved out: they unload with their village wherever they are
   if (m.profession === "merchant" && m.mc && m.mc.trip && BF.merchant && BF.merchant.leftSecs) { taskLeft.errand = true; return Math.min(MAXT, BF.merchant.leftSecs(m)); }
+  if (isLeisure(m)) return 0;                                         // strolling, relaxing and the like: the village doesn't wait for them
   const v = rec.wg;
   const out = v && v.minX != null ? edgeDist(v, m.position.x, m.position.z) : Math.max(0, Math.hypot(m.position.x - rec.x, m.position.z - rec.z) - 40);
   const t = m.vtask, left = t && t.end > nowDay() ? (t.end - nowDay()) * DAY_S : 0;   // what its task's estimate says is left (begin)
@@ -129,13 +133,15 @@ function walkSecs(m, pts) {
   for (const p of pts || []) { if (!p) continue; const px = p.x != null ? p.x : p[0], pz = p.z != null ? p.z : p[1]; d += Math.hypot(px - x, pz - z); x = px; z = pz; }
   return d * 1.3 / sp;
 }
+// The plan's margin on every task estimate: jobs work out the walk and the work, and real tasks run slower (paths, crowds, shopping in between).
+const EST_MARGIN = 1.25;
 // The villager is about to start a task of `secs` game seconds (`what` names it for the debug screen). Returns false, and the task must not
 // start, when its village is counting down and the task would not finish before the timer ends; otherwise records it and returns true.
 function begin(m, secs, what) {
   if (!m || !m.village) return true;
-  secs = Math.max(1, Math.round(secs || 0));
+  secs = Math.max(1, Math.round((secs || 0) * EST_MARGIN));
   if (!mayStart(m.village.key, secs)) { m.vdenied = { what, secs, t: nowDay() }; return false; }
-  m.vtask = { what: what || "", secs, end: nowDay() + secs / DAY_S };
+  m.vtask = { what: what || "", secs, t0: nowDay(), end: nowDay() + secs / DAY_S };
   return true;
 }
 // The task is over (or was given up): nothing left to wait for.
@@ -147,7 +153,11 @@ function estimates(key) {
   let max = 0;
   if (rec) for (const m of rec.members) {
     const s = taskLeft(m, rec);
-    if (s > 0) { list.push({ who: nameOf(m), task: BF.villagerStatus ? BF.villagerStatus.text(m) : "", secs: Math.round(s), errand: taskLeft.errand }); max = Math.max(max, s); }
+    if (s > 0) {
+      const t = m.vtask, x = { who: nameOf(m), task: BF.villagerStatus ? BF.villagerStatus.text(m) : "", secs: Math.round(s), errand: taskLeft.errand };
+      if (t && t.t0 != null) { x.est = t.secs; x.ran = Math.round((nowDay() - t.t0) * DAY_S); }   // the task's own estimate and how long it has run
+      list.push(x); max = Math.max(max, s);
+    }
   }
   list.sort((a, b) => b.secs - a.secs);
   return { list, max: Math.min(max, MAXT) };
@@ -179,9 +189,24 @@ function forceStop(rec, why) {
     for (const j of JOBS()) { const a = j && j.forceStop && j.forceStop(m); if (a) acts.push(a); }
     for (const o of L) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
     const v = rec.wg;
+    if (!acts.length && isLeisure(m)) continue;                      // leisure ends quietly (endLeisure, when the village unloads)
     if (m.profession !== "explorer" && !acts.length && v && v.minX != null && edgeDist(v, m.position.x, m.position.z) > 4 && BF.mobs.sendHome) { BF.mobs.sendHome(m); acts.push("went home"); }
     if (acts.length) logError("forced-stop", { village: key, who: nameOf(m), task, action: acts.join(", "), why });
   }
+}
+// The village is unloading: leisure just ends, without an error. A villager at leisure out beyond the edge is put back home so that it
+// isn't left out there; one line in the village log names them.
+function endLeisure(key) {
+  const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(key), v = rec && rec.wg;
+  if (!rec || !BF.mobs.sendHome) return;
+  const ended = [];
+  for (const m of rec.members) {
+    if (m.dead || m.removed || m.type !== "villager" || m.profession === "explorer" || !isLeisure(m)) continue;
+    const task = BF.villagerStatus.text(m);
+    if (m.vtask) done(m);
+    if (v && v.minX != null && edgeDist(v, m.position.x, m.position.z) > 4) { BF.mobs.sendHome(m); ended.push(nameOf(m) + " (" + task.toLowerCase() + ")"); }
+  }
+  if (ended.length) vlogLine(rec, "Unloaded: " + ended.join(", ") + " stopped and went home");
 }
 // Trips towards or from a village end when it is forced off.
 function forceTrips(key, why) {
@@ -283,10 +308,12 @@ function update(px, pz) {
       if (!(est.max > 0)) continue;                                  // nothing out on a task: it unloads now
       en = { t0: nd, until: nd + est.max / DAY_S, est: est.list, max: est.max };
       ending.set(k, en);
+      const top = est.list[0];
+      vlogLine(BF.mobs.villages.get(k), "Unloading in " + Math.round(est.max) + " s: waiting for " + est.list.length + " task" + (est.list.length === 1 ? "" : "s") + (top ? ", longest " + top.who + " (" + top.task + ")" : ""));
     }
     if (nd < en.until || nd < en.t0) { next.set(k, e); continue; }   // still counting down
     const rec = BF.mobs.villages.get(k);
-    for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.secs, ran: Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
+    for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.est != null ? x.est : x.secs, ran: x.ran != null ? x.ran : Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
     ending.delete(k);
   }
   // over a limit: stop villages in priority order until it is fine (never one within ALWAYS of the player)
@@ -313,6 +340,7 @@ function update(px, pz) {
   for (const [k, e] of next) active.set(k, e);
   for (const [k, e] of fresh) startCatchUp(k, e);
   for (const k of dropped) if (BF.merchant && BF.merchant.remember) BF.merchant.remember(k, true);   // its prices are written down for merchants elsewhere
+  for (const k of dropped) endLeisure(k);
   for (const k of dropped) if (BF.mobs && BF.mobs.unloadVillage) BF.mobs.unloadVillage(k);   // the village and all its villagers go together
   // stamp villages whose centre is loaded: the last stamp is when the village stopped being simulated
   const d = dayNow();
@@ -368,7 +396,7 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT,
+  areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, EST_MARGIN,
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);
