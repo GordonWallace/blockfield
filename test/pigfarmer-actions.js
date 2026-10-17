@@ -208,6 +208,9 @@ module.exports = async (pg, out) => {
 
     // ---- a working day: feeding at or under the limit (keeping 2 to lure), culling above it, never below 2 adults
     for (const s of P.pigs) { s.fed = null; s.cd = 0; }
+    // enough feed for every pig past the FEED_KEEP it holds back (what it bought above varies with the seller's offer, and with one
+    // feed over the lure it fed one pig and stopped, so the pair never bred)
+    { const want = PF.FEED_KEEP + P.pigs.length + 2 - PF.feedHeld(pf); if (want > 0) T.inv.add(pf.inv, I.carrot, want); }
     let fedN = 0, born = 0;
     BF.on("pigFed", (m, by) => { if (by === pf) fedN++; });
     BF.on("pigBorn", (pl, a) => { if (a && a.sty === P) born++; });

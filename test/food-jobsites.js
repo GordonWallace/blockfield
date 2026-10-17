@@ -106,8 +106,10 @@ module.exports = async (pg) => {
       BF.jobs.release(other);
       other.jobMem = null;   // a plain jobless villager (no remembered trade)
       if (js0) W.setBlock(js0.x, js0.y, js0.z, 0);   // and its old block gone, so the new composter is the free jobsite
-      for (const j of BF.jobs.unclaimed(other, null, other)) if (!(j.id === BF.B.composter && Math.abs(j.x - entry.ox) < bp.w + 3 && Math.abs(j.z - entry.oz) < bp.d + 3)) W.setBlock(j.x, j.y, j.z, 0);   // a big village has other free jobsites too
-      for (let s = 0; s < 20 * 150 && other.profession === "unemployed"; s++) { BF.world.update(entry.ox, entry.oz, 30); step(0.05); if (BF.sky.time > 0.45) BF.sky.setTime(0.03); }
+      // a big village has other free jobsites too, and one can come free during the wait (a forester's band saw when it dies or quits): cleared as they appear
+      const clear = () => { for (const j of BF.jobs.unclaimed(other, null, other)) if (!(j.id === BF.B.composter && Math.abs(j.x - entry.ox) < bp.w + 3 && Math.abs(j.z - entry.oz) < bp.d + 3)) W.setBlock(j.x, j.y, j.z, 0); };
+      clear();
+      for (let s = 0; s < 20 * 150 && other.profession === "unemployed"; s++) { if (s % 20 === 0) clear(); BF.world.update(entry.ox, entry.oz, 30); step(0.05); if (BF.sky.time > 0.45) BF.sky.setTime(0.03); }
       ok(R.members.some(o => o.profession === "farmer" && o.jobsite && W.getBlock(o.jobsite.x, o.jobsite.y, o.jobsite.z) === BF.B.composter && Math.abs(o.jobsite.x - entry.ox) < bp.w + 3 && Math.abs(o.jobsite.z - entry.oz) < bp.d + 3), "a jobless villager took the new composter", { prof: other.profession, js: other.jobsite, dist: Math.round(fd(other)), seek: other.seek && { site: other.seek.site, t: other.seek.t && +other.seek.t.toFixed(1), avoid: Object.keys(other.seek.avoid || {}).length }, task: other.vtask ? other.vtask.what : null, free: BF.jobs.unclaimed(other, null, other).map(j => [j.x, j.y, j.z, j.prof]) });
     }
     // ---- 3. farmers' dirt
