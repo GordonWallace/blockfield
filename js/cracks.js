@@ -140,7 +140,7 @@ function boxesFor(x, y, z, id) {
   }
   if (b.boxes && b.boxes.length) return b.boxes;
   if (b.box) return [b.box];
-  if (id === BF.B.dirt_path || id === BF.B.farmland) return [[0, 0, 0, 16, 15, 16]];
+  if (id === BF.B.dirt_path || id === BF.B.farmland || id === BF.B.farmland_dry) return [[0, 0, 0, 16, 15, 16]];
   return FULL;
 }
 

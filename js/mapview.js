@@ -420,7 +420,7 @@ function create(w, slot) {
   const id = BF.resolveItem(nameOf(k, zx, zz));
   getAuto(k, zx, zz);
   if (sel.count === 1) inv.setSlot(slot, { id, count: 1 });
-  else { inv.setSlot(slot, { id: sel.id, count: sel.count - 1 }); const left = inv.add(id, 1); if (left > 0 && BF.emit) BF.emit("itemDropped", id, left); }
+  else { inv.setSlot(slot, { id: sel.id, count: sel.count - 1 }); const left = inv.add(id, 1); if (left > 0) inv.dropOverflow(id, left); }
   return true;
 }
 function confirmPrompt() {

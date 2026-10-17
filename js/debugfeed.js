@@ -53,8 +53,18 @@ const isLoaded = rec => (rec.members || []).some(m => m.type === "villager" && !
 const nameOf = key => (BF.signs && BF.signs.villageName && BF.signs.villageName(key)) || "Village";
 
 // Full detail for one loaded village: the panel's numbers, its villagers, golems and free job blocks.
+// Emeralds and food (bread-equivalent) a villager holds: its inventory plus every chest it owns.
+function holdings(chestsOf, m) {
+  const em = BF.I && BF.I.emerald, F = BF.food, cs = chestsOf.get(BF.storage && BF.storage.keyOf ? BF.storage.keyOf(m) : null) || [];
+  const emIn = a => (a || []).reduce((n, st) => n + (st && st.id === em ? st.count : 0), 0), food = a => F ? F.breadEq(a || []) : 0;
+  let ce = 0, cf = 0;
+  for (const c of cs) { ce += emIn(c.slots); cf += food(c.slots); }
+  return { em: emIn(m.inv), emChests: ce, food: r1(food(m.inv)), foodChests: r1(cf), chests: cs.length };
+}
 function detail(rec) {
   const L = BF.vlog, d = L.panelData(rec);
+  const chestsOf = new Map();   // owner key -> chests
+  if (BF.inventory && BF.inventory.chests) for (const c of BF.inventory.chests.values()) if (c.owner) { const l = chestsOf.get(c.owner) || []; l.push(c); chestsOf.set(c.owner, l); }
   d.villagerList = [];
   d.golems = [];
   for (const m of rec.members || []) {
@@ -65,11 +75,16 @@ function detail(rec) {
       name: L.nameOf(m), prof: m.child ? "Child" : L.pretty(m.profession), child: !!m.child,
       status: status(m) || "", x: r1(m.position.x), y: r1(m.position.y), z: r1(m.position.z),
       hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!m.bed, sleeping: !!m.sleeping,
-      job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null,
+      job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
+      age: m.life ? Math.round((m.life.lived || 0) * 10) / 10 : null,   // game days it has been loaded and active
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));
   d.jobsites = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec).map(s => [s.x, s.z, L.pretty(s.prof)]) : [];
+  // structures the village's builders planned (js/builder.js rec.built): [x0, z0, x1, z1, type, finished 0|1]
+  d.built = (rec.built || []).filter(e => e.state !== "abandoned" && e.w && e.d).map(e => [e.ox, e.oz, e.ox + e.w - 1, e.oz + e.d - 1, e.type, e.state === "done" ? 1 : 0]);
+  // villagers who have died here (js/mobs.js rec.deadInfo, saved): name, job, cause, game day, age in days loaded and active
+  d.dead = (rec.deadInfo || []).map(e => ({ name: e.name || "Someone", prof: L.pretty(e.prof || "unknown"), cause: e.cause || null, day: e.day, age: e.age == null ? null : Math.round(e.age * 10) / 10 }));
   d.clock = BF.vlog.stamp(BF.sky.day + BF.sky.time);   // when these numbers were taken, shown once the village unloads
   return d;
 }
@@ -83,7 +98,9 @@ function villages(pp) {
   for (const key of keys) {
     const rec = recs.get(key), [kx, kz] = key.split(",").map(Number);
     const x = rec ? rec.x : kx, z = rec ? rec.z : kz, loaded = !!rec && isLoaded(rec);
-    out.villages.push({ key, name: nameOf(key), x: Math.round(x), z: Math.round(z), dist: Math.round(Math.hypot(x - pp.x, z - pp.z)), loaded });
+    const va = BF.villageLife && BF.villageLife.villageAge ? BF.villageLife.villageAge(key) : null;   // game days loaded and active
+    const H = BF.happiness, happy = H ? (loaded ? H.score(rec) : H.last(key)) : null;   // js/happiness.js; an unloaded village keeps its last score
+    out.villages.push({ key, name: nameOf(key), x: Math.round(x), z: Math.round(z), dist: Math.round(Math.hypot(x - pp.x, z - pp.z)), loaded, age: va == null ? null : Math.round(va * 10) / 10, happy });
     if (loaded) out.detail[key] = detail(rec);
     if (rec && rec.wg && !sentLayouts.has(key)) { out.layouts[key] = layout(rec); sentLayouts.add(key); }
     const a = L.entries(key), last = a[a.length - 1], sig = a.length + "|" + (last ? last[0] + last[2] : "");

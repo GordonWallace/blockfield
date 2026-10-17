@@ -1,9 +1,14 @@
 // CI test runner: runs a tier of the headless tests one after another and fails if any of them fails.
-// Usage: NODE_PATH=$(npm root -g) node test/ci.js <baseline|integration> [outDir=ci-out] [name ...]
+// Usage: NODE_PATH=$(npm root -g) node test/ci.js <baseline|integration|suites> [outDir=ci-out] [name ...]
 // Tiers and per-test settings live in test/ci.json. A test file that is not listed there can declare its own tier with a comment
 // line `// @ci baseline`, `// @ci integration` or `// @ci skip <reason>`; an unlisted, untagged test runs in integration.
-// Tests run serially: several headless games at once starve each other and village loading gets flaky.
+// Tests run serially: several headless games at once starve each other and village loading gets flaky. To go faster, CI
+// splits a tier across several runners (CI_SHARD below), one machine each.
 // A test fails when it exits non-zero, times out, uses more memory than CI_MEM_LIMIT_MB (10 GB), throws in the page (PAGEERROR), or prints a line starting with FAIL / FAILED.
+// Suites (test/ci.json "suites", or a test file's `// @ci ... suite=<name>` header) group the tests by game area. A baseline run adds every test of the suites named in CI_SUITES
+// ("jobs ui", "all"), or in a "CI suites: jobs, ui" line of the pull request body (PR_BODY, set by the workflow). The long tests
+// (ci.json "soak") run only when soak is named too ("jobs soak") or with all, so a suite stays a few minutes.
+// `node test/ci.js suites` lists them.
 // Writes <outDir>/<name>.log (+ screenshots) and a markdown table to $GITHUB_STEP_SUMMARY when set.
 const fs = require('fs'), path = require('path'), cp = require('child_process');
 const root = path.resolve(__dirname, '..');
@@ -13,22 +18,99 @@ const only = process.argv.slice(4);
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci.json'), 'utf8'));
 const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js']);
 
+// A test file can carry its own settings in a header line, so adding a test needs no edit to the shared ci.json (parallel PRs
+// kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>] [soak] [timeout=<s>] [args=<a,b,...>] [reason]`,
+// e.g. `// @ci integration suite=farming timeout=600`. For a test listed in ci.json, ci.json wins where both say something.
+const header = src => {
+  const m = /^\/\/ @ci (baseline|integration|skip)\b(.*)$/m.exec(src);
+  if (!m) return null;
+  const h = { tier: m[1] }, rest = [];
+  for (const w of m[2].trim().split(/\s+/).filter(Boolean)) {
+    const kv = /^(suite|timeout|args)=(.+)$/.exec(w);
+    if (kv) h[kv[1]] = kv[1] === 'timeout' ? +kv[2] : kv[1] === 'args' ? kv[2].split(',') : kv[2];
+    else if (w === 'soak') h.soak = true;
+    else rest.push(w);
+  }
+  h.why = rest.join(' ');
+  return h;
+};
 // the full test list: manifest entries, then any other test/*.js
 const tests = manifest.tests.map(t => ({ ...t }));
-const listed = new Set(tests.map(t => t.file));
+const listed = new Map(tests.map(t => [t.file, t]));
 for (const f of fs.readdirSync(__dirname).filter(f => f.endsWith('.js') && !NOT_TESTS.has(f)).sort()) {
   const file = 'test/' + f;
-  if (listed.has(file)) continue;
   const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
-  const tag = /^\/\/ @ci (baseline|integration|skip)\b(.*)$/m.exec(src);
+  const h = header(src);
+  const t = listed.get(file);
+  if (t) { if (h) t.header = h; continue; }
   // a module that exports a function is an action script for test/run.js; anything else runs on its own
   const kind = /module\.exports\s*=/.test(src) ? 'actions' : 'node';
-  tests.push({ name: f.replace(/\.js$/, ''), file, kind, tier: tag ? tag[1] : 'integration', why: tag && tag[2].trim(), discovered: true });
+  tests.push({ name: f.replace(/\.js$/, ''), file, kind, tier: h ? h.tier : 'integration', why: h && h.why, timeout: h && h.timeout, args: h && h.args, header: h, discovered: true });
 }
 for (const t of tests) if (!fs.existsSync(path.join(root, t.file))) t.missing = true;
 
-const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier);
-const run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
+// suites: name -> tests; each test's suite (ci.json's suite lists, else the file's header)
+const SUITES = manifest.suites || {};
+for (const [k, s] of Object.entries(SUITES)) for (const n of s.tests) { const t = tests.find(t => t.name === n); if (t) t.suite = k; }
+// soak: the long tests of every suite. A named suite runs without them unless soak is named too (or all); soak alone runs them all
+const SOAK = manifest.soak || { tests: [] };
+for (const n of SOAK.tests) { const t = tests.find(t => t.name === n); if (t) t.soak = true; }
+const badSuite = [];
+for (const t of tests) {
+  const h = t.header;
+  if (!h) continue;
+  if (h.suite && !t.suite) { if (SUITES[h.suite]) t.suite = h.suite; else badSuite.push(`${t.name} (suite=${h.suite})`); }
+  if (h.soak) t.soak = true;
+  if (h.timeout && !t.timeout) t.timeout = h.timeout;
+}
+if (badSuite.length) { console.log(`FAIL unknown suite in a // @ci header: ${badSuite.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}`); process.exit(1); }
+if (tier === 'suites') {
+  const names = (k, soak) => tests.filter(t => t.suite === k && !t.missing && !!t.soak === soak).map(t => t.name).join(' ');
+  for (const [k, s] of Object.entries(SUITES)) console.log(`${k}: ${s.about}\n  ${names(k, false)}\n  with soak: ${names(k, true) || '-'}\n`);
+  console.log(`soak: ${SOAK.about}\n`);
+  const none = tests.filter(t => !t.suite && !t.missing && t.tier !== 'skip');
+  if (none.length) console.log('in no suite (give each a // @ci header with suite=<name>): ' + none.map(t => t.name).join(' '));
+  process.exit(0);
+}
+const bodyLine = /^[\s>*_-]*CI suites?\s*:\s*(.*)$/im.exec(process.env.PR_BODY || '');
+const picked = (process.env.CI_SUITES || (bodyLine ? bodyLine[1] : '')).toLowerCase().split(/[\s,]+/).map(s => s.replace(/[`*_.]/g, '')).filter(s => s && s !== 'none');
+const withSoak = picked.includes('all') || picked.includes('soak');
+let suites = picked.includes('all') ? Object.keys(SUITES) : picked.filter(s => s !== 'soak');
+const unknown = suites.filter(s => !SUITES[s]);
+if (unknown.length) { console.log(`FAIL unknown CI suite(s): ${unknown.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}, soak, all`); process.exit(1); }
+if (withSoak && !suites.length) suites = Object.keys(SUITES);   // soak on its own: every suite's long tests (plus the suites)
+const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier || (t.tier !== 'skip' && suites.includes(t.suite) && (!t.soak || withSoak)));
+let run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
+// CI_SHARD=k/n (1-based): this job runs only its share of the tests, so a workflow can spread one tier across n runners at
+// once. Each runner is a machine of its own, so the games don't starve each other as they would side by side on one runner.
+// Longest first, each to the share with the least expected time so far. Expected times are seconds measured on a CI runner
+// (test/ci-times.json, from the 2026-10-09 integration run; refresh it when tests change a lot). A test not in it counts as a
+// minute, or ten when it is a soak test.
+const shardM = /^(\d+)\/(\d+)$/.exec(process.env.CI_SHARD || '');
+const shard = shardM ? { k: +shardM[1], n: +shardM[2] } : null;
+let times = {};
+try { times = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci-times.json'), 'utf8')); } catch (e) {}
+const weight = t => times[t.name] || (t.soak ? 600 : 60);
+// CI_PLAN=1: how many runners this run should use, so each part takes about CI_PART_SECS (default 240) and never less than
+// its longest test allows; at most 20 (GitHub's limit on jobs at once for a free account). Written to $GITHUB_OUTPUT as parts=[1..n] and n.
+if (process.env.CI_PLAN) {
+  const total = run.reduce((a, t) => a + weight(t), 0), longest = Math.max(1, ...run.map(weight));
+  const n = Math.max(1, Math.min(20, run.length, Math.ceil(total / Math.max(+(process.env.CI_PART_SECS || 240), longest))));
+  const line = `parts=${JSON.stringify(Array.from({ length: n }, (_, i) => i + 1))}\nn=${n}\n`;
+  console.log(`${run.length} test(s), about ${Math.round(total / 60)} min in all: ${n} part(s)`);
+  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line); else process.stdout.write(line);
+  process.exit(0);
+}
+if (shard) {
+  const load = Array(shard.n).fill(0), mine = new Set();
+  for (const t of [...run].sort((a, b) => weight(b) - weight(a) || a.name.localeCompare(b.name))) {
+    const i = load.indexOf(Math.min(...load));
+    load[i] += weight(t);
+    if (i === shard.k - 1) mine.add(t);
+  }
+  run = run.filter(t => mine.has(t));
+}
+if (process.env.CI_DRY) { console.log(run.map(t => t.name).join(' ')); process.exit(0); }   // CI_DRY=1: list what would run, run nothing
 fs.mkdirSync(outDir, { recursive: true });
 
 // Memory cap per test (process tree RSS, MB). A browser that eats the whole machine gets the CI runner killed, which loses
@@ -83,7 +165,8 @@ async function runOne(t) {
 }
 
 (async () => {
-console.log(`tier ${tier}: ${run.length} test(s)`);
+const label = tier + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') + (withSoak ? ' with soak' : '') : '') + (shard ? ` (part ${shard.k} of ${shard.n})` : '');
+console.log(`tier ${label}: ${run.length} test(s)`);
 const results = [];
 for (const t of run) {
   process.stdout.write(`::group::${t.name}\n`);
@@ -97,7 +180,7 @@ for (const t of run) {
 
 const failed = results.filter(r => !r.ok);
 const esc = s => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
-let md = `## ${tier} tests: ${results.length - failed.length}/${results.length} passed\n\n| Test | Result | Time | Notes |\n|---|---|---|---|\n`;
+let md = `## ${label} tests: ${results.length - failed.length}/${results.length} passed\n\n| Test | Result | Time | Notes |\n|---|---|---|---|\n`;
 for (const r of results) md += `| ${r.t.name} | ${r.ok ? '✅ pass' : '❌ fail'} | ${r.secs.toFixed(0)}s | ${esc(r.ok ? r.t.what || '' : r.reasons.join('; '))} |\n`;
 const notRun = tests.filter(t => !run.includes(t) && (t.tier === 'skip' || t.missing));
 if (notRun.length && !only.length) {

@@ -16,7 +16,7 @@ module.exports = async (pg, out) => {
     const it = BF.items[I.shears];
     ok("shears item exists and is a shears tool", !!it && it.tool && it.tool.type === "shears");
     const rc = BF.inventory.recipes.find(r => r.out === I.shears);
-    ok("shears recipe = 3 iron ingots", !!rc && rc.type === "shapeless" && rc.ings.length === 3 && rc.ings.every(g => g.length === 1 && g[0] === I.iron_ingot), rc && rc.desc);
+    ok("shears recipe = 2 iron ingots on a diagonal (Minecraft)", !!rc && rc.type === "shaped" && rc.pattern.join("|") === " I|I " && rc.key.I.length === 1 && rc.key.I[0] === I.iron_ingot, rc && rc.desc);
     ok("shears have an icon", typeof BF.textures.icon(I.shears) === "string" && BF.textures.icon(I.shears).startsWith("data:"));
     ok("shears speed up leaves", BF.items[I.shears].tool.speed > 1 && BF.player.mineSeconds(BF.B.oak_leaves, I.shears) < BF.player.mineSeconds(BF.B.oak_leaves, null), BF.player.mineSeconds(BF.B.oak_leaves, I.shears) + "s vs " + BF.player.mineSeconds(BF.B.oak_leaves, null) + "s by hand");   // leaves are a hoe block (#44); shears are special-cased
     // ---- wild sheep, player use

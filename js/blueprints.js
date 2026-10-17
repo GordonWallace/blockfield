@@ -24,6 +24,8 @@ function rotId(id, k) {
   if (b.bed) return BF.bedId((b.bed.f + k) & 3, b.bed.head);
   if (b.wallTorch) return BF.B["wall_torch_" + ["north", "east", "south", "west"][(b.wallTorch.f + k) & 3]];
   if (b.ladder) return BF.ladderId((b.ladder.f + k) & 3);
+  if (b.furnaceFacing != null) return BF.furnaceId(b.furnaceFacing + k);
+  if (b.chestFacing != null) return BF.chestId(b.chestFacing + k);
   return id;
 }
 // The inventory item that places a block (doors, beds and wall torches are items of their own), or null for free blocks.
@@ -133,7 +135,7 @@ const SPECS = {
       const B = BF.B, S = pal(st), c = [];
       for (const [u, q] of [[0, 0], [4, 0], [0, 2], [4, 2]]) c.push([u, 0, q, B.oak_fence, PH.WALL], [u, 1, q, B.oak_fence, PH.WALL]);
       for (let q = 0; q < 3; q++) for (let u = 0; u < 5; u++) c.push([u, 2, q, S.wall, PH.ROOF]);
-      c.push([1, 0, 2, B.crafting_table, PH.LIGHT], [3, 0, 2, B.chest, PH.LIGHT], [2, 3, 1, B.torch, PH.LIGHT]);
+      c.push([1, 0, 2, B.crafting_table, PH.LIGHT], [3, 0, 2, BF.chestId(0), PH.LIGHT], [2, 3, 1, B.torch, PH.LIGHT]);
       return { cells: c, beds: [], w: 5, d: 3 };
     },
   },
@@ -144,7 +146,7 @@ function classify(spec, u, y, q, id) {
   const B = BF.B, b = BF.blocks[id];
   if (b.door) return PH.DOOR;
   if (b.bed) return PH.BED;
-  if (b.emit || b.wallTorch || id === B.torch || id === B.crafting_table || id === B.chest || id === B.furnace || id === B.bell) return PH.LIGHT;
+  if (b.emit || b.wallTorch || id === B.torch || id === B.crafting_table || BF.isChest(id) || BF.isFurnace(id) || id === B.bell) return PH.LIGHT;
   if (id === B.glass || b.model === "pane") return PH.GLASS;
   if (y === 0) return PH.FLOOR;
   if (spec.wallTop != null && (y > spec.wallTop || u < 0 || q < 0 || u >= spec.w || q >= spec.d)) return PH.ROOF;

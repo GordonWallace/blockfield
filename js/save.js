@@ -1,5 +1,5 @@
 // Saved worlds in the browser's IndexedDB: a list of worlds (name, seed, mode, last played),
-// each storing block edits, player, inventory and time of day. Autosaves while playing.
+// each storing block edits, player, inventory, time of day and the dropped items lying around. Autosaves while playing.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -63,7 +63,10 @@ function snapshot() {
     weather: BF.weather && BF.weather.serialize ? BF.weather.serialize() : undefined,
     signs: BF.signs && BF.signs.serialize ? BF.signs.serialize() : undefined,
     vlog: BF.vlog ? BF.vlog.serialize() : undefined,   // village action logs (js/villagelog.js)
+    happy: BF.happiness ? BF.happiness.serialize() : undefined,   // village happiness: last week's events + last scores (js/happiness.js)
     maps: BF.maps && BF.maps.serialize ? BF.maps.serialize() : undefined, // explored pixels of filled maps (js/maps.js)
+    drops: BF.drops && BF.drops.serialize ? BF.drops.serialize() : undefined, // dropped items lying in the world, with their age (js/drops.js)
+    farmland: BF.farmland ? BF.farmland.serialize() : undefined, // farmland hydration clocks + last rain (js/farmland.js)
     edits,
   };
 }
@@ -89,8 +92,23 @@ function restore(data) {
   if (data.villagers && BF.mobs && BF.mobs.importVillagers) BF.mobs.importVillagers(data.villagers); // old saves have none
   if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather); // old saves: newWorld's seeded default
   if (BF.vlog) BF.vlog.deserialize(data.vlog); // old saves: no logs
+  if (BF.happiness) BF.happiness.deserialize(data.happy || { fromLog: data.vlog }); // old saves: last week's events from the log
   if (BF.maps && BF.maps.deserialize) BF.maps.deserialize(data.maps); // old saves: no maps
   if (BF.signs && BF.signs.deserialize) BF.signs.deserialize(data.signs); // sign texts + auto-sign state (old saves: none)
+  if (BF.drops && BF.drops.deserialize) BF.drops.deserialize(data.drops); // dropped items (old saves: none)
+  if (BF.farmland) BF.farmland.deserialize(data.farmland); // farmland clocks (old saves: each block's clock starts when first seen)
+}
+
+// A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
+// are, so those seeds keep giving the worlds they always have. 0, negative and larger numbers used to wrap onto that range
+// (0 gave seed 1's terrain, 4294967297 gave 1, -1 gave 4294967295, huge numbers gave 0); they are now hashed from their digits
+// instead, so different numbers give different worlds. Saved worlds store the resulting seed, so they never change.
+function numberSeed(text) {
+  const n = BigInt(text);
+  if (n >= 1n && n <= 4294967295n) return Number(n);
+  let h = 0x811c9dc5;
+  for (const ch of "#" + n.toString()) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);   // FNV-1a of the canonical number
+  return (h >>> 0) || 0x9e3779b9;
 }
 
 // ---------- public API ----------
@@ -98,6 +116,7 @@ const save = {
   current: null,          // meta of the world being played, or null (unsaved demo world)
   lastSaved: 0,
   supported: typeof indexedDB !== "undefined",
+  numberSeed,             // exposed for tests
 
   // -> [{id, name, seed, gameMode, created, lastPlayed}] newest first; [] if storage is unavailable
   list() {
@@ -109,11 +128,11 @@ const save = {
   // Starts a brand-new saved world. opts: {name, seed (number|string|blank), gameMode, biomeScale (>=1, default 1), gen (default 3)}
   create(opts = {}) {
     let seed = opts.seed;
-    if (seed === undefined || seed === null || seed === "") seed = (Math.random() * 4294967296) >>> 0;
+    if (seed === undefined || seed === null || seed === "") seed = 1 + Math.floor(Math.random() * 4294967295);
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
-    else seed = Number(seed) >>> 0;
+    else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 2, created: now, lastPlayed: now };
+    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 3, created: now, lastPlayed: now };
     BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
     save.current = meta;
     BF.emit("worldLoaded", meta);

@@ -162,6 +162,21 @@ function clampText(text, cols, rows) {
   for (let i = 0; i <= text.length; i++) if (L.pos[i] && L.pos[i][0] >= rows) { cut = i; break; }
   return text.slice(0, cut).replace(/[\n ]+$/, "");
 }
+// An edit (typing or a paste) that makes the sign overflow: v is prev with some text inserted (maybe over a selection).
+// Keeps the longest start of the inserted text that still fits, so the text already on the sign is never cut; if none
+// of it fits the edit is refused. Returns {text, caret}.
+function fitEdit(prev, v, cols, rows) {
+  let a = 0;
+  while (a < prev.length && a < v.length && prev[a] === v[a]) a++;
+  let b = 0;
+  while (b < prev.length - a && b < v.length - a && prev[prev.length - 1 - b] === v[v.length - 1 - b]) b++;
+  const pre = v.slice(0, a), ins = v.slice(a, v.length - b), post = v.slice(v.length - b);
+  for (let k = Math.min(ins.length, cols * rows); k > 0; k--) {
+    const t = pre + ins.slice(0, k) + post;
+    if (layout(t, cols).lines.length <= rows) return { text: t, caret: a + k };
+  }
+  return { text: prev, caret: Math.min(prev.length, a) };
+}
 // Draws wrapped lines centred on a board of W x H signs into a w x h pixel area (shared by the world texture and the editor).
 function textGeom(W_, H_, w, h) {
   const mx = w / W_ / 16, my = h * 0.04;
@@ -473,11 +488,10 @@ function buildDOM() {
     const c = capacity(ed.g);
     let v = ta.value.replace(/\r\n?/g, "\n").replace(/\t/g, " ");
     if (v !== ta.value) ta.value = v;
-    if (layout(v, c.cols).lines.length > c.rows) {   // no room: refuse the edit (a paste is cut to what fits)
-      const cut = clampText(v, c.cols, c.rows);
-      ta.value = cut.length >= ed.prev.length ? cut : ed.prev;
-      const p = Math.min(ta.value.length, ed.prevSel + Math.max(0, ta.value.length - ed.prev.length));
-      ta.setSelectionRange(p, p);
+    if (layout(v, c.cols).lines.length > c.rows) {   // no room: keep as much of the new text as fits, the old text stays
+      const f = fitEdit(ed.prev, v, c.cols, c.rows);
+      ta.value = f.text;
+      ta.setSelectionRange(f.caret, f.caret);
       ed.info.classList.add("full");
       setTimeout(() => ed.info.classList.remove("full"), 400);
     }

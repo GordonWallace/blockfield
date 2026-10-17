@@ -192,7 +192,9 @@ const isCoord = t => /^(~[+-]?(\d+\.?\d*|\.\d+)?|[+-]?(\d+\.?\d*|\.\d+))$/.test(
 function parseTicks(tok) {
   const m = /^(\d+(?:\.\d+)?)([tsd]?)$/i.exec(tok || "");
   if (!m) fail(`Invalid time '${tok == null ? "" : tok}' (use ticks, or a number with t, s or d)`);
-  return Math.round(+m[1] * ({ "": 1, t: 1, s: 20, d: 24000 })[m[2].toLowerCase()]);
+  const n = Math.round(+m[1] * ({ "": 1, t: 1, s: 20, d: 24000 })[m[2].toLowerCase()]);
+  if (!(n <= 2147483647)) fail(`Time must not be more than 2147483647 ticks, found '${tok}'`);   // vanilla's int limit; more breaks the day counter
+  return n;
 }
 
 // Item / block names (with or without "minecraft:"), a few vanilla aliases.
@@ -201,12 +203,14 @@ const ALIAS = {
   porkchop: "raw_porkchop", beef: "raw_beef", cooked_beef: "steak", chicken: "raw_chicken", mutton: "raw_mutton", cod: "raw_cod",
   wall_torch: "wall_torch_north", tall_grass: "short_grass", grass_path: "dirt_path", sugar_cane_block: "sugar_cane",
 };
+// Own keys only: BF.B, BF.I and the tables here are plain objects, so a bare lookup of 'constructor' or 'toString' finds a function (bug-044).
+const own = (o, k) => (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined);
 function lookupName(n) {
   const B = BF.B || {}, I = BF.I || {};
-  for (const k of [n, ALIAS[n], n + "_item"]) {
+  for (const k of [n, own(ALIAS, n), n + "_item"]) {
     if (!k) continue;
-    if (I[k] != null) return I[k];
-    if (B[k] != null) return B[k];
+    if (own(I, k) != null) return I[k];
+    if (own(B, k) != null) return B[k];
   }
   return null;
 }
@@ -224,7 +228,8 @@ function resolveBlock(tok) {
   const n = norm(tok);
   if (!n) fail("Expected a block");
   const B = BF.B || {};
-  const id = n === "air" ? 0 : B[n] != null ? B[n] : B[ALIAS[n]] != null ? B[ALIAS[n]] : null;
+  const a = own(ALIAS, n);
+  const id = n === "air" ? 0 : own(B, n) != null ? B[n] : a && own(B, a) != null ? B[a] : null;
   if (id == null) {
     const it = lookupName(n);
     if (it != null && BF.items[it] && !BF.items[it].isBlock) fail(`'${tok}' is an item, not a block`);
@@ -262,7 +267,7 @@ function killMob(m) {
 }
 
 // ---------- commands ----------
-const CMDS = {}, ALIASES = {};
+const CMDS = Object.create(null), ALIASES = Object.create(null);   // no prototype, so /constructor or /__proto__ is just an unknown command
 function def(name, o) { o.name = name; CMDS[name] = o; for (const a of o.aliases || []) ALIASES[a] = name; }
 const usage = c => fail("Usage: " + [].concat(CMDS[c].usage).join("\n       "));
 
@@ -299,13 +304,14 @@ def("tp", {
     if (/^@[spa]$/.test(a[0] || "")) a = a.slice(1);
     if (a.length === 2) {
       const p = pos(), x = parseCoord(a[0], p.x, "x"), z = parseCoord(a[1], p.z, "z");
+      if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
       const y = surfaceY(x, z);
       teleport(x, y, z);
       return `Teleported ${PLAYER} to ${fmt(x)}, ${fmt(y)}, ${fmt(z)}`;
     }
     if (a.length !== 3 && a.length !== 5) usage("tp");
     const [x, y, z] = parsePos(a, 0, false);
-    if (y < BF.MIN_Y - 64 || y > BF.H + 832) fail(`Invalid position: y must be between ${BF.MIN_Y - 64} and ${BF.H + 832}`);
+    if (y < BF.MIN_Y || y > BF.H + 832) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${BF.H + 832}`);   // below MIN_Y is solid bedrock with no way out
     if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
     let yaw = null, pitch = null;
     if (a.length === 5) {
@@ -338,7 +344,7 @@ def("time", {
     if (sub === "set") {
       if (a.length !== 2) usage("time");
       const n = norm(a[1]);
-      const t = TIME_NAMES[n] != null ? TIME_NAMES[n] : parseTicks(a[1]);
+      const t = own(TIME_NAMES, n) != null ? TIME_NAMES[n] : parseTicks(a[1]);
       S.setTime((t % 24000) / 24000);
       return `Set the time to ${t % 24000}`;
     }
@@ -369,7 +375,7 @@ def("gamemode", {
     const n = norm(a[0]);
     if (!n) usage("gamemode");
     if (n === "adventure" || n === "spectator" || n === "a" || n === "sp" || n === "2" || n === "3") fail(`Game mode '${a[0]}' is not available here (survival or creative)`);
-    const m = MODES[n];
+    const m = own(MODES, n);
     if (!m) fail(`Unknown game mode '${a[0]}'`);
     if (P().gameMode === m) return `${PLAYER} is already in ${m === "creative" ? "Creative" : "Survival"} Mode`;
     if (P().setGameMode) P().setGameMode(m); else P().gameMode = m;
@@ -510,6 +516,8 @@ def("spawnpoint", {
     if (a.length && /^@[spa]$/.test(a[0])) a = a.slice(1);
     if (a.length && a.length !== 3) usage("spawnpoint");
     const [x, y, z] = a.length ? parsePos(a, 0, true) : [Math.floor(pos().x), Math.floor(pos().y), Math.floor(pos().z)];
+    if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
+    if (y < BF.MIN_Y || y >= BF.H) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${BF.H - 1}`);
     BF.spawnPoint = { x: x + 0.5, y, z: z + 0.5 };
     return `Set spawn point to ${x}, ${y}, ${z} for ${PLAYER}`;
   },

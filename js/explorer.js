@@ -235,9 +235,11 @@ function findCartographer(m, X) {
 }
 function deal(m, dl) {
   const t = T(), v2 = dl.seller, o = dl.offer;
-  if (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy) || !t.exchange(v2, o)) return false;
+  if (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy)) return false;
+  const sold = t.exchange(v2, o);
+  if (!sold) return false;
   t.inv.remove(m.inv, o.buy[0].id, o.buy[0].n);
-  t.inv.add(m.inv, o.sell.id, o.sell.n);
+  t.inv.addStacks(m.inv, sold);
   t.addXp(v2, o);
   if (BF.vlog) BF.vlog.trade(m, v2, o);
   log("buy", m, { from: "cartographer", got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
@@ -284,7 +286,7 @@ function shopAI(m, dt, out) {
 // ---------------------------------------------------------------- camping
 // Out mapping when night is about to fall and the walk home is too long: pitch the tent it carries and sleep there (mobs.js nightAI treats the
 // tent's foot centre as its bed; monsters cannot see anyone asleep in a tent). In the morning it packs the tent up again.
-const BEDTIME = 0.52, DUSK = 0.45, WALK_SLACK = 0.8, DAY_S = 1200;
+const BEDTIME = 0.5, DUSK = 0.45, WALK_SLACK = 0.8, DAY_S = 1200;
 const isNight = t => t > BEDTIME && t < 0.985;
 const tentItem = () => BF.I.tent;
 function homeDistance(m) {

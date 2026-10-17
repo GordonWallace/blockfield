@@ -1,5 +1,6 @@
 // Dropped item entities: items that pop out of broken blocks and killed mobs, bob on the ground,
-// and fly into the player's inventory when they walk close. Not saved; they despawn after 5 minutes.
+// and fly into the player's inventory when they walk close. They despawn after 5 minutes of lying in a loaded chunk
+// (in an unloaded chunk they wait, as in vanilla), and are saved with the world, keeping their age.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -40,6 +41,16 @@ const drops = {
     return d;
   },
 
+  // Drops items the player couldn't hold (a full inventory when a screen closes, a map made from a stack, a broken
+  // furnace's contents) in front of the player, as Minecraft does. Held off from pickup for 2 seconds like a thrown item.
+  atPlayer(id, count, wear) {
+    const P = BF.player, p = P && P.position;
+    if (!p) return null;
+    const yaw = P.yaw || 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const vel = new THREE.Vector3(fx * 2.5, 2.5, fz * 2.5);
+    return drops.spawn(id, count, p.x + fx * 0.3, p.y + 1.3, p.z + fz * 0.3, { vel, pickupDelay: 2, wear });
+  },
+
   // Spawns every stack from BF.rollDrops-style [{id, count}] at the centre of block (x, y, z).
   spawnAt(list, x, y, z) { for (const s of list || []) if (s && s.count > 0) drops.spawn(s.id, s.count, x + 0.5, y + 0.3, z + 0.5); },
 
@@ -51,10 +62,38 @@ const drops = {
 
   clear() { for (const d of drops.list.slice()) drops.remove(d); },
 
+  // -> [[name, count, x, y, z, age, wear, pickupDelay]] for the save (js/save.js). Items are saved by name, like the
+  // inventory: filled and auto map ids are handed out fresh each session, so an id would come back as another map.
+  serialize() {
+    const r = v => Math.round(v * 100) / 100;
+    return drops.list.map(d => [BF.items[d.id].name, d.count, r(d.pos.x), r(d.pos.y), r(d.pos.z), r(d.age), d.wear || 0, r(Math.max(0, d.pickupDelay - d.age))]);
+  },
+
+  // Puts saved drops back where they lay, at rest and with the age they had. Old saves have none.
+  deserialize(a) {
+    if (!Array.isArray(a)) return;
+    for (const e of a) {
+      if (!Array.isArray(e)) continue;
+      const [key, count, x, y, z, age, wear, delay] = e;
+      if (![x, y, z].every(Number.isFinite)) continue;
+      // old saves stored the numeric id: fine for fixed items, but a map's id meant whichever map got it that session
+      const id = typeof key === "string" ? BF.resolveItem(key) : key < BF.ITEM_BASE + 0x10000 ? key : undefined;
+      const d = drops.spawn(id, count, x, y, z, { vel: new THREE.Vector3(0, 0, 0), pickupDelay: 0, wear: wear || 0 });
+      if (!d) continue;
+      d.age = Math.max(0, +age || 0);
+      d.pickupDelay = d.age + Math.max(0, +delay || 0);
+      d.sprite.position.copy(d.pos);
+    }
+  },
+
   update(dt) {
     const P = BF.player, pp = P && P.position, alive = P && !P.dead;
     const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1;
     for (const d of drops.list.slice()) {
+      // in an unloaded chunk an item neither ages nor falls (it would drop out of the world); it waits for the chunk
+      const here = BF.world.isLoaded(d.pos.x, d.pos.z);
+      d.sprite.visible = here;
+      if (!here) continue;
       d.age += dt;
       if (d.age > LIFE) { drops.remove(d); continue; }
       // pulled toward the player once close enough, then collected

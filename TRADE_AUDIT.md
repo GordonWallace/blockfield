@@ -172,14 +172,16 @@ Columns: value given by the player, value received, rho (received / given). A vi
 | 1 | 1 emerald > 4 bread | 1.00 | 0.96 | 0.96 | buy from villager |
 | 2 | 16 beetroot > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
 | 2 | 8 pumpkin > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
-| 2 | 1 emerald > 6 apple | 1.00 | 0.90 | 0.90 | buy from villager |
 | 2 | 1 emerald > 10 baked_potato | 1.00 | 0.90 | 0.90 | buy from villager |
 | 3 | 28 sugar_cane > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
 | 3 | 3 emerald > 4 hay_bale | 3.00 | 2.60 | 0.87 | buy from villager |
 | 3 | 2 hay_bale > 1 emerald | 1.30 | 1.00 | 0.77 | sell to villager |
-| 4 | 1 emerald > 1 iron_hoe | 1.00 | 1.07 | 1.07 | buy from villager |
+| 4 | 1 emerald > 14 wheat_item | 1.00 | 0.98 | 0.98 | buy from villager |
 | 4 | 12 baked_potato > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
-| 5 | 6 emerald + 1 iron_hoe > 1 diamond_hoe | 7.07 | 7.07 | 1.00 | buy from villager |
+| 5 | 1 emerald > 16 carrot | 1.00 | 0.96 | 0.96 | buy from villager |
+| 5 | 1 emerald > 16 potato | 1.00 | 0.96 | 0.96 | buy from villager |
+
+Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple and hoe offers are gone (hoes come from the toolsmith).
 
 ### librarian
 

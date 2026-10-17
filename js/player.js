@@ -29,6 +29,7 @@ let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
 let hurtCd = 0, flashT = 0, attackCd = 0, swingT = 0;
+let hurtAmt = 0;   // the hit that started the current hurtCd window (Infinity: spawn protection)
 let mouseL = false, mouseR = false;
 let breakTarget = null, breakProgress = 0, breakCd = 0;
 let placeCd = 0, eatT = 0;
@@ -325,6 +326,8 @@ function showScreen(name) {
   if (name === "pause") { updateViewBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
+  const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
+  if (a && a !== document.body && a.closest && a.closest(".bfp-screen") && !a.closest(".bfp-screen.on")) a.blur();
 }
 
 // ---------- saved worlds (start screen) ----------
@@ -460,6 +463,21 @@ let frameNo = 0, escClosedFrame = -1e9;
 const markEsc = () => { escClosedAt = performance.now(); escClosedFrame = frameNo; };
 const inEscGrace = () => performance.now() - escClosedAt < ESC_GRACE * 1000 || frameNo - escClosedFrame < ESC_GRACE_FRAMES;
 let lockOnEscUp = false, escClosedAt = -1e9, escCloseEvent = null, escCloseHeld = false, escRelock = false;
+// When the browser refuses or drops that re-lock (Chrome on macOS refuses one for about a second after any Escape), the game
+// still wants the mouse back: it asks once more when that second is up, and on the next key press or click (both count as a
+// user gesture, which every browser accepts).
+const ESC_RETRY_MS = 1300;
+let wantLock = false, escRetryT = 0;
+function relockLater() {
+  wantLock = true;
+  if (escRetryT) return;
+  actionBar("Click or press a key to capture the mouse");
+  escRetryT = setTimeout(() => {
+    escRetryT = 0;
+    if (wantLock && !locked && started && !P.dead && !menuOpen && !invOpen()) requestLock();
+  }, ESC_RETRY_MS);
+}
+function stopRelock() { wantLock = false; if (escRetryT) { clearTimeout(escRetryT); escRetryT = 0; } }
 addEventListener("keyup", e => {
   if (e.key !== "Escape") return;
   if (escCloseHeld) { escCloseHeld = false; markEsc(); }   // the grace runs from the release, when the re-lock goes out
@@ -486,6 +504,7 @@ function requestLock() {
   } catch (_) { onLockError(); }
 }
 function onLockError() {
+  if (escRelock && !locked && !escRetryT) relockLater();
   escRelock = false;
   if (locked) return;
   if (lockWorked) { if (menuOpen === "pause") pauseNote.textContent = "Click Resume again to capture the mouse."; return; }
@@ -518,13 +537,14 @@ function pause() {
   keys.clear(); mouseL = mouseR = false; resetBreak();
   showScreen("pause");
   BF.state.paused = true;
+  stopRelock();
   exitLock();
 }
 
 // Z frees the mouse without pausing (to use the debug screen while the game runs); a click on the game takes it back.
 let mouseFreed = false;
 function releaseMouse() {
-  mouseFreed = true;
+  mouseFreed = true; stopRelock();
   keys.clear(); mouseL = mouseR = false; resetBreak();
   exitLock();
 }
@@ -549,11 +569,13 @@ function deferredToggle(closeOnly) {
 }
 
 // ---------- input ----------
+// keys typed into a text box are its own; a focused slider, checkbox or button doesn't stop game keys (Escape in the pause menu)
+const typingIn = t => !!t && (t.tagName === "TEXTAREA" || t.isContentEditable || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button|submit|reset|color)$/i.test(t.type)));
 function bindInput() {
   const cv = canvas();
   addEventListener("keydown", e => {
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     const c = e.code;
+    if (typingIn(e.target)) return;
     if (c === "Space" || c === "Tab" || (e.ctrlKey && /^Key[WASDQE]$/.test(c))) e.preventDefault();
     if (c === "Escape") {
       if (e.repeat || e === escCloseEvent) return;   // a held Escape, or the one that just closed a screen, must not go on to open the pause menu
@@ -564,6 +586,7 @@ function bindInput() {
     // inventory.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
     if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) { deferredToggle(false); return; }
     if (menuOpen || invOpen() || P.dead) return;
+    if (wantLock && !locked && !dragMode) requestLock();   // a key press is a user gesture: take the mouse back that Escape's re-lock missed
     if (c === "KeyZ" && !e.repeat && !e.ctrlKey && !e.metaKey && locked) { releaseMouse(); return; }
     if (c === "KeyQ" && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
     if (e.repeat) { keys.add(c); return; }
@@ -585,7 +608,7 @@ function bindInput() {
     const was = locked;
     locked = document.pointerLockElement === cv;
     if (locked) {
-      lockWorked = true; dragMode = false;
+      lockWorked = true; dragMode = false; stopRelock();
       if (escRelock) { escRelock = false; markEsc(); }   // the grace also runs from when that re-lock lands, however slow
       if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
     } else if (was) {
@@ -593,6 +616,7 @@ function bindInput() {
       if (mouseFreed) { mouseFreed = false; actionBar("Mouse free: click the game to take it back"); }
       else if (expectUnlock) { expectUnlock = false; if (!invOpen() && started && !menuOpen && !P.dead) requestLock(); }
       else if (!invOpen() && !P.dead && started && !menuOpen && !inEscGrace()) pause();
+      else if (!invOpen() && !P.dead && started && !menuOpen && !escRetryT) relockLater();   // dropped just after Escape: ask again
     }
   });
   document.addEventListener("pointerlockerror", onLockError);
@@ -618,21 +642,23 @@ function bindInput() {
   });
   addEventListener("pointerup", e => { if (drag && e.pointerId === drag.id) drag = null; });
 
+  // No pick block: a middle click uses, like a right click. Ubuntu trackpads report some two-finger right clicks as middle clicks.
   let ctrlRight = false;
   cv.addEventListener("mousedown", e => {
-    if (!started || menuOpen || P.dead || invOpen()) return;
-    if (!locked && !dragMode) return; // this click only captures the mouse
+    if (!started || menuOpen || P.dead || invOpen()) { logClick(e, "ignored: " + (!started ? "not started" : menuOpen ? "menu open" : P.dead ? "dead" : "screen open")); return; }
+    if (!locked && !dragMode) { logClick(e, "takes the mouse"); return; } // this click only captures the mouse
     e.preventDefault();
-    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) { ctrlRight = true; mouseR = true; placeCd = 0; secondaryDown(); } // macOS ctrl+click = right click
-    else if (e.button === 0) { mouseL = true; primaryDown(); }
-    else if (e.button === 2) { mouseR = true; placeCd = 0; secondaryDown(); }
-    else if (e.button === 1) pickBlock();
+    if (e.button === 0 && e.ctrlKey && /Mac/.test(navigator.platform || "")) { ctrlRight = true; mouseR = true; placeCd = 0; logClick(e, "use (ctrl+click)", useNow()); } // macOS ctrl+click = right click
+    else if (e.button === 0) { mouseL = true; primaryDown(); logClick(e, "attack / break"); }
+    else if (e.button === 2 || e.button === 1) { mouseR = true; placeCd = 0; logClick(e, "use", useNow()); }
+    else logClick(e, "no action");
   });
   addEventListener("mouseup", e => {
     if (e.button === 0) { mouseL = false; resetBreak(); if (ctrlRight) { ctrlRight = false; mouseR = false; eatT = 0; } }
-    if (e.button === 2) { mouseR = false; eatT = 0; }
+    if (e.button === 2 || e.button === 1) { mouseR = false; eatT = 0; }
   });
-  cv.addEventListener("contextmenu", e => e.preventDefault());
+  cv.addEventListener("contextmenu", e => { e.preventDefault(); logClick(e, ""); });
+  cv.addEventListener("auxclick", e => logClick(e, ""));
   addEventListener("wheel", e => {
     if (!started || menuOpen || invOpen() || !e.deltaY) return;
     const I = inv(); if (!I.select) return;
@@ -641,6 +667,18 @@ function bindInput() {
   }, { passive: true });
 
   if (isTouch) bindTouch(cv);
+}
+
+// Right click on press: use the block / item in front (secondaryDown). Returns what it was aimed at, for the click log.
+function useNow() { const r = secondaryDown(); return targetName() + (r ? "" : " (nothing happened)"); }
+function targetName() { const b = target && BF.blocks[target.id]; return b ? b.name : "no block"; }
+// Click log for the F3 overlay: the raw mouse fields of the last few presses and what the game did with each.
+const clickLog = [];
+function logClick(e, action, aim) {
+  const mods = ["ctrl", "shift", "alt", "meta"].filter(m => e[m + "Key"]).join("+");
+  clickLog.push(`${e.type} button ${e.button} buttons ${e.buttons}${mods ? " " + mods : ""}${e.pointerType ? " " + e.pointerType : ""}${locked ? " locked" : dragMode ? " drag" : ""}` +
+    (action ? ` -> ${action}${aim ? " " + aim : ""}` : ""));
+  if (clickLog.length > 6) clickLog.shift();
 }
 
 function look(dx, dy) {
@@ -791,20 +829,47 @@ function updateParticles(dt) {
 const iconTex = {};
 function cubeGeometry(id) {
   const b = BF.blocks[id];
-  const g = new THREE.BoxGeometry(0.34, 0.34, 0.34);
-  const uv = g.attributes.uv, col = [];
+  const box = new THREE.BoxGeometry(0.34, 0.34, 0.34);
+  const bp = box.attributes.position, bn = box.attributes.normal, bu = box.attributes.uv, bi = box.index;
   const faces = ["side", "side", "top", "bottom", "side", "side"];  // BoxGeometry order: +x -x +y -y +z -z
   const shade = [0.8, 0.8, 1, 0.55, 0.68, 0.68];
+  const worldFace = [2, 3, 0, 1, 4, 5];  // BoxGeometry face -> js/world.js FACES index (top, bottom, +x, -x, +z, -z)
+  // Grey tiles (grass top, leaves) are tinted by biome in the world (js/world.js _faceTint), so tint them here with the biome
+  // the player stands in, or the hotbar's default tint, else the held grass block shows a stone-grey top. Grass sides are
+  // drawn as in the world: plain dirt with the tinted fringe overlay just outside it.
+  let biome = null;
+  try { biome = BF.worldgen.tintAt(pos.x, pos.z); } catch (_) {}
+  const deft = BF.textures.defaultTint || {};
+  const tintFor = k => (k === 1 || k === 4 ? (biome && biome.grass) || deft.grass : k === 2 ? (biome && biome.foliage) || deft.foliage : k === 3 ? (biome && biome.water) || deft.water : null);
+  const P = [], N = [], U = [], C = [], I = [];
+  const quad = (f, r, t, push) => {
+    const v0 = P.length / 3, s = shade[f], c = t ? [s * t[0], s * t[1], s * t[2]] : [s, s, s];
+    for (let k = 0; k < 4; k++) {
+      const i = f * 4 + k;
+      P.push(bp.getX(i) + bn.getX(i) * push, bp.getY(i) + bn.getY(i) * push, bp.getZ(i) + bn.getZ(i) * push);
+      N.push(bn.getX(i), bn.getY(i), bn.getZ(i));
+      U.push(r ? r[0] + (r[2] - r[0]) * bu.getX(i) : bu.getX(i), r ? r[1] + (r[3] - r[1]) * bu.getY(i) : bu.getY(i));
+      C.push(c[0], c[1], c[2]);
+    }
+    for (let k = 0; k < 6; k++) I.push(bi.getX(f * 6 + k) - f * 4 + v0);
+  };
+  const overlays = [];
   for (let f = 0; f < 6; f++) {
     let r = null;
     try { r = BF.textures.uv(b.tiles[faces[f]]); } catch (_) {}
-    for (let k = 0; k < 4; k++) {
-      const i = f * 4 + k;
-      if (r) uv.setXY(i, r[0] + (r[2] - r[0]) * uv.getX(i), r[1] + (r[3] - r[1]) * uv.getY(i));
-      col.push(shade[f], shade[f], shade[f]);
-    }
+    const tk = BF.world._faceTint ? BF.world._faceTint[id * 6 + worldFace[f]] : 0;
+    if (tk === 4 && BF.world._overlayUV) { quad(f, BF.world._dirtUV, null, 0); overlays.push(f); }
+    else quad(f, r, tintFor(tk), 0);
   }
-  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  for (const f of overlays) quad(f, BF.world._overlayUV, tintFor(4), 0.002);
+  box.dispose();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(U, 2));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
+  g.setIndex(I);
+  g.userData.cube = true;
   return g;
 }
 function iconTexture(id) {
@@ -829,7 +894,7 @@ function setViewModel(sel) {
   if (vmMesh) { vm.remove(vmMesh); if (vmMesh !== hand) { vmMesh.geometry.dispose(); vmMesh.material.dispose(); } }
   const it = BF.items[id];
   if (!id || !it) vmMesh = hand;
-  else if (it.isBlock && it.tiles && BF.world.solidMat) {
+  else if (it.isBlock && it.tiles && BF.world.solidMat && !(BF.textures.iconIsFlat && BF.textures.iconIsFlat(it))) { // flowers, saplings, torches...: a flat sprite, as in the hotbar
     const mat = new THREE.MeshBasicMaterial({ map: BF.world.solidMat.map, vertexColors: true, alphaTest: 0.5, depthTest: false, transparent: it.render === "liquid" });
     vmMesh = new THREE.Mesh(cubeGeometry(id), mat);
     vmMesh.rotation.set(0.1, 0.75, 0);
@@ -1045,7 +1110,7 @@ function boxOverlapsCell(px, py, pz, hw, h, x, y, z) {
   return px + hw > x && px - hw < x + 1 && py + h > y && py < y + 1 && pz + hw > z && pz - hw < z + 1;
 }
 function cellBlockedByEntity(x, y, z) {
-  if (boxOverlapsCell(pos.x, pos.y, pos.z, HW - 0.01, HEIGHT, x, y, z)) return true;
+  if (boxOverlapsCell(pos.x, pos.y, pos.z, HW, HEIGHT, x, y, z)) return true;   // full box: no block may be placed inside the player
   const list = (BF.mobs && BF.mobs.list) || [];
   for (const m of list) {
     if (!m || m.dead) continue;
@@ -1173,8 +1238,10 @@ function sleepFade() {
 }
 // Right-click on a bed: at night with no monsters near, sleep until morning and set the respawn point here.
 // A tent (js/tents.js) works the same, but monsters cannot see anyone asleep in it, so nearby monsters do not stop you.
+let falling = false;   // asleep and fading out: more clicks on the bed do nothing until you wake (else each one adds a day, bug-041)
 function trySleep(t) {
-  if (!BF.sky || !BF.sky.isNight()) { actionBar("You can only sleep at night"); return; }
+  if (falling) return;
+  if (!BF.sky || !(BF.sky.isNight() || (BF.sky.stormy && BF.sky.stormy()))) { actionBar("You can only sleep at night"); return; }
   const b = BF.blocks[t.id], tent = !!b.tent;
   const near = !tent && ((BF.mobs && BF.mobs.list) || []).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
   if (near) { actionBar("You may not rest now, there are monsters nearby"); return; }
@@ -1185,17 +1252,46 @@ function trySleep(t) {
   BF.spawnPoint = { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp };
   if (tent) { P.hiddenInTent = true; setTimeout(() => { P.hiddenInTent = false; }, 2200); }   // monsters lose sight of the sleeper (mobs.js hostileAI)
   sleepFade();
-  setTimeout(() => { BF.sky.setTime(0.01); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
+  falling = true;
+  setTimeout(() => { falling = false; wakeUp(); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
-// Where to respawn: on the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
+// Waking up is the next morning: the day counter moves on unless it is already early morning (sleeping in a daytime storm moves to tomorrow too).
+function wakeUp() {
+  const S = BF.sky;
+  if (S.time > 0.01) S.day = (S.day || 0) + 1;
+  S.setTime(0.01);
+}
+// Where to stand when respawning at a bed: on it if there is headroom, else on the floor beside it (either half), as in vanilla.
+// A bed in a room with a 2-high ceiling has no headroom on top, and the spawn lift would otherwise put you on the roof. Null if
+// nowhere near the bed fits.
+function bedStandSpot(sp) {
+  const W = BF.world, fits = (x, y, z) => !W.boxCollides(x, y, z, HW, HEIGHT) && W.boxCollides(x, y - 0.1, z, HW, 0.1);
+  if (!W.boxCollides(sp.x, sp.y + 0.01, sp.z, HW, HEIGHT)) return [sp.x, sp.y + 0.01, sp.z];
+  const [bx, by, bz] = sp.bed, id = W.getBlock(bx, by, bz), b = BF.blocks[id];
+  const halves = [[bx, bz]];
+  if (b && b.bed && W.partnerOf) { const o = W.partnerOf(bx, by, bz, id); if (o) halves.push([o[0], o[2]]); }
+  for (const dy of [0, -1, 1]) for (const [hx, hz] of halves) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const x = hx + dx + 0.5, z = hz + dz + 0.5, y = by + dy + 0.01;
+    if (fits(x, y, z)) return [x, y, z];
+  }
+  return null;
+}
+let bedRespawn = null;   // the bed spawn point while its chunk loads (P.update picks the standing spot then)
+// Where to respawn: at the bed if it still stands (or its chunk isn't loaded to check), else the world spawn.
+const inWorld = (x, z) => Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7;   // inside the world border (false for NaN)
+const worldSpawn = () => ({ x: 8.5, z: 8.5 });   // the fallback respawnPoint uses when there is no spawn point
 function respawnPoint() {
   let sp = BF.spawnPoint || { x: 8.5, z: 8.5 };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();   // a spawn point past the border (older saves): back to the world spawn
+  bedRespawn = null;
   if (sp.bed) {
     const [bx, by, bz] = sp.bed, b = BF.blocks[BF.world.getBlock(bx, by, bz)];
-    if (!BF.world.isLoaded(bx, bz) || (b && (b.bed || b.tent))) return [sp.x, sp.y + 0.01, sp.z];
+    if (!BF.world.isLoaded(bx, bz)) { bedRespawn = sp; return [sp.x, sp.y + 0.01, sp.z]; }
+    if (b && (b.bed || b.tent)) return bedStandSpot(sp) || [sp.x, sp.y + 0.01, sp.z];
     setTimeout(() => actionBar("You have no home bed"), 300);
     BF.spawnPoint = sp = sp.world && sp.world.x != null ? sp.world : { x: 8.5, z: 8.5 };
   }
+  if (sp.y != null && sp.y >= BF.MIN_Y && sp.y < BF.H) return [sp.x, sp.y + 0.01, sp.z];   // /spawnpoint x y z (lifted out if it's inside blocks)
   return [sp.x, surfaceY(sp.x, sp.z), sp.z];
 }
 
@@ -1224,10 +1320,10 @@ function secondaryDown() {
   if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
-  if (target && target.id === BF.B.furnace && useBlk) {
+  if (target && BF.isFurnace(target.id) && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
   }
-  if (target && target.id === BF.B.chest && useBlk) {
+  if (target && BF.isChest(target.id) && useBlk) {
     openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
   }
   if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
@@ -1237,11 +1333,11 @@ function secondaryDown() {
   if (it.tool && it.tool.type === "hoe" && target && target.normal[1] === 1 && BF.B.farmland != null &&
       (target.id === BF.B.grass || target.id === BF.B.dirt || target.id === BF.B.dirt_path) &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
-    const { x, y, z, id } = target;
-    if (!BF.world.setBlock(x, y, z, BF.B.farmland)) return false;
+    const { x, y, z, id } = target, fid = BF.farmland ? BF.farmland.tillId(x, y, z) : BF.B.farmland;   // hydrated only with water or rain (js/farmland.js)
+    if (!BF.world.setBlock(x, y, z, fid)) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
     wearHeld(1);
-    emit("blockPlaced", x, y, z, BF.B.farmland);
+    emit("blockPlaced", x, y, z, fid);
     placeCd = PLACE_REPEAT;
     return true;
   }
@@ -1256,8 +1352,8 @@ function secondaryDown() {
     placeCd = PLACE_REPEAT;
     return true;
   }
-  // planting: seeds / carrot / potato on the top face of farmland with air above (takes priority over eating)
-  if (it.plants && target && target.id === BF.B.farmland && target.normal[1] === 1 &&
+  // planting: seeds / carrot / potato on the top face of farmland (hydrated or not, never dirt) with air above (takes priority over eating)
+  if (it.plants && target && (target.id === BF.B.farmland || target.id === BF.B.farmland_dry) && target.normal[1] === 1 &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
     const x = target.x, y = target.y + 1, z = target.z;
     if (!BF.world.setBlock(x, y, z, it.plants)) return false;
@@ -1312,6 +1408,7 @@ function secondaryDown() {
   if (BF.RENDER[sel.id] === 4 && !BF.SOLID[BF.world.getBlock(x, y - 1, z)]) return false; // plants need ground
   if (BF.blocks[sel.id] && BF.blocks[sel.id].sapling && BF.forester && !BF.forester.canSurvive(x, y, z)) return false;   // saplings need soil (js/forester.js)
   if (BF.SOLID[sel.id] && cellBlockedByEntity(x, y, z)) return false;
+  placeId = BF.facedId(placeId, BF.openFacing({ x, y, z }, P.position));   // furnaces and chests open towards the player (an open side)
   if (!BF.world.setBlock(x, y, z, placeId)) return false;
   try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
   swing();
@@ -1337,39 +1434,6 @@ function updateUse(dt) {
     return;
   }
   if (mouseR && placeCd <= 0 && !secondaryDown()) placeCd = PLACE_REPEAT;
-}
-
-function pickBlock() {
-  if (!target) return;
-  const I = inv();
-  const tb = BF.blocks[target.id];
-  const tid = tb && tb.item != null ? tb.item : target.id; // door/bed halves pick their item
-  if (creative() && BF.items[tid] && I.select) {
-    // creative: put the block into the hotbar (an existing slot with it, else an empty one, else the selected one)
-    try {
-      const slots = I.slots || I.hotbar;
-      if (slots) {
-        let i = -1;
-        for (let k = 0; k < 9; k++) if (slots[k] && slots[k].id === tid) { i = k; break; }
-        if (i < 0) {
-          const cur = I.selectedIndex | 0;
-          i = !slots[cur] ? cur : -1;
-          for (let k = 0; i < 0 && k < 9; k++) if (!slots[k]) i = k;
-          if (i < 0) i = cur;
-          if (I.setSlot) I.setSlot(i, { id: tid, count: 1 });
-          else slots[i] = { id: tid, count: 1 };
-          if (BF.emit) BF.emit("inventoryChanged");
-        }
-        I.select(i);   // also re-renders the hotbar
-        return;
-      }
-    } catch (e) { console.error(e); }
-  }
-  // best effort: if the inventory exposes hotbar slots, select the one holding this block
-  try {
-    const slots = I.hotbar || (I.slots && I.slots.slice(0, 9));
-    if (slots && I.select) { const i = slots.findIndex(s => s && s.id === tid); if (i >= 0) I.select(i); }
-  } catch (_) {}
 }
 
 // ---------- survival ----------
@@ -1401,9 +1465,14 @@ let lastCause = "";
 // environmental damage, which ignores the post-hit invulnerability window.
 P.damage = function (amount, fromPos, cause) {
   if (creative() || P.dead || !started || waitingForChunk || !(amount > 0)) return;
-  if (hurtCd > 0 && !cause) return;
-  if (!cause) hurtCd = 0.5;
-  P.health = Math.max(0, P.health - amount);
+  // Vanilla invulnerability: during the half second after a hit, a stronger hit still deals the difference (a creeper
+  // blast right after a zombie punch), a weaker or equal one does nothing.
+  let dealt = amount;
+  if (!cause) {
+    if (hurtCd > 0) { if (amount <= hurtAmt) return; dealt = amount - hurtAmt; hurtAmt = amount; }
+    else { hurtCd = 0.5; hurtAmt = amount; }
+  }
+  P.health = Math.max(0, P.health - dealt);
   lastCause = cause || (fromPos ? "slain" : "hurt");
   flashT = 0.45; hurtBlink = 0.5;
   if (fromPos) {
@@ -1413,16 +1482,20 @@ P.damage = function (amount, fromPos, cause) {
     if (!flying) vel.y = Math.max(vel.y, 5);
   }
   exhaustion += 0.1;
-  emit("playerDamaged", amount);
+  emit("playerDamaged", dealt);
   if (P.health <= 0) die();
 };
 P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health + n); };
 
-const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", hurt: "You died" };
+const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", lightning: "You were struck by lightning", hurt: "You died" };
 function die() {
   P.dead = true; P.health = 0;
   resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
-  if (invOpen()) { try { inv().close(); } catch (_) {} }
+  if (invOpen()) {   // every screen closes (the command line closes itself on playerDied)
+    try { inv().close(); } catch (_) {}
+    try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
+    try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
+  }
   deathEl.querySelector(".bfp-sub").textContent = DEATH_MSG[lastCause] || "You died";
   showScreen("death");
   BF.state.paused = true;
@@ -1449,7 +1522,7 @@ function resetStats() {
   vel.x = vel.y = vel.z = 0;
   P.health = P.maxHealth; P.hunger = P.maxHunger; P.dead = false;
   saturation = 5; exhaustion = 0; air = AIR_MAX; fallStart = null; flying = false; sprinting = false;
-  hurtCd = 1; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
+  hurtCd = 1; hurtAmt = Infinity; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
   resetBreak();
 }
 
@@ -1532,7 +1605,7 @@ function physics(dt) {
   }
 
   const ox = pos.x, oz = pos.z;
-  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, { stepUp: 0.6 }); // vanilla step height: slabs, stairs and beds, not full blocks
+  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, { stepUp: 0.6, firm: true }); // vanilla step height: slabs, stairs and beds, not full blocks
   const wasGround = onGround;
   onGround = res.onGround; inWater = res.inWater; headInWater = !!res.headInWater; ladderHit = res.hitX || res.hitZ;
   if (inWater && wantJump && (res.hitX || res.hitZ)) vel.y = Math.max(vel.y, 6.5); // climb out onto a ledge
@@ -1625,7 +1698,7 @@ P.spawn = function (x, y, z) {
   pos.set(x, y, z);
   waitingForChunk = true;
   faceOpen = true;
-  hurtCd = 2;
+  hurtCd = 2; hurtAmt = Infinity;
   if (menuOpen === "death") { showScreen(null); BF.state.paused = false; }
   syncCamera(0.016);
 };
@@ -1635,6 +1708,7 @@ P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
+P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
 P.escGrace = () => inEscGrace();   // tests: still inside the grace after an Escape closed a screen
 P.frame = () => frameNo;
 P.menu = () => menuOpen;
@@ -1649,6 +1723,7 @@ P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started &
 P.teleport = function (x, y, z) {
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists
+  if (y < BF.MIN_Y + 5) waitingForChunk = true;           // in the bedrock floor: lifted to the surface if stuck (bedrock can't be dug out)
   syncCamera(0.016);
 };
 P.kill = function () { if (P.dead || !started) return; lastCause = "killed"; die(); };
@@ -1667,8 +1742,9 @@ P.deserialize = function (o) {
   const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : d);
   if (o.gameMode) setGameMode(o.gameMode);
   resetStats();
-  const sp = BF.spawnPoint || { x: pos.x, z: pos.z };
-  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z)) {
+  let sp = BF.spawnPoint || { x: pos.x, z: pos.z };
+  if (!inWorld(sp.x, sp.z)) BF.spawnPoint = sp = worldSpawn();
+  if (o.dead || num(o.health, 20) <= 0 || !isFinite(o.x) || !isFinite(o.y) || !isFinite(o.z) || !inWorld(o.x, o.z)) {
     pos.set(sp.x, surfaceY(sp.x, sp.z), sp.z);           // saved while dead (or broken data): back to spawn
   } else {
     pos.set(o.x, o.y, o.z);
@@ -1681,10 +1757,17 @@ P.deserialize = function (o) {
   yaw = num(o.yaw, yaw); pitch = clamp(num(o.pitch, pitch), -1.55, 1.55);
   waitingForChunk = true;   // no physics until the chunks around the saved position are loaded
   faceOpen = false;         // keep the saved look direction
-  hurtCd = 2;
+  hurtCd = 2; hurtAmt = Infinity;
   if (menuOpen === "death") { showScreen(null); BF.state.paused = false; }
   hudKey = "";
   syncCamera(0.016);
+};
+P.viewModel = function () { // test hook: what the held view model is ("hand", "cube" or "sprite") and a cube's top-face vertex colour
+  if (!vmMesh) return null;
+  if (vmMesh === hand) return { kind: "hand" };
+  const g = vmMesh.geometry, col = g.attributes.color;
+  if (g.userData.cube) return { kind: "cube", top: col ? [col.getX(8), col.getY(8), col.getZ(8)] : null, faces: g.index.count / 6 };
+  return { kind: "sprite" };
 };
 P.setMouse = function (left, right) { // test hook: simulate held mouse buttons
   if (left && !mouseL) { mouseL = true; primaryDown(); } else if (!left) { mouseL = false; resetBreak(); }
@@ -1702,7 +1785,10 @@ P.update = function (dt) {
     if (W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
         W.isLoaded(pos.x + 1, pos.z - 1) && W.isLoaded(pos.x - 1, pos.z + 1)) {
       waitingForChunk = false;
-      if (W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);
+      const bed = bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);
+      bedRespawn = null;
+      if (bed) pos.set(bed[0], bed[1], bed[2]);
+      else if (pos.y < BF.MIN_Y || W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }

@@ -5,7 +5,7 @@
 //  - Fed: 1 wheat from the player or a shepherd makes a sheep willing to breed for 1 day (`fed` = absolute game day it was fed).
 //  - Breeding: two willing adults within MATE_R walk to each other and a lamb appears; both then rest BREED_CD days.
 //    A lamb is smaller, drops nothing and grows up after LAMB_DAYS.
-//  - Shearing: shears (3 iron ingots) take 1-3 wool and swap the model for a shorn one. The wool grows back after ~7 days, +-30% per sheep.
+//  - Shearing: shears (2 iron ingots) take 1-3 wool and swap the model for a shorn one. The wool grows back after ~7 days, +-30% per sheep.
 // Pens: worldgen gives every shepherd a fenced pen (js/worldgen.js layoutVillage, js/jobs.js puts the loom beside it). Each pen holds a list of sheep
 //  states that outlives the sheep mobs: 2-4 sheep when it is first seen, respawned whenever the pen is loaded, saved as "pens:<village key>".
 //  Penned sheep wander only inside the pen (the fence has a gate gap and sheep can hop one-block fences, so the AI keeps them in).
@@ -313,7 +313,6 @@ function tick(dt) {
   acc = 0;
   const t = now();
   for (const m of BF.mobs.list) {
-    if (m.type === "villager" && m.profession === "shepherd" && !m.kitChecked && live(m)) { ensureKit(m); continue; }   // shepherds start with shears
     if (m.type !== "sheep" || !live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
@@ -354,15 +353,9 @@ function reset() { pending = new Map(); activePens.length = 0; acc = 0; penT = 0
 // ---------------------------------------------------------------- the shepherd
 const shp = m => m.shp || (m.shp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0 });
 
-// Starting kit for a shepherd: shears, and a little wheat for the first days (it buys more when it runs low).
-function ensureKit(m) {
-  const c = idsOf();
-  if (!m.inv || c.shears == null || m.kitChecked) return;
-  m.kitChecked = true;
-  if (cnt(m, c.shears) > 0) return;
-  TR().inv.add(m.inv, c.shears, 1);
-  if (c.wheat != null && cnt(m, c.wheat) < 8) TR().inv.add(m.inv, c.wheat, 8 - cnt(m, c.wheat));
-}
+// Starting kit: a shepherd alive when its village was generated starts with shears and 8 wheat (trading.js stockFor); one hired later gets
+// emeralds and buys its shears (js/villagelife.js toolAI) and wheat. Kept as a no-op for callers of the old API.
+function ensureKit() {}
 // The pen this shepherd works: the one its loom stands beside (its footprint within 4 blocks of the loom).
 function penOf(m) {
   const S = shp(m);
@@ -438,7 +431,7 @@ function perform(m, tk) {
   }
   if (tk.kind === "shear") {
     const n = shear(o, m);
-    if (n) loot(m, c.wool, n, o);
+    if (n) { loot(m, c.wool, n, o); BF.toolWear.use(m, BF.toolWear.best(m, "shears"), 1); }   // shearing wears the shears 1 use, as the player's
     return n > 0;
   }
   // cull: the shepherd keeps the mutton (and the wool the sheep still wears) instead of dropping it
@@ -478,7 +471,6 @@ function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.tradingWith || !BF.mobs.nav || !BF.villageLife || m.sleeping) return false;
   const S = shp(m), ai = m.ai, t = skyT();
   if (t >= WORK_END || t < 0.02) { if (S.task) endTask(m, true); return t >= WORK_END && leave(m, S, dt, out); }
-  ensureKit(m);
   if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
     if ((S.cd -= dt) > 0) return false;
@@ -521,8 +513,8 @@ function statusText(m) {
 }
 
 // ---------------------------------------------------------------- shears: recipe + sprite
-(BF.recipeHooks = BF.recipeHooks || []).push(({ addShapeless }) => {
-  addShapeless(BF.I.shears, 1, [BF.I.iron_ingot, BF.I.iron_ingot, BF.I.iron_ingot], "3 Iron Ingots → Shears");
+(BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped }) => {
+  addShaped(BF.I.shears, 1, [" I", "I "], { I: BF.I.iron_ingot }, "2 Iron Ingots (diagonal) → Shears");   // Minecraft's recipe
 });
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
   if (BF.I.oak_fence_gate === undefined) return;

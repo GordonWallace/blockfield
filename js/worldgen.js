@@ -128,6 +128,7 @@ const band = v => (v < BANDS[0] ? 0 : v < BANDS[1] ? 1 : v < BANDS[2] ? 2 : v < 
 let GEN = 1, SC = 1;
 // Village generator of the current world (BF.state.villages): 1 = classic (8-25 buildings, roster capped at 24, kept for saved worlds),
 // 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
+// 3 = as 2, with at least 4 villagers (a miner, a farmer, a forester and a toolsmith, js/mobs.js villageRoster) and a garden with trees in desert villages.
 let VGEN = 1;
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
@@ -759,7 +760,7 @@ function siteOK(x, z, relaxed) {
 
 // Village population (village generator 2): a shifted gamma draw, 2 + Gamma(k = 2.5, theta = 32/3), so the mode is 18, the mean ~29 and
 // the right tail is long (about 1 village in 20 has 60+, 1 in 500 reaches the maximum of 100). Redrawn above 100. Deterministic from (a, b, salt).
-const POP_MIN = 2, POP_MAX = 100, POP_K = 2.5, POP_THETA = 32 / 3;
+const POP_MIN = 2, POP_MIN3 = 4, POP_MAX = 100, POP_K = 2.5, POP_THETA = 32 / 3;
 function villagePop(a, b, salt) {
   let s = ((noise.hash(a, b, salt) * 4294967296) >>> 0) || 1;
   const u = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) + 0.5) / 4294967296;
@@ -769,7 +770,7 @@ function villagePop(a, b, salt) {
     const x = normal(), v = Math.pow(1 + c * x, 3);
     if (v <= 0 || Math.log(u()) >= 0.5 * x * x + d - d * v + d * Math.log(v)) continue;
     const n = Math.round(POP_MIN + d * v * POP_THETA);
-    if (n <= POP_MAX) return Math.max(POP_MIN, n);
+    if (n <= POP_MAX) return Math.max(VGEN >= 3 ? POP_MIN3 : POP_MIN, n);   // village generator 3: at least a miner, a farmer, a forester and a toolsmith
   }
   return 18;
 }
@@ -824,7 +825,7 @@ function villageAt(x, z, m) {
 
 const BTYPES = {
   house: [5, 5], house2: [5, 6], lhouse: [7, 7], big: [7, 7], library: [9, 7], church: [5, 10],
-  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3],
+  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11],
 };
 const LIVABLE = { house: 1, house2: 1, lhouse: 1, big: 1, library: 1, church: 1, smith: 1 };
 // Beds of a building in its local coords (u along the road, q inward): [footU, footQ, axis the head lies along (+1)].
@@ -1070,6 +1071,35 @@ function layoutVillage(cx, cz, spawn, pop) {
     }
   }
 
+  // Desert garden (village generator 3): sand grows no saplings, so a desert village gets a square of grass with one or two oak trees
+  // for its forester (js/forester.js). It goes just past the end of a road, clear of the buildings, so the forester may replant there.
+  if (VGEN >= 3 && style === 1) {
+    const [w, d] = BTYPES.garden, M = 3;
+    const tryGarden = (road, t, back) => {
+      const { dx, dz } = road, sx = dz ? 1 : 0, sz = dx ? 1 : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(0, 0), c1 = P(w - 1, d - 1);
+      const box = [Math.min(c0[0], c1[0]), Math.min(c0[1], c1[1]), Math.max(c0[0], c1[0]), Math.max(c0[1], c1[1])];
+      if (Math.max(Math.abs(box[0] - cx), Math.abs(box[2] - cx), Math.abs(box[1] - cz), Math.abs(box[3] - cz)) > E + 16) return false;
+      if (overlaps([box[0] - M, box[1] - M, box[2] + M, box[3] + M]) || covers(box, 2)) return false;
+      const mid = P(w >> 1, d >> 1), y = climate(mid[0], mid[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = 0; q < d; q += 2) for (let u = 0; u < w; u += 2) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "garden", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du: w >> 1, doorX: P(w >> 1, -1)[0], doorZ: P(w >> 1, -1)[1],
+        x0: box[0], z0: box[1], x1: box[2], z1: box[3], h: noise.hash(bx, bz, 631) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    // straight on past a road's end first, then beside the end of it
+    const order = mains.filter(r => roads.indexOf(r) >= 0).concat(roads.filter(r => mains.indexOf(r) < 0));
+    found: for (const back of [-(d >> 1), 3, -d - 2]) for (const road of order) for (let t = road.end + 3; t <= road.end + 12; t += 3) if (tryGarden(road, t, back)) break found;
+  }
+
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
   for (const road of roads) {
@@ -1199,6 +1229,8 @@ function drawVillage(v, ox, oz, vox, hAt) {
     const p = padAt(v, x, z), g = p ? p.y : hAt(x, z);
     set(x, g + 1, z, B.oak_fence); set(x, g + 2, z, B.oak_fence); set(x, g + 3, z, B.lantern);
   }
+  // villager jobsites are planned before the buildings are drawn: the plan marks the farms no farmer works (b.untended, drawn run down)
+  if (BF.jobs && BF.jobs.planVillage && !v.jobsites) v.jobsites = BF.jobs.planVillage(v);
   // buildings (local coords: u along the road, q away from it, door wall at q = 0)
   for (const b of v.buildings) {
     if (!isect(b.x0 - 1, b.z0 - 1, b.x1 + 1, b.z1 + 1)) continue;
@@ -1243,6 +1275,8 @@ function windows(P, u0, q0, w, d, y, skipFront) {
   for (let q = q0 + 2; q < q0 + d - 1; q += 2) { P(u0, y, q, G); P(u0 + w - 1, y, q, G); }
 }
 
+let YOUNG = null;   // mature crop block -> its young block
+const youngOf = id => { if (!YOUNG) { YOUNG = new Map(); for (const b of BF.blocks) if (b && b.growsInto != null) YOUNG.set(b.growsInto, b.id); } return YOUNG.get(id); };
 const v_ground = style => style === 1 ? BF.B.sand : style === 2 ? BF.B.snow_grass : BF.B.grass;
 function drawBuilding(b, P, S, style) {
   drawShell(b, P, S, style);
@@ -1267,18 +1301,47 @@ function drawShell(b, P, S, style) {
       const pickCrop = r => { r *= tot; for (let k = 0; k < 4; k++) { if ((r -= WT[k]) < 0) return CROPS[k]; } return B.wheat; };
       // each section (between water channels) is split into bands of 2 rows; each band picks a crop
       const pumpkinBand = noise.hash(b.bx, b.bz, 621) < 0.25 ? 1 + ((noise.hash(b.bx, b.bz, 622) * ((d - 2) >> 1)) | 0) : -1;
+      // a farm no farmer works at spawn (b.untended, set by js/jobs.js planVillage, village generator 3) is run down by a seeded
+      // amount s: up to 0.6 the water is there and the farmland intact, with fewer crops the higher s (30% down to a handful);
+      // above 0.6 the channels are dry, the farmland dehydrated (js/farmland.js) and more and more of it back to dirt (all of it from 0.92)
+      const s = b.untended ? noise.hash(b.bx, b.bz, 640) : -1, dry = s >= 0.6 && B.farmland_dry != null;
+      const cropFrac = s < 0 ? 1 : dry ? 0.04 : 0.3 - 0.45 * s, dirtFrac = dry ? Math.min(1, (s - 0.6) / 0.32) : 0;
+      const cellR = (u, q, k) => noise.hash(b.bx * 31 + u, b.bz * 17 + q, k);
       for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
         if (u === 0 || u === w - 1 || q === 0 || q === d - 1) { P(u, y, q, S.log); continue; }
-        if (mids.includes(u)) { P(u, y, q, B.water); continue; }
+        if (mids.includes(u)) { P(u, y, q, dry ? 0 : B.water); continue; }   // a dry channel is an empty trench
         let sec = 0; for (const m of mids) if (u > m) sec++;
         const bandIx = (q - 1) >> 1;
         if (sec === 0 && bandIx === pumpkinBand) {            // a small pumpkin patch on plain soil
           P(u, y, q, v_ground(style)); P(u, y + 1, q, (u + q) % 3 === 0 ? B.pumpkin : 0);
           continue;
         }
-        P(u, y, q, B.farmland);
-        P(u, y + 1, q, pickCrop(noise.hash(b.bx * 7 + sec, b.bz * 13 + bandIx, 623)));
+        if (s < 0) { P(u, y, q, B.farmland); P(u, y + 1, q, pickCrop(noise.hash(b.bx * 7 + sec, b.bz * 13 + bandIx, 623))); continue; }
+        if (cellR(u, q, 641) < dirtFrac) { P(u, y, q, B.dirt); continue; }
+        P(u, y, q, dry ? B.farmland_dry : B.farmland);
+        if (cellR(u, q, 642) < cropFrac) {   // the crops that are left, half of them still young
+          const crop = pickCrop(noise.hash(b.bx * 7 + sec, b.bz * 13 + bandIx, 623));
+          P(u, y + 1, q, cellR(u, q, 643) < 0.5 && youngOf(crop) != null ? youngOf(crop) : crop);
+        }
       }
+      return;
+    }
+    case "garden": {
+      // grass over dirt, and one or two oak trees (trunks 3 in from the edge, so their leaves stay inside)
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) { P(u, y, q, B.grass); for (let k = 1; k <= 8; k++) P(u, y - k, q, B.dirt); }   // no foundation under it: the forester plants nowhere near built blocks
+      const trees = b.h < 0.5 ? [[3, 3], [w - 4, d - 4]] : [[w >> 1, d >> 1]];
+      trees.forEach(([tu, tq], i) => {
+        const top = y + 1 + 4 + ((noise.hash(b.bx + i, b.bz, 632) * 3) | 0);
+        for (let yy = y + 1; yy < top; yy++) P(tu, yy, tq, B.oak_log);
+        for (let yy = top - 3; yy <= top; yy++) {
+          const r = yy >= top - 1 ? 1 : 2;
+          for (let dq = -r; dq <= r; dq++) for (let du2 = -r; du2 <= r; du2++) {
+            if (!du2 && !dq && yy < top) continue;   // the trunk
+            if (Math.abs(du2) === r && Math.abs(dq) === r && (yy === top || noise.hash(b.bx + tu + du2, yy, b.bz + tq + dq) < 0.5)) continue;   // ragged corners
+            P(tu + du2, yy, tq + dq, B.oak_leaves);
+          }
+        }
+      });
       return;
     }
     case "hay":
@@ -1308,7 +1371,8 @@ function drawShell(b, P, S, style) {
       }
       flatRoof(P, 0, 0, w, d, y + 4, flat ? S.roof : B.planks, flat ? 0 : S.corner);
       door(); P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass);
-      P(1, y + 1, d - 2, B.furnace); P(2, y + 1, d - 2, B.furnace); P(w - 2, y + 1, d - 2, B.chest); P(w - 2, y + 1, d - 3, B.crafting_table);
+      const cq = VGEN >= 3 ? d - 3 : d - 2;   // village generator 3: chest in front of the table, so its lid is clear; older worlds keep the 1.0 spot, where their saved chest contents are
+      P(1, y + 1, d - 2, BF.furnaceId(out)); P(2, y + 1, d - 2, BF.furnaceId(out)); P(w - 2, y + 1, cq, BF.chestId(out)); P(w - 2, y + 1, 2 * d - 5 - cq, B.crafting_table);
       P(1, y + 1, 1, B.lantern);
       return;
     }
@@ -1338,7 +1402,7 @@ function drawShell(b, P, S, style) {
       windows(P, 0, 0, w, d, y + 2, false); windows(P, 0, 0, w, d, y + 3, false);
       if (flat) flatRoof(P, 0, 0, w, d, y + 6, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 5, S.wall, S.roof);
       door();
-      for (let u = 1; u < w - 1; u++) { P(u, y + 1, d - 2, u % 2 ? B.chest : S.wall); P(u, y + 2, d - 2, S.wall); }   // shelves
+      for (let u = 1; u < w - 1; u++) { P(u, y + 1, d - 2, u % 2 ? BF.chestId(out) : S.wall); P(u, y + 2, d - 2, S.wall); }   // shelves
       P(1, y + 1, 1, B.crafting_table); P(w - 2, y + 1, 1, B.lantern);
       return;
     }
@@ -1366,7 +1430,7 @@ function drawShell(b, P, S, style) {
       for (let k = 1; k <= 5; k++) P(lu, y + k, d - 2, BF.ladderId(out));   // against the back wall, one rung above the upper floor to step off
       if (flat) flatRoof(P, 0, 0, w, d, y + 8, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 7, S.wall, S.roof);
       door();
-      P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, B.chest);
+      P(1, y + 1, 1, B.crafting_table); P(1, y + 5, d - 2, BF.chestId(out));
       return;
     }
     default: {
@@ -1377,7 +1441,7 @@ function drawShell(b, P, S, style) {
       if (flat) flatRoof(P, 0, 0, w, d, y + Hh + 1, S.roof, 0); else roof(P, S, 0, 0, w, d, y + Hh, S.wall, S.roof);
       door();
       if (b.type === "big" || b.h < 0.6) P(1, y + 1, d - 2, B.crafting_table);
-      if (b.type === "big") { P(w - 2, y + 1, d - 2, B.chest); P(w - 2, y + 1, 1, B.lantern); }
+      if (b.type === "big") { P(w - 2, y + 1, d - 2, BF.chestId(out)); P(w - 2, y + 1, 1, B.lantern); }
     }
   }
 }
@@ -1547,16 +1611,19 @@ function caves3(vox, Y0, Y1, cx, cz) {
 // Ores, rocks and pockets: random-walk veins in 32-block buckets of absolute y (seeded by chunk and bucket), so any window agrees.
 // kind 'd': y range by depth below the chunk's centre surface [hc - b, hc - a]; kind 'y': absolute [a, b].
 const ORE3 = [
-  // salt, veins per bucket, size, kind, a, b, block, deepslate variant, depth-weighted (more near the surface)
+  // salt, veins per bucket, size, kind, a, b, block, deepslate variant, depth curve (ORE_CURVE: veins per bucket are scaled by it)
   [201, 1.3, 30, "d", 8, 99999, "gravel"], [202, 0.25, 18, "d", 20, 300, "clay"], [203, 1.1, 22, "d", 6, 300, "dirt"],
-  [211, 6.5, 9, "d", 6, 99999, "coal_ore", "deepslate_coal_ore", 1],
-  [212, 6.0, 7, "d", 6, 99999, "iron_ore", "deepslate_iron_ore", 1],
-  [217, 5.5, 9, "d", 6, 99999, "copper_ore", "deepslate_copper_ore", 1],
-  [213, 2.2, 6, "y", -64, 32, "gold_ore", "deepslate_gold_ore"],
-  [214, 2.0, 5, "y", -64, 16, "diamond_ore", "deepslate_diamond_ore"],
-  [215, 1.0, 6, "y", -64, 40, "lapis_ore", "deepslate_lapis_ore"],
-  [216, 3.5, 6, "y", -64, 16, "redstone_ore", "deepslate_redstone_ore"],
-  [219, 0.03, 1, "y", -64, 40, "emerald_ore", "deepslate_emerald_ore"],
+  // coal, iron and copper: rare in surface rock (exposed rock above the chunk's surface too), most common about 100 down, gone by about 210
+  [211, 11.0, 10, "d", -9999, 210, "coal_ore", "deepslate_coal_ore", "c"],
+  [212, 8.0, 8, "d", -9999, 210, "iron_ore", "deepslate_iron_ore", "c"],
+  [217, 6.5, 7, "d", -9999, 210, "copper_ore", "deepslate_copper_ore", "c"],
+  // the rarer ores are placed by depth below the surface too, so every village's miner can reach them (js/miner.js DIG_DEPTH): an apprentice
+  // reaches gold, a journeyman diamonds and redstone. They begin at the same depth wherever the land is and grow richer all the way down.
+  [213, 3.3, 6, "d", 32, 99999, "gold_ore", "deepslate_gold_ore", "r"],
+  [214, 2.4, 5, "d", 48, 99999, "diamond_ore", "deepslate_diamond_ore", "r"],
+  [215, 1.0, 6, "d", 24, 99999, "lapis_ore", "deepslate_lapis_ore", "r"],
+  [216, 3.5, 6, "d", 48, 99999, "redstone_ore", "deepslate_redstone_ore", "r"],
+  [219, 0.03, 1, "d", 24, 99999, "emerald_ore", "deepslate_emerald_ore", "r"],
   [218, 1.1, 1, "d", 3, 500, "emerald_ore", "deepslate_emerald_ore", 0, "mtn"],
   [221, 1.6, 70, "d", 5, 99999, "granite"], [222, 1.6, 70, "d", 5, 99999, "diorite"], [223, 1.6, 70, "d", 5, 99999, "andesite"],
   [224, 1.0, 60, "y", -64, 16, "tuff", "tuff"], [225, 0.35, 40, "d", 30, 250, "dripstone_block"],
@@ -1564,6 +1631,14 @@ const ORE3 = [
   [232, 0.8, 12, "y", -64, -8, "magma_block", "magma_block"],     // there is no lava block: deep magma pockets
   [233, 0.15, 9, "d", 40, 99999, "magma_block", "magma_block"],
 ];
+// Depth curves (d = blocks below the chunk's centre surface, negative above it), as a multiple of the row's veins per bucket.
+//   "c": 0.1 in surface rock and above, rising smoothly to 1 at 100 down, falling smoothly to 0 at 200 (and nothing deeper).
+//   "r": 1 where the band begins (a blocks down), rising towards 3; half of the gain comes within 210 blocks, so it changes quickly near the
+//        top of the band and barely at all a kilometre down.
+const ORE_CURVE = {
+  c: { max: 1, at: (d) => d <= 0 ? 0.1 : d < 100 ? 0.1 + 0.9 * Math.sin(Math.PI / 2 * d / 100) ** 2 : d < 200 ? Math.cos(Math.PI / 2 * (d - 100) / 100) ** 2 : 0 },
+  r: { max: 3, at: (d, a) => 3 - 2 * Math.exp(-Math.max(0, d - a) / 300) },
+};
 function ores3(vox, Y0, Y1, cx, cz) {
   const { CS, B } = BF, MINY = BF.MIN_Y, STONE = B.stone, DEEP = B.deepslate, hc = P.hc;
   const eb = bCache[((CS >> 1) + 1) * HW + (CS >> 1) + 1], mtn = eb === MOUNTAINS || eb === SNOWY_SLOPES || eb === PEAKS || eb === STONY_PEAKS;
@@ -1574,7 +1649,8 @@ function ores3(vox, Y0, Y1, cx, cz) {
     const ds = sp[7] !== undefined ? B[sp[7]] : undefined, size = sp[2];
     let lo, hi;
     if (sp[3] === "d") { lo = Math.max(MINY + 5, hc - sp[5]); hi = hc - sp[4]; } else { lo = sp[4]; hi = sp[5]; }
-    if (hi > hc - 3) hi = hc - 3;
+    const curve = sp[8] ? ORE_CURVE[sp[8]] : null;
+    if (sp[8] === "c") hi = Math.min(hi, P.maxH); else if (hi > hc - 3) hi = hc - 3;   // common ores reach exposed rock above the surface
     const reach = Math.ceil(size * 1.2) + 1;
     const wLo = Math.max(lo, Y0 - reach), wHi = Math.min(hi, Y1 - 1 + reach);
     if (wHi < wLo) continue;
@@ -1582,13 +1658,13 @@ function ores3(vox, Y0, Y1, cx, cz) {
       const bl = Math.max(lo, bk * 32), bh = Math.min(hi, bk * 32 + 31);
       if (bh < bl) continue;
       const len = bh - bl + 1;
-      let cnt = sp[1] * len / 32;
-      if (sp[8]) cnt *= 0.8 + 0.8 * Math.exp(-(hc - (bl + bh) / 2) / 150);
+      const cnt = sp[1] * len / 32 * (curve ? curve.max : 1);
       rs = (noise.hash3(cx, bk, cz, sp[0]) * 4294967296) >>> 0 || 1;
       let n = cnt | 0; if (rnd() < cnt - n) n++;
       for (let k = 0; k < n; k++) {
         let px = (rnd() * CS) | 0, pz = (rnd() * CS) | 0, py = bl + ((rnd() * len) | 0);
         const sz = size * (0.6 + rnd() * 0.6);
+        if (curve && rnd() * curve.max >= curve.at(hc - py, sp[4])) continue;   // thinned to the curve at the vein's own depth
         for (let s = 0; s < sz; s++) {
           if (px >= 0 && px < CS && pz >= 0 && pz < CS && py >= Y0 && py < Y1) {
             const vi = ((py - Y0) * CS + pz) * CS + px, cur = vox[vi];

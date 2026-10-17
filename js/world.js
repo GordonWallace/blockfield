@@ -60,7 +60,7 @@ world.init = function (sceneRef) {
   world._faceUV = [];
   for (const b of BF.blocks) {
     if (!b.tiles) continue;
-    for (let f = 0; f < 6; f++) world._faceUV[b.id * 6 + f] = BF.textures.uv(b.tiles[f === 4 ? "front" : FACES[f].kind]);
+    for (let f = 0; f < 6; f++) world._faceUV[b.id * 6 + f] = BF.textures.uv(b.tiles[f === (b.frontFace != null ? b.frontFace : 4) ? "front" : FACES[f].kind]);
   }
   // Biome tint per face: 0 none, 1 grass, 2 foliage, 3 water, 4 grass side (untinted dirt + tinted overlay quad)
   const tinted = BF.textures.tinted || {};
@@ -72,7 +72,7 @@ world.init = function (sceneRef) {
   for (const b of BF.blocks) {
     if (!b.tiles) continue;
     for (let f = 0; f < 6; f++) {
-      const n = b.tiles[f === 4 ? "front" : FACES[f].kind];
+      const n = b.tiles[f === (b.frontFace != null ? b.frontFace : 4) ? "front" : FACES[f].kind];
       let t = 0;
       if (n === "grass_side" && hasOverlay) t = 4;
       else if (inList("grass", n)) t = 1;
@@ -123,6 +123,7 @@ world.reset = function () {
   world._dirty.clear();
   fluidQ.clear();
   growing.clear();
+  if (BF.farmland) BF.farmland.reset();
   lastCenter = null; genList = []; meshList = []; simList = [];
   if (BF.villageSim) BF.villageSim.reset();   // force a fresh load plan even if the spawn chunk is unchanged
 };
@@ -244,9 +245,12 @@ world.setBlock = function (x, y, z, id) {
   world._dirty.add(c.key);
   scheduleFluid(x, y, z, true);
   if (BF.light) { BF.light.onSet(x, y, z, oldId, id); BF.light.popUnsupported(x, y, z, id); } // block light + torches losing support
+  if (BF.mobs && BF.mobs.onSet) BF.mobs.onSet(x, y, z, oldId, id); // monster spawn wait restarts where it got darker (js/mobs.js)
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
-  if (oldId === BF.B.chest && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
+  if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
+  if (BF.isFurnace(oldId) && !BF.isFurnace(id) && BF.inventory && BF.inventory.furnaceRemoved) BF.inventory.furnaceRemoved(x, y, z); // a furnace stops and spills (js/inventory.js)
   if (BF.blocks[id] && BF.blocks[id].growsInto) growing.add(fkey(x, y, z));
+  if (BF.farmland) BF.farmland.onSet(x, y, z, oldId, id);   // farmland hydration clock (js/farmland.js)
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {
     const above = cblock(c, lx, y + 1, lz);
@@ -602,7 +606,7 @@ function buildMesh(c) {
   const L = { pos: [], uv: [], col: [], sky: [], bl: [], ind: [] };
   const RENDER = BF.RENDER, OPAQUE = BF.OPAQUE, FLUID = BF.FLUID;
   const faceTint = world._faceTint;
-  const B_PATH = BF.B.dirt_path, B_FARM = BF.B.farmland;
+  const B_PATH = BF.B.dirt_path, B_FARM = BF.B.farmland, B_FARM_DRY = BF.B.farmland_dry;
 
   // Biome tint per column over an 18x18 area (1-block border) so AO-free tint blends at borders.
   const tintFn = BF.worldgen.tintAt;
@@ -793,7 +797,7 @@ function buildMesh(c) {
       }
 
       // solid / cutout cube face with ambient occlusion (paths and farmland sit 1/16 lower)
-      const lowTop = (b === B_PATH || b === B_FARM) && !BF.SOLID[get(x, y + 1, z)];
+      const lowTop = (b === B_PATH || b === B_FARM || b === B_FARM_DRY) && !BF.SOLID[get(x, y + 1, z)];
       const ua = sideAxes[f][0], va = sideAxes[f][1];
       for (let k = 0; k < 4; k++) {
         const cc = F.c[k];
@@ -936,7 +940,8 @@ function fluidTick() {
 }
 
 // ---------- crop growth ----------
-// Young crops (blocks with growsInto) mature after ~4 minutes (1/5 game day) on average, only on farmland.
+// Young crops (blocks with growsInto) mature after ~4 minutes (1/5 game day) on average, only on farmland; on dehydrated
+// farmland at a third of that speed (js/farmland.js).
 const growing = new Set();
 let growLast = 0;
 const GROW_CHANCE_PER_S = 1 / 240;   // ~4 minutes (a fifth of the 1200 s game day) on average
@@ -950,9 +955,11 @@ function growTick() {
     if (!world.isLoaded(x, z)) continue; // keeps waiting until its chunk is back
     const id = world.getBlock(x, y, z), b = BF.blocks[id];
     if (!b || !b.growsInto) { growing.delete(k); continue; }
-    if (world.getBlock(x, y - 1, z) !== BF.B.farmland) continue;
+    const soil = world.getBlock(x, y - 1, z);
+    if (soil !== BF.B.farmland && soil !== BF.B.farmland_dry) continue;
+    const f = soil === BF.B.farmland_dry ? (BF.farmland ? BF.farmland.growFactor(soil) : 1 / 3) : 1;
     // crops grow 1.5x faster while it rains (js/weather.js)
-    if (Math.random() < GROW_CHANCE_PER_S * dt * (BF.weather && BF.weather.raining ? 1.5 : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
+    if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
   }
 }
 world.growingCount = () => growing.size;
@@ -1018,15 +1025,22 @@ world.setGate = function (x, y, z, open) {
 
 // ---------- collision ----------
 // Union of the collision boxes of solid blocks overlapping an entity box (filled by boxHit).
-// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored,
-// so an entity caught inside a door slab can walk out of it.
-const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
+// With axis/prev, boxes the entity already overlapped at coordinate prev on that axis are ignored, so an entity caught
+// inside a door slab can walk out of it. For the player (moveBox opts.firm) there is one exception: when this axis is the
+// one the player is least far into the box and the move takes it deeper, it still collides (HIT.inside is set, and
+// moveAxis keeps the player where it was), so the player can't walk through a block it is only slightly inside, while
+// walking along a block it grazes still works. Mobs keep walking out of anything they end up inside (their AI and
+// saved spots rely on it).
+const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, inside: false };
+let firmInside = false;   // set by moveBox for the player (opts.firm): see boxHit
 function boxHit(px, py, pz, hw, h, axis, prev) {
+  HIT.inside = false;
   const x0 = Math.floor(px - hw), x1 = Math.floor(px + hw - 1e-6);
   const y0 = Math.floor(py), y1 = Math.floor(py + h - 1e-6);
   const z0 = Math.floor(pz - hw), z1 = Math.floor(pz + hw - 1e-6);
   let hit = false;
-  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+  for (let y = y0 - 1; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (y < y0 && !BF.TALLBOX[world.getBlock(x, y, z)]) continue;   // the layer below the feet only matters for fences / gates (1.5 tall)
     if (!world.isSolid(x, y, z)) continue;
     const bid = world.getBlock(x, y, z);
     const cbl = (BF.DYNBOXES[bid] && BF.DYNBOXES[bid](world.getBlock, x, y, z, bid)) || BF.CBOXES[bid] || (BF.CBOX[bid] ? [BF.CBOX[bid]] : [null]); // slabs/stairs: several boxes, each tested on its own
@@ -1037,7 +1051,16 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
       if (ax >= px + hw || bx <= px - hw || ay >= py + h || by <= py || az >= pz + hw || bz <= pz - hw) continue;
     }
     if (axis === "x" ? ax < prev + hw && bx > prev - hw : axis === "z" ? az < prev + hw && bz > prev - hw :
-      axis === "y" && ay < prev + h && by > prev) continue;
+      axis === "y" && ay < prev + h && by > prev) {
+      // how far the entity (at prev) was into the box on each axis; it only pushes through a face it is shallowest in
+      const qx = axis === "x" ? prev : px, qy = axis === "y" ? prev : py, qz = axis === "z" ? prev : pz;
+      const ox = Math.min(bx, qx + hw) - Math.max(ax, qx - hw), oy = Math.min(by, qy + h) - Math.max(ay, qy), oz = Math.min(bz, qz + hw) - Math.max(az, qz - hw);
+      const o = axis === "x" ? ox : axis === "y" ? oy : oz;
+      const mv = (axis === "x" ? px : axis === "y" ? py : pz) - prev;
+      const mid = axis === "x" ? (ax + bx) / 2 - prev : axis === "y" ? (ay + by) / 2 - (prev + h / 2) : (az + bz) / 2 - prev;
+      if (!firmInside || o > Math.min(ox, oy, oz) || mv * mid <= 0) continue;   // a mob, grazing it along another face, or leaving it
+      HIT.inside = true;
+    }
     if (!hit) { HIT.x0 = ax; HIT.y0 = ay; HIT.z0 = az; HIT.x1 = bx; HIT.y1 = by; HIT.z1 = bz; hit = true; continue; }
     HIT.x0 = Math.min(HIT.x0, ax); HIT.y0 = Math.min(HIT.y0, ay); HIT.z0 = Math.min(HIT.z0, az);
     HIT.x1 = Math.max(HIT.x1, bx); HIT.y1 = Math.max(HIT.y1, by); HIT.z1 = Math.max(HIT.z1, bz);
@@ -1055,6 +1078,7 @@ world.boxCollides = (px, py, pz, hw, h) => boxHit(px, py, pz, hw, h);
 // Returns {onGround, hitX, hitZ, hitCeil, inWater}.
 world.moveBox = function (pos, vel, hw, h, dt, opts) {
   const stepUp = (opts && opts.stepUp) || 0;
+  firmInside = !!(opts && opts.firm);
   const res = { onGround: false, hitX: false, hitZ: false, hitCeil: false, inWater: false };
   let top = 0; // top of the last obstacle hit (for stepping up onto beds and blocks)
   const moveAxis = (axis, d) => {
@@ -1064,6 +1088,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
       const prev = pos[axis];
       pos[axis] += step;
       if (boxHit(pos.x, pos.y, pos.z, hw, h, axis, prev)) {
+        if (HIT.inside) { pos[axis] = prev; if (axis === "y" && step < 0) res.onGround = true; top = HIT.y1; return true; }
         if (axis === "y") {
           if (step < 0) { pos.y = HIT.y1; res.onGround = true; }
           else { pos.y = HIT.y0 - h - 1e-4; res.hitCeil = true; }
@@ -1099,6 +1124,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
   if (!res.onGround && vel.y <= 0 && world.boxCollides(pos.x, pos.y - 0.02, pos.z, hw, 0.02)) res.onGround = true;
   res.inWater = BF.RENDER[world.getBlock(pos.x, pos.y + 0.4, pos.z)] === 3;
   res.headInWater = BF.RENDER[world.getBlock(pos.x, pos.y + h - 0.15, pos.z)] === 3;
+  firmInside = false;
   return res;
 };
 })();

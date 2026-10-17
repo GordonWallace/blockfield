@@ -79,6 +79,13 @@ function freeCells(v, b, r) {
   const beds = new Set();
   for (const [u, q, a] of wg.bedPlan(b.type, b.w, b.d, b.h)) { beds.add(u + "," + q); beds.add(a === "u" ? (u + 1) + "," + q : u + "," + (q + 1)); }
   const walk = (u, q) => at(u, 1, q) === 0 && at(u, 2, q) === 0 && !!at(u, 0, q) && !beds.has(u + "," + q);
+  const fronts = new Set();   // village generator 3: no jobsite in front of a chest or furnace (blocks.js facing pack)
+  if ((BF.state && BF.state.gen | 0) >= 3) for (const [k, id] of rec) {
+    const b = BF.blocks[id], f = b && (b.chestFacing != null ? b.chestFacing : b.furnaceFacing);
+    if (f == null) continue;
+    const [u, y, q] = k.split(",").map(Number);
+    if (y === 1) fronts.add((u + BF.DIRS[f][0]) + "," + (q + BF.DIRS[f][1]));
+  }
   const start = [b.du, 1];
   if (!walk(start[0], start[1])) return [];
   const taken = new Set();
@@ -99,7 +106,7 @@ function freeCells(v, b, r) {
   };
   const cands = [];
   for (let q = 1; q < b.d - 1; q++) for (let u = 1; u < b.w - 1; u++) {
-    if (!walk(u, q) || (u === b.du && q <= 2)) continue;
+    if (!walk(u, q) || (u === b.du && q <= 2) || fronts.has(u + "," + q)) continue;
     let wall = 0; for (const [du, dq] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (at(u + du, 1, q + dq)) wall++;
     cands.push({ u, q, s: wall + r() * 0.9 });
   }
@@ -125,11 +132,14 @@ function jobList(v) {
   const roster = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 });   // callers catch
   const r = seeded("jobs:" + key);
   const needy = roster.filter(sl => sl.prof && !NO_JOB[sl.prof] && blockFor(sl.prof) != null);
-  const n = drawCount(needy.length, r);
+  let n = drawCount(needy.length, r);
   // who gets a block: villagers of special buildings first, then a seeded shuffle of the rest
   const special = needy.filter(sl => sl.prof === "forester" || sl.prof === "furniture_maker" || sl.prof === "miner" || (sl.house && (sl.house.type === "library" || sl.house.type === "church" || sl.house.type === "smith")));   // foresters always get their band saw, the furniture maker its bench
+  const core = (BF.state && BF.state.villages | 0) >= 3 && !!v.pop;   // village generator 3: the first farmer and toolsmith always get their blocks too
+  for (const p of core ? ["farmer", "toolsmith"] : []) { const sl = needy.find(x => x.prof === p); if (sl && !special.includes(sl)) special.push(sl); }
   const rest = needy.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
+  if (core) n = Math.max(n, special.length);
   const jobs = special.concat(rest).slice(0, n).map(sl => ({ prof: sl.prof, slot: sl.idx, house: sl.house }));
   for (let k = needy.length; k < n; k++) jobs.push({ prof: needy[Math.floor(r() * needy.length)].prof, slot: -1, house: null }); // spares follow the roster mix
   jobs.sort((a, b) => (a.slot < 0) - (b.slot < 0) || (a.slot - b.slot));
@@ -173,6 +183,7 @@ function planVillage(v) {
   const homes = blds.filter(b => LIVABLE[b.type]);
   const bOf = h => h && blds.find(b => b.doorX === h.doorX && b.doorZ === h.doorZ && LIVABLE[b.type]);
   let fi = 0;
+  const farmSite = new Set(), farmHand = new Set();   // farms with a composter beside them / with a roster farmer's composter
   const pens = blds.filter(b => b.type === "pen");   // a shepherd's loom stands right outside a pen (each shepherd gets its own while there are enough)
   let pi = 0;
   for (const job of jobs) {
@@ -181,12 +192,21 @@ function planVillage(v) {
       for (let k = 0; k < pens.length && !placed; k++) placed = beside(pens[(pi + k) % pens.length], job) && (pi += k + 1, true);
       if (placed) continue;
     }
-    if (job.prof === "farmer" && farms.length && beside(farms[fi++ % farms.length], job)) continue;
+    if (job.prof === "farmer" && farms.length) {
+      const f = farms[fi++ % farms.length];
+      if (beside(f, job)) { farmSite.add(f); if (job.slot >= 0) farmHand.add(f); continue; }
+    }
     if ((job.prof === "builder" || job.prof === "furniture_maker") && plaza(job)) continue;
     if (job.prof === "furniture_maker" && homes.length && beside(homes[Math.floor(r() * homes.length)], job)) continue;   // plaza full: beside a house
     const b = bOf(job.house) || ((job.slot < 0 || job.prof === "forester" || job.prof === "miner") && homes.length ? homes[Math.floor(r() * homes.length)] : null);
     if (b && (inside(b, job) || beside(b, job))) continue;
     plaza(job);
+  }
+  // village generator 3: every farm has a composter (a spare one where no roster farmer got one there, for an unemployed villager to
+  // take up), and a farm with no farmer at spawn is run down (worldgen drawShell reads b.untended; js/villagelife.js farmers repair it)
+  if ((BF.state && BF.state.villages | 0) >= 3) for (const f of farms) {
+    if (!farmSite.has(f)) beside(f, { prof: "farmer", slot: -1 });
+    f.untended = !farmHand.has(f);
   }
   for (const j of out) if (j.slot >= 0 && !planIndex.has(pk(j.x, j.y, j.z))) planIndex.set(pk(j.x, j.y, j.z), { vkey: key, slot: j.slot });
   return out;
@@ -273,6 +293,8 @@ function claimedByOther(k, m) {
   const pl = planIndex.get(k);
   if (!pl) return false;
   const owner = pl.vkey + "#" + pl.slot;
+  const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(pl.vkey);
+  if (rec && rec.dead && rec.dead.has(pl.slot)) return false;   // planned for a villager that was killed (slots never respawn)
   return owner !== vkey(m) && !spawned.has(owner) && !savedKeys.has(owner);
 }
 function center(o) {
@@ -303,6 +325,7 @@ function rebuildTrades(m) {
 // Profession change in place: outfit (mobs.js rebuilds the body), offers; inventory, level and xp are kept.
 function setProfession(m, prof) {
   if (!m || !prof || m.profession === prof) return;
+  if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.leave) BF.toolsmith.leave(m);   // the unfinished tool's materials go back to its pack
   if (BF.mobs && BF.mobs.setProfession) BF.mobs.setProfession(m, prof);
   else { m.profession = prof; m.variant = prof; }
   m.profession = prof;
@@ -337,10 +360,13 @@ function hire(m, s) {
   take(m, s, s.prof);
   m.jobMem = null;
   if (first && (m.xp || 0) === 0 && BF.trades && m.inv) { // first job: the profession's starting wares (once per villager)
-    try { for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count); } catch (e) { console.error(e); }
+    try {
+      if (BF.trades.STARTER_TOOLS && BF.trades.STARTER_TOOLS[s.prof]) BF.trades.hireKit(m, s.prof);   // farmer, forester, miner, shepherd: emeralds for its tools
+      else for (const st of BF.trades.stockFor(s.prof, m)) if (st && st.id !== BF.I.emerald) BF.trades.inv.add(m.inv, st.id, st.count);
+    } catch (e) { console.error(e); }
   }
   m.jobStocked = true;
-  if (BF.villageLife && BF.villageLife.ensureKit) BF.villageLife.ensureKit(m);   // a new farmer / builder gets its empty bucket (and hoe)
+  if (BF.villageLife && BF.villageLife.ensureKit) BF.villageLife.ensureKit(m);   // a new builder gets its empty bucket
   if (BF.emit) BF.emit("villagerHired", m, s.prof);
   return s.prof;
 }
@@ -457,6 +483,8 @@ function seekAI(m, dt, out, nav) {
   ai.mode = "idle"; ai.t = 2;
   return true;
 }
+// A cell to stand in to work at jobsite s: beside it (not on it), at most a block up or down.
+const atSite = (s, cx, cy, cz) => Math.abs(cx - s.x) + Math.abs(cz - s.z) === 1 && Math.abs(cy - s.y) <= 1;
 // Daytime work: now and then walk to the jobsite (A*) and stand at it for a while. Returns true while it steers.
 function ai(m, dt, out) {
   const s = m.jobsite, nav = BF.mobs && BF.mobs.nav;
@@ -470,12 +498,12 @@ function ai(m, dt, out) {
     J.t -= dt;
     if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(1, 3);   // something to craft: go to the table soon
     if (J.t > 3 && m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(1, 3);    // wool and boards in hand: go make beds
+    if (J.t > 3 && m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.wantsJob(m)) J.t = rnd(1, 3);          // a tool to make or finish
     if (J.t > 0) return false;
     if (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 40 || !BF.world.isLoaded(s.x, s.z)) { J.t = rnd(20, 40); return false; }
     if (!nav.takePlan()) { J.t = 0.3; return false; }
     const [x, y, z] = nav.feetCell(m);
-    const at = (cx, cy, cz) => Math.abs(cx - s.x) + Math.abs(cz - s.z) === 1 && Math.abs(cy - s.y) <= 1;
-    const route = at(x, y, z) ? [] : nav.findPath(x, y, z, { x: s.x, z: s.z, at }, 2500);
+    const route = atSite(s, x, y, z) ? [] : nav.findPath(x, y, z, { x: s.x, z: s.z, at: (cx, cy, cz) => atSite(s, cx, cy, cz) }, 2500);
     if (!route) { J.t = rnd(40, 90); return false; }
     m.ai.route = route; m.ai.ri = 0; m.ai.stuckT = 0; J.mode = "go";
   }
@@ -484,12 +512,16 @@ function ai(m, dt, out) {
     if (r === "going") return true;
     m.ai.route = null;
     if (r === "stuck") { J.mode = "off"; J.t = rnd(30, 60); return false; }
+    // "done" also when another task took the route over and dropped it (a shepherd leaving its pen): only work once beside the site,
+    // else it stood "working" wherever it was, e.g. in the pen gate, holding it open
+    if (!atSite(s, ...nav.feetCell(m))) { J.mode = "off"; J.t = rnd(1, 3); return false; }
     J.mode = "work"; J.t = rnd(8, 20);
   }
   if (J.mode === "work") {
     J.t -= dt;
     if (m.profession === "cartographer" && BF.cartography) BF.cartography.work(m, J, dt);   // crafts compasses and maps at its table (js/cartography.js)
     if (m.profession === "furniture_maker" && BF.furniture) BF.furniture.work(m, J, dt);   // makes beds at its carpentry bench (js/furniture.js)
+    if (m.profession === "toolsmith" && BF.toolsmith) BF.toolsmith.work(m, J, dt);   // makes tools at its smithing table, 2 game hours each (js/toolsmith.js)
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.45 };   // head down at the block
     if (J.t <= 0) { J.mode = "off"; J.t = rnd(40, 120); m.ai.mode = "idle"; m.ai.t = 1; return false; }
     return true;

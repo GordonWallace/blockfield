@@ -12,7 +12,7 @@ const BLOCK_T = [0.5, 0.8];       // seconds between two placed blocks (random p
 let reachNow = 4.0;
 const REACH = 4.0;                // blocks from the eye to the nearest point of the target cell
 const EYE = 1.62;
-const BUILD_END = 0.47;           // sky time after which builders stop and go home (sunset 0.5, bedtime 0.52)
+const BUILD_END = 0.47;           // sky time after which builders stop and go home (bedtime at sunset 0.5)
 const SITE_RANGE = 40;            // sites up to this far outside the village's bounding box
 const SITE_TRIES = 150, SITE_EVALS = 40, MAX_FILL = 2, MAX_SLOPE = 2;
 const MAX_BUILT = 14;             // structures per village
@@ -41,7 +41,7 @@ function mulberry(a) {
   return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
-const allowed = () => skyT() < BUILD_END && !(skyT() > 0.52);
+const allowed = () => skyT() < BUILD_END && !(skyT() > 0.5);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const styleIdx = s => (typeof s === "number" ? s : Math.max(0, STYLES.indexOf(s)));
 
@@ -379,8 +379,9 @@ function think(m, bs) {
   const R = m.village, built = builtOf(R);
   const active = built.find(e => e.state === "building");
   if (active) {
-    const ownerAlive = R.members.some(x => !x.removed && !x.dead && x.slot && x.slot.idx === active.owner);
-    if (active.owner === (m.slot && m.slot.idx) || !ownerAlive) { active.owner = m.slot ? m.slot.idx : 0; startBuild(m, bs, active); }
+    // the owner keeps it only while it is alive and still a builder; otherwise this builder takes it over (with its own materials)
+    const ownerBuilds = R.members.some(x => !x.removed && !x.dead && x.profession === "builder" && x.slot && x.slot.idx === active.owner);
+    if (active.owner === (m.slot && m.slot.idx) || !ownerBuilds) { active.owner = m.slot ? m.slot.idx : 0; startBuild(m, bs, active); }
     return;
   }
   if (bs.cool > 0 || built.filter(e => e.state !== "abandoned").length >= MAX_BUILT) return;
@@ -536,6 +537,7 @@ function placeCell(m, bs, e) {
   if (isWater) { T.remove(m.inv, BF.I.water_bucket, 1); T.add(m.inv, BF.I.bucket, 1); }   // the bucket is empty after the one block
   let step = 1;
   if (BF.vlog && BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) BF.vlog.bed(m, c.x, c.y, c.z);
+  if (BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) firstDibs(m, e, c);
   if (c.pair) {                                             // door upper half / bed head go in with the lower half / foot
     const c2 = cellOf(e, e.prog + 1);
     w.setBlock(c2.x, c2.y, c2.z, c2.id);
@@ -553,7 +555,7 @@ function finish(m, bs, e) {
   e.state = "done"; e.end = +dayNow().toFixed(3);
   bs.mode = "idle"; bs.entry = null; bs.cool = rnd(40, 80); bs.t = 3; m.ai.route = null;
   const bp = bpOf(e);
-  if (bp.house && bp.beds.length && m.slot && (!m.bed || m.bed.claimed)) claimHome(m, e);   // moves out of a bed it borrowed (js/mobs.js claimBed) into its own house
+  if (bp.house && m.slot && e.claim === m.slot.idx && m.bed && homeFor(e).beds.some(b => sameBed(b, m.bed))) m.home = homeFor(e);   // it took a bed here as it placed it (firstDibs): this is its home now
   logEvent("done", m, { type: e.type, at: [e.ox, e.oy, e.oz], blocks: e.n, skipped: e.skipped || 0 });
   BF.emit && BF.emit("builderDone", m, e);
 }
@@ -564,12 +566,22 @@ function homeFor(e) {
     beds: bp.beds.map(b => ({ x: e.ox + b.x, y: e.oy + b.y, z: e.oz + b.z, f: b.f })),
   };
 }
-function claimHome(m, e) {
-  const H = homeFor(e);
-  m.home = H; m.bed = H.beds[0]; e.claim = m.slot.idx;
-  const same = b => b && b.x === m.bed.x && b.y === m.bed.y && b.z === m.bed.z;
-  for (const o of m.village ? m.village.members : []) if (o !== m && o.bed && o.bed.claimed && same(o.bed)) o.bed = null;   // a villager who borrowed the bed finds another (js/mobs.js claimBed)
-  logEvent("claim", m, { bed: [m.bed.x, m.bed.y, m.bed.z] });
+const sameBed = (a, b) => a && b && a.x === b.x && a.y === b.y && a.z === b.z;
+const heldByOther = (m, b) => (m.village ? m.village.members : []).some(o => o !== m && !o.dead && !o.removed && sameBed(o.bed, b));
+// A builder keeps a bed it has of its own. One with none (or only a borrowed one, js/mobs.js claimBed) takes the first bed it places in a
+// house, the moment it places it, so nobody has borrowed it yet. No villager ever takes a bed another villager holds (bug-027).
+function firstDibs(m, e, c) {
+  if (!bpOf(e).house || !m.slot || (m.bed && !m.bed.claimed)) return;
+  const b = homeFor(e).beds.find(x => x.x === c.x && x.y === c.y && x.z === c.z);
+  if (b) claimHome(m, e, b);
+}
+function claimHome(m, e, bed) {
+  const H = homeFor(e), b = bed || H.beds[0];
+  if (!b || heldByOther(m, b)) return false;
+  m.bed = b; e.claim = m.slot.idx; e.claimBed = H.beds.indexOf(b);
+  if (e.state === "done") m.home = H;
+  logEvent("claim", m, { bed: [b.x, b.y, b.z] });
+  return true;
 }
 
 // ---------------------------------------------------------------- fetching water for a well
@@ -606,7 +618,7 @@ function fillMode(m, bs, dt, out) {
 // ---------------------------------------------------------------- build mode
 function buildMode(m, bs, dt, out) {
   const e = bs.entry, ai = m.ai;
-  if (!e || e.state !== "building") { bs.mode = "idle"; bs.entry = null; return false; }
+  if (!e || e.state !== "building" || e.owner !== (m.slot ? m.slot.idx : 0)) { bs.mode = "idle"; bs.entry = null; return false; }   // done, or another builder took it over
   bs.placeT -= dt;
   reachNow = e.retried ? REACH + 1.6 : REACH;     // second pass: stretch a little for the last awkward cells (gable tops)
   // watchdog: a cell that cannot be placed for 15 s (unreachable, stuck, no free line) is skipped so the structure still gets finished
@@ -703,9 +715,10 @@ function doDeal(m, bs, deal) {
     if (!canSell(v2) || T.blockReason(v2, o)) break;
     if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
     if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    if (!T.exchange(v2, o)) break;                       // same rules as a player trade: the villager's stock and room
+    const sold = T.exchange(v2, o);
+    if (!sold) break;                       // same rules as a player trade: the villager's stock and room
     for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.add(m.inv, o.sell.id, o.sell.n);
+    T.inv.addStacks(m.inv, sold);
     T.addXp(v2, o);
     done++;
   }
@@ -844,8 +857,12 @@ function onSpawn(m, rec, saved) {
     const n = TR().inv.count(m.inv, BF.I.red_bed);
     if (n) TR().inv.remove(m.inv, BF.I.red_bed, n);
   }
-  const e = built.find(x => x.state === "done" && x.claim === idx);
-  if (e && bpOf(e).door) { const H = homeFor(e); m.home = H; m.bed = H.beds[0]; }
+  const e = built.find(x => x.state !== "abandoned" && x.claim === idx);
+  if (e && bpOf(e).door) {
+    const H = homeFor(e), b = H.beds[e.claimBed > 0 ? e.claimBed : 0];
+    if (e.state === "done") m.home = H;
+    if (b && !heldByOther(m, b)) m.bed = b;
+  }
 }
 
 BF.builder = {

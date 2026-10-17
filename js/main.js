@@ -35,7 +35,7 @@ BF.newWorld = function (seed, opts) {
   BF.state.seed = seed >>> 0;
   BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
-  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 2;         // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers (default)
+  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 3;         // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens (default)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
@@ -86,6 +86,7 @@ function debugInfo() {
     blockLight: BF.world.getBlockLight(p.x, p.y + 0.05, p.z), calls: renderer.info.render.calls,
     weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
     cloudCover: BF.sky.cloudCover, cloudHeight: BF.sky.cloudHeight, warp: BF.warp.speed,
+    clicks: BF.player.clickLog ? BF.player.clickLog() : [],
   };
 }
 function debugText(d) {
@@ -97,7 +98,8 @@ function debugText(d) {
     `Mobs ${d.mobs}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
-    `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}`;
+    `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
+    (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
 }
 BF.debugInfo = debugInfo;
 BF.debugText = debugText;
@@ -124,6 +126,7 @@ function frame(now) {
       BF.sky.update(h);
       BF.mobs.update(h);
       BF.drops.update(h);
+      if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
       BF.world.tickSim();
       done++;
     }

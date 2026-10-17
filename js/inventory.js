@@ -14,6 +14,7 @@ let open_ = false, mode = "inventory", openedAt = 0;
 let selected = 0;
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2;
 let furnace = null;                           // furnace state shown on the furnace screen
+let furnaceDirty = false;                     // the open furnace changed in a simulation step: redraw it
 let chest = null;                             // chest state shown on the chest screen
 let villager = null, pay = [null, null], offerSel = -1, tradeOffer = null, tradeResult = null, levelFlashT = 0;
 let creTab = "building", creSearch = "";
@@ -210,10 +211,28 @@ function takeFromInv(id, n) { // main first, then hotbar
   }
   return got;
 }
-function giveBack(stack) { // into inventory; overflow is announced as a drop
+// Takes up to n of id as one stack (main first, then hotbar), wear included: only stacks with the same wear as the first one
+// found (or as `wear`, when given) are taken together. Returns the stack, or null.
+function takeStack(id, n, wear) {
+  let got = 0;
+  for (let i = SIZE - 1; i >= 0 && got < n; i--) {
+    const s = slots[i];
+    if (!s || s.id !== id) continue;
+    if (wear === undefined) wear = s.wear || 0; else if ((s.wear || 0) !== wear) continue;
+    const m = Math.min(s.count, n - got);
+    s.count -= m; got += m;
+    if (s.count <= 0) slots[i] = null;
+  }
+  return got ? mk(id, got, wear) : null;
+}
+function giveBack(stack) { // into inventory; what doesn't fit drops in front of the player
   if (!stack) return;
   const left = addTo(stack.id, stack.count, ORDER_ALL, stack.wear);
-  if (left > 0) BF.emit && BF.emit("itemDropped", stack.id, left);
+  if (left > 0) dropOverflow(stack.id, left, stack.wear);
+}
+function dropOverflow(id, n, wear) {
+  if (BF.drops && BF.drops.atPlayer && BF.drops.atPlayer(id, n, wear)) return;
+  BF.emit && BF.emit("itemDropped", id, n);
 }
 // move as much of `stack` as fits into arr[i]; returns what is left
 function mergeInto(arr, i, stack) {
@@ -283,10 +302,14 @@ function chestUsed(c, owner, name, mob) {
   c.sig = chestSig(c);
   c.emptySince = c.owner && chestEmpty(c) ? (c.emptySince != null ? c.emptySince : dayNow()) : null;
   if (c.owner || !owner) return false;
+  const r = reservedFor(c);
+  if (r && r.key !== owner) return false;   // paid for by a villager (bug-037): stays theirs to claim
   c.owner = owner; c.ownerName = name || ""; c.emptySince = chestEmpty(c) ? dayNow() : null; c.reserved = null;
   BF.emit && BF.emit("chestClaimed", c, mob || null);
   return true;
 }
+// A furniture maker just delivered this unowned chest to the villager who paid for it: {key, until, name} until that runs out, else null.
+const reservedFor = c => (c && !c.owner && c.reserved && c.reserved.until > dayNow() ? c.reserved : null);
 // The chest is free again (why: "empty" | "owner died" | ...).
 function chestRelease(c, why) {
   if (!c || !c.owner) return false;
@@ -296,8 +319,8 @@ function chestRelease(c, why) {
   if (open_ && chest === c) layoutFor(mode);
   return true;
 }
-// Survival: the chest on screen belongs to someone else, so it can be looked at but not changed.
-const chestLocked = () => mode === "chest" && !!chest && !!chest.owner && chest.owner !== "player" && !isCreative();
+// Survival: the chest on screen belongs to someone else (or was just paid for by a villager), so it can be looked at but not changed.
+const chestLocked = () => mode === "chest" && !!chest && ((!!chest.owner && chest.owner !== "player") || !!reservedFor(chest)) && !isCreative();
 // After every player action on the chest screen: did the contents change? (claims an unowned chest for the player)
 function chestCheck() {
   if (!open_ || mode !== "chest" || !chest) return;
@@ -307,6 +330,8 @@ function chestCheck() {
 }
 // Who owns the chest, as shown on its screen.
 function ownerLabel(c) {
+  const r = reservedFor(c);
+  if (r) return "Reserved for " + (r.name || "a villager");
   if (!c || !c.owner) return "Unclaimed";
   if (c.owner === "player") return "Yours";
   let job = "";
@@ -316,10 +341,11 @@ function ownerLabel(c) {
 }
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 // fill arr with `stack`: top up matching stacks first, then empty slots; returns what is left
-function addToArr(arr, id, count) {
+// wear: a worn tool keeps it and never merges (as addTo).
+function addToArr(arr, id, count, wear) {
   const max = stackOf(id);
-  for (const s of arr) if (count > 0 && s && s.id === id && s.count < max) { const m = Math.min(max - s.count, count); s.count += m; count -= m; }
-  for (let i = 0; i < arr.length && count > 0; i++) if (!arr[i]) { const m = Math.min(max, count); arr[i] = { id, count: m }; count -= m; }
+  for (const s of arr) if (count > 0 && s && s.id === id && s.count < max && !(wear > 0) && !(s.wear > 0)) { const m = Math.min(max - s.count, count); s.count += m; count -= m; }
+  for (let i = 0; i < arr.length && count > 0; i++) if (!arr[i]) { const m = Math.min(max, count); arr[i] = mk(id, m, wear); count -= m; }
   return count;
 }
 // The chest block at x,y,z is gone (broken, exploded, replaced): close its screen and spill what it held on the ground.
@@ -331,8 +357,37 @@ function chestRemoved(x, y, z) {
   if (c.owner && BF.emit) BF.emit("chestBroken", c);
   for (const s of c.slots) {
     if (!s) continue;
-    if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5);
-    else { const left = addTo(s.id, s.count, ORDER_ALL); if (left) BF.emit("itemDropped", s.id, left); }
+    if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5, s.wear > 0 ? { wear: s.wear } : undefined);
+    else { const left = addTo(s.id, s.count, ORDER_ALL, s.wear); if (left) dropOverflow(s.id, left, s.wear); }
+  }
+  renderAll(); emitChange();
+}
+
+// The furnace block at x,y,z is gone (world.js calls furnaceRemoved from setBlock): close its screen, stop it cooking and empty it.
+// Mined by the player, the contents go to the inventory: player.js emits blockBroken straight after setBlock, in the same task, and
+// that claims them. Removed any other way (explosion, /setblock, /fill) they drop on the ground a microtask later. The record leaves
+// the furnace map at once, so a furnace placed in the cell again starts empty.
+const removedFurnaces = new Map();   // "x,y,z" -> furnace state waiting to be emptied
+function furnaceRemoved(x, y, z) {
+  const key = `${x},${y},${z}`, f = furnaces.get(key);
+  if (!f) return;
+  if (furnace === f) closeScreen(false);
+  furnaces.delete(key);
+  if (f.lit) { f.lit = false; BF.emit("furnaceLit", x, y, z, false); }
+  removedFurnaces.set(key, f);
+  queueMicrotask(() => furnaceEmpty(key, false));
+}
+function furnaceEmpty(key, toPlayer) {
+  const f = removedFurnaces.get(key);
+  if (!f) return;
+  removedFurnaces.delete(key);
+  const [x, y, z] = key.split(",").map(Number);
+  for (const s of f.slots) {
+    if (!s) continue;
+    const w = s.wear > 0 ? { wear: s.wear } : undefined;   // a worn wooden tool used as fuel keeps its wear
+    if (!toPlayer && BF.drops && BF.drops.spawn) { BF.drops.spawn(s.id, s.count, x + 0.5, y + 0.4, z + 0.5, w); continue; }
+    const left = addTo(s.id, s.count, ORDER_ALL, s.wear); if (left < s.count) showToast(s.id, s.count - left);
+    if (left) { if (BF.drops && BF.drops.spawn) BF.drops.spawn(s.id, left, x + 0.5, y + 0.4, z + 0.5, w); else BF.emit("itemDropped", s.id, left); }   // no room: drops where the furnace stood
   }
   renderAll(); emitChange();
 }
@@ -362,29 +417,31 @@ function recomputeTrade() {
   const order = offerSel >= 0 ? [offerSel] : [...list.keys()]; // a chosen offer never silently switches
   for (const i of order) if (offerFits(list[i])) {
     tradeOffer = list[i]; offerSel = i;
-    tradeResult = { id: tradeOffer.sell.id, count: tradeOffer.sell.n };
+    tradeResult = mk(tradeOffer.sell.id, tradeOffer.sell.n, BF.trades.inv.bestWear(villager.inv, tradeOffer.sell.id));   // a worn tool is sold worn
     return;
   }
 }
 function autoFill(o) { // return payment to the inventory, then pull this offer's costs from it
   for (let k = 0; k < 2; k++) { giveBack(pay[k]); pay[k] = null; }
-  o.buy.forEach((b, k) => { const got = takeFromInv(b.id, stackOf(b.id)); if (got) pay[k] = { id: b.id, count: got }; });
+  o.buy.forEach((b, k) => { pay[k] = takeStack(b.id, stackOf(b.id)); });
 }
 function topUp(o) { // after a trade, refill the payment slots from the inventory
   o.buy.forEach((b, k) => {
     let i = pay.findIndex(s => s && s.id === b.id);
     if (i < 0) { i = pay.findIndex(s => !s); if (i < 0) return; }
     const have = pay[i] ? pay[i].count : 0, want = stackOf(b.id) - have;
-    const got = want > 0 ? takeFromInv(b.id, want) : 0;
-    if (got) pay[i] = { id: b.id, count: have + got };
+    const got = want > 0 ? takeStack(b.id, want, pay[i] ? pay[i].wear || 0 : undefined) : null;
+    if (got) pay[i] = mk(b.id, have + got.count, got.wear);
   });
 }
 function performTrade(o) {
   const idx = offerFits(o);
+  const wear = o.buy.map((b, k) => pay[idx[k]].wear || 0);
   o.buy.forEach((b, k) => { const s = pay[idx[k]]; s.count -= b.n; if (s.count <= 0) pay[idx[k]] = null; });
-  BF.trades.exchange(villager, o);
+  const sold = BF.trades.exchange(villager, o, wear);
   if (BF.trades.addXp(villager, o)) { levelFlashT = 2.5; BF.emit("villagerLevelUp", villager, villager.level); }
   BF.emit("villagerTrade", villager, o);
+  return sold || [];
 }
 function clickTrade(shift) {
   if (!tradeOffer) return;
@@ -393,15 +450,17 @@ function clickTrade(shift) {
     let got = 0;
     for (let g = 0; g < 64 && tradeOffer === o; g++) {
       if (!fits(out.id, out.n)) break;
-      performTrade(o); addTo(out.id, out.n, ORDER_ALL); got += out.n;
+      for (const st of performTrade(o)) addTo(st.id, st.count, ORDER_ALL, st.wear);
+      got += out.n;
       topUp(o); recomputeTrade();
     }
     if (got) showToast(out.id, got);
     return;
   }
-  if (cursor && (cursor.id !== out.id || cursor.count + out.n > stackOf(out.id))) return;
+  const w = BF.trades.inv.bestWear(villager.inv, out.id);
+  if (cursor && (cursor.id !== out.id || cursor.count + out.n > stackOf(out.id) || w > 0 || cursor.wear > 0)) return;
   performTrade(o);
-  if (cursor) cursor.count += out.n; else cursor = { id: out.id, count: out.n };
+  if (cursor) cursor.count += out.n; else cursor = mk(out.id, out.n, w);
   topUp(o); recomputeTrade();
 }
 
@@ -998,7 +1057,7 @@ function shiftMove(c, i) {
       const target = SMELT.has(s.id) ? 0 : FUEL.has(s.id) ? 1 : -1;
       if (target >= 0) st.count = mergeInto(furnace.slots, target, st);
     } else if (mode === "chest" && chest && !chestLocked()) {
-      st.count = addToArr(chest.slots, s.id, s.count);
+      st.count = addToArr(chest.slots, s.id, s.count, s.wear);
     } else if (mode === "trade" && villager) {
       const o = villager.trades[offerSel];
       const wanted = o ? o.buy.map(b => b.id) : villager.trades.flatMap(t => t.buy.map(b => b.id));
@@ -1008,7 +1067,7 @@ function shiftMove(c, i) {
         if (k < 0) k = pay.findIndex(p => !p);
         if (k >= 0) st.count = mergeInto(pay, k, st);
         recomputeTrade();
-      } else if (vinvEditable()) st.count = BF.trades.inv.add(villager.inv, st.id, st.count);   // creative: shift-click gives it to the villager
+      } else if (vinvEditable()) st.count = BF.trades.inv.add(villager.inv, st.id, st.count, st.wear);   // creative: shift-click gives it to the villager
     }
     if (st.count === s.count) { // not consumed by the container: hotbar <-> main
       slots[i] = null;
@@ -1332,29 +1391,18 @@ const api = {
         else if (typing) e.stopImmediatePropagation();
         return;
       }
-      if (/^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey && !(BF.state && BF.state.paused)) api.select(+e.code.slice(5) - 1);
+      if (/^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey && !(BF.state && BF.state.paused) && !(BF.player && BF.player.menu && BF.player.menu())) api.select(+e.code.slice(5) - 1);   // not on the title screen
     }, true);
     document.addEventListener("pointermove", e => { mouseX = e.clientX; mouseY = e.clientY; }, { passive: true });
-    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); chests.clear(); });
+    BF.on("newWorld", () => { closeScreen(); api.clear(); api.select(0); furnaces.clear(); removedFurnaces.clear(); chests.clear(); });
     BF.on("gameModeChanged", () => { if (open_ && (mode === "creative" || mode === "inventory")) api.close(); });
-    BF.on("blockBroken", (x, y, z, id) => {
-      if (id !== BF.B.furnace) return;
-      const key = `${x},${y},${z}`, f = furnaces.get(key);
-      if (!f) return;
-      if (furnace === f) api.close();
-      furnaces.delete(key);
-      for (const s of f.slots) if (s) { const left = addTo(s.id, s.count, ORDER_ALL); if (left < s.count) showToast(s.id, s.count - left); if (left) BF.emit("itemDropped", s.id, left); }
-      if (f.lit) BF.emit("furnaceLit", x, y, z, false);
-      renderAll(); emitChange();
-    });
+    BF.on("blockBroken", (x, y, z, id) => { if (BF.isFurnace(id)) { furnaceRemoved(x, y, z); furnaceEmpty(`${x},${y},${z}`, true); } });
   },
   update(dt) {
-    // furnaces cook while the game runs, or while you watch one
-    if (!BF.state.paused || (open_ && mode === "furnace")) {
-      let changed = false;
-      for (const f of furnaces.values()) if (tickFurnace(f, dt) && f === furnace) changed = true;
-      if (open_ && mode === "furnace" && furnace) { if (changed) renderAll(); else renderFurnaceProgress(); }
-    }
+    // furnaces cook in game time (simTick, so fast-forward speeds them up too), or in real time while you watch one in the pause
+    if (BF.state.paused && open_ && mode === "furnace" && furnace) furnaceDirty = tickFurnace(furnace, dt) || furnaceDirty;
+    if (open_ && mode === "furnace" && furnace) { if (furnaceDirty) renderAll(); else renderFurnaceProgress(); }
+    furnaceDirty = false;
     if (open_) {
       if (mode === "trade" && villager) {
         if (villager.dead || villager.removed) { api.close(); return; }
@@ -1373,6 +1421,7 @@ const api = {
       if (t.t <= 0) { t.el.remove(); toasts.splice(k, 1); }
     }
   },
+  dropOverflow(itemId, count, wear) { dropOverflow(itemId, count, wear); },   // items with no room: dropped in front of the player
   add(itemId, count = 1, wear = 0) {   // wear: uses already spent on a tool (a worn tool picked up again)
     if (itemId === undefined || itemId === null || itemId === 0 || !BF.items[itemId] || !(count > 0)) return count || 0;
     const left = addTo(itemId, count, ORDER_ALL, wear);
@@ -1450,27 +1499,26 @@ const api = {
   ensureTrades,
   close() { closeScreen(false); },
   furnaceState(x, y, z) { return furnaces.get(`${x},${y},${z}`) || null; },
+  furnaceRecord(x, y, z) { return furnaceAt({ x, y, z }); },   // creates the furnace's state when it has none yet (villagers: js/toolsmith.js)
+  // One simulation step for every furnace (main.js runs it with the world, so it follows the fast-forward).
+  simTick(h) { for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true; },
   chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
   // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
-  chestAdd(x, y, z, itemId, count = 1) {
+  chestAdd(x, y, z, itemId, count = 1, wear = 0) {   // wear: uses spent on a worn tool
     if (!BF.items[itemId] || itemId === 0 || !(count > 0)) return count || 0;
-    const left = addToArr(chestAt({ x, y, z }).slots, itemId, Math.floor(count));
+    const left = addToArr(chestAt({ x, y, z }).slots, itemId, Math.floor(count), wear);
     if (open_ && chest && chest.key === `${x},${y},${z}`) renderAll();
     return left;
   },
   // Takes up to n of itemId out of the chest at x,y,z (last slots first); returns how many came out. For villagers and tests.
-  chestTake(x, y, z, itemId, n = 1) {
+  chestTake(x, y, z, itemId, n = 1) { let got = 0; for (const s of this.chestTakeStacks(x, y, z, itemId, n)) got += s.count; return got; },
+  // The same, returning what came out as stacks with their wear ([{id, count, wear?}]).
+  chestTakeStacks(x, y, z, itemId, n = 1) {
     const c = chests.get(`${x},${y},${z}`);
-    if (!c) return 0;
-    let got = 0;
-    for (let i = CHEST_SIZE - 1; i >= 0 && got < n; i--) {
-      const s = c.slots[i];
-      if (!s || s.id !== itemId) continue;
-      const m = Math.min(n - got, s.count); s.count -= m; got += m;
-      if (s.count <= 0) c.slots[i] = null;
-    }
+    if (!c) return [];
+    const out = BF.trades.inv.take(c.slots, itemId, n);
     if (open_ && chest === c) renderAll();
-    return got;
+    return out;
   },
   // Ownership (see "chests" above). chestUsed(x, y, z, owner, name, mob): call after changing a chest's contents for someone.
   chestUsed(x, y, z, owner, name, mob) { const c = chests.get(`${x},${y},${z}`); return c ? chestUsed(c, owner, name, mob) : false; },
@@ -1479,17 +1527,22 @@ const api = {
   chestRecord(x, y, z) { return chestAt({ x, y, z }); },   // creates the (empty, unowned) record of a chest that was never used
   ownerLabel,
   chestRemoved,
+  furnaceRemoved,
 
   serialize() {
     return {
       v: 1,
       slots: slots.map(toSave),
       selected,
+      // items out of the inventory while a screen is open (crafting grid, trade payment, cursor): the tab can close
+      // mid-screen, so they are saved and go back into the inventory on load
+      held: open_ ? [...grid, ...pay, cursor].filter(Boolean).map(toSave) : undefined,
       furnaces: [...furnaces.values()].filter(f => f.pos).map(f => ({
         pos: [f.pos.x, f.pos.y, f.pos.z], slots: f.slots.map(toSave), burn: f.burn, burnMax: f.burnMax, cook: f.cook,
       })),
-      chests: [...chests.values()].filter(c => c.slots.some(Boolean) || c.owner).map(c => ({ pos: [c.pos.x, c.pos.y, c.pos.z], slots: c.slots.map(toSave),
-        owner: c.owner || undefined, on: c.owner ? c.ownerName : undefined, es: c.emptySince != null ? +c.emptySince.toFixed(4) : undefined })),
+      chests: [...chests.values()].filter(c => c.slots.some(Boolean) || c.owner || reservedFor(c)).map(c => ({ pos: [c.pos.x, c.pos.y, c.pos.z], slots: c.slots.map(toSave),
+        owner: c.owner || undefined, on: c.owner ? c.ownerName : undefined, es: c.emptySince != null ? +c.emptySince.toFixed(4) : undefined,
+        rs: reservedFor(c) ? { k: c.reserved.key, u: +c.reserved.until.toFixed(4), n: c.reserved.name || "" } : undefined })),
     };
   },
   deserialize(o) {
@@ -1510,6 +1563,14 @@ const api = {
       const c = chestAt({ x: cs.pos[0], y: cs.pos[1], z: cs.pos[2] });
       for (let k = 0; k < CHEST_SIZE; k++) c.slots[k] = fromSave(cs.slots && cs.slots[k]);
       if (typeof cs.owner === "string" && cs.owner) { c.owner = cs.owner; c.ownerName = typeof cs.on === "string" ? cs.on : ""; c.emptySince = Number.isFinite(cs.es) ? cs.es : null; }
+      else if (cs.rs && typeof cs.rs.k === "string" && Number.isFinite(cs.rs.u)) c.reserved = { key: cs.rs.k, until: cs.rs.u, name: typeof cs.rs.n === "string" ? cs.rs.n : "" };
+    }
+    if (Array.isArray(o.held)) for (const h of o.held) {
+      const st = fromSave(h);
+      if (!st) continue;
+      const left = addTo(st.id, st.count, ORDER_ALL, st.wear);
+      const p = BF.player && BF.player.position;
+      if (left > 0 && p && BF.drops && BF.drops.spawn) BF.drops.spawn(st.id, left, p.x, p.y + 0.5, p.z, { wear: st.wear });
     }
     selected = 0;
     api.select(+o.selected || 0);
