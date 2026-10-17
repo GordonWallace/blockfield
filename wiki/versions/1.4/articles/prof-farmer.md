@@ -10,6 +10,8 @@ A farmer only tends farmland within 12 blocks of its composter, in every directi
 
 A vegetable farm that a [[villager:builder]] built is left with water in its channel and untilled soil, with a composter beside it. A farmer who takes that composter tills and plants the bed as one of its farm projects.
 
+A village farm that had no farmer when the village was made has run down: its channels may be empty and some of its farmland gone back to dirt. A farmer who works it repairs it first, pouring water back into the channels and tilling the dirt. Up to three dirt cells beside the water stay as they are, as spots for its sugar cane.
+
 The farmer takes a short break after about one task in twenty. Farmers also wander out to look at their fields.
 
 ### Where it gets its materials

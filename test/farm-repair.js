@@ -17,13 +17,15 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 3);
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
-  await pg.waitForTimeout(3000);
+  await pg.waitForFunction(() => window.BF && BF.worldgen && BF.player && !BF.preparing, null, { timeout: 120000, polling: 500 });
   const lines = [], ok = (name, c, extra) => lines.push((c ? 'PASS ' : 'FAIL ') + name + (extra !== undefined ? '  ' + JSON.stringify(extra) : ''));
 
   // a village with a dry, run-down farm: the nearest one
   const pick = await pg.evaluate(() => {
     window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    const vs = BF.worldgen.villagesNear(0, 0, 3000).filter(Boolean).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+    // the planet: villages around the spawn point, nearest first (BF.planet.distance through face edges)
+    const sp = BF.spawnPoint, d = v => BF.planet ? BF.planet.distance(v, sp) : Math.hypot(v.x - sp.x, v.z - sp.z);
+    const vs = BF.worldgen.villagesNear(sp.x, sp.z, 3000).filter(Boolean).sort((a, b) => d(a) - d(b));
     const stats = { villages: 0, farms: 0, withComposter: 0, untended: 0, dry: 0 };
     let found = null;
     for (const v of vs.slice(0, 15)) {
@@ -96,7 +98,7 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 3);
     const wet = (x, z) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[W.getBlock(x + dx, y, z + dz)] > 0);
     for (let x = f.x0 + 1; x < f.x1; x++) for (let z = f.z0 + 1; z < f.z1; z++) {
       const id = W.getBlock(x, y, z);
-      if (id === 0) count.air++; else if (BF.FLUID[id]) count.water++; else if (id === B.farmland) count.farm++; else if (id === B.farmland_dry) count.dry++; else if (id === B.dirt) wet(x, z) ? count.cane++ : count.dirt++; else count.grass++;
+      if (id === 0) count.air++; else if (BF.FLUID[id]) count.water++; else if (id === B.farmland) count.farm++; else if (id === B.farmland_dry) count.dry++; else if (id === B.dirt) wet(x, z) ? count.cane++ : (count.dirt++, (count.left = count.left || []).push({ at: [x - f.x0, z - f.z0], above: BF.blocks[W.getBlock(x, y + 1, z)].name, above2: BF.blocks[W.getBlock(x, y + 2, z)].name })); else count.grass++;
       if (BF.RENDER[W.getBlock(x, y + 1, z)] === 4) count.crops++;
     }
     return count;

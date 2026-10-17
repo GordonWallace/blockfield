@@ -719,7 +719,7 @@ function forceStop(m) {
   S.stage = null; S.job = null; vdone(m); m.ai.route = null;
   return oven ? "emptied the oven" : null;
 }
-BF.baker = { forceStop,
+BF.baker = { forceStop, CANE_SPOTS,
   PROF, PER_VILLAGERS, BAKE_T, RECIPE, SLICES, SLICE_CAP, PIE_CAP, TREAT_EVERY, TREAT_GAP, TREAT_HAPPY, CANE_SPOTS, FARM_KINDS, FARM_NAMES,
   ovens, ovenAt, ovenState, tickOven, ovenRemoved: dropOven, simTick, load, topUp, unload, ovenText, isOven, isCake, cakeBites, eatCake, isTreat,
   canMake, reserve, farmerReserve, keepsFood, fuelOk, mayHire, makeSugar, slice, nextJob, shopping, ai, statusText, holdings,
