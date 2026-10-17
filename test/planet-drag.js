@@ -9,6 +9,7 @@ module.exports = async (pg) => {
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
   await pg.evaluate(async () => {
     window.__errs = []; addEventListener("error", e => window.__errs.push(e.message));
+    delete document.getElementById("view").requestPointerLock;   // the real pointer lock: test/run.js turns it off for every other test
     BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative");
     await new Promise(r => setTimeout(r, 2000));
   });

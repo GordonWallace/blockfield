@@ -14,6 +14,11 @@ const root = path.resolve(__dirname, '..');
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript({ path: path.join(__dirname, 'bft.js') });   // window.BFT, the in-page test helpers
+  // No pointer lock: headless Chromium grants it on BF.player.start(), and while the canvas holds it a long evaluate makes the browser
+  // and renderer processes grow by 20-40 MB/s each. Without requestPointerLock the game takes its drag-mode path (js/player.js
+  // requestLock). Set on every load, pg.reload() too; a test that simulates the lock assigns its own, and one that needs the real
+  // lock deletes this (test/planet-drag.js).
+  await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
   // The boot world (spec r14-22): planet seed 123 (generator 4, village generator 10), whose nearest village to spawn is a plains village
   // of 59 villagers 89 blocks away (with pen, coop, pasture, sty and stable), as the tests written on generator 3 assumed. BF_HASH
   // overrides it.
