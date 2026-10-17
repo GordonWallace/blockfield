@@ -152,7 +152,11 @@ function plan(m) {
       if (stockAtLeast(m, cat, mat) >= capOf(cat)) break;   // enough of this or better: lesser ones would not help
       if (canMake(m, cat, mat, stock)) {
         if (later && (stock[cat] > 0 || mat === "wood")) {   // wait for the better one a while (only with one of these already on the shelf, or before falling back to wood); the wait ends when the lesser tool is started (startCraft)
-          const w = S.waitBetter[cat] || (S.waitBetter[cat] = { since: dayNow(), mat: later });
+          let w = S.waitBetter[cat];
+          if (!w) {   // a new wait counts for the Economy view's dead ends at once, whoever asked: begun from the table (jobs.js) just before WORK_END, nextTrip never noted it
+            w = S.waitBetter[cat] = { since: dayNow(), mat: later };
+            if (BF.econ) BF.econ.want(m, MAT_LABEL[later] || later);
+          }
           if (dayNow() - w.since < WAIT_BETTER) break;
           return { cat, mat, ready: true };
         }
