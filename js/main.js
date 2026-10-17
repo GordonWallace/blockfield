@@ -33,6 +33,7 @@ resize();
 // Starts (or restarts) a world from a seed and places the player on solid ground at the planet's spawn. Every world is the planet
 // (generator 4): the flat generators 1 to 3 were retired in 1.4 (spec r14-24), so opts.gen is not read.
 BF.newWorld = function (seed, opts) {
+  BF.emit("worldClosing");   // the world being replaced is unloaded (js/gamelog.js logs it while its clock still reads right)
   BF.state.seed = seed >>> 0;
   BF.state.gen = 4;                                                          // worldgen version: 4 = the planet (saves keep it)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier

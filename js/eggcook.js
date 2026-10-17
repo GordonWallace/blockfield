@@ -35,7 +35,7 @@ const count = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
 const ems = m => count(m, I("emerald"));
 const state = m => m.eggc || (m.eggc = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 });
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: (m.profession || "villager") + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("egg-cook", Object.assign({ kind, day: +dayNow().toFixed(3), who: (m.profession || "villager") + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Villager") + " (" + pretty(m.profession) + ") " + text); };   // place: the "at x,y,z" in the text
 

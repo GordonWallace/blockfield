@@ -62,6 +62,7 @@ function log(rec, kind, text, where) {
   if (a.length > CAP) a.splice(0, a.length - CAP);
   if (BF.happiness) BF.happiness.note(rec.key, kind);   // its weekly counts outlive the capped log (js/happiness.js)
   if (BF.alerts) BF.alerts.check(rec, e);
+  if (BF.glog) BF.glog.village(rec, e);   // the game log keeps every entry, not just the newest CAP (js/gamelog.js)
 }
 const stacks = list => (list || []).map(b => b.n + " " + BF.itemName(b.id)).join(" + ");
 const who = m => nameOf(m) + " (" + pretty(m.profession) + ")";
