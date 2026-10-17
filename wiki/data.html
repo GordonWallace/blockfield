@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Blockfieldpedia data</title>
+<!-- data.html?game=<path>: loads a game's own scripts (the list in <path>index.html; ../ is the running game, versions/<id>/game/ a released version's copy, without the boot, audio and debug feed) so Blockfieldpedia reads blocks,
+     recipes, trades and mobs straight from the game. Runs hidden in an iframe of index.html: the modules' injected styles and listeners stay here. -->
+<div id="ui" hidden></div>
+<script>
+window.BF = { on() {}, emit() {} };   // main.js's event bus is not loaded: modules register handlers we never fire
+(async () => {
+  try {
+    const base = new URLSearchParams(location.search).get("game") || "../";
+    if (!/^(\.\.\/|versions\/[\w.-]+\/game\/)$/.test(base)) throw new Error("bad game path " + base);
+    const html = await (await fetch(base + "index.html", { cache: "no-cache" })).text();
+    const skip = /(^|\/)(main|audio|debugfeed)\.js$/;
+    const srcs = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).filter(s => !skip.test(s.split("?")[0]));
+    for (const s of srcs) await new Promise(res => {
+      const e = document.createElement("script");
+      e.src = /^https?:/.test(s) ? s : base + s;
+      e.onload = res;
+      e.onerror = () => { console.error("Blockfieldpedia: could not load " + s); res(); };
+      document.head.appendChild(e);
+    });
+    try { BF.inventory.init(); } catch (e) { console.warn("Blockfieldpedia: inventory init", e); }   // builds the recipe lists
+    window.bfReady = true;
+  } catch (e) { window.bfError = String(e); }
+  parent.postMessage("bf-data-ready", "*");
+})();
+</script>
