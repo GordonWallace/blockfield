@@ -1355,10 +1355,13 @@ function ladderCell(x, y, z) {
 }
 const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // A* over walkable cells (4-way, step up 1, drop up to 3, straight up/down ladders). goal(x, y, z) -> bool. Returns cells after start, or null.
-// tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear.
+// tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear, and, as it is wider than
+// its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
 let planBudget = 0;
+const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
-  const air = (x, y, z) => !tall || !blockAt(x, y, z).solid, nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) : navCell;
+  const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
+  const nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const key = (x, y, z) => x + "," + y + "," + z;
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const open = [[sx, sy, sz, 0, hh(sx, sz)]], from = new Map([[key(sx, sy, sz), null]]), cost = new Map([[key(sx, sy, sz), 0]]);
