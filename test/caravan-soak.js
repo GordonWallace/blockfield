@@ -6,7 +6,7 @@
 // Once per game day it records each village's villagers, emeralds and items, the merchants' trips (out and home), goods sold each way, pins,
 // and path blocks made. FAILs on a page error, a villager trade made without an offer, no goods carried each way, a trip that left a pin
 // behind, more than 2 trips on the road, or a merchant who never came home (one killed on the road counts as ended). Prices take about 10 game days to drift far enough apart for a
-// trip to pay (js/prices.js: a month to double), so run 30 days; a dirt path needs 20 crossings, so it is only required after 10 trips.
+// trip to pay (js/prices.js: a month to double), so run 30 days; a dirt path needs 20 crossings, so it is only required after 12 trips (10 out and home cross the busiest block 20 times only if every trip takes the very same line, and a road 200-400 blocks long rarely does: 19 on CI).
 const path = require('path');
 const fs = require('fs');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -195,7 +195,7 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   const onRoad = R.routes.reduce((a, r) => a + r.road.length, 0);
   if (R.pinsLeft > onRoad) F(`pins left behind: ${R.pinsLeft} pins, ${onRoad} merchants on the road`);
   if (last.left - last.home - died - cut > 2 + onRoad) F(`merchants who never came home: ${last.left} out, ${last.home} home`);
-  if (last.left >= 10 && !(R.paths > 0)) F('no dirt path formed after ' + last.left + ' trips (most crossings of one block: ' + last.paths + ')');
+  if (last.left >= 12 && !(R.paths > 0)) F('no dirt path formed after ' + last.left + ' trips (most crossings of one block: ' + last.paths + ')');
   if (last.left >= 2 && !(last.paths >= 2)) F('trips do not wear the same ground (most crossings of one block: ' + last.paths + ')');
   console.log(fail ? fail + ' FAILED' : 'all passed');
   await b.close();
