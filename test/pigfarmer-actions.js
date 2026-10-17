@@ -404,6 +404,8 @@ module.exports = async (pg, out) => {
       // a bigger village has other free jobsites too: gone, so the trough is the one it can take
       if (jl) for (const s of BF.jobs.unclaimed(jl, null, jl)) { const id = BF.world.getBlock(s.x, s.y, s.z); BF.world.setBlock(s.x, s.y, s.z, 0); BF.emit("blockBroken", s.x, s.y, s.z, id); }
       ok("and an unemployed villager", !!jl && jl.profession === "unemployed", jl && jl.profession);
+      // a jobsite another villager lets go of later (a farmer's composter) is cleared too while it waits, so the trough stays the one it can take
+      const sweep = () => { if (jl && jl.profession === "unemployed") for (const s of BF.jobs.unclaimed(jl, null, jl)) { const id = BF.world.getBlock(s.x, s.y, s.z); if (id !== BF.B.feed_trough) { BF.world.setBlock(s.x, s.y, s.z, 0); BF.emit("blockBroken", s.x, s.y, s.z, id); } } };
       for (const m of v2()) if (m.profession === "builder" && m !== bm && m.bs) m.bs.cool = 1e9;   // the other builder stays out of the way
       T.inv.add(bm.inv, I.bread, 12);
       for (let i = 0; i < 200 && !bm.bs; i++) step();   // its builder state
@@ -438,6 +440,7 @@ module.exports = async (pg, out) => {
         step();
         if (BF.sky.time > 0.4) BF.sky.setTime(0.05);
         e = (R2.built || []).find(x => x.type === "sty") || null;
+        if (i % 20 === 0) sweep();
         if (!e && i % 100 === 99 && bm.bs.mode !== "build" && bm.bs.mode !== "fill") {   // no site yet (it must be in the jobless's reach): it tries again, as a builder does once its fail mark runs out
           delete bm.bs.fail.sty; Object.assign(bm.bs, { mode: "idle", stage: null, want: null, deal: null, t: 0, cool: 0, next: { type: "sty", wood } });
         }
@@ -449,7 +452,7 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < 8000 && !pf2; i++) {
         step();
         if (BF.sky.time > 0.4) BF.sky.setTime(0.05);
-        if (i % 20 === 0) pf2 = v2().find(m => m.profession === "pig_farmer") || null;
+        if (i % 20 === 0) { sweep(); pf2 = v2().find(m => m.profession === "pig_farmer") || null; }
       }
       ok("an unemployed villager took the job at the feed trough", !!pf2 && BF.world.getBlock(pf2.jobsite.x, pf2.jobsite.y, pf2.jobsite.z) === BF.B.feed_trough && PF.styOf(pf2) === bs2, pf2 ? pf2.jobsite : v2().map(m => m.profession).join(","));
       if (pf2) ok("with no feed from nothing (emeralds to buy it)", !c("raw_porkchop", pf2) && c("emerald", pf2) >= 1, pf2.inv.filter(Boolean).map(s => BF.items[s.id].name + ":" + s.count));

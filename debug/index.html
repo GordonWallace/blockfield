@@ -784,7 +784,8 @@ function renderWild(w) {
   el.innerHTML = `<div><div>Hostiles in the village area <b>${fmt(w.hostiles)}</b></div><div>Wild animals within 128 blocks <b>${fmt(an.reduce((n, a) => n + a[1], 0))}</b>` +
     (an.length ? ` <span class="sub">(${an.map(([t, n]) => n + " " + esc(pretty(t))).join(", ")})</span>` : "") + `</div></div>` +
     `<table title="Nights start at sunset. Zombie in: a zombie got inside the village. Attacks: zombie hits on its villagers. Deaths: villagers who died that night"><thead><tr><th>Night of</th><th>Zombie in</th><th>Attacks</th><th>Deaths</th></tr></thead><tbody>` +
-    w.nights.map(([n, r, a, d]) => `<tr><td>Day ${n + 1}</td><td class="${r ? "hit" : ""}">${r ? "yes" : "-"}</td><td class="${a ? "hit" : ""}">${a}</td><td class="${d ? "dead" : ""}">${d}</td></tr>`).join("") + `</tbody></table>`;
+    (w.nights.length ? w.nights.map(([n, r, a, d]) => `<tr><td>Day ${n + 1}</td><td class="${r ? "hit" : ""}">${r ? "yes" : "-"}</td><td class="${a ? "hit" : ""}">${a}</td><td class="${d ? "dead" : ""}">${d}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="sub">No nights yet</td></tr>`) + `</tbody></table>`;
 }
 
 // Happiness (js/happiness.js): the score, a bar, and every term with its count and points (zero terms dimmed).
