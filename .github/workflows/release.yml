@@ -1,0 +1,43 @@
+# GitHub releases: after a release branch merges into main ("Merge pull request #N from <owner>/release-X-Y"), tag that merge
+# commit vX.Y and publish a release for it. Notes come from releases/vX.Y.md when the release added one, else from the release PR.
+# Every run checks all of main's release merges and creates only the missing ones, so it is safe to re-run from the Actions tab.
+name: Releases
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: releases
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Tag and publish missing releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # oldest first, so the newest release ends up marked latest
+          git log --first-parent --reverse --format='%H %s' origin/main |
+          sed -nE 's|^([0-9a-f]+) Merge pull request #([0-9]+) from [^/]+/release-([0-9]+)-([0-9]+)$|\1 \2 \3.\4|p' |
+          while read -r sha pr ver; do
+            tag="v$ver"
+            if gh release view "$tag" >/dev/null 2>&1; then echo "$tag already released"; continue; fi
+            notes="$RUNNER_TEMP/$tag.md"
+            if [ -f "releases/$tag.md" ]; then cp "releases/$tag.md" "$notes"
+            else gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq .body > "$notes"; fi
+            printf '\n\nRelease PR: #%s\n' "$pr" >> "$notes"
+            # an existing tag is kept as is; otherwise gh creates it on the merge commit
+            gh release create "$tag" --target "$sha" --title "Blockfield $ver" --notes-file "$notes"
+            echo "released $tag at $sha"
+          done
