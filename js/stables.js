@@ -83,13 +83,15 @@ function genStable(R) {
   Object.defineProperty(R, "_gst", { value: e, writable: true, enumerable: false, configurable: true });
   return e;
 }
-// A generated stable starts with 2 tamed horses of its own (idea-044), once: when the village first comes near with its paddock loaded.
+// A generated stable starts with 2 tamed horses of its own (idea-044), once: when the village first comes near, or first runs in the village
+// simulation (js/villagesim.js: a far village, or one a trip pins), with its paddock loaded, as pastures, coops, sties and pens get their
+// starting animals.
 const stocked = new Set();   // village keys whose generated stable got its starting horses (saved: "stables:stocked")
 function stockGen() {
   const pp = BF.player && BF.player.position, W = BF.world, H = BF.horses;
   if (!pp || !H || !BF.mobs.villages) return;
   for (const R of BF.mobs.villages.values()) {
-    if (!R.wg || stocked.has(R.key) || Math.hypot(R.x - pp.x, R.z - pp.z) > 80) continue;
+    if (!R.wg || stocked.has(R.key) || (Math.hypot(R.x - pp.x, R.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(R.key)))) continue;
     const e = genStable(R), st = e && stableOf(R);
     if (!st || st.e !== e) continue;
     const b = st.box;
