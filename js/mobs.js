@@ -1355,10 +1355,13 @@ function ladderCell(x, y, z) {
 }
 const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // A* over walkable cells (4-way, step up 1, drop up to 3, straight up/down ladders). goal(x, y, z) -> bool. Returns cells after start, or null.
-// tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear.
+// tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear, and, as it is wider than
+// its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
 let planBudget = 0;
+const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
-  const air = (x, y, z) => !tall || !blockAt(x, y, z).solid, nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) : navCell;
+  const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
+  const nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const key = (x, y, z) => x + "," + y + "," + z;
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const open = [[sx, sy, sz, 0, hh(sx, sz)]], from = new Map([[key(sx, sy, sz), null]]), cost = new Map([[key(sx, sy, sz), 0]]);
@@ -1655,6 +1658,10 @@ function villagerAI(m, dt, out) {
   }
   if (bedtime()) { nightAI(m, dt, out); return; }
   ai.night = null;
+  // an explorer out mapping and a merchant on a trip stay where they are between tasks (and before the working day) rather than walk back,
+  // and have no house to walk out of in the morning
+  const away = (m.profession === "explorer" && BF.explorer && BF.explorer.away && BF.explorer.away(m)) || (m.profession === "merchant" && BF.merchant && BF.merchant.away && BF.merchant.away(m));
+  if (away && ai.leaving) { ai.leaving = false; if (ai.routeKind === "out") ai.route = null; }
   if (ai.leaving && morningAI(m, dt, out)) return;
   if (jobsAI(m, dt, out)) { m.idleT = 0; return; }
   m.idleT = (m.idleT || 0) + dt;
@@ -1675,7 +1682,8 @@ function villagerAI(m, dt, out) {
     }
   }
   if (ai.outT > 0) ai.outT -= dt;
-  if (V && !(ai.outT > 0 && ai.mode === "walk")) {   // (not while walking away from the door it came out of this morning: morningAI)
+  if (away && ai.mode === "walk" && Math.hypot(ai.tx - m.position.x, ai.tz - m.position.z) > 12) { ai.mode = "idle"; ai.t = rnd(1, 3); }
+  if (V && !away && !(ai.outT > 0 && ai.mode === "walk")) {   // (not while walking away from the door it came out of this morning: morningAI)
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
       ai.mode = "walk"; ai.tx = ax + rnd(-6, 6); ai.tz = az + rnd(-6, 6); ai.t = rnd(5, 8);
