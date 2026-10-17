@@ -49,6 +49,8 @@ Each run's page has a results table, and the logs and screenshots are attached t
 
 `main` tracks the game. Make changes on a branch and open a pull request.
 
+Work lands in numbered release branches (`release-1-2`, …), which merge into `main` once tested. When one does, the Releases workflow (`.github/workflows/release.yml`) tags the merge commit `vX.Y` and publishes a GitHub release. Its notes come from `releases/vX.Y.md`, so add that file to the release branch before its pull request into `main`; without it the notes are the pull request's description.
+
 ## Credits
 
 Textures are from the Faithful 32x pack, https://faithfulpack.net. See `FAITHFUL-LICENSE.txt`. The band saw tiles are the artwork of the villager-planter mod (GordonWallace/villager-planter). Everything else is project code.

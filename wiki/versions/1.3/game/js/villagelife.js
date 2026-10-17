@@ -1,0 +1,1806 @@
+// Villager food consumption (BF.food) and farmer AI (BF.villageLife). Loaded after mobs.js / builder.js.
+// See CONTRACT.md "Villager food and farming (js/villagelife.js)".
+(() => {
+"use strict";
+const BF = (window.BF = window.BF || {});
+
+const BREAD_PTS = 5;               // bread restores 5 hunger points = 1 bread-equivalent
+const KEEP = 7;                    // a seller always keeps at least this many bread-eq
+const MEALS = [0.04, 0.22, 0.42];  // sky.time of the three daily meals (breakfast, lunch, supper; all before bedtime at sunset 0.5)
+const MAX_CATCHUP_MEALS = 3 * 30;  // at most 30 days of meals are caught up at once
+const LIFE_V = 1;                  // save-format version of the per-villager food state
+
+const T = () => BF.trades;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
+const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
+
+// ---------------------------------------------------------------- bread equivalents
+const eqOf = id => { const it = BF.items && BF.items[id]; return it && it.food ? it.food / BREAD_PTS : 0; };
+const isFood = id => eqOf(id) > 0;
+// breadEq(itemId) -> bread-eq of one item; breadEq(inventoryArray | mob) -> total of all food in it
+function breadEq(x) {
+  if (x == null) return 0;
+  if (typeof x === "number") return eqOf(x);
+  const a = Array.isArray(x) ? x : x.inv;
+  if (!Array.isArray(a)) return 0;
+  let s = 0;
+  for (const st of a) if (st) s += eqOf(st.id) * st.count;
+  return s;
+}
+// Items a farmer keeps back for replanting (not eaten, not sold as surplus).
+const SEED_KEEP = 8;
+function reserveOf(m, id) {
+  if (m && m.profession === "cowherd" && ((BF.I.milk_bucket != null && id === BF.I.milk_bucket) || (BF.I.raw_beef != null && id === BF.I.raw_beef))) return Infinity;   // it bottles its milk (never drinks the pail) and cooks or sells its beef (js/cowherd.js)
+  if (m && m.profession === "pig_farmer" && BF.pigFarmer && BF.pigFarmer.keepsFood(m, id)) return Infinity;   // its feed is for the sty, its raw pork for the butcher and its furnace (js/pigfarmer.js)
+  if (m && m.profession === "baker" && BF.baker && (BF.baker.keepsFood(m, id) || BF.baker.isTreat(id))) return Infinity;   // its milk is for cakes, its slices and pies are its wares (js/baker.js)
+  if (!m || m.profession !== "farmer") return 0;
+  const it = BF.items[id];
+  return it && it.plants != null ? SEED_KEEP : 0;
+}
+// Food the mob may eat or sell: [{id, n, eq}] (farmer seed reserve excluded), cheapest per bread-eq first.
+function costPerEq(id) {
+  const V = T() && T().VALUE, it = BF.items[id];
+  const v = V && it && V[it.name] != null ? V[it.name] : 0.2;
+  return v / Math.max(0.01, eqOf(id));
+}
+function edible(m) {
+  const out = new Map();
+  if (!m || !Array.isArray(m.inv)) return [];
+  for (const st of m.inv) if (st && isFood(st.id)) out.set(st.id, (out.get(st.id) || 0) + st.count);
+  const list = [];
+  for (const [id, n] of out) { const k = n - reserveOf(m, id); if (k > 0) list.push({ id, n: k, eq: eqOf(id) }); }
+  list.sort((a, b) => costPerEq(a.id) - costPerEq(b.id) || a.eq - b.eq);
+  return list;
+}
+// Food in hand (bread-eq) the mob can eat, including the fractional carry of an item already started.
+const available = m => edible(m).reduce((s, e) => s + e.n * e.eq, 0) + ((m && m.life && m.life.sat) || 0);
+const rate = m => (m && m.child ? 2 : 1);                      // bread-eq per day
+const surplus = m => Math.max(0, available(m) - KEEP);         // what it can spare while keeping 7 bread-eq
+
+const eatL = [];
+function onEat(cb) { if (typeof cb === "function") eatL.push(cb); }
+function life(m) {
+  // lived: game days this villager has been loaded and active (see tick), its age
+  if (!m.life) { const t = dayNow(); m.life = { v: LIFE_V, mealT: t, lastAte: t, sat: 0, eaten: 0, starving: false, lived: 0 }; }
+  return m.life;
+}
+// Milk drunk leaves its container (blocks.js `container`: milk bottle -> glass bottle, milk bucket -> bucket) in the villager's pack, or on the
+// ground when the pack is full (js/cowherd.js).
+function emptied(m, id) {
+  const it = BF.items[id], back = it && it.container ? BF.I[it.container] : null;
+  if (back == null) return;
+  const left = T().inv.add(m.inv, back, 1);
+  if (left > 0 && BF.drops && m.position) BF.drops.spawn(back, left, m.position.x, m.position.y + 0.6, m.position.z);
+}
+// The next item to eat from list (edible(m)): treats (js/baker.js cake slices, pumpkin pies) are kept for a treat once a day at most: one is eaten
+// first when a treat is due, otherwise only when nothing else is left.
+function nextBite(m, list) {
+  if (!list.length || !BF.baker) return list[0] || null;
+  const treat = e => BF.baker.isTreat(e.id);
+  if (BF.baker.treatDue(m)) { const t = list.find(treat); if (t) return t; }
+  return list.find(e => !treat(e)) || list[0];
+}
+// Eats `amount` bread-eq: whole items are taken out of the inventory (cheapest first) and any excess is carried as
+// satiation (`life.sat`) for later meals. Returns the bread-eq actually eaten (less when food ran out).
+function eat(m, amount) {
+  if (!m || !(amount > 0)) return 0;
+  const L = life(m);
+  let need = amount, ate = [];
+  while (need > 1e-9) {
+    if (L.sat > 1e-9) { const u = Math.min(L.sat, need); L.sat -= u; need -= u; continue; }
+    const e = nextBite(m, edible(m));
+    if (!e) break;
+    T().inv.remove(m.inv, e.id, 1);
+    emptied(m, e.id);
+    if (BF.baker && BF.baker.isTreat(e.id)) BF.baker.ateTreat(m);
+    L.sat += e.eq;
+    ate.push(e.id);
+  }
+  if (L.sat < 1e-9) L.sat = 0;
+  const got = amount - need;
+  if (got > 0) {
+    L.eaten += got;
+    m.eatenTotal = L.eaten;
+    for (const cb of eatL) { try { cb(m, got, ate); } catch (err) { console.error(err); } }
+  }
+  return got;
+}
+// Removes whole items worth at least `eq` bread-eq (cheapest first, reserve kept) and returns them as [{id, count}]. The food is used up (js/breeding.js:
+// what parents pay for a child): containers stay with m (emptied).
+function take(m, eq) {
+  const out = [];
+  let left = eq;
+  for (const e of edible(m)) {
+    if (left <= 1e-9) break;
+    const k = Math.min(e.n, Math.ceil(left / e.eq - 1e-9));
+    const got = T().inv.remove(m.inv, e.id, k);
+    if (got > 0) { out.push({ id: e.id, count: got }); left -= got * e.eq; for (let i = 0; i < got; i++) emptied(m, e.id); }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- meals (by game-day count, so time skips catch up)
+const mealIndex = A => Math.floor(A) * MEALS.length + MEALS.filter(t => t <= A - Math.floor(A)).length;
+const mealTime = k => Math.floor(k / MEALS.length) + MEALS[k % MEALS.length];
+let fx = null;   // visual hook set by the farming part (particles, sound)
+function digest(m, now) {
+  const L = life(m);
+  if (!(L.mealT <= now)) L.mealT = now;            // time went backwards (/time set): nothing due
+  if (!(L.lastAte <= now)) L.lastAte = now;
+  const k0 = mealIndex(L.mealT), k1 = mealIndex(now);
+  let ateAny = 0;
+  if (k1 > k0) {
+    const per = rate(m) / MEALS.length;
+    for (let k = Math.max(k0, k1 - MAX_CATCHUP_MEALS); k < k1; k++) {
+      const got = eat(m, per);
+      if (got > 0) { L.lastAte = mealTime(k); ateAny += got; }
+    }
+    L.mealT = now;
+  }
+  // starving: more than a full day since the last bite. Food in hand is eaten at once to recover.
+  if (now - L.lastAte > 1 && available(m) > 0) {
+    const got = eat(m, rate(m) / MEALS.length);
+    if (got > 0) { L.lastAte = now; ateAny += got; }
+  }
+  L.starving = now - L.lastAte > 1;
+  m.starving = L.starving;
+  if (ateAny > 0 && fx) fx(m);
+  return ateAny;
+}
+
+// ---------------------------------------------------------------- starting food, persistence
+function addAll(inv, list) { for (const [name, n] of list) if (BF.I[name] != null && n > 0) T().inv.add(inv, BF.I[name], n); }
+// Gives a new villager (or one from a save that predates villager food) a starting food stock.
+function startFood(v) {
+  if (!v || !Array.isArray(v.inv)) return;
+  const prof = v.profession;
+  if (prof === "farmer") {
+    addAll(v.inv, [["wheat_seeds", rndInt(10, 20)], ["carrot", rndInt(8, 14)], ["potato", rndInt(8, 14)], ["beetroot_seeds", rndInt(4, 10)]]);
+    if (BF.baker) addAll(v.inv, [["sugar_cane", rndInt(2, 4)]]);   // a few canes to plant beside its beds' water, like its seeds (js/baker.js: the baker's sugar)
+    if (breadEq(v.inv) < 12) addAll(v.inv, [["bread", Math.ceil(12 - breadEq(v.inv))]]);
+    if (Math.random() < 0.45) addAll(v.inv, [["oak_log", rndInt(3, 8)]]);
+  } else {
+    const target = rnd(3, 6);
+    const opts = [["bread", 1], ["apple", 0.8], ["carrot", 0.6], ["baked_potato", 1]];
+    for (let guard = 0; breadEq(v.inv) < target && guard < 20; guard++) {
+      const [name] = opts[Math.random() < 0.6 ? 0 : rndInt(1, opts.length - 1)];
+      if (BF.I[name] == null || T().inv.add(v.inv, BF.I[name], 1) > 0) break;
+    }
+  }
+  v.life = life(v);
+}
+function pack(v) {
+  const L = v.life;
+  if (!L) return { v: LIFE_V };
+  return { v: LIFE_V, mealT: L.mealT, lastAte: L.lastAte, sat: +L.sat.toFixed(4), eaten: +L.eaten.toFixed(3), starving: !!L.starving, lived: +(L.lived || 0).toFixed(4),
+    tt: L.tt != null ? L.tt : undefined, tb: L.tb != null ? L.tb : undefined };   // last treat eaten, last treat bought (js/baker.js)
+}
+function unpack(v, o) {
+  if (!v) return;
+  if (!o || typeof o !== "object") { v.life = null; startFood(v); return; }   // save from before villager food
+  const t = dayNow(), num = (x, d) => (Number.isFinite(+x) ? +x : d);
+  v.life = { v: LIFE_V, mealT: num(o.mealT, t), lastAte: num(o.lastAte, t), sat: Math.max(0, num(o.sat, 0)), eaten: Math.max(0, num(o.eaten, 0)), starving: !!o.starving,
+    lived: Math.max(0, num(o.lived, 0)) };   // saves from before ages: counted from now
+  if (Number.isFinite(+o.tt) && o.tt != null) v.life.tt = +o.tt;   // last treat eaten / bought (js/baker.js)
+  if (Number.isFinite(+o.tb) && o.tb != null) v.life.tb = +o.tb;
+  v.eatenTotal = v.life.eaten;
+  v.starving = v.life.starving;
+}
+// Trade hook: a starving villager only trades food (it still buys food it is offered).
+function blockReason(v, o) {
+  if (v && v.starving && o && o.sell && !isFood(o.sell.id) && !(o.buy || []).some(b => isFood(b.id))) return "Too hungry to trade";
+  return null;
+}
+
+BF.food = {
+  BREAD_PTS, KEEP, MEALS, LIFE_V, SEED_KEEP,
+  breadEq, isFood, available, surplus, rate, eat, take, onEat, edible, life, digest, startFood, pack, unpack, blockReason, dayNow,
+  setFx(f) { fx = f; },
+};
+})();
+
+// ================================================================ farming, food shopping, eating visuals (BF.villageLife)
+(() => {
+"use strict";
+const BF = window.BF;
+const FD = () => BF.food;
+const TR = () => BF.trades;
+const W = () => BF.world;
+const nav = () => BF.mobs.nav;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
+const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
+
+const WORK_END = 0.5;             // farmers and shoppers stop at sunset, which is also bedtime (mobs.js)
+const REACH_H = 1.75;             // horizontal feet -> cell centre distance to work a cell
+const ACT = { harvest: 0.55, plant: 0.45, till: 0.9, border: 0.75, unborder: 0.8, water: 0.9, fill: 0.9, craft: 1.6, tend: 3.0, dig: 0.7, raise: 0.5, gather: 0.9, buylog: 1.2 };
+const actOf = k => (ACT[k] != null ? ACT[k] : BF.baker && BF.baker.FARM_KINDS[k] != null ? BF.baker.FARM_KINDS[k] : 0.6);   // + sugar cane and pumpkin tasks (js/baker.js)
+const TASK_MAX = 45;              // seconds before an unfinished task is given up
+const BREAK_P = 0.05;             // chance of a short break after a task (the rest of the day is farming)
+const SCAN_COLS = 500;            // columns of the village area scanned per tick
+const RESCAN = 10;                // seconds between village farm scans
+const FARM_R = 12;                // a farmer tends farmland within 12 blocks, in every direction, of its composter, and the whole of any bed that reaches that box
+const BED_REACH = 16;             // ... so a bed it looks after (and builds) may stretch up to 16 blocks from the composter
+const FARM_MAX = 64;              // farmland cells within that range a farmer is content with: it only grows / adds beds below this
+const WATER_REACH = 30;           // buckets are filled at water this far (~30 blocks) around the village area, wells included
+const GATHER_R = 24;              // dirt is taken from up to this far outside the village area, never from inside it
+const TRADE_PAUSE = 1.6;
+const WHEAT_SPARE = 24;           // a farmer bakes only the wheat above this: the rest is for sale to shepherds (its spare goods down to 4, js/market.js)
+const SHOP_DAYS = 3;              // a hungry villager buys up to 3 days of food
+const LOG = [];
+
+const B = n => BF.B[n];
+const I = n => BF.I[n];
+let C = null;   // lazily resolved block / item ids
+function ids() {
+  if (C) return C;
+  C = {
+    farmland: B("farmland"), farmlandDry: B("farmland_dry"), water: B("water"), path: B("dirt_path"),
+    mature: new Map([[B("wheat"), I("wheat_seeds")], [B("carrots"), I("carrot")], [B("potatoes"), I("potato")], [B("beetroots"), I("beetroot_seeds")]]),
+    seeds: ["wheat_seeds", "carrot", "potato", "beetroot_seeds"].map(I).filter(x => x != null),
+    till: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass", "mycelium"].map(B).filter(x => x != null)),
+    dirt: B("dirt"), hoes: ["wooden_hoe", "stone_hoe", "iron_hoe", "diamond_hoe"].map(I).filter(x => x != null),
+    // natural ground a farmer may dig away (or fill with dirt) to level a field; everything else is somebody's building or the landscape
+    ground: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass", "mycelium", "sand", "red_sand", "gravel", "clay", "dirt_path", "farmland", "farmland_dry"].map(B).filter(x => x != null)),
+    diggable: new Set(["grass", "dirt", "coarse_dirt", "podzol", "snow_grass"].map(B).filter(x => x != null)),
+    wheat: I("wheat_item"), bread: I("bread"), hay: I("hay_bale"), bucket: I("bucket"), wbucket: I("water_bucket"), em: I("emerald"),
+    cook: [["raw_chicken", "cooked_chicken"], ["raw_porkchop", "cooked_porkchop"], ["raw_beef", "steak"], ["raw_mutton", "cooked_mutton"], ["raw_cod", "cooked_cod"]]
+      .map(([a, b]) => [I(a), I(b)]).filter(([a, b]) => a != null && b != null),
+  };
+  C.matureSet = new Set(C.mature.keys());
+  return C;
+}
+const cnt = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
+const hasHoe = m => BF.toolWear.has(m, "hoe");   // any hoe, gold included (js/toolwear.js)
+const isLogBlock = id => { const b = BF.blocks[id]; return !!b && /_log$/.test(b.name) && !/^stripped_/.test(b.name); };
+// A new builder gets an empty bucket: water is only ever placed from a bucket that was filled first. Farmers are not part of this: a founding
+// farmer starts with a wooden hoe and an empty bucket (trading.js stockFor), any other buys them from the toolsmith (toolAI below).
+function ensureKit(m) {
+  if (!m || !Array.isArray(m.inv) || m.profession !== "builder" || m.kitFor === m.profession) return;
+  m.kitFor = m.profession;
+  const c = ids(), Tinv = TR().inv;
+  if (c.bucket != null && cnt(m, c.bucket) + cnt(m, c.wbucket) === 0) Tinv.add(m.inv, c.bucket, 1);
+}
+const key3 = (x, y, z) => x + "," + y + "," + z;
+const getB = (x, y, z) => W().getBlock(x, y, z);
+
+// ---------------------------------------------------------------- particles (eating crumbs, harvest bits)
+const pool = [];
+let partGeo = null;
+const partMats = {};
+function particles(x, y, z, color, n, spread) {
+  if (!BF.scene || typeof THREE === "undefined") return;
+  if (!partGeo) partGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+  const key = color || "#999999";
+  const mat = partMats[key] || (partMats[key] = new THREE.MeshBasicMaterial({ color: new THREE.Color(key) }));
+  for (let i = 0; i < n; i++) {
+    if (pool.length > 120) { const o = pool.shift(); BF.scene.remove(o.mesh); }
+    const mesh = new THREE.Mesh(partGeo, mat);
+    mesh.position.set(x + (Math.random() - 0.5) * spread, y + Math.random() * 0.2, z + (Math.random() - 0.5) * spread);
+    BF.scene.add(mesh);
+    pool.push({ mesh, vx: (Math.random() - 0.5) * 1.6, vy: 0.8 + Math.random() * 1.6, vz: (Math.random() - 0.5) * 1.6, life: 0.4 + Math.random() * 0.3 });
+  }
+}
+function updateParticles(dt) {
+  for (let i = pool.length - 1; i >= 0; i--) {
+    const p = pool[i];
+    p.life -= dt; p.vy -= 12 * dt;
+    p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt;
+    if (p.life <= 0) { BF.scene.remove(p.mesh); pool.splice(i, 1); }
+  }
+}
+const nearPlayer = (m, r) => { const p = BF.player && BF.player.position; return !!(p && m.position && m.position.distanceTo(p) < r); };
+function sound(name, x, y, z, vol) { try { if (BF.audio && BF.audio.play) BF.audio.play(name, { x, y, z, volume: vol == null ? 0.6 : vol, group: "mobs", dist: 16 }); } catch (e) { /* audio is optional */ } }
+function blockSound(kind, id, x, y, z) { try { if (BF.audio && BF.audio.blockSound) BF.audio.blockSound(kind, id, x, y, z, 0.6); } catch (e) { /* optional */ } }
+// eating: a few crumbs at the mouth, an arm movement and a crunch when the player is close
+FD().setFx(m => {
+  if (!m.position || m.sleeping || m.removed || !nearPlayer(m, 24)) return;
+  const yaw = m.yaw || 0, hy = m.position.y + (m.height || 1.95) * 0.78;
+  const col = (BF.items[BF.I.bread] && BF.items[BF.I.bread].color) || "#b98a3a";
+  particles(m.position.x + Math.cos(yaw) * 0.3, hy, m.position.z + Math.sin(yaw) * 0.3, col, 6, 0.25);
+  if (m.ai) m.ai.swingT = 0.35;
+  m.lastMealFx = dayNow();
+  sound("eat", m.position.x, hy, m.position.z, 0.5);
+});
+
+// ---------------------------------------------------------------- village farm data (scanned incrementally)
+function areaOf(R) {
+  const wg = R.wg;
+  if (wg && Number.isFinite(wg.minX)) {
+    let yLo = Infinity, yHi = -Infinity;
+    for (const p of wg.pads || []) { yLo = Math.min(yLo, p.y); yHi = Math.max(yHi, p.y); }
+    if (!Number.isFinite(yLo)) { yLo = R.y; yHi = R.y; }
+    return { x0: wg.minX - 6, x1: wg.maxX + 6, z0: wg.minZ - 6, z1: wg.maxZ + 6, yLo: yLo - 5, yHi: yHi + 6 };
+  }
+  const y = Number.isFinite(R.y) ? R.y : 64;
+  return { x0: Math.floor(R.x) - 24, x1: Math.floor(R.x) + 24, z0: Math.floor(R.z) - 24, z1: Math.floor(R.z) + 24, yLo: y - 6, yHi: y + 6 };
+}
+function vdata(R) {
+  if (R._life) return R._life;
+  const A = areaOf(R), wg = R.wg || {};
+  const boxes = [], farms = [], farmSeeds = [];      // [x0, z0, x1, z1]: buildings with a 1-block margin (no bed comes there), generated farm plots
+  let farmBase = 0;
+  for (const b of wg.buildings || []) {
+    const farm = b.type === "farm" || b.type === "bigfarm";
+    // a cell inside each generated farm's ring: a farm whose farmland has all gone back to dirt is still found as a bed (detectBeds)
+    if (farm) { farms.push([b.x0, b.z0, b.x1, b.z1]); farmBase += (b.w - 2) * (b.d - 2); farmSeeds.push([b.x0 + 1, b.y, b.z0 + 1]); }
+    else boxes.push([b.x0 - 1, b.z0 - 1, b.x1 + 1, b.z1 + 1]);
+  }
+  if (Number.isFinite(wg.x)) boxes.push([wg.x - 9, wg.z - 9, wg.x + 9, wg.z + 9]);       // meeting square, bell, well
+  for (const l of wg.lamps || []) boxes.push([l[0] - 1, l[1] - 1, l[0] + 1, l[1] + 1]);
+  for (const d of wg.decor || []) boxes.push([d[0] - 1, d[1] - 1, d[0] + 1, d[1] + 1]);
+  R._life = { area: A, base: Object.assign({}, A), boxes, farms, farmSeeds, beds: [], projects: projectsFor(R), dig: digFor(R), farmBase, cells: [], water: [], waterSet: new Set(), wells: new Set(), ready: false, scan: null, scanT: 0, want: 0 };
+  return R._life;
+}
+// The farmer's reach box (composter +-12) must lie inside the scanned area (a composter placed outside the village grounds); a wider area is rescanned.
+function ensureCover(D, m) {
+  const s = m.jobsite, A = D.area;
+  if (!s) return;
+  const x0 = s.x - BED_REACH - 1, x1 = s.x + BED_REACH + 1, z0 = s.z - BED_REACH - 1, z1 = s.z + BED_REACH + 1, yLo = s.y - FARM_R, yHi = s.y + FARM_R;
+  if (x0 >= A.x0 && x1 <= A.x1 && z0 >= A.z0 && z1 <= A.z1 && yLo >= A.yLo && yHi <= A.yHi) return;
+  D.area = { x0: Math.min(A.x0, x0), x1: Math.max(A.x1, x1), z0: Math.min(A.z0, z0), z1: Math.max(A.z1, z1), yLo: Math.min(A.yLo, yLo), yHi: Math.max(A.yHi, yHi) };
+  D.ready = false; D.scan = null; D.scanT = 0;
+}
+// the farmland / water cell (x, y, z) is within 12 blocks of the farmer's composter in every direction
+const inRange = (m, x, y, z) => { const s = m.jobsite; return !!s && Math.abs(x - s.x) <= FARM_R && Math.abs(z - s.z) <= FARM_R && Math.abs(y - s.y) <= FARM_R; };
+const inBedReach = (m, x, y, z) => { const s = m.jobsite; return !!s && Math.abs(x - s.x) <= BED_REACH && Math.abs(z - s.z) <= BED_REACH && Math.abs(y - s.y) <= FARM_R; };
+// the farmer's beds: those reaching into its 12-block box (it tends all of each)
+const reachBox = m => { const s = m.jobsite; return [s.x - FARM_R, s.z - FARM_R, s.x + FARM_R, s.z + FARM_R]; };
+const myBeds = (m, D) => (D.beds || []).filter(b => Math.abs(b.y - m.jobsite.y) <= FARM_R && overlap(outerOf(b), reachBox(m)));
+// inside the village proper (its buildings and 6 blocks around): nothing is dug or felled there for materials
+const inVillage = (D, x, z) => { const b = D.base; return x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1; };
+// top-most water source of an open column outside the village (lake, pond, river), or null
+function surfaceWater(w, x, z) {
+  const h = w.heightAt(x, z);
+  if (h < 0) return null;
+  let top = null;
+  for (let y = h + 1; y < h + 40 && BF.FLUID[w.getBlock(x, y, z)]; y++) if (BF.FLUID[w.getBlock(x, y, z)] === 8) top = y;
+  return top;
+}
+// water cells of the village well (generated) and of wells the builders made; they sit under a roof, so the top-down scan misses them
+function wellCells(R) {
+  const out = [], wg = R.wg || {};
+  if (Number.isFinite(wg.x) && Number.isFinite(wg.y) && Number.isFinite(wg.z)) for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) out.push([wg.x + dx, wg.y, wg.z + dz]);
+  if (BF.builder && BF.builder.builtOf) for (const e of BF.builder.builtOf(R) || []) if (e.type === "well" && e.state === "done") out.push([e.ox + 1, e.oy + 1, e.oz + 1]);
+  return out;
+}
+function inArea(D, x, z) { const A = D.area; return x >= A.x0 && x <= A.x1 && z >= A.z0 && z <= A.z1; }
+// One pass over the village area (farmland + water, top-down) and the ring of WATER_REACH blocks around it (water only), `budget` columns per call.
+function scanStep(R, D, budget) {
+  const w = W(), c = ids();
+  if (!D.scan) {
+    if (BF.simNow() < D.scanT) return;
+    const A = D.area;
+    D.scan = { x: A.x0 - WATER_REACH, z: A.z0 - WATER_REACH, A, e: { x0: A.x0 - WATER_REACH, x1: A.x1 + WATER_REACH, z1: A.z1 + WATER_REACH }, cells: [], water: [] };
+  }
+  const S = D.scan, A = S.A;
+  while (budget-- > 0) {
+    if (w.isLoaded(S.x, S.z)) {
+      if (S.x >= A.x0 && S.x <= A.x1 && S.z >= A.z0 && S.z <= A.z1) {
+        for (let y = A.yHi; y >= A.yLo; y--) {
+          const id = w.getBlock(S.x, y, S.z);
+          if (id === 0 || BF.RENDER[id] === 4) continue;
+          if (BF.FLUID[id] === 8) S.water.push([S.x, y, S.z]);
+          else if (isFarm(c, id)) S.cells.push([S.x, y, S.z]);
+          break;
+        }
+      } else {
+        const top = surfaceWater(w, S.x, S.z);
+        if (top != null) S.water.push([S.x, top, S.z]);
+      }
+    }
+    if (++S.x > S.e.x1) {
+      S.x = S.e.x0;
+      if (++S.z > S.e.z1) {
+        D.wells = new Set();
+        for (const [x, y, z] of wellCells(R)) if (w.isLoaded(x, z) && BF.FLUID[w.getBlock(x, y, z)] === 8) { D.wells.add(key3(x, y, z)); if (!S.water.some(p => p[0] === x && p[1] === y && p[2] === z)) S.water.push([x, y, z]); }
+        D.cells = S.cells; D.water = S.water; D.waterSet = new Set(S.water.map(p => key3(...p)));
+        detectBeds(D);
+        D.ready = true; D.scan = null; D.scanT = BF.simNow() + RESCAN;
+        return;
+      }
+    }
+  }
+}
+// ---------------------------------------------------------------- task search
+const claims = new Map();   // cell key -> mob
+function claimed(k, m) { const o = claims.get(k); return o && o !== m && !o.dead && !o.removed && o.farm && o.farm.task && o.farm.task.k === k; }
+function plantFor(m, x, y, z) {
+  const c = ids(), votes = new Map();
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [0, 2], [0, -2]]) {
+    const b = BF.blocks[getB(x + dx, y + 1, z + dz)];
+    if (!b) continue;
+    let seed = c.mature.get(b.id);
+    if (seed == null && b.growsInto != null) seed = c.mature.get(b.growsInto);
+    if (seed != null && cnt(m, seed) > 0) votes.set(seed, (votes.get(seed) || 0) + (Math.abs(dx) + Math.abs(dz) === 1 ? 2 : 1));
+  }
+  let best = null, bv = 0;
+  for (const [id, v] of votes) if (v > bv) { bv = v; best = id; }
+  if (best != null) return best;
+  for (const id of c.seeds) if (cnt(m, id) > (best == null ? 0 : cnt(m, best))) best = id;
+  return best;
+}
+const CROP_CAP = 64;              // a farmer stops harvesting a crop while it holds a full stack of it (sold or eaten first)
+function dropsFit(m, cropId) {
+  const c = ids(), seed = c.mature.get(cropId), main = BF.blocks[cropId].drop;
+  if (cnt(m, main) >= CROP_CAP) return false;
+  const adds = [{ id: main, n: 4 }];
+  if (seed !== main) adds.push({ id: seed, n: 3 });
+  return TR().inv.canFit(m.inv, adds, []);
+}
+function think(m, fs, R, D) {
+  const c = ids(), px = m.position.x, pz = m.position.z, now = BF.simNow();
+  const dist = (x, z) => Math.hypot(x + 0.5 - px, z + 0.5 - pz);
+  const ok = k => !claimed(k, m) && !(fs.avoid[k] > now);
+  // bake: 3 wheat -> 1 bread (hay bales once bread is plentiful)
+  const wheat = cnt(m, c.wheat) - WHEAT_SPARE;   // the spare wheat is kept for the shepherds (see "wheat for the shepherds" below)
+  if (wheat >= 3 && c.bread != null) {
+    const toHay = cnt(m, c.bread) >= 96 && wheat >= 9 && c.hay != null;
+    if (TR().inv.canFit(m.inv, [{ id: toHay ? c.hay : c.bread, n: 1 }], [{ id: c.wheat, n: toHay ? 9 : 3 }])) return { kind: "craft", hay: toHay };
+  }
+  // a trip for dirt from outside the village goes on until the farmer carries enough
+  if (fs.haul) {
+    const h = fs.haul, have = cnt(m, c.dirt);
+    if (have < h.n) { const g = findGather(m, D, ok); if (g) return g; }
+    fs.haul = null;
+  }
+  // harvest mature crops / plant empty farmland, only within 12 blocks of the composter: nearest first
+  const mine = myBeds(m, D);
+  const cells = D.cells.filter(p => inRange(m, p[0], p[1], p[2]) || mine.some(b => p[1] === b.y && p[0] >= b.x0 && p[0] <= b.x1 && p[2] >= b.z0 && p[2] <= b.z1));
+  let best = null, bd = Infinity, fits = new Map(), hasSeed = c.seeds.some(id => cnt(m, id) > 0);
+  const young = [];
+  for (const [x, y, z] of cells) {
+    if (!W().isLoaded(x, z) || !isFarm(c, getB(x, y, z))) continue;
+    const a = getB(x, y + 1, z), k = key3(x, y + 1, z);
+    let kind = null;
+    if (c.matureSet.has(a)) {
+      if (!fits.has(a)) fits.set(a, dropsFit(m, a));
+      if (fits.get(a)) kind = "harvest";
+    } else if (a === 0 && hasSeed && !BF.SOLID[getB(x, y + 2, z)] && !(D.pumpkins && D.pumpkins.has(key3(x, y, z)))) kind = "plant";   // a pumpkin cell gets pumpkin seeds (js/baker.js)
+    else if (BF.blocks[a] && BF.blocks[a].growsInto != null) young.push([x, y, z]);
+    if (!kind || !ok(k)) continue;
+    const d = dist(x, z) + (kind === "plant" ? 1.5 : 0);
+    if (d < bd) { bd = d; best = { kind, x, y: y + 1, z, k }; }
+  }
+  if (best) return best;
+  // sugar cane beside the water of its beds, the pumpkin patches (js/baker.js: the baker's sugar and pumpkins)
+  if (BF.baker) { const t = BF.baker.farmTask(m, fs, R, D, { myBeds, ok, key3, hasHoe }); if (t) return t; }
+  // nothing to harvest or plant: work on a bed (grow one, or lay out a new one) while the farmer wants more farmland
+  let P = projectOf(m, R, D);
+  if (!P && !(fs.repCd > now)) { fs.repCd = now + 15; P = chooseRepair(m, D); }   // a run-down bed first: water back in its channels, its dirt tilled
+  if (!P && cells.length < FARM_MAX && !(fs.projCd > now)) { fs.projCd = now + PROJECT_CD; P = chooseProject(m, R, D, cells.length); }
+  if (P) {
+    const t = projectTask(m, fs, R, D, P, ok);
+    if (t) return t;
+  }
+  if (young.length && Math.random() < 0.8) {           // look after the growing crops
+    const [x, y, z] = young[Math.floor(Math.random() * young.length)];
+    return { kind: "tend", x, y: y + 1, z, k: "tend:" + key3(x, y, z) };
+  }
+  return null;
+}
+// ---------------------------------------------------------------- water for the buckets
+// A source refills when two neighbouring cells are sources over solid ground / source (like vanilla, and the village wells): taking it leaves no hole.
+function infiniteSource(x, y, z) {
+  let s = 0;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (BF.FLUID[getB(x + dx, y, z + dz)] === 8) s++;
+  const below = getB(x, y - 1, z);
+  return s >= 2 && (BF.SOLID[below] || BF.FLUID[below] === 8);
+}
+// A cell to stand on within 2 blocks of the water cell (the village well is walled in: the bucket is dipped over the wall), nearest to the mob.
+function standFor(m, x, y, z) {
+  const N = nav(), w = W();
+  let best = null, bs = Infinity;
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    if (!dx && !dz) continue;
+    for (let dy = -1; dy <= 2; dy++) {
+      const sx = x + dx, sy = y + dy, sz = z + dz;
+      if (!w.isLoaded(sx, sz) || !N.walkCell(sx, sy, sz)) continue;
+      const sc = Math.hypot(dx, dz) * 4 + Math.hypot(sx + 0.5 - m.position.x, sz + 0.5 - m.position.z) * 0.1 + Math.abs(dy - 1);
+      if (sc < bs) { bs = sc; best = { sx, sy, sz }; }
+    }
+  }
+  return best;
+}
+// The nearest water source (any source of the scanned ring around the village: lake, pond, well) with a place to stand: {x, y, z, sx, sy, sz} or null.
+function findFill(m, D, ok) {
+  const px = m.position.x, pz = m.position.z, near = [];
+  for (const [x, y, z] of D.water) {                       // the 12 nearest sources
+    const d = Math.hypot(x + 0.5 - px, z + 0.5 - pz);
+    if (near.length >= 12 && d >= near[near.length - 1][0]) continue;
+    let i = near.length;
+    while (i > 0 && near[i - 1][0] > d) i--;
+    near.splice(i, 0, [d, x, y, z]);
+    if (near.length > 12) near.pop();
+  }
+  for (const [, x, y, z] of near) {
+    const k = key3(x, y, z);
+    if (ok && !ok(k)) continue;
+    if (BF.FLUID[getB(x, y, z)] !== 8) continue;
+    if (!infiniteSource(x, y, z) && nearBeds(D, x, z)) continue;   // a bed's own channel that would not refill is left in the bed
+    const st = standFor(m, x, y, z);
+    if (st) return { kind: "fill", x, y, z, k, ty: y + 1, sx: st.sx, sy: st.sy, sz: st.sz };
+  }
+  return null;
+}
+// Dips the empty bucket in the source (x, y, z): full bucket, and the source block is taken, as the player's bucket takes it
+// (nothing from nothing). An infinite source (a lake, a pond, the village well) flows back in, so none of those is ever drained.
+function fillBucket(m, x, y, z) {
+  const c = ids(), Tinv = TR().inv, w = W();
+  if (BF.FLUID[getB(x, y, z)] !== 8 || cnt(m, c.bucket) < 1) return false;
+  if (!Tinv.canFit(m.inv, [{ id: c.wbucket, n: 1 }], [{ id: c.bucket, n: 1 }])) return false;
+  if (!w.setBlock(x, y, z, 0)) return false;
+  Tinv.remove(m.inv, c.bucket, 1); Tinv.add(m.inv, c.wbucket, 1);
+  sound("splash", x + 0.5, y + 0.5, z + 0.5, 0.4);
+  return true;
+}
+// For js/builder.js (idea-044): a builder with no dirt to buy digs its own, by the farmers' rules (findGather: natural edges first, then one
+// shallow pit, outside the village). gatherFor gives the next column ({x, y, z, ty}) or null (also while the village is still being scanned);
+// gatherAt takes it (true when the dirt is in its pack).
+function gatherFor(m, R) {
+  const D = vdata(R);
+  D.want = BF.simNow(); wantVillages.add(R);
+  return D.ready ? findGather(m, D, null) : null;
+}
+const gatherAt = (m, R, t) => { const D = vdata(R); return !!(D.ready && gatherBlock(m, D, t)); };
+const wantVillages = new Set();   // villages whose water ring is scanned for builders although no farmer works there
+// For js/builder.js: the nearest water source (within ~30 blocks of the village, wells included) with a stand cell, or null (also while the village is still being scanned).
+function findWater(m, R) {
+  const D = vdata(R);
+  D.want = BF.simNow(); wantVillages.add(R);
+  return D.ready ? findFill(m, D, null) : null;
+}
+
+// ---------------------------------------------------------------- materials from outside the village
+// Dirt (the top block of open ground: grass, dirt ...) is dug from outside the village, never inside it (buildings + 6 blocks around).
+// Logs are not taken from trees: since 1.1 only foresters fell trees, and a farmer buys its logs from them (see "logs from the foresters" below).
+// within a block of a bed, a farm plot or a bed being made (beds made by farmers can lie outside the village box)
+const nearBeds = (D, x, z) => (D.beds || []).some(b => inRect(grow(outerOf(b), 1), x, z)) || D.farms.some(f => inRect(grow(f, 1), x, z)) || D.projects.some(p => inRect(grow(outerOf(p.L), 1), x, z));
+// Dirt is taken neatly (Gordon, 1.2): first off the natural edges of the land, the top of a bank or a step where the ground beside it
+// is lower, highest first, so a bank is cut back evenly and no hole is left; on flat ground, from one shallow rectangular pit
+// (one block deep, at most PIT_MAX across) that is dug out row by row before another is begun. Columns the farmers dug are
+// remembered (D.dig.dug, saved), so the rim of an old pit never counts as a natural edge.
+const PIT = 3, PIT_MAX = 6, DUG_MAX = 3000, GATHER_SCAN = 22;
+function digOf(D) { return D.dig || (D.dig = { dug: new Set(), pit: null }); }
+const ckey = (x, z) => x + "," + z;
+// a column dirt may come from: grass / dirt on top with nothing solid above it, solid ground below (no hole into a cave),
+// no water or lava beside the block (it would run in), outside the village and away from beds
+function gatherCol(c, D, x, z) {
+  const w = W(), b0 = D.base;
+  if (x < b0.x0 - GATHER_R || x > b0.x1 + GATHER_R || z < b0.z0 - GATHER_R || z > b0.z1 + GATHER_R) return -1;
+  if (inVillage(D, x, z) || !w.isLoaded(x, z) || nearBeds(D, x, z)) return -1;
+  const h = w.heightAt(x, z);
+  if (h < BF.MIN_Y + 1 || !c.diggable.has(getB(x, h, z)) || !looseAbove(getB(x, h + 1, z)) || !BF.SOLID[getB(x, h - 1, z)]) return -1;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (BF.FLUID[getB(x + dx, h, z + dz)] || BF.FLUID[getB(x + dx, h + 1, z + dz)]) return -1;
+  return h;
+}
+function findGather(m, D, ok) {
+  const c = ids(), w = W(), b0 = D.base, G = digOf(D), px = m.position.x, pz = m.position.z;
+  const dist = (x, z) => Math.hypot(x + 0.5 - px, z + 0.5 - pz);
+  const free = (x, y, z) => !ok || ok(key3(x, y, z));
+  const task = (x, y, z) => ({ kind: "gather", what: "dirt", x, y, z, k: key3(x, y, z), ty: y + 1 });
+  // 1. a pit being dug is finished first: its undug cells, nearest first; when it is done it grows by a row while it can
+  for (let tries = 0; G.pit && tries < 2; tries++) {
+    const P = G.pit;
+    let best = null, bd = Infinity;
+    for (let x = P.x0; x <= P.x1; x++) for (let z = P.z0; z <= P.z1; z++) {
+      if (G.dug.has(ckey(x, z)) || gatherCol(c, D, x, z) !== P.y || !free(x, P.y, z)) continue;
+      const d = dist(x, z);
+      if (d < bd) { bd = d; best = task(x, P.y, z); }
+    }
+    if (best) return best;
+    if (!growPit(c, D, G)) G.pit = null;
+  }
+  // the ground scanned: around the village edge nearest the farmer
+  let cx = Math.floor(px), cz = Math.floor(pz);
+  if (inVillage(D, cx, cz)) {
+    const e = [[cx - b0.x0, b0.x0 - 6, cz], [b0.x1 - cx, b0.x1 + 6, cz], [cz - b0.z0, cx, b0.z0 - 6], [b0.z1 - cz, cx, b0.z1 + 6]];
+    e.sort((a, b) => a[0] - b[0]);
+    cx = e[0][1]; cz = e[0][2];
+  }
+  const R = GATHER_SCAN, N = 2 * R + 1, H = new Int32Array(N * N).fill(-1 << 30);
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { const x = cx - R + i, z = cz - R + j; if (w.isLoaded(x, z)) H[i * N + j] = w.heightAt(x, z); }
+  const hAt = (x, z) => { const i = x - cx + R, j = z - cz + R; return i >= 0 && j >= 0 && i < N && j < N ? H[i * N + j] : w.isLoaded(x, z) ? w.heightAt(x, z) : -1 << 30; };
+  // 2. natural edges: a column with a lower neighbour that the farmers did not dig; the highest above its neighbours first
+  let best = null, bs = Infinity;
+  const ok2 = new Map();   // valid columns of the scan, for a pit
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x = cx - R + i, z = cz - R + j, h = gatherCol(c, D, x, z);
+    if (h < 0) continue;
+    ok2.set(ckey(x, z), h);
+    let low = 0, sum = 0, n = 0;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nh = hAt(x + dx, z + dz);
+      if (nh < BF.MIN_Y) continue;
+      const dug = G.dug.has(ckey(x + dx, z + dz));
+      sum += dug ? Math.max(nh, h) : nh; n++;
+      if (!dug && nh < h) low++;
+    }
+    if (!low || !free(x, h, z)) continue;
+    const relief = h - sum / n;   // 0.25 for a one-block step on one side ... up to several blocks for the lip of a bank
+    const s = dist(x, z) - 6 * Math.min(relief, 2);
+    if (s < bs) { bs = s; best = task(x, h, z); }
+  }
+  if (best) return best;
+  // 3. flat ground: a new shallow pit, PIT x PIT cells at one height, nearest the farmer
+  let pb = null, pd = Infinity;
+  for (const [k, h] of ok2) {
+    const [x, z] = k.split(",").map(Number);
+    let fit = true;
+    for (let a = 0; a < PIT && fit; a++) for (let b = 0; b < PIT && fit; b++) if (ok2.get(ckey(x + a, z + b)) !== h || G.dug.has(ckey(x + a, z + b))) fit = false;
+    if (!fit) continue;
+    const d = dist(x + 1, z + 1);
+    if (d < pd) { pd = d; pb = { x0: x, z0: z, x1: x + PIT - 1, z1: z + PIT - 1, y: h }; }
+  }
+  if (pb) {
+    G.pit = pb;
+    for (let x = pb.x0; x <= pb.x1; x++) for (let z = pb.z0; z <= pb.z1; z++) if (free(x, pb.y, z)) return task(x, pb.y, z);
+  }
+  return null;
+}
+// A finished pit grows by one row on a side whose next row is all undug ground at the pit's height, up to PIT_MAX across.
+function growPit(c, D, G) {
+  const P = G.pit, sides = [];
+  if (P.x1 - P.x0 + 1 < PIT_MAX) sides.push(["x0", -1], ["x1", 1]);
+  if (P.z1 - P.z0 + 1 < PIT_MAX) sides.push(["z0", -1], ["z1", 1]);
+  for (let i = sides.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [sides[i], sides[j]] = [sides[j], sides[i]]; }
+  for (const [f, s] of sides) {
+    const v = P[f] + s, row = [];
+    if (f[0] === "x") for (let z = P.z0; z <= P.z1; z++) row.push([v, z]); else for (let x = P.x0; x <= P.x1; x++) row.push([x, v]);
+    if (row.every(([x, z]) => !G.dug.has(ckey(x, z)) && gatherCol(c, D, x, z) === P.y)) { P[f] = v; return true; }
+  }
+  return false;
+}
+function noteDug(D, x, z) {
+  const G = digOf(D), k = ckey(x, z);
+  G.dug.delete(k); G.dug.add(k);
+  while (G.dug.size > DUG_MAX) G.dug.delete(G.dug.values().next().value);
+}
+
+// hydrated or dehydrated farmland (js/farmland.js): both are fields, crops are planted and harvested on either
+const isFarm = (c, id) => id === c.farmland || (id === c.farmlandDry && id != null);
+const tillOK = (c, id) => c.till.has(id) || isFarm(c, id);
+const looseAbove = id => id === 0 || (BF.REPLACEABLE[id] && !BF.SOLID[id] && !BF.FLUID[id]);
+// ---------------------------------------------------------------- garden beds
+// Farmland is only ever made inside a bed like the village farms: a rectangle ringed with logs (set into the ground), with water
+// channels every 4 lines across it (3 rows of crops between them). A farmer either grows a bed it can reach (pushes one side of the
+// ring out: few new logs, since the old side's logs are reused, but the edge has to be moved) or, when there is a lot of open
+// ground near its composter, lays out a new bed. Each of these is a project, worked one task at a time and saved with the game.
+// A layout L is { x0, z0, x1, z1, y, ax, ch }: interior x0..x1 / z0..z1 at height y, ring one block outside it, and channels on the
+// lines ax = "x" (x = const, water running along z) or "z" at the positions in ch.
+const BED_GAP = 1;                // free cells kept between a bed's ring and buildings (their boxes already include 1) and other beds
+const ROOM = 2;                   // a new bed needs this much clear ground all round its ring: "a lot of room"
+const CH_STEP = 4;                // channel spacing: 3 lines of crops between channels, as in the generated farms
+const GROW_ALONG = 2;             // a bed grows along its channels two rows at a time
+const MAX_ALONG = 11;             // interior length along the channels a bed grows to (generated farms: 5 and 7)
+const MAX_ACROSS = 15;            // interior width across the channels (3 channels; generated farms: 7 and 11)
+const LOG_COST = 3;               // a log fetched from outside the village weighs like 3 tasks
+const PROJECT_CD = 25;            // seconds between looks for a new project
+const PROJECT_FAILS = 14;         // failed fetches before a project that hasn't changed anything yet is given up (a started one pauses instead)
+const GROW_DAMP = 0.8;            // how much a bed's size counts against growing it further
+const NEW_BONUS = 1.5;            // a new bed (only offered with room all round) against growing: more logs, but a second field
+// new bed shapes: interior lines across the channels (u) x along them (v), channel offsets in u (the village farm and big farm, and a square one)
+const SHAPES = [{ u: 7, v: 5, ch: [3] }, { u: 7, v: 7, ch: [3] }, { u: 11, v: 7, ch: [3, 7] }];
+
+const outerOf = L => [L.x0 - 1, L.z0 - 1, L.x1 + 1, L.z1 + 1];
+const grow = (r, n) => [r[0] - n, r[1] - n, r[2] + n, r[3] + n];
+const overlap = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+const inRect = (r, x, z) => x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3];
+function layoutAt(L, x, z) {
+  if (x < L.x0 - 1 || x > L.x1 + 1 || z < L.z0 - 1 || z > L.z1 + 1) return null;
+  if (x < L.x0 || x > L.x1 || z < L.z0 || z > L.z1) return "log";
+  return L.ch.includes(L.ax === "x" ? x : z) ? "water" : "farm";
+}
+const isLogItem = id => { const it = BF.items[id]; return !!it && it.isBlock && isLogBlock(id); };
+function logCount(m) { let n = 0; for (const s of m.inv) if (s && isLogItem(s.id)) n += s.count; return n; }
+function logId(m, prefer) {
+  if (prefer != null && cnt(m, prefer) > 0) return prefer;
+  for (const s of m.inv) if (s && isLogItem(s.id)) return s.id;
+  return null;
+}
+// clear of the village's buildings (their boxes include a 1-block margin), the square, lamps, decorations and builders' structures
+function clearOfBuildings(R, D, x, z) {
+  for (const b of D.boxes) if (x >= b[0] && x <= b[2] && z >= b[1] && z <= b[3]) return false;
+  if (BF.builder && BF.builder.builtOf) for (const e of BF.builder.builtOf(R) || []) if (x >= e.ox - 1 && x <= e.ox + e.w && z >= e.oz - 1 && z <= e.oz + e.d) return false;
+  return true;
+}
+
+// The beds of the village: every farmland region enclosed by a complete ring of logs (corners included), found after each scan.
+// The region may hold farmland, water and plain soil (the pumpkin patch of a generated farm), and, in a run-down farm, dirt and
+// empty or half-empty channels (air or flowing water). Generated farms are looked for even with no farmland left in them.
+function detectBeds(D) {
+  const c = ids(), w = W(), beds = [], seen = new Set();
+  const member = id => isFarm(c, id) || BF.FLUID[id] > 0 || id === 0 || c.till.has(id);
+  const wet = id => BF.FLUID[id] > 0 || id === 0;   // a channel cell: water, or an empty trench
+  for (const [sx, sy, sz] of D.cells.concat((D.farmSeeds || []).filter(p => w.isLoaded(p[0], p[2]) && c.till.has(getB(p[0], p[1], p[2]))))) {
+    if (seen.has(key3(sx, sy, sz))) continue;
+    seen.add(key3(sx, sy, sz));
+    const q = [[sx, sz]];
+    let n = 0, x0 = sx, x1 = sx, z0 = sz, z1 = sz, open = false;
+    while (q.length && !open) {
+      const [x, z] = q.pop();
+      n++;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
+      if (n > 400 || x1 - x0 > 24 || z1 - z0 > 24) { open = true; break; }
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, nz = z + dz, k = key3(nx, sy, nz);
+        if (seen.has(k)) continue;
+        if (!w.isLoaded(nx, nz)) { open = true; break; }
+        const id = getB(nx, sy, nz);
+        if (isLogBlock(id)) continue;
+        if (!member(id)) { open = true; break; }
+        seen.add(k); q.push([nx, nz]);
+      }
+    }
+    if (open || n !== (x1 - x0 + 1) * (z1 - z0 + 1)) continue;
+    let ring = true;
+    for (let x = x0 - 1; x <= x1 + 1 && ring; x++) for (let z = z0 - 1; z <= z1 + 1; z++) {
+      if (x >= x0 && x <= x1 && z >= z0 && z <= z1) continue;
+      if (!isLogBlock(getB(x, sy, z))) { ring = false; break; }
+    }
+    if (!ring) continue;
+    const full = (ax, p) => { for (let t = ax === "x" ? z0 : x0; t <= (ax === "x" ? z1 : x1); t++) if (!wet(ax === "x" ? getB(p, sy, t) : getB(t, sy, p))) return false; return true; };
+    const cx = [], cz = [];
+    for (let x = x0; x <= x1; x++) if (full("x", x)) cx.push(x);
+    for (let z = z0; z <= z1; z++) if (full("z", z)) cz.push(z);
+    const ax = cx.length >= cz.length ? "x" : "z";
+    beds.push({ x0, z0, x1, z1, y: sy, ax, ch: ax === "x" ? cx : cz, log: getB(x0 - 1, sy, z0 - 1) });
+  }
+  D.beds = beds;
+}
+
+// What has to happen at one cell of a project to match its layout: null when it already does, "blocked" when it cannot,
+// else a task (stage 0 level, 1 lay a ring log, 2 lift an old ring log, 3 water / till).
+function cellJob(P, x, z) {
+  if (P.kind === "repair") return repairJob(P, x, z);
+  const c = ids(), L = P.L, y = L.y, want = layoutAt(L, x, z), cur = getB(x, y, z);
+  if (want === "log" ? isLogBlock(cur) : want === "water" ? BF.FLUID[cur] === 8 : isFarm(c, cur)) return null;
+  const k = key3(x, y, z), at = (kind, stage, yy) => ({ kind, x, y: yy == null ? y : yy, z, k, ty: (yy == null ? y : yy) + 1, stage, proj: P.id });
+  if (isLogBlock(cur)) return at("unborder", 2);                                  // an old edge log where the bed now goes on
+  if (BF.FLUID[cur]) return "blocked";
+  const top = W().heightAt(x, z), b = getB(x, top, z);
+  if (top > y + 2 || top < y - 3 || !c.ground.has(b) || BF.FLUID[getB(x, top + 1, z)]) return "blocked";
+  if (top > y) return at("dig", 0, top);
+  if (top < y) return at("raise", 0, top);
+  if (want !== "log" && !tillOK(c, cur)) return at("dig", 0, top);               // sand, gravel, clay, a path: dug out, then dirt goes in
+  const a = getB(x, y + 1, z);
+  if ((!looseAbove(a) && BF.RENDER[a] !== 4) || BF.SOLID[getB(x, y + 2, z)]) return "blocked";                // a block on it, or overhead
+  return want === "log" ? at("border", 1) : at(want === "water" ? "water" : "till", 3);
+}
+// A run-down bed (a generated farm nobody worked, js/worldgen.js): the repair project puts water back in the empty channel cells
+// and tills the farmland that went back to dirt. The ring, the pumpkin patch (grass / sand) and anything else stay as they are.
+function repairJob(P, x, z) {
+  const c = ids(), L = P.L, y = L.y, want = layoutAt(L, x, z), cur = getB(x, y, z);
+  if (want !== "water" && want !== "farm") return null;
+  const a = getB(x, y + 1, z), at = kind => ({ kind, x, y, z, k: key3(x, y, z), ty: y + 1, stage: 3, proj: P.id });
+  if (want === "water") return (cur === 0 || (BF.FLUID[cur] > 0 && BF.FLUID[cur] < 8)) && BF.SOLID[getB(x, y - 1, z)] && looseAbove(a) ? at("water") : null;
+  return cur === c.dirt && (looseAbove(a) || BF.RENDER[a] === 4) && !BF.SOLID[getB(x, y + 2, z)] ? at("till") : null;
+}
+// The first of the farmer's beds that needs repairing, as a new repair project (or null).
+function chooseRepair(m, D) {
+  for (const b of myBeds(m, D)) {
+    const o = outerOf(b);
+    if (D.projects.some(p => overlap(outerOf(p.L), o))) continue;
+    const P = { id: "p" + Math.floor(Math.random() * 1e9).toString(36), kind: "repair", dir: null, L: { x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, y: b.y, ax: b.ax, ch: b.ch.slice() }, old: null, owner: m.slot ? m.slot.idx : -1, log: b.log, fails: 0 };
+    let water = 0, till = 0;
+    projectCells(P, (x, z) => { if (!W().isLoaded(x, z)) return; const j = repairJob(P, x, z); if (j) j.kind === "water" ? water++ : till++; });
+    if (!water && !till) continue;
+    D.projects.push(P);
+    log("project", m, { plan: "repair", options: water + " water / " + till + " till", at: [P.L.x0, P.L.y, P.L.z0], size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), gain: till, logs: 0 });
+    return P;
+  }
+  return null;
+}
+// cells of a project that it changes: its ring and interior, less the interior of the bed it grows (that stays as it is)
+function projectCells(P, f) {
+  const o = outerOf(P.L);
+  for (let x = o[0]; x <= o[2]; x++) for (let z = o[1]; z <= o[3]; z++) if (!(P.old && inRect(P.old, x, z))) f(x, z);
+}
+// Price of a layout: tasks (levelling, logs to lay and lift, water trips, tilling), logs to fetch, and the new farmland.
+// null when a cell can't be used (blocked, out of reach, a building or its margin, a road).
+function priceLayout(m, R, D, P, held) {
+  const c = ids();
+  let ops = 0, lvl = 0, lay = 0, lift = 0, gain = 0, bad = false;
+  projectCells(P, (x, z) => {
+    if (bad) return;
+    if (!W().isLoaded(x, z) || !clearOfBuildings(R, D, x, z) || !inBedReach(m, x, P.L.y, z)) { bad = true; return; }
+    const top = W().heightAt(x, z);
+    if (getB(x, top, z) === c.path) { bad = true; return; }                     // never over a road
+    const want = layoutAt(P.L, x, z);
+    if (want === "farm") gain++;
+    const j = cellJob(P, x, z);
+    if (j === "blocked") { bad = true; return; }
+    if (!j) return;
+    if (j.stage === 0) { const n = Math.max(1, Math.abs(top - P.L.y)); lvl += n; ops += n; }
+    if (j.kind === "unborder") { lift++; ops++; }
+    else if (want === "log") { lay++; ops++; }                                   // (after levelling) a log goes in
+    else ops += want === "water" ? 2 : 1;                                        // a bucket trip and pour / the hoe
+  });
+  if (bad) return null;
+  const logs = Math.max(0, lay - lift - held);
+  return { ops, lvl, logs, gain, cost: ops + LOG_COST * logs };
+}
+// another bed, farm plot or project within `gap` of rectangle r (cells of `own`, the bed being grown, don't count)
+function crowded(D, r, gap, own) {
+  const g = grow(r, gap);
+  for (const b of D.beds || []) { const o = outerOf(b); if (own && inRect(own, o[0], o[1]) && inRect(own, o[2], o[3])) continue; if (overlap(g, o)) return true; }
+  for (const f of D.farms) { if (own && inRect(own, f[0], f[1]) && inRect(own, f[2], f[3])) continue; if (overlap(g, f)) return true; }
+  for (const p of D.projects) if (overlap(g, outerOf(p.L))) return true;
+  return false;
+}
+// The ways a bed could grow by one step on each side: along its channels (2 more rows, the channels run on) or across them
+// (the edge line becomes a new channel with 3 new rows beyond it). Layouts only; the price decides.
+function growOptions(b) {
+  const out = [], along = b.ax === "x" ? "z" : "x";
+  if (!b.ch.length) return out;
+  const len = b.ax === "x" ? b.z1 - b.z0 + 1 : b.x1 - b.x0 + 1, wid = b.ax === "x" ? b.x1 - b.x0 + 1 : b.z1 - b.z0 + 1;
+  const L0 = { x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, y: b.y, ax: b.ax, ch: b.ch.slice() };
+  if (len + GROW_ALONG <= MAX_ALONG) for (const s of [-1, 1]) {
+    const L = Object.assign({}, L0, { ch: b.ch.slice() });
+    if (s < 0) L[along + "0"] -= GROW_ALONG; else L[along + "1"] += GROW_ALONG;
+    out.push({ L, dir: "along" });
+  }
+  const lo = Math.min(...b.ch), hi = Math.max(...b.ch), a0 = L0[b.ax + "0"], a1 = L0[b.ax + "1"];
+  for (const s of [-1, 1]) {
+    const c0 = s > 0 ? hi : lo, nc = c0 + s * CH_STEP, edge = c0 + s * (2 * CH_STEP - 1);
+    if (s > 0 ? nc <= a1 || edge <= a1 : nc >= a0 || edge >= a0) continue;
+    if (wid + Math.abs(edge - (s > 0 ? a1 : a0)) > MAX_ACROSS) continue;
+    const L = Object.assign({}, L0, { ch: b.ch.concat([nc]) });
+    if (s > 0) L[b.ax + "1"] = edge; else L[b.ax + "0"] = edge;
+    out.push({ L, dir: "across" });
+  }
+  return out;
+}
+// A new bed of one of SHAPES somewhere within reach of the composter, with ROOM clear cells all round: the cheapest of some samples.
+function newBedOptions(m, R, D, room, held) {
+  const s = m.jobsite, w = W(), c = ids(), out = [];
+  for (let t = 0; t < 80; t++) {
+    const S = SHAPES[Math.floor(Math.random() * SHAPES.length)], ax = Math.random() < 0.5 ? "x" : "z";
+    const wx = ax === "x" ? S.u : S.v, wz = ax === "x" ? S.v : S.u;
+    const x0 = s.x + Math.round(rnd(-BED_REACH + 1, BED_REACH - wx)), z0 = s.z + Math.round(rnd(-BED_REACH + 1, BED_REACH - wz));
+    const cx = x0 + (wx >> 1), cz = z0 + (wz >> 1);
+    if (!w.isLoaded(cx, cz)) continue;
+    const y = w.heightAt(cx, cz);
+    if (y < BF.MIN_Y + 1 || !c.ground.has(getB(cx, y, cz))) continue;
+    const L = { x0, z0, x1: x0 + wx - 1, z1: z0 + wz - 1, y, ax, ch: S.ch.map(o => (ax === "x" ? x0 : z0) + o) };
+    const o = outerOf(L);
+    if (!overlap(o, reachBox(m))) continue;                // it must reach into the farmer's box
+    if (crowded(D, o, BED_GAP, null)) continue;
+    let ok = true;                                     // the margin: no building (or its margin), no cliff; other beds may be a path's width away
+    for (let x = o[0] - room; x <= o[2] + room && ok; x++) for (let z = o[1] - room; z <= o[3] + room; z++) {
+      if (inRect(o, x, z)) continue;
+      if (!w.isLoaded(x, z) || !clearOfBuildings(R, D, x, z) || Math.abs(w.heightAt(x, z) - y) > 3) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const P = { L, old: null };
+    const pr = priceLayout(m, R, D, P, held);
+    if (pr && pr.lvl <= pr.gain * 0.6) out.push({ L, dir: null, kind: "new", pr });
+  }
+  return out;
+}
+// Picks the farmer's next project: grow a bed or make a new one. Value = new farmland per unit of work (logs to fetch weigh
+// LOG_COST). Growing a bed costs few logs, so it usually wins; a bed already large is less attractive to grow (it would
+// sprawl), and a new bed only qualifies with ROOM clear cells round it (1 when the farmer has no farmland at all).
+function chooseProject(m, R, D, have) {
+  const held = logCount(m), cands = [];
+  for (const b of myBeds(m, D)) {
+    const o = outerOf(b);
+    if (D.projects.some(p => overlap(outerOf(p.L), o))) continue;
+    for (const g of growOptions(b)) {
+      const P = { L: g.L, old: [b.x0, b.z0, b.x1, b.z1] };
+      if (crowded(D, outerOf(g.L), BED_GAP, o)) continue;
+      const pr = priceLayout(m, R, D, P, held);
+      if (!pr || !pr.gain) continue;
+      const wx = g.L.x1 - g.L.x0 + 1, wz = g.L.z1 - g.L.z0 + 1;
+      // a big bed is less worth growing (it would sprawl), and a bed keeps a compact shape: the step that keeps it squarer wins
+      cands.push({ L: g.L, old: P.old, dir: g.dir, kind: "grow", pr, log: b.log, bias: (1 - GROW_DAMP * wx * wz / (MAX_ALONG * MAX_ACROSS)) * (0.55 + 0.45 * Math.min(wx, wz) / Math.max(wx, wz)) });
+    }
+  }
+  for (const n of newBedOptions(m, R, D, have ? ROOM : 1, held)) cands.push(Object.assign(n, { bias: NEW_BONUS }));
+  let best = null, bv = 0;
+  for (const k of cands) {
+    if (have + k.pr.gain > FARM_MAX + 24) continue;      // not far past what the farmer wants
+    const v = k.pr.gain / Math.max(1, k.pr.cost) * k.bias * rnd(0.7, 1.4);
+    if (v > bv) { bv = v; best = k; }
+  }
+  if (!best) return null;
+  const P = { id: "p" + Math.floor(Math.random() * 1e9).toString(36), kind: best.kind, dir: best.dir, L: best.L, old: best.old, owner: m.slot ? m.slot.idx : -1, log: best.log, fails: 0 };
+  D.projects.push(P);
+  log("project", m, { plan: P.kind + (P.dir ? ":" + P.dir : ""), options: cands.filter(k => k.kind === "new").length + " new / " + cands.filter(k => k.kind === "grow").length + " grow", at: [P.L.x0, P.L.y, P.L.z0], size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), gain: best.pr.gain, logs: best.pr.logs });
+  return P;
+}
+// The farmer's project: its own, or one whose farmer is gone (another farmer takes it over when it lies within its reach).
+function projectOf(m, R, D) {
+  const idx = m.slot ? m.slot.idx : -1;
+  let P = D.projects.find(p => p.owner === idx);
+  if (P) return P;
+  const alive = new Set((R.members || []).filter(v => v && !v.dead && !v.removed && v.profession === "farmer" && v.slot).map(v => v.slot.idx));
+  for (const p of D.projects) {
+    if (alive.has(p.owner)) continue;
+    const o = outerOf(p.L);
+    if (inBedReach(m, o[0], p.L.y, o[1]) && inBedReach(m, o[2], p.L.y, o[3]) && overlap(o, reachBox(m))) { p.owner = idx; return p; }
+  }
+  return null;
+}
+function dropProject(D, P, m, why) {
+  const i = D.projects.indexOf(P);
+  if (i >= 0) D.projects.splice(i, 1);
+  if (m) log(why === "done" ? "bedDone" : "bedDropped", m, { plan: P.kind + (P.dir ? ":" + P.dir : ""), why });
+  if (m && m.farm && why === "failing") m.farm.projCd = BF.simNow() + 300;      // no dirt or logs to be had: not again for a while
+  if (why === "done") { (D.made || (D.made = [])).push({ kind: P.kind, dir: P.dir, size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), L: P.L }); D.scanT = 0; }
+}
+// The next task of the project: level the ground, lay the new ring, lift the old edge, then water the channels and till.
+function projectTask(m, fs, R, D, P, ok) {
+  const c = ids();
+  let best = null, bs = Infinity, blocked = false, lay = 0, left = 0;
+  projectCells(P, (x, z) => {
+    if (!W().isLoaded(x, z)) { left++; return; }
+    const j = cellJob(P, x, z);
+    if (!j) return;
+    if (j === "blocked") { if (!blocked) blocked = [x, z, getB(x, P.L.y, z), getB(x, P.L.y + 1, z), getB(x, P.L.y + 2, z), W().heightAt(x, z) - P.L.y]; return; }
+    left++;
+    if (j.kind === "border") lay++;
+    if (!ok(j.k)) return;
+    const s = j.stage * 1000 + Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z);
+    if (s < bs) { bs = s; best = j; }
+  });
+  if (P.fails > PROJECT_FAILS) {
+    if (!P.started) { dropProject(D, P, m, "failing"); return null; }
+    P.fails = 0; P.wait = BF.simNow() + 120;                       // halfway: no dirt or logs to be had now, try again later
+  }
+  if (P.wait > BF.simNow()) return null;
+  if (blocked) {                                                  // a cell was built on, flooded, dug out: a started bed waits a while before giving up
+    log("blockedAt", m, { cell: blocked, names: blocked.slice(2, 5).map(id => BF.blocks[id] && BF.blocks[id].name), started: !!P.started });
+    if (P.started && (P.blockN = (P.blockN || 0) + 1) <= 3) { P.wait = BF.simNow() + 120; return null; }
+    dropProject(D, P, m, "blocked"); return null;
+  }
+  if (!left) { dropProject(D, P, m, "done"); return null; }
+  if (!best) return null;
+  if (best.stage === 3 && best.kind === "water") {                 // the ring is closed: water the channels from a filled bucket
+    if (cnt(m, c.wbucket) > 0) return best;
+    if (cnt(m, c.bucket) > 0) { const f = findFill(m, D, ok); if (f) return f; }
+    return null;
+  }
+  if (best.kind === "till" && !hasHoe(m)) return null;
+  if ((best.kind === "raise" && cnt(m, c.dirt) < 1) || (best.kind === "border" && logId(m) == null) || best.kind === "unborder" || best.kind === "dig") makeRoom(m);
+  if (best.kind === "raise" && cnt(m, c.dirt) < 1) {
+    fs.haul = { what: "dirt", n: 8 };
+    const g = findGather(m, D, ok);
+    if (g) return g;
+    fs.haul = null; P.fails++;
+    return null;
+  }
+  if (best.kind === "border" && logId(m) == null) {
+    const b = findLogSeller(m, Math.min(16, lay), P.log);
+    if (b) return b;
+    P.fails++;
+    return null;
+  }
+  return best;
+}
+// A full pocket (18 slots) leaves no room for the dirt and logs of a bed: the smaller of two stacks of one crop, or else the
+// biggest stack of spare crops, goes on the compost heap.
+function makeRoom(m) {
+  if (m.inv.some(s => !s)) return;
+  const c = ids(), crops = new Set(c.seeds.concat([c.wheat, I("beetroot")]).filter(x => x != null)), seen = new Map();
+  let pick = -1;
+  m.inv.forEach((s, i) => { if (!s || !crops.has(s.id)) return; if (seen.has(s.id) && pick < 0) pick = m.inv[seen.get(s.id)].count < s.count ? seen.get(s.id) : i; seen.set(s.id, i); });
+  if (pick < 0) m.inv.forEach((s, i) => { if (s && crops.has(s.id) && (pick < 0 || s.count > m.inv[pick].count)) pick = i; });
+  if (pick < 0) return;
+  log("compost", m, { item: BF.items[m.inv[pick].id].name, n: m.inv[pick].count });
+  m.inv[pick] = null;
+}
+// Doing a project task (levelling goes through levelCell). False when the cell no longer fits the plan.
+function performBed(m, fs, R, D, t) {
+  const c = ids(), w = W(), Tinv = TR().inv;
+  const P = D.projects.find(p => p.id === t.proj);
+  if (!P) return false;
+  const j = cellJob(P, t.x, t.z);
+  if (!j || j === "blocked" || j.kind !== t.kind) return false;
+  P.started = true;
+  if (t.kind === "dig" || t.kind === "raise") return levelCell(m, R, D, t);
+  const above = getB(t.x, t.y + 1, t.z);
+  const clearTop = () => { if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); } };
+  const old = getB(t.x, t.y, t.z);
+  let place;
+  if (t.kind === "unborder") {
+    const drops = BF.rollDrops(old);
+    if (!Tinv.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false;
+    if (!w.setBlock(t.x, t.y, t.z, c.dirt)) return false;
+    for (const d of drops) Tinv.add(m.inv, d.id, d.count);
+    blockSound("break", old, t.x, t.y, t.z);
+    particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[old].color, 5, 0.7);
+    log("unborder", m, { at: [t.x, t.y, t.z] });
+    return true;
+  }
+  if (t.kind === "border") { place = logId(m, P.log); if (place == null) return false; }
+  else if (t.kind === "water") {
+    if (cnt(m, c.wbucket) < 1) return false;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {   // walled in: it stays put (a repaired channel may run on into the rest of the trench)
+      const n = getB(t.x + dx, t.y, t.z + dz);
+      if (!BF.SOLID[n] && BF.FLUID[n] !== 8 && !(P.kind === "repair" && layoutAt(P.L, t.x + dx, t.z + dz) === "water")) return false;
+    }
+    place = c.water;
+  } else {
+    if (!hasHoe(m) || !c.till.has(old)) return false;
+    place = BF.farmland ? BF.farmland.tillId(t.x, t.y, t.z) : c.farmland;   // dehydrated until the bed's water reaches it
+  }
+  clearTop();
+  if (!w.setBlock(t.x, t.y, t.z, place)) return false;
+  particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[old].color, 5, 0.7);
+  blockSound("place", place === c.water ? old : place, t.x, t.y, t.z);
+  if (t.kind === "till") { D.cells.push([t.x, t.y, t.z]); m.farm.tilled = (m.farm.tilled || 0) + 1; BF.toolWear.use(m, BF.toolWear.best(m, "hoe"), 1); }   // tilling wears the hoe 1 use, as the player's
+  if (t.kind === "border") { Tinv.remove(m.inv, place, 1); m.farm.bordered = (m.farm.bordered || 0) + 1; }
+  if (t.kind === "water") {
+    Tinv.remove(m.inv, c.wbucket, 1); Tinv.add(m.inv, c.bucket, 1);
+    D.water.push([t.x, t.y, t.z]); D.waterSet.add(key3(t.x, t.y, t.z));
+    m.farm.watered = (m.farm.watered || 0) + 1;
+  }
+  log(t.kind, m, { at: [t.x, t.y, t.z], block: BF.blocks[place].name });
+  return true;
+}
+// For js/builder.js: the ring rectangles of the village's beds and of the beds being made or grown (no building goes there).
+function bedRects(R) {
+  const D = R._life;
+  return D ? (D.beds || []).map(outerOf).concat(D.projects.map(p => outerOf(p.L))) : [];
+}
+// ---------------------------------------------------------------- saving projects (inside the villagers map of save.js: keys "farmbeds:<village key>")
+const savedProjects = new Map();   // village key -> projects not yet attached to a loaded village
+const liveProjects = new Map();    // village key -> the village's project list
+function projectsFor(R) {
+  const k = R.key, list = savedProjects.get(k) || liveProjects.get(k) || [];
+  savedProjects.delete(k); liveProjects.set(k, list);
+  return list;
+}
+// where the farmers took dirt ("farmdig:<village key>": the columns dug and the pit being dug, see findGather)
+const savedDig = new Map(), liveDig = new Map();
+function digFor(R) {
+  const k = R.key, G = savedDig.get(k) || liveDig.get(k) || { dug: new Set(), pit: null };
+  savedDig.delete(k); liveDig.set(k, G);
+  return G;
+}
+function exportAll(out) {
+  for (const M of [savedDig, liveDig]) for (const [k, G] of M) if (G.dug.size || G.pit) out["farmdig:" + k] = { dug: [...G.dug], pit: G.pit ? Object.assign({}, G.pit) : null };
+  for (const [k, list] of savedProjects) if (list.length) out["farmbeds:" + k] = JSON.parse(JSON.stringify(list));
+  for (const [k, list] of liveProjects) if (list.length) out["farmbeds:" + k] = JSON.parse(JSON.stringify(list));
+  for (const [k, A] of villageAges) out["vage:" + k] = +A.lived.toFixed(4);   // the village's age: game days loaded and active
+  return out;
+}
+function importAll(o) {
+  savedProjects.clear(); liveProjects.clear(); savedProjects.clear(); villageAges.clear(); savedDig.clear(); liveDig.clear();
+  for (const k in o || {}) {
+    if (k.slice(0, 8) === "farmdig:" && o[k] && Array.isArray(o[k].dug)) {
+      const P = o[k].pit, pit = P && ["x0", "z0", "x1", "z1", "y"].every(f => Number.isFinite(P[f])) ? { x0: P.x0, z0: P.z0, x1: P.x1, z1: P.z1, y: P.y } : null;
+      savedDig.set(k.slice(8), { dug: new Set(o[k].dug.filter(d => typeof d === "string")), pit });
+      continue;
+    }
+    if (k.slice(0, 5) === "vage:" && Number.isFinite(+o[k])) { villageAges.set(k.slice(5), { lived: Math.max(0, +o[k]), pass: -9, t: 0 }); continue; }
+    if (k.slice(0, 9) !== "farmbeds:" || !Array.isArray(o[k])) continue;
+    const list = o[k].filter(p => p && p.L && ["x0", "z0", "x1", "z1", "y"].every(f => Number.isFinite(p.L[f])) && Array.isArray(p.L.ch) && (p.L.ax === "x" || p.L.ax === "z"));
+    for (const p of list) { p.fails = 0; p.wait = 0; }
+    savedProjects.set(k.slice(9), list);
+  }
+}
+
+// ---------------------------------------------------------------- doing a task
+function travel(m, fs, dt, out, tx, ty, tz, speed) {
+  const ai = m.ai, N = nav(), px = m.position.x, pz = m.position.z;
+  const d = Math.hypot(tx + 0.5 - px, tz + 0.5 - pz);
+  if (d <= REACH_H && Math.abs(ty - m.position.y) < 1.6) { ai.route = null; fs.navFail = 0; return "arrived"; }
+  if (!ai.route || ai.routeKind !== "farm") {
+    ai.route = null;
+    if (fs.navWait > 0) { fs.navWait -= dt; return "going"; }
+    if (!N.takePlan()) return "going";
+    const hop = d > 22 ? [Math.floor(px + (tx + 0.5 - px) * 20 / d), Math.floor(pz + (tz + 0.5 - pz) * 20 / d)] : null;
+    const [fx, fy, fz] = N.feetCell(m);
+    const goal = hop
+      ? { x: hop[0], z: hop[1], at: (x, y, z) => Math.abs(x - hop[0]) + Math.abs(z - hop[1]) <= 2 }
+      : { x: tx, z: tz, at: (x, y, z) => Math.abs(x - tx) <= 1 && Math.abs(z - tz) <= 1 && Math.abs(y - ty) <= 1 };
+    const path = N.findPath(fx, fy, fz, goal, 2500);
+    if (path && path.length) { ai.route = path; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "farm"; fs.navFail = 0; }
+    else {
+      fs.navFail = (fs.navFail || 0) + 1; fs.navWait = 0.6;
+      if (fs.navFail >= (hop ? 5 : 2)) { fs.navFail = 0; return "failed"; }
+    }
+    return "going";
+  }
+  const st = N.followRoute(m, dt, out, speed);
+  if (st === "stuck") { ai.route = null; fs.navFail = (fs.navFail || 0) + 1; if (fs.navFail >= 3) { fs.navFail = 0; return "failed"; } }
+  else if (st === "done") ai.route = null;
+  return "going";
+}
+function newFarm() { return { task: null, stage: null, t: 0, actT: 0, breakT: 0, avoid: {}, stats: { day: -1, farm: 0, total: 0 }, last: null, counts: {} }; }
+function endTask(m, fs, success) {
+  const t = fs.task;
+  if (t) {
+    if (claims.get(t.k) === m) claims.delete(t.k);
+    if (!success) fs.avoid[t.k] = BF.simNow() + 30;
+    fs.last = t.kind;
+    if (success) fs.counts[t.kind] = (fs.counts[t.kind] || 0) + 1;
+  }
+  fs.task = null; fs.stage = null; m.ai.route = null;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
+  if (success && Math.random() < BREAK_P) fs.breakT = rnd(4, 9);
+}
+function log(kind, m, data) {
+  LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data));
+  if (LOG.length > 300) LOG.shift();
+}
+// The work itself. Returns false when the cell changed meanwhile (task dropped).
+function perform(m, fs, R, D) {
+  const t = fs.task, c = ids(), w = W(), Tinv = TR().inv;
+  if (t.kind === "craft") {
+    const spare = Math.max(0, cnt(m, c.wheat) - WHEAT_SPARE);
+    const n = t.hay ? Math.min(Math.floor(spare / 9), 4) : Math.min(Math.floor(spare / 3), 16);
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      const out = t.hay ? c.hay : c.bread, need = t.hay ? 9 : 3;
+      if (!Tinv.canFit(m.inv, [{ id: out, n: 1 }], [{ id: c.wheat, n: need }])) break;
+      Tinv.remove(m.inv, c.wheat, need); Tinv.add(m.inv, out, 1); made++;
+    }
+    if (made) log("craft", m, { made: made + " " + (t.hay ? "hay bale" : "bread") });
+    return made > 0;
+  }
+  if (t.kind === "tend") return true;
+  if (t.kind === "gather") return gatherBlock(m, D, t);
+  if (t.kind === "buylog") return doLogDeal(m, t) > 0;
+  if (BF.baker && BF.baker.FARM_KINDS[t.kind] != null) return BF.baker.farmPerform(m, t, D, { myBeds, ok: () => true, key3, hasHoe });   // sugar cane, pumpkins (js/baker.js)
+  if (!w.isLoaded(t.x, t.z) || !freeCellOrFarm(R, D, t)) return false;
+  if (t.proj) return performBed(m, fs, R, D, t);
+  if (t.kind === "harvest") {
+    const id = getB(t.x, t.y, t.z);
+    if (!c.matureSet.has(id) || !isFarm(c, getB(t.x, t.y - 1, t.z)) || !dropsFit(m, id)) return false;
+    if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
+    const drops = BF.rollDrops(id);
+    for (const d of drops) Tinv.add(m.inv, d.id, d.count);
+    for (const d of drops) {                     // spare seeds beyond a stack go on the compost heap
+      const it = BF.items[d.id], extra = it && it.plants != null && !it.food ? cnt(m, d.id) - CROP_CAP : 0;
+      if (extra > 0) Tinv.remove(m.inv, d.id, extra);
+    }
+    particles(t.x + 0.5, t.y + 0.3, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
+    blockSound("break", id, t.x, t.y, t.z);
+    m.farm.harvested = (m.farm.harvested || 0) + 1;
+    log("harvest", m, { at: [t.x, t.y, t.z], crop: BF.blocks[id].name, got: drops.map(d => d.count + " " + BF.items[d.id].name).join(", ") });
+    // the village log gets one line when a farmer starts on a crop (not one per block): its first harvest of that crop in 30 s
+    const now = BF.simNow(), crop = BF.blocks[id].name, seen = fs.harvSeen || (fs.harvSeen = {}), since = now - (seen[crop] == null ? -1e9 : seen[crop]);
+    if (BF.vlog && m.village && !(since >= 0 && since < 30))
+      BF.vlog.log(m.village, "farm", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession) + ") started harvesting " + BF.vlog.pretty(crop) + " at " + t.x + ", " + t.y + ", " + t.z, [t.x, t.y, t.z]);
+    seen[crop] = now;
+    // replant right away with the matching seed
+    const seed = c.mature.get(id);
+    if (seed != null && cnt(m, seed) > 0) { fs.next = { kind: "plant", x: t.x, y: t.y, z: t.z, k: t.k, seed }; }
+    return true;
+  }
+  if (t.kind === "plant") {
+    if (!isFarm(c, getB(t.x, t.y - 1, t.z)) || getB(t.x, t.y, t.z) !== 0) return false;
+    const seed = t.seed != null && cnt(m, t.seed) > 0 ? t.seed : plantFor(m, t.x, t.y - 1, t.z);
+    if (seed == null || cnt(m, seed) < 1) return false;
+    const young = BF.items[seed].plants;
+    if (young == null || !w.setBlock(t.x, t.y, t.z, young)) return false;
+    Tinv.remove(m.inv, seed, 1);
+    blockSound("place", young, t.x, t.y, t.z);
+    log("plant", m, { at: [t.x, t.y, t.z], seed: BF.items[seed].name });
+    return true;
+  }
+  if (t.kind === "fill") {
+    if (!fillBucket(m, t.x, t.y, t.z)) return false;
+    log("fill", m, { at: [t.x, t.y, t.z] });
+    return true;
+  }
+  return false;
+}
+// Takes the dirt block of a gather task outside the village; its drops go into the inventory.
+function gatherBlock(m, D, t) {
+  const c = ids(), w = W(), Tinv = TR().inv;
+  if (!w.isLoaded(t.x, t.z) || inVillage(D, t.x, t.z) || nearBeds(D, t.x, t.z)) return false;
+  const id = getB(t.x, t.y, t.z);
+  if (!c.diggable.has(id)) return false;
+  const drops = BF.rollDrops(id);
+  if (!Tinv.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false;
+  if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
+  for (const d of drops) Tinv.add(m.inv, d.id, d.count);
+  particles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
+  blockSound("break", id, t.x, t.y, t.z);
+  noteDug(D, t.x, t.z);
+  log("gather", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
+  return true;
+}
+// Levelling a field: "dig" removes the top soil block of the column (plants on it first), "raise" puts a dirt block on it. Nothing else is ever touched.
+function levelCell(m, R, D, t) {
+  const c = ids(), w = W(), Tinv = TR().inv;
+  if (!D.ready || getB(t.x, t.y, t.z) === 0 || w.heightAt(t.x, t.z) !== t.y) return false;
+  const id = getB(t.x, t.y, t.z);
+  if (!c.ground.has(id) || !looseAbove(getB(t.x, t.y + 1, t.z))) return false;
+  if (t.kind === "dig") {
+    const drops = BF.rollDrops(id);
+    const above = getB(t.x, t.y + 1, t.z);
+    if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); }
+    if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
+    for (const d of drops) if (BF.items[d.id] && Tinv.canFit(m.inv, [{ id: d.id, n: d.count }], [])) Tinv.add(m.inv, d.id, d.count);   // what does not fit is left in the ground
+    particles(t.x + 0.5, t.y + 0.8, t.z + 0.5, BF.blocks[id].color, 5, 0.7);
+    blockSound("break", id, t.x, t.y, t.z);
+    log("dig", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
+    return true;
+  }
+  if (cnt(m, c.dirt) < 1) return false;
+  const above = getB(t.x, t.y + 1, t.z);
+  if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); }
+  if (!w.setBlock(t.x, t.y + 1, t.z, c.dirt)) return false;
+  Tinv.remove(m.inv, c.dirt, 1);
+  particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[c.dirt].color, 4, 0.7);
+  blockSound("place", c.dirt, t.x, t.y + 1, t.z);
+  log("raise", m, { at: [t.x, t.y + 1, t.z] });
+  return true;
+}
+// harvest / plant / fill anywhere in the village area; bed work never on a building or its margin
+function freeCellOrFarm(R, D, t) { return t.proj ? clearOfBuildings(R, D, t.x, t.z) : inArea(D, t.x, t.z); }
+
+function farmAI(m, dt, out) {
+  const R = m.village;
+  const D = vdata(R), fs = m.farm || (m.farm = newFarm()), ai = m.ai;
+  ensureKit(m); ensureCover(D, m);
+  if (fs.breakT > 0) { fs.breakT -= dt; return false; }
+  if (!fs.task) {
+    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind); fs.t = 0; claims.set(fs.task.k, m); }
+    else {
+      fs.thinkT = (fs.thinkT || 0) - dt;
+      if (fs.thinkT > 0) return fs.idleWork;      // brief pause between tasks still counts as work
+      fs.thinkT = 0.4;
+      if (!D.ready) { fs.idleWork = false; return false; }
+      const t = think(m, fs, R, D);
+      if (!t) { fs.breakT = rnd(5, 10); fs.idleWork = false; return false; }
+      const VS = BF.villageSim;   // estimate: the walk to the cell (or the bucket's water, the seller) and the action (a harvest replants at once)
+      if (VS && VS.begin && !VS.begin(m, (t.kind === "craft" ? 0 : VS.walkSecs(m, [t.seller ? t.seller.position : [(t.sx != null ? t.sx : t.x) + 0.5, (t.sz != null ? t.sz : t.z) + 0.5]])) + (t.kind === "tend" ? 4 : actOf(t.kind) + (t.kind === "harvest" ? ACT.plant : 0)), t.kind === "craft" && t.hay ? "Making hay bales" : t.kind === "gather" ? "Gathering dirt" : NAMES[t.kind] || (BF.baker && BF.baker.FARM_NAMES[t.kind]) || "Farm work")) { fs.thinkT = 1; fs.idleWork = false; return false; }
+      fs.task = t; fs.stage = t.kind === "craft" ? "act" : "walk"; fs.t = 0; fs.actT = actOf(t.kind); fs.navFail = 0; fs.idleWork = true;
+      t.max = TASK_MAX + (t.x != null ? 2.5 * Math.hypot(t.x + 0.5 - m.position.x, t.z + 0.5 - m.position.z) : 0);   // long walks to a far field get more time
+      if (t.k) claims.set(t.k, m);
+    }
+  }
+  const t = fs.task;
+  fs.t += dt;
+  if (fs.t > (t.max || TASK_MAX)) { endTask(m, fs, false); return true; }
+  ai.mode = "idle"; ai.t = 2;
+  if (t.kind === "buylog") {   // the forester walks about: follow it, trade within reach
+    const v2 = t.seller;
+    if (!canSell(v2)) { log("giveup", m, { task: t.kind, why: v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone" }); avoidSeller(m, v2); endTask(m, fs, false); return true; }
+    t.x = Math.floor(v2.position.x); t.y = Math.floor(v2.position.y + 0.01); t.z = Math.floor(v2.position.z);
+    if (fs.stage === "walk" && Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z) <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) {
+      fs.stage = "act"; fs.actT = ACT.buylog; ai.route = null;
+    }
+    if (fs.stage === "act") { out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2; }
+  }
+  if (fs.stage === "walk") {
+    const st = t.sx != null ? travel(m, fs, dt, out, t.sx, t.sy, t.sz, m.def.speed * 1.1)      // a bucket is filled from a cell beside (or over the wall of) the water
+      : travel(m, fs, dt, out, t.x, t.ty != null ? t.ty : t.y, t.z, m.def.speed * 1.1);
+    if (st === "failed") { log("giveup", m, { task: t.kind, why: "no path", at: [t.x, t.y, t.z] }); endTask(m, fs, false); return true; }
+    if (st === "arrived") { fs.stage = "act"; fs.actT = t.kind === "tend" ? rnd(2, 4) : actOf(t.kind); ai.swingT = t.kind === "tend" ? 0 : 0.35; }
+    return true;
+  }
+  // act: face the cell, swing, then do it
+  if (t.kind !== "craft" && t.kind !== "buylog") { out.faceX = t.x + 0.5; out.faceZ = t.z + 0.5; m.lookAt = null; }
+  fs.actT -= dt;
+  if (t.kind === "craft" && ai.swingT <= 0) ai.swingT = 0.35;
+  if (fs.actT <= 0) {
+    let okDone = false;
+    try { okDone = perform(m, fs, R, D); } catch (e) { console.error(e); }
+    if (okDone && t.kind !== "tend" && t.kind !== "craft") ai.swingT = 0.35;
+    if (!okDone) { log("giveup", m, { task: t.kind, why: t.kind === "buylog" ? "trade refused" : "cell changed", at: [t.x, t.y, t.z] }); if (t.kind === "buylog") avoidSeller(m, t.seller); }
+    endTask(m, fs, okDone);
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------- buying food from other villagers
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv);
+// Best food purchase from one seller for `want` bread-eq: one of its food offers (its job's, or its spare food, js/market.js).
+function dealWith(m, v2, want) {
+  const F = FD(), T = TR(), em = ids().em, myEm = cnt(m, em);
+  const sp = F.surplus(v2);
+  if (sp < Math.min(want, 1) || myEm < 1) return null;
+  const ed = new Map(F.edible(v2).map(e => [e.id, e.n]));
+  let best = null;
+  for (const o of v2.trades || []) {
+    if (o.buy.length !== 1 || o.buy[0].id !== em || !F.isFood(o.sell.id) || isMilk(o.sell.id) || isTreat(o.sell.id) || T.blockReason(v2, o)) continue;
+    const per = F.breadEq(o.sell.id) * o.sell.n;
+    if ((ed.get(o.sell.id) || 0) < o.sell.n || per > sp) continue;
+    let k = Math.min(Math.ceil(want / per), Math.floor(myEm / o.buy[0].n), Math.floor(sp / per), Math.floor((ed.get(o.sell.id) || 0) / o.sell.n), 4);
+    while (k > 0 && !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n * k }], [{ id: em, n: o.buy[0].n * k }])) k--;
+    if (k < 1) continue;
+    const price = o.buy[0].n / per;
+    if (!best || price < best.price) best = { seller: v2, offer: o, times: k, price, item: o.sell.id };
+  }
+  return best;   // only through offers the player could take too: job offers and spare goods (js/market.js)
+}
+// Cake slices and pumpkin pies (js/baker.js) are treats: everyday hunger buys them only when no plain food is for sale (findFoodSeller's "treat"
+// pass, before milk); a villager buys one for the treat now and then (shopAI, BF.baker.treatWanted).
+const isTreat = id => !!(BF.baker && BF.baker.isTreat(id));
+// Milk (js/cowherd.js) is a last resort: a hungry villager buys milk bottles only when no other food is for sale anywhere in its village, through
+// an offer for them (the cowherd's job offer, or anyone's spare milk, js/market.js). The cowherd keeps BF.cowherd.MILK_KEEP bottles back (the baker's
+// next cake) in its market reserve (BF.cowherd.reserve). Never a milk bucket: the cowherd keeps its pails to bottle them.
+// Honey bottles (js/beekeeper.js) are the same kind of last resort, in the same pass.
+const isMilk = id => id != null && (id === I("milk_bottle") || id === I("milk_bucket") || id === I("honey_bottle"));
+function milkDeal(m, v2, want) {
+  const T = TR(), F = FD(), em = ids().em, myEm = cnt(m, em), mb = I("milk_bottle"), hb = I("honey_bottle");
+  if ((mb == null && hb == null) || myEm < 1) return null;
+  let best = null;
+  for (const o of v2.trades || []) {
+    const id = o.sell.id;
+    if (o.buy.length !== 1 || o.buy[0].id !== em || id == null || (id !== mb && id !== hb) || T.blockReason(v2, o)) continue;
+    const per = F.breadEq(id) * o.sell.n;
+    let k = Math.min(Math.ceil(want / per), Math.floor(myEm / o.buy[0].n), Math.floor(cnt(v2, id) / o.sell.n), 4);
+    while (k > 0 && !T.inv.canFit(m.inv, [{ id, n: o.sell.n * k }], [{ id: em, n: o.buy[0].n * k }])) k--;
+    const price = o.buy[0].n / per;
+    if (k > 0 && (!best || price < best.price)) best = { seller: v2, offer: o, times: k, price, item: id, milk: true };
+  }
+  return best;
+}
+// Raw eggs it can cook count as food it has (js/eggcook.js); a villager that can cook eggs buys them first (cheap food), from the nearest
+// seller, and one that cannot buys ready food: never eggs it could not cook.
+const eggsPending = m => (BF.eggCook ? BF.eggCook.pending(m) : 0);
+function findFoodSeller(m) {
+  const R = m.village, F = FD(), want = SHOP_DAYS * F.rate(m) - F.available(m) - eggsPending(m), now = dayNow();
+  if (!R || want <= 0) return null;
+  const sh = m.fshop;
+  let best = null, bs = Infinity;
+  for (const pass of (BF.eggCook ? ["egg", "food"] : ["food"]).concat(BF.baker ? ["treat"] : [], I("milk_bottle") != null || I("honey_bottle") != null ? ["milk"] : [])) {
+    for (const v2 of R.members || []) {
+      if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
+      const d = pass === "egg" ? BF.eggCook.eggDeal(m, v2, want) : pass === "milk" ? milkDeal(m, v2, want) : pass === "treat" ? BF.baker.treatDeal(m, v2, want) : dealWith(m, v2, want);
+      if (!d) continue;
+      const s = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
+      if (s < bs) { bs = s; best = d; }
+    }
+    if (best) break;   // eggs found: no need for dearer ready food; food found: no milk
+  }
+  return best;
+}
+function doFoodDeal(m, deal) {
+  const T = TR(), F = FD(), v2 = deal.seller, em = ids().em;
+  let done = 0, item = deal.item, n = 0;
+  for (let i = 0; i < deal.times; i++) {
+    if (!canSell(v2)) break;
+    {
+      const o = deal.offer, per = F.breadEq(o.sell.id) * o.sell.n;
+      if ((!deal.milk && !deal.treat && F.surplus(v2) < per) || T.blockReason(v2, o) || cnt(m, em) < o.buy[0].n) break;
+      if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
+      const sold = T.exchange(v2, o);                 // the seller's stock and room, as for a player trade
+      if (!sold) break;
+      T.inv.remove(m.inv, em, o.buy[0].n);
+      T.inv.addStacks(m.inv, sold);
+      T.addXp(v2, o);
+      n += o.sell.n;
+    }
+    done++;
+  }
+  if (done) {
+    const paid = deal.offer.buy[0].n * done;
+    if (BF.vlog) BF.vlog.trade(m, v2, deal.offer, done);
+    log("buyFood", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: n + " " + BF.items[item].name, paid: paid + " emerald" });
+    if (BF.emit) BF.emit("villagerFoodTrade", m, v2, item, n);
+  }
+  return done;
+}
+// ---------------------------------------------------------------- logs from the foresters
+// Since 1.1 only foresters fell trees. A farmer short of logs for a bed's edge buys them from any villager of its village with a log offer: a
+// forester's own (level 2, "1 emerald > 8 oak_log") or anyone's spare logs (js/market.js). The species the bed is edged with is preferred, then
+// the nearer seller, foresters first. A seller that failed is skipped for a while (fshop.avoid).
+const sellerIdx = v2 => (v2 && v2.slot ? v2.slot.idx : -1);
+function avoidSeller(m, v2) { if (!v2) return; const sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(0, 3), avoid: {}, cd: 0 }); sh.avoid[sellerIdx(v2)] = dayNow() + 0.05; }
+function logDealWith(m, v2, want, prefer) {
+  const T = TR(), em = ids().em, myEm = cnt(m, em);
+  if (myEm < 1) return null;
+  let best = null;
+  const consider = (item, per, offer) => {
+    const stock = T.inv.count(v2.inv, item);
+    let k = Math.min(Math.ceil(want / per), Math.floor(stock / per), myEm, 4);
+    while (k > 0 && !T.inv.canFit(m.inv, [{ id: item, n: per * k }], [{ id: em, n: k }])) k--;
+    if (k < 1) return;
+    const sc = (item === prefer ? 1000 : 0) + per * k;
+    if (!best || sc > best.sc) best = { item, per, offer, times: k, sc };
+  };
+  for (const o of v2.trades || []) {
+    if (o.buy.length !== 1 || o.buy[0].id !== em || o.buy[0].n !== 1 || !isLogItem(o.sell.id) || T.blockReason(v2, o)) continue;
+    consider(o.sell.id, o.sell.n, o);
+  }
+  return best;
+}
+function findLogSeller(m, want, prefer) {
+  const R = m.village, now = dayNow(), avoid = (m.fshop && m.fshop.avoid) || {};
+  if (!R || want <= 0 || cnt(m, ids().em) < 1) return null;
+  let best = null, bs = -Infinity;
+  for (const v2 of R.members || []) {
+    if (v2 === m || !canSell(v2) || (avoid[sellerIdx(v2)] || 0) > now) continue;
+    const d = logDealWith(m, v2, want, prefer);
+    if (!d) continue;
+    const sc = d.sc - v2.position.distanceTo(m.position) + (v2.profession === "forester" ? 20 : 0);
+    if (sc > bs) { bs = sc; best = d; best.seller = v2; }
+  }
+  if (!best) return null;
+  const v2 = best.seller;
+  return { kind: "buylog", seller: v2, item: best.item, per: best.per, offer: best.offer, times: best.times, want,
+    x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z), k: "buylog:" + sellerIdx(v2) };
+}
+function doLogDeal(m, t) {
+  const T = TR(), v2 = t.seller, em = ids().em;
+  if (!canSell(v2)) return 0;
+  if (!t.offer || t.offer.buy[0].n !== 1) return 0;
+  t.per = t.offer.sell.n;   // the price may have moved since the deal was planned (js/prices.js)
+  let done = 0;
+  for (let i = 0; i < t.times && logCount(m) < t.want; i++) {
+    if (cnt(m, em) < 1 || !T.inv.canFit(m.inv, [{ id: t.item, n: t.per }], [{ id: em, n: 1 }])) break;
+    if (!T.exchange(v2, t.offer)) break;              // the seller's stock, reserve and room, as for a player trade
+    T.addXp(v2, t.offer);
+    T.inv.remove(m.inv, em, 1); T.inv.add(m.inv, t.item, t.per);
+    done++;
+  }
+  if (done) {
+    if (BF.vlog) BF.vlog.trade(m, v2, t.offer, done);
+    log("buyLogs", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * t.per + " " + BF.items[t.item].name, paid: done + " emerald" });
+  }
+  return done;
+}
+
+// ---------------------------------------------------------------- tools: a farmer without a hoe or a bucket, a shepherd without shears
+// They buy one from whoever in the village sells it (the toolsmith, as a rule) at that villager's own offer: the best tool they can pay for,
+// the nearer seller when two are as good. A villager hired after its village was generated starts with only the emeralds for it (trading.js hireKit).
+const TOOL_NEED = { farmer: [/_hoe$/, /^(water_)?bucket$/], shepherd: [/^shears$/] };
+const TOOL_LABEL = { "_hoe$": "Hoe", "^(water_)?bucket$": "Bucket", "^shears$": "Shears" };   // for the Economy view (js/economy.js)
+function toolNeed(m) {
+  if (!TOOL_NEED[m.profession] || m.child) return null;
+  const miss = TOOL_NEED[m.profession].filter(re => !m.inv.some(s => s && re.test(BF.items[s.id].name)));
+  return miss.length ? new RegExp(miss.map(re => "(" + re.source + ")").join("|")) : null;   // any of what it lacks
+}
+function findToolSeller(m, re) {
+  const R = m.village, T = TR(), now = dayNow(), avoid = (m.fshop && m.fshop.avoid) || {};
+  if (!R) return null;
+  let best = null, bs = -Infinity;
+  for (const v2 of R.members || []) {
+    if (v2 === m || !canSell(v2) || !Array.isArray(v2.trades) || (avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
+    for (const o of v2.trades) {
+      const it = BF.items[o.sell.id];
+      if (!it || !re.test(it.name) || T.blockReason(v2, o)) continue;
+      if (!o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
+      const sc = BF.toolWear.rank(o.sell.id) * 10 - v2.position.distanceTo(m.position);   // tier x 1000, then speed (gold above wood), then distance
+      if (sc > bs) { bs = sc; best = { kind: "tool", seller: v2, offer: o, item: o.sell.id }; }
+    }
+  }
+  return best;
+}
+function doToolDeal(m, deal) {
+  const T = TR(), v2 = deal.seller, o = deal.offer;
+  if (!canSell(v2) || !toolNeed(m) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return 0;
+  const sold = T.exchange(v2, o);
+  if (!sold) return 0;
+  for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
+  T.inv.addStacks(m.inv, sold);
+  T.addXp(v2, o);
+  if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
+  log("buyTool", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
+  if (BF.emit) BF.emit("villagerToolTrade", m, v2, o.sell.id);
+  return 1;
+}
+
+// ---------------------------------------------------------------- wheat for the shepherds (js/shepherd.js), seeds for the poultry keepers (js/poultry.js)
+// A shepherd short of wheat (a keeper short of wheat seeds) buys it through any villager's offer for it (a farmer's job offer or anyone's spare
+// wheat or seeds, js/market.js), farmers first. Butchers buy raw chicken from the poultry keepers the same way, to cook and sell.
+// Cowherds buy wheat for their cows like shepherds (js/cowherd.js). Leatherworkers no longer get leather from the restock (1.3): they buy it
+// through the cowherd's and the butcher's offers (or anyone's spare leather), an offer's worth at a time while they hold fewer than LEATHER_LOW.
+const LEATHER_LOW = 12;
+const feedItem = m => (m.profession === "poultry_keeper" ? I("wheat_seeds") : m.profession === "butcher" ? I("raw_chicken") : m.profession === "leatherworker" ? I("leather") : ids().wheat);
+const leatherWanted = m => (BF.cowherd && cnt(m, I("leather")) < LEATHER_LOW ? LEATHER_LOW + 6 - cnt(m, I("leather")) : 0);
+const chickenWanted = m => { const n = cnt(m, I("raw_chicken")) + cnt(m, I("cooked_chicken")); return BF.poultry && n < 9 ? 15 : 0; };   // one emerald's worth while it holds fewer than 9
+// Butchers buy raw porkchops from the pig farmers too (js/pigfarmer.js), one emerald's worth while they hold fewer than 9 porkchops.
+const porkWanted = m => { const n = cnt(m, I("raw_porkchop")) + cnt(m, I("cooked_porkchop")); return BF.pigFarmer && n < 9 ? 14 : 0; };
+const feedWanted = m => (m.profession === "shepherd" && BF.shepherd ? BF.shepherd.wheatWanted(m) : m.profession === "poultry_keeper" && BF.poultry ? BF.poultry.seedsWanted(m)
+  : m.profession === "butcher" ? chickenWanted(m) + porkWanted(m) : m.profession === "cowherd" && BF.cowherd ? BF.cowherd.wheatWanted(m) : m.profession === "leatherworker" ? leatherWanted(m)
+  : m.profession === "pig_farmer" && BF.pigFarmer ? BF.pigFarmer.feedWanted(m) : 0);
+// What it shops for here, [item, how many, whose offers]: a pig farmer any of its feeds (carrot, potato, beetroot), a butcher raw chicken from
+// the poultry keepers and raw pork from the pig farmers, everyone else its one feed item from anyone.
+function shopItems(m) {
+  if (m.profession === "pig_farmer" && BF.pigFarmer) { const w = BF.pigFarmer.feedWanted(m); return w > 0 ? BF.pigFarmer.feedIds().map(id => [id, w, null]) : []; }
+  if (m.profession === "butcher") {
+    const r = [], c = chickenWanted(m), p = porkWanted(m);
+    if (c > 0) r.push([I("raw_chicken"), c, "poultry_keeper"]);
+    if (p > 0 && I("raw_porkchop") != null) r.push([I("raw_porkchop"), p, "pig_farmer"]);
+    return r;
+  }
+  const w = feedWanted(m);
+  return w > 0 ? [[feedItem(m), w, null]] : [];
+}
+function wheatDealWith(m, v2, want, item = feedItem(m)) {
+  const T = TR(), c = ids();
+  let best = null;
+  for (const o of v2.trades || []) {
+    if (o.sell.id !== item || o.buy.length !== 1 || o.buy[0].id !== c.em || T.blockReason(v2, o)) continue;
+    let k = Math.min(Math.ceil(want / o.sell.n), Math.floor(cnt(m, c.em) / o.buy[0].n), Math.floor(cnt(v2, item) / o.sell.n), 4);
+    while (k > 0 && !T.inv.canFit(m.inv, [{ id: item, n: o.sell.n * k }], [{ id: c.em, n: o.buy[0].n * k }])) k--;
+    const price = o.buy[0].n / o.sell.n;
+    if (k > 0 && (!best || price < best.price)) best = { kind: "wheat", seller: v2, offer: o, times: k, item, price };
+  }
+  return best;
+}
+function findWheatSeller(m) {
+  const R = m.village, now = dayNow(), sh = m.fshop, items = R ? shopItems(m) : [];
+  if (!items.length) return null;
+  let best = null, bs = Infinity;
+  for (const v2 of R.members || []) {
+    if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
+    for (const [item, want, from] of items) {
+      if (from && v2.profession !== from) continue;
+      const d = wheatDealWith(m, v2, want, item);
+      if (!d) continue;
+      const sc = v2.position.distanceTo(m.position) * (v2.profession === "farmer" ? 0.5 : 1);
+      if (sc < bs) { bs = sc; best = d; }
+    }
+  }
+  return best;
+}
+// Empty glass bottles back to the cowherd (js/cowherd.js): a cowherd short of bottles buys them through any villager's offer for them (the
+// spare goods of a villager left with the empties of milk it drank, js/market.js: small lots from GLASS_LOT_MIN bottles), the biggest lot nearest.
+// Empties come first: the glassmaker's new bottles count as 64 blocks further off, so a baker's pile is bought back before them.
+function findBottleSeller(m) {
+  const R = m.village, gb = I("glass_bottle"), now = dayNow(), sh = m.fshop;
+  const want = BF.cowherd && m.profession === "cowherd" ? BF.cowherd.bottleWanted(m) : BF.beekeeper && m.profession === "beekeeper" ? BF.beekeeper.bottleWanted(m) : 0;   // and the beekeeper (js/beekeeper.js)
+  if (!R || gb == null || want <= 0 || cnt(m, ids().em) < 1) return null;
+  let best = null, bs = Infinity;
+  for (const v2 of R.members || []) {
+    if (v2 === m || !canSell(v2) || (sh.avoid[v2.slot ? v2.slot.idx : -1] || 0) > now) continue;
+    const d = wheatDealWith(m, v2, want, gb);
+    if (!d) continue;
+    const sc = v2.position.distanceTo(m.position) - d.offer.sell.n * d.times + (v2.profession === "glassmaker" ? 64 : 0);
+    if (sc < bs) { bs = sc; best = d; }
+  }
+  return best;
+}
+function doWheatDeal(m, deal) {
+  const T = TR(), v2 = deal.seller, o = deal.offer;
+  let done = 0;
+  for (let i = 0; i < deal.times; i++) {
+    if (!canSell(v2) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
+    const sold = T.exchange(v2, o);                   // the seller's stock, reserve and room, as for a player trade
+    if (!sold) break;
+    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
+    T.inv.addStacks(m.inv, sold);
+    T.addXp(v2, o);
+    done++;
+  }
+  if (done) {
+    if (BF.vlog) BF.vlog.trade(m, v2, o, done);
+    const c = ids(), what = o.sell.id === c.wheat ? "buyWheat" : o.sell.id === I("wheat_seeds") ? "buySeeds" : "buy";
+    log(what, m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * o.sell.n + " " + BF.items[o.sell.id].name, paid: done * o.buy[0].n + " emerald" });
+  }
+  return done;
+}
+function shopAI(m, dt, out) {
+  const F = FD(), sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(0, 3), avoid: {}, cd: 0 }), ai = m.ai;
+  if (!sh.stage) {
+    sh.checkT -= dt;
+    if (sh.checkT > 0) return false;
+    sh.checkT = 3;
+    const now = dayNow();
+    const hasEm = cnt(m, ids().em) >= 1;
+    const hungry = hasEm && F.available(m) + eggsPending(m) < F.rate(m);   // raw eggs it is about to cook are food on the way
+    const wheat = hasEm && feedWanted(m) > 0;
+    const tool = hasEm && toolNeed(m);
+    const bottles = hasEm && ((m.profession === "cowherd" && BF.cowherd && BF.cowherd.bottleWanted(m) > 0) || (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.bottleWanted(m) > 0));
+    const treat = hasEm && !hungry && !!BF.baker && BF.baker.treatWanted(m);   // a cake slice or a pie now and then (js/baker.js)
+    if (sh.cd > now || m.child || !(hungry || wheat || tool || bottles || treat)) return false;
+    if ((m.pgk && m.pgk.task) || (m.cwk && m.cwk.task)) return false;   // a herder tending or leading an animal home finishes that first (js/pigfarmer.js, js/cowherd.js)
+    // estimate (villageSim.begin): the walk to the seller and the trade pause; during a countdown the next candidate is tried when one is too long
+    const VS = BF.villageSim, tries = [hungry && (() => findFoodSeller(m)), tool && (() => findToolSeller(m, tool)), wheat && (() => findWheatSeller(m)), bottles && (() => findBottleSeller(m)), treat && (() => BF.baker.findTreatSeller(m))];
+    let deal = null, found = false;
+    for (const f of tries) {
+      const d = f && f();
+      if (!d) continue;
+      found = true;
+      if (!VS || !VS.begin || VS.begin(m, VS.walkSecs(m, [d.seller.position]) + TRADE_PAUSE, d.kind === "wheat" ? "Buying " + (d.item === ids().wheat ? "wheat" : BF.itemName(d.item).toLowerCase()) : "Buying food")) { deal = d; break; }
+    }
+    if (!deal) {
+      if (found) { sh.cd = now + 0.02; return false; }
+      if (BF.econ) {   // nobody sells any of it now: the Economy view's dead ends (js/economy.js)
+        if (hungry) BF.econ.want(m, "Food");
+        if (wheat) BF.econ.want(m, ids().wheat);
+        if (tool) for (const re of TOOL_NEED[m.profession]) if (!m.inv.some(s => s && re.test(BF.items[s.id].name))) BF.econ.want(m, TOOL_LABEL[re.source]);
+      }
+      sh.cd = now + 0.08; return false;
+    }
+    sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; ai.route = null;
+  }
+  const deal = sh.deal, v2 = deal && deal.seller;
+  const giveUp = () => { sh.avoid[v2 && v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05; sh.stage = null; sh.deal = null; ai.route = null; sh.checkT = 0.5; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
+  if (!v2 || !canSell(v2)) return giveUp();
+  const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  ai.mode = "idle"; ai.t = 2;
+  if (sh.stage === "walk") {
+    sh.walkT += dt;
+    if (sh.walkT > 60) return giveUp();
+    if (d <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) { sh.stage = "trade"; sh.tt = TRADE_PAUSE; ai.route = null; return true; }
+    const g = { x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z) };
+    if (sh.gx == null || Math.hypot(sh.gx - g.x, sh.gz - g.z) > 3) { if (ai.routeKind === "farm") ai.route = null; sh.gx = g.x; sh.gz = g.z; }
+    const st = travel(m, sh, dt, out, g.x, g.y, g.z, m.def.speed * 1.3);
+    if (st === "failed") return giveUp();
+    return true;
+  }
+  // trade: both stand facing each other for a moment, then the goods change hands
+  sh.tt -= dt;
+  if (d > 3.6) { sh.stage = "walk"; return true; }
+  out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
+  if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;
+  if (sh.tt <= 0) {
+    const done = deal.kind === "wheat" ? doWheatDeal(m, deal) : deal.kind === "tool" ? doToolDeal(m, deal) : doFoodDeal(m, deal);
+    sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
+    if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
+    if (!done) sh.avoid[v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05;
+    else { particles(m.position.x, m.position.y + 1.5, m.position.z, "#2fd06a", 5, 0.4); sound("villager_trade", m.position.x, m.position.y + 1.5, m.position.z, 0.5); if (deal.kind !== "tool") F.digest(m, dayNow()); }
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------- entry points
+// Called from villagerAI (mobs.js) after the trading freeze, flee, bedtime and morning logic, before the builder AI.
+function ai(m, dt, out) {
+  if (!m.inv || m.dead || !BF.mobs || !BF.mobs.nav) return false;
+  if (skyT() >= WORK_END) {
+    if (m.farm && m.farm.task) endTask(m, m.farm, true);
+    if (m.fshop && m.fshop.stage) { m.fshop.stage = null; m.fshop.deal = null; m.ai.route = null; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); }
+    return false;
+  }
+  if (m.profession === "miner" && BF.miner && BF.miner.underground(m)) return false;   // shops for food once back up its mineshaft (js/miner.js)
+  if (shopAI(m, dt, out)) { if (m.farm && m.farm.task) endTask(m, m.farm, true); return true; }
+  if (m.profession === "farmer" && m.village && m.jobsite && !m.child) return farmAI(m, dt, out);   // a farmer works from its composter
+  return false;
+}
+let acc = 0;
+// Ages: game days of being loaded and active, for each villager (life.lived) and each village (villageAges). Only time between
+// two consecutive ticks that both saw the villager counts, so days spent unloaded (or in a closed save) don't; a skip while it
+// is loaded (sleeping, fast-forward) does, since it lives through it (its meals catch up too).
+let pass = 0, agesHooked = false;
+const villageAges = new Map();   // village key -> {lived, pass, t}
+function ageStep(m, now) {
+  const L = FD().life(m);
+  if (m._agePass === pass - 1 && now > m._ageT) L.lived = (L.lived || 0) + (now - m._ageT);
+  m._agePass = pass; m._ageT = now;
+  const k = m.village && m.village.key;
+  if (!k) return;
+  const A = villageAges.get(k) || (villageAges.set(k, { lived: 0, pass: -9, t: now }), villageAges.get(k));
+  if (A.pass === pass) return;   // already counted this pass (another of its villagers)
+  if (A.pass === pass - 1 && now > A.t) A.lived += now - A.t;
+  A.pass = pass; A.t = now;
+}
+const isWorking = m => !!((m.farm && (m.farm.task || (m.farm.idleWork && m.farm.thinkT > 0))) || m.tradingWith);
+function tick(dt) {
+  updateParticles(dt);
+  acc += dt;
+  if (acc < 0.5 || !BF.mobs || !BF.food) return;
+  const step = acc; acc = 0;
+  const now = dayNow(), t = skyT(), day = BF.sky ? BF.sky.day || 0 : 0;
+  if (!agesHooked && BF.on) { agesHooked = true; BF.on("newWorld", () => villageAges.clear()); }
+  pass++;
+  const scanned = new Set();
+  for (const m of BF.mobs.list) {
+    if (m.type !== "villager" || m.dead || m.removed || !Array.isArray(m.inv)) continue;
+    try { FD().digest(m, now); } catch (e) { console.error(e); }
+    ageStep(m, now);
+    cookDaily(m, day);
+    if (m.profession === "farmer" && m.village) {
+      const fs = m.farm || (m.farm = newFarm());
+      if (fs.stats.day !== day) { if (fs.stats.day >= 0) fs.prev = fs.stats; fs.stats = { day, farm: 0, total: 0 }; }
+      if (t < 0.5 && !m.sleeping && !(m.ai && m.ai.leaving)) { fs.stats.total += step; if (isWorking(m)) fs.stats.farm += step; }
+      if (!scanned.has(m.village)) { scanned.add(m.village); scanStep(m.village, vdata(m.village), SCAN_COLS); }
+    }
+  }
+  const nowS = BF.simNow();
+  for (const R of wantVillages) {                       // builders asking for water: keep their village's water ring scanned a while
+    const D = R._life;
+    if (!D || nowS - D.want > 120) { wantVillages.delete(R); continue; }
+    if (!scanned.has(R)) scanStep(R, D, SCAN_COLS);
+  }
+}
+// Butchers and fishermen cook the raw meat / fish they hold (conversion, nothing is created): up to 8 a day.
+function cookDaily(m, day) {
+  if (m.profession !== "butcher" && m.profession !== "fisherman" && m.profession !== "shepherd") return;   // shepherds cook their mutton
+  const L = FD().life(m);
+  if (L.cookDay === day) return;
+  L.cookDay = day;
+  let left = 8;
+  for (const [raw, cooked] of ids().cook) {
+    if (left <= 0) break;
+    const n = Math.min(left, cnt(m, raw));
+    for (let i = 0; i < n; i++) {
+      if (!TR().inv.canFit(m.inv, [{ id: cooked, n: 1 }], [{ id: raw, n: 1 }])) break;
+      TR().inv.remove(m.inv, raw, 1); TR().inv.add(m.inv, cooked, 1); left--;
+    }
+  }
+}
+const NAMES = { dig: "Levelling a field", raise: "Filling in a field", gather: "Gathering", harvest: "Harvesting", plant: "Planting", till: "Tilling farmland", border: "Edging a bed", water: "Watering a bed", unborder: "Moving a bed's edge", fill: "Filling a bucket", craft: "Baking bread", tend: "Tending crops", buylog: "Buying logs" };
+function statusText(m) {
+  if (!m) return "";
+  if (m.starving) return "Starving, only trades food";
+  if (m.fshop && m.fshop.stage) return m.fshop.deal && m.fshop.deal.kind === "wheat" ? "Buying " + (m.fshop.deal.item === ids().wheat ? "wheat" : BF.itemName(m.fshop.deal.item).toLowerCase()) : "Buying food";
+  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.statusText) { const t = BF.shepherd.statusText(m); if (t) return t; }
+  if (m.profession === "poultry_keeper" && BF.poultry) { const t = BF.poultry.statusText(m); if (t) return t; }
+  if (m.profession === "cowherd" && BF.cowherd) { const t = BF.cowherd.statusText(m); if (t) return t; }
+  if (m.profession === "baker" && BF.baker) { const t = BF.baker.statusText(m); if (t) return t; }
+  if (m.profession === "glassmaker" && BF.glassmaker) { const t = BF.glassmaker.statusText(m); if (t) return t; }
+  if (m.profession === "beekeeper" && BF.beekeeper) { const t = BF.beekeeper.statusText(m); if (t) return t; }
+  if (m.profession === "pig_farmer" && BF.pigFarmer) { const t = BF.pigFarmer.statusText(m); if (t) return t; }
+  if (m.profession === "farmer" && m.farm && m.farm.task && !m.sleeping) {
+    const t = m.farm.task;
+    if (t.kind === "craft" && t.hay) return "Making hay bales";
+    const b = t.kind === "harvest" || t.kind === "plant" ? BF.blocks[getB(t.x, t.y, t.z)] : null;
+    if (t.kind === "gather") return "Gathering dirt";
+    if (NAMES[t.kind] == null && BF.baker && BF.baker.FARM_NAMES[t.kind]) return BF.baker.FARM_NAMES[t.kind];
+    return NAMES[t.kind] + (t.kind === "harvest" && b && b.name ? " " + b.name : "");
+  }
+  if (FD().available(m) < FD().rate(m)) return "Hungry";
+  return "";
+}
+function stats(m) {
+  const fs = m && m.farm;
+  if (!fs) return null;
+  const s = fs.stats, p = fs.prev;
+  return { today: s && s.total ? s.farm / s.total : 0, yesterday: p && p.total ? p.farm / p.total : null, farm: s.farm, total: s.total, counts: fs.counts,
+    harvested: fs.harvested || 0, tilled: fs.tilled || 0, bordered: fs.bordered || 0, watered: fs.watered || 0, task: fs.task && fs.task.kind };
+}
+function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; for (const p of pool) BF.scene && BF.scene.remove(p.mesh); pool.length = 0; acc = 0; }
+
+// ---------------------------------------------------------------- the player's buckets (hooked from player.js right-click)
+// Empty bucket: scoops the water source the player looks at (an infinite source refills). Water bucket: pours a source against
+// the targeted face. Creative mode keeps the bucket as it is. Returns true when it did something.
+function useBucket(it, target) {
+  const c = ids(), P = BF.player, inv = BF.inventory, w = W();
+  if (!it || (it.id !== c.bucket && it.id !== c.wbucket) || !P || !inv) return false;
+  const creative = P.gameMode === "creative";
+  const swap = to => {
+    if (creative) return;
+    inv.consumeSelected(1);
+    const left = inv.add(to, 1);
+    if (left > 0 && BF.drops) BF.drops.spawn(to, left, P.position.x, P.position.y + 1, P.position.z);
+  };
+  if (it.id === c.bucket) {
+    const hit = w.raycast(P.eyePos(), P.lookDir(), 5, id => id !== 0 && (BF.FLUID[id] === 8 || BF.RENDER[id] !== 3));
+    if (!hit || BF.FLUID[hit.id] !== 8 || !w.setBlock(hit.x, hit.y, hit.z, 0)) return false;
+    swap(c.wbucket);
+    sound("splash", hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0.5);
+    return true;
+  }
+  if (!target) return false;
+  let x = target.x, y = target.y, z = target.z, cur = target.id;
+  if (!(BF.REPLACEABLE[cur] && !BF.FLUID[cur])) { x += target.normal[0]; y += target.normal[1]; z += target.normal[2]; cur = w.getBlock(x, y, z); }
+  if (BF.FLUID[cur] === 8 || !(cur === 0 || (BF.REPLACEABLE[cur] && !BF.SOLID[cur]))) return false;
+  if (!w.setBlock(x, y, z, c.water)) return false;
+  swap(c.bucket);
+  if (BF.emit) BF.emit("blockPlaced", x, y, z, c.water);   // audio: splash
+  return true;
+}
+
+// ---------------------------------------------------------------- bucket items: sprites + recipe
+if (BF.texKit) {
+  const K = BF.texKit, { SPRITES, put, hex, mul, mix, WHITE } = K;
+  const pail = (G, m, inner) => {
+    const hi = mix(m, WHITE, 0.35), lo = mul(m, 0.7);
+    for (let y = 5; y <= 13; y++) {
+      const half = 6 - Math.round((y - 5) * 2 / 8);
+      for (let x = 8 - half; x <= 7 + half; x++) put(G, x, y, x === 8 - half ? hi : x === 7 + half ? lo : y === 13 ? lo : m);
+    }
+    for (let x = 2; x <= 13; x++) put(G, x, 5, hi);
+    for (let x = 3; x <= 12; x++) put(G, x, 6, inner);
+    for (const [x, y] of [[2, 4], [3, 2], [4, 1], [5, 1], [10, 1], [11, 1], [12, 2], [13, 4], [2, 3], [13, 3]]) put(G, x, y, lo);
+    for (let x = 6; x <= 9; x++) put(G, x, 0, lo);
+  };
+  SPRITES.bucket = (G, m) => pail(G, m, mul(m, 0.45));
+  SPRITES.water_bucket = (G) => pail(G, hex("#c8c8c8"), hex("#3f76e4"));
+  SPRITES.milk_bucket = (G) => pail(G, hex("#c8c8c8"), hex("#f4f2ea"));   // js/cowherd.js
+}
+(BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped }) => {
+  if (BF.I.bucket == null) return;
+  addShaped(BF.I.bucket, 1, ["I I", " I "], { I: BF.I.iron_ingot }, "3 Iron Ingots in a V → Bucket");
+});
+
+BF.villageLife = { ai, tick, travel, toolNeed, findToolSeller, particles, sound, canSell, WHEAT_SPARE, statusText, stats, reset, useBucket, log: LOG, vdata, think, claims, WORK_END, FARM_R, FARM_MAX, WATER_REACH, ensureKit, findWater, fillBucket, gatherFor, gatherAt,
+  exportAll, importAll, bedRects,
+  villageAge: key => { const A = villageAges.get(key); return A ? A.lived : null; },   // game days loaded and active, or null if never
+  _test: { doFoodDeal, detectBeds, repairJob, chooseRepair, growOptions, chooseProject, priceLayout, crowded, newBedOptions, outerOf, projectTask, cellJob, layoutAt, findFill, findGather, gatherBlock, digOf, findLogSeller, doLogDeal, doToolDeal, perform, dealWith, findFoodSeller, milkDeal, findBottleSeller, findWheatSeller, doWheatDeal, feedWanted, get MILK_KEEP() { return BF.cowherd ? BF.cowherd.MILK_KEEP : 3; }, scanStep, inRange } };
+})();
