@@ -98,14 +98,19 @@ module.exports = async (pg) => {
     ok(farmland === 0, "the builder left the soil untilled", farmland);
     // a jobless villager takes the composter
     const PLAIN = ["cleric", "librarian", "cartographer", "armorer", "weaponsmith", "butcher", "fisherman", "fletcher", "leatherworker", "mason"];
-    const other = R.members.find(o => o.type === "villager" && !o.dead && !o.child && PLAIN.includes(o.profession) && o.jobsite);
+    // the one nearest the farm: one from a big village's far side can spend the whole wait walking (or be held by other tasks)
+    const fd = o => Math.hypot(o.position.x - entry.ox, o.position.z - entry.oz);
+    const other = R.members.filter(o => o.type === "villager" && !o.dead && !o.child && PLAIN.includes(o.profession) && o.jobsite).sort((a, b) => fd(a) - fd(b))[0];
     if (other) {
       const js0 = other.jobsite;
       BF.jobs.release(other);
       other.jobMem = null;   // a plain jobless villager (no remembered trade)
       if (js0) W.setBlock(js0.x, js0.y, js0.z, 0);   // and its old block gone, so the new composter is the free jobsite
-      for (let s = 0; s < 20 * 60 && other.profession === "unemployed"; s++) { BF.world.update(entry.ox, entry.oz, 30); step(0.05); if (BF.sky.time > 0.45) BF.sky.setTime(0.03); }
-      ok(R.members.some(o => o.profession === "farmer" && o.jobsite && W.getBlock(o.jobsite.x, o.jobsite.y, o.jobsite.z) === BF.B.composter && Math.abs(o.jobsite.x - entry.ox) < bp.w + 3 && Math.abs(o.jobsite.z - entry.oz) < bp.d + 3), "a jobless villager took the new composter", { prof: other.profession, js: other.jobsite });
+      // a big village has other free jobsites too, and one can come free during the wait (a forester's band saw when it dies or quits): cleared as they appear
+      const clear = () => { for (const j of BF.jobs.unclaimed(other, null, other)) if (!(j.id === BF.B.composter && Math.abs(j.x - entry.ox) < bp.w + 3 && Math.abs(j.z - entry.oz) < bp.d + 3)) W.setBlock(j.x, j.y, j.z, 0); };
+      clear();
+      for (let s = 0; s < 20 * 150 && other.profession === "unemployed"; s++) { if (s % 20 === 0) clear(); BF.world.update(entry.ox, entry.oz, 30); step(0.05); if (BF.sky.time > 0.45) BF.sky.setTime(0.03); }
+      ok(R.members.some(o => o.profession === "farmer" && o.jobsite && W.getBlock(o.jobsite.x, o.jobsite.y, o.jobsite.z) === BF.B.composter && Math.abs(o.jobsite.x - entry.ox) < bp.w + 3 && Math.abs(o.jobsite.z - entry.oz) < bp.d + 3), "a jobless villager took the new composter", { prof: other.profession, js: other.jobsite, dist: Math.round(fd(other)), task: other.vtask ? other.vtask.what : null });
     }
     // ---- 3. farmers' dirt
     const fa = R.members.find(o => o.profession === "farmer" && !o.dead && o.inv);
