@@ -242,7 +242,6 @@ function endLeisure(key) {
   for (const m of rec.members) {
     if (m.dead || m.removed || m.type !== "villager" || m.profession === "explorer" || !isLeisure(m)) continue;
     const task = BF.villagerStatus.text(m);
-    if (m.vtask) done(m);
     if (v && v.minX != null && edgeDist(v, m.position.x, m.position.z) > 4) { BF.mobs.sendHome(m); ended.push(nameOf(m) + " (" + task.toLowerCase() + ")"); }
   }
   if (ended.length) vlogLine(rec, "Unloaded: " + ended.join(", ") + " stopped and went home");
