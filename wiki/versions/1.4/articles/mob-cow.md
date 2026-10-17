@@ -2,7 +2,7 @@ Cows graze in open grassland in groups of four to eight, moving slowly and pausi
 
 ### Feeding and breeding
 
-Right click a cow holding [[item:wheat_item]] to feed it. Cows within 10 blocks of a player holding wheat follow them, which is the easy way to lead one into a pasture. A fed cow is willing for one game day. Two willing cows close together walk to each other, and a calf appears. Calves are half size, drop nothing, give no milk and take three game days to become adults. The parents rest a day before they will breed again. No breeding happens while 24 or more cows are within 16 blocks. See [[page:animal-husbandry]].
+Right click a cow holding [[item:wheat_item]] to feed it. Cows within 10 blocks of a player holding wheat follow them, which is the easy way to lead one into a pasture. A fed cow is willing for one game day. Two willing cows close together walk to each other, and a calf appears. Calves are half size, drop nothing, give no milk and take three game days to become adults. The parents rest a day before they will breed again. No breeding happens while 24 or more cows are within 16 blocks, or in a village pasture whose herd is over its limit. See [[page:animal-husbandry]].
 
 ### Milk
 
