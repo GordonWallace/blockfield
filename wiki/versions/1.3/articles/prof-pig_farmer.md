@@ -15,7 +15,7 @@ During working hours the pig farmer:
 Feed comes from the farmers, bought as it runs low. Fuel is bought too. Nothing is free: the pork comes from the pigs it culls.
 
 ### What it sells
-Raw and cooked porkchops. The [[villager:butcher]] buys the raw porkchops. It buys carrots, potatoes and beetroot from you.
+Raw and cooked porkchops. The [[villager:butcher]] buys the raw porkchops. It buys carrots, potatoes and beetroot from you. It never sells its feed, to villagers or to you, not even the few extra it gets when a farmer's lot is bigger than what it was short of.
 
 ### Starting kit
 6 to 10 carrots and 4 to 8 potatoes, to feed the sty. It never starts with pork. Nothing is restocked.

@@ -18,6 +18,8 @@ Each villager keeps what its next moves require, and never sells it, to villager
 - seed for a [[villager:farmer]], feed for a [[villager:shepherd]], the materials left on the structure a [[villager:builder]] is building and on the one it has chosen next;
 - the inputs of its next two crafts, for crafters such as the [[villager:toolsmith]], [[villager:furniture_maker]] and [[villager:cartographer]].
 
+What it keeps is worked out from what it holds at that moment, so goods it has just bought count at once: they are never offered as spare goods the instant the deal is done.
+
 ## Stock and purses
 A villager's stock of each ware is capped at a few batches of the offer size (six at Novice, down to two at Master, at most two stacks and about six emeralds' worth). Emeralds trickle in at 2 a day up to 12 for most villagers. Builders get 4 a day up to 80, because they pay for whole houses.
 
