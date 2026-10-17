@@ -53,10 +53,15 @@ server.listen(0, "127.0.0.1", async () => {
   const shot = async (name, wait) => {
     await pg.waitForTimeout(wait);
     // a planet frame is slow in SwiftShader: wait until the chunks in view are made and meshed (and the distant rings sampled), not a fixed time
-    await pg.waitForFunction(() => BF.world.queueLength === 0 && BF.world.meshedCount() >= BF.world.chunks.size * 0.9 &&
+    await pg.waitForFunction(() => BF.world.queueLength === 0 &&
       !(BF.lod && BF.lod.stats && BF.lod.stats().pending > 0), null, { timeout: 300000, polling: 1000 }).catch(async () => console.log("  (still loading after 300 s)", JSON.stringify(await pg.evaluate(() => ({ q: BF.world.queueLength, meshed: BF.world.meshedCount(), size: BF.world.chunks.size, lod: BF.lod && BF.lod.stats && BF.lod.stats().pending })))));
+    // a moment of live frames: the sky's fog takes in the distant rings now built, and the camera takes its frame for the face it is on
+    await pg.evaluate(() => { BF.state.paused = false; });
+    await pg.waitForTimeout(400);
+    await pg.evaluate(() => { BF.state.paused = true; for (const c of [...BF.camera.children]) { c.visible = false; c.scale.setScalar(1e-6); } });
     await pg.waitForTimeout(1500);
     await pg.evaluate(() => {   // the paused sky never moves its fog out to the view distance: do it here, further for a camera high above the ground
+      if (BF.lod && BF.lod.radius && BF.lod.radius() > 0) return;   // on the planet the distant terrain carries on past the chunks: keep the game's own fog
       const d = BF.world.viewDist * BF.CS, c = BF.camera.position, above = Math.max(0, c.y - Math.max(BF.worldgen.heightAt(Math.floor(c.x), Math.floor(c.z)), BF.SEA));
       BF.scene.fog.near = d * 0.35 + above; BF.scene.fog.far = d * 0.65 + above;   // inside the loaded area, so its edge never shows
       if (BF.camera.far < BF.scene.fog.far + 64) { BF.camera.far = BF.scene.fog.far + 64; BF.camera.updateProjectionMatrix(); }
