@@ -574,11 +574,33 @@ function beginPlan(m, bs, type, wood) {
   return e;
 }
 
-// Whole-structure estimate: blocks left x the mean time per block, the walk to the site and the steps between standing spots (~0.25 s a block).
+// The builder's own pace: game seconds per block while it works at the site (the walk there not counted), over windows of PACE_N blocks,
+// averaged. Sites differ (standing spots, line of sight, crowds), so the estimate follows what this builder actually manages.
+const PACE_N = 20;
+function pace(m, bs, e, dt, near) {
+  if (bs.paceE !== e.id) { bs.paceE = e.id; bs.paceP = e.prog; bs.paceT = 0; }
+  if (near) bs.paceT += dt;
+  const n = e.prog - bs.paceP;
+  if (n < 0) { bs.paceP = e.prog; bs.paceT = 0; return; }   // a second pass starts back at the skipped cells
+  if (n < PACE_N) return;
+  const spb = bs.paceT / n;
+  bs.spb = bs.spb ? (bs.spb + spb) / 2 : spb;
+  bs.paceP = e.prog; bs.paceT = 0;
+  // the structure's estimate follows the pace, so a countdown that starts mid-build waits for what is really left (js/villagesim.js)
+  const VS = BF.villageSim, t = m.vtask;
+  if (VS && t && t.what && t.what.indexOf("Building ") === 0) {
+    const per = Math.max((BLOCK_T[0] + BLOCK_T[1]) / 2 + 0.25, bs.spb);
+    t.end = dayNow() + (e.n - e.prog) * per * (VS.EST_MARGIN || 1) / 1200;
+  }
+  logEvent("pace", m, { spb: +bs.spb.toFixed(2), left: e.n - e.prog });
+}
+// Whole-structure estimate: blocks left x the time per block (the builder's measured pace, never below the mean placing time plus the
+// steps between standing spots, ~0.25 s a block) and the walk to the site.
 // Tells the village sim (begin) before the builder commits; false = it would not finish in time, so it must not start the structure.
 function beginBuild(m, blocks, x, z, name) {
   const VS = BF.villageSim;
-  return !(VS && VS.begin) || VS.begin(m, blocks * ((BLOCK_T[0] + BLOCK_T[1]) / 2 + 0.25) + (x == null ? 0 : VS.walkSecs(m, [[x, z]])), "Building " + name);
+  const per = Math.max((BLOCK_T[0] + BLOCK_T[1]) / 2 + 0.25, (m.bs && m.bs.spb) || 0);
+  return !(VS && VS.begin) || VS.begin(m, blocks * per + (x == null ? 0 : VS.walkSecs(m, [[x, z]])), "Building " + name);
 }
 // `pre`: the caller already began the task. Returns false when the structure is not started (countdown: it would not finish).
 function startBuild(m, bs, e, pre) {
@@ -909,6 +931,7 @@ function buildMode(m, bs, dt, out) {
   reachNow = e.retried ? REACH + 1.6 : REACH;     // second pass: stretch a little for the last awkward cells (gable tops)
   // watchdog: a cell that cannot be placed for 15 s (unreachable, stuck, no free line) is skipped so the structure still gets finished
   const cStall = e.prog < e.n ? cellOf(e, e.prog) : null;
+  pace(m, bs, e, dt, !!cStall && Math.hypot(cStall.x + 0.5 - m.position.x, cStall.z + 0.5 - m.position.z) <= 16);
   if (bs.stallP !== e.prog || !cStall || Math.hypot(cStall.x + 0.5 - m.position.x, cStall.z + 0.5 - m.position.z) > 16) { bs.stallP = e.prog; bs.stallT = 0; }   // the clock runs only near the block: a long walk to a far site is not a stall
   else if ((bs.stallT += dt) > 15) {
     const c0 = cStall;
