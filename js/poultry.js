@@ -50,7 +50,7 @@ const cnt = (m, id) => (id == null || !m.inv ? 0 : TR().inv.count(m.inv, id));
 const idsOf = () => ({ seeds: BF.I.wheat_seeds, egg: BF.I.egg, feather: BF.I.feather, chicken: BF.I.raw_chicken });
 const layDays = () => rnd(LAY_MIN, LAY_MAX);
 const LOG = [];
-const log = (kind, data) => { LOG.push(Object.assign({ kind, day: +now().toFixed(3) }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, data) => { LOG.push(BF.glog.job("poultry", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 200) LOG.shift(); };
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Poultry keeper") + " (Poultry Keeper) " + text, m); };
 
 let ids = 0;

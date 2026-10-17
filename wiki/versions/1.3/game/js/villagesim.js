@@ -104,7 +104,11 @@ const edgeDist = (v, px, pz) => Math.hypot(Math.max(0, v.minX - px, px - v.maxX)
 const ending = new Map();        // village key -> {t0, until (game day), est: [{who, task, secs}], max}
 const errors = [];               // loading errors, newest last (shown on the debug screen)
 const nowDay = () => dayNow();
-function logError(kind, data) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }
+function logError(kind, data) {
+  errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift();
+  if (BF.glog) BF.glog.log("ERROR", "loading", kind === "task-running" ? data.who + "'s task was cut off when the village unloaded: " + data.task + " (estimate " + data.estimate + " s, ran " + data.ran + " s; " + data.why + ")"
+    : data.who + " was stopped mid-task: " + data.task + " (" + data.action + "; " + data.why + ")", { village: data.village });   // js/gamelog.js
+}
 // At leisure: no task begun (begin) and doing one of the leisure things in js/villagerstatus.js. A task that runs past its estimate still counts.
 const isLeisure = m => !m.vtask && !!(BF.villagerStatus && BF.villagerStatus.leisure && BF.villagerStatus.leisure(m));
 const vlogLine = (rec, text, where) => { if (BF.vlog && rec) BF.vlog.log(rec, "loading", text, where); };   // the game log gets it at INFO (js/gamelog.js)
