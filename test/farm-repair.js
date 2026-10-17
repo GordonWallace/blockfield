@@ -7,7 +7,7 @@
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
-const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 3);
+const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
