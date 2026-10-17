@@ -6,7 +6,7 @@ Wild pigs are placed in groups when land first loads, and a stretch of forest or
 
 ### Feeding and breeding
 
-Hold a [[item:carrot]], [[item:potato]] or [[item:beetroot]] and right click a pig to feed it. Pigs within 10 blocks of a player holding any of these walk after them, so you can lead a pig anywhere. A fed adult is willing to breed for one game day; two willing pigs close together walk to each other and a piglet appears. Piglets are half size, drop nothing and take three game days to grow up. Both parents then rest a day. Pigs do not breed when 24 or more are within 16 blocks. More on this in [[page:animal-husbandry]].
+Hold a [[item:carrot]], [[item:potato]] or [[item:beetroot]] and right click a pig to feed it. Pigs within 10 blocks of a player holding any of these walk after them, so you can lead a pig anywhere. A fed adult is willing to breed for one game day; two willing pigs close together walk to each other and a piglet appears. Piglets are half size, drop nothing and take three game days to grow up. Both parents then rest a day. Pigs do not breed when 24 or more are within 16 blocks, or in a village sty whose herd is over its limit. More on this in [[page:animal-husbandry]].
 
 ### Villages
 
