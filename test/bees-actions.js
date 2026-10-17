@@ -57,9 +57,12 @@ module.exports = async (pg) => {
     await settle(V.x, V.z);
     BF.player.invulnerable = true;
     BF.sky.setTime(0.05);
-    for (let k = 0; k < 160; k++) step();
+    // the most bees each home has had out at once from here on: its chunk has just loaded by day in dry weather, so its bees are scattered
+    // within R of it and fly home over the next seconds, before the hives are known below
+    const peakOf = new Map(), notePeaks = () => { for (const h of BE.loadedHomes()) peakOf.set(h, Math.max(peakOf.get(h) || 0, BE.out(h).length)); };
+    for (let k = 0; k < 160; k++) { step(); notePeaks(); }
     let rec = null;
-    for (let k = 0; k < 160 && !((rec = BF.mobs.villages.get(V.x + "," + V.z)) && rec.members.some(m => m.profession === "beekeeper")); k++) { W.update(V.x, V.z, 8); for (let j = 0; j < 10; j++) step(); }
+    for (let k = 0; k < 160 && !((rec = BF.mobs.villages.get(V.x + "," + V.z)) && rec.members.some(m => m.profession === "beekeeper")); k++) { W.update(V.x, V.z, 8); for (let j = 0; j < 10; j++) { step(); notePeaks(); } }
     const K = rec && rec.members.find(m => m.profession === "beekeeper" && !m.dead);
     ok("the village has a beekeeper", !!K, rec && rec.members.map(m => m.profession));
     if (!K) return R;
@@ -81,9 +84,12 @@ module.exports = async (pg) => {
 
     // ---- bees out by day, home at dusk and in rain
     const h0 = H[0];
-    let out1 = 0;
+    // (counted from the hive's chunk loading: at about 8 bees, those coming out of the hive one by one over a minute, a trip of 10-25 s each
+    // and 15-35 s inside between trips, are 3 or 4 out at once at most, so half of them out together is the scatter at chunk load)
+    const peak0 = peakOf.get(h0) || 0;
+    let out1 = peak0;
     for (let i = 0; i < 1400; i++) { step(); out1 = Math.max(out1, BE.out(h0).length); }   // 70 s: they come out over about a minute, resting inside between trips
-    ok("by day a hive's bees come out", out1 >= h0.bees / 2 && BE.list.length > 0, { peakOut: out1, bees: h0.bees, all: BE.list.length });
+    ok("by day a hive's bees come out", out1 >= h0.bees / 2 && BE.list.length > 0, { peakOut: out1, atLoad: peak0, bees: h0.bees, all: BE.list.length });
     let sides = 0; for (let i = 0; i < 400; i++) { const sp = BE.landingSpot(h0.x, h0.y + 2, h0.z, 6); if (sp && sp.ny === 0) sides++; }
     R.info.sideSpots = sides;
     let landed = 0, wall = 0, flowerL = 0, ceil = 0;
