@@ -88,9 +88,16 @@ module.exports = async (pg) => {
       const pen = BF.shepherd.penOf(shep), shorn = () => pen ? pen.sheep.filter(x => x.shorn).length : 0;
       const shears = TW.best(shep, "shears"), w0 = (shears && shears.wear) || 0, s0 = shorn();
       const hoe = farmer && TW.best(farmer, "hoe"), h0 = (hoe && hoe.wear) || 0, till0 = farmer && farmer.farm ? farmer.farm.tilled || 0 : 0;
-      for (let i = 0; i < 6000; i++) step();
-      const used = ((shears && shears.wear) || 0) - w0, sheared = shorn() - s0;
-      ok("shepherd's shears wore one use per sheep shorn", used > 0 && used === sheared, { used, sheared });
+      // A quarter of a day (6000 steps) usually holds a shearing, but the shepherd feeds the flock first and then may walk off to buy
+      // wheat (js/villagelife.js shopAI: a seller 30-40 blocks away, sometimes a second one), which can push the shearing past it. Then
+      // run on until it shears, up to the end of its working day (js/shepherd.js WORK_END 0.5).
+      const wear = () => (shears && shears.wear) || 0;
+      let steps = 0;
+      for (; steps < 6000 || (wear() === w0 && shorn() === s0 && BF.sky.time < 0.48); steps++) step();
+      const used = wear() - w0, sheared = shorn() - s0;
+      ok("shepherd's shears wore one use per sheep shorn", used > 0 && used === sheared, used > 0 && used === sheared ? { used, sheared }
+        : { used, sheared, steps, time: +BF.sky.time.toFixed(3), shears: !!shears, sheep: pen && pen.sheep ? pen.sheep.map(s => (s.shorn ? "shorn" : "wool") + (s.mob ? "" : ":unloaded")) : null,
+          status: BF.villageLife.statusText(shep), sleeping: !!shep.sleeping, fromLoom: shep.jobsite ? [shep.position.x - shep.jobsite.x, shep.position.z - shep.jobsite.z].map(Math.round) : null });
       if (farmer && hoe) {
         const tilled = (farmer.farm ? farmer.farm.tilled || 0 : 0) - till0, hw = (hoe.wear || 0) - h0;
         if (tilled > 0) ok("farmer's hoe wore one use per block tilled", hw === tilled, { tilled, hw });
