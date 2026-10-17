@@ -1598,6 +1598,10 @@ function villagerAI(m, dt, out) {
   }
   if (bedtime()) { nightAI(m, dt, out); return; }
   ai.night = null;
+  // an explorer out mapping and a merchant on a trip stay where they are between tasks (and before the working day) rather than walk back,
+  // and have no house to walk out of in the morning
+  const away = (m.profession === "explorer" && BF.explorer && BF.explorer.away && BF.explorer.away(m)) || (m.profession === "merchant" && BF.merchant && BF.merchant.away && BF.merchant.away(m));
+  if (away && ai.leaving) { ai.leaving = false; if (ai.routeKind === "out") ai.route = null; }
   if (ai.leaving && morningAI(m, dt, out)) return;
   if (jobsAI(m, dt, out)) { m.idleT = 0; return; }
   m.idleT = (m.idleT || 0) + dt;
@@ -1617,7 +1621,8 @@ function villagerAI(m, dt, out) {
       if (fy > 0 && (BF.world.getBlock(fx, fy, fz) === BF.B.farmland || BF.world.getBlock(fx, fy, fz) === BF.B.farmland_dry)) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
     }
   }
-  if (V) {
+  if (away && ai.mode === "walk" && Math.hypot(ai.tx - m.position.x, ai.tz - m.position.z) > 12) { ai.mode = "idle"; ai.t = rnd(1, 3); }
+  if (V && !away) {
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
       ai.mode = "walk"; ai.tx = ax + rnd(-6, 6); ai.tz = az + rnd(-6, 6); ai.t = rnd(5, 8);
