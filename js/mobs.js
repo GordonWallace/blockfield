@@ -1346,8 +1346,10 @@ function pathToBed(m) {
   const [x, y, z] = feetCell(m);
   return findPath(x, y, z, { x: b.x, z: b.z, at });
 }
+// The house a villager walks out of in the morning: its home, or for a bred child (no home of its own) the house of the bed it slept in.
+const outHouse = m => m.home || (m.bed && !m.bed.tent ? homeOfBed(m.village, m.bed) : null);
 function pathOut(m) {
-  const H = m.home || (m.bed && !m.bed.tent ? homeOfBed(m.village, m.bed) : null);   // bred children have no home of their own: the house of their bed
+  const H = outHouse(m);
   if (!H || H.outX == null) return null;
   const [x, y, z] = feetCell(m);
   return findPath(x, y, z, { x: H.outX, z: H.outZ, at: (cx, cy, cz) => cx === H.outX && cz === H.outZ }, 1200);
@@ -1528,9 +1530,10 @@ function morningAI(m, dt, out) {
   if (st === "stuck" && (ai.leaveTries = (ai.leaveTries || 0) + 1) < 3) { ai.route = null; return true; }
   if (st === "going") return true;
   ai.leaving = false; ai.route = null; ai.leaveTries = 0; ai.leaveEnd = st;
-  if (st === "done" && m.home) { // keep walking away from the door so it gets closed behind them
-    const H = m.home;
+  const H = st === "done" && outHouse(m);   // (a bred child too: standing on the doorstep, its next wander could take it back in through the open door)
+  if (H && H.outX != null) { // keep walking away from the door so it gets closed behind them
     ai.mode = "walk"; ai.t = 5; ai.tx = H.outX + 0.5 + (H.outX - H.doorX) * 5; ai.tz = H.outZ + 0.5 + (H.outZ - H.doorZ) * 5;
+    ai.outT = 5;   // not turned back toward the village centre meanwhile (villagerAI): from a house at the edge facing away, that led back in through the open door
   }
   return false;
 }
@@ -1613,7 +1616,8 @@ function villagerAI(m, dt, out) {
       if (fy > 0 && (BF.world.getBlock(fx, fy, fz) === BF.B.farmland || BF.world.getBlock(fx, fy, fz) === BF.B.farmland_dry)) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
     }
   }
-  if (V) {
+  if (ai.outT > 0) ai.outT -= dt;
+  if (V && !(ai.outT > 0 && ai.mode === "walk")) {   // (not while walking away from the door it came out of this morning: morningAI)
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
       ai.mode = "walk"; ai.tx = ax + rnd(-6, 6); ai.tz = az + rnd(-6, 6); ai.t = rnd(5, 8);
