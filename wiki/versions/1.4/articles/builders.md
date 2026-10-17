@@ -68,7 +68,7 @@ The builder looks for open ground in and around the village:
 ## Building order
 The builder places any foundation fill first, then the structure in phases: the floor, the walls from the bottom up, the roof, the windows, the door, the beds and last the torches and furniture. It takes one item from its inventory for every block, one block every 0.5 to 0.8 seconds. It must be within reach, about 4 blocks, with a clear line to the spot, so it walks around the building to find standing places. It never places a block into a space where someone stands, and waits, then skips. It does not overwrite solid blocks and it does not climb, so structures are limited to what it can reach from the ground. A cell it cannot reach is retried at the end of the job with a longer reach.
 
-- A **well** needs a full water bucket, and so does any other structure with water in it. A builder counts a bucket among the materials it needs for these, and buys one if it has none. If it has only an empty one it walks to water within about 30 blocks and fills it.
+- A **well** needs a full water bucket, and so does any other structure with water in it. A builder counts a bucket among the materials it needs for these, and buys one if it has none. If it has only an empty one it walks to water within about 30 blocks and fills it, taking the source block (a lake, pond or well flows back in).
 - **Windows** need glass panes. If nobody in the village has any and there is no glassmaker, the builder leaves the windows open and comes back to glaze them once panes turn up.
 - A house's first bed becomes the builder's own if it has none (see below).
 
