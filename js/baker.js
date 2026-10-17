@@ -49,7 +49,7 @@ const cnt = (m, id) => (id == null || !m || !Array.isArray(m.inv) ? 0 : TR().inv
 const pk = (x, y, z) => x + "," + y + "," + z;
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 const LOG = [];
-const log = (kind, data) => { LOG.push(Object.assign({ kind, day: +now().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, data) => { LOG.push(BF.glog.job("baker", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 300) LOG.shift(); };
 const who = m => (BF.vlog && BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Villager") + " (" + String(m.profession || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) + ")";
 const vlog = (m, text, where) => { if (BF.vlog && m && m.village) BF.vlog.log(m.village, "bake", who(m) + " " + text, where || m); };
 

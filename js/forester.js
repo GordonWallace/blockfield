@@ -46,7 +46,7 @@ const SWEEP_R = 12, SWEEP_MAX = 120;   // after felling it stays until no wanted
 const BUILD_AVOID = 8;  // never plants within 8 blocks of a building or other structure (anything not landscape; dirt paths do not count)
 
 const LOG = [];
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: "forester" + (m && m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("forester", Object.assign({ kind, who: "forester" + (m && m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 const nowS = () => BF.simNow();
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const W = () => BF.world;

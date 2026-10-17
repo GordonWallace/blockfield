@@ -531,7 +531,7 @@ function newState() { return { mode: "idle", t: rnd(1, 3), cool: 0, stage: null,
 const nextId = built => built.reduce((a, e) => Math.max(a, e.id || 0), 0) + 1;
 function logEvent(kind, m, data) {
   const e = Object.assign({ kind, day: +dayNow().toFixed(3), builder: m && m.slot ? m.slot.idx : null }, data);
-  log.push(e); if (log.length > 200) log.shift();
+  log.push(BF.glog.job("builder", e)); if (log.length > 200) log.shift();
   try { console.info("[builder] " + kind + " " + JSON.stringify(data)); } catch (_) {}
 }
 

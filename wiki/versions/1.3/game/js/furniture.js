@@ -33,7 +33,7 @@ const FURNACE_COBBLE = 8;                     // one furnace = 8 cobblestone
 const FURNACE_STOCK = 1;                      // keeps this many furnaces in stock, demand or not
 const CRAFT_PAUSE = 1.8, WORK_END = 0.45, TRADE_PAUSE = 1.6;
 const LOG = [];
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("furniture", Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const isWool = id => { const n = nameOf(id); return n === "wool" || /_wool$/.test(n); };
