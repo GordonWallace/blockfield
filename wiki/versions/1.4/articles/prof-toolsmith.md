@@ -8,7 +8,7 @@ Standing at its smithing table, the toolsmith crafts one tool every 2 game hours
 
 It follows the usual recipes: 3 head items and 2 sticks for a pickaxe or axe, 2 and 2 for a hoe, 2 iron ingots for shears, 3 for a bucket. Planks of any wood, cobblestone, iron ingots, gold ingots and diamonds are the heads.
 
-It keeps its stock even. It makes a tool while it holds fewer than 2 of that kind in that material or better, and never holds more than 4 of one kind. It keeps only one hoe, one pair of shears and one bucket. It always tries the best material it can get, but if the better material is sold in the village and simply out of stock (the miner is out of cobblestone, say), it waits up to 6 game hours before making a lesser tool, as long as it already has one of that kind on the shelf (or the lesser tool would only be wooden).
+It keeps its stock even. It makes a tool while it holds fewer than 2 of that kind in that material or better, and never holds more than 4 of one kind. It keeps only one hoe, one pair of shears and one bucket. It always tries the best material it can get, but if the better material is sold in the village and simply out of stock (the miner is out of cobblestone, say), it waits up to 6 game hours before making a lesser tool, as long as it already has one of that kind on the shelf (or the lesser tool would only be wooden). Each wait shows on the debug screen's Economy view as something it wanted and could not buy, from the hour it begins, even when it begins at its smithing table just before the working day ends.
 
 ### Where it gets its materials
 It makes everything from what it buys from the other villagers, at their prices:
