@@ -16,7 +16,7 @@ A running village keeps the terrain of its area and 16 blocks around it loaded a
 ## The countdown before a village stops
 When a village would stop, because you moved away or because other villages pushed it out of the nearest four, it does not stop at once. It counts down.
 
-1. Each villager works out how long it needs to finish what it is doing: the walk there and back and the work itself, plus a 25% margin.
+1. Each villager works out how long it needs to finish what it is doing: the walk there and back and the work itself, plus a 25% margin. A [[villager:builder]] times its own pace while it builds and bases the estimate for the rest of the structure on it.
 2. The longest estimate sets the village's timer. It is never longer than 2 game days.
 3. While the timer runs, a villager that finishes a task only starts a new one if the new one will end before the timer does. Otherwise it idles near home. Short jobs still start.
 4. Waiting does not count as a task, such as a villager with nobody to trade with. A villager asleep in bed or a child holds nothing up. Nor does leisure: strolling around the village, relaxing, loafing or wandering about, winding down for the evening, looking for work, heading out for the day or to bed, having no bed, being in love, running from a zombie, a [[villager:forester]] between tasks (looking for saplings or holding saplings to plant) and a [[villager:builder]] planning its next structure. Leisure just ends when the village unloads; a villager at leisure outside the village is put back home, and the village log says so.
