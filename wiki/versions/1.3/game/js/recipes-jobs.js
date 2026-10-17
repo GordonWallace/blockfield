@@ -1,0 +1,41 @@
+// Jobsite pack recipes (vanilla shapes), registered through BF.recipeHooks. Substitutes where the vanilla ingredient does not exist:
+// brewing stand uses a gold ingot for the blaze rod; the drafting table (builder, not vanilla) is paper + blue dye over 4 planks.
+(() => {
+"use strict";
+const BF = (window.BF = window.BF || {});
+(BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
+  const I = BF.I;
+  if (I.composter === undefined) return;
+  const names = BF.blocks.filter(b => b && !b.hidden).map(b => b.name);
+  const ids = list => list.map(n => I[n]).filter(x => x !== undefined);
+  const PLANKS = ids(names.filter(n => n === "planks" || /_planks$/.test(n)));
+  const LOGS = ids(names.filter(n => /_(log|wood)$/.test(n)));
+  const WSLAB = ids(["oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry"].map(s => s + "_slab"));
+  addShaped(I.composter, 1, ["S S", "S S", "SSS"], { S: WSLAB }, "7 Wooden Slabs (U) → Composter");
+  addShaped(I.lectern, 1, ["SSS", " B ", " S "], { S: WSLAB, B: I.bookshelf }, "Wooden Slabs around a Bookshelf → Lectern");
+  addShaped(I.brewing_stand, 1, [" G ", "CCC"], { G: I.gold_ingot, C: I.cobblestone }, "Gold Ingot over 3 Cobblestone → Brewing Stand");
+  addShaped(I.blast_furnace, 1, ["III", "IFI", "SSS"], { I: I.iron_ingot, F: I.furnace, S: I.smooth_stone }, "5 Iron + Furnace + 3 Smooth Stone → Blast Furnace");
+  addShaped(I.grindstone, 1, ["TST", "P P"], { T: I.stick, S: I.stone_slab, P: PLANKS }, "Sticks, Stone Slab, Planks → Grindstone");
+  addShaped(I.smithing_table, 1, ["II", "PP", "PP"], { I: I.iron_ingot, P: PLANKS }, "2 Iron Ingots over 4 Planks → Smithing Table");
+  addShaped(I.smoker, 1, [" L ", "LFL", " L "], { L: LOGS, F: I.furnace }, "4 Logs around a Furnace → Smoker");
+  addShaped(I.barrel, 1, ["PSP", "P P", "PSP"], { P: PLANKS, S: WSLAB }, "6 Planks + 2 Wooden Slabs → Barrel");
+  addShaped(I.loom, 1, ["SS", "PP"], { S: I.string, P: PLANKS }, "2 String over 2 Planks → Loom");
+  addShaped(I.fletching_table, 1, ["FF", "PP", "PP"], { F: I.flint, P: PLANKS }, "2 Flint over 4 Planks → Fletching Table");
+  addShaped(I.stonecutter, 1, [" I ", "SSS"], { I: I.iron_ingot, S: I.stone }, "Iron Ingot over 3 Stone → Stonecutter");
+  addShaped(I.cauldron, 1, ["I I", "I I", "III"], { I: I.iron_ingot }, "7 Iron Ingots (U) → Cauldron");
+  addShaped(I.cartography_table, 1, ["PP", "WW", "WW"], { P: I.paper, W: PLANKS }, "2 Paper over 4 Planks → Cartography Table");
+  addShaped(I.drafting_table, 1, ["PD", "WW", "WW"], { P: I.paper, D: I.blue_dye, W: PLANKS }, "Paper + Blue Dye over 4 Planks → Drafting Table");
+  if (I.survey_table !== undefined && I.compass !== undefined) addShaped(I.survey_table, 1, ["PC", "WW", "WW"], { P: I.paper, C: I.compass, W: PLANKS }, "Paper + Compass over 4 Planks → Survey Table (explorer)");
+  if (I.band_saw !== undefined) addShaped(I.band_saw, 1, ["IFI", "IFI", "SSS"], { I: I.iron_ingot, F: I.flint, S: I.stone }, "4 Iron + 2 Flint + 3 Stone → Band Saw (forester)");
+  const WOOL = ids(names.filter(n => /_wool$/.test(n)));
+  if (I.carpentry_bench !== undefined) addShaped(I.carpentry_bench, 1, ["WI", "PP", "PP"], { W: WOOL, I: I.iron_ingot, P: PLANKS }, "Wool + Iron Ingot over 4 Planks → Carpentry Bench (furniture maker)");
+  if (I.mining_bench !== undefined) addShaped(I.mining_bench, 1, ["IC", "PP", "PP"], { I: I.iron_pickaxe, C: I.cobblestone, P: PLANKS }, "Iron Pickaxe + Cobblestone over 4 Planks → Mining Bench (miner)");
+  if (I.tack_rack !== undefined) addShaped(I.tack_rack, 1, ["LI", "PP", "PP"], { L: I.leather, I: I.iron_ingot, P: PLANKS }, "Leather + Iron Ingot over 4 Planks → Tack Rack (stable hand)");
+  if (I.merchant_counter !== undefined) addShaped(I.merchant_counter, 1, ["SSS", "PCP"], { S: WSLAB, P: PLANKS, C: I.chest }, "3 Wooden Slabs over Planks, Chest, Planks → Merchant's Counter (merchant)");
+  if (I.tent !== undefined) addShaped(I.tent, 1, ["WWW", "WWW", "S S"], { W: WOOL, S: I.stick }, "6 Wool (any colour) over 2 Sticks → Tent");
+  if (I.nesting_box !== undefined && I.hay_bale !== undefined) addShaped(I.nesting_box, 1, [" P ", "PHP", " P "], { P: PLANKS, H: I.hay_bale }, "4 Planks around 1 Hay Bale → Nesting Box (poultry keeper)");
+  if (I.milk_churn !== undefined) addShaped(I.milk_churn, 1, ["P P", "PIP"], { P: PLANKS, I: I.iron_ingot }, "4 Planks around 1 Iron Ingot (a U) → Milk Churn (cowherd)");
+  if (I.feed_trough !== undefined) addShaped(I.feed_trough, 1, ["P P", "P P", "PPP"], { P: PLANKS }, "7 Planks in a deep U → Feed Trough (pig farmer)");
+  fuel(ids(["composter", "lectern", "barrel", "loom", "fletching_table", "smithing_table", "cartography_table", "drafting_table", "survey_table", "carpentry_bench", "merchant_counter", "nesting_box", "feed_trough"]), 15);
+});
+})();
