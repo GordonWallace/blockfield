@@ -13,7 +13,7 @@ A vegetable farm that a [[villager:builder]] built is left with water in its cha
 The farmer takes a short break after about one task in twenty. Farmers also wander out to look at their fields.
 
 ### Where it gets its materials
-Farmers buy the logs for bed edges from a [[villager:forester]], up to 16 at a time, preferring the bed's own kind of log. It fills its bucket at any water source within about 30 blocks of the village. It gathers its dirt from open ground just outside the village, never from inside it. Dirt it digs beyond what its own projects need is sold as spare goods, 16 dirt for an emerald. Builders buy it to level a vegetable farm. It keeps 8 of every seed and crop it plants.
+Farmers buy the logs for bed edges from a [[villager:forester]], up to 16 at a time, preferring the bed's own kind of log. It fills its bucket at any water source within about 30 blocks of the village, taking the source block as the player's bucket does: a lake, pond or well flows back in, a lone source is used up. It never fills from a bed's own channel water when that would not flow back. It gathers its dirt from open ground just outside the village, never from inside it. Dirt it digs beyond what its own projects need is sold as spare goods, 16 dirt for an emerald. Builders buy it to level a vegetable farm. It keeps 8 of every seed and crop it plants.
 
 ### What it sells and buys
 It sells crops and food baked from them: bread, baked potatoes, hay bales and more, and buys crops, sugar cane and pumpkins from you at better levels. It sells to the other villagers too, and they come to it first when hungry.
