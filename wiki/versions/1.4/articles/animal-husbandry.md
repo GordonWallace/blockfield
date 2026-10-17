@@ -38,7 +38,7 @@ Cows, pigs and chickens within 10 blocks of a player holding their food walk aft
 
 ## Pens, coops, pastures and sties
 
-Villages keep their animals in fenced buildings: a **pen** for sheep, a **coop** for chickens, a **pasture** for cows, a **sty** for pigs and a **paddock** for horses. Animals inside stay inside, and each building has a size limit. A keeper cares for them:
+Villages keep their animals in fenced buildings: a **pen** for sheep, a **coop** for chickens, a **pasture** for cows, a **sty** for pigs and a **paddock** for horses. Animals inside stay inside, and each building has a size limit. Wild animals are never set down inside one when land first loads (see [[page:mob-spawning]]); they only come in through the gate. A keeper cares for them:
 
 - The [[villager:shepherd]] feeds, shears and, when the pen is full, culls sheep.
 - The [[villager:poultry_keeper]] collects eggs and culls past eight chickens.
