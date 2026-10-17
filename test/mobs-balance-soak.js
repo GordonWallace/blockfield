@@ -46,6 +46,10 @@ const RUN = 3;   // days each group of villages runs
     const vs = all.filter(v => v.pop >= 4 && P.distance(v, { x: spot[0], z: spot[1] }) > 320).sort((a, b) => P.distance(a, { x: spot[0], z: spot[1] }) - P.distance(b, { x: spot[0], z: spot[1] })).slice(0, need);
     if (vs.length < need) return { err: 'only ' + vs.length + ' villages' };
     const key = v => Math.round(v.x) + ',' + Math.round(v.z);
+    // The village sim's frame-time guard (js/villagesim.js overLimit "AI time", LIMITS.aiMs) force-stops a village beyond ALWAYS of the player
+    // when villager AI averages over 6 ms a frame, a pin's destination (its second village) first. On a busy machine that dropped a pinned
+    // village for a while and the soak read its people as 0. The guard is not what this soak measures (test/force-unload.js checks it).
+    BF.villageSim.LIMITS.aiMs = Infinity;
     const R = window.__rec = { spot, groups: [], born: 0, died: 0, noWild: {}, days: [], pops: {}, animals: {}, nights: {}, keepers: {}, bad: [] };
     for (let g = 0; g < groups; g++) R.groups.push(vs.slice(g * 4, g * 4 + 4).map(key));
     window.__vs = new Map(vs.map(v => [key(v), v]));
