@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Takes Blockfieldpedia's pictures with the game itself: a portrait of every mob and villager profession, and a view of every biome,
-// rivers, mountains, the coast and villages, in a fresh world (seed 1337, the planet; places are found around its spawn on face 4). Writes JPEGs to
+// rivers, mountains, the coast, villages and the planet from high up, in a fresh world (seed 1337, the planet; places are found around its spawn on face 4). Writes JPEGs to
 // wiki/versions/<version>/images/ (the version under development by default). Rerun it when a release changes how things look.
 // Needs Playwright with Chromium: NODE_PATH=$(npm root -g) node wiki/capture.js [version] [only-prefix]
 // (e.g. `node wiki/capture.js 1.3 mob-` retakes only the mob portraits). Takes several minutes: each view waits for its terrain to load.
@@ -52,13 +52,22 @@ server.listen(0, "127.0.0.1", async () => {
   }, [x, y, z, yaw, pitch, dist || 0]);
   const shot = async (name, wait) => {
     await pg.waitForTimeout(wait);
+    // a planet frame is slow in SwiftShader: wait until the chunks in view are made and meshed (and the distant rings sampled), not a fixed time
+    await pg.waitForFunction(() => BF.world.queueLength === 0 &&
+      !(BF.lod && BF.lod.stats && BF.lod.stats().pending > 0), null, { timeout: 300000, polling: 1000 }).catch(async () => console.log("  (still loading after 300 s)", JSON.stringify(await pg.evaluate(() => ({ q: BF.world.queueLength, meshed: BF.world.meshedCount(), size: BF.world.chunks.size, lod: BF.lod && BF.lod.stats && BF.lod.stats().pending })))));
+    // a moment of live frames: the sky's fog takes in the distant rings now built, and the camera takes its frame for the face it is on
+    await pg.evaluate(() => { BF.state.paused = false; });
+    await pg.waitForTimeout(400);
+    await pg.evaluate(() => { BF.state.paused = true; for (const c of [...BF.camera.children]) { c.visible = false; c.scale.setScalar(1e-6); } });
+    await pg.waitForTimeout(1500);
     await pg.evaluate(() => {   // the paused sky never moves its fog out to the view distance: do it here, further for a camera high above the ground
+      if (BF.lod && BF.lod.radius && BF.lod.radius() > 0) return;   // on the planet the distant terrain carries on past the chunks: keep the game's own fog
       const d = BF.world.viewDist * BF.CS, c = BF.camera.position, above = Math.max(0, c.y - Math.max(BF.worldgen.heightAt(Math.floor(c.x), Math.floor(c.z)), BF.SEA));
       BF.scene.fog.near = d * 0.35 + above; BF.scene.fog.far = d * 0.65 + above;   // inside the loaded area, so its edge never shows
       if (BF.camera.far < BF.scene.fog.far + 64) { BF.camera.far = BF.scene.fog.far + 64; BF.camera.updateProjectionMatrix(); }
     });
     await pg.waitForTimeout(300);
-    await pg.screenshot({ path: path.join(OUT, name + ".jpg"), type: "jpeg", quality: 82 });
+    await pg.screenshot({ path: path.join(OUT, name + ".jpg"), type: "jpeg", quality: 82, timeout: 180000 });   // a planet frame in SwiftShader can take seconds
     console.log("took", name);
   };
   const want = name => name.startsWith(only);
@@ -122,19 +131,19 @@ server.listen(0, "127.0.0.1", async () => {
     if (/^Deep |^Frozen River|^(Cold|Lukewarm|Warm|Frozen) Ocean/.test(name)) continue;   // one ocean and one river picture is enough
     const n = "biome-" + slug(name);
     if (!want(n)) continue;
-    await look(x, (await H(x, z)) + 30, z, 0.7, -0.3, 10);
+    await look(x, (await H(x, z)) + 30, z, 0.7, -0.3, 6);   // 6 chunks of blocks, the distant terrain beyond (a planet view of 10 takes minutes to load here)
     await shot(n, 9000);
-    await look(x, (await H(x, z)) + 2.2, z, 2.4, -0.06, 10);   // and standing in it
+    await look(x, (await H(x, z)) + 2.2, z, 2.4, -0.06, 6);   // and standing in it
     await shot(n + "-ground", 2500);
   }
   // rivers: high above one, looking along it; the coast; mountains from afar; the escarpment from below
   const river = P.found.River;
-  if (river && want("terrain-river")) { await look(river[0], (await H(river[0], river[1])) + 60, river[1], 0.4, -0.55, 10); await shot("terrain-river", 30000); }
+  if (river && want("terrain-river")) { await look(river[0], (await H(river[0], river[1])) + 60, river[1], 0.4, -0.55, 8); await shot("terrain-river", 30000); }
   const beach = P.found.Beach;
-  if (beach && want("terrain-coast")) { await look(beach[0], (await H(beach[0], beach[1])) + 40, beach[1], 2.2, -0.35, 10); await shot("terrain-coast", 30000); }
+  if (beach && want("terrain-coast")) { await look(beach[0], (await H(beach[0], beach[1])) + 40, beach[1], 2.2, -0.35, 8); await shot("terrain-coast", 30000); }
   if (P.esc && want("terrain-escarpment")) {
     const [x, z, dir] = P.esc, lowX = dir > 0 ? x - 80 : x + 144;
-    await look(lowX, (await H(lowX, z)) + 25, z, dir > 0 ? -Math.PI / 2 : Math.PI / 2, 0.15, 12);
+    await look(lowX, (await H(lowX, z)) + 25, z, dir > 0 ? -Math.PI / 2 : Math.PI / 2, 0.15, 8);
     await shot("terrain-escarpment", 30000);
   }
   // villages: the nearest one from the air, and one of each biome style
@@ -145,10 +154,19 @@ server.listen(0, "127.0.0.1", async () => {
     const n = "village-" + slug(v.biome);
     if (!want(n)) continue;
     const d = Math.max(50, v.r * 0.55);
-    await look(v.x - d * 0.8, (await H(v.x, v.z)) + d, v.z - d * 0.8, -2.36, -0.8, 16);
+    await look(v.x - d * 0.8, (await H(v.x, v.z)) + d, v.z - d * 0.8, -2.36, -0.8, 8);
     await shot(n, 40000);
   }
 
+  // the planet itself (spec r14-25): the curve of the ground 6,000 up, and the whole globe from orbit (off the planet, north at the top)
+  if (want("planet-")) {
+    const s = await pg.evaluate(() => { const p = BF.spawnPoint || BF.player.position; return [p.x, p.z]; });
+    await look(s[0], (await H(s[0], s[1])) + 6000, s[1], 0.7, -0.35, 6);
+    await shot("planet-curve", 20000);
+    await pg.waitForFunction(() => !BF.globe || !BF.globe.active || BF.globe.built === BF.globe.tiles.length, null, { timeout: 600000, polling: 2000 }).catch(() => console.log("  (globe not finished)"));
+    await look(s[0], 200000, s[1], 0, -Math.PI / 2, 6);
+    await shot("planet-orbit", 15000);
+  }
   // ---- portraits on a grass platform in the sky over the spawn area, one mob or villager each, the sky behind
   const port = await pg.evaluate(() => {
     const s = BF.spawnPoint || BF.player.position, ox = Math.floor(s.x) + 64, oz = Math.floor(s.z) + 64, y = Math.round(BF.worldgen.heightAt(ox, oz)) + 60;
@@ -176,7 +194,7 @@ server.listen(0, "127.0.0.1", async () => {
     await pg.waitForTimeout(400);
     await pg.evaluate(() => { BF.state.paused = true; for (const c of [...BF.camera.children]) { c.visible = false; c.scale.setScalar(1e-6); } /* the view model is re-shown every frame: shrink it away */ for (const c of BF.scene.children) if (c.isLineSegments || (c.userData && c.userData.setCoverage)) c.visible = false; });
     await pg.waitForTimeout(600);
-    await pg.screenshot({ path: path.join(OUT, name + ".jpg"), type: "jpeg", quality: 85, clip: { x: 260, y: 50, width: 420, height: 400 } });
+    await pg.screenshot({ path: path.join(OUT, name + ".jpg"), type: "jpeg", quality: 85, clip: { x: 260, y: 50, width: 420, height: 400 }, timeout: 180000 });
     console.log("took", name);
   }
   await b.close();

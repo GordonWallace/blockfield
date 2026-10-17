@@ -46,5 +46,5 @@ version's pages.
 ### Pictures
 Screenshots in `versions/<id>/images/` and the biome facts in `versions/<id>/biomes.json` come from the game itself:
 `NODE_PATH=$(npm root -g) node wiki/capture.js <id> [name-prefix]` drives a headless game on seed 1337 (biome views, terrain, one village
-per style, a portrait of every mob and profession). Rerun it, or just the affected prefix (`biome-`, `village-`, `mob-`, `villager-`),
+per style, a portrait of every mob and profession). Rerun it, or just the affected prefix (`biome-`, `terrain-`, `village-`, `planet-`, `mob-`, `villager-`),
 when a change alters how something looks or where biomes fall. Block and item pictures are the game's own icons and need nothing.

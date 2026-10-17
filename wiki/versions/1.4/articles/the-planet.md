@@ -4,6 +4,8 @@ category: World generation
 ---
 From 1.4, a Blockfield world is a round planet rather than an endless flat plane. This page describes its shape; how the ground on it is made is on the [[page:world-generation|World generation]] pages.
 
+![The planet from orbit, north at the top: continents, seas and the arctic ice](images/planet-orbit.jpg)
+
 ## Creating a world
 
 Every new world is a planet: the create-world screen asks for a name, a seed, a game mode and a biome size, as before, and there is no flat-world option. Worlds made with Blockfield 1.3 can't be opened in 1.4. They appear greyed out in the world list, marked "Made with Blockfield 1.3, can't be opened in 1.4", with only a Delete button. Where you start is described on [[page:world-generation]].
@@ -37,6 +39,8 @@ As you climb, the view slowly changes from the flat drawing to the true round pl
 Above layer 20,000 you are off the planet. The view looks straight down at the planet with north at the top of the screen, and a thin red line marks the axis through the poles. The mouse is let go: drag with it to turn the planet under you, at the same height. Fly back down below 19,400 and the mouse looks around again, starting from straight down.
 
 Survival players can't fly, so none of this changes survival play.
+
+![6,000 blocks up: the ground already curves away to a round horizon](images/planet-curve.jpg)
 
 ## Coordinates
 
@@ -85,7 +89,3 @@ Blocks themselves are only loaded while they are big enough to see. Fly higher t
 Distant terrain is there at every height, from standing on the ground to high above the planet, and fills in as you travel: the land far ahead is worked out in the background, coarse rings first, without slowing the game down. It is worked out by background workers, which browsers allow only when the game is started with run.sh; opened straight from its file, the game shows the land only as far as the loaded chunks.
 
 Past the distant terrain, the rest of the planet is drawn as a whole globe, with a point every 256 columns everywhere. It is worked out in the background from the moment a world starts, nearest first, and is what you see from orbit: every continent, sea and ice cap on all six faces, with the part beyond the horizon left out.
-
-## While 1.4 is being built
-
-The planet is being brought into the game step by step. Villages are back, laid out on each face as in 1.3 and never across an edge (see [[page:villages]]).
