@@ -428,7 +428,9 @@ module.exports = async (pg, out) => {
     }
 
     // ---- save and load keep the pasture's cows and culls
-    for (const st of P.cows.slice()) if (st.mob) BF.mobs.hurt(st.mob, 999, "test");
+    // every cow goes first, the test's own wild cow (cw, fed by the player above) too: with the pasture short of STOCK_TO the second cowherd
+    // ("late") fetches it, and one led to the gate at the save walked in during run(2) after the load and made the herd 3
+    for (const m of BF.mobs.list.slice()) if (m.type === "cow" && !m.dead) BF.mobs.hurt(m, 999, "test");
     run(1); P.cows.length = 0;
     P.cows.push({ fed: 3.5, cd: 4, growAt: null, milkDay: 3, x: P.x0 + 1.5, z: P.z0 + 1.5, mob: null }, { fed: null, cd: 0, growAt: day() + 1, milkDay: null, x: P.x0 + 2.5, z: P.z0 + 1.5, mob: null });
     P.culls = 7;
