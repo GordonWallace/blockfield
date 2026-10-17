@@ -491,17 +491,19 @@ function findFill(m, D, ok) {
     const k = key3(x, y, z);
     if (ok && !ok(k)) continue;
     if (BF.FLUID[getB(x, y, z)] !== 8) continue;
+    if (!infiniteSource(x, y, z) && nearBeds(D, x, z)) continue;   // a bed's own channel that would not refill is left in the bed
     const st = standFor(m, x, y, z);
     if (st) return { kind: "fill", x, y, z, k, ty: y + 1, sx: st.sx, sy: st.sy, sz: st.sz };
   }
   return null;
 }
-// Dips the empty bucket in the source (x, y, z): full bucket, and the block is taken only when it refills (so no lake or well is ever drained).
+// Dips the empty bucket in the source (x, y, z): full bucket, and the source block is taken, as the player's bucket takes it
+// (nothing from nothing). An infinite source (a lake, a pond, the village well) flows back in, so none of those is ever drained.
 function fillBucket(m, x, y, z) {
   const c = ids(), Tinv = TR().inv, w = W();
   if (BF.FLUID[getB(x, y, z)] !== 8 || cnt(m, c.bucket) < 1) return false;
   if (!Tinv.canFit(m.inv, [{ id: c.wbucket, n: 1 }], [{ id: c.bucket, n: 1 }])) return false;
-  if (infiniteSource(x, y, z) && !w.setBlock(x, y, z, 0)) return false;
+  if (!w.setBlock(x, y, z, 0)) return false;
   Tinv.remove(m.inv, c.bucket, 1); Tinv.add(m.inv, c.wbucket, 1);
   sound("splash", x + 0.5, y + 0.5, z + 0.5, 0.4);
   return true;
