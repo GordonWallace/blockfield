@@ -188,6 +188,14 @@ module.exports = async (pg, out) => {
     } else ok("it finds a feed seller's offer (no farmer in this village)", false);
     T.syncFeed(pf, true);
     ok("it never offers its feed (its reserve: the lure and the sty's next days)", BF.market.spareOf(pf, I.carrot) === 0 && !pf.trades.some(o => o.spare && PF.isFeed(o.sell.id)), BF.market.spareOf(pf, I.carrot));
+    // nor feed it gets in the same tick its reserve was worked out (js/market.js keeps a villager's reserve for the tick: worked out before a deal,
+    // as the market's sync can in the step before, it once read a farmer's lot of 16 against the 15 held then as 1 spare carrot)
+    // (with 16 bread more to eat for the while, so its food reserve doesn't hold the carrots back on its own)
+    const gotB = 16 - T.inv.add(pf.inv, I.bread, 16);
+    BF.market.spareOf(pf, I.carrot);
+    const gotC = 32 - T.inv.add(pf.inv, I.carrot, 32), spC = BF.market.spareOf(pf, I.carrot), sur = BF.food.surplus(pf);
+    T.inv.remove(pf.inv, I.carrot, gotC); T.inv.remove(pf.inv, I.bread, gotB);
+    ok("nor feed it got in the same tick", gotC > 0 && spC === 0, { got: gotC, spare: spC, bread: gotB, surplus: +sur.toFixed(1) });
     for (const s of stash) T.inv.add(pf.inv, s.id, s.count);
     ok("nor eats it, nor its raw pork", !BF.food.edible(pf).some(e => PF.isFeed(e.id) || e.id === I.raw_porkchop) && PF.feedHeld(pf) > 0, BF.food.edible(pf).map(e => BF.items[e.id].name));
 

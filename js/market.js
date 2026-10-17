@@ -41,10 +41,17 @@ const idsOf = pat => { const k = String(pat); if (!patIds.has(k)) patIds.set(k, 
 const rank = id => (BF.toolWear && BF.toolWear.rank ? BF.toolWear.rank(id) : 0);
 
 // ---------------------------------------------------------------- reserve
+// What the villager holds, as one number: a reserve worked out at the same moment from other holdings is stale (some keep what they hold
+// plus what they still want, like the pig farmer's feed: a deal in the same tick then read its new feed as spare).
+function invSig(v) {
+  let h = 0;
+  for (let i = 0; i < v.inv.length; i++) { const s = v.inv[i]; h = (Math.imul(h, 31) + (s ? s.id * 1021 + s.count : 0)) | 0; }
+  return h;
+}
 // [{ids: Set, n}]: of the items in ids together it keeps n.
 function reserve(v) {
-  const now = BF.state ? BF.state.time : 0;
-  if (v._res && v._res.t === now) return v._res.list;
+  const now = BF.state ? BF.state.time : 0, sig = Array.isArray(v.inv) ? invSig(v) : 0;
+  if (v._res && v._res.t === now && v._res.sig === sig) return v._res.list;
   const list = [];
   const add = (ids, n) => { if (n > 0 && ids.size) list.push({ ids, n }); };
   // the tools of its job: the best one it holds of each kind
@@ -64,7 +71,7 @@ function reserve(v) {
   if (v.profession === "glassmaker" && BF.glassmaker) for (const r of BF.glassmaker.reserve(v)) add(r.ids, r.n);   // sand and fuel for its next furnace load (js/glassmaker.js)
   if (v.profession === "beekeeper" && BF.beekeeper) for (const r of BF.beekeeper.reserve(v)) add(r.ids, r.n);   // bottles, shears, honeycomb for its next hive, string, planks, flowers (js/beekeeper.js)
   if (v.profession === "farmer" && BF.baker) for (const r of BF.baker.farmerReserve(v)) add(r.ids, r.n);   // canes to plant, a pumpkin for seeds (js/baker.js)   // the ingredients and fuel it holds (js/baker.js)
-  v._res = { t: now, list };
+  v._res = { t: now, sig, list };
   return list;
 }
 // How many of item id the villager can spare (food: also keeping KEEP bread-eq).
