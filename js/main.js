@@ -99,7 +99,7 @@ function riverWorkers(seed, show) {
     const finish = ok => { workers.forEach(w => w.terminate()); resolve(ok ? pre : null); };
     for (let k = 0; k < K; k++) {
       let w;
-      try { w = new Worker("js/riverworker.js"); } catch (e) { failed = true; break; }
+      try { w = new Worker(BF.workerUrl("js/riverworker.js")); } catch (e) { failed = true; break; }
       workers.push(w);
       const from = Math.floor(NN * k / K), to = Math.floor(NN * (k + 1) / K);
       w.onmessage = ev => {
