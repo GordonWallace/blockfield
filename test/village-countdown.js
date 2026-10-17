@@ -34,7 +34,8 @@ module.exports = async (pg) => {
   await wait(k => BF.mobs.list.filter(m => m.village && m.village.key === k && m.type === "villager").length >= 4, info.key);
   const pin = k => pg.evaluate(k => {   // a villager held out beyond the village edge until the test lets go
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
-    const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    const T = { what: "Test errand", secs: 300, t0: BF.sky.day + BF.sky.time, end: BF.sky.day + BF.sky.time + 300 / 1200 };   // on a task, not at leisure
+    const put = () => { if (m.vtask !== T) m.vtask = T; m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
     Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
     put(); clearInterval(window.__pin); window.__pin = setInterval(put, 150);
     return BF.vlog.nameOf(m);
@@ -54,7 +55,7 @@ module.exports = async (pg) => {
   const gate0 = await pg.evaluate(k => { window.__before = new Set(BF.mobs.list.filter(m => m.vtask).map(m => m.vtask)); const c = BF.villageSim.countdown(k);
     const rec = BF.mobs.villages.get(k), v = rec.members.find(m => m.type === "villager" && !m.dead && !m.child && !m.vtask && m.profession !== "merchant");
     if (!v) return { left: c && c.left, none: true };
-    const r = { left: c.left, long: BF.villageSim.begin(v, c.left + 60, "test: too long"), short: BF.villageSim.begin(v, Math.max(1, c.left - 20), "test: fits") };
+    const r = { left: c.left, long: BF.villageSim.begin(v, c.left + 60, "test: too long"), short: BF.villageSim.begin(v, Math.max(1, (c.left - 20) / BF.villageSim.EST_MARGIN), "test: fits") };
     BF.villageSim.done(v); return r; }, info.key);
   ok("a task longer than the time left is refused, a shorter one may begin", gate0.none || (gate0.long === false && gate0.short === true), gate0);
   await sleep(6000);

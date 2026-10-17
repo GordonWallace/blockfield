@@ -399,9 +399,17 @@ function ai(m, dt, out) {
   return shopAI(m, dt, out);
 }
 
+// Out mapping by day (a map still to fill) or camped for the night: away from home on purpose, so between patches and before the working day
+// it stays out there instead of mobs.js villagerAI walking it back to the village (the 40-block leash). Once the day's work is over it heads home or camps.
+function away(m) {
+  const X = m.ex, t = skyT();
+  return !!X && (!!X.camp || (!isNight(t) && t < WORK_END && carried(m).some(c => !c.done && !c.shelved)));
+}
+
 // Trade-screen status line.
 function statusText(m) {
   if (!m || m.profession !== "explorer" || !BF.maps) return "";
+  if (state(m).camp) return "camping for the night";   // waiting at its tent from dusk, then asleep in it
   const cs = carried(m), act = cs.find(c => !c.done && !c.shelved);
   if (act) return "exploring, map " + Math.floor(coverage(act.d) * 100) + "% filled";
   if (cs.some(c => c.done)) return "has a filled map";
@@ -417,5 +425,5 @@ function unpack(m, o) {
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
+BF.explorer = { offerFor, pitch, strike, away, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
 })();

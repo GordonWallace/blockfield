@@ -1,7 +1,7 @@
 The merchant carries goods between villages. Its workstation is the merchant's counter ([[item:merchant_counter]]). The whole story of its trips is on [[page:caravans]].
 
 ### The working day
-Between trips a merchant stays in its village and visits its counter like other workers. Every second day or so it may set out on a trip: it buys goods its village has too much of, walks to a village where they are wanted, sells them, buys what its own village lacks with the takings, and walks home to sell those. Merchants walk one and a half times as fast as ordinary villagers, and pitch a tent when dusk catches them far from home.
+Between trips a merchant stays in its village and visits its counter like other workers. Every second day or so it may set out on a trip: it buys goods its village has too much of, walks to a village where they are wanted, sells them, buys what its own village lacks with the takings, and walks home to sell those. Merchants walk one and a half times as fast as ordinary villagers, and pitch a tent when dusk catches them far from home. On a trip, a merchant stays where it is in the early morning before the working day, rather than walking back to its village.
 
 ### How it gets its goods
 Only through ordinary trades. It buys from its own villagers at their sell offers (they keep their reserves) and sells into other villagers' buy offers. Its purse and pack are its own.

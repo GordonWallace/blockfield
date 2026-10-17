@@ -7,7 +7,7 @@ category: Villagers
 ## Appearance
 A villager's robe, apron, belt and hat show its profession, and some carry a tool in hand (miners a pickaxe, builders a hammer). Nitwits wear a plain green robe. A villager with no job wears the plain robe of its biome. Children are about half size and run around.
 
-Villagers walk slowly. [[villager:merchant|Merchants]] and [[villager:explorer|explorers]] walk one and a half times as fast. A villager flees from a zombie that comes within 8 blocks.
+Villagers walk slowly. [[villager:merchant|Merchants]] and [[villager:explorer|explorers]] walk one and a half times as fast. A villager flees from a zombie that comes within 8 blocks. A villager that strays more than 40 blocks from its village walks back. An explorer with a map to fill and a merchant on a trip are out there on purpose, so they stay where they are when they pause between tasks or wait for the working day. When something blocks its way, it finds a route around, and when there is no route it steps aside and tries again. It doesn't jump at a step that has a ledge or leaves just above it, because it can't clear one there.
 
 ## Who lives in a village
 Every bed in a village holds one villager (a few big houses hold two). The jobs are handed out when the village is first generated:

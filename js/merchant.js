@@ -20,7 +20,7 @@
 //   at WEAR_N crossings it becomes a dirt path. The counts are saved.
 // - Routes (debug screen): each pair of villages that traded, trips and goods moved in the last 7 days, and whether a merchant is on the road.
 // - Death on the road: its goods drop where it fell (mobKilled).
-// API: BF.merchant = { remember, forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
+// API: BF.merchant = { away(m), remember, forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -629,5 +629,7 @@ let hooked = false;
 function hook() { if (!hooked && BF.on) { hooked = true; BF.on("mobKilled", onKilled); } }
 setTimeout(hook, 0);
 
-BF.merchant = { remember, forceHome, PROF, RANGE, leftSecs, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
+// On a trip (until dusk, when it camps or is home) or camped: mobs.js villagerAI does not walk it back to its village between errands or before the day starts.
+const away = m => !!(m.ex && m.ex.camp) || (!!(m.mc && m.mc.trip) && skyT() < DUSK);
+BF.merchant = { away, remember, forceHome, PROF, RANGE, leftSecs, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
 })();

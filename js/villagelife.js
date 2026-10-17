@@ -771,11 +771,21 @@ function cellJob(P, x, z) {
 }
 // A run-down bed (a generated farm nobody worked, js/worldgen.js): the repair project puts water back in the empty channel cells
 // and tills the farmland that went back to dirt. The ring, the pumpkin patch (grass / sand) and anything else stay as they are.
+// Dirt beside the water is a cane spot (js/baker.js, which turns farmland at a channel's end back to dirt until the farmer has
+// CANE_SPOTS of them): while the bed has no more than that, they stay dirt, else the repair would till them and the farmer would
+// dig them out again, over and over, and never get round to the rest of the bed.
+const besideWater = (x, y, z) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[getB(x + dx, y, z + dz)] > 0);
+function caneSpots(L, dirt) {
+  let n = 0;
+  for (let x = L.x0; x <= L.x1; x++) for (let z = L.z0; z <= L.z1; z++) if (getB(x, L.y, z) === dirt && besideWater(x, L.y, z)) n++;
+  return n;
+}
 function repairJob(P, x, z) {
   const c = ids(), L = P.L, y = L.y, want = layoutAt(L, x, z), cur = getB(x, y, z);
   if (want !== "water" && want !== "farm") return null;
   const a = getB(x, y + 1, z), at = kind => ({ kind, x, y, z, k: key3(x, y, z), ty: y + 1, stage: 3, proj: P.id });
   if (want === "water") return (cur === 0 || (BF.FLUID[cur] > 0 && BF.FLUID[cur] < 8)) && BF.SOLID[getB(x, y - 1, z)] && looseAbove(a) ? at("water") : null;
+  if (cur === c.dirt && besideWater(x, y, z) && caneSpots(L, c.dirt) <= ((BF.baker && BF.baker.CANE_SPOTS) || 3)) return null;
   return cur === c.dirt && (looseAbove(a) || BF.RENDER[a] === 4) && !BF.SOLID[getB(x, y + 2, z)] ? at("till") : null;
 }
 // The first of the farmer's beds that needs repairing, as a new repair project (or null).

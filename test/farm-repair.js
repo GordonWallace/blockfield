@@ -96,7 +96,7 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
     const wet = (x, z) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[W.getBlock(x + dx, y, z + dz)] > 0);
     for (let x = f.x0 + 1; x < f.x1; x++) for (let z = f.z0 + 1; z < f.z1; z++) {
       const id = W.getBlock(x, y, z);
-      if (id === 0) count.air++; else if (BF.FLUID[id]) count.water++; else if (id === B.farmland) count.farm++; else if (id === B.farmland_dry) count.dry++; else if (id === B.dirt) wet(x, z) ? count.cane++ : count.dirt++; else count.grass++;
+      if (id === 0) count.air++; else if (BF.FLUID[id]) count.water++; else if (id === B.farmland) count.farm++; else if (id === B.farmland_dry) count.dry++; else if (id === B.dirt) wet(x, z) ? count.cane++ : (count.dirt++, (count.left = count.left || []).push({ at: [x - f.x0, z - f.z0], above: BF.blocks[W.getBlock(x, y + 1, z)].name, above2: BF.blocks[W.getBlock(x, y + 2, z)].name })); else count.grass++;
       if (BF.RENDER[W.getBlock(x, y + 1, z)] === 4) count.crops++;
     }
     return count;
