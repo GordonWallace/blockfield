@@ -56,7 +56,7 @@ const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
 const keyOf = m => (m && m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : null);
 const live = o => o && o.type === "villager" && !o.dead && !o.removed;
 const who = m => (BF.vlog ? BF.vlog.nameOf(m) : "Merchant") + " (Merchant)";
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: keyOf(m), t: +dayNow().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("merchant", Object.assign({ kind, who: keyOf(m), t: +dayNow().toFixed(3) }, data))); if (LOG.length > 300) LOG.shift(); };
 const state = m => m.mc || (m.mc = { stage: null, trip: null, last: -1e9, cd: 3 + Math.random() * 5, nav: {} });
 
 // ---------------------------------------------------------------- who may work the counter (js/jobs.js)

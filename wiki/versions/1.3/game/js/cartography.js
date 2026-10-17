@@ -19,7 +19,7 @@ const MAP_STOCK = 2;                      // stops making maps once it holds thi
 const UPGRADE_PAPER = 24;                 // paper it keeps before it will spend 8 on a bigger map
 const CRAFT_PAUSE = 1.6, WORK_END = 0.45, TRADE_PAUSE = 1.6;
 const LOG = [];
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("cartographer", Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
 const cnt = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
 const blankIds = () => [1, 2, 3, 4, 5].map(n => BF.I["blank_map_" + n]);

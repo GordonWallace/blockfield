@@ -47,7 +47,7 @@ const who = m => BF.vlog ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.professio
 const isFoal = r => r.growAt != null;
 const ownerOf = rec => "stable:" + rec.key;
 function log(kind, m, data) {
-  LOG.push(Object.assign({ kind, day: +now().toFixed(3), village: m && m.village ? m.village.key : null }, data));
+  LOG.push(BF.glog.job("stables", Object.assign({ kind, day: +now().toFixed(3), village: m && m.village ? m.village.key : null }, data)));
   if (LOG.length > 300) LOG.shift();
 }
 // "speed 9.3 blocks/s, jump 2.4 blocks, health 22"

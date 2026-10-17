@@ -34,10 +34,10 @@ const TRADE_PAUSE = 1.6;
 const LOG = [];
 const nowS = () => BF.simNow();
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
-// Village log (js/villagelog.js, kind "map"): maps finished, shelved and taken up again.
+// Village log (js/villagelog.js, kind "map"; INFO in the game log): maps finished, shelved and taken up again.
 const mapText = c => "the size " + c.it.map.size + " map of zone " + c.it.map.zx + ", " + c.it.map.zz;
 const vlog = (m, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, "map", BF.vlog.nameOf(m) + " (Explorer) " + text, m); };
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: "explorer" + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("explorer", Object.assign({ kind, who: "explorer" + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
 // fin: shelved maps, name -> the game day it was shelved on (it tries again on a later day)
 const state = m => m.ex || (m.ex = { fin: {}, avoid: {}, stage: null, target: null, cd: rnd(1, 4), sync: 0, sampT: 0 });

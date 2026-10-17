@@ -6,6 +6,8 @@
 // Snapshots go out 4 times a second as small POSTs; the village layout, the log and the economy tallies are only re-sent when they change.
 // The server's answer carries the alerts set up on the debug screen whenever the game's copy is out of date (js/alerts.js), and
 // the villager picked there; while one is picked, snapshots carry its day timeline (js/daytimeline.js) whenever it changes.
+// The game log (js/gamelog.js) goes along too, a few thousand entries per snapshot until the server has all of it, and the commit
+// the game runs, so the server can say when the files on disk have changed (BF.glog.diskBuild).
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
 // API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update() }
 (() => {
@@ -175,7 +177,7 @@ function villages(pp) {
 }
 const sentLayouts = new Set(), logSigs = new Map(), econSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
 let daySig = null;   // the picked villager's day timeline as last sent: "key|version"
-const resync = () => { sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); daySig = null; };
+const resync = () => { sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); daySig = null; if (BF.glog) BF.glog.feedReset(); };
 // The day timeline of the villager picked on the debug screen (js/daytimeline.js), only when it changed; null once nothing is picked.
 // undefined (left out) when nothing changed, so the feed stays as light as before while nobody is picked.
 function dayline() {
@@ -240,7 +242,8 @@ function snapshot() {
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
-    alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null };
+    alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
+    glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
 
 function update() {
@@ -261,8 +264,10 @@ function update() {
   fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000, signal: ctl.signal })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
     .then(t => {
-      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?}: the server's alerts / picked villager, when the game's copy is out of date
+      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?, glogAt?, build?}: the server's alerts / picked villager, when the game's copy is out of date
         const o = JSON.parse(t);
+        if (o.glogAt != null && BF.glog) BF.glog.feedAt(o.glogAt);   // the server holds the game log up to there
+        if (o.build && BF.glog) BF.glog.diskBuild(o.build);          // the commit on disk isn't the one running
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
         if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
         t = o.resync ? "resync" : "ok";
