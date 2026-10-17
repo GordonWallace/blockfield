@@ -20,7 +20,7 @@ Every chunk rolls for animals exactly once, the first time it loads (worlds save
 
 Other biomes (desert, badlands, oceans, beaches, rivers, swamps, jungles, mountain peaks, mushroom fields) get no wild animals.
 
-A group is **4 to 8 animals** of one kind, set down on grass within a few blocks of one another inside the chunk. A chunk with no grass it can stand on gets nothing. After this single roll a chunk never gets new animals from nowhere: standing still for days does not make more appear. The only way to get more is breeding.
+A group is **4 to 8 animals** of one kind, set down on grass within a few blocks of one another inside the chunk. A chunk with no grass it can stand on gets nothing. No animal is set down inside a village's pen, coop, pasture, sty or stable (or on its fence): a herd placed there would be taken in as village stock, over the enclosure's limit. After this single roll a chunk never gets new animals from nowhere: standing still for days does not make more appear. The only way to get more is breeding.
 
 ### Zones
 
@@ -78,7 +78,7 @@ A monster never spawns within **12 blocks** of you, of any villager, or of an ir
 When a chunk leaves the loaded area, every wild animal and monster in it is **stored with the chunk** along with the game time. When the chunk loads again:
 
 - Within one game hour: each mob returns on the same spot, doing what it was doing.
-- After longer: each reappears at a random fitting spot within 8 blocks of where it was: grass for animals, a dark spot for monsters (by day, only where a monster could spawn).
+- After longer: each reappears at a random fitting spot within 8 blocks of where it was: grass outside the village enclosures for animals, a dark spot for monsters (by day, only where a monster could spawn).
 - A zombie or skeleton that was standing under open sky when stored does not return if daylight passed while the chunk was away. It would have burned.
 
 Nothing else is ever removed. Wild mobs leave the world only by dying, or by being led into a village's pen, coop, pasture or sty. Time spent unloaded does not age or breed them. Quitting and reloading takes no game time: everything loaded comes back exactly where it stood, facing the same way, with the same health.

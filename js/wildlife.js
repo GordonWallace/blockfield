@@ -99,13 +99,14 @@ function relocate(type, x, y, z) {
   const W = BF.world, T = BF.mobs.typeDef(type);
   if (!T) return null;
   const grass = BF.B.grass, dark = BF.sky && BF.sky.lightAt ? BF.sky.lightAt(BF.sky.time || 0) <= 0.3 : false;
+  const pens = isAnimal(type) && BF.mobs.penBoxes ? BF.mobs.penBoxes(x, z) : [];   // never into a village's pen, coop, pasture, sty or stable
   for (let i = 0; i < 40; i++) {
     const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * (RELOCATE_R - 1);   // within RELOCATE_R blocks (the block centre too)
     const sx = Math.floor(x + Math.cos(a) * d), sz = Math.floor(z + Math.sin(a) * d);
     if (!W.isLoaded(sx, sz)) continue;
     if (isAnimal(type)) {
       const gy = W.heightAt(sx, sz);
-      if (W.getBlock(sx, gy, sz) !== grass || !BF.mobs.standable(sx, gy + 1, sz, T.hw, T.h)) continue;
+      if (W.getBlock(sx, gy, sz) !== grass || BF.mobs.inPenBox(pens, sx, sz) || !BF.mobs.standable(sx, gy + 1, sz, T.hw, T.h)) continue;
       return [sx + 0.5, gy + 1, sz + 0.5];
     }
     for (const dy of [0, 1, -1, 2, -2, 3, -3]) {   // near its old height first: a cave monster stays in its cave

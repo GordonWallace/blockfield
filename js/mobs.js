@@ -2034,11 +2034,27 @@ function countMobs() {
   return { p, h };
 }
 // A group of n wild animals of one type on the grass of chunk (cx, cz): its first-generation roll (js/wildlife.js). Returns how many were placed.
+// The fenced animal buildings of the village layouts near (x, z) (pens, coops, pastures, sties, stables): [x0, z0, x1, z1] footprints with a
+// block of margin, inclusive. Wild animals are never placed in them: a group rolled inside a pasture would be taken into its herd, past its limit.
+const PEN_TYPES = new Set(["pen", "coop", "pasture", "sty", "stable"]);
+function penBoxes(x, z, r = 160) {
+  const out = [];
+  let vs = [];
+  try { vs = BF.worldgen && BF.worldgen.villagesNear ? BF.worldgen.villagesNear(x, z, r) : []; } catch (e) { return out; }
+  for (const v of vs) for (const b of (v && v.buildings) || []) {
+    if (!PEN_TYPES.has(b.type) || b.bx == null || !b.w || !b.d) continue;
+    const x1 = b.bx + b.ax * (b.w - 1) + b.sx * (b.d - 1), z1 = b.bz + b.az * (b.w - 1) + b.sz * (b.d - 1);
+    out.push([Math.min(b.bx, x1) - 1, Math.min(b.bz, z1) - 1, Math.max(b.bx, x1) + 1, Math.max(b.bz, z1) + 1]);
+  }
+  return out;
+}
+const inPenBox = (boxes, x, z) => boxes.some(q => x >= q[0] && x <= q[2] && z >= q[1] && z <= q[3]);
 function spawnGroup(type, cx, cz, n) {
   const w = BF.world, grass = BF.B.grass, T = TYPES[type], CS = BF.CS;
   if (!T || !scene || !w.chunks.has(cx + "," + cz)) return 0;
   const inChunk = (x, z) => Math.floor(x / CS) === cx && Math.floor(z / CS) === cz;
-  const ok = (x, z) => { const y = w.heightAt(x, z); return y >= BF.MIN_Y + 1 && w.getBlock(x, y, z) === grass && standable(x, y + 1, z, T.hw, T.h) ? y + 1 : null; };
+  const pens = penBoxes(cx * CS + 8, cz * CS + 8);
+  const ok = (x, z) => { const y = w.heightAt(x, z); return y >= BF.MIN_Y + 1 && !inPenBox(pens, x, z) && w.getBlock(x, y, z) === grass && standable(x, y + 1, z, T.hw, T.h) ? y + 1 : null; };
   let x = null, z = null;
   for (let i = 0; i < 12 && x == null; i++) { const tx = cx * CS + irnd(1, 14), tz = cz * CS + irnd(1, 14); if (ok(tx, tz) != null) { x = tx; z = tz; } }
   if (x == null) return 0;
@@ -2662,7 +2678,7 @@ BF.mobs = {
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
-  isWild, spawnGroup, standable, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
+  isWild, spawnGroup, penBoxes, inPenBox, standable, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
