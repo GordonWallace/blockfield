@@ -5,6 +5,14 @@
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "survival"; BF.mobs.spawning = false; });
   await require('./lib').toVillage(pg);
+  // the range below (the pad, x -3..24 and z -4..4 from the player, with the wall at x 24) is built and shot in one synchronous step, so
+  // its chunks must be loaded first: the planet's chunks may still be streaming in, and an unloaded chunk counts as solid (an arrow
+  // sticks at its edge, and the wall placed in it is lost)
+  await pg.waitForFunction(() => {
+    const W = BF.world, p = BF.player.position, x0 = Math.floor(p.x), z0 = Math.floor(p.z);
+    for (let dx = -3; dx <= 24; dx++) for (let dz = -4; dz <= 4; dz++) if (!W.isLoaded(x0 + dx, z0 + dz)) return false;
+    return true;
+  }, null, { timeout: 120000, polling: 200 });
   const res = await pg.evaluate(async () => {
     const R = [], ok = (name, cond, extra) => R.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const P = BF.player, M = BF.mobs, W = BF.world, I = BF.I, inv = BF.inventory;

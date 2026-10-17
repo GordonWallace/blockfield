@@ -129,11 +129,16 @@ module.exports = async (pg, out) => {
     const Mi = vs.find(v => v.profession === "miner") || mk("miner", [["stone_pickaxe", 1]]);
     if (!Mi.inv.some(s => s && BF.items[s.id].tool && BF.items[s.id].tool.type === "pickaxe")) inv.add(Mi.inv, I.stone_pickaxe, 1);
     const sf = c(Mi, "flint"), sg = c(Mi, "gravel"), gx = Math.floor(rec.x) + 3, gz = Math.floor(rec.z) + 3, gy = BF.world.heightAt(gx, gz) + 6;
-    const saveInv = T.inv.clone(Mi.inv); let dug = 0;
+    // By now the village's own fletcher may have used up its starting flint on arrows (it works through the waits above, longer on a slow
+    // runner). Then wantsFlint holds and the miner keeps the gravel to sift it (GRAVEL_KEEP, checked with the wall gravel below). This check
+    // is about a miner with no fletcher short of flint, so it digs as the only member of its village.
+    const saveInv = T.inv.clone(Mi.inv), saveVil = Mi.village; let dug = 0;
+    Mi.village = { key: saveVil && saveVil.key, members: [Mi] };
+    const wf = BF.miner.wantsFlint(Mi);
     for (let k = 0; k < 400; k++) { BF.world.setBlock(gx, gy, gz, BF.B.gravel); if (BF.miner._test.dig(Mi, gx, gy, gz)) dug++; if (Mi.inv.filter(Boolean).length > 16) inv.remove(Mi.inv, I.cobblestone, 999); }
-    const flint = c(Mi, "flint") - sf; R.info.flintRate = flint + " flint from " + dug + " gravel";
-    ok("miner keeps flint from gravel (~10%), not the gravel", dug === 400 && flint >= 15 && flint <= 75 && c(Mi, "gravel") === sg, R.info.flintRate);
-    Mi.inv = saveInv;
+    const flint = c(Mi, "flint") - sf; R.info.flintRate = flint + " flint from " + dug + " gravel, gravel " + sg + " -> " + c(Mi, "gravel") + (wf ? " (wantsFlint)" : "");
+    ok("miner keeps flint from gravel (~10%), not the gravel", !wf && dug === 400 && flint >= 15 && flint <= 75 && c(Mi, "gravel") === sg, R.info.flintRate);
+    Mi.inv = saveInv; Mi.village = saveVil;
     // while the village's fletcher is short of flint, gravel in the shaft walls is dug with the cell
     const mi2 = mk("miner", [["stone_pickaxe", 1]]), flA = mk("fletcher", [["emerald", 5]]);
     mi2.village = flA.village = { members: [mi2, flA] };
