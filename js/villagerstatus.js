@@ -1,6 +1,6 @@
 // Villager status line for the trade screen ("Farmer — Harvesting Wheat"). Every villager has one: the specialised modules
 // (food, farming and shepherds, builders, explorers, foresters, furniture makers, miners) speak first, then this falls back on what the villager's everyday AI is doing.
-// API: BF.villagerStatus = { text(m) }
+// API: BF.villagerStatus = { text(m), routine(m), leisure(m), LEISURE }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -50,5 +50,15 @@ function text(m) {
   return cap(s);
 }
 
-BF.villagerStatus = { text, routine };
+// Leisure: what a villager does when it has no task of its own. A village's unload countdown (js/villagesim.js) doesn't wait for these,
+// and when the village unloads they just end (a villager out beyond the edge is put back home), with no loading error.
+const LEISURE = new Set([
+  "Strolling around the village", "Relaxing", "Wandering about", "Loafing", "Winding down for the evening", "Looking for work",
+  "Heading out for the day", "Heading to bed", "Has no bed to sleep in", "In love", "Running from a zombie",
+  "Has saplings to plant", "Looking for saplings",   // a forester between tasks (js/forester.js)
+  "Planning",                                        // a builder between structures (js/builder.js)
+]);
+const leisure = m => LEISURE.has(BF.villagerStatus.text(m));
+
+BF.villagerStatus = { text, routine, leisure, LEISURE };
 })();
