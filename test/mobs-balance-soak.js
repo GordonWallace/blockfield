@@ -56,7 +56,9 @@ const RUN = 3;   // days each group of villages runs
     const day = () => Math.floor(BF.sky.day + BF.sky.time);
     const miss = rec => { if (!rec) return; const k = rec.key + ' ' + day(); R.noWild[k] = (R.noWild[k] || 0) + 1; };
     const ol = BF.vlog.log;
-    BF.vlog.log = function (rec, kind, text) { if (typeof text === 'string' && text.includes('found no wild')) miss(rec); return ol.apply(this, arguments); };
+    // only the cowherd's and the poultry keeper's lines: the shepherd and the pig farmer log the same "found no wild" words, but they are not
+    // among the keepers counted below, so a pig farmer's miss read as a miss of the village's cowherd, poultry keeper or stable hand
+    BF.vlog.log = function (rec, kind, text) { if (typeof text === 'string' && /\((Cowherd|Poultry Keeper)\) found no wild/.test(text)) miss(rec); return ol.apply(this, arguments); };
     const sl = BF.stables.LOG, push = sl.push.bind(sl);
     sl.push = e => { if (e && e.kind === 'nowild' && e.village) miss({ key: e.village }); return push(e); };
     window.__step = (n, h) => {
