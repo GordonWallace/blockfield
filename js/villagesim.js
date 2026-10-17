@@ -139,7 +139,11 @@ function edgeDist(v, px, pz) {
 const ending = new Map();        // village key -> {t0, until (game day), est: [{who, task, secs}], max}
 const errors = [];               // loading errors, newest last (shown on the debug screen)
 const nowDay = () => dayNow();
-function logError(kind, data) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }
+function logError(kind, data) {
+  errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift();
+  if (BF.glog) BF.glog.log("ERROR", "loading", kind === "task-running" ? data.who + "'s task was cut off when the village unloaded: " + data.task + " (estimate " + data.estimate + " s, ran " + data.ran + " s; " + data.why + ")"
+    : data.who + " was stopped mid-task: " + data.task + " (" + data.action + "; " + data.why + ")", { village: data.village });   // js/gamelog.js
+}
 const nameOf = m => (BF.vlog && BF.vlog.nameOf ? BF.vlog.nameOf(m) : "villager");
 // Seconds of game time the villager still needs to finish what it is doing (0 = nothing that must finish). Sets taskLeft.errand when the
 // task is an errand beyond the village (or a caravan trip): only those are errors if they are still running when the timer ends.
