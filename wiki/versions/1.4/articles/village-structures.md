@@ -69,7 +69,7 @@ In generator 10 worlds the pens, coops, pastures, sties and stables are decided 
 - Each paddock gets its own keeper with their jobsite block. The keeper takes the place of an ordinary resident. If only the core four are left, that paddock is left out.
 - A paddock can stand on any ground. A pasture always gets a grass floor, in a desert village too. Plots can reach out to the edge of the village.
 
-A plains village of 100 gets about 7 to 16 paddocks, a desert village of 100 about 2 to 6, and a village of 10 between 0 and 2. A generated stable starts with 2 tamed horses. The other paddocks start with their usual few animals. Worlds made with village generator 9 or earlier keep their villages as they were: a coop in a village of 8 or more, a pasture in a village of 10 or more on grass (not a desert or snowy village), and a sty in 60 percent of those.
+A plains village of 100 gets about 7 to 16 paddocks, a desert village of 100 about 2 to 6, and a village of 10 between 0 and 2. A generated stable starts with 2 tamed horses. The other paddocks start with their usual few animals. All of them get their animals the first time the village runs, whether you are there or it runs in the background ([[page:village-loading]]). Worlds made with village generator 9 or earlier keep their villages as they were: a coop in a village of 8 or more, a pasture in a village of 10 or more on grass (not a desert or snowy village), and a sty in 60 percent of those.
 
 There is no building for bakers, glassmakers or beekeepers at generation. Their workstations stand on the plaza or beside houses, and the glassmaker's kiln comes with a furnace and the beekeeper's extractor with two hives and a flower bed. See [[page:village-economy]].
 

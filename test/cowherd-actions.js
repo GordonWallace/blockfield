@@ -14,6 +14,9 @@ module.exports = async (pg, out) => {
     BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (5 + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
+    // wild animals breed on their own (js/wildlife.js: a daily roll makes a wild pair willing, as if fed): held off here, so a birth or a
+    // willing animal in the checks below comes from the feeding they check, and the wild animals the test spawns stay where it put them
+    BF.wildlife.tune.pairP = 0;
     const V = BFT.village((v, k) => k.pasture && v.ground === 0 && v.pop >= 10);   // the planet: the nearest grass village of 10+ with a pasture
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
     const pb = wv && wv.buildings.find(b => b.type === "pasture");
@@ -23,6 +26,9 @@ module.exports = async (pg, out) => {
     const load = async (x, z) => { for (let i = 0; i < 400; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0 && BF.world.isLoaded(x, z)) break; } };
     await load(pb.doorX, pb.doorZ);
     BF.player.invulnerable = true;
+    // the player stays frozen where it was put (step() doesn't move it), its box in the air 2 blocks over the ground: a villager that steps
+    // onto a block there (the poultry keeper walks over its nesting box) is pushed back by it for good. Out of the way, still in range:
+    BF.player.teleport(BF.player.position.x, BF.player.position.y + 12, BF.player.position.z);
     BF.sky.setTime(0.05);
     run(4);
     const key = V.x + "," + V.z;
@@ -263,9 +269,17 @@ module.exports = async (pg, out) => {
     run(3);
     const crowded = P.cows.length, culls0 = P.culls;
     ok("the pasture is over its limit", crowded > P.limit, [crowded, P.limit]);
+    const pair = P.cows.filter(s => s.mob && !s.mob.dead && s.growAt == null).slice(0, 2);
+    for (const s of pair) { s.cd = 0; s.fed = day(); }
+    ok("fed cows do not breed while the pasture is over its limit (the calf would take it two over)", pair.length === 2 && pair.every(s => !C.willing(s.mob, day())), pair.map(s => C.willing(s.mob, day())));
+    for (const s of pair) s.cd = day() + 5;
     for (let i = 0; i < 9000 && P.cows.length > P.limit; i++) step();
     const n = crowded - P.limit;
     ok("the cowherd culled the herd back to the limit", P.cows.length === P.limit && P.culls - culls0 === n, [P.cows.length, P.limit, P.culls]);
+    const fedAt = P.cows.find(s => s.mob && !s.mob.dead && s.growAt == null);
+    if (fedAt) fedAt.cd = 0;
+    ok("back at the limit, a fed cow is willing to breed again", !!fedAt && C.willing(fedAt.mob, day()), fedAt && [fedAt.fed, fedAt.cd, day()]);
+    if (fedAt) fedAt.cd = day() + 5;
     ok("it kept the beef: 1-3 a cow", c("raw_beef") - beef0 >= n && c("raw_beef") - beef0 <= 3 * n, [beef0, c("raw_beef")]);
     ok("and the leather: 0-2 a cow", c("leather") - lea0 <= 2 * n, [lea0, c("leather")]);
     run(20);
@@ -414,7 +428,9 @@ module.exports = async (pg, out) => {
     }
 
     // ---- save and load keep the pasture's cows and culls
-    for (const st of P.cows.slice()) if (st.mob) BF.mobs.hurt(st.mob, 999, "test");
+    // every cow goes first, the test's own wild cow (cw, fed by the player above) too: with the pasture short of STOCK_TO the second cowherd
+    // ("late") fetches it, and one led to the gate at the save walked in during run(2) after the load and made the herd 3
+    for (const m of BF.mobs.list.slice()) if (m.type === "cow" && !m.dead) BF.mobs.hurt(m, 999, "test");
     run(1); P.cows.length = 0;
     P.cows.push({ fed: 3.5, cd: 4, growAt: null, milkDay: 3, x: P.x0 + 1.5, z: P.z0 + 1.5, mob: null }, { fed: null, cd: 0, growAt: day() + 1, milkDay: null, x: P.x0 + 2.5, z: P.z0 + 1.5, mob: null });
     P.culls = 7;

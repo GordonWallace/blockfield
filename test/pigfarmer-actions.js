@@ -41,6 +41,9 @@ module.exports = async (pg, out) => {
     BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 9", BF.state.villages === 9, BF.state.villages);
     BF.mobs.spawning = false;
+    // wild animals breed on their own (js/wildlife.js: a daily roll makes a wild pair willing, as if fed): held off here, so a birth or a
+    // willing animal in the checks below comes from the feeding they check, and the wild animals the test spawns stay where it put them
+    BF.wildlife.tune.pairP = 0;
     const V = BFT.village((v, k) => k.sty && k.pasture && v.ground === 0 && v.pop >= 10);   // the planet: the nearest grass village of 10+ with a pasture and a sty
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
     const sb = wv && wv.buildings.find(b => b.type === "sty");
@@ -50,6 +53,9 @@ module.exports = async (pg, out) => {
     const load = async (x, z) => { for (let i = 0; i < 400; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0 && BF.world.isLoaded(x, z)) break; } };
     await load(sb.doorX, sb.doorZ);
     BF.player.invulnerable = true;
+    // the player stays frozen where it was put (step() doesn't move it), its box in the air 2 blocks over the ground: a villager that steps
+    // onto a block there (the poultry keeper walks over its nesting box) is pushed back by it for good. Out of the way, still in range:
+    BF.player.teleport(BF.player.position.x, BF.player.position.y + 12, BF.player.position.z);
     BF.sky.setTime(0.03);
     run(2);
     const key = V.x + "," + V.z;
@@ -166,7 +172,7 @@ module.exports = async (pg, out) => {
     ok("a pig follows a player holding feed", f1 < f0 - 2, [f0.toFixed(1), f1.toFixed(1)]);
     BF.inventory.clear();
     for (const m of BF.mobs.list.slice()) if (m.type === "pig" && !m.sty && !m.dead) BF.mobs.hurt(m, 999, "test");
-    BF.player.teleport(P.out[0] + 0.5, BF.world.heightAt(P.out[0], P.out[1] - 4) + 2, P.out[1] - 4.5);
+    BF.player.teleport(P.out[0] + 0.5, BF.world.heightAt(P.out[0], P.out[1] - 4) + 14, P.out[1] - 4.5);   // (high over the path to the gate: see above)
     run(1);
 
     // ---- feed comes from the farmers: a pig farmer short of feed buys it through a farmer's offer
@@ -212,9 +218,17 @@ module.exports = async (pg, out) => {
     run(3);
     const crowded = P.pigs.length, culls0 = P.culls | 0, pork0 = c("raw_porkchop");
     ok("the sty is over its limit", crowded > P.limit, [crowded, P.limit]);
+    const pair = P.pigs.filter(s => s.mob && !s.mob.dead && s.growAt == null).slice(0, 2);
+    for (const s of pair) { s.cd = 0; s.fed = day(); }
+    ok("fed pigs do not breed while the sty is over its limit (the piglet would take it two over)", pair.length === 2 && pair.every(s => !BF.pigFarmer.willing(s.mob, day())), pair.map(s => BF.pigFarmer.willing(s.mob, day())));
+    for (const s of pair) s.cd = day() + 5;
     for (let i = 0; i < 9000 && P.pigs.length > P.limit; i++) { step(); if (BF.sky.time > 0.45) BF.sky.setTime(0.08); }
     const n = crowded - P.limit;
     ok("the pig farmer culled the herd back to the limit", P.pigs.length === P.limit && P.culls - culls0 === n, [P.pigs.length, P.limit, P.culls]);
+    const fedAt = P.pigs.find(s => s.mob && !s.mob.dead && s.growAt == null);
+    if (fedAt) { fedAt.cd = 0; fedAt.fed = day(); }
+    ok("back at the limit, a fed pig is willing to breed again", !!fedAt && BF.pigFarmer.willing(fedAt.mob, day()), fedAt && [fedAt.fed, fedAt.cd, day()]);
+    if (fedAt) fedAt.cd = day() + 5;
     ok("it kept the pork: 1-3 raw porkchops a pig", c("raw_porkchop") - pork0 >= n && c("raw_porkchop") - pork0 <= 3 * n, [pork0, c("raw_porkchop")]);
     run(20);
     ok("no more culling at the limit", P.pigs.length === P.limit, P.pigs.length);
