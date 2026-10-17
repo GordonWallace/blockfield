@@ -144,6 +144,9 @@ function travel(m, st, dt, out, tx, tz, speed, radius) {
 const inLoaded = (x, z) => { const W = BF.world; return W.isLoaded(x, z) && W.isLoaded(x + EDGE, z) && W.isLoaded(x - EDGE, z) && W.isLoaded(x, z + EDGE) && W.isLoaded(x, z - EDGE); };
 // Next blank pixel of map `c` to visit: in each patch that still has blank pixels and has not been given up, the blank pixel nearest the explorer;
 // of those, the nearest one that is loaded (and near the player). null + reason otherwise.
+// How far from a blank pixel it stands to draw it: with the 6-block arrival radius, well inside the fill radius of js/maps.js (40 blocks on
+// the smallest map, 16 on big ones), so a blank at the edge of the loaded area can be drawn from inside it.
+const standOff = size => 0.5 * Math.max(16, 40 / Math.sqrt(BF.maps.scale(size)));
 function pickTarget(m, c) {
   const M = BF.maps, d = c.d, X = state(m), s = M.scale(d.size), ox = M.originX(d.size, d.zx), oz = M.originX(d.size, d.zz);
   const PX = M.PX, CELL = cellPx(d.size), n = PX / CELL, pp = BF.player.position, mx = m.position.x, mz = m.position.z;
@@ -158,15 +161,14 @@ function pickTarget(m, c) {
     if (pi < 0) continue;                                     // patch fully drawn
     const k = c.it.name + ":" + ci + "," + cj;
     if ((X.avoid[k] || 0) >= 2) { avoided++; continue; }
-    const wx = Math.floor(ox + (pi % PX + 0.5) * s), wz = Math.floor(oz + (((pi / PX) | 0) + 0.5) * s);
+    const px = ox + (pi % PX + 0.5) * s, pz = oz + (((pi / PX) | 0) + 0.5) * s, f = pd > 0 ? Math.min(pd, standOff(d.size)) / pd : 0;
+    const wx = Math.floor(px + (mx - px) * f), wz = Math.floor(pz + (mz - pz) * f);   // where it stands: on its side of the pixel, close enough to draw it
     open++;
-    if (!inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE)) continue;
+    if (!BF.world.isLoaded(Math.floor(px), Math.floor(pz)) || !inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE)) continue;
     if (pd < bd) { bd = pd; best = { ci, cj, wx, wz, k, pi }; }
   }
   return { best, open, avoided };
 }
-// How close it has to get to a blank pixel to draw it: well inside the fill radius of js/maps.js (40 blocks on the smallest map, 16 on big ones).
-const reach = size => Math.max(6, 0.6 * Math.max(16, 40 / Math.sqrt(BF.maps.scale(size))));
 function exploreAI(m, c, dt, out) {
   const X = state(m), a = m.ai, M = BF.maps;
   X.sampT -= dt;
@@ -203,7 +205,7 @@ function exploreAI(m, c, dt, out) {
   X.walkT += dt;
   const giveUp = () => { X.avoid[t.k] = (X.avoid[t.k] || 0) + 1; X.target = null; a.route = null; X.pickT = 0.5; return false; };
   if (X.walkT > 90 || !BF.world.isLoaded(t.wx, t.wz)) return giveUp();
-  const r = travel(m, X, dt, out, t.wx, t.wz, m.def.speed * 1.2, reach(c.d.size));
+  const r = travel(m, X, dt, out, t.wx, t.wz, m.def.speed * 1.2, 6);
   if (r === "failed") return giveUp();
   if (r === "arrived") X.dwell = 1.5;
   return true;
