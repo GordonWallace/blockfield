@@ -1,7 +1,9 @@
 // Escape closes in-game screens straight back to play; Escape with nothing open still pauses.
 // Pointer lock is simulated the way Chrome behaves: a lock granted while Escape is held is dropped at once as a user exit.
 // A second pass is a stricter browser that also drops the lock asked for after Escape's release: the game must stay
-// unpaused with the mouse free, and the next click captures it.
+// unpaused with the mouse free, and the next click captures it. A third pass is a browser that refuses every lock request
+// for 1.25 s after an Escape (as Chrome on macOS can): the game must take the mouse back by itself once that time is up, and
+// a key press must take it back at once.
 // Every step waits for the state it expects (up to WAIT ms) rather than for a fixed time, so the test holds on a CI machine
 // drawing one frame a second as well as on a fast one.
 // node test/run.js /tmp/esc test/esc-close.js
@@ -12,10 +14,15 @@ module.exports = async (pg) => {
     let el = null;
     // the test marks Escape as held (window.__esc) around the key press; other modules' capture listeners stop the event
     // before a listener added here could see it
-    window.__escDown = () => { window.__esc = true; if (el) { el = null; setTimeout(fire, 5); return true; } return false; };
+    window.__escDown = () => { window.__esc = true; window.__escAt = performance.now(); if (el) { el = null; setTimeout(fire, 5); return true; } return false; };
     Object.defineProperty(document, "pointerLockElement", { get: () => el, configurable: true });
     const fire = () => document.dispatchEvent(new Event("pointerlockchange"));
-    cv.requestPointerLock = () => new Promise(res => setTimeout(() => {
+    cv.requestPointerLock = () => new Promise((res, rej) => setTimeout(() => {
+      if (window.__refuse === "always" || window.__refuse && performance.now() - (window.__escAt || -1e9) < 1250) {   // refusing browser: no lock yet
+        window.__refused = true;
+        document.dispatchEvent(new Event("pointerlockerror"));
+        return rej(new Error("refused"));
+      }
       el = cv; fire();
       const strictDrop = window.__strict && window.__dropNext;   // strict browser: the lock asked for after an Escape is dropped
       if (strictDrop) { window.__dropNext = false; window.__dropped = true; }
@@ -85,7 +92,30 @@ module.exports = async (pg) => {
     await pg.mouse.click(640, 380);
     await check("strict browser: a click captures the mouse", { locked: true, menu: null });
   }
-  await pg.evaluate(() => { window.__strict = false; });
+  await pg.evaluate(() => { window.__strict = false; window.__refuse = true; });
+  for (const how of ["crafting", "chest"]) {
+    await until(() => BF.player.isLocked() && !BF.player.escGrace());
+    await openScreen(how);
+    await pg.evaluate(() => { window.__refused = false; });
+    await esc();
+    await until(() => window.__refused);
+    await frames(5);
+    report("refusing browser: Esc from " + how + " stays in the game", await st(), { menu: null, inv: false });
+    await check("refusing browser: the mouse comes back by itself", { locked: true, menu: null });
+  }
+  // a key press takes the mouse back without waiting
+  await until(() => BF.player.isLocked() && !BF.player.escGrace());
+  await openScreen("crafting");
+  await pg.evaluate(() => { window.__refused = false; window.__refuse = "always"; });
+  await esc();
+  await until(() => window.__refused);
+  await pg.waitForTimeout(1800);   // the game's own retry has come and gone, refused too
+  await frames(3);
+  report("refusing browser: still in the game with the mouse free", await st(), { locked: false, menu: null, inv: false });
+  await pg.evaluate(() => { window.__refuse = false; });
+  await pg.keyboard.press('KeyW');
+  await check("refusing browser: a key press captures the mouse", { locked: true, menu: null });
+  await pg.evaluate(() => { window.__refuse = false; });
 
   await until(() => BF.player.isLocked() && !BF.player.escGrace());   // past the grace after the last Escape-close
   await esc();
