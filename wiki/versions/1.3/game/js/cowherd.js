@@ -55,7 +55,7 @@ const TR = () => BF.trades;
 const I = n => BF.I[n];
 const cnt = (m, id) => (id == null || !m.inv ? 0 : TR().inv.count(m.inv, id));
 const LOG = [];
-const log = (kind, data) => { LOG.push(Object.assign({ kind, day: +now().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, data) => { LOG.push(BF.glog.job("cowherd", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 300) LOG.shift(); };
 const vlog = (m, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, "cattle", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Cowherd") + " (Cowherd) " + text, m); };
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 

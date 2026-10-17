@@ -33,7 +33,7 @@ const TRADE_PAUSE = 1.6;
 const LOG = [];
 const nowS = () => BF.simNow();
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: "explorer" + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("explorer", Object.assign({ kind, who: "explorer" + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
 const state = m => m.ex || (m.ex = { fin: {}, avoid: {}, stage: null, target: null, cd: rnd(1, 4), sync: 0, sampT: 0 });
 const cnt = (m, id) => (id == null ? 0 : T().inv.count(m.inv, id));

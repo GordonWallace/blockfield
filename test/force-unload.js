@@ -33,6 +33,8 @@ module.exports = async (pg) => {
   const after = await pg.evaluate(k => ({ left: BF.mobs.list.filter(m => m.village && m.village.key === k).length, all: BF.villageSim.errors().map(e => e.kind + ":" + e.who + ":" + (e.action || e.task) + ":" + e.why), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").map(e => e.who + ": " + e.action + " (" + e.why + ")"), who: window.__who }), info.key);
   ok("a village over the village-count limit is unloaded with a villager still out", gone && after.left === 0, after);
   ok("the forced stop of an errand is logged with its action and reason", after.errs.some(e => e.indexOf(after.who + ": went home") === 0 && e.indexOf("village count") > 0), after);
+  const gl = await pg.evaluate(who => BF.glog.recent(500).filter(e => e.l === "ERROR" && e.k === "loading" && e.x.indexOf(who + " was stopped mid-task") === 0 && e.v).length, after.who);
+  ok("and is an ERROR in the game log, with the village's name", gl > 0, gl);
   // 3. held chunks over the limit force a village off too
   await pg.evaluate(() => { BF.villageSim.LIMITS.villages = 10; BF.villageSim.LIMITS.chunks = 5; });
   await tp(info.x, info.z);

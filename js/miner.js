@@ -58,7 +58,7 @@ const PERIOD = BRANCH_EVERY + 2 * BRANCH_LEN;   // tunnel cells per corridor str
 const TRADE_PAUSE = 1.6;
 const STYLES = ["plains", "desert", "snowy", "savanna", "taiga"];
 const LOG = [];
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: "miner" + (m && m.slot ? "#" + m.slot.idx : ""), village: m && m.village ? m.village.key : null }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("miner", Object.assign({ kind, day: +dayNow().toFixed(3), who: "miner" + (m && m.slot ? "#" + m.slot.idx : ""), village: m && m.village ? m.village.key : null }, data))); if (LOG.length > 300) LOG.shift(); };
 
 // ---------------------------------------------------------------- items
 const I = n => BF.I[n];

@@ -193,6 +193,22 @@
   .facts label:hover { background: rgba(255, 255, 255, 0.05); }
   .facts label span:nth-child(2) { flex: 1; }
   .fmenu input { accent-color: var(--accent); margin: 0; }
+  /* ---------- game log (js/gamelog.js): opened from the header, above everything else ---------- */
+  .gbtn { background: transparent; border: 1px solid var(--edge2); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  .gbtn:hover, .gbtn.on { color: var(--ink); border-color: var(--accent); }
+  .gbtn .gerr { color: var(--danger); margin-left: 6px; }
+  #gpanel .ph .gbtn { margin-left: 2px; }
+  #glog { max-height: 55vh; min-height: 200px; overflow: auto; padding: 4px 0; font-size: 12px; }
+  .gent { display: grid; grid-template-columns: 172px 92px 104px 46px minmax(0, 1fr); gap: 10px; padding: 3px 16px; border-left: 3px solid transparent; }
+  .gent > span { color: var(--faint); white-space: nowrap; }
+  .gent .gx { color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+  .gent .gk { color: var(--muted); } .gent .gv { color: var(--accent2); }
+  .gent.ERROR { border-left-color: var(--danger); background: rgba(232, 112, 92, 0.07); } .gent.ERROR .gl, .gent.ERROR .gx { color: var(--danger); }
+  .gent.WARN { border-left-color: var(--warn); } .gent.WARN .gl, .gent.WARN .gx { color: var(--warn); }
+  .gent.INFO .gl { color: var(--info); }
+  .gent.DEBUG .gx { color: var(--muted); }
+  .ghead { padding: 6px 16px; color: var(--muted); border-bottom: 1px solid var(--edge); font-size: 12px; }
+  .gmore { padding: 6px 16px; color: var(--faint); font-size: 12px; }
   #log { max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; padding: 4px 0; }
   .ent { display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding: 5px 16px; border-left: 3px solid transparent; font-size: 12px; }
   .ent time { color: var(--faint); }
@@ -289,6 +305,7 @@
   <div class="pill off" id="conn"><i></i><span>Connecting</span></div>
   <div class="hstat" id="h-clock"></div>
   <span class="warp" id="h-warp" hidden></span>
+  <button class="gbtn" id="g-open" title="The game log: everything the game logs, newest first (js/gamelog.js)">Game log<span class="gerr" id="g-errs"></span></button>
   <div class="grow"></div>
   <div class="hstat">Seed <b id="h-seed">-</b></div>
   <div class="hstat">Gen <b id="h-gen">-</b></div>
@@ -304,6 +321,14 @@
 </div>
 
 <main>
+  <div class="panel" id="gpanel" hidden>
+    <div class="ph"><h2>Game log</h2><span class="sub" id="g-count"></span><div class="grow"></div><input class="search" id="g-q" placeholder="Search the game log">
+      <button class="gbtn" id="g-copy" title="Copy the entries shown by the filters, oldest first, as the log file's text">Copy</button>
+      <button class="gbtn" id="g-dl" title="Download the entries shown by the filters as a .log file">Download</button>
+      <button class="gbtn" id="g-x" title="Close the game log">Close</button></div>
+    <div class="filters" id="g-filters"></div>
+    <div id="glog"><div class="empty">No game log yet: load a saved world in the game.</div></div>
+  </div>
   <section class="cards">
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
     <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
@@ -439,6 +464,7 @@ function profColor(p) {
 function connect() {
   const es = new EventSource("events");
   es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.day !== undefined) dayData = c.day; Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.glog !== undefined) glogSet(c.glog); } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
@@ -466,6 +492,7 @@ setInterval(status, 1000);
 
 // ---------------------------------------------------------------- snapshots
 function onSnap(s) {
+  if (s.glog) glogIn(s.glog);
   Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
   if (s.day !== undefined) dayData = s.day;   // the picked villager's day timeline, when it changed (js/daytimeline.js)
   let logChanged = false, econChanged = false;
@@ -1480,6 +1507,124 @@ $("a-body").addEventListener("click", e => {
   saveAlerts();
 });
 renderAlertForm(); renderAlerts();
+
+// ---------------------------------------------------------------- game log (js/gamelog.js)
+// The open world's whole log as the server holds it, newest entries arriving with each snapshot. Shown only when opened (the
+// header's Game log button, which also counts errors). Filters, like the village log's: levels (DEBUG off at first), events
+// (the entry's kind), villages, and villager types (read from village entries by js/logmatch.js; other entries always pass).
+// Copy and Download take the entries the filters show, oldest first, as the log file's lines (BFLog.gameLine), under its header.
+const { LEVELS, gameLine, sysStamp, gameStamp, chunkSpan } = window.BFLog;
+const GSTORE = "bf-debug-gamelog", GSHOW = 1500;
+let glog = null, gOpen = false, gMenu = null, gDirty = true, gT = 0;
+const gf = { levels: ["DEBUG"], kinds: [], villages: [], types: [] };   // what is switched off
+try { Object.assign(gf, JSON.parse(localStorage.getItem(GSTORE) || "{}")); } catch (e) { /* private window: defaults */ }
+const gOff = { levels: new Set(gf.levels), kinds: new Set(gf.kinds), villages: new Set(gf.villages), types: new Set(gf.types) };
+const gSave = () => { try { localStorage.setItem(GSTORE, JSON.stringify({ levels: [...gOff.levels], kinds: [...gOff.kinds], villages: [...gOff.villages], types: [...gOff.types] })); } catch (e) {} };
+const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors" };
+const NOV = "(no village)";
+function glogSet(g) { glog = g && Array.isArray(g.lines) ? g : null; gDirty = true; gRender(); }
+function glogIn(g) {
+  if (g.reset || !glog || glog.w !== g.w) { if (g.from === g.base) { glog = { w: g.w, name: g.name, head: g.head, base: g.base, lines: g.lines.slice() }; gDirty = true; } else gFetch(); }
+  else if (g.from === glog.base + glog.lines.length) {
+    glog.lines.push(...g.lines); glog.head = g.head; glog.name = g.name;
+    if (g.base > glog.base) { glog.lines.splice(0, Math.min(glog.lines.length, g.base - glog.base)); glog.base = g.base; }
+    gDirty = true;
+  } else gFetch();   // missed some: take the server's copy
+  gRender();
+}
+let gFetching = false;
+function gFetch() { if (gFetching) return; gFetching = true; fetch("glog").then(r => r.json()).then(glogSet, () => {}).finally(() => { gFetching = false; }); }
+const kindLabel = (k, debug) => GKINDS[k] || (KINDS[k] ? KINDS[k] : pretty(k.replace(/-/g, " ")) + (debug ? " (debug)" : ""));
+const gTypes = e => e.v && e.l === "INFO" ? actorsOf([e.d, e.k, e.x]) : null;   // village log entries name who did what
+function gShows(e, q) {
+  if (gOff.levels.has(e.l) || gOff.kinds.has(e.k) || gOff.villages.has(e.v || NOV)) return false;
+  if (gOff.types.size) { const a = gTypes(e); if (a && !a.some(([t]) => !gOff.types.has(t))) return false; }
+  return !q || (e.x + " " + (e.v || "") + " " + e.k).toLowerCase().includes(q);
+}
+function gShown() { const q = $("g-q").value.trim().toLowerCase(), a = glog ? glog.lines : []; return a.filter(e => gShows(e, q)); }
+const gRow = (id, label, n, on, color) => `<div class="frow${on ? "" : " none"}${n ? "" : " zero"}" data-v="${esc(id)}"><label><input type="checkbox"${on ? " checked" : ""}>` +
+  (color ? `<i style="background:${color}"></i>` : "") + `<span class="tn">${esc(label)}</span><span class="n">${n}</span></label></div>`;
+const gMenuHtml = (id, sum, some, rows) => `<details class="ft${some ? " some" : ""}" id="${id}" data-f="${id.slice(2)}"${gMenu === id ? " open" : ""}><summary>${esc(sum)}</summary>` +
+  `<div class="fmenu"><div class="fhead"><button data-all="1">Select all</button><button data-all="0">Select none</button></div><div class="flist">${rows}</div></div></details>`;
+const LCOL = { ERROR: "var(--danger)", WARN: "var(--warn)", INFO: "var(--info)", DEBUG: "var(--faint)" };
+let gLists = { levels: LEVELS, kinds: [], villages: [], types: [] };
+function gFilters() {
+  const a = glog ? glog.lines : [], lc = {}, kc = {}, vc = {}, tc = {}, dbg = new Set();
+  for (const e of a) {
+    lc[e.l] = (lc[e.l] || 0) + 1; kc[e.k] = (kc[e.k] || 0) + 1; vc[e.v || NOV] = (vc[e.v || NOV] || 0) + 1;
+    if (e.l === "DEBUG") dbg.add(e.k);
+    for (const [t] of gTypes(e) || []) tc[t] = (tc[t] || 0) + 1;
+  }
+  const kinds = [...new Set([...Object.keys(GKINDS), ...Object.keys(kc)])].sort((x, y) => (dbg.has(x) - dbg.has(y)) || kindLabel(x, dbg.has(x)).localeCompare(kindLabel(y, dbg.has(y))));
+  const vills = Object.keys(vc).sort((x, y) => (x === NOV) - (y === NOV) || x.localeCompare(y));
+  const types = [...allTypes(Object.keys(tc))].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
+  gLists = { levels: LEVELS, kinds, villages: vills, types };
+  const sum = (f, list, every, nothing, unit, name = x => x) => { const on = list.filter(x => !gOff[f].has(x)); return on.length === list.length ? every : !on.length ? nothing : on.length === 1 ? name(on[0]) : on.length + " of " + list.length + " " + unit; };
+  const some = f => gLists[f].some(x => gOff[f].has(x));
+  const el = $("g-filters"), tops = {};
+  for (const l of el.querySelectorAll(".flist")) tops[l.closest("details").id] = l.scrollTop;
+  el.innerHTML = `<span class="flabel">Show</span>` +
+    gMenuHtml("g-levels", sum("levels", LEVELS, "All levels", "No levels", "levels"), some("levels"), LEVELS.map(l => gRow(l, l, lc[l] || 0, !gOff.levels.has(l), LCOL[l])).join("")) +
+    gMenuHtml("g-kinds", sum("kinds", kinds, "All events", "No events", "events", k => kindLabel(k, dbg.has(k))), some("kinds"), kinds.map(k => gRow(k, kindLabel(k, dbg.has(k)), kc[k] || 0, !gOff.kinds.has(k))).join("")) +
+    gMenuHtml("g-villages", sum("villages", vills, "All villages", "No villages", "villages"), some("villages"), vills.map(v => gRow(v, v, vc[v] || 0, !gOff.villages.has(v))).join("")) +
+    gMenuHtml("g-types", sum("types", types, "All villagers", "No villagers", "types"), some("types"), types.map(t => gRow(t, t, tc[t] || 0, !gOff.types.has(t), t === "Player" ? "var(--accent2)" : profColor(t))).join("")) +
+    (["levels", "kinds", "villages", "types"].some(some) ? `<button class="fclear" id="g-clear" title="Show everything, DEBUG included">Clear filters</button>` : "");
+  for (const l of el.querySelectorAll(".flist")) l.scrollTop = tops[l.closest("details").id] || 0;
+}
+function gRender(force) {
+  const errs = glog ? glog.lines.reduce((n, e) => n + (e.l === "ERROR"), 0) : 0;
+  $("g-errs").textContent = errs ? errs + (errs === 1 ? " error" : " errors") : "";
+  if (!gOpen || !(gDirty || force)) return;
+  if (!force && performance.now() - gT < 400) { if (!gRender.t) gRender.t = setTimeout(() => { gRender.t = 0; gRender(); }, 450); return; }   // at most twice a second
+  gT = performance.now(); gDirty = false;
+  gFilters();
+  const el = $("glog");
+  if (!glog) { el.innerHTML = `<div class="empty">No game log yet: load a saved world in the game.</div>`; $("g-count").textContent = ""; return; }
+  const list = gShown(), rows = [];
+  for (let i = list.length - 1; i >= 0 && rows.length < GSHOW; i--) {
+    const e = list[i];
+    rows.push(`<div class="gent ${esc(e.l)}"><span title="System time">${esc(sysStamp(e.s))}</span><span title="Game time">${esc(gameStamp(e.d))}</span><span title="Chunk time: game days its chunk has been loaded">chunk ${esc(chunkSpan(e.c))}</span>` +
+      `<span class="gl">${esc(e.l)}</span><span class="gx"><span class="gk">${esc(e.k)}</span>  ${e.v ? `<span class="gv">${esc(e.v)}:</span> ` : ""}${esc(e.x)}</span></div>`);
+  }
+  el.innerHTML = `<div class="ghead">${esc(glog.head)}</div>` + (rows.join("") || `<div class="empty">${glog.lines.length ? "Nothing matches the filters." : "No entries yet."}</div>`) +
+    (list.length > GSHOW ? `<div class="gmore">Showing the newest ${fmt(GSHOW)} of ${fmt(list.length)}; Copy and Download take all of them.</div>` : "");
+  $("g-count").textContent = (glog.name ? glog.name + " \u00B7 " : "") + (list.length === glog.lines.length ? fmt(list.length) : fmt(list.length) + " of " + fmt(glog.lines.length)) + " entries";
+}
+function gText() { return [glog ? glog.head : ""].concat(gShown().map(gameLine)).join("\n") + "\n"; }
+function gFlash(b, t) { const o = b.textContent; b.textContent = t; setTimeout(() => { b.textContent = o; }, 1200); }
+$("g-open").addEventListener("click", () => { gOpen = !gOpen; $("gpanel").hidden = !gOpen; $("g-open").classList.toggle("on", gOpen); if (gOpen) { gRender(true); scrollTo({ top: 0 }); } });
+$("g-x").addEventListener("click", () => { gOpen = false; $("gpanel").hidden = true; $("g-open").classList.remove("on"); });
+$("g-q").addEventListener("input", () => gRender(true));
+$("g-copy").addEventListener("click", () => {
+  const t = gText(), b = $("g-copy");
+  const fallback = () => { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (e) {} ta.remove(); gFlash(b, ok ? "Copied" : "Copy failed"); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => gFlash(b, "Copied"), fallback); else fallback();
+});
+$("g-dl").addEventListener("click", () => {
+  const a = document.createElement("a"), name = ((glog && glog.name) || "blockfield").replace(/[^\w .-]+/g, "_").trim() || "blockfield";
+  a.href = URL.createObjectURL(new Blob([gText()], { type: "text/plain" }));
+  a.download = name + ".log"; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
+$("g-filters").addEventListener("toggle", e => {
+  const d = e.target; if (!d.matches || !d.matches("details.ft")) return;
+  if (d.open) { gMenu = d.id; for (const o of $("g-filters").querySelectorAll("details.ft[open]")) if (o !== d) o.open = false; }
+  else if (gMenu === d.id) gMenu = null;
+}, true);
+$("g-filters").addEventListener("change", e => {
+  const cb = e.target.closest(".frow input"); if (!cb) return;
+  const f = cb.closest("details").dataset.f, v = cb.closest(".frow").dataset.v;
+  if (cb.checked) gOff[f].delete(v); else gOff[f].add(v);
+  gSave(); gRender(true);
+});
+$("g-filters").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "g-clear") { for (const f in gOff) gOff[f].clear(); }
+  else if (b.dataset.all) { const f = b.closest("details").dataset.f; if (b.dataset.all === "1") gOff[f].clear(); else for (const x of gLists[f]) gOff[f].add(x); }
+  else return;
+  gSave(); gRender(true);
+});
+document.addEventListener("click", e => { if (gMenu && e.target.isConnected && !e.target.closest("#g-filters details.ft")) { const d = $(gMenu); gMenu = null; if (d) d.open = false; } });
 
 $("raw").addEventListener("toggle", () => { if (snap) $("f3").textContent = snap.text; });
 addEventListener("resize", () => { if (snap) { renderTop(snap); if (curV) drawMap(snap); } });
