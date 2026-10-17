@@ -37,7 +37,7 @@ const MAT = { flint: is("flint"), feather: is("feather"), string: is("string"), 
 const sum = (m, f) => { let n = 0; for (const s of m.inv) if (s && f(s.id)) n += s.count; return n; };
 const count = (m, id) => TR().inv.count(m.inv, id);
 const ems = m => count(m, I("emerald"));
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: "fletcher" + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("fletcher", Object.assign({ kind, day: +dayNow().toFixed(3), who: "fletcher" + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 const state = m => m.flt || (m.flt = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0, craft: null });
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Fletcher") + " (Fletcher) " + text, m); };
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();

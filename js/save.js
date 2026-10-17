@@ -1,5 +1,7 @@
 // Saved worlds in the browser's IndexedDB: a list of worlds (name, seed, mode, last played),
 // each storing block edits, player, inventory, time of day and the dropped items lying around. Autosaves while playing.
+// Each world's game log (js/gamelog.js) is kept next to its save in the same "data" store: a head record ("<id>#loghead") and
+// numbered batches of entries ("<id>#log:000000012"), written as the log grows (logStore).
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -75,6 +77,7 @@ function snapshot() {
     horses: BF.horses ? BF.horses.serialize() : undefined, // every horse, wild or tamed, with its stats, saddle, owner and lead (js/horses.js)
     farmland: BF.farmland ? BF.farmland.serialize() : undefined, // farmland hydration clocks + last rain (js/farmland.js)
     bees: BF.bees ? BF.bees.serialize() : undefined, // every bee nest and hive: its bee count, honey level and last growth day (js/bees.js)
+    chunkTime: BF.glog ? BF.glog.chunkTimes() : undefined, // game days each chunk has been loaded, the game log's chunk time (js/gamelog.js)
     edits,
   };
 }
@@ -113,6 +116,7 @@ function restore(data) {
   if (BF.horses) BF.horses.deserialize(data.horses); // horses come back when the player is near their chunk (old saves: none)
   if (BF.farmland) BF.farmland.deserialize(data.farmland); // farmland clocks (old saves: each block's clock starts when first seen)
   if (BF.bees) BF.bees.deserialize(data.bees); // bee homes (old saves: none)
+  if (BF.glog) BF.glog.loadChunkTimes(data.chunkTime); // chunk times (old saves: every chunk starts at 0)
 }
 
 // A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
@@ -127,12 +131,32 @@ function numberSeed(text) {
   return (h >>> 0) || 0x9e3779b9;
 }
 
+// ---------- game logs (js/gamelog.js) ----------
+const LOGH = id => id + "#loghead", LOGK = id => id + "#log:", logKey = (id, seq) => LOGK(id) + String(seq).padStart(9, "0");
+const logRange = id => IDBKeyRange.bound(LOGK(id), LOGK(id) + "\uffff");
+const logStore = {
+  // -> {head, entries} (head null when the world has no log yet)
+  read(id) {
+    return tx(["data"], "readonly", t => { const s = t.objectStore("data"); return Promise.all([reqP(s.get(LOGH(id))), reqP(s.getAll(logRange(id)))]); })
+      .then(([head, batches]) => ({ head: head || null, entries: head ? [].concat(...(batches || [])) : [] }));
+  },
+  // adds batch number seq and drops the batches numbered in drop, with the head that lists them
+  write(id, head, seq, list, drop) {
+    return tx(["data"], "readwrite", t => {
+      const s = t.objectStore("data");
+      s.put(list, logKey(id, seq)); s.put(head, LOGH(id));
+      for (const d of drop || []) s.delete(logKey(id, d));
+    });
+  },
+};
+
 // ---------- public API ----------
 const save = {
   current: null,          // meta of the world being played, or null (unsaved demo world)
   lastSaved: 0,
   supported: typeof indexedDB !== "undefined",
   numberSeed,             // exposed for tests
+  logStore,               // the game log's storage (js/gamelog.js)
 
   // -> [{id, name, seed, gameMode, created, lastPlayed}] newest first; [] if storage is unavailable
   list() {
@@ -170,7 +194,7 @@ const save = {
 
   remove(id) {
     if (save.current && save.current.id === id) save.current = null;
-    return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").delete(id); t.objectStore("data").delete(id); });
+    return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").delete(id); const d = t.objectStore("data"); d.delete(id); d.delete(LOGH(id)); d.delete(logRange(id)); });
   },
 
   rename(id, name) {

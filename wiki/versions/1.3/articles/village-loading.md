@@ -25,7 +25,7 @@ When a village would stop, because you moved away or because other villages push
 
 If a villager is still out on an errand when the timer ends, the game logs a loading error and unloads the village anyway. [[villager:explorer|Explorers]] do not hold up the timer: they unload with their village wherever they are, and are put back exactly where they stood when it returns. A [[villager:merchant]] on a caravan trip counts as one long task, and no merchant starts a long trip while its village is counting down.
 
-On the debug screen each village shows how long it has before it unloads, a list of what each villager is doing with its estimate, and the list of loading errors.
+On the debug screen each village shows how long it has before it unloads, a list of what each villager is doing with its estimate, and the list of loading errors. Each loading error is also an ERROR line in the world's [[page:game-log]].
 
 ## When the game gets heavy
 A safety valve stops villages early if the game would otherwise slow down. It acts when any one of these is over its limit:

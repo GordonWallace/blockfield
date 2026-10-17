@@ -32,6 +32,7 @@ resize();
 // ---------- world lifecycle ----------
 // Starts (or restarts) a world from a seed and places the player on solid ground near the origin.
 BF.newWorld = function (seed, opts) {
+  BF.emit("worldClosing");   // the world being replaced is unloaded (js/gamelog.js logs it while its clock still reads right)
   BF.state.seed = seed >>> 0;
   BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)

@@ -46,7 +46,7 @@ const isFlowerItem = id => !!(BE() && BE().isFlower(id));
 const pk = (x, y, z) => x + "," + y + "," + z;
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 const LOG = [];
-const log = (kind, data) => { LOG.push(Object.assign({ kind, day: +now().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, data) => { LOG.push(BF.glog.job("beekeeper", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 300) LOG.shift(); };
 const who = m => (BF.vlog && BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Villager") + " (Beekeeper)";
 const vlog = (m, kind, text, where) => { if (BF.vlog && m && m.village) BF.vlog.log(m.village, kind, who(m) + " " + text, where || m); };
 const isExtractor = id => id != null && id === BF.B.honey_extractor;

@@ -60,7 +60,7 @@ const toRestore = new Set();   // loaded chunks with stored mobs waiting
 let nights = new Map();        // village key -> Map(night -> [reached 0|1, zombie attacks, deaths])
 let hooked = false;
 const LOG = [];
-const log = (kind, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, data) => { LOG.push(BF.glog.job("wildlife", Object.assign({ kind, day: +dayNow().toFixed(3) }, data))); if (LOG.length > 300) LOG.shift(); };
 
 // ---------------------------------------------------------------- storing and bringing back
 // Daylight that would burn an undead mob under open sky somewhere in game time (t0, t1]?
