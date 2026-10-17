@@ -270,7 +270,8 @@ function hook() {
   BF.on("villagerHit", (v, by) => { const n = nightNow(); if (n != null && by && by.type === "zombie" && v.village) nightRec(v.village.key, n)[1]++; });
   BF.on("mobKilled", m => { const n = nightNow(); if (n != null && m && m.type === "villager" && m.village) nightRec(m.village.key, n)[2]++; });
 }
-// The debug screen's village panel: hostiles in the village's area, wild animals within 128 blocks of its centre, the last NIGHTS nights.
+// The debug screen's village panel: hostiles in the village's area, wild animals within 128 blocks of its centre, the last NIGHTS nights
+// (fewer in a world younger than that, none before its first sunset).
 function villageStats(rec) {
   let hostiles = 0;
   const animals = {};
@@ -282,7 +283,7 @@ function villageStats(rec) {
     if (ST[m.type] && wildAnimal(m) && BF.planet.distance(m.position, rec) <= 128) animals[m.type] = (animals[m.type] || 0) + 1;
   }
   const v = nights.get(rec.key), cur = Math.floor(dayNow() - 0.5), out = [];
-  for (let n = cur; n > cur - NIGHTS; n--) { const r = v && v.get(n); out.push([n, r ? r[0] : 0, r ? r[1] : 0, r ? r[2] : 0]); }
+  for (let n = cur; n > cur - NIGHTS && n >= 0; n--) { const r = v && v.get(n); out.push([n, r ? r[0] : 0, r ? r[1] : 0, r ? r[2] : 0]); }
   return { hostiles, animals, nights: out };
 }
 
