@@ -15,7 +15,7 @@ module.exports = async (pg, out) => {
     ok("new worlds use village generator 6 (5 + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
     // wild animals breed on their own (js/wildlife.js: a daily roll makes a wild pair willing, as if fed): held off here, so a birth or a
-    // willing animal in the checks below comes from the feeding they check
+    // willing animal in the checks below comes from the feeding they check, and the wild animals the test spawns stay where it put them
     BF.wildlife.tune.pairP = 0;
     const V = { x: -1, z: -72 };   // seed 1: a village of 22 on the plains with a pasture
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
@@ -26,7 +26,8 @@ module.exports = async (pg, out) => {
     const load = async (x, z) => { for (let i = 0; i < 400; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0 && BF.world.isLoaded(x, z)) break; } };
     await load(pb.doorX, pb.doorZ);
     BF.player.invulnerable = true;
-    // the player stays frozen where it was put (step() doesn't move it): a villager stepping up beside it would be pushed back by its box for good. Out of the way, still in range:
+    // the player stays frozen where it was put (step() doesn't move it), its box in the air 2 blocks over the ground: a villager that steps
+    // onto a block there (the poultry keeper walks over its nesting box) is pushed back by it for good. Out of the way, still in range:
     BF.player.teleport(BF.player.position.x, BF.player.position.y + 12, BF.player.position.z);
     BF.sky.setTime(0.05);
     run(4);
@@ -293,8 +294,6 @@ module.exports = async (pg, out) => {
     ok("two wild cows spawned outside the village pasture", wild.length === 2 && wild.every(m => !m.pasture), wild.map(m => [m.position.x.toFixed(0), m.position.z.toFixed(0)]));
     BF.sky.setTime(0.06);
     let leads = 0;
-    // working hours only, and the next morning comes: a failed fetch is tried again at a time of day (js/cowherd.js pickTask stockAt, a
-    // tenth of a day later or the next morning), so a clock put back on the same day never reached it and one failed lead failed the test
     for (let i = 0; i < 30000 && P.cows.length < 2; i++) { step(); if (S.task && S.task.kind === "fetch" && S.stage !== "walk" && i % 20 === 0) leads++; if (BF.sky.time > 0.45) { BF.sky.day += 1; BF.sky.setTime(0.06); } }
     ok("the cowherd led wild cows into the empty pasture until it held 2", P.cows.length >= 2, { cows: P.cows.length, wild: wild.map(m => !!m.pasture), log: C.log.filter(e => /lead|stock|fetch|noWild/.test(e.kind)).slice(-6) });
     ok("it led them (it walked with a cow behind it)", leads > 0, leads);
