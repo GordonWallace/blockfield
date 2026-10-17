@@ -401,8 +401,6 @@ module.exports = async (pg, out) => {
       // a villager out of work (its jobsite gone, its old trade forgotten), to take the trough
       const jl = v2().find(m => ["fisherman", "mason", "fletcher", "leatherworker", "librarian"].includes(m.profession) && m.jobsite);
       if (jl) { const j = jl.jobsite, id = BF.world.getBlock(j.x, j.y, j.z); BF.world.setBlock(j.x, j.y, j.z, 0); BF.emit("blockBroken", j.x, j.y, j.z, id); BF.jobs.release(jl); jl.jobMem = null; jl.xp = 0; }
-      // a bigger village has other free jobsites too: gone, so the trough is the one it can take
-      if (jl) for (const s of BF.jobs.unclaimed(jl, null, jl)) { const id = BF.world.getBlock(s.x, s.y, s.z); BF.world.setBlock(s.x, s.y, s.z, 0); BF.emit("blockBroken", s.x, s.y, s.z, id); }
       ok("and an unemployed villager", !!jl && jl.profession === "unemployed", jl && jl.profession);
       // a jobsite another villager lets go of later (a farmer's composter) is cleared too while it waits, so the trough stays the one it can take
       const sweep = () => { if (jl && jl.profession === "unemployed") for (const s of BF.jobs.unclaimed(jl, null, jl)) { const id = BF.world.getBlock(s.x, s.y, s.z); if (id !== BF.B.feed_trough) { BF.world.setBlock(s.x, s.y, s.z, 0); BF.emit("blockBroken", s.x, s.y, s.z, id); } } };
