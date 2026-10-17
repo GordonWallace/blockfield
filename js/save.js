@@ -194,6 +194,7 @@ const save = {
 
   remove(id) {
     if (save.current && save.current.id === id) save.current = null;
+    if (BF.glog) BF.glog.forget(id);   // its game log goes too, with nothing more written
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").delete(id); const d = t.objectStore("data"); d.delete(id); d.delete(LOGH(id)); d.delete(logRange(id)); });
   },
 

@@ -12,7 +12,7 @@
 // Each world keeps up to CAP entries; past that the oldest are dropped, a stored batch at a time.
 // Adding something to the log: BF.glog.log(level, kind, text, { village: rec|key, at: mob|{x,y,z}|[x,y,z] }).
 // API: BF.glog = { LEVELS, CAP, log(level, kind, text, opts?), job(src, e) -> e, village(rec, e), entries(), base(), world(), head(),
-//                  headLine(), recent(n) (the newest entries, also before a saved world opens), text(list?), chunkDays(x, z), chunkTimes(), loadChunkTimes(o), flush(), feed(), feedAt(n), feedReset(),
+//                  forget(id), headLine(), recent(n) (the newest entries, also before a saved world opens), text(list?), chunkDays(x, z), chunkTimes(), loadChunkTimes(o), flush(), feed(), feedAt(n), feedReset(),
 //                  diskBuild(build), build, ready() }
 (() => {
 "use strict";
@@ -171,6 +171,8 @@ function flush() {
   return st.write(world, head, seq, list, drop).then(() => true, e => { orig.error.call(console, "game log: can't write", e); return false; });
 }
 setInterval(flush, FLUSH_MS);
+// The world is being deleted (js/save.js remove): stop its log without writing anything more.
+function forget(id) { if (world === id) { world = null; head = null; entries = []; base = 0; savedTo = 0; loading = false; } }
 function text(list) {
   return [headLine()].concat((list || entries).map(LM().gameLine)).join("\n") + "\n";
 }
@@ -219,6 +221,6 @@ addEventListener("pagehide", () => close("the page was closed"));
 BF.glog = {
   LEVELS: ["ERROR", "WARN", "INFO", "DEBUG"], CAP, log, job, village, build: BUILD,
   entries: () => entries, recent: (n = 50) => (world ? entries : pre).slice(-n), base: () => base, world: () => world, head: () => head, headLine, text,
-  chunkDays, chunkTimes, loadChunkTimes, flush, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading,
+  chunkDays, chunkTimes, loadChunkTimes, flush, forget, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading,
 };
 })();
