@@ -45,7 +45,7 @@ function use(m, s, n = 1) {
   const i = m && m.inv ? m.inv.indexOf(s) : -1;
   if (i >= 0) m.inv[i] = null;
   const name = BF.itemName(s.id);
-  LOG.push({ kind: "broke", day: +dayNow().toFixed(3), who: m ? m.profession : null, village: m && m.village ? m.village.key : null, tool: BF.items[s.id].name });
+  LOG.push(BF.glog.job("tool-wear", { kind: "broke", day: +dayNow().toFixed(3), who: m ? m.profession : null, village: m && m.village ? m.village.key : null, tool: BF.items[s.id].name }));
   if (LOG.length > 300) LOG.shift();
   if (BF.vlog && m && m.village) BF.vlog.log(m.village, "tool", BF.vlog.nameOf(m) + " (" + String(m.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) + ")'s " + name + " broke", m);
   if (BF.audio && m && m.position) { try { BF.audio.play("dig.metal", { x: m.position.x, y: m.position.y + 1, z: m.position.z, pitch: 1.5 }); } catch (e) { /* optional */ } }

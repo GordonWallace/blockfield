@@ -54,7 +54,7 @@ const feedIds = () => FEED_NAMES.map(I).filter(id => id != null);
 const isFeed = id => id != null && feedIds().includes(id);
 const feedHeld = m => feedIds().reduce((a, id) => a + cnt(m, id), 0);
 const LOG = [];
-const log = (kind, data) => { LOG.push(Object.assign({ kind, day: +now().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, data) => { LOG.push(BF.glog.job("pig-farmer", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 300) LOG.shift(); };
 const vlog = (m, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, "pigs", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Pig farmer") + " (Pig Farmer) " + text, m); };
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 

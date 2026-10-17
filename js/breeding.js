@@ -338,7 +338,7 @@ function birth(a, b, rec, force) {
   for (let k = 0; k < 6; k++) heart(m.position.x, headTop(m), m.position.z);
   S.stats.births++;
   const note = { day: +d.toFixed(2), village: rec.key, child: villageKeyOf(m), parents: e.parents, beds: bedCount(rec), villagers: villagerCount(rec), paid: [pa, pb].map(st => st.map(s => s.count + " " + BF.itemName(s.id)).join(" + ")) };
-  S.log.push(note); if (S.log.length > 50) S.log.shift();
+  S.log.push(BF.glog.job("breeding", Object.assign({ kind: "birth" }, note))); if (S.log.length > 50) S.log.shift();
   console.info("[breeding] birth", JSON.stringify(note));
   if (BF.emit) BF.emit("villagerBorn", m, a, b);
   return m;
@@ -378,6 +378,7 @@ function finishGrow(m) {
   S.stats.grownUp++;
   for (let k = 0; k < 4; k++) heart(m.position.x, headTop(m), m.position.z);
   console.info("[breeding] grew up", villageKeyOf(m), "->", m.profession, "prefer", m.jobPrefer.join("/"));
+  BF.glog.job("breeding", { kind: "grew-up", village: villageKeyOf(m), who: BF.vlog ? BF.vlog.nameOf(m) : null, profession: m.profession, prefer: m.jobPrefer.join("/") });
   if (BF.emit) BF.emit("villagerGrewUp", m);
 }
 function updateGrow(dt) {

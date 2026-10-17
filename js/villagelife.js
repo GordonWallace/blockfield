@@ -1125,7 +1125,7 @@ function endTask(m, fs, success) {
   if (success && Math.random() < BREAK_P) fs.breakT = rnd(4, 9);
 }
 function log(kind, m, data) {
-  LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data));
+  LOG.push(BF.glog.job("village-life", Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data)));
   if (LOG.length > 300) LOG.shift();
 }
 // The work itself. Returns false when the cell changed meanwhile (task dropped).
