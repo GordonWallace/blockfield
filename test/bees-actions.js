@@ -96,17 +96,25 @@ module.exports = async (pg) => {
     for (let i = 0; i < 1200; i++) { step(); for (const b of BE.list) if (b.mode === "land" && b.land) { landed++; if (b.land.ny === 0) wall++; if (b.land.flower) flowerL++; if (b.land.ny < 0) ceil++; } }
     ok("bees land on flowers and other surfaces, never on ceilings", flowerL > 0 && landed > flowerL && ceil === 0, { landed, wall, flowerL, ceil });
     // walls: rest stops on a wall are rare by chance, so send one bee to a wall spot and see it land there, flat against the face
+    // Each try takes the nearest bee not tried yet that is free to fly up: one under an overhang (the leaves of a tree) can only hop straight up into
+    // them on its way to a spot above and beside it, so it gives up after 6 s (js/bees.js stuck), and as the nearest bee it was picked for every try.
+    // The beekeeper is kept from leading wild bees meanwhile: a bee near a villager holding a flower follows it and never gets to the wall.
+    if (K.bkp && K.bkp.stage) BK.forceStop(K);
+    if (K.bkp) K.bkp.cd = 1e12;
+    const tried = new Set(), free = b => !BF.SOLID[W.getBlock(Math.floor(b.x), Math.floor(b.y) + 1, Math.floor(b.z))];
     let ws = null, wb = null, onWall = false;
     for (let tries = 0; tries < 6 && !onWall; tries++) {   // a few wall spots, each with the bee nearest it (a spot can be awkward to reach)
       ws = null;
       for (let i = 0; i < 4000 && !ws; i++) { const sp = BE.landingSpot(h0.x, h0.y + 2, h0.z, 8); if (sp && sp.ny === 0) ws = sp; }
       if (!ws) break;
-      wb = BE.list.filter(b => !b.follow && b.home).sort((p, q) => Math.hypot(p.x - ws.x, p.y - ws.y, p.z - ws.z) - Math.hypot(q.x - ws.x, q.y - ws.y, q.z - ws.z))[0];
+      wb = BE.list.filter(b => !b.follow && b.home && !tried.has(b) && free(b) && !(b.angry > BF.simNow())).sort((p, q) => Math.hypot(p.x - ws.x, p.y - ws.y, p.z - ws.z) - Math.hypot(q.x - ws.x, q.y - ws.y, q.z - ws.z))[0];
       if (!wb) break;
+      tried.add(wb);
       wb.mode = "fly"; wb.tgt = ws; wb.land = null; wb.stuck = 0; wb.lastD = Infinity; wb.front = false; wb.restedOut = wb.restedBack = true;
       for (let i = 0; i < 400 && !onWall && wb.tgt === ws; i++) { step(); onWall = wb.mode === "land" && wb.land === ws; }
     }
-    ok("bees land on walls", sides > 0 && onWall, { sides, spot: ws && [ws.x, ws.y, ws.z, ws.nx, ws.nz], bee: wb && [wb.mode, +wb.x.toFixed(2), +wb.y.toFixed(2), +wb.z.toFixed(2)] });
+    ok("bees land on walls", sides > 0 && onWall, { sides, spot: ws && [ws.x, ws.y, ws.z, ws.nx, ws.nz], bee: wb && [wb.mode, +wb.x.toFixed(2), +wb.y.toFixed(2), +wb.z.toFixed(2)], tries: tried.size });
+    if (K.bkp) K.bkp.cd = 0;
     ok("honey rises after flower visits", h0.honey > 0, h0.honey);
     BF.sky.setTime(BE.DUSK - 0.002);
     for (let i = 0; i < 200; i++) step();
