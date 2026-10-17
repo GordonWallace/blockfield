@@ -14,6 +14,9 @@ module.exports = async (pg, out) => {
     BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (5 + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
+    // wild animals breed on their own (js/wildlife.js: a daily roll makes a wild pair willing, as if fed): held off here, so a birth or a
+    // willing animal in the checks below comes from the feeding they check, and the wild animals the test spawns stay where it put them
+    BF.wildlife.tune.pairP = 0;
     const V = BFT.village((v, k) => k.pasture && v.ground === 0 && v.pop >= 10);   // the planet: the nearest grass village of 10+ with a pasture
     const wv = BF.worldgen.villagesNear(V.x, V.z, 40).find(v => Math.round(v.x) === V.x && Math.round(v.z) === V.z);
     const pb = wv && wv.buildings.find(b => b.type === "pasture");
@@ -23,6 +26,9 @@ module.exports = async (pg, out) => {
     const load = async (x, z) => { for (let i = 0; i < 400; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0 && BF.world.isLoaded(x, z)) break; } };
     await load(pb.doorX, pb.doorZ);
     BF.player.invulnerable = true;
+    // the player stays frozen where it was put (step() doesn't move it), its box in the air 2 blocks over the ground: a villager that steps
+    // onto a block there (the poultry keeper walks over its nesting box) is pushed back by it for good. Out of the way, still in range:
+    BF.player.teleport(BF.player.position.x, BF.player.position.y + 12, BF.player.position.z);
     BF.sky.setTime(0.05);
     run(4);
     const key = V.x + "," + V.z;
