@@ -35,7 +35,7 @@ module.exports = async (pg, out) => {
     const p = X.pickTarget(A, c);
     const s = M.scale(1), ox = M.originX(1, zx), oz = M.originX(1, zz);
     if (p.best && d.px[p.best.pi]) fails.push("target pixel is already drawn");
-    if (p.best && (Math.floor(ox + (p.best.pi % M.PX + 0.5) * s) !== p.best.wx || Math.floor(oz + ((p.best.pi / M.PX | 0) + 0.5) * s) !== p.best.wz)) fails.push("target is not its pixel");
+    if (p.best && Math.hypot(ox + (p.best.pi % M.PX + 0.5) * s - p.best.wx, oz + ((p.best.pi / M.PX | 0) + 0.5) * s - p.best.wz) > 22) fails.push("stands too far from its pixel to draw it");
     // put aside: not for sale, nothing bought on top of it, back to it the next day
     X.shelve(A, c, "unreachable");
     X.syncOffers(A);
