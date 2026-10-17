@@ -992,9 +992,62 @@ function pickWander(m, r) {
   m.ai.tz = m.position.z + Math.sin(a) * d;
 }
 
+// Getting past what blocks a walk (village mobs: villagers and golems). Walks to a point (wanderAI: heading home from far off, a golem's
+// patrol) go straight at it, so a tree, a wall or a ledge too low to jump under would hold them there for good. Blocked for a moment,
+// it finds a route round it (A*, up to DETOUR_HOP blocks towards the point; three blocks high for a golem), and with none it steps
+// aside for a few seconds. Being held in one place for STUCK_LOG seconds of pushing goes in the game log.
+const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, STUCK_LOG = 30;
+function moveLog(m, level, text) {
+  if (!BF.glog) return;
+  const who = BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "An " + m.type.replace(/_/g, " ");   // "Name (Job)" as in the village log
+  BF.glog.log(level, "move", who + " " + text, { village: m.village, at: m });
+}
+// Called every physics step: `blocked` = it wanted to move and a block stopped it.
+function blockedMove(m, dt, blocked) {
+  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, logged: false });
+  if (Math.hypot(p.x - g.x, p.z - g.z) > 3) {   // got somewhere
+    if (g.logged) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
+    g.x = p.x; g.z = p.z; g.t = 0; g.logged = false;
+  } else if (blocked && (g.t += dt) >= STUCK_LOG && !g.logged) {
+    g.logged = true;
+    moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + STUCK_LOG + " s" + (ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
+  }
+  ai.blockedT = blocked ? (ai.blockedT || 0) + dt : 0;
+}
+function startDetour(m) {
+  const ai = m.ai, px = m.position.x, pz = m.position.z, dx = ai.tx - px, dz = ai.tz - pz, d = Math.hypot(dx, dz) || 1;
+  ai.blockedT = 0;
+  if (planBudget > 0) {
+    planBudget--;
+    const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
+    const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
+    if (route && route.length) { ai.detour = { route, ri: 0, stuckT: 0 }; return; }
+  }
+  aside(m);
+}
+function aside(m) {
+  const ai = m.ai, px = m.position.x, pz = m.position.z, a = Math.atan2(ai.tz - pz, ai.tx - px) + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + rnd(-0.5, 0.5));
+  ai.detour = { x: px + Math.cos(a) * 5, z: pz + Math.sin(a) * 5, t: rnd(2, 4) };
+}
+// Steers along a detour; false once it is over (reached, timed out, or the route itself got stuck).
+function followDetour(m, dt, out, sp) {
+  const D = m.ai.detour;
+  if (D.route) {
+    const r = followRoute(m, dt, out, sp, D);
+    if (r === "stuck") { m.ai.detour = null; aside(m); return followDetour(m, dt, out, sp); }   // the route did not fit after all: try from somewhere else
+    return r === "going";
+  }
+  const dx = D.x - m.position.x, dz = D.z - m.position.z, d = Math.hypot(dx, dz);
+  if ((D.t -= dt) <= 0 || d < 0.6) return false;
+  out.x = dx / d * sp; out.z = dz / d * sp;
+  return true;
+}
+
 // Sets out.x/out.z to the desired horizontal velocity; sets m.lookAt.
 function wanderAI(m, dt, out) {
   const ai = m.ai, T = m.def;
+  if (ai.detour && (ai.mode !== "walk" || m.age - (ai.wanderAt || 0) > 0.5)) ai.detour = null;   // a detour is for the walk it was made for
+  ai.wanderAt = m.age;
   ai.t -= dt;
   if (ai.t <= 0) {
     if (ai.mode === "idle" && Math.random() < 0.6) { ai.mode = "walk"; pickWander(m, 8); ai.t = rnd(3, 7); }
@@ -1007,11 +1060,13 @@ function wanderAI(m, dt, out) {
     else m.lookAt = { yaw: rnd(-1, 1), pitch: rnd(-0.4, 0.3) };
   }
   if (ai.mode === "walk") {
+    const sp = T.hostile ? T.speed * 0.4 : T.speed;
+    if (ai.detour) { if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
     const dx = ai.tx - m.position.x, dz = ai.tz - m.position.z, d = Math.hypot(dx, dz);
     if (d < 0.6) { ai.mode = "idle"; ai.t = rnd(2, 5); return; }
     const nx = dx / d, nz = dz / d;
     if (!m.inWater && (dropAhead(m, nx, nz) > 3 || (!T.hostile && waterAhead(m, nx, nz)))) { ai.mode = "idle"; ai.t = rnd(1, 3); return; }
-    const sp = T.hostile ? T.speed * 0.4 : T.speed;
+    if (T.village && ai.blockedT > DETOUR_AFTER) { startDetour(m); if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
     out.x = nx * sp; out.z = nz * sp;
   }
 }
@@ -1248,8 +1303,10 @@ function ladderCell(x, y, z) {
 }
 const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // A* over walkable cells (4-way, step up 1, drop up to 3, straight up/down ladders). goal(x, y, z) -> bool. Returns cells after start, or null.
+// tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear.
 let planBudget = 0;
-function findPath(sx, sy, sz, goal, maxNodes = 3000) {
+function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
+  const air = (x, y, z) => !tall || !blockAt(x, y, z).solid, nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) : navCell;
   const key = (x, y, z) => x + "," + y + "," + z;
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const open = [[sx, sy, sz, 0, hh(sx, sz)]], from = new Map([[key(sx, sy, sz), null]]), cost = new Map([[key(sx, sy, sz), 0]]);
@@ -1266,7 +1323,7 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
     }
     if (ladderAt(x, y, z)) for (const dy of [1, -1]) {           // climb straight up to the next rung or down to the one below
       const ny = y + dy;
-      if (dy > 0 ? !navCell(x, ny, z) : !ladderCell(x, ny, z)) continue;
+      if (dy > 0 ? !nav(x, ny, z) : !ladderCell(x, ny, z) || !air(x, ny + 2, z)) continue;
       const k = key(x, ny, z), ng = g + 1.5;
       if (cost.has(k) && cost.get(k) <= ng) continue;
       cost.set(k, ng); from.set(k, [x, y, z]);
@@ -1274,9 +1331,9 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
     }
     for (const [dx, dz] of BF.DIRS) for (const dy of [0, 1, -1, -2, -3]) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
-      if (!navCell(nx, ny, nz)) continue;
-      if (dy > 0 && blockAt(x, y + 2, z).solid) break;            // no room to jump
-      if (dy < 0 && blockAt(nx, y + 1, nz).solid) break;          // wall: cannot step off
+      if (!nav(nx, ny, nz)) continue;
+      if (dy > 0 && (blockAt(x, y + 2, z).solid || !air(x, y + 3, z) || (tall && BF.DIRS.some(([ex, ez]) => !air(x + ex, y + 3, z + ez))))) break;   // no room to jump (a golem is wider than its cell)
+      if (dy < 0 && (blockAt(nx, y + 1, nz).solid || !air(nx, y + 2, nz))) break;        // wall: cannot step off
       const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
       if (cost.has(k) && cost.get(k) <= ng) break;
       cost.set(k, ng); from.set(k, [x, y, z]);
@@ -1301,8 +1358,9 @@ function pathOut(m) {
   return findPath(x, y, z, { x: H.outX, z: H.outZ, at: (cx, cy, cz) => cx === H.outX && cz === H.outZ }, 1200);
 }
 // Steers along ai.route. Returns "done", "stuck" or "going".
-function followRoute(m, dt, out, speed) {
-  const ai = m.ai, r = ai.route;
+// `ai` defaults to the villager's own route state (m.ai: route, ri, stuckT); detours pass their own.
+function followRoute(m, dt, out, speed, ai = m.ai) {
+  const r = ai.route;
   if (!r || ai.ri >= r.length) return "done";
   const c = r[ai.ri], dx = c[0] + 0.5 - m.position.x, dz = c[2] + 0.5 - m.position.z, d = Math.hypot(dx, dz);
   // reached: within 0.3 of its centre, and on a ladder only once the feet are in that cell
@@ -1705,7 +1763,7 @@ function updateMob(m, dt) {
   // standing still on solid ground with nothing pushing it: no move to make (most grazing animals most of the time)
   const resting = m.onGround && !m.inWater && !m.onLadder && m.knockT <= 0 && !_desired.x && !_desired.z && m.vel.y <= 0 &&
     Math.abs(m.vel.x) < 0.02 && Math.abs(m.vel.z) < 0.02 && BF.world.isSolid(Math.floor(m.position.x), Math.floor(m.position.y - 0.05), Math.floor(m.position.z));
-  if (resting) { m.vel.set(0, 0, 0); m.fallStart = m.position.y; }
+  if (resting) { m.vel.set(0, 0, 0); m.fallStart = m.position.y; ai.blockedT = 0; }
   else {
   const wasGround = m.onGround;
   const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05 });
@@ -1715,10 +1773,11 @@ function updateMob(m, dt) {
   if ((res.hitX || res.hitZ) && wants) {
     if (T.climbs && (ai.target || ai.mode === "walk")) m.vel.y = 3.2;  // spiders climb walls
     else if (m.onLadder) { /* climbing: the ladder code above lifts it */ }
-    else if (res.onGround) m.vel.y = 7.6;                              // jump obstacles
+    else if (res.onGround && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height)) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
     else if (m.inWater) m.vel.y = 4;
-    if (!T.hostile && ai.mode === "walk" && Math.random() < 0.3) pickWander(m, 8);
+    if (!T.hostile && ai.mode === "walk" && !ai.detour && Math.random() < 0.3) pickWander(m, 8);
   }
+  if (T.village) blockedMove(m, dt, (res.hitX || res.hitZ) && wants);
   // fall damage
   const climbing = (T.climbs && (res.hitX || res.hitZ)) || m.onLadder;
   if (m.onGround || m.inWater || climbing) {

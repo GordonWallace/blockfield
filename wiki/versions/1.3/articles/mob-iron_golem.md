@@ -2,7 +2,7 @@ Iron golems are the guardians of a village. They stand almost three blocks tall,
 
 ### How many
 
-A village generated with its own population gets one golem for every 15 or so villagers, and never fewer than one. Older villages get one, or two once they have twelve or more houses. A golem that dies is not replaced: the village stays short of one for good. Golems patrol slowly near the village centre, or in larger villages around one of the houses, moving on from time to time. A golem that strays more than about 14 blocks from its patrol spot walks back.
+A village generated with its own population gets one golem for every 15 or so villagers, and never fewer than one. Older villages get one, or two once they have twelve or more houses. A golem that dies is not replaced: the village stays short of one for good. Golems patrol slowly near the village centre, or in larger villages around one of the houses, moving on from time to time. A golem that strays more than about 14 blocks from its patrol spot walks back. When a tree, a wall or a low ledge blocks its way, it finds a route around with room for its height, or steps aside and tries again.
 
 ### Defending the village
 

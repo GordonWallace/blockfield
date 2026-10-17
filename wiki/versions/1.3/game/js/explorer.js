@@ -402,6 +402,7 @@ function ai(m, dt, out) {
 // Trade-screen status line.
 function statusText(m) {
   if (!m || m.profession !== "explorer" || !BF.maps) return "";
+  if (state(m).camp) return "camping for the night";   // waiting at its tent from dusk, then asleep in it
   const cs = carried(m), act = cs.find(c => !c.done && !c.shelved);
   if (act) return "exploring, map " + Math.floor(coverage(act.d) * 100) + "% filled";
   if (cs.some(c => c.done)) return "has a filled map";
