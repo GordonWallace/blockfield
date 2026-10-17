@@ -5,10 +5,12 @@
 // - It uses the blank map where it stands: the map becomes the filled map of an 8x8-chunk zone near it (its own zone first, then the closest zone
 //   that is not mapped yet), and it starts walking from one unexplored patch of the zone to the next. js/maps.js samples the world around it
 //   (BF.maps.explore) so the shared zone data fills in exactly as if a player carried the map.
-// - The map counts as filled at FILLED coverage, or when every patch left over is out of reach (water, cliffs: a patch is given up after two failed
-//   walks). Only chunks that are loaded can be mapped, so patches far from the player wait until the player comes near.
+// - The map counts as filled only when every pixel is drawn (FILLED). It walks to the nearest blank pixel until none is left. When the blank
+//   pixels left are out of reach (water, cliffs: a patch is given up after two failed walks), out of the loaded area for too long, or it has
+//   walked one map for MAP_WORK_CAP, it shelves the map until the next day and tries again then. A shelved map is never sold.
+//   Only chunks that are loaded can be mapped, so patches far from the player wait until the player comes near.
 // - Filled maps are the explorer's wares: syncOffers() keeps one offer per filled map it carries (price in emeralds by map size).
-// - Persistence: the maps are inventory items (saved by name, js/trading.js); `ex` in the villager pack holds the patches given up on.
+// - Persistence: the maps are inventory items (saved by name, js/trading.js); `ex` in the villager pack holds the shelved maps.
 (() => {
 "use strict";
 const BF = window.BF;
@@ -18,13 +20,12 @@ const T = () => BF.trades;
 const PRICE_BLANK = [4, 8, 16, 32, 64];   // what the cartographer asks for a blank map by size (js/trading.js: "4 emerald > 1 blank_map_1" ...)
 const SELL_PRICE = [7, 16, 36, 80, 176];  // emeralds the player pays for a filled map, by size: well over the blank price, and it grows faster (TRADE_AUDIT.md)
 const IDLE_GIVE_UP = 180;                 // seconds of waiting for patches nobody has loaded before it settles for what it mapped
-const FILLED = 0.97;                      // share of mapped pixels that counts as filled
+const FILLED = 1;                         // share of mapped pixels that counts as filled: all of them, it never sells a map with a blank in it
 // patch size in map pixels: 16 on the two small maps, then about 32 blocks (the fill radius of js/maps.js shrinks to 16 blocks on the big ones)
 const cellPx = size => (size <= 2 ? 16 : Math.max(2, Math.round(32 / BF.maps.scale(size))));
 const MAP_WORK_CAP = 1500;                // seconds of exploring after which it settles for what it mapped (a size 5 map is ~130 km of walking)
 const SIZE_WEIGHT = [16, 8, 4, 2, 1];     // which affordable size it buys: mostly small ones, they are the ones it can finish
-const CELL_DONE = 0.9;                    // a patch is explored when this share of its pixels is
-const MAX_FOR_SALE = 2;                   // stops fetching maps once it carries this many filled ones (waiting for a buyer)
+const MAX_FOR_SALE = 2;                   // stops fetching maps once it carries this many (filled ones waiting for a buyer, or shelved ones)
 const SAMPLE = 700;                       // pixel samples per call to BF.maps.explore, ~5 calls per second
 const PLAYER_RANGE = 85;                  // without BF.villageSim (js/villagesim.js): patches further than this from the player are left alone (villagers despawn at 100)
 const EDGE = 24;                          // a patch must have loaded terrain this far around it, so the explorer never stands at the edge of the loaded area (a villager on an unloaded chunk is removed)
@@ -33,9 +34,14 @@ const TRADE_PAUSE = 1.6;
 const LOG = [];
 const nowS = () => BF.simNow();
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
+// Village log (js/villagelog.js, kind "map"; INFO in the game log): maps finished, shelved and taken up again.
+const mapText = c => "the size " + c.it.map.size + " map of zone " + c.it.map.zx + ", " + c.it.map.zz;
+const vlog = (m, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, "map", BF.vlog.nameOf(m) + " (Explorer) " + text, m); };
 const log = (kind, m, data) => { LOG.push(BF.glog.job("explorer", Object.assign({ kind, who: "explorer" + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
+// fin: shelved maps, name -> the game day it was shelved on (it tries again on a later day)
 const state = m => m.ex || (m.ex = { fin: {}, avoid: {}, stage: null, target: null, cd: rnd(1, 4), sync: 0, sampT: 0 });
+const today = () => (BF.sky ? BF.sky.day || 0 : 0);
 const cnt = (m, id) => (id == null ? 0 : T().inv.count(m.inv, id));
 const blankSlots = m => m.inv.filter(s => s && BF.items[s.id] && BF.items[s.id].mapSize);
 const nameOf = it => it.name;
@@ -51,28 +57,24 @@ function coverage(d) {
   covCache.set(d, c = { ver: d.ver, v: n / px.length });
   return c.v;
 }
-function cellFill(d, ci, cj) {
-  const PX = BF.maps.PX, CELL = cellPx(d.size);
-  let n = 0;
-  for (let j = cj * CELL; j < (cj + 1) * CELL; j++) for (let i = ci * CELL; i < (ci + 1) * CELL; i++) if (d.px[j * PX + i]) n++;
-  return n / (CELL * CELL);
-}
-const isFilled = (m, it, d) => !!(state(m).fin[nameOf(it)] || coverage(d) >= FILLED);
-// Filled-map items in the inventory: [{slot, it, d, done}]
+const isFilled = d => coverage(d) >= FILLED;
+// A map put aside today (blanks out of reach or not loaded, or worked too long): left alone until the next day, never sold.
+const isShelved = (m, it) => { const f = state(m).fin[nameOf(it)]; return f !== undefined && f >= today(); };
+// Filled-map items in the inventory: [{slot, it, d, done, shelved}]
 function carried(m) {
   const out = [];
   m.inv.forEach((s, slot) => {
     const it = s && BF.items[s.id];
     if (!it || !it.map) return;
     const d = BF.maps.getData(it.map.size, it.map.zx, it.map.zz);
-    out.push({ slot, it, d, done: isFilled(m, it, d) });
+    const done = isFilled(d);
+    out.push({ slot, it, d, done, shelved: !done && isShelved(m, it) });
   });
   return out;
 }
 
 // ---------------------------------------------------------------- offers
-// A map it gave up on before 97% is priced by how much of it is explored (at least 15%).
-const priceOf = (it, d) => Math.max(1, Math.round(SELL_PRICE[Math.max(0, Math.min(SELL_PRICE.length - 1, it.map.size - 1))] * Math.max(0.15, Math.min(1, coverage(d) / FILLED))));
+const priceOf = it => SELL_PRICE[Math.max(0, Math.min(SELL_PRICE.length - 1, it.map.size - 1))];
 // One offer per filled map it carries: emeralds for the map. Replaces the previous list only when it changed.
 function syncOffers(m) {
   if (!m || m.profession !== "explorer" || !m.inv || !Array.isArray(m.trades) || !BF.maps) return;
@@ -80,7 +82,7 @@ function syncOffers(m) {
   for (const c of carried(m)) {
     if (!c.done || seen.has(c.it.id)) continue;
     seen.add(c.it.id);
-    dyn.push({ buy: [{ id: em, n: priceOf(c.it, c.d) }], sell: { id: c.it.id, n: 1 }, level: 1, xp: T().TRADE_XP[0], dyn: 1 });
+    dyn.push({ buy: [{ id: em, n: priceOf(c.it) }], sell: { id: c.it.id, n: 1 }, level: 1, xp: T().TRADE_XP[0], dyn: 1 });
   }
   const sig = list => list.map(o => o.sell.id + ":" + o.buy[0].n).join("|");
   const old = m.trades.filter(o => o.dyn);
@@ -98,7 +100,7 @@ function useBlank(m) {
   const zx0 = M.zoneOf(m.position.x), zz0 = M.zoneOf(m.position.z);
   for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
     const zx = zx0 + dx, zz = zz0 + dz, nm = M.nameOf(size, zx, zz);
-    if (held.has(nm) || X.fin[nm]) continue;
+    if (held.has(nm)) continue;
     const d = M.getData(size, zx, zz, false);
     if (d && coverage(d) >= FILLED) continue;
     zones.push({ zx, zz, nm, dist: Math.hypot(M.centre(zx) - m.position.x, M.centre(zz) - m.position.z) });
@@ -110,7 +112,7 @@ function useBlank(m) {
   inv.remove(m.inv, slot.id, 1);
   inv.add(m.inv, id, 1);
   M.getData(size, z.zx, z.zz);
-  X.stage = null; X.target = null; X.avoid = {};
+  X.stage = null; X.target = null; X.avoid = {}; delete X.fin[z.nm];
   log("use", m, { zone: z.zx + "," + z.zz, size });
   return true;
 }
@@ -140,20 +142,30 @@ function travel(m, st, dt, out, tx, tz, speed, radius) {
 
 // ---------------------------------------------------------------- exploring
 const inLoaded = (x, z) => { const W = BF.world; return W.isLoaded(x, z) && W.isLoaded(x + EDGE, z) && W.isLoaded(x - EDGE, z) && W.isLoaded(x, z + EDGE) && W.isLoaded(x, z - EDGE); };
-// Next patch of map `c` to visit: the nearest unexplored, loaded one near the player that has not been given up. null + reason otherwise.
+// Next blank pixel of map `c` to visit: in each patch that still has blank pixels and has not been given up, the blank pixel nearest the explorer;
+// of those, the nearest one that is loaded (and near the player). null + reason otherwise.
+// How far from a blank pixel it stands to draw it: with the 6-block arrival radius, well inside the fill radius of js/maps.js (40 blocks on
+// the smallest map, 16 on big ones), so a blank at the edge of the loaded area can be drawn from inside it.
+const standOff = size => 0.5 * Math.max(16, 40 / Math.sqrt(BF.maps.scale(size)));
 function pickTarget(m, c) {
   const M = BF.maps, d = c.d, X = state(m), s = M.scale(d.size), ox = M.originX(d.size, d.zx), oz = M.originX(d.size, d.zz);
-  const CELL = cellPx(d.size), n = M.PX / CELL, pp = BF.player.position;
+  const PX = M.PX, CELL = cellPx(d.size), n = PX / CELL, pp = BF.player.position, mx = m.position.x, mz = m.position.z;
   let best = null, bd = Infinity, open = 0, avoided = 0;
   for (let cj = 0; cj < n; cj++) for (let ci = 0; ci < n; ci++) {
-    if (cellFill(d, ci, cj) >= CELL_DONE) continue;
+    let pi = -1, pd = Infinity;
+    for (let j = cj * CELL; j < (cj + 1) * CELL; j++) for (let i = ci * CELL; i < (ci + 1) * CELL; i++) {
+      if (d.px[j * PX + i]) continue;
+      const dd = Math.hypot(ox + (i + 0.5) * s - mx, oz + (j + 0.5) * s - mz);
+      if (dd < pd) { pd = dd; pi = j * PX + i; }
+    }
+    if (pi < 0) continue;                                     // patch fully drawn
     const k = c.it.name + ":" + ci + "," + cj;
     if ((X.avoid[k] || 0) >= 2) { avoided++; continue; }
-    const wx = Math.floor(ox + (ci * CELL + CELL / 2) * s), wz = Math.floor(oz + (cj * CELL + CELL / 2) * s);
+    const px = ox + (pi % PX + 0.5) * s, pz = oz + (((pi / PX) | 0) + 0.5) * s, f = pd > 0 ? Math.min(pd, standOff(d.size)) / pd : 0;
+    const wx = Math.floor(px + (mx - px) * f), wz = Math.floor(pz + (mz - pz) * f);   // where it stands: on its side of the pixel, close enough to draw it
     open++;
-    if (!inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE)) continue;
-    const dist = Math.hypot(wx + 0.5 - m.position.x, wz + 0.5 - m.position.z);
-    if (dist < bd) { bd = dist; best = { ci, cj, wx, wz, k }; }
+    if (!BF.world.isLoaded(Math.floor(px), Math.floor(pz)) || !inLoaded(wx, wz) || (!BF.villageSim && Math.hypot(wx - pp.x, wz - pp.z) > PLAYER_RANGE)) continue;
+    if (pd < bd) { bd = pd; best = { ci, cj, wx, wz, k, pi }; }
   }
   return { best, open, avoided };
 }
@@ -161,20 +173,20 @@ function exploreAI(m, c, dt, out) {
   const X = state(m), a = m.ai, M = BF.maps;
   X.sampT -= dt;
   if (X.sampT <= 0) { X.sampT = 0.2; M.explore(c.d, m.position.x, m.position.z, SAMPLE); }
-  if (isFilled(m, c.it, c.d)) { finish(m, c, "covered"); return false; }
+  if (isFilled(c.d)) { finish(m, c); return false; }
   X.work = X.work || {};
-  if ((X.work[c.it.name] = (X.work[c.it.name] || 0) + dt) > MAP_WORK_CAP) { X.fin[c.it.name] = 1; finish(m, c, "time"); return false; }
+  if ((X.work[c.it.name] = (X.work[c.it.name] || 0) + dt) > MAP_WORK_CAP) { shelve(m, c, "time"); return false; }
   if (!X.target) {
     X.pickT = (X.pickT || 0) - dt;
     if (X.pickT > 0) return false;
     X.pickT = 1;
     const p = pickTarget(m, c);
     if (!p.best) {
-      if (!p.open && p.avoided) { X.fin[c.it.name] = 1; finish(m, c, "unreachable"); }   // only patches out of reach are left
-      else if (!p.open) finish(m, c, "covered");
-      else {                                                                           // patches exist but nobody has loaded them: wait for the player
+      if (!p.open && p.avoided) shelve(m, c, "unreachable");                          // only blanks out of reach are left
+      else if (!p.open) finish(m, c);
+      else {                                                                           // blanks exist but nobody has loaded them: wait for the player
         X.pickT = 4; X.idleS = (X.idleS || 0) + 4;
-        if (X.idleS >= IDLE_GIVE_UP) { X.fin[c.it.name] = 1; X.idleS = 0; finish(m, c, "out of range"); }
+        if (X.idleS >= IDLE_GIVE_UP) { X.idleS = 0; shelve(m, c, "out of range"); }
       }
       return false;
     }
@@ -185,7 +197,7 @@ function exploreAI(m, c, dt, out) {
   if (X.dwell > 0) {                                  // standing on the patch: look around while the map fills in
     X.dwell -= dt;
     if (X.dwell <= 0) {
-      if (cellFill(c.d, t.ci, t.cj) < CELL_DONE) X.avoid[t.k] = (X.avoid[t.k] || 0) + 1;
+      if (!c.d.px[t.pi]) X.avoid[t.k] = (X.avoid[t.k] || 0) + 1;
       X.target = null; X.pickT = 0;
     }
     return true;
@@ -198,11 +210,23 @@ function exploreAI(m, c, dt, out) {
   if (r === "arrived") X.dwell = 1.5;
   return true;
 }
-function finish(m, c, why) {
+// Every pixel drawn: the map goes on sale.
+function finish(m, c) {
   const X = state(m);
-  X.target = null; X.stage = null; X.avoid = {};
-  log("filled", m, { map: c.it.name, why, coverage: +coverage(c.d).toFixed(3) });
+  X.target = null; X.stage = null; X.avoid = {}; delete X.fin[c.it.name];
+  if (X.work) delete X.work[c.it.name];
+  log("filled", m, { map: c.it.name, coverage: +coverage(c.d).toFixed(3) });
+  vlog(m, "finished " + mapText(c) + ", every pixel drawn, and put it on sale for " + priceOf(c.it) + " emeralds");
   syncOffers(m);
+}
+// Blanks left that it cannot draw today: puts the map aside until the next day (a fresh start then: patches given up and walking time reset).
+function shelve(m, c, why) {
+  const X = state(m);
+  X.target = null; X.stage = null; X.avoid = {}; X.fin[c.it.name] = today();
+  if (X.work) delete X.work[c.it.name];
+  const blank = c.d.px.length - Math.round(coverage(c.d) * c.d.px.length);
+  log("shelved", m, { map: c.it.name, why, coverage: +coverage(c.d).toFixed(3), blank });
+  vlog(m, "put aside " + mapText(c) + " with " + blank + " blank pixel" + (blank === 1 ? "" : "s") + " (" + why + "), not for sale until it is complete; tries again tomorrow");
 }
 
 // ---------------------------------------------------------------- fetching a blank map from a cartographer
@@ -254,7 +278,7 @@ function shopAI(m, dt, out) {
     X.cd -= dt;
     if (X.cd > 0) return false;
     X.cd = 4;
-    if (blankSlots(m).length || carried(m).filter(c => c.done).length >= MAX_FOR_SALE || cnt(m, BF.I.emerald) < PRICE_BLANK[0]) return false;
+    if (blankSlots(m).length || carried(m).filter(c => c.done || c.shelved).length >= MAX_FOR_SALE || cnt(m, BF.I.emerald) < PRICE_BLANK[0]) return false;
     const dl = findCartographer(m, X);
     if (!dl) { X.cd = rnd(15, 30); return false; }
     X.deal = dl; X.stage = "walk"; X.walkT = 0; a.route = null;
@@ -364,10 +388,11 @@ function ai(m, dt, out) {
   const t = skyT();
   if (campAI(m, t, m.ai)) return true;
   if (t < WORK_START || t >= WORK_END || m.tradingWith) { if (X.stage) { X.stage = null; X.target = null; X.deal = null; m.ai.route = null; } return false; }
-  let act = carried(m).find(c => !c.done);
+  let act = carried(m).find(c => !c.done && !c.shelved);
+  if (act && X.fin[act.it.name] !== undefined) { delete X.fin[act.it.name]; log("resume", m, { map: act.it.name, coverage: +coverage(act.d).toFixed(3) }); vlog(m, "went back to " + mapText(act) + " (" + Math.floor(coverage(act.d) * 100) + "% filled)"); }
   if (!act && blankSlots(m).length) {
     X.cd -= dt;
-    if (X.cd <= 0 && useBlank(m)) act = carried(m).find(c => !c.done);
+    if (X.cd <= 0 && useBlank(m)) act = carried(m).find(c => !c.done && !c.shelved);
     else if (X.cd <= 0) X.cd = 30;
   }
   if (act) return exploreAI(m, act, dt, out);
@@ -378,17 +403,20 @@ function ai(m, dt, out) {
 function statusText(m) {
   if (!m || m.profession !== "explorer" || !BF.maps) return "";
   if (state(m).camp) return "camping for the night";   // waiting at its tent from dusk, then asleep in it
-  const cs = carried(m), act = cs.find(c => !c.done);
-  if (act) return "exploring, map " + Math.round(coverage(act.d) * 100) + "% filled";
+  const cs = carried(m), act = cs.find(c => !c.done && !c.shelved);
+  if (act) return "exploring, map " + Math.floor(coverage(act.d) * 100) + "% filled";
   if (cs.some(c => c.done)) return "has a filled map";
+  const sh = cs.find(c => c.shelved);
+  if (sh) return "map " + Math.floor(coverage(sh.d) * 100) + "% filled, finishing it tomorrow";
   return blankSlots(m).length ? "has a blank map" : "looking for a map";
 }
+// fin: names of shelved maps (older saves: maps it gave up on, which it then sold). After a load it tries them again straight away.
 const pack = m => { const X = state(m); return { fin: Object.keys(X.fin), camp: X.camp || undefined }; };
 function unpack(m, o) {
   const X = state(m);
-  if (o && Array.isArray(o.fin)) for (const n of o.fin) if (typeof n === "string") X.fin[n] = 1;
+  if (o && Array.isArray(o.fin)) for (const n of o.fin) if (typeof n === "string") X.fin[n] = -1;
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, LOG };
+BF.explorer = { offerFor, pitch, strike, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
 })();
