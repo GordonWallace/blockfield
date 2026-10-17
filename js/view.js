@@ -213,7 +213,9 @@ function setupClip(scene, camera) {
   const horizon = Math.sqrt(h * (2 * BF.planet.R + h)), r = ((BF.world && BF.world.viewDist) || 6) * 16;
   const kf = smooth(ALT0, ALT0 + 500, above);
   if (kf > 0 && scene.fog && !(BF.player && BF.player.headInWater)) {
-    const far = lerpLog(r * 0.95 + above, horizon * 1.25 + 1, kf) * (1 + 1e4 * smooth(ALT1, 4 * ALT1, above));
+    // (from where sky.js leaves it: past the distant rings once they are built, so climbing through ALT0 never pulls the fog in)
+    const low = Math.max(r, BF.lod && BF.lod.radius ? BF.lod.radius() : 0) * 0.95 + above;
+    const far = lerpLog(low, Math.max(low, horizon * 1.25 + 1), kf) * (1 + 1e4 * smooth(ALT1, 4 * ALT1, above));
     scene.fog.far = far; scene.fog.near = far * (0.58 - 0.18 * kf);
   }
   const near = Math.max(0.05, Math.min(500, (above - 200) * 0.01));
