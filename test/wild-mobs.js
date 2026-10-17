@@ -1,7 +1,8 @@
 // @ci integration suite=world timeout=600
 // Wild mobs live in the world (js/wildlife.js, idea-037): chunks roll their animals once by habitat (old saves too), a chunk that unloads
 // keeps its wild mobs (back on the same spot within a game hour, nearby after that, an undead mob on open ground gone after daylight),
-// quitting keeps every loaded wild mob (no 120 cap), wild animals breed on their own, and fed pigs breed.
+// quitting keeps every loaded wild mob (no 120 cap), wild animals breed on their own, and fed pigs breed. No group is set down inside a village
+// pasture (or any pen, coop, sty or stable: js/mobs.js penBoxes).
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/wild test/wild-mobs.js
 module.exports = async (pg) => {
   const fails = [];
@@ -25,6 +26,32 @@ module.exports = async (pg) => {
   ok("first-generation animals stand on grass", gen.animals > 0 && gen.onGrass >= gen.animals * 0.8, gen);
   const reroll = await pg.evaluate(() => { const n = BF.wildlife.log.filter(e => e.kind === "rolled").length; for (let i = 0; i < 40; i++) BF.mobs.update(0.05); return [n, BF.wildlife.log.filter(e => e.kind === "rolled").length]; });
   ok("a chunk rolls only once", reroll[0] === reroll[1], reroll);
+
+  // ---- never inside a village's pen, coop, pasture, sty or stable: groups rolled again and again in the chunks of a village's pasture
+  // (its fence footprint from the village layout, as js/cowherd.js makeGenPasture reads it)
+  const VP = await pg.evaluate(() => {
+    const v = BFT.village((v, k) => k.pasture && v.ground === 0), wv = v && BF.worldgen.villagesNear(v.x, v.z, 40).find(w => Math.round(w.x) === v.x && Math.round(w.z) === v.z);
+    const b = wv && wv.buildings.find(b => b.type === "pasture");
+    if (!b) return null;
+    const x1 = b.bx + b.ax * (b.w - 1) + b.sx * (b.d - 1), z1 = b.bz + b.az * (b.w - 1) + b.sz * (b.d - 1);
+    return { x: v.x, z: v.z, f: [Math.min(b.bx, x1), Math.min(b.bz, z1), Math.max(b.bx, x1), Math.max(b.bz, z1)] };
+  });
+  if (VP) { await goTo(VP.x, VP.z, 3000); await pg.waitForFunction(f => [[f[0], f[1]], [f[2], f[3]], [f[0], f[3]], [f[2], f[1]]].every(([x, z]) => BF.world.isLoaded(x, z)), VP.f, { timeout: 90000 }).catch(() => {}); }
+  const pen = VP && await pg.evaluate(f => {
+    const CS = BF.CS, out = { fence: f, groups: 0, made: 0, inside: 0 }, chunks = new Set();
+    for (let x = f[0]; x <= f[2]; x++) for (let z = f[1]; z <= f[3]; z++) chunks.add(Math.floor(x / CS) + "," + Math.floor(z / CS));
+    for (const k of chunks) {
+      const [cx, cz] = k.split(",").map(Number);
+      for (let i = 0; i < 15; i++) {
+        const before = new Set(BF.mobs.list), n = BF.mobs.spawnGroup("cow", cx, cz, 8);
+        out.groups++; out.made += n;
+        for (const m of BF.mobs.list) if (!before.has(m)) { if (m.position.x >= f[0] && m.position.x < f[2] + 1 && m.position.z >= f[1] && m.position.z < f[3] + 1) out.inside++; m.dead = true; }
+      }
+    }
+    BF.mobs.update(0.05);
+    return out;
+  }, VP && VP.f);
+  ok("wild groups are never set down inside a village pasture", !!pen && pen.made > 0 && pen.inside === 0, pen || VP);
 
   // ---- chunk unload and reload, away from villages
   const Q = await pg.evaluate(() => {
