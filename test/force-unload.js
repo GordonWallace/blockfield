@@ -23,7 +23,8 @@ module.exports = async (pg) => {
   await wait(k => { const r = BF.mobs.villages.get(k); return !!r && BF.world.isLoaded(r.wg.maxX + 50, r.z); }, info.key, 60000);
   await pg.evaluate(k => {
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
-    const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    const T = { what: "Test errand", secs: 300, t0: BF.sky.day + BF.sky.time, end: BF.sky.day + BF.sky.time + 300 / 1200 };   // on a task, not at leisure
+    const put = () => { if (m.vtask !== T) m.vtask = T; m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
     Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
     put(); window.__pin = setInterval(put, 150);
     window.__who = BF.vlog.nameOf(m);
