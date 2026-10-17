@@ -417,16 +417,30 @@ module.exports = async (pg, out) => {
       for (const m of v2()) if (m.profession === "builder" && m !== bm && m.bs) m.bs.cool = 1e9;   // the other builder stays out of the way
       T.inv.add(bm.inv, I.bread, 12);
       for (let i = 0; i < 200 && !bm.bs; i++) step();   // its builder state
+      // a village builds one thing at a time (js/builder.js think): a building already going up (often a builder's house) is finished first,
+      // so the sty gets all its own time below; meanwhile neither builder starts anything new
+      if (bm.bs) bm.bs.cool = 1e9;
+      for (const m of v2()) if (m.profession === "builder" && m !== bm && m.bs) m.bs.cool = 1e9;
+      let busy = null;
+      for (let i = 0; i < 16000 && (busy = (R2.built || []).find(x => x.state === "building")); i++) { step(); if (BF.sky.time > 0.4) BF.sky.setTime(0.05); }
+      ok("the building already going up in the village was finished first", !busy, busy && { type: busy.type, prog: busy.prog, n: busy.n, owner: busy.owner });
       // wild pigs near the village (the earlier tests killed them all)
       for (let i = 0; i < 2; i++) { const x = Math.floor(V2.x + 20 + i), z = Math.floor(V2.z + 20); BF.mobs.spawn("pig", x + 0.5, BF.world.heightAt(x, z) + 1, z + 0.5); }
       ok("2 wild pigs within 80 blocks count for the food jobsite roll", BF.builder.wildCount(R2, "pig") >= 2, BF.builder.wildCount(R2, "pig"));
-      // the builder holds what a sty takes (bought, in a real game: test/builder-woods.js), two water buckets and 4 coarse dirt for the wallow
-      T.inv.add(bm.inv, I.coarse_dirt, 4);
+      // the builder holds what a sty takes (bought, in a real game: test/builder-woods.js), two water buckets and 4 coarse dirt for the wallow.
+      // Its pack is emptied first (its emeralds and bread kept): by now it is often full of what it bought, and what did not fit (one of the
+      // two buckets: they don't stack) sent it shopping or to fetch water mid-build, which could take longer than the build is given
+      const keepN = [I.emerald, I.bread].map(id => [id, c(BF.items[id].name, bm)]);
+      bm.inv.fill(null);
+      let left = 0;
+      for (const [id, n] of keepN) left += T.inv.add(bm.inv, id, n);
+      left += T.inv.add(bm.inv, I.coarse_dirt, 4);
       const wood = "oak";   // a plains village
       const need = BF.blueprints.get("sty", 0, 0, 0.5, { mud: true }, wood).req;
-      for (const id in need) T.inv.add(bm.inv, +id, need[id] + 2);
-      T.inv.add(bm.inv, BF.worldgen.palette(0).found, 24);
-      if (I.water_bucket != null) T.inv.add(bm.inv, I.water_bucket, 2);
+      for (const id in need) left += T.inv.add(bm.inv, +id, need[id] + 2);
+      left += T.inv.add(bm.inv, BF.worldgen.palette(0).found, 24);
+      if (I.water_bucket != null) left += T.inv.add(bm.inv, I.water_bucket, 2);
+      ok("the builder holds it all, two water buckets too", left === 0 && (I.water_bucket == null || c("water_bucket", bm) === 2), { left, slots: bm.inv.filter(Boolean).map(s => BF.items[s.id].name + ":" + s.count) });
       Object.assign(bm.bs, { mode: "idle", stage: null, want: null, deal: null, entry: null, goal: null, t: 0, cool: 0, next: { type: "sty", wood } });
       if (bm.ai) bm.ai.route = null;
       let e = null;
