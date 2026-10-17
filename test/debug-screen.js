@@ -36,6 +36,12 @@ const start = async () => {
     villagers: +document.getElementById('v-villagers').textContent, seed: +document.getElementById('h-seed').textContent,
     rows: document.getElementById('r-body').children.length, log: document.querySelectorAll('#log .ent').length, f3: document.getElementById('f3').textContent }));
   let g = await got();
+  // villagers keep logging, so the screen can be one snapshot behind the game: wait (up to 5 s) until both show the same number of entries
+  for (let i = 0; i < 20; i++) {
+    want.log = await game.evaluate(() => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key).length);
+    if (g.log === want.log) break;
+    await dbg.waitForTimeout(250); g = await got();
+  }
   ok('live', g.conn === 'Live');
   ok('village name ' + g.name, g.name === want.name);
   ok('villager count', g.villagers === want.villagers);

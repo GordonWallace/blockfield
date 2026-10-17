@@ -33,11 +33,12 @@ function survey(key) {
   const D = BF.villageLife.vdata(R), A = D.area;
   const isLog = id => { const b = BF.blocks[id]; return !!b && /_log$/.test(b.name); };
   const top = (x, z) => { for (let y = A.yHi; y >= A.yLo; y--) { const id = W.getBlock(x, y, z); if (id === 0 || BF.RENDER[id] === 4) continue; return [y, id]; } return [null, 0]; };
-  const member = id => !isLog(id) && (BF.SOLID[id] || BF.FLUID[id] === 8);   // ground of any kind up to the ring
+  // ground of any kind up to the ring, water, or the empty trench of a run-down farm (air over ground)
+  const member = (id, x, y, z) => !isLog(id) && (BF.SOLID[id] || BF.FLUID[id] > 0 || (id === 0 && BF.SOLID[W.getBlock(x, y - 1, z)]));
   const enclosed = (x, y, z) => {
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       let hit = false;
-      for (let i = 1; i <= 20; i++) { const id = W.getBlock(x + dx * i, y, z + dz * i); if (isLog(id)) { hit = true; break; } if (!member(id)) break; }
+      for (let i = 1; i <= 20; i++) { const id = W.getBlock(x + dx * i, y, z + dz * i); if (isLog(id)) { hit = true; break; } if (!member(id, x + dx * i, y, z + dz * i)) break; }
       if (!hit) return false;
     }
     return true;

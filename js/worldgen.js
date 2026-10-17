@@ -1229,6 +1229,8 @@ function drawVillage(v, ox, oz, vox, hAt) {
     const p = padAt(v, x, z), g = p ? p.y : hAt(x, z);
     set(x, g + 1, z, B.oak_fence); set(x, g + 2, z, B.oak_fence); set(x, g + 3, z, B.lantern);
   }
+  // villager jobsites are planned before the buildings are drawn: the plan marks the farms no farmer works (b.untended, drawn run down)
+  if (BF.jobs && BF.jobs.planVillage && !v.jobsites) v.jobsites = BF.jobs.planVillage(v);
   // buildings (local coords: u along the road, q away from it, door wall at q = 0)
   for (const b of v.buildings) {
     if (!isect(b.x0 - 1, b.z0 - 1, b.x1 + 1, b.z1 + 1)) continue;
@@ -1273,6 +1275,8 @@ function windows(P, u0, q0, w, d, y, skipFront) {
   for (let q = q0 + 2; q < q0 + d - 1; q += 2) { P(u0, y, q, G); P(u0 + w - 1, y, q, G); }
 }
 
+let YOUNG = null;   // mature crop block -> its young block
+const youngOf = id => { if (!YOUNG) { YOUNG = new Map(); for (const b of BF.blocks) if (b && b.growsInto != null) YOUNG.set(b.growsInto, b.id); } return YOUNG.get(id); };
 const v_ground = style => style === 1 ? BF.B.sand : style === 2 ? BF.B.snow_grass : BF.B.grass;
 function drawBuilding(b, P, S, style) {
   drawShell(b, P, S, style);
@@ -1297,17 +1301,28 @@ function drawShell(b, P, S, style) {
       const pickCrop = r => { r *= tot; for (let k = 0; k < 4; k++) { if ((r -= WT[k]) < 0) return CROPS[k]; } return B.wheat; };
       // each section (between water channels) is split into bands of 2 rows; each band picks a crop
       const pumpkinBand = noise.hash(b.bx, b.bz, 621) < 0.25 ? 1 + ((noise.hash(b.bx, b.bz, 622) * ((d - 2) >> 1)) | 0) : -1;
+      // a farm no farmer works at spawn (b.untended, set by js/jobs.js planVillage, village generator 3) is run down by a seeded
+      // amount s: up to 0.6 the water is there and the farmland intact, with fewer crops the higher s (30% down to a handful);
+      // above 0.6 the channels are dry, the farmland dehydrated (js/farmland.js) and more and more of it back to dirt (all of it from 0.92)
+      const s = b.untended ? noise.hash(b.bx, b.bz, 640) : -1, dry = s >= 0.6 && B.farmland_dry != null;
+      const cropFrac = s < 0 ? 1 : dry ? 0.04 : 0.3 - 0.45 * s, dirtFrac = dry ? Math.min(1, (s - 0.6) / 0.32) : 0;
+      const cellR = (u, q, k) => noise.hash(b.bx * 31 + u, b.bz * 17 + q, k);
       for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
         if (u === 0 || u === w - 1 || q === 0 || q === d - 1) { P(u, y, q, S.log); continue; }
-        if (mids.includes(u)) { P(u, y, q, B.water); continue; }
+        if (mids.includes(u)) { P(u, y, q, dry ? 0 : B.water); continue; }   // a dry channel is an empty trench
         let sec = 0; for (const m of mids) if (u > m) sec++;
         const bandIx = (q - 1) >> 1;
         if (sec === 0 && bandIx === pumpkinBand) {            // a small pumpkin patch on plain soil
           P(u, y, q, v_ground(style)); P(u, y + 1, q, (u + q) % 3 === 0 ? B.pumpkin : 0);
           continue;
         }
-        P(u, y, q, B.farmland);
-        P(u, y + 1, q, pickCrop(noise.hash(b.bx * 7 + sec, b.bz * 13 + bandIx, 623)));
+        if (s < 0) { P(u, y, q, B.farmland); P(u, y + 1, q, pickCrop(noise.hash(b.bx * 7 + sec, b.bz * 13 + bandIx, 623))); continue; }
+        if (cellR(u, q, 641) < dirtFrac) { P(u, y, q, B.dirt); continue; }
+        P(u, y, q, dry ? B.farmland_dry : B.farmland);
+        if (cellR(u, q, 642) < cropFrac) {   // the crops that are left, half of them still young
+          const crop = pickCrop(noise.hash(b.bx * 7 + sec, b.bz * 13 + bandIx, 623));
+          P(u, y + 1, q, cellR(u, q, 643) < 0.5 && youngOf(crop) != null ? youngOf(crop) : crop);
+        }
       }
       return;
     }
