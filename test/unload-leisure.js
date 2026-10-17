@@ -7,6 +7,9 @@ module.exports = async (pg) => {
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
   await require('./lib').toVillage(pg);
   await pg.waitForFunction(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 4, null, { timeout: 60000 });
+  const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t }).then(() => true, () => false);
+  // the spot 30 blocks out loaded first (the planet's chunks load slowly: a villager put in a chunk that isn't loaded is taken off and respawns at home)
+  await wait(() => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); return !!r && BF.world.isLoaded(r.wg.maxX + 30, r.z); }, null, 60000);
   const info = await pg.evaluate(() => {
     BF.mobs.spawning = false;
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
@@ -18,7 +21,6 @@ module.exports = async (pg) => {
     put(); window.__pin = setInterval(put, 150);
     return { key: rec.key, x: rec.x, z: rec.z, who };
   });
-  const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t }).then(() => true, () => false);
   await sleep(2000);
   const est = await pg.evaluate(a => ({ leisure: BF.villagerStatus.leisure(BF.mobs.villages.get(a.key).members.find(m => BF.vlog.nameOf(m) === a.who)),
     listed: BF.villageSim.estimates(a.key).list.filter(e => e.who === a.who) }), info);
