@@ -1066,16 +1066,17 @@ function blockedMove(m, dt, blocked) {
   }
   ai.blockedT = blocked ? (ai.blockedT || 0) + dt : 0;
 }
+// False when this frame's A* searches are used up (busy villages): it tries again next frame instead of stepping aside at random.
 function startDetour(m) {
   const ai = m.ai, px = m.position.x, pz = m.position.z, dx = ai.tx - px, dz = ai.tz - pz, d = Math.hypot(dx, dz) || 1;
+  if (planBudget <= 0) return false;
+  planBudget--;
   ai.blockedT = 0;
-  if (planBudget > 0) {
-    planBudget--;
-    const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
-    const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
-    if (route && route.length) { ai.detour = { route, ri: 0, stuckT: 0 }; return; }
-  }
-  aside(m);
+  const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
+  const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
+  if (route && route.length) ai.detour = { route, ri: 0, stuckT: 0 };
+  else aside(m);
+  return true;
 }
 function aside(m) {
   const ai = m.ai, px = m.position.x, pz = m.position.z, a = Math.atan2(ai.tz - pz, ai.tx - px) + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + rnd(-0.5, 0.5));
@@ -1118,7 +1119,7 @@ function wanderAI(m, dt, out) {
     if (d < 0.6) { ai.mode = "idle"; ai.t = rnd(2, 5); return; }
     const nx = dx / d, nz = dz / d;
     if (!m.inWater && (dropAhead(m, nx, nz) > 3 || (!T.hostile && waterAhead(m, nx, nz)))) { ai.mode = "idle"; ai.t = rnd(1, 3); return; }
-    if (T.village && ai.blockedT > DETOUR_AFTER) { startDetour(m); if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
+    if (T.village && ai.blockedT > DETOUR_AFTER && startDetour(m)) { if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
     out.x = nx * sp; out.z = nz * sp;
   }
 }
