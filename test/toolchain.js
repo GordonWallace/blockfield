@@ -123,9 +123,12 @@ function econCheck() {
     if (m.profession !== 'miner' || m.dead || !m.position || !(m.trades || []).some(o => o.sell.id === cob)) continue;
     const held = BF.trades.inv.count(m.inv, cob), name = BF.vlog.nameOf(m), first = R.snaps[0] ? R.snaps[0].d : now;
     const lastSale = Math.max(first, ...R.trades.filter(t => t.sName === window.__who(m) && t.item === 'Cobblestone').map(t => t.d));
-    if (held < 1 || now - lastSale < E.STUCK) continue;
+    // held since: the first snapshot after that sale with cobblestone in the pack (a miner may only reach stone part way through the soak).
+    // The economy's unsold clock starts at its first once-a-day scan after that, at the latest the next day's start.
+    const hs = R.snaps.find(sn => sn.d >= lastSale && sn.vs.some(x => x.name === window.__who(m) && x.counts.cobblestone > 0)), since = hs ? hs.d : now;
+    if (held < 1 || now < Math.floor(since) + 1 + E.STUCK) continue;
     const line = today && today.s.find(r => r[0] === name && r[2] === 'Cobblestone');
-    out.push((line ? 'PASS' : 'FAIL') + ` economy: miner ${name}'s unsold cobblestone (${held}, last sold day ${lastSale.toFixed(2)}) is a dead end` + (line ? ' (' + line[4] + ' days)' : ''));
+    out.push((line ? 'PASS' : 'FAIL') + ` economy: miner ${name}'s unsold cobblestone (${held}, held since day ${since.toFixed(2)}) is a dead end` + (line ? ' (' + line[4] + ' days)' : ''));
   }
   return out;
 }
@@ -226,6 +229,7 @@ function snapshot() {
           const R = window.__rec;
           for (let i = 1; i <= n; i++) {
             BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
+            if (BF.econ) BF.econ.update();   // the Economy view's once-a-day scan of unsold goods (the page's frame loop runs it through vlog)
             if (window.__FT) BF.inventory.update(h);
             if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
             if (i % HOUR === 0) window.__snap();
