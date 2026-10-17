@@ -20,9 +20,9 @@ The first line of the file names the world, its seed, the game version and the c
 
 ## Levels
 
-- **ERROR**: a villager's task cut off when its village unloaded (see [[page:village-loading]]), and any error the game caught or didn't catch.
+- **ERROR**: a villager's task cut off when its village unloaded (see [[page:village-loading]]), a villager or golem stuck in one place for 30 seconds of trying to walk (kind *move*), and any error the game caught or didn't catch.
 - **WARN**: warnings the game prints, a session that ended without unloading the world (the tab was closed or the browser stopped), and the game's files changing on disk while it runs (reload to play the new version).
-- **INFO**: the world loading and unloading, version changes, and every entry of every village's log: trades, beds, births, deaths, jobs, building and the rest.
+- **INFO**: the world loading and unloading, version changes, a stuck villager or golem getting moving again (kind *move*), and every entry of every village's log: trades, beds, births, deaths, jobs, building and the rest.
 - **DEBUG**: each job's own record of what it decided and did, and births and children growing up.
 
 A world keeps its newest 100,000 lines, about two weeks of game days with four villages loaded.
