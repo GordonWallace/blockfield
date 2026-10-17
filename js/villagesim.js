@@ -107,7 +107,7 @@ const nowDay = () => dayNow();
 function logError(kind, data) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }
 // At leisure: no task begun (begin) and doing one of the leisure things in js/villagerstatus.js. A task that runs past its estimate still counts.
 const isLeisure = m => !m.vtask && !!(BF.villagerStatus && BF.villagerStatus.leisure && BF.villagerStatus.leisure(m));
-const vlogLine = (rec, text, where) => { if (BF.vlog && rec) BF.vlog.log(rec, "loading", text, where); };
+const vlogLine = (rec, text, where) => { if (BF.vlog && rec) BF.vlog.log(rec, "loading", text, where); };   // the game log gets it at INFO (js/gamelog.js)
 const nameOf = m => (BF.vlog && BF.vlog.nameOf ? BF.vlog.nameOf(m) : "villager");
 // Seconds of game time the villager still needs to finish what it is doing (0 = nothing that must finish). Sets taskLeft.errand when the
 // task is an errand beyond the village (or a caravan trip): only those are errors if they are still running when the timer ends.
