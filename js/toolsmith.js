@@ -89,7 +89,7 @@ function take(m, f, n) {
   return got;
 }
 const state = m => m.tsm || (m.tsm = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0, craft: null, furnace: null });
-const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Toolsmith") + " (Toolsmith) " + text); };
+const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Toolsmith") + " (Toolsmith) " + text, / at -?\d+, ?-?\d+, ?-?\d+/.test(text) ? null : m); };
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();
 
 // ---------------------------------------------------------------- furnaces in the world

@@ -22,7 +22,7 @@ module.exports = async (pg, out) => {
     if (!nit) { nit = vs.find(m => m.profession !== "builder" && m.profession !== "explorer"); BF.jobs.setProfession(nit, "nitwit"); nit.trades = null; nit.inv = null; }
     r.nitwit = open(nit);
     r.nitwit.trades = nit.trades.length; r.nitwit.inv = nit.inv.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count);
-    r.nitwit.title = [...document.querySelectorAll("*")].map(e => e.childElementCount === 0 ? e.textContent : "").find(t => /^Nitwit/.test(t || ""));
+    r.nitwit.title = [...document.querySelectorAll("*")].map(e => e.childElementCount === 0 ? e.textContent : "").find(t => /Nitwit/.test(t || ""));
     BF.inventory.close();
     // an unemployed villager, fed and then starving
     let un = vs.find(m => m.profession === "unemployed");

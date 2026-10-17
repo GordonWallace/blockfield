@@ -1,4 +1,4 @@
-// @ci integration
+// @ci integration suite=items
 // Closing or reloading the tab with a screen open keeps the items that were out of the inventory: the crafting grid
 // and the cursor are saved and come back into the inventory on load (bug-002).
 // Usage: node test/run.js /tmp/oss test/open-screen-save.js

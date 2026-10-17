@@ -47,7 +47,7 @@ function use(m, s, n = 1) {
   const name = BF.itemName(s.id);
   LOG.push({ kind: "broke", day: +dayNow().toFixed(3), who: m ? m.profession : null, village: m && m.village ? m.village.key : null, tool: BF.items[s.id].name });
   if (LOG.length > 300) LOG.shift();
-  if (BF.vlog && m && m.village) BF.vlog.log(m.village, "tool", BF.vlog.nameOf(m) + " (" + String(m.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) + ")'s " + name + " broke");
+  if (BF.vlog && m && m.village) BF.vlog.log(m.village, "tool", BF.vlog.nameOf(m) + " (" + String(m.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) + ")'s " + name + " broke", m);
   if (BF.audio && m && m.position) { try { BF.audio.play("dig.metal", { x: m.position.x, y: m.position.y + 1, z: m.position.z, pitch: 1.5 }); } catch (e) { /* optional */ } }
   if (BF.emit) BF.emit("villagerToolBroke", m, s.id);
   return r;

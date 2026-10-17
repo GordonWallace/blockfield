@@ -29,6 +29,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     const r = await req(DEBUG, "POST", "/push", b);
     check(exited === null && (typeof r.status === "number" && r.status < 500), "push " + b, r.status);
   }
+  for (const b of ["null", "5", "[]", "{bad json"]) {   // the debug screen's alert list
+    const r = await req(DEBUG, "POST", "/alerts", b);
+    check(exited === null && typeof r.status === "number" && r.status < 500, "alerts " + b, r.status);
+  }
   for (const p of ["/%00", "/js/%00.js", "/%E0%A4%A", "/../package.json", "/.git/config"]) {
     const r = await req(GAME, "GET", p);
     check(exited === null && typeof r.status === "number" && r.status >= 400 && r.status < 500, "game " + p, r.status);
