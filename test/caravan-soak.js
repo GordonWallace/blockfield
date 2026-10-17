@@ -1,4 +1,4 @@
-// Trading caravans soak (release 1.3): two villages between 60 and 200 blocks apart, both with merchants, for many game days.
+// Trading caravans soak (release 1.3): two villages between 200 and 400 blocks apart (village generator 10 spaces them out; caravan range is 600), both with merchants, for many game days.
 // Usage: NODE_PATH=$(npm root -g) node test/caravan-soak.js [seed=1] [days=14] [out.json] [far]
 // far (or FAR=1): a pair 450-590 blocks apart (caravan range is 600), the player visits both, then stays at the one with a merchant. The home village's prices are pushed down to make a real price gap (the natural one takes many days to grow); checked: 2 or more trips out and home, and a trade at the far village.
 // Drives the simulation directly (no rendering), like test/prices-soak.js. The player stands between the two villages, then from day AWAY
@@ -14,7 +14,7 @@ const root = path.resolve(__dirname, '..');
 const SEED = +(process.argv[2] || 1);
 const DAYS = +(process.argv[3] || 14);
 const OUT = process.argv[4] || null;
-const FAR = !!process.env.FAR || process.argv[5] === 'far', LO = +(process.env.LO || (FAR ? 450 : 60)), HI = +(process.env.HI || (FAR ? 590 : 190));
+const FAR = !!process.env.FAR || process.argv[5] === 'far', LO = +(process.env.LO || (FAR ? 450 : 200)), HI = +(process.env.HI || (FAR ? 590 : 400));
 const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
 
 (async () => {
