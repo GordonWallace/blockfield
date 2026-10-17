@@ -72,7 +72,7 @@ const toolId = (cat, mat) => I(IRON_ONLY(cat) ? cat : PREFIX[mat] + "_" + cat);
 const sum = (m, f) => { let n = 0; for (const s of m.inv) if (s && f(s.id)) n += s.count; return n; };
 const count = (m, id) => TR().inv.count(m.inv, id);
 const ems = m => count(m, I("emerald"));
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: "toolsmith" + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("toolsmith", Object.assign({ kind, day: +dayNow().toFixed(3), who: "toolsmith" + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 // Takes n items matching f, the biggest stacks first. Returns [{id, n}] taken.
 function take(m, f, n) {
   const got = [];

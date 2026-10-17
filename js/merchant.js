@@ -56,7 +56,7 @@ const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
 const keyOf = m => (m && m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : null);
 const live = o => o && o.type === "villager" && !o.dead && !o.removed;
 const who = m => (BF.vlog ? BF.vlog.nameOf(m) : "Merchant") + " (Merchant)";
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: keyOf(m), t: +dayNow().toFixed(3) }, data)); if (LOG.length > 300) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("merchant", Object.assign({ kind, who: keyOf(m), t: +dayNow().toFixed(3) }, data))); if (LOG.length > 300) LOG.shift(); };
 // The planet (spec r14-16): a merchant is kept in its home village's frame even past a face edge (js/mobs.js frames), village records and the
 // trip's destination are canonical. Every point it steers for is first seen from where it stands (BF.planet.local), the road line lies in
 // its lower-keyed village's frame, distances between places are BF.planet.distance, and path wear is keyed by canonical cells. RANGE (600)
