@@ -97,7 +97,11 @@ module.exports = async (pg) => {
     m.bed = null; m.slot.bed = null; m.homeBed = null; m.ai.route = null;   // no route either: a sleeper wakes where it is put, not back at its bed
     const H = m.home;
     // out in front of the door, on the ground: the first spot 8 to 3 blocks out that is open ground near the door's height (not a roof or a hillside)
-    const y0 = Math.floor(m.position.y);
+    // The door's height is where one stands in the doorway, under the roof. Not the villager's own height: it was put in its bed, which can be
+    // in another house a few blocks lower, and with no spot near that height it went in front of the door at that height, buried in the ground
+    // where no route starts (CI: H [-65,38,5,5], villager at -63,37, three failed searches).
+    let y0 = Math.floor(m.position.y);
+    for (let y = BF.world.heightAt(H.doorX, H.doorZ), y1 = y - 16; y > y1; y--) if (BF.mobs.nav.walkCell(H.doorX, y, H.doorZ)) { y0 = y; break; }
     let at = null;
     for (let k = 8; k >= 3 && !at; k--) {
       const x = Math.floor(H.outX + (H.outX - H.doorX) * k), z = Math.floor(H.outZ + (H.outZ - H.doorZ) * k), h = BF.world.heightAt(x, z);
