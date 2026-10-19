@@ -551,6 +551,15 @@ function vlogBuild(m, e, verb) {
 
 // Try to start the structure `type`: site, crafts, entry. Returns the entry or null (and remembers the failure).
 // `wood`: the species chosen for it (chooseWood when omitted); the whole structure is built from it.
+// Saplings on the site (and the block round it) are cleared when it is planned: one left there could grow into a tree in a cell before its
+// block goes in (a farm's composter), or inside the farm. Foresters do not plant on a site being built (js/forester.js findSpot).
+function clearSaplings(e) {
+  const w = W();
+  for (let x = e.ox - 1; x <= e.ox + e.w; x++) for (let z = e.oz - 1; z <= e.oz + e.d; z++) for (let y = e.oy - MAX_SLOPE - 1; y <= e.oy + 1; y++) {
+    const b = BF.blocks[w.getBlock(x, y, z)];
+    if (b && /_sapling$/.test(b.name)) w.setBlock(x, y, z, 0);
+  }
+}
 function beginPlan(m, bs, type, wood) {
   const R = m.village, built = builtOf(R), style = styleIdx(R.style);
   const found = foundOf(type, style);
@@ -568,6 +577,7 @@ function beginPlan(m, bs, type, wood) {
     w: site.bp.w, d: site.bp.d, prog: 0, skipped: 0, state: "building", owner: m.slot ? m.slot.idx : 0, fill: site.fill, start: +dayNow().toFixed(3) };
   if (site.span) e.span = site.span;   // a bridge: the water it crosses (js/bridges.js walks villagers over it)
   e.n = nfill(e) + site.bp.n;
+  clearSaplings(e);
   built.push(e);
   logEvent("plan", m, { type, wood, at: [e.ox, e.oy, e.oz], rot: e.rot, blocks: e.n, fill: nfill(e) });
   vlogBuild(m, e, "started building");

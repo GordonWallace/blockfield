@@ -61,7 +61,7 @@ The builder looks for open ground in and around the village:
 - It tries up to 150 spots, evaluating up to 40. Most lie just inside or outside the village, and about two in five are up to 40 blocks outside it, but never more than 40 blocks from the nearest building.
 - Each spot is turned so that the door faces the village centre.
 - It keeps 3 blocks clear of existing buildings and other built structures, 2 from plots, lamps, decorations, the entry arch and signposts, and 1 from roads and from farm beds.
-- The ground must be loaded, natural (grass, dirt, sand, stone and similar), dry, and the heights across the footprint may differ by no more than 2. There must be no water or ice, no trees or other solid blocks in the way, and nobody standing there. Plants are cleared. A gap of up to 2 blocks under the floor is filled with its foundation blocks, so it keeps 8 spare.
+- The ground must be loaded, natural (grass, dirt, sand, stone and similar), dry, and the heights across the footprint may differ by no more than 2. There must be no water or ice, no trees or other solid blocks in the way, and nobody standing there. Plants are cleared, and so are saplings on the site and the block round it when the builder starts, so none grows into a tree in its way. A gap of up to 2 blocks under the floor is filled with its foundation blocks, so it keeps 8 spare.
 - Among the spots that pass, it prefers flat ground about 5 blocks from the nearest building.
 - Some structures have extra rules: a pasture lays its own grass floor, a sty's trough must be within reach of a villager looking for a workstation, and a vegetable farm is levelled with dirt. Pastures, sties and stables may stand in any village, on any ground.
 
