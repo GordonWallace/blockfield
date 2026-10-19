@@ -8,13 +8,18 @@
 //  - the cowherd's buckets and wheat come only from its kit and what it bought: it never holds more than that, minus the wheat it fed;
 //  - empty bottles flow back: bottles villagers emptied (milk they drank) are bought back by the cowherd, and none pile up while it is short.
 // A lean day: from day LEAN to LEAN + 1 every villager but the cowherd has its food (all but milk) put away, as after a bad harvest, so hungry
-// villagers turn to the cowherd's milk (their last resort); what was put away comes back the next day (no more than was taken).
+// villagers turn to the cowherd's milk (their last resort): all day long, so the food the farmers harvest or bake that day goes too (hungry
+// villagers buy that before milk). The cowherd keeps its own (a seller keeps 7 bread-eq of food, its milk included, so without its steak it
+// would sell no milk). What was put away comes back the next day (no more than was taken), except to a villager holding milk it bought: it
+// keeps none until it has drunk the milk (by LEAN + 4), so the empties exist to flow back.
+// Whether the cowherd gets them is a race (the beekeeper buys empties too, and a villager offers them only from 3): when none has come back by
+// day N the run goes on, with another lean day every 4 days, until one does, for at most EXTRA more game days.
 // Usage: NODE_PATH=$(npm root -g) node test/cowchain.js [days=14] [seed=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
 const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
-const LEAN = 3;
+const LEAN = 3, EXTRA = 8;
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -101,33 +106,50 @@ const LEAN = 3;
     R.beeKit0 = new Set(window.__villagers().filter(m => m.beeKit));   // beekeepers' kits (16 glass bottles each, js/beekeeper.js) given before the run
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: pasture ${JSON.stringify(setup.pasture)}`);
-  const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
+  const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h), cap = Math.round((DAYS + EXTRA) * 1200 / h);
   const t0 = Date.now();
-  for (let s = 0; s < total; s += PER) {
-    await pg.evaluate(([n, h, key, LEAN]) => {
-      const [x, z] = key.split(',').map(Number);
+  let back = false;   // an empty bottle came back to the cowherd: the run may stop at day N
+  for (let s = 0; s < cap && (s < total || !back); s += PER) {
+    if (s === total) console.log(`  day ${DAYS}: no empty bottle back to the cowherd yet; running on (another lean day every 4 days, up to day ${DAYS + EXTRA})`);
+    back = await pg.evaluate(([n, h, key, LEAN, more]) => {
+      const [x, z] = key.split(',').map(Number), R = window.__rec;
+      const isBack = () => R.trades.some(x => x[0] === 'cowherd' && /^glass[ _]bottle$/i.test(x[2]));
+      const milk = id => id === BF.I.milk_bottle || id === BF.I.milk_bucket;
+      const putAway = ms => { let n = 0; for (const m of ms) for (let i = 0; i < m.inv.length; i++) { const st = m.inv[i]; if (st && BF.food.isFood(st.id) && !milk(st.id)) { R.lean.push([m, st.id, st.count]); n += st.count; m.inv[i] = null; } } return n; };
+      // the villagers that bought milk keep no food until they have drunk it (3 days after the lean day starts at the latest; the baker keeps its
+      // milk for cakes): with their own cheaper food back they would leave the milk in their packs, and no empties would come back
+      const milkLeft = m => m.profession !== 'baker' && window.__count(m, 'milk_bottle') > 0;
+      const lean = d => {
+        if (!R.lean && d >= LEAN || more && R.lean && !R.lean.length && d >= R.leanAt + 4 && !isBack()) {   // a lean day starts (again past day N with none back yet)
+          R.lean = []; R.leanAt = R.leanAt == null ? LEAN : Math.floor(d); R.leanPut = 0;
+          (R.leanDays = R.leanDays || []).push([R.leanAt, 0]);
+        }
+        if (!R.lean || !R.lean.length && d >= R.leanAt + 1) return;
+        if (d < R.leanAt + 1) R.leanPut += putAway(window.__villagers().filter(m => m.profession !== 'cowherd'));   // all day long: what the farmers harvest, bake or take from a chest too
+        else {   // ... and comes back the next day, to a villager still holding milk it bought once it has drunk it
+          const held = new Set(R.lean.filter(([m]) => !m.dead && milkLeft(m) && d < R.leanAt + 4).map(([m]) => m));
+          R.leanPut += putAway(held);
+          R.lean = R.lean.filter(([m, id, n]) => { if (m.dead) return false; if (held.has(m)) return true; BF.trades.inv.add(m.inv, id, n); return false; });
+        }
+        const L = R.leanDays[R.leanDays.length - 1]; L[1] = R.leanPut;
+        if (R.leanDays.length === 1) R.leanN = R.leanPut;   // the first one's, for the milk check
+      };
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(x, z, 4);
+        lean(BF.sky.day + BF.sky.time);
       }
-      const R = window.__rec, hd = R.herder, P = hd && !hd.dead ? BF.cowherd.pastureOf(hd) : null, d = BF.sky.day + BF.sky.time;
-      if (!R.lean && d >= LEAN) {   // the lean day starts: food (all but milk) put away
-        R.lean = [];
-        const milk = id => id === BF.I.milk_bottle || id === BF.I.milk_bucket;
-        for (const m of window.__villagers()) if (m.profession !== 'cowherd') for (let i = 0; i < m.inv.length; i++) { const st = m.inv[i]; if (st && BF.food.isFood(st.id) && !milk(st.id)) { R.lean.push([m, st.id, st.count]); m.inv[i] = null; } }
-        R.leanN = R.lean.reduce((a, x) => a + x[2], 0);
-      } else if (R.lean && !R.leanBack && d >= LEAN + 1) {   // ... and comes back
-        R.leanBack = true;
-        for (const [m, id, n] of R.lean) if (!m.dead) BF.trades.inv.add(m.inv, id, n);
-      }
+      const hd = R.herder, P = hd && !hd.dead ? BF.cowherd.pastureOf(hd) : null;
       // the herd, and empty bottles other villagers hold while the cowherd is short of them (not the beekeeper's, kept for honey, nor the
       // glassmaker's, made to sell), counted only while both are awake: nobody trades at night, and the cowherd bottles its evening milk
       const stranded = hd.sleeping ? 0 : window.__villagers().filter(m => !m.sleeping && !['cowherd', 'beekeeper', 'glassmaker'].includes(m.profession)).reduce((a, m) => Math.max(a, window.__count(m, 'glass_bottle')), 0);
       R.herd.push([+(BF.sky.day + BF.sky.time).toFixed(2), P && P.cows ? P.cows.length : null, P && P.cows ? P.cows.filter(c => c.growAt != null).length : null, P ? P.culls : null,
         window.__count(hd, 'glass_bottle'), stranded]);
-    }, [Math.min(PER, total - s), h, setup.key, LEAN]);
+      return isBack();
+    }, [Math.min(PER, cap - s), h, setup.key, LEAN, s >= total]);
     if ((s / PER) % 24 === 23) console.log(`  day ${((s + PER) * h / 1200).toFixed(1)} (${Math.round((Date.now() - t0) / 1000)} s)`);
   }
+  const ranTo = +(await pg.evaluate(() => BF.sky.day + BF.sky.time)).toFixed(2);   // the game day the run ended on
   const R = await pg.evaluate(() => {
     const R = window.__rec, hd = R.herder, P = BF.cowherd.pastureOf(hd);
     R.end = window.__total();
@@ -191,8 +213,8 @@ const LEAN = 3;
   ok('the cowherd fed its cows wheat it bought', R.fed > 0 && wheatBought > 0, { fed: R.fed, wheatBought });
   ok('empty bottles flow back: none pile up with a villager while the cowherd is short', stuck <= 1, { stuck, bottlesBack, milkSold });
   ok('on the lean day hungry villagers bought milk from the cowherd', milkSold > 0, { milkSold, putAway: R.leanN });
-  ok('the empty bottles came back: the cowherd bought them from the village', bottlesBack > 0, { milkSold, bottlesBack });
+  ok('the empty bottles came back: the cowherd bought them from the village', bottlesBack > 0, { milkSold, bottlesBack, leanDays: R.leanDays, ranTo });
   if (pageErrors) ok('no page errors', false, pageErrors);
-  console.log(`ran ${DAYS} days in ${Math.round((Date.now() - t0) / 1000)} s`);
+  console.log(`ran to day ${ranTo} in ${Math.round((Date.now() - t0) / 1000)} s`);
   await b.close();
 })();
