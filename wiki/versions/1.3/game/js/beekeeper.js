@@ -168,10 +168,11 @@ function nestFor(h) {
 // ---------------------------------------------------------------- what it keeps and wants
 const flowerCount = m => sumOf(m, isFlowerItem);
 const combKeep = m => (hivesOf(m).length < HIVES_MAX ? COMB_HIVE : 0);
-// Empty bottles it would buy back (js/villagelife.js findBottleSeller).
+// Empty bottles it would buy back (js/villagelife.js findBottleSeller). Its unsold honey bottles count too: it fills each empty at once, so on
+// empties alone it would stay a buyer while its honey piles up, and leave the cowherd none to milk into.
 function bottleWanted(m) {
   if (!m || m.profession !== PROF || !m.inv || I("glass_bottle") == null) return 0;
-  const have = cnt(m, I("glass_bottle"));
+  const have = cnt(m, I("glass_bottle")) + (I("honey_bottle") != null ? cnt(m, I("honey_bottle")) : 0);
   return have < BOTTLES_LOW ? BOTTLES_TO - have : 0;
 }
 // Its market reserve (js/market.js): its bottles (for the next harvest), shears, honeycomb for its next hive, string, planks and flowers.

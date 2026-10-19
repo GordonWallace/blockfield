@@ -7,13 +7,14 @@
 //  - no glass bottles from nothing: the village's bottles (empty and full) never exceed the start plus 30 per cowherd hire kit and 16 per beekeeper kit given during the run, plus the bottles a glassmaker made from sand (honey bottles count as full bottles);
 //  - the cowherd's buckets and wheat come only from its kit and what it bought: it never holds more than that, minus the wheat it fed;
 //  - empty bottles flow back: bottles villagers emptied (milk they drank) are bought back by the cowherd, and none pile up while it is short.
-// A lean day: from day LEAN to LEAN + 1 every villager but the cowherd has its food (all but milk) put away, as after a bad harvest, so hungry
-// villagers turn to the cowherd's milk (their last resort): all day long, so the food the farmers harvest or bake that day goes too (hungry
-// villagers buy that before milk). The cowherd keeps its own (a seller keeps 7 bread-eq of food, its milk included, so without its steak it
-// would sell no milk). What was put away comes back the next day (no more than was taken), except to a villager holding milk it bought: it
-// keeps none until it has drunk the milk (by LEAN + 4), so the empties exist to flow back.
-// Whether the cowherd gets them is a race (the beekeeper buys empties too, and a villager offers them only from 3): when none has come back by
-// day N the run goes on, with another lean day every 4 days, until one does, for at most EXTRA more game days.
+// A lean day: from day LEAN to LEAN + 1 every villager but the cowherd has its food put away, as after a bad harvest, all but milk and honey
+// (the last-resort food; honey is also the beekeeper's ware, which it counts as bottles held, js/beekeeper.js bottleWanted), so hungry
+// villagers turn to the cowherd's milk: all day long, so the food the farmers harvest or bake that day goes too (hungry villagers buy that
+// before milk). The cowherd keeps its own (a seller keeps 7 bread-eq of food, its milk included, so without its steak it would sell no milk).
+// What was put away comes back the next day (no more than was taken), except to a villager holding milk or honey it bought: it keeps none
+// until it has drunk it (by LEAN + 4), so the empties exist to flow back.
+// Whether the cowherd gets them is a race (a beekeeper short of bottles buys empties too, and a villager offers them only from 3): when none
+// has come back by day N the run goes on, with another lean day every 4 days, until one does, for at most EXTRA more game days.
 // Usage: NODE_PATH=$(npm root -g) node test/cowchain.js [days=14] [seed=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -114,11 +115,11 @@ const LEAN = 3, EXTRA = 8;
     back = await pg.evaluate(([n, h, key, LEAN, more]) => {
       const [x, z] = key.split(',').map(Number), R = window.__rec;
       const isBack = () => R.trades.some(x => x[0] === 'cowherd' && /^glass[ _]bottle$/i.test(x[2]));
-      const milk = id => id === BF.I.milk_bottle || id === BF.I.milk_bucket;
+      const milk = id => id === BF.I.milk_bottle || id === BF.I.milk_bucket || id === BF.I.honey_bottle;   // the last-resort food (honey: the beekeeper's wares, which it counts as bottles held)
       const putAway = ms => { let n = 0; for (const m of ms) for (let i = 0; i < m.inv.length; i++) { const st = m.inv[i]; if (st && BF.food.isFood(st.id) && !milk(st.id)) { R.lean.push([m, st.id, st.count]); n += st.count; m.inv[i] = null; } } return n; };
       // the villagers that bought milk keep no food until they have drunk it (3 days after the lean day starts at the latest; the baker keeps its
       // milk for cakes): with their own cheaper food back they would leave the milk in their packs, and no empties would come back
-      const milkLeft = m => m.profession !== 'baker' && window.__count(m, 'milk_bottle') > 0;
+      const milkLeft = m => m.profession !== 'baker' && m.profession !== 'beekeeper' && window.__count(m, 'milk_bottle') + window.__count(m, 'honey_bottle') > 0;
       const lean = d => {
         if (!R.lean && d >= LEAN || more && R.lean && !R.lean.length && d >= R.leanAt + 4 && !isBack()) {   // a lean day starts (again past day N with none back yet)
           R.lean = []; R.leanAt = R.leanAt == null ? LEAN : Math.floor(d); R.leanPut = 0;
