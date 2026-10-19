@@ -239,6 +239,7 @@ module.exports = async (pg, out) => {
     ok("one fed cow alone does not breed", wildBorn === 0 && C.willing(wa, day()) && !C.willing(wb, day()), { wildBorn, willing: [C.willing(wa, day()), C.willing(wb, day())] });
     // back side by side on the flat patch: in the 12 s above they may have wandered off it, apart and more than 2 blocks up or down
     for (const [m, ddx] of [[wa, 0], [wb, 1]]) { const [x, y, z] = spot(flat[0] + ddx, flat[1]); m.position.set(x, y, z); if (m.vel) m.vel.set(0, 0, 0); }
+    if (Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z) > 4) { const [x, y, z] = spot(flat[0], flat[1]); wa.position.set(x, y, z); const s2 = spot(flat[0] + 1, flat[1]); wb.position.set(s2[0], s2[1], s2[2]); }   // they wandered apart while one was fed: back side by side (mates look within 10 blocks)
     C.feed(wb, "test");
     for (let i = 0; i < 600 && !wildBorn; i++) step();
     ok("two fed adults breed: a calf", wildBorn === 1, { wildBorn, d: +Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z).toFixed(2), dy: +(wa.position.y - wb.position.y).toFixed(2),
