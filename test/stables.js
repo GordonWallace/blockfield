@@ -189,7 +189,7 @@ module.exports = async (pg) => {
       return got;
     };
     BF.on("horseFed", (m, by) => { if (by === hand) L.fed++; });
-    BF.on("horseBred", (foal) => { L.bred++; L.bredOwners.push(foal.horse.owner); });
+    BF.on("horseBred", (foal, a, b) => { if (!a.horse.owner && !b.horse.owner && !a.horse.tamed) return; L.bred++; L.bredOwners.push(foal.horse.owner); });   // two wild horses breeding nearby isn't the stable's
   });
 
   // ---------------------------------------------------------------- day 1 morning: no wild horses yet; then a herd comes by
