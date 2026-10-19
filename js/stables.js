@@ -271,9 +271,11 @@ function pickTask(m, S) {
   if (deal) return { kind: "shop", deal };
   return null;
 }
+// A task brought back from a village snapshot (js/mobsave.js: a short unload, or quit and reload) has lost its references to other mobs (a shop
+// deal's seller, a horse): it ends here like any other task, without them.
 function endTask(m, S, ok) {
   const tk = S.task;
-  if (tk && !ok) { if (tk.r) S.avoid["h" + tk.r.hid] = now() + 0.05; if (tk.deal && tk.deal.seller.slot) S.avoid[tk.deal.seller.slot.idx] = now() + 0.05; }
+  if (tk && !ok) { if (tk.r) S.avoid["h" + tk.r.hid] = now() + 0.05; if (tk.deal && tk.deal.seller && tk.deal.seller.slot) S.avoid[tk.deal.seller.slot.idx] = now() + 0.05; }
   if (tk && tk.gatesOpen) setGates(tk.st, false);
   if (tk && tk.r && tk.r.mob) BF.horses.setAvoid(tk.r.mob, null);
   const keep = ok && tk && (tk.kind === "catch" || tk.kind === "fetch") && tk.r && tk.r.lead && tk.r.lead.mob === m;   // a led horse: the walk home carries on under the same estimate
