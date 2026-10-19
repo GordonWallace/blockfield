@@ -1834,7 +1834,7 @@ function updateMob(m, dt) {
   if (resting) { m.vel.set(0, 0, 0); m.fallStart = m.position.y; ai.blockedT = 0; }
   else {
   const wasGround = m.onGround;
-  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05 });
+  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater });   // swimming, it climbs out onto a bank (world.js moveBox)
   m.onGround = res.onGround; m.inWater = res.inWater; m.headInWater = !!res.headInWater;
   if (m.inWater && m.type === "villager" && BF.bridges) BF.bridges.noteSwim(m);   // a swim is a river crossing (js/bridges.js)
   const wants = Math.abs(_desired.x) + Math.abs(_desired.z) > 0.1;
