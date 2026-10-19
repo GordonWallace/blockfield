@@ -66,8 +66,10 @@ module.exports = async (pg, out) => {
     BF.mobs.importVillagers(saved);
     BF.sky.day = dayNow; BF.sky.setTime(tNow);
     await load(PV.x + 4, PV.z + 4);
-    run(10);
-    for (let k = 0; k < 120 && !(BF.mobs.villages.get(PK) && (BF.shepherd.pensOf(BF.mobs.villages.get(PK)).find(p => p.key === key) || { sheep: [] }).sheep.every(s => s.mob && !s.mob.removed) && BF.shepherd.pensOf(BF.mobs.villages.get(PK)).some(p => p.key === key)); k++) { BF.world.update(PV.x + 4, PV.z + 4, 8); run(0.5); }
+    // Read the pen in the step it comes back in. Game time run after that is not part of the round trip: the restored shepherd goes on
+    // feeding, and a hungry sheep it feeds breeds with the one fed above (a lamb joins the pen), so the count would depend on how long this waits.
+    const penBack = () => { const r = BF.mobs.villages.get(PK), p = r && BF.shepherd.pensOf(r).find(q => q.key === key); return !!(p && p.sheep && p.sheep.every(s => s.mob && !s.mob.removed)); };
+    for (let k = 0; k < 1400 && !penBack(); k++) { if (k % 10 === 0) BF.world.update(PV.x + 4, PV.z + 4, 8); step(); }
     const rec2 = BF.mobs.villages.get(PK), pen2 = BF.shepherd.pensOf(rec2).find(p => p.key === key);
     ok("pen restored with the same sheep count", pen2 && pen2.sheep.length === wantN, [pen2 && pen2.sheep.length, wantN]);
     ok("shorn / fed state restored", pen2 && JSON.stringify(pen2.sheep.map(s => [!!s.shorn, s.fed != null])) === JSON.stringify(want), pen2 && pen2.sheep.map(s => [!!s.shorn, s.fed != null]));
