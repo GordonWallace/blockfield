@@ -44,14 +44,18 @@ module.exports = async (pg) => {
     for (const t in o) BF.gameOpts.set(t, o[t]);
     for (const m of BF.mobs.list.slice()) if (m.hostile) BF.mobs.discard(m);
     BF.mobs.spawning = true;
+    // a fixed random sequence so the counts don't swing run to run (restored after)
+    const rnd = Math.random; let a = 0x9e3779b9;
+    Math.random = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
     const seen = new Set(BF.mobs.list), n = {}, caps = [];
-    for (let i = 0; i < 6000; i++) {
+    for (let i = 0; i < 8000; i++) {
       BF.sky.setTime(0.75);
       BF.mobs.update(0.05);
       if (i === 100) { const W = BF.wildlife, sh = BF.mobs.spawnShare(); caps.push(...W.areas().map(A => [A.cap, Math.max(1, Math.round(W.CAP * A.n / W.CAP_CHUNKS)) * sh, sh])); }
-      for (const m of BF.mobs.list) if (!seen.has(m)) { seen.add(m); if (m.hostile) n[m.type] = (n[m.type] || 0) + 1; }
+      for (const m of BF.mobs.list.slice()) if (!seen.has(m)) { seen.add(m); if (m.hostile) { n[m.type] = (n[m.type] || 0) + 1; BF.mobs.discard(m); } }   // counted and taken away, so the area caps never fill and the counts measure the spawn rate
     }
     BF.mobs.spawning = false;
+    Math.random = rnd;
     return { n, caps };
   }, opts);
   const all = await run({ zombie: true, skeleton: true, creeper: true, spider: true });
@@ -60,7 +64,7 @@ module.exports = async (pg) => {
   const zs = r => (r.n.zombie || 0) + (r.n.skeleton || 0);
   ok("with all four on, creepers and spiders spawn too", all.n.zombie && all.n.skeleton && (all.n.creeper || 0) + (all.n.spider || 0) > 0, all.n);
   ok("with creepers and spiders off, none of them spawn", !two.n.creeper && !two.n.spider, two.n);
-  ok("zombies and skeletons spawn about as often either way (0.6x to 1.6x)", zs(all) > 10 && zs(two) >= 0.6 * zs(all) && zs(two) <= 1.6 * zs(all), { all: zs(all), two: zs(two) });
+  ok("zombies and skeletons spawn about as often either way (0.8x to 1.25x)", zs(all) >= 300 && zs(two) >= 0.8 * zs(all) && zs(two) <= 1.25 * zs(all), { all: zs(all), two: zs(two) });
   ok("area caps shrink by the switched-off share", all.caps.length && two.caps.length && all.caps.every(c => c[0] === c[1] && c[2] === 1) && two.caps.every(c => Math.abs(c[0] - c[1]) < 1e-9 && Math.abs(c[2] - 0.58) < 1e-9), { all: all.caps, two: two.caps });
 
   // ---- saved with the world; the start screen's Options apply when it opens
