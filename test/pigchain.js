@@ -6,12 +6,16 @@
 //  - nothing from nothing for the pig farmer: the feed it fed is feed it held at the start or bought (it never holds more than that, minus what it
 //    fed), and the fuel it burns is fuel it held or bought;
 //  - it bought its feed from the village, and cooked pork in a furnace when the village has one.
+// The butcher starts with BUTCHER_PORK porkchops (topped up with cooked ones before the start snapshot, so they count as the village's start):
+// it cooks the pig farmer's pork only beyond the PORK_KEEP raw ones it keeps to sell, and a butcher short of pork (under 9) buys every one as
+// it comes, so with a random starting stock that is low the pig farmer would never hold enough to cook.
 // Usage: NODE_PATH=$(npm root -g) node test/pigchain.js [days=14] [seed=1]
 // @ci integration suite=farming soak timeout=1800 args=14,1
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
 const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
+const BUTCHER_PORK = 48;   // the butcher sells about 2 a day: enough not to be short (under 9) within the run
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -87,14 +91,21 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r)}`);
   }
   if (!setup) { console.log('FAIL no village with a pig farmer and a stocked sty among the nearest ' + cands.length); await b.close(); process.exitCode = 1; return; }
-  await pg.evaluate(() => {
-    const R = window.__rec, h = window.__pf();
+  const stocked = await pg.evaluate(BUTCHER_PORK => {
+    const R = window.__rec, h = window.__pf(), I = BF.I;
+    // the butcher's pork: topped up to BUTCHER_PORK with cooked porkchops (counted in the start below)
+    const given = [];
+    for (const m of window.__villagers().filter(m => m.profession === 'butcher')) {
+      const have = window.__count(m, 'raw_porkchop') + window.__count(m, 'cooked_porkchop'), want = Math.max(0, BUTCHER_PORK - have);
+      given.push([have, want ? want - BF.trades.inv.add(m.inv, I.cooked_porkchop, want) : 0]);
+    }
     R.lines.length = 0; R.restock.length = 0; R.trades.length = 0; R.fed = 0;
     R.start = window.__total();
     R.pfStart = { feed: BF.pigFarmer.feedHeld(h), fuel: window.__fuel(h) };
     R.pf = h;
-  });
-  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: sty ${JSON.stringify(setup.sty)}`);
+    return given;
+  }, BUTCHER_PORK);
+  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: sty ${JSON.stringify(setup.sty)}, butchers' pork [held, given] ${JSON.stringify(stocked)}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
