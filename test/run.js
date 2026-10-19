@@ -13,6 +13,10 @@ const root = path.resolve(__dirname, '..');
   pg.on('pageerror', e => console.log('PAGEERROR', e.stack || e.message));
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
+  // No pointer lock: headless Chromium grants it on BF.player.start(), and while the canvas holds it a long evaluate makes the browser
+  // and renderer processes grow by 20-40 MB/s each. Without requestPointerLock the game takes its drag-mode path (js/player.js
+  // requestLock). Set on every load, pg.reload() too; a test that simulates the lock assigns its own (test/esc-close.js).
+  await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
   // The boot world: seed 1337 with village generator 9 (BF_HASH overrides), so the tests keep the villages they were written for; village
   // generator 10 (idea-044) has no spawn village and other paddocks, and its own tests (paddocks-gen10, food-jobsites) make their worlds.
   await pg.goto('file://' + path.join(root, 'index.html') + (process.env.BF_HASH != null ? process.env.BF_HASH : '#seed1337gen3v9'));
