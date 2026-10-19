@@ -136,7 +136,7 @@ const css = `
 .bfp-card .bfp-mode button{margin:0;border:0;border-radius:0;background:rgba(0,0,0,.3);color:var(--muted);border-bottom:3px solid transparent}
 .bfp-card .bfp-mode button.on{background:#3b4a35;color:var(--ink);border-bottom-color:var(--accent)}
 .bfp-modehint{font:12px var(--mono);color:var(--muted);margin:6px 0 0;min-height:1em}
-.bfp-card.bfp-wide{max-width:760px}
+.bfp-card.bfp-wide{max-width:840px}
 .bfp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px;font:400 15px/1 var(--display);color:var(--ink);text-align:left}
 .bfp-card button.bfp-small{width:auto;margin:0;padding:8px 10px;font-size:12px}
 .bfp-worlds{max-height:min(46vh,340px);overflow:auto;border:1px solid var(--panel-edge);border-radius:3px;background:rgba(0,0,0,.25);text-align:left}
