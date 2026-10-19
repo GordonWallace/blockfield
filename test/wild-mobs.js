@@ -16,8 +16,10 @@ module.exports = async (pg) => {
     const keys = [...W.chunks.keys()], rolled = keys.filter(k => L.isRolled(k)).length;
     const rolls = L.log.filter(e => e.kind === "rolled");
     const NONE = /Desert|Ocean|Beach|River|Swamp|Jungle|Badlands|Peaks|Mushroom|Shore/;
-    const animals = BF.mobs.list.filter(m => BF.mobs.passiveTypes.includes(m.type) && BF.mobs.isWild(m));
-    const onGrass = animals.filter(m => W.getBlock(Math.floor(m.position.x), Math.floor(m.position.y) - 1, Math.floor(m.position.z)) === BF.B.grass).length;
+    const animals = BF.mobs.list.filter(m => (BF.mobs.passiveTypes.includes(m.type) && BF.mobs.isWild(m)) || (m.type === "horse" && m.horse && !m.horse.tamed && !m.horse.owner && !m.horse.pen));   // wild horses roll in plains too (and are not isWild)
+    // the ground of the column it stands in: a horse is wide and its herd walks, so the cell under its middle is often air at a step or
+    // mid-jump (or a plant on the grass), which isn't off the grass
+    const onGrass = animals.filter(m => { const x = Math.floor(m.position.x), z = Math.floor(m.position.z); return W.getBlock(x, W.heightAt(x, z), z) === BF.B.grass; }).length;
     return { chunks: keys.length, rolled, rolls: rolls.length, badBiome: rolls.filter(e => NONE.test(e.biome)).map(e => e.biome), biomes: [...new Set(rolls.map(e => e.biome))], animals: animals.length, onGrass };
   });
   ok("every loaded chunk had its first-generation roll", gen.rolled >= gen.chunks - 4, gen);
@@ -110,7 +112,7 @@ module.exports = async (pg) => {
     await BF.save.load(id);
   }, id);
   await pg.waitForTimeout(9000);
-  const old = await pg.evaluate(() => { const keys = [...BF.world.chunks.keys()]; return { chunks: keys.length, rolled: keys.filter(k => BF.wildlife.isRolled(k)).length, animals: BF.mobs.list.filter(m => BF.mobs.passiveTypes.includes(m.type) && BF.mobs.isWild(m)).length }; });
+  const old = await pg.evaluate(() => { const keys = [...BF.world.chunks.keys()]; return { chunks: keys.length, rolled: keys.filter(k => BF.wildlife.isRolled(k)).length, animals: BF.mobs.list.filter(m => (BF.mobs.passiveTypes.includes(m.type) && BF.mobs.isWild(m)) || (m.type === "horse" && m.horse && !m.horse.tamed && !m.horse.owner && !m.horse.pen)).length }; });   // wild horses too, as above
   ok("an old save's chunks get their one-time roll", old.rolled >= old.chunks - 4 && old.animals > 0, old);
   await pg.evaluate(id => BF.save.remove(id), id);
 
