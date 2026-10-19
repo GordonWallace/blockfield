@@ -14,6 +14,8 @@ Its day, most urgent first:
 4. With 2 or 3 horses, feed wheat or hay to a pair of ready adults so they breed. It keeps the paddock at 2 to 4 horses. It never lets foals take it past 4.
 5. Otherwise shop for supplies.
 
+If its village unloads and comes back within a game hour while it is out shopping, it gives up that errand and picks its next task, as after a save and reload ([[page:village-loading]]).
+
 At the rack it makes saddles (3 leather and an iron ingot) and leads (4 string and a leather make 2). Far from you, where horses do not exist as mobs, catching and breeding pause, but shopping goes on. See [[page:transport]] for horses.
 
 ### Where it gets its materials
