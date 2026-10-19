@@ -376,9 +376,13 @@ function findSpot(m, at) {
     return false;
   };
   const near = (x, y, z, list, d2) => { for (const o of list) { const dx = o[0] - x, dy = o[1] - y, dz = o[2] - z; if (dx * dx + dy * dy + dz * dz <= d2) return true; } return false; };
+  // sites the builders are building on (js/builder.js), with the block round them: a sapling there could grow into a tree in a cell before
+  // its block goes in
+  const sites = (BF.builder && BF.builder.builtOf && m.village ? BF.builder.builtOf(m.village) || [] : []).filter(e => e.state === "building");
+  const onSite = (x, z) => sites.some(e => x >= e.ox - 1 && x <= e.ox + e.w && z >= e.oz - 1 && z <= e.oz + e.d);
   const cands = [];
   for (let x = px - SEARCH; x <= px + SEARCH; x++) for (let z = pz - SEARCH; z <= pz + SEARCH; z++) {
-    if (!W().isLoaded(x, z) || !inHome(m, x + 0.5, z + 0.5)) continue;
+    if (!W().isLoaded(x, z) || !inHome(m, x + 0.5, z + 0.5) || onSite(x, z)) continue;
     for (let y = py - PLANT_DY; y <= py + PLANT_DY; y++) {
       if (get(x, y, z) !== 0 || get(x, y - 1, z) === BF.B.farmland || get(x, y - 1, z) === BF.B.farmland_dry || !isSoil(get(x, y - 1, z))) continue;
       let clear = true;

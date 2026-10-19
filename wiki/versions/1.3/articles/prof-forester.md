@@ -3,7 +3,7 @@ The forester plants and fells trees. Its workstation is the [[item:band_saw]]. T
 ### The working day
 The forester picks planting or felling at random, weighted 10 to 8.
 
-- **Planting.** A forester holding a sapling picks a free spot within 16 blocks of itself: air over soil with room for a tree above, no other sapling within 4 blocks, no door within 10 blocks and no building or other structure within 8 blocks (dirt paths are fine). It walks there and plants. After a sapling is planted it grows into a tree in about 8 minutes on average.
+- **Planting.** A forester holding a sapling picks a free spot within 16 blocks of itself: air over soil with room for a tree above, no other sapling within 4 blocks, no door within 10 blocks, no building or other structure within 8 blocks (dirt paths are fine), and not on a site a [[villager:builder]] is building on or the block round it. It walks there and plants. After a sapling is planted it grows into a tree in about 8 minutes on average.
 - **Felling.** It picks a natural tree within 40 blocks, nearer ones favoured, comes within 3 blocks and chops. It takes as long as you would to break every log of the tree one at a time with the same tool, and the whole tree comes down at once, leaves included. Buildings are never touched: a log pile next to planks or stone is not a tree. If the day ends or someone interrupts it, it keeps its progress on that tree.
 - **Picking up.** It collects saplings, emeralds, logs, sticks and apples within 16 blocks, and after felling stays until nothing it wants lies within 12 blocks of the stump.
 - **Sawing.** Up to 8 logs a day become 4 planks each, keeping 2 logs of each kind.
