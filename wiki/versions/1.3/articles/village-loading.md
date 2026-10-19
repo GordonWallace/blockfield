@@ -48,7 +48,7 @@ Each villager stopped in the middle of a job is dealt with so that nothing is lo
 Each forced stop is written to the loading errors, with the reason.
 
 ## Quitting and loading again
-If you save, quit and load straight away, no game time has passed, so everything that was loaded comes back as it was: villagers, golems, wild and hostile mobs, each in the same place, facing the same way, with the same health and the same job. If more than about 24 seconds of game time have passed, villagers return to the usual places instead.
+If you save, quit and load straight away, no game time has passed, so everything that was loaded comes back as it was: villagers, golems, wild and hostile mobs, each in the same place, facing the same way, with the same health and the same job. A village with several golems gets each of them back at its own spot. If more than about 24 seconds of game time have passed, villagers return to the usual places instead.
 
 ## Coming back to a village
 - **Short absence.** If the village was unloaded for less than a game hour and bedtime did not come in between, everyone is exactly where they were.

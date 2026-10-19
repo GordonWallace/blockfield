@@ -175,15 +175,14 @@ function peek(key) {
   if (!fresh(s)) { villagers.delete(key); return null; }
   return there(s) ? s : "wait";
 }
+// Each snapshot is handed out once: the stored list loses it (a village's golems each come back at their own spot, not all at the first one's).
 function golem(vkey) {
   const a = golems.get(vkey);
   if (!a || !a.length) return null;
-  const ok = a.filter(fresh);
-  if (ok.length !== a.length) { if (ok.length) golems.set(vkey, ok); else golems.delete(vkey); }
-  const s = ok.find(there);
-  if (!s) return null;
-  ok.splice(ok.indexOf(s), 1);
-  return s;
+  const ok = a.filter(fresh), s = ok.find(there);
+  if (s) ok.splice(ok.indexOf(s), 1);
+  if (ok.length) golems.set(vkey, ok); else golems.delete(vkey);
+  return s || null;
 }
 function done(key) { villagers.delete(key); }
 
