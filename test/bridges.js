@@ -92,9 +92,23 @@ module.exports = async (pg) => {
     bm.bs = bm.bs || {}; Object.assign(bm.bs, { mode: "idle", cool: 0, t: 0, fail: {}, avoid: {}, entry: null });
     const built = Bd.builtOf(rec);
     M.update(0.05);
-    for (const o of M.list) if ((M.isWild(o) || o.hostile) && Math.hypot(o.position.x - x0, o.position.z - z0) < 40) o.dead = true;   // wild animals live round villages (idea-037): one standing on the span would hold the plan back (cleared after the update, which can spawn a monster)
+    // nobody but the builder on or beside the span: a mob there holds the plan back (js/builder.js occupiedBox) and one standing where a post
+    // goes gets that log skipped. Wild animals and monsters (idea-037) go; the village's own (villagers, golems, pen and stable animals) are
+    // sent back to the village centre. Done again through the build.
+    const near = o => o.position.x > x0 - 16 && o.position.x < x0 + 28 && Math.abs(o.position.z - z0) < 36;
+    let cleared = [];
+    const clearSpan = () => {
+      for (const o of M.list) {
+        if (o === bm || o.dead || o.removed || !near(o)) continue;
+        cleared.push(o.type + (o.profession ? ":" + o.profession : ""));
+        if (M.isWild(o) || o.hostile) { o.dead = true; continue; }
+        o.position.set(rec.x + 0.5, W.heightAt(Math.floor(rec.x), Math.floor(rec.z)) + 1, rec.z + 0.5); if (o.vel) o.vel.set(0, 0, 0); if (o.ai) o.ai.route = null;
+      }
+    };
+    clearSpan();
+    const inBox = M.list.filter(o => o !== bm && !o.dead && !o.removed && near(o)).map(o => [o.type, o.profession || null, Math.round(o.position.x), Math.round(o.position.z)]);
     const e = Bd.beginPlan(bm, bm.bs, "bridge", "oak");
-    ok("the builder plans the bridge", !!e && e.type === "bridge" && !!e.span, e && { ox: e.ox, oy: e.oy, oz: e.oz, w: e.w, d: e.d, n: e.n });
+    ok("the builder plans the bridge", !!e && e.type === "bridge" && !!e.span, e ? { ox: e.ox, oy: e.oy, oz: e.oz, w: e.w, d: e.d, n: e.n } : { inBox, player: [Math.round(BF.player.position.x), Math.round(BF.player.position.z)], x0, z0 });
     if (!e) return R;
     const said = [], vlog0 = BF.vlog.log;
     BF.vlog.log = function (r, k, t, ...rest) { said.push(t); return vlog0.call(this, r, k, t, ...rest); };
@@ -105,9 +119,10 @@ module.exports = async (pg) => {
     let steps = 0;
     for (; steps < 9000 && e.state !== "done"; steps++) {
       BF.sky.setTime(0.2 + Math.min(0.2, steps * 0.00002)); M.update(0.1);
+      if (steps % 20 === 0) clearSpan();
       if (bm.bs.mode === "idle" && e.state !== "done") { bm.bs.cool = 0; }
     }
-    ok("it finished the bridge", e.state === "done", { state: e.state, prog: e.prog, n: e.n, skipped: e.skipped, steps, status: Bd.statusText(bm) });
+    ok("it finished the bridge", e.state === "done", { state: e.state, prog: e.prog, n: e.n, skipped: e.skipped, steps, status: Bd.statusText(bm), cleared: cleared.slice(0, 12), nCleared: cleared.length });
     BF.vlog.log = vlog0;
     ok("the village log says the bridge is finished", said.some(t => /finished a bridge over the river/.test(t)), said.slice(-2));
     const s = e.span;

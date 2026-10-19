@@ -45,11 +45,28 @@ module.exports = async (pg) => {
   const before = await snapshot();
   want = Object.keys(before).length;
   ok("villagers are loaded to start with", Object.keys(before).length >= 6, Object.keys(before).length);
+  // Where each villager stood is read every frame until it unloads, and where it came back the first frame it is there again. (The snapshot
+  // above is taken before the leaving: villagers on a task work on through the village's countdown, and loaded ones walk on while the rest
+  // load, both for longer on a faster runner, so comparing it with a snapshot after loading counted walkers as misplaced.)
+  await pg.evaluate(k => {
+    const w = window.__rpw = { back: false, stop: false, last: {}, first: {} };
+    const tick = () => {
+      if (w.stop) return;
+      for (const m of BF.mobs.list) if (m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead && !m.removed) {
+        const p = [m.position.x, m.position.z];
+        if (!w.back) w.last[m.slot.idx] = p; else if (!w.first[m.slot.idx]) w.first[m.slot.idx] = p;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, info.key);
   ok("the village unloads when the player leaves", await leave());
+  await pg.evaluate(() => { window.__rpw.back = true; });
   await back();
   const after1 = await snapshot();
-  const same = Object.keys(before).filter(k => after1[k] && dist(before[k], after1[k]) < 4).length;
-  ok("after a short absence the villagers are where they stood", Object.keys(after1).length >= 20 && same >= Math.floor(Object.keys(after1).length * 0.8), { same, present: Object.keys(after1).length, of: Object.keys(before).length });
+  const seen = await pg.evaluate(() => { const w = window.__rpw; w.stop = true; return { last: w.last, first: w.first }; });
+  const same = Object.keys(seen.last).filter(k => seen.first[k] && dist(seen.last[k], seen.first[k]) < 4).length;
+  ok("after a short absence the villagers are where they stood", Object.keys(after1).length >= 20 && same >= Math.floor(Object.keys(after1).length * 0.8), { same, present: Object.keys(after1).length, of: Object.keys(seen.last).length });
   // 2. a longer absence by day: scattered within the leash
   await setTime(0.2);
   const before2 = await snapshot();
@@ -80,7 +97,11 @@ module.exports = async (pg) => {
     m.bed = null; m.slot.bed = null; m.homeBed = null; m.ai.route = null;   // no route either: a sleeper wakes where it is put, not back at its bed
     const H = m.home;
     // out in front of the door, on the ground: the first spot 8 to 3 blocks out that is open ground near the door's height (not a roof or a hillside)
-    const y0 = Math.floor(m.position.y);
+    // The door's height is where one stands in the doorway, under the roof. Not the villager's own height: it was put in its bed, which can be
+    // in another house a few blocks lower, and with no spot near that height it went in front of the door at that height, buried in the ground
+    // where no route starts (CI: H [-65,38,5,5], villager at -63,37, three failed searches).
+    let y0 = Math.floor(m.position.y);
+    for (let y = BF.world.heightAt(H.doorX, H.doorZ), y1 = y - 16; y > y1; y--) if (BF.mobs.nav.walkCell(H.doorX, y, H.doorZ)) { y0 = y; break; }
     let at = null;
     for (let k = 8; k >= 3 && !at; k--) {
       const x = Math.floor(H.outX + (H.outX - H.doorX) * k), z = Math.floor(H.outZ + (H.outZ - H.doorZ) * k), h = BF.world.heightAt(x, z);
