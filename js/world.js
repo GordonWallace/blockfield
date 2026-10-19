@@ -1404,6 +1404,8 @@ world.boxCollides = (px, py, pz, hw, h) => boxHit(px, py, pz, hw, h);
 // Moves an entity box through the world with per-axis collision.
 // pos: {x,y,z} feet centre (mutated). vel: {x,y,z} (mutated: blocked axes zeroed).
 // opts.stepUp: max auto-step height in blocks (1.05 climbs one-block ledges; 0 disables).
+// opts.swim: the box is swimming (it was in water last step): it steps up onto a ledge too, as off the ground, so a mob swimming in a
+// channel or a pond flush with the land climbs out onto the bank (only a bank no higher than stepUp above its feet).
 // Returns {onGround, hitX, hitZ, hitCeil, inWater}.
 world.moveBox = function (pos, vel, hw, h, dt, opts) {
   const stepUp = (opts && opts.stepUp) || 0;
@@ -1438,7 +1440,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
     const save = { x: pos.x, y: pos.y, z: pos.z };
     if (moveAxis(axis, d)) {
       // auto step-up onto a ledge
-      if (stepUp && wasGround) {
+      if (stepUp && (wasGround || (opts && opts.swim))) {
         const lift = { x: save.x, y: save.y, z: save.z };
         lift.y = top > save.y ? top : Math.floor(save.y + 1e-3) + 1; // top of the block we bumped into
         if (lift.y - save.y <= stepUp && !world.boxCollides(lift.x, lift.y, lift.z, hw, h)) {

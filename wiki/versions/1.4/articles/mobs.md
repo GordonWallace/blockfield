@@ -17,6 +17,10 @@ Wild animals and monsters live in the whole loaded world, not only around the pl
 
 When a chunk unloads, the wild mobs standing in it are stored with it, and they come back when it loads again. Nothing is removed just because you walked away. The details are on [[page:mob-spawning]].
 
+## Getting about
+
+Mobs walk up a step of one block without jumping. A mob swimming in water climbs out the same way onto a bank level with the water, such as the edge of a farm's water channel or of a pond flush with the land; a bank higher than that it has to swim round.
+
 ## Fighting
 
 - A mob you hit is briefly immune to further hits (just under half a second) and is knocked back. Hitting while sprinting knocks it back further.
