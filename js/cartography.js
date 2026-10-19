@@ -19,7 +19,7 @@ const MAP_STOCK = 2;                      // stops making maps once it holds thi
 const UPGRADE_PAPER = 24;                 // paper it keeps before it will spend 8 on a bigger map
 const CRAFT_PAUSE = 1.6, WORK_END = 0.45, TRADE_PAUSE = 1.6;
 const LOG = [];
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("cartographer", Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
 const cnt = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
 const blankIds = () => [1, 2, 3, 4, 5].map(n => BF.I["blank_map_" + n]);
@@ -81,7 +81,7 @@ function shortfall(m) {
   need(I.paper, PAPER);
   return out;
 }
-const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession !== "cartographer" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 function findSeller(m, short, avoid) {
   const R = m.village, T = TR();
   if (!R) return null;
@@ -145,7 +145,7 @@ function travel(m, st, dt, out, tx, ty, tz, speed) {
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || !BF.mobs || !BF.mobs.nav || !m.village) return false;
   const sh = m.cshop || (m.cshop = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 }), a = m.ai;
-  if (skyT() >= WORK_END || m.tradingWith) { if (sh.stage) { sh.stage = null; sh.deal = null; a.route = null; } return false; }
+  if (skyT() >= WORK_END || m.tradingWith) { if (sh.stage) { sh.stage = null; sh.deal = null; a.route = null; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   if (!sh.stage) {
     sh.checkT -= dt;
     if (sh.checkT > 0) return false;
@@ -155,11 +155,13 @@ function ai(m, dt, out) {
     const short = shortfall(m);
     if (!Object.keys(short).length) return false;
     const deal = findSeller(m, short, sh.avoid);
-    if (!deal) { sh.cd = now + 0.08; return false; }
+    if (!deal) { if (BF.econ) for (const id in short) BF.econ.want(m, +id); sh.cd = now + 0.08; return false; }   // dead ends (js/economy.js)
+    const VS = BF.villageSim;
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Buying " + BF.itemName(deal.item))) return false;   // walk at 1.3x speed + one trade pause
     sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; a.route = null;
   }
   const deal = sh.deal, v2 = deal && deal.seller;
-  const giveUp = () => { if (v2) sh.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; sh.stage = null; sh.deal = null; a.route = null; sh.checkT = 0.5; return false; };
+  const giveUp = () => { if (v2) sh.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; sh.stage = null; sh.deal = null; a.route = null; sh.checkT = 0.5; if (BF.villageSim) BF.villageSim.done(m); return false; };
   if (!v2 || !canSell(v2)) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   a.mode = "idle"; a.t = 2;
@@ -180,6 +182,7 @@ function ai(m, dt, out) {
   if (sh.tt <= 0) {
     const done = doDeal(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
+    if (BF.villageSim) BF.villageSim.done(m);
     if (!done) sh.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05;
   }
   return true;

@@ -195,11 +195,13 @@ function extendDown(c, newLo) {
   const oldY0 = c.y0;
   c.secs = add.concat(c.secs);
   if (c.light) c.light = new Array(n).concat(c.light);
+  if (c.sky) c.sky = new Array(n).fill(0).concat(c.sky);
   c.lo = newLo; c.y0 = newLo * 16;
   const e = world.edits.get(c.key);       // edits are applied when the chunk is created; deeper ones are only possible if the band was shorter then
   if (e) for (const [i, id] of e) { const y = (i >> 8) + BF.MIN_Y; if (y >= c.y0 && y < oldY0) secSet(c, i & 15, y, (i >> 4) & 15, id); }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) if (c.top[z * CS + x] < oldY0) updateColumn(c, x, z);
   if (BF.light && c.light !== undefined) BF.light.onExtended(c, oldY0);
+  if (BF.skyLight) BF.skyLight.onExtended(c);   // a shaft may reach the new sections: recompute (js/skylight.js)
   markNeighboursDirty(c);
   if (c.mesh !== undefined) world._dirty.add(c.key);
 }
@@ -209,7 +211,9 @@ function extendUp(c, newHi) {
   if (newHi <= c.hi) return;
   for (let i = c.hi; i < newHi; i++) c.secs.push(0);
   if (c.light) for (let i = c.hi; i < newHi; i++) c.light.push(undefined);
+  const oldHi = c.hi;
   c.hi = newHi; c.y1 = newHi * 16;
+  if (BF.skyLight) BF.skyLight.onExtendedUp(c, oldHi);
 }
 function markNeighboursDirty(c) {
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
@@ -245,12 +249,16 @@ world.setBlock = function (x, y, z, id) {
   world._dirty.add(c.key);
   scheduleFluid(x, y, z, true);
   if (BF.light) { BF.light.onSet(x, y, z, oldId, id); BF.light.popUnsupported(x, y, z, id); } // block light + torches losing support
+  if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);   // sky light (js/skylight.js)
   if (BF.mobs && BF.mobs.onSet) BF.mobs.onSet(x, y, z, oldId, id); // monster spawn wait restarts where it got darker (js/mobs.js)
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
   if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
   if (BF.isFurnace(oldId) && !BF.isFurnace(id) && BF.inventory && BF.inventory.furnaceRemoved) BF.inventory.furnaceRemoved(x, y, z); // a furnace stops and spills (js/inventory.js)
-  if (BF.blocks[id] && BF.blocks[id].growsInto) growing.add(fkey(x, y, z));
+  if (BF.baker && BF.baker.isOven(oldId) && !BF.baker.isOven(id)) BF.baker.ovenRemoved(x, y, z); // a baker's oven spills (js/baker.js)
+  if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) growing.add(fkey(x, y, z));
+  if (y > BF.MIN_Y) { const bl = BF.blocks[cblock(c, lx, y - 1, lz)]; if (bl && bl.growsUp && id !== bl.id) growing.add(fkey(x, y - 1, z)); }   // cane cut back: the top left grows again
   if (BF.farmland) BF.farmland.onSet(x, y, z, oldId, id);   // farmland hydration clock (js/farmland.js)
+  if (BF.bees) BF.bees.onSet(x, y, z, oldId, id);   // bee homes placed and broken, flowers planted and picked (js/bees.js)
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {
     const above = cblock(c, lx, y + 1, lz);
@@ -324,7 +332,7 @@ world.heightAt = function (x, z) {
 };
 
 function updateColumn(c, lx, lz) {
-  // light-blocking top (opaque blocks and leaves) for the simple sky-shade model
+  // light-blocking top (opaque blocks and leaves): rain and snow stop here (js/weather.js); sky light is js/skylight.js
   let y = c.y1 - 1;
   for (; y >= c.y0; y--) { const b = cblock(c, lx, y, lz); if (BF.OPAQUE[b] || BF.RENDER[b] === 2 || BF.LIGHTBLOCK[b]) break; }
   c.top[lz * CS + lx] = y;
@@ -338,7 +346,7 @@ function createChunk(cx, cz) {
   if (g.generateBand) { const r = g.generateBand(cx, cz); lo = r.lo; hi = r.hi; data = r.vox; }
   else { hi = BF.H >> 4; lo = 0; data = new Uint16Array(CS * CS * BF.H); g.generate(cx, cz, data); }
   const key = ckey(cx, cz);
-  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), mesh: undefined, meshes: [], light: undefined };
+  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), mesh: undefined, meshes: [], light: undefined, sky: undefined };
   const e = world.edits.get(key);
   if (e) {
     // the band must cover every edited cell (builds above it, tunnels below it)
@@ -351,7 +359,8 @@ function createChunk(cx, cz) {
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) updateColumn(c, x, z);
   world.chunks.set(key, c);
   if (BF.light) BF.light.onChunkCreated(c);
-  if (e) for (const [i, id] of e) if (BF.blocks[id] && BF.blocks[id].growsInto) {
+  if (BF.skyLight) BF.skyLight.onChunkCreated(c);   // sky light spreading (js/skylight.js)
+  if (e) for (const [i, id] of e) if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) {
     growing.add(fkey(cx * CS + (i & 15), (i >> 8) + BF.MIN_Y, cz * CS + ((i >> 4) & 15)));
   }
   for (const fn of world._loadL) { try { fn(cx, cz, c); } catch (err) { console.error(err); } }
@@ -576,12 +585,6 @@ function buildMesh(c) {
     const s = ch.secs[(y >> 4) - ch.lo];
     return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)];
   };
-  const topAt = (x, z) => {
-    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
-    const ch = nb[iz * 3 + ix];
-    if (!ch) return -1;
-    return ch.top[(z - (iz - 1) * CS) * CS + (x - (ix - 1) * CS)];
-  };
   const occ = (x, y, z) => BF.OPAQUE[get(x, y, z)];
   // block light (0..15) from the neighbourhood's chunk.light arrays (0 where unloaded)
   const lget = (x, y, z) => {
@@ -656,10 +659,24 @@ function buildMesh(c) {
   const p = [0, 0, 0], p1 = [0, 0, 0], p2 = [0, 0, 0], p3 = [0, 0, 0];
   const lowUV = [[0, 0], [0, 0], [0, 0], [0, 0]], aoVals = [0, 0, 0, 0], vh = [0, 0, 0, 0];
 
-  const skyAt = (ax, ay, az) => {
-    const top = topAt(ax, az);
-    return ay > top ? 1 : Math.max(0.3, 0.92 - (top - ay) * 0.06);
+  // sky light (js/skylight.js): level 0..15 of a cell (15 where unloaded or above a band), brightness through BRIGHT
+  const SKB = BF.skyLight.BRIGHT, SATT = BF.skyLight.ATT;
+  const sgetN = (x, y, z) => {
+    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
+    const ch = nb[iz * 3 + ix];
+    if (!ch || !ch.sky || y >= ch.y1) return 15;
+    if (y < ch.y0) return 0;
+    const s = ch.sky[(y >> 4) - ch.lo];
+    return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)];
   };
+  // brightness of a cell; a cell that stops sky light (a slab, a stair, a solid block) takes its best neighbour
+  const skyAt = (x, y, z) => {
+    if (SATT[get(x, y, z)] !== 255) return SKB[sgetN(x, y, z)];
+    let v = 0;
+    for (let d = 0; d < 6; d++) { const n = sgetN(x + (d === 0) - (d === 1), y + (d === 2) - (d === 3), z + (d === 4) - (d === 5)); if (n > v) v = n; }
+    return SKB[v];
+  };
+  const skv = [0, 0, 0, 0];
 
   // Emits one quad. corners: 4 [x,y,z] local; uvs: 4 [u,v] in 0..1 of rect; shade per vertex; tintKind
   function quad(T, rect, cs, uvs, shades, sky, tintKind, flip, lx, lz) {
@@ -673,7 +690,7 @@ function buildMesh(c) {
         tintAtCorner(Math.max(0, Math.min(CS, Math.round(q[0]))), Math.max(0, Math.min(CS, Math.round(q[2]))), tintKind, tc);
         T.col.push(l * tc[0], l * tc[1], l * tc[2]);
       } else T.col.push(l, l, l);
-      T.sky.push(sky);
+      T.sky.push(sky < 0 ? skv[k] : sky);   // sky < 0: per-vertex (smooth) values in skv
       T.bl.push(blv[k]);
     }
     if (flip) T.ind.push(v0 + 1, v0 + 2, v0 + 3, v0 + 1, v0 + 3, v0);
@@ -797,6 +814,7 @@ function buildMesh(c) {
       }
 
       // solid / cutout cube face with ambient occlusion (paths and farmland sit 1/16 lower)
+      const fs = sky;
       const lowTop = (b === B_PATH || b === B_FARM || b === B_FARM_DRY) && !BF.SOLID[get(x, y + 1, z)];
       const ua = sideAxes[f][0], va = sideAxes[f][1];
       for (let k = 0; k < 4; k++) {
@@ -817,6 +835,12 @@ function buildMesh(c) {
         if (!o2) { ls += lget(p2[0], p2[1], p2[2]); ln++; }
         if (!o3 && !(o1 && o2)) { ls += lget(p3[0], p3[1], p3[2]); ln++; }
         blv[k] = ls / ln / 15;
+        // smooth sky light the same way (cells that stop sky light, like slabs, are left out)
+        let ss = fs, sn = 1;
+        if (!o1 && SATT[get(p1[0], p1[1], p1[2])] !== 255) { ss += SKB[sgetN(p1[0], p1[1], p1[2])]; sn++; }
+        if (!o2 && SATT[get(p2[0], p2[1], p2[2])] !== 255) { ss += SKB[sgetN(p2[0], p2[1], p2[2])]; sn++; }
+        if (!o3 && !(o1 && o2) && SATT[get(p3[0], p3[1], p3[2])] !== 255) { ss += SKB[sgetN(p3[0], p3[1], p3[2])]; sn++; }
+        skv[k] = ss / sn;
       }
       // a lowered block's sides crop the tile's top 1/16 (as vanilla does) instead of squeezing it, or the tile's top row shows as a strip
       if (lowTop && F.kind === "side") {
@@ -827,12 +851,12 @@ function buildMesh(c) {
       const tk = faceTint[b * 6 + f];
       if (tk === 4) {
         // grass side: plain dirt, then a tinted fringe overlay pushed out slightly
-        quad(S, world._dirtUV, cs4, uvs, sh4, sky, 0, flip);
+        quad(S, world._dirtUV, cs4, uvs, sh4, -1, 0, flip);
         const e = 0.002;
         for (let k = 0; k < 4; k++) { cs4[k][0] += F.n[0] * e; cs4[k][1] += F.n[1] * e; cs4[k][2] += F.n[2] * e; }
-        quad(S, world._overlayUV, cs4, uvs, sh4, sky, 1, flip);
+        quad(S, world._overlayUV, cs4, uvs, sh4, -1, 1, flip);
       } else {
-        quad(BF.blocks[b].translucent ? L : S, rect, cs4, uvs, sh4, sky, tk, flip); // stained glass: blended pass
+        quad(BF.blocks[b].translucent ? L : S, rect, cs4, uvs, sh4, -1, tk, flip); // stained glass: blended pass
       }
     }
   }
@@ -954,13 +978,29 @@ function growTick() {
     const [x, y, z] = k.split(",").map(Number);
     if (!world.isLoaded(x, z)) continue; // keeps waiting until its chunk is back
     const id = world.getBlock(x, y, z), b = BF.blocks[id];
+    if (b && b.growsUp) { if (caneTick(x, y, z, id, b, dt)) growing.delete(k); continue; }
     if (!b || !b.growsInto) { growing.delete(k); continue; }
     const soil = world.getBlock(x, y - 1, z);
     if (soil !== BF.B.farmland && soil !== BF.B.farmland_dry) continue;
     const f = soil === BF.B.farmland_dry ? (BF.farmland ? BF.farmland.growFactor(soil) : 1 / 3) : 1;
-    // crops grow 1.5x faster while it rains (js/weather.js)
-    if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
+    // crops grow 1.5x faster while it rains (js/weather.js), 1.25x by day near a home with bees (js/bees.js)
+    if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1) * (BF.bees ? BF.bees.cropFactor(x, y, z) : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
   }
+}
+// Sugar cane (blocks with growsUp: their tallest height) grows a block on top, at the crop rate, while the column is shorter than that and its
+// bottom stands on dirt, grass or sand beside water (vanilla). Only cane someone placed or cut back is tracked (an edit), so wild cane stays as
+// generated until it is cut. Returns true when the cell is done (not the top, full height, or no water).
+function caneTick(x, y, z, id, b, dt) {
+  const up = world.getBlock(x, y + 1, z);
+  if (up !== 0) return true;
+  let h = 1, by = y - 1;
+  while (by > BF.MIN_Y && world.getBlock(x, by, z) === id) { h++; by--; }
+  if (h >= b.growsUp) return true;
+  const g = BF.blocks[world.getBlock(x, by, z)], gn = g ? g.name : "";
+  if (!/^(grass|dirt|coarse_dirt|podzol|sand|red_sand|snow_grass)$/.test(gn)) return true;
+  if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[world.getBlock(x + dx, by, z + dz)])) return true;
+  if (Math.random() < GROW_CHANCE_PER_S * dt * (BF.weather && BF.weather.raining ? 1.5 : 1)) { world.setBlock(x, y + 1, z, id); return true; }
+  return false;
 }
 world.growingCount = () => growing.size;
 // Fluid spread and crop growth run on the simulation clock (BF.simNow), once per sim step, so fast-forward (js/timewarp.js) speeds them up too.
@@ -1075,6 +1115,8 @@ world.boxCollides = (px, py, pz, hw, h) => boxHit(px, py, pz, hw, h);
 // Moves an entity box through the world with per-axis collision.
 // pos: {x,y,z} feet centre (mutated). vel: {x,y,z} (mutated: blocked axes zeroed).
 // opts.stepUp: max auto-step height in blocks (1.05 climbs one-block ledges; 0 disables).
+// opts.swim: the box is swimming (it was in water last step): it steps up onto a ledge too, as off the ground, so a mob swimming in a
+// channel or a pond flush with the land climbs out onto the bank (only a bank no higher than stepUp above its feet).
 // Returns {onGround, hitX, hitZ, hitCeil, inWater}.
 world.moveBox = function (pos, vel, hw, h, dt, opts) {
   const stepUp = (opts && opts.stepUp) || 0;
@@ -1109,7 +1151,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
     const save = { x: pos.x, y: pos.y, z: pos.z };
     if (moveAxis(axis, d)) {
       // auto step-up onto a ledge
-      if (stepUp && wasGround) {
+      if (stepUp && (wasGround || (opts && opts.swim))) {
         const lift = { x: save.x, y: save.y, z: save.z };
         lift.y = top > save.y ? top : Math.floor(save.y + 1e-3) + 1; // top of the block we bumped into
         if (lift.y - save.y <= stepUp && !world.boxCollides(lift.x, lift.y, lift.z, hw, h)) {

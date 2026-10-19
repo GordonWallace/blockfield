@@ -62,6 +62,7 @@ function log(rec, kind, text, where) {
   if (a.length > CAP) a.splice(0, a.length - CAP);
   if (BF.happiness) BF.happiness.note(rec.key, kind);   // its weekly counts outlive the capped log (js/happiness.js)
   if (BF.alerts) BF.alerts.check(rec, e);
+  if (BF.glog) BF.glog.village(rec, e);   // the game log keeps every entry, not just the newest CAP (js/gamelog.js)
 }
 const stacks = list => (list || []).map(b => b.n + " " + BF.itemName(b.id)).join(" + ");
 const who = m => nameOf(m) + " (" + pretty(m.profession) + ")";
@@ -69,6 +70,8 @@ const recOf = m => m && m.village;
 
 // buyer/seller: villager mobs, or buyer === "player". what: an offer {buy, sell} (times = repeats) or a ready-made string.
 function trade(buyer, seller, what, times) {
+  if (BF.econ) BF.econ.trade(buyer, seller, what, times);   // the Economy view's tallies (js/economy.js)
+  if (BF.prices && what && typeof what === "object") for (const m of [seller, buyer]) BF.prices.filled(m, what, times);   // eases its price at the next tick (js/prices.js)
   const rec = recOf(seller) || recOf(buyer);
   if (!rec) return;
   let text;
@@ -77,16 +80,20 @@ function trade(buyer, seller, what, times) {
     const n = times || 1;
     text = "gave " + stacks(what.buy.map(b => ({ id: b.id, n: b.n * n }))) + ", got " + stacks([{ id: what.sell.id, n: what.sell.n * n }]);
   }
-  const a = buyer === "player" ? "Player" : who(buyer);
-  log(rec, "trade", a + " traded with " + who(seller) + ": " + text, seller && seller.position ? seller : buyer && buyer.position ? buyer : null);
+  const a = buyer === "player" ? "Player" : who(buyer), line = a + " traded with " + who(seller) + ": " + text;
+  log(rec, "trade", line, seller && seller.position ? seller : buyer && buyer.position ? buyer : null);
+  if (BF.dayTimeline) for (const m of [buyer, seller]) if (m && m !== "player") BF.dayTimeline.event(m, "trade", line);   // the villager's day (js/daytimeline.js)
 }
 function bed(m, x, y, z, what) {
   const rec = (m && m.village) || villageAt(x, z);
   if (rec) log(rec, "bed", (m ? who(m) : "Player") + " placed a " + (what || "bed") + " at " + x + ", " + y + ", " + z, [x, y, z]);
+  if (m && BF.dayTimeline) BF.dayTimeline.event(m, "bed", "Placed a " + (what || "bed") + " at " + x + ", " + y + ", " + z, [x, y, z]);
 }
 function profession(m, from, to) {
   if (!m || !m.village || !to || to === "unemployed" || to === "nitwit" || to === "child") return;
-  log(m.village, "job", nameOf(m) + " became a " + pretty(to) + (from && from !== "unemployed" ? " (was " + pretty(from) + ")" : ""), m);
+  const text = nameOf(m) + " became a " + pretty(to) + (from && from !== "unemployed" ? " (was " + pretty(from) + ")" : "");
+  log(m.village, "job", text, m);
+  if (BF.dayTimeline) BF.dayTimeline.event(m, "job", text);
 }
 
 // ---------------------------------------------------------------- where is a point / the player
@@ -212,6 +219,8 @@ BF.vlog = {
   },
   update(dt, on) {
     hook();
+    if (BF.vstats) BF.vstats.update();
+    if (BF.econ) BF.econ.update();
     updateLabels(on);
     if (!panelEl) panelEl = document.getElementById("vlog");
     if (!on) { if (panelEl) panelEl.hidden = true; panelT = 0; return; }

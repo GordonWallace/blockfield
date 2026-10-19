@@ -39,6 +39,8 @@ module.exports = async (pg, out) => {
     res.hasTent = T.inv.count(A.inv, I.tent);
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
     T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2);   // lost its tent: collects a spare at home by day
+    { const h0 = A.bed || A.village, hx = Math.floor(h0.x) + 4, hz = Math.floor(h0.z); A.position.set(hx + 0.5, BF.world.heightAt(hx, hz) + 1, hz + 0.5);   // at home: villagers load scattered up to 40 blocks from their bed, and the spare is only handed over within 30
+    }
     { const p0 = A.position.clone(), h = A.bed || A.village; res.spareFrom = Math.round(Math.hypot(h.x + 0.5 - p0.x, h.z + 0.5 - p0.z));
       for (let i = 0; i < 600; i++) {   // held where it stands until it has the spare (left to roam it can walk out mapping past the 30 blocks one is handed over in)
         BF.mobs.update(0.1);

@@ -10,6 +10,8 @@ Generated against `js/trading.js` (value table `BF.trades.VALUE`, tables `BF.tra
   - player **sells goods for emeralds**: rho 0.72 to 0.93 (villager keeps 7 to 28%; typically ~0.9)
   - player **buys wares** (emeralds, optionally plus a trade-in): rho 0.78 to 1.15 (typically ~0.85 to 1.05; bulk cheap goods may be slightly favourable because whole emeralds are coarse)
   - all offers stay inside +-30%; no round trip is profitable: for every item, the best price any villager pays per unit is below the lowest price any villager charges (checked by script, 0 loops).
+  - since 1.3 every villager also sells its **spare goods** (anything above what it keeps for its next moves, js/market.js) at the cheapest base price any villager's table charges for the item, or VALUE + 5% when none does, and buys what it **needs** right now at VALUE x 0.88. The furniture maker sells a chest for 1 emerald (what villagers pay to have one put in their house). There are no fair-price deals between villagers any more: every trade is an offer the player can take too.
+  - these are **base** prices. Since 1.3 prices follow demand (js/prices.js): a buy offer nobody fills rises up to x2 over 30 game days, a sell offer stuck at its stock cap falls to x0.5, and each filled trade moves it 3 steps (of 2^(1/30)) back. A villager never buys an item above its own sell price for it, never sells below its own buy price, and never buys above the cheapest base price any villager charges. Buying marked-down goods from one villager and selling them to another whose offer has risen can now pay: that is the point (shortages pull goods in), and it is bounded by the seller's stock and the buyer's emerald purse.
 - **Stock.** Each villager only holds what its table sells; per-ware cap = offer size x [6,5,4,3,2] by offer level, at most 2 stacks (gear 1-2 pieces) and at most 6 emeralds worth of any single ware. Start quantity is 50 to 100% of cap, plus the goods it buys occasionally (40% chance, small counts) and 6 to 24 emeralds.
 - **Daily restock** (once per in-game day, skipped while the trade screen is open): only wares in the profession's `PRODUCE` list rise, by 25% of cap (min 1) per day up to the cap (a gap of several days counts up to 4); emeralds +2 per day up to 12. Diamonds, gold, bells, lanterns, mob drops etc. never regenerate; they return only if the player sells them to that villager.
 
@@ -135,6 +137,26 @@ Dropped (not replaced) because no equivalent exists: iron/diamond armor (iron_he
 | raw_cod | 0.07 | No fishing in the game: trade-only; priced like other raw meat |
 | cooked_cod | 0.1 | Raw + furnace |
 
+### Milk and bottles (js/cowherd.js)
+
+| Item | Value | Basis |
+|---|---:|---|
+| glass_bottle | 0.1 | 3 glass in a V -> 3 bottles (1 glass, 0.08, + work); in villages only from the cowherd's hire kit until villagers make glass |
+| milk_bottle | 0.15 | A glass bottle + a third of a milking; food 2 (0.4 bread-eq) |
+| milk_bucket | 1.75 | A bucket (1.6) + milk; food 6; not traded (the cowherd bottles it) |
+| milk_churn | 0.62 | 4 planks + 1 iron ingot (the cowherd's jobsite) |
+
+### Baking (js/baker.js)
+
+| Item | Value | Basis |
+|---|---:|---|
+| sugar | 0.05 | 1 sugar cane (0.04) + work |
+| pumpkin_seeds | 0.035 | A quarter of a pumpkin (0.14) |
+| pumpkin_pie | 0.3 | Pumpkin 0.14 + sugar 0.05 + egg 0.055 + baking; food 8 (1.6 bread-eq) |
+| cake | 1.0 | 3 milk (0.45, of which the bottles 0.3 come back) + 2 sugar 0.1 + egg 0.055 + 3 wheat 0.21 + fuel and work |
+| cake_slice | 0.14 | A seventh of a cake; food 2 (0.4 bread-eq) |
+| bakers_oven | 0.75 | 8 cobblestone (0.24) + 1 iron ingot (0.5) (the baker's jobsite) |
+
 ### Paper goods
 
 | Item | Value | Basis |
@@ -245,6 +267,8 @@ Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple a
 | 5 | 6 emerald + 1 iron_sword > 1 diamond_sword | 7.07 | 7.05 | 1.00 | buy from villager |
 | 5 | 1 diamond_sword > 6 emerald | 7.05 | 6.00 | 0.85 | sell to villager |
 
+`PRODUCE.weaponsmith` was `iron_sword` and is now empty (board bug-032: iron swords were restocked from nothing); it sells only the swords it holds.
+
 ### toolsmith
 
 | Lvl | Offer | In | Out | rho | Kind |
@@ -278,6 +302,9 @@ Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple a
 | 4 | 8 leather > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
 | 5 | 2 emerald > 18 steak | 2.00 | 2.16 | 1.08 | buy from villager |
 
+- **Pork from the pig farmer (1.3).** The butcher's table is unchanged; it now also buys raw porkchops from the pig farmer's `1 emerald > 12 raw_porkchop` while it holds fewer than 9
+  porkchops (raw or cooked), as it buys raw chicken from the poultry keeper, and cooks them as before.
+
 ### fisherman
 
 | Lvl | Offer | In | Out | rho | Kind |
@@ -299,6 +326,7 @@ Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple a
 | 1 | 11 wool > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
 | 1 | 1 emerald > 8 white_wool | 1.00 | 0.96 | 0.96 | buy from villager |
 | 1 | 11 string > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
+| 1 | 1 emerald > 9 string | 1.00 | 0.90 | 0.90 | buy from villager |
 | 2 | 10 white_wool > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
 | 2 | 1 emerald > 2 red_bed | 1.00 | 0.84 | 0.84 | buy from villager |
 | 3 | 1 emerald > 9 wool | 1.00 | 0.90 | 0.90 | buy from villager |
@@ -311,15 +339,24 @@ Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple a
 | Lvl | Offer | In | Out | rho | Kind |
 |---:|---|---:|---:|---:|---|
 | 1 | 54 stick > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
-| 1 | 1 emerald > 22 arrow | 1.00 | 0.88 | 0.88 | buy from villager |
-| 1 | 18 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
-| 2 | 16 feather > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+| 1 | 9 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
+| 1 | 16 feather > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+| 1 | 1 emerald > 16 arrow | 1.00 | 0.88 | 0.88 | buy from villager |
+| 1 | 1 emerald > 1 bow | 1.00 | 0.42 | 0.42 | buy from villager |
 | 2 | 11 string > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
-| 3 | 1 emerald > 15 flint | 1.00 | 0.90 | 0.90 | buy from villager |
-| 3 | 1 emerald > 13 feather | 1.00 | 0.91 | 0.91 | buy from villager |
-| 4 | 1 emerald > 9 string | 1.00 | 0.90 | 0.90 | buy from villager |
-| 4 | 2 emerald > 44 arrow | 2.00 | 1.76 | 0.88 | buy from villager |
-| 5 | 3 emerald > 64 arrow | 3.00 | 2.56 | 0.85 | buy from villager |
+| 3 | 2 emerald > 32 arrow | 2.00 | 1.76 | 0.88 | buy from villager |
+| 4 | 40 planks > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+
+The fletcher makes the arrows and bows it sells (js/fletcher.js, CONTRACT.md "Fletchers") from flint, sticks or planks, feathers and string it buys
+from the player or from villagers (the miner's `1 emerald > 8 flint`, the forester's sticks and planks, the poultry keeper's `1 emerald > 13 feather`,
+the shepherd's `1 emerald > 9 string`). `PRODUCE.fletcher` was `arrow` and is now empty, and a generated fletcher starts with no arrows or bows (8 sticks,
+4 flint, 4 feathers instead). Both wares are offered from level 1, the stock is the limit (it makes arrows up to 48, bows up to 2). It no longer sells
+flint, feathers or string. Prices are above its cost at village prices: 4 arrows = 1 flint (0.125) + 1 stick (0.021) + 1 feather (0.077) = 0.22,
+so 16 arrows cost ~0.89; a bow = 3 sticks + 3 string (0.33) = ~0.4, sold for 1 emerald (the toolsmith's minimum for a tool).
+No round trip: what it pays the player per unit stays below what any villager charges (flint 0.111 < 0.125 miner, feathers 0.0625 < 0.077 poultry
+keeper, string 0.091 < 0.111 shepherd, sticks 0.019 < 0.021 and planks 0.025 < 0.033 forester).
+The miner keeps the flint its gravel drops (10%, js/miner.js), and while the fletcher is short it keeps gravel and sifts it into flint 1:1 (as a player re-places and breaks gravel), so flint's `VALUE` is .12 (was .06) and it sells it at `1 emerald > 8 flint` (104% of `VALUE`); the shepherd spins its
+own wool into string (1 wool -> 2 string, js/shepherd.js) and sells it at `1 emerald > 9 string` (111%); neither is restocked or in a starting pack.
 
 ### mason
 
@@ -344,17 +381,86 @@ Since 1.1 (Gordon) farmers sell only crops and food baked from them: the apple a
 
 ### leatherworker
 
+`PRODUCE.leatherworker` was `leather` and is now empty (1.3): leather comes only from cows. A leatherworker holding fewer than 12 leather buys
+it through any villager's leather offer (the cowherd's `1 emerald > 7 leather`, or spare leather at the cheapest table price; js/villagelife.js `shopAI`, like the shepherd's wheat).
+Its starting stock is unchanged.
+
 | Lvl | Offer | In | Out | rho | Kind |
 |---:|---|---:|---:|---:|---|
 | 1 | 8 leather > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
 | 1 | 14 raw_beef > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
-| 1 | 18 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
+| 1 | 9 flint > 1 emerald | 1.08 | 1.00 | 0.93 | sell to villager |
 | 2 | 1 emerald > 6 leather | 1.00 | 0.90 | 0.90 | buy from villager |
 | 2 | 11 string > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
 | 3 | 2 emerald > 5 book | 2.00 | 1.75 | 0.88 | buy from villager |
 | 3 | 22 rotten_flesh > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
 | 4 | 2 emerald > 12 leather | 2.00 | 1.80 | 0.90 | buy from villager |
 | 5 | 3 emerald > 18 leather | 3.00 | 2.70 | 0.90 | buy from villager |
+
+### cowherd
+
+New profession (see CONTRACT.md "Cowherds"). It sells what its herd gives and buys its feed and its empty bottles back. Nothing is restocked
+(`PRODUCE.cowherd = []`) and none of its wares are in its starting pack: milk bottles come from milking (1 milk bucket + 3 glass bottles ->
+3 milk bottles), raw beef and leather from the cows it culls, steak from beef it cooks in a real furnace. Its hire kit (1 bucket, 30 glass bottles)
+is the only way bottles enter a village.
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 1 emerald > 7 milk_bottle | 1.00 | 1.05 | 1.05 | buy from villager |
+| 1 | 1 emerald > 12 raw_beef | 1.00 | 0.96 | 0.96 | buy from villager |
+| 1 | 1 emerald > 7 leather | 1.00 | 1.05 | 1.05 | buy from villager |
+| 1 | 16 wheat_item > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+| 1 | 12 glass_bottle > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 2 | 1 emerald > 8 steak | 1.00 | 0.96 | 0.96 | buy from villager |
+| 3 | 2 emerald > 16 steak | 2.00 | 1.92 | 0.96 | buy from villager |
+
+- **Empty bottles.** Every villager but the cowherd holding empty bottles (left from milk it drank) offers them as spare goods (js/market.js): `1 emerald > 10 glass_bottle`
+  (VALUE x 1.05), or a small lot of 3-9 for 1 emerald (`LOT_MIN.glass_bottle`: the empties are spread thin). The cowherd buys them back through those offers while it holds fewer
+  than 9; it keeps every bottle it holds (its reserve).
+- **Milk as food.** Hungry villagers buy milk bottles only when no other food is for sale in the village, through an offer for them (the cowherd's `1 emerald > 7 milk_bottle`
+  or spare milk at the same price); the cowherd keeps 3 bottles back.
+- **No round trip.** Leather 0.125 (butcher, leatherworker pay) < 0.143 (cowherd charges); raw beef 0.071 < 0.083; steak 0.106 (feed offers) < 0.125;
+  glass bottles 0.083 (cowherd pays) < 0.111 (villagers charge). It never sells its last bucket.
+
+### baker
+
+New profession (see CONTRACT.md "Bakers"). It sells what it bakes in its oven from ingredients it bought in the village; nothing is restocked
+(`PRODUCE.baker = []`) and none of its wares are in its starting pack. Its ingredients are its reserve (never sold); its empty bottles are spare goods.
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 1 emerald > 7 cake_slice | 1.00 | 0.98 | 0.98 | buy from villager |
+| 1 | 1 emerald > 3 pumpkin_pie | 1.00 | 0.90 | 0.90 | buy from villager |
+| 1 | 20 egg > 1 emerald | 1.10 | 1.00 | 0.91 | sell to villager |
+| 1 | 16 wheat_item > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+| 2 | 1 emerald > 1 cake | 1.00 | 1.00 | 1.00 | buy from villager |
+| 2 | 8 pumpkin > 1 emerald | 1.12 | 1.00 | 0.89 | sell to villager |
+
+- **Treats.** Villagers buy a slice offer or a pie offer at most every 3 days (2 emeralds in hand, none held); hunger buys bread first. A slice costs 0.143 an item
+  (0.36 an emerald per bread-eq), a pie 0.333 (0.21 per bread-eq), bread 0.25: pies are the cheaper food per bread-eq but are eaten as treats (one a day at most).
+- **Ingredients** are bought at the sellers' own offers: milk bottles at the cowherd's `1 emerald > 7 milk_bottle`, eggs at the poultry keeper's, wheat, cane and
+  pumpkins as farmers' spare goods (cane 24 for 1 emerald, VALUE x 1.05, small lots from 12; pumpkins 7 for 1, small lots from 4).
+- **No round trip.** Eggs 0.05 (baker pays) < 0.055+ (sellers charge); wheat 0.0625 < 0.071; pumpkins 0.125 < 0.147; a cake's ingredients (about 0.9 at sellers' prices, less 0.25
+  for the 3 empties sold back) stay under the 1.0 of 7 slices or a whole cake.
+
+### pig_farmer
+
+New profession (see CONTRACT.md "Pig farmers"). It sells what its sty gives: raw porkchops from the pigs it culls and porkchops it cooks from them in a real furnace with
+fuel it bought. Nothing is restocked (`PRODUCE.pig_farmer = []`) and no pork is in its starting pack (a generated one starts with a few carrots and potatoes and emeralds;
+one hired later with an emerald for its first feed). It buys its feed (carrots, potatoes, beetroot) through the farmers' offers and keeps all of it (its reserve), as it keeps up to 16 of the fuel it bought to cook pork; it never sells pigs.
+
+| Lvl | Offer | In | Out | rho | Kind |
+|---:|---|---:|---:|---:|---|
+| 1 | 1 emerald > 12 raw_porkchop | 1.00 | 0.96 | 0.96 | buy from villager |
+| 1 | 1 emerald > 8 cooked_porkchop | 1.00 | 0.96 | 0.96 | buy from villager |
+| 1 | 20 carrot > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 1 | 20 potato > 1 emerald | 1.20 | 1.00 | 0.83 | sell to villager |
+| 2 | 2 emerald > 15 cooked_porkchop | 2.00 | 1.80 | 0.90 | buy from villager |
+| 2 | 17 beetroot > 1 emerald | 1.19 | 1.00 | 0.84 | sell to villager |
+
+- **Its porkchops are wares, not meals** (js/market.js `spareOf` skips the food clamp for them), so its offers sell whatever else it holds to eat; it never eats its feed or raw pork.
+- **No round trip.** Raw porkchops 0.071 (butcher pays) < 0.083 (pig farmer charges); cooked 0.125 (butcher charges) vs 0.125-0.133 (pig farmer); feed 0.05-0.059 (pig farmer pays the player)
+  < 0.0625 (farmers' level 4 offers).
 
 ### cartographer
 

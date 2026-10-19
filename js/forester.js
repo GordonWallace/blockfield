@@ -46,7 +46,7 @@ const SWEEP_R = 12, SWEEP_MAX = 120;   // after felling it stays until no wanted
 const BUILD_AVOID = 8;  // never plants within 8 blocks of a building or other structure (anything not landscape; dirt paths do not count)
 
 const LOG = [];
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, who: "forester" + (m && m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("forester", Object.assign({ kind, who: "forester" + (m && m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 const nowS = () => BF.simNow();
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const W = () => BF.world;
@@ -376,9 +376,13 @@ function findSpot(m, at) {
     return false;
   };
   const near = (x, y, z, list, d2) => { for (const o of list) { const dx = o[0] - x, dy = o[1] - y, dz = o[2] - z; if (dx * dx + dy * dy + dz * dz <= d2) return true; } return false; };
+  // sites the builders are building on (js/builder.js), with the block round them: a sapling there could grow into a tree in a cell before
+  // its block goes in
+  const sites = (BF.builder && BF.builder.builtOf && m.village ? BF.builder.builtOf(m.village) || [] : []).filter(e => e.state === "building");
+  const onSite = (x, z) => sites.some(e => x >= e.ox - 1 && x <= e.ox + e.w && z >= e.oz - 1 && z <= e.oz + e.d);
   const cands = [];
   for (let x = px - SEARCH; x <= px + SEARCH; x++) for (let z = pz - SEARCH; z <= pz + SEARCH; z++) {
-    if (!W().isLoaded(x, z) || !inHome(m, x + 0.5, z + 0.5)) continue;
+    if (!W().isLoaded(x, z) || !inHome(m, x + 0.5, z + 0.5) || onSite(x, z)) continue;
     for (let y = py - PLANT_DY; y <= py + PLANT_DY; y++) {
       if (get(x, y, z) !== 0 || get(x, y - 1, z) === BF.B.farmland || get(x, y - 1, z) === BF.B.farmland_dry || !isSoil(get(x, y - 1, z))) continue;
       let clear = true;
@@ -475,8 +479,19 @@ function travel(m, st, dt, out, tx, ty, tz, speed, radius, dyTol = 2.6) {
   return "going";
 }
 
+// Task estimates (js/villagesim.js): walk there plus the work, in game seconds. false when its village is counting down and the task would not finish.
+const NAMES = { plant: "Planting a sapling", cut: "Felling a tree", buy: "Buying an axe", gather: "Picking things up" };
+function begins(m, task) {
+  const VS = BF.villageSim;
+  if (!VS || !VS.begin) return true;
+  const walk = VS.walkSecs(m, [[task.x + 0.5, task.z + 0.5]]);
+  const work = task.kind === "cut" ? chopSecs(task.tree, axeOf(m)) : task.kind === "plant" ? 1 : task.kind === "buy" ? 1 : 0.5;   // chopping log by log; a swing to plant, trade or pick up
+  return VS.begin(m, walk + work, NAMES[task.kind]);
+}
+
 function endTask(m, F, ok) {
   const t = F.task;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   if (t) {
     if (t.claim) claims.delete(t.claim);
     if (t.kind === "plant") F.plantCd = PLANT_CD;
@@ -544,20 +559,25 @@ function ai(m, dt, out) {
     let task = null;
     if (F.sweep && (nowS() > F.sweep.until || freeSlots(m) === 0)) { log("swept", m, { why: freeSlots(m) ? "time" : "full" }); F.sweep = null; F.skip = null; F.tries = null; }
     const drop = F.gatherCd <= 0 || F.sweep ? findDrop(m, F) : null;
-    if (drop) task = { kind: "gather", drop, x: Math.floor(drop.pos.x), y: Math.floor(drop.pos.y), z: Math.floor(drop.pos.z), max: GATHER_R * 3 };
+    if (drop) { task = { kind: "gather", drop, x: Math.floor(drop.pos.x), y: Math.floor(drop.pos.y), z: Math.floor(drop.pos.z), max: GATHER_R * 3 }; if (!begins(m, task)) task = null; }
     else if (F.sweep && F.young) { F.thinkT = 0.3; a.mode = "idle"; a.t = 1; return true; }       // items still falling: wait for them
     else if (F.sweep) { log("swept", m, { why: "clear" }); F.sweep = null; F.skip = null; F.tries = null; }
     F.shopT -= 1;
     if (!task && !F.sweep && F.shopT <= 0) {
       F.shopT = SHOP_EVERY;
       const deal = findAxeSeller(m, F);
-      if (deal) task = { kind: "buy", deal, x: Math.floor(deal.other.position.x), y: Math.floor(deal.other.position.y), z: Math.floor(deal.other.position.z), max: SHOP_MAX + 2.5 * deal.other.position.distanceTo(m.position) };
+      if (!deal && BF.econ && !m.inv.some(s => s && isAxe(s.id))) BF.econ.want(m, "Axe");   // dead ends (js/economy.js)
+      if (deal) task = { kind: "buy", deal, x: Math.floor(deal.other.position.x), y: Math.floor(deal.other.position.y), z: Math.floor(deal.other.position.z), max: SHOP_MAX + 2.5 * deal.other.position.distanceTo(m.position) }; if (task && !begins(m, task)) task = null;
     }
     if (!task && !F.sweep) {
       const opts = [];
       if (F.plantCd <= 0 && holdsSapling(m)) { let s = findSpot(m); if (!s && boxOf(m)) { const e = edgePoint(m); if (e) s = findSpot(m, e); } if (s) opts.push([W_PLANT, { kind: "plant", x: s.x, y: s.y, z: s.z, max: PLANT_MAX + 2.5 * Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z), claim: pk(s.x, s.y, s.z) }]); else F.plantCd = 5; }
       if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX + 2.5 * Math.hypot(tr.base[0] + 0.5 - m.position.x, tr.base[2] + 0.5 - m.position.z) + 1.25 * chopSecs(tr, axeOf(m)), claim: pk(tr.base[0], tr.base[1], tr.base[2]), done: 0 }]); else F.cutCd = 8; }
-      if (opts.length) { let r = Math.random() * opts.reduce((s, o) => s + o[0], 0); for (const [w, o] of opts) { if ((r -= w) < 0) { task = o; break; } } task = task || opts[0][1]; }
+      if (opts.length) {   // the weighted pick first, then the others; the first whose estimate fits the village's countdown (if any) starts
+        const order = [];
+        while (opts.length) { let r = Math.random() * opts.reduce((s, o) => s + o[0], 0), i = 0; for (; i < opts.length - 1; i++) if ((r -= opts[i][0]) < 0) break; order.push(opts.splice(i, 1)[0][1]); }
+        task = order.find(o => begins(m, o)) || null;
+      }
     }
     if (!task) return false;
     if (F.sweep) F.thinkT = 0.2;

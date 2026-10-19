@@ -7,14 +7,14 @@ const BF = (window.BF = window.BF || {});
 
 const PX = 1 / 16;
 const GRAVITY = 26;
-const PASSIVE_CAP = 16, HOSTILE_CAP = 12;
-const DESPAWN_DIST = 100;
+const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or the view distance) update 4 times a game second (BF.mobs.update)
+const DESPAWN_DIST = 100;   // village stock of a stopped village only: wild mobs and horses are never removed by distance (they wait with their chunk)
+const TRAVELLER_SPEED = 1.5;   // merchants and explorers walk this much faster than other villagers (village loading plan)
 
 let scene = null;
 const list = [];
 const arrows = [];
 const puffs = [];
-let spawnT = 0;
 let baseMat = null, arrowMat = null, fireMat = null, puffMat = null, puffMatDark = null;
 let fireGeo = null, puffGeo = null, arrowGeo = null;
 
@@ -35,17 +35,14 @@ function isNight() {
   if (BF.sky && typeof BF.sky.isNight === "function") return !!BF.sky.isNight();
   return skyLight() < 0.4;
 }
-// Sky exposure at a world position, matching world.js' sky-shade model.
-// Returns {open, factor}: open = no light-blocking block above; factor = darkening under cover.
-const OPEN_SKY = { open: true, factor: 1 };
+// Sky light at a world position (js/skylight.js, the same levels the world is drawn with).
+// Returns {open, level, factor}: level 0..15; open = bright enough to burn the undead (SUN_BURN or more); factor = its brightness.
+const SUN_BURN = 12, CAVE_SKY = 7;
+const OPEN_SKY = { open: true, level: 15, factor: 1 };
 function skyAt(x, y, z) {
-  const w = BF.world, c = w.chunkAt ? w.chunkAt(Math.floor(x), Math.floor(z)) : null;
-  if (!c || !c.top) return OPEN_SKY;
-  const lx = Math.floor(x) - c.cx * BF.CS, lz = Math.floor(z) - c.cz * BF.CS;
-  const top = c.top[lz * BF.CS + lx];
-  const by = Math.floor(y);
-  if (by > top) return OPEN_SKY;
-  return { open: false, factor: Math.max(0.22, 0.92 - (top - by) * 0.07) };
+  if (!BF.skyLight) return OPEN_SKY;
+  const l = BF.skyLight.get(x, y, z);
+  return l === 15 ? OPEN_SKY : { open: l >= SUN_BURN, level: l, factor: BF.skyLight.bright(l) };
 }
 function isWater(id) { return BF.RENDER[id] === 3; }
 
@@ -53,8 +50,8 @@ function isWater(id) { return BF.RENDER[id] === 3; }
 // A monster spawns at a spot only after the spot has been dark enough for DARK_WAIT, half an in-game hour (plus a per-cell extra of up
 // to another half hour, so they trickle in): block light <= 7, and
 // under open sky a sky light <= SPAWN_LIGHT (a little before full night). The sky's light curve is known for any past time, so
-// "dark for half an hour" under open sky is just the light now and half an hour ago: no per-spot tracking. Spots under 5+ blocks
-// of cover (caves, dense forest) count as dark at any time, as before. What the curve can't know is a local change: a light
+// "dark for half an hour" under open sky is just the light now and half an hour ago: no per-spot tracking. Spots whose sky light
+// is CAVE_SKY or less (caves, deep inside dense forest or a windowless building) count as dark at any time. What the curve can't know is a local change: a light
 // source removed, or a block placed that shades the ground (a new roof). Those stamp a coarse cell (CELL x CELL columns, a light
 // source also the cells around it) and nothing spawns in a stamped cell until DARK_WAIT has passed.
 const SPAWN_LIGHT = 0.3, DARK_WAIT = 0.5 / 24, CELL = 8;
@@ -235,11 +232,28 @@ const VILLAGER_OUTFITS = {
   miner:         { robe: 0x4a4c54, trim: 0x2e3036, apron: 0x6b4a2a, sash: 0xd8a83a, pickaxe: true, hat: { kind: "hard", color: 0x3c3e44, color2: 0x2e3036, lamp: true } },
   // furniture maker (not vanilla): sawdust-tan apron over a wine robe, red headband; makes beds for builders from wool and boards (js/furniture.js)
   furniture_maker: { robe: 0x6a2e34, trim: 0x4a1e22, apron: 0xc8a26a, headband: 0xb02a2a, sash: 0xe8e4d8 },
+  // stable hand (not vanilla): saddle-brown work coat, denim apron, rope belt, tan wide-brim hat; catches, breeds and sells horses (js/stables.js).
+  // Never in the roster pool: villages only get one when a builder puts up a stable and a villager takes its tack rack
+  stable_hand:   { robe: 0x7a5232, trim: 0x4a3018, apron: 0x3d5a7a, sash: 0xc9a24a, hat: { kind: "brim", color: 0xb08850, color2: 0x9a7444 } },
+  // merchant (not vanilla): deep blue travelling coat with gold trim, a satchel-brown sash, a tall felt hat; carries goods between villages (js/merchant.js)
+  merchant:      { robe: 0x24346a, trim: 0xc8a040, sash: 0x6b4a2a, hat: { kind: "brim", color: 0x3a2a4a, color2: 0x2a1e36 } },
   nitwit:        { robe: 0x3f8a3a, trim: 0x2e6a2a },
   // builder (15th): orange hi-vis vest with reflective band and straps, brown overalls, yellow hard hat, a hammer in hand
   builder:       { robe: 0xe8741c, trim: 0x6b4a2a, vest: true, sash: 0x4a3220, hammer: true, hat: { kind: "hard", color: 0xf5c518, color2: 0xe3b012 } },
   // no jobsite (js/jobs.js): the plain biome robe of a vanilla unemployed villager; never in the roster pool
   unemployed:    {},
+  // poultry keeper (not vanilla): straw-yellow apron over a russet robe, a brim hat; keeps chickens in a coop (js/poultry.js)
+  poultry_keeper: { robe: 0x8a4a2a, trim: 0x5a2e1a, apron: 0xe6cf7a, sash: 0xd8b84a, hat: { kind: "brim", color: 0xc9a24a, color2: 0xd8b45a } },
+  // cowherd (not vanilla): leather apron over an olive smock, a milk-white belt and a brown brim hat; keeps cows in a pasture (js/cowherd.js)
+  cowherd:       { robe: 0x6a7448, trim: 0x454c2c, apron: 0x8a5530, sash: 0xf0ece0, hat: { kind: "brim", color: 0x5e3a1e, color2: 0x74492a } },
+  // baker (not vanilla): a cream robe, a flour-white apron, a brick-red belt and a tall white cap; bakes cakes and pies in its oven (js/baker.js)
+  baker:         { robe: 0xd8c8a8, trim: 0x9a7a52, apron: 0xf6f4ee, sash: 0xa0523a, hat: { kind: "bucket", color: 0xf8f8f4, color2: 0xe8e6e0 } },
+  // glassmaker (not vanilla): a slate-blue robe, a scorched leather apron and a pale glass-blue belt; digs sand and makes glass at its kiln (js/glassmaker.js)
+  glassmaker:    { robe: 0x4e5e6e, trim: 0x2e3a46, apron: 0x7a5636, sash: 0xa8dcea },
+  // beekeeper (not vanilla): a pale smock, a honey-gold apron and belt and a wide brim hat; keeps hives and makes candles (js/beekeeper.js)
+  beekeeper:     { robe: 0xe8e2cc, trim: 0xb8ae90, apron: 0xd89a2a, sash: 0x8a5a1a, hat: { kind: "brim", color: 0xf0ead6, color2: 0xd8d0b8 } },
+  // pig farmer (not vanilla): a muddy brown smock, a pink-stained apron, a straw belt and a straw hat; keeps pigs in a sty (js/pigfarmer.js)
+  pig_farmer:    { robe: 0x7a5a3e, trim: 0x4a3420, apron: 0xc89088, sash: 0xd8c070, hat: { kind: "brim", color: 0xc8a850, color2: 0xa88a3a } },
 };
 const PROFESSIONS = Object.keys(VILLAGER_OUTFITS);
 const PROF_ALIAS = { smith: "toolsmith" };
@@ -492,6 +506,46 @@ const MODELS = {
       { name: "legR", pivot: [4, 16, 0], swing: -1, boxes: [cbox([-3, -16, -2.5], [3, 0, 2.5], metal)] },
     ];
   },
+  // Horse (js/horses.js): variant "<coat>/<marking>", 7 vanilla coats x 5 markings. The saddle part is always there and shown only on a saddled horse.
+  horse(variant) {
+    const [coatName, mark] = String(variant || "brown/none").split("/");
+    const COATS = { white: 0xe6e1d6, creamy: 0xc8a06a, chestnut: 0xa25e2c, brown: 0x6e4628, black: 0x2a2420, gray: 0x7e7873, dark_brown: 0x40291a };
+    const coat = COATS[coatName] != null ? COATS[coatName] : COATS.brown;
+    const dk = new THREE.Color(coat).multiplyScalar(0.55).getHex(), mane = coatName === "white" || coatName === "creamy" ? 0x8a7a64 : 0x1e1814;
+    const WHITE = 0xf2efe8, BLACK = 0x221c18;
+    const spot = (u, v, s, k) => hash(u >> 1, v >> 1, s, 41) < k;
+    const fur = s => (f, u, v) => {
+      if (mark === "white_field" && spot(u, v, s, 0.45)) return WHITE;
+      if (mark === "white_dots" && spot(u * 3, v * 3, s, 0.12)) return WHITE;
+      if (mark === "black_dots" && spot(u * 3, v * 3, s, 0.14)) return BLACK;
+      return hash(u, v, s, 3) < 0.12 ? dk : coat;
+    };
+    const legPaint = (f, u, v) => (v === 0 ? 0x2e2620 : mark === "white" && v <= 4 ? WHITE : fur(9)(f, u, v));
+    const headPaint = (f, u, v, W, H) => {
+      if (f === "front") return v >= 1 && v <= 2 && (u === 1 || u === W - 2) ? 0x1a1410 : mark === "white" && u >= 2 && u <= W - 3 ? WHITE : coat;   // nostrils, blaze
+      if ((f === "left" || f === "right") && v === H - 2 && u === 3) return 0x111111;   // eyes
+      if (mark === "white" && f === "top" && u >= 2 && u <= 3) return WHITE;
+      return fur(5)(f, u, v);
+    };
+    const leather = 0x6b3e1e, iron = 0xa8a8b0;
+    return [
+      { name: "body", pivot: [0, 0, 0], boxes: [box([-5, 11, -10], [5, 21, 11], fur(1))] },
+      { name: "head", pivot: [0, 19, 10], head: true, boxes: [
+        box([-2.5, -1, -2], [2.5, 10, 4], fur(4)),                 // neck, rising from the chest
+        box([-1, 2, -3], [1, 12, -2], mane),                        // mane down the back of the neck
+        box([-3, 7, 1], [3, 12, 8], fur(6)),                        // head
+        box([-2, 7, 8], [2, 11, 13], headPaint),                    // muzzle
+        box([-2.5, 12, 1.5], [-1, 14, 3], coat), box([1, 12, 1.5], [2.5, 14, 3], coat),   // ears
+      ] },
+      { name: "tail", pivot: [0, 20, -10], boxes: [box([-1.5, -12, -3], [1.5, 1, 0], mane)] },
+      { name: "saddle", pivot: [0, 0, 0], boxes: [
+        box([-5.5, 20.5, -4], [5.5, 22, 5], leather), box([-2, 22, 3], [2, 23.5, 5], leather),
+        box([-5.8, 13, 0], [-5.3, 20.5, 1], 0x3a2414), box([5.3, 13, 0], [5.8, 20.5, 1], 0x3a2414),
+        box([-6.2, 12, -0.5], [-5.2, 13, 1.5], iron), box([5.2, 12, -0.5], [6.2, 13, 1.5], iron),
+      ] },
+      ...quadLegs(3, 8, 11, 4, legPaint),
+    ];
+  },
   spider() {
     const c1 = 0x3a3029, c2 = 0x29221d;
     const fur = (f, u, v) => (hash(u, v, f.length, 3) < 0.35 ? c2 : c1);
@@ -531,6 +585,8 @@ const TYPES = {
   spider:   { hostile: true,  hp: 16, hw: 0.7,  h: 0.9,  speed: 3.4, attack: 2, climbs: true, drops: [["string", 0, 2]] },
   villager: { hostile: false, hp: 20, hw: 0.3,  h: 1.95, speed: 0.9, flee: 2.8, village: true, variants: PROFESSIONS, drops: [] },
   iron_golem: { hostile: false, hp: 100, hw: 0.7, h: 2.7, speed: 1.4, attack: 10, village: true, golem: true, noKnock: true, drops: [["iron_ingot", 3, 5]] },
+  // horses (js/horses.js): spawned in herds by js/horses.js, not by the passive spawner, and not counted against its cap; hp is rolled per horse
+  horse:    { hostile: false, hp: 22, hw: 0.7, h: 1.6, speed: 1.6, flee: 5.5, herd: true, drops: [["leather", 0, 2]] },
 };
 const PASSIVE_TYPES = ["pig", "cow", "sheep", "chicken"];
 const HOSTILE_WEIGHTS = [["zombie", 0.33], ["skeleton", 0.25], ["creeper", 0.24], ["spider", 0.18]];
@@ -643,6 +699,9 @@ function removeMob(m) {
   m.material.dispose();
   if (m.type === "villager" && !m.dead) { const k = villagerKey(m); if (k && m.inv) villagerSaves.set(k, BF.trades.pack(m)); }
   if (m.sheep && m.sheep.mob === m) m.sheep.mob = null;   // pen sheep keep their state and respawn with the pen (js/shepherd.js)
+  if (m.hen && m.hen.mob === m) m.hen.mob = null;   // so do coop chickens (js/poultry.js)
+  if (m.cow && m.cow.mob === m) m.cow.mob = null;   // and pasture cows (js/cowherd.js)
+  if (m.pig && m.pig.mob === m) m.pig.mob = null;   // and sty pigs (js/pigfarmer.js)
   m.removed = true;
 }
 
@@ -711,6 +770,7 @@ function kill(m, byPlayer) {
     (m.village.deadInfo || (m.village.deadInfo = [])).push({ i: m.bred ? null : m.slot.idx, name: BF.vlog ? BF.vlog.nameOf(m) : null, prof: m.child ? "child" : m.profession || null,
       cause: m.lastHurt || null, day: BF.sky ? +((BF.sky.day || 0) + (BF.sky.time || 0)).toFixed(3) : null, age: m.life ? +(m.life.lived || 0).toFixed(2) : null });
   }
+  if (m.type === "villager" && BF.dayTimeline) BF.dayTimeline.drop(m);   // its day timeline goes with it (js/daytimeline.js)
   if (m.village && m.type === "villager" && m.slot && !m.bred) {   // a roster villager: its slot stays empty for good (saved, see exportVillagers)
     deadSlots(m.village).add(m.slot.idx);
     const k = villagerKey(m); if (k) villagerSaves.delete(k);
@@ -725,6 +785,9 @@ function giveDrops(m) {
   if (!inv || typeof inv.add !== "function") return;
   for (const [name, lo, hi] of m.def.drops || []) {
     if (m.type === "sheep" && (m.lamb || (m.sheep && m.sheep.shorn)) && (name === "white_wool" || m.lamb)) continue;   // lambs drop nothing, shorn sheep no wool
+    if (m.type === "chicken" && m.chick) continue;   // nor do chicks (js/poultry.js)
+    if (m.type === "cow" && m.calf) continue;   // nor do calves (js/cowherd.js)
+    if (m.type === "pig" && m.piglet) continue;   // nor do piglets (js/pigfarmer.js)
     const id = (BF.I && BF.I[name] != null) ? BF.I[name] : (BF.B && BF.B[name]);
     if (id == null) continue;
     const n = irnd(lo, hi);
@@ -792,23 +855,85 @@ function shootArrow(m, target, victim) {
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
-const _look = new THREE.Vector3();
+// Player arrows (js/player.js bow): `vel` in blocks/s, `o` = { damage, crit, pickup } where pickup is 1 (walking over the stuck
+// arrow gives it back), 2 (fired in creative: it is just removed) or 0. They hit any living mob as a player attack (BF.mobs.hit:
+// knockback, hostiles turn on the player, a hurt villager or golem angers the village's golems), never the player, and stick in
+// blocks for 60 s (vanilla); a stuck arrow whose block is broken falls again. Returns the arrow record.
+const PLAYER_ARROW_LIFE = 60, ARROW_DRAG = 0.99;   // vanilla: stuck arrows despawn after 1200 ticks; 1% air drag per tick
+function shootPlayerArrow(from, vel, o) {
+  o = o || {};
+  const mesh = new THREE.Mesh(arrowGeo, arrowMat);
+  mesh.position.copy(from);
+  scene.add(mesh);
+  const a = { mesh, pos: mesh.position, vel: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
+    byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
+  _look.copy(a.pos).add(a.vel); mesh.lookAt(_look);
+  arrows.push(a);
+  if (BF.emit) BF.emit("arrowShot", null, from);
+  return a;
+}
+// Damage a player arrow deals: its draw damage, plus 1..damage/2 on a critical (full-draw) arrow; so 1..6, a crit 7..9.
+const playerArrowDamage = a => a.damage + (a.crit ? irnd(1, Math.max(1, a.damage >> 1)) : 0);
+function playerArrowStep(a, p) {
+  if (a.stuck) {   // stuck: falls when its block goes; walking over it picks it up
+    if (!BF.world.isSolid(a.cell[0] + 0.5, a.cell[1] + 0.5, a.cell[2] + 0.5)) { a.stuck = false; a.pos.addScaledVector(a.dir, -0.1); a.vel.set(0, 0, 0); return false; }   // out of the freed cell, then down
+    if (!a.pickup || !p) return false;
+    const pp = p.position, hw = (p.halfWidth || 0.3) + 0.6, h = p.height || 1.8;
+    if (Math.abs(a.pos.x - pp.x) > hw || Math.abs(a.pos.z - pp.z) > hw || a.pos.y < pp.y - 0.6 || a.pos.y > pp.y + h + 0.3) return false;
+    if (a.pickup === 1 && BF.inventory && BF.I) { try { if (BF.inventory.add(BF.I.arrow, 1) > 0) return false; } catch (e) { console.error(e); return false; } }   // a full inventory leaves it there
+    if (BF.emit) BF.emit("arrowPickedUp", a.pickup === 1);
+    return true;
+  }
+  return false;
+}
+// Living mob whose box holds point q (player arrows test every mob).
+function mobAt(q) {
+  for (const m of list) {
+    if (m.dead || m.removed) continue;
+    const vp = m.position, hw = m.halfWidth + 0.1;
+    if (Math.abs(q.x - vp.x) < hw && Math.abs(q.z - vp.z) < hw && q.y > vp.y && q.y < vp.y + m.height) return m;
+  }
+  return null;
+}
+const _look = new THREE.Vector3(), _dir = new THREE.Vector3();
 function updateArrows(dt) {
   const p = playerAlive() ? player() : null;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
     a.life -= dt;
     if (a.life <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
+    if (a.byPlayer && playerArrowStep(a, p)) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
     if (a.stuck) continue;
     a.vel.y -= 20 * dt;
+    if (a.byPlayer) a.vel.multiplyScalar(Math.pow(ARROW_DRAG, dt * 20));
     const steps = Math.max(1, Math.ceil(a.vel.length() * dt / 0.25));
     let hitPlayer = false;
     for (let s = 0; s < steps; s++) {
       a.pos.addScaledVector(a.vel, dt / steps);
       if (BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z)) {
+        if (a.byPlayer) {   // back up and creep in 5 cm steps, so the tip sits just inside the first solid block on the path
+          const sp = a.vel.length(), back = sp * dt / steps;
+          _dir.copy(a.vel).divideScalar(sp || 1); a.pos.addScaledVector(_dir, -back);
+          for (let d = 0; d < back && !BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z); d += 0.05) a.pos.addScaledVector(_dir, 0.05);
+          a.cell = [Math.floor(a.pos.x), Math.floor(a.pos.y), Math.floor(a.pos.z)]; a.dir = _dir.clone(); a.life = PLAYER_ARROW_LIFE;
+          a.stuck = true;
+          if (BF.emit) BF.emit("arrowStuck", a);
+          break;
+        }
         a.stuck = true; a.life = Math.min(a.life, 3);
         a.pos.addScaledVector(a.vel, -dt / steps * 0.3);
         break;
+      }
+      if (a.byPlayer) {   // player arrow: hits the first mob it enters, as a player attack
+        const m = mobAt(a.pos);
+        if (m) {
+          const dmg = playerArrowDamage(a);
+          a.hit = { mob: m, damage: dmg, landed: damageMob(m, dmg, a.vel, true) };
+          if (BF.emit) BF.emit("arrowHitMob", m, dmg, a.crit);
+          hitPlayer = true;
+          break;
+        }
+        continue;
       }
       const v = a.victim;
       if (v && !v.dead && !v.removed) {
@@ -858,14 +983,72 @@ function waterAhead(m, dx, dz) {
 }
 function pickWander(m, r) {
   if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
-  const a = Math.random() * Math.PI * 2, d = rnd(3, r);
+  if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return;   // coop chickens wander inside their run (js/poultry.js)
+  if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
+  if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return;   // sty pigs root about inside the sty (js/pigfarmer.js)
+  if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
+  const a =Math.random() * Math.PI * 2, d = rnd(3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
   m.ai.tz = m.position.z + Math.sin(a) * d;
+}
+
+// Getting past what blocks a walk (village mobs: villagers and golems). Walks to a point (wanderAI: heading home from far off, a golem's
+// patrol) go straight at it, so a tree, a wall or a ledge too low to jump under would hold them there for good. Blocked for a moment,
+// it finds a route round it (A*, up to DETOUR_HOP blocks towards the point; three blocks high for a golem), and with none it steps
+// aside for a few seconds. Being held in one place for STUCK_LOG seconds of pushing goes in the game log.
+const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, STUCK_LOG = 30;
+function moveLog(m, level, text) {
+  if (!BF.glog) return;
+  const who = BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "An " + m.type.replace(/_/g, " ");   // "Name (Job)" as in the village log
+  BF.glog.log(level, "move", who + " " + text, { village: m.village, at: m });
+}
+// Called every physics step: `blocked` = it wanted to move and a block stopped it.
+function blockedMove(m, dt, blocked) {
+  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, logged: false });
+  if (Math.hypot(p.x - g.x, p.z - g.z) > 3) {   // got somewhere
+    if (g.logged) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
+    g.x = p.x; g.z = p.z; g.t = 0; g.logged = false;
+  } else if (blocked && (g.t += dt) >= STUCK_LOG && !g.logged) {
+    g.logged = true;
+    moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + STUCK_LOG + " s" + (ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
+  }
+  ai.blockedT = blocked ? (ai.blockedT || 0) + dt : 0;
+}
+// False when this frame's A* searches are used up (busy villages): it tries again next frame instead of stepping aside at random.
+function startDetour(m) {
+  const ai = m.ai, px = m.position.x, pz = m.position.z, dx = ai.tx - px, dz = ai.tz - pz, d = Math.hypot(dx, dz) || 1;
+  if (planBudget <= 0) return false;
+  planBudget--;
+  ai.blockedT = 0;
+  const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
+  const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
+  if (route && route.length) ai.detour = { route, ri: 0, stuckT: 0 };
+  else aside(m);
+  return true;
+}
+function aside(m) {
+  const ai = m.ai, px = m.position.x, pz = m.position.z, a = Math.atan2(ai.tz - pz, ai.tx - px) + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + rnd(-0.5, 0.5));
+  ai.detour = { x: px + Math.cos(a) * 5, z: pz + Math.sin(a) * 5, t: rnd(2, 4) };
+}
+// Steers along a detour; false once it is over (reached, timed out, or the route itself got stuck).
+function followDetour(m, dt, out, sp) {
+  const D = m.ai.detour;
+  if (D.route) {
+    const r = followRoute(m, dt, out, sp, D);
+    if (r === "stuck") { m.ai.detour = null; aside(m); return followDetour(m, dt, out, sp); }   // the route did not fit after all: try from somewhere else
+    return r === "going";
+  }
+  const dx = D.x - m.position.x, dz = D.z - m.position.z, d = Math.hypot(dx, dz);
+  if ((D.t -= dt) <= 0 || d < 0.6) return false;
+  out.x = dx / d * sp; out.z = dz / d * sp;
+  return true;
 }
 
 // Sets out.x/out.z to the desired horizontal velocity; sets m.lookAt.
 function wanderAI(m, dt, out) {
   const ai = m.ai, T = m.def;
+  if (ai.detour && (ai.mode !== "walk" || m.age - (ai.wanderAt || 0) > 0.5)) ai.detour = null;   // a detour is for the walk it was made for
+  ai.wanderAt = m.age;
   ai.t -= dt;
   if (ai.t <= 0) {
     if (ai.mode === "idle" && Math.random() < 0.6) { ai.mode = "walk"; pickWander(m, 8); ai.t = rnd(3, 7); }
@@ -878,11 +1061,13 @@ function wanderAI(m, dt, out) {
     else m.lookAt = { yaw: rnd(-1, 1), pitch: rnd(-0.4, 0.3) };
   }
   if (ai.mode === "walk") {
+    const sp = T.hostile ? T.speed * 0.4 : T.speed;
+    if (ai.detour) { if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
     const dx = ai.tx - m.position.x, dz = ai.tz - m.position.z, d = Math.hypot(dx, dz);
     if (d < 0.6) { ai.mode = "idle"; ai.t = rnd(2, 5); return; }
     const nx = dx / d, nz = dz / d;
     if (!m.inWater && (dropAhead(m, nx, nz) > 3 || (!T.hostile && waterAhead(m, nx, nz)))) { ai.mode = "idle"; ai.t = rnd(1, 3); return; }
-    const sp = T.hostile ? T.speed * 0.4 : T.speed;
+    if (T.village && ai.blockedT > DETOUR_AFTER && startDetour(m)) { if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
     out.x = nx * sp; out.z = nz * sp;
   }
 }
@@ -953,6 +1138,18 @@ function hostileAI(m, dt, out) {
 // Finds the nearest living mob matching pred within r blocks (horizontal + vertical box).
 function nearestMob(m, r, pred) {
   let best = null, bd = r;
+  if (r <= 32 && chunkGrid.size) {   // only the 16-block cells within r (the grid is rebuilt every update)
+    const gx = Math.floor(m.position.x / 16), gz = Math.floor(m.position.z / 16), n = Math.ceil(r / 16);
+    for (let cz = gz - n; cz <= gz + n; cz++) for (let cx = gx - n; cx <= gx + n; cx++) {
+      const cell = chunkGrid.get(sepKey(cx, cz));
+      if (cell) for (const o of cell) {
+        if (o === m || o.dead || o.removed || !pred(o)) continue;
+        const d = o.position.distanceTo(m.position);
+        if (d < bd) { bd = d; best = o; }
+      }
+    }
+    return best;
+  }
   for (const o of list) {
     if (o === m || o.dead || o.removed || !pred(o)) continue;
     const d = o.position.distanceTo(m.position);
@@ -981,7 +1178,7 @@ function chaseAndHit(m, o, dt, out, dmg, cd, speed) {
       o.invuln = 0; damageMob(o, dmg, k, false, by); if (!o.dead) o.vel.y = 8;
       if (o.hostile && !o.dead) { o.ai.golemFoe = m; o.ai.golemFoeT = 12; }   // hostiles fight back (golemFight)
     } else if (damageMob(o, dmg, k, false, by)) {
-      if (o.type === "villager") { o.attacker = m; o.attackedAt = o.age; }   // golems come running (villagerInDanger)
+      if (o.type === "villager") { o.attacker = m; o.attackedAt = o.age; if (BF.emit) BF.emit("villagerHit", o, m); }   // golems come running (villagerInDanger); js/wildlife.js counts zombie attacks per night
       if (o.def.golem) o.ai.revenge = m;
     }
   }
@@ -1085,6 +1282,7 @@ function zombieBreakDoor(m, dt, out) {
 const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.5 && t < 0.985; };   // villagers head in at sunset, well before monsters can spawn (js/mobs.js)
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
 function bedOK(bed) {
+  if (!bed) return false;   // no bed (a sleeper's bed taken away): not usable, rather than a throw that removes the villager
   const k = blockAt(bed.x, bed.y, bed.z);
   if (bed.tent) return !!(k.tent && k.tent.r === 0 && k.tent.l === 1 && !k.tent.up && k.tent.f === bed.f);   // an explorer's tent: its foot centre cell (js/tents.js)
   const b = k.bed; return !!(b && !b.head && b.f === bed.f);
@@ -1106,8 +1304,13 @@ function ladderCell(x, y, z) {
 }
 const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // A* over walkable cells (4-way, step up 1, drop up to 3, straight up/down ladders). goal(x, y, z) -> bool. Returns cells after start, or null.
+// tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear, and, as it is wider than
+// its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
 let planBudget = 0;
-function findPath(sx, sy, sz, goal, maxNodes = 3000) {
+const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
+  const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
+  const nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const key = (x, y, z) => x + "," + y + "," + z;
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const open = [[sx, sy, sz, 0, hh(sx, sz)]], from = new Map([[key(sx, sy, sz), null]]), cost = new Map([[key(sx, sy, sz), 0]]);
@@ -1124,7 +1327,7 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
     }
     if (ladderAt(x, y, z)) for (const dy of [1, -1]) {           // climb straight up to the next rung or down to the one below
       const ny = y + dy;
-      if (dy > 0 ? !navCell(x, ny, z) : !ladderCell(x, ny, z)) continue;
+      if (dy > 0 ? !nav(x, ny, z) : !ladderCell(x, ny, z) || !air(x, ny + 2, z)) continue;
       const k = key(x, ny, z), ng = g + 1.5;
       if (cost.has(k) && cost.get(k) <= ng) continue;
       cost.set(k, ng); from.set(k, [x, y, z]);
@@ -1132,9 +1335,9 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000) {
     }
     for (const [dx, dz] of BF.DIRS) for (const dy of [0, 1, -1, -2, -3]) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
-      if (!navCell(nx, ny, nz)) continue;
-      if (dy > 0 && blockAt(x, y + 2, z).solid) break;            // no room to jump
-      if (dy < 0 && blockAt(nx, y + 1, nz).solid) break;          // wall: cannot step off
+      if (!nav(nx, ny, nz)) continue;
+      if (dy > 0 && (blockAt(x, y + 2, z).solid || !air(x, y + 3, z) || (tall && BF.DIRS.some(([ex, ez]) => !air(x + ex, y + 3, z + ez))))) break;   // no room to jump (a golem is wider than its cell)
+      if (dy < 0 && (blockAt(nx, y + 1, nz).solid || !air(nx, y + 2, nz))) break;        // wall: cannot step off
       const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
       if (cost.has(k) && cost.get(k) <= ng) break;
       cost.set(k, ng); from.set(k, [x, y, z]);
@@ -1159,8 +1362,9 @@ function pathOut(m) {
   return findPath(x, y, z, { x: H.outX, z: H.outZ, at: (cx, cy, cz) => cx === H.outX && cz === H.outZ }, 1200);
 }
 // Steers along ai.route. Returns "done", "stuck" or "going".
-function followRoute(m, dt, out, speed) {
-  const ai = m.ai, r = ai.route;
+// `ai` defaults to the villager's own route state (m.ai: route, ri, stuckT); detours pass their own.
+function followRoute(m, dt, out, speed, ai = m.ai) {
+  const r = ai.route;
   if (!r || ai.ri >= r.length) return "done";
   const c = r[ai.ri], dx = c[0] + 0.5 - m.position.x, dz = c[2] + 0.5 - m.position.z, d = Math.hypot(dx, dz);
   // reached: within 0.3 of its centre, and on a ladder only once the feet are in that cell
@@ -1254,6 +1458,43 @@ function claimBed(m, n, dt) {
   n.fails = 0; m.ai.route = null;
   if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
 }
+// Without a bed at night: walk into the nearest building (its own house first) that has room, along a path through the door. True while going.
+const inHouse = (h, x, z) => x >= h.x && x <= h.x + h.w && z >= h.z && z <= h.z + h.d;
+function shelterAI(m, dt0, dt, out) {
+  const ai = m.ai, V = m.village, n = dt0;
+  if (!V || (n.sFail || 0) >= 3) return false;
+  if (!n.shelter) {
+    let best = m.home, bd = 1e9;
+    if (!best) for (const h of V.houses || []) {
+      if (!h || !h.w || h.w * h.d < 9) continue;
+      let used = 0;
+      for (const o of V.members) if (o !== m && o.type === "villager" && !o.dead && inHouse(h, o.position.x, o.position.z)) used++;
+      if (used >= 4) continue;                                // full: next one
+      const d = Math.hypot(h.x + h.w / 2 - m.position.x, h.z + h.d / 2 - m.position.z);
+      if (d < bd) { bd = d; best = h; }
+    }
+    if (!best) return false;
+    n.shelter = best;
+  }
+  const h = n.shelter;
+  if (inHouse(h, m.position.x, m.position.z)) return true;
+  if (ai.routeKind !== "shelter") ai.route = null;
+  if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
+    planBudget--;
+    const [fx, fy, fz] = feetCell(m);
+    const gx = Math.floor(h.x + h.w / 2), gz = Math.floor(h.z + h.d / 2);
+    ai.route = findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => x >= h.x && x < h.x + h.w && z >= h.z && z < h.z + h.d }, 2500);
+    ai.ri = 0; ai.stuckT = 0; ai.routeKind = "shelter";
+    if (!ai.route) { n.sFail = (n.sFail || 0) + 1; n.retryT = 8; }
+  }
+  if (ai.route) {
+    const st = followRoute(m, dt, out, m.def.speed * 1.3);
+    if (st === "done") ai.route = null;
+    else if (st === "stuck") { ai.route = null; n.sFail = (n.sFail || 0) + 1; n.retryT = 4; }
+    return true;
+  }
+  return false;
+}
 // Night: head for bed and sleep; without a usable bed stand still indoors or by the village bell.
 function nightAI(m, dt, out) {
   const ai = m.ai, T = m.def, V = m.village;
@@ -1261,8 +1502,9 @@ function nightAI(m, dt, out) {
   const n = ai.night || (ai.night = { fails: 0, retryT: 0 });
   claimBed(m, n, dt);
   const H = m.home;
-  if (ai.routeKind !== "bed") ai.route = null;
+  if (ai.routeKind !== "bed" && ai.routeKind !== "shelter") ai.route = null;   // a day route is dropped; the walk to bed or shelter carries on
   if (m.bed && bedOK(m.bed) && n.fails < 3) {
+    if (ai.routeKind !== "bed") ai.route = null;
     if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
       planBudget--;
       ai.route = pathToBed(m); ai.ri = 0; ai.stuckT = 0; ai.routeKind = "bed";
@@ -1277,6 +1519,7 @@ function nightAI(m, dt, out) {
   }
   const inside = H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d;
   if (inside || !V) return;
+  if (shelterAI(m, n, dt, out)) return;      // a villager without a bed goes indoors for the night
   const dx = V.x + 0.5 - m.position.x, dz = V.z + 0.5 - m.position.z, d = Math.hypot(dx, dz);
   if (d > 3.5) { out.x = dx / d * T.speed; out.z = dz / d * T.speed; }
 }
@@ -1293,7 +1536,7 @@ function morningAI(m, dt, out) {
   if (st === "stuck" && (ai.leaveTries = (ai.leaveTries || 0) + 1) < 3) { ai.route = null; return true; }
   if (st === "going") return true;
   ai.leaving = false; ai.route = null; ai.leaveTries = 0; ai.leaveEnd = st;
-  if (st === "done") { // keep walking away from the door so it gets closed behind them
+  if (st === "done" && m.home) { // keep walking away from the door so it gets closed behind them
     const H = m.home;
     ai.mode = "walk"; ai.t = 5; ai.tx = H.outX + 0.5 + (H.outX - H.doorX) * 5; ai.tz = H.outZ + 0.5 + (H.outZ - H.doorZ) * 5;
   }
@@ -1301,6 +1544,39 @@ function morningAI(m, dt, out) {
 }
 
 // ---------- village mobs ----------
+// The jobs, in order: the first that has something to do this frame takes the villager (true). Each one says how long a task will take before
+// starting it (BF.villageSim.begin); a villager none of them takes for a few seconds is idle and has no task left to wait for.
+function jobsAI(m, dt, out) {
+  if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return true;   // breeding pair: stand still, face each other (js/breeding.js)
+  if (BF.storage && BF.storage.ai(m, dt, out)) return true;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return true;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
+  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return true;   // carries on cooking beef it started (js/cowherd.js)
+  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, true)) return true;   // carries on baking or buying it started (js/baker.js)
+  if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, true)) return true;   // carries on digging, smelting or buying it started (js/glassmaker.js)
+  if (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.ai(m, dt, out, true)) return true;   // carries on harvesting, leading bees or buying it started (js/beekeeper.js)
+  if (m.profession === "pig_farmer" && BF.pigFarmer && BF.pigFarmer.cookAI(m, dt, out, true)) return true;   // carries on cooking pork it started (js/pigfarmer.js)
+  if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return true;   // buys food when hungry, farmers farm (js/villagelife.js)
+  if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return true;   // builds / shops for materials (js/builder.js)
+  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return true;   // feeds, shears and culls the pen sheep (js/shepherd.js)
+  if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return true;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
+  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return true;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
+  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, false)) return true;   // buys ingredients and fuel, bakes cakes and pies in its oven (js/baker.js)
+  if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, false)) return true;   // digs and buys sand, smelts glass, makes panes and bottles (js/glassmaker.js)
+  if (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.ai(m, dt, out, false)) return true;   // harvests hives, plants flowers, builds hives, leads bees, makes candles (js/beekeeper.js)
+  if (m.profession === "pig_farmer" && BF.pigFarmer && BF.pigFarmer.ai(m, dt, out)) return true;   // feeds, culls and stocks the sty, cooks its pork (js/pigfarmer.js)
+  if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return true;   // buys compass / map ingredients (js/cartography.js)
+  if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return true;   // plants saplings, fells trees, picks up what falls (js/forester.js)
+  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return true;   // sells beds to builders, buys wool and boards (js/furniture.js)
+  if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return true;
+  if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return true;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
+  if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return true;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
+  if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.ai(m, dt, out)) return true;   // buys flint, sticks, feathers and string for arrows and bows (js/fletcher.js)
+  if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return true;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
+  if (m.profession === "merchant" && BF.merchant && BF.merchant.ai(m, dt, out)) return true;   // carries surplus goods to a neighbouring village and back (js/merchant.js)
+  if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return true;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
+  if (BF.jobs && BF.jobs.ai(m, dt, out)) return true;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
+  return false;
+}
 function villagerAI(m, dt, out) {
   const ai = m.ai, T = m.def, V = m.village;
   if (m.tradingWith) {
@@ -1326,19 +1602,14 @@ function villagerAI(m, dt, out) {
   }
   if (bedtime()) { nightAI(m, dt, out); return; }
   ai.night = null;
+  // an explorer out mapping and a merchant on a trip stay where they are between tasks (and before the working day) rather than walk back,
+  // and have no house to walk out of in the morning
+  const away = (m.profession === "explorer" && BF.explorer && BF.explorer.away && BF.explorer.away(m)) || (m.profession === "merchant" && BF.merchant && BF.merchant.away && BF.merchant.away(m));
+  if (away && ai.leaving) { ai.leaving = false; if (ai.routeKind === "out") ai.route = null; }
   if (ai.leaving && morningAI(m, dt, out)) return;
-  if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return;   // breeding pair: stand still, face each other (js/breeding.js)
-  if (BF.storage && BF.storage.ai(m, dt, out)) return;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
-  if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return;   // buys food when hungry, farmers farm (js/villagelife.js)
-  if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return;   // builds / shops for materials (js/builder.js)
-  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return;   // feeds, shears and culls the pen sheep (js/shepherd.js)
-  if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return;   // buys compass / map ingredients (js/cartography.js)
-  if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return;   // plants saplings, fells trees, picks up what falls (js/forester.js)
-  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return;   // sells beds to builders, buys wool and boards (js/furniture.js)
-  if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return;
-  if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
-  if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
-  if (BF.jobs && BF.jobs.ai(m, dt, out)) return;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
+  if (jobsAI(m, dt, out)) { m.idleT = 0; return; }
+  m.idleT = (m.idleT || 0) + dt;
+  if (m.vtask && m.idleT > 3 && BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   // farmers sometimes go tend the village fields
   // sized villages (village generator 2) reach far beyond the plaza: villagers living out there keep to their own neighbourhood
   let ax = V ? V.x : 0, az = V ? V.z : 0;
@@ -1354,7 +1625,8 @@ function villagerAI(m, dt, out) {
       if (fy > 0 && (BF.world.getBlock(fx, fy, fz) === BF.B.farmland || BF.world.getBlock(fx, fy, fz) === BF.B.farmland_dry)) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
     }
   }
-  if (V) {
+  if (away && ai.mode === "walk" && Math.hypot(ai.tx - m.position.x, ai.tz - m.position.z) > 12) { ai.mode = "idle"; ai.t = rnd(1, 3); }
+  if (V && !away) {
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
       ai.mode = "walk"; ai.tx = ax + rnd(-6, 6); ai.tz = az + rnd(-6, 6); ai.t = rnd(5, 8);
@@ -1422,7 +1694,7 @@ function updateMob(m, dt) {
   m.age += dt;
   m.hurtT -= dt; m.invuln -= dt; m.knockT -= dt; ai.swingT -= dt;
 
-  const light = Math.max(0.12, skyLight() * skyAt(m.position.x, m.position.y + 0.5, m.position.z).factor,
+  const light = !m.root.visible ? 1 : Math.max(0.12, skyLight() * skyAt(m.position.x, m.position.y + 0.5, m.position.z).factor,   // only for its colour
     Math.pow(BF.world.getBlockLight(m.position.x, m.position.y + 0.5, m.position.z) / 15, 1.5));
 
   if (m.dead) {
@@ -1446,8 +1718,9 @@ function updateMob(m, dt) {
 
   // ---- AI ----
   _desired.x = 0; _desired.z = 0; _desired.faceTarget = false; _desired.faceX = null; _desired.faceZ = null;
-  if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
-  else if (m.type === "villager") villagerAI(m, dt, _desired);
+  if (m.rider) { /* ridden (js/horses.js): its rider moves it */ }
+  else if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
+  else if (m.type === "villager") { { const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0; } if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
   else if (T.golem) golemAI(m, dt, _desired);
   else if (ai.fleeT > 0) {
     ai.fleeT -= dt;
@@ -1458,11 +1731,23 @@ function updateMob(m, dt) {
     _desired.x = Math.cos(a) * T.flee; _desired.z = Math.sin(a) * T.flee;
     m.lookAt = null;
   } else if (m.type === "sheep" && BF.shepherd && BF.shepherd.sheepAI(m, dt, _desired)) { /* walking to a mate (js/shepherd.js) */ }
+  else if (m.type === "horse" && BF.horses && BF.horses.ai(m, dt, _desired)) { /* herd, lead, pen, mate (js/horses.js) */ }
+  else if (m.type === "chicken" && BF.poultry && BF.poultry.chickenAI(m, dt, _desired)) { /* led home, following seeds, or to a mate (js/poultry.js) */ }
+  else if (m.type === "cow" && BF.cowherd && BF.cowherd.cowAI(m, dt, _desired)) { /* led home, following wheat, or to a mate (js/cowherd.js) */ }
+  // Pig breeding lives in js/pigfarmer.js (feed, mates, piglets; wild and sty pigs alike; js/wildlife.js makes wild pairs willing)
+  else if (m.type === "pig" && BF.pigFarmer && BF.pigFarmer.pigAI(m, dt, _desired)) { /* led home, following feed, or to a mate (js/pigfarmer.js) */ }
   else wanderAI(m, dt, _desired);
   if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
+  if (m.coop && BF.poultry) BF.poultry.contain(m, _desired);   // nor does a coop chicken
+  if (m.pasture && BF.cowherd) BF.cowherd.contain(m, _desired);   // nor a pasture cow
+  if (m.sty && BF.pigFarmer) BF.pigFarmer.contain(m, _desired);   // nor a sty pig
   if (m.removed) return; // exploded
 
   // ---- physics ----
+  if (m.rider) {   // ridden (js/horses.js moves it every real-time frame)
+  } else if (m.riding && BF.boats && BF.boats.seat(m)) {   // sitting in a boat (js/boats.js): the boat carries it, no walking, falling or fall damage
+    m.onGround = true; m.inWater = false; m.headInWater = false; m.onLadder = false; m.fallStart = m.position.y;
+  } else {
   m.onLadder = m.type === "villager" && !m.inWater && onLadder(m);
   if (m.knockT <= 0) {
     const k = Math.min(1, dt * (m.onGround ? 10 : m.inWater ? 4 : 2.5));
@@ -1484,17 +1769,24 @@ function updateMob(m, dt) {
   }
   separate(m, dt);
 
+  // standing still on solid ground with nothing pushing it: no move to make (most grazing animals most of the time)
+  const resting = m.onGround && !m.inWater && !m.onLadder && m.knockT <= 0 && !_desired.x && !_desired.z && m.vel.y <= 0 &&
+    Math.abs(m.vel.x) < 0.02 && Math.abs(m.vel.z) < 0.02 && BF.world.isSolid(Math.floor(m.position.x), Math.floor(m.position.y - 0.05), Math.floor(m.position.z));
+  if (resting) { m.vel.set(0, 0, 0); m.fallStart = m.position.y; ai.blockedT = 0; }
+  else {
   const wasGround = m.onGround;
-  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05 });
+  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater });   // swimming, it climbs out onto a bank (world.js moveBox)
   m.onGround = res.onGround; m.inWater = res.inWater; m.headInWater = !!res.headInWater;
+  if (m.inWater && m.type === "villager" && BF.bridges) BF.bridges.noteSwim(m);   // a swim is a river crossing (js/bridges.js)
   const wants = Math.abs(_desired.x) + Math.abs(_desired.z) > 0.1;
   if ((res.hitX || res.hitZ) && wants) {
     if (T.climbs && (ai.target || ai.mode === "walk")) m.vel.y = 3.2;  // spiders climb walls
     else if (m.onLadder) { /* climbing: the ladder code above lifts it */ }
-    else if (res.onGround) m.vel.y = 7.6;                              // jump obstacles
+    else if (res.onGround && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height)) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
     else if (m.inWater) m.vel.y = 4;
-    if (!T.hostile && ai.mode === "walk" && Math.random() < 0.3) pickWander(m, 8);
+    if (!T.hostile && ai.mode === "walk" && !ai.detour && Math.random() < 0.3) pickWander(m, 8);
   }
+  if (T.village) blockedMove(m, dt, (res.hitX || res.hitZ) && wants);
   // fall damage
   const climbing = (T.climbs && (res.hitX || res.hitZ)) || m.onLadder;
   if (m.onGround || m.inWater || climbing) {
@@ -1504,6 +1796,8 @@ function updateMob(m, dt) {
     }
     m.fallStart = m.position.y;
   } else if (m.position.y > m.fallStart) m.fallStart = m.position.y;
+  }
+  }
   if (m.dead) return;
 
   // ---- daylight burning ----
@@ -1522,17 +1816,20 @@ function updateMob(m, dt) {
   // ---- orientation ----
   const hs = Math.hypot(m.vel.x, m.vel.z);
   let targetYaw = m.yaw;
-  if (_desired.faceTarget && playerAlive()) {
+  if (m.rider) targetYaw = m.yaw;
+  else if (_desired.faceTarget && playerAlive()) {
     const p = player().position;
     targetYaw = Math.atan2(p.x - m.position.x, p.z - m.position.z);
   } else if (_desired.faceX != null) targetYaw = Math.atan2(_desired.faceX - m.position.x, _desired.faceZ - m.position.z);
   else if (hs > 0.3 && m.knockT <= 0) targetYaw = Math.atan2(m.vel.x, m.vel.z);
   m.yaw = wrapAngle(m.yaw + Math.max(-7 * dt, Math.min(7 * dt, wrapAngle(targetYaw - m.yaw))));
   m.model.rotation.y = m.yaw;
+  if (!m.root.visible) return;   // the rest is how it looks: nothing to draw beyond the meshed terrain (far villages' land, despawn() hides those)
 
   // head look
   let hy = 0, hp = 0;
-  if (m.lookAt === "player" && playerAlive()) {
+  if (m.rider) hp = -0.35;   // a ridden horse holds its head a little low, out of the rider's view
+  else if (m.lookAt === "player" && playerAlive()) {
     const p = player(), e = p.eyePos ? p.eyePos() : p.position;
     const dx = e.x - m.position.x, dz = e.z - m.position.z, dy = e.y - (m.position.y + m.height * 0.85);
     hy = wrapAngle(Math.atan2(dx, dz) - m.yaw);
@@ -1629,7 +1926,7 @@ function animate(m) {
   for (const name in m.meshes) {
     const mesh = m.meshes[name], p = mesh.userData.part;
     if (p.head) { mesh.rotation.y = m.headYaw; mesh.rotation.x = -m.headPitch; }
-    else if (p.swing) mesh.rotation.x = sw * 0.75 * amp * p.swing;
+    else if (p.swing) mesh.rotation.x = m.riding && m.meshes.legL && !m.meshes.legFL ? -Math.PI / 2 : sw * 0.75 * amp * p.swing;   // sitting in a boat: two-legged mobs put their legs forward
     else if (p.folded) mesh.rotation.x = ai.swingT > 0 ? -Math.sin(ai.swingT / 0.35 * Math.PI) * 0.85 : 0;   // builders swing the folded arms as they place a block
     else if (p.arm) {
       if (m.type === "zombie") {
@@ -1679,8 +1976,26 @@ function updateFire(m, on, dt) {
   }
 }
 
-function separate(m, dt) {
+// Mobs bucketed in 2-block cells once per update (separate() looks at the 3 x 3 cells around a mob instead of every mob).
+const sepGrid = new Map(), chunkGrid = new Map();   // 2-block cells for separate(), 16-block cells for nearestMob()
+const sepKey = (gx, gz) => (((gx & 0xffff) << 16) | (gz & 0xffff)) >>> 0;
+function buildSepGrid() {
+  sepGrid.clear(); chunkGrid.clear();
   for (const o of list) {
+    if (o.dead || o.removed) continue;
+    const k = sepKey(Math.floor(o.position.x / 2), Math.floor(o.position.z / 2));
+    const a = sepGrid.get(k);
+    if (a) a.push(o); else sepGrid.set(k, [o]);
+    const k2 = sepKey(Math.floor(o.position.x / 16), Math.floor(o.position.z / 16));
+    const b = chunkGrid.get(k2);
+    if (b) b.push(o); else chunkGrid.set(k2, [o]);
+  }
+}
+function separate(m, dt) {
+  const gx = Math.floor(m.position.x / 2), gz = Math.floor(m.position.z / 2);
+  for (let cz = gz - 1; cz <= gz + 1; cz++) for (let cx = gx - 1; cx <= gx + 1; cx++) {
+  const cell = sepGrid.get(sepKey(cx, cz));
+  if (cell) for (const o of cell) {
     if (o === m || o.dead) continue;
     const dx = m.position.x - o.position.x, dz = m.position.z - o.position.z;
     const min = m.halfWidth + o.halfWidth;
@@ -1688,6 +2003,7 @@ function separate(m, dt) {
     if (m.position.y > o.position.y + o.height || o.position.y > m.position.y + m.height) continue;
     const d = Math.hypot(dx, dz) || 0.01;
     m.vel.x += (dx / d) * 6 * dt; m.vel.z += (dz / d) * 6 * dt;
+  }
   }
   if (playerAlive()) {
     const p = player();
@@ -1709,76 +2025,107 @@ function standable(x, y, z, hw, h) {
   for (let k = 0; k < Math.max(2, Math.ceil(h)); k++) if (w.getBlock(x, y + k, z) !== 0) return false;
   return !w.boxCollides(x + 0.5, y, z + 0.5, hw, h);
 }
+// A wild mob: one that belongs to no village and no other module's save (not a villager or golem of a village, not pen, coop, pasture, sty or
+// paddock stock, not a horse, not in a boat). Wild mobs live in the world: stored with their chunk when it unloads, never removed by
+// distance (js/wildlife.js).
+function isWild(m) {
+  return !!(m && !m.dead && !m.removed && !m.village && !m.penVillage && !m.pen && !m.coop && !m.pasture && !m.sty && !m.riding && !m.def.village && !m.def.herd && m.type !== "villager");
+}
+// A young farm animal's size (js/herd.js users: calves, piglets): k 0 = born (half size, head hs0 times bigger) .. 1 = grown.
+function setYoungSize(m, k, hs0) {
+  const T = m && TYPES[m.type];
+  if (!T || !m.model) return;
+  const s = 0.5 + 0.5 * k, h0 = hs0 == null ? 1.35 : hs0, hs = h0 + (1 - h0) * k;
+  m.model.scale.setScalar(s);
+  if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
+  m.halfWidth = T.hw * (0.6 + 0.4 * k); m.height = T.h * (0.5 + 0.5 * k);
+}
 function countMobs() {
   let p = 0, h = 0;
-  for (const m of list) if (!m.dead && !m.def.village && !m.pen) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
+  for (const m of list) if (!m.dead && !m.def.village && !m.def.herd && !m.pen && !m.pasture && !m.sty) { if (m.hostile) h++; else p++; }   // pen sheep are village stock, not wildlife
   return { p, h };
 }
-function tryPassiveSpawn() {
-  if (!playerAlive()) return;
-  if (isNight() && Math.random() > 0.12) return;
-  const pp = player().position, w = BF.world, grass = BF.B.grass;
-  const a = Math.random() * Math.PI * 2, d = rnd(24, 64);
-  const x = Math.floor(pp.x + Math.cos(a) * d), z = Math.floor(pp.z + Math.sin(a) * d);
-  if (!w.isLoaded(x, z)) return;
-  const gy = w.heightAt(x, z);
-  if (gy < BF.MIN_Y + 1 || w.getBlock(x, gy, z) !== grass) return;
-  const type = PASSIVE_TYPES[Math.floor(Math.random() * PASSIVE_TYPES.length)];
-  const T = TYPES[type];
-  if (!standable(x, gy + 1, z, T.hw, T.h)) return;
-  const n = irnd(2, 4);
-  let spawned = 0;
-  for (let i = 0; i < n * 3 && spawned < n; i++) {
+// A group of n wild animals of one type on the grass of chunk (cx, cz): its first-generation roll (js/wildlife.js). Returns how many were placed.
+function spawnGroup(type, cx, cz, n) {
+  const w = BF.world, grass = BF.B.grass, T = TYPES[type], CS = BF.CS;
+  if (!T || !scene || !w.chunks.has(cx + "," + cz)) return 0;
+  const inChunk = (x, z) => Math.floor(x / CS) === cx && Math.floor(z / CS) === cz;
+  const ok = (x, z) => { const y = w.heightAt(x, z); return y >= BF.MIN_Y + 1 && w.getBlock(x, y, z) === grass && standable(x, y + 1, z, T.hw, T.h) ? y + 1 : null; };
+  let x = null, z = null;
+  for (let i = 0; i < 12 && x == null; i++) { const tx = cx * CS + irnd(1, 14), tz = cz * CS + irnd(1, 14); if (ok(tx, tz) != null) { x = tx; z = tz; } }
+  if (x == null) return 0;
+  let made = 0;
+  for (let i = 0; i < n * 4 && made < n; i++) {
     const sx = x + (i === 0 ? 0 : irnd(-3, 3)), sz = z + (i === 0 ? 0 : irnd(-3, 3));
-    if (!w.isLoaded(sx, sz)) continue;
-    const sy = w.heightAt(sx, sz);
-    if (sy < BF.MIN_Y + 1 || w.getBlock(sx, sy, sz) !== grass || !standable(sx, sy + 1, sz, T.hw, T.h)) continue;
-    if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9)) continue;
-    createMob(type, sx + 0.5, sy + 1, sz + 0.5);
-    spawned++;
-    if (countMobs().p >= PASSIVE_CAP) break;
+    if (!inChunk(sx, sz)) continue;
+    const sy = ok(sx, sz);
+    if (sy == null) continue;
+    if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9 && Math.abs(o.position.y - sy) < 2)) continue;
+    if (type === "horse" ? BF.horses && BF.horses.spawn(sx + 0.5, sy, sz + 0.5) : createMob(type, sx + 0.5, sy, sz + 0.5)) made++;   // a horse gets its record (js/horses.js)
   }
+  return made;
 }
 function pickHostileType() {
   let r = Math.random();
   for (const [t, wgt] of HOSTILE_WEIGHTS) { if ((r -= wgt) <= 0) return t; }
   return "zombie";
 }
-function tryHostileSpawn() {
+// ---------- monster spawning ----------
+// Every loaded chunk has the same odds of a spawn try, however many chunks are loaded: each update makes tries in proportion to the loaded
+// chunk count (a surface try per chunk every SURFACE_EVERY s while the sky is dark, a cave try per chunk every CAVE_EVERY s) and spreads them
+// over random loaded chunks. Only the spot decides (darkness, block light 7 or less, open sky or cave cover, the dark-long-enough rule);
+// js/wildlife.js adds the density cap of the spot's area and the buffer around the player, villagers and golems.
+const SURFACE_EVERY = 8, CAVE_EVERY = 8, MAX_TRIES = 64;
+let surfAcc = 0, caveAcc = 0, chunkArr = [], chunkArrT = 0;
+function spawnMonsters(dt) {
   if (!playerAlive()) return;
-  const pp = player().position, w = BF.world;
-  const type = pickHostileType(), T = TYPES[type];
-  const surface = (skyLightAt(BF.sky ? BF.sky.time || 0 : 0) <= SPAWN_LIGHT || stormy()) && Math.random() < 0.6;
-  const a = Math.random() * Math.PI * 2, d = surface ? rnd(24, 48) : rnd(12, 40);
-  const x = Math.floor(pp.x + Math.cos(a) * d), z = Math.floor(pp.z + Math.sin(a) * d);
-  if (!w.isLoaded(x, z)) return;
-  if (surface) {
-    const gy = w.heightAt(x, z);
-    if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
-    if (!standable(x, gy + 1, z, T.hw, T.h)) return;
-    if (w.getBlockLight(x, gy + 1, z) > 7) return; // torch/lantern-lit ground stays safe
-    if (!darkLongEnough(x, z, 1)) return;
-    if (Math.hypot(x + 0.5 - pp.x, gy + 1 - pp.y, z + 0.5 - pp.z) < 24) return;
-    createMob(type, x + 0.5, gy + 1, z + 0.5);
-    return;
-  }
-  // cave: a dark, covered air pocket in this column
-  const c = w.chunkAt(x, z);
-  if (!c || !c.top) return;
-  const top = c.top[(z - c.cz * BF.CS) * BF.CS + (x - c.cx * BF.CS)];
+  const W = BF.world;
+  chunkArrT -= dt;
+  if (chunkArrT <= 0 || !chunkArr.length) { chunkArrT = 1; chunkArr = [...W.chunks.values()]; }
+  const n = chunkArr.length;
+  if (!n) return;
+  const dark = skyLightAt(BF.sky ? BF.sky.time || 0 : 0) <= SPAWN_LIGHT || stormy();
+  if (dark) surfAcc += dt * n / SURFACE_EVERY; else surfAcc = 0;
+  caveAcc += dt * n / CAVE_EVERY;
+  const s = Math.min(MAX_TRIES, Math.floor(surfAcc)), c = Math.min(MAX_TRIES, Math.floor(caveAcc));
+  surfAcc -= Math.floor(surfAcc); caveAcc -= Math.floor(caveAcc);
+  for (let i = 0; i < s; i++) { const ch = chunkArr[Math.floor(Math.random() * n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch); }
+  for (let i = 0; i < c; i++) { const ch = chunkArr[Math.floor(Math.random() * n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch); }
+}
+function spawnHostile(type, x, y, z) {
+  if (BF.wildlife && !BF.wildlife.mayHostile(x, y, z)) return null;
+  const m = createMob(type, x, y, z);
+  if (m && BF.wildlife) BF.wildlife.spawned(m);
+  return m;
+}
+function trySurface(c) {
+  const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  const x = c.cx * CS + irnd(0, CS - 1), z = c.cz * CS + irnd(0, CS - 1);
+  const gy = w.heightAt(x, z);
+  if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
+  if (!standable(x, gy + 1, z, T.hw, T.h)) return;
+  if (w.getBlockLight(x, gy + 1, z) > 7) return; // torch/lantern-lit ground stays safe
+  if (!darkLongEnough(x, z, 1)) return;
+  spawnHostile(type, x + 0.5, gy + 1, z + 0.5);
+}
+// a dark, covered air pocket in a random column of the chunk
+function tryCave(c) {
+  const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  const lx = irnd(0, CS - 1), lz = irnd(0, CS - 1), x = c.cx * CS + lx, z = c.cz * CS + lz;
+  if (!c.top) return;
+  const top = c.top[lz * CS + lx];
   if (top < BF.SEA - 40) return;
-  const yMin = Math.max(BF.MIN_Y + 2, Math.floor(pp.y) - 24), yMax = Math.min(top - 3, Math.floor(pp.y) + 24);
+  const yMin = Math.max(BF.MIN_Y + 2, c.y0 + 1), yMax = Math.min(top - 3, c.y1 - 3);
   if (yMax <= yMin) return;
   for (let tries = 0; tries < 6; tries++) {
     const y = irnd(yMin, yMax);
     if (!standable(x, y, z, T.hw, T.h)) continue;
     if (!BF.OPAQUE[w.getBlock(x, y - 1, z)]) continue;
     const s = skyAt(x, y, z);
-    if (s.open || s.factor > 0.6) continue;   // 5+ blocks of cover (caves, dense forest canopy): dark at any time of day, houses never
+    if (s.level > CAVE_SKY) continue;   // sky light 7 or less (caves, deep forest shade): dark at any time of day
     if (!darkLongEnough(x, z, 0)) continue;   // ...unless a light went out or the cover was just built
     if (w.getBlockLight(x, y, z) > 7) continue; // lit caves are safe
-    if (Math.hypot(x + 0.5 - pp.x, y - pp.y, z + 0.5 - pp.z) < 20) continue;
-    createMob(type, x + 0.5, y, z + 0.5);
+    spawnHostile(type, x + 0.5, y, z + 0.5);
     return;
   }
 }
@@ -1809,13 +2156,16 @@ function restockVillagers(dt) { // once per in-game day, never while someone is 
   restockT -= dt;
   if (restockT > 0 || !BF.trades || !BF.sky) return;
   restockT = 2;
-  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child) BF.trades.restock(m, BF.sky.day);
+  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
 }
 const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
 const FORESTER_CHANCE = [0.95, 0.4];   // the first / second forester of a village (the second only in villages with 19+ buildings)
 const FURNITURE_CHANCE = 0.8;  // villages generated with both a shepherd and a forester (js/furniture.js)
 const MINER_CHANCE = 0.95;     // newly generated villages (js/miner.js)
+const BEE_POP = 6;              // village generator 8: grass villages of this many villagers get a beekeeper (js/beekeeper.js)
+const GLASS_CHANCE = 0.8;      // village generator 7: villages with natural sand within 64 blocks (js/glassmaker.js), as FURNITURE_CHANCE
+const PIG_CHANCE = 0.6;        // village generator 8: grass villages of 10+ (js/pigfarmer.js)
 // A village none of whose villagers has a saved state yet is being generated now: newly generated villages may get roster slots that older
 // saved villages never had (the furniture maker), without a villager appearing in a village the player already knows. `slotKey` (a
 // "<village key>#<idx>" key) counts as new too: the save already holds that very villager.
@@ -1823,6 +2173,19 @@ function freshVillage(key, slotKey) {
   if (slotKey && villagerSaves.has(slotKey)) return true;
   const pre = key + "#";
   for (const k of villagerSaves.keys()) if (k.startsWith(pre)) return false;
+  return true;
+}
+// Villager AI time (ms per frame, averaged over about 5 s): what the force-unload limit looks at (js/villagesim.js).
+let aiAcc = 0, aiEma = 0;
+function aiTick(dt) { aiEma += (aiAcc - aiEma) * Math.min(1, dt / 5); aiAcc = 0; }
+// Puts a villager back at its bed, else at its village centre (a forced stop of an errand).
+function sendHome(m) {
+  const b = m.bed, rec = m.village;
+  let x = b ? b.x : rec ? rec.x : m.position.x, z = b ? b.z : rec ? rec.z : m.position.z;
+  let y = b ? b.y : BF.worldgen.heightAt(x, z) + 1;
+  const s = findStand(x, y, z, TYPES.villager);
+  if (s) m.position.set(s[0], s[1], s[2]); else m.position.set(x + 0.5, y, z + 0.5);
+  m.vel.set(0, 0, 0); m.ai.route = null; m.fallStart = m.position.y;
   return true;
 }
 function findStand(x, y, z, T) {
@@ -1862,7 +2225,8 @@ function villageRoster(rec) {
   const special = slots.filter(sl => sl.house && SPECIAL_PROF[sl.house.type]);
   const rest = slots.filter(sl => !special.includes(sl));
   for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
-  const cap = rec.pop || VILLAGERS_PER_VILLAGE;   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
+  const cap = rec.pop || VILLAGERS_PER_VILLAGE;
+  const gen10 = (BF.state && BF.state.villages | 0) >= 10 && !!rec.pop;   // village generator 10: keepers come from the paddock plan (below), shepherds included   // the village's population (worldgen draws 2-100 and lays out a bed for each), 24 for classic villages
   // village generator 3: every village has a miner, a farmer, a forester and a toolsmith (stone and ore, food, wood, and the tools for all of
   // them), so nothing stalls
   const core = (BF.state && BF.state.villages | 0) >= 3 && !!rec.pop;
@@ -1877,7 +2241,7 @@ function villageRoster(rec) {
   const used = {};
   for (const sl of ordered) if (sl.house && SPECIAL_PROF[sl.house.type]) { sl.prof = SPECIAL_PROF[sl.house.type](r); used[sl.prof] = (used[sl.prof] || 0) + 1; }
   // others cycle through a shuffled pool, least-used first, so nothing repeats while others are missing
-  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner");   // builders are never part of the shuffled pool: the roster of old saves must not shift
+  const pool = PROFESSIONS.filter(p => p !== "nitwit" && p !== "builder" && p !== "unemployed" && p !== "explorer" && p !== "forester" && p !== "furniture_maker" && p !== "miner" && p !== "stable_hand" && p !== "merchant" && p !== "poultry_keeper" && p !== "cowherd" && p !== "baker" && p !== "glassmaker" && p !== "beekeeper" && p !== "pig_farmer" && !(gen10 && p === "shepherd"));   // builders are never part of the shuffled pool: the roster of old saves must not shift
   let bag = [];
   for (const sl of ordered) {
     if (sl.prof) continue;
@@ -1922,6 +2286,25 @@ function villageRoster(rec) {
   }
   // foresters: key range <village key>#1200+n (their places were reserved above, so the village never exceeds its cap)
   for (let k = 0; k < nF; k++) ordered.push({ house: null, idx: 1200 + k, bed: null, prof: "forester" });
+  // paddock keepers (village generator 10, idea-044): one per paddock of the village's plan (worldgen paddockPlan: count from size and native
+  // animals, a weighted roll per paddock), keys <village key>#1970+k (js/jobs.js KEEPER_IDX). Each takes the place of the last plain resident,
+  // never one of the core four or a special-building tradesperson; when none can make way, that paddock and its keeper are left out.
+  if (gen10 && BF.worldgen && BF.worldgen.paddockPlan) {
+    const kxz = String(rec.key || "").split(",").map(Number);
+    const plan = kxz.length === 2 ? BF.worldgen.paddockPlan(kxz[0], kxz[1], rec.pop, rec.biomeId != null ? rec.biomeId : rec.wg ? rec.wg.biomeId : null) : [];
+    plan.forEach((a, k) => {
+      if (ordered.length >= cap) {
+        let gone = false;
+        for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
+          const sl = ordered[i];
+          if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+          ordered.splice(i, 1); gone = true;
+        }
+        if (!gone) return;
+      }
+      ordered.push({ house: null, idx: 1970 + k, bed: null, prof: BF.worldgen.KEEPER_OF[a] });
+    });
+  }
   // furniture maker: a newly generated village with both a shepherd and a forester gets one with 80% probability (own seeded stream and key
   // <village key>#1300, so nothing else shifts). In a classic village it may take the village one past the cap of 24; in a sized village
   // it takes the place of the last plain resident (never the only shepherd), so the village keeps its size.
@@ -1960,13 +2343,131 @@ function villageRoster(rec) {
     }
     if (!rec.pop || ordered.length < cap) ordered.push({ house: null, idx: 1400, bed: null, prof: "miner" });
   }
+  // poultry keeper: village generator 4 gives every village of 8 or more villagers one, with a coop beside its nesting box (js/poultry.js,
+  // worldgen layoutVillage). Own key <village key>#1500, so nothing else shifts; it takes the place of the last plain resident, so the village keeps its size.
+  if (!gen10 && (BF.state && BF.state.villages | 0) >= 4 && (rec.pop || 0) >= 8) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1500, bed: null, prof: "poultry_keeper" });
+  }
+  // merchants (js/merchant.js): newly generated villages of 8 or more get one per 20 villagers, at least one (key range <village key>#1600+n,
+  // so nothing else shifts; villages the player already knows keep their people). In a sized village each takes the place of the last plain
+  // resident, so the village keeps its size; a classic village may go one past its cap.
+  const nM = BF.merchant && cap >= 8 && freshVillage(rec.key, rec.key + "#1600") ? Math.max(1, Math.floor(cap / 20)) : 0;
+  for (let k = 0; k < nM; k++) {
+    if (rec.pop && ordered.length >= cap) {
+      let gone = false;
+      for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || sl.prof === "shepherd" || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); gone = true;
+      }
+      if (!gone) break;
+    }
+    ordered.push({ house: null, idx: 1600 + k, bed: null, prof: "merchant" });
+  }
+  // cowherd: village generator 5 gives every village of COWHERD_POP (10) or more villagers on grass (cows spawn only on grass) one, with a pasture
+  // beside its milk churn (js/cowherd.js, worldgen layoutVillage). Own key <village key>#1700 (#1600+k are the trading caravans' merchants); it takes the place of the last plain resident.
+  const ground = rec.ground != null ? rec.ground : rec.wg ? rec.wg.ground : null;
+  if (!gen10 && (BF.state && BF.state.villages | 0) >= 5 && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.COWHERD_POP) || 10) && ground === 0) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1700, bed: null, prof: "cowherd" });
+  }
+  // bakers: village generator 6 gives a village of BAKER_POP (15) or more villagers a baker per 15 villagers, each with a baker's oven placed by the
+  // jobs plan (js/baker.js, js/jobs.js planVillage). Own keys <village key>#1800+k; each takes the place of the last plain resident.
+  const BP = (BF.worldgen && BF.worldgen.BAKER_POP) || 15;
+  const nB = (BF.state && BF.state.villages | 0) >= 6 && (rec.pop || 0) >= BP ? Math.floor(rec.pop / BP) : 0;
+  for (let k = 0; k < nB; k++) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      let gone = false;
+      for (let i = ordered.length - 1; i >= 0 && !gone; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); gone = true;
+      }
+      if (!gone) break;
+    }
+    ordered.push({ house: null, idx: 1800 + k, bed: null, prof: "baker" });
+  }
+  // glassmaker: village generator 7 gives a newly generated village with natural sand within 64 blocks (worldgen sandNear) a glassmaker 80% of
+  // the time (own seeded stream and key <village key>#1900, so nothing else shifts), its glass kiln and a furnace placed by the jobs plan
+  // (js/glassmaker.js, js/jobs.js planVillage). It takes the place of the last plain resident.
+  const kxz = String(rec.key || "").split(",").map(Number);
+  if ((BF.state && BF.state.villages | 0) >= 7 && BF.glassmaker && (rec.pop || 0) >= 4 && kxz.length === 2 && freshVillage(rec.key, rec.key + "#1900")
+    && seededRand("glass:" + rec.key)() < GLASS_CHANCE && BF.worldgen && BF.worldgen.sandNear && BF.worldgen.sandNear(kxz[0], kxz[1], 64)) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1900, bed: null, prof: "glassmaker" });
+  }
+  // beekeeper: village generator 8 gives a village of BEE_POP (6) or more villagers on grass a beekeeper (own key <village key>#1950; not #2000, where js/breeding.js keys its newborns), its honey
+  // extractor, 2 beehives and a flower bed placed by the jobs plan by the farms (js/beekeeper.js, js/jobs.js planVillage). It takes the place of
+  // the last plain resident.
+  if ((BF.state && BF.state.villages | 0) >= 8 && BF.beekeeper && (rec.pop || 0) >= BEE_POP && ground === 0) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1950, bed: null, prof: "beekeeper" });
+  }
+  // pig farmer: village generator 9 gives a village of PIG_POP (10) or more villagers on grass (forest and taiga villages are on grass too) a
+  // pig farmer PIG_CHANCE (60%) of the time, drawn from the village key (own seeded stream, so nothing else shifts), with a sty beside its feed
+  // trough (js/pigfarmer.js, worldgen layoutVillage, js/jobs.js planVillage). Own key <village key>#1960 (keys #2000 and up are newborns, js/breeding.js);
+  // it takes the place of the last plain resident.
+  if (!gen10 && (BF.state && BF.state.villages | 0) >= 9 && BF.pigFarmer && (rec.pop || 0) >= ((BF.worldgen && BF.worldgen.PIG_POP) || 10) && ground === 0
+    && seededRand("pigs:" + rec.key)() < PIG_CHANCE) {
+    if (ordered.length >= cap) {
+      const count = p => ordered.filter(sl => sl.prof === p).length;
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const sl = ordered[i];
+        if (sl.idx >= 1000 || sl.prof === "cartographer" || (sl.prof === "shepherd" && count("shepherd") < 2) || (sl.house && SPECIAL_PROF[sl.house.type]) || loneCore(sl)) continue;
+        ordered.splice(i, 1); break;
+      }
+    }
+    if (ordered.length < cap) ordered.push({ house: null, idx: 1960, bed: null, prof: "pig_farmer" });
+  }
   return ordered;
 }
 
-// (x, z) is in or next to the village (sized villages: their bounds + 32, classic villages: 80 of the centre)
-function inVillage(v, x, z) {
-  if (v.minX != null) return x >= v.minX - 32 && x <= v.maxX + 32 && z >= v.minZ - 32 && z <= v.maxZ + 32;
-  return Math.hypot(v.x - x, v.z - z) <= 80;
+// Where a villager appears when its village loads and it is not restored exactly: by day a random spot inside the village within the leash of its
+// bed (the village centre without one); at bedtime in its bed. null: no spot found (the house is used).
+const LEASH = 40;
+function scatterAt(rec, sl, v) {
+  const b = sl.bed;
+  if (bedtime()) return b ? findStand(b.x, b.y, b.z, TYPES.villager) : null;
+  const cx = b ? b.x : v.x, cz = b ? b.z : v.z;
+  for (let i = 0; i < 14; i++) {
+    const a = Math.random() * Math.PI * 2, d = LEASH * Math.sqrt(Math.random());
+    const x = Math.floor(cx + Math.cos(a) * d), z = Math.floor(cz + Math.sin(a) * d);
+    if (v.minX != null && (x < v.minX || x > v.maxX || z < v.minZ || z > v.maxZ)) continue;
+    if (!BF.world.isLoaded(x, z)) continue;
+    const at = findStand(x, BF.world.heightAt(x, z) + 1, z, TYPES.villager);
+    if (at) return at;
+  }
+  return null;
 }
 function updateVillages(dt) {
   for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
@@ -1977,7 +2478,8 @@ function updateVillages(dt) {
   if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return;
   const pp = player().position;
   let vs;
-  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 : 96) || []; } catch (e) { return; }
+  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 + 150 : 96) || []; } catch (e) { return; }   // by centre: sized villages are measured from their edge (js/villagesim.js)
+  if (BF.villageSim && BF.villageSim.pinned) { const ks = new Set(vs.map(v => v && Math.round(v.x) + "," + Math.round(v.z))); for (const v of BF.villageSim.pinned()) if (!ks.has(Math.round(v.x) + "," + Math.round(v.z))) vs.push(v); }   // villages a merchant's trip keeps loaded (js/merchant.js)
   for (const v of vs) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
@@ -2000,38 +2502,37 @@ function updateVillages(dt) {
       if (haveV >= wantV) break;
       if (taken.has(sl) || dead.has(sl.idx)) continue;   // never respawn a killed villager in place of a living one
       const H = sl.house;
-      const sv = villagerSaves.get(rec.key + "#" + sl.idx);
-      // a villager with a saved spot (a saved game, or it was unloaded) comes back where it stood, once that spot is loaded;
-      // one whose spot is out of reach (and older saves) starts at its house as before
-      const sp = sv && Array.isArray(sv.pos) && sv.pos.length >= 3 && sv.pos.slice(0, 3).every(Number.isFinite) ? sv.pos : null;
-      const spNear = sp && (BF.world.isLoaded(sp[0], sp[2]) || inVillage(v, sp[0], sp[2]));
-      if (spNear && !BF.world.isLoaded(sp[0], sp[2])) continue;   // its spot in the village has not loaded yet: wait for it
-      const T = TYPES.villager;
-      // saves round to 0.01, which can put one standing on a bed (top at 9/16) just inside it: test (and spawn) a hair higher
-      const spY = sp && sp[1] + 0.01;
-      let at = !spNear ? null : !BF.world.boxCollides(sp[0], spY, sp[2], T.hw, T.h) ? [sp[0], spY, sp[2]] : findStand(sp[0], sp[1], sp[2], T);   // its exact spot while nothing has been built there
+      const snap = BF.mobSave ? BF.mobSave.peek(rec.key + "#" + sl.idx) : null;   // quit and reload: back exactly where it was (js/mobsave.js)
+      if (snap === "wait") continue;
+      let at = null;
+      if (snap) at = standable(Math.floor(snap.p[0]), Math.floor(snap.p[1]), Math.floor(snap.p[2]), TYPES.villager.hw, TYPES.villager.h) ? snap.p.slice() : findStand(snap.p[0], snap.p[1], snap.p[2], TYPES.villager);
+      let scattered = false;
+      if (!at && villagerSaves.has(rec.key + "#" + sl.idx) && (at = scatterAt(rec, sl, v))) scattered = !bedtime();   // (a village's first load is not a return: its villagers start at home)
+        // otherwise: by day a random spot within the leash of its bed, at night in the bed
       if (!at) {
         if (H && !loadedHouse(H)) continue;
         const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
         const sy = H && H.y != null ? H.y : (v.y != null ? v.y : BF.world.heightAt(sx, sz) + 1);
-        at = findStand(sx, sy, sz, T);
-        if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, T);
-        if (!at) continue;
+        at = findStand(sx, sy, sz, TYPES.villager);
+        if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, TYPES.villager);
       }
+      if (!at) continue;
       const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
       m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m); haveV++;
-      if (spNear && Math.hypot(at[0] - sp[0], at[2] - sp[2]) < 4) { if (Number.isFinite(sp[3])) m.yaw = m.model.rotation.y = sp[3]; }   // back on its spot, facing as it did
-      else m.ai.leaving = !bedtime(); // spawned indoors by day: walk out through the door
+      m.ai.leaving = !bedtime() && !scattered; // spawned indoors by day: walk out through the door
+      const sv = villagerSaves.get(villagerKey(m));
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
       if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
       if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
+      if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
     }
     const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {
       const gy = v.y != null ? v.y : BF.world.heightAt(v.x, v.z) + 1;
-      const at = findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
-      if (at) { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); }
+      const gs = BF.mobSave ? BF.mobSave.golem(rec.key) : null;
+      const at = (gs && findStand(gs.p[0], gs.p[1], gs.p[2], TYPES.iron_golem)) || findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
+      if (at) { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); if (gs) BF.mobSave.apply(g, gs); }
     }
   }
 }
@@ -2041,11 +2542,13 @@ function despawn(dt) {
   const pp = BF.player.position;
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
+    if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
+    const wild = isWild(m);
+    if (!BF.world.isLoaded(m.position.x, m.position.z)) { if (wild && BF.wildlife) BF.wildlife.stow(m); removeMob(m); continue; }   // a wild mob that walked off the loaded land waits with its chunk
     const d = m.position.distanceTo(pp);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
-    if ((d > DESPAWN_DIST && !simmed) || !BF.world.isLoaded(m.position.x, m.position.z)) { removeMob(m); continue; }
+    if (d > DESPAWN_DIST && !simmed && !m.village && !wild && !m.def.herd) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
-    if (m.hostile && !m.dead && d > 48 && m.age > 20 && Math.random() < dt * 0.03) removeMob(m);
   }
 }
 
@@ -2087,21 +2590,36 @@ BF.mobs = {
     BF.world.onChunkUnload((cx, cz) => {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
-        if (Math.floor(m.position.x / BF.CS) === cx && Math.floor(m.position.z / BF.CS) === cz) removeMob(m);
+        if (Math.floor(m.position.x / BF.CS) === cx && Math.floor(m.position.z / BF.CS) === cz) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];
         if (Math.floor(a.pos.x / BF.CS) === cx && Math.floor(a.pos.z / BF.CS) === cz) { scene.remove(a.mesh); arrows.splice(i, 1); }
       }
     });
+    if (BF.wildlife) BF.wildlife.init();
   },
   update(dt) {
     if (!scene) return;
     dt = Math.min(dt, 0.05);
     planBudget = 2; // A* searches per frame
+    buildSepGrid();
+    // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
+    // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
+    const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     for (const m of list.slice()) {
       if (m.removed) continue;
-      try { updateMob(m, dt); } catch (e) { console.error(e); removeMob(m); }
+      let h = dt;
+      if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
+        const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
+        if (dx * dx + dz * dz > far2) {
+          if (m._farT == null) m._farT = Math.random() / FAR_HZ;
+          m._farT += dt;
+          if (m._farT < 1 / FAR_HZ) continue;
+          h = m._farT; m._farT = 0;
+        } else m._farT = null;
+      }
+      try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
     }
     updateArrows(dt);
     updatePuffs(dt);
@@ -2111,24 +2629,27 @@ BF.mobs = {
     if (BF.breeding) BF.breeding.tick(dt);   // encounters, hearts, children (js/breeding.js)
     if (BF.storage) BF.storage.tick(dt);   // chest owners: empty chests and those of dead villagers are freed (js/storage.js)
     if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
+    if (BF.horses) BF.horses.tick(dt);   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
+    if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
+    if (BF.poultry) BF.poultry.tick(dt);   // chickens growing up, laying, coop stock (js/poultry.js)
+    if (BF.cowherd) BF.cowherd.tick(dt);   // calves growing up, pasture stock (js/cowherd.js)
+    if (BF.pigFarmer) BF.pigFarmer.tick(dt);   // piglets growing up, sty stock (js/pigfarmer.js)
+    if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
-    spawnT -= dt;
-    if (spawnT <= 0 && BF.mobs.spawning !== false) {
-      spawnT = 0.4;
-      const c = countMobs();
-      if (c.p < PASSIVE_CAP && Math.random() < 0.5) tryPassiveSpawn();
-      if (c.h < HOSTILE_CAP) tryHostileSpawn();
-    }
-    try { updateVillages(dt); restockVillagers(dt); } catch (e) { console.error(e); }
+    if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
+    if (BF.wildlife) BF.wildlife.update(dt);
+    try { updateVillages(dt); restockVillagers(dt); if (BF.merchant) BF.merchant.tick(dt); } catch (e) { console.error(e); }
     despawn(dt);
+    aiTick(dt);
+    if (BF.mobSave) BF.mobSave.update(dt);
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
-  raycast(origin, dir, maxDist) {
+  raycast(origin, dir, maxDist, skip) {
     let best = null;
     const mn = [0, 0, 0], mx = [0, 0, 0];
     for (const m of list) {
-      if (m.dead || m.removed) continue;
+      if (m.dead || m.removed || m === skip) continue;
       const p = m.position, hw = m.halfWidth;
       mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
       mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
@@ -2139,23 +2660,47 @@ BF.mobs = {
   },
   // Player attack. Returns true if the hit landed (false while the mob is briefly invulnerable).
   hit(mob, damage, knockDir) { return damageMob(mob, damage, knockDir, true); },
+  // Player bow shot (js/player.js): see shootPlayerArrow. arrows() lists the player's arrows in flight or stuck (tests, debug).
+  shootArrow(from, vel, opts) { return scene ? shootPlayerArrow(from, vel, opts) : null; },
+  playerArrows() { return arrows.filter(a => a.byPlayer); },
   hurt(mob, damage, cause) { mob.invuln = 0; return damageMob(mob, damage, null, false, cause); },   // non-player damage with a cause (tests, commands)
   // /kill (commands.js): kills outright, no knockback, no golem anger; drops as a normal death. Returns false if already dead.
   kill(mob) { if (!mob || mob.dead || mob.removed) return false; kill(mob, true); return true; },
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
+  // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
+  isWild, spawnGroup, standable, findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
+  skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
+  // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
+  aiTime: () => aiEma,
+  sendHome,
+  unloadVillage(key) {
+    const rec = villages.get(key);
+    if (!rec) return 0;
+    let n = 0;
+    for (const m of list.slice()) if (m.village === rec || m.penVillage === rec) { if (BF.mobSave && BF.mobSave.stash && m.village === rec) BF.mobSave.stash(m); removeMob(m); n++; }   // written down where it stands: back exactly after a short absence
+    rec.members = [];
+    return n;
+  },
   // Villager trading state for saved games: {key -> {inv, level, xp, day}} (see CONTRACT.md); loaded ones override stored.
   exportVillagers() {
     const out = {};
     for (const [k, v] of villagerSaves) out[k] = v;
     for (const m of list) if (m.type === "villager" && !m.dead && m.inv) { const k = villagerKey(m); if (k) out[k] = BF.trades.pack(m); }
+    if (BF.bridges) BF.bridges.exportAll(out);   // "cross:<village key>" -> river crossings counted in the last 3 days (js/bridges.js)
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
     if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
     if (BF.breeding) BF.breeding.exportAll(out);   // newborns "<village key>#2000+k" (+ .bred), "breeding:cd"
     if (BF.shepherd) BF.shepherd.exportAll(out);   // "pens:<village key>" -> the sheep of each village pen
-    if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated
+    if (BF.poultry) BF.poultry.exportAll(out);   // "coops:<village key>" -> the chickens and nest eggs of each coop
+    if (BF.cowherd) BF.cowherd.exportAll(out);   // "pastures:<village key>" -> the cows of each pasture
+    if (BF.pigFarmer) BF.pigFarmer.exportAll(out);   // "sties:<village key>" -> the pigs of each sty
+    if (BF.stables && BF.stables.exportAll) BF.stables.exportAll(out);   // "stables:stocked" -> villages whose generated stable got its starting horses
+    if (BF.baker) BF.baker.exportAll(out);   // "ovens" -> what each baker's oven holds
+    if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
+    if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
     for (const rec of villages.values()) {
       const v = rec.dead ? [...rec.dead] : [];
@@ -2167,16 +2712,23 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked") villagerSaves.set(k, o[k]);
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [], g: Math.max(0, Math.floor(+o[k].g || 0)) });
     for (const rec of villages.values()) applyDead(rec);
     if (BF.villageSim) BF.villageSim.importSeen(o);
+    if (BF.bridges) BF.bridges.importAll(o);
     if (BF.builder) BF.builder.importAll(o);
     if (BF.villageLife) BF.villageLife.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
+    if (BF.poultry) BF.poultry.importAll(o);
+    if (BF.cowherd) BF.cowherd.importAll(o);
+    if (BF.pigFarmer) BF.pigFarmer.importAll(o);
+    if (BF.stables && BF.stables.importAll) BF.stables.importAll(o);
+    if (BF.baker) BF.baker.importAll(o);
+    if (BF.merchant) BF.merchant.importAll(o);
   },
   // Right-click on a mob (called by the player module). Opens the trade screen when the inventory module has one
   // (returns null); otherwise falls back to a simple 3 wheat -> 1 emerald trade and returns a message string.
@@ -2184,6 +2736,7 @@ BF.mobs = {
     if (!mob || mob.dead || mob.removed || mob.type !== "villager") return null;
     if (mob.sleeping) return "Villager is sleeping";
     if (mob.child) { mob.lookAt = "player"; mob.ai.lookT = 1.5; return "The child is too young to trade"; }
+    if (mob.profession === "stable_hand" && BF.stables) { const msg = BF.stables.playerSells(mob); if (msg) return msg; }   // the player leading a tamed horse sells it to the stable (js/stables.js)
     mob.ai.was = { mode: mob.ai.mode, flee: mob.ai.fleeT > 0 };   // what it was doing, for the trade screen's status line (js/villagerstatus.js)
     mob.lookAt = "player"; mob.ai.lookT = 3; mob.ai.mode = "idle"; mob.ai.t = 3;
     const inv = BF.inventory, I = BF.I || {};
@@ -2223,6 +2776,25 @@ BF.mobs = {
     if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
     m.halfWidth = TYPES.sheep.hw * (0.5 + 0.5 * k); m.height = TYPES.sheep.h * (0.55 + 0.45 * k);
   },
+  // js/horses.js: swaps every part to the model of another variant (coat / marking) and shows or hides one part (the saddle)
+  setLook(m, variant) {
+    if (!m || !m.meshes) return;
+    for (const p of typeParts(m.type, variant)) if (m.meshes[p.name]) { m.meshes[p.name].geometry = p.geo; m.meshes[p.name].userData.part = p; }
+    m.variant = variant;
+  },
+  showPart(m, name, on) { if (m && m.meshes && m.meshes[name]) m.meshes[name].visible = !!on; },
+  // js/poultry.js: chick to adult size (k: 0 = hatched .. 1 = grown)
+  setChickenSize(m, k) {
+    if (!m || m.type !== "chicken") return;
+    const s = 0.5 + 0.5 * k, hs = 1.3 + (1 - 1.3) * k;
+    m.model.scale.setScalar(s);
+    if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
+    m.halfWidth = TYPES.chicken.hw * (0.6 + 0.4 * k); m.height = TYPES.chicken.h * (0.5 + 0.5 * k);
+  },
+  // js/cowherd.js: calf to adult size (k: 0 = born .. 1 = grown)
+  setCowSize(m, k) { if (m && m.type === "cow") setYoungSize(m, k, 1.35); },
+  // js/herd.js users (cows, pigs): a young animal's size (k: 0 = born .. 1 = grown), half size at birth with a bigger head (hs0 at birth)
+  setYoungSize,
   // js/jobs.js: the deterministic roster of a village record ({key, houses, nb}) and in-place profession change (rebuilds the outfit)
   roster: villageRoster,
   setProfession(m, prof) {
@@ -2241,7 +2813,8 @@ BF.mobs = {
     return true;
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
-  nav: { findPath, followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
+  isOccupied,
+  nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
   spawning: true,
   // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it
   onSet(x, y, z, oldId, id) {
@@ -2260,10 +2833,16 @@ BF.mobs = {
     villagerSaves.clear();
     pendingDead.clear();
     if (BF.builder) BF.builder.reset();
+    if (BF.bridges) BF.bridges.reset();
     if (BF.villageLife) BF.villageLife.reset();
     if (BF.jobs) BF.jobs.reset();
     if (BF.villageSim) BF.villageSim.reset();
     if (BF.shepherd) BF.shepherd.reset();
+    if (BF.stables) BF.stables.reset();
+    if (BF.poultry) BF.poultry.reset();
+    if (BF.cowherd) BF.cowherd.reset();
+    if (BF.pigFarmer) BF.pigFarmer.reset();
+    if (BF.baker) BF.baker.reset();
   },
 };
 })();

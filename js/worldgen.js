@@ -129,7 +129,30 @@ let GEN = 1, SC = 1;
 // Village generator of the current world (BF.state.villages): 1 = classic (8-25 buildings, roster capped at 24, kept for saved worlds),
 // 2 = each village draws a population of 2-100 villagers and its layout grows until it has a bed for every one of them.
 // 3 = as 2, with at least 4 villagers (a miner, a farmer, a forester and a toolsmith, js/mobs.js villageRoster) and a garden with trees in desert villages.
+// 4 = as 3, and a village of 8 or more villagers has a poultry keeper with a chicken coop (js/poultry.js). Worlds saved with 3 keep 3: no coops appear in them.
+// 5 = as 4, and a village of 10 or more villagers on grass has a cowherd with a fenced pasture (js/cowherd.js). Worlds saved with 4 keep 4: no pastures appear in them.
+// 6 = as 5, and a village of 15 or more villagers has a baker per 15 villagers, with a baker's oven placed by the jobs plan (js/baker.js, js/mobs.js
+//     villageRoster, js/jobs.js planVillage); no plot of its own, so layouts are the same as 5. Worlds saved with 5 keep 5: their bakers come when an oven is placed.
+// 7 = as 6, and windows are glass panes instead of glass blocks; a village with natural sand within 64 blocks (sandNear) starts with a glassmaker,
+//     a glass kiln and a furnace 80% of the time (js/glassmaker.js, js/mobs.js villageRoster, js/jobs.js planVillage). Worlds saved with 6 keep 6:
+//     their buildings keep their glass blocks (builders build panes everywhere: recordBuilding).
+// 8 = as 7, and bees (js/bees.js): about 3% of oak and birch trees in forests, meadows and plains carry a bee nest; a grass village of 6 or more
+//     villagers starts with a beekeeper, its honey extractor, 2 beehives of 8-12 bees and a small flower bed by the farms (js/beekeeper.js,
+//     js/mobs.js villageRoster, js/jobs.js planVillage). Worlds saved with 7 keep 7: no nests appear in their trees.
+// 9 = as 8, and a village of 10 or more villagers on grass gets a pig farmer 60% of the time (js/mobs.js villageRoster, drawn from the village
+//     key), with a 7x8 sty added after every other plot (so nothing else moves) and its feed trough beside the gate (js/pigfarmer.js,
+//     js/jobs.js planVillage). Worlds saved with 8 or less keep theirs: no sties appear in them.
+// 10 = as 9, with one rule for animal keepers (idea-044, paddockPlan): the village's size and the animals native to its biome decide how many
+//     paddocks it gets (no population or grass thresholds), a weighted roll picks each one's animal, and each paddock has its own keeper
+//     (shepherd, cowherd, poultry keeper, pig farmer or stable hand, js/mobs.js villageRoster). Pens are no longer rolled among the plots,
+//     a pasture always has a grass floor, a horse paddock is a stable laid out as the builder's (blueprints.js "stable"). There is no spawn
+//     village: every village is a region village on the strict site rules. Worlds saved with 9 or less keep theirs.
 let VGEN = 1;
+let REC = false;          // recordBuilding is running (builders' blueprints): windows are panes whatever the world's village generator
+const winB = () => (VGEN >= 7 || REC ? BF.B.glass_pane : BF.B.glass);
+const BAKER_POP = 15;     // village generator 6: a baker per this many villagers (js/mobs.js villageRoster reads BF.worldgen.BAKER_POP)
+const PIG_POP = 10;       // village generator 8: villages of this many villagers on grass may get a pig farmer and a sty (js/mobs.js villageRoster reads BF.worldgen.PIG_POP)
+const COWHERD_POP = 10;   // village generator 5: villages of this many villagers on grass get a cowherd and a pasture (js/mobs.js villageRoster reads BF.worldgen.COWHERD_POP)
 // World limits per generator (see docs/MILE_HIGH_CONTRACT.md): [MIN_Y, H (exclusive top), SEA]
 BF.setLimits = function (gen) {
   const L = gen >= 3 ? [-64, 3072, 0] : [0, 192, 48];
@@ -777,6 +800,36 @@ function villagePop(a, b, salt) {
 // Half-width of the square a village of `pop` villagers may spread over around its centre (72 for the classic generator).
 const villageExtent = pop => Math.min(150, Math.max(56, Math.round(40 + 36 * Math.sqrt(pop / 18))));
 
+// Village generator 10 (idea-044): the paddocks of a village of `pop` villagers centred at (x, z), in roll order, e.g. ["sheep", "cow", "sheep"].
+// Native animals are the village biome's wild animals (js/wildlife.js HABITAT: open land 5, woods 3, snow 1, else none). The count is
+// E = pop / 10 x (0.4 + 0.15 x native types) x a factor of 0.6-1.4, its fractional part rounding up by chance; each paddock's animal is a
+// weighted roll, 4 for a native animal and 1 for another, halved for each paddock of it already drawn. A village has one stable at most
+// (js/stables.js keeps one stable hand per village), so a horse is not drawn again. Deterministic from the village key and the world seed.
+const PADDOCK_ANIMALS = ["chicken", "sheep", "pig", "cow", "horse"];
+const KEEPER_OF = { chicken: "poultry_keeper", sheep: "shepherd", pig: "pig_farmer", cow: "cowherd", horse: "stable_hand" };
+function nativeAnimals(biomeId) {
+  const tbl = (BF.wildlife && BF.wildlife.HABITAT && BF.wildlife.HABITAT[biomeId]) || [];
+  return PADDOCK_ANIMALS.filter(a => tbl.some(t => t[0] === a));
+}
+function paddockPlan(x, z, pop, biomeId) {
+  if (!pop || !noise) return [];
+  if (biomeId == null) { climate(Math.floor(x), Math.floor(z)); biomeId = C.biome; }
+  const nat = nativeAnimals(biomeId);
+  const E = pop / 10 * (0.4 + 0.15 * nat.length) * (0.6 + 0.8 * noise.hash(x, z, 701));
+  let n = Math.floor(E);
+  if (noise.hash(x, z, 702) < E - n) n++;
+  const have = {}, out = [];
+  for (let k = 0; k < n; k++) {
+    const w = PADDOCK_ANIMALS.map(a => (a === "horse" && have.horse) ? 0 : (nat.includes(a) ? 4 : 1) / Math.pow(2, have[a] || 0));
+    let r = noise.hash(x + 7 * k, z, 703) * w.reduce((s, q) => s + q, 0), i = 0;
+    while (i < w.length - 1 && (r -= w[i]) >= 0) i++;
+    while (!w[i]) i--;   // float edge: never the horse a second time
+    have[PADDOCK_ANIMALS[i]] = (have[PADDOCK_ANIMALS[i]] || 0) + 1;
+    out.push(PADDOCK_ANIMALS[i]);
+  }
+  return out;
+}
+
 function villageRegion(rx, rz) {
   const key = rx + "," + rz;
   let v = villageCache.get(key);
@@ -802,6 +855,7 @@ let spawnV;
 function spawnVillage() {
   if (spawnV !== undefined) return spawnV;
   spawnV = null;
+  if (VGEN >= 10) return spawnV;   // village generator 10: no spawn village
   const [sx, sz] = findSpawn();
   const pop = VGEN >= 2 ? villagePop(sx, sz, 540) : 0;
   outer: for (let r = 80; r <= 320; r += 8)  // a village somewhere nearby, but not on top of spawn
@@ -823,9 +877,10 @@ function villageAt(x, z, m) {
   return inVillage(v, x, z, m) ? v : null;
 }
 
+const PASSES10 = [[3, 0], [3, 1], [12, 0], [21, 0], [30, 1], [30, 0], [39, 0], [39, 1]];   // village generator 10: paddock plots, nearest first (back from the road, past its end)
 const BTYPES = {
   house: [5, 5], house2: [5, 6], lhouse: [7, 7], big: [7, 7], library: [9, 7], church: [5, 10],
-  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11],
+  smith: [7, 6], farm: [9, 7], bigfarm: [13, 9], pen: [9, 8], hay: [3, 3], garden: [11, 11], coop: [7, 7], pasture: [11, 9], sty: [7, 8], stable: [13, 7],
 };
 const LIVABLE = { house: 1, house2: 1, lhouse: 1, big: 1, library: 1, church: 1, smith: 1 };
 // Beds of a building in its local coords (u along the road, q inward): [footU, footQ, axis the head lies along (+1)].
@@ -858,6 +913,8 @@ function layoutVillage(cx, cz, spawn, pop) {
   const v = { x: cx, y: y0, z: cz, biome: NAMES[biome], style, pads: [], roads: [], lamps: [], decor: [], buildings: [], houses: [],
     minX: cx - 7, maxX: cx + 7, minZ: cz - 7, maxZ: cz + 7, minY: y0 };
   if (pop) v.pop = pop;
+  if (VGEN >= 10) v.biomeId = biome;   // village generator 10: the roster's paddock plan reads it (paddockPlan)
+  v.ground = biome === DESERT ? 1 : style === 2 ? 2 : 0;   // set again at the end (unchanged); known this early for the roster (js/mobs.js villageRoster: cowherds on grass)
   const E = pop ? villageExtent(pop) : 72, RL = E - 8;    // building / road reach from the centre
   const sc = pop ? Math.max(1, Math.sqrt(pop / 18)) : 1; // street length scale
   let occ = [];
@@ -934,7 +991,7 @@ function layoutVillage(cx, cz, spawn, pop) {
   const pick = () => {
     const r = rand();
     const ty = r < 0.24 ? "house" : r < 0.36 ? "house2" : r < 0.46 ? "lhouse" : r < 0.55 ? "big" : r < 0.6 ? "library" :
-      r < 0.65 ? "church" : r < 0.7 ? "smith" : r < 0.82 ? "farm" : r < 0.87 ? "bigfarm" : r < 0.94 ? "pen" : "hay";
+      r < 0.65 ? "church" : r < 0.7 ? "smith" : r < 0.82 ? "farm" : r < 0.87 ? "bigfarm" : r < 0.94 ? (VGEN >= 10 ? "hay" : "pen") : "hay";   // village generator 10: pens come only with shepherds (below)
     if (caps[ty] && (count[ty] || 0) >= caps[ty]) return "house";
     return ty;
   };
@@ -1032,9 +1089,14 @@ function layoutVillage(cx, cz, spawn, pop) {
   // beside it. Pens the layout already rolled are used first; missing ones are added here, after everything else, so no other plot moves.
   // v.nb0 keeps the building count of the original layout: the villager roster keys off it (js/mobs.js), so these pens never change it.
   v.nb0 = v.buildings.length;
+  // village generator 10: one paddock per keeper of the roster's paddock plan (paddockPlan), no cap, and reaching as far as the village does
+  let keepers = null;
+  if (VGEN >= 10 && BF.jobs && BF.jobs.keeperCounts) { try { keepers = BF.jobs.keeperCounts(v); } catch (e) { keepers = {}; } }
+  const K10 = p => (keepers && keepers[p]) || 0, RCH = keepers ? Math.max(80, E + 8) : 0;
   if (GEN >= 3 && BF.jobs && BF.jobs.shepherdCount) {
     let need = 0;
-    try { need = Math.min(BF.jobs.shepherdCount(v), 4); } catch (e) { need = 0; }
+    if (keepers) need = K10("shepherd");
+    else try { need = Math.min(BF.jobs.shepherdCount(v), 4); } catch (e) { need = 0; }
     let have = v.buildings.filter(b => b.type === "pen").length;
     const [w, d] = BTYPES.pen;
     // A pen plot at step t along a road, `back` blocks off its side: true when it fit and was added.
@@ -1044,7 +1106,8 @@ function layoutVillage(cx, cz, spawn, pop) {
       const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
       const c0 = P(0, 0), c1 = P(w - 1, d - 1);
       const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
-      if (!(Math.abs(box[0] - cx) < 72 && Math.abs(box[2] - cx) < 72 && Math.abs(box[1] - cz) < 72 && Math.abs(box[3] - cz) < 72) || overlaps(box) || covers(box, 1)) return false;
+      const lim = RCH || 72;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
       const du = w >> 1, door = P(du, 0), front = P(du, -1);
       const y = climate(front[0], front[1]);
       if (y < SEA || C.rv) return false;
@@ -1064,7 +1127,7 @@ function layoutVillage(cx, cz, spawn, pop) {
       return true;
     };
     // Free road frontage first; when the layout already filled it (large villages), past the road ends, then a row further back.
-    const passes = [[3, 0], [3, 1], [12, 0], [21, 0]];
+    const passes = keepers ? PASSES10 : [[3, 0], [3, 1], [12, 0], [21, 0]];
     for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
       const t0 = beyond ? road.end + 2 : 1, t1 = beyond ? road.end + 24 : road.end + 2 - w;
       for (let t = t0; t <= t1 && have < need; t += 2) if (tryPen(road, side, t, back)) t += w;
@@ -1100,6 +1163,152 @@ function layoutVillage(cx, cz, spawn, pop) {
     found: for (const back of [-(d >> 1), 3, -d - 2]) for (const road of order) for (let t = road.end + 3; t <= road.end + 12; t += 3) if (tryGarden(road, t, back)) break found;
   }
 
+  // Chicken coop (village generator 4): a village of 8 or more villagers has a poultry keeper (js/mobs.js villageRoster), who gets a fenced coop
+  // with its nesting box beside it (js/jobs.js planVillage, js/poultry.js). Added last, like the pens, so no other plot moves.
+  const nCoop = keepers ? K10("poultry_keeper") : VGEN >= 4 && (v.pop || 0) >= 8 ? 1 : 0;
+  if (nCoop > 0) {
+    const [w, d] = BTYPES.coop;
+    let have = 0;
+    const tryCoop = (road, side, t, back) => {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side: the nesting box stands beside the fence
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      const lim = RCH || 72;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
+      const du = w >> 1, door = P(du, 0), front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u++) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "coop", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 641) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    const passes = keepers ? PASSES10 : [[3, 0], [3, 1], [12, 0], [21, 0]];
+    found: for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 2, t1 = beyond ? road.end + 24 : road.end + 1 - w;
+      for (let t = t0; t <= t1; t += 2) if (tryCoop(road, side, t, back)) { if (++have >= nCoop) break found; t += w; }
+    }
+  }
+
+  // Pasture (village generator 5): a village of 10 or more villagers on grass has a cowherd (js/mobs.js villageRoster, when one of its residents
+  // can make way), who gets a fenced pasture with its milk churn beside it (js/jobs.js planVillage, js/cowherd.js). Added last, after the coop, so no other plot moves.
+  let cowherd = 0;
+  if (keepers) cowherd = K10("cowherd");
+  else if (VGEN >= 5 && (v.pop || 0) >= COWHERD_POP && v.ground === 0 && BF.jobs && BF.jobs.cowherdCount) { try { cowherd = BF.jobs.cowherdCount(v); } catch (e) { cowherd = 0; } }
+  if (cowherd > 0) {   // only when the roster has room for the cowherd (a village whose residents are all tradespeople it cannot replace has none)
+    const [w, d] = BTYPES.pasture;
+    let have = 0;
+    const tryPasture = (road, side, t, back) => {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side: the churn stands beside the fence
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      const lim = RCH || 80;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
+      const du = w >> 1, door = P(du, 0), front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u++) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "pasture", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 651) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    const passes = keepers ? PASSES10 : [[3, 0], [3, 1], [12, 0], [21, 0], [30, 1]];
+    found: for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 2, t1 = beyond ? road.end + 24 : road.end + 1 - w;
+      for (let t = t0; t <= t1; t += 2) if (tryPasture(road, side, t, back)) { if (++have >= cowherd) break found; t += w; }
+    }
+  }
+
+  // Sty (village generator 8): a village of PIG_POP (10) or more villagers on grass whose roster drew a pig farmer (js/mobs.js villageRoster, 60%)
+  // gets a fenced sty with the feed trough beside its gate (js/jobs.js planVillage, js/pigfarmer.js). Added last, after the pasture, so no other plot moves.
+  let pigs = 0;
+  if (keepers) pigs = K10("pig_farmer");
+  else if (VGEN >= 9 && (v.pop || 0) >= PIG_POP && v.ground === 0 && BF.jobs && BF.jobs.pigFarmerCount) { try { pigs = BF.jobs.pigFarmerCount(v); } catch (e) { pigs = 0; } }
+  if (pigs > 0) {
+    const [w, d] = BTYPES.sty;
+    let have = 0;
+    const trySty = (road, side, t, back) => {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(-1, 0), c1 = P(w, d - 1);   // one column more on each side, and the row in front of the fence: the trough stands beside the gate
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      const lim = RCH || 80;
+      if (!(Math.abs(box[0] - cx) < lim && Math.abs(box[2] - cx) < lim && Math.abs(box[1] - cz) < lim && Math.abs(box[3] - cz) < lim) || overlaps(box) || covers(box, 1)) return false;
+      const du = w >> 1, door = P(du, 0), front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u++) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      v.buildings.push({ type: "sty", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 661) });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    const passes = keepers ? PASSES10 : [[3, 0], [3, 1], [12, 0], [21, 0], [30, 1]];
+    found: for (const [back, beyond] of passes) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 2, t1 = beyond ? road.end + 24 : road.end + 1 - w;
+      for (let t = t0; t <= t1; t += 2) if (trySty(road, side, t, back)) { if (++have >= pigs) break found; t += w; }
+    }
+  }
+
+  // Stable (village generator 10): a village whose paddock plan drew a horse gets the builder's stable (blueprints.js "stable": a shelter
+  // and an 8x7 paddock with a double gate), its gate facing the road; the tack rack inside is the jobs plan's (js/jobs.js planVillage,
+  // js/stables.js stableOf reads the building's rot and corner).
+  if (K10("stable_hand") > 0 && BF.blueprints) {
+    const [w, d] = BTYPES.stable;
+    const tryStable = (road, side, t, back) => {
+      const { dx, dz } = road, sx = dz ? side : 0, sz = dx ? side : 0;
+      const bx = road.sx + dx * t + sx * back, bz = road.sz + dz * t + sz * back;
+      const P = (u, q) => [bx + dx * u + sx * q, bz + dz * u + sz * q];
+      const c0 = P(0, 0), c1 = P(w - 1, d - 1);
+      const box = [Math.min(c0[0], c1[0]) - 1, Math.min(c0[1], c1[1]) - 1, Math.max(c0[0], c1[0]) + 1, Math.max(c0[1], c1[1]) + 1];
+      if (!(Math.abs(box[0] - cx) < RCH && Math.abs(box[2] - cx) < RCH && Math.abs(box[1] - cz) < RCH && Math.abs(box[3] - cz) < RCH) || overlaps(box) || covers(box, 1)) return false;
+      const du = 8, front = P(du, -1);
+      const y = climate(front[0], front[1]);
+      if (y < SEA || C.rv) return false;
+      for (let q = -1; q <= d; q++) for (let u = -1; u <= w; u++) {
+        const p = P(u, q), h = climate(p[0], p[1]);
+        if (h < SEA || C.rv || Math.abs(h - y) > 3) return false;
+      }
+      // the blueprint turn whose gate looks onto the road (local q = -1 in front of it)
+      const ox = box[0] + 1, oz = box[1] + 1, qOf = (X, Z) => dx ? (Z - bz) * sz : (X - bx) * sx;
+      let rot = -1, bp = null;
+      for (let k = 0; k < 4 && rot < 0; k++) {
+        const g = BF.blueprints.get("stable", k, style, 0.5, null, "oak");
+        if (g && g.marks.out && g.marks.out.every(([mx, mz]) => qOf(ox + mx, oz + mz) === -1)) { rot = k; bp = g; }
+      }
+      if (rot < 0) return false;
+      const door = [ox + bp.marks.out[0][0], oz + bp.marks.out[0][1]], rk = bp.marks.rack[0];
+      v.buildings.push({ type: "stable", w, d, y, bx, bz, ax: dx, az: dz, sx, sz, du, doorX: door[0], doorZ: door[1],
+        x0: box[0] + 1, z0: box[1] + 1, x1: box[2] - 1, z1: box[3] - 1, h: noise.hash(bx, bz, 671), rot, ox, oz, rack: [ox + rk[0], oz + rk[1]] });
+      occ.push(box);
+      v.pads.push({ x0: box[0], z0: box[1], x1: box[2], z1: box[3], y, path: false });
+      return true;
+    };
+    found: for (const [back, beyond] of PASSES10) for (const road of roads) for (const side of [1, -1]) {
+      const t0 = beyond ? road.end + 2 : 2, t1 = beyond ? road.end + 24 : road.end + 1 - w;
+      for (let t = t0; t <= t1; t += 2) if (tryStable(road, side, t, back)) break found;
+    }
+  }
+
   // lamps on the plaza corners and along road edges
   v.lamps.push([cx - 7, cz - 7], [cx + 7, cz - 7], [cx - 7, cz + 7], [cx + 7, cz + 7]);
   for (const road of roads) {
@@ -1124,6 +1333,11 @@ function layoutVillage(cx, cz, spawn, pop) {
   }
   for (const [x, z] of v.lamps) {
     v.minX = Math.min(v.minX, x); v.maxX = Math.max(v.maxX, x); v.minZ = Math.min(v.minZ, z); v.maxZ = Math.max(v.maxZ, z);
+  }
+  // signposts to nearby villages (js/signs.js): sites at the main road ends and on the plaza, inside the village box as it stands
+  // (they never grow it, so which villages a world has stays the same); which ones stand is decided when the village is drawn
+  if (BF.signs && BF.signs.planPosts) {
+    try { v.posts = BF.signs.planPosts(v, { climate: (x, z) => climate(x, z) }); } catch (e) { console.error(e); v.posts = null; }
   }
   for (const p of v.pads) v.minY = Math.min(v.minY, p.y);
   v.ground = biome === DESERT ? 1 : style === 2 ? 2 : 0;
@@ -1243,6 +1457,10 @@ function drawVillage(v, ox, oz, vox, hAt) {
     for (const j of v.jobsites) if (j.id != null) set(j.x, j.y, j.z, j.id);
   }
   if (v.arch && BF.signs && BF.signs.drawArch) BF.signs.drawArch(v, set, styles()[v.style]); // entry arch + village sign (js/signs.js)
+  if (v.posts && BF.signs && BF.signs.drawPosts) {   // signposts to nearby villages (js/signs.js); finding the neighbours lays them out, so keep C
+    if (!v.posts.assigned) { const c0 = Object.assign({}, C); try { BF.signs.assignPosts(v); } catch (e) { console.error(e); } Object.assign(C, c0); }
+    BF.signs.drawPosts(v, set, styles()[v.style]);
+  }
 }
 
 // A box room: foundation ring + floor at y, walls y+1..y+Hh, log corners, air inside.
@@ -1270,7 +1488,7 @@ function flatRoof(P, u0, q0, w, d, y, mat, rim) {
     P(u, y, q, rim && (u === u0 || u === u0 + w - 1 || q === q0 || q === q0 + d - 1) ? rim : mat);
 }
 function windows(P, u0, q0, w, d, y, skipFront) {
-  const G = BF.B.glass;
+  const G = winB();
   for (let u = u0 + 2; u < u0 + w - 2; u += 2) { P(u, y, q0 + d - 1, G); if (!skipFront && w >= 7) P(u, y, q0, G); }
   for (let q = q0 + 2; q < q0 + d - 1; q += 2) { P(u0, y, q, G); P(u0 + w - 1, y, q, G); }
 }
@@ -1362,6 +1580,59 @@ function drawShell(b, P, S, style) {
       P(du, y, -1, B.dirt_path);
       return;
     }
+    case "pasture": {
+      // cow pasture (js/cowherd.js): a fenced grass field with a gate facing the road, hay bales and a sunken water trough along the back; the churn beside it is the jobs plan's
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
+        if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
+        else if (!edge) P(u, y, q, VGEN >= 10 ? B.grass : v_ground(style));   // village generator 10: a grass floor, in a desert or snowy village too
+      }
+      if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
+      P(1, y + 1, d - 2, B.hay_bale); P(2, y + 1, d - 2, B.hay_bale);
+      for (let u = w - 5; u <= w - 2; u++) P(u, y, d - 2, B.water);
+      P(du, y, -1, B.dirt_path);
+      return;
+    }
+    case "sty": {
+      // pig sty (js/pigfarmer.js): a fenced pen with a gate facing the road, a muddy coarse-dirt corner by the gate, a sunken water trough in
+      // the back row and a small plank-roofed shelter over the back corner; the feed trough beside the gate is the jobs plan's
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
+        if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
+        else if (!edge) P(u, y, q, (u <= 2 && q <= 2 && !(u === 2 && q === 2)) || (u === 1 && q === 3) ? B.coarse_dirt : v_ground(style));
+      }
+      if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
+      P(1, y, d - 2, B.water); P(2, y, d - 2, B.water);
+      for (const [u, q] of [[w - 1, d - 3], [w - 3, d - 1], [w - 1, d - 1]]) P(u, y + 2, q, B.oak_fence);   // the shelter's posts (on the fence; none in the pen)
+      for (let q = d - 3; q < d; q++) for (let u = w - 3; u < w; u++) P(u, y + 3, q, B.planks);
+      P(du, y, -1, B.dirt_path);
+      return;
+    }
+    case "stable": {
+      // stable (village generator 10, js/stables.js): the builder's blueprint, turned so its gate faces the road (layoutVillage picked b.rot);
+      // blueprint level 0 stands on the pad. The tack rack is the jobs plan's (js/jobs.js planVillage puts it on the rack mark).
+      const bp = BF.blueprints.get("stable", b.rot, style, 0.5, null, "oak");
+      for (const c of bp.cells) {
+        if (c.id === B.tack_rack) continue;
+        const X = b.ox + c.x, Z = b.oz + c.z;
+        const u = b.ax ? (X - b.bx) * b.ax : (Z - b.bz) * b.az, q = b.ax ? (Z - b.bz) * b.sz : (X - b.bx) * b.sx;
+        P(u, y + 1 + c.y, q, c.id);
+      }
+      for (const [mx, mz] of bp.marks.out) { const X = b.ox + mx, Z = b.oz + mz; P(b.ax ? (X - b.bx) * b.ax : (Z - b.bz) * b.az, y, -1, B.dirt_path); }
+      return;
+    }
+    case "coop": {
+      // chicken coop (js/poultry.js): a fenced run with a gate facing the road and hay bales in the back corners; the nesting box beside it is the jobs plan's
+      for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
+        const edge = u === 0 || u === w - 1 || q === 0 || q === d - 1;
+        if (edge && !(q === 0 && u === du)) P(u, y + 1, q, B.oak_fence);
+        else if (!edge) P(u, y, q, noise.hash(b.bx + u, b.bz + q, 642) < 0.35 ? B.coarse_dirt : v_ground(style));   // scratched-up ground
+      }
+      if (BF.gateId) P(du, y + 1, 0, BF.gateId(b.ax !== 0 ? "x" : "z", 0));
+      P(1, y + 1, d - 2, B.hay_bale); P(w - 2, y + 1, d - 2, B.hay_bale);
+      P(du, y, -1, B.dirt_path);
+      return;
+    }
     case "smith": {
       const wall = style === 1 ? B.sandstone : B.cobblestone;
       for (let q = 0; q < d; q++) for (let u = 0; u < w; u++) {
@@ -1370,7 +1641,7 @@ function drawShell(b, P, S, style) {
         for (let k = 1; k <= 3; k++) P(u, y + k, q, (eu && q === 0) ? B.oak_fence : eu || eq || q === 0 ? wall : 0);
       }
       flatRoof(P, 0, 0, w, d, y + 4, flat ? S.roof : B.planks, flat ? 0 : S.corner);
-      door(); P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass);
+      door(); P(1, y + 2, 0, winB()); P(w - 2, y + 2, 0, winB());
       const cq = VGEN >= 3 ? d - 3 : d - 2;   // village generator 3: chest in front of the table, so its lid is clear; older worlds keep the 1.0 spot, where their saved chest contents are
       P(1, y + 1, d - 2, BF.furnaceId(out)); P(2, y + 1, d - 2, BF.furnaceId(out)); P(w - 2, y + 1, cq, BF.chestId(out)); P(w - 2, y + 1, 2 * d - 5 - cq, B.crafting_table);
       P(1, y + 1, 1, B.lantern);
@@ -1392,8 +1663,8 @@ function drawShell(b, P, S, style) {
       P(2, y + 11, d - 3, B.bell); P(2, y + 10, d - 3, B.oak_fence); P(2, y + 14, d - 3, B.lantern);
       if (flat) flatRoof(P, 0, 0, w, d - 5, y + 6, S.roof, 0);
       else roof(P, S, 0, 0, w, d - 4, y + 5, wall, S.roof);
-      door(); P(du, y + 3, 0, B.glass);
-      for (let q = 2; q < d - 1; q += 2) { P(0, y + 2, q, B.glass); P(0, y + 3, q, B.glass); P(w - 1, y + 2, q, B.glass); P(w - 1, y + 3, q, B.glass); }
+      door(); P(du, y + 3, 0, winB());
+      for (let q = 2; q < d - 1; q += 2) { P(0, y + 2, q, winB()); P(0, y + 3, q, winB()); P(w - 1, y + 2, q, winB()); P(w - 1, y + 3, q, winB()); }
       P(2, y + 1, d - 2, B.crafting_table);
       return;
     }
@@ -1415,7 +1686,7 @@ function drawShell(b, P, S, style) {
       if (flat) { flatRoof(P, 0, 0, w, 4, y + 4, S.roof, 0); flatRoof(P, side, 3, 3, d - 3, y + 4, S.roof, 0); }
       else { roof(P, S, 0, 0, w, 4, y + 3, S.wall, S.roof); roof(P, S, side, 4, 3, d - 4, y + 3, S.wall, S.roof); }
       door();
-      P(1, y + 2, 0, B.glass); P(w - 2, y + 2, 0, B.glass); P(side + 1, y + 2, d - 1, B.glass);
+      P(1, y + 2, 0, winB()); P(w - 2, y + 2, 0, winB()); P(side + 1, y + 2, d - 1, winB());
       P(side === 0 ? w - 2 : 1, y + 1, 2, B.crafting_table);
       return;
     }
@@ -1425,7 +1696,7 @@ function drawShell(b, P, S, style) {
       box(P, S, 0, 0, w, d, y, 7, S.wall, S.floor);
       for (let q = 1; q < d - 1; q++) for (let u = 1; u < w - 1; u++) if (!(u === lu && q === d - 2)) P(u, y + 4, q, S.floor);
       for (let q = 1; q < d - 1; q++) { P(0, y + 4, q, S.log); P(w - 1, y + 4, q, S.log); }
-      windows(P, 0, 0, w, d, y + 2, true); windows(P, 0, 0, w, d, y + 6, false); P(1, y + 6, 0, B.glass); P(w - 2, y + 6, 0, B.glass);
+      windows(P, 0, 0, w, d, y + 2, true); windows(P, 0, 0, w, d, y + 6, false); P(1, y + 6, 0, winB()); P(w - 2, y + 6, 0, winB());
       P(lu, y + 2, d - 1, S.wall);                         // no window behind the ladder (ladders need a solid wall)
       for (let k = 1; k <= 5; k++) P(lu, y + k, d - 2, BF.ladderId(out));   // against the back wall, one rung above the upper floor to step off
       if (flat) flatRoof(P, 0, 0, w, d, y + 8, S.roof, 0); else roof(P, S, 0, 0, w, d, y + 7, S.wall, S.roof);
@@ -1957,6 +2228,14 @@ function core(cx, cz, vox, Y0, NY) {
     disc(tx, top, tz, 1, leaf, 0.99);
     putLeaf(tx, top, tz, leaf);
   }
+  // Village generator 8 (js/bees.js): about 3% of the oak and birch trees of forests, birch forests, meadows and plains (biomes with flowers)
+  // carry a bee nest on one side of the trunk, just under the leaves. Older worlds keep their trees as they were.
+  function nestTree(tx, ty, tz, log, leaf, hgt, wide) {
+    oakTree(tx, ty, tz, log, leaf, hgt, wide);
+    if (VGEN < 8 || BF.B.bee_nest == null || noise.hash(tx, tz, 777) >= 0.03) return;
+    const [dx, dz] = BF.DIRS[(noise.hash(tx, tz, 778) * 4) | 0];
+    putLog(tx + dx, Math.max(ty + 1, ty + hgt - 4), tz + dz, BF.B.bee_nest);
+  }
   function spruceTree(tx, ty, tz, hgt) {
     const top = ty + hgt;
     for (let y = ty; y < top; y++) putLog(tx, y, tz, B.spruce_log);
@@ -2133,15 +2412,16 @@ function core(cx, cz, vox, Y0, NY) {
         case CHERRY: cherry(tx, ty, tz, 4 + ((r3 * 3) | 0)); break;
         case MUSHROOM: giantMushroom(tx, ty, tz, r2 < 0.5); break;
         case BIRCH: case MEADOW:
-          if (r2 < 0.85 || b === MEADOW) oakTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
-          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
+          if (r2 < 0.85 || b === MEADOW) nestTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
+          else nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
           break;
         case FOREST: case FLOWER_FOREST:
-          if (r2 < 0.3) oakTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
-          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
+          if (r2 < 0.3) nestTree(tx, ty, tz, B.birch_log, B.birch_leaves, 5 + ((r3 * 3) | 0), false);
+          else nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
           break;
         default:
-          oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), b === SWAMP);
+          if (b === PLAINS) nestTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), false);
+          else oakTree(tx, ty, tz, B.oak_log, B.oak_leaves, 4 + ((r3 * 3) | 0), b === SWAMP);
       }
     }
   // jungle undergrowth bushes on a 3-grid
@@ -2263,19 +2543,46 @@ function recordBuilding(kind, w, d, style, h) {
   style = style | 0;
   const b = { type: kind, w, d, y: 0, bx: 0, bz: 0, ax: 1, az: 0, sx: 0, sz: 1, du: w >> 1, doorX: 0, doorZ: 0, h: h == null ? 0.5 : h };
   const cells = new Map();
-  drawShell(b, (u, y, q, id) => { cells.set(u + "," + y + "," + q, [u, y, q, id]); }, styles()[style] || styles()[0], style);
+  REC = true;
+  try { drawShell(b, (u, y, q, id) => { cells.set(u + "," + y + "," + q, [u, y, q, id]); }, styles()[style] || styles()[0], style); } finally { REC = false; }
   return [...cells.values()];
+}
+// Natural sand open to the sky within r (64) blocks of (x, z): desert, beach and river-bank sand above the water, from the climate (no chunks
+// needed; a grid every 8 blocks). Villages of generator 7 with it start with a glassmaker (js/mobs.js villageRoster); builders want a glassworks
+// (js/builder.js). Memoised per spot; keeps C (it runs during chunk generation, from js/jobs.js planVillage).
+const sandCache = new Map();
+function sandNear(x, z, r) {
+  r = r || 64; x = Math.round(x); z = Math.round(z);
+  const k = x + "," + z + "," + r;
+  if (sandCache.has(k)) return sandCache.get(k);
+  const c0 = Object.assign({}, C);
+  let found = false;
+  try {
+    for (let dz = -r; dz <= r && !found; dz += 8) for (let dx = -r; dx <= r && !found; dx += 8) {
+      if (dx * dx + dz * dz > r * r) continue;
+      climate(x + dx, z + dz);
+      const b = C.biome, dry = C.h >= C.wl;
+      if (dry && (b === DESERT || b === BEACH || b === RIVER || (b === SNOWY_BEACH && C.h < BF.SEA + 1))) found = true;
+    }
+  } finally { Object.assign(C, c0); }
+  if (sandCache.size > 4000) sandCache.clear();
+  sandCache.set(k, found);
+  return found;
 }
 const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: h == null ? 0.5 : h });
 
 BF.worldgen = {
+  COWHERD_POP,
+  BAKER_POP,
+  paddockPlan, nativeAnimals, KEEPER_OF, PADDOCK_ANIMALS,
+  PIG_POP,
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
     noise = n; GEN = (opts && opts.gen) || 1; VGEN = (opts && opts.villages) || 1; BF.setLimits(GEN); SC = GEN >= 2 ? Math.max(1, (opts && opts.biomeScale) || 1) : 1;
     if (GEN >= 3) placeHome3();
     if (GEN >= 3) BF.rivers.init(n, macro3, { sea: BF.SEA, ns: 168, nmax: 80, reach: 100, marg: 140, outlet: 260, mouth: -2, planar: true, wcap: 128, w0: 2.0, w1: 4.5, wlo: 2, whi: 1000, slo: 20, shi: 500, density: 0.09, hs: 10 });
     else if (GEN >= 2) BF.rivers.init(n, macro2, { sea: BF.SEA });
-    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
+    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); tintCache.clear(); sandCache.clear(); spawnXZ = null; spawnV = undefined; STRATA = null; },
   generate,
   generateBand,
   generateRange,
@@ -2288,6 +2595,9 @@ BF.worldgen = {
   tintAt,
   villagesNear,
   nearestVillage,
+  spawnVillage,   // the village by spawn (village generator 9 and older; null from 10)
+  padAt,
+  sandNear,
   recordBuilding,
   bedPlan: bedPlanOf,
   palette: style => styles()[style | 0] || styles()[0],

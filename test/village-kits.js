@@ -12,17 +12,20 @@ module.exports = async (pg) => {
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     BF.state.paused = true;
 
-    // ---- rosters (village generator 3 is the default for new worlds)
+    // ---- rosters (village generator 9 is the default for new worlds; 3 to 9 have the same rosters but 4 adds a coop and its poultry keeper,
+    // 5 a pasture and its cowherd in grass villages of 10+, 6 a baker per 15 villagers with its oven, 8 a beekeeper, 9 a pig farmer and sty in 60% of grass villages of 10+)
+    let pigFarmers = 0, pigOK = 0, styBad = [];
+    let cowherds = 0, pastureBad = [], bakers = 0, bakerBad = [], bakerShort = 0;
     let villages = 0, minPop = Infinity, core = 0, planned = 0, deserts = 0, gardens = 0, bad = [], desertV = null;
     for (const seed of [1, 2, 3, 4, 5, 6]) {
-      BF.newWorld(seed, { gen: 3 });
-      if (seed === 1) ok("new worlds use village generator 3", BF.state.villages === 3, BF.state.villages);
+      BF.newWorld(seed, { gen: 3, villages: 9 });
+      if (seed === 1) ok("new worlds use village generator 9", BF.state.villages >= 9, BF.state.villages);
       const seen = new Set();
       for (let rz = -8; rz < 8; rz++) for (let rx = -8; rx < 8; rx++) for (const v of BF.worldgen.villagesNear(rx * 384, rz * 384, 200)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
         if (seen.has(key)) continue;
         seen.add(key); villages++;
-        const ro = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0 });
+        const ro = BF.mobs.roster({ key, houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground });
         minPop = Math.min(minPop, v.pop);
         const has = p => ro.some(sl => sl.prof === p);
         if (has("miner") && has("farmer") && has("forester") && has("toolsmith")) core++; else bad.push([seed, key, v.pop, ro.map(sl => sl.prof).join(" ")]);
@@ -35,12 +38,43 @@ module.exports = async (pg) => {
           if (g) { gardens++; if (!desertV && seed === 1) desertV = { x: v.x, z: v.z, g: { x0: g.x0, z0: g.z0, x1: g.x1, z1: g.z1, y: g.y } }; }
         }
         if (v.style !== 1 && v.buildings.some(b => b.type === "garden")) bad.push([seed, key, "garden outside the desert"]);
+        const ch = has("cowherd"), pa = v.buildings.some(b => b.type === "pasture");
+        if (ch) cowherds++;
+        if (ch !== pa || (ch && (v.ground !== 0 || v.pop < 10 || !plan.some(j => j.prof === "cowherd" && slotOf("cowherd").includes(j.slot))))) pastureBad.push([seed, key, v.pop, v.ground, ch, pa]);
+        const pf = has("pig_farmer"), st = v.buildings.some(b => b.type === "sty");
+        if (v.ground === 0 && v.pop >= 10) pigOK++;
+        if (pf) pigFarmers++;
+        if (pf !== st || (pf && (v.ground !== 0 || v.pop < 10 || !plan.some(j => j.prof === "pig_farmer" && j.id === BF.B.feed_trough && slotOf("pig_farmer").includes(j.slot))))) styBad.push([seed, key, v.pop, v.ground, pf, st]);
+        const nb = ro.filter(sl => sl.prof === "baker").length;
+        bakers += nb;
+        if (nb < Math.floor(v.pop / 15)) bakerShort++;   // every resident was someone it may not replace (core jobs, specials, the first shepherds)
+        if (nb > Math.floor(v.pop / 15) || slotOf("baker").some(i => !plan.some(j => j.prof === "baker" && j.slot === i && j.id === BF.B.bakers_oven)) || slotOf("baker").some(i => i < 1800)) bakerBad.push([seed, key, v.pop, nb, slotOf("baker")]);
       }
     }
     ok("sampled villages", villages > 30, villages);
     ok("every village has 4+ villagers", minPop >= 4, minPop);
     ok("every village has a miner, a farmer, a forester and a toolsmith", core === villages, { core, villages, bad: bad.slice(0, 4) });
     ok("each of the four has its jobsite planned", planned === villages, { planned, villages });
+    ok("generator 5: grass villages of 10+ with a cowherd have a pasture and a churn, none without", cowherds > 5 && pastureBad.length === 0, { cowherds, bad: pastureBad.slice(0, 4) });
+    ok("generator 6: a baker per 15 villagers at most (none below 15), each with its oven planned", bakers > 5 && bakerBad.length === 0, { bakers, bad: bakerBad.slice(0, 4) });
+    ok("... and almost every village of 15+ gets its full count (a resident it may replace)", bakerShort <= villages * 0.02, { bakerShort, villages });
+    ok("generator 9: grass villages of 10+ with a pig farmer have a sty and a feed trough, none without", pigFarmers > 5 && styBad.length === 0, { pigFarmers, bad: styBad.slice(0, 4) });
+    ok("... in about 60% of the grass villages of 10+", pigOK > 10 && Math.abs(pigFarmers / pigOK - 0.6) < 0.15, { pigFarmers, of: pigOK });
+    {
+      BF.newWorld(1, { gen: 3, villages: 8 });
+      let n7 = 0, s7 = 0;
+      for (const v of BF.worldgen.villagesNear(0, 0, 1500)) {
+        n7 += BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground }).filter(sl => sl.prof === "pig_farmer").length;
+        s7 += v.buildings.filter(b => b.type === "sty").length;
+      }
+      ok("worlds saved with generator 8 keep 8: no pig farmers or sties", n7 === 0 && s7 === 0, { n7, s7 });
+    }
+    {
+      BF.newWorld(1, { gen: 3, villages: 5 });
+      let n5 = 0;
+      for (const v of BF.worldgen.villagesNear(0, 0, 1500)) n5 += BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground }).filter(sl => sl.prof === "baker").length;
+      ok("worlds saved with generator 5 keep 5: no bakers planned", n5 === 0, n5);
+    }
     ok("every desert village has a garden", deserts > 0 && gardens === deserts, { deserts, gardens });
     const tiny = BF.mobs.roster({ key: "9999,9999", houses: [1, 2, 3, 4].map(() => ({ type: "house", beds: [{}] })), nb: 7, pop: 4 }).map(s => s.prof).sort();
     ok("a 4-villager village is exactly miner, farmer, forester, toolsmith", tiny.join() === "farmer,forester,miner,toolsmith", tiny);
@@ -79,7 +113,7 @@ module.exports = async (pg) => {
 
     // ---- the desert garden, live
     if (desertV) {
-      BF.newWorld(1, { gen: 3, gameMode: "survival" });
+      BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
       BF.mobs.spawning = false;
       const g = desertV.g, gx = (g.x0 + g.x1) >> 1, gz = (g.z0 + g.z1) >> 1;
       BF.player.teleport(gx + 0.5, g.y + 12, gz + 0.5);
@@ -107,7 +141,7 @@ module.exports = async (pg) => {
     } else ok("seed 1 has a desert village to visit", false);
 
     // ---- a farmer with no hoe and no bucket buys both from the toolsmith
-    BF.newWorld(1, { gen: 3, gameMode: "survival" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     const V = BF.worldgen.nearestVillage(0, 0), vkey = Math.round(V.x) + "," + Math.round(V.z);
     BF.player.teleport(V.x + 4.5, V.y + 3, V.z + 4.5);

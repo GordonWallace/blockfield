@@ -1,11 +1,13 @@
+// @ci integration timeout=900
 // Run-down farms (village generator 3): every generated farm has a composter beside it; farms no farmer works at spawn start run
 // down by a seeded amount (fewer crops; past 0.6 dry channels, dehydrated farmland, some or all of it back to dirt); a farmer put on
-// a dry, run-down farm refills its channels and tills its dirt within a game day.
-// Usage: NODE_PATH=$(npm root -g) node test/farm-repair.js [seed=2] [days=1]
+// a dry, run-down farm refills its channels and tills its dirt within three game days (since 1.3 farmers also tend sugar cane and
+// pumpkins, so the repair shares their day; it took one before). A dirt cell beside the water is a cane spot (js/baker.js), not left over.
+// Usage: NODE_PATH=$(npm root -g) node test/farm-repair.js [seed=2] [days=3]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
-const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 1);
+const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -90,10 +92,11 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 1);
     for (const kk in k) kinds[kk] = (kinds[kk] || 0) + k[kk];
   }
   const after = await pg.evaluate(f => {
-    const W = BF.world, B = BF.B, y = f.y, count = { air: 0, water: 0, farm: 0, dry: 0, dirt: 0, crops: 0, grass: 0 };
+    const W = BF.world, B = BF.B, y = f.y, count = { air: 0, water: 0, farm: 0, dry: 0, dirt: 0, cane: 0, crops: 0, grass: 0 };
+    const wet = (x, z) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[W.getBlock(x + dx, y, z + dz)] > 0);
     for (let x = f.x0 + 1; x < f.x1; x++) for (let z = f.z0 + 1; z < f.z1; z++) {
       const id = W.getBlock(x, y, z);
-      if (id === 0) count.air++; else if (BF.FLUID[id]) count.water++; else if (id === B.farmland) count.farm++; else if (id === B.farmland_dry) count.dry++; else if (id === B.dirt) count.dirt++; else count.grass++;
+      if (id === 0) count.air++; else if (BF.FLUID[id]) count.water++; else if (id === B.farmland) count.farm++; else if (id === B.farmland_dry) count.dry++; else if (id === B.dirt) wet(x, z) ? count.cane++ : (count.dirt++, (count.left = count.left || []).push({ at: [x - f.x0, z - f.z0], above: BF.blocks[W.getBlock(x, y + 1, z)].name, above2: BF.blocks[W.getBlock(x, y + 2, z)].name })); else count.grass++;
       if (BF.RENDER[W.getBlock(x, y + 1, z)] === 4) count.crops++;
     }
     return count;
@@ -101,7 +104,7 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 1);
   console.log('tasks', JSON.stringify(kinds));
   ok('a repair project ran', (kinds['project:repair'] || 0) > 0, kinds);
   ok('the channels are full again', after.air === 0 && after.water === before.count.air + before.count.water, after);
-  ok('the dirt is farmland again, and hydrated', after.dirt === 0 && after.farm > 0 && after.dry === 0, after);
+  ok('the dirt is farmland again, and hydrated (but for a few cane spots)', after.dirt === 0 && after.cane <= 3 && after.farm > 0 && after.dry === 0, after);
   ok('crops are planted on it again', after.crops > before.count.crops, after);
   for (const l of lines) console.log(l);
   await b.close();

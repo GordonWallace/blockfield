@@ -10,6 +10,9 @@ const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W and R): 10x
 const FLY = 10.9, FLY_SPRINT = 21.6, CFLY = 16, CFLY_SPRINT = 32, SWIM = 2.2, REACH = 5, MOB_REACH = 3.5;
 const BASE_FOV = 75, AIR_MAX = 10, ATTACK_CD = 0.4, EAT_TIME = 1.2, PLACE_REPEAT = 0.22;
 const HW = 0.3, HEIGHT = 1.8, EYE = 1.62, SNEAK_EYE = 1.47;
+// Bow (vanilla): full draw takes 1 s; power f = (t^2 + 2t) / 3 for t = draw seconds, capped at 1, and below 0.1 nothing is fired.
+// The arrow leaves at 60 f blocks/s (3 blocks a tick) and deals ceil(6 f); a full-draw arrow is critical 1 time in 5 (+1..3, so up to 9).
+const BOW_DRAW = 1, BOW_SPEED = 60, BOW_DAMAGE = 6, BOW_CRIT = 0.2, BOW_MIN = 0.1;
 
 // ---------- state ----------
 const pos = new THREE.Vector3(8, 80, 8);
@@ -33,7 +36,13 @@ let hurtAmt = 0;   // the hit that started the current hurtCd window (Infinity: 
 let mouseL = false, mouseR = false;
 let breakTarget = null, breakProgress = 0, breakCd = 0;
 let placeCd = 0, eatT = 0;
+let drawT = 0, drawStack = null;   // bow: seconds the string has been held back (0 = not drawing) and the bow stack being drawn
 let target = null;            // current block raycast hit
+// What the player rides (a boat, js/boats.js), or null. A vehicle carries `ctl`, its module's riding interface:
+//   drive(v, dt, input {fwd, turn, strafe, jump}) -> yaw change, seatOf(v, "player") -> {x, y, z}, sitEye(v) -> eye above the seat,
+//   canBoard(v), exitSpot(v, hw, h) -> {x, y, z}, onLeave(v) (e.g. a boat lets its mob passenger out too).
+// Shift held when it was boarded must be let go first.
+let vehicle = null, rideShift = false;
 const VIEW_OPTS = [4, 6, 8, 10, 12, 16, 20, 24];
 const store = {
   get(k) { try { return localStorage.getItem("blockfield." + k); } catch (_) { return null; } },
@@ -61,6 +70,8 @@ const P = (BF.player = {
   get gameMode() { return gameMode; },
   set gameMode(m) { setGameMode(m); },
   get pitch() { return pitch; },
+  get vehicle() { return vehicle; },
+  get boat() { return vehicle && vehicle.kind === "boat" ? vehicle : null; },
 });
 
 // ---------- small helpers ----------
@@ -163,7 +174,7 @@ const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
      <div><b>Shift</b> sneak</div><div><b>R / Ctrl / W x2</b> sprint</div><div><b>Z</b> free the mouse (game keeps running)</div><div><b>Fly + hold W and R</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
-     <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
+     <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Boat</b> R-click to get in, W/S row, A/D turn, Shift out</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
@@ -674,7 +685,7 @@ function bindInput() {
   });
   addEventListener("mouseup", e => {
     if (e.button === 0) { mouseL = false; resetBreak(); if (ctrlRight) { ctrlRight = false; mouseR = false; eatT = 0; } }
-    if (e.button === 2 || e.button === 1) { mouseR = false; eatT = 0; }
+    if (e.button === 2 || e.button === 1) { if (drawT > 0) logClick(e, "release bow", bowPower(drawT).toFixed(2)); mouseR = false; eatT = 0; }   // right and middle both draw and release a bow (Ubuntu trackpads)
   });
   cv.addEventListener("contextmenu", e => { e.preventDefault(); logClick(e, ""); });
   cv.addEventListener("auxclick", e => logClick(e, ""));
@@ -689,7 +700,7 @@ function bindInput() {
 }
 
 // Right click on press: use the block / item in front (secondaryDown). Returns what it was aimed at, for the click log.
-function useNow() { const r = secondaryDown(); return targetName() + (r ? "" : " (nothing happened)"); }
+function useNow() { const r = secondaryDown(); return drawT > 0 ? "draw bow" : targetName() + (r ? "" : " (nothing happened)"); }
 function targetName() { const b = target && BF.blocks[target.id]; return b ? b.name : "no block"; }
 // Click log for the F3 overlay: the raw mouse fields of the last few presses and what the game did with each.
 const clickLog = [];
@@ -902,6 +913,17 @@ function iconTexture(id) {
   } catch (_) {}
   return (iconTex[id] = t);
 }
+// Drawn bow sprites (js/textures.js bowPull): stage 0..2 as vanilla bow_pulling_0/1/2, picked like vanilla's pull predicate
+// (draw time under 0.65 s, under 0.9 s, then fully drawn); -1 when not drawing.
+const bowTex = [];
+function bowTexture(stage) {
+  if (bowTex[stage]) return bowTex[stage];
+  const t = new THREE.Texture();
+  t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+  try { const img = new Image(); img.onload = () => { t.image = img; t.needsUpdate = true; }; img.src = BF.textures.bowPull(stage); } catch (_) {}
+  return (bowTex[stage] = t);
+}
+const bowStage = () => (drawT <= 0 ? -1 : drawFrac() < 0.65 ? 0 : drawFrac() < 0.9 ? 1 : 2);
 // Held map: fixed relative to the body, not the camera. It sits `fwd` ahead of and `down` below the eye, tilted back by atan(down / fwd) (~61 degrees
 // from vertical) so it faces the eye when looking down at it: only its top edge shows when looking straight ahead, and it fills the view when looking down.
 const MAP_VM = { size: 0.75, fwd: 0.38, down: 0.7, side: 0.06 };
@@ -950,7 +972,16 @@ function updateViewModel(dt) {
     vm.visible = started && !P.dead;
     return;
   }
-  vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0), -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0), -0.72 - s * 0.12);
+  // drawing a bow: the drawn sprite, turned so the arrow points ahead towards the crosshair, brought in and up a little
+  const bowSt = vmMesh && vmMesh !== hand && isBow(held) ? bowStage() : -2;
+  if (bowSt > -2 && vmMesh.userData.bowStage !== bowSt) {
+    vmMesh.userData.bowStage = bowSt;
+    vmMesh.material.map = bowSt < 0 ? iconTexture(held.id) : bowTexture(bowSt);
+    if (bowSt < 0) { vmMesh.rotation.set(0, -0.5, 0.15); vmMesh.position.set(0, 0.06, 0); }
+    else { vmMesh.rotation.set(0, -1.0, -Math.PI * 0.75); vmMesh.position.set(-0.02, 0.1, 0); }
+  }
+  const dr = bowSt >= 0 ? Math.min(1, drawT * 6) : 0, shake = bowSt === 2 ? Math.sin(drawT * 40) * 0.003 : 0;   // a full draw trembles slightly
+  vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0) - dr * 0.2, -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0) + dr * 0.1 + shake, -0.72 - s * 0.12 + dr * 0.08);
   vm.rotation.set(-s * 0.9, s * 0.4, 0);
   vm.visible = started && !P.dead;
 }
@@ -973,12 +1004,13 @@ function drawIcon(g, pat, ox, oy, pal, fromCol, toCol) {
 }
 let hudKey = "", hurtBlink = 0;
 function drawHUD() {
-  const h = Math.max(0, Math.ceil(P.health)), f = Math.max(0, Math.ceil(P.hunger));
+  const mountHud = vehicle && vehicle.ctl.hud ? vehicle.ctl.hud(vehicle) : null;   // riding a horse: its health in place of hunger
+  const h = Math.max(0, Math.ceil(P.health)), f = mountHud ? Math.max(0, Math.ceil(mountHud.hp / mountHud.max * 20)) : Math.max(0, Math.ceil(P.hunger));
   const showAir = headInWater || air < AIR_MAX - 0.01;
   const bubbles = Math.ceil(air - 0.01);
   const blink = hurtBlink > 0 && Math.floor(hurtBlink * 8) % 2 === 0;
   const vis = started && !P.dead && menuOpen !== "start" && !creative();
-  const key = h + "|" + f + "|" + (showAir ? bubbles : -1) + "|" + blink + "|" + vis;
+  const key = h + "|" + f + "|" + (showAir ? bubbles : -1) + "|" + blink + "|" + vis + "|" + !!mountHud;
   if (key === hudKey) return;
   hudKey = key;
   const g = hudCtx;
@@ -992,9 +1024,10 @@ function drawHUD() {
   }
   for (let i = 0; i < 10; i++) { // hunger, right half, filled right to left
     const x = 189 - ((i * 9.5) | 0), y = 11, v = f - i * 2;
-    drawIcon(g, FOOD, x, y, PAL_EMPTY);
-    if (v >= 2) drawIcon(g, FOOD, x, y, PAL);
-    else if (v === 1) drawIcon(g, FOOD, x, y, PAL, 4, 9);
+    const ic = mountHud ? HEART : FOOD;
+    drawIcon(g, ic, x, y, PAL_EMPTY);
+    if (v >= 2) drawIcon(g, ic, x, y, PAL);
+    else if (v === 1) drawIcon(g, ic, x, y, PAL, 4, 9);
   }
   if (showAir) for (let i = 0; i < bubbles && i < 10; i++) drawIcon(g, BUBBLE, 189 - ((i * 9.5) | 0), 1, PAL_BUB);
 }
@@ -1017,12 +1050,24 @@ function throwSelected() {
   emit("itemThrown", id);
 }
 
+function boatHit() {
+  try { return BF.boats ? BF.boats.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
+}
 function mobHit() {
-  try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH) : null; } catch (_) { return null; }
+  try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
 }
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
-  const m = mobHit();
+  const bh = boatHit(), m0 = mobHit();
+  if (bh && (!target || bh.dist < target.dist) && (!m0 || bh.dist < m0.dist)) {   // hitting a boat: lets its mob out, else damages it (js/boats.js)
+    swing();
+    if (attackCd > 0) return true;
+    attackCd = ATTACK_CD;
+    const r = BF.boats.hit(bh.boat, creative());
+    emit("boatHit", r);
+    return true;
+  }
+  const m = m0;
   if (!m || !m.mob || (target && target.dist < m.dist)) return false;
   swing();
   if (attackCd > 0) return true;
@@ -1274,14 +1319,14 @@ function trySleep(t) {
   falling = true;
   setTimeout(() => { falling = false; wakeUp(); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
-const inWorld = (x, z) => Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7;   // inside the world border (false for NaN)
-const worldSpawn = () => ({ x: 8.5, z: 8.5 });   // the fallback respawnPoint uses when there is no spawn point
 // Waking up is the next morning: the day counter moves on unless it is already early morning (sleeping in a daytime storm moves to tomorrow too).
 function wakeUp() {
   const S = BF.sky;
   if (S.time > 0.01) S.day = (S.day || 0) + 1;
   S.setTime(0.01);
 }
+const inWorld = (x, z) => Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7;   // inside the world border (false for NaN)
+const worldSpawn = () => ({ x: 8.5, z: 8.5 });   // the fallback respawnPoint uses when there is no spawn point
 // Where to stand when respawning at a bed: on it if there is headroom, else on the floor beside it (either half), as in vanilla.
 // A bed in a room with a 2-high ceiling has no headroom on top, and the spawn lift would otherwise put you on the roof. Null if
 // nowhere near the bed fits.
@@ -1317,7 +1362,13 @@ function respawnPoint() {
 // Right click: open a crafting table, start eating, or place a block. Returns true if something happened.
 function secondaryDown() {
   updateTarget();
-  const mh = mobHit();
+  const mh = mobHit(), bh = boatHit();
+  if (bh && (!target || bh.dist < target.dist) && (!mh || bh.dist < mh.dist)) {   // right click on a boat: get in (js/boats.js)
+    mouseR = false;
+    if (mount(bh.boat)) { swing(); return true; }
+    actionBar(bh.boat.rider ? "Someone is already in that boat" : "No room to sit in that boat");
+    return true;
+  }
   if (mh && mh.mob && mh.mob.type === "villager" && BF.mobs.interact && (!target || mh.dist < target.dist)) {
     mouseR = false;
     const msg = BF.mobs.interact(mh.mob);
@@ -1333,12 +1384,57 @@ function secondaryDown() {
     const r = BF.shepherd.playerUse(mh.mob, selectedItem());
     if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
+  if (mh && mh.mob && mh.mob.type === "cow" && BF.cowherd && (!target || mh.dist < target.dist)) {   // wheat feeds a cow, a bucket milks it (js/cowherd.js)
+    const r = BF.cowherd.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
+  if (mh && mh.mob && mh.mob.type === "pig" && BF.pigFarmer && (!target || mh.dist < target.dist)) {   // a carrot, potato or beetroot feeds a pig (js/pigfarmer.js)
+    const r = BF.pigFarmer.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
+  if (mh && mh.mob && mh.mob.type === "chicken" && BF.poultry && (!target || mh.dist < target.dist)) {   // seeds feed a chicken (js/poultry.js)
+    const r = BF.poultry.playerUse(mh.mob, selectedItem());
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+  }
+  if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
+    const sel = selectedItem(), r = BF.horses.playerUse(mh.mob, sel, sneaking);
+    if (r) {
+      mouseR = false; swing();
+      if (r.consume) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
+      if (r.give && BF.I[r.give] != null) { const left = inv().add ? inv().add(BF.I[r.give], 1) : 1; if (left > 0 && BF.drops) BF.drops.spawn(BF.I[r.give], left, pos.x, pos.y + 1, pos.z); }
+      if (r.mount && !mount(mh.mob)) actionBar("No room to get on that horse");
+      if (r.msg) actionBar(r.msg);
+      return true;
+    }
+  }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
   if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
+  if (tb && /_fence$/.test(tb.name) && BF.horses && BF.horses.tieToPost(target.x, target.y, target.z)) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
   if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
+  if (tb && BF.baker && BF.baker.isCake(target.id) && useBlk) {   // a placed cake: eat a slice (js/baker.js)
+    const r = BF.baker.eatCake(target.x, target.y, target.z, P, creative());
+    if (r === true) { saturation = Math.min(P.hunger, saturation + 0.4); swing(); } else if (typeof r === "string") actionBar(r);
+    mouseR = false; return true;
+  }
+  if (tb && BF.baker && BF.baker.isOven(target.id) && useBlk) { actionBar(BF.baker.ovenText(target.x, target.y, target.z)); mouseR = false; return true; }   // what a baker's oven holds
+  if (tb && BF.bees && BF.bees.isHome(target.id) && useBlk) {   // a bee nest or beehive: shears or a glass bottle harvest a full one, otherwise how it is (js/bees.js)
+    const r = BF.bees.playerUse(target, selectedItem());
+    if (r) {
+      mouseR = false;
+      if (r.give) {
+        swing();
+        if (r.consume && !creative()) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
+        if (r.wear) wearHeld(r.wear);
+        const left = inv().add ? inv().add(r.give.id, r.give.n) : r.give.n;
+        if (left > 0 && BF.drops) BF.drops.spawn(r.give.id, left, pos.x, pos.y + 1, pos.z);
+      }
+      if (r.msg) actionBar(r.msg);
+      return true;
+    }
+  }
   if (target && BF.isFurnace(target.id) && useBlk) {
     openInventory("furnace", { x: target.x, y: target.y, z: target.z }); mouseR = false; return true;
   }
@@ -1346,6 +1442,10 @@ function secondaryDown() {
     openInventory("chest", { x: target.x, y: target.y, z: target.z }); swing(); mouseR = false; return true;
   }
   if (tb && tb.sign && useBlk && BF.signs) { BF.signs.interact(target); mouseR = false; return true; } // sign editor (js/signs.js)
+  if (isBow(selectedItem()) && (creative() || inv().count(BF.I.arrow) > 0)) {   // bow with arrows: start drawing (released in updateDraw); never places or uses a block
+    if (drawT <= 0) { drawT = 1e-4; drawStack = selectedItem(); }
+    return true;
+  }
   const sel = selectedItem(); if (!sel) return false;
   const it = BF.items[sel.id]; if (!it) return false;
   // hoe: till grass / dirt / path into farmland (top face, air above)
@@ -1389,6 +1489,19 @@ function secondaryDown() {
   if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
     const msg = BF.maps.use(sel, it);
     if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+  }
+  if (it.boat && BF.boats) {   // boat: on the water (or the ground) in front, facing the way the player looks
+    if (!BF.boats.placeFromPlayer(it.boat, eyeVec(), dirVec(), yaw, REACH)) return false;
+    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    swing(); mouseR = false;
+    placeCd = PLACE_REPEAT;
+    return true;
+  }
+  if (it.name === "horse_spawn_egg" && BF.horses && target && target.normal[1] === 1) {   // creative spawn item: a wild horse on the ground in front
+    if (!BF.horses.spawn(target.x + 0.5, target.y + 1, target.z + 0.5)) return false;
+    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    swing(); mouseR = false; placeCd = PLACE_REPEAT;
+    return true;
   }
   if (it.food) { if (P.hunger < P.maxHunger) { if (eatT <= 0) eatT = 0.0001; return true; } return false; }
   if (it.places === "sign" && target) { // signs (js/signs.js): standing on a top face, wall sign on a side face; opens the editor
@@ -1435,8 +1548,27 @@ function secondaryDown() {
   placeCd = PLACE_REPEAT;
   return true;
 }
+// After eating or drinking `it`: its container (blocks.js `container`: milk bucket -> bucket, milk bottle -> glass bottle) goes into the
+// emptied hand slot, else the inventory, else drops. Creative mode used nothing up, so nothing comes back.
+function leaveContainer(it) {
+  const back = it && it.container ? BF.I[it.container] : null, I2 = inv();
+  if (back == null || P.gameMode === "creative" || !I2) return;
+  if (!I2.selected() && I2.setSlot) { I2.setSlot(I2.selectedIndex, { id: back, count: 1 }); return; }
+  const left = I2.add(back, 1);
+  if (left > 0 && BF.drops) BF.drops.spawn(back, left, P.position.x, P.position.y + 1, P.position.z);
+}
+// The end of eating the selected item `it`: hunger, the item used up, its container left (also BF.player.finishEating, for tests).
+function finishEating(it) {
+  P.hunger = Math.min(P.maxHunger, P.hunger + it.food);
+  saturation = Math.min(P.hunger, saturation + it.food * 0.6);
+  try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+  try { leaveContainer(it); } catch (e) { console.error(e); }   // milk: the empty bucket or bottle stays in hand (js/cowherd.js)
+  emit("playerAte", it.id);
+}
+P.finishEating = finishEating;
 function updateUse(dt) {
   if (placeCd > 0) placeCd -= dt;
+  if (drawT > 0) { updateDraw(dt); return; }
   if (eatT > 0) {
     const sel = selectedItem(), it = sel && BF.items[sel.id];
     if (!mouseR || !it || !it.food || P.hunger >= P.maxHunger) { eatT = 0; return; }
@@ -1444,16 +1576,43 @@ function updateUse(dt) {
     emit("playerEating", it.id); // per frame while eating (audio crunch)
     if (eatT >= EAT_TIME) {
       eatT = 0;
-      P.hunger = Math.min(P.maxHunger, P.hunger + it.food);
-      saturation = Math.min(P.hunger, saturation + it.food * 0.6);
-      try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
-      emit("playerAte", it.id);
+      finishEating(it);
       placeCd = 0.3;
     }
     return;
   }
   if (mouseR && placeCd <= 0 && !secondaryDown()) placeCd = PLACE_REPEAT;
 }
+
+// ---------- bow ----------
+const isBow = s => { const it = s && BF.items[s.id]; return !!(it && it.tool && it.tool.type === "bow"); };
+function bowPower(t) { const f = t / BOW_DRAW; return Math.min(1, (f * f + 2 * f) / 3); }
+const bowDamage = f => Math.ceil(BOW_DAMAGE * f);
+// While the button is held the draw builds up; on release the arrow flies. Switching away from the bow, running out of arrows
+// or opening a screen cancels the draw without firing.
+function updateDraw(dt) {
+  const sel = selectedItem();
+  if (sel !== drawStack || !isBow(sel) || invOpen() || (!creative() && !(inv().count(BF.I.arrow) > 0))) { drawT = 0; drawStack = null; return; }
+  if (mouseR) { drawT += dt; return; }
+  const f = bowPower(drawT);
+  drawT = 0; drawStack = null; placeCd = PLACE_REPEAT;
+  if (f >= BOW_MIN) fireArrow(f);
+}
+function fireArrow(f) {
+  if (!BF.mobs || !BF.mobs.shootArrow) return null;
+  const d = dirVec();
+  for (const k of ["x", "y", "z"]) d[k] += (Math.random() - 0.5) * 0.015;   // vanilla's small spread
+  d.normalize();
+  const from = eyeVec().addScaledVector(d, 0.4); from.y -= 0.1;
+  const crit = f >= 1 && Math.random() < BOW_CRIT, damage = bowDamage(f);
+  const a = BF.mobs.shootArrow(from, d.multiplyScalar(BOW_SPEED * f), { damage, crit, pickup: creative() ? 2 : 1 });
+  if (!creative()) { try { inv().remove(BF.I.arrow, 1); } catch (e) { console.error(e); } }   // creative: arrows are free
+  wearHeld(1);   // 1 use of the bow's 384 per shot (survival; js/inventory.js wearSelected)
+  P.lastShot = { power: +f.toFixed(3), damage, crit, speed: +(BOW_SPEED * f).toFixed(2) };
+  emit("playerShot", P.lastShot);
+  return a;
+}
+const drawFrac = () => Math.min(1, drawT / BOW_DRAW);
 
 // ---------- survival ----------
 function survivalTick(dt) {
@@ -1508,8 +1667,9 @@ P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health +
 
 const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", lightning: "You were struck by lightning", hurt: "You died" };
 function die() {
+  dismount();
   P.dead = true; P.health = 0;
-  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; flying = false; turbo = false;
+  resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; drawT = 0; flying = false; turbo = false;
   if (invOpen()) {   // every screen closes (the command line closes itself on playerDied)
     try { inv().close(); } catch (_) {}
     try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
@@ -1542,6 +1702,7 @@ function resetStats() {
   P.health = P.maxHealth; P.hunger = P.maxHunger; P.dead = false;
   saturation = 5; exhaustion = 0; air = AIR_MAX; fallStart = null; flying = false; sprinting = false;
   hurtCd = 1; hurtAmt = Infinity; flashT = 0; regenT = starveT = drownT = 0; eatT = 0;
+  dismount(true);
   resetBreak();
 }
 
@@ -1552,8 +1713,58 @@ function onLadder() {                       // a ladder cell at the feet or at t
   const W = BF.world, a = BF.blocks[W.getBlock(pos.x, pos.y + 0.001, pos.z)], b = BF.blocks[W.getBlock(pos.x, pos.y + 1, pos.z)];
   return !!((a && a.ladder) || (b && b.ladder));
 }
+// Riding (a boat, js/boats.js): W/S forward and back, A/D turn (the view turns with the vehicle), Space jump, Shift gets off.
+function ridePhysics(dt, k) {
+  const shift = k.has("ShiftLeft") || k.has("ShiftRight");
+  if (shift && !rideShift) { dismount(); return 0; }
+  rideShift = shift;
+  let fwd = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
+  let turn = (k.has("KeyA") ? 1 : 0) - (k.has("KeyD") ? 1 : 0);
+  if (stick.id != null) { fwd = -stick.y; turn = -stick.x; }
+  if (eatT > 0) fwd *= 0.35;
+  rideStep(dt, { fwd, turn, strafe: -turn, jump: k.has("Space"), yaw });
+  onGround = true; inWater = false; flying = false; sprinting = false; sneaking = false; turbo = false; fallStart = null;
+  headInWater = BF.RENDER[BF.world.getBlock(pos.x, pos.y + eyeOffset, pos.z)] === 3;
+  return 0;   // no head bob or walking hunger
+}
+function rideStep(dt, input) {
+  const v = vehicle;
+  yaw += v.ctl.drive(v, dt, input) || 0;
+  if (vehicle !== v) return;   // thrown off
+  const s = v.ctl.seatOf(v, "player");
+  pos.set(s.x, s.y, s.z);
+  const vv = v.vel || { x: 0, y: 0, z: 0 };
+  vel.x = vv.x; vel.y = vv.y; vel.z = vv.z;
+}
+// Gets in boat b (fromSave: back into the boat the player was saved in, without the room check). Returns true if seated.
+function mount(v, fromSave) {
+  if (!v || !v.ctl || P.dead) return false;
+  if (vehicle === v) return true;
+  if (!fromSave && !v.ctl.canBoard(v)) return false;
+  if (vehicle) dismount();
+  vehicle = v; v.rider = true; rideShift = true;
+  if (v.ctl.onMount) v.ctl.onMount(v);
+  flying = false; sprinting = false; sneaking = false; turbo = false; fallStart = null; resetBreak();
+  const s = v.ctl.seatOf(v, "player");
+  pos.set(s.x, s.y, s.z); vel.x = vel.y = vel.z = 0;
+  emit("mounted", v);
+  return true;
+}
+// Gets out: onto the nearest solid block beside the boat, else into the water. A mob passenger gets out too.
+// stay: leave the player where they are (teleport, respawn, a new world).
+function dismount(stay) {
+  const v = vehicle;
+  if (!v) return;
+  vehicle = null; v.rider = false;
+  if (stay) return;
+  if (v.ctl.onLeave) v.ctl.onLeave(v);
+  const s = v.ctl.exitSpot(v, HW, HEIGHT);
+  pos.set(s.x, s.y, s.z); vel.x = vel.y = vel.z = 0; fallStart = null;
+  emit("dismounted", v);
+}
 function physics(dt) {
   const k = touchKeys.size ? new Set([...keys, ...touchKeys]) : keys;
+  if (vehicle) return ridePhysics(dt, k);
   const wantJump = k.has("Space");
   const shift = k.has("ShiftLeft") || k.has("ShiftRight");
   sneaking = shift && !flying;
@@ -1561,7 +1772,7 @@ function physics(dt) {
   let strafe = (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0);
   if (stick.id != null) { fwd = -stick.y; strafe = stick.x; if (fwd > 0.92) sprinting = true; }
   if ((k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR")) && fwd > 0) sprinting = true;
-  if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0) sprinting = false;
+  if (fwd <= 0 || sneaking || (P.hunger <= 6 && !flying) || eatT > 0 || drawT > 0) sprinting = false;
   turbo = flying && k.has("KeyR") && fwd > 0 && !!(k.has("KeyW") || k.has("ArrowUp") || stick.id != null);   // flying with W + R held; releasing either (or landing) ends the boost
   // forward (sx, sz) and right (-sz, sx) in the horizontal plane
   const sx = -Math.sin(yaw), sz = -Math.cos(yaw);
@@ -1582,7 +1793,7 @@ function physics(dt) {
   }
   else if (inWater) speed = SWIM * (sprinting ? 1.4 : 1);
   else speed = sneaking ? SNEAK : sprinting ? SPRINT : WALK;
-  if (eatT > 0 && !flying) speed *= 0.35;
+  if ((eatT > 0 || drawT > 0) && !flying) speed *= 0.35;   // eating or drawing a bow: slowed, as in vanilla
 
   const climbing = !flying && !inWater && onLadder();   // body in a ladder cell: gravity is replaced by climbing
   const accel = flying ? 10 : inWater ? 6 : onGround ? 14 : 2.6;
@@ -1647,13 +1858,14 @@ function physics(dt) {
 
 // ---------- camera ----------
 function syncCamera(dt) {
-  const want = sneaking ? SNEAK_EYE : EYE;
+  const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
   eyeOffset += (want - eyeOffset) * Math.min(1, dt * 14);
   const by = Math.abs(Math.sin(bobPhase)) * 0.06 * bobAmt, bx = Math.cos(bobPhase) * 0.035 * bobAmt;
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
   BF.camera.position.set(pos.x + rx * bx, pos.y + eyeOffset + by, pos.z + rz * bx);
   BF.camera.rotation.set(pitch, yaw, 0, "YXZ");
-  const wantFov = BASE_FOV * (turbo ? 1.25 : sprinting ? 1.12 : 1);
+  const df = drawT > 0 ? drawFrac() : 0;
+  const wantFov = BASE_FOV * (turbo ? 1.25 : sprinting ? 1.12 : 1) * (1 - df * df * 0.15);   // drawing a bow zooms in up to 15% (vanilla)
   if (Math.abs(fov - wantFov) > 0.01 || BF.camera.fov !== fov) {
     fov += (wantFov - fov) * Math.min(1, dt * 10);
     if (Math.abs(fov - wantFov) <= 0.01) fov = wantFov;
@@ -1737,12 +1949,13 @@ P.setGameMode = setGameMode;
 P.screenOpen = () => !!menuOpen || invOpen();   // any menu or in-game screen; main.js fades the debug panels behind it (new screens: add them to invOpen)
 P.canOpenUI = () => started && !menuOpen && !P.dead && !invOpen();
 P.actionBar = actionBar;
-P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; resetBreak(); exitLock(); };
+P.uiOpen = function () { if (locked) expectUnlock = true; keys.clear(); mouseL = mouseR = false; drawT = 0; resetBreak(); exitLock(); };
 P.uiClose = function () { screenClosed(); if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !locked) requestLock(); };
 // alerts (js/alerts.js): free the mouse like Z, and take it back (from a key press or click, which browsers require)
 P.freeMouse = function () { if (locked) { releaseMouse(); return true; } return false; };
 P.relock = function () { if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !invOpen() && !locked) requestLock(); };
 P.teleport = function (x, y, z) {
+  dismount(true);
   pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists
   if (y < BF.MIN_Y + 5) waitingForChunk = true;           // in the bedrock floor: lifted to the surface if stuck (bedrock can't be dug out)
@@ -1751,6 +1964,13 @@ P.teleport = function (x, y, z) {
 P.kill = function () { if (P.dead || !started) return; lastCause = "killed"; die(); };
 P.feed = function () { if (P.dead) return; P.hunger = P.maxHunger; saturation = 5; exhaustion = 0; starveT = 0; };
 P.spawnParticles = (x, y, z, id, n) => spawnParticles(x, y, z, id, n);
+P.mount = mount;                     // js/boats.js: get in a boat (right click, or a save made in one)
+P.dismount = () => dismount();       // get off (Shift); also when the boat breaks
+P.ride = function (fwd, turn, dt, jump) {  // tests: one real-time step of what the player rides with this input; false when riding nothing
+  if (!vehicle) return false;
+  rideStep(dt, { fwd, turn, strafe: -turn, jump: !!jump, yaw });
+  return true;
+};
 // Save-game state. deserialize() expects the world (seed) to be set up already, e.g. right after BF.newWorld.
 P.serialize = function () {
   return {
@@ -1789,8 +2009,10 @@ P.viewModel = function () { // test hook: what the held view model is ("hand", "
   if (vmMesh === hand) return { kind: "hand" };
   const g = vmMesh.geometry, col = g.attributes.color;
   if (g.userData.cube) return { kind: "cube", top: col ? [col.getX(8), col.getY(8), col.getZ(8)] : null, faces: g.index.count / 6 };
-  return { kind: "sprite" };
+  return vmMesh.userData.bowStage != null ? { kind: "sprite", bow: vmMesh.userData.bowStage } : { kind: "sprite" };   // bow: drawn stage 0..2, -1 resting
 };
+// Bow (tests, debug): drawing seconds, the power it would fire at, the view-model stage; power(t) / damage(f) as used on release.
+P.bow = { get drawing() { return drawT; }, get pull() { return drawT > 0 ? bowPower(drawT) : 0; }, get stage() { return bowStage(); }, power: bowPower, damage: bowDamage, DRAW: BOW_DRAW };
 P.setMouse = function (left, right) { // test hook: simulate held mouse buttons
   if (left && !mouseL) { mouseL = true; primaryDown(); } else if (!left) { mouseL = false; resetBreak(); }
   if (right && !mouseR) { mouseR = true; placeCd = 0; secondaryDown(); } else if (!right) { mouseR = false; eatT = 0; }
@@ -1807,10 +2029,10 @@ P.update = function (dt) {
     if (W.isLoaded(pos.x, pos.z) && W.isLoaded(pos.x + 1, pos.z + 1) && W.isLoaded(pos.x - 1, pos.z - 1) &&
         W.isLoaded(pos.x + 1, pos.z - 1) && W.isLoaded(pos.x - 1, pos.z + 1)) {
       waitingForChunk = false;
-      const bed = bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);
+      const bed = !vehicle && bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);
       bedRespawn = null;
       if (bed) pos.set(bed[0], bed[1], bed[2]);
-      else if (pos.y < BF.MIN_Y || W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT)) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);
+      else if (pos.y < BF.MIN_Y || (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT))) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }

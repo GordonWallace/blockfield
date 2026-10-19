@@ -69,6 +69,9 @@
   .vrow .ld { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); opacity: 0.6; }
   .vrow.on .ld { background: var(--accent); opacity: 1; box-shadow: 0 0 0 3px rgba(127, 191, 77, 0.18); }
   .vrow:not(.on) .vn { color: var(--muted); }
+  .lerrs { margin: 6px 12px; padding: 6px 10px; border: 1px solid var(--danger, #c0392b); border-radius: 6px; font-size: 11px; }
+  .lerrs h4 { margin: 0 0 4px; font: 11px var(--display); color: var(--danger, #c0392b); }
+  .lerrs div { padding: 1px 0; color: var(--muted); }
   .vsep { padding: 8px 16px 3px; font: 10px var(--display); color: var(--faint); letter-spacing: 0.5px; }
   #vl-auto.on { background: rgba(127, 191, 77, 0.14); color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); }
   .stale #v-here .vstat .big, .stale #v-here .occ, .stale .mapwrap, .stale .roster { opacity: 0.45; filter: grayscale(0.7); }
@@ -91,6 +94,17 @@
   .legend .sw { display: inline-block; width: 12px; height: 9px; border: 1px solid; border-radius: 2px; }
   .tip { position: absolute; pointer-events: none; background: rgba(10, 13, 11, 0.95); border: 1px solid var(--edge2); border-radius: 5px; padding: 6px 9px; font-size: 12px; white-space: nowrap; transform: translate(12px, -50%); display: none; }
   .tip b { font-weight: 600; } .tip .sub { font-size: 11px; }
+  /* ---------- wild mobs (js/wildlife.js): the village panel's numbers and the Mobs map ---------- */
+  .wild { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: flex-start; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .wild b { color: var(--ink); font-weight: 500; }
+  .wild table { width: auto; font-size: 11px; } .wild td, .wild th { padding: 1px 8px 1px 0; border: 0; text-align: right; } .wild th { color: var(--faint); font-weight: 400; } .wild td:first-child, .wild th:first-child { text-align: left; }
+  .wild td.hit { color: var(--warn); } .wild td.dead { color: var(--danger); }
+  #mmap { display: block; width: 100%; height: 460px; cursor: grab; touch-action: none; } #mmap.drag { cursor: grabbing; }
+  .mleg { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 8px 16px 12px; font-size: 11px; align-items: center; }
+  .mleg .item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--edge2); background: none; color: var(--muted); cursor: pointer; font-size: 11px; }
+  .mleg .item b { color: var(--ink); font-weight: 500; } .mleg .item i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .mleg .item.off { opacity: 0.4; text-decoration: line-through; } .mleg .item.off i { filter: grayscale(1); }
+  .mleg .seg { margin-right: 6px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th { text-align: left; font: 10px var(--display); color: var(--faint); letter-spacing: 0.5px; padding: 6px 10px; border-bottom: 1px solid var(--edge); position: sticky; top: 0; background: var(--card); cursor: pointer; user-select: none; white-space: nowrap; }
@@ -118,6 +132,24 @@
   .vslot .wear::after { content: ""; position: absolute; left: 0; top: 0; height: 2px; width: var(--f); background: var(--c); }
   .vinv .side { font-size: 12px; color: var(--muted); min-width: 180px; } .vinv .side div { padding: 2px 0; } .vinv .side b { color: var(--ink); font-weight: 500; }
   .stale .vinv .box { opacity: 0.6; filter: grayscale(0.7); }
+  /* the selected villager's day (js/daytimeline.js): a 24-hour strip of what it did, ticks for trades, meals and job changes, a list below */
+  .vday { border-top: 1px solid var(--edge); padding: 12px 16px 14px; font-size: 12px; color: var(--muted); }
+  .vday h4 { margin: 0 0 8px; font: 13px/1 var(--display); color: var(--muted); font-weight: normal; letter-spacing: 0.5px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .vday .seg { display: inline-flex; border: 1px solid var(--edge2); border-radius: 4px; overflow: hidden; margin-left: auto; }
+  .vday .seg button { background: none; border: 0; color: var(--muted); font: 12px var(--mono); padding: 3px 9px; cursor: pointer; } .vday .seg button.on { background: var(--card2); color: var(--ink); }
+  .dstrip { position: relative; height: 22px; margin-top: 14px; background: repeating-linear-gradient(135deg, rgba(255,255,255,0.03) 0 4px, rgba(255,255,255,0.06) 4px 8px); border-radius: 3px; }
+  .dstrip .b { position: absolute; top: 0; bottom: 0; min-width: 1px; cursor: pointer; } .dstrip .b:hover { filter: brightness(1.3); outline: 1px solid var(--ink); z-index: 1; }
+  .dstrip .now { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+  .dticks { position: absolute; left: 0; right: 0; top: -11px; height: 9px; }
+  .dticks i { position: absolute; top: 0; width: 3px; height: 9px; margin-left: -1px; border-radius: 1px; cursor: pointer; } .dticks i:hover { outline: 1px solid var(--ink); }
+  .dhours { position: relative; height: 14px; margin-top: 3px; font-size: 10px; color: var(--faint); }
+  .dhours span { position: absolute; transform: translateX(-50%); } .dhours span::before { content: ""; position: absolute; left: 50%; top: -3px; height: 3px; border-left: 1px solid var(--faint); }
+  .dkey { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0; } .dkey i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .dsum { margin: 4px 0 8px; color: var(--ink); } .dsum .w { color: var(--danger); }
+  .dlist { max-height: 240px; overflow: auto; border: 1px solid var(--edge); border-radius: 4px; }
+  .dlist div { display: grid; grid-template-columns: 92px 64px 1fr; gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--edge); }
+  .dlist div.at { cursor: pointer; } .dlist div.at:hover { background: rgba(255, 255, 255, 0.04); } .dlist div.sel { background: rgba(127, 191, 77, 0.12); }
+  .dlist .t { color: var(--faint); } .dlist .ev { color: var(--muted); } .dlist .k { white-space: nowrap; }
   .hp { display: inline-block; width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); vertical-align: middle; margin-right: 6px; overflow: hidden; } .hp i { display: block; height: 100%; background: var(--accent); }
   .happy { background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; display: grid; grid-template-columns: auto minmax(80px, 1fr); gap: 4px 14px; align-items: center; }
   .happy .hs { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; } .happy .hs .big { font-size: 22px; }
@@ -161,6 +193,22 @@
   .facts label:hover { background: rgba(255, 255, 255, 0.05); }
   .facts label span:nth-child(2) { flex: 1; }
   .fmenu input { accent-color: var(--accent); margin: 0; }
+  /* ---------- game log (js/gamelog.js): opened from the header, above everything else ---------- */
+  .gbtn { background: transparent; border: 1px solid var(--edge2); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  .gbtn:hover, .gbtn.on { color: var(--ink); border-color: var(--accent); }
+  .gbtn .gerr { color: var(--danger); margin-left: 6px; }
+  #gpanel .ph .gbtn { margin-left: 2px; }
+  #glog { max-height: 55vh; min-height: 200px; overflow: auto; padding: 4px 0; font-size: 12px; }
+  .gent { display: grid; grid-template-columns: 172px 92px 104px 46px minmax(0, 1fr); gap: 10px; padding: 3px 16px; border-left: 3px solid transparent; }
+  .gent > span { color: var(--faint); white-space: nowrap; }
+  .gent .gx { color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+  .gent .gk { color: var(--muted); } .gent .gv { color: var(--accent2); }
+  .gent.ERROR { border-left-color: var(--danger); background: rgba(232, 112, 92, 0.07); } .gent.ERROR .gl, .gent.ERROR .gx { color: var(--danger); }
+  .gent.WARN { border-left-color: var(--warn); } .gent.WARN .gl, .gent.WARN .gx { color: var(--warn); }
+  .gent.INFO .gl { color: var(--info); }
+  .gent.DEBUG .gx { color: var(--muted); }
+  .ghead { padding: 6px 16px; color: var(--muted); border-bottom: 1px solid var(--edge); font-size: 12px; }
+  .gmore { padding: 6px 16px; color: var(--faint); font-size: 12px; }
   #log { max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; padding: 4px 0; }
   .ent { display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding: 5px 16px; border-left: 3px solid transparent; font-size: 12px; }
   .ent time { color: var(--faint); }
@@ -174,6 +222,44 @@
   .ent.build { border-left-color: var(--build); } .ent.build .tx { color: var(--build); }
   .ent.farm { border-left-color: var(--farm); } .ent.farm .tx { color: var(--farm); }
   .ent .at { color: var(--faint); margin-left: 8px; white-space: nowrap; }
+
+  /* ---------- compare villages (the village list's table) ---------- */
+  #vl-cmp.on, #vl-wide.on { background: rgba(127, 191, 77, 0.14); color: var(--accent2); border-color: rgba(127, 191, 77, 0.4); }
+  .cneed { padding: 8px 16px; font-size: 12px; color: var(--warn); border-bottom: 1px solid var(--edge); } .cneed b { font-weight: 600; } .cneed.ok { color: var(--muted); }
+  .ctable { max-height: 420px; overflow: auto; }
+  .ctable th.r, .ctable td.r { text-align: right; }
+  .ctable td.cn { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; } .ctable td.cn small { display: block; color: var(--faint); font-size: 10px; }
+  .ctable tbody tr { cursor: pointer; } .ctable tr.sel td { background: rgba(127, 191, 77, 0.1); }
+  .ctable tr.off td { color: var(--muted); } .ctable tr.off td:not(.warn):not(.danger) { opacity: 0.7; }
+  .ctable td.warn { color: var(--warn); background: rgba(242, 198, 109, 0.08); } .ctable td.danger { color: var(--danger); background: rgba(232, 112, 92, 0.1); }
+  #vlpanel.wide { position: fixed; z-index: 6; inset: 64px 20px 20px; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+  #vlpanel.wide #vcmp { flex: 1; min-height: 0; display: flex; flex-direction: column; } #vlpanel.wide .ctable { max-height: none; flex: 1; }
+
+  /* ---------- economy (the log panel's second tab) ---------- */
+  .tabs { display: flex; gap: 14px; align-items: baseline; }
+  .tab { background: none; border: 0; padding: 0; font: 15px var(--display); color: var(--faint); cursor: pointer; white-space: nowrap; }
+  .tab:hover { color: var(--muted); } .tab.on { color: var(--accent); cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--edge2); border-radius: 6px; overflow: hidden; }
+  .seg button { background: transparent; border: 0; border-left: 1px solid var(--edge2); padding: 3px 9px; font-size: 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  .seg button:first-child { border-left: 0; } .seg button:hover { color: var(--ink); } .seg button.on { background: rgba(127, 191, 77, 0.16); color: var(--accent2); }
+  .econbar { flex-wrap: wrap; }
+  #econ { position: relative; max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; }
+  .etot { padding: 10px 16px 0; color: var(--muted); font-size: 12px; } .etot b { color: var(--ink); font-weight: 500; }
+  .elegend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 16px 0; font-size: 11px; color: var(--muted); } .elegend span { display: inline-flex; align-items: center; gap: 5px; }
+  .elegend i { width: 12px; height: 9px; border-radius: 2px; display: inline-block; }
+  svg.flow { display: block; width: 100%; height: auto; margin: 6px 0 4px; }
+  svg.flow path { fill-opacity: 0.5; transition: fill-opacity 0.1s; } svg.flow path:hover { fill-opacity: 0.88; }
+  svg.flow text { font: 11px var(--mono); fill: var(--ink); } svg.flow .v { fill: var(--faint); }
+  .etip { position: absolute; z-index: 3; pointer-events: none; background: rgba(10, 13, 11, 0.96); border: 1px solid var(--edge2); border-radius: 5px; padding: 6px 9px; font-size: 12px; white-space: nowrap; display: none; }
+  .etip b { font-weight: 600; } .etip .sub { font-size: 11px; } .etip table { width: auto; margin-top: 4px; } .etip td { padding: 1px 10px 1px 0; border: 0; } .etip td.r { text-align: right; color: var(--muted); }
+  .dead { padding: 4px 16px 14px; display: grid; gap: 4px; }
+  .dead h4 { margin: 8px 0 4px; font: 10px var(--display); letter-spacing: 0.5px; color: var(--faint); font-weight: normal; }
+  .drow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 10px; padding: 3px 8px; border-left: 3px solid var(--edge2); font-size: 12px; color: var(--muted); }
+  .drow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .drow > span:last-child { text-align: right; }
+  .drow.warn { border-left-color: var(--warn); color: var(--warn); } .drow.danger { border-left-color: var(--danger); color: var(--danger); }
+  .drow .dim { color: var(--faint); }
+  .etable td.r, .etable th.r { text-align: right; } .etable th { cursor: default; position: static; }
+  .ecopy { margin: 8px 16px 4px; }
 
   /* ---------- alerts ---------- */
   .aform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--edge); }
@@ -219,6 +305,7 @@
   <div class="pill off" id="conn"><i></i><span>Connecting</span></div>
   <div class="hstat" id="h-clock"></div>
   <span class="warp" id="h-warp" hidden></span>
+  <button class="gbtn" id="g-open" title="The game log: everything the game logs, newest first (js/gamelog.js)">Game log<span class="gerr" id="g-errs"></span></button>
   <div class="grow"></div>
   <div class="hstat">Seed <b id="h-seed">-</b></div>
   <div class="hstat">Gen <b id="h-gen">-</b></div>
@@ -234,6 +321,14 @@
 </div>
 
 <main>
+  <div class="panel" id="gpanel" hidden>
+    <div class="ph"><h2>Game log</h2><span class="sub" id="g-count"></span><div class="grow"></div><input class="search" id="g-q" placeholder="Search the game log">
+      <button class="gbtn" id="g-copy" title="Copy the entries shown by the filters, oldest first, as the log file's text">Copy</button>
+      <button class="gbtn" id="g-dl" title="Download the entries shown by the filters as a .log file">Download</button>
+      <button class="gbtn" id="g-x" title="Close the game log">Close</button></div>
+    <div class="filters" id="g-filters"></div>
+    <div id="glog"><div class="empty">No game log yet: load a saved world in the game.</div></div>
+  </div>
   <section class="cards">
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
     <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
@@ -250,8 +345,12 @@
   <div class="split">
     <div class="stack">
       <div class="panel" id="vlpanel">
-        <div class="ph"><h2>Villages</h2><span class="sub" id="vl-count"></span><div class="grow"></div><button class="fbtn" id="vl-auto" title="Show the nearest loaded village, switching as you move">Follow nearest</button></div>
+        <div class="ph"><h2>Villages</h2><span class="sub" id="vl-count"></span><div class="grow"></div>
+          <button class="fbtn" id="vl-cmp" title="Every known village side by side in one table">Compare</button><button class="fbtn" id="vl-wide" title="Open the table across the whole screen (Esc closes)" hidden>Full width</button>
+          <button class="fbtn" id="vl-auto" title="Show the nearest loaded village, switching as you move">Follow nearest</button></div>
         <div class="vlist" id="vlist"><div class="empty">No villages loaded yet.</div></div>
+        <div class="lerrs" id="lerrs" hidden></div>
+        <div id="vcmp" hidden></div>
       </div>
       <div class="panel" id="vpanel">
         <div class="ph"><h2 id="v-name">No village</h2><span class="sub" id="v-sub"></span></div>
@@ -264,6 +363,7 @@
               <div class="vstat"><div class="sub">Iron golems</div><div class="big" id="v-golems">0</div><div class="sub" id="v-golemsub"></div></div>
             </div>
             <div class="happy" id="v-happy" title="Happiness = 100 + each line's points, kept between 0 and 100. The formula is the TERMS table in js/happiness.js"></div>
+            <div class="wild" id="v-wild" hidden></div>
             <div class="occ" id="v-occ"></div>
           </div>
           <div class="mapwrap"><canvas id="map"></canvas><div class="tip" id="tip"></div></div>
@@ -274,10 +374,17 @@
           <div><div class="big" id="a-dist">-</div><div class="sub" id="a-name"></div></div>
         </div>
       </div>
+      <div class="panel" id="mpanel">
+        <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
+          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div></div>
+        <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
+        <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
+      </div>
       <div class="panel" id="rpanel">
         <div class="ph"><h2>Villagers</h2><span class="sub" id="r-count"></span><div class="grow"></div><input class="search" id="r-q" placeholder="Filter name, job, status"></div>
         <div class="roster"><table><thead><tr><th data-k="name">Name</th><th data-k="prof">Job</th><th data-k="status">Doing</th><th data-k="hp">Health</th><th data-k="bed">Bed</th><th data-k="emT" title="In its inventory plus the chests it owns">Emeralds</th><th data-k="foodT" title="Bread-equivalent, in its inventory plus the chests it owns">Food</th><th data-k="starving">Starving</th><th data-k="age" title="Game days it has been loaded and active (time its village sat unloaded doesn't count)">Age</th><th data-k="dist">Distance</th></tr></thead><tbody id="r-body"></tbody></table></div>
         <div class="vinv" id="r-inv" hidden></div>
+        <div class="vday" id="r-day" hidden></div>
         <details class="past" id="r-past" open><summary>Past villagers <b id="r-pastn">0</b></summary>
           <div class="roster"><table><thead><tr><th>Name</th><th>Job</th><th>Died</th><th>Cause</th><th title="Game days it had been loaded and active">Age</th></tr></thead><tbody id="r-pastb"></tbody></table></div>
         </details>
@@ -298,10 +405,27 @@
       <table id="a-table"><colgroup><col><col class="c2"><col class="c3"></colgroup><thead><tr><th>Alert</th><th>Fired</th><th></th></tr></thead><tbody id="a-body"></tbody></table>
       <div class="anote" id="a-note">An alert freezes the game (0×) when a matching event is logged in any loaded village and shows it in the game's top-left corner. Alerts are kept by the debug server, so they carry over to other games.</div>
     </div>
+    <div class="panel" id="rtpanel">
+      <div class="ph"><h2>Routes</h2><span class="sub" id="rt-count"></span></div>
+      <div class="roster"><table><thead><tr><th>Between</th><th title="Trips along this route in the last 7 game days">Trips (7 d)</th><th title="Items carried and sold, and the emeralds they fetched, in the last 7 game days">Goods moved</th><th>On the road</th></tr></thead><tbody id="rt-body"></tbody></table></div>
+      <div class="empty" id="rt-empty">No merchant has travelled yet.</div>
+    </div>
     <div class="panel" id="lpanel">
-      <div class="ph"><h2>Village log</h2><span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
-      <div class="filters" id="l-filters"></div>
-      <div id="log"><div class="empty">Load a village to see its log.</div></div>
+      <div class="ph"><div class="tabs" id="l-tabs"><button class="tab on" data-tab="log">Village log</button><button class="tab" data-tab="econ" title="Goods moving between jobs, and what can't be bought or isn't selling">Economy</button></div>
+        <span class="sub" id="l-count"></span><div class="grow"></div><input class="search" id="l-q" placeholder="Search the log"></div>
+      <div id="l-pane">
+        <div class="filters" id="l-filters"></div>
+        <div id="log"><div class="empty">Load a village to see its log.</div></div>
+      </div>
+      <div id="e-pane" hidden>
+        <div class="filters econbar">
+          <div class="seg" id="e-range" title="Game days"><button data-v="1">Today</button><button data-v="3">3 days</button><button data-v="7">7 days</button></div>
+          <div class="seg" id="e-scope"><button data-v="one">This village</button><button data-v="all">All villages</button></div>
+          <div class="grow"></div>
+          <div class="seg" id="e-mode"><button data-v="flow">Diagram</button><button data-v="table">Table</button></div>
+        </div>
+        <div id="econ"><div class="empty">Load a village to see its economy.</div></div>
+      </div>
     </div>
     </div>
   </div>
@@ -315,11 +439,12 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const fmt = n => n == null ? "-" : n.toLocaleString();
+const gameLeft = secs => { const m = Math.round(secs / 1200 * 24 * 60), h = Math.floor(m / 60); return h ? h + "h " + (m % 60) + "m" : (m % 60) + "m"; };   // game time left
 const days = n => fmt(n) + (n === 1 ? " day" : " days");
 
 // ---------------------------------------------------------------- state
 // layouts / logs / details: everything known per village key (details = the last full numbers while it was loaded)
-const layouts = {}, logs = {}, details = {}, icons = {};   // icons: item id -> {url, name}, sent once by the game for the inventory view
+const layouts = {}, logs = {}, details = {}, icons = {}, econ = {};   // econ: each village's Economy tallies (js/economy.js)   // icons: item id -> {url, name}, sent once by the game for the inventory view
 let viewKey = null, pinned = null, curV = null, curStale = false;   // pinned: a village the user picked; null follows the nearest loaded one
 let snap = null, layout = null, log = null, lastAt = 0, seenLog = 0, logKeyShown = null, hlName = null, hoverName = null;
 const hist = { fps: [], queue: [] }, HIST = 240;   // 60 s at 4 snapshots a second
@@ -338,7 +463,8 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
-  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); logDirty = true; } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.day !== undefined) dayData = c.day; Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.glog !== undefined) glogSet(c.glog); } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
   es.onerror = () => { serverUp = false; status(); };
@@ -366,9 +492,12 @@ setInterval(status, 1000);
 
 // ---------------------------------------------------------------- snapshots
 function onSnap(s) {
+  if (s.glog) glogIn(s.glog);
   Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
-  let logChanged = false;
+  if (s.day !== undefined) dayData = s.day;   // the picked villager's day timeline, when it changed (js/daytimeline.js)
+  let logChanged = false, econChanged = false;
   for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
+  for (const k in s.econ || {}) { econ[k] = s.econ[k]; if (k === viewKey || eopt.scope === "all") econChanged = true; }
   if (s.error) { gameErr = s.error; errAt = Date.now() - (s.age || 0); status(); }
   if (!s.info) return;
   gameErr = null;
@@ -376,8 +505,10 @@ function onSnap(s) {
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
   const was = viewKey;
   pickView(s);
-  renderTop(s); renderVillages(s); renderVillage(s); status(); alertsFromSnap(s);
-  if (logChanged || logDirty || was !== viewKey) { logDirty = false; renderLog(); }
+  renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); renderRoutes(s); renderDay(); status(); alertsFromSnap(s);
+  if (s.mobmap) { mm = s.mobmap; renderMobMap(); }
+  if (logChanged || logDirty || was !== viewKey) { if (logDirty || was !== viewKey) econChanged = true; logDirty = false; renderLog(); }
+  if (econChanged && eopt.tab === "econ") renderEcon();
 }
 // The village on show: the one the user picked, else the nearest loaded one (the list comes sorted loaded-first by distance).
 function pickView(s) {
@@ -389,6 +520,16 @@ function pickView(s) {
 }
 
 // ---------------------------------------------------------------- village list
+// Caravan routes (js/merchant.js routes): each pair of villages a merchant has travelled between, trips and goods of the last 7 game days,
+// and who is on the road now.
+const STAGE = { buy: "buying goods", go: "on the way there", sell: "selling there", shop: "buying to take home", back: "on the way home", unload: "selling at home" };
+function renderRoutes(s) {
+  const rs = s.routes || [], body = $("rt-body");
+  $("rt-empty").hidden = rs.length > 0;
+  $("rt-count").textContent = rs.length ? rs.length + " route" + (rs.length === 1 ? "" : "s") : "";
+  body.innerHTML = rs.map(r => `<tr><td>${esc(r.an)} ↔ ${esc(r.bn)}<div class="sub">${esc(r.a)} ↔ ${esc(r.b)}</div></td><td>${r.trips}<span class="sub"> of ${r.total}</span></td>` +
+    `<td>${r.items} items<span class="sub">, ${r.emeralds} emeralds</span></td><td>${r.road.length ? r.road.map(x => esc(x.who) + " <span class=\"sub\">(" + esc(STAGE[x.stage] || x.stage || "") + ")</span>").join("<br>") : "<span class=\"sub\">no</span>"}</td></tr>`).join("");
+}
 function renderVillages(s) {
   const list = s.villages || [], d = s.info;
   const nLoaded = list.filter(v => v.loaded).length;
@@ -396,14 +537,17 @@ function renderVillages(s) {
   $("vl-auto").classList.toggle("on", !pinned);
   const row = v => {
     const det = details[v.key], b = bearing(v.x - d.x, v.z - d.z);
-    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.age != null ? " \u00B7 age " + days(v.age) : "") + (v.happy ? " \u00B7 happiness " + v.happy.score : "");
+    const extra = (v.loaded ? (v.key === s.inside ? "you're here" : "loaded") : det ? "last seen " + det.clock : "not seen this session") + (v.unload ? " \u00B7 unloads in " + gameLeft(v.unload.left) : "") + (v.age != null ? " \u00B7 age " + days(v.age) : "") + (v.happy ? " \u00B7 happiness " + v.happy.score : "");
     return `<div class="vrow${v.loaded ? " on" : ""}${v.key === viewKey ? " sel" : ""}" data-k="${esc(v.key)}"><i class="ld"></i>` +
-      `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs">${esc(extra)}</div>` +
+      `<div class="vn">${esc(v.name)}${det ? `<small>${det.villagers} villagers</small>` : ""}</div><div class="vs"${v.unload ? ` title="${esc(v.unload.est.map(x => x.who + ": " + x.task + " (" + gameLeft(x.secs) + ")").join("\n"))}"` : ""}>${esc(extra)}</div>` +
       `<div class="vd"><b>${fmt(v.dist)}</b> ${v.dist > 8 ? dirName(b) : ""}</div></div>`;
   };
   const on = list.filter(v => v.loaded), off = list.filter(v => !v.loaded);
   $("vlist").innerHTML = list.length ? on.map(row).join("") + (off.length ? `<div class="vsep">Not loaded</div>` + off.map(row).join("") : "")
     : `<div class="empty">No villages loaded yet.</div>`;
+  const le = s.loadErrors || [];
+  $("lerrs").hidden = !le.length && !s.loadLimits;
+  $("lerrs").innerHTML = le.length ? `<h4>Loading errors (${le.length})${s.loadLimits ? " \u00B7 villager AI " + s.loadLimits.aiMs.toFixed(1) + " of " + s.loadLimits.maxAiMs + " ms, " + s.loadLimits.villages + " of " + s.loadLimits.maxVillages + " villages" : ""}</h4>` + le.slice().reverse().map(e => `<div>${esc(e.kind)} \u00B7 ${esc(e.who || "")} \u00B7 ${esc(e.task || "")} \u00B7 ${e.action ? esc(e.action) : "estimate " + e.estimate + "s, ran " + e.ran + "s"}${e.why ? " \u00B7 " + esc(e.why) : ""} \u00B7 ${esc(e.village || "")}</div>`).join("") : "";
 }
 $("vlist").addEventListener("click", e => {
   const r = e.target.closest(".vrow"); if (!r || !snap) return;
@@ -411,6 +555,129 @@ $("vlist").addEventListener("click", e => {
   onSnap(snap);
 });
 $("vl-auto").addEventListener("click", () => { pinned = null; if (snap) onSnap(snap); });
+// ---------------------------------------------------------------- compare villages (the village list's Compare table)
+// One row per known village, side by side: the numbers each village's own panel shows (its last snapshot while it was loaded)
+// plus last week's trades, births and deaths and the population change. Unloaded villages are greyed with when they were seen.
+// Outliers get the alert colours: the worst 10% of a column (with 5 or more villages, and worse than the middle village),
+// or past a danger line (no food, unhappy, shrinking by more than a quarter in 7 days). Click a header to sort, a row to pick the village.
+const CMP_MAX = 200, CSTORE = "bf-debug-compare";
+const UNHAPPY = 40;   // happiness below this is the red band (happyColor)
+// key, header, tooltip, value(row) -> number|null, worse: "low" | "high" | null (no outlier colour)
+const CCOLS = [
+  { k: "name", h: "Village", sort: r => r.name.toLowerCase() },
+  { k: "dist", h: "Distance", v: r => r.dist },
+  { k: "pop", h: "Villagers", t: "Population, and its change over the last 7 game days", v: r => r.pop },
+  { k: "pop7", h: "7-day change", t: "Population change since the oldest count in the last 7 game days", v: r => r.pop7, worse: "low" },
+  { k: "happy", h: "Happiness", v: r => r.happy, worse: "low" },
+  { k: "beds", h: "Beds", v: r => r.beds },
+  { k: "free", h: "Free beds", t: "Beds minus villagers (negative: villagers without a bed)", v: r => r.free, worse: "low" },
+  { k: "food", h: "Food", t: "Bread-equivalent held by its villagers and in their chests", v: r => r.food, worse: "low" },
+  { k: "trades", h: "Trades 7d", v: r => r.trades, worse: "low" },
+  { k: "noTools", h: "No tools", t: "Miners, foresters, farmers and shepherds without the tool their job needs", v: r => r.noTools, worse: "high" },
+  { k: "jobs", h: "Free jobs", t: "Job blocks nobody has taken", v: r => r.jobs, worse: "high" },
+  { k: "births", h: "Births 7d", v: r => r.births },
+  { k: "deaths", h: "Deaths 7d", v: r => r.deaths, worse: "high" },
+  { k: "golems", h: "Golems", v: r => r.golems },
+];
+let cmpOn = false, cmpWide = false, cmpSort = { k: "dist", dir: 1 };
+try { const o = JSON.parse(sessionStorage.getItem(CSTORE) || "{}"); if (o.sort) cmpSort = o.sort; cmpOn = !!o.on; } catch (e) { /* defaults */ }
+const saveCmp = () => { try { sessionStorage.setItem(CSTORE, JSON.stringify({ sort: cmpSort, on: cmpOn })); } catch (e) {} };
+// A table row from the village list entry v and its last detail d (null: never loaded while this screen or the server ran).
+function cmpRow(v, d, now) {
+  const r = { key: v.key, name: v.name, dist: v.dist, loaded: v.loaded, happy: v.happy ? v.happy.score : null, seen: null };
+  if (!d) return Object.assign(r, { pop: null, pop7: null, pop7from: null, beds: null, free: null, food: null, trades: null, noTools: null, toolJobs: 0, jobs: null, births: null, deaths: null, golems: null, none: true });
+  const food = (d.villagerList || []).reduce((a, x) => a + (x.food || 0) + (x.foodChests || 0), 0);
+  Object.assign(r, { pop: d.villagers, pop7: d.pop7 ? d.pop7.change : null, pop7from: d.pop7 ? d.pop7.from : null, beds: d.beds, free: d.beds ? d.beds - d.villagers : null,
+    food: Math.round(food), trades: d.week ? d.week.trade : null, noTools: d.noTools && d.noTools[1] ? d.noTools[0] : null, toolJobs: d.noTools ? d.noTools[1] : 0,
+    jobs: d.unclaimed, births: d.week ? d.week.birth : null, deaths: d.week ? d.week.death : null, golems: (d.golems || []).length });
+  if (!v.loaded && d.day != null && now != null) r.seen = now - d.day;
+  return r;
+}
+// Which cells are outliers, and why: {key: {col: reason}}. rows: cmpRow()s. Exposed as BFCompare.flags for tests.
+function cmpFlags(rows) {
+  const out = {}, flag = (r, c, why) => { (out[r.key] || (out[r.key] = {}))[c] = why; };
+  for (const r of rows) {
+    if (r.food === 0 && r.pop > 0) flag(r, "food", "no food");
+    if (r.happy != null && r.happy < UNHAPPY) flag(r, "happy", "unhappy");
+    if (r.pop7 != null && r.pop7from > 0 && -r.pop7 / r.pop7from > 0.25) flag(r, "pop7", "shrinking");
+  }
+  for (const c of CCOLS) {
+    if (!c.worse) continue;
+    const vals = rows.map(r => [r, c.v(r)]).filter(x => x[1] != null);
+    if (vals.length < 5) continue;
+    const s = vals.map(x => x[1]).sort((a, b) => c.worse === "low" ? a - b : b - a), n = Math.ceil(vals.length * 0.1), cut = s[n - 1], mid = s[Math.floor(s.length / 2)];
+    const worse = (a, b) => c.worse === "low" ? a < b : a > b;
+    for (const [r, x] of vals) if (!worse(cut, x) && worse(x, mid) && !(out[r.key] && out[r.key][c.k])) flag(r, c.k, (c.worse === "low" ? "low " : "high ") + c.h.toLowerCase());
+  }
+  return out;
+}
+function cmpSortRows(rows, sort) {
+  const c = CCOLS.find(x => x.k === sort.k) || CCOLS[1], key = c.sort || c.v;
+  return rows.slice().sort((a, b) => {
+    const x = key(a), y = key(b);
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;   // blanks last either way
+    return (x < y ? -1 : x > y ? 1 : 0) * sort.dir || a.dist - b.dist;
+  });
+}
+window.BFCompare = { flags: cmpFlags, sortRows: cmpSortRows, row: cmpRow, COLS: CCOLS.map(c => c.k) };
+const sgn = n => n > 0 ? "+" + n : n < 0 ? "−" + -n : "0";
+const ago = dd => dd < 1 / 24 ? "just now" : dd < 1 ? Math.round(dd * 24) + " h ago" : (Math.round(dd * 10) / 10) + " days ago";
+function renderCompare(s) {
+  const el = $("vcmp");
+  if (!cmpOn) return;
+  const list = s.villages || [];
+  if (!list.length) { el.innerHTML = cmpHtml = `<div class="empty">No villages known yet.</div>`; return; }
+  const now = s.info && s.info.day;
+  const all = list.map(v => cmpRow(v, details[v.key], now)), flags = cmpFlags(all);
+  // loaded first, then the others (as in the list), each part sorted by the chosen column
+  const rows = [...cmpSortRows(all.filter(r => r.loaded), cmpSort), ...cmpSortRows(all.filter(r => !r.loaded), cmpSort)];
+  const need = all.filter(r => flags[r.key]);
+  const why = r => [...new Set(Object.values(flags[r.key]))].join(", ");
+  const head = need.length ? `<div class="cneed"><b>${need.length} ${need.length === 1 ? "village needs" : "villages need"} a look:</b> ` + need.slice(0, 8).map(r => `${esc(r.name)} (${esc(why(r))})`).join(", ") + (need.length > 8 ? `, and ${need.length - 8} more` : "") + `</div>`
+    : `<div class="cneed ok">No village stands out.</div>`;
+  const cell = (r, c) => {
+    const f = flags[r.key] && flags[r.key][c.k], cls = f ? (/no food|unhappy|shrinking/.test(f) ? "danger" : "warn") : "";
+    let x = c.v ? c.v(r) : null, txt;
+    if (c.k === "name") txt = `${esc(r.name)}${r.loaded ? "" : `<small>${r.seen != null ? "seen " + ago(r.seen) : r.none ? "no numbers yet" : "not loaded"}</small>`}`;
+    else if (x == null) txt = `<span class="dim">-</span>`;
+    else if (c.k === "pop7") txt = sgn(x);
+    else if (c.k === "free") txt = sgn(x);
+    else if (c.k === "dist") txt = fmt(x);
+    else txt = fmt(x);
+    if (c.k === "noTools" && x != null) txt += `<span class="dim"> / ${r.toolJobs}</span>`;
+    if (c.k === "happy" && x != null) txt = `<span style="color:${happyColor(x)}">${x}</span>`;
+    return `<td class="${c.k === "name" ? "cn" : "r"} ${cls}"${f ? ` title="${esc(f)}"` : ""}>${txt}</td>`;
+  };
+  const shown = rows.slice(0, CMP_MAX);
+  const html = head + `<div class="ctable"><table><thead><tr>${CCOLS.map(c => `<th data-k="${c.k}" class="${c.k === "name" ? "" : "r"}${cmpSort.k === c.k ? " on" : ""}"${c.t ? ` title="${esc(c.t)}"` : ""}>${c.h}${cmpSort.k === c.k ? (cmpSort.dir > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>` +
+    shown.map(r => `<tr data-k="${esc(r.key)}" class="${r.loaded ? "" : "off"}${r.key === viewKey ? " sel" : ""}">${CCOLS.map(c => cell(r, c)).join("")}</tr>`).join("") + `</tbody></table></div>` +
+    (rows.length > CMP_MAX ? `<div class="anote">${rows.length - CMP_MAX} more villages not shown (the first ${CMP_MAX} in this order are).</div>` : "");
+  if (html === cmpHtml && el.firstChild) return;   // unchanged: keep the DOM (and the reader's place in it)
+  const t = el.querySelector(".ctable"), top = t ? t.scrollTop : 0, left = t ? t.scrollLeft : 0;
+  el.innerHTML = cmpHtml = html;
+  const t2 = el.querySelector(".ctable"); if (t2) { t2.scrollTop = top; t2.scrollLeft = left; }
+}
+let cmpHtml = "";
+function setCompare(on, wide) {
+  cmpOn = on; cmpWide = on && wide; saveCmp();
+  $("vl-cmp").classList.toggle("on", cmpOn); $("vl-wide").hidden = !cmpOn; $("vl-wide").classList.toggle("on", cmpWide);
+  $("vlist").hidden = cmpOn; $("vcmp").hidden = !cmpOn;
+  $("vlpanel").classList.toggle("wide", cmpWide);
+  if (snap) renderCompare(snap); else if (cmpOn) $("vcmp").innerHTML = `<div class="empty">No villages known yet.</div>`;
+}
+$("vl-cmp").addEventListener("click", () => setCompare(!cmpOn, false));
+$("vl-wide").addEventListener("click", () => setCompare(true, !cmpWide));
+$("vcmp").addEventListener("click", e => {
+  const th = e.target.closest("th[data-k]");
+  if (th) { cmpSort = cmpSort.k === th.dataset.k ? { k: th.dataset.k, dir: -cmpSort.dir } : { k: th.dataset.k, dir: th.dataset.k === "name" || th.dataset.k === "dist" ? 1 : -1 }; saveCmp(); if (snap) renderCompare(snap); return; }
+  const tr = e.target.closest("tr[data-k]"); if (!tr || !snap) return;
+  pinned = tr.dataset.k;
+  if (cmpWide) setCompare(true, false);   // a full-width table would cover the village panel it just picked
+  onSnap(snap);
+});
+addEventListener("keydown", e => { if (e.key === "Escape" && cmpWide) setCompare(true, false); });
+setCompare(cmpOn, false);
+
 const push = (a, v) => { a.push(v); if (a.length > HIST) a.shift(); };
 
 const DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -485,6 +752,7 @@ function renderVillage(s) {
   $("v-sub").innerHTML = (curStale ? `<span class="stalebadge">Not loaded \u00B7 numbers from ${esc(v.clock)}</span> \u00B7 ` : "") +
     esc(fmt(row.dist) + " blocks away") + (row.age != null ? `<span title="Game days this village has been loaded and active"> \u00B7 age ${esc(days(row.age))}</span>` : "") + (layout && layout.key === v.key ? esc(" \u00B7 " + pretty(layout.biome) + " \u00B7 " + layout.buildings.length + " buildings") : "");
   renderHappy(row.happy);
+  renderWild(v.wild);
   $("v-villagers").textContent = v.villagers;
   $("v-loaded").textContent = curStale ? "not loaded" : v.loaded < v.villagers ? v.loaded + " loaded" : "all loaded";
   $("v-beds").textContent = v.beds;
@@ -507,6 +775,19 @@ function renderVillage(s) {
   renderRoster(s);
 }
 
+// Wild mobs around the village (js/wildlife.js): hostiles in its area, wild animals within 128 blocks, and the last 7 nights.
+function renderWild(w) {
+  const el = $("v-wild");
+  el.hidden = !w;
+  if (!w) return;
+  const an = Object.entries(w.animals || {}).sort((a, b) => b[1] - a[1]);
+  el.innerHTML = `<div><div>Hostiles in the village area <b>${fmt(w.hostiles)}</b></div><div>Wild animals within 128 blocks <b>${fmt(an.reduce((n, a) => n + a[1], 0))}</b>` +
+    (an.length ? ` <span class="sub">(${an.map(([t, n]) => n + " " + esc(pretty(t))).join(", ")})</span>` : "") + `</div></div>` +
+    `<table title="Nights start at sunset. Zombie in: a zombie got inside the village. Attacks: zombie hits on its villagers. Deaths: villagers who died that night"><thead><tr><th>Night of</th><th>Zombie in</th><th>Attacks</th><th>Deaths</th></tr></thead><tbody>` +
+    (w.nights.length ? w.nights.map(([n, r, a, d]) => `<tr><td>Day ${n + 1}</td><td class="${r ? "hit" : ""}">${r ? "yes" : "-"}</td><td class="${a ? "hit" : ""}">${a}</td><td class="${d ? "dead" : ""}">${d}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="sub">No nights yet</td></tr>`) + `</tbody></table>`;
+}
+
 // Happiness (js/happiness.js): the score, a bar, and every term with its count and points (zero terms dimmed).
 const happyColor = n => n >= 70 ? "var(--accent)" : n >= 40 ? "var(--warn)" : "var(--danger)";
 function renderHappy(h) {
@@ -527,7 +808,7 @@ const STRUCT = {
   pen:     { name: "Paddock",        fill: "rgba(90,150,190,0.24)", stroke: "rgba(130,190,230,0.4)" },
   other:   { name: "Other building", fill: "rgba(150,150,165,0.26)", stroke: "rgba(200,200,215,0.3)" },
 };
-const structKind = t => /house|^big$|cottage/.test(t || "") ? "house" : /farm|garden/.test(t || "") ? "farm" : t === "pen" ? "pen" : "other";
+const structKind = t => /house|^big$|cottage/.test(t || "") ? "house" : /farm|garden/.test(t || "") ? "farm" : t === "pen" || t === "stable" || t === "pasture" || t === "sty" ? "pen" : "other";
 function star(g, x, y, r) {
   g.beginPath();
   for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
@@ -564,6 +845,8 @@ function drawMap(s) {
     g.fillStyle = "rgba(242,198,109,0.5)";
     for (const [lx, lz] of L.lamps) { g.beginPath(); g.arc(X(lx + 0.5), Z(lz + 0.5), Math.max(1.5, sc * 0.35), 0, 7); g.fill(); }
   }
+  // river crossings (swims and long detours, last 3 days): a faint blue square per 8-block cell, darker the more there are; a bridge is built at 12 or more
+  for (const [hx, hz, n] of v.cross || []) { g.fillStyle = "rgba(90,170,235," + Math.min(0.5, 0.07 + n / 70).toFixed(2) + ")"; g.fillRect(X(hx), Z(hz), 8 * sc, 8 * sc); if (sc > 3) { g.fillStyle = "rgba(190,225,250,0.6)"; g.font = "9px IBM Plex Mono, monospace"; g.fillText(n, X(hx) + 2, Z(hz) + 9); } }
   // structures the builders made (a star on each; dashed while still going up)
   for (const b of v.built || []) {
     const k = STRUCT[structKind(b[4])];
@@ -584,6 +867,12 @@ function drawMap(s) {
     g.fillStyle = profColor(m.prof); g.globalAlpha = m.sleeping ? 0.45 : 1; g.fill(); g.globalAlpha = 1;
     g.lineWidth = on ? 2 : 1; g.strokeStyle = on ? "#fff" : "rgba(0,0,0,0.6)"; g.stroke();
     if (on && m.job) { g.setLineDash([3, 3]); g.strokeStyle = "rgba(255,255,255,0.5)"; g.beginPath(); g.moveTo(X(m.x), Z(m.z)); g.lineTo(X(m.job[0] + 0.5), Z(m.job[1] + 0.5)); g.stroke(); g.setLineDash([]); }
+  }
+  // a stretch or event picked in the villager's day list: a ring where it happened
+  if (dayAt) {
+    const cx = X(dayAt[0]), cz = Z(dayAt[1]);
+    g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.arc(cx, cz, 9, 0, 7); g.stroke();
+    g.strokeStyle = "rgba(255,255,255,0.5)"; g.lineWidth = 1; g.beginPath(); g.moveTo(cx - 14, cz); g.lineTo(cx - 5, cz); g.moveTo(cx + 5, cz); g.lineTo(cx + 14, cz); g.moveTo(cx, cz - 14); g.lineTo(cx, cz - 5); g.moveTo(cx, cz + 5); g.lineTo(cx, cz + 14); g.stroke();
   }
   // player: arrow pointing where they look; when off the map, a marker on its edge in the player's direction
   let px = X(d.x), pz = Z(d.z), a = -d.yaw;
@@ -616,6 +905,144 @@ mapCv.addEventListener("mousemove", e => {
 mapCv.addEventListener("mouseleave", () => { hoverName = null; tip.style.display = "none"; if (snap && curV) drawMap(snap); markRoster(); });
 mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlName ? hoverName : null; markRoster(true); });
 
+// ---------------------------------------------------------------- Mobs map (js/debugfeed.js mobMap, once a second)
+// Every loaded mob as a dot over the loaded land: hostiles warm, animals cool, village stock ringed. Click a legend entry to hide a type
+// (remembered in this browser); wheel or + / - zooms, dragging pans, Centre follows the player again.
+const MOB_COLORS = { zombie: "#e8583c", skeleton: "#f2c66d", creeper: "#ff9a3d", spider: "#d6477e", pig: "#a796f2", cow: "#4f9be8", sheep: "#a8dcf2",
+  chicken: "#5fd6c2", horse: "#4f6fd0", villager: "#e6dfc8", merchant: "#c98a4b", iron_golem: "#b9c6ce" };
+const MOB_ORDER = ["zombie", "skeleton", "creeper", "spider", "cow", "sheep", "chicken", "pig", "horse", "villager", "merchant", "iron_golem"];
+const MSTORE = "bf-debug-mobmap-hidden";
+let mobHidden = new Set();
+try { mobHidden = new Set(JSON.parse(localStorage.getItem(MSTORE) || "[]")); } catch (e) { /* storage off: nothing remembered */ }
+const saveHidden = () => { try { localStorage.setItem(MSTORE, JSON.stringify([...mobHidden])); } catch (e) { /* storage off */ } };
+const mobColor = k => MOB_COLORS[k] || (() => { let h = 0; for (const c of k) h = (h * 31 + c.charCodeAt(0)) >>> 0; return MOB_COLORS[k] = `hsl(${h % 360}, 50%, 62%)`; })();
+let mm = null, mview = { x: 0, z: 0, sc: 0, follow: true }, mdots = [], mHover = null;
+const mCv = $("mmap"), mTip = $("mtip");
+let hatch = null;
+function hatchPattern(g) {
+  if (hatch) return hatch;
+  const c = document.createElement("canvas"); c.width = c.height = 8;
+  const h = c.getContext("2d"); h.fillStyle = "#070908"; h.fillRect(0, 0, 8, 8);
+  h.strokeStyle = "rgba(255,255,255,0.05)"; h.lineWidth = 1; h.beginPath(); h.moveTo(0, 8); h.lineTo(8, 0); h.stroke();
+  return hatch = g.createPattern(c, "repeat");
+}
+function mobBounds() {
+  const c = mm.chunks, cs = mm.cs || 16;
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < c.length; i += 2) { x0 = Math.min(x0, c[i] * cs); z0 = Math.min(z0, c[i + 1] * cs); x1 = Math.max(x1, (c[i] + 1) * cs); z1 = Math.max(z1, (c[i + 1] + 1) * cs); }
+  if (!isFinite(x0)) { x0 = mm.player[0] - 64; x1 = mm.player[0] + 64; z0 = mm.player[1] - 64; z1 = mm.player[1] + 64; }
+  return [x0, z0, x1, z1];
+}
+const mZoomMin = (w, h) => { const [x0, z0, x1, z1] = mobBounds(); return Math.min((w - 20) / (x1 - x0), (h - 20) / (z1 - z0)); };   // the whole loaded area
+const mZoomMax = w => w / (3 * (mm.cs || 16));                                                                                     // about 3 chunks across
+function clampZoom(w, h) { const lo = mZoomMin(w, h), hi = Math.max(lo, mZoomMax(w)); mview.sc = Math.max(lo, Math.min(hi, mview.sc)); }
+function renderMobMap() {
+  const r = devicePixelRatio || 1, w = mCv.clientWidth, h = mCv.clientHeight;
+  if (!mm || !w) { $("m-count").textContent = mm ? "" : "waiting for the game"; return; }
+  if (mCv.width !== w * r || mCv.height !== h * r) { mCv.width = w * r; mCv.height = h * r; }
+  const g = mCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0);
+  if (!mview.sc) { mview.sc = mZoomMin(w, h); const [x0, z0, x1, z1] = mobBounds(); mview.x = (x0 + x1) / 2; mview.z = (z0 + z1) / 2; mview.follow = false; mview.fitted = true; }
+  if (mview.follow) { mview.x = mm.player[0]; mview.z = mm.player[1]; }
+  clampZoom(w, h);
+  const sc = mview.sc, X = x => w / 2 + (x - mview.x) * sc, Z = z => h / 2 + (z - mview.z) * sc, cs = mm.cs || 16;
+  // unloaded land: dark and faintly hatched; loaded chunks: a soft tone, with a thin line where loaded land ends
+  g.fillStyle = hatchPattern(g); g.fillRect(0, 0, w, h);
+  const set = new Set(), c = mm.chunks;
+  for (let i = 0; i < c.length; i += 2) set.add(c[i] + "," + c[i + 1]);
+  g.fillStyle = "#18221c";
+  for (let i = 0; i < c.length; i += 2) g.fillRect(Math.floor(X(c[i] * cs)), Math.floor(Z(c[i + 1] * cs)), Math.ceil(cs * sc) + 1, Math.ceil(cs * sc) + 1);
+  g.strokeStyle = "rgba(166,220,114,0.35)"; g.lineWidth = 1; g.beginPath();
+  for (let i = 0; i < c.length; i += 2) {
+    const cx = c[i], cz = c[i + 1], x0 = Math.round(X(cx * cs)) + 0.5, z0 = Math.round(Z(cz * cs)) + 0.5, x1 = Math.round(X((cx + 1) * cs)) + 0.5, z1 = Math.round(Z((cz + 1) * cs)) + 0.5;
+    if (!set.has(cx + "," + (cz - 1))) { g.moveTo(x0, z0); g.lineTo(x1, z0); }
+    if (!set.has(cx + "," + (cz + 1))) { g.moveTo(x0, z1); g.lineTo(x1, z1); }
+    if (!set.has((cx - 1) + "," + cz)) { g.moveTo(x0, z0); g.lineTo(x0, z1); }
+    if (!set.has((cx + 1) + "," + cz)) { g.moveTo(x1, z0); g.lineTo(x1, z1); }
+  }
+  g.stroke();
+  // running villages: a subtle outline and their name
+  g.setLineDash([4, 4]); g.strokeStyle = "rgba(242,198,109,0.35)"; g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "rgba(242,198,109,0.6)";
+  for (const v of mm.villages) { g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText(v[4] || "", X(v[0]) + 3, Z(v[1]) - 4); }
+  g.setLineDash([]);
+  // mobs
+  const rad = Math.max(2, Math.min(5, sc * 0.5));
+  mdots = [];
+  for (const d of mm.mobs) {
+    const kind = mm.kinds[d[0]];
+    if (mobHidden.has(kind)) continue;
+    const px = X(d[1]), pz = Z(d[2]);
+    if (px < -6 || pz < -6 || px > w + 6 || pz > h + 6) continue;
+    g.beginPath(); g.arc(px, pz, rad, 0, 7); g.fillStyle = mobColor(kind); g.fill();
+    if (d[4]) { g.lineWidth = 1.5; g.strokeStyle = "#fff"; g.beginPath(); g.arc(px, pz, rad + 2, 0, 7); g.stroke(); }   // village stock
+    mdots.push([px, pz, d]);
+  }
+  if (mHover) { g.lineWidth = 2; g.strokeStyle = "#fff"; g.beginPath(); g.arc(X(mHover[1]), Z(mHover[2]), rad + 4, 0, 7); g.stroke(); }
+  // the player
+  const [ppx, ppz, yaw] = mm.player;
+  g.save(); g.translate(X(ppx), Z(ppz)); g.rotate(-yaw);
+  g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
+  g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
+  // scale bar
+  const blocks = [8, 16, 32, 64, 128, 256, 512].find(b => b * sc >= 60) || 512;
+  g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.fillText(blocks + " blocks", 12, h - 20); g.fillText("N ↑", w - 34, 18);
+  $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded`;
+  renderMobLegend();
+}
+let legSig = "";
+function renderMobLegend() {
+  const n = {};
+  for (const d of mm.mobs) { const k = mm.kinds[d[0]]; n[k] = (n[k] || 0) + 1; }
+  for (const k of mobHidden) if (!(k in n)) n[k] = 0;
+  const keys = Object.keys(n).sort((a, b) => ((MOB_ORDER.indexOf(a) + 1) || 99) - ((MOB_ORDER.indexOf(b) + 1) || 99) || a.localeCompare(b));
+  const sig = keys.map(k => k + n[k] + mobHidden.has(k)).join("|");
+  if (sig === legSig) return;
+  legSig = sig;
+  $("m-legend").innerHTML = keys.map(k => `<button class="item${mobHidden.has(k) ? " off" : ""}" data-k="${esc(k)}" title="Click to ${mobHidden.has(k) ? "show" : "hide"}"><i style="background:${mobColor(k)}"></i>${esc(pretty(k))} <b>${fmt(n[k])}</b></button>`).join("") +
+    `<span class="sub" style="margin-left:6px"><i style="display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px solid #fff;vertical-align:-1px"></i> village animal (pen, coop, pasture, paddock)</span>`;
+}
+$("m-legend").addEventListener("click", e => {
+  const b = e.target.closest("button[data-k]"); if (!b) return;
+  const k = b.dataset.k; if (mobHidden.has(k)) mobHidden.delete(k); else mobHidden.add(k);
+  saveHidden(); renderMobMap();
+});
+$("m-all").addEventListener("click", () => { mobHidden.clear(); saveHidden(); renderMobMap(); });
+$("m-none").addEventListener("click", () => { if (mm) for (const k of mm.kinds) mobHidden.add(k); saveHidden(); renderMobMap(); });
+function mZoom(f, mx, my) {
+  if (!mm) return;
+  const w = mCv.clientWidth, h = mCv.clientHeight, sc0 = mview.sc;
+  mview.sc *= f; clampZoom(w, h);
+  if (mx != null && !mview.follow) { mview.x += (mx - w / 2) * (1 / sc0 - 1 / mview.sc); mview.z += (my - h / 2) * (1 / sc0 - 1 / mview.sc); }   // keep the point under the cursor
+  renderMobMap();
+}
+$("m-zin").addEventListener("click", () => mZoom(1.5));
+$("m-zout").addEventListener("click", () => mZoom(1 / 1.5));
+$("m-center").addEventListener("click", () => { mview.follow = true; renderMobMap(); });
+mCv.addEventListener("wheel", e => { e.preventDefault(); const r = mCv.getBoundingClientRect(); mZoom(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+let mDrag = null;
+mCv.addEventListener("pointerdown", e => { mDrag = { x: e.clientX, y: e.clientY, vx: mview.x, vz: mview.z, moved: false }; mCv.setPointerCapture(e.pointerId); });
+mCv.addEventListener("pointerup", () => { mDrag = null; mCv.classList.remove("drag"); });
+mCv.addEventListener("pointermove", e => {
+  if (!mm) return;
+  const r = mCv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (mDrag) {
+    const dx = e.clientX - mDrag.x, dy = e.clientY - mDrag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) { mDrag.moved = true; mview.follow = false; mCv.classList.add("drag"); }
+    if (mDrag.moved) { mview.x = mDrag.vx - dx / mview.sc; mview.z = mDrag.vz - dy / mview.sc; mTip.style.display = "none"; renderMobMap(); return; }
+  }
+  let best = null, bd = 10;
+  for (const [px, pz, d] of mdots) { const dd = Math.hypot(px - mx, pz - my); if (dd < bd) { bd = dd; best = d; } }
+  mHover = best;
+  if (best) {
+    const kind = mm.kinds[best[0]];
+    mTip.style.display = "block"; mTip.style.left = mx + "px"; mTip.style.top = my + "px";
+    mTip.innerHTML = `<b style="color:${mobColor(kind)}">${esc(pretty(kind))}</b>${best[4] ? ' <span class="sub">village animal</span>' : ""}<div class="sub">${fmt(Math.round(best[1]))}, ${fmt(best[3])}, ${fmt(Math.round(best[2]))}</div><div>${esc(mm.acts[best[5]] || "")}</div>`;
+  } else mTip.style.display = "none";
+  renderMobMap();
+});
+mCv.addEventListener("mouseleave", () => { mHover = null; mTip.style.display = "none"; if (mm) renderMobMap(); });
+addEventListener("resize", () => { if (mm) renderMobMap(); });
+window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], scale: () => mview.sc, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
+
 // ---------------------------------------------------------------- roster
 function renderRoster(s) {
   const v = curV, q = $("r-q").value.trim().toLowerCase(), d = s.info;
@@ -639,7 +1066,7 @@ function markRoster(scroll) {
   for (const tr of $("r-body").children) {
     const on = tr.dataset.n === focus; tr.classList.toggle("hl", on);
     if (on && scroll) tr.scrollIntoView({ block: "nearest" });
-  }  renderInv();
+  }  renderInv(); renderDay();
 }
 // The selected villager's inventory (picked from the list or on the map), slot for slot as the game's trade screen shows it:
 // 18 slots, 6 across, item icons with stack counts and durability bars. Hover a slot for the item's name.
@@ -647,7 +1074,7 @@ let invSig = "";
 function renderInv() {
   const el = $("r-inv"), m = hlName && curV ? curV.villagerList.find(v => v.name === hlName) : null;
   if (!m) { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; invSig = ""; } return; }
-  const inv = m.inv || [], sig = m.name + "|" + JSON.stringify(inv) + "|" + m.em + "|" + m.emChests + "|" + m.food + "|" + m.chests + "|" + Object.keys(icons).length;
+  const inv = m.inv || [], sig = m.name + "|" + JSON.stringify(inv) + "|" + m.em + "|" + m.emChests + "|" + m.food + "|" + m.chests + "|" + JSON.stringify(m.flock || null) + "|" + JSON.stringify(m.horses || null) + "|" + JSON.stringify(m.bakes || null) + "|" + Object.keys(icons).length;
   el.hidden = false;
   if (sig === invSig) return;
   invSig = sig;
@@ -665,9 +1092,92 @@ function renderInv() {
     `<div class="side"><div><i class="dot" style="background:${profColor(m.prof)};margin-right:6px"></i><b>${esc(m.prof)}</b></div>` +
     `<div>${esc(m.status || "")}</div><div>Slots used: <b>${used}</b> of ${slots.length}</div>` +
     `<div>Emeralds: <b>${fmt(m.em || 0)}</b> carried${m.chests ? `, <b>${fmt(m.emChests || 0)}</b> in ${m.chests} chest${m.chests === 1 ? "" : "s"}` : ""}</div>` +
-    `<div>Food: <b>${fmt(m.food || 0)}</b> bread-equivalent carried${m.chests ? `, <b>${fmt(m.foodChests || 0)}</b> in chests` : ""}</div></div>`;
+    `<div>Food: <b>${fmt(m.food || 0)}</b> bread-equivalent carried${m.chests ? `, <b>${fmt(m.foodChests || 0)}</b> in chests` : ""}</div>` +
+    (m.flock ? `<div>Flock: <b>${fmt(m.flock.n)}</b> ${m.flock.kind}${m.flock.young ? ` (${fmt(m.flock.young)} young)` : ""}${m.flock.coop ? "" : `, no ${m.flock.kind === "chickens" ? "coop" : m.flock.kind === "cows" ? "pasture" : m.flock.kind === "pigs" ? "sty" : "pen"}`}${m.flock.eggs != null ? `, <b>${fmt(m.flock.eggs)}</b> egg${m.flock.eggs === 1 ? "" : "s"} in the nest` : ""}${m.flock.milked != null ? `, <b>${fmt(m.flock.milked)}</b> milked today, <b>${fmt(m.flock.culls || 0)}</b> culled${m.flock.limit ? ` (the pasture holds ${fmt(m.flock.limit)})` : ""}` : ""}${m.flock.kind === "pigs" ? `, <b>${fmt(m.flock.culls || 0)}</b> culled${m.flock.limit ? ` (the sty holds ${fmt(m.flock.limit)})` : ""}` : ""}</div>` : "") + horsesHtml(m.horses) + bakesHtml(m.bakes) + "</div>";
+}
+// A stable hand's paddock horses (js/stables.js holdings): how many, then one line per horse with its stats and price.
+// A baker's holdings (js/baker.js holdings): what it holds to bake with, what it has baked and holds, its oven.
+function bakesHtml(b) {
+  if (!b) return "";
+  const g = b.ingredients, o = b.goods, v = b.oven;
+  const ov = !v ? "no oven" : v.kind && v.n ? `oven ${v.lit ? "baking" : "waiting for fuel:"} <b>${fmt(v.n)}</b> ${v.kind === "cake" ? "cake" : "pie"}${v.n === 1 ? "" : "s"}${v.ready ? `, <b>${fmt(v.ready)}</b> ready` : ""}` : v.ready ? `oven: <b>${fmt(v.ready)}</b> ready` : "oven empty";
+  return `<div>Ingredients: <b>${fmt(g.wheat)}</b> wheat, <b>${fmt(g.eggs)}</b> eggs, <b>${fmt(g.milk)}</b> milk, <b>${fmt(g.sugar)}</b> sugar (+${fmt(g.cane)} cane), <b>${fmt(g.pumpkins)}</b> pumpkins, fuel for <b>${fmt(g.fuel)}</b></div>` +
+    `<div>Baked goods: <b>${fmt(o.cakes)}</b> cakes, <b>${fmt(o.slices)}</b> slices, <b>${fmt(o.pies)}</b> pies, <b>${fmt(o.bottles)}</b> empty bottles; ${ov}; baked so far <b>${fmt(b.made.cakes)}</b> cakes, <b>${fmt(b.made.pies)}</b> pies</div>`;
+}
+function horsesHtml(H) {
+  if (!H) return "";
+  if (!H.paddock) return "<div>Horses: <b>0</b> (no stable yet)</div>";
+  const rows = H.horses.map(h => `<div class="sub">${esc(h.coat)}${h.foal ? " foal" : ""}: speed ${h.speed}, jump ${h.jump}, health ${h.hp}, worth ${h.price}` +
+    `${h.led ? " (on a lead)" : h.penned ? "" : " (loose)"}${h.here ? "" : " (not loaded)"}</div>`).join("");
+  return `<div>Paddock horses: <b>${H.horses.length}</b> of 4</div>` + rows;
 }
 $("r-inv").addEventListener("click", e => { if (e.target.closest("#r-invx")) { hlName = null; if (snap && curV) drawMap(snap); markRoster(); } });
+// ---------------------------------------------------------------- the selected villager's day (js/daytimeline.js)
+// Picking a villager tells the server (POST /pick), which tells the game; the game then sends that villager's timeline with its
+// snapshots (snap.day) whenever it changes. Stretches: [t0, t1, text, category, x, z]; events: [t, kind, text, x, z]; times in game days.
+let dayData = null, dayView = "today", daySig = "", dayAt = null, dayAtId = null, pickSent;
+const DCAT = { work: ["Work", "var(--accent)"], trade: ["Trade", "var(--warn)"], walk: ["Walk", "var(--info)"], sleep: ["Sleep", "#6c5fa8"], wait: ["Waiting", "var(--danger)"], idle: ["Idle", "#8b7a64"] };
+const DEV = { trade: ["Trade", "var(--trade)"], meal: ["Meal", "var(--farm)"], bed: ["Bed", "var(--bed)"], job: ["Job", "var(--job)"] };
+const hm = d => { const m = Math.round(d * 1440); return m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? " " + (m % 60) + "m" : "") : m + "m"; };
+function sendPick(key) {
+  if (key === pickSent) return;
+  pickSent = key; dayAt = null; dayAtId = null;
+  fetch("pick", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ key }) }).catch(() => { pickSent = undefined; });
+}
+function renderDay() {
+  const el = $("r-day"), m = hlName && curV ? curV.villagerList.find(v => v.name === hlName) : null;
+  sendPick(m && m.id ? m.id : null);
+  if (!m || !m.id) { if (!el.hidden) { el.hidden = true; el.innerHTML = ""; daySig = ""; } return; }
+  el.hidden = false;
+  const D = dayData && dayData.key === m.id && !dayData.none ? dayData : null;
+  const now = curStale ? curV.day : snap && snap.gt != null ? snap.gt : curV.day;
+  const sig = m.id + "|" + (D ? D.v : "-") + "|" + dayView + "|" + Math.floor(now * 1440) + "|" + dayAtId + "|" + curStale;
+  if (sig === daySig) return;
+  daySig = sig;
+  const head = `<h4>${esc(m.name)}'s Day${curStale ? ' <span class="sub">when last loaded</span>' : ""}<span class="seg"><button type="button" data-dv="today" class="${dayView === "today" ? "on" : ""}">Last 24h</button><button type="button" data-dv="yesterday" class="${dayView === "yesterday" ? "on" : ""}">Yesterday</button></span></h4>`;
+  if (!D) { el.innerHTML = head + `<div class="sub">${dayData && dayData.none ? "Nothing recorded for this villager yet." : "Waiting for the game to send this villager's day…"}</div>`; return; }
+  // the window: the last 24 game hours ending now, or the whole previous game day (06:00 to 06:00, as the log's clock shows it)
+  const w0 = dayView === "today" ? now - 1 : Math.floor(now) - 1, w1 = dayView === "today" ? now : Math.floor(now), span = w1 - w0;
+  const pct = t => ((Math.min(w1, Math.max(w0, t)) - w0) / span * 100).toFixed(3) + "%";
+  // the open stretch runs on to now while the villager is loaded and was seen in the last few game minutes
+  const S = D.s.map((s, i) => i === D.s.length - 1 && !curStale && now - s[1] < 5 / 1440 ? [s[0], now, ...s.slice(2)] : s).filter(s => s[1] > w0 && s[0] < w1);
+  const E = D.e.filter(e => e[0] >= w0 && e[0] <= w1);
+  const clip = s => Math.max(0, Math.min(w1, s[1]) - Math.max(w0, s[0]));
+  const tot = {}, waits = new Map();
+  for (const s of S) { tot[s[3]] = (tot[s[3]] || 0) + clip(s); if (s[3] === "wait") waits.set(s[2], (waits.get(s[2]) || 0) + clip(s)); }
+  const off = Math.max(0, span - Object.values(tot).reduce((a, b) => a + b, 0));
+  const id = (k, i) => k + i;
+  const blocks = S.map((s, i) => { const c = DCAT[s[3]] || DCAT.idle; return `<div class="b" data-di="${id("s", D.s.indexOf(s) >= 0 ? D.s.indexOf(s) : D.s.length - 1)}" style="left:${pct(s[0])};width:calc(${pct(s[1])} - ${pct(s[0])});background:${c[1]}" title="${esc(s[2] + " (" + c[0] + ")\n" + stamp(s[0]) + " to " + stamp(s[1]) + ", " + hm(s[1] - s[0]))}"></div>`; }).join("");
+  const ticks = E.map(e => { const c = DEV[e[1]] || DEV.trade; return `<i data-di="${id("e", D.e.indexOf(e))}" style="left:${pct(e[0])};background:${c[1]}" title="${esc(c[0] + ", " + stamp(e[0]) + "\n" + e[2])}"></i>`; }).join("");
+  // hour marks every 3 game hours (the clock reads 06:00 at the start of a game day)
+  const hours = [];
+  for (let k = Math.ceil(w0 * 8); k <= Math.floor(w1 * 8); k++) { const t = k / 8, h = ((t - Math.floor(t)) * 24 + 6) % 24; hours.push(`<span style="left:${pct(t)}">${String(Math.round(h)).padStart(2, "0")}:00</span>`); }
+  const key = Object.entries(DCAT).filter(([k]) => tot[k] >= 0.5 / 1440).map(([k, c]) => `<span><i style="background:${c[1]}"></i>${c[0]} ${hm(tot[k])}</span>`).join("") + (off > 1 / 1440 ? `<span><i style="background:rgba(255,255,255,0.08)"></i>Not loaded ${hm(off)}</span>` : "") +
+    Object.entries(DEV).filter(([k]) => E.some(e => e[1] === k)).map(([k, c]) => `<span><i style="background:${c[1]};width:3px"></i>${c[0]}s ${E.filter(e => e[1] === k).length}</span>`).join("");
+  const wl = [...waits].sort((a, b) => b[1] - a[1]);
+  const sum = tot.wait ? `<span class="w">Waited ${hm(tot.wait)}</span>: ` + wl.slice(0, 3).map(([t, d]) => `${esc(t)} (${hm(d)})`).join(", ") + (wl.length > 3 ? `, and ${wl.length - 3} more` : "") : "No waiting.";
+  // the list: stretches and events, newest first
+  const rows = [...S.map(s => ({ t: s[0], s, i: id("s", D.s.indexOf(s) >= 0 ? D.s.indexOf(s) : D.s.length - 1) })), ...E.map(e => ({ t: e[0], e, i: id("e", D.e.indexOf(e)) }))].sort((a, b) => b.t - a.t);
+  const row = r => {
+    const at = r.s ? r.s.length > 4 && r.s[4] != null : r.e.length > 3;
+    if (r.s) { const c = DCAT[r.s[3]] || DCAT.idle; return `<div class="${at ? "at" : ""}${r.i === dayAtId ? " sel" : ""}" data-di="${r.i}"><span class="t">${esc(stamp(r.s[0]))}</span><span class="k"><i class="dot" style="background:${c[1]};margin-right:5px"></i>${hm(r.s[1] - r.s[0])}</span><span>${esc(r.s[2])}</span></div>`; }
+    const c = DEV[r.e[1]] || DEV.trade;
+    return `<div class="${at ? "at" : ""}${r.i === dayAtId ? " sel" : ""}" data-di="${r.i}"><span class="t">${esc(stamp(r.e[0]))}</span><span class="k" style="color:${c[1]}">${c[0]}</span><span class="ev">${esc(r.e[2])}</span></div>`;
+  };
+  el.innerHTML = head + `<div class="dstrip"><div class="dticks">${ticks}</div>${blocks}${dayView === "today" && !curStale ? '<div class="now" style="right:0" title="Now"></div>' : ""}</div>` +
+    `<div class="dhours">${hours.join("")}</div><div class="dkey">${key}</div><div class="dsum">${sum}</div>` +
+    `<div class="dlist">${rows.map(row).join("") || '<div><span></span><span></span><span class="sub">Nothing recorded in this window.</span></div>'}</div>`;
+}
+$("r-day").addEventListener("click", e => {
+  const b = e.target.closest("button[data-dv]");
+  if (b) { dayView = b.dataset.dv; daySig = ""; renderDay(); return; }
+  const r = e.target.closest("[data-di]"), D = dayData;
+  if (!r || !D) return;
+  const i = r.dataset.di, x = i[0] === "s" ? D.s[+i.slice(1)] : D.e[+i.slice(1)];
+  const p = !x ? null : i[0] === "s" ? (x.length > 4 ? [x[4], x[5]] : null) : (x.length > 3 ? [x[3], x[4]] : null);
+  if (dayAtId === i || !p) { dayAt = null; dayAtId = null; } else { dayAt = p; dayAtId = i; }
+  daySig = ""; renderDay(); if (snap && curV) drawMap(snap);
+});
 // Villagers who died in this village, newest first (the filter box applies to them too).
 function renderPast(dead, q) {
   const rows = dead.slice().reverse().filter(d => !q || (d.name + " " + d.prof + " " + (d.cause || "")).toLowerCase().includes(q));
@@ -798,6 +1308,138 @@ function renderLog(keepNew) {
 }
 renderFilters();
 
+// ---------------------------------------------------------------- economy (the log panel's second tab)
+// The game's tallies per village (js/economy.js, sent by js/debugfeed.js when they change): per game day, flows
+// [seller, buyer, item, group, items, emeralds, trades], waits [buyer, item, hours] and that day's unsold stock [villager, job, item, count, days].
+// The diagram puts sellers on the left and buyers on the right; a band's width is the emeralds that changed hands, its colour the item's group.
+const GROUPS = { wood: ["Wood", "#b5865b"], stone: ["Stone", "#a9a59c"], ore: ["Ore and ingots", "#e0b84a"], food: ["Food", "#9ccf6a"],
+  tools: ["Tools", "#6fa0d8"], wool: ["Wool and beds", "#e9a6c4"], other: ["Other", "#8f9aa3"] };
+const ESTORE = "bf-debug-econ";
+let eopt = { tab: "log", range: 3, scope: "one", mode: "flow" };
+try { Object.assign(eopt, JSON.parse(localStorage.getItem(ESTORE) || "{}")); } catch (e) { /* private window: defaults */ }
+const saveE = () => { try { localStorage.setItem(ESTORE, JSON.stringify(eopt)); } catch (e) {} };
+const r2 = n => Math.round(n * 100) / 100;
+const emf = n => fmt(r2(n));
+let eBands = [];
+// The flows, waits and unsold stock of the chosen village (or every village) over the chosen range of game days.
+function econData() {
+  const keys = eopt.scope === "all" ? Object.keys(econ) : viewKey ? [viewKey] : [];
+  const today = Math.max(-Infinity, ...keys.map(k => econ[k] ? econ[k].today : -Infinity));
+  const flows = {}, wanted = {}, held = [];
+  let trades = 0, ems = 0;
+  const vname = k => { const v = snap && (snap.villages || []).find(x => x.key === k); return v ? v.name : layouts[k] ? layouts[k].name : k; };
+  for (const k of keys) {
+    const E = econ[k]; if (!E) continue;
+    const ds = Object.keys(E.days).map(Number).filter(d => d > today - eopt.range).sort((a, b) => b - a);
+    for (const d of ds) {
+      const day = E.days[d];
+      for (const [s, b, it, g, n, em, t] of day.f) {
+        const f = flows[s + "|" + b + "|" + it] || (flows[s + "|" + b + "|" + it] = { s, b, it, g, n: 0, em: 0, t: 0 });
+        f.n += n; f.em += em; f.t += t; trades += t; ems += em;
+      }
+      for (const [b, it, h] of day.w) wanted[b + "|" + it] = (wanted[b + "|" + it] || 0) + h;
+    }
+    const last = ds.find(d => E.days[d].s && E.days[d].s.length) ;   // the newest day's count of unsold stock
+    if (last != null) for (const r of E.days[last].s) held.push(eopt.scope === "all" ? [r[0] + " · " + vname(k), ...r.slice(1)] : r);
+  }
+  return { keys, flows: Object.values(flows), wanted: Object.entries(wanted).map(([k, h]) => [...k.split("|"), h]).sort((a, b) => b[2] - a[2]),
+    held: held.sort((a, b) => b[4] - a[4] || b[3] - a[3]), trades, ems };
+}
+function sankey(flows) {
+  const bands = {};   // seller|buyer|group -> band
+  for (const f of flows) {
+    const k = f.s + "|" + f.b + "|" + f.g, b = bands[k] || (bands[k] = { s: f.s, b: f.b, g: f.g, em: 0, n: 0, t: 0, items: [] });
+    b.em += f.em; b.n += f.n; b.t += f.t; b.items.push(f);
+  }
+  const list = Object.values(bands);
+  const val = b => b.em > 0 ? b.em : 0.5;   // trades with no emeralds (barter) still get a thin band
+  const side = key => { const m = {}; for (const b of list) m[b[key]] = (m[b[key]] || 0) + val(b); return Object.keys(m).sort((x, y) => m[y] - m[x]).map(n => ({ n, v: m[n] })); };
+  const L = side("s"), R = side("b"), PAD = 12, MIN = 1.5, W = 640, NW = 10, X0 = 150, X1 = W - 150 - NW;
+  const total = list.reduce((a, b) => a + val(b), 0), H = Math.max(160, 30 * Math.max(L.length, R.length));
+  const scale = Math.min((H - PAD * (L.length - 1)) / total, (H - PAD * (R.length - 1)) / total);
+  const li = new Map(L.map((x, i) => [x.n, i])), ri = new Map(R.map((x, i) => [x.n, i]));
+  for (const b of list) b.w = Math.max(MIN, val(b) * scale);
+  const place = (nodes, key, other, idx) => {
+    let y = 18;
+    for (const nd of nodes) {
+      nd.y = y; let o = y;
+      for (const b of list.filter(b => b[key] === nd.n).sort((p, q) => idx.get(p[other]) - idx.get(q[other]) || q.w - p.w)) { b[key + "y"] = o; o += b.w; }
+      nd.h = o - y; y = o + PAD;
+    }
+    return y;
+  };
+  const h = Math.max(place(L, "s", "b", ri), place(R, "b", "s", li)) + 6;
+  eBands = list;
+  const xm = (X0 + NW + X1) / 2, col = n => n === "Player" ? "#a6dc72" : profColor(n);
+  const paths = list.map((b, i) => {
+    const a0 = b.sy, a1 = b.sy + b.w, c0 = b.by, c1 = b.by + b.w;
+    return `<path data-i="${i}" fill="${GROUPS[b.g] ? GROUPS[b.g][1] : GROUPS.other[1]}" d="M${X0 + NW},${a0}C${xm},${a0} ${xm},${c0} ${X1},${c0}L${X1},${c1}C${xm},${c1} ${xm},${a1} ${X0 + NW},${a1}Z"/>`;
+  }).join("");
+  const node = (nd, x, left) => `<rect x="${x}" y="${nd.y}" width="${NW}" height="${Math.max(nd.h, 1)}" rx="2" fill="${col(nd.n)}"/>` +
+    `<text x="${left ? x - 6 : x + NW + 6}" y="${nd.y + nd.h / 2 + 4}" text-anchor="${left ? "end" : "start"}">${esc(nd.n)} <tspan class="v">${emf(nd.v >= 1 ? nd.v : 0)}</tspan></text>`;
+  return `<svg class="flow" viewBox="0 0 ${W} ${h}" role="img" aria-label="Goods flowing from sellers to buyers">` +
+    `<text x="${X0 + NW}" y="11" class="v" text-anchor="end">SELLERS</text><text x="${X1}" y="11" class="v">BUYERS</text>${paths}` +
+    L.map(nd => node(nd, X0, true)).join("") + R.map(nd => node(nd, X1, false)).join("") + `</svg>`;
+}
+function deadEnds(d) {
+  const wsev = h => h >= 12 ? " danger" : h >= 4 ? " warn" : "", hsev = n => n >= 5 ? " danger" : " warn";
+  const w = d.wanted.map(([b, it, h]) => `<div class="drow${wsev(h)}"><span>${esc(b)}</span><span>${esc(it)}</span><span>${fmt(h)} h waited</span></div>`).join("");
+  const hl = d.held.map(([n, job, it, c, days]) => `<div class="drow${hsev(days)}"><span>${esc(n)} <span class="dim">${esc(job)}</span></span><span>${fmt(c)} ${esc(it)}</span><span>${days} days unsold</span></div>`).join("");
+  return `<div class="dead"><div><h4>Wanted but not available</h4>${w || `<div class="drow"><span class="dim">Nothing waited for in this range.</span></div>`}</div>` +
+    `<div><h4>Held but not selling</h4>${hl || `<div class="drow"><span class="dim">Nothing unsold for 2 days or more.</span></div>`}</div></div>`;
+}
+function flowTable(flows) {
+  const rows = flows.slice().sort((a, b) => b.em - a.em || b.n - a.n);
+  return `<button class="abtn ecopy" id="e-copy" title="Copy as tab-separated text">Copy table</button>` +
+    `<table class="etable"><thead><tr><th>Seller</th><th>Buyer</th><th>Item</th><th class="r">Count</th><th class="r">Emeralds</th><th class="r">Trades</th></tr></thead><tbody>` +
+    rows.map(f => `<tr><td>${esc(f.s)}</td><td>${esc(f.b)}</td><td>${esc(f.it)}</td><td class="r">${fmt(f.n)}</td><td class="r">${emf(f.em)}</td><td class="r">${fmt(f.t)}</td></tr>`).join("") + `</tbody></table>`;
+}
+let eLast = null;
+function renderEcon() {
+  const el = $("econ");
+  for (const [id, k] of [["e-range", "range"], ["e-scope", "scope"], ["e-mode", "mode"]]) for (const b of $(id).children) b.classList.toggle("on", b.dataset.v === String(eopt[k]));
+  if (eopt.tab !== "econ") return;
+  const d = econData();
+  eLast = d;
+  if (!d.keys.length) { el.innerHTML = `<div class="empty">Load a village to see its economy.</div>`; return; }
+  const top = `<div class="etot">${eopt.scope === "all" ? `All villages (${d.keys.length})` : esc(layouts[viewKey] ? layouts[viewKey].name : "This village")} · ` +
+    `${eopt.range === 1 ? "today" : "last " + eopt.range + " game days"}: <b>${fmt(d.trades)}</b> trades, <b>${emf(d.ems)}</b> emeralds</div>`;
+  const body = !d.flows.length ? `<div class="empty">No trades in this range.</div>` : eopt.mode === "table" ? flowTable(d.flows) :
+    `<div class="elegend">${[...new Set(d.flows.map(f => f.g))].sort((a, b) => Object.keys(GROUPS).indexOf(a) - Object.keys(GROUPS).indexOf(b)).map(g => `<span><i style="background:${(GROUPS[g] || GROUPS.other)[1]}"></i>${(GROUPS[g] || GROUPS.other)[0]}</span>`).join("")}</div>` + sankey(d.flows);
+  const tip = `<div class="etip" id="e-tip"></div>`;
+  el.innerHTML = top + body + deadEnds(d) + tip;
+}
+function setTab(t) {
+  eopt.tab = t; saveE();
+  for (const b of $("l-tabs").children) b.classList.toggle("on", b.dataset.tab === t);
+  $("l-pane").hidden = t !== "log"; $("e-pane").hidden = t !== "econ";
+  $("l-count").hidden = $("l-q").hidden = t !== "log";
+  renderEcon();
+}
+$("l-tabs").addEventListener("click", e => { const b = e.target.closest("button[data-tab]"); if (b) setTab(b.dataset.tab); });
+for (const [id, k] of [["e-range", "range"], ["e-scope", "scope"], ["e-mode", "mode"]])
+  $(id).addEventListener("click", e => { const b = e.target.closest("button[data-v]"); if (!b) return; eopt[k] = k === "range" ? +b.dataset.v : b.dataset.v; saveE(); renderEcon(); });
+$("econ").addEventListener("mousemove", e => {
+  const tip = $("e-tip"); if (!tip) return;
+  const p = e.target.closest("svg.flow path"), b = p && eBands[+p.dataset.i];
+  if (!b) { tip.style.display = "none"; return; }
+  const items = b.items.slice().sort((x, y) => y.em - x.em || y.n - x.n);
+  tip.innerHTML = `<b>${esc(b.s)}</b> to <b>${esc(b.b)}</b> <span class="sub">${(GROUPS[b.g] || GROUPS.other)[0]}</span><table>` +
+    items.map(f => `<tr><td>${fmt(f.n)} ${esc(f.it)}</td><td class="r">${f.em ? emf(f.em) + " emeralds" : "no emeralds"}</td><td class="r">${fmt(f.t)} ${f.t === 1 ? "trade" : "trades"}</td></tr>`).join("") + `</table>`;
+  const box = $("econ").getBoundingClientRect();
+  tip.style.display = "block";
+  const x = e.clientX - box.left + $("econ").scrollLeft + 14, y = e.clientY - box.top + $("econ").scrollTop + 10;
+  tip.style.left = Math.min(x, $("econ").clientWidth - tip.offsetWidth - 6) + "px"; tip.style.top = y + "px";
+});
+$("econ").addEventListener("mouseleave", () => { const t = $("e-tip"); if (t) t.style.display = "none"; });
+$("econ").addEventListener("click", e => {
+  if (!e.target.closest("#e-copy") || !eLast) return;
+  const tsv = [["Seller", "Buyer", "Item", "Count", "Emeralds", "Trades"], ...eLast.flows.slice().sort((a, b) => b.em - a.em).map(f => [f.s, f.b, f.it, f.n, r2(f.em), f.t])].map(r => r.join("\t")).join("\n");
+  const done = () => { e.target.textContent = "Copied"; setTimeout(() => { if (e.target.isConnected) e.target.textContent = "Copy table"; }, 1500); };
+  if (navigator.clipboard) navigator.clipboard.writeText(tsv).then(done, () => {}); 
+});
+setTab(eopt.tab);
+
 // ---------------------------------------------------------------- alerts
 // Each alert is { id, who, act, kind, text, on }: the same choices as the log filters (a villager type and one of its actions,
 // an event type) plus words the line must contain; js/logmatch.js decides what matches, in the game as well as here. The debug
@@ -866,6 +1508,124 @@ $("a-body").addEventListener("click", e => {
   saveAlerts();
 });
 renderAlertForm(); renderAlerts();
+
+// ---------------------------------------------------------------- game log (js/gamelog.js)
+// The open world's whole log as the server holds it, newest entries arriving with each snapshot. Shown only when opened (the
+// header's Game log button, which also counts errors). Filters, like the village log's: levels (DEBUG off at first), events
+// (the entry's kind), villages, and villager types (read from village entries by js/logmatch.js; other entries always pass).
+// Copy and Download take the entries the filters show, oldest first, as the log file's lines (BFLog.gameLine), under its header.
+const { LEVELS, gameLine, sysStamp, gameStamp, chunkSpan } = window.BFLog;
+const GSTORE = "bf-debug-gamelog", GSHOW = 1500;
+let glog = null, gOpen = false, gMenu = null, gDirty = true, gT = 0;
+const gf = { levels: ["DEBUG"], kinds: [], villages: [], types: [] };   // what is switched off
+try { Object.assign(gf, JSON.parse(localStorage.getItem(GSTORE) || "{}")); } catch (e) { /* private window: defaults */ }
+const gOff = { levels: new Set(gf.levels), kinds: new Set(gf.kinds), villages: new Set(gf.villages), types: new Set(gf.types) };
+const gSave = () => { try { localStorage.setItem(GSTORE, JSON.stringify({ levels: [...gOff.levels], kinds: [...gOff.kinds], villages: [...gOff.villages], types: [...gOff.types] })); } catch (e) {} };
+const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors" };
+const NOV = "(no village)";
+function glogSet(g) { glog = g && Array.isArray(g.lines) ? g : null; gDirty = true; gRender(); }
+function glogIn(g) {
+  if (g.reset || !glog || glog.w !== g.w) { if (g.from === g.base) { glog = { w: g.w, name: g.name, head: g.head, base: g.base, lines: g.lines.slice() }; gDirty = true; } else gFetch(); }
+  else if (g.from === glog.base + glog.lines.length) {
+    glog.lines.push(...g.lines); glog.head = g.head; glog.name = g.name;
+    if (g.base > glog.base) { glog.lines.splice(0, Math.min(glog.lines.length, g.base - glog.base)); glog.base = g.base; }
+    gDirty = true;
+  } else gFetch();   // missed some: take the server's copy
+  gRender();
+}
+let gFetching = false;
+function gFetch() { if (gFetching) return; gFetching = true; fetch("glog").then(r => r.json()).then(glogSet, () => {}).finally(() => { gFetching = false; }); }
+const kindLabel = (k, debug) => GKINDS[k] || (KINDS[k] ? KINDS[k] : pretty(k.replace(/-/g, " ")) + (debug ? " (debug)" : ""));
+const gTypes = e => e.v && e.l === "INFO" ? actorsOf([e.d, e.k, e.x]) : null;   // village log entries name who did what
+function gShows(e, q) {
+  if (gOff.levels.has(e.l) || gOff.kinds.has(e.k) || gOff.villages.has(e.v || NOV)) return false;
+  if (gOff.types.size) { const a = gTypes(e); if (a && !a.some(([t]) => !gOff.types.has(t))) return false; }
+  return !q || (e.x + " " + (e.v || "") + " " + e.k).toLowerCase().includes(q);
+}
+function gShown() { const q = $("g-q").value.trim().toLowerCase(), a = glog ? glog.lines : []; return a.filter(e => gShows(e, q)); }
+const gRow = (id, label, n, on, color) => `<div class="frow${on ? "" : " none"}${n ? "" : " zero"}" data-v="${esc(id)}"><label><input type="checkbox"${on ? " checked" : ""}>` +
+  (color ? `<i style="background:${color}"></i>` : "") + `<span class="tn">${esc(label)}</span><span class="n">${n}</span></label></div>`;
+const gMenuHtml = (id, sum, some, rows) => `<details class="ft${some ? " some" : ""}" id="${id}" data-f="${id.slice(2)}"${gMenu === id ? " open" : ""}><summary>${esc(sum)}</summary>` +
+  `<div class="fmenu"><div class="fhead"><button data-all="1">Select all</button><button data-all="0">Select none</button></div><div class="flist">${rows}</div></div></details>`;
+const LCOL = { ERROR: "var(--danger)", WARN: "var(--warn)", INFO: "var(--info)", DEBUG: "var(--faint)" };
+let gLists = { levels: LEVELS, kinds: [], villages: [], types: [] };
+function gFilters() {
+  const a = glog ? glog.lines : [], lc = {}, kc = {}, vc = {}, tc = {}, dbg = new Set();
+  for (const e of a) {
+    lc[e.l] = (lc[e.l] || 0) + 1; kc[e.k] = (kc[e.k] || 0) + 1; vc[e.v || NOV] = (vc[e.v || NOV] || 0) + 1;
+    if (e.l === "DEBUG") dbg.add(e.k);
+    for (const [t] of gTypes(e) || []) tc[t] = (tc[t] || 0) + 1;
+  }
+  const kinds = [...new Set([...Object.keys(GKINDS), ...Object.keys(kc)])].sort((x, y) => (dbg.has(x) - dbg.has(y)) || kindLabel(x, dbg.has(x)).localeCompare(kindLabel(y, dbg.has(y))));
+  const vills = Object.keys(vc).sort((x, y) => (x === NOV) - (y === NOV) || x.localeCompare(y));
+  const types = [...allTypes(Object.keys(tc))].sort((x, y) => (x === "Player") - (y === "Player") || (x === "Child") - (y === "Child") || x.localeCompare(y));
+  gLists = { levels: LEVELS, kinds, villages: vills, types };
+  const sum = (f, list, every, nothing, unit, name = x => x) => { const on = list.filter(x => !gOff[f].has(x)); return on.length === list.length ? every : !on.length ? nothing : on.length === 1 ? name(on[0]) : on.length + " of " + list.length + " " + unit; };
+  const some = f => gLists[f].some(x => gOff[f].has(x));
+  const el = $("g-filters"), tops = {};
+  for (const l of el.querySelectorAll(".flist")) tops[l.closest("details").id] = l.scrollTop;
+  el.innerHTML = `<span class="flabel">Show</span>` +
+    gMenuHtml("g-levels", sum("levels", LEVELS, "All levels", "No levels", "levels"), some("levels"), LEVELS.map(l => gRow(l, l, lc[l] || 0, !gOff.levels.has(l), LCOL[l])).join("")) +
+    gMenuHtml("g-kinds", sum("kinds", kinds, "All events", "No events", "events", k => kindLabel(k, dbg.has(k))), some("kinds"), kinds.map(k => gRow(k, kindLabel(k, dbg.has(k)), kc[k] || 0, !gOff.kinds.has(k))).join("")) +
+    gMenuHtml("g-villages", sum("villages", vills, "All villages", "No villages", "villages"), some("villages"), vills.map(v => gRow(v, v, vc[v] || 0, !gOff.villages.has(v))).join("")) +
+    gMenuHtml("g-types", sum("types", types, "All villagers", "No villagers", "types"), some("types"), types.map(t => gRow(t, t, tc[t] || 0, !gOff.types.has(t), t === "Player" ? "var(--accent2)" : profColor(t))).join("")) +
+    (["levels", "kinds", "villages", "types"].some(some) ? `<button class="fclear" id="g-clear" title="Show everything, DEBUG included">Clear filters</button>` : "");
+  for (const l of el.querySelectorAll(".flist")) l.scrollTop = tops[l.closest("details").id] || 0;
+}
+function gRender(force) {
+  const errs = glog ? glog.lines.reduce((n, e) => n + (e.l === "ERROR"), 0) : 0;
+  $("g-errs").textContent = errs ? errs + (errs === 1 ? " error" : " errors") : "";
+  if (!gOpen || !(gDirty || force)) return;
+  if (!force && performance.now() - gT < 400) { if (!gRender.t) gRender.t = setTimeout(() => { gRender.t = 0; gRender(); }, 450); return; }   // at most twice a second
+  gT = performance.now(); gDirty = false;
+  gFilters();
+  const el = $("glog");
+  if (!glog) { el.innerHTML = `<div class="empty">No game log yet: load a saved world in the game.</div>`; $("g-count").textContent = ""; return; }
+  const list = gShown(), rows = [];
+  for (let i = list.length - 1; i >= 0 && rows.length < GSHOW; i--) {
+    const e = list[i];
+    rows.push(`<div class="gent ${esc(e.l)}"><span title="System time">${esc(sysStamp(e.s))}</span><span title="Game time">${esc(gameStamp(e.d))}</span><span title="Chunk time: game days its chunk has been loaded">chunk ${esc(chunkSpan(e.c))}</span>` +
+      `<span class="gl">${esc(e.l)}</span><span class="gx"><span class="gk">${esc(e.k)}</span>  ${e.v ? `<span class="gv">${esc(e.v)}:</span> ` : ""}${esc(e.x)}</span></div>`);
+  }
+  el.innerHTML = `<div class="ghead">${esc(glog.head)}</div>` + (rows.join("") || `<div class="empty">${glog.lines.length ? "Nothing matches the filters." : "No entries yet."}</div>`) +
+    (list.length > GSHOW ? `<div class="gmore">Showing the newest ${fmt(GSHOW)} of ${fmt(list.length)}; Copy and Download take all of them.</div>` : "");
+  $("g-count").textContent = (glog.name ? glog.name + " \u00B7 " : "") + (list.length === glog.lines.length ? fmt(list.length) : fmt(list.length) + " of " + fmt(glog.lines.length)) + " entries";
+}
+function gText() { return [glog ? glog.head : ""].concat(gShown().map(gameLine)).join("\n") + "\n"; }
+function gFlash(b, t) { const o = b.textContent; b.textContent = t; setTimeout(() => { b.textContent = o; }, 1200); }
+$("g-open").addEventListener("click", () => { gOpen = !gOpen; $("gpanel").hidden = !gOpen; $("g-open").classList.toggle("on", gOpen); if (gOpen) { gRender(true); scrollTo({ top: 0 }); } });
+$("g-x").addEventListener("click", () => { gOpen = false; $("gpanel").hidden = true; $("g-open").classList.remove("on"); });
+$("g-q").addEventListener("input", () => gRender(true));
+$("g-copy").addEventListener("click", () => {
+  const t = gText(), b = $("g-copy");
+  const fallback = () => { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (e) {} ta.remove(); gFlash(b, ok ? "Copied" : "Copy failed"); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => gFlash(b, "Copied"), fallback); else fallback();
+});
+$("g-dl").addEventListener("click", () => {
+  const a = document.createElement("a"), name = ((glog && glog.name) || "blockfield").replace(/[^\w .-]+/g, "_").trim() || "blockfield";
+  a.href = URL.createObjectURL(new Blob([gText()], { type: "text/plain" }));
+  a.download = name + ".log"; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
+$("g-filters").addEventListener("toggle", e => {
+  const d = e.target; if (!d.matches || !d.matches("details.ft")) return;
+  if (d.open) { gMenu = d.id; for (const o of $("g-filters").querySelectorAll("details.ft[open]")) if (o !== d) o.open = false; }
+  else if (gMenu === d.id) gMenu = null;
+}, true);
+$("g-filters").addEventListener("change", e => {
+  const cb = e.target.closest(".frow input"); if (!cb) return;
+  const f = cb.closest("details").dataset.f, v = cb.closest(".frow").dataset.v;
+  if (cb.checked) gOff[f].delete(v); else gOff[f].add(v);
+  gSave(); gRender(true);
+});
+$("g-filters").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "g-clear") { for (const f in gOff) gOff[f].clear(); }
+  else if (b.dataset.all) { const f = b.closest("details").dataset.f; if (b.dataset.all === "1") gOff[f].clear(); else for (const x of gLists[f]) gOff[f].add(x); }
+  else return;
+  gSave(); gRender(true);
+});
+document.addEventListener("click", e => { if (gMenu && e.target.isConnected && !e.target.closest("#g-filters details.ft")) { const d = $(gMenu); gMenu = null; if (d) d.open = false; } });
 
 $("raw").addEventListener("toggle", () => { if (snap) $("f3").textContent = snap.text; });
 addEventListener("resize", () => { if (snap) { renderTop(snap); if (curV) drawMap(snap); } });

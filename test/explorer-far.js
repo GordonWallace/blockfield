@@ -1,6 +1,9 @@
 // Far-village explorer (needs js/villagesim.js): node test/run.js /tmp/far test/explorer-far.js
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => BF.player.start());
+  // No pointer lock (the game's drag-mode path, js/player.js requestLock): with the mouse locked, headless Chromium piles up
+  // memory in the browser and renderer processes (~50 MB/s) while the long evaluates below keep the page's main thread busy,
+  // which took this test past CI's 10 GB cap.
+  await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await pg.waitForTimeout(2000);
   console.log(JSON.stringify(await pg.evaluate(async () => {
     const wg = BF.worldgen, vs = wg.villagesNear(0, 0, 300).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));

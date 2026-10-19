@@ -129,7 +129,7 @@ const BLOCK_DEFS = [
   { name: "cornflower", tiles: "cornflower", render: "cross", solid: false, opaque: false, hardness: 0, color: "#4a6ed8" },
   { name: "red_mushroom", tiles: "red_mushroom", render: "cross", solid: false, opaque: false, hardness: 0, color: "#c8302a" },
   { name: "brown_mushroom", tiles: "brown_mushroom", render: "cross", solid: false, opaque: false, hardness: 0, color: "#9a7050" },
-  { name: "sugar_cane", tiles: "sugar_cane", render: "cross", solid: false, opaque: false, hardness: 0, color: "#8ac85a" },
+  { name: "sugar_cane", tiles: "sugar_cane", render: "cross", solid: false, opaque: false, hardness: 0, growsUp: 3, color: "#8ac85a" },   // growsUp: placed cane beside water grows to 3 tall (world.js growTick, js/baker.js)
   // new biome blocks
   { name: "red_sand", tiles: "red_sand", hardness: 0.5, tool: "shovel", color: "#b8622a" },
   { name: "terracotta", tiles: "terracotta", hardness: 1.25, tool: "pickaxe", needsTool: true, color: "#9a5a40" },
@@ -306,6 +306,56 @@ const BLOCK_DEFS = [
   // dehydrated farmland (js/farmland.js): crops grow at a third of the speed; left bare it reverts to dirt
   { name: "farmland_dry", tiles: { top: "farmland", side: "dirt", bottom: "dirt" }, opaque: false, hardness: 0.6, tool: "shovel", drop: "dirt", color: "#7a5a3a" },
   // ---- end farmland pack ----
+  // ---- stable pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Stables")
+  // tack rack: the stable hand villager's jobsite (not vanilla): a wooden wall rack with a saddle on its peg and a bridle hanging beside it
+  { name: "tack_rack", jobsite: "stable_hand", tiles: { top: "tack_rack_top", side: "tack_rack_side", front: "tack_rack_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#7a5232" },
+  // ---- end stable pack ----
+  // ---- merchant pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Merchants")
+  // merchant's counter: the merchant villager's jobsite (not vanilla): a plank counter with a ledger, scales and a cash box on top
+  { name: "merchant_counter", jobsite: "merchant", tiles: { top: "merchant_counter_top", side: "merchant_counter_side", front: "merchant_counter_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#8a6a3a" },
+  // ---- end merchant pack ----
+  // ---- poultry pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Poultry keepers")
+  // nesting box: the poultry keeper villager's jobsite (not vanilla): a plank box of straw with eggs in it
+  { name: "nesting_box", jobsite: "poultry_keeper", tiles: { top: "nesting_box_top", side: "nesting_box_side", front: "nesting_box_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#c8a85a" },
+  // ---- end poultry pack ----
+  // ---- cowherd pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Cowherds")
+  // milk churn: the cowherd villager's jobsite (not vanilla): an iron-banded oak churn with its lid and dasher handle
+  { name: "milk_churn", jobsite: "cowherd", tiles: { top: "milk_churn_top", side: "milk_churn_side", bottom: "milk_churn_bottom" }, hardness: 2.5, tool: "axe", creativeTab: "functional",
+    render: "model", model: "shape", opaque: false, boxes: [[3, 0, 3, 13, 13, 13], [4, 13, 4, 12, 14, 12, "milk_churn_top"], [7, 14, 7, 9, 16, 9, "milk_churn_bottom"]], box: [3, 0, 3, 13, 16, 13], color: "#a8824e" },
+  // ---- end cowherd pack ----
+  // ---- baker pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Bakers")
+  // baker's oven: the baker villager's jobsite (not vanilla): a domed brick oven on a stone base with an arched mouth. It bakes like a furnace
+  // (fuel and a cooking slot, js/baker.js), but only the baker uses it; the player gets its state on a right click.
+  { name: "bakers_oven", jobsite: "baker", tiles: { top: "bakers_oven_top", side: "bakers_oven_side", front: "bakers_oven_front", bottom: "bakers_oven_bottom" }, hardness: 3.5, tool: "pickaxe", needsTool: true, creativeTab: "functional", color: "#a0523a" },
+  // pumpkin stem: planted from pumpkin seeds on farmland, grows into a pumpkin where it stands (a simplification of vanilla's fruit beside the stem)
+  { name: "pumpkin_stem", tiles: "pumpkin_stem", render: "cross", solid: false, opaque: false, hardness: 0, drop: "pumpkin_seeds", growsInto: "pumpkin", fruit: true, color: "#6a9a3a" },
+  // cake (vanilla): placed whole, eaten a slice at a time with a right click (js/baker.js); 7 slices, then it is gone. Breaking it drops nothing.
+  { name: "cake", tiles: { top: "cake_top", side: "cake_side", bottom: "cake_bottom" }, render: "model", model: "shape", opaque: false, hardness: 0.5, drop: null, stack: 1,
+    boxes: [[1, 0, 1, 15, 8, 15]], box: [1, 0, 1, 15, 8, 15], creativeTab: "food", color: "#f4ece0" },
+  ...[1, 2, 3, 4, 5, 6].map(k => ({ name: "cake_bitten_" + k, tiles: { top: "cake_top", side: "cake_side", bottom: "cake_bottom" }, render: "model", model: "shape", opaque: false,
+    hardness: 0.5, drop: null, hidden: true, item: "cake", cakeBites: k, boxes: [[1 + 2 * k, 0, 1, 15, 8, 15]], box: [1 + 2 * k, 0, 1, 15, 8, 15], color: "#f4ece0" })),
+  // ---- end baker pack ----
+  // ---- glassmaker pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Glassmakers")
+  // glass kiln: the glassmaker villager's jobsite (not vanilla): a squat stone kiln with a glowing glass-melt mouth and a chimney top
+  { name: "glass_kiln", jobsite: "glassmaker", tiles: { top: "glass_kiln_top", side: "glass_kiln_side", front: "glass_kiln_front", bottom: "glass_kiln_bottom" }, hardness: 3.5, tool: "pickaxe", needsTool: true, creativeTab: "functional", color: "#7a7a80" },
+  // ---- end glassmaker pack ----
+  // ---- bees pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Bees and beekeepers")
+  // bee nest (vanilla): hangs from oak and birch trunks; holds a counted colony (js/bees.js). Breaking it drops nothing and angers its bees.
+  { name: "bee_nest", beeHome: "nest", tiles: { top: "bee_nest_top", side: "bee_nest_side", front: "bee_nest_front", bottom: "bee_nest_bottom" }, hardness: 0.3, tool: "axe", drop: null, creativeTab: "natural", color: "#c8a038" },
+  // beehive (vanilla): 6 planks + 3 honeycomb; up to 30 bees (js/bees.js). Drops itself (vanilla needs silk touch), losing its honey.
+  { name: "beehive", beeHome: "hive", tiles: { top: "beehive_top", side: "beehive_side", front: "beehive_front", bottom: "beehive_bottom" }, hardness: 0.6, tool: "axe", creativeTab: "functional", color: "#b48a4a" },
+  // honey extractor: the beekeeper villager's jobsite (not vanilla): an oak drum with an iron crank
+  { name: "honey_extractor", jobsite: "beekeeper", tiles: { top: "honey_extractor_top", side: "honey_extractor_side", front: "honey_extractor_front", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional", color: "#a07a40" },
+  // candle (vanilla look): a small lit wax candle, light level 3 (lit when placed). Its tiles hold the wax low down and the flame above it (the
+  // flame box samples the same tiles at its own height and is drawn at full brightness).
+  { name: "candle", tiles: { top: "candle_top", side: "candle", bottom: "candle_top" }, icon: "candle_icon", render: "model", model: "shape", solid: false, opaque: false, hardness: 0.1, emit: 3,
+    boxes: [[6, 0, 6, 10, 6, 10], [7.5, 6, 7.5, 8.5, 8.5, 8.5, undefined, 0, 1]], box: [6, 0, 6, 10, 8, 10], creativeTab: "functional", color: "#e8d8a8" },
+  // ---- end bees pack ----
+  // ---- pig farmer pack ---- (appended; ids are saved numerically: only ever append after this line; see CONTRACT.md "Pig farmers")
+  // feed trough: the pig farmer villager's jobsite (not vanilla): a low plank trough of carrots, potatoes and beetroot, beside the sty gate
+  { name: "feed_trough", jobsite: "pig_farmer", tiles: { top: "feed_trough_top", side: "feed_trough_side", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional",
+    render: "model", model: "shape", opaque: false, boxes: [[1, 0, 2, 15, 9, 14]], box: [1, 0, 2, 15, 9, 14], color: "#9a7240" },
+  // ---- end pig farmer pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);
@@ -590,6 +640,37 @@ const ITEM_DEFS = [
   { name: "golden_sword", tool: { type: "sword", tier: 3, speed: 1, damage: 4 }, durability: 800, material: "gold", color: "#f2d64b" },
   { name: "golden_hoe", tool: { type: "hoe", tier: 3, speed: 7, damage: 1 }, durability: 800, material: "gold", color: "#f2d64b" },
   // ---- end gold tools ----
+  // ---- boats (js/boats.js; append-only): one per wood, stack of 1 as in vanilla; the icon is the "boat" sprite in the wood's colour ----
+  ...WOOD_SPECIES.map(sp => ({ name: sp + "_boat", boat: sp, stack: 1, sprite: "boat", color: WOOD_COLOR[sp], creativeTab: "tools" })),
+  // ---- end boats ----
+  // ---- horses (js/horses.js; append-only) ----
+  { name: "saddle", stack: 1, color: "#6b3e1e", creativeTab: "tools" },        // 3 leather + 1 iron ingot (a Blockfield recipe: vanilla has none)
+  { name: "lead", color: "#a07a4a", creativeTab: "tools" },                     // 4 string + 1 leather (vanilla's slime ball: there are no slimes)
+  { name: "horse_spawn_egg", color: "#c09060", creativeTab: "misc", label: "Horse Spawn Egg" },   // creative: right click on the ground spawns a wild horse
+  // ---- end horses ----
+  // ---- stables (js/stables.js; append-only) ----
+  // The icon of a stable hand's "sell a horse" offer: the horse itself walks out of the paddock to the player, so this item is never held
+  { name: "tamed_horse", stack: 1, color: "#8a5a32", hidden: true, label: "Tamed Horse" },
+  // ---- end stables ----
+  // ---- poultry items (js/poultry.js; append-only). Eggs are laid by chickens; a cooked egg (not vanilla) is cooked in a furnace.
+  { name: "egg", stack: 16, color: "#efe2c4" },
+  { name: "cooked_egg", food: 6, color: "#f4ecd8" },
+  // ---- end poultry items ----
+  // ---- cowherd items (js/cowherd.js; append-only). container: what is left in hand (and in the crafting grid) once it is drunk or used up.
+  { name: "milk_bucket", stack: 1, food: 6, container: "bucket", color: "#f4f2ea" },              // vanilla: an empty bucket used on a cow (6 hunger here: vanilla's restores none)
+  { name: "glass_bottle", color: "#c8dce4" },                                                     // vanilla: 3 glass in a V -> 3 bottles
+  { name: "milk_bottle", stack: 16, food: 2, container: "glass_bottle", color: "#f6f4ec" },       // not vanilla: 1 milk bucket + 3 glass bottles -> 3 (the bucket comes back)
+  // ---- end cowherd items ----
+  // ---- baker items (js/baker.js; append-only)
+  { name: "sugar", color: "#f4f4f0" },                                                            // vanilla: 1 sugar cane -> 1 sugar
+  { name: "pumpkin_seeds", plants: "pumpkin_stem", color: "#e8dca0" },                            // vanilla: 1 pumpkin -> 4 seeds; planted on farmland
+  { name: "pumpkin_pie", food: 8, color: "#d88a3a" },                                             // vanilla: pumpkin + sugar + egg, shapeless
+  { name: "cake_slice", food: 2, color: "#f4ece0" },                                              // not vanilla: what the baker cuts a cake into (7) and sells; a slice of a placed cake gives the same
+  // ---- end baker items ----
+  // ---- bees items (js/bees.js, js/beekeeper.js; append-only)
+  { name: "honeycomb", color: "#e8a828" },                                                        // vanilla: shears on a full nest or hive -> 3
+  { name: "honey_bottle", stack: 16, food: 6, container: "glass_bottle", color: "#f0a020" },      // vanilla: a glass bottle on a full nest or hive
+  // ---- end bees items ----
 ];
 
 const MAX_BLOCK = 4095, ITEM_BASE = 4096;

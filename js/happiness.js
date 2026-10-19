@@ -6,7 +6,7 @@
 //   v.week(kind)  events of that kind in the last WINDOW days: "death", "trade", "birth", "grown" (a child became an adult)
 //   v.villagers   live loaded villagers (children included); v.adults the ones that are not children
 //   v.emeralds(m) emeralds villager m carries plus those in the chests it owns
-// API: BF.happiness = { TERMS, BASE, MAX, WINDOW, note(key, kind), score(rec) -> {score, raw, terms}, last(key),
+// API: BF.happiness = { TERMS, BASE, MAX, WINDOW, note(key, kind), score(rec) -> {score, raw, terms}, last(key), week(key, kind),
 //                       serialize(), deserialize(o), reset(), hook() }
 (() => {
 "use strict";
@@ -23,6 +23,7 @@ const TERMS = [
   { id: "grown",      label: "children grown up this week",       weight: +5,  count: v => v.week("grown") },
   { id: "unemployed", label: "unemployed",                        weight: -3,  count: v => v.adults.filter(m => m.profession === "unemployed").length },
   { id: "broke",      label: "with no emeralds",                  weight: -3,  count: v => v.adults.filter(m => v.emeralds(m) === 0).length },
+  { id: "treats",     label: "ate a treat in the last 3 days",    weight: +1,  count: v => (BF.baker ? v.villagers.filter(m => BF.baker.treatCounts(m)).length : 0) },   // a cake slice or a pumpkin pie (js/baker.js)
 ];
 
 const events = new Map();   // village key -> {kind: [game day, ...]} (only the last WINDOW days are kept)
@@ -82,6 +83,7 @@ function hook() {
 BF.happiness = {
   TERMS, BASE, MAX, WINDOW, note, score, reset, hook,
   last: key => lastScore.get(key) || null,
+  week(key, kind) { const a = (events.get(key) || {})[kind] || [], cut = dayNow() - WINDOW; return a.filter(t => t >= cut).length; },   // events of a kind in the last WINDOW days (the comparison table)
   serialize() {
     const o = {};
     for (const key of events.keys()) prune(key);
