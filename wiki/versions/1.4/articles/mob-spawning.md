@@ -45,6 +45,22 @@ Wild animals breed without help, slowly:
 
 Monsters spawn in any loaded chunk, not only near you or near villages. Each loaded chunk gets about one surface attempt every 8 seconds while it is dark, and one cave attempt every 8 seconds at any hour. Each attempt picks a random chunk and a random spot in it, and picks a kind: [[mob:zombie]] 33%, [[mob:skeleton]] 25%, [[mob:creeper]] 24%, [[mob:spider]] 18%.
 
+### Game options
+
+Each world has its own **game options**, which say which of the four monsters spawn. A new world has zombies and skeletons on, and creepers and spiders off; worlds saved before the options existed take the same settings. You can change them in three places:
+
+- **Create New World**: the *Game options* buttons on the form.
+- **The world list** on the title screen: *Options* on a world's row, then *Save*. The world uses them the next time it opens.
+- **In game**: *Game options* in the pause menu. A change applies at once.
+
+Turning a monster off means:
+
+- None of that kind spawns. An attempt that picks it is simply dropped, not picked again, so the other kinds spawn exactly as often as before.
+- Every one of that kind already in the world leaves: the loaded ones disappear on the spot (no drops), and ones stored with unloaded chunks or in the save do not come back.
+- Each area's cap shrinks by that kind's share (see Caps below), so the others' numbers stay the same. With creepers and spiders off, for example, the cap is 58% of the usual, and you see as many zombies and skeletons as with all four on.
+
+Turning one back on lets it spawn again from then on. The [[page:commands|/summon]] command still makes any monster, whatever the options say.
+
 ### Where and when
 
 A monster appears only on a solid, open spot big enough to stand in, where the **block light is 7 or less**. A torch gives light 14 at its flame and one less with each block of distance, so spots about 7 or more blocks from a torch can still spawn monsters; a few torches spaced out are enough to make a floor safe. Lanterns, glowstone and sea lanterns shine at 15 and reach further. See [[page:light]].
@@ -60,7 +76,7 @@ Changing a place resets its clock. Taking away a light source, or building somet
 
 Monsters are limited by area, so a busy night cannot flood a place:
 
-- An area allows **10 monsters per 28 chunks**, never fewer than one.
+- An area allows **10 monsters per 28 chunks**, never fewer than one, times the share of the spawn kinds switched on in the world's game options (all four: the full cap). Only monsters of kinds that are on count against it.
 - Each running village counts as its own area, together with 16 blocks of margin around it and the land kept loaded around its villagers at its edge. So does the corridor along a caravan's trip, and so does each patch of land kept loaded around villagers who have walked well away from their village.
 - Everything else loaded around you is one big area.
 - When an area is full, no more spawn there until some die.

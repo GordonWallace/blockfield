@@ -138,7 +138,11 @@ function bring(e) {
 function restore(k) {
   const a = stored.get(k);
   stored.delete(k);
-  if (a) for (const e of a) { try { bring(e); } catch (err) { console.error(err); } }
+  if (a) for (const e of a) {
+    const T = BF.mobs.typeDef(e.type);
+    if (T && T.spawns === false) continue;   // a monster switched off in the world (js/gameopts.js)
+    try { bring(e); } catch (err) { console.error(err); }
+  }
 }
 
 // ---------------------------------------------------------------- first-generation animals
@@ -212,8 +216,11 @@ function rebuildAreas() {
   const P = { kind: "player", key: "player", n: 0, h: 0, cap: 0 }, pi = areaList.length;
   for (const k of W.chunks.keys()) if (!areaOf.has(k)) { areaOf.set(k, pi); P.n++; }
   areaList.push(P);
-  for (const A of areaList) A.cap = Math.max(1, Math.round(CAP * A.n / CAP_CHUNKS));
-  for (const m of BF.mobs.list) if (m.hostile && live(m)) { const i = areaOf.get(ck(m.position.x, m.position.z)); if (i != null) areaList[i].h++; }
+  // monsters switched off in the world (js/gameopts.js): the cap shrinks by their share of the spawn weights and only monsters that are on
+  // count, so turning creepers off leaves zombies' numbers as they were
+  const share = BF.mobs.spawnShare(), on = t => BF.mobs.typeDef(t).spawns !== false;
+  for (const A of areaList) A.cap = Math.max(1, Math.round(CAP * A.n / CAP_CHUNKS)) * share;
+  for (const m of BF.mobs.list) if (m.hostile && live(m) && on(m.type)) { const i = areaOf.get(ck(m.position.x, m.position.z)); if (i != null) areaList[i].h++; }
 }
 function rebuildTargets() {
   targets = new Map();

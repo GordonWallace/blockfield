@@ -625,15 +625,17 @@ const MODELS = {
 };
 
 // ---------- type table ----------
+// spawns (monsters): whether the type spawns in the world being played, a plain boolean that the world's game options set (js/gameopts.js);
+// false drops spawn tries that pick it and keeps stored ones from coming back. A type with no spawns flag is not switchable.
 const TYPES = {
   pig:      { hostile: false, hp: 10, hw: 0.45, h: 0.9,  speed: 1.3, flee: 3.4, drops: [["raw_porkchop", 1, 3]] },
   cow:      { hostile: false, hp: 10, hw: 0.45, h: 1.4,  speed: 1.1, flee: 3.0, drops: [["raw_beef", 1, 3], ["leather", 0, 2]] },
   sheep:    { hostile: false, hp: 8,  hw: 0.45, h: 1.3,  speed: 1.2, flee: 3.2, drops: [["white_wool", 1, 1], ["raw_mutton", 1, 2]] },
   chicken:  { hostile: false, hp: 4,  hw: 0.2,  h: 0.75, speed: 1.1, flee: 3.0, drops: [["raw_chicken", 1, 1], ["feather", 0, 2]], slowFall: true },
-  zombie:   { hostile: true,  hp: 20, hw: 0.3,  h: 1.95, speed: 2.2, attack: 3, burns: true, drops: [["rotten_flesh", 0, 2]] },
-  skeleton: { hostile: true,  hp: 20, hw: 0.3,  h: 1.99, speed: 2.3, burns: true, drops: [["bone", 0, 2], ["arrow", 0, 2]] },
-  creeper:  { hostile: true,  hp: 20, hw: 0.3,  h: 1.7,  speed: 1.9, drops: [["gunpowder", 0, 2]] },
-  spider:   { hostile: true,  hp: 16, hw: 0.7,  h: 0.9,  speed: 3.4, attack: 2, climbs: true, drops: [["string", 0, 2]] },
+  zombie:   { hostile: true,  spawns: true, hp: 20, hw: 0.3,  h: 1.95, speed: 2.2, attack: 3, burns: true, drops: [["rotten_flesh", 0, 2]] },
+  skeleton: { hostile: true,  spawns: true, hp: 20, hw: 0.3,  h: 1.99, speed: 2.3, burns: true, drops: [["bone", 0, 2], ["arrow", 0, 2]] },
+  creeper:  { hostile: true,  spawns: true, hp: 20, hw: 0.3,  h: 1.7,  speed: 1.9, drops: [["gunpowder", 0, 2]] },
+  spider:   { hostile: true,  spawns: true, hp: 16, hw: 0.7,  h: 0.9,  speed: 3.4, attack: 2, climbs: true, drops: [["string", 0, 2]] },
   villager: { hostile: false, hp: 20, hw: 0.3,  h: 1.95, speed: 0.9, flee: 2.8, village: true, variants: PROFESSIONS, drops: [] },
   iron_golem: { hostile: false, hp: 100, hw: 0.7, h: 2.7, speed: 1.4, attack: 10, village: true, golem: true, noKnock: true, drops: [["iron_ingot", 3, 5]] },
   // horses (js/horses.js): spawned in herds by js/horses.js, not by the passive spawner, and not counted against its cap; hp is rolled per horse
@@ -2176,6 +2178,7 @@ function spawnHostile(type, x, y, z) {
 }
 function trySurface(c) {
   const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  if (!T.spawns) return;   // switched off in this world (js/gameopts.js): the try is dropped, not re-picked, so the others spawn as often as before
   const x = c.cx * CS + irnd(0, CS - 1), z = c.cz * CS + irnd(0, CS - 1);
   const gy = w.heightAt(x, z);
   if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
@@ -2187,6 +2190,7 @@ function trySurface(c) {
 // a dark, covered air pocket in a random column of the chunk
 function tryCave(c) {
   const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  if (!T.spawns) return;   // (as trySurface)
   const lx = irnd(0, CS - 1), lz = irnd(0, CS - 1), x = c.cx * CS + lx, z = c.cz * CS + lz;
   if (!c.top) return;
   const top = c.top[lz * CS + lx];
@@ -2749,6 +2753,11 @@ BF.mobs = {
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
+  // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
+  discard(m) { if (m && !m.removed) removeMob(m); },
+  // The share of monster spawn weight whose type spawns (1 with all on): js/wildlife.js scales its area caps by it.
+  spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
+  spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
   isWild, spawnGroup, penBoxes, inPenBox, standable, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },

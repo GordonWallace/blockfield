@@ -1,4 +1,4 @@
-Spiders are fast, wide and low, and the only monsters that climb. About one monster spawn in six is a spider, found in the dark on the surface at night and in dark caves at any hour (see [[page:mob-spawning]]). Unlike zombies and skeletons they do not burn in sunlight.
+Spiders are fast, wide and low, and the only monsters that climb. Spiders are **off by default**: they spawn only in worlds whose game options turn them on (see [[page:mob-spawning]]). Then about one monster spawn in six is a spider, found in the dark on the surface at night and in dark caves at any hour (see [[page:mob-spawning]]). Unlike zombies and skeletons they do not burn in sunlight.
 
 ### Neutral by day
 

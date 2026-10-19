@@ -1,4 +1,4 @@
-Skeletons are archers. They make up a quarter of monster spawns, appearing in the dark on the surface at night and in dark caves at any time of day (see [[page:mob-spawning]]). They are slower than you on foot.
+Skeletons are archers. They are on by default (a world's game options can turn them off, see [[page:mob-spawning]]) and make up a quarter of monster spawns, appearing in the dark on the surface at night and in dark caves at any time of day (see [[page:mob-spawning]]). They are slower than you on foot.
 
 ### Combat
 
