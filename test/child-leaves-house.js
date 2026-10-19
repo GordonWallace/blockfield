@@ -23,9 +23,14 @@ const seed = +(process.argv[2] || 1337);
     const rec = BF.mobs.villages.get(Math.round(v.x) + "," + Math.round(v.z));
     const ad = rec.members.filter(m => m.type === "villager" && !m.dead && !m.child);
     const kids = [];
-    for (let i = 0; i + 1 < ad.length && kids.length < 3; i += 2) { const c = BF.breeding.forceBirth(ad[i], ad[i + 1]); if (c) kids.push(c); }
+    // Each parent pays 5 bread-eq for a birth (js/breeding.js birth); how much an adult holds this early is down to what it ate and sold
+    // since the village loaded (often 4-6), so the parents get bread first, as in villagelog.js.
+    for (let i = 0; i + 1 < ad.length && kids.length < 3; i += 2) {
+      for (const m of [ad[i], ad[i + 1]]) BF.trades.inv.add(m.inv, BF.I.bread, 20);
+      const c = BF.breeding.forceBirth(ad[i], ad[i + 1]); if (c) kids.push(c);
+    }
     window.__kids = kids; window.__seen = kids.map(() => ({ slept: false, outAfter: false }));
-    return { x: v.x, z: v.z, kids: kids.length };
+    return { x: v.x, z: v.z, kids: kids.length, adults: ad.length };
   });
   console.log(JSON.stringify(v));
   let last;
