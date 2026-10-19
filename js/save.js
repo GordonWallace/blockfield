@@ -57,6 +57,7 @@ function snapshot() {
     seed: BF.state.seed,
     gen: 4, biomeScale: BF.state.biomeScale,               // worldgen version (4: the planet, the only one since 1.4) + biome size
     villages: BF.state.villages,                           // village generator (old saves have none => 1, the classic villages)
+    monsters: BF.gameOpts ? BF.gameOpts.monsters() : undefined,   // game options: which monsters spawn (js/gameopts.js; the list entry's copy is the one read)
     time: { t: BF.sky.time, day: BF.sky.day },
     spawn: BF.spawnPoint,
     player,
@@ -82,8 +83,9 @@ function snapshot() {
   };
 }
 
-function restore(data) {
-  BF.newWorld(data.seed, { gameMode: data.player && data.player.gameMode, biomeScale: data.biomeScale || 1, villages: data.villages || 1 });
+function restore(data, meta) {
+  const monsters = meta && meta.monsters || data.monsters;   // the list entry's options win: the start screen may have changed them (js/gameopts.js)
+  BF.newWorld(data.seed, { gameMode: data.player && data.player.gameMode, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters });
   for (const k in data.edits || {}) {
     const a = data.edits[k], m = new Map();
     for (let i = 0; i < a.length; i += 2) m.set(a[i], a[i + 1]);
@@ -117,6 +119,7 @@ function restore(data) {
   if (BF.farmland) BF.farmland.deserialize(data.farmland); // farmland clocks (old saves: each block's clock starts when first seen)
   if (BF.bees) BF.bees.deserialize(data.bees); // bee homes (old saves: none)
   if (BF.glog) BF.glog.loadChunkTimes(data.chunkTime); // chunk times (old saves: every chunk starts at 0)
+  if (BF.gameOpts) BF.gameOpts.purgeStored();   // monsters switched off since the save don't come back with their chunks
 }
 
 // A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
@@ -170,16 +173,16 @@ const save = {
       .catch(() => []);
   },
 
-  // Starts a brand-new saved world, a planet. opts: {name, seed (number|string|blank), gameMode, biomeScale (>=1, default 1), villages}
+  // Starts a brand-new saved world, a planet. opts: {name, seed (number|string|blank), gameMode, biomeScale (>=1, default 1), villages, monsters}
   create(opts = {}) {
     let seed = opts.seed;
     if (seed === undefined || seed === null || seed === "") seed = 1 + Math.floor(Math.random() * 4294967295);
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: 4, version: 2, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, created: now, lastPlayed: now };
+    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: 4, version: 2, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
     const start = () => {
-      BF.newWorld(seed, { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages });
+      BF.newWorld(seed, { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages, monsters: meta.monsters });
       save.current = meta;
       BF.emit("worldLoaded", meta);
       return save.saveNow().then(() => meta);
@@ -196,7 +199,7 @@ const save = {
         return BF.prepareWorld(data.seed).then(() => [meta, data]);   // (the planet works out its rivers first)
       })
       .then(([meta, data]) => {
-        restore(data);
+        restore(data, meta);
         meta.lastPlayed = Date.now();
         save.current = meta;
         BF.emit("worldLoaded", meta);
@@ -218,12 +221,23 @@ const save = {
     });
   },
 
+  // A saved world's game options (js/gameopts.js): which monsters spawn ({type: bool}), from the start screen. The world being played
+  // takes them at once.
+  setMonsters(id, o) {
+    const m = BF.gameOpts ? BF.gameOpts.normalize(o) : o;
+    if (save.current && save.current.id === id && BF.gameOpts) { for (const t in m) BF.gameOpts.set(t, m[t]); save.current.monsters = m; }
+    return tx(["worlds"], "readwrite", t => {
+      const s = t.objectStore("worlds"), r = s.get(id);
+      r.onsuccess = () => { if (r.result) { r.result.monsters = m; s.put(r.result); } };
+    });
+  },
+
   // Writes the current world now. Resolves true when saved (false when there's nothing to save).
   saveNow() {
     if (!save.current || !save.supported) return Promise.resolve(false);
     let data;
     try { data = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
-    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen, biomeScale: data.biomeScale || 1, villages: data.villages || 1, version: data.version });
+    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters: data.monsters || save.current.monsters, version: data.version });
     save.current = meta;
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").put(meta); t.objectStore("data").put(data, meta.id); })
       .then(() => { save.lastSaved = Date.now(); BF.emit("worldSaved", meta); return true; })

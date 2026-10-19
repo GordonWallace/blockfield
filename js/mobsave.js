@@ -197,6 +197,8 @@ function update(dt) {
   for (const e of wild) {
     const s = e.snap;
     if (!there(s)) { keep.push(e); continue; }
+    const T = BF.mobs.typeDef && BF.mobs.typeDef(e.type);
+    if (T && T.spawns === false) continue;   // a monster switched off in the world since the save (js/gameopts.js)
     const m = BF.mobs.spawn ? BF.mobs.spawn(e.type, s.p[0], s.p[1], s.p[2], e.variant, e.style) : null;
     if (m) apply(m, s);
   }

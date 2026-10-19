@@ -136,7 +136,7 @@ const css = `
 .bfp-card .bfp-mode button{margin:0;border:0;border-radius:0;background:rgba(0,0,0,.3);color:var(--muted);border-bottom:3px solid transparent}
 .bfp-card .bfp-mode button.on{background:#3b4a35;color:var(--ink);border-bottom-color:var(--accent)}
 .bfp-modehint{font:12px var(--mono);color:var(--muted);margin:6px 0 0;min-height:1em}
-.bfp-card.bfp-wide{max-width:760px}
+.bfp-card.bfp-wide{max-width:840px}
 .bfp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px;font:400 15px/1 var(--display);color:var(--ink);text-align:left}
 .bfp-card button.bfp-small{width:auto;margin:0;padding:8px 10px;font-size:12px}
 .bfp-worlds{max-height:min(46vh,340px);overflow:auto;border:1px solid var(--panel-edge);border-radius:3px;background:rgba(0,0,0,.25);text-align:left}
@@ -155,6 +155,13 @@ const css = `
 .bfp-world input{width:100%;box-sizing:border-box;font:13px var(--mono);background:rgba(0,0,0,.4);color:var(--ink);border:1px solid var(--accent);border-radius:3px;padding:6px 8px}
 .bfp-world.confirm{background:rgba(224,83,61,.14)}
 .bfp-world.old .bfp-info{opacity:.5}
+.bfp-world.opts{flex-wrap:wrap}
+.bfp-world.opts .bfp-opts{flex-basis:100%}
+.bfp-opts{text-align:left;font:12px var(--mono);color:var(--muted);margin:6px 0 0}
+.bfp-optgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
+.bfp-card .bfp-optgrid button{margin:0;padding:8px 10px;font-size:12px;background:rgba(0,0,0,.3);color:var(--muted);border-bottom:3px solid transparent}
+.bfp-card .bfp-optgrid button.on{background:#3b4a35;color:var(--ink);border-bottom-color:var(--accent)}
+.bfp-opts .bfp-hint{display:block;margin-top:4px;font-size:11px;opacity:.8}
 .bfp-empty{font:12px var(--mono);color:var(--muted);padding:16px 12px;margin:0;text-align:center}
 .bfp-savenote{font:12px var(--mono);color:var(--muted);margin:8px 0 0;min-height:0}
 .bfp-savenote:empty{display:none}
@@ -195,6 +202,12 @@ const HELP_HTML = isTouch
      <div><b>Shift</b> sneak</div><div><b>R / Ctrl / W x2</b> sprint</div><div><b>Z</b> free the mouse (game keeps running)</div><div><b>Fly + hold W and R</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
      <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Boat</b> R-click to get in, W/S row, A/D turn, Shift out</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
+// Game options of a world (js/gameopts.js): one on/off button per monster. o: {type: bool}. The buttons carry data-act="mon".
+const optsHTML = o => { const G = BF.gameOpts, ts = G ? G.types() : []; return `<div class="bfp-opts">Monsters that spawn<div class="bfp-optgrid">` +
+  ts.map(t => `<button type="button" data-act="mon" data-mon="${t}" class="${o[t] ? "on" : ""}" aria-pressed="${!!o[t]}">${G.name(t)}: ${o[t] ? "On" : "Off"}</button>`).join("") +
+  `</div><span class="bfp-hint">Off: they never spawn, and any already in the world leave. The others spawn as often as before.</span></div>`; };
+const readOpts = box => { const o = {}; for (const b of box.querySelectorAll('[data-act="mon"]')) o[b.dataset.mon] = b.classList.contains("on"); return o; };
+const flipOpt = b => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.textContent = BF.gameOpts.name(b.dataset.mon) + ": " + (on ? "On" : "Off"); return on; };
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
 function buildDOM() {
@@ -222,6 +235,7 @@ function buildDOM() {
       <label class="bfp-field">Seed<input name="seed" placeholder="Leave blank for a random seed" spellcheck="false"></label>
       <label class="bfp-field">Biome size: <b class="bfp-bsl">${BIOME_SIZES[BIOME_DEF][1]}</b><input name="biome" type="range" min="0" max="${BIOME_SIZES.length - 1}" step="1" value="${BIOME_DEF}"><span class="bfp-hint">Relative size of biomes and climate zones. Small matches older worlds.</span></label>
       <div class="bfp-field">Game mode${modeRow}</div>
+      <div class="bfp-field bfp-createopts"></div>
       <button class="primary" type="submit">Create and play</button>
       <button type="button" data-act="hide-create">Back</button>
       <p class="bfp-savenote"></p>
@@ -231,6 +245,8 @@ function buildDOM() {
     <button class="primary" data-act="resume">Resume</button>
     <button data-act="view">Render distance: 6</button>
     ${modeRow}
+    <button data-act="opts">Game options</button>
+    <div class="bfp-pauseopts" hidden></div>
     <button data-act="help">Controls</button>
     <div class="bfp-help" hidden>${HELP_HTML}</div>
     <button data-act="quit">Save and Quit to Title</button>
@@ -251,6 +267,9 @@ function buildDOM() {
     if (!act) return;
     const a = act.dataset.act, row = act.closest("[data-id]"), id = row && row.dataset.id;
     if (a === "mode") { createMode = act.dataset.mode; updateModeUI(); }
+    else if (a === "mon") flipOpt(act);   // the create form's and a world row's options (saved with Create / Save)
+    else if (a === "options") renderWorlds({ options: id });
+    else if (a === "options-ok") finishOptions(row);
     else if (a === "show-create") showStartView("create");
     else if (a === "hide-create") showStartView("list");
     else if (a === "copy-seed") copySeed(id, act);
@@ -283,6 +302,8 @@ function buildDOM() {
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
     } else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
+    else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.monsters()); }
+    else if (a === "mon") { BF.gameOpts.set(act.dataset.mon, flipOpt(act)); savePause(); }   // in game: applies at once, and saves
     else if (a === "quit") quitToTitle(act);
   });
   deathEl.addEventListener("click", e => { if (e.target.closest('[data-act="respawn"]')) respawn(); });
@@ -398,6 +419,7 @@ function showStartView(v) {
     createForm.elements.name.value = "New World";
     createForm.elements.seed.value = "";
     createForm.elements.biome.value = BIOME_DEF; createForm.querySelector(".bfp-bsl").textContent = BIOME_SIZES[BIOME_DEF][1];
+    if (BF.gameOpts) createForm.querySelector(".bfp-createopts").innerHTML = "Game options" + optsHTML(BF.gameOpts.normalize());
     updateModeUI();
     setTimeout(() => { try { createForm.elements.name.select(); } catch (_) {} }, 0);
   }
@@ -417,6 +439,9 @@ function renderWorlds(st) {
     if (st.renaming === w.id) return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><input value="${esc(w.name)}" maxlength="40" aria-label="New world name"></div>
       <div class="bfp-wbtns"><button class="primary" data-act="rename-ok">Save</button><button data-act="cancel">Cancel</button></div></div>`;
+    if (st.options === w.id) return `<div class="bfp-world opts" role="listitem" data-id="${id}">
+      <div class="bfp-info"><div class="bfp-wname">${esc(w.name)}: game options</div></div>
+      <div class="bfp-wbtns"><button class="primary" data-act="options-ok">Save</button><button data-act="cancel">Cancel</button></div>${optsHTML(BF.gameOpts.normalize(w.monsters))}</div>`;
     if (st.deleting === w.id) return `<div class="bfp-world confirm" role="listitem" data-id="${id}">
       <div class="bfp-info"><div class="bfp-wname">Delete “${esc(w.name)}”?</div><div class="bfp-wmeta">This can't be undone.</div></div>
       <div class="bfp-wbtns"><button class="danger" data-act="delete-ok">Delete</button><button data-act="cancel">Cancel</button></div></div>`;
@@ -425,7 +450,7 @@ function renderWorlds(st) {
       <div class="bfp-wbtns"><button data-act="delete">Delete</button></div></div>`;   // spec r14-19: no old saves in 1.4 (Delete only)
     return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><div class="bfp-wname">${esc(w.name)}</div><div class="bfp-wmeta">${meta}</div></div>
-      <div class="bfp-wbtns"><button class="primary" data-act="play">Play</button><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div></div>`;
+      <div class="bfp-wbtns"><button class="primary" data-act="play">Play</button><button data-act="options">Options</button><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div></div>`;
   }).join("");
   const inp = worldsEl.querySelector("input");
   if (inp) { inp.focus(); inp.select(); }
@@ -444,6 +469,10 @@ function copySeed(id, btn) {
   };
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => done(fallback()));
   else done(fallback());
+}
+function finishOptions(row) {
+  const id = row.dataset.id, o = readOpts(row);
+  Promise.resolve(BF.save.setMonsters ? BF.save.setMonsters(id, o) : null).catch(e => console.error(e)).then(() => refreshWorlds());
 }
 function finishRename(row) {
   const id = row.dataset.id, inp = row.querySelector("input"), name = inp && inp.value.trim();
@@ -466,17 +495,17 @@ function playWorld(id, btn) {
 function createWorld() {
   const f = createForm.elements;
   const name = f.name.value.trim() || "New World", seedText = f.seed.value.trim(), mode = createMode || gameMode;
-  const biomeScale = BIOME_SIZES[f.biome.value | 0][0];
+  const biomeScale = BIOME_SIZES[f.biome.value | 0][0], monsters = readOpts(createForm);
   requestLock();
   const btn = createForm.querySelector('button[type="submit"]');
   btn.disabled = true;
   const done = () => { btn.disabled = false; beginPlay(); };
   if (hasSave() && BF.save.create) {
-    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale })).catch(e => { console.error(e); }).then(done);
+    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale, monsters })).catch(e => { console.error(e); }).then(done);
   } else {
     const sd = parseSeed(seedText);
     BF.prepareWorld(sd).then(() => {   // (the planet works out its rivers first)
-      try { BF.newWorld(sd, { gameMode: mode, biomeScale }); } catch (e) { console.error(e); }
+      try { BF.newWorld(sd, { gameMode: mode, biomeScale, monsters }); } catch (e) { console.error(e); }
       setGameMode(mode);
       done();
     });

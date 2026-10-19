@@ -64,6 +64,7 @@ module.exports = async (pg) => {
   await goTo(Q[0], Q[1], 9000);
   const placed = await pg.evaluate(([qx, qz]) => {
     BF.mobs.spawning = false;
+    BF.gameOpts.set("creeper", true);   // creepers are off by default (js/gameopts.js); this checks storing, not the option
     BF.sky.day = 4; BF.sky.setTime(0.8);
     for (const m of BF.mobs.list.slice()) if (m.hostile) m.dead = true;
     const put = (type, dx, dz, tag) => {
