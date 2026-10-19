@@ -11,6 +11,14 @@
 // unless another villager happened to start with some (a random starting kit), and the check failed (every CI run of #332 and #344).
 // The setup now lays GRAVEL blocks of gravel on open ground beside the village, as on a riverbank or scree: the miner digs them and sifts them
 // into flint on the surface (js/miner.js findGravel, sift), where the fletcher can buy it. The check itself is unchanged.
+// A full coop: the fletcher's own 4 feathers last it 16 arrows, and then it bought feathers only when a librarian or fisherman happened to
+// start with a lot of them it could spare (a random starting kit buys feathers, trading.js stockFor; at least 7, a lot worth half an emerald,
+// js/market.js SMALL_LOT). Otherwise the feathers had to come from the keeper's culls, but a generated coop starts with 2-4 chickens and the
+// keeper culls only above 8 (js/poultry.js CULL_AT), so its first culls came around day 5 and its first lot of 7 feathers around day 13-14 or
+// after the run (reproduced with the starting-kit feathers taken away: keeper 2 feathers on day 7, 6 on day 12, "bought feathers 0"; CI run
+// 39075708979 of #405 on 1.3; the village here has one librarian and no fisherman). The setup now puts chickens in the run of the keeper's
+// coop up to FLOCK, as a player leading chickens in would (js/poultry.js adoptOrRelease): the keeper culls back to 8 from the first morning
+// and sells the feathers. The check itself is unchanged.
 // Usage: NODE_PATH=$(npm root -g) node test/bowchain.js [days=14] [seed=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -18,6 +26,7 @@ const root = path.resolve(__dirname, '..');
 const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
 const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
 const GRAVEL = 32;   // blocks of surface gravel laid beside the village for the miner's flint (see the header)
+const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for the feathers of its culls (see the header; js/poultry.js ADOPT_MAX)
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -114,11 +123,25 @@ const GRAVEL = 32;   // blocks of surface gravel laid beside the village for the
       }
       return placed;
     }, GRAVEL);
+    // a full coop for the keeper's feathers (see the header): grown chickens let into the run of the keeper's coop until it holds FLOCK
+    if (setup.gravelPlaced >= GRAVEL) setup.flock = await pg.evaluate(n => {
+      const R = window.__rec, P = BF.poultry;
+      const k = BF.mobs.list.find(m => m.type === 'villager' && m.profession === 'poultry_keeper' && m.village && m.village.key === R.key && !m.dead);
+      const c = k && P.coopOf(k);
+      if (!c || !c.hens) return 0;
+      for (let i = c.hens.length; i < n; i++) {
+        const x = c.x0 + 0.6 + Math.random() * (c.x1 - c.x0 - 1.2), z = c.z0 + 0.6 + Math.random() * (c.z1 - c.z0 - 1.2);
+        BF.mobs.spawn('chicken', x, c.y + 1, z);
+      }
+      for (let i = 0; i < 4 && c.hens.length < n; i++) P.tick(1);   // the coop takes them in (js/poultry.js adoptOrRelease)
+      return c.hens.length;
+    }, FLOCK);
     if (setup.gravelPlaced < GRAVEL) setup = { err: 'room for only ' + setup.gravelPlaced + ' of ' + GRAVEL + ' surface gravel by village ' + setup.key };
+    else if (setup.flock < FLOCK) setup = { err: 'the poultry keeper\'s coop by village ' + setup.key + ' took in only ' + setup.flock + ' of ' + FLOCK + ' chickens' };
     else await pg.evaluate(() => { const R = window.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = window.__total(); });
   }
   if (setup.err) { console.log('FAIL ' + setup.err); await b.close(); process.exitCode = 1; return; }
-  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}, surface gravel ${setup.gravelPlaced}`);
+  console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}, surface gravel ${setup.gravelPlaced}, coop ${setup.flock} chickens`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
