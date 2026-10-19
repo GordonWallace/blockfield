@@ -18,6 +18,12 @@ module.exports = async (pg) => {
     const rec = bm.village, key = rec.key;
     // ---- a river: x0 .. x0+wd-1 over z0-30 .. z0+30, banks flattened 8 blocks either side, water 7 deep, its top level with the bank's top block
     const wg = rec.wg, x0 = Math.floor(wg ? wg.maxX : rec.x) + 14, z0 = Math.floor(rec.z);
+    // the ground it carves (the widest river below: x0 - 9 .. x0 + 38) must be loaded first: setBlock drops edits to a chunk not yet
+    // generated, and on a busy machine the chunks past the village were still queued, so part of a bank stayed missing (air) and the walk
+    // across the river below found no route
+    const CS = 16, areaLoaded = () => { for (let x = x0 - 9; x <= x0 + 38 + CS; x += CS) for (let z = z0 - 30; z <= z0 + 30 + CS; z += CS) if (!W.isLoaded(Math.min(x, x0 + 38), Math.min(z, z0 + 30))) return false; return true; };
+    for (let i = 0; i < 1500 && !areaLoaded(); i++) { W.update(BF.player.position.x, BF.player.position.z, 30); await new Promise(r => setTimeout(r, 10)); }
+    if (!areaLoaded()) { ok("setup: the ground for the river is loaded", false); return R; }
     const gref = W.heightAt(x0 - 9, z0);
     const carve = (x0, wd) => {
       for (let z = z0 - 30; z <= z0 + 30; z++) for (let x = x0 - 9; x < x0 + wd + 9; x++) {
