@@ -45,7 +45,7 @@ const BODY = 0.2;               // body length in blocks
 const W = () => BF.world;
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const today = () => (BF.sky ? BF.sky.day || 0 : 0);
-const simNow = () => (BF.simNow ? BF.simNow() : performance.now() / 1000);
+const simNow = () => (BF.simNow ? BF.simNow() : 0);
 const pk = (x, y, z) => x + "," + y + "," + z;
 const ck = (cx, cz) => cx + "," + cz;
 const rnd = (a, b) => a + Math.random() * (b - a);

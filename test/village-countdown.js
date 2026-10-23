@@ -37,13 +37,19 @@ module.exports = async (pg) => {
   const pin = async k => (await outLoaded(k), pg.evaluate(k => {   // a villager held out beyond the village edge until the test lets go
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
     const T = { what: "Test errand", secs: 300, t0: BF.sky.day + BF.sky.time, end: BF.sky.day + BF.sky.time + 300 / 1200 };   // on a task, not at leisure
-    const put = () => { if (m.vtask !== T) m.vtask = T; m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
     Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
+    // ...and on the test's task: the village checks inside the game step, right after the villager's own AI, which may end or replace a task
+    // the timer had set (spec r15-16), so the task is held the same way
+    Object.defineProperty(m, "vtask", { get: () => T, set: () => {}, configurable: true });
+    window.__pinned = m;
     put(); clearInterval(window.__pin); window.__pin = setInterval(put, 150);
     return BF.vlog.nameOf(m);
   }, k));
-  const heldOut = (k, who) => wait(a => BF.villageSim.estimates(a.k).list.some(e => e.who === a.who && e.errand), { k, who }, 15000);   // the village sees it out on an errand
-  const unpin = () => pg.evaluate(() => clearInterval(window.__pin));
+  // the village sees it out on an errand, and keeps the ground it stands on (its window, re-checked every 0.5 game seconds: spec r15-16)
+  const heldOut = (k, who) => wait(a => { const m = window.__pinned, CS = BF.CS;
+    return BF.villageSim.estimates(a.k).list.some(e => e.who === a.who && e.errand) && !!m && BF.villageSim.keepKeys.has(Math.floor(m.position.x / CS) + "," + Math.floor(m.position.z / CS)); }, { k, who }, 15000);
+  const unpin = () => pg.evaluate(() => { clearInterval(window.__pin); const m = window.__pinned; if (m) { delete m.vtask; delete m.sleeping; m.vtask = null; m.sleeping = false; window.__pinned = null; } });
   const who = await pin(info.key);
   await heldOut(info.key, who);
   await tp(info.x + 900, info.z);
@@ -76,9 +82,8 @@ module.exports = async (pg) => {
   await tp(info.x + 900, info.z);
   await wait(k => BF.villageSim.countdown(k) !== null, info.key, 30000);
   await pg.evaluate(k => { BF.sky.day += 3; }, info.key);   // the clock jumps past the timer (the villager is still held out there)
-  await sleep(2500);
+  const gone = await wait(k => !BF.villageSim.isActive(k), info.key, 30000);   // (the village re-checks every 1.5 game seconds, slower than real time on a slow runner)
   await unpin();
-  const gone = await wait(k => !BF.villageSim.isActive(k), info.key, 30000);
   const after = await pg.evaluate(k => ({ left: BF.mobs.list.filter(m => m.village && m.village.key === k).length, errors: BF.villageSim.errors().map(e => e.kind + ":" + e.who) }), info.key);
   ok("when the timer ends the village unloads", gone, after);
   ok("all of its villagers unload with it", after.left === 0, after);

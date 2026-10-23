@@ -1944,7 +1944,7 @@ function updateMob(m, dt) {
   _desired.x = 0; _desired.z = 0; _desired.faceTarget = false; _desired.faceX = null; _desired.faceZ = null;
   if (m.rider) { /* ridden (js/horses.js): its rider moves it */ }
   else if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
-  else if (m.type === "villager") { { const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0; } if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
+  else if (m.type === "villager") { { const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0; aiN++; } if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
   else if (T.golem) golemAI(m, dt, _desired);
   else if (ai.fleeT > 0) {
     ai.fleeT -= dt;
@@ -2418,9 +2418,10 @@ function freshVillage(key, slotKey) {
   for (const k of villagerSaves.keys()) if (k.startsWith(pre)) return false;
   return true;
 }
-// Villager AI time (ms per frame, averaged over about 5 s): what the force-unload limit looks at (js/villagesim.js).
-let aiAcc = 0, aiEma = 0;
-function aiTick(dt) { aiEma += (aiAcc - aiEma) * Math.min(1, dt / 5); aiAcc = 0; }
+// Villager AI work per step, averaged over about 5 game seconds: aiN counts villager AI updates, which the force-unload limit looks at
+// (js/villagesim.js), so it acts the same on any machine (spec r15-16). aiAcc/aiEma is the same in wall-clock ms, for the debug screen only.
+let aiAcc = 0, aiEma = 0, aiN = 0, aiWork = 0;
+function aiTick(dt) { const k = Math.min(1, dt / 5); aiEma += (aiAcc - aiEma) * k; aiWork += (aiN - aiWork) * k; aiAcc = 0; aiN = 0; }
 // Puts a villager back at its bed, else at its village centre (a forced stop of an errand).
 function sendHome(m) {
   const b = m.bed, rec = m.village;
@@ -2928,6 +2929,7 @@ BF.mobs = {
   villages,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
   aiTime: () => aiEma,
+  aiWork: () => aiWork,
   sendHome,
   unloadVillage(key) {
     const rec = villages.get(key);
