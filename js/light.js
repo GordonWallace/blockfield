@@ -39,11 +39,12 @@ function chunkOf(x, z) {
   return cC;
 }
 const reset = () => { cCx = cCz = 1e9; cC = null; ah = at = rh = rt = 0; };
+BF.world.onChunkUnload((cx, cz, c) => { if (cC === c) { cCx = cCz = 1e9; cC = null; } });   // don't keep an unloaded chunk's arrays alive (r15-35)
 // A step from canonical cell (x, z) to (nx, nz): the chunk it reaches, with the canonical cell in NX / NZ. On the planet a step out of
 // a chunk at a face edge lands in the margin, which is resolved to the cell on the next face (null in a corner wedge), so the fills
 // carry on across face edges and every queued cell is canonical.
 let NX = 0, NZ = 0;
-const NCELL = {};
+const NCELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function stepTo(x, z, nx, nz) {
   NX = nx; NZ = nz;
   if (((nx >> 4) === (x >> 4) && (nz >> 4) === (z >> 4))) return chunkOf(nx, nz);
@@ -59,7 +60,7 @@ function lget(c, x, y, z) { const s = c.light[(y >> 4) - c.lo]; return s ? s[idx
 function lset(c, x, y, z, v) {
   const si = (y >> 4) - c.lo;
   let s = c.light[si];
-  if (!s) s = c.light[si] = new Uint8Array(4096);
+  if (!s) s = c.light[si] = BF.secArray(Uint8Array, 4096);
   s[idx(x, y, z)] = v;
 }
 const inBand = (c, y) => y >= c.y0 && y < c.y1;
@@ -178,7 +179,7 @@ function seedEmitters(c) {
     for (let i = 0; i < 4096; i++) {
       const e = EMIT[s[i]];
       if (!e) continue;
-      if (!ls) ls = c.light[si] = c.light[si] || new Uint8Array(4096);
+      if (!ls) ls = c.light[si] = c.light[si] || BF.secArray(Uint8Array, 4096);
       ls[i] = e;
       pushAdd(ox + (i & 15), by + (i >> 8), oz + ((i >> 4) & 15));
     }
@@ -226,7 +227,7 @@ light.onSet = function (x, y, z, oldId, newId) {
   flush();
 };
 
-const CELL = {};
+const CELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 // Light level 0..15 at integer world coords (0 in unloaded chunks / out of range).
 light.get = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);

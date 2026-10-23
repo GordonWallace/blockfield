@@ -53,11 +53,12 @@ function chunkOf(x, z) {
   return cC;
 }
 const reset = () => { cCx = cCz = 1e9; cC = null; ah = at = rh = rt = 0; };
+BF.world.onChunkUnload((cx, cz, c) => { if (cC === c) { cCx = cCz = 1e9; cC = null; } });   // don't keep an unloaded chunk's arrays alive (r15-35)
 // A step from canonical cell (x, z) to (nx, nz): the chunk it reaches, with the canonical cell in NX / NZ. On the planet a step out of
 // a chunk at a face edge lands in the margin, which is resolved to the cell on the next face (null in a corner wedge), so the fills
 // carry on across face edges and every queued cell is canonical.
 let NX = 0, NZ = 0;
-const NCELL = {};
+const NCELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function stepTo(x, z, nx, nz) {
   NX = nx; NZ = nz;
   if (((nx >> 4) === (x >> 4) && (nz >> 4) === (z >> 4))) return chunkOf(nx, nz);
@@ -80,7 +81,7 @@ function sset(c, x, y, z, v) {   // y inside the band
   let s = c.sky[si];
   if (typeof s === "number") {
     if (s === v) return;
-    const a = new Uint8Array(4096); if (s) a.fill(s);
+    const a = BF.secArray(Uint8Array, 4096); if (s) a.fill(s);   // shared memory when the page is isolated (js/world.js, r15-35)
     c.sky[si] = s = a;
   }
   s[idx(x, y, z)] = v;
@@ -163,6 +164,7 @@ function removeFrom(c, x, y, z, v) {
 
 // ---------- chunk creation ----------
 let colBuf = new Uint8Array(0);
+const skyTmp = new Uint8Array(4096);   // one section while it is filled; copied out unless it is uniform
 const floorOf = new Int32Array(CS * CS);   // per column: lowest y still at 15 (y1 if the band's top cell is shaded)
 // Straight-down pass of chunk c into c.sky; fills floorOf. Returns nothing.
 function columnPass(c) {
@@ -186,7 +188,7 @@ function columnPass(c) {
   const ns = c.hi - c.lo;
   c.sky = new Array(ns);
   for (let si = 0; si < ns; si++) {
-    const s = new Uint8Array(4096), by = si * 16;
+    const s = skyTmp, by = si * 16;
     let first = -1, uni = true;
     for (let lz = 0; lz < CS; lz++) for (let lx = 0; lx < CS; lx++) {
       const col = (lz * CS + lx) * H + by;
@@ -196,7 +198,8 @@ function columnPass(c) {
         if (first < 0) first = v; else if (v !== first) uni = false;
       }
     }
-    c.sky[si] = uni ? first : s;
+    if (uni) c.sky[si] = first;
+    else { const a = BF.secArray(Uint8Array, 4096); a.set(s); c.sky[si] = a; }   // shared when the page is isolated (js/world.js, r15-35)
   }
 }
 // lowest y at 15 in column (x, z) of a chunk with sky data (scans down from the band's top)
@@ -301,7 +304,7 @@ sky.onSet = function (x, y, z, oldId, newId) {
   flush();
 };
 
-const CELL = {};
+const CELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 // Level 0..15 at world coords: 15 in unloaded chunks and above a band, 0 below it.
 sky.get = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);

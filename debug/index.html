@@ -315,6 +315,7 @@
   <div class="hstat">Seed <b id="h-seed">-</b></div>
   <div class="hstat">Gen <b id="h-gen">-</b></div>
   <div class="hstat" id="h-biomes"></div>
+  <div class="hstat" id="h-shared" title="Chunk block data in shared memory (spec r15-35): on when the game page is cross-origin isolated, as debug/server.js serves it"></div>
 </header>
 
 <div class="waiting" id="waiting">
@@ -725,6 +726,7 @@ function renderTop(s) {
   const d = s.info;
   $("h-clock").innerHTML = `<b>${esc(d.clock)}</b>`;
   $("h-seed").textContent = d.seed; $("h-gen").textContent = d.gen; $("h-biomes").innerHTML = `Biomes <b>x${esc(d.biomeScale)}</b>`;
+  $("h-shared").innerHTML = d.shared ? `Shared memory <b>${esc(d.shared.replace(/^Shared memory: /, ""))}</b>` : "";
   const w = $("h-warp"); w.hidden = d.warp === 1 || d.warp == null; w.textContent = d.warp === 0 ? "❚❚ 0x frozen" : "⏩ " + d.warp + "x";
   $("c-fps").innerHTML = `${d.fps} <small>fps</small>`;
   $("c-calls").textContent = d.calls + " draw calls";

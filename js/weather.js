@@ -71,7 +71,7 @@ function columnTop(c, lx, lz) {
   return y;
 }
 // columnTop of world column (x, z) through world.cell (on the planet, x / z may be a margin address), or null when not loaded.
-const CL = {};
+const CL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function columnTopAt(x, z) {
   const cl = BF.world.cell ? BF.world.cell(x, z, CL) : null;
   if (cl) return cl.c ? columnTop(cl.c, cl.lx, cl.lz) : null;
