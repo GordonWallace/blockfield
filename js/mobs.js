@@ -625,7 +625,7 @@ function updateArrows(dt) {
         const m = mobAt(a.pos);
         if (m) {
           const dmg = playerArrowDamage(a);
-          a.hit = { mob: m, damage: dmg, landed: damageMob(m, dmg, a.vel, true) };
+          a.hit = { mob: m, damage: dmg, landed: !!damageMob(m, dmg, a.vel, true) };   // (in the think phase: the hit is a request, r15-23)
           if (BF.emit) BF.emit("arrowHitMob", m, dmg, a.crit);
           hitPlayer = true;
           break;
