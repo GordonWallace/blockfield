@@ -40,6 +40,7 @@ const FUNCS = [
   ["world.js", "ffTrack", "remesh batching stats (r15-02)"],
   ["world.js", "buildMesh", "chunk meshing: when a chunk was last drawn, mesh timing"],
   ["world.js", "pump", "mesh worker pool (r15-03): hands chunks to workers, timing stats"],
+  ["furnaceuse.js", "offersFor", "BF.debug.checkOffers timing of the offer table vs the full scan (r15-04, debug only; the answer returned doesn't depend on it)"],
 ];
 // Single lines in files that also hold simulation code: [file, text on the line, why it is allowed]
 const LINES = [
