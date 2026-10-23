@@ -24,7 +24,7 @@ const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i
 // On the planet animals and their herders may be kept in different frames near a face edge (js/mobs.js keepFrame): positions are compared
 // as seen from the animal (BF.planet.local), so offsets are true local ones across an edge.
 const LQ = {};
-const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
+const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
 
 // ---------------------------------------------------------------- walking
 // Sets out to walk m towards (tx, tz) at `speed`, facing it once within `stop`. Always true (the caller's AI handled this step).

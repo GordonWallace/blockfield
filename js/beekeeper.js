@@ -39,8 +39,8 @@ const BE = () => BF.bees;
 const W = () => BF.world;
 const I = n => BF.I[n];
 // the planet: q seen from p (its x / z in p's frame), so hives and nests (kept at canonical addresses) measure true against the beekeeper
-// and its jobsite (kept in the village's frame) across a face edge; q itself off the planet
-const seen = (p, q) => (BF.planet && BF.planet.isPlanet && BF.planet.isPlanet() ? BF.planet.local(p, q, {}) : q);
+// and its jobsite (kept in the village's frame) across a face edge
+const seen = (p, q) => BF.planet.local(p, q, {});
 const far = (p, q) => { const r = seen(p, q); return Math.hypot(r.x - p.x, r.z - p.z); };
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const cnt = (m, id) => (id == null || !m || !Array.isArray(m.inv) ? 0 : TR().inv.count(m.inv, id));
