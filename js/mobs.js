@@ -82,7 +82,6 @@ function gridKey(gx, gz, s) {
 // A mob kept in another face's frame (keepFrame) is in the margin, so it takes the canonical path.
 const GRID_EDGE = 48;   // nearestMob's 5 x 5 cells of 16 reach 40 blocks from the mob; separate's 3 x 3 cells of 2, 3
 function inSquare(x, z, d) {
-  if (!onPlanet()) return true;
   const P = BF.planet, N = P.N, W = P.W;
   if (!(x >= 0 && z >= 0)) return false;
   const f = Math.floor(x / W);
