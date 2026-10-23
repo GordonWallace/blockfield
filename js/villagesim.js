@@ -219,7 +219,8 @@ function forceStop(rec, why) {
     const acts = [], task = BF.villagerStatus ? BF.villagerStatus.text(m) : "", leisure = isLeisure(m);   // (before the jobs' stops below clear its task)
     if (m.tradingWith) { m.tradingWith = null; acts.push("cancelled the trade"); }
     if (m.profession === "merchant" && BF.merchant && BF.merchant.forceHome && BF.merchant.forceHome(m, why)) acts.push("went home with its cargo");
-    for (const j of JOBS()) { const a = j && j.forceStop && j.forceStop(m); if (a) acts.push(a); }
+    const stopJob = j => j && j.forceStop && (BF.furnaceUse ? BF.furnaceUse.direct(() => j.forceStop(m)) : j.forceStop(m));   // furnaces emptied at once: it is packed next (js/furnaceuse.js)
+    for (const j of JOBS()) { const a = stopJob(j); if (a) acts.push(a); }
     for (const o of led.get(m) || []) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
     const v = rec.wg;
     if (!acts.length && leisure) continue;                      // leisure ends quietly (endLeisure, when the village unloads)
