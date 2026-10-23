@@ -55,7 +55,7 @@ const WATER = [63, 118, 228];
 // Explorers sample the same columns over and over while they walk (r15-07): each chunk keeps the answers for its columns until a block
 // in that column changes (chunk.colVer, js/world.js), and the scan skips the all-air sections above the ground. columnScan is the old full scan,
 // kept for the decision comparison mode (js/decisioncompare.js).
-const CELL = {};
+const CELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function columnScan(c, lx, lz, skipAir) {
   const W = BF.world;
   for (let y = c.y1 - 1; y >= c.y0; y--) {

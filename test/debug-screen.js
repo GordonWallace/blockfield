@@ -71,7 +71,7 @@ const start = async () => {
   ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
   ok('meter on in the game while the screen is open', await game.evaluate(() => BF.perf.on));
   // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
-  // (the game works the hash out again every 10 s, so the screen can be a snapshot behind it: read both until they agree, for up to 15 s)
+  // (the game hashes again every 10 s and the screen shows it with the next snapshot: wait, up to 15 s, until both show the same one)
   let hs, gh;
   for (let i = 0; i < 30; i++) {
     hs = await dbg.evaluate(() => ({ hash: document.getElementById('c-hash').textContent, parts: document.querySelectorAll('#c-hashparts .row').length }));

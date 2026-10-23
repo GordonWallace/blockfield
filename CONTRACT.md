@@ -64,6 +64,15 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
   between the last two ticks with `alpha = BF.warp.alpha`: `sky.draw(alpha, dt)`, `mobs.draw(alpha)` (arrows), `drops.draw(alpha)`,
   `boats.draw(alpha)`, `mobView.render(dt)` (the mobs, js/mobview.js; bees in their mesh's onBeforeRender). Sim objects keep where they were before the tick (`m.prev`, `drop.prev`,
   `boat.prev`, `arrow.prev`, bee `px/py/pz`); js/mobview.js draws a mob at lerp(`m.prev`, `m`, alpha) (`BF.mobView.drawPos`).
+- Two-phase tick (spec r15-17, js/requests.js): each tick is think (everything above, then `world.onThink(fn)` hooks: villages,
+  their stats and economy, foresters), apply (`BF.req.apply()`: the tick's requests sorted by requester id, then sequence), block
+  ticks (`world.onBlockTick(fn)`: fluids, crops, farmland, grass, each in canonical cell order), deliver (results); `world.tickSim()`
+  runs the last four. Think code reads the start-of-tick world and asks for world changes with `BF.req.send(kind, target, data, from)`
+  -> req (`req.then(fn(result, req))`); `BF.req.on(kind, applyFn(req, world) -> {ok, ...}, {onResult(m, req, result)})` registers a kind.
+  Results arrive after apply, before the requester's next think; a removed requester's result is dropped. Requests sent during apply,
+  deliver or between ticks go to the next tick. Transition mode: direct `world.setBlock` outside apply and block ticks is counted per
+  module (`BF.req.stats().direct`); `BF.req.strict` makes one during think throw. Example kind `setBlock` (target "x,y,z", data
+  {id, expect?, drop?}). Don't wrap `world.tickSim` in new code: register a hook.
 - Event bus: `BF.on(name, fn)`, `BF.emit(name, ...args)`. Known events:
   `newWorld(seed)`, `blockBroken(x,y,z,blockId)`, `blockPlaced(x,y,z,blockId)`,
   `playerDamaged(amount)`, `playerDied()`, `playerRespawned()`, `mobKilled(mob)`.
