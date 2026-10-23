@@ -405,23 +405,47 @@ const sky = {
   // Light level (no weather) at time of day t; sky.light is this times the weather dimming.
   lightAt(t) { return lightOf(daynessAt(t)); },
 
+  // A simulation step of dt game seconds: the clock and the weather move on and sky.light is worked out, then the sky is drawn for
+  // that time. The game loop (main.js) splits the two (spec r15-10): advance(h) every tick, draw(alpha) every frame.
   update(dt) {
+    if (!scene) return;
+    sky.advance(dt);
+    paint(sky.time, sky.day, dt);
+  },
+  // The simulation side of a tick: time of day, cloud drift, weather (js/weather.js) and the light level the sim reads.
+  advance(dt) {
     if (!scene) return;
     if (dt > 0) {
       sky.time += dt / sky.dayLength;
       if (sky.time >= 1) { sky.time -= 1; sky.day++; }
       cloudDrift += dt * 1.2;
     }
-    const t = sky.time, a = t * Math.PI * 2;
-    const sh = Math.sin(a); // sun height, -1..1
-    const dayness = daynessAt(t);
-    const dusk = Math.exp(-(sh * sh) / 0.035); // peaks at sunrise / sunset
-    sky.light = lightOf(dayness);
-    // weather (js/weather.js): overcast greys the sky and dims light ~30% (rain) / ~60% (thunder); lightning flashes
+    // weather: overcast greys the sky and dims light ~30% (rain) / ~60% (thunder); lightning flashes brighten it
     const W = BF.weather;
     if (W && W.update) W.update(dt);
     const wr = W ? W.intensity || 0 : 0, wt = W ? W.thunder || 0 : 0, wf = W ? W.flash || 0 : 0;
-    sky.light *= 1 - 0.3 * wr - 0.3 * wt;
+    sky.light = Math.min(1.35, lightOf(daynessAt(sky.time)) * (1 - 0.3 * wr - 0.3 * wt) + wf * 0.85);   // a lightning flash brightens terrain briefly
+  },
+  // Every frame: the sky drawn at the game time between the last two ticks (alpha 0..1 of the way from the previous tick to the
+  // latest), so a 60 fps day / night doesn't step at the 20 ticks a second. dt: the game seconds drawn since the last frame (clouds).
+  draw(alpha, dt) {
+    if (!scene) return;
+    const back = (1 - Math.max(0, Math.min(1, alpha))) * (BF.warp ? BF.warp.TICK : 0) / sky.dayLength;
+    let t = sky.time - back, d = sky.day;
+    if (t < 0) { t += 1; d--; }
+    paint(t, d, dt || 0);
+  },
+};
+
+// Draws the sky for time of day t on day `day` (colours, sun, moon, stars, fog, clouds). Reads the weather and sky.light as the
+// latest tick left them; changes nothing the simulation reads.
+function paint(t, day, dt) {
+    const a = t * Math.PI * 2;
+    const sh = Math.sin(a); // sun height, -1..1
+    const dayness = daynessAt(t);
+    const dusk = Math.exp(-(sh * sh) / 0.035); // peaks at sunrise / sunset
+    const W = BF.weather;
+    const wr = W ? W.intensity || 0 : 0, wt = W ? W.thunder || 0 : 0, wf = W ? W.flash || 0 : 0;
 
     // colours
     zenith.copy(NIGHT_TOP).lerp(DAY_TOP, dayness);
@@ -464,7 +488,6 @@ const sky = {
     }
     scene.fog.near = d * 0.5 * (1 - 0.45 * wr - 0.15 * wt) + above; scene.fog.far = d * 0.95 * (1 - 0.25 * wr - 0.1 * wt) + above;
     if (cam && cam.far < scene.fog.far + 64) { cam.far = scene.fog.far + 64; cam.updateProjectionMatrix(); }
-    sky.light = Math.min(1.35, sky.light + wf * 0.85); // lightning flash brightens terrain briefly
     if (BF.player && BF.player.headInWater) {
       // dense blue fog when the camera is underwater
       scene.fog.color.setRGB(0.08, 0.2, 0.42).multiplyScalar(0.4 + 0.6 * sky.light);
@@ -486,7 +509,7 @@ const sky = {
     updateCloudBase(dt);
     // Cover: clear spells to scattered to broken over a day or two; rain forces overcast. Height: base + a rise
     // (never below the base) that is mostly small and sometimes large, and rain pulls the cloud deck back down.
-    const T = sky.day + sky.time, cs = ((BF.state && BF.state.seed) | 0);
+    const T = day + t, cs = ((BF.state && BF.state.seed) | 0);
     const wanted = smooth(0.5, 0.88, vnoise(T / 1.4, cs));               // 0 = clear sky
     const cover = wanted + (1 - wanted) * wr;
     const rise = smooth(0.4, 0.9, vnoise(T / 2.1 + 31.7, cs + 1)) * CLOUD_RISE * (1 - 0.8 * wr);
@@ -504,8 +527,7 @@ const sky = {
     cu.color.value.copy(cloudCol);
     cu.fogCol.value.copy(horizon);
     cu.under.value = cam.position.y < cloudY ? 1 : 0;
-  },
-};
+}
 
 BF.sky = sky;
 })();

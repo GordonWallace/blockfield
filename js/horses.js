@@ -355,6 +355,7 @@ function spawnHerdAt(x, z) {
 // ---------------------------------------------------------------- lead lines
 const leadLines = new Map();   // hid -> THREE.Line
 let leadMat = null;
+const drawnAt = m => (m.root ? m.root.position : m.position);
 function drawLeads() {
   const scene = BF.scene || (BF.world && BF.world.scene);
   for (const [hid, line] of leadLines) { const r = recs.get(hid); if (!r || !r.lead || !r.mob || !live(r.mob)) { if (line.parent) line.parent.remove(line); leadLines.delete(hid); } }
@@ -373,11 +374,11 @@ function drawLeads() {
       root.add(line);
       leadLines.set(r.hid, line);
     }
-    const fw = [Math.sin(m.yaw), Math.cos(m.yaw)], s = m._k || 1;
-    const a = [m.position.x + fw[0] * 1.0 * s, m.position.y + 1.45 * s, m.position.z + fw[1] * 1.0 * s];
+    const fw = [Math.sin(m.yaw), Math.cos(m.yaw)], s = m._k || 1, mp = drawnAt(m);   // where the horse is drawn this frame (between ticks, spec r15-10)
+    const a = [mp.x + fw[0] * 1.0 * s, mp.y + 1.45 * s, mp.z + fw[1] * 1.0 * s];
     let b;
     if (r.lead.kind === "player") { const e = P.eyePos(), d = P.lookDir(); b = [e.x + d.x * 0.4 - d.z * 0.3, e.y - 0.5, e.z + d.z * 0.4 + d.x * 0.3]; }
-    else if (r.lead.kind === "mob") { const h = r.lead.mob; b = [h.position.x, h.position.y + 1.0, h.position.z]; }
+    else if (r.lead.kind === "mob") { const h = drawnAt(r.lead.mob); b = [h.x, h.y + 1.0, h.z]; }
     else b = [r.lead.x + 0.5, r.lead.y + 0.75, r.lead.z + 0.5];
     const arr = line.geometry.attributes.position.array;
     const sag = Math.max(0, 1.2 - Math.hypot(a[0] - b[0], a[2] - b[2]) * 0.2);

@@ -1,6 +1,6 @@
 // Mobs: blocky Minecraft-style animals and monsters built from boxes with baked per-pixel vertex colours.
 // Passive: pig, cow, sheep, chicken. Hostile: zombie, skeleton, creeper, spider.
-// API (CONTRACT.md): BF.mobs = { list, init, update, raycast, hit, clear } plus spawn(type, x, y, z) for debugging.
+// API (CONTRACT.md): BF.mobs = { list, init, update, draw, raycast, hit, clear } plus spawn(type, x, y, z) for debugging.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -729,7 +729,7 @@ function createMob(type, x, y, z, variant, style) {
     type, hostile: T.hostile, def: T, variant: T.variants ? variant : null, profession: T.variants ? variant : undefined,
     style: T.variants ? VILLAGE_STYLES[style] : undefined, tradingWith: null, level: T.variants ? 1 : undefined, badge: null, badgeLevel: 0,
     village: null, home: null, tradeCd: 0,
-    position: root.position, vel: new THREE.Vector3(),
+    position: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), prev: null,   // the sim's position; root.position is where it is drawn (drawMob)
     hp: T.hp, maxHp: T.hp, halfWidth: T.hw, height: T.h,
     root, model, meshes, material: mat,
     yaw, headYaw: 0, headPitch: 0, lookAt: null,
@@ -741,6 +741,7 @@ function createMob(type, x, y, z, variant, style) {
     age: 0, fire: null,
   };
   if (type === "villager" && BF.trades) BF.trades.init(mob); // level, offers, inventory with starting stock
+  keepPrev(mob);
   list.push(mob);
   return mob;
 }
@@ -904,7 +905,7 @@ function shootArrow(m, target, victim) {
   const mesh = new THREE.Mesh(arrowGeo, arrowMat);
   mesh.position.copy(from);
   scene.add(mesh);
-  arrows.push({ mesh, pos: mesh.position, vel: dir.multiplyScalar(speed), life: 6, stuck: false, owner: m, victim: victim || null });
+  arrows.push({ mesh, pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), life: 6, stuck: false, owner: m, victim: victim || null });
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
@@ -918,7 +919,7 @@ function shootPlayerArrow(from, vel, o) {
   const mesh = new THREE.Mesh(arrowGeo, arrowMat);
   mesh.position.copy(from);
   scene.add(mesh);
-  const a = { mesh, pos: mesh.position, vel: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
+  const a = { mesh, pos: from.clone(), prev: from.clone(), vel: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
     byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
   _look.copy(a.pos).add(a.vel); mesh.lookAt(_look);
   arrows.push(a);
@@ -953,6 +954,7 @@ function updateArrows(dt) {
   const p = playerAlive() ? player() : null;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
+    a.prev.copy(a.pos);   // drawn between this and where the tick leaves it (drawArrows)
     a.life -= dt;
     if (a.life <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
     if (a.byPlayer && playerArrowStep(a, p)) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
@@ -1010,7 +1012,14 @@ function updateArrows(dt) {
       }
     }
     if (hitPlayer) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
-    if (!a.stuck) { _look.copy(a.pos).add(a.vel); a.mesh.lookAt(_look); }
+  }
+}
+// Every frame (spec r15-10): an arrow is drawn between where the last two ticks left it, pointing along its flight.
+function drawArrows(k) {
+  for (const a of arrows) {
+    if (a.stuck || a.prev.distanceToSquared(a.pos) > 64) a.mesh.position.copy(a.pos);   // (or it crossed a face edge this tick)
+    else a.mesh.position.lerpVectors(a.prev, a.pos, k);
+    if (!a.stuck) { _look.copy(a.mesh.position).add(a.vel); a.mesh.lookAt(_look); }
   }
 }
 
@@ -1927,6 +1936,34 @@ function updateMob(m, dt) {
   }
 }
 
+// ---------- drawing between ticks (spec r15-10) ----------
+// The sim moves a mob once per 0.05 s tick. At the start of each tick keepPrev stores where it was (position, facing, head, walk
+// cycle); every frame drawMob draws it at lerp(prev, cur, alpha), alpha being how far the frame is into the next tick
+// (BF.warp.alpha), so motion stays smooth at 60 fps or more. The sim never reads root.position: that is only where it's drawn.
+// (r15-11's render layer is meant to take this over, reading the same prev fields.)
+function keepPrev(m) {
+  const q = m.prev || (m.prev = { x: 0, y: 0, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 0, age: 0 });
+  q.x = m.position.x; q.y = m.position.y; q.z = m.position.z;
+  q.yaw = m.yaw; q.headYaw = m.headYaw; q.headPitch = m.headPitch; q.walkPhase = m.walkPhase; q.walkAmt = m.walkAmt; q.age = m.age;
+}
+const SNAP2 = 16;   // moved more than 4 blocks in a tick (a teleport, or kept in another face's frame now): drawn where it is
+function drawMob(m, k) {
+  const p = m.position, q = m.prev;
+  // ridden (js/horses.js) or in the player's boat: moved every real-time frame with the player, so drawn where it is
+  if (!q || m.rider || (m.riding && m.riding.rider) || (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > SNAP2) k = 1;
+  const j = 1 - k;
+  m.root.position.set(q && k < 1 ? q.x * j + p.x * k : p.x, q && k < 1 ? q.y * j + p.y * k : p.y, q && k < 1 ? q.z * j + p.z * k : p.z);
+  if (!m.root.visible || m.dead || m.removed) return;
+  if (k >= 1) { m.model.rotation.y = m.yaw; if (!m.sleeping) animate(m); return; }
+  m.model.rotation.y = q.yaw + wrapAngle(m.yaw - q.yaw) * k;
+  if (m.sleeping) return;   // lying in bed: the pose stays as sleepPose set it
+  // the limbs and head at the in-between pose: the cur values swapped out for the drawing, then put back
+  const hy = m.headYaw, hp = m.headPitch, wp = m.walkPhase, wa = m.walkAmt, ag = m.age;
+  m.headYaw = q.headYaw * j + hy * k; m.headPitch = q.headPitch * j + hp * k;
+  m.walkPhase = q.walkPhase * j + wp * k; m.walkAmt = q.walkAmt * j + wa * k; m.age = q.age * j + ag * k;
+  try { animate(m); } finally { m.headYaw = hy; m.headPitch = hp; m.walkPhase = wp; m.walkAmt = wa; m.age = ag; }
+}
+
 // Villager level badge on the belt (level >= 2): iron, gold, emerald, diamond.
 const BADGE_COLORS = [null, null, 0xd8d8d8, 0xf2d64b, 0x2fd06a, 0x5ddfe0];
 const badgeMats = [];
@@ -2691,6 +2728,7 @@ BF.mobs = {
     // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
+    for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (drawMob)
     for (const m of list.slice()) {
       if (m.removed) continue;
       let h = dt;
@@ -2728,6 +2766,16 @@ BF.mobs = {
     aiTick(dt);
     if (BF.mobSave) BF.mobSave.update(dt);
   },
+  // Every frame (main.js, spec r15-10): mobs and arrows drawn at lerp(prev, cur, alpha), alpha = BF.warp.alpha (0 = the previous
+  // tick, 1 = the latest).
+  draw(alpha) {
+    if (!scene) return;
+    const k = Math.max(0, Math.min(1, alpha));
+    for (const m of list) { try { drawMob(m, k); } catch (e) { console.error(e); } }
+    drawArrows(k);
+  },
+  // Where a mob is drawn this frame (tests, r15-10): its model's position, between m.prev and m.position.
+  drawnAt(m) { return m && m.root ? m.root.position : null; },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
   raycast(origin, dir, maxDist, skip) {
     let best = null;

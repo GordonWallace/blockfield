@@ -427,6 +427,8 @@ let acc = 0, lureT = 0, lp = [];
 function update(dt) {
   if (!(dt > 0) || !W() || NEST == null && (ids(), NEST == null)) return;
   hook();
+  for (const b of bees) { b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (draw)
+  dirty = true;
   acc += dt;
   if (acc >= 1) { acc = 0; housekeeping(); }
   release(dt);
@@ -626,19 +628,24 @@ function initMesh() {
 }
 const _m = typeof THREE !== "undefined" ? new THREE.Matrix4() : null;
 const _r = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _u = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _f = typeof THREE !== "undefined" ? new THREE.Vector3() : null;
-const DQ = {}, DV = [0, 0];
+const DQ = {}, DV = [0, 0], BP = { x: 0, y: 0, z: 0 };
+let drawnK = -1;
+// Bees are drawn between where the last two ticks left them (spec r15-10): k = BF.warp.alpha, 0 the previous tick, 1 the latest.
 function draw() {
-  uTime.value = simNow();
+  const Wp = BF.warp, k = Wp && Wp.alpha != null ? Wp.alpha : 1, j = 1 - k;
+  uTime.value = Wp && Wp.renderNow ? Wp.renderNow() : simNow();
   const light = BF.sky && typeof BF.sky.light === "number" ? Math.max(0.3, Math.min(1, BF.sky.light)) : 1;
   mesh.material.color.setRGB(light, light, light);
-  if (!dirty) return;
-  dirty = false;
+  if (!dirty && k === drawnK) return;
+  dirty = false; drawnK = k;
   const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee"), pl = onPlanet();
   for (let i = 0; i < n; i++) {
     const b = bees[i], s = b.mode === "land" && b.land ? b.land : null;
+    const lerp = b.px != null && (b.x - b.px) ** 2 + (b.y - b.py) ** 2 + (b.z - b.pz) ** 2 < 16;   // (a jump: a face edge, a new frame)
+    BP.x = lerp ? b.px * j + b.x * k : b.x; BP.y = lerp ? b.py * j + b.y * k : b.y; BP.z = lerp ? b.pz * j + b.z * k : b.z;
     // the planet: the bee seen from the mesh (in the player's frame), its directions turned with it
-    let bx = b.x, bz = b.z, q = 0;
-    if (pl) { const r = BF.planet.local(mesh.position, b, DQ); bx = r.x; bz = r.z; q = r.turn; }
+    let bx = BP.x, bz = BP.z, q = 0;
+    if (pl) { const r = BF.planet.local(mesh.position, BP, DQ); bx = r.x; bz = r.z; q = r.turn; }
     if (s) {   // landed: belly on the surface, back along its normal
       let nx = s.nx, nz = s.nz;
       if (q) { BF.planet.turnVec(q, nx, nz, DV); nx = DV[0]; nz = DV[1]; }
@@ -646,13 +653,13 @@ function draw() {
       if (s.ny > 0.5) _f.set(Math.sin(b.landYaw), 0, Math.cos(b.landYaw));
       else { const a = (b.landYaw % 1.2) - 0.6; _f.set(Math.sin(a) * nz, Math.cos(a), -Math.sin(a) * nx); }   // on a wall: head up, a little askew
       _r.crossVectors(_u, _f).normalize(); _f.crossVectors(_r, _u).normalize();
-      _m.makeBasis(_r, _u, _f).setPosition(bx + nx * 0.045 - mesh.position.x, b.y + s.ny * 0.045, bz + nz * 0.045 - mesh.position.z);
+      _m.makeBasis(_r, _u, _f).setPosition(bx + nx * 0.045 - mesh.position.x, BP.y + s.ny * 0.045, bz + nz * 0.045 - mesh.position.z);
     } else {
-      let yaw = b.yaw;
+      let yaw = lerp && b.pyaw != null ? b.pyaw + Math.atan2(Math.sin(b.yaw - b.pyaw), Math.cos(b.yaw - b.pyaw)) * k : b.yaw;
       if (q) { BF.planet.turnVec(q, Math.sin(yaw), Math.cos(yaw), DV); yaw = Math.atan2(DV[0], DV[1]); }
       const c = Math.cos(yaw), sn = Math.sin(yaw);
       _f.set(sn, 0, c); _u.set(0, 1, 0); _r.set(c, 0, -sn);
-      _m.makeBasis(_r, _u, _f).setPosition(bx - mesh.position.x, b.y, bz - mesh.position.z);
+      _m.makeBasis(_r, _u, _f).setPosition(bx - mesh.position.x, BP.y, bz - mesh.position.z);
     }
     mesh.setMatrixAt(i, _m);
     A.setXY(i, b.phase, s ? 0 : 1);
