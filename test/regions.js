@@ -6,6 +6,7 @@
 //   index: 1,000 simulation steps at the village nearest the spawn (villagers, golems, animals wandering), then a chest, a furnace and
 //     a sign placed and broken, a drop made and removed, and a village's mobs unloaded; the self-check (BF.regions.check) finds no
 //     differences after each;
+//   queries: mobsAround (r15-31 / r15-32) agrees with a full scan of BF.mobs.list, in its order, with mobs moved since the last sync;
 //   cost: 2,000 objects walking about cost under 0.1 ms a step in the index (measured, printed), and the real index step is printed.
 // Usage: NODE_PATH=$(npm root -g) node test/regions.js [seed=3] [steps=1000]
 const path = require('path');
@@ -130,6 +131,42 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(run.counts.mobs > 20 && run.moves > 0, `mobs were indexed and moved between regions (${run.counts.mobs} mobs, ${run.moves} moves)`);
   check(run.ids, 'a region lists its mobs by their ids (r15-13), each resolving to the mob');
   check(run.counts.villages >= 1, `the running village is indexed (${run.counts.villages})`);
+
+  // ---------------------------------------------------------------- queries (mobsAround, the r15-31 / r15-32 helper)
+  const q = await pg.evaluate(() => {
+    const R = BF.regions, out = {};
+    R.verifyQueries = true; R.resetQueryStats();
+    let n = 0, found = 0;
+    for (let i = 0; i < 200; i++) {   // queries mid-step too (after the mobs moved, before the index's sync): here between steps and inside
+      window.__step(0.05);
+      const L = BF.mobs.list.filter(m => !m.removed);
+      for (let j = 0; j < L.length; j += 7) { const m = L[j]; found += R.mobsAround(m.position.x, m.position.z, 4 + (j % 5) * 12).length; n++; }
+      for (const m of L) m.position.x += 0.3;   // as if they had walked part of a step since the last sync
+      for (let j = 3; j < L.length; j += 11) { const m = L[j]; R.mobsAround(m.position.x, m.position.z, 24, o => o.type === 'villager'); n++; }
+      for (let j = 5; j < L.length; j += 13) { const m = L[j]; R.mobsAround(m.position.x, m.position.z, 30, null, { local: true }); n++; }
+      for (const m of L) m.position.x -= 0.3;
+    }
+    const st = R.queryStats();
+    out.n = n; out.found = found; out.diffs = st.diffs; out.last = st.last; out.checked = st.checked;
+    // list order: what a full scan would find, in the same order
+    const p = BF.player.position, a = R.mobsAround(p.x, p.z, 200), L = BF.mobs.list;
+    out.order = a.length > 1 && a.every((m, i) => !i || L.indexOf(a[i - 1]) < L.indexOf(m));
+    // through a face edge: mobs put just past an edge of the village's face, a local query from this side finds them, a raw one doesn't
+    { const P = BF.planet, f = P.face(p.x, p.z), N = P.N, a = P.atlas(f, N - 2, N / 2), b = P.atlas(f, N + 2, N / 2), c = P.canon(b.x, b.z, {});
+      const ms = BF.mobs.list.filter(m => !m.removed && m.type !== 'villager').slice(0, 2), old = ms.map(m => m.position.clone());
+      for (const m of ms) { m.position.x = c.x; m.position.z = c.z; }
+      R.tick();
+      const lo = R.mobsAround(a.x, a.z, 6, null, { local: true }), raw = R.mobsAround(a.x, a.z, 6);
+      out.edge = ms.length === 2 && ms.every(m => lo.includes(m)) && !ms.some(m => raw.includes(m));
+      ms.forEach((m, i) => m.position.copy(old[i])); R.tick(); }
+    out.wrong = R.checkQuery('test', [], [L[0]]) === false && R.queryStats().diffs === st.diffs + 1;
+    R.verifyQueries = false; R.resetQueryStats();
+    return out;
+  });
+  check(q.diffs === 0 && q.checked === q.n, `mobsAround agrees with a full scan in ${q.n} queries over 200 steps (${q.found} mobs found)` + (q.last ? ' ' + JSON.stringify(q.last) : ''));
+  check(q.order, 'mobsAround lists mobs in BF.mobs.list order');
+  check(q.edge, 'mobsAround with local: true finds mobs just across a face edge (raw distance does not)');
+  check(q.wrong, 'checkQuery reports a difference');
 
   const ev = await pg.evaluate(() => {
     const R = BF.regions, W = BF.world, p = BF.player.position, out = {};
