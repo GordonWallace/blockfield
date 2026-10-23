@@ -748,6 +748,8 @@ world.update = function (px, pz, budgetMs = 8) {
   remeshDirty(pcx, pcz, ffBatch);
   ffTrack(ffBatch);
 
+  // a real-time budget (spec r15-16 allows it): it decides what is drawn and when chunk data arrives, never what villagers do, since they
+  // and their jobs wait for unloaded chunks (js/villagesim.js)
   const t0 = performance.now();
   let gi = 0, mi = 0;
   while (performance.now() - t0 < budgetMs) {
@@ -1302,7 +1304,7 @@ function growTick() {
     if (soil !== BF.B.farmland && soil !== BF.B.farmland_dry) continue;
     const f = soil === BF.B.farmland_dry ? (BF.farmland ? BF.farmland.growFactor(soil) : 1 / 3) : 1;
     // crops grow 1.5x faster while it rains (js/weather.js), 1.25x by day near a home with bees (js/bees.js)
-    if (Math.random() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1) * (BF.bees ? BF.bees.cropFactor(x, y, z) : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
+    if (BF.rand.at("grow", x, z, null, y).next() < GROW_CHANCE_PER_S * dt * f * (BF.weather && BF.weather.raining ? 1.5 : 1) * (BF.bees ? BF.bees.cropFactor(x, y, z) : 1)) { growing.delete(k); world.setBlock(x, y, z, b.growsInto); }
   }
 }
 // Sugar cane (blocks with growsUp: their tallest height) grows a block on top, at the crop rate, while the column is shorter than that and its
@@ -1317,7 +1319,7 @@ function caneTick(x, y, z, id, b, dt) {
   const g = BF.blocks[world.getBlock(x, by, z)], gn = g ? g.name : "";
   if (!/^(grass|dirt|coarse_dirt|podzol|sand|red_sand|snow_grass)$/.test(gn)) return true;
   if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[world.getBlock(x + dx, by, z + dz)])) return true;
-  if (Math.random() < GROW_CHANCE_PER_S * dt * (BF.weather && BF.weather.raining ? 1.5 : 1)) { world.setBlock(x, y + 1, z, id); return true; }
+  if (BF.rand.at("cane", x, z, null, y).next() < GROW_CHANCE_PER_S * dt * (BF.weather && BF.weather.raining ? 1.5 : 1)) { world.setBlock(x, y + 1, z, id); return true; }
   return false;
 }
 world.growingCount = () => growing.size;
