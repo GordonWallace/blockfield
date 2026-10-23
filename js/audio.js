@@ -668,12 +668,11 @@ function applyVolumes(G) {
 // ---------- voices ----------
 const listener = { x: 0, y: 0, z: 0, rx: 1, rz: 0 };
 // A point's x / z in the listener's face frame (RX, RZ): on the planet a sound on the next face is canonical there, far away in
-// atlas x / z, and BF.planet.rel unfolds it beside the listener. False when it isn't near (the opposite face). Off the planet: itself.
+// atlas x / z, and BF.planet.rel unfolds it beside the listener. False when it isn't near (the opposite face).
 let RX = 0, RZ = 0;
 const relOut = {}, relB = { x: 0, z: 0 };
 function relXZ(x, z) {
   const P = BF.planet;
-  if (!P || !P.isPlanet()) { RX = x; RZ = z; return true; }
   relB.x = x; relB.z = z;
   const r = P.rel(listener, relB, relOut);
   if (!r) return false;
@@ -997,7 +996,7 @@ function updateEnv(dt) {
     if (k === 1) rain = Wx.intensity || 0; else if (k === 2) snow = Wx.intensity || 0;
   }
   // wind: stronger high up and in the open, a gust random walk drives the cut-off
-  const base = BF.H > 192 && BF.sky && BF.sky.cloudBase != null ? BF.sky.cloudBase - 80 : (BF.SEA || 48);   // mile-high worlds: relative to the regional ground
+  const base = BF.sky && BF.sky.cloudBase != null ? BF.sky.cloudBase - 80 : BF.SEA;   // relative to the regional ground
   const alt = clamp((p.y + 1.6 - base - 6) / 55, 0, 1);
   let wind = (0.1 + 0.9 * alt) * (0.25 + 0.75 * env.open) * (env.covered ? 0.35 : 1) * (1 + 0.8 * Math.max(rain, snow));
   if (env.under) wind *= 0.15;

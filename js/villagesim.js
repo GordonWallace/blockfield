@@ -26,21 +26,21 @@ const pending = new Map();       // village key -> { away, todo: Set(chunk keys)
 const keepKeys = new Set();
 const MAX_PINS = 2;              // trips on the road at once, world-wide
 const pins = new Map();          // trip id -> { a, b (worldgen villages), keys: [corridor chunk keys] }
-let t = 0, lastT = 0, pinDirty = false;
+let t = 0, pinDirty = false;
 
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
 // The planet (spec r14-15): villages are canonical records, and villagers are kept in their village's frame even past a face edge (js/mobs.js
 // frames), so a point is first seen from the village (BF.planet.local) before it is measured against the village's box; distances between
-// two places use BF.planet.distance; chunk keys are always canonical (canonKey). All of these are the identity off the planet.
+// two places use BF.planet.distance; chunk keys are always canonical (canonKey).
 const PL = () => BF.planet;
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
 const LQ = {}, CQ = {};
 function canonKey(x, z) {
   const CS = BF.CS;
-  if (onPlanet()) { const c = PL().canonCell(Math.floor(x), Math.floor(z), CQ); if (!c.off) { x = c.x; z = c.z; } }
+  const c = PL().canonCell(Math.floor(x), Math.floor(z), CQ);
+  if (!c.off) { x = c.x; z = c.z; }
   return Math.floor(x / CS) + "," + Math.floor(z / CS);
 }
-const pdist = (a, b) => onPlanet() ? PL().distance(a, b) : Math.hypot(b.x - a.x, b.z - a.z);
+const pdist = (a, b) => PL().distance(a, b);
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 
 function footprint(v) {
@@ -89,21 +89,10 @@ function rebuild() {
   for (const p of pins.values()) for (const k of p.keys) keepKeys.add(k);
   for (const k of winKeys) keepKeys.add(k);
 }
-// The chunks a walk from village a to village b crosses, plus one chunk either side.
-function corridor(a, b) {
-  const CS = BF.CS, out = new Set();
-  if (onPlanet()) return corridorP(a, b);
-  const d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(d / 4));
-  for (let i = 0; i <= n; i++) {
-    const cx = Math.floor((a.x + (b.x - a.x) * i / n) / CS), cz = Math.floor((a.z + (b.z - a.z) * i / n) / CS);
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) out.add((cx + dx) + "," + (cz + dz));
-  }
-  return [...out];
-}
-// The planet: walk from a toward b in 4-block steps (BF.planet.toward: straight through an edge's unfold when close, along the great circle
+// The chunks a walk from village a to village b crosses, plus one chunk either side: walk from a toward b in 4-block steps (BF.planet.toward: straight through an edge's unfold when close, along the great circle
 // when far), keeping the walker on its canonical square, and add each step's chunk and the chunks either side in the walker's frame, mapped
 // to their canonical keys.
-function corridorP(a, b) {
+function corridor(a, b) {
   const P = PL(), CS = BF.CS, out = new Set(), p = { x: a.x, z: a.z }, t = {}, c = {};
   for (let i = 0; i < 100000; i++) {
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) out.add(canonKey(p.x + dx * CS, p.z + dz * CS));
@@ -120,16 +109,16 @@ function corridorP(a, b) {
 function pin(id, a, b, keys) {
   if (!pins.has(id) && pins.size >= MAX_PINS) return false;
   pins.set(id, { a, b, keys: keys || corridor(a, b) });
-  pinDirty = true; lastT = 0;
+  pinDirty = true;
   return true;
 }
-function unpin(id) { if (pins.delete(id)) { pinDirty = true; lastT = 0; } }
+function unpin(id) { if (pins.delete(id)) { pinDirty = true; } }
 const pinnedKeys = () => { const s = new Set(); for (const p of pins.values()) { s.add(vKey(p.a)); s.add(vKey(p.b)); } return s; };
 
 // Distance from a point to the village's edge (its bounds), 0 inside.
-// (The planet: the point is seen from the village first, so a player or villager just across a face edge measures true.)
+// (The point is seen from the village first, so a player or villager just across a face edge measures true.)
 function edgeDist(v, px, pz) {
-  if (onPlanet()) { LQ.x = px; LQ.z = pz; PL().local(v, LQ, LQ); px = LQ.x; pz = LQ.z; }
+  LQ.x = px; LQ.z = pz; PL().local(v, LQ, LQ); px = LQ.x; pz = LQ.z;
   return Math.hypot(Math.max(0, v.minX - px, px - v.maxX), Math.max(0, v.minZ - pz, pz - v.maxZ));
 }
 
@@ -213,7 +202,9 @@ function countdown(key) {
 }
 
 // ---- force unload: when the game would bog down, villages are stopped even with tasks running (each one logged as an error)
-const LIMITS = { chunks: 1500, aiMs: 6, villages: 10 };
+// aiWork: villager AI updates per game step (averaged over about 5 game seconds; BF.mobs.aiWork), a count rather than milliseconds so the
+// same villages stop on a fast machine and a slow one (spec r15-16). 300 updates is about 6 ms of thinking at ~20 us an update.
+const LIMITS = { chunks: 1500, aiWork: 300, villages: 10 };
 let aiCoolUntil = 0;
 const JOBS = () => [BF.toolsmith, BF.eggCook, BF.baker, BF.glassmaker, BF.beekeeper, BF.pigFarmer];
 // Stops what the village's villagers are doing so that it can unload: merchants go home with their cargo, furnace and oven workers empty
@@ -276,13 +267,12 @@ function heldChunks(next) {
 function overLimit(next, now) {
   if (next.size > LIMITS.villages) return "village count";
   if (heldChunks(next) > LIMITS.chunks) return "held chunks";
-  if (now >= aiCoolUntil && BF.mobs.aiTime && BF.mobs.aiTime() > LIMITS.aiMs) return "AI time";
+  if (now >= aiCoolUntil && BF.mobs.aiWork && BF.mobs.aiWork() > LIMITS.aiWork) return "AI time";
   return null;
 }
 
 // ---- chunks kept around villagers outside their village
 const winKeys = new Set();
-let winT = 0;
 function windows() {
   const CS = BF.CS, next = new Set(), L = BF.mobs && BF.mobs.list;
   if (L) for (const m of L) {
@@ -303,13 +293,34 @@ function windows() {
   return true;
 }
 
-// Called from world.update every frame; cheap (re-evaluates about every 1.5 s). Returns true when the kept set changed.
+// The clock (spec r15-16): the set is re-checked on the simulation clock, from the game step (step(), hooked into world.tickSim), so countdowns
+// end and limits act on the same game moments on any machine and at any speed. world.update calls update() every frame with the player's
+// position, which step() then uses; only while the world doesn't step (0x or paused) does that frame call re-check on real time itself, so
+// walking up to a village at 0x still loads it. Nothing in the simulation moves meanwhile, so that can't change what happens.
+// Chunk data for the kept set is generated by world.update within its frame budget (real time), but that only decides when chunks arrive:
+// villagers and their jobs never act on an unloaded chunk (they wait, or their village waits for them, js/mobs.js isLoaded checks).
+let focusX = null, focusZ = null, stepChanged = false;
+const simClock = { win: -1e9, last: -1e9 }, realClock = { win: -1e9, last: -1e9 };
+const stepping = () => !(BF.warp && BF.warp.frozen) && !(BF.state && BF.state.paused);
+// Called from world.update every frame. Returns true when the kept set changed (here, or in a step since the last call).
 function update(px, pz) {
-  const now = performance.now() / 1000;
+  focusX = px; focusZ = pz;
+  let changed = stepChanged;
+  stepChanged = false;
+  // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see)
+  if ((!stepping() || pinDirty) && check(px, pz, realClock, performance.now() / 1000)) changed = true;
+  return changed;
+}
+// Called every game step (world.tickSim); cheap (re-evaluates every 1.5 game seconds, the villager windows every 0.5).
+function step() {
+  if (focusX == null) return;
+  if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
+}
+function check(px, pz, clk, now) {
   let winChanged = false;
-  if (now - winT >= 0.5) { winT = now; winChanged = windows(); }
-  if (now - lastT < 1.5 && !pinDirty) { if (winChanged) rebuild(); return winChanged; }
-  lastT = now;
+  if (now - clk.win >= 0.5 || now < clk.win) { clk.win = now; winChanged = windows(); }   // (the clock restarts with a new world)
+  if (now - clk.last < 1.5 && now >= clk.last && !pinDirty) { if (winChanged) rebuild(); return winChanged; }
+  clk.last = now;
   const pinChange = pinDirty;
   pinDirty = false;
   const wg = BF.worldgen;
@@ -356,12 +367,12 @@ function update(px, pz) {
   }
   // over a limit: stop villages in priority order until it is fine (never one within ALWAYS of the player)
   for (let guard = 0; guard < 16; guard++) {
-    const why = overLimit(next, now);
+    const why = overLimit(next, BF.simNow());
     if (!why) break;
     const k = victim(next, px, pz);
     if (k == null) break;
     const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(k);
-    if (why === "AI time") aiCoolUntil = now + 5;
+    if (why === "AI time") aiCoolUntil = BF.simNow() + 5;
     if (rec) forceStop(rec, why);
     forceTrips(k, why);
     ending.delete(k);
@@ -457,7 +468,11 @@ BF.villageSim = {
       }
     }
   },
-  reset() { winT = 0; active.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); lastT = 0; pinDirty = false; },
-  init() { BF.world.onChunkLoad(onChunkLoad); },
+  reset() { simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
+  init() {
+    BF.world.onChunkLoad(onChunkLoad);
+    const W = BF.world, prev = W.tickSim;
+    W.tickSim = () => { prev(); step(); };   // re-checks on the game clock (update)
+  },
 };
 })();

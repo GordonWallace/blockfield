@@ -24,8 +24,9 @@ const LEAD_SLACK = 3, LEAD_BREAK = 12, POST_R = 3.5;
 const GRAV = 32;
 const live = o => !!(o && !o.dead && !o.removed);
 const now = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
-const rnd = (a, b) => a + Math.random() * (b - a);
-const irnd = (a, b) => Math.floor(rnd(a, b + 1));
+const R = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const irnd = (r, a, b) => a + r.int(b - a + 1);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---------------------------------------------------------------- recipes
@@ -63,15 +64,15 @@ if (BF.texKit) {   // item sprites
 // jump strength 0.4 + 3 x rand(0.2), height = -0.1817 j^3 + 3.689 j^2 + 2.128 j - 0.343.
 const jumpHeight = j => -0.1817 * j * j * j + 3.689 * j * j + 2.128 * j - 0.343;
 const SPEED_MIN = 0.1125 * 42.16, SPEED_MAX = 0.3375 * 42.16, JUMP_MIN = jumpHeight(0.4), JUMP_MAX = jumpHeight(1.0), HP_MIN = 15, HP_MAX = 30;
-function rollStats() {
-  const hp = 15 + irnd(0, 7) + irnd(0, 8);
-  const speed = (0.45 + Math.random() * 0.3 + Math.random() * 0.3 + Math.random() * 0.3) * 0.25 * 42.16;
-  const jump = jumpHeight(0.4 + Math.random() * 0.2 + Math.random() * 0.2 + Math.random() * 0.2);
+function rollStats(r = R({})) {   // (tests: a fresh stream each call)
+  const hp = 15 + irnd(r, 0, 7) + irnd(r, 0, 8);
+  const speed = (0.45 + r.next() * 0.3 + r.next() * 0.3 + r.next() * 0.3) * 0.25 * 42.16;
+  const jump = jumpHeight(0.4 + r.next() * 0.2 + r.next() * 0.2 + r.next() * 0.2);
   return { hp, speed, jump };
 }
 // A foal: the average of its parents, varied by up to +-5% (kept inside the vanilla ranges).
-function foalStats(a, b) {
-  const v = () => 1 + rnd(-0.05, 0.05);
+function foalStats(a, b, r = R({})) {
+  const v = () => 1 + rnd(r, -0.05, 0.05);
   return { hp: Math.round(clamp((a.maxHp + b.maxHp) / 2 * v(), HP_MIN, HP_MAX)), speed: clamp((a.speed + b.speed) / 2 * v(), SPEED_MIN, SPEED_MAX),
     jump: clamp((a.jump + b.jump) / 2 * v(), JUMP_MIN, JUMP_MAX) };
 }
@@ -88,8 +89,9 @@ const herds = new Map();       // herd id -> {id, cx, cz, dir}
 let nextHerd = 1;
 const isHorseBiome = (x, z) => { try { return HORSE_BIOMES.has(BF.worldgen.biomeAt(x, z).id); } catch (_) { return false; } };
 function newRec(o) {
-  const st = o.stats || rollStats();
-  const r = { hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(0, 6)], mark: o.mark || MARKS[irnd(0, 4)],
+  const rs = BF.rand.at("horse", o.x, o.z, null, nextId);   // a new horse's looks and stats: from where, when and its number
+  const st = o.stats || rollStats(rs);
+  const r = { hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
     maxHp: st.hp, hp: st.hp, speed: st.speed, jump: st.jump, tamed: !!o.tamed, owner: o.owner || null, saddle: !!o.saddle, temper: 0,
     growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null };
   recs.set(r.hid, r);
@@ -161,10 +163,10 @@ function feed(m, itemName, by) {
 const willing = (r, t) => (r.tamed || !r.owner) && !isFoal(r) && r.fed != null && t - r.fed < FEED_DAYS && t >= r.cd;   // wild ones are made willing by wild breeding (js/wildlife.js)
 function breed(a, b) {
   const ra = a.horse, rb = b.horse, t = now();
-  const st = foalStats(ra, rb);
-  const pick = (x, y) => (Math.random() < 0.45 ? x : Math.random() < 0.82 ? y : null);
+  const r = R(a), st = foalStats(ra, rb, r);
+  const pick = (x, y) => (r.next() < 0.45 ? x : r.next() < 0.82 ? y : null);
   const foal = spawn((a.position.x + b.position.x) / 2, Math.max(a.position.y, b.position.y), (a.position.z + b.position.z) / 2, {
-    stats: st, coat: pick(ra.coat, rb.coat) || COATS[irnd(0, 6)], mark: pick(ra.mark, rb.mark) || MARKS[irnd(0, 4)],
+    stats: st, coat: pick(ra.coat, rb.coat) || COATS[irnd(r, 0, 6)], mark: pick(ra.mark, rb.mark) || MARKS[irnd(r, 0, 4)],
     tamed: !!ra.tamed, owner: ra.owner, growAt: t + FOAL_DAYS, cd: t + FOAL_DAYS + BREED_CD, pen: ra.pen || rb.pen,
   });
   ra.cd = rb.cd = t + BREED_CD; ra.fed = rb.fed = null; ra.mate = rb.mate = null;
@@ -237,7 +239,7 @@ function setAvoid(m, box) { if (m && m.horse) m.horse.avoid = box ? { x0: box.x0
 // ---------------------------------------------------------------- AI (called from mobs.js updateMob for unridden horses)
 // On the planet, positions kept in other frames (the lead holder, a mate, the herd centre) are seen from the horse's (BF.planet.local).
 const LQ = {};
-const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
+const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
 function walkTo(m, out, x, z, speed) {
   const dx = x - m.position.x, dz = z - m.position.z, d = Math.hypot(dx, dz) || 1;
   out.x = dx / d * speed; out.z = dz / d * speed;
@@ -317,35 +319,36 @@ function moveHerds(dt) {
     const hc = { x: h.cx, z: h.cz };
     for (const r of recs.values()) if (r.herd === h.id && r.mob && live(r.mob)) { const q = seenXZ(hc, r.mob.position); n++; sx += q.x; sz += q.z; }   // (seen from the centre's frame)
     if (!n) continue;   // waiting with its horses
-    h.dir += rnd(-1, 1) * 0.4 * dt / 60;   // a slowly changing heading
+    const r = BF.rand.at("herd", h.id, 0);
+    h.dir += rnd(r, -1, 1) * 0.4 * dt / 60;   // a slowly changing heading
     const nx = h.cx - Math.sin(h.dir) * HERD_SPEED * dt, nz = h.cz - Math.cos(h.dir) * HERD_SPEED * dt;
     const ax = h.cx - Math.sin(h.dir) * 24, az = h.cz - Math.cos(h.dir) * 24;
-    if (!isHorseBiome(ax, az) || !BF.world.isLoaded(ax, az)) h.dir += Math.PI * (0.5 + Math.random() * 0.5);   // turn back at the edge of horse land
+    if (!isHorseBiome(ax, az) || !BF.world.isLoaded(ax, az)) h.dir += Math.PI * (0.5 + r.next() * 0.5);   // turn back at the edge of horse land
     else { h.cx = nx; h.cz = nz; }
     // never leave the members far behind
     const mx = sx / n, mz = sz / n;
     if (Math.hypot(mx - h.cx, mz - h.cz) > HERD_R * 2) { h.cx = mx; h.cz = mz; }
-    if (BF.planet && BF.planet.reframe) {   // drifted past a face edge: onto the next face, its heading turned with it
-      const c = { x: h.cx, z: h.cz }, hd = { yaw: h.dir };
-      if (BF.planet.reframe(c, -1, hd) != null) { h.cx = c.x; h.cz = c.z; h.dir = hd.yaw; }
-    }
+    // drifted past a face edge: onto the next face, its heading turned with it
+    const c = { x: h.cx, z: h.cz }, hd = { yaw: h.dir };
+    if (BF.planet.reframe(c, -1, hd) != null) { h.cx = c.x; h.cz = c.z; h.dir = hd.yaw; }
   }
 }
 // A wild herd of 2-6 (sometimes with foals) on the grass around (x, z). Returns the herd, or null when there was no room.
 function spawnHerdAt(x, z) {
   const W = BF.world, gy = W.heightAt(x, z);
   if (W.getBlock(x, gy, z) !== BF.B.grass) return null;
-  const h = { id: nextHerd++, cx: x + 0.5, cz: z + 0.5, dir: Math.random() * Math.PI * 2 };
+  const r = BF.rand.at("herd spawn", x, z, null, nextHerd);   // (the herd number too: tests make several on one spot in a tick)
+  const h = { id: nextHerd++, cx: x + 0.5, cz: z + 0.5, dir: r.next() * Math.PI * 2 };
   herds.set(h.id, h);
-  const n = irnd(2, 6);
+  const n = irnd(r, 2, 6);
   let made = 0;
   for (let i = 0; i < n * 3 && made < n; i++) {
-    const sx = x + (i ? irnd(-4, 4) : 0), sz = z + (i ? irnd(-4, 4) : 0);
+    const sx = x + (i ? irnd(r, -4, 4) : 0), sz = z + (i ? irnd(r, -4, 4) : 0);
     if (!W.isLoaded(sx, sz)) continue;
     const sy = W.heightAt(sx, sz);
     if (W.getBlock(sx, sy, sz) !== BF.B.grass || W.boxCollides(sx + 0.5, sy + 1, sz + 0.5, 0.7, 1.6)) continue;
-    const foal = made >= 2 && Math.random() < 0.25;
-    spawn(sx + 0.5, sy + 1, sz + 0.5, { herd: h.id, growAt: foal ? now() + rnd(0.2, 1) * FOAL_DAYS : null });
+    const foal = made >= 2 && r.next() < 0.25;
+    spawn(sx + 0.5, sy + 1, sz + 0.5, { herd: h.id, growAt: foal ? now() + rnd(r, 0.2, 1) * FOAL_DAYS : null });
     made++;
   }
   if (!made) { herds.delete(h.id); return null; }
@@ -453,8 +456,8 @@ function drive(m, dt, input) {
     m.yaw += Math.sin(now() * 400 + r.hid) * 1.5 * dt;
     fwd = 0.35;
     if (ride.buck <= 0) {
-      ride.buck = rnd(1.5, 3.5);
-      if (Math.random() * 100 < r.temper) { tame(m, "player"); }
+      ride.buck = rnd(R(m), 1.5, 3.5);
+      if (R(m).next() * 100 < r.temper) { tame(m, "player"); }
       else { r.temper = Math.min(100, r.temper + 5); fx(m, "#9a9a9a", 6); v.y = 4; P.dismount(); return 0; }
     }
   } else if (r.saddle) {
@@ -510,7 +513,7 @@ const RIDE = {
   canBoard,
   exitSpot,
   onLeave: m => { m.vel.x = m.vel.z = 0; m.ai.mode = "idle"; ride.charge = 0; ride.jumpHeld = false; },
-  onMount: () => { ride.buck = rnd(1.5, 3.5); ride.charge = 0; },
+  onMount: m => { ride.buck = rnd(R(m), 1.5, 3.5); ride.charge = 0; },
   hud: m => ({ hp: m.hp, max: m.maxHp }),   // the horse's health in place of hunger (js/player.js drawHUD)
 };
 

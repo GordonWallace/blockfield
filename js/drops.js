@@ -8,7 +8,7 @@ const BF = (window.BF = window.BF || {});
 // On the planet items keep to the canonical square of the face they lie on (BF.planet.reframe after each move), and the player is
 // seen from the item's frame (BF.planet.local), so an item slides across a face edge and is picked up from either side of it.
 const LQ = {};
-const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
+const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
 const HW = 0.125, H = 0.25, GRAV = 18, PICKUP_R = 1.6, PICKUP_DELAY = 0.5, LIFE = 300, MAX = 300;
 const loader = new THREE.TextureLoader(), mats = new Map();
 let scene = null;
@@ -37,9 +37,10 @@ const drops = {
     const sprite = new THREE.Sprite(matFor(id));
     sprite.scale.set(0.38, 0.38, 0.38);
     scene.add(sprite);
-    const a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 1.5;
-    const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + Math.random() * 2, Math.sin(a) * s);
-    const d = { id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, sprite,
+    const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + drops.list.length * 4099);   // the toss: seeded by the spot, tick and count (js/rand.js)
+    const a = r.next() * Math.PI * 2, s = 1 + r.next() * 1.5;
+    const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + r.next() * 2, Math.sin(a) * s);
+    const d = { id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
     return d;
@@ -114,7 +115,7 @@ const drops = {
           d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
           d.pos.addScaledVector(d.vel, dt);
           d.pulled = true;
-          if (BF.planet && BF.planet.reframe) BF.planet.reframe(d.pos, -1, null, d.vel);
+          BF.planet.reframe(d.pos, -1, null, d.vel);
           continue;
         }
       }
@@ -125,7 +126,7 @@ const drops = {
       }
       d.vel.y -= GRAV * dt;
       const res = BF.world.moveBox(d.pos, d.vel, HW, H, dt);
-      if (BF.planet && BF.planet.reframe) BF.planet.reframe(d.pos, -1, null, d.vel);   // past a face edge: onto the next face's square
+      BF.planet.reframe(d.pos, -1, null, d.vel);   // past a face edge: onto the next face's square
       if (res.onGround) { d.vel.x *= Math.pow(0.02, dt); d.vel.z *= Math.pow(0.02, dt); }
       if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
       d.sprite.material.color.setScalar(light);

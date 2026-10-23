@@ -35,7 +35,7 @@ const start = async () => {
   // a planet boot works out its rivers first (r14-10): wait for that loading step
   await game.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById('bf-loading'), null, { timeout: 120000 }).catch(() => {});
   await game.waitForTimeout(5000);
-  ok('a planet world, fed to the debug server', await game.evaluate(() => BF.planet.isPlanet() && !!BF.debugFeed));
+  ok('a planet world, fed to the debug server', await game.evaluate(() => !!BF.planet && !!BF.debugFeed));
 
   // a village near an edge of face 4 (as test/planet-village-visit.js finds one), and the cells straight across its nearest edge
   const pick = await game.evaluate(() => {
