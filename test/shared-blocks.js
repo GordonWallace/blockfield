@@ -40,6 +40,16 @@ async function inPage({ walk }) {
   await settle(px, pz);
   R.kinds = kinds();
   R.f3 = BF.debugText(BF.debugInfo());
+  // the mesher workers (r15-03) get copies of the (shared or plain) sections: what they built equals the page's own mesher
+  R.mesh = (() => {
+    const W = BF.world, st = W.meshStats ? W.meshStats() : null;
+    if (!st) return { none: true };
+    const keys = ['pos', 'uv', 'col', 'sky', 'bl', 'ind'];
+    const same = (a, b) => { if (!a || !b) return a === b; for (const k of keys) { const x = a[k], y = b[k]; if (!x || !y) { if (x !== y) return false; continue; } if (x.length !== y.length) return false; for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false; } return true; };
+    const cs = [...W.chunks.values()].filter(c => c.mesh === true && c.meshBy === 'worker' && !W._dirty.has(c.key)).slice(0, 20);
+    let bad = 0; for (const c of cs) { const a = W.shownArrays(c), b = W.meshArrays(c); if (!same(a.S, b.S) || !same(a.L, b.L)) bad++; }
+    return { workers: st.workers, inline: !!st.inline, checked: cs.length, bad };
+  })();
   R.logged = BF.glog.entries().some(e => e.k === 'game' && e.x.startsWith(BF.shared.text));
   // an edit (a block plus a torch for block light) through IndexedDB
   const gy = BF.worldgen.heightAt(px + 3, pz + 3) + 1;
@@ -93,6 +103,7 @@ async function check(b, label, url, { isolated, walk }) {
   ok(`${label}: block light arrays too, after a torch`, R.lightAfterEdit[want] > R.kinds[want] - 1 && Object.keys(R.lightAfterEdit).every(k => k === want || !R.lightAfterEdit[k]), R.lightAfterEdit);
   ok(`${label}: F3 says "${R.mode.text}"`, R.f3.includes(R.mode.text) && (isolated ? /Shared memory: on/ : /Shared memory: off: page not isolated/).test(R.f3));
   ok(`${label}: the game log says it`, R.logged);
+  if (!R.mesh.none && label !== 'file') ok(`${label}: mesher workers build the same meshes as the page`, R.mesh.workers > 0 && !R.mesh.inline && R.mesh.checked >= 10 && R.mesh.bad === 0, R.mesh);
   ok(`${label}: save and load round-trip the edits`, R.roundTrip.want.every((id, i) => id && id === R.roundTrip.got[i]), R.roundTrip);
   ok(`${label}: section arrays after loading are ${want}`, R.kindsAfterLoad[want] > 0 && Object.keys(R.kindsAfterLoad).every(k => k === want || !R.kindsAfterLoad[k]), R.kindsAfterLoad);
   if (walk) {

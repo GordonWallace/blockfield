@@ -24,7 +24,8 @@ const SECN = 4096;
 // Write rule: only the thread that owns a chunk writes its arrays (the main thread, until r15-39 gives regions to workers). Other threads
 // read start-of-tick state (the two-phase tick, r15-17): they never read while the owner writes, so there are no locks or Atomics.
 // Saves hold block edits only (js/save.js), never section arrays; anything that does store or send one must copy it first (a.slice()
-// returns an unshared copy), because IndexedDB can't store a SharedArrayBuffer in every browser, and postMessage would share it.
+// returns an unshared copy), because IndexedDB can't store a SharedArrayBuffer in every browser, and postMessage would share it
+// (and can't transfer it: meshJob(c, true) copies the sections it sends to the mesher workers, r15-03).
 // An unloaded chunk's arrays are freed like any other object, once nothing references the chunk.
 const SHARED = typeof SharedArrayBuffer === "function" && self.crossOriginIsolated === true;
 BF.shared = {
