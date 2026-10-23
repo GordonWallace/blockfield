@@ -9,7 +9,7 @@
 // The game log (js/gamelog.js) goes along too, a few thousand entries per snapshot until the server has all of it, and the commit
 // the game runs, so the server can say when the files on disk have changed (BF.glog.diskBuild).
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
-// API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update() }
+// API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update(), live() (a debug screen is watching the feed) }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -27,7 +27,7 @@ function feedUrls() {
 }
 const URLS = feedUrls();
 if (!URLS.length) return;
-let URL_ = URLS[0], urlIdx = 0, told = false;
+let URL_ = URLS[0], urlIdx = 0, told = false, screens = 0;   // screens: debug screens open on the server (it says when that changes)
 
 const EVERY = 250, RETRY = 4000, RETRY_SLOW = 15000;
 let misses = 0, nextT = 0, busy = false, sent = 0;
@@ -297,7 +297,10 @@ function snapshot() {
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
+    screens,
     alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
+    // the villager-seconds meter (js/perf.js), on while the screen gets the feed: figures and the last 2 minutes of V·s/s
+    perf: BF.perf && BF.perf.on ? Object.assign(BF.perf.stats() || {}, { hist: BF.perf.history() }) : undefined,
     hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
@@ -320,13 +323,14 @@ function update() {
   fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000, signal: ctl.signal })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
     .then(t => {
-      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?, glogAt?, build?}: the server's alerts / picked villager, when the game's copy is out of date
+      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?, screens?, glogAt?, build?}: the server's alerts / picked villager, when the game's copy is out of date
         const o = JSON.parse(t);
         if (o.glogAt != null && BF.glog) BF.glog.feedAt(o.glogAt);   // the server holds the game log up to there
         if (o.build && BF.glog) BF.glog.diskBuild(o.build);          // the commit on disk isn't the one running
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
         if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
         if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }   // a toggle clicked on the debug screen
+        if (o.screens != null) screens = o.screens | 0;
         t = o.resync ? "resync" : "ok";
       }
       if (t === "resync") resync();   // a restarted server asks for the layouts and logs again
@@ -338,12 +342,12 @@ function update() {
       URL_ = URLS[urlIdx = (urlIdx + 1) % URLS.length];
       BF.debugFeed.url = URL_;
       nextT = performance.now() + (misses > 5 * URLS.length ? RETRY_SLOW : RETRY / URLS.length);
-      told = false; resync();
+      told = false; screens = 0; resync();
     })
     .finally(() => { busy = false; clearTimeout(stop); });
 }
 
-BF.debugFeed = { url: URL_, urls: URLS, snapshot, update };
+BF.debugFeed = { url: URL_, urls: URLS, snapshot, update, live: () => told && screens > 0 };   // live: a debug screen is watching the feed
 // The game loop (requestAnimationFrame) stops while the game's tab is in the background, e.g. when the debug screen is opened
 // as another tab in the same window. A timer keeps the feed going then (browsers still run it about once a second), so the
 // debug screen can say the game is in the background instead of waiting for it.
