@@ -227,6 +227,7 @@ function frame(now) {
       BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
       if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
       BF.world.tickSim();
+      if (BF.regions) BF.regions.tick();   // mobs and drops that changed region move in the region index (js/regions.js)
       done++;
     }
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed

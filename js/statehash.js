@@ -36,7 +36,7 @@ const MAX_DEPTH = 9;
 const num = v => Number.isInteger(v) ? String(v) : Number.isFinite(v) ? "f" + Math.round(v * 1024) : String(v);
 // Fields that are drawing, animation or static definitions, never simulation state.
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
-  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg"]);
+  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri"]);
 let mobSet = new Set();
 const mobRef = m => m.id != null ? "#" + m.id : m.type + (m.name ? ":" + m.name : "");
 const isMob = v => mobSet.has(v) || (v.root && v.position && v.type && v.ai);

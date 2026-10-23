@@ -413,6 +413,7 @@ world.setBlock = function (x, y, z, id) {
   if (y > BF.MIN_Y) { const bl = BF.blocks[cblock(c, lx, y - 1, lz)]; if (bl && bl.growsUp && id !== bl.id) growing.add(fkey(x, y - 1, z)); }   // cane cut back: the top left grows again
   if (BF.farmland) BF.farmland.onSet(x, y, z, oldId, id);   // farmland hydration clock (js/farmland.js)
   if (BF.bees) BF.bees.onSet(x, y, z, oldId, id);   // bee homes placed and broken, flowers planted and picked (js/bees.js)
+  if (BF.regions) BF.regions.onSet(x, y, z, oldId, id);   // block entities in the region index (js/regions.js)
   // plants and crops pop off when the block under them goes away or water floods them
   if (y + 1 < BF.H && !BF.SOLID[id]) {
     const above = cblock(c, lx, y + 1, lz);

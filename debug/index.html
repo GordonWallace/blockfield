@@ -385,7 +385,7 @@
       </div>
       <div class="panel" id="mpanel">
         <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
-          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div></div>
+          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds">Regions</button></div></div>
         <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
         <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
       </div>
@@ -1032,6 +1032,19 @@ function renderMobMap() {
     if (!set.has((cx + 1) + "," + cz)) { g.moveTo(x1, z0); g.lineTo(x1, z1); }
   }
   g.stroke();
+  // the Regions overlay (js/regions.js): each region holding mobs shaded by its count, the busiest darkest, with the count when there is room
+  if (mRegions && mm.regions && mm.regions.length) {
+    const top = Math.max(...mm.regions.map(r => r[4]));
+    g.font = "11px IBM Plex Mono, monospace"; g.textAlign = "center"; g.textBaseline = "middle";
+    for (const [x0, z0, x1, z1, n] of mm.regions) {
+      const px = X(x0), pz = Z(z0), pw = (x1 - x0) * sc, ph = (z1 - z0) * sc;
+      if (px > w || pz > h || px + pw < 0 || pz + ph < 0) continue;
+      g.fillStyle = `rgba(232,88,60,${(0.08 + 0.42 * n / top).toFixed(3)})`; g.fillRect(px, pz, pw, ph);
+      g.strokeStyle = "rgba(232,88,60,0.45)"; g.lineWidth = 1; g.strokeRect(Math.round(px) + 0.5, Math.round(pz) + 0.5, Math.round(pw), Math.round(ph));
+      if (pw >= 28) { g.fillStyle = "rgba(238,243,234,0.8)"; g.fillText(String(n), px + pw / 2, pz + ph / 2); }
+    }
+    g.textAlign = "start"; g.textBaseline = "alphabetic";
+  }
   // running villages: a subtle outline and their name
   g.setLineDash([4, 4]); g.strokeStyle = "rgba(242,198,109,0.35)"; g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "rgba(242,198,109,0.6)";
   for (const v of mm.villages) { g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText(v[4] || "", X(v[0]) + 3, Z(v[1]) - 4); }
@@ -1099,6 +1112,16 @@ function mZoom(f, mx, my) {
 $("m-zin").addEventListener("click", () => mZoom(1.5));
 $("m-zout").addEventListener("click", () => mZoom(1 / 1.5));
 $("m-center").addEventListener("click", () => { mview.follow = true; renderMobMap(); });
+// Regions overlay on / off (remembered in this browser)
+const RSTORE = "bf-debug-mobmap-regions";
+let mRegions = false;
+try { mRegions = localStorage.getItem(RSTORE) === "1"; } catch (e) { /* storage off */ }
+$("m-regions").classList.toggle("on", mRegions);
+$("m-regions").addEventListener("click", () => {
+  mRegions = !mRegions; $("m-regions").classList.toggle("on", mRegions);
+  try { localStorage.setItem(RSTORE, mRegions ? "1" : "0"); } catch (e) { /* storage off */ }
+  if (mm) renderMobMap();
+});
 mCv.addEventListener("wheel", e => { e.preventDefault(); const r = mCv.getBoundingClientRect(); mZoom(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
 let mDrag = null;
 mCv.addEventListener("pointerdown", e => { mDrag = { x: e.clientX, y: e.clientY, vx: mview.x, vz: mview.z, moved: false }; mCv.setPointerCapture(e.pointerId); });
