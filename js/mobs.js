@@ -286,12 +286,14 @@ function createMob(type, x, y, z, variant, style) {
   if (type === "villager" && BF.trades) BF.trades.init(mob); // level, offers, inventory with starting stock
   keepPrev(mob);
   list.push(mob);
+  if (BF.regions) BF.regions.mobAdded(mob);   // the region index (js/regions.js)
   return mob;
 }
 
 function removeMob(m) {
   const i = list.indexOf(m);
   if (i >= 0) list.splice(i, 1);
+  if (BF.regions) BF.regions.mobRemoved(m);
   if (m.type === "villager" && !m.dead) { const k = villagerKey(m); if (k && m.inv) villagerSaves.set(k, BF.trades.pack(m)); }
   if (m.sheep && m.sheep.mob === m) m.sheep.mob = null;   // pen sheep keep their state and respawn with the pen (js/shepherd.js)
   if (m.hen && m.hen.mob === m) m.hen.mob = null;   // so do coop chickens (js/poultry.js)

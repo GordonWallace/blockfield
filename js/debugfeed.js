@@ -263,7 +263,15 @@ function mobMap(pp) {
     const p = inF(a.v.minX, a.v.minZ), x0 = p && p.x, z0 = p && p.z, q = p && inF(a.v.maxX + 1, a.v.maxZ + 1);   // block corners, so a turned box stays whole
     if (q) villages.push([Math.min(x0, q.x), Math.min(z0, q.z), Math.max(x0, q.x) - 1, Math.max(z0, q.z) - 1, nameOf(a.key)]);
   }
-  const out = { kinds, acts, mobs, chunks, villages, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: CS };
+  // regions holding mobs (js/regions.js, spec r15-30) for the map's Regions overlay: [x0, z0, x1, z1 (exclusive), mobs]. Corner cells'
+  // centres are mapped, so a region on a neighbouring face comes out as the right (turned) box.
+  const regions = [];
+  if (BF.regions) for (const s of BF.regions.stats()) {
+    if (!s.mobs) continue;
+    const b = BF.regions.bounds(s.key), p = inF(b.x0 + 0.5, b.z0 + 0.5), x0 = p && p.x, z0 = p && p.z, q = p && inF(b.x1 - 0.5, b.z1 - 0.5);
+    if (q) regions.push([Math.min(x0, q.x) - 0.5, Math.min(z0, q.z) - 0.5, Math.max(x0, q.x) + 0.5, Math.max(z0, q.z) + 0.5, s.mobs]);
+  }
+  const out = { kinds, acts, mobs, chunks, villages, regions, region: BF.regions ? BF.regions.REGION : 0, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: CS };
   if (F >= 0) {
     const x0 = P.W * F + P.N;
     Object.assign(out, { face: F, sq: [x0, P.N, x0 + P.N, 2 * P.N], north: northAt(pp.x, pp.z) });

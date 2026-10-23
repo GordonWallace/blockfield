@@ -43,6 +43,7 @@ const drops = {
     const d = { id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
+    if (BF.regions) BF.regions.dropAdded(d);   // the region index (js/regions.js)
     return d;
   },
 
@@ -62,6 +63,7 @@ const drops = {
   remove(d) {
     const i = drops.list.indexOf(d);
     if (i >= 0) drops.list.splice(i, 1);
+    if (BF.regions) BF.regions.dropRemoved(d);
     if (d.sprite) scene.remove(d.sprite);
   },
 
