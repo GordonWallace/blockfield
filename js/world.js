@@ -15,6 +15,32 @@ BF.CS = CS;
 // A chunk is a 16x16 column of 16-high sections. c.secs[sy - c.lo] is a Uint16Array(4096) (index (ly << 8 | lz << 4 | lx)) or a
 // number (the whole section is that block id). Sections outside [c.lo, c.hi) are not loaded: below = stone, above = air.
 const SECN = 4096;
+
+// ---------- shared memory (spec r15-35) ----------
+// Section arrays (blocks here, block light in js/light.js, sky light in js/skylight.js) are allocated by BF.secArray: on a
+// SharedArrayBuffer when the page is cross-origin isolated (debug/server.js, so ./run.sh, sends the COOP / COEP headers), so simulation
+// workers can read blocks without copying (r15-38, r15-39); else (opened as a file, the Artifact, a server without the headers) on an
+// ordinary ArrayBuffer. The views are the same typed arrays either way, so no other code changes.
+// Write rule: only the thread that owns a chunk writes its arrays (the main thread, until r15-39 gives regions to workers). Other threads
+// read start-of-tick state (the two-phase tick, r15-17): they never read while the owner writes, so there are no locks or Atomics.
+// Saves hold block edits only (js/save.js), never section arrays; anything that does store or send one must copy it first (a.slice()
+// returns an unshared copy), because IndexedDB can't store a SharedArrayBuffer in every browser, and postMessage would share it.
+// An unloaded chunk's arrays are freed like any other object, once nothing references the chunk.
+const SHARED = typeof SharedArrayBuffer === "function" && self.crossOriginIsolated === true;
+BF.shared = {
+  on: SHARED,
+  text: SHARED ? "Shared memory: on" : "Shared memory: off: page not isolated",
+  // bytes of section arrays (blocks, block light, sky light) held by loaded chunks, and how many arrays
+  usage() {
+    let bytes = 0, arrays = 0;
+    const add = list => { if (list) for (const a of list) if (a && typeof a === "object") { bytes += a.byteLength; arrays++; } };
+    for (const c of world.chunks.values()) { add(c.secs); add(c.light); add(c.sky); }
+    return { bytes, arrays };
+  },
+};
+BF.secArray = SHARED
+  ? (Ctor, n) => new Ctor(new SharedArrayBuffer(n * Ctor.BYTES_PER_ELEMENT))
+  : (Ctor, n) => new Ctor(n);
 const vIdx = (x, y, z) => (y * CS + z) * CS + x;      // index inside a legacy full-height window (y from 0)
 BF.vIdx = vIdx;
 const ckey = (cx, cz) => cx + "," + cz;
@@ -329,7 +355,7 @@ function secSet(c, lx, y, lz, id) {
   let s = c.secs[si];
   if (typeof s === "number") {
     if (s === id) return;
-    const a = new Uint16Array(SECN); if (s) a.fill(s);
+    const a = BF.secArray(Uint16Array, SECN); if (s) a.fill(s);
     c.secs[si] = s = a;
   }
   s[((y & 15) << 8) | (lz << 4) | lx] = id;
@@ -342,7 +368,8 @@ function sliceSections(data, n) {
     const o = i * SECN, f = data[o];
     let uni = true;
     for (let k = 1; k < SECN; k++) if (data[o + k] !== f) { uni = false; break; }
-    out[i] = uni ? f : data.slice(o, o + SECN);
+    if (uni) out[i] = f;
+    else { const a = BF.secArray(Uint16Array, SECN); a.set(data.subarray(o, o + SECN)); out[i] = a; }
   }
   return out;
 }
@@ -552,7 +579,7 @@ function unload(key) {
   const c = world.chunks.get(key);
   if (!c) return;
   disposeMeshes(c);
-  world.chunks.delete(key); CGEN++;
+  world.chunks.delete(key); CGEN++; if (LC === c) LC = undefined;   // (the lookup cache must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
 }
@@ -570,7 +597,7 @@ function purge(key) {
     for (const a of [...Object.values(g.attributes), g.index]) if (a) { if (a.uploaded) a.array = NOARR; else a.onUpload(freeArray); }
   }
   c.meshes = [];
-  world.chunks.delete(key); CGEN++;
+  world.chunks.delete(key); CGEN++; if (LC === c) LC = undefined;   // (the lookup cache must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   world.purged = (world.purged || 0) + 1;
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }

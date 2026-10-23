@@ -2,6 +2,7 @@
 // Blockfield debug server: the game on one port, a live debug screen on another (for a second monitor).
 //   node debug/server.js                 game on http://localhost:8000, debug screen on http://localhost:8001
 //   node debug/server.js --game 9000 --debug 9001 --lan
+//   (--no-isolate serves the game without the cross-origin isolation headers, so without shared memory: see ISOLATE)
 //   (--alerts <file> keeps the debug screen's alerts somewhere other than debug/.alerts.json)
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to
 // /push on the debug port and every open debug screen receives them over Server-Sent Events (/events).
@@ -48,6 +49,13 @@ function readBuild() {
 }
 
 // ------------------------------------------------------------------ game (static files)
+// Cross-origin isolation (spec r15-35): with these two headers the game page is crossOriginIsolated, which browsers require before they
+// allow SharedArrayBuffer (chunk block data in shared memory, js/world.js). COEP is "credentialless" rather than "require-corp": the
+// page's other-origin files (three.js from cdnjs, Google Fonts) then load without needing a Cross-Origin-Resource-Policy header, only
+// without cookies. Browsers without credentialless (Safari) leave the page unisolated and the game uses ordinary memory, as it does
+// opened as a file. Sent on everything the game port serves (the page, its scripts, the workers' scripts), but not the wiki.
+// --no-isolate leaves them off (tests of the fallback).
+const ISOLATE = args.includes("--no-isolate") ? {} : { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "credentialless" };
 function serveGame(req, res) {
   let rel;
   try { rel = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400).end(); return; }
@@ -71,7 +79,7 @@ function serveGame(req, res) {
       }), at = html.indexOf("<script");
       data = at >= 0 ? html.slice(0, at) + tag + html.slice(at) : html + tag;
     }
-    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-cache" }).end(data);
+    res.writeHead(200, Object.assign({ "Content-Type": type, "Cache-Control": "no-cache" }, rel.startsWith("/wiki/") ? {} : ISOLATE)).end(data);
   });
 }
 

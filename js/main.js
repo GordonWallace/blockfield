@@ -169,6 +169,7 @@ function debugInfo() {
     cloudCover: BF.sky.cloudCover, cloudHeight: BF.sky.cloudHeight, warp: BF.warp.speed,
     clicks: BF.player.clickLog ? BF.player.clickLog() : [],
     planet: planetInfo(p),
+    shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
   };
 }
 // On the planet (generator 4): the canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas
@@ -194,6 +195,7 @@ function debugText(d) {
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
+    (d.shared ? "\n" + d.shared : "") +
     (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
 }
 BF.debugInfo = debugInfo;
