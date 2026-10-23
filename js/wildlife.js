@@ -50,8 +50,9 @@ const wildAnimal = m => BF.mobs.isWild(m) || (m.type === "horse" && !!m.horse &&
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const live = o => !!(o && !o.dead && !o.removed);
 const ck = (x, z) => Math.floor(x / BF.CS) + "," + Math.floor(z / BF.CS);
-const rnd = (a, b) => a + Math.random() * (b - a);
-const irnd = (a, b) => Math.floor(rnd(a, b + 1));
+const R = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const irnd = (r, a, b) => a + r.int(b - a + 1);
 
 let rolled = new Set();        // chunk keys that had their first-generation roll
 const toRoll = new Set();      // loaded chunks still to roll
@@ -100,8 +101,9 @@ function relocate(type, x, y, z) {
   if (!T) return null;
   const grass = BF.B.grass, dark = BF.sky && BF.sky.lightAt ? BF.sky.lightAt(BF.sky.time || 0) <= 0.3 : false;
   const pens = isAnimal(type) && BF.mobs.penBoxes ? BF.mobs.penBoxes(x, z) : [];   // never into a village's pen, coop, pasture, sty or stable
+  const r = BF.rand.at("relocate " + type, x, z, null, y);
   for (let i = 0; i < 40; i++) {
-    const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * (RELOCATE_R - 1);   // within RELOCATE_R blocks (the block centre too)
+    const a = r.next() * Math.PI * 2, d = Math.sqrt(r.next()) * (RELOCATE_R - 1);   // within RELOCATE_R blocks (the block centre too)
     const sx = Math.floor(x + Math.cos(a) * d), sz = Math.floor(z + Math.sin(a) * d);
     if (!W.isLoaded(sx, sz)) continue;
     if (isAnimal(type)) {
@@ -131,7 +133,7 @@ function bring(e) {
   BF.mobSave.apply(m, s);
   BF.mobSave.applyState(m, e);
   m.position.set(at[0], at[1], at[2]); m.fallStart = at[1];
-  if (!exact) { m.ai.mode = "idle"; m.ai.t = rnd(1, 3); m.ai.tx = at[0]; m.ai.tz = at[2]; m.ai.route = null; m.ai.target = false; }
+  if (!exact) { m.ai.mode = "idle"; m.ai.t = rnd(R(m), 1, 3); m.ai.tx = at[0]; m.ai.tz = at[2]; m.ai.route = null; m.ai.target = false; }
   log(exact ? "back" : "moved", { type: e.type, age: +(age * 24).toFixed(2) });
   return m;
 }
@@ -154,9 +156,10 @@ function roll(k) {
   const tbl = b && HABITAT[b.id];
   if (!tbl) return;
   const sum = tbl.reduce((t, e) => t + e[1], 0);
-  if (Math.random() >= sum / 4) return;
+  const r = BF.rand.at("wild", cx, cz, BF.glog ? Math.floor(BF.glog.chunkDays(cx * CS + 8, cz * CS + 8)) : 0);   // keyed by the chunk and its loaded days, not the load time
+  if (r.next() >= sum / 4) return;
   const type = zoneKind(tbl, sum, Math.floor(cx / ZONE), Math.floor(cz / ZONE));
-  const n = BF.mobs.spawnGroup(type, cx, cz, irnd(GROUP[0], GROUP[1]));
+  const n = BF.mobs.spawnGroup(type, cx, cz, irnd(r, GROUP[0], GROUP[1]), r);
   if (n) log("rolled", { type, n, chunk: k, biome: b.name });
 }
 // The kind a region's groups of this habitat are: a fixed pick from the seed and the region, weighted by the habitat's odds.
@@ -184,10 +187,10 @@ function wildBreeding() {
     const a = byType[type];
     for (const m of a) {
       if (!stOf(m)) continue;   // its module hasn't set it up yet
-      const w = m.wildB || (m.wildB = { next: Math.floor(t) + Math.random() });
-      if (w.next > t + 2) w.next = Math.floor(t) + Math.random();   // time was set back
+      const w = m.wildB || (m.wildB = { next: Math.floor(t) + R(m).next() });
+      if (w.next > t + 2) w.next = Math.floor(t) + R(m).next();   // time was set back
       if (t < w.next) continue;
-      w.next = Math.floor(t) + 1 + Math.random();                  // one roll a game day, at a different time each day
+      w.next = Math.floor(t) + 1 + R(m).next();                  // one roll a game day, at a different time each day
       if (!breedable(m, t)) continue;
       let mate = null, md = BREED_R * BREED_R, crowd = 0;
       for (const o of a) {
@@ -195,7 +198,7 @@ function wildBreeding() {
         if (d2 <= CROWD_R * CROWD_R) crowd++;
         if (o !== m && d2 < md && Math.abs(o.position.y - m.position.y) < 3 && breedable(o, t)) { md = d2; mate = o; }
       }
-      if (!mate || crowd >= CROWD_MAX || Math.random() >= tune.pairP) continue;
+      if (!mate || crowd >= CROWD_MAX || R(m).next() >= tune.pairP) continue;
       stOf(m).fed = t; stOf(mate).fed = t;   // willing, as if fed: the animal's own module walks them together and the young one appears
       log("wildPair", { type, crowd });
     }
@@ -236,7 +239,7 @@ function mayHostile(x, y, z) {
   const i = areaOf.get(ck(x, z)), A = areaList[i != null ? i : areaList.length - 1];
   if (A && A.h >= A.cap) return false;
   const p = BF.player && BF.player.position;
-  const q = p && BF.planet && BF.planet.isPlanet() ? BF.planet.local({ x, z }, p) : p;   // (across a face edge: seen from the spot)
+  const q = p && BF.planet.local({ x, z }, p);   // (across a face edge: seen from the spot)
   if (p && !BF.player.dead && Math.hypot(q.x - x, p.y - y, q.z - z) < BUFFER) return false;
   if (targetsDirty) { targetsDirty = false; rebuildTargets(); }   // fresh positions: villagers wake, walk home or load with their village
   const cx = Math.floor(x / BF.CS), cz = Math.floor(z / BF.CS);

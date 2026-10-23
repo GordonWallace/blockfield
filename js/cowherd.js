@@ -162,7 +162,7 @@ function cowAI(m, dt, out) {
     if (H().ledStep(m, dt, out, S, S && S.task && S.task.pasture, inRoom)) return true;
   }
   if (!m.pasture && BF.player && BF.player.position && !BF.player.dead && playerWheat()) {
-    const p0 = BF.player.position, q = BF.planet && BF.planet.isPlanet() ? BF.planet.local(m.position, p0) : p0, p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
+    const p0 = BF.player.position, q = BF.planet.local(m.position, p0), p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
     if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 2, sp); }
   }
   return H().mateStep(m, dt, out, t, MATING);
