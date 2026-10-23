@@ -161,7 +161,10 @@ module.exports = async (pg, out) => {
     },
   };
   for (const [name, fn] of Object.entries(EFFECTS)) {
-    // in one go, so nothing else draws from the seeded stream: the effect is made, and (after the split) played at once
+    // once unseeded first, so the geometry and materials it makes the first time (which draw uuids from Math.random) already exist
+    await pg.evaluate(`(${fn})(${JSON.stringify({ st: stage })})`);
+    await pg.waitForTimeout(300);
+    // then in one go, so nothing else draws from the seeded stream: the effect is made, and (after the split) played at once
     await pg.evaluate(`(() => {
       window.__before = new WeakSet();   // (by the objects themselves: Three.js makes uuids with Math.random, seeded here)
       BF.scene.traverse(o => window.__before.add(o));
