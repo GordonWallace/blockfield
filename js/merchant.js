@@ -299,7 +299,7 @@ function step(m, st) {
   const n = (wear.get(k) || 0) + 1;
   wear.delete(k);
   if (n < WEAR_N) { wear.set(k, n); if (wear.size > WEAR_MAX) wear.delete(wear.keys().next().value); return; }
-  if (BF.B.dirt_path != null) { W.setBlock(x, y, z, BF.B.dirt_path); st.worn = (st.worn || 0) + 1; }
+  if (BF.B.dirt_path != null) BF.blockReq.cells(m, [{ x, y, z, id: BF.B.dirt_path, expect: id }]).then(r => { if (r.ok) st.worn = (st.worn || 0) + 1; });   // a request (spec r15-19)
 }
 
 // ---------------------------------------------------------------- routes

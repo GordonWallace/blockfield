@@ -338,27 +338,33 @@ function homeDistance(m) {
 const HOME_R = 48;
 const atHome = m => homeDistance(m) <= HOME_R;
 function pitch(m) {
-  const X = state(m), T0 = T();
+  const X = state(m);
+  if (X.pitching === BF.blockReq.tick()) return true;   // asked this tick already
   if (!BF.tents || tentItem() == null || cnt(m, tentItem()) < 1) return false;
   const px = Math.floor(m.position.x), pz = Math.floor(m.position.z);
   const site = BF.tents.findSite(m.position.x, m.position.z, 7, (x, y, z) => x === px && z === pz);
-  if (BF.vlog) BF.vlog.actor = m;                       // the blockPlaced events inside place() are logged as this villager's
-  const placed = site && BF.tents.place(site.x, site.y, site.z, site.f);
-  if (BF.vlog) BF.vlog.actor = null;
-  if (!placed) return false;
-  T0.inv.remove(m.inv, tentItem(), 1);
-  X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
-  m.homeBed = m.homeBed || m.bed;
-  m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
-  log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
+  if (!site) return false;
+  // a request (spec r15-19): all twelve cells and the tent item at once in the apply phase; the camp is made when it is up (refused: the
+  // next evening check finds another site). The blockPlaced events are logged as this villager's (actor).
+  X.pitching = BF.blockReq.tick();
+  BF.blockReq.cells(m, BF.tents.pitchCells(site.x, site.y, site.z, site.f), { take: [{ id: tentItem(), n: 1 }], emit: true, actor: true }).then(r => {
+    X.pitching = null;
+    if (!r.ok) { log("pitch_refused", m, { at: site.x + "," + site.z, why: r.why }); return; }
+    X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
+    m.homeBed = m.homeBed || m.bed;
+    m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
+    log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
+  });
   return true;
 }
-// Takes the tent down (when it still stands the item comes back) and gives the villager its own bed again.
+// Takes the tent down (when it still stands the item comes back, by request: spec r15-19) and gives the villager its own bed again.
 function strike(m) {
   const X = state(m), c = X.camp;
   if (c) {
     const id = BF.tentId(c.f, 0, 1);
-    if (BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === id && BF.tents.remove(c.x, c.y, c.z, id)) T().inv.add(m.inv, tentItem(), 1);
+    if (BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === id) {
+      BF.blockReq.cells(m, BF.tents.strikeCells(c.x, c.y, c.z, id), { give: [{ id: tentItem(), n: 1 }], fit: false });
+    }
     log("strike", m, { at: c.x + "," + c.z });
   }
   X.camp = null;

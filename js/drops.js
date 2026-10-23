@@ -30,6 +30,20 @@ function matFor(id) {
   return m;
 }
 
+// An identical stack within a block of d, the first in the list (spec r15-31: from the region index's drops around d; in tests with
+// BF.regions.verifyQueries also by the scan of the whole list it replaced).
+const mergeable = d => o => o !== d && o.id === d.id && o.age > 1 && (q => (q.x - d.pos.x) ** 2 + (o.pos.y - d.pos.y) ** 2 + (q.z - d.pos.z) ** 2)(seenXZ(d.pos, o.pos)) < 1;
+function mergeWith(d) {
+  const R = BF.regions, ok = mergeable(d);
+  if (!R || !R.around) return drops.list.find(ok) || null;
+  let best = null, bi = Infinity;
+  for (const k of R.around(d.pos.x, d.pos.z, 5)) {
+    const s = R.dropsIn(k);
+    if (s) for (const o of s) if (ok(o)) { const i = drops.list.indexOf(o); if (i >= 0 && i < bi) { bi = i; best = o; } }
+  }
+  if (R.verifyQueries && R.checkQuery) R.checkQuery("drops.merge", best ? [best] : [], () => { const o = drops.list.find(ok); return o ? [o] : []; });
+  return best;
+}
 const drops = {
   list: [],
 
@@ -130,7 +144,7 @@ const drops = {
       }
       // merge with an identical stack lying nearby
       if (d.age > 1 && (Math.floor(d.age * 4) % 4 === 0)) {
-        const o = drops.list.find(o => o !== d && o.id === d.id && o.age > 1 && (q => (q.x - d.pos.x) ** 2 + (o.pos.y - d.pos.y) ** 2 + (q.z - d.pos.z) ** 2)(seenXZ(d.pos, o.pos)) < 1);
+        const o = mergeWith(d);
         if (o && o.count + d.count <= (BF.items[d.id].stack || 64)) { o.count += d.count; drops.remove(d); continue; }
       }
       d.vel.y -= GRAV * dt;

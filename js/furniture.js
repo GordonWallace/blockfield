@@ -275,9 +275,12 @@ function ai(m, dt, out) {
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.5 };
     if ((sh.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
-    const ok = BF.storage.deliver(m, v2, s);
-    log(ok ? "deliver" : "giveup", m, { to: v2.profession, item: "chest", at: s.x + "," + s.y + "," + s.z, why: ok ? undefined : "spot taken or unpaid" });
-    if (!ok) { sh.avoid[avoidKey()] = dayNow() + 0.05; if (v2.store) v2.store.order = null; }   // the villager picks a new spot next time
+    const ak = avoidKey(), ended = ok => {
+      log(ok ? "deliver" : "giveup", m, { to: v2.profession, item: "chest", at: s.x + "," + s.y + "," + s.z, why: ok ? undefined : "spot taken or unpaid" });
+      if (!ok) { sh.avoid[ak] = dayNow() + 0.05; if (v2.store) v2.store.order = null; }   // the villager picks a new spot next time
+    };
+    const req = BF.storage.deliver(m, v2, s);   // a request (spec r15-19): put down in the apply phase, the outcome comes before the next think
+    if (req) req.then(r => ended(r.ok)); else ended(false);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
     if (BF.villageSim) BF.villageSim.done(m);
     return true;

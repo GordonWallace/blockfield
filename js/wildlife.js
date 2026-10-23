@@ -180,9 +180,12 @@ function breedable(m, t) {
   return !!(s && s.growAt == null && t >= (s.cd || 0) && (s.fed == null || t - s.fed >= 1) && wildAnimal(m) && !m.ledBy && onGrass(m));
 }
 function wildBreeding() {
-  const t = dayNow(), L = BF.mobs.list;
-  const byType = {};
-  for (const m of L) if (ST[m.type] && live(m) && wildAnimal(m)) (byType[m.type] || (byType[m.type] = [])).push(m);
+  const t = dayNow(), byType = {};
+  // (spec r15-31) each kind's mobs from BF.mobs.ofType, the kinds in the order a scan of the whole list meets them
+  const kinds = [];
+  for (const k in ST) { const a = BF.mobs.ofType(k).filter(m => live(m) && wildAnimal(m)); if (a.length) kinds.push([k, a, BF.mobs.list.indexOf(a[0])]); }
+  kinds.sort((a, b) => a[2] - b[2]);
+  for (const [k, a] of kinds) byType[k] = a;
   for (const type in byType) {
     const a = byType[type];
     for (const m of a) {
@@ -193,7 +196,9 @@ function wildBreeding() {
       w.next = Math.floor(t) + 1 + R(m).next();                  // one roll a game day, at a different time each day
       if (!breedable(m, t)) continue;
       let mate = null, md = BREED_R * BREED_R, crowd = 0;
-      for (const o of a) {
+      // (spec r15-31) a's animals within CROWD_R of m, from the region index; in tests checked against a itself
+      const close = L => L.filter(o => o.type === type && live(o) && wildAnimal(o) && (o.position.x - m.position.x) ** 2 + (o.position.z - m.position.z) ** 2 <= CROWD_R * CROWD_R);
+      for (const o of BF.mobs.checkScan("wildlife.breed", close(BF.mobs.near(m.position, CROWD_R)), () => close(a))) {
         const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
         if (d2 <= CROWD_R * CROWD_R) crowd++;
         if (o !== m && d2 < md && Math.abs(o.position.y - m.position.y) < 3 && breedable(o, t)) { md = d2; mate = o; }
@@ -223,7 +228,7 @@ function rebuildAreas() {
   // count, so turning creepers off leaves zombies' numbers as they were
   const share = BF.mobs.spawnShare(), on = t => BF.mobs.typeDef(t).spawns !== false;
   for (const A of areaList) A.cap = Math.max(1, Math.round(CAP * A.n / CAP_CHUNKS)) * share;
-  for (const m of BF.mobs.list) if (m.hostile && live(m) && on(m.type)) { const i = areaOf.get(ck(m.position.x, m.position.z)); if (i != null) areaList[i].h++; }
+  for (const t of BF.mobs.types) if (BF.mobs.typeDef(t).hostile && on(t)) for (const m of BF.mobs.ofType(t)) if (m.hostile && live(m)) { const i = areaOf.get(ck(m.position.x, m.position.z)); if (i != null) areaList[i].h++; }
 }
 function rebuildTargets() {
   targets = new Map();
@@ -241,13 +246,18 @@ function mayHostile(x, y, z) {
   const p = BF.player && BF.player.position;
   const q = p && BF.planet.local({ x, z }, p);   // (across a face edge: seen from the spot)
   if (p && !BF.player.dead && Math.hypot(q.x - x, p.y - y, q.z - z) < BUFFER) return false;
-  if (targetsDirty) { targetsDirty = false; rebuildTargets(); }   // fresh positions: villagers wake, walk home or load with their village
-  const cx = Math.floor(x / BF.CS), cz = Math.floor(z / BF.CS);
-  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-    const a = targets.get((cx + dx) + "," + (cz + dz));
-    if (a) for (const o of a) if (live(o) && Math.abs(o.position.x - x) < BUFFER && Math.abs(o.position.z - z) < BUFFER && Math.hypot(o.position.x - x, o.position.y - y, o.position.z - z) < BUFFER) return false;
-  }
-  return true;
+  // villagers and golems within BUFFER: from the region index (spec r15-31); in tests checked against the chunk table it replaced
+  const guard = o => live(o) && (o.type === "villager" || (o.def && o.def.golem)) && Math.abs(o.position.x - x) < BUFFER && Math.abs(o.position.z - z) < BUFFER && Math.hypot(o.position.x - x, o.position.y - y, o.position.z - z) < BUFFER;
+  const M = BF.mobs, got = M.near({ x, z }, BUFFER).some(guard);
+  return !M.checkScan("wildlife.buffer", got, () => {
+    if (targetsDirty) { targetsDirty = false; rebuildTargets(); }
+    const cx = Math.floor(x / BF.CS), cz = Math.floor(z / BF.CS);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const a = targets.get((cx + dx) + "," + (cz + dz));
+      if (a) for (const o of a) if (guard(o)) return true;
+    }
+    return false;
+  });
 }
 function spawned(m) {
   const i = areaOf.get(ck(m.position.x, m.position.z));
@@ -267,8 +277,8 @@ function nightRec(key, n) {
 function watchVillages() {
   const n = nightNow();
   if (n == null || !BF.vlog || !BF.vlog.villageAt) return;
-  for (const m of BF.mobs.list) {
-    if (m.type !== "zombie" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("zombie")) {   // (spec r15-31: the zombies only)
+    if (!live(m)) continue;
     const rec = BF.vlog.villageAt(m.position.x, m.position.z);
     if (rec) { const r = nightRec(rec.key, n); if (!r[0]) { r[0] = 1; log("reached", { village: rec.key, night: n }); } }
   }

@@ -379,11 +379,13 @@ function ai(m, dt, out, cont) {
     if ((S.tt -= dt) > 0) return true;
     const [fx, , fz] = BF.mobs.nav.feetCell(m);
     if ((fx === s.x && fz === s.z) || !openCell(m.village, s.x, s.y, s.z, true)) return giveUp("spot taken");
-    if (W().setBlock(s.x, s.y, s.z, BF.B.beehive)) {
-      TR().inv.remove(m.inv, I("beehive"), 1); a.swingT = 0.25;
+    a.swingT = 0.25;
+    // a request (spec r15-19, js/blockreqs.js): the hive goes down and out of the pack together in the apply phase
+    BF.blockReq.cells(m, [{ x: s.x, y: s.y, z: s.z, id: BF.B.beehive, expect: W().getBlock(s.x, s.y, s.z) }], { take: [{ id: I("beehive"), n: 1 }] }).then(r => {
+      if (!r.ok) { log("refused", { job: "place", at: pk(s.x, s.y, s.z), why: r.why }); return; }
       log("place", { at: pk(s.x, s.y, s.z) });
       vlog(m, "bees", "put a new beehive by the farms at " + pk(s.x, s.y, s.z), [s.x, s.y, s.z]);
-    }
+    });
     return done();
   }
   // ---- picking a wild flower, planting one by a hive
@@ -402,12 +404,20 @@ function ai(m, dt, out, cont) {
     a.swingT = 0.25;
     if (job.kind === "pick") {
       const id = W().getBlock(s.x, s.y, s.z);
-      if (isFlowerItem(id) && TR().inv.canFit(m.inv, [{ id, n: 1 }], []) && W().setBlock(s.x, s.y, s.z, 0)) { TR().inv.add(m.inv, id, 1); S.made.picked++; log("pick", { at: pk(s.x, s.y, s.z) }); }
+      if (isFlowerItem(id) && TR().inv.canFit(m.inv, [{ id, n: 1 }], [])) {
+        BF.blockReq.cells(m, [{ x: s.x, y: s.y, z: s.z, id: 0, expect: id }], { give: [{ id, n: 1 }] }).then(r => {   // a request (spec r15-19)
+          if (!r.ok) { log("refused", { job: "pick", at: pk(s.x, s.y, s.z), why: r.why }); return; }
+          S.made.picked++; log("pick", { at: pk(s.x, s.y, s.z) });
+        });
+      }
       return done();
     }
     const fl = (m.inv.find(x => x && isFlowerItem(x.id)) || {}).id;
     if (fl == null || !openCell(m.village, s.x, s.y, s.z, false)) return done();
-    if (W().setBlock(s.x, s.y, s.z, fl)) { TR().inv.remove(m.inv, fl, 1); S.made.flowers++; log("plant", { at: pk(s.x, s.y, s.z) }); vlog(m, "bees", "planted a " + nameOf(fl) + " by a beehive", [s.x, s.y, s.z]); }
+    BF.blockReq.cells(m, [{ x: s.x, y: s.y, z: s.z, id: fl, expect: W().getBlock(s.x, s.y, s.z) }], { take: [{ id: fl, n: 1 }] }).then(r => {   // a request (spec r15-19)
+      if (!r.ok) { log("refused", { job: "plant", at: pk(s.x, s.y, s.z), why: r.why }); return; }
+      S.made.flowers++; log("plant", { at: pk(s.x, s.y, s.z) }); vlog(m, "bees", "planted a " + nameOf(fl) + " by a beehive", [s.x, s.y, s.z]);
+    });
     return done();
   }
   // ---- leading wild bees home with a flower in hand

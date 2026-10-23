@@ -566,11 +566,14 @@ function wildCane(m, D, H) {
   D.wildT = { t: now0 + 20, v: best };
   return best;
 }
-// Does a farmer's cane / pumpkin task. Returns false when the cell changed.
+// Does a farmer's cane / pumpkin task. Returns false when the cell changed. The block edits are requests (spec r15-19, js/blockreqs.js
+// "cells"): the cells and the farmer's items change together in the tick's apply phase, and the follow-ups (log lines, the hoe's wear,
+// replanting) wait for the result. A request refused there (someone changed a cell first this tick) only logs "refused".
 function farmPerform(m, t, D, H) {
   const T = TR().inv, W = BF.world, cane = BF.B.sugar_cane, P = pumpkinsOf(D);
   if (!W.isLoaded(t.x, t.z)) return false;
   const vl = (what) => { if (BF.vlog && m.village) { const seen = m.farm && (m.farm.bakeSeen || (m.farm.bakeSeen = {})), s = BF.simNow(); if (!seen || !(s - (seen[what] || -1e9) < 60)) { if (seen) seen[what] = s; BF.vlog.log(m.village, "farm", BF.vlog.nameOf(m) + " (Farmer) " + what + " at " + t.x + ", " + t.y + ", " + t.z, [t.x, t.y, t.z]); } } };
+  const ask = (cells, o, then) => { BF.blockReq.cells(m, cells, o).then(r => { if (r.ok) then(r); else log("refused", { task: t.kind, why: r.why, at: [t.x, t.y, t.z] }); }); return true; };
   if (t.kind === "cane" || t.kind === "canegather") {
     const base = t.kind === "cane" ? t.y : t.y;   // the bottom cane block
     let top = base; while (getB(t.x, top + 1, t.z) === cane) top++;
@@ -578,53 +581,54 @@ function farmPerform(m, t, D, H) {
     const keepBase = t.kind === "cane" || top > base;   // a wild plant keeps its bottom block when it is taller than one
     const lo = keepBase ? base + 1 : base, n = top - lo + 1;
     if (n <= 0 || !T.canFit(m.inv, [{ id: cane, n }], [])) return false;
-    for (let y = top; y >= lo; y--) W.setBlock(t.x, y, t.z, 0);   // from the top down, so nothing above pops off
-    T.add(m.inv, cane, n);
-    log(t.kind === "cane" ? "caneCut" : "caneWild", { n, at: [t.x, t.y, t.z] });
-    vl(t.kind === "cane" ? "cut sugar cane" : "gathered wild sugar cane");
-    return true;
+    const cells = [];
+    for (let y = top; y >= lo; y--) cells.push({ x: t.x, y, z: t.z, id: 0, expect: cane });   // from the top down, so nothing above pops off
+    return ask(cells, { give: [{ id: cane, n }] }, () => {
+      log(t.kind === "cane" ? "caneCut" : "caneWild", { n, at: [t.x, t.y, t.z] });
+      vl(t.kind === "cane" ? "cut sugar cane" : "gathered wild sugar cane");
+    });
   }
   if (t.kind === "caneplant") {
     if (getB(t.x, t.y, t.z) !== 0 || !SOIL.has(bname(getB(t.x, t.soil, t.z))) || !besideWater(t.x, t.soil, t.z) || cnt(m, cane) < 1) return false;
-    if (!W.setBlock(t.x, t.y, t.z, cane)) return false;
-    T.remove(m.inv, cane, 1);
-    log("canePlant", { at: [t.x, t.y, t.z] });
-    vl("planted sugar cane");
-    return true;
+    return ask([{ x: t.x, y: t.y, z: t.z, id: cane, expect: 0 }], { take: [{ id: cane, n: 1 }] }, () => {
+      log("canePlant", { at: [t.x, t.y, t.z] });
+      vl("planted sugar cane");
+    });
   }
-  if (t.kind === "canespot") {   // farmland at a channel's end back to dirt (the crop on it comes up first)
+  if (t.kind === "canespot") {   // farmland at a channel's end back to dirt (the crop on it comes up first, into the farmer's pack)
     const g = getB(t.x, t.y, t.z), a = getB(t.x, t.y + 1, t.z);
     if (!isFarmland(g)) return false;
-    if (a !== 0) { const drops = BF.rollDrops(a); if (!T.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false; W.setBlock(t.x, t.y + 1, t.z, 0); for (const d of drops) T.add(m.inv, d.id, d.count); }
-    if (!W.setBlock(t.x, t.y, t.z, BF.B.dirt)) return false;
-    log("caneSpot", { at: [t.x, t.y, t.z] });
-    return true;
+    if (a !== 0) { const drops = BF.rollDrops(a, BF.rand.at("canespot", t.x, t.z, null, t.y)); if (!T.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false; }
+    const cells = a !== 0 ? [{ x: t.x, y: t.y + 1, z: t.z, id: 0, expect: a, keep: true }] : [];
+    cells.push({ x: t.x, y: t.y, z: t.z, id: BF.B.dirt, expect: g });
+    return ask(cells, {}, () => log("caneSpot", { at: [t.x, t.y, t.z] }));
   }
   if (t.kind === "pumpkin") {
     if (getB(t.x, t.y, t.z) !== BF.B.pumpkin || !T.canFit(m.inv, [{ id: I("pumpkin"), n: 1 }], [])) return false;
-    if (!W.setBlock(t.x, t.y, t.z, 0)) return false;
-    T.add(m.inv, I("pumpkin"), 1);
-    log("pumpkin", { at: [t.x, t.y, t.z] });
-    vl("harvested a pumpkin");
-    if (!besideWater(t.x, t.soil, t.z)) { P.add(H.key3(t.x, t.soil, t.z)); if (m.farm) m.farm.next = { kind: "pumpkinplant", x: t.x, y: t.y, z: t.z, ty: t.y, soil: t.soil, k: t.k }; }   // replanted at once
-    return true;
+    return ask([{ x: t.x, y: t.y, z: t.z, id: 0, expect: BF.B.pumpkin }], { give: [{ id: I("pumpkin"), n: 1 }] }, () => {
+      log("pumpkin", { at: [t.x, t.y, t.z] });
+      vl("harvested a pumpkin");
+      if (!besideWater(t.x, t.soil, t.z)) { P.add(H.key3(t.x, t.soil, t.z)); if (m.farm) m.farm.next = { kind: "pumpkinplant", x: t.x, y: t.y, z: t.z, ty: t.y, soil: t.soil, k: t.k }; }   // replanted at once
+    });
   }
   if (t.kind === "pumpkinplant") {
     const g = getB(t.x, t.soil, t.z);
     if (getB(t.x, t.y, t.z) !== 0 || BF.B.pumpkin_stem == null) return false;
     if (cnt(m, I("pumpkin_seeds")) < 1 && cnt(m, I("pumpkin")) > 0 && T.canFit(m.inv, [{ id: I("pumpkin_seeds"), n: 4 }], [{ id: I("pumpkin"), n: 1 }])) { T.remove(m.inv, I("pumpkin"), 1); T.add(m.inv, I("pumpkin_seeds"), 4); log("seeds", {}); }   // cut a pumpkin into seeds
     if (cnt(m, I("pumpkin_seeds")) < 1) return false;
+    const cells = [];
+    let tilled = false;
     if (!isFarmland(g)) {
       if (!TILL.has(bname(g)) || !H.hasHoe(m)) return false;
-      const fl = BF.farmland ? BF.farmland.tillId(t.x, t.soil, t.z) : BF.B.farmland;
-      if (!W.setBlock(t.x, t.soil, t.z, fl)) return false;
-      if (BF.toolWear) BF.toolWear.use(m, BF.toolWear.best(m, "hoe"), 1);
+      cells.push({ x: t.x, y: t.soil, z: t.z, id: BF.farmland ? BF.farmland.tillId(t.x, t.soil, t.z) : BF.B.farmland, expect: g });
+      tilled = true;
     }
-    if (!W.setBlock(t.x, t.y, t.z, BF.B.pumpkin_stem)) return false;
-    T.remove(m.inv, I("pumpkin_seeds"), 1);
-    P.add(H.key3(t.x, t.soil, t.z));
-    log("pumpkinPlant", { at: [t.x, t.y, t.z] });
-    return true;
+    cells.push({ x: t.x, y: t.y, z: t.z, id: BF.B.pumpkin_stem, expect: 0 });
+    return ask(cells, { take: [{ id: I("pumpkin_seeds"), n: 1 }] }, () => {
+      if (tilled && BF.toolWear) BF.toolWear.use(m, BF.toolWear.best(m, "hoe"), 1);
+      P.add(H.key3(t.x, t.soil, t.z));
+      log("pumpkinPlant", { at: [t.x, t.y, t.z] });
+    });
   }
   return false;
 }

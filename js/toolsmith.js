@@ -343,15 +343,16 @@ function placeFurnace(m, spot) {
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.8 && Math.abs(o.position.z - spot.z - 0.5) < 0.8 && o.position.y < spot.y + 1 && o.position.y + 1.8 > spot.y;
   if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;
   const id = BF.furnaceId(BF.openFacing(spot, m.position));
-  if (!W.setBlock(spot.x, spot.y, spot.z, id)) return false;
-  TR().inv.remove(m.inv, BF.B.furnace, 1);
-  hook();
-  furnaces.set(pk(spot.x, spot.y, spot.z), { x: spot.x, y: spot.y, z: spot.z });
-  state(m).furnace = { x: spot.x, y: spot.y, z: spot.z };
-  if (BF.emit) BF.emit("blockPlaced", spot.x, spot.y, spot.z, id);
-  log("place", m, { furnace: pk(spot.x, spot.y, spot.z) });
-  vlog(m, "furnace", "put a furnace down at " + spot.x + ", " + spot.y + ", " + spot.z);
-  return true;
+  // a request (spec r15-19, js/blockreqs.js): the furnace goes down and out of the pack in the apply phase; the toolsmith takes it as its
+  // own when that worked (refused: the spot is avoided a while, as a spot found taken here always was)
+  return BF.blockReq.cells(m, [{ x: spot.x, y: spot.y, z: spot.z, id, expect: 0 }], { take: [{ id: BF.B.furnace, n: 1 }], emit: true }).then(r => {
+    if (!r.ok) { log("giveup", m, { furnace: pk(spot.x, spot.y, spot.z), why: "spot taken (" + r.why + ")" }); const S = state(m); if (S.avoid) S.avoid["f:" + pk(spot.x, spot.y, spot.z)] = dayNow() + 0.05; return; }
+    hook();
+    furnaces.set(pk(spot.x, spot.y, spot.z), { x: spot.x, y: spot.y, z: spot.z });
+    state(m).furnace = { x: spot.x, y: spot.y, z: spot.z };
+    log("place", m, { furnace: pk(spot.x, spot.y, spot.z) });
+    vlog(m, "furnace", "put a furnace down at " + spot.x + ", " + spot.y + ", " + spot.z);
+  });
 }
 
 // ---------------------------------------------------------------- AI
