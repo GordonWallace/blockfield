@@ -293,7 +293,7 @@ function snapshot() {
     // the planet debug toggles (js/view.js setDebug: F3 + B / C / R, or the debug screen's Planet section) and which request from the
     // screen they include (tv)
     pt: BF.view && BF.view.debug ? { tv: ptv, ...BF.view.debug } : null,
-    loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), maxAiMs: BF.villageSim.LIMITS.aiMs, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
+    loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), aiWork: BF.mobs.aiWork ? BF.mobs.aiWork() : 0, maxAiWork: BF.villageSim.LIMITS.aiWork, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired

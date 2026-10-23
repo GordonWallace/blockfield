@@ -117,7 +117,7 @@ function check(x, y, z) {
 
 function tick() {
   hook();
-  const now = BF.simNow ? BF.simNow() : performance.now() / 1000;
+  const now = BF.simNow ? BF.simNow() : 0;
   const dt = Math.max(0, Math.min(5, now - last));
   last = now;
   if (rainingNow()) lastRain = dayNow();
