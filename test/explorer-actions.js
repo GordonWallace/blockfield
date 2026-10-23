@@ -50,7 +50,7 @@ module.exports = async (pg, out) => {
   for (let k = 0; k < 40; k++) {
     const line = JSON.stringify(await pg.evaluate(() => {
       const A = window.__A;
-      for (let i = 0; i < 300; i++) { BF.sky.setTime(0.1); BF.mobs.update(0.1); BF.player.position.set(A.position.x + 3, A.position.y + 1, A.position.z); }
+      for (let i = 0; i < 300; i++) { BF.sky.setTime(0.1); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); BF.player.position.set(A.position.x + 3, A.position.y + 1, A.position.z); }
       const maps = BF.explorer.carried(A);
       return { pos: [A.position.x | 0, A.position.z | 0], stage: A.ex && A.ex.stage, inv: A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count), cov: maps.map(c => +BF.explorer.coverage(c.d).toFixed(2)), status: BF.explorer.statusText(A), offers: A.trades.filter(o => o.dyn).length, log: BF.explorer.LOG.slice(-2) };
     }));
@@ -61,7 +61,7 @@ module.exports = async (pg, out) => {
     const A = window.__A, T = BF.trades;
     const act = BF.explorer.carried(A).find(c => !c.done);
     if (act) act.d.px.fill(1), act.d.ver++;      // finish the map by hand when the walk did not get there in time
-    for (let i = 0; i < 50; i++) { BF.sky.setTime(0.1); BF.mobs.update(0.1); }
+    for (let i = 0; i < 50; i++) { BF.sky.setTime(0.1); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); }
     T.init(A);
     const o = A.trades.find(o => o.dyn);
     return { offers: A.trades.map(o => o.buy.map(b => b.n + " " + BF.items[b.id].name).join("+") + " > " + o.sell.n + " " + BF.items[o.sell.id].name), reason: o && T.blockReason(A, o), status: BF.explorer.statusText(A), log: BF.explorer.LOG.slice(-1) };
