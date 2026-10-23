@@ -97,7 +97,7 @@ module.exports = async (pg, out) => {
     } },
     { name: "bees", setup: ({ st }) => {
       const L = BF.bees.list;
-      BF.warp.advance(1000 - BF.simNow());   // the wings flap with the sim clock
+      BF.warp.advance(1000 - (BF.warp.renderNow ? BF.warp.renderNow() : BF.simNow()));   // the wings flap with the drawn game time
       for (let i = 0; i < 10; i++) {
         const b = { x: st.x + 0.5 - 3 + i * 0.7, y: st.y + 0.8 + (i % 3) * 0.4, z: st.z - 3 + 0.5, yaw: i * 0.7, phase: i * 1.3, mode: "fly", land: null, landYaw: 0 };
         if (i >= 7) { b.mode = "land"; b.land = i === 9 ? { nx: 0, ny: 0, nz: 1 } : { nx: 0, ny: 1, nz: 0 }; b.landYaw = i * 0.9; b.y = i === 9 ? st.y + 1.5 : st.y; if (i === 9) b.z = st.z - 7 + 1.02; }
@@ -159,17 +159,20 @@ module.exports = async (pg, out) => {
     },
   };
   for (const [name, fn] of Object.entries(EFFECTS)) {
-    await pg.evaluate(() => {
+    // in one go, so nothing else draws from the seeded stream: the effect is made, and (after the split) played at once
+    await pg.evaluate(`(() => {
       window.__before = new WeakSet();   // (by the objects themselves: Three.js makes uuids with Math.random, seeded here)
       BF.scene.traverse(o => window.__before.add(o));
       let s = 12345;
-      window.__rand = Math.random;
+      const rand = Math.random;
       Math.random = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
-    });
-    await pg.evaluate(`(${fn})(${JSON.stringify({ st: stage })})`);
+      try {
+        (${fn})(${JSON.stringify({ st: stage })});
+        if (BF.entityView) BF.entityView.render(0, 0);
+      } finally { Math.random = rand; }
+    })()`);
     await pg.waitForTimeout(400);
     effects[name] = await pg.evaluate(() => {
-      Math.random = window.__rand;
       const r = v => Math.round(v * 1000) / 1000, a = [];
       BF.scene.traverse(o => {
         if (window.__before.has(o) || !(o.isMesh || o.isSprite) || o.name === "bees") return;
