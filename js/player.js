@@ -195,7 +195,7 @@ const css = `
 const BIOME_SIZES = [[1, "Small (classic)"], [2, "Large"], [3, "Larger"], [4.5, "Huge"], [6, "Vast"]], BIOME_DEF = 1;   // biomeScale, label
 const biomeLabel = s => (BIOME_SIZES.find(b => b[0] === s) || [0, "Large"])[1];
 let savedEl, worldsEl, createForm, createMode = null, worldsCache = [], saveOk = null;
-let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, helpEl;
+let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, budgetBtn, helpEl;
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
@@ -244,6 +244,7 @@ function buildDOM() {
     <h2 class="bfp-title" style="font-size:30px">Paused</h2>
     <button class="primary" data-act="resume">Resume</button>
     <button data-act="view">Render distance: 6</button>
+    <button data-act="budget" title="Villages beyond the nearest four stay simulated while the simulation uses less than this share of each second">Simulated villages</button>
     ${modeRow}
     <button data-act="opts">Game options</button>
     <div class="bfp-pauseopts" hidden></div>
@@ -256,6 +257,7 @@ function buildDOM() {
     <button class="primary" data-act="respawn">Respawn</button></div>`);
   for (const e of [startEl, pauseEl, deathEl]) ui.appendChild(e);
   viewBtn = pauseEl.querySelector('[data-act="view"]');
+  budgetBtn = pauseEl.querySelector('[data-act="budget"]');
   pauseNote = pauseEl.querySelector(".bfp-note");
   helpEl = pauseEl.querySelector(".bfp-help");
   savedEl = pauseEl.querySelector(".bfp-saved");
@@ -300,7 +302,8 @@ function buildDOM() {
     else if (a === "view") {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
-    } else if (a === "mode") setGameMode(act.dataset.mode);
+    } else if (a === "budget") { if (BF.active) BF.active.cycle(); updateBudgetBtn(); }   // 20, 40, 60, 80% or off (js/active.js)
+    else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
     else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.monsters()); }
     else if (a === "mon") { BF.gameOpts.set(act.dataset.mon, flipOpt(act)); savePause(); }   // in game: applies at once, and saves
@@ -316,6 +319,8 @@ function buildDOM() {
   knobEl = touchEl.querySelector(".bfp-knob");
 }
 
+// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js)
+function updateBudgetBtn() { if (budgetBtn && BF.active) budgetBtn.textContent = BF.active.text(); }
 function updateViewBtn() {
   const d = BF.world.viewDist;
   if (viewBtn) viewBtn.textContent = `Render distance: ${d} chunks (${d * (BF.CS || 16)} blocks)`;
@@ -378,7 +383,7 @@ function showScreen(name) {
   startEl.classList.toggle("on", name === "start");
   pauseEl.classList.toggle("on", name === "pause");
   deathEl.classList.toggle("on", name === "death");
-  if (name === "pause") { updateViewBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
+  if (name === "pause") { updateViewBtn(); updateBudgetBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
   const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
