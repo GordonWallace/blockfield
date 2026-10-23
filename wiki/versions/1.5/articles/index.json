@@ -2,4 +2,4 @@
  "villages", "village-structures",
  "villagers", "villager-life", "village-economy", "builders", "caravans", "village-loading",
  "mobs", "mob-spawning", "animal-husbandry",
- "player", "mining-and-tools", "farming", "light", "time-and-weather", "transport", "maps-and-compasses", "commands", "game-log", "performance-meter"]
+ "player", "mining-and-tools", "farming", "light", "time-and-weather", "transport", "maps-and-compasses", "commands", "game-log", "state-hash", "performance-meter"]

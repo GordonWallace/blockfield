@@ -36,7 +36,7 @@ function check(x, y, z) {
 }
 function chunks() {
   const W = BF.world, n = W.chunks.size;
-  if (listAt !== n) { list = [...W.chunks.values()]; listAt = n; }   // rebuilt when chunks load or unload
+  if (listAt !== n) { list = [...W.chunks.values()].sort((a, b) => a.cx - b.cx || a.cz - b.cz); listAt = n; }   // rebuilt when chunks load or unload; sorted, so a sample doesn't hang on load order
   return list;
 }
 function tick() {
@@ -53,9 +53,9 @@ function tick() {
   const cs = chunks(), CS = BF.CS;
   if (!cs.length) return;
   for (; n > 0; n--) {
-    const c = cs[(Math.random() * cs.length) | 0];
+    const r = BF.rand.at("grass", n, 0), c = cs[r.int(cs.length)];   // each sample of the tick has its own seeded stream (js/rand.js)
     if (!c || !W.chunks.has(c.cx + "," + c.cz)) { listAt = -1; continue; }
-    const x = c.cx * CS + ((Math.random() * CS) | 0), z = c.cz * CS + ((Math.random() * CS) | 0);
+    const x = c.cx * CS + r.int(CS), z = c.cz * CS + r.int(CS);
     const y = W.heightAt(x, z);
     looked++;
     check(x, y, z);

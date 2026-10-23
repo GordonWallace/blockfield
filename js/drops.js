@@ -37,9 +37,10 @@ const drops = {
     const sprite = new THREE.Sprite(matFor(id));
     sprite.scale.set(0.38, 0.38, 0.38);
     scene.add(sprite);
-    const a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 1.5;
-    const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + Math.random() * 2, Math.sin(a) * s);
-    const d = { id, count, pos: new THREE.Vector3(x, y, z), vel, age: 0, phase: Math.random() * 6.28, sprite,
+    const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + drops.list.length * 4099);   // the toss: seeded by the spot, tick and count (js/rand.js)
+    const a = r.next() * Math.PI * 2, s = 1 + r.next() * 1.5;
+    const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + r.next() * 2, Math.sin(a) * s);
+    const d = { id, count, pos: new THREE.Vector3(x, y, z), vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
     return d;

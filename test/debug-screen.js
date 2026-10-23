@@ -70,6 +70,10 @@ const start = async () => {
   const pc = await dbg.evaluate(() => ({ vss: document.getElementById('c-vss').textContent, ms: document.getElementById('c-perf-ms').textContent, parts: document.querySelectorAll('#c-split span').length, f3: document.getElementById('f3').textContent }));
   ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
   ok('meter on in the game while the screen is open', await game.evaluate(() => BF.perf.on));
+  // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
+  const hs = await dbg.evaluate(() => ({ hash: document.getElementById('c-hash').textContent, parts: document.querySelectorAll('#c-hashparts .row').length }));
+  const gh = await game.evaluate(() => BF.stateHash.last && { hash: BF.stateHash.last.hash, parts: BF.stateHash.PARTS.length });
+  ok('state hash card shows the game\'s hash and its parts ' + JSON.stringify([hs, gh]), gh && /^[0-9a-f]{16}$/.test(hs.hash) && hs.hash === gh.hash && hs.parts === gh.parts);
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // server restart: a fresh server has no layout/log; the game must resend both
   srv.kill(); await new Promise(r => srv.once('exit', r));
