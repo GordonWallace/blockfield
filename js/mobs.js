@@ -33,11 +33,9 @@ function wrapAngle(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.P
 // coordinates stay plain x / z maths when it walks past a face edge; they are margin addresses there), everything else on the canonical
 // square of the face it stands on. keepFrame runs after every move step. Anything compared with something that may be kept in another
 // frame (the player, other mobs, arrows) is first seen from this one: seen(a, o) is o's position expressed in a's frame, so dx / dz / a
-// distance are true local offsets across an edge. Off the planet both are the identity.
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
+// distance are true local offsets across an edge.
 const LQ = {};
 function seen(a, o, out) {
-  if (!onPlanet()) return o;
   BF.planet.local(a, o, LQ);
   if (LQ.x === o.x && LQ.z === o.z) return o;
   out = out || new THREE.Vector3();
@@ -60,7 +58,7 @@ const FR = {};
 // After a move step: puts the mob back in its frame when it left it (turning its yaw and velocity) and re-expresses the points its AI
 // holds (wander target, route cells) in the new frame.
 function keepFrame(m) {
-  if (!onPlanet() || m.rider) return;   // a ridden mob crosses with its rider (player.js crossEdge)
+  if (m.rider) return;   // a ridden mob crosses with its rider (player.js crossEdge)
   const q = BF.planet.reframe(m.position, frameFace(m), m, m.vel);
   if (q == null) return;
   m.model.rotation.y = m.yaw;
@@ -72,10 +70,8 @@ function keepFrame(m) {
 // Spatial grid key of the cell (gx, gz) of size s, seen from any frame: the canonical cell it shows (grid cells line up across edges).
 const GC = {};
 function gridKey(gx, gz, s) {
-  if (onPlanet()) {
-    const c = BF.planet.canon(gx * s + s / 2, gz * s + s / 2, GC);
-    if (!c.off) { gx = Math.floor(c.x / s); gz = Math.floor(c.z / s); }
-  }
+  const c = BF.planet.canon(gx * s + s / 2, gz * s + s / 2, GC);
+  if (!c.off) { gx = Math.floor(c.x / s); gz = Math.floor(c.z / s); }
   return sepKey(gx, gz);
 }
 const player = () => BF.player;
@@ -625,15 +621,17 @@ const MODELS = {
 };
 
 // ---------- type table ----------
+// spawns (monsters): whether the type spawns in the world being played, a plain boolean that the world's game options set (js/gameopts.js);
+// false drops spawn tries that pick it and keeps stored ones from coming back. A type with no spawns flag is not switchable.
 const TYPES = {
   pig:      { hostile: false, hp: 10, hw: 0.45, h: 0.9,  speed: 1.3, flee: 3.4, drops: [["raw_porkchop", 1, 3]] },
   cow:      { hostile: false, hp: 10, hw: 0.45, h: 1.4,  speed: 1.1, flee: 3.0, drops: [["raw_beef", 1, 3], ["leather", 0, 2]] },
   sheep:    { hostile: false, hp: 8,  hw: 0.45, h: 1.3,  speed: 1.2, flee: 3.2, drops: [["white_wool", 1, 1], ["raw_mutton", 1, 2]] },
   chicken:  { hostile: false, hp: 4,  hw: 0.2,  h: 0.75, speed: 1.1, flee: 3.0, drops: [["raw_chicken", 1, 1], ["feather", 0, 2]], slowFall: true },
-  zombie:   { hostile: true,  hp: 20, hw: 0.3,  h: 1.95, speed: 2.2, attack: 3, burns: true, drops: [["rotten_flesh", 0, 2]] },
-  skeleton: { hostile: true,  hp: 20, hw: 0.3,  h: 1.99, speed: 2.3, burns: true, drops: [["bone", 0, 2], ["arrow", 0, 2]] },
-  creeper:  { hostile: true,  hp: 20, hw: 0.3,  h: 1.7,  speed: 1.9, drops: [["gunpowder", 0, 2]] },
-  spider:   { hostile: true,  hp: 16, hw: 0.7,  h: 0.9,  speed: 3.4, attack: 2, climbs: true, drops: [["string", 0, 2]] },
+  zombie:   { hostile: true,  spawns: true, hp: 20, hw: 0.3,  h: 1.95, speed: 2.2, attack: 3, burns: true, drops: [["rotten_flesh", 0, 2]] },
+  skeleton: { hostile: true,  spawns: true, hp: 20, hw: 0.3,  h: 1.99, speed: 2.3, burns: true, drops: [["bone", 0, 2], ["arrow", 0, 2]] },
+  creeper:  { hostile: true,  spawns: true, hp: 20, hw: 0.3,  h: 1.7,  speed: 1.9, drops: [["gunpowder", 0, 2]] },
+  spider:   { hostile: true,  spawns: true, hp: 16, hw: 0.7,  h: 0.9,  speed: 3.4, attack: 2, climbs: true, drops: [["string", 0, 2]] },
   villager: { hostile: false, hp: 20, hw: 0.3,  h: 1.95, speed: 0.9, flee: 2.8, village: true, variants: PROFESSIONS, drops: [] },
   iron_golem: { hostile: false, hp: 100, hw: 0.7, h: 2.7, speed: 1.4, attack: 10, village: true, golem: true, noKnock: true, drops: [["iron_ingot", 3, 5]] },
   // horses (js/horses.js): spawned in herds by js/horses.js, not by the passive spawner, and not counted against its cap; hp is rolled per horse
@@ -961,7 +959,7 @@ function updateArrows(dt) {
     let hitPlayer = false;
     for (let s = 0; s < steps; s++) {
       a.pos.addScaledVector(a.vel, dt / steps);
-      if (onPlanet()) BF.planet.reframe(a.pos, -1, null, a.vel);   // past a face edge: back on the canonical square, turned
+      BF.planet.reframe(a.pos, -1, null, a.vel);   // past a face edge: back on the canonical square, turned
       if (BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z)) {
         if (a.byPlayer) {   // back up and creep in 5 cm steps, so the tip sits just inside the first solid block on the path
           const sp = a.vel.length(), back = sp * dt / steps;
@@ -2176,6 +2174,7 @@ function spawnHostile(type, x, y, z) {
 }
 function trySurface(c) {
   const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  if (!T.spawns) return;   // switched off in this world (js/gameopts.js): the try is dropped, not re-picked, so the others spawn as often as before
   const x = c.cx * CS + irnd(0, CS - 1), z = c.cz * CS + irnd(0, CS - 1);
   const gy = w.heightAt(x, z);
   if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
@@ -2187,6 +2186,7 @@ function trySurface(c) {
 // a dark, covered air pocket in a random column of the chunk
 function tryCave(c) {
   const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+  if (!T.spawns) return;   // (as trySurface)
   const lx = irnd(0, CS - 1), lz = irnd(0, CS - 1), x = c.cx * CS + lx, z = c.cz * CS + lz;
   if (!c.top) return;
   const top = c.top[lz * CS + lx];
@@ -2562,7 +2562,7 @@ function updateVillages(dt) {
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
     if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); applyDead(rec); }
-    const lp = onPlanet() ? BF.planet.local(v, pp, VQ) : pp;   // (the planet: the player seen from the village, across a face edge)
+    const lp = BF.planet.local(v, pp, VQ);   // (the player seen from the village, across a face edge)
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - lp.x, v.z - lp.z) > 80;
     if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
@@ -2669,7 +2669,7 @@ BF.mobs = {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
         let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
-        if (onPlanet()) { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
+        { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
         if (Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
@@ -2749,6 +2749,11 @@ BF.mobs = {
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
+  // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
+  discard(m) { if (m && !m.removed) removeMob(m); },
+  // The share of monster spawn weight whose type spawns (1 with all on): js/wildlife.js scales its area caps by it.
+  spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
+  spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
   isWild, spawnGroup, penBoxes, inPenBox, standable, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },

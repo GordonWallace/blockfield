@@ -1,4 +1,4 @@
-Creepers are the silent monster with no weapon but themselves. They do not burn in sunlight. About a quarter of monster spawns are creepers, found in the dark on the surface at night and in dark caves at any time of day (see [[page:mob-spawning]]).
+Creepers are the silent monster with no weapon but themselves. They do not burn in sunlight. Creepers are **off by default**: they spawn only in worlds whose game options turn them on (see [[page:mob-spawning]]). Then about a quarter of monster spawns are creepers, found in the dark on the surface at night and in dark caves at any time of day (see [[page:mob-spawning]]).
 
 ### The fuse
 

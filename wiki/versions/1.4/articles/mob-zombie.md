@@ -1,4 +1,4 @@
-Zombies are the commonest monster, making up a third of all spawns. They appear in the dark on the surface at night and in dark caves at any hour (see [[page:mob-spawning]]). They are slow, but they never give up, and they are the main reason villagers shut themselves indoors at night.
+Zombies are the commonest monster, making up a third of all spawns (they are on by default; a world's game options can turn them off, see [[page:mob-spawning]]). They appear in the dark on the surface at night and in dark caves at any hour (see [[page:mob-spawning]]). They are slow, but they never give up, and they are the main reason villagers shut themselves indoors at night.
 
 ### Hunting
 

@@ -25,11 +25,22 @@ module.exports = async (pg, out) => {
     const el = document.querySelector(".bfv-hover");
     return el ? { shown: getComputedStyle(el).display !== "none", text: [...el.children].filter(c => c.style.display !== "none").map(c => c.textContent).join(" | "), mob: BF.villagerHover.shown() === window.__v } : null;
   });
+  // Aims at the villager until the card shows it, up to ~20 tries: on a slow runner the player can still be settling after the
+  // teleport (lifted out of the ground a few frames later), which moves the eye after the look was set. Returns the last card.
+  const aimUntilShown = async () => {
+    let c = null;
+    for (let i = 0; i < 20; i++) {
+      await aim(); await frames(5);
+      c = await card();
+      if (c && c.shown && c.mob) { if (i) console.log(`(card shown after ${i + 1} aims)`); break; }
+    }
+    return c;
+  };
   const r = { pick };
   // clear any blocks between the player and the villager (villages sit on uneven ground)
   await pg.evaluate(() => { const p = window.__v.position; for (let dx = 1; dx <= 4; dx++) for (let dy = 0; dy < 3; dy++) BF.world.setBlock(Math.floor(p.x) + dx, Math.floor(p.y) + dy, Math.floor(p.z), 0); });
-  await aim(); await frames(10); await aim(); await frames(5);
-  r.survival = await card();
+  await aim(); await frames(10);
+  r.survival = await aimUntilShown();
   await pg.screenshot({ path: out + '-survival.png' });
   // a wall between hides it
   await pg.evaluate(() => { const p = window.__v.position; for (let dy = 0; dy < 3; dy++) BF.world.setBlock(Math.floor(p.x) + 2, Math.floor(p.y) + dy, Math.floor(p.z), BF.B ? BF.B.stone || 1 : 1); });
@@ -41,8 +52,7 @@ module.exports = async (pg, out) => {
   r.lookAway = await card();
   // creative
   await pg.evaluate(() => { BF.player.gameMode = "creative"; });
-  await aim(); await frames(5);
-  r.creative = await card();
+  r.creative = await aimUntilShown();
   // trade screen: name in the title and the inventory panel; the hover card hides behind the screen
   r.screen = await pg.evaluate(() => {
     BF.player.gameMode = "survival"; BF.state.paused = false;
