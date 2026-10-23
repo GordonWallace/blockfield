@@ -353,7 +353,7 @@ function damageMob(m, amount, knockDir, byPlayer, cause) {
     else if (m.def.golem) m.ai.provoked = creative() ? 0 : 60;
     else m.ai.fleeT = rnd(R(m), 3, 5);
     // hurting a villager or a golem angers the village's golems
-    if (m.village && !creative()) { m.village.angryT = 60; for (const g of list) if (g.def.golem && g.village === m.village) g.ai.provoked = 60; }
+    if (m.village && !creative()) { m.village.angryT = 60; for (const g of villageMobs(m.village)) if (g.def.golem) g.ai.provoked = 60; }
   } else if (m.type === "villager") m.ai.fleeT = rnd(R(m), 3, 5);
   if (m.hp <= 0) kill(m, byPlayer);
   return true;
@@ -421,10 +421,11 @@ function explode(m) {
       if (dmg > 0 && p.damage) p.damage(dmg, c.clone());
     }
   }
-  for (const o of list.slice()) {
-    if (o === m || o.dead) continue;
+  const blast = L => L.filter(o => o !== m && !o.dead && o.position.distanceTo(c) < 6);
+  for (const o of vq("mobs.explosion", blast(nearMobs(c, 6)), blast)) {
+    if (o.dead) continue;
     const d = o.position.distanceTo(c);
-    if (d < 6) damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false, "an explosion");
+    damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false, "an explosion");
   }
   puff(c, 26, 1.6, false, 4);
   puff(c, 10, 1.0, true, 3);
@@ -485,9 +486,24 @@ function playerArrowStep(a, p) {
   }
   return false;
 }
-// Living mob whose box holds point q (player arrows test every mob).
-function mobAt(q) {
-  for (const m of list) {
+// Nearest living mob whose AABB the ray hits within maxDist (BF.mobs.raycast).
+function raycastIn(L, origin, dir, maxDist, skip) {
+  let best = null;
+  const mn = [0, 0, 0], mx = [0, 0, 0];
+  for (const m of L) {
+    if (m.dead || m.removed || m === skip) continue;
+    const p = seen(origin, m.position, _sA), hw = m.halfWidth;
+    mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
+    mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
+    const t = rayAABB(origin, dir, mn, mx);
+    if (t != null && t <= maxDist && (!best || t < best.dist)) best = { mob: m, dist: t };
+  }
+  return best;
+}
+// Living mob whose box holds point q (player arrows).
+function mobAt(q) { return vq("mobs.mobAt", mobAtIn(nearMobs(q, 2, true), q), L => mobAtIn(L, q)); }
+function mobAtIn(L, q) {
+  for (const m of L) {
     if (m.dead || m.removed) continue;
     const vp = seen(q, m.position, _sA), hw = m.halfWidth + 0.1;
     if (Math.abs(q.x - vp.x) < hw && Math.abs(q.z - vp.z) < hw && q.y > vp.y && q.y < vp.y + m.height) return m;
@@ -743,6 +759,26 @@ function hostileAI(m, dt, out) {
   }
 }
 
+// ---------- region queries (spec r15-31) ----------
+// A scan for mobs near a point looks only at the mobs the region index has within r blocks of it across the ground
+// (BF.regions.mobsAround, dying mobs included; whole list without the index or past QR_MAX), and keeps its own exact test over them,
+// so the answer is the same, in the same order. local: measured through a face edge, for scans that use seen() / mdist.
+const QR_MAX = 1024, LOCAL = { local: true };
+function nearMobs(p, r, local) {
+  const R = BF.regions;
+  return R && R.mobsAround && r <= QR_MAX ? R.mobsAround(p.x, p.z, r, null, local ? LOCAL : null) : list;
+}
+// With BF.regions.verifyQueries on (tests) a converted scan runs over the whole list too, and BF.regions counts and logs a different
+// answer. `scan` is the scan taking a list.
+const qNorm = x => (Array.isArray(x) ? x : x == null ? [] : [x && x.mob ? x.mob : x]);
+function vq(label, got, scan) {
+  const R = BF.regions;
+  if (R && R.verifyQueries && R.checkQuery) R.checkQuery(label, qNorm(got), () => qNorm(scan(list)));
+  return got;
+}
+// A village's mobs (BF.regions.villageMobs: its members), and the mobs of one type (a copy), both in list order.
+const villageMobs = V => (BF.regions && BF.regions.villageMobs ? BF.regions.villageMobs(V) : list.filter(o => o.village === V));
+const ofType = t => (BF.regions && BF.regions.ofType ? BF.regions.ofType(t).slice() : list.filter(o => o.type === t));
 // Finds the nearest living mob matching pred within r blocks (horizontal + vertical box).
 function nearestMob(m, r, pred) {
   let best = null, bd = r;
@@ -760,7 +796,11 @@ function nearestMob(m, r, pred) {
     }
     return best;
   }
-  for (const o of list) {
+  return vq("mobs.nearestMob", nearestIn(nearMobs(m.position, r, true), m, r, pred), L => nearestIn(L, m, r, pred));
+}
+function nearestIn(L, m, r, pred) {
+  let best = null, bd = r;
+  for (const o of L) {
     if (o === m || o.dead || o.removed || !pred(o)) continue;
     const d = mdist(m, o);
     if (d < bd) { bd = d; best = o; }
@@ -800,7 +840,9 @@ const RESCUE_RANGE = 64, RESCUE_SPEED = 6.0;
 const GOLEM_HITS = { zombie: 4, spider: 3, arrow: [3, 5] };
 // A villager is under attack when a mob hit it in the last 6 s, or a zombie hunting it is within 6 blocks.
 // Returns the nearest such attacker to golem g (only its own village's villagers when it has a village).
-function villagerInDanger(g) {
+// The attacker is within RESCUE_RANGE; the villager it hit is looked for RESCUE_RANGE further out (it was hit up to 6 s ago, maybe by an arrow).
+function villagerInDanger(g) { return vq("mobs.villagerInDanger", dangerIn(nearMobs(g.position, 2 * RESCUE_RANGE, true), g), L => dangerIn(L, g)); }
+function dangerIn(L, g) {
   let best = null, bd = RESCUE_RANGE;
   const consider = (v, h) => {
     if (!h || h.dead || h.removed || !h.hostile) return;
@@ -808,7 +850,7 @@ function villagerInDanger(g) {
     const d = mdist(g, h);
     if (d < bd) { bd = d; best = h; }
   };
-  for (const o of list) {
+  for (const o of L) {
     if (o.dead || o.removed) continue;
     if (o.type === "villager" && o.attacker && o.age - o.attackedAt < 6) consider(o, o.attacker);
     else if (o.type === "zombie" && o.ai.vTarget && !o.ai.vTarget.dead && mdist(o, o.ai.vTarget) < 6) consider(o.ai.vTarget, o);
@@ -1175,7 +1217,8 @@ function isOccupied(x, y, z) {
   const hit = (p, hw, h) => p.x + hw > x && p.x - hw < x + 1 && p.z + hw > z && p.z - hw < z + 1 && p.y < y + 2 && p.y + h > y;
   const c = { x: x + 0.5, z: z + 0.5 };   // (seen from the cell's frame)
   if (playerAlive() && hit(seen(c, player().position, _sA), 0.3, 1.8)) return true;
-  return list.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
+  const any = L => L.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
+  return vq("mobs.isOccupied", any(nearMobs(c, 3, true)), any);
 }
 // Villagers open closed doors just ahead on their route, and the one they stand in (spawned or scattered into a doorway: its panel would hold
 // them there for good), and close the ones they opened once clear of them.
@@ -1805,7 +1848,8 @@ function spawnGroup(type, cx, cz, n, r) {
     if (!inChunk(sx, sz)) continue;
     const sy = ok(sx, sz);
     if (sy == null) continue;
-    if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9 && Math.abs(o.position.y - sy) < 2)) continue;
+    const taken = L => L.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9 && Math.abs(o.position.y - sy) < 2);
+    if (vq("mobs.spawnSpot", taken(nearMobs({ x: sx + 0.5, z: sz + 0.5 }, 2)), taken)) continue;
     if (type === "horse" ? BF.horses && BF.horses.spawn(sx + 0.5, sy, sz + 0.5) : createMob(type, sx + 0.5, sy, sz + 0.5)) made++;   // a horse gets its record (js/horses.js)
   }
   return made;
@@ -2332,6 +2376,12 @@ BF.mobs = {
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
+  // spec r15-31, for the animal modules: near(p, r, local) -> the mobs a scan within r blocks of p must look at (see nearMobs);
+  // checkScan(label, got, scan) -> got, checked against scan(BF.mobs.list) when BF.regions.verifyQueries is on (see vq);
+  // ofType(type) -> the mobs of one type, in list order (a copy).
+  near: (p, r, local) => nearMobs(p, r, local),
+  checkScan: (label, got, scan) => vq(label, got, scan),
+  ofType: t => ofType(t),
   // The mob grids for test/mobgrid-compare.js (r15-06): ref(true) switches buildSepGrid and the lookups to the pre-r15-06 builder.
   // cells() lists each grid's non-empty cells (key -> mobs); separate(m, dt) returns the push it gives m's velocity (m.vel is restored).
   grid: {
@@ -2374,6 +2424,9 @@ BF.mobs = {
     if (!scene) return;
     dt = Math.min(dt, 0.05);
     planBudget = 2; // A* searches per frame
+    // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
+    // step BF.mobs.update on its own, and move mobs between steps
+    if (BF.regions) BF.regions.tick();
     // the villager-seconds meter (js/perf.js): each lap charges the time since the last to a category; nothing while it's off
     const PF = BF.perf, PC = PF.C, pon = PF.on;
     buildSepGrid();
@@ -2434,19 +2487,7 @@ BF.mobs = {
     drawArrows(Math.max(0, Math.min(1, alpha)));
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
-  raycast(origin, dir, maxDist, skip) {
-    let best = null;
-    const mn = [0, 0, 0], mx = [0, 0, 0];
-    for (const m of list) {
-      if (m.dead || m.removed || m === skip) continue;
-      const p = seen(origin, m.position, _sA), hw = m.halfWidth;
-      mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
-      mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
-      const t = rayAABB(origin, dir, mn, mx);
-      if (t != null && t <= maxDist && (!best || t < best.dist)) best = { mob: m, dist: t };
-    }
-    return best;
-  },
+  raycast(origin, dir, maxDist, skip) { return vq("mobs.raycast", raycastIn(nearMobs(origin, maxDist + 2, true), origin, dir, maxDist, skip), L => raycastIn(L, origin, dir, maxDist, skip)); },
   // Player attack. Returns true if the hit landed (false while the mob is briefly invulnerable).
   hit(mob, damage, knockDir) { return damageMob(mob, damage, knockDir, true); },
   // Player bow shot (js/player.js): see shootPlayerArrow. arrows() lists the player's arrows in flight or stuck (tests, debug).

@@ -102,9 +102,14 @@ const playerSeeds = () => {
 };
 
 // ---------------------------------------------------------------- breeding
+// (spec r15-31: scans of the mobs near a point, BF.mobs.near, checked against the whole list in tests with BF.mobs.checkScan)
 function findMate(m, t) {
+  const scan = L => mateIn(L, m, t);
+  return BF.mobs.checkScan("poultry.findMate", scan(BF.mobs.near(m.position, Math.max(MATE_R, 16))), scan);
+}
+function mateIn(L, m, t) {
   let best = null, bd = MATE_R * MATE_R, near = 0;
-  for (const o of BF.mobs.list) {
+  for (const o of L) {
     if (o.type !== "chicken" || !live(o)) continue;
     const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
     if (d2 < 256) near++;
@@ -350,8 +355,8 @@ function tick(dt) {
   acc = 0;
   if (toShut.length) shutGates();
   const t = now();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "chicken" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("chicken")) {   // (spec r15-31: the chicken only)
+    if (!live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
     if (s.layAt == null || s.layAt - t > LAY_MAX * 2) s.layAt = t + layDays();   // time was set back
@@ -400,9 +405,10 @@ function coopOf(m) {
 }
 // What the keeper looks after: {coop, hens (live chickens to feed), flock (live chickens counted for culling), size (the flock, unloaded ones too)}.
 function tended(m) {
-  const coop = coopOf(m), list = BF.mobs.list;
-  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
-  const near = o => o.type === "chicken" && live(o) && !o.ledBy && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (coop ? TEND_R : FREE_RADIUS) && Math.abs(o.position.y - m.position.y) < 6;
+  const coop = coopOf(m);
+  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = coop ? TEND_R : FREE_RADIUS;
+  const near = o => o.type === "chicken" && live(o) && !o.ledBy && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
+  const M = BF.mobs, list = M.checkScan("poultry.tended", M.near(home, R).filter(near), L => L.filter(near));
   let flock;
   if (coop && coop.hens) flock = coop.hens.map(s => s.mob).filter(live);
   else flock = list.filter(o => near(o) && !o.coop);
@@ -420,13 +426,16 @@ function seedsWanted(m) {
 }
 function wildChicken(m, coop, S) {
   const c = { x: (coop.x0 + coop.x1) / 2, z: (coop.z0 + coop.z1) / 2 }, sim = BF.simNow();
-  let best = null, bd = FIND_R;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "chicken" || !live(o) || o.coop || o.ledBy || isChick(o) || (S.avoid.get(o.id) || 0) > sim) continue;
-    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best;
+  const scan = L => {
+    let best = null, bd = FIND_R;
+    for (const o of L) {
+      if (o.type !== "chicken" || !live(o) || o.coop || o.ledBy || isChick(o) || (S.avoid.get(o.id) || 0) > sim) continue;
+      const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  return BF.mobs.checkScan("poultry.wildChicken", scan(BF.mobs.near(c, FIND_R)), scan);
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), c = idsOf(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
@@ -640,7 +649,7 @@ function statusText(m) {
 // Counts for the debug screen: chickens loaded near the player, penned and wild.
 function counts() {
   let penned = 0, wild = 0, chicks = 0;
-  if (BF.mobs) for (const m of BF.mobs.list) if (m.type === "chicken" && live(m)) { if (m.coop) penned++; else wild++; if (m.chick) chicks++; }
+  if (BF.mobs) for (const m of BF.mobs.ofType("chicken")) if (live(m)) { if (m.coop) penned++; else wild++; if (m.chick) chicks++; }
   return { penned, wild, chicks };
 }
 

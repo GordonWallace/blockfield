@@ -125,9 +125,14 @@ function playerUse(m, sel) {
 }
 
 // ---------------------------------------------------------------- breeding
+// (spec r15-31: scans of the mobs near a point, BF.mobs.near, checked against the whole list in tests with BF.mobs.checkScan)
 function findMate(m, t) {
+  const scan = L => mateIn(L, m, t);
+  return BF.mobs.checkScan("shepherd.findMate", scan(BF.mobs.near(m.position, Math.max(MATE_R, 16))), scan);
+}
+function mateIn(L, m, t) {
   let best = null, bd = MATE_R * MATE_R, near = 0;
-  for (const o of BF.mobs.list) {
+  for (const o of L) {
     if (o.type !== "sheep" || !live(o)) continue;
     const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
     if (d2 < 256) near++;
@@ -344,8 +349,8 @@ function tick(dt) {
   if (acc < 0.5 || !BF.mobs) return;
   acc = 0;
   const t = now();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "sheep" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("sheep")) {   // (spec r15-31: the sheep only)
+    if (!live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
     if (s.shorn) {
@@ -402,9 +407,10 @@ function penOf(m) {
 }
 // What the shepherd looks after: {pen, sheep (live mobs to feed / shear), flock (live mobs counted for crowding and culling), threshold}.
 function tended(m) {
-  const pen = penOf(m), list = BF.mobs.list;
-  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
-  const near = o => o.type === "sheep" && live(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (pen ? TEND_R : FREE_RADIUS) && Math.abs(o.position.y - m.position.y) < 6;
+  const pen = penOf(m);
+  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = pen ? TEND_R : FREE_RADIUS;
+  const near = o => o.type === "sheep" && live(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
+  const M = BF.mobs, list = M.checkScan("shepherd.tended", M.near(home, R).filter(near), L => L.filter(near));
   let flock, threshold;
   if (pen && pen.sheep) { flock = pen.sheep.map(s => s.mob).filter(live); threshold = pen.threshold; }
   else { flock = list.filter(o => near(o) && !o.pen); threshold = FREE_THRESHOLD; }
@@ -445,13 +451,16 @@ function pickTask(m, S) {
 }
 function wildSheep(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
-  let best = null, bd = FIND_R;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "sheep" || !live(o) || o.pen || o.ledBy || isLamb(o) || (S.avoid.get(o.id) || 0) > sim) continue;
-    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best;
+  const scan = L => {
+    let best = null, bd = FIND_R;
+    for (const o of L) {
+      if (o.type !== "sheep" || !live(o) || o.pen || o.ledBy || isLamb(o) || (S.avoid.get(o.id) || 0) > sim) continue;
+      const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  return BF.mobs.checkScan("shepherd.wildSheep", scan(BF.mobs.near(c, FIND_R)), scan);
 }
 const inRoom = (p, pos) => pos.x > p.x0 && pos.x < p.x1 && pos.z > p.z0 && pos.z < p.z1 && Math.abs(pos.y - (p.y + 1)) < 3;
 // Leading a wild sheep home: to the path in front of the gate, then into the pen (js/herd.js lead; the sheep walks the trail, sheepAI).
