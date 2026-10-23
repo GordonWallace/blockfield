@@ -26,13 +26,18 @@ module.exports = async (pg) => {
     const T = { what: "Test errand", secs: 300, t0: BF.sky.day + BF.sky.time, end: BF.sky.day + BF.sky.time + 300 / 1200 };   // on a task, not at leisure
     const put = () => { if (m.vtask !== T) m.vtask = T; m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
     Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
-    put(); window.__pin = setInterval(put, 150);
+    // pinned before every game tick (the world runs 20 ticks a game second whatever the frame rate, spec r15-10: a real-time timer
+    // between frames would let several ticks run with the villager walking off or its task done)
+    const up = BF.mobs.update, ts = BF.world.tickSim;
+    put(); window.__unpin = () => { BF.mobs.update = up; BF.world.tickSim = ts; };
+    BF.mobs.update = function () { put(); return up.apply(this, arguments); };
+    BF.world.tickSim = function () { put(); return ts.apply(this, arguments); };   // (the village re-checks its villagers in tickSim)
     window.__who = BF.vlog.nameOf(m);
   }, info.key);
   await wait(k => BF.villageSim.estimates(k).max > 0, info.key, 15000);   // the village knows it is out on an errand
   await tp(info.x + 300, info.z);
   const gone = await wait(k => !BF.villageSim.isActive(k), info.key, 30000);
-  await pg.evaluate(() => clearInterval(window.__pin));
+  await pg.evaluate(() => window.__unpin());
   const after = await pg.evaluate(k => ({ left: BF.mobs.list.filter(m => m.village && m.village.key === k).length, all: BF.villageSim.errors().map(e => e.kind + ":" + e.who + ":" + (e.action || e.task) + ":" + e.why), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").map(e => e.who + ": " + e.action + " (" + e.why + ")"), who: window.__who }), info.key);
   ok("a village over the village-count limit is unloaded with a villager still out", gone && after.left === 0, after);
   ok("the forced stop of an errand is logged with its action and reason", after.errs.some(e => e.indexOf(after.who + ": went home") === 0 && e.indexOf("village count") > 0), after);

@@ -74,7 +74,18 @@ module.exports = async (pg, out) => {
       return { fps, ticks, frames, trace: t };
     }
     // physics only: each mob thrown up and sideways, its AI held off (knockT) for the whole run
+    // run on their own: every other mob is set aside (their moves in the first run would push these differently in the second), and
+    // the modules that bring mobs back on their own (wildlife, horse herds, monster spawning) are off
     function thrown(fps) {
+      const others = BF.mobs.list.splice(0), WL = BF.wildlife, HO = BF.horses, sp = BF.mobs.spawning;
+      BF.wildlife = undefined; BF.horses = undefined; BF.mobs.spawning = false;
+      try { return thrownRun(fps); }
+      finally {
+        for (const m of BF.mobs.list.slice()) BF.mobs.discard(m);
+        BF.mobs.list.push(...others); BF.wildlife = WL; BF.horses = HO; BF.mobs.spawning = sp;
+      }
+    }
+    function thrownRun(fps) {
       BF.warp.advance(clock0 - BF.simNow());
       const ms = TYPES.map((t, i) => {
         const a = i / TYPES.length * Math.PI * 2, x = P.x + Math.cos(a) * 7 + 0.31, z = P.z + Math.sin(a) * 7 + 0.17;
@@ -103,7 +114,9 @@ module.exports = async (pg, out) => {
   console.log(JSON.stringify({ a: det.a, b: det.b, c: det.c, first: det.first, pa: det.pa.slice(0, 3), pb: det.pb.slice(0, 3) }));
   check(det.a.ticks === 200 && det.b.ticks === 200 && det.c.ticks === 200, "30, 120 and 144 fps all ran exactly 200 ticks (" + det.a.frames + ", " + det.b.frames + ", " + det.c.frames + " frames)");
   check(det.sameCalls && det.allTick && det.a.trace > 200, "every frame rate makes the same " + det.a.trace + " simulation calls in the same order, each with h = 0.05");
-  check(det.pa.length === 8 && det.samePos && det.pa.some(p => p[7]), "thrown mobs end up exactly where they were at the other frame rate after 200 ticks (" + det.pa.length + " mobs)");
+  const firstDiff = det.pa.findIndex((p, i) => JSON.stringify(p) !== JSON.stringify(det.pb[i]));
+  check(det.pa.length === 8 && det.samePos && det.pa.some(p => p[7]), "thrown mobs end up exactly where they were at the other frame rate after 200 ticks (" + det.pa.length + " mobs, " +
+    det.pa.filter(p => p[7]).length + " landed" + (firstDiff >= 0 ? ", first difference " + JSON.stringify(det.pa[firstDiff]) + " vs " + JSON.stringify(det.pb[firstDiff]) : "") + ")");
   if (!det.samePos) for (let i = 0; i < det.pa.length; i++) if (JSON.stringify(det.pa[i]) !== JSON.stringify(det.pb[i])) console.log("  differs:", JSON.stringify(det.pa[i]), JSON.stringify(det.pb[i]));
 
   // ---- 1000x: still only 0.05 s ticks; a slow frame drops what it can't fit instead of owing it
