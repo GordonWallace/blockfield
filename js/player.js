@@ -88,7 +88,7 @@ const selectedItem = () => {
 };
 // A cell the player reached across a face edge has a margin address (the raycast walks the unfolded neighbour). Block entities
 // (chests, furnaces, jobsites, signs) and every blockPlaced / blockBroken listener key by the canonical cell, so these hand that on,
-// with a block id turned back to the canonical face's frame. Off the planet (and in a corner wedge) they are the identity.
+// with a block id turned back to the canonical face's frame. In a corner wedge they are the identity.
 const canonCell = (x, y, z, id) => {
   const W = BF.world, c = W.cell ? W.cell(x, z, {}) : null;
   if (!c || (c.x === x && c.z === z)) return { x, y, z, id };
@@ -1385,17 +1385,13 @@ function wakeUp() {
   if (S.time > 0.01) S.day = (S.day || 0) + 1;
   S.setTime(0.01);
 }
-// Inside the world (false for NaN): within the border on a flat world; on the planet, a point on a face or in a margin that shows
-// one (not past the atlas, nor in a corner wedge).
-const inWorld = (x, z) => {
-  if (!(Math.abs(x) <= 3e7 && Math.abs(z) <= 3e7)) return false;
-  return !(BF.world.isPlanet && BF.world.isPlanet()) || !!BF.world.canonXZ(x, z);
-};
-// The fallback respawnPoint uses when there is no spawn point or it is off the world. On the planet that is the spawn newWorld chose
-// (BF.worldSpawn: dry temperate land on face 4, js/planetgen.js spawnSearch); on a flat world 8.5, 8.5, as before.
+// Inside the world (false for NaN): a point on a face or in a margin that shows one (not past the atlas, nor in a corner wedge).
+const inWorld = (x, z) => Number.isFinite(x) && Number.isFinite(z) && !!BF.world.canonXZ(x, z);
+// The fallback respawnPoint uses when there is no spawn point or it is off the world: the spawn newWorld chose (BF.worldSpawn: dry
+// temperate land on face 4, js/planetgen.js spawnSearch); 8.5, 8.5 only if there is none.
 const worldSpawn = () => {
-  const w = BF.worldSpawn, planet = BF.world.isPlanet && BF.world.isPlanet();
-  return planet && w && inWorld(w.x, w.z) ? { x: w.x, z: w.z } : { x: 8.5, z: 8.5 };
+  const w = BF.worldSpawn;
+  return w && inWorld(w.x, w.z) ? { x: w.x, z: w.z } : { x: 8.5, z: 8.5 };
 };
 // Where to stand when respawning at a bed: on it if there is headroom, else on the floor beside it (either half), as in vanilla.
 // A bed in a room with a 2-high ceiling has no headroom on top, and the spawn lift would otherwise put you on the roof. Null if
@@ -1746,7 +1742,7 @@ function die() {
     try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
     try { if (BF.coords && BF.coords.panel.isOpen()) BF.coords.panel.close(); } catch (_) {}
   }
-  const where = BF.coords && BF.coords.onPlanet() ? "\n" + BF.coords.describe(pos.x, pos.y, pos.z, { whole: true }) + "  " + (BF.coords.latLonText(pos.x, pos.z) || "") : "";   // planet: where it happened (spec r14-18)
+  const where = BF.coords ? "\n" + BF.coords.describe(pos.x, pos.y, pos.z, { whole: true }) + "  " + (BF.coords.latLonText(pos.x, pos.z) || "") : "";   // planet: where it happened (spec r14-18)
   deathEl.querySelector(".bfp-sub").textContent = (DEATH_MSG[lastCause] || "You died") + where;
   showScreen("death");
   BF.state.paused = true;
@@ -1870,7 +1866,7 @@ function physics(dt) {
   // Above 150 R alone boosts vertical flight too, and climbing is as fast as flying forward. (Not the prototype's Ctrl for double:
   // Ctrl+R reloads the page and Ctrl+W closes it in a browser.)
   let vert = 0.75;
-  if (flying && creative() && BF.view && BF.planet && BF.planet.isPlanet()) {
+  if (flying && creative() && BF.view) {
     const above = pos.y - BF.view.groundAt(pos.x, pos.z);
     if (above > 150) {
       if (k.has("KeyR")) speed = CFLY * TURBO_MULT;
@@ -1971,7 +1967,6 @@ function recanonAt(p, holder, v) {   // p: {x, z}; holder: has a yaw (or null); 
 }
 const me = { yaw: 0 };
 function crossEdge() {
-  if (!BF.planet || !BF.planet.isPlanet()) return;
   if (vehicle) {
     const vp = vehicle.pos || vehicle.position;
     const q = vp ? recanonAt(vp, vehicle, vehicle.vel) : -1;
@@ -2000,7 +1995,7 @@ function frameHere() {
   return c.off ? null : PL.frame(c.f, c.u, c.v, pos.y, {});
 }
 function roundHeading() {
-  if (!BF.view || !BF.planet || !BF.planet.isPlanet() || BF.view.kAt(pos.x, pos.y, pos.z) <= 0.5) return null;
+  if (!BF.view || BF.view.kAt(pos.x, pos.y, pos.z) <= 0.5) return null;
   const fr = frameHere();
   if (!fr) return null;
   const du = -Math.sin(yaw), dv = -Math.cos(yaw), up = fr.up;
@@ -2028,7 +2023,7 @@ function keepHeading(h3) {
 // planet's centre with north at the top, the pointer lock is let go, and dragging turns the planet under the player at the same
 // height. Back below 19,400 the mouse looks around again, starting from straight down.
 function updateOffPlanet() {
-  const V = BF.view, on = !!(V && BF.planet && BF.planet.isPlanet()) && pos.y > (offPlanet ? V.OFF_BACK : V.OFF);
+  const V = BF.view, on = !!V && pos.y > (offPlanet ? V.OFF_BACK : V.OFF);
   if (on === offPlanet) { if (on) { faceNorth(); if (locked) { mouseFreed = true; exitLock(); } } return; }
   offPlanet = on;
   if (on) { resetBreak(); if (locked) releaseMouse(); faceNorth(); }

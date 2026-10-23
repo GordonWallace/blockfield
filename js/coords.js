@@ -1,30 +1,26 @@
-// Positions as the player reads and types them (spec r14-18). On the planet (generator 4) atlas x / z are internal: the player sees
-// the face, the grid position on it (u, v, both 0 to N - 1), the layer y, latitude / longitude and a compass facing. Commands take
-// u / v on the player's current face (extended past its edges into the margin, so "~5" works across an edge). Off the planet
-// everything is plain x / y / z, as in 1.3.
-// Also the teleport panel (P, creative only, planet only): the round-planet prototype's panel, as a front end to /tp.
-// API: BF.coords = { onPlanet(), describe(x, y, z), latLonText(x, z), facing(yaw, x, z), bearing(dx, dz, x, z), compass(deg), yawFor(deg, x, z, yaw0), here(),
+// Positions as the player reads and types them (spec r14-18). Atlas x / z are internal: the player sees the face, the grid position
+// on it (u, v, both 0 to N - 1), the layer y, latitude / longitude and a compass facing. Commands take u / v on the player's current
+// face (extended past its edges into the margin, so "~5" works across an edge).
+// Also the teleport panel (P, creative only): the round-planet prototype's panel, as a front end to /tp.
+// API: BF.coords = { describe(x, y, z), latLonText(x, z), facing(yaw, x, z), bearing(dx, dz, x, z), compass(deg), yawFor(deg, x, z, yaw0), here(),
 //                    toAtlas(f, u, v), corner(n), CORNERS, panel: { open(), close(), isOpen() } }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
 
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
 const num = v => (Math.round(v * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
 const int = v => Math.floor(v).toLocaleString("en-US");
 
-// "face 2  u 81,920  v 81,920  y 64" (canonical: a margin point reads as the face it shows); off the planet "x, y, z".
+// "face 2  u 81,920  v 81,920  y 64" (canonical: a margin point reads as the face it shows).
 const cc = {};
 function describe(x, y, z, opts) {
   const whole = opts && opts.whole, n = whole ? int : num;
-  if (!onPlanet()) return `${n(x)}, ${n(y)}, ${n(z)}`;
   const c = BF.planet.canon(x, z, cc);
   if (c.off) return `off the planet (${n(x)}, ${n(y)}, ${n(z)})`;
   return `face ${c.f}  u ${n(c.u)}  v ${n(c.v)}  y ${n(y)}`;
 }
-// "35.26°N 45.00°E" (null off the planet)
+// "35.26°N 45.00°E" (null off the atlas)
 function latLonText(x, z) {
-  if (!onPlanet()) return null;
   const ll = BF.planet.latLonAt(x, z, {});
   if (!ll) return null;
   return llText(ll.lat, ll.lon);
@@ -36,8 +32,7 @@ function llText(lat, lon) {
   return `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"} ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
 }
 
-// Compass bearing (degrees clockwise from north) of a grid direction (dx, dz) at atlas point (x, z): BF.planet.bearing (north is -z off
-// the planet, as in 1.3). Null at a pole.
+// Compass bearing (degrees clockwise from north) of a grid direction (dx, dz) at atlas point (x, z): BF.planet.bearing. Null at a pole.
 const bearing = (dx, dz, x, z) => BF.planet.bearing(x, z, dx, dz);
 const compass = deg => (deg == null ? "at the pole" : BF.planet.compassPoint(deg));
 // The player's facing (yaw: forward = (-sin yaw, -cos yaw)) as "north-east (37°)".
@@ -58,10 +53,10 @@ function yawFor(deg, x, z, yaw0) {
   }
   return yaw;
 }
-// The player's face and grid position (null off the planet).
+// The player's face and grid position (null off the atlas).
 function here() {
   const p = BF.player && BF.player.position;
-  if (!p || !onPlanet()) return null;
+  if (!p) return null;
   const c = BF.planet.canon(p.x, p.z, {});
   return c.off ? null : c;
 }
@@ -145,7 +140,7 @@ function canOpen() {
 }
 function open() {
   const p = BF.player;
-  if (!onPlanet() || !canOpen()) return false;
+  if (!canOpen()) return false;
   if (p.gameMode !== "creative") { if (p.actionBar) p.actionBar("The teleport panel is a creative tool (use /tp)"); return false; }
   build();
   panel.open = true;   // before releasing the lock (player.js treats this as an open screen)
@@ -176,14 +171,14 @@ addEventListener("keydown", e => {
     return;
   }
   if (e.code !== "KeyP" || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (!onPlanet() || !canOpen() || !(BF.player && BF.player.menu && !BF.player.menu())) return;
+  if (!canOpen() || !(BF.player && BF.player.menu && !BF.player.menu())) return;
   if (document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
   e.preventDefault(); e.stopImmediatePropagation();
   open();
 }, true);
 
 BF.coords = {
-  onPlanet, describe, latLonText, llText, facing, bearing, compass, yawFor, here, toAtlas, corner, CORNERS,
+  describe, latLonText, llText, facing, bearing, compass, yawFor, here, toAtlas, corner, CORNERS,
   panel: { open, close, isOpen: () => panel.open, go },
 };
 })();

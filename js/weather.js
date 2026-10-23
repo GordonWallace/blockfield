@@ -50,9 +50,9 @@ function biomeKind(x, z) {
   biomeCache.set(key, k);
   return k;
 }
-// Snow lines (blocks above sea level) for cold and cool biomes. Old 192-high worlds keep 42 / 52. In mile-high worlds the
-// climate already cools with altitude and the plains sit at about y900-1300, so the lines start above the plains, in the ranges.
-const snowLines = () => (BF.H > 192 ? [1400, 1700] : [42, 52]);
+// Snow lines (blocks above sea level) for cold and cool biomes. The climate already cools with altitude and the plains sit at about
+// y900-1300, so the lines start above the plains, in the ranges.
+const snowLines = () => [1400, 1700];
 function kindToPrecip(k, y) {
   if (k === 0) return 0;
   if (k === 2) return 2;
@@ -247,7 +247,7 @@ function seg(ax, ay, az, bx, by, bz, wa) {
 function buildBolt(x, y, z) {
   segN = 0; boltOX = x; boltOZ = z;
   bolt.position.set(x, 0, z); boltGlow.position.set(x, 0, z);
-  const y0 = Math.max(BF.sky && BF.sky.cloudHeight != null ? BF.sky.cloudHeight + 4 : BF.H + 4, y + 30), n = 26, M = Math.random;
+  const y0 = Math.max(BF.sky && BF.sky.cloudHeight != null ? BF.sky.cloudHeight + 4 : BF.H + 4, y + 30), n = 26, M = Math.random;   // visual (the bolt's shape)
   let px = x + (M() - 0.5) * 8, pz = z + (M() - 0.5) * 8, py = y0;
   let ox = px - x, oz = pz - z;
   const branches = [];
@@ -361,7 +361,7 @@ const weather = {
       // lightning
       if (weather.type === "thunder" && weather.thunder > 0.5) {
         strikeT -= dt;
-        if (strikeT <= 0) { strikeT = 10 + Math.random() * 30; strike(); }
+        if (strikeT <= 0) { strikeT = 10 + BF.rand.at("lightning", 0, 0).next() * 30; strike(); }
       }
       flashT += dt; boltT -= dt;
     }
@@ -399,8 +399,9 @@ const weather = {
 function strike() {
   const p = BF.player && BF.player.position;
   if (!p) return;
+  const r = BF.rand.at("strike", 0, 0);   // seeded (js/rand.js)
   for (let tries = 0; tries < 8; tries++) {
-    const a = Math.random() * Math.PI * 2, d = 6 + Math.random() * 58;
+    const a = r.next() * Math.PI * 2, d = 6 + r.next() * 58;
     const x = Math.floor(p.x + Math.cos(a) * d), z = Math.floor(p.z + Math.sin(a) * d);
     const top = columnTopAt(x, z);
     let y;

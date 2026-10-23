@@ -45,19 +45,19 @@ const BODY = 0.2;               // body length in blocks
 const W = () => BF.world;
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const today = () => (BF.sky ? BF.sky.day || 0 : 0);
-const simNow = () => (BF.simNow ? BF.simNow() : performance.now() / 1000);
+const simNow = () => (BF.simNow ? BF.simNow() : 0);
 const pk = (x, y, z) => x + "," + y + "," + z;
 const ck = (cx, cz) => cx + "," + cz;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const rs = e => BF.rand.of(e);   // seeded random streams (js/rand.js): a bee's own, or BF.rand.at for a home's
+const rnd = (r, a, b) => r.range(a, b);
 const CS = () => BF.CS || 16;
-// the planet: q seen from p (its x / z in p's frame, with the quarter turns taking q's directions into it); q itself off the planet
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet && BF.planet.isPlanet());
-const seen = (p, q, out) => (onPlanet() ? BF.planet.local(p, q, out || {}) : q);
+// q seen from p (its x / z in p's frame, with the quarter turns taking q's directions into it)
+const seen = (p, q, out) => BF.planet.local(p, q, out || {});
 // the canonical key of block (x, y, z), however it was addressed
 const CC = {};
-const ckey = (x, y, z) => { if (!onPlanet()) return pk(x, y, z); const c = BF.planet.canonCell(x, z, CC); return c.off ? pk(x, y, z) : pk(c.x, y, c.z); };
+const ckey = (x, y, z) => { const c = BF.planet.canonCell(x, z, CC); return c.off ? pk(x, y, z) : pk(c.x, y, c.z); };
 // the canonical chunk key of chunk (cx, cz) in some face frame
-const cck = (cx, cz) => { if (!onPlanet()) return ck(cx, cz); const c = BF.planet.canonCell(cx * CS() + 8, cz * CS() + 8, CC); return c.off ? null : ck(Math.floor(c.x / CS()), Math.floor(c.z / CS())); };
+const cck = (cx, cz) => { const c = BF.planet.canonCell(cx * CS() + 8, cz * CS() + 8, CC); return c.off ? null : ck(Math.floor(c.x / CS()), Math.floor(c.z / CS())); };
 function hash(x, y, z, salt) {
   let h = (Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663) ^ Math.imul(z | 0, 83492791) ^ Math.imul(salt | 0, 40503)) >>> 0;
   h ^= h >>> 16; h = Math.imul(h, 0x45d9f3b) >>> 0; h ^= h >>> 16;
@@ -91,7 +91,7 @@ function edited(x, y, z) {
 function newRec(x, y, z, id, placed) {
   const kind = id === NEST ? "nest" : "hive", [a, b] = kind === "nest" ? NEST_START : HIVE_START;
   const n = placed ? 0 : a + Math.floor(hash(x, y, z, 77) * (b - a + 1));
-  return { x, y, z, kind, bees: n, honey: 0, day: today(), out: 0, rest: [], emT: rnd(0, 4), angry: 0, fl: null, flT: -1e9, scatter: false };
+  return { x, y, z, kind, bees: n, honey: 0, day: today(), out: 0, rest: [], emT: rnd(BF.rand.at("hive", x, z, null, y), 0, 4), angry: 0, fl: null, flT: -1e9, scatter: false };
 }
 function track(x, y, z, id) {
   const k = pk(x, y, z);
@@ -120,11 +120,11 @@ const FQ = {};
 function flowersNear(h, fresh) {
   const now = simNow();
   if (!fresh && h.fl && now - h.flT < 8) return h.fl;
-  const cs = CS(), out = [], pl = onPlanet();
+  const cs = CS(), out = [];
   for (let cz = Math.floor((h.z - R) / cs); cz <= Math.floor((h.z + R) / cs); cz++) for (let cx = Math.floor((h.x - R) / cs); cx <= Math.floor((h.x + R) / cs); cx++) {
     const key = cck(cx, cz), s = key && flowers.get(key);
     if (!s) continue;
-    const turned = pl && key !== ck(cx, cz);   // a chunk past an edge: its cells seen from h
+    const turned = key !== ck(cx, cz);   // a chunk past an edge: its cells seen from h
     for (const k of s) {
       const p = k.split(",").map(Number);
       if (turned) { const q = BF.planet.local(h, { x: p[0] + 0.5, z: p[2] + 0.5 }, FQ); p[0] = Math.floor(q.x); p[2] = Math.floor(q.z); }
@@ -152,7 +152,8 @@ function doorOf(h) {
 }
 function spawnBee(h, at, mode) {
   const b = { id: ++seq, home: h, x: at.x, y: at.y, z: at.z, vx: 0, vy: 0, vz: 0, mode: mode || "start", t: 0, nectar: false, land: null, tgt: null,
-    phase: Math.random() * 6.28, yaw: Math.random() * 6.28, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0 };
+    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0 };
+  b.phase = rs(b).next() * 6.28; b.yaw = rs(b).next() * 6.28;
   bees.push(b); h.out++;
   return b;
 }
@@ -167,29 +168,29 @@ function enter(b) {
   const h = b.home;
   if (h && recs.get(pk(h.x, h.y, h.z)) === h) {
     if (b.nectar) h.honey = Math.min(FULL, h.honey + 1);
-    h.rest.push(simNow() + rnd(REST_IN[0], REST_IN[1]));
+    h.rest.push(simNow() + rnd(rs(b), REST_IN[0], REST_IN[1]));
   }
   removeBee(b);
 }
 
 // A random landing spot near (x, y, z) within r blocks: the top of a block (ground, leaves, a fence post, a slab) or the side of a full block
 // (a wall, a trunk, leaves) facing out, in loaded chunks. {x, y, z, nx, ny, nz} (the point on the surface and its outward normal) or null.
-function landingSpot(x, y, z, r) {
+function landingSpot(x, y, z, r, q = rs({})) {   // q: the stream to draw from (tests: a fresh one each call)
   const w = W();
   for (let i = 0; i < 14; i++) {
-    const cx = Math.floor(x + rnd(-r, r)), cz = Math.floor(z + rnd(-r, r));
+    const cx = Math.floor(x + rnd(q, -r, r)), cz = Math.floor(z + rnd(q, -r, r));
     if (!w.isLoaded(cx, cz)) continue;
-    if (Math.random() < 0.6) {   // a top face: the highest solid block of the column, within reach up or down
+    if (q.next() < 0.6) {   // a top face: the highest solid block of the column, within reach up or down
       const top = w.heightAt(cx, cz);
       if (top < BF.MIN_Y || Math.abs(top - y) > 10) continue;
       const id = w.getBlock(cx, top, cz), def = BF.blocks[id];
       if (!def || BF.FLUID[w.getBlock(cx, top + 1, cz)] || BF.SOLID[w.getBlock(cx, top + 1, cz)]) continue;
       if (def.model === "fence") return { x: cx + 0.5, y: top + 1, z: cz + 0.5, nx: 0, ny: 1, nz: 0 };
       const cb = BF.CBOX[id], hy = cb && !BF.TALLBOX[id] ? cb[4] : 1;
-      return { x: cx + rnd(0.2, 0.8), y: top + hy, z: cz + rnd(0.2, 0.8), nx: 0, ny: 1, nz: 0 };
+      return { x: cx + rnd(q, 0.2, 0.8), y: top + hy, z: cz + rnd(q, 0.2, 0.8), nx: 0, ny: 1, nz: 0 };
     }
     // a side face: a full block in the column with open air beside it (a wall, a tree trunk, a step in the ground)
-    const f0 = Math.floor(Math.random() * 4);
+    const f0 = q.int(4);
     for (let cy = Math.floor(y + 3); cy >= Math.floor(y - 4); cy--) {
       const id = w.getBlock(cx, cy, cz);
       if (!BF.SOLID[id] || BF.CBOX[id] || BF.CBOXES[id] || (BF.RENDER[id] !== 1 && BF.RENDER[id] !== 2)) continue;
@@ -199,28 +200,29 @@ function landingSpot(x, y, z, r) {
         if (!BF.SOLID[fr] && !BF.FLUID[fr]) { dx = ex; dz = ez; }
       }
       if (!dx && !dz) continue;
-      const u = rnd(0.2, 0.8);
-      return { x: cx + 0.5 + dx * 0.5 + (dz ? u - 0.5 : 0), y: cy + rnd(0.25, 0.8), z: cz + 0.5 + dz * 0.5 + (dx ? u - 0.5 : 0), nx: dx, ny: 0, nz: dz };
+      const u = rnd(q, 0.2, 0.8);
+      return { x: cx + 0.5 + dx * 0.5 + (dz ? u - 0.5 : 0), y: cy + rnd(q, 0.25, 0.8), z: cz + 0.5 + dz * 0.5 + (dx ? u - 0.5 : 0), nx: dx, ny: 0, nz: dz };
     }
   }
   return null;
 }
-const flowerSpot = p => ({ x: p[0] + 0.5 + rnd(-0.06, 0.06), y: p[1] + 0.56, z: p[2] + 0.5 + rnd(-0.06, 0.06), nx: 0, ny: 1, nz: 0, flower: p });
+const flowerSpot = (p, q) => ({ x: p[0] + 0.5 + rnd(q, -0.06, 0.06), y: p[1] + 0.56, z: p[2] + 0.5 + rnd(q, -0.06, 0.06), nx: 0, ny: 1, nz: 0, flower: p });
 // The bee's next errand after landing (or coming out): a flower, a rest stop on the way, or home.
 function nextErrand(b) {
   const h = b.home;
   b.land = null; b.stuck = 0; b.lastD = Infinity; b.front = false;
-  if (!h) { const s = landingSpot(b.x, b.y, b.z, 6); b.mode = "fly"; b.tgt = s; b.t = 0; if (!s) { b.mode = "wander"; b.t = rnd(2, 4); } return; }
+  const q = rs(b);
+  if (!h) { const s = landingSpot(b.x, b.y, b.z, 6, q); b.mode = "fly"; b.tgt = s; b.t = 0; if (!s) { b.mode = "wander"; b.t = rnd(q, 2, 4); } return; }
   if (b.nectar) {   // flying home with nectar: now and then a short rest on the way
-    if (!b.restedBack && Math.random() < 0.4) { const s = landingSpot(b.x, b.y, b.z, 5); if (s) { b.restedBack = true; b.mode = "fly"; b.tgt = s; return; } }
+    if (!b.restedBack && q.next() < 0.4) { const s = landingSpot(b.x, b.y, b.z, 5, q); if (s) { b.restedBack = true; b.mode = "fly"; b.tgt = s; return; } }
     b.mode = "home"; b.tgt = null; return;
   }
   const fl = flowersNear(h);
-  if (!b.restedOut && Math.random() < 0.45) { const s = landingSpot(b.x, b.y, b.z, 6); if (s) { b.restedOut = true; b.mode = "fly"; b.tgt = s; return; } }
-  if (fl.length) { b.mode = "fly"; b.tgt = flowerSpot(fl[Math.floor(Math.random() * fl.length)]); return; }
+  if (!b.restedOut && q.next() < 0.45) { const s = landingSpot(b.x, b.y, b.z, 6, q); if (s) { b.restedOut = true; b.mode = "fly"; b.tgt = s; return; } }
+  if (fl.length) { b.mode = "fly"; b.tgt = flowerSpot(q.pick(fl), q); return; }
   // no flowers within reach: a few rests near home, then home with nothing
   if ((b.trips = (b.trips || 0) + 1) > 3) { b.mode = "home"; b.tgt = null; return; }
-  const s = landingSpot(h.x, h.y, h.z, 10);
+  const s = landingSpot(h.x, h.y, h.z, 10, q);
   b.mode = "fly"; b.tgt = s;
   if (!s) { b.mode = "home"; b.tgt = null; }
 }
@@ -306,7 +308,7 @@ function stepBee(b, dt, lp, now) {
     }
   }
   if (b.mode === "home") {
-    if (!h) { b.mode = "wander"; b.t = rnd(2, 5); return; }
+    if (!h) { b.mode = "wander"; b.t = rnd(rs(b), 2, 5); return; }
     const d0 = doorOf(h), d = flyTo(b, d0.x, d0.y, d0.z, b.hurry ? HOME_SPEED : SPEED, dt, Math.hypot(d0.x - b.x, d0.z - b.z) < 3);
     if (d < 0.3) { enter(b); return; }
     if (d > b.lastD - 0.01 * dt) { if ((b.stuck += dt) > 8) { enter(b); return; } } else { b.stuck = 0; b.lastD = d; }   // stuck behind something: it gets in anyway
@@ -341,8 +343,8 @@ function stepBee(b, dt, lp, now) {
   const d = flyTo(b, near ? ox : s.x, near ? oy : s.y + 0.4, near ? oz : s.z, SPEED, dt, near);
   if (d < 0.08) {
     b.x = ox; b.y = oy; b.z = oz; b.vx = b.vy = b.vz = 0;
-    b.mode = "land"; b.land = s; b.t = s.flower ? rnd(3, 6) : rnd(1.5, 4);
-    b.landYaw = Math.random() * 6.28;
+    b.mode = "land"; b.land = s; b.t = s.flower ? rnd(rs(b), 3, 6) : rnd(rs(b), 1.5, 4);
+    b.landYaw = rs(b).next() * 6.28;
     return;
   }
   if (d > b.lastD - 0.01 * dt) { if ((b.stuck += dt) > 6) nextErrand(b); } else { b.stuck = 0; b.lastD = d; }
@@ -403,13 +405,13 @@ function release(dt) {
     if (h.scatter) {
       h.scatter = false;
       if (h.allow > 0 && h.out === 0) {
-        const fl = flowersNear(h, true), n = h.allow;
+        const fl = flowersNear(h, true), n = h.allow, q = BF.rand.at("bees out", h.x, h.z, null, h.y);
         for (let i = 0; i < n; i++) {
-          let s = fl.length && Math.random() < 0.7 ? flowerSpot(fl[Math.floor(Math.random() * fl.length)]) : null;
-          for (let k = 0; k < 4 && !s; k++) { s = landingSpot(h.x + 0.5, h.y, h.z + 0.5, R); if (s && Math.hypot(s.x - h.x - 0.5, s.z - h.z - 0.5) > R) s = null; }
+          let s = fl.length && q.next() < 0.7 ? flowerSpot(q.pick(fl), q) : null;
+          for (let k = 0; k < 4 && !s; k++) { s = landingSpot(h.x + 0.5, h.y, h.z + 0.5, R, q); if (s && Math.hypot(s.x - h.x - 0.5, s.z - h.z - 0.5) > R) s = null; }
           if (!s) continue;
           const b = spawnBee(h, { x: s.x + s.nx * 0.03, y: s.y + s.ny * 0.03, z: s.z + s.nz * 0.03 }, "land");
-          b.land = s; b.t = rnd(0.5, 6); b.landYaw = Math.random() * 6.28;
+          b.land = s; b.t = rnd(q, 0.5, 6); b.landYaw = q.next() * 6.28;
         }
         continue;
       }
@@ -417,7 +419,7 @@ function release(dt) {
     const inside = h.bees - h.out - h.rest.length;
     if (h.out >= h.allow || inside <= 0) continue;
     if ((h.emT -= dt) > 0) continue;
-    h.emT = EMERGE / Math.max(1, h.bees) * rnd(0.6, 1.4);
+    h.emT = EMERGE / Math.max(1, h.bees) * rnd(BF.rand.at("bee emerge", h.x, h.z, null, h.y), 0.6, 1.4);
     const b = spawnBee(h, doorOf(h), "start");
     if (h.angry > now) b.angry = h.angry;
   }
@@ -504,7 +506,6 @@ function onSet(x, y, z, old, id) {
 // The planet: bee b, now belonging to home o, flies on in o's frame (a home on another face: its position and heading turned with it,
 // its errand dropped, since its landing spot was in the old frame).
 function toFrameOf(b, o) {
-  if (!onPlanet()) return;
   const v = { x: b.vx, z: b.vz }, hd = { yaw: 0 };
   const q = BF.planet.reframe(b, BF.planet.face(o.x, o.z), hd, v);
   if (q == null) return;
@@ -633,12 +634,11 @@ function draw() {
   mesh.material.color.setRGB(light, light, light);
   if (!dirty) return;
   dirty = false;
-  const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee"), pl = onPlanet();
+  const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee");
   for (let i = 0; i < n; i++) {
     const b = bees[i], s = b.mode === "land" && b.land ? b.land : null;
     // the planet: the bee seen from the mesh (in the player's frame), its directions turned with it
-    let bx = b.x, bz = b.z, q = 0;
-    if (pl) { const r = BF.planet.local(mesh.position, b, DQ); bx = r.x; bz = r.z; q = r.turn; }
+    const r = BF.planet.local(mesh.position, b, DQ), bx = r.x, bz = r.z, q = r.turn;
     if (s) {   // landed: belly on the surface, back along its normal
       let nx = s.nx, nz = s.nz;
       if (q) { BF.planet.turnVec(q, nx, nz, DV); nx = DV[0]; nz = DV[1]; }
@@ -674,7 +674,7 @@ function deserialize(a) {
   bees.length = 0; recs.clear();
   if (Array.isArray(a)) for (let i = 0; i + 6 < a.length; i += 7) {
     const h = { x: a[i], y: a[i + 1], z: a[i + 2], kind: a[i + 3] ? "hive" : "nest", bees: Math.max(0, Math.min(MAX, a[i + 4] | 0)), honey: Math.max(0, Math.min(FULL, a[i + 5] | 0)), day: a[i + 6] | 0,
-      out: 0, rest: [], emT: rnd(0, 4), angry: 0, fl: null, flT: -1e9, scatter: true };
+      out: 0, rest: [], emT: rnd(BF.rand.at("hive", a[i], a[i + 2], null, a[i + 1]), 0, 4), angry: 0, fl: null, flT: -1e9, scatter: true };
     recs.set(pk(h.x, h.y, h.z), h);
   }
   for (const [k, h] of loaded) { const r = recs.get(k); if (r) loaded.set(k, r); else loaded.delete(k); }

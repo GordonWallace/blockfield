@@ -219,11 +219,12 @@ BF.vlog = {
   init() {
     panelEl = document.getElementById("vlog");
     hook();
+    // the population history and the Economy view's scans run on the game step, so they see the same moments at any speed (spec r15-16)
+    const W = BF.world, prev = W.tickSim;
+    if (W && prev) W.tickSim = () => { prev(); if (BF.vstats) BF.vstats.update(); if (BF.econ) BF.econ.update(); };
   },
   update(dt, on) {
     hook();
-    if (BF.vstats) BF.vstats.update();
-    if (BF.econ) BF.econ.update();
     updateLabels(on);
     if (!panelEl) panelEl = document.getElementById("vlog");
     if (!on) { if (panelEl) panelEl.hidden = true; panelT = 0; return; }

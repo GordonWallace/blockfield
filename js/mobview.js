@@ -17,7 +17,7 @@
 const BF = (window.BF = window.BF || {});
 
 const PX = 1 / 16;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const rnd = (a, b) => a + Math.random() * (b - a);   // visual (fire)
 function hash(a, b, c, d) {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647 + d * 1274126177) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -663,7 +663,7 @@ function updateFire(v, m, on, dt) {
   v.fire.visible = true;
   for (const f of v.fire.children) {
     f.position.y += dt * 1.5;
-    if (f.position.y > m.height + 0.15 || Math.random() < dt * 4) {
+    if (f.position.y > m.height + 0.15 || Math.random() < dt * 4) {   // visual
       f.position.set(rnd(-m.halfWidth - 0.05, m.halfWidth + 0.05), rnd(0, m.height * 0.6), rnd(-m.halfWidth - 0.05, m.halfWidth + 0.05));
       f.scale.setScalar(rnd(0.6, 1.4));
     }
