@@ -68,11 +68,15 @@ module.exports = async (pg, out) => {
     const m = { type: "villager", profession: "toolsmith", inv: inv.create(), position: new THREE.Vector3(x + 1, y, z), ai: {} };
     inv.add(m.inv, I.raw_iron != null ? I.raw_iron : I.iron_ore, 3); inv.add(m.inv, I.coal, 4);
     const job = { rawId: I.raw_iron != null ? I.raw_iron : I.iron_ore, furnace: { x, y, z } };
-    const loaded = TS.loadFurnace(m, job);
+    BF.ids.put(m);   // a scripted villager: loading and emptying are "furnace" requests from it (spec r15-22), applied here by hand
+    const flush = () => { BF.req.apply(); BF.req.deliver(); };
+    let loaded = TS.loadFurnace(m, job);
+    if (loaded === null) { flush(); loaded = TS.loadFurnace(m, job); }
     const ownCoalAtLoad = T.inv.count(m.inv, I.coal);
     for (let k = 0; k < 400 && st.slots[0]; k++) BF.inventory.simTick(0.1);
     const afterSmelt = { input: st.slots[0], fuel: st.slots[1], burn: +st.burn.toFixed(1), out: st.slots[2] };
-    TS.emptyFurnace(m, job, false);
+    TS.emptyFurnace(m, job, false); flush();
+    BF.ids.remove(m);
     return { loaded, ownCoalAtLoad, afterSmelt, inv: m.inv.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count), left: st.slots, xyz: [x, y, z] };
   });
   console.log("fuel", JSON.stringify(fuel));

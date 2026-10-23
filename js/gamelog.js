@@ -129,6 +129,7 @@ function open(m) {
   const fresh = entries;
   restamp();
   log("INFO", "game", "Game loaded: \"" + m.name + "\", seed " + m.seed + ", " + (m.gameMode || "survival") + ", version " + fmtBuild(BF.VERSION || "?", BUILD.commit, BUILD.branch));
+  if (BF.shared) log("INFO", "game", BF.shared.text + (BF.shared.on ? " (chunk block data in SharedArrayBuffers)" : ""));   // r15-35 (js/world.js)
   const st = store();
   Promise.resolve(st ? st.read(m.id).catch(e => { orig.error.call(console, "game log: can't read", e); return null; }) : null).then(r => {
     if (world !== m.id) return;

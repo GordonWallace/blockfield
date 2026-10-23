@@ -178,6 +178,7 @@ function debugInfo() {
     perf: BF.perf.stats(),   // villager-seconds meter (js/perf.js): null until it has been on
     requests: BF.req.stats(),   // the request queue and direct writes (js/requests.js)
     planet: planetInfo(p),
+    shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
   };
 }
 // The canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas
@@ -205,6 +206,7 @@ function debugText(d) {
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
+    (d.shared ? "\n" + d.shared : "") +
     (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
 }
 BF.debugInfo = debugInfo;
@@ -230,6 +232,7 @@ function simStep(h) {
   BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
   if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
   BF.world.tickSim();   // the think hooks, then apply the requests, block ticks, deliver results (js/world.js)
+  if (BF.regions) BF.regions.tick();   // mobs and drops that changed region move in the region index (js/regions.js)
   PF.lap(PF.C.world);
   PF.endStep(h);
 }

@@ -702,10 +702,12 @@ function nextTrip(m) {
   return { kind: "cook", furnace: p.furnace, rawId: RAW(), outId: STEAK(), n, fuelOk: fuelOk(m) };
 }
 function finishCook(m, deal, all) {
-  const F = FU(), f = deal.furnace, got = F.empty(m, deal, all) || [];
-  const cooked = got.filter(e => e.id === STEAK()).reduce((a, e) => a + e.n, 0);
-  log("cooked", { steak: cooked, loaded: deal.loaded || 0, at: F.pk(f.x, f.y, f.z) });
-  if (cooked > 0) vlog(m, "cooked " + cooked + " steak in the furnace at " + F.pk(f.x, f.y, f.z));
+  const F = FU(), f = deal.furnace;
+  F.empty(m, deal, all, got => {   // when the "furnace" request applies (js/furnaceuse.js)
+    const cooked = got.filter(e => e.id === STEAK()).reduce((a, e) => a + e.n, 0);
+    log("cooked", { steak: cooked, loaded: deal.loaded || 0, at: F.pk(f.x, f.y, f.z) });
+    if (cooked > 0) vlog(m, "cooked " + cooked + " steak in the furnace at " + F.pk(f.x, f.y, f.z));
+  });
 }
 // Villager AI step (mobs.js villagerAI early with cont = true to carry on an errand under way; ai() above when it has no herd work).
 function cookAI(m, dt, out, cont) {
@@ -756,6 +758,7 @@ function cookAI(m, dt, out, cont) {
     if (S.stage === "work") {
       if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = F.load(m, deal, deal.n);
+      if (n === null) return true;   // the load request is in flight
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
       log("load", { beef: n, at: F.pk(s.x, s.y, s.z), ownFuel: deal.ownFuel || 0 });
@@ -765,8 +768,8 @@ function cookAI(m, dt, out, cont) {
     if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { F.inUse.delete(F.pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finishCook(m, deal, false); S.stage = null; S.deal = null; vdone(m); S.checkT = 0.5; return true; }   // all cooked
-    F.topUp(m, deal, st);
-    if (S.waitT > F.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
+    const fueling = F.topUp(m, deal, st);
+    if (S.waitT > F.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && !fueling && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }

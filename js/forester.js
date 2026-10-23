@@ -408,7 +408,7 @@ function findSpot(m, at) {
 // The log bases (a log with no log below it) of column (x, z), bottom up, or null when its chunk is not loaded. Each chunk keeps
 // the lists of its columns until a block in that column changes (chunk.colVer, js/world.js), so findTree reads a list per column instead of
 // a block per cell (r15-07; BF.debug.decisionCompare checks them against the old scan).
-const LCELL = {};
+const LCELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function logBases(x, z) {
   const cl = W().cell(x, z, LCELL), c = cl.c;
   if (!c) return null;
@@ -630,6 +630,10 @@ function ai(m, dt, out) {
   if (F.t > k.max) { log("giveup", m, { task: k.kind, why: "too slow" }); endTask(m, F, false); return true; }
   a.mode = "idle"; a.t = 2;
   const reach = k.kind === "plant" ? PLANT_REACH : k.kind === "cut" ? CUT_REACH : k.kind === "buy" ? SHOP_REACH : 1.6;
+  if (k.kind === "gather" && k.picks) {   // "pickup" requests sent (js/drops.js): done once they have applied
+    if (k.picks.some(q => q.result === undefined) && BF.rand.tick - k.picks[0].tick < 4) return true;
+    endTask(m, F, !!(k.picks[0].result && k.picks[0].result.ok)); return true;
+  }
   if (k.kind === "gather" && (!BF.drops.list.includes(k.drop))) { endTask(m, F, true); return true; }
   if (k.kind === "buy") {   // the seller walks about: follow it
     const o = k.deal.other;
@@ -653,17 +657,13 @@ function ai(m, dt, out) {
     if (ok) m.ai.swingT = 0.2; else log("giveup", m, { task: "buy", why: "offer gone" });
     endTask(m, F, ok);
   } else if (k.kind === "plant") { const ok = plantAt(m, k); if (ok) a.swingT = 0.35; else log("giveup", m, { task: "plant", why: "spot changed" }); endTask(m, F, ok); }
-  else if (k.kind === "gather") {
-    const d = k.drop, left = T().inv.add(m.inv, d.id, d.count);
-    if (left < d.count) log("pickup", m, { got: (d.count - left) + " " + BF.items[d.id].name });
-    const ok = left < d.count;
-    if (left > 0) d.count = left; else BF.drops.remove(d);
-    for (const o of BF.drops.list.slice()) {                                  // and whatever else lies at its feet
+  else if (k.kind === "gather") {   // asks for the item, and whatever else lies at its feet (the player, or a forester with a lower id, may get it first)
+    const d = k.drop;
+    k.picks = [BF.drops.ask(d, m).then(r => { if (r.ok) log("pickup", m, { got: r.got + " " + BF.items[r.id].name }); })];
+    for (const o of BF.drops.list) {
       if (o === d || !WANT(o.id) || o.age < 0.8 || Math.hypot(o.pos.x - m.position.x, o.pos.z - m.position.z) > 1.6) continue;
-      const l2 = T().inv.add(m.inv, o.id, o.count);
-      if (l2 > 0) o.count = l2; else BF.drops.remove(o);
+      k.picks.push(BF.drops.ask(o, m));
     }
-    endTask(m, F, ok);
   } else {   // cut
     const tr = k.tree, bx = tr.base;
     if (!isLog(get(bx[0], bx[1], bx[2]))) { k.done = 0; endTask(m, F, false); return true; }
