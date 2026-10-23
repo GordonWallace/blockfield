@@ -269,30 +269,8 @@ const key3 = (x, y, z) => x + "," + y + "," + z;
 const getB = (x, y, z) => W().getBlock(x, y, z);
 
 // ---------------------------------------------------------------- particles (eating crumbs, harvest bits)
-const pool = [];
-let partGeo = null;
-const partMats = {};
-function particles(x, y, z, color, n, spread) {
-  if (!BF.scene || typeof THREE === "undefined") return;
-  if (!partGeo) partGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
-  const key = color || "#999999";
-  const mat = partMats[key] || (partMats[key] = new THREE.MeshBasicMaterial({ color: new THREE.Color(key) }));
-  for (let i = 0; i < n; i++) {
-    if (pool.length > 120) { const o = pool.shift(); BF.scene.remove(o.mesh); }
-    const mesh = new THREE.Mesh(partGeo, mat);
-    mesh.position.set(x + (Math.random() - 0.5) * spread, y + Math.random() * 0.2, z + (Math.random() - 0.5) * spread);   // visual
-    BF.scene.add(mesh);
-    pool.push({ mesh, vx: (Math.random() - 0.5) * 1.6, vy: 0.8 + Math.random() * 1.6, vz: (Math.random() - 0.5) * 1.6, life: 0.4 + Math.random() * 0.3 });   // visual
-  }
-}
-function updateParticles(dt) {
-  for (let i = pool.length - 1; i >= 0; i--) {
-    const p = pool[i];
-    p.life -= dt; p.vy -= 12 * dt;
-    p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt;
-    if (p.life <= 0) { BF.scene.remove(p.mesh); pool.splice(i, 1); }
-  }
-}
+// a few bits flying out and falling: an effect event (js/fx.js) that js/entityview.js plays
+function particles(x, y, z, color, n, spread) { BF.fx.emit({ kind: "crumbs", x, y, z, color: color || "#999999", n, spread }); }
 const nearPlayer = (m, r) => { const p = BF.player && BF.player.position; return !!(p && m.position && m.position.distanceTo(p) < r); };
 function sound(name, x, y, z, vol) { try { if (BF.audio && BF.audio.play) BF.audio.play(name, { x, y, z, volume: vol == null ? 0.6 : vol, group: "mobs", dist: 16 }); } catch (e) { /* audio is optional */ } }
 function blockSound(kind, id, x, y, z) { try { if (BF.audio && BF.audio.blockSound) BF.audio.blockSound(kind, id, x, y, z, 0.6); } catch (e) { /* optional */ } }
@@ -1659,7 +1637,6 @@ function ageStep(m, now) {
 }
 const isWorking = m => !!((m.farm && (m.farm.task || (m.farm.idleWork && m.farm.thinkT > 0))) || m.tradingWith);
 function tick(dt) {
-  updateParticles(dt);
   acc += dt;
   if (acc < 0.5 || !BF.mobs || !BF.food) return;
   const step = acc; acc = 0;
@@ -1732,7 +1709,7 @@ function stats(m) {
   return { today: s && s.total ? s.farm / s.total : 0, yesterday: p && p.total ? p.farm / p.total : null, farm: s.farm, total: s.total, counts: fs.counts,
     harvested: fs.harvested || 0, tilled: fs.tilled || 0, bordered: fs.bordered || 0, watered: fs.watered || 0, task: fs.task && fs.task.kind };
 }
-function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; for (const p of pool) BF.scene && BF.scene.remove(p.mesh); pool.length = 0; acc = 0; }
+function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; acc = 0; }
 
 // ---------------------------------------------------------------- the player's buckets (hooked from player.js right-click)
 // Empty bucket: scoops the water source the player looks at (an infinite source refills). Water bucket: pours a source against

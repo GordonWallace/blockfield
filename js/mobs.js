@@ -10,18 +10,15 @@ const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or t
 const DESPAWN_DIST = 100;   // village stock of a stopped village only: wild mobs and horses are never removed by distance (they wait with their chunk)
 const TRAVELLER_SPEED = 1.5;   // merchants and explorers walk this much faster than other villagers (village loading plan)
 
-let scene = null;
+let ready = false;   // init has run
 const list = [];
 const arrows = [];
-const puffs = [];
-let arrowMat = null, puffMat = null, puffMatDark = null, puffGeo = null, arrowGeo = null;   // arrows and puffs (r15-12)
 
 // ---------- small helpers ----------
 // Simulation rolls come from seeded streams (js/rand.js): a mob's own, R(m), or a world event's, BF.rand.at(...).
 const R = e => BF.rand.of(e);
 const rnd = (r, a, b) => r.range(a, b);
 const irnd = (r, a, b) => a + r.int(b - a + 1);
-const vrnd = (a, b) => a + Math.random() * (b - a);   // visual
 function hash(a, b, c, d) {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647 + d * 1274126177) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -306,28 +303,8 @@ function removeMob(m) {
 }
 
 // ---------- particles ----------
-function puff(pos, n, spread, dark, speed) {
-  for (let i = 0; i < n; i++) {
-    const mesh = new THREE.Mesh(puffGeo, dark ? puffMatDark : puffMat);   // (r15-12 moves arrow and puff drawing)
-    mesh.position.set(pos.x + vrnd(-spread, spread), pos.y + vrnd(0, spread * 1.5), pos.z + vrnd(-spread, spread));   // visual
-    const s = vrnd(0.6, 1.4); mesh.scale.setScalar(s);   // visual
-    scene.add(mesh);   // (r15-12 moves arrow and puff drawing)
-    const v = new THREE.Vector3(vrnd(-1, 1), vrnd(0.2, 1.2), vrnd(-1, 1)).multiplyScalar(speed || 1);   // visual
-    puffs.push({ mesh, vel: v, life: vrnd(0.4, 0.8), s });   // visual
-  }
-}
-function updatePuffs(dt) {
-  for (let i = puffs.length - 1; i >= 0; i--) {
-    const p = puffs[i];
-    p.life -= dt;
-    p.mesh.position.addScaledVector(p.vel, dt);
-    p.vel.multiplyScalar(Math.max(0, 1 - dt * 2));
-    p.mesh.scale.setScalar(Math.max(0.01, p.s * Math.min(1, p.life * 2)));
-    if (p.life <= 0) { scene.remove(p.mesh); puffs.splice(i, 1); }
-  }
-  const l = Math.max(0.25, skyLight());
-  puffMat.color.setRGB(0.91 * l, 0.91 * l, 0.91 * l);
-}
+// A puff of smoke: an effect event (js/fx.js) that js/entityview.js plays.
+function puff(pos, n, spread, dark, speed) { BF.fx.emit({ kind: "puff", x: pos.x, y: pos.y, z: pos.z, n, spread, dark: !!dark, speed: speed || 1 }); }
 
 // ---------- damage ----------
 // `cause` names what did it for the village log (js/villagelog.js), e.g. "a Zombie"; the player is implied by byPlayer.
@@ -448,10 +425,7 @@ function shootArrow(m, target, victim) {
   dir.x += rnd(R(m), -0.03, 0.03); dir.y += rnd(R(m), -0.03, 0.03); dir.z += rnd(R(m), -0.03, 0.03);
   dir.normalize();
   from.addScaledVector(dir, 0.5);
-  const mesh = new THREE.Mesh(arrowGeo, arrowMat);   // (r15-12 moves arrow and puff drawing)
-  mesh.position.copy(from);
-  scene.add(mesh);   // (r15-12 moves arrow and puff drawing)
-  arrows.push({ mesh, pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), life: 6, stuck: false, owner: m, victim: victim || null });
+  arrows.push({ pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null });
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
@@ -462,12 +436,8 @@ function shootArrow(m, target, victim) {
 const PLAYER_ARROW_LIFE = 60, ARROW_DRAG = 0.99;   // vanilla: stuck arrows despawn after 1200 ticks; 1% air drag per tick
 function shootPlayerArrow(from, vel, o) {
   o = o || {};
-  const mesh = new THREE.Mesh(arrowGeo, arrowMat);   // (r15-12 moves arrow and puff drawing)
-  mesh.position.copy(from);
-  scene.add(mesh);   // (r15-12 moves arrow and puff drawing)
-  const a = { mesh, pos: from.clone(), prev: from.clone(), vel: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
+  const a = { pos: from.clone(), prev: from.clone(), vel: vel.clone(), look: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
     byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
-  _look.copy(a.pos).add(a.vel); mesh.lookAt(_look);
   arrows.push(a);
   if (BF.emit) BF.emit("arrowShot", null, from);
   return a;
@@ -510,15 +480,15 @@ function mobAtIn(L, q) {
   }
   return null;
 }
-const _look = new THREE.Vector3(), _dir = new THREE.Vector3();
+const _dir = new THREE.Vector3();
 function updateArrows(dt) {
   const p = playerAlive() ? player() : null;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
-    a.prev.copy(a.pos);   // drawn between this and where the tick leaves it (drawArrows)
+    a.prev.copy(a.pos);   // drawn between this and where the tick leaves it (js/entityview.js)
     a.life -= dt;
-    if (a.life <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
-    if (a.byPlayer && playerArrowStep(a, p)) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
+    if (a.life <= 0) { arrows.splice(i, 1); continue; }
+    if (a.byPlayer && playerArrowStep(a, p)) { arrows.splice(i, 1); continue; }
     if (a.stuck) continue;
     a.vel.y -= 20 * dt;
     if (a.byPlayer) a.vel.multiplyScalar(Math.pow(ARROW_DRAG, dt * 20));
@@ -572,15 +542,8 @@ function updateArrows(dt) {
         }
       }
     }
-    if (hitPlayer) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
-  }
-}
-// Every frame (spec r15-10): an arrow is drawn between where the last two ticks left it, pointing along its flight.
-function drawArrows(k) {
-  for (const a of arrows) {
-    if (a.stuck || a.prev.distanceToSquared(a.pos) > 64) a.mesh.position.copy(a.pos);   // (or it crossed a face edge this tick)
-    else a.mesh.position.lerpVectors(a.prev, a.pos, k);
-    if (!a.stuck) { _look.copy(a.mesh.position).add(a.vel); a.mesh.lookAt(_look); }
+    if (hitPlayer) { arrows.splice(i, 1); continue; }
+    if (!a.stuck) { if (a.look) a.look.copy(a.vel); else a.look = a.vel.clone(); }   // the way it points (drawn by js/entityview.js)
   }
 }
 
@@ -1835,7 +1798,7 @@ function penBoxes(x, z, r = 160) {
 const inPenBox = (boxes, x, z) => boxes.some(q => x >= q[0] && x <= q[2] && z >= q[1] && z <= q[3]);
 function spawnGroup(type, cx, cz, n, r) {
   const w = BF.world, grass = BF.B.grass, T = TYPES[type], CS = BF.CS;
-  if (!T || !scene || !w.chunks.has(cx + "," + cz)) return 0;
+  if (!T || !ready || !w.chunks.has(cx + "," + cz)) return 0;
   if (!r) r = BF.rand.at("group", cx, cz);   // (js/wildlife.js passes the chunk's roll)
   const inChunk = (x, z) => Math.floor(x / CS) === cx && Math.floor(z / CS) === cz;
   const pens = penBoxes(cx * CS + 8, cz * CS + 8);
@@ -2393,20 +2356,8 @@ BF.mobs = {
     separate(m, dt) { const x = m.vel.x, z = m.vel.z; separate(m, dt); const d = [m.vel.x - x, m.vel.z - z]; m.vel.x = x; m.vel.z = z; return d; },
   },
   init(sceneRef) {
-    scene = sceneRef;   // (arrows and puffs only, until r15-12 moves their drawing too; mobs are drawn by js/mobview.js)
-    BF.mobView.init(sceneRef);
-    arrowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
-    puffMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.85, depthWrite: false });
-    puffMatDark = new THREE.MeshBasicMaterial({ color: 0x4a4a4a, transparent: true, opacity: 0.85, depthWrite: false });
-    puffGeo = new THREE.BoxGeometry(0.22, 0.22, 0.22);
-    // arrow points along +Z (Object3D.lookAt aims +Z at the target)
-    const V = BF.mobView, box = V.box;
-    arrowGeo = V.buildGeometry([
-      box([-0.5, -0.5, -4], [0.5, 0.5, 3], 0x8a6a40),
-      box([-0.75, -0.75, 3], [0.75, 0.75, 4.5], 0x9a9a9a),
-      box([-1.5, -0.25, -4.5], [1.5, 0.25, -2.5], 0xf0f0f0),
-      box([-0.25, -1.5, -4.5], [0.25, 1.5, -2.5], 0xf0f0f0),
-    ], 11);
+    ready = true;   // (mobs, arrows and effects are drawn by js/mobview.js and js/entityview.js)
+    if (BF.mobView) BF.mobView.init(sceneRef);
     BF.world.onChunkUnload((cx, cz) => {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
@@ -2416,13 +2367,13 @@ BF.mobs = {
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];
-        if (Math.floor(a.pos.x / BF.CS) === cx && Math.floor(a.pos.z / BF.CS) === cz) { scene.remove(a.mesh); arrows.splice(i, 1); }
+        if (Math.floor(a.pos.x / BF.CS) === cx && Math.floor(a.pos.z / BF.CS) === cz) arrows.splice(i, 1);
       }
     });
     if (BF.wildlife) BF.wildlife.init();
   },
   update(dt) {
-    if (!scene) return;
+    if (!ready) return;
     dt = Math.min(dt, 0.05);
     planBudget = 2; // A* searches per frame
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
@@ -2452,7 +2403,6 @@ BF.mobs = {
       if (pon) PF.lap(PF.mobCat(m));
     }
     updateArrows(dt);
-    updatePuffs(dt);
     PF.lap(PC.other);
     if (BF.builder) BF.builder.tick(dt);
     if (BF.villageLife) BF.villageLife.tick(dt);   // villager meals, farm scans (js/villagelife.js)
@@ -2469,7 +2419,6 @@ BF.mobs = {
     PF.lap(PC.vanimals);
     if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
     PF.lap(PC.villagers);
-    arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
     PF.lap(PC.monsters);
     if (BF.wildlife) BF.wildlife.update(dt);
@@ -2481,25 +2430,20 @@ BF.mobs = {
     if (BF.mobSave) BF.mobSave.update(dt);
     PF.lap(PC.other);
   },
-  // Every frame (main.js, spec r15-10): arrows drawn at lerp(prev, cur, alpha), alpha = BF.warp.alpha (0 = the previous tick, 1 = the
-  // latest). The mobs themselves are drawn by js/mobview.js.
-  draw(alpha) {
-    if (!scene) return;
-    drawArrows(Math.max(0, Math.min(1, alpha)));
-  },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
   raycast(origin, dir, maxDist, skip) { return vq("mobs.raycast", raycastIn(nearMobs(origin, maxDist + 2, true), origin, dir, maxDist, skip), L => raycastIn(L, origin, dir, maxDist, skip)); },
   // Player attack. Returns true if the hit landed (false while the mob is briefly invulnerable).
   hit(mob, damage, knockDir) { return damageMob(mob, damage, knockDir, true); },
   // Player bow shot (js/player.js): see shootPlayerArrow. arrows() lists the player's arrows in flight or stuck (tests, debug).
-  shootArrow(from, vel, opts) { return scene ? shootPlayerArrow(from, vel, opts) : null; },
+  shootArrow(from, vel, opts) { return ready ? shootPlayerArrow(from, vel, opts) : null; },
   playerArrows() { return arrows.filter(a => a.byPlayer); },
+  arrowList() { return arrows; },   // every arrow in flight or stuck: {pos, vel, look, stuck, ...} (js/entityview.js draws them)
   hurt(mob, damage, cause) { mob.invuln = 0; return damageMob(mob, damage, null, false, cause); },   // non-player damage with a cause (tests, commands)
   // /kill (commands.js): kills outright, no knockback, no golem anger; drops as a normal death. Returns false if already dead.
   kill(mob) { if (!mob || mob.dead || mob.removed) return false; kill(mob, true); return true; },
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
-  spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
+  spawn(type, x, y, z, variant, style) { return ready ? createMob(type, x, y, z, variant, style) : null; },
   // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
   discard(m) { if (m && !m.removed) removeMob(m); },
   // The share of monster spawn weight whose type spawns (1 with all on): js/wildlife.js scales its area caps by it.
@@ -2665,9 +2609,8 @@ BF.mobs = {
   clear() {
     for (const m of list.slice()) removeMob(m);
     list.length = 0;
-    if (scene) { for (const a of arrows) scene.remove(a.mesh); for (const p of puffs) scene.remove(p.mesh); }
     arrows.length = 0;
-    puffs.length = 0;
+    BF.fx.clear();   // and the effects playing
     villages.clear();
     villagerSaves.clear();
     pendingDead.clear();

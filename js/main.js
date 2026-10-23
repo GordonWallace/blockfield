@@ -276,16 +276,13 @@ function frame(now) {
   // drawing between the last two ticks (r15-10): the sky at the interpolated game time, entities at lerp(prev, cur, alpha)
   const alpha = W.alpha, drawnDt = Math.max(0, W.renderNow() - drawn0);
   BF.sky.draw(alpha, drawnDt);
-  BF.mobs.draw(alpha);   // arrows (the mobs are drawn by BF.mobView.render below)
-  BF.drops.draw(alpha);
-  BF.boats.draw(alpha);
-  if (BF.horses && !BF.state.paused) BF.horses.drawLeads();   // lead ropes follow the player and the horses (as drawn) every frame
   BF.inventory.update && BF.inventory.update(dt);
   if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);
   if (BF.textures.update) BF.textures.update(W.frozen ? 0 : BF.state.paused ? dt : drawnDt);   // water animation runs on the drawn game time (fast-forward included, stopped at 0x)
   if (BF.save && !BF.state.paused) BF.save.update(dt);
   BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
+  BF.entityView.render(BF.state.paused || W.frozen ? 0 : drawnDt, dt);   // drops, arrows, boats, bees, leads and effects at BF.warp.alpha (js/entityview.js)
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)
   if (BF.lod && BF.lod.cull) BF.lod.cull(camera);   // the distant rings' sectors in view (js/lod.js)
   renderer.render(scene, camera);
@@ -305,6 +302,7 @@ BF.villageSim.init();
 BF.vlog.init();
 BF.drops.init(scene);
 BF.boats.init(scene);
+BF.entityView.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
