@@ -74,6 +74,18 @@ function gridKey(gx, gz, s) {
   if (!c.off) { gx = Math.floor(c.x / s); gz = Math.floor(c.z / s); }
   return sepKey(gx, gz);
 }
+// Whether every grid cell a lookup within d blocks of (x, z) touches is already canonical: (x, z) lies at least d blocks inside the
+// middle square of its face, so gridKey's canon() would hand each cell back unchanged (r15-06: most mobs are nowhere near an edge).
+// A mob kept in another face's frame (keepFrame) is in the margin, so it takes the canonical path.
+const GRID_EDGE = 48;   // nearestMob's 5 x 5 cells of 16 reach 40 blocks from the mob; separate's 3 x 3 cells of 2, 3
+function inSquare(x, z, d) {
+  const P = BF.planet, N = P.N, W = P.W;
+  if (!(x >= 0 && z >= 0)) return false;
+  const f = Math.floor(x / W);
+  if (f >= 6) return false;
+  const u = x - W * f - N, v = z - N;
+  return u >= d && u < N - d && v >= d && v < N - d;
+}
 const player = () => BF.player;
 function playerAlive() { const p = BF.player; return !!(p && p.position && !p.dead); }
 function creative() { const p = BF.player; return !!(p && p.gameMode === "creative"); }
@@ -723,11 +735,13 @@ function hostileAI(m, dt, out) {
 // Finds the nearest living mob matching pred within r blocks (horizontal + vertical box).
 function nearestMob(m, r, pred) {
   let best = null, bd = r;
-  if (r <= 32 && chunkGrid.size) {   // only the 16-block cells within r (the grid is rebuilt every update)
+  if (r <= 32 && chunkCells) {   // only the 16-block cells within r (the grid is rebuilt every update)
     const gx = Math.floor(m.position.x / 16), gz = Math.floor(m.position.z / 16), n = Math.ceil(r / 16);
+    const plain = gridFast && inSquare(m.position.x, m.position.z, GRID_EDGE);
     for (let cz = gz - n; cz <= gz + n; cz++) for (let cx = gx - n; cx <= gx + n; cx++) {
-      const cell = chunkGrid.get(gridKey(cx, cz, 16));
-      if (cell) for (const o of cell) {
+      const cell = chunkGrid.get(plain ? sepKey(cx, cz) : gridKey(cx, cz, 16));
+      if (cell) for (let i = 0; i < cell.n; i++) {
+        const o = cell.a[i];
         if (o === m || o.dead || o.removed || !pred(o)) continue;
         const d = mdist(m, o);
         if (d < bd) { bd = d; best = o; }
@@ -1612,26 +1626,81 @@ function updateMob(m, dt) {
 // update and js/mobview.js draws that tool in its folded hands. js/forester.js uses it for axes.
 const toolHolders = {};
 
-// Mobs bucketed in 2-block cells once per update (separate() looks at the 3 x 3 cells around a mob instead of every mob).
-const sepGrid = new Map(), chunkGrid = new Map();   // 2-block cells for separate(), 16-block cells for nearestMob()
+// Mobs bucketed in 2-block cells once per update (separate() looks at the 3 x 3 cells around a mob instead of every mob), and in
+// 16-block cells (nearestMob). Keyed by the canonical cell, since mobs may be kept in other frames. A cell is { n, a }: its n mobs are
+// a[0 .. n - 1]. r15-06: the grids are hash tables kept between updates (a new update bumps gen, which empties every cell at once, and
+// writes over the cell arrays instead of making new ones: setting an array's length to 0 drops its storage), and only a mob near a face
+// edge pays for canon().
 const sepKey = (gx, gz) => (((gx & 0xffff) << 16) | (gz & 0xffff)) >>> 0;
+class CellTable {
+  constructor() { this.gen = 1; this.n = 0; this.size(10); }
+  size(bits) { const n = 1 << bits; this.mask = n - 1; this.sh = 32 - bits; this.keys = new Int32Array(n); this.stamp = new Int32Array(n); this.cells = new Array(n).fill(null); }
+  clear() { this.gen++; this.n = 0; }
+  get(k) {
+    k |= 0;
+    const m = this.mask, g = this.gen;
+    for (let i = Math.imul(k, 0x9e3779b1) >>> this.sh; ; i = (i + 1) & m) {
+      if (this.stamp[i] !== g) return undefined;
+      if (this.keys[i] === k) return this.cells[i];
+    }
+  }
+  add(k, o) {
+    k |= 0;
+    if (this.n * 2 >= this.mask) this.grow();
+    const m = this.mask, g = this.gen;
+    let i = Math.imul(k, 0x9e3779b1) >>> this.sh;
+    for (; this.stamp[i] === g; i = (i + 1) & m) if (this.keys[i] === k) { const c = this.cells[i]; c.a[c.n++] = o; return; }
+    this.stamp[i] = g; this.keys[i] = k; this.n++;
+    let c = this.cells[i];
+    if (!c) c = this.cells[i] = { n: 0, a: [] };
+    c.n = 0; c.a[c.n++] = o;
+  }
+  grow() {   // twice the slots, this update's cells carried over (arrays kept by their new slots)
+    const { keys, stamp, cells, gen } = this, bits = 33 - this.sh;
+    this.size(bits); this.n = 0;
+    for (let i = 0; i < keys.length; i++) if (stamp[i] === gen) {
+      let j = Math.imul(keys[i], 0x9e3779b1) >>> this.sh;
+      while (this.stamp[j] === gen) j = (j + 1) & this.mask;
+      this.stamp[j] = gen; this.keys[j] = keys[i]; this.cells[j] = cells[i]; this.n++;
+    }
+  }
+  entries() { const out = []; for (let i = 0; i < this.keys.length; i++) if (this.stamp[i] === this.gen) out.push([this.keys[i] >>> 0, this.cells[i]]); return out; }
+}
+const SEP = new CellTable(), CHUNK = new CellTable();
+let sepGrid = SEP, chunkGrid = CHUNK, chunkCells = 0, gridFast = true;   // (the reference grids of test/mobgrid-compare.js swap in here)
 function buildSepGrid() {
-  sepGrid.clear(); chunkGrid.clear();
+  if (!gridFast) return buildSepGridRef();
+  SEP.clear(); CHUNK.clear();
   for (const o of list) {
     if (o.dead || o.removed) continue;
-    const k = gridKey(Math.floor(o.position.x / 2), Math.floor(o.position.z / 2), 2);   // (by the canonical cell: mobs may be kept in other frames)
-    const a = sepGrid.get(k);
-    if (a) a.push(o); else sepGrid.set(k, [o]);
-    const k2 = gridKey(Math.floor(o.position.x / 16), Math.floor(o.position.z / 16), 16);
-    const b = chunkGrid.get(k2);
-    if (b) b.push(o); else chunkGrid.set(k2, [o]);
+    const x = o.position.x, z = o.position.z, gx = Math.floor(x / 2), gz = Math.floor(z / 2), hx = Math.floor(x / 16), hz = Math.floor(z / 16);
+    if (inSquare(x, z, GRID_EDGE)) { SEP.add(sepKey(gx, gz), o); CHUNK.add(sepKey(hx, hz), o); }
+    else { SEP.add(gridKey(gx, gz, 2), o); CHUNK.add(gridKey(hx, hz, 16), o); }
   }
+  chunkCells = CHUNK.n;
+}
+// The builder before r15-06 (fresh Maps and cells, every key through canon()), kept for test/mobgrid-compare.js only.
+const REF_SEP = new Map(), REF_CHUNK = new Map();
+function buildSepGridRef() {
+  REF_SEP.clear(); REF_CHUNK.clear();
+  for (const o of list) {
+    if (o.dead || o.removed) continue;
+    const k = gridKey(Math.floor(o.position.x / 2), Math.floor(o.position.z / 2), 2);
+    const a = REF_SEP.get(k);
+    if (a) a.a[a.n++] = o; else REF_SEP.set(k, { n: 1, a: [o] });
+    const k2 = gridKey(Math.floor(o.position.x / 16), Math.floor(o.position.z / 16), 16);
+    const b = REF_CHUNK.get(k2);
+    if (b) b.a[b.n++] = o; else REF_CHUNK.set(k2, { n: 1, a: [o] });
+  }
+  chunkCells = REF_CHUNK.size;
 }
 function separate(m, dt) {
   const gx = Math.floor(m.position.x / 2), gz = Math.floor(m.position.z / 2);
+  const plain = gridFast && inSquare(m.position.x, m.position.z, GRID_EDGE);
   for (let cz = gz - 1; cz <= gz + 1; cz++) for (let cx = gx - 1; cx <= gx + 1; cx++) {
-  const cell = sepGrid.get(gridKey(cx, cz, 2));
-  if (cell) for (const o of cell) {
+  const cell = sepGrid.get(plain ? sepKey(cx, cz) : gridKey(cx, cz, 2));
+  if (cell) for (let i = 0; i < cell.n; i++) {
+    const o = cell.a[i];
     if (o === m || o.dead) continue;
     const op = seen(m.position, o.position, _sA), dx = m.position.x - op.x, dz = m.position.z - op.z;
     const min = m.halfWidth + o.halfWidth;
@@ -2239,6 +2308,15 @@ BF.mobs = {
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
+  // The mob grids for test/mobgrid-compare.js (r15-06): ref(true) switches buildSepGrid and the lookups to the pre-r15-06 builder.
+  // cells() lists each grid's non-empty cells (key -> mobs); separate(m, dt) returns the push it gives m's velocity (m.vel is restored).
+  grid: {
+    ref(on) { gridFast = !on; sepGrid = on ? REF_SEP : SEP; chunkGrid = on ? REF_CHUNK : CHUNK; },
+    build: () => buildSepGrid(),
+    cells() { const f = g => (g instanceof Map ? [...g] : g.entries()).map(([k, c]) => [k, c.a.slice(0, c.n)]); return { sep: f(sepGrid), chunk: f(chunkGrid) }; },
+    nearest: (m, r, pred) => nearestMob(m, r, pred),
+    separate(m, dt) { const x = m.vel.x, z = m.vel.z; separate(m, dt); const d = [m.vel.x - x, m.vel.z - z]; m.vel.x = x; m.vel.z = z; return d; },
+  },
   init(sceneRef) {
     scene = sceneRef;   // (arrows and puffs only, until r15-12 moves their drawing too; mobs are drawn by js/mobview.js)
     BF.mobView.init(sceneRef);
