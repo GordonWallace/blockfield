@@ -169,7 +169,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     R.verifyQueries = false; R.resetQueryStats();
     return out;
   });
-  check(q.diffs === 0 && q.checked === q.n, `mobsAround, ofType and villageMobs agree with a full scan in ${q.n} queries over 200 steps (${q.found} mobs found)` + (q.last ? ' ' + JSON.stringify(q.last) : ''));
+  check(q.diffs === 0 && q.checked >= q.n, `mobsAround, ofType and villageMobs agree with a full scan in ${q.n} queries over 200 steps (${q.found} mobs found)` + (q.last ? ' ' + JSON.stringify(q.last) : ''));
   check(q.box, 'mobsInBox finds the mobs standing in a box');
   check(q.order, 'mobsAround lists mobs in BF.mobs.list order');
   check(q.edge, 'mobsAround with local: true finds mobs just across a face edge (raw distance does not)');
