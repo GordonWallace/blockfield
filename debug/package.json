@@ -1,0 +1,8 @@
+{
+  "name": "blockfield",
+  "private": true,
+  "description": "Blockfield needs no packages to run. This one is for the experimental Claude villager chat (debug/claude.js).",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0"
+  }
+}

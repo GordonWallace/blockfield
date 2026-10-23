@@ -7,9 +7,11 @@
 // /push on the debug port and every open debug screen receives them over Server-Sent Events (/events).
 // The game can also be served some other way and pointed here with index.html?debugfeed=8001.
 // The game page also gets window.BF_BUILD, the commit and branch of this checkout (read from .git), for the game log (js/gamelog.js).
-// No dependencies: Node's built-in http, fs and path only.
+// The game port also answers /claude/* for the experimental Claude villager chat (debug/claude.js, which holds the API key).
+// No dependencies: Node's built-in http, fs and path only (debug/claude.js uses the Anthropic SDK when it's installed).
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path");
+const claude = require("./claude");
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf("--" + name); return i >= 0 && args[i + 1] ? +args[i + 1] : def; };
@@ -52,6 +54,7 @@ function serveGame(req, res) {
   let rel;
   try { rel = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400).end(); return; }
   if (rel.includes("\0")) { res.writeHead(404).end(); return; }   // fs throws on a NUL byte (/%00)
+  if (claude.handle(req, res, rel)) return;   // Claude villager chat (debug/claude.js)
   if (rel === "/wiki") { res.writeHead(301, { Location: "/wiki/" }).end(); return; }   // Blockfieldpedia (wiki/index.html)
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.join(ROOT, rel);
@@ -280,5 +283,6 @@ if (!NO_GAME) listen(serveGame, GAME_PORT, "game");
 console.log(`Blockfield debug server
   ${NO_GAME ? `Game:         serve it yourself and open index.html?debugfeed=${DEBUG_PORT}` : `Game:         http://${shown}:${GAME_PORT}`}
   Debug screen: http://${shown}:${DEBUG_PORT}   (open this one on your second monitor)${NO_GAME ? "" : `
-  Blockfieldpedia: http://${shown}:${GAME_PORT}/wiki/   (the Blockfield wiki)`}
+  Blockfieldpedia: http://${shown}:${GAME_PORT}/wiki/   (the Blockfield wiki)
+  Claude villager: ${claude.describe()}`}
 Ctrl+C to stop.`);

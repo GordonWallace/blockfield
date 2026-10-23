@@ -82,7 +82,7 @@ const P = (BF.player = {
 // ---------- small helpers ----------
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const inv = () => BF.inventory || {};
-const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()) || !!(BF.coords && BF.coords.panel.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
+const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()) || !!(BF.coords && BF.coords.panel.isOpen()) || !!(BF.claudeVillager && BF.claudeVillager.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
 const selectedItem = () => {
   try { const s = inv().selected && inv().selected(); return s && s.count > 0 ? s : null; } catch (_) { return null; }
 };
@@ -1741,6 +1741,7 @@ function die() {
     try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
     try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
     try { if (BF.coords && BF.coords.panel.isOpen()) BF.coords.panel.close(); } catch (_) {}
+    try { if (BF.claudeVillager && BF.claudeVillager.isOpen()) BF.claudeVillager.close(); } catch (_) {}
   }
   const where = BF.coords ? "\n" + BF.coords.describe(pos.x, pos.y, pos.z, { whole: true }) + "  " + (BF.coords.latLonText(pos.x, pos.z) || "") : "";   // planet: where it happened (spec r14-18)
   deathEl.querySelector(".bfp-sub").textContent = (DEATH_MSG[lastCause] || "You died") + where;

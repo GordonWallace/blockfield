@@ -4,3 +4,5 @@ node_modules/
 .claude/worktrees/
 ci-out/
 debug/.alerts.json
+.anthropic-key
+package-lock.json

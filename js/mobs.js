@@ -1634,6 +1634,7 @@ function jobsAI(m, dt, out) {
 }
 function villagerAI(m, dt, out) {
   const ai = m.ai, T = m.def, V = m.village;
+  if (m.claude) { claudeAI(m, dt, out); return; }
   if (m.tradingWith) {
     // auto-release if the trade screen closed without telling us
     const inv = BF.inventory;
@@ -1692,6 +1693,17 @@ function villagerAI(m, dt, out) {
   }
   wanderAI(m, dt, out);
   if (m.child && BF.breeding) BF.breeding.childMove(m, dt, out);   // children run about (js/breeding.js)
+}
+
+// The Claude villager (js/claudevillager.js): faces the player while chatting, otherwise wanders like any villager, within ~12 blocks of its spot.
+function claudeAI(m, dt, out) {
+  const ai = m.ai, h = m.claudeHome;
+  if (BF.claudeVillager && BF.claudeVillager.isChatting(m)) { out.faceTarget = true; m.lookAt = "player"; ai.mode = "idle"; ai.t = 2; return; }
+  if (h) {
+    if (Math.hypot(h.x - m.position.x, h.z - m.position.z) > 12 && ai.mode !== "walk") { ai.mode = "walk"; ai.tx = h.x + rnd(-4, 4); ai.tz = h.z + rnd(-4, 4); ai.t = rnd(5, 8); }
+    else if (ai.mode === "walk" && Math.hypot(ai.tx - h.x, ai.tz - h.z) > 10) { ai.tx = h.x + rnd(-8, 8); ai.tz = h.z + rnd(-8, 8); }
+  }
+  wanderAI(m, dt, out);
 }
 
 function golemAI(m, dt, out) {
@@ -2820,6 +2832,7 @@ BF.mobs = {
   // (returns null); otherwise falls back to a simple 3 wheat -> 1 emerald trade and returns a message string.
   interact(mob) {
     if (!mob || mob.dead || mob.removed || mob.type !== "villager") return null;
+    if (mob.claude && BF.claudeVillager) return BF.claudeVillager.open(mob) ? null : "The Sage can't talk right now";   // the Claude villager's chat (js/claudevillager.js)
     if (mob.sleeping) return "Villager is sleeping";
     if (mob.child) { mob.lookAt = "player"; mob.ai.lookT = 1.5; return "The child is too young to trade"; }
     if (mob.profession === "stable_hand" && BF.stables) { const msg = BF.stables.playerSells(mob); if (msg) return msg; }   // the player leading a tamed horse sells it to the stable (js/stables.js)
