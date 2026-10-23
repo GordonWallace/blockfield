@@ -33,7 +33,7 @@ On the debug screen each village shows how long it has before it unloads, a list
 A safety valve stops villages early if the game would otherwise slow down. It acts when any one of these is over its limit:
 
 - more than 1500 chunks held for villages beyond your view distance;
-- villager thinking time above 6 milliseconds a frame, averaged over about 5 seconds;
+- more than 300 villager thinking updates a game step, averaged over about 5 game seconds (about 6 milliseconds of thinking). It counts work rather than measuring time, so the same villages stop on a fast computer and a slow one;
 - more than 10 villages running or counting down.
 
 Villages are then stopped one at a time until all three are under their limits, in this order: villages counting down (farthest first), then villages a merchant is travelling to and has not yet reached, then running villages beyond 100 blocks of you (farthest first). A village within 100 blocks is never stopped this way.

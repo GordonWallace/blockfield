@@ -595,12 +595,13 @@ function pack(v) {
     ck_: undefined,                                                      // it was given the cowherd's bucket and bottles (js/cowherd.js)
     mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
-    id: v.id,   // its entity id (js/ids.js): it comes back under the same id after an unload or a reload; missing in 1.4 saves
+    id: v.id,   // its entity id (js/ids.js): it comes back under the same id after an unload or a reload
+    rng: v.rng,           // its random stream (js/rand.js), so a reload carries on from where it was
   };
 }
 function unpack(v, o) {
   if (!v || !o || typeof o !== "object") return v;
-  if (o.id && BF.ids) BF.ids.reuse(v, o.id);   // no id (a 1.4 save): it keeps the new one it was made with
+  if (o.id && BF.ids) BF.ids.reuse(v, o.id);   // the same id it had (js/ids.js)
   if (Array.isArray(o.inv)) {
     const a = inv.create();
     o.inv.slice(0, SLOTS).forEach((s, i) => {
@@ -623,6 +624,7 @@ function unpack(v, o) {
   v.cowKit = !!o.ck;
   v.beeKit = !!o.bk;
   if (BF.merchant && o.mc) BF.merchant.unpack(v, o.mc);
+  if (Number.isInteger(o.rng)) v.rng = o.rng >>> 0;
   if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;
 }

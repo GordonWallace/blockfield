@@ -169,7 +169,7 @@ BF.ids = {
   // raises the counter past a saved id (js/mobs.js importVillagers), so new ids never take one a saved villager will come back with
   seen(id) { const n = typeof id === "string" && /^e\d+$/.test(id) ? +id.slice(1) : 0; if (n >= next) next = n + 1; },
   serialize() { return { next }; },
-  deserialize(o) { const n = o && Math.floor(+o.next); if (n > next) next = n; },   // old saves: none (the saved villagers' ids raise it)
+  deserialize(o) { const n = o && Math.floor(+o.next); if (n > next) next = n; },
   reset() { reg.clear(); ghosts.clear(); next = 1; stats.collisions = 0; stats.last = null; },
 };
 })();

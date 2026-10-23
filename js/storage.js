@@ -50,7 +50,7 @@ function bedHouse(m) {
 }
 const houseCache = new Map();   // house -> {t, list: [{x,y,z}]}
 function chestsIn(H, b) {
-  const now = BF.simNow ? BF.simNow() : performance.now() / 1000;
+  const now = BF.simNow ? BF.simNow() : 0;
   const hit = houseCache.get(H);
   if (hit && now - hit.t < 10) return hit.list;
   const W = BF.world, y0 = (H.y != null ? H.y : b.y - 1), list = [];

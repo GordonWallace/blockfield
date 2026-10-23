@@ -93,7 +93,7 @@ function snapOf(m) {
 function apply(m, snap) {
   if (!m || !snap || !snap.s) return m;
   for (const k in snap.s) if (!SKIP.has(k) && !BF.ids.REF.has(k)) m[k] = deser(snap.s[k]);
-  if (m.ai) BF.ids.refs(m.ai);   // (a 1.4 save's snapshot: a plain ai table)
+  if (m.ai) BF.ids.refs(m.ai);   // (its links are ids again)
   m.position.set(snap.p[0], snap.p[1], snap.p[2]);
   m.vel.set(0, 0, 0);
   m.yaw = snap.yaw || 0;

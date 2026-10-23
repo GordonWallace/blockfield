@@ -59,6 +59,7 @@ function snapshot() {
     villages: BF.state.villages,                           // village generator (old saves have none => 1, the classic villages)
     monsters: BF.gameOpts ? BF.gameOpts.monsters() : undefined,   // game options: which monsters spawn (js/gameopts.js; the list entry's copy is the one read)
     time: { t: BF.sky.time, day: BF.sky.day },
+    rand: BF.rand ? BF.rand.save() : undefined,           // the simulation tick and creation counter of the seeded random streams (js/rand.js)
     spawn: BF.spawnPoint,
     player,
     inventory: BF.inventory.serialize ? BF.inventory.serialize() : null,
@@ -93,6 +94,7 @@ function restore(data, meta) {
     BF.world.edits.set(k, m);
   }
   if (data.spawn) BF.spawnPoint = data.spawn;
+  if (BF.rand) BF.rand.load(data.rand);   // missing in older saves: the counters start at 0
   if (data.time) { BF.sky.day = data.time.day || 0; if (BF.sky.setTime) BF.sky.setTime(data.time.t); else BF.sky.time = data.time.t; }
   const pl = data.player || {};
   if (BF.player.deserialize) BF.player.deserialize(pl);
@@ -104,7 +106,7 @@ function restore(data, meta) {
   }
   if (data.inventory && BF.inventory.deserialize) BF.inventory.deserialize(data.inventory);
   if (data.villagers && BF.mobs && BF.mobs.importVillagers) BF.mobs.importVillagers(data.villagers); // old saves have none
-  if (BF.ids) BF.ids.deserialize(data.ids); // 1.4 saves: none (ids are handed out on load, past the saved villagers' ones)
+  if (BF.ids) BF.ids.deserialize(data.ids); // the id counter (js/ids.js)
   if (BF.wildlife) BF.wildlife.deserialize(data.wildlife); // old saves: every chunk rolls its animals once, the first time it loads
   if (BF.mobSave) BF.mobSave.deserialize(data.mobs); // old saves: nothing to restore exactly (wild mobs go to js/wildlife.js, so after it)
   if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather); // old saves: newWorld's seeded default

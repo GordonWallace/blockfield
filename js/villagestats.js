@@ -30,8 +30,8 @@ function popChange(key) {
 let tickT = 0, hooked = false;
 function update() {
   if (!hooked && typeof BF.on === "function") { hooked = true; BF.on("newWorld", reset); }
-  const t = performance.now();
-  if (t - tickT < 2000 || !BF.mobs || !BF.mobs.villages) return;
+  const t = BF.simNow();   // every 2 game seconds, from the game step (js/villagelog.js init; spec r15-16)
+  if ((t - tickT < 2 && t >= tickT) || !BF.mobs || !BF.mobs.villages) return;
   tickT = t;
   for (const rec of BF.mobs.villages.values())
     if ((rec.members || []).some(m => m.type === "villager" && !m.dead && !m.removed && m.position)) sample(rec);   // loaded villages only
