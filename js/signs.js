@@ -596,7 +596,8 @@ addEventListener("keydown", e => {
 
 // ---------------------------------------------------------------- auto signs
 function registerAuto(kind, fn) { autos[kind] = fn; }
-function runAuto(onlyKey) {
+// A sign coming into the world (direct) gets its text at once; the simulation's half-hourly updates are requests.
+function runAuto(onlyKey, direct) {
   for (const [k, e] of data) {
     if (!e.auto || (onlyKey && k !== onlyKey)) continue;
     const [x, y, z] = pk(k);
@@ -608,9 +609,20 @@ function runAuto(onlyKey) {
     if (t == null) continue;
     const c = capacity(g);
     t = clampText(t, c.cols, c.rows);
-    if (t !== e.t) { e.t = t; renderDirty = true; }
+    if (t === e.t) continue;
+    if (direct || !BF.req) { e.t = t; renderDirty = true; }
+    else BF.req.send("signText", k, { t, expect: e.t }, e.ak || null);   // a request (spec r15-19): written in the apply phase
   }
 }
+// signText: target the sign group's anchor key, data {t, expect}: an auto sign's text (the village sign's count), refused when the sign is
+// gone, no longer an auto sign, or its text changed since it was read.
+BF.req.on("signText", req => {
+  const e = data.get(req.target);
+  if (!e || !e.auto) return { ok: false, why: "gone" };
+  if (e.t !== req.data.expect) return { ok: false, why: "changed" };
+  e.t = req.data.t; renderDirty = true;
+  return { ok: true };
+});
 let pendingAuto = true;
 // generated auto signs become text entries once all their blocks are loaded (and only once per auto key)
 function tryAutoPlans() {
@@ -623,7 +635,7 @@ function tryAutoPlans() {
     const g = groupAt(p.cells[0][0], p.cells[0][1], p.cells[0][2]);
     if (!p.cells.every(c => wget(c[0], c[1], c[2]) === p.id) || !g || g.key !== k || g.W * g.H !== p.cells.length || data.has(k)) continue;
     data.set(k, { t: "", auto: p.kind, ak: p.ak });
-    runAuto(k);
+    runAuto(k, true);
     renderDirty = true;
   }
 }
@@ -925,11 +937,6 @@ function tick(now) {
   if (!BF.world || !BF.world.chunks) return;
   try {
     if (pendingAuto) tryAutoPlans();
-    const S = BF.sky;
-    if (S && !(BF.state && BF.state.paused)) {
-      const hh = Math.floor(((S.day || 0) + (S.time || 0)) * 48);   // half an in-game hour = 1/48 day
-      if (hh !== lastHH) { lastHH = hh; runAuto(); }
-    }
     if (renderDirty) refresh();
     tSlow -= dt;
     if (tSlow <= 0) {
@@ -940,6 +947,14 @@ function tick(now) {
   } catch (err) { console.error(err); }
 }
 requestAnimationFrame(tick);
+// auto signs' text, every half game hour, in the simulation's think phase (spec r15-19; js/world.js tickSim)
+function autoTick() {
+  const S = BF.sky;
+  if (!S) return;
+  const hh = Math.floor(((S.day || 0) + (S.time || 0)) * 48);   // half an in-game hour = 1/48 day
+  if (hh !== lastHH) { lastHH = hh; runAuto(); }
+}
+if (BF.world && BF.world.onThink) BF.world.onThink(autoTick);
 addEventListener("load", () => {
   if (BF.on) BF.on("newWorld", reset);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const o of overlays.values()) o.sig = null; renderDirty = true; });

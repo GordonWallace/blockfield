@@ -32,7 +32,7 @@ module.exports = async (pg, out) => {
       m.position.set(x + 0.5, W.heightAt(x, z) + 1, z); m.vel.set(0, 0, 0); m.ai.route = null; m.ai.mode = "idle"; m.ai.t = 0;
       if (kind === "explorer") { BF.trades.inv.add(m.inv, BF.I.blank_map_1, 1); if (!BF.explorer.useBlank(m) || !BF.explorer.carried(m).some(c => !c.done)) return { kind, error: "no map to fill" }; }
       const x0 = m.position.x, z0 = m.position.z, d0 = Math.hypot(x0 - V.x, z0 - V.z);
-      for (let T = 0; T < 25; T += 0.05) { BF.sky.setTime(0.01); BF.mobs.update(0.05); P.set(x0 + 4, m.position.y + 1, z0); }
+      for (let T = 0; T < 25; T += 0.05) { BF.sky.setTime(0.01); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); P.set(x0 + 4, m.position.y + 1, z0); }
       const d1 = Math.hypot(m.position.x - V.x, m.position.z - V.z), moved = Math.hypot(m.position.x - x0, m.position.z - z0);
       m.ex = saved.ex; m.mc = saved.mc; m.inv = saved.inv;
       return { kind, d0: Math.round(d0), d1: Math.round(d1), moved: +moved.toFixed(1) };

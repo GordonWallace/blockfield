@@ -46,7 +46,7 @@ module.exports = async (pg, out) => {
       // past the step: standing on top of it (its cells are x <= 15). A route may run along its edge cells (x = 15, centre 15.5) before
       // turning west, which routes of equal cost do or don't (the heap's tie order, spec r15-05), so the edge cells count.
       const isPast = () => m.position.x < X0 + 16 && m.position.y > Y0 + 0.5;
-      const step = () => { BF.sky.setTime(0.1); BF.mobs.update(0.05); P.set(X0 + 25, Y0 + 1, Z0 + 25); T += 0.05; };
+      const step = () => { BF.sky.setTime(0.1); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); P.set(X0 + 25, Y0 + 1, Z0 + 25); T += 0.05; };
       try {
         if (kind !== "boxed") {
           while (T < 60 && past == null) { step(); if (isPast()) past = +T.toFixed(1); }

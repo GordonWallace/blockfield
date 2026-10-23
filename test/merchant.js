@@ -58,7 +58,7 @@ module.exports = async (pg) => {
       const W = BF.world;
       W.setBlock(px, gy, pz, B.grass); W.setBlock(px, gy + 1, pz, 0); W.setBlock(px, gy + 2, pz, 0);
       const fake = { position: { x: px + 0.5, y: gy + 1, z: pz + 0.5 }, onGround: true };
-      const walk = n => { for (let i = 0; i < n; i++) { const st = {}; M.step(fake, st); } };
+      const walk = n => { for (let i = 0; i < n; i++) { const st = {}; M.step(fake, st); BF.req.apply(); BF.req.deliver(); } };   // the wear is a request (spec r15-19)
       walk(19);
       ok("19 crossings: still grass", W.getBlock(px, gy, pz) === B.grass, W.getBlock(px, gy, pz));
       walk(1);
