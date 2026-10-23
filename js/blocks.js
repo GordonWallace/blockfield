@@ -806,15 +806,18 @@ BF.resolveItem = name => {
 };
 // Items dropped when a block breaks: its `drop` plus `extraDrops` [[itemName, min, max, chance], ...].
 // Returns [{id, count}]. Mature crops' extra drops replace nothing: wheat gives wheat + 1-3 seeds.
-BF.rollDrops = function (blockId) {
+// r: the seeded stream to roll with (js/rand.js); without one, the tick's own stream for the n-th roll of the tick.
+let dropTick = -1, dropN = 0;
+BF.rollDrops = function (blockId, r) {
   const b = blocks[blockId], out = [];
   if (!b) return out;
+  if (!r && b.extraDrops) { if (BF.rand.tick !== dropTick) { dropTick = BF.rand.tick; dropN = 0; } r = BF.rand.at("drops", dropN++, 0); }
   if (b.drop != null) out.push({ id: b.drop, count: 1 });
   for (const [name, min, max, chance] of b.extraDrops || []) {
-    if (Math.random() >= chance) continue;
+    if (r.next() >= chance) continue;
     const id = I[name];
     if (id === undefined) continue;
-    const n = min + Math.floor(Math.random() * (max - min + 1));
+    const n = min + r.int(max - min + 1);
     const same = out.find(o => o.id === id);
     if (same) same.count += n; else out.push({ id, count: n });
   }

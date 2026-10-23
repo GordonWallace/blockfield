@@ -24,11 +24,11 @@ module.exports = async (pg) => {
   });
   ok("found a village with a spot 300 blocks away", !!setup, setup);
   if (!setup) { console.log("FAILED: 1"); return; }
-  // The village sim's frame-time guard (js/villagesim.js overLimit "AI time", LIMITS.aiMs) stops villages beyond ALWAYS of the player, pinned
-  // ones too, when villager AI averages over 6 ms a frame. A headless software-rendered runner gets there with this village's 44 villagers, so
+  // The village sim's AI-work guard (js/villagesim.js overLimit "AI time", LIMITS.aiWork) stops villages beyond ALWAYS of the player, pinned
+  // ones too, when villager AI averages over its limit (6 ms a frame before spec r15-16 made it a count of updates). A headless software-rendered runner gets there with this village's 44 villagers, so
   // the village (and its villagers) dropped out before or during the night and no monster could spawn in it. The guard is not what this
   // test checks (test/force-unload.js does), so it is lifted here and put back at the end.
-  const aiMs = await pg.evaluate(() => { const L = BF.villageSim.LIMITS, was = L.aiMs; L.aiMs = Infinity; return was; });
+  const aiMs = await pg.evaluate(() => { const L = BF.villageSim.LIMITS, was = L.aiWork; L.aiWork = Infinity; return was; });
   await pg.waitForFunction(k => BF.villageSim.isActive(k) && BF.mobs.villages.get(k) && (BF.mobs.villages.get(k).members || []).some(m => m.type === "villager"), setup.key, { timeout: 90000 }).catch(() => {});
   await pg.waitForTimeout(4000);
   const r = await pg.evaluate(async ([key, aiMs]) => {
@@ -57,7 +57,7 @@ module.exports = async (pg) => {
     const active = BF.villageSim.isActive(key);   // (still running at the end: the pin held)
     L.spawned = orig;
     BF.villageSim.unpin("test");
-    BF.villageSim.LIMITS.aiMs = aiMs;
+    BF.villageSim.LIMITS.aiWork = aiMs;
     return {
       n: spawns.length, inVillage: spawns.filter(s => s.inVillage).length, zombiesInVillage: spawns.filter(s => s.inVillage && s.type === "zombie").length,
       lit: spawns.filter(s => s.light > 7).length, atCap: spawns.filter(s => s.h >= s.cap).length, close: spawns.filter(s => s.player < 12 || s.near < 12).map(s => [s.player, s.near].map(Math.round)),
