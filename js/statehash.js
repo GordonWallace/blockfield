@@ -39,7 +39,7 @@ const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg"]);
 let mobSet = new Set();
 const mobRef = m => m.id != null ? "#" + m.id : m.type + (m.name ? ":" + m.name : "");
-const isMob = v => mobSet.has(v) || (v.root && v.position && v.type && v.ai);
+const isMob = v => mobSet.has(v) || (v.def && v.position && v.type && v.ai);   // (a mob: js/mobs.js createMob)
 
 function canon(v, out, d, seen) {
   if (v === null) { out.push("N"); return; }

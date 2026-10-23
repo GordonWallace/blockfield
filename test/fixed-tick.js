@@ -151,17 +151,25 @@ module.exports = async (pg, out) => {
       m.knockT = 1;   // keep the push for this tick (no AI steering)
       BF.mobs.update(BF.warp.TICK);
       const q = { x: m.prev.x, y: m.prev.y, z: m.prev.z }, c = { x: m.position.x, y: m.position.y, z: m.position.z };
-      BF.mobs.draw(0.5);
-      const d = BF.mobs.drawnAt(m), mid = { x: d.x, y: d.y, z: d.z };
-      BF.mobs.draw(1);
-      const e = BF.mobs.drawnAt(m), end = { x: e.x, y: e.y, z: e.z };
-      return { q, c, mid, end, simUntouched: m.position.x === c.x && m.position.z === c.z };
+      // drawn by js/mobview.js at BF.warp.alpha, held here at 0.5 and then 1
+      const W = BF.warp, desc = Object.getOwnPropertyDescriptor(W, "alpha"), V = BF.mobView;
+      let A = 0.5;
+      Object.defineProperty(W, "alpha", { get: () => A, configurable: true });
+      try {
+        V.render(0);
+        const d = V.drawPos(m), v = V.viewOf(m), mid = { x: d.x, y: d.y, z: d.z }, model = v ? { x: v.root.position.x, z: v.root.position.z } : null;
+        A = 1;
+        V.render(0);
+        const e = V.drawPos(m), end = { x: e.x, y: e.y, z: e.z };
+        return { q, c, mid, model, end, simUntouched: m.position.x === c.x && m.position.z === c.z };
+      } finally { Object.defineProperty(W, "alpha", desc); }
     } finally { BF.mobs.discard(m); BF.state.paused = false; }
   });
   console.log(JSON.stringify(dr));
   const between = (v, a, b) => v >= Math.min(a, b) - 1e-9 && v <= Math.max(a, b) + 1e-9;
   check(Math.abs(dr.c.x - dr.q.x) > 0.05, "the test mob moved in its tick (" + (dr.c.x - dr.q.x).toFixed(3) + " blocks)");
   check(between(dr.mid.x, dr.q.x, dr.c.x) && between(dr.mid.z, dr.q.z, dr.c.z) && Math.abs(dr.mid.x - (dr.q.x + dr.c.x) / 2) < 1e-6, "at alpha 0.5 the mob is drawn halfway between prev and cur");
+  check(dr.model && Math.abs(dr.model.x - dr.mid.x) < 1e-6 && Math.abs(dr.model.z - dr.mid.z) < 1e-6, "and its model is placed there (" + JSON.stringify(dr.model) + ")");
   check(Math.abs(dr.end.x - dr.c.x) < 1e-9 && Math.abs(dr.end.z - dr.c.z) < 1e-9, "at alpha 1 it is drawn where the sim has it");
   check(dr.simUntouched, "drawing doesn't move the simulated mob");
 

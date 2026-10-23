@@ -127,8 +127,10 @@ function labelTexture(name, prof) {
   return t;
 }
 function dropLabel(m, l) { if (BF.scene) BF.scene.remove(l.sp); l.sp.material.dispose(); labels.delete(m); }
+let _lp = null;
 function updateLabels(on) {
   if (!BF.scene || typeof THREE === "undefined") return;
+  if (!_lp) _lp = new THREE.Vector3();
   const pp = BF.player && BF.player.position;
   if (!on || !pp) { for (const [m, l] of [...labels]) dropLabel(m, l); return; }
   const seen = new Set();
@@ -143,7 +145,8 @@ function updateLabels(on) {
       sp.scale.set(1.6, 0.4, 1); sp.renderOrder = 10;
       BF.scene.add(sp); labels.set(m, l = { sp, key });
     } else if (l.key !== key) { l.sp.material.map = labelTexture(nameOf(m), prof); l.sp.material.needsUpdate = true; l.key = key; }
-    l.sp.position.set(m.position.x, m.position.y + (m.height || 1.95) + 0.45, m.position.z);
+    const dp = BF.mobView ? BF.mobView.drawPos(m, _lp) : m.position;   // where the villager is drawn (js/mobview.js)
+    l.sp.position.set(dp.x, dp.y + (m.height || 1.95) + 0.45, dp.z);
   }
   for (const [m, l] of [...labels]) if (!seen.has(m)) dropLabel(m, l);
 }

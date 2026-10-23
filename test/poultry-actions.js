@@ -57,7 +57,7 @@ module.exports = async (pg, out) => {
     ok("the chickens laid eggs and the keeper collected them", c("egg") > 0, { eggs: c("egg"), nest: coop.eggs });
     ok("fed chickens bred: a chick hatched in the coop", born > 0 && coop.hens.some(s => s.growAt != null), { born, flock: coop.hens.length });
     const chick = coop.hens.find(s => s.growAt != null);
-    ok("a chick is smaller", !!(chick && chick.mob && chick.mob.chick && chick.mob.model.scale.x < 0.9), chick && chick.mob && chick.mob.model.scale.x);
+    ok("a chick is smaller", !!(chick && chick.mob && chick.mob.chick && chick.mob.scale < 0.9), chick && chick.mob && chick.mob.scale);
     for (let i = 0; i < 1200 && (keeper.position.x > coop.fx0 && keeper.position.x < coop.fx1 && keeper.position.z > coop.fz0 && keeper.position.z < coop.fz1); i++) step();
     R.keeperInv = keeper.inv.filter(Boolean).map(s => BF.items[s.id].name + ":" + s.count).join(",");
 

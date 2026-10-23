@@ -20,7 +20,7 @@ const MAX_DEPTH = 7, MAX_ARR = 2500;
 const SKIP = new Set(["def", "position", "vel", "prev", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
   "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
-  "tradingWith", "badge", "badgeLevel", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig"]);
+  "tradingWith", "badge", "badgeLevel", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig"]);
 
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const r2 = v => Math.round(v * 100) / 100;
@@ -33,7 +33,7 @@ function ser(v, d, seen) {
   if (t === "string" || t === "boolean") return v;
   if (t !== "object" || d > MAX_DEPTH) return undefined;
   if (v.isVector3) return { $v: [r2(v.x), r2(v.y), r2(v.z)] };
-  if (v.isObject3D || v.isMaterial || v.isBufferGeometry || v.nodeType || v.members || (v.root && v.position)) return undefined;
+  if (v.isObject3D || v.isMaterial || v.isBufferGeometry || v.nodeType || v.members || (v.def && v.ai && v.position)) return undefined;
   if (seen.has(v)) return undefined;
   if (v instanceof Map || v instanceof Set) {   // kept with plain keys only (a Map keyed by mobs comes back empty): job modules call .get / .has on theirs
     seen.add(v);
@@ -96,7 +96,6 @@ function apply(m, snap) {
   m.position.set(snap.p[0], snap.p[1], snap.p[2]);
   m.vel.set(0, 0, 0);
   m.yaw = snap.yaw || 0;
-  if (m.model) m.model.rotation.y = m.yaw;
   if (snap.hp > 0) m.hp = Math.min(snap.hp, m.maxHp || snap.hp);
   m.fallStart = m.position.y; m.onGround = false;
   m.tradingWith = null; m.lookAt = null;

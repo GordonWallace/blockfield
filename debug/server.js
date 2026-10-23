@@ -163,7 +163,8 @@ function push(body, res) {
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
   const staleP = !!s.pick && s.pick.pv !== pv;                                 // so is its picked villager
   const staleT = !!ptReq && !!s.pt && s.pt.tv !== ptv;                         // and a planet toggle it hasn't applied
-  const o = stale || staleP || staleT || glogAt != null || build ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleT ? { pt: ptReq, ptv } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}) : null;
+  const staleS = (s.screens | 0) !== clients.size;                             // and how many debug screens are open (the perf meter runs while any is, js/perf.js)
+  const o = stale || staleP || staleT || staleS || glogAt != null || build ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleT ? { pt: ptReq, ptv } : {}, staleS ? { screens: clients.size } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}) : null;
   res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(o ? JSON.stringify(o) : resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
