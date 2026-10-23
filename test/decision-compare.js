@@ -29,8 +29,8 @@ const ok = (name, cond, extra) => console.log((cond ? 'PASS ' : 'FAIL ') + name 
   const where = await pg.evaluate(() => {
     window.__halt = true;
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
-    const P = BF.planet, p = BF.player.position, on = !!(P && P.isPlanet && P.isPlanet());
-    const v = on ? BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0] : BF.worldgen.nearestVillage(0, 0);
+    const P = BF.planet, p = BF.player.position;
+    const v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];
     const y = (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3;
     BF.player.spawn(v.x + 0.5, y, v.z + 0.5);
     BF.player.position.y = y + 40;   // hover above, so the player never lands inside terrain
