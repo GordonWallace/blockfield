@@ -39,6 +39,7 @@ BF.newWorld = function (seed, opts) {
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier
   BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
   BF.noise = BF.makeNoise(BF.state.seed);
+  BF.rand.reset();   // seeded random streams start over with the world (js/rand.js); a save restores its own counters afterwards
   BF.mobs.clear && BF.mobs.clear();
   if (BF.gameOpts) BF.gameOpts.setAll(opts && opts.monsters);   // which monsters spawn in this world (js/gameopts.js); none given: the defaults
   BF.drops.clear();
@@ -219,6 +220,7 @@ function frame(now) {
     while (done < plan.n && !W.frozen && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {   // an alert can freeze it mid-frame (js/alerts.js)
       const h = plan.h;
       W.advance(h);
+      BF.rand.step();   // the tick that keys world-event rolls (js/rand.js)
       BF.state.time += h;
       BF.sky.update(h);
       BF.mobs.update(h);
@@ -248,6 +250,7 @@ function frame(now) {
   updateDebug(now);
   BF.vlog.update(dt, showDebug);
   if (BF.villagerHover) BF.villagerHover.update(dt);
+  if (BF.stateHash) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js)
   if (BF.debugFeed) BF.debugFeed.update();
 }
 

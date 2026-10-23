@@ -595,6 +595,7 @@ function pack(v) {
     ck_: undefined,                                                      // it was given the cowherd's bucket and bottles (js/cowherd.js)
     mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
+    rng: v.rng,           // its random stream (js/rand.js), so a reload carries on from where it was
   };
 }
 function unpack(v, o) {
@@ -621,6 +622,7 @@ function unpack(v, o) {
   v.cowKit = !!o.ck;
   v.beeKit = !!o.bk;
   if (BF.merchant && o.mc) BF.merchant.unpack(v, o.mc);
+  if (Number.isInteger(o.rng)) v.rng = o.rng >>> 0;
   if (Array.isArray(o.bed) && o.bed.length === 4 && o.bed.every(Number.isFinite)) v.bed = { x: o.bed[0], y: o.bed[1], z: o.bed[2], f: o.bed[3] & 3, claimed: true };
   return v;
 }

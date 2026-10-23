@@ -1,0 +1,5 @@
+["the-planet", "world-generation", "terrain", "biomes", "rivers", "caves-and-ores", "trees-and-plants",
+ "villages", "village-structures",
+ "villagers", "villager-life", "village-economy", "builders", "caravans", "village-loading",
+ "mobs", "mob-spawning", "animal-husbandry",
+ "player", "mining-and-tools", "farming", "light", "time-and-weather", "transport", "maps-and-compasses", "commands", "game-log", "state-hash"]
