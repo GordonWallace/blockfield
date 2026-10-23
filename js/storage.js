@@ -272,43 +272,30 @@ BF.req.on("chestPut", (req, W) => {
 });
 
 // ---------------------------------------------------------------- villager AI (mobs.js villagerAI, daytime)
+// Storing and taking back are "chest" requests (js/inventory.js, spec r15-22): the plan is made from the chest as this think sees it, and
+// the request moves only what is still there (and fits) when it applies, in requester order. The log line and the fetch cool-down follow
+// the result, before its next think.
 function doStore(m, p) {
-  const c = INV().chestRecord(p.x, p.y, p.z), k = keyOf(m), st = m.store;
+  const c = INV().chestState(p.x, p.y, p.z), k = keyOf(m);
   if (!usable(p, k)) return false;
-  const plan = storePlan(m, c.slots), done = [], now = dayNow();
-  for (const e of plan) {
-    let got = 0, left = 0;
-    for (const s of TR().inv.take(m.inv, e.id, e.n)) {   // a worn tool keeps its wear in the chest
-      got += s.count;
-      const l = INV().chestAdd(p.x, p.y, p.z, s.id, s.count, s.wear);
-      if (l) TR().inv.add(m.inv, s.id, l, s.wear);
-      left += l;
-    }
-    if (got - left > 0) { done.push({ id: e.id, n: got - left }); (st.stored || (st.stored = {}))[e.id] = now; }
-  }
-  if (!done.length) return false;
-  INV().chestUsed(p.x, p.y, p.z, k, nameOf(m), m);   // claims an unowned chest (logged from the chestClaimed event)
-  log(m.village, who(m) + " put " + listOf(done) + " in their chest at " + at(p));
+  const plan = storePlan(m, c ? c.slots : new Array(INV().CHEST_SIZE).fill(null));
+  if (!plan.length) return false;
+  BF.req.send("chest", pk(p.x, p.y, p.z), { put: plan, owner: k, name: nameOf(m) }, m).then(r => {
+    if (!r.ok) return;
+    const now = dayNow(), st = m.store;
+    for (const e of r.put) (st.stored || (st.stored = {}))[e.id] = now;
+    log(m.village, who(m) + " put " + listOf(r.put) + " in their chest at " + at(p));
+  });
   return true;
 }
 function doTake(m, p) {
   const c = INV().chestState(p.x, p.y, p.z), k = keyOf(m);
   if (!c || !usable(p, k)) return false;
-  const done = [];
-  for (const e of withdrawPlan(m, c)) {
-    let got = 0, left = 0;
-    for (const s of INV().chestTakeStacks(p.x, p.y, p.z, e.id, e.n)) {
-      got += s.count;
-      const l = TR().inv.add(m.inv, s.id, s.count, s.wear);
-      if (l) INV().chestAdd(p.x, p.y, p.z, s.id, l, s.wear);
-      left += l;
-    }
-    if (!got) continue;
-    if (got - left > 0) done.push({ id: e.id, n: got - left });
-  }
-  if (!done.length) return false;
-  INV().chestUsed(p.x, p.y, p.z, k, nameOf(m), m);   // the first to use an unclaimed chest that still holds things becomes its owner
-  log(m.village, who(m) + " took " + listOf(done) + " from their chest at " + at(p));
+  const plan = withdrawPlan(m, c);
+  if (!plan.length) return false;
+  BF.req.send("chest", pk(p.x, p.y, p.z), { take: plan, owner: k, name: nameOf(m) }, m).then(r => {
+    if (r.ok) log(m.village, who(m) + " took " + listOf(r.took) + " from their chest at " + at(p));
+  });
   return true;
 }
 // What it should do now: {act: "store" | "take", p} or null; orders a chest when it is full and has none it may use.

@@ -243,11 +243,12 @@ function nextJob(m) {
 }
 const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
 function finishSmelt(m, job, all) {
-  const got = FU().empty(m, job, all) || [];
-  const glass = got.filter(e => e.id === I("glass")).reduce((a, e) => a + e.n, 0), back = got.filter(e => e.id === SAND()).reduce((a, e) => a + e.n, 0);
-  const S = st(m); S.made = S.made || { glass: 0, panes: 0, bottles: 0 }; S.made.glass += glass;
-  log("collect", { glass, loaded: job.loaded || 0, all: !!all, back });
-  if (glass > 0) vlog(m, "furnace", "smelted " + glass + " glass from sand in the furnace at " + pk(job.furnace.x, job.furnace.y, job.furnace.z), job.furnace);
+  FU().empty(m, job, all, got => {   // when the "furnace" request applies (js/furnaceuse.js)
+    const glass = got.filter(e => e.id === I("glass")).reduce((a, e) => a + e.n, 0), back = got.filter(e => e.id === SAND()).reduce((a, e) => a + e.n, 0);
+    const S = st(m); S.made = S.made || { glass: 0, panes: 0, bottles: 0 }; S.made.glass += glass;
+    log("collect", { glass, loaded: job.loaded || 0, all: !!all, back });
+    if (glass > 0) vlog(m, "furnace", "smelted " + glass + " glass from sand in the furnace at " + pk(job.furnace.x, job.furnace.y, job.furnace.z), job.furnace);
+  });
 }
 function estimate(m, job) {
   const VS = BF.villageSim;
@@ -365,6 +366,7 @@ function ai(m, dt, out, cont) {
     if (S.stage === "work") {
       if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = F.load(m, job, job.n);
+      if (n === null) return true;   // the load request is in flight
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
       log("load", { sand: n, at: pk(s.x, s.y, s.z), ownFuel: job.ownFuel || 0 });
@@ -374,8 +376,8 @@ function ai(m, dt, out, cont) {
     if (!fs || !BF.isFurnace(W().getBlock(s.x, s.y, s.z))) { F.inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!fs.slots[0] || fs.slots[0].id !== job.rawId) { finishSmelt(m, job, false); return done(); }   // all smelted
-    F.topUp(m, job, fs);
-    if (S.waitT > F.COOK * 1.5 * job.loaded + 40 || (fs.burn <= 0 && !fs.slots[1] && S.waitT > 3)) return giveUp(fs.burn <= 0 && !fs.slots[1] ? "out of fuel" : "too slow");
+    const fueling = F.topUp(m, job, fs);
+    if (S.waitT > F.COOK * 1.5 * job.loaded + 40 || (fs.burn <= 0 && !fs.slots[1] && !fueling && S.waitT > 3)) return giveUp(fs.burn <= 0 && !fs.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
