@@ -14,6 +14,7 @@
 (() => {
 "use strict";
 const BF = window.BF;
+BF.debug = BF.debug || {};   // checkOffers: compare every offer lookup with a full scan (test/offers-cache.js)
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 
@@ -176,7 +177,24 @@ const canSell = (m, v2, loose) => v2 && v2 !== m && v2.type === "villager" && !v
 const restocked = (v2, id) => ((TR().PRODUCE[v2.profession] || []).includes(nameOf(id)));
 // Offers of m's village that sell an item matching f, which m can pay for: [{v2, o, max}] (max = how many times), the nearest first.
 // skip(v2, o): an offer it gave up on a while (not checked when loose).
+// Reads the village's offer table (below); BF.debug.checkOffers also runs the full scan (offersScan) and counts any difference.
 function offersFor(m, f, loose, skip) {
+  const R = m.village;
+  if (!R) return [];
+  if (!BF.debug.checkOffers) return fromTable(m, R, f, loose, skip);
+  const st = BF.debug.offerStats || (BF.debug.offerStats = { calls: 0, mismatches: 0, msTable: 0, msScan: 0 });
+  let t0 = performance.now();
+  const out = fromTable(m, R, f, loose, skip);
+  st.msTable += performance.now() - t0; t0 = performance.now();
+  const ref = offersScan(m, f, loose, skip);
+  st.msScan += performance.now() - t0; st.calls++;
+  if (out.length !== ref.length || out.some((e, i) => e.v2 !== ref[i].v2 || e.o !== ref[i].o || e.max !== ref[i].max || e.d !== ref[i].d)) {
+    if (++st.mismatches <= 5 && BF.glog) BF.glog.log("ERROR", "offers", "cached offer lookup differs from a full scan: " + out.length + " offers, scan " + ref.length, { village: R, at: m.position });
+  }
+  return out;
+}
+// The full scan offersFor reads from the table (spec r15-04): every member, every offer.
+function offersScan(m, f, loose, skip) {
   const R = m.village, T = TR(), out = [];
   if (!R) return out;
   for (const v2 of R.members || []) {
@@ -189,6 +207,58 @@ function offersFor(m, f, loose, skip) {
       if (k < 1) continue;
       out.push({ v2, o, max: k, d: v2.position ? v2.position.distanceTo(m.position) : Infinity });
     }
+  }
+  return out.sort((a, b) => a.d - b.d);
+}
+// The village's offer table: its members' offers by sold item, [{id, rows: [{i, v2, o}]}] (i: the offer's place in a full scan), without feed
+// offers and the wares a seller gets from the restock. Shoppers ask several times a plan (a toolsmith prices every material), and most of a
+// scan was matching each of a big village's offers against f; now f sees each sold item once. The table holds only which offers exist:
+// whether a seller can trade now (canSell, blockReason: asleep, out of stock, keeping it, hungry) and its stock are checked live, so the
+// answers are the full scan's. It is rebuilt when the member list, a member's offer list or a profession changes (offers are only ever
+// added by replacing or pushing onto the list, js/market.js sync, trading.js addXp; prices change amounts, which are read live).
+const tables = new WeakMap();   // village record -> table
+function offerTable(R) {
+  const ms = R.members || [], t = tables.get(R);
+  if (t && t.ms === ms && t.n === ms.length) {
+    const k = t.keys;
+    let ok = true;
+    for (let i = 0, j = 0; i < ms.length; i++, j += 4) {
+      const v = ms[i], tr = v && Array.isArray(v.trades) ? v.trades : null;
+      if (k[j] !== v || k[j + 1] !== tr || k[j + 2] !== (tr ? tr.length : 0) || k[j + 3] !== (v && v.profession)) { ok = false; break; }
+    }
+    if (ok) return t;
+  }
+  const keys = [], byId = new Map();
+  let i = 0;
+  for (const v of ms) {
+    const tr = v && Array.isArray(v.trades) ? v.trades : null;
+    keys.push(v, tr, tr ? tr.length : 0, v && v.profession);
+    for (const o of tr || []) {
+      i++;
+      if (o.feed || restocked(v, o.sell.id)) continue;
+      let g = byId.get(o.sell.id);
+      if (!g) byId.set(o.sell.id, (g = { id: o.sell.id, rows: [] }));
+      g.rows.push({ i, v2: v, o });
+    }
+  }
+  const nt = { ms, n: ms.length, keys, groups: [...byId.values()] };
+  tables.set(R, nt);
+  return nt;
+}
+function fromTable(m, R, f, loose, skip) {
+  const T = TR(), hits = [], out = [];
+  for (const g of offerTable(R).groups) if (f(g.id)) for (const r of g.rows) hits.push(r);
+  if (hits.length > 1) hits.sort((a, b) => a.i - b.i);   // the scan's order, so equal distances keep it (one seller's offers)
+  let last, ok = false;
+  for (const { v2, o } of hits) {
+    if (v2 !== last) { last = v2; ok = canSell(m, v2, loose); }
+    if (!ok) continue;
+    if (!loose && T.blockReason(v2, o)) continue;
+    if (!loose && skip && skip(v2, o)) continue;
+    let k = loose ? Infinity : Math.floor(T.inv.count(v2.inv, o.sell.id) / o.sell.n);
+    for (const b of o.buy) k = Math.min(k, Math.floor(T.inv.count(m.inv, b.id) / b.n));
+    if (k < 1) continue;
+    out.push({ v2, o, max: k, d: v2.position ? v2.position.distanceTo(m.position) : Infinity });
   }
   return out.sort((a, b) => a.d - b.d);
 }
@@ -210,7 +280,7 @@ function findDeal(m, need, skip) {
   for (const e of offersFor(m, need.f, false, skip)) {
     let k = Math.min(e.max, Math.ceil(need.n / e.o.sell.n), 4);
     while (k > 0 && !T.inv.canFit(m.inv, [{ id: e.o.sell.id, n: e.o.sell.n * k }], e.o.buy.map(b => ({ id: b.id, n: b.n * k })))) k--;
-    if (k > 0) return { kind: "buy", other: e.v2, offer: e.o, times: k, item: e.o.sell.id, what: need.what };
+    if (k > 0) return BF.ids.refs({ kind: "buy", other: e.v2, offer: e.o, times: k, item: e.o.sell.id, what: need.what });
   }
   return null;
 }
@@ -235,6 +305,6 @@ function doBuy(m, deal) {
 
 BF.furnaceUse = {
   COOK, PER_COAL, PER_WOOD, furnaces, inUse, pk, hook, busyWhen, atFurnace, usable, near, reachOf,
-  isCoal, isLog, isPlanks, isFuel, fuelWorth, fuelFor, fuelIn, load, topUp, empty, travel, beside, canSell, restocked, offersFor, priceOf, findDeal, doBuy,
+  isCoal, isLog, isPlanks, isFuel, fuelWorth, fuelFor, fuelIn, load, topUp, empty, travel, beside, canSell, restocked, offersFor, offersScan, offerTable, priceOf, findDeal, doBuy,
 };
 })();

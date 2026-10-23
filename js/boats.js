@@ -159,8 +159,8 @@ function flowAt(p) {
 const list = [];
 function create(wood, x, y, z, yaw) {
   if (!scene || BF.I[wood + "_boat"] == null) return null;
-  const b = { kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevYaw: yaw || 0, vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
-    stowT: 0, row: [0, 0], rowing: [0, 0], onGround: false, inWater: false, medium: "air" };
+  const b = BF.ids.refs({ kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevYaw: yaw || 0, vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
+    stowT: 0, row: [0, 0], rowing: [0, 0], onGround: false, inWater: false, medium: "air" });
   buildMesh(b);
   list.push(b);
   syncMesh(b);
@@ -430,6 +430,7 @@ const boats = {
     if (i < 0) return;
     list.splice(i, 1);
     if (b.mob) letOut(b);
+    if (b.id != null) BF.ids.remove(b);   // a passenger's link to it (m.riding) goes too
     if (b.rider && BF.player && BF.player.vehicle === b && BF.player.dismount) BF.player.dismount();
     if (scene && b.mesh) scene.remove(b.mesh);
     if (b.mat) b.mat.dispose();
@@ -438,6 +439,7 @@ const boats = {
   letOut,
   exitSpot(b, hw, h) { return exitSpot(b, hw, h); },
   seatOf,
+  onRemoved(m) { const b = m.riding; if (b && b.mob === m && !m.dead) stow(b); },   // js/mobs.js removeMob: its chunk unloaded (js/ids.js: links to a removed mob go)
   holds(m) { return !!(m && m.riding && list.includes(m.riding) && m.riding.mob === m); },
   // js/mobs.js, each step of a mob in a boat: keep it in its seat. Returns false (and frees it) when the boat is gone or it fell asleep.
   seat(m) {

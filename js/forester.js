@@ -308,13 +308,13 @@ function findAxeSeller(m, F) {
   const have = m.inv.some(s => s && isAxe(s.id)) ? Math.max(...m.inv.filter(s => s && isAxe(s.id)).map(s => axeScore(s.id))) : 0, now = nowS();
   let best = null, bs = have, bd = Infinity;
   for (const v2 of R.members || []) {
-    if (v2 === m || !canSell(v2) || (F.avoid && (F.avoid.get(v2) || 0) > now)) continue;
+    if (v2 === m || !canSell(v2) || (F.avoid && (F.avoid.get(v2.id) || 0) > now)) continue;
     for (const o of v2.trades) {
       const sc = axeScore(o.sell.id);
       if (sc <= have || Tr.blockReason(v2, o)) continue;
       if (!o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
       const d = v2.position.distanceTo(m.position);
-      if (sc > bs || (sc === bs && d < bd)) { bs = sc; bd = d; best = { other: v2, offer: o }; }
+      if (sc > bs || (sc === bs && d < bd)) { bs = sc; bd = d; best = BF.ids.refs({ other: v2, offer: o }); }
     }
   }
   return best;
@@ -501,7 +501,7 @@ function endTask(m, F, ok) {
     if (t.claim) claims.delete(t.claim);
     if (t.kind === "plant") F.plantCd = PLANT_CD;
     else if (t.kind === "cut") { F.cutCd = CUT_CD; F.saved = !ok && t.done ? { key: t.claim, done: t.done, chop: F.chop } : null; }   // an interrupted tree keeps its progress
-    else if (t.kind === "buy") { if (!ok) F.avoid.set(t.deal.other, nowS() + 120); }
+    else if (t.kind === "buy") { if (!ok) F.avoid.set(t.deal.otherId, nowS() + 120); }
     else if (t.kind === "gather") { if (!ok && F.sweep) { const n = F.tries || (F.tries = new WeakMap()), c = (n.get(t.drop) || 0) + 1; n.set(t.drop, c); if (c >= 2) (F.skip || (F.skip = new WeakSet())).add(t.drop); } else F.gatherCd = ok ? 0 : 6; }   // an item it cannot reach twice is left
   }
   F.task = null; F.t = 0; F.chop = 0; m.ai.route = null;

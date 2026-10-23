@@ -97,7 +97,7 @@ function findSeller(m, short, avoid) {
       while (k > 0 && !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n * k }], o.buy.map(b => ({ id: b.id, n: b.n * k })))) k--;
       if (k < 1) continue;
       const d = v2.position.distanceTo(m.position);
-      if (d < bd) { bd = d; best = { seller: v2, offer: o, times: k, item: o.sell.id }; }
+      if (d < bd) { bd = d; best = BF.ids.refs({ seller: v2, offer: o, times: k, item: o.sell.id }); }
     }
   }
   return best;
