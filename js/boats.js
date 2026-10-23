@@ -176,7 +176,7 @@ function lightAt(p) {
 }
 // On the planet a boat keeps to the canonical square of the face it floats on; the player and mobs are seen from its frame.
 const LQ = {};
-const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
+const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
 function syncMesh(b) {
   if (!b.mesh) return;
   const here = loadedAt(b.pos.x, b.pos.z);
@@ -465,7 +465,7 @@ const boats = {
       if (!b.rider) {
         pushByPlayer(b, dt);
         step(b, dt, null);
-        if (BF.planet && BF.planet.reframe) BF.planet.reframe(b.pos, -1, b, b.vel);   // drifted past a face edge: onto the next face, turned (the player's boat: js/player.js crossEdge)
+        BF.planet.reframe(b.pos, -1, b, b.vel);   // drifted past a face edge: onto the next face, turned (the player's boat: js/player.js crossEdge)
       }
       if (b.stowed) restoreStowed(b, dt);
       pickUpMobs(b);
