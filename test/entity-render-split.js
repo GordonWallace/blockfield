@@ -78,7 +78,9 @@ module.exports = async (pg, out) => {
     { name: "arrows", setup: ({ st }) => {
       const M = BF.mobs, made = [];
       for (let i = 0; i < 9; i++) {
-        const from = new THREE.Vector3(st.x + 0.5 - 6 + i * 1.5, st.y + 0.8 + (i % 3) * 0.6, st.z - 2.5);
+        // a block from the wall: each sticks in its first step, so it points the way it was shot (before the split a stuck arrow
+        // kept the way it pointed when last drawn)
+        const from = new THREE.Vector3(st.x + 0.5 - 6 + i * 1.5, st.y + 0.8 + (i % 3) * 0.6, st.z - 5.9);
         const vel = new THREE.Vector3((i - 4) * 1.5, 2 - (i % 3) * 2, -30);
         made.push(M.shootArrow(from, vel, { damage: 2, pickup: 0 }));
       }
