@@ -17,7 +17,7 @@
 //                     mobIdsIn(key) -> [mob ids], villageIdsIn(key) -> [village keys],
 //                     tick(), stats() -> [{key, name, f, ru, rv, mobs, drops, villages, blockEntities}], counts(), check() -> {ok, diffs},
 //                     reset(), Index (the bare per-object index, for tests and benchmarks),
-//                     mobsAround(x, z, r, filter, {local}) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
+//                     mobsAround(x, z, r, filter, {local}) -> [mobs], ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -210,8 +210,8 @@ function onSet(x, y, z, oldId, id) {
   if (isBE(id)) beAdd(x, y, z); else if (isBE(oldId)) beDel(x, y, z);
 }
 // js/mobs.js createMob / removeMob, js/drops.js spawn / remove.
-const mobAdded = m => { m._rs = ++mseq; mobs.add(m); };
-const mobRemoved = m => mobs.remove(m);
+const mobAdded = m => { m._rs = ++mseq; mobs.add(m); typeAdd(m); };
+const mobRemoved = m => { mobs.remove(m); typeDel(m); };
 const dropAdded = d => drops.add(d);
 const dropRemoved = d => drops.remove(d);
 
@@ -232,8 +232,8 @@ function syncVillages() {
 }
 // Empties the index and fills it again with what is there now (a new world, a new region size).
 function reset() {
-  mobs.clear(); drops.clear(); villages.clear(); bes.clear(); beBy.clear();
-  if (BF.mobs && BF.mobs.list) for (const m of BF.mobs.list) if (!m.removed) { m._rs = ++mseq; mobs.add(m); }
+  mobs.clear(); drops.clear(); villages.clear(); bes.clear(); beBy.clear(); byType.clear();
+  if (BF.mobs && BF.mobs.list) for (const m of BF.mobs.list) if (!m.removed) { m._rs = ++mseq; mobs.add(m); typeAdd(m); }
   if (BF.drops && BF.drops.list) for (const d of BF.drops.list) drops.add(d);
   syncVillages();
   if (hooked && BF.world) for (const c of BF.world.chunks.values()) scanChunk(c.cx, c.cz, c);
@@ -319,6 +319,27 @@ function mobsAround(x, z, r, filter, opts) {
   }, x, z);
   return out;
 }
+// ofType(type) -> the live mobs of one type, in BF.mobs.list order (kept by mobAdded / mobRemoved; a mob's type never changes). The
+// array is the index's own: read it, don't change it (copy it first when the loop may remove mobs).
+const byType = new Map();
+function ofType(t) {
+  let a = byType.get(t);
+  if (!a) byType.set(t, (a = []));
+  if (regions.verifyQueries) checkQuery("ofType " + t, a, () => ((BF.mobs && BF.mobs.list) || []).filter(m => m.type === t && !m.removed));
+  return a;
+}
+const typeAdd = m => { let a = byType.get(m.type); if (!a) byType.set(m.type, (a = [])); if (!a.length || a[a.length - 1]._rs < m._rs) a.push(m); else if (!a.includes(m)) { a.push(m); a.sort(bySeq); } };
+const typeDel = m => { const a = byType.get(m.type), i = a ? a.lastIndexOf(m) : -1; if (i >= 0) a.splice(i, 1); };
+// villageMobs(rec, filter) -> the live mobs of village record rec (rec.members whose m.village is rec) that pass filter, in BF.mobs.list
+// order: what a scan of BF.mobs.list for m.village === rec found.
+function villageMobs(rec, filter) {
+  const out = [];
+  if (!rec) return out;
+  for (const m of rec.members || []) if (!m.removed && m.village === rec && (!filter || filter(m))) out.push(m);
+  if (out.length > 1) { out.sort(bySeq); let j = 1; for (let i = 1; i < out.length; i++) if (out[i] !== out[j - 1]) out[j++] = out[i]; out.length = j; }   // (once each)
+  if (regions.verifyQueries) checkQuery("villageMobs " + rec.key, out, () => ((BF.mobs && BF.mobs.list) || []).filter(m => !m.removed && m.village === rec && (!filter || filter(m))));
+  return out;
+}
 const who = m => (m && m.type ? m.type + (m.id ? " " + m.id : "") + (m.position ? " at " + Math.floor(m.position.x) + "," + Math.floor(m.position.z) : "") : String(m));
 // Compares a query's answer with the old scan's (want: an array, or a function giving one), in order. Off unless verifyQueries.
 function checkQuery(label, got, want, x, z) {
@@ -348,7 +369,7 @@ const regions = {
   mobsIn: k => mobs.in(k), dropsIn: k => drops.in(k), villagesIn: k => villages.in(k), blockEntitiesIn: k => beBy.get(k),
   mobIdsIn: k => idsOf(mobs.in(k), m => m.id), villageIdsIn: k => idsOf(villages.in(k), v => v.key),
   onSet, mobAdded, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
-  mobsAround, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
+  mobsAround, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
 };
 BF.regions = regions;
 setSize(REGION);

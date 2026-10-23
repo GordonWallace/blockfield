@@ -146,6 +146,8 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
       for (let j = 5; j < L.length; j += 13) { const m = L[j]; R.mobsAround(m.position.x, m.position.z, 30, null, { local: true }); n++; }
       for (const m of L) m.position.x -= 0.3;
     }
+    for (const t of ['villager', 'iron_golem', 'zombie', 'cow']) { R.ofType(t); n++; }
+    for (const rec of BF.mobs.villages.values()) { R.villageMobs(rec); R.villageMobs(rec, m => m.type === 'villager'); n += 2; }
     const st = R.queryStats();
     out.n = n; out.found = found; out.diffs = st.diffs; out.last = st.last; out.checked = st.checked;
     // list order: what a full scan would find, in the same order
@@ -163,7 +165,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     R.verifyQueries = false; R.resetQueryStats();
     return out;
   });
-  check(q.diffs === 0 && q.checked === q.n, `mobsAround agrees with a full scan in ${q.n} queries over 200 steps (${q.found} mobs found)` + (q.last ? ' ' + JSON.stringify(q.last) : ''));
+  check(q.diffs === 0 && q.checked === q.n, `mobsAround, ofType and villageMobs agree with a full scan in ${q.n} queries over 200 steps (${q.found} mobs found)` + (q.last ? ' ' + JSON.stringify(q.last) : ''));
   check(q.order, 'mobsAround lists mobs in BF.mobs.list order');
   check(q.edge, 'mobsAround with local: true finds mobs just across a face edge (raw distance does not)');
   check(q.wrong, 'checkQuery reports a difference');
