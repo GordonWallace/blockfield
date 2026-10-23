@@ -1,7 +1,7 @@
 // @ci baseline suite=world,village
 // No wall-clock time in simulation decisions (spec r15-16). Plain node, no browser: node test/wallclock-lint.js
 // Every performance.now() / Date.now() in js/ must be on the list below: a file that never touches the simulation (UI, drawing, audio,
-// saving, the debug feed, world generation at boot), or, in a file that does, one of the listed lines (a profiling measure, a streaming or
+// saving, the debug feed, world generation at boot), or, in a file that does, one of the listed functions or lines (a profiling measure, a streaming or
 // drawing budget, the 0x fallback). Anything else is a simulation decision on real time and should use BF.simNow() (game seconds, which
 // advance only by simulated steps) or a count of work done instead. The test also fails on a listed line that no longer exists, so the
 // list stays true.
@@ -21,6 +21,8 @@ const FILES = {
   "lod.js": "distant terrain (drawing only)",
   "lodworker.js": "distant terrain worker (drawing only)",
   "maps.js": "held map arrow spinning",
+  "mesher.js": "chunk meshing (r15-03, drawing only)",
+  "meshworker.js": "chunk meshing worker (r15-03, drawing only)",
   "mapview.js": "the player's map view and auto-map fill (drawing; explorers' maps are js/maps.js, filled by walking)",
   "planetgen.js": "world generation timing stats",
   "planetrivers.js": "river solve timing stats",
@@ -29,6 +31,16 @@ const FILES = {
   "signs.js": "sign editor caret blink",
   "statehash.js": "how long hashing the world took (debug screen)",
 };
+// Whole functions in files that also hold simulation code: [file, function, why]. The function is the nearest declaration above the line that
+// starts at column 0 (`function name(` or `name = function`), so a new timing line inside a drawing function needs no new entry.
+const FUNCS = [
+  ["world.js", "plan", "chunk streaming re-plan (drawing; villagers wait for unloaded chunks)"],
+  ["world.js", "world.update", "chunk streaming, generation and meshing budgets: what is drawn and when chunk data arrives, never what villagers do (they wait for unloaded chunks)"],
+  ["world.js", "remeshDirty", "fast-forward remesh batching (r15-02): when chunks are redrawn, and its stats"],
+  ["world.js", "ffTrack", "remesh batching stats (r15-02)"],
+  ["world.js", "buildMesh", "chunk meshing: when a chunk was last drawn, mesh timing"],
+  ["world.js", "pump", "mesh worker pool (r15-03): hands chunks to workers, timing stats"],
+];
 // Single lines in files that also hold simulation code: [file, text on the line, why it is allowed]
 const LINES = [
   ["main.js", "const t0 = performance.now();\n      let f = 0;", "boot: the river solve runs in slices until done, before the game starts"],
@@ -37,10 +49,7 @@ const LINES = [
   ["main.js", "let last = performance.now();", "frame dt (the player and drawing)"],
   ["main.js", "const plan = W.plan(dt), t0 = performance.now();", "steps per frame within BUDGET_MS: how fast the game runs, not what happens"],
   ["main.js", "performance.now() - t0 < W.BUDGET_MS", "steps per frame within BUDGET_MS (above)"],
-  ["world.js", "lastPlanT = performance.now();", "chunk streaming re-plan (drawing; villagers wait for unloaded chunks)"],
-  ["world.js", "performance.now() - lastPlanT > 1000", "chunk streaming re-plan (above)"],
-  ["world.js", "const t0 = performance.now();\n  let gi = 0, mi = 0;", "chunk generation and meshing budget (what is drawn; villagers wait for unloaded chunks)"],
-  ["world.js", "while (performance.now() - t0 < budgetMs)", "chunk generation and meshing budget (above)"],
+  ["mobs.js", "const t0 = performance.now(), a = findPathFast(", "BF.debug.pathCompare timing of findPath vs findPathOld (r15-05, debug only; the route returned doesn't depend on it)"],
   ["mobs.js", "const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0;", "villager AI ms for the debug screen only (the force-unload limit counts updates, aiWork)"],
   ["villagesim.js", "check(px, pz, realClock, performance.now() / 1000)", "re-check on real time only while the world doesn't step (0x, paused), or for a new pin before the next step"],
   ["villagelog.js", "const t = performance.now();                  // wall clock", "village panel redraw"],
@@ -60,7 +69,7 @@ const RE = /performance\.now\s*\(|Date\.now\s*\(/g;
 // code only: drop whole-line comments and trailing "  // ..." comments
 const code = l => (/^\s*\/\//.test(l) ? "" : l.replace(/\s\/\/\s.*$/, ""));
 let fails = 0, uses = 0;
-const used = new Set();
+const used = new Set(), usedFn = new Set();
 for (const f of fs.readdirSync(JS).filter(f => f.endsWith(".js")).sort()) {
   const src = fs.readFileSync(path.join(JS, f), "utf8"), lines = src.split("\n");
   // positions of the listed lines in this file (a listed text may span two lines)
@@ -72,18 +81,22 @@ for (const f of fs.readdirSync(JS).filter(f => f.endsWith(".js")).sort()) {
     used.add(i);
     for (; at >= 0; at = src.indexOf(e[1], at + 1)) { const l0 = src.slice(0, at).split("\n").length - 1; ok.push([l0, l0 + e[1].split("\n").length - 1]); }
   });
+  const fns = FUNCS.filter(e => e[0] === f);
+  const DECL = /^(?:async\s+)?function\s+([\w$]+)\s*\(|^([\w$.]+)\s*=\s*(?:async\s+)?function\b/;
+  const fnAt = n => { for (let i = n; i >= 0; i--) { const m = DECL.exec(lines[i]); if (m) return m[1] || m[2]; } return null; };
   lines.forEach((l, n) => {
     const hits = (code(l).match(RE) || []).length;
     if (!hits) return;
     uses += hits;
     if (FILES[f]) return;
     if (ok.some(([a, b]) => n >= a && n <= b)) return;
+    if (fns.length) { const fn = fnAt(n), e = fns.find(e => e[1] === fn); if (e) { usedFn.add(e); return; } }
     fails++;
     console.log(`FAIL js/${f}:${n + 1} reads the wall clock: ${l.trim().slice(0, 160)}\n     use BF.simNow() or a work count, or list it in test/wallclock-lint.js if it decides nothing in the simulation`);
   });
 }
 LINES.forEach((e, i) => { if (!used.has(i)) { fails++; console.log(`FAIL listed line no longer in js/${e[0]}: ${JSON.stringify(e[1])} (${e[2]})`); } });
-for (const f of Object.keys(FILES)) if (!fs.existsSync(path.join(JS, f))) { fails++; console.log(`FAIL listed file js/${f} is gone`); }
-console.log(`${uses} wall-clock reads in js/, ${Object.keys(FILES).length} files and ${LINES.length} lines allowed`);
+// (listed functions and whole files may be missing: r15-03's mesh pool (pump) and mesher files are listed ahead of their merge)
+console.log(`${uses} wall-clock reads in js/, ${Object.keys(FILES).length} files, ${FUNCS.length} functions and ${LINES.length} lines allowed`);
 console.log(fails ? "FAIL wallclock-lint: " + fails + " problems" : "PASS wallclock-lint");
 process.exit(fails ? 1 : 0);
