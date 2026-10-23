@@ -321,13 +321,10 @@ function findAxeSeller(m, F) {
 }
 function buyAxe(m, deal) {
   const Tr = T(), v2 = deal.other, o = deal.offer;
-  if (!canSell(v2) || Tr.blockReason(v2, o) || !o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return false;
-  const sold = Tr.exchange(v2, o);
-  if (!sold) return false;
-  for (const b of o.buy) Tr.inv.remove(m.inv, b.id, b.n);
-  Tr.inv.addStacks(m.inv, sold);
-  Tr.addXp(v2, o);
-  if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
+  if (!Tr.asked(m, v2, o) && (!canSell(v2) || Tr.blockReason(v2, o) || !o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy))) return false;
+  const done = Tr.buy(m, v2, o, 1, { guard: () => (canSell(v2) ? null : "busy") });   // one transaction (js/trading.js buy)
+  if (done == null) return null;
+  if (!done) return false;
   log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
   return true;
 }
@@ -654,6 +651,7 @@ function ai(m, dt, out) {
   if (k.kind === "buy") {
     if (k.deal.other.tradingWith) return true;   // the player is trading with it: wait
     const ok = buyAxe(m, k.deal);
+    if (ok == null) return true;   // the trade is in flight (js/trading.js buy)
     if (ok) m.ai.swingT = 0.2; else log("giveup", m, { task: "buy", why: "offer gone" });
     endTask(m, F, ok);
   } else if (k.kind === "plant") { const ok = plantAt(m, k); if (ok) a.swingT = 0.35; else log("giveup", m, { task: "plant", why: "spot changed" }); endTask(m, F, ok); }

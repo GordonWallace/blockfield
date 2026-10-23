@@ -720,6 +720,7 @@ function cookAI(m, dt, out, cont) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = F.doBuy(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     S.stage = null; S.deal = null; vdone(m); S.gx = null; S.checkT = 0.5;
     if (done) log("buyFuel", { from: v2.profession, got: done * deal.offer.sell.n, item: BF.itemName(deal.item) });
     else { S.avoid[key] = now() + 0.05; log("cookGiveup", { kind: "buy", why: "trade refused" }); }

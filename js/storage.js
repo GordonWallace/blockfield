@@ -252,7 +252,8 @@ function deliver(f, m, spot) {
   if (!canDeliver(f, m, spot) || !BF.ids) return false;
   return BF.req.send("chestPut", pk(spot.x, spot.y, spot.z), { to: BF.ids.idOf(m), facing: BF.openFacing(spot, f.position) }, f);
 }
-// The chest goes down, the trade is made and the chest is reserved for m, all in the apply phase (the trade itself becomes a transaction in r15-21).
+// The chest goes down, the trade is made and the chest is reserved for m, all in the apply phase: one transaction (spec r15-21). It
+// moves the goods itself rather than through BF.trades.buy, because the chest goes into the world, not into the buyer's pack.
 BF.req.on("chestPut", (req, W) => {
   const [x, y, z] = String(req.target).split(",").map(Number), spot = { x, y, z };
   const f = BF.ids.get(req.from), m = BF.ids.get(req.data.to);

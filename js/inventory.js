@@ -442,15 +442,20 @@ function topUp(o) { // after a trade, refill the payment slots from the inventor
     if (got) pay[i] = mk(b.id, have + got.count, got.wear);
   });
 }
+// One lot of o as a transaction (js/trading.js playerBuy, spec r15-21): the payment leaves its slots, the goods come back, or the
+// payment does when the villager refuses.
 function performTrade(o) {
   const idx = offerFits(o);
-  const wear = o.buy.map((b, k) => pay[idx[k]].wear || 0);
+  if (!idx) return [];
+  const given = o.buy.map((b, k) => mk(b.id, b.n, pay[idx[k]].wear || 0));
   o.buy.forEach((b, k) => { const s = pay[idx[k]]; s.count -= b.n; if (s.count <= 0) pay[idx[k]] = null; });
-  const sold = BF.trades.exchange(villager, o, wear);
-  if (BF.trades.addXp(villager, o)) { levelFlashT = 2.5; BF.emit("villagerLevelUp", villager, villager.level); }
+  const r = BF.trades.playerBuy(villager, o, given);
+  for (const s of r.left) giveBack(s);
+  if (!r.done) return [];
+  if (r.levels) { levelFlashT = 2.5; BF.emit("villagerLevelUp", villager, villager.level); }
   BF.emit("villagerTrade", villager, o);
   if (BF.prices) BF.prices.filled(villager, o, 1);
-  return sold || [];
+  return r.sold;
 }
 function clickTrade(shift) {
   if (!tradeOffer) return;

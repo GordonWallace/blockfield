@@ -1035,19 +1035,8 @@ function findSeller(m, bs, short) {
 }
 function doDeal(m, bs, deal) {
   const T = TR(), v2 = deal.seller, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2) || T.blockReason(v2, o)) break;
-    if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);
-    if (!sold) break;                       // same rules as a player trade: the villager's stock and room
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
+  const done = T.asked(m, v2, o) || canSell(v2) ? T.buy(m, v2, o, deal.times, { guard: () => (canSell(v2) ? null : "busy") }) : 0;   // one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) logEvent("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   else bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id] = dayNow() + 0.05;
   return done;
@@ -1107,7 +1096,7 @@ function shopMode(m, bs, dt, out) {
     m.lookAt = v2; ai.mode = "idle"; ai.t = 2;
     if (bs.tt > TRADE_PAUSE - 0.5 && Math.random() < dt * 4) ai.swingT = 0.2;   // visual
     if (bs.tt <= 0) {
-      doDeal(m, bs, deal);
+      if (doDeal(m, bs, deal) == null) return true;   // the trade is in flight (js/trading.js buy)
       bs.deal = null; bs.stage = "think"; bs.t = 0;
       if (BF.villageSim) BF.villageSim.done(m);
       emitParticles(m.position.x - 0.5, m.position.y + 1.4, m.position.z - 0.5, BF.B.emerald_block != null ? BF.B.emerald_block : 0);
