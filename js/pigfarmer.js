@@ -60,7 +60,7 @@ const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 
 // ---------------------------------------------------------------- pig state
 function stOf(m) {
-  if (!m.pig) m.pig = { fed: null, cd: 0, growAt: null, x: null, z: null, mob: m };
+  if (!m.pig) m.pig = BF.ids.refs({ fed: null, cd: 0, growAt: null, x: null, z: null, mob: m });
   return m.pig;
 }
 const isPiglet = m => !!(m.pig && m.pig.growAt != null);
@@ -152,7 +152,7 @@ function makeGenSty(rec, b, idx) {
   };
   const room = box(1, 1, b.w - 2, b.d - 3), foot = box(0, 0, b.w - 1, b.d - 1);   // the back row holds the water trough and the shelter's back
   const cells = (b.w - 2) * (b.d - 3);
-  return { key: rec.key + "|" + idx, idx: "g" + idx, gen: true, viaOut: true, rec, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
+  return { kind: "sty", key: rec.key + "|" + idx, idx: "g" + idx, gen: true, viaOut: true, rec, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
     y: b.y, cells, limit: limitOf(cells), pigs: null, culls: 0, gate: at(b.du, 0), out: at(b.du, -1) };
 }
 // A builder's sty (js/blueprints.js "sty"): read from the blueprint's marks (turned with the building).
@@ -163,7 +163,7 @@ function makeBuiltSty(rec, e) {
   const at = ([x, z]) => [e.ox + x, e.oz + z], R = M.room.map(at), F = M.fence.map(at);
   const x0 = Math.min(R[0][0], R[1][0]), z0 = Math.min(R[0][1], R[1][1]), x1 = Math.max(R[0][0], R[1][0]) + 1, z1 = Math.max(R[0][1], R[1][1]) + 1;
   const cells = (x1 - x0) * (z1 - z0);
-  return { key: rec.key + "|b" + e.id, idx: "b" + e.id, gen: false, viaOut: true, rec, x0, z0, x1, z1,
+  return { kind: "sty", key: rec.key + "|b" + e.id, idx: "b" + e.id, gen: false, viaOut: true, rec, x0, z0, x1, z1,
     fx0: Math.min(F[0][0], F[1][0]), fz0: Math.min(F[0][1], F[1][1]), fx1: Math.max(F[0][0], F[1][0]) + 1, fz1: Math.max(F[0][1], F[1][1]) + 1,
     y: e.oy - 1, cells, limit: limitOf(cells), pigs: null, culls: 0, gate: at(M.gate[0]), out: at(M.out[0]) };
 }
@@ -206,7 +206,7 @@ const packSt = s => [fix3(s.fed), fix3(s.cd || 0), fix3(s.growAt),
 function unpackSt(a) {
   const num = (x, d) => (x != null && Number.isFinite(+x) ? +x : d);
   if (!Array.isArray(a)) return null;
-  return { fed: num(a[0], null), cd: num(a[1], 0), growAt: num(a[2], null), x: num(a[3], null), z: num(a[4], null), mob: null };
+  return BF.ids.refs({ fed: num(a[0], null), cd: num(a[1], 0), growAt: num(a[2], null), x: num(a[3], null), z: num(a[4], null), mob: null });
 }
 function initSty(p) {
   const rec = pending.get(p.rec.key), at = rec && rec.findIndex(e => e && String(e.i) === p.idx);
@@ -220,7 +220,7 @@ function initSty(p) {
   p.pigs = [];
   if (!p.gen) return;   // a builder's sty starts empty: the pig farmer stocks it from wild pigs
   const r = seeded("sty:" + p.key), n = 2 + (r() < 0.5 ? 1 : 0) + (r() < 0.2 ? 1 : 0);   // a generated sty starts with 2-4 pigs
-  for (let i = 0; i < n; i++) p.pigs.push({ fed: null, cd: 0, growAt: null, x: p.x0 + 0.8 + r() * (p.x1 - p.x0 - 1.6), z: p.z0 + 0.8 + r() * (p.z1 - p.z0 - 1.6), mob: null });
+  for (let i = 0; i < n; i++) p.pigs.push(BF.ids.refs({ fed: null, cd: 0, growAt: null, x: p.x0 + 0.8 + r() * (p.x1 - p.x0 - 1.6), z: p.z0 + 0.8 + r() * (p.z1 - p.z0 - 1.6), mob: null }));
 }
 function spawnPig(p, s) {
   const x = s.x != null && s.x > p.x0 && s.x < p.x1 ? s.x : (p.x0 + p.x1) / 2, z = s.z != null && s.z > p.z0 && s.z < p.z1 ? s.z : (p.z0 + p.z1) / 2;
@@ -342,7 +342,7 @@ function seed(a) {
 }
 
 // ---------------------------------------------------------------- the pig farmer
-const pgk = m => m.pgk || (m.pgk = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
+const pgk = m => m.pgk || (m.pgk = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
 // The sty this pig farmer works: the one its feed trough stands beside (fence within 4.5 blocks).
 function styOf(m) {
   const S = pgk(m);
@@ -404,7 +404,7 @@ function wildPig(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
   let best = null, bd = FIND_R;
   for (const o of BF.mobs.list) {
-    if (o.type !== "pig" || !live(o) || o.sty || o.ledBy || isPiglet(o) || o.riding || (S.avoid.get(o) || 0) > sim) continue;
+    if (o.type !== "pig" || !live(o) || o.sty || o.ledBy || isPiglet(o) || o.riding || (S.avoid.get(o.id) || 0) > sim) continue;
     const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
     if (d < bd) { bd = d; best = o; }
   }
@@ -412,17 +412,17 @@ function wildPig(m, p, S) {
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
-  const ok = o => !((S.avoid.get(o) || 0) > sim);
+  const ok = o => !((S.avoid.get(o.id) || 0) > sim);
   const nearest = a => { let best = null, bd = Infinity; for (const o of a) { const d = Math.hypot(o.position.x - px, o.position.z - pz); if (d < bd) { bd = d; best = o; } } return best; };
   const p = T.sty;
   if (!p) return null;   // without a sty it has no herd to keep
   const have = feedHeld(m), spare = have - FEED_KEEP;   // FEED_KEEP are always kept to lure a wild pig home
   const ad = adults(T.pigs).filter(ok);
-  if (spare > 0 && T.size <= T.limit) { const o = nearest(ad.filter(x => hungry(x, t) && feedOk(T, x, t))); if (o) return { kind: "feed", mob: o }; }
-  if (T.size > T.limit && adults(T.herd).length > MIN_ADULTS && adultStates(p) > MIN_ADULTS) { const o = nearest(adults(T.herd).filter(ok)); if (o) return { kind: "cull", mob: o }; }
+  if (spare > 0 && T.size <= T.limit) { const o = nearest(ad.filter(x => hungry(x, t) && feedOk(T, x, t))); if (o) return BF.ids.refs({ kind: "feed", mob: o }); }
+  if (T.size > T.limit && adults(T.herd).length > MIN_ADULTS && adultStates(p) > MIN_ADULTS) { const o = nearest(adults(T.herd).filter(ok)); if (o) return BF.ids.refs({ kind: "cull", mob: o }); }
   if (p.pigs && p.pigs.length < STOCK_TO && have > 0 && t >= S.stockAt) {
     const o = wildPig(m, p, S);
-    if (o) return { kind: "fetch", mob: o, sty: p };
+    if (o) return BF.ids.refs({ kind: "fetch", mob: o, sty: p });
     if (wildPig(m, p, { avoid: new Map() })) { S.stockAt = t + 0.1; return null; }   // only ones it just failed to bring in: tries them again in a while
     S.stockAt = Math.floor(t) + 1 + 0.03;   // none in range: look again tomorrow morning
     log("noWild", { sty: p.key });
@@ -442,7 +442,7 @@ function stillWanted(m, tk) {
 const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
 function endTask(m, ok) {
   const S = pgk(m), tk = S.task;
-  if (tk && !ok && tk.mob) S.avoid.set(tk.mob, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
+  if (tk && !ok && tk.mob) S.avoid.set(tk.mobId, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
   if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
   H().releaseGate(m, S);
   S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;

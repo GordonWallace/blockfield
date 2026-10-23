@@ -393,7 +393,7 @@ function findSeller(m, want, avoid) {
       if (!want(o.sell.id) || T.blockReason(v2, o) || (avoid[(v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id] || 0) > dayNow()) continue;
       if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
       const d = v2.position.distanceTo(m.position) + (BF.items[o.sell.id].tool ? -10 * BF.items[o.sell.id].tool.tier : 0);   // the better pickaxe first
-      if (d < bd) { bd = d; best = { kind: "buy", other: v2, offer: o, times: 1, item: o.sell.id }; }
+      if (d < bd) { bd = d; best = BF.ids.refs({ kind: "buy", other: v2, offer: o, times: 1, item: o.sell.id }); }
     }
   }
   return best;
@@ -445,7 +445,7 @@ function findBuyer(m, avoid) {
     const k = saleTimes(m, b, o);
     if (k < 1) continue;
     const d = b.position.distanceTo(m.position);
-    if (d < bd) { bd = d; best = { kind: "sell", other: b, offer: o, times: k, item: "cobble" }; }
+    if (d < bd) { bd = d; best = BF.ids.refs({ kind: "sell", other: b, offer: o, times: k, item: "cobble" }); }
   }
   return best;
 }

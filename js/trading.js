@@ -595,10 +595,12 @@ function pack(v) {
     ck_: undefined,                                                      // it was given the cowherd's bucket and bottles (js/cowherd.js)
     mc: BF.merchant && v.profession === "merchant" ? BF.merchant.pack(v) : undefined,   // the merchant's trip (js/merchant.js)
     bed: claimedBed(v),   // a bed it claimed for itself (js/mobs.js claimBed); the beds of the village layout are not saved
+    id: v.id,   // its entity id (js/ids.js): it comes back under the same id after an unload or a reload; missing in 1.4 saves
   };
 }
 function unpack(v, o) {
   if (!v || !o || typeof o !== "object") return v;
+  if (o.id && BF.ids) BF.ids.reuse(v, o.id);   // no id (a 1.4 save): it keeps the new one it was made with
   if (Array.isArray(o.inv)) {
     const a = inv.create();
     o.inv.slice(0, SLOTS).forEach((s, i) => {

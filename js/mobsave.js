@@ -50,11 +50,11 @@ function ser(v, d, seen) {
     seen.delete(v);
     return a;
   }
-  const p = Object.getPrototypeOf(v);
-  if (p !== Object.prototype && p !== null) return undefined;
+  const p = Object.getPrototypeOf(v), r = BF.ids && BF.ids.isRefs(v);   // (records whose links are ids, js/ids.js: their links are left out, as the mobs were)
+  if (p !== Object.prototype && p !== null && !r) return undefined;
   seen.add(v);
-  const o = {};
-  for (const k in v) { const s = ser(v[k], d + 1, seen); if (s !== undefined) o[k] = s; }
+  const o = r ? { $r: p === BF.ids.MobRef ? 2 : 1 } : {};
+  for (const k in v) { if (r && BF.ids.REF.has(k)) continue; const s = ser(v[k], d + 1, seen); if (s !== undefined) o[k] = s; }
   seen.delete(v);
   return o;
 }
@@ -65,8 +65,8 @@ function deser(v) {
   if (v.$m) return new Map(v.$m.map(([k, x]) => [k, deser(x)]));
   if (v.$s) return new Set(v.$s);
   const o = {};
-  for (const k in v) o[k] = deser(v[k]);
-  return o;
+  for (const k in v) if (k !== "$r") o[k] = deser(v[k]);
+  return v.$r && BF.ids ? (v.$r === 2 ? BF.ids.mobRef(o) : BF.ids.refs(o)) : o;
 }
 
 const nightNow = () => !!(BF.mobs && BF.mobs.nav && BF.mobs.nav.bedtime && BF.mobs.nav.bedtime());
@@ -83,7 +83,7 @@ function fresh(s) {
 function snapOf(m) {
   const s = {};
   for (const k of Object.keys(m)) {
-    if (SKIP.has(k)) continue;
+    if (SKIP.has(k) || BF.ids.REF.has(k)) continue;   // (ids of other mobs and places: js/ids.js)
     const x = ser(m[k], 0, new Set());
     if (x !== undefined) s[k] = x;
   }
@@ -92,7 +92,8 @@ function snapOf(m) {
 // Puts a snapshot's state back on mob m, at its saved spot.
 function apply(m, snap) {
   if (!m || !snap || !snap.s) return m;
-  for (const k in snap.s) if (!SKIP.has(k)) m[k] = deser(snap.s[k]);
+  for (const k in snap.s) if (!SKIP.has(k) && !BF.ids.REF.has(k)) m[k] = deser(snap.s[k]);
+  if (m.ai) BF.ids.refs(m.ai);   // (a 1.4 save's snapshot: a plain ai table)
   m.position.set(snap.p[0], snap.p[1], snap.p[2]);
   m.vel.set(0, 0, 0);
   m.yaw = snap.yaw || 0;
@@ -116,7 +117,7 @@ const owned = m => m.pen || m.penVillage || m.coop || m.pasture || m.sty || m.ho
 const ST_KEYS = ["sheep", "hen", "cow", "pig"];
 // what a wild mob keeps: its spot, health, young/shorn flags and breeding roll; motion, animation and AI timers start fresh (a third of the size)
 const WILD_DROP = new Set(["tradeCd", "hp", "yaw", "headYaw", "headPitch", "lookAt", "walkPhase", "walkAmt", "onGround", "inWater", "headInWater", "fallStart",
-  "hurtT", "invuln", "knockT", "ai", "age", "fire", "mate", "onLadder", "_farT"]);
+  "hurtT", "invuln", "knockT", "ai", "age", "fire", "mate", "onLadder", "_farT", "lookV"]);
 function packWild(m) {
   const snap = snapOf(m);
   for (const k of Object.keys(snap.s)) if (WILD_DROP.has(k)) delete snap.s[k];
@@ -130,7 +131,7 @@ function packWild(m) {
 function applyState(m, e) {
   if (!m || !e || !e.st) return;
   const k = { sheep: "sheep", chicken: "hen", cow: "cow", pig: "pig" }[m.type];
-  if (k) m[k] = Object.assign(deser(e.st), { mob: m });
+  if (k) m[k] = BF.ids.refs(Object.assign(deser(e.st), { mob: m }));
 }
 function stash(m) {
   if (!m || !m.position || owned(m) || !m.village) return;

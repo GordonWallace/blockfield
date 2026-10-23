@@ -63,6 +63,7 @@ function snapshot() {
     player,
     inventory: BF.inventory.serialize ? BF.inventory.serialize() : null,
     villagers: BF.mobs && BF.mobs.exportVillagers ? BF.mobs.exportVillagers() : undefined,
+    ids: BF.ids ? BF.ids.serialize() : undefined,           // the entity id counter (js/ids.js); villagers' ids are in villagers
     mobs: BF.mobSave ? BF.mobSave.serialize() : undefined,   // where every loaded mob was and what it was doing, for an exact reload (js/mobsave.js)
     wildlife: BF.wildlife ? BF.wildlife.serialize() : undefined,   // wild mobs stored with unloaded chunks, chunks that rolled their animals, village nights (js/wildlife.js)
     weather: BF.weather && BF.weather.serialize ? BF.weather.serialize() : undefined,
@@ -103,6 +104,7 @@ function restore(data, meta) {
   }
   if (data.inventory && BF.inventory.deserialize) BF.inventory.deserialize(data.inventory);
   if (data.villagers && BF.mobs && BF.mobs.importVillagers) BF.mobs.importVillagers(data.villagers); // old saves have none
+  if (BF.ids) BF.ids.deserialize(data.ids); // 1.4 saves: none (ids are handed out on load, past the saved villagers' ones)
   if (BF.wildlife) BF.wildlife.deserialize(data.wildlife); // old saves: every chunk rolls its animals once, the first time it loads
   if (BF.mobSave) BF.mobSave.deserialize(data.mobs); // old saves: nothing to restore exactly (wild mobs go to js/wildlife.js, so after it)
   if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather); // old saves: newWorld's seeded default

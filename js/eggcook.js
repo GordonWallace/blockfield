@@ -93,7 +93,7 @@ function eggDeal(m, v2, want) {
     while (k > 0 && !canCook(m, o.sell.n * k + count(m, EGG()), myEm - o.buy[0].n * k)) k--;   // only eggs it can cook: fuel money kept back
     if (k < 1) continue;
     const price = o.buy[0].n / per;
-    if (!best || price < best.price) best = { seller: v2, offer: o, times: k, price, item: egg, egg: true };
+    if (!best || price < best.price) best = BF.ids.refs({ seller: v2, offer: o, times: k, price, item: egg, egg: true });
   }
   return best;
 }

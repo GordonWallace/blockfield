@@ -54,7 +54,7 @@ const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i
 
 // ---------------------------------------------------------------- sheep state
 function stOf(m) {
-  if (!m.sheep) m.sheep = { fed: null, shorn: false, woolAt: null, growAt: null, cd: 0, x: null, z: null, mob: m };
+  if (!m.sheep) m.sheep = BF.ids.refs({ fed: null, shorn: false, woolAt: null, growAt: null, cd: 0, x: null, z: null, mob: m });
   return m.sheep;
 }
 const regrowDays = () => REGROW_DAYS * (1 + (Math.random() + Math.random() - 1) * REGROW_VAR);
@@ -191,7 +191,7 @@ function makePen(rec, b, idx) {
   };
   const room = box(1, 1, b.w - 2, b.d - 3), foot = box(0, 0, b.w - 1, b.d - 1);
   const cells = (b.w - 2) * (b.d - 3);
-  return { key: rec.key + "|" + idx, idx, rec, b, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
+  return { kind: "pen", key: rec.key + "|" + idx, idx, rec, b, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
     y: b.y, cells, threshold: Math.ceil(cells / PEN_DENSITY), sheep: null, gate: at(b.du, 0), out: at(b.du, -1) };
 }
 // A builder's pen (js/blueprints.js "pen", idea-044): read from the blueprint's marks (turned with the building). It starts empty.
@@ -202,7 +202,7 @@ function makeBuiltPen(rec, e) {
   const at = ([x, z]) => [e.ox + x, e.oz + z], R = M.room.map(at), F = M.fence.map(at);
   const x0 = Math.min(R[0][0], R[1][0]), z0 = Math.min(R[0][1], R[1][1]), x1 = Math.max(R[0][0], R[1][0]) + 1, z1 = Math.max(R[0][1], R[1][1]) + 1;
   const cells = (x1 - x0) * (z1 - z0);
-  return { key: rec.key + "|b" + e.id, idx: "b" + e.id, built: true, rec, b: null, x0, z0, x1, z1,
+  return { kind: "pen", key: rec.key + "|b" + e.id, idx: "b" + e.id, built: true, rec, b: null, x0, z0, x1, z1,
     fx0: Math.min(F[0][0], F[1][0]), fz0: Math.min(F[0][1], F[1][1]), fx1: Math.max(F[0][0], F[1][0]) + 1, fz1: Math.max(F[0][1], F[1][1]) + 1,
     y: e.oy - 1, cells, threshold: Math.ceil(cells / PEN_DENSITY), sheep: null, gate: at(M.gate[0]), out: at(M.out[0]) };
 }
@@ -240,7 +240,7 @@ const packSt = s => [s.fed == null ? null : +s.fed.toFixed(3), s.shorn ? +(s.woo
 function unpackSt(a) {
   const num = (x, d) => (x != null && Number.isFinite(+x) ? +x : d);
   if (!Array.isArray(a)) return null;
-  return { fed: num(a[0], null), shorn: a[1] != null && Number.isFinite(+a[1]), woolAt: num(a[1], null), growAt: num(a[2], null), cd: num(a[3], 0), x: num(a[4], null), z: num(a[5], null), mob: null };
+  return BF.ids.refs({ fed: num(a[0], null), shorn: a[1] != null && Number.isFinite(+a[1]), woolAt: num(a[1], null), growAt: num(a[2], null), cd: num(a[3], 0), x: num(a[4], null), z: num(a[5], null), mob: null });
 }
 // Whether the village plan put a shepherd's loom on the ring right outside this pen (jobs.js planVillage `beside`).
 function hasLoom(pen) {
@@ -263,7 +263,7 @@ function initPen(pen) {
   pen.sheep = [];
   if (pen.built || !hasLoom(pen)) return;   // only a pen with a shepherd's loom beside it starts with sheep (spare pens stay empty)
   const r = seeded("pen:" + pen.key), n = 2 + (r() < 0.5 ? 1 : 0) + (r() < 0.2 ? 1 : 0);   // a new pen starts with 2-4 sheep
-  for (let i = 0; i < n; i++) pen.sheep.push({ fed: null, shorn: false, woolAt: null, growAt: null, cd: 0, x: pen.x0 + 0.6 + r() * (pen.x1 - pen.x0 - 1.2), z: pen.z0 + 0.6 + r() * (pen.z1 - pen.z0 - 1.2), mob: null });
+  for (let i = 0; i < n; i++) pen.sheep.push(BF.ids.refs({ fed: null, shorn: false, woolAt: null, growAt: null, cd: 0, x: pen.x0 + 0.6 + r() * (pen.x1 - pen.x0 - 1.2), z: pen.z0 + 0.6 + r() * (pen.z1 - pen.z0 - 1.2), mob: null }));
 }
 function spawnSheep(pen, s) {
   const x = s.x != null && s.x > pen.x0 && s.x < pen.x1 ? s.x : (pen.x0 + pen.x1) / 2, z = s.z != null && s.z > pen.z0 && s.z < pen.z1 ? s.z : (pen.z0 + pen.z1) / 2;
@@ -382,7 +382,7 @@ function importAll(o) {
 function reset() { pending = new Map(); activePens.length = 0; acc = 0; penT = 0; }
 
 // ---------------------------------------------------------------- the shepherd
-const shp = m => m.shp || (m.shp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
+const shp = m => m.shp || (m.shp = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
 
 // Starting kit: a shepherd alive when its village was generated starts with shears and 8 wheat (trading.js stockFor); one hired later gets
 // emeralds and buys its shears (js/villagelife.js toolAI) and wheat. Kept as a no-op for callers of the old API.
@@ -423,19 +423,19 @@ function wheatWanted(m) {
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), c = idsOf(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
-  const ok = o => !((S.avoid.get(o) || 0) > sim);
+  const ok = o => !((S.avoid.get(o.id) || 0) > sim);
   const nearest = a => { let best = null, bd = Infinity; for (const o of a) { const d = Math.hypot(o.position.x - px, o.position.z - pz); if (d < bd) { bd = d; best = o; } } return best; };
   const ad = adults(T.sheep).filter(ok);
-  if (cnt(m, c.wheat) > 0) { const o = nearest(ad.filter(x => hungry(x, t))); if (o) return { kind: "feed", mob: o }; }
-  if (cnt(m, c.shears) > 0) { const o = nearest(ad.filter(x => !x.sheep.shorn)); if (o) return { kind: "shear", mob: o }; }
+  if (cnt(m, c.wheat) > 0) { const o = nearest(ad.filter(x => hungry(x, t))); if (o) return BF.ids.refs({ kind: "feed", mob: o }); }
+  if (cnt(m, c.shears) > 0) { const o = nearest(ad.filter(x => !x.sheep.shorn)); if (o) return BF.ids.refs({ kind: "shear", mob: o }); }
   if (T.flock.length >= T.threshold) {
     const pool = adults(T.flock).filter(ok);
-    if (adults(T.flock).length > MIN_ADULTS) { const o = nearest(pool.filter(x => x.sheep.shorn)) || nearest(pool); if (o) return { kind: "cull", mob: o }; }   // shorn sheep first: their wool is already in the bag
+    if (adults(T.flock).length > MIN_ADULTS) { const o = nearest(pool.filter(x => x.sheep.shorn)) || nearest(pool); if (o) return BF.ids.refs({ kind: "cull", mob: o }); }   // shorn sheep first: their wool is already in the bag
   }
   const p = T.pen;   // an empty (builder's) pen: fetch wild sheep until it holds STOCK_TO, with wheat in hand to lure them
   if (p && p.sheep && p.sheep.length < STOCK_TO && cnt(m, c.wheat) > 0 && t >= S.stockAt) {
     const o = wildSheep(m, p, S);
-    if (o) return { kind: "fetch", mob: o, pen: p };
+    if (o) return BF.ids.refs({ kind: "fetch", mob: o, pen: p });
     if (wildSheep(m, p, { avoid: new Map() })) { S.stockAt = t + 0.1; return null; }   // only ones it just failed to bring in: again in a while
     S.stockAt = Math.floor(t) + 1 + 0.03;   // none in range: look again tomorrow morning
     if (BF.vlog && m.village) BF.vlog.log(m.village, "work", BF.vlog.nameOf(m) + " (Shepherd) found no wild sheep within " + FIND_R + " blocks of the pen; will look again tomorrow", m);
@@ -446,7 +446,7 @@ function wildSheep(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
   let best = null, bd = FIND_R;
   for (const o of BF.mobs.list) {
-    if (o.type !== "sheep" || !live(o) || o.pen || o.ledBy || isLamb(o) || (S.avoid.get(o) || 0) > sim) continue;
+    if (o.type !== "sheep" || !live(o) || o.pen || o.ledBy || isLamb(o) || (S.avoid.get(o.id) || 0) > sim) continue;
     const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
     if (d < bd) { bd = d; best = o; }
   }
@@ -477,7 +477,7 @@ function stillWanted(m, tk) {
 }
 function endTask(m, ok) {
   const S = shp(m), tk = S.task;
-  if (tk && !ok) S.avoid.set(tk.mob, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
+  if (tk && !ok) S.avoid.set(tk.mobId, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
   if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
   if (H()) H().releaseGate(m, S);
   S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;

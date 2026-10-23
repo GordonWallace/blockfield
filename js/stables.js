@@ -153,7 +153,7 @@ function dealWith(m, v2, id, want) {
   const keep = (v2.profession === "farmer" && KEEP[BF.items[id].name]) || 0;
   let k = Math.min(Math.ceil(want / o.sell.n), Math.floor((cnt(v2, id) - keep) / o.sell.n), Math.floor(cnt(m, em) / o.buy[0].n), 4);
   while (k > 0 && !T.inv.canFit(m.inv, [{ id, n: o.sell.n * k }], [{ id: em, n: o.buy[0].n * k }])) k--;
-  return k > 0 ? { seller: v2, offer: o, times: k, item: id, keep } : null;
+  return k > 0 ? BF.ids.refs({ seller: v2, offer: o, times: k, item: id, keep }) : null;
 }
 // What it wants to buy now, most needed first: [{id, n}]. Feed first; tack only with a few emeralds to spare.
 function wants(m, st) {
@@ -240,7 +240,7 @@ function work(m, J, dt) {
 }
 
 // ---------------------------------------------------------------- the stable hand's day
-const stb = m => m.stb || (m.stb = { task: null, stage: null, t: 0, cd: rnd(1, 3), navFail: 0, avoid: {}, noSeller: {}, waitWild: 0, exit: null, gx: null, gz: null });
+const stb = m => m.stb || (m.stb = BF.ids.refs({ task: null, stage: null, t: 0, cd: rnd(1, 3), navFail: 0, avoid: {}, noSeller: {}, waitWild: 0, exit: null, gx: null, gz: null }));
 const food = m => (cnt(m, I("wheat_item")) > 0 ? "wheat_item" : cnt(m, I("hay_bale")) > 0 ? "hay_bale" : null);
 const ready = (r, t) => r.tamed && !isFoal(r) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS);
 // The paddock adult to feed so a pair breeds, or null: never past 4 horses (a pair makes one foal), never a third willing one.
@@ -262,10 +262,10 @@ function pickTask(m, S) {
     for (const r of mine) if (r.mob && live(r.mob) && !r.lead && !r.mob.rider && (!r.pen || !inBox(r.pen, r.mob.position.x, r.mob.position.z, 1))) return { kind: "fetch", r };   // a horse that lost its lead or got left outside the paddock
     if (mine.length < MIN_HORSES && t >= S.waitWild && food(m)) {
       const h = BF.horses.wildNear(st.rack.x + 0.5, st.rack.z + 0.5, CATCH_R);
-      if (h && !((S.avoid["h" + h.horse.hid] || 0) > t)) return { kind: "catch", mob: h, r: h.horse };
+      if (h && !((S.avoid["h" + h.horse.hid] || 0) > t)) return BF.ids.refs({ kind: "catch", mob: h, r: h.horse });
       if (!h) { S.waitWild = Math.floor(t) + 1 + WORK_START; log("nowild", m, {}); }   // nothing in range: tomorrow
     }
-    if (mine.length >= MIN_HORSES && mine.length < MAX_HORSES && food(m)) { const h = breedTarget(m, st, mine); if (h) return { kind: "feed", mob: h, r: h.horse }; }
+    if (mine.length >= MIN_HORSES && mine.length < MAX_HORSES && food(m)) { const h = breedTarget(m, st, mine); if (h) return BF.ids.refs({ kind: "feed", mob: h, r: h.horse }); }
   }
   const deal = findDeal(m, st, S);
   if (deal) return { kind: "shop", deal };

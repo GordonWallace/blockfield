@@ -444,7 +444,7 @@ function treatDeal(m, v2, want) {
     let k = 1;
     if (want != null) { k = Math.min(Math.ceil(want / per), Math.floor(myEm / o.buy[0].n), Math.floor(cnt(v2, o.sell.id) / o.sell.n), 2); while (k > 1 && !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n * k }], [{ id: em, n: o.buy[0].n * k }])) k--; }
     if (k < 1) continue;
-    if (!best || price < best.price) best = { seller: v2, offer: o, times: k, price, item: o.sell.id, treat: true };
+    if (!best || price < best.price) best = BF.ids.refs({ seller: v2, offer: o, times: k, price, item: o.sell.id, treat: true });
   }
   return best;
 }
