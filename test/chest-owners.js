@@ -178,11 +178,16 @@ module.exports = async (pg, out) => {
     const beside = await besideSpot(), trail = [];
     console.log("furniture maker placed beside the spot at", JSON.stringify(beside));
     // it may still take beds to a builder or buy wool first, so give it a second day if the first runs out
+    // The villager stores (and so claims the chest) only while its inventory is full, and a seller sells or eats within a minute: keep it
+    // full until it owns the chest, as above, or a delivery that takes a while finds it with a free slot and the chest is never claimed.
+    const keepFull = () => pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
+      for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: BF.I.cobblestone, count: 64 }; }, v.noChestKeys[0]);
     for (let k = 0; k < 20 && !(await placed()); k++) {
       if (k === 10) { await pg.evaluate(() => { BF.sky.day += 1; }); await besideSpot(); }
+      await keepFull();
       await step(0.13 + (k % 10) * 0.03, 0.16 + (k % 10) * 0.03, 30);
       trail.push(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead);
-        return [f.furn && f.furn.stage, f.furn && f.furn.deal && f.furn.deal.kind, BF.villagerStatus.text(f), BF.trades.inv.count(f.inv, BF.I.chest), !!(m.store && m.store.order), +BF.sky.time.toFixed(2)].join("/"); }, v.noChestKeys[0]));
+        return [m.inv.filter(x => !x).length + " free", f.furn && f.furn.stage, f.furn && f.furn.deal && f.furn.deal.kind, BF.villagerStatus.text(f), BF.trades.inv.count(f.inv, BF.I.chest), !!(m.store && m.store.order), +BF.sky.time.toFixed(2)].join("/"); }, v.noChestKeys[0]));
       if (process.env.DEBUG) console.log("fm@", JSON.stringify(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead); return { st: f.furn && f.furn.stage, kind: f.furn && f.furn.deal && f.furn.deal.kind, pos: [Math.round(f.position.x), Math.round(f.position.z)], status: BF.villagerStatus.text(f), chests: BF.trades.inv.count(f.inv, BF.I.chest), orders: BF.storage.orders(m.village).length, log: BF.furniture.LOG.slice(-2) }; }, v.noChestKeys[0])));
     }   // it walks over, puts the chest down; the villager stores its surplus there
     const got = await owned();
