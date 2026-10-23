@@ -60,7 +60,7 @@ const log = (kind, m, data) => { LOG.push(BF.glog.job("merchant", Object.assign(
 // The planet (spec r14-16): a merchant is kept in its home village's frame even past a face edge (js/mobs.js frames), village records and the
 // trip's destination are canonical. Every point it steers for is first seen from where it stands (BF.planet.local), the road line lies in
 // its lower-keyed village's frame, distances between places are BF.planet.distance, and path wear is keyed by canonical cells. RANGE (600)
-// is within BF.planet.LOCAL, so a destination on another face is always reached through one edge's unfold. Identity off the planet.
+// is within BF.planet.LOCAL, so a destination on another face is always reached through one edge's unfold.
 const PL = () => BF.planet;
 const pdist = (a, b) => PL().distance(a, b);
 const LQ = {};
@@ -306,7 +306,7 @@ const WC = {};
 function step(m, st) {
   let x = Math.floor(m.position.x), z = Math.floor(m.position.z);
   const y = Math.floor(m.position.y + 0.01) - 1;
-  if (PL().isPlanet()) { const c = PL().canonCell(x, z, WC); if (!c.off) { x = c.x; z = c.z; } }   // (wear is keyed by the canonical cell)
+  { const c = PL().canonCell(x, z, WC); if (!c.off) { x = c.x; z = c.z; } }   // (wear is keyed by the canonical cell)
   const k = x + "," + y + "," + z;
   if (st.cell === k) return;
   st.cell = k;
