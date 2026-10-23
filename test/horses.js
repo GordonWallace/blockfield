@@ -158,7 +158,6 @@ module.exports = async (pg, out) => {
     const sizes = [];
     for (let k = 0; k < 12; k++) {
       H.reset();
-      if (BF.rand) BF.rand.step();   // a herd is rolled from its spot and the tick (js/rand.js): each try at a different tick, or all 12 come out the same
       fill(x0 - 6, x0 + 6, y0, z0 - 6, z0 + 6, B.grass); fill(x0 - 6, x0 + 6, y0 + 1, z0 - 6, z0 + 6, B.air);
       const hd = H.spawnHerdAt(x0, z0);
       sizes.push(hd ? [...H.records.values()].filter(r => r.herd === hd.id).length : 0);

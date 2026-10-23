@@ -51,6 +51,7 @@ module.exports = async (pg) => {
     out.seeded = v0 !== v1 && R.at('grow', 1, 2, 3).next() === v0;
     // the default tick is the simulation's
     const t0 = R.tick, d0 = R.at('x', 0, 0).next(); R.step(); const d1 = R.at('x', 0, 0).next(); R.tick = t0;
+    out.repeat = R.at('rep', 1, 1).next() !== R.at('rep', 1, 1).next();   // asked again in the same tick: the key's next stream
     out.tick = d0 !== d1 && R.at('x', 0, 0).next() === d0 && R.at('x', 0, 0, t0).next() === d0;
 
     // a mob's stream through a save and reload (the wild mob path: js/wildlife.js stow / bring, js/mobsave.js snapshots)
@@ -101,6 +102,7 @@ module.exports = async (pg) => {
   ok('BF.rand.at differs by kind, cell, height and tick', r.keyed);
   ok('BF.rand.at depends on the world seed', r.seeded);
   ok('BF.rand.at defaults to the simulation tick', r.tick);
+  ok('a key asked again within the same tick gets fresh numbers', r.repeat);
   ok('each new mob gets its own seeded stream', r.ownSeed);
   ok('a mob\'s stream carries on after a save and reload', r.mobBack);
   ok('a villager\'s stream carries on through its trading save', r.villagerBack);

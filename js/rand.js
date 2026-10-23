@@ -65,14 +65,27 @@ function of(e) {
 function seed(e, key) { e.rng = mix(worldSeed() ^ hashStr(String(key))); return of(e); }
 
 const kinds = new Map();
+// With the tick left out (the current one), a key asked for again within the same tick gets the next stream of that key, not the same
+// one again: code run more than once a tick (a test stepping the mobs by hand, two updates in one step) still sees fresh numbers. The
+// first ask of a key in a tick always gets the same stream.
+let repTick = -1;
+const reps = new Map();
 function at(kind, x, z, tick, y) {
   let k = kinds.get(kind);
   if (k === undefined) { k = hashStr(kind); kinds.set(kind, k); }
+  const own = tick == null;
+  if (own) tick = R.tick;
   let h = mix(worldSeed() ^ k);
   h = mix(h ^ Math.imul(Math.floor(x) | 0, 0x9e3779b1));
   h = mix(h ^ Math.imul(Math.floor(z) | 0, 0x85ebca77));
-  h = mix(h ^ Math.imul((tick == null ? R.tick : tick) | 0, 0xc2b2ae3d));
+  h = mix(h ^ Math.imul(tick | 0, 0xc2b2ae3d));
   if (y != null) h = mix(h ^ Math.imul(Math.floor(y) | 0, 0x27d4eb2f));
+  if (own) {
+    if (repTick !== tick || reps.size > 100000) { repTick = tick; reps.clear(); }
+    const n = reps.get(h) || 0;
+    reps.set(h, n + 1);
+    if (n) h = mix(h ^ Math.imul(n, 0x165667b1));
+  }
   return new HashStream(h);
 }
 
@@ -81,7 +94,7 @@ const R = BF.rand = {
   get made() { return made; },
   step() { R.tick++; },
   save() { return { tick: R.tick, made }; },
-  load(o) { R.tick = o && o.tick >= 0 ? Math.floor(o.tick) : 0; made = o && o.made >= 0 ? Math.floor(o.made) : 0; },
-  reset() { R.tick = 0; made = 0; },
+  load(o) { R.tick = o && o.tick >= 0 ? Math.floor(o.tick) : 0; made = o && o.made >= 0 ? Math.floor(o.made) : 0; repTick = -1; reps.clear(); },
+  reset() { R.tick = 0; made = 0; repTick = -1; reps.clear(); },
 };
 })();

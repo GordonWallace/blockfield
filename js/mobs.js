@@ -858,12 +858,12 @@ function giveDrops(m) {
 // ---------- creeper explosion ----------
 function explode(m) {
   const c = new THREE.Vector3(m.position.x, m.position.y + 0.8, m.position.z);
-  const R = 3;
+  const R = 3, r = BF.rand.of(m);
   const w = BF.world, bedrock = BF.B.bedrock;
   const cx = Math.floor(c.x), cy = Math.floor(c.y), cz = Math.floor(c.z);
   for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (d > R - R(m).next() * 0.8) continue;
+    if (d > R - r.next() * 0.8) continue;
     const x = cx + dx, y = cy + dy, z = cz + dz;
     const id = w.getBlock(x, y, z);
     if (!id || id === bedrock || isWater(id)) continue;
