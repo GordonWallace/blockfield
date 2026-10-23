@@ -8,7 +8,7 @@
 //    true round drawing there (Gordon's "mode C"): k rises from 0 at 1,200 blocks from a corner to 1 at 500. Chunk meshes carry
 //    their round positions too (js/world.js, the "sphere" attribute); the shader mixes them by k.
 // Nothing is moved for good: positions stay canonical atlas coordinates, and only the world matrices used for this frame's
-// drawing change (begin() before renderer.render, end() after). Off the planet only the onBegin hooks run.
+// drawing change (begin() before renderer.render, end() after). With no player yet, or off the atlas, only the onBegin hooks run.
 //
 // Debug toggles (spec r14-21; the prototype's B / C / R keys), all off by default: F3 + B, F3 + C, F3 + R in the game, or the debug
 // screen's Planet section. tints: each face's chunks tinted its own colour; wedge: no round drawing near the cube corners, so the
@@ -68,7 +68,7 @@ function setPlacements() {
 }
 
 // Render-space position of atlas point (x, y, z) in this frame's view, or null when it isn't drawn (the opposite face, flat).
-// Off the planet: the point itself.
+// Before the first frame with a player (or off the atlas): the point itself.
 const tp = [0, 0, 0];
 view.toRender = function (x, y, z, out) {
   out = out || [0, 0, 0];
@@ -89,10 +89,10 @@ view.toRender = function (x, y, z, out) {
   return out;
 };
 
-// The corner blend k at atlas point (x, z): 0 away from the cube corners (and off the planet), 1 within CORNER1 blocks of one.
+// The corner blend k at atlas point (x, z): 0 away from the cube corners (and off the atlas), 1 within CORNER1 blocks of one.
 view.roundAt = function (x, z) {
   const P = BF.planet;
-  if (!view.cornerRound || !P || !P.isPlanet()) return 0;
+  if (!view.cornerRound) return 0;
   const f = P.face(x, z);
   if (f < 0) return 0;
   const N = P.N, u = x - P.W * f - N, v = z - N;
@@ -118,10 +118,8 @@ view.groundAt = function (x, z) {
   gKey = key; gVal = n ? sum / n : BF.SEA;
   return gVal;
 };
-// The whole blend k for an eye at atlas (x, y, z): the larger of the corner blend and the height blend (0 off the planet).
+// The whole blend k for an eye at atlas (x, y, z): the larger of the corner blend and the height blend.
 view.kAt = function (x, y, z) {
-  const P = BF.planet;
-  if (!P || !P.isPlanet()) return 0;
   return Math.max(view.roundAt(x, z), smooth(ALT0, ALT1, y - view.groundAt(x, z)));
 };
 // How far the sky has faded to space (0 to 1) for the last frame drawn (js/sky.js).
@@ -136,7 +134,7 @@ const tr = [0, 0, 0];
 view.begin = function (scene, camera) {
   for (const fn of hooks) { try { fn(); } catch (err) { console.error(err); } }
   const P = BF.planet, s = state;
-  s.on = !!(P && P.isPlanet() && BF.player && BF.player.position);
+  s.on = !!(BF.player && BF.player.position);
   if (!s.on) { if (BF.world.roundK) BF.world.roundK.value = 0; if (axis) axis.visible = false; return; }
   if (!tmpM) { tmpM = new THREE.Matrix4(); sphR = new THREE.Matrix4(); }
   const pp = BF.player.position, f = P.face(pp.x, pp.z);
