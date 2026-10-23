@@ -1,7 +1,8 @@
 // @ci integration suite=world timeout=600
 // Batched chunk remeshing during fast-forward (spec r15-02): with the player above the boot world's village (59 villagers) at 1000x for
-// 20 real seconds, chunks outside the player's 3x3 are remeshed at most every 5 s (2 s at 100x, 400 ms at 10x), so few frames remesh more than 2 far chunks. Checks:
-//  - frames remeshing more than 2 far chunks are under 10%;
+// 20 real seconds, chunks outside the player's 3x3 are remeshed at most every 5 s (2 s at 100x, 400 ms at 10x). Checks:
+//  - no far chunk is remeshed twice within the 5 s wait, and far remeshes average under 2 a frame (per-chunk timing, not frame
+//    bursts: chunks meshed together at load come due together, so a slow runner's few frames can each catch several);
 //  - a block the player breaks at 1000x is meshed the same frame;
 //  - after dropping to 1x, no chunk stays dirty after one frame.
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ffr test/ff-remesh.js
@@ -18,7 +19,20 @@ module.exports = async (pg) => {
     if (BF.player.setFlying) BF.player.setFlying(true);
     // each world.update call: this frame's remesh counts and the dirty chunks it left
     const W = BF.world, up = W.update, F = window.__ffr = { frames: [], on: false };
-    W.update = function () { const t0 = performance.now(), r = up.apply(this, arguments); if (F.on) F.frames.push({ ...W.lastRemesh, dirty: W._dirty.size, warp: BF.warp.speed, t0 }); return r; };
+    // and, at 1000x, when each chunk outside the player's 3x3 started a remesh (its meshT moved)
+    F.farT = new Map();
+    W.update = function () {
+      const t0 = performance.now(), was = F.on && BF.warp.speed >= 1000 ? [...W._dirty].map(k => [k, (W.chunks.get(k) || {}).meshT]) : null;
+      const r = up.apply(this, arguments);
+      if (!F.on) return r;
+      F.frames.push({ ...W.lastRemesh, dirty: W._dirty.size, warp: BF.warp.speed, t0 });
+      if (was) {
+        const pp = BF.player.position, pcx = Math.floor(pp.x / 16), pcz = Math.floor(pp.z / 16), near = new Set();
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const c = W.chunkC(pcx + dx, pcz + dz); if (c) near.add(c.key); }
+        for (const [k, mt] of was) { const c = W.chunks.get(k); if (c && !near.has(k) && c.meshT !== mt && c.meshT >= t0) (F.farT.get(k) || F.farT.set(k, []).get(k)).push(c.meshT); }
+      }
+      return r;
+    };
     return { village: [v.x, v.z] };
   });
   ok("found the boot village", !!setup, setup);
@@ -30,12 +44,16 @@ module.exports = async (pg) => {
   await pg.waitForTimeout(20000);
   const ff = await pg.evaluate(() => {
     const f = __ffr.frames.filter(x => x.warp >= 10);
-    return { frames: f.length, over2: f.filter(x => x.far > 2).length, far: f.reduce((s, x) => s + x.far, 0), held: f.reduce((s, x) => s + x.held, 0), maxFar: Math.max(0, ...f.map(x => x.far)) };
+    let minGap = Infinity, chunks = 0, twice = 0;
+    for (const ts of __ffr.farT.values()) { chunks++; if (ts.length > 1) twice++; for (let i = 1; i < ts.length; i++) minGap = Math.min(minGap, ts[i] - ts[i - 1]); }
+    return { frames: f.length, over2: f.filter(x => x.far > 2).length, far: f.reduce((s, x) => s + x.far, 0), held: f.reduce((s, x) => s + x.held, 0), maxFar: Math.max(0, ...f.map(x => x.far)),
+      farChunks: chunks, remeshedTwice: twice, minGapMs: minGap === Infinity ? null : Math.round(minGap) };
   });
   console.log("FF " + JSON.stringify(ff));
   ok("ran frames at 1000x", ff.frames >= 20, ff);
-  ok("the village dirtied far chunks (something to batch)", ff.far + ff.held > 0, ff);
-  ok("frames remeshing more than 2 far chunks are under 10%", ff.over2 < 0.1 * ff.frames, ff);
+  ok("the village dirtied far chunks (something to batch)", ff.far + ff.held > 0 && ff.farChunks > 0, ff);
+  ok("no far chunk is remeshed twice within the 5 s wait", ff.minGapMs === null || ff.minGapMs >= 4990, ff);
+  ok("far remeshes average under 2 a frame", ff.far < 2 * ff.frames, ff);
 
   // the player breaks a block at 1000x: its chunk is meshed by the next world.update
   const brk = await pg.evaluate(async () => {
