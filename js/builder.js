@@ -526,7 +526,7 @@ function pickType(m, bs) {
   return null;
 }
 
-function newState(m) { return { mode: "idle", t: rnd(RS(m), 1, 3), cool: 0, stage: null, fail: {}, avoid: {}, placeT: 0.6, entry: null, want: null, losT: 0, losFor: -1 }; }
+function newState(m) { return BF.ids.refs({ mode: "idle", t: rnd(RS(m), 1, 3), cool: 0, stage: null, fail: {}, avoid: {}, placeT: 0.6, entry: null, want: null, losT: 0, losFor: -1 }); }
 const nextId = built => built.reduce((a, e) => Math.max(a, e.id || 0), 0) + 1;
 function logEvent(kind, m, data) {
   const e = Object.assign({ kind, day: +dayNow().toFixed(3), builder: m && m.slot ? m.slot.idx : null }, data);
@@ -1002,7 +1002,7 @@ function toShop(m, bs, e) {
 function canSell(v2) { return v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.inv && v2.trades; }   // other builders too: their reserve keeps what they need (js/market.js)
 // The nearest other villager that sells something on the shortfall list and could do the deal now.
 function findSeller(m, bs, short) {
-  const R = m.village, T = TR(), best = { d: 1e9 };
+  const R = m.village, T = TR(), best = BF.ids.refs({ d: 1e9 });
   for (const v2 of R.members) {
     if (v2 === m || !canSell(v2)) continue;
     for (const o of offersOf(v2)) {

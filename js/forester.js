@@ -308,13 +308,13 @@ function findAxeSeller(m, F) {
   const have = m.inv.some(s => s && isAxe(s.id)) ? Math.max(...m.inv.filter(s => s && isAxe(s.id)).map(s => axeScore(s.id))) : 0, now = nowS();
   let best = null, bs = have, bd = Infinity;
   for (const v2 of R.members || []) {
-    if (v2 === m || !canSell(v2) || (F.avoid && (F.avoid.get(v2) || 0) > now)) continue;
+    if (v2 === m || !canSell(v2) || (F.avoid && (F.avoid.get(v2.id) || 0) > now)) continue;
     for (const o of v2.trades) {
       const sc = axeScore(o.sell.id);
       if (sc <= have || Tr.blockReason(v2, o)) continue;
       if (!o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
       const d = v2.position.distanceTo(m.position);
-      if (sc > bs || (sc === bs && d < bd)) { bs = sc; bd = d; best = { other: v2, offer: o }; }
+      if (sc > bs || (sc === bs && d < bd)) { bs = sc; bd = d; best = BF.ids.refs({ other: v2, offer: o }); }
     }
   }
   return best;
@@ -405,6 +405,35 @@ function findSpot(m, at) {
   }
   return null;
 }
+// The log bases (a log with no log below it) of column (x, z), bottom up, or null when its chunk is not loaded. Each chunk keeps
+// the lists of its columns until a block in that column changes (chunk.colVer, js/world.js), so findTree reads a list per column instead of
+// a block per cell (r15-07; BF.debug.decisionCompare checks them against the old scan).
+const LCELL = {};
+function logBases(x, z) {
+  const cl = W().cell(x, z, LCELL), c = cl.c;
+  if (!c) return null;
+  const M = c.logBases || (c.logBases = new Array(256)), i = cl.lz * 16 + cl.lx;
+  let L = M[i];
+  if (L && L.ver === c.colVer[i]) return L;
+  L = M[i] = []; L.ver = c.colVer[i];
+  const W0 = W(), CS = 16, off = (cl.lz << 4) | cl.lx;
+  let prev = isLog(W0.chunkBlock(c, cl.lx, c.y0 - 1, cl.lz));
+  for (let si = 0; si < c.secs.length; si++) {
+    const sec = c.secs[si], by = (c.lo + si) * CS;
+    if (typeof sec === "number") {
+      if (!isLog(sec)) { prev = false; continue; }
+      if (!prev) L.push(by);
+      prev = true;
+      continue;
+    }
+    for (let ly = 0; ly < CS; ly++) {
+      const lg = isLog(sec[(ly << 8) | off]);
+      if (lg && !prev) L.push(by + ly);
+      prev = lg;
+    }
+  }
+  return L;
+}
 // Trees within 40 blocks (and 64 of the village centre; sized villages: anywhere within 40 of the village's box). Candidates are ranked by distance times a random factor of 0.5 to 2, so a near tree
 // usually wins but a farther one sometimes does (two foresters do not all go for the same trunk).
 const notTree = new Map();   // "x,y,z" of log bases that are not trees -> sim time until which they are skipped
@@ -413,12 +442,16 @@ function findTree(m) {
   const x0 = box ? box.minX - SIZED_CUT : px - CUT_SEARCH, x1 = box ? box.maxX + SIZED_CUT : px + CUT_SEARCH;
   const z0 = box ? box.minZ - SIZED_CUT : pz - CUT_SEARCH, z1 = box ? box.maxZ + SIZED_CUT : pz + CUT_SEARCH;
   const y0 = py - (box ? SIZED_Y_DOWN : CUT_Y_DOWN), y1 = py + (box ? SIZED_Y_UP : CUT_Y_UP);
+  const cmp = BF.dcmp && BF.dcmp.on() ? [] : null;
   for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
     const d = Math.hypot(x + 0.5 - pos.x, z + 0.5 - pos.z);
     if (box ? boxDist(box, x + 0.5, z + 0.5) > SIZED_CUT : d > CUT_SEARCH || Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) > CUT_HOME) continue;
     if (!W().isLoaded(x, z)) continue;
-    for (let y = y0; y <= y1; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z, d * (0.5 + 1.5 * RS(m).next())]);
+    const L = logBases(x, z);
+    if (L) for (const y of L) if (y >= y0 && y <= y1) { cands.push([x, y, z, d * (0.5 + 1.5 * RS(m).next())]); if (cmp) cmp.push([x, y, z]); }
+    if (cmp) for (let y = y0; y <= y1; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cmp.push(["old", x, y, z]);
   }
+  if (cmp) BF.dcmp.check("forester trees", cmp.filter(e => e[0] === "old").map(e => e.slice(1)), cmp.filter(e => e[0] !== "old"), [px, py, pz]);
   cands.sort((a, b) => a[3] - b[3]);
   const now = nowS();
   let tested = 0;
@@ -501,7 +534,7 @@ function endTask(m, F, ok) {
     if (t.claim) claims.delete(t.claim);
     if (t.kind === "plant") F.plantCd = PLANT_CD;
     else if (t.kind === "cut") { F.cutCd = CUT_CD; F.saved = !ok && t.done ? { key: t.claim, done: t.done, chop: F.chop } : null; }   // an interrupted tree keeps its progress
-    else if (t.kind === "buy") { if (!ok) F.avoid.set(t.deal.other, nowS() + 120); }
+    else if (t.kind === "buy") { if (!ok) F.avoid.set(t.deal.otherId, nowS() + 120); }
     else if (t.kind === "gather") { if (!ok && F.sweep) { const n = F.tries || (F.tries = new WeakMap()), c = (n.get(t.drop) || 0) + 1; n.set(t.drop, c); if (c >= 2) (F.skip || (F.skip = new WeakSet())).add(t.drop); } else F.gatherCd = ok ? 0 : 6; }   // an item it cannot reach twice is left
   }
   F.task = null; F.t = 0; F.chop = 0; m.ai.route = null;

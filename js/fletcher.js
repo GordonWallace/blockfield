@@ -104,7 +104,7 @@ function findDeal(m, need) {
   for (const e of offersFor(m, need.f)) {
     let k = Math.min(e.max, Math.ceil(need.n / e.o.sell.n), 4);
     while (k > 0 && !T.inv.canFit(m.inv, [{ id: e.o.sell.id, n: e.o.sell.n * k }], e.o.buy.map(b => ({ id: b.id, n: b.n * k })))) k--;
-    if (k > 0) return { kind: "buy", other: e.v2, offer: e.o, times: k, item: e.o.sell.id, what: need.what };
+    if (k > 0) return BF.ids.refs({ kind: "buy", other: e.v2, offer: e.o, times: k, item: e.o.sell.id, what: need.what });
   }
   return null;
 }

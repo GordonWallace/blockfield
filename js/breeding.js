@@ -102,19 +102,25 @@ const inRects = (rects, x, z) => rects.some(r => x >= r[0] && x <= r[2] && z >= 
 function scanBeds(rec) {
   const CS = BF.CS, W = BF.world, rects = areaRects(rec), F = footTable();
   const cache = rec.bedCache || (rec.bedCache = new Map());
-  const chunks = new Set();
+  const chunks = new Set(), sig = rects.join(";");
   for (const r of rects) for (let cx = Math.floor(r[0] / CS); cx <= Math.floor(r[2] / CS); cx++)
     for (let cz = Math.floor(r[1] / CS); cz <= Math.floor(r[3] / CS); cz++) chunks.add(cx + "," + cz);
   const beds = [];
   for (const ck of chunks) {
     const c = W.chunks && W.chunks.get(ck);
     if (c && c.secs) {
-      const found = [];
-      W.scanFlagged(c, F, (lx, y, lz, id) => {
-        const x = c.cx * CS + lx, z = c.cz * CS + lz;
-        if (inRects(rects, x, z)) found.push({ x, y, z, f: F[id] });
-      }, -1, BF.MIN_Y + 1);
-      cache.set(ck, found);
+      // a chunk with no block changed since its last scan, for the same area, has the same beds (chunk.ver, js/world.js; r15-07)
+      const prev = cache.get(ck), same = prev && prev.c === c && prev.ver === c.ver && prev.sig === sig;
+      let found = same ? prev : null;
+      if (!found || (BF.dcmp && BF.dcmp.on())) {
+        const scan = [];
+        W.scanFlagged(c, F, (lx, y, lz, id) => {
+          const x = c.cx * CS + lx, z = c.cz * CS + lz;
+          if (inRects(rects, x, z)) scan.push({ x, y, z, f: F[id] });
+        }, -1, BF.MIN_Y + 1);
+        if (found) BF.dcmp.check("village beds", scan, found.slice(), [c.cx * CS, 0, c.cz * CS]);
+        else { found = scan; found.c = c; found.ver = c.ver; found.sig = sig; cache.set(ck, found); }
+      }
       beds.push(...found);
     } else if (cache.has(ck)) beds.push(...cache.get(ck));
     else {
@@ -184,13 +190,21 @@ function encounters(rec) {
   const vs = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && !m.child);
   if (vs.length < 2) return;
   const el = vs.map(eligible);
+  // (r15-07) a pair with someone not eligible only forgets its encounter: no key or distance is worked out unless one is remembered
+  const nearIds = new Set(), cmp = BF.dcmp && BF.dcmp.on();
+  for (const k of S.near) for (const id of k.split(":")) nearIds.add(id);
   for (let i = 0; i < vs.length; i++) for (let j = i + 1; j < vs.length; j++) {
+    if (!el[i] || !el[j]) {
+      if (nearIds.size && nearIds.has(String(mid(vs[i]))) && nearIds.has(String(mid(vs[j])))) S.near.delete(pairKey(vs[i], vs[j]));
+      if (cmp) BF.dcmp.check("breeding encounters", false, S.near.has(pairKey(vs[i], vs[j])));   // the old loop always forgot it
+      continue;
+    }
     const a = vs[i], b = vs[j], k = pairKey(a, b);
     const close = a.position.distanceTo(b.position) <= RADIUS;
     const cond = close && el[i] && el[j] && bedsOK(rec);
     if (!cond) { if (!close || !el[i] || !el[j]) S.near.delete(k); continue; }
     if (S.near.has(k)) continue;                 // already rolled this encounter
-    S.near.add(k);
+    S.near.add(k); for (const id of k.split(":")) nearIds.add(id);
     S.stats.encounters++; S.stats.rolls++;
     if (BF.rand.of(a).next() < CHANCE) { if (!startLove(a, b, rec)) { S.near.delete(k); continue; } S.stats.successes++; el[i] = el[j] = false; }
   }
@@ -274,7 +288,7 @@ function spawnEntry(rec, e, x, y, z) {
 }
 function newEntry(rec, parents) {
   bredList(rec);
-  const e = { k: rec.bredNext++, child: true, born: now(), eaten: 0, parents, prof: "child", bed: null, cd: null, pos: null, save: null, lastDay: BF.sky ? BF.sky.day : 0 };
+  const e = BF.ids.refs({ k: rec.bredNext++, child: true, born: now(), eaten: 0, parents, prof: "child", bed: null, cd: null, pos: null, save: null, lastDay: BF.sky ? BF.sky.day : 0 });
   rec.bred.push(e);
   return e;
 }
@@ -376,18 +390,19 @@ function childTick(rec, e) {
     m.bed = freeBed(rec, m); e.bed = m.bed;
   }
 }
+// A newborn unloading (with its village): its entry keeps where it was and its trading state for when it comes back.
+function keepState(e, m) {
+  e.pos = [m.position.x, m.position.y, m.position.z];
+  if (m.inv) e.save = BF.trades.pack(m);
+  if (!m.child) e.prof = m.profession;
+  e.mob = null;
+}
 function spawnMissing(rec) {
   const P = BF.player && BF.player.position;
   if (!P) return;
   for (const e of bredList(rec)) {
     if (e.dead || (e.mob && !e.mob.removed)) continue;
-    if (e.mob && e.mob.removed) {         // unloaded: keep its state
-      const m = e.mob;
-      e.pos = [m.position.x, m.position.y, m.position.z];
-      if (m.inv) e.save = BF.trades.pack(m);
-      if (!m.child) e.prof = m.profession;
-      e.mob = null;
-    }
+    if (e.mob && e.mob.removed) keepState(e, e.mob);   // unloaded: keep its state
     const r = e.pos ? null : BF.rand.at("newborn", rec.x, rec.z, null, bredList(rec).indexOf(e));
     const pos = e.pos || [rec.x + (r.next() - 0.5) * 8, rec.y != null ? rec.y : BF.world.heightAt(rec.x, rec.z) + 1, rec.z + (r.next() - 0.5) * 8];
     if ((BF.planet.distance({ x: pos[0], z: pos[2] }, P) > 72 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) || !BF.world.isLoaded(pos[0], pos[2])) continue;
@@ -457,11 +472,11 @@ function importAll(o) {
     const idx = +key.slice(i + 1);
     if (!(idx >= KEY_BASE)) continue;
     const b = v.bred, vk = key.slice(0, i);
-    const e = { k: idx - KEY_BASE, child: !!b.child, born: +b.born || 0, eaten: +b.eaten || 0, parents: Array.isArray(b.parents) ? b.parents.slice(0, 2) : [],
+    const e = BF.ids.refs({ k: idx - KEY_BASE, child: !!b.child, born: +b.born || 0, eaten: +b.eaten || 0, parents: Array.isArray(b.parents) ? b.parents.slice(0, 2) : [],
       prof: typeof b.prof === "string" ? b.prof : (b.child ? "child" : "unemployed"), cd: b.cd != null ? +b.cd : null,
       pos: Array.isArray(b.pos) && b.pos.length === 3 && b.pos.every(Number.isFinite) ? b.pos : null,
       bed: b.bed && Number.isFinite(b.bed.x) ? b.bed : null, lastDay: b.lastDay, dead: !!b.dead,
-      save: Object.assign({}, v, { bred: undefined }) };
+      save: Object.assign({}, v, { bred: undefined }) });
     if (!S.pending.has(vk)) S.pending.set(vk, []);
     S.pending.get(vk).push(e);
   }
@@ -524,6 +539,7 @@ addEventListener("load", hookEvents);
 BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,
   tick, ai, childMove, exportAll, importAll, reset,
+  onRemoved(m) { const e = m.bredEntry; if (e && e.mob === m && !e.dead) keepState(e, m); },   // js/mobs.js removeMob (js/ids.js: links to a removed mob go)
   eligible, bedsOK, bedCount, villagerCount, scanBeds, freeBed, breadEq,
   forceBreed, birth, growUp, makeChild, info, stats: S.stats, log: S.log, state: S,
   // instant variants for tests

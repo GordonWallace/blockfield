@@ -267,11 +267,11 @@ function findCartographer(m, X) {
   if (!R) return null;
   let best = null, bd = Infinity;
   for (const v2 of R.members || []) {
-    if (v2 === m || !canSell(v2) || (X.avoidSeller && X.avoidSeller.get(v2) > nowS())) continue;
+    if (v2 === m || !canSell(v2) || (X.avoidSeller && X.avoidSeller.get(v2.id) > nowS())) continue;
     const o = offerFor(v2, cnt(m, BF.I.emerald));
     if (!o || T().blockReason(v2, o) || !T().inv.canFit(m.inv, [o.sell], o.buy)) continue;
     const d = v2.position.distanceTo(m.position);
-    if (d < bd) { bd = d; best = { seller: v2, offer: o }; }
+    if (d < bd) { bd = d; best = BF.ids.refs({ seller: v2, offer: o }); }
   }
   return best;
 }
@@ -300,7 +300,7 @@ function shopAI(m, dt, out) {
     X.deal = dl; X.stage = "walk"; X.walkT = 0; a.route = null;
   }
   const dl = X.deal, v2 = dl && dl.seller;
-  const giveUp = () => { if (v2) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2, nowS() + 60); X.stage = null; X.deal = null; a.route = null; X.cd = 5; return false; };
+  const giveUp = () => { if (v2) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2.id, nowS() + 60); X.stage = null; X.deal = null; a.route = null; X.cd = 5; return false; };
   if (!v2 || !canSell(v2) || !offerFor(v2, cnt(m, BF.I.emerald))) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   a.mode = "idle"; a.t = 2;
@@ -320,7 +320,7 @@ function shopAI(m, dt, out) {
   if (X.tt <= 0) {
     const ok = deal(m, dl);
     X.stage = null; X.deal = null; X.cd = ok ? 0.5 : 5;
-    if (!ok) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2, nowS() + 60);
+    if (!ok) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2.id, nowS() + 60);
   }
   return true;
 }

@@ -142,7 +142,7 @@ function findSeller(m, short, avoid) {
       while (k > 0 && !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n * k }], o.buy.map(b => ({ id: b.id, n: b.n * k })))) k--;
       if (k < 1) continue;
       const d = v2.position.distanceTo(m.position);
-      if (d < bd) { bd = d; best = { kind: "buy", other: v2, offer: o, times: k, item: o.sell.id }; }
+      if (d < bd) { bd = d; best = BF.ids.refs({ kind: "buy", other: v2, offer: o, times: k, item: o.sell.id }); }
     }
   }
   return best;
@@ -195,7 +195,7 @@ function findBuyer(m, avoid) {
     const k = saleTimes(m, b, o);
     if (k < 1) continue;
     const d = b.position.distanceTo(m.position);
-    if (d < bd) { bd = d; best = { kind: "sell", other: b, offer: o, times: k, item: "bed" }; }
+    if (d < bd) { bd = d; best = BF.ids.refs({ kind: "sell", other: b, offer: o, times: k, item: "bed" }); }
   }
   return best;
 }
@@ -224,7 +224,7 @@ function findDelivery(m, avoid) {
   for (const o of orders(m)) {
     if (o.m === m || (avoid[(o.m.slot ? o.m.slot.idx : 0) + ":chest"] || 0) > dayNow()) continue;
     const d = Math.hypot(o.spot.x - m.position.x, o.spot.z - m.position.z);
-    if (d < bd) { bd = d; best = { kind: "deliver", other: o.m, spot: o.spot, item: "chest" }; }
+    if (d < bd) { bd = d; best = BF.ids.refs({ kind: "deliver", other: o.m, spot: o.spot, item: "chest" }); }
   }
   return best;
 }
