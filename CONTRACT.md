@@ -60,10 +60,10 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
   (it still calls `BF.player.updatePaused(dt)` if present and `BF.inventory.update(dt)` always).
 - Fixed tick (spec r15-10, js/timewarp.js): the world simulation runs in ticks of exactly `BF.warp.TICK` = 0.05 s at every speed
   (`sky.advance(h)`, `mobs.update(h)`, `dayTimeline.update()`, `drops.update(h)`, `boats.update(h)`, `inventory.simTick(h)`,
-  `world.tickSim()`, as `BF.simFrame(dt)` runs them); the player updates once per frame in real time. Every frame main then draws
-  between the last two ticks with `alpha = BF.warp.alpha`: `sky.draw(alpha, dt)`, `mobs.draw(alpha)`, `drops.draw(alpha)`,
-  `boats.draw(alpha)` (bees in their mesh's onBeforeRender). Sim objects keep where they were before the tick (`m.prev`, `drop.prev`,
-  `boat.prev`, `arrow.prev`, bee `px/py/pz`); a mob's `position` is its own vector, not its model's (`m.root.position` is where it's drawn).
+  `world.tickSim()`, as `BF.simStep(h)` runs them and `BF.simFrame(dt)` a frame's worth); the player updates once per frame in real time. Every frame main then draws
+  between the last two ticks with `alpha = BF.warp.alpha`: `sky.draw(alpha, dt)`, `mobs.draw(alpha)` (arrows), `drops.draw(alpha)`,
+  `boats.draw(alpha)`, `mobView.render(dt)` (the mobs, js/mobview.js; bees in their mesh's onBeforeRender). Sim objects keep where they were before the tick (`m.prev`, `drop.prev`,
+  `boat.prev`, `arrow.prev`, bee `px/py/pz`); js/mobview.js draws a mob at lerp(`m.prev`, `m`, alpha) (`BF.mobView.drawPos`).
 - Event bus: `BF.on(name, fn)`, `BF.emit(name, ...args)`. Known events:
   `newWorld(seed)`, `blockBroken(x,y,z,blockId)`, `blockPlaced(x,y,z,blockId)`,
   `playerDamaged(amount)`, `playerDied()`, `playerRespawned()`, `mobKilled(mob)`.
