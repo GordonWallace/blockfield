@@ -1545,10 +1545,26 @@ function routeCost(sx, sy, sz, route) {
 }
 // BF.debug.pathCompare (tests, the console): every search also runs findPathOld and tallies BF.debug.pathStats: calls, identical routes,
 // other routes of equal cost, none from both, searches where only one ran out of maxNodes (the other order of equal-f cells reached the
-// goal first; checked with 4x the nodes), differences (the first few kept, and logged), and the time each took.
+// goal first; checked with 4x the nodes), routes whose costs differ by no more than the goal's slack (offGoal, below), differences
+// (the first few kept, and logged), and the time each took.
+// offGoal: a goal that accepts cells away from (goal.x, goal.z) (a jobsite's side, a bed's side, "within 8 blocks") makes the distance
+// estimate overstate what is left at those cells, so neither search is sure to find the cheapest route there and the order of equal-f
+// cells decides which one is found. Such a pair agrees when the costs differ by no more than how far either route ends from (goal.x, goal.z).
+function pathsAgree(sx, sy, sz, goal, maxNodes, tall, a, b) {
+  if (!a && !b) return "nullBoth";
+  if (a && b && a.length === b.length && a.every((c, i) => c[0] === b[i][0] && c[1] === b[i][1] && c[2] === b[i][2])) return "same";
+  if (a && b) {
+    const ca = routeCost(sx, sy, sz, a), cb = routeCost(sx, sy, sz, b);
+    if (ca === cb) return "equal";
+    const slack = r => { const e = r.length ? r[r.length - 1] : [sx, sy, sz]; return Math.abs(e[0] - goal.x) + Math.abs(e[2] - goal.z); };
+    if (Math.abs(ca - cb) <= Math.max(slack(a), slack(b))) return "offGoal";
+    return "diff";
+  }
+  return (a ? findPathOld : findPathFast)(sx, sy, sz, goal, maxNodes * 4, tall) ? "cutoff" : "diff";
+}
 const DBG = (BF.debug = BF.debug || {});
 DBG.pathCompare = DBG.pathCompare || false;
-function pathStatsReset() { return (DBG.pathStats = { calls: 0, same: 0, equal: 0, cutoff: 0, diff: 0, nullBoth: 0, ms: 0, msOld: 0, diffs: [] }); }
+function pathStatsReset() { return (DBG.pathStats = { calls: 0, same: 0, equal: 0, offGoal: 0, cutoff: 0, diff: 0, nullBoth: 0, ms: 0, msOld: 0, diffs: [] }); }
 pathStatsReset();
 // findPath: the route search every caller uses (findPathFast, compared with findPathOld when asked).
 function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
@@ -1556,12 +1572,9 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   const S = DBG.pathStats || pathStatsReset();
   const t0 = performance.now(), a = findPathFast(sx, sy, sz, goal, maxNodes, tall), t1 = performance.now(), b = findPathOld(sx, sy, sz, goal, maxNodes, tall), t2 = performance.now();
   S.calls++; S.ms += t1 - t0; S.msOld += t2 - t1;
-  if (!a && !b) S.nullBoth++;
-  else if (a && b && a.length === b.length && a.every((c, i) => c[0] === b[i][0] && c[1] === b[i][1] && c[2] === b[i][2])) S.same++;
-  else if (a && b && routeCost(sx, sy, sz, a) === routeCost(sx, sy, sz, b)) S.equal++;
-  else if (!a !== !b && (a ? findPathOld : findPathFast)(sx, sy, sz, goal, maxNodes * 4, tall)) S.cutoff++;
-  else {
-    S.diff++;
+  const v = pathsAgree(sx, sy, sz, goal, maxNodes, tall, a, b);
+  S[v]++;
+  if (v === "diff") {
     const d = { from: [sx, sy, sz], goal: [goal.x, goal.z], maxNodes, tall, len: a && a.length, lenOld: b && b.length, cost: a && routeCost(sx, sy, sz, a), costOld: b && routeCost(sx, sy, sz, b) };
     if (S.diffs.length < 20) S.diffs.push(d);
     if (BF.glog && S.diff <= 20) BF.glog.log("DEBUG", "pathCompare", `findPath differs from findPathOld from ${sx},${sy},${sz} toward ${goal.x},${goal.z}: ${d.len} cells cost ${d.cost} vs ${d.lenOld} cost ${d.costOld}`, { at: [sx, sy, sz] });
@@ -2943,7 +2956,7 @@ BF.mobs = {
   spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
   spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
-  isWild, spawnGroup, penBoxes, inPenBox, standable, findPath, findPathFast, findPathOld, routeCost, pathStatsReset,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}, maxNodes, tall): A* route cells (tests); the Fast/Old pair and routeCost for test/findpath-compare.js
+  isWild, spawnGroup, penBoxes, inPenBox, standable, findPath, findPathFast, findPathOld, routeCost, pathsAgree, pathStatsReset,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}, maxNodes, tall): A* route cells (tests); the Fast/Old pair and routeCost for test/findpath-compare.js
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
