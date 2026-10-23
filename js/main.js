@@ -211,7 +211,7 @@ BF.debugInfo = debugInfo;
 BF.debugText = debugText;
 
 // ---------- loop ----------
-// One simulation step of h game seconds (the frame loop runs W.plan(dt).n of them a frame; harnesses and tests call BF.simStep).
+// One simulation tick of h game seconds (W.TICK in the frame loop, simFrame below; harnesses and tests call BF.simStep).
 // The BF.perf points charge each part's time to its category of the villager-seconds meter (js/perf.js); they do nothing while it's off.
 const PF = BF.perf;
 function simStep(h) {
@@ -219,7 +219,7 @@ function simStep(h) {
   BF.warp.advance(h);
   BF.rand.step();   // the tick that keys world-event rolls (js/rand.js)
   BF.state.time += h;
-  BF.sky.update(h);
+  BF.sky.advance(h);   // the clock, weather and light; the sky is drawn every frame at the interpolated time
   PF.lap(PF.C.world);
   BF.mobs.update(h);   // charges its own parts (js/mobs.js update)
   PF.lap(PF.C.vanimals);   // bees (js/bees.js runs after the mobs' update)
@@ -233,11 +233,26 @@ function simStep(h) {
   PF.endStep(h);
 }
 BF.simStep = simStep;
+
+// Fixed tick (spec r15-10, js/timewarp.js): the world simulation runs in ticks of exactly W.TICK (0.05 s) of game time at every
+// speed, as many as the accumulator holds after a frame of `raw` real seconds (20 a second at 1x, W.speed times that when
+// fast-forwarding), so behaviour is the same at any speed and frame rate. Stops early if the frame budget runs out; those ticks are
+// dropped, not owed (W.done). Returns the number of ticks run. BF.simFrame runs it on its own (tests: a forced frame rate).
+function simFrame(raw) {
+  const W = BF.warp, plan = W.plan(raw), t0 = performance.now();
+  let done = 0;
+  while (done < plan.n && !W.frozen && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {   // an alert can freeze it mid-frame (js/alerts.js)
+    simStep(plan.h);
+    done++;
+  }
+  return done;
+}
+BF.simFrame = raw => { const n = simFrame(raw); BF.warp.done(n, n * BF.warp.TICK, raw); return n; };
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   if (BF.preparing) { last = now; return; }
-  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
+  const raw = Math.max(0, (now - last) / 1000), dt = Math.min(0.05, raw);   // the player's step; the sim's accumulator takes up to 0.25 s (js/timewarp.js)
   last = now;
   const p = BF.player.position;
   PF.frame();
@@ -245,28 +260,26 @@ function frame(now) {
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   PF.lap(PF.C.stream);   // chunk streaming and remeshing, once a frame
   if (BF.lod) BF.lod.update();   // distant terrain rings on the planet (js/lod.js)
-  const W = BF.warp;
+  const W = BF.warp, drawn0 = W.renderNow();
   if (!BF.state.paused) {
-    // Fast-forward (arrow keys, js/timewarp.js): run the world simulation W.speed times per frame with the normal step, so
-    // behaviour at 10x matches 1x exactly and it plays like a sped-up recording. From 100x the step grows (up to 0.05 s, the
-    // same step a slow frame already gets) so the step count stays bounded. Stops early if the frame budget runs out.
-    const plan = W.plan(dt), t0 = performance.now();
-    let done = 0;
-    while (done < plan.n && !W.frozen && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {   // an alert can freeze it mid-frame (js/alerts.js)
-      simStep(plan.h);
-      done++;
-    }
+    const done = simFrame(raw);
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
     BF.player.update(dt);
-    if (BF.horses) BF.horses.drawLeads();   // lead ropes follow the player and the horses every frame
-    W.done(done, done * plan.h, dt);
+    W.done(done, done * W.TICK, raw);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
   }
+  // drawing between the last two ticks (r15-10): the sky at the interpolated game time, entities at lerp(prev, cur, alpha)
+  const alpha = W.alpha, drawnDt = Math.max(0, W.renderNow() - drawn0);
+  BF.sky.draw(alpha, drawnDt);
+  BF.mobs.draw(alpha);   // arrows (the mobs are drawn by BF.mobView.render below)
+  BF.drops.draw(alpha);
+  BF.boats.draw(alpha);
+  if (BF.horses && !BF.state.paused) BF.horses.drawLeads();   // lead ropes follow the player and the horses (as drawn) every frame
   BF.inventory.update && BF.inventory.update(dt);
   if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);
-  if (BF.textures.update) BF.textures.update(W.frozen ? 0 : dt * Math.max(1, W.last));   // water animation keeps pace with the fast-forward (and stops at 0x)
+  if (BF.textures.update) BF.textures.update(W.frozen ? 0 : BF.state.paused ? dt : drawnDt);   // water animation runs on the drawn game time (fast-forward included, stopped at 0x)
   if (BF.save && !BF.state.paused) BF.save.update(dt);
   BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)

@@ -40,7 +40,7 @@ const drops = {
     const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + drops.list.length * 4099);   // the toss: seeded by the spot, tick and count (js/rand.js)
     const a = r.next() * Math.PI * 2, s = 1 + r.next() * 1.5;
     const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + r.next() * 2, Math.sin(a) * s);
-    const d = { id, count, pos: new THREE.Vector3(x, y, z), vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
+    const d = { id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
     return d;
@@ -87,6 +87,7 @@ const drops = {
       if (!d) continue;
       d.age = Math.max(0, +age || 0);
       d.pickupDelay = d.age + Math.max(0, +delay || 0);
+      d.prev.copy(d.pos); d.prevAge = d.age;
       d.sprite.position.copy(d.pos);
     }
   },
@@ -95,6 +96,7 @@ const drops = {
     const P = BF.player, pp = P && P.position, alive = P && !P.dead;
     const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1;
     for (const d of drops.list.slice()) {
+      d.prev.copy(d.pos); d.prevAge = d.age; d.pulled = false;   // drawn between this and where the tick leaves it (draw)
       // in an unloaded chunk an item neither ages nor falls (it would drop out of the world); it waits for the chunk
       const here = BF.world.isLoaded(d.pos.x, d.pos.z);
       d.sprite.visible = here;
@@ -112,8 +114,8 @@ const drops = {
           const k = 10 / dist;
           d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
           d.pos.addScaledVector(d.vel, dt);
+          d.pulled = true;
           BF.planet.reframe(d.pos, -1, null, d.vel);
-          d.sprite.position.copy(d.pos);
           continue;
         }
       }
@@ -127,8 +129,20 @@ const drops = {
       BF.planet.reframe(d.pos, -1, null, d.vel);   // past a face edge: onto the next face's square
       if (res.onGround) { d.vel.x *= Math.pow(0.02, dt); d.vel.z *= Math.pow(0.02, dt); }
       if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
-      d.sprite.position.set(d.pos.x, d.pos.y + 0.22 + Math.sin(d.age * 2.5 + d.phase) * 0.06, d.pos.z);
       d.sprite.material.color.setScalar(light);
+    }
+  },
+
+  // Every frame (main.js, spec r15-10): each item drawn between where the last two ticks left it (alpha 0..1), bobbing. One flying
+  // into the player doesn't bob; one that jumped (a face edge) is drawn where it is.
+  draw(alpha) {
+    const k = Math.max(0, Math.min(1, alpha)), j = 1 - k;
+    for (const d of drops.list) {
+      if (!d.sprite) continue;
+      const q = d.prev, p = d.pos, snap = q.distanceToSquared(p) > 16;
+      const age = snap ? d.age : d.prevAge * j + d.age * k, x = snap ? p.x : q.x * j + p.x * k, z = snap ? p.z : q.z * j + p.z * k;
+      const y = snap ? p.y : q.y * j + p.y * k;
+      d.sprite.position.set(x, d.pulled ? y : y + 0.22 + Math.sin(age * 2.5 + d.phase) * 0.06, z);
     }
   },
 };
