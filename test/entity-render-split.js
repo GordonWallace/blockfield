@@ -153,15 +153,15 @@ module.exports = async (pg, out) => {
     crumbs: ({ st }) => { BF.villageLife.particles(st.x + 0.5, st.y + 1.4, st.z - 3, "#b98a3a", 6, 0.25); BF.villageLife.particles(st.x + 2.5, st.y + 1.0, st.z - 3, "#2fd06a", 5, 0.4); },
     puff: ({ st }) => {
       const pig = BF.mobs.spawn("pig", st.x + 0.5, st.y, st.z - 3);
-      BF.mobs.kill(pig);
+      BF.mobs.hurt(pig, 100, "a test");   // not by the player: no drops
       pig.deathT = 1.0;
       BF.mobs.update(1e-4);   // past 1 s dead: it goes in a puff
     },
   };
   for (const [name, fn] of Object.entries(EFFECTS)) {
     await pg.evaluate(() => {
-      window.__before = new Set();
-      BF.scene.traverse(o => window.__before.add(o.uuid));
+      window.__before = new WeakSet();   // (by the objects themselves: Three.js makes uuids with Math.random, seeded here)
+      BF.scene.traverse(o => window.__before.add(o));
       let s = 12345;
       window.__rand = Math.random;
       Math.random = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
@@ -172,7 +172,7 @@ module.exports = async (pg, out) => {
       Math.random = window.__rand;
       const r = v => Math.round(v * 1000) / 1000, a = [];
       BF.scene.traverse(o => {
-        if (window.__before.has(o.uuid) || !(o.isMesh || o.isSprite) || o.name === "bees") return;
+        if (window.__before.has(o) || !(o.isMesh || o.isSprite) || o.name === "bees") return;
         const g = o.geometry && o.geometry.parameters, c = o.material && o.material.color;
         a.push({ kind: o.isSprite ? "sprite" : "mesh", at: [r(o.position.x), r(o.position.y), r(o.position.z)], size: g && g.width ? r(g.width) : null,
           color: c ? c.getHexString() : null, scale: r(o.scale.x) });
