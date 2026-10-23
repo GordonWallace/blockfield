@@ -58,7 +58,7 @@ BF.world.onChunkUnload((cx, cz, c) => { if (cC === c) { cCx = cCz = 1e9; cC = nu
 // a chunk at a face edge lands in the margin, which is resolved to the cell on the next face (null in a corner wedge), so the fills
 // carry on across face edges and every queued cell is canonical.
 let NX = 0, NZ = 0;
-const NCELL = {};
+const NCELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function stepTo(x, z, nx, nz) {
   NX = nx; NZ = nz;
   if (((nx >> 4) === (x >> 4) && (nz >> 4) === (z >> 4))) return chunkOf(nx, nz);
@@ -304,7 +304,7 @@ sky.onSet = function (x, y, z, oldId, newId) {
   flush();
 };
 
-const CELL = {};
+const CELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 // Level 0..15 at world coords: 15 in unloaded chunks and above a band, 0 below it.
 sky.get = function (x, y, z) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);

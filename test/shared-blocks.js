@@ -58,14 +58,15 @@ async function inPage({ walk }) {
     const mem = () => ({ ...BF.shared.usage(), chunks: BF.world.chunks.size });
     R.before = mem();
     // weak references to every section array loaded at the start: once those chunks unload, their buffers must be collectable
-    const refs = [];
-    for (const c of BF.world.chunks.values()) for (const list of [c.secs, c.light, c.sky]) if (list) for (const a of list) if (a && typeof a === 'object') refs.push([c.key, new WeakRef(a)]);
+    // (built in a plain function: an async function's suspended frame can keep its loop's last chunk alive, which would read as a leak)
+    const refs = (() => { const r = []; for (const c of BF.world.chunks.values()) for (const list of [c.secs, c.light, c.sky]) if (list) for (const a of list) if (a && typeof a === 'object') r.push([c.key, new WeakRef(a)]); return r; })();
     for (let d = 100; d <= 2000; d += 100) await settle(px + d, pz);
     for (let i = 0; i < 100; i++) { BF.world.update(px + 2000, pz, 8); await wait(10); }
     R.far = mem();
-    await gcNow();
-    const gone = refs.filter(([k]) => !BF.world.chunks.has(k));
-    R.refs = { tracked: refs.length, unloaded: gone.length, stillAlive: gone.filter(([, w]) => w.deref() !== undefined).length, aliveKeys: [...new Set(gone.filter(([, w]) => w.deref() !== undefined).map(([k]) => k))], gc: typeof gc === 'function' };
+    const gone = refs.filter(([k]) => !BF.world.chunks.has(k)), alive = () => gone.filter(([, w]) => w.deref() !== undefined);
+    // a chunk can stay referenced for a moment after it unloads (a queued job finishing): give it a few seconds of play between collections
+    for (let i = 0; i < 6; i++) { await gcNow(); if (!alive().length) break; for (let k = 0; k < 50; k++) { BF.world.update(px + 2000, pz, 8); await wait(20); } }
+    R.refs = { tracked: refs.length, unloaded: gone.length, stillAlive: alive().length, aliveKeys: [...new Set(alive().map(([k]) => k))], gc: typeof gc === 'function' };
     for (let d = 1900; d >= 0; d -= 100) await settle(px + d, pz);
     for (let i = 0; i < 300; i++) { BF.world.update(px, pz, 8); await wait(10); }   // unload what's left of the walk
     R.after = mem();

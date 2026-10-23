@@ -52,7 +52,7 @@ function rgbOf(id) {
 }
 const WATER = [63, 118, 228];
 // Top visible block of a column: {id, y} or {water: true, depth, bottom, y}; null when the chunk is not loaded.
-const CELL = {};
+const CELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function column(wx, wz) {
   const cl = BF.world.cell(wx, wz, CELL), c = cl.c;   // (through a face edge on the planet)
   if (!c) return null;

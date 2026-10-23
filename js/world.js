@@ -295,6 +295,11 @@ world.cell = function (x, z, out) {
   out.lx = RX - Math.floor(RX / CS) * CS; out.lz = RZ - Math.floor(RZ / CS) * CS;
   return out;
 };
+// A module's reusable out object for world.cell: its .c is cleared when that chunk unloads, so a long-lived scratch object never keeps an
+// unloaded chunk's arrays alive (r15-35). Per-call out objects ({}) need nothing.
+const scratchCells = [];
+world.scratchCell = () => { const o = { c: null }; scratchCells.push(o); return o; };
+const forgetChunk = c => { if (LC === c) LC = undefined; for (const o of scratchCells) if (o.c === c) o.c = null; };
 // The chunk at chunk coordinates (cx, cz), through the margin (canonical coordinates are a plain lookup).
 world.chunkC = (cx, cz) => {
   const k = resChunk(cx, cz);
@@ -569,7 +574,7 @@ function unload(key) {
   const c = world.chunks.get(key);
   if (!c) return;
   disposeMeshes(c);
-  world.chunks.delete(key); CGEN++; if (LC === c) LC = undefined;   // (the lookup cache must not keep its arrays alive, r15-35)
+  world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
 }
@@ -587,7 +592,7 @@ function purge(key) {
     for (const a of [...Object.values(g.attributes), g.index]) if (a) { if (a.uploaded) a.array = NOARR; else a.onUpload(freeArray); }
   }
   c.meshes = [];
-  world.chunks.delete(key); CGEN++; if (LC === c) LC = undefined;   // (the lookup cache must not keep its arrays alive, r15-35)
+  world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   world.purged = (world.purged || 0) + 1;
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
