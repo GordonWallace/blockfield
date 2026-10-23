@@ -347,6 +347,9 @@
         <button class="fbtn" data-pt="sphere" title="Draw the true sphere everywhere, for comparison (F3 + R)">True sphere <kbd>R</kbd></button></div>
       <div class="sub">Also F3 + B, C or R in the game. Off when the game starts.</div></div>
     <div class="card"><h3>Weather</h3><div id="c-weather" class="sub" style="color:var(--ink);white-space:pre-wrap">-</div><div class="sub" id="c-clouds"></div></div>
+    <div class="card" id="c-hashcard"><h3>State hash <button class="fbtn" id="c-hashcopy" title="Copy the hash, its game day and its parts, for a bug report">Copy</button></h3>
+      <div class="big" id="c-hash" style="font:600 15px ui-monospace,monospace;letter-spacing:0">-</div><div class="sub" id="c-hashday"></div>
+      <details class="sub"><summary>Parts</summary><div id="c-hashparts" style="font:11px ui-monospace,monospace;color:var(--ink)"></div></details></div>
   </section>
 
   <div class="split">
@@ -743,11 +746,25 @@ function renderTop(s) {
   $("c-sky").textContent = d.light.toFixed(2); $("b-sky").style.width = Math.round(d.light * 100) + "%";
   $("c-bl").textContent = d.blockLight + " / 15"; $("b-bl").style.width = Math.round(d.blockLight / 15 * 100) + "%";
   $("c-weather").textContent = d.weather || "Clear";
+  renderHash(s.hash);
   $("c-clouds").textContent = `Clouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}`;
   if ($("raw").open) $("f3").textContent = s.text;
   spark($("s-fps"), hist.fps, "#7fbf4d", 60);
   spark($("s-queue"), hist.queue, "#79b8e8", 1);
 }
+
+// ---------------------------------------------------------------- world state hash (js/statehash.js, spec r15-24)
+// A fingerprint of the whole simulated world and of each part (edits, mobs, villages...), worked out every 10 s in the game. Two worlds
+// with the same hash at the same game day are in the same state; the parts say where two differ.
+function hashText(h) { return `State hash ${h.hash} at game day ${h.day}\n` + Object.entries(h.parts).map(([k, v]) => `  ${k} ${v}`).join("\n"); }
+function renderHash(h) {
+  $("c-hashcard").hidden = !h;
+  if (!h) return;
+  $("c-hash").textContent = h.hash;
+  $("c-hashday").textContent = `game day ${h.day.toFixed(4)}, ${h.ms} ms to work out`;
+  $("c-hashparts").innerHTML = Object.entries(h.parts).map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
+}
+$("c-hashcopy").addEventListener("click", () => { if (snap && snap.hash && navigator.clipboard) navigator.clipboard.writeText(hashText(snap.hash)).catch(() => {}); });
 
 function spark(cv, data, color, minMax) {
   const r = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;

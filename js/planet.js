@@ -11,7 +11,7 @@
 // unfolded continuation of the face past each edge, exactly as the flat view draws it. Stored things use canonical points
 // (inside a face's middle square). canon() maps a margin point to the canonical point it shows.
 //
-// The flat generators 1 to 3, on which every helper was the identity, were retired in spec r14-24: isPlanet() is always true.
+// The flat generators 1 to 3, on which every helper was the identity, were retired in spec r14-24; their branches were removed in idea-045.
 (() => {
 "use strict";
 const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
@@ -180,8 +180,6 @@ function fromLatLon(lat, lon, out) {
 // ---------- atlas coordinates ----------
 const W = 3 * N;                 // width of a face's atlas square
 const LOCAL = 4096;              // within this many blocks (through at most one edge) distance / toward are plain grid maths
-
-const isPlanet = () => true;   // (kept for callers: every world is the planet)
 
 // Atlas x/z of grid point (f, u, v), and back. face() is -1 outside every face square.
 const atlas = (f, u, v, out) => { out = out || {}; out.x = W * f + N + u; out.z = N + v; return out; };
@@ -411,7 +409,7 @@ const compassPoint = (deg, short) => (short ? SHORT : POINTS)[((Math.round(deg /
 BF.planet = {
   N, R, W, LOCAL, FACES, EDGE, UNFOLD,
   dir, fromDir, onFace, pos, wrap, frame, toGrid, gridDistance, gridToward, latLon, fromLatLon,
-  isPlanet, atlas, face, grid, canon, canonCell, turnVec, turnYaw, rel, distance, toward, recanon, latLonAt, atlasOfLatLon,
+  atlas, face, grid, canon, canonCell, turnVec, turnYaw, rel, distance, toward, recanon, latLonAt, atlasOfLatLon,
   inFrame, local, reframe,
   north, bearing, facingBearing, compassPoint,
 };

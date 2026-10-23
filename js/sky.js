@@ -13,15 +13,14 @@ const NIGHT_TOP = C("#02040b"), NIGHT_HOR = C("#0b1328"), SPACE = C("#05070f");
 const DUSK_HOR = C("#f08a50"), DUSK_GLOW = C("#ff7a3c"), DUSK_PINK = C("#d86a86");
 const CLOUD_DAY = C("#ffffff"), CLOUD_NIGHT = C("#1c2234"), CLOUD_DUSK = C("#f6b49a");
 
-// Cloud base for mile-high worlds (generator 3): above the regional ground (generator samples on two rings around the camera:
+// Cloud base: above the regional ground (generator samples on two rings around the camera:
 // the higher of average + 110 and upper quartile + 50), so you walk under clouds on the plains and on hills, and climb above
-// them only on real peaks. Teleports and big jumps re-probe at once and snap. Legacy worlds keep BF.H + 4.
+// them only on real peaks. Teleports and big jumps re-probe at once and snap.
 let cloudTarget = 196, regionGround = 64, cloudProbeT = 0, probeX = 1e9, probeZ = 1e9;
 const PROBE = [[0, 0]];
 for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; PROBE.push([Math.cos(a) * 96, Math.sin(a) * 96], [Math.cos(a + 0.39) * 256, Math.sin(a + 0.39) * 256]); }
 function updateCloudBase(dt) {
   const cam = BF.camera;
-  if (BF.H <= 192) { cloudTarget = sky.cloudBase = BF.H + 4; regionGround = BF.SEA; return; }
   cloudProbeT -= dt;
   const jump = cam ? Math.abs(cam.position.x - probeX) + Math.abs(cam.position.z - probeZ) : 0, moved = jump > 64;
   let snap = false;
@@ -321,11 +320,10 @@ function makeClouds() {
 
 // The sun's path on the planet: east to west in true directions (as 1.3's sun runs along +x, which is east at face 4's centre), so
 // it doesn't swing round when the player crosses an edge that turns the grid. One global clock: the sun's height is the same
-// everywhere at a given time of day (spec r14-20). Returns the yaw from the face's +x axis to local east (0 off the planet).
+// everywhere at a given time of day (spec r14-20). Returns the yaw from the face's +x axis to local east.
 const sf = {};
 function planetSunYaw(cam) {
   const P = BF.planet;
-  if (!P || !P.isPlanet()) return 0;
   const f = P.face(cam.position.x, cam.position.z);
   if (f < 0) return sunYaw;
   const N = P.N, u = cam.position.x - P.W * f - N, v = cam.position.z - N;
@@ -459,7 +457,7 @@ const sky = {
       let g = BF.world.heightAt(cam.position.x, cam.position.z);
       if (g < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) { try { g = BF.worldgen.heightAt(Math.floor(cam.position.x), Math.floor(cam.position.z)); } catch (_) { g = BF.SEA; } }   // before the first world exists
       let ref = Math.max(g, BF.SEA);
-      if (BF.H > 192) ref = Math.min(ref, regionGround);   // the regional ground level (see updateCloudBase): steep peaks drop away fast
+      ref = Math.min(ref, regionGround);   // the regional ground level (see updateCloudBase): steep peaks drop away fast
       above = Math.max(0, cam.position.y - ref - 24);
     }
     scene.fog.near = d * 0.5 * (1 - 0.45 * wr - 0.15 * wt) + above; scene.fog.far = d * 0.95 * (1 - 0.25 * wr - 0.1 * wt) + above;
@@ -491,10 +489,10 @@ const sky = {
     const cover = wanted + (1 - wanted) * wr;
     const rise = smooth(0.4, 0.9, vnoise(T / 2.1 + 31.7, cs + 1)) * CLOUD_RISE * (1 - 0.8 * wr);
     sky.cloudCover = cover; sky.cloudHeight = cloudY = sky.cloudBase + rise;
-    const onPlanet = !!(BF.planet && BF.planet.isPlanet() && BF.planet.face(cam.position.x, cam.position.z) >= 0);
-    if (onPlanet) planetClouds();
+    const onFace = BF.planet.face(cam.position.x, cam.position.z) >= 0;
+    if (onFace) planetClouds();
     clouds.userData.setCoverage(cover < 0.06 ? 1 : 0.96 - 0.62 * cover);
-    if (onPlanet) planetCloudSync(cam, dt);
+    if (onFace) planetCloudSync(cam, dt);
     else { planetFace = -1; clouds.userData.sync(cam.position.x, cam.position.z, cloudDrift, cloudY); }
     const cu = clouds.material.uniforms;
     cu.cam.value.set(cam.position.x - clouds.position.x, cam.position.z - clouds.position.z);

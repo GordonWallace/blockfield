@@ -37,7 +37,7 @@ const ck = (cx, cz) => cx + "," + cz;
 const r4 = n => Math.round(n * 1e4) / 1e4;
 const CQ = {};
 function chunkDays(x, z) {
-  if (BF.planet && BF.planet.canon) { BF.planet.canon(x, z, CQ); x = CQ.x; z = CQ.z; }   // a point seen across a face edge: the chunk it shows
+  BF.planet.canon(x, z, CQ); x = CQ.x; z = CQ.z;   // a point seen across a face edge: the chunk it shows
   const cs = BF.CS || 16, k = ck(Math.floor(x / cs), Math.floor(z / cs)), t0 = since.get(k);
   return r4((ctime.get(k) || 0) + (t0 != null ? Math.max(0, dayNow() - t0) : 0));
 }

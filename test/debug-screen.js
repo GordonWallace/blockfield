@@ -65,6 +65,10 @@ const start = async () => {
   ok('log entries ' + g.log + '/' + want.log, g.log >= want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nFace \d {2}u /.test((await got()).f3));
+  // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
+  const hs = await dbg.evaluate(() => ({ hash: document.getElementById('c-hash').textContent, parts: document.querySelectorAll('#c-hashparts .row').length }));
+  const gh = await game.evaluate(() => BF.stateHash.last && { hash: BF.stateHash.last.hash, parts: BF.stateHash.PARTS.length });
+  ok('state hash card shows the game\'s hash and its parts ' + JSON.stringify([hs, gh]), gh && /^[0-9a-f]{16}$/.test(hs.hash) && hs.hash === gh.hash && hs.parts === gh.parts);
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // server restart: a fresh server has no layout/log; the game must resend both
   srv.kill(); await new Promise(r => srv.once('exit', r));

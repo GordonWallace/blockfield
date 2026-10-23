@@ -127,7 +127,7 @@ const F3_COMBO = { KeyB: "tints", KeyC: "wedge", KeyR: "sphere" };
 addEventListener("keydown", e => {
   if (e.code === "F3") { e.preventDefault(); if (!e.repeat) { f3Held = true; f3Combo = false; } return; }
   const k = f3Held && F3_COMBO[e.code];
-  if (!k || !BF.view || !BF.planet || !BF.planet.isPlanet()) return;
+  if (!k || !BF.view) return;
   e.preventDefault(); e.stopImmediatePropagation();
   if (e.repeat) return;
   f3Combo = true;
@@ -172,8 +172,8 @@ function debugInfo() {
     shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
   };
 }
-// On the planet (generator 4): the canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas
-// x / z stay internal. Null off the planet.
+// The canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas
+// x / z stay internal. Null off the atlas.
 function planetInfo(p) {
   const C = BF.coords, c = C && C.here();
   if (!c) return null;
@@ -250,6 +250,7 @@ function frame(now) {
   updateDebug(now);
   BF.vlog.update(dt, showDebug);
   if (BF.villagerHover) BF.villagerHover.update(dt);
+  if (BF.stateHash) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js)
   if (BF.debugFeed) BF.debugFeed.update();
 }
 

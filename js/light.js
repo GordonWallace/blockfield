@@ -47,7 +47,7 @@ let NX = 0, NZ = 0;
 const NCELL = {};
 function stepTo(x, z, nx, nz) {
   NX = nx; NZ = nz;
-  if (((nx >> 4) === (x >> 4) && (nz >> 4) === (z >> 4)) || !world().isPlanet()) return chunkOf(nx, nz);
+  if (((nx >> 4) === (x >> 4) && (nz >> 4) === (z >> 4))) return chunkOf(nx, nz);
   const P = BF.planet, N = P.N, f = Math.floor(nx / P.W), u = nx - P.W * f - N, v = nz - N;
   if (u >= 0 && u < N && v >= 0 && v < N) return chunkOf(nx, nz);
   const cl = world().cell(nx, nz, NCELL);
