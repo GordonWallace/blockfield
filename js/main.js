@@ -248,6 +248,7 @@ function frame(now) {
   updateDebug(now);
   BF.vlog.update(dt, showDebug);
   if (BF.villagerHover) BF.villagerHover.update(dt);
+  if (BF.stateHash) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js)
   if (BF.debugFeed) BF.debugFeed.update();
 }
 
