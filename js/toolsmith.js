@@ -281,11 +281,12 @@ function doBuy(m, deal) {
 }
 
 // ---------------------------------------------------------------- the furnace: loading, waiting, emptying
-// Puts ore and (when the furnace has none left) fuel in. Returns false when the furnace cannot be used.
+// Puts ore and (when the furnace has none left) fuel in. Returns false when the furnace cannot be used, null while the request is in flight.
 function loadFurnace(m, job) {
   const f = job.furnace;
   job.outId = smeltsTo(job.rawId);
   const n = FU.load(m, job);
+  if (n === null) return null;   // the load request is in flight
   if (!n) return false;
   const st = INV().furnaceState(f.x, f.y, f.z);
   log("smelt", m, { ore: n + " " + BF.itemName(job.rawId), at: pk(f.x, f.y, f.z), fuelThere: !!(st.burn > 0 || st.slots[1]) });
@@ -296,11 +297,12 @@ function loadFurnace(m, job) {
 const topUpFuel = (m, job, st) => FU.topUp(m, job, st);
 // Takes the ingots out, and all the fuel left in the furnace (its own or not); also ore that did not get smelted when it gives up.
 function emptyFurnace(m, job, all) {
-  const f = job.furnace, taken = FU.empty(m, job, all);
-  if (!taken) return;
-  const got = taken.map(e => e.n + " " + BF.itemName(e.id));
-  log("collect", m, { got: got.join(", ") || "nothing", at: pk(f.x, f.y, f.z) });
-  vlog(m, "furnace", "took " + (got.join(" + ") || "nothing") + " out of the furnace at " + pk(f.x, f.y, f.z));
+  const f = job.furnace;
+  FU.empty(m, job, all, taken => {   // when the "furnace" request applies (js/furnaceuse.js)
+    const got = taken.map(e => e.n + " " + BF.itemName(e.id));
+    log("collect", m, { got: got.join(", ") || "nothing", at: pk(f.x, f.y, f.z) });
+    vlog(m, "furnace", "took " + (got.join(" + ") || "nothing") + " out of the furnace at " + pk(f.x, f.y, f.z));
+  });
 }
 
 // ---------------------------------------------------------------- placing a furnace it bought
@@ -441,13 +443,13 @@ function ai(m, dt, out) {
       return true;
     }
     // smelting: load, wait beside it (adding fuel when the furnace runs dry), then empty it
-    if (!deal.loaded) { if (!loadFurnace(m, deal)) return giveUp("furnace busy", fkey); S.stage = "smelt"; return true; }
+    if (!deal.loaded) { const r = loadFurnace(m, deal); if (r === null) return true; if (!r) return giveUp("furnace busy", fkey); S.stage = "smelt"; return true; }
     const st = INV().furnaceState(s.x, s.y, s.z);
     if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { FU.inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { emptyFurnace(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; vdone(m); return true; }   // done
-    topUpFuel(m, deal, st);
-    if (S.waitT > 15 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
+    const fueling = topUpFuel(m, deal, st);
+    if (S.waitT > 15 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && !fueling && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }

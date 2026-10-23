@@ -5,6 +5,7 @@
 // - One villager at a time: a villager that loaded a furnace holds it (inUse) while it is still at it (each module tells busyWhen how to see
 //   that: the toolsmith's stage "smelt", an egg cook's stage "cook"). A furnace is usable when its input and output slots are empty (or hold
 //   the same input / its product) and nobody else is using it.
+// - Loading, topping up and emptying are "furnace" requests (spec r15-22), applied in requester order with the furnace checked again.
 // - Loading: the input goes in up to a stack; fuel already in the furnace is burnt first, the villager adds its own only once that runs out,
 //   enough for what is left in the input slot. Emptying: the product and all the fuel left (its own or not), and, when it gives up, the
 //   input it put in.
@@ -102,46 +103,104 @@ function fuelFor(m, n, ok) {
 function fuelIn(f) { const st = INV().furnaceState(f.x, f.y, f.z); return st ? (st.burn > 0 ? 1 : 0) + (st.slots[1] ? st.slots[1].count * fuelWorth(st.slots[1].id) : 0) : 0; }
 
 // ---------------------------------------------------------------- loading, topping up, emptying
-// job: {furnace: {x,y,z}, rawId, outId, loaded?, ownFuel?, fuelOk?}. Puts up to `max` of rawId in (a stack at most), takes the furnace (inUse)
-// and adds fuel when the furnace has none left. Returns the number put in (0 when the furnace cannot be used).
+// As "furnace" requests (spec r15-22): the villager asks during its think and the queue applies the requests in requester order
+// (js/requests.js), so two villagers can't load one furnace or take the same output in one tick. target "x,y,z", data {op, raw, out, ...}:
+//   load  {max, fuels}: up to max of raw in (a stack at most), takes the furnace (inUse), then fuel as for "fuel"; -> {n, fuel: {id, n}?}
+//   fuel  {fuels}: its own fuel, only once the furnace has burnt what was in it (enough for the input still in the slot); -> {fuel}
+//   empty {all}: lets go of the furnace and takes the product and all the fuel left (its own or not), the input it put in when all; -> {got}
+// fuels: the fuel ids it may burn (job.fuelOk, worked out at the send). Each is checked again when applied: the furnace still stands and
+// is usable by it, it still holds what it puts in, and has room for what it takes out. Results reach the job before the next think.
+const pend = new WeakMap();   // job -> {op, req}: a request in flight
+const fuelsOf = (m, job) => [...new Set(m.inv.filter(s => s && isFuel(s.id) && (!job.fuelOk || job.fuelOk(s.id))).map(s => s.id))];
+const inFlight = (job, op) => { const p = pend.get(job); return p && p.op === op && p.req.result === undefined && (BF.rand ? BF.rand.tick - p.req.tick < 4 : true) ? p : null; };
+// Sends the load; returns null while it is in flight, then the number put in (0 when the furnace could not be used).
 function load(m, job, max) {
-  const f = job.furnace, T = TR().inv;
+  const f = job.furnace, p = pend.get(job);
+  if (p && p.op === "load") {
+    if (inFlight(job, "load")) return null;
+    pend.delete(job);
+    return p.req.result ? p.req.result.n || 0 : 0;
+  }
   if (!usable(m, f, job.rawId, job.outId)) return 0;
-  const st = INV().furnaceRecord(f.x, f.y, f.z);
-  inUse.set(pk(f.x, f.y, f.z), m);
-  const room = stackOf(job.rawId) - (st.slots[0] ? st.slots[0].count : 0), outRoom = stackOf(job.outId) - (st.slots[2] ? st.slots[2].count : 0);
-  const n = Math.min(count(m, job.rawId), max == null ? Infinity : max, room, outRoom);
-  if (n <= 0) return 0;
-  T.remove(m.inv, job.rawId, n);
-  if (st.slots[0]) st.slots[0].count += n; else st.slots[0] = { id: job.rawId, count: n };
-  job.loaded = (job.loaded || 0) + n;
-  topUp(m, job, st);
-  return n;
+  const req = BF.req.send("furnace", pk(f.x, f.y, f.z), { op: "load", raw: job.rawId, out: job.outId, max: max == null ? null : max, fuels: fuelsOf(m, job) }, m);
+  req.then(r => { if (r.ok) job.loaded = (job.loaded || 0) + r.n; if (r.fuel) job.ownFuel = (job.ownFuel || 0) + r.fuel.n; });
+  pend.set(job, { op: "load", req });
+  return null;
 }
-// Adds its own fuel only once the furnace has burnt what was in it: enough for the input still in the slot (or all it has, for part of it).
+// Asks to add its own fuel when the furnace st has run dry (nothing burning, no fuel, input waiting). Returns true while such a
+// request is in flight (the furnace will have fuel before the next think, if it had any to give).
 function topUp(m, job, st) {
-  if (st.burn > 0 || st.slots[1] || !st.slots[0]) return;
-  const need = st.slots[0].count - (st.cook > 0 ? st.cook / COOK : 0);
-  let fuel = fuelFor(m, need, job.fuelOk);
-  if (!fuel.length) { const any = m.inv.find(s => s && isFuel(s.id) && (!job.fuelOk || job.fuelOk(s.id))); if (any) fuel = [{ id: any.id, n: Math.min(any.count, 64) }]; }   // part of the input
-  if (!fuel.length) return;
-  const f = fuel[0];   // one fuel kind fits the slot
-  TR().inv.remove(m.inv, f.id, f.n);
-  st.slots[1] = { id: f.id, count: f.n };
-  job.ownFuel = (job.ownFuel || 0) + f.n;
+  if (inFlight(job, "fuel")) return true;
+  if (!st || st.burn > 0 || st.slots[1] || !st.slots[0]) return false;
+  const fuels = fuelsOf(m, job);
+  if (!fuels.length) return false;
+  const f = job.furnace, req = BF.req.send("furnace", pk(f.x, f.y, f.z), { op: "fuel", raw: job.rawId, fuels }, m);
+  req.then(r => { if (r.fuel) job.ownFuel = (job.ownFuel || 0) + r.fuel.n; });
+  pend.set(job, { op: "fuel", req });
+  return true;
 }
-// Lets go of the furnace and takes the product out, and all the fuel left in it (its own or not); also the input it put in when `all`
-// (it gives up). Returns [{id, n}] taken, or null when the furnace has no state (nothing to take).
-function empty(m, job, all) {
-  const f = job.furnace, st = INV().furnaceState(f.x, f.y, f.z), T = TR().inv;
-  inUse.delete(pk(f.x, f.y, f.z));
-  if (!st) return null;
-  const got = [];
-  const grab = i => { const s = st.slots[i]; if (!s) return; const left = T.add(m.inv, s.id, s.count); if (left < s.count) got.push({ id: s.id, n: s.count - left }); if (left > 0) s.count = left; else st.slots[i] = null; };
-  grab(2); grab(1);
-  if (all && st.slots[0] && st.slots[0].id === job.rawId) grab(0);
-  return got;
+// Lets go of the furnace and takes the product out, and all the fuel left in it; also the input it put in when `all` (it gives up).
+// done(got: [{id, n}]) when applied (not called when the furnace has no state or is gone). Inside direct() (a forced stop as its
+// village unloads: the villager is packed straight after) it happens at once.
+let now = 0;
+function empty(m, job, all, done) {
+  const f = job.furnace, data = { op: "empty", raw: job.rawId, all: !!all };
+  pend.delete(job);
+  if (now) { const r = applyFurnace(m, pk(f.x, f.y, f.z), data); if (r.ok && done) done(r.got); return; }
+  const req = BF.req.send("furnace", pk(f.x, f.y, f.z), data, m);
+  if (done) req.then(r => { if (r.ok) done(r.got); });
 }
+const direct = fn => { now++; try { return fn(); } finally { now--; } };
+// Its own fuel into the furnace st: enough for the input still in the slot (or all it has, for part of it), from fuels. -> {id, n} or null
+function addFuel(m, st, fuels) {
+  if (st.burn > 0 || st.slots[1] || !st.slots[0]) return null;
+  const ok = id => fuels.includes(id), need = st.slots[0].count - (st.cook > 0 ? st.cook / COOK : 0);
+  let fuel = fuelFor(m, need, ok);
+  if (!fuel.length) { const any = m.inv.find(s => s && isFuel(s.id) && ok(s.id)); if (any) fuel = [{ id: any.id, n: Math.min(any.count, 64) }]; }   // part of the input
+  if (!fuel.length) return null;
+  const e = fuel[0], n = TR().inv.remove(m.inv, e.id, e.n);   // one fuel kind fits the slot
+  if (!n) return null;
+  st.slots[1] = { id: e.id, count: n };
+  return { id: e.id, n };
+}
+function applyFurnace(m, key, d) {
+  const [x, y, z] = key.split(",").map(Number), T = TR().inv;
+  if (!m || m.removed || m.dead || !Array.isArray(m.inv)) return { ok: false, why: "requester gone" };
+  if (!BF.isFurnace(BF.world.getBlock(x, y, z))) { inUse.delete(key); return { ok: false, why: "gone" }; }
+  if (d.op === "empty") {
+    if (inUse.get(key) === m) inUse.delete(key);
+    const st = INV().furnaceState(x, y, z);
+    if (!st) return { ok: false, why: "empty" };
+    const got = [];
+    const grab = i => { const s = st.slots[i]; if (!s) return; const left = T.add(m.inv, s.id, s.count, s.wear); if (left < s.count) got.push({ id: s.id, n: s.count - left }); if (left > 0) s.count = left; else st.slots[i] = null; };
+    grab(2); grab(1);
+    if (d.all && st.slots[0] && st.slots[0].id === d.raw) grab(0);
+    return { ok: true, got };
+  }
+  const f = { x, y, z };
+  if (d.op === "fuel") {
+    const st = INV().furnaceState(x, y, z);
+    if (!st || !st.slots[0] || st.slots[0].id !== d.raw) return { ok: false, why: "changed" };
+    const fuel = addFuel(m, st, d.fuels || []);
+    return fuel ? { ok: true, fuel } : { ok: false, why: "no fuel needed" };
+  }
+  if (d.op !== "load") return { ok: false, why: "bad op" };
+  if (!usable(m, f, d.raw, d.out)) return { ok: false, why: "busy" };
+  const st = INV().furnaceRecord(x, y, z);
+  const room = stackOf(d.raw) - (st.slots[0] ? st.slots[0].count : 0), outRoom = stackOf(d.out) - (st.slots[2] ? st.slots[2].count : 0);
+  const n = T.remove(m.inv, d.raw, Math.max(0, Math.min(T.count(m.inv, d.raw), d.max == null ? Infinity : d.max, room, outRoom)));
+  if (n <= 0) return { ok: false, why: "nothing to load", n: 0 };
+  inUse.set(key, m);
+  if (st.slots[0]) st.slots[0].count += n; else st.slots[0] = { id: d.raw, count: n };
+  const fuel = addFuel(m, st, d.fuels || []);
+  return fuel ? { ok: true, n, fuel } : { ok: true, n };
+}
+// Game log: INFO "requests" when a villager lost a furnace to another one this tick (loaded first), or the furnace went.
+if (BF.req) BF.req.on("furnace", req => {
+  const m = BF.ids && BF.ids.get(req.from), r = applyFurnace(m, String(req.target), req.data || {});
+  if ((r.why === "busy" || r.why === "gone") && BF.glog) BF.glog.log("INFO", "requests", (m && BF.vlog ? BF.vlog.nameOf(m) : "A villager") + " could not " + req.data.op + " the furnace at " + req.target + ": " + (r.why === "busy" ? "another villager got to it first" : "it is gone"), { at: String(req.target).split(",").map(Number), village: m && m.village });
+  return r;
+});
 
 // ---------------------------------------------------------------- walking to a furnace / a seller
 // One step towards (tx, ty, tz) on a path of route kind `kind`: "arrived", "going" or "failed". near(x, y, z): the feet cells that count as there.
@@ -294,6 +353,6 @@ function doBuy(m, deal, opts) {
 
 BF.furnaceUse = {
   COOK, PER_COAL, PER_WOOD, furnaces, inUse, pk, hook, busyWhen, atFurnace, usable, near, reachOf,
-  isCoal, isLog, isPlanks, isFuel, fuelWorth, fuelFor, fuelIn, load, topUp, empty, travel, beside, canSell, restocked, offersFor, offersScan, offerTable, priceOf, findDeal, doBuy,
+  isCoal, isLog, isPlanks, isFuel, fuelWorth, fuelFor, fuelIn, load, topUp, empty, direct, travel, beside, canSell, restocked, offersFor, offersScan, offerTable, priceOf, findDeal, doBuy,
 };
 })();
