@@ -1092,19 +1092,24 @@ function desiredLevel(x, y, z, cur) {
   return best <= 7 ? best : 0;
 }
 
+// "x,y,z" cell keys as [x, y, z, key], sorted by x, then z, then y: the block ticks' fixed order (spec r15-17)
+function canonOrder(keys) {
+  const a = [];
+  for (const k of keys) { const p = k.split(","); a.push([+p[0], +p[1], +p[2], k]); }
+  return a.sort((p, q) => p[0] - q[0] || p[2] - q[2] || p[1] - q[1]);
+}
 function fluidTick() {
   const now = BF.simNow();
   if (now - fluidLast < FLUID_TICK) return;
   fluidLast = now;
   if (!fluidQ.size) return;
   const FLUID = BF.FLUID, REPL = BF.REPLACEABLE;
-  const batch = [...fluidQ];
+  const batch = canonOrder(fluidQ);   // in canonical cell order (spec r15-17), so the budget's cut doesn't depend on history
   fluidQ.clear();
   let budget = 3000;
   const changes = [];
-  for (const k of batch) {
+  for (const [x, y, z, k] of batch) {
     if (budget-- <= 0) { fluidQ.add(k); continue; }
-    const [x, y, z] = k.split(",").map(Number);
     if (!world.isLoaded(x, z)) continue;
     const id = world.getBlock(x, y, z);
     const cur = FLUID[id];
@@ -1134,8 +1139,7 @@ function growTick() {
   if (now - growLast < 1) return;
   const dt = Math.min(5, now - growLast);
   growLast = now;
-  for (const k of growing) {
-    const [x, y, z] = k.split(",").map(Number);
+  for (const [x, y, z, k] of canonOrder(growing)) {
     if (!world.isLoaded(x, z)) continue; // keeps waiting until its chunk is back
     const id = world.getBlock(x, y, z), b = BF.blocks[id];
     if (b && b.growsUp) { if (caneTick(x, y, z, id, b, dt)) growing.delete(k); continue; }
@@ -1163,8 +1167,25 @@ function caneTick(x, y, z, id, b, dt) {
   return false;
 }
 world.growingCount = () => growing.size;
-// Fluid spread and crop growth run on the simulation clock (BF.simNow), once per sim step, so fast-forward (js/timewarp.js) speeds them up too.
-world.tickSim = () => { fluidTick(); growTick(); };
+// The rest of each simulation tick (spec r15-17, js/requests.js), after the sky, mobs, drops, boats and furnaces:
+// - think hooks (world.onThink: villages, their stats and economy, foresters), the end of the think phase;
+// - apply: the tick's requests (BF.req.apply);
+// - block ticks (world.onBlockTick: fluid spread, crop growth, farmland, grass), in registration order, each in canonical cell order;
+// - deliver: the requests' results.
+// All on the simulation clock (BF.simNow), once per tick, so fast-forward (js/timewarp.js) speeds them up too.
+const thinkHooks = [], blockHooks = [fluidTick, growTick];
+world.onThink = fn => { thinkHooks.push(fn); };
+world.onBlockTick = fn => { blockHooks.push(fn); };
+function blockTicks() { for (const f of blockHooks) f(); }
+world.tickSim = () => {
+  for (const f of thinkHooks) f();
+  const R = BF.req;
+  if (!R) { blockTicks(); return; }
+  R.apply();
+  R.blocks(blockTicks);
+  R.deliver();
+  R.endTick();
+};
 
 // ---------- raycast ----------
 // DDA voxel raycast. Returns {x,y,z,id,normal:[nx,ny,nz],dist} for the first block where

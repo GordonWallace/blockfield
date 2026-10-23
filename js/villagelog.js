@@ -220,8 +220,8 @@ BF.vlog = {
     panelEl = document.getElementById("vlog");
     hook();
     // the population history and the Economy view's scans run on the game step, so they see the same moments at any speed (spec r15-16)
-    const W = BF.world, prev = W.tickSim;
-    if (W && prev) W.tickSim = () => { prev(); if (BF.vstats) BF.vstats.update(); if (BF.econ) BF.econ.update(); };
+    const W = BF.world;
+    if (W && W.onThink) W.onThink(() => { if (BF.vstats) BF.vstats.update(); if (BF.econ) BF.econ.update(); });   // (js/world.js tickSim)
   },
   update(dt, on) {
     hook();

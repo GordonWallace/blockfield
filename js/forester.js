@@ -168,7 +168,7 @@ function growTick() {
 }
 {
   const world = BF.world;
-  if (world && world.tickSim) { const prev = world.tickSim; world.tickSim = () => { prev(); growTick(); }; }
+  if (world && world.onThink) world.onThink(growTick);   // think (the saws, and saplings as direct writes until r15-18: js/world.js tickSim)
 }
 
 // ---------------------------------------------------------------- trees (felling)
