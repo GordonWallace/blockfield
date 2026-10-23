@@ -41,7 +41,7 @@ const LINES = [
   ["world.js", "const t0 = performance.now();\n  let gi = 0, mi = 0;", "chunk generation and meshing budget (what is drawn; villagers wait for unloaded chunks)"],
   ["world.js", "while (performance.now() - t0 < budgetMs)", "chunk generation and meshing budget (above)"],
   ["mobs.js", "const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0;", "villager AI ms for the debug screen only (the force-unload limit counts updates, aiWork)"],
-  ["villagesim.js", "check(px, pz, realClock, performance.now() / 1000)", "re-check on real time only while the world doesn't step (0x, paused)"],
+  ["villagesim.js", "check(px, pz, realClock, performance.now() / 1000)", "re-check on real time only while the world doesn't step (0x, paused), or for a new pin before the next step"],
   ["villagelog.js", "const t = performance.now();                  // wall clock", "village panel redraw"],
   ["weather.js", "const t0 = performance.now();\n    if (!points) init();", "weather ms for the debug line"],
   ["weather.js", "const ms = performance.now() - t0;", "weather ms for the debug line"],
