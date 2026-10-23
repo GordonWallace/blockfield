@@ -103,19 +103,25 @@ const inRects = (rects, x, z) => rects.some(r => x >= r[0] && x <= r[2] && z >= 
 function scanBeds(rec) {
   const CS = BF.CS, W = BF.world, rects = areaRects(rec), F = footTable();
   const cache = rec.bedCache || (rec.bedCache = new Map());
-  const chunks = new Set();
+  const chunks = new Set(), sig = rects.join(";");
   for (const r of rects) for (let cx = Math.floor(r[0] / CS); cx <= Math.floor(r[2] / CS); cx++)
     for (let cz = Math.floor(r[1] / CS); cz <= Math.floor(r[3] / CS); cz++) chunks.add(cx + "," + cz);
   const beds = [];
   for (const ck of chunks) {
     const c = W.chunks && W.chunks.get(ck);
     if (c && c.secs) {
-      const found = [];
-      W.scanFlagged(c, F, (lx, y, lz, id) => {
-        const x = c.cx * CS + lx, z = c.cz * CS + lz;
-        if (inRects(rects, x, z)) found.push({ x, y, z, f: F[id] });
-      }, -1, BF.MIN_Y + 1);
-      cache.set(ck, found);
+      // a chunk with no block changed since its last scan, for the same area, has the same beds (chunk.ver, js/world.js; r15-07)
+      const prev = cache.get(ck), same = prev && prev.c === c && prev.ver === c.ver && prev.sig === sig;
+      let found = same ? prev : null;
+      if (!found || (BF.dcmp && BF.dcmp.on())) {
+        const scan = [];
+        W.scanFlagged(c, F, (lx, y, lz, id) => {
+          const x = c.cx * CS + lx, z = c.cz * CS + lz;
+          if (inRects(rects, x, z)) scan.push({ x, y, z, f: F[id] });
+        }, -1, BF.MIN_Y + 1);
+        if (found) BF.dcmp.check("village beds", scan, found.slice(), [c.cx * CS, 0, c.cz * CS]);
+        else { found = scan; found.c = c; found.ver = c.ver; found.sig = sig; cache.set(ck, found); }
+      }
       beds.push(...found);
     } else if (cache.has(ck)) beds.push(...cache.get(ck));
     else {
@@ -224,13 +230,21 @@ function encounters(rec) {
   const vs = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && !m.child);
   if (vs.length < 2) return;
   const el = vs.map(eligible);
+  // (r15-07) a pair with someone not eligible only forgets its encounter: no key or distance is worked out unless one is remembered
+  const nearIds = new Set(), cmp = BF.dcmp && BF.dcmp.on();
+  for (const k of S.near) for (const id of k.split(":")) nearIds.add(id);
   for (let i = 0; i < vs.length; i++) for (let j = i + 1; j < vs.length; j++) {
+    if (!el[i] || !el[j]) {
+      if (nearIds.size && nearIds.has(String(mid(vs[i]))) && nearIds.has(String(mid(vs[j])))) S.near.delete(pairKey(vs[i], vs[j]));
+      if (cmp) BF.dcmp.check("breeding encounters", false, S.near.has(pairKey(vs[i], vs[j])));   // the old loop always forgot it
+      continue;
+    }
     const a = vs[i], b = vs[j], k = pairKey(a, b);
     const close = a.position.distanceTo(b.position) <= RADIUS;
     const cond = close && el[i] && el[j] && bedsOK(rec);
     if (!cond) { if (!close || !el[i] || !el[j]) S.near.delete(k); continue; }
     if (S.near.has(k)) continue;                 // already rolled this encounter
-    S.near.add(k);
+    S.near.add(k); for (const id of k.split(":")) nearIds.add(id);
     S.stats.encounters++; S.stats.rolls++;
     if (Math.random() < CHANCE) { if (!startLove(a, b, rec)) { S.near.delete(k); continue; } S.stats.successes++; el[i] = el[j] = false; }
   }

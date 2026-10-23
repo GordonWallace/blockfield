@@ -53,13 +53,14 @@ function rgbOf(id) {
 }
 const WATER = [63, 118, 228];
 // Top visible block of a column: {id, y} or {water: true, depth, bottom, y}; null when the chunk is not loaded.
+// Explorers sample the same columns over and over while they walk (r15-07): each chunk keeps the answers for its columns until a block
+// in that column changes (chunk.colVer, js/world.js), and the scan skips the all-air sections above the ground. columnScan is the old full scan,
+// kept for the decision comparison mode (js/decisioncompare.js).
 const CELL = {};
-function column(wx, wz) {
-  const cl = BF.world.cell(wx, wz, CELL), c = cl.c;   // (through a face edge on the planet)
-  if (!c) return null;
-  const lx = cl.lx, lz = cl.lz;
-  const W = BF.world, MIN_Y = BF.MIN_Y;
+function columnScan(c, lx, lz, skipAir) {
+  const W = BF.world;
   for (let y = c.y1 - 1; y >= c.y0; y--) {
+    if (skipAir && c.secs[(y >> 4) - c.lo] === 0) { y &= ~15; continue; }   // a whole section of air: on to the one below
     const id = W.chunkBlock(c, lx, y, lz);
     if (!id) continue;
     if (BF.FLUID[id]) {
@@ -71,6 +72,20 @@ function column(wx, wz) {
     return { id, y };
   }
   return { id: BF.B.stone, y: c.y0 - 1 };
+}
+function column(wx, wz) {
+  const cl = BF.world.cell(wx, wz, CELL), c = cl.c;   // (through a face edge on the planet)
+  if (!c) return null;
+  const i = cl.lz * 16 + cl.lx;
+  const M = c.mapCols || (c.mapCols = { v: new Uint32Array(256), k: new Uint8Array(256), y: new Int16Array(256), id: new Uint16Array(256), d: new Uint16Array(256) });
+  let r;
+  if (M.k[i] && M.v[i] === c.colVer[i]) r = M.k[i] === 2 ? { water: true, depth: M.d[i], bottom: M.id[i], y: M.y[i] } : { id: M.id[i], y: M.y[i] };
+  else {
+    r = columnScan(c, cl.lx, cl.lz, true);
+    M.v[i] = c.colVer[i]; M.k[i] = r.water ? 2 : 1; M.y[i] = r.y; M.id[i] = r.water ? r.bottom : r.id; M.d[i] = r.water ? r.depth : 0;
+  }
+  if (BF.dcmp && BF.dcmp.on()) BF.dcmp.check("map column", columnScan(c, cl.lx, cl.lz, false), r, [cl.x, r.y, cl.z]);
+  return r;
 }
 function pack(r, g, b) {
   const v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
