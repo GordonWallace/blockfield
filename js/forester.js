@@ -419,7 +419,7 @@ function findSpot(m, at) {
 // The log bases (a log with no log below it) of column (x, z), bottom up, or null when its chunk is not loaded. Each chunk keeps
 // the lists of its columns until a block in that column changes (chunk.colVer, js/world.js), so findTree reads a list per column instead of
 // a block per cell (r15-07; BF.debug.decisionCompare checks them against the old scan).
-const LCELL = {};
+const LCELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function logBases(x, z) {
   const cl = W().cell(x, z, LCELL), c = cl.c;
   if (!c) return null;
