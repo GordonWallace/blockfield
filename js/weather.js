@@ -431,9 +431,9 @@ weather.strikeAt = function (x, y, z) {
   weather.lastStrike = { x: at.x, y, z: at.z, dist };
   // small damage only right next to the strike
   if (dist < 2.5 && BF.player.damage) BF.player.damage(5, null, "lightning");
-  if (BF.mobs && BF.mobs.list) for (const m of BF.mobs.list) {
+  if (BF.mobs && BF.regions) for (const m of BF.regions.mobsAround(at.x, at.z, 3.5, m => !m.dead && near(m.position) < 2.5, { local: true, label: "lightning" })) {   // (the mobs at the strike, r15-32)
     if (m.dead || m.removed) continue;
-    if (near(m.position) < 2.5) BF.mobs.hit(m, 5, null);
+    BF.mobs.hit(m, 5, null);
   }
   BF.emit("lightning", { x: at.x, y, z: at.z, dist });
 };

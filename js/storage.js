@@ -219,7 +219,7 @@ function chestSpot(m) {
   for (const [x, z] of cells) {
     if (near(x, z, id => B[id] && (B[id].door || B[id].bed || B[id].gate))) continue;
     if (Math.abs(x - H.doorX) + Math.abs(z - H.doorZ) <= 2) continue;
-    if (BF.mobs.list.some(o => !o.removed && Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2)) continue;
+    if (BF.regions.mobsInBox(x, z, x + 1, z + 1, o => Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2, { label: "storage chest spot" }).length) continue;
     const walls = BF.DIRS.filter(([dx, dz]) => S[get(x + dx, y, z + dz)]).length;
     if (!walls || !connected(x, z)) continue;
     scored.push({ x, y, z, walls });
@@ -244,7 +244,7 @@ function deliver(f, m, spot) {
   const o = (f.trades || []).find(x => x.sell.id === I.chest && x.sell.n === 1 && x.buy.length === 1 && x.buy[0].id === I.emerald);   // its chest offer: the player can buy one too
   if (!o || !m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || T.blockReason(f, o) || count(m.inv, I.emerald) < o.buy[0].n) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.5 + (o.halfWidth || 0.3) && Math.abs(o.position.z - spot.z - 0.5) < 0.5 + (o.halfWidth || 0.3) && o.position.y < spot.y + 1 && o.position.y + (o.height || 1.8) > spot.y;
-  if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;   // somebody is standing there
+  if (BF.regions.mobsInBox(spot.x - 2, spot.z - 2, spot.x + 3, spot.z + 3, o => !o.dead && inCell(o), { label: "storage chest place" }).length || inCell(BF.player)) return false;   // somebody is standing there
   if (!W.setBlock(spot.x, spot.y, spot.z, BF.chestId(BF.openFacing(spot, f.position)))) return false;
   T.exchange(f, o); T.inv.remove(m.inv, I.emerald, o.buy[0].n);
   const c = INV().chestRecord(spot.x, spot.y, spot.z);

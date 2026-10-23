@@ -1692,7 +1692,7 @@ function tick(dt) {
   if (!agesHooked && BF.on) { agesHooked = true; BF.on("newWorld", () => villageAges.clear()); }
   pass++;
   const scanned = new Set();
-  for (const m of BF.mobs.list) {
+  for (const m of BF.regions.ofType("villager")) {   // (the villagers only, r15-32)
     if (m.type !== "villager" || m.dead || m.removed || !Array.isArray(m.inv)) continue;
     try { FD().digest(m, now); } catch (e) { console.error(e); }
     ageStep(m, now);

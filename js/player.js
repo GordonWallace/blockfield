@@ -1235,15 +1235,12 @@ function boxOverlapsCell(px, py, pz, hw, h, x, y, z) {
 }
 function cellBlockedByEntity(x, y, z) {
   if (boxOverlapsCell(pos.x, pos.y, pos.z, HW, HEIGHT, x, y, z)) return true;   // full box: no block may be placed inside the player
-  const list = (BF.mobs && BF.mobs.list) || [];
-  for (const m of list) {
-    if (!m || m.dead) continue;
-    const p = m.position || m.pos; if (!p) continue;
-    const hw = m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4;
+  return BF.regions.mobsInBox(x - 2, z - 2, x + 3, z + 3, m => {   // (the mobs around the cell, r15-32)
+    if (m.dead) return false;
+    const p = m.position, hw = m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4;
     const h = m.height != null ? m.height : m.h != null ? m.h : 1.6;
-    if (boxOverlapsCell(p.x, p.y, p.z, hw, h, x, y, z)) return true;
-  }
-  return false;
+    return boxOverlapsCell(p.x, p.y, p.z, hw, h, x, y, z);
+  }, { label: "player place" }).length > 0;
 }
 
 // Short message above the hotbar (villager trades etc).
@@ -1292,12 +1289,7 @@ function placeMulti(kind, x, y, z, wood) {
 function overlapsEntityBoxes(x, y, z, boxes) {
   const hits = (px, py, pz, hw, h) => boxes.some(b => px + hw > x + b[0] / 16 && px - hw < x + b[3] / 16 && py + h > y + b[1] / 16 && py < y + b[4] / 16 && pz + hw > z + b[2] / 16 && pz - hw < z + b[5] / 16);
   if (hits(pos.x, pos.y, pos.z, HW - 0.01, HEIGHT)) return true;
-  for (const m of (BF.mobs && BF.mobs.list) || []) {
-    if (!m || m.dead) continue;
-    const p = m.position || m.pos; if (!p) continue;
-    if (hits(p.x, p.y, p.z, m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4, m.height != null ? m.height : m.h != null ? m.h : 1.6)) return true;
-  }
-  return false;
+  return BF.regions.mobsInBox(x - 2, z - 2, x + 3, z + 3, m => !m.dead && hits(m.position.x, m.position.y, m.position.z, m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4, m.height != null ? m.height : m.h != null ? m.h : 1.6), { label: "player place shaped" }).length > 0;
 }
 function placeShaped(sel, it) {
   const W = BF.world, sh = it.shape, fam = BF.SHAPES[sh.base], t = target, tb = BF.blocks[t.id];
@@ -1367,7 +1359,7 @@ function trySleep(t) {
   if (falling) return;
   if (!BF.sky || !(BF.sky.isNight() || (BF.sky.stormy && BF.sky.stormy()))) { actionBar("You can only sleep at night"); return; }
   const b = BF.blocks[t.id], tent = !!b.tent;
-  const near = !tent && ((BF.mobs && BF.mobs.list) || []).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
+  const near = !tent && BF.regions.mobsAround(pos.x, pos.z, 8, m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8, { label: "player sleep" }).length > 0;
   if (near) { actionBar("You may not rest now, there are monsters nearby"); return; }
   let foot, sy = 0.5625;
   if (tent) { const o = BF.tents.originOf(t.x, t.y, t.z, t.id); foot = [o.x, o.y, o.z]; sy = 0.125; }

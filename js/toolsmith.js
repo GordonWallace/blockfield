@@ -325,7 +325,7 @@ function furnaceSpot(m) {
         const g = W.getBlock(x, y - 1, z), here = W.getBlock(x, y, z);
         if (!S[g] || here !== 0 || W.getBlock(x, y + 1, z) !== 0) continue;
         if (B[g] && (B[g].name === "dirt_path" || B[g].name === "farmland" || B[g].name === "farmland_dry" || B[g].fluid)) break;   // not on paths or fields
-        if (BF.mobs.list.some(o => !o.removed && Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2)) break;
+        if (BF.regions.mobsInBox(x, z, x + 1, z + 1, o => Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2, { label: "toolsmith furnace spot" }).length) break;
         const d = Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) + Math.abs(y - c.y);
         if (d < bd) { bd = d; best = { x, y, z }; }
         break;
@@ -338,7 +338,7 @@ function placeFurnace(m, spot) {
   const W = BF.world;
   if (count(m, BF.B.furnace) < 1 || W.getBlock(spot.x, spot.y, spot.z) !== 0) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.8 && Math.abs(o.position.z - spot.z - 0.5) < 0.8 && o.position.y < spot.y + 1 && o.position.y + 1.8 > spot.y;
-  if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;
+  if (BF.regions.mobsInBox(spot.x - 1, spot.z - 1, spot.x + 2, spot.z + 2, o => !o.dead && inCell(o), { label: "toolsmith furnace place" }).length || inCell(BF.player)) return false;
   const id = BF.furnaceId(BF.openFacing(spot, m.position));
   if (!W.setBlock(spot.x, spot.y, spot.z, id)) return false;
   TR().inv.remove(m.inv, BF.B.furnace, 1);

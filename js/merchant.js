@@ -334,7 +334,7 @@ function noteTrip(home, dest, items, ems) {
 }
 function routesView() {
   const cut = dayNow() - 7, onRoad = new Map();
-  for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && !m.dead && m.mc && m.mc.trip) {
+  for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && !m.dead && m.mc && m.mc.trip) {
     const k = routeKey(m.mc.trip.home, m.mc.trip.dest);
     onRoad.set(k, (onRoad.get(k) || []).concat([{ who: BF.vlog ? BF.vlog.nameOf(m) : "", stage: m.mc.stage }]));
   }
@@ -589,7 +589,7 @@ function tick(dt) {
   if ((summT -= 5) <= 0) { summT = 60; for (const rec of BF.mobs.villages.values()) remember(rec); }
   else for (const rec of BF.mobs.villages.values()) if (!market.has(rec.key)) remember(rec);   // a village seen for the first time is written down at once
   const now = dayNow(), ids = new Set();
-  for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && !m.dead && !m.removed && m.mc && m.mc.trip) ids.add(m.mc.trip.id);
+  for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && !m.dead && !m.removed && m.mc && m.mc.trip) ids.add(m.mc.trip.id);
   for (const id of [...BF.villageSim.pins().keys()]) {
     if (ids.has(id)) { lastSeen.set(id, now); continue; }
     if (!lastSeen.has(id)) lastSeen.set(id, now);

@@ -343,7 +343,10 @@ function ownerLabel(c) {
   if (!c || !c.owner) return "Unclaimed";
   if (c.owner === "player") return "Yours";
   let job = "";
-  if (BF.mobs) for (const m of BF.mobs.list) if (m.type === "villager" && !m.dead && m.village && m.slot && m.village.key + "#" + m.slot.idx === c.owner) { job = m.profession; break; }
+  if (BF.mobs && BF.regions) {   // (the owner's village's own villagers, r15-32)
+    const i = c.owner.lastIndexOf("#"), o = i > 0 ? BF.regions.villageMobs(BF.mobs.villages.get(c.owner.slice(0, i)), m => m.type === "villager" && !m.dead && m.slot && m.village.key + "#" + m.slot.idx === c.owner)[0] : null;
+    if (o) job = o.profession;
+  }
   const pretty = s => String(s).replace(/_/g, " ").replace(/\b\w/g, ch => ch.toUpperCase());
   return "Owned by " + (c.ownerName || "a villager") + (job ? " (" + pretty(job) + ")" : "");
 }

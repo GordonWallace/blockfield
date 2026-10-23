@@ -134,9 +134,7 @@ function updateLabels(on) {
   const pp = BF.player && BF.player.position;
   if (!on || !pp) { for (const [m, l] of [...labels]) dropLabel(m, l); return; }
   const seen = new Set();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "villager" || m.dead || m.removed || !m.position) continue;
-    if (BF.planet.distance(m.position, pp) > LABEL_R) continue;
+  for (const m of BF.regions.mobsAround(pp.x, pp.z, LABEL_R + 1, m => m.type === "villager" && !m.dead && !!m.position && BF.planet.distance(m.position, pp) <= LABEL_R, { local: true, label: "villagelog labels" })) {   // (r15-32)
     seen.add(m);
     const prof = m.child ? "Child" : pretty(m.profession), key = nameOf(m) + "|" + prof;
     let l = labels.get(m);

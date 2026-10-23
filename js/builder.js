@@ -310,8 +310,7 @@ function occupiedBox(m, r) {   // player or another mob inside the rect (x0, z0,
   const hit = p => p.x >= r[0] - 2 && p.x <= r[2] + 3 && p.z >= r[1] - 2 && p.z <= r[3] + 3;
   const P = BF.player;
   if (P && P.position && !P.dead && hit(P.position)) return true;
-  for (const o of BF.mobs.list) if (o !== m && !o.dead && !o.removed && hit(o.position)) return true;
-  return false;
+  return BF.regions.mobsInBox(r[0] - 2, r[1] - 2, r[2] + 3, r[3] + 3, o => o !== m && !o.dead && hit(o.position), { label: "builder site" }).length > 0;
 }
 function findSite(m, type, opts, haveFound, wood) {
   const R = m.village, wg = R.wg, w = W(), built = builtOf(R);
@@ -378,12 +377,8 @@ function stableWeight(R, has) {
 // Wild animals of a kind within ANIMAL_R blocks of the village centre: loaded, alive, and in nobody's pen (tamed horses are not wild).
 function wildCount(R, kind) {
   if (kind === "horse") return BF.horses && BF.horses.wildCount ? BF.horses.wildCount(R.x, R.z, ANIMAL_R) : 0;
-  let n = 0;
-  for (const o of BF.mobs.list) {
-    if (o.type !== kind || o.dead || o.removed || o.pen || o.pasture || o.coop || o.sty || o.ledBy) continue;
-    if (Math.hypot(o.position.x - R.x, o.position.z - R.z) <= ANIMAL_R && ++n >= ANIMAL_MIN) break;
-  }
-  return n;
+  const n = BF.regions.mobsAround(R.x, R.z, ANIMAL_R, o => o.type === kind && !o.dead && !o.pen && !o.pasture && !o.coop && !o.sty && !o.ledBy && Math.hypot(o.position.x - R.x, o.position.z - R.z) <= ANIMAL_R, { label: "builder wild animals" }).length;
+  return Math.min(n, ANIMAL_MIN);
 }
 // How many of each food jobsite the village has, counted by their jobsite blocks (composter, loom, milk churn, nesting box, feed trough) in
 // the village and the ground its builders build on, so a farm or paddock the player built counts too; plus the ones being built.
@@ -747,8 +742,7 @@ function otherInside(m, c) {   // the player or another mob stands where the blo
   const hit = (p, hw, h) => p.x + hw > c.x && p.x - hw < c.x + 1 && p.z + hw > c.z && p.z - hw < c.z + 1 && p.y < c.y + 1 && p.y + h > c.y;
   const P = BF.player;
   if (P && P.position && !P.dead && hit(P.position, 0.3, 1.8)) return true;
-  for (const o of BF.mobs.list) if (o !== m && !o.dead && !o.removed && hit(o.position, o.halfWidth, o.height)) return true;
-  return false;
+  return BF.regions.mobsInBox(c.x - 2, c.z - 2, c.x + 3, c.z + 3, o => o !== m && !o.dead && hit(o.position, o.halfWidth, o.height), { label: "builder block" }).length > 0;
 }
 function spotsFor(m, bs, c, e) {
   const N = nav(), [fx, fy, fz] = N.feetCell(m), bp = bpOf(e), out = [];
