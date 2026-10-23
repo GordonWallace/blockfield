@@ -110,7 +110,7 @@ module.exports = async (pg) => {
       const out = { onB: onB(d.pos), k: +kOf(d.pos).toFixed(1) };
       PL.teleport(d.pos.x, y, d.pos.z);
       const n0 = BF.inventory.count ? BF.inventory.count(BF.I.cobblestone) : null;
-      for (let i = 0; i < 20; i++) { BF.drops.update(0.05); BF.req.apply(); BF.req.deliver(); }   // the pickup is a request (spec r15-22): applied as a tick would
+      for (let i = 0; i < 20; i++) { BF.drops.update(0.05); BF.req.apply(); BF.req.deliver(); }   // picking up is a "pickup" request (spec r15-22): applied here, as a tick would
       out.picked = !BF.drops.list.includes(d);
       return out;
     }, [y]);
