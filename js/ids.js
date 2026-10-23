@@ -101,7 +101,7 @@ function place(proto, name, field, keyOf) {
 //   places: home (a house), bed, homeBed, slot (a roster slot), bredEntry (a newborn's entry), pen, sty, coop, pasture, exit (any of the
 //   four, by its kind) (-> homeKey, ...);
 //   lookAt: a mob (lookAtId) or plain data ("player", {yaw, pitch}, {position}) kept as it is (lookV).
-// refs(o) gives a plain object this prototype, turning any of those fields it already has into ids.
+// refs(o) returns a copy of a plain object with this prototype, any of those fields it had turned into ids.
 const Refs = {};
 const ENT = ["mob", "other", "seller", "goalSeller", "vTarget", "mate", "love", "attacker", "ledBy", "tradingWith", "riding"];
 for (const n of ENT) link(Refs, n, n + "Id");
@@ -126,27 +126,26 @@ Object.defineProperty(Refs, "lookAt", {
   enumerable: false, configurable: true,
 });
 const NAMES = ENT.concat(["village", "penVillage", "home", "bed", "homeBed", "slot", "bredEntry", "pen", "sty", "coop", "pasture", "exit", "lookAt"]);
+// (A copy, not the object itself: deleting fields or swapping the prototype of a live object would put it in V8's slow dictionary mode.)
+function copyOnto(proto, o) {
+  const n = Object.create(proto);
+  for (const k of Object.keys(o)) n[k] = o[k];   // through the accessors: links become ids
+  return n;
+}
 function refs(o) {
   if (!o || typeof o !== "object" || Array.isArray(o)) return o;
   const p = Object.getPrototypeOf(o);
-  if (p === Refs) return o;
-  if (p !== Object.prototype && p !== null) return o;
-  const had = [];
-  for (const n of NAMES) if (Object.prototype.hasOwnProperty.call(o, n)) { had.push(n, o[n]); delete o[n]; }
-  Object.setPrototypeOf(o, Refs);
-  for (let i = 0; i < had.length; i += 2) o[had[i]] = had[i + 1];
-  return o;
+  if (p === Refs || (p !== Object.prototype && p !== null)) return o;
+  return copyOnto(Refs, o);
 }
 // Records that point at a mob only through o.mob and keep other fields of these names as plain data (a horse's record: its pen is a box).
 const MobRef = {};
 link(MobRef, "mob", "mobId");
 function mobRef(o) {
   if (!o || typeof o !== "object" || Object.getPrototypeOf(o) === MobRef) return o;
-  const own = Object.prototype.hasOwnProperty.call(o, "mob"), m = own ? o.mob : undefined;
-  if (own) delete o.mob;
-  Object.setPrototypeOf(o, MobRef);
-  o.mob = m === undefined ? null : m;
-  return o;
+  const n = copyOnto(MobRef, o);
+  if (n.mobId === undefined) n.mobId = null;
+  return n;
 }
 const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototypeOf(o) : null; return p === Refs || p === MobRef; };
 
