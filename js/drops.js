@@ -50,6 +50,7 @@ const drops = {
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
     byKey.set(d.key, d);
+    if (BF.regions) BF.regions.dropAdded(d);   // the region index (js/regions.js)
     return d;
   },
 
@@ -70,6 +71,7 @@ const drops = {
     const i = drops.list.indexOf(d);
     if (i >= 0) drops.list.splice(i, 1);
     byKey.delete(d.key);
+    if (BF.regions) BF.regions.dropRemoved(d);
     if (d.sprite) scene.remove(d.sprite);
   },
 
