@@ -2872,7 +2872,10 @@ BF.mobs = {
     if (!scene) return;
     dt = Math.min(dt, 0.05);
     planBudget = 2; // A* searches per frame
+    // the villager-seconds meter (js/perf.js): each lap charges the time since the last to a category; nothing while it's off
+    const PF = BF.perf, PC = PF.C, pon = PF.on;
     buildSepGrid();
+    PF.lap(PC.other);
     // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
@@ -2889,29 +2892,38 @@ BF.mobs = {
         } else m._farT = null;
       }
       try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
+      if (pon) PF.lap(PF.mobCat(m));
     }
     updateArrows(dt);
     updatePuffs(dt);
+    PF.lap(PC.other);
     if (BF.builder) BF.builder.tick(dt);
     if (BF.villageLife) BF.villageLife.tick(dt);   // villager meals, farm scans (js/villagelife.js)
     if (BF.jobs) BF.jobs.tick(dt);   // jobsite validation, unemployed villagers look for work (js/jobs.js)
     if (BF.breeding) BF.breeding.tick(dt);   // encounters, hearts, children (js/breeding.js)
     if (BF.storage) BF.storage.tick(dt);   // chest owners: empty chests and those of dead villagers are freed (js/storage.js)
+    PF.lap(PC.villagers);
     if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
     if (BF.horses) BF.horses.tick(dt);   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
     if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
     if (BF.poultry) BF.poultry.tick(dt);   // chickens growing up, laying, coop stock (js/poultry.js)
     if (BF.cowherd) BF.cowherd.tick(dt);   // calves growing up, pasture stock (js/cowherd.js)
     if (BF.pigFarmer) BF.pigFarmer.tick(dt);   // piglets growing up, sty stock (js/pigfarmer.js)
+    PF.lap(PC.vanimals);
     if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
+    PF.lap(PC.villagers);
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
+    PF.lap(PC.monsters);
     if (BF.wildlife) BF.wildlife.update(dt);
+    PF.lap(PC.wild);
     try { updateVillages(dt); restockVillagers(dt); if (BF.merchant) BF.merchant.tick(dt); } catch (e) { console.error(e); }
+    PF.lap(PC.villagers);
     despawn(dt);
     aiTick(dt);
     if (BF.mobSave) BF.mobSave.update(dt);
+    PF.lap(PC.other);
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
   raycast(origin, dir, maxDist, skip) {
