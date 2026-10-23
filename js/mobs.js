@@ -19,8 +19,11 @@ let baseMat = null, arrowMat = null, fireMat = null, puffMat = null, puffMatDark
 let fireGeo = null, puffGeo = null, arrowGeo = null;
 
 // ---------- small helpers ----------
-const rnd = (a, b) => a + Math.random() * (b - a);
-const irnd = (a, b) => Math.floor(rnd(a, b + 1));
+// Simulation rolls come from seeded streams (js/rand.js): a mob's own, R(m), or a world event's, BF.rand.at(...).
+const R = e => BF.rand.of(e);
+const rnd = (r, a, b) => r.range(a, b);
+const irnd = (r, a, b) => a + r.int(b - a + 1);
+const vrnd = (a, b) => a + Math.random() * (b - a);   // visual
 function hash(a, b, c, d) {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647 + d * 1274126177) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -662,7 +665,7 @@ function audio() {
       actx = new AC();
       noiseBuf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate);
       const d = noiseBuf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;   // visual
     }
     if (actx.state === "suspended") actx.resume().catch(() => {});
     return actx.state === "running" ? actx : null;
@@ -696,9 +699,10 @@ function styleAt(x, z) {
 function createMob(type, x, y, z, variant, style) {
   const T = TYPES[type];
   if (!T) return null;
+  const st = {}, r = R(st);   // the new mob's stream, seeded from the creation counter; it becomes the mob's own below (rng)
   if (T.variants) {
     variant = PROF_ALIAS[variant] || variant;
-    if (!T.variants.includes(variant)) variant = T.variants[Math.floor(Math.random() * T.variants.length)];
+    if (!T.variants.includes(variant)) variant = T.variants[Math.floor(r.next() * T.variants.length)];
     if (typeof style === "string") style = VILLAGE_STYLES.indexOf(style);
     if (!(style >= 0 && style <= 4)) style = styleAt(x, z);
   }
@@ -718,7 +722,7 @@ function createMob(type, x, y, z, variant, style) {
     meshes[p.name] = m;
   }
   root.position.set(x, y, z);
-  const yaw = Math.random() * Math.PI * 2 - Math.PI;
+  const yaw = r.next() * Math.PI * 2 - Math.PI;
   model.rotation.y = yaw;
   scene.add(root);
   const mob = {
@@ -729,12 +733,12 @@ function createMob(type, x, y, z, variant, style) {
     hp: T.hp, maxHp: T.hp, halfWidth: T.hw, height: T.h,
     root, model, meshes, material: mat,
     yaw, headYaw: 0, headPitch: 0, lookAt: null,
-    walkPhase: Math.random() * 6, walkAmt: 0,
+    walkPhase: r.next() * 6, walkAmt: 0,
     onGround: false, inWater: false, headInWater: false, fallStart: y,
     hurtT: 0, invuln: 0, knockT: 0, dead: false, deathT: 0, removed: false,
-    ai: { t: rnd(0.5, 3), mode: "idle", tx: x, tz: z, fleeT: 0, target: false, losT: 0, los: false, attackCd: 0,
-          shootCd: rnd(1, 2), fuse: 0, strafe: Math.random() < 0.5 ? 1 : -1, lookT: 0, swingT: 0, provoked: 0, burnT: 0, aiming: false },
-    age: 0, fire: null,
+    ai: { t: rnd(r, 0.5, 3), mode: "idle", tx: x, tz: z, fleeT: 0, target: false, losT: 0, los: false, attackCd: 0,
+          shootCd: rnd(r, 1, 2), fuse: 0, strafe: r.next() < 0.5 ? 1 : -1, lookT: 0, swingT: 0, provoked: 0, burnT: 0, aiming: false },
+    age: 0, fire: null, rng: st.rng,
   };
   if (type === "villager" && BF.trades) BF.trades.init(mob); // level, offers, inventory with starting stock
   list.push(mob);
@@ -758,11 +762,11 @@ function removeMob(m) {
 function puff(pos, n, spread, dark, speed) {
   for (let i = 0; i < n; i++) {
     const mesh = new THREE.Mesh(puffGeo, dark ? puffMatDark : puffMat);
-    mesh.position.set(pos.x + rnd(-spread, spread), pos.y + rnd(0, spread * 1.5), pos.z + rnd(-spread, spread));
-    const s = rnd(0.6, 1.4); mesh.scale.setScalar(s);
+    mesh.position.set(pos.x + vrnd(-spread, spread), pos.y + vrnd(0, spread * 1.5), pos.z + vrnd(-spread, spread));   // visual
+    const s = vrnd(0.6, 1.4); mesh.scale.setScalar(s);   // visual
     scene.add(mesh);
-    const v = new THREE.Vector3(rnd(-1, 1), rnd(0.2, 1.2), rnd(-1, 1)).multiplyScalar(speed || 1);
-    puffs.push({ mesh, vel: v, life: rnd(0.4, 0.8), s });
+    const v = new THREE.Vector3(vrnd(-1, 1), vrnd(0.2, 1.2), vrnd(-1, 1)).multiplyScalar(speed || 1);   // visual
+    puffs.push({ mesh, vel: v, life: vrnd(0.4, 0.8), s });   // visual
   }
 }
 function updatePuffs(dt) {
@@ -800,10 +804,10 @@ function damageMob(m, amount, knockDir, byPlayer, cause) {
   if (byPlayer) {
     if (m.hostile) { m.ai.target = true; m.ai.provoked = 30; }
     else if (m.def.golem) m.ai.provoked = creative() ? 0 : 60;
-    else m.ai.fleeT = rnd(3, 5);
+    else m.ai.fleeT = rnd(R(m), 3, 5);
     // hurting a villager or a golem angers the village's golems
     if (m.village && !creative()) { m.village.angryT = 60; for (const g of list) if (g.def.golem && g.village === m.village) g.ai.provoked = 60; }
-  } else if (m.type === "villager") m.ai.fleeT = rnd(3, 5);
+  } else if (m.type === "villager") m.ai.fleeT = rnd(R(m), 3, 5);
   if (m.hp <= 0) kill(m, byPlayer);
   return true;
 }
@@ -839,7 +843,7 @@ function giveDrops(m) {
     if (m.type === "pig" && m.piglet) continue;   // nor do piglets (js/pigfarmer.js)
     const id = (BF.I && BF.I[name] != null) ? BF.I[name] : (BF.B && BF.B[name]);
     if (id == null) continue;
-    const n = irnd(lo, hi);
+    const n = irnd(R(m), lo, hi);
     if (n <= 0) continue;
     const p = m.pos || m.position;
     if (BF.drops && p) BF.drops.spawn(id, n, p.x, p.y + 0.5, p.z);
@@ -850,12 +854,12 @@ function giveDrops(m) {
 // ---------- creeper explosion ----------
 function explode(m) {
   const c = new THREE.Vector3(m.position.x, m.position.y + 0.8, m.position.z);
-  const R = 3;
+  const R = 3, r = BF.rand.of(m);
   const w = BF.world, bedrock = BF.B.bedrock;
   const cx = Math.floor(c.x), cy = Math.floor(c.y), cz = Math.floor(c.z);
   for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (d > R - Math.random() * 0.8) continue;
+    if (d > R - r.next() * 0.8) continue;
     const x = cx + dx, y = cy + dy, z = cz + dz;
     const id = w.getBlock(x, y, z);
     if (!id || id === bedrock || isWater(id)) continue;
@@ -894,7 +898,7 @@ function shootArrow(m, target, victim) {
   const t = dist / speed;
   to.y += 0.5 * 20 * t * t; // gravity compensation
   const dir = to.sub(from).normalize();
-  dir.x += rnd(-0.03, 0.03); dir.y += rnd(-0.03, 0.03); dir.z += rnd(-0.03, 0.03);
+  dir.x += rnd(R(m), -0.03, 0.03); dir.y += rnd(R(m), -0.03, 0.03); dir.z += rnd(R(m), -0.03, 0.03);
   dir.normalize();
   from.addScaledVector(dir, 0.5);
   const mesh = new THREE.Mesh(arrowGeo, arrowMat);
@@ -922,7 +926,7 @@ function shootPlayerArrow(from, vel, o) {
   return a;
 }
 // Damage a player arrow deals: its draw damage, plus 1..damage/2 on a critical (full-draw) arrow; so 1..6, a crit 7..9.
-const playerArrowDamage = a => a.damage + (a.crit ? irnd(1, Math.max(1, a.damage >> 1)) : 0);
+const playerArrowDamage = a => a.damage + (a.crit ? irnd(R(a), 1, Math.max(1, a.damage >> 1)) : 0);
 function playerArrowStep(a, p) {
   if (a.stuck) {   // stuck: falls when its block goes; walking over it picks it up
     if (!BF.world.isSolid(a.cell[0] + 0.5, a.cell[1] + 0.5, a.cell[2] + 0.5)) { a.stuck = false; a.pos.addScaledVector(a.dir, -0.1); a.vel.set(0, 0, 0); return false; }   // out of the freed cell, then down
@@ -990,7 +994,7 @@ function updateArrows(dt) {
         const vp = seen(a.pos, v.position, _sB), hw = v.halfWidth + 0.1;
         if (Math.abs(a.pos.x - vp.x) < hw && Math.abs(a.pos.z - vp.z) < hw && a.pos.y > vp.y && a.pos.y < vp.y + v.height) {
           const owner = a.owner && !a.owner.removed && !a.owner.dead ? a.owner : null;
-          damageMob(v, irnd(GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton");
+          damageMob(v, irnd(R(a), GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton");
           if (owner && v.def.golem) v.ai.revenge = owner;
           hitPlayer = true;
           break;
@@ -999,7 +1003,7 @@ function updateArrows(dt) {
       if (p) {
         const pp = seen(a.pos, p.position, _sB), hw = (p.halfWidth || 0.3) + 0.1, h = p.height || 1.8;
         if (a.pos.x > pp.x - hw && a.pos.x < pp.x + hw && a.pos.z > pp.z - hw && a.pos.z < pp.z + hw && a.pos.y > pp.y && a.pos.y < pp.y + h) {
-          if (p.damage) p.damage(irnd(2, 4), seen(p.position, a.owner && !a.owner.removed ? a.owner.position : a.pos.clone().sub(a.vel), new THREE.Vector3()).clone());
+          if (p.damage) p.damage(irnd(R(a), 2, 4), seen(p.position, a.owner && !a.owner.removed ? a.owner.position : a.pos.clone().sub(a.vel), new THREE.Vector3()).clone());
           hitPlayer = true;
           break;
         }
@@ -1037,7 +1041,7 @@ function pickWander(m, r) {
   if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
   if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return;   // sty pigs root about inside the sty (js/pigfarmer.js)
   if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
-  const a =Math.random() * Math.PI * 2, d = rnd(3, r);
+  const a =R(m).next() * Math.PI * 2, d = rnd(R(m), 3, r);
   m.ai.tx = m.position.x + Math.cos(a) * d;
   m.ai.tz = m.position.z + Math.sin(a) * d;
 }
@@ -1077,8 +1081,8 @@ function startDetour(m) {
   return true;
 }
 function aside(m) {
-  const ai = m.ai, px = m.position.x, pz = m.position.z, a = Math.atan2(ai.tz - pz, ai.tx - px) + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + rnd(-0.5, 0.5));
-  ai.detour = { x: px + Math.cos(a) * 5, z: pz + Math.sin(a) * 5, t: rnd(2, 4) };
+  const ai = m.ai, px = m.position.x, pz = m.position.z, a = Math.atan2(ai.tz - pz, ai.tx - px) + (R(m).next() < 0.5 ? 1 : -1) * (Math.PI / 2 + rnd(R(m), -0.5, 0.5));
+  ai.detour = { x: px + Math.cos(a) * 5, z: pz + Math.sin(a) * 5, t: rnd(R(m), 2, 4) };
 }
 // Steers along a detour; false once it is over (reached, timed out, or the route itself got stuck).
 function followDetour(m, dt, out, sp) {
@@ -1101,22 +1105,22 @@ function wanderAI(m, dt, out) {
   ai.wanderAt = m.age;
   ai.t -= dt;
   if (ai.t <= 0) {
-    if (ai.mode === "idle" && Math.random() < 0.6) { ai.mode = "walk"; pickWander(m, 8); ai.t = rnd(3, 7); }
-    else { ai.mode = "idle"; ai.t = rnd(2, 6); }
+    if (ai.mode === "idle" && R(m).next() < 0.6) { ai.mode = "walk"; pickWander(m, 8); ai.t = rnd(R(m), 3, 7); }
+    else { ai.mode = "idle"; ai.t = rnd(R(m), 2, 6); }
   }
   ai.lookT -= dt;
   if (ai.lookT <= 0) {
-    ai.lookT = rnd(1.5, 4);
-    if (playerAlive() && pAt(m).distanceTo(m.position) < 8 && Math.random() < 0.6) m.lookAt = "player";
-    else m.lookAt = { yaw: rnd(-1, 1), pitch: rnd(-0.4, 0.3) };
+    ai.lookT = rnd(R(m), 1.5, 4);
+    if (playerAlive() && pAt(m).distanceTo(m.position) < 8 && R(m).next() < 0.6) m.lookAt = "player";
+    else m.lookAt = { yaw: rnd(R(m), -1, 1), pitch: rnd(R(m), -0.4, 0.3) };
   }
   if (ai.mode === "walk") {
     const sp = T.hostile ? T.speed * 0.4 : T.speed;
     if (ai.detour) { if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
     const dx = ai.tx - m.position.x, dz = ai.tz - m.position.z, d = Math.hypot(dx, dz);
-    if (d < 0.6) { ai.mode = "idle"; ai.t = rnd(2, 5); return; }
+    if (d < 0.6) { ai.mode = "idle"; ai.t = rnd(R(m), 2, 5); return; }
     const nx = dx / d, nz = dz / d;
-    if (!m.inWater && (dropAhead(m, nx, nz) > 3 || (!T.hostile && waterAhead(m, nx, nz)))) { ai.mode = "idle"; ai.t = rnd(1, 3); return; }
+    if (!m.inWater && (dropAhead(m, nx, nz) > 3 || (!T.hostile && waterAhead(m, nx, nz)))) { ai.mode = "idle"; ai.t = rnd(R(m), 1, 3); return; }
     if (T.village && ai.blockedT > DETOUR_AFTER && startDetour(m)) { if (followDetour(m, dt, out, sp)) return; ai.detour = null; }
     out.x = nx * sp; out.z = nz * sp;
   }
@@ -1132,7 +1136,7 @@ function hostileAI(m, dt, out) {
   const dx = pp.x - m.position.x, dz = pp.z - m.position.z, dy = pp.y - m.position.y;
   const hd = Math.hypot(dx, dz), dist = Math.hypot(hd, dy);
   ai.losT -= dt;
-  if (ai.losT <= 0) { ai.losT = rnd(0.25, 0.4); ai.los = dist < 24 && hasLineOfSight(m, eye); }
+  if (ai.losT <= 0) { ai.losT = rnd(R(m), 0.25, 0.4); ai.los = dist < 24 && hasLineOfSight(m, eye); }
   ai.provoked = Math.max(0, ai.provoked - dt);
   // spiders are neutral in bright light unless provoked
   const calm = m.type === "spider" && ai.provoked <= 0 && skyLight() * skyAt(m.position.x, m.position.y + 0.5, m.position.z).factor > 0.6;
@@ -1161,13 +1165,13 @@ function hostileAI(m, dt, out) {
     let sp = 0, sx = 0, sz = 0;
     if (dist > 11 || !ai.los) { sx = nx; sz = nz; sp = T.speed; }
     else if (dist < 5) { sx = -nx; sz = -nz; sp = T.speed * 0.8; }
-    else { sx = -nz * ai.strafe; sz = nx * ai.strafe; sp = T.speed * 0.4; if (Math.random() < dt * 0.3) ai.strafe *= -1; }
+    else { sx = -nz * ai.strafe; sz = nx * ai.strafe; sp = T.speed * 0.4; if (R(m).next() < dt * 0.3) ai.strafe *= -1; }
     if (sp && !m.inWater && dropAhead(m, sx, sz) > 3) sp = 0;
     out.x = sx * sp; out.z = sz * sp;
     ai.shootCd -= dt;
     ai.aiming = ai.los && dist < 16;
     if (ai.aiming && ai.shootCd <= 0) {
-      ai.shootCd = rnd(1.6, 2.4);
+      ai.shootCd = rnd(R(m), 1.6, 2.4);
       shootArrow(m, new THREE.Vector3(pp.x, pp.y + (p.height || 1.8) * 0.6, pp.z));
     }
     return;
@@ -1175,7 +1179,7 @@ function hostileAI(m, dt, out) {
 
   // melee: zombie, spider
   if (hd > reach * 0.8) { out.x = nx * T.speed; out.z = nz * T.speed; }
-  if (m.type === "spider" && m.onGround && hd > 2 && hd < 4 && ai.attackCd <= 0 && Math.random() < dt * 2) {
+  if (m.type === "spider" && m.onGround && hd > 2 && hd < 4 && ai.attackCd <= 0 && R(m).next() < dt * 2) {
     m.vel.y = 5.5; m.vel.x = nx * 6; m.vel.z = nz * 6; m.knockT = 0.4; // pounce
   }
   if (hd < reach && Math.abs(dy + (p.height || 1.8) / 2 - m.height / 2) < 1.6 && ai.attackCd <= 0) {
@@ -1277,7 +1281,7 @@ function golemFight(m, dt, out) {
     const nx = dx / (d || 1), nz = dz / (d || 1);
     const chest = new THREE.Vector3(gp.x, gp.y + g.height * 0.6, gp.z);
     ai.losT -= dt;
-    if (ai.losT <= 0) { ai.losT = rnd(0.25, 0.4); ai.gLos = hasLineOfSight(m, chest); }
+    if (ai.losT <= 0) { ai.losT = rnd(R(m), 0.25, 0.4); ai.gLos = hasLineOfSight(m, chest); }
     let sp = 0;
     if (d > 12 || !ai.gLos) sp = T.speed; else if (d < 6) sp = -T.speed * 0.8;
     if (sp && !m.inWater && dropAhead(m, nx * Math.sign(sp), nz * Math.sign(sp)) > 3) sp = 0;
@@ -1285,7 +1289,7 @@ function golemFight(m, dt, out) {
     out.faceX = gp.x; out.faceZ = gp.z; m.lookAt = g;
     ai.shootCd -= dt;
     ai.aiming = ai.gLos && d < 16;
-    if (ai.aiming && ai.shootCd <= 0) { ai.shootCd = rnd(1.6, 2.4); shootArrow(m, chest, g); }
+    if (ai.aiming && ai.shootCd <= 0) { ai.shootCd = rnd(R(m), 1.6, 2.4); shootArrow(m, chest, g); }
     return true;
   }
   return chaseAndHit(m, g, dt, out, GOLEM_HITS[m.type] || T.attack || 2, 1.0);
@@ -1719,7 +1723,7 @@ function shelterAI(m, dt0, dt, out) {
 // Night: head for bed and sleep; without a usable bed stand still indoors or by the village bell.
 function nightAI(m, dt, out) {
   const ai = m.ai, T = m.def, V = m.village;
-  ai.mode = "idle"; ai.t = rnd(1, 3); ai.leaving = false;
+  ai.mode = "idle"; ai.t = rnd(R(m), 1, 3); ai.leaving = false;
   const n = ai.night || (ai.night = { fails: 0, retryT: 0 });
   claimBed(m, n, dt);
   const H = m.home;
@@ -1816,7 +1820,7 @@ function villagerAI(m, dt, out) {
     const src = ai.threat && !ai.threat.removed ? seen(m.position, ai.threat.position, _sA) : (playerAlive() ? pAt(m) : null);
     let fx = Math.cos(m.yaw), fz = Math.sin(m.yaw);
     if (src) { fx = m.position.x - src.x; fz = m.position.z - src.z; }
-    ai.fleeJitter = (ai.fleeJitter || Math.random() * 6) + rnd(-3, 3) * dt;
+    ai.fleeJitter = (ai.fleeJitter || R(m).next() * 6) + rnd(R(m), -3, 3) * dt;
     const a = Math.atan2(fz, fx) + Math.sin(ai.fleeJitter) * 0.6;
     out.x = Math.cos(a) * T.flee; out.z = Math.sin(a) * T.flee;
     m.lookAt = null;
@@ -1839,22 +1843,22 @@ function villagerAI(m, dt, out) {
     const hx = m.home.x + (m.home.w || 1) / 2, hz = m.home.z + (m.home.d || 1) / 2;
     if (Math.hypot(hx - V.x, hz - V.z) > 28) { ax = hx; az = hz; }
   }
-  if (m.profession === "farmer" && V && ai.mode === "idle" && ai.t < 0.2 && Math.random() < 0.5 && BF.B.farmland != null) {
+  if (m.profession === "farmer" && V && ai.mode === "idle" && ai.t < 0.2 && R(m).next() < 0.5 && BF.B.farmland != null) {
     for (let k = 0; k < 12; k++) {
-      const fx = Math.floor(ax + rnd(-18, 18)), fz = Math.floor(az + rnd(-18, 18));
+      const fx = Math.floor(ax + rnd(R(m), -18, 18)), fz = Math.floor(az + rnd(R(m), -18, 18));
       if (!BF.world.isLoaded(fx, fz)) continue;
       const fy = BF.world.heightAt(fx, fz);
-      if (fy > 0 && (BF.world.getBlock(fx, fy, fz) === BF.B.farmland || BF.world.getBlock(fx, fy, fz) === BF.B.farmland_dry)) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(6, 10); break; }
+      if (fy > 0 && (BF.world.getBlock(fx, fy, fz) === BF.B.farmland || BF.world.getBlock(fx, fy, fz) === BF.B.farmland_dry)) { ai.mode = "walk"; ai.tx = fx + 0.5; ai.tz = fz + 0.5; ai.t = rnd(R(m), 6, 10); break; }
     }
   }
   if (ai.outT > 0) ai.outT -= dt;
-  if (away && ai.mode === "walk" && Math.hypot(ai.tx - m.position.x, ai.tz - m.position.z) > 12) { ai.mode = "idle"; ai.t = rnd(1, 3); }
+  if (away && ai.mode === "walk" && Math.hypot(ai.tx - m.position.x, ai.tz - m.position.z) > 12) { ai.mode = "idle"; ai.t = rnd(R(m), 1, 3); }
   if (V && !away && !(ai.outT > 0 && ai.mode === "walk")) {   // (not while walking away from the door it came out of this morning: morningAI)
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
-      ai.mode = "walk"; ai.tx = ax + rnd(-6, 6); ai.tz = az + rnd(-6, 6); ai.t = rnd(5, 8);
+      ai.mode = "walk"; ai.tx = ax + rnd(R(m), -6, 6); ai.tz = az + rnd(R(m), -6, 6); ai.t = rnd(R(m), 5, 8);
     } else if (ai.mode === "walk" && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
-      ai.tx = ax + rnd(-20, 20); ai.tz = az + rnd(-20, 20);
+      ai.tx = ax + rnd(R(m), -20, 20); ai.tz = az + rnd(R(m), -20, 20);
     }
   }
   wanderAI(m, dt, out);
@@ -1873,7 +1877,7 @@ function golemAI(m, dt, out) {
     if (!rv) ai.revenge = null;
     ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile);
   }
-  if (ai.foe && chaseAndHit(m, ai.foe, dt, out, irnd(7, 14), 1.2, ai.foe === ai.rescue ? RESCUE_SPEED : T.speed)) return;
+  if (ai.foe && chaseAndHit(m, ai.foe, dt, out, irnd(R(m), 7, 14), 1.2, ai.foe === ai.rescue ? RESCUE_SPEED : T.speed)) return;
   ai.foe = null; ai.rescue = null;
   if (creative()) ai.provoked = 0;
   if (ai.provoked > 0 && playerAlive()) {
@@ -1887,7 +1891,7 @@ function golemAI(m, dt, out) {
       ai.attackCd -= dt;
       if (hd < reach && Math.abs(pp.y - m.position.y) < 2 && ai.attackCd <= 0) {
         ai.attackCd = 1.3; ai.swingT = 0.35;
-        if (p.damage) p.damage(irnd(5, 9), seen(p.position, m.position, new THREE.Vector3()).clone());
+        if (p.damage) p.damage(irnd(R(m), 5, 9), seen(p.position, m.position, new THREE.Vector3()).clone());
       }
       return;
     }
@@ -1896,10 +1900,10 @@ function golemAI(m, dt, out) {
   const V = m.village;
   let px = V ? V.x : 0, pz = V ? V.z : 0;
   if (V && V.pop && V.houses && V.houses.length) {   // sized villages: each golem patrols around a house, moving on now and then
-    if (!m.patrol || Math.random() < dt / 90) { const h = V.houses[irnd(0, V.houses.length - 1)]; m.patrol = Math.random() < 0.3 || !h ? [V.x, V.z] : [h.x + (h.w || 1) / 2, h.z + (h.d || 1) / 2]; }
+    if (!m.patrol || R(m).next() < dt / 90) { const h = V.houses[irnd(R(m), 0, V.houses.length - 1)]; m.patrol = R(m).next() < 0.3 || !h ? [V.x, V.z] : [h.x + (h.w || 1) / 2, h.z + (h.d || 1) / 2]; }
     px = m.patrol[0]; pz = m.patrol[1];
   }
-  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14) { ai.mode = "walk"; ai.tx = px + rnd(-5, 5); ai.tz = pz + rnd(-5, 5); ai.t = rnd(5, 8); }
+  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14) { ai.mode = "walk"; ai.tx = px + rnd(R(m), -5, 5); ai.tz = pz + rnd(R(m), -5, 5); ai.t = rnd(R(m), 5, 8); }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;
 }
@@ -1950,7 +1954,7 @@ function updateMob(m, dt) {
     ai.fleeT -= dt;
     let fx = Math.cos(m.yaw), fz = Math.sin(m.yaw);
     if (playerAlive()) { const pp = pAt(m); fx = m.position.x - pp.x; fz = m.position.z - pp.z; }
-    ai.fleeJitter = (ai.fleeJitter || Math.random() * 6) + rnd(-3, 3) * dt;
+    ai.fleeJitter = (ai.fleeJitter || R(m).next() * 6) + rnd(R(m), -3, 3) * dt;
     const a = Math.atan2(fz, fx) + Math.sin(ai.fleeJitter) * 0.8;
     _desired.x = Math.cos(a) * T.flee; _desired.z = Math.sin(a) * T.flee;
     m.lookAt = null;
@@ -2008,7 +2012,7 @@ function updateMob(m, dt) {
     else if (m.onLadder) { /* climbing: the ladder code above lifts it */ }
     else if (res.onGround && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height)) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
     else if (m.inWater) m.vel.y = 4;
-    if (!T.hostile && ai.mode === "walk" && !ai.detour && Math.random() < 0.3) pickWander(m, 8);
+    if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3) pickWander(m, 8);
   }
   if (T.village) blockedMove(m, dt, (res.hitX || res.hitZ) && wants);
   // fall damage
@@ -2186,7 +2190,7 @@ function updateFire(m, on, dt) {
     m.fire = new THREE.Group();
     for (let i = 0; i < 7; i++) {
       const f = new THREE.Mesh(fireGeo, fireMat);
-      f.position.set(rnd(-m.halfWidth, m.halfWidth), rnd(0, m.height), rnd(-m.halfWidth, m.halfWidth));
+      f.position.set(vrnd(-m.halfWidth, m.halfWidth), vrnd(0, m.height), vrnd(-m.halfWidth, m.halfWidth));   // visual
       m.fire.add(f);
     }
     m.root.add(m.fire);
@@ -2194,9 +2198,9 @@ function updateFire(m, on, dt) {
   m.fire.visible = true;
   for (const f of m.fire.children) {
     f.position.y += dt * 1.5;
-    if (f.position.y > m.height + 0.15 || Math.random() < dt * 4) {
-      f.position.set(rnd(-m.halfWidth - 0.05, m.halfWidth + 0.05), rnd(0, m.height * 0.6), rnd(-m.halfWidth - 0.05, m.halfWidth + 0.05));
-      f.scale.setScalar(rnd(0.6, 1.4));
+    if (f.position.y > m.height + 0.15 || Math.random() < dt * 4) {   // visual
+      f.position.set(vrnd(-m.halfWidth - 0.05, m.halfWidth + 0.05), vrnd(0, m.height * 0.6), vrnd(-m.halfWidth - 0.05, m.halfWidth + 0.05));   // visual
+      f.scale.setScalar(vrnd(0.6, 1.4));   // visual
     }
   }
 }
@@ -2286,18 +2290,19 @@ function penBoxes(x, z, r = 160) {
   return out;
 }
 const inPenBox = (boxes, x, z) => boxes.some(q => x >= q[0] && x <= q[2] && z >= q[1] && z <= q[3]);
-function spawnGroup(type, cx, cz, n) {
+function spawnGroup(type, cx, cz, n, r) {
   const w = BF.world, grass = BF.B.grass, T = TYPES[type], CS = BF.CS;
   if (!T || !scene || !w.chunks.has(cx + "," + cz)) return 0;
+  if (!r) r = BF.rand.at("group", cx, cz);   // (js/wildlife.js passes the chunk's roll)
   const inChunk = (x, z) => Math.floor(x / CS) === cx && Math.floor(z / CS) === cz;
   const pens = penBoxes(cx * CS + 8, cz * CS + 8);
   const ok = (x, z) => { const y = w.heightAt(x, z); return y >= BF.MIN_Y + 1 && !inPenBox(pens, x, z) && w.getBlock(x, y, z) === grass && standable(x, y + 1, z, T.hw, T.h) ? y + 1 : null; };
   let x = null, z = null;
-  for (let i = 0; i < 12 && x == null; i++) { const tx = cx * CS + irnd(1, 14), tz = cz * CS + irnd(1, 14); if (ok(tx, tz) != null) { x = tx; z = tz; } }
+  for (let i = 0; i < 12 && x == null; i++) { const tx = cx * CS + irnd(r, 1, 14), tz = cz * CS + irnd(r, 1, 14); if (ok(tx, tz) != null) { x = tx; z = tz; } }
   if (x == null) return 0;
   let made = 0;
   for (let i = 0; i < n * 4 && made < n; i++) {
-    const sx = x + (i === 0 ? 0 : irnd(-3, 3)), sz = z + (i === 0 ? 0 : irnd(-3, 3));
+    const sx = x + (i === 0 ? 0 : irnd(r, -3, 3)), sz = z + (i === 0 ? 0 : irnd(r, -3, 3));
     if (!inChunk(sx, sz)) continue;
     const sy = ok(sx, sz);
     if (sy == null) continue;
@@ -2306,9 +2311,9 @@ function spawnGroup(type, cx, cz, n) {
   }
   return made;
 }
-function pickHostileType() {
-  let r = Math.random();
-  for (const [t, wgt] of HOSTILE_WEIGHTS) { if ((r -= wgt) <= 0) return t; }
+function pickHostileType(r) {
+  let x = r.next();
+  for (const [t, wgt] of HOSTILE_WEIGHTS) { if ((x -= wgt) <= 0) return t; }
   return "zombie";
 }
 // ---------- monster spawning ----------
@@ -2322,7 +2327,7 @@ function spawnMonsters(dt) {
   if (!playerAlive()) return;
   const W = BF.world;
   chunkArrT -= dt;
-  if (chunkArrT <= 0 || !chunkArr.length) { chunkArrT = 1; chunkArr = [...W.chunks.values()]; }
+  if (chunkArrT <= 0 || !chunkArr.length) { chunkArrT = 1; chunkArr = [...W.chunks.values()].sort((a, b) => a.cx - b.cx || a.cz - b.cz); }   // sorted: a try's chunk doesn't hang on load order
   const n = chunkArr.length;
   if (!n) return;
   const dark = skyLightAt(BF.sky ? BF.sky.time || 0 : 0) <= SPAWN_LIGHT || stormy();
@@ -2330,8 +2335,9 @@ function spawnMonsters(dt) {
   caveAcc += dt * n / CAVE_EVERY;
   const s = Math.min(MAX_TRIES, Math.floor(surfAcc)), c = Math.min(MAX_TRIES, Math.floor(caveAcc));
   surfAcc -= Math.floor(surfAcc); caveAcc -= Math.floor(caveAcc);
-  for (let i = 0; i < s; i++) { const ch = chunkArr[Math.floor(Math.random() * n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch); }
-  for (let i = 0; i < c; i++) { const ch = chunkArr[Math.floor(Math.random() * n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch); }
+  // each try has its own stream, keyed by the tick and the try's number, that picks its chunk, mob and spot
+  for (let i = 0; i < s; i++) { const r = BF.rand.at("surface", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch, r); }
+  for (let i = 0; i < c; i++) { const r = BF.rand.at("cave", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch, r); }
 }
 function spawnHostile(type, x, y, z) {
   if (BF.wildlife && !BF.wildlife.mayHostile(x, y, z)) return null;
@@ -2339,10 +2345,10 @@ function spawnHostile(type, x, y, z) {
   if (m && BF.wildlife) BF.wildlife.spawned(m);
   return m;
 }
-function trySurface(c) {
-  const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+function trySurface(c, r) {
+  const w = BF.world, CS = BF.CS, type = pickHostileType(r), T = TYPES[type];
   if (!T.spawns) return;   // switched off in this world (js/gameopts.js): the try is dropped, not re-picked, so the others spawn as often as before
-  const x = c.cx * CS + irnd(0, CS - 1), z = c.cz * CS + irnd(0, CS - 1);
+  const x = c.cx * CS + irnd(r, 0, CS - 1), z = c.cz * CS + irnd(r, 0, CS - 1);
   const gy = w.heightAt(x, z);
   if (gy < BF.MIN_Y + 1 || !BF.OPAQUE[w.getBlock(x, gy, z)]) return;
   if (!standable(x, gy + 1, z, T.hw, T.h)) return;
@@ -2351,17 +2357,17 @@ function trySurface(c) {
   spawnHostile(type, x + 0.5, gy + 1, z + 0.5);
 }
 // a dark, covered air pocket in a random column of the chunk
-function tryCave(c) {
-  const w = BF.world, CS = BF.CS, type = pickHostileType(), T = TYPES[type];
+function tryCave(c, r) {
+  const w = BF.world, CS = BF.CS, type = pickHostileType(r), T = TYPES[type];
   if (!T.spawns) return;   // (as trySurface)
-  const lx = irnd(0, CS - 1), lz = irnd(0, CS - 1), x = c.cx * CS + lx, z = c.cz * CS + lz;
+  const lx = irnd(r, 0, CS - 1), lz = irnd(r, 0, CS - 1), x = c.cx * CS + lx, z = c.cz * CS + lz;
   if (!c.top) return;
   const top = c.top[lz * CS + lx];
   if (top < BF.SEA - 40) return;
   const yMin = Math.max(BF.MIN_Y + 2, c.y0 + 1), yMax = Math.min(top - 3, c.y1 - 3);
   if (yMax <= yMin) return;
   for (let tries = 0; tries < 6; tries++) {
-    const y = irnd(yMin, yMax);
+    const y = irnd(r, yMin, yMax);
     if (!standable(x, y, z, T.hw, T.h)) continue;
     if (!BF.OPAQUE[w.getBlock(x, y - 1, z)]) continue;
     const s = skyAt(x, y, z);
@@ -2702,9 +2708,9 @@ const LEASH = 40;
 function scatterAt(rec, sl, v) {
   const b = sl.bed;
   if (bedtime()) return b ? findStand(b.x, b.y, b.z, TYPES.villager) : null;
-  const cx = b ? b.x : v.x, cz = b ? b.z : v.z;
+  const cx = b ? b.x : v.x, cz = b ? b.z : v.z, r = BF.rand.at("scatter", cx, cz, null, sl.idx);
   for (let i = 0; i < 14; i++) {
-    const a = Math.random() * Math.PI * 2, d = LEASH * Math.sqrt(Math.random());
+    const a = r.next() * Math.PI * 2, d = LEASH * Math.sqrt(r.next());
     const x = Math.floor(cx + Math.cos(a) * d), z = Math.floor(cz + Math.sin(a) * d);
     if (v.minX != null && (x < v.minX || x > v.maxX || z < v.minZ || z > v.maxZ)) continue;
     if (!BF.world.isLoaded(x, z)) continue;
@@ -2757,7 +2763,8 @@ function updateVillages(dt) {
         // otherwise: by day a random spot within the leash of its bed, at night in the bed
       if (!at) {
         if (H && !loadedHouse(H)) continue;
-        const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(-6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(-6, 6);
+        const r = BF.rand.at("vspawn", v.x, v.z, null, sl.idx);
+        const sx = H ? H.x + (H.w || 1) / 2 : v.x + rnd(r, -6, 6), sz = H ? H.z + (H.d || 1) / 2 : v.z + rnd(r, -6, 6);
         const sy = H && H.y != null ? H.y : (v.y != null ? v.y : BF.world.heightAt(sx, sz) + 1);
         at = findStand(sx, sy, sz, TYPES.villager);
         if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, TYPES.villager);
@@ -2765,6 +2772,7 @@ function updateVillages(dt) {
       if (!at) continue;
       const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
       m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m); haveV++;
+      BF.rand.seed(m, "villager:" + rec.key + "#" + sl.idx + ":" + (rec.killed.villager || 0));   // its slot's stream (a death in the village moves it on); a saved one wins (js/trading.js unpack)
       m.ai.leaving = !bedtime() && !scattered; // spawned indoors by day: walk out through the door
       const sv = villagerSaves.get(villagerKey(m));
       if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
@@ -2861,7 +2869,7 @@ BF.mobs = {
       if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
         const q = seen(m.position, pp, _sA), dx = m.position.x - q.x, dz = m.position.z - q.z;
         if (dx * dx + dz * dz > far2) {
-          if (m._farT == null) m._farT = Math.random() / FAR_HZ;
+          if (m._farT == null) m._farT = R(m).next() / FAR_HZ;
           m._farT += dt;
           if (m._farT < 1 / FAR_HZ) continue;
           h = m._farT; m._farT = 0;
