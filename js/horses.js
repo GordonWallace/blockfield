@@ -237,7 +237,7 @@ function setAvoid(m, box) { if (m && m.horse) m.horse.avoid = box ? { x0: box.x0
 // ---------------------------------------------------------------- AI (called from mobs.js updateMob for unridden horses)
 // On the planet, positions kept in other frames (the lead holder, a mate, the herd centre) are seen from the horse's (BF.planet.local).
 const LQ = {};
-const seenXZ = (a, b) => (BF.planet && BF.planet.isPlanet() ? BF.planet.local(a, b, LQ) : b);
+const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
 function walkTo(m, out, x, z, speed) {
   const dx = x - m.position.x, dz = z - m.position.z, d = Math.hypot(dx, dz) || 1;
   out.x = dx / d * speed; out.z = dz / d * speed;
@@ -325,10 +325,9 @@ function moveHerds(dt) {
     // never leave the members far behind
     const mx = sx / n, mz = sz / n;
     if (Math.hypot(mx - h.cx, mz - h.cz) > HERD_R * 2) { h.cx = mx; h.cz = mz; }
-    if (BF.planet && BF.planet.reframe) {   // drifted past a face edge: onto the next face, its heading turned with it
-      const c = { x: h.cx, z: h.cz }, hd = { yaw: h.dir };
-      if (BF.planet.reframe(c, -1, hd) != null) { h.cx = c.x; h.cz = c.z; h.dir = hd.yaw; }
-    }
+    // drifted past a face edge: onto the next face, its heading turned with it
+    const c = { x: h.cx, z: h.cz }, hd = { yaw: h.dir };
+    if (BF.planet.reframe(c, -1, hd) != null) { h.cx = c.x; h.cz = c.z; h.dir = hd.yaw; }
   }
 }
 // A wild herd of 2-6 (sometimes with foals) on the grass around (x, z). Returns the herd, or null when there was no room.

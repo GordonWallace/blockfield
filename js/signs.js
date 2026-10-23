@@ -56,7 +56,7 @@ function component(get, x, y, z) {
       if (vis.has(k)) continue;
       vis.add(k);
       if (n[1] < BF.MIN_Y || n[1] >= BF.H) continue;
-      if (W().isPlanet && W().isPlanet() && !sameFace(c, n)) continue;   // boards don't merge across a face edge (their cells and text are keyed canonically)
+      if (!sameFace(c, n)) continue;   // boards don't merge across a face edge (their cells and text are keyed canonically)
       if (get(n[0], n[1], n[2]) === id) q.push(n);
     }
   }
@@ -806,7 +806,7 @@ function postNeighbours(v, range = POST_RANGE) {
   if (!G || !G.villagesNear) return [];
   return G.villagesNear(v.x, v.z, range).filter(o => o && !(o.x === v.x && o.z === v.z))
     .map(o => {   // on the planet: the way there in the village's face frame (through an edge, or round the planet) and planet distance
-      const t = BF.planet ? BF.planet.toward(v, o, {}) : { x: o.x - v.x, z: o.z - v.z, d: Math.hypot(o.x - v.x, o.z - v.z) };
+      const t = BF.planet.toward(v, o, {});
       return { name: o.name || villageName(o) || "Village", dx: t.x, dz: t.z, d: t.d, dist: Math.round(t.d / 10) * 10 };
     })
     .sort((p, q) => p.d - q.d).slice(0, POST_MAX);

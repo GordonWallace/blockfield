@@ -33,11 +33,9 @@ function wrapAngle(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.P
 // coordinates stay plain x / z maths when it walks past a face edge; they are margin addresses there), everything else on the canonical
 // square of the face it stands on. keepFrame runs after every move step. Anything compared with something that may be kept in another
 // frame (the player, other mobs, arrows) is first seen from this one: seen(a, o) is o's position expressed in a's frame, so dx / dz / a
-// distance are true local offsets across an edge. Off the planet both are the identity.
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
+// distance are true local offsets across an edge.
 const LQ = {};
 function seen(a, o, out) {
-  if (!onPlanet()) return o;
   BF.planet.local(a, o, LQ);
   if (LQ.x === o.x && LQ.z === o.z) return o;
   out = out || new THREE.Vector3();
@@ -60,7 +58,7 @@ const FR = {};
 // After a move step: puts the mob back in its frame when it left it (turning its yaw and velocity) and re-expresses the points its AI
 // holds (wander target, route cells) in the new frame.
 function keepFrame(m) {
-  if (!onPlanet() || m.rider) return;   // a ridden mob crosses with its rider (player.js crossEdge)
+  if (m.rider) return;   // a ridden mob crosses with its rider (player.js crossEdge)
   const q = BF.planet.reframe(m.position, frameFace(m), m, m.vel);
   if (q == null) return;
   m.model.rotation.y = m.yaw;
@@ -72,10 +70,8 @@ function keepFrame(m) {
 // Spatial grid key of the cell (gx, gz) of size s, seen from any frame: the canonical cell it shows (grid cells line up across edges).
 const GC = {};
 function gridKey(gx, gz, s) {
-  if (onPlanet()) {
-    const c = BF.planet.canon(gx * s + s / 2, gz * s + s / 2, GC);
-    if (!c.off) { gx = Math.floor(c.x / s); gz = Math.floor(c.z / s); }
-  }
+  const c = BF.planet.canon(gx * s + s / 2, gz * s + s / 2, GC);
+  if (!c.off) { gx = Math.floor(c.x / s); gz = Math.floor(c.z / s); }
   return sepKey(gx, gz);
 }
 const player = () => BF.player;
@@ -963,7 +959,7 @@ function updateArrows(dt) {
     let hitPlayer = false;
     for (let s = 0; s < steps; s++) {
       a.pos.addScaledVector(a.vel, dt / steps);
-      if (onPlanet()) BF.planet.reframe(a.pos, -1, null, a.vel);   // past a face edge: back on the canonical square, turned
+      BF.planet.reframe(a.pos, -1, null, a.vel);   // past a face edge: back on the canonical square, turned
       if (BF.world.isSolid(a.pos.x, a.pos.y, a.pos.z)) {
         if (a.byPlayer) {   // back up and creep in 5 cm steps, so the tip sits just inside the first solid block on the path
           const sp = a.vel.length(), back = sp * dt / steps;
@@ -2567,7 +2563,7 @@ function updateVillages(dt) {
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
     if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); applyDead(rec); }
-    const lp = onPlanet() ? BF.planet.local(v, pp, VQ) : pp;   // (the planet: the player seen from the village, across a face edge)
+    const lp = BF.planet.local(v, pp, VQ);   // (the player seen from the village, across a face edge)
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - lp.x, v.z - lp.z) > 80;
     if (away && !(BF.villageSim && BF.villageSim.isActive(key))) continue;   // far villages run while their chunks are kept (villagesim.js)
@@ -2674,7 +2670,7 @@ BF.mobs = {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
         let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
-        if (onPlanet()) { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
+        { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
         if (Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {

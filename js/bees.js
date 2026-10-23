@@ -50,14 +50,13 @@ const pk = (x, y, z) => x + "," + y + "," + z;
 const ck = (cx, cz) => cx + "," + cz;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const CS = () => BF.CS || 16;
-// the planet: q seen from p (its x / z in p's frame, with the quarter turns taking q's directions into it); q itself off the planet
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet && BF.planet.isPlanet());
-const seen = (p, q, out) => (onPlanet() ? BF.planet.local(p, q, out || {}) : q);
+// q seen from p (its x / z in p's frame, with the quarter turns taking q's directions into it)
+const seen = (p, q, out) => BF.planet.local(p, q, out || {});
 // the canonical key of block (x, y, z), however it was addressed
 const CC = {};
-const ckey = (x, y, z) => { if (!onPlanet()) return pk(x, y, z); const c = BF.planet.canonCell(x, z, CC); return c.off ? pk(x, y, z) : pk(c.x, y, c.z); };
+const ckey = (x, y, z) => { const c = BF.planet.canonCell(x, z, CC); return c.off ? pk(x, y, z) : pk(c.x, y, c.z); };
 // the canonical chunk key of chunk (cx, cz) in some face frame
-const cck = (cx, cz) => { if (!onPlanet()) return ck(cx, cz); const c = BF.planet.canonCell(cx * CS() + 8, cz * CS() + 8, CC); return c.off ? null : ck(Math.floor(c.x / CS()), Math.floor(c.z / CS())); };
+const cck = (cx, cz) => { const c = BF.planet.canonCell(cx * CS() + 8, cz * CS() + 8, CC); return c.off ? null : ck(Math.floor(c.x / CS()), Math.floor(c.z / CS())); };
 function hash(x, y, z, salt) {
   let h = (Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663) ^ Math.imul(z | 0, 83492791) ^ Math.imul(salt | 0, 40503)) >>> 0;
   h ^= h >>> 16; h = Math.imul(h, 0x45d9f3b) >>> 0; h ^= h >>> 16;
@@ -120,11 +119,11 @@ const FQ = {};
 function flowersNear(h, fresh) {
   const now = simNow();
   if (!fresh && h.fl && now - h.flT < 8) return h.fl;
-  const cs = CS(), out = [], pl = onPlanet();
+  const cs = CS(), out = [];
   for (let cz = Math.floor((h.z - R) / cs); cz <= Math.floor((h.z + R) / cs); cz++) for (let cx = Math.floor((h.x - R) / cs); cx <= Math.floor((h.x + R) / cs); cx++) {
     const key = cck(cx, cz), s = key && flowers.get(key);
     if (!s) continue;
-    const turned = pl && key !== ck(cx, cz);   // a chunk past an edge: its cells seen from h
+    const turned = key !== ck(cx, cz);   // a chunk past an edge: its cells seen from h
     for (const k of s) {
       const p = k.split(",").map(Number);
       if (turned) { const q = BF.planet.local(h, { x: p[0] + 0.5, z: p[2] + 0.5 }, FQ); p[0] = Math.floor(q.x); p[2] = Math.floor(q.z); }
@@ -504,7 +503,6 @@ function onSet(x, y, z, old, id) {
 // The planet: bee b, now belonging to home o, flies on in o's frame (a home on another face: its position and heading turned with it,
 // its errand dropped, since its landing spot was in the old frame).
 function toFrameOf(b, o) {
-  if (!onPlanet()) return;
   const v = { x: b.vx, z: b.vz }, hd = { yaw: 0 };
   const q = BF.planet.reframe(b, BF.planet.face(o.x, o.z), hd, v);
   if (q == null) return;
@@ -633,12 +631,11 @@ function draw() {
   mesh.material.color.setRGB(light, light, light);
   if (!dirty) return;
   dirty = false;
-  const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee"), pl = onPlanet();
+  const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee");
   for (let i = 0; i < n; i++) {
     const b = bees[i], s = b.mode === "land" && b.land ? b.land : null;
     // the planet: the bee seen from the mesh (in the player's frame), its directions turned with it
-    let bx = b.x, bz = b.z, q = 0;
-    if (pl) { const r = BF.planet.local(mesh.position, b, DQ); bx = r.x; bz = r.z; q = r.turn; }
+    const r = BF.planet.local(mesh.position, b, DQ), bx = r.x, bz = r.z, q = r.turn;
     if (s) {   // landed: belly on the surface, back along its normal
       let nx = s.nx, nz = s.nz;
       if (q) { BF.planet.turnVec(q, nx, nz, DV); nx = DV[0]; nz = DV[1]; }

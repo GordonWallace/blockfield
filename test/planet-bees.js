@@ -11,7 +11,7 @@
 // node test/run.js /tmp/pb test/planet-bees.js
 module.exports = async (pg) => {
   // (the farming suite still boots generator 3 in CI: the planet is made here)
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); if (!BF.planet.isPlanet() || BF.state.seed !== 123) { BF.newWorld(123, { gen: 4 }); BF.player.start(); } });
+  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); if (BF.state.seed !== 123) { BF.newWorld(123, { gen: 4 }); BF.player.start(); } });
   await pg.waitForTimeout(2000);
   await pg.waitForFunction(() => !BF.preparing, null, { timeout: 180000, polling: 500 }).catch(() => {});
   let bad = 0;
