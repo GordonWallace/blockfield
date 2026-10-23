@@ -89,7 +89,7 @@ const herds = new Map();       // herd id -> {id, cx, cz, dir}
 let nextHerd = 1;
 const isHorseBiome = (x, z) => { try { return HORSE_BIOMES.has(BF.worldgen.biomeAt(x, z).id); } catch (_) { return false; } };
 function newRec(o) {
-  const rs = BF.rand.at("horse", o.x, o.z, null, o.y);   // a new horse's looks and stats: from where and when it appears
+  const rs = BF.rand.at("horse", o.x, o.z, null, nextId);   // a new horse's looks and stats: from where, when and its number
   const st = o.stats || rollStats(rs);
   const r = { hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
     maxHp: st.hp, hp: st.hp, speed: st.speed, jump: st.jump, tamed: !!o.tamed, owner: o.owner || null, saddle: !!o.saddle, temper: 0,
@@ -338,7 +338,7 @@ function moveHerds(dt) {
 function spawnHerdAt(x, z) {
   const W = BF.world, gy = W.heightAt(x, z);
   if (W.getBlock(x, gy, z) !== BF.B.grass) return null;
-  const r = BF.rand.at("herd spawn", x, z);
+  const r = BF.rand.at("herd spawn", x, z, null, nextHerd);   // (the herd number too: tests make several on one spot in a tick)
   const h = { id: nextHerd++, cx: x + 0.5, cz: z + 0.5, dir: r.next() * Math.PI * 2 };
   herds.set(h.id, h);
   const n = irnd(r, 2, 6);
