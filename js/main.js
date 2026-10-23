@@ -232,6 +232,7 @@ function simStep(h) {
   BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
   if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
   BF.world.tickSim();   // the think hooks, then apply the requests, block ticks, deliver results (js/world.js)
+  if (BF.regions) BF.regions.tick();   // mobs and drops that changed region move in the region index (js/regions.js)
   PF.lap(PF.C.world);
   PF.endStep(h);
 }
