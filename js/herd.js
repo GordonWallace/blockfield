@@ -14,7 +14,7 @@
 const BF = (window.BF = window.BF || {});
 
 const LOCAL_MAX = 24, LOCAL_R = 16;   // no breeding when this many of a kind are already within this many blocks
-const rnd = (a, b) => a + Math.random() * (b - a);
+const rnd = (m, a, b) => BF.rand.of(m).range(a, b);   // the mob's seeded stream (js/rand.js)
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const live = o => !!(o && !o.dead && !o.removed);
 let ids = 0;
@@ -66,14 +66,14 @@ function mateStep(m, dt, out, t, c) {
   if (m.mate && (!live(m.mate) || !c.willing(m.mate, t))) m.mate = null;
   if (!m.mate) {
     if (m.mateT > 0) return false;
-    m.mateT = rnd(1, 2);
+    m.mateT = rnd(m, 1, 2);
     m.mate = c.find(m, t);
     if (!m.mate) return false;
     m.mateSeek = 0;
   }
   const o = m.mate, q = seenXZ(m.position, o.position), dx = q.x - m.position.x, dz = q.z - m.position.z, d = Math.hypot(dx, dz), sp = m.def.speed;
   m.mateSeek += dt;
-  if (d > c.mateR + 4 || m.mateSeek > 30) { m.mate = null; m.mateT = rnd(6, 10); return false; }
+  if (d > c.mateR + 4 || m.mateSeek > 30) { m.mate = null; m.mateT = rnd(m, 6, 10); return false; }
   m.ai.mode = "idle"; m.ai.t = 1; m.lookAt = o;
   if (d < c.meet) { if (mid(m) < mid(o)) c.breed(m, o, t); return true; }
   out.x = dx / d * sp; out.z = dz / d * sp;
