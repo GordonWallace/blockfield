@@ -27,7 +27,9 @@ module.exports = async (pg, out) => {
     m.store = m.store || { stage: null, checkT: 99, avoid: {}, stored: {}, order: null };
     m.store.order = { spot, until: BF.sky.day + BF.sky.time + 1 };
     T.inv.add(f.inv, I.chest, 1);
-    const delivered = S.deliver(f, m, spot);
+    const req = S.deliver(f, m, spot);
+    BF.req.apply(); BF.req.deliver();   // the delivery is a request (spec r15-19): applied as a tick would
+    const delivered = !!(req && req.result && req.result.ok);
     window.__t = { key: S.keyOf(m), spot };
     BF.player.spawn(spot.x + 0.5, spot.y + 0.01, spot.z + 1.5);
     BF.inventory.clear(); BF.inventory.add(I.cobblestone, 1);

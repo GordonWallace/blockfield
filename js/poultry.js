@@ -483,7 +483,7 @@ function shutGates() {
     const g = toShut[i], [x, y, z] = g.at, bk = BF.world.isLoaded(x, z) ? BF.blocks[BF.world.getBlock(x, y, z)] : null;
     if (!bk || !bk.gate || !bk.gate.open || BF.simNow() - g.t > 120) { toShut.splice(i, 1); continue; }
     if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || (live(g.m) && Math.hypot(x + 0.5 - g.m.position.x, z + 0.5 - g.m.position.z) < 1.5)) continue;
-    BF.world.setGate(x, y, z, false); toShut.splice(i, 1);
+    BF.blockReq.door(g.m, x, y, z, false); toShut.splice(i, 1);   // a request (spec r15-19, js/blockreqs.js)
   }
 }
 function loot(m, id, n, where) {
@@ -558,7 +558,7 @@ function lead(m, S, tk, dt, out) {
   if (!last || Math.hypot(last[0] - p.x, last[2] - p.z) > 0.6) { S.trail.push([p.x, p.y, p.z]); if (S.trail.length > 60) { S.trail.shift(); S.trailBase++; } }
   if (coop.gate) {   // hold the gate open while the chicken is on its way in
     const [gx, gz] = coop.gate, gy = coop.y + 1, bk = BF.blocks[BF.world.getBlock(gx, gy, gz)];
-    if (bk && bk.gate && Math.hypot(gx + 0.5 - p.x, gz + 0.5 - p.z) < 3) { if (!bk.gate.open) BF.world.setGate(gx, gy, gz, true); S.gateHeld = [gx, gy, gz]; }
+    if (bk && bk.gate && Math.hypot(gx + 0.5 - p.x, gz + 0.5 - p.z) < 3) { if (!bk.gate.open) BF.blockReq.door(m, gx, gy, gz, true); S.gateHeld = [gx, gy, gz]; }
     if (bk && bk.gate && bk.gate.open) {   // not shut behind it: by its own walking (mobs.js villagerDoors) or an earlier fetch's pending close
       S.gateHeld = [gx, gy, gz];
       if (m.ai.doors) m.ai.doors = m.ai.doors.filter(([x, y, z]) => !(x === gx && y === gy && z === gz));
