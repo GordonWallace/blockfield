@@ -236,7 +236,7 @@ function mayHostile(x, y, z) {
   const i = areaOf.get(ck(x, z)), A = areaList[i != null ? i : areaList.length - 1];
   if (A && A.h >= A.cap) return false;
   const p = BF.player && BF.player.position;
-  const q = p && BF.planet && BF.planet.isPlanet() ? BF.planet.local({ x, z }, p) : p;   // (across a face edge: seen from the spot)
+  const q = p && BF.planet.local({ x, z }, p);   // (across a face edge: seen from the spot)
   if (p && !BF.player.dead && Math.hypot(q.x - x, p.y - y, q.z - z) < BUFFER) return false;
   if (targetsDirty) { targetsDirty = false; rebuildTargets(); }   // fresh positions: villagers wake, walk home or load with their village
   const cx = Math.floor(x / BF.CS), cz = Math.floor(z / BF.CS);

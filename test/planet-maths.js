@@ -5,8 +5,8 @@
 //  - handedness: grid u, up and grid v form a right-handed frame on the sphere, as Blockfield draws x, y, z (not mirrored)
 //  - atlas: canon of every edge's margin agrees with wrap, block cells map to cells and back, rel / distance agree with the great
 //    circle near edges, wedges and opposite faces are flagged, lat/lon round-trips, recanon keeps a walk straight
-//  - one world: the helpers' identity branches for the flat generators 1 to 3 were removed with them (r14-24); isPlanet() is always
-//    true and the helpers treat any point as an atlas point, whatever BF.state.gen says
+//  - one world: the helpers' identity branches for the flat generators 1 to 3 were removed with them (r14-24); the helpers treat any
+//    point as an atlas point, whatever BF.state.gen says, and isPlanet() is gone (idea-045)
 global.window = {};
 require(__dirname + "/../js/planet.js");
 const BF = window.BF, P = BF.planet, N = P.N;
@@ -139,7 +139,7 @@ BF.state = { gen: 4 }; BF.SEA = 0;
 {
   BF.state.gen = 3;
   const c = P.canon(-12.5, 99, {}), m = P.canon(P.W * 4 + N - 10, N + 5, {});
-  check(P.isPlanet() && c.off && m.f !== 4 && !m.off, "isPlanet() is always true: an old generator number changes nothing, a point left of the atlas is off it and a margin point is mapped");
+  check(P.isPlanet === undefined && c.off && m.f !== 4 && !m.off, "no isPlanet(): an old generator number changes nothing, a point left of the atlas is off it and a margin point is mapped");
   BF.state.gen = 4;
 }
 
