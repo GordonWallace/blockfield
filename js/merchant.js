@@ -24,6 +24,7 @@
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 
 const PROF = "merchant";
 const RANGE = 600;              // blocks from home village centre to the other village's centre (a trip must also fit in MAX_PLAN_DAYS)
@@ -65,7 +66,7 @@ const PL = () => BF.planet;
 const pdist = (a, b) => PL().distance(a, b);
 const LQ = {};
 const seenFrom = (a, x, z) => { LQ.x = x; LQ.z = z; return PL().local(a, LQ, LQ); };
-const state = m => m.mc || (m.mc = { stage: null, trip: null, last: -1e9, cd: 3 + Math.random() * 5, nav: {} });
+const state = m => m.mc || (m.mc = { stage: null, trip: null, last: -1e9, cd: 3 + RS(m).next() * 5, nav: {} });
 
 // ---------------------------------------------------------------- who may work the counter (js/jobs.js)
 const capOf = R => Math.max(1, Math.floor((R.members || []).filter(live).length / 20));
@@ -534,7 +535,7 @@ function ai(m, dt, out) {
   if (st.trip) return tripAI(m, st, dt, out);
   st.cd -= dt;
   if (st.cd > 0) return false;
-  st.cd = 20 + Math.random() * 10;
+  st.cd = 20 + RS(m).next() * 10;
   if (dayNow() - st.last < TRIP_EVERY || (m.ex && m.ex.camp)) return false;
   const p = plan(m);
   if (!p || !fitsInDay(m, p.d)) return false;

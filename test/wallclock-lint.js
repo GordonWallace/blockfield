@@ -25,6 +25,7 @@ const FILES = {
   "meshworker.js": "chunk meshing worker (r15-03, drawing only)",
   "mapview.js": "the player's map view and auto-map fill (drawing; explorers' maps are js/maps.js, filled by walking)",
   "planetgen.js": "world generation timing stats",
+  "perf.js": "the villager-seconds meter (spec r15-01): measures how long steps take, decides nothing",
   "planetrivers.js": "river solve timing stats",
   "player.js": "input: Escape grace, touch taps, the player runs in real time",
   "save.js": "save metadata (last played, last saved)",

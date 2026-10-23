@@ -46,7 +46,7 @@ module.exports = async (pg, out) => {
     const sk = M.spawn("skeleton", gx - 10, y0, gz); sk.hp = sk.maxHp = 400;
     const levels = new Set(); let hpLog = [];
     let dropsBefore = BF.drops && BF.drops.list ? BF.drops.list.length : null;
-    for (let i = 0; i < 3000 && !g.dead; i++) { step(1); levels.add(g.crackLevel || 0); if (i % 100 === 0) hpLog.push(Math.round(g.hp)); }
+    for (let i = 0; i < 3000 && !g.dead; i++) { step(1); levels.add(g.crackStage || 0); if (i % 100 === 0) hpLog.push(Math.round(g.hp)); }
     r.fight = { golemDead: g.dead, hpLog, crackLevelsSeen: [...levels], lastHurt: g.lastHurt, skeletonTarget: sk.ai.golemFoe === g || g.dead };
     step(30);
     r.fight.removed = g.removed;
@@ -69,7 +69,7 @@ module.exports = async (pg, out) => {
       const o = M.spawn("iron_golem", x, py, zz + 0.5);
       M.hurt(o, [0, 30, 55, 80][k], "a test");
       o.ai.provoked = 0; o.hurtT = 0;
-      row.push([o.hp, o.crackLevel || 0]);
+      row.push([o.hp, o.crackStage || 0]);
       o.frozen = true;
     }
     r.row = row;
@@ -81,7 +81,7 @@ module.exports = async (pg, out) => {
   console.log(JSON.stringify(res, null, 1));
   // keep the line-up still and face it
   for (let i = 0; i < 3; i++) {
-    await pg.evaluate(() => { for (const o of window.__row) { o.model.rotation.y = 0; o.yaw = 0; o.vel.set(0, 0, 0); o.hurtT = 0; } });
+    await pg.evaluate(() => { for (const o of window.__row) { o.yaw = 0; o.vel.set(0, 0, 0); o.hurtT = 0; } });
     await pg.waitForTimeout(150);
   }
   await pg.screenshot({ path: out + '-cracks.png' });

@@ -28,7 +28,8 @@ const BF = window.BF;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 const FU = BF.furnaceUse;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const dayLen = () => (BF.sky && BF.sky.dayLength) || 1200;
@@ -85,7 +86,7 @@ function take(m, f, n) {
   }
   return got;
 }
-const state = m => m.tsm || (m.tsm = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0, craft: null, furnace: null });
+const state = m => m.tsm || (m.tsm = { stage: null, deal: null, checkT: rnd(RS(m), 1, 5), avoid: {}, cd: 0, craft: null, furnace: null });
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Toolsmith") + " (Toolsmith) " + text, / at -?\d+, ?-?\d+, ?-?\d+/.test(text) ? null : m); };
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();
 
@@ -260,7 +261,7 @@ function work(m, J, dt) {
   }
   if (S.craft) {
     S.craft.t -= dt;
-    if (m.ai && Math.random() < dt * 1.5) m.ai.swingT = 0.3;   // hammering
+    if (m.ai && Math.random() < dt * 1.5) m.ai.swingT = 0.3;   // hammering   // visual
     if (S.craft.t <= 0) finishCraft(m);
     if (J && J.t < 3 && (S.craft || (plan(m) || {}).ready)) J.t = 3;   // stays while there is work at the table
   }
@@ -431,7 +432,7 @@ function ai(m, dt, out) {
       return true;
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.4 };
-    if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+    if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
     if (deal.kind === "place") {
       const ok = placeFurnace(m, s);
       S.stage = null; S.deal = null; S.checkT = 1; vdone(m);
@@ -446,7 +447,7 @@ function ai(m, dt, out) {
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { emptyFurnace(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; vdone(m); return true; }   // done
     topUpFuel(m, deal, st);
     if (S.waitT > 15 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
-    if (Math.random() < dt * 0.5) a.swingT = 0.2;
+    if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
   // buying
@@ -465,7 +466,7 @@ function ai(m, dt, out) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = doBuy(m, deal);
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5; vdone(m);

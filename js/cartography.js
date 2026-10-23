@@ -9,8 +9,9 @@
 "use strict";
 const BF = window.BF;
 const TR = () => BF.trades;
-const rnd = (a, b) => a + Math.random() * (b - a);
-const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const rndInt = (r, a, b) => a + r.int(b - a + 1);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
@@ -26,14 +27,14 @@ const blankIds = () => [1, 2, 3, 4, 5].map(n => BF.I["blank_map_" + n]);
 const maps = m => blankIds().reduce((n, id) => n + cnt(m, id), 0);
 
 // Starting inventory top-up for a new cartographer (a = inventory array, already filled by trading.stockFor).
-function seed(a) {
+function seed(a, r = BF.rand.at("stock", 0, 0)) {   // r: the villager's stream (js/trading.js stockFor)
   const inv = TR().inv, I = BF.I;
   if (I.iron_ingot == null || I.gold_ingot == null || I.paper == null) return;
   const have = id => inv.count(a, id);
   if (have(I.iron_ingot) < IRON) inv.add(a, I.iron_ingot, IRON - have(I.iron_ingot));
   if (have(I.gold_ingot) < GOLD) inv.add(a, I.gold_ingot, GOLD - have(I.gold_ingot));
-  if (Math.random() < 0.5) { if (have(I.paper) < PAPER) inv.add(a, I.paper, PAPER - have(I.paper)); }
-  else if (have(I.paper) >= PAPER) inv.remove(a, I.paper, have(I.paper) - rndInt(0, PAPER - 1));
+  if (r.next() < 0.5) { if (have(I.paper) < PAPER) inv.add(a, I.paper, PAPER - have(I.paper)); }
+  else if (have(I.paper) >= PAPER) inv.remove(a, I.paper, have(I.paper) - rndInt(r, 0, PAPER - 1));
 }
 
 // What it could craft right now: {kind: "compass" | "map" | "upgrade", from?: item id} or null.
@@ -144,7 +145,7 @@ function travel(m, st, dt, out, tx, ty, tz, speed) {
 // Villager AI step (mobs.js villagerAI, daytime): shopping trips. Returns true while it steers the villager.
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || !BF.mobs || !BF.mobs.nav || !m.village) return false;
-  const sh = m.cshop || (m.cshop = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 }), a = m.ai;
+  const sh = m.cshop || (m.cshop = { stage: null, deal: null, checkT: rnd(RS(m), 1, 5), avoid: {}, cd: 0 }), a = m.ai;
   if (skyT() >= WORK_END || m.tradingWith) { if (sh.stage) { sh.stage = null; sh.deal = null; a.route = null; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   if (!sh.stage) {
     sh.checkT -= dt;
@@ -178,7 +179,7 @@ function ai(m, dt, out) {
   sh.tt -= dt;
   if (d > 3.6) { sh.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (sh.tt <= 0) {
     const done = doDeal(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;

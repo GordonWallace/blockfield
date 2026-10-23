@@ -14,7 +14,8 @@
 const BF = window.BF;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
@@ -323,12 +324,12 @@ function decide(m) {
 const chestEmpty = c => !c.slots.some(Boolean);
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.sleeping || m.tradingWith || !m.village || !BF.mobs || !BF.mobs.nav || !BF.inventory || !BF.inventory.chestState || !keyOf(m)) return false;
-  const st = m.store || (m.store = { stage: null, checkT: rnd(1, CHECK), avoid: {}, stored: {}, order: null }), a = m.ai, N = BF.mobs.nav;
+  const st = m.store || (m.store = { stage: null, checkT: rnd(RS(m), 1, CHECK), avoid: {}, stored: {}, order: null }), a = m.ai, N = BF.mobs.nav;
   const stop = () => { st.stage = null; st.p = null; if (a.routeKind === "chest") a.route = null; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
   if (skyT() >= WORK_END) return st.stage ? stop() : false;
   if (!st.stage) {
     if ((st.checkT -= dt) > 0) return false;
-    st.checkT = CHECK * rnd(0.8, 1.2);
+    st.checkT = CHECK * rnd(RS(m), 0.8, 1.2);
     const d = decide(m);
     if (!d) return false;
     const VS = BF.villageSim;   // estimate: the walk to the chest and the time at it
@@ -358,7 +359,7 @@ function ai(m, dt, out) {
   out.faceX = p.x + 0.5; out.faceZ = p.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.5 };
   if (st.useT === PUT_T && BF.emit) BF.emit("chestOpened", p.x, p.y, p.z);
   st.useT -= dt;
-  if (st.useT > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+  if (st.useT > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
   if (BF.emit) BF.emit("chestClosed", p.x, p.y, p.z);
   if (st.act === "store") doStore(m, p); else doTake(m, p);
   st.checkT = 1;

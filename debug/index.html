@@ -45,6 +45,10 @@
   .sub { color: var(--muted); font-size: 12px; }
   .row { display: flex; justify-content: space-between; gap: 10px; } .row span:first-child { color: var(--muted); }
   canvas.spark { display: block; width: 100%; height: 34px; margin-top: 6px; }
+  #c-perf.stale .big, #c-perf.stale .psplit, #c-perf.stale canvas { opacity: .45; }   /* frozen or paused: the last figures */
+  .psplit { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 6px; align-items: center; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .psplit i { display: block; height: 4px; border-radius: 2px; background: var(--accent); }
+  .psplit b { font-weight: normal; color: var(--ink); text-align: right; }
   .bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); overflow: hidden; margin-top: 6px; } .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .chip { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); color: var(--muted); white-space: nowrap; } .chip b { color: var(--ink); font-weight: 500; }
@@ -333,6 +337,8 @@
   </div>
   <section class="cards">
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
+    <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
+      <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
     <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
     <div class="card"><h3>Biome</h3><div class="big" id="c-biome" style="font-size:20px">-</div><div class="sub" id="c-sim"></div></div>
     <div class="card"><h3>Chunks</h3><div class="big" id="c-chunks">-</div><div class="sub" id="c-queued"></div><canvas class="spark" id="s-queue"></canvas></div>
@@ -751,6 +757,7 @@ function renderTop(s) {
   if ($("raw").open) $("f3").textContent = s.text;
   spark($("s-fps"), hist.fps, "#7fbf4d", 60);
   spark($("s-queue"), hist.queue, "#79b8e8", 1);
+  renderPerf(s.perf);
 }
 
 // ---------------------------------------------------------------- world state hash (js/statehash.js, spec r15-24)
@@ -766,13 +773,25 @@ function renderHash(h) {
 }
 $("c-hashcopy").addEventListener("click", () => { if (snap && snap.hash && navigator.clipboard) navigator.clipboard.writeText(hashText(snap.hash)).catch(() => {}); });
 
-function spark(cv, data, color, minMax) {
+// the villager-seconds meter (js/perf.js): on while this screen is open; the sparkline is the game's last 2 minutes, one point a second
+function renderPerf(p) {
+  $("c-perf").classList.toggle("stale", !!(p && p.stale));
+  $("c-perf-st").textContent = !p ? "" : p.stale ? "paused" : (p.speed >= 10 ? Math.round(p.speed) : p.speed.toFixed(1)) + "x";   // the game speed it ran at
+  if (!p || p.vss == null) { $("c-vss").textContent = "-"; $("c-perf-ms").textContent = ""; $("c-split").innerHTML = ""; return; }
+  $("c-vss").innerHTML = `${fmt(Math.round(p.vss))} <small>V·s/s</small>`;
+  $("c-perf-ms").textContent = `${p.msPerStep.toFixed(2)} ms/step \u00B7 ${fmt(Math.round(p.mobss))} mob-s/s \u00B7 ${p.villagers} villagers, ${p.mobs} mobs`;
+  const sp = Object.entries(p.split || {}), max = Math.max(1e-6, ...sp.map(e => e[1]));
+  $("c-split").innerHTML = sp.map(([k, v]) => `<span>${esc(k)}</span><i style="width:${Math.round(v / max * 100)}%"></i><b>${v.toFixed(2)}</b>`).join("");
+  spark($("s-vss"), p.hist || [], "#e8c46a", 1, 120);
+}
+
+function spark(cv, data, color, minMax, n = HIST) {
   const r = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
   if (!w) return;
   if (cv.width !== w * r) { cv.width = w * r; cv.height = h * r; }
   const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
   if (data.length < 2) return;
-  const max = Math.max(minMax, ...data) * 1.1, step = w / (HIST - 1), x0 = w - (data.length - 1) * step;
+  const max = Math.max(minMax, ...data) * 1.1, step = w / (n - 1), x0 = w - (data.length - 1) * step;
   const y = v => h - 2 - (v / max) * (h - 4);
   g.beginPath(); data.forEach((v, i) => i ? g.lineTo(x0 + i * step, y(v)) : g.moveTo(x0, y(v)));
   g.lineWidth = 1.5; g.strokeStyle = color; g.lineJoin = "round"; g.stroke();
@@ -1614,7 +1633,7 @@ const gf = { levels: ["DEBUG"], kinds: [], villages: [], types: [] };   // what 
 try { Object.assign(gf, JSON.parse(localStorage.getItem(GSTORE) || "{}")); } catch (e) { /* private window: defaults */ }
 const gOff = { levels: new Set(gf.levels), kinds: new Set(gf.kinds), villages: new Set(gf.villages), types: new Set(gf.types) };
 const gSave = () => { try { localStorage.setItem(GSTORE, JSON.stringify({ levels: [...gOff.levels], kinds: [...gOff.kinds], villages: [...gOff.villages], types: [...gOff.types] })); } catch (e) {} };
-const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors" };
+const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter" };
 const NOV = "(no village)";
 function glogSet(g) { glog = g && Array.isArray(g.lines) ? g : null; gDirty = true; gRender(); }
 function glogIn(g) {

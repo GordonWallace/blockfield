@@ -29,7 +29,8 @@ const BOTTLES_LOW = 4, BOTTLES_TO = 12;
 const KIT_BOTTLES = 16;
 const DAY_SECS = 1200, WORK_START = 0.02, WORK_END = 0.45, DAWN_END = 0.1, DUSK_FROM = 0.37, CHECK = 3, TRADE_PAUSE = 1.6, CRAFT_T = 2.5, LEAD_WAIT = 20;
 
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const live = o => !!(o && !o.dead && !o.removed);
@@ -132,7 +133,7 @@ function plantSpot(m, h) {
     if (d < 2 || d > 5.5) continue;
     const x = h.x + dx, z = h.z + dz, y = w.heightAt(x, z) + 1;
     if (Math.abs(y - h.y) > 3 || !openCell(R, x, y, z, false, keep)) continue;
-    out.push({ x, y, z, d: d + Math.random() });
+    out.push({ x, y, z, d: d + RS(m).next() });
   }
   out.sort((a, b) => a.d - b.d);
   return out[0] || null;
@@ -143,7 +144,7 @@ function pickSpot(m) {
   if (!j || (S.noFlower || 0) > now()) return null;
   const hives = hivesOf(m), w = W(), best = [];
   for (let i = 0; i < 400 && best.length < 12; i++) {
-    const a = Math.random() * Math.PI * 2, d = 6 + Math.sqrt(Math.random()) * (PICK_R - 6);
+    const a = RS(m).next() * Math.PI * 2, d = 6 + Math.sqrt(RS(m).next()) * (PICK_R - 6);
     const x = Math.floor(j.x + Math.cos(a) * d), z = Math.floor(j.z + Math.sin(a) * d);
     if (!w.isLoaded(x, z)) continue;
     const top = w.heightAt(x, z);
@@ -196,7 +197,7 @@ function reserve(m) {
 }
 
 // ---------------------------------------------------------------- the beekeeper's day
-const st = m => m.bkp || (m.bkp = { stage: null, job: null, checkT: rnd(1, 4), avoid: {}, cd: 0, wait: "", next: "honey", made: { comb: 0, honey: 0, candles: 0, hives: 0, flowers: 0, led: 0, picked: 0 } });
+const st = m => m.bkp || (m.bkp = { stage: null, job: null, checkT: rnd(RS(m), 1, 4), avoid: {}, cd: 0, wait: "", next: "honey", made: { comb: 0, honey: 0, candles: 0, hives: 0, flowers: 0, led: 0, picked: 0 } });
 const avoided = (S, k) => (S.avoid[k] || 0) > now();
 const skipOffer = S => (v2, o) => avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id);
 function nextJob(m) {
@@ -330,7 +331,7 @@ function ai(m, dt, out, cont) {
       return true;
     }
     out.faceX = h.x + 0.5; out.faceZ = h.z + 0.5; m.lookAt = { position: { x: h.x + 0.5, y: h.y + 0.5, z: h.z + 0.5 }, height: 0 };
-    if (Math.random() < dt * 3) a.swingT = 0.2;
+    if (Math.random() < dt * 3) a.swingT = 0.2;   // visual
     if ((S.tt -= dt) > 0) return true;
     const T = TR().inv;
     if (job.how === "bottle" && cnt(m, I("glass_bottle")) < 1) return giveUp("no bottle");
@@ -358,7 +359,7 @@ function ai(m, dt, out, cont) {
       S.stage = "work"; S.tt = CRAFT_T;
     }
     out.faceX = k.x + 0.5; out.faceZ = k.z + 0.5;
-    if (Math.random() < dt * 3) a.swingT = 0.2;
+    if (Math.random() < dt * 3) a.swingT = 0.2;   // visual
     if ((S.tt -= dt) > 0) return true;
     craft(m, job);
     return done();
@@ -464,7 +465,7 @@ function ai(m, dt, out, cont) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const n = F.doBuy(m, job);
     S.gx = null;
