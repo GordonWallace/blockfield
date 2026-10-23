@@ -189,43 +189,35 @@ function parsePos(args, i, block) {
 }
 
 // ---------- planet coordinates (spec r14-18) ----------
-// On the planet (generator 4) commands read and print u / v on the player's current face (BF.coords), never atlas x / z. Typed
+// Commands read and print u / v on the player's current face (BF.coords), never atlas x / z. Typed
 // positions may run past the face's edges into the margin (the neighbouring faces unfolded around it, out to one face width), so
 // "~10" works across an edge; they are resolved to the canonical point before anything is placed there.
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
 const ucan = {};
 // The frame typed coordinates are in: atlas = typed + (ox, oz); x / y / z are the player's own position in it (the ~ base).
 function userFrame() {
-  const p = pos();
-  if (onPlanet()) {
-    const c = BF.planet.canon(p.x, p.z, ucan);
-    if (!c.off) return { f: c.f, ox: BF.planet.W * c.f + BF.planet.N, oz: BF.planet.N, x: c.u, y: p.y, z: c.v };
-  }
+  const p = pos(), c = BF.planet.canon(p.x, p.z, ucan);
+  if (!c.off) return { f: c.f, ox: BF.planet.W * c.f + BF.planet.N, oz: BF.planet.N, x: c.u, y: p.y, z: c.v };
   return { f: -1, ox: 0, oz: 0, x: p.x, y: p.y, z: p.z };
 }
-// The world border: on the planet, within the current face's square (the face plus its margin); 30 million blocks out in 1.3.
+// The world border: within the current face's square (the face plus its margin).
 function checkBorder(x, z) {
-  if (onPlanet()) {
-    const f = userFrame().f;
-    if (BF.planet.face(x, z) !== f || f < 0) fail(`Invalid position: off the planet (u and v must be between ${(-BF.planet.N).toLocaleString("en-US")} and ${(2 * BF.planet.N - 1).toLocaleString("en-US")} on this face)`);
-  } else if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
+  const f = userFrame().f;
+  if (BF.planet.face(x, z) !== f || f < 0) fail(`Invalid position: off the planet (u and v must be between ${(-BF.planet.N).toLocaleString("en-US")} and ${(2 * BF.planet.N - 1).toLocaleString("en-US")} on this face)`);
 }
-// A position as the player reads it (BF.coords): "face 2  u 81,920  v 81,920  y 64" on the planet, "x, y, z" otherwise.
+// A position as the player reads it (BF.coords): "face 2  u 81,920  v 81,920  y 64".
 const where = (x, y, z) => (BF.coords ? BF.coords.describe(x, y, z) : `${fmt(x)}, ${fmt(y)}, ${fmt(z)}`);
 function whereBlock(x, y, z) {
-  if (!onPlanet()) return `${x}, ${y}, ${z}`;
   const c = BF.planet.canonCell(x, z, {});
   return c.off ? `${x}, ${y}, ${z}` : `face ${c.f}  u ${c.u.toLocaleString("en-US")}  v ${c.v.toLocaleString("en-US")}  y ${y}`;
 }
 // The canonical point of a typed one (a corner wedge resolves to the nearest point on a face), with the quarter turns q from the
 // typed frame to the point's own: a yaw given in the typed frame is turned by q so the player faces the same way.
 function landing(x, z) {
-  if (!onPlanet()) return { x, z, q: 0 };
   const c = BF.planet.canon(x, z, {});
   return { x: c.x, z: c.z, q: (4 - c.turn) % 4 };
 }
-// The highest layer a teleport may reach: 1.3's build height + 832, and on the planet high enough to see the whole globe.
-const tpMaxY = () => (onPlanet() ? BF.SEA + 300000 : BF.H + 832);
+// The highest layer a teleport may reach: high enough to see the whole globe.
+const tpMaxY = () => BF.SEA + 300000;
 const isCoord = t => /^(~[+-]?(\d+\.?\d*|\.\d+)?|[+-]?(\d+\.?\d*|\.\d+))$/.test(t || "");
 
 // Ticks: "1000", "1000t", "50s", "1d" (vanilla time units).
@@ -294,7 +286,7 @@ function markCheats() {
   try { if (BF.save && BF.save.current && !BF.save.current.cheats) BF.save.current.cheats = true; } catch (_) {}
 }
 function needLoaded(x, z) {
-  if (onPlanet() && W().canonXZ && !W().canonXZ(x, z)) return;   // a corner wedge: nothing there to load (writes there are refused)
+  if (!W().canonXZ(x, z)) return;   // a corner wedge: nothing there to load (writes there are refused)
   if (!W().isLoaded(x, z)) fail("That position is not loaded");
 }
 function surfaceY(x, z) {
@@ -319,7 +311,7 @@ const C_COORD3 = (args, i) => { // x y z at i..i+2 (relative to the first coordi
   const t0 = P().target, out = [];
   const k = args.slice(0, i).length;
   let t = t0;
-  if (t0 && onPlanet()) { const b = userFrame(); t = { x: t0.x - b.ox, y: t0.y, z: t0.z - b.oz }; }   // typed coordinates are u / v
+  if (t0) { const b = userFrame(); t = { x: t0.x - b.ox, y: t0.y, z: t0.z - b.oz }; }   // typed coordinates are u / v
   if (k === 0) { out.push("~ ~ ~"); if (t) out.push(`${t.x} ${t.y} ${t.z}`); }
   else if (k === 1) { out.push("~ ~"); if (t) out.push(`${t.y} ${t.z}`); }
   else { out.push("~"); if (t) out.push(String(t.z)); }
@@ -342,21 +334,20 @@ def("help", {
   },
 });
 
-const TP_USAGE = ["/tp <x> <y> <z> [yaw] [pitch]", "/tp <x> <z>  (to the surface)"];
 const TP_PLANET = ["/tp <u> <y> <v> [yaw] [pitch]  (on your face)", "/tp <u> <v>  (to the surface)", "/tp face <0-5> <u> <v> [y]",
   "/tp <lat> <lon> [y]  (e.g. 35.26N 45E)", "/tp corner <1-8>", "/tp up <blocks>  (above the ground here)", "/tp ground"];
 const LATLON = /^([+-]?(?:\d+\.?\d*|\.\d+))°?([nsew])$/i;
 def("tp", {
-  aliases: ["teleport"], usage: TP_USAGE.concat(TP_PLANET.slice(2).map(u => u + "  (planet)")), desc: "Teleports you. ~ is relative to your position.",
+  aliases: ["teleport"], usage: TP_PLANET, desc: "Teleports you. ~ is relative to your position.",
   complete: (a, i) => {
     if (/^@/.test(a[0] || "")) { a = a.slice(1); i--; }
-    if (i === 0 && onPlanet()) return C_COORD3(a, i).concat(["face", "corner", "up", "ground"]);
-    if (onPlanet() && /^(face|corner|up|ground)$/i.test(a[0] || "")) return norm(a[0]) === "corner" && i === 1 ? ["1", "2", "3", "4", "5", "6", "7", "8"] : null;
+    if (i === 0) return C_COORD3(a, i).concat(["face", "corner", "up", "ground"]);
+    if (/^(face|corner|up|ground)$/i.test(a[0] || "")) return norm(a[0]) === "corner" && i === 1 ? ["1", "2", "3", "4", "5", "6", "7", "8"] : null;
     return i < 3 ? C_COORD3(a, i) : null;
   },
   run(a) {
     if (/^@[spa]$/.test(a[0] || "")) a = a.slice(1);
-    if (onPlanet()) { const r = planetTp(a); if (r) return r; }
+    { const r = planetTp(a); if (r) return r; }
     if (a.length === 2) {
       const b = userFrame(), pl = b.f >= 0;
       const x = parseCoord(a[0], b.x, pl ? "u" : "x") + b.ox, z = parseCoord(a[1], b.z, pl ? "v" : "z") + b.oz;
@@ -555,7 +546,7 @@ def("summon", {
     if (!BF.mobs || !mobTypes().includes(type)) fail(`Unknown entity '${a[0]}'`);
     const p = pos();
     let [x, y, z] = a.length >= 4 ? parsePos(a, 1, false) : [p.x, p.y, p.z];
-    if (y < BF.MIN_Y || y >= (BF.H || 192) + 64) fail("Invalid position for summon");
+    if (y < BF.MIN_Y || y >= BF.H + 64) fail("Invalid position for summon");
     if (a.length >= 4) { checkBorder(x, z); const L = landing(x, z); x = L.x; z = L.z; }   // mobs live at canonical points
     needLoaded(x, z);
     let variant, child = false;
@@ -639,7 +630,7 @@ def("spawnpoint", {
     let [x, y, z] = a.length ? parsePos(a, 0, true) : [Math.floor(pos().x), Math.floor(pos().y), Math.floor(pos().z)];
     checkBorder(x, z);
     if (y < BF.MIN_Y || y >= BF.H) fail(`Invalid position: y must be between ${BF.MIN_Y} and ${BF.H - 1}`);
-    if (onPlanet()) { const c = BF.planet.canonCell(x, z, {}); x = c.x; z = c.z; }
+    { const c = BF.planet.canonCell(x, z, {}); x = c.x; z = c.z; }
     BF.spawnPoint = { x: x + 0.5, y, z: z + 0.5 };
     return `Set spawn point to ${whereBlock(x, y, z)} for ${PLAYER}`;
   },
@@ -660,7 +651,7 @@ def("setblock", {
     if (!["replace", "keep", "destroy"].includes(mode)) usage("setblock");
     if (y < BF.MIN_Y || y >= BF.H) fail("Cannot place block outside of the world");
     checkBorder(x, z);
-    if (onPlanet() && W().canonXZ && !W().canonXZ(x, z)) fail("Could not set the block (that spot is past a cube corner, between two faces)");
+    if (!W().canonXZ(x, z)) fail("Could not set the block (that spot is past a cube corner, between two faces)");
     needLoaded(x, z);
     const old = W().getBlock(x, y, z);
     if (old === id || (mode === "keep" && old !== 0)) fail("Could not set the block");
@@ -722,13 +713,10 @@ def("locate", {
     const p = pos(), v = G.nearestVillage(p.x, p.z);
     if (!v) fail("Could not find a village within reasonable distance");
     const nm = BF.signs && BF.signs.villageName ? BF.signs.villageName(v) : null;
-    if (onPlanet()) {   // planet distance, compass direction, and a /tp that works from anywhere
-      const Pl = BF.planet, d = Math.round(Pl.distance(p, v)), t = Pl.toward(p, v, {});
-      const dir = BF.coords.compass(BF.coords.bearing(t.x, t.z, p.x, p.z)), c = Pl.canonCell(v.x, v.z, {});
-      return `The nearest village${nm ? " (" + nm + ")" : ""} is ${d.toLocaleString("en-US")} blocks away to the ${dir}, at face ${c.f}  u ${c.u.toLocaleString("en-US")}  v ${c.v.toLocaleString("en-US")}. /tp face ${c.f} ${c.u} ${c.v} goes there.`;
-    }
-    const d = Math.round(Math.hypot(v.x - p.x, v.z - p.z));
-    return `The nearest village${nm ? " (" + nm + ")" : ""} is at [${Math.round(v.x)}, ~, ${Math.round(v.z)}] (${d} blocks away). /tp ${Math.round(v.x)} ${Math.round(v.z)} goes there.`;
+    // planet distance, compass direction, and a /tp that works from anywhere
+    const Pl = BF.planet, d = Math.round(Pl.distance(p, v)), t = Pl.toward(p, v, {});
+    const dir = BF.coords.compass(BF.coords.bearing(t.x, t.z, p.x, p.z)), c = Pl.canonCell(v.x, v.z, {});
+    return `The nearest village${nm ? " (" + nm + ")" : ""} is ${d.toLocaleString("en-US")} blocks away to the ${dir}, at face ${c.f}  u ${c.u.toLocaleString("en-US")}  v ${c.v.toLocaleString("en-US")}. /tp face ${c.f} ${c.u} ${c.v} goes there.`;
   },
 });
 

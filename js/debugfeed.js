@@ -145,27 +145,25 @@ function detail(rec) {
   return d;
 }
 
-// Where (x, z) is from the player (spec r14-21): { dist, dx, dz, brg }. On the planet the distance is round the planet
+// Where (x, z) is from the player (spec r14-21): { dist, dx, dz, brg }. The distance is round the planet
 // (BF.planet.toward / distance), dx / dz the way there in the player's grid frame (the great circle's first step when far), and
-// brg the geographic bearing (degrees clockwise from true north; null at a pole). Off the planet: plain offsets, north = -z.
+// brg the geographic bearing (degrees clockwise from true north; null at a pole).
 const tw = {};
 function seen(pp, x, z) {
   const P = BF.planet, t = P.toward(pp, { x, z }, tw), b = P.bearing(pp.x, pp.z, t.x, t.z);
   return { dist: Math.round(t.d), dx: Math.round(t.x), dz: Math.round(t.z), brg: b == null ? null : Math.round(b) };
 }
 // The player as drawn on a village's map: [x, z, yaw] in the frame of the village's face (its villagers and buildings keep that
-// frame, r14-13), so the map stays local; null when the player is on the face opposite. Off the planet, the player's own.
+// frame, r14-13), so the map stays local; null when the player is on the face opposite.
 function meIn(x, z, pp) {
-  const P = BF.planet, yaw = BF.player.yaw || 0, F = P.isPlanet() ? P.face(x, z) : -1;
+  const P = BF.planet, yaw = BF.player.yaw || 0, F = P.face(x, z);
   const r = F >= 0 ? P.inFrame(F, pp.x, pp.z, {}) : { x: pp.x, z: pp.z, turn: 0 };
   return r ? [r1(r.x), r1(r.z), +P.turnYaw(r.turn, yaw).toFixed(2)] : null;
 }
 
-// The unit grid [dx, dz] toward true north at (x, z), for a map's north arrow; null at a pole, undefined off the planet (north is up).
+// The unit grid [dx, dz] toward true north at (x, z), for a map's north arrow; null at a pole.
 function northAt(x, z) {
-  const P = BF.planet;
-  if (!P.isPlanet()) return undefined;
-  const n = P.north(x, z);
+  const n = BF.planet.north(x, z);
   return n ? [+n[0].toFixed(3), +n[1].toFixed(3)] : null;
 }
 
@@ -243,7 +241,7 @@ function doingOf(m) {
 // toward the North Pole at the player (null at a pole).
 function mobMap(pp) {
   const kinds = [], kIdx = new Map(), acts = [], aIdx = new Map(), mobs = [];
-  const P = BF.planet, F = P.isPlanet() ? P.face(pp.x, pp.z) : -1, at = {}, CS = BF.CS;
+  const P = BF.planet, F = P.face(pp.x, pp.z), at = {}, CS = BF.CS;
   const inF = (x, z) => F < 0 ? (at.x = x, at.z = z, at) : P.inFrame(F, x, z, at);
   const idx = (map, arr, v) => { let i = map.get(v); if (i == null) { map.set(v, i = arr.length); arr.push(v); } return i; };
   for (const m of BF.mobs.list) {
@@ -273,6 +271,15 @@ function mobMap(pp) {
   return out;
 }
 
+// The world state hash (js/statehash.js) and its parts, for bug reports: worked out every HASH_EVERY ms (about 15 ms with a 55-villager village loaded), not on every snapshot.
+const HASH_EVERY = 10000;
+let hashT = -Infinity;
+function stateHash() {
+  if (!BF.stateHash) return undefined;
+  if (Date.now() - hashT >= HASH_EVERY || !BF.stateHash.last) { hashT = Date.now(); BF.stateHash.full(); }
+  return BF.stateHash.last;
+}
+
 function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
@@ -285,12 +292,13 @@ function snapshot() {
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
     // the planet debug toggles (js/view.js setDebug: F3 + B / C / R, or the debug screen's Planet section) and which request from the
     // screen they include (tv)
-    pt: BF.view && BF.view.debug && BF.planet.isPlanet() ? { tv: ptv, ...BF.view.debug } : null,
-    loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), maxAiMs: BF.villageSim.LIMITS.aiMs, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
+    pt: BF.view && BF.view.debug ? { tv: ptv, ...BF.view.debug } : null,
+    loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), aiWork: BF.mobs.aiWork ? BF.mobs.aiWork() : 0, maxAiWork: BF.villageSim.LIMITS.aiWork, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
     alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
+    hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
 
