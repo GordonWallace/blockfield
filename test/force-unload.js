@@ -24,20 +24,25 @@ module.exports = async (pg) => {
   await pg.evaluate(k => {
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
     const T = { what: "Test errand", secs: 300, t0: BF.sky.day + BF.sky.time, end: BF.sky.day + BF.sky.time + 300 / 1200 };   // on a task, not at leisure
-    const put = () => { if (m.vtask !== T) m.vtask = T; m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
+    const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
     Object.defineProperty(m, "sleeping", { get: () => false, set: () => {}, configurable: true });   // held out and awake, however slow the frames
+    // ...and on the test's task: the village checks inside the game step, right after the villager's own AI, which may end or replace a task
+    // the timer had set (spec r15-16), so the task is held the same way
+    Object.defineProperty(m, "vtask", { get: () => T, set: () => {}, configurable: true });
     // pinned before every game tick (the world runs 20 ticks a game second whatever the frame rate, spec r15-10: a real-time timer
     // between frames would let several ticks run with the villager walking off or its task done)
     const up = BF.mobs.update, ts = BF.world.tickSim;
-    put(); window.__unpin = () => { BF.mobs.update = up; BF.world.tickSim = ts; };
+    put(); window.__pinned = m; window.__unpin = () => { BF.mobs.update = up; BF.world.tickSim = ts; };
     BF.mobs.update = function () { put(); return up.apply(this, arguments); };
     BF.world.tickSim = function () { put(); return ts.apply(this, arguments); };   // (the village re-checks its villagers in tickSim)
     window.__who = BF.vlog.nameOf(m);
   }, info.key);
-  await wait(k => BF.villageSim.estimates(k).max > 0, info.key, 15000);   // the village knows it is out on an errand
+  // the village knows it is out on an errand, and keeps the ground it stands on (its window, re-checked every 0.5 game seconds: spec r15-16)
+  await wait(k => { const m = window.__pinned, CS = BF.CS;
+    return BF.villageSim.estimates(k).max > 0 && BF.villageSim.keepKeys.has(Math.floor(m.position.x / CS) + "," + Math.floor(m.position.z / CS)); }, info.key, 15000);
   await tp(info.x + 300, info.z);
   const gone = await wait(k => !BF.villageSim.isActive(k), info.key, 30000);
-  await pg.evaluate(() => window.__unpin());
+  await pg.evaluate(() => { window.__unpin(); const m = window.__pinned; if (m) { delete m.vtask; delete m.sleeping; m.vtask = null; m.sleeping = false; } });
   const after = await pg.evaluate(k => ({ left: BF.mobs.list.filter(m => m.village && m.village.key === k).length, all: BF.villageSim.errors().map(e => e.kind + ":" + e.who + ":" + (e.action || e.task) + ":" + e.why), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").map(e => e.who + ": " + e.action + " (" + e.why + ")"), who: window.__who }), info.key);
   ok("a village over the village-count limit is unloaded with a villager still out", gone && after.left === 0, after);
   ok("the forced stop of an errand is logged with its action and reason", after.errs.some(e => e.indexOf(after.who + ": went home") === 0 && e.indexOf("village count") > 0), after);
