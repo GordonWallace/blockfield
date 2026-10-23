@@ -65,6 +65,11 @@ const start = async () => {
   ok('log entries ' + g.log + '/' + want.log, g.log >= want.log && want.log > 0);
   await dbg.click('#raw summary'); await dbg.waitForTimeout(400);
   ok('F3 text matches the overlay format', /^Blockfield {2}\d+ fps\nFace \d {2}u /.test((await got()).f3));
+  // the villager-seconds meter (js/perf.js) runs while a debug screen is open: its card and the F3 text's Sim line
+  await dbg.waitForFunction(() => /V·s\/s/.test(document.getElementById('c-vss').textContent) && document.querySelectorAll('#c-split span').length === 7, null, { timeout: 15000 }).catch(() => {});
+  const pc = await dbg.evaluate(() => ({ vss: document.getElementById('c-vss').textContent, ms: document.getElementById('c-perf-ms').textContent, parts: document.querySelectorAll('#c-split span').length, f3: document.getElementById('f3').textContent }));
+  ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
+  ok('meter on in the game while the screen is open', await game.evaluate(() => BF.perf.on));
   // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
   const hs = await dbg.evaluate(() => ({ hash: document.getElementById('c-hash').textContent, parts: document.querySelectorAll('#c-hashparts .row').length }));
   const gh = await game.evaluate(() => BF.stateHash.last && { hash: BF.stateHash.last.hash, parts: BF.stateHash.PARTS.length });
