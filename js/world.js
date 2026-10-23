@@ -513,8 +513,9 @@ function createChunk(cx, cz) {
   const key = ckey(cx, cz);
   // ver counts the block changes since the chunk was created (setBlock, the band growing), colVer the same per column (lz * 16 + lx):
   // caches of block scans keyed by (chunk, ver) stay right without listening for every change, and a reloaded chunk is a new object,
-  // so they rebuild from it (r15-07)
-  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), ver: 0, colVer: new Uint32Array(CS * CS), mesh: undefined, meshes: [], light: undefined, sky: undefined };
+  // so they rebuild from it (r15-07). mapCols (js/maps.js) and logBases (js/forester.js) are such caches, declared here so every chunk keeps
+  // one shape (a property added later would slow every block lookup down)
+  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), ver: 0, colVer: new Uint32Array(CS * CS), mapCols: null, logBases: null, mesh: undefined, meshes: [], light: undefined, sky: undefined };
   const e = world.edits.get(key);
   if (e) {
     // the band must cover every edited cell (builds above it, tunnels below it)
