@@ -571,9 +571,19 @@ function closeEditor() {
   ed.open = false;
   ed.root.classList.remove("open");
   ed.ta.blur();
-  if (!ed.ro) { const [x, y, z] = ed.cell; if (signOf(wget(x, y, z))) setText(x, y, z, ed.ta.value); }
+  if (!ed.ro) {   // the player's edit: a request (spec r15-20, js/requests.js player()), so a recorded session replays it
+    const [x, y, z] = ed.cell;
+    if (BF.req && BF.req.player) BF.req.player("player.signText", x + "," + y + "," + z, { text: ed.ta.value });
+    else if (signOf(wget(x, y, z))) setText(x, y, z, ed.ta.value);
+  }
   try { if (BF.player && BF.player.uiClose) BF.player.uiClose(); } catch (err) { console.error(err); }
 }
+if (BF.req) BF.req.on("player.signText", req => {
+  const [x, y, z] = String(req.target).split(",").map(Number);
+  if (!signOf(wget(x, y, z))) return { ok: false, why: "gone" };
+  setText(x, y, z, req.data.text);
+  return { ok: true };
+});
 // every key goes to the editor while it is open (registered at load time, capture phase, like commands.js)
 addEventListener("keydown", e => {
   if (!ed.open) return;
