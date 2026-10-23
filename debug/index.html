@@ -315,6 +315,7 @@
   <div class="hstat">Seed <b id="h-seed">-</b></div>
   <div class="hstat">Gen <b id="h-gen">-</b></div>
   <div class="hstat" id="h-biomes"></div>
+  <div class="hstat" id="h-shared" title="Chunk block data in shared memory (spec r15-35): on when the game page is cross-origin isolated, as debug/server.js serves it"></div>
 </header>
 
 <div class="waiting" id="waiting">
@@ -338,6 +339,8 @@
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
     <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
       <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
+    <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
+      <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
     <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
     <div class="card"><h3>Biome</h3><div class="big" id="c-biome" style="font-size:20px">-</div><div class="sub" id="c-sim"></div></div>
     <div class="card"><h3>Chunks</h3><div class="big" id="c-chunks">-</div><div class="sub" id="c-queued"></div><canvas class="spark" id="s-queue"></canvas></div>
@@ -723,6 +726,7 @@ function renderTop(s) {
   const d = s.info;
   $("h-clock").innerHTML = `<b>${esc(d.clock)}</b>`;
   $("h-seed").textContent = d.seed; $("h-gen").textContent = d.gen; $("h-biomes").innerHTML = `Biomes <b>x${esc(d.biomeScale)}</b>`;
+  $("h-shared").innerHTML = d.shared ? `Shared memory <b>${esc(d.shared.replace(/^Shared memory: /, ""))}</b>` : "";
   const w = $("h-warp"); w.hidden = d.warp === 1 || d.warp == null; w.textContent = d.warp === 0 ? "❚❚ 0x frozen" : "⏩ " + d.warp + "x";
   $("c-fps").innerHTML = `${d.fps} <small>fps</small>`;
   $("c-calls").textContent = d.calls + " draw calls";
@@ -756,6 +760,16 @@ function renderTop(s) {
   spark($("s-fps"), hist.fps, "#7fbf4d", 60);
   spark($("s-queue"), hist.queue, "#79b8e8", 1);
   renderPerf(s.perf);
+  renderRequests(s.requests);
+}
+
+// the request queue (js/requests.js): applied and refused since the world loaded, and the direct writes left to convert, by module
+function renderRequests(q) {
+  if (!q) { $("c-req").textContent = "-"; $("c-req-sub").textContent = ""; $("c-direct").innerHTML = ""; return; }
+  $("c-req").innerHTML = `${fmt(q.applied)} <small>applied</small>`;
+  $("c-req-sub").textContent = `${fmt(q.refused)} refused \u00B7 ${fmt(q.directTotal)} direct writes`;
+  const d = Object.entries(q.direct || {}).sort((a, b) => b[1] - a[1]).slice(0, 8), max = Math.max(1, ...d.map(e => e[1]));
+  $("c-direct").innerHTML = d.map(([k, v]) => `<span>${esc(k)}</span><i style="width:${Math.round(v / max * 100)}%"></i><b>${fmt(v)}</b>`).join("");
 }
 
 // ---------------------------------------------------------------- world state hash (js/statehash.js, spec r15-24)
@@ -1631,7 +1645,7 @@ const gf = { levels: ["DEBUG"], kinds: [], villages: [], types: [] };   // what 
 try { Object.assign(gf, JSON.parse(localStorage.getItem(GSTORE) || "{}")); } catch (e) { /* private window: defaults */ }
 const gOff = { levels: new Set(gf.levels), kinds: new Set(gf.kinds), villages: new Set(gf.villages), types: new Set(gf.types) };
 const gSave = () => { try { localStorage.setItem(GSTORE, JSON.stringify({ levels: [...gOff.levels], kinds: [...gOff.kinds], villages: [...gOff.villages], types: [...gOff.types] })); } catch (e) {} };
-const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter" };
+const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter", requests: "Request queue" };
 const NOV = "(no village)";
 function glogSet(g) { glog = g && Array.isArray(g.lines) ? g : null; gDirty = true; gRender(); }
 function glogIn(g) {

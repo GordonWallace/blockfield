@@ -473,8 +473,7 @@ BF.villageSim = {
   reset() { simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
-    const W = BF.world, prev = W.tickSim;
-    W.tickSim = () => { prev(); step(); };   // re-checks on the game clock (update)
+    BF.world.onThink(step);   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
   },
 };
 })();

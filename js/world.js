@@ -15,6 +15,33 @@ BF.CS = CS;
 // A chunk is a 16x16 column of 16-high sections. c.secs[sy - c.lo] is a Uint16Array(4096) (index (ly << 8 | lz << 4 | lx)) or a
 // number (the whole section is that block id). Sections outside [c.lo, c.hi) are not loaded: below = stone, above = air.
 const SECN = 4096;
+
+// ---------- shared memory (spec r15-35) ----------
+// Section arrays (blocks here, block light in js/light.js, sky light in js/skylight.js) are allocated by BF.secArray: on a
+// SharedArrayBuffer when the page is cross-origin isolated (debug/server.js, so ./run.sh, sends the COOP / COEP headers), so simulation
+// workers can read blocks without copying (r15-38, r15-39); else (opened as a file, the Artifact, a server without the headers) on an
+// ordinary ArrayBuffer. The views are the same typed arrays either way, so no other code changes.
+// Write rule: only the thread that owns a chunk writes its arrays (the main thread, until r15-39 gives regions to workers). Other threads
+// read start-of-tick state (the two-phase tick, r15-17): they never read while the owner writes, so there are no locks or Atomics.
+// Saves hold block edits only (js/save.js), never section arrays; anything that does store or send one must copy it first (a.slice()
+// returns an unshared copy), because IndexedDB can't store a SharedArrayBuffer in every browser, and postMessage would share it
+// (and can't transfer it: meshJob(c, true) copies the sections it sends to the mesher workers, r15-03).
+// An unloaded chunk's arrays are freed like any other object, once nothing references the chunk.
+const SHARED = typeof SharedArrayBuffer === "function" && self.crossOriginIsolated === true;
+BF.shared = {
+  on: SHARED,
+  text: SHARED ? "Shared memory: on" : "Shared memory: off: page not isolated",
+  // bytes of section arrays (blocks, block light, sky light) held by loaded chunks, and how many arrays
+  usage() {
+    let bytes = 0, arrays = 0;
+    const add = list => { if (list) for (const a of list) if (a && typeof a === "object") { bytes += a.byteLength; arrays++; } };
+    for (const c of world.chunks.values()) { add(c.secs); add(c.light); add(c.sky); }
+    return { bytes, arrays };
+  },
+};
+BF.secArray = SHARED
+  ? (Ctor, n) => new Ctor(new SharedArrayBuffer(n * Ctor.BYTES_PER_ELEMENT))
+  : (Ctor, n) => new Ctor(n);
 const vIdx = (x, y, z) => (y * CS + z) * CS + x;      // index inside a legacy full-height window (y from 0)
 BF.vIdx = vIdx;
 const ckey = (cx, cz) => cx + "," + cz;
@@ -241,6 +268,11 @@ world.cell = function (x, z, out) {
   out.lx = RX - Math.floor(RX / CS) * CS; out.lz = RZ - Math.floor(RZ / CS) * CS;
   return out;
 };
+// A module's reusable out object for world.cell: its .c is cleared when that chunk unloads, so a long-lived scratch object never keeps an
+// unloaded chunk's arrays alive (r15-35). Per-call out objects ({}) need nothing.
+const scratchCells = [];
+world.scratchCell = () => { const o = { c: null }; scratchCells.push(o); return o; };
+const forgetChunk = c => { if (LC === c) LC = undefined; for (const o of scratchCells) if (o.c === c) o.c = null; };
 // The chunk at chunk coordinates (cx, cz), through the margin (canonical coordinates are a plain lookup).
 world.chunkC = (cx, cz) => {
   const k = resChunk(cx, cz);
@@ -291,7 +323,7 @@ function secSet(c, lx, y, lz, id) {
   let s = c.secs[si];
   if (typeof s === "number") {
     if (s === id) return;
-    const a = new Uint16Array(SECN); if (s) a.fill(s);
+    const a = BF.secArray(Uint16Array, SECN); if (s) a.fill(s);
     c.secs[si] = s = a;
   }
   s[((y & 15) << 8) | (lz << 4) | lx] = id;
@@ -304,7 +336,8 @@ function sliceSections(data, n) {
     const o = i * SECN, f = data[o];
     let uni = true;
     for (let k = 1; k < SECN; k++) if (data[o + k] !== f) { uni = false; break; }
-    out[i] = uni ? f : data.slice(o, o + SECN);
+    if (uni) out[i] = f;
+    else { const a = BF.secArray(Uint16Array, SECN); a.set(data.subarray(o, o + SECN)); out[i] = a; }
   }
   return out;
 }
@@ -519,7 +552,7 @@ function unload(key) {
   const c = world.chunks.get(key);
   if (!c) return;
   disposeMeshes(c);
-  world.chunks.delete(key); CGEN++;
+  world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   MP.queue.delete(c);
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
@@ -538,7 +571,7 @@ function purge(key) {
     for (const a of [...Object.values(g.attributes), g.index]) if (a) { if (a.uploaded) a.array = NOARR; else a.onUpload(freeArray); }
   }
   c.meshes = [];
-  world.chunks.delete(key); CGEN++;
+  world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   world.purged = (world.purged || 0) + 1;
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
@@ -1092,19 +1125,24 @@ function desiredLevel(x, y, z, cur) {
   return best <= 7 ? best : 0;
 }
 
+// "x,y,z" cell keys as [x, y, z, key], sorted by x, then z, then y: the block ticks' fixed order (spec r15-17)
+function canonOrder(keys) {
+  const a = [];
+  for (const k of keys) { const p = k.split(","); a.push([+p[0], +p[1], +p[2], k]); }
+  return a.sort((p, q) => p[0] - q[0] || p[2] - q[2] || p[1] - q[1]);
+}
 function fluidTick() {
   const now = BF.simNow();
   if (now - fluidLast < FLUID_TICK) return;
   fluidLast = now;
   if (!fluidQ.size) return;
   const FLUID = BF.FLUID, REPL = BF.REPLACEABLE;
-  const batch = [...fluidQ];
+  const batch = canonOrder(fluidQ);   // in canonical cell order (spec r15-17), so the budget's cut doesn't depend on history
   fluidQ.clear();
   let budget = 3000;
   const changes = [];
-  for (const k of batch) {
+  for (const [x, y, z, k] of batch) {
     if (budget-- <= 0) { fluidQ.add(k); continue; }
-    const [x, y, z] = k.split(",").map(Number);
     if (!world.isLoaded(x, z)) continue;
     const id = world.getBlock(x, y, z);
     const cur = FLUID[id];
@@ -1134,8 +1172,7 @@ function growTick() {
   if (now - growLast < 1) return;
   const dt = Math.min(5, now - growLast);
   growLast = now;
-  for (const k of growing) {
-    const [x, y, z] = k.split(",").map(Number);
+  for (const [x, y, z, k] of canonOrder(growing)) {
     if (!world.isLoaded(x, z)) continue; // keeps waiting until its chunk is back
     const id = world.getBlock(x, y, z), b = BF.blocks[id];
     if (b && b.growsUp) { if (caneTick(x, y, z, id, b, dt)) growing.delete(k); continue; }
@@ -1163,8 +1200,25 @@ function caneTick(x, y, z, id, b, dt) {
   return false;
 }
 world.growingCount = () => growing.size;
-// Fluid spread and crop growth run on the simulation clock (BF.simNow), once per sim step, so fast-forward (js/timewarp.js) speeds them up too.
-world.tickSim = () => { fluidTick(); growTick(); };
+// The rest of each simulation tick (spec r15-17, js/requests.js), after the sky, mobs, drops, boats and furnaces:
+// - think hooks (world.onThink: villages, their stats and economy, foresters), the end of the think phase;
+// - apply: the tick's requests (BF.req.apply);
+// - block ticks (world.onBlockTick: fluid spread, crop growth, farmland, grass), in registration order, each in canonical cell order;
+// - deliver: the requests' results.
+// All on the simulation clock (BF.simNow), once per tick, so fast-forward (js/timewarp.js) speeds them up too.
+const thinkHooks = [], blockHooks = [fluidTick, growTick];
+world.onThink = fn => { thinkHooks.push(fn); };
+world.onBlockTick = fn => { blockHooks.push(fn); };
+function blockTicks() { for (const f of blockHooks) f(); }
+world.tickSim = () => {
+  for (const f of thinkHooks) f();
+  const R = BF.req;
+  if (!R) { blockTicks(); return; }
+  R.apply();
+  R.blocks(blockTicks);
+  R.deliver();
+  R.endTick();
+};
 
 // ---------- raycast ----------
 // DDA voxel raycast. Returns {x,y,z,id,normal:[nx,ny,nz],dist} for the first block where

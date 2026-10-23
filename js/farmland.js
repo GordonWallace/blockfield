@@ -63,7 +63,7 @@ function waterNear(x, y, z) {
   return unknown ? null : false;
 }
 // Rain (not snow) reaches the block: a rainy biome at this height and nothing light-blocking above (crops don't count).
-const CELL = {};
+const CELL = BF.world.scratchCell();   // (world.cell's out object: cleared when its chunk unloads, r15-35)
 function rainExposed(x, y, z) {
   const Wt = BF.weather;
   if (!Wt || !Wt.precipAt || Wt.precipAt(x, z, y + 1) !== 1) return false;
@@ -201,7 +201,7 @@ const farmland = {
 BF.farmland = farmland;
 {
   const world = BF.world;
-  if (world && world.tickSim) { const prev = world.tickSim; world.tickSim = () => { prev(); tick(); }; }
+  if (world && world.onBlockTick) world.onBlockTick(tick);   // a block tick (spec r15-17, js/world.js tickSim)
   hook();
 }
 })();
