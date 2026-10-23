@@ -40,9 +40,13 @@ function follow(m, dt, out, tx, tz, stop, speed) {
 // The nearest willing mate for m: same type, same pen (pen(o) === pen(m); wild ones have none), within r blocks and 2 of height. null when the
 // place is crowded (LOCAL_MAX of its kind within LOCAL_R blocks).
 function findMate(m, t, willing, pen, r) {
+  const M = BF.mobs, scan = L => mateIn(L, m, t, willing, pen, r);
+  return M.checkScan("herd.findMate", scan(M.near(m.position, Math.max(r, LOCAL_R), true)), scan);
+}
+function mateIn(L, m, t, willing, pen, r) {
   let best = null, bd = r * r, near = 0;
   const mp = pen(m);
-  for (const o of BF.mobs.list) {
+  for (const o of L) {
     if (o.type !== m.type || !live(o)) continue;
     const q = seenXZ(m.position, o.position), dx = q.x - m.position.x, dz = q.z - m.position.z, d2 = dx * dx + dz * dz;
     if (d2 < LOCAL_R * LOCAL_R) near++;
@@ -53,9 +57,8 @@ function findMate(m, t, willing, pen, r) {
 }
 // How many of m's kind stand within LOCAL_R blocks of it (m too).
 function crowd(m) {
-  let n = 0;
-  for (const o of BF.mobs.list) if (o.type === m.type && live(o) && (q => Math.hypot(q.x - m.position.x, q.z - m.position.z))(seenXZ(m.position, o.position)) < LOCAL_R) n++;
-  return n;
+  const M = BF.mobs, scan = L => L.filter(o => o.type === m.type && live(o) && (q => Math.hypot(q.x - m.position.x, q.z - m.position.z))(seenXZ(m.position, o.position)) < LOCAL_R);
+  return M.checkScan("herd.crowd", scan(M.near(m.position, LOCAL_R, true)), scan).length;
 }
 // One AI step of a willing adult: looks for a mate now and then (c.find(m, t)), walks to it and breeds (c.breed(a, b, t)) once within c.meet.
 // Gives up after 30 s or when the mate gets more than c.mateR + 4 away. c = {willing(m, t), find(m, t), breed(a, b, t), mateR, meet}.

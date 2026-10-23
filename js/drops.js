@@ -11,6 +11,12 @@ const LQ = {};
 const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
 const HW = 0.125, H = 0.25, GRAV = 18, PICKUP_R = 1.6, PICKUP_DELAY = 0.5, LIFE = 300, MAX = 300;
 const loader = new THREE.TextureLoader(), mats = new Map();
+// Picking an item up is a "pickup" request (spec r15-22): the player (in drops.update) and foresters (js/forester.js) ask during the think,
+// and the queue gives the item to the first in order: the player first, then villagers by id. Each takes what it has room for, and the
+// rest stays on the ground for the next. target: the drop's key "d<n>" (from a counter, per session; not saved), data {}.
+// Result {ok, got, left}; refused when the drop is gone (picked up, merged, despawned) or the requester is.
+let nextKey = 1;
+const byKey = new Map();   // "d<n>" -> drop
 let scene = null;
 
 function matFor(id) {
@@ -24,6 +30,20 @@ function matFor(id) {
   return m;
 }
 
+// An identical stack within a block of d, the first in the list (spec r15-31: from the region index's drops around d; in tests with
+// BF.regions.verifyQueries also by the scan of the whole list it replaced).
+const mergeable = d => o => o !== d && o.id === d.id && o.age > 1 && (q => (q.x - d.pos.x) ** 2 + (o.pos.y - d.pos.y) ** 2 + (q.z - d.pos.z) ** 2)(seenXZ(d.pos, o.pos)) < 1;
+function mergeWith(d) {
+  const R = BF.regions, ok = mergeable(d);
+  if (!R || !R.around) return drops.list.find(ok) || null;
+  let best = null, bi = Infinity;
+  for (const k of R.around(d.pos.x, d.pos.z, 5)) {
+    const s = R.dropsIn(k);
+    if (s) for (const o of s) if (ok(o)) { const i = drops.list.indexOf(o); if (i >= 0 && i < bi) { bi = i; best = o; } }
+  }
+  if (R.verifyQueries && R.checkQuery) R.checkQuery("drops.merge", best ? [best] : [], () => { const o = drops.list.find(ok); return o ? [o] : []; });
+  return best;
+}
 const drops = {
   list: [],
 
@@ -40,9 +60,10 @@ const drops = {
     const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + drops.list.length * 4099);   // the toss: seeded by the spot, tick and count (js/rand.js)
     const a = r.next() * Math.PI * 2, s = 1 + r.next() * 1.5;
     const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + r.next() * 2, Math.sin(a) * s);
-    const d = { id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
+    const d = { key: "d" + nextKey++, id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
+    byKey.set(d.key, d);
     if (BF.regions) BF.regions.dropAdded(d);   // the region index (js/regions.js)
     return d;
   },
@@ -63,6 +84,7 @@ const drops = {
   remove(d) {
     const i = drops.list.indexOf(d);
     if (i >= 0) drops.list.splice(i, 1);
+    byKey.delete(d.key);
     if (BF.regions) BF.regions.dropRemoved(d);
     if (d.sprite) scene.remove(d.sprite);
   },
@@ -108,10 +130,9 @@ const drops = {
       // pulled toward the player once close enough, then collected
       if (alive && d.age > d.pickupDelay && pp) {
         const q = seenXZ(d.pos, pp), dx = q.x - d.pos.x, dy = pp.y + 0.6 - d.pos.y, dz = q.z - d.pos.z, dist = Math.hypot(dx, dy, dz);
-        if (dist < 0.6) {
-          const left = BF.inventory.add(d.id, d.count, d.wear);
-          if (left <= 0) { drops.remove(d); continue; }
-          d.count = left;
+        if (dist < 0.6) {   // collected: asks for it (applied after the think, before anyone else's ask for it)
+          if (!d.wantP || BF.rand.tick - d.wantP.tick > 2) drops.ask(d, "player");
+          continue;
         } else if (dist < PICKUP_R) {
           const k = 10 / dist;
           d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
@@ -123,7 +144,7 @@ const drops = {
       }
       // merge with an identical stack lying nearby
       if (d.age > 1 && (Math.floor(d.age * 4) % 4 === 0)) {
-        const o = drops.list.find(o => o !== d && o.id === d.id && o.age > 1 && (q => (q.x - d.pos.x) ** 2 + (o.pos.y - d.pos.y) ** 2 + (q.z - d.pos.z) ** 2)(seenXZ(d.pos, o.pos)) < 1);
+        const o = mergeWith(d);
         if (o && o.count + d.count <= (BF.items[d.id].stack || 64)) { o.count += d.count; drops.remove(d); continue; }
       }
       d.vel.y -= GRAV * dt;
@@ -133,6 +154,15 @@ const drops = {
       if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
       d.sprite.material.color.setScalar(light);
     }
+  },
+
+  get: key => byKey.get(key),
+  // Asks for drop d for `from` (a mob, its id, or "player"): a "pickup" request; returns it. The player's ask is remembered on the drop
+  // (wantP) so that it applies before any villager's that tick.
+  ask(d, from) {
+    const req = BF.req.send("pickup", d.key, {}, from);
+    if (req.from === "player") d.wantP = req;
+    return req;
   },
 
   // Every frame (main.js, spec r15-10): each item drawn between where the last two ticks left it (alpha 0..1), bobbing. One flying
@@ -150,4 +180,33 @@ const drops = {
 };
 
 BF.drops = drops;
+
+function take(req, d) {
+  if (!d || !byKey.has(d.key)) return { ok: false, why: "gone" };
+  let left;
+  if (req.from === "player") {
+    const P = BF.player;
+    if (!P || P.dead) return { ok: false, why: "requester gone" };
+    left = BF.inventory.add(d.id, d.count, d.wear);
+  } else {
+    const m = BF.ids && BF.ids.get(req.from);
+    if (!m || m.removed || m.dead || !Array.isArray(m.inv)) return { ok: false, why: "requester gone" };
+    left = BF.trades.inv.add(m.inv, d.id, d.count, d.wear);
+  }
+  const got = d.count - left;
+  if (left <= 0) drops.remove(d); else d.count = left;
+  return got > 0 ? { ok: true, id: d.id, got, left } : { ok: false, why: "no room", left };
+}
+if (BF.req) BF.req.on("pickup", req => {
+  if (req.pre) return req.pre;   // the player's, applied ahead of a villager's ask for the same item (below)
+  const d = byKey.get(String(req.target)), p = d && d.wantP;
+  if (p) d.wantP = null;
+  if (p && p !== req && p.result === undefined) p.pre = take(p, d);   // the player's ask this tick goes first
+  const r = take(req, d);
+  if (r.why === "gone" && req.from !== "player" && BF.glog) {   // game log: a villager lost an item to someone who picked it up first
+    const m = BF.ids && BF.ids.get(req.from);
+    BF.glog.log("INFO", "requests", (m && BF.vlog ? BF.vlog.nameOf(m) : "A villager") + " reached an item that was already gone (picked up first, or merged into another)", { at: m, village: m && m.village });
+  }
+  return r;
+});
 })();

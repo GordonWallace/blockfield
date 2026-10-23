@@ -303,8 +303,8 @@ function tick(dt) {
   acc = 0;
   if (H().toShut.length) H().shutGates();
   const t = now();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "pig" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("pig")) {   // (spec r15-31: the pig only)
+    if (!live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
     if (s.growAt != null && s.growAt - t > PIGLET_DAYS * 2) s.growAt = t + PIGLET_DAYS;   // time was set back
@@ -357,11 +357,20 @@ function styOf(m) {
 // What the pig farmer looks after: {sty, herd (live sty pigs, counted for culling), pigs (live pigs to feed: the herd and strays near it, or
 // without a sty the free pigs near the trough), strays (free adult pigs that can walk into the sty: those it tends and those within TEND_R of
 // the fence, fed or not), size (the herd, unloaded ones too), limit}.
+// The mobs tended() looks at: those within r of home, or within TEND_R of the fence (spec r15-31): [centre, radius] for BF.mobs.near.
+function reach(home, p, r) {
+  if (!p) return [home, r];
+  const c = { x: (p.fx0 + p.fx1) / 2, z: (p.fz0 + p.fz1) / 2 };   // (the fence's box, as fenceDist)
+  return [c, Math.max(Math.hypot(home.x - c.x, home.z - c.z) + r, Math.hypot(p.fx1 - p.fx0, p.fz1 - p.fz0) / 2 + TEND_R) + 1];
+}
 function tended(m) {
-  const p = styOf(m), list = BF.mobs.list;
+  const p = styOf(m);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
   const free = o => o.type === "pig" && live(o) && !o.ledBy && !o.sty && Math.abs(o.position.y - m.position.y) < 6;
   const near = o => free(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (p ? TEND_R : FREE_RADIUS);
+  // (spec r15-31) the free ones near home or the fence, from the mobs around both
+  const mine = o => free(o) && (near(o) || (p && fenceDist(p, o.position.x, o.position.z) <= TEND_R));
+  const list = BF.mobs.checkScan("pigfarmer.tended", BF.mobs.near(...reach(home, p, p ? TEND_R : FREE_RADIUS)).filter(mine), L => L.filter(mine));
   const herd = p && p.pigs ? p.pigs.map(s => s.mob).filter(live) : [];
   const strays = p ? adults(list.filter(o => free(o) && (near(o) || fenceDist(p, o.position.x, o.position.z) <= TEND_R))) : [];
   return { sty: p, herd, pigs: herd.concat(list.filter(near)), strays, size: p && p.pigs ? p.pigs.length : 0, limit: p ? p.limit : 0 };
@@ -403,13 +412,16 @@ function feedOk(T, o, t) {
 }
 function wildPig(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
-  let best = null, bd = FIND_R;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "pig" || !live(o) || o.sty || o.ledBy || isPiglet(o) || o.riding || (S.avoid.get(o.id) || 0) > sim) continue;
-    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best;
+  const scan = L => {
+    let best = null, bd = FIND_R;
+    for (const o of L) {
+      if (o.type !== "pig" || !live(o) || o.sty || o.ledBy || isPiglet(o) || o.riding || (S.avoid.get(o.id) || 0) > sim) continue;
+      const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  return BF.mobs.checkScan("pigfarmer.wildPig", scan(BF.mobs.near(c, FIND_R)), scan);
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
@@ -617,10 +629,12 @@ function nextTrip(m) {
   return { kind: "cook", furnace: p.furnace, rawId: RAW(), outId: COOKED(), n, fuelOk: fuelOk(m) };
 }
 function finishCook(m, deal, all) {
-  const F = FU(), f = deal.furnace, got = F.empty(m, deal, all) || [];
-  const cooked = got.filter(e => e.id === COOKED()).reduce((a, e) => a + e.n, 0);
-  log("cooked", { pork: cooked, loaded: deal.loaded || 0, at: F.pk(f.x, f.y, f.z) });
-  if (cooked > 0) vlog(m, "cooked " + cooked + " porkchop" + (cooked === 1 ? "" : "s") + " in the furnace at " + F.pk(f.x, f.y, f.z));
+  const F = FU(), f = deal.furnace;
+  F.empty(m, deal, all, got => {   // when the "furnace" request applies (js/furnaceuse.js)
+    const cooked = got.filter(e => e.id === COOKED()).reduce((a, e) => a + e.n, 0);
+    log("cooked", { pork: cooked, loaded: deal.loaded || 0, at: F.pk(f.x, f.y, f.z) });
+    if (cooked > 0) vlog(m, "cooked " + cooked + " porkchop" + (cooked === 1 ? "" : "s") + " in the furnace at " + F.pk(f.x, f.y, f.z));
+  });
 }
 // Villager AI step (mobs.js villagerAI early with cont = true to carry on an errand under way; ai() above when it has no herd work).
 function cookAI(m, dt, out, cont) {
@@ -673,6 +687,7 @@ function cookAI(m, dt, out, cont) {
     if (S.stage === "work") {
       if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = F.load(m, deal, deal.n);
+      if (n === null) return true;   // the load request is in flight
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
       log("load", { pork: n, at: F.pk(s.x, s.y, s.z), ownFuel: deal.ownFuel || 0 });
@@ -682,8 +697,8 @@ function cookAI(m, dt, out, cont) {
     if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { F.inUse.delete(F.pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finishCook(m, deal, false); S.stage = null; S.deal = null; vdone(m); S.checkT = 0.5; return true; }   // all cooked
-    F.topUp(m, deal, st);
-    if (S.waitT > F.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
+    const fueling = F.topUp(m, deal, st);
+    if (S.waitT > F.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && !fueling && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
@@ -738,7 +753,7 @@ function holdings(m) {
 // Counts for the debug screen: pigs loaded near the player, in a sty and wild.
 function counts() {
   let penned = 0, wild = 0, young = 0;
-  if (BF.mobs) for (const m of BF.mobs.list) if (m.type === "pig" && live(m)) { if (m.sty) penned++; else wild++; if (m.piglet) young++; }
+  if (BF.mobs) for (const m of BF.mobs.ofType("pig")) if (live(m)) { if (m.sty) penned++; else wild++; if (m.piglet) young++; }
   return { penned, wild, young };
 }
 
