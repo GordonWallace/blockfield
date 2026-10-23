@@ -720,6 +720,8 @@ world.update = function (px, pz, budgetMs = 8) {
   for (const k of world._dirty) { const c = world.chunks.get(k); if (c && c.mesh !== undefined) buildMesh(c); }
   world._dirty.clear();
 
+  // a real-time budget (spec r15-16 allows it): it decides what is drawn and when chunk data arrives, never what villagers do, since they
+  // and their jobs wait for unloaded chunks (js/villagesim.js)
   const t0 = performance.now();
   let gi = 0, mi = 0;
   while (performance.now() - t0 < budgetMs) {

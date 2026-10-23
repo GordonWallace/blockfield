@@ -144,8 +144,8 @@ function scan(rec) {
 }
 let tickT = 0;
 function update() {
-  const t = performance.now();
-  if (t - tickT < 1000 || !BF.mobs || !BF.mobs.villages) return;
+  const t = BF.simNow();   // every game second, from the game step (js/villagelog.js init; spec r15-16)
+  if ((t - tickT < 1 && t >= tickT) || !BF.mobs || !BF.mobs.villages) return;
   tickT = t;
   const d = today();
   for (const rec of BF.mobs.villages.values()) {
