@@ -313,7 +313,7 @@ function spawnEntry(rec, e, x, y, z) {
 }
 function newEntry(rec, parents) {
   bredList(rec);
-  const e = { k: rec.bredNext++, child: true, born: now(), eaten: 0, parents, prof: "child", bed: null, cd: null, pos: null, save: null, lastDay: BF.sky ? BF.sky.day : 0 };
+  const e = BF.ids.refs({ k: rec.bredNext++, child: true, born: now(), eaten: 0, parents, prof: "child", bed: null, cd: null, pos: null, save: null, lastDay: BF.sky ? BF.sky.day : 0 });
   rec.bred.push(e);
   return e;
 }
@@ -415,18 +415,19 @@ function childTick(rec, e) {
     m.bed = freeBed(rec, m); e.bed = m.bed;
   }
 }
+// A newborn unloading (with its village): its entry keeps where it was and its trading state for when it comes back.
+function keepState(e, m) {
+  e.pos = [m.position.x, m.position.y, m.position.z];
+  if (m.inv) e.save = BF.trades.pack(m);
+  if (!m.child) e.prof = m.profession;
+  e.mob = null;
+}
 function spawnMissing(rec) {
   const P = BF.player && BF.player.position;
   if (!P) return;
   for (const e of bredList(rec)) {
     if (e.dead || (e.mob && !e.mob.removed)) continue;
-    if (e.mob && e.mob.removed) {         // unloaded: keep its state
-      const m = e.mob;
-      e.pos = [m.position.x, m.position.y, m.position.z];
-      if (m.inv) e.save = BF.trades.pack(m);
-      if (!m.child) e.prof = m.profession;
-      e.mob = null;
-    }
+    if (e.mob && e.mob.removed) keepState(e, e.mob);   // unloaded: keep its state
     const r = e.pos ? null : BF.rand.at("newborn", rec.x, rec.z, null, bredList(rec).indexOf(e));
     const pos = e.pos || [rec.x + (r.next() - 0.5) * 8, rec.y != null ? rec.y : BF.world.heightAt(rec.x, rec.z) + 1, rec.z + (r.next() - 0.5) * 8];
     if ((BF.planet.distance({ x: pos[0], z: pos[2] }, P) > 72 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) || !BF.world.isLoaded(pos[0], pos[2])) continue;
@@ -497,11 +498,11 @@ function importAll(o) {
     const idx = +key.slice(i + 1);
     if (!(idx >= KEY_BASE)) continue;
     const b = v.bred, vk = key.slice(0, i);
-    const e = { k: idx - KEY_BASE, child: !!b.child, born: +b.born || 0, eaten: +b.eaten || 0, parents: Array.isArray(b.parents) ? b.parents.slice(0, 2) : [],
+    const e = BF.ids.refs({ k: idx - KEY_BASE, child: !!b.child, born: +b.born || 0, eaten: +b.eaten || 0, parents: Array.isArray(b.parents) ? b.parents.slice(0, 2) : [],
       prof: typeof b.prof === "string" ? b.prof : (b.child ? "child" : "unemployed"), cd: b.cd != null ? +b.cd : null,
       pos: Array.isArray(b.pos) && b.pos.length === 3 && b.pos.every(Number.isFinite) ? b.pos : null,
       bed: b.bed && Number.isFinite(b.bed.x) ? b.bed : null, lastDay: b.lastDay, dead: !!b.dead,
-      save: Object.assign({}, v, { bred: undefined }) };
+      save: Object.assign({}, v, { bred: undefined }) });
     if (!S.pending.has(vk)) S.pending.set(vk, []);
     S.pending.get(vk).push(e);
   }
@@ -565,6 +566,7 @@ addEventListener("load", hookEvents);
 BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,
   tick, ai, childMove, exportAll, importAll, reset,
+  onRemoved(m) { const e = m.bredEntry; if (e && e.mob === m && !e.dead) keepState(e, m); },   // js/mobs.js removeMob (js/ids.js: links to a removed mob go)
   eligible, bedsOK, bedCount, villagerCount, scanBeds, freeBed, breadEq,
   forceBreed, birth, growUp, makeChild, info, stats: S.stats, log: S.log, state: S,
   // instant variants for tests
