@@ -50,9 +50,9 @@ function biomeKind(x, z) {
   biomeCache.set(key, k);
   return k;
 }
-// Snow lines (blocks above sea level) for cold and cool biomes. Old 192-high worlds keep 42 / 52. In mile-high worlds the
-// climate already cools with altitude and the plains sit at about y900-1300, so the lines start above the plains, in the ranges.
-const snowLines = () => (BF.H > 192 ? [1400, 1700] : [42, 52]);
+// Snow lines (blocks above sea level) for cold and cool biomes. The climate already cools with altitude and the plains sit at about
+// y900-1300, so the lines start above the plains, in the ranges.
+const snowLines = () => [1400, 1700];
 function kindToPrecip(k, y) {
   if (k === 0) return 0;
   if (k === 2) return 2;
