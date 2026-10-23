@@ -136,6 +136,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   const q = await pg.evaluate(() => {
     const R = BF.regions, out = {};
     R.verifyQueries = true; R.resetQueryStats();
+    const p0 = BF.player.position.clone();
     let n = 0, found = 0;
     for (let i = 0; i < 200; i++) {   // queries mid-step too (after the mobs moved, before the index's sync): here between steps and inside
       window.__step(0.05);
@@ -146,8 +147,11 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
       for (let j = 5; j < L.length; j += 13) { const m = L[j]; R.mobsAround(m.position.x, m.position.z, 30, null, { local: true }); n++; }
       for (const m of L) m.position.x -= 0.3;
     }
+    { const b = R.mobsInBox(p0.x - 20, p0.z - 10, p0.x + 15, p0.z + 25), w = BF.mobs.list.filter(m => !m.removed && m.position.x >= p0.x - 20 && m.position.x <= p0.x + 15 && m.position.z >= p0.z - 10 && m.position.z <= p0.z + 25);
+      out.box = b.length === w.length && b.every((m, i) => m === w[i]) && b.length > 0; }
     for (const t of ['villager', 'iron_golem', 'zombie', 'cow']) { R.ofType(t); n++; }
     for (const rec of BF.mobs.villages.values()) { R.villageMobs(rec); R.villageMobs(rec, m => m.type === 'villager'); n += 2; }
+    n++;
     const st = R.queryStats();
     out.n = n; out.found = found; out.diffs = st.diffs; out.last = st.last; out.checked = st.checked;
     // list order: what a full scan would find, in the same order
@@ -166,6 +170,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     return out;
   });
   check(q.diffs === 0 && q.checked === q.n, `mobsAround, ofType and villageMobs agree with a full scan in ${q.n} queries over 200 steps (${q.found} mobs found)` + (q.last ? ' ' + JSON.stringify(q.last) : ''));
+  check(q.box, 'mobsInBox finds the mobs standing in a box');
   check(q.order, 'mobsAround lists mobs in BF.mobs.list order');
   check(q.edge, 'mobsAround with local: true finds mobs just across a face edge (raw distance does not)');
   check(q.wrong, 'checkQuery reports a difference');
