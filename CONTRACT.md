@@ -212,6 +212,23 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
 - `worldgen.villagesNear()` house records: `{x, y, z, w, d, doorX, doorZ, outX, outZ (cell in front of the door), type,
   beds: [{x, y, z, f}]}` (bed = foot block, f = foot -> head).
 
+## mobview.js (mob drawing, spec r15-11)
+
+A mob in `BF.mobs.list` is plain simulation data: `position` and `vel` are `THREE.Vector3` used as maths only, plus `yaw`, `headYaw`,
+`headPitch`, `walkPhase`, `walkAmt`, `age`, AI and inventory. How it looks is a few plain fields the simulation sets: `look` (model
+variant: `"<profession>/<style 0-4>"` for villagers, `"<coat>/<marking>"` for horses, `"shorn"` for a shorn sheep), `scale` / `headScale`
+(young animals, children), `partVis` (`{name: false}` hides a part, e.g. the saddle), `tint` (`"red"`: hurt or dying), `held` (item id of
+a villager's tool, from `BF.mobs.toolHolders`), `onFire`, `sleeping` (with `bed`), `crackStage` (iron golem, 0-3), `badgeLevel`
+(villager level), `dead` / `deathT`. Setters that only change those fields: `BF.mobs.setLook`, `setSheepLook`, `showPart`, `setProfession`,
+`setSheepSize`, `setChickenSize`, `setCowSize`, `setYoungSize`.
+
+`BF.mobView = { init(scene), render(dt), viewOf(mob) -> {root, model, meshes, heldMesh, badge, lids, fire, ...} | undefined,
+drawPos(mob, out) -> where it is drawn this frame, typeParts(type, variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }`.
+`render` runs once per drawn frame (main.js), builds a model for every mob within the meshed terrain (`(viewDist + 1) * CS`), none for
+one farther away, drops the model of a mob gone from the list, and draws position and angles interpolated between ticks when the mob
+has `prev` and `BF.warp.alpha` is set (r15-10). js/mobs.js makes no scene calls for mobs (test/mob-render-split.js checks it); its arrows
+and puffs still do until r15-12.
+
 ## trading.js (villager economy)
 
 `BF.trades` (loaded before mobs.js; calls into BF only at runtime). Balance and reasoning: `TRADE_AUDIT.md`.

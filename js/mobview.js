@@ -713,6 +713,15 @@ function playerDist(m, pp) {
   return _q.set(LQ.x, pp.y, LQ.z).distanceTo(m.position);
 }
 
+// A model that could not be drawn: logged once per mob type (the game log, js/gamelog.js); the mob itself plays on.
+const failed = new Set();
+function drawFailed(m, e) {
+  console.error(e);
+  if (failed.has(m.type)) return;
+  failed.add(m.type);
+  if (BF.glog) BF.glog.log("ERROR", "mobs", "Could not draw a " + String(m.type).replace(/_/g, " ") + " (" + (e && e.message ? e.message : e) + "); it may look wrong until the game is reloaded", { at: m });
+}
+
 BF.mobView = {
   PX, box, buildGeometry, typeParts, drawPos,
   init(sceneRef) {
@@ -735,7 +744,7 @@ BF.mobView = {
       if (!v) { v = createView(m); views.set(m, v); }
       v.seen = frameNo;
       v.root.visible = true;
-      try { draw(v, m, dt || 0); } catch (e) { console.error(e); }
+      try { draw(v, m, dt || 0); } catch (e) { drawFailed(m, e); }
     }
     for (const [m, v] of views) if (v.seen !== frameNo) { dropView(v); views.delete(m); }   // removed, or gone from the list
     const sl = Math.max(0.15, skyLight());
