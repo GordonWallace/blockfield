@@ -1609,9 +1609,11 @@ const api = {
   furnaceState(x, y, z) { return furnaces.get(`${x},${y},${z}`) || null; },
   furnaceRecord(x, y, z) { return furnaceAt({ x, y, z }); },   // creates the furnace's state when it has none yet (villagers: js/toolsmith.js)
   // One simulation step for every furnace (main.js runs it with the world, so it follows the fast-forward).
+  // During a tick's think (BF.simStep) the step waits for the block-tick phase (spec r15-22), after the tick's "chest" and "furnace"
+  // requests have applied, so loading and emptying come first in a fixed order; called outside a tick (tests) it runs at once.
   simTick(h) {
-    for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true;
-    if (BF.baker) BF.baker.simTick(h);   // bakers' ovens bake on the same clock (js/baker.js)
+    if (BF.req && BF.req.phase === "think" && BF.world.onBlockTick) { furnaceDue += h; return; }
+    furnaceStep(h);
   },
   chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
   // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
@@ -1689,4 +1691,70 @@ const api = {
   },
 };
 BF.inventory = api;
+
+// ---------------------------------------------------------------- furnaces' step as a block tick (spec r15-22)
+let furnaceDue = 0;
+function furnaceStep(h) {
+  for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true;
+  if (BF.baker) BF.baker.simTick(h);   // bakers' ovens bake on the same clock (js/baker.js)
+}
+if (BF.world && BF.world.onBlockTick) BF.world.onBlockTick(() => { if (furnaceDue > 0) { const h = furnaceDue; furnaceDue = 0; furnaceStep(h); } });
+
+// ---------------------------------------------------------------- "chest" requests (spec r15-22)
+// Items into and out of a chest go through the request queue (js/requests.js), so two villagers, or a villager and the player, can't
+// take the same stack in one tick: requests apply in requester order and each sees what the ones before it left.
+// target "x,y,z", data {take: [{id, n}], put: [{id, n}], owner?, name?}, from a villager (its inventory) or "player" (the player's).
+// Takes first (only what the chest holds, as far as the requester has room), then puts (only what the requester holds, as far as the
+// chest has room). owner: the villager key the chest must be usable by (unowned, its own, not reserved for another), and who claims an
+// unowned chest by using it (chestUsed). Result {ok, took: [{id, n}], put: [{id, n}]}, ok when anything moved; refused ({ok: false, why})
+// when the chest is gone (broken in flight: its items already dropped, as for any broken chest), owned by someone else, or the requester
+// is gone. The player's chest screen still edits the slots between ticks (r15-20 turns player actions into requests).
+// A worn tool keeps its wear both ways.
+function holderOf(from) {
+  if (from === "player") return {
+    add: (id, n, wear) => api.add(id, n, wear),
+    take(id, n) { const out = []; let left = n; while (left > 0) { const s = takeStack(id, left); if (!s) break; out.push(s); left -= s.count; } if (out.length) { renderAll(); emitChange(); } return out; },
+  };
+  const m = from != null && BF.ids ? BF.ids.get(from) : null;
+  if (!m || m.removed || m.dead || !Array.isArray(m.inv)) return null;
+  const T = BF.trades.inv;
+  return { add: (id, n, wear) => T.add(m.inv, id, n, wear), take: (id, n) => T.take(m.inv, id, n), mob: m };
+}
+api.holderOf = holderOf;
+// Game log: INFO "requests" when two asked for the same chest and one lost out (it was broken first, or claimed first).
+const who = from => { const m = from && from !== "player" && BF.ids ? BF.ids.get(from) : null; return from === "player" ? "The player" : m && BF.vlog ? BF.vlog.nameOf(m) : "A villager"; };
+function conflict(req, what, why) { if (BF.glog) BF.glog.log("INFO", "requests", who(req.from) + "'s " + what + " at " + req.target + " was refused: " + why, { at: String(req.target).split(",").map(Number) }); }
+if (BF.req) BF.req.on("chest", req => { const r = chestReq(req); if (r.why === "gone" || r.why === "owned") conflict(req, "use of a chest", r.why === "gone" ? "the chest is gone" : "someone else owns it now"); return r; });
+function chestReq(req) {
+  const [x, y, z] = String(req.target).split(",").map(Number), d = req.data || {};
+  if (!BF.isChest(BF.world.getBlock(x, y, z))) return { ok: false, why: "gone" };
+  const h = holderOf(req.from);
+  if (!h) return { ok: false, why: "requester gone" };
+  const c0 = chests.get(`${x},${y},${z}`);
+  if (d.owner && c0 && (c0.owner ? c0.owner !== d.owner : !!(reservedFor(c0) && c0.reserved.key !== d.owner))) return { ok: false, why: "owned", owner: c0.owner || c0.reserved.key };
+  if (req.from === "player" && c0 && ((c0.owner && c0.owner !== "player") || reservedFor(c0)) && !isCreative()) return { ok: false, why: "owned", owner: c0.owner || c0.reserved.key };   // as the chest screen (chestLocked)
+  const c = chestAt({ x, y, z }), took = [], put = [];
+  const note = (list, id, n) => { if (n <= 0) return; const e = list.find(e => e.id === id); if (e) e.n += n; else list.push({ id, n }); };
+  for (const e of d.take || []) {
+    if (!e || !(e.n > 0)) continue;
+    for (const s of BF.trades.inv.take(c.slots, e.id, e.n)) {
+      const left = h.add(s.id, s.count, s.wear);
+      if (left) addToArr(c.slots, s.id, left, s.wear);   // no room: back where it was
+      note(took, s.id, s.count - left);
+    }
+  }
+  for (const e of d.put || []) {
+    if (!e || !(e.n > 0)) continue;
+    for (const s of h.take(e.id, e.n)) {
+      const left = addToArr(c.slots, s.id, s.count, s.wear);
+      if (left) h.add(s.id, left, s.wear);
+      note(put, s.id, s.count - left);
+    }
+  }
+  if (!took.length && !put.length) return { ok: false, why: "nothing", took, put };
+  const owner = req.from === "player" ? "player" : d.owner;
+  if (owner) chestUsed(c, owner, req.from === "player" ? "you" : d.name, h.mob);   // the first to use an unowned chest becomes its owner
+  if (open_ && chest === c) renderAll();
+  return { ok: true, took, put };
+}
 })();
