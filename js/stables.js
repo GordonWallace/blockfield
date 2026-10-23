@@ -240,7 +240,7 @@ function work(m, J, dt) {
 }
 
 // ---------------------------------------------------------------- the stable hand's day
-const stb = m => m.stb || (m.stb = BF.ids.refs({ task: null, stage: null, t: 0, cd: rnd(1, 3), navFail: 0, avoid: {}, noSeller: {}, waitWild: 0, exit: null, gx: null, gz: null }));
+const stb = m => m.stb || (m.stb = BF.ids.refs({ task: null, stage: null, t: 0, cd: rnd(1, 3), navFail: 0, avoid: {}, noSeller: {}, waitWild: 0, leave: null, gx: null, gz: null }));
 const food = m => (cnt(m, I("wheat_item")) > 0 ? "wheat_item" : cnt(m, I("hay_bale")) > 0 ? "hay_bale" : null);
 const ready = (r, t) => r.tamed && !isFoal(r) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS);
 // The paddock adult to feed so a pair breeds, or null: never past 4 horses (a pair makes one foal), never a third willing one.
@@ -406,16 +406,16 @@ function shopStep(m, S, dt, out, tk) {
 // Inside the paddock (after feeding) with nothing to do: out through the gate to the cell in front of it, so it never loiters among the horses.
 function leave(m, S, dt, out) {
   const st = stableOf(m.village), p = m.position;
-  if (!st) { S.exit = null; return false; }
-  if (!S.exit) {
+  if (!st) { S.leave = null; return false; }
+  if (!S.leave) {
     if (!inBox(st.box, p.x, p.z, 0.2) || Math.abs(p.y - st.y) > 2.5) return false;
-    S.exit = { t: 0 }; m.ai.route = null; S.navFail = 0;
+    S.leave = { t: 0 }; m.ai.route = null; S.navFail = 0;
   }
-  S.exit.t += dt;
+  S.leave.t += dt;
   const [ox, oz] = st.out[0], oy = groundY(ox, oz);
   const s = oy == null ? "failed" : BF.villageLife.travel(m, S, dt, out, ox, oy, oz, m.def.speed);
-  if (s === "going" && S.exit.t < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
-  S.exit = null;
+  if (s === "going" && S.leave.t < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
+  S.leave = null;
   return false;
 }
 function ai(m, dt, out) {

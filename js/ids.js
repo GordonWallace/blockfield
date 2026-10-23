@@ -85,7 +85,8 @@ function place(proto, name, field, keyOf) {
     get() { const k = this[field]; return k == null ? k : reg.get(k); },
     set(v) {
       if (v == null) { this[field] = v; return; }
-      const k = keyOf(v, this) ?? idOf(v);   // (a record without a key, as tests make: known by an id of its own)
+      let k = keyOf(v, this);
+      if (k == null || k.includes("undefined")) k = idOf(v);   // (a record without a key or cell, as tests make: known by an id of its own)
       if (reg.get(k) !== v) put(v, k);
       this[field] = k;
     },
