@@ -50,6 +50,10 @@ const LINES = [
   ["light.js", "return performance.now() - t0;", "recomputeAll's ms"],
   ["skylight.js", "const t0 = performance.now(), W = world();", "recomputeAll's ms (tests, debugging)"],
   ["skylight.js", "return performance.now() - t0;", "recomputeAll's ms"],
+  ["mobs.js", "const t0 = performance.now(), a = findPathFast(sx, sy, sz, goal, maxNodes, tall), t1 = performance.now()", "path search timings while the fast and old searches are compared (DBG.pathCompare, debugging only)"],
+  ["world.js", "const now = performance.now(), st = world.lastRemesh;", "fast-forward remesh batching and its stats (what is drawn, not what happens)"],
+  ["world.js", "st.ms = performance.now() - now;", "remesh ms for the stats"],
+  ["world.js", "c.meshT = performance.now();", "when a chunk was last meshed, for the remesh batching (drawing)"],
 ];
 
 const RE = /performance\.now\s*\(|Date\.now\s*\(/g;

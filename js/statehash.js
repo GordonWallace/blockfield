@@ -10,7 +10,7 @@
 //   drops, clock, weather, wildlife (wild mobs stored with unloaded chunks), boats, horses, bees, farmland
 // Numbers that aren't whole are rounded to 1/1024 before hashing; render-only fields (meshes, animation phases, prevPos) are skipped.
 // Mobs have no stable ids yet (r15-13): a reference to a mob is its id when it has one, else its type and name (villagers have names).
-// Hashing only reads: it never calls Math.random or changes the world.
+// Hashing only reads: it never draws random numbers or changes the world.
 // API: BF.stateHash() -> hex (16 digits); BF.stateHash.parts() -> { part: hex }; BF.stateHash.full() -> { hash, parts, day, ms };
 //      BF.stateHash.PARTS; BF.stateHash.text(part) (a part's canonical text, to find where two worlds differ); BF.stateHash.canon(v) (the canonical text of a value, for tests); BF.stateHash.last (the newest full());
 //      BF.stateHash.update() (the main loop: logs the hash when a game day starts)
