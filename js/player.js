@@ -1133,7 +1133,7 @@ onAct("player.break", (d, t) => {
       else for (const s of drops || []) if (s && s.id != null && s.count > 0 && inv().add) inv().add(s.id, s.count);
     } catch (e) { console.error(e); }
   }
-  exhaustion += 0.005;
+  if (!creative()) exhaustion += 0.005;
   if (d.wear) wearHeld(d.wear);
   emit("blockBroken", x, y, z, d.id);
   return { ok: true };
@@ -1186,7 +1186,7 @@ onAct("player.hit", d => {   // a melee hit: {mob, dmg, d: knockback, wear}
   if (!m || m.dead || m.removed) return { ok: false, why: "gone" };
   try { BF.mobs.hit(m, d.dmg, vec(d.d)); } catch (e) { console.error(e); }
   if (d.wear) wearHeld(d.wear);
-  exhaustion += 0.1;
+  if (!creative()) exhaustion += 0.1;
 });
 onAct("player.hitBoat", d => {
   const b = BF.boats && BF.boats.list && BF.boats.list.find(b => idOf(b) === d.boat);

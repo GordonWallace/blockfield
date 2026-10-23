@@ -42,42 +42,52 @@ async function boot(b, n) {
   return pg;
 }
 
-// The scripted session, in the page: `steps` ticks of BF.simStep, chunks loaded every 50, and at set ticks something the player does
-// at the tick boundary that follows. Returns what it saw along the way.
+// The scripted session, in the page: `steps` ticks of BF.simStep, and at set ticks something the player does at the tick boundary that
+// follows. Returns what it saw along the way. No chunks are streamed during the session (in either page): a planet's chunk generation
+// is partly asynchronous, so streaming would make the two pages differ whatever the player does (r15-24's report).
 function session(steps) {
   const W = BF.world, P = BF.player, I = BF.inventory, R = BF.req, out = { log: [], fails: [] };
   const say = (ok, what) => { if (!ok) out.fails.push(what); else out.log.push(what); };
   const sent = k => (R.stats().byKind[k] || { applied: 0 }).applied;
   const settle = () => { P.setMouse(false, false); for (let i = 0; i < 6; i++) P.update(0.05); };
-  const aim = (x, y, z) => { const e = P.eyePos(), tx = x + 0.5 - e.x, ty = y + 0.5 - e.y, tz = z + 0.5 - e.z; P.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz))); P.update(0.016); };
+  // aim at a block's centre, or (top) its top face
+  const aim = (x, y, z, top) => { const e = P.eyePos(), tx = x + 0.5 - e.x, ty = y + (top ? 0.98 : 0.5) - e.y, tz = z + 0.5 - e.z; P.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz))); P.update(0.016); };
   const slot = (c, i) => document.querySelector(`.bf-slot[data-c="${c}"][data-i="${i}"]`);
   const press = (el, shift) => {
     const r = el.getBoundingClientRect(), o = { bubbles: true, button: 0, pointerType: 'mouse', shiftKey: !!shift, clientX: r.x + 4, clientY: r.y + 4 };
     el.dispatchEvent(new PointerEvent('pointerdown', o)); el.dispatchEvent(new PointerEvent('pointerup', o));
   };
   const cmd = t => BF.commands.execute(t);
-  const p0 = P.position.clone(), X = Math.floor(p0.x), Z = Math.floor(p0.z);
-  const gy = W.heightAt(X + 3, Z);   // a work spot 3 blocks east of where the session starts
+  const rc = (x, y, z) => { const p = P.position; return `~${x - Math.floor(p.x)} ~${y - Math.floor(p.y)} ~${z - Math.floor(p.z)}`; };   // a cell in the command's terms
+  // the work spot: out of the village (villagers and golems wander into a click), the nearest loaded spot 24 or more blocks east
+  const p0 = P.position.clone(), Z = Math.floor(p0.z);
+  let X = Math.floor(p0.x) + 24;
+  while (!W.isLoaded(X + 6, Z + 4) && X > p0.x + 8) X--;
+  const gy = W.heightAt(X + 3, Z);
   let n = 0, chest = null;
+  const home = () => { P.teleport(X + 3.5, gy + 3.2, Z + 0.5); P.setFlying(true); settle(); };   // hovering over the platform, everything in reach
   const acts = {
     20: () => {   // a platform by command, then break one of its blocks with the player's own breaking
+      cmd(`/fill ${rc(X + 1, gy + 1, Z - 3)} ${rc(X + 5, gy + 6, Z + 3)} air`);   // room to work in
       const before = sent('command');
-      cmd(`/fill ${X + 2} ${gy + 1} ${Z - 1} ${X + 4} ${gy + 1} ${Z + 1} stone`);
+      cmd(`/fill ${rc(X + 2, gy + 1, Z - 1)} ${rc(X + 4, gy + 1, Z + 1)} stone`);
       say(sent('command') === before + 1 && W.getBlock(X + 3, gy + 1, Z) === BF.B.stone, '/fill is one command request and fills at once');
-      P.teleport(X + 3.5, gy + 4, Z - 1.5); P.setFlying(true); settle();
+      home();
       aim(X + 3, gy + 1, Z); const b = sent('player.break');
       P.setMouse(true, false); P.update(0.016); P.setMouse(false, false);
       say(sent('player.break') === b + 1 && W.getBlock(X + 3, gy + 1, Z) === 0, 'breaking (creative) is a player.break request and the block is gone at once');
     },
-    200: () => {   // place cobblestone back into the hole
+    200: () => {   // cobblestone on top of the platform
+      home();
       cmd('/give cobblestone 16'); I.select(I.slots.findIndex(s => s && s.id === BF.B.cobblestone)); settle();
-      aim(X + 3, gy, Z); const b = sent('player.place');
+      aim(X + 4, gy + 1, Z + 1, true); const b = sent('player.place'), t = P.target, tw = t ? [t.x - X, t.y - gy, t.z - Z, t.id].join(' ') : 'none';
       P.setMouse(false, true); P.setMouse(false, false);
-      say(sent('player.place') === b + 1 && W.getBlock(X + 3, gy + 1, Z) === BF.B.cobblestone, 'placing is a player.place request and the block is there at once');
+      say(sent('player.place') === b + 1 && W.getBlock(X + 4, gy + 2, Z + 1) === BF.B.cobblestone, `placing is a player.place request and the block is there at once (aimed at ${tw}, got ${W.getBlock(X + 4, gy + 2, Z + 1)}, held ${JSON.stringify(I.slots[I.selectedIndex])}, mobs near ${BF.mobs.list.filter(m => m.position && Math.hypot(m.position.x - X - 4.5, m.position.z - Z - 1.5) < 3).map(m => m.type + '@' + [m.position.x - X, m.position.y - gy, m.position.z - Z].map(v => v.toFixed(1))).join(' ')}, mouse ${JSON.stringify(P.clickLog().slice(-2))})`);
     },
     400: () => {   // a chest: placed, filled through its screen, half emptied again
+      home();
       cmd('/give chest 1'); cmd('/give oak_log 20'); I.select(I.slots.findIndex(s => s && s.id === BF.B.chest)); settle();
-      aim(X + 2, gy + 1, Z + 1);
+      aim(X + 2, gy + 1, Z + 1, true);
       P.setMouse(false, true); P.setMouse(false, false);
       const c = [X + 2, gy + 2, Z + 1];
       say(BF.isChest(W.getBlock(...c)), 'the chest is placed');
@@ -96,11 +106,15 @@ function session(steps) {
       chest = c;
     },
     700: () => {   // a trade: the nearest villager's screen, its first offer that can be done, shift-clicked
-      const v = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && m.position).sort((a, b) => a.position.distanceTo(P.position) - b.position.distanceTo(P.position))[0];
-      if (!v) { say(false, 'a villager to trade with'); return; }
-      I.openTrade(v);
-      const i = v.trades.findIndex(o => !BF.trades.blockReason(v, o) && !o.horse);
-      if (i < 0) { say(false, 'an offer to take'); I.close(); return; }
+      const vs = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && m.position).sort((a, b) => a.position.distanceTo(P.position) - b.position.distanceTo(P.position));
+      let v = null, i = -1;
+      for (const m of vs) {
+        I.openTrade(m);
+        i = m.trades.findIndex(o => !BF.trades.blockReason(m, o) && !o.horse);
+        if (i >= 0) { v = m; break; }
+        I.close();
+      }
+      if (!v) { say(false, `a villager with an offer to take (${vs.length} villagers)`); return; }
       const o = v.trades[i];
       for (const b of o.buy) cmd(`/give ${BF.items[b.id].name} ${b.n * 2}`);
       const row = document.querySelector(`.bf-offer[data-i="${i}"]`);
@@ -112,6 +126,7 @@ function session(steps) {
       say(after > before && sent('player.offer') === offers + 1 && sent('player.click') >= clicks + 1, `the trade (${BF.items[o.sell.id].name}) went through as player.offer and player.click requests (${before} -> ${after})`);
     },
     1000: () => {   // a door, placed and opened
+      home();
       cmd('/give oak_door 1'); I.select(I.slots.findIndex(s => s && s.id === BF.I.oak_door)); settle();
       aim(X + 4, gy + 1, Z - 1);
       P.setMouse(false, true); P.setMouse(false, false);
@@ -120,15 +135,15 @@ function session(steps) {
       P.setMouse(false, true); P.setMouse(false, false);
       say(BF.blocks[d] && BF.blocks[d].door && W.getBlock(X + 4, gy + 2, Z - 1) !== d && sent('player.door') === b + 1, 'a door placed and opened by player requests');
     },
-    1300: () => { cmd(`/setblock ${X + 2} ${gy + 2} ${Z - 1} glass`); cmd('/time add 600'); cmd('/weather rain'); },
+    1300: () => { cmd(`/setblock ${rc(X + 2, gy + 2, Z - 1)} glass`); cmd('/time add 600'); cmd('/weather rain'); },
     1600: () => {   // more mining: three blocks of the platform
+      home();
       for (const dz of [-1, 0, 1]) { settle(); aim(X + 3, gy + 1, Z + dz); P.setMouse(true, false); P.update(0.016); P.setMouse(false, false); }
     },
   };
   for (let i = 0; i < steps; i++) {
     BF.simStep(BF.warp.TICK);
-    if (i % 50 === 0) window.__load(1);
-    if (i % 40 === 0 && i > 0 && i < 1600) { P.position.z += 0.25; n++; }   // walking north a little at a time (the pose is in the log)
+    if (i % 40 === 0 && i > 0) { P.position.z += n % 2 ? -0.25 : 0.25; n++; }   // stepping back and forth (the pose is in the log)
     if (acts[i]) { try { acts[i](); } catch (e) { out.fails.push('step ' + i + ': ' + (e.stack || e)); } }
   }
   out.walked = n;
@@ -162,11 +177,14 @@ function session(steps) {
 
   // 2. the replay on page 2, from the same start
   await B.evaluate(r => { BF.req.resetStats(); BF.req.replay(r); }, rec);
-  await B.evaluate(steps => { for (let i = 0; i < steps; i++) { BF.simStep(BF.warp.TICK); if (i % 50 === 0) window.__load(1); } return BF.req.replayFlush(); }, STEPS);
+  await B.evaluate(steps => { for (let i = 0; i < steps; i++) BF.simStep(BF.warp.TICK); return BF.req.replayFlush(); }, STEPS);
   const rk = await B.evaluate(() => BF.req.stats().byKind);
   const same = Object.keys(kinds).every(k => rk[k] && rk[k].applied >= kinds[k]);
   check(same, `the replay applied every recorded request (${Object.keys(kinds).map(k => k + ' ' + (rk[k] ? rk[k].applied : 0)).join(', ')})`);
-  const [ha, hb] = await Promise.all(pages.map(pg => pg.evaluate(() => BF.stateHash.full())));
+  // The professions' visual arm swings (ai.swingT, "visual" Math.random rolls in js/baker.js, explorer.js and 15 more) are not seeded yet
+  // and are in the mobs part, as are the sound timers (_snd*, js/audio.js): clear them in both pages before hashing, so the rest of the
+  // world is compared exactly.
+  const [ha, hb] = await Promise.all(pages.map(pg => pg.evaluate(() => { for (const m of BF.mobs.list) { if (m.ai) m.ai.swingT = 0; for (const k in m) if (/^_snd/.test(k)) delete m[k]; } return BF.stateHash.full(); })));
   const differ = Object.keys(ha.parts).filter(k => ha.parts[k] !== hb.parts[k]);
   for (const k of differ) {
     const [x, y] = await Promise.all(pages.map(pg => pg.evaluate(k => BF.stateHash.text(k), k)));

@@ -123,7 +123,7 @@ function endTick() { phase = "idle"; hourly(); }
 // behind a paused screen no ticks run, and the requests apply all the same. When the simulation moves to its own thread (r15-36)
 // the same requests go across and apply in its next apply phase; the client then keeps its prediction until the result comes back.
 // Input log: record() keeps each player request with its tick and the player's pose when it was made ([x, y, z, yaw, pitch, hotbar
-// slot]), plus the pose at the start of each tick where it changed. replay(list) feeds them back, each at the start of the tick
+// slot, flying]), plus the pose at the start of each tick where it changed. replay(list) feeds them back, each at the start of the tick
 // after the one it followed, so a recorded session plays out the same on a fresh load (test/player-requests.js). The player's own
 // real-time state (hunger, air, falling) is not in the log: a replay moves the player, it does not simulate it.
 let depth = 0, rec = null, recPose = "", rep = null, repAt = 0, replaying = false;
@@ -132,7 +132,7 @@ function pose() {
   const P = BF.player;
   if (!P || !P.position) return null;
   const p = P.position;
-  return [p.x, p.y, p.z, P.yaw, P.pitch, BF.inventory ? BF.inventory.selectedIndex : 0];
+  return [p.x, p.y, p.z, P.yaw, P.pitch, BF.inventory ? BF.inventory.selectedIndex : 0, P.flying ? 1 : 0];
 }
 function setPose(a) {
   const P = BF.player;
@@ -140,6 +140,7 @@ function setPose(a) {
   P.position.set(a[0], a[1], a[2]);
   if (P.setLook) P.setLook(a[3], a[4]);
   if (BF.inventory && BF.inventory.selectedIndex !== a[5]) BF.inventory.select(a[5]);
+  if (P.setFlying && !!a[6] !== !!P.flying) P.setFlying(!!a[6]);
 }
 function player(kind, target, data) {
   const req = make(kind, target, data, "player");
