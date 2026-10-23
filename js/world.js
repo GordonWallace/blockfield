@@ -25,13 +25,11 @@ const ckey = (cx, cz) => cx + "," + cz;
 // functions accept margin addresses and resolve them to the canonical cell (res), so neighbour walks, collision and meshing carry on
 // across face edges. A block with a facing read through a margin address is turned by the edge's turn, so it looks and collides the
 // same from both sides; written through one, it is turned back. Corner wedges (past two edges at once) read as air and refuse writes.
-// Off the planet PLN is false and everything below is the identity.
-let PLN = false, PN = 0, PW = 0;
+const PN = BF.planet.N, PW = 3 * PN;
 let RX = 0, RZ = 0, RT = 0;          // res() output: canonical cell and quarter turns (margin frame = canonical frame turned by RT)
 const CCELL = {};
 function res(x, z) {                 // x, z integers
   RT = 0;
-  if (!PLN) { RX = x; RZ = z; return true; }
   const f = Math.floor(x / PW), u = x - PW * f - PN, v = z - PN;
   if (f >= 0 && f < 6 && u >= 0 && u < PN && v >= 0 && v < PN) { RX = x; RZ = z; return true; }
   const c = BF.planet.canonCell(x, z, CCELL);
@@ -217,7 +215,7 @@ function spherePositions(pos, ox, oz, sph) {
   return out;
 }
 
-// Render-space position of an atlas point this frame (js/view.js; the point itself off the planet).
+// Render-space position of an atlas point this frame (js/view.js).
 world.toRender = (x, y, z, out) => BF.view.toRender(x, y, z, out);
 
 world.getBlockLight = (x, y, z) => (BF.light ? BF.light.get(x, y, z) : 0); // block light 0..15 (see light.js)
@@ -232,7 +230,6 @@ world.onChunkUnload = fn => world._unloadL.push(fn);
 
 // Removes every chunk, edit and mesh (used for a new world / new seed).
 world.reset = function () {
-  PLN = !!(BF.planet && BF.planet.isPlanet()); PN = PLN ? BF.planet.N : 0; PW = 3 * PN;
   for (const k of [...world.chunks.keys()]) unload(k);
   for (const k of [...world.farMeshes.keys()]) dropFar(k);
   world.edits.clear();
@@ -248,7 +245,7 @@ world.reset = function () {
 // chunkAt: the chunk holding column (x, z), through the margin on the planet (its own cx / cz are canonical: index it with world.cell
 // when x / z may be a margin address). rawChunk: canonical coordinates only.
 // The last chunk looked up is kept (most lookups land in the same chunk as the one before; on the planet the keys are long atlas
-// strings, so building and hashing one costs more than on a flat world), until a chunk is added or removed (CGEN).
+// strings, so building and hashing one is not free), until a chunk is added or removed (CGEN).
 let LCX = NaN, LCZ = NaN, LC, LGEN = -1, CGEN = 0;
 const rawChunk = (x, z) => {
   const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
@@ -257,7 +254,6 @@ const rawChunk = (x, z) => {
   return (LC = world.chunks.get(ckey(cx, cz)));
 };
 function chunkAt(x, z) {
-  if (!PLN) return rawChunk(x, z);
   return res(Math.floor(x), Math.floor(z)) ? rawChunk(RX, RZ) : undefined;
 }
 world.chunkAt = chunkAt;
@@ -275,15 +271,13 @@ world.cell = function (x, z, out) {
 };
 // The chunk at chunk coordinates (cx, cz), through the margin (canonical coordinates are a plain lookup).
 world.chunkC = (cx, cz) => {
-  if (!PLN) return world.chunks.get(ckey(cx, cz));
   const k = resChunk(cx, cz);
   return k ? world.chunks.get(ckey(k[0], k[1])) : undefined;
 };
-// The canonical column of (x, z) as [x, z] (x, z themselves off the planet), or null in a corner wedge. Block entities (chests,
+// The canonical column of (x, z) as [x, z], or null in a corner wedge or off the atlas. Block entities (chests,
 // furnaces, signs...) are keyed by canonical cells.
 world.canonXZ = (x, z) => res(Math.floor(x), Math.floor(z)) ? [RX, RZ] : null;
 world.turnId = turnId;
-world.isPlanet = () => PLN;
 
 let STONE_ID = 0, BEDROCK_ID = 0;
 // Block in chunk c at local (lx, lz) and absolute y: below the loaded band stone (bedrock below MIN_Y), above it air.
@@ -300,16 +294,11 @@ world.getBlock = function (x, y, z) {
   if (y < BF.MIN_Y) return BEDROCK_ID;
   if (y >= BF.H) return 0;
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  if (PLN) {
-    if (!res(x, z)) return 0;
-    const c = rawChunk(RX, RZ);
-    if (!c) return 0;
-    const id = cblock(c, RX - c.cx * CS, y, RZ - c.cz * CS);
-    return RT ? turnId(id, RT) : id;
-  }
-  const c = rawChunk(x, z);
+  if (!res(x, z)) return 0;
+  const c = rawChunk(RX, RZ);
   if (!c) return 0;
-  return cblock(c, x - c.cx * CS, y, z - c.cz * CS);
+  const id = cblock(c, RX - c.cx * CS, y, RZ - c.cz * CS);
+  return RT ? turnId(id, RT) : id;
 };
 
 // Solid for collision. Unloaded chunks count as solid so nothing falls out of the world.
@@ -317,7 +306,8 @@ world.isSolid = function (x, y, z) {
   if (y < BF.MIN_Y) return true;
   if (y >= BF.H) return false;
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
-  if (PLN) { if (!res(x, z)) return true; x = RX; z = RZ; }   // (solidity doesn't depend on facing)
+  if (!res(x, z)) return true;
+  x = RX; z = RZ;   // (solidity doesn't depend on facing)
   const c = rawChunk(x, z);
   if (!c) return !world.high;   // not loaded: solid (nothing falls into it), except above the chunk ceiling, where nothing loads
   return BF.SOLID[cblock(c, x - c.cx * CS, y, z - c.cz * CS)] === 1;
@@ -395,11 +385,10 @@ world.ensureRange = function (x, z, y0, y1) {
 world.setBlock = function (x, y, z, id) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
   if (y < BF.MIN_Y || y >= BF.H) return false;
-  if (PLN) {   // a margin address writes the canonical cell (turned back into its frame); hooks below see canonical coordinates
-    if (!res(x, z)) return false;
-    if (RT) id = turnId(id, 4 - RT);
-    x = RX; z = RZ;
-  }
+  // a margin address writes the canonical cell (turned back into its frame); hooks below see canonical coordinates
+  if (!res(x, z)) return false;
+  if (RT) id = turnId(id, 4 - RT);
+  x = RX; z = RZ;
   const c = rawChunk(x, z);
   if (!c) return false;
   if (y < c.y0) extendDown(c, y >> 4); else if (y >= c.y1) extendUp(c, (y >> 4) + 1);
@@ -483,10 +472,11 @@ world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
   }
 };
 
-// Highest solid y at column (x, z) in the loaded band, or BF.MIN_Y - 1 (-1 for legacy worlds) when the column is not loaded.
+// Highest solid y at column (x, z) in the loaded band, or BF.MIN_Y - 1 when the column is not loaded.
 world.heightAt = function (x, z) {
   x = Math.floor(x); z = Math.floor(z);
-  if (PLN) { if (!res(x, z)) return BF.MIN_Y - 1; x = RX; z = RZ; }
+  if (!res(x, z)) return BF.MIN_Y - 1;
+  x = RX; z = RZ;
   const c = rawChunk(x, z);
   if (!c) return BF.MIN_Y - 1;
   const lx = x - c.cx * CS, lz = z - c.cz * CS, SOLID = BF.SOLID;
@@ -595,7 +585,6 @@ function disposeMeshes(c) {
 
 function neighboursReady(cx, cz) {
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-    if (!PLN) { if (!world.chunks.has(ckey(cx + dx, cz + dz))) return false; continue; }
     const k = resChunk(cx + dx, cz + dz);   // a corner wedge has nothing to wait for
     if (k && !world.chunks.has(ckey(k[0], k[1]))) return false;
   }
@@ -616,23 +605,22 @@ function plan(pcx, pcz) {
     if (l > 1e-3) { fwdX = fx / l; fwdZ = fz / l; }
   }
   genList = []; meshList = []; edgeList = [];
-  const keep = new Set(), spots = PLN ? new Map() : null;
-  // the planet: above the chunk ceiling nothing is wanted (distant terrain shows the ground, js/lod.js)
-  const RL = PLN && world.high ? -2 : R;
+  const keep = new Set(), spots = new Map();
+  // above the chunk ceiling nothing is wanted (distant terrain shows the ground, js/lod.js)
+  const RL = world.high ? -2 : R;
   for (let dz = -RL - 1; dz <= RL + 1; dz++) for (let dx = -RL - 1; dx <= RL + 1; dx++) {
     const d2 = dx * dx + dz * dz;
     if (d2 > (R + 1.5) * (R + 1.5)) continue;
     let cx = pcx + dx, cz = pcz + dz;
-    if (PLN) {   // the wanted set is built in the player's face frame, extended into the margin; each spot is a canonical chunk
-      let ck = resChunk(cx, cz);
-      if (!ck) {   // corner wedge: nothing to draw flat, but near a corner the round view fills it from the nearest face (js/view.js)
-        if (!roundPlan) continue;
-        const w = BF.planet.canonCell(cx * CS + 8, cz * CS + 8, CCELL);
-        if (w.off) continue;
-        ck = CCH; CCH[0] = Math.floor(w.x / CS); CCH[1] = Math.floor(w.z / CS);
-      }
-      cx = ck[0]; cz = ck[1];
+    // the wanted set is built in the player's face frame, extended into the margin; each spot is a canonical chunk
+    let ck = resChunk(cx, cz);
+    if (!ck) {   // corner wedge: nothing to draw flat, but near a corner the round view fills it from the nearest face (js/view.js)
+      if (!roundPlan) continue;
+      const w = BF.planet.canonCell(cx * CS + 8, cz * CS + 8, CCELL);
+      if (w.off) continue;
+      ck = CCH; CCH[0] = Math.floor(w.x / CS); CCH[1] = Math.floor(w.z / CS);
     }
+    cx = ck[0]; cz = ck[1];
     const k = ckey(cx, cz);
     if (keep.has(k)) continue;
     keep.add(k);
@@ -641,25 +629,20 @@ function plan(pcx, pcz) {
     const dot = (dx * fwdX + dz * fwdZ) / len;
     const score = d2 <= 2 ? d2 : d2 * (1 + 1.5 * Math.max(0, -dot) + 0.5 * (1 - Math.abs(dot)));
     edgeList.push([cx, cz, dx, dz, d2 <= R * R]);
-    if (PLN) { spots.set(dx + "," + dz, [cx, cz, score, d2, k]); continue; }
-    if (!world.chunks.has(k)) genList.push([cx, cz, score]);
-    if (d2 <= R * R) meshList.push([cx, cz, score, d2]);
+    spots.set(dx + "," + dz, [cx, cz, score, d2, k]);
   }
-  // the planet: block data only within KEEP chunks, and where a chunk still to be meshed needs it (itself and its neighbours); further
+  // block data only within KEEP chunks, and where a chunk still to be meshed needs it (itself and its neighbours); further
   // chunks that already have meshes keep only those (purged below)
-  const data = PLN ? new Set() : null;
-  if (PLN) {
-    const K = Math.min(R, KEEP) + 1.5;
-    for (const [dk, sp] of spots) {
-      const [cx, cz, score, d2, k] = sp, c = world.chunks.get(k);
-      if (d2 <= K * K) data.add(k);
-      if (d2 > R * R || (c ? c.mesh !== undefined : world.farMeshes.has(k))) continue;
-      meshList.push([cx, cz, score, d2]);
-      const [dx, dz] = dk.split(",").map(Number);
-      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const n = spots.get((dx + i) + "," + (dz + j)); if (n) data.add(n[4]); }
-    }
-    for (const sp of spots.values()) if (data.has(sp[4]) && !world.chunks.has(sp[4])) genList.push([sp[0], sp[1], sp[2]]);
+  const data = new Set(), K = Math.min(R, KEEP) + 1.5;
+  for (const [dk, sp] of spots) {
+    const [cx, cz, score, d2, k] = sp, c = world.chunks.get(k);
+    if (d2 <= K * K) data.add(k);
+    if (d2 > R * R || (c ? c.mesh !== undefined : world.farMeshes.has(k))) continue;
+    meshList.push([cx, cz, score, d2]);
+    const [dx, dz] = dk.split(",").map(Number);
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const n = spots.get((dx + i) + "," + (dz + j)); if (n) data.add(n[4]); }
   }
+  for (const sp of spots.values()) if (data.has(sp[4]) && !world.chunks.has(sp[4])) genList.push([sp[0], sp[1], sp[2]]);
   genList.sort((a, b) => a[2] - b[2]);
   meshList.sort((a, b) => a[2] - b[2]);
   // villages simulated beyond view distance (js/villagesim.js): their chunks stay loaded as data, never meshed
@@ -672,15 +655,14 @@ function plan(pcx, pcz) {
   }
   simList.sort((a, b) => a[2] - b[2]);
   const far = (cx, cz, r) => {   // hysteresis: only chunks clearly out of range
-    let dx = cx - pcx, dz = cz - pcz;
-    if (PLN) { const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: cx * CS + 8, z: cz * CS + 8 }, TW); dx = t.x / CS; dz = t.z / CS; }
+    const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: cx * CS + 8, z: cz * CS + 8 }, TW), dx = t.x / CS, dz = t.z / CS;
     return dx * dx + dz * dz > r * r;
   };
   const RU = world.high ? -1 : R;
   for (const k of [...world.chunks.keys()]) {
     const c = world.chunks.get(k);
     if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) unload(k); continue; }
-    if (PLN && !data.has(k) && c.mesh !== undefined && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
+    if (!data.has(k) && c.mesh !== undefined && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
       far(c.cx, c.cz, Math.min(R, KEEP) + 3)) purge(k);
   }
   for (const k of [...world.farMeshes.keys()]) {
@@ -695,9 +677,9 @@ const KEEP = 12;   // chunks from the player that keep their block data on the p
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
   if (BF.villageSim && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
-  roundPlan = !!(PLN && BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
-  // the chunk ceiling (the planet): above min(pxScale, chunkCeiling) over the ground no chunks load; back below 90% of it they do
-  if (PLN && BF.player && BF.player.position) {
+  roundPlan = !!(BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
+  // the chunk ceiling: above min(pxScale, chunkCeiling) over the ground no chunks load; back below 90% of it they do
+  if (BF.player && BF.player.position) {
     let g = BF.SEA;
     try { g = Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(px), Math.floor(pz))); } catch (_) {}
     let ceil = world.chunkCeiling;
@@ -849,7 +831,6 @@ function buildMesh(c) {
   // frame) rather than by local index.
   const nb = [];
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-    if (!PLN) { nb.push(world.chunks.get(ckey(c.cx + dx, c.cz + dz))); continue; }
     const k = resChunk(c.cx + dx, c.cz + dz);
     nb.push(!k ? undefined : k[0] === c.cx + dx && k[1] === c.cz + dz ? world.chunks.get(ckey(k[0], k[1])) : EDGE_NB);
   }
@@ -1154,20 +1135,20 @@ function buildMesh(c) {
     g.setAttribute("color", new THREE.Float32BufferAttribute(T.col, 3));
     g.setAttribute("skyl", new THREE.Float32BufferAttribute(T.sky, 1));
     g.setAttribute("bl", new THREE.Float32BufferAttribute(T.bl, 1));
-    if (PLN) g.setAttribute("sphere", new THREE.Float32BufferAttribute(spherePositions(T.pos, ox, oz, sph), 3));
+    g.setAttribute("sphere", new THREE.Float32BufferAttribute(spherePositions(T.pos, ox, oz, sph), 3));
     g.setIndex(T.ind);
     g.computeBoundingSphere();
-    if (PLN) for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(markUploaded);   // (see purge)
-    const m = new THREE.Mesh(g, PLN ? planetMaterial(mat, BF.planet.face(ox, oz)) : mat);
+    for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(markUploaded);   // (see purge)
+    const m = new THREE.Mesh(g, planetMaterial(mat, BF.planet.face(ox, oz)));
     m.renderOrder = order;
     m.matrixAutoUpdate = false;
     m.position.set(ox, 0, oz); m.updateMatrix();
     m.userData.chunk = c;
-    if (PLN) m.userData.anchor = sph.anchor;
+    m.userData.anchor = sph.anchor;
     scene.add(m);
     c.meshes.push(m);
   };
-  const sph = PLN ? sphereFrame(ox, oz) : null;
+  const sph = sphereFrame(ox, oz);
   make(S, solidMat, 0);
   make(L, liquidMat, 1);
   c.mesh = true;
@@ -1185,7 +1166,8 @@ const fkey = (x, y, z) => x + "," + y + "," + z;
 
 // queued by canonical cell (neighbours of a cell by a face edge are margin addresses)
 function qf(x, y, z) {
-  if (PLN) { if (!res(x, z)) return; x = RX; z = RZ; }
+  if (!res(x, z)) return;
+  x = RX; z = RZ;
   fluidQ.add(fkey(x, y, z));
 }
 function scheduleFluid(x, y, z, withNeighbours) {

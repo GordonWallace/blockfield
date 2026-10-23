@@ -34,10 +34,9 @@ const zoneOf = v => Math.floor(v / ZONE);
 // drawn in that face's grid orientation; past the face's edges it shows the neighbouring faces unfolded, as the world is drawn near the
 // ground (js/world.js cell() reads through the edge), and a corner's wedge stays blank. Anything placed on it (the player's arrow, what an
 // explorer walks over) is first expressed in that face's frame.
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
 const IF = {}, CA = {};
 // The canonical point of (x, z) (a position kept in a neighbouring face's frame names the zone it really stands in).
-const canonAt = (x, z) => (onPlanet() ? BF.planet.canon(x, z, CA) : (CA.x = x, CA.z = z, CA));
+const canonAt = (x, z) => BF.planet.canon(x, z, CA);
 const faceOf = d => (d.face != null ? d.face : (d.face = BF.planet.face(centre(d.zx), centre(d.zz))));
 const dataOfItem = it => (it && it.map ? getData(it.map.size, it.map.zx, it.map.zz) : null);
 
@@ -114,7 +113,7 @@ function sample(wx, wz, s) {
 
 // Samples the pixels of `d` around the world position (x, z). Returns true when something changed.
 function explore(d, x, z, budget) {
-  if (onPlanet()) { const q = BF.planet.inFrame(faceOf(d), x, z, IF); if (!q) return false; x = q.x; z = q.z; }   // (x, z) in the map's face frame
+  { const q = BF.planet.inFrame(faceOf(d), x, z, IF); if (!q) return false; x = q.x; z = q.z; }   // (x, z) in the map's face frame
   const s = scale(d.size), ox = originX(d.size, d.zx), oz = originX(d.size, d.zz);
   const pi = (x - ox) / s, pj = (z - oz) / s, R = revealPx(d.size), RI = Math.ceil(R);
   if (pi < -R || pj < -R || pi > PX + R || pj > PX + R) return false;
@@ -223,17 +222,13 @@ function drawView(d) {
 const MP = { x: 0, z: 0, yaw: 0 };
 function mapPos(d) {
   const P = BF.player, p = P.position;
-  MP.x = p.x; MP.z = p.z; MP.yaw = P.yaw;
-  if (onPlanet()) {
-    const q = BF.planet.inFrame(faceOf(d), p.x, p.z, IF);
-    if (q) { MP.x = q.x; MP.z = q.z; MP.yaw = BF.planet.turnYaw(q.turn, P.yaw); }
-    else { MP.x = MP.z = -1e9; }   // on the far side of the planet: off the map
-  }
+  const q = BF.planet.inFrame(faceOf(d), p.x, p.z, IF);
+  if (q) { MP.x = q.x; MP.z = q.z; MP.yaw = BF.planet.turnYaw(q.turn, P.yaw); }
+  else { MP.x = MP.z = -1e9; MP.yaw = P.yaw; }   // on the far side of the planet: off the map
   return MP;
 }
 // The way to true north on a map (an angle on the map, 0 = up), or null when the map's up is north already (within 4 degrees).
 function northOn(d) {
-  if (!onPlanet()) return null;
   const c = side(d.size) / 2, n = BF.planet.north(originX(d.size, d.zx) + c, originX(d.size, d.zz) + c);
   if (!n) return null;   // a map centred on a pole
   const a = Math.atan2(n[0], -n[1]);
@@ -269,7 +264,7 @@ let cView = null, cTex = null, cg = null, cLast = "";
 // The needle's angle: 0 straight ahead, clockwise positive; it spins when the player stands at the spawn.
 function compassAngle() {
   const P = BF.player, p = P.position, sp0 = BF.spawnPoint || { x: 8.5, z: 8.5 }, sp = sp0.bed && sp0.world ? sp0.world : sp0;
-  const tw = BF.planet ? BF.planet.toward(p, sp, TW) : { x: sp.x - p.x, z: sp.z - p.z };   // the way home in the player's grid frame (round the planet)
+  const tw = BF.planet.toward(p, sp, TW);   // the way home in the player's grid frame (round the planet)
   const dx = tw.x, dz = tw.z, y = P.yaw;
   const sx = dx * Math.cos(y) + dz * -Math.sin(y), su = dx * -Math.sin(y) + dz * -Math.cos(y);   // right / forward components
   return Math.hypot(dx, dz) < 1.5 ? performance.now() / 400 : Math.atan2(sx, su);
