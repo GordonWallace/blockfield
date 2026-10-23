@@ -2374,6 +2374,9 @@ BF.mobs = {
     if (!scene) return;
     dt = Math.min(dt, 0.05);
     planBudget = 2; // A* searches per frame
+    // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
+    // step BF.mobs.update on its own, and move mobs between steps
+    if (BF.regions) BF.regions.tick();
     // the villager-seconds meter (js/perf.js): each lap charges the time since the last to a category; nothing while it's off
     const PF = BF.perf, PC = PF.C, pon = PF.on;
     buildSepGrid();
