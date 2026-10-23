@@ -18,7 +18,7 @@ module.exports = async (pg) => {
     if (BF.player.setFlying) BF.player.setFlying(true);
     // each world.update call: this frame's remesh counts and the dirty chunks it left
     const W = BF.world, up = W.update, F = window.__ffr = { frames: [], on: false };
-    W.update = function () { const r = up.apply(this, arguments); if (F.on) F.frames.push({ ...W.lastRemesh, dirty: W._dirty.size, warp: BF.warp.speed }); return r; };
+    W.update = function () { const t0 = performance.now(), r = up.apply(this, arguments); if (F.on) F.frames.push({ ...W.lastRemesh, dirty: W._dirty.size, warp: BF.warp.speed, t0 }); return r; };
     return { village: [v.x, v.z] };
   });
   ok("found the boot village", !!setup, setup);
@@ -51,14 +51,17 @@ module.exports = async (pg) => {
   });
   ok("a block broken at 1000x is meshed the same frame", brk.warp >= 10 && !!brk.key && !brk.dirtyAfter && brk.near >= 1, brk);
 
-  // drop to 1x: the first world.update after it leaves nothing dirty
+  // drop to 1x: every chunk waiting dirty is remeshed by the first world.update after it (chunks the same update's loading dirties
+  // again, light from a new neighbour, may wait for the next frame as at 1x)
   const drop = await pg.evaluate(async () => {
-    const before = BF.world._dirty.size;
+    const W = BF.world, waiting = [...W._dirty];
     BF.warp.set(0);
     const n0 = __ffr.frames.length;
     while (__ffr.frames.length === n0) await new Promise(r => requestAnimationFrame(r));
-    return { dirtyBefore: before, after: __ffr.frames[n0] };
+    const f = __ffr.frames[n0];
+    const stale = waiting.filter(k => { const c = W.chunks.get(k); return c && c.mesh !== undefined && !(c.meshT >= f.t0); });
+    return { waiting: waiting.length, stale, after: { warp: f.warp, near: f.near, far: f.far, held: f.held, dirty: f.dirty } };
   });
-  ok("after dropping to 1x no chunk stays dirty after one frame", drop.after.warp === 1 && drop.after.dirty === 0, drop);
+  ok("after dropping to 1x no waiting chunk stays dirty after one frame", drop.after.warp === 1 && drop.waiting > 0 && drop.stale.length === 0 && drop.after.held === 0, drop);
   console.log(fails.length ? "FAILED: " + fails.length : "ALL PASSED");
 };
