@@ -4,7 +4,7 @@
 // into one number (f * K + ru) * K + rv, K = N / REGION. A position is keyed by its canonical block cell (BF.planet.canonCell of the
 // floored x / z, as world.js does for chunks), so a region is exactly 4 x 4 chunks and a margin address (a villager kept in its village's
 // frame past a face edge) lands in the region it really stands in.
-// The index holds, per region: mobs, drops (the objects; mobs get stable ids with r15-13, and r15-39 can switch the sets to ids), active
+// The index holds, per region: mobs, drops (the objects; mobIdsIn gives their r15-13 ids), active
 // villages (by centre) and block entities (chests, furnaces, signs, bee homes: canonical "x,y,z" keys, in loaded chunks). It is kept up
 // to date by:
 //   spawn / despawn (js/mobs.js createMob, removeMob), drop spawn / remove (js/drops.js), block edits (js/world.js setBlock -> onSet),
@@ -14,6 +14,7 @@
 // API: BF.regions = { REGION, K, setSize(n), keyOf(x, y, z) -> key or -1, parts(key) -> {f, ru, rv}, name(key) -> "f:ru:rv",
 //                     bounds(key) -> {f, x0, z0, x1, z1} (canonical atlas box, x1 / z1 exclusive), neighbors(key) -> [keys],
 //                     around(x, z, r) -> [keys], get(key) -> region or undefined, mobsIn(key), dropsIn(key), villagesIn(key), blockEntitiesIn(key),
+//                     mobIdsIn(key) -> [mob ids], villageIdsIn(key) -> [village keys],
 //                     tick(), stats() -> [{key, name, f, ru, rv, mobs, drops, villages, blockEntities}], counts(), check() -> {ok, diffs},
 //                     reset(), Index (the bare per-object index, for tests and benchmarks) }
 (() => {
@@ -270,6 +271,7 @@ function check() {
   };
   const at = p => Math.floor(p.x) + "," + Math.floor(p.z);
   cmp("mob", (BF.mobs && BF.mobs.list) || [], mobs, mobPos, mobGone, m => m.type + " at " + at(m.position));
+  if (BF.ids) for (const s of mobs.by.values()) for (const m of s) if (BF.ids.live(m.id) !== m) diffs.push(`mob ${m.type} indexed under id ${m.id}, which is not its registered id`);
   cmp("drop", (BF.drops && BF.drops.list) || [], drops, dropPos, null, d => "at " + at(d.pos));
   cmp("village", BF.mobs && BF.mobs.villages ? [...BF.mobs.villages.values()] : [], villages, vilPos, vilSkip, v => v.key);
   const F = flags(), want = new Map(), CS = BF.CS;
@@ -281,10 +283,16 @@ function check() {
   return { ok, diffs: diffs.slice(0, 50), count: diffs.length };
 }
 
+// The ids (js/ids.js, r15-13) of a region's mobs and village keys, read when asked: the sets hold the objects themselves, because a
+// villager's id can change after it is made (its saved id comes back with its trading state, BF.ids.reuse), and a step that read ids
+// would touch every mob (see Index).
+const idsOf = (s, f) => { const out = []; if (s) for (const o of s) out.push(f(o)); return out; };
+
 const regions = {
   REGION, K, setSize, keyOf, parts, name, bounds, neighbors, around,
   get: k => ({ mobs: mobs.in(k), drops: drops.in(k), villages: villages.in(k), blockEntities: beBy.get(k) }),
   mobsIn: k => mobs.in(k), dropsIn: k => drops.in(k), villagesIn: k => villages.in(k), blockEntitiesIn: k => beBy.get(k),
+  mobIdsIn: k => idsOf(mobs.in(k), m => m.id), villageIdsIn: k => idsOf(villages.in(k), v => v.key),
   onSet, mobAdded, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
 };
 BF.regions = regions;
