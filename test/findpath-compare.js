@@ -5,7 +5,9 @@
 // same frame of the page (so no block changes in between): plain villagers and golems (tall), goals that are one cell, beds (a
 // cell beside them, through house doors), ladders, and areas (within a few blocks, as the job modules ask). Each pair must give routes
 // of the same cost, or both none (identical cells are not required: the heap breaks ties between equal f by insertion order, the old
-// scan by array position, so a tie can also be a route of another length, a ladder for stairs). As the order differs, one search can
+// scan by array position, so a tie can also be a route of another length, a ladder for stairs). A goal that accepts cells away from its
+// centre (a bed's or jobsite's side, an area) makes the distance estimate overstate what is left there, so neither search is sure of the
+// cheapest route and the costs may differ, by no more than how far a route ends from the centre (js/mobs.js pathsAgree). As the order differs, one search can
 // run out of maxNodes just before the goal where the other reaches it: allowed for at most 2% of pairs, and only when that search
 // finds a route given 4x the nodes. Then villagers live their day for a while with BF.debug.pathCompare on, which compares every real
 // search the same way. Prints both times and their ratio.
@@ -17,7 +19,7 @@ module.exports = async (pg) => {
   const wait = (fn, arg, t = 90000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 500 }).then(() => true, () => false);
   await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
   const loadedAround = (x, z, r) => wait(([x, z, r]) => { const w = BF.world; for (let d = -r; d <= r; d += 16) for (let e = -r; e <= r; e += 16) if (!w.isLoaded(x + d, z + e)) return false; return true; }, [x, z, r]);
-  const total = { pairs: 0, same: 0, equal: 0, lenDiff: 0, cutoff: 0, nullBoth: 0, diff: 0, ms: 0, msOld: 0 };
+  const total = { pairs: 0, same: 0, equal: 0, lenDiff: 0, offGoal: 0, cutoff: 0, nullBoth: 0, diff: 0, ms: 0, msOld: 0 };
   const areas = [];
   for (const seed of [1, 3]) {
     await pg.evaluate(s => { BF.newWorld(s, { gen: 4, villages: 10, gameMode: "creative" }); BF.player.start(); }, seed);
@@ -39,11 +41,11 @@ module.exports = async (pg) => {
       BF.mobs.pathStatsReset(); BF.debug.pathCompare = true;
       for (const t of [0.3, 0.55]) { BF.sky.setTime(t); await new Promise(r => setTimeout(r, 15000)); }
       BF.debug.pathCompare = false;
-      const S = BF.debug.pathStats; return { calls: S.calls, same: S.same, equal: S.equal, cutoff: S.cutoff, nullBoth: S.nullBoth, diff: S.diff, ms: S.ms, msOld: S.msOld, diffs: S.diffs.slice(0, 5) };
+      const S = BF.debug.pathStats; return { calls: S.calls, same: S.same, equal: S.equal, offGoal: S.offGoal, cutoff: S.cutoff, nullBoth: S.nullBoth, diff: S.diff, ms: S.ms, msOld: S.msOld, diffs: S.diffs.slice(0, 5) };
     });
-    console.log(`seed ${seed} live: ${live.calls} searches, ${live.same} identical, ${live.equal} same cost, ${live.nullBoth} none both, ${live.cutoff} out of maxNodes in one only, ${live.diff} different; ${live.ms.toFixed(1)} ms vs old ${live.msOld.toFixed(1)} ms` + (live.diff ? " " + JSON.stringify(live.diffs) : ""));
+    console.log(`seed ${seed} live: ${live.calls} searches, ${live.same} identical, ${live.equal} same cost, ${live.offGoal} within the goal's slack, ${live.nullBoth} none both, ${live.cutoff} out of maxNodes in one only, ${live.diff} different; ${live.ms.toFixed(1)} ms vs old ${live.msOld.toFixed(1)} ms` + (live.diff ? " " + JSON.stringify(live.diffs) : ""));
     check(live.calls > 0, `seed ${seed} live: villagers searched routes (${live.calls})`);
-    check(live.diff === 0, `seed ${seed} live: every real search gave a route of the old cost, or none both, or one only ran out of maxNodes first (${live.diff} differ)`);
+    check(live.diff === 0, `seed ${seed} live: every real search gave a route of the old cost (or within the goal's slack), or none both, or one only ran out of maxNodes first (${live.diff} differ)`);
     check(live.cutoff <= Math.max(2, live.calls * 0.02), `seed ${seed} live: few searches ran out of maxNodes in one only (${live.cutoff})`);
     areas[areas.length - 1].live = live;
   }
@@ -64,13 +66,13 @@ module.exports = async (pg) => {
   }
   for (const a of areas) {
     const r = a.r;
-    console.log(`${a.name}: ${r.pairs} pairs (${r.tall} golem, ${r.kinds}), ${r.same} identical, ${r.equal} same cost (${r.lenDiff} of them another length), ${r.nullBoth} none both, ${r.cutoff} found by one only within maxNodes, ${r.diff} different; ` +
+    console.log(`${a.name}: ${r.pairs} pairs (${r.tall} golem, ${r.kinds}), ${r.same} identical, ${r.equal} same cost (${r.lenDiff} of them another length), ${r.offGoal} within the goal's slack, ${r.nullBoth} none both, ${r.cutoff} found by one only within maxNodes, ${r.diff} different; ` +
       `${r.ms.toFixed(1)} ms vs old ${r.msOld.toFixed(1)} ms (${(r.msOld / Math.max(r.ms, 1e-6)).toFixed(1)}x)` + (r.diff ? " " + JSON.stringify(r.diffs) : ""));
     check(r.pairs >= PAIRS * 0.9, `${a.name}: ${r.pairs} start/goal pairs searched`);
     check(r.found > r.pairs * 0.3, `${a.name}: most pairs have a route (${r.found})`);
-    check(r.diff === 0, `${a.name}: every pair gives a route of the old cost, or none both, or one only runs out of maxNodes first (${r.diff} differ)`);
+    check(r.diff === 0, `${a.name}: every pair gives a route of the old cost (or within the goal's slack), or none both, or one only runs out of maxNodes first (${r.diff} differ)`);
     check(r.cutoff <= Math.max(2, r.pairs * 0.02), `${a.name}: few pairs run out of maxNodes in one search only (${r.cutoff})`);
-    for (const k of ["pairs", "same", "equal", "lenDiff", "cutoff", "nullBoth", "diff", "ms", "msOld"]) total[k] += r[k];
+    for (const k of ["pairs", "same", "equal", "lenDiff", "offGoal", "cutoff", "nullBoth", "diff", "ms", "msOld"]) total[k] += r[k];
   }
   console.log(`all: ${total.pairs} pairs, ${total.cutoff} out of maxNodes in one only, ${total.diff} different; findPath ${total.ms.toFixed(1)} ms, findPathOld ${total.msOld.toFixed(1)} ms: ${(total.msOld / Math.max(total.ms, 1e-6)).toFixed(1)}x faster`);
   const errs = await pg.evaluate(() => window.__errs);
@@ -97,7 +99,7 @@ async function comparePairs(pg, box, seed, n) {
       if (b.bed && !b.bed.head && beds.length < 200) beds.push({ x, y, z });
     }
     const pick = a => a[Math.floor(rnd() * a.length)];
-    const R = { pairs: 0, same: 0, equal: 0, lenDiff: 0, cutoff: 0, nullBoth: 0, diff: 0, found: 0, tall: 0, cross: 0, ms: 0, msOld: 0, diffs: [], kinds: "" };
+    const R = { pairs: 0, same: 0, equal: 0, lenDiff: 0, offGoal: 0, cutoff: 0, nullBoth: 0, diff: 0, found: 0, tall: 0, cross: 0, ms: 0, msOld: 0, diffs: [], kinds: "" };
     const kinds = {};
     if (!stand.length) return R;
     for (let i = 0; i < n; i++) {
@@ -113,10 +115,8 @@ async function comparePairs(pg, box, seed, n) {
       R.pairs++; R.ms += t1 - t0; R.msOld += t2 - t1; if (tall) R.tall++;
       if (a) R.found++;
       if (a && box.edge != null && (from[0] < box.edge) !== (a.length ? a[a.length - 1][0] < box.edge : from[0] < box.edge)) R.cross++;
-      if (!a && !b) R.nullBoth++;
-      else if (a && b && a.length === b.length && a.every((c, j) => c[0] === b[j][0] && c[1] === b[j][1] && c[2] === b[j][2])) R.same++;
-      else if (a && b && M.routeCost(from[0], from[1], from[2], a) === M.routeCost(from[0], from[1], from[2], b)) { R.equal++; if (a.length !== b.length) R.lenDiff++; }
-      else if (!a !== !b && (a ? M.findPathOld : M.findPathFast)(from[0], from[1], from[2], goal, max * 4, tall)) R.cutoff++;   // one ran out of maxNodes first: with more it finds one too
+      const v = M.pathsAgree(from[0], from[1], from[2], goal, max, tall, a, b);   // (js/mobs.js: same, equal cost, offGoal, cutoff, nullBoth or diff)
+      if (v !== "diff") { R[v]++; if (v === "equal" && a.length !== b.length) R.lenDiff++; }
       else { R.diff++; if (R.diffs.length < 5) R.diffs.push({ from, kind, goal: [goal.x, goal.z], max, tall, len: a && a.length, lenOld: b && b.length, cost: a && M.routeCost(...from, a), costOld: b && M.routeCost(...from, b) }); }
     }
     R.kinds = Object.entries(kinds).map(([k, v]) => v + " " + k).join(", ");
