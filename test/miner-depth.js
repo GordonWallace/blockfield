@@ -50,9 +50,9 @@ module.exports = async (pg, out) => {
     // raw iron / raw gold are kept when dug
     M.inv = new Array(T.SLOTS).fill(null); T.inv.add(M.inv, I.iron_pickaxe, 1);
     const px = Math.floor(BF.player.position ? BF.player.position.x : M.position.x), pz = Math.floor(M.position.z) + 3, py = W.heightAt(px, pz) + 6;
-    W.setBlock(px, py, pz, B.iron_ore); BF.miner._test.dig(M, px, py, pz);
-    W.setBlock(px, py, pz, B.gold_ore); BF.miner._test.dig(M, px, py, pz);
-    W.setBlock(px, py, pz, B.deepslate_gold_ore); BF.miner._test.dig(M, px, py, pz);
+    W.setBlock(px, py, pz, B.iron_ore); BF.miner._test.dig(M, px, py, pz); BF.blockReq.flush();
+    W.setBlock(px, py, pz, B.gold_ore); BF.miner._test.dig(M, px, py, pz); BF.blockReq.flush();
+    W.setBlock(px, py, pz, B.deepslate_gold_ore); BF.miner._test.dig(M, px, py, pz); BF.blockReq.flush();
     res.kept = M.inv.filter(Boolean).map(s => BF.itemName(s.id) + "x" + s.count);
     ok(T.inv.count(M.inv, I.raw_iron) === 1 && T.inv.count(M.inv, I.raw_gold) === 2, "raw iron / raw gold not kept: " + res.kept.join(" "));
     // wall ores: a corridor cell running +x with ore on its +z side, its -z side and its ceiling (a water-side one is left alone)

@@ -19,6 +19,8 @@ module.exports = async (pg) => {
     }
     const farmer = { type: "villager", profession: "farmer", inv: inv.create(), position: new THREE.Vector3(px + 0.5, y0 + 1, pz + 0.5), ai: {} };
     inv.add(farmer.inv, I.bucket, 1);
+    // fillBucket sends a block request (spec r15-18): applied here at once, as the tick's apply phase would
+    const fill = (x, y, z) => { const rq = VL.fillBucket(farmer, x, y, z); if (!rq) return false; BF.blockReq.flush(); return rq.result.ok; };
     const full = () => inv.count(farmer.inv, I.water_bucket), empty = () => inv.count(farmer.inv, I.bucket);
     // water spreads by the simulation clock (one step per 0.25 s of BF.simNow), which runs slower than the wall clock on slow frames:
     // wait for game time, not real time
@@ -26,20 +28,20 @@ module.exports = async (pg) => {
     // 1. a lone source: the bucket takes it, and it is gone for good
     const lx = px + 2, lz = pz + 2;
     W.setBlock(lx, y0, lz, B.water);
-    ok("fills from a lone source", VL.fillBucket(farmer, lx, y0, lz) && full() === 1 && empty() === 0);
+    ok("fills from a lone source", fill(lx, y0, lz) && full() === 1 && empty() === 0);
     ok("the lone source is taken", BF.FLUID[W.getBlock(lx, y0, lz)] !== 8, W.getBlock(lx, y0, lz));
     await simWait(1.5);
     ok("the lone source does not come back", BF.FLUID[W.getBlock(lx, y0, lz)] !== 8, W.getBlock(lx, y0, lz));
-    ok("no second bucket from the spot", !VL.fillBucket(farmer, lx, y0, lz));
+    ok("no second bucket from the spot", !fill(lx, y0, lz));
     // 2. the bucket is poured into a bed channel cell and the farmer is left empty: refilling from that same single cell takes it back
     inv.remove(farmer.inv, I.water_bucket, 1); inv.add(farmer.inv, I.bucket, 1);
     W.setBlock(lx, y0, lz, B.water);
-    ok("pour then refill from the same cell takes the water back", VL.fillBucket(farmer, lx, y0, lz) && BF.FLUID[W.getBlock(lx, y0, lz)] !== 8);
+    ok("pour then refill from the same cell takes the water back", fill(lx, y0, lz) && BF.FLUID[W.getBlock(lx, y0, lz)] !== 8);
     // 3. an infinite source: a 3x3 pond; the middle cell flows back in after it is taken
     inv.remove(farmer.inv, I.water_bucket, 1); inv.add(farmer.inv, I.bucket, 1);
     const ox = px + 10, oz = pz + 10;
     for (let x = ox - 1; x <= ox + 1; x++) for (let z = oz - 1; z <= oz + 1; z++) W.setBlock(x, y0, z, B.water);
-    ok("fills from a pond", VL.fillBucket(farmer, ox, y0, oz) && full() === 1);
+    ok("fills from a pond", fill(ox, y0, oz) && full() === 1);
     ok("the pond cell is taken at first", BF.FLUID[W.getBlock(ox, y0, oz)] !== 8);
     await simWait(30, () => BF.FLUID[W.getBlock(ox, y0, oz)] === 8);
     ok("the pond cell flows back in", BF.FLUID[W.getBlock(ox, y0, oz)] === 8, W.getBlock(ox, y0, oz));

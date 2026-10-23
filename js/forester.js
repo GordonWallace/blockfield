@@ -152,6 +152,7 @@ function growTree(x, y, z) {
   return true;
 }
 
+// Think hook: the saws (inventory only).
 function growTick() {
   hook();
   const now = nowS();
@@ -160,6 +161,15 @@ function growTick() {
   growLast = now;
   sawT -= dt;
   if (sawT <= 0 && BF.mobs) { sawT = 5; for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m)); }   // whatever the villager is doing
+}
+// Block tick: saplings grow into trees (spec r15-18: a block tick like crop growth, not a request).
+let sapLast = 0;
+function sapTick() {
+  hook();
+  const now = nowS();
+  if (now - sapLast < 1) return;
+  const dt = Math.min(5, now - sapLast);
+  sapLast = now;
   for (const [k, s] of saps) {
     if (!W().isLoaded(s.x, s.z)) continue;
     if (!isSap(get(s.x, s.y, s.z))) { saps.delete(k); continue; }
@@ -168,7 +178,8 @@ function growTick() {
 }
 {
   const world = BF.world;
-  if (world && world.onThink) world.onThink(growTick);   // think (the saws, and saplings as direct writes until r15-18: js/world.js tickSim)
+  if (world && world.onThink) world.onThink(growTick);        // think: the saws (js/world.js tickSim)
+  if (world && world.onBlockTick) world.onBlockTick(sapTick); // block tick: sapling growth
 }
 
 // ---------------------------------------------------------------- trees (felling)
@@ -539,17 +550,28 @@ function endTask(m, F, ok) {
   }
   F.task = null; F.t = 0; F.chop = 0; m.ai.route = null;
 }
+// Plants its sapling at t: a block request (spec r15-18). The request, or false when the spot no longer fits; the rest follows in its result.
 function plantAt(m, t) {
   const slot = holdsSapling(m);
   if (!slot || !canSurvive(t.x, t.y, t.z) || get(t.x, t.y, t.z) !== 0) return false;
   const name = BF.items[slot.id].name, id = BF.B[name];
-  W().setBlock(t.x, t.y, t.z, id);
-  T().inv.remove(m.inv, slot.id, 1);
-  addSap(t.x, t.y, t.z, id);
-  if (BF.audio && BF.audio.blockSound) { try { BF.audio.blockSound("place", id, t.x, t.y, t.z, 0.6); } catch (e) { /* optional */ } }
-  if (BF.emit) BF.emit("blockPlaced", t.x, t.y, t.z, id);
-  log("plant", m, { at: [t.x, t.y, t.z], sapling: name });
-  return true;
+  return BF.blockReq.send(m, [BF.blockReq.cell(t.x, t.y, t.z, 0, id, { emit: "placed" })], { take: [{ id: slot.id, n: 1 }], why: "planting a sapling" }).then(r => {
+    if (!r.ok) return;
+    addSap(t.x, t.y, t.z, id);
+    if (BF.audio && BF.audio.blockSound) { try { BF.audio.blockSound("place", id, t.x, t.y, t.z, 0.6); } catch (e) { /* optional */ } }
+    log("plant", m, { at: [t.x, t.y, t.z], sapling: name });
+  });
+}
+// The forester's felling as one block request (spec r15-18): every log as it saw it, or nothing; leaves that changed meanwhile stay out of it.
+// The blocks drop their items in the world, as fell does.
+function fellReq(m, tree) {
+  const BR = BF.blockReq, cells = [];
+  tree.logs.slice().sort((a, b) => b[1] - a[1]).forEach(([x, y, z]) => cells.push(BR.cell(x, y, z, get(x, y, z), 0, { drops: "world" })));   // top to bottom, as the mod
+  tree.leaves.forEach(([x, y, z]) => cells.push(BR.cell(x, y, z, get(x, y, z), 0, { drops: "world", opt: true })));
+  const base = tree.base, baseId = get(base[0], base[1], base[2]) || BF.B.oak_log;
+  return BR.send(m, cells, { why: "felling a tree" }).then(r => {
+    if (r.ok && BF.audio && BF.audio.blockSound) { try { BF.audio.blockSound("break", baseId, base[0], base[1], base[2], 0.8); } catch (e) { /* optional */ } }
+  });
 }
 
 // Sawing: up to SAW_DAY logs a day become 4 planks each (js/trading.js sells both). It keeps 2 logs of every species unsawn for sale, stops at 128 planks.
@@ -626,6 +648,10 @@ function ai(m, dt, out) {
     log("start", m, { task: task.kind, at: [task.x, task.y, task.z] });
   }
   const k = F.task;
+  if (k.sent) {   // its block request is out: the result ends the task (one that never came, after a reset, gives it up)
+    if (BF.blockReq.busy(m)) { a.mode = "idle"; a.t = 2; return true; }
+    endTask(m, F, false); return true;
+  }
   F.t += dt;
   if (F.t > k.max) { log("giveup", m, { task: k.kind, why: "too slow" }); endTask(m, F, false); return true; }
   a.mode = "idle"; a.t = 2;
@@ -652,7 +678,12 @@ function ai(m, dt, out) {
     const ok = buyAxe(m, k.deal);
     if (ok) m.ai.swingT = 0.2; else log("giveup", m, { task: "buy", why: "offer gone" });
     endTask(m, F, ok);
-  } else if (k.kind === "plant") { const ok = plantAt(m, k); if (ok) a.swingT = 0.35; else log("giveup", m, { task: "plant", why: "spot changed" }); endTask(m, F, ok); }
+  } else if (k.kind === "plant") {
+    const rq = plantAt(m, k);
+    if (!rq) { log("giveup", m, { task: "plant", why: "spot changed" }); endTask(m, F, false); return true; }
+    k.sent = true; a.swingT = 0.35;
+    rq.then(r => { if (F.task !== k) return; if (!r.ok) log("giveup", m, { task: "plant", why: "spot taken" }); endTask(m, F, r.ok); });
+  }
   else if (k.kind === "gather") {
     const d = k.drop, left = T().inv.add(m.inv, d.id, d.count);
     if (left < d.count) log("pickup", m, { got: (d.count - left) + " " + BF.items[d.id].name });
@@ -682,10 +713,14 @@ function ai(m, dt, out) {
     }
     if (k.done >= tr.logs.length) {
       tr.leaves = tr.leaves.filter(([x, y, z]) => isLeaf(get(x, y, z)));
-      fell(m, tr);
-      log("fell", m, { at: bx, logs: tr.logs.length, leaves: tr.leaves.length, secs: +F.t.toFixed(1), axe: axeOf(m) ? BF.items[axeOf(m).id].name : "hand" });
-      F.sweep = { x: bx[0], z: bx[2], until: nowS() + SWEEP_MAX }; F.skip = null; F.tries = null; F.thinkT = 0.8;   // now pick up everything that fell
-      endTask(m, F, true);
+      k.sent = true;
+      fellReq(m, tr).then(r => {   // the tree comes down in the apply phase; a tree another took first is given up (it thinks again)
+        if (F.task !== k) return;
+        if (!r.ok) { log("giveup", m, { task: "cut", why: "tree " + r.why, at: bx }); k.done = 0; endTask(m, F, false); return; }
+        log("fell", m, { at: bx, logs: tr.logs.length, leaves: tr.leaves.length, secs: +F.t.toFixed(1), axe: axeOf(m) ? BF.items[axeOf(m).id].name : "hand" });
+        F.sweep = { x: bx[0], z: bx[2], until: nowS() + SWEEP_MAX }; F.skip = null; F.tries = null; F.thinkT = 0.8;   // now pick up everything that fell
+        endTask(m, F, true);
+      });
     }
   }
   return true;
@@ -702,5 +737,5 @@ function statusText(m) {
 if (BF.mobs && BF.mobs.toolHolders) BF.mobs.toolHolders.forester = m => { const s = m.inv && axeOf(m); return s ? s.id : null; };   // its axe, drawn in its hands
 
 BF.forester = { ai, statusText, canSurvive, growTree, treeAt, fallAbove, fell, findTree, findSpot, shape, saplings: saps, SPECIES, LOG, axeOf, axeScore, logSeconds, chopSecs,
-  _test: { fell, plantAt, growTick, findDrop, state, builtBlock, findAxeSeller, buyAxe, sticks, saw } };
+  _test: { fell, fellReq, plantAt, growTick, findDrop, state, builtBlock, findAxeSeller, buyAxe, sticks, saw } };
 })();

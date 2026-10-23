@@ -135,7 +135,7 @@ module.exports = async (pg, out) => {
     const saveInv = T.inv.clone(Mi.inv), saveVil = Mi.village; let dug = 0;
     Mi.village = { key: saveVil && saveVil.key, members: [Mi] };
     const wf = BF.miner.wantsFlint(Mi);
-    for (let k = 0; k < 400; k++) { BF.world.setBlock(gx, gy, gz, BF.B.gravel); if (BF.miner._test.dig(Mi, gx, gy, gz)) dug++; if (Mi.inv.filter(Boolean).length > 16) inv.remove(Mi.inv, I.cobblestone, 999); }
+    for (let k = 0; k < 400; k++) { BF.world.setBlock(gx, gy, gz, BF.B.gravel); { const rq = BF.miner._test.dig(Mi, gx, gy, gz); BF.blockReq.flush(); if (rq && (rq === true || rq.result.ok)) dug++; } if (Mi.inv.filter(Boolean).length > 16) inv.remove(Mi.inv, I.cobblestone, 999); }
     const flint = c(Mi, "flint") - sf; R.info.flintRate = flint + " flint from " + dug + " gravel, gravel " + sg + " -> " + c(Mi, "gravel") + (wf ? " (wantsFlint)" : "");
     ok("miner keeps flint from gravel (~10%), not the gravel", !wf && dug === 400 && flint >= 15 && flint <= 75 && c(Mi, "gravel") === sg, R.info.flintRate);
     Mi.inv = saveInv; Mi.village = saveVil;

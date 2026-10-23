@@ -25,7 +25,10 @@ module.exports = async (pg) => {
       const got = [];
       for (let i = 0; i < n; i++) {
         const t = X.findGather(farmer, D, null);
-        if (!t || !X.gatherBlock(farmer, D, t)) break;
+        const rq = t && X.gatherBlock(farmer, D, t);   // a block request (spec r15-18), applied at once
+        if (!rq) break;
+        BF.blockReq.flush();
+        if (!rq.result.ok) break;
         got.push(t);
         if (inv.count(farmer.inv, B.dirt) > 40) inv.remove(farmer.inv, B.dirt, 40);
       }

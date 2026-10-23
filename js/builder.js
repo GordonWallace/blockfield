@@ -554,12 +554,14 @@ function vlogBuild(m, e, verb) {
 // `wood`: the species chosen for it (chooseWood when omitted); the whole structure is built from it.
 // Saplings on the site (and the block round it) are cleared when it is planned: one left there could grow into a tree in a cell before its
 // block goes in (a farm's composter), or inside the farm. Foresters do not plant on a site being built (js/forester.js findSpot).
-function clearSaplings(e) {
-  const w = W();
+// One block request (spec r15-18), each sapling left alone if it changed meanwhile.
+function clearSaplings(m, e) {
+  const w = W(), cells = [];
   for (let x = e.ox - 1; x <= e.ox + e.w; x++) for (let z = e.oz - 1; z <= e.oz + e.d; z++) for (let y = e.oy - MAX_SLOPE - 1; y <= e.oy + 1; y++) {
-    const b = BF.blocks[w.getBlock(x, y, z)];
-    if (b && /_sapling$/.test(b.name)) w.setBlock(x, y, z, 0);
+    const id = w.getBlock(x, y, z), b = BF.blocks[id];
+    if (b && /_sapling$/.test(b.name)) cells.push(BF.blockReq.cell(x, y, z, id, 0, { opt: true }));
   }
+  if (cells.length) BF.blockReq.send(m, cells, { why: "clearing saplings off a building site", wait: false });
 }
 function beginPlan(m, bs, type, wood) {
   const R = m.village, built = builtOf(R), style = styleIdx(R.style);
@@ -578,7 +580,7 @@ function beginPlan(m, bs, type, wood) {
     w: site.bp.w, d: site.bp.d, prog: 0, skipped: 0, state: "building", owner: m.slot ? m.slot.idx : 0, fill: site.fill, start: +dayNow().toFixed(3) };
   if (site.span) e.span = site.span;   // a bridge: the water it crosses (js/bridges.js walks villagers over it)
   e.n = nfill(e) + site.bp.n;
-  clearSaplings(e);
+  clearSaplings(m, e);
   built.push(e);
   logEvent("plan", m, { type, wood, at: [e.ox, e.oy, e.oz], rot: e.rot, blocks: e.n, fill: nfill(e) });
   vlogBuild(m, e, "started building");
@@ -791,7 +793,8 @@ function emitParticles(x, y, z, id) {
   }
 }
 function advance(e, by) { e.prog += by || 1; }
-// Places the current cell. Returns "placed" | "skipped" | "wait" | "missing" (needs material) | "nowater" (needs a full bucket) | "paused".
+// Places the current cell. Returns "sent" (a block request, spec r15-18: its result places it, or, refused, the next think looks again) |
+// "skipped" | "wait" | "missing" (needs material) | "nowater" (needs a full bucket) | "paused".
 function placeCell(m, bs, e) {
   const w = W(), c = cellOf(e, e.prog), T = TR().inv;
   if (!w.isLoaded(c.x, c.z)) return "paused";
@@ -821,29 +824,27 @@ function placeCell(m, bs, e) {
       if (have0(m.inv, c.item) < 1) return "missing";
     }
   }
-  if (dig) {   // the ground block comes out first; the builder keeps its drops (grass gives dirt)
-    const drops = BF.rollDrops ? BF.rollDrops(cur) : [];
-    if (!w.setBlock(c.x, c.y, c.z, 0)) return "paused";
-    for (const d of drops) T.add(m.inv, d.id, d.count);
-  }
-  if (!w.setBlock(c.x, c.y, c.z, use)) return "paused";
-  if (c.cost) T.remove(m.inv, c.item, 1);                   // exactly one item per block
-  if (isWater) { T.remove(m.inv, BF.I.water_bucket, 1); T.add(m.inv, BF.I.bucket, 1); }   // the bucket is empty after the one block
-  let step = 1;
-  if (BF.vlog && BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) BF.vlog.bed(m, c.x, c.y, c.z);
-  if (BF.blocks[use] && BF.blocks[use].jobsite && BF.emit) BF.emit("blockPlaced", c.x, c.y, c.z, use);   // a jobsite (the stable's tack rack): js/jobs.js lists it for the jobless at once
-  if (BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) firstDibs(m, e, c);
-  if (c.pair) {                                             // door upper half / bed head go in with the lower half / foot
-    const c2 = cellOf(e, e.prog + 1);
-    w.setBlock(c2.x, c2.y, c2.z, c2.id);
-    step = 2;
-  }
-  emitParticles(c.x, c.y, c.z, use);
-  m.ai.swingT = 0.35;
-  advance(e, step);
-  e.placed = (e.placed || 0) + 1;
-  bs.placed = (bs.placed || 0) + 1;
-  return "placed";
+  // one request for the cell and, for a door or a bed, its other half: all or none. A ground block comes out first (the builder keeps its
+  // drops: grass gives dirt); the material and a full bucket's water are used up, the bucket comes back empty.
+  const BR = BF.blockReq, cells = [BR.cell(c.x, c.y, c.z, cur, use, dig ? { drops: "add" } : null)];
+  if (BF.blocks[use] && BF.blocks[use].jobsite) cells[0].emit = "placed";   // a jobsite (the stable's tack rack): js/jobs.js lists it for the jobless at once
+  const c2 = c.pair ? cellOf(e, e.prog + 1) : null;                  // door upper half / bed head go in with the lower half / foot
+  if (c2) cells.push(BR.cell(c2.x, c2.y, c2.z, w.getBlock(c2.x, c2.y, c2.z), c2.id));
+  const take = c.cost ? [{ id: c.item, n: 1 }] : [];                // exactly one item per block
+  if (isWater) take.push({ id: BF.I.water_bucket, n: 1 });
+  const at = e.prog;
+  BR.send(m, cells, { take, give: isWater ? [{ id: BF.I.bucket, n: 1 }] : null, why: "building " + (BF.blocks[use] ? BF.blocks[use].name : "a block") }).then(r => {
+    if (!r.ok || e.prog !== at) return;
+    if (BF.vlog && BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) BF.vlog.bed(m, c.x, c.y, c.z);
+    if (BF.blocks[use] && BF.blocks[use].bed && !BF.blocks[use].bed.head) firstDibs(m, e, c);
+    emitParticles(c.x, c.y, c.z, use);
+    m.ai.swingT = 0.35;
+    advance(e, c2 ? 2 : 1);
+    e.placed = (e.placed || 0) + 1;
+    bs.placed = (bs.placed || 0) + 1;
+    bs.placeT = rnd(RS(m), BLOCK_T[0], BLOCK_T[1]); bs.cands = null;
+  });
+  return "sent";
 }
 
 // Glass panes for windows left open (entry.gaps): the finished structure with gaps nearest the builder is taken up again, from its first gap,
@@ -913,6 +914,13 @@ function fillMode(m, bs, dt, out) {
     return false;
   };
   if (!F || !VL || !e || e.state !== "building") return back(false);
+  if (F.sent) {   // the bucket's block request (spec r15-18): full, or that water is gone and it looks again
+    if (BF.blockReq.busy(m)) return true;
+    F.sent = false;
+    if (BF.blockReq.result(m).ok) return back(false);
+    F.src = null; F.bad++; F.act = 0;
+    return true;
+  }
   if ((F.t += dt) > 240 || F.bad >= 4) return back(true);        // no water to be had: build the rest, the well stays dry
   if (!F.src) {
     if ((F.cd -= dt) > 0) return false;
@@ -929,7 +937,7 @@ function fillMode(m, bs, dt, out) {
   out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5;
   m.lookAt = { position: { x: s.x + 0.5, y: s.y + 0.5, z: s.z + 0.5 }, height: 0 };
   if ((F.act += dt) < 0.9) { if (ai.swingT <= 0 && F.act < 0.2) ai.swingT = 0.35; return true; }
-  if (VL.fillBucket(m, s.x, s.y, s.z)) return back(false);
+  if (VL.fillBucket(m, s.x, s.y, s.z)) { F.sent = true; return true; }
   F.src = null; F.bad++; F.act = 0;
   return true;
 }
@@ -939,6 +947,7 @@ function buildMode(m, bs, dt, out) {
   const e = bs.entry, ai = m.ai;
   if (!e || e.state !== "building" || e.owner !== (m.slot ? m.slot.idx : 0)) { bs.mode = "idle"; bs.entry = null; return false; }   // done, or another builder took it over
   bs.placeT -= dt;
+  if (BF.blockReq.busy(m)) return true;           // its last block is going in (spec r15-18)
   reachNow = e.retried ? REACH + 1.6 : REACH;     // second pass: stretch a little for the last awkward cells (gable tops)
   // watchdog: a cell that cannot be placed for 15 s (unreachable, stuck, no free line) is skipped so the structure still gets finished
   const cStall = e.prog < e.n ? cellOf(e, e.prog) : null;
@@ -973,7 +982,7 @@ function buildMode(m, bs, dt, out) {
     ai.mode = "idle"; ai.t = 2;
     if (bs.placeT > 0) return true;
     const r = placeCell(m, bs, e);
-    if (r === "placed") { bs.placeT = rnd(RS(m), BLOCK_T[0], BLOCK_T[1]); bs.cands = null; }
+    if (r === "sent") { /* the result (before the next think) advances the build */ }
     else if (r === "missing") { toShop(m, bs, e); }
     else if (r === "nowater") { bs.mode = "fill"; bs.fill = { t: 0, cd: 0, src: null, act: 0, bad: 0 }; ai.route = null; bs.goal = null; }
     else if (r === "skipped") bs.placeT = 0.05;
@@ -1123,6 +1132,15 @@ function digDirt(m, bs, dt, out) {
   const G = bs.dig, VL = BF.villageLife, ai = m.ai;
   // nothing dug (none to dig near): for a while it waits for dirt like for any other material
   const back = () => { if (G && !G.got) bs.noDirt = dayNow() + 0.1; bs.stage = "think"; bs.dig = null; ai.route = null; bs.goal = null; if (BF.villageSim) BF.villageSim.done(m); return false; };
+  if (G && G.sent) {   // the dirt's block request (spec r15-18)
+    if (BF.blockReq.busy(m)) return true;
+    const t = G.task, r = BF.blockReq.result(m);
+    G.sent = false;
+    if (r.ok) { G.got = (G.got || 0) + 1; logEvent("dig", m, { at: [t.x, t.y, t.z], dirt: have0(m.inv, BF.I.dirt) }); } else G.bad++;
+    G.task = null;
+    if (BF.villageSim) BF.villageSim.done(m);
+    return true;
+  }
   if (!G || (G.t += dt) > 240 || G.bad >= 6 || have0(m.inv, BF.I.dirt) >= G.n) return back();
   if (!G.task) {
     if ((G.cd -= dt) > 0) return false;
@@ -1141,7 +1159,8 @@ function digDirt(m, bs, dt, out) {
   out.faceX = t.x + 0.5; out.faceZ = t.z + 0.5;
   m.lookAt = { position: { x: t.x + 0.5, y: t.y + 0.5, z: t.z + 0.5 }, height: 0 };
   if ((G.act += dt) < 0.9) { if (ai.swingT <= 0) ai.swingT = 0.35; return true; }
-  if (VL.gatherAt(m, m.village, t)) { G.got = (G.got || 0) + 1; logEvent("dig", m, { at: [t.x, t.y, t.z], dirt: have0(m.inv, BF.I.dirt) }); } else G.bad++;
+  if (VL.gatherAt(m, m.village, t)) { G.sent = true; return true; }
+  G.bad++;
   G.task = null;
   if (BF.villageSim) BF.villageSim.done(m);
   return true;
