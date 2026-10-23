@@ -1322,7 +1322,7 @@ function dealWith(m, v2, want) {
     while (k > 0 && !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n * k }], [{ id: em, n: o.buy[0].n * k }])) k--;
     if (k < 1) continue;
     const price = o.buy[0].n / per;
-    if (!best || price < best.price) best = { seller: v2, offer: o, times: k, price, item: o.sell.id };
+    if (!best || price < best.price) best = BF.ids.refs({ seller: v2, offer: o, times: k, price, item: o.sell.id });
   }
   return best;   // only through offers the player could take too: job offers and spare goods (js/market.js)
 }
@@ -1345,7 +1345,7 @@ function milkDeal(m, v2, want) {
     let k = Math.min(Math.ceil(want / per), Math.floor(myEm / o.buy[0].n), Math.floor(cnt(v2, id) / o.sell.n), 4);
     while (k > 0 && !T.inv.canFit(m.inv, [{ id, n: o.sell.n * k }], [{ id: em, n: o.buy[0].n * k }])) k--;
     const price = o.buy[0].n / per;
-    if (k > 0 && (!best || price < best.price)) best = { seller: v2, offer: o, times: k, price, item: id, milk: true };
+    if (k > 0 && (!best || price < best.price)) best = BF.ids.refs({ seller: v2, offer: o, times: k, price, item: id, milk: true });
   }
   return best;
 }
@@ -1432,8 +1432,8 @@ function findLogSeller(m, want, prefer) {
   }
   if (!best) return null;
   const v2 = best.seller;
-  return { kind: "buylog", seller: v2, item: best.item, per: best.per, offer: best.offer, times: best.times, want,
-    x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z), k: "buylog:" + sellerIdx(v2) };
+  return BF.ids.refs({ kind: "buylog", seller: v2, item: best.item, per: best.per, offer: best.offer, times: best.times, want,
+    x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z), k: "buylog:" + sellerIdx(v2) });
 }
 function doLogDeal(m, t) {
   const T = TR(), v2 = t.seller, em = ids().em;
@@ -1476,7 +1476,7 @@ function findToolSeller(m, re) {
       if (!it || !re.test(it.name) || T.blockReason(v2, o)) continue;
       if (!o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) continue;
       const sc = BF.toolWear.rank(o.sell.id) * 10 - v2.position.distanceTo(m.position);   // tier x 1000, then speed (gold above wood), then distance
-      if (sc > bs) { bs = sc; best = { kind: "tool", seller: v2, offer: o, item: o.sell.id }; }
+      if (sc > bs) { bs = sc; best = BF.ids.refs({ kind: "tool", seller: v2, offer: o, item: o.sell.id }); }
     }
   }
   return best;
@@ -1530,7 +1530,7 @@ function wheatDealWith(m, v2, want, item = feedItem(m)) {
     let k = Math.min(Math.ceil(want / o.sell.n), Math.floor(cnt(m, c.em) / o.buy[0].n), Math.floor(cnt(v2, item) / o.sell.n), 4);
     while (k > 0 && !T.inv.canFit(m.inv, [{ id: item, n: o.sell.n * k }], [{ id: c.em, n: o.buy[0].n * k }])) k--;
     const price = o.buy[0].n / o.sell.n;
-    if (k > 0 && (!best || price < best.price)) best = { kind: "wheat", seller: v2, offer: o, times: k, item, price };
+    if (k > 0 && (!best || price < best.price)) best = BF.ids.refs({ kind: "wheat", seller: v2, offer: o, times: k, item, price });
   }
   return best;
 }

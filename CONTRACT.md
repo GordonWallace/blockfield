@@ -205,7 +205,13 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
   + bed index, deterministic from the seed): saved into an in-memory map when the mob is unloaded and re-applied when the roster slot respawns.
   Villagers made by the debug `BF.mobs.spawn` have no key and are not saved.
 - Killed villagers: `rec.dead` (Set of roster slots that never respawn) and `rec.deadInfo` ([{i (slot, null for a newborn), name, prof ("child" for a child), cause, day, age (game days loaded and active)}], every villager that died there), saved as `"dead:<village key>": {v, info}` in `exportVillagers`.
-- `BF.mobs.exportVillagers() -> {key: {inv:[{n,c}|null x18], level, xp, day}}` (live villagers override stored ones) and
+- Entity ids (js/ids.js, spec r15-13): every mob has `m.id` ("e<n>", from a counter saved with the world). Links between simulation
+  objects are ids: a mob's own fields hold `villageId` (village key), `homeKey`, `bedKey`, `slotKey`, `penKey`, `mateId`, ..., and
+  `m.village`, `m.home`, `m.bed`, `m.slot`, ... are accessors that resolve them (`BF.ids.get(id)`; `BF.mobs.villageOf(m)`, `bedOf(m)`, ... do
+  the same on a plain copy). Pen animals' state, newborn entries, boats, trade deals and job tasks hold `mobId`, `sellerId`, `otherId`
+  (`BF.ids.refs(o)`). A village record's `members` is a non-enumerable index. A villager's id is packed with its trading state, so it
+  comes back under the same id; a slot that respawns after a death gets a new one.
+- `BF.mobs.exportVillagers() -> {key: {inv:[{n,c}|null x18], level, xp, day, id}}` (live villagers override stored ones) and
   `importVillagers(obj)` (replaces the stored map; call after `newWorld`). Cows also drop 0-2 leather.
 - Zombies (only) with a target (player, not in creative, or a villager) that stay pressed against a closed door for 3 s
   break it: both halves removed, one door of that wood drops. Other hostiles cannot pass closed doors.

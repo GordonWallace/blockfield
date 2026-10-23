@@ -252,7 +252,7 @@ function createMob(type, x, y, z, variant, style) {
     if (!(style >= 0 && style <= 4)) style = styleAt(x, z);
   }
   const yaw = r.next() * Math.PI * 2 - Math.PI;
-  const mob = {
+  const mob = BF.ids.refs({   // links to other mobs, the village and its places are ids (js/ids.js, spec r15-13)
     type, hostile: T.hostile, def: T, variant: T.variants ? variant : null, profession: T.variants ? variant : undefined,
     style: T.variants ? VILLAGE_STYLES[style] : undefined, tradingWith: null, level: T.variants ? 1 : undefined, badgeLevel: 0,
     village: null, home: null, tradeCd: 0,
@@ -266,10 +266,11 @@ function createMob(type, x, y, z, variant, style) {
     walkPhase: r.next() * 6, walkAmt: 0,
     onGround: false, inWater: false, headInWater: false, fallStart: y,
     hurtT: 0, invuln: 0, knockT: 0, dead: false, deathT: 0, removed: false,
-    ai: { t: rnd(r, 0.5, 3), mode: "idle", tx: x, tz: z, fleeT: 0, target: false, losT: 0, los: false, attackCd: 0,
-          shootCd: rnd(r, 1, 2), fuse: 0, strafe: r.next() < 0.5 ? 1 : -1, lookT: 0, swingT: 0, provoked: 0, burnT: 0, aiming: false },
+    ai: BF.ids.refs({ t: rnd(r, 0.5, 3), mode: "idle", tx: x, tz: z, fleeT: 0, target: false, losT: 0, los: false, attackCd: 0,
+          shootCd: rnd(r, 1, 2), fuse: 0, strafe: r.next() < 0.5 ? 1 : -1, lookT: 0, swingT: 0, provoked: 0, burnT: 0, aiming: false }),
     age: 0, rng: st.rng,
-  };
+  });
+  BF.ids.put(mob);   // mob.id: a new "e<n>" (a villager's saved one comes back with its trading state, js/trading.js unpack)
   if (type === "villager" && BF.trades) BF.trades.init(mob); // level, offers, inventory with starting stock
   list.push(mob);
   return mob;
@@ -284,6 +285,9 @@ function removeMob(m) {
   if (m.cow && m.cow.mob === m) m.cow.mob = null;   // and pasture cows (js/cowherd.js)
   if (m.pig && m.pig.mob === m) m.pig.mob = null;   // and sty pigs (js/pigfarmer.js)
   m.removed = true;
+  if (m.riding && BF.boats && BF.boats.onRemoved) BF.boats.onRemoved(m);   // a passenger leaving with its chunk: the boat remembers it
+  if (m.bredEntry && BF.breeding && BF.breeding.onRemoved) BF.breeding.onRemoved(m);   // a newborn leaving with its village: its entry keeps its state
+  BF.ids.remove(m);
 }
 
 // ---------- particles ----------
@@ -1801,7 +1805,7 @@ function applyDead(rec) {
 let villageT = 0;
 // Villager trading state by stable key (village "x,z" + roster slot index): kept while unloaded and saved with the world.
 const villagerSaves = new Map();
-function villagerKey(m) { return m.village && m.slot ? m.village.key + "#" + m.slot.idx : null; }
+function villagerKey(m) { return m.villageId && m.slot ? m.villageId + "#" + m.slot.idx : null; }
 let restockT = 0;
 function restockVillagers(dt) { // once per in-game day, never while someone is trading with the villager
   restockT -= dt;
@@ -2122,6 +2126,15 @@ function scatterAt(rec, sl, v) {
   return null;
 }
 const VQ = {};
+// A village record, registered under its key (js/ids.js). members (its loaded villagers, golems and newborns) is an index for quick
+// lookups, not part of the record: it isn't enumerable, so a copy of the record (a save, a worker) doesn't hold the mobs. A mob's own
+// villageId says which village it belongs to.
+function newVillageRec(key, v) {
+  const rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 };
+  Object.defineProperty(rec, "members", { value: [], writable: true, enumerable: false, configurable: true });
+  BF.ids.put(rec, key);
+  return rec;
+}
 function updateVillages(dt) {
   for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
   villageT -= dt;
@@ -2137,7 +2150,7 @@ function updateVillages(dt) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
-    if (!rec) { rec = { key, x: v.x, y: v.y, z: v.z, biome: v.biome, houses: v.houses || [], killed: {}, angryT: 0, members: [], wg: v, nb: v.nb0 != null ? v.nb0 : (v.buildings || []).length, pop: v.pop || 0 }; villages.set(key, rec); applyDead(rec); }
+    if (!rec) { rec = newVillageRec(key, v); villages.set(key, rec); applyDead(rec); }
     const lp = BF.planet.local(v, pp, VQ);   // (the player seen from the village, across a face edge)
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - lp.x, v.z - lp.z) > 80;
@@ -2346,6 +2359,14 @@ BF.mobs = {
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
+  // A mob's links, read from its ids (js/ids.js): work on a plain copy of a mob too (a save, a worker), where m.village is not there.
+  villageOf: m => m ? BF.ids.get(m.villageId) : undefined,
+  homeOf: m => m ? BF.ids.get(m.homeKey) : undefined,
+  bedOf: m => m ? BF.ids.get(m.bedKey) : undefined,
+  slotOf: m => m ? BF.ids.get(m.slotKey) : undefined,
+  penOf: m => m ? BF.ids.get(m.penKey || m.styKey || m.coopKey || m.pastureKey) : undefined,
+  byId: id => BF.ids.get(id),
+  newVillageRec,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
   aiTime: () => aiEma,
   aiWork: () => aiWork,
@@ -2354,7 +2375,7 @@ BF.mobs = {
     const rec = villages.get(key);
     if (!rec) return 0;
     let n = 0;
-    for (const m of list.slice()) if (m.village === rec || m.penVillage === rec) { if (BF.mobSave && BF.mobSave.stash && m.village === rec) BF.mobSave.stash(m); removeMob(m); n++; }   // written down where it stands: back exactly after a short absence
+    for (const m of list.slice()) if (m.villageId === key || m.penVillageId === key) { if (BF.mobSave && BF.mobSave.stash && m.village === rec) BF.mobSave.stash(m); removeMob(m); n++; }   // written down where it stands: back exactly after a short absence
     rec.members = [];
     return n;
   },
@@ -2387,6 +2408,7 @@ BF.mobs = {
   importVillagers(o) {
     villagerSaves.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked") villagerSaves.set(k, o[k]);
+    for (const v of villagerSaves.values()) if (v && v.id) BF.ids.seen(v.id);   // new ids start past the saved villagers
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [], g: Math.max(0, Math.floor(+o[k].g || 0)) });
     for (const rec of villages.values()) applyDead(rec);
@@ -2498,6 +2520,7 @@ BF.mobs = {
     villages.clear();
     villagerSaves.clear();
     pendingDead.clear();
+    BF.ids.reset();
     if (BF.builder) BF.builder.reset();
     if (BF.bridges) BF.bridges.reset();
     if (BF.villageLife) BF.villageLife.reset();

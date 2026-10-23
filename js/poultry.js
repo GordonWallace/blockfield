@@ -60,7 +60,7 @@ const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i
 
 // ---------------------------------------------------------------- chicken state
 function stOf(m) {
-  if (!m.hen) m.hen = { fed: null, cd: 0, growAt: null, layAt: now() + layDays(), x: null, z: null, mob: m };
+  if (!m.hen) m.hen = BF.ids.refs({ fed: null, cd: 0, growAt: null, layAt: now() + layDays(), x: null, z: null, mob: m });
   return m.hen;
 }
 const isChick = m => !!(m.hen && m.hen.growAt != null);
@@ -197,7 +197,7 @@ function makeGenCoop(rec, b, idx) {
     return [Math.min(p[0], r[0]), Math.min(p[1], r[1]), Math.max(p[0], r[0]) + 1, Math.max(p[1], r[1]) + 1];
   };
   const room = box(1, 1, b.w - 2, b.d - 3), foot = box(0, 0, b.w - 1, b.d - 1);   // the back row holds the hay bales
-  return { key: rec.key + "|" + idx, idx: "g" + idx, gen: true, rec, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
+  return { kind: "coop", key: rec.key + "|" + idx, idx: "g" + idx, gen: true, rec, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
     y: b.y, cells: (b.w - 2) * (b.d - 3), hens: null, eggs: 0, gate: at(b.du, 0), out: at(b.du, -1) };
 }
 // A builder's coop (js/blueprints.js "coop"): its fence ring from the blueprint, the gap in it is the way in.
@@ -213,7 +213,7 @@ function makeBuiltCoop(rec, e) {
   for (let x = a + 1; x < c && !gate; x++) for (const [z, oz] of [[b, b - 1], [d, d + 1]]) if (!has.has(x + "," + z)) { gate = [x, z]; out = [x, oz]; break; }
   for (let z = b + 1; z < d && !gate; z++) for (const [x, ox] of [[a, a - 1], [c, c + 1]]) if (!has.has(x + "," + z)) { gate = [x, z]; out = [ox, z]; break; }
   const X = v => e.ox + v, Z = v => e.oz + v;
-  return { key: rec.key + "|b" + e.id, idx: "b" + e.id, gen: false, rec, x0: X(a + 1), z0: Z(b + 1), x1: X(c), z1: Z(d), fx0: X(a), fz0: Z(b), fx1: X(c + 1), fz1: Z(d + 1),
+  return { kind: "coop", key: rec.key + "|b" + e.id, idx: "b" + e.id, gen: false, rec, x0: X(a + 1), z0: Z(b + 1), x1: X(c), z1: Z(d), fx0: X(a), fz0: Z(b), fx1: X(c + 1), fz1: Z(d + 1),
     y: e.oy - 1, cells: (c - a - 1) * (d - b - 1), hens: null, eggs: 0, gate: gate ? [X(gate[0]), Z(gate[1])] : null, out: out ? [X(out[0]), Z(out[1])] : null };
 }
 function coopsOf(rec) {
@@ -251,7 +251,7 @@ const packSt = s => [fix3(s.fed), fix3(s.cd || 0), fix3(s.growAt), fix3(s.layAt)
 function unpackSt(a) {
   const num = (x, d) => (x != null && Number.isFinite(+x) ? +x : d);
   if (!Array.isArray(a)) return null;
-  return { fed: num(a[0], null), cd: num(a[1], 0), growAt: num(a[2], null), layAt: num(a[3], now() + layDays()), x: num(a[4], null), z: num(a[5], null), mob: null };
+  return BF.ids.refs({ fed: num(a[0], null), cd: num(a[1], 0), growAt: num(a[2], null), layAt: num(a[3], now() + layDays()), x: num(a[4], null), z: num(a[5], null), mob: null });
 }
 function initCoop(coop) {
   const rec = pending.get(coop.rec.key), at = rec && rec.findIndex(e => e && String(e.i) === coop.idx);
@@ -265,7 +265,7 @@ function initCoop(coop) {
   coop.hens = [];
   if (!coop.gen) return;   // a builder's coop starts empty: the keeper stocks it from wild chickens
   const r = seeded("coop:" + coop.key), n = 2 + (r() < 0.5 ? 1 : 0) + (r() < 0.2 ? 1 : 0);   // a generated coop starts with 2-4 chickens
-  for (let i = 0; i < n; i++) coop.hens.push({ fed: null, cd: 0, growAt: null, layAt: now() + layDays(), x: coop.x0 + 0.6 + r() * (coop.x1 - coop.x0 - 1.2), z: coop.z0 + 0.6 + r() * (coop.z1 - coop.z0 - 1.2), mob: null });
+  for (let i = 0; i < n; i++) coop.hens.push(BF.ids.refs({ fed: null, cd: 0, growAt: null, layAt: now() + layDays(), x: coop.x0 + 0.6 + r() * (coop.x1 - coop.x0 - 1.2), z: coop.z0 + 0.6 + r() * (coop.z1 - coop.z0 - 1.2), mob: null }));
 }
 function spawnHen(coop, s) {
   const x = s.x != null && s.x > coop.x0 && s.x < coop.x1 ? s.x : (coop.x0 + coop.x1) / 2, z = s.z != null && s.z > coop.z0 && s.z < coop.z1 ? s.z : (coop.z0 + coop.z1) / 2;
@@ -387,7 +387,7 @@ function importAll(o) {
 function reset() { pending = new Map(); activeCoops.length = 0; toShut.length = 0; acc = 0; coopT = 0; LOG.length = 0; }
 
 // ---------------------------------------------------------------- the poultry keeper
-const pkp = m => m.pkp || (m.pkp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
+const pkp = m => m.pkp || (m.pkp = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
 // The coop this keeper works: the one its nesting box stands beside (footprint within 4.5 blocks).
 function coopOf(m) {
   const S = pkp(m);
@@ -422,7 +422,7 @@ function wildChicken(m, coop, S) {
   const c = { x: (coop.x0 + coop.x1) / 2, z: (coop.z0 + coop.z1) / 2 }, sim = BF.simNow();
   let best = null, bd = FIND_R;
   for (const o of BF.mobs.list) {
-    if (o.type !== "chicken" || !live(o) || o.coop || o.ledBy || isChick(o) || (S.avoid.get(o) || 0) > sim) continue;
+    if (o.type !== "chicken" || !live(o) || o.coop || o.ledBy || isChick(o) || (S.avoid.get(o.id) || 0) > sim) continue;
     const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
     if (d < bd) { bd = d; best = o; }
   }
@@ -430,17 +430,17 @@ function wildChicken(m, coop, S) {
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), c = idsOf(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
-  const ok = o => !((S.avoid.get(o) || 0) > sim);
+  const ok = o => !((S.avoid.get(o.id) || 0) > sim);
   const nearest = a => { let best = null, bd = Infinity; for (const o of a) { const d = Math.hypot(o.position.x - px, o.position.z - pz); if (d < bd) { bd = d; best = o; } } return best; };
   const coop = T.coop;
   if (coop && coop.eggs >= (skyT() > WORK_END - 0.08 ? 1 : COLLECT_AT) && m.jobsite) return { kind: "collect" };
   const seeds = cnt(m, c.seeds), spare = coop && coop.hens && coop.hens.length < STOCK_TO ? seeds - 1 : seeds;   // one seed is always kept to lure a chicken home
   const ad = adults(T.hens).filter(ok);
-  if (spare > 0 && T.size <= CULL_AT) { const o = nearest(ad.filter(x => hungry(x, t))); if (o) return { kind: "feed", mob: o }; }
-  if (T.size > CULL_AT && adults(T.flock).length > MIN_ADULTS) { const o = nearest(adults(T.flock).filter(ok)); if (o) return { kind: "cull", mob: o }; }
+  if (spare > 0 && T.size <= CULL_AT) { const o = nearest(ad.filter(x => hungry(x, t))); if (o) return BF.ids.refs({ kind: "feed", mob: o }); }
+  if (T.size > CULL_AT && adults(T.flock).length > MIN_ADULTS) { const o = nearest(adults(T.flock).filter(ok)); if (o) return BF.ids.refs({ kind: "cull", mob: o }); }
   if (coop && coop.hens && coop.hens.length < STOCK_TO && seeds > 0 && t >= S.stockAt) {
     const o = wildChicken(m, coop, S);
-    if (o) return { kind: "fetch", mob: o, coop };
+    if (o) return BF.ids.refs({ kind: "fetch", mob: o, coop });
     if (wildChicken(m, coop, { avoid: new Map() })) { S.stockAt = t + 0.1; return null; }   // only ones it just failed to bring in: tries them again in a while
     S.stockAt = Math.floor(t) + 1 + 0.03;   // none in range: look again tomorrow morning
     log("noWild", { coop: coop.key });
@@ -461,7 +461,7 @@ function stillWanted(m, tk) {
 }
 function endTask(m, ok) {
   const S = pkp(m), tk = S.task;
-  if (tk && !ok && tk.mob) S.avoid.set(tk.mob, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
+  if (tk && !ok && tk.mob) S.avoid.set(tk.mobId, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
   if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
   if (S.gateHeld) { toShut.push({ at: S.gateHeld, m, t: BF.simNow() }); S.gateHeld = null; shutGates(); }
   S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;
