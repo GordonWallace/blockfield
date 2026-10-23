@@ -910,7 +910,7 @@ function buildDOM() {
       const d = drag; drag = null;
       if (press) { clearTimeout(press.timer); press = null; }
       if (cancel) { renderAll(); return; }
-      if (d.els.length > 1) { applyDrag(d); renderAll(); emitChange(); }
+      if (d.els.length > 1) act("player.drag", { els: d.els.map(slotOf), button: d.button }, x => { applyDrag(x); renderAll(); emitChange(); });
       else if (d.touch) slotClick(d.els[0], 2, false, true);
       else slotClick(d.els[0], d.button, d.shift, false);
       return;
@@ -953,8 +953,8 @@ function arrFor(c) {
   if (c === "vinv") return vinvEditable() ? villager.inv : null;
   return c === "inv" ? slots : c === "grid" ? grid : c === "furn" ? (furnace && furnace.slots) : c === "chest" ? (chest && chest.slots) : c === "pay" ? pay : null;
 }
-function stackAt(el) {
-  const c = el.dataset.c, i = +el.dataset.i;
+function stackAt(el) { return stackIn(el.dataset.c, +el.dataset.i); }
+function stackIn(c, i) {
   if (c === "result") return result;
   if (c === "tres") return tradeResult;
   if (c === "pal") return { id: i, count: 1 };
@@ -1007,22 +1007,26 @@ function dragOver(x, y) {
   drag.els.push(el);
   renderAll();
 }
+// d.els: the slots dragged over, as elements or [container, index] pairs (a request's data).
+const slotOf = el => (Array.isArray(el) ? el : [el.dataset.c, +el.dataset.i]);
 function dragPlan(d) {
   const add = new Map();
   let left = cursor.count;
   const per = d.button === 0 ? Math.floor(cursor.count / d.els.length) : 1;
   for (const el of d.els) {
-    const s = stackAt(el), room = stackOf(cursor.id) - (s ? s.count : 0);
+    const [c, i] = slotOf(el), s = stackIn(c, i), room = stackOf(cursor.id) - (s ? s.count : 0);
     const m = Math.max(0, Math.min(per, room, left));
     add.set(el, m); left -= m;
   }
   return { add, left };
 }
 function applyDrag(d) {
+  if (!cursor) return;
   const { add, left } = dragPlan(d), id = cursor.id;
   for (const [el, m] of add) {
     if (!m) continue;
-    const arr = arrFor(el.dataset.c), i = +el.dataset.i;
+    const [c, i] = slotOf(el), arr = arrFor(c);
+    if (!arr) continue;
     if (arr[i]) arr[i].count += m; else arr[i] = mk(id, m, cursor.wear);
   }
   cursor.count = left;
@@ -1035,6 +1039,12 @@ function slotClick(el, button, shift, touch) {
   const c = el.dataset.c, i = +el.dataset.i;
   if (c === "vinv" && !vinvEditable()) return;
   if (c === "chest" && chestLocked()) return;   // someone else's chest: look, don't touch
+  act("player.click", { c, i, button, shift: !!shift }, () => clickSlot(c, i, button, shift));
+  if (cursor) hideTip(); else showTip(el, touch);
+}
+function clickSlot(c, i, button, shift) {
+  if (c === "vinv" && !vinvEditable()) return;
+  if (c === "chest" && chestLocked()) return;
   if (c === "result") clickResult(shift);
   else if (c === "tres") clickTrade(shift);
   else if (c === "pal") clickPalette(i, button, shift);
@@ -1069,7 +1079,6 @@ function slotClick(el, button, shift, touch) {
     if (c === "pay") recomputeTrade();
   }
   renderAll(); emitChange();
-  if (cursor) hideTip(); else showTip(el, touch);
 }
 function takeOutput(button, shift) {
   const s = furnace && furnace.slots[2];
@@ -1145,14 +1154,19 @@ function clickPalette(id, button, shift) {
 }
 // creative Del key: destroys the held stack, or else the inventory stack under the pointer
 function trashKey() {
-  if (cursor) { cursor = null; renderAll(); emitChange(); return; }
+  if (cursor) { act("player.trash", { i: -1 }, trash); return; }
   const under = document.elementFromPoint(mouseX, mouseY);
   const el = under && under.closest && under.closest(".bf-slot");
   if (!el || el.dataset.c !== "inv" || !slots[+el.dataset.i]) return;
-  slots[+el.dataset.i] = null;
-  renderAll(); emitChange(); hideTip();
+  act("player.trash", { i: +el.dataset.i }, trash);
+  hideTip();
 }
-function selectOffer(i) {
+function trash(d) {   // i: the inventory slot to empty, or -1 for the held stack
+  if (d.i < 0) cursor = null; else slots[d.i] = null;
+  renderAll(); emitChange();
+}
+function selectOffer(i) { act("player.offer", { i }, () => chooseOffer(i)); }
+function chooseOffer(i) {
   if (!villager || !villager.trades[i]) return;
   offerSel = i;
   autoFill(villager.trades[i]);
@@ -1402,6 +1416,49 @@ function closeScreen(silent) {
   if (!silent) BF.emit && BF.emit("inventoryClosed");
 }
 
+function openFor(m, pos) {
+  if (m === "furnace") { furnace = furnaceAt(pos); openScreen("furnace"); return; }
+  if (m === "chest" && pos) { if (open_) closeScreen(true); chest = chestAt(pos); openScreen("chest"); return; }
+  if (m === "creative" || (m === "inventory" && isCreative())) { openScreen("creative"); return; }
+  openScreen(m === "crafting" ? "crafting" : "inventory");
+}
+function openTrade(v) {
+  if (open_) closeScreen(true);
+  ensureTrades(v);
+  BF.trades.restock(v);
+  if (BF.prices) BF.prices.tick(v);   // prices follow demand (js/prices.js)
+  villager = v; offerSel = -1; pay = [null, null]; levelFlashT = 0;
+  recomputeTrade();
+  openScreen("trade");
+  try { if (v.position && BF.mobs && BF.mobs.setTrading) BF.mobs.setTrading(v, true); } catch (e) { console.error(e); }
+}
+
+// ---------------------------------------------------------------- the player's screen actions as requests (spec r15-20)
+// Opening and closing a screen, slot clicks, drags, choosing an offer and the trash key move items between the player, the
+// crafting grid, chests, furnaces and villagers (trades): each is a request from the player (js/requests.js player()), applied at
+// once, naming its slots by container and index so a recorded session replays them. While a screen is open the game is paused,
+// so all of a screen's requests share one tick boundary.
+function act(kind, data, run) {
+  if (BF.req && BF.req.player) BF.req.player(kind, null, data);
+  else run(data);
+}
+if (BF.req) {
+  const on = (kind, fn) => BF.req.on(kind, req => fn(req.data) || { ok: true });
+  on("player.screen", d => {
+    if (d.close) { closeScreen(false); return; }
+    if (d.trade != null) {
+      const v = BF.ids && BF.ids.get(d.trade);
+      if (!v || v.dead || v.removed) return { ok: false, why: "gone" };
+      openTrade(v); return;
+    }
+    openFor(d.open, d.pos);
+  });
+  on("player.click", d => { clickSlot(d.c, d.i, d.button, d.shift); });
+  on("player.drag", d => { applyDrag(d); renderAll(); emitChange(); });
+  on("player.offer", d => { chooseOffer(d.i); });
+  on("player.trash", d => { trash(d); });
+}
+
 // ---------------------------------------------------------------- save / load
 const toSave = s => s ? (s.wear > 0 ? { n: BF.items[s.id] ? BF.items[s.id].name : null, c: s.count, w: s.wear } : { n: BF.items[s.id] ? BF.items[s.id].name : null, c: s.count }) : null;
 function fromSave(o) {
@@ -1540,25 +1597,15 @@ const api = {
   // mode: "inventory" (creative menu in creative mode) | "crafting" | "furnace" / "chest" (pos = {x,y,z} of the block) | "creative"
   open(m = "inventory", pos) {
     if (!backEl) return;
-    if (m === "furnace") { furnace = furnaceAt(pos); openScreen("furnace"); return; }
-    if (m === "chest" && pos) { if (open_) closeScreen(true); chest = chestAt(pos); openScreen("chest"); return; }
-    if (m === "creative" || (m === "inventory" && isCreative())) { openScreen("creative"); return; }
-    openScreen(m === "crafting" ? "crafting" : "inventory");
+    act("player.screen", { open: m, pos: pos ? { x: pos.x, y: pos.y, z: pos.z } : null }, () => openFor(m, pos));
   },
   // Villager trade screen. Offers live on the mob: villager.trades / level / xp (generated on first open).
   openTrade(v) {
     if (!backEl || !v) return;
-    if (open_) closeScreen(true);
-    ensureTrades(v);
-    BF.trades.restock(v);
-    if (BF.prices) BF.prices.tick(v);   // prices follow demand (js/prices.js)
-    villager = v; offerSel = -1; pay = [null, null]; levelFlashT = 0;
-    recomputeTrade();
-    openScreen("trade");
-    try { if (v.position && BF.mobs && BF.mobs.setTrading) BF.mobs.setTrading(v, true); } catch (e) { console.error(e); }
+    act("player.screen", { trade: BF.ids ? BF.ids.idOf(v) : null }, () => openTrade(v));
   },
   ensureTrades,
-  close() { closeScreen(false); },
+  close() { act("player.screen", { close: true }, () => closeScreen(false)); },
   furnaceState(x, y, z) { return furnaces.get(`${x},${y},${z}`) || null; },
   furnaceRecord(x, y, z) { return furnaceAt({ x, y, z }); },   // creates the furnace's state when it has none yet (villagers: js/toolsmith.js)
   // One simulation step for every furnace (main.js runs it with the world, so it follows the fast-forward).

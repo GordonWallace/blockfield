@@ -749,8 +749,17 @@ def("say", {
 });
 
 // ---------- execution ----------
-function split(s) { return s.trim().split(/\s+/).filter(Boolean); }
+// A command is a request from the player (spec r15-20, js/requests.js player()): applied at once, at the tick boundary it is typed
+// at, so /setblock, /fill, /give, /summon, /kill, /time, /weather and /tp change the world between ticks, in the requests' order,
+// and a recorded session replays them. The result is the command's {ok, msg}.
 function execute(text) {
+  if (!BF.req || !BF.req.player) return run(text);
+  const r = BF.req.player("command", null, { text: String(text) }).result;
+  return { ok: !!r.ok, msg: r.msg || "" };
+}
+if (BF.req) BF.req.on("command", req => run(req.data.text));
+function split(s) { return s.trim().split(/\s+/).filter(Boolean); }
+function run(text) {
   const body = String(text).replace(/^\//, "");
   const parts = split(body);
   if (!parts.length) return { ok: false, msg: "" };
