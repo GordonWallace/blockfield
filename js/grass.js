@@ -65,6 +65,6 @@ function tick() {
 BF.grass = { tick, check, spreads, SAMPLES_PER_S, MIN_LIGHT, stats: () => ({ turned, looked }) };
 {
   const world = BF.world;
-  if (world && world.tickSim) { const prev = world.tickSim; world.tickSim = () => { prev(); tick(); }; }
+  if (world && world.onBlockTick) world.onBlockTick(tick);   // a block tick (spec r15-17, js/world.js tickSim)
 }
 })();
