@@ -118,12 +118,15 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     // the cost of the real index step with what is loaded (the step only: everything already sits in its region)
     for (let i = 0; i < 200; i++) { const t0 = performance.now(); R.tick(); t += performance.now() - t0; }
     res.tickMs = t / 200;
+    // the cost of filling the index from scratch (every loaded chunk scanned for block entities): what a chunk load adds
+    { const t0 = performance.now(); for (let i = 0; i < 5; i++) R.reset(); res.resetMs = (performance.now() - t0) / 5; res.chunks = BF.world.chunks.size; }
     res.counts = R.counts(); res.moves = res.counts.moves - res.moves0;
     res.busiest = R.stats().sort((a, b) => b.mobs - a.mobs).slice(0, 3).map(s => s.name + ' ' + s.mobs);
     return res;
   }, steps);
   console.log(`  ${run.counts.mobs} mobs, ${run.counts.drops} drops, ${run.counts.villages} running villages, ${run.counts.blockEntities} block entities in ${run.counts.regions} regions; busiest ${run.busiest.join(', ')}`);
   console.log(`  ${run.moves} region changes in ${steps} steps; the index step takes ${(run.tickMs * 1000).toFixed(1)} us with ${run.counts.mobs} mobs and ${run.counts.drops} drops`);
+  console.log(`  filling the index from scratch: ${run.resetMs.toFixed(1)} ms for ${run.chunks} chunks (${(run.resetMs / run.chunks * 1000).toFixed(0)} us a chunk)`);
   check(run.checks.length && run.checks.every(c => c === 'ok'), `self-check after every 250 of ${steps} steps finds no differences (${run.checks.join(', ')})`);
   check(run.counts.mobs > 20 && run.moves > 0, `mobs were indexed and moved between regions (${run.counts.mobs} mobs, ${run.moves} moves)`);
   check(run.counts.villages >= 1, `the running village is indexed (${run.counts.villages})`);
