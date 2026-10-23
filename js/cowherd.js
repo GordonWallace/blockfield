@@ -134,7 +134,12 @@ const playerWheat = () => {
 
 // ---------------------------------------------------------------- breeding
 const findMate = (m, t) => H().findMate(m, t, willing, o => o.pasture || null, MATE_R);   // none while 24 cows stand within 16 blocks
+// In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
+// when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+}
+function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const calf = BF.mobs.spawn("cow", x, y, z);
   if (!calf) return null;
@@ -553,12 +558,13 @@ function perform(m, tk) {
   }
   // cull: the cowherd keeps the cow's drops (1-3 raw beef, 0-2 leather) to sell
   const herdP = o.pasture;
-  BF.mobs.hurt(o, 999, "a cowherd");
-  const beef = loot(m, I("raw_beef"), rndInt(RS(m), 1, 3), o), lea = loot(m, I("leather"), rndInt(RS(m), 0, 2), o);
-  if (herdP) herdP.culls = (herdP.culls | 0) + 1;
-  const T2 = tended(m);
-  log("culled", { beef, leather: lea, herd: T2.size, limit: T2.limit });
-  vlog(m, "culled a cow (" + T2.size + " left, the pasture holds " + T2.limit + "): " + beef + " raw beef, " + lea + " leather");
+  BF.mobs.cull(o, "a cowherd", m, () => {   // its loot once the kill has applied (a request in the think phase, r15-23)
+    const beef = loot(m, I("raw_beef"), rndInt(RS(m), 1, 3), o), lea = loot(m, I("leather"), rndInt(RS(m), 0, 2), o);
+    if (herdP) herdP.culls = (herdP.culls | 0) + 1;
+    const T2 = tended(m);
+    log("culled", { beef, leather: lea, herd: T2.size, limit: T2.limit });
+    vlog(m, "culled a cow (" + T2.size + " left, the pasture holds " + T2.limit + "): " + beef + " raw beef, " + lea + " leather");
+  });
   return true;
 }
 const ACT = { feed: 0.7, cull: 0.8, milk: 1.4, bottle: 1.6 };

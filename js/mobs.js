@@ -329,8 +329,38 @@ function updatePuffs(dt) {
 
 // ---------- damage ----------
 // `cause` names what did it for the village log (js/villagelog.js), e.g. "a Zombie"; the player is implied by byPlayer.
-function damageMob(m, amount, knockDir, byPlayer, cause) {
-  if (!m || m.dead || m.removed || m.invuln > 0) return false;
+// During the think phase (spec r15-23) a hit is a "damage" request from o.from (the attacker; the mob itself for falls and sunlight), applied
+// in requester-id order: knockback adds up in that order, the invulnerability a hit leaves refuses the hits after it, and the kill goes to
+// the request that took the mob to 0 hp. Returns whether the hit can land (think: the request, if the mob is hittable now; otherwise:
+// whether it landed).
+// o (optional): {from: attacker mob, force: ignores the mob's invulnerability, lift: vel.y after the hit, foe: a hostile hit turns on the
+// attacker (a golem's hit, golemFight), mark: a landed hit on a villager names its attacker (golems come running), a golem's revenge,
+// revenge: a golem hit takes revenge on the attacker}
+function damageMob(m, amount, knockDir, byPlayer, cause, o) {
+  if (!m || m.dead || m.removed || (m.invuln > 0 && !(o && o.force))) return false;
+  if (inThink()) {
+    return BF.req.send("damage", m.id, { amount, knock: knockDir ? { x: knockDir.x, z: knockDir.z } : null, byPlayer: !!byPlayer, cause: cause || null,
+      force: !!(o && o.force), lift: (o && o.lift) || 0, foe: !!(o && o.foe), mark: !!(o && o.mark), revenge: !!(o && o.revenge) },
+      o && o.from ? o.from : byPlayer ? "player" : m);   // (the request: truthy)
+  }
+  return hurtNow(m, amount, knockDir, byPlayer, cause, o && o.from, o);
+}
+function hurtNow(m, amount, knockDir, byPlayer, cause, by, o) {
+  if (!m || m.dead || m.removed) return false;
+  if (o && o.force) m.invuln = 0;
+  const landed = m.invuln <= 0 && hitNow(m, amount, knockDir, byPlayer, cause);
+  if (!o) return landed;
+  if (!m.dead && o.lift) m.vel.y = o.lift;
+  if (!by || by.removed) return landed;
+  if (landed && o.mark) {   // golems come running (villagerInDanger); js/wildlife.js counts zombie attacks per night
+    if (m.type === "villager") { m.attacker = by; m.attackedAt = m.age; if (BF.emit) BF.emit("villagerHit", m, by); }
+    if (m.def.golem) m.ai.revenge = by;
+  }
+  if (o.revenge && m.def.golem && !by.dead) m.ai.revenge = by;
+  if (o.foe && m.hostile && !m.dead) { m.ai.golemFoe = by; m.ai.golemFoeT = 12; }   // hostiles fight back (golemFight)
+  return landed;
+}
+function hitNow(m, amount, knockDir, byPlayer, cause) {
   if (m.sleeping) wake(m);
   m.hp -= amount;
   m.lastHurt = byPlayer ? "the player" : (cause || "unknown causes");
@@ -395,8 +425,76 @@ function giveDrops(m) {
   }
 }
 
+// ---------- mob-on-mob effects, new mobs and claims as requests (spec r15-23, js/requests.js) ----------
+// In the think phase: hits ("damage"), creeper blasts ("explode"), new mobs ("spawn": births, monster spawns, roster respawns) and claims
+// on shared places ("claim": beds, jobsites) are requests, applied in requester-id order after every mob has thought. Outside it (the
+// player between ticks, commands, tests that call these by hand) they happen at once, as before.
+const inThink = () => !!(BF.req && BF.req.phase === "think");
+const knockOf = d => d.knock ? new THREE.Vector3(d.knock.x, 0, d.knock.z) : null;
+BF.req.on("damage", req => {
+  const m = BF.ids.get(req.target), d = req.data, by = req.from && /^e\d+$/.test(req.from) ? BF.ids.get(req.from) : null;
+  if (!m || m.dead || m.removed) return { ok: false, why: m && m.dead ? "dead" : "gone" };
+  const hp = m.hp, landed = hurtNow(m, d.amount, knockOf(d), d.byPlayer, d.cause, by && by !== m ? by : null, d);
+  return landed ? { ok: true, killed: m.dead, hp: m.hp, was: hp } : { ok: false, why: "invulnerable" };
+});
+BF.req.on("explode", req => {
+  const m = BF.ids.get(req.target);
+  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };   // killed (or unloaded) before its fuse ran out
+  explodeNow(m);
+  return { ok: true };
+});
+// spawn: data.make() makes the mob (and links it) when the request applies, so ids come in requester order; it returns the mob, or
+// null when what it needed is gone (a parent, its bread, the bed).
+BF.req.on("spawn", req => {
+  const m = req.data.make();
+  return m ? { ok: true, mob: m.id } : { ok: false, why: "refused" };
+});
+function spawnLater(from, what, make, check) {
+  if (!inThink()) return make();
+  BF.req.send("spawn", what, { make: check ? () => (check() ? make() : null) : make }, from);
+  return null;
+}
+// Claims (BF.claims): kinds register free(m, data) -> null when the claim may be taken, else why not; take(m, data); and
+// result(m, ok, data, why) for the claimer once decided. ask(what, m, place, data) is a "claim" request in the think phase (returns
+// "pending"; the first valid claim of a place in a tick wins, the others are refused and pick again); otherwise it is decided at once
+// (returns true or false). A claim never takes a place from someone holding it: free() checks that at apply time. Game log: DEBUG
+// "claims" when a claim loses to one applied before it in the same tick.
+const claimKinds = {}, claimWins = new Map();   // place -> [requester, tick] of the claim that took it this tick
+function decideClaim(what, m, place, data) {
+  const K = claimKinds[what];
+  if (!K) return { ok: false, why: "no kind" };
+  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };
+  const why = K.free(m, data);
+  if (why) return { ok: false, why };
+  K.take(m, data);
+  return { ok: true };
+}
+BF.req.on("claim", req => {
+  const d = req.data, m = BF.ids.get(req.from), r = decideClaim(d.what, m, req.target, d), tick = BF.rand ? BF.rand.tick : 0;
+  const won = claimWins.get(req.target);
+  if (r.ok) claimWins.set(req.target, [req.from, tick]);
+  else if (won && won[1] === tick && BF.glog) BF.glog.log("DEBUG", "claims", (m && BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) : req.from) + " lost the " + d.what + " at " + req.target + " to " + won[0] + ", who claimed it first this tick", { at: m || undefined });
+  if (claimWins.size > 256) claimWins.clear();
+  return r;
+}, { onResult(m, req, r) { const K = claimKinds[req.data.what]; if (K && K.result) K.result(m, r.ok, req.data, r.why); } });
+BF.claims = {
+  kind(what, k) { claimKinds[what] = k; },
+  ask(what, m, place, data) {
+    data = Object.assign({ what }, data);
+    if (inThink()) { BF.req.send("claim", place, data, m); return "pending"; }
+    const r = decideClaim(what, m, place, data), K = claimKinds[what];
+    if (K && K.result && m) K.result(m, r.ok, data, r.why);
+    return r.ok;
+  },
+};
+
 // ---------- creeper explosion ----------
+// In the think phase the blast is one "explode" request that does its block changes and its damage together; refused if the creeper died first.
 function explode(m) {
+  if (inThink()) { BF.req.send("explode", m.id, {}, m); return; }
+  explodeNow(m);
+}
+function explodeNow(m) {
   const c = new THREE.Vector3(m.position.x, m.position.y + 0.8, m.position.z);
   const R = 3, r = BF.rand.of(m);
   const w = BF.world, bedrock = BF.B.bedrock;
@@ -539,8 +637,7 @@ function updateArrows(dt) {
         const vp = seen(a.pos, v.position, _sB), hw = v.halfWidth + 0.1;
         if (Math.abs(a.pos.x - vp.x) < hw && Math.abs(a.pos.z - vp.z) < hw && a.pos.y > vp.y && a.pos.y < vp.y + v.height) {
           const owner = a.owner && !a.owner.removed && !a.owner.dead ? a.owner : null;
-          damageMob(v, irnd(R(a), GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton");
-          if (owner && v.def.golem) v.ai.revenge = owner;
+          damageMob(v, irnd(R(a), GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton", { from: owner, revenge: true });
           hitPlayer = true;
           break;
         }
@@ -780,17 +877,15 @@ function chaseAndHit(m, o, dt, out, dmg, cd, speed) {
   if (hd < reach && Math.abs(op.y - m.position.y) < 1.6 && ai.attackCd <= 0) {
     ai.attackCd = cd;
     ai.swingT = 0.35;
-    const k = new THREE.Vector3(nx, 0, nz);
-    const by = "a" + (/^[aeiou]/i.test(m.type) ? "n " : " ") + m.type.replace(/_/g, " ");
-    if (m.def.golem) {
-      o.invuln = 0; damageMob(o, dmg, k, false, by); if (!o.dead) o.vel.y = 8;
-      if (o.hostile && !o.dead) { o.ai.golemFoe = m; o.ai.golemFoeT = 12; }   // hostiles fight back (golemFight)
-    } else if (damageMob(o, dmg, k, false, by)) {
-      if (o.type === "villager") { o.attacker = m; o.attackedAt = o.age; if (BF.emit) BF.emit("villagerHit", o, m); }   // golems come running (villagerInDanger); js/wildlife.js counts zombie attacks per night
-      if (o.def.golem) o.ai.revenge = m;
-    }
+    strike(m, o, dmg, new THREE.Vector3(nx, 0, nz));
   }
   return true;
+}
+// m's melee hit on o: a golem's hit ignores o's invulnerability, throws it up and turns a hostile on the golem; another mob's landed hit
+// marks a villager as attacked (golems come running) and gives a golem its revenge. In the think phase it is a "damage" request (r15-23).
+function strike(m, o, dmg, k, by) {
+  by = by || "a" + (/^[aeiou]/i.test(m.type) ? "n " : " ") + m.type.replace(/_/g, " ");
+  return m.def.golem ? damageMob(o, dmg, k, false, by, { from: m, force: true, lift: 8, foe: true }) : damageMob(o, dmg, k, false, by, { from: m, mark: true });
 }
 // ---------- golems vs hostiles ----------
 // Golems sprint to any villager under attack within RESCUE_RANGE; hostile mobs hurt golems with GOLEM_HITS.
@@ -1227,12 +1322,23 @@ function claimBed(m, n, dt) {
   if (!rec.beds || BF.simNow() * 1000 - (rec.bedScanAt || 0) > 3000) B.scanBeds(rec);
   const b = B.freeBed(rec, m);
   if (!b) return;
-  m.bed = Object.assign(b, { claimed: true });
-  const h = homeOfBed(rec, b);
-  if (h) m.home = h;
-  n.fails = 0; m.ai.route = null;
-  if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
+  BF.claims.ask("bed", m, "b:" + b.x + "," + b.y + "," + b.z, { bed: b });   // the first claim of a bed in a tick wins (r15-23)
 }
+// The "bed" claim (claimBed above; children and newborns in js/breeding.js childTick): the bed must still stand and be nobody else's.
+BF.claims.kind("bed", {
+  free: (m, d) => BF.breeding && BF.breeding.bedFree(m.village, d.bed, m) ? null : "taken",
+  take(m, d) {
+    const b = Object.assign({}, d.bed), rec = m.village;
+    if (m.slot && m.slot.bred) { m.bed = b; if (m.bredEntry) m.bredEntry.bed = b; return; }   // a newborn's bed (js/breeding.js)
+    m.bed = Object.assign(b, { claimed: true });
+    const h = homeOfBed(rec, b);
+    if (h) m.home = h;
+    if (m.ai.night) m.ai.night.fails = 0;
+    m.ai.route = null;
+    if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
+  },
+  result(m, ok) { if (!ok && m.ai.night && !(m.slot && m.slot.bred)) m.ai.night.claimT = 0; },   // lost it to someone first: look again next tick
+});
 // Without a bed at night: walk into the nearest building (its own house first) that has room, along a path through the door. True while going.
 const inHouse = (h, x, z) => x >= h.x && x <= h.x + h.w && z >= h.z && z <= h.z + h.d;
 function shelterAI(m, dt0, dt, out) {
@@ -1566,7 +1672,7 @@ function updateMob(m, dt) {
   if (m.onGround || m.inWater || climbing) {
     if (m.onGround && !wasGround && !T.slowFall && !m.inWater) {
       const fall = m.fallStart - m.position.y;
-      if (fall > 3.5) { m.invuln = 0; damageMob(m, Math.floor(fall - 3), null, false, "a fall"); }
+      if (fall > 3.5) damageMob(m, Math.floor(fall - 3), null, false, "a fall", { force: true });
     }
     m.fallStart = m.position.y;
   } else if (m.position.y > m.fallStart) m.fallStart = m.position.y;
@@ -1582,7 +1688,7 @@ function updateMob(m, dt) {
         !(BF.weather && BF.weather.rainingAt && BF.weather.rainingAt(m.position.x, m.position.y + m.height, m.position.z))) { // rain/snow shields undead
       burning = true;
       ai.burnT += dt;
-      if (ai.burnT >= 1) { ai.burnT = 0; m.invuln = 0; damageMob(m, 1, null, false, "sunlight"); }
+      if (ai.burnT >= 1) { ai.burnT = 0; damageMob(m, 1, null, false, "sunlight", { force: true }); }
     }
   }
   m.onFire = burning && !m.dead;
@@ -1833,11 +1939,15 @@ function spawnMonsters(dt) {
   for (let i = 0; i < s; i++) { const r = BF.rand.at("surface", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch, r); }
   for (let i = 0; i < c; i++) { const r = BF.rand.at("cave", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch, r); }
 }
+// In the think phase a "spawn" request from "world" (r15-23): the density cap is checked again when it applies, with the tick's earlier spawns in.
 function spawnHostile(type, x, y, z) {
   if (BF.wildlife && !BF.wildlife.mayHostile(x, y, z)) return null;
-  const m = createMob(type, x, y, z);
-  if (m && BF.wildlife) BF.wildlife.spawned(m);
-  return m;
+  return spawnLater("world", "monster:" + Math.floor(x) + "," + Math.floor(y) + "," + Math.floor(z), () => {
+    if (BF.wildlife && !BF.wildlife.mayHostile(x, y, z)) return null;
+    const m = createMob(type, x, y, z);
+    if (m && BF.wildlife) BF.wildlife.spawned(m);
+    return m;
+  });
 }
 function trySurface(c, r) {
   const w = BF.world, CS = BF.CS, type = pickHostileType(r), T = TYPES[type];
@@ -2273,23 +2383,28 @@ function updateVillages(dt) {
         if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, TYPES.villager);
       }
       if (!at) continue;
-      const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
-      m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m); haveV++;
-      BF.rand.seed(m, "villager:" + rec.key + "#" + sl.idx + ":" + (rec.killed.villager || 0));   // its slot's stream (a death in the village moves it on); a saved one wins (js/trading.js unpack)
-      m.ai.leaving = !bedtime() && !scattered; // spawned indoors by day: walk out through the door
-      const sv = villagerSaves.get(villagerKey(m));
-      if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
-      if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
-      if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
-      if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
-      if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
+      haveV++;
+      spawnLater(rec.key, "s:" + rec.key + "#" + sl.idx, () => {   // a "spawn" request from the village in the think phase (r15-23)
+        if (rec.members.some(o => o.slot === sl && !o.dead && !o.removed)) return null;
+        const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
+        m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m);
+        BF.rand.seed(m, "villager:" + rec.key + "#" + sl.idx + ":" + (rec.killed.villager || 0));   // its slot's stream (a death in the village moves it on); a saved one wins (js/trading.js unpack)
+        m.ai.leaving = !bedtime() && !scattered; // spawned indoors by day: walk out through the door
+        const sv = villagerSaves.get(villagerKey(m));
+        if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
+        if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
+        if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
+        if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
+        if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
+        return m;
+      });
     }
     const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {
       const gy = v.y != null ? v.y : BF.world.heightAt(v.x, v.z) + 1;
       const gs = BF.mobSave ? BF.mobSave.golem(rec.key) : null;
       const at = (gs && findStand(gs.p[0], gs.p[1], gs.p[2], TYPES.iron_golem)) || findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
-      if (at) { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); if (gs) BF.mobSave.apply(g, gs); }
+      if (at) spawnLater(rec.key, "golem:" + rec.key, () => { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); if (gs) BF.mobSave.apply(g, gs); return g; });
     }
   }
 }
@@ -2447,12 +2562,24 @@ BF.mobs = {
   // Player bow shot (js/player.js): see shootPlayerArrow. arrows() lists the player's arrows in flight or stuck (tests, debug).
   shootArrow(from, vel, opts) { return scene ? shootPlayerArrow(from, vel, opts) : null; },
   playerArrows() { return arrows.filter(a => a.byPlayer); },
-  hurt(mob, damage, cause) { mob.invuln = 0; return damageMob(mob, damage, null, false, cause); },   // non-player damage with a cause (tests, commands)
+  hurt(mob, damage, cause, by) { return damageMob(mob, damage, null, false, cause, { force: true, from: by }); },   // non-player damage with a cause (tests, commands; by = the mob doing it)
+  // A villager killing its own stock (shepherd, poultry keeper, cowherd, pig farmer): then() (its loot) runs once the kill has happened, at
+  // once outside the think phase, else when the request's result is delivered (r15-23). Returns false if the mob can't be hurt now.
+  cull(mob, cause, by, then) {
+    const r = damageMob(mob, 999, null, false, cause, { force: true, from: by });
+    if (!r) return false;
+    if (r === true) { if (mob.dead && then) then(); return mob.dead; }
+    if (then) r.then(x => { if (x && x.killed) then(); });
+    return true;
+  },
+  strike,   // strike(m, o, dmg, knockDir?): m's melee hit on o (tests)
   // /kill (commands.js): kills outright, no knockback, no golem anger; drops as a normal death. Returns false if already dead.
   kill(mob) { if (!mob || mob.dead || mob.removed) return false; kill(mob, true); return true; },
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
+  spawnLater,   // spawnLater(from, place, make, check?): make() now, or as a "spawn" request in the think phase (r15-23) that runs make() if check()
+                // still holds when it applies; returns the mob, or null when queued
   // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
   discard(m) { if (m && !m.removed) removeMob(m); },
   // The share of monster spawn weight whose type spawns (1 with all on): js/wildlife.js scales its area caps by it.

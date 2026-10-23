@@ -54,9 +54,7 @@ const LOG = [];
 const log = (kind, data) => { LOG.push(BF.glog.job("poultry", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 200) LOG.shift(); };
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Poultry keeper") + " (Poultry Keeper) " + text, m); };
 
-let ids = 0;
-const idOf = new WeakMap();
-const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };
+const mid = m => +String(m.id).slice(1);   // the mob's stable id number (js/ids.js): which of a pair breeds (r15-23)
 
 // ---------------------------------------------------------------- chicken state
 function stOf(m) {
@@ -113,7 +111,12 @@ function findMate(m, t) {
   }
   return near >= LOCAL_MAX ? null : best;
 }
+// In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
+// when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+}
+function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const chick = BF.mobs.spawn("chicken", x, y, z);
   if (!chick) return null;
@@ -500,11 +503,12 @@ function perform(m, tk) {
     return true;
   }
   // cull: the keeper keeps the chicken and the feathers instead of dropping them
-  BF.mobs.hurt(o, 999, "a poultry keeper");
-  const meat = loot(m, c.chicken, 1, o), fe = loot(m, c.feather, rndInt(RS(m), 0, 2), o);
-  const T2 = tended(m);
-  log("culled", { meat, feathers: fe, flock: T2.size });
-  vlog(m, "poultry", "culled a chicken (" + T2.size + " left): " + meat + " raw chicken, " + fe + " feather" + (fe === 1 ? "" : "s"));
+  BF.mobs.cull(o, "a poultry keeper", m, () => {   // its loot once the kill has applied (a request in the think phase, r15-23)
+    const meat = loot(m, c.chicken, 1, o), fe = loot(m, c.feather, rndInt(RS(m), 0, 2), o);
+    const T2 = tended(m);
+    log("culled", { meat, feathers: fe, flock: T2.size });
+    vlog(m, "poultry", "culled a chicken (" + T2.size + " left): " + meat + " raw chicken, " + fe + " feather" + (fe === 1 ? "" : "s"));
+  });
   return true;
 }
 const ACT = { feed: 0.7, cull: 0.8, collect: 1.2 };
