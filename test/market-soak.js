@@ -1,6 +1,7 @@
 // One market soak (release 1.3): one village for many game days. Run it on this build and on the one before (copy the script there) to compare.
 // Usage: NODE_PATH=$(npm root -g) node test/market-soak.js [seed=1] [days=14] [out.json]   Env: NEED=builder,farmer (jobs the village must have).
-// Drives the simulation directly (no rendering), like test/toolchain.js. Once per game day it records the villagers alive, starving and
+// Drives the simulation directly (no rendering), like test/toolchain.js, each tick in the request queue's phases (js/requests.js: trades
+// asked during the mobs' update settle in the apply phase, spec r15-21). Once per game day it records the villagers alive, starving and
 // dead, the village's happiness, the emeralds and items villagers hold, trades so far (and how many went through spare-goods offers), and
 // the builders' progress (structures finished, blocks placed). Prints a day table and a summary. FAILs on a page error, or a villager trade
 // made without an offer.
@@ -30,7 +31,7 @@ const OUT = process.argv[4] || null;
     // the nearest village with every job in NEED (default: a builder, so building progress shows)
     const need = (window.__NEED || 'builder').split(',').filter(Boolean);
     const cands = BFT.villages(3000).filter(v => v && v.pop).slice(0, 10);
-    const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+    const step = h => { BF.warp.advance(h); if (BF.req) BF.req.beginTick(); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     let v = null, key = null;
     for (const c of cands) {
       const k = Math.round(c.x) + ',' + Math.round(c.z);
@@ -83,7 +84,7 @@ const OUT = process.argv[4] || null;
   for (let s = 0, d = 0; s < DAYS * DAY; s += PER_CALL) {
     await pg.evaluate(([n, h, v]) => {
       for (let i = 1; i <= n; i++) {
-        BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
+        BF.warp.advance(h); if (BF.req) BF.req.beginTick(); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
       }
     }, [Math.min(PER_CALL, DAYS * DAY - s), h, setup.v]);

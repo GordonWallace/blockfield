@@ -104,19 +104,8 @@ function findSeller(m, short, avoid) {
 }
 function doDeal(m, deal) {
   const T = TR(), v2 = deal.seller, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2) || T.blockReason(v2, o)) break;
-    if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);
-    if (!sold) break;
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
+  const done = T.asked(m, v2, o) || canSell(v2) ? T.buy(m, v2, o, deal.times, { guard: () => (canSell(v2) ? null : "busy") }) : 0;   // one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }
@@ -182,6 +171,7 @@ function ai(m, dt, out) {
   if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (sh.tt <= 0) {
     const done = doDeal(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
     if (BF.villageSim) BF.villageSim.done(m);
     if (!done) sh.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05;

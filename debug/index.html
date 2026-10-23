@@ -1643,7 +1643,7 @@ const gf = { levels: ["DEBUG"], kinds: [], villages: [], types: [] };   // what 
 try { Object.assign(gf, JSON.parse(localStorage.getItem(GSTORE) || "{}")); } catch (e) { /* private window: defaults */ }
 const gOff = { levels: new Set(gf.levels), kinds: new Set(gf.kinds), villages: new Set(gf.villages), types: new Set(gf.types) };
 const gSave = () => { try { localStorage.setItem(GSTORE, JSON.stringify({ levels: [...gOff.levels], kinds: [...gOff.kinds], villages: [...gOff.villages], types: [...gOff.types] })); } catch (e) {} };
-const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter", requests: "Request queue" };
+const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter", requests: "Request queue", trades: "Refused trades" };
 const NOV = "(no village)";
 function glogSet(g) { glog = g && Array.isArray(g.lines) ? g : null; gDirty = true; gRender(); }
 function glogIn(g) {

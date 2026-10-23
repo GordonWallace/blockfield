@@ -393,6 +393,7 @@ function ai(m, dt, out, cont) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const n = F.doBuy(m, job);
+    if (n == null) return true;   // the trade is in flight (js/trading.js buy)
     S.gx = null;
     if (n) log("buy", { what: nameOf(job.item), n: n * job.offer.sell.n, from: v2.profession });
     else { S.avoid[key] = now() + 0.05; log("giveup", { kind: "buy", why: "trade refused" }); }

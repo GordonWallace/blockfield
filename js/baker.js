@@ -391,9 +391,8 @@ function ai(m, dt, out, cont) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const milk = job.item === I("milk_bottle");
-    if (milk) clearRes();
-    const done = milk ? withBaker(() => F.doBuy(m, job)) : F.doBuy(m, job);
-    if (milk) clearRes();
+    const done = F.doBuy(m, job, milk ? { wrap: fn => { clearRes(); try { return withBaker(fn); } finally { clearRes(); } } } : null);   // the cowherd's milk reserve for the baker
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     S.stage = null; S.job = null; vdone(m); S.gx = null; S.checkT = 0.5;
     if (done) {
       const n = done * job.offer.sell.n;

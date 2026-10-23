@@ -275,6 +275,7 @@ const travel = (m, st, dt, out, tx, ty, tz, speed, near) => FU.travel(m, st, dt,
 const findDeal = (m, need) => FU.findDeal(m, need, skipOf(m));
 function doBuy(m, deal) {
   const done = FU.doBuy(m, deal), o = deal.offer;
+  if (done == null) return null;   // in flight (js/trading.js buy)
   if (done) log("buy", m, { from: deal.other.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }
@@ -469,6 +470,7 @@ function ai(m, dt, out) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = doBuy(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5; vdone(m);
     if (!done) { S.avoid[key] = dayNow() + 0.05; log("giveup", m, { kind: "buy", item: BF.itemName(deal.item), why: "trade refused" }); }
   }

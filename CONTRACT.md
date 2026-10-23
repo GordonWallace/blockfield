@@ -272,8 +272,12 @@ and puffs still do until r15-12.
   wheat, a builder's shortfall its table doesn't buy) and the food offers of any hungry villager (`feed: 1`) after the job offers. `reserve(v)`
   is what it keeps (job tools, KEEP bread-eq, farmer seed and wheat, shepherd feed, `BF.builder.reserve` = the structure it is building plus
   the next it chose, crafters' next 2 crafts); `blockReason` refuses a sale into it ("Keeping for own use"), for villagers and the player.
-  Any villager may buy from any other. Code that moves goods between two villagers must use a seller's offer with `exchange` and log it with
-  `BF.vlog.trade(buyer, seller, offer, times)`.
+  Any villager may buy from any other. Code that moves goods between two villagers must use a seller's offer through
+  `BF.trades.buy(buyer, seller, offer, times, {by?, guard?(i), wrap?(fn)})` (spec r15-21): the payment goes into escrow (`m.escrow`,
+  counted by `pack`), a request of kind "trade" settles it in the apply phase (buyers in id order; goods and payment both move or
+  neither, lot by lot; xp and `BF.vlog.trade` there). It returns null while in flight and the lot count when the caller asks again at
+  its next think (`asked(by, seller, offer)` says one is waiting); asked outside think it settles at once. A refusal logs an INFO
+  "trades" game log line. The trade screen uses `playerBuy(v, offer, payStacks)`. `exchange` is the bare one-lot move (tests).
 - `inv` helpers on plain `{id,count}|null` arrays: `create()`, `count(a,id)`, `add(a,id,n) -> leftover`, `remove(a,id,n) -> removed`,
   `canFit(a, adds, removes)`, `clone(a)`. `pack(v) / unpack(v, saved)` convert the persisted form (item names, not ids).
 - Trade screen (inventory.js): shows the villager inventory greyed and read-only under the offer list; unavailable offers are dimmed with an "X"
