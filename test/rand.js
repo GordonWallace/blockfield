@@ -9,17 +9,14 @@ const fs = require('fs'), path = require('path');
 const ALLOWED = {
   'audio.js': 'sound', 'cracks.js': 'crack decals', 'rand.js': 'the API itself',
   'save.js': 'a new world\'s seed and save ids', 'player.js': 'player input (r15-20 makes it requests)',
-  // the villager professions: r15-15 converts these and takes them off the list
-  ...Object.fromEntries(['villagelife', 'forester', 'builder', 'glassmaker', 'pigfarmer', 'cowherd', 'beekeeper', 'toolsmith', 'stables', 'shepherd',
-    'baker', 'miner', 'eggcook', 'poultry', 'furniture', 'fletcher', 'explorer', 'cartography', 'trading', 'storage', 'merchant', 'jobs', 'villagesim']
-    .map(f => [f + '.js', 'r15-15'])),
 };
 function lint() {
   const dir = path.join(__dirname, '..', 'js'), bad = [];
   for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort()) {
     if (ALLOWED[f]) continue;
     fs.readFileSync(path.join(dir, f), 'utf8').split('\n').forEach((l, i) => {
-      if (/Math\.random/.test(l) && !/\/\/ visual/.test(l)) bad.push(f + ':' + (i + 1) + '  ' + l.trim().slice(0, 120));
+      // (code only: a comment that names it is fine)
+      if (/Math\.random/.test(l.replace(/\/\/.*$/, '')) && !/\/\/ visual/.test(l)) bad.push(f + ':' + (i + 1) + '  ' + l.trim().slice(0, 120));
     });
   }
   return bad;

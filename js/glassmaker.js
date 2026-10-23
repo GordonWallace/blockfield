@@ -29,7 +29,8 @@ const GLASS_CAP = 48;             // it stops making glass while it holds this m
 const BOTTLE_STOCK = 9, PANE_STOCK = 16, BOTTLE_GAP_MAX = 27;
 const DAY_SECS = 1200, WORK_START = 0.02, WORK_END = 0.45, LATE = 0.36, CHECK = 3, TRADE_PAUSE = 1.6, CRAFT_T = 2.5;
 
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const live = o => !!(o && !o.dead && !o.removed);
@@ -109,7 +110,7 @@ function findDig(m) {
   const keep = keepOut(R), cands = [];
   const cx = m.jobsite ? (m.jobsite.x + R.x) / 2 : R.x, cz = m.jobsite ? (m.jobsite.z + R.z) / 2 : R.z;
   for (let i = 0; i < 500 && cands.length < 24; i++) {
-    const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * DIG_R;
+    const a = RS(m).next() * Math.PI * 2, d = Math.sqrt(RS(m).next()) * DIG_R;
     const x = Math.floor(cx + Math.cos(a) * d), z = Math.floor(cz + Math.sin(a) * d);
     if (!inDigRange(R, m, x, z)) continue;
     const y = digY(R, x, z, keep);
@@ -211,7 +212,7 @@ function smeltPlan(m, n) {
 }
 
 // ---------------------------------------------------------------- the glassmaker's day
-const st = m => m.gls || (m.gls = { stage: null, job: null, checkT: rnd(1, 4), avoid: {}, cd: 0, day: -1, dug: 0, wait: "" });
+const st = m => m.gls || (m.gls = { stage: null, job: null, checkT: rnd(RS(m), 1, 4), avoid: {}, cd: 0, day: -1, dug: 0, wait: "" });
 function nextJob(m) {
   const S = st(m), sand = cnt(m, SAND()), late = skyT() > LATE;
   S.wait = "";
@@ -312,7 +313,7 @@ function ai(m, dt, out, cont) {
       return true;
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { position: { x: s.x + 0.5, y: s.y + 0.5, z: s.z + 0.5 }, height: 0 };
-    if (Math.random() < dt * 4) a.swingT = 0.25;
+    if (Math.random() < dt * 4) a.swingT = 0.25;   // visual
     if ((S.tt -= dt) > 0) return true;
     const [fx, fy, fz] = BF.mobs.nav.feetCell(m);
     if (!(fx === s.x && fz === s.z) && W().getBlock(s.x, s.y, s.z) === SAND() && W().setBlock(s.x, s.y, s.z, 0)) {
@@ -335,7 +336,7 @@ function ai(m, dt, out, cont) {
       S.stage = "work"; S.tt = CRAFT_T;
     } else if (S.stage === "walk") { S.stage = "work"; S.tt = CRAFT_T; }
     if (k) { out.faceX = k.x + 0.5; out.faceZ = k.z + 0.5; }
-    if (Math.random() < dt * 3) a.swingT = 0.2;
+    if (Math.random() < dt * 3) a.swingT = 0.2;   // visual
     if ((S.tt -= dt) > 0) return true;
     craft(m, job.plan);
     return done();
@@ -358,7 +359,7 @@ function ai(m, dt, out, cont) {
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.4 };
     if (S.stage === "work") {
-      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = F.load(m, job, job.n);
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
@@ -371,7 +372,7 @@ function ai(m, dt, out, cont) {
     if (!fs.slots[0] || fs.slots[0].id !== job.rawId) { finishSmelt(m, job, false); return done(); }   // all smelted
     F.topUp(m, job, fs);
     if (S.waitT > F.COOK * 1.5 * job.loaded + 40 || (fs.burn <= 0 && !fs.slots[1] && S.waitT > 3)) return giveUp(fs.burn <= 0 && !fs.slots[1] ? "out of fuel" : "too slow");
-    if (Math.random() < dt * 0.5) a.swingT = 0.2;
+    if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
   // ---- buying sand or fuel at the seller's own offer
@@ -389,7 +390,7 @@ function ai(m, dt, out, cont) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const n = F.doBuy(m, job);
     S.gx = null;

@@ -248,13 +248,15 @@ function pushByPlayer(b, dt) {
 }
 
 // ---------- passengers ----------
-// How high a mob's feet (its model root) sit above the boat bottom: two-legged mobs sit on the seat with their legs forward (js/mobs.js
+// How high a mob's feet (its model root) sit above the boat bottom: two-legged mobs sit on the seat with their legs forward (js/mobview.js
 // animate), villagers with the hem of their robe on the floor, four-legged ones and spiders stand on the floor.
+// LEG_PIVOT: the hip height, in model pixels, of the two-legged models (their legL part in js/mobview.js MODELS).
+const LEG_PIVOT = { chicken: 5, zombie: 12, skeleton: 12, villager: 12, iron_golem: 16 };
 function mobSeatY(m) {
-  const legs = m.meshes && m.meshes.legL && !m.meshes.legFL ? m.meshes.legL : null;
-  if (!legs) return 0.12;
+  const hip = LEG_PIVOT[m.type];
+  if (hip == null) return 0.12;
   if (m.type === "villager") return 3 / 16 - 4 / 16;
-  return 5 / 16 - legs.position.y;
+  return 5 / 16 - hip / 16;
 }
 // Where a rider sits: the player at the front of the seat when a mob shares the boat, the mob behind; alone, either sits in the middle.
 function seatOf(b, who) {
@@ -269,7 +271,6 @@ function seatMob(b) {
   m.position.set(s.x, s.y, s.z);
   m.vel.set(0, 0, 0);
   m.yaw = b.yaw + Math.PI;   // mob models face +z at yaw 0; the boat's bow is -z
-  if (m.model) m.model.rotation.y = m.yaw;
 }
 function takeMob(b, m) {
   if (b.mob || !m || m.dead || m.removed || m.riding) return false;

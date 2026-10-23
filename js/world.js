@@ -66,19 +66,7 @@ function turnId(id, k) {
   return TURN[k][id];
 }
 
-// Faces: normal, tangent axes (u, v) and the 4 corners in CCW order seen from outside.
-const FACES = [
-  { n: [0, 1, 0],  c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]], shade: 1.0,  kind: "top" },
-  { n: [0, -1, 0], c: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], shade: 0.55, kind: "bottom" },
-  { n: [1, 0, 0],  c: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], shade: 0.8,  kind: "side" },
-  { n: [-1, 0, 0], c: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], shade: 0.8,  kind: "side" },
-  { n: [0, 0, 1],  c: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], shade: 0.68, kind: "side" },
-  { n: [0, 0, -1], c: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], shade: 0.68, kind: "side" },
-];
-// UV order matching the corner order above (bottom-left, bottom-right, top-right, top-left)
-const SIDE_UV = [[0,0],[1,0],[1,1],[0,1]];
-const TOP_UV = [[0,0],[1,0],[1,1],[0,1]];
-const AO_CURVE = [0.45, 0.65, 0.82, 1.0];
+const FACES = BF.mesher.FACES;   // (js/mesher.js)
 
 const world = {
   chunks: new Map(),      // key -> chunk
@@ -154,6 +142,7 @@ world.init = function (sceneRef) {
     };
   }
   world.solidMat = solidMat; world.liquidMat = liquidMat;
+  TBL = null;   // the mesher's tables (face rects) are built again
 };
 
 // ---------- the round drawing (planet only) ----------
@@ -196,24 +185,6 @@ function sphereFrame(ox, oz) {
   }
   return { dirs, anchor: P.pos(f, u0 + 8, v0 + 8, BF.SEA, [0, 0, 0]) };
 }
-// Each chunk-local vertex (x, y, z) at its place on the sphere, relative to the anchor: the corner directions blended across
-// its block (quads can sit at fractions of a block), at radius R + (y - SEA).
-function spherePositions(pos, ox, oz, sph) {
-  const out = new Float32Array(pos.length), D = sph.dirs, A = sph.anchor, R = BF.planet.R, sea = BF.SEA;
-  for (let i = 0; i < pos.length; i += 3) {
-    const x = pos[i], z = pos[i + 2];
-    const ix = Math.max(0, Math.min(CS - 1, Math.floor(x))), iz = Math.max(0, Math.min(CS - 1, Math.floor(z))), fx = x - ix, fz = z - iz;
-    const a = (iz * 17 + ix) * 3, b = a + 3, c = a + 51, e = c + 3;
-    let dx = 0, dy = 0, dz = 0;
-    for (let k = 0; k < 3; k++) {
-      const v = (D[a + k] * (1 - fx) + D[b + k] * fx) * (1 - fz) + (D[c + k] * (1 - fx) + D[e + k] * fx) * fz;
-      if (k === 0) dx = v; else if (k === 1) dy = v; else dz = v;
-    }
-    const r = (R + pos[i + 1] - sea) / Math.hypot(dx, dy, dz);
-    out[i] = dx * r - A[0]; out[i + 1] = dy * r - A[1]; out[i + 2] = dz * r - A[2];
-  }
-  return out;
-}
 
 // Render-space position of an atlas point this frame (js/view.js).
 world.toRender = (x, y, z, out) => BF.view.toRender(x, y, z, out);
@@ -238,6 +209,7 @@ world.reset = function () {
   growing.clear();
   if (BF.farmland) BF.farmland.reset();
   lastCenter = null; genList = []; meshList = []; simList = [];
+  MP.queue.clear(); TBL = null;   // (answers still in workers are for chunks that are gone: dropped)
   if (BF.villageSim) BF.villageSim.reset();   // force a fresh load plan even if the spawn chunk is unchanged
 };
 
@@ -549,6 +521,7 @@ function unload(key) {
   disposeMeshes(c);
   world.chunks.delete(key); CGEN++;
   world._dirty.delete(key);
+  MP.queue.delete(c);
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
 }
 
@@ -662,7 +635,7 @@ function plan(pcx, pcz) {
   for (const k of [...world.chunks.keys()]) {
     const c = world.chunks.get(k);
     if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) unload(k); continue; }
-    if (!data.has(k) && c.mesh !== undefined && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
+    if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
       far(c.cx, c.cz, Math.min(R, KEEP) + 3)) purge(k);
   }
   for (const k of [...world.farMeshes.keys()]) {
@@ -679,23 +652,27 @@ const REMESH_FF_MS = 400;
 const remeshFFms = () => BF.warp.speed >= 1000 ? 5000 : BF.warp.speed >= 100 ? 2000 : REMESH_FF_MS;
 const nearKeys = new Set();
 let ffHeld = 0, ffFar = 0, ffSince = 0;   // fast-forward totals since batching started (logged when it ends)
-function remeshDirty(pcx, pcz, batch) {
+// The player's 3x3 are meshed here at once (breaking and placing feel instant); the others go to the mesher workers (r15-03), or are
+// meshed here too without workers or with all (flushDirty).
+function remeshDirty(pcx, pcz, batch, all) {
   const now = performance.now(), st = world.lastRemesh;
   st.near = st.far = st.held = 0;
   const wait = batch ? remeshFFms() : 0;
-  if (batch) {
+  if (!all && world._dirty.size) {
     nearKeys.clear();
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const c = world.chunkC(pcx + dx, pcz + dz); if (c) nearKeys.add(c.key); }
   }
   for (const k of world._dirty) {
     const c = world.chunks.get(k);
     if (!c || c.mesh === undefined) { world._dirty.delete(k); continue; }
-    const near = !batch || nearKeys.has(k);
-    if (!near && now - (c.meshT || 0) < wait) { st.held++; continue; }
-    buildMesh(c);
+    const near = all || nearKeys.has(k);
+    if (batch && !near && now - (c.meshT || 0) < wait) { st.held++; continue; }
+    if (near || MP.inline) buildMesh(c);
+    else { c.meshT = now; enqueue(c, chunkD2(c, pcx, pcz)); }
     world._dirty.delete(k);
     if (near) st.near++; else st.far++;
   }
+  if (all) for (const c of [...MP.queue, ...MP.workers.flatMap(w => w.busy.map(it => it.c))]) if (world.chunks.get(c.key) === c) buildMesh(c);
   st.ms = performance.now() - now;
 }
 // Fast-forward totals: batching starts, adds up, and is logged when fast-forward drops below 10x.
@@ -711,10 +688,17 @@ function ffTrack(batch) {
   }
 }
 world.lastRemesh = { near: 0, far: 0, held: 0, ms: 0 };
-// Remeshes every dirty chunk now (tests reading meshes right after fast-forward).
-world.flushDirty = () => remeshDirty(0, 0, false);
+// Remeshes every dirty chunk now, and the ones waiting for or in a mesher worker (tests reading meshes right after fast-forward).
+world.flushDirty = () => remeshDirty(0, 0, false, true);
 
 const KEEP = 12;   // chunks from the player that keep their block data on the planet (the spec's 8 would shrink wild mobs' range below 1.3's)
+
+// Squared distance in chunks from the player's chunk to chunk c (across face edges too): the mesher workers' order.
+function chunkD2(c, pcx, pcz) {
+  const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: c.cx * CS + 8, z: c.cz * CS + 8 }, TW), dx = t.x / CS, dz = t.z / CS;
+  return dx * dx + dz * dz;
+}
+let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength without the mesher workers' jobs)
 
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
 world.update = function (px, pz, budgetMs = 8) {
@@ -733,8 +717,9 @@ world.update = function (px, pz, budgetMs = 8) {
   } else world.high = false;
   const center = pcx + "," + pcz + "," + world.viewDist + "," + roundPlan + "," + world.high;
   // re-plan on chunk change, and periodically while loading so turning re-prioritises
-  if (center !== lastCenter || (world.queueLength > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
-  if (world.queueLength > 40) budgetMs = Math.max(budgetMs, 12);
+  if (center !== lastCenter || (loadQ > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
+  if (loadQ > 40) budgetMs = Math.max(budgetMs, 12);
+  if (!MP.started || (BF.meshInline && !MP.inline)) poolStart();
 
   // vertical streaming: columns near the player load sections down to ~40 blocks below them (digging, caves, falling)
   if (BF.player && BF.player.position) {
@@ -777,7 +762,8 @@ world.update = function (px, pz, budgetMs = 8) {
       continue;
     }
     if (meshCand && (!genCand || meshCand[2] <= genCand[2] + 2)) {
-      buildMesh(world.chunks.get(ckey(meshCand[0], meshCand[1])));
+      const c = world.chunks.get(ckey(meshCand[0], meshCand[1]));
+      if (MP.inline) buildMesh(c); else { c.mesh = null; enqueue(c, meshCand[2]); }
       meshList.splice(mi, 1);
     } else {
       createChunk(genCand[0], genCand[1]);
@@ -785,13 +771,15 @@ world.update = function (px, pz, budgetMs = 8) {
       mi = 0; // newly generated data may unblock a nearer mesh
     }
   }
-  world.queueLength = genList.length + meshList.filter(m => { const k = ckey(m[0], m[1]), c = world.chunks.get(k); return c ? c.mesh === undefined : !world.farMeshes.has(k); }).length;
+  pump();
+  loadQ = genList.length + meshList.filter(m => { const k = ckey(m[0], m[1]), c = world.chunks.get(k); return c ? c.mesh === undefined : !world.farMeshes.has(k); }).length;
+  world.queueLength = loadQ + poolPending();   // (chunks waiting for or in a mesher worker count as still loading)
   // how far out every wanted chunk has a mesh, in blocks: distant terrain (js/lod.js) leaves its hole only that far while chunks load
   // (the distance from the player to the nearest chunk square, in the planned set or just past it, that has no mesh)
   const lx = px - pcx * CS, lz = pz - pcz * CS;
   let gap = Infinity;
   for (const e of edgeList) {
-    if (e[4]) { const k = ckey(e[0], e[1]), c = world.chunks.get(k); if (c ? c.mesh !== undefined : world.farMeshes.has(k)) continue; }
+    if (e[4]) { const k = ckey(e[0], e[1]), c = world.chunks.get(k); if (c ? c.mesh : world.farMeshes.has(k)) continue; }
     const ex = Math.max(e[2] * CS - lx, 0, lx - (e[2] + 1) * CS), ez = Math.max(e[3] * CS - lz, 0, lz - (e[3] + 1) * CS);
     if (ex * ex + ez * ez < gap) gap = ex * ex + ez * ez;
   }
@@ -799,133 +787,93 @@ world.update = function (px, pz, budgetMs = 8) {
 };
 
 world.setViewDist = function (d) { world.viewDist = d; lastCenter = null; };
-world.meshedCount = () => { let n = 0; for (const c of world.chunks.values()) if (c.mesh !== undefined) n++; return n; };
+world.meshedCount = () => { let n = 0; for (const c of world.chunks.values()) if (c.mesh) n++; return n; };
 
 // ---------- meshing ----------
-// Box models in 1/16 block units: (get, x, y, z, id) -> [[x0,y0,z0,x1,y1,z1], ...]
-const connects = (get, x, y, z, self, axis) => { const n = get(x, y, z), b = BF.blocks[n]; return n === self || (b && b.model === "fence") || (b && b.gate && b.gate.axis === axis) || (BF.OPAQUE[n] && BF.SOLID[n]); }; // fences of any wood connect to each other and to gates in line with them
-const MODELS = {
-  fence(get, x, y, z, id) {
-    const out = [[6, 0, 6, 10, 16, 10]];
-    if (connects(get, x + 1, y, z, id, "x")) out.push([10, 6, 7, 16, 9, 9], [10, 12, 7, 16, 15, 9]);
-    if (connects(get, x - 1, y, z, id, "x")) out.push([0, 6, 7, 6, 9, 9], [0, 12, 7, 6, 15, 9]);
-    if (connects(get, x, y, z + 1, id, "z")) out.push([7, 6, 10, 9, 9, 16], [7, 12, 10, 9, 15, 16]);
-    if (connects(get, x, y, z - 1, id, "z")) out.push([7, 6, 0, 9, 9, 6], [7, 12, 0, 9, 15, 6]);
-    return out;
-  },
-  lantern(get, x, y, z) {
-    // hangs from the block above when there is one, otherwise stands on the ground
-    const hang = BF.SOLID[get(x, y + 1, z)] && !BF.SOLID[get(x, y - 1, z)] ? 1 : 0;
-    const o = hang * 6;
-    return [[5, o, 5, 11, o + 7, 11], [6, o + 7, 6, 10, o + 9, 10], ...(hang ? [[7.5, 15, 7.5, 8.5, 16, 8.5].map((v, i) => i === 1 ? o + 9 : v)] : [])];
-  },
-  // torches: boxes in 1/16; entry 8 = glow (flame drawn at full brightness), entry 9 = lean {dy, base, k, dx, dz} (wall torch)
-  torch() { return [[7, 0, 7, 9, 7, 9], [7, 7, 7, 9, 10, 9, undefined, 0, 1]]; },
-  wall_torch(get, x, y, z, id) {
-    const [dx, dz] = BF.DIRS[BF.blocks[id].wallTorch.f], lean = { dy: 3, base: -6, k: 0.41, dx, dz };
-    return [[7, 0, 7, 9, 7, 9, undefined, 0, 0, lean], [7, 7, 7, 9, 10, 9, undefined, 0, 1, lean]];
-  },
-  bell() { return [[4, 4, 4, 12, 6, 12], [5, 6, 5, 11, 13, 11], [7, 13, 7, 9, 16, 9]]; },
-  chest() { return [[1, 0, 1, 15, 14, 15]]; },
-  cactus() { return [[1, 0, 1, 15, 16, 15]]; },
-  // doors and beds: per-state boxes precomputed in blocks.js (a 7th entry overrides the tile)
-  door(get, x, y, z, id) { return BF.blocks[id].boxes; },
-  gate(get, x, y, z, id) { return BF.blocks[id].boxes; },   // fence gates (per-state boxes from blocks.js gateDefs)
-  bed(get, x, y, z, id) { return BF.blocks[id].boxes; },
-  shape(get, x, y, z, id) { return BF.blocks[id].boxes; }, // slabs and stairs (per-state boxes from blocks.js)
-};
-// ---- panes, iron bars and ladders ----
-// "pane" model (glass panes, stained panes, iron bars): a 2/16 post plus an arm towards every neighbour that is another pane/bars, a glass block
-// or a full opaque solid block (a lone pane is a cross). One block id each; the arms are computed here (like fences) for the mesh and for collision (BF.DYNBOXES).
-const isPane = n => { const b = BF.blocks[n]; return !!b && b.model === "pane"; };
-const isGlassBlock = n => { const b = BF.blocks[n]; return !!b && b.render === "cutout" && /(^|_)glass$/.test(b.name); };
-const paneJoins = n => isPane(n) || isGlassBlock(n) || (BF.OPAQUE[n] === 1 && BF.SOLID[n] === 1 && BF.RENDER[n] === 1);
-const PANE_ARMS = [[7, 0, 0, 9, 16, 7], [9, 0, 7, 16, 16, 9], [7, 0, 9, 9, 16, 16], [0, 0, 7, 7, 16, 9]]; // north (-z), east (+x), south (+z), west (-x)
-// face bits (emitBox 8th entry): 0 top, 1 bottom, 2 +x, 3 -x, 4 +z, 5 -z
-const ARM_HIDE = [(1 << 5) | (1 << 4), (1 << 2) | (1 << 3), (1 << 4) | (1 << 5), (1 << 3) | (1 << 2)]; // cap at the cell edge + face towards the post
-const POST_HIDE = [1 << 5, 1 << 2, 1 << 4, 1 << 3];                                                     // post face on the side of arm i
-function paneArms(get, x, y, z) {
-  const a = [paneJoins(get(x, y, z - 1)), paneJoins(get(x + 1, y, z)), paneJoins(get(x, y, z + 1)), paneJoins(get(x - 1, y, z))];
-  return a[0] || a[1] || a[2] || a[3] ? a : [true, true, true, true];
-}
-function paneBoxes(get, x, y, z) {
-  const arms = paneArms(get, x, y, z);
-  const upA = isPane(get(x, y + 1, z)) ? paneArms(get, x, y + 1, z) : null, dnA = isPane(get(x, y - 1, z)) ? paneArms(get, x, y - 1, z) : null;
-  let post = (upA ? 1 : 0) | (dnA ? 2 : 0);
-  const out = [];
-  for (let i = 0; i < 4; i++) if (arms[i]) {
-    post |= POST_HIDE[i];
-    out.push([...PANE_ARMS[i], 0, ARM_HIDE[i] | (upA && upA[i] ? 1 : 0) | (dnA && dnA[i] ? 2 : 0)]);
-  }
-  out.unshift([7, 0, 7, 9, 16, 9, 0, post]);
-  return out;
-}
-MODELS.pane = (get, x, y, z) => paneBoxes(get, x, y, z);
-MODELS.ladder = (get, x, y, z, id) => BF.blocks[id].boxes; // per-facing box precomputed in blocks.js
+// The mesher itself is js/mesher.js. The player's own edits (the 3x3 chunks around the player) are meshed here at once, so breaking and
+// placing feel instant; every other chunk is meshed by a pool of mesher workers (js/meshworker.js, spec r15-03), nearest first, and the
+// page only wraps the arrays in geometry. Without workers (no Worker, a file: page, BF.meshInline) everything is meshed here.
+// Chunk fields: mesh (undefined: never meshed; null: its first mesh is queued or being built; true: meshed), meshJob (0 none, 1 queued,
+// 2 in a worker), meshAgain (changed while in a worker: one more job when the answer comes), meshV / meshShown (the last job started /
+// the job whose mesh is shown: an answer older than the shown mesh is dropped).
+const M = BF.mesher;
+const MODELS = M.MODELS;
 world.MODELS = MODELS; // extra packs register models here (js/signs.js: MODELS.sign); models get (get, x, y, z, id, worldX, worldZ)
 BF.DYNBOXES = BF.DYNBOXES || []; // id -> fn(get, x, y, z, id) -> collision boxes in blocks (checked by boxHit before CBOXES / CBOX)
-for (const b of BF.blocks) if (b && b.model === "pane") BF.DYNBOXES[b.id] = (get, x, y, z) => paneBoxes(get, x, y, z).map(q => [q[0] / 16, q[1] / 16, q[2] / 16, q[3] / 16, q[4] / 16, q[5] / 16]);
+for (const b of BF.blocks) if (b && b.model === "pane") BF.DYNBOXES[b.id] = (get, x, y, z) => M.paneBoxes(meshTables(), get, x, y, z).map(q => [q[0] / 16, q[1] / 16, q[2] / 16, q[3] / 16, q[4] / 16, q[5] / 16]);
 // A ladder needs a full solid opaque block behind it (the cell at pos + DIRS[f]).
 BF.ladderSupport = id => BF.SOLID[id] === 1 && BF.OPAQUE[id] === 1;
-const EDGE_NB = { edge: true };   // buildMesh: a neighbour chunk across a face edge
-const tileRects = {};
-const tileRect = n => tileRects[n] || (tileRects[n] = BF.textures.uv(n));
+const EDGE_NB = { edge: true };   // meshJob: a neighbour chunk across a face edge
 
-function buildMesh(c) {
-  c.meshT = performance.now();   // fast-forward remesh batching (remeshDirty)
-  const ox = c.cx * CS, oz = c.cz * CS;
-  // 3x3 neighbourhood for border lookups
-  // On the planet a neighbour across a face edge is EDGE_NB: its cells are read through the world (resolved and turned into this face's
-  // frame) rather than by local index.
-  const nb = [];
-  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+// The mesher's tables (see js/mesher.js), built on first use and again after world.init / world.reset. TBLV counts the builds, so the
+// workers are sent new ones.
+let TBL = null, TBLV = 0, WTBL = null, FOREIGN = null;
+function meshTables() {
+  if (TBL) return TBL;
+  const tiles = {};
+  for (const b of BF.blocks) if (b && Array.isArray(b.boxes)) for (const q of b.boxes) if (q && typeof q[6] === "string" && !(q[6] in tiles)) tiles[q[6]] = BF.textures.uv(q[6]);
+  TBL = {
+    RENDER: BF.RENDER, OPAQUE: BF.OPAQUE, FLUID: BF.FLUID, SOLID: BF.SOLID, SATT: BF.skyLight.ATT, SKB: BF.skyLight.BRIGHT,
+    faceUV: world._faceUV, faceTint: world._faceTint, dirtUV: world._dirtUV, overlayUV: world._overlayUV, tiles, tile0: BF.textures.uv("\u0000"),
+    blocks: BF.blocks, DIRS: BF.DIRS, STONE: BF.B.stone, BEDROCK: BF.B.bedrock, PATH: BF.B.dirt_path, FARM: BF.B.farmland, FARM_DRY: BF.B.farmland_dry,
+    MINY: BF.MIN_Y, HTOP: BF.H,
+  };
+  // blocks whose model is not one of the mesher's own (signs read their group from the world): their boxes are worked out here
+  FOREIGN = new Uint8Array(BF.MAX_BLOCK + 1);
+  for (const b of BF.blocks) if (b && BF.RENDER[b.id] === 5 && MODELS[b.model] && MODELS[b.model] !== M.BUILTIN[b.model]) FOREIGN[b.id] = 1;
+  TBLV++; WTBL = null;
+  return TBL;
+}
+// The tables as a worker gets them (the block list cut down to what the mesher and its models read).
+function workerTables() {
+  if (WTBL) return WTBL;
+  const t = Object.assign({}, meshTables());
+  t.blocks = BF.blocks.map(b => b && { model: b.model, translucent: b.translucent, boxes: b.boxes, gate: b.gate && { axis: b.gate.axis }, wallTorch: b.wallTorch && { f: b.wallTorch.f }, name: b.name, render: b.render });
+  return (WTBL = t);
+}
+
+// The mesher's job for chunk c (see js/mesher.js): its sections (copied when copy, for a worker), the ring of cells around it read from
+// its neighbours, the biome tints, the boxes of world-state models and, on the planet, its frame on the sphere.
+const NB = new Array(9);
+function meshJob(c, copy) {
+  const T = meshTables(), ox = c.cx * CS, oz = c.cz * CS;
+  // 3x3 neighbourhood. A neighbour across a face edge is EDGE_NB: its cells are read through the world (resolved and turned
+  // into this face's frame) rather than by local index.
+  for (let dz = -1, i = 0; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++, i++) {
     const k = resChunk(c.cx + dx, c.cz + dz);
-    nb.push(!k ? undefined : k[0] === c.cx + dx && k[1] === c.cz + dz ? world.chunks.get(ckey(k[0], k[1])) : EDGE_NB);
+    NB[i] = !k ? undefined : k[0] === c.cx + dx && k[1] === c.cz + dz ? world.chunks.get(ckey(k[0], k[1])) : EDGE_NB;
   }
-  const MINY = BF.MIN_Y, HTOP = BF.H;
-  const get = (x, y, z) => {
-    if (y < MINY) return BEDROCK_ID;
-    if (y >= HTOP) return 0;
-    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
-    const ch = nb[iz * 3 + ix];
-    if (!ch) return 0;
-    if (ch === EDGE_NB) return world.getBlock(ox + x, y, oz + z);
-    if (y < ch.y0) return STONE_ID;
-    if (y >= ch.y1) return 0;
-    const s = ch.secs[(y >> 4) - ch.lo];
-    return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)];
-  };
-  const occ = (x, y, z) => BF.OPAQUE[get(x, y, z)];
-  // block light (0..15) from the neighbourhood's chunk.light arrays (0 where unloaded)
-  const lget = (x, y, z) => {
-    if (y < MINY || y >= HTOP) return 0;
-    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
-    const ch = nb[iz * 3 + ix];
-    if (ch === EDGE_NB) return world.getBlockLight(ox + x, y, oz + z);
-    if (!ch || !ch.light || y < ch.y0 || y >= ch.y1) return 0;
-    const ls = ch.light[(y >> 4) - ch.lo];
-    return ls ? ls[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)] : 0;
-  };
-  // light of the cell a model / plant occupies; a cell that is itself opaque takes the best neighbour
-  const cellLight = (x, y, z) => {
-    let v = lget(x, y, z);
-    if (OPAQUE[get(x, y, z)] || !v) {
-      if (OPAQUE[get(x, y, z)]) { v = 0; for (let d = 0; d < 6; d++) { const n = lget(x + (d === 0) - (d === 1), y + (d === 2) - (d === 3), z + (d === 4) - (d === 5)); if (n > v) v = n; } }
+  // the ring: blocks (stone below a neighbour's band, air above it and where it is not loaded), block light (0 where unknown) and sky
+  // light (15 where not loaded or above the band, 0 below it)
+  const Y0 = c.y0 - 2, Y1 = c.y1 + 2, NY = Y1 - Y0, RW = CS + 4;
+  const rb = new Uint16Array(M.RN * NY), rl = new Uint8Array(M.RN * NY), rs = new Uint8Array(M.RN * NY);
+  for (let z = -2; z < CS + 2; z++) for (let x = -2; x < CS + 2; x++) {
+    const r = M.RING[(z + 2) * RW + x + 2];
+    if (r < 0) continue;
+    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1, ch = NB[iz * 3 + ix], o = r * NY;
+    if (!ch) { rs.fill(15, o, o + NY); continue; }
+    if (ch === EDGE_NB) {
+      for (let i = 0, y = Y0; i < NY; i++, y++) {
+        rb[o + i] = world.getBlock(ox + x, y, oz + z);
+        if (y >= BF.MIN_Y && y < BF.H) rl[o + i] = world.getBlockLight(ox + x, y, oz + z);
+        rs[o + i] = BF.skyLight.get(ox + x, y, oz + z);
+      }
+      continue;
     }
-    return v / 15;
-  };
-  const blv = [0, 0, 0, 0];
-
-  const S = { pos: [], uv: [], col: [], sky: [], bl: [], ind: [] };
-  const L = { pos: [], uv: [], col: [], sky: [], bl: [], ind: [] };
-  const RENDER = BF.RENDER, OPAQUE = BF.OPAQUE, FLUID = BF.FLUID;
-  const faceTint = world._faceTint;
-  const B_PATH = BF.B.dirt_path, B_FARM = BF.B.farmland, B_FARM_DRY = BF.B.farmland_dry;
-
-  // Biome tint per column over an 18x18 area (1-block border) so AO-free tint blends at borders.
-  const tintFn = BF.worldgen.tintAt;
-  const TW = CS + 2;
-  const tint = new Float32Array(TW * TW * 9); // grass rgb, foliage rgb, water rgb
+    const col = ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS), secs = ch.secs, light = ch.light, sky = ch.sky;
+    for (let i = 0, y = Y0; i < NY; i++, y++) {
+      if (y < ch.y0) { rb[o + i] = T.STONE; rs[o + i] = sky ? 0 : 15; continue; }
+      if (y >= ch.y1) { rs[o + i] = 15; continue; }
+      const si = (y >> 4) - ch.lo, k = ((y & 15) << 8) | col, s = secs[si];
+      rb[o + i] = typeof s === "number" ? s : s[k];
+      const ls = light && light[si];
+      if (ls) rl[o + i] = ls[k];
+      if (!sky) rs[o + i] = 15;
+      else { const ss = sky[si]; rs[o + i] = typeof ss === "number" ? ss : ss[k]; }
+    }
+  }
+  // biome tint per column over an 18x18 area (1-block border)
+  const tintFn = BF.worldgen.tintAt, TW = CS + 2, tint = new Float32Array(TW * TW * 9);
   for (let z = -1; z <= CS; z++) for (let x = -1; x <= CS; x++) {
     const o = ((z + 1) * TW + (x + 1)) * 9;
     let t = null;
@@ -935,256 +883,46 @@ function buildMesh(c) {
     tint[o + 3] = fo[0]; tint[o + 4] = fo[1]; tint[o + 5] = fo[2];
     tint[o + 6] = w[0]; tint[o + 7] = w[1]; tint[o + 8] = w[2];
   }
-  // tint at a vertex corner: average of the 4 columns around it (smooth gradients across borders)
-  const tintAtCorner = (vx, vz, kind, out) => {
-    // vx, vz are local corner coords 0..CS
-    out[0] = out[1] = out[2] = 0;
-    for (let dz = -1; dz <= 0; dz++) for (let dx = -1; dx <= 0; dx++) {
-      const o = ((vz + dz + 1) * TW + (vx + dx + 1)) * 9 + (kind - 1) * 3;
-      out[0] += tint[o]; out[1] += tint[o + 1]; out[2] += tint[o + 2];
-    }
-    out[0] *= 0.25; out[1] *= 0.25; out[2] *= 0.25;
+  // models that read world state (signs): their boxes, with tile names turned into atlas rects
+  let ext = null;
+  const wget = (x, y, z) => world.getBlock(ox + x, y, oz + z);
+  world.scanFlagged(c, FOREIGN, (lx, y, lz, id) => {
+    const boxes = MODELS[BF.blocks[id].model](wget, lx, y, lz, id, ox + lx, oz + lz);
+    (ext || (ext = {}))[((y - c.y0) << 8) | (lz << 4) | lx] = boxes.map(q => {
+      if (typeof q[6] !== "string") return q;
+      q = q.slice(); q[6] = BF.textures.uv(q[6]); return q;
+    });
+  });
+  const cp = a => typeof a === "number" || !a ? a : a.slice();
+  return {
+    ox, oz, lo: c.lo, hi: c.hi, y0: c.y0, y1: c.y1,
+    secs: copy ? c.secs.map(cp) : c.secs, light: copy && c.light ? c.light.map(cp) : c.light, sky: copy && c.sky ? c.sky.map(cp) : c.sky,
+    Y0, Y1, rb, rl, rs, tint, ext,
+    sph: Object.assign(sphereFrame(ox, oz), { R: BF.planet.R, sea: BF.SEA }),
   };
-  const tc = [1, 1, 1];
+}
+// The arrays of a job copied for a worker (to transfer them).
+function jobBuffers(J) {
+  const a = [J.rb.buffer, J.rl.buffer, J.rs.buffer, J.tint.buffer];
+  for (const l of [J.secs, J.light, J.sky]) if (l) for (const s of l) if (s && typeof s === "object") a.push(s.buffer);
+  a.push(J.sph.dirs.buffer);
+  return a;
+}
 
-  // water surface height of a cell: -1 not water, 1 if water above, else by level
-  const fluidH = (x, y, z) => {
-    const f = FLUID[get(x, y, z)];
-    if (!f) return -1;
-    if (FLUID[get(x, y + 1, z)]) return 1;
-    return f === 8 ? 0.889 : (8 - f) / 9;
-  };
-  const cornerH = (x, y, z, cx, cz) => {
-    // corner shared by cells (x+cx-1 .. x+cx, z+cz-1 .. z+cz)
-    let sum = 0, n = 0;
-    for (let dz = cz - 1; dz <= cz; dz++) for (let dx = cx - 1; dx <= cx; dx++) {
-      const h = fluidH(x + dx, y, z + dz);
-      if (h >= 1) return 1;
-      if (h >= 0) { sum += h; n++; }
-    }
-    return n ? sum / n : 0.889;
-  };
-
-  const sideAxes = [];
-  for (let f = 0; f < 6; f++) { const a = []; for (let i = 0; i < 3; i++) if (FACES[f].n[i] === 0) a.push(i); sideAxes.push(a); }
-  const p = [0, 0, 0], p1 = [0, 0, 0], p2 = [0, 0, 0], p3 = [0, 0, 0];
-  const lowUV = [[0, 0], [0, 0], [0, 0], [0, 0]], aoVals = [0, 0, 0, 0], vh = [0, 0, 0, 0];
-
-  // sky light (js/skylight.js): level 0..15 of a cell (15 where unloaded or above a band), brightness through BRIGHT
-  const SKB = BF.skyLight.BRIGHT, SATT = BF.skyLight.ATT;
-  const sgetN = (x, y, z) => {
-    const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1;
-    const ch = nb[iz * 3 + ix];
-    if (ch === EDGE_NB) return BF.skyLight.get(ox + x, y, oz + z);
-    if (!ch || !ch.sky || y >= ch.y1) return 15;
-    if (y < ch.y0) return 0;
-    const s = ch.sky[(y >> 4) - ch.lo];
-    return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - (iz - 1) * CS) << 4) | (x - (ix - 1) * CS)];
-  };
-  // brightness of a cell; a cell that stops sky light (a slab, a stair, a solid block) takes its best neighbour
-  const skyAt = (x, y, z) => {
-    if (SATT[get(x, y, z)] !== 255) return SKB[sgetN(x, y, z)];
-    let v = 0;
-    for (let d = 0; d < 6; d++) { const n = sgetN(x + (d === 0) - (d === 1), y + (d === 2) - (d === 3), z + (d === 4) - (d === 5)); if (n > v) v = n; }
-    return SKB[v];
-  };
-  const skv = [0, 0, 0, 0];
-
-  // Emits one quad. corners: 4 [x,y,z] local; uvs: 4 [u,v] in 0..1 of rect; shade per vertex; tintKind
-  function quad(T, rect, cs, uvs, shades, sky, tintKind, flip, lx, lz) {
-    const v0 = T.pos.length / 3;
-    for (let k = 0; k < 4; k++) {
-      const q = cs[k];
-      T.pos.push(q[0], q[1], q[2]);   // chunk-local: the mesh is placed at the chunk's corner (floating origin, js/view.js)
-      T.uv.push(rect[0] + (rect[2] - rect[0]) * uvs[k][0], rect[1] + (rect[3] - rect[1]) * uvs[k][1]);
-      const l = shades[k];
-      if (tintKind) {
-        tintAtCorner(Math.max(0, Math.min(CS, Math.round(q[0]))), Math.max(0, Math.min(CS, Math.round(q[2]))), tintKind, tc);
-        T.col.push(l * tc[0], l * tc[1], l * tc[2]);
-      } else T.col.push(l, l, l);
-      T.sky.push(sky < 0 ? skv[k] : sky);   // sky < 0: per-vertex (smooth) values in skv
-      T.bl.push(blv[k]);
-    }
-    if (flip) T.ind.push(v0 + 1, v0 + 2, v0 + 3, v0 + 1, v0 + 3, v0);
-    else T.ind.push(v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3);
-  }
-
-  const CROSS = [
-    [[0.15, 0, 0.15], [0.85, 0, 0.85], [0.85, 1, 0.85], [0.15, 1, 0.15]],
-    [[0.85, 0, 0.85], [0.15, 0, 0.15], [0.15, 1, 0.15], [0.85, 1, 0.85]],
-    [[0.15, 0, 0.85], [0.85, 0, 0.15], [0.85, 1, 0.15], [0.15, 1, 0.85]],
-    [[0.85, 0, 0.15], [0.15, 0, 0.85], [0.15, 1, 0.85], [0.85, 1, 0.15]],
-  ];
-  const cs4 = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
-  const sh4 = [0, 0, 0, 0];
-
-  // Emits a box given in 1/16 units inside cell (x,y,z); UVs follow the box's position in the cell.
-  const UVAX = [[0, 2], [0, 2], [2, 1], [2, 1], [0, 1], [0, 1]]; // per face: [u axis, v axis]
-  function emitBox(b, x, y, z, bx) {
-    const lo = [bx[0] / 16, bx[1] / 16, bx[2] / 16], hi = [bx[3] / 16, bx[4] / 16, bx[5] / 16];
-    for (let f = 0; f < 6; f++) {
-      const F = FACES[f];
-      if (bx[7] & (1 << f)) continue; // 8th entry: bitmask of faces hidden by a joined neighbour (panes)
-      // a face flush with the cell edge is hidden by an opaque neighbour
-      const axis = F.n[0] ? 0 : F.n[1] ? 1 : 2, dir = F.n[axis];
-      if ((dir > 0 ? hi[axis] >= 1 : lo[axis] <= 0) && OPAQUE[get(x + F.n[0], y + F.n[1], z + F.n[2])]) continue;
-      const rect = bx[6] ? tileRect(bx[6]) : world._faceUV[b * 6 + f];
-      if (!rect) continue;
-      const sky = skyAt(x + (dir > 0 && axis === 0 ? 1 : 0), y + (axis === 1 && dir > 0 ? 1 : 0), z + (dir > 0 && axis === 2 ? 1 : 0));
-      const [ua, va] = UVAX[f];
-      const uvs = [[0, 0], [0, 0], [0, 0], [0, 0]];
-      const glow = bx[8], lean = bx[9], cl = glow ? 2 : cellLight(x, y, z);
-      for (let k = 0; k < 4; k++) {
-        const cc = F.c[k];
-        const lp = [cc[0] ? hi[0] : lo[0], cc[1] ? hi[1] : lo[1], cc[2] ? hi[2] : lo[2]];
-        cs4[k][0] = x + lp[0]; cs4[k][1] = y + lp[1]; cs4[k][2] = z + lp[2];
-        if (lean) { const o = (lean.base + lean.k * lp[1] * 16) / 16; cs4[k][0] += lean.dx * o; cs4[k][2] += lean.dz * o; cs4[k][1] += lean.dy / 16; }
-        uvs[k][0] = lp[ua]; uvs[k][1] = lp[va];
-        sh4[k] = glow ? 1 : F.shade;
-        blv[k] = cl;
-      }
-      quad(BF.blocks[b].translucent ? L : S, rect, cs4, uvs, sh4, sky, faceTint[b * 6 + f] === 4 ? 1 : faceTint[b * 6 + f], false); // stained panes: blended pass
-    }
-  }
-
-  for (let si = 0; si < c.hi - c.lo; si++) {
-  const sec = c.secs[si];
-  if (sec === 0) continue;                                   // all-air section
-  const uni = typeof sec === "number", sy0 = (c.lo + si) * 16;
-  for (let ly = 0; ly < 16; ly++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
-    let b;
-    if (uni) {
-      // inside a uniform opaque block nothing is visible: only the shell of the section can show faces
-      if (OPAQUE[sec] && ly > 0 && ly < 15 && z > 0 && z < 15 && x > 0 && x < 15) { x = 14; continue; }
-      b = sec;
-    } else b = sec[(ly << 8) | (z << 4) | x];
-    if (!b) continue;
-    const y = sy0 + ly;
-    const r = RENDER[b];
-
-    if (r === 4) { // crossed-quad plant
-      const rect = world._faceUV[b * 6 + 2];
-      if (!rect) continue;
-      const sky = skyAt(x, y, z), crossL = cellLight(x, y, z);
-      const tk = faceTint[b * 6 + 2];
-      // small deterministic offset so fields of grass don't look gridded
-      const h = ((ox + x) * 73856093 ^ (oz + z) * 19349663) >>> 0;
-      const jx = ((h & 255) / 255 - 0.5) * 0.3, jz = (((h >> 8) & 255) / 255 - 0.5) * 0.3;
-      for (const q of CROSS) {
-        for (let k = 0; k < 4; k++) { cs4[k][0] = x + q[k][0] + jx; cs4[k][1] = y + q[k][1]; cs4[k][2] = z + q[k][2] + jz; sh4[k] = q[k][1] ? 0.95 : 0.75; blv[k] = crossL; }
-        quad(S, rect, cs4, SIDE_UV, sh4, sky, tk === 4 ? 1 : tk, false);
-      }
-      continue;
-    }
-
-    if (r === 5) { // small-box model (fence, lantern, chest...)
-      const make = MODELS[BF.blocks[b].model];
-      if (!make) continue;
-      for (const bx of make(get, x, y, z, b, ox + x, oz + z)) emitBox(b, x, y, z, bx);
-      continue;
-    }
-
-    const isFluid = r === 3;
-    if (isFluid) {
-      vh[0] = vh[1] = vh[2] = vh[3] = 1;
-    }
-    let fluidTopComputed = false;
-
-    for (let f = 0; f < 6; f++) {
-      const F = FACES[f];
-      const ax = x + F.n[0], ay = y + F.n[1], az = z + F.n[2];
-      const n = get(ax, ay, az);
-      if (isFluid) {
-        if (FLUID[n] || OPAQUE[n]) continue;
-      } else if (r === 2) {
-        if (OPAQUE[n] || n === b) continue;
-      } else if (OPAQUE[n]) continue;
-      const rect = world._faceUV[b * 6 + f];
-      if (!rect) continue;
-      const sky = skyAt(ax, ay, az);
-      let uvs = F.kind === "side" ? SIDE_UV : TOP_UV;
-      const flL = isFluid ? lget(ax, ay, az) / 15 : 0;
-
-      if (isFluid) {
-        if (!fluidTopComputed) {
-          fluidTopComputed = true;
-          if (!FLUID[get(x, y + 1, z)]) {
-            // per-corner heights; vh index matches the corner's (cx, cz)
-            vh[0] = cornerH(x, y, z, 0, 0); vh[1] = cornerH(x, y, z, 1, 0);
-            vh[2] = cornerH(x, y, z, 0, 1); vh[3] = cornerH(x, y, z, 1, 1);
-          }
-        }
-        for (let k = 0; k < 4; k++) {
-          const cc = F.c[k];
-          cs4[k][0] = x + cc[0]; cs4[k][2] = z + cc[2];
-          cs4[k][1] = y + (cc[1] ? vh[cc[2] * 2 + cc[0]] : 0);
-          sh4[k] = F.shade;
-          blv[k] = flL;
-        }
-        quad(L, rect, cs4, uvs, sh4, sky, faceTint[b * 6 + f] ? 3 : 0, false);
-        continue;
-      }
-
-      // solid / cutout cube face with ambient occlusion (paths and farmland sit 1/16 lower)
-      const fs = sky;
-      const lowTop = (b === B_PATH || b === B_FARM || b === B_FARM_DRY) && !BF.SOLID[get(x, y + 1, z)];
-      const ua = sideAxes[f][0], va = sideAxes[f][1];
-      for (let k = 0; k < 4; k++) {
-        const cc = F.c[k];
-        cs4[k][0] = x + cc[0]; cs4[k][1] = y + cc[1] - (lowTop && cc[1] ? 0.0625 : 0); cs4[k][2] = z + cc[2];
-        const du = cc[ua] ? 1 : -1, dv = cc[va] ? 1 : -1;
-        p[0] = ax; p[1] = ay; p[2] = az;
-        p1[0] = ax; p1[1] = ay; p1[2] = az; p1[ua] += du;
-        p2[0] = ax; p2[1] = ay; p2[2] = az; p2[va] += dv;
-        p3[0] = ax; p3[1] = ay; p3[2] = az; p3[ua] += du; p3[va] += dv;
-        const o1 = occ(p1[0], p1[1], p1[2]), o2 = occ(p2[0], p2[1], p2[2]), o3 = occ(p3[0], p3[1], p3[2]);
-        const ao = o1 && o2 ? 0 : 3 - o1 - o2 - o3;
-        aoVals[k] = ao;
-        sh4[k] = F.shade * AO_CURVE[ao];
-        // smooth block light: mean of the face cell and the non-opaque cells around this corner
-        let ls = lget(ax, ay, az), ln = 1;
-        if (!o1) { ls += lget(p1[0], p1[1], p1[2]); ln++; }
-        if (!o2) { ls += lget(p2[0], p2[1], p2[2]); ln++; }
-        if (!o3 && !(o1 && o2)) { ls += lget(p3[0], p3[1], p3[2]); ln++; }
-        blv[k] = ls / ln / 15;
-        // smooth sky light the same way (cells that stop sky light, like slabs, are left out)
-        let ss = fs, sn = 1;
-        if (!o1 && SATT[get(p1[0], p1[1], p1[2])] !== 255) { ss += SKB[sgetN(p1[0], p1[1], p1[2])]; sn++; }
-        if (!o2 && SATT[get(p2[0], p2[1], p2[2])] !== 255) { ss += SKB[sgetN(p2[0], p2[1], p2[2])]; sn++; }
-        if (!o3 && !(o1 && o2) && SATT[get(p3[0], p3[1], p3[2])] !== 255) { ss += SKB[sgetN(p3[0], p3[1], p3[2])]; sn++; }
-        skv[k] = ss / sn;
-      }
-      // a lowered block's sides crop the tile's top 1/16 (as vanilla does) instead of squeezing it, or the tile's top row shows as a strip
-      if (lowTop && F.kind === "side") {
-        for (let k = 0; k < 4; k++) { lowUV[k][0] = SIDE_UV[k][0]; lowUV[k][1] = F.c[k][1] ? (SIDE_UV[k][1] ? 0.9375 : 0.0625) : SIDE_UV[k][1]; }
-        uvs = lowUV;
-      }
-      const flip = aoVals[0] + aoVals[2] < aoVals[1] + aoVals[3];
-      const tk = faceTint[b * 6 + f];
-      if (tk === 4) {
-        // grass side: plain dirt, then a tinted fringe overlay pushed out slightly
-        quad(S, world._dirtUV, cs4, uvs, sh4, -1, 0, flip);
-        const e = 0.002;
-        for (let k = 0; k < 4; k++) { cs4[k][0] += F.n[0] * e; cs4[k][1] += F.n[1] * e; cs4[k][2] += F.n[2] * e; }
-        quad(S, world._overlayUV, cs4, uvs, sh4, -1, 1, flip);
-      } else {
-        quad(BF.blocks[b].translucent ? L : S, rect, cs4, uvs, sh4, -1, tk, flip); // stained glass: blended pass
-      }
-    }
-  }
-  }
-
+// Shows a mesher result as chunk c's meshes (anchor: its anchor on the sphere).
+function applyMesh(c, R, anchor) {
+  const ox = c.cx * CS, oz = c.cz * CS;
   disposeMeshes(c);
   const make = (T, mat, order) => {
-    if (!T.ind.length) return;
+    if (!T) return;
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(T.pos, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(T.uv, 2));
-    g.setAttribute("color", new THREE.Float32BufferAttribute(T.col, 3));
-    g.setAttribute("skyl", new THREE.Float32BufferAttribute(T.sky, 1));
-    g.setAttribute("bl", new THREE.Float32BufferAttribute(T.bl, 1));
-    g.setAttribute("sphere", new THREE.Float32BufferAttribute(spherePositions(T.pos, ox, oz, sph), 3));
-    g.setIndex(T.ind);
+    g.setAttribute("position", new THREE.BufferAttribute(T.pos, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(T.uv, 2));
+    g.setAttribute("color", new THREE.BufferAttribute(T.col, 3));
+    g.setAttribute("skyl", new THREE.BufferAttribute(T.sky, 1));
+    g.setAttribute("bl", new THREE.BufferAttribute(T.bl, 1));
+    if (T.sphere) g.setAttribute("sphere", new THREE.BufferAttribute(T.sphere, 3));
+    g.setIndex(new THREE.BufferAttribute(T.ind, 1));
     g.computeBoundingSphere();
     for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(markUploaded);   // (see purge)
     const m = new THREE.Mesh(g, planetMaterial(mat, BF.planet.face(ox, oz)));
@@ -1192,15 +930,113 @@ function buildMesh(c) {
     m.matrixAutoUpdate = false;
     m.position.set(ox, 0, oz); m.updateMatrix();
     m.userData.chunk = c;
-    m.userData.anchor = sph.anchor;
+    m.userData.anchor = anchor;
     scene.add(m);
     c.meshes.push(m);
   };
-  const sph = sphereFrame(ox, oz);
-  make(S, solidMat, 0);
-  make(L, liquidMat, 1);
+  make(R.S, solidMat, 0);
+  make(R.L, liquidMat, 1);
   c.mesh = true;
 }
+
+// Meshes chunk c here and now.
+function buildMesh(c) {
+  const t0 = performance.now();
+  c.meshT = t0;   // fast-forward remesh batching (remeshDirty)
+  c.meshV = (c.meshV || 0) + 1;
+  if (c.meshJob === 1) { MP.queue.delete(c); c.meshJob = 0; }
+  c.meshAgain = false;   // (an answer still in a worker is older than this mesh: it is dropped)
+  const J = meshJob(c, false);
+  applyMesh(c, M.build(J, meshTables()), J.sph.anchor);
+  c.meshShown = c.meshV; c.meshBy = "page";
+  MP.pageMeshes++; MP.pageMs += performance.now() - t0;
+}
+world.buildMeshNow = buildMesh;   // (tests)
+world.meshJobFor = (c, copy) => meshJob(c, copy);   // (tests, profiling)
+// (tests) the arrays the page's mesher makes for chunk c now, without showing them; and the arrays of c's meshes as shown
+world.meshArrays = c => M.build(meshJob(c, false), meshTables());
+world.shownArrays = c => {
+  const out = { S: null, L: null };
+  for (const m of c.meshes) {
+    const g = m.geometry, a = g.attributes;
+    out[m.renderOrder ? "L" : "S"] = { pos: a.position.array, uv: a.uv.array, col: a.color.array, sky: a.skyl.array, bl: a.bl.array, sphere: a.sphere ? a.sphere.array : null, ind: g.index.array };
+  }
+  return out;
+};
+
+// ---- the mesher workers ----
+// MP: workers (each with busy: its jobs, oldest first; a worker answers in order), queue (chunks waiting for a worker), inline (no
+// workers: mesh in the page), counters for the debug screen and tests.
+const MP = (world.meshPool = { workers: [], queue: new Set(), inline: true, started: false, sent: 0, done: 0, dropped: 0, workMs: 0, prepMs: 0, pageMeshes: 0, pageMs: 0 });
+const glog = (level, text) => { if (BF.glog) BF.glog.log(level, "meshing", text); };
+function poolStart() {
+  MP.started = true;
+  const left = [...MP.queue];   // (started again: BF.meshInline turned on)
+  for (const w of MP.workers) { for (const it of w.busy) left.push(it.c); w.terminate(); }
+  MP.workers = []; MP.queue.clear();
+  const k = Math.min(4, (navigator.hardwareConcurrency || 2) - 1);   // every core but the page's, up to 4
+  MP.inline = !!BF.meshInline || typeof Worker === "undefined" || location.protocol === "file:" || k < 1 || !BF.workerUrl;
+  if (!MP.inline) for (let i = 0; i < k; i++) {
+    let w;
+    try { w = new Worker(BF.workerUrl("js/meshworker.js")); } catch (e) { poolFail(e && e.message); return; }
+    w.busy = []; w.tv = -1;
+    w.onmessage = e => { const it = w.busy.shift(); if (it) answer(it, e.data); pump(); };
+    w.onerror = e => poolFail(e && e.message);
+    MP.workers.push(w);
+  }
+  glog("INFO", MP.inline ? "Chunks are meshed in the page (no mesher workers)" : "Chunks are meshed in " + MP.workers.length + " worker threads");
+  for (const c of left) { c.meshJob = 0; if (world.chunks.get(c.key) !== c) continue; if (MP.inline) buildMesh(c); else enqueue(c, c.meshPrio || 0); }
+}
+// A worker that can't load or fails: everything is meshed in the page from now on, starting with the chunks the workers had.
+function poolFail(why) {
+  if (MP.inline) return;
+  MP.inline = true;
+  const left = [...MP.queue];
+  for (const w of MP.workers) { for (const it of w.busy) left.push(it.c); w.terminate(); }
+  MP.workers = []; MP.queue.clear();
+  glog("ERROR", "A mesher worker failed (" + (why || "unknown error") + "); chunks are meshed in the page from now on");
+  for (const c of left) { c.meshJob = 0; if (world.chunks.get(c.key) === c) buildMesh(c); }
+}
+// Queues chunk c for a worker (prio: lower first). A chunk already in a worker gets one more job when its answer comes.
+function enqueue(c, prio) {
+  if (c.meshJob === 2) { c.meshAgain = true; return; }
+  c.meshPrio = prio;
+  if (c.meshJob === 1) return;
+  c.meshJob = 1;
+  MP.queue.add(c);
+}
+// Hands queued chunks to free workers, nearest first, two jobs a worker (so it starts the next at once). The job's data is read now, so a
+// chunk that changed while it waited is meshed as it is.
+function pump() {
+  if (MP.inline) return;
+  for (let k = 0; k < 2; k++) for (const w of MP.workers) {
+    if (w.busy.length > k) continue;
+    let c = null;
+    for (const q of MP.queue) if (!c || q.meshPrio < c.meshPrio) c = q;
+    if (!c) return;
+    MP.queue.delete(c);
+    const t0 = performance.now();
+    c.meshV = (c.meshV || 0) + 1; c.meshJob = 2; c.meshAgain = false;
+    const J = meshJob(c, true);
+    if (w.tv !== TBLV) { w.postMessage({ tables: workerTables() }); w.tv = TBLV; }
+    w.busy.push({ c, v: c.meshV, anchor: J.sph.anchor });
+    w.postMessage({ job: J }, jobBuffers(J));
+    MP.sent++; MP.prepMs += performance.now() - t0;
+  }
+}
+// A worker's answer for job it: shown unless the chunk is gone (unloaded, purged, a new world) or a newer mesh is already shown.
+function answer(it, r) {
+  const c = it.c;
+  MP.done++; MP.workMs += r.ms || 0;
+  if (world.chunks.get(c.key) !== c) { MP.dropped++; return; }
+  c.meshJob = 0;
+  if (it.v > (c.meshShown || 0)) { applyMesh(c, r, it.anchor); c.meshShown = it.v; c.meshBy = "worker"; } else MP.dropped++;
+  if (c.meshAgain) { c.meshAgain = false; enqueue(c, c.meshPrio); }
+}
+// Jobs waiting for or in a worker.
+const poolPending = () => MP.queue.size + MP.workers.reduce((n, w) => n + w.busy.length, 0);
+world.meshStats = () => ({ workers: MP.workers.length, inline: MP.inline, queued: MP.queue.size, inWorkers: poolPending() - MP.queue.size, sent: MP.sent, done: MP.done,
+  dropped: MP.dropped, workMs: Math.round(MP.workMs), prepMs: Math.round(MP.prepMs), pageMeshes: MP.pageMeshes, pageMs: Math.round(MP.pageMs) });
 
 // ---------- flowing water ----------
 // Cellular water like Minecraft: sources (FLUID 8) feed flowing cells whose level rises

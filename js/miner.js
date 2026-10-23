@@ -38,7 +38,8 @@ const BF = (window.BF = window.BF || {});
 const TR = () => BF.trades;
 const W = () => BF.world;
 const get = (x, y, z) => W().getBlock(x, y, z);
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const nowS = () => BF.simNow();
@@ -102,8 +103,8 @@ function digTime(id, p) {
 const canHarvest = (id, p) => { const b = BF.blocks[id]; if (!b || !b.needsTool) return true; const tool = p && BF.items[p.id].tool; return !!(tool && tool.type === b.tool && (tool.tier || 0) >= (b.minTier || 0)); };
 
 // Starting pack (trading.js stockFor, which adds the stone pickaxe): 30-40 torches for the shaft.
-function seed(a) {
-  if (I("torch") != null) TR().inv.add(a, I("torch"), 30 + Math.floor(Math.random() * 11));
+function seed(a, r = BF.rand.at("stock", 0, 0)) {   // r: the villager's stream (js/trading.js stockFor)
+  if (I("torch") != null) TR().inv.add(a, I("torch"), 30 + r.int(11));
 }
 
 // ---------------------------------------------------------------- block classes
@@ -191,7 +192,7 @@ function findSurface(m, Q) {
   const bad = Q.badSurf || (Q.badSurf = new Map());
   // nearest first, but the highest blocks of an outcrop before the ones under them: it levels a hill from the top down, so the way up
   // never gets cut off below blocks it still wants
-  const cands = Q.surf.map(c => [c, Math.hypot(c.x + 0.5 - px, c.z + 0.5 - pz) * (0.8 + 0.4 * Math.random()) - 4 * (c.y - floor)]).sort((a, b) => a[1] - b[1]);
+  const cands = Q.surf.map(c => [c, Math.hypot(c.x + 0.5 - px, c.z + 0.5 - pz) * (0.8 + 0.4 * RS(m).next()) - 4 * (c.y - floor)]).sort((a, b) => a[1] - b[1]);
   let tested = 0;
   for (const [c] of cands) {
     const k = pk(c.x, c.y, c.z), o = claims.get(k);
@@ -549,7 +550,7 @@ function climbStep(m, Q, k, dt, out) {
 }
 
 // ---------------------------------------------------------------- the miner's day
-const state = m => m.mi || (m.mi = { task: null, thinkT: rnd(0.5, 2), avoid: {}, nav: { navWait: 0, navFail: 0 }, shaft: null, shafts: 0, sellCheck: 0 });
+const state = m => m.mi || (m.mi = { task: null, thinkT: rnd(RS(m), 0.5, 2), avoid: {}, nav: { navWait: 0, navFail: 0 }, shaft: null, shafts: 0, sellCheck: 0 });
 function endTask(m, Q) {
   const k = Q.task;
   if (k && k.claim) claims.delete(k.claim);
@@ -684,7 +685,7 @@ function ai(m, dt, out) {
   if (k.kind === "trip") return trip(m, Q, k, dt, out);
   if (k.kind === "sift") {   // on the spot: each gravel is placed and broken again until it drops flint (the gravel is used up)
     a.route = null;
-    if (Math.random() < dt * 2) a.swingT = 0.25;
+    if (Math.random() < dt * 2) a.swingT = 0.25;   // visual
     k.n = k.n || 0;
     if ((k.st = (k.st || 0) + dt) >= SIFT_SECS) {
       k.st = 0;

@@ -266,6 +266,7 @@ function frame(now) {
   BF.world.setDaylight(BF.sky.light);
   if (BF.textures.update) BF.textures.update(W.frozen ? 0 : dt * Math.max(1, W.last));   // water animation keeps pace with the fast-forward (and stops at 0x)
   if (BF.save && !BF.state.paused) BF.save.update(dt);
+  BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)
   if (BF.lod && BF.lod.cull) BF.lod.cull(camera);   // the distant rings' sectors in view (js/lod.js)
   renderer.render(scene, camera);
