@@ -91,11 +91,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   // ---------------------------------------------------------------- the index over a run
   await pg.evaluate(() => {
     const W = BF.warp;
-    window.__step = h => {   // the main loop's simulation step (js/main.js frame), without the player
-      W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); if (BF.dayTimeline) BF.dayTimeline.update();
-      BF.drops.update(h); if (BF.boats) BF.boats.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
-      BF.regions.tick();
-    };
+    window.__step = h => BF.simStep(h);   // the main loop's simulation step (js/main.js), without the player; it ends with BF.regions.tick()
     const P = BF.planet, p = BF.player.position;
     const v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];
     if (v) BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);

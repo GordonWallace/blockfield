@@ -41,8 +41,9 @@ const WORK_END = 0.5, COOK_END = 0.45;
 const TASK_MAX = 45, LEAD_MAX = 240;
 const FEED_NAMES = ["carrot", "potato", "beetroot"];
 
-const rnd = (a, b) => a + Math.random() * (b - a);
-const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const rndInt = (r, a, b) => a + r.int(b - a + 1);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const live = o => !!(o && !o.dead && !o.removed);
@@ -270,8 +271,8 @@ function adoptOrRelease(m) {
 function pickStyTarget(m) {
   const p = m.sty;
   if (!p) return false;
-  m.ai.tx = p.x0 + 0.8 + Math.random() * (p.x1 - p.x0 - 1.6);
-  m.ai.tz = p.z0 + 0.8 + Math.random() * (p.z1 - p.z0 - 1.6);
+  m.ai.tx = p.x0 + 0.8 + RS(m).next() * (p.x1 - p.x0 - 1.6);
+  m.ai.tz = p.z0 + 0.8 + RS(m).next() * (p.z1 - p.z0 - 1.6);
   return true;
 }
 // A sty pig never walks into the fence or out of the gate.
@@ -335,14 +336,14 @@ function reset() { pending = new Map(); activeSties.length = 0; acc = 0; styT = 
 // ---------------------------------------------------------------- the starting pack
 // A generated pig farmer starts with a few days' feed (and the usual emeralds, trading.js stockFor); one hired later starts with nothing extra
 // (js/jobs.js hire) and buys its feed. Never porkchops.
-function seed(a) {
+function seed(a, r = BF.rand.at("stock", 0, 0)) {   // r: the villager's stream (js/trading.js stockFor)
   if (!Array.isArray(a)) return;
-  if (I("carrot") != null) TR().inv.add(a, I("carrot"), rndInt(6, 10));
-  if (I("potato") != null) TR().inv.add(a, I("potato"), rndInt(4, 8));
+  if (I("carrot") != null) TR().inv.add(a, I("carrot"), rndInt(r, 6, 10));
+  if (I("potato") != null) TR().inv.add(a, I("potato"), rndInt(r, 4, 8));
 }
 
 // ---------------------------------------------------------------- the pig farmer
-const pgk = m => m.pgk || (m.pgk = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
+const pgk = m => m.pgk || (m.pgk = { task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
 // The sty this pig farmer works: the one its feed trough stands beside (fence within 4.5 blocks).
 function styOf(m) {
   const S = pgk(m);
@@ -472,7 +473,7 @@ function perform(m, tk) {
   // cull: the pig farmer keeps the pig's drops (1-3 raw porkchops) to sell or cook
   const herdP = o.sty;
   BF.mobs.hurt(o, 999, "a pig farmer");
-  const pork = loot(m, I("raw_porkchop"), rndInt(1, 3), o);
+  const pork = loot(m, I("raw_porkchop"), rndInt(RS(m), 1, 3), o);
   if (herdP) herdP.culls = (herdP.culls | 0) + 1;
   const T2 = tended(m);
   log("culled", { pork, herd: T2.size, limit: T2.limit });
@@ -516,7 +517,7 @@ function lead(m, S, tk, dt, out) {
     arrived: () => {
       log("stocked", { sty: P.key, herd: P.pigs.length });
       vlog(m, "brought a wild pig into the sty (" + plural(P.pigs.length, "pig") + ")");
-      endTask(m, true); S.cd = rnd(0.5, 1);
+      endTask(m, true); S.cd = rnd(RS(m), 0.5, 1);
     },
     failed: (why, d) => { log("leadFailed", why === "nopath" ? { why } : { why, d: +d.toFixed(1) }); endTask(m, false); },
   });
@@ -528,7 +529,7 @@ function ai(m, dt, out) {
   if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
     if ((S.cd -= dt) > 0) return cookAI(m, dt, out, false);
-    S.cd = rnd(1.5, 3);
+    S.cd = rnd(RS(m), 1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return cookAI(m, dt, out, false);
     const VS = BF.villageSim;
@@ -575,7 +576,7 @@ function ai(m, dt, out) {
     try { done = perform(m, tk); } catch (e) { console.error(e); }
     ai.swingT = 0.35;
     endTask(m, done);
-    S.cd = rnd(0.4, 1);
+    S.cd = rnd(RS(m), 0.4, 1);
   }
   return true;
 }
@@ -586,7 +587,7 @@ function ai(m, dt, out) {
 const FU = () => BF.furnaceUse;
 const RAW = () => I("raw_porkchop"), COOKED = () => I("cooked_porkchop");
 const CHECK = 4, TRADE_PAUSE = 1.6;
-const cst = m => m.pgc || (m.pgc = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 });
+const cst = m => m.pgc || (m.pgc = { stage: null, deal: null, checkT: rnd(RS(m), 1, 5), avoid: {}, cd: 0 });
 const avoided = (S, k) => (S.avoid[k] || 0) > now();
 function toCook(m) {
   if (RAW() == null || COOKED() == null) return 0;
@@ -670,7 +671,7 @@ function cookAI(m, dt, out, cont) {
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.4 };
     if (S.stage === "work") {
-      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = F.load(m, deal, deal.n);
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
@@ -683,7 +684,7 @@ function cookAI(m, dt, out, cont) {
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finishCook(m, deal, false); S.stage = null; S.deal = null; vdone(m); S.checkT = 0.5; return true; }   // all cooked
     F.topUp(m, deal, st);
     if (S.waitT > F.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
-    if (Math.random() < dt * 0.5) a.swingT = 0.2;
+    if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
   // buying fuel
@@ -701,7 +702,7 @@ function cookAI(m, dt, out, cont) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = F.doBuy(m, deal);
     S.stage = null; S.deal = null; vdone(m); S.gx = null; S.checkT = 0.5;

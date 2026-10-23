@@ -48,7 +48,7 @@ A village can hold only one [[villager:stable_hand]], at most one [[villager:mer
 See [[page:villagers]]: five levels, experience earned from trades with you and with other villagers.
 
 ## Chests and storage
-Villagers with a full inventory put things in a chest. An unclaimed chest belongs to whoever first puts an item in it (or takes one out). A villager only uses chests that are unclaimed or its own, and only in the house its bed is in. It stores its surplus, least needed first, never emeralds or tools, and takes things back when it runs low. If the house has no chest it orders one: a [[villager:furniture_maker]] makes it from 8 planks and puts it in the house for 1 emerald. A chest that stays empty for a day, or whose villager owner dies, is unclaimed again.
+Villagers with a full inventory put things in a chest. An unclaimed chest belongs to whoever first puts an item in it (or takes one out). A villager only uses chests that are unclaimed or its own, and only in the house its bed is in. It stores its surplus, least needed first, never emeralds or tools, and takes things back when it runs low. A villager far from home when it fills up walks back to its chest in stages, so it does not give up on a chest that is only far away. If the house has no chest it can use it orders one: a [[villager:furniture_maker]] makes it from 8 planks and puts it in the house for 1 emerald. A chest that stays empty for a day, or whose villager owner dies, is unclaimed again.
 
 In survival a chest owned by someone else is look-only for you.
 

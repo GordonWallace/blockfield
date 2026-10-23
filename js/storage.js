@@ -14,7 +14,8 @@
 const BF = window.BF;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
@@ -24,7 +25,9 @@ const TAKE_FREE = 2;         // taking things back leaves at least this many fre
 const LOW = 0.5;             // an item is fetched from the chest when the villager holds less than half of what it keeps
 const FETCH_CD = 0.5;        // days before something it stored is fetched back (food for a hungry villager excepted)
 const CHECK = 6;             // seconds between a villager's storage checks
-const TRIP_MAX = 60;         // seconds before a walk to a chest is given up
+const TRIP_MAX = 60;         // seconds before a walk to a chest is given up (plus the straight-line walk there, for a villager far from home)
+const HOP = 20;              // a villager further than HOP_FROM blocks from the chest walks there in legs of HOP blocks (one route search is capped)
+const HOP_FROM = 22;
 const AVOID = 0.3;           // days a chest that could not be reached is left alone
 const ORDER_DAYS = 1;        // an order for a chest stands this long (renewed while the villager still needs one)
 const WORK_END = 0.5;        // villagers stop at sunset (bedtime in mobs.js starts then too)
@@ -323,31 +326,39 @@ function decide(m) {
 const chestEmpty = c => !c.slots.some(Boolean);
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.sleeping || m.tradingWith || !m.village || !BF.mobs || !BF.mobs.nav || !BF.inventory || !BF.inventory.chestState || !keyOf(m)) return false;
-  const st = m.store || (m.store = { stage: null, checkT: rnd(1, CHECK), avoid: {}, stored: {}, order: null }), a = m.ai, N = BF.mobs.nav;
+  const st = m.store || (m.store = { stage: null, checkT: rnd(RS(m), 1, CHECK), avoid: {}, stored: {}, order: null }), a = m.ai, N = BF.mobs.nav;
   const stop = () => { st.stage = null; st.p = null; if (a.routeKind === "chest") a.route = null; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
   if (skyT() >= WORK_END) return st.stage ? stop() : false;
   if (!st.stage) {
     if ((st.checkT -= dt) > 0) return false;
-    st.checkT = CHECK * rnd(0.8, 1.2);
+    st.checkT = CHECK * rnd(RS(m), 0.8, 1.2);
     const d = decide(m);
     if (!d) return false;
     const VS = BF.villageSim;   // estimate: the walk to the chest and the time at it
     if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [[d.p.x + 0.5, d.p.z + 0.5]]) + PUT_T, d.act === "store" ? "Putting things away in their chest" : "Fetching things from their chest")) return false;
-    st.stage = "go"; st.act = d.act; st.p = d.p; st.t = 0; a.route = null;
+    st.stage = "go"; st.act = d.act; st.p = d.p; st.t = 0; st.navFail = 0; st.navWait = 0; a.route = null;
+    st.tMax = TRIP_MAX + Math.hypot(d.p.x + 0.5 - m.position.x, d.p.z + 0.5 - m.position.z) / (m.def.speed * 1.2);
   }
   const p = st.p, giveUp = () => { st.avoid[pk(p.x, p.y, p.z)] = dayNow() + AVOID; return stop(); };
   if (!BF.isChest(BF.world.getBlock(p.x, p.y, p.z)) || !usable(p, keyOf(m))) return stop();
   st.t += dt;
   a.mode = "idle"; a.t = 2;
   if (st.stage === "go") {
-    if (st.t > TRIP_MAX) return giveUp();
+    if (st.t > (st.tMax || TRIP_MAX)) return giveUp();
     const [x, y, z] = N.feetCell(m);
     if (adjacent(p, x, y, z)) { a.route = null; st.stage = "use"; st.useT = PUT_T; return true; }
     if (!a.route || a.routeKind !== "chest") {
+      if ((st.navWait -= dt) > 0) return true;
       if (!N.takePlan()) return true;
-      const route = N.findPath(x, y, z, { x: p.x, z: p.z, at: (cx, cy, cz) => adjacent(p, cx, cy, cz) }, 2500);
-      if (!route) return giveUp();
-      a.route = route; a.ri = 0; a.stuckT = 0; a.routeKind = "chest";
+      // Far from the chest (out at work or shopping across the village), one capped route search often finds no way: walk there in
+      // legs (as js/furniture.js travel does), so a chest that is only far away is not taken for unreachable (avoided, and a new one ordered).
+      const px = m.position.x, pz = m.position.z, dd = Math.hypot(p.x + 0.5 - px, p.z + 0.5 - pz);
+      const hop = dd > HOP_FROM ? [Math.floor(px + (p.x + 0.5 - px) * HOP / dd), Math.floor(pz + (p.z + 0.5 - pz) * HOP / dd)] : null;
+      const goal = hop ? { x: hop[0], z: hop[1], at: (cx, cy, cz) => Math.abs(cx - hop[0]) + Math.abs(cz - hop[1]) <= 2 }
+        : { x: p.x, z: p.z, at: (cx, cy, cz) => adjacent(p, cx, cy, cz) };
+      const route = N.findPath(x, y, z, goal, 2500);
+      if (!route) { if (hop && ++st.navFail < 5) { st.navWait = 0.6; return true; } return giveUp(); }
+      st.navFail = 0; a.route = route; a.ri = 0; a.stuckT = 0; a.routeKind = "chest";
     }
     const r = N.followRoute(m, dt, out, m.def.speed * 1.2);
     if (r === "stuck") return giveUp();
@@ -358,7 +369,7 @@ function ai(m, dt, out) {
   out.faceX = p.x + 0.5; out.faceZ = p.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.5 };
   if (st.useT === PUT_T && BF.emit) BF.emit("chestOpened", p.x, p.y, p.z);
   st.useT -= dt;
-  if (st.useT > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+  if (st.useT > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
   if (BF.emit) BF.emit("chestClosed", p.x, p.y, p.z);
   if (st.act === "store") doStore(m, p); else doTake(m, p);
   st.checkT = 1;

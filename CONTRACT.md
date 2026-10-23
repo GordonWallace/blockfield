@@ -212,6 +212,23 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
 - `worldgen.villagesNear()` house records: `{x, y, z, w, d, doorX, doorZ, outX, outZ (cell in front of the door), type,
   beds: [{x, y, z, f}]}` (bed = foot block, f = foot -> head).
 
+## mobview.js (mob drawing, spec r15-11)
+
+A mob in `BF.mobs.list` is plain simulation data: `position` and `vel` are `THREE.Vector3` used as maths only, plus `yaw`, `headYaw`,
+`headPitch`, `walkPhase`, `walkAmt`, `age`, AI and inventory. How it looks is a few plain fields the simulation sets: `look` (model
+variant: `"<profession>/<style 0-4>"` for villagers, `"<coat>/<marking>"` for horses, `"shorn"` for a shorn sheep), `scale` / `headScale`
+(young animals, children), `partVis` (`{name: false}` hides a part, e.g. the saddle), `tint` (`"red"`: hurt or dying), `held` (item id of
+a villager's tool, from `BF.mobs.toolHolders`), `onFire`, `sleeping` (with `bed`), `crackStage` (iron golem, 0-3), `badgeLevel`
+(villager level), `dead` / `deathT`. Setters that only change those fields: `BF.mobs.setLook`, `setSheepLook`, `showPart`, `setProfession`,
+`setSheepSize`, `setChickenSize`, `setCowSize`, `setYoungSize`.
+
+`BF.mobView = { init(scene), render(dt), viewOf(mob) -> {root, model, meshes, heldMesh, badge, lids, fire, ...} | undefined,
+drawPos(mob, out) -> where it is drawn this frame, typeParts(type, variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }`.
+`render` runs once per drawn frame (main.js), builds a model for every mob within the meshed terrain (`(viewDist + 1) * CS`), none for
+one farther away, drops the model of a mob gone from the list, and draws position and angles interpolated between ticks when the mob
+has `prev` and `BF.warp.alpha` is set (r15-10). js/mobs.js makes no scene calls for mobs (test/mob-render-split.js checks it); its arrows
+and puffs still do until r15-12.
+
 ## trading.js (villager economy)
 
 `BF.trades` (loaded before mobs.js; calls into BF only at runtime). Balance and reasoning: `TRADE_AUDIT.md`.
@@ -811,7 +828,7 @@ Villagers only exist while their chunks are loaded. `BF.villageSim` keeps the te
 - **Screen.** The title shows "Chest — Unclaimed / Yours / Owned by Name (Job)". Survival: a chest owned by someone else is look-only ("(look only)": no clicks, drags or shift-moves into or out of it). Creative: any chest can be changed and the owner stays.
 - **Release** (`BF.storage.tick`, every 2 s of sim time): an owned chest empty for `RELEASE_DAYS` (1) game day is unclaimed again; a villager owner's death (`mobKilled`) unclaims its chests at once, contents kept, and the next one to use the chest owns it.
 - **Villagers** may use unclaimed chests or their own, and only chests in the house their bed is in (`bedHouse`: the village house whose footprint holds `m.bed`, or `m.homeBed` for an explorer away in its tent). `ai` (mobs.js villagerAI, before villageLife, working hours) checks every ~6 s:
-  - **Full inventory** (no empty slot): walks (A*) next to a usable chest, its own first, and stores (`storePlan`): everything beyond what it keeps, least needed first; if that frees fewer than `STORE_FREE` (4) slots, the least needed of what it keeps too, until 4 are free. Never emeralds or its one-of-a-kind items (tools, buckets, maps, the tent).
+  - **Full inventory** (no empty slot): walks (A*; in legs of 20 blocks when more than 22 away, as furniture.js `travel`, so one capped route search failing far from home does not mark the chest unreachable) next to a usable chest, its own first, and stores (`storePlan`): everything beyond what it keeps, least needed first; if that frees fewer than `STORE_FREE` (4) slots, the least needed of what it keeps too, until 4 are free. Never emeralds or its one-of-a-kind items (tools, buckets, maps, the tent).
   - **Need model** (`keepOf(m)` -> id -> {n, s}): emeralds (all, 100), single items (1 each, 90), work inputs of its profession (70: farmer seeds, wheat 24 and bone meal; shepherd wheat; forester saplings; furniture maker wool, planks, logs; cartographer iron, gold, paper, compass; builder its building materials), food for 3 days + 7 bread-eq, most filling first, never scraps like rotten flesh (60), its wares up to the trade stock cap (50). Surplus order: junk 10, goods it bought 20, overflow of wares 30, of food 35, of inputs 40.
   - **Taking back** (`withdrawPlan`): from its own chests, anything it keeps but holds less than half of (`LOW`), up to the keep amount, leaving 2 free slots; not within 0.5 day of storing it, except food when it is hungry (less than a day's food), which it fetches at once.
   - **No usable chest:** it orders one (`m.store.order = {spot, until}`, for a day, renewed while still full) on a free floor cell of its bed's floor in that house: against a wall (corners first), not beside a door or bed, not within 2 of the door, and not one that cuts the floor in two (`chestSpot`). Needs an emerald. A furniture maker delivers it (see "Furniture makers").

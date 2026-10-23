@@ -25,6 +25,7 @@ const FILES = {
   "meshworker.js": "chunk meshing worker (r15-03, drawing only)",
   "mapview.js": "the player's map view and auto-map fill (drawing; explorers' maps are js/maps.js, filled by walking)",
   "planetgen.js": "world generation timing stats",
+  "perf.js": "the villager-seconds meter (spec r15-01): measures how long steps take, decides nothing",
   "planetrivers.js": "river solve timing stats",
   "player.js": "input: Escape grace, touch taps, the player runs in real time",
   "save.js": "save metadata (last played, last saved)",
@@ -40,6 +41,7 @@ const FUNCS = [
   ["world.js", "ffTrack", "remesh batching stats (r15-02)"],
   ["world.js", "buildMesh", "chunk meshing: when a chunk was last drawn, mesh timing"],
   ["world.js", "pump", "mesh worker pool (r15-03): hands chunks to workers, timing stats"],
+  ["furnaceuse.js", "offersFor", "BF.debug.checkOffers timing of the offer table vs the full scan (r15-04, debug only; the answer returned doesn't depend on it)"],
 ];
 // Single lines in files that also hold simulation code: [file, text on the line, why it is allowed]
 const LINES = [

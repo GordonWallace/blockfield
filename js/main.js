@@ -151,7 +151,13 @@ function updateDebug(now) {
   if (scr !== screenWas) { screenWas = scr; document.body.classList.toggle("bf-screen-open", scr); }
   if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
   if (!showDebug) return;
-  dbg.textContent = debugText(debugInfo());
+  const d = debugInfo(), t = debugText(d);
+  if (!d.perf || !d.perf.stale) { dbg.textContent = t; return; }
+  // frozen or paused: the meter's line keeps its last figures, greyed
+  const line = BF.perf.text(d.perf), i = t.indexOf(line);
+  dbg.textContent = t.slice(0, i);
+  const g = document.createElement("span"); g.style.opacity = "0.45"; g.textContent = line;
+  dbg.append(g, t.slice(i + line.length));
 }
 // The F3 numbers as data: the overlay prints them and the second-screen feed (js/debugfeed.js) sends them on.
 function debugInfo() {
@@ -169,6 +175,7 @@ function debugInfo() {
     weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
     cloudCover: BF.sky.cloudCover, cloudHeight: BF.sky.cloudHeight, warp: BF.warp.speed,
     clicks: BF.player.clickLog ? BF.player.clickLog() : [],
+    perf: BF.perf.stats(),   // villager-seconds meter (js/perf.js): null until it has been on
     planet: planetInfo(p),
   };
 }
@@ -192,6 +199,7 @@ function debugText(d) {
     `Chunk ${pl ? Math.floor(pl.u / BF.CS) + ", " + Math.floor(pl.v / BF.CS) : d.chunkX + ", " + d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
     `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
     `Mobs ${d.mobs}${d.boats ? `  Boats ${d.boats}` : ""}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
+    (d.perf ? BF.perf.text(d.perf) + "\n" : "") +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
@@ -201,6 +209,29 @@ BF.debugInfo = debugInfo;
 BF.debugText = debugText;
 
 // ---------- loop ----------
+// One simulation step of h game seconds (the frame loop runs W.plan(dt).n of them a frame; harnesses and tests call BF.simStep).
+// The BF.perf points charge each part's time to its category of the villager-seconds meter (js/perf.js); they do nothing while it's off.
+const PF = BF.perf;
+function simStep(h) {
+  PF.beginStep();
+  BF.warp.advance(h);
+  BF.rand.step();   // the tick that keys world-event rolls (js/rand.js)
+  BF.state.time += h;
+  BF.sky.update(h);
+  PF.lap(PF.C.world);
+  BF.mobs.update(h);   // charges its own parts (js/mobs.js update)
+  PF.lap(PF.C.vanimals);   // bees (js/bees.js runs after the mobs' update)
+  if (BF.dayTimeline) BF.dayTimeline.update();   // villagers' day timelines, once a game minute (js/daytimeline.js)
+  PF.lap(PF.C.villagers);
+  BF.drops.update(h);
+  BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
+  if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
+  BF.world.tickSim();
+  if (BF.regions) BF.regions.tick();   // mobs and drops that changed region move in the region index (js/regions.js)
+  PF.lap(PF.C.world);
+  PF.endStep(h);
+}
+BF.simStep = simStep;
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
@@ -208,7 +239,10 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const p = BF.player.position;
+  PF.frame();
+  PF.mark();
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
+  PF.lap(PF.C.stream);   // chunk streaming and remeshing, once a frame
   if (BF.lod) BF.lod.update();   // distant terrain rings on the planet (js/lod.js)
   const W = BF.warp;
   if (!BF.state.paused) {
@@ -218,18 +252,7 @@ function frame(now) {
     const plan = W.plan(dt), t0 = performance.now();
     let done = 0;
     while (done < plan.n && !W.frozen && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {   // an alert can freeze it mid-frame (js/alerts.js)
-      const h = plan.h;
-      W.advance(h);
-      BF.rand.step();   // the tick that keys world-event rolls (js/rand.js)
-      BF.state.time += h;
-      BF.sky.update(h);
-      BF.mobs.update(h);
-      if (BF.dayTimeline) BF.dayTimeline.update();   // villagers' day timelines, once a game minute (js/daytimeline.js)
-      BF.drops.update(h);
-      BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
-      if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
-      BF.world.tickSim();
-      if (BF.regions) BF.regions.tick();   // mobs and drops that changed region move in the region index (js/regions.js)
+      simStep(plan.h);
       done++;
     }
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
@@ -244,6 +267,7 @@ function frame(now) {
   BF.world.setDaylight(BF.sky.light);
   if (BF.textures.update) BF.textures.update(W.frozen ? 0 : dt * Math.max(1, W.last));   // water animation keeps pace with the fast-forward (and stops at 0x)
   if (BF.save && !BF.state.paused) BF.save.update(dt);
+  BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)
   if (BF.lod && BF.lod.cull) BF.lod.cull(camera);   // the distant rings' sectors in view (js/lod.js)
   renderer.render(scene, camera);
