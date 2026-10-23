@@ -1000,7 +1000,8 @@ function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   }
   return null;
 }
-// The same search with integer cell keys and a binary heap (spec r15-05); routes can differ from findPathOld only between equal f values.
+// The same search with integer cell keys and a binary heap (spec r15-05); routes can differ from findPathOld only between equal f values
+// (ties go to the larger g, then the newer entry).
 // Cells are keyed relative to the start in the mob's own frame (never canonicalised across a face edge): x and z within 32767 of it
 // (maxNodes is far smaller), y from MIN_Y. An open-addressing table, reused between calls (a stamp per search instead of clearing),
 // holds for each cell met its node (best cost and parent, in typed arrays) and whether it is a cell the mob can be in, so each cell's
@@ -1060,8 +1061,10 @@ function findPathFast(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
     S.x[nodes] = x; S.y[nodes] = y; S.z[nodes] = z; S.g[nodes] = g; S.p[nodes] = p;
     return nodes++;
   };
-  // the heap: a before b when its f is lower, or equal and pushed earlier
-  const less = (i, j) => S.hf[i] < S.hf[j] || (S.hf[i] === S.hf[j] && S.hq[i] < S.hq[j]);
+  // the heap: a before b when its f is lower; at equal f, the one further along (larger g, so nearer the goal), then the newer. Oldest-first
+  // fanned out wide over equal-f cells and ran out of maxNodes on long routes the old search found (a jobless villager ~100 blocks
+  // from a sty's trough, test/pigfarmer-actions.js); the old linear scan tended newest-first.
+  const less = (i, j) => S.hf[i] < S.hf[j] || (S.hf[i] === S.hf[j] && (S.hg[i] > S.hg[j] || (S.hg[i] === S.hg[j] && S.hq[i] > S.hq[j])));
   const swap = (i, j) => {
     let t = S.hf[i]; S.hf[i] = S.hf[j]; S.hf[j] = t;
     t = S.hq[i]; S.hq[i] = S.hq[j]; S.hq[j] = t;

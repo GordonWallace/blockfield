@@ -17,7 +17,7 @@
 //                     mobIdsIn(key) -> [mob ids], villageIdsIn(key) -> [village keys],
 //                     tick(), stats() -> [{key, name, f, ru, rv, mobs, drops, villages, blockEntities}], counts(), check() -> {ok, diffs},
 //                     reset(), Index (the bare per-object index, for tests and benchmarks),
-//                     mobsAround(x, z, r, filter, {local}) -> [mobs], ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
+//                     mobsAround(x, z, r, filter, {local}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter), ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -319,6 +319,11 @@ function mobsAround(x, z, r, filter, opts) {
   }, x, z);
   return out;
 }
+// mobsInBox(x0, z0, x1, z1, filter) -> the live mobs standing in the atlas box x in [x0, x1], z in [z0, z1] (raw x / z) passing filter,
+// in list order: the circle around the box, then the box.
+function mobsInBox(x0, z0, x1, z1, filter) {
+  return mobsAround((x0 + x1) / 2, (z0 + z1) / 2, Math.hypot(x1 - x0, z1 - z0) / 2 + 0.01, m => m.position.x >= x0 && m.position.x <= x1 && m.position.z >= z0 && m.position.z <= z1 && (!filter || filter(m)));
+}
 // ofType(type) -> the live mobs of one type, in BF.mobs.list order (kept by mobAdded / mobRemoved; a mob's type never changes). The
 // array is the index's own: read it, don't change it (copy it first when the loop may remove mobs).
 const byType = new Map();
@@ -369,7 +374,7 @@ const regions = {
   mobsIn: k => mobs.in(k), dropsIn: k => drops.in(k), villagesIn: k => villages.in(k), blockEntitiesIn: k => beBy.get(k),
   mobIdsIn: k => idsOf(mobs.in(k), m => m.id), villageIdsIn: k => idsOf(villages.in(k), v => v.key),
   onSet, mobAdded, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
-  mobsAround, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
+  mobsAround, mobsInBox, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
 };
 BF.regions = regions;
 setSize(REGION);
