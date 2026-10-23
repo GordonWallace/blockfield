@@ -11,8 +11,9 @@ const MAX_CATCHUP_MEALS = 3 * 30;  // at most 30 days of meals are caught up at 
 const LIFE_V = 1;                  // save-format version of the per-villager food state
 
 const T = () => BF.trades;
-const rnd = (a, b) => a + Math.random() * (b - a);
-const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const rndInt = (r, a, b) => a + r.int(b - a + 1);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
@@ -157,15 +158,15 @@ function startFood(v) {
   if (!v || !Array.isArray(v.inv)) return;
   const prof = v.profession;
   if (prof === "farmer") {
-    addAll(v.inv, [["wheat_seeds", rndInt(10, 20)], ["carrot", rndInt(8, 14)], ["potato", rndInt(8, 14)], ["beetroot_seeds", rndInt(4, 10)]]);
-    if (BF.baker) addAll(v.inv, [["sugar_cane", rndInt(2, 4)]]);   // a few canes to plant beside its beds' water, like its seeds (js/baker.js: the baker's sugar)
+    addAll(v.inv, [["wheat_seeds", rndInt(RS(v), 10, 20)], ["carrot", rndInt(RS(v), 8, 14)], ["potato", rndInt(RS(v), 8, 14)], ["beetroot_seeds", rndInt(RS(v), 4, 10)]]);
+    if (BF.baker) addAll(v.inv, [["sugar_cane", rndInt(RS(v), 2, 4)]]);   // a few canes to plant beside its beds' water, like its seeds (js/baker.js: the baker's sugar)
     if (breadEq(v.inv) < 12) addAll(v.inv, [["bread", Math.ceil(12 - breadEq(v.inv))]]);
-    if (Math.random() < 0.45) addAll(v.inv, [["oak_log", rndInt(3, 8)]]);
+    if (RS(v).next() < 0.45) addAll(v.inv, [["oak_log", rndInt(RS(v), 3, 8)]]);
   } else {
-    const target = rnd(3, 6);
+    const target = rnd(RS(v), 3, 6);
     const opts = [["bread", 1], ["apple", 0.8], ["carrot", 0.6], ["baked_potato", 1]];
     for (let guard = 0; breadEq(v.inv) < target && guard < 20; guard++) {
-      const [name] = opts[Math.random() < 0.6 ? 0 : rndInt(1, opts.length - 1)];
+      const [name] = opts[RS(v).next() < 0.6 ? 0 : rndInt(RS(v), 1, opts.length - 1)];
       if (BF.I[name] == null || T().inv.add(v.inv, BF.I[name], 1) > 0) break;
     }
   }
@@ -209,7 +210,8 @@ const FD = () => BF.food;
 const TR = () => BF.trades;
 const W = () => BF.world;
 const nav = () => BF.mobs.nav;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const rnd = (r, a, b) => r.range(a, b);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
@@ -278,9 +280,9 @@ function particles(x, y, z, color, n, spread) {
   for (let i = 0; i < n; i++) {
     if (pool.length > 120) { const o = pool.shift(); BF.scene.remove(o.mesh); }
     const mesh = new THREE.Mesh(partGeo, mat);
-    mesh.position.set(x + (Math.random() - 0.5) * spread, y + Math.random() * 0.2, z + (Math.random() - 0.5) * spread);
+    mesh.position.set(x + (Math.random() - 0.5) * spread, y + Math.random() * 0.2, z + (Math.random() - 0.5) * spread);   // visual
     BF.scene.add(mesh);
-    pool.push({ mesh, vx: (Math.random() - 0.5) * 1.6, vy: 0.8 + Math.random() * 1.6, vz: (Math.random() - 0.5) * 1.6, life: 0.4 + Math.random() * 0.3 });
+    pool.push({ mesh, vx: (Math.random() - 0.5) * 1.6, vy: 0.8 + Math.random() * 1.6, vz: (Math.random() - 0.5) * 1.6, life: 0.4 + Math.random() * 0.3 });   // visual
   }
 }
 function updateParticles(dt) {
@@ -475,8 +477,8 @@ function think(m, fs, R, D) {
     const t = projectTask(m, fs, R, D, P, ok);
     if (t) return t;
   }
-  if (young.length && Math.random() < 0.8) {           // look after the growing crops
-    const [x, y, z] = young[Math.floor(Math.random() * young.length)];
+  if (young.length && RS(m).next() < 0.8) {           // look after the growing crops
+    const [x, y, z] = young[Math.floor(RS(m).next() * young.length)];
     return { kind: "tend", x, y: y + 1, z, k: "tend:" + key3(x, y, z) };
   }
   return null;
@@ -645,7 +647,8 @@ function growPit(c, D, G) {
   const P = G.pit, sides = [];
   if (P.x1 - P.x0 + 1 < PIT_MAX) sides.push(["x0", -1], ["x1", 1]);
   if (P.z1 - P.z0 + 1 < PIT_MAX) sides.push(["z0", -1], ["z1", 1]);
-  for (let i = sides.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [sides[i], sides[j]] = [sides[j], sides[i]]; }
+  const r = BF.rand.at("pit", P.x0, P.z0, null, P.x1 * 31 + P.z1);   // seeded (js/rand.js): the pit and the tick
+  for (let i = sides.length - 1; i > 0; i--) { const j = r.int(i + 1); [sides[i], sides[j]] = [sides[j], sides[i]]; }
   for (const [f, s] of sides) {
     const v = P[f] + s, row = [];
     if (f[0] === "x") for (let z = P.z0; z <= P.z1; z++) row.push([v, z]); else for (let x = P.x0; x <= P.x1; x++) row.push([x, v]);
@@ -793,7 +796,7 @@ function chooseRepair(m, D) {
   for (const b of myBeds(m, D)) {
     const o = outerOf(b);
     if (D.projects.some(p => overlap(outerOf(p.L), o))) continue;
-    const P = { id: "p" + Math.floor(Math.random() * 1e9).toString(36), kind: "repair", dir: null, L: { x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, y: b.y, ax: b.ax, ch: b.ch.slice() }, old: null, owner: m.slot ? m.slot.idx : -1, log: b.log, fails: 0 };
+    const P = { id: "p" + Math.floor(RS(m).next() * 1e9).toString(36), kind: "repair", dir: null, L: { x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, y: b.y, ax: b.ax, ch: b.ch.slice() }, old: null, owner: m.slot ? m.slot.idx : -1, log: b.log, fails: 0 };
     let water = 0, till = 0;
     projectCells(P, (x, z) => { if (!W().isLoaded(x, z)) return; const j = repairJob(P, x, z); if (j) j.kind === "water" ? water++ : till++; });
     if (!water && !till) continue;
@@ -867,9 +870,9 @@ function growOptions(b) {
 function newBedOptions(m, R, D, room, held) {
   const s = m.jobsite, w = W(), c = ids(), out = [];
   for (let t = 0; t < 80; t++) {
-    const S = SHAPES[Math.floor(Math.random() * SHAPES.length)], ax = Math.random() < 0.5 ? "x" : "z";
+    const S = SHAPES[Math.floor(RS(m).next() * SHAPES.length)], ax = RS(m).next() < 0.5 ? "x" : "z";
     const wx = ax === "x" ? S.u : S.v, wz = ax === "x" ? S.v : S.u;
-    const x0 = s.x + Math.round(rnd(-BED_REACH + 1, BED_REACH - wx)), z0 = s.z + Math.round(rnd(-BED_REACH + 1, BED_REACH - wz));
+    const x0 = s.x + Math.round(rnd(RS(m), -BED_REACH + 1, BED_REACH - wx)), z0 = s.z + Math.round(rnd(RS(m), -BED_REACH + 1, BED_REACH - wz));
     const cx = x0 + (wx >> 1), cz = z0 + (wz >> 1);
     if (!w.isLoaded(cx, cz)) continue;
     const y = w.heightAt(cx, cz);
@@ -912,11 +915,11 @@ function chooseProject(m, R, D, have) {
   let best = null, bv = 0;
   for (const k of cands) {
     if (have + k.pr.gain > FARM_MAX + 24) continue;      // not far past what the farmer wants
-    const v = k.pr.gain / Math.max(1, k.pr.cost) * k.bias * rnd(0.7, 1.4);
+    const v = k.pr.gain / Math.max(1, k.pr.cost) * k.bias * rnd(RS(m), 0.7, 1.4);
     if (v > bv) { bv = v; best = k; }
   }
   if (!best) return null;
-  const P = { id: "p" + Math.floor(Math.random() * 1e9).toString(36), kind: best.kind, dir: best.dir, L: best.L, old: best.old, owner: m.slot ? m.slot.idx : -1, log: best.log, fails: 0 };
+  const P = { id: "p" + Math.floor(RS(m).next() * 1e9).toString(36), kind: best.kind, dir: best.dir, L: best.L, old: best.old, owner: m.slot ? m.slot.idx : -1, log: best.log, fails: 0 };
   D.projects.push(P);
   log("project", m, { plan: P.kind + (P.dir ? ":" + P.dir : ""), options: cands.filter(k => k.kind === "new").length + " new / " + cands.filter(k => k.kind === "grow").length + " grow", at: [P.L.x0, P.L.y, P.L.z0], size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), gain: best.pr.gain, logs: best.pr.logs });
   return P;
@@ -1132,7 +1135,7 @@ function endTask(m, fs, success) {
   }
   fs.task = null; fs.stage = null; m.ai.route = null;
   if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
-  if (success && Math.random() < BREAK_P) fs.breakT = rnd(4, 9);
+  if (success && RS(m).next() < BREAK_P) fs.breakT = rnd(RS(m), 4, 9);
 }
 function log(kind, m, data) {
   LOG.push(BF.glog.job("village-life", Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data)));
@@ -1260,7 +1263,7 @@ function farmAI(m, dt, out) {
       fs.thinkT = 0.4;
       if (!D.ready) { fs.idleWork = false; return false; }
       const t = think(m, fs, R, D);
-      if (!t) { fs.breakT = rnd(5, 10); fs.idleWork = false; return false; }
+      if (!t) { fs.breakT = rnd(RS(m), 5, 10); fs.idleWork = false; return false; }
       const VS = BF.villageSim;   // estimate: the walk to the cell (or the bucket's water, the seller) and the action (a harvest replants at once)
       if (VS && VS.begin && !VS.begin(m, (t.kind === "craft" ? 0 : VS.walkSecs(m, [t.seller ? t.seller.position : [(t.sx != null ? t.sx : t.x) + 0.5, (t.sz != null ? t.sz : t.z) + 0.5]])) + (t.kind === "tend" ? 4 : actOf(t.kind) + (t.kind === "harvest" ? ACT.plant : 0)), t.kind === "craft" && t.hay ? "Making hay bales" : t.kind === "gather" ? "Gathering dirt" : NAMES[t.kind] || (BF.baker && BF.baker.FARM_NAMES[t.kind]) || "Farm work")) { fs.thinkT = 1; fs.idleWork = false; return false; }
       fs.task = t; fs.stage = t.kind === "craft" ? "act" : "walk"; fs.t = 0; fs.actT = actOf(t.kind); fs.navFail = 0; fs.idleWork = true;
@@ -1285,7 +1288,7 @@ function farmAI(m, dt, out) {
     const st = t.sx != null ? travel(m, fs, dt, out, t.sx, t.sy, t.sz, m.def.speed * 1.1)      // a bucket is filled from a cell beside (or over the wall of) the water
       : travel(m, fs, dt, out, t.x, t.ty != null ? t.ty : t.y, t.z, m.def.speed * 1.1);
     if (st === "failed") { log("giveup", m, { task: t.kind, why: "no path", at: [t.x, t.y, t.z] }); endTask(m, fs, false); return true; }
-    if (st === "arrived") { fs.stage = "act"; fs.actT = t.kind === "tend" ? rnd(2, 4) : actOf(t.kind); ai.swingT = t.kind === "tend" ? 0 : 0.35; }
+    if (st === "arrived") { fs.stage = "act"; fs.actT = t.kind === "tend" ? rnd(RS(m), 2, 4) : actOf(t.kind); ai.swingT = t.kind === "tend" ? 0 : 0.35; }
     return true;
   }
   // act: face the cell, swing, then do it
@@ -1397,7 +1400,7 @@ function doFoodDeal(m, deal) {
 // forester's own (level 2, "1 emerald > 8 oak_log") or anyone's spare logs (js/market.js). The species the bed is edged with is preferred, then
 // the nearer seller, foresters first. A seller that failed is skipped for a while (fshop.avoid).
 const sellerIdx = v2 => (v2 && v2.slot ? v2.slot.idx : -1);
-function avoidSeller(m, v2) { if (!v2) return; const sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(0, 3), avoid: {}, cd: 0 }); sh.avoid[sellerIdx(v2)] = dayNow() + 0.05; }
+function avoidSeller(m, v2) { if (!v2) return; const sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(RS(m), 0, 3), avoid: {}, cd: 0 }); sh.avoid[sellerIdx(v2)] = dayNow() + 0.05; }
 function logDealWith(m, v2, want, prefer) {
   const T = TR(), em = ids().em, myEm = cnt(m, em);
   if (myEm < 1) return null;
@@ -1584,7 +1587,7 @@ function doWheatDeal(m, deal) {
   return done;
 }
 function shopAI(m, dt, out) {
-  const F = FD(), sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(0, 3), avoid: {}, cd: 0 }), ai = m.ai;
+  const F = FD(), sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(RS(m), 0, 3), avoid: {}, cd: 0 }), ai = m.ai;
   if (!sh.stage) {
     sh.checkT -= dt;
     if (sh.checkT > 0) return false;
@@ -1637,7 +1640,7 @@ function shopAI(m, dt, out) {
   sh.tt -= dt;
   if (d > 3.6) { sh.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;
+  if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;   // visual
   if (sh.tt <= 0) {
     const done = deal.kind === "wheat" ? doWheatDeal(m, deal) : deal.kind === "tool" ? doToolDeal(m, deal) : doFoodDeal(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;

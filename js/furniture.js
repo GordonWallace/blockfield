@@ -19,7 +19,8 @@
 "use strict";
 const BF = window.BF;
 const TR = () => BF.trades;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
@@ -256,7 +257,7 @@ function travel(m, st, dt, out, tx, ty, tz, speed, near) {
 // Villager AI step (mobs.js villagerAI, daytime): trips to sell beds to builders (first) or to buy wool and boards. Returns true while it steers.
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || !BF.mobs || !BF.mobs.nav || !m.village) return false;
-  const sh = m.furn || (m.furn = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 }), a = m.ai;
+  const sh = m.furn || (m.furn = { stage: null, deal: null, checkT: rnd(RS(m), 1, 5), avoid: {}, cd: 0 }), a = m.ai;
   if (skyT() >= WORK_END || m.tradingWith) { if (sh.stage) { sh.stage = null; sh.deal = null; a.route = null; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   if (!sh.stage) {
     sh.checkT -= dt;
@@ -292,7 +293,7 @@ function ai(m, dt, out) {
       return true;
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.5 };
-    if ((sh.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+    if ((sh.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
     const ok = BF.storage.deliver(m, v2, s);
     log(ok ? "deliver" : "giveup", m, { to: v2.profession, item: "chest", at: s.x + "," + s.y + "," + s.z, why: ok ? undefined : "spot taken or unpaid" });
     if (!ok) { sh.avoid[avoidKey()] = dayNow() + 0.05; if (v2.store) v2.store.order = null; }   // the villager picks a new spot next time
@@ -316,7 +317,7 @@ function ai(m, dt, out) {
   sh.tt -= dt;
   if (d > 3.6) { sh.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (sh.tt <= 0) {
     const done = deal.kind === "buy" ? doBuy(m, deal) : doSell(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;

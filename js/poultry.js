@@ -39,8 +39,9 @@ const SEEDS_KEEP = 4;         // seeds it keeps back for luring a chicken home
 const WORK_END = 0.5;
 const TASK_MAX = 45, LEAD_MAX = 240;
 
-const rnd = (a, b) => a + Math.random() * (b - a);
-const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const rndInt = (r, a, b) => a + r.int(b - a + 1);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
@@ -48,7 +49,7 @@ const live = o => !!(o && !o.dead && !o.removed);
 const TR = () => BF.trades;
 const cnt = (m, id) => (id == null || !m.inv ? 0 : TR().inv.count(m.inv, id));
 const idsOf = () => ({ seeds: BF.I.wheat_seeds, egg: BF.I.egg, feather: BF.I.feather, chicken: BF.I.raw_chicken });
-const layDays = () => rnd(LAY_MIN, LAY_MAX);
+const layDays = () => rnd(BF.rand.at("lay", 0, 0), LAY_MIN, LAY_MAX);   // seeded by the tick (js/rand.js)
 const LOG = [];
 const log = (kind, data) => { LOG.push(BF.glog.job("poultry", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 200) LOG.shift(); };
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Poultry keeper") + " (Poultry Keeper) " + text, m); };
@@ -171,14 +172,14 @@ function chickenAI(m, dt, out) {
   if (m.mate && (!live(m.mate) || !willing(m.mate, t))) m.mate = null;
   if (!m.mate) {
     if (m.mateT > 0) return false;
-    m.mateT = rnd(1, 2);
+    m.mateT = rnd(RS(m), 1, 2);
     m.mate = findMate(m, t);
     if (!m.mate) return false;
     m.mateSeek = 0;
   }
   const o = m.mate, dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d = Math.hypot(dx, dz);
   m.mateSeek += dt;
-  if (d > MATE_R + 4 || m.mateSeek > 25) { m.mate = null; m.mateT = rnd(6, 10); return false; }
+  if (d > MATE_R + 4 || m.mateSeek > 25) { m.mate = null; m.mateT = rnd(RS(m), 6, 10); return false; }
   m.ai.mode = "idle"; m.ai.t = 1; m.lookAt = o;
   if (d < MEET) { if (mid(m) < mid(o)) breed(m, o, t); return true; }
   out.x = dx / d * sp; out.z = dz / d * sp;
@@ -312,8 +313,8 @@ function adoptOrRelease(m) {
 function pickCoopTarget(m) {
   const p = m.coop;
   if (!p) return false;
-  m.ai.tx = p.x0 + 0.6 + Math.random() * (p.x1 - p.x0 - 1.2);
-  m.ai.tz = p.z0 + 0.6 + Math.random() * (p.z1 - p.z0 - 1.2);
+  m.ai.tx = p.x0 + 0.6 + RS(m).next() * (p.x1 - p.x0 - 1.2);
+  m.ai.tz = p.z0 + 0.6 + RS(m).next() * (p.z1 - p.z0 - 1.2);
   return true;
 }
 // A coop chicken never walks into the fence or out of the gate.
@@ -386,7 +387,7 @@ function importAll(o) {
 function reset() { pending = new Map(); activeCoops.length = 0; toShut.length = 0; acc = 0; coopT = 0; LOG.length = 0; }
 
 // ---------------------------------------------------------------- the poultry keeper
-const pkp = m => m.pkp || (m.pkp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
+const pkp = m => m.pkp || (m.pkp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
 // The coop this keeper works: the one its nesting box stands beside (footprint within 4.5 blocks).
 function coopOf(m) {
   const S = pkp(m);
@@ -500,7 +501,7 @@ function perform(m, tk) {
   }
   // cull: the keeper keeps the chicken and the feathers instead of dropping them
   BF.mobs.hurt(o, 999, "a poultry keeper");
-  const meat = loot(m, c.chicken, 1, o), fe = loot(m, c.feather, rndInt(0, 2), o);
+  const meat = loot(m, c.chicken, 1, o), fe = loot(m, c.feather, rndInt(RS(m), 0, 2), o);
   const T2 = tended(m);
   log("culled", { meat, feathers: fe, flock: T2.size });
   vlog(m, "poultry", "culled a chicken (" + T2.size + " left): " + meat + " raw chicken, " + fe + " feather" + (fe === 1 ? "" : "s"));
@@ -541,7 +542,7 @@ function lead(m, S, tk, dt, out) {
   if (o.coop === coop) {
     log("stocked", { coop: coop.key, flock: coop.hens.length });
     vlog(m, "poultry", "brought a wild chicken into the coop (" + coop.hens.length + " chickens)");
-    endTask(m, true); S.cd = rnd(0.5, 1);
+    endTask(m, true); S.cd = rnd(RS(m), 0.5, 1);
     return false;
   }
   const last = S.trail[S.trail.length - 1];
@@ -578,7 +579,7 @@ function ai(m, dt, out) {
   if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
     if ((S.cd -= dt) > 0) return false;
-    S.cd = rnd(1.5, 3);
+    S.cd = rnd(RS(m), 1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return false;
     const VS = BF.villageSim;
@@ -626,7 +627,7 @@ function ai(m, dt, out) {
     try { done = perform(m, tk); } catch (e) { console.error(e); }
     ai.swingT = 0.35;
     endTask(m, done);
-    S.cd = rnd(0.4, 1);
+    S.cd = rnd(RS(m), 0.4, 1);
   }
   return true;
 }

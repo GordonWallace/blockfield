@@ -16,7 +16,8 @@
 "use strict";
 const BF = window.BF;
 const TR = () => BF.trades;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const dayLen = () => (BF.sky && BF.sky.dayLength) || 1200;
@@ -38,7 +39,7 @@ const sum = (m, f) => { let n = 0; for (const s of m.inv) if (s && f(s.id)) n +=
 const count = (m, id) => TR().inv.count(m.inv, id);
 const ems = m => count(m, I("emerald"));
 const log = (kind, m, data) => { LOG.push(BF.glog.job("fletcher", Object.assign({ kind, day: +dayNow().toFixed(3), who: "fletcher" + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
-const state = m => m.flt || (m.flt = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0, craft: null });
+const state = m => m.flt || (m.flt = { stage: null, deal: null, checkT: rnd(RS(m), 1, 5), avoid: {}, cd: 0, craft: null });
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Fletcher") + " (Fletcher) " + text, m); };
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();
 // Takes n items matching f, the biggest stacks first. Returns [{id, n}] taken.
@@ -194,7 +195,7 @@ function work(m, J, dt) {
   }
   if (S.craft) {
     S.craft.t -= dt;
-    if (m.ai && Math.random() < dt * 1.2) m.ai.swingT = 0.3;   // whittling, fletching
+    if (m.ai && Math.random() < dt * 1.2) m.ai.swingT = 0.3;   // whittling, fletching   // visual
     if (S.craft.t <= 0) finishCraft(m);
     if (J && J.t < 3 && (S.craft || ((plan(m) || {}).ready && !buyNeed(m)))) J.t = 3;   // stays while there is work at the table, unless a seller has what it lacks: it goes shopping after this one
   }
@@ -284,7 +285,7 @@ function ai(m, dt, out) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = doBuy(m, deal);
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5;
