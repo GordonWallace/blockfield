@@ -62,8 +62,17 @@ function growsTable() {
 }
 
 // Young crops on farmland that sat unloaded for `away` game days: each matures with the chance it would have had
-// (a third of the speed on dehydrated farmland, js/farmland.js).
-function catchUpChunk(c, away) {
+// (a third of the speed on dehydrated farmland, js/farmland.js). A world block tick (spec r15-19): a chunk to catch up is queued, and the
+// queue is worked in the tick's block phase in chunk order (catchUpTick), never as a write from the think phase or a chunk load.
+const catchQ = new Map();   // chunk key -> game days away
+function catchUpChunk(c, away) { catchQ.set(c.cx + "," + c.cz, Math.max(away, catchQ.get(c.cx + "," + c.cz) || 0)); }
+function catchUpTick() {
+  if (!catchQ.size) return;
+  const list = [...catchQ].map(([k, away]) => { const [cx, cz] = k.split(",").map(Number); return { k, cx, cz, away }; }).sort((a, b) => a.cx - b.cx || a.cz - b.cz);
+  catchQ.clear();
+  for (const e of list) { const c = BF.world.chunks.get(e.k); if (c) catchUpNow(c, e.away); }
+}
+function catchUpNow(c, away) {
   const rate = f => 1 - Math.exp(-away * CROP_SECS_PER_DAY * GROW_RATE * f), G = growsTable(), CS = BF.CS, W = BF.world;
   const pWet = rate(1), pDry = rate(BF.farmland ? BF.farmland.DRY_GROWTH : 1 / 3), DRY = BF.B.farmland_dry;
   const found = [];
@@ -470,10 +479,11 @@ BF.villageSim = {
       }
     }
   },
-  reset() { simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
+  reset() { simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
     BF.world.onThink(step);   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
+    if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick);   // crop catch-up, a block tick (spec r15-19)
   },
 };
 })();

@@ -277,16 +277,16 @@ function pickTask(m, S) {
 function endTask(m, S, ok) {
   const tk = S.task;
   if (tk && !ok) { if (tk.r) S.avoid["h" + tk.r.hid] = now() + 0.05; if (tk.deal && tk.deal.seller && tk.deal.seller.slot) S.avoid[tk.deal.seller.slot.idx] = now() + 0.05; }
-  if (tk && tk.gatesOpen) setGates(tk.st, false);
+  if (tk && tk.gatesOpen) setGates(m, tk.st, false);
   if (tk && tk.r && tk.r.mob) BF.horses.setAvoid(tk.r.mob, null);
   const keep = ok && tk && (tk.kind === "catch" || tk.kind === "fetch") && tk.r && tk.r.lead && tk.r.lead.mob === m;   // a led horse: the walk home carries on under the same estimate
   S.cont = !!keep;
   if (!keep && BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   S.task = null; S.stage = null; S.gx = null; m.ai.route = null;
 }
-function setGates(st, open) {
-  if (!st || !BF.world.setGate) return;
-  for (const [x, z] of st.gates) if (BF.world.isLoaded(x, z)) BF.world.setGate(x, st.y, z, open);
+function setGates(m, st, open) {   // requests (spec r15-19, js/blockreqs.js)
+  if (!st || !BF.blockReq) return;
+  for (const [x, z] of st.gates) if (BF.world.isLoaded(x, z)) BF.blockReq.door(m, x, st.y, z, open);
 }
 const groundY = (x, z) => { const g = BF.world.heightAt(x, z); return g == null ? null : g + 1; };
 // Walks to a mob (re-planning when it moved off). Returns "near" | "going" | "failed".
@@ -366,7 +366,7 @@ function taskStep(m, S, dt, out) {
     // wait at the gate until the horse has caught up (it follows more slowly round the fence), then open up
     if (Math.hypot(h.position.x - m.position.x, h.position.z - m.position.z) > 5 && (S.hw = (S.hw || 0) + dt) < 30) return true;
     S.hw = 0; S.stage = "pen"; S.penT = 0; tk.st = st; tk.gatesOpen = true;
-    setGates(st, true);
+    setGates(m, st, true);
     H.setPen(h, st.box); H.setAvoid(h, null); H.leash(h, null);
     return true;
   }
