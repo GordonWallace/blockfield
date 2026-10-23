@@ -1976,7 +1976,6 @@ function crossEdge() {
     const vp = vehicle.pos || vehicle.position;
     const q = vp ? recanonAt(vp, vehicle, vehicle.vel) : -1;
     if (q >= 0) {   // the rider crosses with it: the view and velocity turn by the same quarter turns
-      if (vehicle.model && vehicle.model.rotation) vehicle.model.rotation.y = vehicle.yaw;
       me.yaw = yaw; turnBy(q, me, vel); yaw = me.yaw;
       if (vehicle.ctl.seatOf) { const st = vehicle.ctl.seatOf(vehicle, "player"); pos.set(st.x, st.y, st.z); }
       else recanonAt(pos, null, null);

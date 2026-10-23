@@ -207,7 +207,7 @@ module.exports = async (pg, out) => {
     ok("fed cows bred: a calf was born in the pasture", born > 0 && P.cows.some(s => s.growAt != null), { born, herd: P.cows.length });
     const calfS = P.cows.find(s => s.growAt != null);
     const calf = calfS && calfS.mob;
-    ok("a calf is smaller and gives no milk", !!(calf && calf.calf && calf.model.scale.x < 0.9 && !C.milkable(calf)), calf && calf.model.scale.x);
+    ok("a calf is smaller and gives no milk", !!(calf && calf.calf && calf.scale < 0.9 && !C.milkable(calf)), calf && calf.scale);
     R.herderInv = herder.inv.filter(Boolean).map(s => BF.items[s.id].name + ":" + s.count).join(",");
     for (let i = 0; i < 1200 && (herder.position.x > P.fx0 && herder.position.x < P.fx1 && herder.position.z > P.fz0 && herder.position.z < P.fz1); i++) step();
 
