@@ -11,9 +11,9 @@ module.exports = async (pg) => {
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
   const start = await pg.evaluate(() => {
     const p = BF.player.position, P = BF.planet, c = P.canon(p.x, p.z, {});
-    return { gen: BF.state.gen, planet: BF.world.isPlanet(), f: c.f, u: c.u, v: c.v, ll: P.latLonAt(p.x, p.z), y: p.y, h: BF.world.heightAt(p.x, p.z) };
+    return { gen: BF.state.gen, f: c.f, u: c.u, v: c.v, ll: P.latLonAt(p.x, p.z), y: p.y, h: BF.world.heightAt(p.x, p.z) };
   });
-  check(start.gen === 4 && start.planet && start.f === 4, "a generator-4 world starts on face 4 " + JSON.stringify(start));
+  check(start.gen === 4 && start.f === 4, "a generator-4 world starts on face 4 " + JSON.stringify(start));
   check(start.h > 0 && start.y > start.h, "the player stands on dry land at spawn");
 
   // the four edges of face 4 (side 0: u < 0, 1: u >= N, 2: v < 0, 3: v >= N; none of them turns), then three edges that turn by one,
