@@ -83,13 +83,13 @@ const start = async () => {
     BF.warp.set(4);   // 100x
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     const m = rec.members.find(x => x.type === 'villager' && !x.dead && x.position);
-    const sky = BF.sky.update;
+    const sky = BF.sky.advance;   // the sim's part of the sky, once a tick (r15-10)
     let armed = 3;
-    BF.sky.update = function (h) {
+    BF.sky.advance = function (h) {
       sky.call(this, h);
       if (armed > 0 && --armed === 0) { BF.vlog.log(rec, 'birth', 'Test baby was born to A and B', m); window.__at = BF.simNow(); }
     };
-    setTimeout(() => { BF.sky.update = sky; res({ at: window.__at, now: BF.simNow(), frozen: BF.warp.frozen, speed: BF.warp.speed, mob: m.position.x }); }, 1500);
+    setTimeout(() => { BF.sky.advance = sky; res({ at: window.__at, now: BF.simNow(), frozen: BF.warp.frozen, speed: BF.warp.speed, mob: m.position.x }); }, 1500);
   }));
   ok('alert freezes the world mid-frame ' + JSON.stringify(fired), fired.frozen && fired.speed === 0 && fired.at != null && fired.now === fired.at);
   const s1 = await game.evaluate(() => ({ t: BF.simNow(), sky: BF.sky.time, mobs: BF.mobs.list.slice(0, 20).map(m => m.position.x + ',' + m.position.z).join(';') }));
