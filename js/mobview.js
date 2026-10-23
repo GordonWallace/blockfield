@@ -708,7 +708,6 @@ function draw(v, m, dt) {
 // Mob positions are kept in frames on the planet (js/mobs.js keepFrame): the player's position seen from the mob's frame.
 const LQ = {}, _q = new THREE.Vector3();
 function playerDist(m, pp) {
-  if (!(BF.planet && BF.planet.isPlanet())) return m.position.distanceTo(pp);
   BF.planet.local(m.position, pp, LQ);
   return _q.set(LQ.x, pp.y, LQ.z).distanceTo(m.position);
 }
