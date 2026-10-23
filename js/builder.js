@@ -30,9 +30,6 @@ const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const pending = new Map();         // village key -> built list (same array as rec.built)
 const log = [];
-const pool = [];                   // placement particles
-let partGeo = null;
-const partMats = {};
 
 function hash32(str) {
   let h = 2166136261;
@@ -777,19 +774,8 @@ function spotsFor(m, bs, c, e) {
 }
 
 // ---------------------------------------------------------------- placement
-function emitParticles(x, y, z, id) {
-  if (!BF.scene || typeof THREE === "undefined") return;
-  if (!partGeo) partGeo = new THREE.BoxGeometry(0.11, 0.11, 0.11);
-  const b = BF.blocks[id], key = (b && b.color) || "#999999";
-  const mat = partMats[key] || (partMats[key] = new THREE.MeshBasicMaterial({ color: new THREE.Color(key) }));
-  for (let i = 0; i < 5; i++) {
-    if (pool.length > 90) { const o = pool.shift(); BF.scene.remove(o.mesh); }
-    const mesh = new THREE.Mesh(partGeo, mat);
-    mesh.position.set(x + 0.2 + Math.random() * 0.6, y + 0.3 + Math.random() * 0.5, z + 0.2 + Math.random() * 0.6);   // visual
-    BF.scene.add(mesh);
-    pool.push({ mesh, vx: (Math.random() - 0.5) * 2, vy: 1 + Math.random() * 2, vz: (Math.random() - 0.5) * 2, life: 0.45 + Math.random() * 0.3 });   // visual
-  }
-}
+// the block's dust: an effect event (js/fx.js) that js/entityview.js plays
+function emitParticles(x, y, z, id) { BF.fx.emit({ kind: "dust", x, y, z, block: id }); }
 function advance(e, by) { e.prog += by || 1; }
 // Places the current cell. Returns "placed" | "skipped" | "wait" | "missing" (needs material) | "nowater" (needs a full bucket) | "paused".
 function placeCell(m, bs, e) {
@@ -1188,14 +1174,7 @@ function statusText(m) {
   return "Planning";
 }
 
-function tick(dt) {
-  for (let i = pool.length - 1; i >= 0; i--) {
-    const p = pool[i];
-    p.life -= dt; p.vy -= 14 * dt;
-    p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt;
-    if (p.life <= 0) { BF.scene.remove(p.mesh); pool.splice(i, 1); }
-  }
-}
+function tick() {}   // nothing per step (its dust is an effect event since r15-12, played by js/entityview.js)
 
 // ---------------------------------------------------------------- persistence (saved inside the villagers map of save.js: keys "built:<village key>")
 const clean = list => JSON.parse(JSON.stringify(list, (k, v) => (k[0] === "_" ? undefined : v)));
@@ -1235,6 +1214,6 @@ BF.builder = {
   BLOCK_T, REACH, BUILD_END, SITE_RANGE, log, pending,
   ai, tick, statusText, startStock, exportAll, importAll, onSpawn, builtOf, FOOD, FOOD_WEIGHT, STABLE_WEIGHT, ANIMAL_R, ANIMAL_MIN, chooseFood, foodCounts, wildCount, planReq,
   analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, weighTypes, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome, reserve, shortfall, pickNext,
-  reset() { pending.clear(); log.length = 0; for (const p of pool) BF.scene.remove(p.mesh); pool.length = 0; },
+  reset() { pending.clear(); log.length = 0; },
 };
 })();

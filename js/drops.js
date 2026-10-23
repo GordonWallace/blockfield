@@ -1,6 +1,7 @@
 // Dropped item entities: items that pop out of broken blocks and killed mobs, bob on the ground,
 // and fly into the player's inventory when they walk close. They despawn after 5 minutes of lying in a loaded chunk
-// (in an unloaded chunk they wait, as in vanilla), and are saved with the world, keeping their age.
+// (in an unloaded chunk they wait, as in vanilla), and are saved with the world, keeping their age. A drop is plain data
+// {id, count, pos, vel, age, phase, pulled, pickupDelay, wear}; js/entityview.js draws it (spec r15-12).
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -10,37 +11,22 @@ const BF = (window.BF = window.BF || {});
 const LQ = {};
 const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
 const HW = 0.125, H = 0.25, GRAV = 18, PICKUP_R = 1.6, PICKUP_DELAY = 0.5, LIFE = 300, MAX = 300;
-const loader = new THREE.TextureLoader(), mats = new Map();
-let scene = null;
-
-function matFor(id) {
-  let m = mats.get(id);
-  if (!m) {
-    const tex = loader.load(BF.textures.icon(id));
-    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
-    m = new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.1 });
-    mats.set(id, m);
-  }
-  return m;
-}
+let ready = false;
 
 const drops = {
   list: [],
 
-  init(sceneRef) { scene = sceneRef; },
+  init() { ready = true; },
 
   // Spawns `count` of item `id` at (x, y, z) with a small random toss. opts.vel (a THREE.Vector3) replaces the toss,
   // and opts.pickupDelay (seconds) holds off the player's pickup, e.g. for items the player threw. opts.wear: uses spent on a dropped tool.
   spawn(id, count, x, y, z, opts) {
-    if (!scene || id == null || !BF.items[id] || !(count > 0)) return null;
+    if (!ready || id == null || !BF.items[id] || !(count > 0)) return null;
     if (drops.list.length >= MAX) drops.remove(drops.list[0]);
-    const sprite = new THREE.Sprite(matFor(id));
-    sprite.scale.set(0.38, 0.38, 0.38);
-    scene.add(sprite);
     const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + drops.list.length * 4099);   // the toss: seeded by the spot, tick and count (js/rand.js)
     const a = r.next() * Math.PI * 2, s = 1 + r.next() * 1.5;
     const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + r.next() * 2, Math.sin(a) * s);
-    const d = { id, count, pos: new THREE.Vector3(x, y, z), vel, age: 0, phase: Math.random() * 6.28, sprite,   // visual (the bob)
+    const d = { id, count, pos: new THREE.Vector3(x, y, z), vel, age: 0, phase: Math.random() * 6.28, pulled: false,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
     return d;
@@ -62,7 +48,6 @@ const drops = {
   remove(d) {
     const i = drops.list.indexOf(d);
     if (i >= 0) drops.list.splice(i, 1);
-    if (d.sprite) scene.remove(d.sprite);
   },
 
   clear() { for (const d of drops.list.slice()) drops.remove(d); },
@@ -87,18 +72,14 @@ const drops = {
       if (!d) continue;
       d.age = Math.max(0, +age || 0);
       d.pickupDelay = d.age + Math.max(0, +delay || 0);
-      d.sprite.position.copy(d.pos);
     }
   },
 
   update(dt) {
     const P = BF.player, pp = P && P.position, alive = P && !P.dead;
-    const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1;
     for (const d of drops.list.slice()) {
       // in an unloaded chunk an item neither ages nor falls (it would drop out of the world); it waits for the chunk
-      const here = BF.world.isLoaded(d.pos.x, d.pos.z);
-      d.sprite.visible = here;
-      if (!here) continue;
+      if (!BF.world.isLoaded(d.pos.x, d.pos.z)) continue;
       d.age += dt;
       if (d.age > LIFE) { drops.remove(d); continue; }
       // pulled toward the player once close enough, then collected
@@ -113,7 +94,7 @@ const drops = {
           d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
           d.pos.addScaledVector(d.vel, dt);
           BF.planet.reframe(d.pos, -1, null, d.vel);
-          d.sprite.position.copy(d.pos);
+          d.pulled = true;
           continue;
         }
       }
@@ -127,8 +108,7 @@ const drops = {
       BF.planet.reframe(d.pos, -1, null, d.vel);   // past a face edge: onto the next face's square
       if (res.onGround) { d.vel.x *= Math.pow(0.02, dt); d.vel.z *= Math.pow(0.02, dt); }
       if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
-      d.sprite.position.set(d.pos.x, d.pos.y + 0.22 + Math.sin(d.age * 2.5 + d.phase) * 0.06, d.pos.z);
-      d.sprite.material.color.setScalar(light);
+      d.pulled = false;
     }
   },
 };

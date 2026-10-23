@@ -355,43 +355,12 @@ function spawnHerdAt(x, z) {
   return h;
 }
 
-// ---------------------------------------------------------------- lead lines
-const leadLines = new Map();   // hid -> THREE.Line
-let leadMat = null, leadA = null, leadB = null;
-function drawLeads() {
-  const scene = BF.scene || (BF.world && BF.world.scene);
-  if (!leadA) { leadA = new THREE.Vector3(); leadB = new THREE.Vector3(); }
-  for (const [hid, line] of leadLines) { const r = recs.get(hid); if (!r || !r.lead || !r.mob || !live(r.mob)) { if (line.parent) line.parent.remove(line); leadLines.delete(hid); } }
-  for (const r of recs.values()) {
-    if (!r.lead || !r.mob || !live(r.mob)) continue;
-    const m = r.mob, P = BF.player;
-    let line = leadLines.get(r.hid);
-    if (!line) {
-      if (!leadMat) leadMat = new THREE.LineBasicMaterial({ color: 0x6b4a2a });
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(9 * 3), 3));
-      line = new THREE.Line(g, leadMat);
-      line.frustumCulled = false;
-      if (!scene) continue;
-      scene.add(line);   // (r15-12 moves the leads into a render layer)
-      leadLines.set(r.hid, line);
-    }
-    const fw = [Math.sin(m.yaw), Math.cos(m.yaw)], s = m._k || 1, V = BF.mobView;
-    const mp = V ? V.drawPos(m, leadA) : m.position;   // where the horse is drawn (js/mobview.js)
-    const a = [mp.x + fw[0] * 1.0 * s, mp.y + 1.45 * s, mp.z + fw[1] * 1.0 * s];
-    let b;
-    if (r.lead.kind === "player") { const e = P.eyePos(), d = P.lookDir(); b = [e.x + d.x * 0.4 - d.z * 0.3, e.y - 0.5, e.z + d.z * 0.4 + d.x * 0.3]; }
-    else if (r.lead.kind === "mob") { const h = r.lead.mob, hp = V ? V.drawPos(h, leadB) : h.position; b = [hp.x, hp.y + 1.0, hp.z]; }
-    else b = [r.lead.x + 0.5, r.lead.y + 0.75, r.lead.z + 0.5];
-    const arr = line.geometry.attributes.position.array;
-    const sag = Math.max(0, 1.2 - Math.hypot(a[0] - b[0], a[2] - b[2]) * 0.2);
-    line.position.set(a[0], 0, a[2]);   // the rope's points are relative to the horse end (floating origin, js/view.js)
-    for (let i = 0; i < 9; i++) {
-      const t = i / 8;
-      arr[i * 3] = (b[0] - a[0]) * t; arr[i * 3 + 1] = a[1] + (b[1] - a[1]) * t - Math.sin(t * Math.PI) * sag; arr[i * 3 + 2] = (b[2] - a[2]) * t;
-    }
-    line.geometry.attributes.position.needsUpdate = true;
-  }
+// ---------------------------------------------------------------- leads
+// The leads to draw (js/entityview.js draws the ropes, spec r15-12): [{hid, mob, lead}] for every live horse on a lead.
+function leads() {
+  const out = [];
+  for (const r of recs.values()) if (r.lead && r.mob && live(r.mob)) out.push({ hid: r.hid, mob: r.mob, lead: r.lead });
+  return out;
 }
 
 // ---------------------------------------------------------------- tick (mobs.update, world simulation time)
@@ -614,8 +583,6 @@ function deserialize(o) {
   backT = 0;
 }
 function reset() {
-  for (const line of leadLines.values()) if (line.parent) line.parent.remove(line);
-  leadLines.clear();
   recs.clear(); herds.clear(); nextId = 1; nextHerd = 1;
 }
 
@@ -624,7 +591,7 @@ BF.horses = {
   isHorseBiome, rollStats, foalStats, jumpHeight, price: m => price(m.horse || m),
   spawn, tame, feed, breed, leash, setPen, willing: m => !!(m && m.horse && willing(m.horse, now())),
   ai, tick, spawnHerdAt, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, wildCount, herds, records: recs,
-  ride: RIDE, drawLeads,
+  ride: RIDE, leads,
   serialize, deserialize, reset,
 };
 })();

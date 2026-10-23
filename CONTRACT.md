@@ -226,8 +226,21 @@ a villager's tool, from `BF.mobs.toolHolders`), `onFire`, `sleeping` (with `bed`
 drawPos(mob, out) -> where it is drawn this frame, typeParts(type, variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }`.
 `render` runs once per drawn frame (main.js), builds a model for every mob within the meshed terrain (`(viewDist + 1) * CS`), none for
 one farther away, drops the model of a mob gone from the list, and draws position and angles interpolated between ticks when the mob
-has `prev` and `BF.warp.alpha` is set (r15-10). js/mobs.js makes no scene calls for mobs (test/mob-render-split.js checks it); its arrows
-and puffs still do until r15-12.
+has `prev` and `BF.warp.alpha` is set (r15-10). js/mobs.js makes no scene calls (test/mob-render-split.js checks it).
+
+## entityview.js and fx.js (entity drawing and effect events, spec r15-12)
+
+Item drops, arrows, boats, bees and horse leads are plain simulation data, drawn by `BF.entityView` (js/entityview.js, loaded after
+horses.js): drops `{id, count, pos, vel, age, phase, pulled}` (`BF.drops.list`), arrows `{pos, vel, look, stuck, ...}`
+(`BF.mobs.arrowList()`), boats `{wood, pos, yaw, hurtT, row, rowing, mob}` (`BF.boats.list`), bees `{x, y, z, yaw, phase, mode, land,
+landYaw}` (`BF.bees.list`), leads `BF.horses.leads() -> [{hid, mob, lead}]`. The simulation's visual effects are events in `BF.fx`
+(js/fx.js, loaded after rand.js): `emit({kind, x, y, z, ...})` with kind `puff` `{n, spread, dark, speed}`, `heart`, `crumbs` `{color, n,
+spread}` (`BF.villageLife.particles`), `dust` `{block}` (builders); `take()` hands the queued events to the render layer (at most `MAX`
+are kept where nothing draws them); `clear()` (mobs.clear on a new world) drops them and what is playing.
+`BF.entityView = { init(scene), render(dt, realDt), viewOf(entity) -> its scene object | undefined, count() }`: once per drawn frame
+(main.js, after mobView.render) it builds, moves and removes the scene objects and plays the effects (they move with `dt`, the drawn
+game time, 0 while frozen; boat paddles settle in real time). The simulation modules (drops, boats, bees, horses, mobs, breeding,
+villagelife, builder) make no scene calls; test/entity-render-split.js checks it and compares the drawing with release-1-5's.
 
 ## trading.js (villager economy)
 
@@ -291,7 +304,7 @@ F3 and screenshots `<outPrefix>.png`. Use `page.evaluate(() => BF...)` to drive 
 
 ## BF.drops (js/drops.js)
 Dropped item entities (sprites with gravity) from broken blocks, popped plants and killed mobs; picked up within ~1.6 blocks after 0.5s, merge nearby, despawn after 300s of lying in a loaded chunk (in an unloaded chunk they neither age nor fall, and are hidden).
-- `init(scene)`, `update(dt)`, `clear()` (called by newWorld), `list`
+- `init()`, `update(dt)`, `clear()` (called by newWorld), `list` (drawn by js/entityview.js)
 - `serialize()` -> `[[id, count, x, y, z, age, wear, pickupDelayLeft]]`, saved as `drops` by save.js; `deserialize(a)` puts them back at rest with their age (old saves: none).
 - `spawn(itemId, count, x, y, z)`; `spawnAt([{id,count}], bx, by, bz)` drops at the centre of a block.
 

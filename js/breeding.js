@@ -28,7 +28,6 @@ const S = {
   near: new Set(),
   deadKeys: new Set(),       // keys of newborns that died this session (removed from the save)           // pair keys currently within RADIUS with the condition true (rolled already)
   loves: [],                 // active love pairs {a, b, t, rec, heartT}
-  hearts: [],                // heart sprites
   grow: [],                  // {m, t, from}
   stats: { encounters: 0, rolls: 0, successes: 0, births: 0, grownUp: 0 },
   log: [],
@@ -164,47 +163,9 @@ function lookVariant() {
 }
 
 // ---------- hearts ----------
-let heartTex = null;
-function heartTexture() {
-  if (heartTex) return heartTex;
-  const rows = [".XX.XX.", "XWXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X..."];
-  const c = document.createElement("canvas"); c.width = 9; c.height = 8;
-  const g = c.getContext("2d");
-  for (let y = 0; y < rows.length; y++) for (let x = 0; x < 7; x++) {
-    const ch = rows[y][x];
-    if (ch === ".") continue;
-    g.fillStyle = "#3a0a10"; g.fillRect(x + 1, y + 1, 1, 1);   // drop shadow outline
-  }
-  for (let y = 0; y < rows.length; y++) for (let x = 0; x < 7; x++) {
-    const ch = rows[y][x];
-    if (ch === ".") continue;
-    g.fillStyle = ch === "W" ? "#ffb8c0" : y >= 3 ? "#c41e32" : "#ec3046";
-    g.fillRect(x + 1, y, 1, 1);
-  }
-  heartTex = new THREE.CanvasTexture(c);
-  heartTex.magFilter = THREE.NearestFilter; heartTex.minFilter = THREE.NearestFilter;
-  return heartTex;
-}
-function heart(x, y, z) {
-  if (!BF.scene || typeof THREE === "undefined") return;
-  const mat = new THREE.SpriteMaterial({ map: heartTexture(), transparent: true, depthWrite: false });
-  const sp = new THREE.Sprite(mat);
-  sp.scale.set(0.34, 0.3, 1);
-  sp.position.set(x + (Math.random() - 0.5) * 0.5, y + Math.random() * 0.2, z + (Math.random() - 0.5) * 0.5);   // visual
-  BF.scene.add(sp);
-  S.hearts.push({ sp, life: 1.4, vy: 0.55 + Math.random() * 0.3, dx: (Math.random() - 0.5) * 0.2 });   // visual
-}
+// one heart rising: an effect event (js/fx.js) that js/entityview.js plays
+function heart(x, y, z) { BF.fx.emit({ kind: "heart", x, y, z }); }
 const headTop = m => m.position.y + m.height + 0.35;
-function updateHearts(dt) {
-  for (let i = S.hearts.length - 1; i >= 0; i--) {
-    const h = S.hearts[i];
-    h.life -= dt;
-    h.sp.position.y += h.vy * dt; h.sp.position.x += h.dx * dt;
-    h.sp.material.opacity = Math.max(0, Math.min(1, h.life / 0.5));
-    if (h.life <= 0) { BF.scene.remove(h.sp); h.sp.material.dispose(); S.hearts.splice(i, 1); }
-  }
-}
-
 // ---------- eligibility / encounters ----------
 function adultOK(m) {
   return m && m.type === "villager" && !m.dead && !m.removed && !m.child && !m.sleeping && !m.starving && !m.tradingWith &&
@@ -440,7 +401,6 @@ function spawnMissing(rec) {
 function tick(dt) {
   if (!BF.mobs || !BF.trades) return;
   hookEvents();
-  updateHearts(dt);
   updateLoves(dt);
   updateGrow(dt);
   S.timer -= dt;
@@ -507,8 +467,7 @@ function importAll(o) {
   }
 }
 function reset() {
-  for (const h of S.hearts) { if (BF.scene) BF.scene.remove(h.sp); h.sp.material.dispose(); }
-  S.hearts.length = 0; S.loves.length = 0; S.grow.length = 0;
+  S.loves.length = 0; S.grow.length = 0;
   S.pending.clear(); S.cd.clear(); S.near.clear(); S.deadKeys.clear(); S.timer = 0;
 }
 

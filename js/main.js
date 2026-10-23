@@ -256,7 +256,6 @@ function frame(now) {
     }
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
     BF.player.update(dt);
-    if (BF.horses) BF.horses.drawLeads();   // lead ropes follow the player and the horses every frame
     W.done(done, done * plan.h, dt);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
@@ -267,6 +266,7 @@ function frame(now) {
   if (BF.textures.update) BF.textures.update(W.frozen ? 0 : dt * Math.max(1, W.last));   // water animation keeps pace with the fast-forward (and stops at 0x)
   if (BF.save && !BF.state.paused) BF.save.update(dt);
   BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
+  BF.entityView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)), dt);   // drops, arrows, boats, bees, leads, effects (js/entityview.js)
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)
   if (BF.lod && BF.lod.cull) BF.lod.cull(camera);   // the distant rings' sectors in view (js/lod.js)
   renderer.render(scene, camera);
@@ -286,6 +286,7 @@ BF.villageSim.init();
 BF.vlog.init();
 BF.drops.init(scene);
 BF.boats.init(scene);
+BF.entityView.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
