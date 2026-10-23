@@ -7,7 +7,9 @@ module.exports = async (pg) => {
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
   const wait = (fn, arg, t = 60000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 250 }).then(() => true, () => false);
   await require('./lib').toVillage(pg);
-  const base = await pg.evaluate(() => ({ on: BF.active.opts().on, n: BF.villageSim.count(), extras: BF.active.extras().length }));
+  const running = () => BF.villageSim.areas().filter(a => a.kind === "village").map(a => a.key);
+  await pg.evaluate(`window.__running = ${running}`);
+  const base = await pg.evaluate(() => ({ on: BF.active.opts().on, n: BF.villageSim.count(), keys: __running(), extras: BF.active.extras().length }));
   ok("off in automated browsers: the distance rule only", base.on === false && base.extras === 0, base);
 
   // 1. forced high: short windows so the test doesn't wait minutes
@@ -47,9 +49,10 @@ module.exports = async (pg) => {
   ok("the nearest extra (with a villager on a task) is the last to leave", /over budget/.test(down.leaves[down.leaves.length - 1] || "") && down.leaves.length >= 2, down.leaves.slice(-1));
   if (held) ok("a village with a villager on a task counts down instead of unloading at once", down.active && !!down.counting && down.counting.left > 0, down.counting);
   await pg.evaluate(() => { const m = window.__held; if (m) { delete m.vtask; delete m.sleeping; m.vtask = null; m.sleeping = false; } });
+  // (on a slow runner 10x isn't reached and a long task can outlast the wait: a village still counting down is honouring it)
   const back = await wait(n => BF.villageSim.count() <= n, base.n, 300000);
-  const end = await pg.evaluate(() => ({ n: BF.villageSim.count(), errs: BF.villageSim.errors().slice(), glogErr: BF.glog.recent(5000).filter(e => e.l === "ERROR" && e.k === "loading").map(e => e.x), text: BF.active.text() }));
-  ok("back to the minimum rule once the countdowns end", back && end.n <= base.n, { n: end.n, base: base.n });
+  const end = await pg.evaluate(keys => ({ n: BF.villageSim.count(), left: __running().filter(k => !keys.includes(k)).map(k => ({ k, cd: BF.villageSim.countdown(k) })), errs: BF.villageSim.errors().slice(), glogErr: BF.glog.recent(5000).filter(e => e.l === "ERROR" && e.k === "loading").map(e => e.x), text: BF.active.text() }), base.keys);
+  ok("back to the minimum rule once the countdowns end (any village left is still counting down)", (back && end.n <= base.n) || (end.left.length > 0 && end.left.every(x => x.cd && x.cd.left > 0)), { n: end.n, base: base.n, left: end.left });
   ok("no task was cut off or forced to stop (game log and loading errors)", end.errs.length === 0 && end.glogErr.length === 0, { errs: end.errs, glog: end.glogErr });
   // 3. off: the minimum only, and the setting is logged
   await pg.evaluate(() => BF.active.set({ on: false }));
