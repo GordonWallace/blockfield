@@ -14,7 +14,8 @@
 (() => {
 "use strict";
 const BF = window.BF;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const T = () => BF.trades;
 
 const PRICE_BLANK = [4, 8, 16, 32, 64];   // what the cartographer asks for a blank map by size (js/trading.js: "4 emerald > 1 blank_map_1" ...)
@@ -40,7 +41,7 @@ const vlog = (m, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, "ma
 const log = (kind, m, data) => { LOG.push(BF.glog.job("explorer", Object.assign({ kind, who: "explorer" + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
 // fin: shelved maps, name -> the game day it was shelved on (it tries again on a later day)
-const state = m => m.ex || (m.ex = { fin: {}, avoid: {}, stage: null, target: null, cd: rnd(1, 4), sync: 0, sampT: 0 });
+const state = m => m.ex || (m.ex = { fin: {}, avoid: {}, stage: null, target: null, cd: rnd(RS(m), 1, 4), sync: 0, sampT: 0 });
 const today = () => (BF.sky ? BF.sky.day || 0 : 0);
 const cnt = (m, id) => (id == null ? 0 : T().inv.count(m.inv, id));
 const blankSlots = m => m.inv.filter(s => s && BF.items[s.id] && BF.items[s.id].mapSize);
@@ -257,7 +258,7 @@ function offerFor(v2, emeralds) {
     if (k && cnt(v2, o.sell.id) >= 1) opts.push({ o, w: SIZE_WEIGHT[k - 1] });
   }
   if (!opts.length) return null;
-  let r = Math.random() * opts.reduce((a, q) => a + q.w, 0), pick = opts[0];
+  let r = RS(v2).next() * opts.reduce((a, q) => a + q.w, 0), pick = opts[0];
   for (const q of opts) { pick = q; if ((r -= q.w) <= 0) break; }
   return pick.o;
 }
@@ -295,7 +296,7 @@ function shopAI(m, dt, out) {
     X.cd = 4;
     if (blankSlots(m).length || carried(m).filter(c => c.done || c.shelved).length >= MAX_FOR_SALE || cnt(m, BF.I.emerald) < PRICE_BLANK[0]) return false;
     const dl = findCartographer(m, X);
-    if (!dl) { X.cd = rnd(15, 30); return false; }
+    if (!dl) { X.cd = rnd(RS(m), 15, 30); return false; }
     X.deal = dl; X.stage = "walk"; X.walkT = 0; a.route = null;
   }
   const dl = X.deal, v2 = dl && dl.seller;
@@ -315,7 +316,7 @@ function shopAI(m, dt, out) {
   X.tt -= dt;
   if (d > 3.6) { X.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (X.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (X.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (X.tt <= 0) {
     const ok = deal(m, dl);
     X.stage = null; X.deal = null; X.cd = ok ? 0.5 : 5;

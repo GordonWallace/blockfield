@@ -131,7 +131,7 @@ module.exports = async (pg, out) => {
       dy: +(wa.position.y - wb.position.y).toFixed(2), mate: [wa.mate === wb, wb.mate === wa], sty: [!!wa.sty, !!wb.sty], led: [!!wa.ledBy, !!wb.ledBy], crowd: BF.herd.crowd(wa) });
     ok("both then rest a day", !PF.willing(wa, day()) && wa.pig.cd >= day() + PF.BREED_CD - 0.05, [wa.pig.cd, day()]);
     if (piglet) {
-      ok("a piglet is smaller and cannot breed", piglet.piglet && piglet.model.scale.x < 0.9 && !PF.willing(piglet, day()), piglet.model.scale.x);
+      ok("a piglet is smaller and cannot breed", piglet.piglet && piglet.scale < 0.9 && !PF.willing(piglet, day()), piglet.scale);
       const was = piglet.pig.growAt;
       ok("it grows up in 3 days", Math.abs(was - (day() + PF.PIGLET_DAYS)) < 0.05, [was, day()]);
       PF.feed(piglet, "test");
@@ -140,8 +140,8 @@ module.exports = async (pg, out) => {
       const lit = wildAt(flat[0], flat[1] + 1); lit.pig = { fed: null, cd: day() + 3, growAt: day() + 2, x: null, z: null, mob: lit }; PF.syncLook(lit);
       BF.mobs.kill(lit);
       ok("a piglet drops nothing", BF.inventory.count(I.raw_porkchop) === pork0 && lit.piglet, BF.inventory.count(I.raw_porkchop) - pork0);
-      const dd = BF.sky.day; BF.sky.day = dd + PF.PIGLET_DAYS + 1; run(1); const grown = piglet.pig.growAt == null && !piglet.piglet && piglet.model.scale.x > 0.95; BF.sky.day = dd;
-      ok("and is an adult after 3 days", grown, piglet.model.scale.x);
+      const dd = BF.sky.day; BF.sky.day = dd + PF.PIGLET_DAYS + 1; run(1); const grown = piglet.pig.growAt == null && !piglet.piglet && piglet.scale > 0.95; BF.sky.day = dd;
+      ok("and is an adult after 3 days", grown, piglet.scale);
     }
     // the crowding rule: no breeding with 24 pigs within 16 blocks (30 placed: a few wander off during the run)
     {

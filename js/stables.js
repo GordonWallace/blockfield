@@ -37,7 +37,8 @@ const KEEP = { wheat_item: WHEAT_SELF };
 const LOG = [];
 
 const live = o => !!(o && !o.dead && !o.removed);
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const TR = () => BF.trades;
@@ -134,8 +135,8 @@ function mayHire(m, s) {
 function pickPenTarget(m) {
   const b = m.horse && m.horse.pen;
   if (!b) return false;
-  m.ai.tx = b.x0 + 0.8 + Math.random() * Math.max(0.1, b.x1 + 1 - b.x0 - 1.6);
-  m.ai.tz = b.z0 + 0.8 + Math.random() * Math.max(0.1, b.z1 + 1 - b.z0 - 1.6);
+  m.ai.tx = b.x0 + 0.8 + RS(m).next() * Math.max(0.1, b.x1 + 1 - b.x0 - 1.6);
+  m.ai.tz = b.z0 + 0.8 + RS(m).next() * Math.max(0.1, b.z1 + 1 - b.z0 - 1.6);
   return true;
 }
 
@@ -240,7 +241,7 @@ function work(m, J, dt) {
 }
 
 // ---------------------------------------------------------------- the stable hand's day
-const stb = m => m.stb || (m.stb = BF.ids.refs({ task: null, stage: null, t: 0, cd: rnd(1, 3), navFail: 0, avoid: {}, noSeller: {}, waitWild: 0, leave: null, gx: null, gz: null }));
+const stb = m => m.stb || (m.stb = BF.ids.refs({ task: null, stage: null, t: 0, cd: rnd(RS(m), 1, 3), navFail: 0, avoid: {}, noSeller: {}, waitWild: 0, leave: null, gx: null, gz: null }));
 const food = m => (cnt(m, I("wheat_item")) > 0 ? "wheat_item" : cnt(m, I("hay_bale")) > 0 ? "hay_bale" : null);
 const ready = (r, t) => r.tamed && !isFoal(r) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS);
 // The paddock adult to feed so a pair breeds, or null: never past 4 horses (a pair makes one foal), never a third willing one.
@@ -325,7 +326,7 @@ function taskStep(m, S, dt, out) {
     TR().inv.remove(m.inv, I(f), 1);
     const used = H.feed(h, f, m);
     if (!used) TR().inv.add(m.inv, I(f), 1);            // it wanted nothing (calm and fed): it is as tame as it gets
-    if (!used || Math.random() * 100 < r.temper) {
+    if (!used || RS(m).next() * 100 < r.temper) {
       H.tame(h, st.owner); H.leash(h, m);
       r.caught = 1;
       log("tamed", m, { hid: r.hid, temper: r.temper });
@@ -396,7 +397,7 @@ function shopStep(m, S, dt, out, tk) {
   }
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;   // visual
   if ((S.tt -= dt) > 0) return true;
   const done = doDeal(m, deal);
   if (done && BF.villageLife.particles) BF.villageLife.particles(m.position.x, m.position.y + 1.5, m.position.z, "#2fd06a", 5, 0.4);
@@ -425,7 +426,7 @@ function ai(m, dt, out) {
   if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
     if ((S.cd -= dt) > 0) return false;
-    S.cd = rnd(1.5, 3);
+    S.cd = rnd(RS(m), 1.5, 3);
     let tk = null;
     try { tk = pickTask(m, S); } catch (e) { console.error(e); }
     if (!tk) return false;

@@ -26,7 +26,8 @@ const STYLES = ["plains", "desert", "snowy", "savanna", "taiga"];
 const BP = () => BF.blueprints;
 const TR = () => BF.trades;
 const W = () => BF.world;
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const pending = new Map();         // village key -> built list (same array as rec.built)
 const log = [];
 const pool = [];                   // placement particles
@@ -194,7 +195,7 @@ function startStock(v) {
   ex[found] = (ex[found] || 0) + FILL_SPARE;
   if (BF.I.red_bed != null && bedsFromFurniture(v && v.village)) delete ex[BF.I.red_bed];
   for (const k in ex) T.add(a, +k, ex[k]);
-  T.add(a, BF.I.emerald, Math.floor(rnd(40, 81)));
+  T.add(a, BF.I.emerald, Math.floor(rnd(RS(v), 40, 81)));
   if (BF.I.bucket != null) T.add(a, BF.I.bucket, 1);        // an empty bucket: the well's water is carried in it
   return a;
 }
@@ -430,7 +431,7 @@ function chooseFood(m, bs) {
       if (!pool.length) return null;
       let sum = 0;
       for (const t of pool) sum += wt(t);
-      let r = Math.random() * sum, pick = pool[pool.length - 1];
+      let r = RS(m).next() * sum, pick = pool[pool.length - 1];
       for (const t of pool) if ((r -= wt(t)) <= 0) { pick = t; break; }
       if (check(pick)) return pick;
       out.add(pick);
@@ -517,7 +518,7 @@ function pickType(m, bs) {
   while (ws.length) {
     let sum = 0;
     for (const w of ws) sum += w[1];
-    let r = Math.random() * sum, t = ws[ws.length - 1][0];
+    let r = RS(m).next() * sum, t = ws[ws.length - 1][0];
     for (const [k, x] of ws) if ((r -= x) <= 0) { t = k; break; }
     if (t !== "food_jobsite") return t;
     const sub = chooseFood(m, bs);
@@ -528,7 +529,7 @@ function pickType(m, bs) {
   return null;
 }
 
-function newState() { return BF.ids.refs({ mode: "idle", t: rnd(1, 3), cool: 0, stage: null, fail: {}, avoid: {}, placeT: 0.6, entry: null, want: null, losT: 0, losFor: -1 }); }
+function newState(m) { return BF.ids.refs({ mode: "idle", t: rnd(RS(m), 1, 3), cool: 0, stage: null, fail: {}, avoid: {}, placeT: 0.6, entry: null, want: null, losT: 0, losFor: -1 }); }
 const nextId = built => built.reduce((a, e) => Math.max(a, e.id || 0), 0) + 1;
 function logEvent(kind, m, data) {
   const e = Object.assign({ kind, day: +dayNow().toFixed(3), builder: m && m.slot ? m.slot.idx : null }, data);
@@ -784,9 +785,9 @@ function emitParticles(x, y, z, id) {
   for (let i = 0; i < 5; i++) {
     if (pool.length > 90) { const o = pool.shift(); BF.scene.remove(o.mesh); }
     const mesh = new THREE.Mesh(partGeo, mat);
-    mesh.position.set(x + 0.2 + Math.random() * 0.6, y + 0.3 + Math.random() * 0.5, z + 0.2 + Math.random() * 0.6);
+    mesh.position.set(x + 0.2 + Math.random() * 0.6, y + 0.3 + Math.random() * 0.5, z + 0.2 + Math.random() * 0.6);   // visual
     BF.scene.add(mesh);
-    pool.push({ mesh, vx: (Math.random() - 0.5) * 2, vy: 1 + Math.random() * 2, vz: (Math.random() - 0.5) * 2, life: 0.45 + Math.random() * 0.3 });
+    pool.push({ mesh, vx: (Math.random() - 0.5) * 2, vy: 1 + Math.random() * 2, vz: (Math.random() - 0.5) * 2, life: 0.45 + Math.random() * 0.3 });   // visual
   }
 }
 function advance(e, by) { e.prog += by || 1; }
@@ -863,14 +864,14 @@ function finish(m, bs, e) {
   if (e.glaze) {   // windows filled in: the structure was already built
     e.glaze = false; e.state = "done";
     if (BF.villageSim) BF.villageSim.done(m);
-    bs.mode = "idle"; bs.entry = null; bs.cool = rnd(10, 20); bs.t = 3; m.ai.route = null;
+    bs.mode = "idle"; bs.entry = null; bs.cool = rnd(RS(m), 10, 20); bs.t = 3; m.ai.route = null;
     logEvent("glazed", m, { type: e.type, at: [e.ox, e.oy, e.oz], left: (e.gaps || []).length });
     if (BF.vlog && m.village) BF.vlog.log(m.village, "build", BF.vlog.nameOf(m) + " (Builder) put glass panes in the windows of " + what(e, true) + " at " + e.ox + ", " + e.oy + ", " + e.oz, [e.ox, e.oy, e.oz]);
     return;
   }
   e.state = "done"; e.end = +dayNow().toFixed(3);
   if (BF.villageSim) BF.villageSim.done(m);
-  bs.mode = "idle"; bs.entry = null; bs.cool = rnd(40, 80); bs.t = 3; m.ai.route = null;
+  bs.mode = "idle"; bs.entry = null; bs.cool = rnd(RS(m), 40, 80); bs.t = 3; m.ai.route = null;
   const bp = bpOf(e);
   if (bp.house && m.slot && e.claim === m.slot.idx && m.bed && homeFor(e).beds.some(b => sameBed(b, m.bed))) m.home = homeFor(e);   // it took a bed here as it placed it (firstDibs): this is its home now
   logEvent("done", m, { type: e.type, at: [e.ox, e.oy, e.oz], blocks: e.n, skipped: e.skipped || 0 });
@@ -972,7 +973,7 @@ function buildMode(m, bs, dt, out) {
     ai.mode = "idle"; ai.t = 2;
     if (bs.placeT > 0) return true;
     const r = placeCell(m, bs, e);
-    if (r === "placed") { bs.placeT = rnd(BLOCK_T[0], BLOCK_T[1]); bs.cands = null; }
+    if (r === "placed") { bs.placeT = rnd(RS(m), BLOCK_T[0], BLOCK_T[1]); bs.cands = null; }
     else if (r === "missing") { toShop(m, bs, e); }
     else if (r === "nowater") { bs.mode = "fill"; bs.fill = { t: 0, cd: 0, src: null, act: 0, bad: 0 }; ai.route = null; bs.goal = null; }
     else if (r === "skipped") bs.placeT = 0.05;
@@ -1078,8 +1079,8 @@ function shopMode(m, bs, dt, out) {
     }
     else {
       if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
-      bs.stage = "wait"; bs.t = rnd(RECHECK[0], RECHECK[1]);
-      if (!e && Math.random() < 0.5) { bs.mode = "idle"; bs.want = null; bs.cool = 0; bs.t = 1; }   // look at other plans too
+      bs.stage = "wait"; bs.t = rnd(RS(m), RECHECK[0], RECHECK[1]);
+      if (!e && RS(m).next() < 0.5) { bs.mode = "idle"; bs.want = null; bs.cool = 0; bs.t = 1; }   // look at other plans too
     }
     return false;
   }
@@ -1104,7 +1105,7 @@ function shopMode(m, bs, dt, out) {
     if (d > 3.6) { bs.stage = "walk"; return true; }
     out.faceX = v2.position.x; out.faceZ = v2.position.z;
     m.lookAt = v2; ai.mode = "idle"; ai.t = 2;
-    if (bs.tt > TRADE_PAUSE - 0.5 && Math.random() < dt * 4) ai.swingT = 0.2;
+    if (bs.tt > TRADE_PAUSE - 0.5 && Math.random() < dt * 4) ai.swingT = 0.2;   // visual
     if (bs.tt <= 0) {
       doDeal(m, bs, deal);
       bs.deal = null; bs.stage = "think"; bs.t = 0;
@@ -1150,7 +1151,7 @@ function digDirt(m, bs, dt, out) {
 function ai(m, dt, out) {
   const R = m.village;
   if (!R || !R.wg || !BF.blueprints || !m.inv) return false;
-  const bs = m.bs || (m.bs = newState());
+  const bs = m.bs || (m.bs = newState(m));
   if (BF.villageLife) BF.villageLife.ensureKit(m);
   if (!allowed()) {
     if (bs.mode !== "idle") { bs.mode = "idle"; bs.stage = null; bs.goal = null; bs.deal = null; m.ai.route = null; bs.want = null; bs.entry = null; if (BF.villageSim) BF.villageSim.done(m); }
@@ -1160,7 +1161,7 @@ function ai(m, dt, out) {
   switch (bs.mode) {
     case "idle":
       bs.t -= dt;
-      if (bs.t <= 0) { bs.t = 2 + Math.random() * 2; think(m, bs); }
+      if (bs.t <= 0) { bs.t = 2 + RS(m).next() * 2; think(m, bs); }
       return false;
     case "build": return buildMode(m, bs, dt, out);
     case "fill": return fillMode(m, bs, dt, out);

@@ -37,7 +37,8 @@ const TREAT_GAP = 1;             // ... and eat one at most once a day
 const TREAT_HAPPY = 3;           // a treat eaten in the last 3 days counts toward happiness
 const BUY_BY = 0.4;
 
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 const live = o => !!(o && !o.dead && !o.removed);
@@ -207,7 +208,7 @@ function mayHire(m, s) {
 }
 
 // ---------------------------------------------------------------- the baker's day
-const st = m => m.bkr || (m.bkr = { stage: null, job: null, checkT: rnd(1, 4), avoid: {}, cd: 0, noFuelDay: -1 });
+const st = m => m.bkr || (m.bkr = { stage: null, job: null, checkT: rnd(RS(m), 1, 4), avoid: {}, cd: 0, noFuelDay: -1 });
 const avoided = (S, k) => (S.avoid[k] || 0) > now();
 const skipOffer = S => (v2, o) => avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id);
 const ovenOf = m => (m.jobsite && isOven(BF.world.getBlock(m.jobsite.x, m.jobsite.y, m.jobsite.z)) ? m.jobsite : null);
@@ -355,7 +356,7 @@ function ai(m, dt, out, cont) {
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.3 };
     const o = ovenAt(s.x, s.y, s.z);
     if (S.stage === "work") {
-      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       if (job.kind === "collect") { finish(m, S, true); S.stage = null; S.job = null; vdone(m); S.checkT = 0.5; return true; }
       makeSugar(m);
       const n = load(m, o, job.what, job.n, fuelOk(m));
@@ -369,7 +370,7 @@ function ai(m, dt, out, cont) {
     if (!(o.n > 0)) { finish(m, S, false); S.stage = null; S.job = null; vdone(m); S.checkT = 0.5; return true; }
     topUp(m, o, fuelOk(m));
     if (S.waitT > BAKE_T[o.kind || "cake"] * 1.5 * (o.n + 1) + 40 || (o.burn <= 0 && !o.fuel && S.waitT > 3)) return giveUp(o.burn <= 0 && !o.fuel ? "out of fuel" : "too slow");
-    if (Math.random() < dt * 0.5) a.swingT = 0.2;
+    if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
   // buying (an ingredient or fuel) at the seller's own offer
@@ -387,7 +388,7 @@ function ai(m, dt, out, cont) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const milk = job.item === I("milk_bottle");
     if (milk) clearRes();
@@ -429,7 +430,7 @@ function treatWanted(m) {
   if (!m || m.child || m.profession === PROF || !m.village || !Array.isArray(m.inv) || skyT() > BUY_BY || !hasBaker(m.village)) return false;
   const L = BF.food && BF.food.life(m), t = now();
   if (!L) return false;
-  if (L.tb == null) L.tb = t - Math.random() * TREAT_EVERY;   // first look: spread the village out
+  if (L.tb == null) L.tb = t - RS(m).next() * TREAT_EVERY;   // first look: spread the village out
   return t - L.tb >= TREAT_EVERY && treatHeld(m) === 0 && cnt(m, I("emerald")) >= 2;
 }
 // The best treat offer of seller v2 (its job offer or anyone's spare treats): {seller, offer, times: 1, price, item, treat: true} or null.

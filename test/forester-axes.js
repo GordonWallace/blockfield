@@ -97,7 +97,7 @@ module.exports = async (pg, out) => {
       if (moved) {
         chop += dt;
         if (A.ai.swingT > lastSw) swings++;
-        if (A.heldMesh) held = { visible: A.heldMesh.visible, item: BF.items[A.heldId].name, parent: A.heldMesh.parent === A.meshes.arms };
+        if (A.held != null && !held) { BF.mobView.render(0); const v = BF.mobView.viewOf(A); if (v && v.heldMesh) held = { visible: v.heldMesh.visible, item: BF.items[v.heldId].name, parent: v.heldMesh.parent === v.meshes.arms }; }   // as drawn (js/mobview.js)
         if (opts && opts.stopAfter && chop >= opts.stopAfter && !stop) stop = { done: k.done, t };
       }
       lastSw = A.ai.swingT;
@@ -190,7 +190,8 @@ module.exports = async (pg, out) => {
     res.run2 = run();
     res.second = A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count);
     res.holds = F.axeOf(A) && BF.items[F.axeOf(A).id].name;
-    res.drawn = A.heldMesh && A.heldMesh.visible && BF.items[A.heldId].name;
+    BF.mobView.render(0); const AV = BF.mobView.viewOf(A);
+    res.drawn = AV && AV.heldMesh && AV.heldMesh.visible && BF.items[AV.heldId].name;
     // nothing better on sale: no trip
     st.shopT = 0; st.thinkT = 0; BF.mobs.update(0.05);
     res.thirdTask = A.fo.task && A.fo.task.kind;

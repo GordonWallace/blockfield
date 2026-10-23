@@ -111,7 +111,7 @@ function embody(r) {
   m.horse = r; r.mob = m;
   m.kind = "horse"; m.ctl = RIDE;
   m.maxHp = r.maxHp; m.hp = clamp(r.hp, 1, r.maxHp);
-  m.yaw = r.yaw; m.model.rotation.y = r.yaw;
+  m.yaw = r.yaw;
   BF.mobs.setLook(m, variantOf(r));
   syncLook(m);
   if (r.lead && r.lead.kind === "post") r.post = [r.lead.x, r.lead.y, r.lead.z];
@@ -121,7 +121,7 @@ function syncLook(m) {
   const r = m.horse;
   BF.mobs.showPart(m, "saddle", r.saddle && r.growAt == null);
   const k = r.growAt != null ? clamp(1 - (r.growAt - now()) / FOAL_DAYS, 0, 1) : 1, s = 0.5 + 0.5 * k;
-  if (m._k == null || Math.abs(m._k - s) > 0.02) { m._k = s; m.model.scale.setScalar(s); m.halfWidth = 0.7 * (0.6 + 0.4 * k); m.height = 1.6 * s; }
+  if (m._k == null || Math.abs(m._k - s) > 0.02) { m._k = s; m.scale = s; m.halfWidth = 0.7 * (0.6 + 0.4 * k); m.height = 1.6 * s; }
 }
 // Copies the live mob's state into its record (before saving, and when the mob goes away).
 function store(r) {
@@ -357,9 +357,10 @@ function spawnHerdAt(x, z) {
 
 // ---------------------------------------------------------------- lead lines
 const leadLines = new Map();   // hid -> THREE.Line
-let leadMat = null;
+let leadMat = null, leadA = null, leadB = null;
 function drawLeads() {
   const scene = BF.scene || (BF.world && BF.world.scene);
+  if (!leadA) { leadA = new THREE.Vector3(); leadB = new THREE.Vector3(); }
   for (const [hid, line] of leadLines) { const r = recs.get(hid); if (!r || !r.lead || !r.mob || !live(r.mob)) { if (line.parent) line.parent.remove(line); leadLines.delete(hid); } }
   for (const r of recs.values()) {
     if (!r.lead || !r.mob || !live(r.mob)) continue;
@@ -371,16 +372,16 @@ function drawLeads() {
       g.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(9 * 3), 3));
       line = new THREE.Line(g, leadMat);
       line.frustumCulled = false;
-      const root = m.root && m.root.parent;
-      if (!root) continue;
-      root.add(line);
+      if (!scene) continue;
+      scene.add(line);   // (r15-12 moves the leads into a render layer)
       leadLines.set(r.hid, line);
     }
-    const fw = [Math.sin(m.yaw), Math.cos(m.yaw)], s = m._k || 1;
-    const a = [m.position.x + fw[0] * 1.0 * s, m.position.y + 1.45 * s, m.position.z + fw[1] * 1.0 * s];
+    const fw = [Math.sin(m.yaw), Math.cos(m.yaw)], s = m._k || 1, V = BF.mobView;
+    const mp = V ? V.drawPos(m, leadA) : m.position;   // where the horse is drawn (js/mobview.js)
+    const a = [mp.x + fw[0] * 1.0 * s, mp.y + 1.45 * s, mp.z + fw[1] * 1.0 * s];
     let b;
     if (r.lead.kind === "player") { const e = P.eyePos(), d = P.lookDir(); b = [e.x + d.x * 0.4 - d.z * 0.3, e.y - 0.5, e.z + d.z * 0.4 + d.x * 0.3]; }
-    else if (r.lead.kind === "mob") { const h = r.lead.mob; b = [h.position.x, h.position.y + 1.0, h.position.z]; }
+    else if (r.lead.kind === "mob") { const h = r.lead.mob, hp = V ? V.drawPos(h, leadB) : h.position; b = [hp.x, hp.y + 1.0, hp.z]; }
     else b = [r.lead.x + 0.5, r.lead.y + 0.75, r.lead.z + 0.5];
     const arr = line.geometry.attributes.position.array;
     const sag = Math.max(0, 1.2 - Math.hypot(a[0] - b[0], a[2] - b[2]) * 0.2);
@@ -499,8 +500,7 @@ function drive(m, dt, input) {
     if (dmg > 0) BF.mobs.hurt(m, dmg, "a fall");
     m.fallStart = m.position.y;
   }
-  // walking animation and the model's facing (mobs.js skips its own physics for a ridden horse)
-  m.model.rotation.y = m.yaw;
+  // (mobs.js skips its own physics for a ridden horse; js/mobview.js draws it facing m.yaw)
   if (BF.RENDER[W.getBlock(m.position.x, m.position.y + m.height * 0.9, m.position.z)] === 3) { P.dismount(); return 0; }   // no carrying a rider under water
   if (!live(m)) { if (P.vehicle === m) P.dismount(); return 0; }
   return yawD;

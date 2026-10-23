@@ -154,8 +154,7 @@ function freeBed(rec, self) {
 // ---------- child look ----------
 function setChildLook(m, k) {        // k = 0 child .. 1 adult
   const s = CHILD_SCALE + (1 - CHILD_SCALE) * k, hs = CHILD_HEAD + (1 - CHILD_HEAD) * k;
-  m.model.scale.setScalar(s);
-  if (m.meshes && m.meshes.head) m.meshes.head.scale.setScalar(hs);
+  m.scale = s; m.headScale = hs;   // (drawn by js/mobview.js)
   m.height = CHILD_H + (ADULT_H - CHILD_H) * k;
   m.halfWidth = CHILD_HW + (ADULT_HW - CHILD_HW) * k;
 }

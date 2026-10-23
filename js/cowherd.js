@@ -44,8 +44,9 @@ const STEAK_CAP = 24;         // ... while it holds fewer than this many steaks
 const WORK_END = 0.5, COOK_END = 0.45;
 const TASK_MAX = 45, LEAD_MAX = 240;
 
-const rnd = (a, b) => a + Math.random() * (b - a);
-const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const rndInt = (r, a, b) => a + r.int(b - a + 1);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
@@ -316,8 +317,8 @@ function adoptOrRelease(m) {
 function pickPastureTarget(m) {
   const p = m.pasture;
   if (!p) return false;
-  m.ai.tx = p.x0 + 0.8 + Math.random() * (p.x1 - p.x0 - 1.6);
-  m.ai.tz = p.z0 + 0.8 + Math.random() * (p.z1 - p.z0 - 1.6);
+  m.ai.tx = p.x0 + 0.8 + RS(m).next() * (p.x1 - p.x0 - 1.6);
+  m.ai.tz = p.z0 + 0.8 + RS(m).next() * (p.z1 - p.z0 - 1.6);
   return true;
 }
 // A pasture cow never walks into the fence or out of the gate.
@@ -392,7 +393,7 @@ function kitInto(a, v) {
 function hireKit(m) { return !!(m && Array.isArray(m.inv) && kitInto(m.inv, m)); }
 
 // ---------------------------------------------------------------- the cowherd
-const cwk = m => m.cwk || (m.cwk = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
+const cwk = m => m.cwk || (m.cwk = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
 // The pasture this cowherd works: the one its milk churn stands beside (fence within 4.5 blocks).
 function pastureOf(m) {
   const S = cwk(m);
@@ -553,7 +554,7 @@ function perform(m, tk) {
   // cull: the cowherd keeps the cow's drops (1-3 raw beef, 0-2 leather) to sell
   const herdP = o.pasture;
   BF.mobs.hurt(o, 999, "a cowherd");
-  const beef = loot(m, I("raw_beef"), rndInt(1, 3), o), lea = loot(m, I("leather"), rndInt(0, 2), o);
+  const beef = loot(m, I("raw_beef"), rndInt(RS(m), 1, 3), o), lea = loot(m, I("leather"), rndInt(RS(m), 0, 2), o);
   if (herdP) herdP.culls = (herdP.culls | 0) + 1;
   const T2 = tended(m);
   log("culled", { beef, leather: lea, herd: T2.size, limit: T2.limit });
@@ -594,7 +595,7 @@ function lead(m, S, tk, dt, out) {
     arrived: () => {
       log("stocked", { pasture: P.key, herd: P.cows.length });
       vlog(m, "brought a wild cow into the pasture (" + plural(P.cows.length, "cow") + ")");
-      endTask(m, true); S.cd = rnd(0.5, 1);
+      endTask(m, true); S.cd = rnd(RS(m), 0.5, 1);
     },
     failed: (why, d) => { log("leadFailed", why === "nopath" ? { why } : { why, d: +d.toFixed(1) }); endTask(m, false); },
   });
@@ -606,7 +607,7 @@ function ai(m, dt, out) {
   if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
     if ((S.cd -= dt) > 0) return cookAI(m, dt, out, false);
-    S.cd = rnd(1.5, 3);
+    S.cd = rnd(RS(m), 1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return cookAI(m, dt, out, false);
     const VS = BF.villageSim;
@@ -654,7 +655,7 @@ function ai(m, dt, out) {
     try { done = perform(m, tk); } catch (e) { console.error(e); }
     ai.swingT = 0.35;
     endTask(m, done);
-    S.cd = rnd(0.4, 1);
+    S.cd = rnd(RS(m), 0.4, 1);
   }
   return true;
 }
@@ -665,7 +666,7 @@ function ai(m, dt, out) {
 const FU = () => BF.furnaceUse;
 const RAW = () => I("raw_beef"), STEAK = () => I("steak");
 const CHECK = 4, TRADE_PAUSE = 1.6;
-const cst = m => m.cwc || (m.cwc = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 });
+const cst = m => m.cwc || (m.cwc = { stage: null, deal: null, checkT: rnd(RS(m), 1, 5), avoid: {}, cd: 0 });
 const avoided = (S, k) => (S.avoid[k] || 0) > now();
 function toCook(m) {
   if (RAW() == null || STEAK() == null) return 0;
@@ -747,7 +748,7 @@ function cookAI(m, dt, out, cont) {
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.4 };
     if (S.stage === "work") {
-      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = F.load(m, deal, deal.n);
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
@@ -760,7 +761,7 @@ function cookAI(m, dt, out, cont) {
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finishCook(m, deal, false); S.stage = null; S.deal = null; vdone(m); S.checkT = 0.5; return true; }   // all cooked
     F.topUp(m, deal, st);
     if (S.waitT > F.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
-    if (Math.random() < dt * 0.5) a.swingT = 0.2;
+    if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
   // buying fuel
@@ -778,7 +779,7 @@ function cookAI(m, dt, out, cont) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = F.doBuy(m, deal);
     S.stage = null; S.deal = null; vdone(m); S.gx = null; S.checkT = 0.5;

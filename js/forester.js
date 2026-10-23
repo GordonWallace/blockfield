@@ -24,8 +24,9 @@
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
-const rnd = (a, b) => a + Math.random() * (b - a);
-const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const ri = (r, a, b) => a + r.int(b - a + 1);
 const T = () => BF.trades;
 
 const SPECIES = ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry"];
@@ -111,28 +112,28 @@ function hook() {
 }
 
 // Tree shapes: [logs, leaves] as [dx, dy, dz] lists around the sapling cell (dy 0 = the sapling's own cell).
-function shape(sp) {
+function shape(sp, r) {
   const logs = [], leaves = [];
   const trunk = h => { for (let y = 0; y < h; y++) logs.push([0, y, 0]); };
   const disc = (y, r, trim) => {
     for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
       if (dx * dx + dz * dz > r * r + r * 0.8) continue;
-      if (trim && Math.abs(dx) === r && Math.abs(dz) === r && Math.random() < trim) continue;
+      if (trim && Math.abs(dx) === r && Math.abs(dz) === r && r.next() < trim) continue;
       leaves.push([dx, y, dz]);
     }
   };
   if (sp === "spruce") {
-    const h = ri(6, 9); trunk(h);
+    const h = ri(r, 6, 9); trunk(h);
     for (let k = 0; k <= h - 2; k++) disc(h - k, Math.min(3, Math.ceil(k / 2)), 0);
     leaves.push([0, h + 1, 0]);
   } else if (sp === "acacia") {
-    const h = ri(4, 5); trunk(h); disc(h, 3, 0.6); disc(h + 1, 2, 0);
+    const h = ri(r, 4, 5); trunk(h); disc(h, 3, 0.6); disc(h + 1, 2, 0);
   } else if (sp === "jungle") {
-    const h = ri(6, 9); trunk(h); disc(h - 3, 3, 0.5); disc(h - 2, 3, 0.5); disc(h - 1, 2, 0); disc(h, 1, 0.99);
+    const h = ri(r, 6, 9); trunk(h); disc(h - 3, 3, 0.5); disc(h - 2, 3, 0.5); disc(h - 1, 2, 0); disc(h, 1, 0.99);
   } else if (sp === "dark_oak" || sp === "cherry") {
-    const h = ri(5, 7); trunk(h); disc(h - 2, 3, 0.6); disc(h - 1, 3, 0.6); disc(h, 2, 0); disc(h + 1, 1, 0.99);
+    const h = ri(r, 5, 7); trunk(h); disc(h - 2, 3, 0.6); disc(h - 1, 3, 0.6); disc(h, 2, 0); disc(h + 1, 1, 0.99);
   } else {   // oak, birch
-    const h = sp === "birch" ? ri(5, 7) : ri(4, 6); trunk(h); disc(h - 3, 2, 0.6); disc(h - 2, 2, 0.6); disc(h - 1, 1, 0); disc(h, 1, 0.99);
+    const h = sp === "birch" ? ri(r, 5, 7) : ri(r, 4, 6); trunk(h); disc(h - 3, 2, 0.6); disc(h - 2, 2, 0.6); disc(h - 1, 1, 0); disc(h, 1, 0.99);
   }
   return { logs, leaves };
 }
@@ -140,7 +141,7 @@ function shape(sp) {
 function growTree(x, y, z) {
   const sp = sapOf(get(x, y, z));
   if (!sp || !isSoil(get(x, y - 1, z))) return false;
-  const s = shape(sp), B = BF.B, world = W();
+  const s = shape(sp, BF.rand.at("tree", x, z, null, y)), B = BF.B, world = W();
   for (const [dx, dy, dz] of s.logs) {
     const cur = get(x + dx, y + dy, z + dz);
     if (!(cur === 0 || isLeaf(cur) || isPlant(cur))) return false;   // a plant includes the sapling itself
@@ -162,7 +163,7 @@ function growTick() {
   for (const [k, s] of saps) {
     if (!W().isLoaded(s.x, s.z)) continue;
     if (!isSap(get(s.x, s.y, s.z))) { saps.delete(k); continue; }
-    if (Math.random() < GROW_PER_S * dt * (BF.weather && BF.weather.raining ? 1.3 : 1)) { if (growTree(s.x, s.y, s.z)) saps.delete(k); }
+    if (BF.rand.at("sapling", s.x, s.z, null, s.y).next() < GROW_PER_S * dt * (BF.weather && BF.weather.raining ? 1.3 : 1)) { if (growTree(s.x, s.y, s.z)) saps.delete(k); }
   }
 }
 {
@@ -332,7 +333,7 @@ function buyAxe(m, deal) {
 }
 
 // ---------------------------------------------------------------- the forester's day
-const state = m => m.fo || (m.fo = { task: null, plantCd: rnd(2, 8), cutCd: rnd(4, 12), gatherCd: 0, shopT: rnd(1, 4), t: 0, nav: { navWait: 0, navFail: 0 }, chop: 0, claim: null, saved: null, avoid: new Map() });
+const state = m => m.fo || (m.fo = { task: null, plantCd: rnd(RS(m), 2, 8), cutCd: rnd(RS(m), 4, 12), gatherCd: 0, shopT: rnd(RS(m), 1, 4), t: 0, nav: { navWait: 0, navFail: 0 }, chop: 0, claim: null, saved: null, avoid: new Map() });
 const freeSlots = m => m.inv.reduce((n, s) => n + (s ? 0 : 1), 0);
 const holdsSapling = m => { for (const s of m.inv) if (s && /_sapling$/.test(BF.items[s.id].name)) return s; return null; };
 const claims = new Map();   // "x,y,z" of a tree base or a drop -> villager, so two foresters do not go for the same tree
@@ -350,8 +351,8 @@ const inHome = (m, x, z) => { const b = boxOf(m); if (b) return boxDist(b, x, z)
 function edgePoint(m) {
   const b = boxOf(m);
   if (!b) return null;
-  const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2, a = Math.random() * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a);
-  const t = Math.min(Math.abs(dx) > 1e-6 ? (b.maxX - b.minX) / 2 / Math.abs(dx) : Infinity, Math.abs(dz) > 1e-6 ? (b.maxZ - b.minZ) / 2 / Math.abs(dz) : Infinity) + rnd(4, SIZED_PLANT - 2);
+  const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2, a = RS(m).next() * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a);
+  const t = Math.min(Math.abs(dx) > 1e-6 ? (b.maxX - b.minX) / 2 / Math.abs(dx) : Infinity, Math.abs(dz) > 1e-6 ? (b.maxZ - b.minZ) / 2 / Math.abs(dz) : Infinity) + rnd(RS(m), 4, SIZED_PLANT - 2);
   const x = Math.floor(cx + dx * t), z = Math.floor(cz + dz * t);
   if (!W().isLoaded(x, z)) return null;
   return { x, y: W().heightAt(x, z) + 1, z };
@@ -394,7 +395,7 @@ function findSpot(m, at) {
       if (clear) cands.push([x, y, z]);
     }
   }
-  for (let i = cands.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cands[i], cands[j]] = [cands[j], cands[i]]; }
+  for (let i = cands.length - 1; i > 0; i--) { const j = Math.floor(RS(m).next() * (i + 1)); [cands[i], cands[j]] = [cands[j], cands[i]]; }
   for (const [x, y, z] of cands) {
     if (claims.has(pk(x, y, z)) && claims.get(pk(x, y, z)) !== m) continue;
     if (near(x, y, z, doors, DOOR_AVOID * DOOR_AVOID) || nearBuilt(x, z)) continue;
@@ -416,7 +417,7 @@ function findTree(m) {
     const d = Math.hypot(x + 0.5 - pos.x, z + 0.5 - pos.z);
     if (box ? boxDist(box, x + 0.5, z + 0.5) > SIZED_CUT : d > CUT_SEARCH || Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) > CUT_HOME) continue;
     if (!W().isLoaded(x, z)) continue;
-    for (let y = y0; y <= y1; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z, d * (0.5 + 1.5 * Math.random())]);
+    for (let y = y0; y <= y1; y++) if (isLog(get(x, y, z)) && !isLog(get(x, y - 1, z))) cands.push([x, y, z, d * (0.5 + 1.5 * RS(m).next())]);
   }
   cands.sort((a, b) => a[3] - b[3]);
   const now = nowS();
@@ -579,7 +580,7 @@ function ai(m, dt, out) {
       if (F.cutCd <= 0 && freeSlots(m) >= MIN_FREE) { const tr = findTree(m); if (tr) opts.push([W_CUT, { kind: "cut", tree: tr, x: tr.base[0], y: tr.base[1], z: tr.base[2], max: CUT_MAX + 2.5 * Math.hypot(tr.base[0] + 0.5 - m.position.x, tr.base[2] + 0.5 - m.position.z) + 1.25 * chopSecs(tr, axeOf(m)), claim: pk(tr.base[0], tr.base[1], tr.base[2]), done: 0 }]); else F.cutCd = 8; }
       if (opts.length) {   // the weighted pick first, then the others; the first whose estimate fits the village's countdown (if any) starts
         const order = [];
-        while (opts.length) { let r = Math.random() * opts.reduce((s, o) => s + o[0], 0), i = 0; for (; i < opts.length - 1; i++) if ((r -= opts[i][0]) < 0) break; order.push(opts.splice(i, 1)[0][1]); }
+        while (opts.length) { let r = RS(m).next() * opts.reduce((s, o) => s + o[0], 0), i = 0; for (; i < opts.length - 1; i++) if ((r -= opts[i][0]) < 0) break; order.push(opts.splice(i, 1)[0][1]); }
         task = order.find(o => begins(m, o)) || null;
       }
     }

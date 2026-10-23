@@ -21,7 +21,8 @@ const FU = BF.furnaceUse;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 const I = n => BF.I[n];
-const rnd = (a, b) => a + Math.random() * (b - a);
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
@@ -33,7 +34,7 @@ const LOG = [];
 const EGG = () => I("egg"), COOKED = () => I("cooked_egg");
 const count = (m, id) => (id == null ? 0 : TR().inv.count(m.inv, id));
 const ems = m => count(m, I("emerald"));
-const state = m => m.eggc || (m.eggc = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 });
+const state = m => m.eggc || (m.eggc = { stage: null, deal: null, checkT: rnd(RS(m), 1, 5), avoid: {}, cd: 0 });
 const avoided = (S, k) => (S.avoid[k] || 0) > dayNow();
 const log = (kind, m, data) => { LOG.push(BF.glog.job("egg-cook", Object.assign({ kind, day: +dayNow().toFixed(3), who: (m.profession || "villager") + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -166,7 +167,7 @@ function ai(m, dt, out, cont) {
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.4 };
     if (S.stage === "work") {
-      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }
+      if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = FU.load(m, deal, deal.n);
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
@@ -181,7 +182,7 @@ function ai(m, dt, out, cont) {
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finish(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; endTask(m); return true; }   // all cooked
     FU.topUp(m, deal, st);
     if (S.waitT > FU.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
-    if (Math.random() < dt * 0.5) a.swingT = 0.2;
+    if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
   // buying fuel
@@ -199,7 +200,7 @@ function ai(m, dt, out, cont) {
   S.tt -= dt;
   if (d > 3.6) { S.stage = "walk"; return true; }
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
-  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;
+  if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = FU.doBuy(m, deal);
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5; endTask(m);

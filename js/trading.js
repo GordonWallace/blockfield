@@ -302,8 +302,9 @@ const PRODUCE = {
 };
 
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
-const rnd = (a, b) => a + Math.random() * (b - a);
-const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const rndInt = (r, a, b) => a + r.int(b - a + 1);
 
 // ---------------------------------------------------------------- inventory helpers (array of {id,count}|null)
 const inv = {
@@ -418,17 +419,17 @@ function stockFor(prof, v) {
   if (prof === "pig_farmer") for (const n of ["raw_porkchop", "cooked_porkchop"]) noStart.add(I[n]);   // culled or cooked, never given (js/pigfarmer.js)
   if (prof === "nitwit" || prof === "unemployed") {
     const junk = ["bread", "bone", "wheat_seeds", "stick", "apple", "rotten_flesh"].map(n => I[n]).filter(x => x !== undefined);
-    for (let k = rndInt(2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(0, junk.length - 1), 1)[0], n: rndInt(2, 6) });
-    entries.push({ id: em, n: rndInt(1, 6) });
+    for (let k = rndInt(RS(v), 2, 3); k > 0 && junk.length; k--) entries.push({ id: junk.splice(rndInt(RS(v), 0, junk.length - 1), 1)[0], n: rndInt(RS(v), 2, 6) });
+    entries.push({ id: em, n: rndInt(RS(v), 1, 6) });
   } else {
     const { caps, wants } = profile(prof);
     const sells = new Map();
     table(prof).forEach(pool => pool.forEach(o => { if (o.sell.id !== em) sells.set(o.sell.id, Math.max(sells.get(o.sell.id) || 0, o.sell.n)); }));
-    for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(.5, 1)))) });
+    for (const [id, cap] of caps) if (!noStart.has(id)) entries.push({ id, n: Math.min(cap, Math.max(sells.get(id), Math.round(cap * rnd(RS(v), .5, 1)))) });
     // the furniture maker gets none of what it buys (wool, boards): it has to buy them from the shepherd and the forester (js/furniture.js seed gives one bed's worth);
     // nor does the toolsmith (ore, ingots, diamonds): it buys them from the miner (js/toolsmith.js); nor the fletcher (js/fletcher.js seed gives a few)
-    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker" && prof !== "glassmaker" && prof !== "beekeeper" && prof !== "pig_farmer") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && Math.random() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(.3, 1)))), want: true });
-    entries.push({ id: em, n: rndInt(6, 24) });
+    if (prof !== "furniture_maker" && prof !== "toolsmith" && prof !== "fletcher" && prof !== "stable_hand" && prof !== "cowherd" && prof !== "baker" && prof !== "glassmaker" && prof !== "beekeeper" && prof !== "pig_farmer") for (const [id, n] of wants) if (!caps.has(id) && !noStart.has(id) && RS(v).next() < .4) entries.push({ id, n: Math.min(stackOf(id), Math.max(1, Math.round(n * rnd(RS(v), .3, 1)))), want: true });
+    entries.push({ id: em, n: rndInt(RS(v), 6, 24) });
   }
   const stacks = e => Math.ceil(e.n / stackOf(e.id));
   let total = entries.reduce((s, e) => s + stacks(e), 0);
@@ -441,15 +442,15 @@ function stockFor(prof, v) {
   }
   for (const e of entries) if (e.n > 0) inv.add(a, e.id, e.n);
   if ((prof === "explorer" || prof === "merchant") && I.tent !== undefined) inv.add(a, I.tent, 1);   // the merchant camps on the road too (js/merchant.js)   // pitches it when night falls far from a bed (js/explorer.js)
-  if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a);   // ingredients for a compass, for a map about half the time
+  if (prof === "cartographer" && BF.cartography) BF.cartography.seed(a, RS(v));   // ingredients for a compass, for a map about half the time
   if (prof === "furniture_maker" && BF.furniture) BF.furniture.seed(a);    // two beds and one bed's worth of wool and planks
-  if (prof === "miner" && BF.miner) BF.miner.seed(a);                      // torches for the shaft
+  if (prof === "miner" && BF.miner) BF.miner.seed(a, RS(v));                      // torches for the shaft
   if (prof === "toolsmith" && BF.toolsmith) BF.toolsmith.seed(a);          // no tools (it makes them), planks and sticks for its first ones
   if (prof === "fletcher" && BF.fletcher) BF.fletcher.seed(a);             // no arrows or bows (it makes them), sticks, flint and feathers for its first arrows
   for (const n of STARTER_TOOLS[prof] || []) if (I[n] != null && !a.some(s => s && s.id === I[n])) inv.add(a, I[n], 1);
   if (prof === "shepherd" && I.wheat_item != null) inv.add(a, I.wheat_item, 8);   // feed for the first days (it buys more when it runs low)
   if (prof === "poultry_keeper" && I.wheat_seeds != null && inv.count(a, I.wheat_seeds) < 12) inv.add(a, I.wheat_seeds, 12 - inv.count(a, I.wheat_seeds));   // chicken feed (js/poultry.js)
-  if (prof === "pig_farmer" && BF.pigFarmer) BF.pigFarmer.seed(a);   // a few carrots and potatoes to feed the sty it starts with (js/pigfarmer.js)
+  if (prof === "pig_farmer" && BF.pigFarmer) BF.pigFarmer.seed(a, RS(v));   // a few carrots and potatoes to feed the sty it starts with (js/pigfarmer.js)
   if (prof === "cowherd" && BF.cowherd) BF.cowherd.kitInto(a, v);   // 1 bucket + 30 glass bottles, once per villager (js/cowherd.js)
   if (prof === "beekeeper" && BF.beekeeper) BF.beekeeper.kitInto(a, v);   // shears + 16 glass bottles, once per villager (js/beekeeper.js)
   return a;
@@ -478,7 +479,7 @@ function hireKit(m, prof) {
   }
   const have = inv.count(m.inv, I.emerald), add = Math.max(0, want - have);
   if (add) inv.add(m.inv, I.emerald, add);
-  if (prof === "miner" && I.torch != null) inv.add(m.inv, I.torch, rndInt(30, 40));
+  if (prof === "miner" && I.torch != null) inv.add(m.inv, I.torch, rndInt(RS(m), 30, 40));
   return add;
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.
