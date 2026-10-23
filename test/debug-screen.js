@@ -71,8 +71,14 @@ const start = async () => {
   ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
   ok('meter on in the game while the screen is open', await game.evaluate(() => BF.perf.on));
   // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
-  const hs = await dbg.evaluate(() => ({ hash: document.getElementById('c-hash').textContent, parts: document.querySelectorAll('#c-hashparts .row').length }));
-  const gh = await game.evaluate(() => BF.stateHash.last && { hash: BF.stateHash.last.hash, parts: BF.stateHash.PARTS.length });
+  // (the game hashes again every 10 s and the screen shows it with the next snapshot: wait, up to 15 s, until both show the same one)
+  let hs, gh;
+  for (let i = 0; i < 30; i++) {
+    hs = await dbg.evaluate(() => ({ hash: document.getElementById('c-hash').textContent, parts: document.querySelectorAll('#c-hashparts .row').length }));
+    gh = await game.evaluate(() => BF.stateHash.last && { hash: BF.stateHash.last.hash, parts: BF.stateHash.PARTS.length });
+    if (gh && hs.hash === gh.hash) break;
+    await dbg.waitForTimeout(500);
+  }
   ok('state hash card shows the game\'s hash and its parts ' + JSON.stringify([hs, gh]), gh && /^[0-9a-f]{16}$/.test(hs.hash) && hs.hash === gh.hash && hs.parts === gh.parts);
   await dbg.screenshot({ path: out + '.png', fullPage: true });
   // server restart: a fresh server has no layout/log; the game must resend both
