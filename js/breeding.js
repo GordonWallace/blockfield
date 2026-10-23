@@ -197,9 +197,9 @@ function heart(x, y, z) {
   const mat = new THREE.SpriteMaterial({ map: heartTexture(), transparent: true, depthWrite: false });
   const sp = new THREE.Sprite(mat);
   sp.scale.set(0.34, 0.3, 1);
-  sp.position.set(x + (Math.random() - 0.5) * 0.5, y + Math.random() * 0.2, z + (Math.random() - 0.5) * 0.5);
+  sp.position.set(x + (Math.random() - 0.5) * 0.5, y + Math.random() * 0.2, z + (Math.random() - 0.5) * 0.5);   // visual
   BF.scene.add(sp);
-  S.hearts.push({ sp, life: 1.4, vy: 0.55 + Math.random() * 0.3, dx: (Math.random() - 0.5) * 0.2 });
+  S.hearts.push({ sp, life: 1.4, vy: 0.55 + Math.random() * 0.3, dx: (Math.random() - 0.5) * 0.2 });   // visual
 }
 const headTop = m => m.position.y + m.height + 0.35;
 function updateHearts(dt) {
@@ -246,7 +246,7 @@ function encounters(rec) {
     if (S.near.has(k)) continue;                 // already rolled this encounter
     S.near.add(k); for (const id of k.split(":")) nearIds.add(id);
     S.stats.encounters++; S.stats.rolls++;
-    if (Math.random() < CHANCE) { if (!startLove(a, b, rec)) { S.near.delete(k); continue; } S.stats.successes++; el[i] = el[j] = false; }
+    if (BF.rand.of(a).next() < CHANCE) { if (!startLove(a, b, rec)) { S.near.delete(k); continue; } S.stats.successes++; el[i] = el[j] = false; }
   }
 }
 function startLove(a, b, rec) {
@@ -289,9 +289,9 @@ function ai(m, dt, out) {
 // Child movement (after wanderAI): quicker steps with a wobble, shorter idles.
 function childMove(m, dt, out) {
   const ai = m.ai;
-  if (ai.mode === "idle" && ai.t > 2.5) ai.t = 1 + Math.random() * 1.5;
+  if (ai.mode === "idle" && ai.t > 2.5) ai.t = 1 + BF.rand.of(m).next() * 1.5;
   if (!out.x && !out.z) return;
-  m.wob = (m.wob || Math.random() * 6) + dt * 4.5;
+  m.wob = (m.wob || BF.rand.of(m).next() * 6) + dt * 4.5;
   const a = Math.sin(m.wob) * 0.55 + Math.sin(m.wob * 2.3) * 0.25, c = Math.cos(a), s = Math.sin(a);
   const x = out.x, z = out.z;
   out.x = (x * c - z * s) * 1.6; out.z = (x * s + z * c) * 1.6;
@@ -442,7 +442,8 @@ function spawnMissing(rec) {
       if (!m.child) e.prof = m.profession;
       e.mob = null;
     }
-    const pos = e.pos || [rec.x + (Math.random() - 0.5) * 8, rec.y != null ? rec.y : BF.world.heightAt(rec.x, rec.z) + 1, rec.z + (Math.random() - 0.5) * 8];
+    const r = e.pos ? null : BF.rand.at("newborn", rec.x, rec.z, null, bredList(rec).indexOf(e));
+    const pos = e.pos || [rec.x + (r.next() - 0.5) * 8, rec.y != null ? rec.y : BF.world.heightAt(rec.x, rec.z) + 1, rec.z + (r.next() - 0.5) * 8];
     if ((BF.planet.distance({ x: pos[0], z: pos[2] }, P) > 72 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) || !BF.world.isLoaded(pos[0], pos[2])) continue;
     const at = standAt(pos[0], pos[1], pos[2]) || standAt(rec.x + 0.5, (rec.y != null ? rec.y : BF.world.heightAt(rec.x, rec.z) + 1), rec.z + 0.5);
     if (!at) continue;
