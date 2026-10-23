@@ -8,6 +8,7 @@
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 
 const RADIUS = 200;       // a village this close to the player is simulated
 const DROP = 216;         // ...and keeps being simulated until it is this far (hysteresis)
@@ -67,7 +68,8 @@ function catchUpChunk(c, away) {
   const pWet = rate(1), pDry = rate(BF.farmland ? BF.farmland.DRY_GROWTH : 1 / 3), DRY = BF.B.farmland_dry;
   const found = [];
   W.scanFlagged(c, G, (x, y, z, id) => { const s = W.chunkBlock(c, x, y - 1, z); if (s === BF.B.farmland || s === DRY) found.push([x, y, z, id, s === DRY]); }, 0, BF.MIN_Y + 2);
-  for (const [x, y, z, id, dry] of found) if (Math.random() < (dry ? pDry : pWet)) W.setBlock(c.cx * CS + x, y, c.cz * CS + z, G[id]);
+  const day = Math.floor(BF.sky ? BF.sky.day || 0 : 0);   // seeded by the chunk and the visit day (js/rand.js)
+  for (const [x, y, z, id, dry] of found) if (BF.rand.at("catchup", c.cx * CS + x, c.cz * CS + z, day, y).next() < (dry ? pDry : pWet)) W.setBlock(c.cx * CS + x, y, c.cz * CS + z, G[id]);
 }
 
 function startCatchUp(key, ent) {

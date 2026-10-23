@@ -38,8 +38,9 @@ const STOCK_TO = 2;           // a builder's pen (idea-044) starts empty: the sh
 const FIND_R = 100;           // how far it looks for a wild sheep (100 for every keeper)
 const H = () => BF.herd;      // shared herding helpers (js/herd.js): leading a sheep home
 
-const rnd = (a, b) => a + Math.random() * (b - a);
-const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
+const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
+const rnd = (r, a, b) => r.range(a, b);
+const rndInt = (r, a, b) => a + r.int(b - a + 1);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.25);
 const now = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
@@ -57,7 +58,7 @@ function stOf(m) {
   if (!m.sheep) m.sheep = { fed: null, shorn: false, woolAt: null, growAt: null, cd: 0, x: null, z: null, mob: m };
   return m.sheep;
 }
-const regrowDays = () => REGROW_DAYS * (1 + (Math.random() + Math.random() - 1) * REGROW_VAR);
+const regrowDays = () => { const r = BF.rand.at("regrow", 0, 0); return REGROW_DAYS * (1 + (r.next() + r.next() - 1) * REGROW_VAR); };   // seeded by the tick (js/rand.js)
 const isLamb = m => !!(m.sheep && m.sheep.growAt != null);
 const hungry = (m, t) => { const s = m.sheep; return !s || s.fed == null || t - s.fed >= FEED_DAYS; };
 const willing = (m, t) => { const s = m.sheep; return !!(s && live(m) && s.growAt == null && s.fed != null && t - s.fed < FEED_DAYS && t >= s.cd); };
@@ -94,7 +95,7 @@ function shear(m, by) {
   syncLook(m);
   fx(m, "#e9e9e6", 8); snd("sheep", m, 0.5);
   if (BF.emit) BF.emit("sheepShorn", m, by);
-  return rndInt(1, 3);
+  return rndInt(RS(m), 1, 3);
 }
 function dropItem(id, n, m) {
   if (id == null || n <= 0) return;
@@ -162,14 +163,14 @@ function sheepAI(m, dt, out) {
   if (m.mate && (!live(m.mate) || !willing(m.mate, t))) m.mate = null;
   if (!m.mate) {
     if (m.mateT > 0) return false;
-    m.mateT = rnd(1, 2);
+    m.mateT = rnd(RS(m), 1, 2);
     m.mate = findMate(m, t);
     if (!m.mate) return false;
     m.mateSeek = 0;
   }
   const o = m.mate, dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d = Math.hypot(dx, dz);
   m.mateSeek += dt;
-  if (d > MATE_R + 4 || m.mateSeek > 25) { m.mate = null; m.mateT = rnd(6, 10); return false; }   // cannot reach it: try again later
+  if (d > MATE_R + 4 || m.mateSeek > 25) { m.mate = null; m.mateT = rnd(RS(m), 6, 10); return false; }   // cannot reach it: try again later
   m.ai.mode = "idle"; m.ai.t = 1; m.lookAt = o;
   if (d < MEET) {
     if (mid(m) < mid(o)) breed(m, o, t);
@@ -312,8 +313,8 @@ function adoptOrRelease(m) {
 function pickPenTarget(m) {
   const p = m.pen;
   if (!p) return false;
-  m.ai.tx = p.x0 + 0.7 + Math.random() * (p.x1 - p.x0 - 1.4);
-  m.ai.tz = p.z0 + 0.7 + Math.random() * (p.z1 - p.z0 - 1.4);
+  m.ai.tx = p.x0 + 0.7 + RS(m).next() * (p.x1 - p.x0 - 1.4);
+  m.ai.tz = p.z0 + 0.7 + RS(m).next() * (p.z1 - p.z0 - 1.4);
   return true;
 }
 // Called from mobs.js after the AI chose a velocity: a penned sheep never walks into the fence, the hay or out of the gate gap.
@@ -382,7 +383,7 @@ function importAll(o) {
 function reset() { pending = new Map(); activePens.length = 0; acc = 0; penT = 0; }
 
 // ---------------------------------------------------------------- the shepherd
-const shp = m => m.shp || (m.shp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
+const shp = m => m.shp || (m.shp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
 
 // Starting kit: a shepherd alive when its village was generated starts with shears and 8 wheat (trading.js stockFor); one hired later gets
 // emeralds and buys its shears (js/villagelife.js toolAI) and wheat. Kept as a no-op for callers of the old API.
@@ -460,7 +461,7 @@ function lead(m, S, tk, dt, out) {
     pen: P, max: LEAD_MAX, penned: o => o.pen === P,
     arrived: () => {
       if (BF.vlog && m.village) BF.vlog.log(m.village, "work", BF.vlog.nameOf(m) + " (Shepherd) brought a wild sheep into the pen (" + P.sheep.length + " sheep)", m);
-      endTask(m, true); S.cd = rnd(0.5, 1);
+      endTask(m, true); S.cd = rnd(RS(m), 0.5, 1);
     },
     failed: () => endTask(m, false),
   });
@@ -503,7 +504,7 @@ function perform(m, tk) {
   // cull: the shepherd keeps the mutton (and the wool the sheep still wears) instead of dropping it
   const wool = o.sheep && !o.sheep.shorn;
   BF.mobs.hurt(o, 999, "a shepherd");
-  loot(m, c.mutton, rndInt(1, 2), o);
+  loot(m, c.mutton, rndInt(RS(m), 1, 2), o);
   if (wool) loot(m, c.wool, 1, o);
   return true;
 }
@@ -541,7 +542,7 @@ function ai(m, dt, out) {
   if (!S.task && leave(m, S, dt, out)) return true;
   if (!S.task) {
     if ((S.cd -= dt) > 0) return false;
-    S.cd = rnd(1.5, 3);
+    S.cd = rnd(RS(m), 1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return false;
     const VS = BF.villageSim;
@@ -577,7 +578,7 @@ function ai(m, dt, out) {
     try { done = perform(m, tk); } catch (e) { console.error(e); }
     ai.swingT = 0.35;
     endTask(m, done);
-    S.cd = rnd(0.4, 1);
+    S.cd = rnd(RS(m), 0.4, 1);
   }
   return true;
 }
@@ -602,7 +603,7 @@ function work(m, J, dt) {
     S.spin = { n, t: n * ((BF.sky && BF.sky.dayLength) || 1200) * SPIN_HOURS / 24 };
   }
   S.spin.t -= dt;
-  if (m.ai && Math.random() < dt) m.ai.swingT = 0.3;
+  if (m.ai && Math.random() < dt) m.ai.swingT = 0.3;   // visual
   if (J && J.t < 3) J.t = 3;   // stays at the loom until the batch is done
   if (S.spin.t > 0) return;
   const c = idsOf(), T = TR().inv;
