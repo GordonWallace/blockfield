@@ -5,8 +5,8 @@
 // a read. Each then loads the nearest village and runs the same `ticks` 0.05 s steps (the main loop's systems, world.update every 20).
 // The "slow" page also moves its clock 2 ms every step, as a busy computer would. Anything in the simulation that reads the wall clock
 // (a cooldown in real seconds, a work budget in ms) then decides differently there, and the checksums differ. The checksum covers every
-// mob (type, position to 1/1024, health, dead), the block edits, the clock, the village sim's kept set and the village stats; r15-24's
-// BF.stateHash replaces it once that merges, and r15-10's fixed tick lets it run through the real frame loop.
+// mob (type, position to 1/1024, health, dead), the block edits, the clock, the village sim's kept set and the village stats, plus every part
+// of r15-24's BF.stateHash; r15-10's fixed tick will let it run through the real frame loop.
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
@@ -64,6 +64,7 @@ async function run(b, slowMs) {
     const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16); };
     const out = {};
     for (const k in parts) out[k] = fnv(parts[k]);
+    if (BF.stateHash) for (const [k, h] of Object.entries(BF.stateHash.parts())) out['stateHash ' + k] = h;   // r15-24's whole-world hash, part by part
     return { parts: out, mobs: BF.mobs.list.length, villagers: BF.mobs.list.filter(m => m.type === 'villager').length, edits: BF.world.edits.size, t: BF.simNow() };
   });
   await pg.close();

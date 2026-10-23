@@ -27,6 +27,7 @@ const FILES = {
   "player.js": "input: Escape grace, touch taps, the player runs in real time",
   "save.js": "save metadata (last played, last saved)",
   "signs.js": "sign editor caret blink",
+  "statehash.js": "how long hashing the world took (debug screen)",
 };
 // Single lines in files that also hold simulation code: [file, text on the line, why it is allowed]
 const LINES = [
