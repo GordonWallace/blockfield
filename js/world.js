@@ -666,6 +666,49 @@ function plan(pcx, pcz) {
     if (far(cx, cz, RU + 3)) dropFar(k);
   }
 }
+// Remeshes the dirty chunks. batch (fast-forward): a chunk outside the player's 3x3 (through chunkC, so across face edges too) waits
+// until remeshFFms() after its last mesh and stays dirty meanwhile. world.lastRemesh counts this frame's work: near, far, held, and its ms.
+// The wait grows with the speed: a big village's far chunks mostly change a few seconds apart, so only a long wait merges their edits
+// (seed 3 at 1000x: 400 ms cut remeshes ~5%, 2 s ~25%, 5 s ~55%; reports/r15-02.md).
+const REMESH_FF_MS = 400;
+const remeshFFms = () => BF.warp.speed >= 1000 ? 5000 : BF.warp.speed >= 100 ? 2000 : REMESH_FF_MS;
+const nearKeys = new Set();
+let ffHeld = 0, ffFar = 0, ffSince = 0;   // fast-forward totals since batching started (logged when it ends)
+function remeshDirty(pcx, pcz, batch) {
+  const now = performance.now(), st = world.lastRemesh;
+  st.near = st.far = st.held = 0;
+  const wait = batch ? remeshFFms() : 0;
+  if (batch) {
+    nearKeys.clear();
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const c = world.chunkC(pcx + dx, pcz + dz); if (c) nearKeys.add(c.key); }
+  }
+  for (const k of world._dirty) {
+    const c = world.chunks.get(k);
+    if (!c || c.mesh === undefined) { world._dirty.delete(k); continue; }
+    const near = !batch || nearKeys.has(k);
+    if (!near && now - (c.meshT || 0) < wait) { st.held++; continue; }
+    buildMesh(c);
+    world._dirty.delete(k);
+    if (near) st.near++; else st.far++;
+  }
+  st.ms = performance.now() - now;
+}
+// Fast-forward totals: batching starts, adds up, and is logged when fast-forward drops below 10x.
+function ffTrack(batch) {
+  const now = performance.now(), st = world.lastRemesh;
+  if (batch) {
+    if (!ffSince) { ffSince = now; ffHeld = ffFar = 0; }
+    ffHeld += st.held; ffFar += st.far;
+  } else if (ffSince) {
+    if (BF.glog) BF.glog.log("DEBUG", "remesh", "Fast-forward remesh batching ended after " + ((now - ffSince) / 1000).toFixed(1) + " s: " +
+      ffFar + " far remeshes, " + ffHeld + " chunk-frames held back");
+    ffSince = 0;
+  }
+}
+world.lastRemesh = { near: 0, far: 0, held: 0, ms: 0 };
+// Remeshes every dirty chunk now (tests reading meshes right after fast-forward).
+world.flushDirty = () => remeshDirty(0, 0, false);
+
 const KEEP = 12;   // chunks from the player that keep their block data on the planet (the spec's 8 would shrink wild mobs' range below 1.3's)
 
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
@@ -698,9 +741,11 @@ world.update = function (px, pz, budgetMs = 8) {
     }
   }
 
-  // edits first: remesh dirty chunks immediately so breaking/placing feels instant
-  for (const k of world._dirty) { const c = world.chunks.get(k); if (c && c.mesh !== undefined) buildMesh(c); }
-  world._dirty.clear();
+  // edits first: remesh dirty chunks immediately so breaking/placing feels instant. In fast-forward (10x and up) a chunk outside the
+  // player's 3x3 is remeshed at most every REMESH_FF_MS, so villager doors, crops and trees don't remesh a big village every frame.
+  const ffBatch = !!(BF.warp && BF.warp.speed >= 10);
+  remeshDirty(pcx, pcz, ffBatch);
+  ffTrack(ffBatch);
 
   const t0 = performance.now();
   let gi = 0, mi = 0;
@@ -820,6 +865,7 @@ const tileRects = {};
 const tileRect = n => tileRects[n] || (tileRects[n] = BF.textures.uv(n));
 
 function buildMesh(c) {
+  c.meshT = performance.now();   // fast-forward remesh batching (remeshDirty)
   const ox = c.cx * CS, oz = c.cz * CS;
   // 3x3 neighbourhood for border lookups
   // On the planet a neighbour across a face edge is EDGE_NB: its cells are read through the world (resolved and turned into this face's
