@@ -244,7 +244,8 @@ function restoreStowed(b, dt) {
 // Mobs that walk into an empty seat get in (not iron golems, sleeping or trading villagers, or one just let out).
 function pickUpMobs(b) {
   if (b.mob || b.stowed || !BF.mobs) return;
-  for (const m of BF.mobs.list) {
+  const L = BF.mobs.near ? BF.mobs.near(b.pos, HW + 2, true) : BF.mobs.list;   // (spec r15-31: the mobs beside the boat)
+  for (const m of L) {
     if (m.dead || m.removed || m.riding || m.rider || m.sleeping || m.tradingWith || (m.def && (m.def.golem || m.def.herd)) || (m.boatCd || 0) > 0) continue;
     const r = HW + m.halfWidth - 0.1, q = seenXZ(b.pos, m.position);
     if (Math.abs(q.x - b.pos.x) > r || Math.abs(q.z - b.pos.z) > r) continue;

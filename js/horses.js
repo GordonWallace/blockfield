@@ -267,12 +267,17 @@ function ai(m, dt, out) {
   }
   // breeding: a willing adult walks to a willing mate (tamed ones of the same owner, or two wild ones)
   if (willing(r, t)) {
-    let best = null, bd = MATE_R;
-    for (const o of BF.mobs.list) {
-      if (o === m || o.type !== "horse" || !live(o) || !o.horse || !willing(o.horse, t) || o.horse.owner !== r.owner) continue;
-      const q = seenXZ(p, o.position), d = Math.hypot(q.x - p.x, q.z - p.z);
-      if (d < bd) { bd = d; best = o; }
-    }
+    let bd = MATE_R;
+    const mateIn = L => {   // (spec r15-31: the mobs near p, checked against the whole list in tests)
+      let best = null; bd = MATE_R;
+      for (const o of L) {
+        if (o === m || o.type !== "horse" || !live(o) || !o.horse || !willing(o.horse, t) || o.horse.owner !== r.owner) continue;
+        const q = seenXZ(p, o.position), d = Math.hypot(q.x - p.x, q.z - p.z);
+        if (d < bd) { bd = d; best = o; }
+      }
+      return best;
+    };
+    const best = BF.mobs.checkScan("horses.mate", mateIn(BF.mobs.near(p, MATE_R, true)), mateIn);
     if (best) {
       if (bd < MEET) { breed(m, best); return false; }
       const q = seenXZ(p, best.position);

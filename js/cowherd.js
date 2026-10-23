@@ -349,8 +349,8 @@ function tick(dt) {
   acc = 0;
   if (H().toShut.length) H().shutGates();
   const t = now();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "cow" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("cow")) {   // (spec r15-31: the cow only)
+    if (!live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
     if (s.growAt != null && s.growAt - t > CALF_DAYS * 2) s.growAt = t + CALF_DAYS;   // time was set back
@@ -407,11 +407,20 @@ function pastureOf(m) {
 // What the cowherd looks after: {pasture, herd (live pasture cows, counted for culling), cows (live cows to feed and milk: the herd and strays
 // near it, or without a pasture the free cows near the churn), strays (free adult cows that can walk into the pasture: those it tends and those
 // within TEND_R of the fence, fed or not), size (the herd, unloaded ones too), limit}.
+// The mobs tended() looks at: those within r of home, or within TEND_R of the fence (spec r15-31): [centre, radius] for BF.mobs.near.
+function reach(home, p, r) {
+  if (!p) return [home, r];
+  const c = { x: (p.fx0 + p.fx1) / 2, z: (p.fz0 + p.fz1) / 2 };   // (the fence's box, as fenceDist)
+  return [c, Math.max(Math.hypot(home.x - c.x, home.z - c.z) + r, Math.hypot(p.fx1 - p.fx0, p.fz1 - p.fz0) / 2 + TEND_R) + 1];
+}
 function tended(m) {
-  const p = pastureOf(m), list = BF.mobs.list;
+  const p = pastureOf(m);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
   const free = o => o.type === "cow" && live(o) && !o.ledBy && !o.pasture && Math.abs(o.position.y - m.position.y) < 6;
   const near = o => free(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (p ? TEND_R : FREE_RADIUS);
+  // (spec r15-31) the free ones near home or the fence, from the mobs around both
+  const mine = o => free(o) && (near(o) || (p && fenceDist(p, o.position.x, o.position.z) <= TEND_R));
+  const list = BF.mobs.checkScan("cowherd.tended", BF.mobs.near(...reach(home, p, p ? TEND_R : FREE_RADIUS)).filter(mine), L => L.filter(mine));
   const herd = p && p.cows ? p.cows.map(s => s.mob).filter(live) : [];
   const cows = herd.concat(list.filter(near));
   const strays = p ? adults(list.filter(o => free(o) && (near(o) || fenceDist(p, o.position.x, o.position.z) <= TEND_R))) : [];
@@ -462,13 +471,16 @@ function feedOk(T, o, t) {
 }
 function wildCow(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
-  let best = null, bd = FIND_R;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "cow" || !live(o) || o.pasture || o.ledBy || isCalf(o) || (S.avoid.get(o.id) || 0) > sim) continue;
-    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best;
+  const scan = L => {
+    let best = null, bd = FIND_R;
+    for (const o of L) {
+      if (o.type !== "cow" || !live(o) || o.pasture || o.ledBy || isCalf(o) || (S.avoid.get(o.id) || 0) > sim) continue;
+      const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  return BF.mobs.checkScan("cowherd.wildCow", scan(BF.mobs.near(c, FIND_R)), scan);
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
@@ -811,7 +823,7 @@ function holdings(m) {
 // Counts for the debug screen: cows loaded near the player, in a pasture and wild.
 function counts() {
   let penned = 0, wild = 0, calves = 0;
-  if (BF.mobs) for (const m of BF.mobs.list) if (m.type === "cow" && live(m)) { if (m.pasture) penned++; else wild++; if (m.calf) calves++; }
+  if (BF.mobs) for (const m of BF.mobs.ofType("cow")) if (live(m)) { if (m.pasture) penned++; else wild++; if (m.calf) calves++; }
   return { penned, wild, calves };
 }
 
