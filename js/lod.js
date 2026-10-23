@@ -393,7 +393,7 @@ lod.reset = function (scene) {
   lod.levels = CELLS.map((cell, lv) => ({ lv, cell, half: cell * HALF, mesh: null, raw: null, building: null, f: -1, cu: 0, cv: 0, gu0: 0, gv0: 0, buildMs: 0, meshMs: 0, show: false }));
   // off by switch: ?nolod in the page's address, or BF.lodOff set before the game starts (tests served over http that time things under
   // software rendering, where seven rings slow every frame)
-  lod.active = !!(BF.planet && BF.planet.isPlanet()) && !lod.disabled();
+  lod.active = !lod.disabled();
   last = null; speed = 0;
   if (!lod.active) { if (BF.sampler) BF.sampler.reset(null); return; }
   if (!lod.pal) lod.pal = palette();

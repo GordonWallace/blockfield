@@ -60,10 +60,10 @@ const out = process.argv[2] || "/tmp/mesh-worker";
           if (d) diffs.push(c.key + ": " + d);
           verts += (p.S ? p.S.pos.length / 3 : 0) + (p.L ? p.L.pos.length / 3 : 0);
         }
-        return { n: pick.length, diffs: diffs.slice(0, 5), nd: diffs.length, verts, planet: W.isPlanet(), sphere: pick.some(c => c.meshes.some(m => m.geometry.attributes.sphere)) };
+        return { n: pick.length, diffs: diffs.slice(0, 5), nd: diffs.length, verts, sphere: pick.some(c => c.meshes.some(m => m.geometry.attributes.sphere)) };
       });
       check(cmp.n >= 30 && cmp.nd === 0, `seed ${seed}: ${cmp.n} worker-meshed chunks equal the page's mesher exactly (${cmp.verts} vertices)`, cmp.nd ? cmp.diffs : undefined);
-      check(cmp.planet && cmp.sphere, `seed ${seed}: planet meshes carry the sphere attribute`);
+      check(cmp.sphere, `seed ${seed}: meshes carry the sphere attribute`);
       // ---- the player's own edits: meshed the same frame, in the page
       const ed = await pg.evaluate(() => {
         const W = BF.world, p = BF.player.position, x = Math.floor(p.x), z = Math.floor(p.z), g = W.heightAt(x, z), c = W.chunkAt(x, z);

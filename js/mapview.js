@@ -25,25 +25,20 @@ const keyOf = (k, zx, zz) => k + "_" + zx + "_" + zz;
 const nameOf = (k, zx, zz) => "auto_map_" + keyOf(k, zx, zz);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const zoneOf = v => Math.floor(v / ZONE);
-const onPlanet = () => !!(BF.planet && BF.planet.isPlanet());
-const maxK = () => (onPlanet() ? Math.min(MAX_K, BF.planet.N / ZONE) : MAX_K);   // on the planet an auto map is at most one face wide
+const maxK = () => Math.min(MAX_K, BF.planet.N / ZONE);   // an auto map is at most one face wide
 const fmtN = v => Math.floor(v).toLocaleString("en-US");
-// A point as map readouts show it: "face 2  u 81,920  v 81,920" on the planet (canonical), "x 12  z -40" otherwise.
+// A point as map readouts show it: "face 2  u 81,920  v 81,920" (canonical).
 function placeText(x, z) {
-  if (!onPlanet()) return "x " + x + "  z " + z;
   const c = BF.planet.canonCell(x, z, {});
   return c.off || c.wedge ? "past the corner (nothing here)" : "face " + c.f + "  u " + fmtN(c.u) + "  v " + fmtN(c.v);
 }
-// The player's position and yaw in a map's frame (on the planet the map stays in its centre's face frame; the player may be on a neighbour).
+// The player's position and yaw in a map's frame (the map stays in its centre's face frame; the player may be on a neighbour).
 const pin = {};
 function playerIn(d) {
   const p = BF.player.position, yaw = BF.player.yaw;
-  pin.x = p.x; pin.z = p.z; pin.yaw = yaw;
-  if (onPlanet()) {
-    const r = BF.planet.rel({ x: d.x0 + d.side / 2, z: d.z0 + d.side / 2 }, p, {});
-    if (r) { pin.x = r.x; pin.z = r.z; pin.yaw = BF.planet.turnYaw(r.turn, yaw); }
-    else { pin.x = pin.z = -1e9; }   // the far side of the planet: off the map
-  }
+  const r = BF.planet.rel({ x: d.x0 + d.side / 2, z: d.z0 + d.side / 2 }, p, {});
+  if (r) { pin.x = r.x; pin.z = r.z; pin.yaw = BF.planet.turnYaw(r.turn, yaw); }
+  else { pin.x = pin.z = -1e9; pin.yaw = yaw; }   // the far side of the planet: off the map
   return pin;
 }
 
@@ -69,7 +64,7 @@ const dataOfItem = it => (it && it.auto ? getAuto(it.auto.k, it.auto.zx, it.auto
 
 // Samples the next cells of the progressive fill until `deadline` (performance.now() ms). Returns true when something changed.
 function step(d, deadline) {
-  const W = BF.worldgen, N = d.N, R = BF.rivers, tintOf = W.tintAt, PL = onPlanet() && BF.world.canonXZ;
+  const W = BF.worldgen, N = d.N, R = BF.rivers, tintOf = W.tintAt;
   let changed = false, n = 0;
   if (R && R.setEnabled && d.scale > RIVER_MAX_SCALE) R.setEnabled(false);   // the river network is traced per 768-block cell: far too slow and big for coarse maps
   if (W.setCoarse && d.scale > COARSE_SCALE) W.setCoarse(true);              // mile-high plateau weights: skip the slope-limit scan
@@ -85,7 +80,7 @@ function step(d, deadline) {
     if (d.pass > 0 && !(ci & 1) && !(cj & 1)) continue;          // already sampled by the coarser pass
     const i = ci * s, j = cj * s;
     const x = Math.floor(d.x0 + (i + 0.5) * d.scale), z = Math.floor(d.z0 + (j + 0.5) * d.scale);
-    if (PL && !BF.world.canonXZ(x, z)) {   // a corner wedge or off the atlas: left empty (transparent)
+    if (!BF.world.canonXZ(x, z)) {   // a corner wedge or off the atlas: left empty (transparent)
       for (let y = j; y < Math.min(N, j + s); y++) for (let xx = i; xx < Math.min(N, i + s); xx++) d.bio[y * N + xx] = 255;
       changed = true; d.cells++;
       continue;
@@ -119,10 +114,10 @@ const GROUND = { 1: SAND, 2: SAND, 3: GRAVEL, 11: MUD, 12: SAND, 13: RSAND, 19: 
 // Colour of the surface for a biome id at height h, written to `out` (before the tint).
 function groundOf(id, h, out) {
   let c = GROUND[id] || GRASS;
-  const t = BF.H > 192;   // mile-high worlds (generator 3) use their own snow lines (worldgen.js surface rules)
-  if (id === 24) c = h > (t ? 1950 : 100) ? SNOW : h > (t ? 1850 : 90) ? STONE : GRASS;
-  else if (id === 25 && h > (t ? 1450 : 74)) c = SNOW;
-  else if (id === 26 && h > (t ? 1800 : 92)) c = SNOW;
+  // the mile-high snow lines (worldgen.js surface rules)
+  if (id === 24) c = h > 1950 ? SNOW : h > 1850 ? STONE : GRASS;
+  else if (id === 25 && h > 1450) c = SNOW;
+  else if (id === 26 && h > 1800) c = SNOW;
   out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
   if (id === 18) { out[0] = out[0] * 0.6 + PODZOL[0] * 0.4; out[1] = out[1] * 0.6 + PODZOL[1] * 0.4; out[2] = out[2] * 0.6 + PODZOL[2] * 0.4; }   // coarse dirt and podzol patches
   return TINTED[id] && c === GRASS;
@@ -139,7 +134,7 @@ function paint(d) {
   const N = d.N;
   if (!d.cv) { d.cv = document.createElement("canvas"); d.cv.width = d.cv.height = N; }
   if (!scratch || scratch.width !== N) scratch = d.cv.getContext("2d").createImageData(N, N);
-  const o = scratch.data, sea = BF.SEA, tall = BF.H > 192 ? 9 : 1, rel = d.scale * 0.9 + 6;
+  const o = scratch.data, sea = BF.SEA, rel = d.scale * 0.9 + 6;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const p = j * N + i, q = p * 4, id = d.bio[p];
     if (id === 255) { o[q + 3] = 0; continue; }
@@ -155,7 +150,7 @@ function paint(d) {
       if (mode) c = COL[id] || [255, 0, 255];
       else { tinted = groundOf(id, h, gtmp); c = gtmp; }
       const hn = i + 1 < N && j + 1 < N && d.bio[p + N + 1] !== 255 ? d.hgt[p + N + 1] : h;
-      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / (150 * tall), 0, 1) + sh;
+      const sh = clamp((h - hn) / rel * 0.5, -0.35, 0.35), k = 0.7 + 0.45 * clamp((h - sea + 8) / 1350, 0, 1) + sh;
       r = c[0] * k; g = c[1] * k; b = c[2] * k;
       if (tinted) { const t = p * 3; r *= d.tn[t] / 100; g *= d.tn[t + 1] / 100; b *= d.tn[t + 2] / 100; }
     }
@@ -262,7 +257,7 @@ function mount(inner) {
 function buildView() {
   if (view.root) return;
   css();
-  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="col" hidden>Colours: ground</button><button type="button" data-a="tp" hidden disabled>Teleport</button><button type="button" data-a="planet" hidden>Planet</button><button type="button" data-a="close">Close</button></div>`);
+  const r = view.root = mount(`<div class="bfm-title"></div><div class="bfm-board"><canvas></canvas></div><div class="bfm-info"></div><div class="bfm-row"><button type="button" data-a="col" hidden>Colours: ground</button><button type="button" data-a="tp" hidden disabled>Teleport</button><button type="button" data-a="planet">Planet</button><button type="button" data-a="close">Close</button></div>`);
   view.cv = r.querySelector("canvas"); view.g = view.cv.getContext("2d"); view.title = r.querySelector(".bfm-title"); view.info = r.querySelector(".bfm-info");
   r.querySelector('[data-a="close"]').addEventListener("click", closeView);
   view.col = r.querySelector('[data-a="col"]');
@@ -315,7 +310,6 @@ function openView(it, swap) {   // swap: from the planet view, which already hol
   view.col.hidden = !view.d.auto;
   view.tp.hidden = !(P && P.gameMode === "creative");   // like the creative-only auto map itself; /tp stays the survival route
   view.tp.disabled = true;
-  view.planet.hidden = !onPlanet();
   if (!swap) { try { if (P && P.uiOpen) P.uiOpen(); } catch (e) { console.error(e); } }
   view.root.classList.add("open");
   drawView();
@@ -370,7 +364,7 @@ function drawView(force) {
   }
   if (view.sel) line += (line ? "\n" : "") + "selected  " + placeText(view.sel.x, view.sel.z) + (view.tp.hidden ? "" : "   (press Teleport)");
   const prog = m.auto && m.d ? (m.d.done ? "" : "   generating " + Math.floor(100 * progressOf(m.d)) + "%") : "";
-  view.info.textContent = (line || "Move the mouse over the map for coordinates") + prog + "\ngrid lines every " + gs + " blocks (" + (onPlanet() ? "face grid" : "world coordinates") + ")  |  " + (onPlanet() ? (view.it && view.it.fromGlobe ? "scroll out for the planet  |  " : "") + "M planet view  |  " : "") + "Esc to close";
+  view.info.textContent = (line || "Move the mouse over the map for coordinates") + prog + "\ngrid lines every " + gs + " blocks (face grid)  |  " + (view.it && view.it.fromGlobe ? "scroll out for the planet  |  " : "") + "M planet view  |  Esc to close";
 }
 // biomeAt without the river network on coarse maps: tracing it for every hovered point far from the last would stall the page (see step()).
 function biomeFor(x, z, scale) {
@@ -391,15 +385,15 @@ function teleportToSelection() {
   const s = view.sel, P = BF.player;
   if (!s || !P || P.gameMode !== "creative") return;
   let cx = s.x, cz = s.z;
-  if (onPlanet()) { const c = BF.planet.canonCell(s.x, s.z, {}); if (c.off || c.wedge) return; cx = c.x; cz = c.z; }   // land at the canonical cell
+  { const c = BF.planet.canonCell(s.x, s.z, {}); if (c.off || c.wedge) return; cx = c.x; cz = c.z; }   // land at the canonical cell
   closeView();
   travel(cx, cz);
 }
-// Teleports the player onto the surface of canonical cell (cx, cz) (the water surface over water), keeping their compass facing on the planet.
+// Teleports the player onto the surface of canonical cell (cx, cz) (the water surface over water), keeping their compass facing.
 function travel(cx, cz) {
   const P = BF.player, p = P.position, x = cx + 0.5, z = cz + 0.5, y = surfaceAt(cx, cz);
   let yaw = null;
-  if (onPlanet() && BF.coords) { const b = BF.coords.bearing(-Math.sin(P.yaw), -Math.cos(P.yaw), p.x, p.z); if (b != null) yaw = BF.coords.yawFor(b, x, z, P.yaw); }
+  if (BF.coords) { const b = BF.coords.bearing(-Math.sin(P.yaw), -Math.cos(P.yaw), p.x, p.z); if (b != null) yaw = BF.coords.yawFor(b, x, z, P.yaw); }
   P.teleport(x, y, z);
   if (yaw != null && P.setLook) P.setLook(yaw, P.pitch || 0);
   view.pending = { x: cx, z: cz, t: 0 };
@@ -440,7 +434,7 @@ function hint() {
   if (!(w > 0)) { prompt.hint.textContent = "Enter a width, e.g. 2000"; prompt.hint.classList.add("bad"); return false; }
   const k = zonesFor(w), side = k * ZONE, sc = side / Math.min(MAX_PX, side);
   prompt.hint.classList.remove("bad");
-  prompt.hint.textContent = "Becomes " + side + " x " + side + " blocks (" + k + " x " + k + " zones of 8x8 chunks), " + (+sc.toFixed(2)) + " block" + (sc === 1 ? "" : "s") + " per pixel" + (sc > RIVER_MAX_SCALE ? ", no rivers at this scale" : "") + (w > maxK() * ZONE ? "\n(largest allowed is " + maxK() * ZONE + (onPlanet() ? ", one face of the planet" : "") + ")" : "");
+  prompt.hint.textContent = "Becomes " + side + " x " + side + " blocks (" + k + " x " + k + " zones of 8x8 chunks), " + (+sc.toFixed(2)) + " block" + (sc === 1 ? "" : "s") + " per pixel" + (sc > RIVER_MAX_SCALE ? ", no rivers at this scale" : "") + (w > maxK() * ZONE ? "\n(largest allowed is " + maxK() * ZONE + ", one face of the planet)" : "");
   return true;
 }
 function openPrompt(sel) {
@@ -678,7 +672,7 @@ function sizeGlobe() {
 }
 // Opens the planet view (centred on the player unless `keep`: switching back from the local map keeps the view as it was).
 function openGlobe(keep) {
-  if (typeof document === "undefined" || !onPlanet()) return false;
+  if (typeof document === "undefined") return false;
   const P = BF.player;
   const swap = view.open;   // from a map's view: swap screens without touching the pointer lock
   if (!swap && P && P.canOpenUI && !P.canOpenUI()) return false;
@@ -764,8 +758,8 @@ function tickGlobe() {
 
 // every key goes to the open overlay (registered at load time, capture phase, like commands.js and signs.js)
 addEventListener("keydown", e => {
-  if (!view.open && !prompt.open && !globe.open) {   // M opens the planet view (on the planet, with no other screen open)
-    if (e.code !== "KeyM" || e.repeat || e.ctrlKey || e.metaKey || e.altKey || !onPlanet()) return;
+  if (!view.open && !prompt.open && !globe.open) {   // M opens the planet view (with no other screen open)
+    if (e.code !== "KeyM" || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     const P = BF.player, t = e.target;
     if (!P || (P.canOpenUI && !P.canOpenUI()) || (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable))) return;
     e.preventDefault(); e.stopImmediatePropagation();
@@ -780,7 +774,7 @@ addEventListener("keydown", e => {
     return;
   }
   if (view.open) {
-    if (e.code === "KeyM" && !e.repeat && onPlanet()) { e.preventDefault(); openGlobe(!!(view.it && view.it.fromGlobe)); return; }
+    if (e.code === "KeyM" && !e.repeat) { e.preventDefault(); openGlobe(!!(view.it && view.it.fromGlobe)); return; }
     if (e.key === "Tab" || e.key === "F3" || e.key === "F1") e.preventDefault();
     return;
   }
