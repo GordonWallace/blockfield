@@ -54,10 +54,6 @@ R.on("cells", (req, w) => {
   return { ok: true, was, got: give };
 });
 
-// Ticks counted by world.tickSim's think hooks (tests that step by hand don't always advance BF.rand.tick): code that runs once per
-// think compares against tick() to know a request it sent is still waiting for this tick's apply.
-let ticks = 0;
-if (BF.world && BF.world.onThink) BF.world.onThink(() => { ticks++; });
 // door: the first requester in a tick fixes the door's state for that tick. Keyed by the canonical cell, so two villagers seeing a door on a
 // face edge from different faces' frames meet on one key (js/planet.js canonCell).
 const CC = {};
@@ -65,16 +61,19 @@ function canonKey(x, y, z) {
   if (BF.planet && BF.planet.canonCell) { const c = BF.planet.canonCell(x, z, CC); if (!c.off) return pk(c.x, y, c.z); }
   return pk(x, y, z);
 }
-let doorTick = -1;
 const doorSet = new Map();   // "x,y,z" (lower half) -> state set this tick
 let warnAt = -1e9;
+// Apply passes (one a tick, and one each time a test applies by hand): code that runs once per think compares tick() with the value
+// when it sent a request to know that request still waits for an apply. Each pass starts the doors' same-tick map afresh.
+let ticks = 0;
+const apply0 = R.apply;
+R.apply = function () { ticks++; doorSet.clear(); return apply0.apply(this, arguments); };
 R.on("door", (req, w) => {
   const [x, y, z] = String(req.target).split(",").map(Number), open = !!req.data.open;
   if (!w.isLoaded(x, z)) return { ok: false, why: "unloaded" };
   const b = BF.blocks[w.getBlock(x, y, z)], d = b && (b.door || b.gate);
   if (!d) return { ok: false, why: "changed" };
   const k = canonKey(x, b.door && b.door.upper ? y - 1 : y, z);
-  if (ticks !== doorTick) { doorTick = ticks; doorSet.clear(); }
   if (doorSet.has(k) && doorSet.get(k) !== open) {
     const now = BF.simNow ? BF.simNow() : 0;
     if (BF.glog && now - warnAt >= 50) { warnAt = now; BF.glog.log("WARN", "requests", "Door at " + k + ": " + req.from + " wanted it " + (open ? "open" : "shut") + " but a lower id set it first this tick"); }

@@ -47,7 +47,7 @@ module.exports = async (pg, out) => {
     }
     { const p0 = A.position.clone(), h = A.bed || A.village; res.spareFrom = Math.round(Math.hypot(h.x + 0.5 - p0.x, h.z + 0.5 - p0.z));
       for (let i = 0; i < 600; i++) {   // held where it stands until it has the spare (left to roam it can walk out mapping past the 30 blocks one is handed over in)
-        BF.mobs.update(0.1);
+        (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver());
         if (T.inv.count(A.inv, I.tent) < 1) { A.position.copy(p0); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); A.position.copy(p0); }
       } }
     res.spare = T.inv.count(A.inv, I.tent);
@@ -59,7 +59,7 @@ module.exports = async (pg, out) => {
       for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) { if (!keep(cx + dx, cy - 1, cz + dz)) W.setBlock(cx + dx, cy - 1, cz + dz, BF.B.grass || BF.B.dirt); for (let k = 0; k < 40; k++) if (!keep(cx + dx, cy + k, cz + dz)) W.setBlock(cx + dx, cy + k, cz + dz, 0); }   // open sky: nothing overhead
       A.position.set(cx + 0.5, cy, cz + 0.5);
       res.inVillageSite = !!BF.tents.findSite(A.position.x, A.position.z, 7);   // there is room for a tent: not pitching is a choice
-      BF.sky.setTime(0.2); BF.mobs.update(0.1);
+      BF.sky.setTime(0.2); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver());
       A.bed = { x: cx - 20, y: cy, z: cz, f: 0 }; A.ai.leaving = false; A.ai.route = null;   // not still walking out of a house after the time jumps
       for (let i = 0; i < 100; i++) { BF.sky.setTime(0.495); A.position.set(cx + 0.5, cy, cz + 0.5); BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); if (A.ex && A.ex.camp) break; } }   // its own AI step directly (village chores can run first)
     res.inVillageCamp = !!(A.ex && A.ex.camp);
@@ -78,7 +78,7 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.47);
     // held on the open ground cleared above (left to walk, the planet village's houses round it can leave no room for a tent)
     const at = A.position.clone();
-    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) { A.position.copy(at); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); } if (A.ex && A.ex.camp) break; }
+    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (!(A.ex && A.ex.camp)) { A.position.copy(at); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); } if (A.ex && A.ex.camp) break; }
     res.camp = A.ex && A.ex.camp; res.bed = A.bed && A.bed.tent; res.tentLeft = T.inv.count(A.inv, I.tent);
     window.__A = A; window.__home = A.homeBed;
     // a zombie nearby
@@ -92,11 +92,11 @@ module.exports = async (pg, out) => {
   const r3 = await pg.evaluate(async () => {
     const A = window.__A, res = {};
     BF.sky.setTime(0.56);
-    for (let i = 0; i < 400; i++) { BF.sky.setTime(0.56); BF.mobs.update(0.1); if (A.sleeping) break; }
+    for (let i = 0; i < 400; i++) { BF.sky.setTime(0.56); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (A.sleeping) break; }
     res.sleeping = A.sleeping; res.hidden = BF.tents.hidden(A); res.pos = [A.position.x.toFixed(1), A.position.y.toFixed(1), A.position.z.toFixed(1)];
     BF.sky.setTime(0.005);
-    for (let i = 0; i < 100; i++) { BF.sky.setTime(0.005); BF.mobs.update(0.1); if (!A.sleeping) break; }
-    for (let i = 0; i < 30; i++) { BF.sky.setTime(0.01); BF.mobs.update(0.1); if (A.ex.camp && !A.sleeping) BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); }   // morning chores can run before its own step
+    for (let i = 0; i < 100; i++) { BF.sky.setTime(0.005); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (!A.sleeping) break; }
+    for (let i = 0; i < 30; i++) { BF.sky.setTime(0.01); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (A.ex.camp && !A.sleeping) BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); }   // morning chores can run before its own step
     res.awake = !A.sleeping; res.camp = A.ex.camp; res.tentBack = BF.trades.inv.count(A.inv, BF.I.tent); res.bedRestored = A.bed === window.__home || (A.bed && !A.bed.tent);
     return res;
   });

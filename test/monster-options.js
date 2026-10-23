@@ -50,7 +50,7 @@ module.exports = async (pg) => {
     const seen = new Set(BF.mobs.list), n = {}, caps = [];
     for (let i = 0; i < 8000; i++) {
       BF.sky.setTime(0.75);
-      BF.mobs.update(0.05);
+      (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       if (i === 100) { const W = BF.wildlife, sh = BF.mobs.spawnShare(); caps.push(...W.areas().map(A => [A.cap, Math.max(1, Math.round(W.CAP * A.n / W.CAP_CHUNKS)) * sh, sh])); }
       for (const m of BF.mobs.list.slice()) if (!seen.has(m)) { seen.add(m); if (m.hostile) { n[m.type] = (n[m.type] || 0) + 1; BF.mobs.discard(m); } }   // counted and taken away, so the area caps never fill and the counts measure the spawn rate
     }

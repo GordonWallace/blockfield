@@ -28,7 +28,7 @@ module.exports = async (pg, out) => {
   for (let k = 0; k < 8; k++) {
     console.log(JSON.stringify(await pg.evaluate(() => {
       const m = window.__cm;
-      for (let i = 0; i < 400; i++) { BF.sky.setTime(0.1); BF.mobs.update(0.1); }
+      for (let i = 0; i < 400; i++) { BF.sky.setTime(0.1); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); }
       return { pos: [m.position.x | 0, m.position.z | 0], prof: m.profession, site: m.jobsite && [m.jobsite.x, m.jobsite.z], mode: m.job && m.job.mode, inv: m.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count), log: BF.cartography.LOG.slice(-3) };
     })));
   }

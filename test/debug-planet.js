@@ -72,7 +72,7 @@ const start = async () => {
     BF.player.teleport(sp.x, yAt(sp) + 0.01, sp.z); BF.player.setFlying(true);
     BF.mobs.spawning = false;
     for (const m of BF.mobs.list.slice()) if (m.type === 'cow' && P.distance(sp, m.position) < 80) BF.mobs.kill(m);
-    for (let i = 0; i < 10; i++) BF.mobs.update(0.05);
+    for (let i = 0; i < 10; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     const ca = A(-6), cb = A(4), cowA = BF.mobs.spawn('cow', ca.x, yAt(ca), ca.z), cowB = BF.mobs.spawn('cow', cb.x, yAt(cb), cb.z);
     window.__upd = BF.mobs.update; BF.mobs.update = () => {};   // hold everything still so the game and the screen can be compared
     const pp = BF.player.position, F = P.face(pp.x, pp.z), q = P.inFrame(F, cowA.position.x, cowA.position.z, {});
@@ -147,7 +147,7 @@ const start = async () => {
     const yAt = c => Math.max(BF.world.heightAt(c.x, c.z), BF.SEA) + 1;
     BF.player.teleport(sp.x, yAt(sp) + 0.01, sp.z);
     for (const m of BF.mobs.list.slice()) if (m.type === 'cow' && P.distance(sp, m.position) < 80) BF.mobs.kill(m);
-    for (let i = 0; i < 10; i++) BF.mobs.update(0.05);
+    for (let i = 0; i < 10; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     const ca = at(-6), cb = at(4), a = BF.mobs.spawn('cow', ca.x, yAt(ca), ca.z), b = BF.mobs.spawn('cow', cb.x, yAt(cb), cb.z);
     BF.mobs.update = () => {};
     const pp = BF.player.position;

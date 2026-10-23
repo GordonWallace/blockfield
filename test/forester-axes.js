@@ -88,7 +88,7 @@ module.exports = async (pg, out) => {
     let chop = 0, t = 0, fell = null, swings = 0, lastSw = 0, held = null, stop = null; let pk = null, pc = 0, pd = 0;
     for (; t < limit && !fell; t += dt) {
       BF.sky.setTime(opts && opts.offAt != null && t >= opts.offAt && t < opts.offAt + 2 ? 0.6 : 0.1);
-      BF.mobs.update(dt);
+      (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver());
       BF.player.position.set(A.position.x + 4, A.position.y + 2, A.position.z + 4);
       const k = A.fo && A.fo.task;
       // chopping time is the ticks its felling progress moved on (in reach is not enough: it can stand by the trunk without cutting)
@@ -144,7 +144,7 @@ module.exports = async (pg, out) => {
     // the sim clock and drops must move too: with them frozen, a forester waiting for items to land after a felling waits for good
     let chop = 0, pk = null, pc = 0, pd = 0;
     for (let t = 0; t < 400 && chop < 7; t += 0.05) {
-      BF.sky.setTime(0.1); BF.warp.advance(0.05); BF.mobs.update(0.05); BF.drops.update(0.05);
+      BF.sky.setTime(0.1); BF.warp.advance(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); BF.drops.update(0.05);
       const k = A.fo.task;
       if (k && k.kind === "cut" && k === pk && (A.fo.chop > pc + 1e-9 || k.done > pd)) chop += 0.05;
       pk = k; pc = A.fo.chop; pd = k ? k.done : 0;
@@ -174,7 +174,7 @@ module.exports = async (pg, out) => {
     for (const m of [A, S]) { const L = BF.food.life(m); L.sat = 5; L.lastAte = BF.food.dayNow(); L.starving = m.starving = false; m.fshop = { stage: null, deal: null, checkT: 1e9, avoid: {}, cd: 0 }; }
     const st = A.fo; st.task = null; st.saved = null; st.sweep = null; st.thinkT = 0; st.shopT = 0; st.cutCd = 999; st.plantCd = 999; st.gatherCd = 999; st.avoid = new Map();
     const res = { first: null, second: null };
-    const run = () => { let seen = false, t = 0; for (; t < 120; t += 0.05) { BF.sky.setTime(0.1); BF.mobs.update(0.05); if (A.fo.task) seen = true; else if (seen) break; } return { seen, t: +t.toFixed(1) }; };
+    const run = () => { let seen = false, t = 0; for (; t < 120; t += 0.05) { BF.sky.setTime(0.1); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (A.fo.task) seen = true; else if (seen) break; } return { seen, t: +t.toFixed(1) }; };
     const seller = F._test.findAxeSeller(A, st);
     res.offer = seller && BF.items[seller.offer.sell.id].name;
     res.run1 = run();
@@ -193,7 +193,7 @@ module.exports = async (pg, out) => {
     BF.mobView.render(0); const AV = BF.mobView.viewOf(A);
     res.drawn = AV && AV.heldMesh && AV.heldMesh.visible && BF.items[AV.heldId].name;
     // nothing better on sale: no trip
-    st.shopT = 0; st.thinkT = 0; BF.mobs.update(0.05);
+    st.shopT = 0; st.thinkT = 0; (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     res.thirdTask = A.fo.task && A.fo.task.kind;
     res.log = F.LOG.filter(e => e.kind === "buy").map(e => e.got + " for " + e.paid);
     return res;
@@ -233,7 +233,7 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => {
     const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.task = null; st.sweep = null;
     A.inv = BF.trades.inv.create(); BF.trades.inv.add(A.inv, BF.I.diamond_axe, 1);
-    for (let t = 0; t < 120; t += 0.05) { BF.sky.setTime(0.1); BF.mobs.update(0.05); const k = A.fo.task; if (k && k.kind === "cut" && A.fo.chop > 0) break; }
+    for (let t = 0; t < 120; t += 0.05) { BF.sky.setTime(0.1); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); const k = A.fo.task; if (k && k.kind === "cut" && A.fo.chop > 0) break; }
     const k = A.fo.task, fx = A.position.x, fz = A.position.z, tx = k ? k.x + 0.5 : fx + 1, tz = k ? k.z + 0.5 : fz;
     const dx = tx - fx, dz = tz - fz, L = Math.hypot(dx, dz) || 1, px = -dz / L, pz = dx / L;   // stand to the side of the chopping line
     const ex = fx + px * 3.2 + dx / L * 0.6, ez = fz + pz * 3.2 + dz / L * 0.6;
@@ -241,6 +241,6 @@ module.exports = async (pg, out) => {
     BF.player.setLook(Math.atan2(-(fx - ex), -(fz - ez)), -0.12);
     BF.sky.setTime(0.12);
   });
-  for (let i = 0; i < 5; i++) { await pg.evaluate(() => { BF.sky.setTime(0.12); window.__A.ai.swingT = 0.2; BF.mobs.update(0.01); }); await pg.waitForTimeout(80); }
+  for (let i = 0; i < 5; i++) { await pg.evaluate(() => { BF.sky.setTime(0.12); window.__A.ai.swingT = 0.2; (BF.mobs.update(0.01), BF.req.apply(), BF.req.deliver()); }); await pg.waitForTimeout(80); }
   await pg.screenshot({ path: out + '-chop.png' });
 };
