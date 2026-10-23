@@ -9,7 +9,7 @@ module.exports = async (pg, out) => {
   await require('./lib').toVillage(pg);
   const step = (t0, t1, secs) => pg.evaluate(async ([t0, t1, secs]) => {
     const dt = 0.05, n = Math.round(secs / dt);
-    for (let i = 0; i < n; i++) { BF.sky.setTime(t0 + (t1 - t0) * i / n); BF.mobs.update(dt); if (i % 400 === 0) await new Promise(r => setTimeout(r, 0)); }
+    for (let i = 0; i < n; i++) { BF.sky.setTime(t0 + (t1 - t0) * i / n); (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver()); if (i % 400 === 0) await new Promise(r => setTimeout(r, 0)); }
   }, [t0, t1, secs]);
   const ok = (cond, what, extra) => console.log((cond ? "PASS " : "FAIL ") + what + (!cond && extra !== undefined ? "  " + JSON.stringify(extra) : ""));
 

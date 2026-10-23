@@ -317,10 +317,14 @@ function ai(m, dt, out, cont) {
     if (Math.random() < dt * 4) a.swingT = 0.25;   // visual
     if ((S.tt -= dt) > 0) return true;
     const [fx, fy, fz] = BF.mobs.nav.feetCell(m);
-    if (!(fx === s.x && fz === s.z) && W().getBlock(s.x, s.y, s.z) === SAND() && W().setBlock(s.x, s.y, s.z, 0)) {
-      TR().inv.add(m.inv, SAND(), 1);
-      if (BF.toolWear) { const sh = BF.toolWear.best(m, "shovel"); if (sh) BF.toolWear.use(m, sh, 1); }
+    if (!(fx === s.x && fz === s.z) && W().getBlock(s.x, s.y, s.z) === SAND()) {
+      // a request (spec r15-19, js/blockreqs.js): the sand leaves the ground and goes into the pack in the apply phase; counted at once
+      // (the day's quota) and taken back if someone else had the block first
       S.dug++; S.trip++; S.last = { x: s.x, y: s.y, z: s.z };
+      BF.blockReq.cells(m, [{ x: s.x, y: s.y, z: s.z, id: 0, expect: SAND() }], { give: [{ id: SAND(), n: 1 }] }).then(r => {
+        if (!r.ok) { S.dug--; S.trip = Math.max(0, S.trip - 1); log("refused", { at: [s.x, s.y, s.z], why: r.why }); return; }
+        if (BF.toolWear) { const sh = BF.toolWear.best(m, "shovel"); if (sh) BF.toolWear.use(m, sh, 1); }
+      });
     }
     S.si++; S.walkT = 0; S.stage = "walk";
     if (S.dug >= DIG_DAY) S.si = job.spots.length;

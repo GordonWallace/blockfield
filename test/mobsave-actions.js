@@ -13,7 +13,7 @@ module.exports = async (pg, out) => {
     BF.mobs.spawning = false;
     const p = BF.player.position;
     const cow = BF.mobs.spawn("cow", p.x + 6, p.y, p.z + 6); cow.marker = 77; cow.ai.mode = "walk"; cow.ai.tx = p.x + 20; cow.ai.tz = p.z;
-    for (let i = 0; i < 120; i++) BF.mobs.update(0.05);
+    for (let i = 0; i < 120; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     const key = m => m.village.key + "#" + m.slot.idx;
     const vs = {}, gs = [];
     for (const m of BF.mobs.list) {
@@ -46,10 +46,10 @@ module.exports = async (pg, out) => {
     const t0 = performance.now();
     while (Object.keys(vs).length < 3 && performance.now() - t0 < 60000) {
       await new Promise(r => setTimeout(r, 50));   // frames keep loading chunks while paused
-      BF.mobs.update(0.05);
+      (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       read();
     }
-    for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 50)); BF.mobs.update(0.05); read(); }   // two more village passes: the rest that are loaded
+    for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 50)); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); read(); }   // two more village passes: the rest that are loaded
     const c = BF.mobs.list.find(m => m.marker === 77);
     if (!cow && c) cow = { p: [c.position.x, c.position.y, c.position.z], mode: c.ai.mode, tx: c.ai.tx, restored: !!c.restored };
     return { vs, gs, cow };

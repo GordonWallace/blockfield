@@ -886,11 +886,12 @@ function zombieBreakDoor(m, dt, out) {
   const id = W.getBlock(hit[0], hit[1], hit[2]);
   ai.doorT = 0; ai.doorAt = null;
   if (!BF.blocks[id].door) return;
-  W.removePartner(hit[0], hit[1], hit[2], id);
-  W.setBlock(hit[0], hit[1], hit[2], 0);
-  if (BF.drops) BF.drops.spawnAt(BF.rollDrops(id), hit[0], hit[1], hit[2]);
-  noiseSound(0.4, 300, 0.3, m.position);
-  if (BF.emit) BF.emit("doorBroken", m, hit[0], hit[1], hit[2]);
+  // a request (spec r15-19, js/blockreqs.js): refused when the door was opened, shut by someone else or broken first this tick
+  BF.req.send("doorBreak", hit.join(","), { expect: id }, m).then(r => {
+    if (!r.ok || m.removed) return;
+    noiseSound(0.4, 300, 0.3, m.position);
+    if (BF.emit) BF.emit("doorBroken", m, hit[0], hit[1], hit[2]);
+  });
 }
 
 // ---------- villager nights: walk home along a grid path, open doors on the way, sleep in their bed ----------
@@ -1190,15 +1191,15 @@ function villagerDoors(m) {
   if (ai.route && !m.sleeping) for (let k = ai.ri - 1; k < Math.min(ai.route.length, ai.ri + 2); k++) {
     const [x, y, z] = k < ai.ri ? feetCell(m) : ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
     if (d && !d.open && Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.7) {
-      if (bk.gate) W.setGate(x, y, z, true); else W.setDoor(x, y, z, true);
-      (ai.doors || (ai.doors = [])).push([x, y, z]);
+      BF.blockReq.door(m, x, y, z, true);   // a request (spec r15-19): the door is open from this tick's apply phase
+      (ai.doors || (ai.doors = [])).push([x, y, z, BF.blockReq.tick()]);
     }
   }
-  if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(([x, y, z]) => {
-    if (Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || isOccupied(x, y, z)) return true;
+  if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(c => {
+    const [x, y, z] = c;
+    if (c[3] === BF.blockReq.tick() || Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || isOccupied(x, y, z)) return true;   // (asked to open this tick: not open yet)
     const bk = blockAt(x, y, z);
-    if (bk.door && bk.door.open) W.setDoor(x, y, z, false);
-    else if (bk.gate && bk.gate.open) W.setGate(x, y, z, false);
+    if ((bk.door || bk.gate) && (bk.door || bk.gate).open) BF.blockReq.door(m, x, y, z, false);
     return false;
   });
 }
