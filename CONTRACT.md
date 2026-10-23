@@ -58,6 +58,12 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
 - `BF.scene`, `BF.camera` (PerspectiveCamera, already added to scene so children render), `BF.renderer`.
 - `BF.state = {paused, seed, time}`. When `paused` is true, main skips sky/player/mobs update
   (it still calls `BF.player.updatePaused(dt)` if present and `BF.inventory.update(dt)` always).
+- Fixed tick (spec r15-10, js/timewarp.js): the world simulation runs in ticks of exactly `BF.warp.TICK` = 0.05 s at every speed
+  (`sky.advance(h)`, `mobs.update(h)`, `dayTimeline.update()`, `drops.update(h)`, `boats.update(h)`, `inventory.simTick(h)`,
+  `world.tickSim()`, as `BF.simStep(h)` runs them and `BF.simFrame(dt)` a frame's worth); the player updates once per frame in real time. Every frame main then draws
+  between the last two ticks with `alpha = BF.warp.alpha`: `sky.draw(alpha, dt)`, `mobs.draw(alpha)` (arrows), `drops.draw(alpha)`,
+  `boats.draw(alpha)`, `mobView.render(dt)` (the mobs, js/mobview.js; bees in their mesh's onBeforeRender). Sim objects keep where they were before the tick (`m.prev`, `drop.prev`,
+  `boat.prev`, `arrow.prev`, bee `px/py/pz`); js/mobview.js draws a mob at lerp(`m.prev`, `m`, alpha) (`BF.mobView.drawPos`).
 - Event bus: `BF.on(name, fn)`, `BF.emit(name, ...args)`. Known events:
   `newWorld(seed)`, `blockBroken(x,y,z,blockId)`, `blockPlaced(x,y,z,blockId)`,
   `playerDamaged(amount)`, `playerDied()`, `playerRespawned()`, `mobKilled(mob)`.
@@ -179,7 +185,7 @@ granite/diorite/andesite + polished, sandstone and red sandstone families, brick
 
 ## sky.js (owner: sky/textures worker)
 
-`BF.sky = { init(scene), update(dt), time, light, day, isNight(), lightAt(t), SUNSET, HOUR, DUSK_LEN }`
+`BF.sky = { init(scene), update(dt), advance(dt), draw(alpha, dt), time, light, day, isNight(), lightAt(t), SUNSET, HOUR, DUSK_LEN }` (update = advance + drawing at the current time)
 
 Day and night are equal halves: daytime is sky.time 0-0.5 (sun above the horizon), nighttime 0.5-1, and `isNight()` is just `time >= 0.5` (weather never makes it night). Light (`lightAt`, before weather): full day, dipping to 0.84 over the last hour before sunset; dusk is the first 1.5 in-game hours after sunset, darkening gradually to full night (0.18); dawn mirrors it before sunrise.
 
@@ -194,7 +200,7 @@ Monster spawning (mobs.js): a spot must have been dark for half an in-game hour 
 
 ## mobs.js (owner: mobs worker)
 
-`BF.mobs = { list, init(scene), update(dt), raycast(origin, dir, maxDist) -> {mob, dist}|null, hit(mob, damage, knockDir: THREE.Vector3), clear() }`
+`BF.mobs = { list, init(scene), update(dt), draw(alpha) (arrows), raycast(origin, dir, maxDist) -> {mob, dist}|null, hit(mob, damage, knockDir: THREE.Vector3), clear() }`
 - Villagers: one per bed of their home (`m.home`, `m.bed` from `worldgen` house records). From sky time 0.5 (sunset) to 0.985
   they walk home along an A* grid path, opening doors on the way and closing them behind, and sleep (`m.sleeping`,
   lying on the bed); villagers without a usable bed stand indoors or by the bell. They wake at sunrise (or when hurt)

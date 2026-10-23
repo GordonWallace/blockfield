@@ -215,13 +215,13 @@ function forceStop(rec, why) {
   const L = BF.mobs.list, key = rec.key;
   for (const m of L.slice()) {
     if (m.type !== "villager" || m.village !== rec || m.dead || m.removed) continue;
-    const acts = [], task = BF.villagerStatus ? BF.villagerStatus.text(m) : "";
+    const acts = [], task = BF.villagerStatus ? BF.villagerStatus.text(m) : "", leisure = isLeisure(m);   // (before the jobs' stops below clear its task)
     if (m.tradingWith) { m.tradingWith = null; acts.push("cancelled the trade"); }
     if (m.profession === "merchant" && BF.merchant && BF.merchant.forceHome && BF.merchant.forceHome(m, why)) acts.push("went home with its cargo");
     for (const j of JOBS()) { const a = j && j.forceStop && j.forceStop(m); if (a) acts.push(a); }
     for (const o of L) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
     const v = rec.wg;
-    if (!acts.length && isLeisure(m)) continue;                      // leisure ends quietly (endLeisure, when the village unloads)
+    if (!acts.length && leisure) continue;                      // leisure ends quietly (endLeisure, when the village unloads)
     if (m.profession !== "explorer" && !acts.length && v && v.minX != null && edgeDist(v, m.position.x, m.position.z) > 4 && BF.mobs.sendHome) { BF.mobs.sendHome(m); acts.push("went home"); }
     if (acts.length) logError("forced-stop", { village: key, who: nameOf(m), task, action: acts.join(", "), why });
   }

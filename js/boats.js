@@ -159,7 +159,7 @@ function flowAt(p) {
 const list = [];
 function create(wood, x, y, z, yaw) {
   if (!scene || BF.I[wood + "_boat"] == null) return null;
-  const b = BF.ids.refs({ kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
+  const b = BF.ids.refs({ kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevYaw: yaw || 0, vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
     stowT: 0, row: [0, 0], rowing: [0, 0], onGround: false, inWater: false, medium: "air" });
   buildMesh(b);
   list.push(b);
@@ -456,11 +456,13 @@ const boats = {
     if (b.mob && (b.mob.removed || b.mob.dead)) { if (b.mob.removed && !b.mob.dead) stow(b); else { b.mob.riding = null; b.mob = null; } }
     seatMob(b);
     syncMesh(b);
+    b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn where it is while the player rows it
     return b.yaw - y0;
   },
   // World simulation step (main.js, runs with the fast-forward): boats without the player drift, pick up mobs, keep theirs seated.
   update(dt) {
     for (const b of list.slice()) {
+      b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn between this and where the tick leaves it (draw)
       if (b.mob && (b.mob.removed || b.mob.dead)) { if (b.mob.removed && !b.mob.dead) stow(b); else { b.mob.riding = null; b.mob = null; } }
       if (!loadedAt(b.pos.x, b.pos.z)) { syncMesh(b); continue; }
       if (!b.rider) {
@@ -474,6 +476,19 @@ const boats = {
       if (!b.rider) syncMesh(b);
     }
     if (BF.mobs) for (const m of BF.mobs.list) if (m.boatCd > 0) m.boatCd -= dt;
+  },
+  // Every frame (main.js, spec r15-10): boats drifting on their own drawn between the last two ticks (alpha 0..1). The player's
+  // boat moves in real time (drive) and is drawn where it is.
+  draw(alpha) {
+    const k = Math.max(0, Math.min(1, alpha));
+    for (const b of list) {
+      if (!b.mesh || b.rider) continue;
+      if (b.prev.distanceToSquared(b.pos) > 16) { b.mesh.position.copy(b.pos); b.mesh.rotation.y = b.yaw; continue; }   // (crossed a face edge)
+      b.mesh.position.lerpVectors(b.prev, b.pos, k);
+      let d = b.yaw - b.prevYaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      b.mesh.rotation.y = b.prevYaw + d * k;
+    }
   },
   clear() { for (const b of list.slice()) { b.rider = false; boats.remove(b, false); } },
   // Boat counts by wood for the debug screen: {oak_boat: n, ...}

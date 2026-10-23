@@ -59,6 +59,8 @@ The right arrow key makes the whole world run faster; the left arrow slows it ag
 
 At 10x and faster, blocks changing more than a chunk away from you (villagers opening doors, planting, felling trees) are redrawn at most a few times a second rather than every frame, which leaves more of each frame to the simulation. Blocks you break or place yourself still show at once, and everything catches up as soon as you slow below 10x.
 
+The world moves in **ticks** of 0.05 seconds of game time, 20 a second at 1x, at every speed and on every computer: fast-forward just runs more ticks a second, so the world behaves exactly as it would at 1x, only sooner. Mobs, items, boats, arrows, bees and the sky are drawn smoothly between ticks, however fast your screen refreshes. When the computer can't fit all the ticks into a frame, the ones that don't fit are skipped rather than run in a burst later.
+
 ## Commands
 
 `/time set` jumps the clock, `/time add` moves it on and `/weather` switches the weather; see [[page:commands]].
