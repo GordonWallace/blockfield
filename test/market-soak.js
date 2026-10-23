@@ -55,6 +55,13 @@ const OUT = process.argv[4] || null;
       } else if (inV(buyer) || inV(seller)) { R.trades += times || 1; if (buyer !== 'player' && seller !== 'player') R.bad.push('no offer: ' + what); }
       return orig.apply(this, arguments);
     };
+    // nothing from nothing (spec r15-21): the apply phase settles trades, so the emeralds held by villagers (in escrow too) and lying
+    // in the world are the same before and after it
+    if (BF.req && BF.req.apply) {
+      const T = BF.trades, em = BF.I.emerald, apply = BF.req.apply;
+      const ems = () => { let n = 0; for (const m of BF.mobs.list) if (m.type === 'villager' && Array.isArray(m.inv)) { n += T.inv.count(m.inv, em); for (const s of T.escrowed ? T.escrowed(m) : []) if (s.id === em) n += s.count; } for (const d of BF.drops.list) if (d.id === em) n += d.count; return n; };
+      BF.req.apply = function () { const a = ems(), r = apply.apply(this, arguments), b = ems(); if (a !== b && R.bad.length < 20) R.bad.push('emeralds ' + a + ' -> ' + b + ' in the apply phase, day ' + BF.sky.day); return r; };
+    }
     window.__day = () => {
       const rec = BF.vlog.villageAt(v.x, v.z) || { members: [] };
       const vs = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === key);
@@ -110,7 +117,7 @@ const OUT = process.argv[4] || null;
   if (OUT) fs.writeFileSync(OUT, JSON.stringify({ sum, days }, null, 1));
   let fail = 0;
   if (pageErrors) { console.log('FAIL page errors: ' + pageErrors); fail++; }
-  if (R.bad.length) { console.log('FAIL villager trades without an offer: ' + R.bad.length + ' ' + R.bad.slice(0, 5).join('; ')); fail++; }
+  if (R.bad.length) { console.log('FAIL villager trades without an offer, or emeralds made or lost: ' + R.bad.length + ' ' + R.bad.slice(0, 5).join('; ')); fail++; }
   console.log(fail ? fail + ' FAILED' : 'all passed');
   await b.close();
   process.exit(fail ? 1 : 0);
