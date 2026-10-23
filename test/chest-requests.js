@@ -1,8 +1,8 @@
 // @ci integration suite=items timeout=300
 // Chests, furnaces and item pickup as requests (spec r15-22): NODE_PATH=$(npm root -g) node test/run.js /tmp/cr test/chest-requests.js
-// Requests sent in one tick, in the opposite of requester order, apply in order (lower villager id first; the player after villagers
-// for chests, before them for pickups), each seeing what the ones before it left. In every case the items are conserved.
-// - chest takes: two villagers and the player ask for 6 coal each from a chest of 10: 6, 4, then the player is refused;
+// Requests sent in one tick, in the opposite of requester order, apply in order (the player first, then lower villager id first; spec
+// r15-20), each seeing what the ones before it left. In every case the items are conserved.
+// - chest takes: two villagers and the player ask for 6 coal each from a chest of 10: the player 6, the lower id 4, the other refused;
 // - chest puts: two villagers put a stack into a chest with one free slot: the first fills it, the second keeps its stack;
 // - a chest broken with a request in flight: the request is refused and the contents lie on the ground as drops;
 // - furnace load race: two villagers load different inputs into one furnace: the first loads (with the 1 coal its 5 ore need), the second is refused;
@@ -41,9 +41,9 @@ module.exports = async (pg, out) => {
       const pBefore = playerCount(I.coal), total = () => INV.chestState(p.x, p.y, p.z).slots.filter(s => s && s.id === I.coal).reduce((x, s) => x + s.count, 0) + T.count(a.inv, I.coal) + T.count(b.inv, I.coal) + playerCount(I.coal);
       const t0 = total(), key = p.x + "," + p.y + "," + p.z, got = {};
       // sent in the opposite of the order they apply in
-      R.send("chest", key, { take: [{ id: I.coal, n: 6 }] }, "player").then(x => { got.player = x; });
       R.send("chest", key, { take: [{ id: I.coal, n: 6 }] }, b).then(x => { got.b = x; });
       R.send("chest", key, { take: [{ id: I.coal, n: 6 }] }, a).then(x => { got.a = x; });
+      R.send("chest", key, { take: [{ id: I.coal, n: 6 }] }, "player").then(x => { got.player = x; });
       step();
       res.take = { a: T.count(a.inv, I.coal), b: T.count(b.inv, I.coal), player: playerCount(I.coal) - pBefore, playerResult: got.player, conserved: total() === t0, aRes: got.a, bRes: got.b };
       // ---- chest puts: one free slot left
@@ -128,8 +128,8 @@ module.exports = async (pg, out) => {
   });
   console.log(JSON.stringify(r));
   const t = r.take;
-  check(t.a === 6 && t.b === 4 && t.player === 0, "chest takes in requester order: lower id 6, next 4, the player none", t);
-  check(t.playerResult && t.playerResult.ok === false, "the player's take is refused when nothing is left", t.playerResult);
+  check(t.player === 6 && t.a === 4 && t.b === 0, "chest takes in requester order: the player 6, lower id 4, next none", t);
+  check(t.playerResult && t.playerResult.ok === true && t.bRes && t.bRes.ok === false, "the player's take goes through; the last villager's is refused when nothing is left", { p: t.playerResult, b: t.bRes });
   check(t.conserved, "chest takes conserve the coal");
   check(r.put.aLeft === 0 && r.put.bLeft === 64 && r.put.inChest === 64, "chest puts: the first fills the last slot, the second keeps its stack", r.put);
   check(r.put.conserved, "chest puts conserve the cobblestone");
