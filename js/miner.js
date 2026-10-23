@@ -358,13 +358,22 @@ function wearPick(m, p, n) {
   if (!p || BF.toolWear.use(m, p, n) !== "broken") return;
   log("pickBroke", m, { pick: nameOf(p.id) });
 }
+// The hostile mobs, in BF.mobs.list order: worked out once a step for all the miners (r15-07), again if a mob came or went meanwhile.
+let HOST = null;
+function hostiles() {
+  const L = BF.mobs.list, t = BF.simNow(), last = L[L.length - 1];
+  if (!HOST || HOST.t !== t || HOST.n !== L.length || HOST.last !== last) { HOST = L.filter(o => o.def && o.def.hostile); HOST.t = t; HOST.n = L.length; HOST.last = last; }
+  return HOST;
+}
 // A hostile mob within reach (one that wandered into the tunnel from a cave, or spawned in its dark): the miner hits it with its pickaxe
 // (2 + tier damage, 2 uses of wear, like the player's), so it can't block the way for good.
 function fend(m, Q, dt) {
   if ((Q.hitT = (Q.hitT || 0) - dt) > 0) return;
   const p = pickOf(m);
   if (!p) return;
-  const o = BF.mobs.list.find(o => o !== m && !o.dead && !o.removed && o.def && o.def.hostile && Math.hypot(o.position.x - m.position.x, o.position.z - m.position.z) < 1.8 && Math.abs(o.position.y - m.position.y) < 1.5);
+  const near = o => o !== m && !o.dead && !o.removed && o.def && o.def.hostile && Math.hypot(o.position.x - m.position.x, o.position.z - m.position.z) < 1.8 && Math.abs(o.position.y - m.position.y) < 1.5;
+  const o = hostiles().find(near);
+  if (BF.dcmp && BF.dcmp.on()) { const L = BF.mobs.list; BF.dcmp.check("miner fend", L.indexOf(L.find(near)), L.indexOf(o), m); }
   if (!o) return;
   Q.hitT = 0.8; m.ai.swingT = 0.3;
   BF.mobs.hurt(o, 2 + BF.items[p.id].tool.tier, "villager");

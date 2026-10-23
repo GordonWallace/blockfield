@@ -318,7 +318,7 @@ function extendDown(c, newLo) {
   c.secs = add.concat(c.secs);
   if (c.light) c.light = new Array(n).concat(c.light);
   if (c.sky) c.sky = new Array(n).fill(0).concat(c.sky);
-  c.lo = newLo; c.y0 = newLo * 16;
+  c.lo = newLo; c.y0 = newLo * 16; c.ver++; for (let i = 0; i < CS * CS; i++) c.colVer[i]++;
   const e = world.edits.get(c.key);       // edits are applied when the chunk is created; deeper ones are only possible if the band was shorter then
   if (e) for (const [i, id] of e) { const y = (i >> 8) + BF.MIN_Y; if (y >= c.y0 && y < oldY0) secSet(c, i & 15, y, (i >> 4) & 15, id); }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) if (c.top[z * CS + x] < oldY0) updateColumn(c, x, z);
@@ -334,7 +334,7 @@ function extendUp(c, newHi) {
   for (let i = c.hi; i < newHi; i++) c.secs.push(0);
   if (c.light) for (let i = c.hi; i < newHi; i++) c.light.push(undefined);
   const oldHi = c.hi;
-  c.hi = newHi; c.y1 = newHi * 16;
+  c.hi = newHi; c.y1 = newHi * 16; c.ver++; for (let i = 0; i < CS * CS; i++) c.colVer[i]++;
   if (BF.skyLight) BF.skyLight.onExtendedUp(c, oldHi);
 }
 function markNeighboursDirty(c) {
@@ -368,6 +368,7 @@ world.setBlock = function (x, y, z, id) {
   const oldId = cblock(c, lx, y, lz);
   if (oldId === id) return true;
   secSet(c, lx, y, lz, id);
+  c.ver++; c.colVer[(lz << 4) | lx]++;
   let e = world.edits.get(c.key);
   if (!e) world.edits.set(c.key, (e = new Map()));
   e.set(i, id);
@@ -472,7 +473,11 @@ function createChunk(cx, cz) {
   const g = BF.worldgen;
   const r = g.generateBand(cx, cz), lo = r.lo, hi = r.hi, data = r.vox;
   const key = ckey(cx, cz);
-  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), mesh: undefined, meshes: [], light: undefined, sky: undefined };
+  // ver counts the block changes since the chunk was created (setBlock, the band growing), colVer the same per column (lz * 16 + lx):
+  // caches of block scans keyed by (chunk, ver) stay right without listening for every change, and a reloaded chunk is a new object,
+  // so they rebuild from it (r15-07). mapCols (js/maps.js) and logBases (js/forester.js) are such caches, declared here so every chunk keeps
+  // one shape (a property added later would slow every block lookup down)
+  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), ver: 0, colVer: new Uint32Array(CS * CS), mapCols: null, logBases: null, mesh: undefined, meshes: [], light: undefined, sky: undefined };
   const e = world.edits.get(key);
   if (e) {
     // the band must cover every edited cell (builds above it, tunnels below it)
