@@ -7,7 +7,9 @@
 //   leads (js/horses.js)       BF.horses.leads(): the horse and what holds it (the player, a mob, a fence post)
 //   effects (js/fx.js)         puff, heart, crumbs and dust events, played here
 // Once per drawn frame render() builds, updates and removes the scene objects from that data: one gone from its list loses its object on
-// the next frame. Effects move with the drawn time (dt, scaled by the game speed, 0 while frozen); paddles settle in real time.
+// the next frame. Drops, arrows, boats and bees are drawn between where the last two ticks left them (spec r15-10: lerp(prev, cur, k),
+// k = BF.warp.alpha), except one that jumped (a face edge) and the player's own boat (it moves in real time), drawn where they are.
+// Effects move with the drawn game time (dt, 0 while frozen); paddles settle in real time.
 // API: BF.entityView = { init(scene), render(dt, realDt), viewOf(entity) -> its scene object | undefined, count() }
 (() => {
 "use strict";
@@ -30,8 +32,9 @@ function dropMat(id) {
   }
   return m;
 }
-function drawDrops(seen) {
-  const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1;
+const alphaNow = () => { const W = BF.warp, a = W && W.alpha != null ? W.alpha : 1; return Math.max(0, Math.min(1, a)); };
+function drawDrops(seen, k) {
+  const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1, j = 1 - k;
   for (const d of BF.drops.list) {
     let sp = dropViews.get(d);
     if (!sp || sp.material !== dropMat(d.id)) {
@@ -43,8 +46,10 @@ function drawDrops(seen) {
     }
     seen.add(d);
     sp.visible = loadedAt(d.pos.x, d.pos.z);
-    if (d.pulled) sp.position.copy(d.pos);
-    else sp.position.set(d.pos.x, d.pos.y + 0.22 + Math.sin(d.age * 2.5 + d.phase) * 0.06, d.pos.z);
+    const q = d.prev || d.pos, p = d.pos, snap = q.distanceToSquared(p) > 16;
+    const age = snap || d.prevAge == null ? d.age : d.prevAge * j + d.age * k, x = snap ? p.x : q.x * j + p.x * k, z = snap ? p.z : q.z * j + p.z * k;
+    const y = snap ? p.y : q.y * j + p.y * k;
+    sp.position.set(x, d.pulled ? y : y + 0.22 + Math.sin(age * 2.5 + d.phase) * 0.06, z);   // one flying into the player doesn't bob
     sp.material.color.setScalar(light);
   }
 }
@@ -52,7 +57,7 @@ function drawDrops(seen) {
 // ---------------------------------------------------------------- arrows
 let arrowGeo = null, arrowMat = null;
 const arrowViews = new Map(), _look = new THREE.Vector3();
-function drawArrows(seen) {
+function drawArrows(seen, k) {
   if (!arrowGeo) {
     // the arrow points along +Z (Object3D.lookAt aims +Z at the target)
     const V = BF.mobView, box = V.box;
@@ -69,8 +74,10 @@ function drawArrows(seen) {
     let mesh = arrowViews.get(a);
     if (!mesh) { mesh = new THREE.Mesh(arrowGeo, arrowMat); scene.add(mesh); arrowViews.set(a, mesh); }
     seen.add(a);
-    mesh.position.copy(a.pos);
-    if (a.look) { _look.copy(a.pos).add(a.look); mesh.lookAt(_look); }
+    if (a.stuck || !a.prev || a.prev.distanceToSquared(a.pos) > 64) mesh.position.copy(a.pos);
+    else mesh.position.lerpVectors(a.prev, a.pos, k);
+    const dir = a.stuck ? a.look : a.vel;   // along its flight; a stuck one as it flew in
+    if (dir) { _look.copy(mesh.position).add(dir); mesh.lookAt(_look); }
   }
 }
 
@@ -145,15 +152,19 @@ function boatLight(p) {
   try { bl = BF.world.getBlockLight(p.x, p.y + 0.5, p.z) / 15; } catch (_) {}
   return Math.max(0.12, sky, Math.pow(bl, 1.5));
 }
-function drawBoats(seen, realDt) {
+function drawBoats(seen, realDt, k) {
   const ease = 1 - Math.pow(0.8, Math.min(0.25, realDt) * 60);   // a resting paddle settles along the hull
   for (const b of BF.boats.list) {
     let v = boatViews.get(b);
     if (!v) { v = buildBoat(b); boatViews.set(b, v); }
     seen.add(b);
     v.root.visible = loadedAt(b.pos.x, b.pos.z);
-    v.root.position.copy(b.pos);
-    v.root.rotation.y = b.yaw;
+    if (b.rider || !b.prev || b.prev.distanceToSquared(b.pos) > 16) { v.root.position.copy(b.pos); v.root.rotation.y = b.yaw; }
+    else {
+      v.root.position.lerpVectors(b.prev, b.pos, k);
+      const d = b.yaw - b.prevYaw;
+      v.root.rotation.y = b.prevYaw + Math.atan2(Math.sin(d), Math.cos(d)) * k;
+    }
     v.body.rotation.z = b.hurtT > 0 ? Math.sin(b.hurtT * 30) * b.hurtT * 0.6 : 0;
     // paddles: an active one sweeps fore and aft and dips; a resting one lies along the hull
     for (let i = 0; i < 2; i++) {
@@ -215,17 +226,19 @@ function initBees() {
   });
 }
 const _m = new THREE.Matrix4(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
-const DQ = {}, DV = [0, 0];
+const DQ = {}, DV = [0, 0], BP = { x: 0, y: 0, z: 0 };
 function drawBees() {
-  const mesh = beeMesh, bees = BF.bees.list;
-  uTime.value = BF.simNow ? BF.simNow() : 0;
+  const mesh = beeMesh, bees = BF.bees.list, Wp = BF.warp, k = alphaNow(), j = 1 - k;
+  uTime.value = Wp && Wp.renderNow ? Wp.renderNow() : BF.simNow ? BF.simNow() : 0;
   const light = BF.sky && typeof BF.sky.light === "number" ? Math.max(0.3, Math.min(1, BF.sky.light)) : 1;
   mesh.material.color.setRGB(light, light, light);
   const n = Math.min(bees.length, BF.bees.CAP), A = mesh.geometry.getAttribute("bee");
   for (let i = 0; i < n; i++) {
     const b = bees[i], s = b.mode === "land" && b.land ? b.land : null;
+    const lerp = b.px != null && (b.x - b.px) ** 2 + (b.y - b.py) ** 2 + (b.z - b.pz) ** 2 < 16;   // (a jump: a face edge, a new frame)
+    BP.x = lerp ? b.px * j + b.x * k : b.x; BP.y = lerp ? b.py * j + b.y * k : b.y; BP.z = lerp ? b.pz * j + b.z * k : b.z;
     // the planet: the bee seen from the mesh (in the player's frame), its directions turned with it
-    const r = BF.planet.local(mesh.position, b, DQ), bx = r.x, bz = r.z, q = r.turn;
+    const r = BF.planet.local(mesh.position, BP, DQ), bx = r.x, bz = r.z, q = r.turn;
     if (s) {   // landed: belly on the surface, back along its normal
       let nx = s.nx, nz = s.nz;
       if (q) { BF.planet.turnVec(q, nx, nz, DV); nx = DV[0]; nz = DV[1]; }
@@ -233,13 +246,13 @@ function drawBees() {
       if (s.ny > 0.5) _f.set(Math.sin(b.landYaw), 0, Math.cos(b.landYaw));
       else { const a = (b.landYaw % 1.2) - 0.6; _f.set(Math.sin(a) * nz, Math.cos(a), -Math.sin(a) * nx); }   // on a wall: head up, a little askew
       _r.crossVectors(_u, _f).normalize(); _f.crossVectors(_r, _u).normalize();
-      _m.makeBasis(_r, _u, _f).setPosition(bx + nx * 0.045 - mesh.position.x, b.y + s.ny * 0.045, bz + nz * 0.045 - mesh.position.z);
+      _m.makeBasis(_r, _u, _f).setPosition(bx + nx * 0.045 - mesh.position.x, BP.y + s.ny * 0.045, bz + nz * 0.045 - mesh.position.z);
     } else {
-      let yaw = b.yaw;
+      let yaw = lerp && b.pyaw != null ? b.pyaw + Math.atan2(Math.sin(b.yaw - b.pyaw), Math.cos(b.yaw - b.pyaw)) * k : b.yaw;
       if (q) { BF.planet.turnVec(q, Math.sin(yaw), Math.cos(yaw), DV); yaw = Math.atan2(DV[0], DV[1]); }
       const c = Math.cos(yaw), sn = Math.sin(yaw);
       _f.set(sn, 0, c); _u.set(0, 1, 0); _r.set(c, 0, -sn);
-      _m.makeBasis(_r, _u, _f).setPosition(bx - mesh.position.x, b.y, bz - mesh.position.z);
+      _m.makeBasis(_r, _u, _f).setPosition(bx - mesh.position.x, BP.y, bz - mesh.position.z);
     }
     mesh.setMatrixAt(i, _m);
     A.setXY(i, b.phase, s ? 0 : 1);
@@ -402,15 +415,16 @@ BF.entityView = {
     puffMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.85, depthWrite: false });
     puffMatDark = new THREE.MeshBasicMaterial({ color: 0x4a4a4a, transparent: true, opacity: 0.85, depthWrite: false });
   },
-  // Once per drawn frame (js/main.js), after the simulation steps and the player: dt is the drawn time (game seconds, 0 while frozen
-  // or paused), realDt the frame's real seconds.
+  // Once per drawn frame (js/main.js), after the simulation steps and the player: dt is the drawn game time this frame (seconds, 0
+  // while frozen or paused), realDt the frame's real seconds.
   render(dt, realDt) {
     if (!scene) return;
     try {
       seen.clear();
-      if (BF.drops) drawDrops(seen);
-      if (BF.mobs && BF.mobs.arrowList) drawArrows(seen);
-      if (BF.boats) drawBoats(seen, realDt || 0);
+      const k = alphaNow();
+      if (BF.drops) drawDrops(seen, k);
+      if (BF.mobs && BF.mobs.arrowList) drawArrows(seen, k);
+      if (BF.boats) drawBoats(seen, realDt || 0, k);
       prune(dropViews); prune(arrowViews); prune(boatViews);
       initBees();
       if (BF.horses && BF.horses.leads) drawLeads();

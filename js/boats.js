@@ -94,7 +94,7 @@ function flowAt(p) {
 const list = [];
 function create(wood, x, y, z, yaw) {
   if (!ready || BF.I[wood + "_boat"] == null) return null;
-  const b = BF.ids.refs({ kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
+  const b = BF.ids.refs({ kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevYaw: yaw || 0, vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
     stowT: 0, row: [0, 0], rowing: [0, 0], onGround: false, inWater: false, medium: "air" });
   list.push(b);
   return b;
@@ -365,11 +365,13 @@ const boats = {
     step(b, dt, input);
     if (b.mob && (b.mob.removed || b.mob.dead)) { if (b.mob.removed && !b.mob.dead) stow(b); else { b.mob.riding = null; b.mob = null; } }
     seatMob(b);
+    b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn where it is while the player rows it
     return b.yaw - y0;
   },
   // World simulation step (main.js, runs with the fast-forward): boats without the player drift, pick up mobs, keep theirs seated.
   update(dt) {
     for (const b of list.slice()) {
+      b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn between this and where the tick leaves it (js/entityview.js)
       if (b.mob && (b.mob.removed || b.mob.dead)) { if (b.mob.removed && !b.mob.dead) stow(b); else { b.mob.riding = null; b.mob = null; } }
       if (!loadedAt(b.pos.x, b.pos.z)) continue;
       if (!b.rider) {

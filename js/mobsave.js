@@ -17,7 +17,7 @@ const SHORT = 1 / 24;       // game days (a game hour): a village unloaded for l
 const EXACT = 0.02;          // game days (about 24 s at 1x): a snapshot older than this is not an exact restore
 const MAX_DEPTH = 7, MAX_ARR = 2500;
 // Fields a snapshot never holds: render objects, identity (set again by the spawn), what the modules restore from their own saves.
-const SKIP = new Set(["def", "position", "vel", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
+const SKIP = new Set(["def", "position", "vel", "prev", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
   "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
   "tradingWith", "badge", "badgeLevel", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig"]);

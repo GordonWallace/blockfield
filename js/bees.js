@@ -430,6 +430,8 @@ let acc = 0, lureT = 0, lp = [];
 function update(dt) {
   if (!(dt > 0) || !W() || NEST == null && (ids(), NEST == null)) return;
   hook();
+  for (const b of bees) { b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (draw)
+  dirty = true;
   acc += dt;
   if (acc >= 1) { acc = 0; housekeeping(); }
   release(dt);

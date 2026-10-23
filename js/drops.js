@@ -26,7 +26,7 @@ const drops = {
     const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + drops.list.length * 4099);   // the toss: seeded by the spot, tick and count (js/rand.js)
     const a = r.next() * Math.PI * 2, s = 1 + r.next() * 1.5;
     const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + r.next() * 2, Math.sin(a) * s);
-    const d = { id, count, pos: new THREE.Vector3(x, y, z), vel, age: 0, phase: Math.random() * 6.28, pulled: false,   // visual (the bob)
+    const d = { id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, pulled: false,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     drops.list.push(d);
     return d;
@@ -72,12 +72,14 @@ const drops = {
       if (!d) continue;
       d.age = Math.max(0, +age || 0);
       d.pickupDelay = d.age + Math.max(0, +delay || 0);
+      d.prev.copy(d.pos); d.prevAge = d.age;
     }
   },
 
   update(dt) {
     const P = BF.player, pp = P && P.position, alive = P && !P.dead;
     for (const d of drops.list.slice()) {
+      d.prev.copy(d.pos); d.prevAge = d.age; d.pulled = false;   // drawn between this and where the tick leaves it (js/entityview.js)
       // in an unloaded chunk an item neither ages nor falls (it would drop out of the world); it waits for the chunk
       if (!BF.world.isLoaded(d.pos.x, d.pos.z)) continue;
       d.age += dt;
@@ -93,8 +95,8 @@ const drops = {
           const k = 10 / dist;
           d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
           d.pos.addScaledVector(d.vel, dt);
-          BF.planet.reframe(d.pos, -1, null, d.vel);
           d.pulled = true;
+          BF.planet.reframe(d.pos, -1, null, d.vel);
           continue;
         }
       }
@@ -108,7 +110,6 @@ const drops = {
       BF.planet.reframe(d.pos, -1, null, d.vel);   // past a face edge: onto the next face's square
       if (res.onGround) { d.vel.x *= Math.pow(0.02, dt); d.vel.z *= Math.pow(0.02, dt); }
       if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
-      d.pulled = false;
     }
   },
 };

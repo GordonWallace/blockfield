@@ -1,6 +1,6 @@
 // Mobs: blocky Minecraft-style animals and monsters built from boxes with baked per-pixel vertex colours.
 // Passive: pig, cow, sheep, chicken. Hostile: zombie, skeleton, creeper, spider.
-// API (CONTRACT.md): BF.mobs = { list, init, update, raycast, hit, clear } plus spawn(type, x, y, z) for debugging.
+// API (CONTRACT.md): BF.mobs = { list, init, update, draw, raycast, hit, clear } plus spawn(type, x, y, z) for debugging.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -265,7 +265,7 @@ function createMob(type, x, y, z, variant, style) {
     type, hostile: T.hostile, def: T, variant: T.variants ? variant : null, profession: T.variants ? variant : undefined,
     style: T.variants ? VILLAGE_STYLES[style] : undefined, tradingWith: null, level: T.variants ? 1 : undefined, badgeLevel: 0,
     village: null, home: null, tradeCd: 0,
-    position: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(),   // plain maths objects: js/mobview.js draws the mob from these fields
+    position: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), prev: null,   // plain maths objects: js/mobview.js draws the mob from these fields (between prev and cur, r15-10)
     hp: T.hp, maxHp: T.hp, halfWidth: T.hw, height: T.h,
     // how it looks, as data (js/mobview.js): look = the model variant (js/mobview.js typeParts), scale / headScale = its size, partVis =
     // parts shown or hidden by name (a horse's saddle), tint "red" = the hurt / death flash, held = item id of the tool in its hands,
@@ -281,6 +281,7 @@ function createMob(type, x, y, z, variant, style) {
   });
   BF.ids.put(mob);   // mob.id: a new "e<n>" (a villager's saved one comes back with its trading state, js/trading.js unpack)
   if (type === "villager" && BF.trades) BF.trades.init(mob); // level, offers, inventory with starting stock
+  keepPrev(mob);
   list.push(mob);
   return mob;
 }
@@ -421,7 +422,7 @@ function shootArrow(m, target, victim) {
   dir.x += rnd(R(m), -0.03, 0.03); dir.y += rnd(R(m), -0.03, 0.03); dir.z += rnd(R(m), -0.03, 0.03);
   dir.normalize();
   from.addScaledVector(dir, 0.5);
-  arrows.push({ pos: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null });
+  arrows.push({ pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null });
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
@@ -432,7 +433,7 @@ function shootArrow(m, target, victim) {
 const PLAYER_ARROW_LIFE = 60, ARROW_DRAG = 0.99;   // vanilla: stuck arrows despawn after 1200 ticks; 1% air drag per tick
 function shootPlayerArrow(from, vel, o) {
   o = o || {};
-  const a = { pos: from.clone(), vel: vel.clone(), look: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
+  const a = { pos: from.clone(), prev: from.clone(), vel: vel.clone(), look: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
     byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
   arrows.push(a);
   if (BF.emit) BF.emit("arrowShot", null, from);
@@ -466,6 +467,7 @@ function updateArrows(dt) {
   const p = playerAlive() ? player() : null;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
+    a.prev.copy(a.pos);   // drawn between this and where the tick leaves it (js/entityview.js)
     a.life -= dt;
     if (a.life <= 0) { arrows.splice(i, 1); continue; }
     if (a.byPlayer && playerArrowStep(a, p)) { arrows.splice(i, 1); continue; }
@@ -1592,6 +1594,16 @@ function updateMob(m, dt) {
   }
 }
 
+// ---------- drawing between ticks (spec r15-10) ----------
+// The sim moves a mob once per 0.05 s tick. At the start of each tick keepPrev stores where it was (position, facing, head, walk
+// cycle); js/mobview.js draws it every frame at lerp(prev, cur, alpha), alpha being how far the frame is into the next tick
+// (BF.warp.alpha), so motion stays smooth at 60 fps or more.
+function keepPrev(m) {
+  const q = m.prev || (m.prev = { x: 0, y: 0, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 0, age: 0 });
+  q.x = m.position.x; q.y = m.position.y; q.z = m.position.z;
+  q.yaw = m.yaw; q.headYaw = m.headYaw; q.headPitch = m.headPitch; q.walkPhase = m.walkPhase; q.walkAmt = m.walkAmt; q.age = m.age;
+}
+
 // Held tools: a profession module registers toolHolders[profession] = m => item id (or null); the villager's `held` is set from it each
 // update and js/mobview.js draws that tool in its folded hands. js/forester.js uses it for axes.
 const toolHolders = {};
@@ -2315,6 +2327,7 @@ BF.mobs = {
     // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
+    for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
     for (const m of list.slice()) {
       if (m.removed) continue;
       let h = dt;
