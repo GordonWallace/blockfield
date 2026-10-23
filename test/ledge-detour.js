@@ -43,16 +43,19 @@ module.exports = async (pg, out) => {
       const here = e => e.p && e.p[0] >= X0 - 2 && e.p[0] <= X0 + N && e.p[2] >= Z0 - 2 && e.p[2] <= Z0 + N;   // this mob's lines, not the village's own golems'
       const logged = () => (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !old.has(e) && here(e)).map(e => e.l + " " + e.x);
       let T = 0, past = null, stuckAt = null;
+      // past the step: standing on top of it (its cells are x <= 15). A route may run along its edge cells (x = 15, centre 15.5) before
+      // turning west, which routes of equal cost do or don't (the heap's tie order, spec r15-05), so the edge cells count.
+      const isPast = () => m.position.x < X0 + 16 && m.position.y > Y0 + 0.5;
       const step = () => { BF.sky.setTime(0.1); BF.mobs.update(0.05); P.set(X0 + 25, Y0 + 1, Z0 + 25); T += 0.05; };
       try {
         if (kind !== "boxed") {
-          while (T < 60 && past == null) { step(); if (m.position.x < X0 + 15.5) past = +T.toFixed(1); }
+          while (T < 60 && past == null) { step(); if (isPast()) past = +T.toFixed(1); }
         } else {
           while (T < 50 && stuckAt == null) { step(); if (logged().some(t => /^ERROR .* stuck at/.test(t))) stuckAt = +T.toFixed(1); }
           for (let z = 10; z <= 11; z++) W.setBlock(X0 + 18, Y0, Z0 + z, 0), W.setBlock(X0 + 18, Y0 + 1, Z0 + z, 0);   // let it out
           var held = m.ai.held && +m.ai.held.t.toFixed(1), mode = m.ai.mode;
           const t0 = T;
-          while (T < t0 + 30 && past == null) { step(); if (m.position.x < X0 + 15.5) past = +T.toFixed(1); }
+          while (T < t0 + 30 && past == null) { step(); if (isPast()) past = +T.toFixed(1); }
         }
       } finally { W.moveBox = mb; }
       return { kind, ceil, past, stuckAt, held: typeof held === 'undefined' ? null : held, mode: typeof mode === 'undefined' ? null : mode, log: logged(), at: [m.position.x - X0, m.position.y - Y0, m.position.z - Z0].map(v => +v.toFixed(1)) };

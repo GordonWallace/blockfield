@@ -91,9 +91,9 @@ const isHorseBiome = (x, z) => { try { return HORSE_BIOMES.has(BF.worldgen.biome
 function newRec(o) {
   const rs = BF.rand.at("horse", o.x, o.z, null, nextId);   // a new horse's looks and stats: from where, when and its number
   const st = o.stats || rollStats(rs);
-  const r = { hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
+  const r = BF.ids.mobRef({ hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
     maxHp: st.hp, hp: st.hp, speed: st.speed, jump: st.jump, tamed: !!o.tamed, owner: o.owner || null, saddle: !!o.saddle, temper: 0,
-    growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null };
+    growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null });
   recs.set(r.hid, r);
   return r;
 }
@@ -181,7 +181,7 @@ function leash(m, holder) {
   r.post = null;
   if (!holder) r.lead = null;
   else if (holder === "player") r.lead = { kind: "player" };
-  else if (holder.position) r.lead = { kind: "mob", mob: holder };
+  else if (holder.position) r.lead = BF.ids.refs({ kind: "mob", mob: holder });
   else { r.lead = { kind: "post", x: holder.x, y: holder.y, z: holder.z }; r.post = [holder.x, holder.y, holder.z]; }
   return true;
 }
@@ -603,11 +603,11 @@ function deserialize(o) {
   for (const h of Array.isArray(o.herds) ? o.herds : []) if (Array.isArray(h)) herds.set(h[0], { id: h[0], cx: +h[1], cz: +h[2], dir: +h[3] || 0 });
   for (const e of Array.isArray(o.recs) ? o.recs : []) {
     if (!e || ![e.x, e.y, e.z].every(Number.isFinite)) continue;
-    const r = { hid: e.hid || nextId++, x: e.x, y: e.y, z: e.z, yaw: +e.yaw || 0, coat: COATS.includes(e.coat) ? e.coat : "brown", mark: MARKS.includes(e.mark) ? e.mark : "none",
+    const r = BF.ids.mobRef({ hid: e.hid || nextId++, x: e.x, y: e.y, z: e.z, yaw: +e.yaw || 0, coat: COATS.includes(e.coat) ? e.coat : "brown", mark: MARKS.includes(e.mark) ? e.mark : "none",
       maxHp: clamp(+e.maxHp || 20, 1, 60), hp: +e.hp || 20, speed: +e.speed || 9, jump: +e.jump || 2, tamed: !!e.tamed, owner: e.owner || null, saddle: !!e.saddle,
       temper: +e.temper || 0, growAt: e.growAt != null ? +e.growAt : null, cd: +e.cd || 0, fed: e.fed != null ? +e.fed : null, herd: e.herd || null, t: e.t != null ? +e.t : null,
       lead: Array.isArray(e.post) ? { kind: "post", x: e.post[0], y: e.post[1], z: e.post[2] } : e.led ? { kind: "player" } : null, post: Array.isArray(e.post) ? e.post : null,
-      pen: e.pen && typeof e.pen === "object" ? e.pen : null, rider: !!e.rider, mob: null };
+      pen: e.pen && typeof e.pen === "object" ? e.pen : null, rider: !!e.rider, mob: null });
     recs.set(r.hid, r);
     nextId = Math.max(nextId, r.hid + 1);
   }
