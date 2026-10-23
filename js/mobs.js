@@ -1362,7 +1362,8 @@ const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
 let planBudget = 0;
 const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
-function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
+// The A* as it was before spec r15-05 (string keys, a linear scan of the open list): kept for BF.debug.pathCompare.
+function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
   const nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const key = (x, y, z) => x + "," + y + "," + z;
@@ -1400,6 +1401,172 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
     }
   }
   return null;
+}
+// The same search with integer cell keys and a binary heap (spec r15-05); routes can differ from findPathOld only between equal f values.
+// Cells are keyed relative to the start in the mob's own frame (never canonicalised across a face edge): x and z within 32767 of it
+// (maxNodes is far smaller), y from MIN_Y. An open-addressing table, reused between calls (a stamp per search instead of clearing),
+// holds for each cell met its node (best cost and parent, in typed arrays) and whether it is a cell the mob can be in, so each cell's
+// blocks are read once a search. The heap holds (f, insertion order, node, g) entries; an entry whose g is no longer its cell's best is
+// skipped when popped (but still counts toward maxNodes, as the old open list kept such duplicates).
+const FP = { cap: 0, hcap: 0, x: null, y: null, z: null, g: null, p: null, hf: null, hq: null, hn: null, hg: null,
+  tcap: 0, tmask: 0, tused: 0, stamp: 0, tk: null, ts: null, tn: null, tv: null };
+function fpGrow(n) {
+  const c = Math.max(1024, n * 2), o = FP;
+  const g = (A, old) => { const a = new A(c); if (old) a.set(old.subarray(0, o.cap)); return a; };
+  o.x = g(Int32Array, o.x); o.y = g(Int32Array, o.y); o.z = g(Int32Array, o.z); o.g = g(Float64Array, o.g); o.p = g(Int32Array, o.p); o.cap = c;
+}
+function fpGrowHeap(n) {
+  const c = Math.max(1024, n * 2), o = FP;
+  const g = (A, old) => { const a = new A(c); if (old) a.set(old.subarray(0, o.hcap)); return a; };
+  o.hf = g(Float64Array, o.hf); o.hq = g(Int32Array, o.hq); o.hn = g(Int32Array, o.hn); o.hg = g(Float64Array, o.hg); o.hcap = c;
+}
+// the cell table: key (Float64), stamp of the search that wrote the slot, node index (-1 none yet), nav (0 not read, 1 yes, 2 no)
+const fpHash = k => { const lo = k % 4294967296 | 0, hi = (k / 4294967296) | 0; let h = Math.imul(lo, 0x9E3779B1) ^ Math.imul(hi, 0x85EBCA77); h ^= h >>> 15; return h; };
+function fpTable(cap) {
+  const o = FP, ok = o.tk, os = o.ts, on = o.tn, ov = o.tv, oc = o.tcap;
+  o.tk = new Float64Array(cap); o.ts = new Int32Array(cap); o.tn = new Int32Array(cap); o.tv = new Uint8Array(cap); o.tcap = cap; o.tmask = cap - 1;
+  for (let i = 0; i < oc; i++) if (os[i] === o.stamp) {   // the current search's cells move to the bigger table
+    let j = fpHash(ok[i]) & o.tmask;
+    while (o.ts[j] === o.stamp) j = (j + 1) & o.tmask;
+    o.tk[j] = ok[i]; o.ts[j] = o.stamp; o.tn[j] = on[i]; o.tv[j] = ov[i];
+  }
+}
+function fpSlot(k) {   // the table slot of key k in this search, made if new
+  const o = FP;
+  let i = fpHash(k) & o.tmask;
+  while (o.ts[i] === o.stamp) { if (o.tk[i] === k) return i; i = (i + 1) & o.tmask; }
+  if (++o.tused * 2 > o.tcap) { fpTable(o.tcap * 2); return fpSlot(k); }
+  o.tk[i] = k; o.ts[i] = o.stamp; o.tn[i] = -1; o.tv[i] = 0;
+  return i;
+}
+function findPathFast(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
+  const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
+  const navRead = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
+  const Y0 = BF.MIN_Y, key = (x, y, z) => ((x - sx + 32768) * 65536 + (z - sz + 32768)) * 4096 + (y - Y0);
+  const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
+  const S = FP;
+  if (!S.cap) fpGrow(0);
+  if (!S.hcap) fpGrowHeap(0);
+  if (!S.tcap) fpTable(1 << 16);
+  S.stamp = (S.stamp + 1) | 0; S.tused = 0;
+  if (!S.stamp) { S.ts.fill(0); S.stamp = 1; }   // wrapped round: no slot may look written by this search
+  // nav through the table: each cell's blocks are read once per search (they cannot change during it)
+  const nav = (x, y, z) => {
+    const i = fpSlot(key(x, y, z));
+    if (!S.tv[i]) S.tv[i] = navRead(x, y, z) ? 1 : 2;
+    return S.tv[i] === 1;
+  };
+  let nodes = 0, hn = 0, seq = 0;
+  const node = (x, y, z, g, p) => {
+    if (nodes >= S.cap) fpGrow(nodes);
+    S.x[nodes] = x; S.y[nodes] = y; S.z[nodes] = z; S.g[nodes] = g; S.p[nodes] = p;
+    return nodes++;
+  };
+  // the heap: a before b when its f is lower, or equal and pushed earlier
+  const less = (i, j) => S.hf[i] < S.hf[j] || (S.hf[i] === S.hf[j] && S.hq[i] < S.hq[j]);
+  const swap = (i, j) => {
+    let t = S.hf[i]; S.hf[i] = S.hf[j]; S.hf[j] = t;
+    t = S.hq[i]; S.hq[i] = S.hq[j]; S.hq[j] = t;
+    t = S.hn[i]; S.hn[i] = S.hn[j]; S.hn[j] = t;
+    t = S.hg[i]; S.hg[i] = S.hg[j]; S.hg[j] = t;
+  };
+  const push = (f, n, g) => {
+    if (hn >= S.hcap) fpGrowHeap(hn);
+    let i = hn++;
+    S.hf[i] = f; S.hq[i] = seq++; S.hn[i] = n; S.hg[i] = g;
+    while (i > 0) { const up = (i - 1) >> 1; if (!less(i, up)) break; swap(i, up); i = up; }
+  };
+  const pop = () => {   // removes the top entry (read before calling)
+    hn--;
+    if (!hn) return;
+    S.hf[0] = S.hf[hn]; S.hq[0] = S.hq[hn]; S.hn[0] = S.hn[hn]; S.hg[0] = S.hg[hn];
+    for (let i = 0; ;) {
+      const l = 2 * i + 1, r = l + 1;
+      let b = i;
+      if (l < hn && less(l, b)) b = l;
+      if (r < hn && less(r, b)) b = r;
+      if (b === i) break;
+      swap(i, b); i = b;
+    }
+  };
+  // a cell reached at cost ng from node `from`: kept when it is new or cheaper than before
+  const reach = (nx, ny, nz, ng, from) => {
+    const i = fpSlot(key(nx, ny, nz)), at = S.tn[i];
+    if (at >= 0) {
+      if (S.g[at] <= ng) return;
+      S.g[at] = ng; S.p[at] = from;
+      push(ng + hh(nx, nz), at, ng);
+      return;
+    }
+    const n = node(nx, ny, nz, ng, from);
+    S.tn[fpSlot(key(nx, ny, nz))] = n;   // (looked up again: making the node can't move the slot, but the first lookup may have grown the table)
+    push(ng + hh(nx, nz), n, ng);
+  };
+  const s0 = node(sx, sy, sz, 0, -1);
+  S.tn[fpSlot(key(sx, sy, sz))] = s0;
+  push(hh(sx, sz), s0, 0);
+  for (let n = 0; hn && n < maxNodes; n++) {
+    const cur = S.hn[0], g = S.hg[0];
+    pop();
+    if (g > S.g[cur]) continue;   // a cell since reached more cheaply
+    const x = S.x[cur], y = S.y[cur], z = S.z[cur];
+    if (goal.at(x, y, z)) {
+      const out = [];
+      for (let c = cur; S.p[c] !== -1; c = S.p[c]) out.push([S.x[c], S.y[c], S.z[c]]);
+      return out.reverse();
+    }
+    if (ladderAt(x, y, z)) for (const dy of [1, -1]) {           // climb straight up to the next rung or down to the one below
+      const ny = y + dy;
+      if (dy > 0 ? !nav(x, ny, z) : !ladderCell(x, ny, z) || !air(x, ny + 2, z)) continue;
+      reach(x, ny, z, g + 1.5, cur);
+    }
+    for (const [dx, dz] of BF.DIRS) for (const dy of [0, 1, -1, -2, -3]) {
+      const nx = x + dx, ny = y + dy, nz = z + dz;
+      if (!nav(nx, ny, nz)) continue;
+      if (dy > 0 && (blockAt(x, y + 2, z).solid || !air(x, y + 3, z) || (tall && BF.DIRS.some(([ex, ez]) => !air(x + ex, y + 3, z + ez))))) break;   // no room to jump (a golem is wider than its cell)
+      if (dy < 0 && (blockAt(nx, y + 1, nz).solid || !air(nx, y + 2, nz))) break;        // wall: cannot step off
+      const b = blockAt(nx, ny, nz);
+      reach(nx, ny, nz, g + 1 + (dy ? 0.5 : 0) + (b.door || b.gate ? 1 : 0), cur);
+      break;
+    }
+  }
+  return null;
+}
+// What a route costs under findPath's rules (the comparison below and test/findpath-compare.js): 1 a step, +0.5 up or down, +1 into a door
+// or gate, 1.5 a ladder rung straight up or down.
+function routeCost(sx, sy, sz, route) {
+  let c = 0, px = sx, py = sy, pz = sz;
+  for (const [x, y, z] of route) {
+    if (x === px && z === pz) c += 1.5;
+    else { const b = blockAt(x, y, z); c += 1 + (y !== py ? 0.5 : 0) + (b.door || b.gate ? 1 : 0); }
+    px = x; py = y; pz = z;
+  }
+  return c;
+}
+// BF.debug.pathCompare (tests, the console): every search also runs findPathOld and tallies BF.debug.pathStats: calls, identical routes,
+// other routes of equal cost, none from both, searches where only one ran out of maxNodes (the other order of equal-f cells reached the
+// goal first; checked with 4x the nodes), differences (the first few kept, and logged), and the time each took.
+const DBG = (BF.debug = BF.debug || {});
+DBG.pathCompare = DBG.pathCompare || false;
+function pathStatsReset() { return (DBG.pathStats = { calls: 0, same: 0, equal: 0, cutoff: 0, diff: 0, nullBoth: 0, ms: 0, msOld: 0, diffs: [] }); }
+pathStatsReset();
+// findPath: the route search every caller uses (findPathFast, compared with findPathOld when asked).
+function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
+  if (!DBG.pathCompare) return findPathFast(sx, sy, sz, goal, maxNodes, tall);
+  const S = DBG.pathStats || pathStatsReset();
+  const t0 = performance.now(), a = findPathFast(sx, sy, sz, goal, maxNodes, tall), t1 = performance.now(), b = findPathOld(sx, sy, sz, goal, maxNodes, tall), t2 = performance.now();
+  S.calls++; S.ms += t1 - t0; S.msOld += t2 - t1;
+  if (!a && !b) S.nullBoth++;
+  else if (a && b && a.length === b.length && a.every((c, i) => c[0] === b[i][0] && c[1] === b[i][1] && c[2] === b[i][2])) S.same++;
+  else if (a && b && routeCost(sx, sy, sz, a) === routeCost(sx, sy, sz, b)) S.equal++;
+  else if (!a !== !b && (a ? findPathOld : findPathFast)(sx, sy, sz, goal, maxNodes * 4, tall)) S.cutoff++;
+  else {
+    S.diff++;
+    const d = { from: [sx, sy, sz], goal: [goal.x, goal.z], maxNodes, tall, len: a && a.length, lenOld: b && b.length, cost: a && routeCost(sx, sy, sz, a), costOld: b && routeCost(sx, sy, sz, b) };
+    if (S.diffs.length < 20) S.diffs.push(d);
+    if (BF.glog && S.diff <= 20) BF.glog.log("DEBUG", "pathCompare", `findPath differs from findPathOld from ${sx},${sy},${sz} toward ${goal.x},${goal.z}: ${d.len} cells cost ${d.cost} vs ${d.lenOld} cost ${d.costOld}`, { at: [sx, sy, sz] });
+  }
+  return a;
 }
 const feetCell = m => [Math.floor(m.position.x), Math.floor(m.position.y + 0.01), Math.floor(m.position.z)];
 // Route to a cell beside the bed (same floor).
@@ -2759,7 +2926,7 @@ BF.mobs = {
   spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
   spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
-  isWild, spawnGroup, penBoxes, inPenBox, standable, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
+  isWild, spawnGroup, penBoxes, inPenBox, standable, findPath, findPathFast, findPathOld, routeCost, pathStatsReset,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}, maxNodes, tall): A* route cells (tests); the Fast/Old pair and routeCost for test/findpath-compare.js
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
