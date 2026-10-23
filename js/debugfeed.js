@@ -271,6 +271,15 @@ function mobMap(pp) {
   return out;
 }
 
+// The world state hash (js/statehash.js) and its parts, for bug reports: worked out every HASH_EVERY ms (about 15 ms with a 55-villager village loaded), not on every snapshot.
+const HASH_EVERY = 10000;
+let hashT = -Infinity;
+function stateHash() {
+  if (!BF.stateHash) return undefined;
+  if (Date.now() - hashT >= HASH_EVERY || !BF.stateHash.last) { hashT = Date.now(); BF.stateHash.full(); }
+  return BF.stateHash.last;
+}
+
 function snapshot() {
   const info = BF.debugInfo(), pp = BF.player.position;
   const mobs = {};
@@ -289,6 +298,7 @@ function snapshot() {
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
     alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
+    hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
 
