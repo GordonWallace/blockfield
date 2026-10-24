@@ -196,6 +196,7 @@ function frame(now) {
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
   }
+  if (BF.proto) BF.proto.flush();   // the frame's changes to the client's mirror: chunks, blocks, entities, clock (js/protocol.js, r15-36)
   // drawing between the last two ticks (r15-10): the sky at the interpolated game time, entities at lerp(prev, cur, alpha)
   const alpha = W.alpha, drawnDt = Math.max(0, W.renderNow() - drawn0);
   BF.sky.draw(alpha, drawnDt);
@@ -228,6 +229,7 @@ BF.boats.init(scene);
 BF.entityView.init(scene);
 BF.player.init();
 BF.inventory.init();
+if (BF.proto) BF.proto.local.connect();   // the simulation and the client, joined in the page (js/protocol.js, spec r15-36)
 let seed = 1337;
 // The boot world (behind the title screen) is a planet, seed 1337 or #seed<n> (spec r14-19); #seed<n>v9 has village generator 9. The
 // old "gen4" in a test hash (#seed123gen4v10) is still accepted and changes nothing; the flat generators' gen1 to gen3 are gone (r14-24),

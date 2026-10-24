@@ -224,6 +224,9 @@ world.setDaylight = function (l) {
 };
 
 world.onChunkLoad = fn => world._loadL.push(fn);
+// fn(chunk, editIndex, id) after every block change (setBlock): the simulation/client protocol's blockChanges (js/protocol.js, r15-36)
+const setL = [];
+world.onBlockSet = fn => setL.push(fn);
 world.onChunkUnload = fn => world._unloadL.push(fn);
 
 // Removes every chunk, edit and mesh (used for a new world / new seed).
@@ -405,6 +408,7 @@ world.setBlock = function (x, y, z, id) {
   let e = world.edits.get(c.key);
   if (!e) world.edits.set(c.key, (e = new Map()));
   e.set(i, id);
+  for (let k = 0; k < setL.length; k++) setL[k](c, i, id);   // (the protocol's block changes, js/protocol.js)
   updateColumn(c, lx, lz);
   world._dirty.add(c.key);
   scheduleFluid(x, y, z, true);

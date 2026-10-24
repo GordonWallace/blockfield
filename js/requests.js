@@ -15,7 +15,7 @@
 // Queued requests are not saved: those sent in a tick apply in that tick, so only chain effects and between-tick sends can be pending.
 // API: BF.req = { send(kind, target, data, from) -> req (req.then(fn)), on(kind, applyFn(req, world) -> {ok, ...}, {onResult}?),
 //   beginTick(), apply(), blocks(fn), deliver(), endTick(), phase, direct, strict, stats(), resetStats(), text(), queued(), reset(), order(a, b),
-//   player(kind, target, data) -> req (applied now, req.result), record() -> list / record(false) -> list, replay(list), replayFlush(),
+//   player(kind, target, data) -> req (applied now, req.result; through the protocol when R.via is set), applyPlayer(kind, target, data), via, record() -> list / record(false) -> list, replay(list), replayFlush(),
 //   recording, replaying, inPlayer }
 (() => {
 "use strict";
@@ -150,7 +150,14 @@ function setPose(a) {
   if (BF.inventory && BF.inventory.selectedIndex !== a[5]) BF.inventory.select(a[5]);
   if (P.setFlying && !!a[6] !== !!P.flying) P.setFlying(!!a[6]);
 }
+// With the simulation/client protocol connected (js/protocol.js, r15-36), player() hands the request to the client end (R.via), which
+// sends it to the simulation; the simulation applies it with applyPlayer() and sends the result back (in the page: before via returns).
+// A request made while one is being applied, and replayed entries, are the simulation's own and apply directly.
 function player(kind, target, data) {
+  if (R.via && !depth && !replaying) { const r = R.via(kind, target, data); if (r) return r; }
+  return applyPlayer(kind, target, data);
+}
+function applyPlayer(kind, target, data) {
   const req = make(kind, target, data, "player");
   if (rec && !depth && !replaying) rec.push({ tick: req.tick, kind, target, data: clone(req.data), pose: pose() });
   const prev = phase;
@@ -176,7 +183,7 @@ function boundary() {
 }
 function playEntry(e) {
   setPose(e.pose);
-  if (e.kind) player(e.kind, e.target, clone(e.data));
+  if (e.kind) applyPlayer(e.kind, e.target, clone(e.data));
 }
 function record(on) {
   if (on === false) {
@@ -277,7 +284,7 @@ function text(s) {
 
 const R = {
   send, on, apply, deliver, beginTick, blocks, endTick, stats, resetStats, text, order,
-  player, record, replay, replayFlush,
+  player, applyPlayer, record, replay, replayFlush, via: null,
   get recording() { return !!rec; },
   get replaying() { return rep ? rep.length - repAt : 0; },   // entries still to replay
   get inPlayer() { return depth > 0; },
