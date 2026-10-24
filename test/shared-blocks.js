@@ -7,7 +7,7 @@
 const path = require('path'), { spawn } = require('child_process');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/shared-blocks';
-const GAME = 8730, DBG = 8731;
+let GAME = 8730, DBG = 8731;   // (free ports picked at the start: several hosts' runs at once on one machine)
 const fails = [], ok = (n, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (extra !== undefined ? '  ' + JSON.stringify(extra) : '')); if (!c) fails.push(n); };
 const start = async (extra) => {
   const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-shared-alerts.json'), '--test', '--saves', require('fs').mkdtempSync(path.join(require('os').tmpdir(), 'bf-shared-saves-')), ...extra]);   // (--test: BFT.sim on the world server)
@@ -156,6 +156,7 @@ async function check(b, label, url, { isolated, walk }) {
 }
 
 (async () => {
+  GAME = await lib.freePort(); DBG = await lib.freePort();
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--js-flags=--expose-gc'] });
   try {
     let srv = await start([]);

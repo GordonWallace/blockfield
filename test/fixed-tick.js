@@ -29,7 +29,7 @@ module.exports = async (pg, out) => {
     BF.mobs.update = __ftUp; BF.warp.plan = __ftPlan;
     const cap = BF.warp.MAX_FRAME;
     return { sim: BF.simNow(), real: performance.now(), n: __ftH.length, bad: __ftH.filter(h => h !== BF.warp.TICK).length,
-      dropped: BF.warp.dropped, frames: __ftF.length, counted: __ftF.reduce((a, d) => a + Math.min(cap, d), 0), slow: __ftF.filter(d => d > cap).length, alpha: BF.warp.alpha };
+      dropped: BF.warp.dropped, frames: __ftF.length, counted: __ftF.reduce((a, d) => a + Math.min(cap, d), 0), slow: __ftF.filter(d => d > cap).length, first: __ftF.length ? Math.min(cap, __ftF[0]) : 0, alpha: BF.warp.alpha };
   });
   const simS = t1.sim - t0.sim, realS = (t1.real - t0.real) / 1000;
   console.log(JSON.stringify({ dropped: t1.dropped - t0.dropped, simS: +simS.toFixed(3), realS: +realS.toFixed(3), counted: +t1.counted.toFixed(3), frames: t1.frames, slowFrames: t1.slow, ticks: t1.n, badTicks: t1.bad }));
@@ -37,7 +37,8 @@ module.exports = async (pg, out) => {
   check(Math.abs(simS - t1.n * 0.05) < 1e-6, "the clock moved by exactly the ticks run");
   const lostS = (t1.dropped - t0.dropped) * 0.05;   // ticks the 40 ms frame budget couldn't fit (headless software rendering is slow)
   check(Math.abs(simS + lostS - t1.counted) <= 0.1, "at 1x the sim clock keeps the frames' real time: " + simS.toFixed(3) + " s run + " + lostS.toFixed(2) + " s dropped for " + t1.counted.toFixed(3) + " s counted (" + realS.toFixed(3) + " s real, " + t1.slow + " of " + t1.frames + " frames over the 0.25 s cap)");
-  if (!t1.slow && !lostS) check(Math.abs(simS - realS) <= 0.1, "with no frame over the cap and none dropped, it keeps real time");
+  // (the first frame counts time from before the hooks went in: up to one frame's worth, which off the page includes the eval's round trip)
+  if (!t1.slow && !lostS) check(Math.abs(simS - realS) <= 0.1 + t1.first, "with no frame over the cap and none dropped, it keeps real time (" + simS.toFixed(3) + " s for " + realS.toFixed(3) + " s, first frame " + t1.first.toFixed(3) + " s)");
 
   // ---- the same 200 ticks at 30 fps and at 120 fps (forced frame times, each run synchronous so no real frame interleaves).
   // The world as a whole can't be put back to the same start between two runs yet (villages, wildlife, horse herds and the job modules
