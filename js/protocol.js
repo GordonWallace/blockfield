@@ -33,7 +33,8 @@ const errOnce = new Set();
 const errorOnce = (key, text) => { if (!errOnce.has(key)) { errOnce.add(key); glog("ERROR", text); } };
 
 // ---------------------------------------------------------------- entity fields
-// Per kind: HOT fields change most ticks and go as float32 in the binary part of an entities message, with a bitmask of which changed;
+// Per kind: HOT fields change most ticks and go in the binary part of an entities message, with a bitmask of which changed: positions
+// (x, y, z) as float64 (float32 resolves only 0.25 of a block at planet coordinates, about 2.2 million), the rest as float32;
 // COLD fields change rarely and go as JSON. A new entity is sent whole (every field, JSON).
 const HOT = {
   mob: ["x", "y", "z", "yaw", "headYaw", "headPitch", "walkPhase", "walkAmt", "age", "deathT", "fuse", "swingT", "doorT"],
@@ -51,6 +52,7 @@ const COLD = {
   bee: ["phase", "mode", "land", "landYaw"],
 };
 const KINDS = Object.keys(HOT);
+const POS = { x: 1, y: 1, z: 1 };   // hot fields sent as float64
 const KIND_N = Object.fromEntries(KINDS.map((k, i) => [k, i]));
 
 // ---------------------------------------------------------------- encoding
@@ -116,7 +118,8 @@ const CODEC = {
     },
   },
   // entities {tick, add: [{n, kind, s: {every field}}], set: [{n, s: {changed fields}}], gone: [n]}
-  // b: per set entry with hot changes: Uint32 n, Uint32 mask (bit i = HOT[kind][i]), Float32 per set bit; its cold changes go in h.cold.
+  // b: per set entry with hot changes: Uint32 n, Uint32 mask (bit i = HOT[kind][i]), per set bit a Float64 (x, y, z) or Float32 (the rest),
+  // little-endian; its cold changes go in h.cold.
   entities: {
     pack(m) {
       const hot = [], cold = [];
@@ -126,25 +129,30 @@ const CODEC = {
         let mask = 0, nh = 0, c = null;
         for (const f in e.s) {
           const i = H.indexOf(f);
-          if (i >= 0) { mask |= 1 << i; nh++; } else (c || (c = {}))[f] = e.s[f];
+          if (i >= 0) { mask |= 1 << i; nh += POS[f] ? 2 : 1; } else (c || (c = {}))[f] = e.s[f];
         }
         if (mask) { hot.push([e, mask, H]); words += 2 + nh; }
         if (c) cold.push([e.n, KIND_N[e.kind], c]);
       }
-      const buf = new ArrayBuffer(words * 4), U = new Uint32Array(buf), F = new Float32Array(buf);
+      const buf = new ArrayBuffer(words * 4), V = new DataView(buf);
       let o = 0;
       for (const [e, mask, H] of hot) {
-        U[o++] = e.n; U[o++] = (mask | (KIND_N[e.kind] << 24)) >>> 0;
-        for (let i = 0; i < H.length; i++) if (mask & (1 << i)) F[o++] = e.s[H[i]];
+        V.setUint32(o, e.n, true); V.setUint32(o + 4, (mask | (KIND_N[e.kind] << 24)) >>> 0, true); o += 8;
+        for (let i = 0; i < H.length; i++) if (mask & (1 << i)) {
+          if (POS[H[i]]) { V.setFloat64(o, e.s[H[i]], true); o += 8; } else { V.setFloat32(o, e.s[H[i]], true); o += 4; }
+        }
       }
       return [{ t: "entities", tick: m.tick, add: m.add, cold, gone: m.gone }, buf];
     },
     unpack(h, buf) {
-      const U = new Uint32Array(buf), F = new Float32Array(buf), set = new Map();
+      const V = new DataView(buf), set = new Map();
       let o = 0;
-      while (o < U.length) {
-        const n = U[o++], w = U[o++], kind = KINDS[w >>> 24], mask = w & 0xffffff, H = HOT[kind], s = {};
-        for (let i = 0; i < H.length; i++) if (mask & (1 << i)) s[H[i]] = F[o++];
+      while (o < buf.byteLength) {
+        const n = V.getUint32(o, true), w = V.getUint32(o + 4, true), kind = KINDS[w >>> 24], mask = w & 0xffffff, H = HOT[kind], s = {};
+        o += 8;
+        for (let i = 0; i < H.length; i++) if (mask & (1 << i)) {
+          if (POS[H[i]]) { s[H[i]] = V.getFloat64(o, true); o += 8; } else { s[H[i]] = V.getFloat32(o, true); o += 4; }
+        }
         set.set(n, { n, kind, s });
       }
       for (const [n, k, c] of h.cold) {
@@ -653,7 +661,7 @@ const local = {
 
 // ---------------------------------------------------------------- the check: the mirror against the sim
 // Right after a flush the mirror must equal the sim. Chunks: every mirrored chunk is loaded in view, with the sim's band and blocks
-// (pending counts those in view not sent yet). Entities: the live set in view, cold fields equal, hot fields within 1/256 (float32).
+// (pending counts those in view not sent yet). Entities: the live set in view, cold fields equal, positions exact (float64), other hot fields within 1/256 (float32).
 // Returns {ok, chunks, pending, entities, mirrorHash, simHash, diffs, ndiffs}.
 function chunkText(c) {
   const o = [c.key, c.lo, c.hi];
@@ -700,7 +708,7 @@ function check() {
     if (!e) { diffs.push("entity " + n + " (" + r.kind + ") not in the mirror"); continue; }
     for (const f in r.s) {
       const a = r.s[f], b = e[f];
-      if (HOT[r.kind].includes(f)) { if (Math.abs(a - b) > Math.max(1 / 256, Math.abs(a) * 1e-6)) diffs.push("entity " + n + " " + f + " " + b + " vs " + a); }
+      if (HOT[r.kind].includes(f)) { if (Math.abs(a - b) > (POS[f] ? 1e-9 : Math.max(1 / 256, Math.abs(a) * 1e-6))) diffs.push("entity " + n + " " + f + " " + b + " vs " + a); }
       else if (!same(a, b) && JSON.stringify(a) !== JSON.stringify(b)) diffs.push("entity " + n + " " + f + " " + JSON.stringify(b) + " vs " + JSON.stringify(a));
     }
   }
