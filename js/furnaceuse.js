@@ -19,8 +19,8 @@ BF.debug = BF.debug || {};   // checkOffers: compare every offer lookup with a f
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 
-const COOK = 10;                               // seconds one item takes in a furnace (inventory.js COOK_TIME)
-const PER_COAL = 8, PER_WOOD = 1.5;            // items one coal / one log or plank smelts (inventory.js fuel: 80 s, 15 s; 10 s an item)
+const COOK = 10;                               // seconds one item takes in a furnace (playerinv.js COOK_TIME)
+const PER_COAL = 8, PER_WOOD = 1.5;            // items one coal / one log or plank smelts (playerinv.js fuel: 80 s, 15 s; 10 s an item)
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const I = n => BF.I[n];
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;

@@ -1,6 +1,6 @@
 // Fletchers (BF.fletcher): the fletcher makes the arrows and bows it sells from materials it buys from the other villagers of its village.
 // Nothing appears from the daily restock any more (trading.js PRODUCE.fletcher is empty).
-// - Recipes: the vanilla ones (inventory.js): flint over stick over feather -> 4 arrows; 3 sticks + 3 string -> 1 bow. Sticks are cut from
+// - Recipes: the vanilla ones (playerinv.js): flint over stick over feather -> 4 arrows; 3 sticks + 3 string -> 1 bow. Sticks are cut from
 //   2 planks (-> 4 sticks) when it is short of sticks.
 // - What to make: arrows while it holds fewer than ARROW_MAX (4 at a time), bows while it holds fewer than BOW_MAX; the one whose stock is
 //   emptier (against its cap) first. A fletcher missing an ingredient just does not make that item.

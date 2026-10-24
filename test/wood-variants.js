@@ -4,7 +4,7 @@
 module.exports = async (pg, out) => {
   const r = await pg.evaluate(() => {
     const I = BF.I, R = BF.inventory.recipes, res = { missing: [], wrong: [] };
-    // the crafting matcher of inventory.js over a 3x3 grid of item names ("" = empty), first match wins
+    // the crafting matcher of playerinv.js over a 3x3 grid of item names ("" = empty), first match wins
     const craft = rows => {
       const g = rows.map(r => r.map(n => (n ? I[n] : 0)));
       let x0 = 3, y0 = 3, x1 = -1, y1 = -1; const filled = [];

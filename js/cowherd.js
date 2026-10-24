@@ -1,6 +1,6 @@
 // Cows and the cowherd (BF.cowherd). Loaded after js/poultry.js and js/herd.js (breeding, crowding, calf growth and leading home are shared
 // with js/pigfarmer.js there); hooks live in mobs.js, villagelife.js, jobs.js, trading.js, worldgen.js,
-// blueprints.js / builder.js, inventory.js and player.js. See CONTRACT.md "Cowherds (js/cowherd.js)".
+// blueprints.js / builder.js, playerinv.js and player.js. See CONTRACT.md "Cowherds (js/cowherd.js)".
 //
 // Cows (every cow, wild or in a pasture; state in `m.cow`):
 //  - Fed: wheat from the player or a cowherd makes a cow willing to breed for FEED_DAYS (`fed` = absolute game day it was fed).

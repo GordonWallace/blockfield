@@ -1,4 +1,4 @@
-// Chest ownership upkeep and villager storage (BF.storage). The chest contents and the owner of each chest live in js/inventory.js.
+// Chest ownership upkeep and villager storage (BF.storage). The chest contents and the owner of each chest live in js/playerinv.js.
 // - Ownership: an unowned chest becomes the property of whoever first puts an item in it (or takes one out of an unowned chest that still
 //   holds items): the player ("player") or a villager (its persistence key "<village key>#<slot>"). A chest that has been empty for
 //   RELEASE_DAYS game days, or whose villager owner dies, is unclaimed again (its contents stay). Villagers only ever use chests that are
@@ -273,7 +273,7 @@ BF.req.on("chestPut", (req, W) => {
 });
 
 // ---------------------------------------------------------------- villager AI (mobs.js villagerAI, daytime)
-// Storing and taking back are "chest" requests (js/inventory.js, spec r15-22): the plan is made from the chest as this think sees it, and
+// Storing and taking back are "chest" requests (js/playerinv.js, spec r15-22): the plan is made from the chest as this think sees it, and
 // the request moves only what is still there (and fits) when it applies, in requester order. The log line and the fetch cool-down follow
 // the result, before its next think.
 function doStore(m, p) {

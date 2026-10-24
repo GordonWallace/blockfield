@@ -1,5 +1,5 @@
 // Villager economy: trade tables per profession, the value table they are balanced against, villager inventories
-// (18 slots), starting stock, daily restock, trade rules (stock + room) and the save format. UI lives in inventory.js.
+// (18 slots), starting stock, daily restock, trade rules (stock + room) and the save format. UI lives in invscreen.js.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
