@@ -1648,6 +1648,14 @@ const api = {
   chestRemoved,
   furnaceRemoved,
 
+  // The player's own slots as saved, and setting them from that: the simulation's copy sent to the page in self messages, when the
+  // simulation runs in a worker (js/protocol.js, r15-38)
+  own() { return slots.map(toSave); },
+  setOwn(list) {
+    if (!Array.isArray(list)) return;
+    for (let i = 0; i < SIZE; i++) slots[i] = fromSave(list[i]);
+    renderAll(); emitChange();
+  },
   serialize() {
     return {
       v: 1,

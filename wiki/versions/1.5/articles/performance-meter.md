@@ -30,3 +30,11 @@ The meter runs only while the F3 overlay or a debug screen is open (or a test as
 ## Measuring on your own computer
 
 The `tools/perf/` folder in the repository holds the harness that measures the simulation without drawing: `perfmobs.js` runs a village for some game hours and records the meter's figures each hour, `live.js` measures the real frame loop at the top fast-forward speed, `analyze.js` summarises runs and `profsum.js` reads CPU profiles. Its README says how to run them.
+
+## The simulation on its own thread
+
+From 1.5 the world simulation (mobs, villagers, crops, water, the clock and weather) can run in the background on a thread of its own, a Web Worker, so the page only draws and takes your input. The page keeps its own copy of the terrain for drawing and for walking about, and the simulation sends it every block that changes. Saving still writes to the browser's storage, now from that thread.
+
+For now this is switched on by adding `?sim=worker` to the game's address (for example `http://localhost:8000/?sim=worker`); `?sim=page` keeps everything in the page, as before. It needs the game served by `./run.sh` (or another web server): a game opened as a file always runs the simulation in the page. The F3 overlay's last lines say which it is: `Simulation: worker` or `Simulation: in page`.
+
+With the simulation on its own thread, fast-forward no longer takes time from drawing, so the picture stays smooth at 100x and 1000x. While the game's tab is hidden the simulation pauses, as it did when it ran in the page. If the simulation ever stops with an error, the game says so and offers to reload from your last save; the error goes to the [[page:game-log]].

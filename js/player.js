@@ -342,6 +342,7 @@ const MODE_HINT = {
   creative: "Fly, build freely, no damage. Blocks break instantly.",
 };
 function updateModeUI() {
+  if (!BF.page) return;   // (the simulation worker, r15-38: no screens)
   for (const b of document.querySelectorAll(".bfp-mode button")) {
     const on = b.dataset.mode === (startEl && startEl.contains(b) ? (createMode || gameMode) : gameMode);
     b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
@@ -1106,11 +1107,15 @@ const cellKey = (x, y, z) => x + "," + y + "," + z;
 const cellOf = t => String(t).split(",").map(Number);
 const vec = a => new THREE.Vector3(a[0], a[1], a[2]);
 const arr = v => [v.x, v.y, v.z];
+// With the simulation in a Web Worker (r15-38) the result comes later: act goes on as if it worked ({ok: true, pending: true}), and the
+// world's edits and the player's inventory follow from the simulation; a refused action just doesn't happen there.
 function act(kind, target, data) {
   data = data || {};
   if (data.slot == null && BF.inventory) data.slot = BF.inventory.selectedIndex;
   if (!BF.req || !BF.req.player) return { ok: false, why: "no request queue" };
-  return BF.req.player(kind, target, data).result || { ok: false, why: "pending" };
+  const req = BF.req.player(kind, target, data);
+  if (!req.delivered && BF.client && BF.client.mode === "worker") return { ok: true, pending: true };
+  return req.result || { ok: false, why: "pending" };
 }
 function onAct(kind, fn) {
   if (!BF.req) return;

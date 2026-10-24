@@ -1,8 +1,8 @@
 // Simulation/client protocol (spec r15-36, release 1.5). The messages between the simulation and what draws it, so the same protocol
-// can carry the in-page game (now), a Web Worker (r15-38), the Node world server (r15-41) and later multiplayer. The message list,
-// fields and encodings are written up in docs/protocol.md.
-//   sim -> client: hello, chunk, unload, blockChanges, entities, events, village, clock, log, result
-//   client -> sim: request, view, query, speed, save
+// can carry the in-page game, the simulation in a Web Worker (r15-38), the Node world server (r15-41) and later multiplayer. The message
+// list, fields and encodings are written up in docs/protocol.md.
+//   sim -> client: hello, chunk, unload, blockChanges, edits, entities, events, village, clock, log, self, result
+//   client -> sim: request, view, query, speed, save, player, world, meta, clientLog
 // Every message is a plain object {t: type, ...}. encode(msg) turns it into a packet {h, b}: h a JSON string, b an ArrayBuffer or null
 // (bulk data: chunk sections, block changes, entity updates); decode(packet) turns it back. Packets are what crosses a thread or a
 // socket (b can be transferred); their size is what bytes() counts.
@@ -13,20 +13,26 @@
 // encodes and decodes every message, and the client keeps a mirror of what it was sent (BF.client.world). Player requests (r15-20) go
 // through it: BF.req.player sends a request message, the sim applies it at once (js/requests.js), and its block changes and result come
 // straight back, so the client's own edit is in the mirror before the call returns.
+// Worker transport (BF.proto.worker, r15-38): the simulation runs in js/simworker.js and the page is a client that keeps its own copy
+// of the world (serve's replica option): every block edit goes to it, not only those in view, and all of them when it joins (edits),
+// so the page generates and lights its chunks itself and only the edits cross. The page owns the player's body (position, look,
+// health, hunger: player messages); the simulation sends back what it does to the player (self: hurts, inventory, food, teleports).
 // Game log: INFO "protocol" when the in-page transport connects and once a game hour while the debug overlay or screen is on (bytes per
 // second by type), ERROR for a message the other end can't take (bad packet, unknown type, a failed query or encoding).
-// API: BF.proto = { VERSION, TYPES, encode(msg) -> packet, decode(packet) -> msg, bytes(packet), serve(send) -> sim end, connect(send) -> client end,
-//        local: { connect(), disconnect(), on, sim, client }, flush(), stats(), resetStats(), check() -> {ok, diffs, ...}, mirrorHash(), simHash(keys),
+// API: BF.proto = { VERSION, TYPES, encode(msg) -> packet, decode(packet) -> msg, bytes(packet), serve(send, opts?) -> sim end, connect(send) -> client end,
+//        local: { connect(), disconnect(), on, sim, client }, worker: { connect(worker) -> client, disconnect() }, host(send, opts) -> sim end (in the worker),
+//        flush(), stats(), resetStats(), check() -> {ok, diffs, ...}, mirrorHash(), simHash(keys),
 //        queries (what -> fn(args)), HOT, COLD }
 //      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z)}, mode, request(kind, target, data) -> req,
-//        query(what, args, fn), view(x, y, z, dist), speed(s), save(), receive(packet), hello }
+//        query(what, args, fn), view(x, y, z, dist), speed(s, pause), save(), receive(packet), hello, player(state), worldOp(op, args, fn), meta(m),
+//        log(entries), self (the latest self fields), onEdits(chunks, full), onSelf(m), onLog(list), onEvents(list) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const VERSION = 1;
-const TYPES = { out: ["hello", "chunk", "unload", "blockChanges", "entities", "events", "village", "clock", "log", "result"],
-  in: ["request", "view", "query", "speed", "save"] };
+const TYPES = { out: ["hello", "chunk", "unload", "blockChanges", "edits", "entities", "events", "village", "clock", "log", "self", "result"],
+  in: ["request", "view", "query", "speed", "save", "player", "world", "meta", "clientLog"] };
 const SECN = 4096;
 const glog = (lvl, text) => { if (BF.glog) BF.glog.log(lvl, "protocol", text); };
 const errOnce = new Set();
@@ -54,6 +60,26 @@ const KINDS = Object.keys(HOT);
 const KIND_N = Object.fromEntries(KINDS.map((k, i) => [k, i]));
 
 // ---------------------------------------------------------------- encoding
+// Cells of chunks, [[key, [[index, id], ...]], ...]: Uint32 indices then Uint16 ids in b, keys and counts in h (blockChanges, edits).
+function cellsCodec(t) {
+  return {
+    pack(m) {
+      let n = 0;
+      for (const [, cells] of m.chunks) n += cells.length;
+      const buf = new ArrayBuffer(n * 4 + n * 2), I = new Uint32Array(buf, 0, n), D = new Uint16Array(buf, n * 4, n);
+      let j = 0;
+      const keys = [], counts = [];
+      for (const [k, cells] of m.chunks) { keys.push(k); counts.push(cells.length); for (const c of cells) { I[j] = c[0]; D[j] = c[1]; j++; } }
+      return [{ t, tick: m.tick, keys, counts }, buf];
+    },
+    unpack(h, buf) {
+      const n = h.counts.reduce((a, b) => a + b, 0), I = new Uint32Array(buf, 0, n), D = new Uint16Array(buf, n * 4, n), chunks = [];
+      let j = 0;
+      h.keys.forEach((k, ci) => { const cells = []; for (let q = 0; q < h.counts[ci]; q++, j++) cells.push([I[j], D[j]]); chunks.push([k, cells]); });
+      return { t, tick: h.tick, chunks };
+    },
+  };
+}
 // A packet is {h: JSON text, b: ArrayBuffer | null}. Types with bulk data pack it into b; the rest are JSON only.
 const CODEC = {
   // chunk {key, cx, cz, lo, hi, secs: [number (the whole section is that id) | Uint16Array(4096)]}
@@ -98,23 +124,9 @@ const CODEC = {
   },
   // blockChanges {tick, chunks: [[key, [[index, id], ...]], ...]}: index is the chunk's edit index (((y - MIN_Y) * 16 + lz) * 16 + lx, as
   // world.edits). b: Uint32 indices, then Uint16 ids, in chunk order; h: keys and counts.
-  blockChanges: {
-    pack(m) {
-      let n = 0;
-      for (const [, cells] of m.chunks) n += cells.length;
-      const buf = new ArrayBuffer(n * 4 + n * 2), I = new Uint32Array(buf, 0, n), D = new Uint16Array(buf, n * 4, n);
-      let j = 0;
-      const keys = [], counts = [];
-      for (const [k, cells] of m.chunks) { keys.push(k); counts.push(cells.length); for (const c of cells) { I[j] = c[0]; D[j] = c[1]; j++; } }
-      return [{ t: "blockChanges", tick: m.tick, keys, counts }, buf];
-    },
-    unpack(h, buf) {
-      const n = h.counts.reduce((a, b) => a + b, 0), I = new Uint32Array(buf, 0, n), D = new Uint16Array(buf, n * 4, n), chunks = [];
-      let j = 0;
-      h.keys.forEach((k, ci) => { const cells = []; for (let q = 0; q < h.counts[ci]; q++, j++) cells.push([I[j], D[j]]); chunks.push([k, cells]); });
-      return { t: "blockChanges", tick: h.tick, chunks };
-    },
-  },
+  blockChanges: cellsCodec("blockChanges"),
+  // edits {chunks}: every block edit the world holds (world.edits), the same encoding; the page's copy of the world (r15-38) starts from it
+  edits: cellsCodec("edits"),
   // entities {tick, add: [{n, kind, s: {every field}}], set: [{n, s: {changed fields}}], gone: [n]}
   // b: per set entry with hot changes: Uint32 n, Uint32 mask (bit i = HOT[kind][i]), Float32 per set bit; its cold changes go in h.cold.
   entities: {
@@ -205,11 +217,16 @@ function hourly() {
 const kb = n => (n >= 1024 ? (n / 1024).toFixed(1) + " KB" : Math.round(n) + " B");
 
 // ---------------------------------------------------------------- the sim end
-// serve(send): send(packet) delivers to the client. Returns { receive(packet), flush(force), reset(), view, sent }.
+// serve(send, opts): send(packet) delivers to the client. Returns { receive(packet), flush(force), reset(), view, sent }.
+// opts.replica (r15-38): the client keeps its own copy of the world and owns the player's body: every block edit is sent (not only those in
+// chunks the client has), all of them (edits) at the first flush after each hello, its player messages move the player here, and what the
+// simulation does to the player goes back in self messages. opts.world(op, args) -> Promise: the world message's handler (the host's).
 const ckey = (cx, cz) => cx + "," + cz;
 const sectionsOf = c => c.secs.map(s => (typeof s === "number" ? s : s.slice()));
 let liveSim = null;   // the sim end the world's block hook reports to
-function serve(send) {
+function serve(send, opts) {
+  opts = opts || {};
+  const R = !!opts.replica;
   const ids = new WeakMap();   // entity object -> protocol number
   let nextN = 1;
   const S = {
@@ -220,6 +237,8 @@ function serve(send) {
     villages: new Map(),      // key -> summary text sent
     fx: [], logs: [],
     tick: -1, clockKey: "", clockTick: -1e9, weather: null, villageT: 0, inRequest: false, flushes: 0,
+    editsDue: false,          // replica: all edits go at the next flush (after a hello: a save's edits are restored after newWorld)
+    hurts: [], rep: null, invSent: null, spawnSent: null,   // replica: hurts to send, the player as the client last reported it, what self last sent
   };
   const out = msg => {
     let p;
@@ -234,6 +253,7 @@ function serve(send) {
     const St = BF.state || {};
     out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(),
       settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, gameMode: BF.player && BF.player.gameMode || null } });
+    if (R) { S.editsDue = true; S.invSent = S.spawnSent = null; S.hurts = []; }
   }
   function reset() {
     S.chunks.clear(); S.cells.clear(); S.ents.clear(); S.villages.clear(); S.fx = []; S.logs = []; S.tick = -1; S.clockKey = ""; S.clockTick = -1e9; S.weather = null; S.villageT = 0;
@@ -270,7 +290,7 @@ function serve(send) {
   function flushCells() {
     if (!S.cells.size) return;
     const chunks = [];
-    for (const [k, m] of S.cells) if (S.chunks.has(k)) chunks.push([k, [...m]]);
+    for (const [k, m] of S.cells) if (R || S.chunks.has(k)) chunks.push([k, [...m]]);
     S.cells.clear();
     if (chunks.length) out({ t: "blockChanges", tick: tickNow(), chunks });
   }
@@ -347,9 +367,57 @@ function serve(send) {
   }
 
   // flush(force): everything due since the last flush (js/main.js frame; tests). force sends entities even with no new tick.
+  // replica: every edit the world holds, replacing the client's (the pending cells are in them)
+  function flushEdits() {
+    S.editsDue = false; S.cells.clear();
+    const chunks = [];
+    for (const [k, m] of BF.world.edits) if (m.size) chunks.push([k, [...m]]);
+    out({ t: "edits", tick: tickNow(), chunks });
+  }
+  // replica: what the simulation did to the player since the last self (hurts; food, health and game mode it changed; a teleport; the
+  // inventory and the spawn point when they changed). The client reports its own changes in player messages, which set the baseline.
+  function flushSelf() {
+    const P = BF.player;
+    if (!R || !P) return;
+    const m = { t: "self", tick: tickNow() }, r = S.rep;
+    let any = false;
+    if (S.hurts.length) { m.hurt = S.hurts; S.hurts = []; any = true; }
+    if (r) {
+      if (P.health !== r.health) { m.health = r.health = P.health; any = true; }
+      if (P.hunger !== r.hunger) { m.hunger = r.hunger = P.hunger; any = true; }
+      if (P.gameMode !== r.gameMode) { m.gameMode = r.gameMode = P.gameMode; any = true; }
+      const p = P.position;
+      if (Math.abs(p.x - r.x) > 1e-6 || Math.abs(p.y - r.y) > 1e-6 || Math.abs(p.z - r.z) > 1e-6) { m.pos = [p.x, p.y, p.z]; r.x = p.x; r.y = p.y; r.z = p.z; any = true; }
+    }
+    const inv = BF.inventory && BF.inventory.own ? JSON.stringify(BF.inventory.own()) : "null";
+    if (inv !== S.invSent) { S.invSent = inv; m.inv = JSON.parse(inv); any = true; }
+    const sp = JSON.stringify(BF.spawnPoint || null);
+    if (sp !== S.spawnSent) { S.spawnSent = sp; m.spawn = JSON.parse(sp); any = true; }
+    if (any) out(m);
+  }
+  // replica: the client's player (a player message): its body moves here, and becomes the baseline flushSelf compares against
+  function playerIn(m) {
+    const P = BF.player;
+    if (!P || !P.position) return;
+    P.position.set(m.x, m.y, m.z);
+    if (P.setLook) P.setLook(m.yaw || 0, m.pitch || 0);
+    if (m.gameMode && m.gameMode !== P.gameMode && P.setGameMode) P.setGameMode(m.gameMode);
+    if (m.health != null) P.health = m.health;
+    if (m.hunger != null) P.hunger = m.hunger;
+    P.dead = !!m.dead;
+    S.rep = { x: m.x, y: m.y, z: m.z, health: P.health, hunger: P.hunger, gameMode: P.gameMode };
+  }
+  // replica: the player's body is the client's, so what would change it here goes to the client instead (mobs, bees and lightning
+  // hurting the player, js/mobs.js, js/bees.js, js/weather.js)
+  if (R && BF.player) {
+    BF.player.damage = (amount, from, cause) => { if (amount > 0) S.hurts.push({ a: amount, from: from ? [from.x, from.y, from.z] : null, cause: cause || null }); };
+    BF.player.kill = () => S.hurts.push({ kill: true });
+  }
+
   function flush(force) {
     if (!BF.world) return;
     S.flushes++; ST.flushes++;
+    if (S.editsDue) flushEdits();
     const want = wanted();
     flushChunks(want, S.view && S.view.budget != null ? S.view.budget : 16);
     flushCells();
@@ -364,6 +432,7 @@ function serve(send) {
     if ((ticked || force) && --S.villageT <= 0) { S.villageT = 20; flushVillages(); }
     S.tick = t;
     if (S.logs.length) { out({ t: "log", list: S.logs }); S.logs = []; }
+    flushSelf();
     hourly();
   }
 
@@ -383,11 +452,13 @@ function serve(send) {
       let r;
       try { r = BF.req.applyPlayer(m.kind, m.target, m.data).result; } finally { S.inRequest = false; }
       flushCells();
+      flushSelf();   // (replica: what the request did to the player arrives with its result)
       out({ t: "result", rid: m.rid, tick: tickNow(), result: r });
     },
     view(m) {
       const first = !S.view;
       S.view = { x: m.x, y: m.y, z: m.z, dist: m.dist | 0, budget: m.budget };
+      if (opts.onView) opts.onView(S.view);   // (the worker loads chunks to the page's view distance, as the page did)
       if (first) flush(true);
     },
     query(m) {
@@ -397,22 +468,42 @@ function serve(send) {
       else try { r = q(m.args || {}); } catch (e) { r = { ok: false, why: "error", error: String(e && e.message || e) }; errorOnce("query " + m.what, "Query " + m.what + " failed: " + (e && e.message)); }
       out({ t: "result", qid: m.qid, result: r });
     },
+    // speed 0 freezes (0x); pause (the page's menus, r15-38) stops the ticks without changing the speed
     speed(m) {
+      if ("pause" in m && BF.state) BF.state.paused = !!m.pause;
       const W = BF.warp;
-      if (!W) return;
+      if (!W || m.speed == null) return;
       if (!m.speed) W.freeze();
-      else { const i = W.SPEEDS.indexOf(m.speed); if (i >= 0) W.set(i); }
+      else if (m.speed !== W.speed) { const i = W.SPEEDS.indexOf(m.speed); if (i >= 0) W.set(i); }
     },
     save(m) {
       const done = ok => out({ t: "result", sid: m.sid, result: { ok: !!ok } });
       if (!BF.save || !BF.save.saveNow) { done(false); return; }
       BF.save.saveNow().then(done, () => done(false));
     },
+    player: playerIn,
+    // start a world (the host's handler: create, load or the title screen's world), answered with a result when it's ready
+    world(m) {
+      const done = r => out({ t: "result", wid: m.wid, result: r });
+      if (!opts.world) { done({ ok: false, why: "no worlds here" }); return; }
+      let p;
+      try { p = Promise.resolve(opts.world(m.op, m.args || {})); } catch (e) { p = Promise.reject(e); }
+      p.then(r => done(Object.assign({ ok: true }, r || {})), e => { glog("ERROR", "Could not " + m.op + " the world: " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n")); done({ ok: false, why: String(e && e.message || e) }); });
+    },
+    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters)
+    meta(m) {
+      const cur = BF.save && BF.save.current;
+      if (!cur || (m.id && m.id !== cur.id)) return;
+      if (m.name != null) cur.name = m.name;
+      if (m.monsters) { cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
+    },
+    // the client's own log entries (its errors): into this game log, which is the one saved
+    clientLog(m) { if (BF.glog) for (const e of m.list || []) BF.glog.log(e.l, e.k, e.x, { at: e.p }); },
   };
 
   // ---- taps: block edits (js/world.js), effects (js/fx.js), the game log (js/gamelog.js)
   function onBlock(c, i, id) {
-    if (!S.chunks.has(c.key)) return;
+    if (!R && !S.chunks.has(c.key)) return;
     let m = S.cells.get(c.key);
     if (!m) S.cells.set(c.key, (m = new Map()));
     m.set(i, id);   // a cell changed several times since the last flush goes once, with its last id
@@ -423,7 +514,7 @@ function serve(send) {
     each((kind, o, x, z) => { if (inView(x, z)) m.set(nOf(o), { kind, s: stateOf(kind, o) }); });
     return { entities: m, chunks: wanted() };
   }
-  const sim = { receive, flush, reset, hello, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest };
+  const sim = { receive, flush, reset, hello, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, replica: R };
   liveSim = sim;
   return sim;
 }
@@ -447,14 +538,16 @@ const QUERIES = {
   hash() { return BF.stateHash ? Object.assign({ ok: true }, BF.stateHash.full()) : { ok: false, why: "no state hash" }; },
   // the protocol's own figures
   stats() { return Object.assign({ ok: true }, stats()); },
+  // a hash of the blocks of chunks {keys} and which of them aren't loaded (a client keeping its own copy checks it against this, r15-38)
+  chunkHash(a) { const keys = (a.keys || []).filter(k => BF.world.chunks.has(k)); return { ok: true, keys, hash: simHash(keys) }; },
 };
 
 // ---------------------------------------------------------------- the client end and its mirror
 // connect(send): send(packet) delivers to the sim. The mirror (world) holds what the sim sent: chunks (key -> {cx, cz, key, lo, hi, secs}),
 // entities (n -> {n, kind, ...fields, prev: the hot fields before the latest update}), villages (key -> summary), clock, and the log lines.
 function connect(send, mode) {
-  let rid = 1, qid = 1, sidN = 1;
-  const pending = new Map(), queries = new Map(), saves = new Map();
+  let rid = 1, qid = 1, sidN = 1, widN = 1;
+  const pending = new Map(), queries = new Map(), saves = new Map(), worlds = new Map();
   const world = { chunks: new Map(), entities: new Map(), villages: new Map(), clock: null, log: [], tick: -1,
     getBlock(x, y, z) {
       x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
@@ -475,6 +568,7 @@ function connect(send, mode) {
     chunk(m) { world.chunks.set(m.key, { cx: m.cx, cz: m.cz, key: m.key, lo: m.lo, hi: m.hi, secs: m.secs }); },
     unload(m) { for (const k of m.keys) world.chunks.delete(k); },
     blockChanges(m) {
+      if (C.onEdits) C.onEdits(m.chunks, false);   // (the page's copy of the world, r15-38)
       for (const [k, cells] of m.chunks) {
         const c = world.chunks.get(k);
         if (!c) continue;
@@ -500,12 +594,14 @@ function connect(send, mode) {
       }
       for (const n of m.gone) world.entities.delete(n);
     },
+    edits(m) { if (C.onEdits) C.onEdits(m.chunks, true); },
+    self(m) { const o = Object.assign({}, m); delete o.t; delete o.hurt; C.self = Object.assign(C.self || {}, o); if (C.onSelf) C.onSelf(m); },
     events(m) { if (C.onEvents) C.onEvents(m.list); },
     village(m) { for (const v of m.list) world.villages.set(v.key, v); for (const k of m.gone) world.villages.delete(k); },
     clock(m) { world.clock = m; },
-    log(m) { for (const e of m.list) world.log.push(e); if (world.log.length > LOG_KEEP) world.log.splice(0, world.log.length - LOG_KEEP); },
+    log(m) { for (const e of m.list) world.log.push(e); if (world.log.length > LOG_KEEP) world.log.splice(0, world.log.length - LOG_KEEP); if (C.onLog) C.onLog(m.list); },
     result(m) {
-      const tab = m.rid != null ? pending : m.qid != null ? queries : saves, id = m.rid != null ? m.rid : m.qid != null ? m.qid : m.sid, h = tab.get(id);
+      const tab = m.rid != null ? pending : m.qid != null ? queries : m.wid != null ? worlds : saves, id = m.rid != null ? m.rid : m.qid != null ? m.qid : m.wid != null ? m.wid : m.sid, h = tab.get(id);
       tab.delete(id);
       if (h) h(m.result, m);
     },
@@ -529,8 +625,13 @@ function connect(send, mode) {
   };
   C.query = (what, args, fn) => { const id = qid++; if (fn) queries.set(id, fn); out({ t: "query", qid: id, what, args: args || {} }); return id; };
   C.view = (x, y, z, dist, budget) => { C.lastView = { x, y, z, dist }; out({ t: "view", x, y, z, dist, budget }); };
-  C.speed = s => out({ t: "speed", speed: s });
+  C.speed = (s, pause) => out(pause == null ? { t: "speed", speed: s } : { t: "speed", speed: s, pause: !!pause });
   C.save = fn => { const id = sidN++; if (fn) saves.set(id, fn); out({ t: "save", sid: id }); };
+  // r15-38: the player's body (replica), a world to start (op create / load / demo), the open world's name or options, the client's log lines
+  C.player = st => out(Object.assign({ t: "player" }, st));
+  C.worldOp = (op, args, fn) => { const id = widN++; if (fn) worlds.set(id, fn); out({ t: "world", wid: id, op, args: args || {} }); return id; };
+  C.meta = m => out(Object.assign({ t: "meta" }, m));
+  C.log = list => out({ t: "clientLog", list });
   // once a frame: tell the sim when the view moved to another chunk or the view distance changed
   C.frame = () => {
     const P = BF.player, W = BF.world;
@@ -565,6 +666,37 @@ const local = {
     local.on = false; local.sim = null; local.client = null; liveSim = null; BF.client = null;
   },
 };
+
+// ---------------------------------------------------------------- the worker transport (r15-38)
+// The page's end: the simulation runs in a Web Worker (js/simworker.js, started by js/simhost.js); packets cross by postMessage with their
+// binary part transferred. Requests are answered later, when the worker's result arrives (req.then).
+const worker = {
+  on: false, w: null, client: null,
+  connect(w) {
+    if (local.on) local.disconnect();
+    const client = connect(p => { try { w.postMessage(p, p.b ? [p.b] : []); } catch (e) { errorOnce("post", "Could not send to the simulation worker: " + (e && e.message)); } }, "worker");
+    worker.w = w; worker.client = client; worker.on = true;
+    BF.client = client;
+    if (BF.req) BF.req.via = (kind, target, data) => client.request(kind, target, data);
+    glog("INFO", "Simulation and client connected through a Web Worker (protocol version " + VERSION + ")");
+    return client;
+  },
+  receive(p) { if (worker.client) worker.client.receive(p); },
+  disconnect() {
+    if (!worker.on) return;
+    if (BF.req) BF.req.via = null;
+    worker.on = false; worker.w = null; worker.client = null; BF.client = null;
+  },
+};
+// The worker's end: the simulation end serving one client through send, hooked to the world, effects and log like the in-page one.
+let here = null;
+function host(send, opts) {
+  hookUp();
+  here = serve(send, opts);
+  liveSim = here;
+  here.hello();
+  return here;
+}
 
 // ---------------------------------------------------------------- the check: the mirror against the sim
 // Right after a flush the mirror must equal the sim. Chunks: every mirrored chunk is loaded in view, with the sim's band and blocks
@@ -634,8 +766,15 @@ function hookUp() {
 }
 
 BF.proto = {
-  VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
+  VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, worker, host, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
   hookUp,
-  flush(force) { hookUp(); if (local.client) local.client.frame(); if (local.sim) local.sim.flush(force); },
+  // once a frame: the client's view (in the page, also through the worker), then the simulation end's flush (in the page, or in the worker)
+  flush(force) {
+    hookUp();
+    if (local.client) local.client.frame();
+    if (worker.client) worker.client.frame();
+    if (local.sim) local.sim.flush(force);
+    if (here) here.flush(force);
+  },
 };
 })();

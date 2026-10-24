@@ -31,8 +31,15 @@ module.exports = async (pg) => {
       request: { t: "request", rid: 4, tick: 9, kind: "player.break", target: "1,2,3", data: { id: 3, harvest: true, slot: 2 } },
       view: { t: "view", x: 1.5, y: 70, z: -3.25, dist: 6 },
       query: { t: "query", qid: 2, what: "villager", args: { id: "e12" } },
-      speed: { t: "speed", speed: 100 },
+      speed: { t: "speed", speed: 100, pause: true },
       save: { t: "save", sid: 1 },
+      // the simulation in a worker (r15-38)
+      edits: { t: "edits", tick: 9, chunks: [["1,2", [[0, 1], [70000, 65535]]], ["-3,4", [[5, 0]]]] },
+      self: { t: "self", tick: 9, health: 14, hunger: 18, gameMode: "survival", pos: [1.5, 70, -3], spawn: { x: 1, y: 70, z: 2 }, hurt: [{ a: 3, from: [1, 2, 3], cause: "zombie" }, { kill: true }], inv: [null, { id: 5, n: 3 }] },
+      player: { t: "player", x: 1.5, y: 70, z: -3.25, yaw: 0.5, pitch: -0.25, gameMode: "creative", health: 20, hunger: 20, dead: false },
+      world: { t: "world", wid: 2, op: "load", args: { id: "wabc", rivers: null } },
+      meta: { t: "meta", id: "wabc", name: "Home", monsters: { zombie: false } },
+      clientLog: { t: "clientLog", list: [{ s: 1, d: 2.5, c: null, l: "ERROR", k: "uncaught", v: null, x: "boom" }] },
     };
     for (const k in msgs) { const p = P.encode(msgs[k]); res[k] = { ok: eq(P.decode(p), msgs[k]), bytes: P.bytes(p) }; }
     // entities: hot fields come back as float32, cold ones exactly
