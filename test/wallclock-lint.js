@@ -33,6 +33,8 @@ const FILES = {
   "player.js": "input: Escape grace, touch taps, the player runs in real time",
   "save.js": "save metadata (last played, last saved)",
   "signs.js": "sign editor caret blink",
+  "simhost.js": "the page's side of the simulation worker (spec r15-38): how long the worker took to start, logged; it runs no simulation",
+  "simworker.js": "the simulation worker's loop (spec r15-38): the real time between loops, which the fixed ticks turn into steps within BUDGET_MS as js/main.js frame dt does in the page (how fast the game runs, not what happens), and load times, logged",
   "villagepanel.js": "the F3 village panel's redraw (spec r15-37 moved it out of villagelog.js)",
   "statehash.js": "how long hashing the world took (debug screen)",
 };

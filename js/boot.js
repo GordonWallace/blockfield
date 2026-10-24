@@ -3,7 +3,7 @@
 // simulation with no document, canvas, WebGL or Three.js scene: in Node (tools/headless.js), and later a worker (r15-38) and the world
 // server (r15-41). The sim's files, in load order, are listed in js/simfiles.js.
 // API: BF.on(name, fn), BF.emit(name, ...args), BF.state, BF.newWorld(seed, opts), BF.simStep(h), BF.simFrame(raw),
-//      BF.boot = { ticks(raw) (the frame loop's ticks), headless({seed, save, settings}) -> handle, stream(budgetMs), toVillage() }
+//      BF.boot = { ticks(raw) (the frame loop's ticks), headless({seed, save, settings}) -> handle, stream(budgetMs), toVillage(), initSim() }
 // The handle: { tick(n = 1) (n ticks of BF.warp.TICK, streaming chunks round the player as the page does each frame), seconds (game
 // seconds ticked), stateHash() (js/statehash.js: {hash, parts, ...}), save() (the save data, as js/save.js stores it), settle() }
 (() => {
@@ -158,5 +158,5 @@ function headless(o) {
   };
   return h;
 }
-BF.boot = { ticks: simFrame, headless, stream, settle, toVillage };
+BF.boot = { ticks: simFrame, headless, stream, settle, toVillage, initSim };   // (initSim: the sim modules' hooks, once: the worker, js/simworker.js)
 })();

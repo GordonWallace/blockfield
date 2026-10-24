@@ -2,6 +2,9 @@
 // each storing block edits, player, inventory, time of day and the dropped items lying around. Autosaves while playing.
 // Each world's game log (js/gamelog.js) is kept next to its save in the same "data" store: a head record ("<id>#loghead") and
 // numbered batches of entries ("<id>#log:000000012"), written as the log grows (logStore).
+// With the simulation in a Web Worker (spec r15-38, js/simhost.js) the worker owns the world and this file runs there too: it saves
+// (autosave, saveNow) and loads there. In the page, create / load set up the page's copy of the world (restoreClient: the planet, the
+// player, the inventory, the time and weather; the edits come from the worker) and ask the worker for the world; saveNow asks the worker.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -126,6 +129,20 @@ function restore(data, meta) {
   if (BF.gameOpts) BF.gameOpts.purgeStored();   // monsters switched off since the save don't come back with their chunks
 }
 
+// The page's copy of a saved world, when the simulation is in a worker (r15-38): what the page draws and plays with. The worker restores
+// the whole of it (restore above) and sends the block edits.
+function restoreClient(data, meta) {
+  const monsters = meta && meta.monsters || data.monsters;
+  BF.newWorld(data.seed, { gameMode: data.player && data.player.gameMode, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters });
+  if (data.spawn) BF.spawnPoint = data.spawn;
+  if (BF.rand) BF.rand.load(data.rand);
+  if (data.time) { BF.sky.day = data.time.day || 0; BF.sky.setTime(data.time.t); }
+  if (BF.player.deserialize) BF.player.deserialize(data.player || {});
+  if (data.inventory && BF.inventory.setOwn) { BF.inventory.setOwn(data.inventory.slots); BF.inventory.select(+data.inventory.selected || 0); }
+  if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather);
+}
+const host = () => (BF.simHost && BF.simHost.worker ? BF.simHost : null);   // the page, with the simulation in a worker
+
 // A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
 // are, so those seeds keep giving the worlds they always have. 0, negative and larger numbers used to wrap onto that range
 // (0 gave seed 1's terrain, 4294967297 gave 1, -1 gave 4294967295, huge numbers gave 0); they are now hashed from their digits
@@ -169,6 +186,7 @@ const save = {
   supported: typeof indexedDB !== "undefined",
   numberSeed,             // exposed for tests
   snapshot,               // the save data of the world being played (the headless boot's save(), js/boot.js)
+  restoreClient,          // the page's copy of a saved world (the simulation in a worker, r15-38)
   restore,                // restore(data, meta?): the world from save data (the headless boot)
   logStore,               // the game log's storage (js/gamelog.js)
 
@@ -188,9 +206,12 @@ const save = {
     const now = Date.now();
     const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: 4, version: 2, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
     const start = () => {
-      BF.newWorld(seed, { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages, monsters: meta.monsters });
+      const o = { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages, monsters: meta.monsters };
+      BF.newWorld(seed, o);
       save.current = meta;
       BF.emit("worldLoaded", meta);
+      const H = host();
+      if (H) return H.world("create", { seed, opts: o, meta }).then(r => { if (!r.ok) throw new Error(r.why || "the worker could not create it"); return meta; });
       return save.saveNow().then(() => meta);
     };
     return BF.prepareWorld(seed).then(start);   // (the planet works out its rivers first)
@@ -205,6 +226,13 @@ const save = {
         return BF.prepareWorld(data.seed).then(() => [meta, data]);   // (the planet works out its rivers first)
       })
       .then(([meta, data]) => {
+        const H = host();
+        if (H) {
+          restoreClient(data, meta);
+          save.current = meta;
+          BF.emit("worldLoaded", meta);
+          return H.world("load", { id }).then(r => { if (!r.ok) throw new Error(r.why || "the worker could not load it"); save.current = r.meta || meta; return save.current; });
+        }
         restore(data, meta);
         meta.lastPlayed = Date.now();
         save.current = meta;
@@ -223,7 +251,7 @@ const save = {
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds");
       const r = s.get(id);
-      r.onsuccess = () => { if (r.result) { r.result.name = String(name).slice(0, 40); s.put(r.result); if (save.current && save.current.id === id) save.current.name = r.result.name; } };
+      r.onsuccess = () => { if (r.result) { r.result.name = String(name).slice(0, 40); s.put(r.result); if (save.current && save.current.id === id) { save.current.name = r.result.name; if (host()) BF.client.meta({ id, name: r.result.name }); } } };
     });
   },
 
@@ -231,7 +259,7 @@ const save = {
   // takes them at once.
   setMonsters(id, o) {
     const m = BF.gameOpts ? BF.gameOpts.normalize(o) : o;
-    if (save.current && save.current.id === id && BF.gameOpts) { for (const t in m) BF.gameOpts.set(t, m[t]); save.current.monsters = m; }
+    if (save.current && save.current.id === id && BF.gameOpts) { for (const t in m) BF.gameOpts.set(t, m[t]); save.current.monsters = m; if (host()) BF.client.meta({ id, monsters: m }); }
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds"), r = s.get(id);
       r.onsuccess = () => { if (r.result) { r.result.monsters = m; s.put(r.result); } };
@@ -241,6 +269,11 @@ const save = {
   // Writes the current world now. Resolves true when saved (false when there's nothing to save).
   saveNow() {
     if (!save.current || !save.supported) return Promise.resolve(false);
+    const H = host();
+    if (H) {   // the worker saves: the player as it is now goes first
+      H.frame();
+      return new Promise(resolve => BF.client.save(r => { const ok = !!(r && r.ok); if (ok) { save.lastSaved = Date.now(); BF.emit("worldSaved", save.current); } resolve(ok); }));
+    }
     let data;
     try { data = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
     const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters: data.monsters || save.current.monsters, version: data.version });

@@ -448,7 +448,7 @@ function init() {
     makeBolt();
     BF.scene.add(bolt, boltGlow);
   }
-  if (BF.world && BF.world.onChunkLoad) BF.world.onChunkLoad(() => { hmDirty = true; });
+  if (BF.world && BF.world.onChunkLoad) BF.world.onChunkLoad(() => { hmDirty = true; }, true);   // (drawing: in the page's copy of the world too)
   if (BF.on) {
     BF.on("blockPlaced", () => { hmDirty = true; });
     BF.on("blockBroken", () => { hmDirty = true; });

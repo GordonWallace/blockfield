@@ -1,5 +1,6 @@
 // The page's boot: renderer and frame loop (the F3 debug overlay is js/debugoverlay.js). The event bus, BF.newWorld and the simulation tick are in js/boot.js,
-// which the headless boot shares (spec r15-40).
+// which the headless boot shares (spec r15-40). With the simulation in a Web Worker (js/simhost.js, spec r15-38)
+// the frame loop runs no ticks: it draws the page's copy of the world, moves the player and keeps the page's clock for drawing.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -80,7 +81,7 @@ function riverWorkers(seed, show) {
 }
 
 // ---------- loop ----------
-const PF = BF.perf, simFrame = BF.boot.ticks;   // the simulation's ticks for a frame (js/boot.js)
+const PF = BF.perf, simFrame = BF.boot.ticks, host = BF.simHost;   // the simulation's ticks for a frame (js/boot.js); its host (js/simhost.js)
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
@@ -93,24 +94,26 @@ function frame(now) {
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   PF.lap(PF.C.stream);   // chunk streaming and remeshing, once a frame
   if (BF.lod) BF.lod.update();   // distant terrain rings on the planet (js/lod.js)
-  const W = BF.warp, drawn0 = W.renderNow();
+  const W = BF.warp, drawn0 = W.renderNow(), remote = host.worker;
   if (!BF.state.paused) {
-    const done = simFrame(raw);
+    const done = remote ? host.ticks(raw) : simFrame(raw);   // (in the worker: the page only keeps time for drawing)
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
     BF.player.update(dt);
-    W.done(done, done * W.TICK, raw);
+    W.done(done, done * W.TICK, raw, remote ? host.achieved() : undefined);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
   }
+  host.frame();   // the player and the speed to the worker (js/simhost.js)
   if (BF.proto) BF.proto.flush();   // the frame's changes to the client's mirror: chunks, blocks, entities, clock (js/protocol.js, r15-36)
   // drawing between the last two ticks (r15-10): the sky at the interpolated game time, entities at lerp(prev, cur, alpha)
   const alpha = W.alpha, drawnDt = Math.max(0, W.renderNow() - drawn0);
+  if (remote) host.sky(W.frozen ? 0 : drawnDt);   // the worker's clock and weather
   BF.sky.draw(alpha, drawnDt);
   BF.inventory.update && BF.inventory.update(dt);
   if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);
   if (BF.textures.update) BF.textures.update(W.frozen ? 0 : BF.state.paused ? dt : drawnDt);   // water animation runs on the drawn game time (fast-forward included, stopped at 0x)
-  if (BF.save && !BF.state.paused) BF.save.update(dt);
+  if (BF.save && !BF.state.paused && !remote) BF.save.update(dt);   // (the worker autosaves itself)
   BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
   BF.entityView.render(BF.state.paused || W.frozen ? 0 : drawnDt, dt);   // drops, arrows, boats, bees, leads and effects at BF.warp.alpha (js/entityview.js)
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)
@@ -121,7 +124,7 @@ function frame(now) {
   BF.vlog.update();
   if (BF.villagePanel) BF.villagePanel.update(dt, !!BF.debugOn);   // F3: names over villagers and the village panel, from the protocol (js/villagepanel.js)
   if (BF.villagerHover) BF.villagerHover.update(dt);
-  if (BF.stateHash) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js)
+  if (BF.stateHash && !remote) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js; the worker logs its own)
   if (BF.debugFeed) BF.debugFeed.update();
 }
 
@@ -136,7 +139,6 @@ BF.boats.init(scene);
 BF.entityView.init(scene);
 BF.player.init();
 BF.inventory.init();
-if (BF.proto) BF.proto.local.connect();   // the simulation and the client, joined in the page (js/protocol.js, spec r15-36)
 let seed = 1337;
 // The boot world (behind the title screen) is a planet, seed 1337 or #seed<n> (spec r14-19); #seed<n>v9 has village generator 9. The
 // old "gen4" in a test hash (#seed123gen4v10) is still accepted and changes nothing; the flat generators' gen1 to gen3 are gone (r14-24),
@@ -144,5 +146,10 @@ let seed = 1337;
 const m = /^#seed(\d+)(?:gen4)?(?:v(\d+))?$/.exec(location.hash);
 if (m) seed = +m[1];
 const startOpts = m && m[2] ? { villages: +m[2] } : {};
-BF.prepareWorld(seed).then(() => { BF.newWorld(seed, startOpts); requestAnimationFrame(frame); });   // (rivers first)
+// The simulation in a Web Worker where wanted and possible (js/simhost.js, spec r15-38), else here: the simulation and the client joined in
+// the page (js/protocol.js, spec r15-36). Then the boot world, rivers first; with the worker, the page keeps its own copy of it.
+host.start().then(mode => {
+  if (mode !== "worker" && BF.proto) BF.proto.local.connect();
+  BF.prepareWorld(seed).then(() => { BF.newWorld(seed, startOpts); if (mode === "worker") host.demo(seed, startOpts); requestAnimationFrame(frame); });
+});
 })();

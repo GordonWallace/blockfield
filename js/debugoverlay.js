@@ -73,6 +73,7 @@ function debugInfo() {
     requests: q.requests, requestsText: q.requestsText,   // the request queue and direct writes (js/requests.js)
     planet: planetInfo(p),
     shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
+    simMode: BF.simHost ? BF.simHost.mode + (BF.simHost.worker || !BF.simHost.why ? "" : " (" + BF.simHost.why + ")") : "in page",   // r15-38
   };
 }
 // The canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas
@@ -101,6 +102,7 @@ function debugText(d) {
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
     (d.shared ? "\n" + d.shared : "") +
+    "\nSimulation: " + d.simMode +
     (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
 }
 BF.debugInfo = debugInfo;
