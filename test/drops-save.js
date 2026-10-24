@@ -7,12 +7,17 @@ module.exports = async (pg, out) => {
   const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) BF.drops.update(h); };
-    // (up to 90 s, for a slow CI runner; also: cells [[x, z], ...] that must be loaded too; off the page this world's chunks are streamed by the simulation's own loop as well,
-    // around the page's player, so this waits longer than the page needed)
+    // off the page the simulation's own loop also streams chunks, round the player the page reports each frame (the boot world's
+    // spawn, far from here), and unloads what this test loads: while it runs, only this test's calls stream (put back at the end)
+    const update = BF.world.update; let mine = false;
+    BF.world.update = (x, z, b) => mine ? update.call(BF.world, x, z, b) : undefined;
+    const stream = (x, z) => { mine = true; try { update.call(BF.world, x, z, 8); } finally { mine = false; } };
+    try {
+    // (up to 90 s, for a slow CI runner; also: cells [[x, z], ...] that must be loaded too)
     const load = async (x, z, also) => {
       BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
-      for (let i = 0; i < 9000 && !(BF.world.isLoaded(x, z) && (!also || also.every(c => BF.world.isLoaded(c[0], c[1])))); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }
-      for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
+      for (let i = 0; i < 9000 && !(BF.world.isLoaded(x, z) && (!also || also.every(c => BF.world.isLoaded(c[0], c[1])))); i++) { stream(x, z); await new Promise(r => setTimeout(r, 10)); }
+      for (let i = 0; i < 300; i++) { stream(x, z); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
       if (also && !also.every(c => BF.world.isLoaded(c[0], c[1]))) R.lines.push("note: the drops' cells were still not loaded after the wait");
     };
     BF.state.paused = true;
@@ -45,7 +50,7 @@ module.exports = async (pg, out) => {
     ok("after the chunk loads they stay put and age again", still.length === 2 && still.every((d, i) => Math.abs(d.y - before[i].y) < 0.05 && d.age > before[i].age + 4), { before, still });
     // walk away so the chunk unloads: the drops wait instead of falling out of the world
     await load(px + 1500, pz + 1500);
-    for (let k = 0; k < 20; k++) { BF.world.update(px + 1500, pz + 1500, 8); await new Promise(r => setTimeout(r, 0)); }
+    for (let k = 0; k < 20; k++) { stream(px + 1500, pz + 1500); await new Promise(r => setTimeout(r, 0)); }
     const unloaded = !BF.world.isLoaded(gx, gz);
     run(400);
     ok("in an unloaded chunk they neither despawn nor fall", unloaded && BF.drops.list.length === 2, { unloaded, n: BF.drops.list.length });
@@ -56,6 +61,7 @@ module.exports = async (pg, out) => {
     BF.drops.deserialize(undefined);
     ok("old saves: no drops, no error", BF.drops.list.length === 0);
     return R;
+    } finally { BF.world.update = update; }
   });
   // the real save: through IndexedDB (the world server's own store on the server) and BF.save.load, asked by the page
   const id = await pg.evaluate(async () => (await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9, gen: 4 })).id);
