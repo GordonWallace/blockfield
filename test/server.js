@@ -78,7 +78,8 @@ function headless(n) {
     check(m.f3 === 'Simulation: server', `F3 says so (${m.f3})`);
     await pg.waitForFunction(() => BF.glog.recent(500).some(e => e.k === 'worker' && /started in the simulation worker/.test(e.x)), null, { timeout: 60000 }).catch(() => {});
     const logs = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'worker' || e.k === 'protocol').map(e => e.x));
-    check(logs.some(x => /The simulation runs on the world server/.test(x)) && logs.some(x => /world server's socket/.test(x)), 'the game log says the simulation runs on the world server');
+    console.log('log: ' + logs.join(' | ').slice(0, 600));
+    check(logs.some(x => /The simulation runs on the world server/.test(x)) && logs.some(x => /Simulation worker loaded/.test(x)), 'the game log says the simulation runs on the world server (and its thread loaded)');
     check(logs.some(x => /started in the simulation worker .*the page's river network/.test(x)), "the server reused the page's river network for the title screen's world");
 
     // ---- a new world, lockstep, at the village nearest the spawn (where the headless boot puts its player), paused until loaded
@@ -99,8 +100,6 @@ function headless(n) {
     await pg.waitForTimeout(10000);   // (paused: the server loads the chunks round the player)
     const h0 = await query(pg, 'hash');
     check(h0.ok && h0.tick === 0, `the new world has not ticked yet (tick ${h0.tick})`);
-    const st0 = await state(debug);
-    check(st0.latest && st0.latest.server && st0.latest.server.page && Object.keys(st0.layouts || {}).length > 0, `the debug screen's feed comes from the server (${Object.keys(st0.layouts || {}).length} village layouts)`);
     const d0 = await pg.evaluate(() => BF.client.world.clock ? BF.client.world.clock.day + BF.client.world.clock.time : -1);
     const t0 = Date.now();
     await pg.evaluate(() => { BF.warp.set(4); BF.state.paused = false; });   // 100x
@@ -112,6 +111,8 @@ function headless(n) {
     check(h1.ok && h1.hash === h1b.hash && h1.tick > 20000, `paused after a game day (${h1.tick} ticks in ${real.toFixed(0)} s real, ${(h1.tick * 0.05 / real).toFixed(0)}x), the world stands still`);
     const seen = await pg.evaluate(() => { const E = [...BF.client.world.entities.values()]; return { villagers: E.filter(e => e.kind === 'mob' && e.type === 'villager').length, villages: BF.client.world.villages.size }; });
     check(seen.villagers > 0 && seen.villages > 0, `villagers in the client's mirror (${seen.villagers} villagers, ${seen.villages} villages)`);
+    const st0 = await state(debug);
+    check(st0.latest && st0.latest.server && st0.latest.server.page && Object.keys(st0.layouts || {}).length > 0 && /Simulation: server/.test(st0.latest.text || ''), `the debug screen's feed comes from the server, with the page's F3 part (${Object.keys(st0.layouts || {}).length} village layouts)`);
     const keys = await pg.evaluate(() => [...BF.world.chunks.keys()]);
     const wh = await query(pg, 'chunkHash', { keys });
     const ph = await pg.evaluate(k => BF.proto.simHash(k), wh.keys);
@@ -129,7 +130,7 @@ function headless(n) {
     // ---- a second page is refused and runs its own simulation
     const p2 = await open(b, surl.replace('#seed', '&debugfeed=off#seed'));
     const m2 = await p2.evaluate(() => ({ host: BF.simHost.mode, log: BF.glog.recent(200).filter(e => e.l === 'WARN').map(e => e.x) }));
-    check(m2.host === 'worker' && m2.log.some(x => /another page is playing/.test(x)), `a second page is refused and runs a Web Worker (${m2.host})`);
+    check(m2.host === 'worker' && m2.log.some(x => /another page is playing/.test(x)), `a second page is refused and runs a Web Worker (${m2.host}; ${m2.log.slice(-2).join(' / ')})`);
     await p2.close();
 
     // ---- the page closes: the world pauses and saves; a fresh page picks it again
@@ -147,11 +148,13 @@ function headless(n) {
       BF.player.start();
       BF.state.paused = true;
       const meta = await BF.save.load(id);
-      await new Promise(res => setTimeout(res, 1500));
-      return { listed: list.map(w => w.name), name: meta && meta.name, speed: BF.warp.speed, held: BF.glog.recent(300).some(e => /held world "server-test" goes on at 100x/.test(e.x)) };
+      const t = Date.now();
+      while (Date.now() - t < 10000 && !BF.glog.recent(300).some(e => /held world "server-test" goes on at 100x/.test(e.x))) await new Promise(res => setTimeout(res, 250));
+      return { listed: list.map(w => w.name), name: meta && meta.name, speed: BF.warp.speed, held: BF.glog.recent(300).some(e => /held world "server-test" goes on at 100x/.test(e.x)),
+        picked: BF.glog.recent(300).some(e => e.k === 'server' && /picked world "server-test" up again/.test(e.x)) };
     }, r.id);
     check(l.listed.includes('server-test'), `the title screen lists the server's worlds (${l.listed.join(', ')})`);
-    check(l.name === 'server-test' && l.speed === 100 && l.held, `a fresh page picked the held world up again at the speed it had (${l.speed}x)`);
+    check(l.name === 'server-test' && l.speed === 100 && l.held && l.picked, `a fresh page picked the held world up again at the speed it had (${l.speed}x; game log: page ${l.held}, server ${l.picked})`);
     const h2 = await query(pg2, 'hash');
     check(h2.ok && h2.tick > h1.tick, `it is the same world, played on until the page closed (tick ${h2.tick}, ${h1.tick} at the day's end)`);
     const h2b = await query(pg2, 'hash');

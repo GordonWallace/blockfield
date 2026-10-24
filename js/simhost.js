@@ -43,6 +43,7 @@ function inPage(why) {
   if (BF.proto && BF.proto.worker.on) BF.proto.worker.disconnect();
   BF.world.replica = false;
   if (BF.glog) BF.glog.remote(null);
+  logLater();
 }
 
 // Starts the simulation's host (when wanted and possible): the world server (spec r15-41) or a Web Worker. Resolves "worker" once the
@@ -52,15 +53,18 @@ H.start = function () {
   if (!want) { inPage("the default"); return Promise.resolve(H.mode); }
   if (want === "worker") return startWorker();
   if (!/^https?:$/.test(location.protocol) || typeof WebSocket === "undefined") {   // a file or the Artifact: no world server there
-    if (want === "server") glog("WARN", "No world server: the page was not served by ./run.sh");
+    if (want === "server") later.push(["WARN", "No world server: the page was not served by ./run.sh"]);
     return startWorker();
   }
   return serverSocket().then(w => {
     if (w.sock) return run(w.sock, "server");
-    if (want === "server") glog("WARN", "No world server (" + w.why + "): the simulation runs in a Web Worker instead");
+    if (want === "server") later.push(["WARN", "No world server (" + w.why + "): the simulation runs in a Web Worker instead"]);
     return startWorker();
   });
 };
+// lines for the game log once it is clear where the simulation runs (the log the page shows is that host's)
+const later = [];
+const logLater = () => { for (const [l, x] of later.splice(0)) glog(l, x); };
 function startWorker() {
   const no = cannot();
   if (no) { inPage(no); glog("WARN", "The simulation runs in the page: " + no); return Promise.resolve(H.mode); }
@@ -78,7 +82,7 @@ function run(w, via) {
       if (settled) return;
       settled = true; clearTimeout(timer);
       try { w.terminate(); } catch (_) { /* gone */ }
-      if (server) { glog("WARN", "The world server could not start the simulation (" + why + "); it runs in a Web Worker instead"); startWorker().then(resolve); return; }
+      if (server) { BF.proto.worker.disconnect(); later.push(["WARN", "The world server could not start the simulation (" + why + "); it runs in a Web Worker instead"]); startWorker().then(resolve); return; }
       inPage(why);
       glog("WARN", "The simulation worker could not start (" + why + "); the simulation runs in the page");
       resolve(H.mode);
@@ -97,6 +101,7 @@ function run(w, via) {
         BF.glog.remote(list => client.log(list));
         glog("INFO", server ? "The simulation runs on the world server (" + location.host + ", ready in " + Math.round(performance.now() - t0) + " ms)" + (w.hello.held ? "; it holds world \"" + w.hello.held.name + "\", paused since its page closed" : "")
           : "The simulation runs in a Web Worker (started in " + Math.round(performance.now() - t0) + " ms)");
+        logLater();
         resolve("worker");   // (either way the page is the simulation's client: js/main.js)
       } else if (d.failed) fail(d.failed);
       else if (d.crash) crashed(d.crash);

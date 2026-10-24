@@ -19,7 +19,7 @@
 // the page's latest part, so the screen keeps going with no page open.
 // Game log (the simulation thread's, which is the world's): INFO "server" for a page connecting, refused, closing, picking a held world
 // up; ERROR when a simulation thread stops on its own.
-// API: start({ servers (http servers to hook /sim on), saves (folder), debug: { push(snapshot) -> answer, screens() } }) -> world server
+// API: start({ servers (http servers to hook /sim on), saves (folder), build ({commit, branch}: the game log's), debug: { push(snapshot) -> answer, screens() } }) -> world server
 //   { stop() -> Promise (saves every world), status() }
 "use strict";
 const { Worker } = require("worker_threads");
@@ -49,8 +49,8 @@ let nextSim = 1;
 class Sim {
   constructor(srv) {
     this.n = nextSim++; this.srv = srv; this.id = null; this.name = null; this.ready = false; this.dead = false; this.crashed = false;
-    this.waits = {}; this.onReady = [];
-    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves } });
+    this.waits = {}; this.onReady = []; this.early = []; this.played = false;
+    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build } });
     this.w.on("message", m => srv.fromSim(this, m));
     this.w.on("error", e => srv.simStopped(this, "it failed: " + (e && e.stack || e)));
     this.w.on("exit", code => srv.simStopped(this, "it exited (code " + code + ")"));
@@ -78,7 +78,7 @@ class Sim {
 
 function start(o) {
   const store = IDB.open(o.saves).store;
-  const srv = { saves: o.saves, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, stopping: false };
+  const srv = { saves: o.saves, build: o.build || null, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
   const warm = () => { if (!srv.spare && !srv.stopping) srv.spare = new Sim(srv); };   // the next page's thread, loading while nobody waits
@@ -88,7 +88,11 @@ function start(o) {
 
   // ---- from a simulation thread
   srv.fromSim = (s, m) => {
-    if (m && m.h != null) { if (s === srv.active && srv.client) srv.client.send(packetOut(m)); return; }
+    if (m && m.h != null) {
+      if (s === srv.active && srv.client) srv.client.send(packetOut(m));
+      else if (!s.played && m.h.startsWith('{"t":"log"') && s.early.length < 200) s.early.push(m);   // (a fresh thread's boot lines: for its first page)
+      return;
+    }
     if (!m) return;
     if (m.server) {
       if (m.server === "world") { s.id = m.id; s.name = m.name || null; }
@@ -120,7 +124,7 @@ function start(o) {
       return;
     }
     srv.client = ws;
-    srv.page = null; srv.feedAck = null; srv.iconsAsked = false;
+    srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = [];
     say("a page connected");
     const h = srv.held;
     ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, held: h ? { id: h.id, name: h.name } : null } }));
@@ -132,7 +136,8 @@ function start(o) {
     if (m.boot) {
       if (!srv.active) srv.active = fresh();
       const s = srv.active;
-      if (s.ready) toPage({ ready: true }); else s.onReady.push(() => { if (s === srv.active) toPage({ ready: true }); });
+      const go = () => { if (s !== srv.active) return; toPage({ ready: true }); s.played = true; for (const p of s.early.splice(0)) srv.client.send(packetOut(p)); };
+      if (s.ready) go(); else s.onReady.push(go);
       warm();
       return;
     }
@@ -143,6 +148,7 @@ function start(o) {
       srv.wantIcons.clear(); srv.iconsAsked = false;   // (one the page couldn't draw isn't asked for again)
       return;
     }
+    if (m.test === "lockstep") srv.tests.push(m);   // (kept for the threads this page plays on next)
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
   // a protocol packet for the simulation; a world message decides which thread plays
@@ -153,7 +159,16 @@ function start(o) {
       if (m.op === "load" && h && h.id === a.id) {   // the held world, picked again: its thread plays, the title screen's goes
         if (srv.active && srv.active !== h) srv.active.kill();
         srv.active = h; srv.held = null;
-      } else if (h && m.op !== "demo") { srv.held = null; letGo(h); }   // another world: the held one was saved when its page closed
+      } else {
+        if (h && m.op !== "demo") { srv.held = null; letGo(h); }   // another world: the held one was saved when its page closed
+        // a world to play starts in a fresh thread, so nothing of the title screen's world (its clock, counters, timers) carries over
+        if (m.op !== "demo" && srv.active && srv.active.id === null && srv.active.played) {
+          srv.active.kill();
+          srv.active = fresh(); srv.active.played = true;
+          for (const t of srv.tests) srv.active.post(t);
+          warm();
+        }
+      }
     }
     if (srv.active) srv.active.post(p, p.b ? [p.b] : []);
   }

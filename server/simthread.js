@@ -21,6 +21,7 @@ const listeners = { error: [], unhandledrejection: [] };
 Object.assign(globalThis, {
   self: globalThis,
   location: { search: "", hostname: "localhost", protocol: "node:", href: "node:server/simthread.js" },
+  BF_BUILD: workerData.build || undefined,   // the checkout's commit and branch, for the game log (js/gamelog.js), as the page gets them
   indexedDB: idb.indexedDB, IDBKeyRange: idb.IDBKeyRange,
   postMessage: (m, transfer) => { if (m && m.ready) ready(); parentPort.postMessage(m, transfer || []); },
   addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); },
