@@ -21,6 +21,7 @@
 // API: BF.simHost = { mode ("server" | "worker" | "in page"), worker (bool: the simulation is not in the page), server (bool), why (why in
 //   page), start() -> Promise("worker" | "in page"), world(op, args) -> Promise, demo(seed, opts), ticks(raw) -> n, achieved(), frame(),
 //   sky(drawnDt), crashed (text or null), wanted() -> "server" | "worker" | "auto" | null, saves(q) -> Promise (the server's worlds), post(m),
+//   refused (why the world server turned this page away: another page plays on it; else undefined),
 //   label() -> the host as the player sees it, threads (the world server's), CHOICES, pref() / setPref(v) / prefLabel(v) (the setting),
 //   eval(src, arg) -> Promise (tests only: test/bft.js BFT.sim) }
 (() => {
@@ -82,6 +83,7 @@ H.start = function () {
   }
   return serverSocket(want === "server" ? 3000 : 1000).then(w => {
     if (w.sock) return run(w.sock, "server");
+    if (w.refused) H.refused = w.why;   // (the title screen says "World in use", spec r15-42)
     if (want === "server") later.push(["WARN", "No world server (" + w.why + "): the simulation runs in a Web Worker instead"]);
     return startWorker();
   });
@@ -170,7 +172,7 @@ function serverSocket(wait) {
       let d;
       if (typeof ev.data === "string") {
         try { d = JSON.parse(ev.data); } catch (_) { return; }
-        if (!done) { if (d.hello) { sock.hello = d.hello; end({ sock }); } else if (d.refused) { closing = true; end({ why: d.refused }); } return; }
+        if (!done) { if (d.hello) { sock.hello = d.hello; end({ sock }); } else if (d.refused) { closing = true; end({ why: d.refused, refused: true }); } return; }
       } else {
         const u = new Uint8Array(ev.data), n = new DataView(ev.data).getUint32(0, true);
         d = { h: dec.decode(u.subarray(5, 5 + n)), b: u[4] ? ev.data.slice(5 + n) : null };
@@ -206,7 +208,11 @@ H.post = m => { if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage
 // ---- the client: the world's edits into the page's copy, what the simulation did to the player
 function hook(C) {
   C.onEdits = (chunks, full) => BF.world.applyEdits(chunks, full);
-  C.onLog = list => { if (BF.glog) BF.glog.ingest(list); };
+  C.onLog = list => {
+    if (BF.glog) BF.glog.ingest(list);
+    // a save that failed there (an autosave, a full disk: spec r15-42): the page says so, as when it saves itself
+    for (const e of list) if (e.k === "save" && e.l === "ERROR" && Date.now() - e.s < 30000) { const m = /failed \((.*)\); the previous save is kept$/.exec(e.x); BF.emit("saveFailed", new Error(m ? m[1] : e.x)); }
+  };
   C.onSelf = m => {
     const P = BF.player;
     if (m.hurt) for (const h of m.hurt) {

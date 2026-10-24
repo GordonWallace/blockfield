@@ -20,7 +20,7 @@ Every new world is a round planet (see [[page:the-planet]]) with the "mile high"
 
 Only the layer around the surface is generated at first. Everything below it is plain stone until you dig down, when the deeper layers (stone, deepslate, caves, ores) are generated to match. Digging or building above the generated band simply extends it.
 
-Worlds made with Blockfield 1.3 or earlier were flat, and they can't be opened in 1.4. They stay in the world list, greyed out, so that you can delete them.
+Worlds made with Blockfield 1.3 or earlier were flat, and they can't be opened in 1.5; nor can 1.4's planets (see [[page:saving]]). They stay in the world list, greyed out, so that you can delete them.
 
 ## Continents and oceans
 

@@ -31,7 +31,7 @@ const FILES = {
   "planetrivers.js": "river solve timing stats",
   "protocol.js": "the simulation/client protocol's bytes per real second (spec r15-36): statistics, decides nothing",
   "player.js": "input: Escape grace, touch taps, the player runs in real time",
-  "save.js": "save metadata (last played, last saved)",
+  "save.js": "save metadata (last played, last saved), how long a save took (logged), and new world and imported world ids",
   "signs.js": "sign editor caret blink",
   "simhost.js": "the page's side of the simulation worker (spec r15-38): how long the worker took to start, logged; it runs no simulation",
   "simworker.js": "the simulation worker's loop (spec r15-38): the real time between loops, which the fixed ticks turn into steps within BUDGET_MS as js/main.js frame dt does in the page (how fast the game runs, not what happens), and load times, logged",

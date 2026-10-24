@@ -8,7 +8,7 @@ From 1.4, a Blockfield world is a round planet rather than an endless flat plane
 
 ## Creating a world
 
-Every new world is a planet: the create-world screen asks for a name, a seed, a game mode and a biome size, as before, and there is no flat-world option. Worlds made with Blockfield 1.3 can't be opened in 1.4. They appear greyed out in the world list, marked "Made with Blockfield 1.3, can't be opened in 1.4", with only a Delete button. Where you start is described on [[page:world-generation]].
+Every new world is a planet: the create-world screen asks for a name, a seed, a game mode and a biome size, as before, and there is no flat-world option. Worlds made with Blockfield 1.3 or 1.4 can't be opened in 1.5. They appear greyed out in the world list, marked "Made with Blockfield 1.4, can't be opened in 1.5" (or 1.3), with only a Delete button (see [[page:saving]]). Where you start is described on [[page:world-generation]].
 
 ## Size and shape
 
