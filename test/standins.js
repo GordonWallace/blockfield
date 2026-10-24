@@ -1,4 +1,4 @@
-// @ci integration suite=world soak timeout=900
+// @ci integration suite=world soak timeout=900 hosts=worker,server
 // Trees and village buildings from afar on the planet (spec r14-07). Served over http like test/distant.js (workers can't start from a
 // file:// page). Checks:
 //  - a forest seen from 60 blocks up to planet scale, either side of the chunk ceiling (screenshots): ring 0 draws its trees as boxes,
@@ -7,7 +7,8 @@
 //  - stand-ins kept by a moved ring match a fresh build of the same samples;
 //  - a stand-in matches the real tree once its chunks load (a log at its trunk, the right kind);
 //  - chunks stop loading above the chunk ceiling, and far chunks keep only their meshes.
-// node test/run.js /tmp/standins test/standins.js
+// node test/run.js /tmp/standins test/standins.js [--host page|worker|server] (drawing: the page's; served by its own http server, which has
+// no world server: on host server the simulation runs in a worker)
 const http = require("http"), fs = require("fs"), path = require("path");
 const root = path.resolve(__dirname, "..");
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".json": "application/json", ".txt": "text/plain" };
@@ -25,7 +26,9 @@ module.exports = async (pg, out) => {
   try {
     await pg.goto(url);
     await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow (never judge frame rate here)
-    await pg.waitForFunction(() => window.BF && BF.lod && !BF.preparing, null, { timeout: 180000 });   // (the planet's rivers first)
+    // the world started (with the simulation off the page, after its host started), the planet's rivers first
+    await pg.waitForFunction(() => window.BF && BF.lod && BF.state && BF.state.seed === 1337 && !BF.preparing, null, { timeout: 300000, polling: 250 });
+    await require('./lib').simReady(pg);
     const forest = await pg.evaluate(() => {
       BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true);
       // Software rendering draws a forest's stand-ins (hundreds of thousands) in seconds a frame, so they are hidden while rings build

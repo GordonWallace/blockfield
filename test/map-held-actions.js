@@ -1,13 +1,14 @@
-// Held map tilt: node test/run.js /tmp/mh test/map-held-actions.js (screenshots looking ahead and looking down)
+// @ci integration hosts=worker,server
+// Held map tilt: node test/run.js /tmp/mh test/map-held-actions.js [--host page|worker|server] (screenshots looking ahead and looking down)
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(500);
-  await pg.evaluate(() => {
-    const I = BF.I, inv = BF.inventory, p = BF.player.position;
-    inv.clear(); inv.add(I.blank_map_1, 1); inv.select(0);
-    BF.maps.use(inv.selected(), BF.items[inv.selected().id]);
-    BF.player.setLook(-0.8, 0);
-  });
+  // (the map is made where the simulation is, spec r15-43)
+  await lib.give(pg, ['blank_map_1']);
+  await lib.sim(pg, () => { const inv = BF.inventory; BF.maps.use(inv.selected(), BF.items[inv.selected().id]); BF.proto.flush(); });
+  await pg.waitForFunction(() => { const s = BF.inventory.selected(); return s && BF.items[s.id].map; }, null, { timeout: 20000 });
+  await pg.evaluate(() => BF.player.setLook(-0.8, 0));
   await pg.waitForTimeout(2500);
   await pg.screenshot({ path: out + '-ahead.png' });
   await pg.evaluate(() => BF.player.setLook(-0.8, -0.83));

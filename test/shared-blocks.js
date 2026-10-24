@@ -1,5 +1,5 @@
-// @ci integration suite=world timeout=900
-// Chunk block data in shared memory (spec r15-35): NODE_PATH=$(npm root -g) node test/shared-blocks.js [outPrefix]
+// @ci integration suite=world timeout=900 hosts=worker,server
+// Chunk block data in shared memory (spec r15-35): NODE_PATH=$(npm root -g) [BF_HOST=page|worker|server] node test/shared-blocks.js [outPrefix]
 // Served by debug/server.js (as ./run.sh does), the page is cross-origin isolated and every section array (blocks, block light, sky
 // light) sits on a SharedArrayBuffer; served with --no-isolate, and opened as a file, they are ordinary ArrayBuffers and the game plays.
 // In both: F3 and the game log say which, an edit survives a save and load, and (isolated) a 2,000-block walk and back leaves the
@@ -7,41 +7,68 @@
 const path = require('path'), { spawn } = require('child_process');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/shared-blocks';
-const GAME = 8730, DBG = 8731;
+let GAME = 8730, DBG = 8731;   // (free ports picked at the start: several hosts' runs at once on one machine)
 const fails = [], ok = (n, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (extra !== undefined ? '  ' + JSON.stringify(extra) : '')); if (!c) fails.push(n); };
 const start = async (extra) => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-shared-alerts.json'), ...extra]);
+  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-shared-alerts.json'), '--test', '--saves', require('fs').mkdtempSync(path.join(require('os').tmpdir(), 'bf-shared-saves-')), ...extra]);   // (--test: BFT.sim on the world server)
   let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
   for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
   throw new Error('debug server did not start');
 };
 const stop = p => new Promise(r => { p.once('exit', r); p.kill(); });
 
-// In the page: section array kinds, F3 and log lines, a save / load round trip, and (walk) the memory check.
-async function inPage({ walk }) {
-  const R = {}, wait = ms => new Promise(r => setTimeout(r, ms));
-  const settle = async (x, z) => {
-    BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
-    for (let i = 0; i < 600 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 8); await wait(10); }
-    for (let i = 0; i < 600; i++) { BF.world.update(x, z, 8); await wait(10); if (BF.world.queueLength === 0) break; }
+// Section array kinds, F3 and log lines, a save / load round trip, and (walk) the memory check. The sections measured are the page's (its
+// world, which with the simulation elsewhere is a replica: spec r15-43); the edits, the save and the load are the simulation's (lib.sim).
+const lib = require('./lib');
+const pageFns = () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  window.__sb = {
+    wait,
+    settle: async (x, z) => {
+      BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
+      for (let i = 0; i < 600 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 8); await wait(10); }
+      for (let i = 0; i < 600; i++) { BF.world.update(x, z, 8); await wait(10); if (BF.world.queueLength === 0) break; }
+    },
+    kinds: () => {
+      const k = { shared: 0, plain: 0 };
+      for (const c of BF.world.chunks.values()) for (const list of [c.secs, c.light, c.sky]) if (list) for (const a of list) if (a && typeof a === 'object')
+        k[a.buffer instanceof ArrayBuffer ? 'plain' : typeof SharedArrayBuffer === 'function' && a.buffer instanceof SharedArrayBuffer ? 'shared' : 'other']++;
+      return k;
+    },
   };
-  const kinds = () => {
-    const k = { shared: 0, plain: 0 };
-    for (const c of BF.world.chunks.values()) for (const list of [c.secs, c.light, c.sky]) if (list) for (const a of list) if (a && typeof a === 'object')
-      k[a.buffer instanceof ArrayBuffer ? 'plain' : typeof SharedArrayBuffer === 'function' && a.buffer instanceof SharedArrayBuffer ? 'shared' : 'other']++;
-    return k;
+};
+// where the simulation is: the chunks round (x, z) loaded there too (the page's body moved there and the simulation follows it)
+const simSettle = (pg, x, z) => lib.sim(pg, async ([x, z]) => {
+  const W = BF.world;
+  for (let i = 0; i < 1200 && !(W.isLoaded(x, z) && W.queueLength === 0); i++) { W.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }
+}, [x, z]);
+
+async function inPage(pg, { walk }) {
+  await pg.evaluate(pageFns);
+  const R = await pg.evaluate(() => ({ isolated: self.crossOriginIsolated === true, mode: { on: BF.shared.on, text: BF.shared.text } }));
+  await pg.evaluate(() => { BF.state.paused = true; });   // (paused from the page, as the pause menu does: the simulation follows)
+  // worlds started at each end, counted (the boot's world has the same seed: the saved world's start is told apart by the count)
+  const count = () => { if (!globalThis.__sbN) { globalThis.__sbN = { n: 0 }; BF.on('newWorld', () => { globalThis.__sbN.n++; }); } return globalThis.__sbN.n; };
+  let n = await lib.sim(pg, count);
+  let pn = await pg.evaluate(count);
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: 'shared-blocks', seed: 123, gameMode: 'creative', villages: 10, gen: 4 })).id);
+  // (the world server starts each world on a fresh thread, with no counter yet; and it keeps a world it already runs when the page
+  // loads that world again: there the world's id is enough)
+  const started = async (again) => {
+    const st = await lib.simWait(pg, ([n, id, same]) => { const N = globalThis.__sbN; return (!N || N.n > n || same) && BF.glog.world() === id; }, [n, id, !!again && lib.host() === 'server'], 120000);
+    if (!st) console.log('the saved world did not start where the simulation is: ' + JSON.stringify(await lib.sim(pg, () => ({ n: globalThis.__sbN && globalThis.__sbN.n, world: BF.glog.world(), seed: BF.state.seed }))));
+    await lib.sim(pg, () => { BF.state.paused = true; BF.mobs.spawning = false; });
+    await pg.waitForFunction(pn => globalThis.__sbN.n > pn && !BF.preparing, pn, { timeout: again ? 30000 : 180000, polling: 200 }).catch(e => { if (!again) throw e; });
+    n = await lib.sim(pg, count); pn = await pg.evaluate(() => globalThis.__sbN.n);
   };
-  R.isolated = self.crossOriginIsolated === true;
-  R.mode = { on: BF.shared.on, text: BF.shared.text };
-  BF.state.paused = true;
-  const meta = await BF.save.create({ name: 'shared-blocks', seed: 123, gameMode: 'creative', villages: 10, gen: 4 });
-  BF.mobs.spawning = false;
-  const px = Math.floor(BF.spawnPoint.x), pz = Math.floor(BF.spawnPoint.z);
-  await settle(px, pz);
-  R.kinds = kinds();
-  R.f3 = BF.debugText(BF.debugInfo());
+  await started();
+  const [px, pz] = await lib.sim(pg, () => [Math.floor(BF.spawnPoint.x), Math.floor(BF.spawnPoint.z)]);
+  await pg.evaluate(([x, z]) => __sb.settle(x, z), [px, pz]);
+  await simSettle(pg, px, pz);
+  R.kinds = await pg.evaluate(() => __sb.kinds());
+  R.f3 = await pg.evaluate(() => BF.debugText(BF.debugInfo()));
   // the mesher workers (r15-03) get copies of the (shared or plain) sections: what they built equals the page's own mesher
-  R.mesh = (() => {
+  R.mesh = await pg.evaluate(() => {
     const W = BF.world, st = W.meshStats ? W.meshStats() : null;
     if (!st) return { none: true };
     const keys = ['pos', 'uv', 'col', 'sky', 'bl', 'ind'];
@@ -49,21 +76,30 @@ async function inPage({ walk }) {
     const cs = [...W.chunks.values()].filter(c => c.mesh === true && c.meshBy === 'worker' && !W._dirty.has(c.key)).slice(0, 20);
     let bad = 0; for (const c of cs) { const a = W.shownArrays(c), b = W.meshArrays(c); if (!same(a.S, b.S) || !same(a.L, b.L)) bad++; }
     return { workers: st.workers, inline: !!st.inline, checked: cs.length, bad };
-  })();
-  R.logged = BF.glog.entries().some(e => e.k === 'game' && e.x.startsWith(BF.shared.text));
+  });
+  // (the game log is written where the simulation is: the page gets its entries a moment later)
+  // (and it says what memory the simulation's own sections use: the page's, the worker's, or the world server's, which is always "off")
+  const simText = await lib.sim(pg, () => BF.shared.text);
+  R.logged = await pg.waitForFunction(t => BF.glog.entries().some(e => e.k === 'game' && e.x.startsWith(t)), simText, { timeout: 15000 }).then(() => true, () => false);
   // an edit (a block plus a torch for block light) through IndexedDB
-  const gy = BF.worldgen.heightAt(px + 3, pz + 3) + 1;
-  BF.world.setBlock(px + 3, gy, pz + 3, BF.B.gold_block || BF.B.stone);
-  BF.world.setBlock(px + 4, gy, pz + 3, BF.B.torch);
-  const want = [BF.world.getBlock(px + 3, gy, pz + 3), BF.world.getBlock(px + 4, gy, pz + 3)];
-  R.lightAfterEdit = kinds();
-  await BF.save.saveNow();
-  await BF.save.load(meta.id);
-  BF.state.paused = true; BF.mobs.spawning = false;
-  await settle(px, pz);
-  R.roundTrip = { want, got: [BF.world.getBlock(px + 3, gy, pz + 3), BF.world.getBlock(px + 4, gy, pz + 3)] };
-  R.kindsAfterLoad = kinds();
-  if (walk) {
+  const ed = await lib.sim(pg, ([px, pz]) => {
+    const gy = BF.worldgen.heightAt(px + 3, pz + 3) + 1;
+    BF.world.setBlock(px + 3, gy, pz + 3, BF.B.gold_block || BF.B.stone);
+    BF.world.setBlock(px + 4, gy, pz + 3, BF.B.torch);
+    BF.proto.flush();
+    return { gy, want: [BF.world.getBlock(px + 3, gy, pz + 3), BF.world.getBlock(px + 4, gy, pz + 3)] };
+  }, [px, pz]);
+  const want = ed.want, at = [px, pz, ed.gy];
+  await pg.waitForFunction(([px, pz, gy, w]) => BF.world.getBlock(px + 4, gy, pz + 3) === w, [...at, want[1]], { timeout: 20000 }).catch(() => {});
+  R.lightAfterEdit = await pg.evaluate(() => __sb.kinds());
+  await pg.evaluate(async id => { await BF.save.saveNow(); await BF.save.load(id); }, id);
+  await started(true);
+  await pg.evaluate(([x, z]) => { BF.state.paused = true; return __sb.settle(x, z); }, [px, pz]);
+  await simSettle(pg, px, pz);
+  R.roundTrip = { want, got: await lib.sim(pg, ([px, pz, gy]) => [BF.world.getBlock(px + 3, gy, pz + 3), BF.world.getBlock(px + 4, gy, pz + 3)], at) };
+  R.kindsAfterLoad = await pg.evaluate(() => __sb.kinds());
+  if (walk) Object.assign(R, await pg.evaluate(async ([px, pz]) => {
+    const R = {}, { wait, settle } = __sb;
     const gcNow = async () => { for (let i = 0; i < 3; i++) { if (typeof gc === 'function') gc(); await wait(100); } };
     const mem = () => ({ ...BF.shared.usage(), chunks: BF.world.chunks.size });
     R.before = mem();
@@ -80,8 +116,9 @@ async function inPage({ walk }) {
     for (let d = 1900; d >= 0; d -= 100) await settle(px + d, pz);
     for (let i = 0; i < 300; i++) { BF.world.update(px, pz, 8); await wait(10); }   // unload what's left of the walk
     R.after = mem();
-  }
-  await BF.save.remove(meta.id);
+    return R;
+  }, [px, pz]));
+  await pg.evaluate(id => BF.save.remove(id), id);
   return R;
 }
 
@@ -92,10 +129,12 @@ async function check(b, label, url, { isolated, walk }) {
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
+  await lib.install(pg);
   await pg.goto(url);
   await pg.waitForFunction(() => window.BF && BF.state && BF.save && !BF.preparing, null, { timeout: 180000, polling: 200 });
+  await lib.reloaded(pg);   // (its host chosen and, with the simulation elsewhere, its boot world started: the world the test creates replaces it)
   await pg.waitForTimeout(3000);
-  const R = await pg.evaluate(inPage, { walk });
+  const R = await inPage(pg, { walk });
   const want = isolated ? 'shared' : 'plain';
   ok(`${label}: crossOriginIsolated is ${isolated}`, R.isolated === isolated, R.mode);
   ok(`${label}: BF.shared.on is ${isolated}`, R.mode.on === isolated);
@@ -121,6 +160,7 @@ async function check(b, label, url, { isolated, walk }) {
 }
 
 (async () => {
+  GAME = await lib.freePort(); DBG = await lib.freePort();
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--js-flags=--expose-gc'] });
   try {
     let srv = await start([]);
@@ -129,10 +169,10 @@ async function check(b, label, url, { isolated, walk }) {
     ok('COOP / COEP on the page', h.headers.get('cross-origin-opener-policy') === 'same-origin' && h.headers.get('cross-origin-embedder-policy') === 'credentialless');
     ok('COOP / COEP on the scripts', hj.headers.get('cross-origin-embedder-policy') === 'credentialless');
     ok('not on the wiki', !hw.headers.get('cross-origin-embedder-policy'));
-    await check(b, 'served', `http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123gen4v10`, { isolated: true, walk: true });
+    await check(b, 'served', `http://localhost:${GAME}/?nolod&${lib.q()}#seed123gen4v10`, { isolated: true, walk: true });
     await stop(srv);
     srv = await start(['--no-isolate']);
-    await check(b, 'no-headers', `http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123gen4v10`, { isolated: false, walk: false });
+    await check(b, 'no-headers', `http://localhost:${GAME}/?nolod&${lib.q()}#seed123gen4v10`, { isolated: false, walk: false });
     await stop(srv);
     await check(b, 'file', 'file://' + path.join(root, 'index.html') + '?nolod#seed123gen4v10', { isolated: false, walk: false });
   } finally { await b.close(); }

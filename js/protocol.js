@@ -554,12 +554,13 @@ function serve(send, opts) {
       try { p = Promise.resolve(opts.world(m.op, m.args || {})); } catch (e) { p = Promise.reject(e); }
       p.then(r => done(Object.assign({ ok: true }, r || {})), e => { glog("ERROR", "Could not " + m.op + " the world: " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n")); done({ ok: false, why: String(e && e.message || e) }); });
     },
-    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters)
+    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters) or its monster options in
+    // the pause menu (js/player.js; id null for a world that isn't saved)
     meta(m) {
       const cur = BF.save && BF.save.current;
-      if (!cur || (m.id && m.id !== cur.id)) return;
-      if (m.name != null) cur.name = m.name;
-      if (m.monsters) { cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
+      if (m.id ? !cur || m.id !== cur.id : cur) return;
+      if (m.name != null && cur) cur.name = m.name;
+      if (m.monsters) { if (cur) cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
     },
     // the client's own log entries (its errors): into this game log, which is the one saved
     clientLog(m) { if (BF.glog) for (const e of m.list || []) BF.glog.log(e.l, e.k, e.x, { at: e.p }); },
@@ -971,8 +972,9 @@ BF.proto = {
   VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, worker, host, hosted, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
   listen: fn => { LISTEN.push(fn); },
   onSelf: fn => { SELF.push(fn); },
-  // (tests, in-page) the protocol number the in-page sim end gives a simulation object (a mob, drop, arrow, boat or bee), or null
-  numberOf: o => (o && typeof o === "object" && local.sim ? local.sim.nOf(o) : null),
+  // (tests) the protocol number the sim end gives a simulation object (a mob, drop, arrow, boat or bee), or null: in the page, or where
+  // the simulation is (the worker or the world server, through BFT.sim)
+  numberOf: o => (o && typeof o === "object" && liveSim ? liveSim.nOf(o) : null),
   hookUp,
   // once a frame: the client's view (in the page, also through the worker), then the simulation end's flush (in the page, or in the worker)
   flush(force) {

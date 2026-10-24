@@ -1,8 +1,9 @@
-// @ci baseline suite=world
+// @ci baseline suite=world hosts=worker,server
 // Seeded random streams (js/rand.js, spec r15-14): the streams look random (mean, buckets), BF.rand.at gives the same numbers for the same
 // kind, cell and tick and different ones otherwise, a mob's stream carries on after a save and reload, the tick and creation counter are
 // saved with the world, and no simulation code uses Math.random (the lint below).
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/rand test/rand.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/rand test/rand.js [--host page|worker|server]: the streams checked are the
+// simulation's, read where it is (spec r15-43); the world is saved and loaded from the page.
 const fs = require('fs'), path = require('path');
 
 // Files that may still use Math.random. Anywhere else a line needs a `// visual` mark (a particle, a wobble, a sound): nothing the simulation reads.
@@ -27,7 +28,8 @@ module.exports = async (pg) => {
   const bad = lint();
   ok('no Math.random in simulation code (outside the allowed files and // visual lines)', bad.length === 0, bad);
 
-  const r = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  const r = await lib.sim(pg, async () => {
     const R = BF.rand, out = {};
     // distribution: mean and 10 buckets of an entity stream and of a hash stream
     const dist = s => { const b = new Array(10).fill(0); let sum = 0; const N = 200000; for (let i = 0; i < N; i++) { const x = s.next(); sum += x; b[Math.floor(x * 10)]++; } return { mean: sum / N, min: Math.min(...b) / N, max: Math.max(...b) / N }; };
@@ -75,26 +77,27 @@ module.exports = async (pg) => {
     out.slot = sl('villager:0,0#3:0') === sl('villager:0,0#3:0') && sl('villager:0,0#3:0') !== sl('villager:0,0#4:0') && sl('villager:0,0#3:0') !== sl('villager:0,0#3:1');
     for (const m of [cow, cow2, back, v, v2]) BF.mobs.kill ? BF.mobs.kill(m) : (m.dead = true);
 
-    // the tick and creation counter are saved with the world
-    if (BF.save && BF.save.supported) {
-      const id = (await BF.save.create({ name: 'rand', seed: 77, gameMode: 'creative', villages: 9, gen: 4 })).id;
-      BF.state.paused = true;
-      R.tick = 12345; for (let i = 0; i < 4; i++) R.of({}).next();
-      const was = R.save();
-      await BF.save.saveNow();
-      R.reset();
-      await BF.save.load(id);
-      BF.state.paused = true;
-      out.saved = { was, now: R.save() };
-      await BF.save.remove(id);
-    }
     return out;
   });
+  // the tick and creation counter are saved with the world
+  if (await pg.evaluate(() => !!(BF.save && BF.save.supported))) {
+    const id = await pg.evaluate(async () => (await BF.save.create({ name: 'rand', seed: 77, gameMode: 'creative', villages: 9, gen: 4 })).id);
+    // paused from the page (as the pause menu does), so no tick runs where the simulation is between here and the reload
+    await pg.evaluate(() => { BF.state.paused = true; });
+    await pg.waitForTimeout(300);
+    const was = await lib.sim(pg, () => { const R = BF.rand; BF.state.paused = true; R.tick = 12345; for (let i = 0; i < 4; i++) R.of({}).next(); return R.save(); });
+    await pg.evaluate(() => BF.save.saveNow());
+    await lib.sim(pg, () => BF.rand.reset());
+    await pg.evaluate(id => BF.save.load(id), id);
+    const now = await lib.sim(pg, () => { BF.state.paused = true; return BF.rand.save(); });
+    r.saved = { was, now };
+    await pg.evaluate(id => { BF.state.paused = false; return BF.save.remove(id); }, id);
+  }
   const flat = d => d.mean > 0.497 && d.mean < 0.503 && d.min > 0.096 && d.max < 0.104;
   ok('an entity stream is uniform (mean, 10 buckets)', flat(r.ent), r.ent);
   ok('a world-event stream is uniform', flat(r.hash), r.hash);
   ok('the first numbers of neighbouring cells are uniform', r.cells.mean > 0.495 && r.cells.mean < 0.505 && r.cells.min > 0.094 && r.cells.max < 0.106, r.cells);
-  ok('int, range and pick stay in range', r.int && r.range && r.pick[0] === 'a' && r.pick[1] === undefined, r.pick);
+  ok('int, range and pick stay in range', r.int && r.range && r.pick[0] === 'a' && r.pick[1] == null, r.pick);   // (undefined, which comes back as null from elsewhere)
   ok('BF.rand.at is stable across calls', r.stable);
   ok('BF.rand.at differs by kind, cell, height and tick', r.keyed);
   ok('BF.rand.at depends on the world seed', r.seeded);

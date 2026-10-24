@@ -12,7 +12,7 @@
 //    drawn in the face frame of their centre with the neighbouring faces unfolded around it, are at most one face wide (1,280 zones), and leave the
 //    corner wedges (past two face edges, where nothing lies flat) empty. Readouts show face / u / v, never atlas x / z.
 // API: BF.mapview = { use(sel, it), held(it), tick(), open(it), close(), isOpen(), getAuto, nameOf, geometry, finish(d), paint(d), stats,
-//                     planet: { open(), close(), isOpen(), state, zoomBy(f), turn(dx, dy), pick(px, py), clickAt(px, py), toLocal() } }
+//                     pull(it), planet: { open(), close(), isOpen(), state, zoomBy(f), turn(dx, dy), pick(px, py), clickAt(px, py), toLocal() } }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -213,7 +213,7 @@ function mapSnap(it) {
         if (!v) { o[q + 3] = 0; continue; }
         o[q] = ((v >> 11) & 31) * 255 / 31; o[q + 1] = ((v >> 5) & 63) * 255 / 63; o[q + 2] = (v & 31) * 255 / 31; o[q + 3] = 255;
       }
-      c.g.putImageData(c.img, 0, 0); c.ver = r.ver;
+      c.g.putImageData(c.img, 0, 0); c.ver = r.ver; c.px = px;   // (px: for the held view, js/maps.js heldTexture through pull)
     });
   }
   return { src: c.cv, side: c.side, x0: c.x0, z0: c.z0, N: c.N, scale: c.scale, ver: c.ver };
@@ -495,11 +495,10 @@ function create(w, slot) {
   const inv = BF.inventory, sel = inv.slots[slot];
   if (!sel || !BF.items[sel.id] || !BF.items[sel.id].autoBlank) return false;
   const p = BF.player.position, k = zonesFor(w), zx = zoneOf(p.x), zz = zoneOf(p.z);
-  const id = BF.resolveItem(nameOf(k, zx, zz));
   getAuto(k, zx, zz);
-  if (sel.count === 1) inv.setSlot(slot, { id, count: 1 });
-  else { inv.setSlot(slot, { id: sel.id, count: sel.count - 1 }); const left = inv.add(id, 1); if (left > 0) inv.dropOverflow(id, left); }
-  return true;
+  // the item itself changes where the simulation is (the page, a worker or the world server): a player request (js/player.js)
+  if (BF.req && BF.req.player) { BF.req.player("player.autoMap", null, { slot, name: nameOf(k, zx, zz) }); return true; }
+  return false;
 }
 function confirmPrompt() {
   if (!hint()) return;
@@ -831,6 +830,8 @@ BF.mapview = {
   planet: { open: openGlobe, close: closeGlobe, isOpen: () => globe.open, state: globe, zoomBy, turn, pick, clickAt, toLocal, lookAt,
     finishBase() { while (!baseGrid().done) stepBase(Infinity); }, draw() { globe.sig = ""; drawGlobe(); } },
   teleportToSelection, surfaceAt, getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
+  // a normal map's latest pixels from the simulation, {px, ver} (px null until the first answer), for js/maps.js's held view
+  pull(it) { if (!it || !it.map) return null; const c = (mapSnap(it), snaps.get(it.id)); return { px: c.px || null, ver: c.ver }; },
   ZONE, MAX_PX, MAX_K,
   reset() { maps.clear(); thumbs.clear(); snaps.clear(); iconSeen = ""; },
   _maps: maps, _view: view, _prompt: prompt,

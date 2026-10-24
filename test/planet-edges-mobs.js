@@ -1,18 +1,24 @@
-// @ci integration suite=world timeout=420
+// @ci integration suite=world timeout=420 hosts=worker,server
 // Mobs, items and vehicles across face edges on the planet (generator 4, spec r14-13). At an edge of face 4 (no turn) and one that turns
 // (face 0 to face 2), in a cleared, floored box that straddles the edge (k < 0 on face A, k >= 0 across it on face B; j along the edge): cows
 // follow the player holding wheat across and end up on face B's square, while a cow that belongs to a place on face A stays in A's frame;
 // a zombie chases the player across; a dropped item slides across; a boat and a ridden horse cross with their riders and keep heading the
 // same way; an arrow flies across; a route planned across the edge is straight, and a villager walks to a target across the edge.
-// node test/run.js /tmp/pw test/planet-edges-mobs.js
+// node test/run.js /tmp/pw test/planet-edges-mobs.js [--host page|worker|server]
+// The mobs, items and vehicles are the simulation's: each step runs where the simulation is (spec r15-43), with the page's body held
+// out of it (the steps move the player there).
+const lib = require('./lib');
 module.exports = async (pg) => {
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
+  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
+  await lib.newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => BF.player.start());
+  await lib.alone(pg, true);
   await pg.waitForTimeout(2500);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
 
   for (const [f, s] of [[4, 1], [0, 2]]) {
-    const setup = await pg.evaluate(async ([f, s]) => {
+    const setup = await lib.sim(pg, async ([f, s]) => {
       const P = BF.planet, N = P.N, W = BF.world, h = [[-1, 0], [1, 0], [0, -1], [0, 1]][s];
       const at = (k, j) => {   // atlas address (through A's margin for k >= 0) of the cell k across the edge, j along it
         const o = (h[0] || h[1]) < 0 ? -1 - k : N + k, a = N / 2 + j;
@@ -25,14 +31,14 @@ module.exports = async (pg) => {
       const g = P.EDGE[f][s].g;
       const onB = p => { const c = P.canon(p.x, p.z); return c.f === g && c.x === p.x && c.z === p.z; };
       const b5 = cc(5, 0), b6 = cc(6, 0), dirB = [b6.x - b5.x, b6.z - b5.z];
-      Object.assign(window, { __at: at, __cc: cc, __kOf: kOf, __onB: onB, __dirB: dirB, __h: h });
+      Object.assign(globalThis, { __at: at, __cc: cc, __kOf: kOf, __onB: onB, __dirB: dirB, __h: h });
       const sp = at(-8, 0);
       BF.player.setGameMode && BF.player.setGameMode("survival");
       BF.player.teleport(sp.x + 0.5, Math.max(BF.worldgen.heightAt(sp.x, sp.z), BF.SEA) + 30, sp.z + 0.5); BF.player.setFlying(true);
       for (let i = 0; i < 160; i++) {
         await new Promise(r => setTimeout(r, 250));
         let ok = true;
-        for (const [k, j] of [[-16, -10], [-16, 10], [16, -10], [16, 10], [0, 0]]) { const a = at(k, j), c = W.chunkAt(a.x, a.z); if (!c || c.mesh === undefined) ok = false; }
+        for (const [k, j] of [[-16, -10], [-16, 10], [16, -10], [16, 10], [0, 0]]) { const a = at(k, j), c = W.chunkAt(a.x, a.z); if (!c || (BF.page && c.mesh === undefined)) ok = false; }
         if (ok) break;
       }
       let top = BF.SEA;
@@ -49,8 +55,8 @@ module.exports = async (pg) => {
           if (W.getBlock(a.x, yy, a.z) !== want) W.setBlock(a.x, yy, a.z, want);
         }
       }
-      window.__clearMobs = () => { for (const m of BF.mobs.list.slice()) { const q = P.local(c0, m.position); if (Math.hypot(q.x - c0.x, q.z - c0.z) < 40) BF.mobs.kill(m); } for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); };
-      window.__clearMobs();
+      globalThis.__clearMobs = () => { for (const m of BF.mobs.list.slice()) { const q = P.local(c0, m.position); if (Math.hypot(q.x - c0.x, q.z - c0.z) < 40) BF.mobs.kill(m); } for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); };
+      globalThis.__clearMobs();
       BF.mobs.spawning = false;
       const p = cc(-8, 8);
       BF.player.teleport(p.x, y, p.z); BF.player.setFlying(false);
@@ -60,8 +66,8 @@ module.exports = async (pg) => {
     const y = setup.y;
 
     // cows follow the player holding wheat across the edge; one belonging to a place on face A stays in A's frame
-    const cows = await pg.evaluate(async ([y, f]) => {
-      const P = BF.planet, at = window.__at, cc = window.__cc, kOf = window.__kOf, onB = window.__onB, PL = BF.player, I = BF.I;
+    const cows = await lib.sim(pg, async ([y, f]) => {
+      const P = BF.planet, at = globalThis.__at, cc = globalThis.__cc, kOf = globalThis.__kOf, onB = globalThis.__onB, PL = BF.player, I = BF.I;
       BF.inventory.setSlot(0, { id: I.wheat_item, count: 8 }); BF.inventory.select(0);
       const list = [];
       for (const j of [-1, 0, 1, 2]) { const c = cc(-6, j); list.push(BF.mobs.spawn("cow", c.x, y, c.z)); }
@@ -85,8 +91,8 @@ module.exports = async (pg) => {
     check(anch.k > 2 && anch.d < 5 && anch.face === f && !anch.onB, `${tag}: a cow that belongs to a place on face A follows across but stays in A's frame`);
 
     // a zombie chases the player across the edge
-    const zombie = await pg.evaluate(async ([y]) => {
-      const P = BF.planet, cc = window.__cc, kOf = window.__kOf, onB = window.__onB, PL = BF.player;
+    const zombie = await lib.sim(pg, async ([y]) => {
+      const P = BF.planet, cc = globalThis.__cc, kOf = globalThis.__kOf, onB = globalThis.__onB, PL = BF.player;
       const p = cc(4, 3); PL.teleport(p.x, y, p.z);
       PL.health = 20;
       const z0 = cc(-5, 3), z = BF.mobs.spawn("zombie", z0.x, y, z0.z);
@@ -101,8 +107,8 @@ module.exports = async (pg) => {
     check(zombie.close && zombie.onB && zombie.k > 2, `${tag}: a zombie chases the player across the edge ${JSON.stringify(zombie)}`);
 
     // a dropped item slides across, and the player picks it up there
-    const item = await pg.evaluate(async ([y]) => {
-      const cc = window.__cc, kOf = window.__kOf, onB = window.__onB, h = window.__h, PL = BF.player;
+    const item = await lib.sim(pg, async ([y]) => {
+      const cc = globalThis.__cc, kOf = globalThis.__kOf, onB = globalThis.__onB, h = globalThis.__h, PL = BF.player;
       const p = cc(8, 8); PL.teleport(p.x, y, p.z);
       const c = cc(-2, 3);
       const d = BF.drops.spawn(BF.I.cobblestone, 1, c.x, y + 0.2, c.z, { vel: new THREE.Vector3(h[0] * 9, 1, h[1] * 9), pickupDelay: 0 });
@@ -117,8 +123,8 @@ module.exports = async (pg) => {
     check(item.onB && item.k > 0.5 && item.picked, `${tag}: a dropped item slides across the edge and is picked up there ${JSON.stringify(item)}`);
 
     // a boat rowed across the edge, then a ridden horse
-    const ride = await pg.evaluate(async ([y]) => {
-      const P = BF.planet, cc = window.__cc, kOf = window.__kOf, onB = window.__onB, h = window.__h, dirB = window.__dirB, PL = BF.player;
+    const ride = await lib.sim(pg, async ([y]) => {
+      const P = BF.planet, cc = globalThis.__cc, kOf = globalThis.__kOf, onB = globalThis.__onB, h = globalThis.__h, dirB = globalThis.__dirB, PL = BF.player;
       const yaw0 = Math.atan2(-h[0], -h[1]);   // facing +k (forward is (-sin yaw, -cos yaw))
       const fwdDot = yw => (-Math.sin(yw) * dirB[0] - Math.cos(yw) * dirB[1]) / Math.hypot(dirB[0], dirB[1]);
       const out = {};
@@ -145,8 +151,8 @@ module.exports = async (pg) => {
     check(ride.mounted && hs.onB && hs.k > 1 && hs.fwd > 0.95 && hs.riderOnB && hs.seated, `${tag}: a ridden horse crosses the edge with its rider, still heading the same way ${JSON.stringify(ride.horse)}`);
 
     // an arrow flies across the edge
-    const arrow = await pg.evaluate(async ([y]) => {
-      const cc = window.__cc, kOf = window.__kOf, onB = window.__onB, h = window.__h, dirB = window.__dirB, PL = BF.player;
+    const arrow = await lib.sim(pg, async ([y]) => {
+      const cc = globalThis.__cc, kOf = globalThis.__kOf, onB = globalThis.__onB, h = globalThis.__h, dirB = globalThis.__dirB, PL = BF.player;
       const p = cc(8, -9); PL.teleport(p.x, y, p.z);
       const c = cc(-3, 6), a = BF.mobs.shootArrow(new THREE.Vector3(c.x, y + 2, c.z), new THREE.Vector3(h[0] * 25, 3, h[1] * 25), { damage: 1, pickup: 0 });
       for (let i = 0; i < 12 && !a.stuck; i++) (BF.mobs.update(0.025), BF.req.apply(), BF.req.deliver());
@@ -156,8 +162,8 @@ module.exports = async (pg) => {
     check(arrow.onB && arrow.k > 2 && arrow.dir > 0.95, `${tag}: an arrow flies across the edge, turned with it ${JSON.stringify(arrow)}`);
 
     // a route planned across the edge is straight; a villager walks to a target across the edge
-    const walk = await pg.evaluate(async ([y]) => {
-      const P = BF.planet, at = window.__at, cc = window.__cc, kOf = window.__kOf, onB = window.__onB, h = window.__h;
+    const walk = await lib.sim(pg, async ([y]) => {
+      const P = BF.planet, at = globalThis.__at, cc = globalThis.__cc, kOf = globalThis.__kOf, onB = globalThis.__onB, h = globalThis.__h;
       const s0 = at(-5, 3), g0 = at(5, 3);
       const route = BF.mobs.findPath(s0.x, y, s0.z, { x: g0.x, z: g0.z, at: (x, yy, z) => x === g0.x && z === g0.z });
       const straight = !!route && route.length === 10 && route.every(c => (h[0] ? c[2] === s0.z : c[0] === s0.x));
@@ -179,6 +185,7 @@ module.exports = async (pg) => {
     check(walk.got && walk.onB, `${tag}: a villager walks to a target across the edge ${JSON.stringify(walk)}`);
   }
 
+  await lib.alone(pg, false);
   const errs = await pg.evaluate(() => window.__errs);
   check(!errs.length, "no page errors " + JSON.stringify(errs.slice(0, 3)));
   console.log(bad ? "FAIL planet-edges-mobs" : "PASS planet-edges-mobs");

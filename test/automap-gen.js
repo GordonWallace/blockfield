@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Auto map generator checks (no screenshots): synchronous fill time, every pixel known, pixels from the world's own generator (the
 // planet), rivers only on maps up to 16 blocks per pixel, and the widest allowed map (one face of the planet; wider requests are clamped).
 // node test/run.js /tmp/ag test/automap-gen.js

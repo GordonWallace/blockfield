@@ -28,6 +28,19 @@ exports.install = pg => pg.addInitScript({ path: require('path').join(__dirname,
 exports.host = () => { const h = process.env.BF_HOST || 'page'; if (!['page', 'worker', 'server'].includes(h)) throw new Error('BF_HOST must be page, worker or server, not ' + h); return h; };
 exports.q = () => 'sim=' + exports.host();
 exports.sim = (pg, fn, arg) => pg.evaluate(([src, a]) => BF.simHost.eval(src, a), [String(fn), arg === undefined ? null : arg]);   // (= BFT.sim; a page without test/bft.js too)
+// alone(pg, on): the page stops (on) or starts again (off) sending its player's body and speed to the simulation, for a test that drives
+// the player where the simulation is (its own world, a boat ride) and must not have the page's body put back every frame
+exports.alone = (pg, on) => pg.evaluate(on => {
+  const H = BF.simHost;
+  if (on && !H.heldFrame) { H.heldFrame = H.frame; H.frame = () => {}; } else if (!on && H.heldFrame) { H.frame = H.heldFrame; delete H.heldFrame; }
+}, !!on);
+// give(pg, names, sel): the player's inventory emptied and filled with one of each item name, where the simulation is; the page selects
+// hotbar slot sel (the selected slot is the page's) and waits until its hotbar shows them
+exports.give = async (pg, names, sel = 0) => {
+  await exports.sim(pg, names => { const inv = BF.inventory; inv.clear(); for (const n of names) inv.add(BF.I[n], 1); BF.proto.flush(); }, names);
+  await pg.evaluate(sel => BF.inventory.select(sel), sel);
+  await pg.waitForFunction(n => BF.inventory.slots.filter(Boolean).length === n, names.length, { timeout: 20000 });
+};
 // serve(opts): debug/server.js on free ports, for a test served over http: {url (the game's index.html), debugUrl, game, debug, srv,
 // stop()}. The world server runs (with --test, so BFT.sim works there, and saves in a temp folder) unless opts.world is false;
 // opts.args adds arguments (e.g. ['--alerts', file]).
@@ -110,6 +123,7 @@ exports.simBFT = pg => exports.sim(pg, src => { new Function('window', src)(glob
 // copy of the world and its player body must be the new world's too.
 exports.newWorld = async (pg, seed, opts) => {
   await pg.evaluate(async ([s, o]) => {
+    if (BF.prepareWorld) await BF.prepareWorld(s);   // (a planet's rivers first, as the title screen's world starts)
     BF.newWorld(s, o);
     if (!BF.simHost.worker) return;
     await BF.simHost.demo(s, o);

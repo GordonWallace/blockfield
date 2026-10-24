@@ -3,18 +3,22 @@
 // stable (placed the way a builder finishes one) and a stable hand, wild horses come by, and the simulation is stepped by hand through a
 // few game days (nights skipped). Checks the stable gets stocked, the paddock never holds more than 4, horses breed, the player can buy and
 // sell a horse, and that the stable hand never makes hay, wheat, leather, string, saddles or leads from nothing (an inventory ledger).
-// Prints PASS / FAIL lines; the last line is "STABLES OK" or "FAILED stables: n check(s)".
+// Prints PASS / FAIL lines; the last line is "STABLES OK" or "FAILED stables: n check(s)". [--host page|worker|server]: everything runs where
+// the simulation is (spec r15-43), with the page's body held out of it (the soak moves the player there).
+// @ci integration hosts=worker,server
+const lib = require('./lib');
 module.exports = async (pg) => {
   const DAYS = +(process.env.STABLE_DAYS || 3);
-  await pg.evaluate(() => {
-    window.__S = { lines: [], fails: 0 };
-    window.__ok = (name, cond, extra) => { const S = window.__S; S.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : "")); if (!cond) S.fails++; };
+  await lib.alone(pg, true);
+  await lib.sim(pg, () => {
+    globalThis.__S = { lines: [], fails: 0 };
+    globalThis.__ok = (name, cond, extra) => { const S = globalThis.__S; S.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : "")); if (!cond) S.fails++; };
   });
-  const flush = async () => { const l = await pg.evaluate(() => window.__S.lines.splice(0)); for (const x of l) console.log(x); };
+  const flush = async () => { const l = await lib.sim(pg, () => globalThis.__S.lines.splice(0)); for (const x of l) console.log(x); };
 
   // ---------------------------------------------------------------- unit checks
-  await pg.evaluate(() => {
-    const ok = window.__ok, I = BF.I;
+  await lib.sim(pg, () => {
+    const ok = globalThis.__ok, I = BF.I;
     BF.state.paused = true;
     const id = BF.blocks.findIndex(b => b && b.name === "tack_rack");
     ok("tack_rack block exists", id > 0, id);
@@ -30,7 +34,7 @@ module.exports = async (pg) => {
       const cells = r.pattern ? r.pattern.join("").split("").filter(c => c !== " ").map(c => r.key[c]) : (r.ings || r.inputs || []);
       for (const c of cells) { const ids = [].concat(c), k = ids.length > 1 ? "planks" : BF.items[ids[0]] ? BF.items[ids[0]].name : String(c); counts[k] = (counts[k] || 0) + 1; }
     }
-    window.__S.recipe = { n: recs.length, sample: r ? Object.keys(r) : null, counts };
+    globalThis.__S.recipe = { n: recs.length, sample: r ? Object.keys(r) : null, counts };
     const planks = counts ? Object.keys(counts).filter(k => /planks/.test(k)).reduce((a, k) => a + counts[k], 0) : 0;
     ok("tack rack recipe: 4 planks + 1 leather + 1 iron ingot", !!counts && planks === 4 && counts.leather === 1 && counts.iron_ingot === 1, counts);
     // the stable blueprint
@@ -69,18 +73,25 @@ module.exports = async (pg) => {
     ok("stable hand trade table", !!BF.trades.TRADES.stable_hand);
   });
   await flush();
-  const rs = await pg.evaluate(() => window.__S.recipe); console.log("recipe", JSON.stringify(rs));
+  const rs = await lib.sim(pg, () => globalThis.__S.recipe); console.log("recipe", JSON.stringify(rs));
 
   // ---------------------------------------------------------------- the soak village
-  const ready = await pg.evaluate(async () => {
-    const ok = window.__ok, I = BF.I, S = window.__S;
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+  const ready = await lib.sim(pg, async () => {
+    const ok = globalThis.__ok, I = BF.I, S = globalThis.__S;
+    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.advance(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
-    window.__step = step;
+    globalThis.__step = step;
     BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns or herds: the test brings the wild horses
     // the nearest village on horse land with room for 8 villagers (generator 3 used the plains village of 12 at 26, 39)
-    const V = BFT.village((v, k) => BF.horses.isHorseBiome(v.x, v.z) && (k.house || 0) >= 4, 6000);
+    const V = (() => {   // (test/bft.js BFT.village, where the simulation is)
+      const s = BF.spawnPoint || BF.player.position, from = { x: Math.floor(s.x), z: Math.floor(s.z) }, d = v => BF.planet.distance(from, v);
+      for (const v of BF.worldgen.villagesNear(from.x, from.z, 6000).sort((a, b) => d(a) - d(b))) {
+        const k = {}; for (const b of v.buildings || []) k[b.type] = (k[b.type] || 0) + 1;
+        if (BF.horses.isHorseBiome(v.x, v.z) && (k.house || 0) >= 4) return v;
+      }
+      return null;
+    })();
     ok("found a horse-land village near the spawn", !!V, V && [V.x, V.z]);
     if (!V) return false;
     ok("village is on horse land", BF.horses.isHorseBiome(V.x, V.z));
@@ -146,18 +157,18 @@ module.exports = async (pg) => {
     ok("stable hand carries no tack or feed from nowhere", ["hay_bale", "wheat_item", "leather", "string", "saddle", "lead"].every(n => BF.trades.inv.count(hand.inv, I[n]) === 0),
       ["hay_bale", "wheat_item", "leather", "string", "saddle", "lead"].map(n => BF.trades.inv.count(hand.inv, I[n])));
     BF.trades.inv.add(hand.inv, I.emerald, 30 - BF.trades.inv.count(hand.inv, I.emerald));   // emeralds to shop with (restock adds 3 a day too)
-    window.__hand = hand;
-    window.__R = R;
+    globalThis.__hand = hand;
+    globalThis.__R = R;
     return true;
   });
   await flush();
   if (!ready) { console.log("FAILED stables: setup"); return; }
 
   // ---------------------------------------------------------------- the ledger
-  await pg.evaluate(() => {
-    const L = window.__L = { violations: [], dealIn: {}, dealOut: {}, crafted: { saddle: 0, lead: 0 }, craftUsed: {}, fedOut: {}, refund: {}, fed: 0, bred: 0, maxPen: 0, maxPenAt: null,
+  await lib.sim(pg, () => {
+    const L = globalThis.__L = { violations: [], dealIn: {}, dealOut: {}, crafted: { saddle: 0, lead: 0 }, craftUsed: {}, fedOut: {}, refund: {}, fed: 0, bred: 0, maxPen: 0, maxPenAt: null,
       foals: [], bredOwners: [], penSamples: 0, outside: 0 };
-    const hand = window.__hand, T = BF.trades.inv, I = BF.I;
+    const hand = globalThis.__hand, T = BF.trades.inv, I = BF.I;
     const TRACK = new Map(["hay_bale", "wheat_item", "leather", "string", "saddle", "lead", "iron_ingot"].map(n => [I[n], n]));
     // which js/stables.js function the call came from (builder.js has a doDeal of its own)
     const ctx = () => { const s = (new Error().stack || "").split("\n").filter(l => /stables\.js/.test(l) && !/test\//.test(l)).join("\n");
@@ -171,7 +182,7 @@ module.exports = async (pg) => {
           if (c === "deal") L.dealIn[name] = (L.dealIn[name] || 0) + got;
           else if (c === "craft") L.crafted[name] = (L.crafted[name] || 0) + got;
           else if (c === "task") L.refund[name] = (L.refund[name] || 0) + got;
-          else if (c === "player" && window.__allowPlayer) {}
+          else if (c === "player" && globalThis.__allowPlayer) {}
           else L.violations.push({ add: name, n: got, ctx: c, stack: (new Error().stack || "").split("\n").slice(2, 6).join(" | ") });
         }
       }
@@ -193,15 +204,15 @@ module.exports = async (pg) => {
   });
 
   // ---------------------------------------------------------------- day 1 morning: no wild horses yet; then a herd comes by
-  const res1 = await pg.evaluate(async () => {
-    const ok = window.__ok, hand = window.__hand, R = window.__R, step = window.__step;
+  const res1 = await lib.sim(pg, async () => {
+    const ok = globalThis.__ok, hand = globalThis.__hand, R = globalThis.__R, step = globalThis.__step;
     const st = BF.stables.stableOf(R);
     BF.sky.setTime(0.06);
     for (let i = 0; i < 20 * 180 && !BF.stables.LOG.some(e => e.kind === "nowild"); i++) step(0.05);   // it buys feed, looks, finds no horse
     const nowild = BF.stables.LOG.some(e => e.kind === "nowild");
     ok("with no wild horse in range it waits for the next day", nowild && hand.stb && hand.stb.waitWild > BF.sky.day + BF.sky.time);
     // a herd of 3 wild adults ~40 blocks from the rack, on the ground
-    const L = window.__L, sp = [];
+    const L = globalThis.__L, sp = [];
     // the same spot every run: the first direction whose 3 spots are dry grass on horse land, near the rack's height (a random one
     // could land in water or up a cliff, and the stable hand would never reach the herd)
     const spot = (a, k) => [Math.floor(st.rack.x + Math.cos(a) * 38 + k * 2), Math.floor(st.rack.z + Math.sin(a) * 38 + k)];
@@ -223,8 +234,8 @@ module.exports = async (pg) => {
 
   // ---------------------------------------------------------------- run the days
   for (let d = 0; d < DAYS; d++) {
-    const r = await pg.evaluate(async (d) => {
-      const hand = window.__hand, R = window.__R, step = window.__step, L = window.__L;
+    const r = await lib.sim(pg, async (d) => {
+      const hand = globalThis.__hand, R = globalThis.__R, step = globalThis.__step, L = globalThis.__L;
       const st = BF.stables.stableOf(R), owner = st.owner;
       const startDay = BF.sky.day;
       if (d > 0) { BF.sky.day = startDay + 1; BF.sky.setTime(0.035); }
@@ -249,11 +260,11 @@ module.exports = async (pg) => {
   }
 
   // ---------------------------------------------------------------- results
-  await pg.evaluate(() => {
-    const ok = window.__ok, L = window.__L, R = window.__R, hand = window.__hand;
+  await lib.sim(pg, () => {
+    const ok = globalThis.__ok, L = globalThis.__L, R = globalThis.__R, hand = globalThis.__hand;
     const st = BF.stables.stableOf(R), mine = BF.horses.horsesOf(st.owner);
     const kinds = {}; for (const e of BF.stables.LOG) kinds[e.kind] = (kinds[e.kind] || 0) + 1;
-    window.__S.kinds = kinds;
+    globalThis.__S.kinds = kinds;
     ok("stable hand caught horses", (kinds.tamed || 0) >= 1, kinds.tamed);
     ok("caught horses were penned", (kinds.penned || 0) >= 1, kinds.penned);
     ok("the stable got stocked (2 or more)", mine.length >= 2, mine.length);
@@ -271,7 +282,7 @@ module.exports = async (pg) => {
     ok("every mouthful of feed went into a horse", fedOut - back === L.fed, { out: L.fedOut, back: L.refund, fed: L.fed });
     const logs = (BF.vlog.entries ? BF.vlog.entries(R.key) : []) || [];
     const horseLines = logs.filter(e => e[1] === "horse").map(e => e[2]);
-    window.__S.horseLines = horseLines.slice(0, 6);
+    globalThis.__S.horseLines = horseLines.slice(0, 6);
     ok("village log: a caught horse brought home", horseLines.some(t => / brought a wild horse home /.test(t)));
     ok("village log: horse bred, with stats", horseLines.some(t => / bred two horses .*speed .* jump .* health /.test(t)));
     ok("status text while working", typeof BF.stables.statusText(hand) === "string");
@@ -279,18 +290,18 @@ module.exports = async (pg) => {
     ok("debug holdings list the paddock horses", hold && hold.paddock && hold.horses.length === mine.length, hold && hold.horses.length);
   });
   await flush();
-  console.log("log kinds", JSON.stringify(await pg.evaluate(() => window.__S.kinds)));
-  console.log("horse lines", JSON.stringify(await pg.evaluate(() => window.__S.horseLines)));
+  console.log("log kinds", JSON.stringify(await lib.sim(pg, () => globalThis.__S.kinds)));
+  console.log("horse lines", JSON.stringify(await lib.sim(pg, () => globalThis.__S.horseLines)));
 
   // ---------------------------------------------------------------- trading horses with the player
-  await pg.evaluate(() => {
-    const ok = window.__ok, R = window.__R, hand = window.__hand, I = BF.I, H = BF.horses, P = BF.player, T = BF.trades;
-    window.__allowPlayer = true;
+  await lib.sim(pg, () => {
+    const ok = globalThis.__ok, R = globalThis.__R, hand = globalThis.__hand, I = BF.I, H = BF.horses, P = BF.player, T = BF.trades;
+    globalThis.__allowPlayer = true;
     const st = BF.stables.stableOf(R);
     // fill the paddock to 3 grown adults so one is for sale
     let mine = H.horsesOf(st.owner);
     for (const r of mine) if (r.growAt != null) r.growAt = BF.sky.day + BF.sky.time - 0.01;
-    window.__step(0.05);
+    globalThis.__step(0.05);
     while (H.horsesOf(st.owner).length < 3) { const h = H.spawn(st.box.x0 + 2.5, st.y, st.box.z0 + 2.5, { tamed: true, owner: st.owner }); H.setPen(h, st.box); }
     mine = H.horsesOf(st.owner);
     hand.stb.task = null;
@@ -339,6 +350,7 @@ module.exports = async (pg) => {
       c("saddle") === 1 && c("lead") === 2 && c("leather") === 0 && c("iron_ingot") === 0 && c("string") === 0, [m1, m2, m3, c("saddle"), c("lead")]);
   });
   await flush();
-  const f = await pg.evaluate(() => window.__S.fails);
+  const f = await lib.sim(pg, () => globalThis.__S.fails);
+  await lib.alone(pg, false);
   console.log(f ? "FAILED stables: " + f + " check(s)" : "STABLES OK");
 };

@@ -70,7 +70,7 @@ Every message is a plain object `{t: type, ...}`. `BF.proto.encode(msg)` turns i
 | `save` | `sid` | saves the world now (js/save.js), answers `{ok}` (`{ok: false, why}` when the save failed) |
 | `player` | the player's body as `BF.player.serialize()` gives it: `x`, `y`, `z`, `yaw`, `pitch`, `health`, `hunger`, `saturation`, `exhaustion`, `air`, `gameMode`, `flying`, `dead`; r15-44: `sel` (the hotbar slot, which is the page's); r15-44 part 2: `ride` {id, x, y, z, yaw, vel [x, y, z], rowing? (a boat's paddles), fall? (half-hearts a horse took landing)}, the boat or horse the client steers, which the simulation puts there | replica: when it changed, at most once a frame. The simulation moves its player there; it is the baseline `self` compares against |
 | `world` | `wid`, `op` (`demo`, `create`, `load`), `args` ({seed, opts} / {seed, opts, meta} / {id}, and `rivers`: the page's solved river network, js/worldgen.js `riverState()`) | starts a world with the host's handler (the worker's), answers `{ok, meta?}` when it is ready |
-| `meta` | `id`, `name` and / or `monsters` | the open world was renamed or its monster options changed on the title screen |
+| `meta` | `id`, `name` and / or `monsters` | the open world was renamed or its monster options changed on the title screen, or its monster options in the pause menu (`id` null for a world that isn't saved) |
 | `clientLog` | `list` (game log entries) | the client's own log entries (its errors), into the simulation's log, which is the one saved |
 
 ### Inventory entries (r15-44)

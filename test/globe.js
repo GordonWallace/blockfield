@@ -1,4 +1,4 @@
-// @ci integration suite=world soak timeout=900
+// @ci integration suite=world soak timeout=900 hosts=worker,server
 // The whole planet at planet scale (spec r14-06): the globe's tiles, sampled by the distant-terrain workers, so the page is served over
 // http (workers can't start from a file:// page). Checks:
 //  - every tile of all six faces builds, sampled by the workers (time logged);
@@ -8,7 +8,8 @@
 //  - dragging the planet round from orbit, across face edges, and flying across a face edge 30,000 up change the picture smoothly;
 //  - no page errors.
 // Over 75 s in CI (the globe samples 2.7 million columns on 2 cores), so it is a soak test.
-// node test/run.js /tmp/globe test/globe.js
+// node test/run.js /tmp/globe test/globe.js [--host page|worker|server] (drawing: the page's; served by its own http server, which has no
+// world server: on host server the simulation runs in a worker)
 const http = require("http"), fs = require("fs"), path = require("path");
 const root = path.resolve(__dirname, "..");
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".json": "application/json", ".txt": "text/plain" };
@@ -25,7 +26,10 @@ module.exports = async (pg, out) => {
   try {
     await pg.goto(`http://127.0.0.1:${server.address().port}/index.html?${require('./lib').q()}#seed1337gen4`);
     await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow
-    await require("./lib").ready(pg);   // the planet's rivers worked out and the world started
+    // the world started (with the simulation off the page, after its host started), the planet's rivers worked out
+    await pg.waitForFunction(() => window.BF && BF.state && BF.state.seed === 1337 && !BF.preparing, null, { timeout: 300000, polling: 250 });
+    await require("./lib").simReady(pg);
+    await require("./lib").ready(pg);
     await pg.waitForTimeout(2000);
     await pg.evaluate(() => {
       window.__errs = []; addEventListener("error", (e) => window.__errs.push(e.message));

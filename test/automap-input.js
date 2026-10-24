@@ -1,9 +1,12 @@
 // Auto map through the real input path (keyboard + mouse events, no helpers): creative search, then right click with the item in hand.
-// node test/run.js /tmp/ai test/automap-input.js
+// node test/run.js /tmp/ai test/automap-input.js [--host page|worker|server]
+// @ci integration hosts=worker,server
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(500);
-  await pg.evaluate(() => { BF.player.gameMode = "creative"; BF.inventory.clear(); });
+  await pg.evaluate(() => { BF.player.gameMode = "creative"; });
+  await lib.give(pg, []);   // (an empty inventory, where the simulation is: spec r15-43)
   await pg.mouse.click(640, 380);                       // captures the mouse (or falls back to drag mode when pointer lock is unavailable)
   await pg.waitForTimeout(300);
   await pg.keyboard.press('e');                         // creative menu
@@ -21,6 +24,7 @@ module.exports = async (pg, out) => {
   const slot = pg.locator('.bf-pal .bf-slot').first();
   console.log("slots in palette:", await pg.locator('.bf-pal .bf-slot').count());
   await slot.click();
+  await pg.waitForFunction(() => BF.inventory.slots.some(Boolean), null, { timeout: 10000 }).catch(() => {});   // (a player request)
   console.log("hand after click:", await pg.evaluate(() => JSON.stringify(BF.inventory.slots.filter(Boolean).map(s => [BF.items[s.id].name, s.count]))));
   await pg.keyboard.press('Escape');
   await pg.waitForTimeout(300);
@@ -35,13 +39,13 @@ module.exports = async (pg, out) => {
   await pg.screenshot({ path: out + '-rightclick.png' });
   await pg.keyboard.type('2000');
   await pg.keyboard.press('Enter');
-  await pg.waitForTimeout(500);
+  await pg.waitForFunction(() => { const s = BF.inventory.selected(); return s && BF.items[s.id].auto; }, null, { timeout: 10000 }).catch(() => {});   // (a player request)
   console.log("after Enter:", await pg.evaluate(() => { const s = BF.inventory.selected(); return [s && BF.items[s.id].name, BF.mapview.isOpen()]; }));
   // give through the real chat command line, then right click again
   await pg.keyboard.press('t');
   await pg.keyboard.type('/give auto_map');
   await pg.keyboard.press('Enter');
-  await pg.waitForTimeout(300);
+  await pg.waitForFunction(() => BF.inventory.slots.some(s => s && BF.items[s.id].name === 'auto_map'), null, { timeout: 10000 }).catch(() => {});   // (the command runs in the simulation)
   console.log("inventory:", await pg.evaluate(() => JSON.stringify(BF.inventory.slots.map(s => s && [BF.items[s.id].name, s.count]).filter(Boolean))));
   await pg.evaluate(() => { const i = BF.inventory.slots.findIndex(s => s && BF.items[s.id].name === 'auto_map'); BF.inventory.select(i); });
   await pg.mouse.click(640, 380, { button: 'right' });

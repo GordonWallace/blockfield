@@ -1,9 +1,12 @@
-// @ci integration
+// @ci integration hosts=worker,server
 // Horses (js/horses.js): recipes, vanilla stat ranges and prices, foal inheritance, taming by riding (food helps), saddles, riding speed
 // and jumping, fall damage going to the horse, leads and fence posts, and saving tamed horses (they never despawn).
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/horses test/horses.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/horses test/horses.js [--host page|worker|server]
+// The checks drive the simulation's own modules: they run where the simulation is (spec r15-43), with the page's body held out of it.
+const lib = require('./lib');
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  await lib.alone(pg, true);
+  const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => { const l = (cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""); R.lines.push(l); console.warn(l); };
     const tick = () => new Promise(r => setTimeout(r, 10));
     const load = async (x, z) => {
@@ -168,6 +171,7 @@ module.exports = async (pg, out) => {
     H.reset();
     return R;
   });
+  await lib.alone(pg, false);
   for (const l of res.lines) console.log(l);
   const fails = res.lines.filter(l => l.startsWith("FAIL")).length;
   console.log(fails ? "horses FAIL " + fails : "horses PASS");
