@@ -151,7 +151,7 @@ const css = `
 .bfp-card button.bfp-copy{display:inline-block;width:auto;margin:0 0 0 3px;padding:0 4px;font:12px/16px var(--mono);vertical-align:baseline;background:rgba(0,0,0,.35);border:1px solid var(--panel-edge);border-radius:3px;color:var(--muted)}
 .bfp-card button.bfp-copy:hover,.bfp-card button.bfp-copy:focus-visible{background:#4f6a3f;color:var(--ink)}
 .bfp-card button.bfp-copy.done{color:var(--accent)}
-.bfp-wbtns{display:flex;gap:6px;flex-shrink:0}
+.bfp-wbtns{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex-shrink:0;max-width:240px}
 .bfp-card .bfp-wbtns button{width:auto;margin:0;padding:7px 9px;font-size:11px}
 .bfp-card .bfp-wbtns button.danger{background:var(--danger);color:#fff}
 .bfp-world input{width:100%;box-sizing:border-box;font:13px var(--mono);background:rgba(0,0,0,.4);color:var(--ink);border:1px solid var(--accent);border-radius:3px;padding:6px 8px}
@@ -177,7 +177,7 @@ const css = `
 .bfp-ctl{margin-top:10px;text-align:left}
 .bfp-ctl summary{cursor:pointer;font:12px var(--mono);color:var(--muted)}
 .bfp-saved{font:11px var(--mono);color:var(--muted);margin-top:4px;min-height:1em}
-@media (max-width:520px){.bfp-world{flex-wrap:wrap}.bfp-wbtns{width:100%}.bfp-card .bfp-wbtns button{flex:1}}
+@media (max-width:520px){.bfp-world{flex-wrap:wrap}.bfp-wbtns{width:100%;max-width:none}.bfp-card .bfp-wbtns button{flex:1}}
 .bfp-note{font:12px var(--mono);color:var(--muted);margin-top:8px;min-height:1em}
 .bfp-touch{position:fixed;inset:0;pointer-events:none!important;display:none}
 .bfp-touch.on{display:block}
@@ -440,7 +440,7 @@ function showStartView(v) {
     setTimeout(() => { try { createForm.elements.name.select(); } catch (_) {} }, 0);
   }
 }
-let listN = 0;
+let listN = 0, listP = null;
 function refreshWorlds() {
   probeStorage().then(setSaveNote);
   const server = !!(BF.simHost && BF.simHost.server);
@@ -452,7 +452,9 @@ function refreshWorlds() {
   if (server && hasSave() && BF.save.browserList) BF.save.browserList().then(l => { const n = l.filter(w => BF.save.playable(w)).length; copyBtn.hidden = !n; copyBtn.textContent = "Copy browser saves to the server (" + n + ")"; });
   if (!hasSave()) { worldsCache = []; renderWorlds({}); return Promise.resolve(); }
   const n = ++listN;   // (only the newest list is shown: the browser's, asked for before the world server answered, can come back after it)
-  return Promise.resolve(BF.save.list()).catch(() => []).then(list => { if (n === listN) { worldsCache = list || []; renderWorlds({}); } });
+  const p = Promise.resolve(BF.save.list()).catch(() => []).then(list => { if (n === listN) { worldsCache = list || []; renderWorlds({}); } });
+  listP = p;
+  return p.then(() => (n === listN ? undefined : listP));   // (a list overtaken by a newer one resolves once that one is shown)
 }
 function renderWorlds(st) {
   if (!worldsCache.length) {

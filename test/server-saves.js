@@ -204,8 +204,7 @@ const loadPaused = (pg, id) => pg.evaluate(async id => { BF.player.start(); BF.s
     const m3 = await pg3.evaluate(() => ({ mode: BF.simHost.mode, where: document.querySelector('.bfp-where').textContent }));
     check(m3.mode === 'in page' && m3.where === 'Singleplayer', `a page with no world server keeps its worlds in the browser (${m3.mode})`);
     await pg3.setInputFiles('.bfp-importfile', file);
-    const r3 = await until(async () => { const r = await rows(pg3); const t = await note(pg3); return /Imported/.test(t) ? r : null; }, 90000);
-    const bw = r3 && r3.find(r => r.id !== 'wbrowser1' && /Saves test/.test(r.text));
+    const bw = await until(async () => (await rows(pg3)).find(r => r.id !== 'wbrowser1' && /Saves test/.test(r.text)), 90000);
     check(!!bw, 'in browser-only mode Import adds the world to IndexedDB');
     const [dl3] = await Promise.all([pg3.waitForEvent('download', { timeout: 30000 }), pg3.evaluate(i => document.querySelector(`.bfp-world[data-id="${i}"] [data-act="export"]`).click(), bw.id)]);
     const file3 = path.join(saves, '.export3.bfworld');
