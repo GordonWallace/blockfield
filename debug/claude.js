@@ -16,6 +16,8 @@
 // the design into a builder blueprint (js/housedesign.js).
 // Guards: loopback callers only (also under --lan, unless BF_CLAUDE_LAN=1), bounded request size and history, and a per-minute
 // and per-day request cap for this process (BF_CLAUDE_PER_MIN, BF_CLAUDE_PER_DAY). Set a spend limit on the key in the Console too.
+// Every API call is also kept here, in memory only (the last KEEP_CALLS), for the debug screen's API calls panel: the system
+// prompt, request settings, every message sent and every reply, round by round. The key is never part of a record.
 // Needs the official SDK: `npm install` in debug/ (debug/package.json). The rest of the server has no dependencies and runs without it.
 "use strict";
 const fs = require("fs"), path = require("path"), os = require("os");
@@ -51,6 +53,38 @@ function allow() {
   if (today >= PER_DAY) return "Daily Claude message cap reached (BF_CLAUDE_PER_DAY)";
   recent.push(now); today++;
   return null;
+}
+
+// ---------------------------------------------------------------- API call records (debug screen)
+const KEEP_CALLS = 60, calls = [], watchers = new Set();
+let callId = 0, spent = 0;   // spent: dollars for every call this server run, kept or not
+// The API reports tokens, not dollars, so the cost is worked out here from MODEL's price list (dollars per million tokens).
+// Cache reads cost a tenth of input and 5-minute cache writes a quarter more; this code doesn't cache, so those stay 0.
+const PRICE = { input: 0.10, output: 0.50 };
+const cost = u => ((u.input_tokens || 0) * PRICE.input + (u.cache_read_input_tokens || 0) * PRICE.input * 0.1
+  + (u.cache_creation_input_tokens || 0) * PRICE.input * 1.25 + (u.output_tokens || 0) * PRICE.output) / 1e6;
+const copy = o => JSON.parse(JSON.stringify(o));
+const tell = rec => { for (const f of watchers) { try { f(rec); } catch (e) { /* a watcher's problem, not the call's */ } } };
+// One record per player action (a chat message, a design request), however many API rounds it takes.
+function startCall(kind, params, system, messages) {
+  const rec = { id: ++callId, kind, t: Date.now(), model: MODEL, price: PRICE, cost: 0, spent, params, system, messages: copy(messages), earlier: messages.length - 1, rounds: [], status: "running", ms: 0 };   // earlier: chat turns the page sent as history
+  calls.push(rec);
+  if (calls.length > KEEP_CALLS) calls.shift();
+  tell(rec);
+  return rec;
+}
+// After each API reply: the reply, then whatever goes back to the model next (tool results, a builder's list of problems).
+function roundDone(rec, r, ms, next) {
+  rec.messages.push({ role: "assistant", content: copy(r.content), round: rec.rounds.length });
+  const c = cost(r.usage);
+  rec.rounds.push({ stop: r.stop_reason, usage: copy(r.usage), cost: c, ms, id: r.id });
+  rec.cost = (rec.cost || 0) + c; spent += c; rec.spent = spent;
+  if (next) rec.messages.push(copy(next));
+  tell(rec);
+}
+function endCall(rec, status, extra) {
+  Object.assign(rec, { status, ms: Date.now() - rec.t }, extra || {});
+  tell(rec);
 }
 
 const clip = (s, n) => String(s == null ? "" : s).slice(0, n);
@@ -98,16 +132,18 @@ async function chat(body) {
   if (!messages) return [400, { error: "bad conversation" }];
   const limited = allow();
   if (limited) return [429, { error: limited }];
+  const system = systemPrompt(body.villager), used = [], convo = messages.slice();
+  const rec = startCall("chat", { max_tokens: MAX_TOKENS, effort: "low", tools: TOOLS, tool_choice: "auto" }, system, messages);
   try {
-    const system = systemPrompt(body.villager), used = [], convo = messages.slice();
     let r = null, input = 0, output = 0;
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      const t0 = Date.now();
       r = await getClient().messages.create({
         model: MODEL, max_tokens: MAX_TOKENS, output_config: { effort: "low" },
         system, tools: TOOLS, tool_choice: { type: "auto" }, messages: convo,
       });
       input += r.usage.input_tokens; output += r.usage.output_tokens;
-      if (r.stop_reason !== "tool_use") break;
+      if (r.stop_reason !== "tool_use") { roundDone(rec, r, Date.now() - t0); break; }
       // every block goes back as it came (thinking included), then one result per tool call
       convo.push({ role: "assistant", content: r.content });
       const results = r.content.filter(b => b.type === "tool_use").map(b => {
@@ -117,10 +153,12 @@ async function chat(body) {
         return { type: "tool_result", tool_use_id: b.id, content: now ? "You are carrying: " + now + "." : "Your bag is empty." };
       });
       convo.push({ role: "user", content: results });
+      roundDone(rec, r, Date.now() - t0, convo[convo.length - 1]);
     }
     const reply = r.stop_reason === "refusal" ? "" : r.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
+    endCall(rec, r.stop_reason === "refusal" ? "refused" : "ok", { usage: { input, output } });
     return [200, { reply, stop: r.stop_reason, tools: used, usage: { input, output } }];
-  } catch (e) { return apiError(e); }
+  } catch (e) { const out = apiError(e); endCall(rec, "error", { error: out[1].error }); return out; }
 }
 
 function apiError(e) {
@@ -230,25 +268,30 @@ async function blueprint(body) {
   const convo = [{ role: "user", content: prev ? "Here is the blueprint you drew earlier:\n" + prev + "\n\nThe traveller asks for these changes: " + request
     : "The traveller wants: " + request }];
   let input = 0, output = 0, design = null, problems = [], attempts = 0;
+  const schema = designSchema(names);
+  const rec = startCall("design", { max_tokens: DESIGN_TOKENS, effort: DESIGN_EFFORT, format: { type: "json_schema", schema } }, system, convo);
   try {
     for (; attempts < DESIGN_TRIES; ) {
       attempts++;
+      const t0 = Date.now();
       const r = await getClient().messages.create({
-        model: MODEL, max_tokens: DESIGN_TOKENS, output_config: { effort: DESIGN_EFFORT, format: { type: "json_schema", schema: designSchema(names) } },
+        model: MODEL, max_tokens: DESIGN_TOKENS, output_config: { effort: DESIGN_EFFORT, format: { type: "json_schema", schema } },
         system, messages: convo,
       });
       input += r.usage.input_tokens; output += r.usage.output_tokens;
-      if (r.stop_reason === "refusal") return [200, { design: null, refused: true, attempts, usage: { input, output } }];
+      if (r.stop_reason === "refusal") { roundDone(rec, r, Date.now() - t0); endCall(rec, "refused", { usage: { input, output } }); return [200, { design: null, refused: true, attempts, usage: { input, output } }]; }
       const text = r.content.filter(b => b.type === "text").map(b => b.text).join("");
       try { design = JSON.parse(text); } catch (e) { design = null; }
       problems = r.stop_reason === "max_tokens" ? ["the blueprint was cut off; draw a smaller house"] : validateDesign(design);
-      if (!problems.length) break;
+      if (!problems.length || attempts >= DESIGN_TRIES) { roundDone(rec, r, Date.now() - t0); if (!problems.length) break; continue; }
       // show it what's wrong and ask for the whole blueprint again (every block of its reply goes back unchanged)
       convo.push({ role: "assistant", content: r.content });
       convo.push({ role: "user", content: "A builder checked that blueprint and found these problems:\n- " + problems.join("\n- ") + "\nSend the whole corrected blueprint." });
+      roundDone(rec, r, Date.now() - t0, convo[convo.length - 1]);
     }
+    endCall(rec, problems.length ? "problems" : "ok", { usage: { input, output }, problems });
     return [200, { design, attempts, problems, usage: { input, output } }];
-  } catch (e) { return apiError(e); }
+  } catch (e) { const out = apiError(e); endCall(rec, "error", { error: out[1].error }); return out; }
 }
 
 // Returns true when it took the request.
@@ -281,4 +324,8 @@ function handle(req, res, pathname) {
 
 function describe() { return KEY ? (sdkError ? "key found, but " + sdkError : "on (" + MODEL + ")") : "off (no API key; see debug/claude.js)"; }
 
-module.exports = { handle, describe, cleanMessages, validateDesign, designSchema, MODEL };
+// The debug screen's view: every kept record, and a callback for each new or updated one.
+const callLog = () => calls;
+const onCall = f => { watchers.add(f); return () => watchers.delete(f); };
+
+module.exports = { handle, describe, callLog, onCall, cleanMessages, validateDesign, designSchema, MODEL };

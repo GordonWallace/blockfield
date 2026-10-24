@@ -241,10 +241,12 @@ function serveDebug(req, res) {
     send(res, "cache", JSON.stringify(cached()));
     send(res, "alerts", JSON.stringify({ av, alerts }));
     if (latest) send(res, "snap", JSON.stringify({ ...latest, age: Date.now() - lastPush }));   // age: an old one isn't shown as live
+    send(res, "claudecalls", JSON.stringify(claude.callLog()));   // the Claude villager's API calls so far (the API calls panel)
     clients.add(res);
     req.on("close", () => clients.delete(res));
     return;
   }
+  if (url.pathname === "/claude-calls") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(claude.callLog())); return; }
   if (url.pathname === "/glog") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(glog)); return; }   // the game log as the server holds it
   if (url.pathname === "/state") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ latest, ...cached() })); return; }
   if (url.pathname === "/" || url.pathname === "/index.html") {
@@ -253,6 +255,8 @@ function serveDebug(req, res) {
   }
   res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
 }
+// each Claude API call, as it starts, after every round and when it ends (the debug screen's API calls panel)
+claude.onCall(rec => broadcast("claudecall", rec));
 // keep proxies and browsers from timing out an idle stream
 setInterval(() => { for (const c of clients) c.write(": ping\n\n"); }, 15000).unref();
 

@@ -178,6 +178,19 @@ const start = async env => {
   await pg.click('.bfcv-page.on .bfcv-row button:nth-child(2)');
   ok('Revise sends the earlier blueprint and shows the new one', await until(() => /chimney/.test(document.querySelector('.bfcv-dname').textContent), null, 20000)
     && /blueprint you drew earlier:\n\{"name":"Stone cottage"/.test(designCalls[2].messages[0].content) && /changes: add a chimney/.test(designCalls[2].messages[0].content));
+  // the 3D view: bigger in the panel, Enlarge takes most of the screen, Escape brings it back; dragging right turns it the other way now
+  const small = await pg.evaluate(() => document.querySelector('.bfcv-view').getBoundingClientRect().height);
+  const yaw0 = await pg.evaluate(() => { const c = document.querySelector('.bfcv-view canvas').getBoundingClientRect(); return [c.x + c.width / 2, c.y + c.height / 2]; });
+  const y0 = await pg.evaluate(() => BF.claudeVillager.preview().yaw);
+  await pg.mouse.move(yaw0[0], yaw0[1]); await pg.mouse.down(); await pg.mouse.move(yaw0[0] + 40, yaw0[1], { steps: 4 }); await pg.mouse.up();
+  ok('dragging right turns the view the new way (yaw goes up)', Math.abs(await pg.evaluate(() => BF.claudeVillager.preview().yaw) - y0 - 0.4) < 0.05);
+  await pg.click('.bfcv-big');
+  const big = await pg.evaluate(() => ({ h: document.querySelector('.bfcv-view').getBoundingClientRect().height, w: document.querySelector('.bfcv-view').getBoundingClientRect().width, vw: innerWidth, vh: innerHeight }));
+  ok('the 3D view is bigger, and Enlarge spreads it across the screen', small >= 260 && big.w > big.vw * 0.8 && big.h > big.vh * 0.7, { small, big });
+  if (process.env.SHOTS) await pg.screenshot({ path: process.env.SHOTS + '/enlarged.png' });
+  await pg.keyboard.press('Escape');
+  const back = await pg.evaluate(() => ({ big: document.querySelector('.bfcv-stage').classList.contains('big'), open: BF.claudeVillager.isOpen() }));
+  ok('Escape shrinks it back and leaves the trade screen open', !back.big && back.open, back);
   await pg.click('.bfcv-dreq');
   await pg.keyboard.press('Escape');
   const closed = await pg.evaluate(() => ({ chat: BF.claudeVillager.isOpen(), trade: BF.inventory.isOpen(), paused: BF.state.paused }));
@@ -187,6 +200,35 @@ const start = async env => {
   await pg.evaluate(() => BF.inventory.close());
   ok('the panel goes when the trade screen does', await until(() => !BF.claudeVillager.isOpen() && !document.querySelector('.bfcv-panel').classList.contains('open'), null, 3000));
   ok('no page errors', !errs.length, errs);
+
+  // ---- the debug screen's API calls panel
+  const calls = await (await fetch(`http://localhost:${DBG}/claude-calls`)).json();
+  const chats = calls.filter(c => c.kind === 'chat'), designs = calls.filter(c => c.kind === 'design');
+  ok('every call is recorded (chats, the failed one, designs), never the key', chats.length >= 4 && designs.length === 2 && chats.some(c => c.status === 'error' && /rejected/.test(c.error))
+    && !JSON.stringify(calls).includes('sk-ant'), calls.map(c => [c.kind, c.status, c.rounds.length]));
+  ok('a call record has the filled system prompt, the settings and the messages', /You are Sage, a villager in Blockfield/.test(chats[0].system) && chats[0].params.effort === 'low'
+    && chats[0].params.tools[0].name === 'check_inventory' && chats[0].messages[0].content === 'What should I do on my first night?' && chats[0].status === 'ok', chats[0]);
+  const ic = chats.find(c => c.rounds.length === 2);
+  ok('the inventory check shows as two rounds: tool call, result, reply', ic && ic.messages.slice(ic.earlier).map(m => m.role + (Array.isArray(m.content) ? ':' + m.content.map(b => b.type).join('+') : '')).join(' ')
+    === 'user assistant:thinking+tool_use user:tool_result assistant:text', ic && ic.messages);
+  ok('a design record: the schema, both drafts and the server\'s check between', designs[0].params.format.type === 'json_schema' && designs[0].rounds.length === 2
+    && /there is no door/.test(designs[0].messages[2].content) && designs[0].status === 'ok', designs[0] && designs[0].messages.map(m => m.role));
+  const dp = await (await b.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
+  dp.on('pageerror', e => errs.push('debug: ' + e.message));
+  await dp.goto(`http://localhost:${DBG}/`);
+  ok('the header counts the calls', await dp.waitForFunction(n => document.getElementById('api-n').textContent === String(n), calls.length, { timeout: 10000 }).then(() => true, () => false));
+  await dp.evaluate(() => { document.getElementById('waiting').style.display = 'none'; document.getElementById('api-open').click(); });
+  const shown = await dp.evaluate(() => ({ items: document.querySelectorAll('#api-list .aitem').length, sel: document.querySelector('#api-list .aitem.sel b').textContent,
+    detail: document.getElementById('api-detail').textContent }));
+  ok('the panel lists every call and follows the newest (the revised design)', shown.items === calls.length && shown.sel === 'House design' && /chimney/.test(shown.detail) && /System prompt/.test(shown.detail), shown.items + ' ' + shown.sel);
+  await dp.click(`#api-list .aitem[data-id="${ic.id}"]`);
+  const det = await dp.evaluate(() => document.getElementById('api-detail').textContent);
+  ok('picking a chat call shows its system prompt, history, tool call and result', /You are Sage, a villager in Blockfield/.test(det) && /Earlier in the chat/.test(det)
+    && /tool call: check_inventory/.test(det) && /You are carrying: .*2 Diamond/.test(det) && /round 2/.test(det), det.slice(0, 600));
+  ok('each call costs its tokens at Haiku 5.5 prices', Math.abs(chats[0].cost - (321 * 0.10 + 12 * 0.50) / 1e6) < 1e-12 && Math.abs(designs[0].cost - 2 * (2000 * 0.10 + 900 * 0.50) / 1e6) < 1e-12, [chats[0].cost, designs[0].cost]);
+  ok('the panel shows the cost per call, per round and since the server started', /\$0\.000/.test(det) && /since the server started/.test(await dp.evaluate(() => document.getElementById('api-count').textContent)));
+  if (process.env.SHOTS) await dp.screenshot({ path: process.env.SHOTS + '/api-calls.png' });
+  ok('no debug screen errors', !errs.length, errs);
 
   await b.close(); srv.kill(); mock.close();
   console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join('; ')}` : '\nALL PASSED');

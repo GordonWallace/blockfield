@@ -144,8 +144,12 @@ function css() {
 .bfcv-dname{font:13px var(--display);color:var(--accent)}
 .bfcv-dname small{font:11px var(--mono);color:var(--muted);margin-left:6px}
 .bfcv-dsum{font:12px/1.45 var(--mono);color:var(--ink);white-space:pre-wrap}
-.bfcv-view{position:relative;flex:0 0 auto;height:230px;background:radial-gradient(#2a3a30,#141a16);border-radius:3px}
-.bfcv-view canvas{width:100%;height:100%;display:block;cursor:grab}
+.bfcv-stage{display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
+.bfcv-view{position:relative;height:clamp(260px,44vh,440px);background:radial-gradient(#2a3a30,#141a16);border-radius:3px}
+.bfcv-big{position:absolute;top:6px;right:6px;font:11px var(--display);color:var(--ink);background:rgba(0,0,0,.45);border:1px solid var(--panel-edge);border-radius:3px;padding:4px 8px;cursor:pointer}
+.bfcv-stage.big{position:fixed;inset:4vh 4vw;z-index:30;background:rgba(18,22,20,.97);border:1px solid var(--panel-edge);border-radius:4px;padding:10px 12px;box-shadow:0 10px 60px rgba(0,0,0,.7)}
+.bfcv-stage.big .bfcv-view{flex:1;height:auto;min-height:0}
+.bfcv-view canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
 .bfcv-cut{display:flex;align-items:center;gap:8px;font:11px var(--mono);color:var(--muted)}
 .bfcv-cut input{flex:1}
 .bfcv-mats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px 10px;font:12px var(--mono);color:var(--ink)}
@@ -185,9 +189,12 @@ function build() {
   ui.drev.addEventListener("click", () => design(true));
   const out = ui.dout = el("div", "bfcv-dout", pd);
   ui.dname = el("div", "bfcv-dname", out);
-  ui.view = el("div", "bfcv-view", out);
+  ui.stage = el("div", "bfcv-stage", out);
+  ui.view = el("div", "bfcv-view", ui.stage);
   ui.canvas = el("canvas", "", ui.view);
-  const cut = el("label", "bfcv-cut", out);
+  ui.big = el("button", "bfcv-big", ui.view, "Enlarge"); ui.big.type = "button"; ui.big.title = "Show the blueprint across the screen (Esc goes back)";
+  ui.big.addEventListener("click", () => enlarge(!ui.stage.classList.contains("big")));
+  const cut = el("label", "bfcv-cut", ui.stage);
   el("span", "", cut, "Layers");
   ui.cut = el("input", "", cut); ui.cut.type = "range"; ui.cut.min = 1;
   ui.cutText = el("span", "", cut);
@@ -221,6 +228,15 @@ function redraw() {
   ui.log.textContent = "";
   if (!history.length) line("sys", NAME + " looks up and smiles.");
   for (const m of history) m.role === "user" ? line("me", m.content) : line("them", m.content, NAME);
+}
+
+// The 3D view across most of the screen, with its layer slider, or back in the panel.
+addEventListener("resize", () => { if (chatting && ui.preview && current) ui.preview.draw(); });
+function enlarge(on) {
+  if (!ui.stage) return;
+  ui.stage.classList.toggle("big", on);
+  ui.big.textContent = on ? "Shrink" : "Enlarge";
+  if (ui.preview) ui.preview.draw();
 }
 
 // Sits to the right of the trade screen; the pair is centred together (the trade screen moves left to make room).
@@ -271,6 +287,7 @@ function close() {
   if (!chatting) return;
   chatting = null;
   clearInterval(poll);
+  enlarge(false);
   ui.root.classList.remove("open");
   if (document.activeElement && ui.root.contains(document.activeElement)) document.activeElement.blur();
   const inv = document.querySelector(".bf-inv-back .bf-inv"); if (inv) inv.style.left = "";
@@ -392,6 +409,7 @@ function showDesign() {
 // Keys typed in the panel stay in the panel (capture phase, before the trade screen's E / digits / Q): Enter sends the message or the
 // house description, Esc closes the trade screen and the panel. Keys anywhere else are the trade screen's.
 addEventListener("keydown", e => {
+  if (chatting && e.key === "Escape" && ui.stage && ui.stage.classList.contains("big")) { e.preventDefault(); e.stopImmediatePropagation(); enlarge(false); return; }
   if (!chatting || !ui.root || !ui.root.contains(e.target)) return;
   e.stopImmediatePropagation();
   if (e.key === "Escape") { e.preventDefault(); close(); return; }
@@ -408,6 +426,7 @@ BF.claudeVillager = {
   isChatting: m => !!chatting && chatting === m,
   design: () => current, designs: () => designs.slice(), tab: k => (k && ui.root ? setTab(k) : tab),
   home: () => home, mob: () => mob, status: () => status, history: () => history.slice(),
+  preview: () => ui.preview || null,
   inventory: () => contents(mob && mob.inv), startingInventory: () => (start ? start.list.slice() : null),
 };
 })();

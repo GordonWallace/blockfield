@@ -188,7 +188,7 @@ class Preview {
     canvas.addEventListener("pointerdown", e => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); e.stopPropagation(); });
     canvas.addEventListener("pointermove", e => {
       if (!drag) return;
-      this.yaw -= (e.clientX - drag[0]) * 0.01; this.pitch = Math.max(-0.2, Math.min(1.45, this.pitch + (e.clientY - drag[1]) * 0.01));
+      this.yaw += (e.clientX - drag[0]) * 0.01; this.pitch = Math.max(-0.2, Math.min(1.45, this.pitch + (e.clientY - drag[1]) * 0.01));
       drag = [e.clientX, e.clientY]; this.draw();
     });
     canvas.addEventListener("pointerup", () => { drag = null; });
