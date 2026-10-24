@@ -27,7 +27,6 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   await game.waitForTimeout(5000);
   ok('feed is on when served by the debug server', await game.evaluate(() => !!BF.debugFeed));
   await lib.simReady(game);
-  await lib.sim(game, () => { if (BF.active) BF.active.set({ on: false }); });   // (no extra villages, as in an automated page: a worker or the world server can't tell)
   await lib.toVillage(game);
   await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'birth', 'Test baby was born'); });
   const dbg = await b.newPage({ viewport: { width: 1600, height: 1000 } });

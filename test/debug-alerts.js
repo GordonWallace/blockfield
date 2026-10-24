@@ -15,7 +15,7 @@ const FILE = path.join(os.tmpdir(), 'bf-test-alerts-' + process.pid + '.json'), 
 let GAME = 0, DBG = 0;
 const start = async () => { const s = await lib.serve({ world: onServer, game: GAME || undefined, debug: DBG || undefined, args: ['--alerts', FILE] }); GAME = s.game; DBG = s.debug; return s; };
 (async () => {
-  const fails = [], ok = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails.push(n); };
+  const fails = [], ok = (n, c, x) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (!c && x !== undefined ? '  ' + JSON.stringify(x) : '')); if (!c) fails.push(n); };
   try { fs.unlinkSync(FILE); } catch (e) {}
   let srv = await start();
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -27,7 +27,6 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(4000);
   await lib.simReady(game);
-  await lib.sim(game, () => { if (BF.active) BF.active.set({ on: false }); });   // (no extra villages, as in an automated page: a worker or the world server can't tell)
   // simulated pointer lock (headless Chromium has none), as in test/z-release.js
   await game.evaluate(() => {
     const cv = document.querySelector('canvas');
@@ -143,10 +142,13 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   // ---- disable, then delete
   await dbg.click('#a-body tr[data-id]:nth-child(2) [data-act=toggle]');
   ok('disable reaches the game', await until(game, () => BF.alerts.list.some(a => a.kind === 'birth' && a.on === false)));
-  for (let i = 0; i < 40 && !(await lib.sim(game, () => BF.alertSim.list.some(a => a.kind === 'birth' && a.on === false))); i++) await game.waitForTimeout(250);   // (the page passes the list on)
-  const quiet = await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'birth', 'Test baby (quiet) was born to A and B'); return !BF.warp.frozen; });
-  await game.waitForTimeout(500);
-  ok('a disabled alert does not fire', quiet && await game.evaluate(() => !BF.warp.frozen && !BF.alerts.active));
+  let simOff = false;
+  for (let i = 0; i < 80 && !(simOff = await lib.sim(game, () => BF.alertSim.list.some(a => a.kind === 'birth' && a.on === false))); i++) await game.waitForTimeout(250);   // (the page passes the list on)
+  // (the farmers' wheat alert is still on and a real harvest can fire it meanwhile: only the quiet birth must not)
+  await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'birth', 'Test baby (quiet) was born to A and B'); if (BF.proto) BF.proto.flush(); });
+  await game.waitForTimeout(1000);
+  const after = await game.evaluate(() => { const a = BF.alerts.active; return a && { entry: a.entry, more: a.more }; });
+  ok('a disabled alert does not fire', !(after && /quiet/.test(JSON.stringify(after.entry))), { simOff, after });
   // ---- persistence across a server restart
   if (onServer) console.log('(the server restart is skipped on the world server: it would stop the world)');
   else {

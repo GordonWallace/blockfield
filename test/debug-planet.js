@@ -58,7 +58,6 @@ const standAt = async (pg, cells) => {
   await game.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById('bf-loading'), null, { timeout: 120000 }).catch(() => {});
   await game.waitForTimeout(5000);
   await lib.simReady(game);
-  await lib.sim(game, () => { if (BF.active) BF.active.set({ on: false }); });   // (no extra villages, as in an automated page: a worker or the world server can't tell)
   ok('a planet world, fed to the debug server', await game.evaluate(() => !!BF.planet && !!BF.debugFeed));
 
   // a village near an edge of face 4 (as test/planet-village-visit.js finds one), and the cells straight across its nearest edge

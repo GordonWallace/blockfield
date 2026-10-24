@@ -20,7 +20,6 @@ const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/compa
   await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(5000);
   await lib.simReady(game);
-  await lib.sim(game, () => { if (BF.active) BF.active.set({ on: false }); });   // (no extra villages, as in an automated page: a worker or the world server can't tell)
   await lib.toVillage(game);
   const dbg = await b.newPage({ viewport: { width: 1600, height: 1000 } });
   dbg.on('pageerror', e => console.log('PAGEERROR debug', e.message));

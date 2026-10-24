@@ -19,8 +19,6 @@ const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug
   await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(5000);
   await lib.simReady(game);
-  // the simulation budget's extra villages (js/active.js) are off in an automated page; a worker or the world server can't tell, so say so
-  await lib.sim(game, () => { if (BF.active) BF.active.set({ on: false }); });
   await lib.toVillage(game);
   // hold the mobs still so the game and the screen can be compared
   await lib.sim(game, () => { BF.mobs.spawning = false; globalThis.__upd = BF.mobs.update; BF.mobs.update = () => {}; });
