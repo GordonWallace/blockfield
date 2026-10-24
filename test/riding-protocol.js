@@ -161,8 +161,13 @@ async function run(b, url, mode) {
     const b0 = await query('entity', { id: horseId });
     // facing the floor's middle: the untamed rides may have left the horse at its edge, facing the hill beyond (a flake in CI)
     await pg.evaluate(([g, h]) => BF.player.setLook(Math.atan2(-(g.x + 0.5 - h.x), -(g.z + 0.5 - h.z)), 0), [ground, b0]);
-    await hold('KeyW', 1000); await settle(); await pg.waitForTimeout(300); await settle();
-    const b1 = await query('entity', { id: horseId }), p3 = await me();
+    // (a second of W, more while it hasn't gone a block: on a slow runner the page's frames, and so its horse, can lag)
+    let b1, p3;
+    for (let t = 0; t < 4; t++) {
+      await hold('KeyW', t ? 500 : 1000); await settle(); await pg.waitForTimeout(300); await settle();
+      b1 = await query('entity', { id: horseId }); p3 = await me();
+      if (dist(b0, b1) > 1) break;
+    }
     check(dist(b0, b1) > 1, tag('W rides the horse: the simulation\'s horse moved'), { moved: +dist(b0, b1).toFixed(2) });
     check(dist(p3, b1) < 0.6, tag('the simulation\'s horse is under the player'), { horse: b1, me: p3 });
     await hold('ShiftLeft', 200); await settle();
