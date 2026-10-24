@@ -44,7 +44,13 @@ function roll() {
 
 // ---------------------------------------------------------------- think: the shared queue of regions
 let queue = [], next = 0;
-const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15 + (m._rs || 0); };
+const idCache = new Map();   // "e<n>" -> n
+function idNum(m) {
+  const id = m.id;
+  let n = idCache.get(id);
+  if (n === undefined) { n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; if (n !== n) n = 1e15; if (idCache.size > 100000) idCache.clear(); idCache.set(id, n); }
+  return n;
+}
 const byId = (a, b) => idNum(a) - idNum(b);
 function take() { return next < queue.length ? queue[next++] : undefined; }
 // The mobs of this tick in the order they think: list order for "list"; else region by region from the queue, each region's mobs by id.
@@ -62,9 +68,10 @@ function plan(list) {
   const out = [];
   let k;
   while ((k = take()) !== undefined) {
-    const ms = by.get(k), start = out.length;
-    for (const m of ms) out.push(m);
-    if (ms.size > 1) { const part = out.splice(start).sort(byId); for (const m of part) out.push(m); }
+    const start = out.length;
+    let sorted = true, last = -Infinity;
+    for (const m of by.get(k)) { const n = idNum(m); if (n < last) sorted = false; last = n; out.push(m); }
+    if (!sorted) { const part = out.splice(start).sort(byId); for (const m of part) out.push(m); }
   }
   const n = out.length;
   for (const m of list) { const k = G.regionOf(m); if ((k === undefined || k < 0) && !m.removed) out.push(m); }
