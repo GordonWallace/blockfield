@@ -114,8 +114,8 @@ const start = async env => {
     && req.messages.length === 1 && req.messages[0].content === 'What should I do on my first night?', last);
   ok('the system prompt comes from prompts/villager-system.md, filled in', req && /You are Sage, a villager in Blockfield/.test(req.system) && /no trade/.test(req.system)
     && /Right now: day 1/.test(req.system) && req.system.includes('you were carrying: ' + startText + '.') && !/\{\{/.test(req.system) && !/<!--/.test(req.system), req && req.system);
-  ok('effort low, no sampling params, check_inventory and look_around offered', req && req.output_config && req.output_config.effort === 'low' && req.temperature === undefined
-    && req.tools && req.tools.map(t => t.name).join() === 'check_inventory,look_around' && req.tool_choice.type === 'auto', req && req.tools);
+  ok('effort low, no sampling params, check_inventory, look_around and move_to offered', req && req.output_config && req.output_config.effort === 'low' && req.temperature === undefined
+    && req.tools && req.tools.map(t => t.name).join() === 'check_inventory,look_around,move_to' && req.tool_choice.type === 'auto', req && req.tools);
   const logged = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'claude').map(e => e.l + ' ' + e.x));
   ok('the exchange is logged as INFO without the words', logged.some(l => /^INFO Chat with Sage: 35 characters in, 39 out, 321\/12 tokens/.test(l)) && !logged.some(l => /first night/.test(l)), logged);
 

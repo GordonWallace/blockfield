@@ -1699,11 +1699,43 @@ function villagerAI(m, dt, out) {
 function claudeAI(m, dt, out) {
   const ai = m.ai, h = m.claudeHome;
   if (m.tradingWith || (BF.claudeVillager && BF.claudeVillager.isChatting(m))) { out.faceTarget = true; m.lookAt = "player"; ai.mode = "idle"; ai.t = 2; return; }
+  if (m.claudeErrand && !m.claudeErrand.result) { claudeErrand(m, dt, out); return; }
   if (h) {
     if (Math.hypot(h.x - m.position.x, h.z - m.position.z) > 12 && ai.mode !== "walk") { ai.mode = "walk"; ai.tx = h.x + rnd(-4, 4); ai.tz = h.z + rnd(-4, 4); ai.t = rnd(5, 8); }
     else if (ai.mode === "walk" && Math.hypot(ai.tx - h.x, ai.tz - h.z) > 10) { ai.tx = h.x + rnd(-8, 8); ai.tz = h.z + rnd(-8, 8); }
   }
   wanderAI(m, dt, out);
+}
+
+// The Claude villager's errands (js/claudevillager.js move_to sets m.claudeErrand = { goal() -> { x, z, r } | null, max }): it walks there
+// the way villagers do, on A* routes in hops of up to 20 blocks (findPath, bridges included), opening doors on the way, and leaves
+// errand.result = "arrived" or "failed: <why>" for the page to pick up. goal() is asked again for every hop, so a moving target works.
+function claudeErrand(m, dt, out) {
+  const e = m.claudeErrand, ai = m.ai;
+  villagerDoors(m);
+  e.t = (e.t || 0) + dt;
+  const g = e.goal();
+  if (!g) { e.result = "failed: the place to go is gone"; ai.route = null; return; }
+  const px = m.position.x, pz = m.position.z, d = Math.hypot(g.x + 0.5 - px, g.z + 0.5 - pz), r = g.r || 2;
+  if (d <= r + 0.5) { e.result = "arrived"; ai.route = null; return; }
+  if (e.t > (e.max || 240)) { e.result = "failed: gave up after walking a long time"; ai.route = null; return; }
+  if (!ai.route || ai.routeKind !== "errand") {
+    ai.route = null;
+    if (e.wait > 0) { e.wait -= dt; return; }
+    if (planBudget <= 0) return;
+    planBudget--;
+    const hop = d > 22 ? [Math.floor(px + (g.x + 0.5 - px) * 20 / d), Math.floor(pz + (g.z + 0.5 - pz) * 20 / d)] : null;
+    const [fx, fy, fz] = feetCell(m);
+    const goal = hop ? { x: hop[0], z: hop[1], at: (x, y, z) => Math.abs(x - hop[0]) + Math.abs(z - hop[1]) <= 2 }
+      : { x: g.x, z: g.z, at: (x, y, z) => Math.abs(x - g.x) <= r && Math.abs(z - g.z) <= r };
+    const path = BF.bridges ? BF.bridges.route(findPath, fx, fy, fz, goal, 2500) : findPath(fx, fy, fz, goal, 2500);
+    if (path && path.length) { ai.route = path; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "errand"; e.fails = 0; }
+    else { e.fails = (e.fails || 0) + 1; e.wait = 0.6; if (e.fails >= (hop ? 6 : 3)) { e.result = "failed: couldn't find a way there"; e.fails = 0; } }
+    return;
+  }
+  const st = followRoute(m, dt, out, m.def.speed * 1.3);
+  if (st === "stuck") { ai.route = null; e.stuck = (e.stuck || 0) + 1; if (e.stuck >= 4) e.result = "failed: got stuck on the way"; }
+  else if (st === "done") ai.route = null;
 }
 
 function golemAI(m, dt, out) {
@@ -2637,7 +2669,7 @@ function despawn(dt) {
     if (!BF.world.isLoaded(m.position.x, m.position.z)) { if (wild && BF.wildlife) BF.wildlife.stow(m); removeMob(m); continue; }   // a wild mob that walked off the loaded land waits with its chunk
     const d = seen(m.position, pp, _sA).distanceTo(m.position);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
-    if (d > DESPAWN_DIST && !simmed && !m.village && !wild && !m.def.herd) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
+    if (d > DESPAWN_DIST && !simmed && !m.village && !wild && !m.def.herd && !m.claude) { removeMob(m); continue; }   // (the Claude villager on an errand stays while its chunk is loaded)   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
     m.root.visible = d <= (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
   }
 }

@@ -17,10 +17,11 @@ const mock = http.createServer((req, res) => {
     const body = JSON.parse(b || '{}'); reqs.push(body);
     const msgs = body.messages, end = msgs[msgs.length - 1];
     const result = Array.isArray(end.content) && end.content.find(c => c.type === 'tool_result');
-    const content = result ? [{ type: 'text', text: 'I see: ' + result.content.slice(0, 200) }]
+    const event = typeof end.content === 'string' && /^\(World event/.test(end.content);
+    const content = event ? [{ type: 'text', text: 'News: ' + end.content.slice(0, 120) }] : result ? [{ type: 'text', text: 'I see: ' + result.content.slice(0, 200) }]
       : [{ type: 'thinking', thinking: '', signature: 'sig' }, { type: 'tool_use', id: 'toolu_look', name: 'look_around', input: {} }];
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: 'msg', type: 'message', role: 'assistant', model: body.model,
-      stop_reason: result ? 'end_turn' : 'tool_use', stop_sequence: null, content, usage: { input_tokens: 500, output_tokens: 20 } }));
+      stop_reason: result || event ? 'end_turn' : 'tool_use', stop_sequence: null, content, usage: { input_tokens: 500, output_tokens: 20 } }));
   });
 }).listen(MOCK);
 
@@ -119,11 +120,43 @@ const mock = http.createServer((req, res) => {
   const second = reqs[1], tr = second && second.messages[second.messages.length - 1];
   ok('look_around goes to the game and its answer back to the model', reqs.length === 2 && tr.content[0].type === 'tool_result' && tr.content[0].tool_use_id === 'toolu_look'
     && /You live in|It is light|It is dark|Animals|The land around you/.test(tr.content[0].content), tr);
-  ok('the first request carries where the Sage is in the system prompt and offers both tools', /Where you are:\n- You live in/.test(reqs[0].system) && reqs[0].tools.map(t => t.name).join() === 'check_inventory,look_around', reqs[0].tools && reqs[0].tools.map(t => t.name));
+  ok('the first request carries where the Sage is in the system prompt and offers both tools', /Where you are:\n- You live in/.test(reqs[0].system) && reqs[0].tools.map(t => t.name).join() === 'check_inventory,look_around,move_to', reqs[0].tools && reqs[0].tools.map(t => t.name));
   ok('the reply shows and the look is logged', r.h.length === 2 && /^I see:/.test(r.h[1].content) && r.log.some(x => /^Sage looked around: \d+ creatures and people/.test(x)), r);
   const calls = await (await fetch(`http://localhost:${DBG}/claude-calls`)).json();
   ok('the debug screen record holds the tool call and the game\'s answer', calls.length === 1 && calls[0].rounds.length === 2 && calls[0].status === 'ok'
     && calls[0].messages.some(m => Array.isArray(m.content) && m.content[0].type === 'tool_result'), calls.map(c => [c.status, c.rounds.length]));
+
+  // ---- move_to: the Sage walks round a wall to the traveller, the arrival comes back as a world event, the reply shows in the game chat
+  const mv = await pg.evaluate(({ x0, z0, y }) => {
+    BF.inventory.close();
+    clearInterval(window._pin);
+    const m = BF.claudeVillager.mob(), W = BF.world, B = BF.B;
+    for (let dz = -12; dz <= 12; dz++) for (let dy = 1; dy <= 3; dy++) W.setBlock(x0 - 20, y + dy, z0 + dz, B.stone);   // a wall to go round
+    m.position.set(x0 - 34.5, y + 1, z0 + 0.5); m.claudeHome = { x: m.position.x, z: m.position.z }; m.ai.route = null;
+    BF.player.spawn(x0 + 0.5, y + 1, z0 + 0.5); BF.player.flying = false;
+    return BF.claudeVillager.runTool('move_to', m, { target: 'traveller', reason: 'test' });
+  }, setup);
+  ok('move_to answers at once: setting off, about 35 blocks', /^You set off for the traveller, about 3[4-6] blocks away/.test(mv), mv);
+  const n0 = reqs.length;
+  const arrived = await pg.waitForFunction(() => !BF.claudeVillager.errand() && BF.claudeVillager.history().length >= 4, null, { timeout: 240000, polling: 500 }).then(() => true, () => false);
+  const st = await pg.evaluate(() => { const m = BF.claudeVillager.mob(), p = BF.player.position; return { d: Math.hypot(m.position.x - p.x, m.position.z - p.z), h: BF.claudeVillager.history().slice(-2),
+    chat: [...document.querySelectorAll('.bfc-line')].map(e => e.textContent).slice(-3), log: BF.glog.recent(300).filter(e => e.k === 'claude').map(e => e.l + ' ' + e.x).slice(-4) }; });
+  ok('it walks round the wall to the traveller', arrived && st.d < 4.5, st);
+  ok('the arrival is told to the model as a world event, with where the traveller is', reqs.length > n0 && /^\(World event, not the traveller speaking\) You have arrived at the traveller\. The traveller is about \d+ blocks/.test(reqs[reqs.length - 1].messages.slice(-1)[0].content), reqs.length > n0 && reqs[reqs.length - 1].messages.slice(-1)[0]);
+  ok('its reply shows in the game chat (the panel is closed)', st.chat.some(t => /^<Sage> News:/.test(t)), st.chat);
+  ok('setting off and arriving are logged', st.log.some(x => /^INFO Sage set off for the traveller \(about \d+ blocks\): test/.test(x)) && st.log.some(x => /^INFO Sage arrived at the traveller after \d+ s/.test(x)), st.log);
+  // a place it can't reach (off the edge of the deck): the failure comes back as a world event too
+  const fail = await pg.evaluate(() => {
+    const m = BF.claudeVillager.mob(), P = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+    let best = null, bz = 0;
+    for (let k = 0; k < 8; k += 2) { const yaw = BF.coords.yawFor(k * 45, m.position.x, m.position.z, 0), dz = Math.abs(Math.cos(yaw)); if (dz > bz) { bz = dz; best = P[k]; } }
+    return BF.claudeVillager.runTool('move_to', m, { target: 'direction', direction: best, distance: 40 });
+  });
+  ok('a direction and distance sets off too', /^You set off for a spot about \d+ blocks/.test(fail), fail);
+  const failed = await pg.waitForFunction(() => !BF.claudeVillager.errand() && BF.claudeVillager.history().length >= 6, null, { timeout: 240000, polling: 500 }).then(() => true, () => false);
+  const fl = reqs[reqs.length - 1].messages.slice(-1)[0].content;
+  ok('somewhere it can\'t reach comes back as "didn\'t make it"', failed && /^\(World event, not the traveller speaking\) You didn't make it to a spot about \d+ blocks/.test(fl), fl);
+  ok('move_to is offered with its targets', reqs[0].tools.some(t => t.name === 'move_to' && t.input_schema.properties.target.enum.includes('traveller')));
   ok('no page errors', !errs.length, errs);
   await b.close(); srv.kill(); mock.close();
   console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join('; ')}` : '\nALL PASSED');

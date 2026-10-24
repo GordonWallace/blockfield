@@ -13,7 +13,8 @@
 // Game log (kind "claude"): INFO when it appears, each exchange (lengths and tokens, not the words), each tool call and design;
 // WARN for a design with problems left; ERROR when a reply or a design fails.
 // API: BF.claudeVillager = { isOpen(), open(mob) -> bool, close(), isChatting(mob), design(), designs(), tab(name?), home(), mob(), status(),
-//                            history(), inventory(), startingInventory(), tools() -> [names], runTool(name, mob?) -> text }
+//                            history(), inventory(), startingInventory(), tools() -> [names], runTool(name, mob?, input?) -> text,
+//                            errand() -> the walk under way or null, events() -> world events waiting to be told }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -67,12 +68,12 @@ function tick() {
   mob = m;
   if (!announced) { announced = true; glog("INFO", NAME + " (the Claude villager) appeared at the world spawn carrying " + (listText(contents(m.inv)) || "nothing"), m); }
 }
-setInterval(() => { try { tick(); } catch (e) { console.error(e); } }, 1000);
+setInterval(() => { try { tick(); errandTick(); drainEvents(); } catch (e) { console.error(e); } }, 1000);
 if (typeof BF.on === "function") hook(); else addEventListener("load", hook);
 function hook() {
   if (BF.on) BF.on("newWorld", () => {
     if (isOpen()) close();
-    mob = null; history = []; announced = false; deadAt = 0; start = null; current = null; designs.length = 0;
+    mob = null; history = []; events.length = 0; announced = false; deadAt = 0; start = null; current = null; designs.length = 0;
     if (ui.dout) ui.dout.classList.remove("on");
   });
 }
@@ -229,7 +230,7 @@ function line(cls, text, who) {
 function redraw() {
   ui.log.textContent = "";
   if (!history.length) line("sys", NAME + " looks up and smiles.");
-  for (const m of history) m.role === "user" ? line("me", m.content) : line("them", m.content, NAME);
+  for (const m of history) m.event ? line("sys", m.content.replace(/^\(World event[^)]*\) /, "")) : m.role === "user" ? line("me", m.content) : line("them", m.content, NAME);
 }
 
 // The 3D view across most of the screen, with its layer slider, or back in the panel.
@@ -305,6 +306,7 @@ const TOOLS = {
     glog("INFO", NAME + " checked its inventory (" + (now || "empty") + ")", who);
     return now ? "You are carrying: " + now + "." : "Your bag is empty.";
   },
+  move_to(who, input) { return startErrand(who, input || {}); },
   look_around(who) {
     const o = BF.claudeSight.look(who);
     const kinds = Object.values(o.groups).reduce((n, g) => n + g.size, 0);
@@ -312,6 +314,83 @@ const TOOLS = {
     return o.text;
   },
 };
+// ---------------------------------------------------------------- errands (move_to)
+// The model sends the Sage somewhere: to the traveller, back home, to the nearest village, or some blocks off in a compass direction.
+// js/mobs.js (claudeErrand) walks it there on villager routes; the tool returns at once ("you set off"), and when the walk ends the
+// game tells the Sage in a new turn of its own (a world event), so it can look around and report. Its reply shows in the panel and,
+// with the panel closed, in the game's chat. Where it arrives becomes the spot it wanders around.
+const POINTS = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+const ERRAND_MAX = 100;   // blocks it will go in one errand
+const events = [];        // world events waiting to be told to the Sage: [text]
+let errandNote = false;   // an errand started during this exchange (the panel says it will set off once the screen closes)
+const localOf = (who, p) => (BF.planet && BF.planet.local ? BF.planet.local(who.position, p, {}) : { x: p.x, z: p.z });
+function compassFrom(who, p) {
+  const P = BF.planet, t = P && P.toward ? P.toward(who.position, p, {}) : { x: p.x - who.position.x, z: p.z - who.position.z, d: Math.hypot(p.x - who.position.x, p.z - who.position.z) };
+  const b = P && P.bearing ? P.bearing(who.position.x, who.position.z, t.x, t.z) : null;
+  return { d: Math.round(t.d), dir: b == null ? "" : P.compassPoint(b) };
+}
+function startErrand(who, input) {
+  const t = String(input.target || ""), W = BF.world;
+  if (t === "stop") { const was = !!who.claudeErrand; who.claudeErrand = null; who.ai.route = null; who.claudeHome = { x: who.position.x, z: who.position.z }; return was ? "You stop where you are." : "You weren't going anywhere."; }
+  let goal = null, label = "";
+  if (t === "traveller") {
+    if (!BF.player || !BF.player.position || BF.player.dead) return "You can't find the traveller.";
+    goal = () => { const p = localOf(who, BF.player.position); return { x: Math.floor(p.x), z: Math.floor(p.z), r: 3 }; };
+    label = "the traveller";
+  } else if (t === "home") {
+    if (!home) return "You don't know where home is.";
+    const h = localOf(who, home); goal = () => ({ x: Math.floor(h.x), z: Math.floor(h.z), r: 2 }); label = "your usual spot by the world spawn";
+  } else if (t === "village") {
+    const v = BF.worldgen && BF.worldgen.nearestVillage && BF.worldgen.nearestVillage(who.position.x, who.position.z);
+    if (!v) return "You don't know of any village near enough.";
+    const c = localOf(who, v), d = Math.hypot(c.x - who.position.x, c.z - who.position.z);
+    if (d > ERRAND_MAX) return "The nearest village is about " + Math.round(d / 10) * 10 + " blocks away, too far to walk to and back now (" + ERRAND_MAX + " blocks at most).";
+    let name = null; try { name = BF.signs.villageName(v); } catch (e) { /* unnamed */ }
+    goal = () => ({ x: Math.floor(c.x), z: Math.floor(c.z), r: 4 }); label = name ? "the village of " + name : "the nearest village";
+  } else if (t === "direction") {
+    const k = POINTS.indexOf(String(input.direction || "").toLowerCase());
+    if (k < 0) return "Say which way: one of " + POINTS.join(", ") + ".";
+    let dist = Math.round(+input.distance || 0);
+    if (!(dist >= 3)) return "Say how far, in blocks (3 to " + ERRAND_MAX + ").";
+    dist = Math.min(ERRAND_MAX, dist);
+    const yaw = BF.coords && BF.coords.yawFor ? BF.coords.yawFor(k * 45, who.position.x, who.position.z, 0) : -k * Math.PI / 4;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    let x = who.position.x + fx * dist, z = who.position.z + fz * dist;
+    while (dist > 3 && !W.isLoaded(x, z)) { dist -= 4; x = who.position.x + fx * dist; z = who.position.z + fz * dist; }   // only as far as the known land
+    const gx = Math.floor(x), gz = Math.floor(z);
+    goal = () => ({ x: gx, z: gz, r: 2 }); label = "a spot about " + dist + " blocks " + POINTS[k];
+  } else return "Unknown target: use traveller, home, village, direction (with direction and distance) or stop.";
+  const g = goal(), d = Math.round(Math.hypot(g.x + 0.5 - who.position.x, g.z + 0.5 - who.position.z));
+  if (d <= (g.r || 2)) return "You are already there.";
+  who.claudeErrand = { goal, label, max: 60 + d * 3, from: { x: who.position.x, z: who.position.z }, t0: BF.simNow ? BF.simNow() : 0, why: String(input.reason || "").slice(0, 200) };
+  who.ai.route = null;
+  errandNote = true;
+  glog("INFO", NAME + " set off for " + label + " (about " + d + " blocks)" + (who.claudeErrand.why ? ": " + who.claudeErrand.why : ""), who);
+  return "You set off for " + label + ", about " + d + " blocks away. You'll be told when you get there (or if you can't), and can look around then.";
+}
+// Once a second: an errand that ended becomes a world event for the Sage.
+function errandTick() {
+  const m = mob, e = m && m.claudeErrand;
+  if (!e || !e.result) return;
+  m.claudeErrand = null;
+  m.claudeHome = { x: m.position.x, z: m.position.z };   // it stays around where it ended up
+  const secs = Math.round(e.t || 0), rel = BF.player && BF.player.position ? compassFrom(m, BF.player.position) : null;
+  const where = rel ? " The traveller is about " + rel.d + " blocks " + (rel.dir || "away") + " of you." : "";
+  if (e.result === "arrived") {
+    glog("INFO", NAME + " arrived at " + e.label + " after " + secs + " s", m);
+    events.push("You have arrived at " + e.label + "." + where);
+  } else {
+    const moved = Math.round(Math.hypot(m.position.x - e.from.x, m.position.z - e.from.z));
+    glog("WARN", NAME + " didn't reach " + e.label + " (" + e.result.replace(/^failed: /, "") + ") after " + secs + " s, " + moved + " blocks from where it set off", m);
+    events.push("You didn't make it to " + e.label + ": you " + e.result.replace(/^failed: /, "") + ". You stopped " + moved + " blocks from where you set off." + where);
+  }
+}
+async function drainEvents() {
+  if (!events.length || busy || !mob || !status || !status.configured) return;
+  const text = events.shift();
+  await turn(mob, { role: "user", content: "(World event, not the traveller speaking) " + text, event: true }, text);
+}
+
 async function post(body) {
   const r = await fetch("/claude/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const out = await r.json().catch(() => null);
@@ -339,11 +418,17 @@ async function send() {
   const text = ui.ta.value.trim();
   if (!text || busy || !chatting) return;
   ui.ta.value = "";
-  history.push({ role: "user", content: text.slice(0, 2000) });
-  line("me", text);
+  await turn(chatting, { role: "user", content: text.slice(0, 2000) }, text);
+}
+// One exchange: msg (the player's words, or a world event) goes on the history, and the reply comes back through converse().
+async function turn(who, msg, shown) {
+  build();
+  history.push(msg);
+  line(msg.event ? "sys" : "me", shown);
   const wait = line("sys", NAME + " is thinking...");
   setBusy(true);
-  const t0 = performance.now(), who = chatting;
+  errandNote = false;
+  const t0 = performance.now(), text = msg.content;
   let out = null, err = null;
   try { out = await converse(who, history.slice(-MAX_TURNS)); }
   catch (e) { err = e instanceof TypeError ? "couldn't reach the game server (is it still running?)" : e.message; }
@@ -352,7 +437,7 @@ async function send() {
   const ms = Math.round(performance.now() - t0);
   if (err) {
     history.pop();   // the message didn't land: keep the conversation well formed, put the words back to retry
-    if (!ui.ta.value) ui.ta.value = text;
+    if (!msg.event && !ui.ta.value) ui.ta.value = text;
     line("err", "No answer: " + err);
     glog("ERROR", "Claude villager chat failed after " + ms + " ms: " + err, who);
     return;
@@ -368,8 +453,10 @@ async function send() {
   history.push({ role: "assistant", content: reply });
   if (history.length > 200) history.splice(0, history.length - 200);
   line("them", reply, NAME);
+  if (!chatting && BF.commands && BF.commands.print) BF.commands.print("<" + NAME + "> " + reply, "gold");   // heard from afar: the game's chat
+  if (errandNote && chatting) line("sys", "(" + NAME + " will set off once you close this screen.)");
   const u = out.usage || {};
-  glog("INFO", "Chat with " + NAME + ": " + text.length + " characters in, " + reply.length + " out, " + (u.input || 0) + "/" + (u.output || 0) + " tokens, " + ms + " ms" + (out.tools && out.tools.length ? ", tools: " + out.tools.join(", ") : ""), who);
+  glog("INFO", (msg.event ? "World event told to " + NAME + ": " : "Chat with " + NAME + ": ") + text.length + " characters in, " + reply.length + " out, " + (u.input || 0) + "/" + (u.output || 0) + " tokens, " + ms + " ms" + (out.tools && out.tools.length ? ", tools: " + out.tools.join(", ") : ""), who);
 }
 
 // ---------------------------------------------------------------- house designer
@@ -460,6 +547,6 @@ BF.claudeVillager = {
   design: () => current, designs: () => designs.slice(), tab: k => (k && ui.root ? setTab(k) : tab),
   home: () => home, mob: () => mob, status: () => status, history: () => history.slice(),
   preview: () => ui.preview || null,
-  inventory: () => contents(mob && mob.inv), tools: () => Object.keys(TOOLS), runTool: (name, who) => TOOLS[name](who || mob, {}), startingInventory: () => (start ? start.list.slice() : null),
+  inventory: () => contents(mob && mob.inv), tools: () => Object.keys(TOOLS), errand: () => (mob && mob.claudeErrand) || null, events: () => events.slice(), runTool: (name, who, input) => TOOLS[name](who || mob, input || {}), startingInventory: () => (start ? start.list.slice() : null),
 };
 })();

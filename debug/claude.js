@@ -10,7 +10,7 @@
 //                        -> { reply, stop, tools: [names called], usage }, or { pending: { turn, calls: [{ id, name, input }] } } when
 //                           the model calls a tool, or { error }
 //   POST /claude/chat    { turn, results: [{ id, content, is_error? }] } -> the same: the game's answers to those calls
-// The model's tools (check_inventory, look_around) are answered by the game (js/claudevillager.js, js/claudesight.js), live.
+// The model's tools (check_inventory, look_around, move_to) are answered by the game (js/claudevillager.js, js/claudesight.js), live.
 //   POST /claude/blueprint { villager: { name }, request, palette: [{ name, about }], previous?: design }
 //                        -> { design, attempts, problems: [left after the last attempt], usage } or { error }
 // The house designer: Claude draws a house as JSON (DESIGN_SCHEMA, forced with structured outputs) from prompts/house-designer.md;
@@ -124,6 +124,24 @@ const TOOLS = [{
     "hills or trees), and you see less far in the dark. Use it whenever the traveller asks what is around, about something nearby, or " +
     "before you describe your surroundings; don't guess.",
   input_schema: NO_INPUT,
+}, {
+  name: "move_to",
+  description: "Walk somewhere. Use it when you have a reason to go: the traveller asks you to come along, to go and look at something, or " +
+    "to fetch news from a place. It returns at once; you walk like any villager (around walls and water, through doors), and the game " +
+    "tells you in a later message when you arrive or if you can't get there. Then look_around and report back: your words still reach " +
+    "the traveller from afar. Targets: \"traveller\" (go to them), \"home\" (your usual spot by the world spawn), \"village\" (the nearest " +
+    "village), \"direction\" (some blocks off toward a compass point, e.g. something you saw with look_around), \"stop\" (stay where you are).",
+  input_schema: {
+    type: "object",
+    properties: {
+      target: { type: "string", enum: ["traveller", "home", "village", "direction", "stop"] },
+      direction: { type: "string", enum: ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"], description: "For target direction: which way." },
+      distance: { type: "integer", description: "For target direction: how many blocks, 3 to 100." },
+      reason: { type: "string", description: "A few words on why you are going, for the game's log." },
+    },
+    required: ["target"],
+    additionalProperties: false,
+  },
 }];
 const TOOL_NAMES = new Set(TOOLS.map(t => t.name));
 const MAX_RESULT = 12000;   // characters of one tool result
