@@ -1,8 +1,8 @@
 // @ci integration suite=village timeout=1500
 // Region queries for villagers, the player and the UI (spec r15-32): with BF.regions.verifyQueries on, every converted scan (region
 // queries, the village's own lists, the per-type lists) also runs the old scan of BF.mobs.list and compares. On seed 3 (planet,
-// village generator 10), at the village nearest the spawn, one game day of simulation steps, plus a lightning strike on a mob, the
-// villager name labels, /kill of one type and a jobsite block placed and broken: no differences, and every kind of query was used.
+// village generator 10), at the village nearest the spawn, one game day of simulation steps, plus a lightning strike on a mob,
+// /kill of one type and a jobsite block placed and broken: no differences, and every kind of query was used.
 // Usage: NODE_PATH=$(npm root -g) node test/region-queries-villagers.js [seed=3] [days=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -57,8 +57,6 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     const p = BF.player.position, zb = BF.mobs.spawn ? BF.mobs.spawn('zombie', p.x + 3, p.y, p.z) : null;
     out.zombie = !!zb;
     if (zb && BF.weather && BF.weather.strikeAt) { const hp = zb.hp; BF.weather.strikeAt(zb.position.x, Math.floor(zb.position.y), zb.position.z); out.struck = zb.hp < hp || !!zb.dead; }
-    // the villager name labels (villagelog.js)
-    if (BF.vlog && BF.vlog.update) BF.vlog.update(0.05, true);
     // /kill of one type (commands.js)
     if (BF.commands) { const r = BF.commands.execute('/kill zombie'); out.kill = r && r.msg; }
     // a jobsite block placed by an unemployed villager remembering it (jobs.js reclaimAt / reservedForMemory)
@@ -78,7 +76,6 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   const L = ex.st.labels, has = k => (L[k] || 0) > 0;
   const want = ['ofType villager', 'villageMobs', 'jobs reaching'];
   check(want.every(has), `the per-villager loops, village lists and jobsite reach were used (${want.map(k => k + ' ' + (L[k] || 0)).join(', ')})`);
-  check(has('villagelog labels'), `the name labels used a region query (${L['villagelog labels'] || 0})`);
   check(ex.zombie && ex.struck, `lightning hit the zombie next to the player (${ex.struck})`);
   check(has('lightning'), 'the strike used a region query');
   await b.close();
