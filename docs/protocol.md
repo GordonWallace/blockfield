@@ -44,13 +44,14 @@ Every message is a plain object `{t: type, ...}`. `BF.proto.encode(msg)` turns i
   indices as Uint32, then the ids as Uint16, in chunk order. `h` has the keys and how many cells each has.
 - **entities**: `n` is the entity's protocol number. It is given by the simulation end and stays the same while the entity lives. A
   new entity comes in `add` with every field, as JSON. A changed one comes in `set` with only the fields that changed:
-  - hot fields as float32 in `b`: per entity a Uint32 `n`, a Uint32 with the kind in the top 8 bits and a bitmask of the hot fields
-    below, then a float32 for each bit set;
+  - hot fields in `b`, little-endian: per entity a Uint32 `n`, a Uint32 with the kind in the top 8 bits and a bitmask of the hot fields
+    below, then for each bit set a float64 for x, y, z (float32 resolves only 0.25 of a block at planet coordinates, about 2.2
+    million) and a float32 for the rest;
   - cold fields as JSON in `h.cold` [[n, kind, {fields}]].
 
 ### Entity fields
 
-| Kind | Hot (float32) | Cold (JSON) |
+| Kind | Hot (x, y, z float64, the rest float32) | Cold (JSON) |
 |---|---|---|
 | `mob` | x, y, z, yaw, headYaw, headPitch, walkPhase, walkAmt, age, deathT, fuse, swingT (an arm or tool swing), doorT (a zombie's time at a door) | type, sid (the r15-13 id), look, scale, headScale, partVis (text: name and 1/0 per part), tint, held, onFire, sleeping, bedF (bed facing), crackStage, badgeLevel, dead, onGround, riding, rider (protocol numbers), child; r15-37: hw, h (half width, height), k (a horse's size), golem, aiming (a skeleton's bow), trading, doorAt ([x, y, z] or null), name and prof (villagers), lead (a horse's: "player", the holder's number, or the fence post [x, y, z]) |
 | `drop` | x, y, z, age | item, count, phase, pulled |

@@ -42,12 +42,12 @@ module.exports = async (pg) => {
       clientLog: { t: "clientLog", list: [{ s: 1, d: 2.5, c: null, l: "ERROR", k: "uncaught", v: null, x: "boom" }] },
     };
     for (const k in msgs) { const p = P.encode(msgs[k]); res[k] = { ok: eq(P.decode(p), msgs[k]), bytes: P.bytes(p) }; }
-    // entities: hot fields come back as float32, cold ones exactly
+    // entities: positions come back exactly (float64, at planet coordinates too), other hot fields as float32, cold ones exactly
     const em = { t: "entities", tick: 5, add: [{ n: 1, kind: "mob", s: { x: 1, y: 2, z: 3, type: "villager", look: "farmer/1" } }],
-      set: [{ n: 1, kind: "mob", s: { x: 1.125, yaw: 0.5, look: "farmer/2" } }, { n: 2, kind: "boat", s: { row: [1, 0] } }, { n: 3, kind: "arrow", s: { lx: -0.25, stuck: true } }], gone: [7] };
+      set: [{ n: 1, kind: "mob", s: { x: 2219904.7, z: -1876543.21, yaw: 0.5, look: "farmer/2" } }, { n: 2, kind: "boat", s: { row: [1, 0] } }, { n: 3, kind: "arrow", s: { lx: -0.25, stuck: true } }], gone: [7] };
     const d = P.decode(P.encode(em));
     const set = new Map(d.set.map(e => [e.n, e]));
-    res.entities = { ok: eq(d.add, em.add) && eq(d.gone, em.gone) && set.size === 3 && set.get(1).s.x === 1.125 && set.get(1).s.yaw === 0.5 &&
+    res.entities = { ok: eq(d.add, em.add) && eq(d.gone, em.gone) && set.size === 3 && set.get(1).s.x === 2219904.7 && set.get(1).s.z === -1876543.21 && set.get(1).s.yaw === 0.5 &&
       set.get(1).s.look === "farmer/2" && set.get(2).kind === "boat" && eq(set.get(2).s.row, [1, 0]) && set.get(3).s.lx === -0.25 && set.get(3).s.stuck === true, bytes: P.bytes(P.encode(em)) };
     res.types = P.TYPES.out.concat(P.TYPES.in).filter(t => !res[t]);
     res.rle = { raw: P.bytes(P.encode({ t: "chunk", key: "0,0", cx: 0, cz: 0, lo: 0, hi: 1, secs: [raw] })), runs: P.bytes(P.encode({ t: "chunk", key: "0,0", cx: 0, cz: 0, lo: 0, hi: 1, secs: [runs] })) };
