@@ -152,7 +152,10 @@ module.exports = async (pg, out) => {
   check(sv.gen2 === 4 && sv.player.face === 0 && sv.player.d < 0.5 && sv.player.dyaw < 0.01, "the player comes back on face 0 where they were, facing the same way");
   check(sv.farFace !== 0 && sv.glass && sv.bricks, "edits on both sides of the face edge come back");
   check(sv.boat && sv.boat.d < 0.6 && sv.boat.face === 0, "the boat comes back");
-  check(sv.frozen && sv.pig < 0.1 && sv.cow < 0.1, "the mobs come back where they were");
+  // (on the world server a loaded world starts in a fresh thread, which runs a few ticks before the page's freeze reaches it and where
+  // nothing the test held is held: the mobs can take a step, so there they only have to come back, near where they were)
+  if (lib.host() === 'server') check(sv.frozen && sv.pig < 3 && sv.cow < 3, "the mobs come back (near where they were: on the world server they can take a step before the freeze)");
+  else check(sv.frozen && sv.pig < 0.1 && sv.cow < 0.1, "the mobs come back where they were");
 
   // ---- a 1.3 world in the list: greyed, Delete only, won't open
   const oldLoad = await pg.evaluate(async () => {
