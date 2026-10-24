@@ -51,7 +51,10 @@ module.exports = async (pg) => {
   console.log('F3: ' + f3);
   await pg.evaluate(() => BF.warp.freeze());
   await pg.waitForFunction(() => !!document.querySelector('#debug span'), null, { timeout: 30000, polling: 250 }).catch(() => fails.push('frozen game: the Sim line is not greyed'));
-  const frozen = { s: await lib.sim(pg, () => BF.perf.stats()), span: await pg.evaluate(() => (document.querySelector('#debug span') || {}).textContent) };
+  // (the frozen warp reaches the simulation with its next message, and the meter goes stale once no step has run for a while: poll for it)
+  let fs = null;
+  for (let i = 0; i < 60 && !(fs = await lib.sim(pg, () => BF.perf.stats())).stale; i++) await pg.waitForTimeout(250);
+  const frozen = { s: fs, span: await pg.evaluate(() => (document.querySelector('#debug span') || {}).textContent) };
   if (!frozen.s.stale) fails.push('frozen game: the meter is not stale');
   console.log('frozen: ' + frozen.span);
   if (!(frozen.s.vss > 0) || !isFinite(frozen.s.msPerStep)) fails.push('frozen: last figures not kept ' + JSON.stringify(frozen.s));
