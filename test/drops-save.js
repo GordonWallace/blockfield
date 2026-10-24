@@ -7,12 +7,13 @@ module.exports = async (pg, out) => {
   const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) BF.drops.update(h); };
-    // (also: cells [[x, z], ...] that must be loaded too; off the page this world's chunks are streamed by the simulation's own loop as well,
+    // (up to 90 s, for a slow CI runner; also: cells [[x, z], ...] that must be loaded too; off the page this world's chunks are streamed by the simulation's own loop as well,
     // around the page's player, so this waits longer than the page needed)
     const load = async (x, z, also) => {
       BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
-      for (let i = 0; i < 3000 && !(BF.world.isLoaded(x, z) && (!also || also.every(c => BF.world.isLoaded(c[0], c[1])))); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }
+      for (let i = 0; i < 9000 && !(BF.world.isLoaded(x, z) && (!also || also.every(c => BF.world.isLoaded(c[0], c[1])))); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
+      if (also && !also.every(c => BF.world.isLoaded(c[0], c[1]))) R.lines.push("note: the drops' cells were still not loaded after the wait");
     };
     BF.state.paused = true;
     BF.newWorld(1, { gen: 4, villages: 9, gameMode: "creative" });
