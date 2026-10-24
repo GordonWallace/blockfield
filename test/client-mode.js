@@ -167,6 +167,41 @@ module.exports = async (pg, out) => {
     const base = fs.existsSync(f3File) ? fs.readFileSync(f3File, "utf8") : null;
     ok("F3 shows the same as before", base === f3, { now: f3, before: base });
   }
+
+  // ---- 7. r15-44: the inventory, crafting table, furnace and creative screens, with items moved by the player's requests ----
+  const click = (c, i, button, shift) => pg.evaluate(a => BF.req.player("player.click", null, a), { c, i, button: button || 0, shift: !!shift });
+  await place();
+  await pg.evaluate(() => BF.inventory.open("inventory"));
+  await frames(3);
+  await click("inv", 1); await click("grid", 0, 2); await click("grid", 2, 2); await click("inv", 1);   // two planks stacked: sticks
+  await frames(5);
+  await shoot("inventory");
+  await pg.evaluate(() => BF.inventory.close());
+  await frames(3);
+  await pg.evaluate(() => BF.inventory.open("crafting"));
+  await frames(3);
+  await click("inv", 1); for (const g of [0, 1, 3, 4]) await click("grid", g, 2); await click("inv", 1);   // 2x2 planks: a crafting table
+  await frames(5);
+  await shoot("crafting");
+  await pg.evaluate(() => BF.inventory.close());
+  await frames(3);
+  const fpos = await pg.evaluate(({ st }) => {
+    const p = { x: st.x - 3, y: st.y, z: st.z + 6 }, I = BF.I;   // behind the player
+    BF.world.setBlock(p.x, p.y, p.z, BF.B.furnace);
+    const f = BF.inventory.furnaceRecord(p.x, p.y, p.z);
+    f.slots = [{ id: I.raw_beef, count: 5 }, null, { id: I.steak, count: 3 }]; f.burn = 0; f.burnMax = 0; f.cook = 0;
+    BF.inventory.open("furnace", p);
+    return p;
+  }, { st });
+  await frames(5);
+  await shoot("furnace");
+  await pg.evaluate(() => BF.inventory.close());
+  await frames(3);
+  await pg.evaluate(() => { BF.player.setGameMode("creative"); BF.inventory.open("inventory"); });
+  await frames(5);
+  await shoot("creative");
+  await pg.evaluate(() => { BF.inventory.close(); BF.player.setGameMode("survival"); });
+  await frames(3);
   if (RECORD) { console.log("RECORDED"); return; }
 
   // ---- a slow answer: the screen waits, then shows the offers ----
