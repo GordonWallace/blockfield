@@ -55,7 +55,7 @@ const F3_NONE = { mobs: 0, boats: 0, sim: "", clock: "", weather: "", perf: null
 function debugInfo() {
   const p = BF.player.position;
   const biome = BF.worldgen.biomeAt(p.x, p.z), cc = BF.world.chunkAt(p.x, p.z);
-  if (BF.client && !f3Asking) { f3Asking = true; BF.client.query("f3", { x: p.x, y: p.y, z: p.z }, r => { f3Asking = false; if (r && r.ok) f3 = r; }); }
+  if (BF.client && !f3Asking) { f3Asking = true; BF.client.query("f3", { x: p.x, y: p.y, z: p.z, shown: !!BF.debugOn }, r => { f3Asking = false; if (r && r.ok) f3 = r; }); }
   const q = f3 || F3_NONE;
   return {
     fps, x: p.x, y: p.y, z: p.z, yaw: BF.player.yaw,

@@ -1,6 +1,7 @@
+// @ci integration suite=ui hosts=worker,server
 // Game hotkeys do nothing on the title screen: the arrow keys don't fast-forward the background world and the number
 // keys don't move the hotbar. They still work once a world is playing.
-// node test/run.js /tmp/th test/title-hotkeys.js
+// node test/run.js /tmp/th test/title-hotkeys.js [--host page|worker|server] (all on the page: its clock, keys and hotbar)
 module.exports = async (pg) => {
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
