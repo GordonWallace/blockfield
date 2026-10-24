@@ -1,7 +1,6 @@
-// @ci baseline hosts=worker
+// @ci baseline hosts=worker,server
 // Title screen: the world list is wide enough to show a whole seed, and the copy button next to it puts the seed on the
 // clipboard. node test/run.js /tmp/sc test/seed-copy.js [--host page|worker|server]
-// (Not on the world server yet: its world list reaches the title screen only once #489 refreshes it when the host is chosen.)
 module.exports = async (pg, out) => {
   const seed = 4294967295;   // the longest seed there is (ten digits)
   await pg.evaluate(s => BF.save.create({ name: "A long world name for the seed test", seed: String(s), gameMode: "creative", biomeScale: 4 }), seed);
