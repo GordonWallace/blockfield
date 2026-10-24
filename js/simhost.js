@@ -142,7 +142,7 @@ function run(w, via) {
     };
     w.onerror = ev => { if (ev && ev.preventDefault) ev.preventDefault(); if (!settled) fail(ev && ev.message || "it could not load"); else crashed(ev && ev.message || "the " + what + " failed"); };
     const three = document.querySelector('script[src*="three"]');
-    w.postMessage({ boot: { three: three ? three.src : null } });
+    w.postMessage({ boot: { three: three ? three.src : null, build: window.BF_BUILD || null } });   // (build: the checkout's commit, for the game log's header)
   });
 }
 
@@ -227,6 +227,8 @@ function hook(C) {
     if (m.gameMode && m.gameMode !== P.gameMode) P.setGameMode(m.gameMode);
     if (m.mount !== undefined) P.rideSelf(m.mount);   // got on or off a boat or horse (r15-44 part 2), before a teleport off it
     if (m.pos) P.teleport(m.pos[0], m.pos[1], m.pos[2]);
+    if (m.look) P.setLook(m.look[0], m.look[1]);
+    if (m.flying != null && P.flying !== m.flying) P.setFlying(m.flying);
     if (m.inv && BF.inventory.setOwn) BF.inventory.setOwn(m.inv);
     if (m.spawn) BF.spawnPoint = m.spawn;
     sentPlayer = "";   // (the next frame reports the player again, so the simulation's baseline is the page's)

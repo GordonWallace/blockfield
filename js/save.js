@@ -304,6 +304,7 @@ const save = {
   remove(id) {
     if (save.current && save.current.id === id) save.current = null;
     if (BF.glog) BF.glog.forget(id);   // its game log goes too, with nothing more written
+    if (host() && BF.client && BF.client.meta) BF.client.meta({ id, forget: true });   // (there too: the simulation keeps the log, and would write it again)
     if (server()) return asked({ op: "remove", id }, "delete it").then(() => undefined);
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").delete(id); const d = t.objectStore("data"); d.delete(id); d.delete(LOGH(id)); d.delete(logRange(id)); });
   },
@@ -331,6 +332,13 @@ const save = {
     });
   },
 
+  // Save and Quit to Title, after the save: the world stays as the title background, unsaved, here and where the simulation is (which
+  // would otherwise go on autosaving it and keep its game log open).
+  quit() {
+    const cur = save.current;
+    save.current = null;
+    if (cur && host() && BF.client && BF.client.meta) BF.client.meta({ id: cur.id, quit: true });
+  },
   // Writes the current world now. Resolves true when saved (false when there's nothing to save).
   saveNow() {
     if (!save.current || !save.supported) return Promise.resolve(false);

@@ -4,7 +4,11 @@
 // subtropical land at least 5 km from every face edge and 20 km from every corner, the same each time; a 1.3 (version 1) world is
 // listed greyed with only Delete, won't open from the list and save.load refuses it; creating a world from the menu makes a planet;
 // #seed<n> boots a planet, and since the flat generators were retired (r14-24) a #seed<n>gen3 hash is not read: the default planet boots.
-// node test/run.js /tmp/ps test/planet-saves.js
+// Converted for every host (lib.sim, spec r15-43) but not opted in yet: with the world loaded in a Web Worker, mobs saved standing on a
+// built platform come back moved off their spots (reported 2026-10-24); on the world server a loaded world starts in a fresh thread,
+// which can run before the page's freeze reaches it, so the mobs can't be held for the check there.
+// node test/run.js /tmp/ps test/planet-saves.js [--host page|worker|server]
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
@@ -38,58 +42,93 @@ module.exports = async (pg, out) => {
   check(sp.every(s => s.same && s.ok), "the spawn is the same each time for a seed");
   check(sp.filter(s => s.f === 4).length >= 3, "spawns are on face 4 when possible");
 
-  // ---- save.create makes a planet; save and restore across faces and an edge
+  // ---- save.create makes a planet; save and restore across faces and an edge. The world, its mobs and boat, and the stored save are
+  // the simulation's (lib.sim: the page, a Web Worker or the world server, whose IndexedDB is server/idb.js); the player is the page's.
+  const until = async (f, ms = 20000) => { const t = Date.now() + ms; for (;;) { const v = await f(); if (v || Date.now() > t) return v; await pg.waitForTimeout(250); } };
   const sv = await pg.evaluate(async () => {
-    const r = {}, P = BF.planet, N = P.N, W = BF.world, B = BF.B;
     BF.player.start();
     const meta = await BF.save.create({ name: "planet save", seed: "4242", gameMode: "creative" });
-    r.gen = BF.state.gen; r.metaGen = meta.gen;
+    BF.world.setViewDist(4);
+    return { gen: BF.state.gen, metaGen: meta.gen, meta: meta.id };
+  });
+  await until(() => lib.sim(pg, () => BF.state.gen === 4 && BF.state.seed === 4242 && !BF.preparing), 120000);
+  // somewhere on face 0, 12 blocks from its +u edge: a platform with a pool for the boat, and edits on both sides of the edge (the far
+  // side through its margin address)
+  Object.assign(sv, await lib.sim(pg, async () => {
+    const r = {}, P = BF.planet, N = P.N, W = BF.world, B = BF.B;
     BF.mobs.spawning = false;
-    // somewhere on face 0, 12 blocks from its +u edge
-    const at = P.atlas(0, N - 12, 70000, {}), g = Math.floor(BF.mapview.surfaceAt(Math.floor(at.x), Math.floor(at.z)));
+    const at = P.atlas(0, N - 12, 70000, {}), x0 = Math.floor(at.x), z0 = Math.floor(at.z);
+    const g = Math.floor(Math.max(BF.worldgen.heightAt(x0, z0), BF.SEA, BF.worldgen.waterLevelAt ? BF.worldgen.waterLevelAt(x0, z0) : 0) + 1.01);   // (js/mapview.js surfaceAt)
     const y0 = g + 6;
     BF.commands.execute(`/tp face 0 ${N - 12} 70000 ${y0 + 3}`);
     BF.player.setFlying(true);
-    W.setViewDist(4);
-    await settle(2500);
-    const x0 = Math.floor(at.x), z0 = Math.floor(at.z);
-    // a platform with a pool for the boat, and edits on both sides of the edge (the far side through its margin address)
+    if (BF.proto) BF.proto.flush();
+    for (let i = 0; i < 160 && !(W.isLoaded(x0, z0) && W.isLoaded(x0 + 14, z0)); i++) await new Promise(q => setTimeout(q, 250));
     for (let z = z0 - 3; z <= z0 + 3; z++) for (let x = x0 - 3; x <= x0 + 3; x++) { W.setBlock(x, y0, z, B.stone); W.setBlock(x, y0 + 1, z, 0); W.setBlock(x, y0 + 2, z, 0); }
     for (let z = z0 - 1; z <= z0 + 1; z++) for (let x = x0 - 1; x <= x0 + 1; x++) W.setBlock(x, y0 + 1, z, B.water);
     W.setBlock(x0 + 10, y0 + 4, z0, B.glass);          // u N-2 on face 0
     W.setBlock(x0 + 14, y0 + 4, z0, B.bricks);         // u N+2: the neighbouring face, through the margin
     const far = P.canonCell(x0 + 14, z0, {});
-    r.farFace = far.f;
-    // freeze the world (0x) so the mobs can't wander between the save and the checks; a pig walking off this
-    // raised platform and falling 6 blocks made the check flaky under CI load
-    BF.warp.freeze();
+    r.farFace = far.f; r.x0 = x0; r.y0 = y0; r.z0 = z0; r.far = { x: far.x, z: far.z };
+    if (BF.proto) BF.proto.flush();
+    return r;
+  }));
+  await pg.evaluate(() => settle(2500));
+  // freeze the world (0x) so the mobs can't wander between the save and the checks; a pig walking off this raised platform and falling
+  // 6 blocks made the check flaky under CI load (the page sets the speed: the simulation follows)
+  await pg.evaluate(() => BF.warp.freeze());
+  await until(() => lib.sim(pg, () => BF.warp.frozen));
+  // the mobs' own steps are held until they have been checked: with the simulation off the page the page's freeze reaches it a message
+  // late after the load below (the module outlives the world; the world server loads it in a fresh thread, where nothing is held)
+  await lib.sim(pg, () => { if (!globalThis.__upd) globalThis.__upd = BF.mobs.update; BF.mobs.update = () => {}; });
+  const put = await lib.sim(pg, ({ x0, y0, z0 }) => {
     const boat = BF.boats.spawn("birch", x0 + 0.5, y0 + 1.739, z0 + 0.5, 0.7);
     const pig = BF.mobs.spawn("pig", x0 + 2.5, y0 + 1, z0 - 2.5), cow = BF.mobs.spawn("cow", x0 - 2.5, y0 + 1, z0 + 2.5);
     pig.ai = pig.ai || {}; cow.ai = cow.ai || {};
     BF.player.teleport(x0 + 0.5, y0 + 3, z0 + 2.5); BF.player.setLook(1.1, -0.3);
-    const ok = await BF.save.saveNow();
-    r.saved = ok;
-    const before = { p: { x: BF.player.position.x, y: BF.player.position.y, z: BF.player.position.z, yaw: BF.player.yaw }, pig: { x: pig.position.x, z: pig.position.z }, cow: { x: cow.position.x, z: cow.position.z } };
-    // the stored snapshot
-    const raw = await new Promise((res, rej) => { const q = indexedDB.open("blockfield"); q.onsuccess = () => { const t = q.result.transaction(["data", "worlds"], "readonly"); const a = t.objectStore("data").get(meta.id), m = t.objectStore("worlds").get(meta.id); t.oncomplete = () => res({ data: a.result, meta: m.result }); t.onerror = () => rej(t.error); }; q.onerror = () => rej(q.error); });
+    if (BF.proto) BF.proto.flush();
+    return { boat: !!boat, pig: { x: pig.position.x, y: pig.position.y, z: pig.position.z }, cow: { x: cow.position.x, y: cow.position.y, z: cow.position.z } };
+  }, sv);
+  await until(() => pg.evaluate(w => Math.abs(BF.player.position.x - w.x) < 1e-6 && Math.abs(BF.player.position.z - w.z) < 1e-6 && Math.abs(BF.player.yaw - 1.1) < 1e-9, { x: sv.x0 + 0.5, z: sv.z0 + 2.5 }));
+  Object.assign(sv, await pg.evaluate(async () => {
+    const r = {};
+    r.saved = await BF.save.saveNow();
+    r.before = { p: { x: BF.player.position.x, y: BF.player.position.y, z: BF.player.position.z, yaw: BF.player.yaw } };
+    return r;
+  }));
+  // where they were saved
+  Object.assign(sv.before, await lib.sim(pg, ({ x0, z0 }) => {
+    const at = t => { const m = BF.mobs.list.filter(m => m.type === t && !m.dead).sort((a, b) => Math.hypot(a.position.x - x0, a.position.z - z0) - Math.hypot(b.position.x - x0, b.position.z - z0))[0]; return m && { x: m.position.x, y: m.position.y, z: m.position.z }; };
+    return { pig: at("pig"), cow: at("cow") };
+  }, sv));
+  sv.put = put;
+  // the stored snapshot
+  Object.assign(sv, await lib.sim(pg, async id => {
+    const P = BF.planet, r = {};
+    const raw = await new Promise((res, rej) => { const q = indexedDB.open("blockfield"); q.onsuccess = () => { const t = q.result.transaction(["data", "worlds"], "readonly"); const a = t.objectStore("data").get(id), m = t.objectStore("worlds").get(id); t.oncomplete = () => res({ data: a.result, meta: m.result }); t.onerror = () => rej(t.error); }; q.onerror = () => rej(q.error); });
     r.version = raw.data.version; r.dataGen = raw.data.gen; r.metaVersion = raw.meta.version; r.metaGen2 = raw.meta.gen;
     r.playerCanonical = (() => { const c = P.canon(raw.data.player.x, raw.data.player.z, {}); return c.x === raw.data.player.x && c.z === raw.data.player.z && c.f === 0; })();
-    // somewhere else (another planet), then back
-    BF.newWorld(1);
+    return r;
+  }, sv.meta));
+  // somewhere else (another planet), then back
+  await lib.newWorld(pg, 1);   // (there too, off the page)
+  await until(() => lib.sim(pg, () => BF.state.seed === 1), 60000);
+  sv.frozen = await pg.evaluate(async id => {
     await settle(500);
     let refreeze = true;
     BF.on("worldLoaded", () => { if (refreeze) BF.warp.freeze(); });   // straight after restore (which resets the speed), before any frame runs
-    await BF.save.load(meta.id);
+    await BF.save.load(id);
     refreeze = false;
-    r.frozen = BF.warp.frozen;
+    return BF.warp.frozen;
+  }, sv.meta);
+  await until(() => lib.sim(pg, () => BF.warp.frozen && BF.state.seed === 4242), 60000);
+  // wild mobs come back with their chunks, in the wildlife step; still frozen, wait for the chunks (up to 20 s on a slow machine) and run
+  // that step once by hand, so they are checked where they were put, before any AI step
+  Object.assign(sv, await lib.sim(pg, async ({ x0, y0, z0, far, before }) => {
+    const P = BF.planet, W = BF.world, B = BF.B, r = {};
     BF.mobs.spawning = false;
-    // wild mobs come back with their chunks, in the wildlife step; still frozen, wait for the chunks (up to 20 s on a slow
-    // machine) and run that step once by hand, so they are checked where they were put, before any AI step
-    for (let i = 0; i < 40 && !(W.isLoaded(Math.floor(before.pig.x), Math.floor(before.pig.z)) && W.isLoaded(Math.floor(before.cow.x), Math.floor(before.cow.z))); i++) await settle(500);
+    for (let i = 0; i < 80 && !(W.isLoaded(Math.floor(before.pig.x), Math.floor(before.pig.z)) && W.isLoaded(Math.floor(before.cow.x), Math.floor(before.cow.z)) && W.isLoaded(x0 + 14, z0)); i++) await new Promise(q => setTimeout(q, 250));
     BF.wildlife.update(0);
-    await settle(500);
-    const p = BF.player.position, pc = P.canon(p.x, p.z, {});
-    r.player = { face: pc.f, d: Math.hypot(p.x - before.p.x, p.y - before.p.y, p.z - before.p.z), dyaw: Math.abs(BF.player.yaw - before.p.yaw) };
     r.gen2 = BF.state.gen;
     r.glass = W.getBlock(x0 + 10, y0 + 4, z0) === B.glass;
     r.bricks = W.getBlock(x0 + 14, y0 + 4, z0) === B.bricks && W.getBlock(far.x, y0 + 4, far.z) === B.bricks;
@@ -97,10 +136,16 @@ module.exports = async (pg, out) => {
     r.boat = lb ? { d: Math.hypot(lb.pos.x - (x0 + 0.5), lb.pos.z - (z0 + 0.5)), face: P.canon(lb.pos.x, lb.pos.z, {}).f } : null;
     const near = (t, q) => BF.mobs.list.filter(m => m.type === t && !m.dead).map(m => Math.hypot(m.position.x - q.x, m.position.z - q.z)).sort((a, b) => a - b)[0];
     r.pig = near("pig", before.pig); r.cow = near("cow", before.cow);
-    r.meta = meta.id;
+    if (globalThis.__upd) { BF.mobs.update = globalThis.__upd; delete globalThis.__upd; }   // (the world server loads a world in a fresh thread: nothing held there)
+    return r;
+  }, sv));
+  Object.assign(sv, await pg.evaluate(async before => {
+    await settle(500);
+    const P = BF.planet, p = BF.player.position, pc = P.canon(p.x, p.z, {});
+    const r = { player: { face: pc.f, d: Math.hypot(p.x - before.p.x, p.y - before.p.y, p.z - before.p.z), dyaw: Math.abs(BF.player.yaw - before.p.yaw) } };
     BF.warp.reset();
     return r;
-  });
+  }, sv.before));
   console.log("save " + JSON.stringify(sv));
   check(sv.gen === 4 && sv.metaGen === 4, "save.create makes a planet (generator 4)");
   check(sv.saved && sv.version === 3 && sv.dataGen === 4 && sv.metaVersion === 3 && sv.metaGen2 === 4, "it is saved as version 3 with gen 4");
@@ -115,7 +160,8 @@ module.exports = async (pg, out) => {
     const now = Date.now(), id = "wold" + now.toString(36);
     const meta = { id, name: "My 1.3 world", seed: 77, gameMode: "survival", gen: 3, biomeScale: 2, villages: 10, created: now - 1000, lastPlayed: now + 1000 };
     const data = { version: 1, seed: 77, gen: 3, biomeScale: 2, villages: 10, time: { t: 0.3, day: 2 }, player: { x: 8, y: 80, z: 8 }, edits: {} };
-    await new Promise((res, rej) => { const q = indexedDB.open("blockfield"); q.onsuccess = () => { const t = q.result.transaction(["data", "worlds"], "readwrite"); t.objectStore("worlds").put(meta); t.objectStore("data").put(data, id); t.oncomplete = res; t.onerror = () => rej(t.error); }; q.onerror = () => rej(q.error); });
+    // (stored where the saves are: the page's or the worker's IndexedDB, or the world server's, server/idb.js)
+    await BFT.sim(async ([meta, data, id]) => { await new Promise((res, rej) => { const q = indexedDB.open("blockfield"); q.onsuccess = () => { const t = q.result.transaction(["data", "worlds"], "readwrite"); t.objectStore("worlds").put(meta); t.objectStore("data").put(data, id); t.oncomplete = res; t.onerror = () => rej(t.error); }; q.onerror = () => rej(q.error); }); return true; }, [meta, data, id]);
     window.__oldId = id;
     // save.load refuses it too (there is no flat generator to open it with), and leaves the world as it was
     const seed0 = BF.state.seed;
@@ -235,12 +281,13 @@ module.exports = async (pg, out) => {
 
   // ---- #seed<n> boots a planet; #seed<n>gen3 is no longer read (the flat generators are gone): the default planet, seed 1337
   const url = pg.url().replace(/#.*$/, "");
-  const booted = () => pg.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById("bf-loading"), null, { timeout: 120000 }).catch(() => {}).then(() => pg.waitForTimeout(1000));   // (a planet boot works out its rivers first)
-  await pg.goto(url + "#seed42"); await pg.reload(); await booted();
+  // (a planet boot works out its rivers first; with the simulation off the page the page has the seed once the world has started there)
+  const booted = seed => pg.waitForFunction(s => window.BF && BF.state && !BF.preparing && !document.getElementById("bf-loading") && BF.state.seed === s, seed, { timeout: 120000 }).catch(() => {}).then(() => pg.waitForTimeout(1000));
+  await pg.goto(url + "#seed42"); await pg.reload(); await booted(42);
   const h1 = await pg.evaluate(() => ({ gen: BF.state.gen, seed: BF.state.seed }));
-  await pg.goto(url); await pg.reload(); await booted();
+  await pg.goto(url); await pg.reload(); await booted(1337);
   const h0 = await pg.evaluate(() => BF.state.gen);
-  await pg.goto(url + "#seed42gen3"); await pg.reload(); await booted();
+  await pg.goto(url + "#seed42gen3"); await pg.reload(); await booted(1337);
   const h3 = await pg.evaluate(() => ({ gen: BF.state.gen, seed: BF.state.seed }));
   console.log("hash " + JSON.stringify({ h1, h0, h3 }));
   check(h1.gen === 4 && h1.seed === 42 && h0 === 4, "#seed42 and no hash boot planets");

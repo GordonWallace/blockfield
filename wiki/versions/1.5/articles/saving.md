@@ -2,7 +2,7 @@
 title: Saving and moving worlds
 category: Game rules
 ---
-Blockfield saves the world you are playing every 30 seconds, when you pause, when you choose **Save and Quit to Title**, and when you close the page. Where the save goes depends on how you started the game.
+Blockfield saves the world you are playing every 30 seconds, when you pause, when you choose **Save and Quit to Title**, and when you close the page. After **Save and Quit to Title** the world stays behind the title screen but is no longer saved, wherever the simulation runs. Where the save goes depends on how you started the game.
 
 ## Where your worlds are kept
 
