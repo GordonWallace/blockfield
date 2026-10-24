@@ -20,7 +20,8 @@ const MAX_DEPTH = 7, MAX_ARR = 2500;
 const SKIP = new Set(["def", "position", "vel", "prev", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
   "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
-  "tradingWith", "badge", "badgeLevel", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig"]);
+  "tradingWith", "badge", "badgeLevel", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig",
+  "_ri", "_rs"]);   // (the region index's slot and creation order, js/regions.js: the new mob's own, never the snapshot's)
 
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const r2 = v => Math.round(v * 100) / 100;

@@ -123,8 +123,8 @@ class Index {
     this._set(i, o, keyOf(p.x, 0, p.z));
   }
   remove(o) {
-    const i = o._ri;
-    if (i === undefined || this.objs[i] !== o) return;
+    let i = o._ri;
+    if (i === undefined || this.objs[i] !== o) { i = this.objs.indexOf(o); if (i < 0) return; }   // (a slot number copied onto it from another object)
     this._set(i, o, -1);
     const last = this.objs.length - 1;
     if (i !== last) {   // the last one takes the slot
