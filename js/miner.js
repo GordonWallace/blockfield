@@ -34,7 +34,7 @@
 // - Persistence: the current mineshaft (m.mi.shaft) is saved with the villager (trading.js pack, `mi`). See CONTRACT.md "Miners".
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const TR = () => BF.trades;
 const W = () => BF.world;
 const get = (x, y, z) => W().getBlock(x, y, z);
@@ -369,13 +369,6 @@ function wearPick(m, p, n) {
   if (!p || BF.toolWear.use(m, p, n) !== "broken") return;
   log("pickBroke", m, { pick: nameOf(p.id) });
 }
-// The hostile mobs, in BF.mobs.list order: worked out once a step for all the miners (r15-07), again if a mob came or went meanwhile.
-let HOST = null;
-function hostiles() {
-  const L = BF.mobs.list, t = BF.simNow(), last = L[L.length - 1];
-  if (!HOST || HOST.t !== t || HOST.n !== L.length || HOST.last !== last) { HOST = L.filter(o => o.def && o.def.hostile); HOST.t = t; HOST.n = L.length; HOST.last = last; }
-  return HOST;
-}
 // A hostile mob within reach (one that wandered into the tunnel from a cave, or spawned in its dark): the miner hits it with its pickaxe
 // (2 + tier damage, 2 uses of wear, like the player's), so it can't block the way for good.
 function fend(m, Q, dt) {
@@ -383,11 +376,11 @@ function fend(m, Q, dt) {
   const p = pickOf(m);
   if (!p) return;
   const near = o => o !== m && !o.dead && !o.removed && o.def && o.def.hostile && Math.hypot(o.position.x - m.position.x, o.position.z - m.position.z) < 1.8 && Math.abs(o.position.y - m.position.y) < 1.5;
-  const o = hostiles().find(near);
+  const o = BF.regions.mobsAround(m.position.x, m.position.z, 1.8, near, { label: "miner fend" })[0];   // (the first in BF.mobs.list order, r15-32)
   if (BF.dcmp && BF.dcmp.on()) { const L = BF.mobs.list; BF.dcmp.check("miner fend", L.indexOf(L.find(near)), L.indexOf(o), m); }
   if (!o) return;
   Q.hitT = 0.8; m.ai.swingT = 0.3;
-  BF.mobs.hurt(o, 2 + BF.items[p.id].tool.tier, "villager");
+  BF.mobs.hurt(o, 2 + BF.items[p.id].tool.tier, "villager", m);
   wearPick(m, p, BF.toolWear.forHit(p));
   log("fend", m, { mob: o.type });
 }
@@ -421,18 +414,8 @@ function findSeller(m, want, avoid) {
 }
 function doBuy(m, deal) {
   const T = TR(), v2 = deal.other, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2) || T.blockReason(v2, o)) break;
-    if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);
-    if (!sold) break;
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
+  const done = T.asked(m, v2, o) || canSell(v2) ? T.buy(m, v2, o, deal.times, { guard: () => (canSell(v2) ? null : "busy") }) : 0;   // one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }
@@ -473,17 +456,9 @@ function findBuyer(m, avoid) {
 // The builder buys from the miner's own offer: same stock / room rules as a player trade, xp to the miner.
 function doSell(m, deal) {
   const T = TR(), b = deal.other, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canBuy(b) || saleTimes(m, b, o) < 1) break;
-    const sold = T.exchange(m, o);
-    if (!sold) break;
-    for (const p of o.buy) T.inv.remove(b.inv, p.id, p.n);
-    T.inv.addStacks(b.inv, sold);
-    T.addXp(m, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(b, m, o, done);
+  const k = T.asked(m, m, o) ? deal.times : canBuy(b) ? Math.min(deal.times, saleTimes(m, b, o)) : 0;
+  const done = k > 0 ? T.buy(b, m, o, k, { by: m, guard: () => (canBuy(b) ? null : "buyer busy") }) : 0;   // the builder buys: one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) log("sell", m, { to: "builder", cobble: done * o.sell.n, got: o.buy.map(p => p.n * done + " " + BF.itemName(p.id)).join(" + ") });
   return done;
 }
@@ -856,13 +831,14 @@ function trip(m, Q, k, dt, out) {
   out.faceX = v2.position.x; out.faceZ = v2.position.z; m.lookAt = v2;
   if (k.tt <= 0) {
     const done = deal.kind === "buy" ? doBuy(m, deal) : doSell(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     if (!done) { Q.avoid[avoidKey()] = dayNow() + 0.05; log("giveup", m, { to: v2.profession, item: deal.item === "cobble" ? "cobblestone" : BF.itemName(deal.item), why: "trade refused" }); }
     endTask(m, Q); Q.thinkT = 1;
   }
   return true;
 }
 
-// Trade-screen status line (inventory.js).
+// Trade-screen status line (the trades query, js/playerinv.js tradeView).
 function taskName(Q, k) {
   if (k.kind === "quarry") return k.gravel ? "Digging gravel for flint" : "Quarrying stone";
   if (k.kind === "sift") return "Sifting gravel for flint";

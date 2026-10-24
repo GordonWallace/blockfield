@@ -6,6 +6,7 @@
 //   blocks  block ticks (fluids, crops, farmland, grass), in a fixed order;
 //   deliver results, so the requester has them before its next think: req.then(fn) callbacks, and the kind's onResult(m, req, result)
 //           for a requester that is a live mob. A requester removed by then gets nothing (what the request did stays done).
+// A request whose requester mob is dead by the time it applies (killed earlier in the same apply) is refused with why "dead".
 // Requests sent during apply or deliver (chain effects), or between ticks (the player, real time), go into the next tick's apply.
 // Transition mode (BF.req.direct, on until r15-18 to r15-23 convert the systems): code may still write the world directly. Every
 // direct world.setBlock outside apply and the block ticks is counted by the module that made it (BF.req.stats().direct), shown on
@@ -13,23 +14,32 @@
 // Game log: INFO "requests" summary once a game hour while the debug overlay or debug screen is on; ERROR for a kind with no handler.
 // Queued requests are not saved: those sent in a tick apply in that tick, so only chain effects and between-tick sends can be pending.
 // API: BF.req = { send(kind, target, data, from) -> req (req.then(fn)), on(kind, applyFn(req, world) -> {ok, ...}, {onResult}?),
-//   beginTick(), apply(), blocks(fn), deliver(), endTick(), phase, direct, strict, stats(), resetStats(), text(), queued(), reset(), order(a, b) }
+//   beginTick(), apply(), blocks(fn), deliver(), endTick(), times() -> {ticks, think, apply, blocks, deliver} (ms), resetTimes(), phase, direct, strict, stats(), resetStats(), text(), queued(), reset(), order(a, b),
+//   player(kind, target, data) -> req (applied now, req.result; through the protocol when R.via is set), applyPlayer(kind, target, data), via, record() -> list / record(false) -> list, replay(list), replayFlush(),
+//   recording, replaying, inPlayer, route, regionOrder, single, applying (region inboxes, spec r15-33) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const kinds = new Map();   // kind -> {apply, onResult}
 let queue = [], seq = 0, done = [];   // done: [req, result] waiting for delivery
+// Region inboxes (spec r15-33): with R.route set (js/regiontick.js), a request sent in the think phase goes to the inbox of the region it
+// targets (route(req) -> region key, or -1 for the global inbox: requests with no place, such as new mobs). apply() then runs the
+// inboxes one region at a time, in R.regionOrder() (key order), each sorted by order(), and the global inbox last. R.route null (or
+// R.single) keeps the single-list apply of r15-17: every request in one list sorted by order(). Either way, requests marked data.late
+// (the far parts of a wide effect, js/mobs.js explode) apply after all the others: region by region, then the global ones.
+let inbox = new Map();   // region key -> [req]
 let phase = "idle";
-const S = { sent: 0, applied: 0, refused: 0, byKind: {}, direct: {}, directTotal: 0 };
+const S = { sent: 0, applied: 0, refused: 0, byKind: {}, direct: {}, directTotal: 0, regionApplies: 0 };
 const H = { sent: 0, refused: 0, byKind: {}, direct: {}, directTotal: 0 };   // since the last hourly log line
 let hourAt = null;
 const unhandled = new Set();
 const HOUR = 1200 / 24;   // game seconds (js/sky.js: a 1200 s day)
 
-// Requester order: mob ids "e<n>" by n, then other requesters ("player", village keys, "test") by name, then none; ties by sequence.
+// Requester order: the player, then mob ids "e<n>" by n, then other requesters ("player", village keys, "test") by name, then none; ties by sequence.
 function rank(from) {
   if (from == null) return [2, 0, ""];
+  if (from === "player") return [-1, 0, ""];   // the player first, on every client alike (spec r15-20)
   const s = String(from), m = /^e(\d+)$/.exec(s);
   return m ? [0, +m[1], ""] : [1, 0, s];
 }
@@ -40,43 +50,79 @@ function order(a, b) {
 
 function bump(o, kind, key) { const k = o.byKind[kind] || (o.byKind[kind] = { sent: 0, applied: 0, refused: 0 }); k[key]++; }
 
-function send(kind, target, data, from) {
+function make(kind, target, data, from) {
   const req = { kind, target, data: data || {}, from: from == null ? null : BF.ids && typeof from === "object" ? BF.ids.idOf(from) : from,
-    seq: seq++, tick: BF.rand ? BF.rand.tick : 0, cbs: null, result: undefined };
-  req.then = fn => { (req.cbs || (req.cbs = [])).push(fn); return req; };
-  queue.push(req);
+    seq: seq++, tick: BF.rand ? BF.rand.tick : 0, cbs: null, result: undefined, delivered: false };
+  req.then = fn => { if (req.delivered) { try { fn(req.result, req); } catch (e) { console.error(e); } } else (req.cbs || (req.cbs = [])).push(fn); return req; };
   S.sent++; H.sent++; bump(S, kind, "sent"); bump(H, kind, "sent");
   return req;
 }
-function on(kind, applyFn, opts) { kinds.set(kind, { apply: applyFn, onResult: opts && opts.onResult }); }
+function send(kind, target, data, from) {
+  const req = make(kind, target, data, from);
+  const k = R.route && kinds.has(kind) && !kinds.get(kind).global ? R.route(req) : -1;
+  if (k >= 0) { req.region = k; let a = inbox.get(k); if (!a) inbox.set(k, (a = [])); a.push(req); }
+  else queue.push(req);
+  return req;
+}
+// opts: onResult(m, req, result) for a requester that is a live mob; global: true for a kind that is always applied from the global
+// inbox, after the regions (one that hands out ids or otherwise depends on order across the whole world: "spawn").
+function on(kind, applyFn, opts) { kinds.set(kind, { apply: applyFn, onResult: opts && opts.onResult, global: !!(opts && opts.global) }); }
 
+function applyOne(req) {
+  const k = kinds.get(req.kind);
+  let r;
+  if (dead(req.from)) r = { ok: false, why: "dead" };
+  else if (R.inactive && (r = R.inactive(req))) {}   // its region isn't simulated (spec r15-33)   // killed earlier in this apply (r15-23): its own requests are refused, items stay put
+  else if (!k) {
+    r = { ok: false, why: "no handler" };
+    if (!unhandled.has(req.kind)) { unhandled.add(req.kind); if (BF.glog) BF.glog.log("ERROR", "requests", "Request kind \"" + req.kind + "\" has no handler (from " + (req.from || "nobody") + ")"); }
+  } else {
+    try { r = k.apply(req, BF.world) || { ok: true }; }
+    catch (e) { r = { ok: false, why: "error", error: String(e && e.message || e) }; console.error(e); }
+  }
+  req.result = r;
+  S.applied++; bump(S, req.kind, "applied");
+  if (!r.ok) { S.refused++; H.refused++; bump(S, req.kind, "refused"); bump(H, req.kind, "refused"); }
+  return r;
+}
 function apply() {
-  const list = queue;
-  queue = [];   // anything sent from here on is the next tick's
-  if (!list.length) return 0;
-  list.sort(order);
+  if (phase === "think" && t0) lapT("think");
+  const list = queue, boxes = inbox;
+  queue = []; inbox = new Map();   // anything sent from here on is the next tick's
+  if (!list.length && !boxes.size) return 0;
   const prev = phase;
   phase = "apply";
+  let n = 0;
+  // R.applying: the region of the request being applied (-1: the global inbox), in both modes alike (per-region roll counters, js/blocks.js)
+  const run = L => { L.sort(order); for (const req of L) { R.applying = req.region >= 0 ? req.region : -1; applyOne(req); done.push(req); } n += L.length; };
+  // late requests (data.late: the far parts of a wide effect, decided by an earlier request of the same tick) go after all the others
+  const split = L => { const a = [], b = []; for (const req of L) (req.data.late ? b : a).push(req); return [a, b]; };
   try {
-    for (const req of list) {
-      const k = kinds.get(req.kind);
-      let r;
-      if (!k) {
-        r = { ok: false, why: "no handler" };
-        if (!unhandled.has(req.kind)) { unhandled.add(req.kind); if (BF.glog) BF.glog.log("ERROR", "requests", "Request kind \"" + req.kind + "\" has no handler (from " + (req.from || "nobody") + ")"); }
-      } else {
-        try { r = k.apply(req, BF.world) || { ok: true }; }
-        catch (e) { r = { ok: false, why: "error", error: String(e && e.message || e) }; console.error(e); }
-      }
-      req.result = r;
-      S.applied++; bump(S, req.kind, "applied");
-      if (!r.ok) { S.refused++; H.refused++; bump(S, req.kind, "refused"); bump(H, req.kind, "refused"); }
-      done.push(req);
+    if (R.single || !R.route) {
+      const all = list.slice();
+      for (const L of boxes.values()) for (const req of L) all.push(req);
+      const [a, b] = split(all);
+      run(a); run(b);
+    } else {
+      const keys = [...boxes.keys()], late = new Map();
+      if (R.regionOrder) R.regionOrder(keys); else keys.sort((a, b) => a - b);
+      for (const k of keys) { const [a, b] = split(boxes.get(k)); if (b.length) late.set(k, b); run(a); }
+      const [g, gl] = split(list);
+      run(g);
+      for (const k of keys) if (late.has(k)) run(late.get(k));
+      run(gl);
+      S.regionApplies += keys.length;
     }
-  } finally { phase = prev; }
-  return list.length;
+  } finally { phase = prev; R.applying = -1; }
+  return n;
 }
 
+// A requester that has died (a mob killed by an earlier request this tick, spec r15-23). A removed one (unloaded) still has its requests applied.
+function dead(from) {
+  if (from == null || !BF.ids || !/^e\d+$/.test(from)) return false;
+  const o = BF.ids.get(from);
+  return !!(o && o.dead);
+}
 // A requester that is gone: an entity id that no longer reads a live object.
 function gone(from) {
   if (from == null || !BF.ids || !/^e\d+$/.test(from)) return false;
@@ -91,6 +137,7 @@ function deliver() {
   phase = "deliver";
   try {
     for (const req of list) {
+      req.delivered = true;
       if (gone(req.from)) continue;   // the requester went: the result is dropped (the apply function kept any items in the world)
       const k = kinds.get(req.kind);
       if (k && k.onResult && req.from) { const m = BF.ids && BF.ids.get(req.from); if (m) { try { k.onResult(m, req, req.result); } catch (e) { console.error(e); } } }
@@ -99,9 +146,120 @@ function deliver() {
   } finally { phase = prev; }
 }
 
-function beginTick() { phase = "think"; }
-function blocks(fn) { const prev = phase; phase = "blocks"; try { fn(); } finally { phase = prev; } }
-function endTick() { phase = "idle"; hourly(); }
+// Time per phase (spec r15-33): ms summed over the ticks since resetTimes(), for the debug screen and the hourly region-tick log line.
+// Think runs from beginTick to apply, so it includes the think hooks of world.tickSim.
+const T = { ticks: 0, think: 0, apply: 0, blocks: 0, deliver: 0 };
+const clock = () => (globalThis.performance ? performance.now() : Date.now());
+let t0 = 0;
+function lapT(part) { const t = clock(); if (t0) T[part] += t - t0; t0 = t; }
+function beginTick() { if (rec || rep) boundary(); phase = "think"; t0 = clock(); T.ticks++; }
+function blocks(fn) { if (t0) lapT("apply"); const prev = phase; phase = "blocks"; try { fn(); } finally { phase = prev; if (t0) lapT("blocks"); } }
+function endTick() { phase = "idle"; if (t0) lapT("deliver"); t0 = 0; hourly(); if (BF.rtick) BF.rtick.hourly(); }
+const times = () => Object.assign({}, T);
+function resetTimes() { T.ticks = T.think = T.apply = T.blocks = T.deliver = 0; }
+
+// ---------- the player (spec r15-20) ----------
+// The player runs in real time between ticks (js/main.js frame: the tick batch, then BF.player.update). What it does to the world
+// (breaking, placing, doors, using items on blocks and mobs, eating, shooting, throwing, the inventory screens with trades, chests
+// and furnaces, slash commands) is a request from "player", stamped with the tick it follows (BF.rand.tick, the last tick run), and
+// applied at once, at that tick boundary. In the page the client and the simulation share one world, so the prediction is the
+// apply: the player feels no delay, and its edit comes before every request of the next tick, as the player sorts first. The result
+// is back when player() returns (req.result); the caller keeps its own side (the item in hand, the swing) for a refusal. A refusal
+// because someone else got there first ("changed", "gone") is logged at INFO. A player
+// request made while one is being applied (the trade screen that talking to a villager opens) is part of it. At 0x (frozen) and
+// behind a paused screen no ticks run, and the requests apply all the same. When the simulation moves to its own thread (r15-36)
+// the same requests go across and apply in its next apply phase; the client then keeps its prediction until the result comes back.
+// Input log: record() keeps each player request with its tick and the player's pose when it was made ([x, y, z, yaw, pitch, hotbar
+// slot, flying]), plus the pose at the start of each tick where it changed. replay(list) feeds them back, each at the start of the tick
+// after the one it followed, so a recorded session plays out the same on a fresh load (test/player-requests.js). The player's own
+// real-time state (hunger, air, falling) is not in the log: a replay moves the player, it does not simulate it.
+let depth = 0, rec = null, recPose = "", rep = null, repAt = 0, replaying = false;
+const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
+function pose() {
+  const P = BF.player;
+  if (!P || !P.position) return null;
+  const p = P.position;
+  return [p.x, p.y, p.z, P.yaw, P.pitch, BF.inventory ? BF.inventory.selectedIndex : 0, P.flying ? 1 : 0];
+}
+function setPose(a) {
+  const P = BF.player;
+  if (!a || !P || !P.position) return;
+  P.position.set(a[0], a[1], a[2]);
+  if (P.setLook) P.setLook(a[3], a[4]);
+  if (BF.inventory && BF.inventory.selectedIndex !== a[5]) BF.inventory.select(a[5]);
+  if (P.setFlying && !!a[6] !== !!P.flying) P.setFlying(!!a[6]);
+}
+// With the simulation/client protocol connected (js/protocol.js, r15-36), player() hands the request to the client end (R.via), which
+// sends it to the simulation; the simulation applies it with applyPlayer() and sends the result back (in the page: before via returns).
+// A request made while one is being applied, and replayed entries, are the simulation's own and apply directly.
+function player(kind, target, data) {
+  if (R.via && !depth && !replaying) { const r = R.via(kind, target, data); if (r) return r; }
+  return applyPlayer(kind, target, data);
+}
+function applyPlayer(kind, target, data) {
+  const req = make(kind, target, data, "player");
+  if (rec && !depth && !replaying) rec.push({ tick: req.tick, kind, target, data: clone(req.data), pose: pose() });
+  const prev = phase;
+  phase = "apply"; depth++;
+  try { applyOne(req); } finally { depth--; phase = prev; }
+  req.delivered = true;
+  if (req.cbs) for (const fn of req.cbs) { try { fn(req.result, req); } catch (e) { console.error(e); } }
+  const r = req.result;
+  if (!r.ok && (r.why === "changed" || r.why === "gone") && BF.glog) BF.glog.log("INFO", "requests", "Player request " + kind + (target != null ? " at " + target : "") + " refused (" + (r.why || "refused") + ")");
+  return req;
+}
+// At the start of each tick: the pose for the input log, and the replayed entries that followed the last tick.
+function boundary() {
+  const t = BF.rand ? BF.rand.tick : 0;
+  if (rep) {
+    replaying = true;
+    try {
+      while (repAt < rep.length && rep[repAt].tick < t) playEntry(rep[repAt++]);
+    } finally { replaying = false; }
+    if (repAt >= rep.length) endReplay();
+  }
+  if (rec) { const p = pose(), k = JSON.stringify(p); if (p && k !== recPose) { recPose = k; rec.push({ tick: t - 1, pose: p }); } }
+}
+function playEntry(e) {
+  setPose(e.pose);
+  if (e.kind) applyPlayer(e.kind, e.target, clone(e.data));
+}
+function record(on) {
+  if (on === false) {
+    const list = rec || [];
+    if (rec && BF.glog) BF.glog.log("INFO", "requests", "Player input recording stopped: " + list.filter(e => e.kind).length + " requests, " + list.length + " entries");
+    rec = null;
+    return list;
+  }
+  rec = [];
+  const p = pose();
+  recPose = JSON.stringify(p);
+  if (p) rec.push({ tick: (BF.rand ? BF.rand.tick : 0) - 1, pose: p });   // where the player stands when it starts
+  if (BF.glog) BF.glog.log("INFO", "requests", "Player input recording started at tick " + (BF.rand ? BF.rand.tick : 0));
+  return rec;
+}
+function replay(list) {
+  rep = clone(list || []); repAt = 0;
+  if (BF.glog) BF.glog.log("INFO", "requests", "Replaying " + rep.filter(e => e.kind).length + " player requests" + (rep.length ? " from tick " + rep[0].tick + " to " + rep[rep.length - 1].tick : ""));
+  replaying = true;
+  try { while (repAt < rep.length && rep[repAt].tick < (BF.rand ? BF.rand.tick : 0)) playEntry(rep[repAt++]); }   // entries before now
+  finally { replaying = false; }
+  if (repAt >= rep.length) endReplay();
+  return rep.length;
+}
+// The entries still waiting (those after the last tick run): applied now, and the replay ends.
+function replayFlush() {
+  if (!rep) return 0;
+  const n = rep.length - repAt;
+  replaying = true;
+  try { while (repAt < rep.length) playEntry(rep[repAt++]); } finally { replaying = false; }
+  endReplay();
+  return n;
+}
+function endReplay() {
+  if (rep && BF.glog) BF.glog.log("INFO", "requests", "Replay finished: " + rep.filter(e => e.kind).length + " player requests");
+  rep = null; repAt = 0;
+}
 
 // ---------- transition mode: direct writes ----------
 // The module is the first file on the stack that isn't the world or this file, skipping pass-through wrappers that other modules hang
@@ -153,9 +311,10 @@ function hourly() {
 function stats() {
   const byKind = {};
   for (const k in S.byKind) byKind[k] = Object.assign({}, S.byKind[k]);
-  return { sent: S.sent, applied: S.applied, refused: S.refused, queued: queue.length, byKind, direct: Object.assign({}, S.direct), directTotal: S.directTotal };
+  return { sent: S.sent, applied: S.applied, refused: S.refused, queued: queued(), regionApplies: S.regionApplies, byKind, direct: Object.assign({}, S.direct), directTotal: S.directTotal };
 }
-function resetStats() { S.sent = S.applied = S.refused = 0; S.byKind = {}; S.direct = {}; S.directTotal = 0; }
+function queued() { let n = queue.length; for (const L of inbox.values()) n += L.length; return n; }
+function resetStats() { S.sent = S.applied = S.refused = S.regionApplies = 0; S.byKind = {}; S.direct = {}; S.directTotal = 0; }
 // The F3 line: "Requests 12 (1 refused)  Direct writes 40: miner 20, builder 12, player 8"
 function text(s) {
   s = s || stats();
@@ -164,11 +323,16 @@ function text(s) {
 }
 
 const R = {
-  send, on, apply, deliver, beginTick, blocks, endTick, stats, resetStats, text, order,
+  send, on, apply, deliver, beginTick, blocks, endTick, stats, resetStats, text, order, times, resetTimes,
+  player, applyPlayer, record, replay, replayFlush, via: null,
+  get recording() { return !!rec; },
+  get replaying() { return rep ? rep.length - repAt : 0; },   // entries still to replay
+  get inPlayer() { return depth > 0; },
   get phase() { return phase; },
   direct: true, strict: false,
-  queued: () => queue.length,
-  reset() { queue = []; done = []; seq = 0; phase = "idle"; hourAt = null; resetStats(); H.sent = H.refused = H.directTotal = 0; H.byKind = {}; H.direct = {}; unhandled.clear(); },
+  route: null, regionOrder: null, inactive: null, single: false, applying: -1,   // region inboxes (spec r15-33, js/regiontick.js)
+  queued,
+  reset() { queue = []; inbox = new Map(); done = []; seq = 0; phase = "idle"; hourAt = null; rec = null; rep = null; repAt = 0; replaying = false; depth = 0; resetStats(); H.sent = H.refused = H.directTotal = 0; H.byKind = {}; H.direct = {}; unhandled.clear(); },
   hook,
 };
 BF.req = R;

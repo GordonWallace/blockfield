@@ -1,3 +1,4 @@
+// @ci integration suite=ui hosts=worker,server
 // Escape closes in-game screens straight back to play; Escape with nothing open still pauses.
 // Pointer lock is simulated the way Chrome behaves: a lock granted while Escape is held is dropped at once as a user exit.
 // A second pass is a stricter browser that also drops the lock asked for after Escape's release: the game must stay
@@ -6,7 +7,9 @@
 // a key press must take it back at once.
 // Every step waits for the state it expects (up to WAIT ms) rather than for a fixed time, so the test holds on a CI machine
 // drawing one frame a second as well as on a fast one.
-// node test/run.js /tmp/esc test/esc-close.js
+// The screens and the mouse are the page's; their furnace, chest and villager are the simulation's (lib.sim, spec r15-43).
+// node test/run.js /tmp/esc test/esc-close.js [--host page|worker|server]
+const lib = require('./lib');
 const WAIT = 30000;
 module.exports = async (pg) => {
   await pg.evaluate(() => {
@@ -57,13 +60,20 @@ module.exports = async (pg) => {
   const openScreen = async how => {
     if (how === "E") await pg.keyboard.press('e');
     else if (how === "chat") await pg.keyboard.press('t');
-    else if (how === "villager") await pg.evaluate(() => {
-      const p = BF.player.position;
-      const v = BF.mobs.list.find(m => m.type === "villager" && m.profession) || BF.mobs.spawn("villager", p.x + 2, p.y, p.z);
-      if (v && !v.profession) v.profession = "farmer";
-      BF.inventory.openTrade(v);
-    });
-    else await pg.evaluate(m => { const p = BF.player.position; BF.inventory.open(m, { x: Math.floor(p.x), y: Math.floor(p.y) - 1, z: Math.floor(p.z) }); }, how);
+    else if (how === "villager") {
+      const id = await lib.sim(pg, () => {
+        const p = BF.player.position;
+        const v = BF.mobs.list.find(m => m.type === "villager" && m.profession) || BF.mobs.spawn("villager", p.x + 2, p.y, p.z);
+        if (v && !v.profession) v.profession = "farmer";
+        return BF.ids.idOf(v);
+      });
+      await pg.evaluate(id => BF.inventory.openTrade(id), id);
+    } else {
+      // a furnace or chest screen needs its block there (spec r15-44: the simulation refuses one for a block that is gone)
+      const at = await pg.evaluate(() => { const p = BF.player.position; return { x: Math.floor(p.x) + 2, y: Math.floor(p.y), z: Math.floor(p.z) }; });
+      if (how !== "crafting") { await lib.sim(pg, ([at, m]) => { BF.world.setBlock(at.x, at.y, at.z, BF.B[m]); if (BF.proto) BF.proto.flush(); }, [at, how]); await pg.waitForTimeout(300); }
+      await pg.evaluate(([m, at]) => BF.inventory.open(m, at), [how, at]);
+    }
     // the screen is up and its unlock has landed, as both have in a real browser long before a person presses Escape
     const open = await until(() => (BF.inventory.isOpen() || BF.commands.isOpen()) && !BF.player.isLocked());
     console.log(how, "open:", open);

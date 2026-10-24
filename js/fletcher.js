@@ -1,6 +1,6 @@
 // Fletchers (BF.fletcher): the fletcher makes the arrows and bows it sells from materials it buys from the other villagers of its village.
 // Nothing appears from the daily restock any more (trading.js PRODUCE.fletcher is empty).
-// - Recipes: the vanilla ones (inventory.js): flint over stick over feather -> 4 arrows; 3 sticks + 3 string -> 1 bow. Sticks are cut from
+// - Recipes: the vanilla ones (playerinv.js): flint over stick over feather -> 4 arrows; 3 sticks + 3 string -> 1 bow. Sticks are cut from
 //   2 planks (-> 4 sticks) when it is short of sticks.
 // - What to make: arrows while it holds fewer than ARROW_MAX (4 at a time), bows while it holds fewer than BOW_MAX; the one whose stock is
 //   emptier (against its cap) first. A fletcher missing an ingredient just does not make that item.
@@ -14,7 +14,7 @@
 // See CONTRACT.md "Fletchers".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const TR = () => BF.trades;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
@@ -110,19 +110,8 @@ function findDeal(m, need) {
 }
 function doBuy(m, deal) {
   const T = TR(), v2 = deal.other, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(m, v2) || T.blockReason(v2, o)) break;
-    if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);
-    if (!sold) break;
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
+  const done = T.asked(m, v2, o) || canSell(m, v2) ? T.buy(m, v2, o, deal.times, { guard: () => (canSell(m, v2) ? null : "busy") }) : 0;   // one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }
@@ -288,6 +277,7 @@ function ai(m, dt, out) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = doBuy(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5;
     if (BF.villageSim) BF.villageSim.done(m);
     if (!done) { S.avoid[key] = dayNow() + 0.05; log("giveup", m, { kind: "buy", item: BF.itemName(deal.item), why: "trade refused" }); }

@@ -1,22 +1,24 @@
-// Alerts from the debug screen. The user sets alerts up on the debug screen (debug/index.html), with the same choices as its
-// log filters (villager type, action, event type, plus words the entry must contain); the debug server keeps them in a file and
-// hands them to the game with its answers to the feed (js/debugfeed.js). Every village log entry (js/villagelog.js) is checked
-// against the enabled ones, and when one matches the game:
-//   - drops to 0x straight away (js/timewarp.js: the world freezes, even part-way through a fast-forward frame),
+// Alerts from the debug screen, the page's half. The user sets alerts up on the debug screen (debug/index.html), with the same choices
+// as its log filters (villager type, action, event type, plus words the entry must contain); the debug server keeps them in a file and
+// hands them to the game with its answers to the feed (js/debugfeed.js). The page passes the list to the simulation (the protocol's
+// alerts query, again for each new world), which checks every village log entry against the enabled ones (js/alertsim.js, spec r15-43:
+// so alerts work with the simulation in the page, a Web Worker or the world server). When one matches, the simulation
+//   - drops to 0x straight away (js/timewarp.js: the world freezes, even part-way through a fast-forward frame), and sends an "alert"
+//     entry in the events message; here the page then also freezes its own clock (which tells a worker or the server 0x too),
 //   - frees the mouse (as Z does), and
 //   - shows a notice in the top-left corner with the log line, its village and, when the entry has a location, how far away
 //     it is and a Teleport button that puts the player a few blocks from it, looking at it.
 // Right arrow (or any speed change) dismisses the notice, takes the mouse back if the alert freed it and resumes at 1x.
-// API: BF.alerts = { set(list, av), list, av, hits, check(rec, entry), active, dismiss(), teleport(), fire(alert, rec, entry) }
+// API: BF.alerts = { set(list, av), list, av, hits, active, dismiss(), teleport(), fire(alert, rec, entry) (in-page simulation only), show(ev) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 let list = [], av = null, active = null, el = null, freed = false;
 const hits = {};   // alert id -> { n, text, day } (sent back to the debug screen)
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const LM = () => BF.logmatch || window.BFLog;
+const LM = () => BF.logmatch || globalThis.BFLog;
 
 function ui() {
   if (el || !document.body) return el;
@@ -45,10 +47,9 @@ function render() {
   const e = ui();
   if (!e) return;
   if (!active) { e.hidden = true; return; }
-  const A = active, at = A.entry[3], L = BF.vlog, d = distTo(at);
-  const vname = (BF.signs && BF.signs.villageName && BF.signs.villageName(A.rec.key)) || "Village";
+  const A = active, at = A.entry[3], d = distTo(at), vname = A.name || "Village";
   e.innerHTML = `<div class="h">⚠ ALERT: ${esc(LM() ? LM().describe(A.alert) : "alert")}${A.more ? ` <span class="v">(+${A.more} more)</span>` : ""}</div>` +
-    `<div class="v">${esc(vname)} · ${esc(L ? L.stamp(A.entry[0]) : "")}</div>` +
+    `<div class="v">${esc(vname)} · ${esc(A.stamp || "")}</div>` +
     `<div class="tx">${esc(A.entry[2])}</div>` +
     (at ? `<div class="row"><span class="d" data-d>${d} blocks away</span> <span class="v">(${at.join(", ")})</span><button data-act="tp">Teleport</button></div>` :
       `<div class="row"><span class="d">No location for this event</span></div>`) +
@@ -59,6 +60,7 @@ function render() {
 // keep the distance current as the player moves
 function tick() {
   requestAnimationFrame(tick);
+  push(false);
   if (!active || !el || el.hidden) return;
   const at = active.entry[3];
   if (!at) return;
@@ -66,20 +68,30 @@ function tick() {
   if (d !== active.shownD) { active.shownD = d; const s = el.querySelector("[data-d]"); if (s) s.textContent = d + " blocks away"; }
 }
 
-function fire(alert, rec, entry) {
+// an "alert" entry of the events message: the simulation froze the world for alert ev.alert (js/alertsim.js)
+function show(ev) {
+  const alert = ev.alert, entry = ev.entry || [];
   const h = hits[alert.id] || (hits[alert.id] = { n: 0 });
   h.n++; h.text = entry[2]; h.day = entry[0];
-  if (active) { active = { alert, rec, entry, more: active.more + 1 }; render(); return; }   // already frozen: show the newest
-  active = { alert, rec, entry, more: 0 };
-  if (BF.warp) BF.warp.freeze();
+  if (BF.warp && !BF.warp.frozen) BF.warp.freeze();   // (the page's clock: with a worker or the server, this sends 0x on)
+  const shown = { alert, entry, key: ev.key, name: ev.name, stamp: ev.stamp };
+  if (active) { active = Object.assign(shown, { more: active.more + 1 }); render(); return; }   // already frozen: show the newest
+  active = Object.assign(shown, { more: 0 });
   freed = !!(BF.player && BF.player.freeMouse && BF.player.freeMouse());
   render();
   if (BF.audio && BF.audio.play) { try { BF.audio.play("xp"); } catch (_) { /* optional */ } }
-  if (BF.emit) BF.emit("alertFired", alert, entry);
 }
-function check(rec, entry) {
-  if (!list.length || !LM()) return;
-  for (const a of list) if (a.on !== false && LM().matches(a, entry)) { fire(a, rec, entry); return; }
+BF.onLoad(() => BF.proto.listen(list => { for (const e of list) if (e.kind === "alert" && e.alert) show(e); }));   // (js/protocol.js loads later)
+// fire an alert by hand (tests): the in-page simulation's half does it, and its event comes back here
+function fire(alert, rec, entry) { if (BF.alertSim) BF.alertSim.fire(alert, rec, entry); }
+
+// the list to the simulation: when it changes, and again for each new world (a worker's or the world server's thread starts empty)
+let sentC = null, sentGen = -1, sentAv;
+function push(force) {
+  const C = BF.client;
+  if (!C || (!force && C === sentC && C.world.gen === sentGen && av === sentAv)) return;
+  sentC = C; sentGen = C.world.gen; sentAv = av;
+  C.query("alerts", { list, av });
 }
 function dismiss() {
   if (!active) return;
@@ -123,10 +135,10 @@ requestAnimationFrame(tick);
 
 BF.alerts = {
   // from the debug server: [{ id, who, act, kind, text, on }]
-  set(l, v) { list = Array.isArray(l) ? l.filter(a => a && a.id) : []; av = v == null ? null : v; },
+  set(l, v) { list = Array.isArray(l) ? l.filter(a => a && a.id) : []; av = v == null ? null : v; push(true); },
   get list() { return list; },
   get av() { return av; },
   get active() { return active; },
-  hits, check, fire, dismiss, teleport,
+  hits, fire, show, dismiss, teleport,
 };
 })();

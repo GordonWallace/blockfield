@@ -1,16 +1,18 @@
+// @ci baseline hosts=worker,server
 // Farmer bucket checks (1.2): node test/run.js /tmp/fb test/farmer-bucket.js
 // Nothing from nothing: a villager's bucket is filled only by taking a water source block, as the player's bucket does. A lone
 // source is used up; an infinite source (two source neighbours over solid ground) flows back in; a bed's own channel water that
 // would not refill is never picked to fill from.
 module.exports = async (pg) => {
+  const lib = require('./lib');   // (lib.sim: where the simulation is, spec r15-43)
   // the test ground (32 x 32 blocks, 12..44 blocks east of the player) must be loaded before it is laid: a write to a chunk that is
   // not loaded yet is refused, and the spawn's chunks may still be loading when the test starts (slow frames, the planet's queue)
-  const at = await (await pg.waitForFunction(() => {
+  const at = await lib.simWait(pg, () => {
     const px = Math.floor(BF.player.position.x) + 20, pz = Math.floor(BF.player.position.z) - 10;
     for (let x = px - 8; x <= px + 24; x += 4) for (let z = pz - 8; z <= pz + 24; z += 4) if (!BF.world.isLoaded(x, z)) return false;
     return [px, pz];
-  }, null, { timeout: 120000, polling: 250 })).jsonValue();
-  const r = await pg.evaluate(async ([px, pz]) => {
+  });
+  const r = await lib.sim(pg, async ([px, pz]) => {
     const out = [], ok = (name, c, info) => out.push((c ? "PASS " : "FAIL ") + name + (c || info === undefined ? "" : " " + JSON.stringify(info)));
     const B = BF.B, W = BF.world, VL = BF.villageLife, X = VL._test, inv = BF.trades.inv, I = BF.I;
     const y0 = W.heightAt(px, pz);

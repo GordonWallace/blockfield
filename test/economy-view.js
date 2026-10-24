@@ -1,30 +1,28 @@
+// @ci integration hosts=worker,server
 // Debug screen Economy tab test: NODE_PATH=$(npm root -g) node test/economy-view.js [outPrefix]
 // Starts debug/server.js on spare ports, opens the game and the debug screen, scripts some trades, waits and unsold stock in the
 // village, then checks the Economy tab: the flow diagram's bands and hover details, the dead ends, the table, the day range,
 // "All villages", the empty state, and that a newly opened screen gets the tallies from the server's cache. Screenshots it.
-const path = require('path'), { spawn } = require('child_process');
+// BF_HOST=page|worker|server (spec r15-43): where the simulation runs; the trades are scripted there (lib.sim).
+const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
+const lib = require('./lib');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/economy-view';
-const GAME = 8720, DBG = 8721;
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-economy-view-alerts.json')]);
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
-};
 (async () => {
   const fails = [], ok = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails.push(n); };
-  const srv = await start();
+  const srv = await lib.serve({ world: lib.host() === 'server' }), GAME = srv.game, DBG = srv.debug;
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const game = await b.newPage({ viewport: { width: 1280, height: 760 } });
   game.on('pageerror', e => console.log('PAGEERROR game', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await lib.install(game);   // (BFT.sim)
+  await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(5000);
-  await require('./lib').toVillage(game);
+  await lib.simReady(game);
+  await lib.toVillage(game);
   // the scripted economy: planks and logs, a pickaxe, bread for the player, a wait for gold, and stock nobody buys
-  const want = await game.evaluate(() => {
+  const want = await lib.sim(game, () => {
     const L = BF.vlog, E = BF.econ, I = BF.I, rec = L.villageAt(BF.player.position.x, BF.player.position.z);
     const vs = rec.members.filter(m => m.type === 'villager' && !m.dead && !m.child && m.slot && Array.isArray(m.inv));
     const [a, b2, c] = vs;
@@ -107,7 +105,7 @@ const start = async () => {
   const cached = await dbg.evaluate(() => ({ tab: !document.getElementById('e-pane').hidden, rows: document.querySelectorAll('#econ .etable tbody tr').length }));
   ok('new screen: remembered tab and cached tallies ' + JSON.stringify(cached), cached.tab && cached.rows >= 4);
   await b.close();
-  srv.kill(); await new Promise(r => srv.exitCode !== null ? r() : srv.once('exit', r));
+  await srv.stop();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
 })();

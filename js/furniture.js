@@ -17,7 +17,7 @@
 // See CONTRACT.md "Furniture makers".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const TR = () => BF.trades;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
@@ -149,19 +149,8 @@ function findSeller(m, short, avoid) {
 }
 function doBuy(m, deal) {
   const T = TR(), v2 = deal.other, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2) || T.blockReason(v2, o)) break;
-    if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);
-    if (!sold) break;
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
+  const done = T.asked(m, v2, o) || canSell(v2) ? T.buy(m, v2, o, deal.times, { guard: () => (canSell(v2) ? null : "busy") }) : 0;   // one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }
@@ -202,17 +191,9 @@ function findBuyer(m, avoid) {
 // The builder buys from the furniture maker's own offer: same stock / room rules as a player trade, xp to the furniture maker.
 function doSell(m, deal) {
   const T = TR(), b = deal.other, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canBuy(b) || saleTimes(m, b, o) < 1) break;
-    const sold = T.exchange(m, o);
-    if (!sold) break;
-    for (const p of o.buy) T.inv.remove(b.inv, p.id, p.n);
-    T.inv.addStacks(b.inv, sold);
-    T.addXp(m, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(b, m, o, done);
+  const k = T.asked(m, m, o) ? deal.times : canBuy(b) ? Math.min(deal.times, saleTimes(m, b, o)) : 0;
+  const done = k > 0 ? T.buy(b, m, o, k, { by: m, guard: () => (canBuy(b) ? null : "buyer busy") }) : 0;   // the builder buys: one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) log("sell", m, { to: "builder", beds: done * o.sell.n, got: o.buy.map(p => p.n * done + " " + BF.itemName(p.id)).join(" + ") });
   return done;
 }
@@ -294,9 +275,12 @@ function ai(m, dt, out) {
     }
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; m.lookAt = { yaw: 0, pitch: -0.5 };
     if ((sh.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
-    const ok = BF.storage.deliver(m, v2, s);
-    log(ok ? "deliver" : "giveup", m, { to: v2.profession, item: "chest", at: s.x + "," + s.y + "," + s.z, why: ok ? undefined : "spot taken or unpaid" });
-    if (!ok) { sh.avoid[avoidKey()] = dayNow() + 0.05; if (v2.store) v2.store.order = null; }   // the villager picks a new spot next time
+    const ak = avoidKey(), ended = ok => {
+      log(ok ? "deliver" : "giveup", m, { to: v2.profession, item: "chest", at: s.x + "," + s.y + "," + s.z, why: ok ? undefined : "spot taken or unpaid" });
+      if (!ok) { sh.avoid[ak] = dayNow() + 0.05; if (v2.store) v2.store.order = null; }   // the villager picks a new spot next time
+    };
+    const req = BF.storage.deliver(m, v2, s);   // a request (spec r15-19): put down in the apply phase, the outcome comes before the next think
+    if (req) req.then(r => ended(r.ok)); else ended(false);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
     if (BF.villageSim) BF.villageSim.done(m);
     return true;
@@ -320,6 +304,7 @@ function ai(m, dt, out) {
   if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (sh.tt <= 0) {
     const done = deal.kind === "buy" ? doBuy(m, deal) : doSell(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
     if (BF.villageSim) BF.villageSim.done(m);
     if (!done) { sh.avoid[avoidKey()] = dayNow() + 0.05; log("giveup", m, { to: v2.profession, item: deal.item === "bed" ? "bed" : BF.itemName(deal.item), why: "trade refused" }); }
@@ -327,7 +312,7 @@ function ai(m, dt, out) {
   return true;
 }
 
-// Trade screen title (inventory.js): what it is doing right now, or "".
+// Trade screen title (js/invscreen.js, from the trades query): what it is doing right now, or "".
 function statusText(m) {
   if (!m || m.profession !== "furniture_maker") return "";
   const sh = m.furn;

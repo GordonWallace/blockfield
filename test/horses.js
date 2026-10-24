@@ -54,7 +54,7 @@ module.exports = async (pg, out) => {
     const x0 = SX, z0 = SZ, y0 = BF.worldgen.heightAt(x0, z0) + 30;
     const fill = (xa, xb, y, za, zb, id) => { for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) W.setBlock(x, y, z, id); };
     fill(x0 - 6, x0 + 6, y0, z0 - 60, z0 + 6, B.stone);
-    const settle = async m => { for (let i = 0; i < 40; i++) { BF.mobs.update(0.05); if (i % 10 === 0) await tick(); } };
+    const settle = async m => { for (let i = 0; i < 40; i++) { (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 10 === 0) await tick(); } };
 
     // ---- taming by riding ----
     let tries = 0, throws = 0, tamedAt = -1;
@@ -120,13 +120,13 @@ module.exports = async (pg, out) => {
     const useL = H.playerUse(wild, { id: I.lead, n: 1 }, false);
     ok("a lead goes on the horse", useL && useL.consume === 1 && wild.horse.lead && wild.horse.lead.kind === "player", useL);
     P.teleport(x0 + 0.5, y0 + 1, z0 - 12.5);
-    for (let i = 0; i < 160; i++) { BF.mobs.update(0.05); if (i % 20 === 0) await tick(); }
+    for (let i = 0; i < 160; i++) { (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 20 === 0) await tick(); }
     const dLead = Math.hypot(P.position.x - wild.position.x, P.position.z - wild.position.z);
     ok("a led horse follows the player", dLead < 5, { d: +dLead.toFixed(2) });
     W.setBlock(x0 + 2, y0 + 1, z0 - 12, B.oak_fence || B.fence);
     ok("right clicking a fence ties the led horse to it", H.tieToPost(x0 + 2, y0 + 1, z0 - 12) && wild.horse.lead.kind === "post");
     P.teleport(x0 + 0.5, y0 + 1, z0 - 40.5);
-    for (let i = 0; i < 200; i++) { BF.mobs.update(0.05); if (i % 20 === 0) await tick(); }
+    for (let i = 0; i < 200; i++) { (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 20 === 0) await tick(); }
     const dPost = Math.hypot(x0 + 2.5 - wild.position.x, z0 - 11.5 - wild.position.z);
     ok("a tied horse stays by its post", dPost < 4.5, { d: +dPost.toFixed(2) });
 
@@ -134,7 +134,7 @@ module.exports = async (pg, out) => {
     const hid = wild.horse.hid, st = { hp: wild.maxHp, speed: wild.horse.speed, jump: wild.horse.jump, coat: wild.horse.coat, mark: wild.horse.mark };
     const data = JSON.parse(JSON.stringify(H.serialize()));
     H.deserialize(data);
-    for (let i = 0; i < 20; i++) { BF.mobs.update(0.05); if (i % 10 === 0) await tick(); }
+    for (let i = 0; i < 20; i++) { (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 10 === 0) await tick(); }
     const back = [...H.records.values()].find(r => r.hid === hid);
     ok("a tamed horse is saved with its stats, coat, saddle, owner and post", !!back && back.tamed && back.owner === "player" && back.saddle && back.maxHp === st.hp &&
       Math.abs(back.speed - st.speed) < 0.01 && back.coat === st.coat && back.mark === st.mark && back.lead && back.lead.kind === "post", back && { tamed: back.tamed, saddle: back.saddle, lead: back.lead });
@@ -143,11 +143,11 @@ module.exports = async (pg, out) => {
     const m2 = back.mob;
     P.teleport(x0 + 0.5, y0 + 1, z0 + 2000.5);
     await load(x0, z0 + 2000);
-    for (let i = 0; i < 60; i++) { BF.mobs.update(0.5); if (i % 10 === 0) await tick(); }
+    for (let i = 0; i < 60; i++) { (BF.mobs.update(0.5), BF.req.apply(), BF.req.deliver()); if (i % 10 === 0) await tick(); }
     ok("far from the player the tamed horse is kept, not despawned", H.records.has(hid), { mobGone: !BF.mobs.list.includes(m2) });
     P.teleport(x0 + 0.5, y0 + 1, z0 - 10.5);
     await load(x0, z0 - 10);
-    for (let i = 0; i < 60; i++) { BF.mobs.update(0.1); if (i % 10 === 0) await tick(); }
+    for (let i = 0; i < 60; i++) { (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (i % 10 === 0) await tick(); }
     const r3 = H.records.get(hid);
     ok("coming back, the tamed horse is there again", !!(r3 && r3.mob && BF.mobs.list.includes(r3.mob)), r3 && { x: r3.x, z: r3.z });
     // old saves without horses

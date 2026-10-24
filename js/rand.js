@@ -8,10 +8,12 @@
 //   cell (or chunk) and the tick, so a roll depends on where and when it happens, not on how many rolls came before it.
 // - BF.rand.tick: the simulation step counter (js/main.js steps it), saved with the world.
 // Every stream has next() (0 to 1), int(n) (0 to n-1), range(a, b) and pick(arr).
-// API: BF.rand = { of, seed, at, step(), tick, made, save(), load(o), reset() }
+// - BF.rand.thinker: the mob whose update is running in the mob loop (js/mobs.js). A mob thinking may draw only from its own stream: a
+//   draw from another's depends on the order mobs think in (spec r15-33). BF.rand.watch(e, thinker), when set (tests), is called on each.
+// API: BF.rand = { of, seed, at, step(), tick, made, save(), load(o), reset(), thinker, watch }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const worldSeed = () => ((BF.state && BF.state.seed) >>> 0);
 // murmur3's finaliser: a good 32-bit mix
@@ -43,6 +45,7 @@ function EntityStream(e) { this.e = e; }
 EntityStream.prototype = Object.assign(Object.create(methods), {
   next() {
     const e = this.e;
+    if (R.watch && R.thinker && R.thinker !== e) R.watch(e, R.thinker);   // a draw from another mob's stream while one thinks (r15-33)
     if (e.rng == null) seedNew(e);
     return out(e.rng = (e.rng + STEP) >>> 0);
   },
@@ -91,6 +94,7 @@ function at(kind, x, z, tick, y) {
 
 const R = BF.rand = {
   of, seed, at, tick: 0,
+  thinker: null, watch: null,   // the mob whose update is running (js/mobs.js) and a check called on a draw from someone else's stream (tests)
   get made() { return made; },
   step() { R.tick++; },
   save() { return { tick: R.tick, made }; },

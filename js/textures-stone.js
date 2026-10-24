@@ -3,7 +3,7 @@
 // Tile names are the vanilla texture names so a texture pack can be mapped onto them by name later.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const K = BF.texKit;
 if (!K) { console.warn("textures-stone: BF.texKit missing (textures.js must load first)"); return; }
 const { T, SPRITES, TS, hex, pal, mul, mix, ramp, clamp01, smooth, jit, dome, voronoi, WHITE, lighten, put, stroke, blob,

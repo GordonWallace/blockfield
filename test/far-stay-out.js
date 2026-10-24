@@ -1,26 +1,26 @@
-// @ci integration suite=village
-// Out on purpose: node test/run.js /tmp/out test/far-stay-out.js
+// @ci integration suite=village hosts=worker,server
+// Out on purpose: node test/run.js /tmp/out test/far-stay-out.js [--host page|worker|server]
 // Villagers more than 40 blocks from their village walk back (mobs.js villagerAI). An explorer with a map still to fill and a merchant on a trip
 // are out there on purpose: in the minutes before the working day starts (and between an explorer's patches) they stay put instead of losing
 // the ground they covered. With nothing to do out there (an explorer with no map) they still walk home.
 module.exports = async (pg, out) => {
+  const lib = require('./lib');
   await pg.evaluate(() => BF.player.start());
-  await require('./lib').toVillage(pg);
-  // the spot 70 blocks east of the village: the player stands by it until its chunks are loaded
-  const A = await pg.evaluate(() => {
+  await lib.toVillage(pg);
+  // the spot 70 blocks east of the village: the player (the page's: the simulation follows it, spec r15-43) stands by it until its chunks are loaded
+  const A = await lib.sim(pg, () => {
     const m = BF.mobs.list.find(v => v.type === "villager" && !v.child && v.village && !v.dead), V = m && m.village;
     if (!V) return null;
-    const x = Math.floor(V.x) + 70, z = Math.floor(V.z);
-    BF.player.position.set(x + 4, BF.player.position.y, z);
-    return { x, z };
+    return { x: Math.floor(V.x) + 70, z: Math.floor(V.z) };
   });
+  if (A) await pg.evaluate(A => BF.player.position.set(A.x + 4, BF.player.position.y, A.z), A);
   for (let i = 0; A && i < 90; i++) {
-    if (await pg.evaluate(A => [[-12, -12], [12, 12], [-12, 12], [12, -12], [0, 0]].every(([dx, dz]) => BF.world.isLoaded(A.x + dx, A.z + dz)), A)) break;
+    if (await lib.sim(pg, A => [[-12, -12], [12, 12], [-12, 12], [12, -12], [0, 0]].every(([dx, dz]) => BF.world.isLoaded(A.x + dx, A.z + dz)), A)) break;
     await pg.waitForTimeout(1000);
   }
   let bad = 0;
   for (const kind of ["explorer", "merchant", "explorer without a map"]) {
-    const r = await pg.evaluate(kind => {
+    const r = await lib.sim(pg, kind => {
       const P = BF.player.position, W = BF.world, prof = kind.split(" ")[0];
       const m = BF.mobs.list.find(v => v.type === "villager" && !v.child && v.village && !v.dead && v.profession === prof);
       if (!m) return { kind, error: "no " + prof };
@@ -32,7 +32,7 @@ module.exports = async (pg, out) => {
       m.position.set(x + 0.5, W.heightAt(x, z) + 1, z); m.vel.set(0, 0, 0); m.ai.route = null; m.ai.mode = "idle"; m.ai.t = 0;
       if (kind === "explorer") { BF.trades.inv.add(m.inv, BF.I.blank_map_1, 1); if (!BF.explorer.useBlank(m) || !BF.explorer.carried(m).some(c => !c.done)) return { kind, error: "no map to fill" }; }
       const x0 = m.position.x, z0 = m.position.z, d0 = Math.hypot(x0 - V.x, z0 - V.z);
-      for (let T = 0; T < 25; T += 0.05) { BF.sky.setTime(0.01); BF.mobs.update(0.05); P.set(x0 + 4, m.position.y + 1, z0); }
+      for (let T = 0; T < 25; T += 0.05) { BF.sky.setTime(0.01); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); P.set(x0 + 4, m.position.y + 1, z0); }
       const d1 = Math.hypot(m.position.x - V.x, m.position.z - V.z), moved = Math.hypot(m.position.x - x0, m.position.z - z0);
       m.ex = saved.ex; m.mc = saved.mc; m.inv = saved.inv;
       return { kind, d0: Math.round(d0), d1: Math.round(d1), moved: +moved.toFixed(1) };

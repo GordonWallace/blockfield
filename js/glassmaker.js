@@ -15,7 +15,7 @@
 // it dug or bought, smelted with real fuel.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PROF = "glassmaker";
 const DIG_R = 64;                 // sand it digs lies within this many blocks of its village centre or its kiln
@@ -243,11 +243,12 @@ function nextJob(m) {
 }
 const vdone = m => { if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); };
 function finishSmelt(m, job, all) {
-  const got = FU().empty(m, job, all) || [];
-  const glass = got.filter(e => e.id === I("glass")).reduce((a, e) => a + e.n, 0), back = got.filter(e => e.id === SAND()).reduce((a, e) => a + e.n, 0);
-  const S = st(m); S.made = S.made || { glass: 0, panes: 0, bottles: 0 }; S.made.glass += glass;
-  log("collect", { glass, loaded: job.loaded || 0, all: !!all, back });
-  if (glass > 0) vlog(m, "furnace", "smelted " + glass + " glass from sand in the furnace at " + pk(job.furnace.x, job.furnace.y, job.furnace.z), job.furnace);
+  FU().empty(m, job, all, got => {   // when the "furnace" request applies (js/furnaceuse.js)
+    const glass = got.filter(e => e.id === I("glass")).reduce((a, e) => a + e.n, 0), back = got.filter(e => e.id === SAND()).reduce((a, e) => a + e.n, 0);
+    const S = st(m); S.made = S.made || { glass: 0, panes: 0, bottles: 0 }; S.made.glass += glass;
+    log("collect", { glass, loaded: job.loaded || 0, all: !!all, back });
+    if (glass > 0) vlog(m, "furnace", "smelted " + glass + " glass from sand in the furnace at " + pk(job.furnace.x, job.furnace.y, job.furnace.z), job.furnace);
+  });
 }
 function estimate(m, job) {
   const VS = BF.villageSim;
@@ -316,10 +317,14 @@ function ai(m, dt, out, cont) {
     if (Math.random() < dt * 4) a.swingT = 0.25;   // visual
     if ((S.tt -= dt) > 0) return true;
     const [fx, fy, fz] = BF.mobs.nav.feetCell(m);
-    if (!(fx === s.x && fz === s.z) && W().getBlock(s.x, s.y, s.z) === SAND() && W().setBlock(s.x, s.y, s.z, 0)) {
-      TR().inv.add(m.inv, SAND(), 1);
-      if (BF.toolWear) { const sh = BF.toolWear.best(m, "shovel"); if (sh) BF.toolWear.use(m, sh, 1); }
+    if (!(fx === s.x && fz === s.z) && W().getBlock(s.x, s.y, s.z) === SAND()) {
+      // a request (spec r15-19, js/blockreqs.js): the sand leaves the ground and goes into the pack in the apply phase; counted at once
+      // (the day's quota) and taken back if someone else had the block first
       S.dug++; S.trip++; S.last = { x: s.x, y: s.y, z: s.z };
+      BF.blockReq.cells(m, [{ x: s.x, y: s.y, z: s.z, id: 0, expect: SAND() }], { give: [{ id: SAND(), n: 1 }] }).then(r => {
+        if (!r.ok) { S.dug--; S.trip = Math.max(0, S.trip - 1); log("refused", { at: [s.x, s.y, s.z], why: r.why }); return; }
+        if (BF.toolWear) { const sh = BF.toolWear.best(m, "shovel"); if (sh) BF.toolWear.use(m, sh, 1); }
+      });
     }
     S.si++; S.walkT = 0; S.stage = "walk";
     if (S.dug >= DIG_DAY) S.si = job.spots.length;
@@ -361,6 +366,7 @@ function ai(m, dt, out, cont) {
     if (S.stage === "work") {
       if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = F.load(m, job, job.n);
+      if (n === null) return true;   // the load request is in flight
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
       log("load", { sand: n, at: pk(s.x, s.y, s.z), ownFuel: job.ownFuel || 0 });
@@ -370,8 +376,8 @@ function ai(m, dt, out, cont) {
     if (!fs || !BF.isFurnace(W().getBlock(s.x, s.y, s.z))) { F.inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!fs.slots[0] || fs.slots[0].id !== job.rawId) { finishSmelt(m, job, false); return done(); }   // all smelted
-    F.topUp(m, job, fs);
-    if (S.waitT > F.COOK * 1.5 * job.loaded + 40 || (fs.burn <= 0 && !fs.slots[1] && S.waitT > 3)) return giveUp(fs.burn <= 0 && !fs.slots[1] ? "out of fuel" : "too slow");
+    const fueling = F.topUp(m, job, fs);
+    if (S.waitT > F.COOK * 1.5 * job.loaded + 40 || (fs.burn <= 0 && !fs.slots[1] && !fueling && S.waitT > 3)) return giveUp(fs.burn <= 0 && !fs.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
@@ -393,6 +399,7 @@ function ai(m, dt, out, cont) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const n = F.doBuy(m, job);
+    if (n == null) return true;   // the trade is in flight (js/trading.js buy)
     S.gx = null;
     if (n) log("buy", { what: nameOf(job.item), n: n * job.offer.sell.n, from: v2.profession });
     else { S.avoid[key] = now() + 0.05; log("giveup", { kind: "buy", why: "trade refused" }); }

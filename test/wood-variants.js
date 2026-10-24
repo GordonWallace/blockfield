@@ -1,10 +1,13 @@
+// @ci integration hosts=worker,server
 // Wood variant checks: NODE_PATH=$(npm root -g) node test/run.js /tmp/wv test/wood-variants.js
 // every wood species has its door, fence gate, fence, sign, slab, stairs, wood and stripped wood with a recipe from its own planks / logs;
 // doors and gates keep their wood when opened; a zombie-broken door drops its own wood; screenshots a row of doors and gates.
 module.exports = async (pg, out) => {
-  const r = await pg.evaluate(() => {
+  const lib = require('./lib');
+  // the recipes, blocks and drops where the simulation is (spec r15-43); textures and icons on the page, which draws them
+  const r = await lib.sim(pg, () => {
     const I = BF.I, R = BF.inventory.recipes, res = { missing: [], wrong: [] };
-    // the crafting matcher of inventory.js over a 3x3 grid of item names ("" = empty), first match wins
+    // the crafting matcher of playerinv.js over a 3x3 grid of item names ("" = empty), first match wins
     const craft = rows => {
       const g = rows.map(r => r.map(n => (n ? I[n] : 0)));
       let x0 = 3, y0 = 3, x1 = -1, y1 = -1; const filled = [];
@@ -49,17 +52,19 @@ module.exports = async (pg, out) => {
       made([["planks", "birch_planks", "cherry_planks"], ["", "stick", ""], ["", "stick", ""]], "wooden_pickaxe")];
     res.ladder = made([["stick", "", "stick"], ["stick", "stick", "stick"], ["stick", "", "stick"]], "ladder");
     res.fuel = BF.WOOD_SPECIES.map(sp => [BF.inventory.fuel.get(I[sp + "_door"]), BF.inventory.fuel.get(I[sp + "_fence_gate"])].join("/")).join(" ");
-    // textures and icons
-    res.tiles = BF.WOOD_SPECIES.filter(sp => !(BF.textures.has(sp + "_door_top") && BF.textures.has(sp + "_door_bottom"))).map(sp => sp + " door tiles");
-    res.icons = BF.WOOD_SPECIES.flatMap(sp => [sp + "_door", sp + "_fence_gate"]).filter(n => !BF.textures.icon(I[n]));
     return res;
   });
+  Object.assign(r, await pg.evaluate(() => ({
+    tiles: BF.WOOD_SPECIES.filter(sp => !(BF.textures.has(sp + "_door_top") && BF.textures.has(sp + "_door_bottom"))).map(sp => sp + " door tiles"),
+    icons: BF.WOOD_SPECIES.flatMap(sp => [sp + "_door", sp + "_fence_gate"]).filter(n => !BF.textures.icon(BF.I[n])),
+  })));
   console.log(JSON.stringify(r));
 
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(3000);
-  const r2 = await pg.evaluate(() => {
-    const W = BF.world, B = BF.B, p = BF.player.position, res = {};
+  const at = await pg.evaluate(() => ({ x: BF.player.position.x, z: BF.player.position.z }));
+  const r2 = await lib.sim(pg, at => {
+    const W = BF.world, B = BF.B, p = at, res = {};
     // a stone platform in the air above the highest ground around, so nothing hides the row
     const x0 = Math.floor(p.x) + 3, z0 = Math.floor(p.z) + 6;
     let top = 0; for (let dx = -3; dx <= 20; dx++) for (let dz = -8; dz <= 12; dz++) top = Math.max(top, W.heightAt(x0 + dx, z0 + dz));
@@ -80,15 +85,17 @@ module.exports = async (pg, out) => {
     });
     // blueprint rotation keeps a door's wood
     res.rot = BF.blocks[BF.blueprints.rotId(BF.doorId(0, 0, 0, "cherry"), 1)].name;
-    BF.player.position.set(x0 + 7.5, y + 0.2, z0 + 6);
-    BF.player.setLook(0, -0.15);
-    window.__wv = { x0, y, z0 };
+    res.at = { x0, y, z0 };
+    BF.proto.flush();
     return res;
-  });
+  }, at);
+  const wv = r2.at; delete r2.at;
+  await pg.evaluate(({ x0, y, z0 }) => { BF.player.position.set(x0 + 7.5, y + 0.2, z0 + 6); BF.player.setLook(0, -0.15); }, wv);
   console.log(JSON.stringify(r2));
   await pg.waitForTimeout(1500);
   await pg.screenshot({ path: out + "-closed.png" });
-  await pg.evaluate(() => { const { x0, y, z0 } = window.__wv; BF.WOOD_SPECIES.forEach((sp, i) => BF.world.setDoor(x0 + i * 2, y, z0, true)); BF.player.setLook(0.35, -0.25); });
+  await lib.sim(pg, ({ x0, y, z0 }) => { BF.WOOD_SPECIES.forEach((sp, i) => BF.world.setDoor(x0 + i * 2, y, z0, true)); BF.proto.flush(); }, wv);
+  await pg.evaluate(() => BF.player.setLook(0.35, -0.25));
   await pg.waitForTimeout(1500);
   await pg.screenshot({ path: out + "-open.png" });
   // inventory icons: doors, then fence gates, then fences, oak first

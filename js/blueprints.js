@@ -4,7 +4,7 @@
 // See CONTRACT.md "Builder villagers". Loaded after mobs.js; only calls other modules at runtime.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PH = { FLOOR: 1, WALL: 2, ROOF: 3, GLASS: 4, DOOR: 5, BED: 6, LIGHT: 7 };   // build order: floor, walls, roof, windows, door, beds, torches/furniture
 const WALL_TOP = { house: 3, lhouse: 3, smith: 3 };                                // top wall level (y) of the generator types we reuse

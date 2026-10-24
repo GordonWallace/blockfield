@@ -2,11 +2,23 @@
 // each storing block edits, player, inventory, time of day and the dropped items lying around. Autosaves while playing.
 // Each world's game log (js/gamelog.js) is kept next to its save in the same "data" store: a head record ("<id>#loghead") and
 // numbered batches of entries ("<id>#log:000000012"), written as the log grows (logStore).
+// With the simulation in a Web Worker (spec r15-38, js/simhost.js) the worker owns the world and this file runs there too: it saves
+// (autosave, saveNow) and loads there. In the page, create / load set up the page's copy of the world (restoreClient: the planet, the
+// player, the inventory, the time and weather; the edits come from the worker) and ask the worker for the world; saveNow asks the worker.
+// With the page a client of the Node world server (spec r15-41) the saved worlds are the server's, on its disk (server/idb.js keeps them
+// in this file's own format): list, load, remove, rename and setMonsters ask the server (BF.simHost.saves), and the server's simulation
+// runs this file to save and load. A world the server holds paused (its page closed) loads as it is now, not from its last save.
+// On the server each world is a folder, saves/<world name>/ (spec r15-42, server/savedir.js).
+// Export and import (spec r15-42): a saved world as one .bfworld file (js/savefile.js), the same file in every mode. exportFile(id)
+// downloads one (from the server, or made here from IndexedDB), importFile(file) adds the world it holds (to the server, or to
+// IndexedDB), and copyToServer() copies this browser's IndexedDB worlds to the server (they stay in the browser too).
+// Game log: DEBUG "save" for each save (how long it took), ERROR when a save fails (the previous save is kept); INFO "save" for an
+// export, an import, a copy to the server, and for a world refused as too old.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
-const DB_NAME = "blockfield", DB_VER = 1, AUTOSAVE_S = 30;
+const DB_NAME = "blockfield", DB_VER = 1, AUTOSAVE_S = 30, VERSION = 3;
 let dbp = null;
 
 function db() {
@@ -53,7 +65,7 @@ function snapshot() {
     health: P.health, hunger: P.hunger, gameMode: P.gameMode,
   };
   return {
-    version: 2,                                            // 2: a planet (Blockfield 1.4); 1: a flat world from 1.3 or earlier, which 1.4 won't open
+    version: VERSION,                                      // 3: Blockfield 1.5; 2: a planet from 1.4; 1: a flat world from 1.3 or earlier (neither opens in 1.5)
     seed: BF.state.seed,
     gen: 4, biomeScale: BF.state.biomeScale,               // worldgen version (4: the planet, the only one since 1.4) + biome size
     villages: BF.state.villages,                           // village generator (old saves have none => 1, the classic villages)
@@ -126,6 +138,23 @@ function restore(data, meta) {
   if (BF.gameOpts) BF.gameOpts.purgeStored();   // monsters switched off since the save don't come back with their chunks
 }
 
+// The page's copy of a saved world, when the simulation is in a worker (r15-38): what the page draws and plays with. The worker restores
+// the whole of it (restore above) and sends the block edits.
+function restoreClient(data, meta) {
+  const monsters = meta && meta.monsters || data.monsters;
+  BF.newWorld(data.seed, { gameMode: data.player && data.player.gameMode, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters });
+  if (data.spawn) BF.spawnPoint = data.spawn;
+  if (BF.rand) BF.rand.load(data.rand);
+  if (data.time) { BF.sky.day = data.time.day || 0; BF.sky.setTime(data.time.t); }
+  if (BF.player.deserialize) BF.player.deserialize(data.player || {});
+  if (data.inventory && BF.inventory.setOwn) { BF.inventory.setOwn(data.inventory.slots); BF.inventory.select(+data.inventory.selected || 0); }
+  if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather);
+}
+const host = () => (BF.simHost && BF.simHost.worker ? BF.simHost : null);   // the page, with the simulation in a worker
+// the page, a client of the world server (r15-41): the saved worlds are the server's (on its disk), not this browser's
+const server = () => (BF.simHost && BF.simHost.server ? BF.simHost : null);
+const asked = (q, what) => server().saves(q).then(r => { if (!r || !r.ok) throw new Error(r && r.why || "the world server could not " + what); return r; });
+
 // A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
 // are, so those seeds keep giving the worlds they always have. 0, negative and larger numbers used to wrap onto that range
 // (0 gave seed 1's terrain, 4294967297 gave 1, -1 gave 4294967295, huge numbers gave 0); they are now hashed from their digits
@@ -157,21 +186,71 @@ const logStore = {
   },
 };
 
+// ---------- export / import (spec r15-42): this browser's worlds as .bfworld files (js/savefile.js) ----------
+// -> {game, meta, data, log: {head, lists} | null} of a world in this browser's IndexedDB
+function exportRecord(id) {
+  return tx(["worlds", "data"], "readonly", t => {
+    const d = t.objectStore("data");
+    return Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(d.get(id)), reqP(d.get(LOGH(id))), reqP(d.getAll(logRange(id)))]);
+  }).then(([meta, data, head, lists]) => {
+    if (!meta || !data) throw new Error("World not found");
+    return { game: BF.VERSION || null, meta, data, log: head ? { head, lists: lists || [] } : null };
+  });
+}
+// a world from a file into this browser's IndexedDB; keepId: a world already here with its id is left as it is ({skipped: true}),
+// else it gets a new id. -> {meta, skipped}
+function importRecord(rec, keepId) {
+  const meta = Object.assign({}, rec.meta), data = rec.data;
+  if (!playable(meta) || !playable(data)) throw new Error(tooOld(meta));
+  return tx(["worlds"], "readonly", t => reqP(t.objectStore("worlds").get(meta.id))).then(had => {
+    if (had && keepId) return { meta: had, skipped: true };
+    if (had || !meta.id) meta.id = newId();
+    meta.lastPlayed = Date.now();
+    const log = rec.log;
+    return tx(["worlds", "data"], "readwrite", t => {
+      t.objectStore("worlds").put(meta);
+      const d = t.objectStore("data");
+      d.put(data, meta.id);
+      if (log && log.head) {
+        const head = Object.assign({}, log.head, { name: meta.name });
+        d.put(head, LOGH(meta.id));
+        (head.batches || []).forEach(([seq], i) => d.put(log.lists[i] || [], logKey(meta.id, seq)));
+      }
+    }).then(() => ({ meta, skipped: false }));
+  });
+}
+const newId = () => "w" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+const download = (url, name) => { const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
+// the world server's import (debug/server.js -> server/world.js): the file's bytes; keep: as importRecord's keepId
+const upload = (body, keep) => fetch("/saves/import" + (keep ? "?keep=1" : ""), { method: "POST", body, headers: { "X-Blockfield": "saves" } })
+  .then(r => r.json().catch(() => ({ ok: false, why: "the world server answered " + r.status })))
+  .then(r => { if (!r.ok) throw new Error(r.why || "the world server could not import it"); return r; });
+const slog = (lvl, text) => { if (BF.glog) BF.glog.log(lvl, "save", text); };
+
 // ---------- public API ----------
-// Worlds 1.4 can open: planets (generator 4, snapshot version 2). Older worlds (version 1: generators 1 to 3, made with 1.3 or before)
-// are listed greyed with only Delete, and load() refuses them (Gordon, 2026-10-15: no old saves in 1.4, no conversion; the flat
-// generators they need were retired in spec r14-24).
-const playable = meta => !!meta && (meta.gen === 4 || meta.version >= 2);
+// Worlds 1.5 can open: snapshot version 3. Older worlds (version 2: the planets of 1.4; version 1: the flat worlds of 1.3 and before)
+// are listed greyed with only Delete, and load() refuses them (Gordon, 2026-10-15: no old saves in 1.4; 2026-10-23: 1.5 doesn't load
+// 1.4 saves).
+const playable = meta => !!meta && meta.version >= VERSION;
+const madeWith = meta => meta && meta.version === 2 ? "1.4" : "1.3";   // (an old world's release, for the messages)
+const tooOld = meta => "Made with Blockfield " + madeWith(meta) + ", can't be opened in " + (BF.VERSION || "1.5");
 const save = {
   current: null,
   playable,          // meta of the world being played, or null (unsaved demo world)
+  tooOld,                 // tooOld(meta): why an old world can't be opened ("Made with Blockfield 1.4, can't be opened in 1.5")
+  lastError: null,        // why the last save failed (null once one works)
   lastSaved: 0,
   supported: typeof indexedDB !== "undefined",
   numberSeed,             // exposed for tests
+  snapshot,               // the save data of the world being played (the headless boot's save(), js/boot.js)
+  restoreClient,          // the page's copy of a saved world (the simulation in a worker, r15-38)
+  restore,                // restore(data, meta?): the world from save data (the headless boot)
   logStore,               // the game log's storage (js/gamelog.js)
+  exportRecord, importRecord,   // this browser's worlds as file records (js/savefile.js), for tests
 
   // -> [{id, name, seed, gameMode, created, lastPlayed}] newest first; [] if storage is unavailable
   list() {
+    if (server()) return asked({ op: "list" }, "list its worlds").then(r => r.list || [], () => []);
     return tx(["worlds"], "readonly", t => reqP(t.objectStore("worlds").getAll()))
       .then(p => p).then(a => (a || []).sort((x, y) => y.lastPlayed - x.lastPlayed))
       .catch(() => []);
@@ -184,11 +263,14 @@ const save = {
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: 4, version: 2, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
+    const meta = { id: newId(), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: 4, version: VERSION, game: BF.VERSION, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
     const start = () => {
-      BF.newWorld(seed, { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages, monsters: meta.monsters });
+      const o = { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages, monsters: meta.monsters };
+      BF.newWorld(seed, o);
       save.current = meta;
       BF.emit("worldLoaded", meta);
+      const H = host();
+      if (H) return H.world("create", { seed, opts: o, meta }).then(r => { if (!r.ok) throw new Error(r.why || "the worker could not create it"); return meta; });
       return save.saveNow().then(() => meta);
     };
     return BF.prepareWorld(seed).then(start);   // (the planet works out its rivers first)
@@ -196,13 +278,21 @@ const save = {
 
   // Loads a saved world by id. Resolves to its meta; rejects a world 1.4 can't open (not playable: a 1.3 world).
   load(id) {
-    return tx(["worlds", "data"], "readonly", t => Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(t.objectStore("data").get(id))]))
+    return (server() ? asked({ op: "get", id }, "find it").then(r => [r.meta, r.data])   // (the world server's world: the page's part of it)
+      : tx(["worlds", "data"], "readonly", t => Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(t.objectStore("data").get(id))])))
       .then(([meta, data]) => {
         if (!meta || !data) throw new Error("World not found");
-        if (!playable(meta) || !playable(data)) throw new Error("Made with Blockfield 1.3, can't be opened in 1.4");
+        if (!playable(meta) || !playable(data)) { slog("INFO", "World \"" + meta.name + "\" was not opened: " + tooOld(meta)); throw new Error(tooOld(meta)); }
         return BF.prepareWorld(data.seed).then(() => [meta, data]);   // (the planet works out its rivers first)
       })
       .then(([meta, data]) => {
+        const H = host();
+        if (H) {
+          restoreClient(data, meta);
+          save.current = meta;
+          BF.emit("worldLoaded", meta);
+          return H.world("load", { id }).then(r => { if (!r.ok) throw new Error(r.why || "the worker could not load it"); save.current = r.meta || meta; return save.current; });
+        }
         restore(data, meta);
         meta.lastPlayed = Date.now();
         save.current = meta;
@@ -214,14 +304,18 @@ const save = {
   remove(id) {
     if (save.current && save.current.id === id) save.current = null;
     if (BF.glog) BF.glog.forget(id);   // its game log goes too, with nothing more written
+    if (server()) return asked({ op: "remove", id }, "delete it").then(() => undefined);
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").delete(id); const d = t.objectStore("data"); d.delete(id); d.delete(LOGH(id)); d.delete(logRange(id)); });
   },
 
   rename(id, name) {
+    if (server()) return asked({ op: "rename", id, name: String(name).slice(0, 40) }, "rename it").then(r => {
+      if (save.current && save.current.id === id) { save.current.name = r.meta.name; BF.client.meta({ id, name: r.meta.name }); }
+    });
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds");
       const r = s.get(id);
-      r.onsuccess = () => { if (r.result) { r.result.name = String(name).slice(0, 40); s.put(r.result); if (save.current && save.current.id === id) save.current.name = r.result.name; } };
+      r.onsuccess = () => { if (r.result) { r.result.name = String(name).slice(0, 40); s.put(r.result); if (save.current && save.current.id === id) { save.current.name = r.result.name; if (host()) BF.client.meta({ id, name: r.result.name }); } } };
     });
   },
 
@@ -229,7 +323,8 @@ const save = {
   // takes them at once.
   setMonsters(id, o) {
     const m = BF.gameOpts ? BF.gameOpts.normalize(o) : o;
-    if (save.current && save.current.id === id && BF.gameOpts) { for (const t in m) BF.gameOpts.set(t, m[t]); save.current.monsters = m; }
+    if (save.current && save.current.id === id && BF.gameOpts) { for (const t in m) BF.gameOpts.set(t, m[t]); save.current.monsters = m; if (host()) BF.client.meta({ id, monsters: m }); }
+    if (server()) return asked({ op: "monsters", id, monsters: m }, "change it").then(() => undefined);
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds"), r = s.get(id);
       r.onsuccess = () => { if (r.result) { r.result.monsters = m; s.put(r.result); } };
@@ -239,13 +334,77 @@ const save = {
   // Writes the current world now. Resolves true when saved (false when there's nothing to save).
   saveNow() {
     if (!save.current || !save.supported) return Promise.resolve(false);
+    const H = host();
+    if (H) {   // the worker saves: the player as it is now goes first
+      H.frame();
+      return new Promise(resolve => BF.client.save(r => {
+        const ok = !!(r && r.ok);
+        if (ok) { save.lastSaved = Date.now(); save.lastError = null; BF.emit("worldSaved", save.current); }
+        else if (r && r.why) { save.lastError = r.why; BF.emit("saveFailed", new Error(r.why)); }
+        resolve(ok);
+      }));
+    }
     let data;
+    const t0 = performance.now();
     try { data = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
-    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters: data.monsters || save.current.monsters, version: data.version });
+    const t1 = performance.now();
+    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters: data.monsters || save.current.monsters, version: data.version, game: BF.VERSION, time: data.time });
     save.current = meta;
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").put(meta); t.objectStore("data").put(data, meta.id); })
-      .then(() => { save.lastSaved = Date.now(); BF.emit("worldSaved", meta); return true; })
-      .catch(e => { console.error("Save failed", e); BF.emit("saveFailed", e); return false; });
+      .then(() => {
+        save.lastSaved = Date.now(); save.lastError = null;
+        slog("DEBUG", "Saved world \"" + meta.name + "\" in " + Math.round(performance.now() - t0) + " ms (" + Math.round(t1 - t0) + " ms to gather it)");
+        BF.emit("worldSaved", meta); return true;
+      })
+      .catch(e => {
+        const why = String(e && e.message || e);
+        console.error("Save failed", e);
+        save.lastError = why;
+        slog("ERROR", "Saving world \"" + meta.name + "\" failed (" + why + "); the previous save is kept");
+        BF.emit("saveFailed", e); return false;
+      });
+  },
+
+  // A saved world as a .bfworld file, downloaded (spec r15-42): the world server's copy (debug/server.js serves it), or this browser's.
+  exportFile(id) {
+    const w = save.current && save.current.id === id ? save.current : null;
+    if (server()) {
+      download("/saves/" + encodeURIComponent(id) + "/export", "");
+      slog("INFO", "Exported world " + (w ? "\"" + w.name + "\"" : id) + " from the world server");
+      return Promise.resolve(true);
+    }
+    const first = w && save.saveNow ? save.saveNow() : Promise.resolve();
+    return first.then(() => exportRecord(id)).then(rec => BF.saveFile.pack(rec).then(blob => {
+      const url = URL.createObjectURL(blob);
+      download(url, BF.saveFile.fileName(rec.meta.name));
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      slog("INFO", "Exported world \"" + rec.meta.name + "\" (" + Math.round(blob.size / 1024) + " KB)");
+      return true;
+    }));
+  },
+  // A .bfworld file (a File or Blob) -> the world it holds, added to the world server's saves or this browser's. -> its meta
+  importFile(file) {
+    return Promise.resolve(file.arrayBuffer()).then(buf => {
+      if (server()) return upload(buf, false).then(r => r.meta);
+      return BF.saveFile.unpack(buf).then(rec => importRecord(rec, false)).then(r => r.meta);
+    }).then(meta => { slog("INFO", "Imported world \"" + meta.name + "\" from " + (file.name || "a file") + (server() ? " to the world server" : "")); return meta; });
+  },
+  // This browser's own worlds (IndexedDB), whatever the page plays on: for "Copy browser saves to the server"
+  browserList() {
+    return tx(["worlds"], "readonly", t => reqP(t.objectStore("worlds").getAll())).then(a => (a || []).sort((x, y) => y.lastPlayed - x.lastPlayed)).catch(() => []);
+  },
+  // Copies this browser's worlds to the world server (they stay here too); one copied before is skipped. -> {copied, skipped, old, failed}
+  copyToServer() {
+    if (!server()) return Promise.reject(new Error("no world server"));
+    const out = { copied: [], skipped: [], old: [], failed: [] };
+    return save.browserList().then(list => list.reduce((p, w) => p.then(() => {
+      if (!playable(w)) { out.old.push(w.name); return; }
+      return exportRecord(w.id).then(rec => BF.saveFile.pack(rec)).then(blob => upload(blob, true))
+        .then(r => (r.skipped ? out.skipped : out.copied).push(w.name), e => out.failed.push(w.name + ": " + (e && e.message || e)));
+    }), Promise.resolve())).then(() => {
+      slog("INFO", "Copied browser saves to the world server: " + out.copied.length + " copied, " + out.skipped.length + " already there, " + out.old.length + " too old" + (out.failed.length ? ", " + out.failed.length + " failed (" + out.failed.join("; ") + ")" : ""));
+      return out;
+    });
   },
 
   update(dt) {
@@ -259,6 +418,6 @@ BF.save = save;
 
 // save when the tab is hidden or closed, and when the game pauses
 const flush = () => { if (save.current) save.saveNow(); };
-addEventListener("pagehide", flush);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
+if (BF.page) addEventListener("pagehide", flush);
+if (BF.page) document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
 })();

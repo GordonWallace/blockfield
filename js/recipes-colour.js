@@ -1,8 +1,8 @@
 // Recipes for the wood/colour pack (dyes, dyeing, concrete powder, glazed terracotta, fences, tinted glass).
-// Registered through BF.recipeHooks, which inventory.js calls from buildRecipes with its helpers.
+// Registered through BF.recipeHooks, which playerinv.js calls from buildRecipes with its helpers.
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, addShapeless, smelt, fuel }) => {
   const I = BF.I, names = Object.keys(I), C = BF.DYE_COLOURS.map(c => c[0]);
   const dye = c => I[c + "_dye"];
@@ -44,13 +44,13 @@ const BF = window.BF;
   }
   addShaped(I.tinted_glass, 1, [" D ", "DGD", " D "], { D: dye("black"), G: I.glass }, "4 Black Dye around Glass → Tinted Glass");
 
-  // ---- per-species fences (the oak recipe is in inventory.js; each fence takes its own species' planks, as for oak) ----
+  // ---- per-species fences (the oak recipe is in playerinv.js; each fence takes its own species' planks, as for oak) ----
   for (const sp of BF.WOOD_SPECIES) if (sp !== "oak") {
     const pl = I[sp + "_planks"];
     addShaped(I[sp + "_fence"], 3, ["PSP", "PSP"], { P: pl, S: I.stick }, "Planks, Stick, Planks × 2 rows → 3 " + nm(sp) + " Fence (" + nm(sp) + " Planks)");
   }
 
-  // ---- per-species doors and fence gates (oak's are in inventory.js / shepherd.js). As in Minecraft each takes its own species' planks;
+  // ---- per-species doors and fence gates (oak's are in playerinv.js / shepherd.js). As in Minecraft each takes its own species' planks;
   // sticks are one item whatever wood they were cut from. The recipe book shows the oak line ("... of one wood -> ... of that wood") only.
   for (const sp of BF.WOOD_SPECIES) if (sp !== "oak") {
     const pl = I[sp + "_planks"];
@@ -66,7 +66,7 @@ const BF = window.BF;
   fuel(names.filter(n => /_door$/.test(n) && n !== "oak_door").map(n => I[n]), 15, "Other doors");
   fuel(names.filter(n => /_fence_gate$/.test(n) && n !== "oak_fence_gate").map(n => I[n]), 15, "Other fence gates");
 
-  // ---- fuel: fences and wool (logs/woods/planks are covered by inventory.js patterns) ----
+  // ---- fuel: fences and wool (logs/woods/planks are covered by playerinv.js patterns) ----
   fuel(names.filter(n => /_fence$/.test(n) && n !== "oak_fence").map(n => I[n]), 15, "Other fences");
   fuel(WOOL.filter(id => id !== I.white_wool), 5, "Coloured wool");
 });

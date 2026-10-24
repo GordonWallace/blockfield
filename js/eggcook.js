@@ -16,7 +16,7 @@
 // See CONTRACT.md "Egg cooking".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const FU = BF.furnaceUse;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
@@ -102,11 +102,13 @@ function eggDeal(m, v2, want) {
 // ---------------------------------------------------------------- at the furnace
 // Takes the cooked eggs (and all the fuel left) out; `all`: also the raw eggs it put in (it gives up). Logs what it cooked.
 function finish(m, deal, all) {
-  const f = deal.furnace, got = FU.empty(m, deal, all) || [];
-  const cooked = got.filter(e => e.id === COOKED()).reduce((a, e) => a + e.n, 0);
-  deal.cooked = cooked;
-  log("collect", m, { got: got.map(e => e.n + " " + BF.itemName(e.id)).join(", ") || "nothing", at: FU.pk(f.x, f.y, f.z), loaded: deal.loaded || 0 });
-  if (cooked > 0) vlog(m, "furnace", "cooked " + cooked + " egg" + (cooked === 1 ? "" : "s") + " in the furnace at " + FU.pk(f.x, f.y, f.z));
+  const f = deal.furnace;
+  FU.empty(m, deal, all, got => {   // when the "furnace" request applies (js/furnaceuse.js)
+    const cooked = got.filter(e => e.id === COOKED()).reduce((a, e) => a + e.n, 0);
+    deal.cooked = cooked;
+    log("collect", m, { got: got.map(e => e.n + " " + BF.itemName(e.id)).join(", ") || "nothing", at: FU.pk(f.x, f.y, f.z), loaded: deal.loaded || 0 });
+    if (cooked > 0) vlog(m, "furnace", "cooked " + cooked + " egg" + (cooked === 1 ? "" : "s") + " in the furnace at " + FU.pk(f.x, f.y, f.z));
+  });
 }
 // The next errand: {kind: "cook", furnace, rawId, outId, n, fuelOk}, a fuel purchase {kind: "buy", ...}, or null.
 function nextTrip(m) {
@@ -169,6 +171,7 @@ function ai(m, dt, out, cont) {
     if (S.stage === "work") {
       if ((S.tt -= dt) > 0) { if (Math.random() < dt * 3) a.swingT = 0.2; return true; }   // visual
       const n = FU.load(m, deal, deal.n);
+      if (n === null) return true;   // the load request is in flight
       if (!n) return giveUp("furnace busy", fkey);
       S.stage = "cook";
       const st = INV().furnaceState(s.x, s.y, s.z);
@@ -180,8 +183,8 @@ function ai(m, dt, out, cont) {
     if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { FU.inUse.delete(FU.pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { finish(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; endTask(m); return true; }   // all cooked
-    FU.topUp(m, deal, st);
-    if (S.waitT > FU.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
+    const fueling = FU.topUp(m, deal, st);
+    if (S.waitT > FU.COOK * 1.5 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && !fueling && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
@@ -203,6 +206,7 @@ function ai(m, dt, out, cont) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = FU.doBuy(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5; endTask(m);
     if (done) log("buy", m, { from: v2.profession, got: done * deal.offer.sell.n + " " + BF.itemName(deal.item) });
     else { S.avoid[key] = dayNow() + 0.05; log("giveup", m, { kind: "buy", why: "trade refused" }); }

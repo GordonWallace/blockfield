@@ -1,20 +1,21 @@
+// @ci integration hosts=worker,server
 // Debug screen alerts and 0x: NODE_PATH=$(npm root -g) node test/debug-alerts.js [outPrefix]
 // Starts debug/server.js (alerts in a temp file), creates an alert on the debug screen, checks the game gets it, that a matching
 // log entry freezes the world at 0x (even part-way through a 100x frame), frees the mouse and shows the notice with distance and
 // Teleport, that Teleport moves the player next to the event, that Right resumes at 1x and takes the mouse back, that disable and
 // delete reach the game, that alerts survive a server restart, and that Left at 1x gives 0x.
-const path = require('path'), fs = require('fs'), os = require('os'), { spawn } = require('child_process');
+// BF_HOST=page|worker|server (spec r15-43): where the simulation runs; the log entries that fire alerts are written there and the
+// freeze is checked there (lib.sim); the notice, the mouse and the speed keys are the page's. On the world server the restart step is
+// skipped (restarting it stops the world the page plays).
+const path = require('path'), fs = require('fs'), os = require('os');
 const { chromium } = require(process.env.PW || 'playwright');
+const lib = require('./lib');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug-alerts';
-const GAME = 8720, DBG = 8721, FILE = path.join(os.tmpdir(), 'bf-test-alerts-' + process.pid + '.json');
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', FILE]);
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
-};
+const FILE = path.join(os.tmpdir(), 'bf-test-alerts-' + process.pid + '.json'), onServer = lib.host() === 'server';
+let GAME = 0, DBG = 0;
+const start = async () => { const s = await lib.serve({ world: onServer, game: GAME || undefined, debug: DBG || undefined, args: ['--alerts', FILE] }); GAME = s.game; DBG = s.debug; return s; };
 (async () => {
-  const fails = [], ok = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails.push(n); };
+  const fails = [], ok = (n, c, x) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (!c && x !== undefined ? '  ' + JSON.stringify(x) : '')); if (!c) fails.push(n); };
   try { fs.unlinkSync(FILE); } catch (e) {}
   let srv = await start();
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -22,8 +23,10 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await lib.install(game);   // (BFT.sim)
+  await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(4000);
+  await lib.simReady(game);
   // simulated pointer lock (headless Chromium has none), as in test/z-release.js
   await game.evaluate(() => {
     const cv = document.querySelector('canvas');
@@ -34,11 +37,11 @@ const start = async () => {
     document.exitPointerLock = () => { if (el) { el = null; setTimeout(fire, 5); } };
     BF.player.start();
   });
-  await require('./lib').toVillage(game);
+  await lib.toVillage(game);
   const until = (pg, fn, arg, t = 15000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 50 }).then(() => true, () => false);
 
   // ---- shared reader
-  const lm = await game.evaluate(() => {
+  const lm = await lib.sim(game, () => {
     const M = BF.logmatch, e = (k, t) => [1, k, t, [1, 2, 3]];
     return {
       wheat: M.matches({ who: 'Farmer', act: 'harvest', text: 'wheat' }, e('farm', 'Ana Reid (Farmer) started harvesting Wheat at 1, 2, 3')),
@@ -53,7 +56,7 @@ const start = async () => {
   ok('reader: forester trading', lm.forester && !lm.notForester);
   ok('reader: anyone trading, births', lm.anyTrade && lm.births);
   // ---- locations
-  const loc = await game.evaluate(() => {
+  const loc = await lib.sim(game, () => {
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     const vs = rec.members.filter(m => m.type === 'villager' && !m.dead && m.position);
     BF.vlog.trade(vs[0], vs[1], 'gave 1 Emerald, got 1 Loc test');
@@ -79,22 +82,23 @@ const start = async () => {
   ok('game receives the alerts', await until(game, () => BF.alerts.list.length === 2));
 
   // ---- an alert at 100x, fired from inside the simulation step: frozen at once
-  const fired = await game.evaluate(() => new Promise(res => {
-    BF.warp.set(4);   // 100x
+  await game.evaluate(() => BF.warp.set(4));   // 100x (the page's speed keys and menus go on to the simulation)
+  await game.waitForTimeout(500);
+  const fired = await lib.sim(game, () => new Promise(res => {
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     const m = rec.members.find(x => x.type === 'villager' && !x.dead && x.position);
     const sky = BF.sky.advance;   // the sim's part of the sky, once a tick (r15-10)
     let armed = 3;
     BF.sky.advance = function (h) {
       sky.call(this, h);
-      if (armed > 0 && --armed === 0) { BF.vlog.log(rec, 'birth', 'Test baby was born to A and B', m); window.__at = BF.simNow(); }
+      if (armed > 0 && --armed === 0) { BF.vlog.log(rec, 'birth', 'Test baby was born to A and B', m); globalThis.__at = BF.simNow(); }
     };
-    setTimeout(() => { BF.sky.advance = sky; res({ at: window.__at, now: BF.simNow(), frozen: BF.warp.frozen, speed: BF.warp.speed, mob: m.position.x }); }, 1500);
+    setTimeout(() => { BF.sky.advance = sky; res({ at: globalThis.__at, now: BF.simNow(), frozen: BF.warp.frozen, speed: BF.warp.speed, mob: m.position.x }); }, 1500);
   }));
   ok('alert freezes the world mid-frame ' + JSON.stringify(fired), fired.frozen && fired.speed === 0 && fired.at != null && fired.now === fired.at);
-  const s1 = await game.evaluate(() => ({ t: BF.simNow(), sky: BF.sky.time, mobs: BF.mobs.list.slice(0, 20).map(m => m.position.x + ',' + m.position.z).join(';') }));
+  const s1 = await lib.sim(game, () => ({ t: BF.simNow(), sky: BF.sky.time, mobs: BF.mobs.list.slice(0, 20).map(m => m.position.x + ',' + m.position.z).join(';') }));
   await game.waitForTimeout(1500);
-  const s2 = await game.evaluate(() => ({ t: BF.simNow(), sky: BF.sky.time, mobs: BF.mobs.list.slice(0, 20).map(m => m.position.x + ',' + m.position.z).join(';') }));
+  const s2 = await lib.sim(game, () => ({ t: BF.simNow(), sky: BF.sky.time, mobs: BF.mobs.list.slice(0, 20).map(m => m.position.x + ',' + m.position.z).join(';') }));
   ok('nothing moves at 0x', s1.t === s2.t && s1.sky === s2.sky && s1.mobs === s2.mobs);
   const note = await game.evaluate(() => { const e = document.getElementById('bf-alert'); return { shown: !e.hidden, text: e.textContent, tp: !!e.querySelector('[data-act=tp]'), locked: BF.player.isLocked(), ind: document.getElementById('warp').textContent }; });
   ok('notice shows the log line, distance and Teleport ' + JSON.stringify(note), note.shown && /Test baby was born/.test(note.text) && /\d+ blocks away/.test(note.text) && note.tp);
@@ -118,13 +122,15 @@ const start = async () => {
   ok('Right resumes at 1x and dismisses', await until(game, () => BF.warp.speed === 1 && document.getElementById('bf-alert').hidden));
   // an alert while playing with the mouse captured frees it; Right takes it back
   ok('mouse captured before the next alert', await until(game, () => BF.player.isLocked()));
-  await game.evaluate(() => { BF.alerts.fire(BF.alerts.list[1], BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), [0, 'birth', 'Test baby again', [0, 0, 0]]); });
+  await lib.sim(game, () => { BF.alertSim.fire(BF.alertSim.list[1], BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), [0, 'birth', 'Test baby again', [0, 0, 0]]); if (BF.proto) BF.proto.flush(); });
   ok('alert frees the mouse without pausing', await until(game, () => !BF.player.isLocked() && !BF.state.paused && BF.warp.frozen));
   await game.keyboard.press('ArrowRight');
   ok('Right dismisses that one too', await until(game, () => BF.warp.speed === 1 && !BF.alerts.active));
   ok('Right takes the mouse back', await until(game, () => BF.player.isLocked()));
-  const t0 = await game.evaluate(() => BF.simNow());   // the CI runner can manage only a few frames a second: allow it time
-  ok('time runs again', await until(game, t => BF.simNow() > t, t0, 20000));
+  const t0 = await lib.sim(game, () => BF.simNow());   // the CI runner can manage only a few frames a second: allow it time
+  let ran = false;
+  for (let i = 0; i < 40 && !ran; i++) { await game.waitForTimeout(500); ran = (await lib.sim(game, () => BF.simNow())) > t0; }
+  ok('time runs again', ran);
   // ---- Left at 1x: 0x; Right: 1x
   await game.keyboard.press('ArrowLeft');
   ok('Left at 1x gives 0x', await game.evaluate(() => BF.warp.speed === 0 && BF.warp.frozen));
@@ -136,20 +142,28 @@ const start = async () => {
   // ---- disable, then delete
   await dbg.click('#a-body tr[data-id]:nth-child(2) [data-act=toggle]');
   ok('disable reaches the game', await until(game, () => BF.alerts.list.some(a => a.kind === 'birth' && a.on === false)));
-  await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'birth', 'Test baby (quiet) was born to A and B'); });
-  ok('a disabled alert does not fire', await game.evaluate(() => !BF.warp.frozen && !BF.alerts.active));
+  let simOff = false;
+  for (let i = 0; i < 80 && !(simOff = await lib.sim(game, () => BF.alertSim.list.some(a => a.kind === 'birth' && a.on === false))); i++) await game.waitForTimeout(250);   // (the page passes the list on)
+  // (the farmers' wheat alert is still on and a real harvest can fire it meanwhile: only the quiet birth must not)
+  await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'birth', 'Test baby (quiet) was born to A and B'); if (BF.proto) BF.proto.flush(); });
+  await game.waitForTimeout(1000);
+  const after = await game.evaluate(() => { const a = BF.alerts.active; return a && { entry: a.entry, more: a.more }; });
+  ok('a disabled alert does not fire', !(after && /quiet/.test(JSON.stringify(after.entry))), { simOff, after });
   // ---- persistence across a server restart
-  srv.kill(); await new Promise(r => srv.once('exit', r));
-  srv = await start();
-  const st = await (await fetch(`http://localhost:${DBG}/alerts`)).json();
-  ok('alerts survive a server restart', st.alerts.length === 2 && st.alerts.some(a => a.on === false));
-  await dbg.waitForTimeout(2500);
+  if (onServer) console.log('(the server restart is skipped on the world server: it would stop the world)');
+  else {
+    await srv.stop();
+    srv = await start();
+    const st = await (await fetch(`http://localhost:${DBG}/alerts`)).json();
+    ok('alerts survive a server restart', st.alerts.length === 2 && st.alerts.some(a => a.on === false));
+    await dbg.waitForTimeout(2500);
+  }
   await dbg.click('#a-body tr[data-id]:nth-child(1) [data-act=del]');
   ok('delete reaches the game', await until(game, () => BF.alerts.list.length === 1));
   ok('table shows one alert', await dbg.evaluate(() => document.querySelectorAll('#a-body tr[data-id]').length === 1));
   ok('log shows locations', await dbg.evaluate(() => [...document.querySelectorAll('#log .ent .at')].length > 0));
 
-  await b.close(); srv.kill();
+  await b.close(); await srv.stop();
   try { fs.unlinkSync(FILE); } catch (e) {}
   console.log(fails.length ? 'FAILED: ' + fails.join('; ') : 'ALL PASS');
   process.exit(fails.length ? 1 : 0);

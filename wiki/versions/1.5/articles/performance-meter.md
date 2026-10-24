@@ -25,8 +25,16 @@ The performance meter measures how much simulation the game gets through. Its ma
 
 All of them are averaged over the last 5 seconds of real time. When the game is frozen (0x) or paused, the meter keeps its last figures and greys them out.
 
-The meter runs only while the F3 overlay or a debug screen is open (or a test asks for it), so it costs nothing in normal play. Turning it on and off writes a line to the [[page:game-log]] (kind *perf*), and the line for turning it off gives the last figures.
+The meter runs only while the F3 overlay or a debug screen is open (or a test asks for it), so it costs nothing in normal play. It measures the simulation wherever it runs: in the page, in a Web Worker or on the world server, the F3 overlay turns it on there. Turning it on and off writes a line to the [[page:game-log]] (kind *perf*), and the line for turning it off gives the last figures.
 
 ## Measuring on your own computer
 
 The `tools/perf/` folder in the repository holds the harness that measures the simulation without drawing: `perfmobs.js` runs a village for some game hours and records the meter's figures each hour, `live.js` measures the real frame loop at the top fast-forward speed, `analyze.js` summarises runs and `profsum.js` reads CPU profiles. Its README says how to run them.
+
+## The simulation on its own thread
+
+From 1.5 the world simulation (mobs, villagers, crops, water, the clock and weather) can run in the background on a thread of its own, a Web Worker, so the page only draws and takes your input. The page keeps its own copy of the terrain for drawing and for walking about, and the simulation sends it every block that changes. Saving still writes to the browser's storage, now from that thread.
+
+This is how the game runs when it isn't served by `./run.sh` with its world server, and the browser can start a worker: the online version, or the game served by another web server. A game opened as a file runs the simulation in the page. The F3 overlay's last line and the pause menu's *Simulation* button say which it is, and the button can force one; see [[page:world-server]] for the three ways the game runs.
+
+With the simulation on its own thread, fast-forward's ticks no longer share the page's time with drawing, so the picture stays smooth at fast-forward: in the tests' big-village day at 100x the page's work per frame dropped from about 50 ms to about 6 ms. While the game's tab is hidden the simulation pauses, as it did when it ran in the page. If the simulation ever stops with an error, the game says so and offers to reload from your last save; the error goes to the [[page:game-log]].

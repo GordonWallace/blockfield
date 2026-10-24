@@ -5,7 +5,7 @@
 // without weather, so monster spawning (js/mobs.js) can ask how long a spot has been dark.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const C = h => new THREE.Color(h);
 const DAY_TOP = C("#5d93ef"), DAY_HOR = C("#b6d2f5");
@@ -384,7 +384,7 @@ const sky = {
     sky.update(0);
   },
 
-  setTime(t) { sky.time = ((t % 1) + 1) % 1; if (scene) sky.update(0); },
+  setTime(t) { sky.time = ((t % 1) + 1) % 1; if (scene) sky.update(0); else sky.advance(0); },   // (headless: no sky to draw, js/boot.js)
 
   get cloudY() { return cloudY; },   // alias of cloudHeight
   // tests and the debug screen: cloud cover at a cell of the current window, the cell size, and the planet drift
@@ -405,14 +405,13 @@ const sky = {
 
   // A simulation step of dt game seconds: the clock and the weather move on and sky.light is worked out, then the sky is drawn for
   // that time. The game loop (main.js) splits the two (spec r15-10): advance(h) every tick, draw(alpha) every frame.
+  // (headless, in a Web Worker or on the world server: the step without the drawing, so a test's step helper moves the clock on every host)
   update(dt) {
-    if (!scene) return;
     sky.advance(dt);
-    paint(sky.time, sky.day, dt);
+    if (scene) paint(sky.time, sky.day, dt);
   },
   // The simulation side of a tick: time of day, cloud drift, weather (js/weather.js) and the light level the sim reads.
   advance(dt) {
-    if (!scene) return;
     if (dt > 0) {
       sky.time += dt / sky.dayLength;
       if (sky.time >= 1) { sky.time -= 1; sky.day++; }

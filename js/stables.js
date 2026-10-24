@@ -1,5 +1,5 @@
 // Stables and stable hands (BF.stables). Loaded after js/horses.js; hooks live in mobs.js (villagerAI, pickWander, interact, update, clear),
-// jobs.js (who may take a tack rack, work at the rack), trading.js (horse offers), inventory.js (a horse offer gives no item), builder.js /
+// jobs.js (who may take a tack rack, work at the rack), trading.js (horse offers), playerinv.js (a horse offer gives no item), builder.js /
 // blueprints.js (the "stable" structure) and villagerstatus.js. See CONTRACT.md "Stables".
 //
 // A stable is a builder structure (blueprints.js "stable": an open shelter with the tack rack, and a fenced paddock with a double gate), built only
@@ -19,7 +19,7 @@
 // Far villages (js/villagesim.js): horses only exist as mobs near the player, so catching and breeding pause there; shopping goes on.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PROF = "stable_hand";
 const MIN_HORSES = 2, MAX_HORSES = 4;   // catch until 2, breed up to 4
@@ -190,20 +190,11 @@ function findDeal(m, st, S) {
   return null;
 }
 function doDeal(m, deal) {
-  const T = TR(), v2 = deal.seller, o = deal.offer, em = I("emerald");
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!BF.villageLife.canSell(v2) || cnt(v2, o.sell.id) - o.sell.n < deal.keep || cnt(m, em) < o.buy[0].n) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);                    // the seller's stock and room, as for a player trade
-    if (!sold) break;
-    T.inv.remove(m.inv, em, o.buy[0].n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
+  const T = TR(), v2 = deal.seller, o = deal.offer;
+  const guard = () => (!BF.villageLife.canSell(v2) ? "busy" : cnt(v2, o.sell.id) - o.sell.n < deal.keep ? "Keeping for own use" : null);
+  const done = T.asked(m, v2, o) || !guard() ? T.buy(m, v2, o, deal.times, { guard }) : 0;   // the seller's stock and room, as for a player trade: one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) {
-    if (BF.vlog) BF.vlog.trade(m, v2, o, done);
     log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.items[o.sell.id].name, paid: done * o.buy[0].n + " emerald", how: o.spare ? "spare" : "offer" });
   }
   return done;
@@ -277,16 +268,16 @@ function pickTask(m, S) {
 function endTask(m, S, ok) {
   const tk = S.task;
   if (tk && !ok) { if (tk.r) S.avoid["h" + tk.r.hid] = now() + 0.05; if (tk.deal && tk.deal.seller && tk.deal.seller.slot) S.avoid[tk.deal.seller.slot.idx] = now() + 0.05; }
-  if (tk && tk.gatesOpen) setGates(tk.st, false);
+  if (tk && tk.gatesOpen) setGates(m, tk.st, false);
   if (tk && tk.r && tk.r.mob) BF.horses.setAvoid(tk.r.mob, null);
   const keep = ok && tk && (tk.kind === "catch" || tk.kind === "fetch") && tk.r && tk.r.lead && tk.r.lead.mob === m;   // a led horse: the walk home carries on under the same estimate
   S.cont = !!keep;
   if (!keep && BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
   S.task = null; S.stage = null; S.gx = null; m.ai.route = null;
 }
-function setGates(st, open) {
-  if (!st || !BF.world.setGate) return;
-  for (const [x, z] of st.gates) if (BF.world.isLoaded(x, z)) BF.world.setGate(x, st.y, z, open);
+function setGates(m, st, open) {   // requests (spec r15-19, js/blockreqs.js)
+  if (!st || !BF.blockReq) return;
+  for (const [x, z] of st.gates) if (BF.world.isLoaded(x, z)) BF.blockReq.door(m, x, st.y, z, open);
 }
 const groundY = (x, z) => { const g = BF.world.heightAt(x, z); return g == null ? null : g + 1; };
 // Walks to a mob (re-planning when it moved off). Returns "near" | "going" | "failed".
@@ -366,7 +357,7 @@ function taskStep(m, S, dt, out) {
     // wait at the gate until the horse has caught up (it follows more slowly round the fence), then open up
     if (Math.hypot(h.position.x - m.position.x, h.position.z - m.position.z) > 5 && (S.hw = (S.hw || 0) + dt) < 30) return true;
     S.hw = 0; S.stage = "pen"; S.penT = 0; tk.st = st; tk.gatesOpen = true;
-    setGates(st, true);
+    setGates(m, st, true);
     H.setPen(h, st.box); H.setAvoid(h, null); H.leash(h, null);
     return true;
   }
@@ -400,6 +391,7 @@ function shopStep(m, S, dt, out, tk) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;   // visual
   if ((S.tt -= dt) > 0) return true;
   const done = doDeal(m, deal);
+  if (done == null) return true;   // the trade is in flight (js/trading.js buy)
   if (done && BF.villageLife.particles) BF.villageLife.particles(m.position.x, m.position.y + 1.5, m.position.z, "#2fd06a", 5, 0.4);
   endTask(m, S, done > 0);
   return true;
@@ -556,7 +548,7 @@ function tick(dt) {
   if ((offT -= dt) > 0 || !BF.mobs) return;
   offT = 2;
   stockGen();
-  for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && live(m) && !m.tradingWith) syncOffers(m);
+  for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && live(m) && !m.tradingWith) syncOffers(m);
 }
 // What a villager holds besides its pack, for the debug screen (js/debugfeed.js): a stable hand's paddock horses.
 function holdings(m) {

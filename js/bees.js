@@ -17,7 +17,8 @@
 // - A bee follows anyone holding a flower within FOLLOW_R blocks (the player, or a beekeeper: lure()). Led within reach of another home with
 //   room, it moves in: one from the old count to the new.
 // - Crops within CROP_R blocks of a home with bees grow CROP_BOOST times faster by day (world.js growTick reads cropFactor).
-// Bees are drawn with one instanced mesh (wings flicker in the vertex shader) and fly straight with a hop over obstacles: no pathfinding.
+// Bees fly straight with a hop over obstacles: no pathfinding. A bee is plain data (x, y, z, yaw, phase, mode, land); js/entityview.js draws
+// them all with one instanced mesh, wings flickering in the vertex shader (spec r15-12).
 // On the planet (spec r14-13 frames) homes are kept at canonical addresses and a bee flies in its home's face frame, past an edge too (a
 // margin address there; the world reads those through to the canonical cell). Flowers, crops, the player and lures are seen from the home
 // or the bee (BF.planet.local) before any distance is taken; a bee that moves to a home on another face is put into that home's frame.
@@ -25,7 +26,7 @@
 //   how, who), playerUse(target, stack), lure(m, on), out(), stats(), serialize(), deserialize(a), reset(), MAX, CAP, R, FULL, ... }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const MAX = 30;                 // bees a home can hold
 const FULL = 5;                 // honey level of a full home
@@ -429,8 +430,7 @@ let acc = 0, lureT = 0, lp = [];
 function update(dt) {
   if (!(dt > 0) || !W() || NEST == null && (ids(), NEST == null)) return;
   hook();
-  for (const b of bees) { b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (draw)
-  dirty = true;
+  for (const b of bees) { b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (js/entityview.js)
   acc += dt;
   if (acc >= 1) { acc = 0; housekeeping(); }
   release(dt);
@@ -454,7 +454,6 @@ function update(dt) {
     } else for (const b of bees) if (b.follow) { b.follow = null; nextErrand(b); }
   }
   for (let i = bees.length - 1; i >= 0; i--) { const b = bees[i]; if (b && !b.gone) stepBee(b, dt, lp, now); }
-  dirty = true;
 }
 
 // ---------------------------------------------------------------- the world: chunks, blocks, crops
@@ -578,97 +577,6 @@ function reset() {
   bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0;
 }
 
-// ---------------------------------------------------------------- drawing: one instanced mesh, wings flickering in the vertex shader
-let mesh = null, dirty = true;
-function geometry() {
-  const pos = [], col = [], wing = [];
-  const box = (x0, y0, z0, x1, y1, z1, c, wg) => {
-    const P = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
-    const F = [[0, 3, 2, 1, 0.7], [4, 5, 6, 7, 0.8], [0, 4, 7, 3, 0.75], [1, 2, 6, 5, 0.75], [3, 7, 6, 2, 1], [0, 1, 5, 4, 0.5]];
-    for (const [a, b, cc, d, sh] of F) for (const i of [a, b, cc, a, cc, d]) { pos.push(...P[i]); col.push(c[0] * sh, c[1] * sh, c[2] * sh); wing.push(wg); }
-  };
-  const Y = [0.98, 0.78, 0.1], K = [0.1, 0.08, 0.06], Wg = [0.86, 0.92, 0.98];
-  const L = BODY, w = 0.045, hgt = 0.045;
-  const segs = [[-0.5, -0.38, K], [-0.38, -0.24, Y], [-0.24, -0.12, K], [-0.12, 0.04, Y], [0.04, 0.22, [0.25, 0.18, 0.08]], [0.22, 0.5, K]];
-  for (const [a, b, c] of segs) { const s = a > 0.2 ? 0.8 : 1; box(-w * s, -hgt * s, a * L, w * s, hgt * s, b * L, c, 0); }
-  box(0.01, hgt, -0.04, 0.11, hgt + 0.006, 0.04, Wg, 1);      // right wing (hinged at x = 0, y = hgt)
-  box(-0.11, hgt, -0.04, -0.01, hgt + 0.006, 0.04, Wg, -1);   // left wing
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-  g.setAttribute("wing", new THREE.Float32BufferAttribute(wing, 1));
-  return g;
-}
-const uTime = { value: 0 };
-function initMesh() {
-  if (mesh || !BF.scene || typeof THREE === "undefined" || !THREE.InstancedMesh) return;
-  const g = geometry(), mat = new THREE.MeshBasicMaterial({ vertexColors: true });
-  g.setAttribute("bee", new THREE.InstancedBufferAttribute(new Float32Array(CAP * 2), 2));   // per bee: wing phase, flapping (1) or folded (0)
-  mat.onBeforeCompile = sh => {
-    sh.uniforms.uBeeTime = uTime;
-    sh.vertexShader = "attribute float wing;\nattribute vec2 bee;\nuniform float uBeeTime;\n" + sh.vertexShader.replace("#include <begin_vertex>", `#include <begin_vertex>
-      if (wing != 0.0) {
-        float a = wing * mix(-0.15, 0.25 + 0.75 * abs(sin(uBeeTime * 70.0 + bee.x)), bee.y);
-        vec2 r = vec2(transformed.x, transformed.y - ${(0.045).toFixed(3)});
-        transformed.x = r.x * cos(a) - r.y * sin(a);
-        transformed.y = r.x * sin(a) + r.y * cos(a) + ${(0.045).toFixed(3)};
-      }`);
-  };
-  mesh = new THREE.InstancedMesh(g, mat, CAP);
-  mesh.count = 0; mesh.frustumCulled = false; mesh.name = "bees";
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  mesh.onBeforeRender = draw;
-  BF.scene.add(mesh);
-  // floating origin (js/view.js): instance positions are stored relative to the mesh, which sits on a coarse grid near the player
-  if (BF.view) BF.view.onBegin(() => {
-    const p = BF.player && BF.player.position;
-    if (!p) return;
-    const rx = Math.floor(p.x / 256) * 256, rz = Math.floor(p.z / 256) * 256;
-    if (rx !== mesh.position.x || rz !== mesh.position.z) { mesh.position.set(rx, 0, rz); dirty = true; }
-  });
-}
-const _m = typeof THREE !== "undefined" ? new THREE.Matrix4() : null;
-const _r = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _u = typeof THREE !== "undefined" ? new THREE.Vector3() : null, _f = typeof THREE !== "undefined" ? new THREE.Vector3() : null;
-const DQ = {}, DV = [0, 0], BP = { x: 0, y: 0, z: 0 };
-let drawnK = -1;
-// Bees are drawn between where the last two ticks left them (spec r15-10): k = BF.warp.alpha, 0 the previous tick, 1 the latest.
-function draw() {
-  const Wp = BF.warp, k = Wp && Wp.alpha != null ? Wp.alpha : 1, j = 1 - k;
-  uTime.value = Wp && Wp.renderNow ? Wp.renderNow() : simNow();
-  const light = BF.sky && typeof BF.sky.light === "number" ? Math.max(0.3, Math.min(1, BF.sky.light)) : 1;
-  mesh.material.color.setRGB(light, light, light);
-  if (!dirty && k === drawnK) return;
-  dirty = false; drawnK = k;
-  const n = Math.min(bees.length, CAP), A = mesh.geometry.getAttribute("bee");
-  for (let i = 0; i < n; i++) {
-    const b = bees[i], s = b.mode === "land" && b.land ? b.land : null;
-    const lerp = b.px != null && (b.x - b.px) ** 2 + (b.y - b.py) ** 2 + (b.z - b.pz) ** 2 < 16;   // (a jump: a face edge, a new frame)
-    BP.x = lerp ? b.px * j + b.x * k : b.x; BP.y = lerp ? b.py * j + b.y * k : b.y; BP.z = lerp ? b.pz * j + b.z * k : b.z;
-    // the planet: the bee seen from the mesh (in the player's frame), its directions turned with it
-    const r = BF.planet.local(mesh.position, BP, DQ), bx = r.x, bz = r.z, q = r.turn;
-    if (s) {   // landed: belly on the surface, back along its normal
-      let nx = s.nx, nz = s.nz;
-      if (q) { BF.planet.turnVec(q, nx, nz, DV); nx = DV[0]; nz = DV[1]; }
-      _u.set(nx, s.ny, nz);
-      if (s.ny > 0.5) _f.set(Math.sin(b.landYaw), 0, Math.cos(b.landYaw));
-      else { const a = (b.landYaw % 1.2) - 0.6; _f.set(Math.sin(a) * nz, Math.cos(a), -Math.sin(a) * nx); }   // on a wall: head up, a little askew
-      _r.crossVectors(_u, _f).normalize(); _f.crossVectors(_r, _u).normalize();
-      _m.makeBasis(_r, _u, _f).setPosition(bx + nx * 0.045 - mesh.position.x, BP.y + s.ny * 0.045, bz + nz * 0.045 - mesh.position.z);
-    } else {
-      let yaw = lerp && b.pyaw != null ? b.pyaw + Math.atan2(Math.sin(b.yaw - b.pyaw), Math.cos(b.yaw - b.pyaw)) * k : b.yaw;
-      if (q) { BF.planet.turnVec(q, Math.sin(yaw), Math.cos(yaw), DV); yaw = Math.atan2(DV[0], DV[1]); }
-      const c = Math.cos(yaw), sn = Math.sin(yaw);
-      _f.set(sn, 0, c); _u.set(0, 1, 0); _r.set(c, 0, -sn);
-      _m.makeBasis(_r, _u, _f).setPosition(bx - mesh.position.x, BP.y, bz - mesh.position.z);
-    }
-    mesh.setMatrixAt(i, _m);
-    A.setXY(i, b.phase, s ? 0 : 1);
-  }
-  mesh.count = n;
-  mesh.instanceMatrix.needsUpdate = true;
-  A.needsUpdate = true;
-}
-
 // ---------------------------------------------------------------- saving
 // [x, y, z, kind (0 nest, 1 hive), bees, honey, day, ...]; bees that are out count as home.
 function serialize() {
@@ -699,12 +607,12 @@ BF.bees = {
   homes: () => [...recs.values()], loadedHomes: () => [...loaded.values()], list: bees, canFly, dayOut,
   onMoveIn: fn => moveL.push(fn),
   out: h => bees.filter(b => b.home === h),
-  housekeeping, initMesh,
+  housekeeping,
 };
-// The bee simulation runs with the mobs, once per simulation step (fast-forward included); the mesh is drawn when the scene renders.
+// The bee simulation runs with the mobs, once per simulation step (fast-forward included); js/entityview.js draws the bees (spec r15-12).
 if (BF.mobs && BF.mobs.update) {
   const prev = BF.mobs.update;
-  BF.mobs.update = function (dt) { const r = prev.apply(this, arguments); try { initMesh(); update(dt); } catch (e) { console.error(e); } return r; };
+  BF.mobs.update = function (dt) { const r = prev.apply(this, arguments); try { update(dt); } catch (e) { console.error(e); } return r; };
 }
 if (W() && W().reset) { const prev = W().reset; W().reset = function () { const r = prev.apply(this, arguments); reset(); return r; }; }
 })();

@@ -1,7 +1,7 @@
 // World storage, progressive chunk loading, meshing, edits, raycasting and collision.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const CS = 16;      // chunk width/depth
 // World limits (BF.MIN_Y lowest y, BF.H exclusive top, BF.SEA sea level, BF.SY0/SY1 section range) are the mile-high ones,
@@ -27,7 +27,7 @@ const SECN = 4096;
 // returns an unshared copy), because IndexedDB can't store a SharedArrayBuffer in every browser, and postMessage would share it
 // (and can't transfer it: meshJob(c, true) copies the sections it sends to the mesher workers, r15-03).
 // An unloaded chunk's arrays are freed like any other object, once nothing references the chunk.
-const SHARED = typeof SharedArrayBuffer === "function" && self.crossOriginIsolated === true;
+const SHARED = typeof SharedArrayBuffer === "function" && globalThis.crossOriginIsolated === true;
 BF.shared = {
   on: SHARED,
   text: SHARED ? "Shared memory: on" : "Shared memory: off: page not isolated",
@@ -100,8 +100,11 @@ const world = {
   edits: new Map(),       // key -> Map(localIndex -> blockId); survives unloading
   viewDist: 6,
   queueLength: 0,
-  _loadL: [], _unloadL: [],
+  _loadL: [], _viewLoadL: [], _unloadL: [],
   _dirty: new Set(),
+  // The page's copy of a world simulated in a Web Worker (spec r15-38, js/simhost.js): chunks are generated and lit here as usual, but the
+  // edits come from the simulation (applyEdits) and nothing here simulates: no village loading, and only the drawing's chunk-load hooks run.
+  replica: false,
   _faceUV: null,
   daylight: 1,
   // The planet (spec r14-07): far chunks keep only their meshes (key -> meshes), and chunks load only while blocks are big enough to see:
@@ -223,7 +226,12 @@ world.setDaylight = function (l) {
   dayUniform.value = l;
 };
 
-world.onChunkLoad = fn => world._loadL.push(fn);
+// fn(cx, cz, chunk) when a chunk is created. view: the hook draws (it runs in the page's copy of the world too, r15-38); the others are
+// the simulation's (villages, wildlife, block entities...).
+world.onChunkLoad = (fn, view) => { world._loadL.push(fn); if (view) world._viewLoadL.push(fn); };
+// fn(chunk, editIndex, id) after every block change (setBlock): the simulation/client protocol's blockChanges (js/protocol.js, r15-36)
+const setL = [];
+world.onBlockSet = fn => setL.push(fn);
 world.onChunkUnload = fn => world._unloadL.push(fn);
 
 // Removes every chunk, edit and mesh (used for a new world / new seed).
@@ -232,6 +240,7 @@ world.reset = function () {
   for (const k of [...world.farMeshes.keys()]) dropFar(k);
   world.edits.clear();
   world._dirty.clear();
+  staleFar.clear();
   fluidQ.clear();
   growing.clear();
   if (BF.farmland) BF.farmland.reset();
@@ -405,6 +414,7 @@ world.setBlock = function (x, y, z, id) {
   let e = world.edits.get(c.key);
   if (!e) world.edits.set(c.key, (e = new Map()));
   e.set(i, id);
+  for (let k = 0; k < setL.length; k++) setL[k](c, i, id);   // (the protocol's block changes, js/protocol.js)
   updateColumn(c, lx, lz);
   world._dirty.add(c.key);
   scheduleFluid(x, y, z, true);
@@ -412,8 +422,8 @@ world.setBlock = function (x, y, z, id) {
   if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);   // sky light (js/skylight.js)
   if (BF.mobs && BF.mobs.onSet) BF.mobs.onSet(x, y, z, oldId, id); // monster spawn wait restarts where it got darker (js/mobs.js)
   if (BF.signs) BF.signs.onSet(x, y, z, oldId, id); // sign groups re-merge / text moves / signs pop without support (js/signs.js)
-  if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/inventory.js)
-  if (BF.isFurnace(oldId) && !BF.isFurnace(id) && BF.inventory && BF.inventory.furnaceRemoved) BF.inventory.furnaceRemoved(x, y, z); // a furnace stops and spills (js/inventory.js)
+  if (BF.isChest(oldId) && BF.inventory && BF.inventory.chestRemoved) BF.inventory.chestRemoved(x, y, z); // a chest spills its contents (js/playerinv.js)
+  if (BF.isFurnace(oldId) && !BF.isFurnace(id) && BF.inventory && BF.inventory.furnaceRemoved) BF.inventory.furnaceRemoved(x, y, z); // a furnace stops and spills (js/playerinv.js)
   if (BF.baker && BF.baker.isOven(oldId) && !BF.baker.isOven(id)) BF.baker.ovenRemoved(x, y, z); // a baker's oven spills (js/baker.js)
   if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) growing.add(fkey(x, y, z));
   if (y > BF.MIN_Y) { const bl = BF.blocks[cblock(c, lx, y - 1, lz)]; if (bl && bl.growsUp && id !== bl.id) growing.add(fkey(x, y - 1, z)); }   // cane cut back: the top left grows again
@@ -455,6 +465,48 @@ world.setBlock = function (x, y, z, id) {
     if (n && n.mesh !== undefined) world._dirty.add(n.key);
   }
   return true;
+};
+
+// ---------- the page's copy of a world simulated elsewhere (spec r15-38) ----------
+// The simulation's edits, as the protocol sends them (js/protocol.js: edits, blockChanges): chunks [[key, [[edit index, id], ...]], ...].
+// full: every edit the world holds, replacing these. A loaded chunk takes each cell at once (blocks, light, remesh), as setBlock does
+// without any of its consequences (drops, popping plants, fluids): the simulation makes those and sends them as edits too. A chunk that
+// is only a far mesh is marked stale and loaded again, so it is remeshed; a loaded chunk that loses edits (full) is generated again.
+const staleFar = new Set();
+function applyCell(key, i, id) {
+  let e = world.edits.get(key);
+  if (!e) world.edits.set(key, (e = new Map()));
+  e.set(i, id);
+  const c = world.chunks.get(key);
+  if (!c) { if (world.farMeshes.has(key) && !staleFar.has(key)) { staleFar.add(key); lastCenter = null; } return; }
+  const y = (i >> 8) + BF.MIN_Y, lx = i & 15, lz = (i >> 4) & 15;
+  if (y < c.y0) extendDown(c, y >> 4); else if (y >= c.y1) extendUp(c, (y >> 4) + 1);
+  const oldId = cblock(c, lx, y, lz);
+  if (oldId === id) return;
+  secSet(c, lx, y, lz, id);
+  c.ver++; c.colVer[(lz << 4) | lx]++;
+  updateColumn(c, lx, lz);
+  world._dirty.add(key);
+  const x = c.cx * CS + lx, z = c.cz * CS + lz;
+  if (BF.light) BF.light.onSet(x, y, z, oldId, id);
+  if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);
+  if (lx === 0 || lz === 0 || lx === CS - 1 || lz === CS - 1) markNeighboursDirty(c);
+}
+world.applyEdits = function (chunks, full) {
+  let gone = null;
+  if (full) {
+    const before = new Map(world.edits);
+    world.edits.clear();
+    const now = new Map(chunks);
+    for (const [k, m] of before) {
+      const c = world.chunks.get(k), n = now.get(k);
+      if (!c || !m.size) continue;
+      const nm = n ? new Map(n) : null;
+      for (const [i, id] of m) if (!nm || nm.get(i) !== id) { (gone || (gone = [])).push(k); break; }
+    }
+  }
+  for (const [k, cells] of chunks) for (const [i, id] of cells) applyCell(k, i, id);
+  if (gone) { for (const k of gone) unload(k); lastCenter = null; }   // (generated again with the edits it has now)
 };
 
 // Calls cb(lx, y, lz, id) for every block of chunk c (optionally only y in [ya, yb]) whose flag[id] > thr (default 0).
@@ -528,7 +580,7 @@ function createChunk(cx, cz) {
   if (e) for (const [i, id] of e) if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) {
     growing.add(fkey(cx * CS + (i & 15), (i >> 8) + BF.MIN_Y, cz * CS + ((i >> 4) & 15)));
   }
-  for (const fn of world._loadL) { try { fn(cx, cz, c); } catch (err) { console.error(err); } }
+  for (const fn of world.replica ? world._viewLoadL : world._loadL) { try { fn(cx, cz, c); } catch (err) { console.error(err); } }
   // a far chunk's data again (it came near, or a neighbour needs it for its mesh): it takes back its mesh, which is still right (pitfall 9:
   // left dirty, it would be meshed again every frame)
   const fm = world.farMeshes.get(key);
@@ -536,7 +588,8 @@ function createChunk(cx, cz) {
     world.farMeshes.delete(key);
     c.meshes = fm; c.mesh = true;
     for (const m of fm) m.userData.chunk = c;
-    world._dirty.delete(key);
+    if (staleFar.delete(key)) world._dirty.add(key);   // (the page's copy: edited while it was only a mesh, r15-38)
+    else world._dirty.delete(key);
   }
   return c;
 }
@@ -581,6 +634,7 @@ const NOARR = new Float32Array(0);
 function freeArray() { this.array = NOARR; }
 function markUploaded() { this.uploaded = true; }
 function dropFar(key) {
+  staleFar.delete(key);
   for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   world.farMeshes.delete(key);
 }
@@ -643,7 +697,7 @@ function plan(pcx, pcz) {
   const data = new Set(), K = Math.min(R, KEEP) + 1.5;
   for (const [dk, sp] of spots) {
     const [cx, cz, score, d2, k] = sp, c = world.chunks.get(k);
-    if (d2 <= K * K) data.add(k);
+    if (d2 <= K * K || staleFar.has(k)) data.add(k);
     if (d2 > R * R || (c ? c.mesh !== undefined : world.farMeshes.has(k))) continue;
     meshList.push([cx, cz, score, d2]);
     const [dx, dz] = dk.split(",").map(Number);
@@ -737,7 +791,7 @@ let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength w
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
-  if (BF.villageSim && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
+  if (BF.villageSim && !world.replica && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
   roundPlan = !!(BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
   // the chunk ceiling: above min(pxScale, chunkCeiling) over the ground no chunks load; back below 90% of it they do
   if (BF.player && BF.player.position) {
@@ -844,11 +898,11 @@ const EDGE_NB = { edge: true };   // meshJob: a neighbour chunk across a face ed
 let TBL = null, TBLV = 0, WTBL = null, FOREIGN = null;
 function meshTables() {
   if (TBL) return TBL;
-  const tiles = {};
-  for (const b of BF.blocks) if (b && Array.isArray(b.boxes)) for (const q of b.boxes) if (q && typeof q[6] === "string" && !(q[6] in tiles)) tiles[q[6]] = BF.textures.uv(q[6]);
+  const tiles = {}, draw = !!scene;   // headless (no scene, js/boot.js): the collision boxes only (pane boxes), no texture atlas
+  if (draw) for (const b of BF.blocks) if (b && Array.isArray(b.boxes)) for (const q of b.boxes) if (q && typeof q[6] === "string" && !(q[6] in tiles)) tiles[q[6]] = BF.textures.uv(q[6]);
   TBL = {
     RENDER: BF.RENDER, OPAQUE: BF.OPAQUE, FLUID: BF.FLUID, SOLID: BF.SOLID, SATT: BF.skyLight.ATT, SKB: BF.skyLight.BRIGHT,
-    faceUV: world._faceUV, faceTint: world._faceTint, dirtUV: world._dirtUV, overlayUV: world._overlayUV, tiles, tile0: BF.textures.uv("\u0000"),
+    faceUV: world._faceUV, faceTint: world._faceTint, dirtUV: world._dirtUV, overlayUV: world._overlayUV, tiles, tile0: draw ? BF.textures.uv("\u0000") : null,
     blocks: BF.blocks, DIRS: BF.DIRS, STONE: BF.B.stone, BEDROCK: BF.B.bedrock, PATH: BF.B.dirt_path, FARM: BF.B.farmland, FARM_DRY: BF.B.farmland_dry,
     MINY: BF.MIN_Y, HTOP: BF.H,
   };
@@ -977,6 +1031,7 @@ function applyMesh(c, R, anchor) {
 function buildMesh(c) {
   const t0 = performance.now();
   c.meshT = t0;   // fast-forward remesh batching (remeshDirty)
+  if (!scene) { c.mesh = true; c.meshAgain = false; return; }   // headless (js/boot.js): nothing is drawn; the chunk streams as if shown
   c.meshV = (c.meshV || 0) + 1;
   if (c.meshJob === 1) { MP.queue.delete(c); c.meshJob = 0; }
   c.meshAgain = false;   // (an answer still in a worker is older than this mesh: it is dropped)
@@ -1008,8 +1063,8 @@ function poolStart() {
   const left = [...MP.queue];   // (started again: BF.meshInline turned on)
   for (const w of MP.workers) { for (const it of w.busy) left.push(it.c); w.terminate(); }
   MP.workers = []; MP.queue.clear();
-  const k = Math.min(4, (navigator.hardwareConcurrency || 2) - 1);   // every core but the page's, up to 4
-  MP.inline = !!BF.meshInline || typeof Worker === "undefined" || location.protocol === "file:" || k < 1 || !BF.workerUrl;
+  const k = Math.min(4, ((globalThis.navigator && navigator.hardwareConcurrency) || 2) - 1);   // every core but the page's, up to 4
+  MP.inline = !scene || !!BF.meshInline || typeof Worker === "undefined" || location.protocol === "file:" || k < 1 || !BF.workerUrl;
   if (!MP.inline) for (let i = 0; i < k; i++) {
     let w;
     try { w = new Worker(BF.workerUrl("js/meshworker.js")); } catch (e) { poolFail(e && e.message); return; }
@@ -1018,7 +1073,7 @@ function poolStart() {
     w.onerror = e => poolFail(e && e.message);
     MP.workers.push(w);
   }
-  glog("INFO", MP.inline ? "Chunks are meshed in the page (no mesher workers)" : "Chunks are meshed in " + MP.workers.length + " worker threads");
+  glog("INFO", !scene ? "Headless: chunks are not meshed (nothing is drawn)" : MP.inline ? "Chunks are meshed in the page (no mesher workers)" : "Chunks are meshed in " + MP.workers.length + " worker threads");
   for (const c of left) { c.meshJob = 0; if (world.chunks.get(c.key) !== c) continue; if (MP.inline) buildMesh(c); else enqueue(c, c.meshPrio || 0); }
 }
 // A worker that can't load or fails: everything is meshed in the page from now on, starting with the chunks the workers had.

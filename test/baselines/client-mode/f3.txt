@@ -1,0 +1,8 @@
+Face 4  u 89,179.5  v 17,203.5  y 44.0
+35.48°N 3.99°E  Facing north (0°)
+Chunk 5573, 1075  Sections -3..2 (y -48..47)  Biome Plains
+Mobs -  Seed 123  Gen 4 Biomes x1  sims
+Day 1 12:00  Light 1.00  BL 0  Calls -
+Weather clear 0.00 (1000000s left, rain here)  ms
+Clouds clear at y124
+Simulation: Browser (this page) (the page was opened as a file, so a worker can't load the game's scripts)

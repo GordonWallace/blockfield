@@ -2,7 +2,7 @@
 // See CONTRACT.md "Villager food and farming (js/villagelife.js)".
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const BREAD_PTS = 5;               // bread restores 5 hunger points = 1 bread-equivalent
 const KEEP = 7;                    // a seller always keeps at least this many bread-eq
@@ -205,7 +205,7 @@ BF.food = {
 // ================================================================ farming, food shopping, eating visuals (BF.villageLife)
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const FD = () => BF.food;
 const TR = () => BF.trades;
 const W = () => BF.world;
@@ -269,30 +269,8 @@ const key3 = (x, y, z) => x + "," + y + "," + z;
 const getB = (x, y, z) => W().getBlock(x, y, z);
 
 // ---------------------------------------------------------------- particles (eating crumbs, harvest bits)
-const pool = [];
-let partGeo = null;
-const partMats = {};
-function particles(x, y, z, color, n, spread) {
-  if (!BF.scene || typeof THREE === "undefined") return;
-  if (!partGeo) partGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
-  const key = color || "#999999";
-  const mat = partMats[key] || (partMats[key] = new THREE.MeshBasicMaterial({ color: new THREE.Color(key) }));
-  for (let i = 0; i < n; i++) {
-    if (pool.length > 120) { const o = pool.shift(); BF.scene.remove(o.mesh); }
-    const mesh = new THREE.Mesh(partGeo, mat);
-    mesh.position.set(x + (Math.random() - 0.5) * spread, y + Math.random() * 0.2, z + (Math.random() - 0.5) * spread);   // visual
-    BF.scene.add(mesh);
-    pool.push({ mesh, vx: (Math.random() - 0.5) * 1.6, vy: 0.8 + Math.random() * 1.6, vz: (Math.random() - 0.5) * 1.6, life: 0.4 + Math.random() * 0.3 });   // visual
-  }
-}
-function updateParticles(dt) {
-  for (let i = pool.length - 1; i >= 0; i--) {
-    const p = pool[i];
-    p.life -= dt; p.vy -= 12 * dt;
-    p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt;
-    if (p.life <= 0) { BF.scene.remove(p.mesh); pool.splice(i, 1); }
-  }
-}
+// a few bits flying out and falling: an effect event (js/fx.js) that js/entityview.js plays
+function particles(x, y, z, color, n, spread) { BF.fx.emit({ kind: "crumbs", x, y, z, color: color || "#999999", n, spread }); }
 const nearPlayer = (m, r) => { const p = BF.player && BF.player.position; return !!(p && m.position && m.position.distanceTo(p) < r); };
 function sound(name, x, y, z, vol) { try { if (BF.audio && BF.audio.play) BF.audio.play(name, { x, y, z, volume: vol == null ? 0.6 : vol, group: "mobs", dist: 16 }); } catch (e) { /* audio is optional */ } }
 function blockSound(kind, id, x, y, z) { try { if (BF.audio && BF.audio.blockSound) BF.audio.blockSound(kind, id, x, y, z, 0.6); } catch (e) { /* optional */ } }
@@ -1157,7 +1135,7 @@ function perform(m, fs, R, D) {
   }
   if (t.kind === "tend") return true;
   if (t.kind === "gather") return gatherBlock(m, D, t);
-  if (t.kind === "buylog") return doLogDeal(m, t) > 0;
+  if (t.kind === "buylog") { const n = doLogDeal(m, t); return n == null ? "wait" : n > 0; }   // "wait": the trade is in flight (js/trading.js buy)
   if (BF.baker && BF.baker.FARM_KINDS[t.kind] != null) return BF.baker.farmPerform(m, t, D, { myBeds, ok: () => true, key3, hasHoe });   // sugar cane, pumpkins (js/baker.js)
   if (!w.isLoaded(t.x, t.z) || !freeCellOrFarm(R, D, t)) return false;
   if (t.proj) return performBed(m, fs, R, D, t);
@@ -1309,6 +1287,7 @@ function farmAI(m, dt, out) {
       });
       return true;
     }
+    if (okDone === "wait") return true;
     if (okDone && t.kind !== "tend" && t.kind !== "craft") ai.swingT = 0.35;
     if (!okDone) { log("giveup", m, { task: t.kind, why: t.kind === "buylog" ? "trade refused" : "cell changed", at: [t.x, t.y, t.z] }); if (t.kind === "buylog") avoidSeller(m, t.seller); }
     endTask(m, fs, okDone);
@@ -1382,25 +1361,13 @@ function findFoodSeller(m) {
 }
 function doFoodDeal(m, deal) {
   const T = TR(), F = FD(), v2 = deal.seller, em = ids().em;
-  let done = 0, item = deal.item, n = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2)) break;
-    {
-      const o = deal.offer, per = F.breadEq(o.sell.id) * o.sell.n;
-      if ((!deal.milk && !deal.treat && F.surplus(v2) < per) || T.blockReason(v2, o) || cnt(m, em) < o.buy[0].n) break;
-      if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-      const sold = T.exchange(v2, o);                 // the seller's stock and room, as for a player trade
-      if (!sold) break;
-      T.inv.remove(m.inv, em, o.buy[0].n);
-      T.inv.addStacks(m.inv, sold);
-      T.addXp(v2, o);
-      n += o.sell.n;
-    }
-    done++;
-  }
+  const o = deal.offer, item = deal.item, per = F.breadEq(o.sell.id) * o.sell.n;
+  const guard = () => (!canSell(v2) ? "busy" : !deal.milk && !deal.treat && F.surplus(v2) < per ? "No food to spare" : null);   // its surplus, lot by lot
+  const done = T.asked(m, v2, o) || (!guard() && cnt(m, em) >= o.buy[0].n) ? T.buy(m, v2, o, deal.times, { guard }) : 0;   // the seller's stock and room, as for a player trade: one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
+  const n = done * o.sell.n;
   if (done) {
-    const paid = deal.offer.buy[0].n * done;
-    if (BF.vlog) BF.vlog.trade(m, v2, deal.offer, done);
+    const paid = o.buy[0].n * done;
     log("buyFood", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: n + " " + BF.items[item].name, paid: paid + " emerald" });
     if (BF.emit) BF.emit("villagerFoodTrade", m, v2, item, n);
   }
@@ -1447,20 +1414,17 @@ function findLogSeller(m, want, prefer) {
     x: Math.floor(v2.position.x), y: Math.floor(v2.position.y + 0.01), z: Math.floor(v2.position.z), k: "buylog:" + sellerIdx(v2) });
 }
 function doLogDeal(m, t) {
-  const T = TR(), v2 = t.seller, em = ids().em;
-  if (!canSell(v2)) return 0;
-  if (!t.offer || t.offer.buy[0].n !== 1) return 0;
-  t.per = t.offer.sell.n;   // the price may have moved since the deal was planned (js/prices.js)
-  let done = 0;
-  for (let i = 0; i < t.times && logCount(m) < t.want; i++) {
-    if (cnt(m, em) < 1 || !T.inv.canFit(m.inv, [{ id: t.item, n: t.per }], [{ id: em, n: 1 }])) break;
-    if (!T.exchange(v2, t.offer)) break;              // the seller's stock, reserve and room, as for a player trade
-    T.addXp(v2, t.offer);
-    T.inv.remove(m.inv, em, 1); T.inv.add(m.inv, t.item, t.per);
-    done++;
+  const T = TR(), v2 = t.seller;
+  if (!T.asked(m, v2, t.offer)) {
+    if (!canSell(v2)) return 0;
+    if (!t.offer || t.offer.buy[0].n !== 1) return 0;
+    t.per = t.offer.sell.n;   // the price may have moved since the deal was planned (js/prices.js)
   }
+  if (!t.offer) return 0;
+  const guard = () => (!canSell(v2) ? "busy" : logCount(m) >= t.want ? "has enough" : null);   // up to the logs it wants, lot by lot
+  const done = T.asked(m, v2, t.offer) || !guard() ? T.buy(m, v2, t.offer, t.times, { guard }) : 0;   // the seller's stock, reserve and room, as for a player trade: one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) {
-    if (BF.vlog) BF.vlog.trade(m, v2, t.offer, done);
     log("buyLogs", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * t.per + " " + BF.items[t.item].name, paid: done + " emerald" });
   }
   return done;
@@ -1494,13 +1458,10 @@ function findToolSeller(m, re) {
 }
 function doToolDeal(m, deal) {
   const T = TR(), v2 = deal.seller, o = deal.offer;
-  if (!canSell(v2) || !toolNeed(m) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return 0;
-  const sold = T.exchange(v2, o);
-  if (!sold) return 0;
-  for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-  T.inv.addStacks(m.inv, sold);
-  T.addXp(v2, o);
-  if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
+  if (!T.asked(m, v2, o) && (!canSell(v2) || !toolNeed(m) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy))) return 0;
+  const got = T.buy(m, v2, o, 1, { guard: () => (!canSell(v2) ? "busy" : !toolNeed(m) ? "has one" : null) });   // one transaction (js/trading.js buy)
+  if (got == null) return null;   // in flight: the answer comes next tick
+  if (!got) return 0;
   log("buyTool", m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
   if (BF.emit) BF.emit("villagerToolTrade", m, v2, o.sell.id);
   return 1;
@@ -1580,18 +1541,9 @@ function findBottleSeller(m) {
 }
 function doWheatDeal(m, deal) {
   const T = TR(), v2 = deal.seller, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(v2) || !o.buy.every(b => cnt(m, b.id) >= b.n) || !T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);                   // the seller's stock, reserve and room, as for a player trade
-    if (!sold) break;
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
+  const done = T.asked(m, v2, o) || canSell(v2) ? T.buy(m, v2, o, deal.times, { guard: () => (canSell(v2) ? null : "busy") }) : 0;   // the seller's stock, reserve and room, as for a player trade: one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) {
-    if (BF.vlog) BF.vlog.trade(m, v2, o, done);
     const c = ids(), what = o.sell.id === c.wheat ? "buyWheat" : o.sell.id === I("wheat_seeds") ? "buySeeds" : "buy";
     log(what, m, { from: v2.profession + (v2.slot ? "#" + v2.slot.idx : ""), got: done * o.sell.n + " " + BF.items[o.sell.id].name, paid: done * o.buy[0].n + " emerald" });
   }
@@ -1654,6 +1606,7 @@ function shopAI(m, dt, out) {
   if (sh.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;   // visual
   if (sh.tt <= 0) {
     const done = deal.kind === "wheat" ? doWheatDeal(m, deal) : deal.kind === "tool" ? doToolDeal(m, deal) : doFoodDeal(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
     if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
     if (!done) sh.avoid[v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05;
@@ -1695,7 +1648,6 @@ function ageStep(m, now) {
 }
 const isWorking = m => !!((m.farm && (m.farm.task || (m.farm.idleWork && m.farm.thinkT > 0))) || m.tradingWith);
 function tick(dt) {
-  updateParticles(dt);
   acc += dt;
   if (acc < 0.5 || !BF.mobs || !BF.food) return;
   const step = acc; acc = 0;
@@ -1703,7 +1655,7 @@ function tick(dt) {
   if (!agesHooked && BF.on) { agesHooked = true; BF.on("newWorld", () => villageAges.clear()); }
   pass++;
   const scanned = new Set();
-  for (const m of BF.mobs.list) {
+  for (const m of BF.regions.ofType("villager")) {   // (the villagers only, r15-32)
     if (m.type !== "villager" || m.dead || m.removed || !Array.isArray(m.inv)) continue;
     try { FD().digest(m, now); } catch (e) { console.error(e); }
     ageStep(m, now);
@@ -1768,7 +1720,7 @@ function stats(m) {
   return { today: s && s.total ? s.farm / s.total : 0, yesterday: p && p.total ? p.farm / p.total : null, farm: s.farm, total: s.total, counts: fs.counts,
     harvested: fs.harvested || 0, tilled: fs.tilled || 0, bordered: fs.bordered || 0, watered: fs.watered || 0, task: fs.task && fs.task.kind };
 }
-function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; for (const p of pool) BF.scene && BF.scene.remove(p.mesh); pool.length = 0; acc = 0; }
+function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; acc = 0; }
 
 // ---------------------------------------------------------------- the player's buckets (hooked from player.js right-click)
 // Empty bucket: scoops the water source the player looks at (an infinite source refills). Water bucket: pours a source against

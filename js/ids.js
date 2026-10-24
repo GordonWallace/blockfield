@@ -17,7 +17,7 @@
 //                 serialize(), deserialize(o), reset(), stats }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const reg = new Map();   // id -> live object
 // Removed mobs, kept readable for a while (id -> {o, t}): code that held a mob saw it go (m.removed) and acted on that a little later;
@@ -96,14 +96,15 @@ function place(proto, name, field, keyOf) {
 
 // The shared prototype of mobs and of the plain records that point at mobs or places (pen animals' state, newborn entries, boats,
 // trade deals, job tasks, a mob's ai table). Each link reads the object whose id or key is in its field:
-//   mobs and the player: mob, other, seller, goalSeller, vTarget, mate, love, attacker, ledBy, tradingWith (-> mobId, otherId, ...), riding (a boat);
+//   mobs and the player: mob, other, seller, goalSeller, vTarget, mate, love, attacker, ledBy, tradingWith (-> mobId, otherId, ...), riding (a boat),
+//     a golem's rescue, foe and revenge and a hostile's golemFoe (its ai table);
 //   village records: village, penVillage (-> villageId, penVillageId: the village key);
 //   places: home (a house), bed, homeBed, slot (a roster slot), bredEntry (a newborn's entry), pen, sty, coop, pasture, exit (any of the
 //   four, by its kind) (-> homeKey, ...);
 //   lookAt: a mob (lookAtId) or plain data ("player", {yaw, pitch}, {position}) kept as it is (lookV).
 // refs(o) returns a copy of a plain object with this prototype, any of those fields it had turned into ids.
 const Refs = {};
-const ENT = ["mob", "other", "seller", "goalSeller", "vTarget", "mate", "love", "attacker", "ledBy", "tradingWith", "riding"];
+const ENT = ["mob", "other", "seller", "goalSeller", "vTarget", "mate", "love", "attacker", "ledBy", "tradingWith", "riding", "rescue", "foe", "revenge", "golemFoe"];
 for (const n of ENT) link(Refs, n, n + "Id");
 const villageKey = r => r.key;
 place(Refs, "village", "villageId", villageKey);

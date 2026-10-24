@@ -3,11 +3,13 @@
 // normal AI while the player is beyond view distance. Also catches up crops when a village is revisited.
 // Trips (js/merchant.js) pin both villages and a corridor of chunks between them: pinned villages run whatever the player's distance, outside
 // MAX and the chunk budget, until the trip ends (unpin). At most MAX_PINS trips at a time; pins are saved with the game ("pin:<id>").
+// The rule above is the minimum (spec r15-34): js/active.js adds "extra" villages on top of it while the simulation has time to spare in
+// each real second, and takes them off again (through the countdown below) when it hasn't. Extras don't count toward the force-unload limits.
 // API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), pin(id, a, b, keys) -> ok, unpin(id),
 //                        pins(), pinned() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 
 const RADIUS = 200;       // a village this close to the player is simulated
@@ -62,8 +64,17 @@ function growsTable() {
 }
 
 // Young crops on farmland that sat unloaded for `away` game days: each matures with the chance it would have had
-// (a third of the speed on dehydrated farmland, js/farmland.js).
-function catchUpChunk(c, away) {
+// (a third of the speed on dehydrated farmland, js/farmland.js). A world block tick (spec r15-19): a chunk to catch up is queued, and the
+// queue is worked in the tick's block phase in chunk order (catchUpTick), never as a write from the think phase or a chunk load.
+const catchQ = new Map();   // chunk key -> game days away
+function catchUpChunk(c, away) { catchQ.set(c.cx + "," + c.cz, Math.max(away, catchQ.get(c.cx + "," + c.cz) || 0)); }
+function catchUpTick() {
+  if (!catchQ.size) return;
+  const list = [...catchQ].map(([k, away]) => { const [cx, cz] = k.split(",").map(Number); return { k, cx, cz, away }; }).sort((a, b) => a.cx - b.cx || a.cz - b.cz);
+  catchQ.clear();
+  for (const e of list) { const c = BF.world.chunks.get(e.k); if (c) catchUpNow(c, e.away); }
+}
+function catchUpNow(c, away) {
   const rate = f => 1 - Math.exp(-away * CROP_SECS_PER_DAY * GROW_RATE * f), G = growsTable(), CS = BF.CS, W = BF.world;
   const pWet = rate(1), pDry = rate(BF.farmland ? BF.farmland.DRY_GROWTH : 1 / 3), DRY = BF.B.farmland_dry;
   const found = [];
@@ -212,14 +223,16 @@ const JOBS = () => [BF.toolsmith, BF.eggCook, BF.baker, BF.glassmaker, BF.beekee
 // Stops what the village's villagers are doing so that it can unload: merchants go home with their cargo, furnace and oven workers empty
 // them, led animals are let go, trades are cancelled and villagers out on an errand are put back at their bed. Each one is logged.
 function forceStop(rec, why) {
-  const L = BF.mobs.list, key = rec.key;
-  for (const m of L.slice()) {
+  const key = rec.key, led = new Map();   // (the led animals, found in one pass: a lead can be any length)
+  for (const o of BF.mobs.list) { const by = o.ledBy; if (by) { if (!led.has(by)) led.set(by, []); led.get(by).push(o); } }
+  for (const m of BF.regions.villageMobs(rec, m => m.type === "villager")) {   // (its own villagers, r15-32)
     if (m.type !== "villager" || m.village !== rec || m.dead || m.removed) continue;
     const acts = [], task = BF.villagerStatus ? BF.villagerStatus.text(m) : "", leisure = isLeisure(m);   // (before the jobs' stops below clear its task)
     if (m.tradingWith) { m.tradingWith = null; acts.push("cancelled the trade"); }
     if (m.profession === "merchant" && BF.merchant && BF.merchant.forceHome && BF.merchant.forceHome(m, why)) acts.push("went home with its cargo");
-    for (const j of JOBS()) { const a = j && j.forceStop && j.forceStop(m); if (a) acts.push(a); }
-    for (const o of L) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
+    const stopJob = j => j && j.forceStop && (BF.furnaceUse ? BF.furnaceUse.direct(() => j.forceStop(m)) : j.forceStop(m));   // furnaces emptied at once: it is packed next (js/furnaceuse.js)
+    for (const j of JOBS()) { const a = stopJob(j); if (a) acts.push(a); }
+    for (const o of led.get(m) || []) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
     const v = rec.wg;
     if (!acts.length && leisure) continue;                      // leisure ends quietly (endLeisure, when the village unloads)
     if (m.profession !== "explorer" && !acts.length && v && v.minX != null && edgeDist(v, m.position.x, m.position.z) > 4 && BF.mobs.sendHome) { BF.mobs.sendHome(m); acts.push("went home"); }
@@ -242,46 +255,44 @@ function endLeisure(key) {
 // Trips towards or from a village end when it is forced off.
 function forceTrips(key, why) {
   if (!BF.merchant || !BF.merchant.forceHome) return;
-  for (const m of BF.mobs.list) if (m.mc && m.mc.trip && (m.mc.trip.home === key || m.mc.trip.dest === key) && m.type === "villager") {
+  for (const m of BF.regions.ofType("villager").slice()) if (m.mc && m.mc.trip && (m.mc.trip.home === key || m.mc.trip.dest === key)) {
     BF.merchant.forceHome(m, why);
     logError("forced-stop", { village: key, who: nameOf(m), task: "caravan trip", action: "went home with its cargo", why });
   }
 }
 // The village to stop first, or null: 1. counting down, farthest first; 2. caravan destinations; 3. running villages beyond ALWAYS; never within ALWAYS.
-function victim(next, px, pz) {
+function victim(next, px, pz, extra) {
   let best = null, bs = -1;
   const dests = new Set();
   for (const p of pins.values()) dests.add(vKey(p.b));
   for (const [k, e] of next) {
     const d = edgeDist(e.v, px, pz);
-    if (d <= ALWAYS) continue;
+    if (d <= ALWAYS || extra.has(k)) continue;
     const rank = ending.has(k) ? 3 : dests.has(k) ? 2 : 1;
     const sc = rank * 1e6 + d;
     if (sc > bs) { bs = sc; best = k; }
   }
   return best;
 }
-function heldChunks(next) {
+function heldChunks(next, extra) {
   const all = new Set(winKeys);
-  for (const e of next.values()) for (const k of e.keys) all.add(k);
+  for (const [k, e] of next) if (!extra.has(k)) for (const c of e.keys) all.add(c);
   return all.size;
 }
-function overLimit(next, now) {
-  if (next.size > LIMITS.villages) return "village count";
-  if (heldChunks(next) > LIMITS.chunks) return "held chunks";
-  if (now >= aiCoolUntil && BF.mobs.aiWork && BF.mobs.aiWork() > LIMITS.aiWork) return "AI time";
+// The limits hold the minimum set (and trips); budget extras (js/active.js) are left out of them: the budget takes them off gracefully when
+// the game slows, so while any run the AI-time limit waits for that instead of forcing villages off.
+function overLimit(next, now, extra) {
+  if (next.size - extra.size > LIMITS.villages) return "village count";
+  if (heldChunks(next, extra) > LIMITS.chunks) return "held chunks";
+  if (!extra.size && now >= aiCoolUntil && BF.mobs.aiWork && BF.mobs.aiWork() > LIMITS.aiWork) return "AI time";
   return null;
 }
 
 // ---- chunks kept around villagers outside their village
 const winKeys = new Set();
 function windows() {
-  const CS = BF.CS, next = new Set(), L = BF.mobs && BF.mobs.list;
-  if (L) for (const m of L) {
-    const rec = m.village;
-    if (!rec || m.type !== "villager" || m.dead || m.removed || !m.position) continue;
-    const ent = active.get(rec.key);
-    if (!ent) continue;
+  const CS = BF.CS, next = new Set(), V = BF.mobs && BF.mobs.villages;
+  if (V) for (const [key, ent] of active) for (const m of BF.regions.villageMobs(V.get(key), m => m.type === "villager" && !m.dead && !!m.position)) {   // (the running villages' own villagers, r15-32)
     if (!ent.set) ent.set = new Set(ent.keys);
     const x = m.position.x, z = m.position.z, K = (dx, dz) => canonKey(x + dx * CS, z + dz * CS);   // (canonical: a villager past an edge is kept in its village's frame)
     if (ent.set.has(K(-WIN, -WIN)) && ent.set.has(K(WIN, WIN)) && ent.set.has(K(-WIN, WIN)) && ent.set.has(K(WIN, -WIN))) continue;   // well inside its village
@@ -348,6 +359,11 @@ function check(px, pz, clk, now) {
     kept += e.keys.length;
     next.set(c.key, e);
   }
+  // then the budget's extras (js/active.js), beyond the minimum
+  // (an extra keeps its flag while it counts down after leaving the set, so the limits leave it alone then too)
+  const extra = new Set();
+  for (const e of next.values()) e.extra = false;
+  if (BF.active) for (const x of BF.active.decide(px, pz, next)) if (!next.has(x.key)) { const e = active.get(x.key) || { v: x.v, keys: footprint(x.v) }; e.extra = true; next.set(x.key, e); extra.add(x.key); }
   // a village that would stop waits for its villagers' tasks (the countdown); one the player came back to cancels it
   const nd = nowDay();
   for (const k of [...ending.keys()]) if (next.has(k) || !active.has(k)) ending.delete(k);
@@ -362,16 +378,16 @@ function check(px, pz, clk, now) {
       const top = est.list[0];
       vlogLine(BF.mobs.villages.get(k), "Unloading in " + Math.round(est.max) + " s: waiting for " + est.list.length + " task" + (est.list.length === 1 ? "" : "s") + (top ? ", longest " + top.who + " (" + top.task + ")" : ""));
     }
-    if (nd < en.until || nd < en.t0) { next.set(k, e); continue; }   // still counting down
+    if (nd < en.until || nd < en.t0) { next.set(k, e); if (e.extra) extra.add(k); continue; }   // still counting down
     const rec = BF.mobs.villages.get(k);
     for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.est != null ? x.est : x.secs, ran: x.ran != null ? x.ran : Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
     ending.delete(k);
   }
   // over a limit: stop villages in priority order until it is fine (never one within ALWAYS of the player)
   for (let guard = 0; guard < 16; guard++) {
-    const why = overLimit(next, BF.simNow());
+    const why = overLimit(next, BF.simNow(), extra);
     if (!why) break;
-    const k = victim(next, px, pz);
+    const k = victim(next, px, pz, extra);
     if (k == null) break;
     const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(k);
     if (why === "AI time") aiCoolUntil = BF.simNow() + 5;
@@ -454,8 +470,8 @@ BF.villageSim = {
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
   areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, DROP, EST_MARGIN,
-  _edgeDist: edgeDist,
-  status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
+  _edgeDist: edgeDist, footprint, count: () => active.size,
+  status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}` + (BF.active && BF.active.extras().length ? ` (${BF.active.extras().length} extra)` : "") + `, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);
     for (const [id, p] of pins) out["pin:" + id] = { a: vKey(p.a), b: vKey(p.b) };   // the corridor is worked out again on load
@@ -470,10 +486,11 @@ BF.villageSim = {
       }
     }
   },
-  reset() { simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
+  reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
     BF.world.onThink(step);   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
+    if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick);   // crop catch-up, a block tick (spec r15-19)
   },
 };
 })();

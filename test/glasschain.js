@@ -1,4 +1,4 @@
-// @ci integration suite=jobs soak timeout=1800 args=15,123
+// @ci integration suite=jobs soak timeout=1800 args=15,123 hosts=worker,server
 // Glassmaking soak (js/glassmaker.js): a sand village with a glassmaker runs for N game days (no rendering, like test/bakechain.js) and checks:
 //  - the glassmaker digs sand, smelts it into glass and makes panes or bottles; never more than a stack of sand dug in one day;
 //  - its glass came only from sand it held, dug or bought (1 glass a sand);
@@ -9,6 +9,7 @@
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
+const sim = require('./lib').sim;   // (where the simulation is, on BF_HOST's host: spec r15-43)
 const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // seed 123: the planet of seed 1 has no sand village within 3 km of its spawn
 
 (async () => {
@@ -21,7 +22,7 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // se
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').goto(pg, '#seed' + SEED);   // (on BF_HOST's host: spec r15-43)
   await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
   // the nearest sand villages
@@ -30,9 +31,10 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // se
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
     return BFT.villages(3000).filter(v => v && v.pop >= 8 && BF.worldgen.sandNear(Math.round(v.x), Math.round(v.z), 64)).slice(0, 8).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
-  await pg.evaluate(() => {
-    const WATCH = window.__WATCH = ['sand', 'glass', 'glass_pane', 'glass_bottle', 'milk_bottle'];
-    const R = window.__rec = { key: null, lines: [], restock: [], trades: [], kits: 0, status: {} };
+  await require('./lib').hold(pg, true);   // (the simulation's own ticks off too: the test steps it)
+  await sim(pg, () => {
+    const WATCH = globalThis.__WATCH = ['sand', 'glass', 'glass_pane', 'glass_bottle', 'milk_bottle'];
+    const R = globalThis.__rec = { key: null, lines: [], restock: [], trades: [], kits: 0, status: {} };
     const mine = m => m && m.village && m.village.key === R.key;
     const oLog = BF.vlog.log;
     BF.vlog.log = function (rec, kind, text) { if (rec && rec.key === R.key) R.lines.push([+(BF.sky.day + BF.sky.time).toFixed(3), kind, String(text)]); return oLog.apply(this, arguments); };
@@ -55,45 +57,45 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // se
       WATCH.forEach((n, i) => { if (after[i] > before[i]) R.restock.push([m.profession, n, after[i] - before[i]]); });
       return r;
     };
-    window.__villagers = () => BF.mobs.list.filter(m => m.type === 'villager' && mine(m) && !m.dead && Array.isArray(m.inv));
-    window.__glassTotal = () => {   // packs and chests within 80 blocks, and the furnaces' output, in glass blocks
+    globalThis.__villagers = () => BF.mobs.list.filter(m => m.type === 'villager' && mine(m) && !m.dead && Array.isArray(m.inv));
+    globalThis.__glassTotal = () => {   // packs and chests within 80 blocks, and the furnaces' output, in glass blocks
       const I = BF.I, [cx, cz] = R.key.split(',').map(Number), w = { glass: 1, glass_pane: 6 / 16, glass_bottle: 1, milk_bottle: 1 };
       let t = 0;
       const add = s => { if (s) for (const n in w) if (s.id === I[n]) t += s.count * w[n]; };
-      for (const m of window.__villagers()) m.inv.forEach(add);
+      for (const m of globalThis.__villagers()) m.inv.forEach(add);
       for (const c of BF.inventory.chests.values()) if (Math.hypot(c.pos.x - cx, c.pos.z - cz) < 80) c.slots.forEach(add);
       if (BF.inventory.furnaces) for (const f of BF.inventory.furnaces.values()) if (f.pos && Math.hypot(f.pos.x - cx, f.pos.z - cz) < 80) f.slots.slice(2).forEach(add);
       return t;
     };
-    window.__gm = () => window.__villagers().find(m => m.profession === 'glassmaker' && m.jobsite);
+    globalThis.__gm = () => globalThis.__villagers().find(m => m.profession === 'glassmaker' && m.jobsite);
   });
   let setup = null;
   for (const v of cands) {
-    const r = await pg.evaluate(v => {
-      const key = window.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
+    const r = await sim(pg, v => {
+      const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
       for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
       BF.sky.setTime(0.02);
       for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
-      return { key, pop: v.pop, glassmaker: !!window.__gm() };
+      return { key, pop: v.pop, glassmaker: !!globalThis.__gm() };
     }, v);
     if (r.glassmaker) { setup = r; break; }
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: no glassmaker`);
   }
-  if (!setup) { console.log('FAIL no sand village with a glassmaker among the nearest ' + cands.length); await b.close(); process.exitCode = 1; return; }
-  await pg.evaluate(() => {
-    const R = window.__rec, gm = window.__gm();
+  if (!setup) { console.log('FAIL no sand village with a glassmaker among the nearest ' + cands.length); await pg.done(); await b.close(); process.exitCode = 1; return; }
+  await sim(pg, () => {
+    const R = globalThis.__rec, gm = globalThis.__gm();
     R.lines.length = 0; R.restock.length = 0; R.trades.length = 0; R.kits = 0;
     BF.glassmaker.LOG.length = 0;
-    R.start = window.__glassTotal(); R.sandStart = BF.trades.inv.count(gm.inv, BF.I.sand); R.gm = gm;
+    R.start = globalThis.__glassTotal(); R.sandStart = BF.trades.inv.count(gm.inv, BF.I.sand); R.gm = gm;
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
-    await pg.evaluate(([n, h, key]) => {
-      const [x, z] = key.split(',').map(Number), R = window.__rec;
+    await sim(pg, ([n, h, key]) => {
+      const [x, z] = key.split(',').map(Number), R = globalThis.__rec;
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(x, z, 4);
@@ -102,9 +104,9 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // se
     }, [Math.min(PER, total - s), h, setup.key]);
     if ((s / PER) % 24 === 23) console.log(`  day ${((s + PER) * h / 1200).toFixed(1)} (${Math.round((Date.now() - t0) / 1000)} s)`);
   }
-  const R = await pg.evaluate(() => {
-    const R = window.__rec, gm = R.gm, W = BF.world, B = BF.B;
-    R.end = window.__glassTotal();
+  const R = await sim(pg, () => {
+    const R = globalThis.__rec, gm = R.gm, W = BF.world, B = BF.B;
+    R.end = globalThis.__glassTotal();
     R.gmEnd = { alive: !gm.dead, holdings: BF.glassmaker.holdings(gm) };
     R.digs = BF.glassmaker.LOG.filter(e => e.kind === 'dig');
     const solid = id => id && BF.blocks[id] && BF.blocks[id].solid !== false && !BF.blocks[id].fluid;
@@ -135,5 +137,5 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // se
   ok('dug spots are open and walkable', R.badSpots.length === 0, R.badSpots.slice(0, 5));
   if (pageErrors) ok('no page errors', false, pageErrors);
   console.log(`ran ${DAYS} days in ${Math.round((Date.now() - t0) / 1000)} s`);
-  await b.close();
+  await pg.done(); await b.close();
 })();

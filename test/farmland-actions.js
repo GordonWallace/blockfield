@@ -1,10 +1,12 @@
-// @ci baseline
+// @ci baseline hosts=worker,server
 // Farmland hydration (js/farmland.js): water within 3 blocks or rain keeps farmland hydrated; without either it dries out
 // between 1 and 3 days later; bare dehydrated farmland reverts to dirt between 1 and 14 days after drying, a crop keeps it;
 // crops grow at a third of the speed on dehydrated farmland; hoes till dehydrated farmland away from water; clocks are saved.
 // Usage: node test/run.js /tmp/fl test/farmland-actions.js
 module.exports = async (pg) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "creative" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const load = async (x, z) => {
       BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
@@ -12,7 +14,6 @@ module.exports = async (pg) => {
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     const B = BF.B, W = BF.world, F = BF.farmland, WET = B.farmland, DRY = B.farmland_dry;
     ok("dehydrated farmland block exists", DRY != null && DRY !== WET && BF.blocks[DRY].drop === BF.blocks[WET].drop);

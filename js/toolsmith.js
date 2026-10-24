@@ -24,7 +24,7 @@
 // See CONTRACT.md "Toolsmiths".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 const FU = BF.furnaceUse;
@@ -275,16 +275,18 @@ const travel = (m, st, dt, out, tx, ty, tz, speed, near) => FU.travel(m, st, dt,
 const findDeal = (m, need) => FU.findDeal(m, need, skipOf(m));
 function doBuy(m, deal) {
   const done = FU.doBuy(m, deal), o = deal.offer;
+  if (done == null) return null;   // in flight (js/trading.js buy)
   if (done) log("buy", m, { from: deal.other.profession, got: done * o.sell.n + " " + BF.itemName(o.sell.id), paid: o.buy.map(b => b.n * done + " " + BF.itemName(b.id)).join(" + ") });
   return done;
 }
 
 // ---------------------------------------------------------------- the furnace: loading, waiting, emptying
-// Puts ore and (when the furnace has none left) fuel in. Returns false when the furnace cannot be used.
+// Puts ore and (when the furnace has none left) fuel in. Returns false when the furnace cannot be used, null while the request is in flight.
 function loadFurnace(m, job) {
   const f = job.furnace;
   job.outId = smeltsTo(job.rawId);
   const n = FU.load(m, job);
+  if (n === null) return null;   // the load request is in flight
   if (!n) return false;
   const st = INV().furnaceState(f.x, f.y, f.z);
   log("smelt", m, { ore: n + " " + BF.itemName(job.rawId), at: pk(f.x, f.y, f.z), fuelThere: !!(st.burn > 0 || st.slots[1]) });
@@ -295,11 +297,12 @@ function loadFurnace(m, job) {
 const topUpFuel = (m, job, st) => FU.topUp(m, job, st);
 // Takes the ingots out, and all the fuel left in the furnace (its own or not); also ore that did not get smelted when it gives up.
 function emptyFurnace(m, job, all) {
-  const f = job.furnace, taken = FU.empty(m, job, all);
-  if (!taken) return;
-  const got = taken.map(e => e.n + " " + BF.itemName(e.id));
-  log("collect", m, { got: got.join(", ") || "nothing", at: pk(f.x, f.y, f.z) });
-  vlog(m, "furnace", "took " + (got.join(" + ") || "nothing") + " out of the furnace at " + pk(f.x, f.y, f.z));
+  const f = job.furnace;
+  FU.empty(m, job, all, taken => {   // when the "furnace" request applies (js/furnaceuse.js)
+    const got = taken.map(e => e.n + " " + BF.itemName(e.id));
+    log("collect", m, { got: got.join(", ") || "nothing", at: pk(f.x, f.y, f.z) });
+    vlog(m, "furnace", "took " + (got.join(" + ") || "nothing") + " out of the furnace at " + pk(f.x, f.y, f.z));
+  });
 }
 
 // ---------------------------------------------------------------- placing a furnace it bought
@@ -325,7 +328,7 @@ function furnaceSpot(m) {
         const g = W.getBlock(x, y - 1, z), here = W.getBlock(x, y, z);
         if (!S[g] || here !== 0 || W.getBlock(x, y + 1, z) !== 0) continue;
         if (B[g] && (B[g].name === "dirt_path" || B[g].name === "farmland" || B[g].name === "farmland_dry" || B[g].fluid)) break;   // not on paths or fields
-        if (BF.mobs.list.some(o => !o.removed && Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2)) break;
+        if (BF.regions.mobsInBox(x, z, x + 1, z + 1, o => Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2, { label: "toolsmith furnace spot" }).length) break;
         const d = Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) + Math.abs(y - c.y);
         if (d < bd) { bd = d; best = { x, y, z }; }
         break;
@@ -338,17 +341,18 @@ function placeFurnace(m, spot) {
   const W = BF.world;
   if (count(m, BF.B.furnace) < 1 || W.getBlock(spot.x, spot.y, spot.z) !== 0) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.8 && Math.abs(o.position.z - spot.z - 0.5) < 0.8 && o.position.y < spot.y + 1 && o.position.y + 1.8 > spot.y;
-  if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;
+  if (BF.regions.mobsInBox(spot.x - 1, spot.z - 1, spot.x + 2, spot.z + 2, o => !o.dead && inCell(o), { label: "toolsmith furnace place" }).length || inCell(BF.player)) return false;
   const id = BF.furnaceId(BF.openFacing(spot, m.position));
-  if (!W.setBlock(spot.x, spot.y, spot.z, id)) return false;
-  TR().inv.remove(m.inv, BF.B.furnace, 1);
-  hook();
-  furnaces.set(pk(spot.x, spot.y, spot.z), { x: spot.x, y: spot.y, z: spot.z });
-  state(m).furnace = { x: spot.x, y: spot.y, z: spot.z };
-  if (BF.emit) BF.emit("blockPlaced", spot.x, spot.y, spot.z, id);
-  log("place", m, { furnace: pk(spot.x, spot.y, spot.z) });
-  vlog(m, "furnace", "put a furnace down at " + spot.x + ", " + spot.y + ", " + spot.z);
-  return true;
+  // a request (spec r15-19, js/blockreqs.js): the furnace goes down and out of the pack in the apply phase; the toolsmith takes it as its
+  // own when that worked (refused: the spot is avoided a while, as a spot found taken here always was)
+  return BF.blockReq.cells(m, [{ x: spot.x, y: spot.y, z: spot.z, id, expect: 0 }], { take: [{ id: BF.B.furnace, n: 1 }], emit: true }).then(r => {
+    if (!r.ok) { log("giveup", m, { furnace: pk(spot.x, spot.y, spot.z), why: "spot taken (" + r.why + ")" }); const S = state(m); if (S.avoid) S.avoid["f:" + pk(spot.x, spot.y, spot.z)] = dayNow() + 0.05; return; }
+    hook();
+    furnaces.set(pk(spot.x, spot.y, spot.z), { x: spot.x, y: spot.y, z: spot.z });
+    state(m).furnace = { x: spot.x, y: spot.y, z: spot.z };
+    log("place", m, { furnace: pk(spot.x, spot.y, spot.z) });
+    vlog(m, "furnace", "put a furnace down at " + spot.x + ", " + spot.y + ", " + spot.z);
+  });
 }
 
 // ---------------------------------------------------------------- AI
@@ -440,13 +444,13 @@ function ai(m, dt, out) {
       return true;
     }
     // smelting: load, wait beside it (adding fuel when the furnace runs dry), then empty it
-    if (!deal.loaded) { if (!loadFurnace(m, deal)) return giveUp("furnace busy", fkey); S.stage = "smelt"; return true; }
+    if (!deal.loaded) { const r = loadFurnace(m, deal); if (r === null) return true; if (!r) return giveUp("furnace busy", fkey); S.stage = "smelt"; return true; }
     const st = INV().furnaceState(s.x, s.y, s.z);
     if (!st || !BF.isFurnace(BF.world.getBlock(s.x, s.y, s.z))) { FU.inUse.delete(pk(s.x, s.y, s.z)); return giveUp("furnace gone", fkey); }
     S.waitT += dt;
     if (!st.slots[0] || st.slots[0].id !== deal.rawId) { emptyFurnace(m, deal, false); S.stage = null; S.deal = null; S.checkT = 0.5; vdone(m); return true; }   // done
-    topUpFuel(m, deal, st);
-    if (S.waitT > 15 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
+    const fueling = topUpFuel(m, deal, st);
+    if (S.waitT > 15 * deal.loaded + 40 || (st.burn <= 0 && !st.slots[1] && !fueling && S.waitT > 3)) return giveUp(st.burn <= 0 && !st.slots[1] ? "out of fuel" : "too slow");
     if (Math.random() < dt * 0.5) a.swingT = 0.2;   // visual
     return true;
   }
@@ -469,6 +473,7 @@ function ai(m, dt, out) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = doBuy(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     S.stage = null; S.deal = null; S.gx = null; S.checkT = 0.5; vdone(m);
     if (!done) { S.avoid[key] = dayNow() + 0.05; log("giveup", m, { kind: "buy", item: BF.itemName(deal.item), why: "trade refused" }); }
   }

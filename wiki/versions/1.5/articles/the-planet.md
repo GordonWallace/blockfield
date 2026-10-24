@@ -8,7 +8,7 @@ From 1.4, a Blockfield world is a round planet rather than an endless flat plane
 
 ## Creating a world
 
-Every new world is a planet: the create-world screen asks for a name, a seed, a game mode and a biome size, as before, and there is no flat-world option. Worlds made with Blockfield 1.3 can't be opened in 1.4. They appear greyed out in the world list, marked "Made with Blockfield 1.3, can't be opened in 1.4", with only a Delete button. Where you start is described on [[page:world-generation]].
+Every new world is a planet: the create-world screen asks for a name, a seed, a game mode and a biome size, as before, and there is no flat-world option. Worlds made with Blockfield 1.3 or 1.4 can't be opened in 1.5. They appear greyed out in the world list, marked "Made with Blockfield 1.4, can't be opened in 1.5" (or 1.3), with only a Delete button (see [[page:saving]]). Where you start is described on [[page:world-generation]].
 
 ## Size and shape
 
@@ -58,7 +58,7 @@ Hold F3 and press B, C or R to switch a debug view of the planet on or off. All 
 - C turns off the round drawing near the corners, so the open quarter-circle gap where three faces meet shows.
 - R draws the true round planet everywhere, to compare with the flat drawing.
 
-The second-screen debug screen has the same three switches in its Planet section. It shows your position as face, `u`, `v` and `y` with the latitude and longitude. Village distances there are measured round the planet, with compass directions towards true north. Its mobs map is drawn in your own face's grid: the faces beside it are laid out flat beyond a dashed line at the edge, and an arrow points to true north. Each village's own map stays in that village's face grid. The mobs map's Regions button shades the simulation regions, squares of 64 by 64 blocks on each face that the simulation is being split into, by how many mobs each one holds.
+The second-screen debug screen has the same three switches in its Planet section. It shows your position as face, `u`, `v` and `y` with the latitude and longitude. Village distances there are measured round the planet, with compass directions towards true north. Its mobs map is drawn in your own face's grid: the faces beside it are laid out flat beyond a dashed line at the edge, and an arrow points to true north. Each village's own map stays in that village's face grid. The mobs map's Regions button shades the simulation regions, squares of 64 by 64 blocks on each face that the simulation is being split into, by how many mobs each one holds. Its Region tick card shows how many regions were simulated in the last tick, the time each part of a tick takes, and the regions with the most mobs.
 
 ## Continents and corners
 

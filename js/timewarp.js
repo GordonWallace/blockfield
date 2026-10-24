@@ -12,12 +12,12 @@
 // The player is not stepped: it keeps normal speed (one update per frame) so you can still move around and observe.
 // BF.simNow() is the simulation clock in seconds: it advances only by simulated ticks (not while paused), and every
 // cooldown / scan timer in the sim modules reads it instead of performance.now(), so they speed up with everything else.
-// API: BF.warp = { speed, frozen, TICK, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt), alpha, renderNow(), last, dropped, reset(), set(i),
+// API: BF.warp = { speed, frozen, TICK, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt, achieved?), alpha, renderNow(), last, dropped, reset(), set(i),
 // freeze(), cycle(), faster(), slower(), BUDGET_MS, MAX_FRAME, SPEEDS }. advance(h) moves the clock only (tests step it by hand).
 // set(i) takes an index into SPEEDS (0 = 1x); speed reads 0 while frozen.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const SPEEDS = [1, 3, 5, 10, 100, 1000];
 const TICK = 0.05, MAX_STEPS = 1000, MAX_FRAME = 0.25;   // one tick is 0.05 s of game time; never more than 1000 ticks in a frame; a frame counts at most 0.25 real s
@@ -29,7 +29,7 @@ BF.simNow = () => clock;
 // Indicator (hidden at 1x).
 let el = null;
 function ui() {
-  if (el || !document.body) return el;
+  if (el || !BF.page || !document.body) return el;   // (headless: no badge)
   el = document.createElement("div");
   el.id = "warp";
   el.hidden = true;
@@ -83,14 +83,15 @@ BF.warp = {
   advance(dt) { clock += dt; },
   // After the frame's ticks: n ran. The ticks it ran leave the accumulator; whole ticks it couldn't fit (the budget, MAX_STEPS, a
   // freeze mid-frame) are dropped, so only the fraction of a tick carries on.
-  done(n, simSec, dt) {
+  // ach: the speed achieved, when the simulation runs elsewhere (a worker, r15-38: the page's clock only keeps time for drawing)
+  done(n, simSec, dt, ach) {
     const run = Math.max(0, n | 0);
     acc -= run * TICK;
     if (acc >= TICK) acc %= TICK;
     if (acc < 0) acc = 0;
     noteDropped(planned - run);
     dt = Math.min(MAX_FRAME, dt);
-    last = dt > 0 ? Math.max(0, run * TICK + acc - acc0) / dt : 1;   // the speed this frame achieved: game seconds simulated (and carried) per real second
+    last = ach != null ? ach : dt > 0 ? Math.max(0, run * TICK + acc - acc0) / dt : 1;   // the speed this frame achieved: game seconds simulated (and carried) per real second
     eff = frozen ? 0 : idx === 0 ? 1 : eff + (last - eff) * 0.2;   // smoothed game seconds per real second = achieved speed
     const key = (frozen ? "f" : idx) + ":" + Math.round(eff * 10);
     if (key !== shown) { shown = key; show(); }
@@ -107,7 +108,7 @@ BF.warp = {
   reset() { this.set(0); },
 };
 
-addEventListener("keydown", e => {
+if (BF.page) addEventListener("keydown", e => {
   if ((e.code !== "ArrowLeft" && e.code !== "ArrowRight") || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
   if (BF.state && BF.state.paused) return;   // menus, inventory, chat, death screen
@@ -115,5 +116,5 @@ addEventListener("keydown", e => {
   e.preventDefault();
   if (e.code === "ArrowRight") BF.warp.faster(); else BF.warp.slower();
 });
-if (document.body) ui(); else addEventListener("DOMContentLoaded", ui);
+if (!BF.page) { /* headless: no speed badge */ } else if (document.body) ui(); else addEventListener("DOMContentLoaded", ui);
 })();

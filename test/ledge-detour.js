@@ -1,27 +1,28 @@
-// @ci integration suite=village
-// Walking home under a ledge: node test/run.js /tmp/ledge test/ledge-detour.js
+// @ci integration suite=village hosts=worker,server
+// Walking home under a ledge: node test/run.js /tmp/ledge test/ledge-detour.js [--host page|worker|server]
 // A villager far from its village and a golem far from its patrol walk straight home. Here a one-block step stands in the way with leaves
 // just above their heads (a tree's lowest leaves), so they can neither step up nor jump it, and the only way round is along the step to
 // where the leaves end. They used to jump into the leaves over and over all day; now they never jump into them and find the way round.
 // Then a villager boxed in on every side: after 30 s of pushing the game log says it is stuck (ERROR), and once let out, that it got moving.
 module.exports = async (pg, out) => {
+  const lib = require('./lib');
   await pg.evaluate(() => BF.player.start());
-  await require('./lib').toVillage(pg);
-  // the test floor: 60 blocks east of the village, 20 above the ground; the player stands by it until its chunks are loaded
-  const A = await pg.evaluate(() => {
+  await lib.toVillage(pg);
+  // the test floor: 60 blocks east of the village, 20 above the ground; the player (the page's: the simulation follows it, spec r15-43)
+  // stands by it until its chunks are loaded
+  const A = await lib.sim(pg, () => {
     const m = BF.mobs.list.find(v => v.type === "villager" && !v.child && v.village && !v.dead), V = m && m.village;
     if (!V) return null;
-    const X0 = Math.floor(V.x) + 60, Z0 = Math.floor(V.z) - 12;
-    BF.player.position.set(X0 + 25, BF.player.position.y, Z0 + 25);
-    return { X0, Z0 };
+    return { X0: Math.floor(V.x) + 60, Z0: Math.floor(V.z) - 12 };
   });
+  if (A) await pg.evaluate(A => BF.player.position.set(A.X0 + 25, BF.player.position.y, A.Z0 + 25), A);
   for (let i = 0; A && i < 90; i++) {
-    if (await pg.evaluate(A => [[-40, -2], [-40, 32], [32, -2], [32, 32], [15, 15]].every(([x, z]) => BF.world.isLoaded(A.X0 + x, A.Z0 + z)), A)) break;
+    if (await lib.sim(pg, A => [[-40, -2], [-40, 32], [32, -2], [32, 32], [15, 15]].every(([x, z]) => BF.world.isLoaded(A.X0 + x, A.Z0 + z)), A)) break;
     await pg.waitForTimeout(1000);
   }
   let bad = 0;
   for (const kind of ["villager", "iron_golem", "boxed"]) {
-    const r = await pg.evaluate(([kind, A]) => {
+    const r = await lib.sim(pg, ([kind, A]) => {
       const W = BF.world, P = BF.player.position, type = kind === "boxed" ? "villager" : kind;
       const m = A && BF.mobs.list.find(v => v.type === type && !v.child && v.village && !v.dead);
       if (!m) return { kind, error: "no " + type };
@@ -46,7 +47,7 @@ module.exports = async (pg, out) => {
       // past the step: standing on top of it (its cells are x <= 15). A route may run along its edge cells (x = 15, centre 15.5) before
       // turning west, which routes of equal cost do or don't (the heap's tie order, spec r15-05), so the edge cells count.
       const isPast = () => m.position.x < X0 + 16 && m.position.y > Y0 + 0.5;
-      const step = () => { BF.sky.setTime(0.1); BF.mobs.update(0.05); P.set(X0 + 25, Y0 + 1, Z0 + 25); T += 0.05; };
+      const step = () => { BF.sky.setTime(0.1); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); P.set(X0 + 25, Y0 + 1, Z0 + 25); T += 0.05; };
       try {
         if (kind !== "boxed") {
           while (T < 60 && past == null) { step(); if (isPast()) past = +T.toFixed(1); }

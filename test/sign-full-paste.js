@@ -1,21 +1,32 @@
+// @ci integration suite=ui hosts=worker,server
 // Pasting or typing into a sign that has no room left never deletes the text already on it: a paste keeps only as much
 // of itself as fits, and a letter typed into a full sign is refused (it used to push the last letter off).
-// node test/run.js /tmp/sp test/sign-full-paste.js
+// The sign is placed and read where the simulation is (lib.sim, spec r15-43); the editor is the page's.
+// node test/run.js /tmp/sp test/sign-full-paste.js [--host page|worker|server]
+const lib = require('./lib');
 module.exports = async (pg) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(1500);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
-  const openSign = (text, caret) => pg.evaluate(([text, caret]) => {
-    const p = BF.player.position, x = Math.floor(p.x) + 2, z = Math.floor(p.z) + 2, y = BF.world.heightAt(x, z) + 1;
-    BF.world.setBlock(x, y, z, BF.signs.signId("oak", 0, 0));
-    BF.signs.setText(x, y, z, text);
-    window._sg = [x, y, z];
-    BF.signs.openEditor(x, y, z);
-    const ta = document.querySelector(".bfs-board textarea"); ta.focus(); ta.setSelectionRange(caret, caret);
-    return BF.signs.capacity(1, 1);
-  }, [text, caret]);
-  const stored = () => pg.evaluate(() => { BF.signs.closeEditor(); return BF.signs.get(...window._sg).text; });
+  let sg = null;
+  const openSign = async (text, caret) => {
+    sg = await lib.sim(pg, text => {
+      const p = BF.player.position, x = Math.floor(p.x) + 2, z = Math.floor(p.z) + 2, y = BF.world.heightAt(x, z) + 1;
+      BF.world.setBlock(x, y, z, BF.signs.signId("oak", 0, 0));
+      BF.signs.setText(x, y, z, text);
+      if (BF.proto) BF.proto.flush();
+      return [x, y, z];
+    }, text);
+    await pg.waitForFunction(([c, t]) => { const g = BF.signs.get(...c); return g && g.text === t; }, [sg, text], { timeout: 10000 }).catch(() => {});
+    return pg.evaluate(([c, caret]) => {
+      BF.signs.openEditor(...c);
+      const ta = document.querySelector(".bfs-board textarea"); ta.focus(); ta.setSelectionRange(caret, caret);
+      return BF.signs.capacity(1, 1);
+    }, [sg, caret]);
+  };
+  // closes the editor (its text goes to the simulation as a request) and reads the sign there
+  const stored = async () => { await pg.evaluate(() => BF.signs.closeEditor()); await pg.waitForTimeout(500); return lib.sim(pg, c => BF.signs.get(...c).text, sg); };
   // paste a long sentence at the start of a sign with two lines on it
   await openSign("Welcome home\nBeware of dog", 0);
   await pg.waitForTimeout(200);

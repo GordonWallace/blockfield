@@ -13,7 +13,7 @@
 // - Persistence: the maps are inventory items (saved by name, js/trading.js); `ex` in the villager pack holds the shelved maps.
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const T = () => BF.trades;
@@ -248,9 +248,9 @@ function shelve(m, c, why) {
 // ---------------------------------------------------------------- fetching a blank map from a cartographer
 const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 // The blank map it would buy from v2: one of v2's own offers (its job's, or its spare goods, js/market.js) selling a blank map it can pay
-// for, drawn with weights favouring small ones (SIZE_WEIGHT). A villager with blank maps but no offer for them is passed by: every trade is
-// an offer the player could take too.
-function offerFor(v2, emeralds) {
+// for, drawn with weights favouring small ones (SIZE_WEIGHT), from the buyer m's stream (spec r15-33: a mob draws only from its own). A
+// villager with blank maps but no offer for them is passed by: every trade is an offer the player could take too.
+function offerFor(v2, emeralds, m) {
   const I = BF.I, opts = [];
   for (const o of (v2 && v2.trades) || []) {
     if (o.buy.length !== 1 || o.buy[0].id !== I.emerald || o.buy[0].n > emeralds || o.sell.n !== 1) continue;
@@ -258,7 +258,7 @@ function offerFor(v2, emeralds) {
     if (k && cnt(v2, o.sell.id) >= 1) opts.push({ o, w: SIZE_WEIGHT[k - 1] });
   }
   if (!opts.length) return null;
-  let r = RS(v2).next() * opts.reduce((a, q) => a + q.w, 0), pick = opts[0];
+  let r = RS(m || v2).next() * opts.reduce((a, q) => a + q.w, 0), pick = opts[0];
   for (const q of opts) { pick = q; if ((r -= q.w) <= 0) break; }
   return pick.o;
 }
@@ -268,7 +268,7 @@ function findCartographer(m, X) {
   let best = null, bd = Infinity;
   for (const v2 of R.members || []) {
     if (v2 === m || !canSell(v2) || (X.avoidSeller && X.avoidSeller.get(v2.id) > nowS())) continue;
-    const o = offerFor(v2, cnt(m, BF.I.emerald));
+    const o = offerFor(v2, cnt(m, BF.I.emerald), m);
     if (!o || T().blockReason(v2, o) || !T().inv.canFit(m.inv, [o.sell], o.buy)) continue;
     const d = v2.position.distanceTo(m.position);
     if (d < bd) { bd = d; best = BF.ids.refs({ seller: v2, offer: o }); }
@@ -277,13 +277,10 @@ function findCartographer(m, X) {
 }
 function deal(m, dl) {
   const t = T(), v2 = dl.seller, o = dl.offer;
-  if (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy)) return false;
-  const sold = t.exchange(v2, o);
-  if (!sold) return false;
-  t.inv.remove(m.inv, o.buy[0].id, o.buy[0].n);
-  t.inv.addStacks(m.inv, sold);
-  t.addXp(v2, o);
-  if (BF.vlog) BF.vlog.trade(m, v2, o);
+  if (!t.asked(m, v2, o) && (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy))) return false;
+  const done = t.buy(m, v2, o, 1, { guard: () => (canSell(v2) ? null : "busy") });   // one transaction (js/trading.js buy)
+  if (done == null) return null;
+  if (!done) return false;
   log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
   return true;
 }
@@ -301,7 +298,7 @@ function shopAI(m, dt, out) {
   }
   const dl = X.deal, v2 = dl && dl.seller;
   const giveUp = () => { if (v2) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2.id, nowS() + 60); X.stage = null; X.deal = null; a.route = null; X.cd = 5; return false; };
-  if (!v2 || !canSell(v2) || !offerFor(v2, cnt(m, BF.I.emerald))) return giveUp();
+  if (!v2 || !canSell(v2) || !offerFor(v2, cnt(m, BF.I.emerald), m)) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   a.mode = "idle"; a.t = 2;
   if (X.stage === "walk") {
@@ -319,6 +316,7 @@ function shopAI(m, dt, out) {
   if (X.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (X.tt <= 0) {
     const ok = deal(m, dl);
+    if (ok == null) return true;   // the trade is in flight (js/trading.js buy)
     X.stage = null; X.deal = null; X.cd = ok ? 0.5 : 5;
     if (!ok) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2.id, nowS() + 60);
   }
@@ -340,27 +338,33 @@ function homeDistance(m) {
 const HOME_R = 48;
 const atHome = m => homeDistance(m) <= HOME_R;
 function pitch(m) {
-  const X = state(m), T0 = T();
+  const X = state(m);
+  if (X.pitching === BF.blockReq.tick()) return true;   // asked this tick already
   if (!BF.tents || tentItem() == null || cnt(m, tentItem()) < 1) return false;
   const px = Math.floor(m.position.x), pz = Math.floor(m.position.z);
   const site = BF.tents.findSite(m.position.x, m.position.z, 7, (x, y, z) => x === px && z === pz);
-  if (BF.vlog) BF.vlog.actor = m;                       // the blockPlaced events inside place() are logged as this villager's
-  const placed = site && BF.tents.place(site.x, site.y, site.z, site.f);
-  if (BF.vlog) BF.vlog.actor = null;
-  if (!placed) return false;
-  T0.inv.remove(m.inv, tentItem(), 1);
-  X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
-  m.homeBed = m.homeBed || m.bed;
-  m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
-  log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
+  if (!site) return false;
+  // a request (spec r15-19): all twelve cells and the tent item at once in the apply phase; the camp is made when it is up (refused: the
+  // next evening check finds another site). The blockPlaced events are logged as this villager's (actor).
+  X.pitching = BF.blockReq.tick();
+  BF.blockReq.cells(m, BF.tents.pitchCells(site.x, site.y, site.z, site.f), { take: [{ id: tentItem(), n: 1 }], emit: true, actor: true }).then(r => {
+    X.pitching = null;
+    if (!r.ok) { log("pitch_refused", m, { at: site.x + "," + site.z, why: r.why }); return; }
+    X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
+    m.homeBed = m.homeBed || m.bed;
+    m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
+    log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
+  });
   return true;
 }
-// Takes the tent down (when it still stands the item comes back) and gives the villager its own bed again.
+// Takes the tent down (when it still stands the item comes back, by request: spec r15-19) and gives the villager its own bed again.
 function strike(m) {
   const X = state(m), c = X.camp;
   if (c) {
     const id = BF.tentId(c.f, 0, 1);
-    if (BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === id && BF.tents.remove(c.x, c.y, c.z, id)) T().inv.add(m.inv, tentItem(), 1);
+    if (BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === id) {
+      BF.blockReq.cells(m, BF.tents.strikeCells(c.x, c.y, c.z, id), { give: [{ id: tentItem(), n: 1 }], fit: false });
+    }
     log("strike", m, { at: c.x + "," + c.z });
   }
   X.camp = null;

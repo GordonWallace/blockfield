@@ -2,7 +2,7 @@
 // Wood slabs/stairs need their own species' planks. Wooden slabs burn 7.5 s, wooden stairs 15 s. Registered through BF.recipeHooks.
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
   const I = BF.I, nm = s => s.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   const WOOD = new Set(BF.WOOD_SPECIES.map(sp => (sp === "oak" ? "planks" : sp + "_planks")));

@@ -13,7 +13,7 @@
 //   importAll() rebuilds the claim table from a save. See CONTRACT.md "Jobsites".
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const JOBSITE = {
   farmer: "composter", librarian: "lectern", cleric: "brewing_stand", armorer: "blast_furnace", weaponsmith: "grindstone",
@@ -335,10 +335,7 @@ function siteGone(x, y, z) {
 function reclaimAt(s) {
   if (!s || !BF.mobs) return;
   let best = null, bd = Infinity;
-  for (const m of BF.mobs.list) {
-    if (m.type !== "villager" || m.dead || m.removed || m.jobsite || isChild(m) || !memValid(m) || m.jobMem.prof !== s.prof || !mayTake(m, s)) continue;
-    const c = center(m);
-    if (!c || Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > reachOf(m)) continue;
+  for (const m of reaching(s, m => !m.jobsite && !isChild(m) && memValid(m) && m.jobMem.prof === s.prof && mayTake(m, s))) {
     const d = Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z);
     if (d < bd) { bd = d; best = m; }
   }
@@ -346,8 +343,24 @@ function reclaimAt(s) {
 }
 function liveByKey(key) {
   if (!key || !BF.mobs) return null;
-  for (const m of BF.mobs.list) if (m.type === "villager" && !m.dead && !m.removed && vkey(m) === key) return m;
-  return null;
+  const want = m => m.type === "villager" && !m.dead && vkey(m) === key;
+  const i = key.lastIndexOf("#"), m = i > 0 ? BF.regions.villageMobs(BF.mobs.villages.get(key.slice(0, i)), want)[0] : undefined;   // (vkey: village key # slot)
+  if (BF.regions.verifyQueries) BF.regions.checkQuery("jobs liveByKey", m ? [m] : [], () => BF.mobs.list.filter(o => !o.removed && want(o)).slice(0, 1));
+  return m || null;
+}
+// The villagers whose claim reach covers jobsite s (their village's centre within its reach of the block, or a villager with no village
+// within RADIUS of it) that pass want, in BF.mobs.list order: the villagers of the villages around s, not every mob (r15-32).
+function reaching(s, want) {
+  const x = s.x + 0.5, z = s.z + 0.5;
+  const ok = m => { if (m.type !== "villager" || m.dead || !want(m)) return false; const c = center(m); return !!c && Math.hypot(x - c.x, z - c.z) <= reachOf(m); };
+  const out = BF.regions.mobsAround(x, z, RADIUS, m => !m.village && ok(m), { label: "jobs reach" });
+  for (const rec of BF.mobs.villages.values()) {
+    if (!rec.members || !rec.members.length || Math.hypot(x - rec.x, z - rec.z) > Math.max(RADIUS, (rec.wg && rec.wg.reach) || 0)) continue;
+    for (const m of BF.regions.villageMobs(rec, ok)) out.push(m);
+  }
+  if (out.length > 1) out.sort((a, b) => a._rs - b._rs);
+  if (BF.regions.verifyQueries) BF.regions.checkQuery("jobs reaching", out, () => BF.mobs.list.filter(m => !m.removed && ok(m)));
+  return out;
 }
 
 // ---------------------------------------------------------------- claims
@@ -355,12 +368,7 @@ function liveByKey(key) {
 function reservedForMemory(k, m) {
   const s = sites.get(k);
   if (!s || !BF.mobs || (memValid(m) && m.jobMem.prof === s.prof)) return false;
-  for (const o of BF.mobs.list) {
-    if (o === m || o.type !== "villager" || o.dead || o.removed || o.jobsite || !memValid(o) || o.jobMem.prof !== s.prof) continue;
-    const c = center(o);
-    if (c && Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) <= reachOf(o)) return true;
-  }
-  return false;
+  return reaching(s, o => o !== m && !o.jobsite && memValid(o) && o.jobMem.prof === s.prof).length > 0;
 }
 function claimedByOther(k, m) {
   if (reservedForMemory(k, m)) return true;
@@ -506,8 +514,8 @@ function tick(dt) {
   if (tickT > 0 || !BF.mobs || !BF.world) return;
   tickT = 1;
   const W = BF.world;
-  for (const m of BF.mobs.list) {
-    if (m.type !== "villager" || m.dead || m.removed) continue;
+  for (const m of BF.regions.ofType("villager")) {
+    if (m.dead || m.removed) continue;
     if (m.jobMem && !memValid(m)) forget(m);
     if (m.jobsite) {
       const s = m.jobsite;
@@ -517,6 +525,28 @@ function tick(dt) {
   }
 }
 // ---------------------------------------------------------------- walking to a jobsite (unemployed villagers)
+function seekGiveUp(m, sk, k, lost) {
+  sk.avoid[k] = BF.simNow() + (lost ? 15 : SEEK_AVOID); sk.site = null; sk.cd = lost ? rnd(RS(m), 0.5, 2) : rnd(RS(m), 3, 8); m.ai.route = null; endTask(m);
+  return false;
+}
+// The "jobsite" claim of a villager that walked to a block (spec r15-23): in the think phase a request, so of two villagers reaching one
+// block in a tick the first by id gets it and the other picks again. free: nobody else holds or is owed it, and the villager may take it.
+// On success it takes the block and looks at it for a while.
+BF.claims.kind("jobsite", {
+  free(m, d) {
+    const s = d.site, W = BF.world;
+    if (m.type !== "villager" || m.profession === "nitwit") return "can't work";
+    if (W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id) return "gone";
+    return claimedByOther(pk(s.x, s.y, s.z), m) ? "taken" : !mayTake(m, s) ? "not its trade" : null;
+  },
+  take: (m, d) => { hire(m, d.site); },
+  result(m, ok, d) {
+    const sk = m.seek;
+    if (sk) sk.asked = null;
+    if (ok) { if (sk) m.seek = null; if (m.job) { m.job.mode = "work"; m.job.t = rnd(RS(m), 4, 8); } endTask(m); }
+    else if (sk && sk.site) seekGiveUp(m, sk, pk(d.site.x, d.site.y, d.site.z), true);
+  },
+});
 // A villager without a job picks the nearest free jobsite block (one it may take: experienced ones only their own profession), walks to it
 // and takes it on arrival if nobody got there first: the claim happens at the block, not from afar. The loser of a race picks again.
 const SEEK_MAX = 120;             // seconds before a walk is given up
@@ -547,7 +577,11 @@ function seekAI(m, dt, out, nav) {
     sk.site = s; sk.t = 0; sk.route = false; ai.route = null;
   }
   const s = sk.site, k = pk(s.x, s.y, s.z), W = BF.world;
-  const giveUp = lost => { sk.avoid[k] = now + (lost ? 15 : SEEK_AVOID); sk.site = null; sk.cd = lost ? rnd(RS(m), 0.5, 2) : rnd(RS(m), 3, 8); ai.route = null; endTask(m); return false; };
+  const giveUp = lost => seekGiveUp(m, sk, k, lost);
+  if (sk.asked != null) {   // its claim on the block is waiting for the tick's apply (r15-23): stand facing it
+    if (sk.asked === (BF.rand ? BF.rand.tick : 0)) { out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; return true; }
+    sk.asked = null;   // no result came (the queue was reset): look again
+  }
   sk.t += dt;
   if (sk.t > SEEK_MAX || (W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id)) return giveUp(false);
   if (claimedByOther(k, m)) return giveUp(true);                   // somebody else got there first
@@ -555,8 +589,7 @@ function seekAI(m, dt, out, nav) {
   if (adjacentTo(s, x, y, z) || (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) < 1.9 && Math.abs(s.y - y) <= 1)) {
     ai.route = null;
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5;
-    if (claim(m, { site: s })) { sk.site = null; m.seek = null; if (m.job) { m.job.mode = "work"; m.job.t = rnd(RS(m), 4, 8); } endTask(m); }   // takes the block and looks at it for a while
-    else giveUp(true);
+    if (BF.claims.ask("jobsite", m, "j:" + k, { site: s }) === "pending") sk.asked = BF.rand ? BF.rand.tick : 0;   // takes the block (the claim's result, below)
     return true;
   }
   if (!ai.route || ai.routeKind !== "job") {

@@ -23,7 +23,7 @@
 // API: BF.merchant = { away(m), remember, forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 
 const PROF = "merchant";
@@ -197,34 +197,16 @@ function plan(m) {
 // Buys from seller v2 through its sell offer o, up to `want` items. Returns items bought.
 function buyFrom(m, v2, o, want) {
   const Tr = T(), e = em();
-  let done = 0;
-  while ((done + 1) * o.sell.n <= want || (!done && want > 0 && o.sell.n <= stackOf(o.sell.id))) {   // whole lots up to what it wants (at least one)
-    if (cnt(m, e) < o.buy[0].n || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = Tr.exchange(v2, o);                 // its stock above its reserve, its room
-    if (!sold) break;
-    Tr.inv.remove(m.inv, e, o.buy[0].n);
-    Tr.inv.addStacks(m.inv, sold);
-    Tr.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
-  return done * o.sell.n;
+  const lots = Math.floor(want / o.sell.n) || (want > 0 && o.sell.n <= stackOf(o.sell.id) ? 1 : 0);   // whole lots up to what it wants (at least one)
+  const done = Tr.asked(m, v2, o) || lots > 0 ? Tr.buy(m, v2, o, lots) : 0;   // its stock above its reserve, its room: one transaction (js/trading.js buy)
+  return done == null ? null : done * o.sell.n;
 }
 // Sells into buyer v2's buy offer o (it pays emeralds for the items), as long as the merchant has the items. Returns items sold.
 function sellTo(m, v2, o, max) {
   const Tr = T(), id = o.buy[0].id;
-  let done = 0;
-  while ((done + 1) * o.buy[0].n <= max && cnt(m, id) >= o.buy[0].n) {
-    if (!Tr.inv.canFit(m.inv, [o.sell], o.buy)) break;
-    const sold = Tr.exchange(v2, o);                 // its emeralds, its room
-    if (!sold) break;
-    Tr.inv.remove(m.inv, id, o.buy[0].n);
-    Tr.inv.addStacks(m.inv, sold);
-    Tr.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
-  return done * o.buy[0].n;
+  const lots = Math.floor(max / o.buy[0].n);
+  const done = Tr.asked(m, v2, o) || lots > 0 ? Tr.buy(m, v2, o, lots) : 0;   // its emeralds, its room: one transaction (js/trading.js buy)
+  return done == null ? null : done * o.buy[0].n;
 }
 // The errands of a shopping round in village rec: buy `list` goods (at most the expected n each, from the cheapest sellers first).
 function buyErrands(rec, m, list, maxUnit) {
@@ -317,7 +299,7 @@ function step(m, st) {
   const n = (wear.get(k) || 0) + 1;
   wear.delete(k);
   if (n < WEAR_N) { wear.set(k, n); if (wear.size > WEAR_MAX) wear.delete(wear.keys().next().value); return; }
-  if (BF.B.dirt_path != null) { W.setBlock(x, y, z, BF.B.dirt_path); st.worn = (st.worn || 0) + 1; }
+  if (BF.B.dirt_path != null) BF.blockReq.cells(m, [{ x, y, z, id: BF.B.dirt_path, expect: id }]).then(r => { if (r.ok) st.worn = (st.worn || 0) + 1; });   // a request (spec r15-19)
 }
 
 // ---------------------------------------------------------------- routes
@@ -334,7 +316,7 @@ function noteTrip(home, dest, items, ems) {
 }
 function routesView() {
   const cut = dayNow() - 7, onRoad = new Map();
-  for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && !m.dead && m.mc && m.mc.trip) {
+  for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && !m.dead && m.mc && m.mc.trip) {
     const k = routeKey(m.mc.trip.home, m.mc.trip.dest);
     onRoad.set(k, (onRoad.get(k) || []).concat([{ who: BF.vlog ? BF.vlog.nameOf(m) : "", stage: m.mc.stage }]));
   }
@@ -400,19 +382,24 @@ function errands(m, st, dt, out) {
   while (st.ei < st.errands.length) {
     const e = st.errands[st.ei];
     const v2 = e.v;
-    const skip = !live(v2) || v2.sleeping || v2.tradingWith || (e.kind === "buy" && !(st.want.get(e.id) > 0)) || (e.kind === "sell" && cnt(m, e.id) < e.o.buy[0].n);
+    const asked = T().asked(m, v2, e.o);   // its answer is in (js/trading.js buy): collect it whatever changed since
+    const skip = !asked && (!live(v2) || v2.sleeping || v2.tradingWith || (e.kind === "buy" && !(st.want.get(e.id) > 0)) || (e.kind === "sell" && cnt(m, e.id) < e.o.buy[0].n));
     if (skip) { st.ei++; st.et = 0; continue; }
-    st.et += dt;
-    if (st.et > DEAL_TIMEOUT) { st.ei++; st.et = 0; m.ai.route = null; continue; }
-    const r = travel(m, st, dt, out, v2.position.x, v2.position.z, DEAL_R);
-    if (r === "failed") { st.ei++; st.et = 0; continue; }
-    if (r !== "arrived") return false;
+    if (!asked) {
+      st.et += dt;
+      if (st.et > DEAL_TIMEOUT) { st.ei++; st.et = 0; m.ai.route = null; continue; }
+      const r = travel(m, st, dt, out, v2.position.x, v2.position.z, DEAL_R);
+      if (r === "failed") { st.ei++; st.et = 0; continue; }
+      if (r !== "arrived") return false;
+    }
     out.faceTarget = true;
     if (e.kind === "buy") {
       const n = buyFrom(m, v2, e.o, st.want.get(e.id));
+      if (n == null) return false;   // the trade is in flight (js/trading.js buy)
       if (n) { st.want.set(e.id, st.want.get(e.id) - n); log("buy", m, { from: BF.vlog ? BF.vlog.nameOf(v2) : "", got: n + " " + nameOf(e.id), at: st.stage }); }
     } else {
       const n = sellTo(m, v2, e.o, cnt(m, e.id));
+      if (n == null) return false;   // the trade is in flight (js/trading.js buy)
       if (n) { st.trip.soldN += n; log("sell", m, { to: BF.vlog ? BF.vlog.nameOf(v2) : "", gave: n + " " + nameOf(e.id), at: st.stage }); }
     }
     st.ei++; st.et = 0;
@@ -589,7 +576,7 @@ function tick(dt) {
   if ((summT -= 5) <= 0) { summT = 60; for (const rec of BF.mobs.villages.values()) remember(rec); }
   else for (const rec of BF.mobs.villages.values()) if (!market.has(rec.key)) remember(rec);   // a village seen for the first time is written down at once
   const now = dayNow(), ids = new Set();
-  for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && !m.dead && !m.removed && m.mc && m.mc.trip) ids.add(m.mc.trip.id);
+  for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && !m.dead && !m.removed && m.mc && m.mc.trip) ids.add(m.mc.trip.id);
   for (const id of [...BF.villageSim.pins().keys()]) {
     if (ids.has(id)) { lastSeen.set(id, now); continue; }
     if (!lastSeen.has(id)) lastSeen.set(id, now);

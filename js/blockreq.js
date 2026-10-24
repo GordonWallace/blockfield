@@ -21,7 +21,7 @@
 // API: BF.blockReq = { send(m, cells, {take, give, giver, why, wait}) -> req, busy(m), result(m), giver(name, fn), cell(x, y, z, expect, id, more), flush() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const givers = new Map();
 const pend = new WeakMap();   // villager -> its last block request (not saved: a restored villager that was waiting finds none and re-plans)
@@ -118,5 +118,6 @@ BF.req.on("block", (req, W) => {
 // For tests and tools that call a villager's action directly between ticks: applies the queued requests and delivers their results now.
 function flush() { BF.req.apply(); BF.req.deliver(); }
 
-BF.blockReq = { send, busy, result, cell, flush, giver: (name, fn) => givers.set(name, fn) };
+// BF.blockReq is shared with js/blockreqs.js (spec r15-19: cells, door, free, tick), loaded before this file.
+Object.assign(BF.blockReq || (BF.blockReq = {}), { send, busy, result, cell, flush, giver: (name, fn) => givers.set(name, fn) });
 })();

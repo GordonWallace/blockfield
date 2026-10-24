@@ -6,6 +6,7 @@
 //   index: 1,000 simulation steps at the village nearest the spawn (villagers, golems, animals wandering), then a chest, a furnace and
 //     a sign placed and broken, a drop made and removed, and a village's mobs unloaded; the self-check (BF.regions.check) finds no
 //     differences after each;
+//   queries: mobsAround (r15-31 / r15-32) agrees with a full scan of BF.mobs.list, in its order, with mobs moved since the last sync;
 //   cost: 2,000 objects walking about cost under 0.1 ms a step in the index (measured, printed), and the real index step is printed.
 // Usage: NODE_PATH=$(npm root -g) node test/regions.js [seed=3] [steps=1000]
 const path = require('path');
@@ -131,6 +132,50 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(run.ids, 'a region lists its mobs by their ids (r15-13), each resolving to the mob');
   check(run.counts.villages >= 1, `the running village is indexed (${run.counts.villages})`);
 
+  // ---------------------------------------------------------------- queries (mobsAround, the r15-31 / r15-32 helper)
+  const q = await pg.evaluate(() => {
+    const R = BF.regions, out = {};
+    R.verifyQueries = true; R.resetQueryStats();
+    const p0 = BF.player.position.clone();
+    let n = 0, found = 0;
+    for (let i = 0; i < 200; i++) {   // queries mid-step too (after the mobs moved, before the index's sync): here between steps and inside
+      window.__step(0.05);
+      const L = BF.mobs.list.filter(m => !m.removed);
+      for (let j = 0; j < L.length; j += 7) { const m = L[j]; found += R.mobsAround(m.position.x, m.position.z, 4 + (j % 5) * 12).length; n++; }
+      for (const m of L) m.position.x += 0.3;   // as if they had walked part of a step since the last sync
+      for (let j = 3; j < L.length; j += 11) { const m = L[j]; R.mobsAround(m.position.x, m.position.z, 24, o => o.type === 'villager'); n++; }
+      for (let j = 5; j < L.length; j += 13) { const m = L[j]; R.mobsAround(m.position.x, m.position.z, 30, null, { local: true }); n++; }
+      for (const m of L) m.position.x -= 0.3;
+    }
+    { const b = R.mobsInBox(p0.x - 20, p0.z - 10, p0.x + 15, p0.z + 25), w = BF.mobs.list.filter(m => !m.removed && m.position.x >= p0.x - 20 && m.position.x <= p0.x + 15 && m.position.z >= p0.z - 10 && m.position.z <= p0.z + 25);
+      out.box = b.length === w.length && b.every((m, i) => m === w[i]) && b.length > 0; }
+    for (const t of ['villager', 'iron_golem', 'zombie', 'cow']) { R.ofType(t); n++; }
+    for (const rec of BF.mobs.villages.values()) { R.villageMobs(rec); R.villageMobs(rec, m => m.type === 'villager'); n += 2; }
+    n++;
+    const st = R.queryStats();
+    out.n = n; out.found = found; out.diffs = st.diffs; out.last = st.last; out.checked = st.checked;
+    // list order: what a full scan would find, in the same order
+    const p = BF.player.position, a = R.mobsAround(p.x, p.z, 200), L = BF.mobs.list;
+    out.order = a.length > 1 && a.every((m, i) => !i || L.indexOf(a[i - 1]) < L.indexOf(m));
+    // through a face edge: mobs put just past an edge of the village's face, a local query from this side finds them, a raw one doesn't
+    { const P = BF.planet, f = P.face(p.x, p.z), N = P.N, a = P.atlas(f, N - 2, N / 2), b = P.atlas(f, N + 2, N / 2), c = P.canon(b.x, b.z, {});
+      const ms = BF.mobs.list.filter(m => !m.removed && m.type !== 'villager').slice(0, 2), old = ms.map(m => m.position.clone());
+      for (const m of ms) { m.position.x = c.x; m.position.z = c.z; }
+      R.tick();
+      const lo = R.mobsAround(a.x, a.z, 6, null, { local: true }), raw = R.mobsAround(a.x, a.z, 6);
+      out.edge = ms.length === 2 && ms.every(m => lo.includes(m)) && !ms.some(m => raw.includes(m));
+      ms.forEach((m, i) => m.position.copy(old[i])); R.tick(); }
+    out.wrong = R.checkQuery('test', [], [L[0]]) === false && R.queryStats().diffs === st.diffs + 1;
+    R.verifyQueries = false; R.resetQueryStats();
+    return out;
+  });
+  // (checked >= n: the converted scans in js/mobs.js and the animal modules (r15-31) check themselves during the steps too)
+  check(q.diffs === 0 && q.checked >= q.n, `mobsAround, ofType and villageMobs agree with a full scan in ${q.n} queries over 200 steps (${q.found} mobs found)` + (q.last ? ' ' + JSON.stringify(q.last) : ''));
+  check(q.box, 'mobsInBox finds the mobs standing in a box');
+  check(q.order, 'mobsAround lists mobs in BF.mobs.list order');
+  check(q.edge, 'mobsAround with local: true finds mobs just across a face edge (raw distance does not)');
+  check(q.wrong, 'checkQuery reports a difference');
+
   const ev = await pg.evaluate(() => {
     const R = BF.regions, W = BF.world, p = BF.player.position, out = {};
     const x = Math.floor(p.x) + 2, z = Math.floor(p.z) + 2, y = Math.floor(p.y) + 6, k = R.keyOf(x, y, z), key = x + ',' + y + ',' + z;
@@ -147,6 +192,14 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     out.drop1 = !!(d && R.dropsIn(R.keyOf(d.pos.x, 0, d.pos.z)).has(d)) && R.check().ok;
     BF.drops.remove(d);
     out.drop2 = R.check().ok;
+    // a mob brought back from a snapshot (js/mobsave.js, as wildlife.js brings back a wild animal) keeps its own index slot and order,
+    // and leaves the index when removed
+    { const src = BF.mobs.list.find(m => !m.removed && !m.dead && m.type !== 'villager' && m.type !== 'iron_golem'), snap = src && BF.mobSave.snapOf(src);
+      const m = snap && BF.mobs.spawn(src.type, p.x + 2, p.y, p.z + 2), ri = m && m._ri, rs = m && m._rs;
+      if (m) BF.mobSave.apply(m, snap);
+      out.snapSlot = !!m && m._ri === ri && m._rs === rs && m._rs > src._rs;
+      if (m) BF.mobs.discard(m);
+      out.snapGone = !!m && !R.mobsIn(R.keyOf(m.position.x, 0, m.position.z))?.has(m) && R.check().ok; }
     const rec = [...BF.mobs.villages.values()].find(v => BF.villageSim.isActive(v.key));
     const before = R.counts().mobs;
     out.unloaded = rec ? BF.mobs.unloadVillage(rec.key) : 0;
@@ -160,6 +213,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   });
   check(ev.beOk, `block entities placed and broken stay in step (${ev.be.join(', ')})`);
   check(ev.drop1 && ev.drop2, 'a drop is indexed when made and leaves when removed');
+  check(ev.snapSlot && ev.snapGone, `a mob given a snapshot's state keeps its own index slot and order, and leaves the index when removed (${ev.snapSlot}, ${ev.snapGone})`);
   check(ev.resize, 'a new region size (32, then 64 again) refills the index, and the self-check agrees');
   check(ev.unload && ev.unloaded > 0 && ev.mobsAfter === ev.before - ev.unloaded, `a village's ${ev.unloaded} mobs leave the index when it unloads (${ev.before} -> ${ev.mobsAfter}) ${ev.unloadDiffs.join(' | ')}`);
 

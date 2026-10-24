@@ -1,19 +1,22 @@
-// @ci integration suite=village
+// @ci integration suite=village hosts=worker,server
 // Quit and reload takes no game time: villagers, village golems and wild mobs come back where they were, facing the same way, with their
-// state (js/mobsave.js, village loading plan scenario 1). Usage: node test/run.js /tmp/ms test/mobsave-actions.js
+// state (js/mobsave.js, village loading plan scenario 1). Usage: node test/run.js /tmp/ms test/mobsave-actions.js [--host page|worker|server]
 module.exports = async (pg, out) => {
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra));
   const id = await pg.evaluate(async () => (await BF.save.create({ name: "mobsave", seed: 123, gameMode: "creative", villages: 9, gen: 4 })).id);
-  await require('./lib').toVillage(pg);
-  await pg.waitForFunction(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 4, null, { timeout: 60000 });
+  const lib = require('./lib');
+  await lib.simReady(pg);
+  await lib.toVillage(pg);
+  for (let i = 0; i < 120 && !(await lib.sim(pg, () => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 4)); i++) await pg.waitForTimeout(500);
   // The world is held still from the snapshot to the checks (BF.state.paused: no frame steps mobs, no autosave, and the save on pagehide
   // writes the same state). After the load the test steps the mobs itself and reads each one in the step it comes back in, before
   // its AI has run: mobs restored early would otherwise go on walking and turning in real time while the rest load.
-  const before = await pg.evaluate(async () => {
+  // (Where the simulation is, spec r15-43: it pauses there at once, and the page pauses too, so it doesn't send the simulation on again.)
+  const before = await lib.sim(pg, () => {
     BF.mobs.spawning = false;
     const p = BF.player.position;
     const cow = BF.mobs.spawn("cow", p.x + 6, p.y, p.z + 6); cow.marker = 77; cow.ai.mode = "walk"; cow.ai.tx = p.x + 20; cow.ai.tz = p.z;
-    for (let i = 0; i < 120; i++) BF.mobs.update(0.05);
+    for (let i = 0; i < 120; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     const key = m => m.village.key + "#" + m.slot.idx;
     const vs = {}, gs = [];
     for (const m of BF.mobs.list) {
@@ -22,16 +25,21 @@ module.exports = async (pg, out) => {
     }
     const c = BF.mobs.list.find(m => m.marker === 77);
     BF.state.paused = true;
-    await BF.save.saveNow();
     return { vs, gs, cow: c && { p: [c.position.x, c.position.y, c.position.z], mode: c.ai.mode, tx: c.ai.tx } };
   });
+  await pg.evaluate(() => { BF.state.paused = true; return BF.save.saveNow(); });
   const n = Object.keys(before.vs).length;
   ok("villagers were loaded to save", n >= 4, { n });
   await pg.reload();
-  await require('./lib').ready(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
+  await lib.reloaded(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
   await pg.waitForTimeout(6000);
-  await pg.evaluate(async id => { BF.state.paused = true; await BF.save.load(id); BF.mobs.spawning = false; }, id);
-  const after = await pg.evaluate(async () => {
+  await lib.sim(pg, () => { BF.state.paused = true; });
+  // the world server holds the world its page left (paused, server/world.js) and plays it on when the page picks it again, so nothing
+  // comes back from the save; another world first lets it go (saved), and the load then reads it from the save as a page would
+  if (lib.host() === 'server') { await pg.evaluate(async () => { await BF.save.create({ name: "mobsave other", seed: 7, gameMode: "creative", villages: 9, gen: 4 }); }); await lib.simReady(pg); }
+  await pg.evaluate(async id => { BF.state.paused = true; await BF.save.load(id); }, id);
+  const after = await lib.sim(pg, async () => {
+    BF.state.paused = true; BF.mobs.spawning = false;
     const key = m => m.village.key + "#" + m.slot.idx, vs = {}, gs = [], seen = new Set();
     let cow = null;
     const read = () => {   // each restored mob as it stands in the step it came back in
@@ -46,10 +54,10 @@ module.exports = async (pg, out) => {
     const t0 = performance.now();
     while (Object.keys(vs).length < 3 && performance.now() - t0 < 60000) {
       await new Promise(r => setTimeout(r, 50));   // frames keep loading chunks while paused
-      BF.mobs.update(0.05);
+      (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       read();
     }
-    for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 50)); BF.mobs.update(0.05); read(); }   // two more village passes: the rest that are loaded
+    for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 50)); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); read(); }   // two more village passes: the rest that are loaded
     const c = BF.mobs.list.find(m => m.marker === 77);
     if (!cow && c) cow = { p: [c.position.x, c.position.y, c.position.z], mode: c.ai.mode, tx: c.ai.tx, restored: !!c.restored };
     return { vs, gs, cow };
@@ -66,7 +74,7 @@ module.exports = async (pg, out) => {
   const used = new Set(), own = after.gs.filter(g => g[2]).every(g => { const i = before.gs.findIndex((b, j) => !used.has(j) && Math.hypot(b[0] - g[0], b[1] - g[1]) < 0.1); if (i >= 0) used.add(i); return i >= 0; });
   ok("each village golem comes back on its own saved spot", own, { before: before.gs, after: after.gs });
   // a stale snapshot (game time passed) is not used
-  const stale = await pg.evaluate(() => {
+  const stale = await lib.sim(pg, () => {
     BF.mobSave.deserialize({ t: BF.sky.day + BF.sky.time - 0.5, v: { "x#1": { p: [0, 0, 0], yaw: 0, hp: 20, s: {} } }, g: {}, w: [] });
     return BF.mobSave.peek("x#1");
   });

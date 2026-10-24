@@ -1,9 +1,11 @@
+// @ci integration hosts=worker,server
 // Merchants and trading caravans (js/merchant.js): node test/run.js /tmp/merchant test/merchant.js
 // The merchant's counter (block, jobsite, recipe), merchants in a new village's roster (one per 20 villagers), the hiring cap, surplus and
 // lack read from prices, trip pins (at most 2, unpinning, saved), path wear (20 crossings, never farmland), the cargo reserve, and saving a trip.
 module.exports = async (pg) => {
-  await require('./lib').toVillage(pg);
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const res = await lib.sim(pg, () => {
     const out = [], ok = (n, c, x) => out.push((c ? "PASS " : "FAIL ") + n + (x !== undefined ? "  " + JSON.stringify(x) : ""));
     const M = BF.merchant, T = BF.trades, I = BF.I, B = BF.B, P = BF.prices, VS = BF.villageSim;
     ok("merchant loaded", !!M);
@@ -36,7 +38,7 @@ module.exports = async (pg) => {
     ok("not the other way", M.goods(Bv, A, merch, 10).list.length === 0);
     // ---- pins (synthetic village boxes around a chunk corner by the spawn, on one face; the player 4 km away)
     VS.reset();
-    const o = BFT.spawn(), bx = Math.floor(o.x / 16) * 16, bz = Math.floor(o.z / 16) * 16, cx = bx / 16, cz = bz / 16;
+    const s0 = BF.spawnPoint || BF.player.position, o = { x: Math.floor(s0.x), z: Math.floor(s0.z) }, bx = Math.floor(o.x / 16) * 16, bz = Math.floor(o.z / 16) * 16, cx = bx / 16, cz = bz / 16;
     const box = (x, z) => ({ x: bx + x, z: bz + z, minX: bx + x - 10, maxX: bx + x + 10, minZ: bz + z - 10, maxZ: bz + z + 10 });
     const key = (x, z) => (bx + x) + "," + (bz + z), ck = (x, z) => (cx + x) + "," + (cz + z);
     const v0 = box(0, 0), v1 = box(160, 40), v2 = box(-100, 100), far = [bx + 4000, bz + 4000];
@@ -58,7 +60,7 @@ module.exports = async (pg) => {
       const W = BF.world;
       W.setBlock(px, gy, pz, B.grass); W.setBlock(px, gy + 1, pz, 0); W.setBlock(px, gy + 2, pz, 0);
       const fake = { position: { x: px + 0.5, y: gy + 1, z: pz + 0.5 }, onGround: true };
-      const walk = n => { for (let i = 0; i < n; i++) { const st = {}; M.step(fake, st); } };
+      const walk = n => { for (let i = 0; i < n; i++) { const st = {}; M.step(fake, st); BF.req.apply(); BF.req.deliver(); } };   // the wear is a request (spec r15-19)
       walk(19);
       ok("19 crossings: still grass", W.getBlock(px, gy, pz) === B.grass, W.getBlock(px, gy, pz));
       walk(1);

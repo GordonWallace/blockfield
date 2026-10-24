@@ -11,7 +11,7 @@
 //                     apply(m, snap), done(key), update(dt), reset(), pending() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const SHORT = 1 / 24;       // game days (a game hour): a village unloaded for less than this, with no bedtime in between, brings its mobs back exactly too
 const EXACT = 0.02;          // game days (about 24 s at 1x): a snapshot older than this is not an exact restore
@@ -20,7 +20,8 @@ const MAX_DEPTH = 7, MAX_ARR = 2500;
 const SKIP = new Set(["def", "position", "vel", "prev", "root", "model", "meshes", "material", "village", "home", "slot", "bed", "homeBed", "jobsite",
   "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
-  "tradingWith", "badge", "badgeLevel", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig"]);
+  "tradingWith", "badge", "badgeLevel", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig",
+  "_ri", "_rs"]);   // (the region index's slot and creation order, js/regions.js: the new mob's own, never the snapshot's)
 
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const r2 = v => Math.round(v * 100) / 100;
@@ -61,7 +62,7 @@ function ser(v, d, seen) {
 function deser(v) {
   if (v === null || typeof v !== "object") return v;
   if (Array.isArray(v)) return v.map(deser);
-  if (v.$v && window.THREE) return new THREE.Vector3(v.$v[0], v.$v[1], v.$v[2]);
+  if (v.$v && globalThis.THREE) return new THREE.Vector3(v.$v[0], v.$v[1], v.$v[2]);
   if (v.$m) return new Map(v.$m.map(([k, x]) => [k, deser(x)]));
   if (v.$s) return new Set(v.$s);
   const o = {};

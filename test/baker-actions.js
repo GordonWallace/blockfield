@@ -1,16 +1,18 @@
+// @ci integration hosts=worker,server
 // Bakers, cakes and pies (js/baker.js): the recipes (sugar, pumpkin seeds, pumpkin pie, cake with milk bottles or buckets that come back empty),
 // the baker's oven (bakes only with fuel, on game time, the cake's empty bottles come out with it, contents saved), eating a placed cake,
 // pumpkin stems and sugar cane growing, the baker in a generator-6 village (no free goods, one per 15 villagers), the baker buying and baking,
 // treats bought and eaten, the happiness term. Usage:
 //   NODE_PATH=$(npm root -g) node test/run.js /tmp/out test/baker-actions.js
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const K = BF.baker, I = BF.I, T = BF.trades, W = BF.world;
     BF.state.paused = true;
-    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
 
@@ -163,11 +165,14 @@ module.exports = async (pg, out) => {
       fm.farm = fm.farm || {};
       const t1 = K.farmTask(fm, fm.farm, rec, D, H);
       ok("a pumpkin in its bed is a farmer task", !!t1 && (t1.kind === "pumpkin" || t1.kind === "cane" || t1.kind === "caneplant" || t1.kind === "canespot"), t1);
+      const flush = () => { BF.req.apply(); BF.req.deliver(); };   // its block edits are requests (spec r15-19): applied and answered as a tick would
       const done = K.farmPerform(fm, { kind: "pumpkin", x, y: y + 1, z, ty: y + 1, soil: y, k: "t" }, D, H);
+      flush();
       ok("it harvests the pumpkin", done && W.getBlock(x, y + 1, z) === 0 && n("pumpkin", fm) === 1);
       const nx = fm.farm.next;
       ok("and replants the cell next", nx && nx.kind === "pumpkinplant" && nx.x === x && nx.z === z, nx);
       const planted = nx && K.farmPerform(fm, nx, D, H);
+      flush();
       ok("it cuts the pumpkin into 4 seeds, tills the soil and plants a stem", planted && W.getBlock(x, y + 1, z) === BF.B.pumpkin_stem && (W.getBlock(x, y, z) === BF.B.farmland || W.getBlock(x, y, z) === BF.B.farmland_dry) && n("pumpkin", fm) === 0 && n("pumpkin_seeds", fm) === 3, [W.getBlock(x, y, z), n("pumpkin_seeds", fm)]);
       ok("the cell is kept for pumpkins (no wheat planted there)", D.pumpkins && D.pumpkins.has(x + "," + y + "," + z));
       W.setBlock(x, y + 1, z, 0);

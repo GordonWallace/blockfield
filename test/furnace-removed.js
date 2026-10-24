@@ -1,9 +1,10 @@
+// @ci integration hosts=worker,server
 // A furnace removed by anything but the player's own mining (creeper explosion, /setblock, /fill) drops its contents on the ground,
 // stops cooking, and a new furnace in the same cell starts empty (bug-004). Mining it yourself still hands the contents to you.
 module.exports = async (pg) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.setGameMode("survival"); });
   await pg.waitForTimeout(3000);
-  const r = await pg.evaluate(async () => {
+  const r = await require('./lib').sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const I = BF.I, B = BF.B, W = BF.world, P = BF.player, inv = BF.inventory, tick = () => new Promise(r => setTimeout(r, 0));
     BF.mobs.spawning = false;
     const x = Math.floor(P.position.x) + 2, y = Math.floor(P.position.y) + 1, z = Math.floor(P.position.z);

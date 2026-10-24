@@ -23,7 +23,7 @@
 // Persistence: nothing of its own. Saplings and trees are blocks; the forester's pack is the usual villager inventory.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const ri = (r, a, b) => a + r.int(b - a + 1);
@@ -160,7 +160,7 @@ function growTick() {
   const dt = Math.min(5, now - growLast);
   growLast = now;
   sawT -= dt;
-  if (sawT <= 0 && BF.mobs) { sawT = 5; for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m)); }   // whatever the villager is doing
+  if (sawT <= 0 && BF.mobs) { sawT = 5; for (const m of BF.regions.ofType("villager")) if (m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m)); }   // whatever the villager is doing
 }
 // Block tick: saplings grow into trees (spec r15-18: a block tick like crop growth, not a request).
 let sapLast = 0;
@@ -332,13 +332,10 @@ function findAxeSeller(m, F) {
 }
 function buyAxe(m, deal) {
   const Tr = T(), v2 = deal.other, o = deal.offer;
-  if (!canSell(v2) || Tr.blockReason(v2, o) || !o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) return false;
-  const sold = Tr.exchange(v2, o);
-  if (!sold) return false;
-  for (const b of o.buy) Tr.inv.remove(m.inv, b.id, b.n);
-  Tr.inv.addStacks(m.inv, sold);
-  Tr.addXp(v2, o);
-  if (BF.vlog) BF.vlog.trade(m, v2, o, 1);
+  if (!Tr.asked(m, v2, o) && (!canSell(v2) || Tr.blockReason(v2, o) || !o.buy.every(b => Tr.inv.count(m.inv, b.id) >= b.n) || !Tr.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy))) return false;
+  const done = Tr.buy(m, v2, o, 1, { guard: () => (canSell(v2) ? null : "busy") });   // one transaction (js/trading.js buy)
+  if (done == null) return null;
+  if (!done) return false;
   log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy.map(b => b.n + " " + BF.items[b.id].name).join(" + ") });
   return true;
 }
@@ -656,6 +653,10 @@ function ai(m, dt, out) {
   if (F.t > k.max) { log("giveup", m, { task: k.kind, why: "too slow" }); endTask(m, F, false); return true; }
   a.mode = "idle"; a.t = 2;
   const reach = k.kind === "plant" ? PLANT_REACH : k.kind === "cut" ? CUT_REACH : k.kind === "buy" ? SHOP_REACH : 1.6;
+  if (k.kind === "gather" && k.picks) {   // "pickup" requests sent (js/drops.js): done once they have applied
+    if (k.picks.some(q => q.result === undefined) && BF.rand.tick - k.picks[0].tick < 4) return true;
+    endTask(m, F, !!(k.picks[0].result && k.picks[0].result.ok)); return true;
+  }
   if (k.kind === "gather" && (!BF.drops.list.includes(k.drop))) { endTask(m, F, true); return true; }
   if (k.kind === "buy") {   // the seller walks about: follow it
     const o = k.deal.other;
@@ -676,6 +677,7 @@ function ai(m, dt, out) {
   if (k.kind === "buy") {
     if (k.deal.other.tradingWith) return true;   // the player is trading with it: wait
     const ok = buyAxe(m, k.deal);
+    if (ok == null) return true;   // the trade is in flight (js/trading.js buy)
     if (ok) m.ai.swingT = 0.2; else log("giveup", m, { task: "buy", why: "offer gone" });
     endTask(m, F, ok);
   } else if (k.kind === "plant") {
@@ -684,17 +686,13 @@ function ai(m, dt, out) {
     k.sent = true; a.swingT = 0.35;
     rq.then(r => { if (F.task !== k) return; if (!r.ok) log("giveup", m, { task: "plant", why: "spot taken" }); endTask(m, F, r.ok); });
   }
-  else if (k.kind === "gather") {
-    const d = k.drop, left = T().inv.add(m.inv, d.id, d.count);
-    if (left < d.count) log("pickup", m, { got: (d.count - left) + " " + BF.items[d.id].name });
-    const ok = left < d.count;
-    if (left > 0) d.count = left; else BF.drops.remove(d);
-    for (const o of BF.drops.list.slice()) {                                  // and whatever else lies at its feet
+  else if (k.kind === "gather") {   // asks for the item, and whatever else lies at its feet (the player, or a forester with a lower id, may get it first)
+    const d = k.drop;
+    k.picks = [BF.drops.ask(d, m).then(r => { if (r.ok) log("pickup", m, { got: r.got + " " + BF.items[r.id].name }); })];
+    for (const o of BF.drops.list) {
       if (o === d || !WANT(o.id) || o.age < 0.8 || Math.hypot(o.pos.x - m.position.x, o.pos.z - m.position.z) > 1.6) continue;
-      const l2 = T().inv.add(m.inv, o.id, o.count);
-      if (l2 > 0) o.count = l2; else BF.drops.remove(o);
+      k.picks.push(BF.drops.ask(o, m));
     }
-    endTask(m, F, ok);
   } else {   // cut
     const tr = k.tree, bx = tr.base;
     if (!isLog(get(bx[0], bx[1], bx[2]))) { k.done = 0; endTask(m, F, false); return true; }

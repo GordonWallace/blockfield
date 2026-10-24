@@ -2,7 +2,7 @@
 // (BF.signs.villageName); deterministic from the world seed and the village's region, no repeats among nearby villages.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 BF.VILLAGE_NAMES = Object.freeze([
   "Kaitaia", "Kerikeri", "Kaikohe", "Paihia", "Russell", "Kawakawa", "Moerewa", "Whangārei", "Dargaville", "Ruakākā",
   "Waipu", "Mangawhai", "Wellsford", "Warkworth", "Helensville", "Pukekohe", "Waiuku", "Tuakau", "Pōkeno", "Huntly",

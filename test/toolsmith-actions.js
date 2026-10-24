@@ -1,9 +1,11 @@
 // Toolsmith and furnace checks: node test/run.js /tmp/ts test/toolsmith-actions.js
+// @ci integration hosts=worker,server
 // Unit part: trade tables, starting stock, what the toolsmith makes next (even stock, best material, shears first), the furniture maker's
 // furnaces. Live part, in a real village: fuel rules at a furnace (fuel already in it is burnt first, all fuel is taken out at the end), then
 // a toolsmith with no furnace in reach buys one from a furniture maker, puts it down, buys ore and coal, smelts and makes tools.
 module.exports = async (pg, out) => {
-  const r = await pg.evaluate(() => {
+  const sim = require('./lib').sim;   // (where the simulation is: spec r15-43)
+  const r = await sim(pg, () => {
     const res = {}, I = BF.I, T = BF.trades, TS = BF.toolsmith, F = BF.furniture, inv = T.inv;
     const names = a => a.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count);
     const fmt = o => o.buy.map(b => b.n + " " + BF.items[b.id].name).join("+") + " > " + o.sell.n + " " + BF.items[o.sell.id].name;
@@ -58,7 +60,7 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
   // ---- fuel rules at one furnace beside the player
-  const fuel = await pg.evaluate(() => {
+  const fuel = await sim(pg, () => {
     const I = BF.I, T = BF.trades, TS = BF.toolsmith, inv = T.inv, W = BF.world;
     const p = BF.player.position, x = Math.floor(p.x) + 2, z = Math.floor(p.z) + 2;
     let y = Math.floor(p.y) + 4; while (y > p.y - 12 && !BF.SOLID[W.getBlock(x, y - 1, z)]) y--;
@@ -68,16 +70,20 @@ module.exports = async (pg, out) => {
     const m = { type: "villager", profession: "toolsmith", inv: inv.create(), position: new THREE.Vector3(x + 1, y, z), ai: {} };
     inv.add(m.inv, I.raw_iron != null ? I.raw_iron : I.iron_ore, 3); inv.add(m.inv, I.coal, 4);
     const job = { rawId: I.raw_iron != null ? I.raw_iron : I.iron_ore, furnace: { x, y, z } };
-    const loaded = TS.loadFurnace(m, job);
+    BF.ids.put(m);   // a scripted villager: loading and emptying are "furnace" requests from it (spec r15-22), applied here by hand
+    const flush = () => { BF.req.apply(); BF.req.deliver(); };
+    let loaded = TS.loadFurnace(m, job);
+    if (loaded === null) { flush(); loaded = TS.loadFurnace(m, job); }
     const ownCoalAtLoad = T.inv.count(m.inv, I.coal);
     for (let k = 0; k < 400 && st.slots[0]; k++) BF.inventory.simTick(0.1);
     const afterSmelt = { input: st.slots[0], fuel: st.slots[1], burn: +st.burn.toFixed(1), out: st.slots[2] };
-    TS.emptyFurnace(m, job, false);
+    TS.emptyFurnace(m, job, false); flush();
+    BF.ids.remove(m);
     return { loaded, ownCoalAtLoad, afterSmelt, inv: m.inv.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count), left: st.slots, xyz: [x, y, z] };
   });
   console.log("fuel", JSON.stringify(fuel));
   // placing: towards the placer among the open sides; none open: towards the placer anyway
-  console.log("openFacing", JSON.stringify(await pg.evaluate(xyz => {
+  console.log("openFacing", JSON.stringify(await sim(pg, xyz => {
     const W = BF.world, [x, y, z] = xyz, p = { x: x + 3, y, z }, st = BF.B.stone, set = (dx, dz, id) => W.setBlock(p.x + dx, y, p.z + dz, id);
     for (const [dx, dz] of BF.DIRS) set(dx, dz, 0);
     const east = { x: p.x + 5.5, z: p.z + 1.5 };
@@ -90,7 +96,7 @@ module.exports = async (pg, out) => {
   }, fuel.xyz)));
 
   // ---- live: a toolsmith with no furnace buys one, places it, buys ore and coal, smelts, makes tools
-  const setup = await pg.evaluate((fx) => {
+  const setup = await sim(pg, (fx) => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child && m.profession !== "builder");
     if (vs.length < 4) return "villagers: " + vs.length;
     const T = BF.trades, I = BF.I, inv = T.inv, W = BF.world, R = vs[0].village;
@@ -121,7 +127,7 @@ module.exports = async (pg, out) => {
     for (const v of [A, M, Wd, Fm]) inv.add(v.inv, I.bread, 12);
     BF.sky.setTime ? BF.sky.setTime(0.06) : (BF.sky.time = 0.06);
     BF.player.position.set(A.position.x + 5, A.position.y + 1, A.position.z);
-    window.__A = A;
+    globalThis.__A = A;
     BF.toolsmith.LOG.length = 0;
     if (BF.warp) BF.warp.set(4);
     return { genOpen, removed, claim: A.res, jobsite: A.jobsite, M: M.profession, Wd: Wd.profession, Fm: Fm.profession };
@@ -131,8 +137,8 @@ module.exports = async (pg, out) => {
   let last = null;
   while (Date.now() - t0 < 600000) {
     await pg.waitForTimeout(5000);
-    const s = await pg.evaluate(() => {
-      const A = window.__A;
+    const s = await sim(pg, () => {
+      const A = globalThis.__A;
       if (BF.sky.time > 0.42) BF.sky.setTime ? BF.sky.setTime(0.06) : (BF.sky.time = 0.06);
       const tools = A.inv.filter(x => x && BF.items[x.id].tool && !BF.items[x.id].isBlock).map(x => BF.items[x.id].name);
       const S = A.tsm || {};
@@ -145,13 +151,13 @@ module.exports = async (pg, out) => {
     last = s;
     if (s.tools.length >= 6) break;
   }
-  console.log("placed furnace", JSON.stringify(await pg.evaluate(() => {
-    const f = window.__A.tsm && window.__A.tsm.furnace, W = BF.world; if (!f) return "none";
+  console.log("placed furnace", JSON.stringify(await sim(pg, () => {
+    const f = globalThis.__A.tsm && globalThis.__A.tsm.furnace, W = BF.world; if (!f) return "none";
     const b = BF.blocks[W.getBlock(f.x, f.y, f.z)], d = b && b.furnaceFacing != null ? BF.DIRS[b.furnaceFacing] : null;
     return { name: b && b.name, frontClear: d ? !BF.SOLID[W.getBlock(f.x + d[0], f.y, f.z + d[1])] : null, at: f };
   })));
   console.log("live kinds seen:", [...seen].join(","), "tools:", last && last.tools.join(","));
-  await pg.evaluate(() => BF.warp && BF.warp.reset());
-  await pg.evaluate(() => { const A = window.__A; BF.player.position.set(A.position.x + 3, A.position.y + 1.5, A.position.z + 3); });
+  await sim(pg, () => BF.warp && BF.warp.reset());
+  await sim(pg, () => { const A = globalThis.__A; BF.player.position.set(A.position.x + 3, A.position.y + 1.5, A.position.z + 3); });
   await pg.waitForTimeout(800);
 };

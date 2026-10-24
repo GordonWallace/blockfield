@@ -1,21 +1,24 @@
-// @ci baseline
+// @ci baseline hosts=worker,server
 // Ore depth and miner levels: NODE_PATH=$(npm root -g) node test/run.js /tmp/md test/miner-depth.js
 // - the generator places gold, diamonds, redstone, lapis by depth below the surface (worldgen ORE3): none of them shallower than their band
 // - the miner keeps raw iron / raw gold (vanilla drops since #44) and sells them; its staircase depth follows its level and pickaxe;
 //   a levelled-up miner leaves a shallow shaft for a deeper one; ore in the walls of a cell it opens is dug with the cell
 module.exports = async (pg, out) => {
+  const sim = require('./lib').sim;   // (where the simulation is: spec r15-43)
   await pg.evaluate(() => BF.player.start());
   await require('./lib').toVillage(pg);
   // the planet page runs at a frame or two a second here: give the village time to load its villagers
-  await pg.waitForFunction(() => BF.mobs.list.some(m => m.type === "villager" && m.village && m.inv && !m.child), null, { timeout: 120000, polling: 500 }).catch(() => {});
-  const r = await pg.evaluate(() => {
+  for (let t0 = Date.now(); Date.now() - t0 < 120000; await pg.waitForTimeout(500))
+    if (await sim(pg, () => BF.mobs.list.some(m => m.type === "villager" && m.village && m.inv && !m.child))) break;
+  const spawn = await pg.evaluate(() => BFT.spawn());   // (the page's spawn: BFT is not in the simulation)
+  const r = await sim(pg, spawn => {
     const res = { fails: [] }, B = BF.B, I = BF.I, W = BF.world, T = BF.trades;
     const ok = (c, msg) => { if (!c) res.fails.push(msg); };
     // 1. ore bands in the generator, over 24 chunks around the spawn (0,0 is a corner margin of face 0 on the planet: nothing there)
     const band = { gold_ore: 32, deepslate_gold_ore: 32, diamond_ore: 48, deepslate_diamond_ore: 48, redstone_ore: 48, deepslate_redstone_ore: 48, lapis_ore: 24, deepslate_lapis_ore: 24 };
     const ids = new Map(Object.keys(band).map(n => [B[n], n])), seen = {};
     let shallow = 0;
-    const sp = BFT.spawn(), scx = Math.floor(sp.x / 16), scz = Math.floor(sp.z / 16);
+    const sp = spawn, scx = Math.floor(sp.x / 16), scz = Math.floor(sp.z / 16);
     for (let k = 0; k < 24; k++) {
       const cx = scx + (k % 6) - 3, cz = scz + Math.floor(k / 6) - 2, hc = BF.worldgen.heightAt(cx * 16 + 8, cz * 16 + 8);
       const sy0 = (hc - 150) >> 4, sy1 = (hc >> 4) + 1, vox = BF.worldgen.generateRange(cx, cz, sy0, sy1), Y0 = Math.max(sy0, BF.SY0) * 16;
@@ -105,7 +108,7 @@ module.exports = async (pg, out) => {
     BF.miner.unpack(M2, JSON.parse(JSON.stringify(p)));
     ok(M2.mi.shaft && M2.mi.shaft.D === Q.shaft.D, "shaft depth not saved");
     return res;
-  });
+  }, spawn);
   console.log(JSON.stringify(r, null, 1));
   for (const f of r.fails) console.log("FAIL: " + f);
   console.log(r.fails.length ? "FAILED" : "miner-depth: all checks passed");

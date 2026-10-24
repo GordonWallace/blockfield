@@ -3,25 +3,22 @@
 // API (CONTRACT.md): BF.mobs = { list, init, update, draw, raycast, hit, clear } plus spawn(type, x, y, z) for debugging.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const GRAVITY = 26;
 const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or the view distance) update 4 times a game second (BF.mobs.update)
 const DESPAWN_DIST = 100;   // village stock of a stopped village only: wild mobs and horses are never removed by distance (they wait with their chunk)
 const TRAVELLER_SPEED = 1.5;   // merchants and explorers walk this much faster than other villagers (village loading plan)
 
-let scene = null;
+let ready = false;   // init has run
 const list = [];
 const arrows = [];
-const puffs = [];
-let arrowMat = null, puffMat = null, puffMatDark = null, puffGeo = null, arrowGeo = null;   // arrows and puffs (r15-12)
 
 // ---------- small helpers ----------
 // Simulation rolls come from seeded streams (js/rand.js): a mob's own, R(m), or a world event's, BF.rand.at(...).
 const R = e => BF.rand.of(e);
 const rnd = (r, a, b) => r.range(a, b);
 const irnd = (r, a, b) => a + r.int(b - a + 1);
-const vrnd = (a, b) => a + Math.random() * (b - a);   // visual
 function hash(a, b, c, d) {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647 + d * 1274126177) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -306,33 +303,43 @@ function removeMob(m) {
 }
 
 // ---------- particles ----------
-function puff(pos, n, spread, dark, speed) {
-  for (let i = 0; i < n; i++) {
-    const mesh = new THREE.Mesh(puffGeo, dark ? puffMatDark : puffMat);   // (r15-12 moves arrow and puff drawing)
-    mesh.position.set(pos.x + vrnd(-spread, spread), pos.y + vrnd(0, spread * 1.5), pos.z + vrnd(-spread, spread));   // visual
-    const s = vrnd(0.6, 1.4); mesh.scale.setScalar(s);   // visual
-    scene.add(mesh);   // (r15-12 moves arrow and puff drawing)
-    const v = new THREE.Vector3(vrnd(-1, 1), vrnd(0.2, 1.2), vrnd(-1, 1)).multiplyScalar(speed || 1);   // visual
-    puffs.push({ mesh, vel: v, life: vrnd(0.4, 0.8), s });   // visual
-  }
-}
-function updatePuffs(dt) {
-  for (let i = puffs.length - 1; i >= 0; i--) {
-    const p = puffs[i];
-    p.life -= dt;
-    p.mesh.position.addScaledVector(p.vel, dt);
-    p.vel.multiplyScalar(Math.max(0, 1 - dt * 2));
-    p.mesh.scale.setScalar(Math.max(0.01, p.s * Math.min(1, p.life * 2)));
-    if (p.life <= 0) { scene.remove(p.mesh); puffs.splice(i, 1); }
-  }
-  const l = Math.max(0.25, skyLight());
-  puffMat.color.setRGB(0.91 * l, 0.91 * l, 0.91 * l);
-}
+// A puff of smoke: an effect event (js/fx.js) that js/entityview.js plays.
+function puff(pos, n, spread, dark, speed) { BF.fx.emit({ kind: "puff", x: pos.x, y: pos.y, z: pos.z, n, spread, dark: !!dark, speed: speed || 1 }); }
 
 // ---------- damage ----------
 // `cause` names what did it for the village log (js/villagelog.js), e.g. "a Zombie"; the player is implied by byPlayer.
-function damageMob(m, amount, knockDir, byPlayer, cause) {
-  if (!m || m.dead || m.removed || m.invuln > 0) return false;
+// During the think phase (spec r15-23) a hit is a "damage" request from o.from (the attacker; the mob itself for falls and sunlight), applied
+// in requester-id order: knockback adds up in that order, the invulnerability a hit leaves refuses the hits after it, and the kill goes to
+// the request that took the mob to 0 hp. Returns whether the hit can land (think: the request, if the mob is hittable now; otherwise:
+// whether it landed).
+// o (optional): {from: attacker mob, force: ignores the mob's invulnerability, lift: vel.y after the hit, foe: a hostile hit turns on the
+// attacker (a golem's hit, golemFight), mark: a landed hit on a villager names its attacker (golems come running), a golem's revenge,
+// revenge: a golem hit takes revenge on the attacker}
+function damageMob(m, amount, knockDir, byPlayer, cause, o) {
+  if (!m || m.dead || m.removed || (m.invuln > 0 && !(o && o.force))) return false;
+  if (inThink()) {
+    return BF.req.send("damage", m.id, { amount, knock: knockDir ? { x: knockDir.x, z: knockDir.z } : null, byPlayer: !!byPlayer, cause: cause || null,
+      force: !!(o && o.force), lift: (o && o.lift) || 0, foe: !!(o && o.foe), mark: !!(o && o.mark), revenge: !!(o && o.revenge) },
+      o && o.from ? o.from : byPlayer ? "player" : m);   // (the request: truthy)
+  }
+  return hurtNow(m, amount, knockDir, byPlayer, cause, o && o.from, o);
+}
+function hurtNow(m, amount, knockDir, byPlayer, cause, by, o) {
+  if (!m || m.dead || m.removed) return false;
+  if (o && o.force) m.invuln = 0;
+  const landed = m.invuln <= 0 && hitNow(m, amount, knockDir, byPlayer, cause);
+  if (!o) return landed;
+  if (!m.dead && o.lift) m.vel.y = o.lift;
+  if (!by || by.removed) return landed;
+  if (landed && o.mark) {   // golems come running (villagerInDanger); js/wildlife.js counts zombie attacks per night
+    if (m.type === "villager") { m.attacker = by; m.attackedAt = m.age; if (BF.emit) BF.emit("villagerHit", m, by); }
+    if (m.def.golem) m.ai.revenge = by;
+  }
+  if (o.revenge && m.def.golem && !by.dead) m.ai.revenge = by;
+  if (o.foe && m.hostile && !m.dead) { m.ai.golemFoe = by; m.ai.golemFoeT = 12; }   // hostiles fight back (golemFight)
+  return landed;
+}
+function hitNow(m, amount, knockDir, byPlayer, cause) {
   if (m.sleeping) wake(m);
   m.hp -= amount;
   m.lastHurt = byPlayer ? "the player" : (cause || "unknown causes");
@@ -353,7 +360,7 @@ function damageMob(m, amount, knockDir, byPlayer, cause) {
     else if (m.def.golem) m.ai.provoked = creative() ? 0 : 60;
     else m.ai.fleeT = rnd(R(m), 3, 5);
     // hurting a villager or a golem angers the village's golems
-    if (m.village && !creative()) { m.village.angryT = 60; for (const g of list) if (g.def.golem && g.village === m.village) g.ai.provoked = 60; }
+    if (m.village && !creative()) { m.village.angryT = 60; for (const g of villageMobs(m.village)) if (g.def.golem) g.ai.provoked = 60; }
   } else if (m.type === "villager") m.ai.fleeT = rnd(R(m), 3, 5);
   if (m.hp <= 0) kill(m, byPlayer);
   return true;
@@ -397,22 +404,109 @@ function giveDrops(m) {
   }
 }
 
+// ---------- mob-on-mob effects, new mobs and claims as requests (spec r15-23, js/requests.js) ----------
+// In the think phase: hits ("damage"), creeper blasts ("explode"), new mobs ("spawn": births, monster spawns, roster respawns) and claims
+// on shared places ("claim": beds, jobsites) are requests, applied in requester-id order after every mob has thought. Outside it (the
+// player between ticks, commands, tests that call these by hand) they happen at once, as before.
+const inThink = () => !!(BF.req && BF.req.phase === "think");
+const knockOf = d => d.knock ? new THREE.Vector3(d.knock.x, 0, d.knock.z) : null;
+BF.req.on("damage", req => {
+  const m = BF.ids.get(req.target), d = req.data, by = req.from && /^e\d+$/.test(req.from) ? BF.ids.get(req.from) : null;
+  if (!m || m.dead || m.removed) return { ok: false, why: m && m.dead ? "dead" : "gone" };
+  const hp = m.hp, landed = hurtNow(m, d.amount, knockOf(d), d.byPlayer, d.cause, by && by !== m ? by : null, d);
+  return landed ? { ok: true, killed: m.dead, hp: m.hp, was: hp } : { ok: false, why: "invulnerable" };
+});
+// A blast is one request per region it reaches (spec r15-33). The creeper's own region's part applies with the tick's other requests and
+// is refused if the creeper died first; it does that region's blocks and mobs, the player, and removes the creeper. The other regions'
+// parts are late requests (js/requests.js: applied after every region's inbox, region by region), so they only go ahead once the own
+// part has: they never depend on the order the regions apply in.
+BF.req.on("explode", req => {
+  const d = req.data, m = d.m || BF.ids.get(req.target);
+  if (d.late) { if (!m || !m.exploded) return { ok: false, why: "gone" }; }   // the creeper's own part didn't go off
+  else if (!m || m.dead || m.removed) return { ok: false, why: "gone" };   // killed (or unloaded) before its fuse ran out
+  explodeNow(m, d.at ? d : null);
+  return { ok: true };
+});
+// spawn: data.make() makes the mob (and links it) when the request applies, so ids come in requester order; it returns the mob, or
+// null when what it needed is gone (a parent, its bread, the bed).
+BF.req.on("spawn", req => {
+  const m = req.data.make();
+  return m ? { ok: true, mob: m.id } : { ok: false, why: "refused" };
+}, { global: true });   // from the global inbox after the regions (spec r15-33): ids come in requester order over the whole world
+function spawnLater(from, what, make, check) {
+  if (!inThink()) return make();
+  BF.req.send("spawn", what, { make: check ? () => (check() ? make() : null) : make }, from);
+  return null;
+}
+// Claims (BF.claims): kinds register free(m, data) -> null when the claim may be taken, else why not; take(m, data); and
+// result(m, ok, data, why) for the claimer once decided. ask(what, m, place, data) is a "claim" request in the think phase (returns
+// "pending"; the first valid claim of a place in a tick wins, the others are refused and pick again); otherwise it is decided at once
+// (returns true or false). A claim never takes a place from someone holding it: free() checks that at apply time. Game log: DEBUG
+// "claims" when a claim loses to one applied before it in the same tick.
+const claimKinds = {}, claimWins = new Map();   // place -> [requester, tick] of the claim that took it this tick
+function decideClaim(what, m, place, data) {
+  const K = claimKinds[what];
+  if (!K) return { ok: false, why: "no kind" };
+  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };
+  const why = K.free(m, data);
+  if (why) return { ok: false, why };
+  K.take(m, data);
+  return { ok: true };
+}
+BF.req.on("claim", req => {
+  const d = req.data, m = BF.ids.get(req.from), r = decideClaim(d.what, m, req.target, d), tick = BF.rand ? BF.rand.tick : 0;
+  const won = claimWins.get(req.target);
+  if (r.ok) claimWins.set(req.target, [req.from, tick]);
+  else if (won && won[1] === tick && BF.glog) BF.glog.log("DEBUG", "claims", (m && BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) : req.from) + " lost the " + d.what + " at " + req.target + " to " + won[0] + ", who claimed it first this tick", { at: m || undefined });
+  if (claimWins.size > 256) claimWins.clear();
+  return r;
+}, { onResult(m, req, r) { const K = claimKinds[req.data.what]; if (K && K.result) K.result(m, r.ok, req.data, r.why); } });
+BF.claims = {
+  kind(what, k) { claimKinds[what] = k; },
+  ask(what, m, place, data) {
+    data = Object.assign({ what }, data);
+    if (inThink()) { BF.req.send("claim", place, data, m); return "pending"; }
+    const r = decideClaim(what, m, place, data), K = claimKinds[what];
+    if (K && K.result && m) K.result(m, r.ok, data, r.why);
+    return r.ok;
+  },
+};
+
 // ---------- creeper explosion ----------
+// In the think phase the blast is one "explode" request that does its block changes and its damage together; refused if the creeper died first.
 function explode(m) {
-  const c = new THREE.Vector3(m.position.x, m.position.y + 0.8, m.position.z);
-  const R = 3, r = BF.rand.of(m);
+  if (!inThink()) { explodeNow(m); return; }
+  // one "explode" request per region the blast reaches (its blocks within R, its mobs within 6), applied in region order
+  const c = blastCentre(m), G = BF.regions, own = G && G.regionOf ? G.regionOf(m) : undefined;
+  const at = { x: c.x, y: c.y, z: c.z }, tick = BF.rand ? BF.rand.tick : 0;
+  if (!G || own == null || own < 0) { BF.req.send("explode", m.id, { m, at, tick }, m); return; }
+  const keys = G.around(c.x, c.z, BLAST_MOBS + 2);
+  BF.req.send("explode", m.id, { m, at, tick, region: own, own }, m);
+  for (const k of keys) if (k !== own) BF.req.send("explode", m.id, { m, at, tick, region: k, own, late: true }, m);
+}
+const BLAST_R = 3, BLAST_MOBS = 6;
+const blastCentre = m => new THREE.Vector3(m.position.x, m.position.y + 0.8, m.position.z);
+// The blast, whole (outside the think phase) or one region's part of it (part: {at, tick, region, own} from explode above). The cells'
+// rolls come from a stream of the blast's cell and tick, so every part rolls the same cells alike.
+function explodeNow(m, part) {
+  const c = part ? new THREE.Vector3(part.at.x, part.at.y, part.at.z) : blastCentre(m);
+  const R = BLAST_R, G = BF.regions, rk = part && part.region != null ? part.region : null;
   const w = BF.world, bedrock = BF.B.bedrock;
   const cx = Math.floor(c.x), cy = Math.floor(c.y), cz = Math.floor(c.z);
+  const r = BF.rand.at("explode", cx, cz, part ? part.tick : BF.rand.tick, cy);
+  const mine = rk == null ? () => true : (x, y, z) => G.keyOf(x, y, z) === rk;
   for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (d > R - r.next() * 0.8) continue;
     const x = cx + dx, y = cy + dy, z = cz + dz;
+    if (!mine(x, y, z)) continue;
     const id = w.getBlock(x, y, z);
     if (!id || id === bedrock || isWater(id)) continue;
     w.setBlock(x, y, z, 0);
     if (w.removePartner) w.removePartner(x, y, z, id);
   }
-  if (playerAlive()) {
+  const own = rk == null || rk === part.own;
+  if (own && playerAlive()) {
     const p = player();
     const pc = new THREE.Vector3(p.position.x, p.position.y + (p.height || 1.8) / 2, p.position.z);
     const d = pc.distanceTo(c);
@@ -421,11 +515,13 @@ function explode(m) {
       if (dmg > 0 && p.damage) p.damage(dmg, c.clone());
     }
   }
-  for (const o of list.slice()) {
-    if (o === m || o.dead) continue;
+  const blast = L => L.filter(o => o !== m && !o.dead && o.position.distanceTo(c) < BLAST_MOBS && (rk == null || G.regionOf(o) === rk));
+  for (const o of vq("mobs.explosion", blast(nearMobs(c, BLAST_MOBS)), blast)) {
+    if (o.dead) continue;
     const d = o.position.distanceTo(c);
-    if (d < 6) damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false, "an explosion");
+    damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false, "an explosion");
   }
+  if (!own) return;
   puff(c, 26, 1.6, false, 4);
   puff(c, 10, 1.0, true, 3);
   noiseSound(1.2, 500, 0.9, c);
@@ -447,10 +543,7 @@ function shootArrow(m, target, victim) {
   dir.x += rnd(R(m), -0.03, 0.03); dir.y += rnd(R(m), -0.03, 0.03); dir.z += rnd(R(m), -0.03, 0.03);
   dir.normalize();
   from.addScaledVector(dir, 0.5);
-  const mesh = new THREE.Mesh(arrowGeo, arrowMat);   // (r15-12 moves arrow and puff drawing)
-  mesh.position.copy(from);
-  scene.add(mesh);   // (r15-12 moves arrow and puff drawing)
-  arrows.push({ mesh, pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), life: 6, stuck: false, owner: m, victim: victim || null });
+  arrows.push({ pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null });
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
@@ -461,12 +554,8 @@ function shootArrow(m, target, victim) {
 const PLAYER_ARROW_LIFE = 60, ARROW_DRAG = 0.99;   // vanilla: stuck arrows despawn after 1200 ticks; 1% air drag per tick
 function shootPlayerArrow(from, vel, o) {
   o = o || {};
-  const mesh = new THREE.Mesh(arrowGeo, arrowMat);   // (r15-12 moves arrow and puff drawing)
-  mesh.position.copy(from);
-  scene.add(mesh);   // (r15-12 moves arrow and puff drawing)
-  const a = { mesh, pos: from.clone(), prev: from.clone(), vel: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
+  const a = { pos: from.clone(), prev: from.clone(), vel: vel.clone(), look: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
     byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
-  _look.copy(a.pos).add(a.vel); mesh.lookAt(_look);
   arrows.push(a);
   if (BF.emit) BF.emit("arrowShot", null, from);
   return a;
@@ -485,24 +574,39 @@ function playerArrowStep(a, p) {
   }
   return false;
 }
-// Living mob whose box holds point q (player arrows test every mob).
-function mobAt(q) {
-  for (const m of list) {
+// Nearest living mob whose AABB the ray hits within maxDist (BF.mobs.raycast).
+function raycastIn(L, origin, dir, maxDist, skip) {
+  let best = null;
+  const mn = [0, 0, 0], mx = [0, 0, 0];
+  for (const m of L) {
+    if (m.dead || m.removed || m === skip) continue;
+    const p = seen(origin, m.position, _sA), hw = m.halfWidth;
+    mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
+    mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
+    const t = rayAABB(origin, dir, mn, mx);
+    if (t != null && t <= maxDist && (!best || t < best.dist)) best = { mob: m, dist: t };
+  }
+  return best;
+}
+// Living mob whose box holds point q (player arrows).
+function mobAt(q) { return vq("mobs.mobAt", mobAtIn(nearMobs(q, 2, true), q), L => mobAtIn(L, q)); }
+function mobAtIn(L, q) {
+  for (const m of L) {
     if (m.dead || m.removed) continue;
     const vp = seen(q, m.position, _sA), hw = m.halfWidth + 0.1;
     if (Math.abs(q.x - vp.x) < hw && Math.abs(q.z - vp.z) < hw && q.y > vp.y && q.y < vp.y + m.height) return m;
   }
   return null;
 }
-const _look = new THREE.Vector3(), _dir = new THREE.Vector3();
+const _dir = new THREE.Vector3();
 function updateArrows(dt) {
   const p = playerAlive() ? player() : null;
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
-    a.prev.copy(a.pos);   // drawn between this and where the tick leaves it (drawArrows)
+    a.prev.copy(a.pos);   // drawn between this and where the tick leaves it (js/entityview.js)
     a.life -= dt;
-    if (a.life <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
-    if (a.byPlayer && playerArrowStep(a, p)) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
+    if (a.life <= 0) { arrows.splice(i, 1); continue; }
+    if (a.byPlayer && playerArrowStep(a, p)) { arrows.splice(i, 1); continue; }
     if (a.stuck) continue;
     a.vel.y -= 20 * dt;
     if (a.byPlayer) a.vel.multiplyScalar(Math.pow(ARROW_DRAG, dt * 20));
@@ -529,7 +633,7 @@ function updateArrows(dt) {
         const m = mobAt(a.pos);
         if (m) {
           const dmg = playerArrowDamage(a);
-          a.hit = { mob: m, damage: dmg, landed: damageMob(m, dmg, a.vel, true) };
+          a.hit = { mob: m, damage: dmg, landed: !!damageMob(m, dmg, a.vel, true) };   // (in the think phase: the hit is a request, r15-23)
           if (BF.emit) BF.emit("arrowHitMob", m, dmg, a.crit);
           hitPlayer = true;
           break;
@@ -541,8 +645,7 @@ function updateArrows(dt) {
         const vp = seen(a.pos, v.position, _sB), hw = v.halfWidth + 0.1;
         if (Math.abs(a.pos.x - vp.x) < hw && Math.abs(a.pos.z - vp.z) < hw && a.pos.y > vp.y && a.pos.y < vp.y + v.height) {
           const owner = a.owner && !a.owner.removed && !a.owner.dead ? a.owner : null;
-          damageMob(v, irnd(R(a), GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton");
-          if (owner && v.def.golem) v.ai.revenge = owner;
+          damageMob(v, irnd(R(a), GOLEM_HITS.arrow[0], GOLEM_HITS.arrow[1]), a.vel, false, "a skeleton", { from: owner, revenge: true });
           hitPlayer = true;
           break;
         }
@@ -556,15 +659,8 @@ function updateArrows(dt) {
         }
       }
     }
-    if (hitPlayer) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
-  }
-}
-// Every frame (spec r15-10): an arrow is drawn between where the last two ticks left it, pointing along its flight.
-function drawArrows(k) {
-  for (const a of arrows) {
-    if (a.stuck || a.prev.distanceToSquared(a.pos) > 64) a.mesh.position.copy(a.pos);   // (or it crossed a face edge this tick)
-    else a.mesh.position.lerpVectors(a.prev, a.pos, k);
-    if (!a.stuck) { _look.copy(a.mesh.position).add(a.vel); a.mesh.lookAt(_look); }
+    if (hitPlayer) { arrows.splice(i, 1); continue; }
+    if (!a.stuck) { if (a.look) a.look.copy(a.vel); else a.look = a.vel.clone(); }   // the way it points (drawn by js/entityview.js)
   }
 }
 
@@ -625,8 +721,7 @@ function blockedMove(m, dt, blocked) {
 // False when this frame's A* searches are used up (busy villages): it tries again next frame instead of stepping aside at random.
 function startDetour(m) {
   const ai = m.ai, px = m.position.x, pz = m.position.z, dx = ai.tx - px, dz = ai.tz - pz, d = Math.hypot(dx, dz) || 1;
-  if (planBudget <= 0) return false;
-  planBudget--;
+  if (!takePlan()) return false;
   ai.blockedT = 0;
   const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
   const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
@@ -743,6 +838,26 @@ function hostileAI(m, dt, out) {
   }
 }
 
+// ---------- region queries (spec r15-31) ----------
+// A scan for mobs near a point looks only at the mobs the region index has within r blocks of it across the ground
+// (BF.regions.mobsAround, dying mobs included; whole list without the index or past QR_MAX), and keeps its own exact test over them,
+// so the answer is the same, in the same order. local: measured through a face edge, for scans that use seen() / mdist.
+const QR_MAX = 1024, LOCAL = { local: true };
+function nearMobs(p, r, local) {
+  const R = BF.regions;
+  return R && R.mobsAround && r <= QR_MAX ? R.mobsAround(p.x, p.z, r, null, local ? LOCAL : null) : list;
+}
+// With BF.regions.verifyQueries on (tests) a converted scan runs over the whole list too, and BF.regions counts and logs a different
+// answer. `scan` is the scan taking a list.
+const qNorm = x => (Array.isArray(x) ? x : x == null ? [] : [x && x.mob ? x.mob : x]);
+function vq(label, got, scan) {
+  const R = BF.regions;
+  if (R && R.verifyQueries && R.checkQuery) R.checkQuery(label, qNorm(got), () => qNorm(scan(list)));
+  return got;
+}
+// A village's mobs (BF.regions.villageMobs: its members), and the mobs of one type (a copy), both in list order.
+const villageMobs = V => (BF.regions && BF.regions.villageMobs ? BF.regions.villageMobs(V) : list.filter(o => o.village === V));
+const ofType = t => (BF.regions && BF.regions.ofType ? BF.regions.ofType(t).slice() : list.filter(o => o.type === t));
 // Finds the nearest living mob matching pred within r blocks (horizontal + vertical box).
 function nearestMob(m, r, pred) {
   let best = null, bd = r;
@@ -760,7 +875,11 @@ function nearestMob(m, r, pred) {
     }
     return best;
   }
-  for (const o of list) {
+  return vq("mobs.nearestMob", nearestIn(nearMobs(m.position, r, true), m, r, pred), L => nearestIn(L, m, r, pred));
+}
+function nearestIn(L, m, r, pred) {
+  let best = null, bd = r;
+  for (const o of L) {
     if (o === m || o.dead || o.removed || !pred(o)) continue;
     const d = mdist(m, o);
     if (d < bd) { bd = d; best = o; }
@@ -782,17 +901,15 @@ function chaseAndHit(m, o, dt, out, dmg, cd, speed) {
   if (hd < reach && Math.abs(op.y - m.position.y) < 1.6 && ai.attackCd <= 0) {
     ai.attackCd = cd;
     ai.swingT = 0.35;
-    const k = new THREE.Vector3(nx, 0, nz);
-    const by = "a" + (/^[aeiou]/i.test(m.type) ? "n " : " ") + m.type.replace(/_/g, " ");
-    if (m.def.golem) {
-      o.invuln = 0; damageMob(o, dmg, k, false, by); if (!o.dead) o.vel.y = 8;
-      if (o.hostile && !o.dead) { o.ai.golemFoe = m; o.ai.golemFoeT = 12; }   // hostiles fight back (golemFight)
-    } else if (damageMob(o, dmg, k, false, by)) {
-      if (o.type === "villager") { o.attacker = m; o.attackedAt = o.age; if (BF.emit) BF.emit("villagerHit", o, m); }   // golems come running (villagerInDanger); js/wildlife.js counts zombie attacks per night
-      if (o.def.golem) o.ai.revenge = m;
-    }
+    strike(m, o, dmg, new THREE.Vector3(nx, 0, nz));
   }
   return true;
+}
+// m's melee hit on o: a golem's hit ignores o's invulnerability, throws it up and turns a hostile on the golem; another mob's landed hit
+// marks a villager as attacked (golems come running) and gives a golem its revenge. In the think phase it is a "damage" request (r15-23).
+function strike(m, o, dmg, k, by) {
+  by = by || "a" + (/^[aeiou]/i.test(m.type) ? "n " : " ") + m.type.replace(/_/g, " ");
+  return m.def.golem ? damageMob(o, dmg, k, false, by, { from: m, force: true, lift: 8, foe: true }) : damageMob(o, dmg, k, false, by, { from: m, mark: true });
 }
 // ---------- golems vs hostiles ----------
 // Golems sprint to any villager under attack within RESCUE_RANGE; hostile mobs hurt golems with GOLEM_HITS.
@@ -800,7 +917,9 @@ const RESCUE_RANGE = 64, RESCUE_SPEED = 6.0;
 const GOLEM_HITS = { zombie: 4, spider: 3, arrow: [3, 5] };
 // A villager is under attack when a mob hit it in the last 6 s, or a zombie hunting it is within 6 blocks.
 // Returns the nearest such attacker to golem g (only its own village's villagers when it has a village).
-function villagerInDanger(g) {
+// The attacker is within RESCUE_RANGE; the villager it hit is looked for RESCUE_RANGE further out (it was hit up to 6 s ago, maybe by an arrow).
+function villagerInDanger(g) { return vq("mobs.villagerInDanger", dangerIn(nearMobs(g.position, 2 * RESCUE_RANGE, true), g), L => dangerIn(L, g)); }
+function dangerIn(L, g) {
   let best = null, bd = RESCUE_RANGE;
   const consider = (v, h) => {
     if (!h || h.dead || h.removed || !h.hostile) return;
@@ -808,7 +927,7 @@ function villagerInDanger(g) {
     const d = mdist(g, h);
     if (d < bd) { bd = d; best = h; }
   };
-  for (const o of list) {
+  for (const o of L) {
     if (o.dead || o.removed) continue;
     if (o.type === "villager" && o.attacker && o.age - o.attackedAt < 6) consider(o, o.attacker);
     else if (o.type === "zombie" && o.ai.vTarget && !o.ai.vTarget.dead && mdist(o, o.ai.vTarget) < 6) consider(o.ai.vTarget, o);
@@ -881,11 +1000,12 @@ function zombieBreakDoor(m, dt, out) {
   const id = W.getBlock(hit[0], hit[1], hit[2]);
   ai.doorT = 0; ai.doorAt = null;
   if (!BF.blocks[id].door) return;
-  W.removePartner(hit[0], hit[1], hit[2], id);
-  W.setBlock(hit[0], hit[1], hit[2], 0);
-  if (BF.drops) BF.drops.spawnAt(BF.rollDrops(id), hit[0], hit[1], hit[2]);
-  noiseSound(0.4, 300, 0.3, m.position);
-  if (BF.emit) BF.emit("doorBroken", m, hit[0], hit[1], hit[2]);
+  // a request (spec r15-19, js/blockreqs.js): refused when the door was opened, shut by someone else or broken first this tick
+  BF.req.send("doorBreak", hit.join(","), { expect: id }, m).then(r => {
+    if (!r.ok || m.removed) return;
+    noiseSound(0.4, 300, 0.3, m.position);
+    if (BF.emit) BF.emit("doorBroken", m, hit[0], hit[1], hit[2]);
+  });
 }
 
 // ---------- villager nights: walk home along a grid path, open doors on the way, sleep in their bed ----------
@@ -917,6 +1037,32 @@ const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear, and, as it is wider than
 // its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
 let planBudget = 0;
+// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants are handed out at the start of each tick
+// to the mobs that have been waiting longest (then by id), so who gets a search never depends on the order mobs think in (regions,
+// later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
+// waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
+// village ticks after it, in a fixed order) searches share planBudget as before.
+const PLANS = 2, KEEP = 20, planWant = new Map();   // mob -> [tick it first asked, tick it last asked]
+const planGrant = new Map();   // mob -> tick granted (kept KEEP ticks: a far mob thinks only 4 times a game second)
+let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
+const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
+function grantPlans() {
+  const t = ++planTick;
+  for (const [m, g] of planGrant) if (m.removed || g < t - KEEP) planGrant.delete(m);
+  if (!planWant.size) return;
+  const w = [];
+  for (const [m, a] of planWant) { if (m.removed || m.dead || a[1] < t - KEEP) planWant.delete(m); else w.push([m, a[0]]); }
+  w.sort((a, b) => a[1] - b[1] || idNum(a[0]) - idNum(b[0]));
+  for (let i = 0; i < w.length && i < PLANS; i++) { planGrant.set(w[i][0], t); planWant.delete(w[i][0]); }
+}
+function takePlan() {
+  const m = curMob;
+  if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
+  if (planGrant.delete(m)) return true;
+  const t = planTick, a = planWant.get(m);
+  if (a) a[1] = t; else planWant.set(m, [t, t]);
+  return false;
+}
 const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 // The A* as it was before spec r15-05 (string keys, a linear scan of the open list): kept for BF.debug.pathCompare.
 function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
@@ -1175,7 +1321,17 @@ function isOccupied(x, y, z) {
   const hit = (p, hw, h) => p.x + hw > x && p.x - hw < x + 1 && p.z + hw > z && p.z - hw < z + 1 && p.y < y + 2 && p.y + h > y;
   const c = { x: x + 0.5, z: z + 0.5 };   // (seen from the cell's frame)
   if (playerAlive() && hit(seen(c, player().position, _sA), 0.3, 1.8)) return true;
-  return list.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
+  const any = L => L.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
+  return vq("mobs.isOccupied", any(nearMobs(c, 3, true)), any);
+}
+// Someone at a doorway: a mob (other than `but`) or the player within 1.3 of the cell's centre at its height. A villager doesn't shut a door
+// while another stands in or right by it (they'd be shut out, or it would close in their face as they open it).
+function atDoor(x, y, z, but) {
+  const c = { x: x + 0.5, z: z + 0.5 };
+  const by = (p, h) => { const dx = p.x - c.x, dz = p.z - c.z; return dx * dx + dz * dz < 1.69 && p.y < y + 2 && p.y + h > y; };
+  if (playerAlive() && by(seen(c, player().position, _sA), 1.8)) return true;
+  const any = L => L.some(o => o !== but && !o.dead && !o.removed && !o.sleeping && by(seen(c, o.position, _sB), o.height));
+  return vq("mobs.atDoor", any(nearMobs(c, 3, true)), any);
 }
 // Villagers open closed doors just ahead on their route, and the one they stand in (spawned or scattered into a doorway: its panel would hold
 // them there for good), and close the ones they opened once clear of them.
@@ -1184,16 +1340,18 @@ function villagerDoors(m) {
   if (ai.route && !m.sleeping) for (let k = ai.ri - 1; k < Math.min(ai.route.length, ai.ri + 2); k++) {
     const [x, y, z] = k < ai.ri ? feetCell(m) : ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
     if (d && !d.open && Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.7) {
-      if (bk.gate) W.setGate(x, y, z, true); else W.setDoor(x, y, z, true);
-      (ai.doors || (ai.doors = [])).push([x, y, z]);
+      BF.blockReq.door(m, x, y, z, true);   // a request (spec r15-19): the door is open from this tick's apply phase
+      (ai.doors || (ai.doors = [])).push([x, y, z, BF.blockReq.tick()]);
     }
   }
-  if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(([x, y, z]) => {
-    if (Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || isOccupied(x, y, z)) return true;
-    const bk = blockAt(x, y, z);
-    if (bk.door && bk.door.open) W.setDoor(x, y, z, false);
-    else if (bk.gate && bk.gate.open) W.setGate(x, y, z, false);
-    return false;
+  if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(c => {
+    const [x, y, z] = c;
+    if (c[3] === BF.blockReq.tick() || Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || atDoor(x, y, z, m)) return true;   // (asked to open this tick: not open yet)
+    const bk = blockAt(x, y, z), d = bk.door || bk.gate;
+    if (!d || !d.open || c[4] > 9 || Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) > 16) return false;
+    // shut it; the close is refused if someone came to the doorway this tick (js/blockreqs.js), so look again next tick (a few times)
+    BF.blockReq.door(m, x, y, z, false); c[3] = BF.blockReq.tick(); c[4] = (c[4] || 0) + 1;
+    return true;
   });
 }
 // Lying on the bed, head on the pillow (re-applied every step while asleep); js/mobview.js draws it lying flat with its eyes shut.
@@ -1232,12 +1390,23 @@ function claimBed(m, n, dt) {
   if (!rec.beds || BF.simNow() * 1000 - (rec.bedScanAt || 0) > 3000) B.scanBeds(rec);
   const b = B.freeBed(rec, m);
   if (!b) return;
-  m.bed = Object.assign(b, { claimed: true });
-  const h = homeOfBed(rec, b);
-  if (h) m.home = h;
-  n.fails = 0; m.ai.route = null;
-  if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
+  BF.claims.ask("bed", m, "b:" + b.x + "," + b.y + "," + b.z, { bed: b });   // the first claim of a bed in a tick wins (r15-23)
 }
+// The "bed" claim (claimBed above; children and newborns in js/breeding.js childTick): the bed must still stand and be nobody else's.
+BF.claims.kind("bed", {
+  free: (m, d) => BF.breeding && BF.breeding.bedFree(m.village, d.bed, m) ? null : "taken",
+  take(m, d) {
+    const b = Object.assign({}, d.bed), rec = m.village;
+    if (m.slot && m.slot.bred) { m.bed = b; if (m.bredEntry) m.bredEntry.bed = b; return; }   // a newborn's bed (js/breeding.js)
+    m.bed = Object.assign(b, { claimed: true });
+    const h = homeOfBed(rec, b);
+    if (h) m.home = h;
+    if (m.ai.night) m.ai.night.fails = 0;
+    m.ai.route = null;
+    if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
+  },
+  result(m, ok) { if (!ok && m.ai.night && !(m.slot && m.slot.bred)) m.ai.night.claimT = 0; },   // lost it to someone first: look again next tick
+});
 // Without a bed at night: walk into the nearest building (its own house first) that has room, along a path through the door. True while going.
 const inHouse = (h, x, z) => x >= h.x && x <= h.x + h.w && z >= h.z && z <= h.z + h.d;
 function shelterAI(m, dt0, dt, out) {
@@ -1259,8 +1428,7 @@ function shelterAI(m, dt0, dt, out) {
   const h = n.shelter;
   if (inHouse(h, m.position.x, m.position.z)) return true;
   if (ai.routeKind !== "shelter") ai.route = null;
-  if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
-    planBudget--;
+  if (!ai.route && (n.retryT -= dt) <= 0 && takePlan()) {
     const [fx, fy, fz] = feetCell(m);
     const gx = Math.floor(h.x + h.w / 2), gz = Math.floor(h.z + h.d / 2);
     ai.route = findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => x >= h.x && x < h.x + h.w && z >= h.z && z < h.z + h.d }, 2500);
@@ -1285,8 +1453,7 @@ function nightAI(m, dt, out) {
   if (ai.routeKind !== "bed" && ai.routeKind !== "shelter") ai.route = null;   // a day route is dropped; the walk to bed or shelter carries on
   if (m.bed && bedOK(m.bed) && n.fails < 3) {
     if (ai.routeKind !== "bed") ai.route = null;
-    if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
-      planBudget--;
+    if (!ai.route && (n.retryT -= dt) <= 0 && takePlan()) {
       ai.route = pathToBed(m); ai.ri = 0; ai.stuckT = 0; ai.routeKind = "bed";
       if (!ai.route) { n.fails++; n.retryT = 8; }
     }
@@ -1307,8 +1474,7 @@ function nightAI(m, dt, out) {
 function morningAI(m, dt, out) {
   const ai = m.ai;
   if (!ai.route) {
-    if (planBudget <= 0) return true;
-    planBudget--;
+    if (!takePlan()) return true;
     ai.route = pathOut(m); ai.ri = 0; ai.stuckT = 0; ai.routeKind = "out";
     if (!ai.route) { ai.leaving = false; ai.leaveEnd = "nopath"; return false; }
   }
@@ -1571,7 +1737,7 @@ function updateMob(m, dt) {
   if (m.onGround || m.inWater || climbing) {
     if (m.onGround && !wasGround && !T.slowFall && !m.inWater) {
       const fall = m.fallStart - m.position.y;
-      if (fall > 3.5) { m.invuln = 0; damageMob(m, Math.floor(fall - 3), null, false, "a fall"); }
+      if (fall > 3.5) damageMob(m, Math.floor(fall - 3), null, false, "a fall", { force: true });
     }
     m.fallStart = m.position.y;
   } else if (m.position.y > m.fallStart) m.fallStart = m.position.y;
@@ -1587,7 +1753,7 @@ function updateMob(m, dt) {
         !(BF.weather && BF.weather.rainingAt && BF.weather.rainingAt(m.position.x, m.position.y + m.height, m.position.z))) { // rain/snow shields undead
       burning = true;
       ai.burnT += dt;
-      if (ai.burnT >= 1) { ai.burnT = 0; m.invuln = 0; damageMob(m, 1, null, false, "sunlight"); }
+      if (ai.burnT >= 1) { ai.burnT = 0; damageMob(m, 1, null, false, "sunlight", { force: true }); }
     }
   }
   m.onFire = burning && !m.dead;
@@ -1640,6 +1806,24 @@ function updateMob(m, dt) {
 // The sim moves a mob once per 0.05 s tick. At the start of each tick keepPrev stores where it was (position, facing, head, walk
 // cycle); js/mobview.js draws it every frame at lerp(prev, cur, alpha), alpha being how far the frame is into the next tick
 // (BF.warp.alpha), so motion stays smooth at 60 fps or more.
+// Moves wait for the end of the mob loop (spec r15-33): a mob's new position is put aside when its update ends and it stands where it
+// started the tick until every mob has thought, so the others read start-of-tick positions (separation, targets, looks) whatever order
+// mobs think in. A mob moved by another (a mount carrying its rider) after its own update keeps that move.
+const moved = [];
+function hold(m) {
+  const q = m.prev, p = m.position;
+  if (m.removed || !q) return;
+  moved.push(m, p.x, p.y, p.z);
+  p.x = q.x; p.y = q.y; p.z = q.z;
+}
+function commitMoves() {
+  for (let i = 0; i < moved.length; i += 4) {
+    const m = moved[i], p = m.position, q = m.prev;
+    if (m.removed || p.x !== q.x || p.y !== q.y || p.z !== q.z) continue;
+    p.x = moved[i + 1]; p.y = moved[i + 2]; p.z = moved[i + 3];
+  }
+  moved.length = 0;
+}
 function keepPrev(m) {
   const q = m.prev || (m.prev = { x: 0, y: 0, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 0, age: 0 });
   q.x = m.position.x; q.y = m.position.y; q.z = m.position.z;
@@ -1791,7 +1975,7 @@ function penBoxes(x, z, r = 160) {
 const inPenBox = (boxes, x, z) => boxes.some(q => x >= q[0] && x <= q[2] && z >= q[1] && z <= q[3]);
 function spawnGroup(type, cx, cz, n, r) {
   const w = BF.world, grass = BF.B.grass, T = TYPES[type], CS = BF.CS;
-  if (!T || !scene || !w.chunks.has(cx + "," + cz)) return 0;
+  if (!T || !ready || !w.chunks.has(cx + "," + cz)) return 0;
   if (!r) r = BF.rand.at("group", cx, cz);   // (js/wildlife.js passes the chunk's roll)
   const inChunk = (x, z) => Math.floor(x / CS) === cx && Math.floor(z / CS) === cz;
   const pens = penBoxes(cx * CS + 8, cz * CS + 8);
@@ -1805,7 +1989,8 @@ function spawnGroup(type, cx, cz, n, r) {
     if (!inChunk(sx, sz)) continue;
     const sy = ok(sx, sz);
     if (sy == null) continue;
-    if (list.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9 && Math.abs(o.position.y - sy) < 2)) continue;
+    const taken = L => L.some(o => Math.abs(o.position.x - sx - 0.5) < 0.9 && Math.abs(o.position.z - sz - 0.5) < 0.9 && Math.abs(o.position.y - sy) < 2);
+    if (vq("mobs.spawnSpot", taken(nearMobs({ x: sx + 0.5, z: sz + 0.5 }, 2)), taken)) continue;
     if (type === "horse" ? BF.horses && BF.horses.spawn(sx + 0.5, sy, sz + 0.5) : createMob(type, sx + 0.5, sy, sz + 0.5)) made++;   // a horse gets its record (js/horses.js)
   }
   return made;
@@ -1838,11 +2023,15 @@ function spawnMonsters(dt) {
   for (let i = 0; i < s; i++) { const r = BF.rand.at("surface", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch, r); }
   for (let i = 0; i < c; i++) { const r = BF.rand.at("cave", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch, r); }
 }
+// In the think phase a "spawn" request from "world" (r15-23): the density cap is checked again when it applies, with the tick's earlier spawns in.
 function spawnHostile(type, x, y, z) {
   if (BF.wildlife && !BF.wildlife.mayHostile(x, y, z)) return null;
-  const m = createMob(type, x, y, z);
-  if (m && BF.wildlife) BF.wildlife.spawned(m);
-  return m;
+  return spawnLater("world", "monster:" + Math.floor(x) + "," + Math.floor(y) + "," + Math.floor(z), () => {
+    if (BF.wildlife && !BF.wildlife.mayHostile(x, y, z)) return null;
+    const m = createMob(type, x, y, z);
+    if (m && BF.wildlife) BF.wildlife.spawned(m);
+    return m;
+  });
 }
 function trySurface(c, r) {
   const w = BF.world, CS = BF.CS, type = pickHostileType(r), T = TYPES[type];
@@ -2278,23 +2467,28 @@ function updateVillages(dt) {
         if (!at && H && H.doorX != null) at = findStand(H.doorX, sy, H.doorZ, TYPES.villager);
       }
       if (!at) continue;
-      const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
-      m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m); haveV++;
-      BF.rand.seed(m, "villager:" + rec.key + "#" + sl.idx + ":" + (rec.killed.villager || 0));   // its slot's stream (a death in the village moves it on); a saved one wins (js/trading.js unpack)
-      m.ai.leaving = !bedtime() && !scattered; // spawned indoors by day: walk out through the door
-      const sv = villagerSaves.get(villagerKey(m));
-      if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
-      if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
-      if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
-      if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
-      if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
+      haveV++;
+      spawnLater(rec.key, "s:" + rec.key + "#" + sl.idx, () => {   // a "spawn" request from the village in the think phase (r15-23)
+        if (rec.members.some(o => o.slot === sl && !o.dead && !o.removed)) return null;
+        const m = createMob("villager", at[0], at[1], at[2], sl.prof, rec.style);
+        m.village = rec; m.home = H; m.slot = sl; m.bed = sl.bed; rec.members.push(m);
+        BF.rand.seed(m, "villager:" + rec.key + "#" + sl.idx + ":" + (rec.killed.villager || 0));   // its slot's stream (a death in the village moves it on); a saved one wins (js/trading.js unpack)
+        m.ai.leaving = !bedtime() && !scattered; // spawned indoors by day: walk out through the door
+        const sv = villagerSaves.get(villagerKey(m));
+        if (sv) BF.trades.unpack(m, sv); // inventory/level/xp survive unload/reload and saved games
+        if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
+        if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
+        if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
+        if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
+        return m;
+      });
     }
     const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {
       const gy = v.y != null ? v.y : BF.world.heightAt(v.x, v.z) + 1;
       const gs = BF.mobSave ? BF.mobSave.golem(rec.key) : null;
       const at = (gs && findStand(gs.p[0], gs.p[1], gs.p[2], TYPES.iron_golem)) || findStand(v.x, gy, v.z, TYPES.iron_golem) || findStand(v.x + 3, BF.world.heightAt(v.x + 3, v.z) + 1, v.z, TYPES.iron_golem);
-      if (at) { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); if (gs) BF.mobSave.apply(g, gs); }
+      if (at) spawnLater(rec.key, "golem:" + rec.key, () => { const g = createMob("iron_golem", at[0], at[1], at[2]); g.village = rec; rec.members.push(g); if (gs) BF.mobSave.apply(g, gs); return g; });
     }
   }
 }
@@ -2332,6 +2526,13 @@ BF.mobs = {
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
+  isHostile: t => !!(TYPES[t] && TYPES[t].hostile),   // the type table's flag (js/player.js on the client's mirror, r15-38)
+  // spec r15-31, for the animal modules: near(p, r, local) -> the mobs a scan within r blocks of p must look at (see nearMobs);
+  // checkScan(label, got, scan) -> got, checked against scan(BF.mobs.list) when BF.regions.verifyQueries is on (see vq);
+  // ofType(type) -> the mobs of one type, in list order (a copy).
+  near: (p, r, local) => nearMobs(p, r, local),
+  checkScan: (label, got, scan) => vq(label, got, scan),
+  ofType: t => ofType(t),
   // The mob grids for test/mobgrid-compare.js (r15-06): ref(true) switches buildSepGrid and the lookups to the pre-r15-06 builder.
   // cells() lists each grid's non-empty cells (key -> mobs); separate(m, dt) returns the push it gives m's velocity (m.vel is restored).
   grid: {
@@ -2342,20 +2543,8 @@ BF.mobs = {
     separate(m, dt) { const x = m.vel.x, z = m.vel.z; separate(m, dt); const d = [m.vel.x - x, m.vel.z - z]; m.vel.x = x; m.vel.z = z; return d; },
   },
   init(sceneRef) {
-    scene = sceneRef;   // (arrows and puffs only, until r15-12 moves their drawing too; mobs are drawn by js/mobview.js)
-    BF.mobView.init(sceneRef);
-    arrowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
-    puffMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.85, depthWrite: false });
-    puffMatDark = new THREE.MeshBasicMaterial({ color: 0x4a4a4a, transparent: true, opacity: 0.85, depthWrite: false });
-    puffGeo = new THREE.BoxGeometry(0.22, 0.22, 0.22);
-    // arrow points along +Z (Object3D.lookAt aims +Z at the target)
-    const V = BF.mobView, box = V.box;
-    arrowGeo = V.buildGeometry([
-      box([-0.5, -0.5, -4], [0.5, 0.5, 3], 0x8a6a40),
-      box([-0.75, -0.75, 3], [0.75, 0.75, 4.5], 0x9a9a9a),
-      box([-1.5, -0.25, -4.5], [1.5, 0.25, -2.5], 0xf0f0f0),
-      box([-0.25, -1.5, -4.5], [0.25, 1.5, -2.5], 0xf0f0f0),
-    ], 11);
+    ready = true;   // (mobs, arrows and effects are drawn by js/mobview.js and js/entityview.js)
+    if (BF.mobView) BF.mobView.init(sceneRef);
     BF.world.onChunkUnload((cx, cz) => {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
@@ -2365,15 +2554,19 @@ BF.mobs = {
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];
-        if (Math.floor(a.pos.x / BF.CS) === cx && Math.floor(a.pos.z / BF.CS) === cz) { scene.remove(a.mesh); arrows.splice(i, 1); }
+        if (Math.floor(a.pos.x / BF.CS) === cx && Math.floor(a.pos.z / BF.CS) === cz) arrows.splice(i, 1);
       }
     });
     if (BF.wildlife) BF.wildlife.init();
   },
   update(dt) {
-    if (!scene) return;
+    if (!ready) return;
     dt = Math.min(dt, 0.05);
-    planBudget = 2; // A* searches per frame
+    planBudget = 2; // A* searches per frame outside the mob loop
+    grantPlans();   // and the mob loop's (spec r15-33)
+    // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
+    // step BF.mobs.update on its own, and move mobs between steps
+    if (BF.regions) BF.regions.tick();
     // the villager-seconds meter (js/perf.js): each lap charges the time since the last to a category; nothing while it's off
     const PF = BF.perf, PC = PF.C, pon = PF.on;
     buildSepGrid();
@@ -2382,7 +2575,8 @@ BF.mobs = {
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
-    for (const m of list.slice()) {
+    // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
+    for (const m of BF.rtick ? BF.rtick.plan(list) : list.slice()) {
       if (m.removed) continue;
       let h = dt;
       if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
@@ -2394,11 +2588,14 @@ BF.mobs = {
           h = m._farT; m._farT = 0;
         } else m._farT = null;
       }
+      curMob = BF.rand.thinker = m;
       try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
+      curMob = BF.rand.thinker = null;
+      hold(m);
       if (pon) PF.lap(PF.mobCat(m));
     }
+    commitMoves();
     updateArrows(dt);
-    updatePuffs(dt);
     PF.lap(PC.other);
     if (BF.builder) BF.builder.tick(dt);
     if (BF.villageLife) BF.villageLife.tick(dt);   // villager meals, farm scans (js/villagelife.js)
@@ -2415,7 +2612,6 @@ BF.mobs = {
     PF.lap(PC.vanimals);
     if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
     PF.lap(PC.villagers);
-    arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
     PF.lap(PC.monsters);
     if (BF.wildlife) BF.wildlife.update(dt);
@@ -2427,39 +2623,35 @@ BF.mobs = {
     if (BF.mobSave) BF.mobSave.update(dt);
     PF.lap(PC.other);
   },
-  // Every frame (main.js, spec r15-10): arrows drawn at lerp(prev, cur, alpha), alpha = BF.warp.alpha (0 = the previous tick, 1 = the
-  // latest). The mobs themselves are drawn by js/mobview.js.
-  draw(alpha) {
-    if (!scene) return;
-    drawArrows(Math.max(0, Math.min(1, alpha)));
-  },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.
-  raycast(origin, dir, maxDist, skip) {
-    let best = null;
-    const mn = [0, 0, 0], mx = [0, 0, 0];
-    for (const m of list) {
-      if (m.dead || m.removed || m === skip) continue;
-      const p = seen(origin, m.position, _sA), hw = m.halfWidth;
-      mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
-      mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
-      const t = rayAABB(origin, dir, mn, mx);
-      if (t != null && t <= maxDist && (!best || t < best.dist)) best = { mob: m, dist: t };
-    }
-    return best;
-  },
+  raycast(origin, dir, maxDist, skip) { return vq("mobs.raycast", raycastIn(nearMobs(origin, maxDist + 2, true), origin, dir, maxDist, skip), L => raycastIn(L, origin, dir, maxDist, skip)); },
   // Player attack. Returns true if the hit landed (false while the mob is briefly invulnerable).
   hit(mob, damage, knockDir) { return damageMob(mob, damage, knockDir, true); },
   // Player bow shot (js/player.js): see shootPlayerArrow. arrows() lists the player's arrows in flight or stuck (tests, debug).
-  shootArrow(from, vel, opts) { return scene ? shootPlayerArrow(from, vel, opts) : null; },
+  shootArrow(from, vel, opts) { return ready ? shootPlayerArrow(from, vel, opts) : null; },
   playerArrows() { return arrows.filter(a => a.byPlayer); },
-  hurt(mob, damage, cause) { mob.invuln = 0; return damageMob(mob, damage, null, false, cause); },   // non-player damage with a cause (tests, commands)
+  arrowList() { return arrows; },   // every arrow in flight or stuck: {pos, vel, look, stuck, ...} (js/entityview.js draws them)
+  hurt(mob, damage, cause, by) { return damageMob(mob, damage, null, false, cause, { force: true, from: by }); },   // non-player damage with a cause (tests, commands; by = the mob doing it)
+  // A villager killing its own stock (shepherd, poultry keeper, cowherd, pig farmer): then() (its loot) runs once the kill has happened, at
+  // once outside the think phase, else when the request's result is delivered (r15-23). Returns false if the mob can't be hurt now.
+  cull(mob, cause, by, then) {
+    const r = damageMob(mob, 999, null, false, cause, { force: true, from: by });
+    if (!r) return false;
+    if (r === true) { if (mob.dead && then) then(); return mob.dead; }
+    if (then) r.then(x => { if (x && x.killed) then(); });
+    return true;
+  },
+  strike,   // strike(m, o, dmg, knockDir?): m's melee hit on o (tests)
   // /kill (commands.js): kills outright, no knockback, no golem anger; drops as a normal death. Returns false if already dead.
   kill(mob) { if (!mob || mob.dead || mob.removed) return false; kill(mob, true); return true; },
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
-  spawn(type, x, y, z, variant, style) { return scene ? createMob(type, x, y, z, variant, style) : null; },
+  spawn(type, x, y, z, variant, style) { return ready ? createMob(type, x, y, z, variant, style) : null; },
+  spawnLater,   // spawnLater(from, place, make, check?): make() now, or as a "spawn" request in the think phase (r15-23) that runs make() if check()
+                // still holds when it applies; returns the mob, or null when queued
   // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
   discard(m) { if (m && !m.removed) removeMob(m); },
+  explode(m) { if (m && !m.removed && !m.dead) explode(m); },   // a creeper's blast now (tests): in the think phase, one request per region it reaches
   // The share of monster spawn weight whose type spawns (1 with all on): js/wildlife.js scales its area caps by it.
   spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
   spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
@@ -2611,7 +2803,7 @@ BF.mobs = {
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
   isOccupied,
-  nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
+  nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan },
   spawning: true,
   // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it
   onSet(x, y, z, oldId, id) {
@@ -2623,9 +2815,8 @@ BF.mobs = {
   clear() {
     for (const m of list.slice()) removeMob(m);
     list.length = 0;
-    if (scene) { for (const a of arrows) scene.remove(a.mesh); for (const p of puffs) scene.remove(p.mesh); }
     arrows.length = 0;
-    puffs.length = 0;
+    BF.fx.clear();   // and the effects playing
     villages.clear();
     villagerSaves.clear();
     pendingDead.clear();

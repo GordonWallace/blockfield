@@ -15,7 +15,7 @@
 //                     planet: { open(), close(), isOpen(), state, zoomBy(f), turn(dx, dy), pick(px, py), clickAt(px, py), toLocal() } }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const ZONE = 128, MAX_PX = 1024, MAX_K = BF.AUTO_MAP_MAX_K || 4096, DEFAULT_W = 2048;   // 4096 zones = 524288 blocks, see js/blocks.js
 const COARSE_SCALE = 64;      // above this many blocks per pixel, mile-high plateau weights are approximated (worldgen.setCoarse)
@@ -186,9 +186,42 @@ function held(it) {
   return BF.maps.heldCanvas(d, d.ver + "|" + (d.cvVer) + "|" + mode, src, (q.x - d.x0) / d.scale * 128 / d.N, (q.z - d.z0) / d.scale * 128 / d.N);
 }
 
+// ---------------------------------------------------------------- normal maps' pixels (spec r15-37)
+// A normal map's pixels are simulation state (js/maps.js fills them in as the player explores), so the page asks for them with the
+// protocol's "map" query: {item, ver} answers the map's bounds, and its pixels (RGB565, base64) only when they changed since the version
+// the page has. Kept here per item as a 128x128 canvas; asked again at most four times a second.
+const snaps = new Map();   // item id -> {ver, cv, g, img, side, x0, z0, N, scale, at, asking}
+function mapSnap(it) {
+  let c = snaps.get(it.id);
+  if (!c) {
+    c = { ver: null, cv: document.createElement("canvas"), side: 0, x0: 0, z0: 0, N: 128, scale: 1, at: -1e9, asking: false };
+    c.cv.width = c.cv.height = 128; c.g = c.cv.getContext("2d"); c.img = c.g.createImageData(128, 128);
+    snaps.set(it.id, c);
+  }
+  const now = performance.now();
+  if (!c.asking && now - c.at > 250 && BF.client) {
+    c.at = now; c.asking = true;
+    BF.client.query("map", { item: it.id, ver: c.ver }, r => {
+      c.asking = false;
+      if (!r || !r.ok) return;
+      Object.assign(c, { side: r.side, x0: r.x0, z0: r.z0, N: r.N, scale: r.scale });
+      if (r.px == null) return;
+      const bin = atob(r.px), px = new Uint16Array(bin.length >> 1), o = c.img.data;
+      for (let k = 0; k < px.length; k++) px[k] = bin.charCodeAt(2 * k) | (bin.charCodeAt(2 * k + 1) << 8);
+      for (let k = 0; k < px.length; k++) {
+        const v = px[k], q = k * 4;
+        if (!v) { o[q + 3] = 0; continue; }
+        o[q] = ((v >> 11) & 31) * 255 / 31; o[q + 1] = ((v >> 5) & 63) * 255 / 63; o[q + 2] = (v & 31) * 255 / 31; o[q + 3] = 255;
+      }
+      c.g.putImageData(c.img, 0, 0); c.ver = r.ver;
+    });
+  }
+  return { src: c.cv, side: c.side, x0: c.x0, z0: c.z0, N: c.N, scale: c.scale, ver: c.ver };
+}
+
 // ---------------------------------------------------------------- item icons
 // Inventory / hotbar / drop icon of a filled map (normal or auto): the map itself, shrunk into a framed sheet (brown frame for normal maps, teal for auto
-// maps). textures.js icon() and inventory.js ask BF.mapIcon(item) -> {ver, url}; ver changes when the thumbnail does, and tick() refreshes the inventory
+// maps). textures.js icon() and invscreen.js ask BF.mapIcon(item) -> {ver, url}; ver changes when the thumbnail does, and tick() refreshes the inventory
 // icons about once a second while a map in the inventory is changing (generating, or being explored).
 const thumbs = new Map();   // item id -> {ver, t, url}
 function composeIcon(src, auto) {
@@ -207,7 +240,7 @@ function mapIcon(it) {
   let src, ver;
   try {
     if (it.auto) { const d = dataOfItem(it); src = canvasOf(d); ver = "a" + d.cvVer + "m" + mode; }
-    else if (it.map && BF.maps && BF.maps.snapshot) { const m = BF.maps.snapshot(it); src = m.src; ver = "n" + m.ver; }
+    else if (it.map) { const m = mapSnap(it); src = m.src; ver = "n" + m.ver; }
     else return null;
   } catch (e) { console.error(e); return null; }
   const now = performance.now();
@@ -290,7 +323,7 @@ function describe(it) {
     const d = dataOfItem(it);
     return { d, auto: true, src: canvasOf(d), side: d.side, x0: d.x0, z0: d.z0, N: d.N, scale: d.scale, ver: d.ver + "m" + mode, label: d.side + " x " + d.side + " blocks" };
   }
-  const m = BF.maps.snapshot(it);
+  const m = mapSnap(it);
   return Object.assign({ auto: false, label: m.side + " x " + m.side + " blocks" }, m);
 }
 function openView(it, swap) {   // swap: from the planet view, which already holds the screen (no pointer-lock change)
@@ -799,7 +832,7 @@ BF.mapview = {
     finishBase() { while (!baseGrid().done) stepBase(Infinity); }, draw() { globe.sig = ""; drawGlobe(); } },
   teleportToSelection, surfaceAt, getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
   ZONE, MAX_PX, MAX_K,
-  reset() { maps.clear(); thumbs.clear(); iconSeen = ""; },
+  reset() { maps.clear(); thumbs.clear(); snaps.clear(); iconSeen = ""; },
   _maps: maps, _view: view, _prompt: prompt,
 };
 addEventListener("load", () => { if (BF.on) BF.on("newWorld", () => BF.mapview.reset()); });

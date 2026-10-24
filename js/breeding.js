@@ -7,7 +7,7 @@
 // Newborns are not part of the deterministic roster: they live in rec.bred and are saved under "<village key>#2000+k".
 (function () {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 
 const RADIUS = 5;            // encounter distance (blocks, 3D)
 const CHANCE = 0.5;          // per encounter
@@ -28,7 +28,6 @@ const S = {
   near: new Set(),
   deadKeys: new Set(),       // keys of newborns that died this session (removed from the save)           // pair keys currently within RADIUS with the condition true (rolled already)
   loves: [],                 // active love pairs {a, b, t, rec, heartT}
-  hearts: [],                // heart sprites
   grow: [],                  // {m, t, from}
   stats: { encounters: 0, rolls: 0, successes: 0, births: 0, grownUp: 0 },
   log: [],
@@ -142,20 +141,26 @@ function bedsOK(rec) { const v = villagerCount(rec) + lovesIn(rec); return v < m
 // A free bed for a newborn: not a living roster slot's bed (a killed slot never respawns, so its bed is free), not any live member's bed,
 // not another newborn's.
 const bedKey = b => b.x + "," + b.y + "," + b.z;
-function freeBed(rec, self) {
+function usedBeds(rec, self) {
   const used = new Set();
   for (const sl of rec.roster || []) if (sl.bed && !(rec.dead && rec.dead.has(sl.idx))) used.add(bedKey(sl.bed));
   for (const m of rec.members || []) if (m !== self && !m.dead && !m.removed) { if (m.bed && !m.bed.tent) used.add(bedKey(m.bed)); if (m.homeBed) used.add(bedKey(m.homeBed)); }   // an explorer away in its tent keeps its bed at home
   for (const e of bredList(rec)) if (!e.dead && e.bed && (!self || e.mob !== self)) used.add(bedKey(e.bed));
-  const W = BF.world, foot = (b) => { const d = BF.blocks[W.getBlock(b.x, b.y, b.z)]; return d && d.bed && !d.bed.head && d.bed.f === b.f; };
+  return used;
+}
+const footOK = b => { const d = BF.blocks[BF.world.getBlock(b.x, b.y, b.z)]; return !!(d && d.bed && !d.bed.head && d.bed.f === b.f); };
+function freeBed(rec, self) {
+  const used = usedBeds(rec, self);
   let best = null, bd = Infinity;
   for (const b of rec.beds || []) {
-    if (used.has(bedKey(b)) || !foot(b)) continue;
+    if (used.has(bedKey(b)) || !footOK(b)) continue;
     const d = self ? Math.hypot(b.x - self.position.x, b.z - self.position.z) : 0;
     if (d < bd) { bd = d; best = b; }
   }
   return best ? { x: best.x, y: best.y, z: best.z, f: best.f } : null;
 }
+// Whether bed b is still free for `self` (a claim being applied, spec r15-23): standing, and nobody else's. Nobody is ever evicted from a bed.
+const bedFree = (rec, b, self) => !!(rec && b && footOK(b) && !usedBeds(rec, self).has(bedKey(b)));
 
 // ---------- child look ----------
 function setChildLook(m, k) {        // k = 0 child .. 1 adult
@@ -170,47 +175,9 @@ function lookVariant() {
 }
 
 // ---------- hearts ----------
-let heartTex = null;
-function heartTexture() {
-  if (heartTex) return heartTex;
-  const rows = [".XX.XX.", "XWXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X..."];
-  const c = document.createElement("canvas"); c.width = 9; c.height = 8;
-  const g = c.getContext("2d");
-  for (let y = 0; y < rows.length; y++) for (let x = 0; x < 7; x++) {
-    const ch = rows[y][x];
-    if (ch === ".") continue;
-    g.fillStyle = "#3a0a10"; g.fillRect(x + 1, y + 1, 1, 1);   // drop shadow outline
-  }
-  for (let y = 0; y < rows.length; y++) for (let x = 0; x < 7; x++) {
-    const ch = rows[y][x];
-    if (ch === ".") continue;
-    g.fillStyle = ch === "W" ? "#ffb8c0" : y >= 3 ? "#c41e32" : "#ec3046";
-    g.fillRect(x + 1, y, 1, 1);
-  }
-  heartTex = new THREE.CanvasTexture(c);
-  heartTex.magFilter = THREE.NearestFilter; heartTex.minFilter = THREE.NearestFilter;
-  return heartTex;
-}
-function heart(x, y, z) {
-  if (!BF.scene || typeof THREE === "undefined") return;
-  const mat = new THREE.SpriteMaterial({ map: heartTexture(), transparent: true, depthWrite: false });
-  const sp = new THREE.Sprite(mat);
-  sp.scale.set(0.34, 0.3, 1);
-  sp.position.set(x + (Math.random() - 0.5) * 0.5, y + Math.random() * 0.2, z + (Math.random() - 0.5) * 0.5);   // visual
-  BF.scene.add(sp);
-  S.hearts.push({ sp, life: 1.4, vy: 0.55 + Math.random() * 0.3, dx: (Math.random() - 0.5) * 0.2 });   // visual
-}
+// one heart rising: an effect event (js/fx.js) that js/entityview.js plays
+function heart(x, y, z) { BF.fx.emit({ kind: "heart", x, y, z }); }
 const headTop = m => m.position.y + m.height + 0.35;
-function updateHearts(dt) {
-  for (let i = S.hearts.length - 1; i >= 0; i--) {
-    const h = S.hearts[i];
-    h.life -= dt;
-    h.sp.position.y += h.vy * dt; h.sp.position.x += h.dx * dt;
-    h.sp.material.opacity = Math.max(0, Math.min(1, h.life / 0.5));
-    if (h.life <= 0) { BF.scene.remove(h.sp); h.sp.material.dispose(); S.hearts.splice(i, 1); }
-  }
-}
-
 // ---------- eligibility / encounters ----------
 function adultOK(m) {
   return m && m.type === "villager" && !m.dead && !m.removed && !m.child && !m.sleeping && !m.starving && !m.tradingWith &&
@@ -337,9 +304,20 @@ function giveChildBread(m) {
   inv.add(m.inv, BF.I.bread, CHILD_BREAD);
   m.trades = []; m.level = 1; m.xp = 0;
 }
+// In the think phase the birth is a "spawn" request from parent a (r15-23): births come in parent-id order, each checking the bread and the
+// beds again when it applies, so of two births in a tick with one spare bed the first wins. Returns the child when born at once.
 function birth(a, b, rec, force) {
   if (breadEq(a.inv) < PAY || breadEq(b.inv) < PAY) return null;   // traded away meanwhile
   if (!bedsOK(rec) && !force) return null;                           // a bed was broken meanwhile
+  return BF.mobs.spawnLater(a, "bred:" + rec.key, () => {
+    if (bad2(a) || bad2(b)) return null;
+    if (breadEq(a.inv) < PAY || breadEq(b.inv) < PAY) return null;
+    if (!bedsOK(rec) && !force) { BF.glog.log("DEBUG", "breeding", "A birth in " + rec.key + " was refused: no spare bed left after an earlier birth this tick", { village: rec }); return null; }
+    return bornNow(a, b, rec);
+  });
+}
+const bad2 = m => !m || m.dead || m.removed;
+function bornNow(a, b, rec) {
   const pa = take(a, PAY), pb = take(b, PAY);
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const at = standAt(x, y, z) || standAt(a.position.x, a.position.y, a.position.z) || [a.position.x, a.position.y, a.position.z];
@@ -426,7 +404,9 @@ function childTick(rec, e) {
   const bedOK = b => { const d = BF.blocks[BF.world.getBlock(b.x, b.y, b.z)]; return d && d.bed && !d.bed.head && d.bed.f === b.f; };
   if (BF.sky && BF.sky.time > 0.45 && !m.sleeping && (!m.bed || !bedOK(m.bed))) {
     if (!rec.beds || BF.simNow() * 1000 - (rec.bedScanAt || 0) > 3000) scanBeds(rec);
-    m.bed = freeBed(rec, m); e.bed = m.bed;
+    const b = freeBed(rec, m);
+    if (!b) { m.bed = null; e.bed = null; }
+    else BF.claims.ask("bed", m, "b:" + bedKey(b), { bed: b });   // the first claim of a bed in a tick wins (r15-23; its take sets e.bed)
   }
 }
 // A newborn unloading (with its village): its entry keeps where it was and its trading state for when it comes back.
@@ -455,7 +435,6 @@ function spawnMissing(rec) {
 function tick(dt) {
   if (!BF.mobs || !BF.trades) return;
   hookEvents();
-  updateHearts(dt);
   updateLoves(dt);
   updateGrow(dt);
   S.timer -= dt;
@@ -522,8 +501,7 @@ function importAll(o) {
   }
 }
 function reset() {
-  for (const h of S.hearts) { if (BF.scene) BF.scene.remove(h.sp); h.sp.material.dispose(); }
-  S.hearts.length = 0; S.loves.length = 0; S.grow.length = 0;
+  S.loves.length = 0; S.grow.length = 0;
   S.pending.clear(); S.cd.clear(); S.near.clear(); S.deadKeys.clear(); S.timer = 0;
 }
 
@@ -575,13 +553,13 @@ function info(rec) {
 }
 
 // main.js defines BF.on after this file loads: hook up as soon as the page has loaded (or on the first tick)
-addEventListener("load", hookEvents);
+BF.onLoad(hookEvents);
 
 BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,
   tick, ai, childMove, exportAll, importAll, reset,
   onRemoved(m) { const e = m.bredEntry; if (e && e.mob === m && !e.dead) keepState(e, m); },   // js/mobs.js removeMob (js/ids.js: links to a removed mob go)
-  eligible, bedsOK, bedCount, villagerCount, scanBeds, freeBed, breadEq,
+  eligible, bedsOK, bedCount, villagerCount, scanBeds, freeBed, bedFree, breadEq,
   forceBreed, birth, growUp, makeChild, info, stats: S.stats, log: S.log, state: S,
   // instant variants for tests
   forceBirth(a, b) { const rec = villageOf(a) || villageOf(b); return rec ? birth(a, b, rec, true) : null; },

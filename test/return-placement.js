@@ -1,26 +1,28 @@
-// @ci integration suite=village timeout=600
+// @ci integration suite=village timeout=600 hosts=worker,server
 // Where villagers appear when their village loads again (village loading plan, scenario 2): a short absence (under a game hour, no bedtime in
 // between) brings everyone back exactly where they stood; a longer one by day puts them at random spots within the leash of their bed; at bedtime
 // they are in their beds; an explorer comes back at its saved spot; a villager without a bed goes indoors at night.
-// Usage: node test/run.js /tmp/rp test/return-placement.js
+// Usage: node test/run.js /tmp/rp test/return-placement.js [--host page|worker|server]
 module.exports = async (pg) => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-  await require('./lib').toVillage(pg);
-  await pg.waitForFunction(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 6, null, { timeout: 60000 });
-  const info = await pg.evaluate(() => {
+  const lib = require('./lib');
+  // waits until fn(arg) is true where the simulation is (spec r15-43)
+  const wait = async (fn, arg, t = 40000) => { for (const end = Date.now() + t; Date.now() < end; await sleep(500)) if (await lib.sim(pg, fn, arg)) return true; return false; };
+  await lib.toVillage(pg);
+  if (!await wait(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 6, null, 60000)) return ok("the village's villagers are out", false);
+  const info = await lib.sim(pg, () => {
     BF.mobs.spawning = false;
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), v = rec.wg;
     return { key: rec.key, x: rec.x, z: rec.z, minX: v.minX, maxX: v.maxX, minZ: v.minZ, maxZ: v.maxZ };
   });
-  const tp = (x, z) => pg.evaluate(([x, z]) => { BF.player.spawn(x, BF.worldgen.heightAt(x, z) + 3, z); }, [x, z]);
-  const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t }).then(() => true, () => false);
-  const snapshot = () => pg.evaluate(k => Object.fromEntries(BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead).map(m => [m.slot.idx, [m.position.x, m.position.z, m.profession]])), info.key);
+  const tp = (x, z) => pg.evaluate(([x, z]) => { BF.player.spawn(x, BF.worldgen.heightAt(x, z) + 3, z); }, [x, z]);   // (the page's player: the simulation follows it)
+  const snapshot = () => lib.sim(pg, k => Object.fromEntries(BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead).map(m => [m.slot.idx, [m.position.x, m.position.z, m.profession]])), info.key);
   const leave = async () => {   // away, then the clock jumps past the countdown (headless frames are slow) so the village unloads at once
     await tp(info.x + 900, info.z);
     for (let i = 0; i < 4; i++) {
       if (await wait(k => !BF.villageSim.isActive(k) && !BF.mobs.list.some(m => m.village && m.village.key === k), info.key, 8000)) return true;
-      await pg.evaluate(k => { const t = BF.villageSim.timeLeft(k); BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200); }, info.key);   // past the countdown, which lasts as long as the longest task
+      await lib.sim(pg, k => { const t = BF.villageSim.timeLeft(k); BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200); }, info.key);   // past the countdown, which lasts as long as the longest task
     }
     return false;
   };
@@ -32,49 +34,49 @@ module.exports = async (pg) => {
     await wait(([k, n]) => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length >= n, [info.key, want], 90000);
     let last = -1;
     for (let i = 0; i < 30; i++) {
-      const n = await pg.evaluate(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length, info.key);
+      const n = await lib.sim(pg, k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k).length, info.key);
       if (n === last) break;
       last = n; await sleep(2000);
     }
   };
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-  const setTime = t => pg.evaluate(t => { BF.sky.setTime(t); }, t);
+  const setTime = t => lib.sim(pg, t => { BF.sky.setTime(t); }, t);
   // 1. a short absence by day: exact
   await setTime(0.3);
   await sleep(1500);
   const before = await snapshot();
   want = Object.keys(before).length;
   ok("villagers are loaded to start with", Object.keys(before).length >= 6, Object.keys(before).length);
-  // Where each villager stood is read every frame until it unloads, and where it came back the first frame it is there again. (The snapshot
+  // Where each villager stood is read every 20 ms until it unloads, and where it came back the first time it is there again. (The snapshot
   // above is taken before the leaving: villagers on a task work on through the village's countdown, and loaded ones walk on while the rest
   // load, both for longer on a faster runner, so comparing it with a snapshot after loading counted walkers as misplaced.)
-  await pg.evaluate(k => {
-    const w = window.__rpw = { back: false, stop: false, last: {}, first: {} };
+  await lib.sim(pg, k => {
+    const w = globalThis.__rpw = { back: false, stop: false, last: {}, first: {} };
     const tick = () => {
       if (w.stop) return;
       for (const m of BF.mobs.list) if (m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead && !m.removed) {
         const p = [m.position.x, m.position.z];
         if (!w.back) w.last[m.slot.idx] = p; else if (!w.first[m.slot.idx]) w.first[m.slot.idx] = p;
       }
-      requestAnimationFrame(tick);
+      setTimeout(tick, 20);   // (where the simulation is there may be no frames: a timer between its ticks)
     };
-    requestAnimationFrame(tick);
+    setTimeout(tick, 20);
   }, info.key);
   ok("the village unloads when the player leaves", await leave());
-  await pg.evaluate(() => { window.__rpw.back = true; });
+  await lib.sim(pg, () => { globalThis.__rpw.back = true; });
   await back();
   const after1 = await snapshot();
-  const seen = await pg.evaluate(() => { const w = window.__rpw; w.stop = true; return { last: w.last, first: w.first }; });
+  const seen = await lib.sim(pg, () => { const w = globalThis.__rpw; w.stop = true; return { last: w.last, first: w.first }; });
   const same = Object.keys(seen.last).filter(k => seen.first[k] && dist(seen.last[k], seen.first[k]) < 4).length;
   ok("after a short absence the villagers are where they stood", Object.keys(after1).length >= 20 && same >= Math.floor(Object.keys(after1).length * 0.8), { same, present: Object.keys(after1).length, of: Object.keys(seen.last).length });
   // 2. a longer absence by day: scattered within the leash
   await setTime(0.2);
   const before2 = await snapshot();
   ok("the village unloads again for the longer absence", await leave());
-  const savedAt = await pg.evaluate(([k, idxs]) => Object.fromEntries(idxs.map(i => { const s = BF.mobSave.serialize().v[k + "#" + i]; return [i, s ? [s.p[0], s.p[2]] : null]; })), [info.key, Object.keys(before2).filter(i => before2[i][2] === "explorer")]);   // where an explorer was when the village unloaded (it walks on while the test waits)
-  await pg.evaluate(() => { BF.sky.time = 0.3; BF.sky.day += 1; if (BF.explorer && !BF.explorer.__ai) { BF.explorer.__ai = BF.explorer.ai; BF.explorer.ai = m => m.profession === "explorer"; } });   // a day later, mid-morning; explorers stand still so the spot they load at can be read
+  const savedAt = await lib.sim(pg, ([k, idxs]) => Object.fromEntries(idxs.map(i => { const s = BF.mobSave.serialize().v[k + "#" + i]; return [i, s ? [s.p[0], s.p[2]] : null]; })), [info.key, Object.keys(before2).filter(i => before2[i][2] === "explorer")]);   // where an explorer was when the village unloaded (it walks on while the test waits)
+  await lib.sim(pg, () => { BF.sky.time = 0.3; BF.sky.day += 1; if (BF.explorer && !BF.explorer.__ai) { BF.explorer.__ai = BF.explorer.ai; BF.explorer.ai = m => m.profession === "explorer"; } });   // a day later, mid-morning; explorers stand still so the spot they load at can be read
   await back();
-  const info2 = await pg.evaluate(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead && m.profession !== "explorer").map(m => { const b = m.slot.bed, c = b ? [b.x, b.z] : [m.village.x, m.village.z]; return { d: Math.hypot(m.position.x - c[0], m.position.z - c[1]), inside: m.position.x >= m.village.wg.minX - 2 && m.position.x <= m.village.wg.maxX + 2 && m.position.z >= m.village.wg.minZ - 2 && m.position.z <= m.village.wg.maxZ + 2, x: m.position.x, z: m.position.z, idx: m.slot.idx }; }), info.key);
+  const info2 = await lib.sim(pg, k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead && m.profession !== "explorer").map(m => { const b = m.slot.bed, c = b ? [b.x, b.z] : [m.village.x, m.village.z]; return { d: Math.hypot(m.position.x - c[0], m.position.z - c[1]), inside: m.position.x >= m.village.wg.minX - 2 && m.position.x <= m.village.wg.maxX + 2 && m.position.z >= m.village.wg.minZ - 2 && m.position.z <= m.village.wg.maxZ + 2, x: m.position.x, z: m.position.z, idx: m.slot.idx }; }), info.key);
   const moved = info2.filter(e => before2[e.idx] && dist(before2[e.idx], [e.x, e.z]) > 4).length;
   ok("after a longer absence the villagers are within the leash of their beds and inside the village", info2.length >= 4 && info2.filter(e => e.d <= 46 && e.inside).length >= Math.ceil(info2.length * 0.85), info2.slice(0, 4));
   ok("they are not back on their old spots", moved >= Math.floor(info2.length / 3), { moved, of: info2.length });   // (a random spot near the bed is often within 4 blocks of where one stood, so a third, not half)
@@ -83,15 +85,15 @@ module.exports = async (pg) => {
     const nowPos = await snapshot();
     ok("an explorer comes back at the spot it was at, however long it was away", ex.every(k => nowPos[k] && savedAt[k] && dist(savedAt[k], nowPos[k]) < 6), ex.map(k => [savedAt[k], nowPos[k]]));
   }
-  await pg.evaluate(() => { if (BF.explorer && BF.explorer.__ai) { BF.explorer.ai = BF.explorer.__ai; BF.explorer.__ai = null; } });
+  await lib.sim(pg, () => { if (BF.explorer && BF.explorer.__ai) { BF.explorer.ai = BF.explorer.__ai; BF.explorer.__ai = null; } });
   // 3. back at bedtime: in bed
   ok("the village unloads again before night", await leave());
-  await pg.evaluate(() => { BF.sky.time = 0.75; BF.sky.day += 1; });
+  await lib.sim(pg, () => { BF.sky.time = 0.75; BF.sky.day += 1; });
   await back();
-  const bed = await pg.evaluate(k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && m.slot.bed && !m.dead).map(m => Math.hypot(m.position.x - m.slot.bed.x, m.position.z - m.slot.bed.z)), info.key);
+  const bed = await lib.sim(pg, k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && m.slot.bed && !m.dead).map(m => Math.hypot(m.position.x - m.slot.bed.x, m.position.z - m.slot.bed.z)), info.key);
   ok("at bedtime villagers with a bed are in it", bed.length >= 3 && bed.filter(d => d < 4).length >= Math.floor(bed.length * 0.8), bed.map(d => Math.round(d)));
   // 4. a villager without a bed goes indoors at night
-  const night = await pg.evaluate(k => {
+  const night = await lib.sim(pg, k => {
     const m = BF.mobs.list.find(x => x.type === "villager" && x.village && x.village.key === k && x.slot && !x.dead && x.profession !== "explorer" && x.profession !== "merchant" && x.home);
     if (!m) return null;
     m.bed = null; m.slot.bed = null; m.homeBed = null; m.ai.route = null;   // no route either: a sleeper wakes where it is put, not back at its bed
@@ -109,10 +111,10 @@ module.exports = async (pg) => {
     }
     if (!at) at = [H.outX + 0.5, y0, H.outZ + 0.5];
     m.position.set(at[0], at[1], at[2]);
-    window.__bedless = m;
+    globalThis.__bedless = m;
     return true;
   }, info.key);
-  await wait(() => { const m = window.__bedless, H = m && m.home; return !!H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d; }, null, 240000);
-  const inside = await pg.evaluate(() => { const m = window.__bedless, H = m && m.home; const ins = !!H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d; window.__why = { pos: [Math.round(m.position.x), Math.round(m.position.z)], H: H && [H.x, H.z, H.w, H.d], night: m.ai.night && { f: m.ai.night.fails, sf: m.ai.night.sFail, sh: !!m.ai.night.shelter }, rk: m.ai.routeKind, route: m.ai.route && m.ai.route.length, bed: !!m.bed, mode: m.ai.mode, bt: BF.mobs.nav.bedtime(), sleeping: !!m.sleeping, hb: m.homeBed }; return ins; });
-  ok("a villager without a bed goes indoors at night", night && inside, { night, inside, why: await pg.evaluate(() => window.__why) });
+  await wait(() => { const m = globalThis.__bedless, H = m && m.home; return !!H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d; }, null, 240000);
+  const inside = await lib.sim(pg, () => { const m = globalThis.__bedless, H = m && m.home; const ins = !!H && m.position.x >= H.x && m.position.x <= H.x + H.w && m.position.z >= H.z && m.position.z <= H.z + H.d; globalThis.__why = { pos: [Math.round(m.position.x), Math.round(m.position.z)], H: H && [H.x, H.z, H.w, H.d], night: m.ai.night && { f: m.ai.night.fails, sf: m.ai.night.sFail, sh: !!m.ai.night.shelter }, rk: m.ai.routeKind, route: m.ai.route && m.ai.route.length, bed: !!m.bed, mode: m.ai.mode, bt: BF.mobs.nav.bedtime(), sleeping: !!m.sleeping, hb: m.homeBed }; return ins; });
+  ok("a villager without a bed goes indoors at night", night && inside, { night, inside, why: await lib.sim(pg, () => globalThis.__why) });
 };

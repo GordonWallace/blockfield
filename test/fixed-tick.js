@@ -149,7 +149,10 @@ module.exports = async (pg, out) => {
     try {
       m.vel.set(3, 0, 0);
       m.knockT = 1;   // keep the push for this tick (no AI steering)
+      BF.proto.flush(true);   // the page draws from the protocol's mirror (r15-37): send the mob before and after its tick
+      BF.rand.step();         // (one simulation step, as js/main.js counts them: the mirror interpolates across exactly one tick)
       BF.mobs.update(BF.warp.TICK);
+      BF.proto.flush(true);
       const q = { x: m.prev.x, y: m.prev.y, z: m.prev.z }, c = { x: m.position.x, y: m.position.y, z: m.position.z };
       // drawn by js/mobview.js at BF.warp.alpha, held here at 0.5 and then 1
       const W = BF.warp, desc = Object.getOwnPropertyDescriptor(W, "alpha"), V = BF.mobView;

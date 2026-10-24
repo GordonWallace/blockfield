@@ -14,7 +14,7 @@
 // The flat generators 1 to 3, on which every helper was the identity, were retired in spec r14-24; their branches were removed in idea-045.
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const G = globalThis;   // self: the generator also runs in a Web Worker (r14-05)
 const BF = (G.BF = G.BF || {});
 
 const N = 163840;                // columns along a face edge; the equator is 4N = 655,360 blocks around

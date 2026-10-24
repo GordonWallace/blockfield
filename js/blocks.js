@@ -5,7 +5,7 @@
 // BF.items is sparse between the last block id and ITEM_BASE: always skip holes when iterating.
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const G = globalThis;   // self: the generator also runs in a Web Worker (r14-05)
 const BF = (G.BF = G.BF || {});
 
 // Facing 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).
@@ -634,7 +634,7 @@ const ITEM_DEFS = [
     { name: sp + "_fence_gate", places: "gate", wood: sp, sprite: "oak_fence_gate", color: WOOD_COLOR[sp], creativeTab: "functional" }]),
   // ---- end wood variants items ----
   // ---- gold tools (append-only). Not vanilla (Gordon, 1.1): between iron and diamond, iron's harvest level (tier 3), speed 7 (iron 6, diamond 8), 800 uses (iron 250, diamond 1561).
-  // Recipes come from the tool loop in inventory.js ("golden" + Gold Ingot). Damage as the wooden tool of the same kind.
+  // Recipes come from the tool loop in playerinv.js ("golden" + Gold Ingot). Damage as the wooden tool of the same kind.
   { name: "golden_pickaxe", tool: { type: "pickaxe", tier: 3, speed: 7, damage: 2 }, durability: 800, material: "gold", color: "#f2d64b" },
   { name: "golden_axe", tool: { type: "axe", tier: 3, speed: 7, damage: 3 }, durability: 800, material: "gold", color: "#f2d64b" },
   { name: "golden_shovel", tool: { type: "shovel", tier: 3, speed: 7, damage: 1 }, durability: 800, material: "gold", color: "#f2d64b" },
@@ -806,12 +806,23 @@ BF.resolveItem = name => {
 };
 // Items dropped when a block breaks: its `drop` plus `extraDrops` [[itemName, min, max, chance], ...].
 // Returns [{id, count}]. Mature crops' extra drops replace nothing: wheat gives wheat + 1-3 seeds.
-// r: the seeded stream to roll with (js/rand.js); without one, the tick's own stream for the n-th roll of the tick.
-let dropTick = -1, dropN = 0;
+// r: the seeded stream to roll with (js/rand.js). Without one: the stream of the mob thinking (BF.rand.thinker), or in the apply phase the
+// n-th roll of the tick in the region being applied (BF.req.applying), else the n-th roll of the tick; so a roll never depends on the order
+// mobs think or regions apply in (spec r15-33).
+let dropTick = -1;
+const dropN = new Map();   // region key (-1: none) -> rolls this tick
 BF.rollDrops = function (blockId, r) {
   const b = blocks[blockId], out = [];
   if (!b) return out;
-  if (!r && b.extraDrops) { if (BF.rand.tick !== dropTick) { dropTick = BF.rand.tick; dropN = 0; } r = BF.rand.at("drops", dropN++, 0); }
+  if (!r && b.extraDrops) {
+    if (BF.rand.thinker && BF.req && BF.req.phase === "think") r = BF.rand.of(BF.rand.thinker);
+    else {
+      if (BF.rand.tick !== dropTick) { dropTick = BF.rand.tick; dropN.clear(); }
+      const k = BF.req && BF.req.phase === "apply" && BF.req.applying != null ? BF.req.applying : -1, n = dropN.get(k) || 0;
+      dropN.set(k, n + 1);
+      r = k < 0 ? BF.rand.at("drops", n, 0) : BF.rand.at("drops", n, 1, null, k);
+    }
+  }
   if (b.drop != null) out.push({ id: b.drop, count: 1 });
   for (const [name, min, max, chance] of b.extraDrops || []) {
     if (r.next() >= chance) continue;

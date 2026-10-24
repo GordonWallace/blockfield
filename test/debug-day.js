@@ -1,33 +1,33 @@
+// @ci integration hosts=worker,server
 // Debug screen: a picked villager's day (js/daytimeline.js, the Day section under its inventory). NODE_PATH=$(npm root -g) node test/debug-day.js [outPrefix]
 // Starts debug/server.js on spare ports, opens the game and the debug screen, gives one villager a known day, then checks: nothing extra in
 // the feed before a pick; picking it sends its key to the game and its timeline comes back; the strip (stretches, the wait in red, event
 // ticks, hour marks), the summary of waits, the list, clicking a list row marks the spot on the map, Yesterday, the timeline isn't re-sent
 // with every snapshot, and unpicking stops it. Screenshots it.
-const path = require('path'), { spawn } = require('child_process');
+// BF_HOST=page|worker|server (spec r15-43): where the simulation runs; the villager's day is set and added to there (lib.sim).
+const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
+const lib = require('./lib');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug-day';
-const GAME = 8740, DBG = 8741;
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-debug-day-alerts.json')]);
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
-};
+let DBG = 0;
 const state = async () => (await (await fetch(`http://localhost:${DBG}/state`)).json()).latest || {};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const fails = [], ok = (n, c, x) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  ' + JSON.stringify(x).slice(0, 300) : '')); if (!c) fails.push(n); };
-  const srv = await start();
+  const srv = await lib.serve({ world: lib.host() === 'server' }), GAME = srv.game;
+  DBG = srv.debug;
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const game = await b.newPage({ viewport: { width: 1280, height: 760 } });
   game.on('pageerror', e => console.log('PAGEERROR game', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await lib.install(game);   // (BFT.sim)
+  await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(5000);
-  await require('./lib').toVillage(game);
+  await lib.simReady(game);
+  await lib.toVillage(game);
   // a known day for one villager: quarrying, then 2h 24m waiting for gold, then sleeping, a trade and a meal; the game keeps sampling it after
-  const v = await game.evaluate(() => {
+  const v = await lib.sim(game, () => {
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), D = BF.dayTimeline;
     const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && x.slot);
     const key = D.keyOf(m), now = BF.sky.day + BF.sky.time, x = Math.round(m.position.x), z = Math.round(m.position.z), r5 = t => Math.round(t * 1e5) / 1e5;
@@ -88,7 +88,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   for (let i = 0; i < 12; i++) { if ('day' in await state()) withDay++; await sleep(260); }
   ok(`the timeline is only re-sent when it changes (${withDay} of 12 snapshots)`, withDay < 12);
   // the live villager keeps adding to it
-  await game.evaluate(k => { const D = BF.dayTimeline; D.event(BF.mobs.list.find(x => D.keyOf(x) === k), 'meal', 'Ate Carrot'); }, v.key);
+  await lib.sim(game, k => { const D = BF.dayTimeline; D.event(BF.mobs.list.find(x => D.keyOf(x) === k), 'meal', 'Ate Carrot'); }, v.key);
   await dbg.waitForFunction(() => [...document.querySelectorAll('#r-day .dticks i')].some(t => /Ate Carrot/.test(t.title)), null, { timeout: 20000 }).catch(() => {});
   ok('a new event shows up', await dbg.evaluate(() => [...document.querySelectorAll('#r-day .dticks i')].some(t => /Ate Carrot/.test(t.title))));
   // unpick: nothing extra in the feed again
@@ -101,7 +101,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   for (let i = 0; i < 8; i++) { const s = await state(); if (s.day || (s.pick && s.pick.key)) extra++; /* one snapshot says day: null (cleared), then nothing */ await sleep(260); }
   const s9 = await state(); ok('unpicked: no timeline in the feed', extra === 0, { extra, pick: s9.pick, day: s9.day === undefined ? 'absent' : s9.day && s9.day.key });
   await b.close();
-  srv.kill(); await new Promise(r => srv.exitCode !== null ? r() : srv.once('exit', r));
+  await srv.stop();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
 })();
