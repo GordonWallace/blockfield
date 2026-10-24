@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Builders build each structure from one wood species, any species.
 // Usage: NODE_PATH=$(npm root -g) node test/builder-woods.js [seed=1337]
 // 1. Blueprints: every type x style x wood holds no wood but the chosen one (oak doors aside), and its requirement names only that wood.
@@ -6,6 +7,7 @@
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
+const sim = require('./lib').sim;   // (where the simulation is, on BF_HOST's host: spec r15-43)
 const seed = +(process.argv[2] || 1337);
 let fails = 0;
 const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!ok) fails++; };
@@ -18,7 +20,7 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
+  await require('./lib').goto(pg, '#seed' + seed);   // (on BF_HOST's host: spec r15-43)
   await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
 
@@ -45,9 +47,10 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
     const vs = BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).length >= 6);
     return vs.slice(0, 8).map(v => ({ x: v.x, z: v.z, y: v.y }));
   });
+  await require('./lib').hold(pg, true);   // (the simulation's own ticks off too: the test steps it)
   let vk = null;
   for (const c of v) {
-    const r = await pg.evaluate(v => {
+    const r = await sim(pg, v => {
       const key = Math.round(v.x) + "," + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
@@ -60,10 +63,10 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
     if (r.builder && r.forester) { vk = { ...c, key: r.key }; break; }
   }
   check(!!vk, 'village with a builder and a forester ' + (vk ? vk.key : '-'));
-  if (!vk) { await b.close(); process.exit(1); }
+  if (!vk) { await pg.done(); await b.close(); process.exit(1); }
 
   // Runs one scenario: set up the builder (and forester), step up to `days` days, report the woods placed in the structures it planned.
-  const run = (setup, days) => pg.evaluate(([v, setup, days]) => {
+  const run = (setup, days) => sim(pg, ([v, setup, days]) => {
     const key = v.key, T = BF.trades.inv, P = BF.blueprints;
     const mem = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === key && !m.dead);
     const bl = mem.find(m => m.profession === "builder"), fo = mem.find(m => m.profession === "forester"), R = bl.village;
@@ -112,6 +115,6 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
   check(r3.planned && Object.keys(r3.woods).every(w => w === r3.wood) && (r3.woods[r3.wood] || 0) > 0, `placed only that wood: ${JSON.stringify(r3.woods)} (${r3.state} ${r3.prog}/${r3.n})`);
 
   console.log(fails ? `FAILED ${fails}` : 'ALL OK');
-  await b.close();
+  await pg.done(); await b.close();
   process.exit(fails ? 1 : 0);
 })();

@@ -2,9 +2,9 @@
 // Gold tools: Minecraft's lifespan (32), speed (12), harvest level (wood's) and recipes. Villager wear (js/toolwear.js): the player's rule
 // per block / hit, a used-up tool leaves the pack and is logged, and in a running village the shepherd's shears and the farmer's hoe wear
 // one use per sheep shorn / block tilled.
-// @ci baseline
+// @ci baseline hosts=worker,server
 module.exports = async (pg) => {
-  const r = await pg.evaluate(async () => {
+  const r = await require('./lib').sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const out = [], ok = (name, c, extra) => out.push((c ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const I = BF.I, B = BF.B, P = BF.player, TW = BF.toolWear, T = BF.trades.inv;
     // ---- gold tools
@@ -16,7 +16,6 @@ module.exports = async (pg) => {
     const rp = recipe(I.golden_pickaxe), rh = recipe(I.golden_hoe);
     ok("golden pickaxe recipe: 3 gold ingots + 2 sticks", !!rp && rp.pattern.join("|") === "MMM| S | S " && rp.key.M.includes(I.gold_ingot), rp && rp.pattern);
     ok("every gold tool has a recipe", kinds.every(k => recipe(I["golden_" + k])));
-    ok("gold tools sit in the Tools tab with an icon", !!BF.textures.icon(I.golden_axe));
     // gold sits between iron and diamond (Gordon, 1.1; not vanilla): stone 0.4 s with iron, 0.3 s with diamond
     const ms = (b, t) => +P.mineSeconds(B[b], t == null ? null : I[t]).toFixed(2);
     ok("gold pickaxe mines stone between iron and diamond", ms("stone", "golden_pickaxe") <= ms("stone", "iron_pickaxe") && ms("stone", "golden_pickaxe") >= ms("stone", "diamond_pickaxe") && ms("stone", "iron_pickaxe") === 0.4 && ms("stone", "diamond_pickaxe") === 0.3, [ms("stone", "golden_pickaxe"), ms("stone", "iron_pickaxe"), ms("stone", "diamond_pickaxe")]);
@@ -70,7 +69,9 @@ module.exports = async (pg) => {
     BF.state.paused = true;
     BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });   // the harness planet seed: its rivers are worked out in this page already
     BF.mobs.spawning = false;
-    const vg = BFT.village((v, k) => v.ground === 0 && k.pen > 0);   // a village with a sheep pen: its shepherd has its loom
+    // a village with a sheep pen: its shepherd has its loom (as BFT.village, which is the page's only: test/bft.js)
+    const sp = BF.spawnPoint || P.position, pens = v => (v.buildings || []).some(b => b.type === "pen");
+    const vg = BF.worldgen.villagesNear(sp.x, sp.z, 3000).sort((a, b) => BF.planet.distance(sp, a) - BF.planet.distance(sp, b)).find(v => v.ground === 0 && pens(v));
     if (!vg) { ok("a grass village with a pen within 3 km", false); return out; }
     const V = { x: Math.round(vg.x), z: Math.round(vg.z) };
     P.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);
@@ -109,6 +110,8 @@ module.exports = async (pg) => {
     }
     return out;
   });
+  // the icon is drawn on the page (its canvas)
+  r.splice(4, 0, (await pg.evaluate(() => !!BF.textures.icon(BF.I.golden_axe)) ? "PASS " : "FAIL ") + "gold tools sit in the Tools tab with an icon");
   console.log(r.join("\n"));
   const fails = r.filter(l => l.startsWith("FAIL")).length;
   console.log(fails ? fails + " FAILED" : "ALL PASS");

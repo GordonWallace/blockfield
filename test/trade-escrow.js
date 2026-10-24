@@ -1,4 +1,4 @@
-// @ci integration suite=jobs timeout=300
+// @ci integration suite=jobs timeout=300 hosts=worker,server
 // Trades as transactions with escrow (spec r15-21): NODE_PATH=$(npm root -g) node test/run.js /tmp/te test/trade-escrow.js
 // Scripted villagers ask for trades during a tick's think (BF.trades.buy from inside BF.mobs.update), as the job modules do:
 // - two buyers for a seller's last diamond in one tick: the lower buyer id gets it, though the other is first in the list and asks
@@ -14,7 +14,7 @@ module.exports = async (pg, out) => {
   const fails = [];
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
 
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     BF.state.paused = true;   // ticks by hand (BF.simStep), no frames' ticks in between
     const T = BF.trades, I = BF.I, em = I.emerald, dia = I.diamond, P = BF.player.position, step = () => BF.simStep(BF.warp.TICK);
     const all = [];
