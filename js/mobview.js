@@ -14,7 +14,7 @@
 //   variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PX = 1 / 16;
 const rnd = (a, b) => a + Math.random() * (b - a);   // visual (fire)

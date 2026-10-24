@@ -3,7 +3,7 @@
 // API (CONTRACT.md): BF.mobs = { list, init, update, draw, raycast, hit, clear } plus spawn(type, x, y, z) for debugging.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const GRAVITY = 26;
 const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or the view distance) update 4 times a game second (BF.mobs.update)

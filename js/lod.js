@@ -26,7 +26,7 @@
 // API: BF.lod = { reset(scene), update(), radius(), levels, stats(), material, cuts }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const CELLS = [4, 8, 16, 32, 64, 128, 256, 512];
 const HALF = 128, EXT = 136;   // cells from a ring's centre to the edge of its disc, and of its mesh
 const HIDE = 1500;             // a ring is hidden above this many times its cell size (its cells are then about 2 pixels)

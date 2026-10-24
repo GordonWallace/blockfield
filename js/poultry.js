@@ -17,7 +17,7 @@
 //  feathers each, kept to sell), and stock a coop that holds fewer than STOCK_TO chickens from wild chickens within FIND_R (once a day when none).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const FEED_DAYS = 1;          // a chicken is willing to breed for this long after eating seeds
 const BREED_CD = 1;           // days before a chicken that bred can breed again

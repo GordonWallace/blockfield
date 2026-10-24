@@ -2,7 +2,7 @@
 // (18 slots), starting stock, daily restock, trade rules (stock + room) and the save format. UI lives in inventory.js.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const SLOTS = 18;                              // villager inventory size
 const EM_CAP = 12, EM_DAY = 2;                 // emerald allowance: +2 per day up to 12

@@ -15,7 +15,7 @@
 //                     planet: { open(), close(), isOpen(), state, zoomBy(f), turn(dx, dy), pick(px, py), clickAt(px, py), toLocal() } }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const ZONE = 128, MAX_PX = 1024, MAX_K = BF.AUTO_MAP_MAX_K || 4096, DEFAULT_W = 2048;   // 4096 zones = 524288 blocks, see js/blocks.js
 const COARSE_SCALE = 64;      // above this many blocks per pixel, mile-high plateau weights are approximated (worldgen.setCoarse)

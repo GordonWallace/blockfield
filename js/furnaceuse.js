@@ -14,7 +14,7 @@
 // See CONTRACT.md "Toolsmiths" and "Egg cooking".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 BF.debug = BF.debug || {};   // checkOffers: compare every offer lookup with a full scan (test/offers-cache.js)
 const TR = () => BF.trades;
 const INV = () => BF.inventory;

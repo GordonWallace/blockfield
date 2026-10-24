@@ -86,6 +86,6 @@ const gameLine = e => sysStamp(e.s) + "  " + gameStamp(e.d).padEnd(13) + "  chun
   (e.v ? e.v + ": " : "") + String(e.x).replace(/\n/g, "\n    ");   // a multi-line text (a stack trace) is indented under its line
 
 const api = { ACTIONS, KINDS, ACTS_FOR, kindName, typeOf, actorsOf, matches, describe, LEVELS, sysStamp, gameStamp, chunkSpan, gameLine };
-window.BFLog = api;
-if (window.BF) window.BF.logmatch = api; else window.BF = { logmatch: api };
+globalThis.BFLog = api;
+if (globalThis.BF) globalThis.BF.logmatch = api; else globalThis.BF = { logmatch: api };
 })();

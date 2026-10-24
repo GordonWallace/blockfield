@@ -11,7 +11,7 @@
 // build(J, TB) -> { S, L } (solid and blended passes), each null or { pos, uv, col, sky, bl, sphere (planet), ind } typed arrays.
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: in a mesher worker
+const G = globalThis;   // self: in a mesher worker
 const BF = (G.BF = G.BF || {});
 const CS = 16;
 let TB = null;   // the tables of the build running now (the models read them)

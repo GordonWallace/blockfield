@@ -1,7 +1,7 @@
 // World storage, progressive chunk loading, meshing, edits, raycasting and collision.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const CS = 16;      // chunk width/depth
 // World limits (BF.MIN_Y lowest y, BF.H exclusive top, BF.SEA sea level, BF.SY0/SY1 section range) are the mile-high ones,
@@ -27,7 +27,7 @@ const SECN = 4096;
 // returns an unshared copy), because IndexedDB can't store a SharedArrayBuffer in every browser, and postMessage would share it
 // (and can't transfer it: meshJob(c, true) copies the sections it sends to the mesher workers, r15-03).
 // An unloaded chunk's arrays are freed like any other object, once nothing references the chunk.
-const SHARED = typeof SharedArrayBuffer === "function" && self.crossOriginIsolated === true;
+const SHARED = typeof SharedArrayBuffer === "function" && globalThis.crossOriginIsolated === true;
 BF.shared = {
   on: SHARED,
   text: SHARED ? "Shared memory: on" : "Shared memory: off: page not isolated",
@@ -848,11 +848,11 @@ const EDGE_NB = { edge: true };   // meshJob: a neighbour chunk across a face ed
 let TBL = null, TBLV = 0, WTBL = null, FOREIGN = null;
 function meshTables() {
   if (TBL) return TBL;
-  const tiles = {};
-  for (const b of BF.blocks) if (b && Array.isArray(b.boxes)) for (const q of b.boxes) if (q && typeof q[6] === "string" && !(q[6] in tiles)) tiles[q[6]] = BF.textures.uv(q[6]);
+  const tiles = {}, draw = !!scene;   // headless (no scene, js/boot.js): the collision boxes only (pane boxes), no texture atlas
+  if (draw) for (const b of BF.blocks) if (b && Array.isArray(b.boxes)) for (const q of b.boxes) if (q && typeof q[6] === "string" && !(q[6] in tiles)) tiles[q[6]] = BF.textures.uv(q[6]);
   TBL = {
     RENDER: BF.RENDER, OPAQUE: BF.OPAQUE, FLUID: BF.FLUID, SOLID: BF.SOLID, SATT: BF.skyLight.ATT, SKB: BF.skyLight.BRIGHT,
-    faceUV: world._faceUV, faceTint: world._faceTint, dirtUV: world._dirtUV, overlayUV: world._overlayUV, tiles, tile0: BF.textures.uv("\u0000"),
+    faceUV: world._faceUV, faceTint: world._faceTint, dirtUV: world._dirtUV, overlayUV: world._overlayUV, tiles, tile0: draw ? BF.textures.uv("\u0000") : null,
     blocks: BF.blocks, DIRS: BF.DIRS, STONE: BF.B.stone, BEDROCK: BF.B.bedrock, PATH: BF.B.dirt_path, FARM: BF.B.farmland, FARM_DRY: BF.B.farmland_dry,
     MINY: BF.MIN_Y, HTOP: BF.H,
   };
@@ -981,6 +981,7 @@ function applyMesh(c, R, anchor) {
 function buildMesh(c) {
   const t0 = performance.now();
   c.meshT = t0;   // fast-forward remesh batching (remeshDirty)
+  if (!scene) { c.mesh = true; c.meshAgain = false; return; }   // headless (js/boot.js): nothing is drawn; the chunk streams as if shown
   c.meshV = (c.meshV || 0) + 1;
   if (c.meshJob === 1) { MP.queue.delete(c); c.meshJob = 0; }
   c.meshAgain = false;   // (an answer still in a worker is older than this mesh: it is dropped)
@@ -1012,8 +1013,8 @@ function poolStart() {
   const left = [...MP.queue];   // (started again: BF.meshInline turned on)
   for (const w of MP.workers) { for (const it of w.busy) left.push(it.c); w.terminate(); }
   MP.workers = []; MP.queue.clear();
-  const k = Math.min(4, (navigator.hardwareConcurrency || 2) - 1);   // every core but the page's, up to 4
-  MP.inline = !!BF.meshInline || typeof Worker === "undefined" || location.protocol === "file:" || k < 1 || !BF.workerUrl;
+  const k = Math.min(4, ((globalThis.navigator && navigator.hardwareConcurrency) || 2) - 1);   // every core but the page's, up to 4
+  MP.inline = !scene || !!BF.meshInline || typeof Worker === "undefined" || location.protocol === "file:" || k < 1 || !BF.workerUrl;
   if (!MP.inline) for (let i = 0; i < k; i++) {
     let w;
     try { w = new Worker(BF.workerUrl("js/meshworker.js")); } catch (e) { poolFail(e && e.message); return; }
@@ -1022,7 +1023,7 @@ function poolStart() {
     w.onerror = e => poolFail(e && e.message);
     MP.workers.push(w);
   }
-  glog("INFO", MP.inline ? "Chunks are meshed in the page (no mesher workers)" : "Chunks are meshed in " + MP.workers.length + " worker threads");
+  glog("INFO", !scene ? "Headless: chunks are not meshed (nothing is drawn)" : MP.inline ? "Chunks are meshed in the page (no mesher workers)" : "Chunks are meshed in " + MP.workers.length + " worker threads");
   for (const c of left) { c.meshJob = 0; if (world.chunks.get(c.key) !== c) continue; if (MP.inline) buildMesh(c); else enqueue(c, c.meshPrio || 0); }
 }
 // A worker that can't load or fails: everything is meshed in the page from now on, starting with the chunks the workers had.

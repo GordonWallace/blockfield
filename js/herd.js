@@ -11,7 +11,7 @@
 // Nothing here creates, removes or saves an animal: each module keeps its own state, pens and saves.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const LOCAL_MAX = 24, LOCAL_R = 16;   // no breeding when this many of a kind are already within this many blocks
 const rnd = (m, a, b) => BF.rand.of(m).range(a, b);   // the mob's seeded stream (js/rand.js)

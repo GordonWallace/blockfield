@@ -5,7 +5,7 @@
 // command line like an open inventory (no movement, no clicks, no hotkeys).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const HIST_KEY = "blockfield.cmdHistory", HIST_MAX = 30, LOG_MAX = 100, FADE_S = 10, MAX_FILL = 32768, MAX_GIVE = 64 * 36;
 const PLAYER = "Player";

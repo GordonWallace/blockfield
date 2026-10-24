@@ -6,7 +6,7 @@
 // builder.js keeps clear of v.arch.box, commands.js /locate prints the village name.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const COLS = 15, ROWS = 4;          // one sign: 4 lines x 15 characters (vanilla); a W x H group holds 4H lines x 15W characters
 const MAXW = 4, MAXH = 4;           // largest group (bigger runs split into several boards)
@@ -585,7 +585,7 @@ if (BF.req) BF.req.on("player.signText", req => {
   return { ok: true };
 });
 // every key goes to the editor while it is open (registered at load time, capture phase, like commands.js)
-addEventListener("keydown", e => {
+if (BF.page) addEventListener("keydown", e => {
   if (!ed.open) return;
   e.stopImmediatePropagation();
   if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey || ed.ro))) { e.preventDefault(); closeEditor(); return; }
@@ -946,7 +946,7 @@ function tick(now) {
     if (ed.open) drawEditor();
   } catch (err) { console.error(err); }
 }
-requestAnimationFrame(tick);
+if (BF.page) requestAnimationFrame(tick);   // (drawing: headless has none)
 // auto signs' text, every half game hour, in the simulation's think phase (spec r15-19; js/world.js tickSim)
 function autoTick() {
   const S = BF.sky;
@@ -955,9 +955,9 @@ function autoTick() {
   if (hh !== lastHH) { lastHH = hh; runAuto(); }
 }
 if (BF.world && BF.world.onThink) BF.world.onThink(autoTick);
-addEventListener("load", () => {
+BF.onLoad(() => {
   if (BF.on) BF.on("newWorld", reset);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const o of overlays.values()) o.sig = null; renderDirty = true; });
+  if (BF.page && document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const o of overlays.values()) o.sig = null; renderDirty = true; });
 });
 
 BF.signs = {

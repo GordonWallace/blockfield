@@ -17,7 +17,7 @@
 // set(i) takes an index into SPEEDS (0 = 1x); speed reads 0 while frozen.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const SPEEDS = [1, 3, 5, 10, 100, 1000];
 const TICK = 0.05, MAX_STEPS = 1000, MAX_FRAME = 0.25;   // one tick is 0.05 s of game time; never more than 1000 ticks in a frame; a frame counts at most 0.25 real s
@@ -29,7 +29,7 @@ BF.simNow = () => clock;
 // Indicator (hidden at 1x).
 let el = null;
 function ui() {
-  if (el || !document.body) return el;
+  if (el || !BF.page || !document.body) return el;   // (headless: no badge)
   el = document.createElement("div");
   el.id = "warp";
   el.hidden = true;
@@ -107,7 +107,7 @@ BF.warp = {
   reset() { this.set(0); },
 };
 
-addEventListener("keydown", e => {
+if (BF.page) addEventListener("keydown", e => {
   if ((e.code !== "ArrowLeft" && e.code !== "ArrowRight") || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
   if (BF.state && BF.state.paused) return;   // menus, inventory, chat, death screen
@@ -115,5 +115,5 @@ addEventListener("keydown", e => {
   e.preventDefault();
   if (e.code === "ArrowRight") BF.warp.faster(); else BF.warp.slower();
 });
-if (document.body) ui(); else addEventListener("DOMContentLoaded", ui);
+if (!BF.page) { /* headless: no speed badge */ } else if (document.body) ui(); else addEventListener("DOMContentLoaded", ui);
 })();

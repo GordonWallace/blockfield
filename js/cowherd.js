@@ -19,7 +19,7 @@
 //  They cook raw beef into steak in a real furnace with fuel (js/furnaceuse.js, as js/eggcook.js), and buy empty bottles back from the village.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const FEED_DAYS = 1;          // a cow is willing to breed for this long after eating wheat
 const BREED_CD = 1;           // days before a cow that bred can breed again

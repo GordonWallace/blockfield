@@ -17,7 +17,7 @@
 //                 serialize(), deserialize(o), reset(), stats }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const reg = new Map();   // id -> live object
 // Removed mobs, kept readable for a while (id -> {o, t}): code that held a mob saw it go (m.removed) and acted on that a little later;

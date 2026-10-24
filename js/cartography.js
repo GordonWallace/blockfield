@@ -7,7 +7,7 @@
 //   librarian's paper, ...) and trades like the player would (stock and room rules of trading.js); the player can sell it the ingredients too (trade table).
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const TR = () => BF.trades;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);

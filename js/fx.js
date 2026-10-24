@@ -10,7 +10,7 @@
 //   tap(fn) (fn(e) for every event emitted) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const MAX = 600;
 let q = [];

@@ -14,7 +14,7 @@
 // from picking, hives from real honeycomb and planks, candles from honeycomb and string.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PROF = "beekeeper";
 const HIVES_MAX = 4;              // hives per beekeeper

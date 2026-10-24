@@ -7,9 +7,8 @@
 //    circle near edges, wedges and opposite faces are flagged, lat/lon round-trips, recanon keeps a walk straight
 //  - one world: the helpers' identity branches for the flat generators 1 to 3 were removed with them (r14-24); the helpers treat any
 //    point as an atlas point, whatever BF.state.gen says, and isPlanet() is gone (idea-045)
-global.window = {};
-require(__dirname + "/../js/planet.js");
-const BF = window.BF, P = BF.planet, N = P.N;
+require(__dirname + "/../js/planet.js");   // (the modules hang off globalThis.BF, in a page or in node: js/env.js)
+const BF = globalThis.BF, P = BF.planet, N = P.N;
 let fails = 0;
 const check = (ok, what) => { if (ok) console.log("ok " + what); else { fails++; console.log("FAIL " + what); } };
 BF.state = { gen: 4 }; BF.SEA = 0;

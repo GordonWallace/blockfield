@@ -2,7 +2,7 @@
 // coal on top and an ore crate built into its front. Registered on BF.texKit before the atlas is first drawn (loaded after textures-jobs.js).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const K = BF.texKit;
 if (!K) { console.warn("textures-miner: BF.texKit missing (textures.js must load first)"); return; }
 const { T, TS, hex, pal, mix, ramp, jit, planksBase, stoneBase, cobbleBase, WOOD_SPRUCE } = K;

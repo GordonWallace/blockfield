@@ -14,7 +14,7 @@
 // See CONTRACT.md "Fletchers".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const TR = () => BF.trades;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);

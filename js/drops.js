@@ -4,7 +4,7 @@
 // {id, count, pos, vel, age, phase, pulled, pickupDelay, wear}; js/entityview.js draws it (spec r15-12).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // On the planet items keep to the canonical square of the face they lie on (BF.planet.reframe after each move), and the player is
 // seen from the item's frame (BF.planet.local), so an item slides across a face edge and is picked up from either side of it.

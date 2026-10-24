@@ -14,7 +14,7 @@
 //                  history() (V·s/s once a real second, the last 2 minutes), totals() (since reset), reset(), laps (timing points run) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const CATS = ["villagers", "monsters", "wild animals", "village animals", "streaming", "world", "other"];
 const C = { villagers: 0, monsters: 1, wild: 2, vanimals: 3, stream: 4, world: 5, other: 6 };

@@ -15,7 +15,7 @@
 //                      check(x, y, z), checkAll(), stampOf(x, y, z), setStamp(x, y, z, day), serialize(), deserialize(a), stats() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const WET_R = 3;                 // water within 3 blocks (horizontally) hydrates
 const DRY_FROM = 1, DRY_BY = 3;  // days without water or rain: drying may start / is certain
