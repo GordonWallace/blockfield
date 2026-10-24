@@ -1,4 +1,4 @@
-// @ci integration suite=items timeout=420
+// @ci integration suite=items timeout=420 hosts=worker,server
 // Maps, the compass and directions on the planet (generator 4, spec r14-17). True north is toward the pole: BF.planet.north / bearing agree
 // with latitude and longitude, and a margin point's north is its canonical north turned into the margin's frame. At an edge of face 4 (no
 // turn) and one that turns (face 0 to face 2), in a floored box straddling the edge with a gold line across it and a lapis line along it
@@ -8,13 +8,21 @@
 // from another face. An explorer kept in face A's frame across the edge maps the zone it stands in on face B.
 // node test/run.js /tmp/pw test/planet-maps.js
 module.exports = async (pg) => {
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
+  const lib = require('./lib');
+  // a new world of seed 1337 wherever the simulation runs; the planet, the maps and the explorer are read there (spec r15-43), the player
+  // is moved on the page (whose body it is)
+  const wid = await pg.evaluate(async () => {
+    window.__errs = []; addEventListener("error", e => window.__errs.push(e.message));
+    BF.player.start();
+    return (await BF.save.create({ name: "planet-maps", seed: 1337, gameMode: "creative", gen: 4 })).id;
+  });
+  await lib.simReady(pg);
   await pg.waitForTimeout(2500);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
 
   // ---- directions: north toward the pole, east toward increasing longitude
-  const dirs = await pg.evaluate(() => {
+  const dirs = await lib.sim(pg, () => {
     const P = BF.planet, N = P.N, out = [];
     for (const [f, u, v] of [[4, N / 4, N / 3], [0, N * 0.7, N * 0.2], [2, N * 0.3, N * 0.6], [3, N * 0.8, N * 0.4], [1, N / 2, N / 2]]) {
       const a = P.atlas(f, u, v), ll = P.latLonAt(a.x, a.z), n = P.north(a.x, a.z);
@@ -41,17 +49,19 @@ module.exports = async (pg) => {
   check(dirs.names.join() === "north,north-east,S,north", `compass point names ${JSON.stringify(dirs.names)}`);
 
   for (const [f, s] of [[4, 1], [0, 2]]) {
-    const setup = await pg.evaluate(async ([f, s]) => {
-      const P = BF.planet, N = P.N, W = BF.world, h = [[-1, 0], [1, 0], [0, -1], [0, 1]][s];
-      const at = (k, j) => {   // atlas address (through A's margin for k >= 0) of the cell k across the edge, j along it
-        const o = (h[0] || h[1]) < 0 ? -1 - k : N + k, a = N / 2 + j;
-        return h[0] ? P.atlas(f, o, a) : P.atlas(f, a, o);
-      };
+    // the cell k across the edge, j along it (atlas address, through face A's margin for k >= 0), and its canonical cell's middle
+    const atSrc = `(f, s) => { const P = BF.planet, N = P.N, h = [[-1, 0], [1, 0], [0, -1], [0, 1]][s];
+      const at = (k, j) => { const o = (h[0] || h[1]) < 0 ? -1 - k : N + k, a = N / 2 + j; return h[0] ? P.atlas(f, o, a) : P.atlas(f, a, o); };
       const cc = (k, j) => { const a = at(k, j), c = P.canonCell(a.x, a.z); return { x: c.x + 0.5, z: c.z + 0.5 }; };
-      window.__at = at; window.__cc = cc; window.__h = h;
-      const sp = at(-8, 0);
+      return { at, cc, h }; }`;
+    await pg.evaluate(([f, s, src]) => {
+      const { at } = (0, eval)(src)(f, s), sp = at(-8, 0);
       BF.player.setGameMode && BF.player.setGameMode("creative");
       BF.player.teleport(sp.x + 0.5, Math.max(BF.worldgen.heightAt(sp.x, sp.z), BF.SEA) + 30, sp.z + 0.5); BF.player.setFlying(true);
+    }, [f, s, atSrc]);
+    const setup = await lib.sim(pg, async ([f, s, src]) => {
+      const P = BF.planet, W = BF.world, o = (0, eval)(src)(f, s), at = o.at;
+      globalThis.__at = o.at; globalThis.__cc = o.cc; globalThis.__h = o.h;
       for (let i = 0; i < 160; i++) {
         await new Promise(r => setTimeout(r, 250));
         let ok = true;
@@ -66,12 +76,12 @@ module.exports = async (pg) => {
         for (let yy = y - 1; yy < y + 8; yy++) { const id = yy === y - 1 ? want : 0; if (W.getBlock(a.x, yy, a.z) !== id) W.setBlock(a.x, yy, a.z, id); }
       }
       return { y, g: P.EDGE[f][s].g, turn: P.EDGE[f][s].turn, gold: !!B.gold_block, lapis: !!B.lapis_block };
-    }, [f, s]);
+    }, [f, s, atSrc]);
     const tag = `face ${f} edge ${s} (to face ${setup.g}, turn ${setup.turn})`;
     if (!setup.gold || !setup.lapis) { check(false, `${tag}: gold and lapis blocks exist`); continue; }
 
-    const r = await pg.evaluate(([y]) => {
-      const P = BF.planet, M = BF.maps, at = window.__at, cc = window.__cc, h = window.__h, out = {};
+    const r = await lib.sim(pg, ([y]) => {
+      const P = BF.planet, M = BF.maps, at = globalThis.__at, cc = globalThis.__cc, h = globalThis.__h, out = {};
       // a size 2 map (2 blocks a pixel) of the zone on face A beside the edge: it reaches 64 blocks over the edge
       const a0 = at(-1, 0), zx = M.zoneOf(a0.x), zz = M.zoneOf(a0.z), size = 2;
       M.reset();
@@ -125,7 +135,7 @@ module.exports = async (pg) => {
   }
 
   // ---- a map away from a face's middle lines shows a north arrow pointing at the pole; the compass points home from another face
-  const far = await pg.evaluate(async () => {
+  const far = await lib.sim(pg, async () => {
     const P = BF.planet, M = BF.maps, N = P.N, out = {};
     const a = P.atlas(2, N * 0.25, N * 0.3), zx = M.zoneOf(a.x), zz = M.zoneOf(a.z), d = M.getData(3, zx, zz);
     const ang = M.northOn(d), c = M.side(3) / 2, cx = M.originX(3, zx) + c, cz = M.originX(3, zz) + c;
@@ -149,6 +159,7 @@ module.exports = async (pg) => {
   check(far.arrow && far.toPole > 0.02, `off the middle lines the map shows a north arrow pointing at the pole ${JSON.stringify(far)}`);
   check(Math.abs(far.ahead) < 0.05 && Math.abs(far.right - Math.PI / 2) < 0.05, `the compass points home from another face (ahead ${far.ahead}, turned left ${far.right})`);
 
+  await pg.evaluate(id => BF.save.remove(id), wid);
   const errs = await pg.evaluate(() => window.__errs);
   check(!errs.length, "no page errors " + JSON.stringify(errs.slice(0, 3)));
   console.log(bad ? "FAIL planet-maps" : "PASS planet-maps");

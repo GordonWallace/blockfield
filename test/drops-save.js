@@ -1,8 +1,10 @@
-// @ci integration
+// @ci integration hosts=worker,server
 // Dropped items survive a save and load, keep their age (so they still despawn on time), and wait in an unloaded chunk
 // instead of ageing or falling out of the world. Usage: node test/run.js /tmp/ds test/drops-save.js
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  // (where the simulation is: spec r15-43; BF.newWorld there starts its own worlds, the page keeps drawing the boot world)
+  const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) BF.drops.update(h); };
     const load = async (x, z) => {
@@ -50,19 +52,26 @@ module.exports = async (pg, out) => {
     // old saves have no drops
     BF.drops.deserialize(undefined);
     ok("old saves: no drops, no error", BF.drops.list.length === 0);
-    // the real save: through IndexedDB and BF.save.load
-    const meta = await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9, gen: 4 });
-    BF.mobs.spawning = false;
-    await load(px - 21, pz);
-    BF.drops.spawn(cobble, 7, gx + 0.5, gy + 2, gz + 0.5);
-    run(20);
-    await BF.save.saveNow();
-    BF.drops.clear();
-    await BF.save.load(meta.id);
-    const got = BF.drops.list.map(d => [d.id, d.count, Math.round(d.age)]);
-    ok("saved and loaded through IndexedDB", got.length === 1 && got[0][0] === cobble && got[0][1] === 7 && got[0][2] === 20, got);
-    await BF.save.remove(meta.id);
     return R;
   });
+  // the real save: through IndexedDB (the world server's own store on the server) and BF.save.load, asked by the page
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: "drops", seed: 1, gameMode: "creative", villages: 9, gen: 4 })).id);
+  await lib.simReady(pg);
+  await pg.evaluate(() => { BF.state.paused = true; });   // (the simulation pauses with the page: the drops don't age between the steps below)
+  await pg.evaluate(() => new Promise(r => BF.client.query("stats", {}, () => requestAnimationFrame(() => requestAnimationFrame(r)))));
+  await lib.sim(pg, async () => {
+    const px = Math.floor(BF.spawnPoint.x), pz = Math.floor(BF.spawnPoint.z), gx = px + 12, gz = pz + 4, gy = BF.worldgen.heightAt(gx, gz);   // (out of the player's reach)
+    BF.mobs.spawning = false;
+    for (let i = 0; i < 400 && !BF.world.isLoaded(gx, gz); i++) { BF.world.update(gx, gz, 8); await new Promise(r => setTimeout(r, 10)); }
+    BF.drops.spawn(BF.I.cobblestone, 7, gx + 0.5, gy + 2, gz + 0.5, { pickupDelay: 999 });
+    for (let t = 0; t < 20; t += 0.05) BF.drops.update(0.05);
+    await BF.save.saveNow();
+    BF.drops.clear();
+  });
+  await pg.evaluate(id => BF.save.load(id), id);
+  const got = await lib.sim(pg, () => BF.drops.list.map(d => [d.id, d.count, Math.round(d.age), BF.items[d.id].name]));
+  await pg.evaluate(() => { BF.state.paused = false; });
+  res.lines.push((got.length === 1 && got[0][3] === "cobblestone" && got[0][1] === 7 && got[0][2] === 20 ? "PASS " : "FAIL ") + "saved and loaded through the save store  " + JSON.stringify(got));
+  await pg.evaluate(id => BF.save.remove(id), id);
   for (const l of res.lines) console.log(l);
 };

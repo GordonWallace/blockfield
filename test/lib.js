@@ -54,5 +54,7 @@ exports.serve = async (opts = {}) => {
 // where(pg): {host, mode, label} as the page reports it, to check the test runs where it asked
 exports.where = pg => pg.evaluate(() => ({ mode: BF.simHost.mode, label: BF.simHost.label() }));
 // simReady(pg): with the simulation off the page, waits until the world it plays has ticked a couple of seconds (the world server may
-// first solve the planet's rivers), so a test's first BFT.sim sees the world the page shows
-exports.simReady = pg => pg.waitForFunction(() => !BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0), null, { timeout: 300000, polling: 250 });
+// first solve the planet's rivers), so a test's first BFT.sim sees the world the page shows. It first waits for the page to have chosen
+// its host (after a pg.reload the worker starts a moment later: a world loaded before then would load in the page, and the boot world
+// would then replace it in the worker)
+exports.simReady = pg => pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why) && (!BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0)), null, { timeout: 300000, polling: 250 });
