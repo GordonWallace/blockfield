@@ -124,7 +124,9 @@ function run(w, via) {
         settled = true; clearTimeout(timer);
         H.mode = server ? "server" : "worker"; H.worker = true; H.server = server; H.why = "";
         H.threads = server ? (w.hello && w.hello.threads) || 1 : 1;
-        if (globalThis.BF_TEST) w.postMessage({ test: "eval" });   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
+        if (globalThis.BF_TEST) w.postMessage({ test: "eval" });
+        // an automated browser starts the budget off (js/active.js); the world server's Node has a navigator of its own that never says so
+        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) w.postMessage({ auto: true });   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
         BF.world.replica = true;
         BF.glog.remote(list => client.log(list));
         glog("INFO", server ? "The simulation runs on the world server (" + location.host + ", ready in " + Math.round(performance.now() - t0) + " ms)" + (w.hello.held ? "; it holds world \"" + w.hello.held.name + "\", paused since its page closed" : "")

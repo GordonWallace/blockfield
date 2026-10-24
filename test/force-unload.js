@@ -1,27 +1,29 @@
-// @ci integration suite=village
+// @ci integration suite=village hosts=worker,server
 // Force unload (village loading plan): over a limit, a village far from the player is stopped even with a task running, in priority order,
-// never within 100 blocks; each forced stop is logged. Usage: node test/run.js /tmp/fu test/force-unload.js
+// never within 100 blocks; each forced stop is logged. Usage: node test/run.js /tmp/fu test/force-unload.js [--host page|worker|server]
 module.exports = async (pg) => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-  await require('./lib').toVillage(pg);
-  await pg.waitForFunction(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 4, null, { timeout: 60000 });
-  const info = await pg.evaluate(() => {
+  const lib = require('./lib');
+  // waits until fn(arg) is true where the simulation is (spec r15-43)
+  const wait = async (fn, arg, t = 40000) => { for (const end = Date.now() + t; Date.now() < end; await sleep(250)) if (await lib.sim(pg, fn, arg)) return true; return false; };
+  await lib.toVillage(pg);
+  if (!await wait(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.slot).length >= 4, null, 60000)) return ok("the village's villagers are out", false);
+  const info = await lib.sim(pg, () => {
     BF.mobs.spawning = false;
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), v = rec.wg;
     return { key: rec.key, maxX: v.maxX, x: rec.x, z: rec.z };
   });
-  const tp = (x, z) => pg.evaluate(([x, z]) => { BF.player.spawn(x, BF.worldgen.heightAt(x, z) + 3, z); }, [x, z]);
-  const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t }).then(() => true, () => false);
+  const tp = (x, z) => pg.evaluate(([x, z]) => { BF.player.spawn(x, BF.worldgen.heightAt(x, z) + 3, z); }, [x, z]);   // (the page's player: the simulation follows it)
   // 1. a village within 100 blocks of the player is never force-unloaded, whatever the limit
-  await pg.evaluate(() => { BF.villageSim.LIMITS.villages = 0; });
+  await lib.sim(pg, () => { BF.villageSim.LIMITS.villages = 0; });
   await sleep(4000);
-  const near = await pg.evaluate(k => ({ active: BF.villageSim.isActive(k), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").length }), info.key);
+  const near = await lib.sim(pg, k => ({ active: BF.villageSim.isActive(k), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").length }), info.key);
   ok("a village the player stands in is never forced off", near.active && near.errs === 0, near);
   // 2. out on a task, 300 blocks away, over the village-count limit: stopped at once, the villager sent home first, and logged
   // the spot 50 blocks out loaded first (the planet's chunks load slowly: a villager put in a chunk that isn't loaded is taken off and respawns at home)
   await wait(k => { const r = BF.mobs.villages.get(k); return !!r && BF.world.isLoaded(r.wg.maxX + 50, r.z); }, info.key, 60000);
-  await pg.evaluate(k => {
+  await lib.sim(pg, k => {
     const m = BF.mobs.list.find(x => x.village && x.village.key === k && x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
     const T = { what: "Test errand", secs: 300, t0: BF.sky.day + BF.sky.time, end: BF.sky.day + BF.sky.time + 300 / 1200 };   // on a task, not at leisure
     const put = () => { m.position.set(m.village.wg.maxX + 50, BF.worldgen.heightAt(m.village.wg.maxX + 50, m.village.z) + 2, m.village.z); };
@@ -32,24 +34,24 @@ module.exports = async (pg) => {
     // pinned before every game tick (the world runs 20 ticks a game second whatever the frame rate, spec r15-10: a real-time timer
     // between frames would let several ticks run with the villager walking off or its task done)
     const up = BF.mobs.update, ts = BF.world.tickSim;
-    put(); window.__pinned = m; window.__unpin = () => { BF.mobs.update = up; BF.world.tickSim = ts; };
+    put(); globalThis.__pinned = m; globalThis.__unpin = () => { BF.mobs.update = up; BF.world.tickSim = ts; };
     BF.mobs.update = function () { put(); return up.apply(this, arguments); };
     BF.world.tickSim = function () { put(); return ts.apply(this, arguments); };   // (the village re-checks its villagers in tickSim)
-    window.__who = BF.vlog.nameOf(m);
+    globalThis.__who = BF.vlog.nameOf(m);
   }, info.key);
   // the village knows it is out on an errand, and keeps the ground it stands on (its window, re-checked every 0.5 game seconds: spec r15-16)
-  await wait(k => { const m = window.__pinned, CS = BF.CS;
+  await wait(k => { const m = globalThis.__pinned, CS = BF.CS;
     return BF.villageSim.estimates(k).max > 0 && BF.villageSim.keepKeys.has(Math.floor(m.position.x / CS) + "," + Math.floor(m.position.z / CS)); }, info.key, 15000);
   await tp(info.x + 300, info.z);
   const gone = await wait(k => !BF.villageSim.isActive(k), info.key, 30000);
-  await pg.evaluate(() => { window.__unpin(); const m = window.__pinned; if (m) { delete m.vtask; delete m.sleeping; m.vtask = null; m.sleeping = false; } });
-  const after = await pg.evaluate(k => ({ left: BF.mobs.list.filter(m => m.village && m.village.key === k).length, all: BF.villageSim.errors().map(e => e.kind + ":" + e.who + ":" + (e.action || e.task) + ":" + e.why), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").map(e => e.who + ": " + e.action + " (" + e.why + ")"), who: window.__who }), info.key);
+  await lib.sim(pg, () => { globalThis.__unpin(); const m = globalThis.__pinned; if (m) { delete m.vtask; delete m.sleeping; m.vtask = null; m.sleeping = false; } });
+  const after = await lib.sim(pg, k => ({ left: BF.mobs.list.filter(m => m.village && m.village.key === k).length, all: BF.villageSim.errors().map(e => e.kind + ":" + e.who + ":" + (e.action || e.task) + ":" + e.why), errs: BF.villageSim.errors().filter(e => e.kind === "forced-stop").map(e => e.who + ": " + e.action + " (" + e.why + ")"), who: globalThis.__who }), info.key);
   ok("a village over the village-count limit is unloaded with a villager still out", gone && after.left === 0, after);
   ok("the forced stop of an errand is logged with its action and reason", after.errs.some(e => e.indexOf(after.who + ": went home") === 0 && e.indexOf("village count") > 0), after);
-  const gl = await pg.evaluate(who => BF.glog.recent(500).filter(e => e.l === "ERROR" && e.k === "loading" && e.x.indexOf(who + " was stopped mid-task") === 0 && e.v).length, after.who);
+  const gl = await lib.sim(pg, who => BF.glog.recent(500).filter(e => e.l === "ERROR" && e.k === "loading" && e.x.indexOf(who + " was stopped mid-task") === 0 && e.v).length, after.who);
   ok("and is an ERROR in the game log, with the village's name", gl > 0, gl);
   // 3. held chunks over the limit force a village off too
-  await pg.evaluate(() => { BF.villageSim.LIMITS.villages = 10; BF.villageSim.LIMITS.chunks = 5; });
+  await lib.sim(pg, () => { BF.villageSim.LIMITS.villages = 10; BF.villageSim.LIMITS.chunks = 5; });
   await tp(info.x, info.z);
   await wait(k => BF.villageSim.isActive(k), info.key, 30000);
   await tp(info.x + 300, info.z);

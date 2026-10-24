@@ -1,26 +1,26 @@
-// @ci integration suite=village
-// Out on purpose: node test/run.js /tmp/out test/far-stay-out.js
+// @ci integration suite=village hosts=worker,server
+// Out on purpose: node test/run.js /tmp/out test/far-stay-out.js [--host page|worker|server]
 // Villagers more than 40 blocks from their village walk back (mobs.js villagerAI). An explorer with a map still to fill and a merchant on a trip
 // are out there on purpose: in the minutes before the working day starts (and between an explorer's patches) they stay put instead of losing
 // the ground they covered. With nothing to do out there (an explorer with no map) they still walk home.
 module.exports = async (pg, out) => {
+  const lib = require('./lib');
   await pg.evaluate(() => BF.player.start());
-  await require('./lib').toVillage(pg);
-  // the spot 70 blocks east of the village: the player stands by it until its chunks are loaded
-  const A = await pg.evaluate(() => {
+  await lib.toVillage(pg);
+  // the spot 70 blocks east of the village: the player (the page's: the simulation follows it, spec r15-43) stands by it until its chunks are loaded
+  const A = await lib.sim(pg, () => {
     const m = BF.mobs.list.find(v => v.type === "villager" && !v.child && v.village && !v.dead), V = m && m.village;
     if (!V) return null;
-    const x = Math.floor(V.x) + 70, z = Math.floor(V.z);
-    BF.player.position.set(x + 4, BF.player.position.y, z);
-    return { x, z };
+    return { x: Math.floor(V.x) + 70, z: Math.floor(V.z) };
   });
+  if (A) await pg.evaluate(A => BF.player.position.set(A.x + 4, BF.player.position.y, A.z), A);
   for (let i = 0; A && i < 90; i++) {
-    if (await pg.evaluate(A => [[-12, -12], [12, 12], [-12, 12], [12, -12], [0, 0]].every(([dx, dz]) => BF.world.isLoaded(A.x + dx, A.z + dz)), A)) break;
+    if (await lib.sim(pg, A => [[-12, -12], [12, 12], [-12, 12], [12, -12], [0, 0]].every(([dx, dz]) => BF.world.isLoaded(A.x + dx, A.z + dz)), A)) break;
     await pg.waitForTimeout(1000);
   }
   let bad = 0;
   for (const kind of ["explorer", "merchant", "explorer without a map"]) {
-    const r = await pg.evaluate(kind => {
+    const r = await lib.sim(pg, kind => {
       const P = BF.player.position, W = BF.world, prof = kind.split(" ")[0];
       const m = BF.mobs.list.find(v => v.type === "villager" && !v.child && v.village && !v.dead && v.profession === prof);
       if (!m) return { kind, error: "no " + prof };
