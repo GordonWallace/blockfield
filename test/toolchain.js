@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Tool economy soak test (release 1.1): miners, foresters, farmers and shepherds work with tools that wear out; the toolsmith makes
 // new ones from ingots, sticks and planks it buys from miners and foresters (smelting ore in a furnace from the furniture maker when it must).
 // Usage: NODE_PATH=$(npm root -g) node test/toolchain.js <seeds e.g. 1,2,3> [days=3] [villagesPerSeed=3] [out.json]
@@ -11,6 +12,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
+const sim = require('./lib').sim;   // (where the simulation is, on BF_HOST's host: spec r15-43)
 const seeds = (process.argv[2] || '1337').split(',').map(Number);
 const DAYS = +(process.argv[3] || 3);
 const PER_SEED = +(process.argv[4] || 3);
@@ -26,22 +28,23 @@ async function openWorld(seed) {
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
+  await require('./lib').goto(pg, '#seed' + seed);   // (on BF_HOST's host: spec r15-43)
   await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
   await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
+  await require('./lib').hold(pg, true);   // (the simulation's own ticks off too: the test steps it)
   return pg;
 }
 
 // ---- in-page recorder, installed before the villagers spawn (starting kits are handed out at spawn)
 function install(key) {
-  const R = window.__rec = { key, trades: [], calls: [], uses: {}, breaks: [], dug: {}, logs: [], minerLog: [], snaps: [], furn: [], lastTools: {}, appeared: [], vanished: [] };
+  const R = globalThis.__rec = { key, trades: [], calls: [], uses: {}, breaks: [], dug: {}, logs: [], minerLog: [], snaps: [], furn: [], lastTools: {}, appeared: [], vanished: [] };
   const day = () => +(BF.sky.day + BF.sky.time).toFixed(3);
-  const inV = m => m && m.village && m.village.key === window.__rec.key;
+  const inV = m => m && m.village && m.village.key === globalThis.__rec.key;
   // a unique label per villager (names can repeat within a village)
-  const who = window.__who = m => (m && m.type === 'villager') ? BF.vlog.nameOf(m) + '#' + (m.__tcid || (m.__tcid = window.__tcn = (window.__tcn || 0) + 1)) : String(m);
-  if (window.__hooked) return;
-  window.__hooked = true;
+  const who = globalThis.__who = m => (m && m.type === 'villager') ? BF.vlog.nameOf(m) + '#' + (m.__tcid || (m.__tcid = globalThis.__tcn = (globalThis.__tcn || 0) + 1)) : String(m);
+  if (globalThis.__hooked) return;
+  globalThis.__hooked = true;
   const owner = new WeakMap();
   const findOwner = s => {
     if (owner.has(s)) return owner.get(s);
@@ -51,7 +54,7 @@ function install(key) {
   };
   const oTrade = BF.vlog.trade;
   BF.vlog.trade = function (buyer, seller, o, times) {
-    const r = window.__rec;
+    const r = globalThis.__rec;
     if (r && (inV(buyer) || inV(seller)))   // every trade as given, for checking the Economy view's tallies (js/economy.js) at the end
       r.calls.push([buyer === 'player' ? 'Player' : BF.vlog.pretty(buyer.profession), BF.vlog.pretty(seller.profession), typeof o === 'object' ? JSON.parse(JSON.stringify(o)) : String(o), times || 1]);
     if (r && o && typeof o === 'object' && o.sell && (inV(buyer) || inV(seller)))
@@ -61,14 +64,14 @@ function install(key) {
   };
   const oLog = BF.vlog.log;
   BF.vlog.log = function (rec, kind, text) {
-    const r = window.__rec;
+    const r = globalThis.__rec;
     if (r && rec && rec.key === r.key && kind !== 'trade') r.logs.push([day(), kind, String(text)]);
     return oLog.apply(this, arguments);
   };
   const oWear = BF.wearStack;
   BF.wearStack = function (s, n) {
     const res = oWear.apply(this, arguments);
-    const r = window.__rec, m = s && res ? findOwner(s) : null;
+    const r = globalThis.__rec, m = s && res ? findOwner(s) : null;
     if (r && m && inV(m)) {
       const k = m.profession + ' ' + BF.itemName(s.id);
       r.uses[k] = (r.uses[k] || 0) + (n || 1);
@@ -78,7 +81,7 @@ function install(key) {
   };
   const oEmit = BF.emit;
   BF.emit = function (ev, x, y, z, id) {
-    const r = window.__rec;
+    const r = globalThis.__rec;
     if (r && ev === 'blockBroken' && typeof id === 'number') {
       const n = BF.itemName(id);
       if (/ore|Debris|Raw/i.test(n)) {
@@ -95,7 +98,7 @@ function install(key) {
 // Dead ends: a toolsmith the soak saw "Waiting for gold ..." must show as wanting it, and a miner holding cobblestone it hasn't sold
 // for 2 days must show as holding it.
 function econCheck() {
-  const R = window.__rec, E = BF.econ, out = [];
+  const R = globalThis.__rec, E = BF.econ, out = [];
   if (!E) return ['FAIL economy: BF.econ missing'];
   const nm = id => BF.itemName(id).replace(/ Item$/, ''), want = {};
   const add = (k, n) => { want[k] = (want[k] || 0) + n; };
@@ -122,10 +125,10 @@ function econCheck() {
   for (const m of (rec ? rec.members : [])) {
     if (m.profession !== 'miner' || m.dead || !m.position || !(m.trades || []).some(o => o.sell.id === cob)) continue;
     const held = BF.trades.inv.count(m.inv, cob), name = BF.vlog.nameOf(m), first = R.snaps[0] ? R.snaps[0].d : now;
-    const lastSale = Math.max(first, ...R.trades.filter(t => t.sName === window.__who(m) && t.item === 'Cobblestone').map(t => t.d));
+    const lastSale = Math.max(first, ...R.trades.filter(t => t.sName === globalThis.__who(m) && t.item === 'Cobblestone').map(t => t.d));
     // held since: the first snapshot after that sale with cobblestone in the pack (a miner may only reach stone part way through the soak).
     // The economy's unsold clock starts at its first once-a-day scan after that, at the latest the next day's start.
-    const hs = R.snaps.find(sn => sn.d >= lastSale && sn.vs.some(x => x.name === window.__who(m) && x.counts.cobblestone > 0)), since = hs ? hs.d : now;
+    const hs = R.snaps.find(sn => sn.d >= lastSale && sn.vs.some(x => x.name === globalThis.__who(m) && x.counts.cobblestone > 0)), since = hs ? hs.d : now;
     if (held < 1 || now < Math.floor(since) + 1 + E.STUCK) continue;
     const line = today && today.s.find(r => r[0] === name && r[2] === 'Cobblestone');
     out.push((line ? 'PASS' : 'FAIL') + ` economy: miner ${name}'s unsold cobblestone (${held}, held since day ${since.toFixed(2)}) is a dead end` + (line ? ' (' + line[4] + ' days)' : ''));
@@ -135,7 +138,7 @@ function econCheck() {
 
 // One snapshot of the village (every game hour).
 function snapshot() {
-  const R = window.__rec, key = R.key;
+  const R = globalThis.__rec, key = R.key;
   const isTool = id => { const it = BF.items[id]; return !!(it && (it.tool && typeof it.tool === 'object' || /shears/.test(it.name))); };
   const toolType = id => { const it = BF.items[id]; return it.tool && it.tool.type || (/shears/.test(it.name) ? 'shears' : '?'); };
   const KEY = ['emerald', 'stick', 'iron_ingot', 'gold_ingot', 'raw_iron', 'raw_gold', 'iron_ore', 'gold_ore', 'diamond', 'redstone', 'coal', 'cobblestone', 'torch', 'furnace'];
@@ -149,7 +152,7 @@ function snapshot() {
     for (const s of m.inv || []) if (s) { const nm = BF.items[s.id].name; if (/_planks$|^planks$/.test(nm)) planks += s.count; if (/_log$|^log$/.test(nm)) logs += s.count; }
     if (planks) counts.planks = planks; if (logs) counts.logs = logs;
     const x = Math.floor(m.position.x), z = Math.floor(m.position.z);
-    return { name: window.__who(m), prof: m.profession, level: m.level || 1, xp: m.xp || 0, tools, counts, y: +m.position.y.toFixed(1),
+    return { name: globalThis.__who(m), prof: m.profession, level: m.level || 1, xp: m.xp || 0, tools, counts, y: +m.position.y.toFixed(1),
       depth: +(BF.worldgen.heightAt(x, z) - m.position.y).toFixed(1), status: BF.villagerStatus ? BF.villagerStatus.text(m) : '' };
   });
   // tools that appeared / vanished since the last snapshot (net of trades this interval)
@@ -171,9 +174,9 @@ function snapshot() {
     R.lastTools[v.name] = now;
   }
   R.lastSnapD = d;
-  if (window.__TSTRACE && BF.toolsmith) for (const m of mem) if (m.profession === 'toolsmith') {   // TSTRACE=1: what each toolsmith plans, every hour
+  if (globalThis.__TSTRACE && BF.toolsmith) for (const m of mem) if (m.profession === 'toolsmith') {   // TSTRACE=1: what each toolsmith plans, every hour
     let p = null; try { p = BF.toolsmith.plan(m); } catch (e) { p = { err: String(e) }; }
-    const v = vs.find(x => x.name === window.__who(m));
+    const v = vs.find(x => x.name === globalThis.__who(m));
     (R.tstrace = R.tstrace || []).push([d, v.name, p && JSON.stringify(p, (k, x) => typeof x === 'function' ? undefined : x), v.tools.map(t => t.n).join('/'), JSON.stringify(v.counts), v.status, JSON.stringify(m.tsm && m.tsm.waitBetter)]);
   }
   // furnaces near the village centre
@@ -201,14 +204,14 @@ function snapshot() {
       const key = Math.round(v.x) + ',' + Math.round(v.z);
       if (process.env.ONLY && process.env.ONLY !== key) continue;
       const t0 = Date.now();
-      if (pg.__used) { await pg.close(); pg = await openWorld(seed); }
+      if (pg.__used) { await pg.done(); pg = await openWorld(seed); }
       pg.__used = true;
-      await pg.evaluate(t => { window.__TSTRACE0 = t; }, !!process.env.TSTRACE);
-      await pg.evaluate(install, key);
-      await pg.evaluate('window.__snap = ' + snapshot.toString());
-      await pg.evaluate('window.__econCheck = ' + econCheck.toString());
-      const setup = await pg.evaluate(([v, ft]) => {
-        window.__FT = ft; window.__TSTRACE = !!(window.__TSTRACE0);
+      await sim(pg, t => { globalThis.__TSTRACE0 = t; }, !!process.env.TSTRACE);
+      await sim(pg, install, key);
+      await sim(pg, '() => { globalThis.__snap = ' + snapshot.toString() + '; }');
+      await sim(pg, '() => { globalThis.__econCheck = ' + econCheck.toString() + '; }');
+      const setup = await sim(pg, ([v, ft]) => {
+        globalThis.__FT = ft; globalThis.__TSTRACE = !!(globalThis.__TSTRACE0);
         const key = Math.round(v.x) + ',' + Math.round(v.z);
         BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
         const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
@@ -222,17 +225,17 @@ function snapshot() {
       }, [v, !!process.env.FURNACE_TICK]);
       if (!Object.keys(setup.profs).length || NEED.some(p => !setup.profs[p])) { console.log(`seed ${seed} village ${key} pop ${v.pop}: skipped ${JSON.stringify(setup.profs)}`); continue; }
       done++;
-      await pg.evaluate(() => window.__snap());
+      await sim(pg, () => globalThis.__snap());
       const h = 0.05, HOUR = Math.round(50 / h), total = Math.round(DAYS * 1200 / h), PER_CALL = HOUR * 4;
       for (let s = 0; s < total; s += PER_CALL) {
-        await pg.evaluate(([n, h, v, HOUR]) => {
-          const R = window.__rec;
+        await sim(pg, ([n, h, v, HOUR]) => {
+          const R = globalThis.__rec;
           for (let i = 1; i <= n; i++) {
             BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
             if (BF.econ) BF.econ.update();   // the Economy view's once-a-day scan of unsold goods (the page's frame loop runs it through vlog)
-            if (window.__FT) BF.inventory.update(h);
+            if (globalThis.__FT) BF.inventory.update(h);
             if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
-            if (i % HOUR === 0) window.__snap();
+            if (i % HOUR === 0) globalThis.__snap();
           }
           if (BF.miner && BF.miner.LOG) R.minerLog.push(...BF.miner.LOG.splice(0).filter(e => e.village === R.key));
         }, [Math.min(PER_CALL, total - s), h, v, HOUR]);
@@ -240,7 +243,7 @@ function snapshot() {
       results.push(await summarise(pg, seed, v, setup, t0));
       if (OUT) fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
     }
-    await pg.close();
+    await pg.done();
   }
   overall(results);
   await b.close();
@@ -255,8 +258,8 @@ const add = (o, k, n = 1) => { o[k] = (o[k] || 0) + n; };
 const top = (o, n = 6) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => k + ' ' + v).join(', ');
 
 async function summarise(pg, seed, v, setup, t0) {
-  const econ = await pg.evaluate(() => window.__econCheck());
-  const R = await pg.evaluate(() => { const r = Object.assign({}, window.__rec); delete r.lastTools; delete r.calls; return r; });
+  const econ = await sim(pg, () => globalThis.__econCheck());
+  const R = await sim(pg, () => { const r = Object.assign({}, globalThis.__rec); delete r.lastTools; delete r.calls; return r; });
   const first = R.snaps[0], last = R.snaps[R.snaps.length - 1];
   const profsEnd = {};
   for (const x of last.vs) add(profsEnd, x.prof);

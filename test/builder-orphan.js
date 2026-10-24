@@ -1,7 +1,10 @@
 // A builder that leaves the trade mid-structure must not block the village: another builder takes the structure over (bug-006).
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/bo test/builder-orphan.js
+// @ci integration suite=jobs hosts=worker,server
 module.exports = async (pg) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.sky.setTime(0.2); });
+  const sim = (fn, a) => require('./lib').sim(pg, fn, a);   // (where the simulation is: spec r15-43)
+  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
+  await sim(() => BF.sky.setTime(0.2));
   await require('./lib').toVillage(pg);
   // The setup below runs the builder's AI in place, without moving anyone, so a builder short of materials can't buy them there. In a
   // village with a furniture maker a builder starts with no beds and walks over to buy one (js/builder.js startStock), so a house can
@@ -9,13 +12,13 @@ module.exports = async (pg) => {
   // so its chunks load, and 10 s steps of mob time) until one of its builders has started a structure: up to 5 minutes of mob time, or
   // 150 s (slow frames make each step slow).
   for (let k = 0, t0 = Date.now(); k < 30 && Date.now() - t0 < 150000; k++, await pg.waitForTimeout(500)) {
-    if (await pg.evaluate(() => {
+    if (await sim(() => {
       const M = BF.mobs;
       M.spawning = false; for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(0.05); }
       return M.list.some(m => m.type === "villager" && !m.dead && m.profession === "builder" && m.village && BF.builder.builtOf(m.village).some(e => e.state === "building"));
     })) break;
   }
-  const r = await pg.evaluate(() => {
+  const r = await sim(() => {
     const M = BF.mobs, Bd = BF.builder, r = {};
     M.spawning = false; for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(0.05); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.child);

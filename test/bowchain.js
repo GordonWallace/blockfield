@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Bow and arrow economy soak (release 1.3): the poultry keeper's culls give feathers, the shepherd spins string, the miner keeps flint from gravel,
 // the forester sells sticks, and the fletcher buys them and makes arrows and bows. Runs one village that has a fletcher, a shepherd, a poultry
 // keeper, a miner and a forester for N game days (no rendering, like test/toolchain.js) and checks:
@@ -23,6 +24,7 @@
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
+const sim = require('./lib').sim;   // (where the simulation is, on BF_HOST's host: spec r15-43)
 const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
 const NEED = ['fletcher', 'shepherd', 'poultry_keeper', 'miner', 'forester'];
 const GRAVEL = 32;   // blocks of surface gravel laid beside the village for the miner's flint (see the header)
@@ -38,7 +40,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await require('./lib').goto(pg, '#seed' + SEED);   // (on BF_HOST's host: spec r15-43)
   await require('./lib').ready(pg);
   // the nearest village (within 3000 blocks of the spawn) whose villagers include every trade of the chain and that has a coop
   const cands = await pg.evaluate(() => {
@@ -46,9 +48,10 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
     return BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'coop')).slice(0, 8).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
-  await pg.evaluate(() => {
-    const WATCH = window.__WATCH = ['arrow', 'bow', 'feather', 'string', 'flint', 'egg', 'raw_chicken'];
-    const R = window.__rec = { key: null, lines: [], restock: [], buys: {} };
+  await require('./lib').hold(pg, true);   // (the simulation's own ticks off too: the test steps it)
+  await sim(pg, () => {
+    const WATCH = globalThis.__WATCH = ['arrow', 'bow', 'feather', 'string', 'flint', 'egg', 'raw_chicken'];
+    const R = globalThis.__rec = { key: null, lines: [], restock: [], buys: {} };
     const oLog = BF.vlog.log;
     BF.vlog.log = function (rec, kind, text) { if (rec && rec.key === R.key) R.lines.push([+(BF.sky.day + BF.sky.time).toFixed(3), kind, String(text)]); return oLog.apply(this, arguments); };
     const oTrade = BF.vlog.trade;   // trades are logged inside villagelog.js, past the BF.vlog.log hook
@@ -72,7 +75,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
       return r;
     };
     // the village's holdings of the watched items: its villagers' packs and the chests within 80 blocks of its centre
-    window.__total = () => {
+    globalThis.__total = () => {
       const out = {}, I = BF.I, [cx, cz] = R.key.split(',').map(Number);
       const ms = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === R.key && !m.dead && Array.isArray(m.inv));
       for (const n of WATCH) {
@@ -86,8 +89,8 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   });
   let setup = null;
   for (const v of cands) {
-    const r = await pg.evaluate(v => {
-      const key = window.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
+    const r = await sim(pg, v => {
+      const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
       for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
@@ -104,8 +107,8 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   else {
     // surface gravel for the miner's flint (see the header): GRAVEL single blocks of gravel laid on flat open ground beside the village, two
     // blocks apart, clear of anything built: each is a step above the ground around it, which is what the miner digs (js/miner.js quarryable)
-    setup.gravelPlaced = await pg.evaluate(n => {
-      const R = window.__rec, W = BF.world, T = BF.miner._test;
+    setup.gravelPlaced = await sim(pg, n => {
+      const R = globalThis.__rec, W = BF.world, T = BF.miner._test;
       const mn = BF.mobs.list.find(m => m.type === 'villager' && m.profession === 'miner' && m.village && m.village.key === R.key && !m.dead);
       const A = T.area(mn), b = A.box, floor = Math.floor(mn.village.wg && mn.village.wg.y != null ? mn.village.wg.y : mn.village.y) - 12;
       const out = (x, z) => Math.hypot(Math.max(0, b.minX - x, x - b.maxX), Math.max(0, b.minZ - z, z - b.maxZ));
@@ -124,8 +127,8 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
       return placed;
     }, GRAVEL);
     // a full coop for the keeper's feathers (see the header): grown chickens let into the run of the keeper's coop until it holds FLOCK
-    if (setup.gravelPlaced >= GRAVEL) setup.flock = await pg.evaluate(n => {
-      const R = window.__rec, P = BF.poultry;
+    if (setup.gravelPlaced >= GRAVEL) setup.flock = await sim(pg, n => {
+      const R = globalThis.__rec, P = BF.poultry;
       const k = BF.mobs.list.find(m => m.type === 'villager' && m.profession === 'poultry_keeper' && m.village && m.village.key === R.key && !m.dead);
       const c = k && P.coopOf(k);
       if (!c || !c.hens) return 0;
@@ -138,14 +141,14 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
     }, FLOCK);
     if (setup.gravelPlaced < GRAVEL) setup = { err: 'room for only ' + setup.gravelPlaced + ' of ' + GRAVEL + ' surface gravel by village ' + setup.key };
     else if (setup.flock < FLOCK) setup = { err: 'the poultry keeper\'s coop by village ' + setup.key + ' took in only ' + setup.flock + ' of ' + FLOCK + ' chickens' };
-    else await pg.evaluate(() => { const R = window.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = window.__total(); });
+    else await sim(pg, () => { const R = globalThis.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = globalThis.__total(); });
   }
-  if (setup.err) { console.log('FAIL ' + setup.err); await b.close(); process.exitCode = 1; return; }
+  if (setup.err) { console.log('FAIL ' + setup.err); await pg.done(); await b.close(); process.exitCode = 1; return; }
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}, surface gravel ${setup.gravelPlaced}, coop ${setup.flock} chickens`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
-    await pg.evaluate(([n, h, key]) => {
+    await sim(pg, ([n, h, key]) => {
       const [x, z] = key.split(',').map(Number);
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
@@ -154,9 +157,9 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
     }, [Math.min(PER, total - s), h, setup.key]);
     if ((s / PER) % 24 === 23) console.log(`  day ${((s + PER) * h / 1200).toFixed(1)} (${Math.round((Date.now() - t0) / 1000)} s)`);
   }
-  const R = await pg.evaluate(() => {
-    const R = window.__rec, I = BF.I;
-    R.end = window.__total();
+  const R = await sim(pg, () => {
+    const R = globalThis.__rec, I = BF.I;
+    R.end = globalThis.__total();
     const f = BF.mobs.list.find(m => m.type === 'villager' && m.profession === 'fletcher' && m.village && m.village.key === R.key && !m.dead);
     R.fletcher = f ? { inv: f.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count), offers: (f.trades || []).filter(o => o.sell.id === I.arrow || o.sell.id === I.bow).map(o => BF.items[o.sell.id].name + (BF.trades.blockReason(f, o) ? ' (' + BF.trades.blockReason(f, o) + ')' : ' in stock')) } : null;
     R.miners = BF.mobs.list.filter(m => m.type === 'villager' && m.profession === 'miner' && m.village && m.village.key === R.key && !m.dead).map(m => {
@@ -199,5 +202,5 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   ok('no bows from nothing', R.end.bow <= R.start.bow + bows, [R.start.bow, bows, R.end.bow]);
   if (pageErrors) ok('no page errors', false, pageErrors);
   console.log(`ran ${DAYS} days in ${Math.round((Date.now() - t0) / 1000)} s`);
-  await b.close();
+  await pg.done(); await b.close();
 })();

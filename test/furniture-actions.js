@@ -1,8 +1,10 @@
 // Furniture maker checks: node test/run.js /tmp/furn test/furniture-actions.js
+// @ci integration hosts=worker,server
 // Unit part: roster odds (needs the forester profession, PR #27), the newly-generated-village gate, starting stock, crafting, buying wool and
 // boards, selling beds to a builder. Live part: in a real village a furniture maker at its bench buys, crafts and sells to a builder.
 module.exports = async (pg, out) => {
-  const r = await pg.evaluate(() => {
+  const sim = require('./lib').sim;   // (where the simulation is: spec r15-43)
+  const r = await sim(pg, () => {
     const res = {}, I = BF.I, T = BF.trades, F = BF.furniture, inv = T.inv;
     const names = a => a.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count);
     // ---- roster: 80% of villages with both a shepherd and a forester; never otherwise
@@ -82,7 +84,7 @@ module.exports = async (pg, out) => {
   // (~50 MB/s) while the long evaluates below keep the page busy, past CI's 10 GB cap on the planet (as test/explorer-far.js)
   await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
-  const setup = await pg.evaluate(() => {
+  const setup = await sim(pg, () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child && m.profession !== "builder");
     const bld = BF.mobs.list.find(m => m.type === "villager" && m.profession === "builder" && !m.dead);
     if (vs.length < 3) return "villagers: " + vs.length;
@@ -99,7 +101,7 @@ module.exports = async (pg, out) => {
     for (const v of [A, S, W]) inv.add(v.inv, I.bread, 12);   // fed, so food shopping (js/villagelife.js) does not take over
     BF.sky.setTime ? BF.sky.setTime(0.08) : (BF.sky.time = 0.08);
     BF.player.position.set(A.position.x + 5, A.position.y + 1, A.position.z);
-    window.__A = A; window.__B = bld;
+    globalThis.__A = A; globalThis.__B = bld;
     BF.furniture.LOG.length = 0;
     if (BF.warp) BF.warp.set(4);   // 100x: the headless renderer is slow
     return { claim: A.res, builder: !!bld, A: A.profession, jobsite: A.jobsite };
@@ -108,8 +110,8 @@ module.exports = async (pg, out) => {
   const t0 = Date.now(), seen = new Set();
   while (Date.now() - t0 < 150000) {
     await pg.waitForTimeout(5000);
-    const s = await pg.evaluate(() => {
-      const A = window.__A, B = window.__B, I = BF.I, c = (m, id) => (m ? BF.trades.inv.count(m.inv, id) : -1);
+    const s = await sim(pg, () => {
+      const A = globalThis.__A, B = globalThis.__B, I = BF.I, c = (m, id) => (m ? BF.trades.inv.count(m.inv, id) : -1);
       if (BF.sky.time > 0.4) BF.sky.setTime ? BF.sky.setTime(0.08) : (BF.sky.time = 0.08);
       return { st: BF.furniture.statusText(A), beds: c(A, I.red_bed), wool: c(A, I.white_wool), planks: c(A, I.planks), em: c(A, I.emerald), bBeds: c(B, I.red_bed),
         log: BF.furniture.LOG.slice(-4).map(e => e.kind + ":" + (e.made || e.got || e.from || "") + (e.beds ? " beds " + e.beds : "")) };
@@ -119,7 +121,7 @@ module.exports = async (pg, out) => {
     if (seen.has("buy") && seen.has("craft") && seen.has("sell")) break;
   }
   console.log("live kinds seen:", [...seen].join(","));
-  await pg.evaluate(() => BF.warp && BF.warp.reset());
-  await pg.evaluate(() => { const A = window.__A; BF.player.position.set(A.position.x + 3, A.position.y + 1.5, A.position.z + 3); });
+  await sim(pg, () => BF.warp && BF.warp.reset());
+  await sim(pg, () => { const A = globalThis.__A; BF.player.position.set(A.position.x + 3, A.position.y + 1.5, A.position.z + 3); });
   await pg.waitForTimeout(800);
 };
