@@ -1387,7 +1387,7 @@ function rayBox(o, d, mn, mx) {   // distance along the ray to the box, or null
   return t0;
 }
 // The mobs whose boxes block a placement or a rest: the simulation's, or the mirror's stand-ins with the simulation in a worker
-const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : (BF.mobs && BF.mobs.list) || [];
+const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { label: "player near" }) : (BF.mobs && BF.mobs.list) || [];   // (r15-32)
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
   const bh = boatHit(), m0 = mobHit();

@@ -223,15 +223,16 @@ const JOBS = () => [BF.toolsmith, BF.eggCook, BF.baker, BF.glassmaker, BF.beekee
 // Stops what the village's villagers are doing so that it can unload: merchants go home with their cargo, furnace and oven workers empty
 // them, led animals are let go, trades are cancelled and villagers out on an errand are put back at their bed. Each one is logged.
 function forceStop(rec, why) {
-  const L = BF.mobs.list, key = rec.key;
-  for (const m of L.slice()) {
+  const key = rec.key, led = new Map();   // (the led animals, found in one pass: a lead can be any length)
+  for (const o of BF.mobs.list) { const by = o.ledBy; if (by) { if (!led.has(by)) led.set(by, []); led.get(by).push(o); } }
+  for (const m of BF.regions.villageMobs(rec, m => m.type === "villager")) {   // (its own villagers, r15-32)
     if (m.type !== "villager" || m.village !== rec || m.dead || m.removed) continue;
     const acts = [], task = BF.villagerStatus ? BF.villagerStatus.text(m) : "", leisure = isLeisure(m);   // (before the jobs' stops below clear its task)
     if (m.tradingWith) { m.tradingWith = null; acts.push("cancelled the trade"); }
     if (m.profession === "merchant" && BF.merchant && BF.merchant.forceHome && BF.merchant.forceHome(m, why)) acts.push("went home with its cargo");
     const stopJob = j => j && j.forceStop && (BF.furnaceUse ? BF.furnaceUse.direct(() => j.forceStop(m)) : j.forceStop(m));   // furnaces emptied at once: it is packed next (js/furnaceuse.js)
     for (const j of JOBS()) { const a = stopJob(j); if (a) acts.push(a); }
-    for (const o of L) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
+    for (const o of led.get(m) || []) if (o.ledBy === m) { o.ledBy = null; acts.push("let go of a " + o.type); }
     const v = rec.wg;
     if (!acts.length && leisure) continue;                      // leisure ends quietly (endLeisure, when the village unloads)
     if (m.profession !== "explorer" && !acts.length && v && v.minX != null && edgeDist(v, m.position.x, m.position.z) > 4 && BF.mobs.sendHome) { BF.mobs.sendHome(m); acts.push("went home"); }
@@ -254,7 +255,7 @@ function endLeisure(key) {
 // Trips towards or from a village end when it is forced off.
 function forceTrips(key, why) {
   if (!BF.merchant || !BF.merchant.forceHome) return;
-  for (const m of BF.mobs.list) if (m.mc && m.mc.trip && (m.mc.trip.home === key || m.mc.trip.dest === key) && m.type === "villager") {
+  for (const m of BF.regions.ofType("villager").slice()) if (m.mc && m.mc.trip && (m.mc.trip.home === key || m.mc.trip.dest === key)) {
     BF.merchant.forceHome(m, why);
     logError("forced-stop", { village: key, who: nameOf(m), task: "caravan trip", action: "went home with its cargo", why });
   }
@@ -290,12 +291,8 @@ function overLimit(next, now, extra) {
 // ---- chunks kept around villagers outside their village
 const winKeys = new Set();
 function windows() {
-  const CS = BF.CS, next = new Set(), L = BF.mobs && BF.mobs.list;
-  if (L) for (const m of L) {
-    const rec = m.village;
-    if (!rec || m.type !== "villager" || m.dead || m.removed || !m.position) continue;
-    const ent = active.get(rec.key);
-    if (!ent) continue;
+  const CS = BF.CS, next = new Set(), V = BF.mobs && BF.mobs.villages;
+  if (V) for (const [key, ent] of active) for (const m of BF.regions.villageMobs(V.get(key), m => m.type === "villager" && !m.dead && !!m.position)) {   // (the running villages' own villagers, r15-32)
     if (!ent.set) ent.set = new Set(ent.keys);
     const x = m.position.x, z = m.position.z, K = (dx, dz) => canonKey(x + dx * CS, z + dz * CS);   // (canonical: a villager past an edge is kept in its village's frame)
     if (ent.set.has(K(-WIN, -WIN)) && ent.set.has(K(WIN, WIN)) && ent.set.has(K(-WIN, WIN)) && ent.set.has(K(WIN, -WIN))) continue;   // well inside its village

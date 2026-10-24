@@ -192,6 +192,14 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     out.drop1 = !!(d && R.dropsIn(R.keyOf(d.pos.x, 0, d.pos.z)).has(d)) && R.check().ok;
     BF.drops.remove(d);
     out.drop2 = R.check().ok;
+    // a mob brought back from a snapshot (js/mobsave.js, as wildlife.js brings back a wild animal) keeps its own index slot and order,
+    // and leaves the index when removed
+    { const src = BF.mobs.list.find(m => !m.removed && !m.dead && m.type !== 'villager' && m.type !== 'iron_golem'), snap = src && BF.mobSave.snapOf(src);
+      const m = snap && BF.mobs.spawn(src.type, p.x + 2, p.y, p.z + 2), ri = m && m._ri, rs = m && m._rs;
+      if (m) BF.mobSave.apply(m, snap);
+      out.snapSlot = !!m && m._ri === ri && m._rs === rs && m._rs > src._rs;
+      if (m) BF.mobs.discard(m);
+      out.snapGone = !!m && !R.mobsIn(R.keyOf(m.position.x, 0, m.position.z))?.has(m) && R.check().ok; }
     const rec = [...BF.mobs.villages.values()].find(v => BF.villageSim.isActive(v.key));
     const before = R.counts().mobs;
     out.unloaded = rec ? BF.mobs.unloadVillage(rec.key) : 0;
@@ -205,6 +213,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   });
   check(ev.beOk, `block entities placed and broken stay in step (${ev.be.join(', ')})`);
   check(ev.drop1 && ev.drop2, 'a drop is indexed when made and leaves when removed');
+  check(ev.snapSlot && ev.snapGone, `a mob given a snapshot's state keeps its own index slot and order, and leaves the index when removed (${ev.snapSlot}, ${ev.snapGone})`);
   check(ev.resize, 'a new region size (32, then 64 again) refills the index, and the self-check agrees');
   check(ev.unload && ev.unloaded > 0 && ev.mobsAfter === ev.before - ev.unloaded, `a village's ${ev.unloaded} mobs leave the index when it unloads (${ev.before} -> ${ev.mobsAfter}) ${ev.unloadDiffs.join(' | ')}`);
 

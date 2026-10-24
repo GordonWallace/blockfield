@@ -548,7 +548,7 @@ function tick(dt) {
   if ((offT -= dt) > 0 || !BF.mobs) return;
   offT = 2;
   stockGen();
-  for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === PROF && live(m) && !m.tradingWith) syncOffers(m);
+  for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && live(m) && !m.tradingWith) syncOffers(m);
 }
 // What a villager holds besides its pack, for the debug screen (js/debugfeed.js): a stable hand's paddock horses.
 function holdings(m) {

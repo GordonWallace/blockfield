@@ -171,8 +171,9 @@ async function run(b, url, mode) {
     const hud = await pg.evaluate(() => { const v = BF.player.vehicle; return v && v.ctl.hud ? v.ctl.hud(v) : null; });
     check(hud && hud.hp > 0 && hud.max >= hud.hp, tag('the HUD has the horse\'s health'), hud);
     const b0 = await query('entity', { id: horseId });
-    await pg.evaluate(() => BF.player.setLook(Math.PI / 2, 0));
-    await hold('KeyW', 2000); await settle(); await pg.waitForTimeout(300); await settle();
+    // facing the floor's middle: the untamed rides may have left the horse at its edge, facing the hill beyond (a flake in CI)
+    await pg.evaluate(([g, h]) => BF.player.setLook(Math.atan2(-(g.x + 0.5 - h.x), -(g.z + 0.5 - h.z)), 0), [ground, b0]);
+    await hold('KeyW', 1000); await settle(); await pg.waitForTimeout(300); await settle();
     const b1 = await query('entity', { id: horseId }), p3 = await me();
     check(dist(b0, b1) > 1, tag('W rides the horse: the simulation\'s horse moved'), { moved: +dist(b0, b1).toFixed(2) });
     check(dist(p3, b1) < 0.6, tag('the simulation\'s horse is under the player'), { horse: b1, me: p3 });

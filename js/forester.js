@@ -159,7 +159,7 @@ function growTick() {
   const dt = Math.min(5, now - growLast);
   growLast = now;
   sawT -= dt;
-  if (sawT <= 0 && BF.mobs) { sawT = 5; for (const m of BF.mobs.list) if (m.type === "villager" && m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m)); }   // whatever the villager is doing
+  if (sawT <= 0 && BF.mobs) { sawT = 5; for (const m of BF.regions.ofType("villager")) if (m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m)); }   // whatever the villager is doing
   for (const [k, s] of saps) {
     if (!W().isLoaded(s.x, s.z)) continue;
     if (!isSap(get(s.x, s.y, s.z))) { saps.delete(k); continue; }

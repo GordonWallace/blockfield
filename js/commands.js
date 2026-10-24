@@ -596,7 +596,8 @@ def("kill", {
     else if (mobTypes().includes(norm(t))) { const ty = norm(t); pred = x => x.type === ty; }
     else fail(`Unknown target '${a[0]}'`);
     let n = 0;
-    for (const mob of BF.mobs.list.slice()) if (!mob.dead && !mob.removed && pred(mob) && killMob(mob)) n++;
+    const only = m && !m[1] ? m[2] : mobTypes().includes(norm(t)) ? norm(t) : null;   // one type: only those (r15-32)
+    for (const mob of (only && BF.regions ? BF.regions.ofType(only) : BF.mobs.list).slice()) if (!mob.dead && !mob.removed && pred(mob) && killMob(mob)) n++;
     if (!n) fail("No entity was found");
     return n === 1 ? "Killed 1 entity" : `Killed ${n} entities`;
   },

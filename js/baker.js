@@ -236,7 +236,7 @@ function withBaker(fn) {
   const was = C.forBaker; C.forBaker = true;
   try { return fn(); } finally { C.forBaker = was; }
 }
-const clearRes = () => { if (BF.mobs) for (const v of BF.mobs.list) if (v.profession === "cowherd") v._res = null; };
+const clearRes = () => { if (BF.mobs) for (const v of BF.regions.ofType("villager")) if (v.profession === "cowherd") v._res = null; };
 // What it should buy next: {f, n, what} or null. Fuel first when it could bake now, then the missing ingredient of the treat it is short of.
 function shopping(m) {
   const S = st(m), out = [];

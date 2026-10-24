@@ -219,7 +219,7 @@ function chestSpot(m) {
   for (const [x, z] of cells) {
     if (near(x, z, id => B[id] && (B[id].door || B[id].bed || B[id].gate))) continue;
     if (Math.abs(x - H.doorX) + Math.abs(z - H.doorZ) <= 2) continue;
-    if (BF.mobs.list.some(o => !o.removed && Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2)) continue;
+    if (BF.regions.mobsInBox(x, z, x + 1, z + 1, o => Math.floor(o.position.x) === x && Math.floor(o.position.z) === z && Math.abs(o.position.y - y) < 2, { label: "storage chest spot" }).length) continue;
     const walls = BF.DIRS.filter(([dx, dz]) => S[get(x + dx, y, z + dz)]).length;
     if (!walls || !connected(x, z)) continue;
     scored.push({ x, y, z, walls });
@@ -245,7 +245,7 @@ function canDeliver(f, m, spot) {
   const W = BF.world, T = TR(), I = BF.I, o = chestOffer(f);
   if (!o || !m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || T.blockReason(f, o) || count(m.inv, I.emerald) < o.buy[0].n) return null;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.5 + (o.halfWidth || 0.3) && Math.abs(o.position.z - spot.z - 0.5) < 0.5 + (o.halfWidth || 0.3) && o.position.y < spot.y + 1 && o.position.y + (o.height || 1.8) > spot.y;
-  if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return null;   // somebody is standing there
+  if (BF.regions.mobsInBox(spot.x - 2, spot.z - 2, spot.x + 3, spot.z + 3, o => !o.dead && inCell(o), { label: "storage chest place" }).length || inCell(BF.player)) return null;   // somebody is standing there
   return o;
 }
 function deliver(f, m, spot) {
