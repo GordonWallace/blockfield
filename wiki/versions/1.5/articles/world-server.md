@@ -8,10 +8,10 @@ category: Game rules
 
 The page then only draws the world and takes your input. It keeps its own copy of the terrain to draw and to walk about in, and the server sends it every block that changes, the mobs and villagers in view, the clock and the weather. Because the simulation is no longer in a browser tab it can use the machine's other cores and its own memory, and the browser can't slow it down.
 
-- **Worlds are kept on the server.** The title screen lists the worlds saved by the server, in the `saves/` folder next to the game, rather than the ones in your browser's storage. Saving, autosaving and the [[page:game-log]] all happen on the server. Moving a browser world to the server (and back) is coming in a later 1.5 change.
+- **Worlds are kept on the server.** The title screen lists the worlds saved by the server, a folder each in the `saves/` folder next to the game, rather than the ones in your browser's storage. Saving, autosaving and the [[page:game-log]] all happen on the server. The title screen can copy your browser's worlds to the server, and export and import worlds as files: see [[page:saving]].
 - **Closing the page pauses the world at once** and saves it. The server keeps it ready: open the game again and pick the same world, and it carries on from where it was, at the fast-forward speed it had. Picking another world lets it go (it was already saved).
 - **A hidden tab doesn't pause it.** With the simulation in the page or in a worker, hiding the tab pauses the game. On the server it keeps going while the page is open, so you can watch the debug screen on another monitor. The pause menu still pauses it.
-- **One page plays at a time.** A second page opened while one is playing runs its own simulation, as it would without a server.
+- **One page plays at a time.** A second page opened while one is playing says *World in use* on its title screen and runs its own simulation, as it would without a server.
 - **The debug screen reads the world from the server**, so it keeps showing the world (paused) after the page is closed.
 - **If the server stops** (Ctrl+C, or a crash), the page says "World server stopped" and shows the game log's last lines. Ctrl+C saves every world first.
 

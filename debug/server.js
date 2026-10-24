@@ -64,6 +64,7 @@ function serveGame(req, res) {
   try { rel = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400).end(); return; }
   if (rel.includes("\0")) { res.writeHead(404).end(); return; }   // fs throws on a NUL byte (/%00)
   if (rel === "/wiki") { res.writeHead(301, { Location: "/wiki/" }).end(); return; }   // Blockfieldpedia (wiki/index.html)
+  if (rel.startsWith("/saves/")) { if (!world || !world.http(req, res, rel)) res.writeHead(404, { "Content-Type": "text/plain" }).end("No world server"); return; }   // export / import (spec r15-42)
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep) || rel.split("/").some(p => p.startsWith(".") && p.length > 1)) { res.writeHead(404).end(); return; }

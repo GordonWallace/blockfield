@@ -137,6 +137,8 @@ const css = `
 .bfp-card .bfp-mode button.on{background:#3b4a35;color:var(--ink);border-bottom-color:var(--accent)}
 .bfp-modehint{font:12px var(--mono);color:var(--muted);margin:6px 0 0;min-height:1em}
 .bfp-card.bfp-wide{max-width:840px}
+.bfp-saveops{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0}
+.bfp-card .bfp-saveops button{width:auto;margin:0;padding:7px 9px;font-size:11px}
 .bfp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px;font:400 15px/1 var(--display);color:var(--ink);text-align:left}
 .bfp-card button.bfp-small{width:auto;margin:0;padding:8px 10px;font-size:12px}
 .bfp-worlds{max-height:min(46vh,340px);overflow:auto;border:1px solid var(--panel-edge);border-radius:3px;background:rgba(0,0,0,.25);text-align:left}
@@ -223,8 +225,9 @@ function buildDOM() {
   startEl = el("div", "bfp-screen bfp-start", `<div class="bfp-card bfp-wide">
     <h1 class="bfp-title">Blockfield</h1><p class="bfp-sub">a blocky survival sandbox</p>
     <div class="bfp-view-list">
-      <div class="bfp-head"><span>Singleplayer</span><button data-act="show-create" class="primary bfp-small">Create New World</button></div>
+      <div class="bfp-head"><span class="bfp-where">Singleplayer</span><button data-act="show-create" class="primary bfp-small">Create New World</button></div>
       <div class="bfp-worlds" role="list"><p class="bfp-empty">Loading worlds…</p></div>
+      <div class="bfp-saveops"><button data-act="import" title="Add a world from a .bfworld file (made by Export)">Import world…</button><button data-act="copy-browser" hidden title="Copy the worlds saved in this browser to the world server's saves folder; they stay in the browser too">Copy browser saves to the server</button><input type="file" class="bfp-importfile" accept=".bfworld,application/gzip,application/json" hidden></div>
       <p class="bfp-savenote"></p>
       <p class="bfp-credit">Block textures: <a href="https://faithfulpack.net" target="_blank" rel="noopener noreferrer">Faithful 32x</a> © Faithful Resource Pack, used under the <a href="https://faithfulpack.net/license" target="_blank" rel="noopener noreferrer">Faithful License</a>.</p>
       <details class="bfp-ctl"><summary>Controls</summary><div class="bfp-help">${HELP_HTML}</div></details>
@@ -279,6 +282,9 @@ function buildDOM() {
     else if (a === "rename") renderWorlds({ renaming: id });
     else if (a === "rename-ok") finishRename(row);
     else if (a === "delete") renderWorlds({ deleting: id });
+    else if (a === "export") exportWorld(id, act);
+    else if (a === "import") startEl.querySelector(".bfp-importfile").click();
+    else if (a === "copy-browser") copyBrowser(act);
     else if (a === "delete-ok") { Promise.resolve(BF.save.remove(id)).catch(err => console.error(err)).then(() => refreshWorlds()); }
     else if (a === "cancel") renderWorlds({});
   });
@@ -291,6 +297,7 @@ function buildDOM() {
     }
   });
   startEl.addEventListener("keyup", e => e.stopPropagation());
+  startEl.querySelector(".bfp-importfile").addEventListener("change", e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (f) importWorld(f); });
   const biomeIn = createForm.elements.biome, biomeLbl = createForm.querySelector(".bfp-bsl");
   biomeIn.addEventListener("input", () => { biomeLbl.textContent = BIOME_SIZES[biomeIn.value | 0][1]; });
   createForm.addEventListener("submit", e => { e.preventDefault(); createWorld(); });
@@ -403,6 +410,7 @@ function fmtDate(ms) {
 }
 function probeStorage() {
   if (saveOk !== null) return Promise.resolve(saveOk);
+  if (BF.simHost && BF.simHost.server) return Promise.resolve((saveOk = true));   // (the world server's saves, on its disk)
   if (!hasSave() || BF.save.supported === false || typeof indexedDB === "undefined") return Promise.resolve((saveOk = false));
   return new Promise(res => {
     try {
@@ -414,7 +422,9 @@ function probeStorage() {
   });
 }
 function setSaveNote() {
-  const t = saveOk === false ? "Saving unavailable in this browser. You can still play; worlds won't be kept." : "";
+  const H = BF.simHost || {};
+  const t = saveOk === false ? "Saving unavailable in this browser. You can still play; worlds won't be kept."
+    : H.refused ? "World in use: another page is playing on this world server, so this page runs its own simulation and keeps its worlds in this browser." : "";
   for (const n of startEl.querySelectorAll(".bfp-savenote")) n.textContent = t;
 }
 function showStartView(v) {
@@ -430,10 +440,19 @@ function showStartView(v) {
     setTimeout(() => { try { createForm.elements.name.select(); } catch (_) {} }, 0);
   }
 }
+let listN = 0;
 function refreshWorlds() {
   probeStorage().then(setSaveNote);
+  const server = !!(BF.simHost && BF.simHost.server);
+  startEl.querySelector(".bfp-where").textContent = server ? "Singleplayer · on the world server" : "Singleplayer";
+  startEl.querySelector('[data-act="import"]').hidden = !hasSave() || !BF.save.importFile;
+  // "Copy browser saves to the server": when this browser has worlds of its own (spec r15-42)
+  const copyBtn = startEl.querySelector('[data-act="copy-browser"]');
+  copyBtn.hidden = true;
+  if (server && hasSave() && BF.save.browserList) BF.save.browserList().then(l => { const n = l.filter(w => BF.save.playable(w)).length; copyBtn.hidden = !n; copyBtn.textContent = "Copy browser saves to the server (" + n + ")"; });
   if (!hasSave()) { worldsCache = []; renderWorlds({}); return Promise.resolve(); }
-  return Promise.resolve(BF.save.list()).catch(() => []).then(list => { worldsCache = list || []; renderWorlds({}); });
+  const n = ++listN;   // (only the newest list is shown: the browser's, asked for before the world server answered, can come back after it)
+  return Promise.resolve(BF.save.list()).catch(() => []).then(list => { if (n === listN) { worldsCache = list || []; renderWorlds({}); } });
 }
 function renderWorlds(st) {
   if (!worldsCache.length) {
@@ -452,11 +471,11 @@ function renderWorlds(st) {
       <div class="bfp-info"><div class="bfp-wname">Delete “${esc(w.name)}”?</div><div class="bfp-wmeta">This can't be undone.</div></div>
       <div class="bfp-wbtns"><button class="danger" data-act="delete-ok">Delete</button><button data-act="cancel">Cancel</button></div></div>`;
     if (BF.save.playable && !BF.save.playable(w)) return `<div class="bfp-world old" role="listitem" data-id="${id}" aria-disabled="true">
-      <div class="bfp-info"><div class="bfp-wname">${esc(w.name)}</div><div class="bfp-wmeta">Made with Blockfield 1.3, can't be opened in 1.4</div></div>
-      <div class="bfp-wbtns"><button data-act="delete">Delete</button></div></div>`;   // spec r14-19: no old saves in 1.4 (Delete only)
+      <div class="bfp-info"><div class="bfp-wname">${esc(w.name)}</div><div class="bfp-wmeta">${esc(BF.save.tooOld(w))}</div></div>
+      <div class="bfp-wbtns"><button data-act="delete">Delete</button></div></div>`;   // spec r14-19, r15-42: no older releases' saves (Delete only)
     return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><div class="bfp-wname">${esc(w.name)}</div><div class="bfp-wmeta">${meta}</div></div>
-      <div class="bfp-wbtns"><button class="primary" data-act="play">Play</button><button data-act="options">Options</button><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div></div>`;
+      <div class="bfp-wbtns"><button class="primary" data-act="play">Play</button><button data-act="options">Options</button><button data-act="rename">Rename</button><button data-act="export" title="Download this world as a .bfworld file">Export</button><button data-act="delete">Delete</button></div></div>`;
   }).join("");
   const inp = worldsEl.querySelector("input");
   if (inp) { inp.focus(); inp.select(); }
@@ -489,7 +508,7 @@ function startNote(t) { for (const n of startEl.querySelectorAll(".bfp-savenote"
 function playWorld(id, btn) {
   if (!hasSave() || !id) return;
   const w = worldsCache.find(x => x.id === id);
-  if (w && BF.save.playable && !BF.save.playable(w)) { startNote("That world was made with Blockfield 1.3 and can't be opened in 1.4"); return; }
+  if (w && BF.save.playable && !BF.save.playable(w)) { startNote(BF.save.tooOld(w)); return; }
   requestLock();                       // inside the click so the browser allows it
   if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
   Promise.resolve(BF.save.load(id)).then(() => beginPlay()).catch(e => {
@@ -497,6 +516,29 @@ function playWorld(id, btn) {
     if (btn) { btn.disabled = false; btn.textContent = "Play"; }
     startNote("Couldn't load that world: " + (e && e.message || e));
   });
+}
+// Export, import and copying browser saves to the server (spec r15-42, js/save.js)
+function exportWorld(id, btn) {
+  if (!BF.save.exportFile) return;
+  btn.disabled = true;
+  Promise.resolve(BF.save.exportFile(id)).then(() => startNote(""), e => { console.error(e); startNote("Couldn't export that world: " + (e && e.message || e)); })
+    .then(() => { btn.disabled = false; });
+}
+function importWorld(file) {
+  startNote("Importing " + file.name + "…");
+  Promise.resolve(BF.save.importFile(file)).then(m => refreshWorlds().then(() => startNote("Imported “" + m.name + "”")),
+    e => { console.error(e); startNote("Couldn't import " + file.name + ": " + (e && e.message || e)); });
+}
+function copyBrowser(btn) {
+  btn.disabled = true;
+  startNote("Copying this browser's worlds to the world server…");
+  BF.save.copyToServer().then(r => {
+    const bits = [r.copied.length + " copied"];
+    if (r.skipped.length) bits.push(r.skipped.length + " already there");
+    if (r.old.length) bits.push(r.old.length + " too old to open");
+    if (r.failed.length) bits.push(r.failed.length + " failed (" + r.failed.join("; ") + ")");
+    return refreshWorlds().then(() => startNote("Browser saves: " + bits.join(", ") + ". They are still in this browser too."));
+  }, e => startNote("Couldn't copy the browser saves: " + (e && e.message || e))).then(() => { btn.disabled = false; });
 }
 function createWorld() {
   const f = createForm.elements;
@@ -527,7 +569,7 @@ function updateSavedLabel(ok) {
   if (!savedEl) return;
   const t = BF.save && BF.save.lastSaved;
   if (ok === false && !(BF.save && BF.save.current)) savedEl.textContent = "This world isn't saved";
-  else if (ok === false) savedEl.textContent = "Couldn't save" + (t ? " · last saved " + fmtDate(t) : "");
+  else if (ok === false) savedEl.textContent = "Couldn't save" + (BF.save.lastError ? " (" + BF.save.lastError + ")" : "") + (t ? " · last saved " + fmtDate(t) : "");
   else savedEl.textContent = t ? "Saved " + new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
 }
 function quitToTitle(btn) {
@@ -712,6 +754,13 @@ function bindInput() {
     }
   });
   document.addEventListener("pointerlockerror", onLockError);
+  // a save that failed (a full disk, spec r15-42): said on the action bar and the pause menu; the previous save is kept
+  let failSaid = 0;
+  if (BF.on) BF.on("saveFailed", e => {
+    if (BF.save) BF.save.lastError = String(e && e.message || e);
+    updateSavedLabel(false);
+    if (Date.now() - failSaid > 10000) { failSaid = Date.now(); actionBar("Couldn't save the world: " + (BF.save && BF.save.lastError || "unknown error") + ". The last save is kept."); }
+  });
   if (BF.on) BF.on("inventoryClosed", () => {
     screenClosed();
     if (started && !menuOpen && !P.dead && !dragMode && !isTouch && !locked && !offPlanet) requestLock();
@@ -2441,6 +2490,7 @@ P.setFlying = function (on) { flying = !!on; vel.y = 0; };   // tests
 P.aimedMob = () => { const h = mobHit(); return h && h.mob ? { type: h.mob.type, id: idOf(h.mob), dist: h.dist } : null; };
 P.attack = () => { updateTarget(); attackCd = 0; return tryAttack(); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
+P.refreshWorlds = () => refreshWorlds();   // the title screen's world list again (tests)
 P.isLocked = () => locked;
 P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
 P.escGrace = () => inEscGrace();   // tests: still inside the grace after an Escape closed a screen
