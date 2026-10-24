@@ -1,11 +1,12 @@
-// @ci integration suite=village,world
-// Explorers only sell complete maps: node test/run.js /tmp/expc test/explorer-complete.js
+// @ci integration suite=village,world hosts=worker,server
+// Explorers only sell complete maps: node test/run.js /tmp/expc test/explorer-complete.js [--host page|worker|server]
 // A map with a blank corner (97% drawn, the old "filled" threshold) is not offered, even one an old save marked as given up on; the explorer
 // walks to a blank pixel; a map it cannot finish is put aside until the next day, never sold; once every pixel is drawn it is on sale.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
-  await require('./lib').toVillage(pg);
-  const r = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const r = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     const fails = [], X = BF.explorer, T = BF.trades, M = BF.maps, I = BF.I;
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     if (!vs.length) return { fails: ["no villager"] };
