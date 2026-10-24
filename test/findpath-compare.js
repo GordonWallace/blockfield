@@ -1,4 +1,4 @@
-// @ci baseline suite=village timeout=900
+// @ci baseline suite=village timeout=900 hosts=worker,server
 // Villager pathfinding (spec r15-05): findPath's integer keys and binary heap (js/mobs.js findPathFast) against the old string-key A*
 // with its linear open-list scan (findPathOld). In the nearest village of planet seeds 1 and 3, and on a stretch of ground across one
 // of face 4's edges (seed 1337, walked in face 4's frame as a caravan would), random start/goal pairs are searched both ways in the
@@ -11,33 +11,36 @@
 // run out of maxNodes just before the goal where the other reaches it: allowed for at most 2% of pairs, and only when that search
 // finds a route given 4x the nodes. Then villagers live their day for a while with BF.debug.pathCompare on, which compares every real
 // search the same way. Prints both times and their ratio.
-// node test/run.js /tmp/fp test/findpath-compare.js   (PAIRS=n per area, default 700)
+// node test/run.js /tmp/fp test/findpath-compare.js [--host page|worker|server]   (PAIRS=n per area, default 700; the searches run where the
+// simulation is, spec r15-43, and the player moves on the page)
 module.exports = async (pg) => {
   const PAIRS = +(process.env.PAIRS || 700);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
-  const wait = (fn, arg, t = 90000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 500 }).then(() => true, () => false);
+  const lib = require("./lib");
+  const wait = async (fn, arg, t = 90000) => { for (const end = Date.now() + t; Date.now() < end; await pg.waitForTimeout(500)) if (await lib.sim(pg, fn, arg)) return true; return false; };   // (where the simulation is)
   await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
   const loadedAround = (x, z, r) => wait(([x, z, r]) => { const w = BF.world; for (let d = -r; d <= r; d += 16) for (let e = -r; e <= r; e += 16) if (!w.isLoaded(x + d, z + e)) return false; return true; }, [x, z, r]);
   const total = { pairs: 0, same: 0, equal: 0, lenDiff: 0, offGoal: 0, cutoff: 0, nullBoth: 0, diff: 0, ms: 0, msOld: 0 };
   const areas = [];
   for (const seed of [1, 3]) {
-    await pg.evaluate(s => { BF.newWorld(s, { gen: 4, villages: 10, gameMode: "creative" }); BF.player.start(); }, seed);
-    await require("./lib").ready(pg);
-    const v = await pg.evaluate(() => {
+    await lib.newWorld(pg, seed, { gen: 4, villages: 10, gameMode: "creative" });
+    await pg.evaluate(() => BF.player.start());
+    await lib.ready(pg);
+    const v = await lib.sim(pg, () => {
       const P = BF.planet, p = BF.player.position, v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];
       if (!v) return null;
-      BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5);
       return { x: v.x, y: v.y, z: v.z, minX: v.minX, maxX: v.maxX, minZ: v.minZ, maxZ: v.maxZ, pop: v.pop };
     });
     check(!!v, `seed ${seed}: a village near spawn ${JSON.stringify(v)}`);
     if (!v) continue;
+    await pg.evaluate(v => BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5), v);
     check(await loadedAround(v.x, v.z, Math.min(96, Math.max(v.maxX - v.x, v.x - v.minX, v.maxZ - v.z, v.z - v.minZ, 32))), `seed ${seed}: the village's chunks loaded`);
     check(await wait(() => BF.mobs.list.some(m => m.type === "villager"), null), `seed ${seed}: villagers are out`);
     areas.push({ name: `seed ${seed} village`, box: { x0: v.minX, x1: v.maxX, z0: v.minZ, z1: v.maxZ, y: v.y } });
     areas[areas.length - 1].r = await comparePairs(pg, areas[areas.length - 1].box, seed * 7919, PAIRS);
     // live: villagers search for real (beds, doors, jobsites, shops) with the comparison on, for 30 s of play around noon and dusk
-    const live = await pg.evaluate(async () => {
+    const live = await lib.sim(pg, async () => {
       BF.mobs.pathStatsReset(); BF.debug.pathCompare = true;
       for (const t of [0.3, 0.55]) { BF.sky.setTime(t); await new Promise(r => setTimeout(r, 15000)); }
       BF.debug.pathCompare = false;
@@ -51,12 +54,13 @@ module.exports = async (pg) => {
   }
   // across a face edge: face 4's +u edge, the ground on both sides walked in face 4's frame (its margin past the edge)
   {
-    await pg.evaluate(() => { BF.newWorld(1337, { gen: 4, villages: 10, gameMode: "creative" }); BF.player.start(); });
-    await require("./lib").ready(pg);
+    await lib.newWorld(pg, 1337, { gen: 4, villages: 10, gameMode: "creative" });
+    await pg.evaluate(() => BF.player.start());
+    await lib.ready(pg);
     const e = await pg.evaluate(() => {
       const P = BF.planet, N = P.N, a = P.atlas(4, N - 24, Math.round(N / 2));
       const y = BF.worldgen.heightAt(a.x, a.z);
-      BF.player.spawn(a.x + 24.5, y + 3, a.z + 0.5);   // on the edge
+      BF.player.spawn(a.x + 24.5, y + 3, a.z + 0.5);   // on the edge (the page's player: the simulation follows it)
       return { x: Math.floor(a.x) + 24, z: Math.floor(a.z), y, N };
     });
     check(await loadedAround(e.x, e.z, 48), "face edge: the ground on both sides of face 4's edge loaded");
@@ -82,7 +86,7 @@ module.exports = async (pg) => {
 
 // Random pairs in box (x0..x1, z0..z1 around ground level y), both searches per pair in one evaluate. Returns the tallies.
 async function comparePairs(pg, box, seed, n) {
-  return pg.evaluate(([box, seed, n]) => {
+  return require("./lib").sim(pg, ([box, seed, n]) => {   // (where the simulation is)
     let s = seed >>> 0;
     const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
     const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));

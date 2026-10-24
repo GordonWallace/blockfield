@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // One market soak (release 1.3): one village for many game days. Run it on this build and on the one before (copy the script there) to compare.
 // Usage: NODE_PATH=$(npm root -g) node test/market-soak.js [seed=1] [days=14] [out.json]   Env: NEED=builder,farmer (jobs the village must have).
 // Drives the simulation directly (no rendering), like test/toolchain.js, each tick in the request queue's phases (js/requests.js: trades
@@ -7,6 +8,7 @@
 // made without an offer.
 const path = require('path');
 const fs = require('fs');
+const lib = require('./lib');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
 const SEED = +(process.argv[2] || 1);
@@ -22,14 +24,23 @@ const OUT = process.argv[4] || null;
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript(n => { window.__NEED = n; }, process.env.NEED || 'builder');
-  await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
-  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
+  await lib.install(pg);
+  const srv = lib.host() === 'page' ? null : await lib.serve({ world: lib.host() === 'server' });
+  await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await lib.ready(pg);   // the planet (spec r14-22): its river step first
+  if (srv) await lib.simReady(pg);
+  // the page's player in creative (the simulation's follows with the next player message), then only the soak's steps move the world:
+  // the page's frames held and, off the page, the simulation's own ticks stopped; test/bft.js's helpers there too
+  await pg.evaluate(() => { if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
+  await pg.waitForTimeout(600);
+  await pg.evaluate(() => { window.__halt = true; });
+  if (srv) await lib.sim(pg, () => { BF.state.paused = true; });
+  await lib.simBFT(pg);
+  await lib.sim(pg, o => { Object.assign(globalThis, o); }, await pg.evaluate(() => ({ __NEED: window.__NEED })));   // (the init script's setting is the page's)
   await pg.waitForTimeout(3000);
-  const setup = await pg.evaluate(() => {
-    window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
+  const setup = await lib.sim(pg, () => {
     // the nearest village with every job in NEED (default: a builder, so building progress shows)
-    const need = (window.__NEED || 'builder').split(',').filter(Boolean);
+    const need = (globalThis.__NEED || 'builder').split(',').filter(Boolean);
     const cands = BFT.villages(3000).filter(v => v && v.pop).slice(0, 10);
     const step = h => { BF.warp.advance(h); if (BF.req) BF.req.beginTick(); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     let v = null, key = null;
@@ -44,7 +55,7 @@ const OUT = process.argv[4] || null;
     BF.sky.setTime(0.02);
     for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
     // every trade, as the village log sees it
-    const R = window.__rec = { key, trades: 0, spare: 0, items: 0, ems: 0, days: [], bad: [] };
+    const R = globalThis.__rec = { key, trades: 0, spare: 0, items: 0, ems: 0, days: [], bad: [] };
     const orig = BF.vlog.trade;
     BF.vlog.trade = function (buyer, seller, what, times) {
       const inV = m => m && m.village && m.village.key === key;
@@ -62,7 +73,7 @@ const OUT = process.argv[4] || null;
       const ems = () => { let n = 0; for (const m of BF.mobs.list) if (m.type === 'villager' && Array.isArray(m.inv)) { n += T.inv.count(m.inv, em); for (const s of T.escrowed ? T.escrowed(m) : []) if (s.id === em) n += s.count; } for (const d of BF.drops.list) if (d.id === em) n += d.count; return n; };
       BF.req.apply = function () { const a = ems(), r = apply.apply(this, arguments), b = ems(); if (a !== b && R.bad.length < 20) R.bad.push('emeralds ' + a + ' -> ' + b + ' in the apply phase, day ' + BF.sky.day); return r; };
     }
-    window.__day = () => {
+    globalThis.__day = () => {
       const rec = BF.vlog.villageAt(v.x, v.z) || { members: [] };
       const vs = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === key);
       const alive = vs.filter(m => !m.dead && !m.removed);
@@ -86,21 +97,21 @@ const OUT = process.argv[4] || null;
   });
   console.log(`seed ${SEED} village ${setup.key} ${process.env.LABEL || ''} ${JSON.stringify(setup.profs)}`);
   const t0 = Date.now();
-  await pg.evaluate(() => window.__day());
+  await lib.sim(pg, () => globalThis.__day());
   const h = 0.05, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
   for (let s = 0, d = 0; s < DAYS * DAY; s += PER_CALL) {
-    await pg.evaluate(([n, h, v]) => {
+    await lib.sim(pg, ([n, h, v]) => {
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); if (BF.req) BF.req.beginTick(); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
       }
     }, [Math.min(PER_CALL, DAYS * DAY - s), h, setup.v]);
-    if (Math.floor((s + PER_CALL) / DAY) > d) { d = Math.floor((s + PER_CALL) / DAY); await pg.evaluate(() => window.__day()); const x = await pg.evaluate(() => window.__rec.days.at(-1)); console.log(`day ${String(x.day).padStart(3)}  alive ${x.alive}  starving ${x.starving}  dead ${x.dead}  happy ${x.happy}  emeralds ${x.ems}  items ${x.items}  trades ${x.trades} (spare ${x.spare})  built ${x.done} placed ${x.placed}  (${Math.round((Date.now() - t0) / 1000)} s)`); }
+    if (Math.floor((s + PER_CALL) / DAY) > d) { d = Math.floor((s + PER_CALL) / DAY); await lib.sim(pg, () => globalThis.__day()); const x = await lib.sim(pg, () => globalThis.__rec.days.at(-1)); console.log(`day ${String(x.day).padStart(3)}  alive ${x.alive}  starving ${x.starving}  dead ${x.dead}  happy ${x.happy}  emeralds ${x.ems}  items ${x.items}  trades ${x.trades} (spare ${x.spare})  built ${x.done} placed ${x.placed}  (${Math.round((Date.now() - t0) / 1000)} s)`); }
   }
-  const R = await pg.evaluate(() => window.__rec);
+  const R = await lib.sim(pg, () => globalThis.__rec);
   // who is starving and what the builders are doing, at the end
-  R.end = await pg.evaluate(() => {
-    const key = window.__rec.key, F = BF.food, em = BF.I.emerald;
+  R.end = await lib.sim(pg, () => {
+    const key = globalThis.__rec.key, F = BF.food, em = BF.I.emerald;
     const vs = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === key && !m.dead && !m.removed);
     return {
       starving: vs.filter(m => m.starving).map(m => ({ prof: m.profession, em: BF.trades.inv.count(m.inv, em), food: +F.available(m).toFixed(2), shop: m.fshop && m.fshop.stage })),
@@ -119,6 +130,6 @@ const OUT = process.argv[4] || null;
   if (pageErrors) { console.log('FAIL page errors: ' + pageErrors); fail++; }
   if (R.bad.length) { console.log('FAIL villager trades without an offer, or emeralds made or lost: ' + R.bad.length + ' ' + R.bad.slice(0, 5).join('; ')); fail++; }
   console.log(fail ? fail + ' FAILED' : 'all passed');
-  await b.close();
+  await b.close(); if (srv) await srv.stop();
   process.exit(fail ? 1 : 0);
 })();

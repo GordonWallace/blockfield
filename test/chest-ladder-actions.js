@@ -1,7 +1,10 @@
-// Chests and house ladders: node test/run.js /tmp/chest test/chest-ladder-actions.js
+// @ci integration hosts=worker,server
+// Chests and house ladders: node test/run.js /tmp/chest test/chest-ladder-actions.js [--host page|worker|server]   (the player, its climb and the
+// chest screen are the page's; the chest, the items and the drops are read where the simulation is, spec r15-43)
 // 1. Two-storey village houses (house2) have a ladder column up through the hatch, and the player can climb it to the upper floor.
 // 2. Chests open on right-click, hold 27 slots, shift-click moves stacks in and out, survive save/load and spill when broken.
 module.exports = async (pg, out) => {
+  const lib = require('./lib');
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "survival"; });
   // find a two-storey house in a village near the origin
   const house = await pg.evaluate(() => {
@@ -61,30 +64,34 @@ module.exports = async (pg, out) => {
     BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
   }, house);
   await pg.waitForTimeout(300);
+  await lib.sim(pg, () => { const I = BF.inventory; I.clear(); I.add(BF.I.cobblestone, 40); I.add(BF.I.oak_log, 5); I.add(BF.I.bread, 3); BF.proto.flush(); });
+  await pg.waitForTimeout(500);
   const r = await pg.evaluate(async h => {
     const I = BF.inventory, r = {};
-    I.clear(); I.add(BF.I.cobblestone, 40); I.add(BF.I.oak_log, 5); I.add(BF.I.bread, 3);
     BF.player.setMouse(false, true); BF.player.setMouse(false, false);
     r.openedByRightClick = I.mode;
     return r;
   }, house);
+  await pg.waitForTimeout(600);   // (the chest's contents come from the simulation)
   console.log("right-click opens:", r.openedByRightClick);
   // shift-click the cobblestone (hotbar slot 0) into the chest, then a plain click-move of the bread
   const slot = (c, i) => `.bf-slot[data-c="${c}"][data-i="${i}"]`;
   await pg.keyboard.down('Shift'); await pg.click(slot('inv', 0)); await pg.keyboard.up('Shift');
-  await pg.click(slot('inv', 2)); await pg.click(slot('chest', 13));
+  await pg.waitForTimeout(600);
+  await pg.click(slot('inv', 2)); await pg.waitForTimeout(600); await pg.click(slot('chest', 13)); await pg.waitForTimeout(600);
   await pg.screenshot({ path: out + '-chest.png' });
-  const r2 = await pg.evaluate(h => {
+  const r2 = await lib.sim(pg, h => {
     const I = BF.inventory, c = I.chestState(h.cx, h.y + 5, h.cz), sum = id => c.slots.reduce((n, s) => n + (s && s.id === id ? s.count : 0), 0);
     return { cobbleInChest: sum(BF.I.cobblestone), breadInChest: sum(BF.I.bread), breadSlot13: c.slots[13] && c.slots[13].count, cobbleInInv: I.count(BF.I.cobblestone) };
   }, house);
   console.log("after moving in:", JSON.stringify(r2));
   // shift-click cobble back out, keep the bread, close, save/load round trip, then break the chest
   await pg.keyboard.down('Shift'); await pg.click(slot('chest', 0)); await pg.keyboard.up('Shift');
-  const r3 = await pg.evaluate(h => {
+  await pg.waitForTimeout(600);
+  await pg.evaluate(() => BF.inventory.close());
+  const r3 = await lib.sim(pg, h => {
     const I = BF.inventory, r = {};
     r.cobbleBackInInv = I.count(BF.I.cobblestone);
-    I.close();
     I.chestAdd(h.cx, h.y + 5, h.cz, BF.I.diamond, 70);
     const saved = JSON.parse(JSON.stringify(I.serialize()));
     r.savedChests = saved.chests.length;

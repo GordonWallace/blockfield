@@ -1,4 +1,4 @@
-// @ci integration suite=world,village timeout=900
+// @ci integration suite=world,village timeout=900 hosts=worker,server
 // The region model and index (spec r15-30, js/regions.js). On seed 3 (planet, village generator 10):
 //   keys: a margin address keys like its canonical cell, a region is exactly 4 x 4 chunks, floor decides on a border, the key changes face
 //     across a face edge; neighbours: 8 inside a face and along an edge, 7 at each of the 24 cube corners, always mutual; around() finds
@@ -8,29 +8,33 @@
 //     differences after each;
 //   queries: mobsAround (r15-31 / r15-32) agrees with a full scan of BF.mobs.list, in its order, with mobs moved since the last sync;
 //   cost: 2,000 objects walking about cost under 0.1 ms a step in the index (measured, printed), and the real index step is printed.
-// Usage: NODE_PATH=$(npm root -g) node test/regions.js [seed=3] [steps=1000]
+// Usage: NODE_PATH=$(npm root -g) node test/regions.js [seed=3] [steps=1000]   (BF_HOST=page|worker|server: where the simulation runs, spec
+// r15-43; the regions, the steps and the checks run there, the page's player moves to the village and the simulation's follows)
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
 const seed = +(process.argv[2] || 3), steps = +(process.argv[3] || 1000);
 let fails = 0;
+const lib = require('./lib');
 const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fails++; };
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const pg = await (await b.newContext({ viewport: { width: 320, height: 200 } })).newPage();
   pg.on('pageerror', e => console.log('PAGEERROR', (e.stack || e.message).slice(0, 500)));
-  // the frame loop is held: only the test's steps move the world
-  await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.__halt = true; window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
+  // the frame loop is held: only the test's steps move the world (off the page, once the simulation's player has followed the page's)
+  await pg.addInitScript(page => { const raf = window.requestAnimationFrame.bind(window); window.__halt = page; window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); }, lib.host() === 'page');
   await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '?debugfeed=off#seed' + seed + 'gen4v10');
-  await require('./lib').ready(pg);
+  await lib.install(pg);
+  const srv = lib.host() === 'page' ? null : await lib.serve({ world: lib.host() === 'server' });
+  await pg.goto(srv ? srv.url + '?nolod&debugfeed=off&' + lib.q() + '#seed' + seed + 'gen4v10' : 'file://' + path.join(root, 'index.html') + '?debugfeed=off#seed' + seed + 'gen4v10');
+  await lib.ready(pg);
+  if (srv) await lib.simReady(pg);
 
   // ---------------------------------------------------------------- keys, neighbours, around
-  const u = await pg.evaluate(() => {
+  const u = await lib.sim(pg, () => {
     const R = BF.regions, P = BF.planet, N = P.N, S = R.REGION, out = { bad: [] };
     const bad = s => { if (out.bad.length < 20) out.bad.push(s); };
     let seed = 12345;
@@ -90,26 +94,33 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(u.around3 && u.around4, 'around: reaches across a face edge, and at a cube corner holds the three faces');
 
   // ---------------------------------------------------------------- the index over a run
-  await pg.evaluate(() => {
-    const W = BF.warp;
-    window.__step = h => BF.simStep(h);   // the main loop's simulation step (js/main.js), without the player; it ends with BF.regions.tick()
+  const where = await pg.evaluate(() => {   // (the page's player: the simulation's follows it)
     const P = BF.planet, p = BF.player.position;
     const v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];
     if (v) BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
-    window.__load = k => { const p = BF.player.position; for (let i = 0; i < k; i++) BF.world.update(p.x, p.z, 8); };
+    return v ? { x: v.x, z: v.z } : null;
+  });
+  if (srv && where) {
+    for (let i = 0; i < 60 && !(await lib.sim(pg, a => Math.hypot(BF.player.position.x - a.x, BF.player.position.z - a.z) < 20, where)); i++) await pg.waitForTimeout(500);
+    await pg.evaluate(() => { window.__halt = true; });
+    await lib.sim(pg, () => { BF.state.paused = true; });   // (its own ticks stop: only the test's steps move it)
+  }
+  await lib.sim(pg, () => {
+    globalThis.__step = h => BF.simStep(h);   // the main loop's simulation step (js/boot.js), without the player; it ends with BF.regions.tick()
+    globalThis.__load = k => { const p = BF.player.position; for (let i = 0; i < k; i++) BF.world.update(p.x, p.z, 8); };
   });
   let last = -1;
   for (let i = 0; i < 60; i++) {
-    const c = await pg.evaluate(() => { window.__load(20); window.__step(0.05); return BF.world.chunks.size; });
+    const c = await lib.sim(pg, () => { globalThis.__load(20); globalThis.__step(0.05); return BF.world.chunks.size; });
     if (c === last && i > 5) break;
     last = c; await pg.waitForTimeout(250);
   }
-  const run = await pg.evaluate(n => {
+  const run = await lib.sim(pg, n => {
     const R = BF.regions, res = { checks: [], moves0: R.counts().moves };
     let t = 0;
     for (let i = 1; i <= n; i++) {
-      window.__step(0.05);
-      if (i % 50 === 0) window.__load(1);
+      globalThis.__step(0.05);
+      if (i % 50 === 0) globalThis.__load(1);
       if (i % 250 === 0) { const c = R.check(); res.checks.push(c.ok ? 'ok' : c.diffs.slice(0, 5).join(' | ')); }
     }
     // the cost of the real index step with what is loaded (the step only: everything already sits in its region)
@@ -133,13 +144,13 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(run.counts.villages >= 1, `the running village is indexed (${run.counts.villages})`);
 
   // ---------------------------------------------------------------- queries (mobsAround, the r15-31 / r15-32 helper)
-  const q = await pg.evaluate(() => {
+  const q = await lib.sim(pg, () => {
     const R = BF.regions, out = {};
     R.verifyQueries = true; R.resetQueryStats();
     const p0 = BF.player.position.clone();
     let n = 0, found = 0;
     for (let i = 0; i < 200; i++) {   // queries mid-step too (after the mobs moved, before the index's sync): here between steps and inside
-      window.__step(0.05);
+      globalThis.__step(0.05);
       const L = BF.mobs.list.filter(m => !m.removed);
       for (let j = 0; j < L.length; j += 7) { const m = L[j]; found += R.mobsAround(m.position.x, m.position.z, 4 + (j % 5) * 12).length; n++; }
       for (const m of L) m.position.x += 0.3;   // as if they had walked part of a step since the last sync
@@ -176,7 +187,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(q.edge, 'mobsAround with local: true finds mobs just across a face edge (raw distance does not)');
   check(q.wrong, 'checkQuery reports a difference');
 
-  const ev = await pg.evaluate(() => {
+  const ev = await lib.sim(pg, () => {
     const R = BF.regions, W = BF.world, p = BF.player.position, out = {};
     const x = Math.floor(p.x) + 2, z = Math.floor(p.z) + 2, y = Math.floor(p.y) + 6, k = R.keyOf(x, y, z), key = x + ',' + y + ',' + z;
     const cc = W.canonXZ(x, z), ck = cc[0] + ',' + y + ',' + cc[1];
@@ -218,7 +229,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(ev.unload && ev.unloaded > 0 && ev.mobsAfter === ev.before - ev.unloaded, `a village's ${ev.unloaded} mobs leave the index when it unloads (${ev.before} -> ${ev.mobsAfter}) ${ev.unloadDiffs.join(' | ')}`);
 
   // ---------------------------------------------------------------- cost: 2,000 mobs moving
-  const cost = await pg.evaluate(() => {
+  const cost = await lib.sim(pg, () => {
     const R = BF.regions, P = BF.planet, N = P.N, ix = new R.Index(o => o.position), objs = [];
     let seed = 7;
     const rnd = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
@@ -254,6 +265,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(cost.ms < 0.1, `2,000 mobs moving cost under 0.1 ms a step in the index (${(cost.ms * 1000).toFixed(1)} us)`);
 
   await b.close();
+  if (srv) await srv.stop();
   console.log(fails ? `FAILED ${fails}` : 'all ok');
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.log('FAIL', e.stack || e); process.exit(1); });

@@ -1,23 +1,27 @@
-// Villagers reach upstairs chests: node test/run.js /tmp/vlc test/villager-ladder-chest.js
+// @ci integration hosts=worker,server
+// Villagers reach upstairs chests: node test/run.js /tmp/vlc test/villager-ladder-chest.js [--host page|worker|server]
 // A villager whose bed is in a two-storey house (house2) and whose only usable chest is the one on the upper floor fills up,
 // climbs the ladder through the hatch, stores its surplus in that chest (from the top rungs or the floor) and comes back down.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
-  await require('./lib').toVillage(pg);
-  // the planet's villagers come out over a while: wait for one whose only usable chest is upstairs
-  await pg.waitForFunction(() => { const S = BF.storage; return BF.mobs.list.some(m => { if (m.type !== "villager" || m.dead || m.child || !m.inv || !S.bedHouse(m)) return false;
-    const cs = S.chestsIn(S.bedHouse(m), m.bed).filter(p => S.usable(p, S.keyOf(m))), up = cs.filter(p => p.y >= m.bed.y + 3); return up.length && up.length === cs.length; }); }, null, { timeout: 60000 }).catch(() => {});
-  const step = (t0, t1, secs, k, fill) => pg.evaluate(async ([t0, t1, secs, k, fill]) => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  // the planet's villagers come out over a while: wait for one whose only usable chest is upstairs (where the simulation is: spec r15-43)
+  const upstairs = () => { const S = BF.storage; return BF.mobs.list.some(m => { if (m.type !== "villager" || m.dead || m.child || !m.inv || !S.bedHouse(m)) return false;
+    const cs = S.chestsIn(S.bedHouse(m), m.bed).filter(p => S.usable(p, S.keyOf(m))), up = cs.filter(p => p.y >= m.bed.y + 3); return up.length && up.length === cs.length; }); };
+  for (let i = 0; i < 120 && !(await lib.sim(pg, upstairs)); i++) await pg.waitForTimeout(500);
+  const step = (t0, t1, secs, k, fill) => lib.sim(pg, async ([t0, t1, secs, k, fill]) => {
     const dt = 0.05, n = Math.round(secs / dt), m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
     let top = -1e9;
     for (let i = 0; i < n; i++) { BF.sky.setTime(t0 + (t1 - t0) * i / n); (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver()); if (m && fill && i % 20 === 0 && !(m.store && m.store.stage)) for (let j = 0; j < m.inv.length; j++) if (!m.inv[j]) m.inv[j] = { id: j % 3 ? BF.I.rotten_flesh : BF.I.cobblestone, count: 64 };   // meals and breeding use up food: keep it full until it sets off
-      if (m) top = Math.max(top, m.position.y); if (m && window.__dbg && i % 20 === 0) console.log("[t]", (i * dt).toFixed(0), m.store && m.store.stage, m.ai.routeKind, m.ai.route && m.ai.ri + "/" + m.ai.route.length, m.position.y.toFixed(2), BF.villagerStatus.text(m)); if (i % 400 === 0) await new Promise(r => setTimeout(r, 0)); }
+      if (m) top = Math.max(top, m.position.y); if (m && globalThis.__dbg && i % 20 === 0) console.log("[t]", (i * dt).toFixed(0), m.store && m.store.stage, m.ai.routeKind, m.ai.route && m.ai.ri + "/" + m.ai.route.length, m.position.y.toFixed(2), BF.villagerStatus.text(m)); if (i % 400 === 0) await new Promise(r => setTimeout(r, 0)); }
     return top;
   }, [t0, t1, secs, k, fill]);
-  if (process.env.DEBUG) { await pg.evaluate(() => { window.__dbg = true; }); pg.on('console', msg => { if (/^\[t\]/.test(msg.text())) console.log(msg.text()); }); }
+  if (process.env.DEBUG) { await lib.sim(pg, () => { globalThis.__dbg = true; });   // (the [t] lines show with the simulation in the page)
+    pg.on('console', msg => { if (/^\[t\]/.test(msg.text())) console.log(msg.text()); }); }
   const ok = (cond, what) => console.log((cond ? "PASS " : "FAIL ") + what);
 
-  const v = await pg.evaluate(() => {
+  const v = await lib.sim(pg, () => {
     BF.mobs.spawning = false; BF.sky.day = 1; BF.sky.setTime(0.1);
     const S = BF.storage;
     for (const m of BF.mobs.list.filter(m => m.type === "villager" && !m.dead && !m.child && m.inv && S.bedHouse(m))) {
@@ -29,16 +33,16 @@ module.exports = async (pg, out) => {
   });
   console.log("villager with only an upstairs chest:", JSON.stringify(v));
   if (!v) { ok(false, "found a villager in a two-storey house"); return; }
-  await pg.evaluate(k => {
+  await lib.sim(pg, k => {
     const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), I = BF.I;
     m.store = null;
     for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: i % 3 ? I.rotten_flesh : I.cobblestone, count: 64 };
   }, v.key);
   let top = -1e9;
-  for (let k = 0; k < 6 && !(await pg.evaluate(p => { const c = BF.inventory.chestState(p.x, p.y, p.z); return !!(c && c.owner); }, v.chest)); k++)
+  for (let k = 0; k < 6 && !(await lib.sim(pg, p => { const c = BF.inventory.chestState(p.x, p.y, p.z); return !!(c && c.owner); }, v.chest)); k++)
     top = Math.max(top, await step(0.1 + k * 0.03, 0.13 + k * 0.03, 30, v.key, true));
   top = Math.max(top, await step(0.3, 0.33, 30, v.key));   // time to come back down
-  const r = await pg.evaluate(([k, p]) => {
+  const r = await lib.sim(pg, ([k, p]) => {
     const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), c = BF.inventory.chestState(p.x, p.y, p.z);
     return { owner: c && c.owner, chest: c ? c.slots.filter(Boolean).map(s => BF.itemName(s.id) + " x" + s.count) : [], y: m.position.y, hp: m.hp, maxHp: m.maxHp,
       status: BF.villagerStatus.text(m), log: BF.vlog.entries(m.village.key).filter(e => e[1] === "chest").slice(-3).map(e => e[2]) };

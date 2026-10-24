@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Pigs, sties and the pig farmer (js/pigfarmer.js, board idea-042): village generator 9 (the default) gives about 60% of the grass villages of
 // 10+ a pig farmer and a sty (old saves none); the sty (gate, coarse dirt, water trough, roofed shelter, 2-4 pigs, one pig per 8 cells); its
 // starting pack (feed and emeralds only) and trades; breeding on carrots, potatoes and beetroot, piglets (no drops, grown in 3 days, feeding
@@ -7,7 +8,9 @@
 //   NODE_PATH=$(npm root -g) node test/run.js /tmp/out test/pigfarmer-actions.js
 // @ci integration suite=farming,village timeout=900
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.simBFT(pg);
+  const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };

@@ -960,10 +960,11 @@ function tick(now) {
   } catch (err) { console.error(err); }
 }
 if (BF.page) requestAnimationFrame(tick);   // (drawing: headless has none)
-// auto signs' text, every half game hour, in the simulation's think phase (spec r15-19; js/world.js tickSim)
+// auto signs' text, every half game hour, in the simulation's think phase (spec r15-19; js/world.js tickSim); off the page also the generated signs coming into the world
 function autoTick() {
   const S = BF.sky;
   if (!S) return;
+  if (!BF.page && pendingAuto) tryAutoPlans();   // (in the page the frame does it; a worker or the world server has no frames)
   const hh = Math.floor(((S.day || 0) + (S.time || 0)) * 48);   // half an in-game hour = 1/48 day
   if (hh !== lastHH) { lastHH = hh; runAuto(); }
 }

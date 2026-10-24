@@ -1,27 +1,38 @@
-// @ci integration
+// @ci integration hosts=worker,server
 // Creative right and middle clicks on doors and chests use them; nothing picks the block (there is no pick block). node test/run.js /tmp/rc test/creative-rclick.js
 // Gordon's Ubuntu trackpad sends some right clicks as middle clicks, which used to pick the block into his hotbar.
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.mobs.spawning = false; });
+  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
+  await require('./lib').sim(pg, () => { BF.mobs.spawning = false; });
   await pg.waitForTimeout(1500);
-  const setup = () => pg.evaluate(() => {
-    if (!window._t) { const p = BF.player.position; window._t = { x: Math.floor(p.x), z: Math.floor(p.z), y: Math.floor(p.y) + 3 }; }
-    const { x, y, z } = window._t;
-    for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) { BF.world.setBlock(x + dx, y - 1, z + dz, BF.B.stone); for (let k = 0; k < 4; k++) BF.world.setBlock(x + dx, y + k, z + dz, 0); }
-    BF.world.setBlock(x, y, z - 2, BF.doorId(0, 0, 0, "oak")); BF.world.setBlock(x, y + 1, z - 2, BF.doorId(0, 1, 0, "oak"));
-    BF.world.setBlock(x + 2, y, z - 2, BF.B.chest);
-    BF.player.teleport(x + 0.5, y + 0.01, z + 0.5);
-    BF.inventory.clear(); BF.inventory.select(3);
-  });
+  const lib = require('./lib');
+  // a round trip: requests and queries are answered in order, so what was sent before has been applied (and its self is in)
+  const settle = () => pg.evaluate(() => new Promise(r => BF.client.query("stats", {}, () => requestAnimationFrame(() => requestAnimationFrame(r)))));
+  // the blocks and items are the simulation's (spec r15-43); the player's body and the hotbar slot are the page's
+  const setup = async () => {
+    const t = await pg.evaluate(() => { if (!window._t) { const p = BF.player.position; window._t = { x: Math.floor(p.x), z: Math.floor(p.z), y: Math.floor(p.y) + 3 }; } return window._t; });
+    await lib.sim(pg, ({ x, y, z }) => {
+      for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) { BF.world.setBlock(x + dx, y - 1, z + dz, BF.B.stone); for (let k = 0; k < 4; k++) BF.world.setBlock(x + dx, y + k, z + dz, 0); }
+      BF.world.setBlock(x, y, z - 2, BF.doorId(0, 0, 0, "oak")); BF.world.setBlock(x, y + 1, z - 2, BF.doorId(0, 1, 0, "oak"));
+      BF.world.setBlock(x + 2, y, z - 2, BF.B.chest);
+      BF.inventory.clear();
+      BF.proto.flush();
+    }, t);
+    await pg.evaluate(({ x, y, z }) => { BF.player.teleport(x + 0.5, y + 0.01, z + 0.5); BF.inventory.select(3); }, t);
+  };
   const look = (bx, by, bz) => pg.evaluate(([bx, by, bz]) => {
     const e = BF.player.eyePos(), tx = bx - e.x, ty = by - e.y, tz = bz - e.z;
     BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
   }, [bx, by, bz]);
-  const state = () => pg.evaluate(() => {
-    const d = BF.world.getBlock(_t.x, _t.y, _t.z - 2), s = { slots: BF.inventory.slots };
-    return { door: !!(BF.blocks[d].door && BF.blocks[d].door.open), chest: BF.inventory.isOpen ? !!BF.inventory.isOpen() : BF.player.screenOpen(),
-      hotbar: s.slots.slice(0, 9).filter(Boolean).map(x => (BF.items[x.id] || BF.blocks[x.id]).name).join(",") };
-  });
+  const state = async () => {
+    await settle();
+    const chest = await pg.evaluate(() => BF.inventory.isOpen ? !!BF.inventory.isOpen() : BF.player.screenOpen());
+    const t = await pg.evaluate(() => _t);
+    return Object.assign({ chest }, await lib.sim(pg, t => {
+      const d = BF.world.getBlock(t.x, t.y, t.z - 2), s = { slots: BF.inventory.slots };
+      return { door: !!(BF.blocks[d].door && BF.blocks[d].door.open), hotbar: s.slots.slice(0, 9).filter(Boolean).map(x => (BF.items[x.id] || BF.blocks[x.id]).name).join(",") };
+    }, t));
+  };
   // [label, mousedown fields, also send a context menu event, expect]
   const variants = [
     ["right (button 2)", { button: 2, buttons: 2 }, true, "use"],
@@ -49,7 +60,7 @@ module.exports = async (pg, out) => {
       const ok = used && !picked;
       if (!ok) fails++;
       console.log(`${ok ? "ok  " : "FAIL"} ${label} on the ${what}: ${used ? "used" : "not used"}, hotbar [${s.hotbar}] (want ${want})`);
-      await pg.evaluate(() => { try { BF.inventory.close(); } catch (_) {} });
+      await pg.evaluate(() => { try { BF.inventory.close(); } catch (_) {} }); await settle();
     }
   }
   await pg.keyboard.press('F3'); await pg.waitForTimeout(300);

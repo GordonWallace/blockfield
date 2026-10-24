@@ -1,6 +1,10 @@
-// Explorer checks: node test/run.js /tmp/exp test/explorer-actions.js
+// @ci integration hosts=worker,server
+// Explorer checks: node test/run.js /tmp/exp test/explorer-actions.js [--host page|worker|server]
+// (Reads the simulation where it is, spec r15-43; the page's player follows the explorer, so the simulation's does too.)
 module.exports = async (pg, out) => {
-  const r = await pg.evaluate(() => {
+  const lib = require('./lib');
+  const follow = p => p && pg.evaluate(p => BF.player.position.set(p[0], p[1], p[2]), p);
+  const r = await lib.sim(pg, () => {
     const res = {};
     // roster: explorers only where there are cartographers, ~70% per cartographer
     let carto = 0, expl = 0, badNoCarto = 0, villages = 0, withC = 0, withE = 0;
@@ -22,8 +26,8 @@ module.exports = async (pg, out) => {
   });
   console.log(JSON.stringify(r));
   await pg.evaluate(() => BF.player.start());
-  await require('./lib').toVillage(pg);
-  const setup = await pg.evaluate(() => {
+  await lib.toVillage(pg);
+  const setup = await lib.sim(pg, () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     if (vs.length < 2) return "villagers: " + vs.length;
     const T = BF.trades, I = BF.I;
@@ -43,22 +47,25 @@ module.exports = async (pg, out) => {
     C.inv = T.inv.create(); T.inv.add(C.inv, I.blank_map_2, 1); T.inv.add(C.inv, I.emerald, 5);
     C.trades = [1, 2, 3, 4, 5].flatMap(l => T.offers("cartographer", l)); C.level = 5;
     BF.player.position.set(A.position.x + 5, A.position.y + 1, A.position.z);
-    window.__A = A; window.__C = C;
-    return { claim: A.res, prof: A.profession, A: [A.position.x | 0, A.position.z | 0], C: [C.position.x | 0, C.position.z | 0], same: A.village === C.village };
+    globalThis.__A = A; globalThis.__C = C;
+    return { me: [A.position.x + 5, A.position.y + 1, A.position.z], claim: A.res, prof: A.profession, A: [A.position.x | 0, A.position.z | 0], C: [C.position.x | 0, C.position.z | 0], same: A.village === C.village };
   });
   console.log(JSON.stringify(setup));
+  await follow(setup.me);
   for (let k = 0; k < 40; k++) {
-    const line = JSON.stringify(await pg.evaluate(() => {
-      const A = window.__A;
+    const got = await lib.sim(pg, () => {
+      const A = globalThis.__A;
       for (let i = 0; i < 300; i++) { BF.sky.setTime(0.1); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); BF.player.position.set(A.position.x + 3, A.position.y + 1, A.position.z); }
       const maps = BF.explorer.carried(A);
-      return { pos: [A.position.x | 0, A.position.z | 0], stage: A.ex && A.ex.stage, inv: A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count), cov: maps.map(c => +BF.explorer.coverage(c.d).toFixed(2)), status: BF.explorer.statusText(A), offers: A.trades.filter(o => o.dyn).length, log: BF.explorer.LOG.slice(-2) };
-    }));
+      return { me: [A.position.x + 3, A.position.y + 1, A.position.z], pos: [A.position.x | 0, A.position.z | 0], stage: A.ex && A.ex.stage, inv: A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count), cov: maps.map(c => +BF.explorer.coverage(c.d).toFixed(2)), status: BF.explorer.statusText(A), offers: A.trades.filter(o => o.dyn).length, log: BF.explorer.LOG.slice(-2) };
+    });
+    await follow(got.me); delete got.me;
+    const line = JSON.stringify(got);
     if (k % 5 === 0 || /filled/.test(line)) console.log(k, line);
     if (/filled_map/.test(line)) break;
   }
-  console.log(JSON.stringify(await pg.evaluate(() => {
-    const A = window.__A, T = BF.trades;
+  console.log(JSON.stringify(await lib.sim(pg, () => {
+    const A = globalThis.__A, T = BF.trades;
     const act = BF.explorer.carried(A).find(c => !c.done);
     if (act) act.d.px.fill(1), act.d.ver++;      // finish the map by hand when the walk did not get there in time
     for (let i = 0; i < 50; i++) { BF.sky.setTime(0.1); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); }

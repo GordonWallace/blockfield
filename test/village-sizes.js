@@ -1,16 +1,18 @@
-// Village sizes (village generator 2): node test/run.js /tmp/vs test/village-sizes.js
+// @ci integration hosts=worker,server
+// Village sizes (village generator 2): node test/run.js /tmp/vs test/village-sizes.js [--host page|worker|server]
 // Samples the rosters of every village in a large area for several seeds and prints the size distribution and per-profession
 // frequencies (VS_SEEDS, VS_R regions per side / 2 around the spawn, VS_GEN; VS_VG=1 for the classic villages), then walks into the biggest village of the
 // last seed and checks its villagers spawn.
 module.exports = async (pg) => {
   const seeds = (process.env.VS_SEEDS || "1,2,3,4,5,6,7,8").split(",").map(Number), R = +(process.env.VS_R || 14);
   const gen = +(process.env.VS_GEN || 4), vg = +(process.env.VS_VG || 2);
-  const stats = await pg.evaluate(({ seeds, R, gen, vg }) => {
+  const lib = require('./lib');
+  const stats = await lib.sim(pg, ({ seeds, R, gen, vg }) => {   // (where the simulation is: spec r15-43)
     const sizes = [], prof = {}, has = {}, slots = { explorer: 0, cart: 0 }, golems = [], jobs = [], fails = [];
     let villages = 0, total = 0, maxV = null;
     for (const seed of seeds) {
       BF.newWorld(seed, { gen, villages: vg });
-      const seen = new Set(), o = BFT.spawn();
+      const seen = new Set(), s0 = BF.spawnPoint || BF.player.position, o = { x: Math.floor(s0.x), z: Math.floor(s0.z) };   // (BFT.spawn(): test/bft.js is the page's)
       for (let rz = -R; rz < R; rz++) for (let rx = -R; rx < R; rx++) for (const v of BF.worldgen.villagesNear(o.x + rx * 384, o.z + rz * 384, 200)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
         if (seen.has(key)) continue;
@@ -46,9 +48,11 @@ module.exports = async (pg) => {
   if (process.env.VS_WALK === "0" || !stats.maxV) return;
   // walk into the biggest village: its villagers spawn as the player moves about it
   const v = stats.maxV;
+  // off the page, the simulation started those worlds by itself: the page plays the last one too, so its player walks in the same world
+  if (lib.host() !== 'page') await lib.newWorld(pg, seeds[seeds.length - 1], { gen, villages: vg });
   await pg.evaluate(v => { BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5); }, v);
   await pg.waitForTimeout(12000);
-  const live = await pg.evaluate(v => {
+  const live = await lib.sim(pg, v => {
     const key = Math.round(v.x) + "," + Math.round(v.z), rec = BF.mobs.villages.get(key);
     return { roster: rec && rec.roster.length, live: BF.mobs.list.filter(m => m.type === "villager" && m.village === rec && !m.dead).length,
       golems: BF.mobs.list.filter(m => m.type === "iron_golem" && m.village === rec).length };

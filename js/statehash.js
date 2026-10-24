@@ -34,9 +34,10 @@ function hashStr(s) {
 // ---------------------------------------------------------------- canonical text of a value
 const MAX_DEPTH = 9;
 const num = v => Number.isInteger(v) ? String(v) : Number.isFinite(v) ? "f" + Math.round(v * 1024) : String(v);
-// Fields that are drawing, animation or static definitions, never simulation state.
+// Fields that are drawing, animation or static definitions, never simulation state; and caches (_res: a villager's reserve, js/market.js,
+// worked out by whoever asks first in a tick, so its time stamp depends on the order mobs think in, spec r15-33).
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
-  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs"]);
+  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res"]);
 let mobSet = new Set();
 const mobRef = m => m.id != null ? "#" + m.id : m.type + (m.name ? ":" + m.name : "");
 const isMob = v => mobSet.has(v) || (v.def && v.position && v.type && v.ai);   // (a mob: js/mobs.js createMob)

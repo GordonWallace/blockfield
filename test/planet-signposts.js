@@ -1,16 +1,19 @@
-// @ci integration suite=village
+// @ci integration suite=village hosts=worker,server
 // Signposts on the planet (generator 4, spec r14-17): a village beside a face edge lists a village on the next face, with the planet
 // distance rounded to 10 and an arrow that points the way to it in the village's own grid (stepping that way gets closer by as much).
 // Villages keep well clear of face edges (r14-12), so two on different faces are rarely within the signposts' 800 blocks: the listing is
 // checked with a 1,200-block range, and the real signposts of the same villages list only neighbours within 800.
 // node test/run.js /tmp/pw test/planet-signposts.js
 module.exports = async (pg) => {
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
+  const lib = require('./lib');
+  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
+  await lib.newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(1500);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
 
-  const r = await pg.evaluate(() => {
+  const r = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     const P = BF.planet, G = BF.worldgen, S = BF.signs, N = P.N, out = { pairs: [] }, RANGE = 1200;
     // villages within 800 blocks of each other on two faces: walk a few edges, looking at villages near points just inside them
     const edges = [[4, 1], [0, 2], [0, 3], [4, 0], [1, 2], [5, 3]];

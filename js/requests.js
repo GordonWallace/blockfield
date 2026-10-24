@@ -14,17 +14,23 @@
 // Game log: INFO "requests" summary once a game hour while the debug overlay or debug screen is on; ERROR for a kind with no handler.
 // Queued requests are not saved: those sent in a tick apply in that tick, so only chain effects and between-tick sends can be pending.
 // API: BF.req = { send(kind, target, data, from) -> req (req.then(fn)), on(kind, applyFn(req, world) -> {ok, ...}, {onResult}?),
-//   beginTick(), apply(), blocks(fn), deliver(), endTick(), phase, direct, strict, stats(), resetStats(), text(), queued(), reset(), order(a, b),
+//   beginTick(), apply(), blocks(fn), deliver(), endTick(), times() -> {ticks, think, apply, blocks, deliver} (ms), resetTimes(), phase, direct, strict, stats(), resetStats(), text(), queued(), reset(), order(a, b),
 //   player(kind, target, data) -> req (applied now, req.result; through the protocol when R.via is set), applyPlayer(kind, target, data), via, record() -> list / record(false) -> list, replay(list), replayFlush(),
-//   recording, replaying, inPlayer }
+//   recording, replaying, inPlayer, route, regionOrder, single, applying (region inboxes, spec r15-33) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const kinds = new Map();   // kind -> {apply, onResult}
 let queue = [], seq = 0, done = [];   // done: [req, result] waiting for delivery
+// Region inboxes (spec r15-33): with R.route set (js/regiontick.js), a request sent in the think phase goes to the inbox of the region it
+// targets (route(req) -> region key, or -1 for the global inbox: requests with no place, such as new mobs). apply() then runs the
+// inboxes one region at a time, in R.regionOrder() (key order), each sorted by order(), and the global inbox last. R.route null (or
+// R.single) keeps the single-list apply of r15-17: every request in one list sorted by order(). Either way, requests marked data.late
+// (the far parts of a wide effect, js/mobs.js explode) apply after all the others: region by region, then the global ones.
+let inbox = new Map();   // region key -> [req]
 let phase = "idle";
-const S = { sent: 0, applied: 0, refused: 0, byKind: {}, direct: {}, directTotal: 0 };
+const S = { sent: 0, applied: 0, refused: 0, byKind: {}, direct: {}, directTotal: 0, regionApplies: 0 };
 const H = { sent: 0, refused: 0, byKind: {}, direct: {}, directTotal: 0 };   // since the last hourly log line
 let hourAt = null;
 const unhandled = new Set();
@@ -53,15 +59,20 @@ function make(kind, target, data, from) {
 }
 function send(kind, target, data, from) {
   const req = make(kind, target, data, from);
-  queue.push(req);
+  const k = R.route && kinds.has(kind) && !kinds.get(kind).global ? R.route(req) : -1;
+  if (k >= 0) { req.region = k; let a = inbox.get(k); if (!a) inbox.set(k, (a = [])); a.push(req); }
+  else queue.push(req);
   return req;
 }
-function on(kind, applyFn, opts) { kinds.set(kind, { apply: applyFn, onResult: opts && opts.onResult }); }
+// opts: onResult(m, req, result) for a requester that is a live mob; global: true for a kind that is always applied from the global
+// inbox, after the regions (one that hands out ids or otherwise depends on order across the whole world: "spawn").
+function on(kind, applyFn, opts) { kinds.set(kind, { apply: applyFn, onResult: opts && opts.onResult, global: !!(opts && opts.global) }); }
 
 function applyOne(req) {
   const k = kinds.get(req.kind);
   let r;
-  if (dead(req.from)) r = { ok: false, why: "dead" };   // killed earlier in this apply (r15-23): its own requests are refused, items stay put
+  if (dead(req.from)) r = { ok: false, why: "dead" };
+  else if (R.inactive && (r = R.inactive(req))) {}   // its region isn't simulated (spec r15-33)   // killed earlier in this apply (r15-23): its own requests are refused, items stay put
   else if (!k) {
     r = { ok: false, why: "no handler" };
     if (!unhandled.has(req.kind)) { unhandled.add(req.kind); if (BF.glog) BF.glog.log("ERROR", "requests", "Request kind \"" + req.kind + "\" has no handler (from " + (req.from || "nobody") + ")"); }
@@ -75,15 +86,35 @@ function applyOne(req) {
   return r;
 }
 function apply() {
-  const list = queue;
-  queue = [];   // anything sent from here on is the next tick's
-  if (!list.length) return 0;
-  list.sort(order);
+  if (phase === "think" && t0) lapT("think");
+  const list = queue, boxes = inbox;
+  queue = []; inbox = new Map();   // anything sent from here on is the next tick's
+  if (!list.length && !boxes.size) return 0;
   const prev = phase;
   phase = "apply";
-  try { for (const req of list) { applyOne(req); done.push(req); } }
-  finally { phase = prev; }
-  return list.length;
+  let n = 0;
+  // R.applying: the region of the request being applied (-1: the global inbox), in both modes alike (per-region roll counters, js/blocks.js)
+  const run = L => { L.sort(order); for (const req of L) { R.applying = req.region >= 0 ? req.region : -1; applyOne(req); done.push(req); } n += L.length; };
+  // late requests (data.late: the far parts of a wide effect, decided by an earlier request of the same tick) go after all the others
+  const split = L => { const a = [], b = []; for (const req of L) (req.data.late ? b : a).push(req); return [a, b]; };
+  try {
+    if (R.single || !R.route) {
+      const all = list.slice();
+      for (const L of boxes.values()) for (const req of L) all.push(req);
+      const [a, b] = split(all);
+      run(a); run(b);
+    } else {
+      const keys = [...boxes.keys()], late = new Map();
+      if (R.regionOrder) R.regionOrder(keys); else keys.sort((a, b) => a - b);
+      for (const k of keys) { const [a, b] = split(boxes.get(k)); if (b.length) late.set(k, b); run(a); }
+      const [g, gl] = split(list);
+      run(g);
+      for (const k of keys) if (late.has(k)) run(late.get(k));
+      run(gl);
+      S.regionApplies += keys.length;
+    }
+  } finally { phase = prev; R.applying = -1; }
+  return n;
 }
 
 // A requester that has died (a mob killed by an earlier request this tick, spec r15-23). A removed one (unloaded) still has its requests applied.
@@ -115,9 +146,17 @@ function deliver() {
   } finally { phase = prev; }
 }
 
-function beginTick() { if (rec || rep) boundary(); phase = "think"; }
-function blocks(fn) { const prev = phase; phase = "blocks"; try { fn(); } finally { phase = prev; } }
-function endTick() { phase = "idle"; hourly(); }
+// Time per phase (spec r15-33): ms summed over the ticks since resetTimes(), for the debug screen and the hourly region-tick log line.
+// Think runs from beginTick to apply, so it includes the think hooks of world.tickSim.
+const T = { ticks: 0, think: 0, apply: 0, blocks: 0, deliver: 0 };
+const clock = () => (globalThis.performance ? performance.now() : Date.now());
+let t0 = 0;
+function lapT(part) { const t = clock(); if (t0) T[part] += t - t0; t0 = t; }
+function beginTick() { if (rec || rep) boundary(); phase = "think"; t0 = clock(); T.ticks++; }
+function blocks(fn) { if (t0) lapT("apply"); const prev = phase; phase = "blocks"; try { fn(); } finally { phase = prev; if (t0) lapT("blocks"); } }
+function endTick() { phase = "idle"; if (t0) lapT("deliver"); t0 = 0; hourly(); if (BF.rtick) BF.rtick.hourly(); }
+const times = () => Object.assign({}, T);
+function resetTimes() { T.ticks = T.think = T.apply = T.blocks = T.deliver = 0; }
 
 // ---------- the player (spec r15-20) ----------
 // The player runs in real time between ticks (js/main.js frame: the tick batch, then BF.player.update). What it does to the world
@@ -272,9 +311,10 @@ function hourly() {
 function stats() {
   const byKind = {};
   for (const k in S.byKind) byKind[k] = Object.assign({}, S.byKind[k]);
-  return { sent: S.sent, applied: S.applied, refused: S.refused, queued: queue.length, byKind, direct: Object.assign({}, S.direct), directTotal: S.directTotal };
+  return { sent: S.sent, applied: S.applied, refused: S.refused, queued: queued(), regionApplies: S.regionApplies, byKind, direct: Object.assign({}, S.direct), directTotal: S.directTotal };
 }
-function resetStats() { S.sent = S.applied = S.refused = 0; S.byKind = {}; S.direct = {}; S.directTotal = 0; }
+function queued() { let n = queue.length; for (const L of inbox.values()) n += L.length; return n; }
+function resetStats() { S.sent = S.applied = S.refused = S.regionApplies = 0; S.byKind = {}; S.direct = {}; S.directTotal = 0; }
 // The F3 line: "Requests 12 (1 refused)  Direct writes 40: miner 20, builder 12, player 8"
 function text(s) {
   s = s || stats();
@@ -283,15 +323,16 @@ function text(s) {
 }
 
 const R = {
-  send, on, apply, deliver, beginTick, blocks, endTick, stats, resetStats, text, order,
+  send, on, apply, deliver, beginTick, blocks, endTick, stats, resetStats, text, order, times, resetTimes,
   player, applyPlayer, record, replay, replayFlush, via: null,
   get recording() { return !!rec; },
   get replaying() { return rep ? rep.length - repAt : 0; },   // entries still to replay
   get inPlayer() { return depth > 0; },
   get phase() { return phase; },
   direct: true, strict: false,
-  queued: () => queue.length,
-  reset() { queue = []; done = []; seq = 0; phase = "idle"; hourAt = null; rec = null; rep = null; repAt = 0; replaying = false; depth = 0; resetStats(); H.sent = H.refused = H.directTotal = 0; H.byKind = {}; H.direct = {}; unhandled.clear(); },
+  route: null, regionOrder: null, inactive: null, single: false, applying: -1,   // region inboxes (spec r15-33, js/regiontick.js)
+  queued,
+  reset() { queue = []; inbox = new Map(); done = []; seq = 0; phase = "idle"; hourAt = null; rec = null; rep = null; repAt = 0; replaying = false; depth = 0; resetStats(); H.sent = H.refused = H.directTotal = 0; H.byKind = {}; H.direct = {}; unhandled.clear(); },
   hook,
 };
 BF.req = R;

@@ -1,14 +1,17 @@
-// @ci integration suite=village
+// @ci integration suite=village hosts=worker,server
 // Builders bridge rivers (idea-030, js/bridges.js). A river is carved through a village, crossings are counted, and the checks follow:
 //  - the weights offer a bridge only with 12 or more crossings in the last 3 days and water 3 to 24 wide, at most 3 per village
 //  - the builder builds it from materials it holds, with a 3-wide deck, rails, torch posts, log posts down to the bed (each built from the bed up
 //    before the deck above it) and room for a boat to pass under between them
 //  - walks across the river go over the bridge instead of nowhere (swimming), and the crossing counts and the bridge survive a save
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/br test/bridges.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/br test/bridges.js [--host page|worker|server]   (the village, the builder and the
+// bridge where the simulation is, spec r15-43)
 module.exports = async (pg) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.sky.setTime(0.2); });
-  await require('./lib').toVillage(pg);
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
+  await lib.sim(pg, () => BF.sky.setTime(0.2));
+  await lib.toVillage(pg);
+  const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const M = BF.mobs, Bd = BF.builder, Br = BF.bridges, W = BF.world, B = BF.B, I = BF.I, T = BF.trades.inv;
     M.spawning = false;

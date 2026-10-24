@@ -32,30 +32,47 @@ exports.sim = (pg, fn, arg) => pg.evaluate(([src, a]) => BF.simHost.eval(src, a)
 // stop()}. The world server runs (with --test, so BFT.sim works there, and saves in a temp folder) unless opts.world is false;
 // opts.args adds arguments (e.g. ['--alerts', file]).
 exports.freePort = () => new Promise(res => { const s = require('net').createServer().listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
+// A port probed free can be taken again before debug/server.js binds it (another test, a browser): the server then says it "can't open"
+// the port and runs without it, so an attempt that logs that is stopped and tried again on fresh ports (up to 5 times).
 exports.serve = async (opts = {}) => {
   const path = require('path'), cp = require('child_process'), os = require('os'), fs = require('fs');
-  const game = opts.game || await exports.freePort(), debug = opts.debug || await exports.freePort();
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-saves-'));
-  const args = [path.join(__dirname, '..', 'debug/server.js'), '--game', String(game), '--debug', String(debug), '--saves', saves, '--test', ...(opts.world === false ? ['--no-world'] : []),
-    ...((opts.args || []).includes('--alerts') ? [] : ['--alerts', path.join(saves, 'alerts.json')]), ...(opts.args || [])];   // (the debug screen's alerts: not debug/.alerts.json)
-  const srv = cp.spawn(process.execPath, args, { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
-  await new Promise((res, rej) => {
+  for (let attempt = 1; ; attempt++) {
+    const game = opts.game || await exports.freePort(), debug = opts.debug || await exports.freePort();
+    const args = [path.join(__dirname, '..', 'debug/server.js'), '--game', String(game), '--debug', String(debug), '--saves', saves, '--test', ...(opts.world === false ? ['--no-world'] : []),
+      ...((opts.args || []).includes('--alerts') ? [] : ['--alerts', path.join(saves, 'alerts.json')]), ...(opts.args || [])];   // (the debug screen's alerts: not debug/.alerts.json)
+    const srv = cp.spawn(process.execPath, args, { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
-    const t = setTimeout(() => rej(new Error('debug/server.js did not start: ' + out)), 20000);
-    srv.stdout.on('data', d => { out += d; if (/Ctrl\+C/.test(out)) { clearTimeout(t); res(); } });
-    srv.stderr.on('data', d => { out += d; });
-    srv.on('exit', c => { clearTimeout(t); rej(new Error('debug/server.js exited ' + c + ': ' + out)); });
-  });
-  srv.stdout.on('data', d => { if (opts.verbose) process.stdout.write('SERVER ' + d); });
-  srv.stderr.on('data', d => process.stdout.write('SERVER ' + d));
-  return { srv, game, debug, url: 'http://localhost:' + game + '/index.html', debugUrl: 'http://localhost:' + debug + '/',
-    stop: () => new Promise(res => { if (srv.exitCode != null) { res(); return; } srv.once('exit', () => { try { fs.rmSync(saves, { recursive: true, force: true }); } catch (e) {} res(); }); srv.kill('SIGKILL'); }) };
+    const started = await new Promise(res => {
+      const t = setTimeout(() => res('did not start in 20 s'), 20000);
+      // (the "can't open" line goes to stderr and can come after the banner: give it a moment)
+      srv.stdout.on('data', d => { out += d; if (/Ctrl\+C/.test(out)) { clearTimeout(t); setTimeout(() => res(/can't open/.test(out) ? 'a port was taken' : null), 500); } });
+      srv.stderr.on('data', d => { out += d; });
+      srv.on('exit', c => { clearTimeout(t); res('exited ' + c); });
+    });
+    if (started) {
+      if (srv.exitCode == null) { srv.kill('SIGKILL'); await new Promise(r => srv.once('exit', r)); }
+      if (attempt < 5 && !(opts.game && opts.debug)) { console.log(`debug/server.js on ports ${game}/${debug}: ${started}; trying other ports`); continue; }
+      throw new Error('debug/server.js ' + started + ': ' + out);
+    }
+    srv.stdout.on('data', d => { if (opts.verbose) process.stdout.write('SERVER ' + d); });
+    srv.stderr.on('data', d => process.stdout.write('SERVER ' + d));
+    return { srv, game, debug, url: 'http://localhost:' + game + '/index.html', debugUrl: 'http://localhost:' + debug + '/',
+      stop: () => new Promise(res => { if (srv.exitCode != null) { res(); return; } srv.once('exit', () => { try { fs.rmSync(saves, { recursive: true, force: true }); } catch (e) {} res(); }); srv.kill('SIGKILL'); }) };
+  }
 };
 // where(pg): {host, mode, label} as the page reports it, to check the test runs where it asked
 exports.where = pg => pg.evaluate(() => ({ mode: BF.simHost.mode, label: BF.simHost.label() }));
 // simReady(pg): with the simulation off the page, waits until the world it plays has ticked a couple of seconds (the world server may
 // first solve the planet's rivers), so a test's first BFT.sim sees the world the page shows
-exports.simReady = pg => pg.waitForFunction(() => !BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0), null, { timeout: 300000, polling: 250 });
+// Also waits for the host to be chosen (until then BF.simHost.worker is false and BFT.sim runs in the page) and, off the page, for the
+// simulation to play the page's seed (a Web Worker plays its first world for a few seconds before the page's)
+exports.simReady = async pg => {
+  await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why) && (!BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0)), null, { timeout: 300000, polling: 250 });
+  if (!(await pg.evaluate(() => BF.simHost.worker))) return;
+  const seed = await pg.evaluate(() => BF.state.seed >>> 0);
+  for (let i = 0; i < 600 && !(await exports.sim(pg, s => BF.state.seed >>> 0 === s && BF.rand.tick > 20, seed)); i++) await pg.waitForTimeout(500);
+};
 // goto(pg, hash): a node test's own page opened on BF_HOST's host: index.html as a file for page, else served by a debug/server.js of
 // its own (with the world server for server, so each page gets a fresh world there), checked to run there and ready for lib.sim.
 // pg.done() closes the page and stops that server.

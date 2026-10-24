@@ -1,4 +1,4 @@
-// @ci integration suite=items
+// @ci integration suite=items hosts=worker,server
 // No block can be placed inside the player, and an entity slightly inside a block can't walk through it (bug-015):
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/pip test/place-inside-player.js
 module.exports = async (pg, out) => {
@@ -6,27 +6,47 @@ module.exports = async (pg, out) => {
   await pg.waitForTimeout(3000);
   const fails = [];
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
-  const r = await pg.evaluate(() => {
-    BF.mobs.spawning = false;
-    const W = BF.world, p = BF.player.position;
-    const X = Math.floor(p.x), Z = Math.floor(p.z), gy = W.heightAt(X, Z);
+  const lib = require('./lib');
+  // a round trip: requests and queries are answered in order, so what was sent before has been applied (and its self is in); then a
+  // moment for the page's copy of the world to take the simulation's edits
+  const settle = () => pg.evaluate(() => new Promise(r => BF.client.query("stats", {}, () => requestAnimationFrame(() => requestAnimationFrame(r)))));
+  const synced = async () => { await settle(); await pg.waitForTimeout(300); await settle(); };
+  // a right click where the page's player now stands: the simulation checks the block against its copy of the player's body, which the
+  // page sends each frame, so let a couple of frames send the new position (and a round trip apply it) before clicking
+  const click = async () => {
+    await pg.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await settle();
+    await pg.evaluate(() => { BF.player.setMouse(false, true); BF.player.setMouse(false, false); });
+    await synced();
+  };
+  // the blocks and items are the simulation's (spec r15-43); the player's body, its physics and its clicks are the page's
+  const block = (x, y, z) => lib.sim(pg, ([x, y, z]) => BF.world.getBlock(x, y, z), [x, y, z]);
+  const p0 = await pg.evaluate(() => { const p = BF.player.position, X = Math.floor(p.x), Z = Math.floor(p.z); return { X, Z, gy: BF.world.heightAt(X, Z) }; });
+  await lib.sim(pg, () => { BF.mobs.spawning = false; BF.inventory.setSlot(0, { id: BF.B.cobblestone, count: 10 }); BF.proto.flush(); });
+  await lib.sim(pg, ({ X, Z, gy }) => {
+    const W = BF.world;
     for (let dx = -6; dx <= 6; dx++) for (let dz = -3; dz <= 3; dz++) { W.setBlock(X + dx, gy, Z + dz, BF.B.stone); for (let k = 1; k <= 4; k++) W.setBlock(X + dx, gy + k, Z + dz, 0); }
-    BF.inventory.setSlot(0, { id: BF.B.cobblestone, count: 10 }); BF.inventory.select(0);
-    const r = { X, gy };
+    BF.proto.flush();
+  }, p0);
+  await synced();
+  await pg.evaluate(() => BF.inventory.select(0));
+  await pg.evaluate(({ X, Z, gy }) => {
     // 1. stand reaching 0.005 into the cell at x X-1 and try to place cobblestone there at feet height
     BF.player.teleport(X + 0.295, gy + 1, Z + 0.5);
     for (let i = 0; i < 5; i++) BF.player.update(0.05);
     const e = BF.player.eyePos(), tx = X - 1 + 0.5 - e.x, ty = gy + 1 - e.y, tz = Z + 0.5 - e.z;
     BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
     BF.player.update(0.016);
-    BF.player.setMouse(false, true); BF.player.setMouse(false, false);
-    r.placed = W.getBlock(X - 1, gy + 1, Z);
-    // 2. a block that ends up overlapping the player anyway (set directly) still stops a walk into it
-    W.setBlock(X - 1, gy + 1, Z, BF.B.cobblestone);
+  }, p0);
+  await click();
+  const r = { X: p0.X, gy: p0.gy, placed: await block(p0.X - 1, p0.gy + 1, p0.Z) };
+  // 2. a block that ends up overlapping the player anyway (set directly) still stops a walk into it
+  await lib.sim(pg, ({ X, Z, gy }) => { BF.world.setBlock(X - 1, gy + 1, Z, BF.B.cobblestone); BF.proto.flush(); }, p0);
+  await synced();
+  await pg.evaluate(({ X, Z, gy }) => {
     BF.player.teleport(X + 0.295, gy + 1, Z + 0.5);
     BF.player.setLook(Math.PI / 2, 0);            // facing -x
-    return r;
-  });
+  }, p0);
   console.log(JSON.stringify(r));
   const BF_COBBLE = await pg.evaluate(() => BF.B.cobblestone);
   check(r.placed === 0, "placing a block in a cell the player reaches into is refused");
@@ -43,27 +63,31 @@ module.exports = async (pg, out) => {
   console.log("walking away:", JSON.stringify(away));
   check(away[away.length - 1] > r.X + 1, "walking out of the block works");
   // 4. normal play: standing flush against the next cell (as collision leaves you), placing there still works
-  const flush = await pg.evaluate(() => {
-    const W = BF.world, X = Math.floor(BF.player.position.x) - 1, gy = Math.floor(BF.player.position.y), Z = Math.floor(BF.player.position.z);
+  const p4 = await pg.evaluate(() => {
+    const X = Math.floor(BF.player.position.x) - 1, gy = Math.floor(BF.player.position.y), Z = Math.floor(BF.player.position.z);
     BF.player.teleport(X + 0.3001, gy, Z + 0.5);
     BF.player.update(0.016);
     const e = BF.player.eyePos(), tx = X - 1 + 0.5 - e.x, ty = gy - e.y, tz = Z + 0.5 - e.z;
     BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
     BF.player.update(0.016);
-    BF.player.setMouse(false, true); BF.player.setMouse(false, false);
-    return W.getBlock(X - 1, gy, Z);
+    return { X, gy, Z };
   });
+  await click();
+  const flush = await block(p4.X - 1, p4.gy, p4.Z);
   check(flush === BF_COBBLE, "a block can still be placed right next to the player");
   // 5. grazing: a player slightly inside a block's side (0.005 in z) but well along it in x keeps walking along it
-  const graze = await pg.evaluate(() => {
-    const W = BF.world, p = BF.player.position;
-    const X = Math.floor(p.x), Z = Math.floor(p.z), gy = Math.floor(p.y);
+  const graze = await pg.evaluate(() => { const p = BF.player.position; return { X: Math.floor(p.x), Z: Math.floor(p.z), gy: Math.floor(p.y) }; });
+  await lib.sim(pg, ({ X, Z, gy }) => {
+    const W = BF.world;
     for (let dx = -8; dx <= 8; dx++) for (let dz = -2; dz <= 2; dz++) { W.setBlock(X + dx, gy - 1, Z + dz, BF.B.stone); for (let k = 0; k <= 3; k++) W.setBlock(X + dx, gy + k, Z + dz, 0); }
-    BF.player.teleport(X - 0.2, gy, Z + 1 - 0.295);           // body spans x X-0.5..X+0.1, z just 0.005 into row Z+1
     W.setBlock(X - 1, gy, Z + 1, BF.B.cobblestone);          // the block it is grazing (x X-1..X, row Z+1)
+    BF.proto.flush();
+  }, graze);
+  await synced();
+  await pg.evaluate(({ X, Z, gy }) => {
+    BF.player.teleport(X - 0.2, gy, Z + 1 - 0.295);           // body spans x X-0.5..X+0.1, z just 0.005 into row Z+1
     BF.player.setLook(Math.PI / 2, 0);                        // facing -x, along the block's side
-    return { X };
-  });
+  }, graze);
   await pg.keyboard.down('KeyW');
   const along = await pg.evaluate(() => { const xs = []; for (let i = 0; i < 20; i++) { BF.player.update(0.05); xs.push(+BF.player.position.x.toFixed(3)); } return xs; });
   await pg.keyboard.up('KeyW');

@@ -1,4 +1,4 @@
-// @ci integration suite=items timeout=300
+// @ci integration suite=items timeout=300 hosts=worker,server
 // Chests, furnaces and item pickup as requests (spec r15-22): NODE_PATH=$(npm root -g) node test/run.js /tmp/cr test/chest-requests.js
 // Requests sent in one tick, in the opposite of requester order, apply in order (the player first, then lower villager id first; spec
 // r15-20), each seeing what the ones before it left. In every case the items are conserved.
@@ -14,7 +14,7 @@ module.exports = async (pg, out) => {
   const fails = [];
   const check = (ok, what, info) => { console.log((ok ? "ok   " : "FAIL ") + what + (info !== undefined ? "  " + JSON.stringify(info) : "")); if (!ok) fails.push(what); };
 
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     BF.state.paused = true;   // ticks by hand
     const W = BF.world, I = BF.I, T = BF.trades.inv, INV = BF.inventory, R = BF.req, FU = BF.furnaceUse, P = BF.player.position;
     const step = () => BF.simStep(BF.warp.TICK);
