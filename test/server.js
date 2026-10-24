@@ -64,7 +64,7 @@ function headless(n) {
   const h = BF.boot.headless({ seed, settings: { at: 'village', villages: 10, gameMode: 'creative' } });
   const start = h.stateHash();
   h.tick(n);
-  return { start, end: h.stateHash(), ticks: h.ticks };
+  return { start, end: h.stateHash(), ticks: h.ticks, clock: BF.stateHash.text('clock') };
 }
 
 (async () => {
@@ -126,7 +126,8 @@ function headless(n) {
     const startDiff = diffParts(h0.parts, hl.start.parts), endDiff = diffParts(h1.parts, hl.end.parts);
     console.log(`headless start ${hl.start.hash} / server ${h0.hash}${startDiff.length ? ' (parts ' + startDiff.join(', ') + ')' : ''}`);
     console.log(`${endDiff.length ? 'DIFF' : 'same'} after ${hl.ticks} ticks: headless ${hl.end.hash} / server ${h1.hash}${endDiff.length ? ' (parts ' + endDiff.join(', ') + ')' : ''}`);
-    check(h1.parts.clock === hl.end.parts.clock, 'the clock matches the headless run after as many ticks');
+    const clk = await query(pg, 'partText', { part: 'clock' });
+    check(h1.parts.clock === hl.end.parts.clock, `the clock matches the headless run after as many ticks (server ${clk.text}, headless ${hl.clock})`);
     if (!endDiff.length || ENFORCE) check(!endDiff.length, 'the server and the headless run hash the same world');
     else console.log('report-only (ENFORCE off until Stage 1, as test/headless.js): the difference does not fail the test');
 

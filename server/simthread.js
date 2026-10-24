@@ -94,6 +94,7 @@ function lockstep() {
     while (n < plan.n && !W.frozen && (n === 0 || performance.now() - t0 < W.BUDGET_MS)) { BF.boot.stream(); BF.simStep(plan.h); n++; }
     return n;
   };
+  BF.proto.queries.partText = a => ({ ok: true, text: String(BF.stateHash.text(a.part)).slice(0, 4000) });   // (to show what differs)
   glog("Lockstep ticks (a test): chunks load before each tick, as headless");
 }
 
