@@ -1,15 +1,17 @@
+// @ci integration hosts=worker,server
 // Chickens, coops and the poultry keeper (js/poultry.js): a generated coop and its keeper, laying and collecting eggs, feeding and breeding,
 // culling past 8, stocking an empty coop from wild chickens, the player's seeds, save and load, and a builder's coop. Usage:
 //   NODE_PATH=$(npm root -g) node test/run.js /tmp/out test/poultry-actions.js
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     const P = BF.poultry, I = BF.I;
     BF.state.paused = true;
-    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (4 + pastures + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
     // wild animals breed on their own (js/wildlife.js: a daily roll makes a wild pair willing, as if fed): held off here, so a birth or a

@@ -1,9 +1,11 @@
+// @ci baseline hosts=worker,server
 // Farmer log checks (1.1: only foresters fell trees): node test/run.js /tmp/fl test/farmer-logs.js
 // A farmer short of logs for a bed's edge buys them through an offer: a forester's log offer (level 2) or, before that, its spare logs (8 an
 // emerald, js/market.js). Foresters come first; another villager's spare logs do when no forester has any (1.3, one market). A farmer without
 // emeralds buys nothing, and a gather task never takes a log from a tree.
 module.exports = async (pg) => {
-  const r = await pg.evaluate(() => {
+  const lib = require('./lib');   // (lib.sim: where the simulation is, spec r15-43)
+  const r = await lib.sim(pg, () => {
     const out = [], ok = (name, c, info) => out.push((c ? "PASS " : "FAIL ") + name + (c || info === undefined ? "" : " " + JSON.stringify(info)));
     const I = BF.I, T = BF.trades, inv = T.inv, VL = BF.villageLife, X = VL._test;
     const at = (x) => new THREE.Vector3(x, 64, 0);

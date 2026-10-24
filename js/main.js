@@ -152,6 +152,7 @@ const startOpts = m && m[2] ? { villages: +m[2] } : {};
 // the page (js/protocol.js, spec r15-36). Then the boot world, rivers first; with the worker, the page keeps its own copy of it.
 host.start().then(mode => {
   if (mode !== "worker" && BF.proto) BF.proto.local.connect();
+  if (BF.player.menu() === "start") BF.player.refreshWorlds();   // the title screen's list is the host's now: the world server's saves, or this browser's
   BF.prepareWorld(seed).then(() => { BF.newWorld(seed, startOpts); if (mode === "worker") host.demo(seed, startOpts); requestAnimationFrame(frame); });
 });
 })();

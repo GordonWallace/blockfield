@@ -1,11 +1,11 @@
 // A toolsmith that loses its job mid-craft gets the tool's materials back (bug-009): NODE_PATH=$(npm root -g) node test/run.js /tmp/tj test/toolsmith-job-change.js
-// @ci integration suite=jobs
+// @ci integration suite=jobs hosts=worker,server
 // Starts a craft, releases the jobsite (it becomes unemployed), and checks the iron and sticks are back in its pack, nothing more or less,
 // that the craft is gone, that a save and load keeps them, and that what does not fit in a full pack drops at its feet.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(500);
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     const res = {}, I = BF.I, T = BF.trades, TS = BF.toolsmith, J = BF.jobs, inv = T.inv;
     const P = BF.player.position;
     const mk = items => {

@@ -1,4 +1,6 @@
-// Chest ownership and villager storage: node test/run.js /tmp/co test/chest-owners.js
+// @ci integration hosts=worker,server
+// Chest ownership and villager storage: node test/run.js /tmp/co test/chest-owners.js [--host page|worker|server]
+// (Chests, villagers and the player's items are read where the simulation is, spec r15-43; the chest screen and the player are the page's.)
 // 1. Player: an unowned chest becomes yours when you put something in; someone else's chest is look-only in survival, editable in creative.
 // 2. An owned chest left empty for a game day is unclaimed again; a dead villager's chests are unclaimed at once.
 // 3. A villager with a full inventory claims an unowned chest in its bed's house and stores its surplus there (least needed first),
@@ -6,62 +8,75 @@
 // 4. A full villager with no chest it may use orders one; a furniture maker makes it from planks and delivers it into the house.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "survival"; });
-  await require('./lib').toVillage(pg);
-  const step = (t0, t1, secs) => pg.evaluate(async ([t0, t1, secs]) => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const step = (t0, t1, secs) => lib.sim(pg, async ([t0, t1, secs]) => {
     const dt = 0.05, n = Math.round(secs / dt);
     for (let i = 0; i < n; i++) { BF.sky.setTime(t0 + (t1 - t0) * i / n); (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver()); if (i % 400 === 0) await new Promise(r => setTimeout(r, 0)); }
   }, [t0, t1, secs]);
   const ok = (cond, what, extra) => console.log((cond ? "PASS " : "FAIL ") + what + (!cond && extra !== undefined ? "  " + JSON.stringify(extra) : ""));
 
   // ---- 1. player ownership
-  const p1 = await pg.evaluate(() => {
+  // the chest screen's title, once the simulation's answer has given it its label ("Chest — " until then)
+  const title = async () => {
+    let t = "";
+    for (let i = 0; i < 50 && !/^Chest \u2014 \S/.test(t); i++) { if (i) await pg.waitForTimeout(100); t = await pg.evaluate(() => [...document.querySelectorAll(".bf-inv h2")].map(h => h.textContent).find(t => /^Chest/.test(t)) || ""); }
+    return t;
+  };
+  const p1 = await lib.sim(pg, () => {
     BF.mobs.spawning = false;
     BF.sky.day = 1; BF.sky.setTime(0.2);
     const I = BF.inventory, W = BF.world, pp = BF.player.position;
     const x = Math.floor(pp.x) + 2, z = Math.floor(pp.z) + 2, y = BF.world.heightAt(x, z) + 1;
     W.setBlock(x, y, z, BF.B.chest);
-    I.clear(); I.add(BF.I.cobblestone, 10);
-    I.open("chest", { x, y, z });
-    const title0 = [...document.querySelectorAll(".bf-inv h2")].map(h => h.textContent).find(t => /^Chest/.test(t)) || "";
-    return { pos: { x, y, z }, title0 };
+    I.clear(); I.add(BF.I.cobblestone, 10); BF.proto.flush();
+    return { pos: { x, y, z } };
   });
+  await pg.waitForTimeout(300);
+  await pg.evaluate(p => BF.inventory.open("chest", p), p1.pos);
+  p1.title0 = await title();
   const slot = (c, i) => `.bf-slot[data-c="${c}"][data-i="${i}"]`;
-  await pg.keyboard.down('Shift'); await pg.click(slot('inv', 0), { force: true }); await pg.keyboard.up('Shift');
-  const r1 = await pg.evaluate(p => {
+  // clicks are requests: done where the simulation is by the next tick
+  const click = async (sel, shift) => { if (shift) await pg.keyboard.down('Shift'); await pg.click(sel, { force: true }); if (shift) await pg.keyboard.up('Shift'); await pg.waitForTimeout(600); };
+  await click(slot('inv', 0), true);
+  const r1 = await lib.sim(pg, p => {
     const I = BF.inventory, c = I.chestState(p.x, p.y, p.z);
-    return { owner: c.owner, title: [...document.querySelectorAll(".bf-inv h2")].map(h => h.textContent).find(t => /^Chest/.test(t)) || "", n: c.slots.reduce((s, x) => s + (x ? x.count : 0), 0) };
+    return { owner: c.owner, n: c.slots.reduce((s, x) => s + (x ? x.count : 0), 0) };
   }, p1.pos);
+  r1.title = await title();
   console.log(JSON.stringify(r1), "unowned title:", p1.title0, "| after putting cobblestone:", r1.title);
   ok(/Unclaimed/.test(p1.title0) && r1.owner === "player" && /Yours/.test(r1.title) && r1.n === 10, "player claims an unowned chest by putting an item in");
   // someone else's chest
-  const r2 = await pg.evaluate(p => {
-    const I = BF.inventory; I.close();
-    const c = I.chestState(p.x, p.y, p.z); c.owner = "test#99"; c.ownerName = "Aroha Parata";
-    I.open("chest", p);
-    return [...document.querySelectorAll(".bf-inv h2")].map(h => h.textContent).find(t => /^Chest/.test(t)) || "";
-  }, p1.pos);
-  await pg.keyboard.down('Shift'); await pg.click(slot('chest', 0), { force: true }); await pg.keyboard.up('Shift');
-  await pg.click(slot('chest', 0), { force: true });
-  const r3 = await pg.evaluate(p => { const I = BF.inventory, c = I.chestState(p.x, p.y, p.z); return { n: c.slots.reduce((s, x) => s + (x ? x.count : 0), 0), cursor: !!I.cursor, inv: I.count(BF.I.cobblestone) }; }, p1.pos);
+  await pg.evaluate(() => BF.inventory.close());
+  await lib.sim(pg, p => { const c = BF.inventory.chestState(p.x, p.y, p.z); c.owner = "test#99"; c.ownerName = "Aroha Parata"; }, p1.pos);
+  await pg.evaluate(p => BF.inventory.open("chest", p), p1.pos);
+  const r2 = await title();
+  await click(slot('chest', 0), true);
+  await click(slot('chest', 0));
+  const r3 = await lib.sim(pg, p => { const I = BF.inventory, c = I.chestState(p.x, p.y, p.z); return { n: c.slots.reduce((s, x) => s + (x ? x.count : 0), 0), cursor: !!I.cursor, inv: I.count(BF.I.cobblestone) }; }, p1.pos);
   await pg.screenshot({ path: out + '-lookonly.png' });
   console.log("someone else's chest:", r2);
   ok(/Owned by Aroha Parata/.test(r2) && /look only/.test(r2) && r3.n === 10 && !r3.cursor && r3.inv === 0, "survival: another owner's chest can be viewed but not changed");
-  const r4 = await pg.evaluate(p => { const I = BF.inventory; I.close(); BF.player.gameMode = "creative"; I.open("chest", p); return [...document.querySelectorAll(".bf-inv h2")].map(h => h.textContent).find(t => /^Chest/.test(t)) || ""; }, p1.pos);
-  await pg.keyboard.down('Shift'); await pg.click(slot('chest', 0), { force: true }); await pg.keyboard.up('Shift');
-  const r5 = await pg.evaluate(p => { const I = BF.inventory, c = I.chestState(p.x, p.y, p.z); I.close(); BF.player.gameMode = "survival"; return { n: c.slots.reduce((s, x) => s + (x ? x.count : 0), 0), owner: c.owner }; }, p1.pos);
+  await pg.evaluate(() => { BF.inventory.close(); BF.player.gameMode = "creative"; });
+  await pg.waitForTimeout(500);   // (the game mode reaches the simulation with the page's next player message)
+  await pg.evaluate(p => BF.inventory.open("chest", p), p1.pos);
+  const r4 = await title();
+  await click(slot('chest', 0), true);
+  const r5 = await lib.sim(pg, p => { const c = BF.inventory.chestState(p.x, p.y, p.z); return { n: c.slots.reduce((s, x) => s + (x ? x.count : 0), 0), owner: c.owner }; }, p1.pos);
+  await pg.evaluate(() => { BF.inventory.close(); BF.player.gameMode = "survival"; });
   ok(!/look only/.test(r4) && r5.n === 0 && r5.owner === "test#99", "creative: any chest can be changed, the owner stays");
 
   // ---- 2. release after a day empty
-  const t0 = await pg.evaluate(() => BF.sky.day + BF.sky.time);
+  const t0 = await lib.sim(pg, () => BF.sky.day + BF.sky.time);
   await step(0.2, 0.25, 3);
-  await pg.evaluate(() => { BF.sky.day += 1; });
+  await lib.sim(pg, () => { BF.sky.day += 1; });
   await step(0.26, 0.27, 3);
-  const r6 = await pg.evaluate(p => { const c = BF.inventory.chestState(p.x, p.y, p.z); const rec = BF.vlog.villageAt(p.x, p.z); return { owner: c.owner, log: rec ? BF.vlog.entries(rec.key).filter(e => e[1] === "chest").map(e => e[2]) : [] }; }, p1.pos);
+  const r6 = await lib.sim(pg, p => { const c = BF.inventory.chestState(p.x, p.y, p.z); const rec = BF.vlog.villageAt(p.x, p.z); return { owner: c.owner, log: rec ? BF.vlog.entries(rec.key).filter(e => e[1] === "chest").map(e => e[2]) : [] }; }, p1.pos);
   console.log("chest log:", r6.log);
   ok(r6.owner === null, "an owned chest empty for a day is unclaimed again (from day " + t0.toFixed(2) + ")");
 
   // ---- 3. a villager with a full inventory stores its surplus
-  const v = await pg.evaluate(() => {
+  const v = await lib.sim(pg, () => {
     const S = BF.storage, I = BF.inventory, T = BF.trades;
     const vs = BF.mobs.list.filter(m => m.type === "villager" && !m.dead && !m.child && m.inv && S.bedHouse(m));
     let pick = null, chest = null;
@@ -76,7 +91,7 @@ module.exports = async (pg, out) => {
   });
   console.log("villagers with a bed house:", v.have, "| with a chest:", v.key, JSON.stringify(v.chest), "| without:", v.noChestKeys.length);
   if (v.key) {
-    await pg.evaluate(k => {
+    await lib.sim(pg, k => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), T = BF.trades, I = BF.I;
       m.store = null;
       const old = m.inv.filter(Boolean).map(s => BF.itemName(s.id) + " x" + s.count);
@@ -84,11 +99,11 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: i % 3 ? I.rotten_flesh : I.cobblestone, count: 64 };
     }, v.key);
     pg.on('console', msg => { if (/^\[test\]/.test(msg.text())) console.log(msg.text()); });
-    for (let k = 0; k < 4 && !(await pg.evaluate(([k, p]) => { const c = BF.inventory.chestState(p.x, p.y, p.z); if (c && c.owner) return true;
+    for (let k = 0; k < 4 && !(await lib.sim(pg, ([k, p]) => { const c = BF.inventory.chestState(p.x, p.y, p.z); if (c && c.owner) return true;
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);   // it may eat, sell or trade between steps: keep it full until it stores
       for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: i % 3 ? BF.I.rotten_flesh : BF.I.cobblestone, count: 64 };
       return false; }, [v.key, v.chest])); k++) await step(0.1 + k * 0.05, 0.15 + k * 0.05, 30);
-    const r7 = await pg.evaluate(([k, p]) => {
+    const r7 = await lib.sim(pg, ([k, p]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), c = BF.inventory.chestState(p.x, p.y, p.z);
       return { free: m.inv.filter(s => !s).length, owner: c && c.owner, chest: c ? c.slots.filter(Boolean).map(s => BF.itemName(s.id) + " x" + s.count) : [],
         why: c && c.owner ? undefined : { leaving: m.ai.leaving, leaveEnd: m.ai.leaveEnd, store: m.store && { checkT: m.store.checkT, stage: m.store.stage, avoid: m.store.avoid, t: m.store.t }, d: Math.hypot(m.position.x - p.x, m.position.z - p.z), dy: m.position.y - p.y, status: BF.villagerStatus.text(m), route: m.ai.routeKind },
@@ -98,7 +113,7 @@ module.exports = async (pg, out) => {
     ok(r7.owner === v.key && r7.free >= BF_STORE_FREE(r7) && r7.chest.some(s => /Rotten Flesh|Cobblestone/.test(s)), "full villager claimed a house chest and stored its surplus");
     ok(!r7.inv.some(s => /Rotten Flesh/.test(s)), "junk went first");
     // withdraw: eat its food, leave bread in the chest
-    await pg.evaluate(([k, p]) => {
+    await lib.sim(pg, ([k, p]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), I = BF.I;
       for (let i = 0; i < m.inv.length; i++) if (m.inv[i] && BF.food.isFood(m.inv[i].id)) m.inv[i] = null;
       if (m.life) m.life.sat = 0;
@@ -106,14 +121,14 @@ module.exports = async (pg, out) => {
       m.store.checkT = 0.1; m.store.stored = {};
     }, [v.key, v.chest]);
     await step(0.3, 0.4, 40);
-    const r8 = await pg.evaluate(([k, p]) => {
+    const r8 = await lib.sim(pg, ([k, p]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
       return { bread: BF.trades.inv.count(m.inv, BF.I.bread), log: BF.vlog.entries(m.village.key).filter(e => e[1] === "chest").slice(-2).map(e => e[2]) };
     }, [v.key, v.chest]);
     console.log(JSON.stringify(r8));
     ok(r8.bread > 0, "hungry villager fetched bread from its chest");
     // death frees its chests
-    const r9 = await pg.evaluate(([k, p]) => {
+    const r9 = await lib.sim(pg, ([k, p]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
       BF.mobs.kill(m);
       const c = BF.inventory.chestState(p.x, p.y, p.z);
@@ -125,7 +140,7 @@ module.exports = async (pg, out) => {
 
   // ---- 4. ordering a chest from the furniture maker
   if (v.noChestKeys.length) {
-    const r10 = await pg.evaluate(k => {
+    const r10 = await lib.sim(pg, k => {
       BF.sky.day += 1;   // a new day: the steps above ran the clock to evening, and villagers keep their cool-downs in game time
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), I = BF.I, T = BF.trades;
       m.store = null;
@@ -141,11 +156,11 @@ module.exports = async (pg, out) => {
       return { buyer: m.profession, em: T.inv.count(m.inv, I.emerald), fm: BF.storage.keyOf(f) };
     }, v.noChestKeys[0]);
     console.log("order test:", JSON.stringify(r10));
-    for (let k = 0; k < 6 && !(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
+    for (let k = 0; k < 6 && !(await lib.sim(pg, k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
       if (!(m.store && m.store.order)) for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: BF.I.cobblestone, count: 64 };   // it may eat or sell between steps: keep it full
       return !!(m.store && m.store.order); }, v.noChestKeys[0])); k++)
       await step(0.1 + k * 0.004, 0.104 + k * 0.004, 10);   // the buyer notices it is full and orders a chest
-    const r11 = await pg.evaluate(k => {
+    const r11 = await lib.sim(pg, k => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead);
       const had = BF.trades.inv.count(f.inv, BF.I.chest), p = BF.furniture.plan(f);
       if (p && p.kind === "chest") BF.furniture.craft(f, p);   // what it does at its bench
@@ -157,13 +172,13 @@ module.exports = async (pg, out) => {
     if (!r11.order) return;
     // the chest it owns in its bed's house: usually on the ordered spot, but when a delivery there fails (someone standing on it) the
     // order is dropped and the villager orders again with a new spot, so look in the whole house
-    const owned = () => pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), S = BF.storage, H = S.bedHouse(m);
+    const owned = () => lib.sim(pg, k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), S = BF.storage, H = S.bedHouse(m);
       return (H ? S.chestsIn(H, m.bed) : []).find(p => { const c = BF.inventory.chestState(p.x, p.y, p.z); return c && c.owner === k; }) || null; }, v.noChestKeys[0]);
     const placed = async () => !!(await owned());
     // The test checks the order and the hand-over, not a long walk across a busy village: walking there competes with every other
     // villager for route searches, and on slow runners it timed out and gave up again and again. So stand the furniture maker
     // beside the spot (where its walk would end), fed and free to pick the delivery, then let it put the chest down itself.
-    const besideSpot = () => pg.evaluate(([k, s0]) => {
+    const besideSpot = () => lib.sim(pg, ([k, s0]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), s = m.store && m.store.order ? m.store.order.spot : s0, f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead), N = BF.mobs.nav;
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const dy of [0, -1, 1]) {
         const x = s.x + dx, y = s.y + dy, z = s.z + dz;
@@ -180,26 +195,26 @@ module.exports = async (pg, out) => {
     // it may still take beds to a builder or buy wool first, so give it a second day if the first runs out
     // The villager stores (and so claims the chest) only while its inventory is full, and a seller sells or eats within a minute: keep it
     // full until it owns the chest, as above, or a delivery that takes a while finds it with a free slot and the chest is never claimed.
-    const keepFull = () => pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
+    const keepFull = () => lib.sim(pg, k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
       for (let i = 0; i < m.inv.length; i++) if (!m.inv[i]) m.inv[i] = { id: BF.I.cobblestone, count: 64 }; }, v.noChestKeys[0]);
     for (let k = 0; k < 20 && !(await placed()); k++) {
-      if (k === 10) { await pg.evaluate(() => { BF.sky.day += 1; }); await besideSpot(); }
+      if (k === 10) { await lib.sim(pg, () => { BF.sky.day += 1; }); await besideSpot(); }
       await keepFull();
       await step(0.13 + (k % 10) * 0.03, 0.16 + (k % 10) * 0.03, 30);
-      trail.push(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead);
+      trail.push(await lib.sim(pg, k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead);
         return [m.inv.filter(x => !x).length + " free", f.furn && f.furn.stage, f.furn && f.furn.deal && f.furn.deal.kind, BF.villagerStatus.text(f), BF.trades.inv.count(f.inv, BF.I.chest), !!(m.store && m.store.order), +BF.sky.time.toFixed(2)].join("/"); }, v.noChestKeys[0]));
-      if (process.env.DEBUG) console.log("fm@", JSON.stringify(await pg.evaluate(k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead); return { st: f.furn && f.furn.stage, kind: f.furn && f.furn.deal && f.furn.deal.kind, pos: [Math.round(f.position.x), Math.round(f.position.z)], status: BF.villagerStatus.text(f), chests: BF.trades.inv.count(f.inv, BF.I.chest), orders: BF.storage.orders(m.village).length, log: BF.furniture.LOG.slice(-2) }; }, v.noChestKeys[0])));
+      if (process.env.DEBUG) console.log("fm@", JSON.stringify(await lib.sim(pg, k => { const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), f = m.village.members.find(o => o.profession === "furniture_maker" && !o.dead); return { st: f.furn && f.furn.stage, kind: f.furn && f.furn.deal && f.furn.deal.kind, pos: [Math.round(f.position.x), Math.round(f.position.z)], status: BF.villagerStatus.text(f), chests: BF.trades.inv.count(f.inv, BF.I.chest), orders: BF.storage.orders(m.village).length, log: BF.furniture.LOG.slice(-2) }; }, v.noChestKeys[0])));
     }   // it walks over, puts the chest down; the villager stores its surplus there
     const got = await owned();
-    const r12 = await pg.evaluate(([k, s]) => {
+    const r12 = await lib.sim(pg, ([k, s]) => {
       const m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k), c = BF.inventory.chestState(s.x, s.y, s.z);
       return { at: s, block: BF.blocks[BF.world.getBlock(s.x, s.y, s.z)].name, owner: c && c.owner, free: m.inv.filter(x => !x).length, em: BF.trades.inv.count(m.inv, BF.I.emerald),
         status: BF.villagerStatus.text(m), log: BF.vlog.entries(m.village.key).filter(e => e[1] === "chest" || /Chest/.test(e[2])).slice(-5).map(e => e[2]) };
     }, [v.noChestKeys[0], got || r11.order.spot]);
     console.log(JSON.stringify(r12, null, 1));
     ok(/^chest(_[new])?$/.test(r12.block) && r12.owner === v.noChestKeys[0], "the furniture maker delivered the chest and the villager claimed it",
-      { block: r12.block, owner: r12.owner, at: r12.at, spot: r11.order.spot, beside, trail: trail.slice(-6), log: r12.log, flog: await pg.evaluate(() => BF.furniture.LOG.slice(-5).map(e => e.kind + ":" + (e.why || e.made || e.got || e.item || "") + (e.to ? ">" + e.to : ""))) });
-    await pg.evaluate(s => { const e = BF.player.eyePos(); BF.player.teleport(s.x + 2.5, s.y + 0.01, s.z + 0.5); }, r11.order.spot);
+      { block: r12.block, owner: r12.owner, at: r12.at, spot: r11.order.spot, beside, trail: trail.slice(-6), log: r12.log, flog: await lib.sim(pg, () => BF.furniture.LOG.slice(-5).map(e => e.kind + ":" + (e.why || e.made || e.got || e.item || "") + (e.to ? ">" + e.to : ""))) });
+    await pg.evaluate(s => { BF.player.teleport(s.x + 2.5, s.y + 0.01, s.z + 0.5); }, r11.order.spot);
   } else console.log("SKIP no villager without a chest here");
 };
 // at least STORE_FREE (4) free slots after storing

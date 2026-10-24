@@ -1,5 +1,5 @@
 // @ci integration suite=ui timeout=900
-// New worlds are planets, and saves (spec r14-19): save.create makes a generator 4 world saved as version 2; a save made with the
+// New worlds are planets, and saves (spec r14-19): save.create makes a generator 4 world saved as version 3 (1.5: spec r15-42); a save made with the
 // player, a boat and mobs on face 0 and edits on both sides of a face edge comes back exactly; the spawn is dry temperate or
 // subtropical land at least 5 km from every face edge and 20 km from every corner, the same each time; a 1.3 (version 1) world is
 // listed greyed with only Delete, won't open from the list and save.load refuses it; creating a world from the menu makes a planet;
@@ -103,7 +103,7 @@ module.exports = async (pg, out) => {
   });
   console.log("save " + JSON.stringify(sv));
   check(sv.gen === 4 && sv.metaGen === 4, "save.create makes a planet (generator 4)");
-  check(sv.saved && sv.version === 2 && sv.dataGen === 4 && sv.metaVersion === 2 && sv.metaGen2 === 4, "it is saved as version 2 with gen 4");
+  check(sv.saved && sv.version === 3 && sv.dataGen === 4 && sv.metaVersion === 3 && sv.metaGen2 === 4, "it is saved as version 3 with gen 4");
   check(sv.playerCanonical, "positions are saved as canonical atlas coordinates");
   check(sv.gen2 === 4 && sv.player.face === 0 && sv.player.d < 0.5 && sv.player.dyaw < 0.01, "the player comes back on face 0 where they were, facing the same way");
   check(sv.farFace !== 0 && sv.glass && sv.bricks, "edits on both sides of the face edge come back");
@@ -122,7 +122,7 @@ module.exports = async (pg, out) => {
     const msg = await BF.save.load(id).then(() => "opened", e => e.message);
     return { msg, kept: BF.state.seed === seed0 && BF.state.gen === 4 };
   });
-  check(/can't be opened in 1\.4/.test(oldLoad.msg) && oldLoad.kept, "save.load refuses a 1.3 world (" + oldLoad.msg + ") and the world stays as it was");
+  check(/Made with Blockfield 1\.3, can't be opened in 1\.5/.test(oldLoad.msg) && oldLoad.kept, "save.load refuses a 1.3 world (" + oldLoad.msg + ") and the world stays as it was");
   await pg.reload();
   await pg.waitForTimeout(5000);
   const list = await pg.evaluate(() => {
@@ -132,7 +132,7 @@ module.exports = async (pg, out) => {
   });
   console.log("list " + JSON.stringify(list.rows.map(r => [r.old, r.btns.join("/"), r.text.slice(0, 80)])));
   const old = list.rows.find(r => /My 1\.3 world/.test(r.text)), mine = list.rows.find(r => /planet save/.test(r.text));
-  check(old && old.old && /Made with Blockfield 1\.3, can't be opened in 1\.4/.test(old.text) && old.btns.join() === "delete", "a 1.3 world is listed greyed, with only Delete");
+  check(old && old.old && /Made with Blockfield 1\.3, can't be opened in 1\.5/.test(old.text) && old.btns.join() === "delete", "a 1.3 world is listed greyed, with only Delete");
   check(mine && !mine.old && mine.btns.includes("play"), "a planet world is listed normally");
   check(list.gen === list.want, "the test page boots the generator its hash names (" + list.hash + ")");
   if (out) await pg.screenshot({ path: `${out}-worlds.png` });

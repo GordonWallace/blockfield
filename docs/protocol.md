@@ -67,7 +67,7 @@ Every message is a plain object `{t: type, ...}`. `BF.proto.encode(msg)` turns i
 | `view` | `x`, `y`, `z`, `dist` (chunks), `budget` (optional: chunks a flush) | decides what is sent: chunks and entities within `dist` chunks of the view's chunk |
 | `query` | `qid`, `what`, `args` | answers with a `result`. Kinds: `villager` {id} (hover card: name, profession, status), `village` {key, n} (summary and newest log lines), `hash` (the r15-24 state hash and parts), `stats` (protocol figures), `chunkHash` {keys} (a hash of those chunks' blocks, for a client checking its copy), `feed` {ack} (the simulation's part of a debug feed snapshot, in the worker: js/debugfeed.js); r15-37: `chest` {x, y, z} (slots, owner label, locked), `trades` {id} (offers with why one can't be done now and the stock, the villager's inventory, level, xp, name, status, editable), `inventory` {id} (a mob's slots), `map` {item, ver} (a normal map's bounds, and its RGB565 pixels as base64 when ver is not the latest), `f3` {x, y, z} (the F3 overlay's simulation figures), `vpanel` {x, z, n} (the F3 village panel: tally, occupations, free job blocks, newest log lines); r15-44: `furnace` {x, y, z} (slots [input, fuel, output], burn, burnMax, cook, can: whether it can smelt now; `{}` for the open screen's furnace); r15-44 part 2: `entity` {id} (a boat or mob as the simulation has it: x, y, z, yaw, ridden by the player, hp, a horse's tamed, saddle and lead; for tests); r15-43: `alerts` {list, av} (the debug screen's alerts, from the page to js/alertsim.js: the page sends them when they change and again after each `hello`), `eval` {src, arg} (tests only: runs a function's source where the simulation is and answers {ok, value} once its promise settles; off unless the page has `BF_TEST` set, which sends `{test: "eval"}` to a worker, and on the world server only when started with `--test`). A query may answer with a promise. Add more in `BF.proto.queries` |
 | `speed` | `speed` (0 freezes, else one of `BF.warp.SPEEDS`), `pause` (optional: the page's menus or a hidden tab stop the ticks without changing the speed) | sets the fast-forward speed |
-| `save` | `sid` | saves the world now (js/save.js), answers `{ok}` |
+| `save` | `sid` | saves the world now (js/save.js), answers `{ok}` (`{ok: false, why}` when the save failed) |
 | `player` | the player's body as `BF.player.serialize()` gives it: `x`, `y`, `z`, `yaw`, `pitch`, `health`, `hunger`, `saturation`, `exhaustion`, `air`, `gameMode`, `flying`, `dead`; r15-44: `sel` (the hotbar slot, which is the page's); r15-44 part 2: `ride` {id, x, y, z, yaw, vel [x, y, z], rowing? (a boat's paddles), fall? (half-hearts a horse took landing)}, the boat or horse the client steers, which the simulation puts there | replica: when it changed, at most once a frame. The simulation moves its player there; it is the baseline `self` compares against |
 | `world` | `wid`, `op` (`demo`, `create`, `load`), `args` ({seed, opts} / {seed, opts, meta} / {id}, and `rivers`: the page's solved river network, js/worldgen.js `riverState()`) | starts a world with the host's handler (the worker's), answers `{ok, meta?}` when it is ready |
 | `meta` | `id`, `name` and / or `monsters` | the open world was renamed or its monster options changed on the title screen, or its monster options in the pause menu (`id` null for a world that isn't saved) |
@@ -113,7 +113,7 @@ lightning hurt the player by `self.hurt` instead of directly. What requests do t
 spawn point) comes back in `self`. Requests are answered later than they are sent; js/player.js goes on as if they worked.
 
 The worker owns the world state and saves it (js/save.js runs there too). The page's `BF.save.create` / `load` set up its copy
-(`restoreClient`) and send `world`; `saveNow` sends `save`.
+(`restoreClient`) and send `world`; `saveNow` sends `save`, answered `{ok}` or `{ok: false, why}`.
 
 ## The world server's socket (r15-41)
 
@@ -130,6 +130,9 @@ like a Worker (js/simhost.js), so `BF.proto.worker` carries it; `BF.client.mode`
     page: alerts, planet toggles, screens open, item icons it lacks);
   - page to server: `{saves: {rid, op}}` with op `list`, `get` (meta and the page's part of the data, js/save.js restoreClient), `remove`,
     `rename`, `monsters`; `{feedPage}` (the page's part of the debug feed); `{feedIcons}`.
+- **Saved worlds** (r15-42) are a folder each, `saves/<world name>/` with `world.json`, `save.v8` and `log/` (server/savedir.js, under
+  server/idb.js's IndexedDB). Export and import are plain http on the game port, not the socket: `GET /saves/<id>/export` downloads a
+  `.bfworld` file (js/savefile.js), `POST /saves/import[?keep=1]` with the file as the body (and an `X-Blockfield` header) adds its world.
 - **Which thread plays** is decided by the page's `world` message: `demo` and `create` go to a fresh thread; `load` of the held world
   goes back to its thread, which answers at once with `{meta, resumed: true, speed}` and starts its client over (`hello`, then every
   edit: `BF.proto.hosted().reset()`).

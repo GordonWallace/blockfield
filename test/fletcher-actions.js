@@ -1,4 +1,5 @@
 // Fletcher, string and flint checks: NODE_PATH=$(npm root -g) node test/run.js /tmp/fl test/fletcher-actions.js
+// @ci integration hosts=worker,server
 // Unit part: trade tables and daily restock (no arrows or iron swords from nothing), starting packs, the fletcher crafts arrows and bows only
 // from what it holds (exact recipe amounts, game-time crafting), buys string / flint / sticks / feathers from villagers who hold them at
 // their own offers, the shepherd spins 1 wool into 2 string and sells it, the miner keeps flint from gravel.
@@ -6,7 +7,8 @@
 // materials buys from the shepherd (string it spun itself), a miner, a forester and a stand-in poultry keeper
 // (feathers), makes arrows and a bow at its table, and both log to BF.vlog.
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const vgPage = await pg.evaluate(() => BFT.village((v, k) => v.ground === 0 && k.pen > 0 && v.pop <= 30));   // (the page's planet: BFT is not in the simulation)
+  const res = await require('./lib').sim(pg, async vgPage => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const I = BF.I, T = BF.trades, inv = T.inv, FL = BF.fletcher, SH = BF.shepherd;
     const c = (m, n) => inv.count(m.inv, I[n]);
@@ -112,7 +114,7 @@ module.exports = async (pg, out) => {
 
     // ---- a live village: the nearest grass village with a sheep pen (a shepherd), small enough (30 at most) to have one
     // fletcher and one shepherd: in a bigger one the other fletchers and shepherds trade in between
-    const vg = BFT.village((v, k) => v.ground === 0 && k.pen > 0 && v.pop <= 30);
+    const vg = vgPage;
     if (!vg) { ok("a grass village of 30 or fewer with a pen within 3 km", false); return R; }
     const V = { x: Math.round(vg.x), z: Math.round(vg.z) };
     BF.player.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);
@@ -219,7 +221,7 @@ module.exports = async (pg, out) => {
     ok("live: 'made 4 arrows' and 'made a bow' are on the village log", logs.some(t => /\(Fletcher\) made 4 arrows$/.test(t)) && logs.some(t => /\(Fletcher\) made a bow$/.test(t)), logs.filter(t => /made/.test(t)));
     ok("live: its status says what it does", [...seenStatus].some(s => /^Buying /.test(s)) && [...seenStatus].some(s => /^Making /.test(s)), [...seenStatus]);
     return R;
-  });
+  }, vgPage);
   for (const l of res.lines) console.log(l);
   console.log(JSON.stringify(res.info, null, 1));
 };

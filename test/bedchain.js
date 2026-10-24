@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Bed supply chain soak test: foresters fell and saw wood, shepherds shear wool, the furniture maker buys both and makes beds, builders buy the beds.
 // Usage: NODE_PATH=$(npm root -g) node test/bedchain.js <seeds e.g. 1,2,3> [days=3] [villagesPerSeed=6] [out.json]
 // Drives the simulation directly (no rendering): for each village near spawn that has a forester, a shepherd, a furniture maker and a builder,
@@ -11,6 +12,7 @@ const seeds = (process.argv[2] || '1337').split(',').map(Number);
 const DAYS = +(process.argv[3] || 3);
 const PER_SEED = +(process.argv[4] || 6);
 const OUT = process.argv[5] || null;
+const lib = require('./lib'), sim = lib.sim;   // (spec r15-43: BF_HOST=page|worker|server says where the simulation runs)
 
 let b;
 async function openWorld(seed) {
@@ -22,10 +24,11 @@ async function openWorld(seed) {
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
-  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
+  await lib.goto(pg, '#seed' + seed);   // (on BF_HOST's host: spec r15-43)
+  await lib.ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
-  await pg.evaluate(t => { window.__TRACE = t; }, !!process.env.TRACE);
+  // the test steps the simulation itself: no frames' ticks in the worker or on the server either (the page's frames stop below)
+  await sim(pg, t => { globalThis.__TRACE = t; if (!BF.page) BF.boot.ticks = () => 0; }, !!process.env.TRACE);
   return pg;
 }
 
@@ -46,30 +49,31 @@ async function openWorld(seed) {
       if (process.env.ONLY && process.env.ONLY !== Math.round(v.x) + ',' + Math.round(v.z)) continue;
       const t0 = Date.now();
       // a fresh page per village: neighbouring villages within the far-village simulation range would otherwise have run already
-      if (done || pg.__used) { await pg.close(); pg = await openWorld(seed); await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); }); }
+      if (done || pg.__used) { await pg.done(); pg = await openWorld(seed); await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); }); }
       pg.__used = true;
       // ---- recorder (before the villagers spawn: a furniture maker short of stock shops right away)
-      await pg.evaluate(key => {
-        const R = window.__rec = { key, trades: [], shorn: 0, shornBy: 0, crafts: 0, fells: 0, saws: 0, sweeps: 0, sold: 0, firstCraftFromBought: null, events: [], built: [], giveups: {}, fo: {}, trace: [] };
-        const inVillage = m => m && m.village && window.__rec && m.village.key === window.__rec.key;
+      await sim(pg, key => {
+        const R = globalThis.__rec = { key, trades: [], shorn: 0, shornBy: 0, crafts: 0, fells: 0, saws: 0, sweeps: 0, sold: 0, firstCraftFromBought: null, events: [], built: [], giveups: {}, fo: {}, trace: [] };
+        const inVillage = m => m && m.village && globalThis.__rec && m.village.key === globalThis.__rec.key;
         const day = () => +(BF.sky.day + BF.sky.time).toFixed(3);
-        if (!window.__hooked) {
-          window.__hooked = true;
+        if (!globalThis.__hooked) {
+          globalThis.__hooked = true;
           const orig = BF.vlog.trade;
           BF.vlog.trade = function (buyer, seller, o, times) {
-            const r = window.__rec;
+            const r = globalThis.__rec;
             if (r && typeof o === "object" && o && o.sell && (inVillage(buyer) || inVillage(seller)))
               r.trades.push({ d: day(), buyer: buyer.profession || String(buyer), seller: seller.profession || String(seller), item: BF.itemName(o.sell.id), n: o.sell.n * (times || 1) });
             return orig.apply(this, arguments);
           };
-          BF.on("builderDone", (m, e) => { const r = window.__rec; if (r && inVillage(m)) r.built.push(e.type); });
-          BF.on("sheepShorn", (m, by) => { const r = window.__rec; if (r) { r.shorn++; if (by && by.profession === "shepherd") r.shornBy++; } });
+          BF.on("builderDone", (m, e) => { const r = globalThis.__rec; if (r && inVillage(m)) r.built.push(e.type); });
+          BF.on("sheepShorn", (m, by) => { const r = globalThis.__rec; if (r) { r.shorn++; if (by && by.profession === "shepherd") r.shornBy++; } });
         }
-        window.__trace = !!window.__TRACE; window.__fLog = BF.forester.LOG.length = 0; BF.furniture.LOG.length = 0;
+        globalThis.__trace = !!globalThis.__TRACE; globalThis.__fLog = BF.forester.LOG.length = 0; BF.furniture.LOG.length = 0;
       }, Math.round(v.x) + "," + Math.round(v.z));
       // ---- load the village and let its villagers spawn
-      const setup = await pg.evaluate(v => {
+      const setup = await sim(pg, v => {
         const key = Math.round(v.x) + "," + Math.round(v.z);
+        if (BF.player.setGameMode) BF.player.setGameMode('creative');   // (in the simulation too: the page's frames, which report it, have stopped)
         BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
         const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
         for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
@@ -101,8 +105,8 @@ async function openWorld(seed) {
       if (process.env.DEBUG) console.log('   after spawn: FM', JSON.stringify(setup.fmInv), 'builders', JSON.stringify(setup.bInv));
       const STEPS_PER_CALL = 4000, h = 0.05, total = Math.round(DAYS * 1200 / h);
       for (let s = 0; s < total; s += STEPS_PER_CALL) {
-        await pg.evaluate(([n, h, v]) => {
-          const R = window.__rec;
+        await sim(pg, ([n, h, v]) => {
+          const R = globalThis.__rec;
           for (let i = 0; i < n; i++) {
             BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim();
             if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
@@ -110,12 +114,12 @@ async function openWorld(seed) {
           // drain the module logs (they keep 200 entries)
           for (const e of BF.forester.LOG.splice(0)) { if (e.kind === "fell") R.fells++; else if (e.kind === "saw") R.saws++; else if (e.kind !== "pickup") { const k = e.kind + (e.why ? ":" + e.why : e.reason ? ":" + e.reason : ""); R.fo[k] = (R.fo[k] || 0) + 1; } }
           const inVillage = m => m && m.village && m.village.key === R.key;
-          if (window.__trace) { const fm = BF.mobs.list.find(m => m.profession === "furniture_maker" && inVillage(m)); const fo = BF.mobs.list.filter(m => m.profession === "forester" && inVillage(m)); R.trace.push([+(BF.sky.day + BF.sky.time).toFixed(2), fm ? [BF.furniture.statusText(fm), fm.job && fm.job.mode, fm.jobsite ? Math.round(Math.hypot(fm.position.x - fm.jobsite.x, fm.position.z - fm.jobsite.z)) : -1, fm.inv.filter(Boolean).map(s => BF.itemName(s.id) + s.count).join(',')] : null, fo.map(f => [BF.forester.statusText(f), f.fo && f.fo.task && f.fo.task.kind])]); }
+          if (globalThis.__trace) { const fm = BF.mobs.list.find(m => m.profession === "furniture_maker" && inVillage(m)); const fo = BF.mobs.list.filter(m => m.profession === "forester" && inVillage(m)); R.trace.push([+(BF.sky.day + BF.sky.time).toFixed(2), fm ? [BF.furniture.statusText(fm), fm.job && fm.job.mode, fm.jobsite ? Math.round(Math.hypot(fm.position.x - fm.jobsite.x, fm.position.z - fm.jobsite.z)) : -1, fm.inv.filter(Boolean).map(s => BF.itemName(s.id) + s.count).join(',')] : null, fo.map(f => [BF.forester.statusText(f), f.fo && f.fo.task && f.fo.task.kind])]); }
           for (const e of BF.furniture.LOG.splice(0)) { if (e.kind === "craft" && e.made !== "planks") R.crafts++; if (e.kind === "giveup") { const k = e.to + ":" + e.item + ":" + e.why; R.giveups[k] = (R.giveups[k] || 0) + 1; } }
         }, [Math.min(STEPS_PER_CALL, total - s), h, v]);
       }
-      const res = await pg.evaluate(key => {
-        const R = window.__rec;
+      const res = await sim(pg, key => {
+        const R = globalThis.__rec;
         const mem = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === key && !m.dead);
         const inv = (prof, re) => mem.filter(m => m.profession === prof).map(m => m.inv.filter(Boolean).filter(s => re.test(BF.itemName(s.id))).map(s => BF.itemName(s.id) + "x" + s.count).join(" "));
         const st = prof => mem.filter(m => m.profession === prof).map(m => {
@@ -146,7 +150,7 @@ async function openWorld(seed) {
       console.log('   giveups', JSON.stringify(row.giveups), 'forester', JSON.stringify(res.R.fo)); if (process.env.TRACE) for (const t of res.R.trace) console.log('   ', JSON.stringify(t)); console.log('   end', JSON.stringify(row.end), JSON.stringify(row.status));
       if (OUT) fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
     }
-    await pg.close();
+    await pg.done();
   }
   const full = results.filter(r => r.full).length;
   console.log(`SUMMARY: ${full}/${results.length} villages completed the full chain in ${DAYS} days`);

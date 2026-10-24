@@ -532,7 +532,7 @@ function serve(send, opts) {
       else if (m.speed !== W.speed) { const i = W.SPEEDS.indexOf(m.speed); if (i >= 0) W.set(i); }
     },
     save(m) {
-      const done = ok => out({ t: "result", sid: m.sid, result: { ok: !!ok } });
+      const done = ok => out({ t: "result", sid: m.sid, result: ok ? { ok: true } : { ok: false, why: BF.save && BF.save.lastError || null } });
       if (!BF.save || !BF.save.saveNow) { done(false); return; }
       BF.save.saveNow().then(done, () => done(false));
     },
