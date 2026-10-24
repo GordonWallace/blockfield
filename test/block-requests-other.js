@@ -1,5 +1,5 @@
-// @ci integration suite=village timeout=300
-// Other block edits as requests (spec r15-19, js/blockreqs.js): NODE_PATH=$(npm root -g) node test/run.js /tmp/bro test/block-requests-other.js
+// @ci integration suite=village timeout=300 hosts=worker,server
+// Other block edits as requests (spec r15-19, js/blockreqs.js): NODE_PATH=$(npm root -g) node test/run.js /tmp/bro test/block-requests-other.js [--host page|worker|server]
 // Scripted requesters (taken out of BF.mobs.list so their own AI sends nothing) ask in one tick's think, in the opposite of id order:
 // - two villagers and one door: wanting the same state both succeed; wanting different states the lower id wins, the other is refused;
 // - an explorer pitching a tent where a builder places a block: the lower id wins; the tent goes up whole or not at all, and the tent
@@ -13,7 +13,7 @@ module.exports = async (pg, out) => {
   const fails = [];
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
 
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     BF.state.paused = true;   // ticks by hand
     const W = BF.world, R = BF.req, P = BF.player.position, step = () => BF.simStep(BF.warp.TICK), res = {};
     const num = m => +String(m.id).slice(1);

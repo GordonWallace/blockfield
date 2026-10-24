@@ -1,9 +1,12 @@
-// Tent checks: node test/run.js /tmp/tent test/tent-actions.js
+// @ci integration hosts=worker,server
+// Tent checks: node test/run.js /tmp/tent test/tent-actions.js [--host page|worker|server]
+// (The tents and the explorer are where the simulation is, spec r15-43; the player and camera on the page.)
 module.exports = async (pg, out) => {
   // no pointer lock (drag mode): with the mouse locked, headless Chromium piles up memory during the long evaluates below
   await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
-  await require('./lib').toVillage(pg);
-  const r1 = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const r1 = await lib.sim(pg, () => {
     const W = BF.world, p = BF.player.position, res = {};
     const x = Math.floor(p.x) + 4, z = Math.floor(p.z), y = W.heightAt(x, z) + 1;
     // flatten a pad
@@ -22,15 +25,14 @@ module.exports = async (pg, out) => {
     BF.tents.place(x, y, z, 2); const upc = BF.tents.cells(x, y, z, 2).find(c => c.up && c.l === 2 && c.r === 1); BF.world.setBlock(upc.x, upc.y, upc.z, 0); BF.emit('blockBroken', upc.x, upc.y, upc.z, upc.id); res.afterBreakUp = BF.tents.cells(x, y, z, 2).map(c => W.getBlock(c.x, c.y, c.z)).filter(Boolean).length;
     res.placed4 = [0, 1, 3].map(f => { const ok = BF.tents.place(x, y, z, f); const n = BF.tents.cells(x, y, z, f).filter(c => W.getBlock(c.x, c.y, c.z) === c.id).length; BF.tents.remove(x, y, z, BF.tentId(f, 0, 1)); return [ok, n]; });
     BF.tents.place(x, y, z, 2);
-    BF.player.position.set(x - 5, y + 1, z - 6);
-    window.__tent = { x, y, z };
+    res.at = [x - 5, y + 1, z - 6];
     return res;
   });
   console.log(JSON.stringify(r1));
-  await pg.evaluate(() => { BF.player.yaw = Math.atan2(-4 + 5, 6) ; });
+  await pg.evaluate(a => { BF.player.position.set(a[0], a[1], a[2]); BF.player.yaw = Math.atan2(-4 + 5, 6) ; }, r1.at);
   await pg.waitForTimeout(800);
   await pg.screenshot({ path: out + "-view.png" });
-  const r2 = await pg.evaluate(async () => {
+  const r2 = await lib.sim(pg, async () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     const open = m => { const c = BF.world.chunkAt(m.position.x, m.position.z); return c && c.top[(Math.floor(m.position.z) - c.cz * 16) * 16 + Math.floor(m.position.x) - c.cx * 16] < m.position.y; };
     const T = BF.trades, I = BF.I, A = vs.find(open) || vs[0], res = {};   // a villager outdoors (one inside a house would pitch on its roof)
@@ -80,7 +82,7 @@ module.exports = async (pg, out) => {
     const at = A.position.clone();
     for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (!(A.ex && A.ex.camp)) { A.position.copy(at); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); } if (A.ex && A.ex.camp) break; }
     res.camp = A.ex && A.ex.camp; res.bed = A.bed && A.bed.tent; res.tentLeft = T.inv.count(A.inv, I.tent);
-    window.__A = A; window.__home = A.homeBed;
+    globalThis.__A = A; globalThis.__home = A.homeBed;
     // a zombie nearby
     const z = BF.mobs.spawn ? null : null;
     return res;
@@ -89,15 +91,15 @@ module.exports = async (pg, out) => {
   if (!r2.claimed) console.log("FAIL: the test villager did not take the survey table (setup)");
   if (r2.inVillageCamp) console.log("FAIL: explorer pitched its tent inside its own village");
   if (!r2.camp) console.log("FAIL: explorer far from home at dusk did not pitch its tent " + JSON.stringify(r2));
-  const r3 = await pg.evaluate(async () => {
-    const A = window.__A, res = {};
+  const r3 = await lib.sim(pg, async () => {
+    const A = globalThis.__A, res = {};
     BF.sky.setTime(0.56);
     for (let i = 0; i < 400; i++) { BF.sky.setTime(0.56); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (A.sleeping) break; }
     res.sleeping = A.sleeping; res.hidden = BF.tents.hidden(A); res.pos = [A.position.x.toFixed(1), A.position.y.toFixed(1), A.position.z.toFixed(1)];
     BF.sky.setTime(0.005);
     for (let i = 0; i < 100; i++) { BF.sky.setTime(0.005); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (!A.sleeping) break; }
     for (let i = 0; i < 30; i++) { BF.sky.setTime(0.01); (BF.mobs.update(0.1), BF.req.apply(), BF.req.deliver()); if (A.ex.camp && !A.sleeping) BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver(); }   // morning chores can run before its own step
-    res.awake = !A.sleeping; res.camp = A.ex.camp; res.tentBack = BF.trades.inv.count(A.inv, BF.I.tent); res.bedRestored = A.bed === window.__home || (A.bed && !A.bed.tent);
+    res.awake = !A.sleeping; res.camp = A.ex.camp; res.tentBack = BF.trades.inv.count(A.inv, BF.I.tent); res.bedRestored = A.bed === globalThis.__home || (A.bed && !A.bed.tent);
     return res;
   });
   console.log(JSON.stringify(r3));

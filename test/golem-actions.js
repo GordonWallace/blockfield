@@ -1,11 +1,13 @@
-// Iron golem checks: node test/run.js /tmp/golem test/golem-actions.js
+// @ci integration hosts=worker,server
+// Iron golem checks: node test/run.js /tmp/golem test/golem-actions.js [--host page|worker|server]
 // Rescue sprint to a villager under attack, hostiles fighting back (melee and arrows), crack stages, death and drops.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
-  await require('./lib').toVillage(pg);
-  // the planet's village spawns its golems one at a time, after its villagers: wait for one
-  await pg.waitForFunction(() => BF.mobs.list.some(m => m.type === "iron_golem" && m.village), null, { timeout: 60000 }).catch(() => {});
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  // the planet's village spawns its golems one at a time, after its villagers: wait for one (where the simulation is: spec r15-43)
+  for (let i = 0; i < 120 && !(await lib.sim(pg, () => BF.mobs.list.some(m => m.type === "iron_golem" && m.village))); i++) await pg.waitForTimeout(500);
+  const res = await lib.sim(pg, () => {
     const M = BF.mobs, W = BF.world, r = {};
     BF.sky.setTime(0.75);
     M.spawning = false;   // no natural spawns muddling the fights
@@ -74,14 +76,14 @@ module.exports = async (pg, out) => {
     }
     r.row = row;
     BF.sky.setTime(0.3);
-    BF.player.yaw = 0; BF.player.pitch = -0.15;
-    window.__row = M.list.filter(o => o.frozen);
+    globalThis.__row = M.list.filter(o => o.frozen);
     return r;
   });
+  await pg.evaluate(() => { BF.player.yaw = 0; BF.player.pitch = -0.15; });   // (the page's view)
   console.log(JSON.stringify(res, null, 1));
   // keep the line-up still and face it
   for (let i = 0; i < 3; i++) {
-    await pg.evaluate(() => { for (const o of window.__row) { o.yaw = 0; o.vel.set(0, 0, 0); o.hurtT = 0; } });
+    await lib.sim(pg, () => { for (const o of globalThis.__row) { o.yaw = 0; o.vel.set(0, 0, 0); o.hurtT = 0; } });
     await pg.waitForTimeout(150);
   }
   await pg.screenshot({ path: out + '-cracks.png' });
