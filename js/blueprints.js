@@ -338,26 +338,13 @@ function classify(spec, u, y, q, id) {
 // rot 0..3: the building turns clockwise by rot quarter turns (the door faces north, east, south, west). h in [0,1): variant.
 // opts: {lantern, hay}. Result cells: {x, y, z, id, item, cost, ph}: x/z relative to the min corner of the footprint box (eaves and
 // doorstep included), y relative to the floor level; cost 1 = one inventory item per block (0 for the upper door half, the bed head, water).
-function get(type, rot, style, h, opts, wood) {
-  rot = rot & 3; style = style | 0; h = h == null ? 0.5 : h;
-  if (!wood || !woodsAvailable().includes(wood)) wood = styleWood(style);
-  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, opts && opts.mud ? 1 : 0, opts && opts.len ? [opts.len, opts.r0 | 0, opts.r1 | 0, opts.posts || ""].join("/") : 0, wood].join("|");
-  let bp = cache.get(ck);
-  if (bp) return bp;
-  const T = SPECS[type];
-  if (!T) return null;
-  const spec = T.gen(style, h, opts);
-  const raw = [];
+// The common end of every blueprint: raw [{x, y, z, id, ph}] cells (any frame) -> the blueprint object (cells in build order with
+// item / cost / pair, req, door, beds...). get() uses it for the built-in designs, custom() for designs from elsewhere (the Claude
+// house designer, js/housedesign.js). info: { type, label, rot, style, h, opts, wood, spec: { marks?, ground?, house? } }
+function assemble(raw, info) {
+  const spec = info.spec || {};
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, maxY = 0;
-  for (const c of spec.cells) {
-    const id = woodSwap(c[3], wood);
-    if (!BF.blocks[id] || id === 0) continue;
-    const [x, z] = rot90(c[0], c[2], rot);
-    const nid = rotId(id, rot);
-    const ph = c[4] != null ? c[4] : classify(spec, c[0], c[1], c[2], id);
-    raw.push({ x, y: c[1], z, id: nid, ph });
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); maxY = Math.max(maxY, c[1]);
-  }
+  for (const c of raw) { minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x); minZ = Math.min(minZ, c.z); maxZ = Math.max(maxZ, c.z); maxY = Math.max(maxY, c.y); }
   const cellsAt = new Map();
   for (const c of raw) { c.x -= minX; c.z -= minZ; cellsAt.set(c.x + "," + c.y + "," + c.z, c); }
   const w = maxX - minX + 1, d = maxZ - minZ + 1, cx = w / 2, cz = d / 2;
@@ -393,15 +380,52 @@ function get(type, rot, style, h, opts, wood) {
   }
   // marks: named spots of the design ([u, q] in the local frame, js/stables.js reads the paddock's), in the same rotated, min-corner frame as the cells
   const marks = {};
-  for (const k in spec.marks || {}) marks[k] = spec.marks[k].map(([u, q]) => { const [x, z] = rot90(u, q, rot); return [x - minX, z - minZ]; });
+  for (const k in spec.marks || {}) marks[k] = spec.marks[k].map(([u, q]) => { const [x, z] = rot90(u, q, info.rot); return [x - minX, z - minZ]; });
   if (spec.ground) for (const c of cells) if (c.y < 0) c.dig = true;   // ground-layer cells take the place of the ground they stand on (builder.js placeCell)
-  bp = { type, label: T.label, rot, style, h, opts: opts || null, wood, woody: cells.some(c => woodOf(c.id)), w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door, marks, ground: !!spec.ground };
+  return { type: info.type, label: info.label, rot: info.rot, style: info.style, h: info.h, opts: info.opts, wood: info.wood, woody: cells.some(c => woodOf(c.id)), w, d, hgt: maxY + 1, cells, n: cells.length, req, exact, free, door, beds, house: !!spec.house && !!door, marks, ground: !!spec.ground };
+}
+
+function get(type, rot, style, h, opts, wood) {
+  rot = rot & 3; style = style | 0; h = h == null ? 0.5 : h;
+  if (!wood || !woodsAvailable().includes(wood)) wood = styleWood(style);
+  const ck = [type, rot, style, h, opts && opts.lantern ? 1 : 0, opts && opts.hay ? 1 : 0, opts && opts.mud ? 1 : 0, opts && opts.len ? [opts.len, opts.r0 | 0, opts.r1 | 0, opts.posts || ""].join("/") : 0, wood].join("|");
+  let bp = cache.get(ck);
+  if (bp) return bp;
+  const T = SPECS[type];
+  if (!T) return null;
+  const spec = T.gen(style, h, opts);
+  const raw = [];
+  for (const c of spec.cells) {
+    const id = woodSwap(c[3], wood);
+    if (!BF.blocks[id] || id === 0) continue;
+    const [x, z] = rot90(c[0], c[2], rot);
+    const nid = rotId(id, rot);
+    const ph = c[4] != null ? c[4] : classify(spec, c[0], c[1], c[2], id);
+    raw.push({ x, y: c[1], z, id: nid, ph });
+  }
+  bp = assemble(raw, { type, label: T.label, rot, style, h, opts: opts || null, wood, spec });
   cache.set(ck, bp);
   return bp;
 }
 
+// A blueprint from a design made elsewhere (the Claude house designer, js/housedesign.js): cells [[x, y, z, id, ph]] in the design's
+// own frame (door side as drawn), turned by rot like the built-in ones. The result has the same shape as get()'s, so a builder can
+// take it as it takes a small house (entry.type "custom" with the design saved alongside; not wired into builder.js yet).
+// Not cached: designs are one-offs.
+function custom(design, rot = 0) {
+  rot &= 3;
+  const raw = [];
+  for (const c of design.cells || []) {
+    if (!BF.blocks[c[3]] || c[3] === 0) continue;
+    const [x, z] = rot90(c[0], c[2], rot);
+    raw.push({ x, y: c[1], z, id: rotId(c[3], rot), ph: c[4] || PH.WALL });
+  }
+  return raw.length ? assemble(raw, { type: "custom", label: design.label || "custom house", rot, style: null, h: 0, opts: null, wood: design.wood || null,
+    spec: { house: !!design.house } }) : null;
+}
+
 BF.blueprints = {
-  PH, TYPES: TYPE_NAMES, SPECS, get, itemOf, rotId, nameOf,
+  PH, TYPES: TYPE_NAMES, SPECS, get, custom, itemOf, rotId, nameOf,
   WOODS, woodOf, woodSwap, woodItem, woodName, styleWood, woodsAvailable,
   label: t => (SPECS[t] ? SPECS[t].label : t),
   // human readable material list, e.g. "48 Oak Planks, 12 Oak Log"

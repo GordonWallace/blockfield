@@ -1,9 +1,11 @@
 // Claude villager (js/claudevillager.js, debug/claude.js; experimental): NODE_PATH=$(npm root -g) node test/claude-villager.js [outPrefix]
 // @ci skip experimental branch: needs `npm install` in debug/ (the Anthropic SDK); talks to a mock Claude API, never the real one
 // Starts a mock Messages API and debug/server.js pointed at it with a fake key, then checks: /claude/status, the guards (wrong origin,
-// non-JSON, bad conversation), that the Sage appears beside the world spawn, right-click opens the chat panel (not the trade screen),
-// a message round-trips with the prompt file's system prompt and the right model, errors show in the panel and the game log, and
-// Escape closes it. Without a key the server reports configured: false and no Sage appears.
+// non-JSON, bad conversation), that the Sage appears beside the world spawn, right-click opens its trade screen (no offers) with the
+// Chat / House designer panel to the right, a message round-trips with the prompt file's system prompt and the right model, the
+// inventory tool, errors in the panel and the game log; the house designer: the structured-output request, a flawed draft sent back
+// with its problems, the blueprint built in the builders' format (door and bed facing, materials), a revision; Escape closes it all.
+// Without a key the server reports configured: false and no Sage appears.
 const path = require('path'), http = require('http'), { spawn } = require('child_process');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/claude-villager';
@@ -16,6 +18,7 @@ const mock = http.createServer((req, res) => {
   let b = ''; req.on('data', c => { b += c; }); req.on('end', () => {
     last = { url: req.url, hdr: req.headers, key: req.headers['x-api-key'], body: JSON.parse(b || '{}') };
     if (failNext) { failNext = false; res.writeHead(401, { 'Content-Type': 'application/json' }).end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } })); return; }
+    if (last.body.output_config && last.body.output_config.format) { designReply(res); return; }
     // "what are you carrying?" -> a check_inventory call, then an answer quoting the tool result
     const msgs = last.body.messages, end = msgs[msgs.length - 1], rounds = msgs.filter(m => m.role === 'assistant' && Array.isArray(m.content)).length;
     const result = Array.isArray(end.content) && end.content.find(c => c.type === 'tool_result');
@@ -29,6 +32,24 @@ const mock = http.createServer((req, res) => {
     }));
   });
 }).listen(MOCK, '127.0.0.1');
+
+// the house designer's drafts: the first has no door (the server should send it back), then a good one
+const GOOD = { name: 'Stone cottage', summary: 'A snug stone cottage.', notes: '', width: 7, depth: 5,
+  legend: [{ symbol: 'S', block: 'stone_bricks' }, { symbol: 'D', block: 'oak_door' }, { symbol: 'B', block: 'red_bed' }, { symbol: 'F', block: 'furnace' },
+    { symbol: 't', block: 'torch' }, { symbol: 'G', block: 'glass_pane' }, { symbol: 's', block: 'oak_slab' }],
+  layers: [{ label: 'floor', rows: ['SSSSSSS', 'SSSSSSS', 'SSSSSSS', 'SSSSSSS', 'SSSSSSS'] },
+    { label: 'walls', rows: ['SSSDSSS', 'S.....S', 'SBB.F.S', 'S.t...S', 'SSSSSSS'] },
+    { label: 'windows', rows: ['SSS.SSS', 'G.....G', 'S.....S', 'G.....G', 'SSSSSSS'] },
+    { label: 'roof', rows: ['sssssss', 'sssssss', 'sssssss', 'sssssss', 'sssssss'] }] };
+const NODOOR = JSON.parse(JSON.stringify(GOOD)); NODOOR.layers[1].rows[0] = 'SSSSSSS';
+let designCalls = [];
+function designReply(res) {
+  designCalls.push(last.body);
+  const revise = /drew earlier/.test(last.body.messages[0].content), retry = last.body.messages.length > 1;
+  const d = revise ? Object.assign(JSON.parse(JSON.stringify(GOOD)), { name: 'Stone cottage with a chimney' }) : retry ? GOOD : NODOOR;
+  res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: 'msg_d', type: 'message', role: 'assistant', model: last.body.model,
+    stop_reason: 'end_turn', stop_sequence: null, content: [{ type: 'thinking', thinking: '', signature: 's' }, { type: 'text', text: JSON.stringify(d) }], usage: { input_tokens: 2000, output_tokens: 900 } }));
+}
 
 const start = async env => {
   const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-claude-alerts.json')],
@@ -79,7 +100,12 @@ const start = async env => {
 
   await pg.evaluate(() => BF.player.start());
   const opened = await pg.evaluate(() => { const r = BF.mobs.interact(BF.claudeVillager.mob()); return { r, chat: BF.claudeVillager.isOpen(), trade: BF.inventory.isOpen(), paused: BF.state.paused }; });
-  ok('right-click opens the chat, not the trade screen', opened.r === null && opened.chat && !opened.trade && opened.paused, opened);
+  ok('right-click opens the trade screen and the Sage\'s panel', opened.r === null && opened.chat && opened.trade && opened.paused, opened);
+  const lay = await pg.evaluate(() => { const a = document.querySelector('.bf-inv').getBoundingClientRect(), b = document.querySelector('.bfcv-panel').getBoundingClientRect();
+    return { invRight: a.right, panelLeft: b.left, panelRight: b.right, vw: innerWidth, title: document.querySelector('.bf-thead h2').textContent,
+      offers: document.querySelector('.bf-offers').textContent, vinv: [...document.querySelectorAll('.bf-vgrid .bf-slot')].filter(e => e.querySelector('img')).length }; });
+  ok('the panel sits right of the trade screen, both on screen', lay.panelLeft >= lay.invRight && lay.panelRight <= lay.vw, lay);
+  ok('no offers; the title and its inventory show', /^Sage, Wanderer — Here to talk/.test(lay.title) && /nothing to trade/.test(lay.offers) && lay.vinv >= 3, lay);
   await pg.keyboard.type('What should I do on my first night?');
   await pg.keyboard.press('Enter');
   ok('the reply shows in the panel', await until(() => /Mind the creepers/.test(document.querySelector('.bfcv-log').textContent), null, 15000), await pg.evaluate(() => document.querySelector('.bfcv-log').textContent));
@@ -115,9 +141,51 @@ const start = async env => {
   ok('the check is logged', await pg.evaluate(() => BF.glog.recent(500).some(e => e.k === 'claude' && /^Sage checked its inventory \(.*2 Diamond/.test(e.x))));
   ok('the history keeps only the words', await pg.evaluate(() => BF.claudeVillager.history().every(m => typeof m.content === 'string')));
   await pg.screenshot({ path: out + '-chat.png' });
+
+  // ---- house designer
+  await pg.click('.bfcv-tabs button:nth-child(2)');
+  await pg.keyboard.type('stone with a wood roof, one bed, furnace');
+  await pg.keyboard.press('Enter');
+  ok('a design comes back and shows', await until(() => !!BF.claudeVillager.design() && document.querySelector('.bfcv-dout').classList.contains('on'), null, 20000),
+    await pg.evaluate(() => document.querySelector('.bfcv-dstat').textContent));
+  const dq = designCalls[0] || {};
+  const sch = dq.output_config && dq.output_config.format && dq.output_config.format.schema;
+  const names = sch ? sch.properties.legend.items.properties.block.enum : [];
+  ok('the design request: Haiku 5.5, a JSON schema with the palette, the designer prompt', dq.model === 'claude-haiku-5-5' && dq.output_config.format.type === 'json_schema'
+    && ['oak_slab', 'red_bed', 'oak_door', 'stone_bricks', 'oak_stairs_up_north'].every(n => names.includes(n)) && /gift for designing houses/.test(dq.system)
+    && /- oak_stairs_up_north: oak planks stairs rising toward the north/.test(dq.system) && /The traveller wants: stone with a wood roof/.test(dq.messages[0].content), { names: names.length, sys: (dq.system || '').slice(0, 200) });
+  const rq = designCalls[1] || {};
+  ok('the doorless draft goes back with its problems', designCalls.length === 2 && rq.messages.length === 3 && rq.messages[1].content[0].type === 'thinking' && /there is no door/.test(rq.messages[2].content), rq.messages);
+  const bpi = await pg.evaluate(() => { const c = BF.claudeVillager.design(), bp = c.bp, B = BF.blocks;
+    const at = (x, y, z) => bp.cells.find(q => q.x === x && q.y === y && q.z === z);
+    const fur = at(4, 1, 2), bed = bp.cells.filter(q => B[q.id].bed);
+    return { type: bp.type, w: bp.w, d: bp.d, h: bp.hgt, n: bp.n, door: bp.door, beds: bp.beds, bedHead: bed.map(q => [q.x, q.z, B[q.id].bed.head, B[q.id].bed.f]),
+      furnace: B[fur.id].name, phases: bp.cells.map(q => q.ph), first: bp.cells[0], upper: !!at(3, 2, 0) && B[at(3, 2, 0).id].door.upper,
+      wallTorch: B[at(2, 1, 3).id].name, mats: c.materials.map(m => m.count + ' ' + m.name), shown: document.querySelectorAll('.bfcv-mats > div').length,
+      name: document.querySelector('.bfcv-dname').textContent };
+  });
+  ok('builder blueprint: custom type, size, door facing out (north) with its upper half', bpi.type === 'custom' && bpi.w === 7 && bpi.d === 5 && bpi.h === 4 && bpi.door && bpi.door.f === 0 && bpi.door.x === 3 && bpi.upper, bpi);
+  ok('the bed: foot and head, head against the west wall', bpi.beds.length === 1 && JSON.stringify(bpi.bedHead.sort()) === JSON.stringify([[1, 2, true, 3], [2, 2, false, 3]]), bpi.bedHead);
+  ok('the furnace faces the room, the torch stands on the floor', /^furnace/.test(bpi.furnace) && bpi.wallTorch === 'torch', bpi);
+  ok('cells in build order: floor first, phases never go back', bpi.first.y === 0 && bpi.phases.every((p, i) => !i || p >= bpi.phases[i - 1]), bpi.phases.join(''));
+  ok('materials: one door and one bed (two cells each), 35 slabs, listed in the panel', bpi.mats.includes('1 Oak Door') && bpi.mats.includes('1 Red Bed') && bpi.mats.includes('35 Oak Slab')
+    && bpi.shown === bpi.mats.length && /^Stone cottage/.test(bpi.name), bpi.mats);
+  ok('the design is logged', await pg.evaluate(() => BF.glog.recent(500).some(e => e.k === 'claude' && e.l === 'INFO' && /^Sage designed "Stone cottage" \(7x5, 4 high, \d+ blocks, 1 beds; 2 drafts, 4000\/1800 tokens/.test(e.x))));
+  await pg.evaluate(() => { const r = document.querySelector('.bfcv-cut input'); r.value = 2; r.dispatchEvent(new Event('input')); });
+  await pg.screenshot({ path: out + '-design.png' });
+  // a revision sends the earlier blueprint
+  await pg.fill('.bfcv-dreq', 'add a chimney');
+  await pg.click('.bfcv-page.on .bfcv-row button:nth-child(2)');
+  ok('Revise sends the earlier blueprint and shows the new one', await until(() => /chimney/.test(document.querySelector('.bfcv-dname').textContent), null, 20000)
+    && /blueprint you drew earlier:\n\{"name":"Stone cottage"/.test(designCalls[2].messages[0].content) && /changes: add a chimney/.test(designCalls[2].messages[0].content));
+  await pg.click('.bfcv-dreq');
   await pg.keyboard.press('Escape');
-  const closed = await pg.evaluate(() => ({ chat: BF.claudeVillager.isOpen(), paused: BF.state.paused }));
-  ok('Escape closes the chat and unpauses', !closed.chat && !closed.paused, closed);
+  const closed = await pg.evaluate(() => ({ chat: BF.claudeVillager.isOpen(), trade: BF.inventory.isOpen(), paused: BF.state.paused }));
+  ok('Escape closes the panel and the trade screen, and unpauses', !closed.chat && !closed.trade && !closed.paused, closed);
+  // closing the trade screen some other way takes the panel with it
+  await pg.evaluate(() => BF.mobs.interact(BF.claudeVillager.mob()));
+  await pg.evaluate(() => BF.inventory.close());
+  ok('the panel goes when the trade screen does', await until(() => !BF.claudeVillager.isOpen() && !document.querySelector('.bfcv-panel').classList.contains('open'), null, 3000));
   ok('no page errors', !errs.length, errs);
 
   await b.close(); srv.kill(); mock.close();

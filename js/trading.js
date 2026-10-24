@@ -483,7 +483,7 @@ function hireKit(m, prof) {
 }
 // Daily production: wares of the profession's own make rise by ~25% of their cap (min 1) up to the cap; emeralds +2 up to 12.
 function restock(v, day) {
-  if (!v || !v.inv) return false;
+  if (!v || !v.inv || v.claude) return false;   // the Claude villager's bag only changes by what happens to it
   if (day == null) day = BF.sky ? BF.sky.day : 0;
   if (v.restockDay == null || day < v.restockDay) { v.restockDay = day; return false; }
   const d = day - v.restockDay;
@@ -537,6 +537,7 @@ function feedOffers() {
 // Adds the food offers to a hungry unemployed villager (or takes them away again). Called when the trade screen opens and closes.
 function syncFeed(v, open = true) {
   if (!v || !Array.isArray(v.trades)) return v;
+  if (v.claude) { v.trades = []; return v; }   // the Claude villager trades nothing for now (js/claudevillager.js)
   if (BF.market) return BF.market.sync(v);   // food offers for any hungry villager, with its spare goods and needs (js/market.js)
   v.trades = v.trades.filter(o => !o.feed);
   if (open && v.profession === "unemployed" && needsFood(v)) v.trades.push(...feedOffers());

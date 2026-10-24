@@ -1248,7 +1248,7 @@ function renderOffers() {
   }
   if (v) {
     const lvl = v.level || 1;
-    const prof = (v.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const prof = v.claudeTitle || (v.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());   // claudeTitle: the Claude villager (js/claudevillager.js)
     const st = BF.villagerStatus ? BF.villagerStatus.text(v) : "";   // what the villager is doing (js/villagerstatus.js)
     const vn = BF.vlog ? BF.vlog.nameOf(v) : "";                      // villager names (js/villagelog.js)
     titleEl.textContent = (vn ? vn + ", " : "") + (st ? prof + " \u2014 " + st : prof);

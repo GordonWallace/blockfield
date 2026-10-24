@@ -33,6 +33,7 @@ function routine(m) {
 }
 
 function text(m) {
+  if (m && m.claude) return "Here to talk";   // the Claude villager (js/claudevillager.js)
   if (!m || m.type !== "villager") return "";
   const s = (BF.eggCook ? BF.eggCook.statusText(m) : "")                        // cooking eggs in a furnace, buying fuel for it (js/eggcook.js)
     || (BF.villageLife && BF.villageLife.statusText(m))                    // hunger, buying food, farm work (js/villagelife.js)

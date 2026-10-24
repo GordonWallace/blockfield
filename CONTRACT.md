@@ -330,6 +330,8 @@ The 15th profession `builder` (orange hi-vis vest with reflective band and strap
   village palette (which mixes woods, e.g. plains oak walls under a spruce roof) becomes that species (`woodSwap(id, wood)`, `woodOf(id) -> [species, "planks"|"log"|"fence"]`, `woodItem(species, part)`). Doors stay oak (no other
   door exists); crafting tables and chests are wood-neutral. Without `wood` the style's own wood is used (`styleWood(style)`: plains/desert oak, snowy/taiga spruce, savanna acacia). `woody` = the structure has wood cells. Types (`BF.blueprints.TYPES`):
   `small_house` (worldgen `house` 5x5, 1 bed), `medium_house` (`house` 7x5 shell with the `house2` bed plan: 2 beds), `cottage` (`lhouse` 7x7, 1 bed), `workshop` (`smith` 7x6), `well` (3x3), `lamp_posts` (3 posts 4 apart, lanterns if
+  `custom(design, rot?)` (experimental, Claude house designer, js/housedesign.js): a blueprint from outside cells `{cells: [[x, y, z, id, ph]], label, wood?, house?}`, turned and assembled
+  exactly like `get()`'s (shared `assemble`), `type: "custom"`, not cached; builder.js does not build custom structures yet.
   `opts.lantern` else torches), `garden` (7x5 fence ring with a gate gap, hay bales with `opts.hay`), `market_stall` (5x3). All use the village palette of the style (`BF.worldgen.palette(style)`).
   Houses: door, windows, bed(s), a torch inside and a wall torch beside the door, doorstep. Houses are built from the worldgen generators through `BF.worldgen.recordBuilding(kind, w, d, style, h)` (runs `drawShell` against a
   recording buffer; the chunk generation path is untouched, verified by hashing village chunks of 5 seeds before/after) and `BF.worldgen.bedPlan(kind, w, d, h)`, `BF.worldgen.palette(style)`.
