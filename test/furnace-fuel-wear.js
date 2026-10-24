@@ -1,12 +1,12 @@
 // A worn wooden tool in a furnace's fuel slot keeps its wear when the furnace is removed (bug-042):
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/ffw test/furnace-fuel-wear.js
-// @ci integration suite=items
+// @ci integration suite=items hosts=worker,server
 // /setblock and an explosion drop it on the ground, the player mining the furnace gets it in their inventory, and with a full
 // inventory it drops where the furnace stood. An unworn tool still comes back unworn.
 module.exports = async (pg) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.setGameMode("survival"); });
   await pg.waitForTimeout(3000);
-  const r = await pg.evaluate(async () => {
+  const r = await require('./lib').sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const I = BF.I, B = BF.B, W = BF.world, P = BF.player, inv = BF.inventory, tick = () => new Promise(r => setTimeout(r, 0));
     BF.mobs.spawning = false;
     const x = Math.floor(P.position.x) + 2, y = Math.floor(P.position.y) + 1, z = Math.floor(P.position.z);

@@ -1,8 +1,8 @@
-// @ci integration suite=world,items timeout=1800
+// @ci integration suite=world,items timeout=1800 hosts=worker,server
 // Riding over the protocol (spec r15-44 part 2): getting on and off a boat or horse are player requests, whoever steers moves the vehicle
 // (the page rows a boat and rides a saddled, tamed horse with its own copy and reports where it is; the simulation drives an untamed
 // horse and the page sits the player on the mirror's), and what the simulation does to the ride comes back in self. Served over http and
-// run with the simulation in the worker, then again in the page:
+// run with the simulation on each host asked for (BF_HOST, as test/ci.js sets it; else the worker, the world server and the page):
 //   - a boat placed by a request; player.mount gets the player in (self.mount); W rows it and the simulation's boat follows the page's;
 //     Shift gets out (player.dismount), onto a spot beside it;
 //   - the save keeps the player in the boat: saved, loaded again, they're back in it (self.mount from the simulation's save);
@@ -11,26 +11,14 @@
 //     ridden again until tamed, then saddled (a request with the saddle held) and ridden with W: the simulation's horse follows the page's;
 //     the HUD shows the horse's health;
 //   - a lead on the horse: the player walks off and the horse follows (the simulation reads the player from the player message).
-// Usage: NODE_PATH=$(npm root -g) node test/riding-protocol.js [modes=worker,page]
-const path = require('path'), cp = require('child_process'), net = require('net');
+// Usage: NODE_PATH=$(npm root -g) node test/riding-protocol.js [modes=worker,server,page]
+const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
-const MODES = (process.argv[2] || 'worker,page').split(',');
+const lib = require('./lib');
+const MODES = (process.argv[2] || process.env.BF_HOST || 'worker,server,page').split(',');
 let fails = 0;
 const check = (ok, what, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + what + (extra === undefined ? '' : '  ' + JSON.stringify(extra))); if (!ok) fails++; };
-const freePort = () => new Promise(res => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
-
-async function server() {
-  const game = await freePort(), debug = await freePort();
-  const srv = cp.spawn(process.execPath, ['debug/server.js', '--game', String(game), '--debug', String(debug)], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
-  await new Promise((res, rej) => {
-    let out = '';
-    const t = setTimeout(() => rej(new Error('debug/server.js did not start: ' + out)), 20000);
-    srv.stdout.on('data', d => { out += d; if (/Ctrl\+C/.test(out)) { clearTimeout(t); res(); } });
-    srv.on('exit', c => rej(new Error('debug/server.js exited ' + c + ': ' + out)));
-  });
-  return { srv, url: 'http://localhost:' + game + '/index.html' };
-}
 
 async function run(b, url, mode) {
   const ctx = await b.newContext({ viewport: { width: 1280, height: 760 } });
@@ -43,7 +31,7 @@ async function run(b, url, mode) {
   await pg.goto(url + '?sim=' + mode);
   await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
   await pg.waitForFunction(() => !BF.preparing && BF.client, null, { timeout: 600000 });
-  check(await pg.evaluate(() => BF.simHost.mode) === (mode === 'worker' ? 'worker' : 'in page'), `${mode}: the simulation runs ${mode === 'worker' ? 'in the worker' : 'in the page'}`);
+  check(await pg.evaluate(() => BF.simHost.mode) === (mode === 'page' ? 'in page' : mode), `${mode}: the simulation runs ${{ worker: 'in the worker', server: 'on the world server', page: 'in the page' }[mode]}`);
   const tag = s => mode + ': ' + s;
 
   // ---- helpers
@@ -91,7 +79,7 @@ async function run(b, url, mode) {
     await until(() => !!BF.player.vehicle);
     const r = await riding(), s1 = await query('entity', { id: boatId });
     check(got.ok && got.r === undefined ? true : got.ok, tag('player.mount is accepted'), got);
-    check(r && r.kind === 'boat' && r.local === (mode === 'worker') && s1.ridden, tag('the player sits in the boat (self.mount in the worker: the page rows its copy)'), { r, sim: s1 });
+    check(r && r.kind === 'boat' && r.local === (mode !== 'page') && s1.ridden, tag('the player sits in the boat (self.mount off the page: the page rows its copy)'), { r, sim: s1 });
     const a0 = await query('entity', { id: boatId });
     await hold('KeyW', 2500); await settle(); await pg.waitForTimeout(300); await settle();
     const a1 = await query('entity', { id: boatId }), p1 = await me();
@@ -134,7 +122,7 @@ async function run(b, url, mode) {
     const mounted = await req('player.mount', null, { id: horseId });
     await until(() => !!BF.player.vehicle, null, 5000);
     const r = await riding();
-    check(mounted.ok && r && r.kind === 'horse' && (mode !== 'worker' || r.local), tag('on the untamed horse (in the worker: seated on the mirror\'s horse)'), { mounted, r });
+    check(mounted.ok && r && r.kind === 'horse' && (mode === 'page' || r.local), tag('on the untamed horse (off the page: seated on the mirror\'s horse)'), { mounted, r });
     // carried, then thrown (or tamed at once)
     const t0 = Date.now();
     let followed = true, thrown = false, rodeFor = 0;
@@ -167,14 +155,19 @@ async function run(b, url, mode) {
     await req('player.mount', null, { id: horseId });
     await until(() => !!BF.player.vehicle, null, 5000);
     const r2 = await riding();
-    check(r2 && r2.kind === 'horse' && (mode !== 'worker' || r2.local), tag('on the saddled horse (in the worker: the page rides its copy)'), r2);
+    check(r2 && r2.kind === 'horse' && (mode === 'page' || r2.local), tag('on the saddled horse (off the page: the page rides its copy)'), r2);
     const hud = await pg.evaluate(() => { const v = BF.player.vehicle; return v && v.ctl.hud ? v.ctl.hud(v) : null; });
     check(hud && hud.hp > 0 && hud.max >= hud.hp, tag('the HUD has the horse\'s health'), hud);
     const b0 = await query('entity', { id: horseId });
     // facing the floor's middle: the untamed rides may have left the horse at its edge, facing the hill beyond (a flake in CI)
     await pg.evaluate(([g, h]) => BF.player.setLook(Math.atan2(-(g.x + 0.5 - h.x), -(g.z + 0.5 - h.z)), 0), [ground, b0]);
-    await hold('KeyW', 1000); await settle(); await pg.waitForTimeout(300); await settle();
-    const b1 = await query('entity', { id: horseId }), p3 = await me();
+    // (a second of W, more while it hasn't gone a block: on a slow runner the page's frames, and so its horse, can lag)
+    let b1, p3;
+    for (let t = 0; t < 4; t++) {
+      await hold('KeyW', t ? 500 : 1000); await settle(); await pg.waitForTimeout(300); await settle();
+      b1 = await query('entity', { id: horseId }); p3 = await me();
+      if (dist(b0, b1) > 1) break;
+    }
     check(dist(b0, b1) > 1, tag('W rides the horse: the simulation\'s horse moved'), { moved: +dist(b0, b1).toFixed(2) });
     check(dist(p3, b1) < 0.6, tag('the simulation\'s horse is under the player'), { horse: b1, me: p3 });
     await hold('ShiftLeft', 200); await settle();
@@ -198,12 +191,12 @@ async function run(b, url, mode) {
 }
 
 (async () => {
-  const { srv, url } = await server();
+  const srv = await lib.serve(), url = srv.url;   // (with the world server; ?sim=worker and ?sim=page leave it idle)
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   try {
     for (const m of MODES) await run(b, url, m);
   } catch (e) { console.log('FAIL ' + (e.stack || e)); fails++; }
-  await b.close(); srv.kill();
+  await b.close(); await srv.stop();
   console.log(fails ? 'FAILED: ' + fails : 'ALL PASS');
   process.exit(fails ? 1 : 0);
 })();

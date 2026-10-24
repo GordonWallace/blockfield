@@ -1,10 +1,15 @@
+// @ci integration hosts=worker,server
 // Held view model: node test/run.js /tmp/hi test/held-items.js
 // A held grass block's top is biome-tinted (not grey), and flowers, saplings and torches are flat sprites, not cubes.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(500);
+  const lib = require('./lib');
+  // the item goes into the player's inventory where the simulation is (spec r15-43); the page draws the held item from its self messages
   const hold = async name => {
-    await pg.evaluate(n => { const inv = BF.inventory; inv.clear(); inv.add(BF.I[n], 1); inv.select(0); BF.player.setLook(-0.3, 0); }, name);
+    await lib.sim(pg, n => { const inv = BF.inventory; inv.clear(); inv.add(BF.I[n], 1); BF.proto.flush(); }, name);
+    await pg.evaluate(() => { BF.inventory.select(0); BF.player.setLook(-0.3, 0); });
+    await pg.evaluate(() => new Promise(r => BF.client.query("stats", {}, r)));
     await pg.waitForTimeout(400);
     return pg.evaluate(() => BF.player.viewModel());
   };
