@@ -1,15 +1,17 @@
+// @ci baseline hosts=worker,server
 // Shepherd checks for test/run.js: NODE_PATH=$(npm root -g) node test/run.js /tmp/shep test/shepherd-check.js
 // Loads the planet world (seed 123) next to a village, steps the simulation by hand (the headless browser renders too slowly to fast-forward)
 // and prints PASS / FAIL lines for the sheep rules and the shepherd's work. Exit code is not used; read the output.
 module.exports = async (pg, out) => {
   const log = (...a) => console.log(...a);
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     BF.state.paused = true;                                  // the page's own loop stays out of the way
-    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns: only village stock
     const V = BFT.village((v, k) => k.pen);   // the planet: the village nearest to spawn with a pen, whose shepherd has its loom from the start
     const gy = BF.worldgen.heightAt(V.x + 4, V.z + 4);

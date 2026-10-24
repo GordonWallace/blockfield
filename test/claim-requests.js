@@ -1,5 +1,5 @@
-// @ci integration suite=village timeout=420
-// Mob-on-mob effects and claims as requests (spec r15-23): NODE_PATH=$(npm root -g) node test/run.js /tmp/cr test/claim-requests.js
+// @ci integration suite=village timeout=420 hosts=worker,server
+// Mob-on-mob effects and claims as requests (spec r15-23): NODE_PATH=$(npm root -g) node test/run.js /tmp/cr test/claim-requests.js [--host page|worker|server]
 // Each case sends from a scripted think (inside BF.mobs.update during BF.simStep), in an order opposite to id order, and runs twice:
 // - two villagers claim one free bed in one tick: the lower id gets it, the other is refused, nobody else's bed changes;
 // - a zombie and an iron golem hit one villager in one tick: the hits apply in attacker-id order. Zombie first: both land (a golem's
@@ -10,12 +10,14 @@
 // - a creeper's blast is one request: refused when a lower-id attacker kills the creeper first in the same tick.
 // The outcomes are the same on both runs.
 module.exports = async (pg) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.sky.setTime(0.25); });
-  await require('./lib').toVillage(pg);
+  const lib = require('./lib');
+  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
+  await lib.sim(pg, () => BF.sky.setTime(0.25));
+  await lib.toVillage(pg);
   const fails = [];
   const check = (ok, what, info) => { console.log((ok ? "ok   " : "FAIL ") + what + (ok || info === undefined ? "" : " " + JSON.stringify(info))); if (!ok) fails.push(what); };
 
-  const run = () => pg.evaluate(() => {
+  const run = () => lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     BF.state.paused = true;   // ticks by hand
     const M = BF.mobs, W = BF.world, step = () => BF.simStep(BF.warp.TICK), n = s => +String(s).slice(1), res = {};
     M.spawning = false;

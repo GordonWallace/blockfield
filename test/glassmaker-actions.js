@@ -1,11 +1,12 @@
-// @ci integration suite=jobs
+// @ci integration suite=jobs hosts=worker,server
 // Glassmakers (js/glassmaker.js): NODE_PATH=$(npm root -g) node test/run.js /tmp/glass test/glassmaker-actions.js
 // The glass kiln recipe and jobsite; librarians and cartographers neither restock glass nor list it; village generator 7: pane windows, a sand
 // village with a glassmaker, its kiln and a furnace; the glassmaker digs only the top layer of open natural sand (not placed sand, not beside
 // water, not on village ground, a stack a day at most), smelts it into glass in a furnace with real fuel, crafts bottles and panes; a cowherd
 // short of bottles buys new ones from it; builders leave windows open while no panes are to be had and glaze them later.
 module.exports = async (pg) => {
-  const res = await pg.evaluate(async () => {
+  const vgPage = await pg.evaluate(() => BFT.village(v => v.ground === 1 && BF.worldgen.heightAt(v.x, v.z) >= BF.SEA + 20, 6000));   // (the page's planet: BFT is not in the simulation)
+  const res = await require('./lib').sim(pg, async vgPage => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const I = BF.I, B = BF.B, T = BF.trades, inv = T.inv, W = BF.world, GM = BF.glassmaker;
@@ -36,7 +37,7 @@ module.exports = async (pg) => {
 
     // ---- the sand village near spawn: a glassmaker, its kiln and a furnace beside it
     // an inland one: by the sea most of a desert village's sand lies beside water, which is never dug
-    const vg = BFT.village(v => v.ground === 1 && BF.worldgen.heightAt(v.x, v.z) >= BF.SEA + 20, 6000);
+    const vg = vgPage;
     if (!vg) { ok("an inland sand village within 6 km", false); return R; }
     const V = { x: Math.round(vg.x), z: Math.round(vg.z) };
     ok("worldgen: sand within 64 blocks of the village", BF.worldgen.sandNear(V.x, V.z, 64));
@@ -190,7 +191,7 @@ module.exports = async (pg) => {
       }
     }
     return R;
-  });
+  }, vgPage);
   for (const l of res.lines) console.log(l);
   console.log("info", JSON.stringify(res.info).slice(0, 4000));
 };

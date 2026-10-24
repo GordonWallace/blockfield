@@ -1,23 +1,24 @@
-// @ci integration suite=village
+// @ci integration suite=village hosts=worker,server
 // Signposts to nearby villages (js/signs.js planPosts/assignPosts): every village lists the 4 nearest villages within 800 blocks on a
 // plaza signpost, and each main road end lists the ones within 45 degrees of that road, arrows as the reader sees them.
-// node test/run.js /tmp/sp test/signposts.js
-const { toVillage } = require('./lib');
+// node test/run.js /tmp/sp test/signposts.js [--host page|worker|server]   (signs and villages read where the simulation is: spec r15-43)
+const lib = require('./lib'), { toVillage } = lib;
 module.exports = async (pg) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(1500);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
   // arrows: the reader faces north (0,-1); a village straight ahead is up, then clockwise
-  const arrows = await pg.evaluate(() => [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]].map(([dx, dz]) => BF.signs.arrowFor(dx, dz, [0, -1])).join(""));
+  const arrows = await lib.sim(pg, () => [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]].map(([dx, dz]) => BF.signs.arrowFor(dx, dz, [0, -1])).join(""));
   check(arrows === "↑↗→↘↓↙←↖", "8 arrows as seen by a reader facing north: " + arrows);
-  const east = await pg.evaluate(() => BF.signs.arrowFor(0, -5, [1, 0]));
+  const east = await lib.sim(pg, () => BF.signs.arrowFor(0, -5, [1, 0]));
   check(east === "←", "a reader facing east sees a village to the north on the left: " + east);
-  const fit = await pg.evaluate(() => BF.VILLAGE_NAMES.every(n => BF.signs.postLine({ name: n, dx: 1, dz: 0, dist: 800 }, [1, 0]).length <= 30));
+  const fit = await lib.sim(pg, () => BF.VILLAGE_NAMES.every(n => BF.signs.postLine({ name: n, dx: 1, dz: 0, dist: 800 }, [1, 0]).length <= 30));
   check(fit, "every village name fits a 30-character line with its distance");
   // 36 villages from the fixed test seed
-  const r = await pg.evaluate(() => {
-    const G = BF.worldgen, S = BF.signs, vs = BFT.villages(3600).slice(0, 36), dist = BF.planet.distance;   // around the spawn, all on its face
+  const r = await lib.sim(pg, () => {
+    const G = BF.worldgen, S = BF.signs, dist = BF.planet.distance, s0 = BF.spawnPoint || BF.player.position, sp = { x: Math.floor(s0.x), z: Math.floor(s0.z) };
+    const vs = G.villagesNear(sp.x, sp.z, 3600).sort((a, b) => dist(sp, a) - dist(sp, b)).slice(0, 36);   // around the spawn, all on its face (BFT.villages: test/bft.js is the page's)
     const errs = [];
     let posts = 0, used = 0, lines = 0;
     const inB = (x, z, b) => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1;
@@ -55,12 +56,13 @@ module.exports = async (pg) => {
   // a signpost gets its text on the frame after its chunks load (js/signs.js tick). At the planet's low frame rates more chunks keep
   // loading while the test looks, so wait until every used signpost whose chunks are loaded has had that frame, not just the ones
   // that were loaded a moment ago
-  await pg.waitForFunction(() => {
+  const posted = () => {
     const v = BF.worldgen.nearestVillage(BF.player.position.x, BF.player.position.z);
     return (v.posts || []).filter(p => p.used && p.cells.every(q => BF.world.isLoaded(q[0], q[2])))
       .every(p => { const s = BF.signs.get(p.cells[0][0], p.cells[0][1], p.cells[0][2]); return s && s.autoKey === p.ak; });
-  }, null, { timeout: 30000, polling: 500 }).catch(() => {});
-  const g = await pg.evaluate(() => {
+  };
+  for (let i = 0; i < 60 && !(await lib.sim(pg, posted)); i++) await pg.waitForTimeout(500);
+  const g = await lib.sim(pg, () => {
     const v = BF.worldgen.nearestVillage(BF.player.position.x, BF.player.position.z), out = [];
     for (const p of (v.posts || []).filter(p => p.used)) {
       const c = p.cells[0], loaded = p.cells.every(q => BF.world.isLoaded(q[0], q[2]));
@@ -72,7 +74,7 @@ module.exports = async (pg) => {
   });
   check(g.length > 0 && g.every(p => p.ok && p.text === p.want), `${g.length} loaded signposts stand with their text: ` + JSON.stringify(g.map(p => p.text)));
   if (g.length) {
-    const b = await pg.evaluate(p => {
+    const b = await lib.sim(pg, p => {
       const [x, y, z] = p.c;
       BF.world.setBlock(x, y, z, 0);
       BF.signs.runAuto();

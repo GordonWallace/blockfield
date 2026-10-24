@@ -1,17 +1,19 @@
+// @ci integration hosts=worker,server
 // Cows, pastures and the cowherd (js/cowherd.js): a generated pasture and its cowherd with its hire kit, milking once a day, bottling, drinking
 // and cooking with milk leaving the empty bottle, feeding and breeding, culling only above the pasture's limit and never below 2 adults,
 // milk as the last-resort food, the last bucket, empty bottles flowing back, the leatherworker buying leather, builders and grass, leading
 // wild cows into an empty pasture, save and load. Usage:
 //   NODE_PATH=$(npm root -g) node test/run.js /tmp/out test/cowherd-actions.js
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     const C = BF.cowherd, I = BF.I, T = BF.trades;
     BF.state.paused = true;
-    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6 (5 + bakers)", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
     // wild animals breed on their own (js/wildlife.js: a daily roll makes a wild pair willing, as if fed): held off here, so a birth or a
