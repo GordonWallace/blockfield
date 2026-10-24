@@ -13,7 +13,7 @@
 // Adding something to the log: BF.glog.log(level, kind, text, { village: rec|key, at: mob|{x,y,z}|[x,y,z] }).
 // API: BF.glog = { LEVELS, CAP, log(level, kind, text, opts?), job(src, e) -> e, village(rec, e), entries(), base(), world(), head(),
 //                  forget(id), headLine(), recent(n) (the newest entries, also before a saved world opens), text(list?), chunkDays(x, z), chunkTimes(), loadChunkTimes(o), flush(), feed(), feedAt(n), feedReset(),
-//                  diskBuild(build), build, ready() }
+//                  diskBuild(build), build, ready(), tap(fn) (fn(entry) for each new entry) }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -66,9 +66,11 @@ function villageName(v) {
   if (!key) return null;
   return (BF.signs && BF.signs.villageName && BF.signs.villageName(key)) || "Village " + key;
 }
+const taps = [];   // fn(entry) for every new entry: the protocol's log messages (js/protocol.js, spec r15-36)
 function add(e) {
   if (world) entries.push(e);
   else { pre.push(e); if (pre.length > 5000) pre.shift(); }
+  for (const fn of taps) { try { fn(e); } catch (err) { /* never let a listener stop logging */ } }
   return e;
 }
 function log(level, kind, text, o) {
@@ -224,6 +226,6 @@ addEventListener("pagehide", () => close("the page was closed"));
 BF.glog = {
   LEVELS: ["ERROR", "WARN", "INFO", "DEBUG"], CAP, log, job, village, build: BUILD,
   entries: () => entries, recent: (n = 50) => (world ? entries : pre).slice(-n), base: () => base, world: () => world, head: () => head, headLine, text,
-  chunkDays, chunkTimes, loadChunkTimes, flush, forget, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading,
+  chunkDays, chunkTimes, loadChunkTimes, flush, forget, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading, tap: fn => taps.push(fn),
 };
 })();
