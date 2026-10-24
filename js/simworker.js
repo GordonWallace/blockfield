@@ -2,7 +2,7 @@
 // speaks the simulation/client protocol (js/protocol.js) to it: the page only draws and takes input, and keeps its own copy of the world
 // (the protocol's replica option) to draw, light and collide with. Everything that changes the world happens here.
 // Loads Three.js (for its maths: the page's copy, else the repo's test copy), the simulation's files (js/simfiles.js, the same list
-// as the headless boot, js/boot.js) and the debug feed's snapshot (js/debugfeed.js), then runs the tick loop on its own timer:
+// as the headless boot, js/boot.js), the debug feed's snapshot (js/debugfeed.js) and the slash commands (js/commands.js), then runs the tick loop on its own timer:
 // fixed ticks (r15-10) at the speed the page asks for, within its own budget (BF.warp.BUDGET_MS a loop), streaming chunks round the
 // player the page reports, flushing the protocol after every loop and autosaving like the page did (js/save.js writes IndexedDB here).
 // Worlds start by the protocol's world message: demo (the title screen's world), create (a new saved world, its meta made by the page)
@@ -28,6 +28,7 @@ function boot(o) {
   BF = self.BF;
   importScripts(...BF.SIM_FILES.map(f => "../" + f + Q));
   importScripts("debugfeed.js" + Q);   // (its snapshot only: the page sends it to the debug server)
+  importScripts("commands.js" + Q);    // (the slash commands: the page's command line sends them as "command" requests)
   BF.boot.initSim();
   BF.glog.setSink(e => { if (e.l === "ERROR") post({ errorLine: e.x }); });   // (the page shows the latest error with a crash)
   BF.worker = { feed: o.feed || null };
