@@ -53,7 +53,9 @@ async function inPage(pg, { walk }) {
   let pn = await pg.evaluate(count);
   const id = await pg.evaluate(async () => (await BF.save.create({ name: 'shared-blocks', seed: 123, gameMode: 'creative', villages: 10, gen: 4 })).id);
   const started = async () => {
-    await lib.sim(pg, async ([n, id]) => { for (let i = 0; i < 1200 && !(globalThis.__sbN.n > n && BF.glog.world() === id); i++) await new Promise(r => setTimeout(r, 100)); BF.state.paused = true; BF.mobs.spawning = false; }, [n, id]);
+    const st = await lib.simWait(pg, ([n, id]) => globalThis.__sbN.n > n && BF.glog.world() === id, [n, id], 120000);
+    if (!st) console.log('the saved world did not start where the simulation is: ' + JSON.stringify(await lib.sim(pg, () => ({ n: globalThis.__sbN && globalThis.__sbN.n, world: BF.glog.world(), seed: BF.state.seed }))));
+    await lib.sim(pg, () => { BF.state.paused = true; BF.mobs.spawning = false; });
     await pg.waitForFunction(pn => globalThis.__sbN.n > pn && !BF.preparing, pn, { timeout: 180000, polling: 200 });
     n = await lib.sim(pg, () => globalThis.__sbN.n); pn = await pg.evaluate(() => globalThis.__sbN.n);
   };
@@ -126,7 +128,7 @@ async function check(b, label, url, { isolated, walk }) {
   await lib.install(pg);
   await pg.goto(url);
   await pg.waitForFunction(() => window.BF && BF.state && BF.save && !BF.preparing, null, { timeout: 180000, polling: 200 });
-  await lib.simReady(pg);   // (with the simulation elsewhere, its boot world has started: the world the test creates replaces it)
+  await lib.reloaded(pg);   // (its host chosen and, with the simulation elsewhere, its boot world started: the world the test creates replaces it)
   await pg.waitForTimeout(3000);
   const R = await inPage(pg, { walk });
   const want = isolated ? 'shared' : 'plain';

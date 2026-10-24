@@ -34,16 +34,6 @@ exports.alone = (pg, on) => pg.evaluate(on => {
   const H = BF.simHost;
   if (on && !H.heldFrame) { H.heldFrame = H.frame; H.frame = () => {}; } else if (!on && H.heldFrame) { H.frame = H.heldFrame; delete H.heldFrame; }
 }, !!on);
-// newWorld(pg, seed, opts): a new world (not saved) in the page and where the simulation is, as the title screen's world starts
-// (js/main.js boot): its rivers first, the page's copy, then the simulation's; waits until the simulation runs it
-exports.newWorld = async (pg, seed, opts) => {
-  await pg.evaluate(async ([seed, opts]) => {
-    await BF.prepareWorld(seed);
-    BF.newWorld(seed, opts);
-    if (BF.simHost.worker) { const r = await BF.simHost.demo(seed, opts); if (r && r.ok === false) throw new Error('the simulation could not start the world: ' + r.why); }
-  }, [seed, opts || {}]);
-  if (exports.host() !== 'page') await exports.sim(pg, async seed => { for (let i = 0; i < 600 && !(BF.state.seed === seed && BF.rand.tick > 20); i++) await new Promise(r => setTimeout(r, 100)); }, seed);
-};
 // give(pg, names, sel): the player's inventory emptied and filled with one of each item name, where the simulation is; the page selects
 // hotbar slot sel (the selected slot is the page's) and waits until its hotbar shows them
 exports.give = async (pg, names, sel = 0) => {
@@ -116,6 +106,7 @@ exports.simBFT = pg => exports.sim(pg, src => { new Function('window', src)(glob
 // copy of the world and its player body must be the new world's too.
 exports.newWorld = async (pg, seed, opts) => {
   await pg.evaluate(async ([s, o]) => {
+    if (BF.prepareWorld) await BF.prepareWorld(s);   // (a planet's rivers first, as the title screen's world starts)
     BF.newWorld(s, o);
     if (!BF.simHost.worker) return;
     await BF.simHost.demo(s, o);
