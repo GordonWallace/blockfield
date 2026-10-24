@@ -227,6 +227,7 @@ function hook(C) {
     if (m.gameMode && m.gameMode !== P.gameMode) P.setGameMode(m.gameMode);
     if (m.mount !== undefined) P.rideSelf(m.mount);   // got on or off a boat or horse (r15-44 part 2), before a teleport off it
     if (m.pos) P.teleport(m.pos[0], m.pos[1], m.pos[2]);
+    if (m.mv != null) moveSeen = m.mv;   // (the player messages say it was taken up: protocol.js playerIn)
     if (m.look) P.setLook(m.look[0], m.look[1]);
     if (m.flying != null && P.flying !== m.flying) P.setFlying(m.flying);
     if (m.inv && BF.inventory.setOwn) BF.inventory.setOwn(m.inv);
@@ -262,7 +263,7 @@ H.world = function (op, args) {
 H.demo = (seed, opts) => H.world("demo", { seed, opts: opts || {} });
 
 // ---- each frame (js/main.js)
-let sentPlayer = "", sentSpeed = null, sentPause = null, lastClock = null;
+let sentPlayer = "", sentSpeed = null, sentPause = null, lastClock = null, moveSeen = 0;
 // The page's clock for drawing: the ticks a frame would run, counted but not run (they run in the worker). Returns how many.
 H.ticks = function (raw) {
   const W = BF.warp, plan = W.plan(raw);
@@ -276,6 +277,7 @@ H.frame = function () {
   const C = BF.client, P = BF.player;
   const st = P.serialize();
   st.sel = BF.inventory.selectedIndex;   // the hotbar slot: the page's (r15-44)
+  st.mv = moveSeen;   // the last move the simulation made that the page has taken up
   const ride = P.rideReport();   // the boat or saddled horse the page steers (r15-44 part 2)
   if (ride) st.ride = ride;
   const k = JSON.stringify(st);
