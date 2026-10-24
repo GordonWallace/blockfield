@@ -1,7 +1,9 @@
+// @ci baseline hosts=worker,server
 // Village comparison counters test (js/villagestats.js, BF.happiness.week, the feed's compare facts): node test/run.js /tmp/cmp test/compare.js
 module.exports = async (pg) => {
-  await require('./lib').toVillage(pg);
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const res = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     const out = [], ok = (n, c) => out.push((c ? "PASS " : "FAIL ") + n);
     const S = BF.vstats, H = BF.happiness, L = BF.vlog, p = BF.player.position, rec = L.villageAt(p.x, p.z);
     ok("vstats loaded", !!S && !!rec);
@@ -28,15 +30,15 @@ module.exports = async (pg) => {
     BF.sky.day = d0;
     // the feed carries the table's facts for a loaded village
     S.sample(rec);
-    const det = BF.debugFeed.snapshot().detail[rec.key];
+    const det = (BF.debugFeed.snapshot || BF.debugFeed.simPart)().detail[rec.key];
     ok("feed detail has week, pop7, noTools, day " + JSON.stringify({ w: det.week, p: det.pop7, n: det.noTools, d: det.day }),
       det.week && det.week.trade >= 1 && det.week.birth >= 1 && "pop7" in det && Array.isArray(det.noTools) && det.noTools[0] <= det.noTools[1] && typeof det.day === "number");
     const m = rec.members.find(x => x.type === "villager" && !x.dead && !x.child && x.position && x.profession === "miner") ||
       rec.members.find(x => x.type === "villager" && !x.dead && !x.child && x.position && x.profession !== "nitwit");
     m.profession = "miner"; m.inv = m.inv.map(s => s && /_pickaxe$/.test(BF.items[s.id].name) ? null : s);
-    const n1 = BF.debugFeed.snapshot().detail[rec.key].noTools;
+    const n1 = (BF.debugFeed.snapshot || BF.debugFeed.simPart)().detail[rec.key].noTools;
     m.inv[0] = { id: BF.I.iron_pickaxe, count: 1 };
-    const n2 = BF.debugFeed.snapshot().detail[rec.key].noTools;
+    const n2 = (BF.debugFeed.snapshot || BF.debugFeed.simPart)().detail[rec.key].noTools;
     ok("a miner without a pickaxe counts " + JSON.stringify([n1, n2]), n1[0] === n2[0] + 1 && n1[1] === n2[1]);
     return out;
   });
