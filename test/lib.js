@@ -55,7 +55,14 @@ exports.serve = async (opts = {}) => {
 exports.where = pg => pg.evaluate(() => ({ mode: BF.simHost.mode, label: BF.simHost.label() }));
 // simReady(pg): with the simulation off the page, waits until the world it plays has ticked a couple of seconds (the world server may
 // first solve the planet's rivers), so a test's first BFT.sim sees the world the page shows
-exports.simReady = pg => pg.waitForFunction(() => !BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0), null, { timeout: 300000, polling: 250 });
+// Also waits for the host to be chosen (until then BF.simHost.worker is false and BFT.sim runs in the page) and, off the page, for the
+// simulation to play the page's seed (a Web Worker plays its first world for a few seconds before the page's)
+exports.simReady = async pg => {
+  await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why) && (!BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0)), null, { timeout: 300000, polling: 250 });
+  if (!(await pg.evaluate(() => BF.simHost.worker))) return;
+  const seed = await pg.evaluate(() => BF.state.seed >>> 0);
+  for (let i = 0; i < 600 && !(await exports.sim(pg, s => BF.state.seed >>> 0 === s && BF.rand.tick > 20, seed)); i++) await pg.waitForTimeout(500);
+};
 // goto(pg, hash): a node test's own page opened on BF_HOST's host: index.html as a file for page, else served by a debug/server.js of
 // its own (with the world server for server, so each page gets a fresh world there), checked to run there and ready for lib.sim.
 // pg.done() closes the page and stops that server.
