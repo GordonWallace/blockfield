@@ -7,9 +7,11 @@ module.exports = async (pg, out) => {
   const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) BF.drops.update(h); };
-    const load = async (x, z) => {
+    // (also: cells [[x, z], ...] that must be loaded too; off the page this world's chunks are streamed by the simulation's own loop as well,
+    // around the page's player, so this waits longer than the page needed)
+    const load = async (x, z, also) => {
       BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
-      for (let i = 0; i < 400 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }
+      for (let i = 0; i < 3000 && !(BF.world.isLoaded(x, z) && (!also || also.every(c => BF.world.isLoaded(c[0], c[1])))); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }
       for (let i = 0; i < 300; i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     };
     BF.state.paused = true;
@@ -46,7 +48,7 @@ module.exports = async (pg, out) => {
     const unloaded = !BF.world.isLoaded(gx, gz);
     run(400);
     ok("in an unloaded chunk they neither despawn nor fall", unloaded && BF.drops.list.length === 2, { unloaded, n: BF.drops.list.length });
-    await load(px - 21, pz);
+    await load(px - 21, pz, BF.drops.list.map(d => [Math.floor(d.pos.x), Math.floor(d.pos.z)]));   // (where the drops lie)
     run(300 - Math.max(...BF.drops.list.map(d => d.age)) + 1);
     ok("they despawn once their 300s are up in a loaded chunk", BF.drops.list.length === 0, BF.drops.list.map(d => d.age));
     // old saves have no drops
