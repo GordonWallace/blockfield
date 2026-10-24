@@ -1,9 +1,11 @@
+// @ci integration hosts=worker,server
 // Economy tallies test (js/economy.js): node test/run.js /tmp/econ test/economy.js
 // Scripted trades must add up to the same counts as the village log's trade lines; waits count once per villager, item and game hour;
 // unsold stock shows after 2 days; the 8th day drops off; save and load keep it all; old saves start empty; the debug feed sends it.
 module.exports = async (pg) => {
-  await require('./lib').toVillage(pg);
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const res = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     const out = [], ok = (n, c) => out.push((c ? "PASS " : "FAIL ") + n);
     const E = BF.econ, L = BF.vlog, I = BF.I, p = BF.player.position, rec = L.villageAt(p.x, p.z);
     ok("econ loaded", !!E);
@@ -84,9 +86,10 @@ module.exports = async (pg) => {
     ok("view keeps 7", Object.keys(E.view(rec.key).days).length === 7);
     // ---- the debug feed sends the tallies only when they change
     if (BF.debugFeed) {
-      const s1 = BF.debugFeed.snapshot(), s2 = BF.debugFeed.snapshot();
+      const snap = BF.debugFeed.snapshot || BF.debugFeed.simPart;   // (off the page the simulation makes its part of the snapshot, the villages' tallies with it)
+      const s1 = snap(), s2 = snap();
       E.want(b.dead ? c : b, "Wool");
-      const s3 = BF.debugFeed.snapshot();
+      const s3 = snap();
       ok("feed sends tallies once, then on change", s1.econ && s1.econ[rec.key] && !(s2.econ && s2.econ[rec.key]) && s3.econ && s3.econ[rec.key]);
     } else ok("feed sends tallies (no feed here: skipped)", true);
     BF.sky.time = dayFrac;

@@ -1,26 +1,30 @@
-// @ci integration suite=village
+// @ci integration suite=village hosts=worker,server
 // A killed village iron golem stays gone after saving and reloading (bug-040): the kill count is saved with the village's
-// dead roster ("dead:<village key>"), so the respawn check still counts it. Usage: node test/run.js /tmp/gks test/golem-kills-saved.js
+// dead roster ("dead:<village key>"), so the respawn check still counts it. Usage: node test/run.js /tmp/gks test/golem-kills-saved.js [--host page|worker|server]
 module.exports = async (pg, out) => {
+  const lib = require('./lib');
   const id = await pg.evaluate(async () => (await BF.save.create({ name: "golem-kills-saved", seed: 123, gameMode: "creative", villages: 9, gen: 4 })).id);
-  await require('./lib').toVillage(pg);
-  const golems = () => pg.evaluate(() => BF.mobs.list.filter(m => m.type === "iron_golem" && !m.dead && m.village).length);
+  await lib.simReady(pg);
+  await lib.toVillage(pg);
+  const golems = () => lib.sim(pg, () => BF.mobs.list.filter(m => m.type === "iron_golem" && !m.dead && m.village).length);   // (where the simulation is: spec r15-43)
   const before = await golems();
-  await pg.evaluate(async () => {
+  await lib.sim(pg, () => {
     BF.mobs.spawning = false;
     for (let round = 0; round < 10; round++) {   // the village replaces golems one at a time until its quota is used up
       for (const g of BF.mobs.list.filter(m => m.type === "iron_golem" && m.village)) BF.mobs.kill(g);
       for (let i = 0; i < 200; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     }
-    await BF.save.saveNow();
   });
+  await pg.evaluate(() => BF.save.saveNow());
   const afterKill = await golems();
   await pg.reload();
-  await require('./lib').ready(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
+  await lib.reloaded(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
   await pg.waitForTimeout(6000);
-  await pg.evaluate(async id => { await BF.save.load(id); BF.mobs.spawning = false; }, id);
+  await pg.evaluate(id => BF.save.load(id), id);
+  await lib.simReady(pg);
+  await lib.sim(pg, () => { BF.mobs.spawning = false; });
   await pg.waitForTimeout(9000);
-  await pg.evaluate(() => { for (let i = 0; i < 400; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); });
+  await lib.sim(pg, () => { for (let i = 0; i < 400; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); });
   const afterReload = await golems();
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra));
   ok("the village had golems to kill", before > 0, { before });

@@ -1,9 +1,10 @@
-// @ci integration suite=village
+// @ci integration suite=village hosts=worker,server
 // Caravans reach 600 blocks and plan from last-known prices (village loading plan): the trip length rule, candidates that are not loaded, the no-road
 // memory, the 3-day give-up, and the saved prices. Usage: node test/run.js /tmp/mr test/merchant-range.js
 module.exports = async (pg) => {
-  await require('./lib').toVillage(pg);
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const res = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     const out = [], ok = (n, c, x) => out.push((c ? "PASS " : "FAIL ") + n + (x !== undefined ? "  " + JSON.stringify(x) : ""));
     const M = BF.merchant, rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     ok("range is 600 blocks and the give-up is 3 days", M.RANGE === 600 && M.TRIP_MAX_DAYS === 3, { r: M.RANGE, d: M.TRIP_MAX_DAYS });

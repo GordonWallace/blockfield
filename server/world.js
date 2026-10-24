@@ -172,7 +172,7 @@ function start(o) {
       return;
     }
     if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
-    if (m.test === "lockstep" || m.test === "eval") srv.tests.push(m);   // (kept for the threads this page plays on next)
+    if (m.test === "lockstep" || m.test === "eval" || m.auto) srv.tests.push(m);   // (kept for the threads this page plays on next)
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
   // a protocol packet for the simulation; a world message decides which thread plays

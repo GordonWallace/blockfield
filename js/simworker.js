@@ -117,7 +117,8 @@ self.onmessage = ev => {
   const d = ev.data;
   if (d && d.boot) { try { boot(d.boot); } catch (e) { post({ failed: String(e && e.message || e) }); } return; }
   if (d && d.test === "crash") { crashNext = true; return; }   // (test/sim-worker.js: the crash path)
-  if (d && d.test === "eval") { if (BF) BF.testEval = true; return; }   // (a test page: the protocol's eval query, BFT.sim)
+  if (d && d.test === "eval") { if (BF) BF.testEval = true; return; }
+  if (d && d.auto) { if (BF && BF.active) BF.active.set({ on: false }); return; }   // (an automated browser's page: the budget off, js/active.js)   // (a test page: the protocol's eval query, BFT.sim)
   if (!d || d.h == null) return;
   if (!sim) { early.push(d); return; }
   if (crashed) return;

@@ -1,10 +1,12 @@
+// @ci integration hosts=worker,server
 // A killed villager's bed is free for newborns and bedless villagers (bug-030).
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/dvb test/dead-villager-bed.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/dvb test/dead-villager-bed.js [--host page|worker|server]
 module.exports = async (pg) => {
+  const lib = require('./lib');
   await pg.evaluate(() => BF.player.start());
-  await require('./lib').toVillage(pg);
+  await lib.toVillage(pg);
   await pg.waitForTimeout(4000);
-  const r = await pg.evaluate(() => {
+  const r = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     const B = BF.breeding, pp = BF.player.position;
     const rec = [...BF.mobs.villages.values()].sort((a, b) => Math.hypot(a.x - pp.x, a.z - pp.z) - Math.hypot(b.x - pp.x, b.z - pp.z))[0];
     const victim = rec.members.find(m => m.type === "villager" && !m.dead && !m.removed && m.slot && m.slot.bed && !m.bred);

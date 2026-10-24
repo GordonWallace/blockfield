@@ -56,3 +56,11 @@ exports.where = pg => pg.evaluate(() => ({ mode: BF.simHost.mode, label: BF.simH
 // simReady(pg): with the simulation off the page, waits until the world it plays has ticked a couple of seconds (the world server may
 // first solve the planet's rivers), so a test's first BFT.sim sees the world the page shows
 exports.simReady = pg => pg.waitForFunction(() => !BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0), null, { timeout: 300000, polling: 250 });
+// reloaded(pg): after pg.reload(), waits for the game to be up again where it was: its host chosen (before that BF.preparing is not set
+// yet, so ready() alone can pass at once and a save loaded then is wiped by the boot world's newWorld), the planet's rivers, and the
+// simulation playing
+exports.reloaded = async pg => {
+  await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
+  await exports.ready(pg);
+  await exports.simReady(pg);
+};

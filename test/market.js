@@ -1,10 +1,12 @@
+// @ci integration hosts=worker,server
 // One market for players and villagers (js/market.js): node test/run.js /tmp/market test/market.js
 // Spare-goods offers match the inventory minus the reserve; builder, crafter, farmer and shepherd reserves; a builder buys cobblestone from a
 // villager that isn't a miner; a holder won't sell into its reserve, to villagers or the player; hungry villagers and shepherds buy only through
 // offers; and no villager-to-villager trade in the code is made without an offer.
 module.exports = async (pg) => {
-  await require('./lib').toVillage(pg);
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const res = await lib.sim(pg, () => {
     const out = [], ok = (n, c) => out.push((c ? "PASS " : "FAIL ") + n);
     const M = BF.market, T = BF.trades, I = BF.I, em = I.emerald, inv = T.inv;
     ok("market loaded", !!M);

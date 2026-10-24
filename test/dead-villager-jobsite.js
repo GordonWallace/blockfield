@@ -1,13 +1,16 @@
+// @ci integration hosts=worker,server
 // A killed villager's workstation stays free for others after a save and reload (bug-036).
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/dvj test/dead-villager-jobsite.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/dvj test/dead-villager-jobsite.js [--host page|worker|server]
+const lib = require('./lib');
 const toVillage = async pg => {
-  await require('./lib').toVillage(pg);
-  for (let i = 0; i < 30 && (await pg.evaluate(() => BF.mobs.list.filter(m => m.type === 'villager').length)) < 3; i++) await pg.waitForTimeout(2000);
+  await lib.toVillage(pg);
+  for (let i = 0; i < 30 && (await lib.sim(pg, () => BF.mobs.list.filter(m => m.type === 'villager').length)) < 3; i++) await pg.waitForTimeout(2000);
 };
 module.exports = async (pg) => {
   const id = await pg.evaluate(async () => { BF.player.start(); const m = await BF.save.create({ name: "dvj", seed: "123", gameMode: "creative", villages: 9, gen: 4 }); return m.id; });
+  await lib.simReady(pg);
   await toVillage(pg);
-  const r = await pg.evaluate(() => {
+  const r = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     BF.mobs.spawning = false;
     const pp = BF.player.position;
     const rec = [...BF.mobs.villages.values()].sort((a, b) => Math.hypot(a.x - pp.x, a.z - pp.z) - Math.hypot(b.x - pp.x, b.z - pp.z))[0];
@@ -24,8 +27,9 @@ module.exports = async (pg) => {
   if (r.err) return ok("setup: " + r.err, false);
   ok("the dead " + r.prof + "'s workstation is free in the same session", r.free);
   await pg.evaluate(async id => { await BF.save.saveNow(); await BF.save.load(id); }, id);
+  await lib.simReady(pg);
   await toVillage(pg);
-  const r2 = await pg.evaluate(o => {
+  const r2 = await lib.sim(pg, o => {
     const rec = BF.mobs.villages.get(o.key), s = o.site;
     if (!rec) return { err: "village not loaded" };
     const free = BF.jobs.unclaimed(rec).some(x => x.x === s.x && x.y === s.y && x.z === s.z);
