@@ -961,8 +961,9 @@ BF.proto = {
   VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, worker, host, hosted, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
   listen: fn => { LISTEN.push(fn); },
   onSelf: fn => { SELF.push(fn); },
-  // (tests, in-page) the protocol number the in-page sim end gives a simulation object (a mob, drop, arrow, boat or bee), or null
-  numberOf: o => (o && typeof o === "object" && local.sim ? local.sim.nOf(o) : null),
+  // (tests) the protocol number the sim end gives a simulation object (a mob, drop, arrow, boat or bee), or null: in the page, or where
+  // the simulation is (the worker or the world server, through BFT.sim)
+  numberOf: o => (o && typeof o === "object" && liveSim ? liveSim.nOf(o) : null),
   hookUp,
   // once a frame: the client's view (in the page, also through the worker), then the simulation end's flush (in the page, or in the worker)
   flush(force) {

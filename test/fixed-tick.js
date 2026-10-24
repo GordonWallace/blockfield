@@ -1,10 +1,12 @@
-// @ci integration suite=world timeout=420
-// Fixed simulation tick (spec r15-10): NODE_PATH=$(npm root -g) node test/run.js /tmp/ft test/fixed-tick.js
+// @ci integration suite=world timeout=420 hosts=worker,server
+// Fixed simulation tick (spec r15-10): NODE_PATH=$(npm root -g) node test/run.js /tmp/ft test/fixed-tick.js [--host page|worker|server]
+// (the ticks are run where the simulation is, spec r15-43; the drawing between them is the page's, from the protocol's mirror)
 // The world simulation runs in ticks of exactly 0.05 s at every speed and frame rate, and mobs are drawn between the last two ticks:
 // - at 1x for 10 real seconds the sim clock advances 10 s (± 0.1) in ticks of exactly 0.05;
 // - forced 30 fps and 120 fps frames give the same world after 200 ticks (mob position checksum, from the same start, seeded random);
 // - frames at 1000x never run a tick of any other size, and drop (not owe) the ticks the budget can't fit;
 // - a mob is drawn between where the previous tick and the latest left it.
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(3000);
@@ -13,17 +15,17 @@ module.exports = async (pg, out) => {
 
   // ---- 1x for 10 real seconds: ticks of exactly 0.05, the clock keeps real time. Headless frames can be slower than the
   // accumulator's 0.25 s cap per frame (MAX_FRAME), so the clock is compared with the real time the frames counted.
-  const t0 = await pg.evaluate(() => {
+  const t0 = await lib.sim(pg, () => {
     BF.warp.reset();
-    const hs = (window.__ftH = []), fr = (window.__ftF = []);
+    const hs = (globalThis.__ftH = []), fr = (globalThis.__ftF = []);
     const up = BF.mobs.update, plan = BF.warp.plan;
-    window.__ftUp = up; window.__ftPlan = plan;
+    globalThis.__ftUp = up; globalThis.__ftPlan = plan;
     BF.mobs.update = function (h) { hs.push(h); return up.apply(this, arguments); };
     BF.warp.plan = function (dt) { fr.push(dt); return plan.apply(this, arguments); };
     return { sim: BF.simNow(), real: performance.now(), dropped: BF.warp.dropped };
   });
   await pg.waitForTimeout(10000);
-  const t1 = await pg.evaluate(() => {
+  const t1 = await lib.sim(pg, () => {
     BF.mobs.update = __ftUp; BF.warp.plan = __ftPlan;
     const cap = BF.warp.MAX_FRAME;
     return { sim: BF.simNow(), real: performance.now(), n: __ftH.length, bad: __ftH.filter(h => h !== BF.warp.TICK).length,
@@ -43,20 +45,23 @@ module.exports = async (pg, out) => {
   // so this checks what the fixed tick is responsible for: (1) every frame rate makes exactly the same sequence of simulation calls,
   // all with h = 0.05; (2) mobs moved by physics alone (thrown, falling, knocked back; no AI steering) end up identical, to the bit.
   // Away from any village, on dry land.
-  const spot = await pg.evaluate(() => {
-    const s = BFT.spawn();
+  const spot = await lib.sim(pg, () => {
+    const s0 = BF.spawnPoint || BF.player.position, s = { x: Math.floor(s0.x), z: Math.floor(s0.z) };
     for (let k = 1; k < 40; k++) for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
       const x = s.x + dx * k * 400, z = s.z + dz * k * 400, h = BF.worldgen.heightAt(x, z);
       if (h <= BF.SEA + 2 || BF.worldgen.villagesNear(x, z, 450).length) continue;
-      BF.player.position.set(x + 0.5, h + 1.01, z + 0.5);
       return { x, z, h };
     }
     return null;
   });
   console.log("test spot " + JSON.stringify(spot));
-  await pg.waitForFunction(() => { const p = BF.player.position; return BF.world.isLoaded(p.x + 24, p.z + 24) && BF.world.isLoaded(p.x - 24, p.z - 24); }, null, { timeout: 120000 }).catch(() => {});
+  await pg.evaluate(s => BF.player.position.set(s.x + 0.5, s.h + 1.01, s.z + 0.5), spot);   // (the page moves its player: the simulation follows)
+  await lib.sim(pg, async s => {
+    const W = BF.world, near = () => Math.abs(BF.player.position.x - s.x - 0.5) < 1 && W.isLoaded(s.x + 24, s.z + 24) && W.isLoaded(s.x - 24, s.z - 24);
+    for (let i = 0; i < 1200 && !near(); i++) await new Promise(r => setTimeout(r, 100));
+  }, spot);
   await pg.waitForTimeout(5000);
-  const det = await pg.evaluate(() => {
+  const det = await lib.sim(pg, () => {
     BF.state.paused = true;   // the real frame loop runs no ticks meanwhile
     const P = BF.player.position, gy = (x, z) => BF.world.heightAt(Math.floor(x), Math.floor(z)) + 1;
     const clock0 = BF.simNow(), TYPES = ["cow", "pig", "sheep", "zombie", "skeleton", "spider", "iron_golem", "horse"];
@@ -120,7 +125,7 @@ module.exports = async (pg, out) => {
   if (!det.samePos) for (let i = 0; i < det.pa.length; i++) if (JSON.stringify(det.pa[i]) !== JSON.stringify(det.pb[i])) console.log("  differs:", JSON.stringify(det.pa[i]), JSON.stringify(det.pb[i]));
 
   // ---- 1000x: still only 0.05 s ticks; a slow frame drops what it can't fit instead of owing it
-  const ff = await pg.evaluate(() => {
+  const ff = await lib.sim(pg, () => {
     BF.state.paused = true;
     const W = BF.warp, hs = [], up = BF.mobs.update;
     BF.mobs.update = function (h) { hs.push(h); return up.apply(this, arguments); };
@@ -142,32 +147,42 @@ module.exports = async (pg, out) => {
   check(ff.n3 === ff.want3 && ff.n4 === ff.want4 && Math.abs(ff.alpha - ff.wantAlpha) < 1e-6, "at 1x the accumulator carries the fraction of a tick (" + ff.n3 + " + " + ff.n4 + " ticks, alpha " + ff.alpha.toFixed(3) + ")");
 
   // ---- drawing between ticks: a walking mob is drawn between prev and cur, and at cur when alpha is 1
-  const dr = await pg.evaluate(() => {
+  // (paused from the page, as the pause menu does, so the simulation runs no tick of its own until the drawing is checked)
+  await pg.evaluate(() => { BF.state.paused = true; });
+  const mv = await lib.sim(pg, () => {
     BF.state.paused = true;
     const P = BF.player.position, x = P.x + 5, z = P.z + 5, y = BF.world.heightAt(Math.floor(x), Math.floor(z)) + 1;
     const m = BF.mobs.spawn("cow", x, y, z);
-    try {
-      m.vel.set(3, 0, 0);
-      m.knockT = 1;   // keep the push for this tick (no AI steering)
-      BF.proto.flush(true);   // the page draws from the protocol's mirror (r15-37): send the mob before and after its tick
-      BF.rand.step();         // (one simulation step, as js/main.js counts them: the mirror interpolates across exactly one tick)
-      BF.mobs.update(BF.warp.TICK);
-      BF.proto.flush(true);
-      const q = { x: m.prev.x, y: m.prev.y, z: m.prev.z }, c = { x: m.position.x, y: m.position.y, z: m.position.z };
-      // drawn by js/mobview.js at BF.warp.alpha, held here at 0.5 and then 1
-      const W = BF.warp, desc = Object.getOwnPropertyDescriptor(W, "alpha"), V = BF.mobView;
-      let A = 0.5;
-      Object.defineProperty(W, "alpha", { get: () => A, configurable: true });
-      try {
-        V.render(0);
-        const d = V.drawPos(m), v = V.viewOf(m), mid = { x: d.x, y: d.y, z: d.z }, model = v ? { x: v.root.position.x, z: v.root.position.z } : null;
-        A = 1;
-        V.render(0);
-        const e = V.drawPos(m), end = { x: e.x, y: e.y, z: e.z };
-        return { q, c, mid, model, end, simUntouched: m.position.x === c.x && m.position.z === c.z };
-      } finally { Object.defineProperty(W, "alpha", desc); }
-    } finally { BF.mobs.discard(m); BF.state.paused = false; }
+    globalThis.__ftCow = m;
+    m.vel.set(3, 0, 0);
+    m.knockT = 1;   // keep the push for this tick (no AI steering)
+    BF.proto.flush(true);   // the page draws from the protocol's mirror (r15-37): send the mob before and after its tick
+    BF.rand.step();         // (one simulation step, as js/main.js counts them: the mirror interpolates across exactly one tick)
+    BF.mobs.update(BF.warp.TICK);
+    BF.proto.flush(true);
+    return { n: BF.proto.numberOf(m), q: { x: m.prev.x, y: m.prev.y, z: m.prev.z }, c: { x: m.position.x, y: m.position.y, z: m.position.z } };
   });
+  // the page's mirror has the cow's latest tick and the one before it
+  await pg.waitForFunction(mv => { const M = BF.client.world, e = M.entities.get(mv.n); return e && Math.abs(e.x - mv.c.x) < 1e-9 && M.k(e, 0.5) === 0.5; }, mv, { timeout: 20000 }).catch(() => {});
+  console.log("mirror " + JSON.stringify(await pg.evaluate(mv => { const M = BF.client.world, e = M.entities.get(mv.n); return { mv, tick: M.tick, e: e && { x: e.x, z: e.z, prev: e.prev, ct: e.ct, pt: e.pt } }; }, mv)));
+  const drawn = await pg.evaluate(mv => {
+    // drawn by js/mobview.js at BF.warp.alpha, held here at 0.5 and then 1
+    const W = BF.warp, desc = Object.getOwnPropertyDescriptor(W, "alpha"), V = BF.mobView, e = BF.client.world.entities.get(mv.n);
+    if (!e) return null;
+    let A = 0.5;
+    Object.defineProperty(W, "alpha", { get: () => A, configurable: true });
+    try {
+      V.render(0);
+      const d = V.drawPos(e), v = V.viewOf(mv.n), mid = { x: d.x, y: d.y, z: d.z }, model = v ? { x: v.root.position.x, z: v.root.position.z } : null;
+      A = 1;
+      V.render(0);
+      const f = V.drawPos(e), end = { x: f.x, y: f.y, z: f.z };
+      return { mid, model, end };
+    } finally { Object.defineProperty(W, "alpha", desc); }
+  }, mv);
+  const still = await lib.sim(pg, c => { const m = globalThis.__ftCow, r = m.position.x === c.x && m.position.z === c.z; BF.mobs.discard(m); delete globalThis.__ftCow; BF.state.paused = false; return r; }, mv.c);
+  await pg.evaluate(() => { BF.state.paused = false; });
+  const dr = Object.assign({ q: mv.q, c: mv.c, simUntouched: still }, drawn || { mid: { x: NaN, z: NaN }, model: null, end: { x: NaN, z: NaN } });
   console.log(JSON.stringify(dr));
   const between = (v, a, b) => v >= Math.min(a, b) - 1e-9 && v <= Math.max(a, b) + 1e-9;
   check(Math.abs(dr.c.x - dr.q.x) > 0.05, "the test mob moved in its tick (" + (dr.c.x - dr.q.x).toFixed(3) + " blocks)");

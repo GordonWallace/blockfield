@@ -15,6 +15,8 @@ The page then only draws the world and takes your input. It keeps its own copy o
 - **The debug screen reads the world from the server**, so it keeps showing the world (paused) after the page is closed.
 - **If the server stops** (Ctrl+C, or a crash), the page says "World server stopped" and shows the game log's last lines. Ctrl+C saves every world first.
 
+Everything you do plays the same in all three places. Some things the page used to do itself now go through the simulation wherever it runs: making an [[page:maps-and-compasses|auto-fill map]] from the width prompt, a held map filling in around you, sleeping in a bed (a second click while already asleep does nothing; see [[page:time-and-weather]]), and the pause menu's monster options, which reach the simulation as soon as you change them.
+
 ## The three ways the game runs
 
 From 1.5 the simulation can run in one of three places, and the game picks one each time it starts:

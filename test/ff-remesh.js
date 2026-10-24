@@ -1,11 +1,12 @@
-// @ci integration suite=world timeout=600
+// @ci integration suite=world timeout=600 hosts=worker,server
 // Batched chunk remeshing during fast-forward (spec r15-02): with the player above the boot world's village (59 villagers) at 1000x for
 // 20 real seconds, chunks outside the player's 3x3 are remeshed at most every 5 s (2 s at 100x, 400 ms at 10x). Checks:
 //  - no far chunk is remeshed twice within the 5 s wait, and far remeshes average under 2 a frame (per-chunk timing, not frame
 //    bursts: chunks meshed together at load come due together, so a slow runner's few frames can each catch several);
 //  - a block the player breaks at 1000x is meshed the same frame;
 //  - after dropping to 1x, no chunk stays dirty after one frame.
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ffr test/ff-remesh.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ffr test/ff-remesh.js [--host page|worker|server]
+// (the meshing is the page's in every host: with the simulation elsewhere, the village's edits reach the page's replica world, spec r15-43)
 module.exports = async (pg) => {
   const fails = [];
   const ok = (name, cond, extra) => { console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra === undefined ? "" : extra)); if (!cond) fails.push(name); };
