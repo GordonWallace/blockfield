@@ -125,13 +125,18 @@ function build() {
     hs.appendChild(b);
   }
 }
-// Runs the text as /tp (the panel is a front end to the command). Closes on success; shows the error otherwise.
+// Runs the text as /tp (the panel is a front end to the command). Closes on success; shows the error otherwise. True or false, or null
+// with the simulation off the page (the answer comes later).
 function go(text) {
   const t = String(text || "").trim().replace(/^\/?(tp|teleport)\s+/i, "");
   if (!t) return false;
   const r = BF.commands ? BF.commands.execute("/tp " + t) : { ok: false, msg: "Commands not available" };
+  if (r.pending && r.done) { r.done.then(answer); return null; }   // the simulation in a worker or on the world server: its answer comes later
+  return answer(r);
+}
+function answer(r) {
   if (r.ok) { close(); if (BF.player && BF.player.actionBar) BF.player.actionBar(r.msg); return true; }
-  panel.msg.textContent = r.msg; panel.msg.classList.add("bad");
+  if (panel.msg) { panel.msg.textContent = r.msg; panel.msg.classList.add("bad"); }
   return false;
 }
 function canOpen() {
@@ -160,8 +165,9 @@ function close() {
   panel.input.blur();
   try { if (BF.player && BF.player.uiClose) BF.player.uiClose(); } catch (e) { console.error(e); }
 }
-// Every key goes to the open panel; P opens it (capture phase at load time, like commands.js).
-addEventListener("keydown", e => {
+// Every key goes to the open panel; P opens it (capture phase at load time, like commands.js). The page only: the simulation loads this
+// file for the commands' planet forms and messages (js/simworker.js).
+if (BF.page) addEventListener("keydown", e => {
   if (panel.open) {
     e.stopImmediatePropagation();
     if (e.key === "Escape") { e.preventDefault(); close(); return; }

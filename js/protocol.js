@@ -432,6 +432,9 @@ function serve(send, opts) {
       const p = P.position;
       if (P.vehicle) { r.x = p.x; r.y = p.y; r.z = p.z; }   // riding: the page seats the player itself (js/player.js rideSelf)
       else if (Math.abs(p.x - r.x) > 1e-6 || Math.abs(p.y - r.y) > 1e-6 || Math.abs(p.z - r.z) > 1e-6) { m.pos = [p.x, p.y, p.z]; r.x = p.x; r.y = p.y; r.z = p.z; any = true; }
+      // where it looks and whether it flies, when a command here changed them (/tp corner faces the corner, a far /tp keeps the compass facing)
+      if (P.yaw !== undefined && (P.yaw !== r.yaw || P.pitch !== r.pitch)) { m.look = [P.yaw, P.pitch]; r.yaw = P.yaw; r.pitch = P.pitch; any = true; }
+      if (P.flying !== undefined && !!P.flying !== r.flying) { m.flying = r.flying = !!P.flying; any = true; }
     }
     // riding (r15-44 part 2): the boat or horse the player is on, when that changed (getting on or off here, its health); the pose goes along
     const ride = P.rideState ? P.rideState() : null, rk = JSON.stringify(ride);
@@ -446,6 +449,7 @@ function serve(send, opts) {
     if (!P || !P.position) return;
     P.position.set(m.x, m.y, m.z);
     if (P.setLook) P.setLook(m.yaw || 0, m.pitch || 0);
+    if (m.flying != null && P.setFlying && P.flying !== !!m.flying) P.setFlying(m.flying);
     if (m.gameMode && m.gameMode !== P.gameMode && P.setGameMode) P.setGameMode(m.gameMode);
     if (m.health != null) P.health = m.health;
     if (m.hunger != null) P.hunger = m.hunger;
@@ -453,7 +457,7 @@ function serve(send, opts) {
     if (m.sel != null && BF.inventory && BF.inventory.selectedIndex !== m.sel) BF.inventory.select(m.sel);   // the hotbar slot (r15-44: the page's)
     if (m.ride && P.rideIn) P.rideIn(m.ride);   // the boat or horse the page steers (r15-44 part 2)
     if (m.saturation != null) P.saturation = m.saturation;   // (r15-43: the page drains it; eating here raises it, flushSelf)
-    S.rep = { x: m.x, y: m.y, z: m.z, health: P.health, hunger: P.hunger, saturation: P.saturation, gameMode: P.gameMode };
+    S.rep = { x: m.x, y: m.y, z: m.z, yaw: P.yaw, pitch: P.pitch, flying: !!P.flying, health: P.health, hunger: P.hunger, saturation: P.saturation, gameMode: P.gameMode };
   }
   // replica: the player's body is the client's, so what would change it here goes to the client instead (mobs, bees and lightning
   // hurting the player, js/mobs.js, js/bees.js, js/weather.js)
