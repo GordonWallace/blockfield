@@ -6,7 +6,7 @@
 //                     precipAt(x, z, y?) -> 0 none | 1 rain | 2 snow, rainingAt(x, y, z), remaining, ms }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const DAY = 1200;                              // seconds per in-game day (sky.dayLength); spells are measured in days
 const RAMP = 15;                               // seconds for intensity 0 -> 1
@@ -355,7 +355,7 @@ const weather = {
 
   update(dt) {
     const t0 = performance.now();
-    if (!points) init();
+    if (!inited) init();
     if (dt > 0) {
       weather.tick(dt);
       // lightning
@@ -368,6 +368,7 @@ const weather = {
     // flash envelope: bright strike plus a weaker second flash ~0.13 s later
     const f1 = Math.exp(-flashT / 0.05), f2 = flashT > 0.13 ? 0.7 * Math.exp(-(flashT - 0.13) / 0.06) : 0;
     weather.flash = flashT < 0.6 ? Math.min(1, f1 + f2) : 0;
+    if (!points) { weather.ms = weather.ms * 0.95 + (performance.now() - t0) * 0.05; return; }   // headless: nothing to draw
     const bo = boltT > 0 ? Math.min(1, boltT / BOLT_LIFE * 2.2) * (0.75 + 0.25 * Math.sin(boltT * 90)) : 0;
     bolt.visible = boltGlow.visible = bo > 0;
     boltMat.uniforms.uO.value = glowMat.uniforms.uO.value = bo;
@@ -416,8 +417,8 @@ function strike() {
 // everything else (the event, lastStrike, who is hit) uses the canonical column. Distances go through BF.planet.rel.
 const sc = {}, sr = {};
 weather.strikeAt = function (x, y, z) {
-  if (!bolt) init();
-  buildBolt(x, y, z);
+  if (!inited) init();
+  if (bolt) buildBolt(x, y, z);
   boltT = BOLT_LIFE; flashT = 0;
   weather.strikes++;
   const P = BF.planet, c = P ? P.canonCell(x, z, sc) : { x, z };
@@ -442,10 +443,12 @@ let inited = false;
 function init() {
   if (inited) return;
   inited = true;
-  BF.scene.add(makeParticles());
-  makeBolt();
-  BF.scene.add(bolt, boltGlow);
-  if (BF.world && BF.world.onChunkLoad) BF.world.onChunkLoad(() => { hmDirty = true; });
+  if (BF.scene) {   // the rain, snow and bolt (headless there is no scene: js/boot.js)
+    BF.scene.add(makeParticles());
+    makeBolt();
+    BF.scene.add(bolt, boltGlow);
+  }
+  if (BF.world && BF.world.onChunkLoad) BF.world.onChunkLoad(() => { hmDirty = true; }, true);   // (drawing: in the page's copy of the world too)
   if (BF.on) {
     BF.on("blockPlaced", () => { hmDirty = true; });
     BF.on("blockBroken", () => { hmDirty = true; });
@@ -455,7 +458,8 @@ function init() {
 }
 // newWorld runs before the first sky.update, so register the reset listener as soon as the event bus exists
 weather.reset(1337);
-setTimeout(() => { if (BF.scene && !inited) init(); }, 0);
+if (BF.page) setTimeout(() => { if (BF.scene && !inited) init(); }, 0);
+else BF.onLoad(init);   // headless: the sim hooks once the event bus is in (js/boot.js)
 
 BF.weather = weather;
 })();

@@ -10,7 +10,7 @@
 //                       serialize(), deserialize(o), reset(), hook() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const BASE = 100, MAX = 100;   // score = BASE + sum(count * weight), clamped to 0..MAX
 const WINDOW = 7;              // game days counted by "last week" terms

@@ -17,7 +17,7 @@
 //  feathers each, kept to sell), and stock a coop that holds fewer than STOCK_TO chickens from wild chickens within FIND_R (once a day when none).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const FEED_DAYS = 1;          // a chicken is willing to breed for this long after eating seeds
 const BREED_CD = 1;           // days before a chicken that bred can breed again
@@ -54,9 +54,7 @@ const LOG = [];
 const log = (kind, data) => { LOG.push(BF.glog.job("poultry", Object.assign({ kind, day: +now().toFixed(3) }, data))); if (LOG.length > 200) LOG.shift(); };
 const vlog = (m, kind, text) => { if (BF.vlog && m.village) BF.vlog.log(m.village, kind, (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Poultry keeper") + " (Poultry Keeper) " + text, m); };
 
-let ids = 0;
-const idOf = new WeakMap();
-const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };
+const mid = m => +String(m.id).slice(1);   // the mob's stable id number (js/ids.js): which of a pair breeds (r15-23)
 
 // ---------------------------------------------------------------- chicken state
 function stOf(m) {
@@ -102,9 +100,14 @@ const playerSeeds = () => {
 };
 
 // ---------------------------------------------------------------- breeding
+// (spec r15-31: scans of the mobs near a point, BF.mobs.near, checked against the whole list in tests with BF.mobs.checkScan)
 function findMate(m, t) {
+  const scan = L => mateIn(L, m, t);
+  return BF.mobs.checkScan("poultry.findMate", scan(BF.mobs.near(m.position, Math.max(MATE_R, 16))), scan);
+}
+function mateIn(L, m, t) {
   let best = null, bd = MATE_R * MATE_R, near = 0;
-  for (const o of BF.mobs.list) {
+  for (const o of L) {
     if (o.type !== "chicken" || !live(o)) continue;
     const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
     if (d2 < 256) near++;
@@ -113,7 +116,12 @@ function findMate(m, t) {
   }
   return near >= LOCAL_MAX ? null : best;
 }
+// In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
+// when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+}
+function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const chick = BF.mobs.spawn("chicken", x, y, z);
   if (!chick) return null;
@@ -350,8 +358,8 @@ function tick(dt) {
   acc = 0;
   if (toShut.length) shutGates();
   const t = now();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "chicken" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("chicken")) {   // (spec r15-31: the chicken only)
+    if (!live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
     if (s.layAt == null || s.layAt - t > LAY_MAX * 2) s.layAt = t + layDays();   // time was set back
@@ -400,9 +408,10 @@ function coopOf(m) {
 }
 // What the keeper looks after: {coop, hens (live chickens to feed), flock (live chickens counted for culling), size (the flock, unloaded ones too)}.
 function tended(m) {
-  const coop = coopOf(m), list = BF.mobs.list;
-  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
-  const near = o => o.type === "chicken" && live(o) && !o.ledBy && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (coop ? TEND_R : FREE_RADIUS) && Math.abs(o.position.y - m.position.y) < 6;
+  const coop = coopOf(m);
+  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = coop ? TEND_R : FREE_RADIUS;
+  const near = o => o.type === "chicken" && live(o) && !o.ledBy && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
+  const M = BF.mobs, list = M.checkScan("poultry.tended", M.near(home, R).filter(near), L => L.filter(near));
   let flock;
   if (coop && coop.hens) flock = coop.hens.map(s => s.mob).filter(live);
   else flock = list.filter(o => near(o) && !o.coop);
@@ -420,13 +429,16 @@ function seedsWanted(m) {
 }
 function wildChicken(m, coop, S) {
   const c = { x: (coop.x0 + coop.x1) / 2, z: (coop.z0 + coop.z1) / 2 }, sim = BF.simNow();
-  let best = null, bd = FIND_R;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "chicken" || !live(o) || o.coop || o.ledBy || isChick(o) || (S.avoid.get(o.id) || 0) > sim) continue;
-    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best;
+  const scan = L => {
+    let best = null, bd = FIND_R;
+    for (const o of L) {
+      if (o.type !== "chicken" || !live(o) || o.coop || o.ledBy || isChick(o) || (S.avoid.get(o.id) || 0) > sim) continue;
+      const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  return BF.mobs.checkScan("poultry.wildChicken", scan(BF.mobs.near(c, FIND_R)), scan);
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), c = idsOf(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
@@ -474,7 +486,7 @@ function shutGates() {
     const g = toShut[i], [x, y, z] = g.at, bk = BF.world.isLoaded(x, z) ? BF.blocks[BF.world.getBlock(x, y, z)] : null;
     if (!bk || !bk.gate || !bk.gate.open || BF.simNow() - g.t > 120) { toShut.splice(i, 1); continue; }
     if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || (live(g.m) && Math.hypot(x + 0.5 - g.m.position.x, z + 0.5 - g.m.position.z) < 1.5)) continue;
-    BF.world.setGate(x, y, z, false); toShut.splice(i, 1);
+    BF.blockReq.door(g.m, x, y, z, false); toShut.splice(i, 1);   // a request (spec r15-19, js/blockreqs.js)
   }
 }
 function loot(m, id, n, where) {
@@ -500,11 +512,12 @@ function perform(m, tk) {
     return true;
   }
   // cull: the keeper keeps the chicken and the feathers instead of dropping them
-  BF.mobs.hurt(o, 999, "a poultry keeper");
-  const meat = loot(m, c.chicken, 1, o), fe = loot(m, c.feather, rndInt(RS(m), 0, 2), o);
-  const T2 = tended(m);
-  log("culled", { meat, feathers: fe, flock: T2.size });
-  vlog(m, "poultry", "culled a chicken (" + T2.size + " left): " + meat + " raw chicken, " + fe + " feather" + (fe === 1 ? "" : "s"));
+  BF.mobs.cull(o, "a poultry keeper", m, () => {   // its loot once the kill has applied (a request in the think phase, r15-23)
+    const meat = loot(m, c.chicken, 1, o), fe = loot(m, c.feather, rndInt(RS(m), 0, 2), o);
+    const T2 = tended(m);
+    log("culled", { meat, feathers: fe, flock: T2.size });
+    vlog(m, "poultry", "culled a chicken (" + T2.size + " left): " + meat + " raw chicken, " + fe + " feather" + (fe === 1 ? "" : "s"));
+  });
   return true;
 }
 const ACT = { feed: 0.7, cull: 0.8, collect: 1.2 };
@@ -549,7 +562,7 @@ function lead(m, S, tk, dt, out) {
   if (!last || Math.hypot(last[0] - p.x, last[2] - p.z) > 0.6) { S.trail.push([p.x, p.y, p.z]); if (S.trail.length > 60) { S.trail.shift(); S.trailBase++; } }
   if (coop.gate) {   // hold the gate open while the chicken is on its way in
     const [gx, gz] = coop.gate, gy = coop.y + 1, bk = BF.blocks[BF.world.getBlock(gx, gy, gz)];
-    if (bk && bk.gate && Math.hypot(gx + 0.5 - p.x, gz + 0.5 - p.z) < 3) { if (!bk.gate.open) BF.world.setGate(gx, gy, gz, true); S.gateHeld = [gx, gy, gz]; }
+    if (bk && bk.gate && Math.hypot(gx + 0.5 - p.x, gz + 0.5 - p.z) < 3) { if (!bk.gate.open) BF.blockReq.door(m, gx, gy, gz, true); S.gateHeld = [gx, gy, gz]; }
     if (bk && bk.gate && bk.gate.open) {   // not shut behind it: by its own walking (mobs.js villagerDoors) or an earlier fetch's pending close
       S.gateHeld = [gx, gy, gz];
       if (m.ai.doors) m.ai.doors = m.ai.doors.filter(([x, y, z]) => !(x === gx && y === gy && z === gz));
@@ -640,7 +653,7 @@ function statusText(m) {
 // Counts for the debug screen: chickens loaded near the player, penned and wild.
 function counts() {
   let penned = 0, wild = 0, chicks = 0;
-  if (BF.mobs) for (const m of BF.mobs.list) if (m.type === "chicken" && live(m)) { if (m.coop) penned++; else wild++; if (m.chick) chicks++; }
+  if (BF.mobs) for (const m of BF.mobs.ofType("chicken")) if (live(m)) { if (m.coop) penned++; else wild++; if (m.chick) chicks++; }
   return { penned, wild, chicks };
 }
 

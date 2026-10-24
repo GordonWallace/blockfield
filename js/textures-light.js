@@ -5,7 +5,7 @@
 //   torch_icon : bigger sprite for the inventory / hotbar.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const K = BF.texKit;
 if (!K) { console.warn("textures-light: BF.texKit missing (textures.js must load first)"); return; }
 const { T, TS, hex, mix, jit, SPRITE_TILES } = K;

@@ -4,3 +4,4 @@ node_modules/
 .claude/worktrees/
 ci-out/
 debug/.alerts.json
+saves/

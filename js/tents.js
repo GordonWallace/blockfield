@@ -1,10 +1,11 @@
 // Tents (BF.tents): a bed that is 3 blocks wide, 2 long and 2 high at the ridge, and that monsters cannot see through. Block states live in blocks.js (tentDefs, `tent: {f, r, l}`),
-// the item is `tent`, the recipe is in js/recipes-jobs.js, players place and sleep in them from player.js, explorers pitch them (js/explorer.js).
+// the item is `tent`, the recipe is in js/recipes-jobs.js, players place and sleep in them from player.js, explorers pitch them (js/explorer.js) by
+// request (pitchCells / strikeCells, spec r15-19: all twelve cells at once or none).
 // Geometry: the cell the tent is placed from is its foot centre `origin` (row 0, lateral 1). Facing f runs foot -> head like beds (DIRS[f]); lateral index l
 // (0..2) steps along DIRS[(f + 3) % 4], the direction local +x of the drawn boxes points to for facing f.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const lat = f => BF.DIRS[(f + 3) % 4];
 // The twelve cells of a tent with origin (x, y, z) and facing f, six on the ground and the six above them (the ridge is two blocks high):
@@ -32,6 +33,14 @@ function place(x, y, z, f, blocked) {
   for (const c of cells(x, y, z, f)) { BF.world.setBlock(c.x, c.y, c.z, c.id); if (BF.emit) BF.emit("blockPlaced", c.x, c.y, c.z, c.id); }
   return true;
 }
+// The same as cell lists for a request (spec r15-19, js/blockreqs.js "cells"): pitching expects every cell free, striking expects the parts
+// still standing (a part already broken is left alone, as remove() does).
+const pitchCells = (x, y, z, f) => cells(x, y, z, f).map(c => ({ x: c.x, y: c.y, z: c.z, id: c.id, expect: "free" }));
+function strikeCells(x, y, z, id) {
+  if (!isTent(id)) return [];
+  const o = originOf(x, y, z, id);
+  return cells(o.x, o.y, o.z, o.f).filter(c => BF.world.getBlock(c.x, c.y, c.z) === c.id).map(c => ({ x: c.x, y: c.y, z: c.z, id: 0, expect: c.id }));
+}
 // Takes the other parts away (no drops) after one part was broken or the whole tent is struck. Returns true when a tent was removed.
 function remove(x, y, z, id) {
   if (!isTent(id)) return false;
@@ -53,5 +62,5 @@ function findSite(px, pz, radius, blocked) {
   }
   return best;
 }
-BF.tents = { cells, originOf, canPlace, place, remove, isTent, hidden, findSite };
+BF.tents = { cells, originOf, canPlace, place, remove, isTent, hidden, findSite, pitchCells, strikeCells };
 })();

@@ -5,7 +5,7 @@
 // row 0 is the top of the block (y = 16/16), row 31 the bottom; columns follow x (or z) in 1/16 * 2.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const K = BF.texKit;
 if (!K) { console.warn("textures-jobs: BF.texKit missing (textures.js must load first)"); return; }
 const { T, ICON_T, TS, hex, pal, mul, mix, ramp, jit, WHITE, lighten, smoothBase, frame, planksBase, cobbleBase, bricks, SPRITE_TILES, WOOD_OAK, WOOD_SPRUCE } = K;

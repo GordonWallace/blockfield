@@ -7,7 +7,7 @@
 module.exports = async (pg) => {
   const fails = [];
   const ok = (name, cond, extra) => { console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra === undefined ? "" : extra)); if (!cond) fails.push(name); };
-  const step = (n, dt = 0.05) => pg.evaluate(async ([n, dt]) => { for (let i = 0; i < n; i++) { BF.sky.update(dt); BF.mobs.update(dt); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); } }, [n, dt]);
+  const step = (n, dt = 0.05) => pg.evaluate(async ([n, dt]) => { for (let i = 0; i < n; i++) { BF.sky.update(dt); (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); } }, [n, dt]);
   const goTo = async (x, z, wait = 7000) => { await pg.evaluate(([x, z]) => BF.player.spawn(x + 0.5, BF.worldgen.heightAt(x, z) + 2, z + 0.5), [x, z]); await pg.waitForTimeout(wait); };
 
   // ---- first generation: every loaded chunk rolls once, by habitat
@@ -24,7 +24,7 @@ module.exports = async (pg) => {
   ok("every loaded chunk had its first-generation roll", gen.rolled >= gen.chunks - 4, gen);
   ok("animals were placed by habitat, never in desert, ocean, beach or peaks", gen.rolls > 0 && gen.badBiome.length === 0, { rolls: gen.rolls, biomes: gen.biomes, bad: gen.badBiome });
   ok("first-generation animals stand on grass", gen.animals > 0 && gen.onGrass >= gen.animals * 0.8, gen);
-  const reroll = await pg.evaluate(() => { const n = BF.wildlife.log.filter(e => e.kind === "rolled").length; for (let i = 0; i < 40; i++) BF.mobs.update(0.05); return [n, BF.wildlife.log.filter(e => e.kind === "rolled").length]; });
+  const reroll = await pg.evaluate(() => { const n = BF.wildlife.log.filter(e => e.kind === "rolled").length; for (let i = 0; i < 40; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); return [n, BF.wildlife.log.filter(e => e.kind === "rolled").length]; });
   ok("a chunk rolls only once", reroll[0] === reroll[1], reroll);
 
   // ---- never inside a village's pen, coop, pasture, sty or stable: groups rolled again and again in the chunks of a village's pasture
@@ -48,7 +48,7 @@ module.exports = async (pg) => {
         for (const m of BF.mobs.list) if (!before.has(m)) { if (m.position.x >= f[0] && m.position.x < f[2] + 1 && m.position.z >= f[1] && m.position.z < f[3] + 1) out.inside++; m.dead = true; }
       }
     }
-    BF.mobs.update(0.05);
+    (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     return out;
   }, VP && VP.f);
   ok("wild groups are never set down inside a village pasture", !!pen && pen.made > 0 && pen.inside === 0, pen || VP);
@@ -74,7 +74,7 @@ module.exports = async (pg) => {
       return m ? [+m.position.x.toFixed(2), +m.position.y.toFixed(2), +m.position.z.toFixed(2)] : null;
     };
     const out = { cow: put("cow", 6, 4, "cow"), creeper: put("creeper", -5, 3, "creeper"), zombie: put("zombie", 3, -6, "zombie") };
-    for (let i = 0; i < 3; i++) BF.mobs.update(0.05);
+    for (let i = 0; i < 3; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     return out;
   }, Q);
   ok("test mobs placed", placed.cow && placed.creeper && placed.zombie, placed);
@@ -120,7 +120,7 @@ module.exports = async (pg) => {
       if (!at) continue;
       const m = BF.mobs.spawn("chicken", at[0], at[1], at[2]); m.tag = "q" + n++;
     }
-    for (let i = 0; i < 3; i++) BF.mobs.update(0.05);
+    for (let i = 0; i < 3; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     const wild = BF.mobs.list.filter(m => BF.mobs.isWild(m)).length;
     await BF.save.saveNow();
     return { tagged: n, wild };
@@ -170,35 +170,35 @@ module.exports = async (pg) => {
       const calm = () => { if (BF.sky.time > 0.4) BF.sky.setTime(0.1); for (const m of L.slice()) if (m.hostile && Math.hypot(m.position.x - x, m.position.z - z) < 48) m.dead = true; };
       for (const m of L.slice()) if (BF.mobs.isWild(m) && Math.hypot(m.position.x - x, m.position.z - z) < 40) m.dead = true;
       calm();
-      for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
+      for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       BF.wildlife.tune.pairP = 1;
       const a = BF.mobs.spawn("cow", x + 0.5, y, z + 0.5), b = BF.mobs.spawn("cow", x + 2.5, y, z + 0.5);
       for (const m of [a, b]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
-      for (let i = 0; i < 40; i++) BF.mobs.update(0.05);   // landed on the grass before their daily roll
+      for (let i = 0; i < 40; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());   // landed on the grass before their daily roll
       for (const m of [a, b]) m.wildB = { next: 0 };
-      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
+      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
       const calves = L.filter(m => m.type === "cow" && !m.dead && m.cow && m.cow.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).length;
       const pairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "cow").length, cows = [a, b].map(m => [m.dead ? "dead" : "", m.cow && m.cow.fed, +m.position.x.toFixed(1), +m.position.y.toFixed(1), +m.position.z.toFixed(1)]);
       // a crowd: 9 cows together never pair up on their own
       for (const m of L.slice()) if (m.type === "cow") m.dead = true;
-      for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
+      for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       const crowd = [];
       for (let i = 0; i < 9; i++) { const m = BF.mobs.spawn("cow", x + 0.5 + (i % 3), y, z + 0.5 + Math.floor(i / 3)); m.wildB = { next: 0 }; crowd.push(m); }
-      for (let i = 0; i < 100; i++) BF.mobs.update(0.05);
+      for (let i = 0; i < 100; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       const willing = crowd.filter(m => m.cow && m.cow.fed != null).length;
       for (const m of crowd) m.dead = true;
-      for (let i = 0; i < 30; i++) BF.mobs.update(0.05);
+      for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       // two wild horses breed on their own too, and their foal is wild
       calm();
       const h1 = BF.horses.spawn(x + 0.5, y, z + 0.5), h2 = BF.horses.spawn(x + 2.5, y, z + 0.5);
       for (const m of [h1, h2]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
-      for (let i = 0; i < 40; i++) BF.mobs.update(0.05);
+      for (let i = 0; i < 40; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
       for (const m of [h1, h2]) m.wildB = { next: 0 };
       // one roll a game day, and calm() keeps it the same day: a horse caught mid-jump at its roll isn't on grass, so give it the next
       // day's roll, as the game would, until the pair is willing (the roll itself still has to pick the pair)
       const hRolls = [], ground = m => BF.world.getBlock(Math.floor(m.position.x), Math.floor(m.position.y + 0.01) - 1, Math.floor(m.position.z));
       for (let i = 0; i < 1200; i++) {
-        BF.sky.update(0.05); BF.mobs.update(0.05);
+        BF.sky.update(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
         if (i % 200 === 0) {
           calm();
           if (h1.horse.fed == null && i < 1000) { hRolls.push([h1, h2].map(ground)); for (const m of [h1, h2]) m.wildB = { next: 0 }; }
@@ -212,7 +212,7 @@ module.exports = async (pg) => {
       // fed pigs
       const p1 = BF.mobs.spawn("pig", x + 0.5, y, z + 0.5), p2 = BF.mobs.spawn("pig", x + 2.5, y, z + 1.5);
       const fedOk = BF.pigFarmer.feed(p1, "player") && BF.pigFarmer.feed(p2, "player");
-      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); BF.mobs.update(0.05); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
+      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
       const piglets = L.filter(m => m.type === "pig" && !m.dead && m.pig && m.pig.growAt != null).length;
       return { calves, pairs, cows, foals, horses, hPairs, hRolls, wildHorses, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.scale.toFixed(2)) };
     }, spot);

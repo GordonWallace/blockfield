@@ -1,7 +1,7 @@
 // Item sprites for the cartography items: paper, compass, blank maps and the filled map. Painters register on BF.texKit.SPRITES.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 if (!BF.texKit) return;
 const { SPRITES, put, hex, mul, mix, lighten, WHITE } = BF.texKit;
 

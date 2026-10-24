@@ -18,7 +18,7 @@
 //  if the day or the game ends first), logged as "spun N string". It sells the string ("1 emerald > 9 string"): the fletcher's bowstrings.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const FEED_DAYS = 1;          // a sheep is willing to breed for this long after eating wheat
 const BREED_CD = 1;           // days before a sheep that bred can breed again
@@ -49,9 +49,7 @@ const TR = () => BF.trades;
 const cnt = (m, id) => (id == null || !m.inv ? 0 : TR().inv.count(m.inv, id));
 const idsOf = () => ({ wheat: BF.I.wheat_item, wool: BF.I.white_wool, shears: BF.I.shears, mutton: BF.I.raw_mutton });
 
-let ids = 0;
-const idOf = new WeakMap();
-const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };
+const mid = m => +String(m.id).slice(1);   // the mob's stable id number (js/ids.js): which of a pair breeds (r15-23)
 
 // ---------------------------------------------------------------- sheep state
 function stOf(m) {
@@ -125,9 +123,14 @@ function playerUse(m, sel) {
 }
 
 // ---------------------------------------------------------------- breeding
+// (spec r15-31: scans of the mobs near a point, BF.mobs.near, checked against the whole list in tests with BF.mobs.checkScan)
 function findMate(m, t) {
+  const scan = L => mateIn(L, m, t);
+  return BF.mobs.checkScan("shepherd.findMate", scan(BF.mobs.near(m.position, Math.max(MATE_R, 16))), scan);
+}
+function mateIn(L, m, t) {
   let best = null, bd = MATE_R * MATE_R, near = 0;
-  for (const o of BF.mobs.list) {
+  for (const o of L) {
     if (o.type !== "sheep" || !live(o)) continue;
     const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
     if (d2 < 256) near++;
@@ -136,7 +139,12 @@ function findMate(m, t) {
   }
   return near >= LOCAL_MAX ? null : best;
 }
+// In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
+// when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+}
+function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const lamb = BF.mobs.spawn("sheep", x, y, z);
   if (!lamb) return null;
@@ -344,8 +352,8 @@ function tick(dt) {
   if (acc < 0.5 || !BF.mobs) return;
   acc = 0;
   const t = now();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "sheep" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("sheep")) {   // (spec r15-31: the sheep only)
+    if (!live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
     if (s.shorn) {
@@ -402,9 +410,10 @@ function penOf(m) {
 }
 // What the shepherd looks after: {pen, sheep (live mobs to feed / shear), flock (live mobs counted for crowding and culling), threshold}.
 function tended(m) {
-  const pen = penOf(m), list = BF.mobs.list;
-  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
-  const near = o => o.type === "sheep" && live(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (pen ? TEND_R : FREE_RADIUS) && Math.abs(o.position.y - m.position.y) < 6;
+  const pen = penOf(m);
+  const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = pen ? TEND_R : FREE_RADIUS;
+  const near = o => o.type === "sheep" && live(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
+  const M = BF.mobs, list = M.checkScan("shepherd.tended", M.near(home, R).filter(near), L => L.filter(near));
   let flock, threshold;
   if (pen && pen.sheep) { flock = pen.sheep.map(s => s.mob).filter(live); threshold = pen.threshold; }
   else { flock = list.filter(o => near(o) && !o.pen); threshold = FREE_THRESHOLD; }
@@ -445,13 +454,16 @@ function pickTask(m, S) {
 }
 function wildSheep(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
-  let best = null, bd = FIND_R;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "sheep" || !live(o) || o.pen || o.ledBy || isLamb(o) || (S.avoid.get(o.id) || 0) > sim) continue;
-    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best;
+  const scan = L => {
+    let best = null, bd = FIND_R;
+    for (const o of L) {
+      if (o.type !== "sheep" || !live(o) || o.pen || o.ledBy || isLamb(o) || (S.avoid.get(o.id) || 0) > sim) continue;
+      const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  return BF.mobs.checkScan("shepherd.wildSheep", scan(BF.mobs.near(c, FIND_R)), scan);
 }
 const inRoom = (p, pos) => pos.x > p.x0 && pos.x < p.x1 && pos.z > p.z0 && pos.z < p.z1 && Math.abs(pos.y - (p.y + 1)) < 3;
 // Leading a wild sheep home: to the path in front of the gate, then into the pen (js/herd.js lead; the sheep walks the trail, sheepAI).
@@ -503,9 +515,10 @@ function perform(m, tk) {
   }
   // cull: the shepherd keeps the mutton (and the wool the sheep still wears) instead of dropping it
   const wool = o.sheep && !o.sheep.shorn;
-  BF.mobs.hurt(o, 999, "a shepherd");
-  loot(m, c.mutton, rndInt(RS(m), 1, 2), o);
-  if (wool) loot(m, c.wool, 1, o);
+  BF.mobs.cull(o, "a shepherd", m, () => {   // its loot once the kill has applied (a request in the think phase, r15-23)
+    loot(m, c.mutton, rndInt(RS(m), 1, 2), o);
+    if (wool) loot(m, c.wool, 1, o);
+  });
   return true;
 }
 const ACT = { feed: 0.7, shear: 1.1, cull: 0.8 };
@@ -652,7 +665,7 @@ if (BF.texKit) {
 
 BF.shepherd = {
   FEED_DAYS, BREED_CD, LAMB_DAYS, REGROW_DAYS, PEN_DENSITY,
-  feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb,
+  feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb, breed,
   STOCK_TO, FIND_R,
   pensOf, penOf, hasLoom, tended, wheatWanted, ensureKit, ai, tick, statusText, pickPenTarget, contain,
   WOOL_KEEP, STRING_CAP, SPIN_BATCH, SPIN_HOURS, spinnable, wantsSpin, work,

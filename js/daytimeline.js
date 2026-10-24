@@ -12,7 +12,7 @@
 //                         version(key), pick(key, pv), picked, pv, update(), serialize(), deserialize(o), reset() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const MIN = 1 / 1440;    // a game minute, in days
 const EVERY = MIN;       // sampling interval

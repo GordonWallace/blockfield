@@ -1,4 +1,5 @@
-// Village action logs, villager names and the F3 village panel.
+// Village action logs and villager names. The F3 village panel and the names floating over villagers are drawn by js/villagepanel.js
+// (spec r15-37) from the protocol: the villagers' names in the client's mirror and the "vpanel" query (panelData here).
 // Every village keeps a timestamped log of births, beds placed (and by whom), trades (villager <-> villager and
 // villager <-> player) and professions gained, capped at CAP entries (oldest dropped) and saved with the world.
 // Entries are [t, kind, text, [x, y, z]?]: the location of the event (block coordinates) when it has one, from the `where` given
@@ -7,23 +8,19 @@
 // Builders log what they start, take over and finish building (kind "build", js/builder.js).
 // Explorers' tents are logged with the beds (the tally still counts only real beds).
 // API: BF.vlog = { nameOf(m), log(rec, kind, text, where?), posOf(where, text) -> [x, y, z]|null, trade(buyer, seller, offerOrText), bed(m, x, y, z), profession(m, from, to),
-//                  entries(key), villageAt(x, z) -> rec|null, tally(rec), panelData(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }
+//                  entries(key), villageAt(x, z) -> rec|null, tally(rec), panelData(rec), serialize(), deserialize(o), reset(), init(), update() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const CAP = 300;          // entries kept per village
 const MARGIN = 8;         // blocks beyond the village box that still count as "within the village"
-const LABEL_R = 40;       // names float over villagers this close to the player
-const SHOW = 26;          // log lines in the panel
 
 const FIRST = ["Aroha", "Hemi", "Mere", "Tane", "Ngaio", "Rawiri", "Kiri", "Wiremu", "Anika", "Tama", "Hine", "Manu", "Ruby", "Jack", "Olive", "Finn", "Maia", "Niko", "Isla", "Cooper", "Pania", "Rangi", "Tui", "Koa", "Lucy", "Ben", "Aria", "Hugo", "Sione", "Leilani", "Matiu", "Kahu", "Ivy", "Rua", "Mika", "Zoe", "Eru", "Awhina", "Noah", "Piper", "Tipene", "Huia", "Ella", "Arlo", "Wai", "Nikau", "Sadie", "Toby", "Rewi", "Amy", "Kauri", "Hana", "Liam", "Tilly", "Rata", "Oscar", "Moana", "Stella", "Tomas", "Ariki"];
 const LAST = ["Parata", "Tane", "Reid", "Whittle", "Hohepa", "Smith", "Ngata", "Mackay", "Takerei", "Brown", "Kereama", "Wilson", "Rewi", "Cooper", "Walker", "Piripi", "Henare", "Scott", "Moana", "Stewart", "Tawhiri", "Murray", "Eruera", "Fraser", "Poata", "Cameron", "Karaka", "Hunter", "Te Rangi", "Baker", "Matene", "Ross", "Waaka", "Gray", "Manihera", "Clarke", "Rangi", "Dunn", "Tamihana", "Fisher", "Hape", "Mason", "Nikora", "Webb", "Pere", "Holt", "Rata", "Bell"];
 
 const logs = new Map();       // village key -> [[t, kind, text]]
-const labels = new Map();     // mob -> { sp, key }
-const texCache = new Map();
-let hooked = false, panelT = 0, panelEl = null;
+let hooked = false;
 
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const pretty = s => String(s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -111,47 +108,9 @@ function tally(rec) {
 }
 const entries = key => logs.get(key) || [];
 
-// ---------------------------------------------------------------- floating names (F3)
-function labelTexture(name, prof) {
-  const k = name + "|" + prof;
-  let t = texCache.get(k);
-  if (t) return t;
-  const c = document.createElement("canvas"); c.width = 256; c.height = 64;
-  const g = c.getContext("2d");
-  g.textAlign = "center"; g.textBaseline = "middle";
-  g.font = "bold 26px sans-serif"; g.lineWidth = 5; g.strokeStyle = "#000a"; g.strokeText(name, 128, 22); g.fillStyle = "#fff"; g.fillText(name, 128, 22);
-  g.font = "18px sans-serif"; g.strokeText(prof, 128, 47); g.fillStyle = "#cfe8b0"; g.fillText(prof, 128, 47);
-  t = new THREE.CanvasTexture(c);
-  texCache.set(k, t);
-  if (texCache.size > 400) { const f = texCache.keys().next().value; texCache.get(f).dispose(); texCache.delete(f); }
-  return t;
-}
-function dropLabel(m, l) { if (BF.scene) BF.scene.remove(l.sp); l.sp.material.dispose(); labels.delete(m); }
-let _lp = null;
-function updateLabels(on) {
-  if (!BF.scene || typeof THREE === "undefined") return;
-  if (!_lp) _lp = new THREE.Vector3();
-  const pp = BF.player && BF.player.position;
-  if (!on || !pp) { for (const [m, l] of [...labels]) dropLabel(m, l); return; }
-  const seen = new Set();
-  for (const m of BF.regions.mobsAround(pp.x, pp.z, LABEL_R + 1, m => m.type === "villager" && !m.dead && !!m.position && BF.planet.distance(m.position, pp) <= LABEL_R, { local: true, label: "villagelog labels" })) {   // (r15-32)
-    seen.add(m);
-    const prof = m.child ? "Child" : pretty(m.profession), key = nameOf(m) + "|" + prof;
-    let l = labels.get(m);
-    if (!l) {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(nameOf(m), prof), transparent: true, depthWrite: false }));
-      sp.scale.set(1.6, 0.4, 1); sp.renderOrder = 10;
-      BF.scene.add(sp); labels.set(m, l = { sp, key });
-    } else if (l.key !== key) { l.sp.material.map = labelTexture(nameOf(m), prof); l.sp.material.needsUpdate = true; l.key = key; }
-    const dp = BF.mobView ? BF.mobView.drawPos(m, _lp) : m.position;   // where the villager is drawn (js/mobview.js)
-    l.sp.position.set(dp.x, dp.y + (m.height || 1.95) + 0.45, dp.z);
-  }
-  for (const [m, l] of [...labels]) if (!seen.has(m)) dropLabel(m, l);
-}
-
 // ---------------------------------------------------------------- panel (F3)
-const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-// The panel's numbers as data, for the second-screen debug feed (js/debugfeed.js); the F3 panel below draws its own.
+// The panel's numbers as data, for the second-screen debug feed (js/debugfeed.js) and the protocol's "vpanel" query, which the F3 panel
+// (js/villagepanel.js, spec r15-37) draws from.
 const byName = (x, y) => (x[0] === "Child") - (y[0] === "Child") || x[0].localeCompare(y[0]);   // alphabetical, children last
 function panelData(rec) {
   const t = tally(rec), name = (BF.signs && BF.signs.villageName && BF.signs.villageName(rec.key)) || "Village";
@@ -163,26 +122,6 @@ function panelData(rec) {
     occupations: Object.entries(prof).sort(byName), free: Object.entries(uc).sort(byName),
     loaded: Object.values(prof).reduce((x, y) => x + y, 0) };
 }
-function renderPanel() {
-  if (!panelEl) return;
-  const pp = BF.player && BF.player.position, rec = pp ? villageAt(pp.x, pp.z) : null;
-  if (!rec) { panelEl.hidden = true; return; }
-  const t = tally(rec), a = entries(rec.key), name = (BF.signs && BF.signs.villageName && BF.signs.villageName(rec.key)) || "Village";
-  const prof = {};
-  for (const m of rec.members || []) if (m.type === "villager" && !m.dead && !m.removed) { const p = m.child ? "Child" : pretty(m.profession); prof[p] = (prof[p] || 0) + 1; }
-  const byName = (x, y) => (x[0] === "Child") - (y[0] === "Child") || x[0].localeCompare(y[0]);   // alphabetical, children last
-  const occ = Object.entries(prof).sort(byName).map(([p, n]) => n + " " + p).join(", ");
-  const un = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec) : [], uc = {};
-  for (const s of un) { const p = pretty(s.prof); uc[p] = (uc[p] || 0) + 1; }
-  const free = Object.entries(uc).sort(byName).map(([p, n]) => n + " " + p).join(", ");
-  const at = e => Array.isArray(e[3]) && !e[2].includes(e[3].join(", ")) ? " at " + e[3].join(", ") : "";   // where, unless the text says already
-  const rows = a.slice(-SHOW).map(e => `<div class="vl-${e[1]}"><span>${stamp(e[0])}</span> ${esc(e[2] + at(e))}</div>`).join("");
-  panelEl.innerHTML = `<h4>${esc(name)}</h4><div class="vl-tally">${t.villagers} villagers &middot; ${t.beds} beds &middot; ${un.length} unclaimed job blocks${free ? " (" + esc(free) + ")" : ""}</div>` +
-    `<div class="vl-tally">Occupations: ${esc(occ || "none loaded")}${Object.values(prof).reduce((x, y) => x + y, 0) < t.villagers ? " (rest not loaded)" : ""}</div>` +
-    (rows || `<div class="vl-none">No events yet.</div>`) + (a.length > SHOW ? `<div class="vl-none">${a.length - SHOW} older entries not shown</div>` : "");
-  panelEl.hidden = false;
-}
-
 function hook() {
   if (hooked || typeof BF.on !== "function") return;
   hooked = true;
@@ -202,7 +141,7 @@ function hook() {
   });
 }
 
-function reset() { logs.clear(); for (const [m, l] of [...labels]) dropLabel(m, l); }
+function reset() { logs.clear(); }
 
 BF.vlog = {
   actor: null,      // set around block placements made by a villager that goes through blockPlaced (explorer tents)
@@ -215,19 +154,11 @@ BF.vlog = {
   },
   reset,
   init() {
-    panelEl = document.getElementById("vlog");
     hook();
     // the population history and the Economy view's scans run on the game step, so they see the same moments at any speed (spec r15-16)
     const W = BF.world;
     if (W && W.onThink) W.onThink(() => { if (BF.vstats) BF.vstats.update(); if (BF.econ) BF.econ.update(); });   // (js/world.js tickSim)
   },
-  update(dt, on) {
-    hook();
-    updateLabels(on);
-    if (!panelEl) panelEl = document.getElementById("vlog");
-    if (!on) { if (panelEl) panelEl.hidden = true; panelT = 0; return; }
-    const t = performance.now();                  // wall clock: the game's dt is clamped at low frame rates
-    if (t - panelT > 500) { panelT = t; renderPanel(); }
-  },
+  update() { hook(); },   // (the floating names and the F3 panel are drawn by js/villagepanel.js)
 };
 })();

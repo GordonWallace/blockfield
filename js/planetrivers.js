@@ -24,7 +24,7 @@
 // rs (water surface). BF.rivers (at the end of this file) answers the same for atlas columns, for terrain carving and maps.
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: also loaded in the sampling workers (r14-05)
+const G = globalThis;   // self: also loaded in the sampling workers (r14-05)
 const BF = (G.BF = G.BF || {});
 const P = BF.planet, N = P.N;
 const M = 160, NS = N / M;            // nodes per face edge; node spacing in blocks (1024)

@@ -2,7 +2,7 @@
 // breaking/placing, attacking mobs, survival stats (health/hunger/air), HUD and menus.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // ---------- tuning ----------
 const GRAVITY = 32, JUMP_V = 8.4, WALK = 4.3, SPRINT = 5.6, SNEAK = 1.3;
@@ -54,7 +54,7 @@ const store = {
 };
 let gameMode = store.get("gameMode") === "creative" ? "creative" : "survival";
 const creative = () => gameMode === "creative";
-const isTouch = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches);
+const isTouch = !!(globalThis.matchMedia && matchMedia("(pointer: coarse)").matches);
 
 const P = (BF.player = {
   position: pos,
@@ -195,7 +195,7 @@ const css = `
 const BIOME_SIZES = [[1, "Small (classic)"], [2, "Large"], [3, "Larger"], [4.5, "Huge"], [6, "Vast"]], BIOME_DEF = 1;   // biomeScale, label
 const biomeLabel = s => (BIOME_SIZES.find(b => b[0] === s) || [0, "Large"])[1];
 let savedEl, worldsEl, createForm, createMode = null, worldsCache = [], saveOk = null;
-let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, helpEl;
+let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, budgetBtn, helpEl;
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
@@ -244,6 +244,7 @@ function buildDOM() {
     <h2 class="bfp-title" style="font-size:30px">Paused</h2>
     <button class="primary" data-act="resume">Resume</button>
     <button data-act="view">Render distance: 6</button>
+    <button data-act="budget" title="Villages beyond the nearest four stay simulated while the simulation uses less than this share of each second">Simulated villages</button>
     ${modeRow}
     <button data-act="opts">Game options</button>
     <div class="bfp-pauseopts" hidden></div>
@@ -256,6 +257,7 @@ function buildDOM() {
     <button class="primary" data-act="respawn">Respawn</button></div>`);
   for (const e of [startEl, pauseEl, deathEl]) ui.appendChild(e);
   viewBtn = pauseEl.querySelector('[data-act="view"]');
+  budgetBtn = pauseEl.querySelector('[data-act="budget"]');
   pauseNote = pauseEl.querySelector(".bfp-note");
   helpEl = pauseEl.querySelector(".bfp-help");
   savedEl = pauseEl.querySelector(".bfp-saved");
@@ -300,7 +302,8 @@ function buildDOM() {
     else if (a === "view") {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
-    } else if (a === "mode") setGameMode(act.dataset.mode);
+    } else if (a === "budget") { if (BF.active) BF.active.cycle(); updateBudgetBtn(); }   // 20, 40, 60, 80% or off (js/active.js)
+    else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
     else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.monsters()); }
     else if (a === "mon") { BF.gameOpts.set(act.dataset.mon, flipOpt(act)); savePause(); }   // in game: applies at once, and saves
@@ -316,6 +319,8 @@ function buildDOM() {
   knobEl = touchEl.querySelector(".bfp-knob");
 }
 
+// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js)
+function updateBudgetBtn() { if (budgetBtn && BF.active) budgetBtn.textContent = BF.active.text(); }
 function updateViewBtn() {
   const d = BF.world.viewDist;
   if (viewBtn) viewBtn.textContent = `Render distance: ${d} chunks (${d * (BF.CS || 16)} blocks)`;
@@ -337,6 +342,7 @@ const MODE_HINT = {
   creative: "Fly, build freely, no damage. Blocks break instantly.",
 };
 function updateModeUI() {
+  if (!BF.page) return;   // (the simulation worker, r15-38: no screens)
   for (const b of document.querySelectorAll(".bfp-mode button")) {
     const on = b.dataset.mode === (startEl && startEl.contains(b) ? (createMode || gameMode) : gameMode);
     b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
@@ -378,7 +384,7 @@ function showScreen(name) {
   startEl.classList.toggle("on", name === "start");
   pauseEl.classList.toggle("on", name === "pause");
   deathEl.classList.toggle("on", name === "death");
-  if (name === "pause") { updateViewBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
+  if (name === "pause") { updateViewBtn(); updateBudgetBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
   const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
@@ -564,14 +570,14 @@ function relockLater() {
   }, ESC_RETRY_MS);
 }
 function stopRelock() { wantLock = false; if (escRetryT) { clearTimeout(escRetryT); escRetryT = 0; } }
-addEventListener("keyup", e => {
+if (BF.page) addEventListener("keyup", e => {
   if (e.key !== "Escape") return;
   if (escCloseHeld) { escCloseHeld = false; markEsc(); }   // the grace runs from the release, when the re-lock goes out
   if (!lockOnEscUp) return;
   lockOnEscUp = false;
   if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) { requestLock(); escRelock = inEscGrace(); }
 }, true);
-addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
+if (BF.page) addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
 // A screen is closing: note it when Escape did it, so neither that key press nor an unlock in the next ESC_GRACE seconds pauses.
 function screenClosed() {
   const ev = window.event;
@@ -669,7 +675,7 @@ function bindInput() {
       if ((dragMode || !locked) && started && !P.dead) { if (menuOpen === "pause") resume(); else if (!menuOpen) pause(); }
       return;
     }
-    // inventory.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
+    // invscreen.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
     if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) { deferredToggle(false); return; }
     if (menuOpen || invOpen() || P.dead) return;
     if (wantLock && !locked && !dragMode) requestLock();   // a key press is a user gesture: take the mouse back that Escape's re-lock missed
@@ -1092,6 +1098,180 @@ function drawHUD() {
   if (showAir) for (let i = 0; i < bubbles && i < 10; i++) drawIcon(g, BUBBLE, 189 - ((i * 9.5) | 0), 1, PAL_BUB);
 }
 
+// ---------- world actions as requests (spec r15-20) ----------
+// What the player does to the world goes through act(): a tick-stamped request from "player", applied at once at this tick
+// boundary (js/requests.js player()), so it feels instant and orders before the next tick's villagers. act returns the result
+// ({ok, ...}). The handlers (onAct) take what they need from the request's data (cells, the hotbar slot it was made with, mob and
+// boat ids), never from the moment's input, so a recorded session replays the same (BF.req.record / replay).
+const cellKey = (x, y, z) => x + "," + y + "," + z;
+const cellOf = t => String(t).split(",").map(Number);
+const vec = a => new THREE.Vector3(a[0], a[1], a[2]);
+const arr = v => [v.x, v.y, v.z];
+// With the simulation in a Web Worker (r15-38) the result comes later: act goes on as if it worked ({ok: true, pending: true}), and the
+// world's edits and the player's inventory follow from the simulation; a refused action just doesn't happen there.
+function act(kind, target, data) {
+  data = data || {};
+  if (data.slot == null && BF.inventory) data.slot = BF.inventory.selectedIndex;
+  if (!BF.req || !BF.req.player) return { ok: false, why: "no request queue" };
+  const req = BF.req.player(kind, target, data);
+  if (!req.delivered && BF.client && BF.client.mode === "worker") return { ok: true, pending: true, then: fn => req.then(fn) };
+  return req.result || { ok: false, why: "pending" };
+}
+// A right click on a mob (player.mob): the module's answer, or true while it is on its way (the simulation in a worker answers later)
+function mobAct(data) {
+  const a = act("player.mob", null, data);
+  if (!a.pending) return a.r;
+  a.then(res => { const r = res && res.r; if (typeof r === "string") actionBar(r); else if (r && r.msg) actionBar(r.msg); });   // (its message when it comes)
+  return true;
+}
+function onAct(kind, fn) {
+  if (!BF.req) return;
+  BF.req.on(kind, req => {
+    const d = req.data, I2 = inv();
+    if (d.slot != null && I2.select && I2.selectedIndex !== d.slot) I2.select(d.slot);
+    return fn(d, req.target, req) || { ok: true };
+  });
+}
+const mobOf = id => (id != null && BF.ids ? BF.ids.get(id) : null);
+const idOf = m => (m && m.mirror ? m.sid : m && BF.ids ? BF.ids.idOf(m) : null);   // (a stand-in from the client's mirror: its sid)
+function consumeHeld(n) { if (n > 0) { try { if (inv().consumeSelected) inv().consumeSelected(n); } catch (e) { console.error(e); } } }
+function giveOrDrop(id, n) { const left = inv().add ? inv().add(id, n) : n; if (left > 0 && BF.drops) BF.drops.spawn(id, left, pos.x, pos.y + 1, pos.z); }
+
+// Breaking: {id: the block broken (refused if it has changed), harvest, shears, wear}.
+onAct("player.break", (d, t) => {
+  const W = BF.world, [x, y, z] = cellOf(t), b = BF.blocks[d.id];
+  if (W.getBlock(x, y, z) !== d.id) return { ok: false, why: "changed" };
+  if (!W.setBlock(x, y, z, 0)) return { ok: false, why: "refused" };
+  if (d.harvest && b) {
+    try {
+      const drops = d.shears ? [{ id: d.id, count: 1 }]   // shearing leaves drops the leaves
+        : BF.rollDrops ? BF.rollDrops(d.id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
+      if (BF.drops) BF.drops.spawnAt(drops, x, y, z);
+      else for (const s of drops || []) if (s && s.id != null && s.count > 0 && inv().add) inv().add(s.id, s.count);
+    } catch (e) { console.error(e); }
+  }
+  if (!creative()) exhaustion += 0.005;
+  if (d.wear) wearHeld(d.wear);
+  emit("blockBroken", x, y, z, d.id);
+  return { ok: true };
+});
+// Placing: {cells: [[x, y, z, id, was]...] (refused if any cell no longer holds `was`), consume, wear}. Also tilling, stripping,
+// planting, slabs merging (the cell's slab becomes the full block) and two-block doors and beds.
+onAct("player.place", d => {
+  const W = BF.world;
+  if (!d.cells.every(c => W.isLoaded(c[0], c[2]) && W.getBlock(c[0], c[1], c[2]) === c[4])) return { ok: false, why: "changed" };
+  const set = [];
+  for (const [x, y, z, id] of d.cells) if (W.setBlock(x, y, z, id)) set.push([x, y, z, id]);
+  if (!set.length) return { ok: false, why: "refused" };
+  consumeHeld(d.consume);
+  if (d.wear) wearHeld(d.wear);
+  for (const [x, y, z, id] of set) emit("blockPlaced", x, y, z, id);
+  return { ok: true };
+});
+// Cells to place as [x, y, z, id]; true when placed.
+function place(cells, o) {
+  const W = BF.world;
+  return act("player.place", cellKey(cells[0][0], cells[0][1], cells[0][2]),
+    { cells: cells.map(c => [c[0], c[1], c[2], c[3], W.getBlock(c[0], c[1], c[2])]), consume: (o && o.consume) || 0, wear: (o && o.wear) || 0 }).ok;
+}
+onAct("player.door", (d, t) => { const [x, y, z] = cellOf(t); if (d.gate) BF.world.setGate(x, y, z); else BF.world.setDoor(x, y, z); });
+onAct("player.tie", (d, t) => { const [x, y, z] = cellOf(t); return { ok: !!(BF.horses && BF.horses.tieToPost(x, y, z)), why: "nothing to tie" }; });
+onAct("player.tent", (d, t) => {
+  const [x, y, z] = cellOf(t);
+  if (!(BF.tents && BF.tents.place(x, y, z, d.f, cellBlockedByEntity))) return { ok: false, why: "no room" };
+  consumeHeld(d.consume);
+});
+// Right click on a mob with the held item: {mob, what}. The result's r is the module's answer (a message, true, or the horse's plan).
+onAct("player.mob", d => {
+  const m = mobOf(d.mob), sel = selectedItem();
+  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };
+  let r = null;
+  if (d.what === "villager") r = BF.mobs.interact(m);
+  else if (d.what === "sheep") { r = BF.shepherd.playerUse(m, sel); const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); }
+  else if (d.what === "cow") r = BF.cowherd.playerUse(m, sel);
+  else if (d.what === "pig") r = BF.pigFarmer.playerUse(m, sel);
+  else if (d.what === "chicken") r = BF.poultry.playerUse(m, sel);
+  else if (d.what === "horse") {
+    r = BF.horses.playerUse(m, sel, !!d.sneak);
+    if (r && r.consume) consumeHeld(r.consume);
+    if (r && r.give && BF.I[r.give] != null) giveOrDrop(BF.I[r.give], 1);
+  }
+  return { ok: true, r };
+});
+onAct("player.hit", d => {   // a melee hit: {mob, dmg, d: knockback, wear}
+  const m = mobOf(d.mob);
+  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };
+  try { BF.mobs.hit(m, d.dmg, vec(d.d)); } catch (e) { console.error(e); }
+  if (d.wear) wearHeld(d.wear);
+  if (!creative()) exhaustion += 0.1;
+});
+onAct("player.hitBoat", d => {
+  const b = BF.boats && BF.boats.list && BF.boats.list.find(b => idOf(b) === d.boat);
+  if (!b) return { ok: false, why: "gone" };
+  return { ok: true, r: BF.boats.hit(b, !!d.creative) };
+});
+onAct("player.shoot", d => {   // a bow shot: {from, vel, damage, crit, pickup, arrow: one used}
+  const a = BF.mobs.shootArrow(vec(d.from), vec(d.vel), { damage: d.damage, crit: d.crit, pickup: d.pickup });
+  if (d.arrow) { try { inv().remove(BF.I.arrow, 1); } catch (e) { console.error(e); } }
+  wearHeld(1);
+  return { ok: true, a };
+});
+onAct("player.throw", d => {   // Q: one of the held item, thrown from {at} at {vel}
+  const sel = selectedItem();
+  if (!sel || !BF.drops || !inv().consumeSelected) return { ok: false, why: "nothing held" };
+  const id = sel.id, wear = sel.wear || 0;
+  try { if (!(inv().consumeSelected(1) > 0)) return { ok: false, why: "nothing held" }; } catch (e) { console.error(e); return { ok: false, why: "error" }; }
+  BF.drops.spawn(id, 1, d.at[0], d.at[1], d.at[2], { vel: vec(d.vel), pickupDelay: THROW_PICKUP_DELAY, wear });
+  emit("itemThrown", id);
+});
+onAct("player.eat", () => {
+  const sel = selectedItem(), it = sel && BF.items[sel.id];
+  if (!it || !it.food) return { ok: false, why: "nothing to eat" };
+  finishEating(it);
+});
+onAct("player.cake", (d, t) => {
+  const [x, y, z] = cellOf(t), r = BF.baker.eatCake(x, y, z, P, !!d.creative);
+  if (r === true) saturation = Math.min(P.hunger, saturation + 0.4);
+  return { ok: true, r };
+});
+onAct("player.hive", d => {   // a bee nest or beehive: {cell: the targeted block}
+  const r = BF.bees.playerUse(d.cell, selectedItem());
+  if (r && r.give) {
+    if (r.consume && !d.creative) consumeHeld(r.consume);
+    if (r.wear) wearHeld(r.wear);
+    giveOrDrop(r.give.id, r.give.n);
+  }
+  return { ok: true, r };
+});
+onAct("player.bucket", d => ({ ok: !!(BF.villageLife.useBucket(BF.items[selectedItem() ? selectedItem().id : 0], d.cell)), why: "nothing to do" }));
+onAct("player.map", () => { const sel = selectedItem(), it = sel && BF.items[sel.id]; return { ok: true, r: it ? BF.maps.use(sel, it) : null }; });
+onAct("player.boat", d => {
+  if (!BF.boats.placeFromPlayer(d.boat, vec(d.eye), vec(d.dir), d.yaw, REACH)) return { ok: false, why: "no room" };
+  consumeHeld(1);
+});
+// Riding (spec r15-44 part 2): getting on and off are requests, so the simulation decides wherever it runs. {id}: the boat or horse.
+onAct("player.mount", d => {
+  const v = vehicleOf(d.id);
+  if (!v) return { ok: false, why: "gone" };
+  if (v.kind === "horse" && !BF.horses.canRide(v)) return { ok: false, why: "You can't ride that horse" };
+  if (vehicle !== v && !mount(v)) return { ok: false, why: v.kind === "boat" ? (v.rider ? "Someone is already in that boat" : "No room to sit in that boat") : "No room to get on that horse" };
+  return Object.assign({ ok: true, id: d.id }, rideInfo(v));
+});
+onAct("player.dismount", d => { dismount(!!d.stay); });
+onAct("player.horseEgg", (d, t) => {
+  const [x, y, z] = cellOf(t);
+  if (!BF.horses.spawn(x + 0.5, y + 1, z + 0.5)) return { ok: false, why: "no room" };
+  consumeHeld(1);
+});
+onAct("player.sign", d => {
+  const sel = selectedItem(), it = sel && BF.items[sel.id];
+  if (!(BF.signs && BF.signs.place(d.cell, it))) return { ok: false, why: "no room" };
+  consumeHeld(1);
+});
+// Sleeping: the spawn point at the bed or tent ({spawn}), then waking ("player.wake") the next morning.
+onAct("player.sleep", d => { BF.spawnPoint = d.spawn; });
+onAct("player.wake", () => { wakeUp(); });
+
 // ---------- world interaction ----------
 function eyeVec() { return new THREE.Vector3(pos.x, pos.y + eyeOffset, pos.z); }
 function dirVec() { return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)); }
@@ -1102,20 +1282,63 @@ const THROW_SPEED = 6, THROW_LIFT = 1.5, THROW_PICKUP_DELAY = 2;
 function throwSelected() {
   const sel = selectedItem();
   if (!sel || !BF.drops || !inv().consumeSelected) return;
-  const id = sel.id, wear = sel.wear || 0;
-  try { if (!(inv().consumeSelected(1) > 0)) return; } catch (e) { console.error(e); return; }
   const d = dirVec(), e = eyeVec();
   const vel = d.clone().multiplyScalar(THROW_SPEED); vel.y += THROW_LIFT;
-  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY, wear });
-  emit("itemThrown", id);
+  act("player.throw", null, { at: [e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3], vel: arr(vel) });
 }
 
 function boatHit() {
+  if (remoteSim()) return mirrorHit("boat");
   try { return BF.boats ? BF.boats.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
 }
 function mobHit() {
+  if (remoteSim()) return mirrorHit("mob");
   try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
 }
+// With the simulation in a worker (r15-38) the page has no simulated mobs or boats: it aims at the client's mirror of them
+// (BF.client.world.entities). A stand-in carries what this file reads (type, position, box, rider, hostile) and the simulation's id (sid)
+// that the request names. Returns {mob | boat: stand-in, dist} like BF.mobs.raycast / BF.boats.raycast, or null.
+const remoteSim = () => !!(BF.client && BF.client.mode === "worker");
+const MLQ = {};
+function standIn(e, x, z) {
+  const boat = e.kind === "boat";
+  return { mirror: true, kind: e.kind, sid: e.sid, type: e.type, position: new THREE.Vector3(x, e.y, z), pos: new THREE.Vector3(x, e.y, z),
+    halfWidth: boat ? BF.boats.HW : e.hw, height: boat ? BF.boats.H : e.h, dead: !!e.dead, rider: e.rider, hostile: !boat && !!(BF.mobs && BF.mobs.isHostile && BF.mobs.isHostile(e.type)) };
+}
+function mirrorEntities(kind, o, r) {   // the mirror's living mobs (or boats) within r of o, as stand-ins seen from o's frame
+  const W = BF.client && BF.client.world, out = [];
+  if (!W) return out;
+  for (const e of W.entities.values()) {
+    if (e.kind !== kind || e.dead || e.sid == null) continue;
+    BF.planet.local(o, e, MLQ);
+    if ((MLQ.x - o.x) ** 2 + (e.y - o.y) ** 2 + (MLQ.z - o.z) ** 2 <= r * r) out.push(standIn(e, MLQ.x, MLQ.z));
+  }
+  return out;
+}
+function mirrorHit(kind) {
+  const o = eyeVec(), d = dirVec();
+  let best = null;
+  for (const m of mirrorEntities(kind, o, MOB_REACH + 2)) {
+    if (vehicle && vehicle.sid === m.sid) continue;
+    const p = m.position, t = rayBox(o, d, [p.x - m.halfWidth, p.y, p.z - m.halfWidth], [p.x + m.halfWidth, p.y + m.height, p.z + m.halfWidth]);
+    if (t != null && t <= MOB_REACH && (!best || t < best.dist)) best = { [kind === "boat" ? "boat" : "mob"]: m, dist: t };
+  }
+  return best;
+}
+function rayBox(o, d, mn, mx) {   // distance along the ray to the box, or null
+  let t0 = 0, t1 = Infinity;
+  const os = [o.x, o.y, o.z], ds = [d.x, d.y, d.z];
+  for (let a = 0; a < 3; a++) {
+    if (Math.abs(ds[a]) < 1e-9) { if (os[a] < mn[a] || os[a] > mx[a]) return null; continue; }
+    let ta = (mn[a] - os[a]) / ds[a], tb = (mx[a] - os[a]) / ds[a];
+    if (ta > tb) { const t = ta; ta = tb; tb = t; }
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+    if (t0 > t1) return null;
+  }
+  return t0;
+}
+// The mobs whose boxes block a placement or a rest: the simulation's, or the mirror's stand-ins with the simulation in a worker
+const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { label: "player near" }) : (BF.mobs && BF.mobs.list) || [];   // (r15-32)
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
   const bh = boatHit(), m0 = mobHit();
@@ -1123,7 +1346,7 @@ function tryAttack() {
     swing();
     if (attackCd > 0) return true;
     attackCd = ATTACK_CD;
-    const r = BF.boats.hit(bh.boat, creative());
+    const r = act("player.hitBoat", null, { boat: idOf(bh.boat), creative: creative() }).r;
     emit("boatHit", r);
     return true;
   }
@@ -1138,9 +1361,7 @@ function tryAttack() {
   if (d.lengthSq() < 1e-6) d.set(-Math.sin(yaw), 0, -Math.cos(yaw));
   d.normalize();
   if (sprinting) { d.multiplyScalar(1.6); sprinting = false; }
-  try { BF.mobs.hit(m.mob, dmg, d); } catch (e) { console.error(e); }
-  if (it && it.tool) wearHeld(it.tool.type === "sword" ? 1 : 2);   // a sword wears 1 use per hit, other tools 2 (Minecraft)
-  exhaustion += 0.1;
+  act("player.hit", null, { mob: idOf(m.mob), dmg, d: arr(d), wear: it && it.tool ? (it.tool.type === "sword" ? 1 : 2) : 0 });   // a sword wears 1 use per hit, other tools 2 (Minecraft)
   return true;
 }
 function primaryDown() {
@@ -1203,21 +1424,11 @@ function updateBreaking(dt) {
   breakProgress += t > 0 ? dt / t : 1;
   if (swingT <= 0) swing();
   if (breakProgress >= 1) {
-    const { x, y, z, id } = breakTarget;
-    BF.world.setBlock(x, y, z, 0);
+    const { x, y, z, id } = breakTarget, tool = heldTool();
+    const r = act("player.break", cellKey(x, y, z), { id, harvest: !creative() && canHarvest(b), shears: !!(b.shearSelf && tool && tool.type === "shears"),
+      wear: b.hardness > 0 ? (tool && tool.type === "sword" ? 2 : 1) : 0 });   // tools wear 1 use per block, swords 2 (Minecraft)
+    if (!r.ok) { resetBreak(); return; }   // the block changed under the crosshair
     spawnParticles(x, y, z, id);
-    if (!creative() && canHarvest(b)) {
-      try {
-        const tool = heldTool();
-        const drops = b.shearSelf && tool && tool.type === "shears" ? [{ id, count: 1 }]   // shearing leaves drops the leaves
-          : BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
-        if (BF.drops) BF.drops.spawnAt(drops, x, y, z);
-        else for (const d of drops || []) if (d && d.id != null && d.count > 0 && inv().add) inv().add(d.id, d.count);
-      } catch (e) { console.error(e); }
-    }
-    exhaustion += 0.005;
-    if (b.hardness > 0) wearHeld(heldTool() && heldTool().type === "sword" ? 2 : 1);   // tools wear 1 use per block, swords 2 (Minecraft)
-    emit("blockBroken", x, y, z, id);
     resetBreak();
     breakCd = t === 0 && !creative() ? 0.05 : 0.25;   // vanilla: 5 ticks after a break (also the creative repeat), 1 tick for instant breaks
     target = null; outline.visible = false;
@@ -1235,12 +1446,15 @@ function boxOverlapsCell(px, py, pz, hw, h, x, y, z) {
 }
 function cellBlockedByEntity(x, y, z) {
   if (boxOverlapsCell(pos.x, pos.y, pos.z, HW, HEIGHT, x, y, z)) return true;   // full box: no block may be placed inside the player
-  return BF.regions.mobsInBox(x - 2, z - 2, x + 3, z + 3, m => {   // (the mobs around the cell, r15-32)
-    if (m.dead) return false;
-    const p = m.position, hw = m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4;
+  const list = nearMobList(8);
+  for (const m of list) {
+    if (!m || m.dead) continue;
+    const p = m.position || m.pos; if (!p) continue;
+    const hw = m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4;
     const h = m.height != null ? m.height : m.h != null ? m.h : 1.6;
-    return boxOverlapsCell(p.x, p.y, p.z, hw, h, x, y, z);
-  }, { label: "player place" }).length > 0;
+    if (boxOverlapsCell(p.x, p.y, p.z, hw, h, x, y, z)) return true;
+  }
+  return false;
 }
 
 // Short message above the hotbar (villager trades etc).
@@ -1261,15 +1475,14 @@ function actionBar(text) {
 // ---------- doors and beds ----------
 const lookFacing = () => BF.dirIndex(-Math.sin(yaw), -Math.cos(yaw));
 const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c === 0 || BF.RENDER[c] === 3 || !!BF.REPLACEABLE[c]) && !cellBlockedByEntity(x, y, z); };
-// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z). wood: species of a door / fence gate item.
+// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z), using up one of the held item.
+// wood: species of a door / fence gate item.
 function placeMulti(kind, x, y, z, wood) {
   const W = BF.world, f = lookFacing();
-  if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
+  if (kind === "tent") return !!BF.tents && act("player.tent", cellKey(x, y, z), { f, consume: 1 }).ok;   // 3x2 tent, js/tents.js
   if (kind === "gate") {   // fence gate: spans across the player's view
     if (!(y < BF.H && W.isLoaded(x, z) && freeCell(x, y, z))) return false;
-    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0, wood);
-    W.setBlock(x, y, z, id); emit("blockPlaced", x, y, z, id);
-    return true;
+    return place([[x, y, z, BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0, wood)]], { consume: 1 });
   }
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
@@ -1280,8 +1493,7 @@ function placeMulti(kind, x, y, z, wood) {
     cells = [[x, y, z, BF.bedId(f, 0)], [hx, y, hz, BF.bedId(f, 1)]];
   }
   if (!cells.every(c => c[1] < BF.H && W.isLoaded(c[0], c[2]) && freeCell(c[0], c[1], c[2]))) return false;
-  for (const [cx, cy, cz, id] of cells) { W.setBlock(cx, cy, cz, id); emit("blockPlaced", cx, cy, cz, id); }
-  return true;
+  return place(cells, { consume: 1 });
 }
 // ---------- slabs and stairs ----------
 // Placement for items whose block has `shape` (blocks.js): slabs pick bottom/top from the clicked face and merge into the
@@ -1289,7 +1501,12 @@ function placeMulti(kind, x, y, z, wood) {
 function overlapsEntityBoxes(x, y, z, boxes) {
   const hits = (px, py, pz, hw, h) => boxes.some(b => px + hw > x + b[0] / 16 && px - hw < x + b[3] / 16 && py + h > y + b[1] / 16 && py < y + b[4] / 16 && pz + hw > z + b[2] / 16 && pz - hw < z + b[5] / 16);
   if (hits(pos.x, pos.y, pos.z, HW - 0.01, HEIGHT)) return true;
-  return BF.regions.mobsInBox(x - 2, z - 2, x + 3, z + 3, m => !m.dead && hits(m.position.x, m.position.y, m.position.z, m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4, m.height != null ? m.height : m.h != null ? m.h : 1.6), { label: "player place shaped" }).length > 0;
+  for (const m of nearMobList(8)) {
+    if (!m || m.dead) continue;
+    const p = m.position || m.pos; if (!p) continue;
+    if (hits(p.x, p.y, p.z, m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4, m.height != null ? m.height : m.h != null ? m.h : 1.6)) return true;
+  }
+  return false;
 }
 function placeShaped(sel, it) {
   const W = BF.world, sh = it.shape, fam = BF.SHAPES[sh.base], t = target, tb = BF.blocks[t.id];
@@ -1298,14 +1515,14 @@ function placeShaped(sel, it) {
   const n = t.normal;
   const wantTop = n[1] === 1 ? 0 : n[1] === -1 ? 1 : fy > 0.5 ? 1 : 0;
   const done = (x, y, z, id) => {
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (err) { console.error(err); }
-    swing(); emit("blockPlaced", x, y, z, id); placeCd = PLACE_REPEAT; return true;
+    if (!place([[x, y, z, id]], { consume: 1 })) return false;
+    swing(); placeCd = PLACE_REPEAT; return true;
   };
   const merge = (x, y, z, top) => { // top = the half to fill; a slab of this family on the other half becomes the full block
     const c = BF.blocks[W.getBlock(x, y, z)];
     if (sh.kind !== "slab" || !c || !c.shape || c.shape.kind !== "slab" || c.shape.base !== sh.base || c.shape.top === top) return false;
     if (overlapsEntityBoxes(x, y, z, [top ? [0, 8, 0, 16, 16, 16] : [0, 0, 0, 16, 8, 16]])) return false; // someone stands in the open half
-    return W.setBlock(x, y, z, sh.base) && done(x, y, z, sh.base);
+    return done(x, y, z, sh.base);
   };
   if (sh.kind === "slab" && tb && tb.shape && tb.shape.kind === "slab" && tb.shape.base === sh.base) { // clicked a slab of this family
     const openTop = tb.shape.top ? (n[1] === -1 || (n[1] === 0 && fy < 0.5)) : (n[1] === 1 || (n[1] === 0 && fy > 0.5));
@@ -1319,10 +1536,9 @@ function placeShaped(sel, it) {
   if (cur !== 0 && BF.RENDER[cur] !== 3 && !(BF.REPLACEABLE && BF.REPLACEABLE[cur])) return false;
   const id = sh.kind === "slab" ? fam.slab[wantTop] : fam.stairs[wantTop][lookFacing()];
   if (overlapsEntityBoxes(x, y, z, BF.blocks[id].cboxes)) return false;
-  if (!W.setBlock(x, y, z, id)) return false;
   return done(x, y, z, id);
 }
-// Places a ladder against the clicked side face (facing = the face normal), or extends the clicked ladder's column up/down.
+// Places a ladder against the clicked side face (facing = the face normal), or extends the clicked ladder's column up/down, using up one.
 function placeLadder() {
   const W = BF.world, t = target, n = t.normal, tb = BF.blocks[t.id];
   let x, y, z, f;
@@ -1337,10 +1553,7 @@ function placeLadder() {
   const cur = W.getBlock(x, y, z);
   if ((cur !== 0 && !BF.REPLACEABLE[cur]) || BF.FLUID[cur]) return false;
   if (!BF.ladderSupport(W.getBlock(x - BF.DIRS[f][0], y, z - BF.DIRS[f][1]))) return false;
-  const id = BF.ladderId(f);
-  if (!W.setBlock(x, y, z, id)) return false;
-  emit("blockPlaced", x, y, z, id);
-  return true;
+  return place([[x, y, z, BF.ladderId(f)]], { consume: 1 });
 }
 let fadeEl = null;
 function sleepFade() {
@@ -1359,17 +1572,17 @@ function trySleep(t) {
   if (falling) return;
   if (!BF.sky || !(BF.sky.isNight() || (BF.sky.stormy && BF.sky.stormy()))) { actionBar("You can only sleep at night"); return; }
   const b = BF.blocks[t.id], tent = !!b.tent;
-  const near = !tent && BF.regions.mobsAround(pos.x, pos.z, 8, m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8, { label: "player sleep" }).length > 0;
+  const near = !tent && nearMobList(9).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
   if (near) { actionBar("You may not rest now, there are monsters nearby"); return; }
   let foot, sy = 0.5625;
   if (tent) { const o = BF.tents.originOf(t.x, t.y, t.z, t.id); foot = [o.x, o.y, o.z]; sy = 0.125; }
   else foot = b.bed.head ? BF.world.partnerOf(t.x, t.y, t.z, t.id) : [t.x, t.y, t.z];
   const sp = BF.spawnPoint || {};
-  BF.spawnPoint = { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp };
+  act("player.sleep", null, { spawn: { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp } });
   if (tent) { P.hiddenInTent = true; setTimeout(() => { P.hiddenInTent = false; }, 2200); }   // monsters lose sight of the sleeper (mobs.js hostileAI)
   sleepFade();
   falling = true;
-  setTimeout(() => { falling = false; wakeUp(); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
+  setTimeout(() => { falling = false; act("player.wake"); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
 // Waking up is the next morning: the day counter moves on unless it is already early morning (sleeping in a daytime storm moves to tomorrow too).
 function wakeUp() {
@@ -1423,72 +1636,63 @@ function secondaryDown() {
   const mh = mobHit(), bh = boatHit();
   if (bh && (!target || bh.dist < target.dist) && (!mh || bh.dist < mh.dist)) {   // right click on a boat: get in (js/boats.js)
     mouseR = false;
-    if (mount(bh.boat)) { swing(); return true; }
-    actionBar(bh.boat.rider ? "Someone is already in that boat" : "No room to sit in that boat");
+    if (mountReq(idOf(bh.boat), bh.boat.rider ? "Someone is already in that boat" : "No room to sit in that boat")) swing();
     return true;
   }
   if (mh && mh.mob && mh.mob.type === "villager" && BF.mobs.interact && (!target || mh.dist < target.dist)) {
     mouseR = false;
-    const msg = BF.mobs.interact(mh.mob);
+    const msg = mobAct({ mob: idOf(mh.mob), what: "villager" });
     if (invOpen()) { // the trading screen opened
       if (locked) expectUnlock = true;
       keys.clear(); mouseL = false; resetBreak();
       exitLock();
     }
-    if (msg) actionBar(msg);
+    if (typeof msg === "string") actionBar(msg);
     return true;
   }
   if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
-    const r = BF.shepherd.playerUse(mh.mob, selectedItem());
-    if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+    const r = mobAct({ mob: idOf(mh.mob), what: "sheep" });
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "cow" && BF.cowherd && (!target || mh.dist < target.dist)) {   // wheat feeds a cow, a bucket milks it (js/cowherd.js)
-    const r = BF.cowherd.playerUse(mh.mob, selectedItem());
+    const r = mobAct({ mob: idOf(mh.mob), what: "cow" });
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "pig" && BF.pigFarmer && (!target || mh.dist < target.dist)) {   // a carrot, potato or beetroot feeds a pig (js/pigfarmer.js)
-    const r = BF.pigFarmer.playerUse(mh.mob, selectedItem());
+    const r = mobAct({ mob: idOf(mh.mob), what: "pig" });
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "chicken" && BF.poultry && (!target || mh.dist < target.dist)) {   // seeds feed a chicken (js/poultry.js)
-    const r = BF.poultry.playerUse(mh.mob, selectedItem());
+    const r = mobAct({ mob: idOf(mh.mob), what: "chicken" });
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
-    const sel = selectedItem(), r = BF.horses.playerUse(mh.mob, sel, sneaking);
-    if (r) {
-      mouseR = false; swing();
-      if (r.consume) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
-      if (r.give && BF.I[r.give] != null) { const left = inv().add ? inv().add(BF.I[r.give], 1) : 1; if (left > 0 && BF.drops) BF.drops.spawn(BF.I[r.give], left, pos.x, pos.y + 1, pos.z); }
-      if (r.mount && !mount(mh.mob)) actionBar("No room to get on that horse");
-      if (r.msg) actionBar(r.msg);
-      return true;
-    }
+    const id = idOf(mh.mob), a = act("player.mob", null, { mob: id, what: "horse", sneak: sneaking });
+    const after = r => {   // the horse's answer: get on (a request too), or its message
+      if (r && r.mount) mountReq(id, "No room to get on that horse");
+      if (r && r.msg) actionBar(r.msg);
+    };
+    if (a.pending) { a.then(res => after(res && res.r)); mouseR = false; swing(); return true; }   // (the simulation in a worker answers later)
+    if (a.r) { mouseR = false; swing(); after(a.r); return true; }
   }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
-  if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
-  if (tb && /_fence$/.test(tb.name) && BF.horses && BF.horses.tieToPost(target.x, target.y, target.z)) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
-  if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
+  if (tb && tb.door && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), {}); swing(); mouseR = false; return true; }
+  if (tb && /_fence$/.test(tb.name) && BF.horses && act("player.tie", cellKey(target.x, target.y, target.z), {}).ok) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
+  if (tb && tb.gate && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), { gate: true }); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (tb && BF.baker && BF.baker.isCake(target.id) && useBlk) {   // a placed cake: eat a slice (js/baker.js)
-    const r = BF.baker.eatCake(target.x, target.y, target.z, P, creative());
-    if (r === true) { saturation = Math.min(P.hunger, saturation + 0.4); swing(); } else if (typeof r === "string") actionBar(r);
+    const r = act("player.cake", cellKey(target.x, target.y, target.z), { creative: creative() }).r;
+    if (r === true) swing(); else if (typeof r === "string") actionBar(r);
     mouseR = false; return true;
   }
   if (tb && BF.baker && BF.baker.isOven(target.id) && useBlk) { actionBar(BF.baker.ovenText(target.x, target.y, target.z)); mouseR = false; return true; }   // what a baker's oven holds
   if (tb && BF.bees && BF.bees.isHome(target.id) && useBlk) {   // a bee nest or beehive: shears or a glass bottle harvest a full one, otherwise how it is (js/bees.js)
-    const r = BF.bees.playerUse(target, selectedItem());
+    const r = act("player.hive", null, { cell: Object.assign({}, target), creative: creative() }).r;
     if (r) {
       mouseR = false;
-      if (r.give) {
-        swing();
-        if (r.consume && !creative()) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
-        if (r.wear) wearHeld(r.wear);
-        const left = inv().add ? inv().add(r.give.id, r.give.n) : r.give.n;
-        if (left > 0 && BF.drops) BF.drops.spawn(r.give.id, left, pos.x, pos.y + 1, pos.z);
-      }
+      if (r.give) swing();
       if (r.msg) actionBar(r.msg);
       return true;
     }
@@ -1511,10 +1715,8 @@ function secondaryDown() {
       (target.id === BF.B.grass || target.id === BF.B.dirt || target.id === BF.B.dirt_path) &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
     const { x, y, z, id } = target, fid = BF.farmland ? BF.farmland.tillId(x, y, z) : BF.B.farmland;   // hydrated only with water or rain (js/farmland.js)
-    if (!BF.world.setBlock(x, y, z, fid)) return false;
+    if (!place([[x, y, z, fid]], { wear: 1 })) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
-    wearHeld(1);
-    emit("blockPlaced", x, y, z, fid);
     placeCd = PLACE_REPEAT;
     return true;
   }
@@ -1522,56 +1724,47 @@ function secondaryDown() {
   if (it.tool && it.tool.type === "axe" && target && BF.blocks[target.id] && /^(?!stripped_).+_(log|wood)$/.test(BF.blocks[target.id].name) &&
       BF.B["stripped_" + BF.blocks[target.id].name] != null) {
     const { x, y, z, id } = target, nid = BF.B["stripped_" + BF.blocks[id].name];
-    if (!BF.world.setBlock(x, y, z, nid)) return false;
+    if (!place([[x, y, z, nid]], { wear: 1 })) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
-    wearHeld(1);
-    emit("blockPlaced", x, y, z, nid);
     placeCd = PLACE_REPEAT;
     return true;
   }
   // planting: seeds / carrot / potato on the top face of farmland (hydrated or not, never dirt) with air above (takes priority over eating)
   if (it.plants && target && (target.id === BF.B.farmland || target.id === BF.B.farmland_dry) && target.normal[1] === 1 &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
-    const x = target.x, y = target.y + 1, z = target.z;
-    if (!BF.world.setBlock(x, y, z, it.plants)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!place([[target.x, target.y + 1, target.z, it.plants]], { consume: 1 })) return false;
     swing();
-    emit("blockPlaced", x, y, z, it.plants);
     placeCd = PLACE_REPEAT;
     return true;
   }
-  if (BF.villageLife && BF.villageLife.useBucket && BF.villageLife.useBucket(it, target)) { swing(); placeCd = PLACE_REPEAT; return true; }   // buckets (js/villagelife.js)
+  if (BF.villageLife && BF.villageLife.useBucket && (it.name === "bucket" || it.name === "water_bucket") && act("player.bucket", null, { cell: target && Object.assign({}, target) }).ok) { swing(); placeCd = PLACE_REPEAT; return true; }   // buckets (js/villagelife.js)
   if ((it.map || it.auto || it.autoBlank) && BF.mapview) { // right click with a filled map opens it full screen; the creative auto map asks for a width (js/mapview.js)
     if (BF.mapview.use(sel, it)) { swing(); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
-    const msg = BF.maps.use(sel, it);
+    const msg = act("player.map", null, {}).r;
     if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.boat && BF.boats) {   // boat: on the water (or the ground) in front, facing the way the player looks
-    if (!BF.boats.placeFromPlayer(it.boat, eyeVec(), dirVec(), yaw, REACH)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!act("player.boat", null, { boat: it.boat, eye: arr(eyeVec()), dir: arr(dirVec()), yaw }).ok) return false;
     swing(); mouseR = false;
     placeCd = PLACE_REPEAT;
     return true;
   }
   if (it.name === "horse_spawn_egg" && BF.horses && target && target.normal[1] === 1) {   // creative spawn item: a wild horse on the ground in front
-    if (!BF.horses.spawn(target.x + 0.5, target.y + 1, target.z + 0.5)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!act("player.horseEgg", cellKey(target.x, target.y, target.z), {}).ok) return false;
     swing(); mouseR = false; placeCd = PLACE_REPEAT;
     return true;
   }
   if (it.food) { if (P.hunger < P.maxHunger) { if (eatT <= 0) eatT = 0.0001; return true; } return false; }
   if (it.places === "sign" && target) { // signs (js/signs.js): standing on a top face, wall sign on a side face; opens the editor
-    if (!(BF.signs && BF.signs.place(target, it))) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!(BF.signs && act("player.sign", null, { cell: Object.assign({}, target) }).ok)) return false;
     swing(); mouseR = false;
     placeCd = PLACE_REPEAT;
     return true;
   }
   if (it.places === "ladder" && target) { // ladders: only on the side face of a solid block (or extending a ladder column up/down)
     if (!placeLadder()) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing();
     placeCd = PLACE_REPEAT;
     return true;
@@ -1580,7 +1773,6 @@ function secondaryDown() {
     const into = BF.REPLACEABLE && BF.REPLACEABLE[target.id];
     const x = into ? target.x : target.x + target.normal[0], y = into ? target.y : target.y + target.normal[1], z = into ? target.z : target.z + target.normal[2];
     if (!placeMulti(it.places, x, y, z, it.wood)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing();
     placeCd = PLACE_REPEAT;
     return true;
@@ -1599,10 +1791,8 @@ function secondaryDown() {
   if (BF.blocks[sel.id] && BF.blocks[sel.id].sapling && BF.forester && !BF.forester.canSurvive(x, y, z)) return false;   // saplings need soil (js/forester.js)
   if (BF.SOLID[sel.id] && cellBlockedByEntity(x, y, z)) return false;
   placeId = BF.facedId(placeId, BF.openFacing({ x, y, z }, P.position));   // furnaces and chests open towards the player (an open side)
-  if (!BF.world.setBlock(x, y, z, placeId)) return false;
-  try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+  if (!place([[x, y, z, placeId]], { consume: 1 })) return false;
   swing();
-  emit("blockPlaced", x, y, z, placeId);
   placeCd = PLACE_REPEAT;
   return true;
 }
@@ -1634,7 +1824,7 @@ function updateUse(dt) {
     emit("playerEating", it.id); // per frame while eating (audio crunch)
     if (eatT >= EAT_TIME) {
       eatT = 0;
-      finishEating(it);
+      act("player.eat");
       placeCd = 0.3;
     }
     return;
@@ -1662,10 +1852,9 @@ function fireArrow(f) {
   for (const k of ["x", "y", "z"]) d[k] += (Math.random() - 0.5) * 0.015;   // vanilla's small spread
   d.normalize();
   const from = eyeVec().addScaledVector(d, 0.4); from.y -= 0.1;
-  const crit = f >= 1 && Math.random() < BOW_CRIT, damage = bowDamage(f);
-  const a = BF.mobs.shootArrow(from, d.multiplyScalar(BOW_SPEED * f), { damage, crit, pickup: creative() ? 2 : 1 });
-  if (!creative()) { try { inv().remove(BF.I.arrow, 1); } catch (e) { console.error(e); } }   // creative: arrows are free
-  wearHeld(1);   // 1 use of the bow's 384 per shot (survival; js/inventory.js wearSelected)
+  const crit = f >= 1 && Math.random() < BOW_CRIT, damage = bowDamage(f);   // the player's own rolls: the request carries them (replays the same)
+  // creative: arrows are free; 1 use of the bow's 384 per shot (survival; js/playerinv.js wearSelected)
+  const a = act("player.shoot", null, { from: arr(from), vel: arr(d.multiplyScalar(BOW_SPEED * f)), damage, crit, pickup: creative() ? 2 : 1, arrow: !creative() }).a;
   P.lastShot = { power: +f.toFixed(3), damage, crit, speed: +(BOW_SPEED * f).toFixed(2) };
   emit("playerShot", P.lastShot);
   return a;
@@ -1776,7 +1965,7 @@ function onLadder() {                       // a ladder cell at the feet or at t
 // Riding (a boat, js/boats.js): W/S forward and back, A/D turn (the view turns with the vehicle), Space jump, Shift gets off.
 function ridePhysics(dt, k) {
   const shift = k.has("ShiftLeft") || k.has("ShiftRight");
-  if (shift && !rideShift) { dismount(); return 0; }
+  if (shift && !rideShift) { leave(); return 0; }
   rideShift = shift;
   let fwd = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
   let turn = (k.has("KeyA") ? 1 : 0) - (k.has("KeyD") ? 1 : 0);
@@ -1812,16 +2001,133 @@ function mount(v, fromSave) {
 }
 // Gets out: onto the nearest solid block beside the boat, else into the water. A mob passenger gets out too.
 // stay: leave the player where they are (teleport, respawn, a new world).
+// The page's copy of a vehicle (the simulation in a worker, ridePose): the simulation gets the player off (player.dismount) and sends
+// where they landed; the page only lets go of its copy.
 function dismount(stay) {
   const v = vehicle;
   if (!v) return;
   vehicle = null; v.rider = false;
+  if (v.local) { mirrorRide = null; act("player.dismount", null, { stay: !!stay }); emit("dismounted", v); return; }
   if (stay) return;
   if (v.ctl.onLeave) v.ctl.onLeave(v);
   const s = v.ctl.exitSpot(v, HW, HEIGHT);
   pos.set(s.x, s.y, s.z); vel.x = vel.y = vel.z = 0; fallStart = null;
   emit("dismounted", v);
 }
+// Shift: get off, a request (the simulation runs onLeave and finds the spot, js/boats.js / js/horses.js)
+function leave() {
+  if (!vehicle) return;
+  if (vehicle.local) { dismount(); return; }
+  act("player.dismount", null, {});
+}
+// A right click's request to get on {id}; no: the action bar's message when it's refused. True unless refused at once.
+function mountReq(id, no) {
+  const a = act("player.mount", null, { id });
+  const done = r => { if (!r || !r.ok) actionBar(r && r.why && r.why !== "gone" && r.why !== "pending" ? r.why : no); };
+  if (a.pending) { a.then(done); return true; }
+  done(a);
+  return !!a.ok;
+}
+const vehicleOf = id => {
+  if (id == null) return null;
+  const b = BF.boats && BF.boats.list.find(b => idOf(b) === id);
+  if (b) return b;
+  const m = mobOf(id);
+  return m && m.kind === "horse" && m.ctl && !m.dead && !m.removed ? m : null;
+};
+const rideInfo = v => (v.kind === "boat" ? BF.boats.rideInfo(v) : BF.horses.rideInfo(v));
+
+// ---- riding with the simulation in a worker (spec r15-44 part 2). Whoever steers moves the vehicle, as for the player's body (r15-38):
+// the page rows a boat and rides a saddled, tamed horse with its own copy (js/boats.js / js/horses.js localCopy, driven by the same
+// drive()) and reports where it is (rideReport, the player message's ride); the simulation sets the real one there (ridePose). An untamed
+// horse steers itself: the simulation drives it (simRide) and the page sits the player on the mirror's horse (mirrorRide). What the
+// simulation does to the ride comes back in self.mount (rideState / rideSelf): getting on (a request, or a save), being thrown or put
+// off (the horse died or went under, the boat broke, a teleport), and the horse's health for the HUD.
+let mirrorRide = null;   // {id, e: the mirror entity} that the page draws where its copy is
+function mirrorOf(id) {
+  const W = BF.client && BF.client.world;
+  if (!W) return null;
+  if (mirrorRide && mirrorRide.id === id && W.entities.get(mirrorRide.n) === mirrorRide.e) return mirrorRide.e;
+  for (const [n, e] of W.entities) if (e.sid === id && !e.dead) { mirrorRide = { id, n, e }; return e; }
+  return null;
+}
+// The page's stand-in for a horse the simulation steers: it sits the player on the mirror's horse
+const MIRROR_CTL = {
+  drive(v) {
+    const e = mirrorOf(v.sid);
+    if (e) { BF.planet.local(pos, e, MLQ); v.position.set(MLQ.x, e.y, MLQ.z); v.yaw = e.yaw; }
+    return 0;
+  },
+  seatOf: v => ({ x: v.position.x, y: v.position.y + v.info.seat, z: v.position.z }),
+  sitEye: v => v.info.sitEye,
+  canBoard: () => true,
+  exitSpot: v => ({ x: v.position.x, y: v.position.y, z: v.position.z }),
+  hud: v => ({ hp: v.info.hp, max: v.info.max }),
+};
+function pageCopy(id, info, pose) {
+  if (info.kind === "boat") return BF.boats.localCopy(id, info, pose);
+  if (info.steer === "page") return BF.horses.localCopy(id, info, pose);
+  return { local: true, sid: id, kind: "horse", ctl: MIRROR_CTL, info, position: new THREE.Vector3(pose.x, pose.y, pose.z), vel: new THREE.Vector3(), yaw: pose.yaw || 0 };
+}
+// page: self.mount, what the simulation says the player rides (null: nothing; {id, kind, steer, ..., pose} from rideInfo)
+P.rideSelf = function (m) {
+  if (!m) { if (vehicle && vehicle.local) { const v = vehicle; vehicle = null; v.rider = false; mirrorRide = null; emit("dismounted", v); } return; }
+  const v = vehicle;
+  if (v && v.local && v.sid === m.id && (v.info ? v.info.steer : "page") === m.steer) {   // the same ride: its health, passenger, a horse tamed
+    if (v.info) v.info = Object.assign(v.info, m);
+    if (v.kind === "horse" && v.maxHp != null) { v.hp = m.hp; v.maxHp = m.max; }
+    if (v.kind === "boat") BF.boats.setPassenger(v, m.pass);
+    return;
+  }
+  if (v) { vehicle = null; v.rider = false; }
+  mount(pageCopy(m.id, m, m.pose || { x: pos.x, y: pos.y, z: pos.z, yaw: 0 }), true);
+};
+// page: the player message's ride, the pose of the copy the page steers (null when the simulation steers or nothing is ridden)
+P.rideReport = function () {
+  const v = vehicle;
+  if (!v || !v.local || v.ctl === MIRROR_CTL) return null;
+  const p = v.pos || v.position, r = { id: v.sid, x: p.x, y: p.y, z: p.z, yaw: v.yaw, vel: [v.vel.x, v.vel.y, v.vel.z] };
+  if (v.rowing) r.rowing = v.rowing.slice();
+  if (v.fall) { r.fall = v.fall; v.fall = 0; }
+  return r;
+};
+// page, each frame: the mirror's boat or horse drawn where the page's copy is (the simulation's lags a message behind)
+function syncMirrorRide() {
+  const v = vehicle;
+  if (!v || !v.local || v.ctl === MIRROR_CTL) return;
+  const e = mirrorOf(v.sid);
+  if (!e) return;
+  const p = v.pos || v.position;
+  e.x = p.x; e.y = p.y; e.z = p.z; e.yaw = v.yaw;
+  if (e.prev) { e.prev.x = p.x; e.prev.y = p.y; e.prev.z = p.z; e.prev.yaw = v.yaw; }
+  if (v.rowing && e.rowing) { e.rowing = v.rowing.slice(); e.row = v.row.slice(); }
+}
+// simulation: what the player rides, for self.mount (null when nothing)
+P.rideState = function () {
+  const v = vehicle;
+  if (!v || v.local) return null;
+  return Object.assign({ id: idOf(v) }, rideInfo(v));
+};
+P.ridePose = function () { const v = vehicle; if (!v || v.local) return null; const p = v.pos || v.position; return { x: p.x, y: p.y, z: p.z, yaw: v.yaw }; };
+// simulation: the page's ride (player message): its boat or horse goes where the page rowed or rode it; a fall hurts the horse
+P.rideIn = function (r) {
+  const v = vehicle;
+  if (!v || v.local || !r || idOf(v) !== r.id || rideInfo(v).steer !== "page") return;
+  const p = v.pos || v.position;
+  p.set(r.x, r.y, r.z); v.yaw = r.yaw;
+  if (Array.isArray(r.vel)) v.vel.set(r.vel[0], r.vel[1], r.vel[2]);
+  if (Array.isArray(r.rowing) && v.rowing) { v.rowing[0] = r.rowing[0]; v.rowing[1] = r.rowing[1]; }
+  if (r.fall > 0 && v.kind === "horse" && BF.mobs) BF.mobs.hurt(v, r.fall, "a fall");
+};
+// simulation, each loop in real time (js/simworker.js): an untamed horse carries the player where it likes and throws them; the
+// player is put off a boat or horse that is gone (died, unloaded) whoever steers it
+P.simRide = function (dt) {
+  const v = vehicle;
+  if (!v || v.local) return;
+  if (v.dead || v.removed || (v.kind === "boat" && !BF.boats.list.includes(v))) { dismount(); return; }
+  if (P.dead || (BF.state && BF.state.paused) || rideInfo(v).steer !== "sim") return;
+  rideStep(Math.min(dt, 0.1), { fwd: 0, turn: 0, strafe: 0, jump: false, yaw });
+};
 function physics(dt) {
   const k = touchKeys.size ? new Set([...keys, ...touchKeys]) : keys;
   if (vehicle) return ridePhysics(dt, k);
@@ -2050,6 +2356,7 @@ P.turnPlanet = turnPlanet;   // tests
 function syncCamera(dt) {
   const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
   eyeOffset += (want - eyeOffset) * Math.min(1, dt * 14);
+  if (!BF.camera) return;   // headless (js/boot.js): no camera
   const by = Math.abs(Math.sin(bobPhase)) * 0.06 * bobAmt, bx = Math.cos(bobPhase) * 0.035 * bobAmt;
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
   BF.camera.position.set(pos.x + rx * bx, pos.y + eyeOffset + by, pos.z + rz * bx);
@@ -2130,6 +2437,9 @@ P.eyePos = () => eyeVec();
 P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
 P.setFlying = function (on) { flying = !!on; vel.y = 0; };   // tests
+// tests: the mob under the crosshair ({type, id, dist} or null; the mirror's with the simulation in a worker) and a left click's attack
+P.aimedMob = () => { const h = mobHit(); return h && h.mob ? { type: h.mob.type, id: idOf(h.mob), dist: h.dist } : null; };
+P.attack = () => { updateTarget(); attackCd = 0; return tryAttack(); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
 P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
@@ -2243,6 +2553,7 @@ P.update = function (dt) {
     const h3 = roundHeading();
     moved = physics(dt);
     crossEdge();
+    syncMirrorRide();
     keepHeading(h3);
     updateOffPlanet();
     updateTarget();

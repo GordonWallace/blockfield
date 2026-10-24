@@ -63,7 +63,12 @@ module.exports = async (pg) => {
       if (v && !v.profession) v.profession = "farmer";
       BF.inventory.openTrade(v);
     });
-    else await pg.evaluate(m => { const p = BF.player.position; BF.inventory.open(m, { x: Math.floor(p.x), y: Math.floor(p.y) - 1, z: Math.floor(p.z) }); }, how);
+    else await pg.evaluate(m => {
+      // a furnace or chest screen needs its block there (spec r15-44: the simulation refuses one for a block that is gone)
+      const p = BF.player.position, at = { x: Math.floor(p.x) + 2, y: Math.floor(p.y), z: Math.floor(p.z) };
+      if (m !== "crafting") BF.world.setBlock(at.x, at.y, at.z, BF.B[m]);
+      BF.inventory.open(m, at);
+    }, how);
     // the screen is up and its unlock has landed, as both have in a real browser long before a person presses Escape
     const open = await until(() => (BF.inventory.isOpen() || BF.commands.isOpen()) && !BF.player.isLocked());
     console.log(how, "open:", open);

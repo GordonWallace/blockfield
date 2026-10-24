@@ -47,7 +47,7 @@ module.exports = async (pg) => {
     BF.mobs.hit(d3, 999, null);
     ok("player kill logged", L.entries(rec.key).some(e => e[1] === "death" && /killed by the player/.test(e[2])));
     // tally in the panel
-    BF.vlog.update(1, true);
+    BF.villagePanel.update(1, true);   // (the F3 panel, js/villagepanel.js since r15-37: drawn from the "vpanel" query)
     const html = document.getElementById("vlog").innerHTML;
     ok("panel shows occupations and unclaimed job blocks", /Occupations:/.test(html) && /unclaimed job blocks/.test(html));
     BF.vlog.update(1, true);

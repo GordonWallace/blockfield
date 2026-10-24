@@ -20,7 +20,7 @@
 //  furnace with fuel they bought (js/furnaceuse.js, as the cowherd cooks steak). Nothing is created: no restock, no free feed or fuel.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const FEED_DAYS = 1;          // a pig is willing to breed for this long after eating
 const BREED_CD = 1;           // days before a pig that bred can breed again
@@ -105,7 +105,12 @@ const playerFeed = () => {
 
 // ---------------------------------------------------------------- breeding (js/herd.js does the walking and the crowding rule)
 const findMate = (m, t) => H().findMate(m, t, willing, o => o.sty || null, MATE_R);
+// In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
+// when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+}
+function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const young = BF.mobs.spawn("pig", x, y, z);
   if (!young) return null;
@@ -303,8 +308,8 @@ function tick(dt) {
   acc = 0;
   if (H().toShut.length) H().shutGates();
   const t = now();
-  for (const m of BF.mobs.list) {
-    if (m.type !== "pig" || !live(m)) continue;
+  for (const m of BF.mobs.ofType("pig")) {   // (spec r15-31: the pig only)
+    if (!live(m)) continue;
     const s = stOf(m);
     if (s.growAt != null && t >= s.growAt) { s.growAt = null; s.cd = Math.max(s.cd, t); }
     if (s.growAt != null && s.growAt - t > PIGLET_DAYS * 2) s.growAt = t + PIGLET_DAYS;   // time was set back
@@ -357,11 +362,20 @@ function styOf(m) {
 // What the pig farmer looks after: {sty, herd (live sty pigs, counted for culling), pigs (live pigs to feed: the herd and strays near it, or
 // without a sty the free pigs near the trough), strays (free adult pigs that can walk into the sty: those it tends and those within TEND_R of
 // the fence, fed or not), size (the herd, unloaded ones too), limit}.
+// The mobs tended() looks at: those within r of home, or within TEND_R of the fence (spec r15-31): [centre, radius] for BF.mobs.near.
+function reach(home, p, r) {
+  if (!p) return [home, r];
+  const c = { x: (p.fx0 + p.fx1) / 2, z: (p.fz0 + p.fz1) / 2 };   // (the fence's box, as fenceDist)
+  return [c, Math.max(Math.hypot(home.x - c.x, home.z - c.z) + r, Math.hypot(p.fx1 - p.fx0, p.fz1 - p.fz0) / 2 + TEND_R) + 1];
+}
 function tended(m) {
-  const p = styOf(m), list = BF.mobs.list;
+  const p = styOf(m);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
   const free = o => o.type === "pig" && live(o) && !o.ledBy && !o.sty && Math.abs(o.position.y - m.position.y) < 6;
   const near = o => free(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (p ? TEND_R : FREE_RADIUS);
+  // (spec r15-31) the free ones near home or the fence, from the mobs around both
+  const mine = o => free(o) && (near(o) || (p && fenceDist(p, o.position.x, o.position.z) <= TEND_R));
+  const list = BF.mobs.checkScan("pigfarmer.tended", BF.mobs.near(...reach(home, p, p ? TEND_R : FREE_RADIUS)).filter(mine), L => L.filter(mine));
   const herd = p && p.pigs ? p.pigs.map(s => s.mob).filter(live) : [];
   const strays = p ? adults(list.filter(o => free(o) && (near(o) || fenceDist(p, o.position.x, o.position.z) <= TEND_R))) : [];
   return { sty: p, herd, pigs: herd.concat(list.filter(near)), strays, size: p && p.pigs ? p.pigs.length : 0, limit: p ? p.limit : 0 };
@@ -403,13 +417,16 @@ function feedOk(T, o, t) {
 }
 function wildPig(m, p, S) {
   const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
-  let best = null, bd = FIND_R;
-  for (const o of BF.mobs.list) {
-    if (o.type !== "pig" || !live(o) || o.sty || o.ledBy || isPiglet(o) || o.riding || (S.avoid.get(o.id) || 0) > sim) continue;
-    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best;
+  const scan = L => {
+    let best = null, bd = FIND_R;
+    for (const o of L) {
+      if (o.type !== "pig" || !live(o) || o.sty || o.ledBy || isPiglet(o) || o.riding || (S.avoid.get(o.id) || 0) > sim) continue;
+      const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  return BF.mobs.checkScan("pigfarmer.wildPig", scan(BF.mobs.near(c, FIND_R)), scan);
 }
 function pickTask(m, S) {
   const T = tended(m), t = now(), sim = BF.simNow(), px = m.position.x, pz = m.position.z;
@@ -472,13 +489,14 @@ function perform(m, tk) {
   }
   // cull: the pig farmer keeps the pig's drops (1-3 raw porkchops) to sell or cook
   const herdP = o.sty;
-  BF.mobs.hurt(o, 999, "a pig farmer");
-  const pork = loot(m, I("raw_porkchop"), rndInt(RS(m), 1, 3), o);
-  if (herdP) herdP.culls = (herdP.culls | 0) + 1;
-  const T2 = tended(m);
-  log("culled", { pork, herd: T2.size, limit: T2.limit });
-  vlog(m, "culled a pig (" + T2.size + " left, the sty holds " + T2.limit + "): " + pork + " raw porkchop" + (pork === 1 ? "" : "s"));
-  if (BF.emit) BF.emit("pigCulled", o, m, pork);
+  BF.mobs.cull(o, "a pig farmer", m, () => {   // its loot once the kill has applied (a request in the think phase, r15-23)
+    const pork = loot(m, I("raw_porkchop"), rndInt(RS(m), 1, 3), o);
+    if (herdP) herdP.culls = (herdP.culls | 0) + 1;
+    const T2 = tended(m);
+    log("culled", { pork, herd: T2.size, limit: T2.limit });
+    vlog(m, "culled a pig (" + T2.size + " left, the sty holds " + T2.limit + "): " + pork + " raw porkchop" + (pork === 1 ? "" : "s"));
+    if (BF.emit) BF.emit("pigCulled", o, m, pork);
+  });
   return true;
 }
 const ACT = { feed: 0.7, cull: 0.8 };
@@ -708,6 +726,7 @@ function cookAI(m, dt, out, cont) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (S.tt <= 0) {
     const done = F.doBuy(m, deal);
+    if (done == null) return true;   // the trade is in flight (js/trading.js buy)
     S.stage = null; S.deal = null; vdone(m); S.gx = null; S.checkT = 0.5;
     if (done) log("buyFuel", { from: v2.profession, got: done * deal.offer.sell.n, item: BF.itemName(deal.item) });
     else { S.avoid[key] = now() + 0.05; log("cookGiveup", { kind: "buy", why: "trade refused" }); }
@@ -741,7 +760,7 @@ function holdings(m) {
 // Counts for the debug screen: pigs loaded near the player, in a sty and wild.
 function counts() {
   let penned = 0, wild = 0, young = 0;
-  if (BF.mobs) for (const m of BF.mobs.list) if (m.type === "pig" && live(m)) { if (m.sty) penned++; else wild++; if (m.piglet) young++; }
+  if (BF.mobs) for (const m of BF.mobs.ofType("pig")) if (live(m)) { if (m.sty) penned++; else wild++; if (m.piglet) young++; }
   return { penned, wild, young };
 }
 

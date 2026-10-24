@@ -3,7 +3,7 @@
 // API: BF.villagerStatus = { text(m), routine(m), leisure(m), LEISURE }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const WORK_START = 0.04, WORK_END = 0.45;   // js/jobs.js: the daytime window for jobsite visits
 const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3);
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : "";

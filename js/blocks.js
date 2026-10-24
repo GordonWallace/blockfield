@@ -5,7 +5,7 @@
 // BF.items is sparse between the last block id and ITEM_BASE: always skip holes when iterating.
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const G = globalThis;   // self: the generator also runs in a Web Worker (r14-05)
 const BF = (G.BF = G.BF || {});
 
 // Facing 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).
@@ -634,7 +634,7 @@ const ITEM_DEFS = [
     { name: sp + "_fence_gate", places: "gate", wood: sp, sprite: "oak_fence_gate", color: WOOD_COLOR[sp], creativeTab: "functional" }]),
   // ---- end wood variants items ----
   // ---- gold tools (append-only). Not vanilla (Gordon, 1.1): between iron and diamond, iron's harvest level (tier 3), speed 7 (iron 6, diamond 8), 800 uses (iron 250, diamond 1561).
-  // Recipes come from the tool loop in inventory.js ("golden" + Gold Ingot). Damage as the wooden tool of the same kind.
+  // Recipes come from the tool loop in playerinv.js ("golden" + Gold Ingot). Damage as the wooden tool of the same kind.
   { name: "golden_pickaxe", tool: { type: "pickaxe", tier: 3, speed: 7, damage: 2 }, durability: 800, material: "gold", color: "#f2d64b" },
   { name: "golden_axe", tool: { type: "axe", tier: 3, speed: 7, damage: 3 }, durability: 800, material: "gold", color: "#f2d64b" },
   { name: "golden_shovel", tool: { type: "shovel", tier: 3, speed: 7, damage: 1 }, durability: 800, material: "gold", color: "#f2d64b" },

@@ -14,13 +14,13 @@
 // See CONTRACT.md "Toolsmiths" and "Egg cooking".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 BF.debug = BF.debug || {};   // checkOffers: compare every offer lookup with a full scan (test/offers-cache.js)
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 
-const COOK = 10;                               // seconds one item takes in a furnace (inventory.js COOK_TIME)
-const PER_COAL = 8, PER_WOOD = 1.5;            // items one coal / one log or plank smelts (inventory.js fuel: 80 s, 15 s; 10 s an item)
+const COOK = 10;                               // seconds one item takes in a furnace (playerinv.js COOK_TIME)
+const PER_COAL = 8, PER_WOOD = 1.5;            // items one coal / one log or plank smelts (playerinv.js fuel: 80 s, 15 s; 10 s an item)
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const I = n => BF.I[n];
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
@@ -343,23 +343,12 @@ function findDeal(m, need, skip) {
   }
   return null;
 }
-// Trades deal.times times (fewer when the seller runs out or refuses); logs the trade to the village log. Returns how many went through.
-function doBuy(m, deal) {
+// Trades deal.times times (fewer when the seller runs out or refuses), as one transaction (trading.js buy, spec r15-21). Returns how many
+// went through, or null while the trade is in flight (call again next tick). opts: trading.js buy's (wrap).
+function doBuy(m, deal, opts) {
   const T = TR(), v2 = deal.other, o = deal.offer;
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!canSell(m, v2) || T.blockReason(v2, o)) break;
-    if (!o.buy.every(b => T.inv.count(m.inv, b.id) >= b.n)) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);
-    if (!sold) break;
-    for (const b of o.buy) T.inv.remove(m.inv, b.id, b.n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
-  if (done && BF.vlog) BF.vlog.trade(m, v2, o, done);
-  return done;
+  if (!T.asked(m, v2, o) && !canSell(m, v2)) return 0;
+  return T.buy(m, v2, o, deal.times, Object.assign({ guard: () => (canSell(m, v2) ? null : "busy") }, opts));
 }
 
 BF.furnaceUse = {

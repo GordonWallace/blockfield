@@ -11,7 +11,7 @@
 // API: BF.rand = { of, seed, at, step(), tick, made, save(), load(o), reset() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const worldSeed = () => ((BF.state && BF.state.seed) >>> 0);
 // murmur3's finaliser: a good 32-bit mix

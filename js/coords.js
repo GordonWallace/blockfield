@@ -6,7 +6,7 @@
 //                    toAtlas(f, u, v), corner(n), CORNERS, panel: { open(), close(), isOpen() } }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const num = v => (Math.round(v * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
 const int = v => Math.floor(v).toLocaleString("en-US");

@@ -14,7 +14,7 @@
 // API: BF.market = { reserve(v) -> [{ids, n}], spareOf(v, id), keeps(v, o) -> reason | null, sync(v), JOB_TOOLS, CRAFT_KEEP }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const SELL_UP = 1.05, BUY_AT = 0.88;     // spare goods sell at VALUE x 1.05 when no table sells them; needs pay VALUE x 0.88 (the feed rule)
 const JOB_TOOLS = { miner: [/_pickaxe$/], forester: [/(^|_)axe$/], farmer: [/_hoe$/, /^(water_)?bucket$/], shepherd: [/^shears$/], builder: [/^(water_)?bucket$/] };

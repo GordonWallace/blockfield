@@ -6,22 +6,25 @@
 //   WARN   console warnings, a session that ended without unloading the game, game files that changed on disk mid-session
 //   INFO   the game loaded and unloaded, version or commit changes, every village log entry (js/villagelog.js)
 //   DEBUG  the jobs' own event lists (the LOG arrays of the miner, baker, builder... modules) and births and grow-ups (js/breeding.js)
-// The file starts with a header line: world, seed, version and commit (the commit is read by the debug server, window.BF_BUILD;
+// The file starts with a header line: world, seed, version and commit (the commit is read by the debug server, globalThis.BF_BUILD;
 // a game not served by it has none). Lines are written by js/logmatch.js (gameLine), which the debug screen shares.
 // Entries logged while no saved world is open are kept from the last newWorld (a world being loaded) and go to the world that opens.
 // Each world keeps up to CAP entries; past that the oldest are dropped, a stored batch at a time.
 // Adding something to the log: BF.glog.log(level, kind, text, { village: rec|key, at: mob|{x,y,z}|[x,y,z] }).
 // API: BF.glog = { LEVELS, CAP, log(level, kind, text, opts?), job(src, e) -> e, village(rec, e), entries(), base(), world(), head(),
-//                  forget(id), headLine(), recent(n) (the newest entries, also before a saved world opens), text(list?), chunkDays(x, z), chunkTimes(), loadChunkTimes(o), flush(), feed(), feedAt(n), feedReset(),
-//                  diskBuild(build), build, ready() }
+//                  forget(id), headLine(), recent(n) (the newest entries, also before a saved world opens), text(list?), chunkDays(x, z), chunkTimes(), loadChunkTimes(o), flush(), feed(), feedAt(n), feedReset(), setSink(fn),
+//                  diskBuild(build), build, ready(), tap(fn) (fn(entry) for each new entry), remote(fn), ingest(list) }
+// With the simulation in a Web Worker (spec r15-38) the worker keeps the world's log and saves it; the page's log is remote(fn): its own
+// entries (its errors) go to fn (the protocol, to the worker's log) instead of being kept, and the worker's come in by ingest(list) to
+// be read here (recent(), the debug overlay).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const CAP = 100000;              // entries kept per world
 const FLUSH_MS = 5000;           // new entries are written this often (and whenever the world saves)
 const FEED_MAX = 3000;           // entries per debug feed snapshot (a whole log reaches a fresh debug server in a few seconds)
-const BUILD = Object.assign({ commit: null, branch: null }, window.BF_BUILD || {});   // set by debug/server.js
+const BUILD = Object.assign({ commit: null, branch: null }, globalThis.BF_BUILD || {});   // set by debug/server.js
 const LM = () => BF.logmatch;
 
 let world = null, wname = "", head = null, entries = [], base = 0, savedTo = 0, loading = false, pre = [];
@@ -66,9 +69,15 @@ function villageName(v) {
   if (!key) return null;
   return (BF.signs && BF.signs.villageName && BF.signs.villageName(key)) || "Village " + key;
 }
+let sink = null;   // headless (tools/headless.js): every entry also goes to a file
+let fwd = null;    // the page with the simulation in a worker: entries go there (remote)
+let rlog = [];     // and the worker's newest entries come here (ingest), to read
+const taps = [];   // fn(entry) for every new entry: the protocol's log messages (js/protocol.js, spec r15-36)
 function add(e) {
+  if (sink) { try { sink(e); } catch (err) { /* never let logging stop the game */ } }
   if (world) entries.push(e);
   else { pre.push(e); if (pre.length > 5000) pre.shift(); }
+  for (const fn of taps) { try { fn(e); } catch (err) { /* never let a listener stop logging */ } }
   return e;
 }
 function log(level, kind, text, o) {
@@ -76,6 +85,7 @@ function log(level, kind, text, o) {
   const at = posOf(o.at);
   const e = { s: Date.now(), d: r4(dayNow()), c: at ? chunkDays(at[0], at[2]) : null, l: level, k: kind, v: villageName(o.village), x: String(text) };
   if (at) e.p = at;
+  if (fwd) { try { fwd([e]); } catch (err) { /* never let logging stop the game */ } return e; }
   return add(e);
 }
 const val = v => typeof v === "number" || typeof v === "boolean" || v == null ? String(v) : typeof v === "string" && !/[\s=]/.test(v) && v ? v : JSON.stringify(v);
@@ -105,8 +115,8 @@ for (const [fn, level] of [["error", "ERROR"], ["warn", "WARN"]]) {
     return orig[fn].apply(this, a);
   };
 }
-addEventListener("error", ev => { if (ev.error || ev.message) log("ERROR", "uncaught", ev.error ? stackOf(ev.error) : ev.message + (ev.filename ? " (" + ev.filename + ":" + ev.lineno + ")" : "")); });
-addEventListener("unhandledrejection", ev => log("ERROR", "uncaught", "unhandled promise rejection: " + stackOf(ev.reason)));
+if (BF.page) addEventListener("error", ev => { if (ev.error || ev.message) log("ERROR", "uncaught", ev.error ? stackOf(ev.error) : ev.message + (ev.filename ? " (" + ev.filename + ":" + ev.lineno + ")" : "")); });
+if (BF.page) addEventListener("unhandledrejection", ev => log("ERROR", "uncaught", "unhandled promise rejection: " + stackOf(ev.reason)));
 
 // ---------------------------------------------------------------- the world's log
 const fmtBuild = (v, c, b) => v + " (commit " + (c ? c.slice(0, 10) : "unknown") + (c && b ? ", " + b : "") + ")";
@@ -122,7 +132,7 @@ function newHead(m) {
 }
 const store = () => BF.save && BF.save.supported && BF.save.logStore;
 function open(m) {
-  if (world === m.id) return;
+  if (fwd || world === m.id) return;   // (remote: the worker opens it)
   if (world) close("another world was opened");
   world = m.id; wname = m.name; head = null; loading = true; base = 0; savedTo = 0;
   entries = pre; pre = [];
@@ -151,7 +161,7 @@ function open(m) {
   });
 }
 function close(why) {
-  if (!world) return;
+  if (!world || fwd) return;
   log("INFO", "game", "Game unloaded: \"" + wname + "\"" + (why ? " (" + why + ")" : ""));
   flush();
   world = null; head = null; entries = []; base = 0; savedTo = 0; loading = false;
@@ -218,12 +228,16 @@ function hook() {
   // Save and Quit to Title (js/player.js) clears save.current: the world is unloaded
   setInterval(() => { if (world && !loading && (!BF.save || !BF.save.current || BF.save.current.id !== world)) close(); }, 500);
 }
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hook); else hook();
-addEventListener("pagehide", () => close("the page was closed"));
+if (!BF.page) BF.onLoad(hook);   // headless: once every sim file has loaded (js/env.js)
+else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hook); else hook();
+if (BF.page) addEventListener("pagehide", () => close("the page was closed"));
 
 BF.glog = {
   LEVELS: ["ERROR", "WARN", "INFO", "DEBUG"], CAP, log, job, village, build: BUILD,
-  entries: () => entries, recent: (n = 50) => (world ? entries : pre).slice(-n), base: () => base, world: () => world, head: () => head, headLine, text,
-  chunkDays, chunkTimes, loadChunkTimes, flush, forget, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading,
+  entries: () => (fwd ? rlog : entries), recent: (n = 50) => (fwd ? rlog : world ? entries : pre).slice(-n), base: () => base, world: () => world, head: () => head, headLine, text,
+  chunkDays, chunkTimes, loadChunkTimes, flush, forget, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading, tap: fn => taps.push(fn),
+  setSink: fn => { sink = typeof fn === "function" ? fn : null; },   // fn(entry) for every entry from now on (headless: the log file)
+  remote: fn => { fwd = typeof fn === "function" ? fn : null; },   // fn(entries) takes this page's entries (r15-38); null: kept here again
+  ingest: list => { for (const e of list || []) rlog.push(e); if (rlog.length > 5000) rlog.splice(0, rlog.length - 5000); },   // the worker's entries, to read here
 };
 })();

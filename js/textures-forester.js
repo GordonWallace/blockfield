@@ -2,7 +2,7 @@
 // 16x16 RGBA, each pixel doubled to the game's 32px tile); the saplings are procedural. Registered on BF.texKit before the atlas is drawn.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const K = BF.texKit;
 if (!K) { console.warn("textures-forester: BF.texKit missing (textures.js must load first)"); return; }
 const { T, hex, pal, ramp, jit } = K;

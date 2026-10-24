@@ -5,7 +5,7 @@
 // API: BF.debug.decisionCompare (the switch), BF.dcmp = { on() -> bool, check(kind, oldValue, newValue, at?) -> newValue, stats, reset() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 BF.debug = BF.debug || {};
 if (BF.debug.decisionCompare == null) BF.debug.decisionCompare = false;
 

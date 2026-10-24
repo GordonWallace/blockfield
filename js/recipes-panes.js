@@ -1,7 +1,7 @@
-// Panes / bars / ladders recipes, registered through BF.recipeHooks (inventory.js runs the hooks at the end of buildRecipes()).
+// Panes / bars / ladders recipes, registered through BF.recipeHooks (playerinv.js runs the hooks at the end of buildRecipes()).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
   const I = BF.I, C = BF.DYE_COLOURS.map(c => c[0]);
   const nm = c => c.replace(/_/g, " ").replace(/\b\w/g, x => x.toUpperCase());

@@ -21,7 +21,7 @@ module.exports = async (pg, out) => {
       W.setViewDist(8);
       await load(Math.floor(BF.spawnPoint.x), Math.floor(BF.spawnPoint.z));
     };
-    const runBoats = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) { BF.mobs.update(h); boats.update(h); } };
+    const runBoats = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) { (BF.mobs.update(h), BF.req.apply(), BF.req.deliver()); boats.update(h); } };
 
     // ---- recipes ----
     const recipes = BF.inventory.recipes;

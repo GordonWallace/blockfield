@@ -9,10 +9,13 @@
 // The game log (js/gamelog.js) goes along too, a few thousand entries per snapshot until the server has all of it, and the commit
 // the game runs, so the server can say when the files on disk have changed (BF.glog.diskBuild).
 // While no debug server is listening it just retries quietly, every 4 s at first and then every 15 s.
-// API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update(), live() (a debug screen is watching the feed) }
+// With the simulation in a Web Worker (spec r15-38) the simulation's part of each snapshot (villages, mobs, the log, the hash...) is made
+// there (js/simworker.js loads this file for it: the feed query, js/protocol.js) and the page adds its own (the F3 numbers, alerts,
+// planet toggles) and sends it on as before; the server's answers go back to the worker in the next query (ack).
+// API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), simPart(ack), update(), live() (a debug screen is watching the feed) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // Where to send: ?debugfeed=<port|url> or the address the debug server injected, else port 8001 on the game's own host, then
 // on localhost and 127.0.0.1 (a game opened by a LAN address or a name like mymac.local still finds a server on this machine).
@@ -25,8 +28,8 @@ function feedUrls() {
   const p = given || "8001", h = location.hostname || "localhost";
   return [...new Set([h, "localhost", "127.0.0.1"].map(x => "http://" + (x.includes(":") && !x.startsWith("[") ? "[" + x + "]" : x) + ":" + p))];
 }
-const URLS = feedUrls();
-if (!URLS.length) return;
+const URLS = BF.page ? feedUrls() : [];
+if (BF.page && !URLS.length) return;
 let URL_ = URLS[0], urlIdx = 0, told = false, screens = 0;   // screens: debug screens open on the server (it says when that changes)
 
 const EVERY = 250, RETRY = 4000, RETRY_SLOW = 15000;
@@ -288,37 +291,78 @@ function stateHash() {
   return BF.stateHash.last;
 }
 
-function snapshot() {
-  const info = BF.debugInfo(), pp = BF.player.position;
+// The simulation's part of a snapshot. ack: what the server answered last time, when the simulation is in a worker (its log position,
+// the commit on disk, the picked villager, a resync).
+function simPart(ack) {
+  if (ack) applyAck(ack);
+  const pp = BF.player.position;
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) { const k = m.type === "chicken" ? (m.coop ? "chicken (coop)" : "chicken (wild)") : m.type === "cow" ? (m.pasture ? "cow (pasture)" : "cow (wild)") : m.type === "pig" ? (m.sty ? "pig (sty)" : "pig (wild)") : m.type; mobs[k] = (mobs[k] || 0) + 1; }   // chickens: penned and wild (js/poultry.js)
   if (BF.boats) Object.assign(mobs, BF.boats.counts());   // boats by wood ("oak_boat": n) next to the mob types
-  return { t: Date.now(), n: ++sent, info, text: BF.debugText(info), mobs, paused: !!BF.state.paused, hidden: document.hidden,
-    professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
+  return { mobs, professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
     mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
-    // the planet debug toggles (js/view.js setDebug: F3 + B / C / R, or the debug screen's Planet section) and which request from the
-    // screen they include (tv)
-    pt: BF.view && BF.view.debug ? { tv: ptv, ...BF.view.debug } : null,
     loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), aiWork: BF.mobs.aiWork ? BF.mobs.aiWork() : 0, maxAiWork: BF.villageSim.LIMITS.aiWork, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
-    // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
-    screens,
-    alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
     // the villager-seconds meter (js/perf.js), on while the screen gets the feed: figures and the last 2 minutes of V·s/s
     perf: BF.perf && BF.perf.on ? Object.assign(BF.perf.stats() || {}, { hist: BF.perf.history() }) : undefined,
+    budget: BF.active ? BF.active.feed() : undefined,   // the simulation budget and its decisions (js/active.js, spec r15-34)
     requests: BF.req ? BF.req.stats() : undefined,   // the request queue and transition-mode direct writes by module (js/requests.js)
     hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
+// The server's answer, the simulation's part of it
+function applyAck(o) {
+  if (o.glogAt != null && BF.glog) BF.glog.feedAt(o.glogAt);   // the server holds the game log up to there
+  if (o.build && BF.glog) BF.glog.diskBuild(o.build);          // the commit on disk isn't the one running
+  if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
+  if (o.resync) resync();
+}
+if (!BF.page) {   // in the simulation worker: only the feed query (js/simworker.js)
+  if (BF.proto) BF.proto.queries.feed = a => Object.assign({ ok: true }, simPart(a && a.ack));
+  BF.debugFeed = { simPart };
+  return;
+}
+// With the simulation in a worker: its latest part (asked for once a snapshot; it comes back before the next one) and the answer to pass on
+let remote = null, ack = null;
+// With the page a client of the world server (r15-41): the server makes the snapshots itself (debug/server.js is the same process) and
+// this page sends only its own part, over the server's socket; the answers for the page come back the same way (serverAck).
+const onServer = () => !!(BF.simHost && BF.simHost.server);
+const inWorker = () => !!(BF.client && BF.client.mode === "worker") && !onServer();
+function snapshot() {
+  const info = BF.debugInfo();
+  let part;
+  if (onServer()) part = {};
+  else if (inWorker()) {
+    BF.client.query("feed", { ack }, r => { if (r && r.ok) { delete r.ok; remote = r; } });
+    ack = null;
+    part = remote || {};
+    remote = null;
+    for (const id in part.icons || {}) if (part.icons[id] && !part.icons[id].url) { try { part.icons[id].url = BF.inventory.iconURL ? BF.inventory.iconURL(+id) : BF.textures.icon(+id); } catch (e) { /* none */ } }
+  } else part = simPart();
+  return Object.assign({ t: Date.now(), n: ++sent, info, text: BF.debugText(info), paused: !!BF.state.paused, hidden: document.hidden }, part, {
+    // the planet debug toggles (js/view.js setDebug: F3 + B / C / R, or the debug screen's Planet section) and which request from the
+    // screen they include (tv)
+    pt: BF.view && BF.view.debug ? { tv: ptv, ...BF.view.debug } : null,
+    // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
+    screens,
+    alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
+  });
+}
+// the simulation's part of the answer: here, or to the worker with the next query
+const passAck = o => { if (inWorker()) ack = Object.assign(ack || {}, o); else applyAck(o); };
 
 function update() {
   const now = performance.now();
   if (!hooked && BF.on) { hooked = true; BF.on("newWorld", resync); }   // main.js (which defines BF.on) loads after this file
   if (busy || now < nextT || !BF.debugInfo) return;
   nextT = now + EVERY;
+  if (onServer()) {
+    try { BF.simHost.post({ feedPage: snapshot() }); } catch (e) { console.warn("debug feed:", e); nextT = now + RETRY; }
+    return;
+  }
   let body;
   try { body = JSON.stringify(snapshot()); }
   catch (e) {   // tell the debug screen too, so it shows the error instead of waiting for the game
@@ -334,15 +378,17 @@ function update() {
     .then(t => {
       if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?, screens?, glogAt?, build?}: the server's alerts / picked villager, when the game's copy is out of date
         const o = JSON.parse(t);
-        if (o.glogAt != null && BF.glog) BF.glog.feedAt(o.glogAt);   // the server holds the game log up to there
-        if (o.build && BF.glog) BF.glog.diskBuild(o.build);          // the commit on disk isn't the one running
+        const a = {};
+        if (o.glogAt != null) a.glogAt = o.glogAt;
+        if (o.build) a.build = o.build;
+        if ("pick" in o) { a.pick = o.pick; a.pv = o.pv; }
+        passAck(a);
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
-        if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
         if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }   // a toggle clicked on the debug screen
         if (o.screens != null) screens = o.screens | 0;
         t = o.resync ? "resync" : "ok";
       }
-      if (t === "resync") resync();   // a restarted server asks for the layouts and logs again
+      if (t === "resync") { resync(); if (inWorker()) passAck({ resync: true }); }   // a restarted server asks for the layouts and logs again
     })
     .then(() => { if (!told) { told = true; console.info("Blockfield debug feed: sending to " + URL_); } misses = 0; })
     .catch(() => {                                // server down or not at this address: try the next one, resend everything when it's back
@@ -351,12 +397,30 @@ function update() {
       URL_ = URLS[urlIdx = (urlIdx + 1) % URLS.length];
       BF.debugFeed.url = URL_;
       nextT = performance.now() + (misses > 5 * URLS.length ? RETRY_SLOW : RETRY / URLS.length);
-      told = false; screens = 0; resync();
+      told = false; screens = 0; resync(); if (inWorker()) passAck({ resync: true });
     })
     .finally(() => { busy = false; clearTimeout(stop); });
 }
 
-BF.debugFeed = { url: URL_, urls: URLS, snapshot, update, live: () => told && screens > 0 };   // live: a debug screen is watching the feed
+// The world server's answers that are this page's: alerts, a planet toggle, how many screens are open, the item icons it lacks
+function serverAck(o) {
+  if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
+  if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }
+  if (o.screens != null) screens = o.screens | 0;
+  if (o.resync) resync();
+  told = true;
+  if (o.icons) {
+    const out = {};
+    for (const id of o.icons) {
+      let url = null;
+      try { url = BF.inventory && BF.inventory.iconURL ? BF.inventory.iconURL(+id) : BF.textures.icon(+id); } catch (e) { url = null; }
+      if (url) out[id] = { url };
+    }
+    BF.simHost.post({ feedIcons: out });
+  }
+}
+
+BF.debugFeed = { url: URL_, urls: URLS, snapshot, simPart, update, serverAck, live: () => told && screens > 0 };   // live: a debug screen is watching the feed
 // The game loop (requestAnimationFrame) stops while the game's tab is in the background, e.g. when the debug screen is opened
 // as another tab in the same window. A timer keeps the feed going then (browsers still run it about once a second), so the
 // debug screen can say the game is in the background instead of waiting for it.

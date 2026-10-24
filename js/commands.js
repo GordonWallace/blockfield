@@ -5,7 +5,7 @@
 // command line like an open inventory (no movement, no clicks, no hotkeys).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const HIST_KEY = "blockfield.cmdHistory", HIST_MAX = 30, LOG_MAX = 100, FADE_S = 10, MAX_FILL = 32768, MAX_GIVE = 64 * 36;
 const PLAYER = "Player";
@@ -50,6 +50,7 @@ function buildDOM() {
 
 // ---------- chat log ----------
 function print(text, kind = "info") {
+  if (!BF.page) return;   // (in the simulation worker the result's msg carries it to the page)
   buildDOM();
   for (const part of String(text).split("\n")) {
     const el = document.createElement("div");
@@ -128,7 +129,7 @@ function submit() {
   else print(`<${PLAYER}> ${text}`, "info");
 }
 
-addEventListener("keydown", e => {
+if (BF.page) addEventListener("keydown", e => {   // (the page only: the simulation worker loads this file for the commands, r15-38)
   if (open) {
     e.stopImmediatePropagation();               // nothing reaches the game (movement, E, Q, digits, F3...)
     if (e.target !== inputEl) inputEl.focus();
@@ -750,8 +751,25 @@ def("say", {
 });
 
 // ---------- execution ----------
-function split(s) { return s.trim().split(/\s+/).filter(Boolean); }
+// A command is a request from the player (spec r15-20, js/requests.js player()): applied at once, at the tick boundary it is typed
+// at, so /setblock, /fill, /give, /summon, /kill, /time, /weather and /tp change the world between ticks, in the requests' order,
+// and a recorded session replays them. The result is the command's {ok, msg}.
+// With the simulation in a worker (r15-38) it runs there (this file is loaded for it) and the answer comes back later: the page echoes
+// the command now and prints the answer when it comes; the result is then {ok: true, pending: true}.
 function execute(text) {
+  if (!BF.req || !BF.req.player) return run(text);
+  const req = BF.req.player("command", null, { text: String(text) });
+  if (!req.delivered && req.then) {
+    print("/" + String(text).replace(/^\//, "").trim(), "dim");
+    req.then(r => { if (r && r.msg) print(r.msg, r.ok ? "ok" : "err"); });
+    return { ok: true, pending: true, msg: "" };
+  }
+  const r = req.result;
+  return { ok: !!r.ok, msg: r.msg || "" };
+}
+if (BF.req) BF.req.on("command", req => run(req.data.text));
+function split(s) { return s.trim().split(/\s+/).filter(Boolean); }
+function run(text) {
   const body = String(text).replace(/^\//, "");
   const parts = split(body);
   if (!parts.length) return { ok: false, msg: "" };
@@ -852,7 +870,8 @@ function wire() {
   BF.on("playerDied", () => closeChat());
 }
 // main.js (the event bus) loads after this file: hook up once every script has run
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { wire(); buildDOM(); });
+if (!BF.page) { /* the simulation worker: no command line */ }
+else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { wire(); buildDOM(); });
 else setTimeout(() => { wire(); buildDOM(); }, 0);
 
 BF.commands = {
