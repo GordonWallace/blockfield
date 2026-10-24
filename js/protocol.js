@@ -42,7 +42,7 @@ const errorOnce = (key, text) => { if (!errOnce.has(key)) { errOnce.add(key); gl
 // Per kind: HOT fields change most ticks and go as float32 in the binary part of an entities message, with a bitmask of which changed;
 // COLD fields change rarely and go as JSON. A new entity is sent whole (every field, JSON).
 const HOT = {
-  mob: ["x", "y", "z", "yaw", "headYaw", "headPitch", "walkPhase", "walkAmt", "age", "deathT", "fuse"],
+  mob: ["x", "y", "z", "yaw", "headYaw", "headPitch", "walkPhase", "walkAmt", "age", "deathT", "fuse", "swingT", "doorT"],
   drop: ["x", "y", "z", "age"],
   arrow: ["x", "y", "z", "lx", "ly", "lz"],
   boat: ["x", "y", "z", "yaw", "hurtT"],
@@ -50,10 +50,10 @@ const HOT = {
 };
 const COLD = {
   mob: ["type", "sid", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "sleeping", "bedF", "crackStage", "badgeLevel", "dead",
-    "onGround", "riding", "rider", "child"],
+    "onGround", "riding", "rider", "child", "hw", "h", "k", "golem", "aiming", "trading", "doorAt", "name", "prof", "lead"],
   drop: ["item", "count", "phase", "pulled"],
   arrow: ["stuck"],
-  boat: ["wood", "row", "rowing", "mob"],
+  boat: ["wood", "row", "rowing", "mob", "rider"],
   bee: ["phase", "mode", "land", "landYaw"],
 };
 const KINDS = Object.keys(HOT);
@@ -307,12 +307,32 @@ function serve(send, opts) {
         type: o.type, sid: o.id != null ? o.id : null, look: o.look == null ? null : o.look, scale: o.scale == null ? 1 : o.scale, headScale: o.headScale == null ? 1 : o.headScale,
         partVis: pvText(o.partVis), tint: o.tint || null, held: o.held == null ? null : o.held, onFire: !!o.onFire, sleeping: !!o.sleeping,
         bedF: o.sleeping && o.bed ? o.bed.f : null, crackStage: o.crackStage || 0, badgeLevel: o.badgeLevel || 0, dead: !!o.dead, onGround: !!o.onGround,
-        riding: nOrNull(o.riding), rider: nOrNull(o.rider), child: !!o.child };
+        riding: nOrNull(o.riding), rider: nOrNull(o.rider), child: !!o.child,
+        // r15-37: what the render layer, sounds and labels read besides
+        swingT: o.ai && o.ai.swingT > 0 ? o.ai.swingT : 0, doorT: o.ai && o.ai.doorAt ? o.ai.doorT || 0 : 0,
+        hw: o.halfWidth || 0, h: o.height || 0, k: o._k || 1, golem: !!(o.def && o.def.golem), aiming: !!(o.ai && o.ai.aiming), trading: !!o.tradingWith,
+        doorAt: o.ai && o.ai.doorAt ? o.ai.doorAt.slice() : null,
+        name: o.type === "villager" && BF.vlog ? BF.vlog.nameOf(o) : null, prof: o.type === "villager" ? (o.child ? "child" : o.profession || "villager") : null,
+        lead: leadOf(o) };
     }
     if (kind === "drop") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, age: o.age || 0, item: o.id, count: o.count, phase: o.phase || 0, pulled: !!o.pulled };
-    if (kind === "arrow") { const l = o.look || o.vel; return { x: o.pos.x, y: o.pos.y, z: o.pos.z, lx: l ? l.x : 0, ly: l ? l.y : 0, lz: l ? l.z : 0, stuck: !!o.stuck }; }
-    if (kind === "boat") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, yaw: o.yaw || 0, hurtT: o.hurtT || 0, wood: o.wood, row: (o.row || [0, 0]).slice(), rowing: (o.rowing || [0, 0]).slice(), mob: nOrNull(o.mob) };
-    return { x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, phase: o.phase || 0, mode: o.mode, land: o.land ? [o.land.x, o.land.y, o.land.z] : null, landYaw: o.landYaw || 0 };   // bee
+    if (kind === "arrow") { const l = o.stuck ? o.look || o.vel : o.vel || o.look; return { x: o.pos.x, y: o.pos.y, z: o.pos.z, lx: l ? l.x : 0, ly: l ? l.y : 0, lz: l ? l.z : 0, stuck: !!o.stuck }; }
+    if (kind === "boat") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, yaw: o.yaw || 0, hurtT: o.hurtT || 0, wood: o.wood, row: (o.row || [0, 0]).slice(), rowing: (o.rowing || [0, 0]).slice(), mob: nOrNull(o.mob), rider: !!o.rider };
+    const L = o.land;   // bee: landed at a point on a surface, with the surface's normal
+    return { x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, phase: o.phase || 0, mode: o.mode, land: L ? [L.x, L.y, L.z, L.nx || 0, L.ny || 0, L.nz || 0] : null, landYaw: o.landYaw || 0 };
+  }
+  // A horse's lead (js/horses.js leads()): "player", the protocol number of the mob holding it, or the fence post [x, y, z]; null for none.
+  let leads = null;
+  function leadOf(m) {
+    if (!leads || m.type !== "horse") return null;
+    const L = leads.get(m);
+    if (!L) return null;
+    return L.kind === "player" ? "player" : L.kind === "mob" ? nOrNull(L.mob) : [L.x, L.y, L.z];
+  }
+  function readLeads() {
+    leads = null;
+    if (!BF.horses || !BF.horses.leads) return;
+    for (const L of BF.horses.leads()) (leads || (leads = new Map())).set(L.mob, L.lead);
   }
   const same = (a, b) => a === b || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]));
   function each(fn) {
@@ -322,8 +342,9 @@ function serve(send, opts) {
     if (BF.boats) for (const b of BF.boats.list) fn("boat", b, b.pos.x, b.pos.z);
     if (BF.bees && BF.bees.list) for (const b of BF.bees.list) fn("bee", b, b.x, b.z);
   }
-  function flushEntities() {
+  function flushEntities(ticked) {
     const add = [], set = [], seen = new Set();
+    readLeads();
     each((kind, o, x, z) => {
       if (!inView(x, z)) return;
       const n = nOf(o), s = stateOf(kind, o), had = S.ents.get(n);
@@ -335,7 +356,9 @@ function serve(send, opts) {
     });
     const gone = [];
     for (const n of S.ents.keys()) if (!seen.has(n)) { gone.push(n); S.ents.delete(n); }
-    if (add.length || set.length || gone.length) out({ t: "entities", tick: tickNow(), add, set, gone });
+    // sent after every tick even when nothing changed, so the client knows which tick its entities are from (r15-37: an entity not in
+    // a tick's message stood still in it, and is drawn where it is)
+    if (ticked || add.length || set.length || gone.length) out({ t: "entities", tick: tickNow(), add, set, gone });
   }
 
   // ---- villages: the summaries the UI needs (names, centre, people), sent when they change
@@ -422,7 +445,11 @@ function serve(send, opts) {
     flushChunks(want, S.view && S.view.budget != null ? S.view.budget : 16);
     flushCells();
     const t = tickNow(), ticked = t !== S.tick;
-    if (ticked || force) flushEntities();
+    // entities: after a tick; after a request applied (changed); and every flush while the world is frozen or paused, when nothing ticks
+    // but a request, a command or a test can still move things (no ticks then, so the diff is the only cost)
+    const still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
+    if (ticked || force || S.changed || still) flushEntities(ticked);
+    S.changed = false;
     if (S.fx.length) {
       const list = S.fx.filter(e => e.x == null || inView(e.x, e.z));
       S.fx = [];
@@ -450,7 +477,7 @@ function serve(send, opts) {
     request(m) {
       S.inRequest = true;
       let r;
-      try { r = BF.req.applyPlayer(m.kind, m.target, m.data).result; } finally { S.inRequest = false; }
+      try { r = BF.req.applyPlayer(m.kind, m.target, m.data).result; } finally { S.inRequest = false; S.changed = true; }
       flushCells();
       flushSelf();   // (replica: what the request did to the player arrives with its result)
       out({ t: "result", rid: m.rid, tick: tickNow(), result: r });
@@ -511,10 +538,11 @@ function serve(send, opts) {
   // what the client should have now: the live state of every entity in view (n -> {kind, s}), and the loaded chunks in view
   function interest() {
     const m = new Map();
+    readLeads();
     each((kind, o, x, z) => { if (inView(x, z)) m.set(nOf(o), { kind, s: stateOf(kind, o) }); });
     return { entities: m, chunks: wanted() };
   }
-  const sim = { receive, flush, reset, hello, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, replica: R };
+  const sim = { receive, flush, reset, hello, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, nOf, replica: R };
   liveSim = sim;
   return sim;
 }
@@ -540,7 +568,51 @@ const QUERIES = {
   stats() { return Object.assign({ ok: true }, stats()); },
   // a hash of the blocks of chunks {keys} and which of them aren't loaded (a client keeping its own copy checks it against this, r15-38)
   chunkHash(a) { const keys = (a.keys || []).filter(k => BF.world.chunks.has(k)); return { ok: true, keys, hash: simHash(keys) }; },
+
+  // ---- r15-37: what the page's screens and overlays ask for
+  // a chest's slots, owner and whether the player may change it ({x, y, z}; js/inventory.js chestView)
+  chest(a) { return BF.inventory && BF.inventory.chestView ? BF.inventory.chestView(a) : { ok: false, why: "no chests" }; },
+  // a villager's offers (with why one can't be done now), inventory, level, xp, name and status ({id}; js/inventory.js tradeView)
+  trades(a) { return BF.inventory && BF.inventory.tradeView ? BF.inventory.tradeView(a) : { ok: false, why: "no trading" }; },
+  // a mob's inventory ({id}): the slots of a villager or merchant
+  inventory(a) {
+    const m = BF.ids && BF.ids.get(a.id);
+    if (!m || m.removed || !Array.isArray(m.inv)) return { ok: false, why: "gone" };
+    return { ok: true, slots: m.inv.map(s => (s ? (s.wear > 0 ? { id: s.id, count: s.count, wear: s.wear } : { id: s.id, count: s.count }) : null)) };
+  },
+  // a map item's pixels ({item, ver}; js/maps.js): the map's bounds always, its pixels (RGB565, base64) only when ver is not the client's
+  map(a) {
+    const it = BF.items && BF.items[a.item], M = BF.maps;
+    if (!it || !it.map || !M) return { ok: false, why: "not a map" };
+    const d = M.dataOfItem(it), b = M.bounds(d.size, d.zx, d.zz), r = { ok: true, item: a.item, ver: d.ver, side: M.side(d.size), x0: b.x0, z0: b.z0, N: M.PX, scale: M.scale(d.size) };
+    if (a.ver !== d.ver) r.px = b64(new Uint8Array(d.px.buffer, d.px.byteOffset, d.px.byteLength));
+    return r;
+  },
+  // the F3 overlay's simulation figures (js/main.js debugInfo adds the page's own: fps, position, draw calls)
+  f3(a) {
+    const p = a && a.x != null ? a : BF.player && BF.player.position;
+    return { ok: true, mobs: BF.mobs ? BF.mobs.list.length : 0, boats: BF.boats ? BF.boats.list.length : 0, sim: BF.villageSim ? BF.villageSim.status() : "",
+      clock: BF.vlog && BF.sky ? BF.vlog.stamp(BF.sky.day + BF.sky.time) : "", weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
+      perf: BF.perf ? BF.perf.stats() : null, perfText: BF.perf && BF.perf.stats() ? BF.perf.text(BF.perf.stats()) : "",
+      requests: BF.req ? BF.req.stats() : null, requestsText: BF.req && BF.req.stats() ? BF.req.text(BF.req.stats()) : "",
+      blockLight: p && BF.world ? BF.world.getBlockLight(p.x, p.y + 0.05, p.z) : 0 };
+  },
+  // the F3 village panel ({x, z}): the village there, its tally, occupations, free job blocks and newest log lines (js/villagelog.js)
+  vpanel(a) {
+    const V = BF.vlog, rec = V && V.villageAt(a.x, a.z);
+    if (!rec) return { ok: true, none: true };
+    const all = V.entries(rec.key);   // log lines as [time text, kind, text, [x, y, z]?]
+    return Object.assign({ ok: true, log: all.slice(-(a.n || 26)).map(e => [V.stamp(e[0]), e[1], e[2], e[3]]), total: all.length }, V.panelData(rec));
+  },
 };
+function b64(u8) {
+  let bin = "";
+  for (let i = 0; i < u8.length; i += 8192) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return typeof btoa === "function" ? btoa(bin) : Buffer.from(bin, "binary").toString("base64");
+}
+
+// r15-37: fn(list) for every events message any client end gets (effects for js/entityview.js, sounds for js/audio.js); BF.proto.listen.
+const LISTEN = [];
 
 // ---------------------------------------------------------------- the client end and its mirror
 // connect(send): send(packet) delivers to the sim. The mirror (world) holds what the sim sent: chunks (key -> {cx, cz, key, lo, hi, secs}),
@@ -559,12 +631,16 @@ function connect(send, mode) {
       const s = c.secs[sy - c.lo];
       return typeof s === "number" ? s : s[((y & 15) << 8) | ((z - c.cz * 16) << 4) | (x - c.cx * 16)];
     } };
+  // r15-37: how far to draw entity r from prev towards its current fields, given the warp's alpha: alpha when r changed in the latest tick
+  // and prev is the tick just before; else 1 (it stood still, or several ticks went by since the last message: fast-forward).
+  world.k = (r, a) => (r.prev && r.ct === world.tick && r.ct - r.pt === 1 && typeof a === "number" ? Math.max(0, Math.min(1, a)) : 1);
+  world.gen = 0;   // counts hello messages: a new world (the render layers drop what they were showing)
   const C = { world, mode: mode || "in page", hello: null, lastView: null };
   const out = msg => send(encode(msg));
   function clear() { world.chunks.clear(); world.entities.clear(); world.villages.clear(); world.clock = null; world.log = []; world.tick = -1; }
   const LOG_KEEP = 500;
   const ON = {
-    hello(m) { C.hello = m; clear(); C.lastView = null; },
+    hello(m) { C.hello = m; clear(); C.lastView = null; world.gen++; },
     chunk(m) { world.chunks.set(m.key, { cx: m.cx, cz: m.cz, key: m.key, lo: m.lo, hi: m.hi, secs: m.secs }); },
     unload(m) { for (const k of m.keys) world.chunks.delete(k); },
     blockChanges(m) {
@@ -581,22 +657,31 @@ function connect(send, mode) {
         }
       }
     },
+    // An entity's current fields are from tick ct; prev holds its hot fields as of tick pt, the tick before (r15-37). An entity missing
+    // from a tick's message stood still in it, so when the ticks come one by one its prev is its state at the tick before the change.
+    // A change within the same tick (a request while frozen) only overwrites the current fields.
     entities(m) {
-      world.tick = m.tick;
-      for (const e of m.add) world.entities.set(e.n, Object.assign({ n: e.n, kind: e.kind, prev: null }, e.s));
+      const T = m.tick, step = T === world.tick + 1;
+      for (const e of m.add) world.entities.set(e.n, Object.assign({ n: e.n, kind: e.kind, prev: null, pt: null, ct: T }, e.s));
       for (const e of m.set) {
         const r = world.entities.get(e.n);
         if (!r) continue;
-        const prev = {};
-        for (const f of HOT[r.kind]) prev[f] = r[f];
-        r.prev = prev;
+        if (r.ct !== T) {
+          const prev = r.prev || (r.prev = {});
+          for (const f of HOT[r.kind]) prev[f] = r[f];
+          r.pt = step ? T - 1 : r.ct; r.ct = T;
+        }
         Object.assign(r, e.s);
       }
       for (const n of m.gone) world.entities.delete(n);
+      world.tick = T;
+    },
+    events(m) {
+      if (C.onEvents) C.onEvents(m.list);
+      for (const fn of LISTEN) { try { fn(m.list); } catch (e) { errorOnce("cev", "An event listener failed: " + (e && e.message)); console.error(e); } }
     },
     edits(m) { if (C.onEdits) C.onEdits(m.chunks, true); },
     self(m) { const o = Object.assign({}, m); delete o.t; delete o.hurt; C.self = Object.assign(C.self || {}, o); if (C.onSelf) C.onSelf(m); },
-    events(m) { if (C.onEvents) C.onEvents(m.list); },
     village(m) { for (const v of m.list) world.villages.set(v.key, v); for (const k of m.gone) world.villages.delete(k); },
     clock(m) { world.clock = m; },
     log(m) { for (const e of m.list) world.log.push(e); if (world.log.length > LOG_KEEP) world.log.splice(0, world.log.length - LOG_KEEP); if (C.onLog) C.onLog(m.list); },
@@ -756,17 +841,63 @@ function check() {
 }
 function same(a, b) { return a === b || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i])); }
 
+// ---------------------------------------------------------------- sounds (r15-37)
+// The game's sound cues are bus events (BF.emit) raised by the simulation; js/audio.js plays them at the client. The sim end turns each
+// into a plain `sound` entry of the events message ({kind: "sound", ev, ...}): positions, block ids, and a mob's protocol number, type and
+// height in place of the mob. Doors (js/world.js setDoor, which villagers and the player both use) are wrapped to raise "door".
+const mobArgs = (m, o) => {
+  if (!m || !m.position) return o;
+  o.x = m.position.x; o.y = m.position.y; o.z = m.position.z; o.type = m.type; o.h = m.height || 1;
+  if (liveSim) o.n = liveSim.nOf(m);
+  return o;
+};
+const SOUNDS = {
+  blockBroken: (x, y, z, id) => ({ x, y, z, id }),
+  blockPlaced: (x, y, z, id) => ({ x, y, z, id }),
+  blockHit: (x, y, z, id) => ({ x, y, z, id }),
+  playerEating: () => ({}), playerAte: () => ({}), playerDamaged: () => ({}), villagerLevelUp: () => ({}), gameModeChanged: () => ({}), worldLoaded: () => ({}),
+  mobHurt: m => (m && m.hp > 0 ? mobArgs(m, {}) : null),
+  mobKilled: m => (m && !m.exploded ? mobArgs(m, {}) : null),
+  mobExploded: (m, c) => { const p = c || (m && m.position); return p ? { x: p.x, y: p.y, z: p.z } : null; },
+  arrowShot: (m, from) => { const p = from || (m && m.position); return p ? { x: p.x, y: p.y, z: p.z } : null; },
+  chestOpened: (x, y, z) => ({ x, y, z }), chestClosed: (x, y, z) => ({ x, y, z }),
+  doorBroken: (m, x, y, z) => ({ x, y, z }),
+  villagerTrade: v => mobArgs(v, {}),
+  lightning: e => (e ? { lx: e.x, lz: e.z, dist: e.dist } : null),   // (heard from far off: not limited to the view)
+};
+function soundTap() {
+  for (const ev in SOUNDS) BF.on(ev, (...a) => {
+    if (!liveSim) return;
+    const o = SOUNDS[ev](...a);
+    if (o) { o.kind = "sound"; o.ev = ev; liveSim.onFx(o); }
+  });
+  const W = BF.world;
+  if (W && W.setDoor && !W.setDoor._proto) {
+    const orig = W.setDoor;
+    W.setDoor = function (x, y, z, open) {
+      const before = BF.blocks[W.getBlock(x, y, z)], was = before && before.door ? before.door.open : null;
+      const res = orig.apply(this, arguments);
+      if (res != null && res !== was && liveSim) liveSim.onFx({ kind: "sound", ev: "door", open: !!res, x, y, z });
+      return res;
+    };
+    W.setDoor._proto = true;
+  }
+}
+
 // ---------------------------------------------------------------- hooks
 // The world's block hook (js/world.js setBlock), effects and log lines go to the live sim end; a new world starts the client over.
 function hookUp() {
   if (BF.world && BF.world.onBlockSet && !hookUp.w) { hookUp.w = true; BF.world.onBlockSet((c, i, id) => { if (liveSim) liveSim.onBlock(c, i, id); }); }
   if (BF.fx && BF.fx.tap && !hookUp.f) { hookUp.f = true; BF.fx.tap(e => { if (liveSim) liveSim.onFx(e); }); }
   if (BF.glog && BF.glog.tap && !hookUp.g) { hookUp.g = true; BF.glog.tap(e => { if (liveSim) liveSim.onLog(e); }); }
-  if (BF.on && !hookUp.n) { hookUp.n = true; BF.on("newWorld", () => { if (liveSim) liveSim.reset(); }); }
+  if (BF.on && !hookUp.n) { hookUp.n = true; BF.on("newWorld", () => { if (liveSim) liveSim.reset(); }); soundTap(); }
 }
 
 BF.proto = {
   VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, worker, host, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
+  listen: fn => { LISTEN.push(fn); },
+  // (tests, in-page) the protocol number the in-page sim end gives a simulation object (a mob, drop, arrow, boat or bee), or null
+  numberOf: o => (o && typeof o === "object" && local.sim ? local.sim.nOf(o) : null),
   hookUp,
   // once a frame: the client's view (in the page, also through the worker), then the simulation end's flush (in the page, or in the worker)
   flush(force) {

@@ -1,7 +1,9 @@
 // Sound: every effect, ambience loop and music note is synthesized (Web Audio, no audio files).
 // Samples are generated in JS once (lazily, per name) into AudioBuffers and reused; music is a seeded generative
 // piano + pad piece through a generated convolution reverb. Nothing is created before the first user gesture.
-// Hooks into the game through events (see CONTRACT.md "Audio") and light polling of BF.player / BF.mobs / BF.world.
+// Hooks into the game through the protocol's sound events (see CONTRACT.md "Audio"; js/protocol.js turns the simulation's bus events
+// into `sound` entries of its events messages, spec r15-37) and light polling of BF.player, BF.world and the mobs in the client's mirror
+// (BF.client.world entities: fuse, swingT, doorAt / doorT, trading, tint).
 // Loaded after main.js; drives its own requestAnimationFrame loop (no main.js change needed).
 (() => {
 "use strict";
@@ -850,7 +852,16 @@ function mobSound(m, kind) {
   if (kind === "death" && s.dp) o.pitch = (o.pitch || 1) * s.dp;
   return play(s[kind], o);
 }
-function vpitch(m) { if (m._sndP == null) m._sndP = 0.86 + Math.random() * 0.28; return m._sndP; }
+// a villager's voice pitch, kept per mob (its protocol number) for the session
+const pitches = new Map();
+function vpitch(m) {
+  const k = m.n != null ? m.n : m;
+  let p = pitches.get(k);
+  if (p == null) { p = 0.86 + Math.random() * 0.28; pitches.set(k, p); if (pitches.size > 2000) pitches.delete(pitches.keys().next().value); }
+  return p;
+}
+// a mob as a sound event or the mirror gives it ({type, x, y, z, h, n}), shaped as mobSound and mobPos read it
+const asMob = e => ({ type: e.type, position: { x: e.x, y: e.y, z: e.z }, height: e.h || 1, n: e.n });
 
 // ---------- per-frame update ----------
 function blockUnderFeet(p) {
@@ -913,38 +924,46 @@ function updatePlayer(dt) {
   }
   pl.x = p.x; pl.y = p.y; pl.z = p.z; pl.vy = vy; pl.ground = ground; pl.water = water;
 }
+// The mobs near the listener, from the client's mirror: ambient calls, a creeper's fuse, an iron golem's steps and swings, a zombie
+// pounding on a door, a villager starting to trade. Each mob's sound state is kept here by its protocol number.
+const mobSt = new Map();
+let mobGen = -1;
 function updateMobs(dt, now) {
-  const M = BF.mobs;
-  if (!M || !M.list) return;
-  const L = M.list, R2 = 26 * 26;
-  for (let i = 0; i < L.length; i++) {
-    const m = L[i];
-    if (m.dead || m.removed || !m.position) continue;
-    let dx = m.position.x - listener.x, dz = m.position.z - listener.z;
-    const dy = m.position.y - listener.y;
-    if ((Math.abs(dx) > 26 || Math.abs(dz) > 26) && relXZ(m.position.x, m.position.z)) { dx = RX - listener.x; dz = RZ - listener.z; }
-    if (dx * dx + dy * dy + dz * dz > R2) { m._sndT = 0; continue; }
-    const s = MOB_SND[m.type];
+  const W = BF.client && BF.client.world;
+  if (!W) return;
+  if (W.gen !== mobGen) { mobGen = W.gen; mobSt.clear(); }
+  const R2 = 26 * 26;
+  for (const e of W.entities.values()) {
+    if (e.kind !== "mob" || e.dead) continue;
+    let st = mobSt.get(e.n);
+    if (!st) mobSt.set(e.n, st = { t: 0, fuse: false, sx: null, sz: 0, sd: 0, sw: false, door: null, tr: false, seen: 0 });
+    st.seen = now;
+    let dx = e.x - listener.x, dz = e.z - listener.z;
+    const dy = e.y - listener.y;
+    if ((Math.abs(dx) > 26 || Math.abs(dz) > 26) && relXZ(e.x, e.z)) { dx = RX - listener.x; dz = RZ - listener.z; }
+    if (dx * dx + dy * dy + dz * dz > R2) { st.t = 0; continue; }
+    const s = MOB_SND[e.type];
     if (!s) continue;
-    if (!m._sndT) m._sndT = now + rnd(1, s.iv ? s.iv[1] : 10);
-    if (now >= m._sndT) { m._sndT = now + (s.iv ? rnd(s.iv[0], s.iv[1]) : 10); if (s.amb && !m.sleeping && m.hurtT <= 0) mobSound(m, "amb"); }
-    const ai = m.ai || EMPTY;
-    if (m.type === "creeper") { if (ai.fuse > 0 && !m._sndFuse) { m._sndFuse = true; play("creeper_fuse", mobPos(m)); } else if (!(ai.fuse > 0)) m._sndFuse = false; }
-    else if (m.type === "iron_golem") {
-      if (m._sx == null) { m._sx = m.position.x; m._sz = m.position.z; m._sd = 0; }
-      const mx = m.position.x - m._sx, mz = m.position.z - m._sz; m._sx = m.position.x; m._sz = m.position.z;
+    const m = asMob(e);
+    if (!st.t) st.t = now + rnd(1, s.iv ? s.iv[1] : 10);
+    if (now >= st.t) { st.t = now + (s.iv ? rnd(s.iv[0], s.iv[1]) : 10); if (s.amb && !e.sleeping && e.tint !== "red") mobSound(m, "amb"); }   // (tint red: hurt)
+    if (e.type === "creeper") { if (e.fuse > 0 && !st.fuse) { st.fuse = true; play("creeper_fuse", mobPos(m)); } else if (!(e.fuse > 0)) st.fuse = false; }
+    else if (e.type === "iron_golem") {
+      if (st.sx == null) { st.sx = e.x; st.sz = e.z; st.sd = 0; }
+      const mx = e.x - st.sx, mz = e.z - st.sz; st.sx = e.x; st.sz = e.z;
       const md = Math.sqrt(mx * mx + mz * mz);
-      if (m.onGround && md < 2) { m._sd += md; if (m._sd > 1.6) { m._sd = 0; play("golem_step", { x: m.position.x, y: m.position.y, z: m.position.z }); } }
-      if (ai.swingT > 0 && !m._sndSw) { m._sndSw = true; play("golem_attack", mobPos(m)); } else if (!(ai.swingT > 0)) m._sndSw = false;
-    } else if (m.type === "zombie") {
-      const k = ai.doorAt ? Math.floor(ai.doorT || 0) : -1;   // pounding on a door: one bash per second
-      if (k > (m._sndDoor == null ? -1 : m._sndDoor)) play("door_bash", { x: ai.doorAt[0] + 0.5, y: ai.doorAt[1] + 1, z: ai.doorAt[2] + 0.5, volume: 0.7 });
-      m._sndDoor = k;
-    } else if (m.type === "villager") {
-      if (m.tradingWith && !m._sndTr) play("villager_trade", Object.assign(mobPos(m), { pitch: vpitch(m) }));
-      m._sndTr = !!m.tradingWith;
+      if (e.onGround && md < 2) { st.sd += md; if (st.sd > 1.6) { st.sd = 0; play("golem_step", { x: e.x, y: e.y, z: e.z }); } }
+      if (e.swingT > 0 && !st.sw) { st.sw = true; play("golem_attack", mobPos(m)); } else if (!(e.swingT > 0)) st.sw = false;
+    } else if (e.type === "zombie") {
+      const k = e.doorAt ? Math.floor(e.doorT || 0) : -1;   // pounding on a door: one bash per second
+      if (k > (st.door == null ? -1 : st.door)) play("door_bash", { x: e.doorAt[0] + 0.5, y: e.doorAt[1] + 1, z: e.doorAt[2] + 0.5, volume: 0.7 });
+      st.door = k;
+    } else if (e.type === "villager") {
+      if (e.trading && !st.tr) play("villager_trade", Object.assign(mobPos(m), { pitch: vpitch(m) }));
+      st.tr = !!e.trading;
     }
   }
+  if (mobSt.size > W.entities.size + 64) for (const [n, st] of mobSt) if (!W.entities.has(n)) mobSt.delete(n);   // gone from the mirror
 }
 // ambience: cheap world probes a few times per second
 function probeEnv() {
@@ -1084,6 +1103,7 @@ function update(dt) {
   const head = !!(P && P.headInWater);
   if (head !== state.head) { state.head = head; G.muffle.frequency.setTargetAtTime(head ? 480 : G.nyq, ctx.currentTime, 0.08); }
   const now = ctx.currentTime;
+  newWorld();
   try {
     if (!paused && !state.menu) { updatePlayer(dt); updateMobs(dt, now); }
     else pl.init = false;
@@ -1096,52 +1116,53 @@ function update(dt) {
 }
 
 // ---------- event hooks ----------
-function hook() {
-  if (!BF.on) return;
-  BF.on("blockBroken", (x, y, z, id) => blockSound("break", id, x, y, z));
-  BF.on("blockPlaced", (x, y, z, id) => {
+// The protocol's sound entries (js/protocol.js SOUNDS), by the bus event each stands for.
+const SOUND = {
+  blockBroken: e => blockSound("break", e.id, e.x, e.y, e.z),
+  blockPlaced: e => {
     const now = performance.now();
     if (now - lastPlaceT < 60) return;                        // doors / beds emit twice
     lastPlaceT = now;
-    if (BF.RENDER && BF.RENDER[id] === 3) play("swim", { x: x + 0.5, y: y + 0.5, z: z + 0.5, volume: 0.8 });
-    else blockSound("place", id, x, y, z);
-  });
+    if (BF.RENDER && BF.RENDER[e.id] === 3) play("swim", { x: e.x + 0.5, y: e.y + 0.5, z: e.z + 0.5, volume: 0.8 });
+    else blockSound("place", e.id, e.x, e.y, e.z);
+  },
   // mining hit ticks: cracks.js emits "blockHit" every 0.25 s of mining
-  BF.on("blockHit", (x, y, z, id) => { const now = performance.now(); if (now - lastHitT >= 200) { lastHitT = now; blockSound("hit", id, x, y, z); } });
-  BF.on("playerEating", () => { const now = performance.now(); if (now - lastEatT >= 210) { lastEatT = now; play("eat"); } });
-  BF.on("playerAte", () => play("burp", { delay: 0.05 }));
-  BF.on("playerDamaged", () => play("hurt"));
-  BF.on("mobHurt", m => { if (m && m.hp > 0) mobSound(m, "hurt"); });
-  BF.on("mobKilled", m => { if (m && !m.exploded) mobSound(m, "death"); });
-  BF.on("mobExploded", (m, c) => { const p = c || (m && m.position); if (p) play("explode", { x: p.x, y: p.y, z: p.z }); });
-  BF.on("arrowShot", (m, from) => { const p = from || (m && m.position); if (p) play("bow", { x: p.x, y: p.y, z: p.z }); });
-  BF.on("chestOpened", (x, y, z) => play("door_open", { x: x + 0.5, y: y + 0.5, z: z + 0.5, pitch: 0.72, volume: 0.8 }));   // a lower, heavier creak
-  BF.on("chestClosed", (x, y, z) => play("door_close", { x: x + 0.5, y: y + 0.5, z: z + 0.5, pitch: 0.75, volume: 0.8 }));
-  BF.on("doorBroken", (m, x, y, z) => { play("door_bash", { x: x + 0.5, y: y + 1, z: z + 0.5 }); play("dig.wood", { x: x + 0.5, y: y + 1, z: z + 0.5 }); });
-  BF.on("villagerTrade", v => { if (v && v.position) play("villager_yes", Object.assign(mobPos(v), { pitch: vpitch(v) })); play("xp", { volume: 0.7 }); });
-  BF.on("villagerLevelUp", () => play("levelup", { delay: 0.15 }));
-  BF.on("lightning", e => {
-    if (!e) return;
+  blockHit: e => { const now = performance.now(); if (now - lastHitT >= 200) { lastHitT = now; blockSound("hit", e.id, e.x, e.y, e.z); } },
+  playerEating: () => { const now = performance.now(); if (now - lastEatT >= 210) { lastEatT = now; play("eat"); } },
+  playerAte: () => play("burp", { delay: 0.05 }),
+  playerDamaged: () => play("hurt"),
+  mobHurt: e => mobSound(asMob(e), "hurt"),
+  mobKilled: e => mobSound(asMob(e), "death"),
+  mobExploded: e => play("explode", { x: e.x, y: e.y, z: e.z }),
+  arrowShot: e => play("bow", { x: e.x, y: e.y, z: e.z }),
+  chestOpened: e => play("door_open", { x: e.x + 0.5, y: e.y + 0.5, z: e.z + 0.5, pitch: 0.72, volume: 0.8 }),   // a lower, heavier creak
+  chestClosed: e => play("door_close", { x: e.x + 0.5, y: e.y + 0.5, z: e.z + 0.5, pitch: 0.75, volume: 0.8 }),
+  doorBroken: e => { play("door_bash", { x: e.x + 0.5, y: e.y + 1, z: e.z + 0.5 }); play("dig.wood", { x: e.x + 0.5, y: e.y + 1, z: e.z + 0.5 }); },
+  door: e => play(e.open ? "door_open" : "door_close", { x: e.x + 0.5, y: e.y + 1, z: e.z + 0.5 }),   // (js/world.js setDoor: players and villagers)
+  villagerTrade: e => { if (e.x != null) play("villager_yes", Object.assign(mobPos(asMob(e)), { pitch: vpitch(asMob(e)) })); play("xp", { volume: 0.7 }); },
+  villagerLevelUp: () => play("levelup", { delay: 0.15 }),
+  lightning: e => {
     const p = BF.player && BF.player.position;
-    const dist = e.dist != null ? e.dist : p ? Math.hypot(e.x - p.x, e.z - p.z) : 50;
+    const dist = e.dist != null ? e.dist : p ? Math.hypot(e.lx - p.x, e.lz - p.z) : 50;
     const near = dist < 48;
     play(near ? "thunder_near" : "thunder_far", { volume: near ? 1 : clamp(1.3 - dist / 250, 0.35, 1), delay: Math.min(3.5, dist / 340 * 3) });
+  },
+  gameModeChanged: () => { music.mood = null; },
+  worldLoaded: () => { pl.init = false; },
+};
+let worldGen = -1;
+function hook() {
+  if (!BF.proto || !BF.proto.listen) return;
+  BF.proto.listen(list => {
+    for (const e of list) if (e.kind === "sound" && SOUND[e.ev]) { try { SOUND[e.ev](e); } catch (err) { console.error(err); } }
   });
-  BF.on("gameModeChanged", () => { music.mood = null; });
-  BF.on("newWorld", () => { stopMusic(1); music.wait = rnd(30, 60); pl.init = false; });
-  BF.on("worldLoaded", () => { pl.init = false; });
-  // doors (player and villagers go through world.setDoor): wrap it once
-  const W = BF.world;
-  if (W && W.setDoor && !W.setDoor._snd) {
-    const orig = W.setDoor;
-    W.setDoor = function (x, y, z, open) {
-      const before = BF.blocks[W.getBlock(x, y, z)], was = before && before.door ? before.door.open : null;
-      const res = orig.apply(this, arguments);
-      if (res != null && res !== was) play(res ? "door_open" : "door_close", { x: x + 0.5, y: y + 1, z: z + 0.5 });
-      return res;
-    };
-    W.setDoor._snd = true;
-  }
+}
+// a new world (the client's mirror starts over): the music stops and the player's movement sounds start fresh
+function newWorld() {
+  const W = BF.client && BF.client.world;
+  if (!W || W.gen === worldGen) return;
+  if (worldGen !== -1) { stopMusic(1); music.wait = rnd(30, 60); }
+  worldGen = W.gen; pl.init = false;
 }
 
 // ---------- settings UI (injected into the pause menu) ----------

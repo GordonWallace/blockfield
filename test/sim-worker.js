@@ -43,12 +43,12 @@ async function open(b, url) {
   pg.on('pageerror', e => console.log('PAGEERROR', (e.stack || e.message).slice(0, 600)));
   pg.on('console', m => { if (m.type() === 'error' && !/GL Driver/.test(m.text())) console.log('console.error:', m.text().slice(0, 400)); });
   await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
-  // frame times: how long each of the game's frames (js/main.js frame) takes on the page's thread, for the report. (Frames a second
+  // frame times: how long each of the game's frames (js/main.js frame) takes on the page's thread, less drawing, for the report. (Frames a second
   // mean little here: the software renderer the tests draw with takes most of the machine.)
   await pg.addInitScript(() => {
     const raf = window.requestAnimationFrame.bind(window);
-    window.__ft = [];
-    window.requestAnimationFrame = cb => cb.name !== 'frame' ? raf(cb) : raf(t => { const t0 = performance.now(); cb(t); window.__ft.push(performance.now() - t0); if (window.__ft.length > 20000) window.__ft.splice(0, 10000); });
+    window.__ft = []; window.__rt = 0;   // (less the time in renderer.render: the software renderer's, not the game's)
+    window.requestAnimationFrame = cb => cb.name !== 'frame' ? raf(cb) : raf(t => { const t0 = performance.now(); window.__rt = 0; cb(t); window.__ft.push(performance.now() - t0 - window.__rt); if (window.__ft.length > 20000) window.__ft.splice(0, 10000); });
   });
   await pg.goto(url);
   await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
@@ -71,12 +71,16 @@ async function playDay(pg, mode) {
   check(r.village, `${mode}: the player is at the village nearest the spawn`);
   await pg.waitForTimeout(8000);   // chunks and villagers round the village
   const day0 = await pg.evaluate(() => BF.client.world.clock ? BF.client.world.clock.day + BF.client.world.clock.time : -1);
-  await pg.evaluate(() => { window.__ft.length = 0; BF.warp.set(4); });   // 100x
+  await pg.evaluate(() => {
+    const R = BF.renderer, draw = R.render.bind(R);
+    if (!R.__timed) { R.__timed = true; R.render = (s, c) => { const t0 = performance.now(); draw(s, c); window.__rt += performance.now() - t0; }; }
+    window.__ft.length = 0; BF.warp.set(4);   // 100x
+  });
   const t0 = Date.now();
   await pg.waitForFunction(d0 => { const c = BF.client.world.clock; return c && c.day + c.time >= d0 + 1; }, day0, { timeout: 900000, polling: 1000 });
   const real = (Date.now() - t0) / 1000;
-  const fr = await pg.evaluate(() => { const a = window.__ft.slice().sort((x, y) => x - y); return { n: a.length, avg: a.reduce((s, v) => s + v, 0) / Math.max(1, a.length), p95: a[Math.floor(a.length * 0.95)] || 0, max: a[a.length - 1] || 0 }; });
-  console.log(`${mode}: a game day at 100x in ${real.toFixed(0)} s real (${(1200 / real).toFixed(0)}x); page frames ${fr.n} (${(fr.n / real).toFixed(1)} a second), ${fr.avg.toFixed(2)} ms avg, p95 ${fr.p95.toFixed(2)} ms, max ${fr.max.toFixed(1)} ms`);
+  const fr = await pg.evaluate(() => { const a = window.__ft.slice().sort((x, y) => x - y); return { drawn: BF.world.meshedCount(), calls: BF.renderer.info.render.calls, n: a.length, avg: a.reduce((s, v) => s + v, 0) / Math.max(1, a.length), p95: a[Math.floor(a.length * 0.95)] || 0, max: a[a.length - 1] || 0 }; });
+  console.log(`${mode}: a game day at 100x in ${real.toFixed(0)} s real (${(1200 / real).toFixed(0)}x); page frames ${fr.n} (${(fr.n / real).toFixed(1)} a second), ${fr.avg.toFixed(2)} ms avg, p95 ${fr.p95.toFixed(2)} ms, max ${fr.max.toFixed(1)} ms; ${fr.drawn} chunks drawn, ${fr.calls} draw calls`);
   await pg.evaluate(() => BF.warp.set(0));
   const seen = await pg.evaluate(() => { const E = [...BF.client.world.entities.values()]; return { villagers: E.filter(e => e.kind === "mob" && e.type === "villager").length, mobs: E.length, villages: BF.client.world.villages.size }; });
   check(seen.villagers > 0 && seen.villages > 0, `${mode}: villagers in the client's mirror (${seen.villagers} villagers, ${seen.mobs} entities, ${seen.villages} villages)`);

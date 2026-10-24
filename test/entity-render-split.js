@@ -173,6 +173,7 @@ module.exports = async (pg, out) => {
       Math.random = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
       try {
         (${fn})(${JSON.stringify({ st: stage })});
+        if (BF.proto) BF.proto.flush(true);   // (r15-37: effects reach the render layer through the protocol's events message)
         if (BF.entityView) BF.entityView.render(0, 0);
       } finally { Math.random = rand; }
     })()`);

@@ -640,6 +640,8 @@ const css = `
 .bf-fstat { font: 11px/1.4 var(--mono); color: var(--muted); max-width: calc(var(--s) * 3); }
 .bf-tx { position: absolute; inset: 0; display: none; place-items: center; color: var(--danger); font: calc(var(--s) * .6) / 1 var(--display); }
 .bf-tx.on { display: grid; }
+.bf-wait { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 6px 12px; background: var(--panel); border: 1px solid var(--panel-edge); color: var(--muted); font: 12px var(--mono); z-index: 3; }
+.bf-wait[hidden] { display: none; }
 .bf-thead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .bf-thead h2 { margin: 0; }
 .bf-lvl { font: calc(var(--s) * .3) / 1 var(--display); color: var(--accent); }
@@ -822,6 +824,7 @@ function buildDOM() {
   paySlots = [0, 1].map(i => makeSlot("", "pay", i));
   const [tarrow] = progEl("bf-parrow", S.arrowOff, S.arrowOff);
   txEl = div("bf-tx", tarrow); txEl.textContent = "X";
+  waitEl = div("bf-wait", panelEl); waitEl.textContent = "Waiting for the world\u2026"; waitEl.hidden = true;   // a slow "chest" / "trades" answer (r15-37)
   tresEl = makeSlot("bf-big", "tres");
   tradeEl.append(paySlots[0], paySlots[1], tarrow, tresEl);
 
@@ -939,12 +942,12 @@ function toggleRecipes(force) {
 }
 function hover(target) {
   const row = target && target.closest && target.closest(".bf-offer");
-  if (row && villager && !cursor) {
-    const o = villager.trades[+row.dataset.i];
+  if (row && TV && !cursor) {
+    const o = TV.trades[+row.dataset.i];
     if (o) {
       const cost = o.buy.map(b => b.n + " " + nameOf(b.id)).join(" + ");
-      const why = tradeReason(o);
-      showTipText(cost + " \u2192 " + o.sell.n + " " + nameOf(o.sell.id) + "\n" + (why || "In stock: " + BF.trades.inv.count(villager.inv, o.sell.id)), false);
+      const why = o.reason;
+      showTipText(cost + " \u2192 " + o.sell.n + " " + nameOf(o.sell.id) + "\n" + (why || "In stock: " + o.stock), false);
       return;
     }
   }
@@ -963,7 +966,8 @@ function stackIn(c, i) {
   if (c === "result") return result;
   if (c === "tres") return tradeResult;
   if (c === "pal") return { id: i, count: 1 };
-  if (c === "vinv") return villager && villager.inv ? villager.inv[i] : null;
+  if (c === "vinv") return TV && TV.inv ? TV.inv[i] : null;   // (as shown: the "trades" answer)
+  if (c === "chest") return CV ? CV.slots[i] : null;           // (the "chest" answer)
   if (c === "trash") return null;
   const arr = arrFor(c);
   return arr ? arr[i] : null;
@@ -1193,18 +1197,13 @@ function renderAll() {
   } else if (mode === "furnace" && furnace) {
     for (let i = 0; i < 3; i++) setSlot(fSlots[i], furnace.slots[i]);
     renderFurnaceProgress();
-  } else if (mode === "chest" && chest) {
-    for (let i = 0; i < CHEST_SIZE; i++) setSlot(chestSlotEls[i], chest.slots[i]);
+  } else if (mode === "chest") {
+    askViews(); drawViews();   // the chest's slots: the simulation's answer (askViews)
   } else if (mode === "trade") {
     setSlot(paySlots[0], pay[0]); setSlot(paySlots[1], pay[1]);
-    const vi = villager && villager.inv;
-    vSlotEls[0].parentNode.classList.toggle("edit", vinvEditable());
-    for (let i = 0; i < vSlotEls.length; i++) setSlot(vSlotEls[i], vi ? vi[i] : null);
     setSlot(tresEl, tradeResult);
     tresEl.classList.toggle("has", !!tradeResult);
-    const o = villager && villager.trades[offerSel];
-    txEl.classList.toggle("on", !!(o && tradeReason(o)));
-    renderOffers();
+    askViews(); drawViews();   // the villager's inventory and offers: the simulation's answer
   }
   for (const el of backEl.querySelectorAll(".bf-ghost")) el.classList.remove("bf-ghost");
   let held = cursor;
@@ -1238,8 +1237,8 @@ function renderFurnaceProgress() {
 }
 let offersKey = "";
 function renderOffers() {
-  const v = villager;
-  const key = v ? v.trades.map(o => (tradeReason(o) || "") + o.buy.map(b => b.id + "x" + b.n).join("+") + ">" + o.sell.id + "x" + o.sell.n).join("|") + "#" + offerSel + "#" + v.level : "-";   // amounts too: prices move (js/prices.js)
+  const v = TV;   // the "trades" answer (askViews)
+  const key = v ? v.trades.map(o => (o.reason || "") + o.buy.map(b => b.id + "x" + b.n).join("+") + ">" + o.sell.id + "x" + o.sell.n).join("|") + "#" + offerSel + "#" + v.level : "-";   // amounts too: prices move (js/prices.js)
   if (key !== offersKey) {
     offersKey = key;
     offersEl.textContent = "";
@@ -1250,7 +1249,7 @@ function renderOffers() {
       const extra = x => !!(x.spare || x.need || x.feed);
       if (extra(o) && (i === 0 || !extra(v.trades[i - 1]))) { const d = div("bf-osep", offersEl); d.textContent = "Spare goods and needs"; }
       const row = document.createElement("button"); row.type = "button";
-      row.className = "bf-offer" + (i === offerSel ? " sel" : "") + (tradeReason(o) ? " out" : "");
+      row.className = "bf-offer" + (i === offerSel ? " sel" : "") + (o.reason ? " out" : "");
       row.dataset.i = i;
       const cell = st => {
         const c = div(st ? "bf-oc" : "");
@@ -1258,7 +1257,7 @@ function renderOffers() {
           if (st.n > 1) { const b = document.createElement("b"); b.textContent = st.n; c.appendChild(b); } }
         return c;
       };
-      const ar = document.createElement("span"); ar.className = "ar"; ar.textContent = tradeReason(o) ? "X" : "\u2192";
+      const ar = document.createElement("span"); ar.className = "ar"; ar.textContent = o.reason ? "X" : "\u2192";
       row.append(cell(o.buy[0]), cell(o.buy[1]), ar, cell(o.sell));
       row.setAttribute("aria-label", o.buy.map(b => b.n + " " + nameOf(b.id)).join(" + ") + " for " + o.sell.n + " " + nameOf(o.sell.id));
       if (o.note) row.title = o.note;   // e.g. a stable horse's stats (js/stables.js)
@@ -1268,8 +1267,8 @@ function renderOffers() {
   if (v) {
     const lvl = v.level || 1;
     const prof = (v.profession || "villager").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    const st = BF.villagerStatus ? BF.villagerStatus.text(v) : "";   // what the villager is doing (js/villagerstatus.js)
-    const vn = BF.vlog ? BF.vlog.nameOf(v) : "";                      // villager names (js/villagelog.js)
+    const st = v.status;   // what the villager is doing (js/villagerstatus.js)
+    const vn = v.name;     // villager names (js/villagelog.js)
     titleEl.textContent = (vn ? vn + ", " : "") + (st ? prof + " \u2014 " + st : prof);
     vinvTitleEl.textContent = vn ? vn + "'s Inventory" : prof + " Inventory";
     lvlEl.textContent = levelFlashT > 0 ? "Level up! " + LEVELS[lvl - 1] : LEVELS[lvl - 1];
@@ -1344,7 +1343,7 @@ function layoutFor(m) {
     setTab(creTab);
   } else if (trade) {
     // title/level set in renderOffers
-  } else if (m === "chest") titleEl.textContent = "Chest \u2014 " + ownerLabel(chest) + (chestLocked() ? " (look only)" : "");
+  } else if (m === "chest") titleEl.textContent = "Chest \u2014 " + (CV ? CV.label + (CV.locked ? " (look only)" : "") : "");
   else titleEl.textContent = m === "crafting" ? "Crafting Table" : m === "furnace" ? "Furnace" : "Crafting";
 }
 
@@ -1400,6 +1399,8 @@ function openScreen(m) {
 function closeScreen(silent) {
   if (!open_) return;
   open_ = false; drag = null;
+  if (!silent) viewTarget = null;   // (silent: another screen is opening, its target already set)
+  CV = TV = null; viewAsk = null; if (waitEl) waitEl.hidden = true;
   for (let i = 0; i < grid.length; i++) { giveBack(grid[i]); grid[i] = null; }
   for (let k = 0; k < 2; k++) { giveBack(pay[k]); pay[k] = null; }
   giveBack(cursor); cursor = null; result = null;
@@ -1446,10 +1447,68 @@ function openTrade(v) {
 function act(kind, data, run) {
   if (BF.req && BF.req.player) BF.req.player(kind, null, data);
   else run(data);
+  askViews();
+}
+
+// ---------------------------------------------------------------- what the chest and trade screens show (spec r15-37)
+// The screens draw a chest's slots and a villager's offers, inventory, level and status from the simulation's answers to "chest" and
+// "trades" queries (js/protocol.js), not from the chest record or the mob, so they can show a world simulated elsewhere (a worker or a
+// server). They ask on opening, after every action, and four times a second while open (live updates: a villager taking from the chest,
+// prices moving). In the page the answer comes at once; when the first one takes longer than 300 ms the screen says "Waiting for the
+// world..." instead of freezing (later answers keep the last one up meanwhile). viewTarget is the screen asked about ({chest: pos} | {trade: id}), CV and TV the latest answers.
+let viewTarget = null, CV = null, TV = null, viewAsk = null, viewT = 0, waitEl = null;
+function askViews() {
+  if (!open_ || !viewTarget) return;
+  const C = BF.client, q = viewTarget.chest ? ["chest", viewTarget.chest] : ["trades", { id: viewTarget.trade }];
+  if (!C || !C.query) return;
+  if (viewAsk) return;   // one at a time; the next ask follows the answer
+  const ask = viewAsk = { at: performance.now(), target: viewTarget };
+  viewT = 0;
+  C.query(q[0], q[1], r => {
+    if (viewAsk === ask) viewAsk = null;
+    const ms = performance.now() - ask.at;
+    if (ms > 300 && BF.glog) BF.glog.log("INFO", "client", "The " + q[0] + " screen waited " + Math.round(ms) + " ms for the world's answer");
+    if (ask.target !== viewTarget || !open_) return;
+    if (viewTarget.chest) { const lab = CV && CV.label, lk = CV && CV.locked; CV = r && r.ok ? r : null; if (CV && (CV.label !== lab || CV.locked !== lk)) layoutFor(mode); }
+    else { TV = r && r.ok ? r : null; offersKey = ""; }
+    drawViews();
+  });
+}
+// draws the answer (the parts of the screen that come from it)
+function drawViews() {
+  if (waitEl) waitEl.hidden = !(open_ && viewAsk && !(CV || TV) && performance.now() - viewAsk.at > 300);   // (live updates keep the last answer up)
+  if (!open_) return;
+  if (mode === "chest") for (let i = 0; i < CHEST_SIZE; i++) setSlot(chestSlotEls[i], CV ? CV.slots[i] : null);
+  else if (mode === "trade") {
+    const vi = TV && TV.inv;
+    vSlotEls[0].parentNode.classList.toggle("edit", !!(TV && TV.editable));
+    for (let i = 0; i < vSlotEls.length; i++) setSlot(vSlotEls[i], vi ? vi[i] : null);
+    const o = TV && TV.trades[offerSel];
+    txEl.classList.toggle("on", !!(o && o.reason));
+    renderOffers();
+  }
+}
+// The answers, worked out on the simulation's side (the protocol's "chest" and "trades" queries call these).
+const copyStack = s => (s ? (s.wear > 0 ? { id: s.id, count: s.count, wear: s.wear } : { id: s.id, count: s.count }) : null);
+function chestView(a) {
+  const key = `${a.x},${a.y},${a.z}`, c = chests.get(key);
+  if (!BF.isChest(BF.world.getBlock(a.x, a.y, a.z))) return { ok: false, why: "gone" };
+  const slots = c ? c.slots.map(copyStack) : new Array(CHEST_SIZE).fill(null);
+  return { ok: true, key, slots, label: ownerLabel(c || null), locked: !!c && ((!!c.owner && c.owner !== "player") || !!reservedFor(c)) && !isCreative() };
+}
+function tradeView(a) {
+  const v = a.id != null && BF.ids ? BF.ids.get(a.id) : null;
+  if (!v || v.dead || v.removed || !v.trades) return { ok: false, why: "gone" };
+  return { ok: true, id: a.id, level: v.level || 1, xp: v.xp || 0, profession: v.profession || null,
+    name: BF.vlog ? BF.vlog.nameOf(v) : "", status: BF.villagerStatus ? BF.villagerStatus.text(v) : "",
+    inv: v.inv ? v.inv.map(copyStack) : null, editable: isCreative() && !!v.inv,
+    trades: v.trades.map(o => ({ buy: o.buy.map(b => ({ id: b.id, n: b.n })), sell: { id: o.sell.id, n: o.sell.n }, reason: BF.trades.blockReason(v, o) || null,
+      stock: v.inv ? BF.trades.inv.count(v.inv, o.sell.id) : 0, spare: !!o.spare, need: !!o.need, feed: !!o.feed, note: o.note || null })) };
 }
 if (BF.req) {
   const on = (kind, fn) => BF.req.on(kind, req => fn(req.data) || { ok: true });
   on("player.screen", d => {
+    viewTarget = d.trade != null ? { trade: d.trade } : d.open === "chest" && d.pos ? { chest: d.pos } : null;   // (a replayed request too)
     if (d.close) { closeScreen(false); return; }
     if (d.trade != null) {
       const v = BF.ids && BF.ids.get(d.trade);
@@ -1524,8 +1583,9 @@ const api = {
       if (mode === "trade" && villager) {
         if (villager.dead || villager.removed) { api.close(); return; }
         if (levelFlashT > 0) levelFlashT -= dt;
-        renderOffers();
       }
+      // live updates of what the chest and trade screens show: asked again four times a second (r15-37)
+      if (mode === "chest" || mode === "trade") { viewT += dt; if (viewT >= 0.25) askViews(); drawViews(); }
       const held = !heldEl.classList.contains("on") ? null : true;
       if (held) heldEl.style.transform = `translate(${mouseX - 20}px, ${mouseY - 20}px)`;
       if (tipEl.classList.contains("on")) { if (performance.now() > tipUntil) hideTip(); else placeTip(); }
@@ -1603,12 +1663,15 @@ const api = {
   // mode: "inventory" (creative menu in creative mode) | "crafting" | "furnace" / "chest" (pos = {x,y,z} of the block) | "creative"
   open(m = "inventory", pos) {
     if (!backEl) return;
+    viewTarget = m === "chest" && pos ? { chest: { x: pos.x, y: pos.y, z: pos.z } } : null; CV = TV = null;
     act("player.screen", { open: m, pos: pos ? { x: pos.x, y: pos.y, z: pos.z } : null }, () => openFor(m, pos));
   },
   // Villager trade screen. Offers live on the mob: villager.trades / level / xp (generated on first open).
   openTrade(v) {
     if (!backEl || !v) return;
-    act("player.screen", { trade: BF.ids ? BF.ids.idOf(v) : null }, () => openTrade(v));
+    const id = BF.ids ? BF.ids.idOf(v) : null;
+    viewTarget = { trade: id }; CV = TV = null;
+    act("player.screen", { trade: id }, () => openTrade(v));
   },
   ensureTrades,
   close() { act("player.screen", { close: true }, () => closeScreen(false)); },
@@ -1622,6 +1685,9 @@ const api = {
     furnaceStep(h);
   },
   chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
+  // r15-37: the answers to the protocol's "chest" ({x, y, z}) and "trades" ({id}) queries, worked out here on the simulation's side
+  chestView, tradeView,
+  views: () => ({ target: viewTarget, chest: CV, trade: TV, waiting: !!viewAsk }),   // what the screens show now (tests)
   // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
   chestAdd(x, y, z, itemId, count = 1, wear = 0) {   // wear: uses spent on a worn tool
     if (!BF.items[itemId] || itemId === 0 || !(count > 0)) return count || 0;
