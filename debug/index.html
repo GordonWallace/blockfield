@@ -339,6 +339,8 @@
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
     <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
       <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
+    <div class="card" id="c-budgetcard" title="Simulation budget (js/active.js, spec r15-34): villages beyond the nearest four are simulated while the simulation uses less than this share of each real second; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
+      <div class="big" id="c-budget">-</div><div class="sub" id="c-budget-sub"></div><div class="bar"><i id="b-budget"></i></div><div class="sub" id="c-budget-ex"></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
     <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
       <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
     <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
@@ -760,6 +762,7 @@ function renderTop(s) {
   spark($("s-fps"), hist.fps, "#7fbf4d", 60);
   spark($("s-queue"), hist.queue, "#79b8e8", 1);
   renderPerf(s.perf);
+  renderBudget(s.budget);
   renderRequests(s.requests);
 }
 
@@ -784,6 +787,19 @@ function renderHash(h) {
   $("c-hashparts").innerHTML = Object.entries(h.parts).map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
 }
 $("c-hashcopy").addEventListener("click", () => { if (snap && snap.hash && navigator.clipboard) navigator.clipboard.writeText(hashText(snap.hash)).catch(() => {}); });
+
+// the simulation budget (js/active.js): the share of each second the simulation used against the budget, the extra villages, and the decisions
+function renderBudget(b) {
+  $("c-budgetcard").hidden = !b;
+  if (!b) return;
+  const pc = f => Math.round(f * 100) + "%", on = b.on && b.budget > 0;
+  $("c-budget-st").textContent = on ? "budget " + pc(b.budget) : "off";
+  $("c-budget").innerHTML = `${b.villages} <small>villages simulated</small>`;
+  $("c-budget-sub").textContent = `${pc(b.used)} of each second used · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
+  $("b-budget").style.width = Math.min(100, Math.round(on ? b.used / b.budget * 100 : 0)) + "%";
+  $("c-budget-ex").textContent = b.extras.length ? "Extra: " + b.extras.map(e => `${e.name} (${e.d} blocks)`).join(", ") : "No extra villages";
+  $("c-budget-log").innerHTML = b.log.slice().reverse().map(e => `<div>day ${e.day.toFixed(2)} · ${esc(e.text)}</div>`).join("");
+}
 
 // the villager-seconds meter (js/perf.js): on while this screen is open; the sparkline is the game's last 2 minutes, one point a second
 function renderPerf(p) {
@@ -1668,7 +1684,7 @@ const gf = { levels: ["DEBUG"], kinds: [], villages: [], types: [] };   // what 
 try { Object.assign(gf, JSON.parse(localStorage.getItem(GSTORE) || "{}")); } catch (e) { /* private window: defaults */ }
 const gOff = { levels: new Set(gf.levels), kinds: new Set(gf.kinds), villages: new Set(gf.villages), types: new Set(gf.types) };
 const gSave = () => { try { localStorage.setItem(GSTORE, JSON.stringify({ levels: [...gOff.levels], kinds: [...gOff.kinds], villages: [...gOff.villages], types: [...gOff.types] })); } catch (e) {} };
-const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter", requests: "Request queue", trades: "Refused trades" };
+const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter", budget: "Simulation budget", requests: "Request queue", trades: "Refused trades" };
 const NOV = "(no village)";
 function glogSet(g) { glog = g && Array.isArray(g.lines) ? g : null; gDirty = true; gRender(); }
 function glogIn(g) {

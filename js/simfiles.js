@@ -15,7 +15,7 @@
   "js/textures-forester.js", "js/textures-furniture.js", "js/textures-miner.js", "js/textures-maps.js", "js/recipes-stone.js",
   "js/recipes-shapes.js", "js/recipes-panes.js", "js/recipes-jobs.js", "js/recipes-maps.js", "js/planet.js", "js/view.js",
   "js/planetgen.js", "js/planetrivers.js", "js/worldgen.js", "js/mesher.js", "js/world.js", "js/requests.js", "js/blockreqs.js",
-  "js/grid.js", "js/villagesim.js", "js/farmland.js", "js/grass.js", "js/light.js", "js/skylight.js", "js/sky.js",
+  "js/grid.js", "js/villagesim.js", "js/active.js", "js/farmland.js", "js/grass.js", "js/light.js", "js/skylight.js", "js/sky.js",
   "js/weather.js", "js/ids.js", "js/trading.js", "js/prices.js", "js/market.js", "js/toolwear.js", "js/perf.js", "js/mobs.js",
   "js/mobsave.js", "js/blueprints.js", "js/builder.js", "js/bridges.js", "js/jobs.js", "js/villagelife.js", "js/breeding.js",
   "js/shepherd.js", "js/poultry.js", "js/maps.js", "js/cartography.js", "js/tents.js", "js/explorer.js", "js/forester.js",

@@ -6,6 +6,7 @@
 //   blocks  block ticks (fluids, crops, farmland, grass), in a fixed order;
 //   deliver results, so the requester has them before its next think: req.then(fn) callbacks, and the kind's onResult(m, req, result)
 //           for a requester that is a live mob. A requester removed by then gets nothing (what the request did stays done).
+// A request whose requester mob is dead by the time it applies (killed earlier in the same apply) is refused with why "dead".
 // Requests sent during apply or deliver (chain effects), or between ticks (the player, real time), go into the next tick's apply.
 // Transition mode (BF.req.direct, on until r15-18 to r15-23 convert the systems): code may still write the world directly. Every
 // direct world.setBlock outside apply and the block ticks is counted by the module that made it (BF.req.stats().direct), shown on
@@ -60,7 +61,8 @@ function on(kind, applyFn, opts) { kinds.set(kind, { apply: applyFn, onResult: o
 function applyOne(req) {
   const k = kinds.get(req.kind);
   let r;
-  if (!k) {
+  if (dead(req.from)) r = { ok: false, why: "dead" };   // killed earlier in this apply (r15-23): its own requests are refused, items stay put
+  else if (!k) {
     r = { ok: false, why: "no handler" };
     if (!unhandled.has(req.kind)) { unhandled.add(req.kind); if (BF.glog) BF.glog.log("ERROR", "requests", "Request kind \"" + req.kind + "\" has no handler (from " + (req.from || "nobody") + ")"); }
   } else {
@@ -84,6 +86,12 @@ function apply() {
   return list.length;
 }
 
+// A requester that has died (a mob killed by an earlier request this tick, spec r15-23). A removed one (unloaded) still has its requests applied.
+function dead(from) {
+  if (from == null || !BF.ids || !/^e\d+$/.test(from)) return false;
+  const o = BF.ids.get(from);
+  return !!(o && o.dead);
+}
 // A requester that is gone: an entity id that no longer reads a live object.
 function gone(from) {
   if (from == null || !BF.ids || !/^e\d+$/.test(from)) return false;

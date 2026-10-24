@@ -376,7 +376,7 @@ function fend(m, Q, dt) {
   if (BF.dcmp && BF.dcmp.on()) { const L = BF.mobs.list; BF.dcmp.check("miner fend", L.indexOf(L.find(near)), L.indexOf(o), m); }
   if (!o) return;
   Q.hitT = 0.8; m.ai.swingT = 0.3;
-  BF.mobs.hurt(o, 2 + BF.items[p.id].tool.tier, "villager");
+  BF.mobs.hurt(o, 2 + BF.items[p.id].tool.tier, "villager", m);
   wearPick(m, p, BF.toolWear.forHit(p));
   log("fend", m, { mob: o.type });
 }

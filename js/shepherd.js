@@ -49,9 +49,7 @@ const TR = () => BF.trades;
 const cnt = (m, id) => (id == null || !m.inv ? 0 : TR().inv.count(m.inv, id));
 const idsOf = () => ({ wheat: BF.I.wheat_item, wool: BF.I.white_wool, shears: BF.I.shears, mutton: BF.I.raw_mutton });
 
-let ids = 0;
-const idOf = new WeakMap();
-const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };
+const mid = m => +String(m.id).slice(1);   // the mob's stable id number (js/ids.js): which of a pair breeds (r15-23)
 
 // ---------------------------------------------------------------- sheep state
 function stOf(m) {
@@ -141,7 +139,12 @@ function mateIn(L, m, t) {
   }
   return near >= LOCAL_MAX ? null : best;
 }
+// In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
+// when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+}
+function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const lamb = BF.mobs.spawn("sheep", x, y, z);
   if (!lamb) return null;
@@ -512,9 +515,10 @@ function perform(m, tk) {
   }
   // cull: the shepherd keeps the mutton (and the wool the sheep still wears) instead of dropping it
   const wool = o.sheep && !o.sheep.shorn;
-  BF.mobs.hurt(o, 999, "a shepherd");
-  loot(m, c.mutton, rndInt(RS(m), 1, 2), o);
-  if (wool) loot(m, c.wool, 1, o);
+  BF.mobs.cull(o, "a shepherd", m, () => {   // its loot once the kill has applied (a request in the think phase, r15-23)
+    loot(m, c.mutton, rndInt(RS(m), 1, 2), o);
+    if (wool) loot(m, c.wool, 1, o);
+  });
   return true;
 }
 const ACT = { feed: 0.7, shear: 1.1, cull: 0.8 };
@@ -661,7 +665,7 @@ if (BF.texKit) {
 
 BF.shepherd = {
   FEED_DAYS, BREED_CD, LAMB_DAYS, REGROW_DAYS, PEN_DENSITY,
-  feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb,
+  feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb, breed,
   STOCK_TO, FIND_R,
   pensOf, penOf, hasLoom, tended, wheatWanted, ensureKit, ai, tick, statusText, pickPenTarget, contain,
   WOOL_KEEP, STRING_CAP, SPIN_BATCH, SPIN_HOURS, spinnable, wantsSpin, work,

@@ -10,6 +10,7 @@ const JS = path.join(__dirname, "..", "js");
 
 // Whole files: nothing in them decides what happens in the simulation.
 const FILES = {
+  "active.js": "the simulation budget (spec r15-34): which villages beyond the minimum rule run is chosen by the machine's spare real time on purpose; off in automated browsers, so tests and determinism checks see the distance rule",
   "audio.js": "sound",
   "commands.js": "chat lines fading out",
   "cracks.js": "block-breaking crack animation",
@@ -54,6 +55,7 @@ const LINES = [
   ["boot.js", "chunks + \" chunks loaded in \" + ((performance.now() - t0) / 1000).toFixed(1)", "the headless boot's own timing (above)"],
   ["timewarp.js", "const now = performance.now();\n  if (n > 0) droppedAll += n;", "the dropped-ticks WARN in the game log, at most once a real minute (r15-10)"],
   ["boot.js", "performance.now() - t0 < W.BUDGET_MS", "steps per frame within BUDGET_MS (above)"],
+  ["boot.js", "if (BF.active) BF.active.frame(performance.now() - t0, raw);", "the frame's simulation ms for the budget (js/active.js, r15-34)"],
   ["mobs.js", "const t0 = performance.now(), a = findPathFast(", "BF.debug.pathCompare timing of findPath vs findPathOld (r15-05, debug only; the route returned doesn't depend on it)"],
   ["mobs.js", "const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0;", "villager AI ms for the debug screen only (the force-unload limit counts updates, aiWork)"],
   ["villagesim.js", "check(px, pz, realClock, performance.now() / 1000)", "re-check on real time only while the world doesn't step (0x, paused), or for a new pin before the next step"],

@@ -11,12 +11,27 @@ Villagers only exist while the ground under them is loaded. To keep villages ali
 - A village whose edge is within 100 blocks of you **always** runs, whatever the limits.
 - A village that a [[page:caravans|caravan]] is travelling to or from also runs until the trip is over.
 
+These rules are the **minimum**. Villages beyond the nearest four stay simulated when the computer has time to spare (see "More villages when the computer has time to spare" below).
+
 A running village keeps the terrain of its area and 16 blocks around it loaded as data only. Its villagers follow their normal day: [[villager:farmer|farmers]] farm, [[villager:builder|builders]] build, everybody eats, trades and sleeps. A villager who walks out of the village, such as a [[villager:forester]] or a [[villager:shepherd]] leading a sheep, keeps a window of 5 by 5 chunks around itself loaded, so it always has ground to walk on.
 
 On the [[page:the-planet|planet]] these distances are measured on the planet itself, across the edges between the cube's faces. A villager who walks over an edge keeps its ground loaded on the far side, and a caravan's road is kept loaded the whole way, whichever faces it crosses. Villages always sit several hundred blocks from a face edge (see [[page:villages]]), so the 200 and 216 block limits are always reached on the village's own face.
 
+## More villages when the computer has time to spare
+The game measures how much of each real second the simulation takes. The pause menu's **Simulated villages** button shows how many villages are running and the budget, for example "Simulated villages: 6 (budget 40%)". Click it to choose 20%, 40% (the default), 60%, 80% or off; the choice is remembered.
+
+- If the simulation has used less than the budget for 10 seconds in a row, the next nearest village that is not running yet, up to 1000 blocks away, starts running too. It loads exactly as a nearby village does, and its villagers come out and carry on with their day. A village is only added if the time it is expected to take still fits in the budget.
+- If the simulation has used more than the budget for 10 seconds in a row, the farthest of these extra villages stops, through the usual countdown below, so its villagers finish their tasks first. It is not picked again for 5 minutes.
+- Nothing is stopped within 60 seconds of a village being added, and no village is added while the game runs under 30 frames a second at normal speed. This keeps the set from flickering.
+- The extra villages' terrain may take up at most 500 MB of memory between them (a village holds about 5 to 7 MB).
+- An extra village more than 1000 blocks from you stops the same way.
+- The budget is per real second, so when you fast-forward each village costs more of it and fewer extra villages fit. Speed and the number of villages trade one for one. On a slow computer the game never runs fewer villages than the minimum rules above.
+- Extra villages do not count toward the safety valve's limits below. While any are running, the budget sheds them instead of the safety valve stopping villages.
+
+Each village that joins or leaves for the budget, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). The debug screen's Simulation budget card shows the budget, how much of it is in use, the extra villages and the latest decisions.
+
 ## The countdown before a village stops
-When a village would stop, because you moved away or because other villages pushed it out of the nearest four, it does not stop at once. It counts down.
+When a village would stop, because you moved away, because other villages pushed it out of the nearest four, or because the simulation went over its budget, it does not stop at once. It counts down.
 
 1. Each villager works out how long it needs to finish what it is doing: the walk there and back and the work itself, plus a 25% margin. A [[villager:builder]] times its own pace while it builds and bases the estimate for the rest of the structure on it.
 2. The longest estimate sets the village's timer. It is never longer than 2 game days.
@@ -35,6 +50,8 @@ A safety valve stops villages early if the game would otherwise slow down. It ac
 - more than 1500 chunks held for villages beyond your view distance;
 - more than 300 villager thinking updates a game step, averaged over about 5 game seconds (about 6 milliseconds of thinking). It counts work rather than measuring time, so the same villages stop on a fast computer and a slow one;
 - more than 10 villages running or counting down.
+
+Extra villages running for the budget are left out of these counts, and the second limit is not checked while any of them run: the budget takes them off gracefully first.
 
 Villages are then stopped one at a time until all three are under their limits, in this order: villages counting down (farthest first), then villages a merchant is travelling to and has not yet reached, then running villages beyond 100 blocks of you (farthest first). A village within 100 blocks is never stopped this way.
 

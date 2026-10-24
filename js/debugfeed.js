@@ -309,6 +309,7 @@ function snapshot() {
     alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
     // the villager-seconds meter (js/perf.js), on while the screen gets the feed: figures and the last 2 minutes of V·s/s
     perf: BF.perf && BF.perf.on ? Object.assign(BF.perf.stats() || {}, { hist: BF.perf.history() }) : undefined,
+    budget: BF.active ? BF.active.feed() : undefined,   // the simulation budget and its decisions (js/active.js, spec r15-34)
     requests: BF.req ? BF.req.stats() : undefined,   // the request queue and transition-mode direct writes by module (js/requests.js)
     hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running

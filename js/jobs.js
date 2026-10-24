@@ -517,6 +517,28 @@ function tick(dt) {
   }
 }
 // ---------------------------------------------------------------- walking to a jobsite (unemployed villagers)
+function seekGiveUp(m, sk, k, lost) {
+  sk.avoid[k] = BF.simNow() + (lost ? 15 : SEEK_AVOID); sk.site = null; sk.cd = lost ? rnd(RS(m), 0.5, 2) : rnd(RS(m), 3, 8); m.ai.route = null; endTask(m);
+  return false;
+}
+// The "jobsite" claim of a villager that walked to a block (spec r15-23): in the think phase a request, so of two villagers reaching one
+// block in a tick the first by id gets it and the other picks again. free: nobody else holds or is owed it, and the villager may take it.
+// On success it takes the block and looks at it for a while.
+BF.claims.kind("jobsite", {
+  free(m, d) {
+    const s = d.site, W = BF.world;
+    if (m.type !== "villager" || m.profession === "nitwit") return "can't work";
+    if (W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id) return "gone";
+    return claimedByOther(pk(s.x, s.y, s.z), m) ? "taken" : !mayTake(m, s) ? "not its trade" : null;
+  },
+  take: (m, d) => { hire(m, d.site); },
+  result(m, ok, d) {
+    const sk = m.seek;
+    if (sk) sk.asked = null;
+    if (ok) { if (sk) m.seek = null; if (m.job) { m.job.mode = "work"; m.job.t = rnd(RS(m), 4, 8); } endTask(m); }
+    else if (sk && sk.site) seekGiveUp(m, sk, pk(d.site.x, d.site.y, d.site.z), true);
+  },
+});
 // A villager without a job picks the nearest free jobsite block (one it may take: experienced ones only their own profession), walks to it
 // and takes it on arrival if nobody got there first: the claim happens at the block, not from afar. The loser of a race picks again.
 const SEEK_MAX = 120;             // seconds before a walk is given up
@@ -547,7 +569,11 @@ function seekAI(m, dt, out, nav) {
     sk.site = s; sk.t = 0; sk.route = false; ai.route = null;
   }
   const s = sk.site, k = pk(s.x, s.y, s.z), W = BF.world;
-  const giveUp = lost => { sk.avoid[k] = now + (lost ? 15 : SEEK_AVOID); sk.site = null; sk.cd = lost ? rnd(RS(m), 0.5, 2) : rnd(RS(m), 3, 8); ai.route = null; endTask(m); return false; };
+  const giveUp = lost => seekGiveUp(m, sk, k, lost);
+  if (sk.asked != null) {   // its claim on the block is waiting for the tick's apply (r15-23): stand facing it
+    if (sk.asked === (BF.rand ? BF.rand.tick : 0)) { out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5; return true; }
+    sk.asked = null;   // no result came (the queue was reset): look again
+  }
   sk.t += dt;
   if (sk.t > SEEK_MAX || (W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id)) return giveUp(false);
   if (claimedByOther(k, m)) return giveUp(true);                   // somebody else got there first
@@ -555,8 +581,7 @@ function seekAI(m, dt, out, nav) {
   if (adjacentTo(s, x, y, z) || (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) < 1.9 && Math.abs(s.y - y) <= 1)) {
     ai.route = null;
     out.faceX = s.x + 0.5; out.faceZ = s.z + 0.5;
-    if (claim(m, { site: s })) { sk.site = null; m.seek = null; if (m.job) { m.job.mode = "work"; m.job.t = rnd(RS(m), 4, 8); } endTask(m); }   // takes the block and looks at it for a while
-    else giveUp(true);
+    if (BF.claims.ask("jobsite", m, "j:" + k, { site: s }) === "pending") sk.asked = BF.rand ? BF.rand.tick : 0;   // takes the block (the claim's result, below)
     return true;
   }
   if (!ai.route || ai.routeKind !== "job") {

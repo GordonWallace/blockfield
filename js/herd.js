@@ -17,9 +17,7 @@ const LOCAL_MAX = 24, LOCAL_R = 16;   // no breeding when this many of a kind ar
 const rnd = (m, a, b) => BF.rand.of(m).range(a, b);   // the mob's seeded stream (js/rand.js)
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const live = o => !!(o && !o.dead && !o.removed);
-let ids = 0;
-const idOf = new WeakMap();
-const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };   // a stable order between two animals (which one breeds)
+const mid = m => +String(m.id).slice(1);   // the mob's stable id number (js/ids.js): which of a pair breeds (r15-23)
 
 // On the planet animals and their herders may be kept in different frames near a face edge (js/mobs.js keepFrame): positions are compared
 // as seen from the animal (BF.planet.local), so offsets are true local ones across an edge.
