@@ -165,9 +165,14 @@ const loadPaused = (pg, id) => pg.evaluate(async id => { BF.player.start(); BF.s
     const rf = await until(() => folderOf(copy.id) === 'Renamed copy', 90000);
     check(rf, `Rename moves its folder (${folderOf(copy.id)})`);
     await until(async () => (await rows(pg2)).some(r => r.id === copy.id && /Renamed copy/.test(r.text)), 90000);   // (the list redrawn after the rename)
-    await pg2.evaluate(cid => document.querySelector(`.bfp-world[data-id="${cid}"] [data-act="delete"]`).click(), copy.id);
-    await pg2.evaluate(() => document.querySelector('.bfp-world.confirm [data-act="delete-ok"]').click());
-    check(await until(() => !folderOf(copy.id), 90000) && !fs.existsSync(path.join(saves, 'Renamed copy')), 'Delete removes its folder');
+    // (the title screen can redraw its list between the two clicks, taking the confirm row with it: ask again while the row is still there)
+    let gone = null;
+    for (let i = 0; i < 3 && !gone; i++) {
+      await pg2.evaluate(cid => { const b = document.querySelector(`.bfp-world[data-id="${cid}"] [data-act="delete"]`); if (b) b.click(); }, copy.id);
+      await pg2.evaluate(() => { const b = document.querySelector('.bfp-world.confirm [data-act="delete-ok"]'); if (b) b.click(); });
+      gone = await until(() => !folderOf(copy.id) && !fs.existsSync(path.join(saves, 'Renamed copy')), 30000);
+    }
+    check(gone, 'Delete removes its folder' + (gone ? '' : ' ' + JSON.stringify({ folder: folderOf(copy.id) || null, renamed: fs.existsSync(path.join(saves, 'Renamed copy')), listed: (await rows(pg2)).some(r => r.id === copy.id) })));
     // a 1.4 world file is refused
     const old14 = SaveFile.packSync({ game: '1.4', meta: Object.assign({}, rec.meta, { version: 2, name: 'Old 1.4' }), data: Object.assign({}, rec.data, { version: 2 }) });
     fs.writeFileSync(path.join(saves, '.old.bfworld'), old14);

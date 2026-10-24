@@ -24,10 +24,12 @@ function boot(o) {
     try { importScripts(u); three = typeof THREE !== "undefined"; } catch (e) { /* the next one */ }
   }
   if (!three) throw new Error("three.js would not load in the worker");
+  if (o.build) self.BF_BUILD = o.build;   // the commit and branch debug/server.js gave the page, for the game log (js/gamelog.js)
   importScripts("simfiles.js" + Q);
   BF = self.BF;
   importScripts(...BF.SIM_FILES.map(f => "../" + f + Q));
   importScripts("debugfeed.js" + Q);   // (its snapshot only: the page sends it to the debug server)
+  importScripts("coords.js" + Q);      // (the planet's positions, for the commands: /tp corner, latitude / longitude, face / u / v)
   importScripts("commands.js" + Q);    // (the slash commands: the page's command line sends them as "command" requests)
   BF.boot.initSim();
   BF.glog.setSink(e => { if (e.l === "ERROR") post({ errorLine: e.x }); });   // (the page shows the latest error with a crash)

@@ -1,10 +1,13 @@
-// @ci integration suite=ui timeout=600
+// @ci integration suite=ui timeout=600 hosts=worker,server
 // Positions on the planet (generator 4, spec r14-18): F3 shows face / u / v / y, latitude / longitude and a compass facing (never atlas
 // x / z); /tp takes u y v on the current face (with ~, and past an edge into the margin, landing canonical), and the planet forms face,
 // lat / lon, corner, up and ground; /setblock and /summon across an edge land on the right canonical cell; the world border is the
 // face square; /locate prints planet distance, direction and a /tp; the teleport panel (P) is creative only and runs /tp; the planet
 // view opens with M, turns, zooms, switches to the local map and back, and travels on click in creative; auto maps stop at one face.
-// node test/run.js /tmp/pc test/planet-coords.js
+// The commands run where the simulation is (window.tp: BFT.sim, spec r15-43), and what they do to the player (place, facing, flying) comes
+// back to the page's player; the F3 text, the teleport panel, the planet view and the auto maps are the page's.
+// node test/run.js /tmp/pc test/planet-coords.js [--host page|worker|server]
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
@@ -15,15 +18,32 @@ module.exports = async (pg, out) => {
       for (let i = 0; i < 120 && BF.world.queueLength > 0; i++) await new Promise(r => setTimeout(r, 250));
       await new Promise(r => setTimeout(r, 300));
     };
-    window.tp = s => BF.commands.execute(s);
-    BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 3; BF.player.start(); BF.player.setGameMode("creative");
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    // the simulation has the page's look and game mode (they go with the page's next player report)
+    window.synced = async () => {
+      if (!BF.simHost.worker) return;
+      for (let i = 0; i < 100; i++) { const g = await BFT.sim(() => [BF.player.yaw, BF.player.gameMode]); if (Math.abs(g[0] - BF.player.yaw) < 1e-9 && g[1] === BF.player.gameMode) return; await sleep(50); }
+    };
+    // a command, run where the simulation is; resolves once the page's player has what it did
+    window.tp = async s => {
+      await synced();
+      const r = await BFT.sim(s => { const r = BF.commands.execute(s), p = BF.player.position; if (BF.proto) BF.proto.flush(); return { r, p: [p.x, p.y, p.z], yaw: BF.player.yaw }; }, s);
+      for (let i = 0; i < 100 && BF.simHost.worker; i++) {
+        const p = BF.player.position;
+        if (Math.abs(p.x - r.p[0]) < 1e-6 && Math.abs(p.z - r.p[2]) < 1e-6 && Math.abs(BF.player.yaw - r.yaw) < 1e-9) break;
+        await sleep(50);
+      }
+      return r.r;
+    };
   });
+  await lib.newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => { BF.world.viewDist = 3; BF.player.start(); BF.player.setGameMode("creative"); });
   await pg.evaluate(() => { const p = BF.player.position; window.__start = { x: p.x, y: p.y, z: p.z }; return settle(2500); });
   const N = await pg.evaluate(() => BF.planet.N);
 
   // ---- F3: face / u / v / y, lat / lon, facing; no atlas x / z
   const f3 = await pg.evaluate(async () => {
-    const r = tp("/tp face 4 81920 81920");
+    const r = await tp("/tp face 4 81920 81920");
     BF.player.setLook(0, 0);
     await settle(800);
     const d = BF.debugInfo(), t = BF.debugText(d);
@@ -61,28 +81,28 @@ module.exports = async (pg, out) => {
   // ---- /tp forms
   const forms = await pg.evaluate(async (N) => {
     const r = {}, P = BF.planet, here = () => P.canon(BF.player.position.x, BF.player.position.z, {});
-    tp("/tp face 2 1000 2000"); r.face = Object.assign({}, here()); r.faceY = BF.player.position.y;
+    await tp("/tp face 2 1000 2000"); r.face = Object.assign({}, here()); r.faceY = BF.player.position.y;
     r.faceGround = Math.abs(BF.player.position.y - BF.mapview.surfaceAt(Math.floor(BF.player.position.x), Math.floor(BF.player.position.z))) < 1.5;
-    tp("/tp face 2 1000 2000 1500"); r.faceY2 = BF.player.position.y;
-    r.uyv = tp("/tp 5000 900 6000"); r.uyvAt = Object.assign({}, here()); r.uyvY = BF.player.position.y;
-    r.rel = tp("/tp ~10 ~ ~-20"); r.relAt = Object.assign({}, here());
-    r.uv = tp("/tp 7000 8000"); r.uvAt = Object.assign({}, here());
-    r.ll = tp("/tp 35.26N 45E"); const ll = P.latLonAt(BF.player.position.x, BF.player.position.z); r.llAt = [ll.lat, ll.lon];
-    r.llS = tp("/tp 10.5S 120.25W 2000"); const l2 = P.latLonAt(BF.player.position.x, BF.player.position.z); r.llSAt = [l2.lat, l2.lon, BF.player.position.y];
-    r.llBad = tp("/tp 95N 10E");
-    r.corner = tp("/tp corner 3"); const c3 = BF.coords.corner(3, 0), h3 = here();
+    await tp("/tp face 2 1000 2000 1500"); r.faceY2 = BF.player.position.y;
+    r.uyv = await tp("/tp 5000 900 6000"); r.uyvAt = Object.assign({}, here()); r.uyvY = BF.player.position.y;
+    r.rel = await tp("/tp ~10 ~ ~-20"); r.relAt = Object.assign({}, here());
+    r.uv = await tp("/tp 7000 8000"); r.uvAt = Object.assign({}, here());
+    r.ll = await tp("/tp 35.26N 45E"); const ll = P.latLonAt(BF.player.position.x, BF.player.position.z); r.llAt = [ll.lat, ll.lon];
+    r.llS = await tp("/tp 10.5S 120.25W 2000"); const l2 = P.latLonAt(BF.player.position.x, BF.player.position.z); r.llSAt = [l2.lat, l2.lon, BF.player.position.y];
+    r.llBad = await tp("/tp 95N 10E");
+    r.corner = await tp("/tp corner 3"); const c3 = BF.coords.corner(3, 0), h3 = here();
     r.cornerAt = { f: h3.f, du: Math.abs(h3.u - c3.u), dv: Math.abs(h3.v - c3.v), flying: BF.player.flying };
     // facing the corner: the forward vector points toward the corner point
     const yaw = BF.player.yaw, fx = -Math.sin(yaw), fz = -Math.cos(yaw), tx = c3.u - h3.u, tz = c3.v - h3.v;
     r.cornerFacing = (fx * tx + fz * tz) / Math.hypot(tx, tz);
-    tp("/tp face 4 81920 81920"); await settle(500);
+    await tp("/tp face 4 81920 81920"); await settle(500);
     const g0 = BF.mapview.surfaceAt(Math.floor(BF.player.position.x), Math.floor(BF.player.position.z)) - 1.01;   // the ground, or the water over it
-    r.up = tp("/tp up 5000"); r.upY = BF.player.position.y - g0; r.upFly = BF.player.flying;
-    r.ground = tp("/tp ground"); r.groundY = BF.player.position.y - g0;
-    r.big = tp("/tp up 25000"); r.bigY = BF.player.position.y - g0;
-    tp("/tp ground");
-    r.border = tp(`/tp ${2 * N + 5} 800 100`);
-    r.borderOk = tp(`/tp ${N + 300} 900 100`); r.borderAt = Object.assign({}, here());
+    r.up = await tp("/tp up 5000"); r.upY = BF.player.position.y - g0; r.upFly = BF.player.flying;
+    r.ground = await tp("/tp ground"); r.groundY = BF.player.position.y - g0;
+    r.big = await tp("/tp up 25000"); r.bigY = BF.player.position.y - g0;
+    await tp("/tp ground");
+    r.border = await tp(`/tp ${2 * N + 5} 800 100`);
+    r.borderOk = await tp(`/tp ${N + 300} 900 100`); r.borderAt = Object.assign({}, here());
     return r;
   }, N);
   console.log("tp " + JSON.stringify({ face: [forms.face.f, forms.face.u, forms.face.v], uyv: forms.uyv.msg, rel: forms.rel.msg, ll: forms.llAt, llS: forms.llSAt, corner: forms.cornerAt, cf: forms.cornerFacing, up: forms.upY, ground: forms.groundY, border: forms.border.msg, borderAt: [forms.borderAt.f, forms.borderAt.u, forms.borderAt.v] }));
@@ -111,21 +131,21 @@ module.exports = async (pg, out) => {
       if (c.turn) { best = { f, mu, mv }; break; }
     }
     r.best = best;
-    tp(`/tp face ${best.f} ${N / 2} ${N / 2} 1500`);
+    await tp(`/tp face ${best.f} ${N / 2} ${N / 2} 1500`);
     BF.player.setLook(0.3, 0);
     const b0 = BF.coords.bearing(-Math.sin(0.3), -Math.cos(0.3), BF.player.position.x, BF.player.position.z);
     // the same spot just across the edge, typed as margin coordinates: the compass facing should be (nearly) unchanged
     const near = [best.mu === N / 2 ? N / 2 : best.mu < 0 ? -1 : N, best.mv === N / 2 ? N / 2 : best.mv < 0 ? -1 : N];
-    tp(`/tp face ${best.f} ${Math.min(N - 1, Math.max(0, near[0]))} ${Math.min(N - 1, Math.max(0, near[1]))} 1500`);
+    await tp(`/tp face ${best.f} ${Math.min(N - 1, Math.max(0, near[0]))} ${Math.min(N - 1, Math.max(0, near[1]))} 1500`);
     const bA = BF.coords.bearing(-Math.sin(BF.player.yaw), -Math.cos(BF.player.yaw), BF.player.position.x, BF.player.position.z);
-    const res = tp(`/tp ${near[0] + (best.mu === N / 2 ? 0 : best.mu < 0 ? -2 : 2)} 1500 ${near[1] + (best.mv === N / 2 ? 0 : best.mv < 0 ? -2 : 2)}`);
+    const res = await tp(`/tp ${near[0] + (best.mu === N / 2 ? 0 : best.mu < 0 ? -2 : 2)} 1500 ${near[1] + (best.mv === N / 2 ? 0 : best.mv < 0 ? -2 : 2)}`);
     const c = P.canon(BF.player.position.x, BF.player.position.z, {});
     const bB = BF.coords.bearing(-Math.sin(BF.player.yaw), -Math.cos(BF.player.yaw), BF.player.position.x, BF.player.position.z);
     r.res = res; r.canonical = c.x === BF.player.position.x && c.z === BF.player.position.z && c.f !== best.f;
     r.dBearing = Math.abs(((bB - bA + 540) % 360) - 180); r.b0 = b0;
     // wedge: past two edges at once
-    tp(`/tp face 4 10 10 1500`);
-    r.wedge = tp(`/tp -50 1500 -50`);
+    await tp(`/tp face 4 10 10 1500`);
+    r.wedge = await tp(`/tp -50 1500 -50`);
     const w = P.canon(BF.player.position.x, BF.player.position.z, {});
     r.wedgeAt = { canon: w.x === BF.player.position.x && w.z === BF.player.position.z, wedge: w.wedge, off: w.off, f: w.f };
     return r;
@@ -135,10 +155,10 @@ module.exports = async (pg, out) => {
   check(edge.wedge.ok && edge.wedgeAt.canon && !edge.wedgeAt.wedge && !edge.wedgeAt.off, "a /tp into a corner wedge lands on the nearest point on a face");
 
   // ---- far teleports keep the compass facing
-  const far = await pg.evaluate(() => {
-    tp("/tp face 4 81920 81920 1500"); BF.player.setLook(0.8, 0);
+  const far = await pg.evaluate(async () => {
+    await tp("/tp face 4 81920 81920 1500"); BF.player.setLook(0.8, 0);
     const p = BF.player.position, b0 = BF.coords.bearing(-Math.sin(0.8), -Math.cos(0.8), p.x, p.z);
-    tp("/tp face 2 40000 90000 1500");
+    await tp("/tp face 2 40000 90000 1500");
     const q = BF.player.position, b1 = BF.coords.bearing(-Math.sin(BF.player.yaw), -Math.cos(BF.player.yaw), q.x, q.z);
     return { b0, b1 };
   });
@@ -147,29 +167,32 @@ module.exports = async (pg, out) => {
   // ---- /setblock and /summon across an edge
   const sb = await pg.evaluate(async (N) => {
     const P = BF.planet, r = {};
-    tp(`/tp face 4 ${N - 6} 81920`); await settle(1500);
+    await tp(`/tp face 4 ${N - 6} 81920`); await settle(1500);
     const y = Math.floor(BF.player.position.y) + 3;
-    r.set = tp(`/setblock ${N + 2} ${y} 81920 glass`);
+    r.set = await tp(`/setblock ${N + 2} ${y} 81920 glass`);
     const c = P.canonCell(P.W * 4 + N + N + 2, N + 81920, {});
     r.cell = [c.f, c.u, c.v];
-    r.got = BF.world.getBlock(c.x, y, c.z) === BF.B.glass;
-    r.viaMargin = BF.world.getBlock(P.W * 4 + N + N + 2, y, N + 81920) === BF.B.glass;
-    r.sum = tp(`/summon pig ${N + 3} ${y + 1} 81920`);
-    const pig = BF.mobs.list.filter(m => m.type === "pig").pop();
-    const pc = pig ? P.canon(pig.position.x, pig.position.z, {}) : null;
-    r.pig = pc ? { f: pc.f, canonical: pc.x === pig.position.x } : null;
-    r.fill = tp(`/fill ${N - 2} ${y + 5} 81918 ${N + 2} ${y + 5} 81922 stone`);
+    // (the world and its mobs, where the simulation is)
+    Object.assign(r, await BFT.sim(([N, y, c]) => { const P = BF.planet; return { got: BF.world.getBlock(c.x, y, c.z) === BF.B.glass, viaMargin: BF.world.getBlock(P.W * 4 + N + N + 2, y, N + 81920) === BF.B.glass }; }, [N, y, { x: c.x, z: c.z }]));
+    r.sum = await tp(`/summon pig ${N + 3} ${y + 1} 81920`);
+    r.pig = await BFT.sim(() => {
+      const P = BF.planet, pig = BF.mobs.list.filter(m => m.type === "pig").pop();
+      const pc = pig ? P.canon(pig.position.x, pig.position.z, {}) : null;
+      return pc ? { f: pc.f, canonical: pc.x === pig.position.x } : null;
+    });
+    r.fill = await tp(`/fill ${N - 2} ${y + 5} 81918 ${N + 2} ${y + 5} 81922 stone`);
     // stand 300 blocks from a village near spawn (the nearest is 835 blocks out on seed 1337, past /locate's 1.5-region reach)
-    const v0 = BF.worldgen.villagesNear(__start.x, __start.z, 4000)[0];
+    const v0 = await BFT.sim(s => BF.worldgen.villagesNear(s.x, s.z, 4000)[0] || null, __start);
     r.v0 = !!v0;
-    if (v0) BF.player.teleport(v0.x + 300, 1500, v0.z + 120);
+    if (v0) await BFT.sim(v => { BF.player.teleport(v.x + 300, 1500, v.z + 120); if (BF.proto) BF.proto.flush(); }, { x: v0.x, z: v0.z });
+    for (let i = 0; v0 && i < 100 && Math.abs(BF.player.position.x - (v0.x + 300)) > 1e-6; i++) await new Promise(q => setTimeout(q, 50));
     const here = { x: BF.player.position.x, z: BF.player.position.z };
-    r.loc = tp("/locate village");
-    const v = BF.worldgen.nearestVillage(here.x, here.z), m = /(\/tp face \d \d+ \d+)/.exec(r.loc.msg || "");
+    r.loc = await tp("/locate village");
+    const v = await BFT.sim(h => { const v = BF.worldgen.nearestVillage(h.x, h.z); return v && { x: v.x, z: v.z }; }, here), m = /(\/tp face \d \d+ \d+)/.exec(r.loc.msg || "");
     if (v && m) {
       const t = BF.planet.toward(here, v, {}), dir = BF.planet.compassPoint(BF.planet.bearing(here.x, here.z, t.x, t.z));
       r.locDir = r.loc.msg.includes("to the " + dir + ",");
-      tp(m[1]); r.locArrive = BF.planet.distance(BF.player.position, v) < 2;
+      await tp(m[1]); r.locArrive = BF.planet.distance(BF.player.position, v) < 2;
     }
     return r;
   }, N);
@@ -186,20 +209,28 @@ module.exports = async (pg, out) => {
     BF.player.setGameMode("survival");
     r.survival = BF.coords.panel.open();
     BF.player.setGameMode("creative");
-    tp("/tp face 4 81920 81920");
+    await tp("/tp face 4 81920 81920");
     r.creative = BF.coords.panel.open();
     r.screen = BF.player.screenOpen();
     const el = document.querySelector(".bft-wrap.open");
     r.buttons = el ? el.querySelectorAll("button").length : 0;
     el.querySelectorAll('[data-a="corners"] button')[4].click();
+    // (with the simulation off the page the panel closes when its answer comes)
+    const until = async f => { for (let i = 0; i < 200 && !f(); i++) await new Promise(q => setTimeout(q, 50)); };
+    await until(() => !BF.coords.panel.isOpen());
+    const c5w = BF.coords.corner(5, 0);
+    await until(() => BF.planet.canon(BF.player.position.x, BF.player.position.z, {}).f === c5w.f);
     r.closedAfterCorner = !BF.coords.panel.isOpen();
     const c5 = BF.coords.corner(5, 0), h = BF.planet.canon(BF.player.position.x, BF.player.position.z, {});
     r.atCorner = h.f === c5.f && Math.abs(h.u - c5.u) < 45 && Math.abs(h.v - c5.v) < 45;
     BF.coords.panel.open();
     r.bad = BF.coords.panel.go("nowhere special");
+    await until(() => document.querySelector(".bft-msg").classList.contains("bad"));
     r.stillOpen = BF.coords.panel.isOpen();
     r.msg = document.querySelector(".bft-msg").textContent;
     BF.coords.panel.go("face 1 100 200");
+    await until(() => !BF.coords.panel.isOpen());
+    await until(() => BF.planet.canon(BF.player.position.x, BF.player.position.z, {}).f === 1);
     const h2 = BF.planet.canon(BF.player.position.x, BF.player.position.z, {});
     r.typed = h2.f === 1 && Math.floor(h2.u) === 100 && Math.floor(h2.v) === 200 && !BF.coords.panel.isOpen();
     return r;
@@ -220,7 +251,7 @@ module.exports = async (pg, out) => {
   const gv = await pg.evaluate(async () => {
     const r = {}, M = BF.mapview, G = M.planet;
     BF.coords.panel.close();
-    tp("/tp face 4 81920 81920");
+    await tp("/tp face 4 81920 81920");
     r.open = G.open();
     r.screen = BF.player.screenOpen();
     const t0 = performance.now(); G.finishBase(); r.baseMs = Math.round(performance.now() - t0);
@@ -280,10 +311,10 @@ module.exports = async (pg, out) => {
   check(mOpen && mClosed, "M opens and closes the planet view");
 
   // ---- auto maps: at most one face wide; the corner wedges stay empty
-  const am = await pg.evaluate(() => {
+  const am = await pg.evaluate(async () => {
     const M = BF.mapview, r = {};
     r.maxK = M.zonesFor(1e9);
-    tp("/tp face 4 300 300");
+    await tp("/tp face 4 300 300");
     const p = BF.player.position, d = M.getAuto(64, Math.floor(p.x / 128), Math.floor(p.z / 128));
     M.finish(d);
     let empty = 0, n = 0;
