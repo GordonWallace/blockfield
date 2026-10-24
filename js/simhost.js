@@ -117,7 +117,7 @@ function run(w, via) {
 }
 
 // ---- the world server's socket (ws://<this page's host>/sim, server/world.js), made to look like a Worker for run(): protocol packets
-// as binary frames ([header length u32 LE][header JSON][binary part]), everything else as JSON text. Resolves {sock} once the server
+// as binary frames ([header length u32 LE][1 if a binary part follows][header JSON][binary part]), everything else as JSON text. Resolves {sock} once the server
 // has said hello, else {why} (no server, refused: another page plays, or no answer within 3 s).
 function serverSocket() {
   return new Promise(resolve => {
@@ -132,9 +132,9 @@ function serverSocket() {
       postMessage(m) {
         if (ws.readyState !== 1) return;
         if (m && m.h != null) {
-          const h = enc.encode(m.h), n = m.b ? m.b.byteLength : 0, out = new Uint8Array(4 + h.length + n);
-          new DataView(out.buffer).setUint32(0, h.length, true); out.set(h, 4);
-          if (n) out.set(new Uint8Array(m.b), 4 + h.length);
+          const h = enc.encode(m.h), n = m.b ? m.b.byteLength : 0, out = new Uint8Array(5 + h.length + n);
+          new DataView(out.buffer).setUint32(0, h.length, true); out[4] = m.b ? 1 : 0; out.set(h, 5);
+          if (n) out.set(new Uint8Array(m.b), 5 + h.length);
           ws.send(out);
         } else ws.send(JSON.stringify(m));
       },
@@ -147,7 +147,7 @@ function serverSocket() {
         if (!done) { if (d.hello) { sock.hello = d.hello; end({ sock }); } else if (d.refused) { closing = true; end({ why: d.refused }); } return; }
       } else {
         const u = new Uint8Array(ev.data), n = new DataView(ev.data).getUint32(0, true);
-        d = { h: dec.decode(u.subarray(4, 4 + n)), b: u.length > 4 + n ? ev.data.slice(4 + n) : null };
+        d = { h: dec.decode(u.subarray(5, 5 + n)), b: u[4] ? ev.data.slice(5 + n) : null };
       }
       if (sock.onmessage) sock.onmessage({ data: d });
     };

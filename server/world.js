@@ -6,7 +6,7 @@
 // One page plays at a time (a second one is refused and runs its own simulation); the world it plays is the one it picks on the title
 // screen (its world message: demo, create, load). Saves are on disk (server/idb.js, <saves>/), listed to the page instead of its
 // IndexedDB ones (the saves message below; spec r15-42 adds the folder per world, import and export).
-// On the socket: binary frames are protocol packets ([header length u32 LE][header JSON, UTF-8][binary part]); text frames are JSON
+// On the socket: binary frames are protocol packets ([header length u32 LE][1 if a binary part follows, u8][header JSON, UTF-8][binary part]); text frames are JSON
 // for everything else, the same messages the page and a Web Worker exchange ({boot}, {ready}, {crash}, {failed}, {errorLine},
 // {test}), plus the server's own:
 //   server -> page: {hello: {server, version, held}} first (the page knows the server is there), {saves: {rid, ...}} answers,
@@ -31,14 +31,14 @@ const say = s => console.log("[world] " + s);
 
 // ---- packets on the socket
 function packetOut(p) {   // {h, b} -> one binary frame
-  const h = Buffer.from(p.h, "utf8"), b = p.b ? Buffer.from(p.b) : null, out = Buffer.alloc(4 + h.length + (b ? b.length : 0));
-  out.writeUInt32LE(h.length, 0); h.copy(out, 4); if (b) b.copy(out, 4 + h.length);
+  const h = Buffer.from(p.h, "utf8"), b = p.b ? Buffer.from(p.b) : null, out = Buffer.alloc(5 + h.length + (b ? b.length : 0));
+  out.writeUInt32LE(h.length, 0); out[4] = b ? 1 : 0; h.copy(out, 5); if (b) b.copy(out, 5 + h.length);
   return out;
 }
-function packetIn(buf) {   // a binary frame -> {h, b} with b its own ArrayBuffer (transferred to the thread)
-  const n = buf.readUInt32LE(0), h = buf.toString("utf8", 4, 4 + n), rest = buf.length - 4 - n;
+function packetIn(buf) {   // a binary frame -> {h, b} with b its own ArrayBuffer (transferred to the thread), or null
+  const n = buf.readUInt32LE(0), h = buf.toString("utf8", 5, 5 + n);
   let b = null;
-  if (rest > 0) { b = new ArrayBuffer(rest); Buffer.from(b).set(buf.subarray(4 + n)); }
+  if (buf[4]) { b = new ArrayBuffer(buf.length - 5 - n); Buffer.from(b).set(buf.subarray(5 + n)); }
   return { h, b };
 }
 // the save data for JSON: typed arrays as plain arrays (js/save.js restore reads both)

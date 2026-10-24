@@ -111,7 +111,7 @@ worker_thread (server/simthread.js shims `self`, `importScripts`, `location` and
 replica rules above are the same. The page reaches it at `ws://<page host>/sim` (server/ws.js, no packages) and wraps the socket to look
 like a Worker (js/simhost.js), so `BF.proto.worker` carries it; `BF.client.mode` is `"worker"`, `BF.simHost.mode` is `"server"`.
 
-- **Binary frames** are packets: `[header length, u32 little-endian][header JSON, UTF-8][binary part]`.
+- **Binary frames** are packets: `[header length, u32 little-endian][1 if a binary part follows, else 0, u8][header JSON, UTF-8][binary part]` (a binary part can be empty, which is not the same as none).
 - **Text frames** are JSON, the same messages a Web Worker and its page exchange (`{boot}`, `{ready}`, `{crash}`, `{failed}`,
   `{errorLine}`, `{test}`), plus the server's own:
   - server to page: `{hello: {server, version, held}}` first (how the page finds the server; `held` is a world kept paused since its
