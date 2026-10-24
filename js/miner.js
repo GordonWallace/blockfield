@@ -831,7 +831,7 @@ function trip(m, Q, k, dt, out) {
   return true;
 }
 
-// Trade-screen status line (inventory.js).
+// Trade-screen status line (the trades query, js/playerinv.js tradeView).
 function taskName(Q, k) {
   if (k.kind === "quarry") return k.gravel ? "Digging gravel for flint" : "Quarrying stone";
   if (k.kind === "sift") return "Sifting gravel for flint";

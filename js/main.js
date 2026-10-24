@@ -109,7 +109,8 @@ function frame(now) {
   const alpha = W.alpha, drawnDt = Math.max(0, W.renderNow() - drawn0);
   if (remote) host.sky(W.frozen ? 0 : drawnDt);   // the worker's clock and weather
   BF.sky.draw(alpha, drawnDt);
-  BF.inventory.update && BF.inventory.update(dt);
+  BF.inventory.simFrame(dt);   // the simulation's screens (js/playerinv.js; in a worker a no-op here, the worker runs its own)
+  BF.inventory.update && BF.inventory.update(dt);   // the page's screens (js/invscreen.js)
   if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);
   if (BF.textures.update) BF.textures.update(W.frozen ? 0 : BF.state.paused ? dt : drawnDt);   // water animation runs on the drawn game time (fast-forward included, stopped at 0x)

@@ -1,4 +1,4 @@
-// Bakers, cakes and pies (BF.baker). Loaded after js/cowherd.js; hooks live in blocks.js, world.js (cane growth), inventory.js (oven sim tick),
+// Bakers, cakes and pies (BF.baker). Loaded after js/cowherd.js; hooks live in blocks.js, world.js (cane growth), playerinv.js (oven sim tick),
 // player.js (cake, oven), mobs.js, jobs.js, trading.js, market.js, villagelife.js, eggcook.js, happiness.js, builder.js / blueprints.js,
 // worldgen.js, debugfeed.js. See CONTRACT.md "Bakers (js/baker.js)".
 //
@@ -80,7 +80,7 @@ function trayReady(o) {
   if (!o.kind || !(o.n > 0)) return false;
   return RECIPE[o.kind].every(([nm, k]) => I(nm) != null && has(o.tray, I(nm), k));
 }
-// A sim step of one oven (inventory.js simTick, so fast-forward too): burn fuel, bake, put the cake or pie (and the cake's empty bottles) out.
+// A sim step of one oven (playerinv.js simTick, so fast-forward too): burn fuel, bake, put the cake or pie (and the cake's empty bottles) out.
 function tickOven(o, h) {
   if (o.burn > 0) o.burn = Math.max(0, o.burn - h);
   const ok = trayReady(o);

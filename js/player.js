@@ -675,7 +675,7 @@ function bindInput() {
       if ((dragMode || !locked) && started && !P.dead) { if (menuOpen === "pause") resume(); else if (!menuOpen) pause(); }
       return;
     }
-    // inventory.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
+    // invscreen.js handles E/Esc itself (capture phase) while it is open; deferredToggle copes either way
     if (c === "KeyE" && started && !menuOpen && !P.dead && !e.repeat) { deferredToggle(false); return; }
     if (menuOpen || invOpen() || P.dead) return;
     if (wantLock && !locked && !dragMode) requestLock();   // a key press is a user gesture: take the mouse back that Escape's re-lock missed
@@ -1845,7 +1845,7 @@ function fireArrow(f) {
   d.normalize();
   const from = eyeVec().addScaledVector(d, 0.4); from.y -= 0.1;
   const crit = f >= 1 && Math.random() < BOW_CRIT, damage = bowDamage(f);   // the player's own rolls: the request carries them (replays the same)
-  // creative: arrows are free; 1 use of the bow's 384 per shot (survival; js/inventory.js wearSelected)
+  // creative: arrows are free; 1 use of the bow's 384 per shot (survival; js/playerinv.js wearSelected)
   const a = act("player.shoot", null, { from: arr(from), vel: arr(d.multiplyScalar(BOW_SPEED * f)), damage, crit, pickup: creative() ? 2 : 1, arrow: !creative() }).a;
   P.lastShot = { power: +f.toFixed(3), damage, crit, speed: +(BOW_SPEED * f).toFixed(2) };
   emit("playerShot", P.lastShot);

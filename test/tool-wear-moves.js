@@ -49,6 +49,7 @@ module.exports = async (pg, out) => {
     const v = T.init({ profession: "weaponsmith" });
     v.level = 5; v.inv = T.inv.create(); v.inv[0] = { id: I.emerald, count: 40 };
     v.trades = [T.parseTrade("1 diamond_sword > 6 emerald"), T.parseTrade("6 emerald > 1 diamond_sword")].map(o => Object.assign(o, { xp: 1 }));
+    BF.ids.idOf(v);   // the trade screen asks for its villager by id (spec r15-44)
     inv.clear(); BF.drops.clear();
     inv.setSlot(9, { id: I.diamond_sword, count: 1, wear: 1500 });
     inv.openTrade(v);

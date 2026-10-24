@@ -1,5 +1,5 @@
 // Stables and stable hands (BF.stables). Loaded after js/horses.js; hooks live in mobs.js (villagerAI, pickWander, interact, update, clear),
-// jobs.js (who may take a tack rack, work at the rack), trading.js (horse offers), inventory.js (a horse offer gives no item), builder.js /
+// jobs.js (who may take a tack rack, work at the rack), trading.js (horse offers), playerinv.js (a horse offer gives no item), builder.js /
 // blueprints.js (the "stable" structure) and villagerstatus.js. See CONTRACT.md "Stables".
 //
 // A stable is a builder structure (blueprints.js "stable": an open shelter with the tack rack, and a fenced paddock with a double gate), built only

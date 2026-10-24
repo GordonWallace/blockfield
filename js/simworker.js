@@ -89,6 +89,7 @@ function loop() {
     if (crashNext) { crashNext = false; throw new Error("a test crash (test/sim-worker.js)"); }
     const W = BF.warp, p = BF.player.position;
     BF.world.update(p.x, p.z, W.speed >= 10 ? 3 : 8);   // (generation only: nothing is meshed here)
+    BF.inventory.simFrame(raw);   // a furnace watched in the pause cooks in real time; a gone villager's trade screen closes (js/playerinv.js)
     if (!BF.state.paused) {
       const n = BF.boot.ticks(raw);
       W.done(n, n * W.TICK, raw);

@@ -1,7 +1,7 @@
 // Simulation/client protocol (spec r15-36, release 1.5). The messages between the simulation and what draws it, so the same protocol
 // can carry the in-page game, the simulation in a Web Worker (r15-38), the Node world server (r15-41) and later multiplayer. The message
 // list, fields and encodings are written up in docs/protocol.md.
-//   sim -> client: hello, chunk, unload, blockChanges, edits, entities, events, village, clock, log, self, result
+//   sim -> client: hello, chunk, unload, blockChanges, edits, entities, events, village, clock, log, self (r15-44: inv, cursor, screen in every mode), result
 //   client -> sim: request, view, query, speed, save, player, world, meta, clientLog
 // Every message is a plain object {t: type, ...}. encode(msg) turns it into a packet {h, b}: h a JSON string, b an ArrayBuffer or null
 // (bulk data: chunk sections, block changes, entity updates); decode(packet) turns it back. Packets are what crosses a thread or a
@@ -247,6 +247,7 @@ function serve(send, opts) {
     tick: -1, clockKey: "", clockTick: -1e9, weather: null, villageT: 0, inRequest: false, flushes: 0,
     editsDue: false,          // replica: all edits go at the next flush (after a hello: a save's edits are restored after newWorld)
     hurts: [], rep: null, invSent: null, spawnSent: null,   // replica: hurts to send, the player as the client last reported it, what self last sent
+    cursorSent: null, screenSent: null,   // (r15-44: the held stack and the open screen, in every mode)
   };
   const out = msg => {
     let p;
@@ -261,7 +262,8 @@ function serve(send, opts) {
     const St = BF.state || {};
     out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(),
       settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, gameMode: BF.player && BF.player.gameMode || null } });
-    if (R) { S.editsDue = true; S.invSent = S.spawnSent = null; S.hurts = []; }
+    S.invSent = S.cursorSent = S.screenSent = null;   // (self sends the inventory and the screen again)
+    if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; }
   }
   function reset() {
     S.chunks.clear(); S.cells.clear(); S.ents.clear(); S.villages.clear(); S.fx = []; S.logs = []; S.tick = -1; S.clockKey = ""; S.clockTick = -1e9; S.weather = null; S.villageT = 0;
@@ -405,13 +407,22 @@ function serve(send, opts) {
     for (const [k, m] of BF.world.edits) if (m.size) chunks.push([k, [...m]]);
     out({ t: "edits", tick: tickNow(), chunks });
   }
-  // replica: what the simulation did to the player since the last self (hurts; food, health and game mode it changed; a teleport; the
-  // inventory and the spawn point when they changed). The client reports its own changes in player messages, which set the baseline.
+  // The player's items and screens, in every mode (r15-44: js/invscreen.js draws from them): the 36 slots, the held stack and the open
+  // screen, when they changed. Replica: also what the simulation did to the player since the last self (hurts; food, health and game mode
+  // it changed; a teleport; the spawn point when it changed). The client reports its own changes in player messages, which set the baseline.
   function flushSelf() {
-    const P = BF.player;
-    if (!R || !P) return;
+    const P = BF.player, I = BF.inventory;
     const m = { t: "self", tick: tickNow() }, r = S.rep;
     let any = false;
+    if (I && I.own) {
+      const inv = JSON.stringify(I.own());
+      if (inv !== S.invSent) { S.invSent = inv; m.inv = JSON.parse(inv); any = true; }
+      const cur = JSON.stringify(I.cursorView ? I.cursorView() : null);
+      if (cur !== S.cursorSent) { S.cursorSent = cur; m.cursor = JSON.parse(cur); any = true; }
+      const sc = JSON.stringify(I.screenView ? I.screenView() : null);
+      if (sc !== S.screenSent) { S.screenSent = sc; m.screen = JSON.parse(sc); any = true; }
+    }
+    if (!R || !P) { if (any) out(m); return; }
     if (S.hurts.length) { m.hurt = S.hurts; S.hurts = []; any = true; }
     if (r) {
       if (P.health !== r.health) { m.health = r.health = P.health; any = true; }
@@ -420,8 +431,6 @@ function serve(send, opts) {
       const p = P.position;
       if (Math.abs(p.x - r.x) > 1e-6 || Math.abs(p.y - r.y) > 1e-6 || Math.abs(p.z - r.z) > 1e-6) { m.pos = [p.x, p.y, p.z]; r.x = p.x; r.y = p.y; r.z = p.z; any = true; }
     }
-    const inv = BF.inventory && BF.inventory.own ? JSON.stringify(BF.inventory.own()) : "null";
-    if (inv !== S.invSent) { S.invSent = inv; m.inv = JSON.parse(inv); any = true; }
     const sp = JSON.stringify(BF.spawnPoint || null);
     if (sp !== S.spawnSent) { S.spawnSent = sp; m.spawn = JSON.parse(sp); any = true; }
     if (any) out(m);
@@ -436,6 +445,7 @@ function serve(send, opts) {
     if (m.health != null) P.health = m.health;
     if (m.hunger != null) P.hunger = m.hunger;
     P.dead = !!m.dead;
+    if (m.sel != null && BF.inventory && BF.inventory.selectedIndex !== m.sel) BF.inventory.select(m.sel);   // the hotbar slot (r15-44: the page's)
     S.rep = { x: m.x, y: m.y, z: m.z, health: P.health, hunger: P.hunger, gameMode: P.gameMode };
   }
   // replica: the player's body is the client's, so what would change it here goes to the client instead (mobs, bees and lightning
@@ -578,10 +588,12 @@ const QUERIES = {
   chunkHash(a) { const keys = (a.keys || []).filter(k => BF.world.chunks.has(k)); return { ok: true, keys, hash: simHash(keys) }; },
 
   // ---- r15-37: what the page's screens and overlays ask for
-  // a chest's slots, owner and whether the player may change it ({x, y, z}; js/inventory.js chestView)
+  // a chest's slots, owner and whether the player may change it ({x, y, z}; js/playerinv.js chestView)
   chest(a) { return BF.inventory && BF.inventory.chestView ? BF.inventory.chestView(a) : { ok: false, why: "no chests" }; },
-  // a villager's offers (with why one can't be done now), inventory, level, xp, name and status ({id}; js/inventory.js tradeView)
+  // a villager's offers (with why one can't be done now), inventory, level, xp, name and status ({id}; js/playerinv.js tradeView)
   trades(a) { return BF.inventory && BF.inventory.tradeView ? BF.inventory.tradeView(a) : { ok: false, why: "no trading" }; },
+  // r15-44: a furnace's slots, burn, burnMax, cook and whether it can smelt now ({x, y, z}, or {} for the open screen's; js/playerinv.js furnaceView)
+  furnace(a) { return BF.inventory && BF.inventory.furnaceView ? BF.inventory.furnaceView(a) : { ok: false, why: "no furnaces" }; },
   // a mob's inventory ({id}): the slots of a villager or merchant
   inventory(a) {
     const m = BF.ids && BF.ids.get(a.id);
@@ -621,6 +633,8 @@ function b64(u8) {
 
 // r15-37: fn(list) for every events message any client end gets (effects for js/entityview.js, sounds for js/audio.js); BF.proto.listen.
 const LISTEN = [];
+// r15-44: fn(m) for every self message any client end gets (js/invscreen.js: the inventory, cursor and screen); BF.proto.onSelf.
+const SELF = [];
 
 // ---------------------------------------------------------------- the client end and its mirror
 // connect(send): send(packet) delivers to the sim. The mirror (world) holds what the sim sent: chunks (key -> {cx, cz, key, lo, hi, secs}),
@@ -689,7 +703,11 @@ function connect(send, mode) {
       for (const fn of LISTEN) { try { fn(m.list); } catch (e) { errorOnce("cev", "An event listener failed: " + (e && e.message)); console.error(e); } }
     },
     edits(m) { if (C.onEdits) C.onEdits(m.chunks, true); },
-    self(m) { const o = Object.assign({}, m); delete o.t; delete o.hurt; C.self = Object.assign(C.self || {}, o); if (C.onSelf) C.onSelf(m); },
+    self(m) {
+      const o = Object.assign({}, m); delete o.t; delete o.hurt; C.self = Object.assign(C.self || {}, o);
+      if (C.onSelf) C.onSelf(m);
+      for (const fn of SELF) { try { fn(m); } catch (e) { errorOnce("cself", "A self listener failed: " + (e && e.message)); console.error(e); } }
+    },
     village(m) { for (const v of m.list) world.villages.set(v.key, v); for (const k of m.gone) world.villages.delete(k); },
     clock(m) { world.clock = m; },
     log(m) { for (const e of m.list) world.log.push(e); if (world.log.length > LOG_KEEP) world.log.splice(0, world.log.length - LOG_KEEP); if (C.onLog) C.onLog(m.list); },
@@ -874,12 +892,20 @@ const SOUNDS = {
   villagerTrade: v => mobArgs(v, {}),
   lightning: e => (e ? { lx: e.x, lz: e.z, dist: e.dist } : null),   // (heard from far off: not limited to the view)
 };
+// r15-44: what the inventory screens show besides (js/invscreen.js): a toast (+n of an item), the trade screen's villager going up a
+// level, the held item's name over the hotbar (a creative pick-block). Entries {kind, ...} of the events message, like the sounds.
+const UI = {
+  invToast: (id, n) => ({ kind: "toast", id, n }),
+  villagerLevelUp: v => ({ kind: "levelUp", id: v && v.id != null ? v.id : null }),
+  invFlashName: () => ({ kind: "flashName" }),
+};
 function soundTap() {
   for (const ev in SOUNDS) BF.on(ev, (...a) => {
     if (!liveSim) return;
     const o = SOUNDS[ev](...a);
     if (o) { o.kind = "sound"; o.ev = ev; liveSim.onFx(o); }
   });
+  for (const ev in UI) BF.on(ev, (...a) => { if (liveSim) liveSim.onFx(UI[ev](...a)); });
   const W = BF.world;
   if (W && W.setDoor && !W.setDoor._proto) {
     const orig = W.setDoor;
@@ -905,6 +931,7 @@ function hookUp() {
 BF.proto = {
   VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, worker, host, hosted, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
   listen: fn => { LISTEN.push(fn); },
+  onSelf: fn => { SELF.push(fn); },
   // (tests, in-page) the protocol number the in-page sim end gives a simulation object (a mob, drop, arrow, boat or bee), or null
   numberOf: o => (o && typeof o === "object" && local.sim ? local.sim.nOf(o) : null),
   hookUp,
