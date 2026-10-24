@@ -7,7 +7,7 @@
 // pixels near the player are sampled from the loaded world each frame. Held view: js/player.js asks heldTexture() for a canvas texture.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PX = 128, ZONE = 128, MAX_SIZE = 5;
 // Fill radius while a map is held, in blocks: 40 on the smallest map, shrinking with the square root of the scale (28, 20, 14, ...) down to a floor of 16,
@@ -367,6 +367,6 @@ const api = {
   reset() { data.clear(); last = { ver: -1 }; },
   _data: data,
 };
-addEventListener("load", () => { if (BF.on) BF.on("newWorld", () => api.reset()); }); // main.js (the bus) loads after this file
+BF.onLoad(() => { if (BF.on) BF.on("newWorld", () => api.reset()); }); // main.js (the bus) loads after this file
 BF.maps = api;
 })();

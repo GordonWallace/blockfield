@@ -4,7 +4,7 @@
 // API: BF.vstats = { DAYS, sample(rec), popChange(key) -> {change, from, days}|null, serialize(), deserialize(o), reset(), update() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const DAYS = 7;                // the change is measured against the oldest count within the last DAYS game days
 const pops = new Map();        // village key -> {game day: population}

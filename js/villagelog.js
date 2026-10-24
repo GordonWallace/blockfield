@@ -10,7 +10,7 @@
 //                  entries(key), villageAt(x, z) -> rec|null, tally(rec), panelData(rec), serialize(), deserialize(o), reset(), init(), update(dt, debugOn) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const CAP = 300;          // entries kept per village
 const MARGIN = 8;         // blocks beyond the village box that still count as "within the village"
@@ -217,7 +217,7 @@ BF.vlog = {
   },
   reset,
   init() {
-    panelEl = document.getElementById("vlog");
+    panelEl = BF.page ? document.getElementById("vlog") : null;
     hook();
     // the population history and the Economy view's scans run on the game step, so they see the same moments at any speed (spec r15-16)
     const W = BF.world;

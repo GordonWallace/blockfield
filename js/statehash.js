@@ -16,7 +16,7 @@
 //      BF.stateHash.update() (the main loop: logs the hash when a game day starts)
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // ---------------------------------------------------------------- the hash: two 32-bit lanes over a string (cyrb53-style), 16 hex digits
 function hashStr(s) {

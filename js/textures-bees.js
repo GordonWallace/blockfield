@@ -8,7 +8,7 @@
 //   candle_icon       : the inventory sprite
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const K = BF.texKit;
 if (!K) { console.warn("textures-bees: BF.texKit missing (textures.js must load first)"); return; }
 const { T, SPRITES, TS, hex, pal, mix, ramp, jit, planksBase, SPRITE_TILES, WOOD_OAK } = K;

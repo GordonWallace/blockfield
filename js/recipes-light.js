@@ -1,7 +1,7 @@
 // Torch recipe (vanilla): coal or charcoal over a stick makes 4 torches. Registered through BF.recipeHooks.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped }) => {
   const I = BF.I;
   if (I.torch === undefined) return;

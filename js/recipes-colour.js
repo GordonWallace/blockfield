@@ -2,7 +2,7 @@
 // Registered through BF.recipeHooks, which inventory.js calls from buildRecipes with its helpers.
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, addShapeless, smelt, fuel }) => {
   const I = BF.I, names = Object.keys(I), C = BF.DYE_COLOURS.map(c => c[0]);
   const dye = c => I[c + "_dye"];

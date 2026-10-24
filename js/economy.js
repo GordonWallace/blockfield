@@ -10,7 +10,7 @@
 //                  group(item), scan(rec), serialize(), deserialize(o), reset(), update() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const DAYS = 7;          // game days kept per village
 const STUCK = 2;         // days unsold before an item held for sale counts as stuck

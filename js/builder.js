@@ -5,7 +5,7 @@
 // See CONTRACT.md "Builder villagers". Loaded after mobs.js and blueprints.js; only calls other modules at runtime.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // ---- tunables ----
 const BLOCK_T = [0.5, 0.8];       // seconds between two placed blocks (random per block)

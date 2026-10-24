@@ -18,7 +18,7 @@
 //                    cool, reach, minFps}), opts(), cycle(), text(), feed(), log(), reset(), BUDGETS }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const BUDGETS = [0, 0.2, 0.4, 0.6, 0.8];   // the pause menu's choices (0: the minimum rule only)
 const opt = { on: true, budget: 0.4, memMB: 500, win: 10, hold: 60, cool: 300, reach: 1000, minFps: 30 };
@@ -29,7 +29,7 @@ const store = {
 {
   const s = parseFloat(store.get());
   if (s >= 0 && s <= 1) opt.budget = s;
-  if (typeof navigator !== "undefined" && navigator.webdriver) opt.on = false;   // tests: the distance rule, unless they turn it on
+  if (typeof navigator === "undefined" || navigator.webdriver) opt.on = false;   // tests and the headless boot (no navigator, r15-40): the distance rule, unless they turn it on
   const q = typeof location !== "undefined" && /(?:^|[?&])budget=(\d+)/.exec(location.search.slice(1));
   if (q) { opt.on = true; opt.budget = Math.min(10, +q[1] / 100); }
 }

@@ -16,7 +16,7 @@
 // API: BF.blockReq = { cells(m, cells, opts) -> req, door(m, x, y, z, open) -> req, free(id), tick() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const R = BF.req;
 const pk = (x, y, z) => x + "," + y + "," + z;
 const W = () => BF.world, TR = () => BF.trades;

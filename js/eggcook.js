@@ -16,7 +16,7 @@
 // See CONTRACT.md "Egg cooking".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const FU = BF.furnaceUse;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;

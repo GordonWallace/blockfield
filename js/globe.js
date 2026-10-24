@@ -18,7 +18,7 @@
 // API: BF.globe = { reset(scene), update(), tiles, built, hidden, stats() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const T = 64, TILES = 10, CELLS = T * TILES;   // cells per tile edge, tiles per face edge, cells per face edge
 const n = T + 5;                               // samples across a tile: its T + 1 vertices and two more each side
 const PEAK = 300;                              // blocks: how high a mountain past the horizon can still show over it

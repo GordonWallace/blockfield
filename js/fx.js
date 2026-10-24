@@ -9,7 +9,7 @@
 // API: BF.fx = { emit(e), take() -> events since the last take, clear() (a new world: drops the queue and what is playing), gen, MAX }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const MAX = 600;
 let q = [];

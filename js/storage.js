@@ -11,7 +11,7 @@
 // See CONTRACT.md "Chest ownership and villager storage".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)

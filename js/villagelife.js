@@ -2,7 +2,7 @@
 // See CONTRACT.md "Villager food and farming (js/villagelife.js)".
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const BREAD_PTS = 5;               // bread restores 5 hunger points = 1 bread-equivalent
 const KEEP = 7;                    // a seller always keeps at least this many bread-eq
@@ -205,7 +205,7 @@ BF.food = {
 // ================================================================ farming, food shopping, eating visuals (BF.villageLife)
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const FD = () => BF.food;
 const TR = () => BF.trades;
 const W = () => BF.world;

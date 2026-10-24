@@ -13,7 +13,7 @@
 // - Persistence: the maps are inventory items (saved by name, js/trading.js); `ex` in the villager pack holds the shelved maps.
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const T = () => BF.trades;

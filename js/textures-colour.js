@@ -3,7 +3,7 @@
 // load after textures.js. Colour families are generated from BF.DYE_COLOURS (blocks.js) so 16 colours cost one loop.
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const K = BF.texKit;
 const { T, SPRITES, TS, hex, pal, mul, mix, ramp, jit, WHITE, blob, put, stroke, lighten, planksBase, woolBase, barkSide, logTop,
   SPRITE_TILES, WOOD_OAK, WOOD_SPRUCE, WOOD_ACACIA } = K;

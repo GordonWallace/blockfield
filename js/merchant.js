@@ -23,7 +23,7 @@
 // API: BF.merchant = { away(m), remember, forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 
 const PROF = "merchant";

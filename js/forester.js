@@ -23,7 +23,7 @@
 // Persistence: nothing of its own. Saplings and trees are blocks; the forester's pack is the usual villager inventory.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const ri = (r, a, b) => a + r.int(b - a + 1);

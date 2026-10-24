@@ -18,7 +18,7 @@
 //  most (a treat is eaten first when one is due). Eating one counts toward happiness ("treats") for TREAT_HAPPY days.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PROF = "baker";
 const PER_VILLAGERS = 15;        // at most one baker per 15 villagers (at least one)

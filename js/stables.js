@@ -19,7 +19,7 @@
 // Far villages (js/villagesim.js): horses only exist as mobs near the player, so catching and breeding pause there; shopping goes on.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PROF = "stable_hand";
 const MIN_HORSES = 2, MAX_HORSES = 4;   // catch until 2, breed up to 4

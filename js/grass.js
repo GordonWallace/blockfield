@@ -7,7 +7,7 @@
 // API: BF.grass = { tick(), check(x, y, z), spreads(x, y, z), SAMPLES_PER_S, MIN_LIGHT, stats() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const SAMPLES_PER_S = 120;   // random columns looked at per sim second, across all loaded chunks
 const MIN_LIGHT = 9;         // sky light above the dirt (vanilla's grass rule)

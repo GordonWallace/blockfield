@@ -15,7 +15,7 @@
 // it dug or bought, smelted with real fuel.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const PROF = "glassmaker";
 const DIG_R = 64;                 // sand it digs lies within this many blocks of its village centre or its kiln

@@ -5,7 +5,7 @@
 // BF.items is sparse between the last block id and ITEM_BASE: always skip holes when iterating.
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const G = globalThis;   // self: the generator also runs in a Web Worker (r14-05)
 const BF = (G.BF = G.BF || {});
 
 // Facing 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).

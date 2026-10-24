@@ -20,7 +20,7 @@
 //                     mobsAround(x, z, r, filter, {local}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter), ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const P = () => BF.planet;
 
 let REGION = 64, K = 0;          // block width of a region; regions along a face edge (N / REGION)

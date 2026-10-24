@@ -5,7 +5,7 @@
 // (0..2) steps along DIRS[(f + 3) % 4], the direction local +x of the drawn boxes points to for facing f.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const lat = f => BF.DIRS[(f + 3) % 4];
 // The twelve cells of a tent with origin (x, y, z) and facing f, six on the ground and the six above them (the ridge is two blocks high):

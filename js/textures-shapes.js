@@ -2,7 +2,7 @@
 // Loaded after textures-stone.js; registers painters on the shared kit (BF.texKit) before the atlas is first drawn.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const K = BF.texKit;
 if (!K) { console.warn("textures-shapes: BF.texKit missing (textures.js must load first)"); return; }
 const { T, SPRITES, TS, hex, pal, mul, mix, ramp, jit, WHITE, put, SPRITE_TILES, WOOD_OAK } = K;

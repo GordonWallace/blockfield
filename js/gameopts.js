@@ -11,7 +11,7 @@
 // API: BF.gameOpts = { DEFAULTS, NAMES, types(), name(type), monsters() -> {type: bool}, on(type), set(type, on), setAll(o), normalize(o), purgeStored() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const DEFAULTS = { zombie: true, skeleton: true, creeper: false, spider: false };   // a new world, and worlds saved before the options existed
 const NAMES = { zombie: "Zombies", skeleton: "Skeletons", creeper: "Creepers", spider: "Spiders" };

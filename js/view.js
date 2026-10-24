@@ -17,7 +17,7 @@
 // API: BF.view = { begin(scene, camera), end(), onBegin(fn), toRender(x, y, z, out), state, cornerRound, debug, setDebug(o) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // the corner blend: fully round within CORNER1 blocks of a cube corner, flat beyond CORNER0
 const CORNER0 = 1200, CORNER1 = 500;

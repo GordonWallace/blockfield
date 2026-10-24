@@ -21,7 +21,7 @@
 //                      rolledCount(), counts(), serialize(), deserialize(o), reset(), HABITAT, ... }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const HOUR = 1 / 24;           // game days: a chunk back within this brings its mobs back exactly
 const RELOCATE_R = 8;          // blocks: how far a mob may have wandered by the time a chunk that was away longer comes back
