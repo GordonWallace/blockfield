@@ -4,40 +4,62 @@
 // (the protocol's player message); what the simulation does to the player (hurts, food, inventory, teleports) comes back in self
 // messages. Saving goes through the worker (js/save.js), which owns the world state and writes IndexedDB itself.
 // Where the worker can't run the game's scripts (no Worker, a page opened as a file) the simulation runs in the page as before, through
-// the in-page transport (js/protocol.js local). Until the page draws everything from the client's copy (spec r15-37) the worker is
-// opt-in: ?sim=worker (or localStorage blockfield.sim = "worker"); ?sim=page forces the page.
+// the in-page transport (js/protocol.js local).
+// Choosing the host (spec r15-43): at start-up, the world server if it says hello on the page's socket within 1 s, else a Web Worker if
+// the page can run one, else the page. ?sim=auto|server|worker|page, or the pause menu's Simulation setting (localStorage blockfield.sim),
+// forces one; F3 and the pause menu show where it runs: "World server (N threads)", "Browser (worker)" or "Browser (this page)".
 // Speed: the page's fast-forward keys and menus are sent on (speed, pause); a hidden tab pauses the simulation, as 1.4 stopped with
 // the page's frames. The page's own clock (BF.warp) keeps time for drawing between ticks and shows the speed the worker achieved.
 // A crash in the worker stops it; the page shows the error with a button that reloads the game (the last save, from the title screen).
 // The world server (spec r15-41, server/world.js): served by ./run.sh, the page can be a client of the simulation in the Node process
 // instead, over a WebSocket on its own host (/sim). The socket is wrapped to look like a Worker, so everything here is the same for
 // both; the server's saved worlds are its own (H.saves, js/save.js), a hidden tab doesn't pause it, and if its connection closes by
-// itself the page shows "World server stopped" with the game log's last lines. ?sim=server asks for it, ?sim=auto (the default once
-// DEFAULT is not "page") takes it when the page has one and a worker otherwise; ?sim=worker always takes the Web Worker.
-// Game log: INFO "worker" when the simulation starts in the worker or on the world server, WARN when it falls back (and why), ERROR on
-// a crash or when the world server stops.
+// itself the page shows "World server stopped" with the game log's last lines. ?sim=server asks for it (waiting up to 3 s for its hello),
+// ?sim=auto (the default) takes it when the page has one and a worker otherwise; ?sim=worker always takes the Web Worker.
+// Game log: INFO "worker" when the simulation starts in the worker, on the world server, or in the page because it was asked for, and
+// when the Simulation setting changes; WARN when it falls back (and why), ERROR on a crash or when the world server stops.
 // API: BF.simHost = { mode ("server" | "worker" | "in page"), worker (bool: the simulation is not in the page), server (bool), why (why in
 //   page), start() -> Promise("worker" | "in page"), world(op, args) -> Promise, demo(seed, opts), ticks(raw) -> n, achieved(), frame(),
-//   sky(drawnDt), crashed (text or null), wanted() -> "server" | "worker" | "auto" | null, saves(q) -> Promise (the server's worlds), post(m) }
+//   sky(drawnDt), crashed (text or null), wanted() -> "server" | "worker" | "auto" | null, saves(q) -> Promise (the server's worlds), post(m),
+//   label() -> the host as the player sees it, threads (the world server's), CHOICES, pref() / setPref(v) / prefLabel(v) (the setting),
+//   eval(src, arg) -> Promise (tests only: test/bft.js BFT.sim) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
-const DEFAULT = "page";   // until r15-37 has moved the drawing and screens to the client's copy
 const glog = (lvl, text) => { if (BF.glog) BF.glog.log(lvl, "worker", text); };
 
 const H = (BF.simHost = { mode: "in page", worker: false, server: false, why: "", crashed: null, lastError: null });
 
-// Which host the page asks for: "server", "worker", "auto" (the world server when the page has one, else a worker) or null (the page)
+// Which host the page asks for (spec r15-43): ?sim= in the address, else the setting (localStorage blockfield.sim, the pause menu's
+// "Simulation" button), else DEFAULT. "auto" (the default): the world server when the page has one (it says hello within 1 s), else a
+// Web Worker when the page can run one, else the page. "server", "worker" and "page" force one (a forced host that can't run falls back
+// the same way: server, worker, page).
+H.CHOICES = ["auto", "server", "worker", "page"];
+H.pref = function () { try { const v = localStorage.getItem("blockfield.sim"); return H.CHOICES.includes(v) ? v : "auto"; } catch (_) { return "auto"; } };
+H.setPref = function (v) {
+  if (!H.CHOICES.includes(v)) return;
+  try { if (v === "auto") localStorage.removeItem("blockfield.sim"); else localStorage.setItem("blockfield.sim", v); } catch (_) { /* not kept */ }
+  glog("INFO", "Simulation setting: " + H.prefLabel(v) + " (from the next start)");
+};
+H.prefLabel = v => ({ auto: "Automatic", server: "World server", worker: "Browser (worker)", page: "Browser (this page)" })[v] || v;
 H.wanted = function () {
   let v = null;
   try { v = new URLSearchParams(location.search).get("sim"); } catch (_) { /* none */ }
-  if (!v) try { v = localStorage.getItem("blockfield.sim"); } catch (_) { /* none */ }
-  v = v || DEFAULT;
-  return v === "server" || v === "worker" ? v : v === "auto" ? "auto" : null;
+  if (!H.CHOICES.includes(v)) v = H.pref();
+  return v === "page" ? null : v;
+};
+// What the player is shown (F3, the pause menu): where the simulation runs now
+H.label = function () {
+  if (H.server) { const n = H.threads || 1; return "World server (" + n + " thread" + (n === 1 ? "" : "s") + ")"; }
+  return H.worker ? "Browser (worker)" : "Browser (this page)";
 };
 const cannot = () => typeof Worker === "undefined" ? "this browser has no Web Workers" :
   !/^https?:$/.test(location.protocol) ? "the page was opened as a file, so a worker can't load the game's scripts" : "";
 
+// the line saying the simulation runs in the page, and why: logged now and again as each world starts (the game log drops what was logged
+// before the first world, js/gamelog.js)
+let pageNote = null;
+const notePage = (lvl, text) => { pageNote = [lvl, text]; glog(lvl, text); };
 function inPage(why) {
   H.mode = "in page"; H.worker = false; H.server = false; H.why = why;
   if (BF.proto && BF.proto.worker.on) BF.proto.worker.disconnect();
@@ -49,14 +71,16 @@ function inPage(why) {
 // Starts the simulation's host (when wanted and possible): the world server (spec r15-41) or a Web Worker. Resolves "worker" once the
 // simulation has loaded there (H.mode says which: "server" or "worker"), or "in page".
 H.start = function () {
+  // (after the game log's own newWorld listener has started the world's log: it registers later, at the page's load)
+  if (BF.on) BF.on("newWorld", () => setTimeout(() => { if (pageNote && !H.worker) glog(pageNote[0], pageNote[1]); }, 0));
   const want = H.wanted();
-  if (!want) { inPage("the default"); return Promise.resolve(H.mode); }
+  if (!want) { inPage("asked for"); notePage("INFO", "The simulation runs in the page (asked for: ?sim=page or the Simulation setting)"); return Promise.resolve(H.mode); }
   if (want === "worker") return startWorker();
   if (!/^https?:$/.test(location.protocol) || typeof WebSocket === "undefined") {   // a file or the Artifact: no world server there
     if (want === "server") later.push(["WARN", "No world server: the page was not served by ./run.sh"]);
     return startWorker();
   }
-  return serverSocket().then(w => {
+  return serverSocket(want === "server" ? 3000 : 1000).then(w => {
     if (w.sock) return run(w.sock, "server");
     if (want === "server") later.push(["WARN", "No world server (" + w.why + "): the simulation runs in a Web Worker instead"]);
     return startWorker();
@@ -67,9 +91,9 @@ const later = [];
 const logLater = () => { for (const [l, x] of later.splice(0)) glog(l, x); };
 function startWorker() {
   const no = cannot();
-  if (no) { inPage(no); glog("WARN", "The simulation runs in the page: " + no); return Promise.resolve(H.mode); }
+  if (no) { inPage(no); notePage(H.wanted() === "auto" ? "INFO" : "WARN", "The simulation runs in the page: " + no); return Promise.resolve(H.mode); }
   let w;
-  try { w = new Worker(BF.workerUrl("js/simworker.js")); } catch (e) { inPage(String(e && e.message || e)); glog("WARN", "The simulation worker could not start (" + H.why + "); the simulation runs in the page"); return Promise.resolve(H.mode); }
+  try { w = new Worker(BF.workerUrl("js/simworker.js")); } catch (e) { inPage(String(e && e.message || e)); notePage("WARN", "The simulation worker could not start (" + H.why + "); the simulation runs in the page"); return Promise.resolve(H.mode); }
   return run(w, "worker");
 }
 // w: a Web Worker, or the world server's socket wrapped to look like one (serverSocket)
@@ -84,7 +108,7 @@ function run(w, via) {
       try { w.terminate(); } catch (_) { /* gone */ }
       if (server) { BF.proto.worker.disconnect(); later.push(["WARN", "The world server could not start the simulation (" + why + "); it runs in a Web Worker instead"]); startWorker().then(resolve); return; }
       inPage(why);
-      glog("WARN", "The simulation worker could not start (" + why + "); the simulation runs in the page");
+      notePage("WARN", "The simulation worker could not start (" + why + "); the simulation runs in the page");
       resolve(H.mode);
     };
     const timer = setTimeout(() => fail("it did not start in 60 s"), 60000);
@@ -97,6 +121,8 @@ function run(w, via) {
       if (d.ready && !settled) {
         settled = true; clearTimeout(timer);
         H.mode = server ? "server" : "worker"; H.worker = true; H.server = server; H.why = "";
+        H.threads = server ? (w.hello && w.hello.threads) || 1 : 1;
+        if (globalThis.BF_TEST) w.postMessage({ test: "eval" });   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
         BF.world.replica = true;
         BF.glog.remote(list => client.log(list));
         glog("INFO", server ? "The simulation runs on the world server (" + location.host + ", ready in " + Math.round(performance.now() - t0) + " ms)" + (w.hello.held ? "; it holds world \"" + w.hello.held.name + "\", paused since its page closed" : "")
@@ -119,11 +145,11 @@ function run(w, via) {
 // ---- the world server's socket (ws://<this page's host>/sim, server/world.js), made to look like a Worker for run(): protocol packets
 // as binary frames ([header length u32 LE][1 if a binary part follows][header JSON][binary part]), everything else as JSON text. Resolves {sock} once the server
 // has said hello, else {why} (no server, refused: another page plays, or no answer within 3 s).
-function serverSocket() {
+function serverSocket(wait) {
   return new Promise(resolve => {
     let ws, done = false, closing = false;
     const end = r => { if (!done) { done = true; clearTimeout(t); resolve(r); } };
-    const t = setTimeout(() => { end({ why: "no answer in 3 s" }); try { ws.close(); } catch (_) { /* gone */ } }, 3000);
+    const t = setTimeout(() => { end({ why: "no answer in " + wait / 1000 + " s" }); try { ws.close(); } catch (_) { /* gone */ } }, wait);
     try { ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/sim"); } catch (e) { end({ why: String(e && e.message || e) }); return; }
     ws.binaryType = "arraybuffer";
     const enc = new TextEncoder(), dec = new TextDecoder();
@@ -167,6 +193,13 @@ H.saves = function (q) {
   const rid = askN++;
   return new Promise(resolve => { asked.set(rid, resolve); BF.proto.worker.w.postMessage({ saves: Object.assign({ rid }, q) }); });
 };
+// Tests (test/bft.js BFT.sim, spec r15-43): runs a function's source where the simulation is, with arg, and resolves its (awaited,
+// structured-clone or JSON) result. In the page it runs here; in a worker or on the world server through the protocol's eval query,
+// which only a page with BF_TEST set turns on (and on the world server only one started with --test).
+H.eval = function (src, arg) {
+  if (!H.worker) return Promise.resolve().then(() => (0, eval)("(" + src + ")")(arg));
+  return new Promise((resolve, reject) => BF.client.query("eval", { src, arg }, r => (r && r.ok ? resolve(r.value) : reject(new Error("in the simulation: " + (r && (r.error || r.why)))))));
+};
 // to the world server, outside the protocol (the debug feed's page part, js/debugfeed.js)
 H.post = m => { if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage(m); };
 
@@ -182,6 +215,7 @@ function hook(C) {
     }
     if (m.health != null) P.health = m.health;
     if (m.hunger != null) P.hunger = m.hunger;
+    if (m.saturation != null) P.saturation = m.saturation;   // (eating, in the simulation: r15-43)
     if (m.gameMode && m.gameMode !== P.gameMode) P.setGameMode(m.gameMode);
     if (m.mount !== undefined) P.rideSelf(m.mount);   // got on or off a boat or horse (r15-44 part 2), before a teleport off it
     if (m.pos) P.teleport(m.pos[0], m.pos[1], m.pos[2]);

@@ -3,12 +3,20 @@
 # push to a release branch: release-branch PRs stay light and the full run comes right before a release goes into main.
 # The tests are split over as many runners at once as their longest test allows (CI_PLAN and CI_SHARD in test/ci.js),
 # about 12, so the run takes about as long as that one test rather than an hour.
+# Hosts (spec r15-43): the run covers the three places the game's simulation can run. Host page runs every test (the page opened as
+# a file); hosts worker (a Web Worker, the page served without the world server) and server (the Node world server, ./run.sh) run the
+# tests whose // @ci header lists them in hosts=, each host split into its own parts. A manual run can pick fewer hosts.
 name: Integration tests
 
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      hosts:
+        description: 'Hosts to run the tests on (any of page worker server)'
+        required: false
+        default: 'page worker server'
 
 # A newer manual run waits for the running one instead of cancelling it; pull request runs cancel their superseded ones.
 concurrency:
@@ -22,25 +30,33 @@ jobs:
     if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release-')
     runs-on: ubuntu-latest
     outputs:
-      parts: ${{ steps.plan.outputs.parts }}
-      n: ${{ steps.plan.outputs.n }}
+      runs: ${{ steps.plan.outputs.runs }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      # one entry {host, part, n} per runner: each host's tests split into parts (test/ci.js CI_PLAN)
       - id: plan
         env:
           CI_PLAN: 1
           CI_PART_SECS: 1
-        run: node test/ci.js integration
+          HOSTS: ${{ inputs.hosts || 'page worker server' }}
+        run: |
+          runs='[]'
+          for h in $HOSTS; do
+            n=$(GITHUB_OUTPUT= CI_HOST=$h node test/ci.js integration | sed -n 's/^n=//p')
+            echo "host $h: $n part(s)"
+            runs=$(node -e 'const [r, h, n] = process.argv.slice(1); const a = JSON.parse(r); for (let k = 1; k <= +n; k++) a.push({ host: h, part: k, n: +n }); console.log(JSON.stringify(a))' "$runs" "$h" "${n:-0}")
+          done
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
   integration-part:
     needs: plan
-    name: integration part ${{ matrix.part }} of ${{ needs.plan.outputs.n }}
+    name: integration ${{ matrix.host }} part ${{ matrix.part }} of ${{ matrix.n }}
     strategy:
       fail-fast: false
       matrix:
-        part: ${{ fromJSON(needs.plan.outputs.parts) }}
+        include: ${{ fromJSON(needs.plan.outputs.runs) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -58,13 +74,14 @@ jobs:
           playwright install chromium
       - name: Run integration tests
         env:
-          CI_SHARD: ${{ matrix.part }}/${{ needs.plan.outputs.n }}
+          CI_SHARD: ${{ matrix.part }}/${{ matrix.n }}
+          CI_HOST: ${{ matrix.host }}
         run: NODE_PATH=$(npm root -g) node test/ci.js integration ci-out
       - name: Upload logs and screenshots
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: integration-results-${{ matrix.part }}
+          name: integration-results-${{ matrix.host }}-${{ matrix.part }}
           path: ci-out/
           retention-days: 30
   # one check named integration that passes only when every part did (the result branch rules and emails look at); skipped when a

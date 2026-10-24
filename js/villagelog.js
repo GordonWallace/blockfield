@@ -3,7 +3,7 @@
 // Every village keeps a timestamped log of births, beds placed (and by whom), trades (villager <-> villager and
 // villager <-> player) and professions gained, capped at CAP entries (oldest dropped) and saved with the world.
 // Entries are [t, kind, text, [x, y, z]?]: the location of the event (block coordinates) when it has one, from the `where` given
-// to log() (a mob or a point) or else the first "at x, y, z" in the text. Every logged entry also goes to BF.alerts (js/alerts.js).
+// to log() (a mob or a point) or else the first "at x, y, z" in the text. Every logged entry also goes to BF.alertSim (js/alertsim.js).
 // Villager names are generated deterministically from the villager's persistence key, so they need no saving.
 // Builders log what they start, take over and finish building (kind "build", js/builder.js).
 // Explorers' tents are logged with the beds (the tally still counts only real beds).
@@ -58,7 +58,7 @@ function log(rec, kind, text, where) {
   a.push(e);
   if (a.length > CAP) a.splice(0, a.length - CAP);
   if (BF.happiness) BF.happiness.note(rec.key, kind);   // its weekly counts outlive the capped log (js/happiness.js)
-  if (BF.alerts) BF.alerts.check(rec, e);
+  if (BF.alertSim) BF.alertSim.check(rec, e);   // debug screen alerts (js/alertsim.js)
   if (BF.glog) BF.glog.village(rec, e);   // the game log keeps every entry, not just the newest CAP (js/gamelog.js)
 }
 const stacks = list => (list || []).map(b => b.n + " " + BF.itemName(b.id)).join(" + ");

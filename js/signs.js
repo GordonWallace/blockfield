@@ -37,6 +37,10 @@ const chunkSigns = new Map(); // chunk key -> Set(cell key) of sign cells in loa
 const overlays = new Map();   // anchor key -> {mesh, sig, cell}
 const vByKey = new Map();     // village key -> worldgen village object
 let renderDirty = true;
+// the text store's version (spec r15-43): bumped on every change, so the protocol sends the store to a page that draws a replica world
+// (the simulation in a Web Worker or on the world server, js/protocol.js), which then follows it (follow) instead of keeping its own
+let ver = 0, follow = false;
+const touched = () => { renderDirty = true; ver++; };
 
 // ---------------------------------------------------------------- grouping
 // The plane of a sign: same block id (wood, kind, facing); neighbours to the viewer's left/right and above/below.
@@ -217,7 +221,7 @@ function setText(x, y, z, text, force) {
   if (e) e.t = t;
   else if (t) data.set(g.key, { t });
   if (e && !e.t && !e.auto) data.delete(g.key);
-  renderDirty = true;
+  touched();
   return true;
 }
 
@@ -307,7 +311,7 @@ function structural(x, y, z, oldId, id, so, sn) {
   }
   trackCell(x, y, z, !!sn);
   groupCache.clear();
-  renderDirty = true;
+  touched();
   const all = [[x, y, z]];
   for (const g of oldG.concat(newG)) all.push(...g.cells);
   markDirty(all);
@@ -598,6 +602,7 @@ if (BF.page) addEventListener("keydown", e => {
 function registerAuto(kind, fn) { autos[kind] = fn; }
 // A sign coming into the world (direct) gets its text at once; the simulation's half-hourly updates are requests.
 function runAuto(onlyKey, direct) {
+  if (follow) return;   // (a page following the simulation's store: the simulation writes auto signs)
   for (const [k, e] of data) {
     if (!e.auto || (onlyKey && k !== onlyKey)) continue;
     const [x, y, z] = pk(k);
@@ -610,7 +615,7 @@ function runAuto(onlyKey, direct) {
     const c = capacity(g);
     t = clampText(t, c.cols, c.rows);
     if (t === e.t) continue;
-    if (direct || !BF.req) { e.t = t; renderDirty = true; }
+    if (direct || !BF.req) { e.t = t; touched(); }
     else BF.req.send("signText", k, { t, expect: e.t }, e.ak || null);   // a request (spec r15-19): written in the apply phase
   }
 }
@@ -620,13 +625,14 @@ BF.req.on("signText", req => {
   const e = data.get(req.target);
   if (!e || !e.auto) return { ok: false, why: "gone" };
   if (e.t !== req.data.expect) return { ok: false, why: "changed" };
-  e.t = req.data.t; renderDirty = true;
+  e.t = req.data.t; touched();
   return { ok: true };
 });
 let pendingAuto = true;
 // generated auto signs become text entries once all their blocks are loaded (and only once per auto key)
 function tryAutoPlans() {
   pendingAuto = false;
+  if (follow) return;
   for (const [k, p] of autoPlan) {
     if (seen.has(p.ak)) { autoPlan.delete(k); continue; }
     if (!p.cells.every(c => W().isLoaded(c[0], c[2]))) continue;
@@ -636,7 +642,7 @@ function tryAutoPlans() {
     if (!p.cells.every(c => wget(c[0], c[1], c[2]) === p.id) || !g || g.key !== k || g.W * g.H !== p.cells.length || data.has(k)) continue;
     data.set(k, { t: "", auto: p.kind, ak: p.ak });
     runAuto(k, true);
-    renderDirty = true;
+    touched();
   }
 }
 
@@ -921,10 +927,17 @@ function reset() {
   data.clear(); seen.clear(); groupCache.clear();
   for (const o of overlays.values()) disposeOverlay(o);
   overlays.clear();
-  renderDirty = true; pendingAuto = true;
+  touched(); pendingAuto = true;
+}
+// a page drawing a replica world (r15-43): the simulation's whole store, from the protocol's "signs" event entry; from then on the
+// page writes no auto signs itself
+function adopt(o) {
+  follow = true;
+  data.clear(); groupCache.clear(); renderDirty = true;
+  for (const [k, t, auto, ak] of (o && o.data) || []) { const e = { t: t || "" }; if (auto) { e.auto = auto; e.ak = ak; } data.set(k, e); }
 }
 function deserialize(o) {
-  data.clear(); seen.clear(); groupCache.clear(); renderDirty = true; pendingAuto = true;
+  data.clear(); seen.clear(); groupCache.clear(); touched(); pendingAuto = true;
   if (!o) return;
   for (const [k, t, auto, ak] of o.data || []) { const e = { t: t || "" }; if (auto) { e.auto = auto; e.ak = ak; } data.set(k, e); }
   for (const s of o.seen || []) seen.add(s);
@@ -957,6 +970,7 @@ function autoTick() {
 if (BF.world && BF.world.onThink) BF.world.onThink(autoTick);
 BF.onLoad(() => {
   if (BF.on) BF.on("newWorld", reset);
+  if (BF.page && BF.proto && BF.proto.listen) BF.proto.listen(list => { for (const e of list) if (e.kind === "signs" && BF.world.replica) adopt(e.store); });
   if (BF.page && document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const o of overlays.values()) o.sig = null; renderDirty = true; });
 });
 
@@ -968,7 +982,8 @@ BF.signs = {
   registerAuto, runAuto, autos,
   planArch, drawArch, villageName, nameFor,
   planPosts, assignPosts, drawPosts, postNeighbours, arrowFor, postLine, POST_RANGE,
-  serialize, deserialize, reset,
+  serialize, deserialize, reset, adopt,
+  get ver() { return ver; },
   isSign: id => !!IS[id], signId,
   _state: { data, seen, autoPlan, overlays, chunkSigns, groupCache, vByKey },
 };
