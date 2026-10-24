@@ -90,6 +90,7 @@ function hook(C) {
     if (m.health != null) P.health = m.health;
     if (m.hunger != null) P.hunger = m.hunger;
     if (m.gameMode && m.gameMode !== P.gameMode) P.setGameMode(m.gameMode);
+    if (m.mount !== undefined) P.rideSelf(m.mount);   // got on or off a boat or horse (r15-44 part 2), before a teleport off it
     if (m.pos) P.teleport(m.pos[0], m.pos[1], m.pos[2]);
     if (m.inv && BF.inventory.setOwn) BF.inventory.setOwn(m.inv);
     if (m.spawn) BF.spawnPoint = m.spawn;
@@ -122,6 +123,8 @@ H.frame = function () {
   const C = BF.client, P = BF.player;
   const st = P.serialize();
   st.sel = BF.inventory.selectedIndex;   // the hotbar slot: the page's (r15-44)
+  const ride = P.rideReport();   // the boat or saddled horse the page steers (r15-44 part 2)
+  if (ride) st.ride = ride;
   const k = JSON.stringify(st);
   if (k !== sentPlayer) { sentPlayer = k; C.player(st); }
   speedNow();
