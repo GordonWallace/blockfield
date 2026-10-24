@@ -8,7 +8,8 @@
 // waiting in unloaded chunks and never despawning. A boat is plain data (wood, pos, vel, yaw, hurtT, row / rowing, mob); js/entityview.js
 // draws it (spec r15-12).
 // API: BF.boats = { list, init, update(dt), drive(b, dt, input), raycast, place, placeFromPlayer, board, hit, seat(m), holds(m), seatOf(b, who),
-//   exitSpot(b), letOut(b), remove(b), clear, serialize, deserialize, counts(), spawn(wood, x, y, z, yaw) }.
+//   exitSpot(b), letOut(b), remove(b), clear, serialize, deserialize, counts(), spawn(wood, x, y, z, yaw),
+//   rideInfo(b), localCopy(id, info, pose), setPassenger(b, type) (riding over the protocol, spec r15-44 part 2) }.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -293,8 +294,29 @@ const RIDE = {
   onLeave: b => { if (b.mob) letOut(b); },   // Shift lets the mob passenger out too
 };
 
+// Riding over the protocol (spec r15-44 part 2): what the page needs to ride b (player.mount's answer, self.mount). The rider steers a
+// boat, so the page rows its own copy (localCopy) and reports where it is; pass: the mob passenger's type (it moves the player's seat).
+function rideInfo(b) {
+  return { kind: "boat", steer: "page", wood: b.wood, sitEye: SIT_EYE, pass: b.mob && !b.mob.dead ? b.mob.type : null };
+}
+// The page's copy of a boat it rows (the simulation in a worker): not in the list, driven by drive() as the real one is. A passenger is a
+// stand-in for where the player sits (seatOf); the simulation seats the real one.
+function localCopy(id, info, pose) {
+  const b = { local: true, sid: id, kind: "boat", ctl: LOCAL, wood: info.wood, pos: new THREE.Vector3(pose.x, pose.y, pose.z), prev: new THREE.Vector3(pose.x, pose.y, pose.z),
+    prevYaw: pose.yaw || 0, vel: new THREE.Vector3(), yaw: pose.yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null, stowT: 0, row: [0, 0], rowing: [0, 0],
+    onGround: false, inWater: false, medium: "air" };
+  setPassenger(b, info.pass);
+  return b;
+}
+function setPassenger(b, type) {
+  if (!type) { b.mob = null; return; }
+  if (!b.mob || b.mob.type !== type) b.mob = { type, position: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0 };
+}
+const LOCAL = Object.assign({}, RIDE, { onLeave: () => {} });
+
 const boats = {
   list,
+  rideInfo, localCopy, setPassenger,
   HW, H, SIT_EYE,
   init() {
     ready = true;
