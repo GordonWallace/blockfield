@@ -105,14 +105,27 @@ async function run(b, url, mode) {
     return { chest: { x: x + 2, y, z }, furn: { x: x - 2, y, z } };
   });
   const placed = s => BF.world.getBlock(s.chest.x, s.chest.y, s.chest.z) === BF.B.chest && BF.world.getBlock(s.furn.x, s.furn.y, s.furn.z) === BF.B.furnace;
-  for (let i = 0; i < 10 && !(await pg.evaluate(placed, spots)); i++) {
-    await pg.evaluate(s => {
-      const W = BF.world, put = (c, id) => { if (W.getBlock(c.x, c.y, c.z) !== id) BF.req.player("player.place", c.x + "," + c.y + "," + c.z, { cells: [[c.x, c.y, c.z, id, W.getBlock(c.x, c.y, c.z)]], consume: 0 }); };
+  // The simulation refuses a block in a chunk it hasn't loaded yet: on a slow runner the worker can still be streaming the village's
+  // chunks after the wait above. Wait until it has both cells' chunks (chunkHash answers with the keys it has), then place.
+  await pg.waitForFunction(s => {
+    const cs = [s.chest, s.furn].map(c => BF.world.chunkAt(c.x, c.z));
+    if (!cs.every(Boolean)) return false;
+    const keys = [...new Set(cs.map(c => c.key))];
+    if (window.__ck && window.__ck.n === keys.length) return true;
+    if (!window.__ckAsk) { window.__ckAsk = true; BF.client.query('chunkHash', { keys }, r => { window.__ckAsk = false; if (r && r.keys && r.keys.length === keys.length) window.__ck = { n: keys.length }; }); }
+    return false;
+  }, spots, { timeout: 120000, polling: 250 }).catch(() => {});
+  let lastPlace = null;
+  for (const t0 = Date.now(); Date.now() - t0 < 60000 && !(await pg.evaluate(placed, spots));) {
+    lastPlace = await pg.evaluate(s => {
+      const W = BF.world, out = [];
+      const put = (c, id) => { if (W.getBlock(c.x, c.y, c.z) !== id) out.push(new Promise(r => BF.req.player("player.place", c.x + "," + c.y + "," + c.z, { cells: [[c.x, c.y, c.z, id, W.getBlock(c.x, c.y, c.z)]], consume: 0 }).then(r))); };
       put(s.chest, BF.B.chest); put(s.furn, BF.B.furnace);
+      return Promise.all(out);
     }, spots);
     await settle(); await pg.waitForTimeout(500); await settle();
   }
-  check(await pg.evaluate(placed, spots), tag('a chest and a furnace placed by player requests'));
+  check(await pg.evaluate(placed, spots), tag('a chest and a furnace placed by player requests'), lastPlace);
   // click-to-redraw times: pointerdown (capture) to the next self message
   await pg.evaluate(() => {
     window.__lat = []; let t0 = null;
