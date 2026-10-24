@@ -706,7 +706,7 @@ if (BF.req) BF.req.on("trade", req => {
   catch (err) { release(d.m, d.e); if (isMob(d.m)) giveTo(d.m, d.m.inv, d.e.pay); d.e.pay = []; r = { done: 0, why: "error" }; console.error(err); }
   d.slot.res = r;   // the asker reads it at its next think (buy above); written now, so a buyer that went still answers its seller
   return { ok: r.done > 0, done: r.done, why: r.why };
-});
+}, { global: true });   // two villagers' packs, maybe in two regions: from the global inbox, after the regions (spec r15-33)
 
 // ---------------------------------------------------------------- persistence
 function claimedBed(v) {

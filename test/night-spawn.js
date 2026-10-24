@@ -95,7 +95,8 @@ module.exports = async (pg, out) => {
     for (const m of M.list.slice()) if (m.hostile) m.dead = true;
     S.day = 12; S.time = 0.44;
     const dt = 0.05;
-    for (let i = 0; S.time < 0.565; i++) { S.time += dt / S.dayLength; M.update(dt); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
+    // each step a whole sim tick after the mobs (js/world.js tickSim): their requests apply, so a door a villager opens is open next step
+    for (let i = 0; S.time < 0.565; i++) { S.time += dt / S.dayLength; M.update(dt); BF.world.tickSim(); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.removed && m.bed);
     const out = vs.filter(m => !m.sleeping).map(m => ({ prof: m.profession || m.variant, d: Math.round(Math.hypot(m.position.x - m.bed.x, m.position.z - m.bed.z)), tent: !!m.bed.tent }));
     M.spawning = true;

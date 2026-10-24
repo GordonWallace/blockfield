@@ -117,13 +117,15 @@ const zeroSplit = () => Object.fromEntries(CATS.map(k => [k, 0]));
 function toggle(on) {
   const s = wasOn ? P.stats() : null;
   wasOn = P.on = on;
+  if (!on) { for (const b of buckets) for (let i = 0; i < N; i++) allT[i] += b.t[i]; buckets = []; }
+  if (BF.glog) {
+    const why = BF.debugOn ? "F3 overlay" : asks > 0 ? "a harness" : "debug screen";
+    if (on) BF.glog.log("INFO", "perf", "Performance meter on (" + why + ")");
+    else if (s && !s.stale) BF.glog.log("INFO", "perf", `Performance meter off: ${Math.round(s.vss)} V·s/s, ${Math.round(s.mobss)} mob-s/s, ${s.msPerStep.toFixed(2)} ms/step, ${s.villagers} villagers (last ${WINDOW_MS / 1000} s)`);
+    else BF.glog.log("INFO", "perf", "Performance meter off");
+  }
+  // the window starts after the log line (off the page writing it can take tens of ms, which would count as real time with no steps)
   if (on) { buckets = [cur = bucket(now())]; last = now(); histT = 0; }
-  else { for (const b of buckets) for (let i = 0; i < N; i++) allT[i] += b.t[i]; buckets = []; }
-  if (!BF.glog) return;
-  const why = BF.debugOn ? "F3 overlay" : asks > 0 ? "a harness" : "debug screen";
-  if (on) BF.glog.log("INFO", "perf", "Performance meter on (" + why + ")");
-  else if (s && !s.stale) BF.glog.log("INFO", "perf", `Performance meter off: ${Math.round(s.vss)} V·s/s, ${Math.round(s.mobss)} mob-s/s, ${s.msPerStep.toFixed(2)} ms/step, ${s.villagers} villagers (last ${WINDOW_MS / 1000} s)`);
-  else BF.glog.log("INFO", "perf", "Performance meter off");
 }
 
 // "Sim 1234 V·s/s  2.9 ms/step  (villagers 0.8, monsters 0.6, ...)": the F3 line (also the debug screen's raw F3 text)

@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Village starting kits and desert gardens (release 1.1): NODE_PATH=$(npm root -g) node test/run.js /tmp/vk test/village-kits.js
 // - village generator 3 rosters: at least 3 villagers, every village has a miner, a farmer and a forester, each with its jobsite planned
 // - founding villagers' tools (wooden hoe / axe / pickaxe, shears; 30-40 torches for miners); villagers hired later get emeralds only
@@ -5,7 +6,9 @@
 // - a farmer without a hoe buys one from the village's toolsmith
 // @ci integration
 module.exports = async (pg) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.simBFT(pg);
+  const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const I = BF.I, T = BF.trades, names = a => a.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count);
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };

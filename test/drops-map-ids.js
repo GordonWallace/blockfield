@@ -1,9 +1,11 @@
-// @ci integration suite=items
+// @ci integration suite=items hosts=worker,server
 // A filled or auto map lying on the ground is the same map after a page reload (bug-003): drops are saved by item name,
 // since map item ids are handed out fresh each session. Usage: node test/run.js /tmp/dmi test/drops-map-ids.js
 module.exports = async (pg, out) => {
-  const id = await pg.evaluate(async () => {
-    const meta = await BF.save.create({ name: "drops-map-ids", seed: 7, gameMode: "survival", villages: 9, gen: 4 });
+  const lib = require("./lib");
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: "drops-map-ids", seed: 7, gameMode: "survival", villages: 9, gen: 4 })).id);
+  await lib.simReady(pg);
+  await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     BF.mobs.spawning = false;
     const A = BF.resolveItem("filled_map_1_0_0"), B = BF.resolveItem("filled_map_1_5_5"), C = BF.resolveItem("auto_map_2_3_-4");
     const p = BF.player.position;
@@ -14,17 +16,16 @@ module.exports = async (pg, out) => {
     BF.drops.spawn(A, 1, p.x + 20, p.y + 5, p.z + 20, still);
     BF.drops.spawn(C, 1, p.x + 22, p.y + 5, p.z + 20, still);
     BF.drops.spawn(BF.I.cobblestone, 9, p.x + 24, p.y + 5, p.z + 20, still);
-    await BF.save.saveNow();
-    return meta.id;
   });
+  await pg.evaluate(() => BF.save.saveNow());
   await pg.reload();
-  await require("./lib").ready(pg);   // the planet works out its rivers before the boot world starts (a load before then is wiped by it)
+  await lib.reloaded(pg);   // the host, then the planet's rivers, before the boot world starts (a load before then is wiped by it)
   await pg.waitForTimeout(1000);
-  const res = await pg.evaluate(async id => {
+  // a map made this session takes the first dynamic id, as map B would have when the inventory loads first
+  await lib.sim(pg, () => { BF.resolveItem("filled_map_2_9_9"); });
+  await pg.evaluate(id => BF.save.load(id), id);
+  const res = await lib.sim(pg, () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    // a map made this session takes the first dynamic id, as map B would have when the inventory loads first
-    BF.resolveItem("filled_map_2_9_9");
-    await BF.save.load(id);
     const names = BF.drops.list.map(d => BF.items[d.id] ? BF.items[d.id].name + "x" + d.count : "unknown " + d.id).sort();
     ok("the dropped maps and the cobblestone are the same items after reload", JSON.stringify(names) === JSON.stringify(["auto_map_2_3_-4x1", "cobblestonex9", "filled_map_1_0_0x1"]), names);
     ok("the inventory still holds map B", BF.inventory.slots[0] && BF.items[BF.inventory.slots[0].id].name === "filled_map_1_5_5");
@@ -33,8 +34,8 @@ module.exports = async (pg, out) => {
     BF.drops.deserialize([[BF.I.cobblestone, 3, 0, 80, 0, 1, 0, 0], [BF.ITEM_BASE + 0x10000 + 1, 1, 0, 80, 0, 1, 0, 0]]);
     ok("old numeric saves: fixed items load, map ids are dropped", BF.drops.list.length === 1 && BF.drops.list[0].id === BF.I.cobblestone, BF.drops.list.map(d => d.id));
     BF.drops.clear();
-    await BF.save.remove(id);
     return R;
-  }, id);
+  });
+  await pg.evaluate(id => BF.save.remove(id), id);
   for (const l of res.lines) console.log(l);
 };

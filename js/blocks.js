@@ -806,12 +806,23 @@ BF.resolveItem = name => {
 };
 // Items dropped when a block breaks: its `drop` plus `extraDrops` [[itemName, min, max, chance], ...].
 // Returns [{id, count}]. Mature crops' extra drops replace nothing: wheat gives wheat + 1-3 seeds.
-// r: the seeded stream to roll with (js/rand.js); without one, the tick's own stream for the n-th roll of the tick.
-let dropTick = -1, dropN = 0;
+// r: the seeded stream to roll with (js/rand.js). Without one: the stream of the mob thinking (BF.rand.thinker), or in the apply phase the
+// n-th roll of the tick in the region being applied (BF.req.applying), else the n-th roll of the tick; so a roll never depends on the order
+// mobs think or regions apply in (spec r15-33).
+let dropTick = -1;
+const dropN = new Map();   // region key (-1: none) -> rolls this tick
 BF.rollDrops = function (blockId, r) {
   const b = blocks[blockId], out = [];
   if (!b) return out;
-  if (!r && b.extraDrops) { if (BF.rand.tick !== dropTick) { dropTick = BF.rand.tick; dropN = 0; } r = BF.rand.at("drops", dropN++, 0); }
+  if (!r && b.extraDrops) {
+    if (BF.rand.thinker && BF.req && BF.req.phase === "think") r = BF.rand.of(BF.rand.thinker);
+    else {
+      if (BF.rand.tick !== dropTick) { dropTick = BF.rand.tick; dropN.clear(); }
+      const k = BF.req && BF.req.phase === "apply" && BF.req.applying != null ? BF.req.applying : -1, n = dropN.get(k) || 0;
+      dropN.set(k, n + 1);
+      r = k < 0 ? BF.rand.at("drops", n, 0) : BF.rand.at("drops", n, 1, null, k);
+    }
+  }
   if (b.drop != null) out.push({ id: b.drop, count: 1 });
   for (const [name, min, max, chance] of b.extraDrops || []) {
     if (r.next() >= chance) continue;

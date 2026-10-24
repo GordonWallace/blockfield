@@ -1,15 +1,22 @@
+// @ci integration suite=ui hosts=worker,server
 // Commands can't send the player past the world border: /tp x z and /spawnpoint refuse it like /tp x y z does, and a
 // spawn point or saved position past the border (older saves) falls back to the world spawn. /spawnpoint keeps its y.
 // On the planet the border is the player's face square (u and v from -N to 2N, spec r14-18), and the world spawn is where newWorld
 // put the player (spec r14-19).
-// node test/run.js /tmp/tf test/tp-far.js
+// The commands run where the simulation is (lib.sim, spec r15-43); the player, its death and respawn are the page's.
+// node test/run.js /tmp/tf test/tp-far.js [--host page|worker|server]
+const lib = require('./lib');
 module.exports = async (pg) => {
   await pg.evaluate(() => { BF.player.start(); window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
   await pg.waitForTimeout(1500);
   const home = await pg.evaluate(() => ({ x: BF.spawnPoint.x, z: BF.spawnPoint.z }));   // the world spawn
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
-  const x = c => pg.evaluate(c => { const r = BF.commands.execute(c), p = BF.player.position; return { ok: r.ok, msg: r.msg, pos: [p.x, p.y, p.z], sp: BF.spawnPoint }; }, c);
+  const x = async c => {
+    const r = await lib.sim(pg, c => { const r = BF.commands.execute(c); if (BF.proto) BF.proto.flush(); return r; }, c);
+    await pg.waitForTimeout(500);   // (a teleport reaches the page's player with the next self message)
+    return pg.evaluate(r => { const p = BF.player.position; return { ok: r.ok, msg: r.msg, pos: [p.x, p.y, p.z], sp: BF.spawnPoint }; }, r);
+  };
   for (const c of ["/tp 99999999999 0", "/tp 2147483700 0", "/tp 0 -30000001", "/spawnpoint 99999999999 64 0", "/spawnpoint 0 -100000 0"]) {
     const p0 = await pg.evaluate(() => [BF.player.position.x, BF.player.position.z]);
     const r = await x(c);
@@ -20,19 +27,22 @@ module.exports = async (pg) => {
   // /spawnpoint with a y below the surface: respawn there, not on the surface
   await x(await pg.evaluate(h => `/tp ${BFT.at(h.x, BF.worldgen.heightAt(Math.floor(h.x), Math.floor(h.z)) + 2, h.z)}`, home));   // back to the world spawn
   await pg.waitForTimeout(2000);
-  const cave = await pg.evaluate(() => {
+  const cave = await lib.sim(pg, () => {
     const W = BF.world, p = BF.player.position, bx = Math.floor(p.x), bz = Math.floor(p.z), h = W.heightAt(bx, bz), y = h - 12;
     for (let dy = 0; dy < 3; dy++) W.setBlock(bx, y + dy, bz, 0);        // a 1x3 pocket underground
     W.setBlock(bx, y - 1, bz, BF.B.stone);
-    return { h, y, msg: BF.commands.execute(`/spawnpoint ${BFT.cell(bx, y, bz)}`).msg };
+    const r = { h, y, msg: BF.commands.execute(`/spawnpoint ~0 ~${y - Math.floor(p.y)} ~0`).msg };   // (BFT.cell's form)
+    if (BF.proto) BF.proto.flush();
+    return r;
   });
+  await pg.waitForTimeout(500);
   await pg.evaluate(() => BF.player.kill());
   await pg.waitForTimeout(500);
   await pg.evaluate(() => document.querySelector('[data-act="respawn"]').click());
   await pg.waitForTimeout(2500);
   const after = await pg.evaluate(() => BF.player.position.y);
   check(Math.abs(after - cave.y) < 1.1, `respawn at the /spawnpoint y (${cave.msg}; surface ${cave.h}, now y ${after.toFixed(2)})`);
-  // a saved spawn point and position past the border (an older save) go back to the world spawn
+  // a saved spawn point and position past the border (an older save) go back to the world spawn (the page's player loads it)
   const saved = await pg.evaluate(async () => {
     BF.spawnPoint = { x: 99999999999.5, y: 64, z: 0.5 };
     BF.player.deserialize({ x: 99999999999.5, y: -57, z: 0.5, health: 20 });

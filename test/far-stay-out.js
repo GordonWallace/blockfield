@@ -41,7 +41,7 @@ module.exports = async (pg, out) => {
     if (r.error) { console.log("FAIL " + kind + ": " + r.error); bad++; continue; }
     const homeward = r.d0 - r.d1;
     if (kind === "explorer without a map") { if (homeward < 20) { console.log("FAIL an explorer with nothing to do out there did not walk home (" + homeward + " blocks)"); bad++; } }
-    else if (homeward > 15) {   // it wanders about where it is (walks of up to 8 blocks)
+    else if (homeward > 20) {   // it wanders about where it is (walks of up to 8 blocks: up to 16 homeward in 25 s seen); one walking home gets 24-34 nearer
       console.log("FAIL the " + kind + " walked " + homeward + " blocks back towards its village before the working day"); bad++; }
   }
   console.log(bad ? "far-stay-out: " + bad + " failures" : "far-stay-out: ok");

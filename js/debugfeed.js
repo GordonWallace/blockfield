@@ -310,11 +310,15 @@ function simPart(ack) {
     perf: BF.perf && BF.perf.on ? Object.assign(BF.perf.stats() || {}, { hist: BF.perf.history() }) : undefined,
     budget: BF.active ? BF.active.feed() : undefined,   // the simulation budget and its decisions (js/active.js, spec r15-34)
     requests: BF.req ? BF.req.stats() : undefined,   // the request queue and transition-mode direct writes by module (js/requests.js)
+    regionTick: BF.rtick ? BF.rtick.stats() : undefined,   // regions ticked, ms per phase, the busiest regions (js/regiontick.js, spec r15-33)
     hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
-// The server's answer, the simulation's part of it
+// The server's answer, the simulation's part of it. screens: how many debug screens are open (the villager-seconds meter runs while any
+// is, js/perf.js); off the page the simulation hears it here (r15-43)
+let simScreens = 0;
 function applyAck(o) {
+  if (o.screens != null) simScreens = o.screens | 0;
   if (o.glogAt != null && BF.glog) BF.glog.feedAt(o.glogAt);   // the server holds the game log up to there
   if (o.build && BF.glog) BF.glog.diskBuild(o.build);          // the commit on disk isn't the one running
   if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
@@ -322,11 +326,11 @@ function applyAck(o) {
 }
 if (!BF.page) {   // in the simulation worker: only the feed query (js/simworker.js)
   if (BF.proto) BF.proto.queries.feed = a => Object.assign({ ok: true }, simPart(a && a.ack));
-  BF.debugFeed = { simPart };
+  BF.debugFeed = { simPart, live: () => simScreens > 0 };
   return;
 }
 // With the simulation in a worker: its latest part (asked for once a snapshot; it comes back before the next one) and the answer to pass on
-let remote = null, ack = null;
+let remote = null, ack = null, remoteErr = null;
 // With the page a client of the world server (r15-41): the server makes the snapshots itself (debug/server.js is the same process) and
 // this page sends only its own part, over the server's socket; the answers for the page come back the same way (serverAck).
 const onServer = () => !!(BF.simHost && BF.simHost.server);
@@ -336,8 +340,9 @@ function snapshot() {
   let part;
   if (onServer()) part = {};
   else if (inWorker()) {
-    BF.client.query("feed", { ack }, r => { if (r && r.ok) { delete r.ok; remote = r; } });
+    BF.client.query("feed", { ack }, r => { if (r && r.ok) { delete r.ok; remote = r; } else if (r && r.error) remoteErr = r.error; });
     ack = null;
+    if (remoteErr) { const e = remoteErr; remoteErr = null; throw new Error("in the simulation: " + e); }   // (the screen shows it, as one here)
     part = remote || {};
     remote = null;
     for (const id in part.icons || {}) if (part.icons[id] && !part.icons[id].url) { try { part.icons[id].url = BF.inventory.iconURL ? BF.inventory.iconURL(+id) : BF.textures.icon(+id); } catch (e) { /* none */ } }
@@ -385,7 +390,7 @@ function update() {
         passAck(a);
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
         if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }   // a toggle clicked on the debug screen
-        if (o.screens != null) screens = o.screens | 0;
+        if (o.screens != null) { screens = o.screens | 0; if (inWorker()) passAck({ screens }); }
         t = o.resync ? "resync" : "ok";
       }
       if (t === "resync") { resync(); if (inWorker()) passAck({ resync: true }); }   // a restarted server asks for the layouts and logs again

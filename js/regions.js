@@ -16,7 +16,7 @@
 //                     around(x, z, r) -> [keys], get(key) -> region or undefined, mobsIn(key), dropsIn(key), villagesIn(key), blockEntitiesIn(key),
 //                     mobIdsIn(key) -> [mob ids], villageIdsIn(key) -> [village keys],
 //                     tick(), stats() -> [{key, name, f, ru, rv, mobs, drops, villages, blockEntities}], counts(), check() -> {ok, diffs},
-//                     reset(), Index (the bare per-object index, for tests and benchmarks),
+//                     reset(), Index (the bare per-object index, for tests and benchmarks), regionOf(mob), dropRegionOf(drop), mobsByRegion() -> Map key -> Set (r15-33),
 //                     mobsAround(x, z, r, filter, {local, label}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter, opts), ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
 (() => {
 "use strict";
@@ -367,6 +367,10 @@ const resetQueryStats = () => { qs.queries = qs.checked = qs.diffs = 0; qs.last 
 // The ids (js/ids.js, r15-13) of a region's mobs and village keys, read when asked: the sets hold the objects themselves, because a
 // villager's id can change after it is made (its saved id comes back with its trading state, BF.ids.reuse), and a step that read ids
 // would touch every mob (see Index).
+// The region tick (spec r15-33, js/regiontick.js): a mob's or drop's region as the index holds it (where it stood at the last sync), and
+// the regions holding mobs.
+const regionOf = m => mobs.keyOf(m), dropRegionOf = d => drops.keyOf(d);
+const mobsByRegion = () => mobs.by;
 const idsOf = (s, f) => { const out = []; if (s) for (const o of s) out.push(f(o)); return out; };
 
 const regions = {
@@ -375,6 +379,7 @@ const regions = {
   mobsIn: k => mobs.in(k), dropsIn: k => drops.in(k), villagesIn: k => villages.in(k), blockEntitiesIn: k => beBy.get(k),
   mobIdsIn: k => idsOf(mobs.in(k), m => m.id), villageIdsIn: k => idsOf(villages.in(k), v => v.key),
   onSet, mobAdded, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
+  regionOf, dropRegionOf, mobsByRegion,
   mobsAround, mobsInBox, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
 };
 BF.regions = regions;

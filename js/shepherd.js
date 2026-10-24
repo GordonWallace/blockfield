@@ -93,7 +93,7 @@ function shear(m, by) {
   syncLook(m);
   fx(m, "#e9e9e6", 8); snd("sheep", m, 0.5);
   if (BF.emit) BF.emit("sheepShorn", m, by);
-  return rndInt(RS(m), 1, 3);
+  return rndInt(RS(by && by.position ? by : m), 1, 3);   // the shearer's stream when a villager shears (spec r15-33: a mob draws only from its own)
 }
 function dropItem(id, n, m) {
   if (id == null || n <= 0) return;

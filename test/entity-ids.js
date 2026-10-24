@@ -1,19 +1,21 @@
-// @ci integration suite=village timeout=900 args=0.2
+// @ci integration suite=village timeout=900 args=0.2 hosts=worker,server
 // Stable entity ids (spec r15-13): after a game day on seed 3 no mob or village record holds another mob, village record or boat
 // directly (only ids); a save and reload brings every villager back under the same id (same name and slot); a villager killed and
-// its slot respawned gets a new id under the same slot key. Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ids test/entity-ids.js [days]
+// its slot respawned gets a new id under the same slot key. Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ids test/entity-ids.js [days] [--host page|worker|server]
 module.exports = async (pg) => {
   const days = +(process.argv[4] || 1);
+  const lib = require('./lib');
   const ok = (n, c, extra) => console.log((c ? "PASS " : "FAIL ") + n + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
   const setup = await pg.evaluate(async () => {
     BF.player.start();
     const meta = await BF.save.create({ name: "ids", seed: "3", gameMode: "creative", villages: 10 });
     return { id: meta.id };
   });
-  // in-page helpers: a fixed-step run with the village kept loaded, and the reference audit
-  await pg.evaluate(() => {
+  // helpers where the simulation is (spec r15-43; again after the reload, which may start a new thread there): a fixed-step run with
+  // the village kept loaded, and the reference audit
+  const helpers = () => lib.sim(pg, () => {
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.boats) BF.boats.update(h); BF.world.tickSim(); };
-    window.IDT = {
+    globalThis.IDT = {
       run: sec => { for (let t = 0; t < sec; t += 0.05) step(); },
       load: async (x, z) => {
         BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
@@ -50,9 +52,12 @@ module.exports = async (pg) => {
         .map(m => ({ id: m.id, name: BF.vlog.nameOf(m), slot: m.slotKey, ok: BF.ids.get(m.id) === m })),
     };
   });
-  const s1 = await pg.evaluate(async days => {
+  await lib.simReady(pg);
+  await helpers();
+  const s1 = await lib.sim(pg, async days => {
     BF.state.paused = true;
-    const v = BFT.village(), key = Math.round(v.x) + "," + Math.round(v.z), X = Math.round(v.x) + 4, Z = Math.round(v.z) + 4;
+    // the village nearest the spawn (as BFT.village(): test/bft.js is the page's)
+    const s = BF.spawnPoint || BF.player.position, v = BF.worldgen.villagesNear(s.x, s.z, 3000).sort((a, b) => BF.planet.distance(s, a) - BF.planet.distance(s, b))[0], key = Math.round(v.x) + "," + Math.round(v.z), X = Math.round(v.x) + 4, Z = Math.round(v.z) + 4;
     BF.sky.setTime(0.1);
     await IDT.load(X, Z);
     const t0 = performance.now();
@@ -72,9 +77,9 @@ module.exports = async (pg) => {
   ok("no two places took the same key", s1.collisions === 0, [s1.collisions, s1.lastCollision]);
 
   // save and reload: the same villagers under the same ids
-  const s2 = await pg.evaluate(async o => {
-    await BF.save.saveNow();
-    await BF.save.load(o.id);
+  await pg.evaluate(async id => { await BF.save.saveNow(); await BF.save.load(id); BF.state.paused = true; }, setup.id);   // (the page pauses too: it sends that on)
+  await helpers();
+  const s2 = await lib.sim(pg, async o => {
     BF.state.paused = true;
     await IDT.load(o.X, o.Z);
     for (let k = 0; k < 40; k++) { BF.world.update(o.X, o.Z, 8); IDT.run(0.5); await new Promise(r => setTimeout(r, 0)); }
@@ -87,7 +92,7 @@ module.exports = async (pg) => {
   ok("after a reload no mob or village record holds another directly", s2.audit.length === 0, s2.audit);
 
   // kill a villager, then let its slot respawn (a dead slot stays dead in play; the test clears it as a respawn would)
-  const s3 = await pg.evaluate(async o => {
+  const s3 = await lib.sim(pg, async o => {
     const rec = BF.mobs.villages.get(o.key);
     const v = BF.mobs.list.find(m => m.type === "villager" && !m.dead && !m.removed && m.villageId === o.key && m.slot && !m.slot.bred);
     if (!v) return { err: "no villager" };

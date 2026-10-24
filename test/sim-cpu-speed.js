@@ -1,4 +1,6 @@
 // @ci integration suite=world,village timeout=900
+// (Page only, spec r15-43: it needs a boot with no frames run, with Math.random and performance.now replaced before the game loads; a worker
+// or the world server starts its own tick loop as soon as it boots, so there is no such point there.)
 // The simulation decides the same on a fast and a slow computer (spec r15-16). Usage: NODE_PATH=$(npm root -g) node test/sim-cpu-speed.js [ticks=2000] [seed=123]
 // (SLOW_MS=0 runs the slow page at full speed too: a plain same-seed-twice check)
 // Two fresh pages boot the same world with the frame loop halted, the same seeded Math.random and a fake performance.now that moves 1 us

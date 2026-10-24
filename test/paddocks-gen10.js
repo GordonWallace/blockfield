@@ -1,4 +1,4 @@
-// @ci integration suite=village,world timeout=400
+// @ci integration suite=village,world timeout=400 hosts=worker,server
 // Village generator 10 (idea-044): node test/run.js /tmp/pd test/paddocks-gen10.js
 // 1. The paddock plan (worldgen paddockPlan) for 200 village keys per biome: the mean count follows E = pop / 10 x (0.4 + 0.15 x native types)
 //    (the 0.6-1.4 factor averages 1); where wild-horse land lies within 100 blocks (worldgen horseLand), native animals are drawn about 4x
@@ -7,10 +7,14 @@
 //    block for each keeper, no old fixed-rule keepers and no shepherd in the shuffle. (The spawn village, which only the flat generator 3
 //    had, went with it in r14-24: every village is a region village, so there is no spawn village left to check for.)
 // 3. Walks into a village with a generated stable: it starts with 2 tamed horses in its paddock.
+// (--host page|worker|server: 1 and 2 run where the simulation is, spec r15-43, with the worlds made there; then the page and the
+// simulation open seed 1 together for 3, the page's player walks in and the stable is read where the simulation is)
 module.exports = async (pg) => {
-  const out = await pg.evaluate(() => {
+  const lib = require('./lib');
+  const out = await lib.sim(pg, () => {
+    const spawn = () => { const s = BF.spawnPoint || BF.player.position; return { x: Math.floor(s.x), z: Math.floor(s.z) }; };   // (as BFT.spawn: test/bft.js is the page's)
     BF.newWorld(1, { gen: 4, villages: 10 });
-    const WG = BF.worldgen, res = { fails: [], biomes: {} }, o0 = BFT.spawn();
+    const WG = BF.worldgen, res = { fails: [], biomes: {} }, o0 = spawn();
     const BIOMES = { plains: 5, forest: 6, snowy: 19, desert: 12 };
     for (const [name, id] of Object.entries(BIOMES)) {
       const nat = WG.nativeAnimals(id), pop = 40;
@@ -46,7 +50,7 @@ module.exports = async (pg) => {
     res.villages = 0; res.keepers = 0; res.plots = 0; res.missingPlots = 0; res.stable = null;
     for (const seed of [1, 2, 3]) {
       BF.newWorld(seed, { gen: 4, villages: 10 });
-      const seen = new Set(), o = BFT.spawn(), d = v => BF.planet.distance(o, v);   // sampled around the spawn
+      const seen = new Set(), o = spawn(), d = v => BF.planet.distance(o, v);   // sampled around the spawn
       for (let rz = -4; rz <= 4; rz++) for (let rx = -4; rx <= 4; rx++) for (const v of WG.villagesNear(o.x + rx * 600, o.z + rz * 600, 300)) {
         const key = Math.round(v.x) + "," + Math.round(v.z);
         if (seen.has(key) || !v.pop) continue;
@@ -80,9 +84,10 @@ module.exports = async (pg) => {
   if (out.missingPlots > out.keepers * 0.1) fails.push("too many keepers without a plot: " + out.missingPlots + " of " + out.keepers);
   if (!out.stable) console.log("no generated stable near seed 1's spawn: stable stocking not checked");
   else {
-    await pg.evaluate(v => { BF.newWorld(1, { gen: 4, villages: 10 }); BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5); }, out.stable);
+    await lib.newWorld(pg, 1, { gen: 4, villages: 10 });
+    await pg.evaluate(v => { BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5); }, out.stable);
     await pg.waitForTimeout(15000);
-    const h = await pg.evaluate(key => {
+    const h = await lib.sim(pg, key => {
       const R = BF.mobs.villages.get(key), st = R && BF.stables.stableOf(R);
       return st ? { horses: BF.stables.horsesOf(st).length, penned: BF.stables.horsesOf(st).filter(r => r.pen).length, gen: !!st.e.gen,
         rack: BF.world.getBlock(st.rack.x, st.rack.y, st.rack.z) === BF.B.tack_rack } : null;

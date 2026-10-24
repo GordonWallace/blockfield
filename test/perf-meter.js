@@ -1,14 +1,15 @@
-// @ci integration suite=ui
+// @ci integration suite=ui hosts=worker,server
 // Villager-seconds meter (spec r15-01, js/perf.js). In the seed 123 village: with the meter off, 50 steps run no timing point (BF.perf.laps
 // stays 0); with it on, 200 steps of 0.05 s give V·s/s within 1% of villagers x game seconds / real seconds measured here, and the split
 // by subsystem adds up to within 10% of the ms per step measured here. Then F3 shows the Sim line, a frozen game greys it, and the
-// game log has the meter's on and off lines.
-// node test/run.js /tmp/pm test/perf-meter.js
+// game log has the meter's on and off lines. The meter and the steps are the simulation's (lib.sim, spec r15-43); F3 is the page's, its
+// Sim line from the f3 query (off the page, F3 showing turns the meter on there).
+// node test/run.js /tmp/pm test/perf-meter.js [--host page|worker|server]
 const lib = require('./lib');
 module.exports = async (pg) => {
   await lib.toVillage(pg);
   const fails = [];
-  const r = await pg.evaluate(() => {
+  const r = await lib.sim(pg, () => {
     const P = BF.perf, out = {};
     const alive = () => { let v = 0; for (const m of BF.mobs.list) if (!m.dead && !m.removed && m.type === "villager") v++; return v; };
     out.offOn = P.on; out.lapsBefore = P.laps;
@@ -49,18 +50,23 @@ module.exports = async (pg) => {
   const f3 = await pg.evaluate(() => document.getElementById('debug').textContent.split('\n').find(l => l.startsWith('Sim ')));
   console.log('F3: ' + f3);
   await pg.evaluate(() => BF.warp.freeze());
-  await pg.waitForFunction(() => BF.perf.stats().stale && !!document.querySelector('#debug span'), null, { timeout: 30000, polling: 250 }).catch(() => fails.push('frozen game: the Sim line is not greyed'));
-  const frozen = await pg.evaluate(() => ({ s: BF.perf.stats(), span: (document.querySelector('#debug span') || {}).textContent }));
+  await pg.waitForFunction(() => !!document.querySelector('#debug span'), null, { timeout: 30000, polling: 250 }).catch(() => fails.push('frozen game: the Sim line is not greyed'));
+  // (the frozen warp reaches the simulation with its next message, and the meter goes stale once no step has run for a while: poll for it)
+  let fs = null;
+  for (let i = 0; i < 60 && !(fs = await lib.sim(pg, () => BF.perf.stats())).stale; i++) await pg.waitForTimeout(250);
+  const frozen = { s: fs, span: await pg.evaluate(() => (document.querySelector('#debug span') || {}).textContent) };
+  if (!frozen.s.stale) fails.push('frozen game: the meter is not stale');
   console.log('frozen: ' + frozen.span);
   if (!(frozen.s.vss > 0) || !isFinite(frozen.s.msPerStep)) fails.push('frozen: last figures not kept ' + JSON.stringify(frozen.s));
   await pg.evaluate(() => BF.warp.set(0));
   await pg.keyboard.press('F3');
   await pg.waitForTimeout(500);
-  const log = await pg.evaluate(() => BF.glog.recent(200).filter(e => e && JSON.stringify(e).includes('Performance meter')).map(e => JSON.stringify(e)));
+  await lib.sim(pg, () => new Promise(r => setTimeout(r, 2500)));   // (off the page the meter goes off once F3 has stopped asking)
+  const log = await lib.sim(pg, () => BF.glog.recent(200).filter(e => e && JSON.stringify(e).includes('Performance meter')).map(e => JSON.stringify(e)));
   console.log('log: ' + log.join(' | '));
   if (!log.some(l => l.includes('Performance meter on (a harness)'))) fails.push('no "meter on" log line');
   if (!log.some(l => /Performance meter off: \d+ V·s\/s/.test(l))) fails.push('no "meter off" log line with figures');
-  if (await pg.evaluate(() => BF.perf.on)) fails.push('meter still on with F3 closed');
+  if (await lib.sim(pg, () => BF.perf.on)) fails.push('meter still on with F3 closed');
   if (fails.length) fails.forEach(f => console.log('FAIL ' + f));
   else console.log('PASS perf-meter');
 };

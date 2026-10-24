@@ -248,9 +248,9 @@ function shelve(m, c, why) {
 // ---------------------------------------------------------------- fetching a blank map from a cartographer
 const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 // The blank map it would buy from v2: one of v2's own offers (its job's, or its spare goods, js/market.js) selling a blank map it can pay
-// for, drawn with weights favouring small ones (SIZE_WEIGHT). A villager with blank maps but no offer for them is passed by: every trade is
-// an offer the player could take too.
-function offerFor(v2, emeralds) {
+// for, drawn with weights favouring small ones (SIZE_WEIGHT), from the buyer m's stream (spec r15-33: a mob draws only from its own). A
+// villager with blank maps but no offer for them is passed by: every trade is an offer the player could take too.
+function offerFor(v2, emeralds, m) {
   const I = BF.I, opts = [];
   for (const o of (v2 && v2.trades) || []) {
     if (o.buy.length !== 1 || o.buy[0].id !== I.emerald || o.buy[0].n > emeralds || o.sell.n !== 1) continue;
@@ -258,7 +258,7 @@ function offerFor(v2, emeralds) {
     if (k && cnt(v2, o.sell.id) >= 1) opts.push({ o, w: SIZE_WEIGHT[k - 1] });
   }
   if (!opts.length) return null;
-  let r = RS(v2).next() * opts.reduce((a, q) => a + q.w, 0), pick = opts[0];
+  let r = RS(m || v2).next() * opts.reduce((a, q) => a + q.w, 0), pick = opts[0];
   for (const q of opts) { pick = q; if ((r -= q.w) <= 0) break; }
   return pick.o;
 }
@@ -268,7 +268,7 @@ function findCartographer(m, X) {
   let best = null, bd = Infinity;
   for (const v2 of R.members || []) {
     if (v2 === m || !canSell(v2) || (X.avoidSeller && X.avoidSeller.get(v2.id) > nowS())) continue;
-    const o = offerFor(v2, cnt(m, BF.I.emerald));
+    const o = offerFor(v2, cnt(m, BF.I.emerald), m);
     if (!o || T().blockReason(v2, o) || !T().inv.canFit(m.inv, [o.sell], o.buy)) continue;
     const d = v2.position.distanceTo(m.position);
     if (d < bd) { bd = d; best = BF.ids.refs({ seller: v2, offer: o }); }
@@ -298,7 +298,7 @@ function shopAI(m, dt, out) {
   }
   const dl = X.deal, v2 = dl && dl.seller;
   const giveUp = () => { if (v2) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2.id, nowS() + 60); X.stage = null; X.deal = null; a.route = null; X.cd = 5; return false; };
-  if (!v2 || !canSell(v2) || !offerFor(v2, cnt(m, BF.I.emerald))) return giveUp();
+  if (!v2 || !canSell(v2) || !offerFor(v2, cnt(m, BF.I.emerald), m)) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
   a.mode = "idle"; a.t = 2;
   if (X.stage === "walk") {

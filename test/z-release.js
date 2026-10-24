@@ -1,5 +1,6 @@
+// @ci integration suite=ui hosts=worker,server
 // Z frees the mouse without pausing (the game keeps running) and a click on the game takes it back; Escape still pauses.
-// Pointer lock is simulated (headless Chromium has none). node test/run.js /tmp/zr test/z-release.js
+// Pointer lock is simulated (headless Chromium has none). node test/run.js /tmp/zr test/z-release.js [--host page|worker|server] (all on the page)
 const WAIT = 30000;
 module.exports = async (pg) => {
   await pg.evaluate(() => {

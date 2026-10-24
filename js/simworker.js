@@ -94,6 +94,8 @@ function loop() {
   try {
     if (crashNext) { crashNext = false; throw new Error("a test crash (test/sim-worker.js)"); }
     const W = BF.warp, p = BF.player.position;
+    if (BF.debugOn && now - (BF.debugOnAt || 0) > 2000) BF.debugOn = false;   // the page's F3 overlay asks while it shows (js/protocol.js f3)
+    BF.perf.frame();   // the villager-seconds meter on or off, its window's slices (js/perf.js; js/main.js in the page)
     if (!loadingWorld) BF.world.update(p.x, p.z, W.speed >= 10 ? 3 : 8);   // (generation only: nothing is meshed here)
     BF.inventory.simFrame(raw);
     BF.maps.simFrame();   // the held map fills in round the player (js/maps.js)

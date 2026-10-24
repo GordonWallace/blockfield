@@ -1,11 +1,13 @@
-// @ci baseline
+// @ci baseline hosts=worker,server
 // Title screen: the world list is wide enough to show a whole seed, and the copy button next to it puts the seed on the
-// clipboard. node test/run.js /tmp/sc test/seed-copy.js
+// clipboard. node test/run.js /tmp/sc test/seed-copy.js [--host page|worker|server]
 module.exports = async (pg, out) => {
   const seed = 4294967295;   // the longest seed there is (ten digits)
   await pg.evaluate(s => BF.save.create({ name: "A long world name for the seed test", seed: String(s), gameMode: "creative", biomeScale: 4 }), seed);
   await pg.reload();
   await pg.waitForTimeout(5000);
+  // (the world server's list comes over the page's socket, behind the title world's chunks: allow it time)
+  await pg.waitForFunction(s => { const m = document.querySelector(".bfp-wmeta"); return m && m.textContent.includes("seed " + s); }, seed, { timeout: 60000, polling: 250 }).catch(() => {});
   await pg.evaluate(() => { window._copied = []; const w = navigator.clipboard && navigator.clipboard.writeText;
     if (w) navigator.clipboard.writeText = t => { _copied.push(t); return w.call(navigator.clipboard, t).catch(() => {}); }; });
   const r = await pg.evaluate(() => {
