@@ -25,7 +25,7 @@ The performance meter measures how much simulation the game gets through. Its ma
 
 All of them are averaged over the last 5 seconds of real time. When the game is frozen (0x) or paused, the meter keeps its last figures and greys them out.
 
-The meter runs only while the F3 overlay or a debug screen is open (or a test asks for it), so it costs nothing in normal play. Turning it on and off writes a line to the [[page:game-log]] (kind *perf*), and the line for turning it off gives the last figures.
+The meter runs only while the F3 overlay or a debug screen is open (or a test asks for it), so it costs nothing in normal play. It measures the simulation wherever it runs: in the page, in a Web Worker or on the world server, the F3 overlay turns it on there. Turning it on and off writes a line to the [[page:game-log]] (kind *perf*), and the line for turning it off gives the last figures.
 
 ## Measuring on your own computer
 
