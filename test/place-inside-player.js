@@ -11,6 +11,14 @@ module.exports = async (pg, out) => {
   // moment for the page's copy of the world to take the simulation's edits
   const settle = () => pg.evaluate(() => new Promise(r => BF.client.query("stats", {}, () => requestAnimationFrame(() => requestAnimationFrame(r)))));
   const synced = async () => { await settle(); await pg.waitForTimeout(300); await settle(); };
+  // a right click where the page's player now stands: the simulation checks the block against its copy of the player's body, which the
+  // page sends each frame, so let a couple of frames send the new position (and a round trip apply it) before clicking
+  const click = async () => {
+    await pg.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await settle();
+    await pg.evaluate(() => { BF.player.setMouse(false, true); BF.player.setMouse(false, false); });
+    await synced();
+  };
   // the blocks and items are the simulation's (spec r15-43); the player's body, its physics and its clicks are the page's
   const block = (x, y, z) => lib.sim(pg, ([x, y, z]) => BF.world.getBlock(x, y, z), [x, y, z]);
   const p0 = await pg.evaluate(() => { const p = BF.player.position, X = Math.floor(p.x), Z = Math.floor(p.z); return { X, Z, gy: BF.world.heightAt(X, Z) }; });
@@ -29,9 +37,8 @@ module.exports = async (pg, out) => {
     const e = BF.player.eyePos(), tx = X - 1 + 0.5 - e.x, ty = gy + 1 - e.y, tz = Z + 0.5 - e.z;
     BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
     BF.player.update(0.016);
-    BF.player.setMouse(false, true); BF.player.setMouse(false, false);
   }, p0);
-  await synced();
+  await click();
   const r = { X: p0.X, gy: p0.gy, placed: await block(p0.X - 1, p0.gy + 1, p0.Z) };
   // 2. a block that ends up overlapping the player anyway (set directly) still stops a walk into it
   await lib.sim(pg, ({ X, Z, gy }) => { BF.world.setBlock(X - 1, gy + 1, Z, BF.B.cobblestone); BF.proto.flush(); }, p0);
@@ -63,10 +70,9 @@ module.exports = async (pg, out) => {
     const e = BF.player.eyePos(), tx = X - 1 + 0.5 - e.x, ty = gy - e.y, tz = Z + 0.5 - e.z;
     BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
     BF.player.update(0.016);
-    BF.player.setMouse(false, true); BF.player.setMouse(false, false);
     return { X, gy, Z };
   });
-  await synced();
+  await click();
   const flush = await block(p4.X - 1, p4.gy, p4.Z);
   check(flush === BF_COBBLE, "a block can still be placed right next to the player");
   // 5. grazing: a player slightly inside a block's side (0.005 in z) but well along it in x keeps walking along it
