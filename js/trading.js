@@ -575,14 +575,149 @@ function addXp(v, o) {
   return up;
 }
 
+// ---------------------------------------------------------------- trades as transactions (spec r15-21)
+// Every trade, between villagers or with the player, is one transaction: the buyer's payment moves into escrow when it asks (m.escrow,
+// so it can't spend it twice), and in the apply phase (js/requests.js, kind "trade", requests sorted by buyer id) the goods and the
+// payment either both move or neither does, lot by lot. Two buyers after a seller's last item in one tick: the lower buyer id gets it.
+// Asked outside a tick's think phase (the trade screen, a test calling a module by hand) a trade settles at once, by the same rules.
+// buy(m, v, o, times, opts) -> lots done, or null while the trade is in flight (asked this tick: the answer is there at m's next think,
+//   when the same call returns it; asked(by, v, o) says whether one is waiting). opts: {by: the villager asking (when the seller asks for a sale: m is the buyer, by the seller),
+//   guard(i) -> reason|null (the module's own rule for one more lot), wrap(fn) (runs the seller's checks inside the module's context)}.
+const KEEP_TICKS = 600;   // an answer nobody came back for within 30 game seconds is dropped (what the trade did stays done)
+const isMob = x => x && typeof x === "object";
+const idOf = x => (isMob(x) ? (BF.ids ? BF.ids.idOf(x) : x.id) : x);
+function payFrom(pay, id, n) {   // n of id out of the escrowed stacks, wear included; null when short (and nothing taken)
+  let have = 0;
+  for (const s of pay) if (s.id === id) have += s.count;
+  if (have < n) return null;
+  const out = [];
+  for (const s of pay) {
+    if (n <= 0) break;
+    if (s.id !== id || s.count <= 0) continue;
+    const k = Math.min(n, s.count);
+    s.count -= k; n -= k;
+    out.push(s.wear > 0 ? { id, count: k, wear: s.wear } : { id, count: k });
+  }
+  for (let i = pay.length - 1; i >= 0; i--) if (pay[i].count <= 0) pay.splice(i, 1);
+  return out;
+}
+function dropAt(who, id, n, wear) {   // what doesn't fit an inventory goes into the world, never lost
+  const p = who && (who.position || who.pos);
+  if (n > 0 && p && BF.drops && BF.drops.spawn) BF.drops.spawn(id, n, p.x, p.y + 0.5, p.z, { wear: wear || 0 });
+}
+function giveTo(who, a, stacks) { for (const s of stacks) { const left = inv.add(a, s.id, s.count, s.wear); if (left > 0) dropAt(who, s.id, left, s.wear); } }
+const escrowOf = m => (m.escrow || (m.escrow = []));
+function release(m, e) { if (m && m.escrow) { const i = m.escrow.indexOf(e); if (i >= 0) m.escrow.splice(i, 1); } }
+// The transaction: up to `times` lots of seller v's offer o, paid from the escrowed stacks `pay`. Lot by lot: the seller (there, its
+// blockReason: stock, reserve, room, hunger), the module's guard, the buyer's room (room()); then the goods go to the buyer (give) and
+// the lot's payment to the seller, with xp. Returns {done, why, levels, sold}; what is left in pay is the buyer's to take back.
+function settle(v, o, times, pay, opts) {
+  let done = 0, why = null, levels = 0;
+  const sold = [];
+  for (let i = 0; i < times; i++) {
+    if (!v || v.dead || v.removed || !Array.isArray(v.inv)) { why = "seller gone"; break; }
+    if (!o.horse && Array.isArray(v.trades) && !v.trades.includes(o)) { why = "offer gone"; break; }
+    why = blockReason(v, o) || (opts.guard && opts.guard(i)) || (opts.room && !opts.room(o) ? "no room" : null);
+    if (why) break;
+    const paid = [];
+    for (const b of o.buy) { const p = payFrom(pay, b.id, b.n); if (!p) { why = "not paid"; break; } paid.push(...p); }
+    if (why) { giveTo(v, pay, paid); break; }   // can't happen: the escrow holds every lot's payment
+    let got = [];
+    if (o.horse) BF.stables.handOver(v, o);   // the horse itself goes to the buyer (js/stables.js)
+    else got = inv.take(v.inv, o.sell.id, o.sell.n, true);
+    giveTo(v, v.inv, paid);
+    if (opts.give) opts.give(got);
+    sold.push(...got);
+    levels += addXp(v, o);
+    done++;
+  }
+  return { done, why: done < times ? why : null, levels, sold };
+}
+// The buyer's side: the goods into its inventory, the escrow back when it is done, and the village log.
+function finish(m, v, o, times, e, opts) {
+  const ms = isMob(m);
+  if (ms && (m.dead || m.removed)) { release(m, e); return { done: 0, why: "buyer gone" }; }   // an unloaded buyer took its escrow with it (pack)
+  const r = (opts.wrap || (f => f()))(() => settle(v, o, times, e.pay, {
+    guard: opts.guard,
+    room: ms ? x => inv.canFit(m.inv, [{ id: x.sell.id, n: x.sell.n }], []) : null,
+    give: ms ? got => giveTo(m, m.inv, got) : null,
+  }));
+  release(m, e);
+  if (ms) giveTo(m, m.inv, e.pay);
+  if (r.done && ms && BF.vlog) BF.vlog.trade(m, v, o, r.done);   // the player's trades: the villagerTrade event (js/villagelog.js)
+  if (!r.done && BF.glog) {
+    const nm = x => (x === "player" ? "Player" : BF.vlog ? BF.vlog.nameOf(x) : (x && x.profession) || "?");
+    BF.glog.log("INFO", "trades", nm(m) + " could not buy " + o.sell.n + " " + BF.itemName(o.sell.id) + " from " + nm(v) + ": " + r.why,
+      { village: (v && v.village) || (ms && m.village) || undefined, at: v && v.position ? v : ms ? m : undefined });
+  }
+  stats.done += r.done; if (!r.done) stats.refused++;
+  return r;
+}
+const stats = { sent: 0, now: 0, done: 0, refused: 0 };
+// The asker's open trades (by.asks): [{v, o, tick, res}], one per seller and offer; answered ones wait there for the asker's next call.
+function askOf(by, v, o) {
+  const a = by && by.asks;
+  if (!a) return -1;
+  const vid = idOf(v);
+  for (let i = 0; i < a.length; i++) if (a[i].v === vid && a[i].o === o) return i;
+  return -1;
+}
+// Has `by` asked for this trade, with the answer not yet collected? (Modules skip their own checks then: the trade happened or not.)
+function asked(by, v, o) { return askOf(by, v, o) >= 0; }
+function buy(m, v, o, times, opts) {
+  opts = opts || {};
+  const by = opts.by || m, a = by.asks, now = BF.rand.tick;
+  if (a && a.length) {
+    const i = askOf(by, v, o);
+    if (i >= 0) {
+      const t = a[i];
+      if (!t.res && now <= t.tick + 1) return null;   // in flight (answered in the apply phase of the tick it was sent)
+      a.splice(i, 1);
+      if (t.res) return t.res.done;
+    }
+    for (let j = a.length - 1; j >= 0; j--) if (now - a[j].tick > KEEP_TICKS) a.splice(j, 1);   // answers nobody came back for
+  }
+  let k = times;
+  for (const b of o.buy) k = Math.min(k, Math.floor(inv.count(m.inv, b.id) / b.n));
+  if (!(k >= 1) || !v) return 0;
+  const pay = [];
+  for (const b of o.buy) pay.push(...inv.take(m.inv, b.id, b.n * k));
+  const e = { pay };
+  escrowOf(m).push(e);
+  if (!BF.req || BF.req.phase !== "think") { stats.now++; return finish(m, v, o, k, e, opts).done; }
+  stats.sent++;
+  const slot = { v: idOf(v), o, tick: now, res: null };
+  (by.asks || (by.asks = [])).push(slot);
+  BF.req.send("trade", idOf(v), { m, v, o, times: k, e, opts, slot }, m);
+  return null;
+}
+// The trade screen: one lot of o with the payment the player put in its slots (stacks, wear included). Returns {done, sold, levels};
+// a refused trade gives the payment back to the caller in `left`.
+function playerBuy(v, o, pay) {
+  const e = { pay: pay.map(s => Object.assign({}, s)) };
+  const r = finish("player", v, o, 1, e, {});
+  return { done: r.done, sold: r.sold || [], levels: r.levels || 0, left: e.pay, why: r.why };
+}
+function escrowed(m) { const out = []; for (const e of (m && m.escrow) || []) out.push(...e.pay); return out; }
+if (BF.req) BF.req.on("trade", req => {
+  const d = req.data;
+  let r;
+  try { r = finish(d.m, d.v, d.o, d.times, d.e, d.opts); }
+  catch (err) { release(d.m, d.e); if (isMob(d.m)) giveTo(d.m, d.m.inv, d.e.pay); d.e.pay = []; r = { done: 0, why: "error" }; console.error(err); }
+  d.slot.res = r;   // the asker reads it at its next think (buy above); written now, so a buyer that went still answers its seller
+  return { ok: r.done > 0, done: r.done, why: r.why };
+});
+
 // ---------------------------------------------------------------- persistence
 function claimedBed(v) {
   const b = v.homeBed !== undefined ? v.homeBed : v.bed;   // an explorer camping in its tent keeps its bed at home
   return b && b.claimed && !b.tent ? [b.x, b.y, b.z, b.f] : undefined;
 }
 function pack(v) {
+  let a = v.inv;
+  if (v.escrow && v.escrow.length) { a = inv.clone(a); for (const s of escrowed(v)) inv.add(a, s.id, s.count, s.wear); }   // a trade in flight: its payment is still the villager's
   return {
-    inv: v.inv.map(s => s && BF.items[s.id] ? (s.wear > 0 ? { n: BF.items[s.id].name, c: s.count, w: s.wear } : { n: BF.items[s.id].name, c: s.count }) : null),
+    inv: a.map(s => s && BF.items[s.id] ? (s.wear > 0 ? { n: BF.items[s.id].name, c: s.count, w: s.wear } : { n: BF.items[s.id].name, c: s.count }) : null),
     level: v.level, xp: v.xp, day: v.restockDay,
     pr: BF.prices ? BF.prices.pack(v) : undefined, pd: v.priceDay,   // prices off base and the last price tick (js/prices.js); missing in older saves
     prof: v.profession, job: v.jobsite ? [v.jobsite.x, v.jobsite.y, v.jobsite.z] : null, st: v.jobStocked ? 1 : 0, mem: v.jobMem ? [v.jobMem.prof, v.jobMem.t] : undefined,   // jobsites (js/jobs.js); missing in older saves
@@ -632,6 +767,6 @@ function unpack(v, o) {
 
 BF.trades = {
   SLOTS, EM_CAP, EM_DAY, BUILDER_EM_CAP, BUILDER_EM_DAY, LEVELS, LEVEL_XP, TRADE_XP, CAP_K, VALUE, TRADES, PRODUCE, inv,
-  parseTrade, offers: genOffers, table, profile, stockFor, STARTER_TOOLS, hireKit, restock, init, blockReason, FEED, feedOffers, syncFeed, needsFood, exchange, addXp, pack, unpack,
+  parseTrade, offers: genOffers, buy, asked, settle, playerBuy, escrowed, tradeStats: () => Object.assign({}, stats), table, profile, stockFor, STARTER_TOOLS, hireKit, restock, init, blockReason, FEED, feedOffers, syncFeed, needsFood, exchange, addXp, pack, unpack,
 };
 })();

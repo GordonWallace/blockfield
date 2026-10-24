@@ -195,7 +195,7 @@ const css = `
 const BIOME_SIZES = [[1, "Small (classic)"], [2, "Large"], [3, "Larger"], [4.5, "Huge"], [6, "Vast"]], BIOME_DEF = 1;   // biomeScale, label
 const biomeLabel = s => (BIOME_SIZES.find(b => b[0] === s) || [0, "Large"])[1];
 let savedEl, worldsEl, createForm, createMode = null, worldsCache = [], saveOk = null;
-let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, helpEl;
+let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, budgetBtn, helpEl;
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
@@ -244,6 +244,7 @@ function buildDOM() {
     <h2 class="bfp-title" style="font-size:30px">Paused</h2>
     <button class="primary" data-act="resume">Resume</button>
     <button data-act="view">Render distance: 6</button>
+    <button data-act="budget" title="Villages beyond the nearest four stay simulated while the simulation uses less than this share of each second">Simulated villages</button>
     ${modeRow}
     <button data-act="opts">Game options</button>
     <div class="bfp-pauseopts" hidden></div>
@@ -256,6 +257,7 @@ function buildDOM() {
     <button class="primary" data-act="respawn">Respawn</button></div>`);
   for (const e of [startEl, pauseEl, deathEl]) ui.appendChild(e);
   viewBtn = pauseEl.querySelector('[data-act="view"]');
+  budgetBtn = pauseEl.querySelector('[data-act="budget"]');
   pauseNote = pauseEl.querySelector(".bfp-note");
   helpEl = pauseEl.querySelector(".bfp-help");
   savedEl = pauseEl.querySelector(".bfp-saved");
@@ -300,7 +302,8 @@ function buildDOM() {
     else if (a === "view") {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
-    } else if (a === "mode") setGameMode(act.dataset.mode);
+    } else if (a === "budget") { if (BF.active) BF.active.cycle(); updateBudgetBtn(); }   // 20, 40, 60, 80% or off (js/active.js)
+    else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
     else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.monsters()); }
     else if (a === "mon") { BF.gameOpts.set(act.dataset.mon, flipOpt(act)); savePause(); }   // in game: applies at once, and saves
@@ -316,6 +319,8 @@ function buildDOM() {
   knobEl = touchEl.querySelector(".bfp-knob");
 }
 
+// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js)
+function updateBudgetBtn() { if (budgetBtn && BF.active) budgetBtn.textContent = BF.active.text(); }
 function updateViewBtn() {
   const d = BF.world.viewDist;
   if (viewBtn) viewBtn.textContent = `Render distance: ${d} chunks (${d * (BF.CS || 16)} blocks)`;
@@ -378,7 +383,7 @@ function showScreen(name) {
   startEl.classList.toggle("on", name === "start");
   pauseEl.classList.toggle("on", name === "pause");
   deathEl.classList.toggle("on", name === "death");
-  if (name === "pause") { updateViewBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
+  if (name === "pause") { updateViewBtn(); updateBudgetBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
   const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
@@ -1092,6 +1097,160 @@ function drawHUD() {
   if (showAir) for (let i = 0; i < bubbles && i < 10; i++) drawIcon(g, BUBBLE, 189 - ((i * 9.5) | 0), 1, PAL_BUB);
 }
 
+// ---------- world actions as requests (spec r15-20) ----------
+// What the player does to the world goes through act(): a tick-stamped request from "player", applied at once at this tick
+// boundary (js/requests.js player()), so it feels instant and orders before the next tick's villagers. act returns the result
+// ({ok, ...}). The handlers (onAct) take what they need from the request's data (cells, the hotbar slot it was made with, mob and
+// boat ids), never from the moment's input, so a recorded session replays the same (BF.req.record / replay).
+const cellKey = (x, y, z) => x + "," + y + "," + z;
+const cellOf = t => String(t).split(",").map(Number);
+const vec = a => new THREE.Vector3(a[0], a[1], a[2]);
+const arr = v => [v.x, v.y, v.z];
+function act(kind, target, data) {
+  data = data || {};
+  if (data.slot == null && BF.inventory) data.slot = BF.inventory.selectedIndex;
+  if (!BF.req || !BF.req.player) return { ok: false, why: "no request queue" };
+  return BF.req.player(kind, target, data).result || { ok: false, why: "pending" };
+}
+function onAct(kind, fn) {
+  if (!BF.req) return;
+  BF.req.on(kind, req => {
+    const d = req.data, I2 = inv();
+    if (d.slot != null && I2.select && I2.selectedIndex !== d.slot) I2.select(d.slot);
+    return fn(d, req.target, req) || { ok: true };
+  });
+}
+const mobOf = id => (id != null && BF.ids ? BF.ids.get(id) : null);
+const idOf = m => (m && BF.ids ? BF.ids.idOf(m) : null);
+function consumeHeld(n) { if (n > 0) { try { if (inv().consumeSelected) inv().consumeSelected(n); } catch (e) { console.error(e); } } }
+function giveOrDrop(id, n) { const left = inv().add ? inv().add(id, n) : n; if (left > 0 && BF.drops) BF.drops.spawn(id, left, pos.x, pos.y + 1, pos.z); }
+
+// Breaking: {id: the block broken (refused if it has changed), harvest, shears, wear}.
+onAct("player.break", (d, t) => {
+  const W = BF.world, [x, y, z] = cellOf(t), b = BF.blocks[d.id];
+  if (W.getBlock(x, y, z) !== d.id) return { ok: false, why: "changed" };
+  if (!W.setBlock(x, y, z, 0)) return { ok: false, why: "refused" };
+  if (d.harvest && b) {
+    try {
+      const drops = d.shears ? [{ id: d.id, count: 1 }]   // shearing leaves drops the leaves
+        : BF.rollDrops ? BF.rollDrops(d.id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
+      if (BF.drops) BF.drops.spawnAt(drops, x, y, z);
+      else for (const s of drops || []) if (s && s.id != null && s.count > 0 && inv().add) inv().add(s.id, s.count);
+    } catch (e) { console.error(e); }
+  }
+  if (!creative()) exhaustion += 0.005;
+  if (d.wear) wearHeld(d.wear);
+  emit("blockBroken", x, y, z, d.id);
+  return { ok: true };
+});
+// Placing: {cells: [[x, y, z, id, was]...] (refused if any cell no longer holds `was`), consume, wear}. Also tilling, stripping,
+// planting, slabs merging (the cell's slab becomes the full block) and two-block doors and beds.
+onAct("player.place", d => {
+  const W = BF.world;
+  if (!d.cells.every(c => W.isLoaded(c[0], c[2]) && W.getBlock(c[0], c[1], c[2]) === c[4])) return { ok: false, why: "changed" };
+  const set = [];
+  for (const [x, y, z, id] of d.cells) if (W.setBlock(x, y, z, id)) set.push([x, y, z, id]);
+  if (!set.length) return { ok: false, why: "refused" };
+  consumeHeld(d.consume);
+  if (d.wear) wearHeld(d.wear);
+  for (const [x, y, z, id] of set) emit("blockPlaced", x, y, z, id);
+  return { ok: true };
+});
+// Cells to place as [x, y, z, id]; true when placed.
+function place(cells, o) {
+  const W = BF.world;
+  return act("player.place", cellKey(cells[0][0], cells[0][1], cells[0][2]),
+    { cells: cells.map(c => [c[0], c[1], c[2], c[3], W.getBlock(c[0], c[1], c[2])]), consume: (o && o.consume) || 0, wear: (o && o.wear) || 0 }).ok;
+}
+onAct("player.door", (d, t) => { const [x, y, z] = cellOf(t); if (d.gate) BF.world.setGate(x, y, z); else BF.world.setDoor(x, y, z); });
+onAct("player.tie", (d, t) => { const [x, y, z] = cellOf(t); return { ok: !!(BF.horses && BF.horses.tieToPost(x, y, z)), why: "nothing to tie" }; });
+onAct("player.tent", (d, t) => {
+  const [x, y, z] = cellOf(t);
+  if (!(BF.tents && BF.tents.place(x, y, z, d.f, cellBlockedByEntity))) return { ok: false, why: "no room" };
+  consumeHeld(d.consume);
+});
+// Right click on a mob with the held item: {mob, what}. The result's r is the module's answer (a message, true, or the horse's plan).
+onAct("player.mob", d => {
+  const m = mobOf(d.mob), sel = selectedItem();
+  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };
+  let r = null;
+  if (d.what === "villager") r = BF.mobs.interact(m);
+  else if (d.what === "sheep") { r = BF.shepherd.playerUse(m, sel); const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); }
+  else if (d.what === "cow") r = BF.cowherd.playerUse(m, sel);
+  else if (d.what === "pig") r = BF.pigFarmer.playerUse(m, sel);
+  else if (d.what === "chicken") r = BF.poultry.playerUse(m, sel);
+  else if (d.what === "horse") {
+    r = BF.horses.playerUse(m, sel, !!d.sneak);
+    if (r && r.consume) consumeHeld(r.consume);
+    if (r && r.give && BF.I[r.give] != null) giveOrDrop(BF.I[r.give], 1);
+  }
+  return { ok: true, r };
+});
+onAct("player.hit", d => {   // a melee hit: {mob, dmg, d: knockback, wear}
+  const m = mobOf(d.mob);
+  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };
+  try { BF.mobs.hit(m, d.dmg, vec(d.d)); } catch (e) { console.error(e); }
+  if (d.wear) wearHeld(d.wear);
+  if (!creative()) exhaustion += 0.1;
+});
+onAct("player.hitBoat", d => {
+  const b = BF.boats && BF.boats.list && BF.boats.list.find(b => idOf(b) === d.boat);
+  if (!b) return { ok: false, why: "gone" };
+  return { ok: true, r: BF.boats.hit(b, !!d.creative) };
+});
+onAct("player.shoot", d => {   // a bow shot: {from, vel, damage, crit, pickup, arrow: one used}
+  const a = BF.mobs.shootArrow(vec(d.from), vec(d.vel), { damage: d.damage, crit: d.crit, pickup: d.pickup });
+  if (d.arrow) { try { inv().remove(BF.I.arrow, 1); } catch (e) { console.error(e); } }
+  wearHeld(1);
+  return { ok: true, a };
+});
+onAct("player.throw", d => {   // Q: one of the held item, thrown from {at} at {vel}
+  const sel = selectedItem();
+  if (!sel || !BF.drops || !inv().consumeSelected) return { ok: false, why: "nothing held" };
+  const id = sel.id, wear = sel.wear || 0;
+  try { if (!(inv().consumeSelected(1) > 0)) return { ok: false, why: "nothing held" }; } catch (e) { console.error(e); return { ok: false, why: "error" }; }
+  BF.drops.spawn(id, 1, d.at[0], d.at[1], d.at[2], { vel: vec(d.vel), pickupDelay: THROW_PICKUP_DELAY, wear });
+  emit("itemThrown", id);
+});
+onAct("player.eat", () => {
+  const sel = selectedItem(), it = sel && BF.items[sel.id];
+  if (!it || !it.food) return { ok: false, why: "nothing to eat" };
+  finishEating(it);
+});
+onAct("player.cake", (d, t) => {
+  const [x, y, z] = cellOf(t), r = BF.baker.eatCake(x, y, z, P, !!d.creative);
+  if (r === true) saturation = Math.min(P.hunger, saturation + 0.4);
+  return { ok: true, r };
+});
+onAct("player.hive", d => {   // a bee nest or beehive: {cell: the targeted block}
+  const r = BF.bees.playerUse(d.cell, selectedItem());
+  if (r && r.give) {
+    if (r.consume && !d.creative) consumeHeld(r.consume);
+    if (r.wear) wearHeld(r.wear);
+    giveOrDrop(r.give.id, r.give.n);
+  }
+  return { ok: true, r };
+});
+onAct("player.bucket", d => ({ ok: !!(BF.villageLife.useBucket(BF.items[selectedItem() ? selectedItem().id : 0], d.cell)), why: "nothing to do" }));
+onAct("player.map", () => { const sel = selectedItem(), it = sel && BF.items[sel.id]; return { ok: true, r: it ? BF.maps.use(sel, it) : null }; });
+onAct("player.boat", d => {
+  if (!BF.boats.placeFromPlayer(d.boat, vec(d.eye), vec(d.dir), d.yaw, REACH)) return { ok: false, why: "no room" };
+  consumeHeld(1);
+});
+onAct("player.horseEgg", (d, t) => {
+  const [x, y, z] = cellOf(t);
+  if (!BF.horses.spawn(x + 0.5, y + 1, z + 0.5)) return { ok: false, why: "no room" };
+  consumeHeld(1);
+});
+onAct("player.sign", d => {
+  const sel = selectedItem(), it = sel && BF.items[sel.id];
+  if (!(BF.signs && BF.signs.place(d.cell, it))) return { ok: false, why: "no room" };
+  consumeHeld(1);
+});
+// Sleeping: the spawn point at the bed or tent ({spawn}), then waking ("player.wake") the next morning.
+onAct("player.sleep", d => { BF.spawnPoint = d.spawn; });
+onAct("player.wake", () => { wakeUp(); });
+
 // ---------- world interaction ----------
 function eyeVec() { return new THREE.Vector3(pos.x, pos.y + eyeOffset, pos.z); }
 function dirVec() { return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)); }
@@ -1102,12 +1261,9 @@ const THROW_SPEED = 6, THROW_LIFT = 1.5, THROW_PICKUP_DELAY = 2;
 function throwSelected() {
   const sel = selectedItem();
   if (!sel || !BF.drops || !inv().consumeSelected) return;
-  const id = sel.id, wear = sel.wear || 0;
-  try { if (!(inv().consumeSelected(1) > 0)) return; } catch (e) { console.error(e); return; }
   const d = dirVec(), e = eyeVec();
   const vel = d.clone().multiplyScalar(THROW_SPEED); vel.y += THROW_LIFT;
-  BF.drops.spawn(id, 1, e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3, { vel, pickupDelay: THROW_PICKUP_DELAY, wear });
-  emit("itemThrown", id);
+  act("player.throw", null, { at: [e.x + d.x * 0.3, e.y - 0.3, e.z + d.z * 0.3], vel: arr(vel) });
 }
 
 function boatHit() {
@@ -1123,7 +1279,7 @@ function tryAttack() {
     swing();
     if (attackCd > 0) return true;
     attackCd = ATTACK_CD;
-    const r = BF.boats.hit(bh.boat, creative());
+    const r = act("player.hitBoat", null, { boat: idOf(bh.boat), creative: creative() }).r;
     emit("boatHit", r);
     return true;
   }
@@ -1138,9 +1294,7 @@ function tryAttack() {
   if (d.lengthSq() < 1e-6) d.set(-Math.sin(yaw), 0, -Math.cos(yaw));
   d.normalize();
   if (sprinting) { d.multiplyScalar(1.6); sprinting = false; }
-  try { BF.mobs.hit(m.mob, dmg, d); } catch (e) { console.error(e); }
-  if (it && it.tool) wearHeld(it.tool.type === "sword" ? 1 : 2);   // a sword wears 1 use per hit, other tools 2 (Minecraft)
-  exhaustion += 0.1;
+  act("player.hit", null, { mob: idOf(m.mob), dmg, d: arr(d), wear: it && it.tool ? (it.tool.type === "sword" ? 1 : 2) : 0 });   // a sword wears 1 use per hit, other tools 2 (Minecraft)
   return true;
 }
 function primaryDown() {
@@ -1203,21 +1357,11 @@ function updateBreaking(dt) {
   breakProgress += t > 0 ? dt / t : 1;
   if (swingT <= 0) swing();
   if (breakProgress >= 1) {
-    const { x, y, z, id } = breakTarget;
-    BF.world.setBlock(x, y, z, 0);
+    const { x, y, z, id } = breakTarget, tool = heldTool();
+    const r = act("player.break", cellKey(x, y, z), { id, harvest: !creative() && canHarvest(b), shears: !!(b.shearSelf && tool && tool.type === "shears"),
+      wear: b.hardness > 0 ? (tool && tool.type === "sword" ? 2 : 1) : 0 });   // tools wear 1 use per block, swords 2 (Minecraft)
+    if (!r.ok) { resetBreak(); return; }   // the block changed under the crosshair
     spawnParticles(x, y, z, id);
-    if (!creative() && canHarvest(b)) {
-      try {
-        const tool = heldTool();
-        const drops = b.shearSelf && tool && tool.type === "shears" ? [{ id, count: 1 }]   // shearing leaves drops the leaves
-          : BF.rollDrops ? BF.rollDrops(id) : (b.drop != null ? [{ id: b.drop, count: 1 }] : []);
-        if (BF.drops) BF.drops.spawnAt(drops, x, y, z);
-        else for (const d of drops || []) if (d && d.id != null && d.count > 0 && inv().add) inv().add(d.id, d.count);
-      } catch (e) { console.error(e); }
-    }
-    exhaustion += 0.005;
-    if (b.hardness > 0) wearHeld(heldTool() && heldTool().type === "sword" ? 2 : 1);   // tools wear 1 use per block, swords 2 (Minecraft)
-    emit("blockBroken", x, y, z, id);
     resetBreak();
     breakCd = t === 0 && !creative() ? 0.05 : 0.25;   // vanilla: 5 ticks after a break (also the creative repeat), 1 tick for instant breaks
     target = null; outline.visible = false;
@@ -1264,15 +1408,14 @@ function actionBar(text) {
 // ---------- doors and beds ----------
 const lookFacing = () => BF.dirIndex(-Math.sin(yaw), -Math.cos(yaw));
 const freeCell = (x, y, z) => { const c = BF.world.getBlock(x, y, z); return (c === 0 || BF.RENDER[c] === 3 || !!BF.REPLACEABLE[c]) && !cellBlockedByEntity(x, y, z); };
-// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z). wood: species of a door / fence gate item.
+// Places a two-block door (facing the player) or bed (head away from the player) at cell (x, y, z), using up one of the held item.
+// wood: species of a door / fence gate item.
 function placeMulti(kind, x, y, z, wood) {
   const W = BF.world, f = lookFacing();
-  if (kind === "tent") return !!(BF.tents && BF.tents.place(x, y, z, f, cellBlockedByEntity));   // 3x2 tent, js/tents.js
+  if (kind === "tent") return !!BF.tents && act("player.tent", cellKey(x, y, z), { f, consume: 1 }).ok;   // 3x2 tent, js/tents.js
   if (kind === "gate") {   // fence gate: spans across the player's view
     if (!(y < BF.H && W.isLoaded(x, z) && freeCell(x, y, z))) return false;
-    const id = BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0, wood);
-    W.setBlock(x, y, z, id); emit("blockPlaced", x, y, z, id);
-    return true;
+    return place([[x, y, z, BF.gateId(BF.DIRS[f][0] === 0 ? "x" : "z", 0, wood)]], { consume: 1 });
   }
   if (!BF.SOLID[W.getBlock(x, y - 1, z)]) return false;
   let cells;
@@ -1283,8 +1426,7 @@ function placeMulti(kind, x, y, z, wood) {
     cells = [[x, y, z, BF.bedId(f, 0)], [hx, y, hz, BF.bedId(f, 1)]];
   }
   if (!cells.every(c => c[1] < BF.H && W.isLoaded(c[0], c[2]) && freeCell(c[0], c[1], c[2]))) return false;
-  for (const [cx, cy, cz, id] of cells) { W.setBlock(cx, cy, cz, id); emit("blockPlaced", cx, cy, cz, id); }
-  return true;
+  return place(cells, { consume: 1 });
 }
 // ---------- slabs and stairs ----------
 // Placement for items whose block has `shape` (blocks.js): slabs pick bottom/top from the clicked face and merge into the
@@ -1306,14 +1448,14 @@ function placeShaped(sel, it) {
   const n = t.normal;
   const wantTop = n[1] === 1 ? 0 : n[1] === -1 ? 1 : fy > 0.5 ? 1 : 0;
   const done = (x, y, z, id) => {
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (err) { console.error(err); }
-    swing(); emit("blockPlaced", x, y, z, id); placeCd = PLACE_REPEAT; return true;
+    if (!place([[x, y, z, id]], { consume: 1 })) return false;
+    swing(); placeCd = PLACE_REPEAT; return true;
   };
   const merge = (x, y, z, top) => { // top = the half to fill; a slab of this family on the other half becomes the full block
     const c = BF.blocks[W.getBlock(x, y, z)];
     if (sh.kind !== "slab" || !c || !c.shape || c.shape.kind !== "slab" || c.shape.base !== sh.base || c.shape.top === top) return false;
     if (overlapsEntityBoxes(x, y, z, [top ? [0, 8, 0, 16, 16, 16] : [0, 0, 0, 16, 8, 16]])) return false; // someone stands in the open half
-    return W.setBlock(x, y, z, sh.base) && done(x, y, z, sh.base);
+    return done(x, y, z, sh.base);
   };
   if (sh.kind === "slab" && tb && tb.shape && tb.shape.kind === "slab" && tb.shape.base === sh.base) { // clicked a slab of this family
     const openTop = tb.shape.top ? (n[1] === -1 || (n[1] === 0 && fy < 0.5)) : (n[1] === 1 || (n[1] === 0 && fy > 0.5));
@@ -1327,10 +1469,9 @@ function placeShaped(sel, it) {
   if (cur !== 0 && BF.RENDER[cur] !== 3 && !(BF.REPLACEABLE && BF.REPLACEABLE[cur])) return false;
   const id = sh.kind === "slab" ? fam.slab[wantTop] : fam.stairs[wantTop][lookFacing()];
   if (overlapsEntityBoxes(x, y, z, BF.blocks[id].cboxes)) return false;
-  if (!W.setBlock(x, y, z, id)) return false;
   return done(x, y, z, id);
 }
-// Places a ladder against the clicked side face (facing = the face normal), or extends the clicked ladder's column up/down.
+// Places a ladder against the clicked side face (facing = the face normal), or extends the clicked ladder's column up/down, using up one.
 function placeLadder() {
   const W = BF.world, t = target, n = t.normal, tb = BF.blocks[t.id];
   let x, y, z, f;
@@ -1345,10 +1486,7 @@ function placeLadder() {
   const cur = W.getBlock(x, y, z);
   if ((cur !== 0 && !BF.REPLACEABLE[cur]) || BF.FLUID[cur]) return false;
   if (!BF.ladderSupport(W.getBlock(x - BF.DIRS[f][0], y, z - BF.DIRS[f][1]))) return false;
-  const id = BF.ladderId(f);
-  if (!W.setBlock(x, y, z, id)) return false;
-  emit("blockPlaced", x, y, z, id);
-  return true;
+  return place([[x, y, z, BF.ladderId(f)]], { consume: 1 });
 }
 let fadeEl = null;
 function sleepFade() {
@@ -1373,11 +1511,11 @@ function trySleep(t) {
   if (tent) { const o = BF.tents.originOf(t.x, t.y, t.z, t.id); foot = [o.x, o.y, o.z]; sy = 0.125; }
   else foot = b.bed.head ? BF.world.partnerOf(t.x, t.y, t.z, t.id) : [t.x, t.y, t.z];
   const sp = BF.spawnPoint || {};
-  BF.spawnPoint = { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp };
+  act("player.sleep", null, { spawn: { x: foot[0] + 0.5, y: foot[1] + sy, z: foot[2] + 0.5, bed: foot, world: sp.bed ? sp.world : sp } });
   if (tent) { P.hiddenInTent = true; setTimeout(() => { P.hiddenInTent = false; }, 2200); }   // monsters lose sight of the sleeper (mobs.js hostileAI)
   sleepFade();
   falling = true;
-  setTimeout(() => { falling = false; wakeUp(); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
+  setTimeout(() => { falling = false; act("player.wake"); actionBar("Respawn point set"); emit("playerSlept"); }, 700);
 }
 // Waking up is the next morning: the day counter moves on unless it is already early morning (sleeping in a daytime storm moves to tomorrow too).
 function wakeUp() {
@@ -1437,7 +1575,7 @@ function secondaryDown() {
   }
   if (mh && mh.mob && mh.mob.type === "villager" && BF.mobs.interact && (!target || mh.dist < target.dist)) {
     mouseR = false;
-    const msg = BF.mobs.interact(mh.mob);
+    const msg = act("player.mob", null, { mob: idOf(mh.mob), what: "villager" }).r;
     if (invOpen()) { // the trading screen opened
       if (locked) expectUnlock = true;
       keys.clear(); mouseL = false; resetBreak();
@@ -1447,27 +1585,25 @@ function secondaryDown() {
     return true;
   }
   if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
-    const r = BF.shepherd.playerUse(mh.mob, selectedItem());
-    if (r) { const sh = selectedItem(); if (r === true && sh && BF.items[sh.id].name === "shears") wearHeld(1); mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
+    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "sheep" }).r;
+    if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "cow" && BF.cowherd && (!target || mh.dist < target.dist)) {   // wheat feeds a cow, a bucket milks it (js/cowherd.js)
-    const r = BF.cowherd.playerUse(mh.mob, selectedItem());
+    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "cow" }).r;
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "pig" && BF.pigFarmer && (!target || mh.dist < target.dist)) {   // a carrot, potato or beetroot feeds a pig (js/pigfarmer.js)
-    const r = BF.pigFarmer.playerUse(mh.mob, selectedItem());
+    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "pig" }).r;
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "chicken" && BF.poultry && (!target || mh.dist < target.dist)) {   // seeds feed a chicken (js/poultry.js)
-    const r = BF.poultry.playerUse(mh.mob, selectedItem());
+    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "chicken" }).r;
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
-    const sel = selectedItem(), r = BF.horses.playerUse(mh.mob, sel, sneaking);
+    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "horse", sneak: sneaking }).r;
     if (r) {
       mouseR = false; swing();
-      if (r.consume) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
-      if (r.give && BF.I[r.give] != null) { const left = inv().add ? inv().add(BF.I[r.give], 1) : 1; if (left > 0 && BF.drops) BF.drops.spawn(BF.I[r.give], left, pos.x, pos.y + 1, pos.z); }
       if (r.mount && !mount(mh.mob)) actionBar("No room to get on that horse");
       if (r.msg) actionBar(r.msg);
       return true;
@@ -1476,27 +1612,21 @@ function secondaryDown() {
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
-  if (tb && tb.door && useBlk) { BF.world.setDoor(target.x, target.y, target.z); swing(); mouseR = false; return true; }
-  if (tb && /_fence$/.test(tb.name) && BF.horses && BF.horses.tieToPost(target.x, target.y, target.z)) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
-  if (tb && tb.gate && useBlk) { BF.world.setGate(target.x, target.y, target.z); swing(); mouseR = false; return true; }
+  if (tb && tb.door && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), {}); swing(); mouseR = false; return true; }
+  if (tb && /_fence$/.test(tb.name) && BF.horses && act("player.tie", cellKey(target.x, target.y, target.z), {}).ok) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
+  if (tb && tb.gate && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), { gate: true }); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (tb && BF.baker && BF.baker.isCake(target.id) && useBlk) {   // a placed cake: eat a slice (js/baker.js)
-    const r = BF.baker.eatCake(target.x, target.y, target.z, P, creative());
-    if (r === true) { saturation = Math.min(P.hunger, saturation + 0.4); swing(); } else if (typeof r === "string") actionBar(r);
+    const r = act("player.cake", cellKey(target.x, target.y, target.z), { creative: creative() }).r;
+    if (r === true) swing(); else if (typeof r === "string") actionBar(r);
     mouseR = false; return true;
   }
   if (tb && BF.baker && BF.baker.isOven(target.id) && useBlk) { actionBar(BF.baker.ovenText(target.x, target.y, target.z)); mouseR = false; return true; }   // what a baker's oven holds
   if (tb && BF.bees && BF.bees.isHome(target.id) && useBlk) {   // a bee nest or beehive: shears or a glass bottle harvest a full one, otherwise how it is (js/bees.js)
-    const r = BF.bees.playerUse(target, selectedItem());
+    const r = act("player.hive", null, { cell: Object.assign({}, target), creative: creative() }).r;
     if (r) {
       mouseR = false;
-      if (r.give) {
-        swing();
-        if (r.consume && !creative()) { try { if (inv().consumeSelected) inv().consumeSelected(r.consume); } catch (e) { console.error(e); } }
-        if (r.wear) wearHeld(r.wear);
-        const left = inv().add ? inv().add(r.give.id, r.give.n) : r.give.n;
-        if (left > 0 && BF.drops) BF.drops.spawn(r.give.id, left, pos.x, pos.y + 1, pos.z);
-      }
+      if (r.give) swing();
       if (r.msg) actionBar(r.msg);
       return true;
     }
@@ -1519,10 +1649,8 @@ function secondaryDown() {
       (target.id === BF.B.grass || target.id === BF.B.dirt || target.id === BF.B.dirt_path) &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
     const { x, y, z, id } = target, fid = BF.farmland ? BF.farmland.tillId(x, y, z) : BF.B.farmland;   // hydrated only with water or rain (js/farmland.js)
-    if (!BF.world.setBlock(x, y, z, fid)) return false;
+    if (!place([[x, y, z, fid]], { wear: 1 })) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
-    wearHeld(1);
-    emit("blockPlaced", x, y, z, fid);
     placeCd = PLACE_REPEAT;
     return true;
   }
@@ -1530,56 +1658,47 @@ function secondaryDown() {
   if (it.tool && it.tool.type === "axe" && target && BF.blocks[target.id] && /^(?!stripped_).+_(log|wood)$/.test(BF.blocks[target.id].name) &&
       BF.B["stripped_" + BF.blocks[target.id].name] != null) {
     const { x, y, z, id } = target, nid = BF.B["stripped_" + BF.blocks[id].name];
-    if (!BF.world.setBlock(x, y, z, nid)) return false;
+    if (!place([[x, y, z, nid]], { wear: 1 })) return false;
     swing(); spawnParticles(x, y + 0.6, z, id, 6);
-    wearHeld(1);
-    emit("blockPlaced", x, y, z, nid);
     placeCd = PLACE_REPEAT;
     return true;
   }
   // planting: seeds / carrot / potato on the top face of farmland (hydrated or not, never dirt) with air above (takes priority over eating)
   if (it.plants && target && (target.id === BF.B.farmland || target.id === BF.B.farmland_dry) && target.normal[1] === 1 &&
       BF.world.getBlock(target.x, target.y + 1, target.z) === 0) {
-    const x = target.x, y = target.y + 1, z = target.z;
-    if (!BF.world.setBlock(x, y, z, it.plants)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!place([[target.x, target.y + 1, target.z, it.plants]], { consume: 1 })) return false;
     swing();
-    emit("blockPlaced", x, y, z, it.plants);
     placeCd = PLACE_REPEAT;
     return true;
   }
-  if (BF.villageLife && BF.villageLife.useBucket && BF.villageLife.useBucket(it, target)) { swing(); placeCd = PLACE_REPEAT; return true; }   // buckets (js/villagelife.js)
+  if (BF.villageLife && BF.villageLife.useBucket && (it.name === "bucket" || it.name === "water_bucket") && act("player.bucket", null, { cell: target && Object.assign({}, target) }).ok) { swing(); placeCd = PLACE_REPEAT; return true; }   // buckets (js/villagelife.js)
   if ((it.map || it.auto || it.autoBlank) && BF.mapview) { // right click with a filled map opens it full screen; the creative auto map asks for a width (js/mapview.js)
     if (BF.mapview.use(sel, it)) { swing(); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
-    const msg = BF.maps.use(sel, it);
+    const msg = act("player.map", null, {}).r;
     if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.boat && BF.boats) {   // boat: on the water (or the ground) in front, facing the way the player looks
-    if (!BF.boats.placeFromPlayer(it.boat, eyeVec(), dirVec(), yaw, REACH)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!act("player.boat", null, { boat: it.boat, eye: arr(eyeVec()), dir: arr(dirVec()), yaw }).ok) return false;
     swing(); mouseR = false;
     placeCd = PLACE_REPEAT;
     return true;
   }
   if (it.name === "horse_spawn_egg" && BF.horses && target && target.normal[1] === 1) {   // creative spawn item: a wild horse on the ground in front
-    if (!BF.horses.spawn(target.x + 0.5, target.y + 1, target.z + 0.5)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!act("player.horseEgg", cellKey(target.x, target.y, target.z), {}).ok) return false;
     swing(); mouseR = false; placeCd = PLACE_REPEAT;
     return true;
   }
   if (it.food) { if (P.hunger < P.maxHunger) { if (eatT <= 0) eatT = 0.0001; return true; } return false; }
   if (it.places === "sign" && target) { // signs (js/signs.js): standing on a top face, wall sign on a side face; opens the editor
-    if (!(BF.signs && BF.signs.place(target, it))) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+    if (!(BF.signs && act("player.sign", null, { cell: Object.assign({}, target) }).ok)) return false;
     swing(); mouseR = false;
     placeCd = PLACE_REPEAT;
     return true;
   }
   if (it.places === "ladder" && target) { // ladders: only on the side face of a solid block (or extending a ladder column up/down)
     if (!placeLadder()) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing();
     placeCd = PLACE_REPEAT;
     return true;
@@ -1588,7 +1707,6 @@ function secondaryDown() {
     const into = BF.REPLACEABLE && BF.REPLACEABLE[target.id];
     const x = into ? target.x : target.x + target.normal[0], y = into ? target.y : target.y + target.normal[1], z = into ? target.z : target.z + target.normal[2];
     if (!placeMulti(it.places, x, y, z, it.wood)) return false;
-    try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
     swing();
     placeCd = PLACE_REPEAT;
     return true;
@@ -1607,10 +1725,8 @@ function secondaryDown() {
   if (BF.blocks[sel.id] && BF.blocks[sel.id].sapling && BF.forester && !BF.forester.canSurvive(x, y, z)) return false;   // saplings need soil (js/forester.js)
   if (BF.SOLID[sel.id] && cellBlockedByEntity(x, y, z)) return false;
   placeId = BF.facedId(placeId, BF.openFacing({ x, y, z }, P.position));   // furnaces and chests open towards the player (an open side)
-  if (!BF.world.setBlock(x, y, z, placeId)) return false;
-  try { if (inv().consumeSelected) inv().consumeSelected(1); } catch (e) { console.error(e); }
+  if (!place([[x, y, z, placeId]], { consume: 1 })) return false;
   swing();
-  emit("blockPlaced", x, y, z, placeId);
   placeCd = PLACE_REPEAT;
   return true;
 }
@@ -1642,7 +1758,7 @@ function updateUse(dt) {
     emit("playerEating", it.id); // per frame while eating (audio crunch)
     if (eatT >= EAT_TIME) {
       eatT = 0;
-      finishEating(it);
+      act("player.eat");
       placeCd = 0.3;
     }
     return;
@@ -1670,10 +1786,9 @@ function fireArrow(f) {
   for (const k of ["x", "y", "z"]) d[k] += (Math.random() - 0.5) * 0.015;   // vanilla's small spread
   d.normalize();
   const from = eyeVec().addScaledVector(d, 0.4); from.y -= 0.1;
-  const crit = f >= 1 && Math.random() < BOW_CRIT, damage = bowDamage(f);
-  const a = BF.mobs.shootArrow(from, d.multiplyScalar(BOW_SPEED * f), { damage, crit, pickup: creative() ? 2 : 1 });
-  if (!creative()) { try { inv().remove(BF.I.arrow, 1); } catch (e) { console.error(e); } }   // creative: arrows are free
-  wearHeld(1);   // 1 use of the bow's 384 per shot (survival; js/inventory.js wearSelected)
+  const crit = f >= 1 && Math.random() < BOW_CRIT, damage = bowDamage(f);   // the player's own rolls: the request carries them (replays the same)
+  // creative: arrows are free; 1 use of the bow's 384 per shot (survival; js/inventory.js wearSelected)
+  const a = act("player.shoot", null, { from: arr(from), vel: arr(d.multiplyScalar(BOW_SPEED * f)), damage, crit, pickup: creative() ? 2 : 1, arrow: !creative() }).a;
   P.lastShot = { power: +f.toFixed(3), damage, crit, speed: +(BOW_SPEED * f).toFixed(2) };
   emit("playerShot", P.lastShot);
   return a;

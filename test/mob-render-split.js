@@ -4,8 +4,8 @@
 // stands in a row on a stone stage high above the spawn and is photographed; each photo is compared (scaled to half size, a JPEG) with the
 // baseline in test/baselines/mob-render/, taken on release-1-5 before the split. The mobs are held still for the photos: the warp is
 // frozen, each is given a stand-in rider (js/mobs.js updateMob: a ridden mob neither thinks nor moves) and the test steps BF.mobs itself.
-// Also: js/mobs.js makes no scene calls (THREE.Mesh, THREE.Group, scene.add, .root., .meshes) outside the arrow and puff lines that
-// r15-12 moves; zombies in the sun get their fire; nothing is drawn for a mob too far away.
+// Also: js/mobs.js makes no scene calls (THREE.Mesh, THREE.Group, scene.add, .root., .meshes; arrows and puffs are drawn by
+// js/entityview.js since r15-12); zombies in the sun get their fire; nothing is drawn for a mob too far away.
 // Record new baselines: MOB_RENDER_RECORD=1 NODE_PATH=$(npm root -g) node test/run.js /tmp/mr test/mob-render-split.js
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/mr test/mob-render-split.js
 const fs = require("fs"), path = require("path");
@@ -21,8 +21,8 @@ module.exports = async (pg, out) => {
   // ---- the sim makes no scene calls ----
   const src = fs.readFileSync(path.join(__dirname, "..", "js", "mobs.js"), "utf8").split("\n");
   const bad = [];
-  src.forEach((l, i) => { if (/THREE\.Mesh\b|THREE\.Group\b|scene\.add|\.root\.|\.meshes\b/.test(l) && !/r15-12/.test(l)) bad.push(i + 1); });
-  if (fs.existsSync(path.join(__dirname, "..", "js", "mobview.js"))) ok("js/mobs.js makes no scene calls (outside the arrow and puff lines left to r15-12)", bad.length === 0, bad.slice(0, 20));
+  src.forEach((l, i) => { if (/THREE\.Mesh\b|THREE\.Group\b|scene\.add|\.root\.|\.meshes\b/.test(l) ) bad.push(i + 1); });
+  if (fs.existsSync(path.join(__dirname, "..", "js", "mobview.js"))) ok("js/mobs.js makes no scene calls", bad.length === 0, bad.slice(0, 20));
 
   // ---- the stage ----
   const stage = await pg.evaluate(() => {

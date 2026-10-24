@@ -238,23 +238,39 @@ function orders(rec) {
   }
   return out;
 }
-// js/furniture.js: furniture maker f puts a chest it holds at spot for villager m and takes 1 emerald from m. Returns true when done.
-function deliver(f, m, spot) {
-  const W = BF.world, T = TR(), I = BF.I;
-  const o = (f.trades || []).find(x => x.sell.id === I.chest && x.sell.n === 1 && x.buy.length === 1 && x.buy[0].id === I.emerald);   // its chest offer: the player can buy one too
-  if (!o || !m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || T.blockReason(f, o) || count(m.inv, I.emerald) < o.buy[0].n) return false;
+// js/furniture.js: furniture maker f puts a chest it holds at spot for villager m and takes 1 emerald from m. A request (spec r15-19,
+// "chestPut" below): returns the request (its result {ok} comes before f's next think), or false when it can't be done now.
+const chestOffer = f => (f.trades || []).find(x => x.sell.id === BF.I.chest && x.sell.n === 1 && x.buy.length === 1 && x.buy[0].id === BF.I.emerald);   // its chest offer: the player can buy one too
+function canDeliver(f, m, spot) {
+  const W = BF.world, T = TR(), I = BF.I, o = chestOffer(f);
+  if (!o || !m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || T.blockReason(f, o) || count(m.inv, I.emerald) < o.buy[0].n) return null;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.5 + (o.halfWidth || 0.3) && Math.abs(o.position.z - spot.z - 0.5) < 0.5 + (o.halfWidth || 0.3) && o.position.y < spot.y + 1 && o.position.y + (o.height || 1.8) > spot.y;
-  if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;   // somebody is standing there
-  if (!W.setBlock(spot.x, spot.y, spot.z, BF.chestId(BF.openFacing(spot, f.position)))) return false;
+  if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return null;   // somebody is standing there
+  return o;
+}
+function deliver(f, m, spot) {
+  if (!canDeliver(f, m, spot) || !BF.ids) return false;
+  return BF.req.send("chestPut", pk(spot.x, spot.y, spot.z), { to: BF.ids.idOf(m), facing: BF.openFacing(spot, f.position) }, f);
+}
+// The chest goes down, the trade is made and the chest is reserved for m, all in the apply phase: one transaction (spec r15-21). It
+// moves the goods itself rather than through BF.trades.buy, because the chest goes into the world, not into the buyer's pack.
+BF.req.on("chestPut", (req, W) => {
+  const [x, y, z] = String(req.target).split(",").map(Number), spot = { x, y, z };
+  const f = BF.ids.get(req.from), m = BF.ids.get(req.data.to);
+  if (!f || !m || f.removed || m.removed || !W.isLoaded(x, z)) return { ok: false, why: "gone" };
+  const o = canDeliver(f, m, spot);
+  if (!o) return { ok: false, why: "changed" };
+  if (!W.setBlock(x, y, z, BF.chestId(req.data.facing))) return { ok: false, why: "refused" };
+  const T = TR(), I = BF.I;
   T.exchange(f, o); T.inv.remove(m.inv, I.emerald, o.buy[0].n);
-  const c = INV().chestRecord(spot.x, spot.y, spot.z);
+  const c = INV().chestRecord(x, y, z);
   c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS, name: nameOf(m) };
   m.store.order = null; m.store.checkT = 0.5;
   houseCache.clear();
   if (BF.vlog) BF.vlog.trade(m, f, o, 1);
   log(m.village, who(f) + " placed a chest at " + at(spot) + " in the house of " + who(m));
-  return true;
-}
+  return { ok: true };
+});
 
 // ---------------------------------------------------------------- villager AI (mobs.js villagerAI, daytime)
 // Storing and taking back are "chest" requests (js/inventory.js, spec r15-22): the plan is made from the chest as this think sees it, and
