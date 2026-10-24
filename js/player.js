@@ -1249,6 +1249,15 @@ onAct("player.boat", d => {
   if (!BF.boats.placeFromPlayer(d.boat, vec(d.eye), vec(d.dir), d.yaw, REACH)) return { ok: false, why: "no room" };
   consumeHeld(1);
 });
+// Riding (spec r15-44 part 2): getting on and off are requests, so the simulation decides wherever it runs. {id}: the boat or horse.
+onAct("player.mount", d => {
+  const v = vehicleOf(d.id);
+  if (!v) return { ok: false, why: "gone" };
+  if (v.kind === "horse" && !BF.horses.canRide(v)) return { ok: false, why: "You can't ride that horse" };
+  if (vehicle !== v && !mount(v)) return { ok: false, why: v.kind === "boat" ? (v.rider ? "Someone is already in that boat" : "No room to sit in that boat") : "No room to get on that horse" };
+  return Object.assign({ ok: true, id: d.id }, rideInfo(v));
+});
+onAct("player.dismount", d => { dismount(!!d.stay); });
 onAct("player.horseEgg", (d, t) => {
   const [x, y, z] = cellOf(t);
   if (!BF.horses.spawn(x + 0.5, y + 1, z + 0.5)) return { ok: false, why: "no room" };
@@ -1627,8 +1636,7 @@ function secondaryDown() {
   const mh = mobHit(), bh = boatHit();
   if (bh && (!target || bh.dist < target.dist) && (!mh || bh.dist < mh.dist)) {   // right click on a boat: get in (js/boats.js)
     mouseR = false;
-    if (mount(bh.boat)) { swing(); return true; }
-    actionBar(bh.boat.rider ? "Someone is already in that boat" : "No room to sit in that boat");
+    if (mountReq(idOf(bh.boat), bh.boat.rider ? "Someone is already in that boat" : "No room to sit in that boat")) swing();
     return true;
   }
   if (mh && mh.mob && mh.mob.type === "villager" && BF.mobs.interact && (!target || mh.dist < target.dist)) {
@@ -1659,13 +1667,13 @@ function secondaryDown() {
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
-    const r = mobAct({ mob: idOf(mh.mob), what: "horse", sneak: sneaking });
-    if (r) {
-      mouseR = false; swing();
-      if (r.mount && !mount(mh.mob)) actionBar("No room to get on that horse");
-      if (r.msg) actionBar(r.msg);
-      return true;
-    }
+    const id = idOf(mh.mob), a = act("player.mob", null, { mob: id, what: "horse", sneak: sneaking });
+    const after = r => {   // the horse's answer: get on (a request too), or its message
+      if (r && r.mount) mountReq(id, "No room to get on that horse");
+      if (r && r.msg) actionBar(r.msg);
+    };
+    if (a.pending) { a.then(res => after(res && res.r)); mouseR = false; swing(); return true; }   // (the simulation in a worker answers later)
+    if (a.r) { mouseR = false; swing(); after(a.r); return true; }
   }
   const useBlk = !sneaking || !selectedItem(); // sneaking with an item in hand = place; empty-handed sneak still uses blocks (as in Minecraft)
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
@@ -1957,7 +1965,7 @@ function onLadder() {                       // a ladder cell at the feet or at t
 // Riding (a boat, js/boats.js): W/S forward and back, A/D turn (the view turns with the vehicle), Space jump, Shift gets off.
 function ridePhysics(dt, k) {
   const shift = k.has("ShiftLeft") || k.has("ShiftRight");
-  if (shift && !rideShift) { dismount(); return 0; }
+  if (shift && !rideShift) { leave(); return 0; }
   rideShift = shift;
   let fwd = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
   let turn = (k.has("KeyA") ? 1 : 0) - (k.has("KeyD") ? 1 : 0);
@@ -1993,16 +2001,133 @@ function mount(v, fromSave) {
 }
 // Gets out: onto the nearest solid block beside the boat, else into the water. A mob passenger gets out too.
 // stay: leave the player where they are (teleport, respawn, a new world).
+// The page's copy of a vehicle (the simulation in a worker, ridePose): the simulation gets the player off (player.dismount) and sends
+// where they landed; the page only lets go of its copy.
 function dismount(stay) {
   const v = vehicle;
   if (!v) return;
   vehicle = null; v.rider = false;
+  if (v.local) { mirrorRide = null; act("player.dismount", null, { stay: !!stay }); emit("dismounted", v); return; }
   if (stay) return;
   if (v.ctl.onLeave) v.ctl.onLeave(v);
   const s = v.ctl.exitSpot(v, HW, HEIGHT);
   pos.set(s.x, s.y, s.z); vel.x = vel.y = vel.z = 0; fallStart = null;
   emit("dismounted", v);
 }
+// Shift: get off, a request (the simulation runs onLeave and finds the spot, js/boats.js / js/horses.js)
+function leave() {
+  if (!vehicle) return;
+  if (vehicle.local) { dismount(); return; }
+  act("player.dismount", null, {});
+}
+// A right click's request to get on {id}; no: the action bar's message when it's refused. True unless refused at once.
+function mountReq(id, no) {
+  const a = act("player.mount", null, { id });
+  const done = r => { if (!r || !r.ok) actionBar(r && r.why && r.why !== "gone" && r.why !== "pending" ? r.why : no); };
+  if (a.pending) { a.then(done); return true; }
+  done(a);
+  return !!a.ok;
+}
+const vehicleOf = id => {
+  if (id == null) return null;
+  const b = BF.boats && BF.boats.list.find(b => idOf(b) === id);
+  if (b) return b;
+  const m = mobOf(id);
+  return m && m.kind === "horse" && m.ctl && !m.dead && !m.removed ? m : null;
+};
+const rideInfo = v => (v.kind === "boat" ? BF.boats.rideInfo(v) : BF.horses.rideInfo(v));
+
+// ---- riding with the simulation in a worker (spec r15-44 part 2). Whoever steers moves the vehicle, as for the player's body (r15-38):
+// the page rows a boat and rides a saddled, tamed horse with its own copy (js/boats.js / js/horses.js localCopy, driven by the same
+// drive()) and reports where it is (rideReport, the player message's ride); the simulation sets the real one there (ridePose). An untamed
+// horse steers itself: the simulation drives it (simRide) and the page sits the player on the mirror's horse (mirrorRide). What the
+// simulation does to the ride comes back in self.mount (rideState / rideSelf): getting on (a request, or a save), being thrown or put
+// off (the horse died or went under, the boat broke, a teleport), and the horse's health for the HUD.
+let mirrorRide = null;   // {id, e: the mirror entity} that the page draws where its copy is
+function mirrorOf(id) {
+  const W = BF.client && BF.client.world;
+  if (!W) return null;
+  if (mirrorRide && mirrorRide.id === id && W.entities.get(mirrorRide.n) === mirrorRide.e) return mirrorRide.e;
+  for (const [n, e] of W.entities) if (e.sid === id && !e.dead) { mirrorRide = { id, n, e }; return e; }
+  return null;
+}
+// The page's stand-in for a horse the simulation steers: it sits the player on the mirror's horse
+const MIRROR_CTL = {
+  drive(v) {
+    const e = mirrorOf(v.sid);
+    if (e) { BF.planet.local(pos, e, MLQ); v.position.set(MLQ.x, e.y, MLQ.z); v.yaw = e.yaw; }
+    return 0;
+  },
+  seatOf: v => ({ x: v.position.x, y: v.position.y + v.info.seat, z: v.position.z }),
+  sitEye: v => v.info.sitEye,
+  canBoard: () => true,
+  exitSpot: v => ({ x: v.position.x, y: v.position.y, z: v.position.z }),
+  hud: v => ({ hp: v.info.hp, max: v.info.max }),
+};
+function pageCopy(id, info, pose) {
+  if (info.kind === "boat") return BF.boats.localCopy(id, info, pose);
+  if (info.steer === "page") return BF.horses.localCopy(id, info, pose);
+  return { local: true, sid: id, kind: "horse", ctl: MIRROR_CTL, info, position: new THREE.Vector3(pose.x, pose.y, pose.z), vel: new THREE.Vector3(), yaw: pose.yaw || 0 };
+}
+// page: self.mount, what the simulation says the player rides (null: nothing; {id, kind, steer, ..., pose} from rideInfo)
+P.rideSelf = function (m) {
+  if (!m) { if (vehicle && vehicle.local) { const v = vehicle; vehicle = null; v.rider = false; mirrorRide = null; emit("dismounted", v); } return; }
+  const v = vehicle;
+  if (v && v.local && v.sid === m.id && (v.info ? v.info.steer : "page") === m.steer) {   // the same ride: its health, passenger, a horse tamed
+    if (v.info) v.info = Object.assign(v.info, m);
+    if (v.kind === "horse" && v.maxHp != null) { v.hp = m.hp; v.maxHp = m.max; }
+    if (v.kind === "boat") BF.boats.setPassenger(v, m.pass);
+    return;
+  }
+  if (v) { vehicle = null; v.rider = false; }
+  mount(pageCopy(m.id, m, m.pose || { x: pos.x, y: pos.y, z: pos.z, yaw: 0 }), true);
+};
+// page: the player message's ride, the pose of the copy the page steers (null when the simulation steers or nothing is ridden)
+P.rideReport = function () {
+  const v = vehicle;
+  if (!v || !v.local || v.ctl === MIRROR_CTL) return null;
+  const p = v.pos || v.position, r = { id: v.sid, x: p.x, y: p.y, z: p.z, yaw: v.yaw, vel: [v.vel.x, v.vel.y, v.vel.z] };
+  if (v.rowing) r.rowing = v.rowing.slice();
+  if (v.fall) { r.fall = v.fall; v.fall = 0; }
+  return r;
+};
+// page, each frame: the mirror's boat or horse drawn where the page's copy is (the simulation's lags a message behind)
+function syncMirrorRide() {
+  const v = vehicle;
+  if (!v || !v.local || v.ctl === MIRROR_CTL) return;
+  const e = mirrorOf(v.sid);
+  if (!e) return;
+  const p = v.pos || v.position;
+  e.x = p.x; e.y = p.y; e.z = p.z; e.yaw = v.yaw;
+  if (e.prev) { e.prev.x = p.x; e.prev.y = p.y; e.prev.z = p.z; e.prev.yaw = v.yaw; }
+  if (v.rowing && e.rowing) { e.rowing = v.rowing.slice(); e.row = v.row.slice(); }
+}
+// simulation: what the player rides, for self.mount (null when nothing)
+P.rideState = function () {
+  const v = vehicle;
+  if (!v || v.local) return null;
+  return Object.assign({ id: idOf(v) }, rideInfo(v));
+};
+P.ridePose = function () { const v = vehicle; if (!v || v.local) return null; const p = v.pos || v.position; return { x: p.x, y: p.y, z: p.z, yaw: v.yaw }; };
+// simulation: the page's ride (player message): its boat or horse goes where the page rowed or rode it; a fall hurts the horse
+P.rideIn = function (r) {
+  const v = vehicle;
+  if (!v || v.local || !r || idOf(v) !== r.id || rideInfo(v).steer !== "page") return;
+  const p = v.pos || v.position;
+  p.set(r.x, r.y, r.z); v.yaw = r.yaw;
+  if (Array.isArray(r.vel)) v.vel.set(r.vel[0], r.vel[1], r.vel[2]);
+  if (Array.isArray(r.rowing) && v.rowing) { v.rowing[0] = r.rowing[0]; v.rowing[1] = r.rowing[1]; }
+  if (r.fall > 0 && v.kind === "horse" && BF.mobs) BF.mobs.hurt(v, r.fall, "a fall");
+};
+// simulation, each loop in real time (js/simworker.js): an untamed horse carries the player where it likes and throws them; the
+// player is put off a boat or horse that is gone (died, unloaded) whoever steers it
+P.simRide = function (dt) {
+  const v = vehicle;
+  if (!v || v.local) return;
+  if (v.dead || v.removed || (v.kind === "boat" && !BF.boats.list.includes(v))) { dismount(); return; }
+  if (P.dead || (BF.state && BF.state.paused) || rideInfo(v).steer !== "sim") return;
+  rideStep(Math.min(dt, 0.1), { fwd: 0, turn: 0, strafe: 0, jump: false, yaw });
+};
 function physics(dt) {
   const k = touchKeys.size ? new Set([...keys, ...touchKeys]) : keys;
   if (vehicle) return ridePhysics(dt, k);
@@ -2428,6 +2553,7 @@ P.update = function (dt) {
     const h3 = roundHeading();
     moved = physics(dt);
     crossEdge();
+    syncMirrorRide();
     keepHeading(h3);
     updateOffPlanet();
     updateTarget();

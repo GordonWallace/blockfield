@@ -246,7 +246,7 @@ function serve(send, opts) {
     fx: [], logs: [],
     tick: -1, clockKey: "", clockTick: -1e9, weather: null, villageT: 0, inRequest: false, flushes: 0,
     editsDue: false,          // replica: all edits go at the next flush (after a hello: a save's edits are restored after newWorld)
-    hurts: [], rep: null, invSent: null, spawnSent: null,   // replica: hurts to send, the player as the client last reported it, what self last sent
+    hurts: [], rep: null, invSent: null, spawnSent: null, mountSent: "null",   // replica: hurts to send, the player as the client last reported it, what self last sent
     cursorSent: null, screenSent: null,   // (r15-44: the held stack and the open screen, in every mode)
   };
   const out = msg => {
@@ -263,7 +263,7 @@ function serve(send, opts) {
     out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(),
       settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, gameMode: BF.player && BF.player.gameMode || null } });
     S.invSent = S.cursorSent = S.screenSent = null;   // (self sends the inventory and the screen again)
-    if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; }
+    if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; S.mountSent = "null"; }
   }
   function reset() {
     S.chunks.clear(); S.cells.clear(); S.ents.clear(); S.villages.clear(); S.fx = []; S.logs = []; S.tick = -1; S.clockKey = ""; S.clockTick = -1e9; S.weather = null; S.villageT = 0;
@@ -327,7 +327,7 @@ function serve(send, opts) {
     }
     if (kind === "drop") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, age: o.age || 0, item: o.id, count: o.count, phase: o.phase || 0, pulled: !!o.pulled };
     if (kind === "arrow") { const l = o.stuck ? o.look || o.vel : o.vel || o.look; return { x: o.pos.x, y: o.pos.y, z: o.pos.z, lx: l ? l.x : 0, ly: l ? l.y : 0, lz: l ? l.z : 0, stuck: !!o.stuck }; }
-    if (kind === "boat") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, yaw: o.yaw || 0, hurtT: o.hurtT || 0, wood: o.wood, row: (o.row || [0, 0]).slice(), rowing: (o.rowing || [0, 0]).slice(), mob: nOrNull(o.mob), rider: !!o.rider, sid: o.id != null ? o.id : null };
+    if (kind === "boat") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, yaw: o.yaw || 0, hurtT: o.hurtT || 0, wood: o.wood, row: (o.row || [0, 0]).slice(), rowing: (o.rowing || [0, 0]).slice(), mob: nOrNull(o.mob), rider: !!o.rider, sid: BF.ids ? BF.ids.idOf(o) : null };   // (a boat has an id once something names it: the mirror's requests do)
     const L = o.land;   // bee: landed at a point on a surface, with the surface's normal
     return { x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, phase: o.phase || 0, mode: o.mode, land: L ? [L.x, L.y, L.z, L.nx || 0, L.ny || 0, L.nz || 0] : null, landYaw: o.landYaw || 0 };
   }
@@ -429,8 +429,12 @@ function serve(send, opts) {
       if (P.hunger !== r.hunger) { m.hunger = r.hunger = P.hunger; any = true; }
       if (P.gameMode !== r.gameMode) { m.gameMode = r.gameMode = P.gameMode; any = true; }
       const p = P.position;
-      if (Math.abs(p.x - r.x) > 1e-6 || Math.abs(p.y - r.y) > 1e-6 || Math.abs(p.z - r.z) > 1e-6) { m.pos = [p.x, p.y, p.z]; r.x = p.x; r.y = p.y; r.z = p.z; any = true; }
+      if (P.vehicle) { r.x = p.x; r.y = p.y; r.z = p.z; }   // riding: the page seats the player itself (js/player.js rideSelf)
+      else if (Math.abs(p.x - r.x) > 1e-6 || Math.abs(p.y - r.y) > 1e-6 || Math.abs(p.z - r.z) > 1e-6) { m.pos = [p.x, p.y, p.z]; r.x = p.x; r.y = p.y; r.z = p.z; any = true; }
     }
+    // riding (r15-44 part 2): the boat or horse the player is on, when that changed (getting on or off here, its health); the pose goes along
+    const ride = P.rideState ? P.rideState() : null, rk = JSON.stringify(ride);
+    if (rk !== S.mountSent) { S.mountSent = rk; m.mount = ride && Object.assign(ride, { pose: P.ridePose() }); any = true; }
     const sp = JSON.stringify(BF.spawnPoint || null);
     if (sp !== S.spawnSent) { S.spawnSent = sp; m.spawn = JSON.parse(sp); any = true; }
     if (any) out(m);
@@ -446,6 +450,7 @@ function serve(send, opts) {
     if (m.hunger != null) P.hunger = m.hunger;
     P.dead = !!m.dead;
     if (m.sel != null && BF.inventory && BF.inventory.selectedIndex !== m.sel) BF.inventory.select(m.sel);   // the hotbar slot (r15-44: the page's)
+    if (m.ride && P.rideIn) P.rideIn(m.ride);   // the boat or horse the page steers (r15-44 part 2)
     S.rep = { x: m.x, y: m.y, z: m.z, health: P.health, hunger: P.hunger, gameMode: P.gameMode };
   }
   // replica: the player's body is the client's, so what would change it here goes to the client instead (mobs, bees and lightning
@@ -594,6 +599,14 @@ const QUERIES = {
   trades(a) { return BF.inventory && BF.inventory.tradeView ? BF.inventory.tradeView(a) : { ok: false, why: "no trading" }; },
   // r15-44: a furnace's slots, burn, burnMax, cook and whether it can smelt now ({x, y, z}, or {} for the open screen's; js/playerinv.js furnaceView)
   furnace(a) { return BF.inventory && BF.inventory.furnaceView ? BF.inventory.furnaceView(a) : { ok: false, why: "no furnaces" }; },
+  // a boat or mob by id as the simulation has it (tests, r15-44 part 2): where it is, whether the player rides it, a horse's state
+  entity(a) {
+    const o = a.id != null && BF.ids ? BF.ids.get(a.id) : null;
+    if (!o || o.dead || o.removed || (o.kind === "boat" && !(BF.boats && BF.boats.list.includes(o)))) return { ok: false, why: "gone" };
+    const p = o.pos || o.position, r = o.horse;
+    return { ok: true, kind: o.kind === "boat" ? "boat" : o.type, x: p.x, y: p.y, z: p.z, yaw: o.yaw || 0, ridden: !!(BF.player && BF.player.vehicle === o), hp: o.hp,
+      horse: r ? { tamed: !!r.tamed, saddle: !!r.saddle, lead: r.lead ? r.lead.kind : null, temper: r.temper } : null };
+  },
   // a mob's inventory ({id}): the slots of a villager or merchant
   inventory(a) {
     const m = BF.ids && BF.ids.get(a.id);

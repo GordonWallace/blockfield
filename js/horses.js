@@ -476,7 +476,7 @@ function drive(m, dt, input) {
   // landing: the horse takes the fall damage, reduced (vanilla: half the distance, minus 3); the rider takes none
   if (res.onGround && !wasGround && !inWater && m.fallStart != null) {
     const dmg = Math.ceil((m.fallStart - m.position.y) * 0.5 - 3);
-    if (dmg > 0) BF.mobs.hurt(m, dmg, "a fall");
+    if (dmg > 0) { if (m.local) m.fall = (m.fall || 0) + dmg; else BF.mobs.hurt(m, dmg, "a fall"); }   // the page's copy: the simulation hurts the horse (ridePose)
     m.fallStart = m.position.y;
   }
   // (mobs.js skips its own physics for a ridden horse; js/mobview.js draws it facing m.yaw)
@@ -494,6 +494,30 @@ const RIDE = {
   onMount: m => { ride.buck = rnd(R(m), 1.5, 3.5); ride.charge = 0; },
   hud: m => ({ hp: m.hp, max: m.maxHp }),   // the horse's health in place of hunger (js/player.js drawHUD)
 };
+// Riding over the protocol (spec r15-44 part 2). The rules for getting on, past canBoard (player.mount): the rider's horse or no one's, not a
+// foal, and a tamed one only with a saddle (an untamed one is ridden to tame it).
+function canRide(m) {
+  const r = m && m.horse;
+  return !!(r && live(m) && !isFoal(r) && (!r.owner || r.owner === "player") && (!r.tamed || r.saddle));
+}
+// What the page needs to ride m (player.mount's answer, self.mount): who steers ("page": tamed and saddled, the rider; "sim": the horse),
+// the seat above its feet and its health for the HUD; speed and jump for the page's own copy.
+function rideInfo(m) {
+  const r = m.horse;
+  return { kind: "horse", steer: r.tamed && r.saddle ? "page" : "sim", seat: SEAT_Y * (m._k || 1), sitEye: SIT_EYE, hp: m.hp, max: m.maxHp,
+    tamed: !!r.tamed, saddle: !!r.saddle, speed: r.speed, jump: r.jump, hw: m.halfWidth, h: m.height, k: m._k || 1 };
+}
+// The page's copy of a horse it steers (the simulation in a worker): driven by drive() as the real one is; never in BF.mobs. Its falls
+// add up in m.fall for the page to report (js/simhost.js).
+const LOCAL = Object.assign({}, RIDE, {
+  onMount: () => { ride.charge = 0; ride.jumpHeld = false; },
+  onLeave: () => { ride.charge = 0; ride.jumpHeld = false; },
+});
+function localCopy(id, info, pose) {
+  return { local: true, sid: id, kind: "horse", type: "horse", ctl: LOCAL, horse: { tamed: info.tamed, saddle: info.saddle, speed: info.speed, jump: info.jump, hid: 0, temper: 100 },
+    position: new THREE.Vector3(pose.x, pose.y, pose.z), vel: new THREE.Vector3(), yaw: pose.yaw || 0, onGround: false, fallStart: null,
+    halfWidth: info.hw, height: info.h, _k: info.k, hp: info.hp, maxHp: info.max, ai: { mode: "idle" }, fall: 0 };
+}
 
 // ---------------------------------------------------------------- the player's right click on a horse
 // sel: the held stack. Returns null (not handled) or {msg?, consume?: n, mount?: true, give?: itemName}.
@@ -601,7 +625,7 @@ BF.horses = {
   isHorseBiome, rollStats, foalStats, jumpHeight, price: m => price(m.horse || m),
   spawn, tame, feed, breed, leash, setPen, willing: m => !!(m && m.horse && willing(m.horse, now())),
   ai, tick, spawnHerdAt, setAvoid, playerUse, tieToPost, recOf, horsesOf, wildNear, wildCount, herds, records: recs,
-  ride: RIDE, leads,
+  ride: RIDE, leads, canRide, rideInfo, localCopy,
   serialize, deserialize, reset,
 };
 })();
