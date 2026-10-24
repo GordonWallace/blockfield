@@ -1,28 +1,26 @@
+// @ci integration hosts=worker,server
 // Debug screen Compare table test: NODE_PATH=$(npm root -g) node test/compare-view.js [outPrefix] [days=0]
 // Starts debug/server.js on spare ports, opens the game and the debug screen, fast-forwards the world `days` game days (the CI
 // integration tier runs 14), then checks the Compare table: the outlier rules and sorting on fixed sample data, every loaded
 // village's row against its own village panel, clicking a row, full width, and screenshots it.
-const path = require('path'), { spawn } = require('child_process');
+// BF_HOST=page|worker|server (spec r15-43): where the simulation runs; the fast-forward and the game's own numbers are there (lib.sim).
+const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
+const lib = require('./lib');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/compare-view', DAYS = +(process.argv[3] || 0);
-const GAME = 8730, DBG = 8731;
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-compare-view-alerts.json')]);
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
-};
 (async () => {
   const fails = [], ok = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails.push(n); };
-  const srv = await start();
+  const srv = await lib.serve({ world: lib.host() === 'server' }), GAME = srv.game, DBG = srv.debug;
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const game = await b.newPage({ viewport: { width: 1280, height: 760 } });
   game.on('pageerror', e => console.log('PAGEERROR game', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await lib.install(game);   // (BFT.sim)
+  await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(5000);
-  await require('./lib').toVillage(game);
+  await lib.simReady(game);
+  await lib.toVillage(game);
   const dbg = await b.newPage({ viewport: { width: 1600, height: 1000 } });
   dbg.on('pageerror', e => console.log('PAGEERROR debug', e.message));
   await dbg.route('https://fonts.**', r => r.abort());
@@ -59,7 +57,7 @@ const start = async () => {
   if (DAYS > 0) {
     const t0 = Date.now();
     for (let d = 0; d < DAYS * 6; d++) {   // a sixth of a game day per call: the game loop and the feed run in between
-      await game.evaluate(n => { const h = 0.05; for (let i = 0; i < n; i++) { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
+      await lib.sim(game, n => { const h = 0.05; for (let i = 0; i < n; i++) { BF.simStep(h);   // (the game's own tick: js/boot.js)
         if (i % 50 === 0) BF.world.update(BF.player.position.x, BF.player.position.z, 4); } }, Math.round(200 / 0.05));
       await game.waitForTimeout(50);
     }
@@ -90,13 +88,13 @@ const start = async () => {
     ok(`${p.name}: table ${JSON.stringify(got)} = panel ${JSON.stringify(want)}`, row[0].startsWith(p.name) && JSON.stringify(got) === JSON.stringify(want));
   }
   // the numbers behind the row, from the game itself
-  const g = await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), d = BF.debugFeed.snapshot().detail[rec.key];
+  const g = await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), d = (BF.debugFeed.snapshot || BF.debugFeed.simPart)().detail[rec.key];
     return { key: rec.key, trades: BF.happiness.week(rec.key, 'trade'), births: BF.happiness.week(rec.key, 'birth'), deaths: BF.happiness.week(rec.key, 'death'), noTools: d.noTools[0], pop7: d.pop7 }; });
   await dbg.waitForTimeout(600);
   const here = (await tab()).rows.find(x => x.key === g.key);
   // trades between the game's count before and after the table was read (a busy village trades several times a second, and old trades leave
   // the 7-day window as fast-forwarded time passes), give or take 5%
-  const tradesAfter = await game.evaluate(k => BF.happiness.week(k, 'trade'), g.key), tol = Math.max(3, Math.max(g.trades, tradesAfter) * 0.05);
+  const tradesAfter = await lib.sim(game, k => BF.happiness.week(k, 'trade'), g.key), tol = Math.max(3, Math.max(g.trades, tradesAfter) * 0.05);
   ok('trades, births, deaths, tools match the game ' + JSON.stringify([here && here.cells.slice(8, 13), g, tradesAfter]), here && +here.cells[8] >= Math.min(g.trades, tradesAfter) - tol && +here.cells[8] <= Math.max(g.trades, tradesAfter) + tol && +here.cells[11] === g.births && +here.cells[12] === g.deaths && Math.abs(parseInt(here.cells[9]) - g.noTools) <= 1);
   if (DAYS >= 1) ok('population change after ' + DAYS + ' days: ' + (here && here.cells[3]), here && here.cells[3] !== '-' && g.pop7);
   // sorting by clicking a header, and again to reverse
@@ -113,7 +111,7 @@ const start = async () => {
   await dbg.reload(); await dbg.waitForTimeout(2000);
   ok('the table and its sort are remembered for the session', await dbg.evaluate(() => !document.getElementById('vcmp').hidden && document.querySelector('#vcmp th.on') && document.querySelector('#vcmp th.on').dataset.k === 'pop'));
   await b.close();
-  srv.kill(); await new Promise(r => srv.exitCode !== null ? r() : srv.once('exit', r));
+  await srv.stop();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
 })();

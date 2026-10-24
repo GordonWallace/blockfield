@@ -1,30 +1,27 @@
-// @ci integration suite=ui timeout=400 args={out}
+// @ci integration suite=ui timeout=400 args={out} hosts=worker,server
 // The debug screen's Mobs map (js/debugfeed.js mobMap, debug/index.html; idea-037): every loaded mob drawn once, legend entries hide and bring
 // back a type (remembered after a reload), zoom both ways, and loaded and unloaded land drawn differently.
 // Usage: NODE_PATH=$(npm root -g) node test/debug-mobmap.js [outPrefix]
-const path = require('path'), { spawn } = require('child_process');
+// BF_HOST=page|worker|server (spec r15-43): where the simulation runs; its mobs are held still and counted there (lib.sim).
+const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
+const lib = require('./lib');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug-mobmap';
-const GAME = 8720, DBG = 8721;
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-debug-mobmap-alerts.json')]);
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
-};
 (async () => {
   const fails = [], ok = (n, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (extra !== undefined ? '  ' + JSON.stringify(extra) : '')); if (!c) fails.push(n); };
-  const srv = await start();
+  const srv = await lib.serve({ world: lib.host() === 'server' }), GAME = srv.game, DBG = srv.debug;
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const game = await b.newPage({ viewport: { width: 1280, height: 760 } });
   game.on('pageerror', e => console.log('PAGEERROR game', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await lib.install(game);   // (BFT.sim)
+  await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(5000);
-  await require('./lib').toVillage(game);
+  await lib.simReady(game);
+  await lib.toVillage(game);
   // hold the mobs still so the game and the screen can be compared
-  await game.evaluate(() => { BF.mobs.spawning = false; window.__upd = BF.mobs.update; BF.mobs.update = () => {}; });
+  await lib.sim(game, () => { BF.mobs.spawning = false; globalThis.__upd = BF.mobs.update; BF.mobs.update = () => {}; });
   const dbg = await b.newPage({ viewport: { width: 1600, height: 1400 } });
   dbg.on('pageerror', e => console.log('PAGEERROR debug', e.message));
   await dbg.route('https://fonts.**', r => r.abort());
@@ -34,7 +31,7 @@ const start = async () => {
   await dbg.waitForFunction(() => window.BFMobMap && BFMobMap.data(), null, { timeout: 20000 });
   await dbg.waitForTimeout(1500);
   await dbg.locator('#mpanel').scrollIntoViewIfNeeded();
-  const want = await game.evaluate(() => { const c = {}; let n = 0; for (const m of BF.mobs.list) if (!m.dead && !m.removed) { n++; const k = m.type === 'villager' ? (m.profession === 'merchant' ? 'merchant' : 'villager') : m.type; c[k] = (c[k] || 0) + 1; } return { n, c, chunks: BF.world.chunks.size }; });
+  const want = await lib.sim(game, () => { const c = {}; let n = 0; for (const m of BF.mobs.list) if (!m.dead && !m.removed) { n++; const k = m.type === 'villager' ? (m.profession === 'merchant' ? 'merchant' : 'villager') : m.type; c[k] = (c[k] || 0) + 1; } return { n, c, chunks: BF.world.chunks.size }; });
   const got = await dbg.evaluate(() => { const d = BFMobMap.data(), c = {}; for (const m of d.mobs) { const k = d.kinds[m[0]]; c[k] = (c[k] || 0) + 1; } return { n: d.mobs.length, c, chunks: d.chunks.length / 2, legend: [...document.querySelectorAll('#m-legend .item')].map(e => e.textContent) }; });
   ok('every loaded mob is on the map once', got.n === want.n && JSON.stringify(Object.entries(got.c).sort()) === JSON.stringify(Object.entries(want.c).sort()), { want, got });
   ok('the legend lists each type with its count', Object.entries(want.c).every(([k, n]) => got.legend.some(t => t.toLowerCase().replace(/_/g, ' ').startsWith(k.replace(/_/g, ' ')) && t.endsWith(' ' + n))), got.legend);
@@ -89,13 +86,13 @@ const start = async () => {
   await dbg.click('#m-regions');
   await dbg.waitForTimeout(1500);
   const rg = await dbg.evaluate(() => { const d = BFMobMap.data(); return { on: document.getElementById('m-regions').classList.contains('on'), n: (d.regions || []).length, sum: (d.regions || []).reduce((a, r) => a + r[4], 0), w: d.regions && d.regions[0] && d.regions[0][2] - d.regions[0][0], size: d.region }; });
-  const idx = await game.evaluate(() => BF.regions.counts().mobs);
+  const idx = await lib.sim(game, () => BF.regions.counts().mobs);
   ok('the Regions button shades regions by mob count, and their counts add up to the indexed mobs', rg.on && rg.n > 0 && rg.sum === idx && rg.w === rg.size, { rg, idx });
   await dbg.locator('#mpanel').screenshot({ path: out + '-regions.png' });
   await dbg.click('#m-regions');
-  await game.evaluate(() => { BF.mobs.update = window.__upd; });
+  await lib.sim(game, () => { BF.mobs.update = globalThis.__upd; });
   await b.close();
-  srv.kill(); await new Promise(r => srv.exitCode !== null ? r() : srv.once('exit', r));
+  await srv.stop();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
 })();

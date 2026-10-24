@@ -50,7 +50,7 @@ for (const f of fs.readdirSync(__dirname).filter(f => f.endsWith('.js') && !NOT_
   const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
   const h = header(src);
   const t = listed.get(file);
-  if (t) { if (h) t.header = h; continue; }
+  if (t) { if (h) for (const u of tests) if (u.file === file) u.header = h; continue; }   // (every entry of the file: compare-view and compare-view-14d)
   // a module that exports a function is an action script for test/run.js; anything else runs on its own
   const kind = /module\.exports\s*=/.test(src) ? 'actions' : 'node';
   tests.push({ name: f.replace(/\.js$/, ''), file, kind, tier: h ? h.tier : 'integration', why: h && h.why, timeout: h && h.timeout, args: h && h.args, header: h, discovered: true });

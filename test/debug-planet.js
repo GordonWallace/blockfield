@@ -1,4 +1,4 @@
-// @ci integration suite=ui timeout=400 args={out}
+// @ci integration suite=ui timeout=400 args={out} hosts=worker,server
 // The debug screen on the planet (generator 4, spec r14-21). A village near a face edge is visited and logged, then the player stands just
 // across that edge on the next face, with a cow on each side of it:
 //  - the Position card shows face / u / v / y and latitude / longitude, never atlas x / z;
@@ -8,33 +8,56 @@
 //    distance and direction away as in the world, and both are drawn; the face edge is marked and the map's north arrow follows true north;
 //  - the Planet section's toggles (face tints, corner wedge, true sphere) reach the game, F3 + B / C / R flip them in the game and the
 //    screen follows, and F3 on its own still shows and hides the overlay.
+// BF_HOST=page|worker|server (spec r15-43): where the simulation runs; the village, the cows and the frozen mobs are there (lib.sim), the
+// player's body and the planet toggles are the page's.
 // Usage: NODE_PATH=$(npm root -g) node test/debug-planet.js [outPrefix]
-const path = require('path'), { spawn } = require('child_process');
+const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
+const lib = require('./lib');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug-planet';
-const GAME = 8730, DBG = 8731;
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-debug-planet-alerts.json')]);
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
+// the cows' cells (k blocks across the edge: c.x, c.z), cleared of cows and set, and the mobs held still, where the simulation is; once its
+// chunks there have loaded
+const cows = (pg, c) => lib.sim(pg, async c => {
+  const P = BF.planet, sp = c.sp;
+  for (let i = 0; i < 120 && ![c.a, c.b, sp].every(q => BF.world.isLoaded(q.x, q.z)); i++) await new Promise(r => setTimeout(r, 250));
+  const yAt = q => Math.max(BF.world.heightAt(q.x, q.z), BF.SEA) + 1;
+  if (globalThis.__upd) BF.mobs.update = globalThis.__upd;
+  BF.mobs.spawning = false;
+  for (const m of BF.mobs.list.slice()) if (m.type === 'cow' && P.distance(sp, m.position) < 80) BF.mobs.kill(m);
+  for (let i = 0; i < 10; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+  const cowA = BF.mobs.spawn('cow', c.a.x, yAt(c.a), c.a.z), cowB = BF.mobs.spawn('cow', c.b.x, yAt(c.b), c.b.z);
+  globalThis.__upd = BF.mobs.update; BF.mobs.update = () => {};   // hold everything still so the game and the screen can be compared
+  const pp = BF.player.position, F = P.face(pp.x, pp.z), q = P.inFrame(F, cowA.position.x, cowA.position.z, {});
+  return { F, fa: P.face(cowA.position.x, cowA.position.z), fb: P.face(cowB.position.x, cowB.position.z), sp,
+    a: [cowA.position.x, cowA.position.z], b: [cowB.position.x, cowB.position.z], aIn: [q.x, q.z], dA: P.distance(pp, cowA.position), dB: P.distance(pp, cowB.position) };
+}, c);
+// the player stands at sp (the page's body), flying, once the page has the chunks of the cells drawn; the simulation hears of it next
+const standAt = async (pg, cells) => {
+  await pg.evaluate(async cells => {
+    const sp = cells[cells.length - 1];
+    BF.player.teleport(sp.x, Math.max(BF.worldgen.heightAt(sp.x, sp.z), BF.SEA) + 30, sp.z); BF.player.setFlying(true);
+    for (let i = 0; i < 120; i++) { await new Promise(r => setTimeout(r, 250)); if (cells.every(c => { const ch = BF.world.chunkAt(c.x, c.z); return ch && ch.mesh !== undefined; })) break; }
+    BF.player.teleport(sp.x, Math.max(BF.world.heightAt(sp.x, sp.z), BF.SEA) + 1.01, sp.z); BF.player.setFlying(true);
+  }, cells);
+  await pg.waitForTimeout(800);
 };
 (async () => {
   const fails = [], ok = (n, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (extra !== undefined ? '  ' + JSON.stringify(extra) : '')); if (!c) fails.push(n); };
-  const srv = await start();
+  const srv = await lib.serve({ world: lib.host() === 'server' }), GAME = srv.game, DBG = srv.debug;
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const game = await b.newPage({ viewport: { width: 1280, height: 760 } });
   const errs = [];
   game.on('pageerror', e => { console.log('PAGEERROR game', e.message); errs.push(e.message); });
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  // no distant terrain (js/lod.js), as on the file:// test pages: without workers it stays off. Served over http it would draw seven
-  // rings in software rendering, which slows every frame of the game page to a crawl here
-  await game.addInitScript(() => { window.Worker = undefined; });
-  await game.goto(`http://localhost:${GAME}/?${require('./lib').q()}#seed1337gen4`);
+  // no distant terrain (?nolod, js/lod.js), as on the file:// test pages: served over http it would draw seven rings in software rendering,
+  // which slows every frame of the game page to a crawl here
+  await lib.install(game);   // (BFT.sim)
+  await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed1337gen4`);
   // a planet boot works out its rivers first (r14-10): wait for that loading step
   await game.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById('bf-loading'), null, { timeout: 120000 }).catch(() => {});
   await game.waitForTimeout(5000);
+  await lib.simReady(game);
   ok('a planet world, fed to the debug server', await game.evaluate(() => !!BF.planet && !!BF.debugFeed));
 
   // a village near an edge of face 4 (as test/planet-village-visit.js finds one), and the cells straight across its nearest edge
@@ -50,35 +73,21 @@ const start = async () => {
       const g = P.grid(q.x, q.z), side = [g.u, N - g.u, g.v, N - g.v].indexOf(dEdge(q)), hh = [[-1, 0], [1, 0], [0, -1], [0, 1]][side];
       // the cell k across the edge (k < 0: still on face 4), level with the village along it: a face-4 margin address, then canonical
       const across = k => { const o = hh[0] + hh[1] < 0 ? -1 - k : N + k, a2 = hh[0] ? P.atlas(4, o, Math.floor(g.v)) : P.atlas(4, Math.floor(g.u), o), c = P.canonCell(a2.x, a2.z); return { x: c.x + 0.5, z: c.z + 0.5, f: c.f }; };
-      window.__across = across;
-      return { x: q.x, z: q.z, name: q.name, dEdge: Math.round(dEdge(q)), side, g: P.EDGE[4][side].g, turn: P.EDGE[4][side].turn };
+      return { cells: { a: across(-6), b: across(4), sp: across(10) }, x: q.x, z: q.z, name: q.name, dEdge: Math.round(dEdge(q)), side, g: P.EDGE[4][side].g, turn: P.EDGE[4][side].turn };
     }
     return null;
   });
   ok('found a village near an edge of face 4', !!pick, pick);
-  if (!pick) { await b.close(); srv.kill(); process.exit(1); }
+  if (!pick) { await b.close(); await srv.stop(); process.exit(1); }
   await game.evaluate(t => { const v = BF.worldgen.villageAt(t.x, t.z); BF.player.spawn(t.x + 0.5, v.y + 3, t.z + 0.5); }, pick);
   let key = null;
-  for (let i = 0; i < 40 && !key; i++) { await game.waitForTimeout(1000); key = await game.evaluate(() => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); return r && r.members && r.members.length ? r.key : null; }); }
+  for (let i = 0; i < 40 && !key; i++) { await game.waitForTimeout(1000); key = await lib.sim(game, () => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); return r && r.members && r.members.length ? r.key : null; }); }
   ok('the village loads', !!key, key);
-  await game.evaluate(() => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(r, 'birth', 'Test baby was born'); });
+  await lib.sim(game, () => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(r, 'birth', 'Test baby was born'); });
 
   // across the edge: the player 10 blocks onto the next face, a cow 6 blocks back on face 4 and one 4 blocks onto the next face
-  const setup = await game.evaluate(async () => {
-    const P = BF.planet, A = window.__across, sp = A(10);
-    BF.player.teleport(sp.x, Math.max(BF.worldgen.heightAt(sp.x, sp.z), BF.SEA) + 30, sp.z); BF.player.setFlying(true);
-    for (let i = 0; i < 120; i++) { await new Promise(r => setTimeout(r, 250)); if ([-6, 4, 10].every(k => { const c = A(k), ch = BF.world.chunkAt(c.x, c.z); return ch && ch.mesh !== undefined; })) break; }
-    const yAt = c => Math.max(BF.world.heightAt(c.x, c.z), BF.SEA) + 1;
-    BF.player.teleport(sp.x, yAt(sp) + 0.01, sp.z); BF.player.setFlying(true);
-    BF.mobs.spawning = false;
-    for (const m of BF.mobs.list.slice()) if (m.type === 'cow' && P.distance(sp, m.position) < 80) BF.mobs.kill(m);
-    for (let i = 0; i < 10; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
-    const ca = A(-6), cb = A(4), cowA = BF.mobs.spawn('cow', ca.x, yAt(ca), ca.z), cowB = BF.mobs.spawn('cow', cb.x, yAt(cb), cb.z);
-    window.__upd = BF.mobs.update; BF.mobs.update = () => {};   // hold everything still so the game and the screen can be compared
-    const pp = BF.player.position, F = P.face(pp.x, pp.z), q = P.inFrame(F, cowA.position.x, cowA.position.z, {});
-    return { F, fa: P.face(cowA.position.x, cowA.position.z), fb: P.face(cowB.position.x, cowB.position.z), sp,
-      a: [cowA.position.x, cowA.position.z], b: [cowB.position.x, cowB.position.z], aIn: [q.x, q.z], dA: P.distance(pp, cowA.position), dB: P.distance(pp, cowB.position) };
-  });
+  await standAt(game, [pick.cells.a, pick.cells.b, pick.cells.sp]);
+  const setup = await cows(game, pick.cells);
   ok(`the player stands on face ${setup.F}, a cow on face ${setup.fa} and one on face ${setup.fb}`, setup.F === pick.g && setup.fa === 4 && setup.fb === pick.g, setup);
 
   const dbg = await b.newPage({ viewport: { width: 1600, height: 1400 } });
@@ -137,23 +146,14 @@ const start = async () => {
   await dbg.screenshot({ path: out + '-mobmap.png', fullPage: true });
 
   // the same across an edge that turns (face 0 to face 2, as in test/planet-edges-mobs.js): the far cow comes unfolded and turned with it
-  const t = await game.evaluate(async () => {
+  const cells = await game.evaluate(() => {
     const P = BF.planet, N = P.N, f = 0, s = 2, h = [[-1, 0], [1, 0], [0, -1], [0, 1]][s], e = P.EDGE[f][s];
     const at = k => { const o = h[0] + h[1] < 0 ? -1 - k : N + k, a = h[0] ? P.atlas(f, o, N / 2) : P.atlas(f, N / 2, o), c = P.canonCell(a.x, a.z); return { x: c.x + 0.5, z: c.z + 0.5, f: c.f }; };
-    BF.mobs.update = window.__upd;
-    const sp = at(10);
-    BF.player.teleport(sp.x, Math.max(BF.worldgen.heightAt(sp.x, sp.z), BF.SEA) + 30, sp.z);
-    for (let i = 0; i < 120; i++) { await new Promise(r => setTimeout(r, 250)); if ([-6, 4, 10].every(k => { const c = at(k), ch = BF.world.chunkAt(c.x, c.z); return ch && ch.mesh !== undefined; })) break; }
-    const yAt = c => Math.max(BF.world.heightAt(c.x, c.z), BF.SEA) + 1;
-    BF.player.teleport(sp.x, yAt(sp) + 0.01, sp.z);
-    for (const m of BF.mobs.list.slice()) if (m.type === 'cow' && P.distance(sp, m.position) < 80) BF.mobs.kill(m);
-    for (let i = 0; i < 10; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
-    const ca = at(-6), cb = at(4), a = BF.mobs.spawn('cow', ca.x, yAt(ca), ca.z), b = BF.mobs.spawn('cow', cb.x, yAt(cb), cb.z);
-    BF.mobs.update = () => {};
-    const pp = BF.player.position;
-    return { F: P.face(pp.x, pp.z), fa: P.face(a.position.x, a.position.z), turn: e.turn, g: e.g, a: [a.position.x, a.position.z], b: [b.position.x, b.position.z],
-      aIn: (q => [q.x, q.z])(P.inFrame(P.face(pp.x, pp.z), a.position.x, a.position.z, {})), dA: P.distance(pp, a.position) };
+    return { a: at(-6), b: at(4), sp: at(10), turn: e.turn, g: e.g };
   });
+  await lib.sim(game, () => { if (globalThis.__upd) BF.mobs.update = globalThis.__upd; });
+  await standAt(game, [cells.a, cells.b, cells.sp]);
+  const t = Object.assign(await cows(game, cells), { turn: cells.turn, g: cells.g });
   await dbg.click('#m-center');
   await dbg.waitForFunction(F => BFMobMap.data().face === F, t.F, { timeout: 10000 }).catch(() => {});
   await dbg.waitForTimeout(2500);
@@ -199,7 +199,7 @@ const start = async () => {
 
   ok('no page errors', !errs.length, errs.slice(0, 3));
   await b.close();
-  srv.kill(); await new Promise(r => srv.exitCode !== null ? r() : srv.once('exit', r));
+  await srv.stop();
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
 })();
