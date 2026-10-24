@@ -1,5 +1,6 @@
-// @ci integration suite=world timeout=300
-// Request queue and two-phase tick (spec r15-17): NODE_PATH=$(npm root -g) node test/run.js /tmp/rq test/requests.js
+// @ci integration suite=world timeout=300 hosts=worker,server
+// Request queue and two-phase tick (spec r15-17): NODE_PATH=$(npm root -g) node test/run.js /tmp/rq test/requests.js [--host page|worker|server]
+// (the queue and the tick are the simulation's: the checks run where it is, spec r15-43)
 // - two scripted villagers ask to mine the same block in the same tick: the lower id gets it, the other is refused, and the world has
 //   exactly one dropped item; requests apply in requester-id order whatever the order of BF.mobs.list;
 // - results arrive one tick later: not during the tick's think, before the next tick's think (then() and the kind's onResult);
@@ -12,7 +13,7 @@ module.exports = async (pg, out) => {
   const fails = [];
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
 
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {
     BF.state.paused = true;   // ticks by hand (BF.simStep), no frames' ticks in between
     const W = BF.world, R = BF.req, P = BF.player.position, step = () => BF.simStep(BF.warp.TICK);
     const res = {};

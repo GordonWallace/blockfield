@@ -226,9 +226,10 @@ function endReplay() {
 // The module is the first file on the stack that isn't the world or this file, skipping pass-through wrappers that other modules hang
 // on shared functions (W.setDoor in js/audio.js for door sounds, BF.mobs.update in js/bees.js): those are named W.x, BF.x.y or world.x.
 const MOD = /\/js\/([\w-]+)\.js/, WRAP = /^\s*at (?:W|BF|world)\.[\w.]+ \(/;
+// (code a test sent to run where the simulation is, BFT.sim: an eval frame, js/protocol.js eval query or js/simhost.js in the page, is "test")
 function moduleOf(stack) {
   const lines = String(stack || "").split("\n");
-  for (const l of lines) { const m = MOD.exec(l); if (m && m[1] !== "requests" && m[1] !== "world" && !WRAP.test(l)) return m[1]; }
+  for (const l of lines) { if (/\(eval at /.test(l)) return "test"; const m = MOD.exec(l); if (m && m[1] !== "requests" && m[1] !== "world" && !WRAP.test(l)) return m[1]; }
   for (const l of lines) { const m = MOD.exec(l); if (m && m[1] === "world") return "world"; }
   return /\/test\/|__puppeteer|playwright|<anonymous>/.test(stack) ? "test" : "other";
 }

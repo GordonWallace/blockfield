@@ -1,10 +1,12 @@
-// @ci integration suite=world timeout=600
+// @ci integration suite=world timeout=600 hosts=worker,server
 // Sky, weather and sound on the planet (generator 4, spec r14-20): the sun keeps 1.3's path at face 4's centre and its true heading
 // across a turned edge; clouds are one field over the planet, so the sky seen from a face's margin and from the next face match
 // (across an edge that turns and one that doesn't); the wind slides the clouds smoothly (a rebuild shows the cells the slide
 // predicted); rain stops at the same column tops on both sides of an edge; snow follows the climate band; lightning across an edge
 // reports its canonical column and hits what is there; sounds on the next face are heard beside the listener.
-// node test/run.js /tmp/ps test/planet-sky.js
+// node test/run.js /tmp/ps test/planet-sky.js [--host page|worker|server]. The sky is drawn in the page; the weather's rain, its lightning
+// and the pig it hits are the simulation's, checked where it is (spec r15-43).
+const lib = require('./lib');
 module.exports = async (pg) => {
   await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow
   let bad = 0;
@@ -31,9 +33,10 @@ module.exports = async (pg) => {
     // a fixed half-cloudy sky (cover otherwise drifts with game time)
     const ud = BF.sky.cloudMesh.userData, orig = ud.setCoverage;
     ud.setCoverage = () => orig(0.5);
-    BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative");
-    BF.mobs.spawning = false;
   });
+  await lib.newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => { BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative"); });
+  await lib.sim(pg, () => { BF.mobs.spawning = false; });
   await pg.evaluate(() => settle(3000));
 
   // ---- the sun at face 4's centre runs as in 1.3 (heading 0.35)
@@ -126,10 +129,15 @@ module.exports = async (pg) => {
   }
 
   // ---- rain stops at the same column tops on both sides of an edge; lightning there reports its canonical column
-  const edge = await pg.evaluate(async () => {
+  await pg.evaluate(async () => {
     const P = BF.planet, N = P.N, a = P.atlas(4, N - 3.5, N / 2 + 0.5);
     BF.player.teleport(a.x, 40, a.z); BF.player.setFlying(true);
     await settle();
+  });
+  // (where the simulation is: its chunks round the player loaded)
+  await lib.sim(pg, async () => { const p = BF.player.position; for (let i = 0; i < 120 && !(BF.world.isLoaded(p.x + 16, p.z) && BF.world.isLoaded(p.x - 16, p.z)); i++) await new Promise(r => setTimeout(r, 250)); });
+  const edge = await lib.sim(pg, async () => {
+    const P = BF.planet, N = P.N;
     BF.weather.set("rain"); BF.weather.intensity = 1;
     let same = 0, n = 0, wet = 0;
     for (let dz = -8; dz <= 8; dz += 2) for (let du = 1; du <= 12; du += 1) {
@@ -150,13 +158,16 @@ module.exports = async (pg) => {
     const out = { n, same, wet, sx: s.x, sz: s.z, cx: c.x + 0.5, cz: c.z + 0.5, face: P.face(s.x, s.z), g: P.EDGE[4][1].g, dist: s.dist,
       want: Math.hypot(Math.floor(m.x) + 0.5 - pp.x, dy, Math.floor(m.z) + 0.5 - pp.z), hit: pig.hp < hp };
     BF.mobs.hit(pig, 99, null);
-    // sounds: the canonical point across the edge is heard beside the listener (at its margin address)
+    BF.weather.set("clear"); BF.weather.intensity = 0;
+    return out;
+  });
+  // sounds (the page's): the canonical point across the edge is heard beside the listener (at its margin address)
+  edge.sound = await pg.evaluate(() => {
+    const P = BF.planet, N = P.N, m = P.atlas(4, N + 1.5, N / 2 + 0.5), c = P.canonCell(Math.floor(m.x), Math.floor(m.z), {});
     const L = BF.audio.listener, cam = BF.camera.position;
     L.x = cam.x; L.y = cam.y; L.z = cam.z;
     const r = BF.audio.relXZ(c.x + 0.5, c.z + 0.5);
-    out.sound = r ? Math.hypot(r[0] - Math.floor(m.x) - 0.5, r[1] - Math.floor(m.z) - 0.5) : -1;
-    BF.weather.set("clear"); BF.weather.intensity = 0;
-    return out;
+    return r ? Math.hypot(r[0] - Math.floor(m.x) - 0.5, r[1] - Math.floor(m.z) - 0.5) : -1;
   });
   check(edge.same === edge.n && edge.wet > 0, `rain across the edge: margin and canonical columns agree (${edge.same} of ${edge.n}, ${edge.wet} wet)`);
   check(edge.face === edge.g && edge.sx === edge.cx && edge.sz === edge.cz, `lightning across the edge reports the canonical column on face ${edge.face}`);

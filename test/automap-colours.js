@@ -1,4 +1,6 @@
-// Ground vs biome colours on the auto map and the toggle button: node test/run.js /tmp/ac test/automap-colours.js
+// @ci integration hosts=worker,server
+// Ground vs biome colours on the auto map and the toggle button: node test/run.js /tmp/ac test/automap-colours.js [--host page|worker|server]
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   // a big map on the planet takes a while to make and draw: wait until the view is up and its buttons take clicks
   const settled = () => pg.waitForFunction(() => { const v = BF.mapview._view, b = document.querySelector('[data-a="col"]'); if (!v || !v.d || !b) return false;
@@ -7,11 +9,16 @@ module.exports = async (pg, out) => {
   // is still held when the map opens, and the mouse clicks below never reach it
   await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await pg.waitForTimeout(500);
+  await pg.evaluate(() => { BF.player.gameMode = "creative"; });
+  await lib.give(pg, ['auto_map']);   // (the items are where the simulation is, spec r15-43)
   await pg.evaluate(() => {
-    BF.player.gameMode = "creative"; const inv = BF.inventory; inv.clear(); inv.add(BF.I.auto_map, 1); inv.select(0);
+    const inv = BF.inventory;
     BF.mapview.use(inv.selected(), BF.items[inv.selected().id]);
     document.querySelector('.bfm-in').value = "4096";
     document.querySelector('.bfm-wrap.open [data-a="ok"]').click();
+  });
+  await pg.waitForFunction(() => { const s = BF.inventory.selected(); return s && BF.items[s.id].auto; }, null, { timeout: 20000 });   // (made by a player request)
+  await pg.evaluate(() => {
     BF.mapview.finish(BF.mapview.dataOfItem(BF.items[BF.inventory.selected().id]));
     const s = BF.inventory.selected(); BF.mapview.use(s, BF.items[s.id]);
   });

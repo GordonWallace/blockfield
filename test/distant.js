@@ -1,4 +1,4 @@
-// @ci integration suite=world soak timeout=900
+// @ci integration suite=world soak timeout=900 hosts=worker,server
 // Distant terrain on the planet (spec r14-05): rings of height-field meshes out to the horizon, sampled by Web Workers. The page is
 // served over http here (workers can't start from a file:// page). Checks:
 //  - the workers sample (not the in-page fallback), all eight rings build, and their samples match the generator's own columns;

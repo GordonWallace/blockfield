@@ -1,4 +1,4 @@
-// @ci integration suite=world
+// @ci integration suite=world hosts=worker,server
 // Different number seeds give different worlds; seeds 1..4294967295 are unchanged (bug-021). (The check that a world saved with seed 0
 // before the fix keeps its terrain went with the flat generators, r14-24: only 1.3 and older worlds can have seed 0, and 1.4 opens none.)
 // NODE_PATH=$(npm root -g) node test/run.js /tmp/ns test/number-seeds.js

@@ -1,13 +1,16 @@
-// Day/night and monster spawn timing: NODE_PATH=$(npm root -g) node test/run.js /tmp/night test/night-spawn.js
+// @ci integration hosts=worker,server
+// Day/night and monster spawn timing: NODE_PATH=$(npm root -g) node test/run.js /tmp/night test/night-spawn.js [--host page|worker|server]
 // Day and night are equal halves, dusk/dawn darken and lighten gradually, monsters need half an in-game hour of darkness
-// (also after a torch is broken), and villagers are in bed before the first monsters can spawn.
+// (also after a torch is broken), and villagers are in bed before the first monsters can spawn. The clock, the mobs and the villagers are
+// the simulation's: the checks run where it is (spec r15-43).
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(4000);
   const fails = [];
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
 
-  const a = await pg.evaluate(() => {
+  const a = await lib.sim(pg, () => {
     const S = BF.sky, L = t => +S.lightAt(t).toFixed(3), H = S.HOUR, r = {};
     r.noon = L(0.25); r.beforeSunset = L(0.5 - 0.001); r.sunset = L(0.5); r.dusk1h = L(0.5 + H); r.full = L(0.5 + 1.5 * H); r.midnight = L(0.75);
     r.dawn = L(1 - H); r.sunrise = L(0.999);
@@ -31,7 +34,7 @@ module.exports = async (pg, out) => {
   check(a.nightHalf.join() === "false,true,true,false" && a.nightShare === 0.5, "night is exactly the half with the sun down");
   check(a.first > 0.56 && a.first < 0.59, "open-sky spawns from about 1.5-2 h after sunset (" + a.first + ")");
   check(a.last > 0.94 && a.last < 0.97 && !a.noonOK, "no new open-sky spawns from about 1 h before sunrise (" + a.last + ")");
-  const spread = await pg.evaluate(() => {   // over many cells, the first eligible time spreads over half an hour
+  const spread = await lib.sim(pg, () => {   // over many cells, the first eligible time spreads over half an hour
     const S = BF.sky, firsts = [];
     for (let k = 0; k < 40; k++) for (let t = 0.55; t < 0.62; t += 0.0005) { S.time = t; if (BF.mobs.darkLongEnough(k * 8 * 7 + 3, 5, 1)) { firsts.push(t); break; } }
     return [Math.min(...firsts), Math.max(...firsts)].map(v => +v.toFixed(4));
@@ -41,7 +44,7 @@ module.exports = async (pg, out) => {
   check(a.caveNoon, "deep cover still counts as dark at noon");
 
   // a torch broken at midnight: the spot waits half an hour
-  const b = await pg.evaluate(() => {
+  const b = await lib.sim(pg, () => {
     const S = BF.sky, W = BF.world, p = BF.player.position, x = Math.floor(p.x) + 3, z = Math.floor(p.z), y = W.heightAt(x, z) + 1, r = {};
     S.day = 5; S.time = 0.75;
     r.before = BF.mobs.darkLongEnough(x, z, 1);
@@ -62,7 +65,7 @@ module.exports = async (pg, out) => {
   check(b.timeSetBack, "setting the time back clears the wait");
 
   // live run in the open: no monster on the surface before the first spawn time
-  const c = await pg.evaluate(async () => {
+  const c = await lib.sim(pg, async () => {
     const S = BF.sky, M = BF.mobs, p = BF.player.position;
     for (const m of M.list.slice()) if (m.hostile) m.dead = true;
     const surf = () => M.list.filter(m => m.hostile && !m.dead && !m.removed && m.position.y >= BF.world.heightAt(m.position.x, m.position.z) + 0.5);
@@ -85,8 +88,8 @@ module.exports = async (pg, out) => {
   check(c.firstAt == null || c.firstAt >= 0.56, "no surface monster before the wait is over (first " + c.firstAt + ")");
 
   // villagers: in bed (or a tent) by the time monsters can start spawning
-  await require('./lib').toVillage(pg);
-  const d = await pg.evaluate(async () => {
+  await lib.toVillage(pg);
+  const d = await lib.sim(pg, async () => {
     const S = BF.sky, M = BF.mobs;
     M.spawning = false;
     for (const m of M.list.slice()) if (m.hostile) m.dead = true;

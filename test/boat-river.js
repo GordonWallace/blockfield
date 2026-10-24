@@ -1,9 +1,13 @@
 // Boats on a real river: finds a generated river (the planet's, spec r14-10) near the spawn, puts the player in a boat on it and rows 500 blocks
 // downstream with a simple autopilot (steer towards the heading with the longest run of water that doesn't rise). Checks the boat never
-// ends up inside a solid block or below the world, and that it gets the whole way. Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/br test/boat-river.js [seed]
+// ends up inside a solid block or below the world, and that it gets the whole way. Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/br test/boat-river.js
+// [--host page|worker|server] (SEED=n for another world). The run is the simulation's: it runs where the simulation is (spec r15-43).
+// @ci integration hosts=worker,server
 module.exports = async (pg, out) => {
   const seed = +(process.env.SEED || 270465807);
-  const res = await pg.evaluate(async seed => {
+  const lib = require('./lib');
+  await lib.alone(pg, true);   // (the run moves the player where the simulation is: the page's body stays out of it)
+  const res = await lib.sim(pg, async seed => {
     const R = { lines: [] }, ok = (name, cond, extra) => { const l = (cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""); R.lines.push(l); console.warn(l); };
     const tick = () => new Promise(r => setTimeout(r, 0));
     BF.state.paused = true;
@@ -88,6 +92,7 @@ module.exports = async (pg, out) => {
     R.start = start; R.drop = level(start.x, start.z) - level(b.pos.x, b.pos.z);
     return R;
   }, seed);
+  await lib.alone(pg, false);
   for (const l of res.lines) console.log(l);
   console.log("water level drop along the run:", res.drop);
   const fails = res.lines.filter(l => l.startsWith("FAIL")).length;

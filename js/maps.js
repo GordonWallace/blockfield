@@ -4,7 +4,8 @@
 // Bigger maps keep the centre of the zone and just cover more (a paper ring around a map makes the next size, used or not).
 // Filled maps are items named "filled_map_<size>_<zoneX>_<zoneZ>" (created on demand by BF.resolveItem, saved by name); all copies of one
 // size and zone share the explored pixels, which live in BF.maps (saved in the world file). A map only fills in while it is in the hand:
-// pixels near the player are sampled from the loaded world each frame. Held view: js/player.js asks heldTexture() for a canvas texture.
+// pixels near the player are sampled from the loaded world each frame, where the simulation runs (simFrame). Held view: js/player.js asks
+// heldTexture() for a canvas texture; with the simulation off the page, the page's copy of the pixels comes from it (js/mapview.js pull).
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -310,10 +311,17 @@ const api = {
     if (!it.map) return null;
     ensureView();
     const d = dataOfItem(it), p = BF.player.position;
-    if (BF.world) explore(d, p.x, p.z, BUDGET);
+    // (the simulation fills it in, simFrame; off the page its pixels come from there: js/mapview.js pull)
+    if (BF.world && BF.world.replica && BF.mapview && BF.mapview.pull) BF.mapview.pull(it);
     const sig = d.ver + "|" + p.x.toFixed(1) + "|" + p.z.toFixed(1) + "|" + BF.player.yaw.toFixed(2);
     if (sig !== last.sig || last.key !== d) { drawView(d); last.sig = sig; last.key = d; }
     return viewTex;
+  },
+  // Each real frame, wherever the simulation runs (js/main.js in the page, the worker's loop): the filled map in the player's hand fills
+  // in round the player
+  simFrame() {
+    const s = BF.inventory && BF.inventory.selected && BF.inventory.selected(), it = s && BF.items[s.id];
+    if (it && it.map && BF.world) { const p = BF.player.position; explore(dataOfItem(it), p.x, p.z, BUDGET); }
   },
   // Held view of a map whose pixels live elsewhere (js/mapview.js): `key` identifies the map, `ver` its content version, `src` the canvas.
   heldCanvas(key, ver, src, mx, mz) {

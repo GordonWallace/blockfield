@@ -1,10 +1,13 @@
-// Creative auto map + full-screen map view: node test/run.js /tmp/am test/automap-actions.js
+// @ci integration hosts=worker,server
+// Creative auto map + full-screen map view: node test/run.js /tmp/am test/automap-actions.js [--host page|worker|server]
 // Creates a 2000-block auto map through the width prompt, lets it generate, and screenshots the held view and full-screen views (auto + normal map).
+const lib = require('./lib');
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(500);
   console.log("gen", await pg.evaluate(() => BF.state.gen));
-  await pg.evaluate(() => { BF.player.gameMode = "creative"; const inv = BF.inventory; inv.clear(); inv.add(BF.I.auto_map, 1); inv.select(0); });
+  await pg.evaluate(() => { BF.player.gameMode = "creative"; });
+  await lib.give(pg, ['auto_map']);   // (the items are where the simulation is, spec r15-43)
   console.log("in creative list:", await pg.evaluate(() => BF.inventory.creativeItems ? 'n/a' : 'n/a'));
   // right click path: the player calls mapview.use
   console.log("prompt opened:", await pg.evaluate(() => { const s = BF.inventory.selected(); return BF.mapview.use(s, BF.items[s.id]); }), await pg.evaluate(() => BF.mapview.isOpen()));
@@ -12,6 +15,8 @@ module.exports = async (pg, out) => {
   console.log("hint:", await pg.evaluate(() => document.querySelector('.bfm-wrap.open .bfm-info').textContent));
   await pg.screenshot({ path: out + '-prompt.png' });
   await pg.keyboard.press('Enter');
+  // the map is made where the simulation is (a player request): wait for the page's hotbar to show it
+  await pg.waitForFunction(() => { const s = BF.inventory.selected(); return s && BF.items[s.id].auto; }, null, { timeout: 20000 });
   console.log("held:", await pg.evaluate(() => { const s = BF.inventory.selected(), it = BF.items[s.id]; return [it.name, it.label, JSON.stringify(it.auto), BF.mapview.isOpen()]; }));
   // generation timing: frame times while it runs
   const t = await pg.evaluate(async () => {
@@ -32,7 +37,10 @@ module.exports = async (pg, out) => {
   await pg.keyboard.press('Escape');
   console.log("closed:", await pg.evaluate(() => !BF.mapview.isOpen()));
   // normal map full screen
-  await pg.evaluate(() => { const inv = BF.inventory; inv.clear(); inv.add(BF.I.blank_map_2, 1); inv.select(0); BF.maps.use(inv.selected(), BF.items[inv.selected().id]); BF.player.position.set(BF.player.position.x + 30, BF.player.position.y, BF.player.position.z + 20); });
+  await lib.give(pg, ['blank_map_2']);
+  await lib.sim(pg, () => { const inv = BF.inventory; BF.maps.use(inv.selected(), BF.items[inv.selected().id]); BF.proto.flush(); });
+  await pg.waitForFunction(() => { const s = BF.inventory.selected(); return s && BF.items[s.id].map; }, null, { timeout: 20000 });
+  await pg.evaluate(() => BF.player.position.set(BF.player.position.x + 30, BF.player.position.y, BF.player.position.z + 20));
   await pg.waitForTimeout(1500);
   await pg.evaluate(() => { const s = BF.inventory.selected(); BF.mapview.use(s, BF.items[s.id]); });
   await pg.mouse.move(600, 360);

@@ -1,9 +1,12 @@
-// @ci baseline
+// @ci baseline hosts=worker,server
 // Boats (js/boats.js): recipes for every wood, placing on water, speeds on water, ice and land, no clipping into a wall at speed,
 // falling down a river step but not climbing one, mob passengers, getting out, breaking, and saving with the player and a mob aboard.
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/boats test/boats.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/boats test/boats.js [--host page|worker|server]
+// The checks drive the simulation's own modules: they run where the simulation is (spec r15-43), with the page's body held out of it.
+const lib = require('./lib');
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  await lib.alone(pg, true);
+  const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => { const l = (cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""); R.lines.push(l); console.warn(l); };
     const tick = () => new Promise(r => setTimeout(r, 10));
     const load = async (x, z) => {
@@ -184,6 +187,7 @@ module.exports = async (pg, out) => {
     R.counts = boats.counts();
     return R;
   });
+  await lib.alone(pg, false);
   for (const l of res.lines) console.log(l);
   console.log("boat counts (debug screen):", JSON.stringify(res.counts));
   const fails = res.lines.filter(l => l.startsWith("FAIL")).length;

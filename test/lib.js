@@ -28,6 +28,29 @@ exports.install = pg => pg.addInitScript({ path: require('path').join(__dirname,
 exports.host = () => { const h = process.env.BF_HOST || 'page'; if (!['page', 'worker', 'server'].includes(h)) throw new Error('BF_HOST must be page, worker or server, not ' + h); return h; };
 exports.q = () => 'sim=' + exports.host();
 exports.sim = (pg, fn, arg) => pg.evaluate(([src, a]) => BF.simHost.eval(src, a), [String(fn), arg === undefined ? null : arg]);   // (= BFT.sim; a page without test/bft.js too)
+// alone(pg, on): the page stops (on) or starts again (off) sending its player's body and speed to the simulation, for a test that drives
+// the player where the simulation is (its own world, a boat ride) and must not have the page's body put back every frame
+exports.alone = (pg, on) => pg.evaluate(on => {
+  const H = BF.simHost;
+  if (on && !H.heldFrame) { H.heldFrame = H.frame; H.frame = () => {}; } else if (!on && H.heldFrame) { H.frame = H.heldFrame; delete H.heldFrame; }
+}, !!on);
+// newWorld(pg, seed, opts): a new world (not saved) in the page and where the simulation is, as the title screen's world starts
+// (js/main.js boot): its rivers first, the page's copy, then the simulation's; waits until the simulation runs it
+exports.newWorld = async (pg, seed, opts) => {
+  await pg.evaluate(async ([seed, opts]) => {
+    await BF.prepareWorld(seed);
+    BF.newWorld(seed, opts);
+    if (BF.simHost.worker) { const r = await BF.simHost.demo(seed, opts); if (r && r.ok === false) throw new Error('the simulation could not start the world: ' + r.why); }
+  }, [seed, opts || {}]);
+  if (exports.host() !== 'page') await exports.sim(pg, async seed => { for (let i = 0; i < 600 && !(BF.state.seed === seed && BF.rand.tick > 20); i++) await new Promise(r => setTimeout(r, 100)); }, seed);
+};
+// give(pg, names, sel): the player's inventory emptied and filled with one of each item name, where the simulation is; the page selects
+// hotbar slot sel (the selected slot is the page's) and waits until its hotbar shows them
+exports.give = async (pg, names, sel = 0) => {
+  await exports.sim(pg, names => { const inv = BF.inventory; inv.clear(); for (const n of names) inv.add(BF.I[n], 1); BF.proto.flush(); }, names);
+  await pg.evaluate(sel => BF.inventory.select(sel), sel);
+  await pg.waitForFunction(n => BF.inventory.slots.filter(Boolean).length === n, names.length, { timeout: 20000 });
+};
 // serve(opts): debug/server.js on free ports, for a test served over http: {url (the game's index.html), debugUrl, game, debug, srv,
 // stop()}. The world server runs (with --test, so BFT.sim works there, and saves in a temp folder) unless opts.world is false;
 // opts.args adds arguments (e.g. ['--alerts', file]).

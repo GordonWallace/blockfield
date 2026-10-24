@@ -1,11 +1,12 @@
-// @ci integration suite=world
+// @ci integration suite=world hosts=worker,server
 // Upgrading a map again picks up what the smaller map explored since the last upgrade (bug-031): seeing the crafting
 // result used to merge the small map in once per session and never again.
-// Usage: node test/run.js /tmp/mua test/map-upgrade-again.js
+// Usage: node test/run.js /tmp/mua test/map-upgrade-again.js [--host page|worker|server]
+// (Maps and the player's items are simulation state: the checks run where the simulation is, spec r15-43.)
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(3000);
-  const res = await pg.evaluate(() => {
+  const res = await require('./lib').sim(pg, () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const I = BF.I, inv = BF.inventory, M = BF.maps;
     const P = BF.player.position, x0 = P.x, z0 = P.z;

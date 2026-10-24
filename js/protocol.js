@@ -545,12 +545,13 @@ function serve(send, opts) {
       try { p = Promise.resolve(opts.world(m.op, m.args || {})); } catch (e) { p = Promise.reject(e); }
       p.then(r => done(Object.assign({ ok: true }, r || {})), e => { glog("ERROR", "Could not " + m.op + " the world: " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n")); done({ ok: false, why: String(e && e.message || e) }); });
     },
-    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters)
+    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters) or its monster options in
+    // the pause menu (js/player.js; id null for a world that isn't saved)
     meta(m) {
       const cur = BF.save && BF.save.current;
-      if (!cur || (m.id && m.id !== cur.id)) return;
-      if (m.name != null) cur.name = m.name;
-      if (m.monsters) { cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
+      if (m.id ? !cur || m.id !== cur.id : cur) return;
+      if (m.name != null && cur) cur.name = m.name;
+      if (m.monsters) { if (cur) cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
     },
     // the client's own log entries (its errors): into this game log, which is the one saved
     clientLog(m) { if (BF.glog) for (const e of m.list || []) BF.glog.log(e.l, e.k, e.x, { at: e.p }); },
