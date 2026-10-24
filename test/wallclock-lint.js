@@ -15,6 +15,7 @@ const FILES = {
   "commands.js": "chat lines fading out",
   "cracks.js": "block-breaking crack animation",
   "debugfeed.js": "the debug screen feed",
+  "debugoverlay.js": "the F3 overlay's fps counter (spec r15-37 moved it out of main.js)",
   "gamelog.js": "log timestamps",
   "globe.js": "globe drawing stats",
   "grid.js": "distant terrain sampling (drawing only)",
@@ -32,6 +33,7 @@ const FILES = {
   "player.js": "input: Escape grace, touch taps, the player runs in real time",
   "save.js": "save metadata (last played, last saved)",
   "signs.js": "sign editor caret blink",
+  "villagepanel.js": "the F3 village panel's redraw (spec r15-37 moved it out of villagelog.js)",
   "statehash.js": "how long hashing the world took (debug screen)",
 };
 // Whole functions in files that also hold simulation code: [file, function, why]. The function is the nearest declaration above the line that
@@ -49,7 +51,6 @@ const FUNCS = [
 const LINES = [
   ["main.js", "const t0 = performance.now();\n      let f = 0;", "boot: the river solve runs in slices until done, before the game starts"],
   ["main.js", "while (f < 1 && performance.now() - t0 < 60)", "boot: the river solve slices (above)"],
-  ["main.js", "let frames = 0, fpsT = performance.now()", "fps counter"],
   ["main.js", "let last = performance.now();", "frame dt (the player and drawing)"],
   ["boot.js", "const W = BF.warp, plan = W.plan(raw), t0 = performance.now();", "ticks per frame within BUDGET_MS: how fast the game runs, not what happens"],
   ["boot.js", "const t0 = performance.now();\n  BF.world.setViewDist", "the headless boot's own timing, logged (r15-40)"],
@@ -60,7 +61,6 @@ const LINES = [
   ["mobs.js", "const t0 = performance.now(), a = findPathFast(", "BF.debug.pathCompare timing of findPath vs findPathOld (r15-05, debug only; the route returned doesn't depend on it)"],
   ["mobs.js", "const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0;", "villager AI ms for the debug screen only (the force-unload limit counts updates, aiWork)"],
   ["villagesim.js", "check(px, pz, realClock, performance.now() / 1000)", "re-check on real time only while the world doesn't step (0x, paused), or for a new pin before the next step"],
-  ["villagelog.js", "const t = performance.now();                  // wall clock", "village panel redraw"],
   ["weather.js", "const t0 = performance.now();\n    if (!inited) init();", "weather ms for the debug line"],
   ["weather.js", "if (!points) { weather.ms = weather.ms * 0.95 + (performance.now() - t0) * 0.05; return; }", "weather ms for the debug line, headless (nothing is drawn)"],
   ["weather.js", "const ms = performance.now() - t0;", "weather ms for the debug line"],

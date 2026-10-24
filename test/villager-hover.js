@@ -23,7 +23,7 @@ module.exports = async (pg, out) => {
   });
   const card = () => pg.evaluate(() => {
     const el = document.querySelector(".bfv-hover");
-    return el ? { shown: getComputedStyle(el).display !== "none", text: [...el.children].filter(c => c.style.display !== "none").map(c => c.textContent).join(" | "), mob: BF.villagerHover.shown() === window.__v } : null;
+    return el ? { shown: getComputedStyle(el).display !== "none", text: [...el.children].filter(c => c.style.display !== "none").map(c => c.textContent).join(" | "), mob: (s => !!s && s.n === BF.proto.numberOf(window.__v))(BF.villagerHover.shown()) } : null;   // (the card's mob is its entity in the client's mirror, r15-37)
   });
   // Aims at the villager until the card shows it, up to ~20 tries: on a slow runner the player can still be settling after the
   // teleport (lifted out of the ground a few frames later), which moves the eye after the look was set. Returns the last card.

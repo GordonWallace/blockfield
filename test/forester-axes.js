@@ -97,7 +97,7 @@ module.exports = async (pg, out) => {
       if (moved) {
         chop += dt;
         if (A.ai.swingT > lastSw) swings++;
-        if (A.held != null && !held) { BF.mobView.render(0); const v = BF.mobView.viewOf(A); if (v && v.heldMesh) held = { visible: v.heldMesh.visible, item: BF.items[v.heldId].name, parent: v.heldMesh.parent === v.meshes.arms }; }   // as drawn (js/mobview.js)
+        if (A.held != null && !held) { BF.proto.flush(true); BF.mobView.render(0); const v = BF.mobView.viewOf(A); if (v && v.heldMesh) held = { visible: v.heldMesh.visible, item: BF.items[v.heldId].name, parent: v.heldMesh.parent === v.meshes.arms }; }   // as drawn (js/mobview.js)
         if (opts && opts.stopAfter && chop >= opts.stopAfter && !stop) stop = { done: k.done, t };
       }
       lastSw = A.ai.swingT;
@@ -190,7 +190,7 @@ module.exports = async (pg, out) => {
     res.run2 = run();
     res.second = A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count);
     res.holds = F.axeOf(A) && BF.items[F.axeOf(A).id].name;
-    BF.mobView.render(0); const AV = BF.mobView.viewOf(A);
+    BF.proto.flush(true); BF.mobView.render(0); const AV = BF.mobView.viewOf(A);   // (the mirror first: r15-37)
     res.drawn = AV && AV.heldMesh && AV.heldMesh.visible && BF.items[AV.heldId].name;
     // nothing better on sale: no trip
     st.shopT = 0; st.thinkT = 0; (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());

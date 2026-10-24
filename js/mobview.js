@@ -1,17 +1,20 @@
-// Mob drawing (spec r15-11): the render layer for the mobs of js/mobs.js. A mob in BF.mobs.list is plain simulation data (position, vel,
-// yaw, head and walk angles, AI, inventory) plus a few plain fields saying how it looks, set by the simulation:
-//   look (model variant), scale / headScale (size), partVis (parts shown or hidden by name), tint ("red": hurt or dying), held (item id
-//   of a villager's tool), onFire, sleeping (with its bed), crackStage (iron golem), badgeLevel (villager level), dead / deathT.
+// Mob drawing (spec r15-11): the render layer for the mobs of js/mobs.js. Since r15-37 it draws from the client's mirror, not the
+// simulation: every mob in view is an entity of kind "mob" in BF.client.world.entities (js/protocol.js), with the hot fields x, y, z,
+// yaw, headYaw, headPitch, walkPhase, walkAmt, age, deathT, fuse, swingT and the cold ones saying how it looks:
+//   type, look (model variant), golem, scale / headScale (size), hw / h (half width, height), partVis (parts shown or hidden: a text of
+//   name + 1/0), tint ("red": hurt or dying), held (item id of a villager's tool), onFire, sleeping and bedF (its bed's facing),
+//   crackStage (iron golem), badgeLevel (villager level), aiming (a skeleton's bow), riding / rider (protocol numbers), dead.
 // Once per drawn frame render() builds, updates and removes a Three.js model for each mob from those fields: it owns the models and
 // their geometry, the animation (head look, limb swing, creeper swell and fuse flash, sleeping pose, eyelids, death roll), the light
 // colour, level badges, golem cracks, held tools and fire. A mob too far away to draw (past the meshed terrain) gets no model until it
 // comes near; one gone from the list loses its model on the next frame. The simulation never touches a scene object, so it can run
 // where there is no screen (a worker or a server, specs r15-38 / r15-40).
-// Drawn state: between the last two ticks of the fixed tick (r15-10), lerp(m.prev, m, BF.warp.alpha) of the position, yaw, head and
-// walk angles and age, where m.prev is the previous tick's; without them, the mob's own fields. A sleeping mob, a ridden one and one
-// that moved more than 4 blocks in a tick (a teleport) are drawn where they are; a rider is placed by its boat or horse every tick.
-// API: BF.mobView = { init(scene), render(dt), viewOf(mob) -> {root, model, meshes, ...} | undefined, drawPos(mob, out), typeParts(type,
-//   variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }
+// Drawn state: between the last two ticks of the fixed tick (r15-10), lerp(m.prev, m, k) of the position, yaw, head and walk angles and
+// age, where m.prev is the tick before and k = BF.client.world.k(m, BF.warp.alpha) (1 when it stood still in the latest tick, or at
+// fast-forward when several ticks went by). A sleeping mob, a ridden one and one that moved more than 4 blocks in a tick (a teleport) are
+// drawn where they are; a rider is placed by its boat or horse every tick.
+// API: BF.mobView = { init(scene), render(dt), viewOf(entity | protocol number | sim mob (tests)) -> {root, model, meshes, ...} | undefined,
+//   drawPos(entity, out), typeParts(type, variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -477,10 +480,10 @@ function typeParts(name, variant) {
 }
 // ---------- per-mob models ----------
 let scene = null, baseMat = null, fireMat = null, fireGeo = null, badgeGeo = null, lidGeo = null;
-const views = new Map();   // mob -> its view: {root, model, meshes, mat, look, lids, badge, badgeLv, heldMesh, heldId, fire, seen}
+const views = new Map();   // protocol number -> its view: {root, model, meshes, mat, look, lids, badge, badgeLv, heldMesh, heldId, fire, seen}
 let frameNo = 0;
 // the model variant a mob is drawn with: an iron golem's crack stage, else its look
-const lookOf = m => (m.def && m.def.golem ? (m.crackStage ? String(m.crackStage) : null) : m.look);
+const lookOf = m => (m.golem ? (m.crackStage ? String(m.crackStage) : null) : m.look);
 function buildMeshes(v, m) {
   for (const k in v.meshes) v.model.remove(v.meshes[k]);
   v.meshes = {}; v.lids = null; v.heldMesh = null; v.heldId = null;
@@ -510,15 +513,19 @@ function dropView(v) {
 
 // ---------- drawn state ----------
 const D = { x: 0, y: 0, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 0, age: 0 };
+let M = null;   // the client's mirror (BF.client.world) this frame
+const ent = n => (n != null && M ? M.entities.get(n) : null);
 function tickK(m) {
   const a = BF.warp && BF.warp.alpha, p = m.prev;
-  if (!p || typeof a !== "number" || a >= 1 || m.sleeping || m.rider || (m.riding && m.riding.rider)) return 1;
-  const dx = m.position.x - p.x, dy = m.position.y - p.y, dz = m.position.z - p.z;
-  return dx * dx + dy * dy + dz * dz > 16 ? 1 : Math.max(0, a);
+  if (!p || !M || typeof a !== "number" || a >= 1 || m.sleeping || m.rider != null) return 1;
+  const r = ent(m.riding);
+  if (r && r.rider != null) return 1;
+  const dx = m.x - p.x, dy = m.y - p.y, dz = m.z - p.z;
+  return dx * dx + dy * dy + dz * dz > 16 ? 1 : M.k(m, a);
 }
 const mix = (a, b, k) => (typeof a === "number" ? a + (b - a) * k : b);
 function drawState(m, out) {
-  const k = tickK(m), p = m.prev, P = m.position;
+  const k = tickK(m), p = m.prev, P = m;
   if (k >= 1) {
     out.x = P.x; out.y = P.y; out.z = P.z; out.yaw = m.yaw; out.headYaw = m.headYaw; out.headPitch = m.headPitch;
     out.walkPhase = m.walkPhase; out.walkAmt = m.walkAmt; out.age = m.age;
@@ -533,8 +540,10 @@ function drawState(m, out) {
   return out;
 }
 const _ds = Object.assign({}, D);
-// Where a mob is drawn this frame (labels over villagers, js/villagelog.js).
+// Where a mob is drawn this frame (labels over villagers, js/villagepanel.js; leads, js/entityview.js). m: its entity in the mirror.
 function drawPos(m, out) {
+  if (!M) M = BF.client && BF.client.world;
+  if (m && m.position && !m.kind) m = ent(BF.proto.numberOf(m)) || { x: m.position.x, y: m.position.y, z: m.position.z };   // a sim mob (tests)
   drawState(m, _ds);
   return (out || new THREE.Vector3()).set(_ds.x, _ds.y, _ds.z);
 }
@@ -613,19 +622,19 @@ function syncHeld(v, m) {
 
 // ---------- limbs ----------
 function animate(v, m, S) {
-  const amp = S.walkAmt, ph = S.walkPhase, ai = m.ai, meshes = v.meshes;
+  const amp = S.walkAmt, ph = S.walkPhase, swingT = m.swingT || 0, meshes = v.meshes;
   syncHeld(v, m);
   const sw = Math.sin(ph);
   for (const name in meshes) {
     const mesh = meshes[name], p = mesh.userData.part;
     if (p.head) { mesh.rotation.y = S.headYaw; mesh.rotation.x = -S.headPitch; }
-    else if (p.swing) mesh.rotation.x = m.riding && meshes.legL && !meshes.legFL ? -Math.PI / 2 : sw * 0.75 * amp * p.swing;   // sitting in a boat: two-legged mobs put their legs forward
-    else if (p.folded) mesh.rotation.x = ai.swingT > 0 ? -Math.sin(ai.swingT / 0.35 * Math.PI) * 0.85 : 0;   // builders swing the folded arms as they place a block
+    else if (p.swing) mesh.rotation.x = m.riding != null && meshes.legL && !meshes.legFL ? -Math.PI / 2 : sw * 0.75 * amp * p.swing;   // sitting in a boat: two-legged mobs put their legs forward
+    else if (p.folded) mesh.rotation.x = swingT > 0 ? -Math.sin(swingT / 0.35 * Math.PI) * 0.85 : 0;   // builders swing the folded arms as they place a block
     else if (p.arm) {
       if (m.type === "zombie") {
-        mesh.rotation.x = -Math.PI / 2 + Math.sin(S.age * 2 + p.arm) * 0.06 + (ai.swingT > 0 ? Math.sin(ai.swingT / 0.35 * Math.PI) * 0.7 : 0);
+        mesh.rotation.x = -Math.PI / 2 + Math.sin(S.age * 2 + p.arm) * 0.06 + (swingT > 0 ? Math.sin(swingT / 0.35 * Math.PI) * 0.7 : 0);
         mesh.rotation.z = Math.sin(S.age * 1.3 + p.arm) * 0.04;
-      } else if (ai.aiming) { // skeleton drawing the bow
+      } else if (m.aiming) { // skeleton drawing the bow
         mesh.rotation.x = -Math.PI / 2 - S.headPitch;
         mesh.rotation.y = p.arm > 0 ? 0.15 : 0.6;
       } else {
@@ -633,7 +642,7 @@ function animate(v, m, S) {
         mesh.rotation.y = 0;
       }
     } else if (p.golemArm) {
-      const lift = ai.swingT > 0 ? Math.sin(ai.swingT / 0.35 * Math.PI) * 1.6 : 0;
+      const lift = swingT > 0 ? Math.sin(swingT / 0.35 * Math.PI) * 1.6 : 0;
       mesh.rotation.x = -sw * 0.5 * amp * p.golemArm - lift;
       mesh.rotation.z = 0.06 * p.golemArm;
     } else if (p.wing) {
@@ -655,7 +664,7 @@ function updateFire(v, m, on, dt) {
     v.fire = new THREE.Group();
     for (let i = 0; i < 7; i++) {
       const f = new THREE.Mesh(fireGeo, fireMat);
-      f.position.set(rnd(-m.halfWidth, m.halfWidth), rnd(0, m.height), rnd(-m.halfWidth, m.halfWidth));
+      f.position.set(rnd(-m.hw, m.hw), rnd(0, m.h), rnd(-m.hw, m.hw));
       v.fire.add(f);
     }
     v.root.add(v.fire);
@@ -663,8 +672,8 @@ function updateFire(v, m, on, dt) {
   v.fire.visible = true;
   for (const f of v.fire.children) {
     f.position.y += dt * 1.5;
-    if (f.position.y > m.height + 0.15 || Math.random() < dt * 4) {   // visual
-      f.position.set(rnd(-m.halfWidth - 0.05, m.halfWidth + 0.05), rnd(0, m.height * 0.6), rnd(-m.halfWidth - 0.05, m.halfWidth + 0.05));
+    if (f.position.y > m.h + 0.15 || Math.random() < dt * 4) {   // visual
+      f.position.set(rnd(-m.hw - 0.05, m.hw + 0.05), rnd(0, m.h * 0.6), rnd(-m.hw - 0.05, m.hw + 0.05));
       f.scale.setScalar(rnd(0.6, 1.4));
     }
   }
@@ -677,21 +686,21 @@ function draw(v, m, dt) {
   const pos = drawState(m, S);
   v.root.position.set(pos.x, pos.y, pos.z);
   const r = v.model.rotation;
-  if (m.sleeping && m.bed && !m.dead) {   // lying flat on the bed, head on the pillow
-    const [fx, fz] = BF.DIRS[m.bed.f];
+  if (m.sleeping && m.bedF != null && !m.dead) {   // lying flat on the bed, head on the pillow
+    const [fx, fz] = BF.DIRS[m.bedF];
     r.order = "YXZ";
     r.set(-Math.PI / 2, Math.atan2(-fx, -fz), 0);
   } else {
     r.order = "XYZ";
     r.set(0, S.yaw, m.dead ? Math.min(1, m.deathT / 0.45) * Math.PI / 2 : 0);   // dying: it tips over
   }
-  const fuse = m.type === "creeper" && !m.dead ? m.ai.fuse : 0;
+  const fuse = m.type === "creeper" && !m.dead ? m.fuse : 0;
   if (m.type === "creeper") {   // swelling before it blows
     const f = Math.min(1, fuse / 1.5), s = 1 + f * 0.22 + (f > 0 ? Math.sin(fuse * 40) * 0.02 : 0);
     v.model.scale.set(s, 1 + f * 0.12, s);
   } else v.model.scale.setScalar(m.scale || 1);
   if (v.meshes.head) v.meshes.head.scale.setScalar(m.headScale || 1);
-  if (m.partVis) for (const k in m.partVis) if (v.meshes[k]) v.meshes[k].visible = m.partVis[k] !== false;
+  if (m.partVis) { const pv = partsOf(m.partVis); for (const k in pv) if (v.meshes[k]) v.meshes[k].visible = pv[k]; }
   if (m.type === "villager") eyelids(v, !!m.sleeping && !m.dead);
   if (!m.dead) animate(v, m, S);   // (a dying mob keeps the pose it died in)
   // colour: light, hurt and death flash, creeper fuse
@@ -705,11 +714,24 @@ function draw(v, m, dt) {
   updateFire(v, m, !!m.onFire && !m.dead, dt);
 }
 
+// partVis as the protocol sends it ("saddle1chest0": a part's name, then 1 shown or 0 hidden) -> {saddle: true, chest: false}
+const pvCache = new Map();
+function partsOf(t) {
+  let o = pvCache.get(t);
+  if (!o) {
+    o = {};
+    for (const [, k, on] of t.matchAll(/([^01]+)([01])/g)) o[k] = on === "1";
+    if (pvCache.size > 200) pvCache.clear();
+    pvCache.set(t, o);
+  }
+  return o;
+}
+
 // Mob positions are kept in frames on the planet (js/mobs.js keepFrame): the player's position seen from the mob's frame.
-const LQ = {}, _q = new THREE.Vector3();
+const LQ = {}, _q = new THREE.Vector3(), _mp = new THREE.Vector3();
 function playerDist(m, pp) {
-  BF.planet.local(m.position, pp, LQ);
-  return _q.set(LQ.x, pp.y, LQ.z).distanceTo(m.position);
+  BF.planet.local(_mp.set(m.x, m.y, m.z), pp, LQ);
+  return _q.set(LQ.x, pp.y, LQ.z).distanceTo(_mp);
 }
 
 // A model that could not be drawn: logged once per mob type (the game log, js/gamelog.js); the mob itself plays on.
@@ -718,7 +740,7 @@ function drawFailed(m, e) {
   console.error(e);
   if (failed.has(m.type)) return;
   failed.add(m.type);
-  if (BF.glog) BF.glog.log("ERROR", "mobs", "Could not draw a " + String(m.type).replace(/_/g, " ") + " (" + (e && e.message ? e.message : e) + "); it may look wrong until the game is reloaded", { at: m });
+  if (BF.glog) BF.glog.log("ERROR", "mobs", "Could not draw a " + String(m.type).replace(/_/g, " ") + " (" + (e && e.message ? e.message : e) + "); it may look wrong until the game is reloaded", { at: [Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)] });
 }
 
 BF.mobView = {
@@ -733,23 +755,24 @@ BF.mobView = {
   },
   // Once per drawn frame (js/main.js), after the simulation steps; dt = game seconds the frame covered (0 when paused or frozen), for the fire.
   render(dt) {
-    if (!scene || !BF.mobs) return;
+    M = BF.client && BF.client.world;
+    if (!scene || !M) return;
     frameNo++;
     const pp = BF.player && BF.player.position, far = (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
-    for (const m of BF.mobs.list) {
-      if (m.removed) continue;
-      let v = views.get(m);
+    for (const m of M.entities.values()) {
+      if (m.kind !== "mob") continue;
+      let v = views.get(m.n);
       if (pp && playerDist(m, pp) > far) { if (v) { v.root.visible = false; v.seen = frameNo; } continue; }
-      if (!v) { v = createView(m); views.set(m, v); }
+      if (!v) { v = createView(m); views.set(m.n, v); }
       v.seen = frameNo;
       v.root.visible = true;
       try { draw(v, m, dt || 0); } catch (e) { drawFailed(m, e); }
     }
-    for (const [m, v] of views) if (v.seen !== frameNo) { dropView(v); views.delete(m); }   // removed, or gone from the list
+    for (const [n, v] of views) if (v.seen !== frameNo) { dropView(v); views.delete(n); }   // removed, or gone from the mirror
     const sl = Math.max(0.15, skyLight());
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(sl);
   },
-  viewOf: m => views.get(m),
+  viewOf: m => views.get(typeof m === "number" ? m : m && m.kind ? m.n : m && BF.proto ? BF.proto.numberOf(m) : null),
   count: () => views.size,
 };
 })();
