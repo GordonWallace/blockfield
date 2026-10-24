@@ -105,7 +105,12 @@ const playerFeed = () => {
 
 // ---------------------------------------------------------------- breeding (js/herd.js does the walking and the crowding rule)
 const findMate = (m, t) => H().findMate(m, t, willing, o => o.sty || null, MATE_R);
+// In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
+// when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+}
+function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const young = BF.mobs.spawn("pig", x, y, z);
   if (!young) return null;
@@ -484,13 +489,14 @@ function perform(m, tk) {
   }
   // cull: the pig farmer keeps the pig's drops (1-3 raw porkchops) to sell or cook
   const herdP = o.sty;
-  BF.mobs.hurt(o, 999, "a pig farmer");
-  const pork = loot(m, I("raw_porkchop"), rndInt(RS(m), 1, 3), o);
-  if (herdP) herdP.culls = (herdP.culls | 0) + 1;
-  const T2 = tended(m);
-  log("culled", { pork, herd: T2.size, limit: T2.limit });
-  vlog(m, "culled a pig (" + T2.size + " left, the sty holds " + T2.limit + "): " + pork + " raw porkchop" + (pork === 1 ? "" : "s"));
-  if (BF.emit) BF.emit("pigCulled", o, m, pork);
+  BF.mobs.cull(o, "a pig farmer", m, () => {   // its loot once the kill has applied (a request in the think phase, r15-23)
+    const pork = loot(m, I("raw_porkchop"), rndInt(RS(m), 1, 3), o);
+    if (herdP) herdP.culls = (herdP.culls | 0) + 1;
+    const T2 = tended(m);
+    log("culled", { pork, herd: T2.size, limit: T2.limit });
+    vlog(m, "culled a pig (" + T2.size + " left, the sty holds " + T2.limit + "): " + pork + " raw porkchop" + (pork === 1 ? "" : "s"));
+    if (BF.emit) BF.emit("pigCulled", o, m, pork);
+  });
   return true;
 }
 const ACT = { feed: 0.7, cull: 0.8 };

@@ -161,7 +161,12 @@ function feed(m, itemName, by) {
   return used;
 }
 const willing = (r, t) => (r.tamed || !r.owner) && !isFoal(r) && r.fed != null && t - r.fed < FEED_DAYS && t >= r.cd;   // wild ones are made willing by wild breeding (js/wildlife.js)
+// In the think phase the birth is a "spawn" request from a (r15-23); both must still be willing when it applies. Returns the foal when born at once.
 function breed(a, b) {
+  const t = now();
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b), () => live(a) && live(b) && a.horse && b.horse && willing(a.horse, t) && willing(b.horse, t));
+}
+function breedNow(a, b) {
   const ra = a.horse, rb = b.horse, t = now();
   const r = R(a), st = foalStats(ra, rb, r);
   const pick = (x, y) => (r.next() < 0.45 ? x : r.next() < 0.82 ? y : null);
