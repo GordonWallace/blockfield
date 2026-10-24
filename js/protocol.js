@@ -554,7 +554,9 @@ function serve(send, opts) {
     player: playerIn,
     // start a world (the host's handler: create, load or the title screen's world), answered with a result when it's ready
     world(m) {
-      const done = r => out({ t: "result", wid: m.wid, result: r });
+      // (replica: the new world's player, its spawn or saved spot, arrives before the answer: a teleport the client makes once it has the
+      // answer is not then undone by a self message from before it)
+      const done = r => { flushSelf(); out({ t: "result", wid: m.wid, result: r }); };
       if (!opts.world) { done({ ok: false, why: "no worlds here" }); return; }
       let p;
       try { p = Promise.resolve(opts.world(m.op, m.args || {})); } catch (e) { p = Promise.reject(e); }
