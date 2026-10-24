@@ -1,4 +1,4 @@
-// @ci integration suite=village,farming soak timeout=900
+// @ci integration suite=village,farming soak timeout=900 hosts=worker,server
 // Builders' food jobsites, farmers' dirt and grass spreading (idea-044): node test/run.js /tmp/fj test/food-jobsites.js
 // 1. The food jobsite roll (builder.js chooseFood): with no animals near it builds a vegetable farm, with 2 wild cows within 80 blocks a
 //    pasture can be picked too, with no materials anywhere nothing passes. The stable needs 2 wild horses within 80 blocks.
@@ -6,7 +6,9 @@
 // 3. A farmer with dirt beyond its keep offers it at 16 per emerald; with none for sale a builder short of dirt digs its own.
 // 4. Exposed dirt beside grass turns green within a few days; dirt under a block does not.
 module.exports = async (pg) => {
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.simBFT(pg);
+  const res = await lib.sim(pg, () => {
     const out = { fails: [], notes: [] }, ok = (c, msg, d) => { if (!c) out.fails.push(msg + (d !== undefined ? " " + JSON.stringify(d) : "")); else out.notes.push("ok " + msg); };
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     BF.state.paused = true;
@@ -144,7 +146,7 @@ module.exports = async (pg) => {
   for (const n of res.notes || []) console.log(n);
   const fails = (res.fails || []).slice();
   // ---- 4. grass
-  const g = await pg.evaluate(() => {
+  const g = await lib.sim(pg, () => {
     const W = BF.world, B = BF.B, p = BF.player.position, x0 = Math.floor(p.x) + 6, z0 = Math.floor(p.z) + 6;
     let y = W.heightAt(x0, z0);
     // a 5x5 grass pad at the surface, its middle row dug to dirt; one cell covered by a plank

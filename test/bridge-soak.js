@@ -1,4 +1,4 @@
-// @ci skip suite=village
+// @ci skip suite=village hosts=worker,server
 // Bridge soak (idea-030): does a generated village by a river ever get a bridge, and do its villagers walk over it?
 // Usage: NODE_PATH=$(npm root -g) node test/bridge-soak.js [seed=123] [days=6] [out.json]   Env: SCAN=1 only lists villages near rivers;
 //   FORCE=1 starts with 30 crossings at that river crossing, so a bridge is offered at once and the soak shows whether villagers then use it.
@@ -8,6 +8,7 @@
 // finished deck (a villager whose feet are on a deck cell, sampled every 2.5 s of game time).
 const path = require('path');
 const fs = require('fs');
+const lib = require('./lib');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
 const SEED = +(process.argv[2] || 123);   // seed 123: on the planets of seeds 1 and 1337 none of the 10 villages nearest the spawn has a river crossing
@@ -23,12 +24,21 @@ const OUT = process.argv[4] || null;
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.addInitScript(f => { window.__FORCE = f; }, !!process.env.FORCE);
-  await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
-  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
+  await lib.install(pg);
+  const srv = lib.host() === 'page' ? null : await lib.serve({ world: lib.host() === 'server' });
+  await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await lib.ready(pg);   // the planet (spec r14-22): its river step first
+  if (srv) await lib.simReady(pg);
+  // the page's player in creative (the simulation's follows with the next player message), then only the soak's steps move the world:
+  // the page's frames held and, off the page, the simulation's own ticks stopped; test/bft.js's helpers there too
+  await pg.evaluate(() => { if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
+  await pg.waitForTimeout(600);
+  await pg.evaluate(() => { window.__halt = true; });
+  if (srv) await lib.sim(pg, () => { BF.state.paused = true; });
+  await lib.simBFT(pg);
+  await lib.sim(pg, o => { Object.assign(globalThis, o); }, await pg.evaluate(() => ({ __FORCE: window.__FORCE })));   // (the init script's setting is the page's)
   await pg.waitForTimeout(3000);
-  const setup = await pg.evaluate(scanOnly => {
-    window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
+  const setup = await lib.sim(pg, scanOnly => {
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const cands = BFT.villages(3000).filter(v => v && v.pop).slice(0, 10);
     const seen = [];
@@ -49,19 +59,19 @@ const OUT = process.argv[4] || null;
     BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
     for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
     BF.sky.setTime(0.02);
-    const R = window.__rec = { key, swims: 0, routed: 0, visits: 0, visitors: {}, days: [] };
+    const R = globalThis.__rec = { key, swims: 0, routed: 0, visits: 0, visitors: {}, days: [] };
     const Br = BF.bridges, swim0 = Br.noteSwim, rec0 = Br.record;
     Br.noteSwim = function (m) { const t = m._swT, r = swim0.apply(this, arguments); if (m._swT !== t && m.village && m.village.key === key) R.swims++; return r; };   // swims as counted (one every few seconds per villager)
     // FORCE=1: 30 crossings at the river crossing found near the village, as if villagers had been crossing there, so the builder is offered the bridge
-    if (window.__FORCE && setupSpan) {
+    if (globalThis.__FORCE && setupSpan) {
       const sp = setupSpan, mx = sp.axis === 'x' ? (sp.a + sp.b) >> 1 : sp.f, mz = sp.axis === 'x' ? sp.f : (sp.a + sp.b) >> 1;
       for (let i = 0; i < 30; i++) { BF.sky.setTime(0.02 + i * 0.002); rec0(mx, mz, BF.mobs.villages.get(key)); }
       BF.sky.setTime(0.08); R.forced = [mx, mz];
     }
     // FORCE: the crossings are topped up every day; if no builder has started the bridge after 2 days, the harness hands one the materials
     // and starts it (so the rest of the soak still shows whether villagers use it), and says so.
-    window.__force = () => {
-      if (!window.__FORCE || !R.forced) return;
+    globalThis.__force = () => {
+      if (!globalThis.__FORCE || !R.forced) return;
       const rec = BF.mobs.villages.get(key);
       for (let i = 0; i < 30; i++) rec0(R.forced[0] + (i % 3) * 3 - 3, R.forced[1], rec);
       const br = BF.builder.builtOf(rec).filter(e => e.type === 'bridge');
@@ -76,7 +86,7 @@ const OUT = process.argv[4] || null;
       R.handed = e ? 'materials handed to a builder on day ' + BF.sky.day + ', bridge started' : 'beginPlan refused';
       if (e) BF.builder.startBuild(bm, bm.bs, e, true);
     };
-    window.__sample = () => {
+    globalThis.__sample = () => {
       const rec = BF.mobs.villages.get(key);
       for (const e of BF.builder.builtOf(rec)) if (e.type === 'bridge' && e.state === 'done') {
         const cells = new Set(Br.deck(e).map(c => c.join(',')));
@@ -86,7 +96,7 @@ const OUT = process.argv[4] || null;
         }
       }
     };
-    window.__day = () => {
+    globalThis.__day = () => {
       const rec = BF.mobs.villages.get(key), heat = Br.heat(rec);
       const kinds = {};
       for (const e of BF.builder.log.splice(0)) { const t = e.kind + (e.type ? ':' + e.type : ''); kinds[t] = (kinds[t] || 0) + 1; }
@@ -95,36 +105,36 @@ const OUT = process.argv[4] || null;
         weight: +Br.weight(rec).toFixed(2), bridges: br.map(e => e.state + ' ' + (e.prog || 0) + '/' + e.n), swims: R.swims, visits: R.visits,
         building: BF.builder.builtOf(rec).filter(e => e.state === 'building').map(e => e.type), log: kinds, handed: R.handed || null,
         builders: BF.mobs.list.filter(m => m.type === 'villager' && m.profession === 'builder' && !m.dead && m.village && m.village.key === key).map(m => BF.builder.statusText(m)) });
-      window.__force();
+      globalThis.__force();
     };
     const profs = {};
     for (const m of BF.mobs.list) if (m.type === 'villager' && m.village && m.village.key === key && !m.dead) profs[m.profession] = (profs[m.profession] || 0) + 1;
     return { key, v, profs, seen };
   }, !!process.env.SCAN);
   console.log(`seed ${SEED}`); for (const s of setup.seen) console.log('  ' + JSON.stringify(s));
-  if (process.env.SCAN || !setup.v) { console.log(setup.v ? '' : 'no village with a builder near a river'); await b.close(); process.exit(0); }
+  if (process.env.SCAN || !setup.v) { console.log(setup.v ? '' : 'no village with a builder near a river'); await b.close(); if (srv) await srv.stop(); process.exit(0); }
   console.log(`village ${setup.key} ${JSON.stringify(setup.profs)}`);
   const t0 = Date.now();
-  await pg.evaluate(() => window.__day());
+  await lib.sim(pg, () => globalThis.__day());
   const h = 0.05, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
   for (let s = 0, d = 0; s < DAYS * DAY; s += PER_CALL) {
-    await pg.evaluate(([n, h, v]) => {
+    await lib.sim(pg, ([n, h, v]) => {
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
-        if (i % 50 === 0) { BF.world.update(v.x, v.z, 4); window.__sample(); }
+        if (i % 50 === 0) { BF.world.update(v.x, v.z, 4); globalThis.__sample(); }
       }
     }, [Math.min(PER_CALL, DAYS * DAY - s), h, setup.v]);
     if (Math.floor((s + PER_CALL) / DAY) > d) {
-      d = Math.floor((s + PER_CALL) / DAY); await pg.evaluate(() => window.__day());
-      const x = await pg.evaluate(() => window.__rec.days.at(-1));
+      d = Math.floor((s + PER_CALL) / DAY); await lib.sim(pg, () => globalThis.__day());
+      const x = await lib.sim(pg, () => globalThis.__rec.days.at(-1));
       console.log(`day ${String(x.day).padStart(3)}  crossings ${x.crossings} (busiest cell ${x.busiest}, ${x.cells} cells)  weight ${x.weight}  bridges [${x.bridges.join(', ')}]  building [${x.building.join(', ')}]  swims ${x.swims}  deck visits ${x.visits}  (${Math.round((Date.now() - t0) / 1000)} s)\n     builder log ${JSON.stringify(x.log)}  builders ${JSON.stringify(x.builders)}${x.handed ? '  harness: ' + x.handed : ''}`);
     }
   }
-  const R = await pg.evaluate(() => window.__rec);
+  const R = await lib.sim(pg, () => globalThis.__rec);
   const sum = { seed: SEED, village: R.key, days: DAYS, swims: R.swims, visits: R.visits, visitors: R.visitors, last: R.days.at(-1), seconds: Math.round((Date.now() - t0) / 1000) };
   console.log(JSON.stringify(sum, null, 1));
   if (OUT) fs.writeFileSync(OUT, JSON.stringify({ sum, days: R.days }, null, 1));
   if (pageErrors) console.log('FAIL page errors: ' + pageErrors);
-  await b.close();
+  await b.close(); if (srv) await srv.stop();
   process.exit(pageErrors ? 1 : 0);
 })();
