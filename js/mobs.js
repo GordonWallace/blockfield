@@ -2803,7 +2803,6 @@ BF.mobs = {
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
   isOccupied,
-  atDoor,
   nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan },
   spawning: true,
   // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it

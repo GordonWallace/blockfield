@@ -9,8 +9,8 @@
 //              "blockPlaced" for each cell set to a block (actor: the villager the village log names). Result {ok, was: [ids], got: [{id, n}]}.
 //   door       target "x,y,z" (either half of a door, or a fence gate), data {open}. Already in that state: ok. Two requesters setting one
 //              door in the same tick: the first in requester order (the lower id) wins, a later one that wants the other state is
-//              refused ("contended"), one that wants the same state succeeds. Shutting a door or gate someone stands in or by is refused
-//              ("occupied"; js/mobs.js villagerDoors tries again).
+//              refused ("contended"), one that wants the same state succeeds. Shutting a door or gate someone stands in is refused
+//              ("occupied"; the villager or herder tries again).
 //   doorBreak  target "x,y,z" (the lower half), data {expect: door id}: a zombie breaks a closed door; both halves go, one door drops. The
 //              break progress stays on the zombie (ai.doorT, js/mobs.js); a door opened, closed by someone else or gone is refused.
 // Game log: a WARN "requests" line when a villager loses a contended door to a lower id (at most one a game hour, as it can be frequent).
@@ -81,9 +81,9 @@ R.on("door", (req, w) => {
     return { ok: false, why: "contended" };
   }
   if (!!d.open === open) { doorSet.set(k, open); return { ok: true, same: true }; }
-  // shutting a door someone stands in or by (positions are where every mob ended its think, spec r15-33): refused, the requester tries again
+  // shutting a door someone stands in (positions are where every mob ended its think, spec r15-33): refused, the requester tries again
   const ly = b.door && b.door.upper ? y - 1 : y;
-  if (!open && BF.mobs && BF.mobs.atDoor && BF.mobs.atDoor(x, ly, z, owner(req))) return { ok: false, why: "occupied" };
+  if (!open && BF.mobs && BF.mobs.isOccupied && BF.mobs.isOccupied(x, ly, z)) return { ok: false, why: "occupied" };
   doorSet.set(k, open);
   if (b.gate) w.setGate(x, y, z, open); else w.setDoor(x, y, z, open);
   return { ok: true };
