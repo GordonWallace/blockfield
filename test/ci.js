@@ -12,6 +12,14 @@
 // Writes <outDir>/<name>.log (+ screenshots) and a markdown table to $GITHUB_STEP_SUMMARY when set.
 const fs = require('fs'), path = require('path'), cp = require('child_process');
 const root = path.resolve(__dirname, '..');
+// --host page|worker|server (or CI_HOST; spec r15-43): where the tests run the game's simulation. Every test runs with page (index.html as
+// a file, the simulation in the page). worker and server run only the tests whose // @ci header lists that host (hosts=worker,server):
+// those are served over http (test/run.js, test/lib.js serve) and read the simulation through BFT.sim; the rest are listed as page-only
+// in the summary, or, with --others page (CI_OTHERS=page: the baseline workflow), run on page. CI_HOST_ALL=1 runs every test on the
+// host anyway (to find what breaks there).
+for (const [flag, env] of [['--host', 'CI_HOST'], ['--others', 'CI_OTHERS']]) { const i = process.argv.indexOf(flag); if (i >= 0) { process.env[env] = process.argv[i + 1]; process.argv.splice(i, 2); } }
+const HOST = process.env.CI_HOST || 'page';
+if (!['page', 'worker', 'server'].includes(HOST)) { console.log('FAIL --host must be page, worker or server, not ' + HOST); process.exit(1); }
 const tier = process.argv[2] || 'baseline';
 const outDir = path.resolve(process.argv[3] || 'ci-out');
 const only = process.argv.slice(4);
@@ -19,15 +27,15 @@ const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci.json'), 'ut
 const NOT_TESTS = new Set(['run.js', 'lib.js', 'ci.js', 'bft.js']);
 
 // A test file can carry its own settings in a header line, so adding a test needs no edit to the shared ci.json (parallel PRs
-// kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>[,<name>...]] [soak] [timeout=<s>] [args=<a,b,...>] [reason]`,
+// kept conflicting there): `// @ci <baseline|integration|skip> [suite=<name>[,<name>...]] [soak] [timeout=<s>] [args=<a,b,...>] [hosts=worker,server] [reason]`,
 // e.g. `// @ci integration suite=farming timeout=600`; a test in several suites (suite=farming,village) runs with any of them. For a test listed in ci.json, ci.json wins where both say something.
 const header = src => {
   const m = /^\/\/ @ci (baseline|integration|skip)\b(.*)$/m.exec(src);
   if (!m) return null;
   const h = { tier: m[1] }, rest = [];
   for (const w of m[2].trim().split(/\s+/).filter(Boolean)) {
-    const kv = /^(suite|timeout|args)=(.+)$/.exec(w);
-    if (kv) h[kv[1]] = kv[1] === 'timeout' ? +kv[2] : kv[1] === 'args' ? kv[2].split(',') : kv[2];
+    const kv = /^(suite|timeout|args|hosts)=(.+)$/.exec(w);
+    if (kv) h[kv[1]] = kv[1] === 'timeout' ? +kv[2] : kv[1] === 'args' || kv[1] === 'hosts' ? kv[2].split(',') : kv[2];
     else if (w === 'soak') h.soak = true;
     else rest.push(w);
   }
@@ -48,6 +56,10 @@ for (const f of fs.readdirSync(__dirname).filter(f => f.endsWith('.js') && !NOT_
   tests.push({ name: f.replace(/\.js$/, ''), file, kind, tier: h ? h.tier : 'integration', why: h && h.why, timeout: h && h.timeout, args: h && h.args, header: h, discovered: true });
 }
 for (const t of tests) if (!fs.existsSync(path.join(root, t.file))) t.missing = true;
+// the hosts each test runs on: page always, plus its header's hosts= (spec r15-43)
+for (const t of tests) t.hosts = ['page', ...((t.header && t.header.hosts) || []).filter(h => h !== 'page')];
+const badHost = tests.filter(t => t.hosts.some(h => !['page', 'worker', 'server'].includes(h)));
+if (badHost.length) { console.log(`FAIL unknown host in a // @ci header's hosts=: ${badHost.map(t => t.name + ' (hosts=' + t.hosts.slice(1).join(',') + ')').join(', ')}. Hosts: worker, server (page is always on)`); process.exit(1); }
 
 // suites: name -> tests; each test's suite (ci.json's suite lists, else the file's header)
 const SUITES = manifest.suites || {};
@@ -82,6 +94,11 @@ if (unknown.length) { console.log(`FAIL unknown CI suite(s): ${unknown.join(', '
 if (withSoak && !suites.length) suites = Object.keys(SUITES);   // soak on its own: every suite's long tests (plus the suites)
 const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier || (t.tier !== 'skip' && (t.suites || []).some(k => suites.includes(k)) && (!t.soak || withSoak)));
 let run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
+const pageOnly = HOST === 'page' || process.env.CI_HOST_ALL ? [] : run.filter(t => !t.hosts.includes(HOST));
+for (const t of run) t.host = pageOnly.includes(t) ? 'page' : HOST;
+if (pageOnly.length && process.env.CI_OTHERS !== 'page') run = run.filter(t => !pageOnly.includes(t));
+// with --others page (baseline) a test that runs on the host runs in the page too, so a page-only regression still shows on every PR
+if (process.env.CI_OTHERS === 'page' && HOST !== 'page') run = run.flatMap(t => t.host === HOST ? [t, { ...t, name: t.name + '-page', host: 'page', copyOf: t.name }] : [t]);
 // CI_SHARD=k/n (1-based): this job runs only its share of the tests, so a workflow can spread one tier across n runners at
 // once. Each runner is a machine of its own, so the games don't starve each other as they would side by side on one runner.
 // Longest first, each to the share with the least expected time so far. Expected times are seconds measured on a CI runner
@@ -91,12 +108,12 @@ const shardM = /^(\d+)\/(\d+)$/.exec(process.env.CI_SHARD || '');
 const shard = shardM ? { k: +shardM[1], n: +shardM[2] } : null;
 let times = {};
 try { times = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci-times.json'), 'utf8')); } catch (e) {}
-const weight = t => times[t.name] || (t.soak ? 600 : 60);
+const weight = t => times[t.copyOf || t.name] || (t.soak ? 600 : 60);
 // CI_PLAN=1: how many runners this run should use, so each part takes about CI_PART_SECS (default 240) and never less than
 // its longest test allows; at most 20 (GitHub's limit on jobs at once for a free account). Written to $GITHUB_OUTPUT as parts=[1..n] and n.
 if (process.env.CI_PLAN) {
   const total = run.reduce((a, t) => a + weight(t), 0), longest = Math.max(1, ...run.map(weight));
-  const n = Math.max(1, Math.min(20, run.length, Math.ceil(total / Math.max(+(process.env.CI_PART_SECS || 240), longest))));
+  const n = run.length ? Math.max(1, Math.min(20, run.length, Math.ceil(total / Math.max(+(process.env.CI_PART_SECS || 240), longest)))) : 0;
   const line = `parts=${JSON.stringify(Array.from({ length: n }, (_, i) => i + 1))}\nn=${n}\n`;
   console.log(`${run.length} test(s), about ${Math.round(total / 60)} min in all: ${n} part(s)`);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line); else process.stdout.write(line);
@@ -147,7 +164,7 @@ async function runOne(t) {
   const args = t.kind === 'actions' ? [path.join('test', 'run.js'), out, t.file] : [t.file, ...(t.args || []).map(a => a.replace('{out}', out))];
   const timeout = (t.timeout || 300) * 1000;
   const t0 = Date.now();
-  const r = await spawnWatched(args, { ...process.env, ...(t.env || {}) }, timeout, MEM_LIMIT_MB);
+  const r = await spawnWatched(args, { ...process.env, BF_HOST: t.host, ...(t.env || {}) }, timeout, MEM_LIMIT_MB);
   const secs = (Date.now() - t0) / 1000;
   const log = r.out;
   fs.writeFileSync(out + '.log', log);
@@ -166,7 +183,7 @@ async function runOne(t) {
 }
 
 (async () => {
-const label = tier + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') + (withSoak ? ' with soak' : '') : '') + (shard ? ` (part ${shard.k} of ${shard.n})` : '');
+const label = tier + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') + (withSoak ? ' with soak' : '') : '') + (HOST !== 'page' ? ` on host ${HOST}` : '') + (shard ? ` (part ${shard.k} of ${shard.n})` : '');
 console.log(`tier ${label}: ${run.length} test(s)`);
 const results = [];
 for (const t of run) {
@@ -182,12 +199,13 @@ for (const t of run) {
 const failed = results.filter(r => !r.ok);
 const esc = s => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
 let md = `## ${label} tests: ${results.length - failed.length}/${results.length} passed\n\n| Test | Result | Time | Notes |\n|---|---|---|---|\n`;
-for (const r of results) md += `| ${r.t.name} | ${r.ok ? '✅ pass' : '❌ fail'} | ${r.secs.toFixed(0)}s | ${esc(r.ok ? r.t.what || '' : r.reasons.join('; '))} |\n`;
+for (const r of results) md += `| ${r.t.name}${HOST !== 'page' && r.t.host === 'page' && !r.t.copyOf ? ' (page)' : ''} | ${r.ok ? '✅ pass' : '❌ fail'} | ${r.secs.toFixed(0)}s | ${esc(r.ok ? r.t.what || '' : r.reasons.join('; '))} |\n`;
 const notRun = tests.filter(t => !run.includes(t) && (t.tier === 'skip' || t.missing));
 if (notRun.length && !only.length) {
   md += `\n**Not run in CI**\n\n| Test | Why |\n|---|---|\n`;
   for (const t of notRun) md += `| ${t.name} | ${esc(t.missing ? 'listed in test/ci.json but the file is not on this branch' : t.why || '')} |\n`;
 }
+if (pageOnly.length && (!shard || shard.k === 1)) md += `\n**Page only** (not yet on host ${HOST}: their // @ci header has no hosts=${HOST}; ${process.env.CI_OTHERS === 'page' ? 'they ran on host page' : 'the page run covers them'}): ${pageOnly.length} test(s): ${pageOnly.map(t => t.name).join(', ')}\n`;
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
 fs.writeFileSync(path.join(outDir, 'summary.md'), md);
 console.log(`\n${results.length - failed.length}/${results.length} passed` + (failed.length ? '; failed: ' + failed.map(r => r.t.name).join(', ') : ''));

@@ -76,7 +76,7 @@ function headless(n) {
     const pg = await open(b, surl);
     const m = await pg.evaluate(() => ({ host: BF.simHost.mode, server: BF.simHost.server, client: BF.client.mode, replica: BF.world.replica, f3: BF.debugText(BF.debugInfo()).split('\n').find(l => /^Simulation/.test(l)) }));
     check(m.host === 'server' && m.server && m.client === 'worker' && m.replica, `the page is the world server's client (${m.host}, client ${m.client})`);
-    check(m.f3 === 'Simulation: server', `F3 says so (${m.f3})`);
+    check(m.f3 === 'Simulation: World server (1 thread)', `F3 says so (${m.f3})`);
     await pg.waitForFunction(() => BF.glog.recent(500).some(e => e.k === 'worker' && /started in the simulation worker/.test(e.x)), null, { timeout: 240000 }).catch(() => {});   // (the server solves the planet's rivers: about 75 s)
     const logs = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'worker' || e.k === 'protocol').map(e => e.x));
     console.log('log: ' + logs.join(' | ').slice(0, 600));
@@ -115,7 +115,7 @@ function headless(n) {
     const seen = await pg.evaluate(() => { const E = [...BF.client.world.entities.values()]; return { villagers: E.filter(e => e.kind === 'mob' && e.type === 'villager').length, villages: BF.client.world.villages.size }; });
     check(seen.villagers > 0 && seen.villages > 0, `villagers in the client's mirror (${seen.villagers} villagers, ${seen.villages} villages)`);
     const st0 = await state(debug);
-    check(st0.latest && st0.latest.server && st0.latest.server.page && Object.keys(st0.layouts || {}).length > 0 && /Simulation: server/.test(st0.latest.text || ''), `the debug screen's feed comes from the server, with the page's F3 part (${Object.keys(st0.layouts || {}).length} village layouts)`);
+    check(st0.latest && st0.latest.server && st0.latest.server.page && Object.keys(st0.layouts || {}).length > 0 && /Simulation: World server/.test(st0.latest.text || ''), `the debug screen's feed comes from the server, with the page's F3 part (${Object.keys(st0.layouts || {}).length} village layouts)`);
     const keys = await pg.evaluate(() => [...BF.world.chunks.keys()]);
     const wh = await query(pg, 'chunkHash', { keys });
     const ph = await pg.evaluate(k => BF.proto.simHash(k), wh.keys);

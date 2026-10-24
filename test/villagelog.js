@@ -1,4 +1,5 @@
-// Village action log test: node test/run.js /tmp/vl test/villagelog.js
+// @ci baseline hosts=worker,server
+// Village action log test: node test/run.js /tmp/vl test/villagelog.js [--host page|worker|server]
 module.exports = async (pg) => {
   await pg.evaluate(() => {
     const v = BFT.village();
@@ -6,7 +7,9 @@ module.exports = async (pg) => {
     BF.player.spawn(v.x + 0.5, (v.y || BF.world.heightAt(v.x, v.z)) + 3, v.z + 0.5);
   });
   await pg.waitForTimeout(9000);
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  for (let i = 0; i < 30 && !(await lib.sim(pg, () => !!BF.vlog.villageAt(BF.player.position.x, BF.player.position.z))); i++) await pg.waitForTimeout(1000);
+  const res = await lib.sim(pg, () => {   // (where the simulation is: spec r15-43)
     const out = [], ok = (n, c) => out.push((c ? "PASS " : "FAIL ") + n);
     const L = BF.vlog, p = BF.player.position, rec = L.villageAt(p.x, p.z);
     ok("player is inside a village", !!rec);
@@ -46,11 +49,6 @@ module.exports = async (pg) => {
     ok("cause logged", L.entries(rec.key).some(e => e[1] === "death" && /killed by a zombie/.test(e[2])) && L.entries(rec.key).some(e => /killed by an explosion/.test(e[2])));
     BF.mobs.hit(d3, 999, null);
     ok("player kill logged", L.entries(rec.key).some(e => e[1] === "death" && /killed by the player/.test(e[2])));
-    // tally in the panel
-    BF.villagePanel.update(1, true);   // (the F3 panel, js/villagepanel.js since r15-37: drawn from the "vpanel" query)
-    const html = document.getElementById("vlog").innerHTML;
-    ok("panel shows occupations and unclaimed job blocks", /Occupations:/.test(html) && /unclaimed job blocks/.test(html));
-    BF.vlog.update(1, true);
     const a2 = L.entries(rec.key);
     ok("log grew by 4+", a2.length - before >= 4);
     for (const k of ["job", "bed", "trade", "birth"]) ok("has " + k, a2.some(e => e[1] === k));
@@ -62,6 +60,10 @@ module.exports = async (pg) => {
     return out.concat(L.entries(rec.key).map(e => L.stamp(e[0]) + " " + e[2]));
   });
   console.log(res.join("\n"));
+  // tally in the panel (the F3 panel, js/villagepanel.js since r15-37: drawn on the page from the "vpanel" query)
+  await pg.evaluate(() => BF.villagePanel.update(1, true));
+  const panel = await pg.waitForFunction(() => { const h = document.getElementById("vlog").innerHTML; return /Occupations:/.test(h) && /unclaimed job blocks/.test(h); }, null, { timeout: 15000, polling: 250 }).then(() => true, () => false);
+  console.log((panel ? "PASS " : "FAIL ") + "panel shows occupations and unclaimed job blocks");
   // run.js presses F3 afterwards (debug on); hide the title screen and let the panel and name tags render
   await pg.evaluate(() => { for (const e of document.querySelectorAll("#ui > *")) e.style.display = "none"; BF.player.setLook && BF.player.setLook(0.8, -0.1); });
   await pg.waitForTimeout(1500);

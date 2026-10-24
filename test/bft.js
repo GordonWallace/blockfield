@@ -1,5 +1,6 @@
 // In-page helpers for tests on the planet (spec r14-22), as window.BFT. test/run.js installs them in every action-script test; a
 // node test calls require('./lib').install(page) before its goto. Not a test (test/ci.js skips it).
+window.BF_TEST = true;   // (js/simhost.js: turns the simulation's eval query on, for BFT.sim)
 window.BFT = {
   // the world's spawn column (BF.newWorld puts the player there; on the planet it is on face 4, at least 5 km from any edge)
   spawn() { const s = BF.spawnPoint || BF.player.position; return { x: Math.floor(s.x), z: Math.floor(s.z) }; },
@@ -18,6 +19,9 @@ window.BFT = {
   },
   // a block cell as typed into a command: relative to the player, as commands read u y v on the planet's faces (spec r14-18)
   cell(x, y, z) { const p = BF.player.position; return `~${x - Math.floor(p.x)} ~${y - Math.floor(p.y)} ~${z - Math.floor(p.z)}`; },
+  // (spec r15-43) runs fn(arg) where the simulation is, in the page, a Web Worker or on the world server (js/simhost.js eval), and
+  // resolves its result; fn is a function or its source, and must not use anything outside itself (it runs in another thread there)
+  sim(fn, arg) { return BF.simHost.eval(String(fn), arg); },
   // an exact position as typed into a command (/tp, /summon), relative to the player as above
   at(x, y, z) { const p = BF.player.position, f = n => +n.toFixed(4); return `~${f(x - p.x)} ~${f(y - p.y)} ~${f(z - p.z)}`; },
 };

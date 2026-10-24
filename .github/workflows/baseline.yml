@@ -3,6 +3,8 @@
 # suites (game areas) the pull request turns on with a line in its description, e.g. `CI suites: jobs, ui` (or `all`). A suite's
 # long tests run only when `soak` is on the line too (`CI suites: village, soak`); `all` includes them.
 # Editing that line re-runs the check. Tiers, suites and timeouts are in test/ci.json; the runner is test/ci.js.
+# Host (spec r15-43): the world server, the game's main host. Tests whose // @ci header lists hosts=server run with the simulation on the
+# world server; the rest (not converted yet) run with it in the page. The integration workflow runs every host.
 name: Baseline tests
 
 on:
@@ -37,6 +39,8 @@ jobs:
           CI_PLAN: 1
           PR_BODY: ${{ github.event.pull_request.body }}
           CI_SUITES: ${{ inputs.suites }}
+          CI_HOST: server
+          CI_OTHERS: page
         run: node test/ci.js baseline
   baseline-part:
     needs: plan
@@ -65,6 +69,8 @@ jobs:
           CI_SHARD: ${{ matrix.part }}/${{ needs.plan.outputs.n }}
           PR_BODY: ${{ github.event.pull_request.body }}
           CI_SUITES: ${{ inputs.suites }}
+          CI_HOST: server
+          CI_OTHERS: page
         run: NODE_PATH=$(npm root -g) node test/ci.js baseline ci-out
       - name: Upload logs and screenshots
         if: always()

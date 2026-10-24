@@ -21,7 +21,7 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await game.goto(`http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   // a planet boot works out its rivers first (r14-10): wait for that loading step
   await game.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById('bf-loading'), null, { timeout: 120000 }).catch(() => {});
   await game.waitForTimeout(5000);

@@ -4,7 +4,8 @@
 //   node debug/server.js --game 9000 --debug 9001 --lan
 //   (--no-isolate serves the game without the cross-origin isolation headers, so without shared memory: see ISOLATE)
 //   (--alerts <file> keeps the debug screen's alerts somewhere other than debug/.alerts.json)
-//   (--saves <dir> keeps the world server's saves somewhere other than saves/; --no-world runs no world server)
+//   (--saves <dir> keeps the world server's saves somewhere other than saves/; --no-world runs no world server; --test lets a test page
+//   run code in the simulation, BFT.sim: tests only, never on a server others can reach)
 // It also runs the world server (spec r15-41, server/world.js): the game's simulation in this process, with the page as its client
 // over a WebSocket on the game port (/sim). Ctrl+C saves its worlds before stopping.
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to
@@ -300,7 +301,7 @@ const gameServers = NO_GAME ? [] : listen(serveGame, GAME_PORT, "game");
 // --no-world leaves it out (the page then runs the simulation itself); --saves <dir> keeps its saved worlds somewhere other than saves/.
 const si = args.indexOf("--saves"), SAVES = si >= 0 && args[si + 1] ? path.resolve(args[si + 1]) : path.join(ROOT, "saves");
 const world = NO_GAME || args.includes("--no-world") ? null : require("../server/world.js").start({
-  servers: gameServers, saves: SAVES, version: readBuild().version, build: { commit: readBuild().commit, branch: readBuild().branch }, debug: { push: take, screens: () => clients.size } });
+  servers: gameServers, saves: SAVES, test: args.includes("--test"), version: readBuild().version, build: { commit: readBuild().commit, branch: readBuild().branch }, debug: { push: take, screens: () => clients.size } });
 let stopping = false;
 const stop = () => {
   if (stopping) process.exit(1);   // (a second Ctrl+C: at once)

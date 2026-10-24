@@ -11,11 +11,10 @@ const JS = path.join(__dirname, "..", "js");
 
 // The render and UI files (the page's side).
 const FILES = ["mobview.js", "entityview.js", "mapview.js", "villagerhover.js", "villagepanel.js", "debugoverlay.js", "audio.js", "coords.js",
-  "cracks.js", "globe.js", "lod.js", "faithful.js", "invscreen.js"];
+  "cracks.js", "globe.js", "lod.js", "faithful.js", "invscreen.js", "alerts.js"];
 // Left out, with why:
 //   main.js       the page's boot: it starts the simulation in the page (BF.mobs.init and friends); r15-38 moves that into a worker
 //   debugfeed.js  the debug screen's feed: produced on the simulation's side (the spec), so it reads the simulation
-//   alerts.js     the debug screen's alerts: checked against village log entries as the simulation writes them
 //   commands.js   slash commands act on the simulation (spawn, kill, give, weather): "command" requests, run in the worker (r15-38)
 //   player.js, maps.js, signs.js, sky.js, weather.js, world.js, villagelog.js: simulation files that also draw or take input; their
 //                 screens and overlays read the protocol where this spec moved them (the village panel and names: js/villagepanel.js)
@@ -26,7 +25,7 @@ const FILES = ["mobview.js", "entityview.js", "mapview.js", "villagerhover.js", 
 const SIM = ["mobs", "drops", "boats", "bees", "horses", "ids", "villageSim", "villageLife", "jobs", "econ", "market", "trades", "prices",
   "storage", "vlog", "villagerStatus", "signs", "maps", "stables", "merchant", "explorer", "builder", "bridges", "breeding", "shepherd",
   "poultry", "cowherd", "pigFarmer", "baker", "beekeeper", "fletcher", "forester", "miner", "toolsmith", "furniture", "glassmaker",
-  "wildlife", "happiness", "vstats", "dayTimeline", "regions", "stateHash", "req", "perf", "food", "durability", "active"];
+  "wildlife", "happiness", "vstats", "dayTimeline", "regions", "stateHash", "req", "perf", "food", "durability", "active", "alertSim"];
 // Reads of a simulation module that are allowed: constant tables and drawing helpers, not simulation state. [file, "module.property", why]
 const ALLOW = [
   ["mobview.js", "mobs.outfits", "the professions' outfits: a constant table of js/mobs.js"],
@@ -38,6 +37,8 @@ const ALLOW = [
   ["invscreen.js", "req.player", "sends the player's screen actions as requests (js/requests.js player(): through BF.client)"],
   ["invscreen.js", "req", "whether the request queue is there (BF.req ?)"],
   ["invscreen.js", "durability", "an item's uses when new, for the durability bar (a constant of the item tables, js/toolwear.js)"],
+  ["alerts.js", "alertSim.fire", "fires an alert by hand in the in-page simulation (tests; r15-43: its event comes back through the protocol)"],
+  ["alerts.js", "alertSim", "whether the in-page simulation's alert half is there (BF.alertSim ?)"],
 ];
 // js/invscreen.js reaches the inventory module as SIM (BF.inventory: in the page the simulation's own, in a worker the page's copy). It may
 // read only these from it: constant tables, and the hotbar slot, which is the page's (r15-44).
