@@ -28,6 +28,7 @@ const FILES = {
   "planetgen.js": "world generation timing stats",
   "perf.js": "the villager-seconds meter (spec r15-01): measures how long steps take, decides nothing",
   "planetrivers.js": "river solve timing stats",
+  "protocol.js": "the simulation/client protocol's bytes per real second (spec r15-36): statistics, decides nothing",
   "player.js": "input: Escape grace, touch taps, the player runs in real time",
   "save.js": "save metadata (last played, last saved)",
   "signs.js": "sign editor caret blink",

@@ -61,12 +61,16 @@ module.exports = async (pg) => {
     const v = BFT.village(), X = Math.round(v.x) + 12, Z = Math.round(v.z);
     BF.player.teleport(X + 0.5, BF.worldgen.heightAt(X, Z) + 2, Z + 0.5);
     window.PT = {
+      sim: 0, flush: 0, frames: 0,
+      times() { const r = { simMs: +(PT.sim / PT.frames).toFixed(3), flushMs: +(PT.flush / PT.frames).toFixed(3) }; PT.sim = PT.flush = PT.frames = 0; return r; },
       // one drawn frame without drawing: streaming, the frame's ticks, the player, the protocol flush
       frame(raw) {
         const p = BF.player.position;
         BF.world.update(p.x, p.z, 3);
-        const n = BF.simFrame(raw);
+        const t0 = performance.now(), n = BF.simFrame(raw), t1 = performance.now();
         BF.proto.flush();
+        const t2 = performance.now();
+        PT.sim += t1 - t0; PT.flush += t2 - t1; PT.frames++;
         return n;
       },
     };
@@ -81,14 +85,14 @@ module.exports = async (pg) => {
   // ---- 1x: 30 game seconds of 60 fps frames, checked every 50 frames
   const one = await pg.evaluate(() => {
     BF.warp.reset();
-    BF.proto.resetStats();
+    BF.proto.resetStats(); PT.times();
     const t0 = BF.simNow(), bad = [];
     let frames = 0, checks = 0;
     while (BF.simNow() - t0 < 30) {
       PT.frame(1 / 60); frames++;
       if (frames % 50 === 0) { const c = BF.proto.check(); checks++; if (!c.ok) bad.push({ f: frames, d: c.diffs.slice(0, 3), mh: c.mirrorHash, sh: c.simHash }); }
     }
-    return { frames, checks, bad: bad.slice(0, 3), nbad: bad.length, stats: BF.proto.stats(), entities: BF.proto.check().entities };
+    return { frames, checks, bad: bad.slice(0, 3), nbad: bad.length, stats: BF.proto.stats(), times: PT.times(), entities: BF.proto.check().entities };
   });
   ok("1x: the mirror equals the simulation at every check", one.nbad === 0, { checks: one.checks, bad: one.bad });
   ok("1x: the mirror has the village's mobs", one.entities > 50, { entities: one.entities });
@@ -98,6 +102,7 @@ module.exports = async (pg) => {
     return { total: Math.round(st.bytesOut / sec), toSim: Math.round(st.bytesIn / sec), byType: o };
   };
   const b1 = perSec(one.stats, one.frames);
+  console.log("TIME 1x ms per frame: " + JSON.stringify(one.times));
   console.log("BYTES 1x per second (60 fps): " + JSON.stringify(b1));
   ok("1x: entities sent every tick", one.stats.out.entities && one.stats.out.entities.msgs >= 30 * 20 * 0.9, one.stats.out.entities);
 
@@ -132,7 +137,7 @@ module.exports = async (pg) => {
   // ---- 100x: a game day of 60 fps frames, checked every 30 frames
   const ff = await pg.evaluate(async (daySec) => {
     BF.warp.set(BF.warp.SPEEDS.indexOf(100));
-    BF.proto.resetStats();
+    BF.proto.resetStats(); PT.times();
     const t0 = BF.simNow(), bad = [], w0 = performance.now();
     let frames = 0, checks = 0, ticks = 0;
     while (BF.simNow() - t0 < daySec && frames < 20000) {
@@ -142,13 +147,14 @@ module.exports = async (pg) => {
         await new Promise(r => setTimeout(r, 0));
       }
     }
-    const c = BF.proto.check();
+    const times = PT.times(), c = BF.proto.check();
     BF.warp.reset();
-    return { frames, ticks, checks, bad: bad.slice(0, 3), nbad: bad.length, stats: BF.proto.stats(), game: BF.simNow() - t0, wall: (performance.now() - w0) / 1000,
+    return { times, frames, ticks, checks, bad: bad.slice(0, 3), nbad: bad.length, stats: BF.proto.stats(), game: BF.simNow() - t0, wall: (performance.now() - w0) / 1000,
       last: { ok: c.ok, chunks: c.chunks, entities: c.entities }, tracked: BF.proto.local.sim.S.ents.size };
   }, daySec);
   ok("100x: the mirror equals the simulation at every check over a game day", ff.nbad === 0 && ff.last.ok, { checks: ff.checks, game: Math.round(ff.game), bad: ff.bad, last: ff.last });
   const b100 = perSec(ff.stats, ff.frames);
+  console.log("TIME 100x ms per frame: " + JSON.stringify(ff.times));
   console.log("BYTES 100x per second (60 fps frames, " + (ff.ticks / ff.frames).toFixed(1) + " ticks a frame, achieved " + (ff.game / (ff.frames / 60)).toFixed(0) + "x): " + JSON.stringify(b100));
   ok("100x: entities at most once a frame", ff.stats.out.entities && ff.stats.out.entities.msgs <= ff.stats.flushes && ff.stats.out.entities.msgs * 10 < ff.ticks,
     { msgs: ff.stats.out.entities && ff.stats.out.entities.msgs, flushes: ff.stats.flushes, ticks: ff.ticks });
