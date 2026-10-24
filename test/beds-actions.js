@@ -1,13 +1,18 @@
+// @ci integration hosts=worker,server
 // Claimed beds: node test/run.js /tmp/beds test/beds-actions.js
 // Runs a village through several nights and reports, per villager, the bed it slept in each night (and who slept nowhere).
 module.exports = async (pg, out) => {
   // no pointer lock (drag mode): with the mouse locked, headless Chromium piles up memory during the long evaluates below
   await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); BF.player.gameMode = "creative"; });
-  await require('./lib').toVillage(pg);
+  const lib = require('./lib');
+  await lib.toVillage(pg);
   const nights = +(process.env.NIGHTS || 3);
-  const res = await pg.evaluate(async (nights) => {
+  const res = await lib.sim(pg, async (nights) => {   // (where the simulation is: spec r15-43)
     const M = BF.mobs;
     M.spawning = false;
+    // off the page the simulation ticks on its own between the steps below (they yield every 400): stopped, so only these steps run
+    const paused = BF.state.paused;
+    if (!BF.page) BF.state.paused = true;
     const key = m => (m.village ? m.village.key : "?") + "#" + (m.slot ? m.slot.idx : "?") + " " + m.profession;
     const seen = new Map();   // villager key -> [bed per night]
     const run = async (t0, t1, secs, dt = 0.05) => {
@@ -31,6 +36,7 @@ module.exports = async (pg, out) => {
       }
       await run(0.99, 1.05, 20);        // morning: wake up
     }
+    BF.state.paused = paused;
     const rows = [...seen].map(([k, v]) => ({ k, v }));
     const sleptAll = rows.filter(r => r.v.every(b => b && !b.startsWith("awake") && b !== "no bed"));
     const same = sleptAll.filter(r => new Set(r.v).size === 1);

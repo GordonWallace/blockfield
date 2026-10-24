@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Prices follow demand soak (release 1.3): one village for many game days, with demand prices (default) or fixed prices (PRICES=off).
 // Usage: NODE_PATH=$(npm root -g) node test/prices-soak.js [seed=1] [days=45] [out.json]
 // Drives the simulation directly (no rendering), like test/toolchain.js. Once per game day it records the villagers alive, starving and
@@ -6,6 +7,7 @@
 // prices on) the economy tallies not matching the trades.
 const path = require('path');
 const fs = require('fs');
+const lib = require('./lib');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
 const SEED = +(process.argv[2] || 1);
@@ -21,12 +23,20 @@ const OFF = process.env.PRICES === 'off';
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = cb => (window.__halt ? 0 : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
-  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
+  await lib.install(pg);
+  const srv = lib.host() === 'page' ? null : await lib.serve({ world: lib.host() === 'server' });
+  await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  await lib.ready(pg);   // the planet (spec r14-22): its river step first
+  if (srv) await lib.simReady(pg);
+  // the page's player in creative (the simulation's follows with the next player message), then only the soak's steps move the world:
+  // the page's frames held and, off the page, the simulation's own ticks stopped; test/bft.js's helpers there too
+  await pg.evaluate(() => { if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
+  await pg.waitForTimeout(600);
+  await pg.evaluate(() => { window.__halt = true; });
+  if (srv) await lib.sim(pg, () => { BF.state.paused = true; });
+  await lib.simBFT(pg);
   await pg.waitForTimeout(3000);
-  const setup = await pg.evaluate(off => {
-    window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
+  const setup = await lib.sim(pg, off => {
     BF.prices.off = off;
     const v = BFT.villages(3000).filter(v => v && v.pop)[0];
     const key = Math.round(v.x) + ',' + Math.round(v.z);
@@ -36,7 +46,7 @@ const OFF = process.env.PRICES === 'off';
     BF.sky.setTime(0.02);
     for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
     // every trade, as the village log sees it
-    const R = window.__rec = { key, trades: 0, items: 0, ems: 0, days: [], bad: [] };
+    const R = globalThis.__rec = { key, trades: 0, items: 0, ems: 0, days: [], bad: [] };
     const orig = BF.vlog.trade;
     BF.vlog.trade = function (buyer, seller, what, times) {
       const inV = m => m && m.village && m.village.key === key;
@@ -47,7 +57,7 @@ const OFF = process.env.PRICES === 'off';
       } else if (inV(buyer) || inV(seller)) R.trades += times || 1;
       return orig.apply(this, arguments);
     };
-    window.__day = () => {
+    globalThis.__day = () => {
       const P = BF.prices, rec = BF.vlog.villageAt(v.x, v.z) || { members: [] };
       const vs = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === key);
       const alive = vs.filter(m => !m.dead && !m.removed);
@@ -81,20 +91,20 @@ const OFF = process.env.PRICES === 'off';
   }, OFF);
   console.log(`seed ${SEED} village ${setup.key} prices ${OFF ? 'FIXED' : 'DEMAND'} ${JSON.stringify(setup.profs)}`);
   const t0 = Date.now();
-  await pg.evaluate(() => window.__day());
+  await lib.sim(pg, () => globalThis.__day());
   const h = 0.05, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
   for (let s = 0, d = 0; s < DAYS * DAY; s += PER_CALL) {
-    await pg.evaluate(([n, h, v]) => {
+    await lib.sim(pg, ([n, h, v]) => {
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
       }
     }, [Math.min(PER_CALL, DAYS * DAY - s), h, setup.v]);
-    if (Math.floor((s + PER_CALL) / DAY) > d) { d = Math.floor((s + PER_CALL) / DAY); await pg.evaluate(() => window.__day()); const x = await pg.evaluate(() => window.__rec.days.at(-1)); console.log(`day ${String(x.day).padStart(3)}  alive ${x.alive}  starving ${x.starving}  dead ${x.dead}  happy ${x.happy}  emeralds ${x.ems}  trades ${x.trades}  prices up ${x.up} down ${x.down} max ${x.atMax} min ${x.atMin} mean ${x.mean}  (${Math.round((Date.now() - t0) / 1000)} s)`); }
+    if (Math.floor((s + PER_CALL) / DAY) > d) { d = Math.floor((s + PER_CALL) / DAY); await lib.sim(pg, () => globalThis.__day()); const x = await lib.sim(pg, () => globalThis.__rec.days.at(-1)); console.log(`day ${String(x.day).padStart(3)}  alive ${x.alive}  starving ${x.starving}  dead ${x.dead}  happy ${x.happy}  emeralds ${x.ems}  trades ${x.trades}  prices up ${x.up} down ${x.down} max ${x.atMax} min ${x.atMin} mean ${x.mean}  (${Math.round((Date.now() - t0) / 1000)} s)`); }
   }
-  const R = await pg.evaluate(() => window.__rec);
+  const R = await lib.sim(pg, () => globalThis.__rec);
   // the Economy view's tallies must still add up to the trades (last 7 days are kept: compare the item and emerald totals of trades from then)
-  const econ = await pg.evaluate(() => { const E = BF.econ, key = window.__rec.key; let n = 0, e = 0, t = 0; for (const x of E.days(key).values()) for (const k in x.f) { n += x.f[k][0]; e += x.f[k][1]; t += x.f[k][2]; } return { n, e, t, days: E.days(key).size }; });
+  const econ = await lib.sim(pg, () => { const E = BF.econ, key = globalThis.__rec.key; let n = 0, e = 0, t = 0; for (const x of E.days(key).values()) for (const k in x.f) { n += x.f[k][0]; e += x.f[k][1]; t += x.f[k][2]; } return { n, e, t, days: E.days(key).size }; });
   const days = R.days, last = days.at(-1);
   const sum = { seed: SEED, village: R.key, prices: OFF ? 'fixed' : 'demand', days: DAYS, alive: last.alive, dead: last.dead,
     starvingDays: days.reduce((a, x) => a + x.starving, 0), happyMean: Math.round(days.filter(x => x.happy != null).reduce((a, x) => a + x.happy, 0) / Math.max(1, days.filter(x => x.happy != null).length)),
@@ -106,6 +116,6 @@ const OFF = process.env.PRICES === 'off';
   if (R.bad.length) { console.log('FAIL prices out of bounds: ' + R.bad.length + ' ' + R.bad.slice(0, 5).join('; ')); fail++; }
   if (!OFF && DAYS >= 31 && !(last.atMax + last.atMin > 0)) console.log('NOTE no price reached its limit');
   console.log(fail ? fail + ' FAILED' : 'all passed');
-  await b.close();
+  await b.close(); if (srv) await srv.stop();
   process.exit(fail ? 1 : 0);
 })();

@@ -1,11 +1,16 @@
+// @ci integration hosts=worker,server
 // Respawning at a bed in a room with a 2-high ceiling, or in an underground bedroom, puts you beside the bed inside the room,
 // not on the roof or the surface (bug-025). Also when you die far away and the bed's chunk has to load first.
+// node test/run.js /tmp/br test/bed-respawn.js [--host page|worker|server]   (the rooms are built, the clock set and the mobs cleared where the
+// simulation is, spec r15-43; the player, its bed click, death and respawn are the page's)
 module.exports = async (pg) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.setGameMode("survival"); BF.mobs.spawning = false; });
+  const lib = require('./lib');
+  await pg.evaluate(() => { BF.player.start(); BF.player.setGameMode("survival"); });
+  await lib.sim(pg, () => { BF.mobs.spawning = false; });
   await pg.waitForTimeout(3000);
   const check = (ok, msg) => console.log((ok ? "PASS " : "FAIL ") + msg);
   const room = async (depth, far) => {
-    const info = await pg.evaluate((depth) => {
+    const info = await lib.sim(pg, (depth) => {
       const P = BF.player, p = P.position, W = BF.world;
       const x = Math.floor(p.x) + 6, z = Math.floor(p.z) + 6, g = W.heightAt(x, z), y = g - depth;   // bed cell y
       // 7x7 stone box: floor y-1, air y..y+1, ceiling y+2
@@ -14,22 +19,33 @@ module.exports = async (pg) => {
         W.setBlock(x + dx, y + k, z + dz, k === -1 || k === 2 || edge ? BF.B.stone : 0);
       }
       W.setBlock(x, y, z, BF.bedId(0, 0)); W.setBlock(x, y, z - 1, BF.bedId(0, 1));
-      P.teleport(x + 1.5, y + 0.01, z + 0.5);
-      window._b = [x, y, z];
       return { bed: [x, y, z], built: W.getBlock(x, y + 2, z) === BF.B.stone && !!BF.blocks[W.getBlock(x, y, z)].bed };
     }, depth);
+    // the blocks reach the page (the page's copy of the world is the one the player clicks)
+    await pg.waitForFunction(([x, y, z]) => { const b = BF.blocks[BF.world.getBlock(x, y, z)]; return !!(b && b.bed) && BF.world.getBlock(x, y + 2, z) === BF.B.stone; }, info.bed, { timeout: 20000 }).catch(() => {});
+    await pg.evaluate(([x, y, z]) => { BF.player.teleport(x + 1.5, y + 0.01, z + 0.5); window._b = [x, y, z]; }, info.bed);
     await pg.waitForTimeout(1000);
-    await pg.evaluate(() => {
+    await lib.sim(pg, () => {
       BF.sky.setTime(0.7);
       for (const m of BF.mobs.list.slice()) if (m.hostile) m.dead = true;
+    });
+    // the page decides the click (js/player.js trySleep): wait until its clock and mobs show the night and no monster near
+    await pg.waitForFunction(() => {
+      const p = BF.player.position, W = BF.simHost.worker && BF.client && BF.client.world;   // (off the page: the mirror's mobs)
+      const near = W ? [...W.entities.values()].some(e => e.kind === "mob" && !e.dead && BF.mobs.isHostile(e.type) && Math.hypot(e.x - p.x, e.y - p.y, e.z - p.z) < 10)
+        : BF.mobs.list.some(m => m.hostile && !m.dead && m.position.distanceTo(p) < 10);
+      return BF.sky.isNight() && !near;
+    }, null, { timeout: 10000 }).catch(() => {});
+    await pg.waitForTimeout(300);
+    await pg.evaluate(() => {
       BF.spawnPoint = null;
       const [bx, by, bz] = _b, e = BF.player.eyePos(), tx = bx + 0.5 - e.x, ty = by + 0.3 - e.y, tz = bz + 0.5 - e.z;
       BF.player.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz)));
     });
     await pg.waitForTimeout(200);
     await pg.evaluate(() => { BF.player.setMouse(false, true); BF.player.setMouse(false, false); });
-    await pg.waitForTimeout(1200);
-    const slept = await pg.evaluate(() => !!(BF.spawnPoint && BF.spawnPoint.bed));
+    // (the sleep is the simulation's answer to the click: the spawn point comes back with it)
+    const slept = await pg.waitForFunction(() => !!(BF.spawnPoint && BF.spawnPoint.bed), null, { timeout: 8000 }).then(() => true, () => false);
     if (far) {   // die somewhere the bed's chunk unloads
       await pg.evaluate(() => { const p = BF.player.position; BF.player.teleport(p.x + 3000, 2000, p.z + 3000); });
       await pg.waitForTimeout(4000);
@@ -50,13 +66,18 @@ module.exports = async (pg) => {
   await room(12);   // underground bedroom
   await room(12, true);
   // a bed in the open: you still wake on the bed
-  const open = await pg.evaluate(async () => {
-    const P = BF.player, W = BF.world, p = P.position, x = Math.floor(p.x) + 3, z = Math.floor(p.z), y = W.heightAt(x, z) + 1;
+  const ob = await lib.sim(pg, () => {
+    const W = BF.world, p = BF.player.position, x = Math.floor(p.x) + 3, z = Math.floor(p.z), y = W.heightAt(x, z) + 1;
     for (let dx = -2; dx <= 2; dx++) for (let dz = -3; dz <= 2; dz++) { W.setBlock(x + dx, y - 1, z + dz, BF.B.stone); for (let k = 0; k < 4; k++) W.setBlock(x + dx, y + k, z + dz, 0); }
     W.setBlock(x, y, z, BF.bedId(0, 0)); W.setBlock(x, y, z - 1, BF.bedId(0, 1));
+    return [x, y, z];
+  });
+  await pg.waitForTimeout(500);
+  const open = await pg.evaluate(async ([x, y, z]) => {
+    const P = BF.player;
     BF.spawnPoint = { x: x + 0.5, y: y + 0.5625, z: z + 0.5, bed: [x, y, z], world: {} };
     P.kill(); await new Promise(r => setTimeout(r, 300)); P.respawn(); await new Promise(r => setTimeout(r, 1500));
     return { y, at: [P.position.x - x, P.position.y - y, P.position.z - z] };
-  });
+  }, ob);
   check(Math.abs(open.at[0] - 0.5) < 0.05 && Math.abs(open.at[2] - 0.5) < 0.05 && Math.abs(open.at[1] - 0.5625) < 0.1, `bed in the open: respawned on the bed (${open.at.map(v => v.toFixed(2)).join(",")})`);
 };

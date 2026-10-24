@@ -1,14 +1,16 @@
-// @ci integration suite=village timeout=600
+// @ci integration suite=village timeout=600 hosts=worker,server
 // Monsters spawn in any loaded chunk, not around the player (js/mobs.js spawnMonsters, js/wildlife.js mayHostile; idea-037): with the player
 // 300 blocks from a running village at night, zombies appear in the village's dark spots and none on lit ground; no area holds more than its
 // cap (10 per 28 chunks) and nothing spawns within 12 blocks of the player, a villager or an iron golem.
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ms test/monster-spawn.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/ms test/monster-spawn.js [--host page|worker|server]
 module.exports = async (pg) => {
   const fails = [];
   const ok = (name, cond, extra) => { console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra === undefined ? "" : extra)); if (!cond) fails.push(name); };
   // a village with a spot 300 blocks off that no other village is near; the village kept running by a pin (as a caravan trip does)
-  const setup = await pg.evaluate(() => {
-    const vs = BFT.villages(3000).filter(v => v && v.minX != null && v.pop >= 6);   // nearest the spawn first
+  const lib = require('./lib');
+  const setup = await lib.sim(pg, () => {   // (where the simulation is, spec r15-43: the page's player goes there below, and the simulation's follows)
+    const s0 = BF.spawnPoint || BF.player.position, sp = { x: Math.floor(s0.x), z: Math.floor(s0.z) };   // (BFT.villages: test/bft.js is the page's)
+    const vs = BF.worldgen.villagesNear(sp.x, sp.z, 3000).sort((a, b) => BF.planet.distance(sp, a) - BF.planet.distance(sp, b)).filter(v => v && v.minX != null && v.pop >= 6);   // nearest the spawn first
     for (const v of vs) for (let a = 0; a < 8; a++) {
       const x = Math.round(v.x + Math.cos(a * 0.785) * 300), z = Math.round(v.z + Math.sin(a * 0.785) * 300);
       const near = (BF.worldgen.villagesNear(x, z, 600) || []).filter(o => o.minX != null && BF.planet.distance(o, { x, z }) < 260);
@@ -17,21 +19,21 @@ module.exports = async (pg) => {
       // game day, so a jump of 6 days after pinning lost the pin at the night's first tick and the village unloaded (300 blocks is past DROP)
       BF.sky.day = 6;
       BF.villageSim.pin("test", v, v, []);
-      BF.player.spawn(x + 0.5, BF.worldgen.heightAt(x, z) + 2, z + 0.5);
       return { v: [v.x, v.z], key: Math.round(v.x) + "," + Math.round(v.z), at: [x, z] };
     }
     return null;
   });
   ok("found a village with a spot 300 blocks away", !!setup, setup);
   if (!setup) { console.log("FAILED: 1"); return; }
+  await pg.evaluate(([x, z]) => BF.player.spawn(x + 0.5, BF.worldgen.heightAt(x, z) + 2, z + 0.5), setup.at);
   // The village sim's AI-work guard (js/villagesim.js overLimit "AI time", LIMITS.aiWork) stops villages beyond ALWAYS of the player, pinned
   // ones too, when villager AI averages over its limit (6 ms a frame before spec r15-16 made it a count of updates). A headless software-rendered runner gets there with this village's 44 villagers, so
   // the village (and its villagers) dropped out before or during the night and no monster could spawn in it. The guard is not what this
   // test checks (test/force-unload.js does), so it is lifted here and put back at the end.
-  const aiMs = await pg.evaluate(() => { const L = BF.villageSim.LIMITS, was = L.aiWork; L.aiWork = Infinity; return was; });
-  await pg.waitForFunction(k => BF.villageSim.isActive(k) && BF.mobs.villages.get(k) && (BF.mobs.villages.get(k).members || []).some(m => m.type === "villager"), setup.key, { timeout: 90000 }).catch(() => {});
+  const aiMs = await lib.sim(pg, () => { const L = BF.villageSim.LIMITS, was = L.aiWork; L.aiWork = Infinity; return was; });
+  for (let i = 0; i < 180 && !(await lib.sim(pg, k => BF.villageSim.isActive(k) && BF.mobs.villages.get(k) && (BF.mobs.villages.get(k).members || []).some(m => m.type === "villager"), setup.key)); i++) await pg.waitForTimeout(500);
   await pg.waitForTimeout(4000);
-  const r = await pg.evaluate(async ([key, aiMs]) => {
+  const r = await lib.sim(pg, async ([key, aiMs]) => {
     const W = BF.world, L = BF.wildlife, M = BF.mobs, S = BF.sky, rec = M.villages.get(key);
     for (const m of M.list.slice()) if (m.hostile) m.dead = true;
     S.day = 6; S.setTime(0.56);

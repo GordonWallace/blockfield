@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // A villager's day timeline (js/daytimeline.js): node test/run.js /tmp/daytimeline test/daytimeline.js
 // DAYS=2 (env) runs the live part for 2 game days instead of a few game hours (longer than CI's baseline should take).
 // Unit: status texts sorted into categories (samples from every job module), stretches opened and closed on text changes, short flickers
@@ -5,9 +6,10 @@
 // a dead villager's timeline dropped, save and reload, old saves. Live: one village run headless with a villager stuck "Waiting for gold"
 // for 2 game hours in the afternoon; its timeline shows that wait at the right length, and real stretches, trades and meals turn up.
 module.exports = async (pg) => {
-  await require('./lib').toVillage(pg);
+  const lib = require('./lib');
+  await lib.toVillage(pg);
   const days = +(process.env.DAYS || 0) || 0.25;
-  const res = await pg.evaluate(async (days) => {
+  const res = await lib.sim(pg, async (days) => {   // (where the simulation is: spec r15-43)
     const out = [], ok = (n, c, x) => out.push((c ? "PASS " : "FAIL ") + n + (x !== undefined ? "  " + JSON.stringify(x).slice(0, 400) : ""));
     const D = BF.dayTimeline, MIN = 1 / 1440;
     ok("loaded", !!D);

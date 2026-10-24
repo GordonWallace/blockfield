@@ -1,15 +1,18 @@
-// @ci baseline suite=village timeout=300
+// @ci baseline suite=village timeout=300 hosts=worker,server
 // Villages on the planet (spec r14-12), in the game: on a generator-4 world (seed 1337), the nearest village to spawn and a village near a
 // face edge (found by walking face 4's edges, as tools/planet-villages.js does) are each visited. Both have their well (water at the
 // plaza), the beds of their houses, their jobsite blocks where jobs.planVillage puts them, and a roster of their population with
 // villagers spawned. From the point by the edge, villagesNear finds villages on both faces.
-// node test/run.js /tmp/pv test/planet-village-visit.js
+// node test/run.js /tmp/pv test/planet-village-visit.js [--host page|worker|server]   (villages read where the simulation is: spec r15-43)
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
+  const lib = require('./lib');
+  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
+  await lib.newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(2000);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
-  const picks = await pg.evaluate(() => {
+  const picks = await lib.sim(pg, () => {
     const P = BF.planet, N = P.N, W = BF.worldgen, p = BF.player.position;
     const near = W.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b));
     const home = near[0];
@@ -38,7 +41,7 @@ module.exports = async (pg, out) => {
     let r = null;
     for (let i = 0; i < 40; i++) {   // until the village's chunks are generated and its villagers are out
       await pg.waitForTimeout(1000);
-      r = await pg.evaluate(t => {
+      r = await lib.sim(pg, t => {
         const W = BF.worldgen, Wd = BF.world, B = BF.B, v = W.villageAt(t.x, t.z);
         if (!v) return { none: true };
         const loaded = Wd.chunkAt(v.minX, v.minZ) && Wd.chunkAt(v.maxX, v.maxZ) && Wd.chunkAt(v.minX, v.maxZ) && Wd.chunkAt(v.maxX, v.minZ);
