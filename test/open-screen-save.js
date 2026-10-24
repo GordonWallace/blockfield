@@ -36,8 +36,7 @@ module.exports = async (pg, out) => {
   console.log("BEFORE " + JSON.stringify(await lib.sim(pg, () => { const I = BF.I, inv = BF.inventory; return { logs: inv.count(I.oak_log), cobble: inv.count(I.cobblestone), mode: inv.mode }; })));
   await pg.evaluate(() => BF.save.saveNow());   // what the pagehide / visibilitychange flush does
   await pg.reload();                           // the tab closes with the screen still open
-  await lib.ready(pg);   // the planet works out its rivers before the boot world starts (a load before then is wiped by it)
-  await lib.simReady(pg);
+  await lib.reloaded(pg);   // the host, then the planet's rivers, before the boot world starts (a load before then is wiped by it)
   await pg.waitForTimeout(1000);
   await pg.evaluate(id => BF.save.load(id), id);
   await settle(); await pg.waitForTimeout(1000); await settle();

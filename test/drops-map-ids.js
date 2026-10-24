@@ -19,8 +19,7 @@ module.exports = async (pg, out) => {
   });
   await pg.evaluate(() => BF.save.saveNow());
   await pg.reload();
-  await lib.ready(pg);   // the planet works out its rivers before the boot world starts (a load before then is wiped by it)
-  await lib.simReady(pg);
+  await lib.reloaded(pg);   // the host, then the planet's rivers, before the boot world starts (a load before then is wiped by it)
   await pg.waitForTimeout(1000);
   // a map made this session takes the first dynamic id, as map B would have when the inventory loads first
   await lib.sim(pg, () => { BF.resolveItem("filled_map_2_9_9"); });

@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // The smithy chest per village generator (bug-033): node test/run.js /tmp/os test/old-save-smithy.js
 // 1.1 moved the generated smith chest in front of its crafting table for village generator 3, so that a 1.0 world (village generator 2),
 // which regenerates its buildings from the seed, kept its saved chest contents in the chest. 1.4 opens no 1.0 to 1.3 worlds (spec r14-19,
@@ -6,7 +7,7 @@
 // The smith building: village generator 2 keeps the 1.0 layout, village generator 3 and later (new worlds) put the chest in front of the table.
 module.exports = async (pg, out) => {
   const ok = (cond, what) => console.log((cond ? "PASS " : "FAIL ") + what);
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     // the smith layout per village generator, from the building generator itself (no world to load)
     const smith = vg => { BF.worldgen.init(BF.noise, { biomeScale: BF.state.biomeScale, villages: vg }); const cells = BF.worldgen.recordBuilding("smith", 7, 6);
       const at = id => cells.filter(c => c[1] === 1 && (id === "chest" ? BF.isChest(c[3]) : c[3] === BF.B[id])).map(c => c[2]);
