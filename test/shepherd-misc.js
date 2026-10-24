@@ -24,11 +24,12 @@ module.exports = async (pg, out) => {
     ok("shears item exists and is a shears tool", !!it && it.tool && it.tool.type === "shears");
     const rc = BF.inventory.recipes.find(r => r.out === I.shears);
     ok("shears recipe = 2 iron ingots on a diagonal (Minecraft)", !!rc && rc.type === "shaped" && rc.pattern.join("|") === " I|I " && rc.key.I.length === 1 && rc.key.I[0] === I.iron_ingot, rc && rc.desc);
-    ok("shears have an icon", typeof BF.textures.icon(I.shears) === "string" && BF.textures.icon(I.shears).startsWith("data:"));
     ok("shears speed up leaves", BF.items[I.shears].tool.speed > 1 && BF.player.mineSeconds(BF.B.oak_leaves, I.shears) < BF.player.mineSeconds(BF.B.oak_leaves, null), BF.player.mineSeconds(BF.B.oak_leaves, I.shears) + "s vs " + BF.player.mineSeconds(BF.B.oak_leaves, null) + "s by hand");   // leaves are a hoe block (#44); shears are special-cased
     // ---- wild sheep, player use
     return S.lines;
   }));
+  // (an icon is drawn on the page)
+  lines.push(await pg.evaluate(() => { const I = BF.I, ok = typeof BF.textures.icon(I.shears) === "string" && BF.textures.icon(I.shears).startsWith("data:"); return (ok ? "PASS " : "FAIL ") + "shears have an icon"; }));
   await lib.newWorld(pg, 5, { gen: 4, villages: 9, gameMode: "creative" });
   lines.push(...await lib.sim(pg, async () => {
     const S = globalThis.__sm, { ok, step, run, day, load } = S, I = BF.I; S.lines = []; BF.state.paused = true;
@@ -79,9 +80,11 @@ module.exports = async (pg, out) => {
     Object.assign(S, { saved, PV, PK, key, want, wantN, dayNow, tNow });
     return S.lines;
   }));
-  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
   lines.push(...await lib.sim(pg, async () => {
     const S = globalThis.__sm, { ok, step, run, day, load } = S, I = BF.I; S.lines = []; BF.state.paused = true;
+    // the same world again, made here with the import in the same call: the page's copy is that world already, and a simulation off the
+    // page would load the village (unshorn, unfed) between a lib.newWorld and the next call
+    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     const { saved, PV, PK, key, want, wantN, dayNow, tNow } = S;
     BF.mobs.spawning = false;
     BF.mobs.importVillagers(saved);

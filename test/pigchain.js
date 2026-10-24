@@ -27,7 +27,11 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   const lib = require('./lib'), host = lib.host(), srv = host === 'page' ? null : await lib.serve({ world: host === 'server' });
   await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
-  if (srv) { console.log('host ' + host + ': ' + (await lib.where(pg)).label); await lib.simReady(pg); }
+  if (srv) {   // the host has started (a worker only after the page's river step), then its world
+    await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
+    console.log('host ' + host + ': ' + (await lib.where(pg)).label);
+    await lib.simReady(pg);
+  }
   await lib.simBFT(pg);   // (BFT where the simulation is)
   await pg.waitForTimeout(3000);
   // the nearest villages (within 3000 blocks of the spawn) that have a sty

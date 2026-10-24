@@ -18,9 +18,14 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
   await pg.route('https://fonts.**', r => r.abort());
   // BF_HOST (spec r15-43): page, as before (index.html as a file); worker or server: served by debug/server.js, the simulation there
   const lib = require('./lib'), host = lib.host(), srv = host === 'page' ? null : await lib.serve({ world: host === 'server' });
+  await lib.install(pg);   // (BF_TEST: lib.sim works off the page)
   await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForFunction(() => window.BF && BF.worldgen && BF.player && !BF.preparing, null, { timeout: 120000, polling: 500 });
-  if (srv) { console.log('host ' + host + ': ' + (await lib.where(pg)).label); await lib.simReady(pg); }
+  if (srv) {   // the host has started (a worker only after the page's river step), then its world
+    await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
+    console.log('host ' + host + ': ' + (await lib.where(pg)).label);
+    await lib.simReady(pg);
+  }
   const lines = [], ok = (name, c, extra) => lines.push((c ? 'PASS ' : 'FAIL ') + name + (extra !== undefined ? '  ' + JSON.stringify(extra) : ''));
 
   // a village with a dry, run-down farm: the nearest one

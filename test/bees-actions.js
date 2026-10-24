@@ -12,6 +12,7 @@
 module.exports = async (pg) => {
   const lib = require('./lib');
   await lib.newWorld(pg, 123, { gen: 4, villages: 10, gameMode: "survival" });
+  if (await pg.evaluate(() => BF.simHost.worker)) await pg.evaluate(() => BF.player.start());   // (the page's player: the stings below)
   const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
@@ -158,8 +159,9 @@ module.exports = async (pg) => {
     ok("a glass bottle on a full hive gives a honey bottle", g2 && g2.id === I.honey_bottle && g2.n === 1);
 
     // ---- stings: players only
-    BF.player.start(); BF.player.setGameMode("survival"); BF.state.paused = true;
-    for (let i = 0; i < 50; i++) BF.player.update(0.05);   // the spawn wait and spawn protection end
+    if (BF.page) BF.player.start();   // (off the page the page's player has started: the test does that before)
+    BF.player.setGameMode("survival"); BF.state.paused = true;
+    if (BF.page) for (let i = 0; i < 50; i++) BF.player.update(0.05);   // the spawn wait (off the page: the page body's) and spawn protection end
     BF.player.health = 20;
     const hp0 = BF.player.health;
     const pp = BF.player.position;
@@ -168,8 +170,12 @@ module.exports = async (pg) => {
     BE.harvest(h1.x, h1.y, h1.z, "bottle", "player");
     const angry = BE.list.filter(b => b.home === h1 && b.angry > BF.simNow()).length;
     let stings = 0, hurt = 0; if (BF.on) { BF.on("beeSting", () => stings++); BF.on("playerDamaged", n => { hurt += n; }); }
-    for (let i = 0; i < 400; i++) { step(); BF.player.update(0.05); BF.player.position.set(h1.x + 2.5, h1.y + 0.1, h1.z + 0.5); }
+    // (off the page the player's body is the page's: a hurt goes to it from BF.player.damage, js/protocol.js, with no playerDamaged here)
+    const damage0 = BF.player.damage;
+    if (!BF.page) BF.player.damage = function (n) { if (n > 0) hurt += n; return damage0.apply(this, arguments); };
+    for (let i = 0; i < 400; i++) { step(); if (BF.page) BF.player.update(0.05); BF.player.position.set(h1.x + 2.5, h1.y + 0.1, h1.z + 0.5); }
     ok("harvesting by day while bees are out angers them and they sting the player", angry > 0 && hurt > 0, { angry, hurt, stings, mode: BF.player.gameMode, modes: BE.list.filter(b => b.home === h1).map(b => b.mode + (b.stung ? "!" : "")).join(",") });
+    BF.player.damage = damage0;
     BF.player.health = 20; BF.player.setGameMode("creative");
     const villHp = rec.members.filter(m => !m.dead).map(m => m.health);
     h1.honey = BE.FULL; BE.harvest(h1.x, h1.y, h1.z, "bottle", K);

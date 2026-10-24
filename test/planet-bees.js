@@ -95,6 +95,8 @@ module.exports = async (pg) => {
   const d1 = await drawn();
   check(d1.n > 0 && d1.worst < 40, `the ${d1.n} bees drawn are all by the player (farthest ${Math.round(d1.worst || 0)} blocks)`);
   // a second hive past the edge; the first broken: its bees that are out move to the second, into its face's frame, and get home
+  // (1x while the bees move over and are drawn: off the page the simulation runs 10x in full, and they would be home before the next look)
+  await pg.evaluate(() => BF.warp.set(0));
   const rh = await lib.sim(pg, s => {
     const P = BF.planet, BE = BF.bees, w = BF.world;
     const x = s.x - 6, z = s.z + 8, t = w.heightAt(x, z);
@@ -110,6 +112,7 @@ module.exports = async (pg) => {
   await pg.waitForTimeout(300);
   const d2 = await drawn();
   check(d2.other > 0 && d2.worst < 40, `those bees, kept in the other face's frame (${d2.other}), are drawn by the player too (farthest ${Math.round(d2.worst || 0)} blocks)`);
+  await pg.evaluate(() => BF.warp.set(BF.warp.SPEEDS.indexOf(10)));
   const home = await wait(() => { const h2 = globalThis.__h2; return h2.rest.length > 0; }, null, 90000);
   check(home, "they fly in to the hive past the edge");
   const errs = await pg.evaluate(() => window.__errs);
