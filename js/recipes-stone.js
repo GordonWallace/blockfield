@@ -1,5 +1,5 @@
-// Stone / ore / mineral pack recipes, registered through the BF.recipeHooks hook that inventory.js runs at the end of
-// buildRecipes(). Recipes that name missing items are skipped by inventory.js's helpers.
+// Stone / ore / mineral pack recipes, registered through the BF.recipeHooks hook that playerinv.js runs at the end of
+// buildRecipes(). Recipes that name missing items are skipped by playerinv.js's helpers.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});

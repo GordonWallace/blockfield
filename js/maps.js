@@ -152,7 +152,7 @@ function upgradeData(s, zx, zz) {
   return to;
 }
 const isPaper = id => id === BF.I.paper;
-// Crafting grid hook (inventory.js): 8 paper around one map of size < 5 gives the next size; a used map stays used and keeps its pixels.
+// Crafting grid hook (playerinv.js): 8 paper around one map of size < 5 gives the next size; a used map stays used and keeps its pixels.
 function craftHook(grid, gw) {
   if (gw !== 3 || grid.length !== 9) return null;
   const mid = grid[4];

@@ -31,7 +31,7 @@ Every message is a plain object `{t: type, ...}`. `BF.proto.encode(msg)` turns i
 | `village` | `list` [{key, name, x, z, people}], `gone` [key] | when a summary changes (checked every 20 flushes that ticked) |
 | `clock` | `tick`, `day`, `time`, `speed`, `frozen`, `achieved`, `weather` (only when it changed) | once a game second, and on a speed change |
 | `log` | `list` (game log entries, as js/gamelog.js keeps them) | every flush with new entries |
-| `self` | `tick`, and only what changed: `hurt` [{a (half-hearts), from [x, y, z] or null, cause} or {kill: true}], `health`, `hunger`, `gameMode`, `pos` [x, y, z] (the simulation moved the player), `inv` (the player's slots, js/inventory.js `own()`), `spawn` | replica only: every flush and with each request's result, when the simulation did something to the player |
+| `self` | `tick`, and only what changed: `inv` (the player's slots, js/playerinv.js `own()`), `cursor` (the stack held by the pointer {id, count, wear?} or null), `screen` (the open screen or null: {mode, target ({x, y, z} of a chest or furnace, {id} of a villager, or null), grid, result, pay, offer (the chosen offer's index), tradeResult}, stacks as {id, count, wear?}); replica also: `hurt` [{a (half-hearts), from [x, y, z] or null, cause} or {kill: true}], `health`, `hunger`, `gameMode`, `pos` [x, y, z] (the simulation moved the player), `spawn` | every flush and with each request's result, when one of them changed: `inv`, `cursor` and `screen` in every mode (r15-44), the rest when the client keeps a replica |
 | `result` | `rid` (a request), `qid` (a query), `sid` (a save) or `wid` (a world), `result`; `tick` for requests | the answer to a client message |
 
 ### Encodings
@@ -65,13 +65,20 @@ Every message is a plain object `{t: type, ...}`. `BF.proto.encode(msg)` turns i
 |---|---|---|
 | `request` | `rid`, `tick`, `kind`, `target`, `data` | applies the r15-20 player request at once (`BF.req.applyPlayer`), sends its block changes, then a `result` |
 | `view` | `x`, `y`, `z`, `dist` (chunks), `budget` (optional: chunks a flush) | decides what is sent: chunks and entities within `dist` chunks of the view's chunk |
-| `query` | `qid`, `what`, `args` | answers with a `result`. Kinds: `villager` {id} (hover card: name, profession, status), `village` {key, n} (summary and newest log lines), `hash` (the r15-24 state hash and parts), `stats` (protocol figures), `chunkHash` {keys} (a hash of those chunks' blocks, for a client checking its copy), `feed` {ack} (the simulation's part of a debug feed snapshot, in the worker: js/debugfeed.js); r15-37: `chest` {x, y, z} (slots, owner label, locked), `trades` {id} (offers with why one can't be done now and the stock, the villager's inventory, level, xp, name, status, editable), `inventory` {id} (a mob's slots), `map` {item, ver} (a normal map's bounds, and its RGB565 pixels as base64 when ver is not the latest), `f3` {x, y, z} (the F3 overlay's simulation figures), `vpanel` {x, z, n} (the F3 village panel: tally, occupations, free job blocks, newest log lines). Add more in `BF.proto.queries` |
+| `query` | `qid`, `what`, `args` | answers with a `result`. Kinds: `villager` {id} (hover card: name, profession, status), `village` {key, n} (summary and newest log lines), `hash` (the r15-24 state hash and parts), `stats` (protocol figures), `chunkHash` {keys} (a hash of those chunks' blocks, for a client checking its copy), `feed` {ack} (the simulation's part of a debug feed snapshot, in the worker: js/debugfeed.js); r15-37: `chest` {x, y, z} (slots, owner label, locked), `trades` {id} (offers with why one can't be done now and the stock, the villager's inventory, level, xp, name, status, editable), `inventory` {id} (a mob's slots), `map` {item, ver} (a normal map's bounds, and its RGB565 pixels as base64 when ver is not the latest), `f3` {x, y, z} (the F3 overlay's simulation figures), `vpanel` {x, z, n} (the F3 village panel: tally, occupations, free job blocks, newest log lines); r15-44: `furnace` {x, y, z} (slots [input, fuel, output], burn, burnMax, cook, can: whether it can smelt now; `{}` for the open screen's furnace). Add more in `BF.proto.queries` |
 | `speed` | `speed` (0 freezes, else one of `BF.warp.SPEEDS`), `pause` (optional: the page's menus or a hidden tab stop the ticks without changing the speed) | sets the fast-forward speed |
 | `save` | `sid` | saves the world now (js/save.js), answers `{ok}` |
-| `player` | the player's body as `BF.player.serialize()` gives it: `x`, `y`, `z`, `yaw`, `pitch`, `health`, `hunger`, `saturation`, `exhaustion`, `air`, `gameMode`, `flying`, `dead` | replica: when it changed, at most once a frame. The simulation moves its player there; it is the baseline `self` compares against |
+| `player` | the player's body as `BF.player.serialize()` gives it: `x`, `y`, `z`, `yaw`, `pitch`, `health`, `hunger`, `saturation`, `exhaustion`, `air`, `gameMode`, `flying`, `dead`; r15-44: `sel` (the hotbar slot, which is the page's) | replica: when it changed, at most once a frame. The simulation moves its player there; it is the baseline `self` compares against |
 | `world` | `wid`, `op` (`demo`, `create`, `load`), `args` ({seed, opts} / {seed, opts, meta} / {id}, and `rivers`: the page's solved river network, js/worldgen.js `riverState()`) | starts a world with the host's handler (the worker's), answers `{ok, meta?}` when it is ready |
 | `meta` | `id`, `name` and / or `monsters` | the open world was renamed or its monster options changed on the title screen |
 | `clientLog` | `list` (game log entries) | the client's own log entries (its errors), into the simulation's log, which is the one saved |
+
+### Inventory entries (r15-44)
+
+The events message also carries what the inventory screens show besides their slots (js/invscreen.js plays them): `{kind: "toast", id, n}`
+(+n of an item: a pickup, a shift-craft, a shift-trade), `{kind: "levelUp", id}` (the villager of the open trade screen went up a level: the
+level flashes), `{kind: "flashName"}` (the held item's name over the hotbar, after a creative pick-block). The simulation raises them as bus
+events (`invToast`, `villagerLevelUp`, `invFlashName`); the sim end turns them into entries.
 
 ### Sound entries (r15-37)
 
@@ -122,8 +129,12 @@ is encoded, delivered at once and decoded. The client end, `BF.client`, keeps a 
 The page's render and UI files read the mirror, queries and events, never the simulation (test/client-lint.js keeps the list):
 js/mobview.js and js/entityview.js (entities), js/audio.js (sound entries, mobs near the listener), js/villagerhover.js (the mirror's
 mobs, the `villager` query), js/villagepanel.js (names over villagers, the `vpanel` query), js/debugoverlay.js (F3, the `f3` query),
-js/mapview.js (the `map` query), and the chest and trade screens of js/inventory.js (`chest` and `trades`, asked again four times a
-second while open; "Waiting for the world..." when the first answer takes over 300 ms). Chunk meshing, light and the player's physics
+js/mapview.js (the `map` query), and the inventory screens, js/invscreen.js (r15-44): the hotbar and every screen's slots from `self` (`inv`,
+`cursor`, `screen`), a chest, a villager and a furnace from the `chest`, `trades` and `furnace` queries (asked again four times a second while
+open; "Waiting for the world..." when the first answer takes over 300 ms), toasts and the level-up flash from events. Every click, drag,
+offer, trash, open and close is a player request (`player.screen`, `player.click`, `player.drag`, `player.offer`, `player.trash`) that
+js/playerinv.js applies wherever the simulation runs. A screen the simulation opens (the trade screen) or closes (its chest broken) arrives
+in `self.screen` and the page follows, unless a screen request of its own is still on its way. Chunk meshing, light and the player's physics
 read BF.world: the simulation's in the page, a replica fed by `chunk` and `blockChanges` in a worker (r15-38).
 
 The player's requests go through it: `BF.req.player` calls `BF.client.request`, the simulation applies the request, and its block

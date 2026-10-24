@@ -19,7 +19,7 @@ const FILES = {
   "gamelog.js": "log timestamps",
   "globe.js": "globe drawing stats",
   "grid.js": "distant terrain sampling (drawing only)",
-  "inventory.js": "inventory screen: tooltips, click guard",
+  "invscreen.js": "inventory screens: tooltips, click guard, the furnace's progress between answers, slow-answer timing",
   "lod.js": "distant terrain (drawing only)",
   "lodworker.js": "distant terrain worker (drawing only)",
   "maps.js": "held map arrow spinning",

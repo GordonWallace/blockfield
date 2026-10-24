@@ -11,15 +11,16 @@ const JS = path.join(__dirname, "..", "js");
 
 // The render and UI files (the page's side).
 const FILES = ["mobview.js", "entityview.js", "mapview.js", "villagerhover.js", "villagepanel.js", "debugoverlay.js", "audio.js", "coords.js",
-  "cracks.js", "globe.js", "lod.js", "faithful.js"];
+  "cracks.js", "globe.js", "lod.js", "faithful.js", "invscreen.js"];
 // Left out, with why:
 //   main.js       the page's boot: it starts the simulation in the page (BF.mobs.init and friends); r15-38 moves that into a worker
 //   debugfeed.js  the debug screen's feed: produced on the simulation's side (the spec), so it reads the simulation
 //   alerts.js     the debug screen's alerts: checked against village log entries as the simulation writes them
 //   commands.js   slash commands act on the simulation (spawn, kill, give, weather); r15-38 sends them as requests
-//   inventory.js, player.js, maps.js, signs.js, sky.js, weather.js, world.js, villagelog.js: simulation files that also draw or take
-//                 input; their screens and overlays read the protocol where this spec moved them (the chest and trade screens: "chest"
-//                 and "trades" queries; the village panel and names: js/villagepanel.js)
+//   player.js, maps.js, signs.js, sky.js, weather.js, world.js, villagelog.js: simulation files that also draw or take input; their
+//                 screens and overlays read the protocol where this spec moved them (the village panel and names: js/villagepanel.js)
+// The inventory screens (r15-44) are js/invscreen.js, in the list; the items themselves are js/playerinv.js, a simulation file, which must
+// not touch the page (document, window, performance.now, localStorage: checked below).
 
 // The simulation's modules the page must not read.
 const SIM = ["mobs", "drops", "boats", "bees", "horses", "ids", "villageSim", "villageLife", "jobs", "econ", "market", "trades", "prices",
@@ -34,7 +35,14 @@ const ALLOW = [
   ["entityview.js", "bees", "whether bees exist in this build (BF.bees ?)"],
   ["mapview.js", "maps.heldCanvas", "draws a map held in the hand (a drawing helper of js/maps.js)"],
   ["mapview.js", "maps", "whether maps exist in this build (BF.maps ?)"],
+  ["invscreen.js", "req.player", "sends the player's screen actions as requests (js/requests.js player(): through BF.client)"],
+  ["invscreen.js", "req", "whether the request queue is there (BF.req ?)"],
+  ["invscreen.js", "durability", "an item's uses when new, for the durability bar (a constant of the item tables, js/toolwear.js)"],
 ];
+// js/invscreen.js reaches the inventory module as SIM (BF.inventory: in the page the simulation's own, in a worker the page's copy). It may
+// read only these from it: constant tables, and the hotbar slot, which is the page's (r15-44).
+const INV_OK = ["HOTBAR", "SIZE", "CHEST_SIZE", "COOK_TIME", "VILLAGER_SLOTS", "recipes", "smelting", "smeltList", "fuel", "fuelList", "levelNames",
+  "levelXP", "initSim", "select", "selectedIndex"];
 // Properties of page-side modules that are simulation state.
 const DENY = ["world.edits", "inventory.chests", "inventory.chestState", "inventory.chestView", "inventory.tradeView", "inventory.chestRecord",
   "inventory.furnaceState", "inventory.holderOf"];
@@ -69,6 +77,18 @@ for (const f of FILES) {
     }
   });
 }
+// invscreen.js: what it takes from the inventory module (SIM.x), and no BF.inventory reads beside the one that names it
+stripComments(fs.readFileSync(path.join(JS, "invscreen.js"), "utf8")).forEach((line, i) => {
+  const re = /\bSIM\.([A-Za-z_$][\w$]*)/g;
+  let m;
+  while ((m = re.exec(line))) if (!INV_OK.includes(m[1])) bad.push(`invscreen.js:${i + 1}: SIM.${m[1]}`);
+  if (/\bBF\.inventory\.[A-Za-z_$]/.test(line)) bad.push(`invscreen.js:${i + 1}: BF.inventory.<a property>`);
+});
+// playerinv.js: no page (it runs in the worker and headless too)
+stripComments(fs.readFileSync(path.join(JS, "playerinv.js"), "utf8")).forEach((line, i) => {
+  const m = /\b(document|window|localStorage|performance\.now)\b/.exec(line);
+  if (m) bad.push(`playerinv.js:${i + 1}: ${m[1]}`);
+});
 for (const b of bad) console.log("FAIL reads the simulation: " + b);
 for (const [f, k] of ALLOW) if (!used.has(f + " " + k)) { console.log("FAIL allowed read no longer used: " + f + " BF." + k); ok = false; }
 if (bad.length) ok = false;

@@ -120,7 +120,9 @@ H.achieved = () => { const c = BF.client && BF.client.world.clock; return c ? c.
 H.frame = function () {
   if (!H.worker || H.crashed) return;
   const C = BF.client, P = BF.player;
-  const st = P.serialize(), k = JSON.stringify(st);
+  const st = P.serialize();
+  st.sel = BF.inventory.selectedIndex;   // the hotbar slot: the page's (r15-44)
+  const k = JSON.stringify(st);
   if (k !== sentPlayer) { sentPlayer = k; C.player(st); }
   speedNow();
 };

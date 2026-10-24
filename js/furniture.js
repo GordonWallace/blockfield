@@ -312,7 +312,7 @@ function ai(m, dt, out) {
   return true;
 }
 
-// Trade screen title (inventory.js): what it is doing right now, or "".
+// Trade screen title (js/invscreen.js, from the trades query): what it is doing right now, or "".
 function statusText(m) {
   if (!m || m.profession !== "furniture_maker") return "";
   const sh = m.furn;

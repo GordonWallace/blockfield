@@ -221,7 +221,7 @@ function mapSnap(it) {
 
 // ---------------------------------------------------------------- item icons
 // Inventory / hotbar / drop icon of a filled map (normal or auto): the map itself, shrunk into a framed sheet (brown frame for normal maps, teal for auto
-// maps). textures.js icon() and inventory.js ask BF.mapIcon(item) -> {ver, url}; ver changes when the thumbnail does, and tick() refreshes the inventory
+// maps). textures.js icon() and invscreen.js ask BF.mapIcon(item) -> {ver, url}; ver changes when the thumbnail does, and tick() refreshes the inventory
 // icons about once a second while a map in the inventory is changing (generating, or being explored).
 const thumbs = new Map();   // item id -> {ver, t, url}
 function composeIcon(src, auto) {
