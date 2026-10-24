@@ -53,12 +53,13 @@ const start = async () => {
   await dbg.click('#m-zin'); await dbg.click('#m-zin');
   const s1 = await dbg.evaluate(() => BFMobMap.scale());
   await dbg.mouse.move(800, 300);
+  await dbg.locator('#mmap').scrollIntoViewIfNeeded();   // (the panels above it grow as the feed fills them: keep the wheel on the map)
   const box = await dbg.locator('#mmap').boundingBox();
   await dbg.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await dbg.mouse.wheel(0, 300);
   await dbg.waitForFunction(s => BFMobMap.scale() !== s, s1, { timeout: 3000 }).catch(() => {});   // (a busy runner can take longer than a frame)
   const s2 = await dbg.evaluate(() => BFMobMap.scale());
-  ok('zooms in and out (buttons and wheel)', s1 > s0 && s2 < s1, [s0, s1, s2]);
+  ok('zooms in and out (buttons and wheel)', s1 > s0 && s2 < s1, [s0, s1, s2, box && Math.round(box.y + box.height / 2), dbg.viewportSize()]);
   // hide villagers from the legend, then bring them back; the choice survives a reload
   await dbg.click('#m-zout'); await dbg.click('#m-zout'); await dbg.click('#m-zout');
   const before = await dbg.evaluate(() => BFMobMap.dots());
