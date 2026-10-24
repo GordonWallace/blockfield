@@ -1814,7 +1814,7 @@ function apiDetail() {
     (p.format ? apiFold("schema", `<b>Output schema</b>`, apiPre(JSON.stringify(p.format.schema, null, 2))) : "") +
     (earlier.length ? apiFold("earlier", `<b>Earlier in the chat</b> (${earlier.length} message${earlier.length === 1 ? "" : "s"} sent as history)`, earlier.map((m, i) => apiMsg(c, m, i)).join("")) : "") +
     rest.map((m, i) => apiMsg(c, m, i + earlier.length)).join("") +
-    (c.status === "running" ? `<div class="sub" style="padding:6px 2px">Waiting for the model\u2026</div>` : "");
+    (c.status === "running" ? `<div class="sub" style="padding:6px 2px">${(c.messages || []).length && c.messages[c.messages.length - 1].role === "assistant" ? "Waiting for the game to answer the tool call" : "Waiting for the model"}\u2026</div>` : "");
   el.dataset.id = c.id;
   el.scrollTop = same ? top : 0;
 }

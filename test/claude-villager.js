@@ -114,8 +114,8 @@ const start = async env => {
     && req.messages.length === 1 && req.messages[0].content === 'What should I do on my first night?', last);
   ok('the system prompt comes from prompts/villager-system.md, filled in', req && /You are Sage, a villager in Blockfield/.test(req.system) && /no trade/.test(req.system)
     && /Right now: day 1/.test(req.system) && req.system.includes('you were carrying: ' + startText + '.') && !/\{\{/.test(req.system) && !/<!--/.test(req.system), req && req.system);
-  ok('effort low, no sampling params, the check_inventory tool offered', req && req.output_config && req.output_config.effort === 'low' && req.temperature === undefined
-    && req.tools && req.tools.length === 1 && req.tools[0].name === 'check_inventory' && req.tool_choice.type === 'auto', req && req.tools);
+  ok('effort low, no sampling params, check_inventory and look_around offered', req && req.output_config && req.output_config.effort === 'low' && req.temperature === undefined
+    && req.tools && req.tools.map(t => t.name).join() === 'check_inventory,look_around' && req.tool_choice.type === 'auto', req && req.tools);
   const logged = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'claude').map(e => e.l + ' ' + e.x));
   ok('the exchange is logged as INFO without the words', logged.some(l => /^INFO Chat with Sage: 35 characters in, 39 out, 321\/12 tokens/.test(l)) && !logged.some(l => /first night/.test(l)), logged);
 
@@ -143,7 +143,8 @@ const start = async env => {
   await pg.screenshot({ path: out + '-chat.png' });
 
   // ---- house designer
-  await pg.click('.bfcv-tabs button:nth-child(2)');
+  // (in slow headless runs Playwright's hit test sometimes sees the trade screen's backdrop over this tab for a while: try a few times)
+  for (let i = 0; ; i++) { try { await pg.click('.bfcv-tabs button:nth-child(2)', { timeout: 5000 }); break; } catch (e) { console.log('CLICKFAIL', await pg.evaluate(() => { const b = document.querySelector('.bfcv-tabs button:nth-child(2)'), r = b.getBoundingClientRect(); return JSON.stringify({ r, at: document.elementsFromPoint(r.x + r.width / 2, r.y + r.height / 2).map(x => x.tagName + '.' + x.className).slice(0, 4), panel: document.querySelector('.bfcv-panel').getBoundingClientRect(), inv: document.querySelector('.bf-inv').getBoundingClientRect() }); })); if (i >= 3) throw e; } }
   await pg.keyboard.type('stone with a wood roof, one bed, furnace');
   await pg.keyboard.press('Enter');
   ok('a design comes back and shows', await until(() => !!BF.claudeVillager.design() && document.querySelector('.bfcv-dout').classList.contains('on'), null, 20000),

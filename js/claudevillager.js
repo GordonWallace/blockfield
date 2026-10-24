@@ -6,12 +6,14 @@
 // Artifact and a checkout without a key play as before; ?claude=0 turns it off.
 // It isn't part of any village and isn't saved: it is spawned again whenever the player comes near its spot, and the conversation
 // and designs last for the session (newWorld clears them). Its instructions: prompts/villager-system.md, prompts/house-designer.md.
-// It carries a few random odds and ends (POOL). The prompt tells it what it started with; its check_inventory tool (debug/claude.js)
-// reads what it holds now, which the page sends with each message.
-// Game log (kind "claude"): INFO when it appears, each exchange (lengths and tokens, not the words), each inventory check and design;
+// It carries a few random odds and ends (POOL). The prompt tells it what it started with and where it is (BF.claudeSight.where).
+// Its tools (defined in debug/claude.js) are answered here, live, when the model calls them: the server hands the call back
+// ({ pending }) and the page posts the answer. check_inventory reads its bag; look_around reads what it can see (js/claudesight.js).
+// Nothing assumes the world is paused, so the same loop serves the Sage acting on its own later.
+// Game log (kind "claude"): INFO when it appears, each exchange (lengths and tokens, not the words), each tool call and design;
 // WARN for a design with problems left; ERROR when a reply or a design fails.
 // API: BF.claudeVillager = { isOpen(), open(mob) -> bool, close(), isChatting(mob), design(), designs(), tab(name?), home(), mob(), status(),
-//                            history(), inventory(), startingInventory() }
+//                            history(), inventory(), startingInventory(), tools() -> [names], runTool(name, mob?) -> text }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -296,6 +298,43 @@ function close() {
 function setBusy(b) { busy = b; if (ui.send) { ui.send.disabled = b; ui.send.textContent = b ? "..." : "Send"; } }
 
 // ---------------------------------------------------------------- chat
+// The model's tools, answered from the world as it is now. Each returns the text the model reads.
+const TOOLS = {
+  check_inventory(who) {
+    const now = listText(contents(who.inv));
+    glog("INFO", NAME + " checked its inventory (" + (now || "empty") + ")", who);
+    return now ? "You are carrying: " + now + "." : "Your bag is empty.";
+  },
+  look_around(who) {
+    const o = BF.claudeSight.look(who);
+    const kinds = Object.values(o.groups).reduce((n, g) => n + g.size, 0);
+    glog("INFO", NAME + " looked around: " + o.mobs.length + " creatures and people, " + o.houses.length + " houses, " + kinds + " kinds of thing seen within " + o.range + " blocks (" + o.rays + " rays, " + o.ms + " ms)", who);
+    return o.text;
+  },
+};
+async function post(body) {
+  const r = await fetch("/claude/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const out = await r.json().catch(() => null);
+  if (!r.ok || !out || out.error) throw new Error((out && out.error) || "server answered " + r.status);
+  return out;
+}
+// One player message to a reply: the first request, then one more per round of tool calls the model makes.
+async function converse(who, messages) {
+  let out = await post({ villager: { name: NAME, world: worldLine(), surroundings: surroundings(who), start: start ? start.list : [] }, messages });
+  for (let i = 0; out.pending && i < 8; i++) {
+    const results = out.pending.calls.map(c => {
+      const f = TOOLS[c.name];
+      if (!f) return { id: c.id, content: "Unknown tool", is_error: true };
+      try { return { id: c.id, content: String(f(who, c.input || {})) }; }
+      catch (e) { console.error(e); return { id: c.id, content: "Couldn't do that just now (" + (e && e.message) + ")", is_error: true }; }
+    });
+    out = await post({ turn: out.pending.turn, results });
+  }
+  if (out.pending) throw new Error("too many tool calls");
+  return out;
+}
+function surroundings(who) { try { return BF.claudeSight ? BF.claudeSight.where(who) : ""; } catch (e) { return ""; } }
+
 async function send() {
   const text = ui.ta.value.trim();
   if (!text || busy || !chatting) return;
@@ -306,13 +345,8 @@ async function send() {
   setBusy(true);
   const t0 = performance.now(), who = chatting;
   let out = null, err = null;
-  try {
-    const r = await fetch("/claude/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ villager: { name: NAME, world: worldLine(), start: start ? start.list : [], inventory: contents(who.inv) },
-        messages: history.slice(-MAX_TURNS) }) });
-    out = await r.json().catch(() => null);
-    if (!r.ok || !out || out.error) err = (out && out.error) || "server answered " + r.status;
-  } catch (e) { err = "couldn't reach the game server (is it still running?)"; }
+  try { out = await converse(who, history.slice(-MAX_TURNS)); }
+  catch (e) { err = e instanceof TypeError ? "couldn't reach the game server (is it still running?)" : e.message; }
   wait.remove();
   setBusy(false);
   const ms = Math.round(performance.now() - t0);
@@ -331,12 +365,11 @@ async function send() {
     return;
   }
   if (out.stop === "max_tokens") reply += " ...";
-  if (out.tools && out.tools.length) glog("INFO", NAME + " checked its inventory (" + (listText(contents(who.inv)) || "empty") + ")", who);
   history.push({ role: "assistant", content: reply });
   if (history.length > 200) history.splice(0, history.length - 200);
   line("them", reply, NAME);
   const u = out.usage || {};
-  glog("INFO", "Chat with " + NAME + ": " + text.length + " characters in, " + reply.length + " out, " + (u.input || 0) + "/" + (u.output || 0) + " tokens, " + ms + " ms", who);
+  glog("INFO", "Chat with " + NAME + ": " + text.length + " characters in, " + reply.length + " out, " + (u.input || 0) + "/" + (u.output || 0) + " tokens, " + ms + " ms" + (out.tools && out.tools.length ? ", tools: " + out.tools.join(", ") : ""), who);
 }
 
 // ---------------------------------------------------------------- house designer
@@ -427,6 +460,6 @@ BF.claudeVillager = {
   design: () => current, designs: () => designs.slice(), tab: k => (k && ui.root ? setTab(k) : tab),
   home: () => home, mob: () => mob, status: () => status, history: () => history.slice(),
   preview: () => ui.preview || null,
-  inventory: () => contents(mob && mob.inv), startingInventory: () => (start ? start.list.slice() : null),
+  inventory: () => contents(mob && mob.inv), tools: () => Object.keys(TOOLS), runTool: (name, who) => TOOLS[name](who || mob, {}), startingInventory: () => (start ? start.list.slice() : null),
 };
 })();

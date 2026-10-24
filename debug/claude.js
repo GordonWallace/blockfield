@@ -6,9 +6,11 @@
 //   3. ~/.config/blockfield/anthropic-key (outside the checkout, so it can't be committed)
 // Without a key (CI, a fresh checkout) /claude/status says so and the game spawns no Claude villager.
 //   GET  /claude/status  -> { configured, sdk, model }
-//   POST /claude/chat    { villager: { name, world, start: [{item, count}], inventory: [{item, count}] }, messages: [{ role, content }] }
-//                        -> { reply, stop, tools: [names called], usage } or { error }
-// The model gets one tool, check_inventory, answered here from the inventory the page sent with the message.
+//   POST /claude/chat    { villager: { name, world, surroundings, start: [{item, count}] }, messages: [{ role, content }] }
+//                        -> { reply, stop, tools: [names called], usage }, or { pending: { turn, calls: [{ id, name, input }] } } when
+//                           the model calls a tool, or { error }
+//   POST /claude/chat    { turn, results: [{ id, content, is_error? }] } -> the same: the game's answers to those calls
+// The model's tools (check_inventory, look_around) are answered by the game (js/claudevillager.js, js/claudesight.js), live.
 //   POST /claude/blueprint { villager: { name }, request, palette: [{ name, about }], previous?: design }
 //                        -> { design, attempts, problems: [left after the last attempt], usage } or { error }
 // The house designer: Claude draws a house as JSON (DESIGN_SCHEMA, forced with structured outputs) from prompts/house-designer.md;
@@ -95,6 +97,7 @@ function systemPrompt(v) {
   let t;
   try { t = fs.readFileSync(PROMPT_FILE, "utf8").replace(/<!--[\s\S]*?-->/g, "").trim(); } catch (e) { t = ""; }
   const fill = { name: clip(v && v.name, 60) || "the Sage", world: clip(v && v.world, 300) || "nothing special.",
+    surroundings: clip(v && v.surroundings, 1500) || "somewhere in the wide world.",
     inventory: itemsText(v && v.start) || "nothing at all" };
   return (t || FALLBACK).replace(/\{\{(\w+)\}\}/g, (m, k) => (k in fill ? fill[k] : m));
 }
@@ -105,15 +108,27 @@ function itemsText(list) {
   return list.slice(0, 40).filter(e => e && e.count > 0).map(e => Math.floor(+e.count) + " " + clip(e.item, 40)).join(", ");
 }
 
-// The villager's one tool. The page sends what it holds now with every message; the tool answers from that, so the model looks
-// only when it needs to (asked what it has, about to offer something) and sees the live contents, not the starting list.
+// The villager's tools. The game answers them, not this server: when the model calls one, /claude/chat hands the call back to the
+// page, which looks at the world as it is at that moment (the Sage's bag, what it can see from where it stands) and posts the result
+// to carry on. So the answers are live whether or not the game is paused, and the game can later start conversations of its own.
+const NO_INPUT = { type: "object", properties: {}, required: [], additionalProperties: false };
 const TOOLS = [{
   name: "check_inventory", strict: true,
   description: "Look in your bag: returns every item you are carrying right now, with counts. Your starting inventory in the instructions " +
     "may be out of date, so use this whenever the traveller asks what you have, or before you mention or offer a specific item.",
-  input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+  input_schema: NO_INPUT,
+}, {
+  name: "look_around", strict: true,
+  description: "Look around from where you stand: returns the creatures, people, plants, trees, crops, buildings, workstations and land you " +
+    "can see right now, each with a compass direction and distance. Only what is in your line of sight is listed (nothing behind walls, " +
+    "hills or trees), and you see less far in the dark. Use it whenever the traveller asks what is around, about something nearby, or " +
+    "before you describe your surroundings; don't guess.",
+  input_schema: NO_INPUT,
 }];
-const MAX_ROUNDS = 4;   // tool calls per player message
+const TOOL_NAMES = new Set(TOOLS.map(t => t.name));
+const MAX_RESULT = 12000;   // characters of one tool result
+const PENDING_MS = 120000;  // a tool call the page hasn't answered in this long is dropped
+const MAX_ROUNDS = 6;   // model rounds per player message (each tool call adds one)
 
 // Strict shape: alternating turns that start and end with the player, short strings only.
 function cleanMessages(list) {
@@ -127,38 +142,70 @@ function cleanMessages(list) {
 function json(res, code, obj) { res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(obj)); }
 const loopback = req => { const a = req.socket.remoteAddress || ""; return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1"; };
 
+// POST /claude/chat with { villager, messages } starts a reply; with { turn, results: [{ id, content, is_error? }] } it answers the tool calls
+// of a reply in progress. Either way the answer is the reply ({ reply, stop, tools, usage }) or, when the model calls tools,
+// { pending: { turn, calls: [{ id, name, input }] } } for the page to answer.
+const pending = new Map();   // turn -> { rec, convo, system, used, input, output, round, calls, t }
+let turnId = 0;
 async function chat(body) {
+  const now = Date.now();
+  for (const [k, p] of pending) if (now - p.t > PENDING_MS) { pending.delete(k); endCall(p.rec, "error", { error: "the game never answered the tool call" }); }
+  if (body && body.turn != null) return toolResults(body);
   const messages = cleanMessages(body && body.messages);
   if (!messages) return [400, { error: "bad conversation" }];
   const limited = allow();
   if (limited) return [429, { error: limited }];
-  const system = systemPrompt(body.villager), used = [], convo = messages.slice();
+  const system = systemPrompt(body.villager);
   const rec = startCall("chat", { max_tokens: MAX_TOKENS, effort: "low", tools: TOOLS, tool_choice: "auto" }, system, messages);
+  return step({ rec, convo: messages.slice(), system, used: [], input: 0, output: 0, round: 0 });
+}
+function toolResults(body) {
+  const p = pending.get(String(body.turn));
+  if (!p) return [404, { error: "that reply is no longer waiting for a tool result" }];
+  const got = Array.isArray(body.results) ? body.results : [];
+  const results = p.calls.map(c => {
+    const r = got.find(x => x && x.id === c.id);
+    if (!TOOL_NAMES.has(c.name)) return { type: "tool_result", tool_use_id: c.id, content: "Unknown tool", is_error: true };
+    if (!r) return { type: "tool_result", tool_use_id: c.id, content: "No answer from the game", is_error: true };
+    const out = { type: "tool_result", tool_use_id: c.id, content: clip(r.content, MAX_RESULT) || "(nothing)" };
+    if (r.is_error) out.is_error = true;
+    return out;
+  });
+  pending.delete(String(body.turn));
+  p.convo.push({ role: "user", content: results });
+  p.rec.messages.push(copy(p.convo[p.convo.length - 1])); tell(p.rec);
+  return step(p);
+}
+// One model round, then either the reply, or the tool calls handed to the page (the state waits in `pending`).
+async function step(p) {
+  const { rec } = p;
   try {
-    let r = null, input = 0, output = 0;
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      const t0 = Date.now();
-      r = await getClient().messages.create({
-        model: MODEL, max_tokens: MAX_TOKENS, output_config: { effort: "low" },
-        system, tools: TOOLS, tool_choice: { type: "auto" }, messages: convo,
-      });
-      input += r.usage.input_tokens; output += r.usage.output_tokens;
-      if (r.stop_reason !== "tool_use") { roundDone(rec, r, Date.now() - t0); break; }
-      // every block goes back as it came (thinking included), then one result per tool call
-      convo.push({ role: "assistant", content: r.content });
-      const results = r.content.filter(b => b.type === "tool_use").map(b => {
-        used.push(b.name);
-        if (b.name !== "check_inventory") return { type: "tool_result", tool_use_id: b.id, content: "Unknown tool", is_error: true };
-        const now = itemsText(body.villager && body.villager.inventory);
-        return { type: "tool_result", tool_use_id: b.id, content: now ? "You are carrying: " + now + "." : "Your bag is empty." };
-      });
-      convo.push({ role: "user", content: results });
-      roundDone(rec, r, Date.now() - t0, convo[convo.length - 1]);
+    const t0 = Date.now();
+    const r = await getClient().messages.create({
+      model: MODEL, max_tokens: MAX_TOKENS, output_config: { effort: "low" },
+      system: p.system, tools: TOOLS, tool_choice: { type: "auto" }, messages: p.convo,
+    });
+    p.input += r.usage.input_tokens; p.output += r.usage.output_tokens; p.round++;
+    roundDone(rec, r, Date.now() - t0);
+    if (r.stop_reason === "tool_use" && p.round < MAX_ROUNDS) {
+      // every block goes back as it came (thinking included); the page answers each call
+      p.convo.push({ role: "assistant", content: r.content });
+      p.calls = r.content.filter(b => b.type === "tool_use").map(b => ({ id: b.id, name: b.name, input: b.input || {} }));
+      for (const c of p.calls) p.used.push(c.name);
+      const unknown = p.calls.filter(c => !TOOL_NAMES.has(c.name));
+      if (unknown.length) return toolResults(Object.assign({ turn: park(p) }, { results: [] }));   // answered as errors here
+      return [200, { pending: { turn: park(p), calls: p.calls } }];
     }
     const reply = r.stop_reason === "refusal" ? "" : r.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
-    endCall(rec, r.stop_reason === "refusal" ? "refused" : "ok", { usage: { input, output } });
-    return [200, { reply, stop: r.stop_reason, tools: used, usage: { input, output } }];
+    endCall(rec, r.stop_reason === "refusal" ? "refused" : "ok", { usage: { input: p.input, output: p.output } });
+    return [200, { reply, stop: r.stop_reason, tools: p.used, usage: { input: p.input, output: p.output } }];
   } catch (e) { const out = apiError(e); endCall(rec, "error", { error: out[1].error }); return out; }
+}
+function park(p) {
+  const turn = String(++turnId);
+  p.t = Date.now(); pending.set(turn, p);
+  while (pending.size > 8) { const [k, o] = pending.entries().next().value; pending.delete(k); endCall(o.rec, "error", { error: "dropped: too many replies waiting" }); }
+  return turn;
 }
 
 function apiError(e) {
