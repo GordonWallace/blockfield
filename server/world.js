@@ -266,6 +266,7 @@ function start(o) {
     try {
       const r = await s.ask("feed", { ack: srv.feedAck }, 5000);
       srv.feedAck = null;
+      if (r && r.error) { debug.push({ t: Date.now(), n: ++feedN, error: "in the simulation: " + String(r.error).split("\n").slice(0, 3).join("\n") }); return; }   // (the screen shows it, as a page's)
       if (!r || !r.part) return;
       const part = r.part, pg = srv.page || {};
       // item icons: the simulation names them, the page draws them (asked for once; they go in a later snapshot)
@@ -285,6 +286,7 @@ function start(o) {
         const simA = {}, pageA = {};
         for (const k in a) (SIM_ACK.includes(k) ? simA : pageA)[k] = a[k];
         if (a.resync) pageA.resync = true;
+        if (a.screens != null) simA.screens = a.screens;   // (both: the meter runs in the simulation while a screen is open, js/perf.js)
         if (Object.keys(simA).length) srv.feedAck = simA;
         if (Object.keys(pageA).length) toPage({ feedAck: pageA });
       }

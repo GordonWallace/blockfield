@@ -1,18 +1,17 @@
+// @ci integration hosts=worker,server
 // Second-screen debug test: NODE_PATH=$(npm root -g) node test/debug-screen.js [outPrefix]
 // On a planet world (generator 4, spec r14-21; test/debug-planet.js covers what is new there).
 // Starts debug/server.js on spare ports, opens the game and the debug screen, checks the screen matches the game,
 // restarts the server mid-village (the game must resend the layout and log), and screenshots the screen.
-const path = require('path'), { spawn } = require('child_process');
+// BF_HOST=page|worker|server (spec r15-43): where the simulation runs; the village's numbers and the scripted events are read and
+// written there (lib.sim). On the world server the restart and closed-game steps are skipped (the server is the game there).
+const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
+const lib = require('./lib');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug-screen';
-const GAME = 8710, DBG = 8711;
-// the server prints its banner before its ports are open: wait until the debug port answers
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', path.join(require('os').tmpdir(), 'bf-debug-screen-alerts.json')]);   // not the user's own alerts
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
-};
+const onServer = lib.host() === 'server';
+let GAME = 0, DBG = 0;
+const start = async () => { const s = await lib.serve({ world: onServer, game: GAME || undefined, debug: DBG || undefined }); GAME = s.game; DBG = s.debug; return s; };
 (async () => {
   const fails = [], ok = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails.push(n); };
   let srv = await start();
@@ -21,19 +20,22 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await lib.install(game);   // (BFT.sim)
+  await game.goto(`http://localhost:${GAME}/?nolod&${lib.q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   // a planet boot works out its rivers first (r14-10): wait for that loading step
   await game.waitForFunction(() => window.BF && BF.state && !BF.preparing && !document.getElementById('bf-loading'), null, { timeout: 120000 }).catch(() => {});
   await game.waitForTimeout(5000);
   ok('feed is on when served by the debug server', await game.evaluate(() => !!BF.debugFeed));
-  await require('./lib').toVillage(game);
-  await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'birth', 'Test baby was born'); });
+  await lib.simReady(game);
+  await lib.sim(game, () => { if (BF.active) BF.active.set({ on: false }); });   // (no extra villages, as in an automated page: a worker or the world server can't tell)
+  await lib.toVillage(game);
+  await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'birth', 'Test baby was born'); });
   const dbg = await b.newPage({ viewport: { width: 1600, height: 1000 } });
   dbg.on('pageerror', e => console.log('DBG PAGEERROR', e.message));
   await dbg.route('https://fonts.**', r => r.abort());
   await dbg.goto(`http://localhost:${DBG}/`);
   await dbg.waitForTimeout(2000);
-  const want = await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), d = BF.vlog.panelData(rec);
+  const want = await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z), d = BF.vlog.panelData(rec);
     return { name: d.name, villagers: d.villagers, seed: BF.state.seed, log: BF.vlog.entries(rec.key).length, loaded: d.loaded }; });
   const got = () => dbg.evaluate(() => ({ conn: document.getElementById('conn').textContent, name: document.getElementById('v-name').textContent,
     villagers: +document.getElementById('v-villagers').textContent, seed: +document.getElementById('h-seed').textContent,
@@ -41,7 +43,7 @@ const start = async () => {
   let g = await got();
   // villagers keep logging, so the screen can be one snapshot behind the game: wait (up to 5 s) until both show the same number of entries
   for (let i = 0; i < 20; i++) {
-    want.log = await game.evaluate(() => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key).length);
+    want.log = await lib.sim(game, () => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key).length);
     if (g.log === want.log) break;
     await dbg.waitForTimeout(250); g = await got();
   }
@@ -51,7 +53,7 @@ const start = async () => {
   ok('seed', g.seed === want.seed);
   ok('roster rows = loaded villagers', g.rows === want.loaded);
   // emeralds and food (inventory plus owned chests) and starving, per villager
-  const gv = await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
+  const gv = await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && BF.trades.inv.count(x.inv, BF.I.emerald) > 0) || rec.members.find(x => x.type === 'villager' && !x.dead);
     const k = BF.storage.keyOf(m), cs = [...BF.inventory.chests.values()].filter(c => c.owner === k);
     const em = BF.trades.inv.count(m.inv, BF.I.emerald) + cs.reduce((n, c) => n + c.slots.reduce((a, st) => a + (st && st.id === BF.I.emerald ? st.count : 0), 0), 0);
@@ -69,32 +71,35 @@ const start = async () => {
   await dbg.waitForFunction(() => /V·s\/s/.test(document.getElementById('c-vss').textContent) && document.querySelectorAll('#c-split span').length === 7, null, { timeout: 15000 }).catch(() => {});
   const pc = await dbg.evaluate(() => ({ vss: document.getElementById('c-vss').textContent, ms: document.getElementById('c-perf-ms').textContent, parts: document.querySelectorAll('#c-split span').length, f3: document.getElementById('f3').textContent }));
   ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
-  ok('meter on in the game while the screen is open', await game.evaluate(() => BF.perf.on));
+  ok('meter on in the game while the screen is open', await lib.sim(game, () => BF.perf.on));
   // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
   // (the game hashes again every 10 s and the screen shows it with the next snapshot: wait, up to 15 s, until both show the same one)
   let hs, gh;
   for (let i = 0; i < 30; i++) {
     hs = await dbg.evaluate(() => ({ hash: document.getElementById('c-hash').textContent, parts: document.querySelectorAll('#c-hashparts .row').length }));
-    gh = await game.evaluate(() => BF.stateHash.last && { hash: BF.stateHash.last.hash, parts: BF.stateHash.PARTS.length });
+    gh = await lib.sim(game, () => BF.stateHash.last && { hash: BF.stateHash.last.hash, parts: BF.stateHash.PARTS.length });
     if (gh && hs.hash === gh.hash) break;
     await dbg.waitForTimeout(500);
   }
   ok('state hash card shows the game\'s hash and its parts ' + JSON.stringify([hs, gh]), gh && /^[0-9a-f]{16}$/.test(hs.hash) && hs.hash === gh.hash && hs.parts === gh.parts);
   await dbg.screenshot({ path: out + '.png', fullPage: true });
-  // server restart: a fresh server has no layout/log; the game must resend both
-  srv.kill(); await new Promise(r => srv.once('exit', r));
-  srv = await start();
-  await game.evaluate(() => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'job', 'Someone became a Tester'); });
+  // server restart: a fresh server has no layout/log; the game must resend both (on the world server the restart is skipped: it would
+  // stop the world)
+  if (onServer) console.log('(the server restart is skipped on the world server: it would stop the world)');
+  else { await srv.stop(); srv = await start(); }
+  await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'job', 'Someone became a Tester'); });
   await dbg.waitForTimeout(7000);
   g = await got();
   ok('after restart: live again', g.conn === 'Live');
-  const now = await game.evaluate(() => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key));
-  await dbg.waitForTimeout(1500); g = await got();   // villagers may log more meanwhile: the screen must hold at least what the game had
+  const now = await lib.sim(game, () => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key));
+  await dbg.waitForTimeout(1500);   // villagers may log more meanwhile: the screen must hold at least what the game had
+  await dbg.waitForFunction(n => document.querySelectorAll('#log .ent').length >= n, now.length, { timeout: 10000 }).catch(() => {});   // (a snapshot later off the page)
+  g = await got();
   ok('after restart: log resent ' + g.log + '/' + now.length, g.log >= now.length && now.some(e => /Tester/.test(e[2])));
   const st = await (await fetch(`http://localhost:${DBG}/state`)).json();
   ok('after restart: layout resent', Object.values(st.layouts || {}).some(l => l.buildings.length));
   // log filters: a dropdown per villager type, checkboxes per action, remembered across reloads
-  const tr = await game.evaluate(() => {
+  const tr = await lib.sim(game, () => {
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     const vs = rec.members.filter(m => m.type === 'villager' && !m.child && m.trades && m.trades.length && m.profession !== 'nitwit');
     const s = vs[0], b2 = vs.find(m => m.profession !== s.profession);
@@ -159,17 +164,18 @@ const start = async () => {
   ok('clear filters shows everything', (await count()) >= all && !(await dbg.$('#l-clear')));
   // a second village: the view follows the nearest loaded one, the list shows both with distances, and the first can be picked
   const first = want.name;
-  const second = await game.evaluate(() => {
+  const sv = await lib.sim(game, () => {   // (the village here is the simulation's; the player's body is the page's)
     const p = BF.player.position, here = BF.vlog.villageAt(p.x, p.z);
     const vs = BF.worldgen.villagesNear(p.x, p.z, 1500).filter(v => Math.round(v.x) + "," + Math.round(v.z) !== here.key)
       .sort((a, b) => BF.planet.distance(p, a) - BF.planet.distance(p, b));
     const v = vs[0];
-    BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
-    return BF.signs.villageName(Math.round(v.x) + "," + Math.round(v.z));
+    return { x: v.x, y: v.y || BF.worldgen.heightAt(v.x, v.z), z: v.z, name: BF.signs.villageName(Math.round(v.x) + "," + Math.round(v.z)) };
   });
+  await game.evaluate(v => BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5), sv);
+  const second = sv.name;
   await game.waitForTimeout(12000);
   // the planet's chunks (and the distant terrain) can take longer: wait up to 40 s more for the village's villagers to be out, then a snapshot
-  for (let i = 0; i < 40 && !(await game.evaluate(() => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); return !!(r && r.members && r.members.some(m => m.type === 'villager')); })); i++) await game.waitForTimeout(1000);
+  for (let i = 0; i < 40 && !(await lib.sim(game, () => { const r = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); return !!(r && r.members && r.members.some(m => m.type === 'villager')); })); i++) await game.waitForTimeout(1000);
   await game.waitForTimeout(2500);
   const list = () => dbg.evaluate(() => [...document.querySelectorAll('#vlist .vrow')].map(r => ({ name: r.querySelector('.vn').firstChild.textContent, on: r.classList.contains('on'), sel: r.classList.contains('sel'), dist: +r.querySelector('.vd b').textContent.replace(/,/g, '') })));
   let L = await list();
@@ -191,7 +197,7 @@ const start = async () => {
   ok('follow nearest goes back', (await got()).name === second);
   // ages: game days loaded and active, for villagers and villages; a villager that wasn't ticking (unloaded) doesn't age through a gap
   const shownKey = await dbg.evaluate(() => document.querySelector('.vrow.sel').dataset.k);   // the village on the screen (another may be known but unloaded)
-  const ages = await game.evaluate(async key => {
+  const ages = await lib.sim(game, async key => {
     const vs = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && m.life && m.village && m.village.key === key);
     const a = vs[0], b = vs[1], la = a.life.lived, lb = b.life.lived;
     b._agePass = -99;                                            // as if b had just come back from being unloaded
@@ -207,12 +213,12 @@ const start = async () => {
   ok('villager rows all the same height ' + JSON.stringify([...new Set(rowH)]), rowH.length > 3 && new Set(rowH).size === 1);
   // map legend: structure kinds, and builder-made structures (planned ones count) reach the screen
   const bkey = await dbg.evaluate(() => document.querySelector('.vrow.sel').dataset.k);
-  const nBuilt = await game.evaluate(key => { const r = BF.mobs.villages.get(key); return (r.built || []).filter(e => e.state !== 'abandoned').length; }, bkey);
+  const nBuilt = await lib.sim(game, key => { const r = BF.mobs.villages.get(key); return (r.built || []).filter(e => e.state !== 'abandoned').length; }, bkey);
   await dbg.waitForTimeout(800);
   const leg = await dbg.evaluate(() => document.getElementById('legend').textContent);
   ok('map legend shows houses, farms, paddocks and builder stars (' + nBuilt + ' built)', /House/.test(leg) && /Farm/.test(leg) && /Paddock/.test(leg) && /Built by a builder/.test(leg));
   // happiness: the formula's terms, events falling out of the week, and the panel showing the game's score
-  const hap = await game.evaluate(key => {
+  const hap = await lib.sim(game, key => {
     const H = BF.happiness, rec = BF.mobs.villages.get(key);
     const vs = rec.members.filter(m => m.type === 'villager' && !m.dead && !m.removed), ad = vs.filter(m => !m.child);
     const h0 = H.score(rec), c = id => h0.terms.find(t => t.id === id).count;
@@ -227,9 +233,9 @@ const start = async () => {
   const hShown = await dbg.evaluate(() => document.getElementById('v-happy').textContent);
   ok('happiness shown on the debug screen: ' + hShown.slice(0, 60), /Happiness\s*\d+\s*\/ 100/.test(hShown) && /\u221210 1 villagers? killed this week/.test(hShown) && /\+\d+ \d+ born this week/.test(hShown));
   await dbg.screenshot({ path: out + '-happy.png', fullPage: true });
-  const born2 = await game.evaluate(key => { BF.sky.day += 8; const n = BF.happiness.score(BF.mobs.villages.get(key)).terms.find(t => t.id === 'born').count; BF.sky.day -= 8; return n; }, hap.key);
+  const born2 = await lib.sim(game, key => { BF.sky.day += 8; const n = BF.happiness.score(BF.mobs.villages.get(key)).terms.find(t => t.id === 'born').count; BF.sky.day -= 8; return n; }, hap.key);
   ok('a birth and a death this week move happiness by +5 - 10, gone after a week', hap.d1 === -5 && born2 === 0);
-  const hsave = await game.evaluate(key => {
+  const hsave = await lib.sim(game, key => {
     const H = BF.happiness, saved = JSON.stringify(H.serialize());
     H.deserialize(JSON.parse(saved));
     const round = JSON.stringify(H.serialize()) === saved && H.last(key) != null;
@@ -242,7 +248,7 @@ const start = async () => {
   }, hap.key);
   ok('happiness saves and loads, old saves read last week from the log ' + JSON.stringify(hsave), hsave.round && hsave.fromLog);
   // past villagers: a villager killed in the shown village is listed with its job, cause and age, and counted
-  const victim = await game.evaluate(key => {
+  const victim = await lib.sim(game, key => {
     const r = BF.mobs.villages.get(key), m = r.members.find(x => x.type === 'villager' && !x.dead && !x.child && x.profession !== 'unemployed');
     const name = BF.vlog.nameOf(m); BF.mobs.hurt(m, 999, 'a zombie'); return name;
   }, bkey);
@@ -253,19 +259,22 @@ const start = async () => {
   // the game page's scripts carry their file times, so a browser can't keep running an old saved copy of one
   ok('game scripts are versioned', await game.evaluate(() => [...document.scripts].filter(s => /\/js\//.test(s.src)).every(s => /\?v=\d+$/.test(s.src))));
   // a feed error (an old villagelog.js without panelData, say) shows on the screen instead of "waiting for the game"
-  await game.evaluate(() => { window._pd = BF.vlog.panelData; delete BF.vlog.panelData; });
+  await lib.sim(game, () => { globalThis._pd = BF.vlog.panelData; delete BF.vlog.panelData; });
   await dbg.waitForTimeout(6000);
   const errShown = await dbg.evaluate(() => ({ conn: document.getElementById('conn').textContent, wait: !document.getElementById('waiting').hidden, text: document.getElementById('waiting').textContent }));
   ok('feed error shown ' + errShown.conn, errShown.conn === 'Game error' && errShown.wait && /panelData/.test(errShown.text));
-  await game.evaluate(() => { BF.vlog.panelData = window._pd; });
+  await lib.sim(game, () => { BF.vlog.panelData = globalThis._pd; });
   await dbg.waitForTimeout(5000);   // after an error the feed waits 4 s before its next try
+  // (off the page the simulation's part comes a snapshot later, so the error can show once more before it clears)
+  await dbg.waitForFunction(() => document.getElementById('conn').textContent === 'Live', null, { timeout: 15000 }).catch(() => {});
   ok('live again once fixed', (await got()).conn === 'Live');
-  // a debug screen opened after the game has gone doesn't show its last snapshot as live
+  // a debug screen opened after the game has gone doesn't show its last snapshot as live (the world server keeps feeding it: its
+  // world pauses, test/server.js)
   await game.close(); await dbg.waitForTimeout(3000);
   await dbg.reload(); await dbg.waitForTimeout(1500);
-  ok('closed game not shown as live: ' + (await got()).conn, (await got()).conn === 'Game not responding');
+  if (!onServer) ok('closed game not shown as live: ' + (await got()).conn, (await got()).conn === 'Game not responding');
   await b.close();
-  srv.kill(); await new Promise(r => srv.exitCode !== null ? r() : srv.once('exit', r));   // free the ports for the next run
+  await srv.stop();   // free the ports for the next run
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);
 })();
