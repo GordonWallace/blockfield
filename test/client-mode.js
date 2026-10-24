@@ -158,7 +158,7 @@ module.exports = async (pg, out) => {
   await pg.keyboard.press("F3");
   await frames(10);
   const f3 = await pg.evaluate(() => document.getElementById("debug").textContent.split("\n")
-    .filter(l => !/^(Blockfield|Chunks|Sim |Requests|Shared memory)/.test(l))
+    .filter(l => !/^(Blockfield|Chunks|Sim |Requests|Regions|Shared memory)/.test(l))
     .map(l => l.replace(/Calls \d+/, "Calls -").replace(/Mobs \d+/, "Mobs -").replace(/\d+ sim villages?, \d+ kept chunks/, "sims").replace(/[\d.]+ms$/, "ms")).join("\n"));
   await pg.keyboard.press("F3");
   const f3File = path.join(DIR, "f3.txt");

@@ -486,7 +486,7 @@ function shutGates() {
     const g = toShut[i], [x, y, z] = g.at, bk = BF.world.isLoaded(x, z) ? BF.blocks[BF.world.getBlock(x, y, z)] : null;
     if (!bk || !bk.gate || !bk.gate.open || BF.simNow() - g.t > 120) { toShut.splice(i, 1); continue; }
     if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || (live(g.m) && Math.hypot(x + 0.5 - g.m.position.x, z + 0.5 - g.m.position.z) < 1.5)) continue;
-    BF.blockReq.door(g.m, x, y, z, false); toShut.splice(i, 1);   // a request (spec r15-19, js/blockreqs.js)
+    BF.blockReq.door(g.m, x, y, z, false);   // a request (spec r15-19, js/blockreqs.js); kept until the gate is seen shut, as a close is refused if an animal steps in
   }
 }
 function loot(m, id, n, where) {

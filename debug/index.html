@@ -343,6 +343,8 @@
       <div class="big" id="c-budget">-</div><div class="sub" id="c-budget-sub"></div><div class="bar"><i id="b-budget"></i></div><div class="sub" id="c-budget-ex"></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
     <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
       <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
+    <div class="card" id="c-rtickcard" title="The region tick (js/regiontick.js, spec r15-33): mobs think region by region, and each region's requests apply together; ms per tick by phase over the last 200 ticks, and the regions with the most mobs"><h3>Region tick <span class="sub" id="c-rtick-st"></span></h3>
+      <div class="big" id="c-rtick">-</div><div class="sub" id="c-rtick-sub"></div><div class="psplit" id="c-rtick-ms"></div><div class="psplit" id="c-rtick-regions"></div></div>
     <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
     <div class="card"><h3>Biome</h3><div class="big" id="c-biome" style="font-size:20px">-</div><div class="sub" id="c-sim"></div></div>
     <div class="card"><h3>Chunks</h3><div class="big" id="c-chunks">-</div><div class="sub" id="c-queued"></div><canvas class="spark" id="s-queue"></canvas></div>
@@ -764,6 +766,20 @@ function renderTop(s) {
   renderPerf(s.perf);
   renderBudget(s.budget);
   renderRequests(s.requests);
+  renderRegionTick(s.regionTick);
+}
+
+// the region tick (js/regiontick.js): regions ticked, ms per tick by phase, and the busiest regions by mobs
+function renderRegionTick(r) {
+  $("c-rtickcard").hidden = !r;
+  if (!r) return;
+  $("c-rtick-st").textContent = r.order === "region" ? "" : "order " + r.order;
+  $("c-rtick").innerHTML = `${fmt(r.regions)} <small>regions ticked</small>`;
+  $("c-rtick-sub").textContent = `${fmt(r.mobs)} mobs \u00B7 ${fmt(r.requests)} requests applied` + (r.inactive ? ` \u00B7 ${fmt(r.inactive)} refused (region not simulated)` : "");
+  const ms = Object.entries(r.ms || {}), mx = Math.max(0.001, ...ms.map(e => e[1]));
+  $("c-rtick-ms").innerHTML = ms.map(([k, v]) => `<span>${esc(k)}</span><i style="width:${Math.round(v / mx * 100)}%"></i><b>${v.toFixed(2)} ms</b>`).join("");
+  const rg = r.byRegion || [], rm = Math.max(1, ...rg.map(e => e.mobs));
+  $("c-rtick-regions").innerHTML = rg.map(e => `<span>${esc(e.name)}</span><i style="width:${Math.round(e.mobs / rm * 100)}%"></i><b>${fmt(e.mobs)}</b>`).join("");
 }
 
 // the request queue (js/requests.js): applied and refused since the world loaded, and the direct writes left to convert, by module
@@ -1684,7 +1700,7 @@ const gf = { levels: ["DEBUG"], kinds: [], villages: [], types: [] };   // what 
 try { Object.assign(gf, JSON.parse(localStorage.getItem(GSTORE) || "{}")); } catch (e) { /* private window: defaults */ }
 const gOff = { levels: new Set(gf.levels), kinds: new Set(gf.kinds), villages: new Set(gf.villages), types: new Set(gf.types) };
 const gSave = () => { try { localStorage.setItem(GSTORE, JSON.stringify({ levels: [...gOff.levels], kinds: [...gOff.kinds], villages: [...gOff.villages], types: [...gOff.types] })); } catch (e) {} };
-const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter", budget: "Simulation budget", requests: "Request queue", trades: "Refused trades" };
+const GKINDS = { game: "Game loaded and unloaded", version: "Version changes", loading: "Village loading errors", console: "Console errors and warnings", uncaught: "Uncaught errors", perf: "Performance meter", budget: "Simulation budget", requests: "Request queue", regions: "Regions", trades: "Refused trades" };
 const NOV = "(no village)";
 function glogSet(g) { glog = g && Array.isArray(g.lines) ? g : null; gDirty = true; gRender(); }
 function glogIn(g) {

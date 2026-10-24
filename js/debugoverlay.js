@@ -51,7 +51,7 @@ function updateDebug(now) {
 // figures (mobs, villages simulated, the clock, weather, the villager-seconds meter, requests, block light) are the protocol's "f3" query
 // (spec r15-37); in the page its answer comes at once, elsewhere the overlay shows the latest one.
 let f3 = null, f3Asking = false;
-const F3_NONE = { mobs: 0, boats: 0, sim: "", clock: "", weather: "", perf: null, perfText: "", requests: null, requestsText: "", blockLight: 0 };
+const F3_NONE = { mobs: 0, boats: 0, sim: "", clock: "", weather: "", perf: null, perfText: "", requests: null, requestsText: "", regionText: "", blockLight: 0 };
 function debugInfo() {
   const p = BF.player.position;
   const biome = BF.worldgen.biomeAt(p.x, p.z), cc = BF.world.chunkAt(p.x, p.z);
@@ -71,6 +71,7 @@ function debugInfo() {
     clicks: BF.player.clickLog ? BF.player.clickLog() : [],
     perf: q.perf, perfText: q.perfText,   // villager-seconds meter (js/perf.js): null until it has been on
     requests: q.requests, requestsText: q.requestsText,   // the request queue and direct writes (js/requests.js)
+    regionText: q.regionText,   // the region tick (js/regiontick.js)
     planet: planetInfo(p),
     shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
     simMode: BF.simHost && BF.simHost.label ? BF.simHost.label() + (BF.simHost.worker || !BF.simHost.why ? "" : " (" + BF.simHost.why + ")") : "Browser (this page)",   // r15-38, r15-43
@@ -98,6 +99,7 @@ function debugText(d) {
     `Mobs ${d.mobs}${d.boats ? `  Boats ${d.boats}` : ""}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
     (d.perf ? d.perfText + "\n" : "") +
     (d.requests ? d.requestsText + "\n" : "") +
+    (d.regionText ? d.regionText + "\n" : "") +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
