@@ -16,7 +16,7 @@ const FILES = ["mobview.js", "entityview.js", "mapview.js", "villagerhover.js", 
 //   main.js       the page's boot: it starts the simulation in the page (BF.mobs.init and friends); r15-38 moves that into a worker
 //   debugfeed.js  the debug screen's feed: produced on the simulation's side (the spec), so it reads the simulation
 //   alerts.js     the debug screen's alerts: checked against village log entries as the simulation writes them
-//   commands.js   slash commands act on the simulation (spawn, kill, give, weather); r15-38 sends them as requests
+//   commands.js   slash commands act on the simulation (spawn, kill, give, weather): "command" requests, run in the worker (r15-38)
 //   inventory.js, player.js, maps.js, signs.js, sky.js, weather.js, world.js, villagelog.js: simulation files that also draw or take
 //                 input; their screens and overlays read the protocol where this spec moved them (the chest and trade screens: "chest"
 //                 and "trades" queries; the village panel and names: js/villagepanel.js)

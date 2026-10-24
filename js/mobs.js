@@ -2455,6 +2455,7 @@ BF.mobs = {
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
+  isHostile: t => !!(TYPES[t] && TYPES[t].hostile),   // the type table's flag (js/player.js on the client's mirror, r15-38)
   // spec r15-31, for the animal modules: near(p, r, local) -> the mobs a scan within r blocks of p must look at (see nearMobs);
   // checkScan(label, got, scan) -> got, checked against scan(BF.mobs.list) when BF.regions.verifyQueries is on (see vq);
   // ofType(type) -> the mobs of one type, in list order (a copy).

@@ -6,6 +6,7 @@
 //     generated here with the worker's edits) has the same blocks as the worker's;
 //   - paused, the state hash is taken and the world saved through the worker; a fresh page loads it, and its hash matches;
 //   - the page's frame time at 100x, worker against page (printed for the report);
+//   - slash commands run in the worker, and the crosshair finds and hits a mob in the client's mirror;
 //   - a crash in the worker shows the error screen and goes to the game log;
 //   - the same day, save and load with the simulation forced into the page (?sim=page), and a page opened as a file falls back to it.
 // The hash after loading is REPORT-ONLY on the parts the save doesn't restore exactly in either mode (the same parts differ with the
@@ -136,6 +137,30 @@ async function loadBack(b, url, mode, day) {
     const edits = await pg.evaluate(() => [...BF.world.edits.values()].reduce((n, m) => n + m.size, 0));
     check(wh.keys.length > 50 && wh.hash === ph, `the page's copy of the world has the worker's blocks (${wh.keys.length} chunks loaded in both, ${edits} edits)`);
     // the crash path, on this page (it's done with)
+    // slash commands run in the worker, and the player aims at and hits a mob from the client's mirror
+    const cm = await pg.evaluate(async () => {
+      const P = BF.player, p = P.position;
+      P.setLook(0, -0.3);   // facing -z, a little down (the cow's box at 3 blocks)
+      const r = BF.commands.execute('/summon cow ~ ~ ~-3');
+      const t0 = performance.now();
+      let cow = null;
+      while (performance.now() - t0 < 10000 && !cow) {
+        await new Promise(res => setTimeout(res, 100));
+        cow = [...BF.client.world.entities.values()].find(e => e.kind === 'mob' && e.type === 'cow' && Math.abs(e.x - p.x) < 1 && Math.abs(e.z - (p.z - 3)) < 1);
+      }
+      const printed = [...document.querySelectorAll('.bfc-line')].map(e => e.textContent);
+      const aim = P.aimedMob();
+      const req = BF.client.request, seen = [];
+      BF.client.request = (k, t, d) => { const q = req(k, t, d); if (k === 'player.hit') q.then(res => seen.push(res)); return q; };
+      const hit = P.attack();
+      const t1 = performance.now();
+      while (performance.now() - t1 < 5000 && !seen.length) await new Promise(res => setTimeout(res, 100));
+      BF.client.request = req;
+      return { pending: !!r.pending, cow: !!cow, printed: printed.slice(-3), aim, cowId: cow && cow.sid, hit, hitResult: seen[0] || null };
+    });
+    check(cm.pending && cm.cow && cm.printed.some(t => /Summoned new Cow/.test(t)), `worker: /summon ran in the worker and its answer came back (${JSON.stringify(cm.printed)})`);
+    check(cm.aim && cm.aim.type === 'cow' && cm.aim.id === cm.cowId, `worker: the crosshair finds the cow in the client's mirror (${JSON.stringify(cm.aim)})`);
+    check(cm.hit && cm.hitResult && cm.hitResult.ok, `worker: a left click hits it through the worker (${JSON.stringify(cm.hitResult)})`);
     const lw = await loadBack(b, wurl, 'worker', day);
     await pg.close();
     await lw.pg.evaluate(() => BF.proto.worker.w.postMessage({ test: 'crash' }));
