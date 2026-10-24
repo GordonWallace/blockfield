@@ -54,6 +54,7 @@ const LINES = [
   ["main.js", "const t0 = performance.now();\n      let f = 0;", "boot: the river solve runs in slices until done, before the game starts"],
   ["main.js", "while (f < 1 && performance.now() - t0 < 60)", "boot: the river solve slices (above)"],
   ["main.js", "let last = performance.now();", "frame dt (the player and drawing)"],
+  ["requests.js", "const clock = () => (globalThis.performance ? performance.now() : Date.now());", "ms per tick phase for the debug screen and the region-tick log line (spec r15-33): measures, decides nothing"],
   ["boot.js", "const W = BF.warp, plan = W.plan(raw), t0 = performance.now();", "ticks per frame within BUDGET_MS: how fast the game runs, not what happens"],
   ["boot.js", "const t0 = performance.now();\n  BF.world.setViewDist", "the headless boot's own timing, logged (r15-40)"],
   ["boot.js", "chunks + \" chunks loaded in \" + ((performance.now() - t0) / 1000).toFixed(1)", "the headless boot's own timing (above)"],

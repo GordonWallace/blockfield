@@ -416,10 +416,15 @@ BF.req.on("damage", req => {
   const hp = m.hp, landed = hurtNow(m, d.amount, knockOf(d), d.byPlayer, d.cause, by && by !== m ? by : null, d);
   return landed ? { ok: true, killed: m.dead, hp: m.hp, was: hp } : { ok: false, why: "invulnerable" };
 });
+// A blast is one request per region it reaches (spec r15-33). The creeper's own region's part applies with the tick's other requests and
+// is refused if the creeper died first; it does that region's blocks and mobs, the player, and removes the creeper. The other regions'
+// parts are late requests (js/requests.js: applied after every region's inbox, region by region), so they only go ahead once the own
+// part has: they never depend on the order the regions apply in.
 BF.req.on("explode", req => {
-  const m = BF.ids.get(req.target);
-  if (!m || m.dead || m.removed) return { ok: false, why: "gone" };   // killed (or unloaded) before its fuse ran out
-  explodeNow(m);
+  const d = req.data, m = d.m || BF.ids.get(req.target);
+  if (d.late) { if (!m || !m.exploded) return { ok: false, why: "gone" }; }   // the creeper's own part didn't go off
+  else if (!m || m.dead || m.removed) return { ok: false, why: "gone" };   // killed (or unloaded) before its fuse ran out
+  explodeNow(m, d.at ? d : null);
   return { ok: true };
 });
 // spawn: data.make() makes the mob (and links it) when the request applies, so ids come in requester order; it returns the mob, or
@@ -427,7 +432,7 @@ BF.req.on("explode", req => {
 BF.req.on("spawn", req => {
   const m = req.data.make();
   return m ? { ok: true, mob: m.id } : { ok: false, why: "refused" };
-});
+}, { global: true });   // from the global inbox after the regions (spec r15-33): ids come in requester order over the whole world
 function spawnLater(from, what, make, check) {
   if (!inThink()) return make();
   BF.req.send("spawn", what, { make: check ? () => (check() ? make() : null) : make }, from);
@@ -470,24 +475,38 @@ BF.claims = {
 // ---------- creeper explosion ----------
 // In the think phase the blast is one "explode" request that does its block changes and its damage together; refused if the creeper died first.
 function explode(m) {
-  if (inThink()) { BF.req.send("explode", m.id, {}, m); return; }
-  explodeNow(m);
+  if (!inThink()) { explodeNow(m); return; }
+  // one "explode" request per region the blast reaches (its blocks within R, its mobs within 6), applied in region order
+  const c = blastCentre(m), G = BF.regions, own = G && G.regionOf ? G.regionOf(m) : undefined;
+  const at = { x: c.x, y: c.y, z: c.z }, tick = BF.rand ? BF.rand.tick : 0;
+  if (!G || own == null || own < 0) { BF.req.send("explode", m.id, { m, at, tick }, m); return; }
+  const keys = G.around(c.x, c.z, BLAST_MOBS + 2);
+  BF.req.send("explode", m.id, { m, at, tick, region: own, own }, m);
+  for (const k of keys) if (k !== own) BF.req.send("explode", m.id, { m, at, tick, region: k, own, late: true }, m);
 }
-function explodeNow(m) {
-  const c = new THREE.Vector3(m.position.x, m.position.y + 0.8, m.position.z);
-  const R = 3, r = BF.rand.of(m);
+const BLAST_R = 3, BLAST_MOBS = 6;
+const blastCentre = m => new THREE.Vector3(m.position.x, m.position.y + 0.8, m.position.z);
+// The blast, whole (outside the think phase) or one region's part of it (part: {at, tick, region, own} from explode above). The cells'
+// rolls come from a stream of the blast's cell and tick, so every part rolls the same cells alike.
+function explodeNow(m, part) {
+  const c = part ? new THREE.Vector3(part.at.x, part.at.y, part.at.z) : blastCentre(m);
+  const R = BLAST_R, G = BF.regions, rk = part && part.region != null ? part.region : null;
   const w = BF.world, bedrock = BF.B.bedrock;
   const cx = Math.floor(c.x), cy = Math.floor(c.y), cz = Math.floor(c.z);
+  const r = BF.rand.at("explode", cx, cz, part ? part.tick : BF.rand.tick, cy);
+  const mine = rk == null ? () => true : (x, y, z) => G.keyOf(x, y, z) === rk;
   for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (d > R - r.next() * 0.8) continue;
     const x = cx + dx, y = cy + dy, z = cz + dz;
+    if (!mine(x, y, z)) continue;
     const id = w.getBlock(x, y, z);
     if (!id || id === bedrock || isWater(id)) continue;
     w.setBlock(x, y, z, 0);
     if (w.removePartner) w.removePartner(x, y, z, id);
   }
-  if (playerAlive()) {
+  const own = rk == null || rk === part.own;
+  if (own && playerAlive()) {
     const p = player();
     const pc = new THREE.Vector3(p.position.x, p.position.y + (p.height || 1.8) / 2, p.position.z);
     const d = pc.distanceTo(c);
@@ -496,12 +515,13 @@ function explodeNow(m) {
       if (dmg > 0 && p.damage) p.damage(dmg, c.clone());
     }
   }
-  const blast = L => L.filter(o => o !== m && !o.dead && o.position.distanceTo(c) < 6);
-  for (const o of vq("mobs.explosion", blast(nearMobs(c, 6)), blast)) {
+  const blast = L => L.filter(o => o !== m && !o.dead && o.position.distanceTo(c) < BLAST_MOBS && (rk == null || G.regionOf(o) === rk));
+  for (const o of vq("mobs.explosion", blast(nearMobs(c, BLAST_MOBS)), blast)) {
     if (o.dead) continue;
     const d = o.position.distanceTo(c);
     damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false, "an explosion");
   }
+  if (!own) return;
   puff(c, 26, 1.6, false, 4);
   puff(c, 10, 1.0, true, 3);
   noiseSound(1.2, 500, 0.9, c);
@@ -701,8 +721,7 @@ function blockedMove(m, dt, blocked) {
 // False when this frame's A* searches are used up (busy villages): it tries again next frame instead of stepping aside at random.
 function startDetour(m) {
   const ai = m.ai, px = m.position.x, pz = m.position.z, dx = ai.tx - px, dz = ai.tz - pz, d = Math.hypot(dx, dz) || 1;
-  if (planBudget <= 0) return false;
-  planBudget--;
+  if (!takePlan()) return false;
   ai.blockedT = 0;
   const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
   const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
@@ -1018,6 +1037,32 @@ const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear, and, as it is wider than
 // its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
 let planBudget = 0;
+// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants are handed out at the start of each tick
+// to the mobs that have been waiting longest (then by id), so who gets a search never depends on the order mobs think in (regions,
+// later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
+// waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
+// village ticks after it, in a fixed order) searches share planBudget as before.
+const PLANS = 2, KEEP = 20, planWant = new Map();   // mob -> [tick it first asked, tick it last asked]
+const planGrant = new Map();   // mob -> tick granted (kept KEEP ticks: a far mob thinks only 4 times a game second)
+let curMob = null;
+const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
+function grantPlans() {
+  const t = BF.rand ? BF.rand.tick : 0;
+  for (const [m, g] of planGrant) if (m.removed || g < t - KEEP) planGrant.delete(m);
+  if (!planWant.size) return;
+  const w = [];
+  for (const [m, a] of planWant) { if (m.removed || m.dead || a[1] < t - KEEP) planWant.delete(m); else w.push([m, a[0]]); }
+  w.sort((a, b) => a[1] - b[1] || idNum(a[0]) - idNum(b[0]));
+  for (let i = 0; i < w.length && i < PLANS; i++) { planGrant.set(w[i][0], t); planWant.delete(w[i][0]); }
+}
+function takePlan() {
+  const m = curMob;
+  if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
+  if (planGrant.delete(m)) return true;
+  const t = BF.rand ? BF.rand.tick : 0, a = planWant.get(m);
+  if (a) a[1] = t; else planWant.set(m, [t, t]);
+  return false;
+}
 const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 // The A* as it was before spec r15-05 (string keys, a linear scan of the open list): kept for BF.debug.pathCompare.
 function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
@@ -1372,8 +1417,7 @@ function shelterAI(m, dt0, dt, out) {
   const h = n.shelter;
   if (inHouse(h, m.position.x, m.position.z)) return true;
   if (ai.routeKind !== "shelter") ai.route = null;
-  if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
-    planBudget--;
+  if (!ai.route && (n.retryT -= dt) <= 0 && takePlan()) {
     const [fx, fy, fz] = feetCell(m);
     const gx = Math.floor(h.x + h.w / 2), gz = Math.floor(h.z + h.d / 2);
     ai.route = findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => x >= h.x && x < h.x + h.w && z >= h.z && z < h.z + h.d }, 2500);
@@ -1398,8 +1442,7 @@ function nightAI(m, dt, out) {
   if (ai.routeKind !== "bed" && ai.routeKind !== "shelter") ai.route = null;   // a day route is dropped; the walk to bed or shelter carries on
   if (m.bed && bedOK(m.bed) && n.fails < 3) {
     if (ai.routeKind !== "bed") ai.route = null;
-    if (!ai.route && (n.retryT -= dt) <= 0 && planBudget > 0) {
-      planBudget--;
+    if (!ai.route && (n.retryT -= dt) <= 0 && takePlan()) {
       ai.route = pathToBed(m); ai.ri = 0; ai.stuckT = 0; ai.routeKind = "bed";
       if (!ai.route) { n.fails++; n.retryT = 8; }
     }
@@ -1420,8 +1463,7 @@ function nightAI(m, dt, out) {
 function morningAI(m, dt, out) {
   const ai = m.ai;
   if (!ai.route) {
-    if (planBudget <= 0) return true;
-    planBudget--;
+    if (!takePlan()) return true;
     ai.route = pathOut(m); ai.ri = 0; ai.stuckT = 0; ai.routeKind = "out";
     if (!ai.route) { ai.leaving = false; ai.leaveEnd = "nopath"; return false; }
   }
@@ -1753,6 +1795,24 @@ function updateMob(m, dt) {
 // The sim moves a mob once per 0.05 s tick. At the start of each tick keepPrev stores where it was (position, facing, head, walk
 // cycle); js/mobview.js draws it every frame at lerp(prev, cur, alpha), alpha being how far the frame is into the next tick
 // (BF.warp.alpha), so motion stays smooth at 60 fps or more.
+// Moves wait for the end of the mob loop (spec r15-33): a mob's new position is put aside when its update ends and it stands where it
+// started the tick until every mob has thought, so the others read start-of-tick positions (separation, targets, looks) whatever order
+// mobs think in. A mob moved by another (a mount carrying its rider) after its own update keeps that move.
+const moved = [];
+function hold(m) {
+  const q = m.prev, p = m.position;
+  if (m.removed || !q) return;
+  moved.push(m, p.x, p.y, p.z);
+  p.x = q.x; p.y = q.y; p.z = q.z;
+}
+function commitMoves() {
+  for (let i = 0; i < moved.length; i += 4) {
+    const m = moved[i], p = m.position, q = m.prev;
+    if (m.removed || p.x !== q.x || p.y !== q.y || p.z !== q.z) continue;
+    p.x = moved[i + 1]; p.y = moved[i + 2]; p.z = moved[i + 3];
+  }
+  moved.length = 0;
+}
 function keepPrev(m) {
   const q = m.prev || (m.prev = { x: 0, y: 0, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 0, age: 0 });
   q.x = m.position.x; q.y = m.position.y; q.z = m.position.z;
@@ -2491,7 +2551,8 @@ BF.mobs = {
   update(dt) {
     if (!ready) return;
     dt = Math.min(dt, 0.05);
-    planBudget = 2; // A* searches per frame
+    planBudget = 2; // A* searches per frame outside the mob loop
+    grantPlans();   // and the mob loop's (spec r15-33)
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
     // step BF.mobs.update on its own, and move mobs between steps
     if (BF.regions) BF.regions.tick();
@@ -2503,7 +2564,8 @@ BF.mobs = {
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
-    for (const m of list.slice()) {
+    // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
+    for (const m of BF.rtick ? BF.rtick.plan(list) : list.slice()) {
       if (m.removed) continue;
       let h = dt;
       if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
@@ -2515,9 +2577,13 @@ BF.mobs = {
           h = m._farT; m._farT = 0;
         } else m._farT = null;
       }
+      curMob = BF.rand.thinker = m;
       try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
+      curMob = BF.rand.thinker = null;
+      hold(m);
       if (pon) PF.lap(PF.mobCat(m));
     }
+    commitMoves();
     updateArrows(dt);
     PF.lap(PC.other);
     if (BF.builder) BF.builder.tick(dt);
@@ -2574,6 +2640,7 @@ BF.mobs = {
                 // still holds when it applies; returns the mob, or null when queued
   // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
   discard(m) { if (m && !m.removed) removeMob(m); },
+  explode(m) { if (m && !m.removed && !m.dead) explode(m); },   // a creeper's blast now (tests): in the think phase, one request per region it reaches
   // The share of monster spawn weight whose type spawns (1 with all on): js/wildlife.js scales its area caps by it.
   spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
   spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
@@ -2725,7 +2792,7 @@ BF.mobs = {
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
   isOccupied,
-  nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan() { if (planBudget > 0) { planBudget--; return true; } return false; } },
+  nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan },
   spawning: true,
   // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it
   onSet(x, y, z, oldId, id) {
