@@ -334,25 +334,36 @@ function torch(m, c) {
     T.remove(m.inv, I("coal"), 1); T.remove(m.inv, I("stick"), 1); T.add(m.inv, t, 4);   // 1 coal + 1 stick = 4 torches
   }
   if (count(m, t) < 1) return;
-  W().setBlock(c.x, c.y, c.z, BF.B.torch);
-  T.remove(m.inv, t, 1);
-  if (BF.emit) BF.emit("blockPlaced", c.x, c.y, c.z, BF.B.torch);
+  BF.blockReq.send(m, [BF.blockReq.cell(c.x, c.y, c.z, 0, BF.B.torch, { emit: "placed" })], { take: [{ id: t, n: 1 }], why: "placing a torch", wait: false });   // a block request (spec r15-18)
 }
 
 // ---------------------------------------------------------------- digging
-// Breaks block (x, y, z) as the miner: drops it wants go into its pack, the pickaxe wears by one use. Returns false when it cannot.
+// Breaks block (x, y, z) as the miner, as a block request (spec r15-18): applied in the tick's apply phase, where the drops it wants go into
+// its pack (the "miner" giver below); the pickaxe wears by one use when it succeeds. Returns false when it cannot, true when there is
+// nothing to break, else the request.
 function dig(m, x, y, z) {
   const id = get(x, y, z);
   if (!id || liquid(id)) return true;
-  const p = pickOf(m), b = BF.blocks[id];
+  const b = BF.blocks[id];
   if (!isFinite(b.hardness)) return false;
-  W().setBlock(x, y, z, 0);
-  const keepGravel = id === BF.B.gravel && count(m, I("gravel")) < GRAVEL_KEEP && wantsFlint(m);   // to sift for flint later
-  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if ((keeps(d.id) || keepGravel && d.id === I("gravel")) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE) && !(d.id === I("cobbled_deepslate") && count(m, d.id) >= KEEP_DEEPSLATE)) { const left = TR().inv.add(m.inv, d.id, d.count); if (left) log("full", m, { lost: left + " " + nameOf(d.id) }); }
-  wearPick(m, p, BF.toolWear.forBlock(id, p));
-  if (BF.emit) BF.emit("blockBroken", x, y, z, id);
-  return true;
+  return BF.blockReq.send(m, [BF.blockReq.cell(x, y, z, id, 0, { emit: "broken" })], { giver: "miner", why: "mining " + b.name }).then(r => {
+    if (!r.ok) { log("lostBlock", m, { at: [x, y, z], why: r.why }); return; }
+    const p = pickOf(m);
+    wearPick(m, p, BF.toolWear.forBlock(id, p));
+  });
 }
+// The miner's share of a block it broke (apply phase): the drops it keeps, by its pickaxe and keep rules; the rest stays in the rock.
+function minerGets(m, c, id) {
+  const p = pickOf(m), got = [];
+  const keepGravel = id === BF.B.gravel && count(m, I("gravel")) < GRAVEL_KEEP && wantsFlint(m);   // to sift for flint later
+  if (canHarvest(id, p)) for (const d of BF.rollDrops(id)) if ((keeps(d.id) || keepGravel && d.id === I("gravel")) && !(d.id === I("cobblestone") && count(m, d.id) >= KEEP_COBBLE) && !(d.id === I("cobbled_deepslate") && count(m, d.id) >= KEEP_DEEPSLATE)) {
+    const left = TR().inv.add(m.inv, d.id, d.count);
+    if (left) log("full", m, { lost: left + " " + nameOf(d.id) });
+    if (d.count > left) got.push({ id: d.id, count: d.count - left });
+  }
+  return got;
+}
+if (BF.blockReq) BF.blockReq.giver("miner", minerGets);
 // Wear at the player's rate (js/toolwear.js): a used-up pickaxe leaves its pack with a clink and a village log line.
 function wearPick(m, p, n) {
   if (!p || BF.toolWear.use(m, p, n) !== "broken") return;
@@ -739,7 +750,8 @@ function ai(m, dt, out) {
   if (!k.ores) k.ores = wallOres(m, sh, c);
   for (const o of k.ores) if (get(o[0], o[1], o[2]) !== 0) blocks.push(o);
   return digBlocks(m, Q, blocks, dt, () => {
-    if (k.floor && !solid(get(c.x, c.y - 1, c.z)) && count(m, I("cobblestone")) > 0) { W().setBlock(c.x, c.y - 1, c.z, BF.B.cobblestone); TR().inv.remove(m.inv, I("cobblestone"), 1); if (BF.emit) BF.emit("blockPlaced", c.x, c.y - 1, c.z, BF.B.cobblestone); }
+    if (k.floor && !solid(get(c.x, c.y - 1, c.z)) && count(m, I("cobblestone")) > 0)   // a block request (spec r15-18)
+      BF.blockReq.send(m, [BF.blockReq.cell(c.x, c.y - 1, c.z, get(c.x, c.y - 1, c.z), BF.B.cobblestone, { emit: "placed" })], { take: [{ id: I("cobblestone"), n: 1 }], why: "laying a floor", wait: false });
     afterCell(m, sh, c, k.rocky); Q.shaftStuck = 0;
     endTask(m, Q); Q.thinkT = 0.1;
   });
@@ -782,6 +794,7 @@ function wallOres(m, sh, c) {
 // Digs the listed blocks one after another (each takes digTime with its pickaxe), swinging; calls done() after the last.
 function digBlocks(m, Q, blocks, dt, done) {
   const a = m.ai;
+  if (BF.blockReq.busy(m)) return true;   // its last block is being broken (the request's result comes before its next think)
   const left = blocks.filter(([x, y, z]) => get(x, y, z) !== 0 && !liquid(get(x, y, z)));
   if (!left.length) { done(); return true; }
   const [x, y, z] = left[0], id = get(x, y, z), p = pickOf(m);
@@ -790,9 +803,10 @@ function digBlocks(m, Q, blocks, dt, done) {
   Q.digT += dt;
   if (a.swingT <= 0) { a.swingT = 0.3; if (BF.audio && BF.audio.blockSound) { try { BF.audio.blockSound("hit", id, x, y, z, 0.5); } catch (e) { /* optional */ } } }
   if (Q.digT >= digTime(id, p)) {
-    if (!dig(m, x, y, z)) { endTask(m, Q); return true; }
+    const rq = dig(m, x, y, z);
+    if (!rq) { endTask(m, Q); return true; }
     Q.digAt = null; Q.digT = 0;
-    if (left.length === 1) done();
+    if (rq === true && left.length === 1) done();   // else the next think finds the cell open (or, refused, digs what is there now)
   }
   return true;
 }
@@ -859,5 +873,5 @@ function unpack(m, o) {
 // In its mineshaft (or digging its way out): village errands such as food shopping wait until it is back up (js/villagelife.js).
 const underground = m => !!(m && m.mi && (inShaft(m, m.mi.shaft) || m.mi.task && m.mi.task.kind === "climb"));
 BF.miner = { ai, underground, statusText, seed, pack, unpack, pickOf, digTime, findSurface, findGravel, scanSurface, quarryable, planShaft, cellOf, walkTo, findBuyer, builderWants, doSell, LOG,
-  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, FLINT_WANT, GRAVEL_KEEP, SIFT_SECS, VEIN_R, digDepth, wantsStore, wantsFlint, _test: { state, area, checkCell, dig, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
+  KEEP_COBBLE, SELL_MIN, DIG_DEPTH, FLINT_WANT, GRAVEL_KEEP, SIFT_SECS, VEIN_R, digDepth, wantsStore, wantsFlint, _test: { state, area, checkCell, dig, digBlocks, wallOres, think, inShaft, shaftCellOf, routeIn, standWalk } };
 })();
