@@ -312,7 +312,10 @@ const api = {
     ensureView();
     const d = dataOfItem(it), p = BF.player.position;
     // (the simulation fills it in, simFrame; off the page its pixels come from there: js/mapview.js pull)
-    if (BF.world && BF.world.replica && BF.mapview && BF.mapview.pull) BF.mapview.pull(it);
+    if (BF.world && BF.world.replica && BF.mapview && BF.mapview.pull) {
+      const q = BF.mapview.pull(it);
+      if (q && q.px && q.ver !== d.pulled && q.px.length === d.px.length) { d.px.set(q.px); d.pulled = q.ver; d.ver++; }
+    }
     const sig = d.ver + "|" + p.x.toFixed(1) + "|" + p.z.toFixed(1) + "|" + BF.player.yaw.toFixed(2);
     if (sig !== last.sig || last.key !== d) { drawView(d); last.sig = sig; last.key = d; }
     return viewTex;

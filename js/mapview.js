@@ -213,9 +213,7 @@ function mapSnap(it) {
         if (!v) { o[q + 3] = 0; continue; }
         o[q] = ((v >> 11) & 31) * 255 / 31; o[q + 1] = ((v >> 5) & 63) * 255 / 63; o[q + 2] = (v & 31) * 255 / 31; o[q + 3] = 255;
       }
-      c.g.putImageData(c.img, 0, 0); c.ver = r.ver;
-      const d = BF.maps && BF.maps.dataOfItem(it);   // the page's copy too, for the held view (js/maps.js heldTexture)
-      if (d && d.px.length === px.length) { d.px.set(px); d.ver++; }
+      c.g.putImageData(c.img, 0, 0); c.ver = r.ver; c.px = px;   // (px: for the held view, js/maps.js heldTexture through pull)
     });
   }
   return { src: c.cv, side: c.side, x0: c.x0, z0: c.z0, N: c.N, scale: c.scale, ver: c.ver };
@@ -832,7 +830,8 @@ BF.mapview = {
   planet: { open: openGlobe, close: closeGlobe, isOpen: () => globe.open, state: globe, zoomBy, turn, pick, clickAt, toLocal, lookAt,
     finishBase() { while (!baseGrid().done) stepBase(Infinity); }, draw() { globe.sig = ""; drawGlobe(); } },
   teleportToSelection, surfaceAt, getAuto, nameOf, geometry, finish, paint, create, zonesFor, dataOfItem, progress: progressOf,
-  pull(it) { if (it && it.map) mapSnap(it); },   // a normal map's pixels from the simulation into BF.maps' copy (js/maps.js held view)
+  // a normal map's latest pixels from the simulation, {px, ver} (px null until the first answer), for js/maps.js's held view
+  pull(it) { if (!it || !it.map) return null; const c = (mapSnap(it), snaps.get(it.id)); return { px: c.px || null, ver: c.ver }; },
   ZONE, MAX_PX, MAX_K,
   reset() { maps.clear(); thumbs.clear(); snaps.clear(); iconSeen = ""; },
   _maps: maps, _view: view, _prompt: prompt,
