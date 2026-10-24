@@ -172,15 +172,21 @@ module.exports = async (pg, out) => {
   // ---- a slow answer: the screen waits, then shows the offers ----
   const slow = await pg.evaluate(async () => {
     const C = BF.client, q = C.query;
-    C.query = (what, args, fn) => q(what, args, r => setTimeout(() => fn(r), 500));
+    // answers 2 s late; the page checks its wait once a frame, and CI's software rendering draws only a few frames a second
+    C.query = (what, args, fn) => q(what, args, r => setTimeout(() => fn(r), 2000));
     try {
       BF.inventory.openTrade(window.__v);
-      await new Promise(r => setTimeout(r, 380));
-      const waitEl = document.querySelector(".bf-wait"), waiting = !!waitEl && !waitEl.hidden && getComputedStyle(waitEl).display !== "none";
-      const offers0 = document.querySelectorAll(".bf-offer").length;
-      await new Promise(r => setTimeout(r, 600));
-      const offers1 = document.querySelectorAll(".bf-offer").length, after = !!waitEl && waitEl.hidden;
-      return { waiting, offers0, offers1, after };
+      const t0 = performance.now(), sleep = ms => new Promise(r => setTimeout(r, ms));
+      const waitEl = () => document.querySelector(".bf-wait"), shown = () => { const e = waitEl(); return !!e && !e.hidden && getComputedStyle(e).display !== "none"; };
+      let waiting = false, early = false, offers0 = 0;
+      while (performance.now() - t0 < 1800) {
+        if (shown()) { waiting = true; early = performance.now() - t0 < 300; offers0 = document.querySelectorAll(".bf-offer").length; break; }
+        await sleep(25);
+      }
+      while (performance.now() - t0 < 5000 && !document.querySelectorAll(".bf-offer").length) await sleep(50);
+      await sleep(300);
+      const offers1 = document.querySelectorAll(".bf-offer").length, after = !shown();
+      return { waiting: waiting && !early, offers0, offers1, after };
     } finally { C.query = q; BF.inventory.close(); }
   });
   ok("a slow trade answer: \"Waiting for the world\" after 300 ms, then the offers", slow.waiting && slow.offers0 === 0 && slow.offers1 > 0 && slow.after, slow);
