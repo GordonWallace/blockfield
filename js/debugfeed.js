@@ -380,7 +380,7 @@ function update() {
         if (o.screens != null) screens = o.screens | 0;
         t = o.resync ? "resync" : "ok";
       }
-      if (t === "resync") { resync(); passAck({ resync: true }); }   // a restarted server asks for the layouts and logs again
+      if (t === "resync") { resync(); if (inWorker()) passAck({ resync: true }); }   // a restarted server asks for the layouts and logs again
     })
     .then(() => { if (!told) { told = true; console.info("Blockfield debug feed: sending to " + URL_); } misses = 0; })
     .catch(() => {                                // server down or not at this address: try the next one, resend everything when it's back
@@ -389,7 +389,7 @@ function update() {
       URL_ = URLS[urlIdx = (urlIdx + 1) % URLS.length];
       BF.debugFeed.url = URL_;
       nextT = performance.now() + (misses > 5 * URLS.length ? RETRY_SLOW : RETRY / URLS.length);
-      told = false; screens = 0; resync(); passAck({ resync: true });
+      told = false; screens = 0; resync(); if (inWorker()) passAck({ resync: true });
     })
     .finally(() => { busy = false; clearTimeout(stop); });
 }
