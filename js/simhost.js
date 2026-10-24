@@ -238,7 +238,12 @@ function hook(C) {
 H.world = function (op, args) {
   if (!H.worker) return Promise.resolve({ ok: false, why: "in page" });
   // (not to the world server: the network is tens of megabytes, and the server keeps the ones it has solved, server/world.js)
-  const a = Object.assign({ rivers: !H.server && BF.worldgen.riverState ? BF.worldgen.riverState() : null }, args);
+  // It goes as its own message, structured-cloned: through the protocol (JSON) its typed arrays would arrive as empty objects, and the
+  // worker would solve a network of its own from zero samples (no lakes, other rivers) under the page's terrain. The world message
+  // names its key.
+  const st = !H.server && BF.worldgen.riverState ? BF.worldgen.riverState() : null;
+  if (st) BF.proto.worker.w.postMessage({ rivers: st });
+  const a = Object.assign({ rivers: st ? st.seed : null }, args);
   sentPlayer = ""; lastClock = null; sentSpeed = sentPause = null;
   return new Promise(resolve => BF.client.worldOp(op, a, r => {
     if (r && r.resumed && r.speed != null) {   // a world the server held paused, picked again: it goes on at the speed it had
@@ -246,6 +251,9 @@ H.world = function (op, args) {
       if (!r.speed) W.freeze(); else if (i >= 0) W.set(i);
       glog("INFO", "The world server's held world \"" + (r.meta && r.meta.name) + "\" goes on at " + r.speed + "x");
     }
+    // the page's speed again, to the world just started: starting it reset the speed there, after any speed the page sent while it
+    // loaded (a freeze set on worldLoaded, which the page fires first, was lost and the world ran on at 1x)
+    sentSpeed = sentPause = null;
     resolve(r);
   }));
 };

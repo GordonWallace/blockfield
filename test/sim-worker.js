@@ -44,6 +44,7 @@ async function open(b, url) {
   pg.on('pageerror', e => console.log('PAGEERROR', (e.stack || e.message).slice(0, 600)));
   pg.on('console', m => { if (m.type() === 'error' && !/GL Driver/.test(m.text())) console.log('console.error:', m.text().slice(0, 400)); });
   await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
+  await pg.addInitScript(() => { window.BF_TEST = true; });   // (the eval query in the worker: BF.simHost.eval)
   // frame times: how long each of the game's frames (js/main.js frame) takes on the page's thread, for the report. The day is played
   // with drawing switched off (renderer.render does nothing): the software renderer the tests draw with takes most of the machine,
   // so with it on, frames a second measure the renderer, not the game.
@@ -129,6 +130,11 @@ async function loadBack(b, url, mode, day) {
     const logs = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'worker').map(e => e.x));
     check(logs.some(x => /The simulation runs in a Web Worker/.test(x)) && logs.some(x => /Simulation worker loaded/.test(x)), 'the game log says where the simulation runs');
     check(logs.some(x => /started in the simulation worker .*the page's river network/.test(x)), "the worker reused the page's river network");
+    // and has the same network: the replay ran to its end and found the same lakes and node samples (the page's copy once came through
+    // the protocol's JSON with its typed arrays emptied, and the worker solved a network of its own from zeros: no lakes)
+    const net = () => { const N = BF.rivers.planet(); let s = 0; for (let i = 0; i < N.pre.p.length; i += 97) s += N.pre.p[i]; return { lakes: N.lakes.length, links: N.link.length, p: s, miss: BF.worldgen.tapeMiss() }; };
+    const pn = await pg.evaluate(net), wn = await pg.evaluate(src => BF.simHost.eval(src, null), String(net));
+    check(wn.miss === -1 && pn.lakes > 0 && wn.lakes === pn.lakes && wn.links === pn.links && wn.p === pn.p, `the worker's river network is the page's (worker ${JSON.stringify(wn)}, page ${JSON.stringify(pn)})`);
     const day = await playDay(pg, 'worker');
     // the page's copy of the world against the worker's
     const keys = await pg.evaluate(() => [...BF.world.chunks.keys()]);
