@@ -171,7 +171,7 @@ module.exports = async (pg, out) => {
   // ---- 7. r15-44: the inventory, crafting table, furnace and creative screens, with items moved by the player's requests ----
   const click = (c, i, button, shift) => pg.evaluate(a => BF.req.player("player.click", null, a), { c, i, button: button || 0, shift: !!shift });
   await place();
-  await pg.evaluate(() => BF.inventory.open("inventory"));
+  await pg.evaluate(() => { BF.inventory.setSlot(1, { id: BF.I.planks, count: 16 }); BF.inventory.open("inventory"); });
   await frames(3);
   await click("inv", 1); await click("grid", 0, 2); await click("grid", 2, 2); await click("inv", 1);   // two planks stacked: sticks
   await frames(5);
