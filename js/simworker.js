@@ -74,12 +74,18 @@ function worldOp(op, a) {
     started("World \"" + a.meta.name + "\" created");
     return S.saveNow().then(ok => ({ meta: S.current, saved: ok, rivers: replayed }));
   }
-  if (op === "load") return S.load(a.id).then(meta => { started("World \"" + meta.name + "\" loaded"); return { meta }; });
+  if (op === "load") {
+    // no chunks are made while the save is read (on the world server that takes a while, spec r15-42): the rivers are set up before the
+    // world is, and a chunk made in between had no terrain noise to make it from
+    loadingWorld = true;
+    const done = () => { loadingWorld = false; };
+    return S.load(a.id).then(meta => { done(); started("World \"" + meta.name + "\" loaded"); return { meta }; }, e => { done(); throw e; });
+  }
   throw new Error("unknown world op " + op);
 }
 
 // ---- the loop: a frame of ticks, chunks round the player, autosave, the protocol's flush
-let last = 0, timer = 0, crashNext = false;
+let last = 0, timer = 0, crashNext = false, loadingWorld = false;
 function loop() {
   timer = 0;
   if (crashed) return;
@@ -88,7 +94,7 @@ function loop() {
   try {
     if (crashNext) { crashNext = false; throw new Error("a test crash (test/sim-worker.js)"); }
     const W = BF.warp, p = BF.player.position;
-    BF.world.update(p.x, p.z, W.speed >= 10 ? 3 : 8);   // (generation only: nothing is meshed here)
+    if (!loadingWorld) BF.world.update(p.x, p.z, W.speed >= 10 ? 3 : 8);   // (generation only: nothing is meshed here)
     BF.inventory.simFrame(raw);
     BF.player.simRide(raw);   // an untamed horse carries the player; a boat or horse gone puts them off (js/player.js, r15-44 part 2)   // a furnace watched in the pause cooks in real time; a gone villager's trade screen closes (js/playerinv.js)
     if (!BF.state.paused) {

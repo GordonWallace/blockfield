@@ -4,8 +4,13 @@
 // The simulation runs in worker_threads (server/simthread.js), each the Web Worker's simulation (js/simworker.js, r15-38) unchanged:
 // one thread per world. Regions spread over several workers (r15-39) will plug in behind simworker.js the same way in both hosts.
 // One page plays at a time (a second one is refused and runs its own simulation); the world it plays is the one it picks on the title
-// screen (its world message: demo, create, load). Saves are on disk (server/idb.js, <saves>/), listed to the page instead of its
-// IndexedDB ones (the saves message below; spec r15-42 adds the folder per world, import and export).
+// screen (its world message: demo, create, load). Saves are on disk, a folder per world (spec r15-42: <saves>/<world name>/, see
+// server/savedir.js; the simulation writes them through server/idb.js), listed to the page instead of its IndexedDB ones (the saves
+// message below). Over http on the game port (debug/server.js passes /saves/ here):
+//   GET /saves/<id>/export   the world as a .bfworld file (js/savefile.js), saved first if it is being played or held
+//   POST /saves/import[?keep=1]   a .bfworld file's world added to the saves (a new id if one has its id; keep=1: left as it is,
+//                            {skipped}); -> {ok, meta, skipped} or {ok: false, why}. Needs the header X-Blockfield (no other site's page
+//                            can send it without asking first).
 // On the socket: binary frames are protocol packets ([header length u32 LE][1 if a binary part follows, u8][header JSON, UTF-8][binary part]); text frames are JSON
 // for everything else, the same messages the page and a Web Worker exchange ({boot}, {ready}, {crash}, {failed}, {errorLine},
 // {test}), plus the server's own:
@@ -18,15 +23,16 @@
 // The debug screen: this process reads the simulation's part of each snapshot from the thread itself (js/debugfeed.js simPart) and adds
 // the page's latest part, so the screen keeps going with no page open.
 // Game log (the simulation thread's, which is the world's): INFO "server" for a page connecting, refused, closing, picking a held world
-// up; ERROR when a simulation thread stops on its own.
+// up; ERROR when a simulation thread stops on its own. Imports and exports go in the page's log (js/save.js) and this one's output.
 // API: start({ servers (http servers to hook /sim on), saves (folder), build ({commit, branch}: the game log's), debug: { push(snapshot) -> answer, screens() } }) -> world server
-//   { stop() -> Promise (saves every world), status() }
+//   { stop() -> Promise (saves every world), status(), http(req, res, path) -> true when it answered (/saves/...) }
 "use strict";
 const { Worker } = require("worker_threads");
 const path = require("path"), fs = require("fs"), v8 = require("v8");
-const WS = require("./ws.js"), IDB = require("./idb.js");
+const WS = require("./ws.js"), IDB = require("./idb.js"), SaveFile = require("../js/savefile.js");
 
-const SIMTHREAD = path.join(__dirname, "simthread.js"), DB = "blockfield", FEED_MS = 250;
+const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = 1 << 30;
+const SAVE_VERSION = 3;   // (js/save.js VERSION: the worlds this release opens)
 const say = s => console.log("[world] " + s);
 
 // ---- packets on the socket
@@ -99,7 +105,8 @@ class Sim {
 }
 
 function start(o) {
-  const store = IDB.open(o.saves).store, rivers = riverCache(o.saves);
+  const worlds = IDB.open(o.saves).worlds, rivers = riverCache(o.saves);
+  for (const [a, b] of worlds.tidy()) say("renamed folder " + JSON.stringify(a) + " to " + JSON.stringify(b) + " (its world's name)");
   const srv = { saves: o.saves, build: o.build || null, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
@@ -198,7 +205,7 @@ function start(o) {
     }
     if (m && srv.active) {
       // the planet's river network, when this server has solved it before
-      const a = m.args || {}, meta = m.op === "load" ? store.get(DB, "worlds", a.id) : null;
+      const a = m.args || {}, meta = m.op === "load" ? worlds.meta(a.id) : null;
       const st = meta ? rivers.get(riverKey(meta.seed, meta.biomeScale)) : rivers.get(riverKey(a.seed, (a.opts || {}).biomeScale));
       if (st) srv.active.post({ server: "rivers", st });
     }
@@ -224,15 +231,16 @@ function start(o) {
 
   // ---- saved worlds (the page's title screen, js/save.js): the server's, on disk
   const live = id => [srv.active, srv.held].find(s => s && !s.dead && s.id === id && s.ready);
+  const inUse = id => [srv.active, srv.held, srv.spare].some(s => s && !s.dead && s.id === id);   // (a thread writing its folder)
   async function saves(q) {
     if (q.op === "list") {
-      const a = store.all(DB, "worlds");
+      const a = worlds.list();
       return { ok: true, list: a.sort((x, y) => (y.lastPlayed || 0) - (x.lastPlayed || 0)) };
     }
     if (q.op === "get") {
       const s = live(q.id);
       if (s) { const r = await s.ask("state", { id: q.id }); if (r && r.meta) return { ok: true, meta: r.meta, data: JSON.parse(json(r.data)) }; }
-      const meta = store.get(DB, "worlds", q.id), data = store.get(DB, "data", q.id);
+      const meta = worlds.meta(q.id), data = worlds.get(q.id, "data");
       if (!meta || !data) return { ok: false, why: "World not found" };
       const d = {};
       for (const k of ["version", "gen", "seed", "biomeScale", "villages", "monsters", "spawn", "rand", "time", "player", "inventory", "weather"]) d[k] = data[k];
@@ -240,20 +248,83 @@ function start(o) {
     }
     if (q.op === "remove") {
       if (srv.held && srv.held.id === q.id) { srv.held.kill(); srv.held = null; }
-      store.del(DB, "worlds", q.id); store.del(DB, "data", q.id); store.del(DB, "data", q.id + "#loghead");
-      for (const k of store.keys(DB, "data", IDB.IDBKeyRange.bound(q.id + "#log:", q.id + "#log:￿"))) store.del(DB, "data", k);
+      const f = worlds.folder(q.id);
+      worlds.remove(q.id);
+      if (f != null) say("deleted world folder " + JSON.stringify(f));
       return { ok: true };
     }
     if (q.op === "rename" || q.op === "monsters") {
-      const meta = store.get(DB, "worlds", q.id);
+      const meta = worlds.meta(q.id);
       if (!meta) return { ok: false, why: "World not found" };
       if (q.op === "rename") meta.name = String(q.name).slice(0, 40); else meta.monsters = q.monsters;
-      store.put(DB, "worlds", q.id, meta);
+      worlds.put(q.id, "meta", meta);
+      // its folder follows the name, unless a thread is writing to it (then at the server's next start: savedir.js tidy)
+      if (q.op === "rename" && !inUse(q.id)) try { const to = worlds.rename(q.id, meta.name); say("world " + q.id + " is in folder " + JSON.stringify(to)); } catch (e) { say("could not rename the folder of " + q.id + ": " + e.message); }
       const s = live(q.id);   // the world being played or held takes it too (the page sends its meta message to the one it plays)
       if (s && s !== srv.active) s.post({ h: JSON.stringify(Object.assign({ t: "meta", id: q.id }, q.op === "rename" ? { name: meta.name } : { monsters: q.monsters })), b: null });
       return { ok: true, meta };
     }
     return { ok: false, why: "unknown saves op " + q.op };
+  }
+
+  // ---- export and import (.bfworld files, js/savefile.js): http on the game port
+  async function exportWorld(id) {
+    const s = live(id);
+    if (s) { const r = await s.ask("save", null, 30000); if (!r || !r.ok) throw new Error("it could not be saved first" + (r && r.why ? ": " + r.why : "")); }
+    const meta = worlds.meta(id), data = worlds.get(id, "data");
+    if (!meta || !data) throw Object.assign(new Error("World not found"), { status: 404 });
+    const head = worlds.get(id, "loghead");
+    const log = head ? { head, lists: (head.batches || []).map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
+    return { meta, buf: SaveFile.packSync({ game: o.version || null, meta, data, log }) };
+  }
+  function importWorld(buf, keep) {
+    const rec = SaveFile.unpackSync(buf), meta = Object.assign({}, rec.meta);
+    const old = m => !m || !(m.version >= SAVE_VERSION);
+    if (old(meta) || old(rec.data)) throw new Error("Made with Blockfield " + (meta.version === 2 ? "1.4" : "1.3") + ", can't be opened in " + (o.version || "1.5"));
+    const had = meta.id && worlds.meta(meta.id);
+    if (had && keep) return { ok: true, skipped: true, meta: had };
+    if (had || !meta.id) meta.id = "w" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    meta.lastPlayed = Date.now();
+    worlds.put(meta.id, "meta", meta);
+    try {
+      worlds.put(meta.id, "data", rec.data);
+      if (rec.log && rec.log.head) {
+        const head = Object.assign({}, rec.log.head, { name: meta.name });
+        (head.batches || []).forEach(([seq], i) => worlds.put(meta.id, "log:" + String(seq).padStart(9, "0"), rec.log.lists[i] || []));
+        worlds.put(meta.id, "loghead", head);
+      }
+    } catch (e) { worlds.remove(meta.id); throw e; }   // (half a world is no world)
+    say("imported world " + JSON.stringify(meta.name) + " into folder " + JSON.stringify(worlds.folder(meta.id)));
+    return { ok: true, skipped: false, meta };
+  }
+  function http(req, res, rel) {
+    if (!rel.startsWith("/saves/")) return false;
+    const reply = (code, obj) => res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(obj));
+    const ex = /^\/saves\/([^/]+)\/export$/.exec(rel);
+    if (ex && req.method === "GET") {
+      exportWorld(ex[1]).then(({ meta, buf }) => {
+        const name = SaveFile.fileName(meta.name);
+        say("exported world " + JSON.stringify(meta.name) + " (" + Math.round(buf.length / 1024) + " KB)");
+        res.writeHead(200, { "Content-Type": "application/gzip", "Content-Length": buf.length, "Cache-Control": "no-store",
+          "Content-Disposition": "attachment; filename=\"" + name.replace(/[^\x20-\x7e]|"/g, "_") + "\"; filename*=UTF-8''" + encodeURIComponent(name) }).end(buf);
+      }, e => reply(e.status || 500, { ok: false, why: e.message }));
+      return true;
+    }
+    if (rel === "/saves/import" && req.method === "POST") {
+      if (!req.headers["x-blockfield"]) { reply(403, { ok: false, why: "missing the X-Blockfield header" }); return true; }
+      const parts = [];
+      let n = 0, over = false;
+      req.on("data", d => { n += d.length; if (n > IMPORT_MAX) { over = true; req.destroy(); } else parts.push(d); });
+      req.on("end", () => {
+        if (over) return;
+        try { reply(200, importWorld(Buffer.concat(parts), /[?&]keep=1\b/.test(req.url))); }
+        catch (e) { say("an import failed: " + e.message); reply(400, { ok: false, why: e.message }); }
+      });
+      req.on("close", () => { if (over) reply(413, { ok: false, why: "that file is over 1 GB" }); });
+      return true;
+    }
+    reply(404, { ok: false, why: "no such saves request" });
+    return true;
   }
 
   // ---- the debug screen, read from the simulation here
@@ -306,6 +377,8 @@ function start(o) {
       const all = sims();
       return Promise.all(all.map(s => s.id ? s.ask("shutdown", null, 15000) : null)).then(r => { for (const s of all) s.kill(); return r; });
     },
+    http,
+    worlds,   // (tests)
     status: () => ({ page: !!srv.client, active: srv.active && { id: srv.active.id, name: srv.active.name }, held: srv.held && { id: srv.held.id, name: srv.held.name } }),
   };
 }
