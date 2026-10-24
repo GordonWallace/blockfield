@@ -249,6 +249,7 @@ function simFrame(raw) {
     simStep(plan.h);
     done++;
   }
+  if (BF.active) BF.active.frame(performance.now() - t0, raw);   // the simulation's share of real time, for the budget (js/active.js, spec r15-34)
   return done;
 }
 BF.simFrame = raw => { const n = simFrame(raw); BF.warp.done(n, n * BF.warp.TICK, raw); return n; };
