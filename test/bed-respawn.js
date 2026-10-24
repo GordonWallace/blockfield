@@ -29,6 +29,13 @@ module.exports = async (pg) => {
       BF.sky.setTime(0.7);
       for (const m of BF.mobs.list.slice()) if (m.hostile) m.dead = true;
     });
+    // the page decides the click (js/player.js trySleep): wait until its clock and mobs show the night and no monster near
+    await pg.waitForFunction(() => {
+      const p = BF.player.position, W = BF.simHost.worker && BF.client && BF.client.world;   // (off the page: the mirror's mobs)
+      const near = W ? [...W.entities.values()].some(e => e.kind === "mob" && !e.dead && BF.mobs.isHostile(e.type) && Math.hypot(e.x - p.x, e.y - p.y, e.z - p.z) < 10)
+        : BF.mobs.list.some(m => m.hostile && !m.dead && m.position.distanceTo(p) < 10);
+      return BF.sky.isNight() && !near;
+    }, null, { timeout: 10000 }).catch(() => {});
     await pg.waitForTimeout(300);
     await pg.evaluate(() => {
       BF.spawnPoint = null;
