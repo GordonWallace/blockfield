@@ -190,20 +190,11 @@ function findDeal(m, st, S) {
   return null;
 }
 function doDeal(m, deal) {
-  const T = TR(), v2 = deal.seller, o = deal.offer, em = I("emerald");
-  let done = 0;
-  for (let i = 0; i < deal.times; i++) {
-    if (!BF.villageLife.canSell(v2) || cnt(v2, o.sell.id) - o.sell.n < deal.keep || cnt(m, em) < o.buy[0].n) break;
-    if (!T.inv.canFit(m.inv, [{ id: o.sell.id, n: o.sell.n }], o.buy)) break;
-    const sold = T.exchange(v2, o);                    // the seller's stock and room, as for a player trade
-    if (!sold) break;
-    T.inv.remove(m.inv, em, o.buy[0].n);
-    T.inv.addStacks(m.inv, sold);
-    T.addXp(v2, o);
-    done++;
-  }
+  const T = TR(), v2 = deal.seller, o = deal.offer;
+  const guard = () => (!BF.villageLife.canSell(v2) ? "busy" : cnt(v2, o.sell.id) - o.sell.n < deal.keep ? "Keeping for own use" : null);
+  const done = T.asked(m, v2, o) || !guard() ? T.buy(m, v2, o, deal.times, { guard }) : 0;   // the seller's stock and room, as for a player trade: one transaction (js/trading.js buy)
+  if (done == null) return null;   // in flight: the answer comes next tick
   if (done) {
-    if (BF.vlog) BF.vlog.trade(m, v2, o, done);
     log("buy", m, { from: v2.profession, got: done * o.sell.n + " " + BF.items[o.sell.id].name, paid: done * o.buy[0].n + " emerald", how: o.spare ? "spare" : "offer" });
   }
   return done;
@@ -400,6 +391,7 @@ function shopStep(m, S, dt, out, tk) {
   if (S.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) ai.swingT = 0.2;   // visual
   if ((S.tt -= dt) > 0) return true;
   const done = doDeal(m, deal);
+  if (done == null) return true;   // the trade is in flight (js/trading.js buy)
   if (done && BF.villageLife.particles) BF.villageLife.particles(m.position.x, m.position.y + 1.5, m.position.z, "#2fd06a", 5, 0.4);
   endTask(m, S, done > 0);
   return true;

@@ -5,7 +5,8 @@
 // A boat carries the player plus one mob: a mob (not an iron golem) that walks into a boat gets in; hitting the boat, or the player
 // getting out with Shift, lets it out. Hitting an empty boat 3 times breaks it into its item (creative: one hit, no item).
 // Boats are entities like dropped items: saved with the world (wood, position, facing, the player if aboard, the mob passenger),
-// waiting in unloaded chunks and never despawning.
+// waiting in unloaded chunks and never despawning. A boat is plain data (wood, pos, vel, yaw, hurtT, row / rowing, mob); js/entityview.js
+// draws it (spec r15-12).
 // API: BF.boats = { list, init, update(dt), drive(b, dt, input), raycast, place, placeFromPlayer, board, hit, seat(m), holds(m), seatOf(b, who),
 //   exitSpot(b), letOut(b), remove(b), clear, serialize, deserialize, counts(), spawn(wood, x, y, z, yaw) }.
 (() => {
@@ -23,10 +24,9 @@ const BACK = 0.35;                               // rowing backwards is slower
 const FLOW_PUSH = 2.0;                           // flowing water accelerates a boat along the flow (with water drag: ~1.7 blocks/s drift)
 const HITS = 3, HIT_DECAY = 1, EJECT_CD = 4;     // hits to break (damage decays 1 per second); seconds before a let-out mob may get back in
 const ICE_IDS = new Set();
-let scene = null, mat0 = null;
+let ready = false;
 
 const fwdOf = yaw => [-Math.sin(yaw), -Math.cos(yaw)];
-const planksTile = wood => (wood === "oak" ? "planks" : wood + "_planks");
 
 // ---------- items, recipes, sprite ----------
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
@@ -50,71 +50,6 @@ if (BF.texKit) {
     for (let i = 0; i < 9; i++) put(G, 4 + i, 12 - i, i < 2 ? mul(m, 0.8) : hi);   // paddle shaft
     put(G, 3, 13, lo); put(G, 4, 13, lo); put(G, 3, 12, lo);                          // blade
   };
-}
-
-// ---------- model ----------
-// Boxes in 1/16 block, drawn facing north (bow at -z). Faces are shaded like mobs; UVs take a slice of the wood's planks tile.
-const HULL = [
-  [-10, 0, -14, 10, 3, 14],    // bottom
-  [-12, 0, -14, -10, 9, 14],   // left side
-  [10, 0, -14, 12, 9, 14],     // right side
-  [-12, 0, -16, 12, 9, -14],   // bow
-  [-12, 0, 14, 12, 9, 16],     // stern
-  [-10, 3, 3, -10 + 20, 5, 7], // seat
-];
-const PADDLE = [[-0.5, -12, -0.5, 0.5, 6, 0.5], [-0.5, -13, -2.5, 0.5, -6, 2.5]];   // shaft, blade (pivot at the oarlock)
-const SHADE = [0.8, 0.8, 1, 0.55, 0.68, 0.68];   // BoxGeometry face order: +x -x +y -y +z -z
-function boxesGeometry(boxes, r) {
-  const P = [], U = [], C = [], I = [];
-  for (const b of boxes) {
-    const w = b[3] - b[0], h = b[4] - b[1], d = b[5] - b[2];
-    const g = new THREE.BoxGeometry(w / 16, h / 16, d / 16);
-    g.translate((b[0] + b[3]) / 32, (b[1] + b[4]) / 32, (b[2] + b[5]) / 32);
-    const gp = g.attributes.position, gu = g.attributes.uv, gi = g.index;
-    const v0 = P.length / 3;
-    for (let i = 0; i < gp.count; i++) {
-      const f = Math.floor(i / 4), fw = f < 2 ? d : w, fh = f === 2 || f === 3 ? d : h;   // the face's size in pixels
-      const su = Math.min(1, fw / 16), sv = Math.min(1, fh / 16);
-      P.push(gp.getX(i), gp.getY(i), gp.getZ(i));
-      U.push(r[0] + (r[2] - r[0]) * gu.getX(i) * su, r[1] + (r[3] - r[1]) * gu.getY(i) * sv);
-      C.push(SHADE[f], SHADE[f], SHADE[f]);
-    }
-    for (let k = 0; k < gi.count; k++) I.push(gi.getX(k) + v0);
-    g.dispose();
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
-  g.setAttribute("uv", new THREE.Float32BufferAttribute(U, 2));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
-  g.setIndex(I);
-  return g;
-}
-const geoCache = new Map();
-function geos(wood) {
-  let g = geoCache.get(wood);
-  if (!g) {
-    const r = BF.textures.uv(planksTile(wood)), rs = BF.textures.uv(wood + "_log");
-    g = { hull: boxesGeometry(HULL, r), paddle: boxesGeometry(PADDLE, BF.textures.has && BF.textures.has(wood + "_log") ? rs : r) };
-    geoCache.set(wood, g);
-  }
-  return g;
-}
-function buildMesh(b) {
-  const g = geos(b.wood);
-  const mat = new THREE.MeshBasicMaterial({ map: (BF.world.solidMat && BF.world.solidMat.map) || null, vertexColors: true, alphaTest: 0.5 });
-  const root = new THREE.Group(), body = new THREE.Group();
-  root.add(body);
-  body.add(new THREE.Mesh(g.hull, mat));
-  const paddles = [-1, 1].map(side => {
-    const p = new THREE.Group();
-    p.position.set(side * 11.5 / 16, 8 / 16, -1 / 16);
-    p.rotation.order = "YXZ";
-    p.add(new THREE.Mesh(g.paddle, mat));
-    body.add(p);
-    return p;
-  });
-  b.mesh = root; b.body = body; b.paddles = paddles; b.mat = mat;
-  scene.add(root);
 }
 
 // ---------- water ----------
@@ -158,40 +93,17 @@ function flowAt(p) {
 // ---------- boats ----------
 const list = [];
 function create(wood, x, y, z, yaw) {
-  if (!scene || BF.I[wood + "_boat"] == null) return null;
+  if (!ready || BF.I[wood + "_boat"] == null) return null;
   const b = BF.ids.refs({ kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevYaw: yaw || 0, vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
     stowT: 0, row: [0, 0], rowing: [0, 0], onGround: false, inWater: false, medium: "air" });
-  buildMesh(b);
   list.push(b);
-  syncMesh(b);
   return b;
 }
 const height = b => (b.rider ? RIDDEN_H : H);
 const loadedAt = (x, z) => BF.world.isLoaded(x, z);
-function lightAt(p) {
-  const sky = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1;
-  let bl = 0;
-  try { bl = BF.world.getBlockLight(p.x, p.y + 0.5, p.z) / 15; } catch (_) {}
-  return Math.max(0.12, sky, Math.pow(bl, 1.5));
-}
 // On the planet a boat keeps to the canonical square of the face it floats on; the player and mobs are seen from its frame.
 const LQ = {};
 const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
-function syncMesh(b) {
-  if (!b.mesh) return;
-  const here = loadedAt(b.pos.x, b.pos.z);
-  b.mesh.visible = here;
-  b.mesh.position.copy(b.pos);
-  b.mesh.rotation.y = b.yaw;
-  b.body.rotation.z = b.hurtT > 0 ? Math.sin(b.hurtT * 30) * b.hurtT * 0.6 : 0;
-  // paddles: an active one sweeps fore and aft and dips; a resting one lies along the hull
-  for (let i = 0; i < 2; i++) {
-    const p = b.paddles[i], side = i === 0 ? -1 : 1, ph = b.row[i];
-    if (b.rowing[i]) { p.rotation.x = Math.sin(ph) * 0.75; p.rotation.z = side * (0.75 + 0.25 * Math.cos(ph)); }
-    else { p.rotation.x += (1.1 - p.rotation.x) * 0.2; p.rotation.z += (side * 1.25 - p.rotation.z) * 0.2; }
-  }
-  b.mat.color.setScalar(lightAt(b.pos));
-}
 // Lifts a boat stuck in a solid block (a block put into it, water that froze around it) onto the nearest free spot above.
 function unstick(b) {
   const W = BF.world, h = height(b);
@@ -384,8 +296,8 @@ const RIDE = {
 const boats = {
   list,
   HW, H, SIT_EYE,
-  init(sceneRef) {
-    scene = sceneRef;
+  init() {
+    ready = true;
     for (const n of ["ice", "packed_ice", "blue_ice"]) if (BF.B[n] != null) ICE_IDS.add(BF.B[n]);
   },
   spawn(wood, x, y, z, yaw) { return create(wood, x, y, z, yaw); },
@@ -407,7 +319,7 @@ const boats = {
   raycast(origin, dir, maxDist, skip) {
     let best = null;
     for (const b of list) {
-      if (b === skip || !b.mesh || !b.mesh.visible) continue;
+      if (b === skip || !loadedAt(b.pos.x, b.pos.z)) continue;
       const p = b.pos, t = rayAABB(origin, dir, [p.x - HW, p.y, p.z - HW], [p.x + HW, p.y + H, p.z + HW]);
       if (t != null && t <= maxDist && (!best || t < best.dist)) best = { boat: b, dist: t };
     }
@@ -433,8 +345,6 @@ const boats = {
     if (b.mob) letOut(b);
     if (b.id != null) BF.ids.remove(b);   // a passenger's link to it (m.riding) goes too
     if (b.rider && BF.player && BF.player.vehicle === b && BF.player.dismount) BF.player.dismount();
-    if (scene && b.mesh) scene.remove(b.mesh);
-    if (b.mat) b.mat.dispose();
     if (drop && BF.drops) BF.drops.spawn(BF.I[b.wood + "_boat"], 1, b.pos.x, b.pos.y + 0.3, b.pos.z);
   },
   letOut,
@@ -456,16 +366,15 @@ const boats = {
     step(b, dt, input);
     if (b.mob && (b.mob.removed || b.mob.dead)) { if (b.mob.removed && !b.mob.dead) stow(b); else { b.mob.riding = null; b.mob = null; } }
     seatMob(b);
-    syncMesh(b);
     b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn where it is while the player rows it
     return b.yaw - y0;
   },
   // World simulation step (main.js, runs with the fast-forward): boats without the player drift, pick up mobs, keep theirs seated.
   update(dt) {
     for (const b of list.slice()) {
-      b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn between this and where the tick leaves it (draw)
+      b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn between this and where the tick leaves it (js/entityview.js)
       if (b.mob && (b.mob.removed || b.mob.dead)) { if (b.mob.removed && !b.mob.dead) stow(b); else { b.mob.riding = null; b.mob = null; } }
-      if (!loadedAt(b.pos.x, b.pos.z)) { syncMesh(b); continue; }
+      if (!loadedAt(b.pos.x, b.pos.z)) continue;
       if (!b.rider) {
         pushByPlayer(b, dt);
         step(b, dt, null);
@@ -474,22 +383,8 @@ const boats = {
       if (b.stowed) restoreStowed(b, dt);
       pickUpMobs(b);
       seatMob(b);
-      if (!b.rider) syncMesh(b);
     }
     if (BF.mobs) for (const m of BF.mobs.list) if (m.boatCd > 0) m.boatCd -= dt;
-  },
-  // Every frame (main.js, spec r15-10): boats drifting on their own drawn between the last two ticks (alpha 0..1). The player's
-  // boat moves in real time (drive) and is drawn where it is.
-  draw(alpha) {
-    const k = Math.max(0, Math.min(1, alpha));
-    for (const b of list) {
-      if (!b.mesh || b.rider) continue;
-      if (b.prev.distanceToSquared(b.pos) > 16) { b.mesh.position.copy(b.pos); b.mesh.rotation.y = b.yaw; continue; }   // (crossed a face edge)
-      b.mesh.position.lerpVectors(b.prev, b.pos, k);
-      let d = b.yaw - b.prevYaw;
-      d = Math.atan2(Math.sin(d), Math.cos(d));
-      b.mesh.rotation.y = b.prevYaw + d * k;
-    }
   },
   clear() { for (const b of list.slice()) { b.rider = false; boats.remove(b, false); } },
   // Boat counts by wood for the debug screen: {oak_boat: n, ...}

@@ -20,6 +20,11 @@ Each villager keeps what its next moves require, and never sells it, to villager
 
 What it keeps is worked out from what it holds at that moment, so goods it has just bought count at once: they are never offered as spare goods the instant the deal is done.
 
+## How a trade settles
+A villager's trade is one transaction. When it asks, its payment is set aside at once, so it can't spend the same emeralds on something else while the deal goes through. The trade settles at the end of the game tick: the goods and the payment either both change hands or neither does, lot by lot, and anything not used goes back to the buyer. A seller that dies, leaves or runs out before then refuses, and the buyer keeps its emeralds.
+
+When several villagers try to buy from the same seller in the same tick, they are served in a fixed order (by the order the villagers were first created in), so the one served first gets a last item and the others are refused. Your own trades on the trade screen settle the moment you click, by the same rules.
+
 ## Stock and purses
 A villager's stock of each ware is capped at a few batches of the offer size (six at Novice, down to two at Master, at most two stacks and about six emeralds' worth). Emeralds trickle in at 2 a day up to 12 for most villagers. Builders get 4 a day up to 80, because they pay for whole houses.
 

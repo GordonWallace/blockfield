@@ -277,13 +277,10 @@ function findCartographer(m, X) {
 }
 function deal(m, dl) {
   const t = T(), v2 = dl.seller, o = dl.offer;
-  if (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy)) return false;
-  const sold = t.exchange(v2, o);
-  if (!sold) return false;
-  t.inv.remove(m.inv, o.buy[0].id, o.buy[0].n);
-  t.inv.addStacks(m.inv, sold);
-  t.addXp(v2, o);
-  if (BF.vlog) BF.vlog.trade(m, v2, o);
+  if (!t.asked(m, v2, o) && (!canSell(v2) || cnt(m, BF.I.emerald) < o.buy[0].n || !t.inv.canFit(m.inv, [o.sell], o.buy))) return false;
+  const done = t.buy(m, v2, o, 1, { guard: () => (canSell(v2) ? null : "busy") });   // one transaction (js/trading.js buy)
+  if (done == null) return null;
+  if (!done) return false;
   log("buy", m, { from: v2.profession, got: BF.items[o.sell.id].name, paid: o.buy[0].n + " emerald" });
   return true;
 }
@@ -319,6 +316,7 @@ function shopAI(m, dt, out) {
   if (X.tt > TRADE_PAUSE - 0.4 && Math.random() < dt * 4) a.swingT = 0.2;   // visual
   if (X.tt <= 0) {
     const ok = deal(m, dl);
+    if (ok == null) return true;   // the trade is in flight (js/trading.js buy)
     X.stage = null; X.deal = null; X.cd = ok ? 0.5 : 5;
     if (!ok) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2.id, nowS() + 60);
   }
