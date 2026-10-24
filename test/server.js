@@ -1,7 +1,8 @@
 // @ci integration suite=world,ui timeout=1800
 // The Node world server (spec r15-41, server/world.js, debug/server.js): ./run.sh's server on free ports (its saves in a temp folder),
 // a page opened with ?sim=server, seed 3:
-//   - the page finds the server (its hello) and is its client: BF.simHost.mode "server", F3 and the game log say so;
+//   - the page finds the server (its hello) and is its client: BF.simHost.mode "server", F3 and the game log say so; the server solves
+//     each planet's river network once and keeps it (<saves>/rivers/);
 //   - a new world plays a game day at 100x on the server in lockstep ticks; its state hash is compared part by part with a headless
 //     run (tools/headless.js load, BF.boot.headless) of as many ticks from the same start (REPORT-ONLY on the parts, as test/headless.js:
 //     the mobs differ between two headless runs too, until Stage 1's determinism is enforced; the clock must match);
@@ -76,11 +77,11 @@ function headless(n) {
     const m = await pg.evaluate(() => ({ host: BF.simHost.mode, server: BF.simHost.server, client: BF.client.mode, replica: BF.world.replica, f3: BF.debugText(BF.debugInfo()).split('\n').find(l => /^Simulation/.test(l)) }));
     check(m.host === 'server' && m.server && m.client === 'worker' && m.replica, `the page is the world server's client (${m.host}, client ${m.client})`);
     check(m.f3 === 'Simulation: server', `F3 says so (${m.f3})`);
-    await pg.waitForFunction(() => BF.glog.recent(500).some(e => e.k === 'worker' && /started in the simulation worker/.test(e.x)), null, { timeout: 60000 }).catch(() => {});
+    await pg.waitForFunction(() => BF.glog.recent(500).some(e => e.k === 'worker' && /started in the simulation worker/.test(e.x)), null, { timeout: 240000 }).catch(() => {});   // (the server solves the planet's rivers: about 75 s)
     const logs = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'worker' || e.k === 'protocol').map(e => e.x));
     console.log('log: ' + logs.join(' | ').slice(0, 600));
     check(logs.some(x => /The simulation runs on the world server/.test(x)) && logs.some(x => /Simulation worker loaded/.test(x)), 'the game log says the simulation runs on the world server (and its thread loaded)');
-    check(logs.some(x => /started in the simulation worker .*the page's river network/.test(x)), "the server reused the page's river network for the title screen's world");
+    check(logs.some(x => /Title screen world seed \d+ started in the simulation worker/.test(x)), "the title screen's world runs on the server");
 
     // ---- a new world, lockstep, at the village nearest the spawn (where the headless boot puts its player), paused until loaded
     await pg.evaluate(() => { BF.state.paused = true; });
@@ -98,6 +99,8 @@ function headless(n) {
     }, seed);
     check(r.village, 'the player is at the village nearest the spawn');
     await pg.waitForTimeout(10000);   // (paused: the server loads the chunks round the player)
+    const rv = fs.existsSync(path.join(saves, 'rivers')) ? fs.readdirSync(path.join(saves, 'rivers')) : [];
+    check(rv.includes(encodeURIComponent(seed + ':1') + '.v8'), `the server keeps the river networks it solved (${rv.join(', ')})`);
     const h0 = await query(pg, 'hash');
     check(h0.ok && h0.tick === 0, `the new world has not ticked yet (tick ${h0.tick})`);
     const d0 = await pg.evaluate(() => BF.client.world.clock ? BF.client.world.clock.day + BF.client.world.clock.time : -1);

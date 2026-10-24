@@ -23,7 +23,7 @@
 //   { stop() -> Promise (saves every world), status() }
 "use strict";
 const { Worker } = require("worker_threads");
-const path = require("path");
+const path = require("path"), fs = require("fs"), v8 = require("v8");
 const WS = require("./ws.js"), IDB = require("./idb.js");
 
 const SIMTHREAD = path.join(__dirname, "simthread.js"), DB = "blockfield", FEED_MS = 250;
@@ -43,6 +43,28 @@ function packetIn(buf) {   // a binary frame -> {h, b} with b its own ArrayBuffe
 }
 // the save data for JSON: typed arrays as plain arrays (js/save.js restore reads both)
 const json = o => JSON.stringify(o, (k, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v));
+
+// ---- solved river networks (js/worldgen.js riverState), by "seed:biome size": a thread that solved one sends it here, and a world on
+// the same planet starts from it (simworker.js replays it, as a Web Worker replays the page's). Kept in memory and in <saves>/rivers/,
+// so a planet's network is solved once per machine, not once per world started (seed 3: about 75 s). The page doesn't send its copy
+// to the server: it's tens of megabytes.
+function riverCache(dir) {
+  const mem = new Map(), file = k => path.join(dir, "rivers", encodeURIComponent(k) + ".v8");
+  return {
+    get(k) {
+      if (mem.has(k)) return mem.get(k);
+      try { const st = v8.deserialize(fs.readFileSync(file(k))); mem.set(k, st); return st; } catch (e) { return null; }
+    },
+    put(k, st) {
+      if (!st || mem.has(k)) return;
+      mem.set(k, st);
+      while (mem.size > 4) mem.delete(mem.keys().next().value);
+      try { fs.mkdirSync(path.dirname(file(k)), { recursive: true }); const t = file(k) + ".tmp"; fs.writeFileSync(t, v8.serialize(st)); fs.renameSync(t, file(k)); }
+      catch (e) { say("could not keep the river network for " + k + ": " + e.message); }
+    },
+  };
+}
+const riverKey = (seed, biomeScale) => (Number(seed) >>> 0) + ":" + Math.max(1, Number(biomeScale) || 1);
 
 // ---- a simulation thread: one world
 let nextSim = 1;
@@ -77,7 +99,7 @@ class Sim {
 }
 
 function start(o) {
-  const store = IDB.open(o.saves).store;
+  const store = IDB.open(o.saves).store, rivers = riverCache(o.saves);
   const srv = { saves: o.saves, build: o.build || null, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
@@ -96,6 +118,7 @@ function start(o) {
     if (!m) return;
     if (m.server) {
       if (m.server === "world") { s.id = m.id; s.name = m.name || null; }
+      else if (m.server === "rivers") rivers.put(m.st && m.st.seed, m.st);
       else if (m.server === "detached") { s.detachedDone = true; say("world " + JSON.stringify(s.name) + " paused" + (m.saved ? " and saved" : " (the save failed)")); s.answer("detached", m); }
       else s.answer(m.server, m);
       return;
@@ -153,8 +176,10 @@ function start(o) {
   }
   // a protocol packet for the simulation; a world message decides which thread plays
   function fromPagePacket(p) {
+    let m = null;
     if (p.h.startsWith('{"t":"world"')) {
-      const m = JSON.parse(p.h), a = m.args || {};
+      m = JSON.parse(p.h);
+      const a = m.args || {};
       const h = srv.held;
       if (m.op === "load" && h && h.id === a.id) {   // the held world, picked again: its thread plays, the title screen's goes
         if (srv.active && srv.active !== h) srv.active.kill();
@@ -169,6 +194,12 @@ function start(o) {
           warm();
         }
       }
+    }
+    if (m && srv.active) {
+      // the planet's river network, when this server has solved it before
+      const a = m.args || {}, meta = m.op === "load" ? store.get(DB, "worlds", a.id) : null;
+      const st = meta ? rivers.get(riverKey(meta.seed, meta.biomeScale)) : rivers.get(riverKey(a.seed, (a.opts || {}).biomeScale));
+      if (st) srv.active.post({ server: "rivers", st });
     }
     if (srv.active) srv.active.post(p, p.b ? [p.b] : []);
   }

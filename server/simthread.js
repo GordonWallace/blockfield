@@ -8,8 +8,9 @@
 //   {server: "state", id}  the page's copy of the world being played (js/save.js restoreClient), for a page about to pick it again
 //   {server: "feed", ack}  the debug screen's simulation part (js/debugfeed.js simPart), read here instead of through the page
 //   {server: "shutdown"}  save and say so (Ctrl+C on ./run.sh)
+//   {server: "rivers", st}  the next world's river network, solved before on this machine (the server's cache)
 // and it sends back {server: "world", id, name} whenever a world starts here (id null: the title screen's world), {server: "detached"},
-// {server: "state"}, {server: "feed"} and {server: "shutdown"} (saved).
+// {server: "state"}, {server: "feed"}, {server: "shutdown"} (saved) and {server: "rivers", st} (a network it solved, for the cache).
 // Game log: INFO "server" when the world pauses because its page closed, and when a page picks it up again.
 "use strict";
 const { parentPort, workerData } = require("worker_threads");
@@ -42,8 +43,14 @@ const BFx = () => globalThis.BF;
 const glog = text => BFx().glog.log("INFO", "server", text);
 
 // once the simulation has loaded: tell the server which world is here as worlds start
+let riversIn = null;
 function ready() {
   const BF = BFx();
+  BF.worker.rivers = () => { const st = riversIn; riversIn = null; return st; };
+  // a network solved here goes to the server's cache, for the next world on this planet
+  BF.on("newWorld", () => setTimeout(() => {
+    if (!BF.worker.replayed) try { const st = BF.worldgen.riverState(); if (st) post({ server: "rivers", st }); } catch (e) { /* none */ }
+  }, 0));
   BF.on("newWorld", () => post({ server: "world", id: null, seed: BF.state.seed }));
   BF.on("worldLoaded", m => post({ server: "world", id: m && m.id || null, name: m && m.name, seed: BF.state.seed }));
 }
@@ -94,7 +101,8 @@ parentPort.on("message", d => {
   if (d && d.server) {
     const BF = BFx();
     try {
-      if (d.server === "detach") detach();
+      if (d.server === "rivers") riversIn = d.st;   // (the next world's network, from the server's cache: simworker.js worldOp)
+      else if (d.server === "detach") detach();
       else if (d.server === "state") post(Object.assign({ server: "state", id: d.id }, BF.save.current && BF.save.current.id === d.id ? state() : { meta: null }));
       else if (d.server === "feed") post({ server: "feed", part: BF.debugFeed && BF.debugFeed.simPart ? BF.debugFeed.simPart(d.ack) : null });
       else if (d.server === "shutdown") {

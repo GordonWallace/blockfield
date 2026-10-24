@@ -45,9 +45,10 @@ function post(m, transfer) { self.postMessage(m, transfer || []); }
 // The planet's river network: the page's copy replayed (r14-23), so the worker doesn't solve it again; its key is "seed:biome size".
 // False when there is none or it isn't for this world (newWorld then solves it here).
 function rivers(seed, st) {
+  BF.worker.replayed = false;
   if (!st) return false;
   BF.worldgen.init(BF.makeNoise(seed >>> 0), { biomeScale: +String(st.seed).split(":")[1] || 1, villages: 10 });
-  return !!BF.worldgen.adoptRivers(st);
+  return (BF.worker.replayed = !!BF.worldgen.adoptRivers(st));
 }
 // js/save.js load() asks for the rivers first (the page's loading screen, BF.prepareWorld); here they come with the world message
 let riverSt = null;
@@ -56,7 +57,7 @@ function worldOp(op, a) {
   if (op === "load" && BF.worker.held && BF.save.current && BF.save.current.id === a.id) return BF.worker.held(a);
   BF.worker.held = null;
   const t0 = performance.now();
-  riverSt = a.rivers || null;
+  riverSt = a.rivers || (BF.worker.rivers ? BF.worker.rivers() : null);   // (the world server's cache, server/simthread.js)
   BF.prepareWorld = seed => { rivers(seed, riverSt); return Promise.resolve(); };
   const S = BF.save;
   const started = what => {

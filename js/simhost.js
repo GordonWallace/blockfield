@@ -194,7 +194,8 @@ function hook(C) {
 // network goes along, so the worker replays it instead of solving it again.
 H.world = function (op, args) {
   if (!H.worker) return Promise.resolve({ ok: false, why: "in page" });
-  const a = Object.assign({ rivers: BF.worldgen.riverState ? BF.worldgen.riverState() : null }, args);
+  // (not to the world server: the network is tens of megabytes, and the server keeps the ones it has solved, server/world.js)
+  const a = Object.assign({ rivers: !H.server && BF.worldgen.riverState ? BF.worldgen.riverState() : null }, args);
   sentPlayer = ""; lastClock = null; sentSpeed = sentPause = null;
   return new Promise(resolve => BF.client.worldOp(op, a, r => {
     if (r && r.resumed && r.speed != null) {   // a world the server held paused, picked again: it goes on at the speed it had
