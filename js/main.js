@@ -1,4 +1,4 @@
-// The page's boot: renderer, frame loop and debug overlay. The event bus, BF.newWorld and the simulation tick are in js/boot.js,
+// The page's boot: renderer and frame loop (the F3 debug overlay is js/debugoverlay.js). The event bus, BF.newWorld and the simulation tick are in js/boot.js,
 // which the headless boot shares (spec r15-40).
 (() => {
 "use strict";
@@ -79,100 +79,6 @@ function riverWorkers(seed, show) {
   });
 }
 
-// ---------- debug overlay (F3) ----------
-const dbg = document.getElementById("debug");
-let showDebug = false;
-// F3 shows or hides it when released. Held with B, C or R on the planet it flips a planet debug toggle instead (js/view.js setDebug,
-// spec r14-21): B face tints, C the open corner wedge (no round drawing near the cube corners), R the true sphere everywhere.
-let f3Held = false, f3Combo = false;
-const F3_COMBO = { KeyB: "tints", KeyC: "wedge", KeyR: "sphere" };
-addEventListener("keydown", e => {
-  if (e.code === "F3") { e.preventDefault(); if (!e.repeat) { f3Held = true; f3Combo = false; } return; }
-  const k = f3Held && F3_COMBO[e.code];
-  if (!k || !BF.view) return;
-  e.preventDefault(); e.stopImmediatePropagation();
-  if (e.repeat) return;
-  f3Combo = true;
-  const on = BF.view.setDebug({ [k]: !BF.view.debug[k] })[k];
-  if (BF.player.actionBar) BF.player.actionBar(PLANET_TOGGLE[k] + (on ? ": on" : ": off"));
-}, true);
-addEventListener("keyup", e => {
-  if (e.code !== "F3") return;
-  e.preventDefault();
-  if (f3Held && !f3Combo) { showDebug = !showDebug; dbg.hidden = !showDebug; BF.debugOn = showDebug; }
-  f3Held = false;
-});
-addEventListener("blur", () => { f3Held = false; });
-const PLANET_TOGGLE = { tints: "Face tints", wedge: "Open corner wedge", sphere: "True sphere everywhere" };
-let frames = 0, fpsT = performance.now(), fps = 0;
-let screenWas = false;
-function updateDebug(now) {
-  frames++;
-  const scr = !!(BF.player.screenOpen && BF.player.screenOpen());
-  if (scr !== screenWas) { screenWas = scr; document.body.classList.toggle("bf-screen-open", scr); }
-  if (now - fpsT > 500) { fps = Math.round(frames * 1000 / (now - fpsT)); frames = 0; fpsT = now; }
-  if (!showDebug) return;
-  const d = debugInfo(), t = debugText(d);
-  if (!d.perf || !d.perf.stale) { dbg.textContent = t; return; }
-  // frozen or paused: the meter's line keeps its last figures, greyed
-  const line = BF.perf.text(d.perf), i = t.indexOf(line);
-  dbg.textContent = t.slice(0, i);
-  const g = document.createElement("span"); g.style.opacity = "0.45"; g.textContent = line;
-  dbg.append(g, t.slice(i + line.length));
-}
-// The F3 numbers as data: the overlay prints them and the second-screen feed (js/debugfeed.js) sends them on.
-function debugInfo() {
-  const p = BF.player.position;
-  const biome = BF.worldgen.biomeAt(p.x, p.z), cc = BF.world.chunkAt(p.x, p.z);
-  return {
-    fps, x: p.x, y: p.y, z: p.z, yaw: BF.player.yaw,
-    chunkX: Math.floor(p.x / BF.CS), chunkZ: Math.floor(p.z / BF.CS),
-    sections: cc ? { lo: cc.lo, hi: cc.hi - 1, y0: cc.y0, y1: cc.y1 - 1 } : null,
-    biome: biome ? biome.name : "?",
-    chunksDrawn: BF.world.meshedCount(), chunksLoaded: BF.world.chunks.size, chunksQueued: BF.world.queueLength,
-    mobs: BF.mobs.list.length, boats: BF.boats ? BF.boats.list.length : 0, seed: BF.state.seed, gen: BF.state.gen, biomeScale: BF.state.biomeScale, sim: BF.villageSim.status(),
-    day: BF.sky.day + BF.sky.time, clock: BF.vlog.stamp(BF.sky.day + BF.sky.time), light: BF.sky.light,
-    blockLight: BF.world.getBlockLight(p.x, p.y + 0.05, p.z), calls: renderer.info.render.calls,
-    weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
-    cloudCover: BF.sky.cloudCover, cloudHeight: BF.sky.cloudHeight, warp: BF.warp.speed,
-    clicks: BF.player.clickLog ? BF.player.clickLog() : [],
-    perf: BF.perf.stats(),   // villager-seconds meter (js/perf.js): null until it has been on
-    requests: BF.req.stats(),   // the request queue and direct writes (js/requests.js)
-    planet: planetInfo(p),
-    shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
-  };
-}
-// The canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas
-// x / z stay internal. Null off the atlas.
-function planetInfo(p) {
-  const C = BF.coords, c = C && C.here();
-  if (!c) return null;
-  const ll = BF.planet.latLonAt(p.x, p.z, {});
-  return { face: c.f, u: c.u, v: c.v, lat: ll.lat, lon: ll.lon, latLon: C.latLonText(p.x, p.z), facing: C.facing(BF.player.yaw, p.x, p.z),
-    debug: BF.view && BF.view.debug ? { ...BF.view.debug } : null };
-}
-// "Planet debug: face tints, true sphere" when any F3 + B / C / R toggle is on
-const planetToggles = pl => { const on = pl.debug ? Object.keys(PLANET_TOGGLE).filter(k => pl.debug[k]) : []; return on.length ? "Planet debug: " + on.map(k => PLANET_TOGGLE[k].toLowerCase()).join(", ") + "\n" : ""; };
-function debugText(d) {
-  const s = d.sections, pl = d.planet;
-  const n1 = v => (Math.floor(v * 10) / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  return `Blockfield  ${d.fps} fps\n` +
-    (pl ? `Face ${pl.face}  u ${n1(pl.u)}  v ${n1(pl.v)}  y ${n1(d.y)}\n${pl.latLon}  Facing ${pl.facing}\n` + planetToggles(pl)
-      : `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n`) +
-    `Chunk ${pl ? Math.floor(pl.u / BF.CS) + ", " + Math.floor(pl.v / BF.CS) : d.chunkX + ", " + d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
-    `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
-    `Mobs ${d.mobs}${d.boats ? `  Boats ${d.boats}` : ""}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
-    (d.perf ? BF.perf.text(d.perf) + "\n" : "") +
-    (d.requests ? BF.req.text(d.requests) + "\n" : "") +
-    `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
-    (d.weather ? "\n" + d.weather : "") +
-    `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
-    (d.shared ? "\n" + d.shared : "") +
-    (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
-}
-BF.debugInfo = debugInfo;
-BF.debugText = debugText;
-
 // ---------- loop ----------
 const PF = BF.perf, simFrame = BF.boot.ticks;   // the simulation's ticks for a frame (js/boot.js)
 let last = performance.now();
@@ -211,8 +117,9 @@ function frame(now) {
   if (BF.lod && BF.lod.cull) BF.lod.cull(camera);   // the distant rings' sectors in view (js/lod.js)
   renderer.render(scene, camera);
   BF.view.end();
-  updateDebug(now);
-  BF.vlog.update(dt, showDebug);
+  BF.debugOverlay.update(now);   // F3 (js/debugoverlay.js)
+  BF.vlog.update();
+  if (BF.villagePanel) BF.villagePanel.update(dt, !!BF.debugOn);   // F3: names over villagers and the village panel, from the protocol (js/villagepanel.js)
   if (BF.villagerHover) BF.villagerHover.update(dt);
   if (BF.stateHash) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js)
   if (BF.debugFeed) BF.debugFeed.update();
