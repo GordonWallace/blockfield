@@ -1044,10 +1044,10 @@ let planBudget = 0;
 // village ticks after it, in a fixed order) searches share planBudget as before.
 const PLANS = 2, KEEP = 20, planWant = new Map();   // mob -> [tick it first asked, tick it last asked]
 const planGrant = new Map();   // mob -> tick granted (kept KEEP ticks: a far mob thinks only 4 times a game second)
-let curMob = null;
+let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 function grantPlans() {
-  const t = BF.rand ? BF.rand.tick : 0;
+  const t = ++planTick;
   for (const [m, g] of planGrant) if (m.removed || g < t - KEEP) planGrant.delete(m);
   if (!planWant.size) return;
   const w = [];
@@ -1059,7 +1059,7 @@ function takePlan() {
   const m = curMob;
   if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
   if (planGrant.delete(m)) return true;
-  const t = BF.rand ? BF.rand.tick : 0, a = planWant.get(m);
+  const t = planTick, a = planWant.get(m);
   if (a) a[1] = t; else planWant.set(m, [t, t]);
   return false;
 }
@@ -1324,6 +1324,15 @@ function isOccupied(x, y, z) {
   const any = L => L.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
   return vq("mobs.isOccupied", any(nearMobs(c, 3, true)), any);
 }
+// Someone at a doorway: a mob (other than `but`) or the player within 1.3 of the cell's centre at its height. A villager doesn't shut a door
+// while another stands in or right by it (they'd be shut out, or it would close in their face as they open it).
+function atDoor(x, y, z, but) {
+  const c = { x: x + 0.5, z: z + 0.5 };
+  const by = (p, h) => { const dx = p.x - c.x, dz = p.z - c.z; return dx * dx + dz * dz < 1.69 && p.y < y + 2 && p.y + h > y; };
+  if (playerAlive() && by(seen(c, player().position, _sA), 1.8)) return true;
+  const any = L => L.some(o => o !== but && !o.dead && !o.removed && !o.sleeping && by(seen(c, o.position, _sB), o.height));
+  return vq("mobs.atDoor", any(nearMobs(c, 3, true)), any);
+}
 // Villagers open closed doors just ahead on their route, and the one they stand in (spawned or scattered into a doorway: its panel would hold
 // them there for good), and close the ones they opened once clear of them.
 function villagerDoors(m) {
@@ -1337,10 +1346,12 @@ function villagerDoors(m) {
   }
   if (ai.doors && ai.doors.length) ai.doors = ai.doors.filter(c => {
     const [x, y, z] = c;
-    if (c[3] === BF.blockReq.tick() || Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || isOccupied(x, y, z)) return true;   // (asked to open this tick: not open yet)
-    const bk = blockAt(x, y, z);
-    if ((bk.door || bk.gate) && (bk.door || bk.gate).open) BF.blockReq.door(m, x, y, z, false);
-    return false;
+    if (c[3] === BF.blockReq.tick() || Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.5 || atDoor(x, y, z, m)) return true;   // (asked to open this tick: not open yet)
+    const bk = blockAt(x, y, z), d = bk.door || bk.gate;
+    if (!d || !d.open || c[4] > 9 || Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) > 16) return false;
+    // shut it; the close is refused if someone came to the doorway this tick (js/blockreqs.js), so look again next tick (a few times)
+    BF.blockReq.door(m, x, y, z, false); c[3] = BF.blockReq.tick(); c[4] = (c[4] || 0) + 1;
+    return true;
   });
 }
 // Lying on the bed, head on the pillow (re-applied every step while asleep); js/mobview.js draws it lying flat with its eyes shut.
@@ -2792,6 +2803,7 @@ BF.mobs = {
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
   isOccupied,
+  atDoor,
   nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan },
   spawning: true,
   // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it
