@@ -28,10 +28,10 @@ module.exports = async (pg) => {
   };
   try {
     await pg.setViewportSize({ width: 320, height: 200 });
-    await pg.goto(base + "?nolod#seed1337gen4");
+    await pg.goto(base + "?nolod&" + require("./lib").q() + "#seed1337gen4");
     const off = await state();
     check(!off.active && off.workers === 0 && off.built === 0, `?nolod: no distant terrain (${JSON.stringify(off)})`);
-    await pg.goto(base + "#seed1337gen4");
+    await pg.goto(base + "?" + require("./lib").q() + "#seed1337gen4");
     const on = await state();
     check(on.active && on.workers > 0 && on.built > 0, `without it: distant terrain on, sampled by workers (${JSON.stringify(on)})`);
   } finally {

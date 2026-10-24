@@ -23,7 +23,7 @@ const start = async () => {
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await game.goto(`http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(4000);
   await require('./lib').ready(game);
   const VER = await game.evaluate(() => BF.VERSION), VRE = VER.replace('.', '\\.');

@@ -129,10 +129,10 @@ async function check(b, label, url, { isolated, walk }) {
     ok('COOP / COEP on the page', h.headers.get('cross-origin-opener-policy') === 'same-origin' && h.headers.get('cross-origin-embedder-policy') === 'credentialless');
     ok('COOP / COEP on the scripts', hj.headers.get('cross-origin-embedder-policy') === 'credentialless');
     ok('not on the wiki', !hw.headers.get('cross-origin-embedder-policy'));
-    await check(b, 'served', `http://localhost:${GAME}/?nolod#seed123gen4v10`, { isolated: true, walk: true });
+    await check(b, 'served', `http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123gen4v10`, { isolated: true, walk: true });
     await stop(srv);
     srv = await start(['--no-isolate']);
-    await check(b, 'no-headers', `http://localhost:${GAME}/?nolod#seed123gen4v10`, { isolated: false, walk: false });
+    await check(b, 'no-headers', `http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123gen4v10`, { isolated: false, walk: false });
     await stop(srv);
     await check(b, 'file', 'file://' + path.join(root, 'index.html') + '?nolod#seed123gen4v10', { isolated: false, walk: false });
   } finally { await b.close(); }

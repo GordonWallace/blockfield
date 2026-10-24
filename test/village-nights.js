@@ -1,8 +1,8 @@
-// @ci baseline suite=ui
+// @ci baseline suite=ui hosts=worker,server
 // Village nights on the debug screen (js/wildlife.js villageStats): a new world lists no nights before its first sunset, then only
 // nights from night 0 on (never Day 0 or negative days), up to the last 7. For test/run.js.
 module.exports = async (pg) => {
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     const rec = [...BF.mobs.villages.values()][0];
     if (!rec) return { err: "no village" };
     const at = (day, time) => { BF.sky.day = day; BF.sky.time = time; return BF.wildlife.villageStats(rec).nights.map(n => n[0]); };

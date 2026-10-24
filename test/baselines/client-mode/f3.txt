@@ -5,4 +5,4 @@ Mobs -  Seed 123  Gen 4 Biomes x1  sims
 Day 1 12:00  Light 1.00  BL 0  Calls -
 Weather clear 0.00 (1000000s left, rain here)  ms
 Clouds clear at y124
-Simulation: in page (the default)
+Simulation: Browser (this page) (the page was opened as a file, so a worker can't load the game's scripts)

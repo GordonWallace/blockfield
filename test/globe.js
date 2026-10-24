@@ -23,7 +23,7 @@ module.exports = async (pg, out) => {
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
   try {
-    await pg.goto(`http://127.0.0.1:${server.address().port}/index.html#seed1337gen4`);
+    await pg.goto(`http://127.0.0.1:${server.address().port}/index.html?${require('./lib').q()}#seed1337gen4`);
     await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow
     await require("./lib").ready(pg);   // the planet's rivers worked out and the world started
     await pg.waitForTimeout(2000);
