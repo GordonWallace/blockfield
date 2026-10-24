@@ -1,9 +1,10 @@
+// @ci integration suite=ui hosts=worker,server
 // /time add and /time set refuse more than 2147483647 ticks (vanilla's limit), so a huge value can't break the day counter.
 // node test/run.js /tmp/ta test/time-add-limit.js
 module.exports = async (pg) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(500);
-  const r = await pg.evaluate(() => {
+  const r = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     const S = BF.sky, x = c => BF.commands.execute(c);
     const day0 = S.day;
     const huge = [x("/time add 100000000000000000000d"), x("/time add " + "9".repeat(240) + "d"), x("/time add 2147483648"), x("/time set 89479d")];

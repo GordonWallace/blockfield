@@ -1,15 +1,22 @@
-// Villager screens: node test/run.js /tmp/vs test/villager-screens.js
+// @ci baseline hosts=worker,server
+// Villager screens: node test/run.js /tmp/vs test/villager-screens.js [--host page|worker|server]
 // Nitwits and unemployed villagers open the trade screen (no offers), a hungry unemployed villager buys food, every villager has a status,
 // and a claimed bed survives pack/unpack.
+// The villagers and their screens are the simulation's (lib.sim, spec r15-43); the screens' titles are read on the page, which follows
+// the screen the simulation opens.
+const lib = require('./lib');
 module.exports = async (pg, out) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "survival"; BF.sky.setTime(0.2); });
-  await require('./lib').toVillage(pg);
-  const r = await pg.evaluate(() => {
+  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "survival"; });
+  await lib.sim(pg, () => BF.sky.setTime(0.2));
+  await lib.toVillage(pg);
+  // the page's screen, once it has followed the simulation's (open or closed)
+  const follow = open => pg.waitForFunction(o => BF.inventory.isOpen() === o, open, { timeout: 10000 }).then(() => pg.waitForTimeout(400), () => {});
+  const r = await lib.sim(pg, () => {
     const M = BF.mobs, T = BF.trades, I = BF.I, r = {};
     M.spawning = false;
     for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(0.05); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.child);
-    const open = m => { m.sleeping = false; const msg = M.interact(m); const o = BF.inventory.isOpen(); const title = document.querySelector(".bf-trade-title, #bf-trade-title") ; return { msg, open: o }; };
+    const open = m => { m.sleeping = false; const msg = M.interact(m); const o = BF.inventory.isOpen(); if (BF.proto) BF.proto.flush(); return { msg, open: o }; };
     // statuses of everyone (screen title text)
     r.status = {};
     for (const m of vs) {
@@ -22,7 +29,14 @@ module.exports = async (pg, out) => {
     if (!nit) { nit = vs.find(m => m.profession !== "builder" && m.profession !== "explorer"); BF.jobs.setProfession(nit, "nitwit"); nit.trades = null; nit.inv = null; }
     r.nitwit = open(nit);
     r.nitwit.trades = nit.trades.length; r.nitwit.inv = nit.inv.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count);
-    r.nitwit.title = [...document.querySelectorAll("*")].map(e => e.childElementCount === 0 ? e.textContent : "").find(t => /Nitwit/.test(t || ""));
+    globalThis.__vs = { vs, nit };
+    return r;
+  });
+  await follow(true);
+  r.nitwit.title = await pg.evaluate(() => [...document.querySelectorAll("*")].map(e => e.childElementCount === 0 ? e.textContent : "").find(t => /Nitwit/.test(t || "")));
+  Object.assign(r, await lib.sim(pg, () => {
+    const M = BF.mobs, T = BF.trades, I = BF.I, r = {}, { vs, nit } = globalThis.__vs;
+    const open = m => { m.sleeping = false; const msg = M.interact(m); const o = BF.inventory.isOpen(); if (BF.proto) BF.proto.flush(); return { msg, open: o }; };
     BF.inventory.close();
     // an unemployed villager, fed and then starving
     let un = vs.find(m => m.profession === "unemployed");
@@ -44,9 +58,10 @@ module.exports = async (pg, out) => {
     r.unHungry.exchange = T.exchange(un, bread);
     r.unHungry.foodAfter = [before, BF.food.available(un), T.inv.count(un.inv, I.emerald)];
     return r;
-  });
+  }));
+  await follow(true);
   await pg.screenshot({ path: out + '-unemployed.png' });
-  const r2 = await pg.evaluate(() => {
+  const r2 = await lib.sim(pg, () => {
     const M = BF.mobs, T = BF.trades, r = {};
     BF.inventory.close();
     const un = M.list.find(m => m.type === "villager" && m.profession === "unemployed");
@@ -60,9 +75,11 @@ module.exports = async (pg, out) => {
     // a villager on the screen shows status in the title
     const fm = M.list.find(m => m.type === "villager" && !m.child && m.profession !== "nitwit" && m.profession !== "unemployed");
     fm.sleeping = false; M.interact(fm);
-    r.openTitle = [...document.querySelectorAll("*")].filter(e => e.childElementCount === 0 && / — /.test(e.textContent || "")).map(e => e.textContent);
+    if (BF.proto) BF.proto.flush();
     return r;
   });
+  await follow(true);
+  r2.openTitle = await pg.evaluate(() => [...document.querySelectorAll("*")].filter(e => e.childElementCount === 0 && / — /.test(e.textContent || "")).map(e => e.textContent));
   await pg.screenshot({ path: out + '-status.png' });
   await pg.evaluate(() => BF.inventory.close());
   console.log(JSON.stringify({ ...await Promise.resolve(r), ...r2 }, null, 1));

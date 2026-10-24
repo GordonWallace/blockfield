@@ -637,6 +637,7 @@ const QUERIES = {
   // the F3 overlay's simulation figures (js/main.js debugInfo adds the page's own: fps, position, draw calls)
   f3(a) {
     const p = a && a.x != null ? a : BF.player && BF.player.position;
+    if (!BF.page && a) { BF.debugOn = !!a.shown; BF.debugOnAt = now(); }   // off the page: the page's F3 overlay is showing (the meter is on while it is, js/perf.js; js/simworker.js lets it lapse)
     return { ok: true, mobs: BF.mobs ? BF.mobs.list.length : 0, boats: BF.boats ? BF.boats.list.length : 0, sim: BF.villageSim ? BF.villageSim.status() : "",
       clock: BF.vlog && BF.sky ? BF.vlog.stamp(BF.sky.day + BF.sky.time) : "", weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
       perf: BF.perf ? BF.perf.stats() : null, perfText: BF.perf && BF.perf.stats() ? BF.perf.text(BF.perf.stats()) : "",
