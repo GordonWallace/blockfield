@@ -4,10 +4,14 @@
 // went in, as IndexedDB's own clone does). A write goes to a temp file first and is renamed over the old one, so a failed write keeps
 // the previous record. Transactions run their requests in order, one after another, then fire complete; they are not atomic across
 // records (a crash between two puts keeps the first), which is as much as a world's save needs (its meta and its data go in one tx).
-// Spec r15-42 replaces this layout with a folder per world.
-// API: open(root) -> { indexedDB, IDBKeyRange, store } (store: { get, put, del, all(storeName, range?), keys } for the server itself)
+// The game's own database ("blockfield": its stores worlds and data) is kept a folder per world instead (spec r15-42, server/savedir.js):
+// "worlds" <id> is the world's world.json, "data" <id> its save.v8, "<id>#loghead" and "<id>#log:<seq>" its log/ folder.
+// API: open(root) -> { indexedDB, IDBKeyRange, store, worlds } (store: { get, put, del, all(storeName, range?), keys } for the server
+//   itself; worlds: the server/savedir.js folders)
 "use strict";
 const fs = require("fs"), path = require("path"), v8 = require("v8");
+const SaveDir = require("./savedir.js");
+const GAME_DB = "blockfield";
 
 const enc = k => encodeURIComponent(String(k)).replace(/\*/g, "%2A") + ".v8";
 const dec = f => decodeURIComponent(f.slice(0, -3));
@@ -20,23 +24,50 @@ const IDBKeyRange = {
 };
 const isRange = k => k && typeof k === "object" && typeof k.includes === "function";
 
+// a game database record's key -> [world id, part] (server/savedir.js)
+function part(s, key) {
+  key = String(key);
+  if (s === "worlds") return [key, "meta"];
+  const m = /^(.*)#(loghead|log:\d+)$/.exec(key);
+  return m ? [m[1], m[2]] : [key, "data"];
+}
+const keyOf = (s, id, p) => s === "worlds" ? id : p === "data" ? id : id + "#" + p;
+
 function open(root) {
-  const dbDir = name => path.join(root, encodeURIComponent(name));
+  // other databases: a folder each under <root>/.idb/ (only the game's is used today)
+  const dbDir = name => path.join(root, ".idb", encodeURIComponent(name));
+  const worlds = SaveDir.open(root);
+  const game = (db, s) => db === GAME_DB && (s === "worlds" || s === "data");
   // ---- records, synchronously
   function storeOf(db, s) { return path.join(dbDir(db), encodeURIComponent(s)); }
   const store = {
     get(db, s, key) {
+      if (game(db, s)) { const [id, p] = part(s, key); return worlds.get(id, p); }
       try { return v8.deserialize(fs.readFileSync(path.join(storeOf(db, s), enc(key)))); }
       catch (e) { if (e.code === "ENOENT") return undefined; throw e; }
     },
     put(db, s, key, value) {
+      if (game(db, s)) { const [id, p] = part(s, key); worlds.put(id, p, value); return; }
       const dir = storeOf(db, s), f = path.join(dir, enc(key)), tmp = f + ".tmp" + process.pid + "_" + Math.random().toString(36).slice(2);
       fs.mkdirSync(dir, { recursive: true });
       try { fs.writeFileSync(tmp, v8.serialize(value)); fs.renameSync(tmp, f); }
       catch (e) { try { fs.unlinkSync(tmp); } catch (_) { /* never written */ } throw e; }
     },
-    del(db, s, key) { try { fs.unlinkSync(path.join(storeOf(db, s), enc(key))); } catch (e) { if (e.code !== "ENOENT") throw e; } },
+    del(db, s, key) {
+      if (game(db, s)) { const [id, p] = part(s, key); worlds.del(id, p); return; }
+      try { fs.unlinkSync(path.join(storeOf(db, s), enc(key))); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    },
     keys(db, s, range) {
+      if (game(db, s)) {
+        let ks;
+        if (s === "worlds") ks = worlds.list().map(m => m.id);
+        else {   // (a range within one world, as the game log's: only that world's folder is read)
+          const one = range && typeof range.lower === "string" && range.lower.includes("#") ? [range.lower.split("#")[0]] : worlds.list().map(m => m.id);
+          ks = [].concat(...one.map(id => worlds.parts(id).map(p => keyOf(s, id, p))));
+        }
+        ks.sort();
+        return range ? ks.filter(k => range.includes(k)) : ks;
+      }
       let names;
       try { names = fs.readdirSync(storeOf(db, s)); } catch (e) { return []; }
       const ks = names.filter(f => f.endsWith(".v8")).map(dec).sort();
@@ -120,7 +151,7 @@ function open(root) {
       return r;
     },
   };
-  return { indexedDB, IDBKeyRange, store };
+  return { indexedDB, IDBKeyRange, store, worlds };
 }
 
 module.exports = { open, IDBKeyRange };
