@@ -1,7 +1,10 @@
+// @ci integration hosts=worker,server
 // Killed villagers stay dead: through the village unloading and loading again (the living ones come back, not the dead ones)
 // and through a save and load. Usage: node test/run.js /tmp/dv test/dead-villagers.js
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 1, { gen: 4, villages: 9, gameMode: "creative" });   // (on the page too, so its player and world are the simulation's: spec r15-43)
+  const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
@@ -15,7 +18,8 @@ module.exports = async (pg, out) => {
     const settle = async () => { for (let k = 0; k < 60; k++) { BF.world.update(X, Z, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); } };
     BF.state.paused = true;
     BF.newWorld(1, { gen: 4, villages: 9, gameMode: "creative" });
-    { const v = BFT.village(); KEY = Math.round(v.x) + "," + Math.round(v.z); X = Math.round(v.x) + 4; Z = Math.round(v.z) + 4; FX = X + 1500; FZ = Z + 1500; }
+    // the village nearest the spawn (as BFT.village(): test/bft.js is the page's)
+    { const s = BF.spawnPoint || BF.player.position, v = BF.worldgen.villagesNear(s.x, s.z, 3000).sort((a, b) => BF.planet.distance(s, a) - BF.planet.distance(s, b))[0]; KEY = Math.round(v.x) + "," + Math.round(v.z); X = Math.round(v.x) + 4; Z = Math.round(v.z) + 4; FX = X + 1500; FZ = Z + 1500; }
     BF.mobs.spawning = false;
     BF.sky.setTime(0.1);
     await load(X, Z); await settle();

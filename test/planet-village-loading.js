@@ -1,4 +1,4 @@
-// @ci baseline suite=village timeout=420
+// @ci baseline suite=village timeout=420 hosts=worker,server
 // Village loading on the planet (spec r14-15): on a generator-4 world (seed 1337), the player starts on face 4 next to an edge, with a
 // village of the neighbouring face beyond it, and walks across the edge toward the village: it is simulated once its box is within 200 blocks
 // (measured on the planet) and its villagers come out; walking back, it keeps running at 210 (DROP 216) and stops past it (countdown or
@@ -7,16 +7,19 @@
 // (A simulated village's chunks load as data only once every chunk in view is ready (js/world.js simList), and the jump to 195 blocks
 // leaves a fresh view to load first; under CI's software rendering at 1 to 2 fps that alone can take over a minute. The test waits for the
 // village's kept chunks before it looks for villagers.)
-// node test/run.js /tmp/pvl test/planet-village-loading.js
+// node test/run.js /tmp/pvl test/planet-village-loading.js [--host page|worker|server]   (villages read where the simulation is: spec r15-43)
 module.exports = async (pg) => {
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
+  const lib = require('./lib');
+  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
+  await lib.newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(2000);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
-  const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 500 }).then(() => true, () => false);
+  const wait = async (fn, arg, t = 40000) => { for (const end = Date.now() + t; Date.now() < end; await pg.waitForTimeout(500)) if (await lib.sim(pg, fn, arg)) return true; return false; };   // (where the simulation is)
   // a village on another face, nearest to one of face 4's edges, and the walk line toward it from face 4 (face 4's frame, perpendicular to
   // the edge), sampled every 4 blocks with the planet edge distance of each canonical point
-  const plan = await pg.evaluate(() => {
+  const plan = await lib.sim(pg, () => {
     const P = BF.planet, N = P.N, W = BF.worldgen, S = BF.villageSim;
     for (let s = 0; s < 4; s++) for (let k = 2; k < 60; k++) {
       const along = Math.round(N * k / 62), h = [[-1, 0], [1, 0], [0, -1], [0, 1]][s];
@@ -48,7 +51,7 @@ module.exports = async (pg) => {
   // walking across the edge: not simulated at 230, simulated at 195
   for (const p of plan.pts) { if (p.d < 230) break; if (p.t % 40 === 0) { await tp(p); await pg.waitForTimeout(150); } }
   await tp(at(230)); await pg.waitForTimeout(3000);
-  check(!(await pg.evaluate(k => BF.villageSim.isActive(k), plan.key)), "past the edge, 230 blocks from the village's box, it is not simulated");
+  check(!(await lib.sim(pg, k => BF.villageSim.isActive(k), plan.key)), "past the edge, 230 blocks from the village's box, it is not simulated");
   await tp(at(195));
   check(await wait(k => BF.villageSim.isActive(k), plan.key), "195 blocks from its box (measured on the planet) the village is simulated");
   check(await wait(() => { const K = BF.villageSim.keepKeys; return K.size > 0 && [...K].every(k => BF.world.chunks.has(k)); }, null, 200000), "its kept chunks load (as data, once the view is ready)");
@@ -56,12 +59,12 @@ module.exports = async (pg) => {
   // walking back toward the edge: still running at 210, stops past 216
   const back = plan.pts.slice().reverse().find(p => p.d >= 210);
   await tp(back); await pg.waitForTimeout(3000);
-  check(await pg.evaluate(k => BF.villageSim.isActive(k), plan.key), `walking back, ${Math.round(back.d)} blocks from its box it keeps running (DROP 216)`);
+  check(await lib.sim(pg, k => BF.villageSim.isActive(k), plan.key), `walking back, ${Math.round(back.d)} blocks from its box it keeps running (DROP 216)`);
   const far = plan.pts.slice().reverse().find(p => p.d >= 260);
   await tp(far);
   check(await wait(k => !BF.villageSim.isActive(k) || BF.villageSim.countdown(k) !== null, plan.key), `${Math.round(far.d)} blocks from its box (on face ${far.f}) it counts down or unloads`);
   // a point and its margin address measure the same, and a trip corridor across the edge is canonical and joins both villages
-  const r = await pg.evaluate(plan => {
+  const r = await lib.sim(pg, plan => {
     const P = BF.planet, S = BF.villageSim, V = BF.worldgen.villageAt(plan.V.x, plan.V.z), O = BF.worldgen.villageAt(plan.other.x, plan.other.z);
     const p = plan.pts[0], m = P.local(V, p, {});   // the start point (face 4) as a margin address of the village's face
     const keys = S.corridor(V, O), ok = keys.every(k => { const [cx, cz] = k.split(",").map(Number), c = P.canonCell(cx * 16 + 8, cz * 16 + 8, {}); return !c.off && c.x === cx * 16 + 8 && c.z === cz * 16 + 8; });
