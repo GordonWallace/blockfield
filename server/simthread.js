@@ -46,6 +46,7 @@ const glog = text => BFx().glog.log("INFO", "server", text);
 let riversIn = null;
 function ready() {
   const BF = BFx();
+  BF.state.paused = true;   // (a thread waiting for its page ticks nothing: the page's speed message starts it, after its world)
   BF.worker.rivers = () => { const st = riversIn; riversIn = null; return st; };
   // a network solved here goes to the server's cache, for the next world on this planet
   BF.on("newWorld", () => setTimeout(() => {
