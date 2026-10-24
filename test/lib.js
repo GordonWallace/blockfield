@@ -76,3 +76,11 @@ exports.hold = async (pg, creative) => {
   await pg.waitForTimeout(500);   // (a frame already asked for)
   await exports.sim(pg, c => { if (!BF.page) BF.boot.ticks = () => 0; if (c && BF.player.setGameMode) BF.player.setGameMode('creative'); }, !!creative);
 };
+// reloaded(pg): after pg.reload(), waits for the game to be up again where it was: its host chosen (before that BF.preparing is not set
+// yet, so ready() alone can pass at once and a save loaded then is wiped by the boot world's newWorld), the planet's rivers, and the
+// simulation playing
+exports.reloaded = async pg => {
+  await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
+  await exports.ready(pg);
+  await exports.simReady(pg);
+};
