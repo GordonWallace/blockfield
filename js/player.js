@@ -1114,8 +1114,15 @@ function act(kind, target, data) {
   if (data.slot == null && BF.inventory) data.slot = BF.inventory.selectedIndex;
   if (!BF.req || !BF.req.player) return { ok: false, why: "no request queue" };
   const req = BF.req.player(kind, target, data);
-  if (!req.delivered && BF.client && BF.client.mode === "worker") return { ok: true, pending: true };
+  if (!req.delivered && BF.client && BF.client.mode === "worker") return { ok: true, pending: true, then: fn => req.then(fn) };
   return req.result || { ok: false, why: "pending" };
+}
+// A right click on a mob (player.mob): the module's answer, or true while it is on its way (the simulation in a worker answers later)
+function mobAct(data) {
+  const a = act("player.mob", null, data);
+  if (!a.pending) return a.r;
+  a.then(res => { const r = res && res.r; if (typeof r === "string") actionBar(r); else if (r && r.msg) actionBar(r.msg); });   // (its message when it comes)
+  return true;
 }
 function onAct(kind, fn) {
   if (!BF.req) return;
@@ -1126,7 +1133,7 @@ function onAct(kind, fn) {
   });
 }
 const mobOf = id => (id != null && BF.ids ? BF.ids.get(id) : null);
-const idOf = m => (m && BF.ids ? BF.ids.idOf(m) : null);
+const idOf = m => (m && m.mirror ? m.sid : m && BF.ids ? BF.ids.idOf(m) : null);   // (a stand-in from the client's mirror: its sid)
 function consumeHeld(n) { if (n > 0) { try { if (inv().consumeSelected) inv().consumeSelected(n); } catch (e) { console.error(e); } } }
 function giveOrDrop(id, n) { const left = inv().add ? inv().add(id, n) : n; if (left > 0 && BF.drops) BF.drops.spawn(id, left, pos.x, pos.y + 1, pos.z); }
 
@@ -1272,11 +1279,57 @@ function throwSelected() {
 }
 
 function boatHit() {
+  if (remoteSim()) return mirrorHit("boat");
   try { return BF.boats ? BF.boats.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
 }
 function mobHit() {
+  if (remoteSim()) return mirrorHit("mob");
   try { return BF.mobs && BF.mobs.raycast ? BF.mobs.raycast(eyeVec(), dirVec(), MOB_REACH, vehicle) : null; } catch (_) { return null; }
 }
+// With the simulation in a worker (r15-38) the page has no simulated mobs or boats: it aims at the client's mirror of them
+// (BF.client.world.entities). A stand-in carries what this file reads (type, position, box, rider, hostile) and the simulation's id (sid)
+// that the request names. Returns {mob | boat: stand-in, dist} like BF.mobs.raycast / BF.boats.raycast, or null.
+const remoteSim = () => !!(BF.client && BF.client.mode === "worker");
+const MLQ = {};
+function standIn(e, x, z) {
+  const boat = e.kind === "boat";
+  return { mirror: true, kind: e.kind, sid: e.sid, type: e.type, position: new THREE.Vector3(x, e.y, z), pos: new THREE.Vector3(x, e.y, z),
+    halfWidth: boat ? BF.boats.HW : e.hw, height: boat ? BF.boats.H : e.h, dead: !!e.dead, rider: e.rider, hostile: !boat && !!(BF.mobs && BF.mobs.isHostile && BF.mobs.isHostile(e.type)) };
+}
+function mirrorEntities(kind, o, r) {   // the mirror's living mobs (or boats) within r of o, as stand-ins seen from o's frame
+  const W = BF.client && BF.client.world, out = [];
+  if (!W) return out;
+  for (const e of W.entities.values()) {
+    if (e.kind !== kind || e.dead || e.sid == null) continue;
+    BF.planet.local(o, e, MLQ);
+    if ((MLQ.x - o.x) ** 2 + (e.y - o.y) ** 2 + (MLQ.z - o.z) ** 2 <= r * r) out.push(standIn(e, MLQ.x, MLQ.z));
+  }
+  return out;
+}
+function mirrorHit(kind) {
+  const o = eyeVec(), d = dirVec();
+  let best = null;
+  for (const m of mirrorEntities(kind, o, MOB_REACH + 2)) {
+    if (vehicle && vehicle.sid === m.sid) continue;
+    const p = m.position, t = rayBox(o, d, [p.x - m.halfWidth, p.y, p.z - m.halfWidth], [p.x + m.halfWidth, p.y + m.height, p.z + m.halfWidth]);
+    if (t != null && t <= MOB_REACH && (!best || t < best.dist)) best = { [kind === "boat" ? "boat" : "mob"]: m, dist: t };
+  }
+  return best;
+}
+function rayBox(o, d, mn, mx) {   // distance along the ray to the box, or null
+  let t0 = 0, t1 = Infinity;
+  const os = [o.x, o.y, o.z], ds = [d.x, d.y, d.z];
+  for (let a = 0; a < 3; a++) {
+    if (Math.abs(ds[a]) < 1e-9) { if (os[a] < mn[a] || os[a] > mx[a]) return null; continue; }
+    let ta = (mn[a] - os[a]) / ds[a], tb = (mx[a] - os[a]) / ds[a];
+    if (ta > tb) { const t = ta; ta = tb; tb = t; }
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+    if (t0 > t1) return null;
+  }
+  return t0;
+}
+// The mobs whose boxes block a placement or a rest: the simulation's, or the mirror's stand-ins with the simulation in a worker
+const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : (BF.mobs && BF.mobs.list) || [];
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
   const bh = boatHit(), m0 = mobHit();
@@ -1384,7 +1437,7 @@ function boxOverlapsCell(px, py, pz, hw, h, x, y, z) {
 }
 function cellBlockedByEntity(x, y, z) {
   if (boxOverlapsCell(pos.x, pos.y, pos.z, HW, HEIGHT, x, y, z)) return true;   // full box: no block may be placed inside the player
-  const list = (BF.mobs && BF.mobs.list) || [];
+  const list = nearMobList(8);
   for (const m of list) {
     if (!m || m.dead) continue;
     const p = m.position || m.pos; if (!p) continue;
@@ -1439,7 +1492,7 @@ function placeMulti(kind, x, y, z, wood) {
 function overlapsEntityBoxes(x, y, z, boxes) {
   const hits = (px, py, pz, hw, h) => boxes.some(b => px + hw > x + b[0] / 16 && px - hw < x + b[3] / 16 && py + h > y + b[1] / 16 && py < y + b[4] / 16 && pz + hw > z + b[2] / 16 && pz - hw < z + b[5] / 16);
   if (hits(pos.x, pos.y, pos.z, HW - 0.01, HEIGHT)) return true;
-  for (const m of (BF.mobs && BF.mobs.list) || []) {
+  for (const m of nearMobList(8)) {
     if (!m || m.dead) continue;
     const p = m.position || m.pos; if (!p) continue;
     if (hits(p.x, p.y, p.z, m.halfWidth != null ? m.halfWidth : m.hw != null ? m.hw : 0.4, m.height != null ? m.height : m.h != null ? m.h : 1.6)) return true;
@@ -1510,7 +1563,7 @@ function trySleep(t) {
   if (falling) return;
   if (!BF.sky || !(BF.sky.isNight() || (BF.sky.stormy && BF.sky.stormy()))) { actionBar("You can only sleep at night"); return; }
   const b = BF.blocks[t.id], tent = !!b.tent;
-  const near = !tent && ((BF.mobs && BF.mobs.list) || []).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
+  const near = !tent && nearMobList(9).some(m => m.hostile && !m.dead && m.position.distanceTo(pos) < 8);
   if (near) { actionBar("You may not rest now, there are monsters nearby"); return; }
   let foot, sy = 0.5625;
   if (tent) { const o = BF.tents.originOf(t.x, t.y, t.z, t.id); foot = [o.x, o.y, o.z]; sy = 0.125; }
@@ -1580,33 +1633,33 @@ function secondaryDown() {
   }
   if (mh && mh.mob && mh.mob.type === "villager" && BF.mobs.interact && (!target || mh.dist < target.dist)) {
     mouseR = false;
-    const msg = act("player.mob", null, { mob: idOf(mh.mob), what: "villager" }).r;
+    const msg = mobAct({ mob: idOf(mh.mob), what: "villager" });
     if (invOpen()) { // the trading screen opened
       if (locked) expectUnlock = true;
       keys.clear(); mouseL = false; resetBreak();
       exitLock();
     }
-    if (msg) actionBar(msg);
+    if (typeof msg === "string") actionBar(msg);
     return true;
   }
   if (mh && mh.mob && mh.mob.type === "sheep" && BF.shepherd && (!target || mh.dist < target.dist)) {   // wheat feeds a sheep, shears shear it (js/shepherd.js)
-    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "sheep" }).r;
+    const r = mobAct({ mob: idOf(mh.mob), what: "sheep" });
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "cow" && BF.cowherd && (!target || mh.dist < target.dist)) {   // wheat feeds a cow, a bucket milks it (js/cowherd.js)
-    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "cow" }).r;
+    const r = mobAct({ mob: idOf(mh.mob), what: "cow" });
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "pig" && BF.pigFarmer && (!target || mh.dist < target.dist)) {   // a carrot, potato or beetroot feeds a pig (js/pigfarmer.js)
-    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "pig" }).r;
+    const r = mobAct({ mob: idOf(mh.mob), what: "pig" });
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "chicken" && BF.poultry && (!target || mh.dist < target.dist)) {   // seeds feed a chicken (js/poultry.js)
-    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "chicken" }).r;
+    const r = mobAct({ mob: idOf(mh.mob), what: "chicken" });
     if (r) { mouseR = false; swing(); if (typeof r === "string") actionBar(r); return true; }
   }
   if (mh && mh.mob && mh.mob.type === "horse" && BF.horses && (!target || mh.dist < target.dist)) {   // horses: feed, saddle, lead, ride (js/horses.js)
-    const r = act("player.mob", null, { mob: idOf(mh.mob), what: "horse", sneak: sneaking }).r;
+    const r = mobAct({ mob: idOf(mh.mob), what: "horse", sneak: sneaking });
     if (r) {
       mouseR = false; swing();
       if (r.mount && !mount(mh.mob)) actionBar("No room to get on that horse");
@@ -2259,6 +2312,9 @@ P.eyePos = () => eyeVec();
 P.lookDir = () => dirVec();
 P.setLook = function (y, p) { yaw = y; pitch = clamp(p, -1.55, 1.55); };
 P.setFlying = function (on) { flying = !!on; vel.y = 0; };   // tests
+// tests: the mob under the crosshair ({type, id, dist} or null; the mirror's with the simulation in a worker) and a left click's attack
+P.aimedMob = () => { const h = mobHit(); return h && h.mob ? { type: h.mob.type, id: idOf(h.mob), dist: h.dist } : null; };
+P.attack = () => { updateTarget(); attackCd = 0; return tryAttack(); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.isLocked = () => locked;
 P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
