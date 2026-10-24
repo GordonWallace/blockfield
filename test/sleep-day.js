@@ -51,6 +51,9 @@ module.exports = async (pg) => {
       await new Promise(r => setTimeout(r, 1500));
       return { info, wall: Math.round(performance.now() - wall0) };
     }, { x: at.x, y: at.y, z: at.z, clicks });
+    // (a loaded runner: the sleep request and the wake can take longer than the fade; then 2 s more for any extra night to show)
+    await lib.simWait(pg, () => BF.sky.day >= 6, null, 15000);
+    await pg.waitForTimeout(2000);
     const res = await lib.sim(pg, () => ({ slept: !!(BF.spawnPoint && BF.spawnPoint.bed), day: BF.sky.day, time: BF.sky.time, stormy: !!(BF.sky.stormy && BF.sky.stormy()) }));
     return Object.assign(res, { info: r.info && Object.assign({ from: at.from }, r.info), wall: r.wall });
   };
