@@ -54,7 +54,7 @@ const COLD = {
     "onGround", "riding", "rider", "child", "hw", "h", "k", "golem", "aiming", "trading", "doorAt", "name", "prof", "lead"],
   drop: ["item", "count", "phase", "pulled"],
   arrow: ["stuck"],
-  boat: ["wood", "row", "rowing", "mob", "rider"],
+  boat: ["wood", "row", "rowing", "mob", "rider", "sid"],
   bee: ["phase", "mode", "land", "landYaw"],
 };
 const KINDS = Object.keys(HOT);
@@ -327,7 +327,7 @@ function serve(send, opts) {
     }
     if (kind === "drop") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, age: o.age || 0, item: o.id, count: o.count, phase: o.phase || 0, pulled: !!o.pulled };
     if (kind === "arrow") { const l = o.stuck ? o.look || o.vel : o.vel || o.look; return { x: o.pos.x, y: o.pos.y, z: o.pos.z, lx: l ? l.x : 0, ly: l ? l.y : 0, lz: l ? l.z : 0, stuck: !!o.stuck }; }
-    if (kind === "boat") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, yaw: o.yaw || 0, hurtT: o.hurtT || 0, wood: o.wood, row: (o.row || [0, 0]).slice(), rowing: (o.rowing || [0, 0]).slice(), mob: nOrNull(o.mob), rider: !!o.rider };
+    if (kind === "boat") return { x: o.pos.x, y: o.pos.y, z: o.pos.z, yaw: o.yaw || 0, hurtT: o.hurtT || 0, wood: o.wood, row: (o.row || [0, 0]).slice(), rowing: (o.rowing || [0, 0]).slice(), mob: nOrNull(o.mob), rider: !!o.rider, sid: o.id != null ? o.id : null };
     const L = o.land;   // bee: landed at a point on a surface, with the surface's normal
     return { x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, phase: o.phase || 0, mode: o.mode, land: L ? [L.x, L.y, L.z, L.nx || 0, L.ny || 0, L.nz || 0] : null, landYaw: o.landYaw || 0 };
   }
