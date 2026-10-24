@@ -1,6 +1,7 @@
-// Jobsite memory test: node test/run.js /tmp/jm test/jobmemory.js
+// @ci baseline hosts=worker,server
+// Jobsite memory test: node test/run.js /tmp/jm test/jobmemory.js [--host page|worker|server]
 module.exports = async (pg) => {
-  const res = await pg.evaluate(() => {
+  const res = await require('./lib').sim(pg, () => {   // (where the simulation is: spec r15-43)
     const out = [], ok = (n, c) => out.push((c ? "PASS " : "FAIL ") + n);
     const J = BF.jobs, p = BF.player.pos || BF.player.position;
     const px = Math.floor(p.x), pz = Math.floor(p.z);

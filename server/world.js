@@ -157,7 +157,7 @@ function start(o) {
     srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = [];
     say("a page connected");
     const h = srv.held;
-    ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, held: h ? { id: h.id, name: h.name } : null } }));
+    ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: 1, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (1 until r15-39)
     ws.on("message", (data, binary) => { try { binary ? fromPagePacket(packetIn(data)) : fromPageText(JSON.parse(data.toString("utf8"))); } catch (e) { say("a bad message from the page: " + e.message); } });
     ws.on("close", () => { if (srv.client === ws) closed(); });
     ws.on("error", () => {});
@@ -178,7 +178,8 @@ function start(o) {
       srv.wantIcons.clear(); srv.iconsAsked = false;   // (one the page couldn't draw isn't asked for again)
       return;
     }
-    if (m.test === "lockstep") srv.tests.push(m);   // (kept for the threads this page plays on next)
+    if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
+    if (m.test === "lockstep" || m.test === "eval") srv.tests.push(m);   // (kept for the threads this page plays on next)
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
   // a protocol packet for the simulation; a world message decides which thread plays

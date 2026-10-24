@@ -73,7 +73,7 @@ function debugInfo() {
     requests: q.requests, requestsText: q.requestsText,   // the request queue and direct writes (js/requests.js)
     planet: planetInfo(p),
     shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
-    simMode: BF.simHost ? BF.simHost.mode + (BF.simHost.worker || !BF.simHost.why ? "" : " (" + BF.simHost.why + ")") : "in page",   // r15-38
+    simMode: BF.simHost && BF.simHost.label ? BF.simHost.label() + (BF.simHost.worker || !BF.simHost.why ? "" : " (" + BF.simHost.why + ")") : "Browser (this page)",   // r15-38, r15-43
   };
 }
 // The canonical face, grid position, latitude / longitude and compass facing (spec r14-18); atlas

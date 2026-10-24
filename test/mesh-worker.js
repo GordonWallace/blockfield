@@ -31,7 +31,7 @@ const out = process.argv[2] || "/tmp/mesh-worker";
       await pg.route("**/three.min.js", (r) => r.fulfill({ path: path.join(root, ".three-test.min.js"), contentType: "text/javascript" }));
       await pg.route("https://fonts.**", (r) => r.abort());
       await pg.addInitScript(() => document.addEventListener("DOMContentLoaded", () => { const v = document.getElementById("view"); if (v) v.requestPointerLock = null; }));
-      await pg.goto(`http://127.0.0.1:${server.address().port}/index.html?nolod#seed${seed}gen4v10`);
+      await pg.goto(`http://127.0.0.1:${server.address().port}/index.html?nolod&${require('./lib').q()}#seed${seed}gen4v10`);
       await pg.waitForFunction(() => window.BF && BF.world && !BF.preparing, null, { timeout: 180000, polling: 200 });
       await pg.evaluate(() => { BF.world.setViewDist(4); BF.player.start(); BF.player.setGameMode("creative"); BF.player.setFlying(true); BF.state.paused = true; });
       await pg.waitForFunction(() => BF.world.queueLength === 0 && BF.world.meshedCount() > 40, null, { timeout: 180000, polling: 250 }).catch(() => {});

@@ -124,7 +124,7 @@ async function loadBack(b, url, mode, day) {
     const pg = await open(b, wurl);
     const m = await pg.evaluate(() => ({ host: BF.simHost.mode, client: BF.client.mode, replica: BF.world.replica, f3: BF.debugText(BF.debugInfo()).split('\n').find(l => /^Simulation/.test(l)) }));
     check(m.host === 'worker' && m.client === 'worker' && m.replica, `the simulation runs in a Web Worker (${m.host}, client ${m.client})`);
-    check(m.f3 === 'Simulation: worker', `F3 says so (${m.f3})`);
+    check(m.f3 === 'Simulation: Browser (worker)', `F3 says so (${m.f3})`);
     await pg.waitForFunction(() => BF.glog.recent(500).some(e => e.k === 'worker' && /started in the simulation worker/.test(e.x)), null, { timeout: 60000 }).catch(() => {});   // (the title screen's world starts there a moment later)
     const logs = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'worker').map(e => e.x));
     check(logs.some(x => /The simulation runs in a Web Worker/.test(x)) && logs.some(x => /Simulation worker loaded/.test(x)), 'the game log says where the simulation runs');

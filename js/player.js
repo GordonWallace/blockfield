@@ -197,7 +197,7 @@ const css = `
 const BIOME_SIZES = [[1, "Small (classic)"], [2, "Large"], [3, "Larger"], [4.5, "Huge"], [6, "Vast"]], BIOME_DEF = 1;   // biomeScale, label
 const biomeLabel = s => (BIOME_SIZES.find(b => b[0] === s) || [0, "Large"])[1];
 let savedEl, worldsEl, createForm, createMode = null, worldsCache = [], saveOk = null;
-let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, budgetBtn, helpEl;
+let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, budgetBtn, hostBtn, helpEl;
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
@@ -248,6 +248,7 @@ function buildDOM() {
     <button class="primary" data-act="resume">Resume</button>
     <button data-act="view">Render distance: 6</button>
     <button data-act="budget" title="Villages beyond the nearest four stay simulated while the simulation uses less than this share of each second">Simulated villages</button>
+    <button data-act="host" title="Where the world's simulation runs: Automatic takes the world server (./run.sh) when there is one, else a background worker in the browser, else this page. Applies the next time the game starts.">Simulation</button>
     ${modeRow}
     <button data-act="opts">Game options</button>
     <div class="bfp-pauseopts" hidden></div>
@@ -261,6 +262,7 @@ function buildDOM() {
   for (const e of [startEl, pauseEl, deathEl]) ui.appendChild(e);
   viewBtn = pauseEl.querySelector('[data-act="view"]');
   budgetBtn = pauseEl.querySelector('[data-act="budget"]');
+  hostBtn = pauseEl.querySelector('[data-act="host"]');
   pauseNote = pauseEl.querySelector(".bfp-note");
   helpEl = pauseEl.querySelector(".bfp-help");
   savedEl = pauseEl.querySelector(".bfp-saved");
@@ -310,6 +312,7 @@ function buildDOM() {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
     } else if (a === "budget") { if (BF.active) BF.active.cycle(); updateBudgetBtn(); }   // 20, 40, 60, 80% or off (js/active.js)
+    else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
     else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.monsters()); }
@@ -328,6 +331,22 @@ function buildDOM() {
 
 // "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js)
 function updateBudgetBtn() { if (budgetBtn && BF.active) budgetBtn.textContent = BF.active.text(); }
+// "Simulation: World server (1 thread)", and the setting when it forces a host (spec r15-43, js/simhost.js); a click cycles the setting
+// (Automatic, World server, Browser (worker), Browser (this page)), which applies from the next start
+function updateHostBtn() {
+  const H = BF.simHost;
+  if (!hostBtn || !H || !H.label) return;
+  const p = H.pref();
+  hostBtn.textContent = "Simulation: " + H.label() + (p === "auto" ? "" : " (setting: " + H.prefLabel(p) + ")");
+}
+function cycleHost() {
+  const H = BF.simHost;
+  if (!H || !H.setPref) return;
+  const p = H.CHOICES[(H.CHOICES.indexOf(H.pref()) + 1) % H.CHOICES.length];
+  H.setPref(p);
+  updateHostBtn();
+  pauseNote.textContent = "Simulation from the next start: " + H.prefLabel(p) + (p === "auto" ? " (the world server, else a worker, else this page)" : "") + ". Save and quit, then reload the page.";
+}
 function updateViewBtn() {
   const d = BF.world.viewDist;
   if (viewBtn) viewBtn.textContent = `Render distance: ${d} chunks (${d * (BF.CS || 16)} blocks)`;
@@ -391,7 +410,7 @@ function showScreen(name) {
   startEl.classList.toggle("on", name === "start");
   pauseEl.classList.toggle("on", name === "pause");
   deathEl.classList.toggle("on", name === "death");
-  if (name === "pause") { updateViewBtn(); updateBudgetBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
+  if (name === "pause") { updateViewBtn(); updateBudgetBtn(); updateHostBtn(); updateModeUI(); pauseNote.textContent = ""; savePause(); }
   if (name === "start") { showStartView("list"); refreshWorlds(); }
   touchEl.classList.toggle("on", isTouch && started && !name);
   const a = document.activeElement;   // a slider or button left focused in a hidden menu would keep taking the keys
@@ -2527,6 +2546,9 @@ P.ride = function (fwd, turn, dt, jump) {  // tests: one real-time step of what 
   crossEdge();   // as the real frame does after physics (a face edge on the planet)
   return true;
 };
+// the food meter's hidden part (r15-43): with the simulation off the page, eating runs there and the page's body drains it, so it
+// crosses the protocol both ways (js/protocol.js playerIn / flushSelf, js/simhost.js)
+Object.defineProperty(P, "saturation", { get: () => saturation, set: v => { if (typeof v === "number" && isFinite(v)) saturation = v; } });
 // Save-game state. deserialize() expects the world (seed) to be set up already, e.g. right after BF.newWorld.
 P.serialize = function () {
   return {

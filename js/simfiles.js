@@ -22,7 +22,7 @@
   "js/furniture.js", "js/storage.js", "js/miner.js", "js/furnaceuse.js", "js/toolsmith.js", "js/eggcook.js", "js/herd.js",
   "js/cowherd.js", "js/baker.js", "js/glassmaker.js", "js/bees.js", "js/beekeeper.js", "js/pigfarmer.js", "js/fletcher.js",
   "js/playerinv.js", "js/drops.js", "js/boats.js", "js/horses.js", "js/stables.js", "js/merchant.js", "js/wildlife.js",
-  "js/gameopts.js", "js/player.js", "js/village-names.js", "js/signs.js", "js/logmatch.js", "js/villagelog.js", "js/economy.js",
+  "js/gameopts.js", "js/player.js", "js/village-names.js", "js/signs.js", "js/logmatch.js", "js/alertsim.js", "js/villagelog.js", "js/economy.js",
   "js/happiness.js", "js/villagestats.js", "js/statehash.js", "js/regions.js", "js/villagerstatus.js", "js/daytimeline.js",
   "js/save.js", "js/protocol.js", "js/boot.js"
 ]);

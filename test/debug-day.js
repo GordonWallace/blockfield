@@ -23,7 +23,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   game.on('pageerror', e => console.log('PAGEERROR game', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
-  await game.goto(`http://localhost:${GAME}/?nolod#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
+  await game.goto(`http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(5000);
   await require('./lib').toVillage(game);
   // a known day for one villager: quarrying, then 2h 24m waiting for gold, then sleeping, a trade and a meal; the game keeps sampling it after

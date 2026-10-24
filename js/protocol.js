@@ -263,7 +263,7 @@ function serve(send, opts) {
     out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(),
       settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, gameMode: BF.player && BF.player.gameMode || null } });
     S.invSent = S.cursorSent = S.screenSent = null;   // (self sends the inventory and the screen again)
-    if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; S.mountSent = "null"; }
+    if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; S.mountSent = "null"; S.signsVer = -1; }
   }
   function reset() {
     S.chunks.clear(); S.cells.clear(); S.ents.clear(); S.villages.clear(); S.fx = []; S.logs = []; S.tick = -1; S.clockKey = ""; S.clockTick = -1e9; S.weather = null; S.villageT = 0;
@@ -427,6 +427,7 @@ function serve(send, opts) {
     if (r) {
       if (P.health !== r.health) { m.health = r.health = P.health; any = true; }
       if (P.hunger !== r.hunger) { m.hunger = r.hunger = P.hunger; any = true; }
+      if (P.saturation !== r.saturation) { m.saturation = r.saturation = P.saturation; any = true; }
       if (P.gameMode !== r.gameMode) { m.gameMode = r.gameMode = P.gameMode; any = true; }
       const p = P.position;
       if (P.vehicle) { r.x = p.x; r.y = p.y; r.z = p.z; }   // riding: the page seats the player itself (js/player.js rideSelf)
@@ -451,7 +452,8 @@ function serve(send, opts) {
     P.dead = !!m.dead;
     if (m.sel != null && BF.inventory && BF.inventory.selectedIndex !== m.sel) BF.inventory.select(m.sel);   // the hotbar slot (r15-44: the page's)
     if (m.ride && P.rideIn) P.rideIn(m.ride);   // the boat or horse the page steers (r15-44 part 2)
-    S.rep = { x: m.x, y: m.y, z: m.z, health: P.health, hunger: P.hunger, gameMode: P.gameMode };
+    if (m.saturation != null) P.saturation = m.saturation;   // (r15-43: the page drains it; eating here raises it, flushSelf)
+    S.rep = { x: m.x, y: m.y, z: m.z, health: P.health, hunger: P.hunger, saturation: P.saturation, gameMode: P.gameMode };
   }
   // replica: the player's body is the client's, so what would change it here goes to the client instead (mobs, bees and lightning
   // hurting the player, js/mobs.js, js/bees.js, js/weather.js)
@@ -473,6 +475,8 @@ function serve(send, opts) {
     const still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
     if (ticked || force || S.changed || still) flushEntities(ticked);
     S.changed = false;
+    // replica (r15-43): the sign text store whenever it changed (a few entries; the page draws sign texts from it)
+    if (R && BF.signs && BF.signs.ver !== S.signsVer) { S.signsVer = BF.signs.ver; S.fx.push({ kind: "signs", store: BF.signs.serialize() }); }
     if (S.fx.length) {
       const list = S.fx.filter(e => e.x == null || inView(e.x, e.z));
       S.fx = [];
@@ -516,6 +520,7 @@ function serve(send, opts) {
       let r;
       if (!q) r = { ok: false, why: "unknown query" };
       else try { r = q(m.args || {}); } catch (e) { r = { ok: false, why: "error", error: String(e && e.message || e) }; errorOnce("query " + m.what, "Query " + m.what + " failed: " + (e && e.message)); }
+      if (r && typeof r.then === "function") { r.then(v => out({ t: "result", qid: m.qid, result: v }), e => out({ t: "result", qid: m.qid, result: { ok: false, why: "error", error: String(e && e.stack || e) } })); return; }   // (eval)
       out({ t: "result", qid: m.qid, result: r });
     },
     // speed 0 freezes (0x); pause (the page's menus, r15-38) stops the ticks without changing the speed
@@ -600,6 +605,14 @@ const QUERIES = {
   // r15-44: a furnace's slots, burn, burnMax, cook and whether it can smelt now ({x, y, z}, or {} for the open screen's; js/playerinv.js furnaceView)
   furnace(a) { return BF.inventory && BF.inventory.furnaceView ? BF.inventory.furnaceView(a) : { ok: false, why: "no furnaces" }; },
   // a boat or mob by id as the simulation has it (tests, r15-44 part 2): where it is, whether the player rides it, a horse's state
+  // (tests only, spec r15-43: BFT.sim) runs a function's source here with a.arg and answers {ok, value}; off unless the page turned it on
+  // (BF.testEval: a page with BF_TEST in a Web Worker, js/simworker.js; on the world server only when started with --test)
+  eval(a) {
+    if (!BF.testEval) return { ok: false, why: "eval is off (tests only)" };
+    return Promise.resolve().then(() => (0, eval)("(" + a.src + ")")(a.arg)).then(v => ({ ok: true, value: v === undefined ? null : JSON.parse(JSON.stringify(v)) }), e => ({ ok: false, error: String(e && e.stack || e) }));
+  },
+  // r15-43: the debug screen's alerts, from the page (js/alerts.js) to the simulation's half (js/alertsim.js)
+  alerts(a) { if (!BF.alertSim) return { ok: false, why: "no alerts here" }; BF.alertSim.set(a.list, a.av); return { ok: true }; },
   entity(a) {
     const o = a.id != null && BF.ids ? BF.ids.get(a.id) : null;
     if (!o || o.dead || o.removed || (o.kind === "boat" && !(BF.boats && BF.boats.list.includes(o)))) return { ok: false, why: "gone" };
@@ -911,6 +924,8 @@ const UI = {
   invToast: (id, n) => ({ kind: "toast", id, n }),
   villagerLevelUp: v => ({ kind: "levelUp", id: v && v.id != null ? v.id : null }),
   invFlashName: () => ({ kind: "flashName" }),
+  // r15-43: a debug screen alert fired (js/alertsim.js): the page shows its notice (js/alerts.js)
+  alertFired: (alert, o) => Object.assign({ kind: "alert", alert }, o),
 };
 function soundTap() {
   for (const ev in SOUNDS) BF.on(ev, (...a) => {
