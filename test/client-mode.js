@@ -19,6 +19,8 @@ module.exports = async (pg, out) => {
   const fails = [];
   const ok = (name, cond, extra) => { console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra === undefined ? "" : extra)); if (!cond) fails.push(name); };
   await require("./lib").ready(pg);
+  // the same fonts on every computer: CI downloads the page's Google Fonts, a sandbox without the network falls back to the system's
+  await pg.evaluate(() => { const r = document.documentElement.style; r.setProperty("--display", '"DejaVu Sans Mono", monospace'); r.setProperty("--mono", '"DejaVu Sans Mono", monospace'); });
   const frames = n => pg.evaluate(k => new Promise(res => { let i = 0; const f = () => (++i >= k ? res() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
 
   // ---- the stage: floor, a wall to face, a chest, a villager held still ----
