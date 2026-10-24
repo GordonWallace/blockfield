@@ -52,12 +52,14 @@ async function inPage(pg, { walk }) {
   let n = await lib.sim(pg, count);
   let pn = await pg.evaluate(count);
   const id = await pg.evaluate(async () => (await BF.save.create({ name: 'shared-blocks', seed: 123, gameMode: 'creative', villages: 10, gen: 4 })).id);
-  const started = async () => {
-    const st = await lib.simWait(pg, ([n, id]) => globalThis.__sbN.n > n && BF.glog.world() === id, [n, id], 120000);
+  // (the world server starts each world on a fresh thread, with no counter yet; and it keeps a world it already runs when the page
+  // loads that world again: there the world's id is enough)
+  const started = async (again) => {
+    const st = await lib.simWait(pg, ([n, id, same]) => { const N = globalThis.__sbN; return (!N || N.n > n || same) && BF.glog.world() === id; }, [n, id, !!again && lib.host() === 'server'], 120000);
     if (!st) console.log('the saved world did not start where the simulation is: ' + JSON.stringify(await lib.sim(pg, () => ({ n: globalThis.__sbN && globalThis.__sbN.n, world: BF.glog.world(), seed: BF.state.seed }))));
     await lib.sim(pg, () => { BF.state.paused = true; BF.mobs.spawning = false; });
-    await pg.waitForFunction(pn => globalThis.__sbN.n > pn && !BF.preparing, pn, { timeout: 180000, polling: 200 });
-    n = await lib.sim(pg, () => globalThis.__sbN.n); pn = await pg.evaluate(() => globalThis.__sbN.n);
+    await pg.waitForFunction(pn => globalThis.__sbN.n > pn && !BF.preparing, pn, { timeout: again ? 30000 : 180000, polling: 200 }).catch(e => { if (!again) throw e; });
+    n = await lib.sim(pg, count); pn = await pg.evaluate(() => globalThis.__sbN.n);
   };
   await started();
   const [px, pz] = await lib.sim(pg, () => [Math.floor(BF.spawnPoint.x), Math.floor(BF.spawnPoint.z)]);
@@ -76,7 +78,9 @@ async function inPage(pg, { walk }) {
     return { workers: st.workers, inline: !!st.inline, checked: cs.length, bad };
   });
   // (the game log is written where the simulation is: the page gets its entries a moment later)
-  R.logged = await pg.waitForFunction(() => BF.glog.entries().some(e => e.k === 'game' && e.x.startsWith(BF.shared.text)), null, { timeout: 15000 }).then(() => true, () => false);
+  // (and it says what memory the simulation's own sections use: the page's, the worker's, or the world server's, which is always "off")
+  const simText = await lib.sim(pg, () => BF.shared.text);
+  R.logged = await pg.waitForFunction(t => BF.glog.entries().some(e => e.k === 'game' && e.x.startsWith(t)), simText, { timeout: 15000 }).then(() => true, () => false);
   // an edit (a block plus a torch for block light) through IndexedDB
   const ed = await lib.sim(pg, ([px, pz]) => {
     const gy = BF.worldgen.heightAt(px + 3, pz + 3) + 1;
@@ -89,7 +93,7 @@ async function inPage(pg, { walk }) {
   await pg.waitForFunction(([px, pz, gy, w]) => BF.world.getBlock(px + 4, gy, pz + 3) === w, [...at, want[1]], { timeout: 20000 }).catch(() => {});
   R.lightAfterEdit = await pg.evaluate(() => __sb.kinds());
   await pg.evaluate(async id => { await BF.save.saveNow(); await BF.save.load(id); }, id);
-  await started();
+  await started(true);
   await pg.evaluate(([x, z]) => { BF.state.paused = true; return __sb.settle(x, z); }, [px, pz]);
   await simSettle(pg, px, pz);
   R.roundTrip = { want, got: await lib.sim(pg, ([px, pz, gy]) => [BF.world.getBlock(px + 3, gy, pz + 3), BF.world.getBlock(px + 4, gy, pz + 3)], at) };
