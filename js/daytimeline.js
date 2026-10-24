@@ -117,8 +117,8 @@ function update() {
   if (now < last) last = -1;                    // the clock went backwards
   if (last >= 0 && now - last < EVERY) return;
   last = now;
-  if (!BF.mobs || !BF.mobs.list) return;
-  for (const m of BF.mobs.list) if (m.type === "villager" && !m.dead && !m.removed && m.position) sample(m, now);
+  if (!BF.mobs || !BF.regions) return;
+  for (const m of BF.regions.ofType("villager")) if (!m.dead && !m.removed && m.position) sample(m, now);
 }
 function reset() { lines.clear(); last = -1; }
 

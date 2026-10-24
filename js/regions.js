@@ -17,7 +17,7 @@
 //                     mobIdsIn(key) -> [mob ids], villageIdsIn(key) -> [village keys],
 //                     tick(), stats() -> [{key, name, f, ru, rv, mobs, drops, villages, blockEntities}], counts(), check() -> {ok, diffs},
 //                     reset(), Index (the bare per-object index, for tests and benchmarks),
-//                     mobsAround(x, z, r, filter, {local}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter), ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
+//                     mobsAround(x, z, r, filter, {local, label}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter, opts), ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -293,7 +293,7 @@ function check() {
 // checkQuery(label, got, want) does the same for scans replaced by a village's own lists. queryStats() -> {queries, checked, diffs, last}.
 const PAD = 4;
 let mseq = 0;
-const qs = { queries: 0, checked: 0, diffs: 0, last: null };
+const qs = { queries: 0, checked: 0, diffs: 0, last: null, labels: {} };   // (labels: checked calls by label, with verifyQueries on)
 const bySeq = (a, b) => a._rs - b._rs;
 const LA = {}, LB = {};
 // m within r of (x, z): on raw atlas x / z, or (local) with m's position seen from the point's frame (BF.planet.local), as scans that
@@ -312,7 +312,7 @@ function mobsAround(x, z, r, filter, opts) {
     if (s) for (const m of s) if (!m.removed && near(m, x, z, r2, local) && (!filter || filter(m))) out.push(m);
   }
   if (out.length > 1) out.sort(bySeq);
-  if (regions.verifyQueries) checkQuery("mobsAround", out, () => {
+  if (regions.verifyQueries) checkQuery((opts && opts.label) || "mobsAround", out, () => {
     const want = [];
     for (const m of (BF.mobs && BF.mobs.list) || []) if (!m.removed && near(m, x, z, r2, local) && (!filter || filter(m))) want.push(m);
     return want;
@@ -321,8 +321,8 @@ function mobsAround(x, z, r, filter, opts) {
 }
 // mobsInBox(x0, z0, x1, z1, filter) -> the live mobs standing in the atlas box x in [x0, x1], z in [z0, z1] (raw x / z) passing filter,
 // in list order: the circle around the box, then the box.
-function mobsInBox(x0, z0, x1, z1, filter) {
-  return mobsAround((x0 + x1) / 2, (z0 + z1) / 2, Math.hypot(x1 - x0, z1 - z0) / 2 + 0.01, m => m.position.x >= x0 && m.position.x <= x1 && m.position.z >= z0 && m.position.z <= z1 && (!filter || filter(m)));
+function mobsInBox(x0, z0, x1, z1, filter, opts) {
+  return mobsAround((x0 + x1) / 2, (z0 + z1) / 2, Math.hypot(x1 - x0, z1 - z0) / 2 + 0.01, m => m.position.x >= x0 && m.position.x <= x1 && m.position.z >= z0 && m.position.z <= z1 && (!filter || filter(m)), opts);
 }
 // ofType(type) -> the live mobs of one type, in BF.mobs.list order (kept by mobAdded / mobRemoved; a mob's type never changes). The
 // array is the index's own: read it, don't change it (copy it first when the loop may remove mobs).
@@ -342,7 +342,7 @@ function villageMobs(rec, filter) {
   if (!rec) return out;
   for (const m of rec.members || []) if (!m.removed && m.village === rec && (!filter || filter(m))) out.push(m);
   if (out.length > 1) { out.sort(bySeq); let j = 1; for (let i = 1; i < out.length; i++) if (out[i] !== out[j - 1]) out[j++] = out[i]; out.length = j; }   // (once each)
-  if (regions.verifyQueries) checkQuery("villageMobs " + rec.key, out, () => ((BF.mobs && BF.mobs.list) || []).filter(m => !m.removed && m.village === rec && (!filter || filter(m))));
+  if (regions.verifyQueries) checkQuery("villageMobs", out, () => ((BF.mobs && BF.mobs.list) || []).filter(m => !m.removed && m.village === rec && (!filter || filter(m))));
   return out;
 }
 const who = m => (m && m.type ? m.type + (m.id ? " " + m.id : "") + (m.position ? " at " + Math.floor(m.position.x) + "," + Math.floor(m.position.z) : "") : String(m));
@@ -350,6 +350,7 @@ const who = m => (m && m.type ? m.type + (m.id ? " " + m.id : "") + (m.position 
 function checkQuery(label, got, want, x, z) {
   if (!regions.verifyQueries) return true;
   qs.checked++;
+  qs.labels[label] = (qs.labels[label] || 0) + 1;
   const w = typeof want === "function" ? want() : want;
   let same = got.length === w.length;
   for (let i = 0; same && i < w.length; i++) if (got[i] !== w[i]) same = false;
@@ -360,8 +361,8 @@ function checkQuery(label, got, want, x, z) {
   if (qs.diffs <= 20 && BF.glog) BF.glog.log("ERROR", "regions", `Region query ${label} differs from a full scan: ${got.length} found, ${w.length} expected` + (miss.length ? "; missing " + miss.slice(0, 3).map(who).join(", ") : "") + (extra.length ? "; extra " + extra.slice(0, 3).map(who).join(", ") : "") + (!miss.length && !extra.length ? " (order)" : ""));
   return false;
 }
-const queryStats = () => ({ queries: qs.queries, checked: qs.checked, diffs: qs.diffs, last: qs.last });
-const resetQueryStats = () => { qs.queries = qs.checked = qs.diffs = 0; qs.last = null; };
+const queryStats = () => ({ queries: qs.queries, checked: qs.checked, diffs: qs.diffs, last: qs.last, labels: Object.assign({}, qs.labels) });
+const resetQueryStats = () => { qs.queries = qs.checked = qs.diffs = 0; qs.last = null; qs.labels = {}; };
 
 // The ids (js/ids.js, r15-13) of a region's mobs and village keys, read when asked: the sets hold the objects themselves, because a
 // villager's id can change after it is made (its saved id comes back with its trading state, BF.ids.reuse), and a step that read ids
