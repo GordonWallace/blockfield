@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Farm beds soak test: farmers only make farmland inside log-bordered beds (new beds or grown ones).
 // Usage: NODE_PATH=$(npm root -g) node test/farmbeds.js <seeds e.g. 1,2,3> [days=3] [villagesPerSeed=4] [outDir]
 // Drives the simulation directly (no rendering): for each village near spawn with a farmer, puts the player in the middle,
@@ -7,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
+const lib = require('./lib');
 const seeds = (process.argv[2] || '1337').split(',').map(Number);
 const DAYS = +(process.argv[3] || 3);
 const PER_SEED = +(process.argv[4] || 4);
@@ -20,15 +22,27 @@ async function openWorld(seed) {
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.__raf = raf; window.requestAnimationFrame = cb => (window.__halt ? (window.__pending = cb, 0) : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
-  await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
+  await lib.install(pg);
+  // BF_HOST (spec r15-43): page, as before (index.html as a file); worker or server: served by debug/server.js (one per page), the
+  // simulation there
+  const host = lib.host(), srv = host === 'page' ? null : await lib.serve({ world: host === 'server' });
+  pg.__srv = srv;
+  await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + seed : 'file://' + path.join(root, 'index.html') + '#seed' + seed);
+  await lib.ready(pg);   // the planet (spec r14-22): its river step first
+  if (srv) {   // the host has started (a worker only after the page's river step), then its world
+    await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
+    console.log('host ' + host + ': ' + (await lib.where(pg)).label);
+    await lib.simReady(pg);
+  }
+  await lib.simBFT(pg);   // (BFT where the simulation is)
   await pg.waitForTimeout(3000);
-  await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
+  await pg.evaluate(() => { window.__halt = true; });   // the page's frames stop: the test steps the simulation itself
+  await lib.sim(pg, () => { if (!BF.page) BF.state.paused = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); });   // (off the page, its own loop stops too)
   return pg;
 }
+async function closeWorld(pg) { await pg.close(); if (pg.__srv) await pg.__srv.stop(); }
 
-// In the page: farmland cells of the village area that no log ring encloses, and a character map of the fields.
+// Where the simulation is (lib.sim): farmland cells of the village area that no log ring encloses, and a character map of the fields.
 function survey(key) {
   const B = BF.B, W = BF.world;
   const R = BF.mobs.list.find(m => m.village && m.village.key === key).village;
@@ -82,7 +96,7 @@ function survey(key) {
   if (OUT) fs.mkdirSync(OUT, { recursive: true });
   for (const seed of seeds) {
     let pg = await openWorld(seed);
-    const villages = await pg.evaluate(n => {
+    const villages = await lib.sim(pg, n => {
       const vs = BFT.villages(3000).filter(Boolean);
       return vs.slice(0, n * 3).map(v => ({ x: v.x, z: v.z, y: v.y }));
     }, PER_SEED);
@@ -91,10 +105,10 @@ function survey(key) {
       if (done >= PER_SEED) break;
       const t0 = Date.now();
       if (process.env.ONLY && process.env.ONLY !== Math.round(v.x) + ',' + Math.round(v.z)) continue;
-      if (pg.__used) { await pg.close(); pg = await openWorld(seed); }
+      if (pg.__used) { await closeWorld(pg); pg = await openWorld(seed); }
       pg.__used = true;
       const key = Math.round(v.x) + ',' + Math.round(v.z);
-      const setup = await pg.evaluate(v => {
+      const setup = await lib.sim(pg, v => {
         const key = Math.round(v.x) + ',' + Math.round(v.z);
         BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
         const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
@@ -107,11 +121,11 @@ function survey(key) {
       }, v);
       if (!setup.farmers) { console.log(`seed ${seed} village ${key}: no farmer, skipped`); continue; }
       done++;
-      const before = await pg.evaluate(survey, key);
+      const before = await lib.sim(pg, survey, key);
       const kinds = {};
       const STEPS_PER_CALL = 4000, h = 0.05, total = Math.round(DAYS * 1200 / h);
       for (let s = 0; s < total; s += STEPS_PER_CALL) {
-        const k = await pg.evaluate(([n, h, v]) => {
+        const k = await lib.sim(pg, ([n, h, v]) => {
           for (let i = 0; i < n; i++) {
             BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim();
             if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
@@ -124,12 +138,12 @@ function survey(key) {
         delete k._p;
         for (const kk in k) kinds[kk] = (kinds[kk] || 0) + k[kk];
       }
-      const after = await pg.evaluate(survey, key);
-      const projects = await pg.evaluate(key => {
+      const after = await lib.sim(pg, survey, key);
+      const projects = await lib.sim(pg, key => {
         const R = BF.mobs.list.find(m => m.village && m.village.key === key).village, D = BF.villageLife.vdata(R);
         return { beds: (D.beds || []).length, open: (D.projects || []).map(p => p.kind + (p.dir ? ':' + p.dir : '')), made: (D.made || []).map(m => ({ kind: m.kind, dir: m.dir, size: m.size })), L: (D.made || []).map(m => m.L) };
       }, key);
-      if (process.env.DEBUG) console.log(await pg.evaluate(key => {
+      if (process.env.DEBUG) console.log(await lib.sim(pg, key => {
         const R = BF.mobs.list.find(m => m.village && m.village.key === key).village, D = BF.villageLife.vdata(R);
         return JSON.stringify({ projects: D.projects, farmers: BF.mobs.list.filter(m => m.village === R && m.profession === 'farmer').map(m => ({ idx: m.slot && m.slot.idx, site: m.jobsite, pos: [m.position.x | 0, m.position.y | 0, m.position.z | 0], inv: m.inv.filter(Boolean).map(s => BF.itemName(s.id) + 'x' + s.count).join(' '), haul: m.farm.haul, task: m.farm.task, avoid: Object.keys(m.farm.avoid).length, think: BF.villageLife.think(m, m.farm, R, D) })) }, null, 1);
       }, key));
@@ -137,7 +151,7 @@ function survey(key) {
       results.push(row);
       console.log(`seed ${seed} village ${key} farmers ${row.farmers} gen farms ${row.genFarms}: farmland ${row.farmland0} -> ${row.farmland} (dehydrated ${row.dry0} -> ${row.dry}), stray ${row.stray0} -> ${row.stray} | beds ${projects.beds} made ${JSON.stringify(projects.made)} open ${JSON.stringify(projects.open)} (${row.secs}s)`);
       console.log('   tasks', JSON.stringify(kinds));
-      // SHOT=1: a picture of the first new bed and the first grown bed, from above and to the south
+      // SHOT=1: a picture of the first new bed and the first grown bed, from above and to the south (host page only)
       if (OUT && process.env.SHOT && projects.L.length) {
         const picks = [];
         for (const kind of ['new', 'grow']) { const i = projects.made.findIndex(m => m.kind === kind); if (i >= 0) picks.push([kind, projects.L[i]]); }
@@ -157,7 +171,7 @@ function survey(key) {
       }
       if (OUT) fs.writeFileSync(path.join(OUT, `map-${seed}-${key}.txt`), `before\n${before.map}\n\nafter ${DAYS} days\n${after.map}\n`);
     }
-    await pg.close();
+    await closeWorld(pg);
   }
   const stray = results.reduce((n, r) => n + r.stray - r.stray0, 0);
   const made = results.flatMap(r => r.projects.made.map(p => p.kind));

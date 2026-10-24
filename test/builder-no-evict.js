@@ -1,11 +1,13 @@
-// @ci integration suite=jobs
+// @ci integration suite=jobs hosts=worker,server
 // A builder never takes a bed another villager holds: a villager asleep in a borrowed bed keeps it (and stays in the world) when a builder
 // claims that house; a builder takes a bed nobody holds as its own (bug-027).
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/bne test/builder-no-evict.js
 module.exports = async (pg) => {
-  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; BF.sky.setTime(0.2); });
+  const sim = (fn, a) => require('./lib').sim(pg, fn, a);   // (where the simulation is: spec r15-43)
+  await pg.evaluate(() => { BF.player.start(); BF.player.gameMode = "creative"; });
+  await sim(() => BF.sky.setTime(0.2));
   await require('./lib').toVillage(pg);
-  const r = await pg.evaluate(() => {
+  const r = await sim(() => {
     const M = BF.mobs, Bd = BF.builder, r = {};
     M.spawning = false; for (let i = 0; i < 100; i++) { BF.sky.setTime(0.2); M.update(0.05); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.child && m.village);

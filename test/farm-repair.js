@@ -1,9 +1,9 @@
-// @ci integration timeout=900
+// @ci integration timeout=900 hosts=worker,server
 // Run-down farms (village generator 3): every generated farm has a composter beside it; farms no farmer works at spawn start run
 // down by a seeded amount (fewer crops; past 0.6 dry channels, dehydrated farmland, some or all of it back to dirt); a farmer put on
 // a dry, run-down farm refills its channels and tills its dirt within three game days (since 1.3 farmers also tend sugar cane and
 // pumpkins, so the repair shares their day; it took one before). A dirt cell beside the water is a cane spot (js/baker.js), not left over.
-// Usage: NODE_PATH=$(npm root -g) node test/farm-repair.js [seed=2] [days=3]
+// Usage: NODE_PATH=$(npm root -g) node test/farm-repair.js [seed=2] [days=3] (BF_HOST=page|worker|server)
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
@@ -16,13 +16,23 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
   await pg.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); window.__raf = raf; window.requestAnimationFrame = cb => (window.__halt ? (window.__pending = cb, 0) : raf(cb)); });
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  // BF_HOST (spec r15-43): page, as before (index.html as a file); worker or server: served by debug/server.js, the simulation there
+  const lib = require('./lib'), host = lib.host(), srv = host === 'page' ? null : await lib.serve({ world: host === 'server' });
+  await lib.install(pg);   // (BF_TEST: lib.sim works off the page)
+  await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await pg.waitForFunction(() => window.BF && BF.worldgen && BF.player && !BF.preparing, null, { timeout: 120000, polling: 500 });
+  if (srv) {   // the host has started (a worker only after the page's river step), then its world
+    await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
+    console.log('host ' + host + ': ' + (await lib.where(pg)).label);
+    await lib.simReady(pg);
+  }
   const lines = [], ok = (name, c, extra) => lines.push((c ? 'PASS ' : 'FAIL ') + name + (extra !== undefined ? '  ' + JSON.stringify(extra) : ''));
 
   // a village with a dry, run-down farm: the nearest one
-  const pick = await pg.evaluate(() => {
-    window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative');
+  await pg.evaluate(() => { window.__halt = true; });   // the page's frames stop: the test steps the simulation itself
+  const pick = await lib.sim(pg, () => {
+    if (!BF.page) BF.state.paused = true;   // (off the page, its own loop stops too)
+    if (BF.player.setGameMode) BF.player.setGameMode('creative');
     // the planet: villages around the spawn point, nearest first (BF.planet.distance through face edges)
     const sp = BF.spawnPoint, d = v => BF.planet ? BF.planet.distance(v, sp) : Math.hypot(v.x - sp.x, v.z - sp.z);
     const vs = BF.worldgen.villagesNear(sp.x, sp.z, 3000).filter(Boolean).sort((a, b) => d(a) - d(b));
@@ -46,9 +56,9 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
   });
   ok('every generated farm has a composter beside it', pick.stats.farms > 0 && pick.stats.withComposter === pick.stats.farms, pick.stats);
   ok('some farms start untended, some of those dry', pick.stats.untended > 0 && pick.stats.dry > 0 && pick.stats.untended < pick.stats.farms, pick.stats);
-  if (!pick.found) { ok('a dry run-down farm to repair', false); for (const l of lines) console.log(l); await b.close(); return; }
+  if (!pick.found) { ok('a dry run-down farm to repair', false); for (const l of lines) console.log(l); await b.close(); if (srv) await srv.stop(); return; }
 
-  const before = await pg.evaluate(({ v, f }) => {
+  const before = await lib.sim(pg, ({ v, f }) => {
     BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
@@ -82,7 +92,7 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
 
   const STEPS = 4000, h = 0.05, total = Math.round(DAYS * 1200 / h), kinds = {};
   for (let s = 0; s < total; s += STEPS) {
-    const k = await pg.evaluate(([n, h, v]) => {
+    const k = await lib.sim(pg, ([n, h, v]) => {
       for (let i = 0; i < n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
@@ -93,7 +103,7 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
     }, [Math.min(STEPS, total - s), h, pick.found.v]);
     for (const kk in k) kinds[kk] = (kinds[kk] || 0) + k[kk];
   }
-  const after = await pg.evaluate(f => {
+  const after = await lib.sim(pg, f => {
     const W = BF.world, B = BF.B, y = f.y, count = { air: 0, water: 0, farm: 0, dry: 0, dirt: 0, cane: 0, crops: 0, grass: 0 };
     const wet = (x, z) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => BF.FLUID[W.getBlock(x + dx, y, z + dz)] > 0);
     for (let x = f.x0 + 1; x < f.x1; x++) for (let z = f.z0 + 1; z < f.z1; z++) {
@@ -109,5 +119,5 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
   ok('the dirt is farmland again, and hydrated (but for a few cane spots)', after.dirt === 0 && after.cane <= 3 && after.farm > 0 && after.dry === 0, after);
   ok('crops are planted on it again', after.crops > before.count.crops, after);
   for (const l of lines) console.log(l);
-  await b.close();
+  await b.close(); if (srv) await srv.stop();
 })();

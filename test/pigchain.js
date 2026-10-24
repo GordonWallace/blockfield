@@ -7,7 +7,7 @@
 //    fed), and the fuel it burns is fuel it held or bought;
 //  - it bought its feed from the village, and cooked pork in a furnace when the village has one.
 // Usage: NODE_PATH=$(npm root -g) node test/pigchain.js [days=14] [seed=1]
-// @ci integration suite=farming soak timeout=1800 args=14,1
+// @ci integration suite=farming soak timeout=1800 args=14,1 hosts=worker,server
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
@@ -23,19 +23,28 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  // BF_HOST (spec r15-43): page, as before (index.html as a file); worker or server: served by debug/server.js, the simulation there
+  const lib = require('./lib'), host = lib.host(), srv = host === 'page' ? null : await lib.serve({ world: host === 'server' });
+  await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
+  if (srv) {   // the host has started (a worker only after the page's river step), then its world
+    await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
+    console.log('host ' + host + ': ' + (await lib.where(pg)).label);
+    await lib.simReady(pg);
+  }
+  await lib.simBFT(pg);   // (BFT where the simulation is)
   await pg.waitForTimeout(3000);
   // the nearest villages (within 3000 blocks of the spawn) that have a sty
-  const cands = await pg.evaluate(() => {
-    window.__halt = true;
+  await pg.evaluate(() => { window.__halt = true; });   // the page's frames stop: the test steps the simulation itself
+  const cands = await lib.sim(pg, () => {
+    if (!BF.page) BF.state.paused = true;   // (off the page, its own loop stops too)
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
     return BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'sty')).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
-  await pg.evaluate(() => {
-    const WATCH = window.__WATCH = ['raw_porkchop', 'cooked_porkchop', 'carrot', 'potato', 'beetroot'];
-    const FUEL = window.__FUEL = id => { const n = BF.items[id] && BF.items[id].name; return !!n && (n === 'coal' || n === 'charcoal' || /_log$|planks$/.test(n)) && !/^stripped/.test(n); };
-    const R = window.__rec = { key: null, lines: [], restock: [], trades: [], fed: 0, herd: [] };
+  await lib.sim(pg, () => {
+    const WATCH = globalThis.__WATCH = ['raw_porkchop', 'cooked_porkchop', 'carrot', 'potato', 'beetroot'];
+    const FUEL = globalThis.__FUEL = id => { const n = BF.items[id] && BF.items[id].name; return !!n && (n === 'coal' || n === 'charcoal' || /_log$|planks$/.test(n)) && !/^stripped/.test(n); };
+    const R = globalThis.__rec = { key: null, lines: [], restock: [], trades: [], fed: 0, herd: [] };
     const mine = m => m && m.village && m.village.key === R.key;
     const oLog = BF.vlog.log;
     BF.vlog.log = function (rec, kind, text) { if (rec && rec.key === R.key) R.lines.push([+(BF.sky.day + BF.sky.time).toFixed(3), kind, String(text)]); return oLog.apply(this, arguments); };
@@ -57,9 +66,9 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
       WATCH.forEach((n, i) => { if (after[i] > before[i]) R.restock.push([m.profession, n, after[i] - before[i]]); });
       return r;
     };
-    window.__villagers = () => BF.mobs.list.filter(m => m.type === 'villager' && mine(m) && !m.dead && Array.isArray(m.inv));
-    window.__total = () => {
-      const out = {}, I = BF.I, [cx, cz] = R.key.split(',').map(Number), ms = window.__villagers();
+    globalThis.__villagers = () => BF.mobs.list.filter(m => m.type === 'villager' && mine(m) && !m.dead && Array.isArray(m.inv));
+    globalThis.__total = () => {
+      const out = {}, I = BF.I, [cx, cz] = R.key.split(',').map(Number), ms = globalThis.__villagers();
       for (const n of WATCH) {
         let t = 0;
         for (const m of ms) t += BF.trades.inv.count(m.inv, I[n]);
@@ -68,52 +77,52 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
       }
       return out;
     };
-    window.__pf = () => window.__villagers().find(m => m.profession === 'pig_farmer');
-    window.__count = (m, n) => (m ? BF.trades.inv.count(m.inv, BF.I[n]) : 0);
-    window.__fuel = m => (m ? m.inv.filter(s => s && FUEL(s.id)).reduce((a, s) => a + s.count, 0) : 0);
+    globalThis.__pf = () => globalThis.__villagers().find(m => m.profession === 'pig_farmer');
+    globalThis.__count = (m, n) => (m ? BF.trades.inv.count(m.inv, BF.I[n]) : 0);
+    globalThis.__fuel = m => (m ? m.inv.filter(s => s && FUEL(s.id)).reduce((a, s) => a + s.count, 0) : 0);
   });
   let setup = null;
   for (const v of cands) {
-    const r = await pg.evaluate(v => {
-      const key = window.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
+    const r = await lib.sim(pg, v => {
+      const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
       for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
       BF.sky.setTime(0.02);
       for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
-      const h = window.__pf(), P = h && BF.pigFarmer.styOf(h);
+      const h = globalThis.__pf(), P = h && BF.pigFarmer.styOf(h);
       return { key, pop: v.pop, pf: !!h, sty: P ? { pigs: P.pigs ? P.pigs.length : null, limit: P.limit, cells: P.cells } : null };
     }, v);
     if (r.pf && r.sty && r.sty.pigs >= 2) { setup = r; break; }
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r)}`);
   }
-  if (!setup) { console.log('FAIL no village with a pig farmer and a stocked sty among the nearest ' + cands.length); await b.close(); process.exitCode = 1; return; }
-  await pg.evaluate(() => {
-    const R = window.__rec, h = window.__pf();
+  if (!setup) { console.log('FAIL no village with a pig farmer and a stocked sty among the nearest ' + cands.length); await b.close(); if (srv) await srv.stop(); process.exitCode = 1; return; }
+  await lib.sim(pg, () => {
+    const R = globalThis.__rec, h = globalThis.__pf();
     R.lines.length = 0; R.restock.length = 0; R.trades.length = 0; R.fed = 0;
-    R.start = window.__total();
-    R.pfStart = { feed: BF.pigFarmer.feedHeld(h), fuel: window.__fuel(h) };
+    R.start = globalThis.__total();
+    R.pfStart = { feed: BF.pigFarmer.feedHeld(h), fuel: globalThis.__fuel(h) };
     R.pf = h;
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: sty ${JSON.stringify(setup.sty)}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
-    await pg.evaluate(([n, h, key]) => {
+    await lib.sim(pg, ([n, h, key]) => {
       const [x, z] = key.split(',').map(Number);
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(x, z, 4);
       }
-      const R = window.__rec, pf = R.pf, P = pf && !pf.dead ? BF.pigFarmer.styOf(pf) : null;
+      const R = globalThis.__rec, pf = R.pf, P = pf && !pf.dead ? BF.pigFarmer.styOf(pf) : null;
       R.herd.push([+(BF.sky.day + BF.sky.time).toFixed(2), P && P.pigs ? P.pigs.length : null, P && P.pigs ? P.pigs.filter(c => c.growAt == null).length : null, P ? P.culls : null, BF.pigFarmer.feedHeld(pf)]);
     }, [Math.min(PER, total - s), h, setup.key]);
     if ((s / PER) % 24 === 23) console.log(`  day ${((s + PER) * h / 1200).toFixed(1)} (${Math.round((Date.now() - t0) / 1000)} s)`);
   }
-  const R = await pg.evaluate(() => {
-    const R = window.__rec, pf = R.pf, P = BF.pigFarmer.styOf(pf);
-    R.end = window.__total();
-    R.pfEnd = { feed: BF.pigFarmer.feedHeld(pf), fuel: window.__fuel(pf), alive: !pf.dead, inv: pf.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' ') };
+  const R = await lib.sim(pg, () => {
+    const R = globalThis.__rec, pf = R.pf, P = BF.pigFarmer.styOf(pf);
+    R.end = globalThis.__total();
+    R.pfEnd = { feed: BF.pigFarmer.feedHeld(pf), fuel: globalThis.__fuel(pf), alive: !pf.dead, inv: pf.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' ') };
     const FU = BF.furnaceUse, VR = BF.mobs.villages.get(R.key);
     R.dead = (VR.deadInfo || []).map(d => [d.prof, d.cause, d.day]);   // who died in the village, and of what
     R.furnaces = [...FU.furnaces.values()].filter(f => Math.hypot(f.x + 0.5 - VR.x, f.z + 0.5 - VR.z) <= FU.reachOf(VR) + 8).length;
@@ -121,7 +130,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     R.events = BF.pigFarmer.log.filter(e => e.kind === 'bred' || e.kind === 'culled' || e.kind === 'stocked' || e.kind === 'joined' || e.kind === 'left').map(e => e.kind[0] + (e.herd != null ? e.herd : '') + '@' + e.day.toFixed(2)).join(' ');
     R.log = Object.entries(BF.pigFarmer.log.reduce((a, e) => (a[e.kind] = (a[e.kind] || 0) + 1, a), {})).map(([k, n]) => k + ':' + n).join(' ');
     R.holders = {};
-    for (const n of ['raw_porkchop', 'cooked_porkchop']) R.holders[n] = window.__villagers().filter(m => window.__count(m, n) > 0).map(m => m.profession + ':' + window.__count(m, n)).join(' ');
+    for (const n of ['raw_porkchop', 'cooked_porkchop']) R.holders[n] = globalThis.__villagers().filter(m => globalThis.__count(m, n) > 0).map(m => m.profession + ':' + globalThis.__count(m, n)).join(' ');
     delete R.pf;
     return R;
   });
@@ -163,5 +172,5 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   ok('the pig farmer fed its pigs feed it bought', R.fed > 0 && feedBought > 0, { fed: R.fed, feedBought });
   if (pageErrors) ok('no page errors', false, pageErrors);
   console.log(`ran ${DAYS} days in ${Math.round((Date.now() - t0) / 1000)} s`);
-  await b.close();
+  await b.close(); if (srv) await srv.stop();
 })();

@@ -1,8 +1,10 @@
 // Miner checks: NODE_PATH=$(npm root -g) node test/run.js /tmp/mi test/miner-actions.js
+// @ci integration hosts=worker,server
 // roster odds, starting pack and trades; in a live village: the builder would buy the miner's cobblestone (builder.js findSeller), the miner
 // sells it to a builder short of cobblestone (miner.js findBuyer / doSell), and a miner digs a mineshaft cell by cell with its pickaxe wearing.
 module.exports = async (pg, out) => {
-  const r = await pg.evaluate(() => {
+  const sim = require('./lib').sim;   // (where the simulation is: spec r15-43)
+  const r = await sim(pg, () => {
     const res = {};
     let withM = 0, n = 0, bad = 0;
     for (let k = 0; k < 1000; k++) {
@@ -24,7 +26,7 @@ module.exports = async (pg, out) => {
   // (~50 MB/s) while the long evaluates below keep the page busy, past CI's 10 GB cap on the planet (as test/explorer-far.js)
   await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
-  const s = await pg.evaluate(() => {
+  const s = await sim(pg, () => {
     const res = {}, T = BF.trades, I = BF.I, B = BF.B, W = BF.world;
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child && !m.dead);
     let M = vs.find(m => m.profession === "miner"), Bd = vs.find(m => m.profession === "builder" && m.village === (M && M.village));
@@ -54,13 +56,13 @@ module.exports = async (pg, out) => {
     const after = { bc: T.inv.count(Bd.inv, I.cobblestone), be: T.inv.count(Bd.inv, I.emerald), mc: T.inv.count(M.inv, I.cobblestone), me: T.inv.count(M.inv, I.emerald) };
     res.builderCobble = before.bc + " -> " + after.bc; res.builderEmeralds = before.be + " -> " + after.be;
     res.minerCobble = before.mc + " -> " + after.mc; res.minerEmeralds = before.me + " -> " + after.me;
-    window.__M = M;
+    globalThis.__M = M;
     return res;
   });
   console.log(JSON.stringify(s, null, 1));
   // the miner digs: let it work a while in its shaft or quarry
-  const d = await pg.evaluate(async () => {
-    const M = window.__M, T = BF.trades, I = BF.I;
+  const d = await sim(pg, async () => {
+    const M = globalThis.__M, T = BF.trades, I = BF.I;
     T.inv.remove(M.inv, I.cobblestone, 9999);
     BF.sky.setTime(0.06);
     const pick0 = BF.miner.pickOf(M), w0 = pick0 ? pick0.wear || 0 : null;

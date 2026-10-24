@@ -1,8 +1,10 @@
 // Forester checks: NODE_PATH=$(npm root -g) node test/run.js /tmp/fo test/forester-actions.js
+// @ci integration hosts=worker,server
 // roster, stock and recipe; every sapling grows into a tree; players cannot plant on stone; a forester in a village fells trees,
 // picks up what falls, plants the saplings and leaves doors alone; the sapling trade.
 module.exports = async (pg, out) => {
-  const r = await pg.evaluate(() => {
+  const sim = require('./lib').sim;   // (where the simulation is: spec r15-43)
+  const r = await sim(pg, () => {
     const res = {}, I = BF.I, B = BF.B;
     let withF = 0, nF = 0, villages = 0, bad = 0, two = 0;
     for (let k = 0; k < 600; k++) {
@@ -29,7 +31,7 @@ module.exports = async (pg, out) => {
   await require('./lib').toVillage(pg);
 
   // 1. every sapling grows into a tree, in open ground away from the village
-  const g = await pg.evaluate(() => {
+  const g = await sim(pg, () => {
     const B = BF.B, W = BF.world, F = BF.forester, res = {};
     const p = BF.player.position;
     const clear = (x, y, z) => { for (let dx = -5; dx <= 5; dx++) for (let dz = -5; dz <= 5; dz++) for (let dy = -2; dy <= 12; dy++) { const id = W.getBlock(x + dx, y + dy, z + dz); if (id && (F._test.builtBlock(id) || /_(log|leaves)$/.test(BF.blocks[id].name))) return false; } return true; };
@@ -56,7 +58,7 @@ module.exports = async (pg, out) => {
     res.canSurviveStone = F.canSurvive(base.x0, base.ys[0] - 1, base.z0);
     res.canSurviveGrass = F.canSurvive(base.x0 + 4, base.ys[0] + 1, base.z0);
     BF.player.position.set(base.x0 + 3, base.ys[0] + 3, base.z0 + 14);
-    window.__row = base;
+    globalThis.__row = base;
     return res;
   });
   console.log(JSON.stringify(g));
@@ -64,7 +66,7 @@ module.exports = async (pg, out) => {
   await pg.screenshot({ path: out + '-trees.png' });
 
   // 2. a forester at work
-  const setup = await pg.evaluate(() => {
+  const setup = await sim(pg, () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     if (!vs.length) return "no villagers";
     const T = BF.trades, I = BF.I, B = BF.B, W = BF.world;
@@ -75,14 +77,14 @@ module.exports = async (pg, out) => {
     A.res = BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: B.band_saw, prof: "forester" } });
     T.inv.add(A.inv, I.oak_sapling, 4); T.inv.add(A.inv, I.birch_sapling, 2);
     // a tree 6 blocks from it
-    window.__A = A;
+    globalThis.__A = A;
     return { claim: A.res, prof: A.profession, village: !!A.village, jobsite: !!A.jobsite, pos: [A.position.x | 0, A.position.y | 0, A.position.z | 0] };
   });
   console.log(JSON.stringify(setup));
   if (typeof setup === "string") return;
   // grow a tree about 8 blocks from the forester (where the sapling can stand), then watch
-  const tree = await pg.evaluate(() => {
-    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester;
+  const tree = await sim(pg, () => {
+    const A = globalThis.__A, B = BF.B, W = BF.world, F = BF.forester;
     for (let r = 7; r < 16; r++) for (let a = 0; a < 6.28; a += 0.3) {
       const x = Math.floor(A.position.x + Math.cos(a) * r), z = Math.floor(A.position.z + Math.sin(a) * r), y = W.heightAt(x, z);
       if (W.getBlock(x, y, z) !== B.grass) continue;
@@ -94,16 +96,16 @@ module.exports = async (pg, out) => {
   });
   console.log("tree", JSON.stringify(tree));
   for (let k = 0; k < 80; k++) {
-    const line = await pg.evaluate(() => {
-      const A = window.__A;
+    const line = await sim(pg, () => {
+      const A = globalThis.__A;
       for (let i = 0; i < 100; i++) { BF.sky.setTime(0.1); BF.mobs.update(0.1); BF.player.position.set(A.position.x + 4, A.position.y + 2, A.position.z + 4); BF.world.tickSim && 0; }
       const F = BF.forester;
       return JSON.stringify({ pos: [A.position.x | 0, A.position.z | 0], task: A.fo && A.fo.task && A.fo.task.kind, saps: F.saplings.size, inv: A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count).join(","), drops: BF.drops.list.length });
     });
     if (k % 5 === 0) console.log(k, line);
   }
-  console.log(JSON.stringify(await pg.evaluate(() => {
-    const F = BF.forester, A = window.__A, W = BF.world, B = BF.B;
+  console.log(JSON.stringify(await sim(pg, () => {
+    const F = BF.forester, A = globalThis.__A, W = BF.world, B = BF.B;
     const kinds = {};
     for (const e of F.LOG) kinds[e.kind] = (kinds[e.kind] || 0) + 1;
     // every planted sapling: distance to the nearest door and to the nearest other sapling
@@ -122,8 +124,8 @@ module.exports = async (pg, out) => {
   await pg.screenshot({ path: out + '-work.png' });
 
   // 4. what the mod's GameTests guard: player-built logs are left alone, a full pack stops felling
-  console.log(JSON.stringify(await pg.evaluate(() => {
-    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester, res = {};
+  console.log(JSON.stringify(await sim(pg, () => {
+    const A = globalThis.__A, B = BF.B, W = BF.world, F = BF.forester, res = {};
     const p = BF.player.position;
     const fx = Math.floor(A.position.x), fz = Math.floor(A.position.z);
     let spot = null;
@@ -150,8 +152,8 @@ module.exports = async (pg, out) => {
     return res;
   })));
   // 3. the trade
-  console.log(JSON.stringify(await pg.evaluate(() => {
-    const A = window.__A, T = BF.trades, I = BF.I;
+  console.log(JSON.stringify(await sim(pg, () => {
+    const A = globalThis.__A, T = BF.trades, I = BF.I;
     A.trades = T.offers("forester", 1);
     const o = A.trades.find(o => o.sell.id === I.emerald && o.buy[0].id === I.oak_sapling);
     if (!o) return "no offer";
@@ -160,8 +162,8 @@ module.exports = async (pg, out) => {
     return { reason, ok, emeralds: [em0, T.inv.count(A.inv, I.emerald)], saplings: [sap0, T.inv.count(A.inv, I.oak_sapling)] };
   })));
   // 5. wares: nothing in the starting pack, planks sawed from logs, sold for emeralds
-  console.log(JSON.stringify(await pg.evaluate(() => {
-    const A = window.__A, T = BF.trades, I = BF.I, res = {};
+  console.log(JSON.stringify(await sim(pg, () => {
+    const A = globalThis.__A, T = BF.trades, I = BF.I, res = {};
     let starts = 0; for (let k = 0; k < 50; k++) if (T.stockFor("forester", {}).some(s => s && /planks|_log$/.test(BF.items[s.id].name))) starts++;
     res.startsWithWood = starts;
     A.inv = T.inv.create(); T.inv.add(A.inv, I.emerald, 4); T.inv.add(A.inv, I.birch_log, 10); T.inv.add(A.inv, I.oak_log, 2);
@@ -176,8 +178,8 @@ module.exports = async (pg, out) => {
     return res;
   })));
   // 6. tree search reaches 40 blocks and favours near trees
-  console.log(JSON.stringify(await pg.evaluate(() => {
-    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester;
+  console.log(JSON.stringify(await sim(pg, () => {
+    const A = globalThis.__A, B = BF.B, W = BF.world, F = BF.forester;
     const grown = [];
     for (const want of [8, 20, 34, 48]) {
       let done = false;
@@ -197,8 +199,8 @@ module.exports = async (pg, out) => {
     return { grown: grown.map(g => g[0]), found: dists.length, hist, max: Math.max(...dists), farOnly: far };
   })));
   // 7. chopping a trunk brings the tree above down (player); a log pillar in a building stays
-  console.log(JSON.stringify(await pg.evaluate(() => {
-    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester, res = {};
+  console.log(JSON.stringify(await sim(pg, () => {
+    const A = globalThis.__A, B = BF.B, W = BF.world, F = BF.forester, res = {};
     let spot = null;
     for (let r = 10; r < 40 && !spot; r++) for (let a = 0; a < 6.28 && !spot; a += 0.2) {
       const x = Math.floor(A.position.x + Math.cos(a) * r), z = Math.floor(A.position.z + Math.sin(a) * r), y = W.heightAt(x, z);
@@ -222,8 +224,8 @@ module.exports = async (pg, out) => {
     return res;
   })));
   // 8. two oaks whose crowns touch: felling one leaves the other's leaves on it
-  console.log("neighbours", JSON.stringify(await pg.evaluate(() => {
-    const B = BF.B, W = BF.world, F = BF.forester, row = window.__row;
+  console.log("neighbours", JSON.stringify(await sim(pg, () => {
+    const B = BF.B, W = BF.world, F = BF.forester, row = globalThis.__row;
     const x = row.x0, z = row.z0 + 20, y = W.heightAt(x, z);
     for (let dx = -6; dx <= 10; dx++) for (let dz = -6; dz <= 6; dz++) { W.setBlock(x + dx, y, z + dz, B.grass); for (let dy = 1; dy <= 12; dy++) W.setBlock(x + dx, y + dy, z + dz, 0); }
     const crown = (cx, leaf) => { for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 3; dy <= 5; dy++) if (!W.getBlock(cx + dx, y + dy, z + dz)) W.setBlock(cx + dx, y + dy, z + dz, leaf); for (let dy = 1; dy <= 5; dy++) W.setBlock(cx, y + dy, z, B.oak_log); };

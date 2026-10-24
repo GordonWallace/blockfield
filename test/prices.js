@@ -1,10 +1,12 @@
+// @ci integration hosts=worker,server
 // Prices follow demand (js/prices.js): node test/run.js /tmp/prices test/prices.js
 // An unfilled buy offer doubles in 30 game days and no further; a sell offer stuck at its stock cap halves in 30 days and no lower; trades ease
 // prices back 3 steps each; a villager never buys above its own sell price or the cheapest seller's base price; days missed while away (or
 // fast-forwarded) catch up; save and load keep the prices and old saves start at base; the Economy view records the price actually paid.
 module.exports = async (pg) => {
-  await require('./lib').toVillage(pg);
-  const res = await pg.evaluate(() => {
+  const lib = require('./lib');
+  await lib.toVillage(pg);
+  const res = await lib.sim(pg, () => {
     const out = [], ok = (n, c) => out.push((c ? "PASS " : "FAIL ") + n);
     const P = BF.prices, T = BF.trades, I = BF.I, em = I.emerald;
     ok("prices loaded", !!P);
