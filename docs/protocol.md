@@ -104,6 +104,27 @@ spawn point) comes back in `self`. Requests are answered later than they are sen
 The worker owns the world state and saves it (js/save.js runs there too). The page's `BF.save.create` / `load` set up its copy
 (`restoreClient`) and send `world`; `saveNow` sends `save`.
 
+## The world server's socket (r15-41)
+
+`./run.sh` (debug/server.js) runs the world server (server/world.js). Each world's simulation is js/simworker.js unchanged in a Node
+worker_thread (server/simthread.js shims `self`, `importScripts`, `location` and IndexedDB, the last on files: server/idb.js), so the
+replica rules above are the same. The page reaches it at `ws://<page host>/sim` (server/ws.js, no packages) and wraps the socket to look
+like a Worker (js/simhost.js), so `BF.proto.worker` carries it; `BF.client.mode` is `"worker"`, `BF.simHost.mode` is `"server"`.
+
+- **Binary frames** are packets: `[header length, u32 little-endian][header JSON, UTF-8][binary part]`.
+- **Text frames** are JSON, the same messages a Web Worker and its page exchange (`{boot}`, `{ready}`, `{crash}`, `{failed}`,
+  `{errorLine}`, `{test}`), plus the server's own:
+  - server to page: `{hello: {server, version, held}}` first (how the page finds the server; `held` is a world kept paused since its
+    page closed), `{refused}` (another page is playing), `{saves: {rid, ...}}` answers, `{feedAck}` (the debug server's answers for the
+    page: alerts, planet toggles, screens open, item icons it lacks);
+  - page to server: `{saves: {rid, op}}` with op `list`, `get` (meta and the page's part of the data, js/save.js restoreClient), `remove`,
+    `rename`, `monsters`; `{feedPage}` (the page's part of the debug feed); `{feedIcons}`.
+- **Which thread plays** is decided by the page's `world` message: `demo` and `create` go to a fresh thread; `load` of the held world
+  goes back to its thread, which answers at once with `{meta, resumed: true, speed}` and starts its client over (`hello`, then every
+  edit: `BF.proto.hosted().reset()`).
+- **The socket closing** pauses the world at once and saves it; the thread is held for the next page. A close the page didn't ask for
+  shows "World server stopped" there.
+
 ## The in-page transport and the mirror
 
 `BF.proto.local.connect()` (at boot, js/main.js) joins a simulation end and a client end in the page with a direct queue. Each packet

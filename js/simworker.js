@@ -51,6 +51,9 @@ function rivers(seed, st) {
 // js/save.js load() asks for the rivers first (the page's loading screen, BF.prepareWorld); here they come with the world message
 let riverSt = null;
 function worldOp(op, a) {
+  // the world server (r15-41, server/simthread.js): the world held paused since its page closed, picked again: it goes on as it is
+  if (op === "load" && BF.worker.held && BF.save.current && BF.save.current.id === a.id) return BF.worker.held(a);
+  BF.worker.held = null;
   const t0 = performance.now();
   riverSt = a.rivers || null;
   BF.prepareWorld = seed => { rivers(seed, riverSt); return Promise.resolve(); };

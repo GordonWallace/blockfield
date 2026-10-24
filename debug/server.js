@@ -4,11 +4,14 @@
 //   node debug/server.js --game 9000 --debug 9001 --lan
 //   (--no-isolate serves the game without the cross-origin isolation headers, so without shared memory: see ISOLATE)
 //   (--alerts <file> keeps the debug screen's alerts somewhere other than debug/.alerts.json)
+//   (--saves <dir> keeps the world server's saves somewhere other than saves/; --no-world runs no world server)
+// It also runs the world server (spec r15-41, server/world.js): the game's simulation in this process, with the page as its client
+// over a WebSocket on the game port (/sim). Ctrl+C saves its worlds before stopping.
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to
 // /push on the debug port and every open debug screen receives them over Server-Sent Events (/events).
 // The game can also be served some other way and pointed here with index.html?debugfeed=8001.
 // The game page also gets window.BF_BUILD, the commit and branch of this checkout (read from .git), for the game log (js/gamelog.js).
-// No dependencies: Node's built-in http, fs and path only.
+// No dependencies: Node's built-in modules only.
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path");
 
@@ -135,6 +138,12 @@ function push(body, res) {
   let s;
   try { s = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
   if (!s || typeof s !== "object" || Array.isArray(s)) { res.writeHead(400, cors()).end("not a snapshot"); return; }
+  const o = take(s);
+  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(typeof o === "string" ? o : JSON.stringify(o));
+}
+// A snapshot from the game (POSTed by the page, or made by the world server in this process, server/world.js): cached and relayed
+// to the debug screens. Returns the answer: "ok", "resync", or an object (see below).
+function take(s) {
   const fresh = !lastPush || Date.now() - lastPush > 5000;
   lastPush = Date.now();
   if (s.info && typeof s.info === "object" && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); econ.clear(); day = null; } seed = s.info.seed; }
@@ -173,7 +182,7 @@ function push(body, res) {
   const staleT = !!ptReq && !!s.pt && s.pt.tv !== ptv;                         // and a planet toggle it hasn't applied
   const staleS = (s.screens | 0) !== clients.size;                             // and how many debug screens are open (the perf meter runs while any is, js/perf.js)
   const o = stale || staleP || staleT || staleS || glogAt != null || build ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleT ? { pt: ptReq, ptv } : {}, staleS ? { screens: clients.size } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}) : null;
-  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(o ? JSON.stringify(o) : resync ? "resync" : "ok");
+  return o || (resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
 const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true" }, h);
@@ -272,7 +281,7 @@ const safe = handler => (req, res) => {
 };
 function listen(handler, port, label) {
   const hosts = HOST === "0.0.0.0" ? ["::"] : ["127.0.0.1", "::1"];
-  hosts.forEach((h, i) => {
+  return hosts.map((h, i) => {
     const server = http.createServer(safe(handler));
     server.on("error", e => {
       if (i > 0 && e.code !== "EADDRINUSE") return;   // no IPv6 on this machine: IPv4 is enough
@@ -281,13 +290,31 @@ function listen(handler, port, label) {
       process.exit(1);
     });
     server.listen(port, h);
+    return server;
   });
 }
 const shown = HOST === "0.0.0.0" ? "<this machine's address>" : "localhost";
 listen(serveDebug, DEBUG_PORT, "debug screen");
-if (!NO_GAME) listen(serveGame, GAME_PORT, "game");
+const gameServers = NO_GAME ? [] : listen(serveGame, GAME_PORT, "game");
+// The world server (spec r15-41, server/world.js): the simulation in this process, the page its client over ws://<game>/sim.
+// --no-world leaves it out (the page then runs the simulation itself); --saves <dir> keeps its saved worlds somewhere other than saves/.
+const si = args.indexOf("--saves"), SAVES = si >= 0 && args[si + 1] ? path.resolve(args[si + 1]) : path.join(ROOT, "saves");
+const world = NO_GAME || args.includes("--no-world") ? null : require("../server/world.js").start({
+  servers: gameServers, saves: SAVES, version: readBuild().version, debug: { push: take, screens: () => clients.size } });
+let stopping = false;
+const stop = () => {
+  if (stopping) process.exit(1);   // (a second Ctrl+C: at once)
+  stopping = true;
+  if (!world) process.exit(0);
+  console.log("[world] saving and stopping...");
+  world.stop().then(() => process.exit(0), () => process.exit(1));
+  setTimeout(() => process.exit(1), 20000).unref();
+};
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);
 console.log(`Blockfield debug server
   ${NO_GAME ? `Game:         serve it yourself and open index.html?debugfeed=${DEBUG_PORT}` : `Game:         http://${shown}:${GAME_PORT}`}
   Debug screen: http://${shown}:${DEBUG_PORT}   (open this one on your second monitor)${NO_GAME ? "" : `
-  Blockfieldpedia: http://${shown}:${GAME_PORT}/wiki/   (the Blockfield wiki)`}
+  Blockfieldpedia: http://${shown}:${GAME_PORT}/wiki/   (the Blockfield wiki)`}${world ? `
+  World server: ws://${shown}:${GAME_PORT}/sim   (the simulation runs here; saves in ${SAVES})` : ""}
 Ctrl+C to stop.`);

@@ -20,7 +20,7 @@
 // Game log: INFO "protocol" when the in-page transport connects and once a game hour while the debug overlay or screen is on (bytes per
 // second by type), ERROR for a message the other end can't take (bad packet, unknown type, a failed query or encoding).
 // API: BF.proto = { VERSION, TYPES, encode(msg) -> packet, decode(packet) -> msg, bytes(packet), serve(send, opts?) -> sim end, connect(send) -> client end,
-//        local: { connect(), disconnect(), on, sim, client }, worker: { connect(worker) -> client, disconnect() }, host(send, opts) -> sim end (in the worker),
+//        local: { connect(), disconnect(), on, sim, client }, worker: { connect(worker, via?) -> client, disconnect() }, host(send, opts) -> sim end (in the worker), hosted() -> it,
 //        flush(), stats(), resetStats(), check() -> {ok, diffs, ...}, mirrorHash(), simHash(keys),
 //        queries (what -> fn(args)), HOT, COLD }
 //      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z)}, mode, request(kind, target, data) -> req,
@@ -571,7 +571,7 @@ const QUERIES = {
     return { ok: true, key: a.key, name: (BF.signs && BF.signs.villageName && BF.signs.villageName(a.key)) || null, people: r.members ? r.members.length || 0 : 0, log: (r.log || []).slice(-(a.n || 20)) };
   },
   // the world state hash and its parts (js/statehash.js)
-  hash() { return BF.stateHash ? Object.assign({ ok: true }, BF.stateHash.full()) : { ok: false, why: "no state hash" }; },
+  hash() { return BF.stateHash ? Object.assign({ ok: true, tick: BF.rand ? BF.rand.tick : null }, BF.stateHash.full()) : { ok: false, why: "no state hash" }; },   // (tick: r15-41's test compares with a headless run of as many ticks)
   // the protocol's own figures
   stats() { return Object.assign({ ok: true }, stats()); },
   // a hash of the blocks of chunks {keys} and which of them aren't loaded (a client keeping its own copy checks it against this, r15-38)
@@ -765,13 +765,13 @@ const local = {
 // binary part transferred. Requests are answered later, when the worker's result arrives (req.then).
 const worker = {
   on: false, w: null, client: null,
-  connect(w) {
+  connect(w, via) {   // via "server": w is the Node world server's socket (r15-41, js/simhost.js); the client's mode is "worker" all the same
     if (local.on) local.disconnect();
-    const client = connect(p => { try { w.postMessage(p, p.b ? [p.b] : []); } catch (e) { errorOnce("post", "Could not send to the simulation worker: " + (e && e.message)); } }, "worker");
+    const client = connect(p => { try { w.postMessage(p, p.b ? [p.b] : []); } catch (e) { errorOnce("post", "Could not send to the simulation " + (via || "worker") + ": " + (e && e.message)); } }, "worker");
     worker.w = w; worker.client = client; worker.on = true;
     BF.client = client;
     if (BF.req) BF.req.via = (kind, target, data) => client.request(kind, target, data);
-    glog("INFO", "Simulation and client connected through a Web Worker (protocol version " + VERSION + ")");
+    glog("INFO", "Simulation and client connected through " + (via === "server" ? "the world server's socket" : "a Web Worker") + " (protocol version " + VERSION + ")");
     return client;
   },
   receive(p) { if (worker.client) worker.client.receive(p); },
@@ -790,6 +790,7 @@ function host(send, opts) {
   here.hello();
   return here;
 }
+const hosted = () => here;   // (the world server, r15-41: a new page on the same world starts its client over, reset())
 
 // ---------------------------------------------------------------- the check: the mirror against the sim
 // Right after a flush the mirror must equal the sim. Chunks: every mirrored chunk is loaded in view, with the sim's band and blocks
@@ -902,7 +903,7 @@ function hookUp() {
 }
 
 BF.proto = {
-  VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, worker, host, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
+  VERSION, TYPES, HOT, COLD, encode, decode, bytes, serve, connect, local, worker, host, hosted, stats, resetStats, check, mirrorHash, simHash, queries: QUERIES,
   listen: fn => { LISTEN.push(fn); },
   // (tests, in-page) the protocol number the in-page sim end gives a simulation object (a mob, drop, arrow, boat or bee), or null
   numberOf: o => (o && typeof o === "object" && local.sim ? local.sim.nOf(o) : null),

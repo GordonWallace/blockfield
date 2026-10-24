@@ -5,6 +5,9 @@
 // With the simulation in a Web Worker (spec r15-38, js/simhost.js) the worker owns the world and this file runs there too: it saves
 // (autosave, saveNow) and loads there. In the page, create / load set up the page's copy of the world (restoreClient: the planet, the
 // player, the inventory, the time and weather; the edits come from the worker) and ask the worker for the world; saveNow asks the worker.
+// With the page a client of the Node world server (spec r15-41) the saved worlds are the server's, on its disk (server/idb.js keeps them
+// in this file's own format): list, load, remove, rename and setMonsters ask the server (BF.simHost.saves), and the server's simulation
+// runs this file to save and load. A world the server holds paused (its page closed) loads as it is now, not from its last save.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -142,6 +145,9 @@ function restoreClient(data, meta) {
   if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather);
 }
 const host = () => (BF.simHost && BF.simHost.worker ? BF.simHost : null);   // the page, with the simulation in a worker
+// the page, a client of the world server (r15-41): the saved worlds are the server's (on its disk), not this browser's
+const server = () => (BF.simHost && BF.simHost.server ? BF.simHost : null);
+const asked = (q, what) => server().saves(q).then(r => { if (!r || !r.ok) throw new Error(r && r.why || "the world server could not " + what); return r; });
 
 // A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
 // are, so those seeds keep giving the worlds they always have. 0, negative and larger numbers used to wrap onto that range
@@ -192,6 +198,7 @@ const save = {
 
   // -> [{id, name, seed, gameMode, created, lastPlayed}] newest first; [] if storage is unavailable
   list() {
+    if (server()) return asked({ op: "list" }, "list its worlds").then(r => r.list || [], () => []);
     return tx(["worlds"], "readonly", t => reqP(t.objectStore("worlds").getAll()))
       .then(p => p).then(a => (a || []).sort((x, y) => y.lastPlayed - x.lastPlayed))
       .catch(() => []);
@@ -219,7 +226,8 @@ const save = {
 
   // Loads a saved world by id. Resolves to its meta; rejects a world 1.4 can't open (not playable: a 1.3 world).
   load(id) {
-    return tx(["worlds", "data"], "readonly", t => Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(t.objectStore("data").get(id))]))
+    return (server() ? asked({ op: "get", id }, "find it").then(r => [r.meta, r.data])   // (the world server's world: the page's part of it)
+      : tx(["worlds", "data"], "readonly", t => Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(t.objectStore("data").get(id))])))
       .then(([meta, data]) => {
         if (!meta || !data) throw new Error("World not found");
         if (!playable(meta) || !playable(data)) throw new Error("Made with Blockfield 1.3, can't be opened in 1.4");
@@ -244,10 +252,14 @@ const save = {
   remove(id) {
     if (save.current && save.current.id === id) save.current = null;
     if (BF.glog) BF.glog.forget(id);   // its game log goes too, with nothing more written
+    if (server()) return asked({ op: "remove", id }, "delete it").then(() => undefined);
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").delete(id); const d = t.objectStore("data"); d.delete(id); d.delete(LOGH(id)); d.delete(logRange(id)); });
   },
 
   rename(id, name) {
+    if (server()) return asked({ op: "rename", id, name: String(name).slice(0, 40) }, "rename it").then(r => {
+      if (save.current && save.current.id === id) { save.current.name = r.meta.name; BF.client.meta({ id, name: r.meta.name }); }
+    });
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds");
       const r = s.get(id);
@@ -260,6 +272,7 @@ const save = {
   setMonsters(id, o) {
     const m = BF.gameOpts ? BF.gameOpts.normalize(o) : o;
     if (save.current && save.current.id === id && BF.gameOpts) { for (const t in m) BF.gameOpts.set(t, m[t]); save.current.monsters = m; if (host()) BF.client.meta({ id, monsters: m }); }
+    if (server()) return asked({ op: "monsters", id, monsters: m }, "change it").then(() => undefined);
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds"), r = s.get(id);
       r.onsuccess = () => { if (r.result) { r.result.monsters = m; s.put(r.result); } };

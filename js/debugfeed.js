@@ -327,11 +327,15 @@ if (!BF.page) {   // in the simulation worker: only the feed query (js/simworker
 }
 // With the simulation in a worker: its latest part (asked for once a snapshot; it comes back before the next one) and the answer to pass on
 let remote = null, ack = null;
-const inWorker = () => !!(BF.client && BF.client.mode === "worker");
+// With the page a client of the world server (r15-41): the server makes the snapshots itself (debug/server.js is the same process) and
+// this page sends only its own part, over the server's socket; the answers for the page come back the same way (serverAck).
+const onServer = () => !!(BF.simHost && BF.simHost.server);
+const inWorker = () => !!(BF.client && BF.client.mode === "worker") && !onServer();
 function snapshot() {
   const info = BF.debugInfo();
   let part;
-  if (inWorker()) {
+  if (onServer()) part = {};
+  else if (inWorker()) {
     BF.client.query("feed", { ack }, r => { if (r && r.ok) { delete r.ok; remote = r; } });
     ack = null;
     part = remote || {};
@@ -355,6 +359,10 @@ function update() {
   if (!hooked && BF.on) { hooked = true; BF.on("newWorld", resync); }   // main.js (which defines BF.on) loads after this file
   if (busy || now < nextT || !BF.debugInfo) return;
   nextT = now + EVERY;
+  if (onServer()) {
+    try { BF.simHost.post({ feedPage: snapshot() }); } catch (e) { console.warn("debug feed:", e); nextT = now + RETRY; }
+    return;
+  }
   let body;
   try { body = JSON.stringify(snapshot()); }
   catch (e) {   // tell the debug screen too, so it shows the error instead of waiting for the game
@@ -394,7 +402,25 @@ function update() {
     .finally(() => { busy = false; clearTimeout(stop); });
 }
 
-BF.debugFeed = { url: URL_, urls: URLS, snapshot, simPart, update, live: () => told && screens > 0 };   // live: a debug screen is watching the feed
+// The world server's answers that are this page's: alerts, a planet toggle, how many screens are open, the item icons it lacks
+function serverAck(o) {
+  if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
+  if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }
+  if (o.screens != null) screens = o.screens | 0;
+  if (o.resync) resync();
+  told = true;
+  if (o.icons) {
+    const out = {};
+    for (const id of o.icons) {
+      let url = null;
+      try { url = BF.inventory && BF.inventory.iconURL ? BF.inventory.iconURL(+id) : BF.textures.icon(+id); } catch (e) { url = null; }
+      if (url) out[id] = { url };
+    }
+    BF.simHost.post({ feedIcons: out });
+  }
+}
+
+BF.debugFeed = { url: URL_, urls: URLS, snapshot, simPart, update, serverAck, live: () => told && screens > 0 };   // live: a debug screen is watching the feed
 // The game loop (requestAnimationFrame) stops while the game's tab is in the background, e.g. when the debug screen is opened
 // as another tab in the same window. A timer keeps the feed going then (browsers still run it about once a second), so the
 // debug screen can say the game is in the background instead of waiting for it.
