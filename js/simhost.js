@@ -142,7 +142,7 @@ function run(w, via) {
     };
     w.onerror = ev => { if (ev && ev.preventDefault) ev.preventDefault(); if (!settled) fail(ev && ev.message || "it could not load"); else crashed(ev && ev.message || "the " + what + " failed"); };
     const three = document.querySelector('script[src*="three"]');
-    w.postMessage({ boot: { three: three ? three.src : null } });
+    w.postMessage({ boot: { three: three ? three.src : null, build: window.BF_BUILD || null } });   // (build: the checkout's commit, for the game log's header)
   });
 }
 

@@ -1,48 +1,55 @@
+// @ci integration hosts=worker,server
 // Game log (js/gamelog.js) and its viewer on the debug screen: NODE_PATH=$(npm root -g) node test/game-log.js [outPrefix]
 // Starts debug/server.js, creates a saved world and checks the log's header (seed, version, commit), the load line, village entries
 // (INFO, with the village's name and a chunk time), console errors and warnings (ERROR / WARN), job events (DEBUG), that it is
 // stored with the world and comes back with the unload line and a version change after a reload, that chunk time is saved, and
 // on the debug screen: hidden until its button is clicked, DEBUG off at first, the level filter, live entries, Copy and Download.
+// BF_HOST=page|worker|server (spec r15-43): the world's log is kept where the simulation is (the page's own errors go there), so it is
+// read there (lib.sim); Save and Quit tells it the world is closed (js/save.js quit).
 const path = require('path'), fs = require('fs'), os = require('os'), { spawn, execSync } = require('child_process');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/game-log';
-const GAME = 8730, DBG = 8731, FILE = path.join(os.tmpdir(), 'bf-test-alerts-' + process.pid + '.json');
-const start = async () => {
-  const p = spawn(process.execPath, [path.join(root, 'debug/server.js'), '--game', GAME, '--debug', DBG, '--alerts', FILE]);
-  let gone = false; p.on('exit', () => { gone = true; }); p.stderr.on('data', d => process.stderr.write('SERVER ' + d));
-  for (let i = 0; i < 100 && !gone; i++) { try { await fetch(`http://localhost:${DBG}/state`); await new Promise(r => setTimeout(r, 300)); if (!gone) return p; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
-  throw new Error('debug server did not start');
-};
+const lib = require('./lib');
+const FILE = path.join(os.tmpdir(), 'bf-test-alerts-' + process.pid + '.json');
+let GAME = 0, DBG = 0;
 (async () => {
   const fails = [], ok = (n, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + n + (extra !== undefined && !c ? '  ' + JSON.stringify(extra).slice(0, 600) : '')); if (!c) fails.push(n); };
   let commit = null; try { commit = execSync('git rev-parse HEAD', { cwd: root }).toString().trim(); } catch (e) { /* not a checkout */ }
-  const srv = await start();
+  const srv = await lib.serve({ world: lib.host() === 'server', args: ['--alerts', FILE] });
+  GAME = srv.game; DBG = srv.debug;
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const ctx = await b.newContext({ viewport: { width: 1280, height: 760 }, acceptDownloads: true, permissions: ['clipboard-read', 'clipboard-write'] });
   const game = await ctx.newPage();
   game.on('pageerror', e => console.log('GAME PAGEERROR', e.message));
   await game.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await game.route('https://fonts.**', r => r.abort());
+  await lib.install(game);   // (BFT.sim)
   await game.goto(`http://localhost:${GAME}/?nolod&${require('./lib').q()}#seed123`);   // no distant terrain: under swiftshader its rings drop the planet to about 1 fps
   await game.waitForTimeout(4000);
   await require('./lib').ready(game);
   const VER = await game.evaluate(() => BF.VERSION), VRE = VER.replace('.', '\\.');
+  await lib.simReady(game);
   const until = (pg, fn, arg, t = 20000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 100 }).then(() => true, () => false);
+  const simUntil = (fn, arg, t = 20000) => lib.simWait(game, fn, arg, t).then(v => !!v);
 
   // ---- a saved world gets a log
   const id = await game.evaluate(() => BF.save.create({ name: 'Log test', seed: 1337 }).then(m => m.id));
   await require('./lib').ready(game);
-  ok('the log opens with the world', await until(game, () => BF.glog.ready()));
-  const h = await game.evaluate(() => BF.glog.headLine());
+  ok('the log opens with the world', await simUntil(() => BF.glog.ready() && BF.glog.world() !== null));
+  const h = await lib.sim(game, () => BF.glog.headLine());
   ok('header: world, seed, version, commit', new RegExp('^# Blockfield game log \\| world "Log test" \\| seed 1337 \\| version ' + VRE + ' \\| commit ').test(h) && (!commit || h.includes(commit)), h);
-  ok('the load is logged as INFO', await game.evaluate(() => BF.glog.entries().some(e => e.l === 'INFO' && e.k === 'game' && /^Game loaded: "Log test", seed 1337/.test(e.x))));
+  ok('the load is logged as INFO', await lib.sim(game, () => BF.glog.entries().some(e => e.l === 'INFO' && e.k === 'game' && /^Game loaded: "Log test", seed 1337/.test(e.x))));
   await require('./lib').toVillage(game);
-  const v = await game.evaluate(() => {
+  // the page's own console errors and warnings (they go to the simulation's log), a village entry and a job event there
+  await game.evaluate(() => { console.error(new Error('test boom')); console.warn('test warning'); });
+  await lib.sim(game, () => {
     const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     BF.vlog.log(rec, 'job', 'Test Person became a Tester', BF.player.position);
-    console.error(new Error('test boom'));
-    console.warn('test warning');
     BF.glog.job('miner', { kind: 'test', day: 1, who: 'miner#1', n: 2, ore: 'iron ore' });
+  });
+  await simUntil(() => BF.glog.entries().some(e => e.l === 'WARN' && e.x === 'test warning'));
+  const v = await lib.sim(game, () => {
+    const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     const E = BF.glog.entries(), name = BF.signs.villageName(rec.key);
     return { name, vil: E.find(e => e.x === 'Test Person became a Tester'), err: E.find(e => e.l === 'ERROR' && /test boom/.test(e.x)), warn: E.find(e => e.l === 'WARN' && e.x === 'test warning'),
       job: E.find(e => e.l === 'DEBUG' && e.k === 'miner' && e.x.startsWith('test')), others: E.filter(e => e.v && e.l === 'INFO').length, line: BF.glog.text().split('\n')[1] };
@@ -82,19 +89,21 @@ const start = async () => {
   ok('copy: the same text', clip === file, clip && clip.slice(0, 200));
   await dbg.fill('#g-q', '');
   await dbg.screenshot({ path: out + '-screen.png' });
-  ok('the server holds the whole log', await (async () => { const g = await (await fetch(`http://localhost:${DBG}/glog`)).json(); const n = await game.evaluate(() => BF.glog.base() + BF.glog.entries().length); return g && g.w === id && g.base + g.lines.length >= n - 5; })());
+  ok('the server holds the whole log', await (async () => { const g = await (await fetch(`http://localhost:${DBG}/glog`)).json(); const n = await lib.sim(game, () => BF.glog.base() + BF.glog.entries().length); return g && g.w === id && g.base + g.lines.length >= n - 5; })());
 
   // ---- stored with the world: quit, reload the page, load it under another version
-  const before = await game.evaluate(() => { const p = BF.player.position; return { n: BF.glog.entries().length, cd: BF.glog.chunkDays(p.x, p.z), x: p.x, z: p.z }; });
+  const before = await lib.sim(game, () => { const p = BF.player.position; return { n: BF.glog.entries().length, cd: BF.glog.chunkDays(p.x, p.z), x: p.x, z: p.z }; });
   ok('chunk time grows while loaded', before.cd > 0, before);
-  await game.evaluate(() => BF.save.saveNow().then(() => { BF.save.current = null; }));
-  ok('quitting closes the log', await until(game, () => !BF.glog.world()));
+  await game.evaluate(() => BF.save.saveNow().then(() => BF.save.quit()));   // (js/player.js Save and Quit to Title)
+  ok('quitting closes the log', await simUntil(() => !BF.glog.world()));
   await game.waitForTimeout(1500);
   await game.reload(); await game.waitForTimeout(4000);
   await require('./lib').ready(game);
-  await game.evaluate(id => { BF.VERSION += '-test'; return BF.save.load(id); }, id);
-  ok('the log comes back with the world', await until(game, () => BF.glog.ready()));
-  const back = await game.evaluate(p => {
+  await lib.simReady(game);
+  await lib.sim(game, () => { BF.VERSION += '-test'; });   // (the log's version is where the log is kept)
+  await game.evaluate(id => BF.save.load(id), id);
+  ok('the log comes back with the world', await simUntil(id => BF.glog.ready() && BF.glog.world() === id, id));
+  const back = await lib.sim(game, p => {
     const E = BF.glog.entries();
     return { n: E.length, boom: E.some(e => /test boom/.test(e.x)), unload: E.filter(e => /^Game unloaded: "Log test"/.test(e.x)).length, loads: E.filter(e => /^Game loaded/.test(e.x)).length,
       ver: (E.find(e => e.k === 'version') || {}).x, crash: E.some(e => /without unloading/.test(e.x)), cd: BF.glog.chunkDays(p.x, p.z), head: BF.glog.headLine() };
@@ -102,15 +111,17 @@ const start = async () => {
   ok('earlier entries are kept', back.boom && back.n > before.n, back);
   ok('the unload and the second load are logged', back.unload === 1 && back.loads === 2, back);
   ok('no crash warning after a clean quit', !back.crash);
-  ok('the version change is logged; the header keeps the first', new RegExp('^Version changed: ' + VRE + ' \\(commit .*\\) -> ' + VRE + '-test \\(commit ').test(back.ver || '') && back.head.includes('version ' + VER + ' |'), back);
+  if (lib.host() === 'server') console.log('(the version change is not checked on the world server: each world starts in a fresh thread there, which the test can\'t give another version)');
+  else ok('the version change is logged; the header keeps the first', new RegExp('^Version changed: ' + VRE + ' \\(commit .*\\) -> ' + VRE + '-test \\(commit ').test(back.ver || '') && back.head.includes('version ' + VER + ' |'), back);
   ok('chunk time is saved with the world', back.cd >= before.cd, { before: before.cd, after: back.cd });
-  const disk = await game.evaluate(() => { BF.glog.diskBuild({ commit: 'abcdef1234567', version: '9.9', branch: 'x' }); BF.glog.diskBuild({ commit: 'abcdef1234567' }); return BF.glog.entries().filter(e => e.l === 'WARN' && /files on disk changed to 9\.9 \(commit abcdef1234/.test(e.x)).length; });
+  const disk = await lib.sim(game, () => { BF.glog.diskBuild({ commit: 'abcdef1234567', version: '9.9', branch: 'x' }); BF.glog.diskBuild({ commit: 'abcdef1234567' }); return BF.glog.entries().filter(e => e.l === 'WARN' && /files on disk changed to 9\.9 \(commit abcdef1234/.test(e.x)).length; });
   ok('a commit change on disk is a WARN, once', disk === 1, disk);
   // ---- deleting the world deletes its log
-  const gone = await game.evaluate(id => { BF.save.current = null; return BF.save.remove(id).then(() => BF.save.logStore.read(id)); }, id);
+  await game.evaluate(id => { BF.save.quit(); return BF.save.remove(id); }, id);
+  const gone = await lib.sim(game, id => BF.save.logStore.read(id), id);
   ok('deleting the world deletes its log', gone.head === null && gone.entries.length === 0, gone);
 
-  await b.close(); srv.kill();
+  await b.close(); await srv.stop();
   try { fs.unlinkSync(FILE); } catch (e) {}
   console.log(fails.length ? fails.length + ' FAILED' : 'all passed');
   process.exit(fails.length ? 1 : 0);

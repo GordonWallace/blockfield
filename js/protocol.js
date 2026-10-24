@@ -549,10 +549,12 @@ function serve(send, opts) {
       try { p = Promise.resolve(opts.world(m.op, m.args || {})); } catch (e) { p = Promise.reject(e); }
       p.then(r => done(Object.assign({ ok: true }, r || {})), e => { glog("ERROR", "Could not " + m.op + " the world: " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n")); done({ ok: false, why: String(e && e.message || e) }); });
     },
-    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters)
+    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters), or the player quit it (save.quit)
     meta(m) {
+      if (m.forget) { if (BF.glog) BF.glog.forget(m.id); if (BF.save && BF.save.current && BF.save.current.id === m.id) BF.save.current = null; return; }   // the world is being deleted
       const cur = BF.save && BF.save.current;
       if (!cur || (m.id && m.id !== cur.id)) return;
+      if (m.quit) { BF.save.current = null; return; }   // Save and Quit to Title: the world plays on as the title background, unsaved (its log closes)
       if (m.name != null) cur.name = m.name;
       if (m.monsters) { cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
     },

@@ -24,6 +24,7 @@ function boot(o) {
     try { importScripts(u); three = typeof THREE !== "undefined"; } catch (e) { /* the next one */ }
   }
   if (!three) throw new Error("three.js would not load in the worker");
+  if (o.build) self.BF_BUILD = o.build;   // the commit and branch debug/server.js gave the page, for the game log (js/gamelog.js)
   importScripts("simfiles.js" + Q);
   BF = self.BF;
   importScripts(...BF.SIM_FILES.map(f => "../" + f + Q));
