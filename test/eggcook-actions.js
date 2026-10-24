@@ -1,15 +1,17 @@
-// Egg cooking checks (js/eggcook.js, js/furnaceuse.js): NODE_PATH=$(npm root -g) node test/run.js /tmp/egg test/eggcook-actions.js
+// @ci integration hosts=worker,server
+// Egg cooking checks (js/eggcook.js, js/furnaceuse.js): NODE_PATH=$(npm root -g) node test/run.js /tmp/egg test/eggcook-actions.js [--host page|worker|server]
 // Villagers cook eggs only in a real furnace of their village, with fuel they hold (or what burns there already), in game time, one villager
 // per furnace; with no furnace, or no fuel and no emeralds, the eggs stay raw for a whole day. Eggs in == cooked eggs out. A hungry villager
 // buys eggs when it can cook them (ready food when it cannot), cooks and eats them. The player's furnace cooks eggs too.
 module.exports = async (pg) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const I = BF.I, T = BF.trades, inv = T.inv, W = BF.world, EC = BF.eggCook, FU = BF.furnaceUse;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;
-    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;
     const V = BFT.village(v => v.pop >= 10);   // the planet: the village nearest to spawn of 10+
     BF.player.teleport(V.x + 4.5, BF.worldgen.heightAt(V.x + 4, V.z + 4) + 2, V.z + 4.5);
