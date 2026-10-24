@@ -13,7 +13,7 @@
 //   importAll() rebuilds the claim table from a save. See CONTRACT.md "Jobsites".
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const JOBSITE = {
   farmer: "composter", librarian: "lectern", cleric: "brewing_stand", armorer: "blast_furnace", weaponsmith: "grindstone",

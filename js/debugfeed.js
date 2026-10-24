@@ -12,7 +12,7 @@
 // API: BF.debugFeed = { url (current address), urls (candidates), snapshot(), update(), live() (a debug screen is watching the feed) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // Where to send: ?debugfeed=<port|url> or the address the debug server injected, else port 8001 on the game's own host, then
 // on localhost and 127.0.0.1 (a game opened by a LAN address or a name like mymac.local still finds a server on this machine).

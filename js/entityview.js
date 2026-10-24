@@ -13,7 +13,7 @@
 // API: BF.entityView = { init(scene), render(dt, realDt), viewOf(entity) -> its scene object | undefined, count() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const vrnd = (a, b) => a + Math.random() * (b - a);   // visual
 let scene = null;

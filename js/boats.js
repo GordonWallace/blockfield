@@ -11,7 +11,7 @@
 //   exitSpot(b), letOut(b), remove(b), clear, serialize, deserialize, counts(), spawn(wood, x, y, z, yaw) }.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const HW = 0.6875, H = 0.5625, RIDDEN_H = 1.5;   // collision box (vanilla 1.375 wide); with the player aboard it covers the sitting player
 const SINK = 0.15;                               // the hull bottom sits this far under the water surface (just under the inside floor)

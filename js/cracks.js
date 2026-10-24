@@ -5,7 +5,7 @@
 // player.js calls BF.cracks.show(...) every frame while mining (survival) and BF.cracks.hide() from resetBreak().
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const STAGES = 10, TEX = 32, HIT_EVERY = 0.25, INFLATE = 0.002, MAX_QUADS = 192, POOL = 64;
 const FULL = [[0, 0, 0, 16, 16, 16]];

@@ -1,15 +1,8 @@
-// Boot, render loop, shared event bus and debug overlay.
+// The page's boot: renderer, frame loop and debug overlay. The event bus, BF.newWorld and the simulation tick are in js/boot.js,
+// which the headless boot shares (spec r15-40).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
-
-// ---------- tiny event bus ----------
-const handlers = {};
-BF.on = (name, fn) => (handlers[name] = handlers[name] || []).push(fn);
-BF.emit = (name, ...args) => { for (const fn of handlers[name] || []) { try { fn(...args); } catch (e) { console.error(e); } } };
-
-// Shared game state. paused: no simulation (menus, inventory open, death screen).
-BF.state = { paused: false, seed: 0, time: 0 };
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // ---------- renderer ----------
 const canvas = document.getElementById("view");
@@ -28,38 +21,6 @@ function resize() {
 }
 addEventListener("resize", resize);
 resize();
-
-// ---------- world lifecycle ----------
-// Starts (or restarts) a world from a seed and places the player on solid ground at the planet's spawn. Every world is the planet
-// (generator 4): the flat generators 1 to 3 were retired in 1.4 (spec r14-24), so opts.gen is not read.
-BF.newWorld = function (seed, opts) {
-  BF.emit("worldClosing");   // the world being replaced is unloaded (js/gamelog.js logs it while its clock still reads right)
-  BF.state.seed = seed >>> 0;
-  BF.state.gen = 4;                                                          // worldgen version: 4 = the planet (saves keep it)
-  BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier
-  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
-  BF.noise = BF.makeNoise(BF.state.seed);
-  BF.rand.reset();   // seeded random streams start over with the world (js/rand.js); a save restores its own counters afterwards
-  BF.mobs.clear && BF.mobs.clear();
-  if (BF.gameOpts) BF.gameOpts.setAll(opts && opts.monsters);   // which monsters spawn in this world (js/gameopts.js); none given: the defaults
-  BF.drops.clear();
-  if (BF.boats) BF.boats.clear();
-  if (BF.horses) BF.horses.reset();
-  BF.world.reset();
-  BF.worldgen.init(BF.noise, { biomeScale: BF.state.biomeScale, villages: BF.state.villages });
-  if (BF.lod) BF.lod.reset(scene);   // distant terrain on the planet (js/lod.js): fresh rings and sampling workers for this seed
-  if (BF.globe) BF.globe.reset(scene);   // the whole planet as a globe (js/globe.js), sampled by the same workers
-  // the spawn: dry temperate / subtropical land near 35 N on face 4, away from edges and corners (r14-19)
-  const [sx, sz] = BF.planetgen.spawnSearch();
-  BF.spawnPoint = { x: sx + 0.5, z: sz + 0.5 };
-  BF.worldSpawn = { x: sx + 0.5, z: sz + 0.5 };   // kept apart: the fallback when a spawn point or saved position is off the world (js/player.js)
-  BF.player.spawn(sx + 0.5, BF.worldgen.heightAt(sx, sz) + 1.01, sz + 0.5);
-  // every world starts at sunrise on day 0; loading a save restores its own time afterwards
-  BF.sky.day = 0; BF.sky.setTime(0.05);
-  BF.warp.reset();
-  if (opts && opts.gameMode && BF.player.setGameMode) BF.player.setGameMode(opts.gameMode);
-  BF.emit("newWorld", BF.state.seed);
-};
 
 // The planet's rivers and lakes are worked out for the whole planet before its world starts (js/planetrivers.js, spec r14-10): several
 // seconds, once per seed per session. prepareWorld(seed) runs that in slices behind a loading screen with progress and resolves
@@ -213,45 +174,7 @@ BF.debugInfo = debugInfo;
 BF.debugText = debugText;
 
 // ---------- loop ----------
-// One simulation tick of h game seconds (W.TICK in the frame loop, simFrame below; harnesses and tests call BF.simStep).
-// The BF.perf points charge each part's time to its category of the villager-seconds meter (js/perf.js); they do nothing while it's off.
-const PF = BF.perf;
-function simStep(h) {
-  PF.beginStep();
-  BF.warp.advance(h);
-  BF.rand.step();   // the tick that keys world-event rolls (js/rand.js)
-  BF.req.beginTick();   // think: everything below reads the start-of-tick world and asks for changes (js/requests.js, spec r15-17)
-  BF.state.time += h;
-  BF.sky.advance(h);   // the clock, weather and light; the sky is drawn every frame at the interpolated time
-  PF.lap(PF.C.world);
-  BF.mobs.update(h);   // charges its own parts (js/mobs.js update)
-  PF.lap(PF.C.vanimals);   // bees (js/bees.js runs after the mobs' update)
-  if (BF.dayTimeline) BF.dayTimeline.update();   // villagers' day timelines, once a game minute (js/daytimeline.js)
-  PF.lap(PF.C.villagers);
-  BF.drops.update(h);
-  BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
-  if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
-  BF.world.tickSim();   // the think hooks, then apply the requests, block ticks, deliver results (js/world.js)
-  if (BF.regions) BF.regions.tick();   // mobs and drops that changed region move in the region index (js/regions.js)
-  PF.lap(PF.C.world);
-  PF.endStep(h);
-}
-BF.simStep = simStep;
-
-// Fixed tick (spec r15-10, js/timewarp.js): the world simulation runs in ticks of exactly W.TICK (0.05 s) of game time at every
-// speed, as many as the accumulator holds after a frame of `raw` real seconds (20 a second at 1x, W.speed times that when
-// fast-forwarding), so behaviour is the same at any speed and frame rate. Stops early if the frame budget runs out; those ticks are
-// dropped, not owed (W.done). Returns the number of ticks run. BF.simFrame runs it on its own (tests: a forced frame rate).
-function simFrame(raw) {
-  const W = BF.warp, plan = W.plan(raw), t0 = performance.now();
-  let done = 0;
-  while (done < plan.n && !W.frozen && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {   // an alert can freeze it mid-frame (js/alerts.js)
-    simStep(plan.h);
-    done++;
-  }
-  return done;
-}
-BF.simFrame = raw => { const n = simFrame(raw); BF.warp.done(n, n * BF.warp.TICK, raw); return n; };
+const PF = BF.perf, simFrame = BF.boot.ticks;   // the simulation's ticks for a frame (js/boot.js)
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);

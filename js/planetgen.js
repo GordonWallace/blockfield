@@ -14,7 +14,7 @@
 // The sampling path uses no window or document, so it also runs in a Web Worker (r14-05); it needs BF.planet (js/planet.js).
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const G = globalThis;   // self: the generator also runs in a Web Worker (r14-05)
 const BF = (G.BF = G.BF || {});
 const P = BF.planet;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };

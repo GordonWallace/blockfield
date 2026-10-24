@@ -8,7 +8,7 @@
 // generator 3's ("mile high"), which the planet samples on the sphere, so its functions keep their names (relief3, climate3, caves3...).
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: the generator also runs in a Web Worker (r14-05)
+const G = globalThis;   // self: the generator also runs in a Web Worker (r14-05)
 const BF = (G.BF = G.BF || {});
 let noise;
 // The terrain's noise fields at an atlas position (x, z), from js/planetgen.js (set by init): they sample 3D noise at the point on the

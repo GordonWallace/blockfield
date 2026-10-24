@@ -10,7 +10,7 @@
 // (a cave spot at 7 or less) and burning (12 or more at the head).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const CS = 16;
 const sky = (BF.skyLight = {});
 const world = () => BF.world;

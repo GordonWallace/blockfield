@@ -6,7 +6,7 @@
 //   deck(e, reverse), exportAll(out), importAll(o), reset() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const CELL = 8, RANGE = 64, WINDOW = 3, NEED = 12, BUSY = 30, WMIN = 3, WMAX = 24, SPACING = 32, MAXBUILT = 3, ROUTE_R = 48, MAXRAMP = 3, MAXPOST = 14;
 const W = () => BF.world;

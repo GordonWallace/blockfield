@@ -26,7 +26,7 @@
 //   how, who), playerUse(target, stack), lure(m, on), out(), stats(), serialize(), deserialize(a), reset(), MAX, CAP, R, FULL, ... }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const MAX = 30;                 // bees a home can hold
 const FULL = 5;                 // honey level of a full home

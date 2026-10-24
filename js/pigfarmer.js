@@ -20,7 +20,7 @@
 //  furnace with fuel they bought (js/furnaceuse.js, as the cowherd cooks steak). Nothing is created: no restock, no free feed or fuel.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const FEED_DAYS = 1;          // a pig is willing to breed for this long after eating
 const BREED_CD = 1;           // days before a pig that bred can breed again

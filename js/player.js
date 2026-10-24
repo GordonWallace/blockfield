@@ -2,7 +2,7 @@
 // breaking/placing, attacking mobs, survival stats (health/hunger/air), HUD and menus.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 // ---------- tuning ----------
 const GRAVITY = 32, JUMP_V = 8.4, WALK = 4.3, SPRINT = 5.6, SNEAK = 1.3;
@@ -54,7 +54,7 @@ const store = {
 };
 let gameMode = store.get("gameMode") === "creative" ? "creative" : "survival";
 const creative = () => gameMode === "creative";
-const isTouch = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches);
+const isTouch = !!(globalThis.matchMedia && matchMedia("(pointer: coarse)").matches);
 
 const P = (BF.player = {
   position: pos,
@@ -564,14 +564,14 @@ function relockLater() {
   }, ESC_RETRY_MS);
 }
 function stopRelock() { wantLock = false; if (escRetryT) { clearTimeout(escRetryT); escRetryT = 0; } }
-addEventListener("keyup", e => {
+if (BF.page) addEventListener("keyup", e => {
   if (e.key !== "Escape") return;
   if (escCloseHeld) { escCloseHeld = false; markEsc(); }   // the grace runs from the release, when the re-lock goes out
   if (!lockOnEscUp) return;
   lockOnEscUp = false;
   if (started && !P.dead && !invOpen() && (!menuOpen || menuOpen === "pause")) { requestLock(); escRelock = inEscGrace(); }
 }, true);
-addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
+if (BF.page) addEventListener("blur", () => { lockOnEscUp = escCloseHeld = escRelock = false; });
 // A screen is closing: note it when Escape did it, so neither that key press nor an unlock in the next ESC_GRACE seconds pauses.
 function screenClosed() {
   const ev = window.event;
@@ -2168,6 +2168,7 @@ P.turnPlanet = turnPlanet;   // tests
 function syncCamera(dt) {
   const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
   eyeOffset += (want - eyeOffset) * Math.min(1, dt * 14);
+  if (!BF.camera) return;   // headless (js/boot.js): no camera
   const by = Math.abs(Math.sin(bobPhase)) * 0.06 * bobAmt, bx = Math.cos(bobPhase) * 0.035 * bobAmt;
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
   BF.camera.position.set(pos.x + rx * bx, pos.y + eyeOffset + by, pos.z + rz * bx);

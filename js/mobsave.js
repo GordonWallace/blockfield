@@ -11,7 +11,7 @@
 //                     apply(m, snap), done(key), update(dt), reset(), pending() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const SHORT = 1 / 24;       // game days (a game hour): a village unloaded for less than this, with no bedtime in between, brings its mobs back exactly too
 const EXACT = 0.02;          // game days (about 24 s at 1x): a snapshot older than this is not an exact restore
@@ -61,7 +61,7 @@ function ser(v, d, seen) {
 function deser(v) {
   if (v === null || typeof v !== "object") return v;
   if (Array.isArray(v)) return v.map(deser);
-  if (v.$v && window.THREE) return new THREE.Vector3(v.$v[0], v.$v[1], v.$v[2]);
+  if (v.$v && globalThis.THREE) return new THREE.Vector3(v.$v[0], v.$v[1], v.$v[2]);
   if (v.$m) return new Map(v.$m.map(([k, x]) => [k, deser(x)]));
   if (v.$s) return new Set(v.$s);
   const o = {};

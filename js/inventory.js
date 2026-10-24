@@ -3,7 +3,7 @@
 // Minecraft-style mouse/touch stack handling incl. drag-splitting, shaped/shapeless recipes, save/load.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const HOTBAR = 9, SIZE = 36, COOK_TIME = 10;
 const slots = new Array(SIZE).fill(null);    // {id, count} | null; 0..8 hotbar, 9..35 main
@@ -12,7 +12,7 @@ let result = null;                            // current crafting output
 let cursor = null;                            // stack held by the pointer
 let open_ = false, mode = "inventory", openedAt = 0;
 let selected = 0;
-let mouseX = innerWidth / 2, mouseY = innerHeight / 2;
+let mouseX = (globalThis.innerWidth || 0) / 2, mouseY = (globalThis.innerHeight || 0) / 2;
 let furnace = null;                           // furnace state shown on the furnace screen
 let furnaceDirty = false;                     // the open furnace changed in a simulation step: redraw it
 let chest = null;                             // chest state shown on the chest screen
@@ -1494,6 +1494,7 @@ const api = {
   iconURL,          // item id -> icon image URL, as the slots show it (js/debugfeed.js sends these to the debug screen)
   creativeItems,    // [{id, cat, name}] in creative-menu order, and the tabs: Blockfieldpedia (wiki/) groups its block and item lists by them
   creativeTabs: CRE_TABS,
+  initSim() { buildRecipes(); },   // headless (js/boot.js): the recipes and fuels only, no screens
   init() {
     buildRecipes();
     buildDOM();

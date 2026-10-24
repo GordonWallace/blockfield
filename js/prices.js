@@ -11,7 +11,7 @@
 // API: BF.prices = { STEPS, STEP, FILL, kind(o), step(o), mult(o), tick(v, day), filled(v, o, times), reprice(v, o), pack(v), unpack(v, pr, pd), off }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const STEPS = 30;                  // steps to double (or halve): a game month of days
 const STEP = Math.pow(2, 1 / STEPS);

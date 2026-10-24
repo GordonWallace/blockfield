@@ -7,7 +7,7 @@
 //                        pins(), pinned() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 
 const RADIUS = 200;       // a village this close to the player is simulated

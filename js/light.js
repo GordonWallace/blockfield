@@ -7,7 +7,7 @@
 // mesher reads chunk.light of the 3x3 chunk neighbourhood.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const CS = 16;
 const light = (BF.light = {});
 const world = () => BF.world;

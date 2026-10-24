@@ -4,7 +4,7 @@
 // alpha coverage preserved for cutout tiles) and uploaded as ImageData so colours under alpha survive.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const TS = 32, CELL = 64, OFF = 16, ATLAS_W = 1024, PER_ROW = ATLAS_W / CELL;
 const MIP_CELL_LEVELS = 7; // levels 0..6 are built per cell (cell 64 -> 1px)
 const index = new Map();      // tile name -> cell index

@@ -5,7 +5,7 @@
 // Loaded after main.js; drives its own requestAnimationFrame loop (no main.js change needed).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const ACtor = window.AudioContext || window.webkitAudioContext;
 const SR = 44100;          // effect sample rate
 const MSR = 22050;         // music notes and ambience loops

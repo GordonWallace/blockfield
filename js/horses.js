@@ -10,7 +10,7 @@
 // See CONTRACT.md "Horses".
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const HORSE_BIOMES = new Set([5, 14, 22]);   // worldgen ids: plains, savanna, meadow
 const COATS = ["white", "creamy", "chestnut", "brown", "black", "gray", "dark_brown"];

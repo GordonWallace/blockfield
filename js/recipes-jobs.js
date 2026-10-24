@@ -2,7 +2,7 @@
 // brewing stand uses a gold ingot for the blaze rod; the drafting table (builder, not vanilla) is paper + blue dye over 4 planks.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 (BF.recipeHooks = BF.recipeHooks || []).push(({ addShaped, fuel }) => {
   const I = BF.I;
   if (I.composter === undefined) return;

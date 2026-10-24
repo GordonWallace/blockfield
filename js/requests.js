@@ -18,7 +18,7 @@
 //   recording, replaying, inPlayer }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const kinds = new Map();   // kind -> {apply, onResult}
 let queue = [], seq = 0, done = [];   // done: [req, result] waiting for delivery

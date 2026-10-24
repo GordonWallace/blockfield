@@ -4,7 +4,7 @@
 // API: BF.villagerHover = { init(), update(dt), shown() -> mob|null }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const RANGE = 32;        // blocks: far enough to read a villager across a field, not across the map
 const REFRESH = 0.25;    // s between status-text refreshes while the same villager stays under the crosshair

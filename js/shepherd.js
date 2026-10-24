@@ -18,7 +18,7 @@
 //  if the day or the game ends first), logged as "spun N string". It sells the string ("1 emerald > 9 string"): the fletcher's bowstrings.
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const FEED_DAYS = 1;          // a sheep is willing to breed for this long after eating wheat
 const BREED_CD = 1;           // days before a sheep that bred can breed again

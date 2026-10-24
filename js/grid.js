@@ -11,7 +11,7 @@
 // terrain is sampled. If workers can't start (the page opened from a file), it runs the jobs in the page instead, a few rows per frame.
 (() => {
 "use strict";
-const G = typeof window !== "undefined" ? window : self;   // self: in a Web Worker
+const G = globalThis;   // self: in a Web Worker
 const BF = (G.BF = G.BF || {});
 
 // Biome ids (js/worldgen.js)

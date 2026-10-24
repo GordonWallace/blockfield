@@ -4,7 +4,7 @@
 // numbered batches of entries ("<id>#log:000000012"), written as the log grows (logStore).
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 const DB_NAME = "blockfield", DB_VER = 1, AUTOSAVE_S = 30;
 let dbp = null;
@@ -168,6 +168,8 @@ const save = {
   lastSaved: 0,
   supported: typeof indexedDB !== "undefined",
   numberSeed,             // exposed for tests
+  snapshot,               // the save data of the world being played (the headless boot's save(), js/boot.js)
+  restore,                // restore(data, meta?): the world from save data (the headless boot)
   logStore,               // the game log's storage (js/gamelog.js)
 
   // -> [{id, name, seed, gameMode, created, lastPlayed}] newest first; [] if storage is unavailable
@@ -259,6 +261,6 @@ BF.save = save;
 
 // save when the tab is hidden or closed, and when the game pauses
 const flush = () => { if (save.current) save.saveNow(); };
-addEventListener("pagehide", flush);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
+if (BF.page) addEventListener("pagehide", flush);
+if (BF.page) document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
 })();

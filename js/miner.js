@@ -34,7 +34,7 @@
 // - Persistence: the current mineshaft (m.mi.shaft) is saved with the villager (trading.js pack, `mi`). See CONTRACT.md "Miners".
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 const TR = () => BF.trades;
 const W = () => BF.world;
 const get = (x, y, z) => W().getBlock(x, y, z);

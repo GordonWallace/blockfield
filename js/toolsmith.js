@@ -24,7 +24,7 @@
 // See CONTRACT.md "Toolsmiths".
 (() => {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 const TR = () => BF.trades;
 const INV = () => BF.inventory;
 const FU = BF.furnaceUse;

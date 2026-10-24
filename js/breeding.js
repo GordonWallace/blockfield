@@ -7,7 +7,7 @@
 // Newborns are not part of the deterministic roster: they live in rec.bred and are saved under "<village key>#2000+k".
 (function () {
 "use strict";
-const BF = window.BF;
+const BF = globalThis.BF;
 
 const RADIUS = 5;            // encounter distance (blocks, 3D)
 const CHANCE = 0.5;          // per encounter
@@ -534,7 +534,7 @@ function info(rec) {
 }
 
 // main.js defines BF.on after this file loads: hook up as soon as the page has loaded (or on the first tick)
-addEventListener("load", hookEvents);
+BF.onLoad(hookEvents);
 
 BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,

@@ -10,13 +10,13 @@
 // API: BF.alerts = { set(list, av), list, av, hits, check(rec, entry), active, dismiss(), teleport(), fire(alert, rec, entry) }
 (() => {
 "use strict";
-const BF = (window.BF = window.BF || {});
+const BF = (globalThis.BF = globalThis.BF || {});
 
 let list = [], av = null, active = null, el = null, freed = false;
 const hits = {};   // alert id -> { n, text, day } (sent back to the debug screen)
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const LM = () => BF.logmatch || window.BFLog;
+const LM = () => BF.logmatch || globalThis.BFLog;
 
 function ui() {
   if (el || !document.body) return el;
