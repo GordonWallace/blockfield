@@ -204,7 +204,9 @@ async function run(b, url, mode) {
   await click('inv', v.inv.findIndex(s => s && s.id === I.raw_beef), 'left', true);
   await click('inv', v.inv.findIndex(s => s && s.id === I.coal), 'left', true);
   v = await seen(null, spots.furn);
-  check(v.furnace.slots[0] && v.furnace.slots[0].id === I.raw_beef && (v.furnace.slots[1] || v.furnace.burn > 0), tag('shift-clicks load the input and the fuel'), v.furnace);
+  // (one beef cooks in a few seconds, so by this query it may already be steak)
+  const fs = v.furnace.slots;
+  check(((fs[0] && fs[0].id === I.raw_beef) || (fs[2] && fs[2].id === I.steak)) && (fs[1] || v.furnace.burn > 0) && !v.inv.some(s => s && s.id === I.raw_beef), tag('shift-clicks load the input and the fuel'), v.furnace);
   const t0 = Date.now();
   let cooked = null;
   while (Date.now() - t0 < 30000) {
@@ -213,7 +215,8 @@ async function run(b, url, mode) {
     await pg.waitForTimeout(500);
   }
   check(cooked && cooked.slots[2].id === I.steak && !cooked.slots[0], tag('it cooks while the screen is open'), cooked && { secs: (Date.now() - t0) / 1000, out: cooked.slots[2] });
-  const drawn = await pg.evaluate(() => document.querySelector('.bf-inv-back [data-c="furn"][data-i="2"] img').hidden === false);
+  // the page redraws from its next furnace answer (four a second, on its own frames)
+  const drawn = await pg.waitForFunction(() => document.querySelector('.bf-inv-back [data-c="furn"][data-i="2"] img').hidden === false, null, { timeout: 15000 }).then(() => true, () => false);
   check(drawn, tag('the furnace output is drawn'));
   await click('furn', 2);
   await click('inv', 6);
@@ -257,7 +260,7 @@ async function run(b, url, mode) {
   await settle(); await settle();
   v = await seen(spots.chest);
   const drops = await pg.evaluate(() => [...BF.client.world.entities.values()].filter(e => e.kind === "drop").map(e => [e.item, e.count]));
-  check(!v.open && !v.screen && v.chestGone && !document.hidden, tag('the chest broken while open: the screen closes, the chest is gone'), { open: v.open, screen: v.screen });
+  check(!v.open && !v.screen && v.chestGone, tag('the chest broken while open: the screen closes, the chest is gone'), { open: v.open, screen: v.screen });
   check(drops.some(d => d[0] === I.cobblestone) && drops.some(d => d[0] === I.crafting_table), tag('its items dropped'), drops.length);
 
   // ---- a villager's trade: an offer chosen (auto-fill from the inventory), shift-traded
@@ -265,7 +268,14 @@ async function run(b, url, mode) {
     const p = BF.player.position;
     const list = [...BF.client.world.entities.values()].filter(e => e.kind === "mob" && e.type === "villager" && !e.child && !e.dead && !e.sleeping && e.sid != null);
     list.sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
-    return list.length ? list[0].sid : null;
+    return list.map(e => e.sid);
+  }).then(async ids => {
+    // the nearest villager with an emerald offer it can do now (stock and jobs differ between runs)
+    for (const id of ids.slice(0, 12)) {
+      const t = await pg.evaluate(([id, em]) => new Promise(r => BF.client.query('trades', { id }, r)).then(t => !!(t && t.ok !== false && t.trades && t.trades.some(o => !o.reason && o.buy[0].id === em && !o.buy[1] && o.buy[0].n <= 16 && o.sell.id !== em))), [id, I.emerald]);
+      if (t) return id;
+    }
+    return ids.length ? ids[0] : null;
   });
   check(vid != null, tag('a villager in the mirror'));
   if (vid != null) {
