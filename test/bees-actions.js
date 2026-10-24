@@ -1,4 +1,4 @@
-// @ci integration suite=farming
+// @ci integration suite=farming hosts=worker,server
 // Bees and beekeepers (js/bees.js, js/beekeeper.js): NODE_PATH=$(npm root -g) node test/run.js /tmp/bees test/bees-actions.js
 // On the planet (spec r14-22): planet seed 123 (generator 4, village generator 10), whose plains village nearest spawn has beekeepers; the test
 // makes that world itself, whatever the page booted.
@@ -10,7 +10,9 @@
 // well under 600 even with 700+ to share); save and load of hive state; bees led
 // into a hive by a held flower; the beekeeper harvests, plants picked flowers, builds a hive from real honeycomb and planks, and makes candles.
 module.exports = async (pg) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 10, gameMode: "survival" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const I = BF.I, B = BF.B, T = BF.trades, inv = T.inv, W = BF.world, BE = BF.bees, BK = BF.beekeeper;
@@ -20,7 +22,6 @@ module.exports = async (pg) => {
       for (let i = 0; i < 300; i++) { W.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); if (W.queueLength === 0) break; }
     };
     BF.state.paused = true;
-    BF.newWorld(123, { gen: 4, villages: 10, gameMode: "survival" });
     for (let i = 0; i < 1800 && BF.preparing; i++) await new Promise(r => setTimeout(r, 100));   // a planet first works out its rivers
     BF.state.paused = true;
     ok("new worlds use village generator 8 or later", BF.state.villages >= 8, BF.state.villages);

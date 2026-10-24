@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Cattle economy soak (js/cowherd.js): one village with a cowherd and a stocked generated pasture runs for N game days (no rendering, like
 // test/bowchain.js) and checks:
 //  - the herd grows (fed cows breed) and is held at the pasture's limit (one cow per 8 cells): the cowherd culls past it;
@@ -27,18 +28,23 @@ const LEAN = 3;
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + SEED);
+  // BF_HOST (spec r15-43): page, as before (index.html as a file); worker or server: served by debug/server.js, the simulation there
+  const lib = require('./lib'), host = lib.host(), srv = host === 'page' ? null : await lib.serve({ world: host === 'server' });
+  await pg.goto(srv ? srv.url + '?nolod&' + lib.q() + '#seed' + SEED : 'file://' + path.join(root, 'index.html') + '#seed' + SEED);
   await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
+  if (srv) { console.log('host ' + host + ': ' + (await lib.where(pg)).label); await lib.simReady(pg); }
+  await lib.simBFT(pg);   // (BFT where the simulation is)
   await pg.waitForTimeout(3000);
   // the nearest villages (within 3000 blocks of the spawn) that have a pasture
-  const cands = await pg.evaluate(() => {
-    window.__halt = true;
+  await pg.evaluate(() => { window.__halt = true; });   // the page's frames stop: the test steps the simulation itself
+  const cands = await lib.sim(pg, () => {
+    if (!BF.page) BF.state.paused = true;   // (off the page, its own loop stops too)
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
     return BFT.villages(3000).filter(v => v && v.pop && (v.buildings || []).some(x => x.type === 'pasture')).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
-  await pg.evaluate(() => {
-    const WATCH = window.__WATCH = ['raw_beef', 'steak', 'leather', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'honey_bottle', 'bucket', 'wheat_item'];
-    const R = window.__rec = { key: null, lines: [], restock: [], trades: [], fed: 0, milked: 0, kits: 0, herd: [] };
+  await lib.sim(pg, () => {
+    const WATCH = globalThis.__WATCH = ['raw_beef', 'steak', 'leather', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'honey_bottle', 'bucket', 'wheat_item'];
+    const R = globalThis.__rec = { key: null, lines: [], restock: [], trades: [], fed: 0, milked: 0, kits: 0, herd: [] };
     const mine = m => m && m.village && m.village.key === R.key;
     const oLog = BF.vlog.log;
     BF.vlog.log = function (rec, kind, text) { if (rec && rec.key === R.key) R.lines.push([+(BF.sky.day + BF.sky.time).toFixed(3), kind, String(text)]); return oLog.apply(this, arguments); };
@@ -63,10 +69,10 @@ const LEAN = 3;
       WATCH.forEach((n, i) => { if (after[i] > before[i]) R.restock.push([m.profession, n, after[i] - before[i]]); });
       return r;
     };
-    window.__villagers = () => BF.mobs.list.filter(m => m.type === 'villager' && mine(m) && !m.dead && Array.isArray(m.inv));
+    globalThis.__villagers = () => BF.mobs.list.filter(m => m.type === 'villager' && mine(m) && !m.dead && Array.isArray(m.inv));
     // the village's holdings of the watched items: its villagers' packs and the chests within 80 blocks of its centre
-    window.__total = () => {
-      const out = {}, I = BF.I, [cx, cz] = R.key.split(',').map(Number), ms = window.__villagers();
+    globalThis.__total = () => {
+      const out = {}, I = BF.I, [cx, cz] = R.key.split(',').map(Number), ms = globalThis.__villagers();
       for (const n of WATCH) {
         let t = 0;
         for (const m of ms) t += BF.trades.inv.count(m.inv, I[n]);
@@ -75,13 +81,13 @@ const LEAN = 3;
       }
       return out;
     };
-    window.__herder = () => window.__villagers().find(m => m.profession === 'cowherd');
-    window.__count = (m, n) => (m ? BF.trades.inv.count(m.inv, BF.I[n]) : 0);
+    globalThis.__herder = () => globalThis.__villagers().find(m => m.profession === 'cowherd');
+    globalThis.__count = (m, n) => (m ? BF.trades.inv.count(m.inv, BF.I[n]) : 0);
   });
   let setup = null;
   for (const v of cands) {
-    const r = await pg.evaluate(v => {
-      const key = window.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
+    const r = await lib.sim(pg, v => {
+      const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
       for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
@@ -89,62 +95,62 @@ const LEAN = 3;
       for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
       // the whole village before the snapshot: a planet village's villagers keep arriving for a while, each with its starting pack (a
       // cowherd's has a bucket and 30 glass bottles), and one arriving after it would look like stock from nothing
-      for (let i = 0; i < 2400 && window.__villagers().length < v.pop; i++) { if (i % 10 === 0) BF.world.update(v.x, v.z, 30); step(0.05); }
+      for (let i = 0; i < 2400 && globalThis.__villagers().length < v.pop; i++) { if (i % 10 === 0) BF.world.update(v.x, v.z, 30); step(0.05); }
       BF.sky.setTime(0.02);
-      const h = window.__herder(), P = h && BF.cowherd.pastureOf(h);
-      return { key, pop: v.pop, here: window.__villagers().length, herder: !!h, pasture: P ? { cows: P.cows ? P.cows.length : null, limit: P.limit, cells: P.cells } : null };
+      const h = globalThis.__herder(), P = h && BF.cowherd.pastureOf(h);
+      return { key, pop: v.pop, here: globalThis.__villagers().length, herder: !!h, pasture: P ? { cows: P.cows ? P.cows.length : null, limit: P.limit, cells: P.cells } : null };
     }, v);
     if (r.herder && r.pasture && r.pasture.cows >= 2) { setup = r; break; }
     console.log(`seed ${SEED} village ${r.key} pop ${r.pop}: skipped ${JSON.stringify(r)}`);
   }
-  if (!setup) { console.log('FAIL no village with a cowherd and a stocked pasture among the nearest ' + cands.length); await b.close(); process.exitCode = 1; return; }
-  await pg.evaluate(() => {
-    const R = window.__rec, h = window.__herder();
+  if (!setup) { console.log('FAIL no village with a cowherd and a stocked pasture among the nearest ' + cands.length); await b.close(); if (srv) await srv.stop(); process.exitCode = 1; return; }
+  await lib.sim(pg, () => {
+    const R = globalThis.__rec, h = globalThis.__herder();
     R.lines.length = 0; R.restock.length = 0; R.trades.length = 0; R.fed = 0; R.milked = 0; R.kits = 0;
-    R.start = window.__total();
+    R.start = globalThis.__total();
     // every cowherd's stock: a planet village can have two, and the trade and feeding ledgers count them all
-    R.herders0 = window.__villagers().filter(m => m.profession === 'cowherd');
-    const stock = (ms, n) => ms.reduce((a, m) => a + window.__count(m, n), 0);
+    R.herders0 = globalThis.__villagers().filter(m => m.profession === 'cowherd');
+    const stock = (ms, n) => ms.reduce((a, m) => a + globalThis.__count(m, n), 0);
     R.herderStart = { bucket: stock(R.herders0, 'bucket') + stock(R.herders0, 'milk_bucket'), wheat: stock(R.herders0, 'wheat_item'), n: R.herders0.length };
     R.herder = h;
-    R.beeKit0 = new Set(window.__villagers().filter(m => m.beeKit));   // beekeepers' kits (16 glass bottles each, js/beekeeper.js) given before the run
+    R.beeKit0 = new Set(globalThis.__villagers().filter(m => m.beeKit));   // beekeepers' kits (16 glass bottles each, js/beekeeper.js) given before the run
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop} (${setup.here} here): pasture ${JSON.stringify(setup.pasture)}`);
   const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
-    await pg.evaluate(([n, h, key, LEAN]) => {
+    await lib.sim(pg, ([n, h, key, LEAN]) => {
       const [x, z] = key.split(',').map(Number);
       for (let i = 1; i <= n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
         if (i % 50 === 0) BF.world.update(x, z, 4);
       }
-      const R = window.__rec, hd = R.herder, P = hd && !hd.dead ? BF.cowherd.pastureOf(hd) : null, d = BF.sky.day + BF.sky.time;
+      const R = globalThis.__rec, hd = R.herder, P = hd && !hd.dead ? BF.cowherd.pastureOf(hd) : null, d = BF.sky.day + BF.sky.time;
       if (!R.lean && d >= LEAN) {   // the lean day starts: food (all but milk) put away
         R.lean = [];
         const milk = id => id === BF.I.milk_bottle || id === BF.I.milk_bucket;
-        for (const m of window.__villagers()) if (m.profession !== 'cowherd') for (let i = 0; i < m.inv.length; i++) { const st = m.inv[i]; if (st && BF.food.isFood(st.id) && !milk(st.id)) { R.lean.push([m, st.id, st.count]); m.inv[i] = null; } }
+        for (const m of globalThis.__villagers()) if (m.profession !== 'cowherd') for (let i = 0; i < m.inv.length; i++) { const st = m.inv[i]; if (st && BF.food.isFood(st.id) && !milk(st.id)) { R.lean.push([m, st.id, st.count]); m.inv[i] = null; } }
         R.leanN = R.lean.reduce((a, x) => a + x[2], 0);
       } else if (R.lean && R.lean.length && d >= LEAN + 1) {   // ... and comes back the next day; to a villager that bought milk once it has
         // drunk it (LEAN + 4 at the latest): with its own cheaper food back it would leave the milk in its pack, and no empties would come back
-        const milkLeft = m => m.profession !== 'baker' && window.__count(m, 'milk_bottle') > 0;   // the baker keeps its milk for cakes
+        const milkLeft = m => m.profession !== 'baker' && globalThis.__count(m, 'milk_bottle') > 0;   // the baker keeps its milk for cakes
         R.lean = R.lean.filter(([m, id, n]) => { if (m.dead) return false; if (milkLeft(m) && d < LEAN + 4) return true; BF.trades.inv.add(m.inv, id, n); return false; });
       }
       // the herd, and empty bottles other villagers hold while the cowherd is short of them (not the beekeeper's, kept for honey, nor the
       // glassmaker's, made to sell), counted only while both are awake: nobody trades at night, and the cowherd bottles its evening milk
-      const stranded = hd.sleeping ? 0 : window.__villagers().filter(m => !m.sleeping && !['cowherd', 'beekeeper', 'glassmaker'].includes(m.profession)).reduce((a, m) => Math.max(a, window.__count(m, 'glass_bottle')), 0);
+      const stranded = hd.sleeping ? 0 : globalThis.__villagers().filter(m => !m.sleeping && !['cowherd', 'beekeeper', 'glassmaker'].includes(m.profession)).reduce((a, m) => Math.max(a, globalThis.__count(m, 'glass_bottle')), 0);
       R.herd.push([+(BF.sky.day + BF.sky.time).toFixed(2), P && P.cows ? P.cows.length : null, P && P.cows ? P.cows.filter(c => c.growAt != null).length : null, P ? P.culls : null,
-        window.__count(hd, 'glass_bottle'), stranded]);
+        globalThis.__count(hd, 'glass_bottle'), stranded]);
     }, [Math.min(PER, total - s), h, setup.key, LEAN]);
     if ((s / PER) % 24 === 23) console.log(`  day ${((s + PER) * h / 1200).toFixed(1)} (${Math.round((Date.now() - t0) / 1000)} s)`);
   }
-  const R = await pg.evaluate(() => {
-    const R = window.__rec, hd = R.herder, P = BF.cowherd.pastureOf(hd);
-    R.end = window.__total();
-    R.beeKits = window.__villagers().filter(m => m.beeKit && !R.beeKit0.has(m)).length;   // ... and during it
+  const R = await lib.sim(pg, () => {
+    const R = globalThis.__rec, hd = R.herder, P = BF.cowherd.pastureOf(hd);
+    R.end = globalThis.__total();
+    R.beeKits = globalThis.__villagers().filter(m => m.beeKit && !R.beeKit0.has(m)).length;   // ... and during it
     R.beeKitBottles = BF.beekeeper ? BF.beekeeper.KIT_BOTTLES : 0;
     delete R.beeKit0;
-    const herders = [...new Set([...R.herders0.filter(m => !m.dead), ...window.__villagers().filter(m => m.profession === 'cowherd')])], stock = (ms, n) => ms.reduce((a, m) => a + window.__count(m, n), 0);
+    const herders = [...new Set([...R.herders0.filter(m => !m.dead), ...globalThis.__villagers().filter(m => m.profession === 'cowherd')])], stock = (ms, n) => ms.reduce((a, m) => a + globalThis.__count(m, n), 0);
     delete R.herders0;
     R.herderEnd = { bucket: stock(herders, 'bucket') + stock(herders, 'milk_bucket'), wheat: stock(herders, 'wheat_item'), n: herders.length, alive: !hd.dead,
       inv: hd.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' ') };
@@ -154,7 +160,7 @@ const LEAN = 3;
     R.events = BF.cowherd.log.filter(e => e.kind === 'bred' || e.kind === 'culled' || e.kind === 'stocked' || e.kind === 'joined' || e.kind === 'left').map(e => e.kind[0] + (e.herd != null ? e.herd : '') + '@' + e.day.toFixed(2)).join(' ');
     R.log = Object.entries(BF.cowherd.log.reduce((a, e) => (a[e.kind] = (a[e.kind] || 0) + 1, a), {})).map(([k, n]) => k + ':' + n).join(' ');
     R.holders = {};
-    for (const n of ['milk_bottle', 'glass_bottle', 'leather', 'raw_beef', 'steak']) R.holders[n] = window.__villagers().filter(m => window.__count(m, n) > 0).map(m => m.profession + ':' + window.__count(m, n)).join(' ');
+    for (const n of ['milk_bottle', 'glass_bottle', 'leather', 'raw_beef', 'steak']) R.holders[n] = globalThis.__villagers().filter(m => globalThis.__count(m, n) > 0).map(m => m.profession + ':' + globalThis.__count(m, n)).join(' ');
     delete R.herder; delete R.lean;
     return R;
   });
@@ -206,5 +212,5 @@ const LEAN = 3;
   ok('the empty bottles came back: the cowherd bought them from the village', bottlesBack > 0, { milkSold, bottlesBack });
   if (pageErrors) ok('no page errors', false, pageErrors);
   console.log(`ran ${DAYS} days in ${Math.round((Date.now() - t0) / 1000)} s`);
-  await b.close();
+  await b.close(); if (srv) await srv.stop();
 })();

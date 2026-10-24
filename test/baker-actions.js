@@ -1,16 +1,18 @@
+// @ci integration hosts=worker,server
 // Bakers, cakes and pies (js/baker.js): the recipes (sugar, pumpkin seeds, pumpkin pie, cake with milk bottles or buckets that come back empty),
 // the baker's oven (bakes only with fuel, on game time, the cake's empty bottles come out with it, contents saved), eating a placed cake,
 // pumpkin stems and sugar cane growing, the baker in a generator-6 village (no free goods, one per 15 villagers), the baker buying and baking,
 // treats bought and eaten, the happiness term. Usage:
 //   NODE_PATH=$(npm root -g) node test/run.js /tmp/out test/baker-actions.js
 module.exports = async (pg, out) => {
-  const res = await pg.evaluate(async () => {
+  const lib = require('./lib');
+  await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
+  const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
     const K = BF.baker, I = BF.I, T = BF.trades, W = BF.world;
     BF.state.paused = true;
-    BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });
     ok("new worlds use village generator 6", BF.state.villages >= 6, BF.state.villages);
     BF.mobs.spawning = false;
 

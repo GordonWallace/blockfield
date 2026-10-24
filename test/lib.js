@@ -56,3 +56,25 @@ exports.where = pg => pg.evaluate(() => ({ mode: BF.simHost.mode, label: BF.simH
 // simReady(pg): with the simulation off the page, waits until the world it plays has ticked a couple of seconds (the world server may
 // first solve the planet's rivers), so a test's first BFT.sim sees the world the page shows
 exports.simReady = pg => pg.waitForFunction(() => !BF.simHost.worker || (BF.client && BF.client.world.clock && BF.client.world.clock.tick > 40 && BF.client.world.entities.size > 0), null, { timeout: 300000, polling: 250 });
+// ---- farming tests' helpers on every host (r15-43 conversions)
+// simBFT(pg): window.BFT (test/bft.js: spawn, villages, village, kinds, cell, at) where the simulation is too, as a global there, so a
+// BFT.sim / lib.sim function can call BFT.village() as the page does. Once per page (the simulation keeps it across new worlds).
+exports.simBFT = pg => exports.sim(pg, src => { new Function('window', src)(globalThis); return true; }, require('fs').readFileSync(require('path').join(__dirname, 'bft.js'), 'utf8'));
+// newWorld(pg, seed, opts): BF.newWorld on the page and, with the simulation off the page, the same world started there (as the title
+// screen's world: js/main.js boot), then BFT there (simBFT). Use it rather than BF.newWorld inside a lib.sim function: the page's
+// copy of the world and its player body must be the new world's too.
+exports.newWorld = async (pg, seed, opts) => {
+  await pg.evaluate(async ([s, o]) => {
+    BF.newWorld(s, o);
+    if (!BF.simHost.worker) return;
+    await BF.simHost.demo(s, o);
+    // two frames: the page sends its speed again after a new world (js/simhost.js), which would undo a BF.state.paused set there next
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  }, [seed, opts || {}]);
+  await exports.simBFT(pg);
+};
+// simWait(pg, fn, arg, timeout ms): polls lib.sim(pg, fn, arg) until it returns something truthy and resolves that (null on timeout)
+exports.simWait = async (pg, fn, arg, timeout = 120000) => {
+  const t = Date.now() + timeout;
+  for (;;) { const v = await exports.sim(pg, fn, arg); if (v) return v; if (Date.now() > t) return null; await pg.waitForTimeout(250); }
+};

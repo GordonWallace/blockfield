@@ -405,10 +405,10 @@ const sky = {
 
   // A simulation step of dt game seconds: the clock and the weather move on and sky.light is worked out, then the sky is drawn for
   // that time. The game loop (main.js) splits the two (spec r15-10): advance(h) every tick, draw(alpha) every frame.
+  // (headless, in a Web Worker or on the world server: the step without the drawing, so a test's step helper moves the clock on every host)
   update(dt) {
-    if (!scene) return;
     sky.advance(dt);
-    paint(sky.time, sky.day, dt);
+    if (scene) paint(sky.time, sky.day, dt);
   },
   // The simulation side of a tick: time of day, cloud drift, weather (js/weather.js) and the light level the sim reads.
   advance(dt) {

@@ -1,10 +1,12 @@
+// @ci baseline hosts=worker,server
 // Farm bed checks: node test/run.js /tmp/fb test/farmbeds-actions.js
 // Builds a bed by hand next to the player, checks it is detected with its channel, the ways it can grow, and that a project survives a save round trip.
 module.exports = async (pg) => {
+  const lib = require('./lib');   // (lib.sim: where the simulation is, spec r15-43)
   // the bed goes next to the player: wait for its chunks (on the planet the ground around the spawn may still be loading)
-  await pg.waitForFunction(() => { const p = BF.player.position, x = Math.floor(p.x) + 6, z = Math.floor(p.z) + 6;
-    return [[0, 0], [8, 0], [0, 6], [8, 6]].every(([dx, dz]) => BF.world.isLoaded(x + dx, z + dz)); }, null, { timeout: 120000, polling: 250 });
-  const r = await pg.evaluate(() => {
+  await lib.simWait(pg, () => { const p = BF.player.position, x = Math.floor(p.x) + 6, z = Math.floor(p.z) + 6;
+    return [[0, 0], [8, 0], [0, 6], [8, 6]].every(([dx, dz]) => BF.world.isLoaded(x + dx, z + dz)); });
+  const r = await lib.sim(pg, () => {
     const out = [], ok = (name, c) => out.push((c ? "PASS " : "FAIL ") + name);
     const B = BF.B, W = BF.world, VL = BF.villageLife, T = VL._test;
     const px = Math.floor(BF.player.position.x) + 6, pz = Math.floor(BF.player.position.z) + 6, y = W.heightAt(px, pz);
