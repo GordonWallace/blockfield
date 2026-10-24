@@ -1,10 +1,12 @@
 // Forester felling time, axes and sticks: NODE_PATH=$(npm root -g) node test/run.js /tmp/fa test/forester-axes.js
+// @ci integration hosts=worker,server
 // 1. break times and axe ranking; 2. a live forester fells a tree by hand in (logs x 3 s) and with an iron axe in (logs x 0.5 s), wearing the
 // axe one use per log; 3. an interrupted felling keeps its progress; 4. it buys the best axe it can afford from a toolsmith and holds it
 // (drawn in its hands); 5. it makes sticks from planks, keeps them in stock and sells them.
 module.exports = async (pg, out) => {
+  const sim = require('./lib').sim;   // (where the simulation is: spec r15-43)
   const ok = (name, cond, info) => console.log((cond ? "PASS " : "FAIL ") + name + (info !== undefined ? " " + JSON.stringify(info) : ""));
-  const unit = await pg.evaluate(() => {
+  const unit = await sim(pg, () => {
     const F = BF.forester, I = BF.I, B = BF.B;
     const axes = ["wooden_axe", "stone_axe", "iron_axe", "golden_axe", "diamond_axe"].filter(n => I[n] != null);
     const secs = { hand: F.logSeconds(B.oak_log, null) };
@@ -19,7 +21,7 @@ module.exports = async (pg, out) => {
   // (~50 MB/s) while the long evaluates below keep the page busy, past CI's 10 GB cap on the planet (as test/explorer-far.js)
   await pg.evaluate(() => { document.getElementById("view").requestPointerLock = null; BF.player.start(); });
   await require('./lib').toVillage(pg);
-  const setup = await pg.evaluate(() => {
+  const setup = await sim(pg, () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     if (vs.length < 2) return "no villagers";
     const T = BF.trades, I = BF.I, B = BF.B, W = BF.world;
@@ -32,14 +34,14 @@ module.exports = async (pg, out) => {
     W.setBlock(tx, ty, tz, B.band_saw); BF.emit('blockPlaced', tx, ty, tz, B.band_saw);
     BF.mobs.setProfession(A, "forester"); A.xp = 0; A.level = 1; A.trades = T.offers("forester", 1); A.inv = T.inv.create();
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: B.band_saw, prof: "forester" } });
-    window.__A = A;
+    globalThis.__A = A;
     // fells every tree it could pick but `keep` ("x,y,z" of its base), by a scan of the ground it searches (js/forester.js findTree: the
     // village's box and 40 blocks round it, or 40 round itself). Clearing with findTree until it returns null left natural trees: it
     // gives up after 40 log bases that are no tree (the planet village's log walls and beams), so null came back while several trees (7 in a probe)
     // stood in its range; and on the planet more ground loads between evaluates. A later pick (nearer trees are only favoured) then
     // went to one of those: starting on it drops the interrupted tree's saved progress (it is felled afresh, 17.95 s for 6 logs), and
     // one it can't reach ("no path") eats a whole run. Called before every run as well, as no chunk loads within one evaluate.
-    window.__clearOthers = keep => {
+    globalThis.__clearOthers = keep => {
       const W = BF.world, F = BF.forester, w = A.village && A.village.wg, b = w && w.minX != null ? w : null, R = 45;
       const x0 = Math.floor(Math.min(A.position.x, b ? b.minX : Infinity) - R), x1 = Math.ceil(Math.max(A.position.x, b ? b.maxX : -Infinity) + R);
       const z0 = Math.floor(Math.min(A.position.z, b ? b.minZ : Infinity) - R), z1 = Math.ceil(Math.max(A.position.z, b ? b.maxZ : -Infinity) + R);
@@ -61,9 +63,9 @@ module.exports = async (pg, out) => {
   if (typeof setup === "string") return;
 
   // grows an oak about 6-30 blocks from the forester; clears every other natural tree in its reach first so it has to fell this one
-  const grow = () => pg.evaluate(() => {
-    const A = window.__A, B = BF.B, W = BF.world, F = BF.forester;
-    window.__clearOthers(null);
+  const grow = () => sim(pg, () => {
+    const A = globalThis.__A, B = BF.B, W = BF.world, F = BF.forester;
+    globalThis.__clearOthers(null);
     let tries = 0;
     for (let r = 6; r < 30; r++) for (let a = 0; a < 6.28; a += 0.2) {
       const x = Math.floor(A.position.x + Math.cos(a) * r), z = Math.floor(A.position.z + Math.sin(a) * r), y = W.heightAt(x, z);
@@ -73,15 +75,15 @@ module.exports = async (pg, out) => {
       const snap = [];
       for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) for (let dy = 1; dy <= 12; dy++) snap.push([x + dx, y + dy, z + dz, W.getBlock(x + dx, y + dy, z + dz)]);
       W.setBlock(x, y + 1, z, B.oak_sapling);
-      if (F.growTree(x, y + 1, z)) { const t = F.treeAt(x, y + 1, z); if (t) { window.__T = t.base.join(); return { at: t.base, logs: t.logs.length, tries }; } }
+      if (F.growTree(x, y + 1, z)) { const t = F.treeAt(x, y + 1, z); if (t) { globalThis.__T = t.base.join(); return { at: t.base, logs: t.logs.length, tries }; } }
       for (const [sx, sy, sz, id] of snap) if (W.getBlock(sx, sy, sz) !== id) W.setBlock(sx, sy, sz, id);
       tries++;
     }
     return null;
   });
   // runs the forester until it fells a tree (or `limit` seconds): seconds spent chopping (task cut, within reach) and the fell log entry
-  const watch = (limit, opts) => pg.evaluate(([limit, opts]) => {
-    const A = window.__A, F = BF.forester, n0 = F.LOG.length, dt = 0.05, others = window.__clearOthers(window.__T);
+  const watch = (limit, opts) => sim(pg, ([limit, opts]) => {
+    const A = globalThis.__A, F = BF.forester, n0 = F.LOG.length, dt = 0.05, others = globalThis.__clearOthers(globalThis.__T);
     A.fo = A.fo || null; const st = A.fo || (BF.forester._test.state(A));
     st.cutCd = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.thinkT = 0; st.sweep = null; if (!opts || !opts.keep) st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
@@ -97,7 +99,10 @@ module.exports = async (pg, out) => {
       if (moved) {
         chop += dt;
         if (A.ai.swingT > lastSw) swings++;
-        if (A.held != null && !held) { BF.proto.flush(true); BF.mobView.render(0); const v = BF.mobView.viewOf(A); if (v && v.heldMesh) held = { visible: v.heldMesh.visible, item: BF.items[v.heldId].name, parent: v.heldMesh.parent === v.meshes.arms }; }   // as drawn (js/mobview.js)
+        if (A.held != null && !held) {
+          if (BF.mobView) { BF.proto.flush(true); BF.mobView.render(0); const v = BF.mobView.viewOf(A); if (v && v.heldMesh) held = { visible: v.heldMesh.visible, item: BF.items[v.heldId].name, parent: v.heldMesh.parent === v.meshes.arms }; }   // as drawn (js/mobview.js)
+          else held = { visible: true, item: BF.items[A.held].name, parent: true, sim: true };   // (a worker or the server draws nothing: the tool it holds; the page host checks the drawing)
+        }
         if (opts && opts.stopAfter && chop >= opts.stopAfter && !stop) stop = { done: k.done, t };
       }
       lastSw = A.ai.swingT;
@@ -115,31 +120,31 @@ module.exports = async (pg, out) => {
   ok("swings while chopping", r1.swings >= 5, r1.swings);
 
   // 2b. iron axe, wears one use per log
-  await pg.evaluate(() => { const A = window.__A; A.inv = BF.trades.inv.create(); BF.trades.inv.add(A.inv, BF.I.iron_axe, 1); });
+  await sim(pg, () => { const A = globalThis.__A; A.inv = BF.trades.inv.create(); BF.trades.inv.add(A.inv, BF.I.iron_axe, 1); });
   const t2 = await grow();
   const r2 = await watch(240);
-  const wear2 = await pg.evaluate(() => { const s = BF.forester.axeOf(window.__A); return s ? s.wear || 0 : -1; });
+  const wear2 = await sim(pg, () => { const s = BF.forester.axeOf(globalThis.__A); return s ? s.wear || 0 : -1; });
   console.log("iron", JSON.stringify(r2), "wear", wear2);
   ok("iron axe: logs x 0.5 s", r2.fell && Math.abs(r2.chop - r2.fell.logs * 0.5) <= 0.4, { logs: r2.fell && r2.fell.logs, chop: r2.chop });
   ok("iron axe wears 1 per log", r2.fell && wear2 === r2.fell.logs, { wear: wear2, logs: r2.fell && r2.fell.logs });
   ok("axe drawn in its hands while chopping", r2.held && r2.held.visible && r2.held.item === "iron_axe" && r2.held.parent, r2.held);
 
   // 2c. an axe about to break: the rest goes by hand
-  await pg.evaluate(() => { const A = window.__A; A.inv = BF.trades.inv.create(); BF.trades.inv.add(A.inv, BF.I.wooden_axe, 1); BF.forester.axeOf(A).wear = BF.durability(BF.I.wooden_axe) - 2; });
+  await sim(pg, () => { const A = globalThis.__A; A.inv = BF.trades.inv.create(); BF.trades.inv.add(A.inv, BF.I.wooden_axe, 1); BF.forester.axeOf(A).wear = BF.durability(BF.I.wooden_axe) - 2; });
   const t3 = await grow();
   const r3 = await watch(240);
-  const left3 = await pg.evaluate(() => !!BF.forester.axeOf(window.__A));
+  const left3 = await sim(pg, () => !!BF.forester.axeOf(globalThis.__A));
   ok("worn-out axe breaks mid-tree, rest by hand", r3.fell && !left3 && Math.abs(r3.chop - (2 * 1.5 + (r3.fell.logs - 2) * 3)) <= 0.6, { logs: r3.fell && r3.fell.logs, chop: r3.chop, axeLeft: left3 });
 
   // 3. interrupted (a trade): progress kept
-  await pg.evaluate(() => { const A = window.__A; A.inv = BF.trades.inv.create(); });
+  await sim(pg, () => { const A = globalThis.__A; A.inv = BF.trades.inv.create(); });
   const t4 = await grow();
   const r4 = await watch(400, { stopAfter: 7, offAt: null });
   ok("hand felling again (control)", r4.fell, r4.fell ? r4.chop : { chop: r4.chop, tree: t4, t: r4.t, task: r4.task, log: r4.log, pos: r4.pos });
   const t5 = await grow();
-  const part = await pg.evaluate(() => {   // chop 7 s, then interrupt it
-    const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
-    window.__clearOthers(window.__T);
+  const part = await sim(pg, () => {   // chop 7 s, then interrupt it
+    const A = globalThis.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.sweep = null; st.task = null;
+    globalThis.__clearOthers(globalThis.__T);
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
     // the sim clock and drops must move too: with them frozen, a forester waiting for items to land after a felling waits for good
     let chop = 0, pk = null, pc = 0, pd = 0;
@@ -158,8 +163,8 @@ module.exports = async (pg, out) => {
   ok("interrupted felling resumes", part.saved && part.saved.done >= 2 && r5.fell && r5.fell.at.join() === part.saved.key && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop, tasks: r5.tasks });
 
   // 4. axe shopping: a toolsmith sells iron and diamond axes at its own offers (prices from TRADES.toolsmith)
-  const shop = await pg.evaluate(() => {
-    const A = window.__A, T = BF.trades, I = BF.I, F = BF.forester;
+  const shop = await sim(pg, () => {
+    const A = globalThis.__A, T = BF.trades, I = BF.I, F = BF.forester;
     const S = BF.mobs.list.find(m => m !== A && m.type === "villager" && m.village === A.village && m.inv && !m.child && m.profession !== "nitwit");
     if (!S) return "no second villager";
     // a smithing table of its own: with its old jobsite it would be fired (unemployed) within a second and sell nothing
@@ -190,8 +195,8 @@ module.exports = async (pg, out) => {
     res.run2 = run();
     res.second = A.inv.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count);
     res.holds = F.axeOf(A) && BF.items[F.axeOf(A).id].name;
-    BF.proto.flush(true); BF.mobView.render(0); const AV = BF.mobView.viewOf(A);   // (the mirror first: r15-37)
-    res.drawn = AV && AV.heldMesh && AV.heldMesh.visible && BF.items[AV.heldId].name;
+    if (BF.mobView) { BF.proto.flush(true); BF.mobView.render(0); const AV = BF.mobView.viewOf(A); res.drawn = AV && AV.heldMesh && AV.heldMesh.visible && BF.items[AV.heldId].name; }   // (the mirror first: r15-37)
+    else res.drawn = A.held != null && BF.items[A.held].name;   // (off the page: the tool it holds; the page host checks the drawing)
     // nothing better on sale: no trip
     st.shopT = 0; st.thinkT = 0; (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
     res.thirdTask = A.fo.task && A.fo.task.kind;
@@ -204,8 +209,8 @@ module.exports = async (pg, out) => {
   ok("no trip when nothing better is on sale", shop.thirdTask !== "buy", shop.thirdTask);
 
   // 5. sticks
-  const st = await pg.evaluate(() => {
-    const A = window.__A, T = BF.trades, I = BF.I, F = BF.forester, res = {};
+  const st = await sim(pg, () => {
+    const A = globalThis.__A, T = BF.trades, I = BF.I, F = BF.forester, res = {};
     A.inv = T.inv.create(); T.inv.add(A.inv, I.planks, 40); T.inv.add(A.inv, I.birch_planks, 6);
     const S = A.fo; S.sawDay = BF.sky.day; S.stickDay = null;
     F._test.sticks(A, S);
@@ -230,17 +235,17 @@ module.exports = async (pg, out) => {
 
   // screenshot: the forester chopping with its diamond axe, seen from the side
   await grow();
-  await pg.evaluate(() => {
-    const A = window.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.task = null; st.sweep = null;
+  const view = await sim(pg, () => {
+    const A = globalThis.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.task = null; st.sweep = null;
     A.inv = BF.trades.inv.create(); BF.trades.inv.add(A.inv, BF.I.diamond_axe, 1);
     for (let t = 0; t < 120; t += 0.05) { BF.sky.setTime(0.1); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); const k = A.fo.task; if (k && k.kind === "cut" && A.fo.chop > 0) break; }
     const k = A.fo.task, fx = A.position.x, fz = A.position.z, tx = k ? k.x + 0.5 : fx + 1, tz = k ? k.z + 0.5 : fz;
     const dx = tx - fx, dz = tz - fz, L = Math.hypot(dx, dz) || 1, px = -dz / L, pz = dx / L;   // stand to the side of the chopping line
     const ex = fx + px * 3.2 + dx / L * 0.6, ez = fz + pz * 3.2 + dz / L * 0.6;
-    BF.player.position.set(ex, A.position.y + 0.2, ez);
-    BF.player.setLook(Math.atan2(-(fx - ex), -(fz - ez)), -0.12);
     BF.sky.setTime(0.12);
+    return { x: ex, y: A.position.y + 0.2, z: ez, yaw: Math.atan2(-(fx - ex), -(fz - ez)) };
   });
-  for (let i = 0; i < 5; i++) { await pg.evaluate(() => { BF.sky.setTime(0.12); window.__A.ai.swingT = 0.2; (BF.mobs.update(0.01), BF.req.apply(), BF.req.deliver()); }); await pg.waitForTimeout(80); }
+  await pg.evaluate(v => { BF.player.teleport(v.x, v.y, v.z); BF.player.setLook(v.yaw, -0.12); }, view);   // (the page's player and camera)
+  for (let i = 0; i < 5; i++) { await sim(pg, () => { BF.sky.setTime(0.12); globalThis.__A.ai.swingT = 0.2; (BF.mobs.update(0.01), BF.req.apply(), BF.req.deliver()); }); await pg.waitForTimeout(80); }
   await pg.screenshot({ path: out + '-chop.png' });
 };

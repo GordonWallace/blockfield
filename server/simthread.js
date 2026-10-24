@@ -9,8 +9,9 @@
 //   {server: "feed", ack}  the debug screen's simulation part (js/debugfeed.js simPart), read here instead of through the page
 //   {server: "shutdown"}  save and say so (Ctrl+C on ./run.sh)
 //   {server: "rivers", st}  the next world's river network, solved before on this machine (the server's cache)
+//   {server: "save"}  save now (an export, spec r15-42); {server: "writeFail", n, code} the next n writes fail (tests: a full disk)
 // and it sends back {server: "world", id, name} whenever a world starts here (id null: the title screen's world), {server: "detached"},
-// {server: "state"}, {server: "feed"}, {server: "shutdown"} (saved) and {server: "rivers", st} (a network it solved, for the cache).
+// {server: "state"}, {server: "feed"}, {server: "save", ok, why}, {server: "shutdown"} (saved) and {server: "rivers", st} (a network it solved, for the cache).
 // Game log: INFO "server" when the world pauses because its page closed, and when a page picks it up again.
 "use strict";
 const { parentPort, workerData } = require("worker_threads");
@@ -107,6 +108,11 @@ parentPort.on("message", d => {
       else if (d.server === "detach") detach();
       else if (d.server === "state") post(Object.assign({ server: "state", id: d.id }, BF.save.current && BF.save.current.id === d.id ? state() : { meta: null }));
       else if (d.server === "feed") post({ server: "feed", part: BF.debugFeed && BF.debugFeed.simPart ? BF.debugFeed.simPart(d.ack) : null });
+      else if (d.server === "save") {   // (an export of the world being played or held: saved first)
+        if (!BF.save || !BF.save.current) { post({ server: "save", ok: false, why: "no world here" }); return; }
+        BF.save.saveNow().then(ok => post({ server: "save", ok: !!ok, why: BF.save.lastError }), e => post({ server: "save", ok: false, why: String(e && e.message || e) }));
+      }
+      else if (d.server === "writeFail") idb.worlds.failWrites(d.n, d.code);   // (test/server-saves.js: a full disk)
       else if (d.server === "shutdown") {
         if (!BF || !BF.save || !BF.save.current) { post({ server: "shutdown", ok: false }); return; }
         BF.state.paused = true;

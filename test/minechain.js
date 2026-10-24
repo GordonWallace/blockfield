@@ -1,3 +1,4 @@
+// @ci integration hosts=worker,server
 // Miner soak test: miners quarry surface stone or dig a mineshaft, and sell the cobblestone to the builders of their village.
 // Usage: NODE_PATH=$(npm root -g) node test/minechain.js <seeds e.g. 1,2,3> [days=2] [villagesPerSeed=4] [out.json]
 // OUTCROP=1 adds a stone hill (stepped sides and a cliff) beside each village and prints its heights afterwards (surface quarrying).
@@ -8,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
+const sim = require('./lib').sim;   // (where the simulation is, on BF_HOST's host: spec r15-43)
 const seeds = (process.argv[2] || '1337').split(',').map(Number);
 const DAYS = +(process.argv[3] || 2);
 const PER_SEED = +(process.argv[4] || 4);
@@ -22,10 +24,11 @@ async function openWorld(seed) {
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await require('./lib').install(pg);
-  await pg.goto('file://' + path.join(root, 'index.html') + '#seed' + seed);
+  await require('./lib').goto(pg, '#seed' + seed);   // (on BF_HOST's host: spec r15-43)
   await require('./lib').ready(pg);   // the planet (spec r14-22): its river step first
   await pg.waitForTimeout(3000);
   await pg.evaluate(() => { window.__halt = true; if (BF.player.setGameMode) BF.player.setGameMode('creative'); });
+  await require('./lib').hold(pg, true);   // (the simulation's own ticks off too: the test steps it)
   return pg;
 }
 
@@ -43,23 +46,23 @@ async function openWorld(seed) {
       if (done >= PER_SEED) break;
       if (process.env.ONLY && process.env.ONLY !== Math.round(v.x) + ',' + Math.round(v.z)) continue;
       const t0 = Date.now();
-      if (pg.__used) { await pg.close(); pg = await openWorld(seed); }
+      if (pg.__used) { await pg.done(); pg = await openWorld(seed); }
       pg.__used = true;
-      await pg.evaluate(key => {
-        const R = window.__rec = { key, trades: [], log: [] };
-        const inVillage = m => m && m.village && m.village.key === window.__rec.key;
+      await sim(pg, key => {
+        const R = globalThis.__rec = { key, trades: [], log: [] };
+        const inVillage = m => m && m.village && m.village.key === globalThis.__rec.key;
         const day = () => +(BF.sky.day + BF.sky.time).toFixed(3);
         const orig = BF.vlog.trade;
         BF.vlog.trade = function (buyer, seller, o, times) {
-          const r = window.__rec;
+          const r = globalThis.__rec;
           if (r && o && o.sell && (inVillage(buyer) || inVillage(seller)))
             r.trades.push({ d: day(), buyer: buyer.profession || String(buyer), seller: seller.profession || String(seller), item: BF.itemName(o.sell.id), n: o.sell.n * (times || 1) });
           return orig.apply(this, arguments);
         };
         BF.miner.LOG.length = 0;
       }, Math.round(v.x) + "," + Math.round(v.z));
-      await pg.evaluate(([t, v, b, o]) => { window.__TRACE = t; window.__TRACEV = v; window.__BOX = b; window.__OUTCROP = o[0]; window.__LEVEL = o[1]; window.__PICK = o[2]; window.__FILL = o[3]; }, [!!process.env.TRACE, process.env.TRACEV || null, !!process.env.BOX, [!!process.env.OUTCROP, +process.env.LEVEL || 0, process.env.PICK || null, !!process.env.FILL]]);
-      const setup = await pg.evaluate(v => {
+      await sim(pg, ([t, v, b, o]) => { globalThis.__TRACE = t; globalThis.__TRACEV = v; globalThis.__BOX = b; globalThis.__OUTCROP = o[0]; globalThis.__LEVEL = o[1]; globalThis.__PICK = o[2]; globalThis.__FILL = o[3]; }, [!!process.env.TRACE, process.env.TRACEV || null, !!process.env.BOX, [!!process.env.OUTCROP, +process.env.LEVEL || 0, process.env.PICK || null, !!process.env.FILL]]);
+      const setup = await sim(pg, v => {
         const key = Math.round(v.x) + "," + Math.round(v.z);
         BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
         const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
@@ -71,18 +74,18 @@ async function openWorld(seed) {
         for (const m of mem) profs[m.profession] = (profs[m.profession] || 0) + 1;
         const mi = mem.find(m => m.profession === "miner");
         let surf = 0;
-        if (mi && window.__OUTCROP) {   // OUTCROP=1: a stone hill 10 blocks off the village's east edge (steps and a sheer side), to watch it quarried
+        if (mi && globalThis.__OUTCROP) {   // OUTCROP=1: a stone hill 10 blocks off the village's east edge (steps and a sheer side), to watch it quarried
           const b = BF.miner._test.area(mi).box, cx = b.maxX + 16, cz = Math.round((b.minZ + b.maxZ) / 2), W = BF.world;
           for (let x = cx - 7; x <= cx + 7; x++) for (let z = cz - 7; z <= cz + 7; z++) {
             const d = Math.max(Math.abs(x - cx), Math.abs(z - cz)), hgt = x > cx + 3 ? (d <= 7 ? 6 : 0) : Math.max(0, 7 - d);   // east third: a 6-high cliff
             const g = W.heightAt(x, z);
             for (let y = g + 1; y <= g + hgt; y++) W.setBlock(x, y, z, BF.B.stone);
           }
-          window.__outcrop = [cx, cz];
+          globalThis.__outcrop = [cx, cz];
         }
-        if (mi && window.__LEVEL) { mi.level = window.__LEVEL; mi.xp = BF.trades.LEVEL_XP[mi.level - 1]; mi.trades = null; BF.inventory.ensureTrades(mi); }   // LEVEL=n: start the miner at level n
-        if (mi && window.__PICK) { mi.inv = mi.inv.map(s => s && BF.items[s.id].tool && BF.items[s.id].tool.type === 'pickaxe' ? null : s); BF.trades.inv.add(mi.inv, BF.I[window.__PICK], 1); }   // PICK=diamond_pickaxe: swap its pickaxe
-        if (mi && window.__FILL) { for (let i = 0; i < 12; i++) BF.trades.inv.add(mi.inv, BF.I.raw_copper, 64); }   // FILL=1: a pack of raw copper to store
+        if (mi && globalThis.__LEVEL) { mi.level = globalThis.__LEVEL; mi.xp = BF.trades.LEVEL_XP[mi.level - 1]; mi.trades = null; BF.inventory.ensureTrades(mi); }   // LEVEL=n: start the miner at level n
+        if (mi && globalThis.__PICK) { mi.inv = mi.inv.map(s => s && BF.items[s.id].tool && BF.items[s.id].tool.type === 'pickaxe' ? null : s); BF.trades.inv.add(mi.inv, BF.I[globalThis.__PICK], 1); }   // PICK=diamond_pickaxe: swap its pickaxe
+        if (mi && globalThis.__FILL) { for (let i = 0; i < 12; i++) BF.trades.inv.add(mi.inv, BF.I.raw_copper, 64); }   // FILL=1: a pack of raw copper to store
         if (mi) { surf = BF.miner.scanSurface(mi, BF.miner._test.state(mi)).length; }
         const bld = mem.filter(m => m.profession === "builder").map(m => BF.trades.inv.count(m.inv, BF.I.cobblestone));
         return { key, profs, surf, builderCobble: bld, style: mem[0] && mem[0].village.style };
@@ -92,27 +95,27 @@ async function openWorld(seed) {
       done++;
       const STEPS_PER_CALL = 4000, h = 0.05, total = Math.round(DAYS * 1200 / h);
       for (let s = 0; s < total; s += STEPS_PER_CALL) {
-        await pg.evaluate(([n, h, v]) => {
-          const R = window.__rec;
+        await sim(pg, ([n, h, v]) => {
+          const R = globalThis.__rec;
           for (let i = 0; i < n; i++) {
             BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim();
             if (i % 50 === 0) BF.world.update(v.x, v.z, 4);
-            if (window.__TRACE && i % 40 === 0) {
-              const mi = BF.mobs.list.find(m => m.profession === "miner" && m.village && m.village.key === (window.__TRACEV || R.key));
+            if (globalThis.__TRACE && i % 40 === 0) {
+              const mi = BF.mobs.list.find(m => m.profession === "miner" && m.village && m.village.key === (globalThis.__TRACEV || R.key));
               if (mi) { const Q = mi.mi || {}, k = Q.task; (R.trace = R.trace || []).push([+(BF.sky.day + BF.sky.time).toFixed(3), k && k.kind, [+mi.position.x.toFixed(1), +mi.position.y.toFixed(1), +mi.position.z.toFixed(1)], Q.shaft ? [Q.shaft.x, Q.shaft.y, Q.shaft.z, Q.shaft.n] : null, Q.shaft ? BF.miner._test.shaftCellOf(mi, Q.shaft) : null, mi.ai.route ? mi.ai.route.length + ":" + mi.ai.ri : null, mi.ai.routeKind, Q.t && +Q.t.toFixed(1), mi.position.y, Q.status, mi.fshop && mi.fshop.stage, +(mi.ai.fleeT || 0).toFixed(1), mi.sleeping ? "zz" : "", mi.ai.mode, Q.thinkT && +Q.thinkT.toFixed(1)]); }
             }
           }
           R.log.push(...BF.miner.LOG.splice(0));
         }, [Math.min(STEPS_PER_CALL, total - s), h, v]);
       }
-      const res = await pg.evaluate(key => {
-        const R = window.__rec;
+      const res = await sim(pg, key => {
+        const R = globalThis.__rec;
         const mem = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === key && !m.dead);
         const mi = mem.filter(m => m.profession === "miner");
         const probe = mi.map(m => { const sh = m.mi && m.mi.shaft; if (!sh) return null; const o = []; for (let i = 0; i <= 3; i++) { const x = sh.x + sh.dx * i, z = sh.z + sh.dz * i; o.push(i + ":" + [-2, -1, 0, 1, 2, 3].map(dy => BF.itemName(BF.world.getBlock(x, sh.y - i + dy, z))).join(",")); } return o; });
         let box = null;
-        if (window.__outcrop) { const [cx, cz] = window.__outcrop; box = ["outcrop heights (east is right; . = no stone on top)"]; for (let z = cz - 8; z <= cz + 8; z++) { let r = ""; for (let x = cx - 8; x <= cx + 8; x++) { const y = BF.world.heightAt(x, z), id = BF.world.getBlock(x, y, z); r += BF.itemName(id) === "Stone" ? String(y % 10) : "."; } box.push(r); } }
-        if (window.__BOX && !box) { const m0 = mi[0], px = Math.floor(m0.position.x), py = Math.floor(m0.position.y), pz = Math.floor(m0.position.z); box = []; for (let y = py + 2; y >= py - 1; y--) { box.push("y" + y + " x" + (px - 8) + ".." + (px + 8)); for (let z = pz - 4; z <= pz + 4; z++) { let r = (z + "").padStart(5) + " "; for (let x = px - 8; x <= px + 8; x++) { const b = BF.world.getBlock(x, y, z), n = BF.itemName(b); r += x === px && z === pz ? "@" : b === 0 ? "." : n.includes("Torch") ? "t" : n.includes("Cobble") ? "c" : n.includes("Stone") || n.includes("Deepslate") ? "#" : n.charAt(0); } box.push(r); } } }
+        if (globalThis.__outcrop) { const [cx, cz] = globalThis.__outcrop; box = ["outcrop heights (east is right; . = no stone on top)"]; for (let z = cz - 8; z <= cz + 8; z++) { let r = ""; for (let x = cx - 8; x <= cx + 8; x++) { const y = BF.world.heightAt(x, z), id = BF.world.getBlock(x, y, z); r += BF.itemName(id) === "Stone" ? String(y % 10) : "."; } box.push(r); } }
+        if (globalThis.__BOX && !box) { const m0 = mi[0], px = Math.floor(m0.position.x), py = Math.floor(m0.position.y), pz = Math.floor(m0.position.z); box = []; for (let y = py + 2; y >= py - 1; y--) { box.push("y" + y + " x" + (px - 8) + ".." + (px + 8)); for (let z = pz - 4; z <= pz + 4; z++) { let r = (z + "").padStart(5) + " "; for (let x = px - 8; x <= px + 8; x++) { const b = BF.world.getBlock(x, y, z), n = BF.itemName(b); r += x === px && z === pz ? "@" : b === 0 ? "." : n.includes("Torch") ? "t" : n.includes("Cobble") ? "c" : n.includes("Stone") || n.includes("Deepslate") ? "#" : n.charAt(0); } box.push(r); } } }
         return { box, probe, R, miners: mi.map(m => ({ inv: m.inv.filter(Boolean).map(s => BF.itemName(s.id) + "x" + s.count + (s.wear ? "(wear " + s.wear + ")" : "")).join(" "), status: BF.miner.statusText(m), shaft: m.mi && m.mi.shaft ? { n: m.mi.shaft.n, S: m.mi.shaft.S, done: m.mi.shaft.done } : null, shafts: m.mi && m.mi.shafts, pos: [m.position.x | 0, m.position.y | 0, m.position.z | 0], L: m.level, xp: m.xp, chests: [...BF.inventory.chests.values()].filter(c => c.owner === BF.storage.keyOf(m)).map(c => c.slots.filter(Boolean).map(t => BF.itemName(t.id) + 'x' + t.count).join(' ')), order: !!(m.store && m.store.order), D: m.mi && m.mi.shaft ? m.mi.shaft.D : null })),
           furn: mem.filter(m => m.profession === "furniture_maker").map(m => (BF.furniture && BF.furniture.statusText ? BF.furniture.statusText(m) : '') + ' | ' + m.inv.filter(Boolean).map(t => BF.itemName(t.id) + 'x' + t.count).join(' ')),
           builders: mem.filter(m => m.profession === "builder").map(m => "cobble " + BF.trades.inv.count(m.inv, BF.I.cobblestone) + " em " + BF.trades.inv.count(m.inv, BF.I.emerald)) };
@@ -136,7 +139,7 @@ async function openWorld(seed) {
       if (process.env.TRACE) for (const t of (res.R.trace || []).slice(0, +process.env.TRACE || 200)) console.log('    ', JSON.stringify(t));
       if (OUT) fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
     }
-    await pg.close();
+    await pg.done();
   }
   const sold = results.filter(r => r.toBuilders > 0).length;
   console.log(`SUMMARY: miners sold cobblestone to builders in ${sold}/${results.length} villages in ${DAYS} days`);
