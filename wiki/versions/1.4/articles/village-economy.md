@@ -39,7 +39,7 @@ The aim is that goods have a source. A villager sells a ware only if it made, gr
 
 - Food is never conjured. Farmers harvest crops and bake them, and villagers buy food from each other. A butcher or fisherman cooks the raw meat or cod it already holds.
 - Metal, stone, wood, wool, leather, glass, honey and tools are dug, felled, sheared, smelted or crafted by the matching profession from materials it bought.
-- Builders place only blocks taken from their own inventory, and only the wood their structure is built from. See [[page:builders]].
+- Builders place only blocks taken from their own inventory, and only the wood their structure is built from. See [[villager:builder]].
 
 A few wares are still topped up by a daily restock, by about a quarter of their cap a day:
 
