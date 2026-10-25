@@ -38,7 +38,8 @@ module.exports = async (pg, out) => {
   };
   const r = { pick };
   // clear any blocks between the player and the villager (villages sit on uneven ground)
-  await pg.evaluate(() => { const p = window.__v.position; for (let dx = 1; dx <= 4; dx++) for (let dy = 0; dy < 3; dy++) BF.world.setBlock(Math.floor(p.x) + dx, Math.floor(p.y) + dy, Math.floor(p.z), 0); });
+  // (its own cell too: a villager standing in a doorway has the open door panel between it and the player)
+  await pg.evaluate(() => { const p = window.__v.position; for (let dx = 0; dx <= 4; dx++) for (let dy = 0; dy < 3; dy++) BF.world.setBlock(Math.floor(p.x) + dx, Math.floor(p.y) + dy, Math.floor(p.z), 0); });
   await aim(); await frames(10);
   r.survival = await aimUntilShown();
   await pg.screenshot({ path: out + '-survival.png' });
