@@ -2,24 +2,26 @@
 // Regions over several workers (spec r15-39): the world comes out the same however many workers think. Plain node, no browser.
 // Runs seed 3 for one game day headless (tools/headless.js, the player at the village nearest the spawn) with 1, 2 and 4 workers, one
 // after another, and with 3 workers that start splitting after 300 game seconds on their own ("3@300", as the split starts mid-run in
-// play, js/rplay.js), and checks:
+// play, js/rplay.js), and with 2 workers whose regions are dealt out by a hash at every rebalance and, every third plan, all go to
+// the leader ("2s1": tools/headless.js --shuffle 1; a village's thinking moves between workers as on a runner whose thinking falls under
+// the share threshold now and then), and checks:
 //   - the same world state hash at the end (js/statehash.js), part by part when not;
 //   - the same items in the world, every kind counted (tools/headless.js census: mobs' inventories, chests, furnaces, the player, drops),
 //     and the same emeralds (the coins): the exchange between workers made nothing twice and lost nothing;
 //   - the workers ran split (both had regions to think) and none stopped with an error.
 // It prints ms per tick for each, which reports/r15-39.md and the release checklist read (scaling numbers, not checked: a CI runner's
 // cores vary).
-// Usage: node test/multi-worker.js [seed=3] [seconds=1200] [workers=1,2,4,3@300]
+// Usage: node test/multi-worker.js [seed=3] [seconds=1200] [workers=1,2,4,3@300,2s1]
 const path = require('path'), cp = require('child_process');
 const root = path.resolve(__dirname, '..');
 const seed = +(process.argv[2] || 3), seconds = +(process.argv[3] || 1200);
-const counts = (process.argv[4] || '1,2,4,3@300').split(',').map(x => { const [n, after] = x.split('@').map(Number); return { n, after: after || 0, label: x }; });
+const counts = (process.argv[4] || '1,2,4,3@300,2s1').split(',').map(x => { const [a, sh] = x.split('s'), [n, after] = a.split('@').map(Number); return { n, after: after || 0, shuffle: +sh || 0, label: x }; });
 let fails = 0;
 const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fails++; };
 
-const run = ({ n, after }) => new Promise(done => {
+const run = ({ n, after, shuffle }) => new Promise(done => {
   const t0 = Date.now();
-  cp.execFile(process.execPath, [path.join(root, 'tools', 'headless.js'), '--seed', String(seed), '--seconds', String(seconds - after), '--workers', String(n), '--json'].concat(after ? ['--after', String(after)] : []),
+  cp.execFile(process.execPath, [path.join(root, 'tools', 'headless.js'), '--seed', String(seed), '--seconds', String(seconds - after), '--workers', String(n), '--json'].concat(after ? ['--after', String(after)] : [], shuffle ? ['--shuffle', String(shuffle)] : []),
     { cwd: root, maxBuffer: 1 << 28, timeout: 2400 * 1000 }, (e, out, err) => {
       const line = String(out).trim().split('\n').filter(l => l.startsWith('{')).pop();
       if (e || !line) { console.log(`FAIL ${n} worker(s): ${e ? e.message : 'no result'}\n${String(out).slice(-3000)}\n${String(err).slice(-3000)}`); fails++; return done(null); }

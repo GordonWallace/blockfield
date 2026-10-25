@@ -3,7 +3,7 @@
 // villager-seconds per second (js/perf.js) and the world state hash (js/statehash.js). The fast CI path, and the base of the Node
 // world server (r15-41).
 // Usage: node tools/headless.js [--seed 3] [--seconds 600] [--at village|spawn] [--villages 10] [--view 8] [--log file.log]
-//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k]
+//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file]
 //   --at village (default): the player moves to the village nearest the spawn first, so villagers are simulated; spawn: stays there.
 //   --log: the game log, one line an entry (js/logmatch.js gameLine), as the debug screen's download writes it.
 //   --save / --load: the save data as js/save.js stores it (snapshot / restore), as JSON. --every: print the hash every s game seconds.
@@ -152,6 +152,7 @@ async function main(argv) {
     workers, census: census(BF),
   };
   if (a.save) fs.writeFileSync(a.save, saveJSON(h.save()));
+  if (a.dump) { const o = {}; for (const k of BF.stateHash.PARTS) o[k] = BF.stateHash.text(k); fs.writeFileSync(a.dump, JSON.stringify(o)); }   // --dump file: every hash part's text (tests: where two runs differ)
   BF.glog.log('INFO', 'headless', `Headless run ended: ${r.seconds.toFixed(0)} game s in ${r.real} s, ${r.vss} V·s/s, hash ${r.hash}`);
   if (a.json) console.log(JSON.stringify(r));
   else {

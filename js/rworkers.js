@@ -600,7 +600,7 @@ function afterThink() {
     if (ops) mobs.push([m.id, ops]);
   }
   foreignOps(mobs);
-  const msg = JSON.stringify({ mobs, recs: recOps(null), touched: takeTouched(), dyn: takeDyn(), reqs: own.map(e => reqOut(e, e[2])), logs, fx, think: +(t - tA).toFixed(3), regions: T.regions, mine: mine.length });
+  const msg = JSON.stringify({ mobs, recs: recOps(null), touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: own.map(e => reqOut(e, e[2])), logs, fx, think: +(t - tA).toFixed(3), regions: T.regions, mine: mine.length });
   const all = RW.link.exchange(msg);
   T.bytes += msg.length;
   peers = [];
@@ -610,6 +610,7 @@ function afterThink() {
     peers[w] = p ? { think: p.think, regions: p.regions, mobs: p.mine } : { think: +(t - tA).toFixed(3), regions: T.regions, mobs: mine.length };
     if (!p) continue;
     adoptDyn(p.dyn, w);   // (first of all: the changes may hold the new items)
+    adoptReg(p.reg);   // (and the places they point at)
     patchRecs(p.recs, w);   // (first: a mob's changes may point into its village's record)
     patchMobs(p.mobs, w);
     applyTouched(p.touched);
@@ -662,7 +663,7 @@ function afterDeliver() {
   foreignOps(mobs);
   const mineSends = dSends.filter(e => e[1] === 1);   // (those from callbacks: only this worker made them; onResult's are made everywhere)
   const plan = T.ticks % REBALANCE === 0;
-  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region]),
+  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region]),
     logs, fx, load: plan ? [...load] : null };
   const msg = JSON.stringify(out);
   const all = RW.link.exchange(msg);
@@ -674,6 +675,7 @@ function afterDeliver() {
     if (p.load) loads.push(...p.load);
     if (w === RW.me) continue;
     adoptDyn(p.dyn, w);
+    adoptReg(p.reg);
     patchRecs(p.recs, w);
     patchMobs(p.mobs, w);
     applyTouched(p.touched);
@@ -723,6 +725,7 @@ function replan(loads) {
 }
 // (tests, RW.shuffle k) every region with load to a worker picked by a hash of k, the key and the tick, the same on every worker
 function shuffled(loads) {
+  if (Math.floor(T.ticks / REBALANCE) % 3 === 0) { RW.solo = true; RW.owners = new Map(); return; }   // (and every third plan all to the leader, as below SOLO_MS)
   const next = new Map();
   for (const [k] of loads) {
     if (next.has(k)) continue;
@@ -790,6 +793,12 @@ function touch(name, obj) {
 let dynNew = [];
 function dynItem(name, id) { if (RW.active && owning) dynNew.push([name, id]); }
 function takeDyn() { const d = dynNew; dynNew = []; return d; }
+// Places registered while this worker thinks (a house a builder finished, made its home: js/ids.js place keys hold a ":"): the other
+// workers register a copy under the same key, else the key the mob's changes carry would read nothing there.
+let regNew = [];
+const onNewPlace = (o, k) => { if (RW.active && owning && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };   // (hooked at setup: js/ids.js loads after this file)
+function takeReg() { const d = regNew; regNew = []; return d.map(([k, o]) => [k, enc(o, null)]); }
+function adoptReg(list) { for (const [k, e] of list || []) if (BF.ids.live(k) === undefined) BF.ids.put(dec(e, null), k); }
 function adoptDyn(list, from) { for (const [name, id] of list || []) if (!BF.dynItemAs(name, id)) out_of_step("worker " + from + " made item " + name + " as " + id + ", which is another item here"); }
 // A mob of another unit that this worker's thinking is about to change (a poultry keeper feeding a wild chicken it lures, js/poultry.js):
 // called before the change, it is sent with this worker's mobs (a diff from now), and its owner takes the change as the others do.
@@ -818,7 +827,8 @@ let owning = false;   // in this worker's own part of the tick (its mobs thinkin
 function setup(o) {
   RW.n = o.n; RW.me = o.me; RW.link = o.link; RW.active = o.n > 1;
   RW.owners = new Map(); RW.solo = false; RW.mismatch = null;
-  shadows = new Map(); recShadows = new Map(); load.clear(); touched = new Map(); foreign = new Map(); dynNew = []; owning = false;
+  shadows = new Map(); recShadows = new Map(); load.clear(); touched = new Map(); foreign = new Map(); dynNew = []; regNew = []; owning = false;
+  if (BF.ids && BF.ids.hooks) BF.ids.hooks.onNew = onNewPlace;
   for (const k in T) T[k] = 0;
   tA = tB = 0; peers = [];
   if (RW.active) note(RW.n + " workers share the regions (worker " + RW.me + " of " + RW.n + ")");

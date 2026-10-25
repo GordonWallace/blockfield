@@ -275,7 +275,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was"];
+  "fleeJitter", "gLos", "was", "planW", "planL", "planG"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -1086,25 +1086,36 @@ let planBudget = 0;
 // later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
 // waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
 // village ticks after it, in a fixed order) searches share planBudget as before.
-const PLANS = 2, KEEP = 20, planWant = new Map();   // mob -> [tick it first asked, tick it last asked]
-const planGrant = new Map();   // mob -> tick granted (kept KEEP ticks: a far mob thinks only 4 times a game second)
+// The waiting list and the grants live on the mobs (ai.planW: the tick it first asked, planL: last asked, planG: granted), not in a
+// module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
+// table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
+// ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
+const PLANS = 2, KEEP = 20;
 let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
+const lapsed = (v, t) => v > t || v < t - KEEP;
 function grantPlans() {
-  const t = ++planTick;
-  for (const [m, g] of planGrant) if (m.removed || g < t - KEEP) planGrant.delete(m);
-  if (!planWant.size) return;
-  const w = [];
-  for (const [m, a] of planWant) { if (m.removed || m.dead || a[1] < t - KEEP) planWant.delete(m); else w.push([m, a[0]]); }
-  w.sort((a, b) => a[1] - b[1] || idNum(a[0]) - idNum(b[0]));
-  for (let i = 0; i < w.length && i < PLANS; i++) { planGrant.set(w[i][0], t); planWant.delete(w[i][0]); }
+  const t = ++planTick, w = [];
+  for (const m of list) {
+    const a = m.ai;
+    if (!a) continue;
+    if (a.planG != null && (m.removed || lapsed(a.planG, t))) a.planG = undefined;
+    if (a.planW == null) continue;
+    if (m.removed || m.dead || lapsed(a.planL, t) || a.planW > t) { a.planW = a.planL = undefined; continue; }
+    w.push(m);
+  }
+  if (!w.length) return;
+  w.sort((a, b) => a.ai.planW - b.ai.planW || idNum(a) - idNum(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+  for (let i = 0; i < w.length && i < PLANS; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
 }
 function takePlan() {
   const m = curMob;
   if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
-  if (planGrant.delete(m)) return true;
-  const t = planTick, a = planWant.get(m);
-  if (a) a[1] = t; else planWant.set(m, [t, t]);
+  const a = m.ai;
+  if (!a) return false;
+  if (a.planG != null) { a.planG = undefined; return true; }
+  const t = planTick;
+  if (a.planW != null) a.planL = t; else { a.planW = t; a.planL = t; }
   return false;
 }
 const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
@@ -2876,7 +2887,7 @@ BF.mobs = {
     BF.ids.reset();
     villageT = restockT = 0;   // (and the counters and timers below, so a world started after another plays as in a fresh page: spec r15-39)
     surfAcc = caveAcc = chunkArrT = 0; chunkArr = [];
-    planTick = planBudget = 0; planWant.clear(); planGrant.clear();
+    planTick = planBudget = 0;
     aiAcc = aiEma = aiN = aiWork = 0;
     if (BF.builder) BF.builder.reset();
     if (BF.bridges) BF.bridges.reset();
