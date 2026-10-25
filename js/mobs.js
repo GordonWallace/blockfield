@@ -2552,8 +2552,10 @@ function updateVillages(dt) {
       if (snap === "wait") continue;
       let at = null, offRoof = false;
       if (snap) at = standable(Math.floor(snap.p[0]), Math.floor(snap.p[1]), Math.floor(snap.p[2]), TYPES.villager.hw, TYPES.villager.h) ? snap.p.slice() : findStand(snap.p[0], snap.p[1], snap.p[2], TYPES.villager);
-      if (at && roofLedge(at[0], at[1], at[2], TYPES.villager.hw)) {   // saved up on a roof (before bug-063): back on the ground instead
-        if (BF.glog) BF.glog.log("INFO", "mobs", "villager " + sl.prof + " saved on a roof: placed on the ground instead", { village: rec, at });
+      // saved up on a roof (before bug-063): back on the ground instead. The saved spot itself, not the stand found near it: the snapshot
+      // puts the villager back on its saved spot anyway, and one saved in a doorway can have its nearest stand up on the roof above.
+      if (at && roofLedge(snap.p[0], snap.p[1], snap.p[2], TYPES.villager.hw)) {
+        if (BF.glog) BF.glog.log("INFO", "mobs", "villager " + sl.prof + " saved on a roof: placed on the ground instead", { village: rec, at: snap.p });
         at = null; offRoof = true;
       }
       let scattered = false;
