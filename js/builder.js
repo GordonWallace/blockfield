@@ -203,7 +203,11 @@ function startStock(v) {
 function bpOf(e) {
   if (!e.wood || !BP().woodsAvailable().includes(e.wood)) e.wood = BP().styleWood(e.style);   // planned before woods were chosen: the style's own wood
   const key = e.rot + "|" + e.style + "|" + e.wood;
-  if (!e._bp || e._bpKey !== key) { e._bp = BP().get(e.type, e.rot, e.style, e.h, e.opts, e.wood); e._bpKey = key; }
+  if (!e._bp || e._bpKey !== key) {
+    e._bp = BP().get(e.type, e.rot, e.style, e.h, e.opts, e.wood); e._bpKey = key;
+    // a structure begun before its blueprint changed (bug-060: sunken troughs) goes on by the new one; its cells are placed by position
+    if (e.state !== "done" && e.n !== nfill(e) + e._bp.n) { e.n = nfill(e) + e._bp.n; e.prog = Math.min(e.prog | 0, e.n); }
+  }
   return e._bp;
 }
 const nfill = e => (e.fill ? e.fill.length : 0);
@@ -289,6 +293,12 @@ function evalTerrain(bp, px, pz, found) {
     if (g == null) continue;
     for (let y = g + 1; y < oy - 1; y++) fill.push([x, y, z, 3]);
     if (g < oy - 1 || w.getBlock(x, g, z) !== BF.B.grass) fill.push([x, oy - 1, z, 2]);
+  }
+  // a sunken trough's surroundings (marks.basin, bug-060): ground up to the fence's ground level, so the water has a bank all round
+  for (const [u, q] of bp.marks.basin || []) {
+    const x = px + u, z = pz + q, g = gs.get(x + "," + z);
+    if (g == null) continue;
+    for (let y = g + 1; y < oy; y++) fill.push([x, y, z, 3]);
   }
   for (const [u, q] of (bp.ground && bp.marks.soil) || []) {
     const x = px + u, z = pz + q, g = gs.get(x + "," + z);
