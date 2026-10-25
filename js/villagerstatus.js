@@ -58,7 +58,8 @@ const LEISURE = new Set([
   "Has saplings to plant", "Looking for saplings",   // a forester between tasks (js/forester.js)
   "Planning",                                        // a builder between structures (js/builder.js)
 ]);
-const leisure = m => LEISURE.has(BF.villagerStatus.text(m));
+// ...and a builder waiting for materials nobody sells yet ("Looking for: 22 Oak Log", js/builder.js shopMode): it wanders the village
+const leisure = m => { const t = BF.villagerStatus.text(m); return LEISURE.has(t) || t.startsWith("Looking for: "); };
 
 BF.villagerStatus = { text, routine, leisure, LEISURE };
 })();
