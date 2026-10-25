@@ -507,24 +507,23 @@ function findFill(m, D, ok) {
 }
 // Dips the empty bucket in the source (x, y, z): full bucket, and the source block is taken, as the player's bucket takes it
 // (nothing from nothing). An infinite source (a lake, a pond, the village well) flows back in, so none of those is ever drained.
+// A block request (spec r15-18): false when it can't, else the request (its result says whether the bucket is full).
 function fillBucket(m, x, y, z) {
-  const c = ids(), Tinv = TR().inv, w = W();
-  if (BF.FLUID[getB(x, y, z)] !== 8 || cnt(m, c.bucket) < 1) return false;
+  const c = ids(), Tinv = TR().inv, src = getB(x, y, z);
+  if (BF.FLUID[src] !== 8 || cnt(m, c.bucket) < 1) return false;
   if (!Tinv.canFit(m.inv, [{ id: c.wbucket, n: 1 }], [{ id: c.bucket, n: 1 }])) return false;
-  if (!w.setBlock(x, y, z, 0)) return false;
-  Tinv.remove(m.inv, c.bucket, 1); Tinv.add(m.inv, c.wbucket, 1);
-  sound("splash", x + 0.5, y + 0.5, z + 0.5, 0.4);
-  return true;
+  return BF.blockReq.send(m, [BF.blockReq.cell(x, y, z, src, 0)], { take: [{ id: c.bucket, n: 1 }], give: [{ id: c.wbucket, n: 1 }], why: "filling a bucket" })
+    .then(r => { if (r.ok) sound("splash", x + 0.5, y + 0.5, z + 0.5, 0.4); });
 }
 // For js/builder.js (idea-044): a builder with no dirt to buy digs its own, by the farmers' rules (findGather: natural edges first, then one
 // shallow pit, outside the village). gatherFor gives the next column ({x, y, z, ty}) or null (also while the village is still being scanned);
-// gatherAt takes it (true when the dirt is in its pack).
+// gatherAt takes it: false, or the block request (spec r15-18) whose result says the dirt is in its pack.
 function gatherFor(m, R) {
   const D = vdata(R);
   D.want = BF.simNow(); wantVillages.add(R);
   return D.ready ? findGather(m, D, null) : null;
 }
-const gatherAt = (m, R, t) => { const D = vdata(R); return !!(D.ready && gatherBlock(m, D, t)); };
+const gatherAt = (m, R, t) => { const D = vdata(R); return (D.ready && gatherBlock(m, D, t)) || false; };
 const wantVillages = new Set();   // villages whose water ring is scanned for builders although no farmer works there
 // For js/builder.js: the nearest water source (within ~30 blocks of the village, wells included) with a stand cell, or null (also while the village is still being scanned).
 function findWater(m, R) {
@@ -983,7 +982,7 @@ function makeRoom(m) {
   log("compost", m, { item: BF.items[m.inv[pick].id].name, n: m.inv[pick].count });
   m.inv[pick] = null;
 }
-// Doing a project task (levelling goes through levelCell). False when the cell no longer fits the plan.
+// Doing a project task (levelling goes through levelCell). False when the cell no longer fits the plan, else the block request (spec r15-18).
 function performBed(m, fs, R, D, t) {
   const c = ids(), w = W(), Tinv = TR().inv;
   const P = D.projects.find(p => p.id === t.proj);
@@ -992,19 +991,16 @@ function performBed(m, fs, R, D, t) {
   if (!j || j === "blocked" || j.kind !== t.kind) return false;
   P.started = true;
   if (t.kind === "dig" || t.kind === "raise") return levelCell(m, R, D, t);
-  const above = getB(t.x, t.y + 1, t.z);
-  const clearTop = () => { if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); } };
+  const BR = BF.blockReq, above = getB(t.x, t.y + 1, t.z);
   const old = getB(t.x, t.y, t.z);
   let place;
-  if (t.kind === "unborder") {
-    const drops = BF.rollDrops(old);
-    if (!Tinv.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false;
-    if (!w.setBlock(t.x, t.y, t.z, c.dirt)) return false;
-    for (const d of drops) Tinv.add(m.inv, d.id, d.count);
-    blockSound("break", old, t.x, t.y, t.z);
-    particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[old].color, 5, 0.7);
-    log("unborder", m, { at: [t.x, t.y, t.z] });
-    return true;
+  if (t.kind === "unborder") {   // its drops must all fit
+    return BR.send(m, [BR.cell(t.x, t.y, t.z, old, c.dirt, { drops: "inv" })], { why: "taking up a bed border" }).then(r => {
+      if (!r.ok) return;
+      blockSound("break", old, t.x, t.y, t.z);
+      particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[old].color, 5, 0.7);
+      log("unborder", m, { at: [t.x, t.y, t.z] });
+    });
   }
   if (t.kind === "border") { place = logId(m, P.log); if (place == null) return false; }
   else if (t.kind === "water") {
@@ -1018,19 +1014,22 @@ function performBed(m, fs, R, D, t) {
     if (!hasHoe(m) || !c.till.has(old)) return false;
     place = BF.farmland ? BF.farmland.tillId(t.x, t.y, t.z) : c.farmland;   // dehydrated until the bed's water reaches it
   }
-  clearTop();
-  if (!w.setBlock(t.x, t.y, t.z, place)) return false;
-  particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[old].color, 5, 0.7);
-  blockSound("place", place === c.water ? old : place, t.x, t.y, t.z);
-  if (t.kind === "till") { D.cells.push([t.x, t.y, t.z]); m.farm.tilled = (m.farm.tilled || 0) + 1; BF.toolWear.use(m, BF.toolWear.best(m, "hoe"), 1); }   // tilling wears the hoe 1 use, as the player's
-  if (t.kind === "border") { Tinv.remove(m.inv, place, 1); m.farm.bordered = (m.farm.bordered || 0) + 1; }
-  if (t.kind === "water") {
-    Tinv.remove(m.inv, c.wbucket, 1); Tinv.add(m.inv, c.bucket, 1);
-    D.water.push([t.x, t.y, t.z]); D.waterSet.add(key3(t.x, t.y, t.z));
-    m.farm.watered = (m.farm.watered || 0) + 1;
-  }
-  log(t.kind, m, { at: [t.x, t.y, t.z], block: BF.blocks[place].name });
-  return true;
+  // the plant on top comes off first (its drops into the pack), then the cell
+  const cells = above !== 0 ? [BR.cell(t.x, t.y + 1, t.z, above, 0, { drops: "add" })] : [];
+  cells.push(BR.cell(t.x, t.y, t.z, old, place));
+  const take = t.kind === "border" ? [{ id: place, n: 1 }] : t.kind === "water" ? [{ id: c.wbucket, n: 1 }] : null;
+  return BR.send(m, cells, { take, give: t.kind === "water" ? [{ id: c.bucket, n: 1 }] : null, why: NAMES[t.kind] || t.kind }).then(r => {
+    if (!r.ok) return;
+    particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[old].color, 5, 0.7);
+    blockSound("place", place === c.water ? old : place, t.x, t.y, t.z);
+    if (t.kind === "till") { D.cells.push([t.x, t.y, t.z]); m.farm.tilled = (m.farm.tilled || 0) + 1; BF.toolWear.use(m, BF.toolWear.best(m, "hoe"), 1); }   // tilling wears the hoe 1 use, as the player's
+    if (t.kind === "border") m.farm.bordered = (m.farm.bordered || 0) + 1;
+    if (t.kind === "water") {
+      D.water.push([t.x, t.y, t.z]); D.waterSet.add(key3(t.x, t.y, t.z));
+      m.farm.watered = (m.farm.watered || 0) + 1;
+    }
+    log(t.kind, m, { at: [t.x, t.y, t.z], block: BF.blocks[place].name });
+  });
 }
 // For js/builder.js: the ring rectangles of the village's beds and of the beds being made or grown (no building goes there).
 function bedRects(R) {
@@ -1143,60 +1142,59 @@ function perform(m, fs, R, D) {
   if (t.kind === "harvest") {
     const id = getB(t.x, t.y, t.z);
     if (!c.matureSet.has(id) || !isFarm(c, getB(t.x, t.y - 1, t.z)) || !dropsFit(m, id)) return false;
-    if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
-    const drops = BF.rollDrops(id);
-    for (const d of drops) Tinv.add(m.inv, d.id, d.count);
-    for (const d of drops) {                     // spare seeds beyond a stack go on the compost heap
-      const it = BF.items[d.id], extra = it && it.plants != null && !it.food ? cnt(m, d.id) - CROP_CAP : 0;
-      if (extra > 0) Tinv.remove(m.inv, d.id, extra);
-    }
-    particles(t.x + 0.5, t.y + 0.3, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
-    blockSound("break", id, t.x, t.y, t.z);
-    m.farm.harvested = (m.farm.harvested || 0) + 1;
-    log("harvest", m, { at: [t.x, t.y, t.z], crop: BF.blocks[id].name, got: drops.map(d => d.count + " " + BF.items[d.id].name).join(", ") });
-    // the village log gets one line when a farmer starts on a crop (not one per block): its first harvest of that crop in 30 s
-    const now = BF.simNow(), crop = BF.blocks[id].name, seen = fs.harvSeen || (fs.harvSeen = {}), since = now - (seen[crop] == null ? -1e9 : seen[crop]);
-    if (BF.vlog && m.village && !(since >= 0 && since < 30))
-      BF.vlog.log(m.village, "farm", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession) + ") started harvesting " + BF.vlog.pretty(crop) + " at " + t.x + ", " + t.y + ", " + t.z, [t.x, t.y, t.z]);
-    seen[crop] = now;
-    // replant right away with the matching seed
-    const seed = c.mature.get(id);
-    if (seed != null && cnt(m, seed) > 0) { fs.next = { kind: "plant", x: t.x, y: t.y, z: t.z, k: t.k, seed }; }
-    return true;
+    return BF.blockReq.send(m, [BF.blockReq.cell(t.x, t.y, t.z, id, 0, { drops: "inv" })], { why: "harvesting" }).then(r => {   // a block request (spec r15-18)
+      if (!r.ok) return;
+      const drops = r.got;
+      for (const d of drops) {                     // spare seeds beyond a stack go on the compost heap
+        const it = BF.items[d.id], extra = it && it.plants != null && !it.food ? cnt(m, d.id) - CROP_CAP : 0;
+        if (extra > 0) Tinv.remove(m.inv, d.id, extra);
+      }
+      particles(t.x + 0.5, t.y + 0.3, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
+      blockSound("break", id, t.x, t.y, t.z);
+      m.farm.harvested = (m.farm.harvested || 0) + 1;
+      log("harvest", m, { at: [t.x, t.y, t.z], crop: BF.blocks[id].name, got: drops.map(d => d.count + " " + BF.items[d.id].name).join(", ") });
+      // the village log gets one line when a farmer starts on a crop (not one per block): its first harvest of that crop in 30 s
+      const now = BF.simNow(), crop = BF.blocks[id].name, seen = fs.harvSeen || (fs.harvSeen = {}), since = now - (seen[crop] == null ? -1e9 : seen[crop]);
+      if (BF.vlog && m.village && !(since >= 0 && since < 30))
+        BF.vlog.log(m.village, "farm", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession) + ") started harvesting " + BF.vlog.pretty(crop) + " at " + t.x + ", " + t.y + ", " + t.z, [t.x, t.y, t.z]);
+      seen[crop] = now;
+      // replant right away with the matching seed
+      const seed = c.mature.get(id);
+      if (seed != null && cnt(m, seed) > 0) { fs.next = { kind: "plant", x: t.x, y: t.y, z: t.z, k: t.k, seed }; }
+    });
   }
   if (t.kind === "plant") {
     if (!isFarm(c, getB(t.x, t.y - 1, t.z)) || getB(t.x, t.y, t.z) !== 0) return false;
     const seed = t.seed != null && cnt(m, t.seed) > 0 ? t.seed : plantFor(m, t.x, t.y - 1, t.z);
     if (seed == null || cnt(m, seed) < 1) return false;
     const young = BF.items[seed].plants;
-    if (young == null || !w.setBlock(t.x, t.y, t.z, young)) return false;
-    Tinv.remove(m.inv, seed, 1);
-    blockSound("place", young, t.x, t.y, t.z);
-    log("plant", m, { at: [t.x, t.y, t.z], seed: BF.items[seed].name });
-    return true;
+    if (young == null) return false;
+    return BF.blockReq.send(m, [BF.blockReq.cell(t.x, t.y, t.z, 0, young)], { take: [{ id: seed, n: 1 }], why: "planting" }).then(r => {
+      if (!r.ok) return;
+      blockSound("place", young, t.x, t.y, t.z);
+      log("plant", m, { at: [t.x, t.y, t.z], seed: BF.items[seed].name });
+    });
   }
   if (t.kind === "fill") {
-    if (!fillBucket(m, t.x, t.y, t.z)) return false;
-    log("fill", m, { at: [t.x, t.y, t.z] });
-    return true;
+    const rq = fillBucket(m, t.x, t.y, t.z);
+    return rq && rq.then(r => { if (r.ok) log("fill", m, { at: [t.x, t.y, t.z] }); });
   }
   return false;
 }
-// Takes the dirt block of a gather task outside the village; its drops go into the inventory.
+// Takes the dirt block of a gather task outside the village; its drops go into the inventory (all of them, or it is refused "full").
+// False when it can't, else the block request (spec r15-18).
 function gatherBlock(m, D, t) {
-  const c = ids(), w = W(), Tinv = TR().inv;
+  const c = ids(), w = W();
   if (!w.isLoaded(t.x, t.z) || inVillage(D, t.x, t.z) || nearBeds(D, t.x, t.z)) return false;
   const id = getB(t.x, t.y, t.z);
   if (!c.diggable.has(id)) return false;
-  const drops = BF.rollDrops(id);
-  if (!Tinv.canFit(m.inv, drops.map(d => ({ id: d.id, n: d.count })), [])) return false;
-  if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
-  for (const d of drops) Tinv.add(m.inv, d.id, d.count);
-  particles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
-  blockSound("break", id, t.x, t.y, t.z);
-  noteDug(D, t.x, t.z);
-  log("gather", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
-  return true;
+  return BF.blockReq.send(m, [BF.blockReq.cell(t.x, t.y, t.z, id, 0, { drops: "inv" })], { why: "gathering dirt" }).then(r => {
+    if (!r.ok) return;
+    particles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BF.blocks[id].color, 5, 0.6);
+    blockSound("break", id, t.x, t.y, t.z);
+    noteDug(D, t.x, t.z);
+    log("gather", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
+  });
 }
 // Levelling a field: "dig" removes the top soil block of the column (plants on it first), "raise" puts a dirt block on it. Nothing else is ever touched.
 function levelCell(m, R, D, t) {
@@ -1204,26 +1202,25 @@ function levelCell(m, R, D, t) {
   if (!D.ready || getB(t.x, t.y, t.z) === 0 || w.heightAt(t.x, t.z) !== t.y) return false;
   const id = getB(t.x, t.y, t.z);
   if (!c.ground.has(id) || !looseAbove(getB(t.x, t.y + 1, t.z))) return false;
+  // a block request (spec r15-18): the plant on top first (its drops into the pack), then the soil block
+  const BR = BF.blockReq, above = getB(t.x, t.y + 1, t.z);
   if (t.kind === "dig") {
-    const drops = BF.rollDrops(id);
-    const above = getB(t.x, t.y + 1, t.z);
-    if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); }
-    if (!w.setBlock(t.x, t.y, t.z, 0)) return false;
-    for (const d of drops) if (BF.items[d.id] && Tinv.canFit(m.inv, [{ id: d.id, n: d.count }], [])) Tinv.add(m.inv, d.id, d.count);   // what does not fit is left in the ground
-    particles(t.x + 0.5, t.y + 0.8, t.z + 0.5, BF.blocks[id].color, 5, 0.7);
-    blockSound("break", id, t.x, t.y, t.z);
-    log("dig", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
-    return true;
+    const cells = above !== 0 ? [BR.cell(t.x, t.y + 1, t.z, above, 0, { drops: "add" })] : [];
+    cells.push(BR.cell(t.x, t.y, t.z, id, 0, { drops: "fit" }));   // what does not fit is left in the ground
+    return BR.send(m, cells, { why: "levelling a field" }).then(r => {
+      if (!r.ok) return;
+      particles(t.x + 0.5, t.y + 0.8, t.z + 0.5, BF.blocks[id].color, 5, 0.7);
+      blockSound("break", id, t.x, t.y, t.z);
+      log("dig", m, { at: [t.x, t.y, t.z], block: BF.blocks[id].name });
+    });
   }
   if (cnt(m, c.dirt) < 1) return false;
-  const above = getB(t.x, t.y + 1, t.z);
-  if (above !== 0) { for (const d of BF.rollDrops(above)) Tinv.add(m.inv, d.id, d.count); w.setBlock(t.x, t.y + 1, t.z, 0); }
-  if (!w.setBlock(t.x, t.y + 1, t.z, c.dirt)) return false;
-  Tinv.remove(m.inv, c.dirt, 1);
-  particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[c.dirt].color, 4, 0.7);
-  blockSound("place", c.dirt, t.x, t.y + 1, t.z);
-  log("raise", m, { at: [t.x, t.y + 1, t.z] });
-  return true;
+  return BR.send(m, [BR.cell(t.x, t.y + 1, t.z, above, c.dirt, { drops: "add" })], { take: [{ id: c.dirt, n: 1 }], why: "raising a field" }).then(r => {
+    if (!r.ok) return;
+    particles(t.x + 0.5, t.y + 1.02, t.z + 0.5, BF.blocks[c.dirt].color, 4, 0.7);
+    blockSound("place", c.dirt, t.x, t.y + 1, t.z);
+    log("raise", m, { at: [t.x, t.y + 1, t.z] });
+  });
 }
 // harvest / plant / fill anywhere in the village area; bed work never on a building or its margin
 function freeCellOrFarm(R, D, t) { return t.proj ? clearOfBuildings(R, D, t.x, t.z) : inArea(D, t.x, t.z); }
@@ -1250,6 +1247,11 @@ function farmAI(m, dt, out) {
     }
   }
   const t = fs.task;
+  if (fs.stage === "wait") {   // its block request is out: the result ends the task (one that never came, after a reset or a reload, gives it up)
+    ai.mode = "idle"; ai.t = 2;
+    if (!BF.blockReq.busy(m)) endTask(m, fs, false);
+    return true;
+  }
   fs.t += dt;
   if (fs.t > (t.max || TASK_MAX)) { endTask(m, fs, false); return true; }
   ai.mode = "idle"; ai.t = 2;
@@ -1276,6 +1278,15 @@ function farmAI(m, dt, out) {
   if (fs.actT <= 0) {
     let okDone = false;
     try { okDone = perform(m, fs, R, D); } catch (e) { console.error(e); }
+    if (okDone && typeof okDone === "object") {   // a block request (spec r15-18): the result, before its next think, ends the task
+      fs.stage = "wait"; ai.swingT = 0.35;
+      okDone.then(r => {
+        if (fs.task !== t) return;
+        if (!r.ok) log("giveup", m, { task: t.kind, why: "cell " + r.why, at: [t.x, t.y, t.z] });
+        endTask(m, fs, r.ok);
+      });
+      return true;
+    }
     if (okDone === "wait") return true;
     if (okDone && t.kind !== "tend" && t.kind !== "craft") ai.swingT = 0.35;
     if (!okDone) { log("giveup", m, { task: t.kind, why: t.kind === "buylog" ? "trade refused" : "cell changed", at: [t.x, t.y, t.z] }); if (t.kind === "buylog") avoidSeller(m, t.seller); }

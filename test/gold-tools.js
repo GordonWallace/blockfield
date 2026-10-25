@@ -58,7 +58,7 @@ module.exports = async (pg) => {
       for (let x = px; x <= px + 4 && tilled < 5; x++) {
         const t = X.cellJob(Pj, x, pz + 2);
         jobs.push(t && t.kind ? t.kind : t);
-        if (t && t.kind === "till" && X.perform(f, { task: t }, R, D)) tilled++;
+        if (t && t.kind === "till") { const rq = X.perform(f, { task: t }, R, D); BF.blockReq.flush(); if (rq && rq.result && rq.result.ok) tilled++; }   // a block request (spec r15-18)
       }
       ok("a farmer's hoe wears one use per block tilled", tilled > 0 && f.inv[0] && f.inv[0].wear === tilled, tilled > 0 ? { tilled, wear: f.inv[0] && f.inv[0].wear }
         : { tilled, jobs, at: [px, y, pz], loaded: W.isLoaded(px, pz + 2), top: W.heightAt(px, pz + 2), cur: W.getBlock(px, y, pz + 2), above: W.getBlock(px, y + 1, pz + 2), player: [P.position.x, P.position.y, P.position.z].map(Math.round) });
