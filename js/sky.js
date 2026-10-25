@@ -94,6 +94,16 @@ function makeDome() {
   return m;
 }
 
+// The sun, moon and stars sit a few hundred blocks from the camera, nearer than distant land, so a depth test would draw them in
+// front of it. Instead they draw straight after the dome, before any land (opaque list, blended by hand, no depth test), and
+// everything solid then paints over them.
+function behindLand(m) {
+  Object.assign(m.material, { transparent: false, depthTest: false, depthWrite: false, blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor });
+  m.renderOrder = -999;
+  return m;
+}
+
 function makeSun() {
   const tex = pixelCanvas(32, g => {
     g.fillStyle = "rgba(255,240,170,0.16)"; g.fillRect(2, 2, 28, 28);
@@ -104,7 +114,7 @@ function makeSun() {
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, fog: false });
   const m = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), mat);
   m.position.set(SUN_D, 0, 0); m.rotation.y = -Math.PI / 2;
-  return m;
+  return behindLand(m);
 }
 
 function makeMoon() {
@@ -117,7 +127,7 @@ function makeMoon() {
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, fog: false });
   const m = new THREE.Mesh(new THREE.PlaneGeometry(52, 52), mat);
   m.position.set(-SUN_D, 0, 0); m.rotation.y = Math.PI / 2;
-  return m;
+  return behindLand(m);
 }
 
 function makeStars() {
@@ -147,7 +157,7 @@ function makeStars() {
   });
   const p = new THREE.Points(g, mat);
   p.frustumCulled = false;
-  return p;
+  return behindLand(p);
 }
 
 // ---------- clouds on the planet (generator 4, spec r14-20) ----------
@@ -391,6 +401,8 @@ const sky = {
   cloudCell(i, j) { return clouds.userData.cell(i, j); },
   get cloudCellSize() { return clouds.userData.cellSize(); },
   get cloudMesh() { return clouds; },
+  get sunMesh() { return sun; },
+  get moonMesh() { return moon; },
   planetDrift: planetD,
   get sunYaw() { return celestial ? celestial.rotation.y : 0.35; },   // the sun path's heading in the face frame (0.35 at face 4's centre)
 
