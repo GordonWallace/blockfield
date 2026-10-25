@@ -54,8 +54,8 @@ browser                         POST /claude/chat        run.sh / debug/server.j
 
 ## Limits of the prototype
 
-- The Sage belongs to no village and isn't saved. It respawns at its spot by the spawn when you come back near it, with the same inventory for the session. A new world gives it a new inventory. If its chunk unloads while it's away, it's gone until you come back to spawn.
-- The conversation lasts for the browser session.
+- The Sage belongs to no village. Its bag (what it carries now), the list of what it started with, and the spot it last settled are saved with the world (`claude` in the save, `BF.claudeVillager.serialize`). It comes back at that spot when you're within 64 blocks of it, or at its spot by the spawn. A new world, or one saved before this, gives it a fresh random bag. If its chunk unloads while it's away on an errand, it settles where it was.
+- The conversation and designs last for the browser session; they aren't saved.
 - It can't trade or give items yet. Nothing changes its inventory except the console: `BF.trades.inv.add(BF.claudeVillager.mob().inv, BF.I.diamond, 2)`.
 - The world is paused while the trade screen is open, as for any villager.
 - Designs last for the browser session. Their footprint is at most 15x15 and 14 layers tall. The designer runs at effort `medium`; set `BF_CLAUDE_DESIGN_EFFORT=high` for more careful (slower) drafts.

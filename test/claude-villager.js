@@ -143,8 +143,9 @@ const start = async env => {
   await pg.screenshot({ path: out + '-chat.png' });
 
   // ---- house designer
-  // (in slow headless runs Playwright's hit test sometimes sees the trade screen's backdrop over this tab for a while: try a few times)
-  for (let i = 0; ; i++) { try { await pg.click('.bfcv-tabs button:nth-child(2)', { timeout: 5000 }); break; } catch (e) { console.log('CLICKFAIL', await pg.evaluate(() => { const b = document.querySelector('.bfcv-tabs button:nth-child(2)'), r = b.getBoundingClientRect(); return JSON.stringify({ r, at: document.elementsFromPoint(r.x + r.width / 2, r.y + r.height / 2).map(x => x.tagName + '.' + x.className).slice(0, 4), panel: document.querySelector('.bfcv-panel').getBoundingClientRect(), inv: document.querySelector('.bf-inv').getBoundingClientRect() }); })); if (i >= 3) throw e; } }
+  // (in some headless runs Playwright reports the trade screen's backdrop as covering this tab although elementsFromPoint puts the tab on top:
+  // then the tab is clicked from the page instead)
+  await pg.click('.bfcv-tabs button:nth-child(2)', { timeout: 5000 }).catch(() => { console.log('(house designer tab clicked from the page)'); return pg.$eval('.bfcv-tabs button:nth-child(2)', b => b.click()); });
   await pg.keyboard.type('stone with a wood roof, one bed, furnace');
   await pg.keyboard.press('Enter');
   ok('a design comes back and shows', await until(() => !!BF.claudeVillager.design() && document.querySelector('.bfcv-dout').classList.contains('on'), null, 20000),
@@ -200,6 +201,27 @@ const start = async env => {
   await pg.evaluate(() => BF.mobs.interact(BF.claudeVillager.mob()));
   await pg.evaluate(() => BF.inventory.close());
   ok('the panel goes when the trade screen does', await until(() => !BF.claudeVillager.isOpen() && !document.querySelector('.bfcv-panel').classList.contains('open'), null, 3000));
+  // ---- the Sage's bag and spot are saved with the world
+  const sv = await pg.evaluate(async () => {
+    const meta = await BF.save.create({ name: 'sage', seed: 123, gameMode: 'survival', gen: 4 });
+    const wait = async f => { for (let i = 0; i < 600 && !f(); i++) await new Promise(r => setTimeout(r, 200)); return f(); };
+    await wait(() => !BF.preparing && BF.claudeVillager.mob() && !BF.claudeVillager.mob().removed);
+    const m = BF.claudeVillager.mob();
+    BF.trades.inv.add(m.inv, BF.I.diamond, 3);
+    const want = BF.claudeVillager.inventory(), startList = BF.claudeVillager.startingInventory();
+    m.claudeHome = { x: m.position.x + 2, z: m.position.z + 1 };   // as if it had settled after an errand
+    const at = m.claudeHome;
+    await BF.save.saveNow();
+    await BF.save.load(meta.id);
+    await wait(() => !BF.preparing && BF.claudeVillager.mob() && !BF.claudeVillager.mob().removed);
+    const m2 = BF.claudeVillager.mob();
+    const r = { want, got: BF.claudeVillager.inventory(), startList, startGot: BF.claudeVillager.startingInventory(), at, home: m2 && m2.claudeHome, d: m2 ? Math.hypot(m2.position.x - at.x, m2.position.z - at.z) : null };
+    await BF.save.remove(meta.id);
+    return r;
+  });
+  ok('after a save and reload its bag (3 diamonds added) and starting list are the same', JSON.stringify(sv.want) === JSON.stringify(sv.got) && sv.got.some(e => /Diamond/.test(e.item) && e.count >= 3)
+    && JSON.stringify(sv.startList) === JSON.stringify(sv.startGot), sv);
+  ok('it comes back where it had settled', sv.home && Math.abs(sv.home.x - sv.at.x) < 0.01 && sv.d < 2, sv);
   ok('no page errors', !errs.length, errs);
 
   // ---- the debug screen's API calls panel

@@ -4,8 +4,8 @@
 // API key and calls the Claude API; the page never sees the key. js/housedesign.js turns a drawing into a builder blueprint, draws it
 // and lists its materials. The villager only appears when the server says a key is set (GET /claude/status), so CI, the published
 // Artifact and a checkout without a key play as before; ?claude=0 turns it off.
-// It isn't part of any village and isn't saved: it is spawned again whenever the player comes near its spot, and the conversation
-// and designs last for the session (newWorld clears them). Its instructions: prompts/villager-system.md, prompts/house-designer.md.
+// It isn't part of any village. Its bag, starting list and the spot it last settled are saved with the world (serialize); it is spawned
+// again whenever the player comes near that spot. The conversation and designs last for the session (newWorld clears them). Its instructions: prompts/villager-system.md, prompts/house-designer.md.
 // It carries a few random odds and ends (POOL). The prompt tells it what it started with and where it is (BF.claudeSight.where).
 // Its tools (defined in debug/claude.js) are answered here, live, when the model calls them: the server hands the call back
 // ({ pending }) and the page posts the answer. check_inventory reads its bag; look_around reads what it can see (js/claudesight.js).
@@ -14,7 +14,8 @@
 // WARN for a design with problems left; ERROR when a reply or a design fails.
 // API: BF.claudeVillager = { isOpen(), open(mob) -> bool, close(), isChatting(mob), design(), designs(), tab(name?), home(), mob(), status(),
 //                            history(), inventory(), startingInventory(), tools() -> [names], runTool(name, mob?, input?) -> text,
-//                            errand() -> the walk under way or null, events() -> world events waiting to be told }
+//                            errand() -> the walk under way or null, events() -> world events waiting to be told,
+//                            serialize() / deserialize(o): its bag, starting list and where it settled, kept with the saved world }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -30,6 +31,7 @@ const POOL = [["bread", 1, 4], ["apple", 1, 5], ["carrot", 2, 6], ["potato", 2, 
   ["iron_ingot", 1, 2], ["cooked_cod", 1, 3], ["sugar_cane", 2, 6], ["compass", 1, 1], ["glass_bottle", 1, 3]];
 
 const off = /[?&]claude=0\b/.test(location.search);
+let station = null;   // where it last settled, when not its spot by the spawn (saved with the world)
 let status = null, mob = null, home = null, deadAt = 0, history = [], busy = false, announced = false, start = null;
 const glog = (level, text, at) => { try { if (BF.glog) BF.glog.log(level, "claude", text, at ? { at } : undefined); } catch (e) { /* ignore */ } };
 
@@ -50,18 +52,20 @@ function spot() {
 }
 function tick() {
   if (!status || !status.configured || !BF.mobs || !BF.player || !BF.player.position || !BF.world) return;
-  if (mob && (mob.removed || mob.dead)) { if (mob.dead) deadAt = performance.now(); if (isOpen()) close(); mob = null; }
+  if (mob && (mob.removed || mob.dead)) { if (mob.dead) deadAt = performance.now(); else station = mob.claudeHome; if (isOpen()) close(); mob = null; }
   if (mob) return;
   if (performance.now() - deadAt < 30000) return;   // killed: back after a while
   home = spot();
-  if (!home || !BF.world.isLoaded(home.x, home.z)) return;
+  // it comes back where it last settled (after an errand), or else at its spot by the spawn
+  const at = station && BF.world.isLoaded(station.x, station.z) ? station : home;
+  if (!at || !BF.world.isLoaded(at.x, at.z)) return;
   const p = BF.player.position;
-  if (Math.hypot(p.x - home.x, p.z - home.z) > NEAR) return;
-  const h = BF.world.heightAt(home.x, home.z);
+  if (Math.hypot(p.x - at.x, p.z - at.z) > NEAR) return;
+  const h = BF.world.heightAt(at.x, at.z);
   if (!(h > -1e6)) return;
-  const m = BF.mobs.spawn("villager", home.x, h + 1.01, home.z, PROFESSION);
+  const m = BF.mobs.spawn("villager", at.x, h + 1.01, at.z, PROFESSION);
   if (!m) return;
-  m.claude = true; m.claudeHome = home; m.vname = NAME; m.claudeTitle = "Wanderer"; m.trades = [];
+  m.claude = true; m.claudeHome = { x: at.x, z: at.z }; m.vname = NAME; m.claudeTitle = "Wanderer"; m.trades = [];
   // the same inventory all session: a Sage that despawns and comes back keeps what it had
   if (!start) start = startingStock();
   m.inv = start.slots;
@@ -73,9 +77,27 @@ if (typeof BF.on === "function") hook(); else addEventListener("load", hook);
 function hook() {
   if (BF.on) BF.on("newWorld", () => {
     if (isOpen()) close();
-    mob = null; history = []; events.length = 0; announced = false; deadAt = 0; start = null; current = null; designs.length = 0;
+    mob = null; history = []; events.length = 0; announced = false; station = null; deadAt = 0; start = null; current = null; designs.length = 0;
     if (ui.dout) ui.dout.classList.remove("on");
   });
+}
+
+// ---------------------------------------------------------------- saved with the world (js/save.js "claude")
+// Its bag as it is now, what it started with (the system prompt says so) and where it last settled. A world saved without one (or
+// a new world) gets a fresh random bag. The conversation and designs stay per session.
+function serialize() {
+  if (!start) return undefined;
+  const slots = start.slots.map(s => (s && s.count > 0 ? Object.assign({}, s) : null));
+  const at = mob && !mob.removed ? mob.claudeHome : station;
+  return { v: 1, slots, start: start.list, at: at && isFinite(at.x) ? { x: at.x, z: at.z } : null };
+}
+function deserialize(o) {
+  if (!o || o.v !== 1 || !Array.isArray(o.slots)) return;
+  const T = BF.trades, slots = T && T.inv ? T.inv.create() : [];
+  o.slots.forEach((s, i) => { if (s && s.id != null && s.count > 0 && ((BF.items && BF.items[s.id]) || BF.blocks[s.id]) && i < slots.length) slots[i] = Object.assign({}, s); });
+  start = { slots, list: Array.isArray(o.start) ? o.start.filter(e => e && e.item && e.count > 0) : contents(slots) };
+  station = o.at && isFinite(o.at.x) && isFinite(o.at.z) ? { x: o.at.x, z: o.at.z } : null;
+  if (mob && !mob.removed) mob.inv = start.slots;
 }
 
 function startingStock() {
@@ -547,6 +569,7 @@ BF.claudeVillager = {
   design: () => current, designs: () => designs.slice(), tab: k => (k && ui.root ? setTab(k) : tab),
   home: () => home, mob: () => mob, status: () => status, history: () => history.slice(),
   preview: () => ui.preview || null,
+  serialize, deserialize,
   inventory: () => contents(mob && mob.inv), tools: () => Object.keys(TOOLS), errand: () => (mob && mob.claudeErrand) || null, events: () => events.slice(), runTool: (name, who, input) => TOOLS[name](who || mob, input || {}), startingInventory: () => (start ? start.list.slice() : null),
 };
 })();
