@@ -1143,12 +1143,22 @@ function qf(x, y, z) {
   x = RX; z = RZ;
   fluidQ.add(fkey(x, y, z));
 }
+
+// Water passes through fences and fence gates (bug-060): a fence doesn't hold it, it runs on to the cell beyond as if the fence's cell were
+// water one level thinner. The fence's own cell stays dry (no waterlogged blocks).
+let leakyT = null;
+function leaky(id) {
+  if (!leakyT) { leakyT = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); for (const b of BF.blocks) if (b && (b.model === "fence" || b.gate)) leakyT[b.id] = 1; }
+  return leakyT[id] === 1;
+}
+world.leaky = leaky;
 function scheduleFluid(x, y, z, withNeighbours) {
   if (y < BF.MIN_Y || y >= BF.H) return;
   qf(x, y, z);
   if (withNeighbours) {
     qf(x + 1, y, z); qf(x - 1, y, z);
     qf(x, y, z + 1); qf(x, y, z - 1);
+    for (const [dx, dz] of HN) if (leaky(world.getBlock(x + dx, y, z + dz))) qf(x + 2 * dx, y, z + 2 * dz);   // and on through a fence
     if (y + 1 < BF.H) qf(x, y + 1, z);
     if (y > BF.MIN_Y) qf(x, y - 1, z);
   }
@@ -1164,9 +1174,15 @@ function desiredLevel(x, y, z, cur) {
   if (FLUID[get(x, y + 1, z)]) return 1; // falling water
   let best = 99, sources = 0;
   for (const [dx, dz] of HN) {
-    const nx = x + dx, nz = z + dz;
+    let nx = x + dx, nz = z + dz, thru = 0;
+    if (leaky(get(nx, y, nz))) { nx += dx; nz += dz; thru = 1; }   // through a fence: the water beyond it, one level thinner
     const f = FLUID[get(nx, y, nz)];
     if (!f) continue;
+    if (thru) {
+      if (f !== 8) { const below = get(nx, y - 1, nz); if ((BF.REPLACEABLE[below] && !FLUID[below]) || (FLUID[below] && FLUID[below] !== 8)) continue; }
+      best = Math.min(best, (f === 8 ? 1 : f + 1) + 1);
+      continue;
+    }
     if (f === 8) { sources++; best = Math.min(best, 1); continue; }
     // flowing water only spreads sideways when it rests on something
     const below = get(nx, y - 1, nz);
