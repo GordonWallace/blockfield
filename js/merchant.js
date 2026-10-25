@@ -107,6 +107,10 @@ function goods(from, to, m, purse) {
     const lo = ss[0], hi = bs[0];
     if (!(hi.u > lo.u * (1 + MIN_GAIN))) continue;
     if (!(ss.some(x => x.s < 0) || bs.some(x => x.s > 0))) continue;   // surplus here or lack there: otherwise base prices already balance
+    // bug-066: never carry what the buyers there can already get as cheaply from a seller of their own with stock to spare (a forester's
+    // sticks at home at 49 an emerald beat sticks bought at 48 elsewhere, whatever the toolsmith's buy offer says)
+    const there = (B.sells.get(id) || []).find(x => (x.spare != null ? x.spare : x.v && BF.market ? BF.market.spareOf(x.v, id) : 0) >= (x.o ? x.o.sell.n : 1));
+    if (there && there.u <= lo.u * (1 + MIN_GAIN)) continue;
     // supply: what the sellers can spare; demand: what the buyers can pay for
     let supply = 0, demand = 0;
     for (const x of ss) if (x.u < hi.u) supply += x.spare != null ? x.spare : BF.market ? BF.market.spareOf(x.v, id) : cnt(x.v, id);

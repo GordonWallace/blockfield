@@ -11,7 +11,9 @@
 //   own table doesn't buy. Villagers fill each other's needs by buying through sell offers; the player can fill them directly.
 // Offers are rebuilt from the inventory (sync) with the daily restock pass (every 2 s) and when the trade screen opens; an offer that stays keeps
 // its object, so its demand price (js/prices.js) carries on. Nothing new is saved: old saves get their offers on the first sync.
-// API: BF.market = { reserve(v) -> [{ids, n}], spareOf(v, id), keeps(v, o) -> reason | null, sync(v), JOB_TOOLS, CRAFT_KEEP }
+// - One side per item (bug-051, oneSide): where its offers would both buy and sell an item, only one side shows: selling while it can spare a
+//   lot, looking for it otherwise.
+// API: BF.market = { reserve(v) -> [{ids, n}], spareOf(v, id), keeps(v, o) -> reason | null, sync(v), oneSide(v), OFF_NOTE, JOB_TOOLS, CRAFT_KEEP }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -174,8 +176,36 @@ function sync(v) {
   fresh.push(...needOffers(v), ...spareOffers(v));
   const same = (p, o) => { const b = p.base || [p.buy[0].n, p.sell.n]; return b[0] === o.buy[0].n && b[1] === o.sell.n; };   // same base amounts
   for (const o of fresh) { const prev = old.get(key(o)); v.trades.push(prev && same(prev, o) ? prev : o); }
+  oneSide(v);
   return v;
 }
+// One side per item (bug-051): a villager is either selling an item or looking for it, never both at once. Where its offers (job, spare goods,
+// needs) both buy and sell the same item, it sells while it can spare a lot of it and buys otherwise. The other side's job offers are set aside
+// (o.off = "buy" | "sell": hidden on the trade screen, blocked for villagers, their prices kept and still), its spare and need offers dropped.
+// Offers without a single emerald side (barter, horses, maps, food for the hungry) are left alone.
+const OFF_NOTE = { buy: "Selling these now, not buying", sell: "Looking for these, not selling" };
+function oneSide(v) {
+  const P = BF.prices, sides = new Map();
+  for (const o of v.trades) {
+    if (o.off) delete o.off;
+    const k = P ? P.kind(o) : null;
+    if (!k || o.horse) continue;
+    const id = k === "buy" ? o.buy[0].id : o.sell.id;
+    let s = sides.get(id);
+    if (!s) sides.set(id, s = { buy: [], sell: [] });
+    s[k].push(o);
+  }
+  for (const [id, s] of sides) {
+    if (!s.buy.length || !s.sell.length) continue;
+    const lot = Math.min(...s.sell.map(o => o.sell.n)), selling = spareOf(v, id) >= lot, side = selling ? "buy" : "sell";
+    for (const o of selling ? s.buy : s.sell) o.off = side;
+    const sideOf = v._side || (v._side = new Map()), was = sideOf.get(id);   // not saved: the first sync after a load decides afresh
+    sideOf.set(id, side);
+    if (was && was !== side && BF.glog) BF.glog.log("INFO", "market", (BF.vlog ? BF.vlog.nameOf(v) : "A villager") + " (" + v.profession + ") is now " +
+      (selling ? "selling " : "looking for ") + (BF.itemName ? BF.itemName(id) : nameOf(id)).toLowerCase() + (selling ? " instead of buying it" : " instead of selling it"), { village: v.village, at: v.position });
+  }
+  v.trades = v.trades.filter(o => !(o.off && (o.spare || o.need)));
+}
 
-BF.market = { reserve, spareOf, keeps, sync, sellUnit, JOB_TOOLS, CRAFT_KEEP };
+BF.market = { reserve, spareOf, keeps, sync, sellUnit, oneSide, OFF_NOTE, JOB_TOOLS, CRAFT_KEEP };
 })();
