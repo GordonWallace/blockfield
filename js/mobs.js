@@ -250,6 +250,40 @@ function styleAt(x, z) {
   if (/taiga/i.test(name)) return 4;
   return 0;
 }
+// One object layout for every mob (r15-50 follow-up). V8 keeps an object's properties in fixed slots only while it has few enough of them
+// added one by one; mobs used to be built by copying a literal key by key (js/ids.js refs) and then gain fields as jobs, pens, breeding
+// and the region index needed them, so every mob ended up in V8's slow dictionary mode and each property read in the mob loop was a
+// hash lookup. Now a mob (and its ai table) is made by a constructor that creates every field below, undefined, in this order: one
+// fast layout for all of them. undefined fields are left out of saves, snapshots and the world hash just like missing ones. A new
+// field set on mobs belongs in MOB_FIELDS (AI_FIELDS for m.ai); test/mob-shape.js checks the layout and names any field missing here.
+const MOB_FIELDS = [
+  // made by createMob's own fields (raw link fields: js/ids.js)
+  "type", "hostile", "def", "variant", "profession", "style", "tradingWithId", "level", "badgeLevel", "villageId", "homeKey", "tradeCd", "position",
+  "vel", "prev", "hp", "maxHp", "halfWidth", "height", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "crackStage", "yaw", "headYaw",
+  "headPitch", "lookAtId", "lookV", "walkPhase", "walkAmt", "onGround", "inWater", "headInWater", "fallStart", "hurtT", "invuln", "knockT", "dead",
+  "deathT", "removed", "ai", "age", "rng",
+  // set later by the game's systems
+  "id", "xp", "trades", "inv", "life", "restockDay", "_res", "_rs", "_ri", "slotKey", "bedKey", "jobStocked", "jobsite", "onLadder", "starving",
+  "_agePass", "_ageT", "vname", "priceDay", "store", "fshop", "eggc", "job", "idleT", "tsm", "farm", "flt", "cshop", "bs", "kitFor", "vtask", "ex",
+  "fo", "shp", "pkp", "pgk", "pgc", "stb", "furn", "mi", "mc", "bkr", "beeKit", "bkp", "patrol", "_farT", "mateId", "cow", "calf", "_k", "wildB",
+  "pig", "piglet", "hen", "chick", "sheep", "penKey", "penVillageId", "_shorn", "lamb", "coopKey", "styKey", "horse", "kind", "ctl", "escrow",
+  "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "parents", "_swT",
+  "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
+  "penIn", "atOut", "fall", "jobMem", "seek", "exploded", "vdenied", "vanon", "local", "otherId", "sellerId", "goalSellerId", "ledById", "ridingId",
+  "pastureKey", "exitKey"];
+const AI_FIELDS = [
+  "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
+  "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
+  "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
+  "fleeJitter", "gLos", "was"];
+// The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
+// prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
+const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
+const MobShape = shapeOf(MOB_FIELDS), AiShape = shapeOf(AI_FIELDS);
+// A new object of that layout holding o's fields (link names go through their accessors, as in BF.ids.refs).
+function fill(o, C) { const n = new C(); for (const k of Object.keys(o)) n[k] = o[k]; return n; }
+// An ai table brought back from a snapshot (js/mobsave.js apply) in a new mob's layout.
+const shapeAi = a => fill(a, AiShape);
 function createMob(type, x, y, z, variant, style) {
   const T = TYPES[type];
   if (!T) return null;
@@ -261,7 +295,7 @@ function createMob(type, x, y, z, variant, style) {
     if (!(style >= 0 && style <= 4)) style = styleAt(x, z);
   }
   const yaw = r.next() * Math.PI * 2 - Math.PI;
-  const mob = BF.ids.refs({   // links to other mobs, the village and its places are ids (js/ids.js, spec r15-13)
+  const mob = fill({   // links to other mobs, the village and its places are ids (js/ids.js, spec r15-13)
     type, hostile: T.hostile, def: T, variant: T.variants ? variant : null, profession: T.variants ? variant : undefined,
     style: T.variants ? VILLAGE_STYLES[style] : undefined, tradingWith: null, level: T.variants ? 1 : undefined, badgeLevel: 0,
     village: null, home: null, tradeCd: 0,
@@ -275,10 +309,10 @@ function createMob(type, x, y, z, variant, style) {
     walkPhase: r.next() * 6, walkAmt: 0,
     onGround: false, inWater: false, headInWater: false, fallStart: y,
     hurtT: 0, invuln: 0, knockT: 0, dead: false, deathT: 0, removed: false,
-    ai: BF.ids.refs({ t: rnd(r, 0.5, 3), mode: "idle", tx: x, tz: z, fleeT: 0, target: false, losT: 0, los: false, attackCd: 0,
-          shootCd: rnd(r, 1, 2), fuse: 0, strafe: r.next() < 0.5 ? 1 : -1, lookT: 0, swingT: 0, provoked: 0, burnT: 0, aiming: false }),
+    ai: fill({ t: rnd(r, 0.5, 3), mode: "idle", tx: x, tz: z, fleeT: 0, target: false, losT: 0, los: false, attackCd: 0,
+          shootCd: rnd(r, 1, 2), fuse: 0, strafe: r.next() < 0.5 ? 1 : -1, lookT: 0, swingT: 0, provoked: 0, burnT: 0, aiming: false }, AiShape),
     age: 0, rng: st.rng,
-  });
+  }, MobShape);
   BF.ids.put(mob);   // mob.id: a new "e<n>" (a villager's saved one comes back with its trading state, js/trading.js unpack)
   if (type === "villager" && BF.trades) BF.trades.init(mob); // level, offers, inventory with starting stock
   keepPrev(mob);
@@ -2536,6 +2570,7 @@ function rayAABB(o, d, mn, mx) {
 
 // ---------- public API ----------
 BF.mobs = {
+  shapeAi, MOB_FIELDS, AI_FIELDS,   // one mob layout (test/mob-shape.js, js/mobsave.js)
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
