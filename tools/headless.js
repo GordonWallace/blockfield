@@ -1,4 +1,4 @@
-// Headless simulation (spec r15-40): loads the simulation's files (js/simfiles.js) into one vm context with no document, canvas,
+// Headless simulation (spec r15-40): loads the simulation's files (js/simfiles.js) into this Node process with no document, canvas,
 // WebGL or Three.js scene, boots a seed (or a save) with BF.boot.headless (js/boot.js) and ticks N game seconds, then prints the
 // villager-seconds per second (js/perf.js) and the world state hash (js/statehash.js). The fast CI path, and the base of the Node
 // world server (r15-41).
@@ -12,19 +12,30 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.resolve(__dirname, '..');
 
-// A fresh context with the simulation loaded. opts.log: a file path for the game log. Returns { BF, ctx, ms } (ms: load time).
+// The simulation loaded into this process's own global context, as the world server does (server/simthread.js), so it runs at the
+// same speed as in a page or the server. (Until r15-50's follow-up it ran in a vm context; there every read of a global such as Math
+// goes through the context's interceptor, and the whole simulation ran about 2.5x slower, which skewed every headless measurement.)
+// Once a process: a second call throws. opts.isolated: a fresh vm context instead (the old way: slow, but several worlds in one process).
+// opts.log: a file path for the game log. Returns { BF, ctx (the global object the game sees), ms (load time) }.
 function load(opts = {}) {
   const t0 = performance.now();
-  const con = {};   // the game wraps console.error / warn (js/gamelog.js): its own copy, so Node's console is left alone
-  for (const k of Object.keys(console)) con[k] = typeof console[k] === 'function' ? console[k].bind(console) : console[k];
-  // timers that don't keep Node running (the game log flushes on an interval)
-  const unref = f => (...a) => { const t = f(...a); if (t && t.unref) t.unref(); return t; };
-  const ctx = {
-    console: con, performance, TextEncoder, TextDecoder, structuredClone, queueMicrotask, URL, btoa, atob,
-    setTimeout: unref(setTimeout), setInterval: unref(setInterval), clearTimeout, clearInterval,
-  };
-  vm.createContext(ctx);
-  const run = f => vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: path.join(root, f) });
+  let ctx, run;
+  if (opts.isolated) {
+    const con = {};   // the game wraps console.error / warn (js/gamelog.js): its own copy, so Node's console is left alone
+    for (const k of Object.keys(console)) con[k] = typeof console[k] === 'function' ? console[k].bind(console) : console[k];
+    // timers that don't keep Node running (the game log flushes on an interval)
+    const unref = f => (...a) => { const t = f(...a); if (t && t.unref) t.unref(); return t; };
+    ctx = {
+      console: con, performance, TextEncoder, TextDecoder, structuredClone, queueMicrotask, URL, btoa, atob,
+      setTimeout: unref(setTimeout), setInterval: unref(setInterval), clearTimeout, clearInterval,
+    };
+    vm.createContext(ctx);
+    run = f => vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: path.join(root, f) });
+  } else {
+    if (globalThis.BF) throw new Error('the simulation is already loaded in this process (load({ isolated: true }) for another)');
+    ctx = globalThis;
+    run = f => vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: path.join(root, f) });
+  }
   run('.three-test.min.js');   // three.js r128 (the copy the tests serve for the CDN's): its maths only, no renderer
   for (const f of require('../js/simfiles.js')) run(f);
   const BF = ctx.BF;
