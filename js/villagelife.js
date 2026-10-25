@@ -462,6 +462,9 @@ function think(m, fs, R, D) {
     if (have < h.n) { const g = findGather(m, D, ok); if (g) return g; }
     fs.haul = null;
   }
+  // a builder's farm it is tilling (bug-057) shares the farmer's time with the harvest, else a farmer with many beds never gets to it
+  const own = projectOf(m, R, D);
+  if (own && own.built && Math.random() < 0.5) { const t = projectTask(m, fs, R, D, own, ok); if (t) return t; }
   // harvest mature crops / plant empty farmland, only within 12 blocks of the composter: nearest first
   const mine = myBeds(m, D);
   const cells = D.cells.filter(p => inRange(m, p[0], p[1], p[2]) || mine.some(b => p[1] === b.y && p[0] >= b.x0 && p[0] <= b.x1 && p[2] >= b.z0 && p[2] <= b.z1));
