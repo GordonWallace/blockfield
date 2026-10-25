@@ -183,6 +183,7 @@ function sync(v) {
 // needs) both buy and sell the same item, it sells while it can spare a lot of it and buys otherwise. The other side's job offers are set aside
 // (o.off = "buy" | "sell": hidden on the trade screen, blocked for villagers, their prices kept and still), its spare and need offers dropped.
 // Offers without a single emerald side (barter, horses, maps, food for the hungry) are left alone.
+const SIDES = new WeakMap();   // villager -> Map(item id -> the side it has open), only to log a change of side
 const OFF_NOTE = { buy: "Selling these now, not buying", sell: "Looking for these, not selling" };
 function oneSide(v) {
   const P = BF.prices, sides = new Map();
@@ -199,7 +200,9 @@ function oneSide(v) {
     if (!s.buy.length || !s.sell.length) continue;
     const lot = Math.min(...s.sell.map(o => o.sell.n)), selling = spareOf(v, id) >= lot, side = selling ? "buy" : "sell";
     for (const o of selling ? s.buy : s.sell) o.off = side;
-    const sideOf = v._side || (v._side = new Map()), was = sideOf.get(id);   // not saved: the first sync after a load decides afresh
+    let sideOf = SIDES.get(v);   // not on the mob, not saved: the first sync after a load decides afresh
+    if (!sideOf) SIDES.set(v, sideOf = new Map());
+    const was = sideOf.get(id);
     sideOf.set(id, side);
     if (was && was !== side && BF.glog) BF.glog.log("INFO", "market", (BF.vlog ? BF.vlog.nameOf(v) : "A villager") + " (" + v.profession + ") is now " +
       (selling ? "selling " : "looking for ") + (BF.itemName ? BF.itemName(id) : nameOf(id)).toLowerCase() + (selling ? " instead of buying it" : " instead of selling it"), { village: v.village, at: v.position });
