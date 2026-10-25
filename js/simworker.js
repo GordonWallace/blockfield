@@ -101,6 +101,7 @@ function loop() {
     BF.perf.frame();   // the villager-seconds meter on or off, its window's slices (js/perf.js; js/main.js in the page)
     if (!loadingWorld) BF.world.update(p.x, p.z, W.speed >= 10 ? 3 : 8);   // (generation only: nothing is meshed here)
     BF.inventory.simFrame(raw);
+    BF.maps.simFrame();   // the held map fills in round the player (js/maps.js)
     BF.player.simRide(raw);   // an untamed horse carries the player; a boat or horse gone puts them off (js/player.js, r15-44 part 2)   // a furnace watched in the pause cooks in real time; a gone villager's trade screen closes (js/playerinv.js)
     if (!BF.state.paused) {
       const n = BF.boot.ticks(raw);

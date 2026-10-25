@@ -1,12 +1,15 @@
-// @ci baseline suite=world timeout=300
+// @ci baseline suite=world timeout=300 hosts=worker,server
 // Trees on the planet (generator 4, spec r14-11), in the game: for each kind of tree (and ice spikes and giant mushrooms) one place found
 // with BF.planetgen.treesIn, the player sent there, and the loaded world has that tree's trunk where treesIn says. Then one tree right
 // at a face edge: its crown reaches past the edge, where the next face's chunk draws it (tools/planet-trees.js checks it block for block).
-// node test/run.js /tmp/pf test/planet-forests.js
+// node test/run.js /tmp/pf test/planet-forests.js [--host page|worker|server] (the trees are the page's copy of the world: it generates its
+// own chunks, spec r15-38)
 module.exports = async (pg) => {
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; return ok; };
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); BF.player.setGameMode("creative"); });
+  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
+  await require('./lib').newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => { BF.player.start(); BF.player.setGameMode("creative"); });
   await pg.waitForTimeout(2500);
   // trunk block of each kind (at the tree's base y)
   const KINDS = { oak_nest: "oak_log", birch_nest: "birch_log", spruce: "spruce_log", mega_spruce: "spruce_log", jungle: "jungle_log", acacia: "acacia_log",
