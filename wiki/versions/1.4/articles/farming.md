@@ -15,7 +15,7 @@ Farmland comes in two states, which look different:
 
 Hydrated farmland that goes without water or rain for a day may dry out, and is certain to by the third day. Dry farmland becomes hydrated again as soon as water or rain reaches it. Dry farmland with no crop on it turns back into dirt, at a random moment between one and fourteen days after it dried. A crop growing on it keeps it as farmland. A chunk that was unloaded during rain catches up when it loads again.
 
-A ditch or a single water block therefore keeps a plot of about 7 by 7 blocks moist.
+A ditch or a single water block therefore keeps a plot of about 7 by 7 blocks moist. Water spreads up to 7 blocks from a source on flat ground. Fences and fence gates do not hold it back: the fence stays dry, and the water carries on beyond it one step thinner, so a pool fenced in at ground level leaks out. Sink a trough into the ground instead.
 
 ## Planting
 
