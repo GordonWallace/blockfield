@@ -36,6 +36,20 @@ Object.assign(globalThis, {
     }
   },
 });
+// region workers (spec r15-39, js/rplay.js): followers in worker_threads of their own (server/regionthread.js), as many as the server says
+Object.assign(globalThis, {
+  BF_WORKERS: workerData.workers || undefined, BF_SPLIT: workerData.split || undefined,
+  BF_CORES: require("os").availableParallelism ? require("os").availableParallelism() : require("os").cpus().length,
+  BF_REGION_SPAWN: (me, n) => {
+    const { Worker } = require("worker_threads");
+    const w = new Worker(path.join(__dirname, "regionthread.js"), { workerData: { me, n, play: true } });
+    let fn = null, done = false;
+    w.on("message", m => { if (fn) fn(m); });
+    w.on("error", e => { if (fn && !done) fn({ error: String(e && e.stack || e) }); });
+    w.on("exit", code => { if (code && fn && !done) fn({ error: "it exited (code " + code + ")" }); });
+    return { post: m => w.postMessage(m), on: f => { fn = f; }, terminate: () => { done = true; w.terminate(); } };
+  },
+});
 process.on("uncaughtException", e => { for (const fn of listeners.error) fn({ error: e, message: e && e.message }); if (!listeners.error.length) throw e; });
 process.on("unhandledRejection", reason => { for (const fn of listeners.unhandledrejection) fn({ reason }); });
 

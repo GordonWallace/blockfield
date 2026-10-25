@@ -193,7 +193,7 @@ function view(key) {
   return out;
 }
 
-function reset() { tallies.clear(); vers.clear(); held.clear(); lastWant.clear(); scanned.clear(); }
+function reset() { tallies.clear(); vers.clear(); held.clear(); lastWant.clear(); scanned.clear(); tickT = 0; }
 let hooked = false;
 function hook() { if (!hooked && typeof BF.on === "function") { hooked = true; BF.on("newWorld", reset); } }
 

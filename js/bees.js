@@ -541,6 +541,7 @@ function harvest(x, y, z, how, who) {
   const h = recs.get(ckey(x, y, z));
   if (!h || h.honey < FULL) return null;
   h.honey = 0;
+  if (BF.rworkers) BF.rworkers.touch("hive", h);   // (a beekeeper harvests while it thinks: the other workers get the home's honey, js/rworkers.js)
   if (who === "player") { const out = bees.filter(b => b.home === h); if (out.length) anger(out, h); }
   if (BF.emit) BF.emit("beeHarvest", h, how, who);
   return how === "shears" ? { id: BF.I.honeycomb, n: 3 } : { id: BF.I.honey_bottle, n: 1 };
@@ -558,7 +559,13 @@ function playerUse(target, stack) {
   }
   return { msg: what() };
 }
-function lure(m, on) { if (on) lures.add(m); else lures.delete(m); }
+function lure(m, on) { if (on ? lures.has(m) : !lures.has(m)) return; if (on) lures.add(m); else lures.delete(m); if (BF.rworkers) BF.rworkers.touch("lure", m); }
+// Several workers (spec r15-39): a beekeeper changes its home's honey and its lure while it thinks, on its own worker; these send them on.
+if (BF.rworkers) {
+  BF.rworkers.channel("hive", { key: h => [h.x, h.y, h.z], get: k => homeAt(k[0], k[1], k[2]), state: h => ({ honey: h.honey, bees: h.bees, day: h.day }),
+    set: (h, d) => { if (h && d) { h.honey = d.honey; h.bees = d.bees; h.day = d.day; } } });
+  BF.rworkers.channel("lure", { key: m => m.id, get: id => BF.ids.get(id), state: m => lures.has(m), set: (m, on) => { if (!m) return; if (on) lures.add(m); else lures.delete(m); } });
+}
 
 function hook() {
   if (hooked || !W() || !W().onChunkLoad) return;
@@ -574,7 +581,7 @@ function hook() {
 }
 function reset() {
   for (const b of bees) b.gone = true;
-  bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0;
+  bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
 }
 
 // ---------------------------------------------------------------- saving
@@ -615,4 +622,7 @@ if (BF.mobs && BF.mobs.update) {
   BF.mobs.update = function (dt) { const r = prev.apply(this, arguments); try { update(dt); } catch (e) { console.error(e); } return r; };
 }
 if (W() && W().reset) { const prev = W().reset; W().reset = function () { const r = prev.apply(this, arguments); reset(); return r; }; }
+// homes are found as their chunks load from the start (not first at the first step, scanning the chunks already there in the map's order):
+// a world started in a fresh copy (a region worker, spec r15-39) finds them in the same order as one started after another world
+BF.onLoad(() => { ids(); if (NEST != null) hook(); });
 })();
