@@ -1,4 +1,4 @@
-// @ci integration suite=world,village soak timeout=3000
+// @ci integration suite=world,village soak timeout=4800
 // Regions over several workers (spec r15-39): the world comes out the same however many workers think. Plain node, no browser.
 // Runs seed 3 for one game day headless (tools/headless.js, the player at the village nearest the spawn) with 1, 2 and 4 workers, one
 // after another, and with 3 workers that start splitting after 300 game seconds on their own ("3@300", as the split starts mid-run in

@@ -135,6 +135,7 @@ function sharedIndex() {
   for (const rec of recSet) indexTree(rec, [{ V: rec.key }, null, null], shared, 0);
   return shared;
 }
+function topOf(e) { let x = e; while (x[1] && x[1][1] !== null) x = x[1]; return x[1] ? x[2] : null; }   // the first key of an entry's path
 function pathOf(e) {
   const keys = [];
   for (let x = e; x && x[1] !== null; x = x[1]) keys.push(x[2]);
@@ -148,7 +149,7 @@ function withPaths(roots, fn, not) {
   let index = null;
   const find = obj => {
     const sh = sharedIndex().get(obj);
-    if (sh && !(not && sh[0]["@"] === not.id)) return pathOf(sh);
+    if (sh && !(not && sh[0]["@"] === not.id && (topKey == null || topOf(sh) === topKey))) return pathOf(sh);
     if (!roots.length) return null;
     if (!index) { index = new Map(); for (const r of roots) if (r && typeof r === "object") indexTree(r, [rootRef(r), null, null], index, 0); }
     const e = index.get(obj);
@@ -295,6 +296,7 @@ function diffV(v, s) {
       const old = vs[i], x = v[ks[i]];
       if (typeof x === "function") { vs[i] = SKIPPED; continue; }   // (methods are each worker's own)
       if (old === SKIPPED && skipKey(ks[i])) continue;
+      if (v === self) topKey = ks[i];
       vs[i] = diffChild(old, x, ops, ks[i]);
     }
     return ops.length ? ops : null;
@@ -308,13 +310,17 @@ function diffV(v, s) {
     if (skipKey(k)) { nvs[i] = SKIPPED; continue; }
     const old = at.has(k) ? at.get(k) : SKIPPED;
     at.delete(k);
+    if (v === self) topKey = k;
     nvs[i] = typeof x === "function" ? SKIPPED : diffChild(old, x, ops, k);
   }
   for (const [k, old] of at) if (old !== SKIPPED) ops.push([k, 2]);
   s.ks = ks; s.vs = nvs;
   return ops.length ? ops : null;
 }
-function diff(m, s) { const prev = self; self = m; try { return recSet.has(m) ? diffV(m, s) : withPaths([], () => diffV(m, s), m); } finally { self = prev; } }
+// topKey: the mob's own field being diffed. An object of its own is written where it is, except one met under another field (a seller's
+// slot in its asks pointing at one of its own offers): that is sent as where it lives, so the other workers keep the two the same object
+let topKey = null;
+function diff(m, s) { const prev = self, pk = topKey; self = m; topKey = null; try { return recSet.has(m) ? diffV(m, s) : withPaths([], () => diffV(m, s), m); } finally { self = prev; topKey = pk; } }
 
 // patch(obj, ops) on a replica: the same changes, in place, so links into the object stay as they are
 function patchV(o, ops) {
