@@ -113,7 +113,7 @@ async function play(pg, label, minutes) {
   // ---- the world server: Node worker threads
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-mw-'));
   const S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--verify', '20']);
-  const sp = await open(b, S.url + '?sim=server');
+  const sp = await open(b, S.url + '?sim=server&workers=3');   // (an automated page asks for one region worker unless its URL says)
   check(await sp.evaluate(() => BF.simHost.mode === 'server'), 'server: the page is the world server\'s client');
   const ss = await play(sp, 'server', 20);
   check(ss.split && ss.followers === 2 && !ss.mismatch, `server: split over 3 threads, the copies agree (${ss.text})`);

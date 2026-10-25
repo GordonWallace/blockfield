@@ -616,6 +616,9 @@ BF.bees = {
   onMoveIn: fn => moveL.push(fn),
   out: h => bees.filter(b => b.home === h),
   housekeeping,
+  // (region workers, js/rplay.js: whether homes are already found as their chunks load, as after an earlier world, or first at the first
+  // step; a follower starts its world the way the leader did, so it finds them in the same order)
+  hooked: () => hooked, hook: () => { ids(); if (NEST != null) hook(); },
 };
 // The bee simulation runs with the mobs, once per simulation step (fast-forward included); js/entityview.js draws the bees (spec r15-12).
 if (BF.mobs && BF.mobs.update) {
@@ -623,7 +626,5 @@ if (BF.mobs && BF.mobs.update) {
   BF.mobs.update = function (dt) { const r = prev.apply(this, arguments); try { update(dt); } catch (e) { console.error(e); } return r; };
 }
 if (W() && W().reset) { const prev = W().reset; W().reset = function () { const r = prev.apply(this, arguments); reset(); return r; }; }
-// homes are found as their chunks load from the start (not first at the first step, scanning the chunks already there in the map's order):
-// a world started in a fresh copy (a region worker, spec r15-39) finds them in the same order as one started after another world
-BF.onLoad(() => { ids(); if (NEST != null) hook(); });
+
 })();

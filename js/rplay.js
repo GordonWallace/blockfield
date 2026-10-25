@@ -57,6 +57,7 @@ function begin(world) {
   world.active = BF.active ? BF.active.opts() : null;   // (the simulation budget's settings: the leader's may differ from a fresh copy's, js/active.js)
   world.testEval = !!BF.testEval;
   world.dyn = BF.dynItems ? BF.dynItems() : [];   // (map items made in earlier worlds keep their ids: the follower makes them alike)
+  world.beesHooked = !!(BF.bees && BF.bees.hooked && BF.bees.hooked());
   world.player = player();   // (the look and the rest the title world left: a new world keeps them)
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
   L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
@@ -300,6 +301,7 @@ function follower(post) {
     for (const [name, id] of w.dyn || []) BF.dynItemAs(name, id);
     if (w.viewDist > 0) BF.world.setViewDist(w.viewDist);
     if (w.active && BF.active) BF.active.set(w.active);
+    if (w.beesHooked && BF.bees && BF.bees.hook) BF.bees.hook();   // (homes found as chunks load, as the leader does after an earlier world)
     if (w.op === "load") BF.save.restore(w.data, w.meta);
     else BF.newWorld(w.seed, w.opts || {});
     if (w.player) setPlayer(w.player);
