@@ -2,7 +2,7 @@ Iron golems are the guardians of a village. They stand almost three blocks tall,
 
 ### How many
 
-A village generated with its own population gets one golem for every 15 or so villagers, and never fewer than one. Older villages get one, or two once they have twelve or more houses. A golem that dies is not replaced: the village stays short of one for good. Golems patrol slowly near the village centre, or in larger villages around one of the houses, moving on from time to time. A golem that strays more than about 14 blocks from its patrol spot walks back. When a tree, a wall or a low ledge blocks its way, it finds a route around with room for its height, or steps aside and tries again.
+A village generated with its own population gets one golem for every 15 or so villagers, and never fewer than one. Older villages get one, or two once they have twelve or more houses. A golem that dies is not replaced: the village stays short of one for good. Golems patrol slowly near the village centre, or in larger villages around one of the houses, moving on from time to time. A golem that strays more than about 14 blocks from its patrol spot walks back. Golems are too tall for doors and low roofs, so the spots a golem patrols to are always open ground it fits on, never inside a house or under its eaves. When a tree, a wall or a low ledge blocks its way, it finds a route around with room for its height, or steps aside and tries again. A golem only jumps at a one-block step, never at a wall.
 
 ### Defending the village
 
@@ -11,6 +11,8 @@ A golem attacks any hostile mob within 16 blocks. Its hit is heavy enough to kil
 1. **Rescue.** A villager counts as under attack when a monster hit it in the last six seconds, or a zombie hunting it is within six blocks. Every golem of that village within 64 blocks sprints to the attacker, several times faster than its normal walk.
 2. **Revenge.** Whatever hurt the golem, as long as it is within 32 blocks.
 3. **The nearest hostile** within 16 blocks.
+
+A golem runs straight at its target. When a wall is in the way (a monster inside a house, or behind one), it looks for a route round with room for its height; if there is none, it leaves that monster alone for a minute and goes back to its patrol rather than pressing against the wall.
 
 Monsters fight back: zombies, spiders and skeletons that are not busy with you will attack a golem within 10 blocks, hurting it for 4, 3 and 3 to 5 points. A monster the golem has hit targets it for 12 seconds, even over you. Creepers ignore golems.
 
