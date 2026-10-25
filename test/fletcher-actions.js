@@ -190,6 +190,18 @@ module.exports = async (pg, out) => {
     Pk.inv = inv.create(); inv.add(Pk.inv, I.feather, 26); inv.add(Pk.inv, I.bread, 12); Pk.trades = ["1 emerald > 13 feather"].map(off);             // stand-in poultry keeper
     inv.remove(shp.inv, I.string, 999); inv.remove(shp.inv, I.white_wool, 999); inv.add(shp.inv, I.white_wool, 28);
     const logs0 = BF.vlog.entries(rec.key).length;
+    // the shepherd's string is the fletcher's: other villagers buy it too (a beekeeper for candles, a builder for a loom) and can use it
+    // at once, before the check below sees it held (CI flakes: the fletcher never got any). Each such sale goes back to the shepherd.
+    const oTrade = BF.vlog.trade, taken = [];
+    BF.vlog.trade = function (buyer, seller, o, times) {
+      const r = oTrade.apply(this, arguments);
+      if (seller === shp && buyer !== Fl && buyer && Array.isArray(buyer.inv) && o && typeof o === "object" && o.sell && o.sell.id === I.string) {
+        const n = Math.min(o.sell.n * (times || 1), c(buyer, "string"));
+        if (n > 0) { inv.remove(buyer.inv, I.string, n); inv.add(shp.inv, I.string, n); }
+        taken.push(buyer.profession + " " + n);
+      }
+      return r;
+    };
     FL.LOG.length = 0;
     BF.sky.setTime(0.06);
     const got = { string: false, flint: false, feather: false, stick: false }, seenStatus = new Set();
@@ -197,28 +209,31 @@ module.exports = async (pg, out) => {
     for (let i = 0; i < 40000 && !(arrowsAt && bowAt); i++) {
       step();
       if (i % 20 === 0) {
-        if (BF.sky.time > 0.43) BF.sky.setTime(0.06);   // one long working day
+        // one long working day. Winding the clock back leaves the fletcher's waits, which are game day + time (js/fletcher.js: S.cd, the
+        // pause after finding nothing to buy, and S.avoid, a seller that refused), in the future for good when they were set late in the
+        // day. A CI flake: the beekeeper had bought the shepherd's string just then, the fletcher found none and never looked again. They
+        // are cleared with it.
+        if (BF.sky.time > 0.43) { BF.sky.setTime(0.06); if (Fl.flt) { Fl.flt.avoid = {}; Fl.flt.cd = 0; } }
         for (const n of Object.keys(got)) if (c(Fl, n) > 0) got[n] = true;
         // the village's furniture maker buys wool too: when it got there first the shepherd was left at WOOL_KEEP with too little
         // string for its "1 emerald > 9 string" offer, and the fletcher never got any. Keep the shepherd's spare wool topped up.
         if (c(shp, "white_wool") < 28) inv.add(shp.inv, I.white_wool, 28 - c(shp, "white_wool"));
         // the shepherd is the village's only string: on the planet a fisherman can come home with some and sell it first
         for (const v of vs) if (v !== shp && v !== Fl && c(v, "string")) inv.remove(v.inv, I.string, 999);
-        // and a beekeeper buys string for its candles (js/beekeeper.js) and turns it into candles at once, so it never shows as held: with
-        // its candle stock full it doesn't shop for string (a CI flake: the fletcher never got any)
-        for (const v of vs) if (v.profession === "beekeeper" && BF.beekeeper && c(v, "candle") < BF.beekeeper.CANDLE_STOCK) inv.add(v.inv, I.candle, BF.beekeeper.CANDLE_STOCK - c(v, "candle"));
         const st = BF.villagerStatus.text(Fl); if (st) seenStatus.add(st);
         if (spunAt == null && c(shp, "string") > 0) spunAt = +BF.sky.time.toFixed(3);
         if (arrowsAt == null && c(Fl, "arrow") > 0) arrowsAt = +BF.sky.time.toFixed(3);
         if (bowAt == null && c(Fl, "bow") > 0) bowAt = +BF.sky.time.toFixed(3);
       }
     }
+    BF.vlog.trade = oTrade;
+    R.info.stringTakenBack = taken;
     const logs = BF.vlog.entries(rec.key).slice(logs0).map(e => e[2]);
     R.info.shepherd = { name: BF.vlog.nameOf(shp), prof: shp.profession, jobsite: !!shp.jobsite, sellers: [Mn, Fo, Pk].map(m => BF.vlog.nameOf(m) + " " + m.profession) };
-    R.info.live = { spunAt, arrowsAt, bowAt, fl: names(Fl.inv), shep: names(shp.inv), status: [...seenStatus], dbg: { need: FL.buyNeed(Fl), short: FL.shortfall(Fl), offers: FL.offersFor(Fl, id => id === I.string).length, shep: [shp.sleeping, !!shp.tradingWith, +(shp.position.y - Fl.position.y).toFixed(1)], job: Fl.job, t: BF.sky.time }, flog: FL.LOG.map(e => e.kind + ":" + (e.got || e.made || e.item || e.why || "") + (e.from ? " from " + e.from : "")).slice(-14) };
+    R.info.live = { spunAt, arrowsAt, bowAt, fl: names(Fl.inv), shep: names(shp.inv), status: [...seenStatus], dbg: { need: FL.buyNeed(Fl), short: FL.shortfall(Fl), offers: FL.offersFor(Fl, id => id === I.string).length, shep: [shp.sleeping, !!shp.tradingWith, +(shp.position.y - Fl.position.y).toFixed(1)], job: Fl.job, t: BF.sky.time, avoid: Fl.flt ? Fl.flt.avoid : null, cd: Fl.flt ? +(Fl.flt.cd - BF.sky.day - BF.sky.time).toFixed(3) : null, block: shp.trades.filter(o => o.sell.id === I.string).map(o => T.blockReason(shp, o)) }, flog: FL.LOG.map(e => e.kind + ":" + (e.got || e.made || e.item || e.why || "") + (e.from ? " from " + e.from : "")).slice(-14) };
     ok("live: the shepherd spun string at its loom", spunAt != null, { wool: c(shp, "white_wool"), string: c(shp, "string") });
     ok("live: 'spun N string' is on the village log", logs.some(t => /\(Shepherd\) spun \d+ string$/.test(t)), logs.filter(t => /Shepherd/.test(t)).slice(-3));
-    ok("live: the fletcher bought string, flint, feathers and sticks", Object.values(got).every(Boolean), got);
+    ok("live: the fletcher bought string, flint, feathers and sticks", Object.values(got).every(Boolean), { got, stringTakenBack: taken });
     ok("live: the fletcher bought string from the shepherd", logs.some(t => /\(Fletcher\) traded with .*\(Shepherd\)/.test(t)), { log: logs.filter(t => /Fletcher/.test(t)).slice(-6), shepherd: R.info.shepherd });
     ok("live: the fletcher made arrows and a bow", arrowsAt != null && bowAt != null, { arrowsAt, bowAt });
     ok("live: 'made 4 arrows' and 'made a bow' are on the village log", logs.some(t => /\(Fletcher\) made 4 arrows$/.test(t)) && logs.some(t => /\(Fletcher\) made a bow$/.test(t)), logs.filter(t => /made/.test(t)));
