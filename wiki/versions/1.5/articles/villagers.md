@@ -46,4 +46,4 @@ A village is guarded by iron golems: about one for every 15 villagers, and at le
 ## More
 - [[page:villager-life]]: schedule, beds, food, children, storage, jobsites
 - [[page:village-economy]]: the shared market, reserves and prices
-- [[page:builders]], [[page:caravans]], [[page:village-loading]]
+- [[villager:builder|Builders]], [[page:caravans]], [[page:village-loading]]
