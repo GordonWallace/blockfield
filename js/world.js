@@ -1387,8 +1387,9 @@ world.boxCollides = (px, py, pz, hw, h) => boxHit(px, py, pz, hw, h);
 // opts.stepUp: max auto-step height in blocks (1.05 climbs one-block ledges; 0 disables).
 // opts.swim: the box is swimming (it was in water last step): it steps up onto a ledge too, as off the ground, so a mob swimming in a
 // channel or a pond flush with the land climbs out onto the bank (only a bank no higher than stepUp above its feet).
-// Returns {onGround, hitX, hitZ, hitCeil, inWater}.
-world.moveBox = function (pos, vel, hw, h, dt, opts) {
+// Returns {onGround, hitX, hitZ, hitCeil, inWater, headInWater}.
+// Every call tries fastMove first (below); this general version runs when the box touches a face edge's margin or a pane.
+function moveBoxFull(pos, vel, hw, h, dt, opts) {
   const stepUp = (opts && opts.stepUp) || 0;
   firmInside = !!(opts && opts.firm);
   const res = { onGround: false, hitX: false, hitZ: false, hitCeil: false, inWater: false };
@@ -1438,5 +1439,171 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
   res.headInWater = BF.RENDER[world.getBlock(pos.x, pos.y + h - 0.15, pos.z)] === 3;
   firmInside = false;
   return res;
+}
+
+// ---------- fast collision (r15-50 follow-up) ----------
+// moveBoxFull's algorithm, written for speed: flat collision-box tables, chunks found by a numeric key, block reads that skip res()
+// inside a face's own square, nothing allocated but the result. The same f64 operations in the same order, so the result is identical
+// (BF.debug.collideCompare checks every call). A box touching a margin cell (a face edge, where res() turns addresses) or a pane
+// (boxes that depend on its neighbours, BF.DYNBOXES) throws STOP, and moveBoxFull does that call. About 23x faster per call than
+// moveBoxFull: collision was a third of a tick (reports/r15-50.md).
+const Mfloor = Math.floor, Mmin = Math.min, Mmax = Math.max, Mceil = Math.ceil, Mabs = Math.abs;   // (locals: in a vm context, as headless, every global read is slow)
+const FC = { n: 0, off: null, nul: null, dyn: null, box: null, gen: -1, byNum: new Map(), lastK: NaN, lastC: null };
+const STOP = { stop: true }, ABSENT = { absent: true };
+function fcTables() {   // once the blocks and the pane boxes are known (the first call)
+  const n = Mmax(BF.SOLID.length, BF.RENDER.length, BF.TALLBOX.length, BF.blocks.length);
+  const off = new Uint32Array(n + 1), nul = new Uint8Array(n), dyn = new Uint8Array(n), bx = [];
+  for (let id = 0; id < n; id++) {
+    off[id] = bx.length / 6;
+    if (BF.DYNBOXES[id]) dyn[id] = 1;
+    const list = BF.CBOXES[id] || (BF.CBOX[id] ? [BF.CBOX[id]] : null);
+    if (!list) nul[id] = 1; else for (const b of list) for (let k = 0; k < 6; k++) bx.push(b[k]);
+  }
+  off[n] = bx.length / 6;
+  FC.n = n; FC.off = off; FC.nul = nul; FC.dyn = dyn; FC.box = Float64Array.from(bx);
+}
+// the chunk at canonical chunk (cx, cz), or ABSENT; the numeric keys are dropped whenever a chunk loads or unloads (CGEN)
+function fcChunk(cx, cz) {
+  const k = cx * 2097152 + cz;   // (canonical cx, cz are under 2^20)
+  if (k === FC.lastK) return FC.lastC;
+  let c = FC.byNum.get(k);
+  if (c === undefined) { c = world.chunks.get(ckey(cx, cz)) || ABSENT; FC.byNum.set(k, c); }
+  FC.lastK = k; FC.lastC = c;
+  return c;
+}
+// world.getBlock / isSolid for integer cells, inside a face's own square only (else STOP)
+function fcGet(x, y, z) {
+  if (y < BF.MIN_Y) return BEDROCK_ID;
+  if (y >= BF.H) return 0;
+  const f = Mfloor(x / PW), u = x - PW * f - PN, v = z - PN;
+  if (!(f >= 0 && f < 6 && u >= 0 && u < PN && v >= 0 && v < PN)) throw STOP;
+  const cx = Mfloor(x / CS), cz = Mfloor(z / CS), c = fcChunk(cx, cz);
+  return c === ABSENT ? 0 : cblock(c, x - cx * CS, y, z - cz * CS);
+}
+function fcSolid(x, y, z) {
+  if (y < BF.MIN_Y) return true;
+  if (y >= BF.H) return false;
+  const f = Mfloor(x / PW), u = x - PW * f - PN, v = z - PN;
+  if (!(f >= 0 && f < 6 && u >= 0 && u < PN && v >= 0 && v < PN)) throw STOP;
+  const cx = Mfloor(x / CS), cz = Mfloor(z / CS), c = fcChunk(cx, cz);
+  return c === ABSENT ? !world.high : BF.SOLID[cblock(c, x - cx * CS, y, z - cz * CS)] === 1;
+}
+const fcGetF = (x, y, z) => (y < BF.MIN_Y ? BEDROCK_ID : y >= BF.H ? 0 : fcGet(Mfloor(x), Mfloor(y), Mfloor(z)));
+// boxHit with axis 0 none, 1 x, 2 y, 3 z; the union box in F.h*, F.inside as HIT.inside
+const F = { hx0: 0, hy0: 0, hz0: 0, hx1: 0, hy1: 0, hz1: 0, inside: false, firm: false, px: 0, py: 0, pz: 0, top: 0, onGround: false, hitCeil: false };
+function fcHit(px, py, pz, hw, h, axis, prev) {
+  F.inside = false;
+  const TALL = BF.TALLBOX, off = FC.off, nul = FC.nul, dyn = FC.dyn, BOX = FC.box;
+  const x0 = Mfloor(px - hw), x1 = Mfloor(px + hw - 1e-6);
+  const y0 = Mfloor(py), y1 = Mfloor(py + h - 1e-6);
+  const z0 = Mfloor(pz - hw), z1 = Mfloor(pz + hw - 1e-6);
+  let hit = false;
+  for (let y = y0 - 1; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (y < y0 && !TALL[fcGet(x, y, z)]) continue;
+    if (!fcSolid(x, y, z)) continue;
+    const bid = fcGet(x, y, z);
+    if (dyn[bid]) throw STOP;
+    const nb = nul[bid] === 1, b0 = off[bid], cnt = nb ? 1 : off[bid + 1] - b0;
+    for (let bi = 0; bi < cnt; bi++) {
+      let ax = x, ay = y, az = z, bx = x + 1, by = y + 1, bz = z + 1;
+      if (!nb) {
+        const o6 = (b0 + bi) * 6;
+        ax += BOX[o6]; ay += BOX[o6 + 1]; az += BOX[o6 + 2]; bx = x + BOX[o6 + 3]; by = y + BOX[o6 + 4]; bz = z + BOX[o6 + 5];
+        if (ax >= px + hw || bx <= px - hw || ay >= py + h || by <= py || az >= pz + hw || bz <= pz - hw) continue;
+      }
+      if (axis === 1 ? ax < prev + hw && bx > prev - hw : axis === 3 ? az < prev + hw && bz > prev - hw : axis === 2 && ay < prev + h && by > prev) {
+        const qx = axis === 1 ? prev : px, qy = axis === 2 ? prev : py, qz = axis === 3 ? prev : pz;
+        const ox = Mmin(bx, qx + hw) - Mmax(ax, qx - hw), oy = Mmin(by, qy + h) - Mmax(ay, qy), oz = Mmin(bz, qz + hw) - Mmax(az, qz - hw);
+        const o = axis === 1 ? ox : axis === 2 ? oy : oz;
+        const mv = (axis === 1 ? px : axis === 2 ? py : pz) - prev;
+        const mid = axis === 1 ? (ax + bx) / 2 - prev : axis === 2 ? (ay + by) / 2 - (prev + h / 2) : (az + bz) / 2 - prev;
+        if (!F.firm || o > Mmin(ox, oy, oz) || mv * mid <= 0) continue;
+        F.inside = true;
+      }
+      if (!hit) { F.hx0 = ax; F.hy0 = ay; F.hz0 = az; F.hx1 = bx; F.hy1 = by; F.hz1 = bz; hit = true; continue; }
+      F.hx0 = Mmin(F.hx0, ax); F.hy0 = Mmin(F.hy0, ay); F.hz0 = Mmin(F.hz0, az);
+      F.hx1 = Mmax(F.hx1, bx); F.hy1 = Mmax(F.hy1, by); F.hz1 = Mmax(F.hz1, bz);
+    }
+  }
+  return hit;
+}
+// moveAxis on (F.px, F.py, F.pz): a 1 x, 2 y, 3 z
+function fcAxis(a, d, hw, h) {
+  const n = Mmax(1, Mceil(Mabs(d) / 0.45)), step = d / n;
+  for (let i = 0; i < n; i++) {
+    const prev = a === 1 ? F.px : a === 2 ? F.py : F.pz;
+    if (a === 1) F.px += step; else if (a === 2) F.py += step; else F.pz += step;
+    if (fcHit(F.px, F.py, F.pz, hw, h, a, prev)) {
+      if (F.inside) { if (a === 1) F.px = prev; else if (a === 2) F.py = prev; else F.pz = prev; if (a === 2 && step < 0) F.onGround = true; F.top = F.hy1; return true; }
+      if (a === 2) { if (step < 0) { F.py = F.hy1; F.onGround = true; } else { F.py = F.hy0 - h - 1e-4; F.hitCeil = true; } }
+      else if (a === 1) F.px = step > 0 ? F.hx0 - hw - 1e-4 : F.hx1 + hw + 1e-4;
+      else F.pz = step > 0 ? F.hz0 - hw - 1e-4 : F.hz1 + hw + 1e-4;
+      F.top = F.hy1;
+      return true;
+    }
+  }
+  return false;
+}
+// The result, or null (pos and vel untouched) when moveBoxFull must do the call.
+function fastMove(pos, vel, hw, h, dt, opts) {
+  if (!FC.off) fcTables();
+  if (FC.gen !== CGEN) { FC.byNum.clear(); FC.lastK = NaN; FC.lastC = null; FC.gen = CGEN; }
+  const stepUp = (opts && opts.stepUp) || 0, swim = !!(opts && opts.swim);
+  F.firm = !!(opts && opts.firm);
+  F.px = pos.x; F.py = pos.y; F.pz = pos.z; F.top = 0; F.onGround = false; F.hitCeil = false;
+  let vx = vel.x, vy = vel.y, vz = vel.z, hitX = false, hitZ = false;
+  try {
+    if (fcAxis(2, vy * dt, hw, h)) vy = 0;
+    const wasGround = F.onGround || (vy <= 0 && fcHit(F.px, F.py - 0.05, F.pz, hw, 0.05, 0, 0));
+    for (let a = 1; a <= 3; a += 2) {
+      const d = (a === 1 ? vx : vz) * dt;
+      if (!d) continue;
+      const sx = F.px, sy = F.py, sz = F.pz;
+      if (fcAxis(a, d, hw, h)) {
+        if (stepUp && (wasGround || swim)) {   // auto step-up onto a ledge
+          let lx = sx, lz = sz;
+          const ly = F.top > sy ? F.top : Mfloor(sy + 1e-3) + 1;
+          if (ly - sy <= stepUp && !fcHit(lx, ly, lz, hw, h, 0, 0)) {
+            if (a === 1) lx += d; else lz += d;
+            if (!fcHit(lx, ly, lz, hw, h, 0, 0)) { F.px = lx; F.py = ly; F.pz = lz; continue; }
+          }
+        }
+        if (a === 1) { vx = 0; hitX = true; } else { vz = 0; hitZ = true; }
+      }
+    }
+    if (!F.onGround && vy <= 0 && fcHit(F.px, F.py - 0.02, F.pz, hw, 0.02, 0, 0)) F.onGround = true;
+    const RENDER = BF.RENDER, inWater = RENDER[fcGetF(F.px, F.py + 0.4, F.pz)] === 3, headInWater = RENDER[fcGetF(F.px, F.py + h - 0.15, F.pz)] === 3;
+    pos.x = F.px; pos.y = F.py; pos.z = F.pz; vel.x = vx; vel.y = vy; vel.z = vz;
+    return { onGround: F.onGround, hitX, hitZ, hitCeil: F.hitCeil, inWater, headInWater };
+  } catch (e) {
+    if (e === STOP) return null;
+    throw e;
+  }
+}
+// BF.debug.collideCompare (tests, the console): every call also runs moveBoxFull on copies and tallies BF.debug.collideStats (calls,
+// fast, full (moveBoxFull did it), diffs, the first few kept and logged). moveBoxFull's result is the one used.
+const CDBG = (BF.debug = BF.debug || {});
+CDBG.collideCompare = CDBG.collideCompare || false;
+const collideStatsReset = () => (CDBG.collideStats = { calls: 0, fast: 0, full: 0, diffs: 0, list: [] });
+collideStatsReset();
+CDBG.collideStatsReset = collideStatsReset;
+world.moveBox = function (pos, vel, hw, h, dt, opts) {
+  if (!CDBG.collideCompare) return fastMove(pos, vel, hw, h, dt, opts) || moveBoxFull(pos, vel, hw, h, dt, opts);
+  const S = CDBG.collideStats;
+  const p2 = { x: pos.x, y: pos.y, z: pos.z }, v2 = { x: vel.x, y: vel.y, z: vel.z };
+  const r2 = fastMove(p2, v2, hw, h, dt, opts), r = moveBoxFull(pos, vel, hw, h, dt, opts);
+  S.calls++;
+  if (!r2) { S.full++; return r; }
+  S.fast++;
+  const bad = [];
+  for (const k of ["x", "y", "z"]) { if (!Object.is(p2[k], pos[k])) bad.push("pos." + k); if (!Object.is(v2[k], vel[k])) bad.push("vel." + k); }
+  for (const k in r) if (r[k] !== r2[k]) bad.push(k);
+  if (bad.length) {
+    S.diffs++;
+    if (S.list.length < 10) S.list.push({ bad, at: [pos.x, pos.y, pos.z], hw, h, dt });
+    if (BF.glog && S.diffs <= 20) BF.glog.log("DEBUG", "collideCompare", `Fast collision differs from moveBoxFull at ${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}: ${bad.join(", ")}`, { at: [Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z)] });
+  }
+  return r;
 };
+world.moveBoxFull = moveBoxFull;
 })();
