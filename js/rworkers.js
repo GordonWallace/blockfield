@@ -588,7 +588,7 @@ function afterThink() {
     if (ops) mobs.push([m.id, ops]);
   }
   foreignOps(mobs);
-  const msg = JSON.stringify({ mobs, recs: recOps(null), touched: takeTouched(), reqs: own.map(e => reqOut(e, e[2])), logs, fx, think: +(t - tA).toFixed(3), regions: T.regions, mine: mine.length });
+  const msg = JSON.stringify({ mobs, recs: recOps(null), touched: takeTouched(), dyn: takeDyn(), reqs: own.map(e => reqOut(e, e[2])), logs, fx, think: +(t - tA).toFixed(3), regions: T.regions, mine: mine.length });
   const all = RW.link.exchange(msg);
   T.bytes += msg.length;
   peers = [];
@@ -597,6 +597,7 @@ function afterThink() {
     const p = w === RW.me ? null : JSON.parse(all[w]);
     peers[w] = p ? { think: p.think, regions: p.regions, mobs: p.mine } : { think: +(t - tA).toFixed(3), regions: T.regions, mobs: mine.length };
     if (!p) continue;
+    adoptDyn(p.dyn, w);   // (first of all: the changes may hold the new items)
     patchRecs(p.recs, w);   // (first: a mob's changes may point into its village's record)
     patchMobs(p.mobs, w);
     applyTouched(p.touched);
@@ -649,7 +650,7 @@ function afterDeliver() {
   foreignOps(mobs);
   const mineSends = dSends.filter(e => e[1] === 1);   // (those from callbacks: only this worker made them; onResult's are made everywhere)
   const plan = T.ticks % REBALANCE === 0;
-  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region]),
+  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region]),
     logs, fx, load: plan ? [...load] : null };
   const msg = JSON.stringify(out);
   const all = RW.link.exchange(msg);
@@ -660,6 +661,7 @@ function afterDeliver() {
     const p = w === RW.me ? out : JSON.parse(all[w]);
     if (p.load) loads.push(...p.load);
     if (w === RW.me) continue;
+    adoptDyn(p.dyn, w);
     patchRecs(p.recs, w);
     patchMobs(p.mobs, w);
     applyTouched(p.touched);
@@ -758,6 +760,13 @@ function touch(name, obj) {
   const key = ch.key(obj);
   touched.set(name + "\u0000" + JSON.stringify(key), [name, key]);
 }
+// Dynamic items (map items, js/blocks.js BF.resolveItem) made while this worker thinks: the others make them under the same ids. Two
+// workers making different new items in one tick would give them one id: the copies would differ, and that is reported (rare: a map
+// made for a zone no map was made for before).
+let dynNew = [];
+function dynItem(name, id) { if (RW.active && owning) dynNew.push([name, id]); }
+function takeDyn() { const d = dynNew; dynNew = []; return d; }
+function adoptDyn(list, from) { for (const [name, id] of list || []) if (!BF.dynItemAs(name, id)) out_of_step("worker " + from + " made item " + name + " as " + id + ", which is another item here"); }
 // A mob of another unit that this worker's thinking is about to change (a poultry keeper feeding a wild chicken it lures, js/poultry.js):
 // called before the change, it is sent with this worker's mobs (a diff from now), and its owner takes the change as the others do.
 let foreign = new Map();   // mob -> Shadow from before the change
@@ -785,7 +794,7 @@ let owning = false;   // in this worker's own part of the tick (its mobs thinkin
 function setup(o) {
   RW.n = o.n; RW.me = o.me; RW.link = o.link; RW.active = o.n > 1;
   RW.owners = new Map(); RW.solo = false; RW.mismatch = null;
-  shadows = new Map(); recShadows = new Map(); load.clear(); touched = new Map(); foreign = new Map(); owning = false;
+  shadows = new Map(); recShadows = new Map(); load.clear(); touched = new Map(); foreign = new Map(); dynNew = []; owning = false;
   for (const k in T) T[k] = 0;
   tA = tB = 0; peers = [];
   if (RW.active) note(RW.n + " workers share the regions (worker " + RW.me + " of " + RW.n + ")");
@@ -848,7 +857,7 @@ function hourly() {
   hourT = Object.assign({}, T);
 }
 
-Object.assign(RW, { journal: null, clock: null, onTick: null, rec, stamp, realNow, tick, pause, channel, touch, writes, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
+Object.assign(RW, { journal: null, clock: null, onTick: null, rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS,
   refs: refsOn });
 BF.rworkers = RW;

@@ -56,6 +56,7 @@ function begin(world) {
   world.viewDist = BF.world.viewDist;
   world.active = BF.active ? BF.active.opts() : null;   // (the simulation budget's settings: the leader's may differ from a fresh copy's, js/active.js)
   world.testEval = !!BF.testEval;
+  world.dyn = BF.dynItems ? BF.dynItems() : [];   // (map items made in earlier worlds keep their ids: the follower makes them alike)
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
   L.world = world; L.ticks = 0; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
   L.soloMs = null; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
@@ -254,6 +255,7 @@ function follower(post) {
     BF.prepareWorld = () => Promise.resolve();
     if (w.testEval) BF.testEval = true;   // (the leader runs tests' functions: so does every copy, js/protocol.js eval)
     if (w.clock) BF.warp.advance(w.clock - BF.simNow());
+    for (const [name, id] of w.dyn || []) BF.dynItemAs(name, id);
     if (w.viewDist > 0) BF.world.setViewDist(w.viewDist);
     if (w.active && BF.active) BF.active.set(w.active);
     if (w.op === "load") BF.save.restore(w.data, w.meta);

@@ -791,19 +791,33 @@ BF.resolveItem = name => {
   if (I[name] !== undefined) return I[name];
   const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
   if (a && +a[1] > BF.AUTO_MAP_MAX_K) return BF.resolveItem("auto_map_" + BF.AUTO_MAP_MAX_K + "_" + a[2] + "_" + a[3]);   // old saves: wider maps shrink to the widest allowed, same centre
-  if (a && +a[1] >= 1) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
-    const k = +a[1], id = dynItem++;
-    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map_filled", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto-Fill Map (" + k * 128 + "x" + k * 128 + " blocks)", search: "auto map autofill auto-fill automap" };
-    I[name] = id;
-    return id;
-  }
-  const m = /^filled_map_([1-5])_(-?\d+)_(-?\d+)$/.exec(name || "");
-  if (!m) return undefined;
-  const size = +m[1], zx = +m[2], zz = +m[3], side = 8 * Math.pow(2, size - 1), id = dynItem++;
-  items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "filled_map", map: { size, zx, zz }, label: "Map (" + side + "x" + side + " chunks)" };
-  I[name] = id;
+  if (!(a && +a[1] >= 1) && !/^filled_map_([1-5])_(-?\d+)_(-?\d+)$/.test(name || "")) return undefined;
+  const id = dynItem;
+  dynMake(name, id);
+  if (BF.rworkers && BF.rworkers.dynItem) BF.rworkers.dynItem(name, id);   // (region workers: the others make it under the same id, js/rworkers.js)
   return id;
 };
+// A dynamic item made under a given id (a map item: auto-filling, or a zone's filled map). Returns false when the name isn't one.
+function dynMake(name, id) {
+  const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
+  if (a && +a[1] >= 1) {   // auto-filling map: <zones per side>_<zoneX>_<zoneZ> (js/mapview.js)
+    const k = +a[1];
+    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "auto_map_filled", auto: { k, zx: +a[2], zz: +a[3] }, label: "Auto-Fill Map (" + k * 128 + "x" + k * 128 + " blocks)", search: "auto map autofill auto-fill automap" };
+  } else {
+    const m = /^filled_map_([1-5])_(-?\d+)_(-?\d+)$/.exec(name || "");
+    if (!m) return false;
+    const size = +m[1], zx = +m[2], zz = +m[3], side = 8 * Math.pow(2, size - 1);
+    items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "filled_map", map: { size, zx, zz }, label: "Map (" + side + "x" + side + " chunks)" };
+  }
+  I[name] = id;
+  if (id >= dynItem) dynItem = id + 1;
+  return true;
+}
+// The dynamic items made so far, [[name, id]] in id order, and one made under the id another copy of the world gave it (spec r15-39:
+// region workers, so the same map is the same item everywhere; a new world doesn't forget them, so a follower starting on a later world
+// takes the leader's list first)
+BF.dynItems = () => { const out = []; for (let id = ITEM_BASE + 0x10000; id < dynItem; id++) if (items[id]) out.push([items[id].name, id]); return out; };
+BF.dynItemAs = (name, id) => (I[name] !== undefined ? I[name] === id : dynMake(name, id));
 // Items dropped when a block breaks: its `drop` plus `extraDrops` [[itemName, min, max, chance], ...].
 // Returns [{id, count}]. Mature crops' extra drops replace nothing: wheat gives wheat + 1-3 seeds.
 // r: the seeded stream to roll with (js/rand.js). Without one: the stream of the mob thinking (BF.rand.thinker), or in the apply phase the
