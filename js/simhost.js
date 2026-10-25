@@ -227,6 +227,7 @@ function hook(C) {
     if (m.gameMode && m.gameMode !== P.gameMode) P.setGameMode(m.gameMode);
     if (m.mount !== undefined) P.rideSelf(m.mount);   // got on or off a boat or horse (r15-44 part 2), before a teleport off it
     if (m.pos) P.teleport(m.pos[0], m.pos[1], m.pos[2]);
+    if (m.mv != null) moveSeen = m.mv;   // (the player messages say it was taken up: protocol.js playerIn)
     if (m.look) P.setLook(m.look[0], m.look[1]);
     if (m.flying != null && P.flying !== m.flying) P.setFlying(m.flying);
     if (m.inv && BF.inventory.setOwn) BF.inventory.setOwn(m.inv);
@@ -240,7 +241,12 @@ function hook(C) {
 H.world = function (op, args) {
   if (!H.worker) return Promise.resolve({ ok: false, why: "in page" });
   // (not to the world server: the network is tens of megabytes, and the server keeps the ones it has solved, server/world.js)
-  const a = Object.assign({ rivers: !H.server && BF.worldgen.riverState ? BF.worldgen.riverState() : null }, args);
+  // It goes as its own message, structured-cloned: through the protocol (JSON) its typed arrays would arrive as empty objects, and the
+  // worker would solve a network of its own from zero samples (no lakes, other rivers) under the page's terrain. The world message
+  // names its key.
+  const st = !H.server && BF.worldgen.riverState ? BF.worldgen.riverState() : null;
+  if (st) BF.proto.worker.w.postMessage({ rivers: st });
+  const a = Object.assign({ rivers: st ? st.seed : null }, args);
   sentPlayer = ""; lastClock = null; sentSpeed = sentPause = null;
   return new Promise(resolve => BF.client.worldOp(op, a, r => {
     if (r && r.resumed && r.speed != null) {   // a world the server held paused, picked again: it goes on at the speed it had
@@ -248,13 +254,16 @@ H.world = function (op, args) {
       if (!r.speed) W.freeze(); else if (i >= 0) W.set(i);
       glog("INFO", "The world server's held world \"" + (r.meta && r.meta.name) + "\" goes on at " + r.speed + "x");
     }
+    // the page's speed again, to the world just started: starting it reset the speed there, after any speed the page sent while it
+    // loaded (a freeze set on worldLoaded, which the page fires first, was lost and the world ran on at 1x)
+    sentSpeed = sentPause = null;
     resolve(r);
   }));
 };
 H.demo = (seed, opts) => H.world("demo", { seed, opts: opts || {} });
 
 // ---- each frame (js/main.js)
-let sentPlayer = "", sentSpeed = null, sentPause = null, lastClock = null;
+let sentPlayer = "", sentSpeed = null, sentPause = null, lastClock = null, moveSeen = 0;
 // The page's clock for drawing: the ticks a frame would run, counted but not run (they run in the worker). Returns how many.
 H.ticks = function (raw) {
   const W = BF.warp, plan = W.plan(raw);
@@ -268,6 +277,7 @@ H.frame = function () {
   const C = BF.client, P = BF.player;
   const st = P.serialize();
   st.sel = BF.inventory.selectedIndex;   // the hotbar slot: the page's (r15-44)
+  st.mv = moveSeen;   // the last move the simulation made that the page has taken up
   const ride = P.rideReport();   // the boat or saddled horse the page steers (r15-44 part 2)
   if (ride) st.ride = ride;
   const k = JSON.stringify(st);

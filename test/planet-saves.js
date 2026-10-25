@@ -1,12 +1,11 @@
-// @ci integration suite=ui timeout=900
+// @ci integration suite=ui timeout=900 hosts=worker,server
 // New worlds are planets, and saves (spec r14-19): save.create makes a generator 4 world saved as version 3 (1.5: spec r15-42); a save made with the
 // player, a boat and mobs on face 0 and edits on both sides of a face edge comes back exactly; the spawn is dry temperate or
 // subtropical land at least 5 km from every face edge and 20 km from every corner, the same each time; a 1.3 (version 1) world is
 // listed greyed with only Delete, won't open from the list and save.load refuses it; creating a world from the menu makes a planet;
 // #seed<n> boots a planet, and since the flat generators were retired (r14-24) a #seed<n>gen3 hash is not read: the default planet boots.
-// Converted for every host (lib.sim, spec r15-43) but not opted in yet: with the world loaded in a Web Worker, mobs saved standing on a
-// built platform come back moved off their spots (reported 2026-10-24); on the world server a loaded world starts in a fresh thread,
-// which can run before the page's freeze reaches it, so the mobs can't be held for the check there.
+// Runs on every host (lib.sim, spec r15-43). On the world server a loaded world starts in a fresh thread, where nothing the test held
+// before the load is held.
 // node test/run.js /tmp/ps test/planet-saves.js [--host page|worker|server]
 const lib = require('./lib');
 module.exports = async (pg, out) => {
