@@ -17,7 +17,7 @@ The hash is made from separate parts, each with its own hash, so when two worlds
 - **clock** and **weather**;
 - **wildlife** (wild mobs stored with chunks that aren't loaded), **boats**, **horses**, **bees** (nests and hives) and **farmland**.
 
-Positions are rounded to 1/1024 of a block, and anything that is only drawing (models, walking animation, particles, sounds) is left out. Working out the hash doesn't change the world.
+Positions are rounded to 1/1024 of a block, and anything that is only drawing or sound (models, walking animation, arm swings, items bobbing on the ground, particles, sound timers) is left out. Working out the hash doesn't change the world.
 
 ## Where to see it
 
@@ -26,7 +26,7 @@ Positions are rounded to 1/1024 of a block, and anything that is only drawing (m
 
 ## The determinism test
 
-`test/determinism.js` starts the same world (seed 3) twice, runs each for one game day and compares the hashes every eighth of a day. Blockfield 1.5 is making the simulation deterministic step by step, so for now the test only reports which parts differ and where they first differ; once that work is in, a difference fails it.
+`test/determinism.js` starts the same world (seed 3) twice, at the village nearest the spawn, runs each for one game day and compares the hashes every eighth of a day. The simulation is deterministic in 1.5, so the hashes must match at every check: a difference fails the test, which names the parts that differ and shows where each first differs. Chunks load at the same ticks in both copies. In play, when chunk data arrives still depends on how fast the computer generates it.
 
 ## Regions in any order
 

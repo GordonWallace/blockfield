@@ -181,10 +181,8 @@ function session(steps) {
   const rk = await B.evaluate(() => BF.req.stats().byKind);
   const same = Object.keys(kinds).every(k => rk[k] && rk[k].applied >= kinds[k]);
   check(same, `the replay applied every recorded request (${Object.keys(kinds).map(k => k + ' ' + (rk[k] ? rk[k].applied : 0)).join(', ')})`);
-  // The professions' visual arm swings (ai.swingT, "visual" Math.random rolls in js/baker.js, explorer.js and 15 more) are not seeded yet
-  // and are in the mobs part, as are the sound timers (_snd*, js/audio.js): clear them in both pages before hashing, so the rest of the
-  // world is compared exactly.
-  const [ha, hb] = await Promise.all(pages.map(pg => pg.evaluate(() => { for (const m of BF.mobs.list) { if (m.ai) m.ai.swingT = 0; for (const k in m) if (/^_snd/.test(k)) delete m[k]; } return BF.stateHash.full(); })));
+  // (the professions' visual arm swings, ai.swingT, and the mobs' sound timers, _snd*, are drawn or heard only: js/statehash.js leaves them out)
+  const [ha, hb] = await Promise.all(pages.map(pg => pg.evaluate(() => BF.stateHash.full())));
   const differ = Object.keys(ha.parts).filter(k => ha.parts[k] !== hb.parts[k]);
   for (const k of differ) {
     const [x, y] = await Promise.all(pages.map(pg => pg.evaluate(k => BF.stateHash.text(k), k)));

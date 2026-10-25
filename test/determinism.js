@@ -1,15 +1,16 @@
 // @ci integration suite=world soak timeout=1800
 // Determinism (spec r15-24): the same seed gives the same world. Boots seed 3 twice, each in a fresh page, fast-forwards one game day in
-// each with the main loop's simulation step (js/main.js frame) and compares the world state hash (js/statehash.js) and its parts at the
-// start and every eighth of a day. A second case, replaying a recorded player session, comes with r15-20.
+// each with the main loop's simulation tick (BF.simStep) and compares the world state hash (js/statehash.js) and its parts at the
+// start and every eighth of a day. The second case, a recorded player session replayed in a fresh page, is test/player-requests.js
+// (r15-20), which requires the same hash at the end.
 // The frame loop is held from the first frame, so both pages start from the boot's state and only the test's steps move the world:
-// the player is moved to the village nearest the spawn, chunks load by BF.world.update every 50 steps, and the player stands still
+// the player is moved to the village nearest the spawn, chunks load to completion every 50 steps, and the player stands still
 // (it is not simulated here).
-// REPORT-ONLY until Stage 1 (r15-10, r15-14 to r15-23) has merged: differences are printed as DIFF lines and the test passes. With
-// ENFORCE = true (the coordinator flips it then) any difference fails. The unit checks (a single block, item or mob position changes
-// the hash; hashing twice gives the same hash) always count.
+// ENFORCED since Stage 1 (r15-10, r15-14 to r15-23) merged: any difference fails, with the parts that differ and where each first differs.
+// (ENFORCE = false makes it report-only again, printing DIFF lines and passing.) The unit checks (a single block, item or mob position
+// changes the hash; hashing twice gives the same hash) always count.
 // Usage: NODE_PATH=$(npm root -g) node test/determinism.js [seed=3] [days=1]
-const ENFORCE = false;
+const ENFORCE = true;
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
 const root = path.resolve(__dirname, '..');
@@ -29,30 +30,33 @@ async function boot(b, n) {
   await pg.goto('file://' + path.join(root, 'index.html') + '?debugfeed=off#seed' + seed + 'gen4v10');
   await require('./lib').ready(pg);
   await pg.evaluate(() => {
-    const W = BF.warp;
-    // the main loop's simulation step (js/main.js frame), without the player
-    window.__step = h => {
-      W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); if (BF.dayTimeline) BF.dayTimeline.update();
-      BF.drops.update(h); if (BF.boats) BF.boats.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim();
-    };
+    // the main loop's simulation tick (js/boot.js simStep, in fixed W.TICK steps: r15-10), without the player
+    window.__step = () => BF.simStep(BF.warp.TICK);
     // to the village nearest the spawn (as test/lib.js toVillage), so villagers are in the comparison
     const P = BF.planet, p = BF.player.position;
     const v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];
     if (v) BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
     window.__load = k => { const p = BF.player.position; for (let i = 0; i < k; i++) BF.world.update(p.x, p.z, 8); };
+    // Chunk loading in the steps: BF.world.update creates chunk data within a real-time budget (js/world.js), so what one call creates
+    // depends on the machine. Between ticks the test calls it until no more chunks appear, so both pages have the same chunks at the same
+    // tick. (In play chunk data still arrives on real time; tying it to ticks is later work.)
+    window.__settle = () => { const p = BF.player.position; let same = 0, n = BF.world.chunks.size;
+      for (let i = 0; i < 200 && same < 3; i++) { BF.world.update(p.x, p.z, 50); const m = BF.world.chunks.size; same = m === n ? same + 1 : 0; n = m; } };
   });
-  // the chunks round the spawn: load until the count stops growing (a planet's chunk generation is partly asynchronous)
+  // the chunks round the spawn: load until nothing is left to generate or mesh and the count stops growing (a planet's chunk generation is
+  // partly asynchronous)
   let last = -1;
-  for (let i = 0; i < 60; i++) {
-    const c = await pg.evaluate(() => { window.__load(20); return BF.world.chunks.size; });
-    if (c === last && i > 5) break;
-    last = c; await pg.waitForTimeout(250);
+  for (let i = 0; i < 240; i++) {
+    const c = await pg.evaluate(() => { window.__load(20); return { n: BF.world.chunks.size, q: BF.world.queueLength }; });
+    if (c.n === last && c.q === 0 && i > 5) break;
+    last = c.n; await pg.waitForTimeout(250);
   }
+  console.log(`page ${n}: ${last} chunks loaded`);
   return pg;
 }
 const advance = (pg, steps) => pg.evaluate(k => {
-  for (let i = 0; i < k; i++) { window.__step(0.05); if (i % 50 === 0) window.__load(1); }
-  return BF.stateHash.full();
+  for (let i = 0; i < k; i++) { window.__step(); if (i % 50 === 0) window.__settle(); }
+  return Object.assign(BF.stateHash.full(), { chunks: BF.world.chunks.size, queued: BF.world.queueLength });
 }, steps);
 
 (async () => {
@@ -63,7 +67,7 @@ const advance = (pg, steps) => pg.evaluate(k => {
 
   // unit checks on the first page (then put back): the hash is stable and sees one block, one item and one mob's position
   const u = await pages[0].evaluate(() => {
-    for (let i = 0; i < 400; i++) { window.__step(0.05); if (i % 50 === 0) window.__load(1); }   // 20 s, for some mobs
+    for (let i = 0; i < 400; i++) { window.__step(); if (i % 50 === 0) window.__settle(); }   // 20 s, for some mobs
     const H = BF.stateHash, a = H.full(), same = H.full().hash === a.hash, p = BF.player.position, r = {};
     const diff = (base, b) => Object.keys(b.parts).filter(k => b.parts[k] !== base.parts[k]);
     const change = f => { const base = H.full(); f(); return diff(base, H.full()); };
@@ -89,7 +93,7 @@ const advance = (pg, steps) => pg.evaluate(k => {
   const compare = async (label, r) => {
     const parts = Object.keys(r[0].parts).filter(k => r[0].parts[k] !== r[1].parts[k]);
     const same = r[0].hash === r[1].hash;
-    console.log(`${same ? 'same ' : 'DIFF '}${label}: ${r[0].hash} ${same ? '' : r[1].hash + ' parts ' + parts.join(', ')} (${r[0].ms} ms)`);
+    console.log(`${same ? 'same ' : 'DIFF '}${label}: ${r[0].hash} ${same ? '' : r[1].hash + ' parts ' + parts.join(', ')} (${r[0].ms} ms${r[0].chunks != null ? `; chunks ${r[0].chunks} / ${r[1].chunks}, queued ${r[0].queued} / ${r[1].queued}` : ''})`);
     for (const k of parts) {
       differ[k] = (differ[k] || 0) + 1;
       if (first[k]) continue;
@@ -114,7 +118,7 @@ const advance = (pg, steps) => pg.evaluate(k => {
   else {
     console.log('parts that differed (checks, first at): ' + Object.keys(differ).map(k => `${k} (${differ[k]}, ${first[k]})`).join('; '));
     if (ENFORCE) check(false, 'the same seed gives the same world state hash');
-    else console.log('report-only (ENFORCE off until Stage 1 merges): differences do not fail the test');
+    else console.log('report-only (ENFORCE off): differences do not fail the test');
   }
   await b.close();
   if (fails) { console.log(`FAIL ${fails} check(s)`); process.exit(1); }
