@@ -248,6 +248,7 @@ function serve(send, opts) {
     editsDue: false,          // replica: all edits go at the next flush (after a hello: a save's edits are restored after newWorld)
     hurts: [], rep: null, invSent: null, spawnSent: null, mountSent: "null",   // replica: hurts to send, the player as the client last reported it, what self last sent
     movedTo: null,            // replica: where self.pos last put the player, until the client's messages say it is there (playerIn)
+    moveSeq: 0,               // replica: counts self.pos moves (sent as mv); a player message carrying the latest mv was sent after the client took it
     cursorSent: null, screenSent: null,   // (r15-44: the held stack and the open screen, in every mode)
   };
   const out = msg => {
@@ -432,7 +433,10 @@ function serve(send, opts) {
       if (P.gameMode !== r.gameMode) { m.gameMode = r.gameMode = P.gameMode; any = true; }
       const p = P.position;
       if (P.vehicle) { r.x = p.x; r.y = p.y; r.z = p.z; }   // riding: the page seats the player itself (js/player.js rideSelf)
-      else if (Math.abs(p.x - r.x) > 1e-6 || Math.abs(p.y - r.y) > 1e-6 || Math.abs(p.z - r.z) > 1e-6) { m.pos = [p.x, p.y, p.z]; r.x = p.x; r.y = p.y; r.z = p.z; any = true; S.movedTo = { x: p.x, y: p.y, z: p.z, until: Date.now() + 3000 }; }
+      else if (Math.abs(p.x - r.x) > 1e-6 || Math.abs(p.y - r.y) > 1e-6 || Math.abs(p.z - r.z) > 1e-6) { m.pos = [p.x, p.y, p.z]; m.mv = ++S.moveSeq; r.x = p.x; r.y = p.y; r.z = p.z; any = true; S.movedTo = { x: p.x, y: p.y, z: p.z, until: Date.now() + 3000, mv: S.moveSeq }; }
+      // where it looks and whether it flies, when a command here changed them (/tp corner faces the corner, a far /tp keeps the compass facing)
+      if (P.yaw !== undefined && (P.yaw !== r.yaw || P.pitch !== r.pitch)) { m.look = [P.yaw, P.pitch]; r.yaw = P.yaw; r.pitch = P.pitch; any = true; }
+      if (P.flying !== undefined && !!P.flying !== r.flying) { m.flying = r.flying = !!P.flying; any = true; }
     }
     // riding (r15-44 part 2): the boat or horse the player is on, when that changed (getting on or off here, its health); the pose goes along
     const ride = P.rideState ? P.rideState() : null, rk = JSON.stringify(ride);
@@ -451,10 +455,15 @@ function serve(send, opts) {
     const rp = S.rep, p0 = P.position, now = Date.now();
     const unsent = rp && !P.vehicle && (Math.abs(p0.x - rp.x) > 1e-6 || Math.abs(p0.y - rp.y) > 1e-6 || Math.abs(p0.z - rp.z) > 1e-6);
     const t = S.movedTo;
-    if (t && (now > t.until || Math.hypot(m.x - t.x, m.y - t.y, m.z - t.z) < 2)) S.movedTo = null;
+    // (or the message says the client had taken the move up when it sent it, mv: a teleport it made since is its own and wins; without
+    // this one sent within the 3 s was dropped, and a player standing still never sent another, so the simulation kept it elsewhere)
+    if (t && (now > t.until || Math.hypot(m.x - t.x, m.y - t.y, m.z - t.z) < 2 || (m.mv != null && m.mv >= t.mv))) S.movedTo = null;
     const keep = unsent || !!S.movedTo;
     if (!keep) P.position.set(m.x, m.y, m.z);
-    if (P.setLook) P.setLook(m.yaw || 0, m.pitch || 0);
+    // the same for a look or flying changed here and not sent yet (the next self message carries them)
+    const lookUnsent = rp && rp.yaw !== undefined && (P.yaw !== rp.yaw || P.pitch !== rp.pitch), flyUnsent = rp && rp.flying !== undefined && !!P.flying !== rp.flying;
+    if (P.setLook && !lookUnsent) P.setLook(m.yaw || 0, m.pitch || 0);
+    if (m.flying != null && P.setFlying && !flyUnsent && P.flying !== !!m.flying) P.setFlying(m.flying);
     if (m.gameMode && m.gameMode !== P.gameMode && P.setGameMode) P.setGameMode(m.gameMode);
     if (m.health != null) P.health = m.health;
     if (m.hunger != null) P.hunger = m.hunger;
@@ -462,7 +471,7 @@ function serve(send, opts) {
     if (m.sel != null && BF.inventory && BF.inventory.selectedIndex !== m.sel) BF.inventory.select(m.sel);   // the hotbar slot (r15-44: the page's)
     if (m.ride && P.rideIn) P.rideIn(m.ride);   // the boat or horse the page steers (r15-44 part 2)
     if (m.saturation != null) P.saturation = m.saturation;   // (r15-43: the page drains it; eating here raises it, flushSelf)
-    S.rep = { x: keep ? rp.x : m.x, y: keep ? rp.y : m.y, z: keep ? rp.z : m.z, health: P.health, hunger: P.hunger, saturation: P.saturation, gameMode: P.gameMode };
+    S.rep = { x: keep ? rp.x : m.x, y: keep ? rp.y : m.y, z: keep ? rp.z : m.z, yaw: lookUnsent ? rp.yaw : P.yaw, pitch: lookUnsent ? rp.pitch : P.pitch, flying: flyUnsent ? rp.flying : !!P.flying, health: P.health, hunger: P.hunger, saturation: P.saturation, gameMode: P.gameMode };
   }
   // replica: the player's body is the client's, so what would change it here goes to the client instead (mobs, bees and lightning
   // hurting the player, js/mobs.js, js/bees.js, js/weather.js)
@@ -548,16 +557,20 @@ function serve(send, opts) {
     player: playerIn,
     // start a world (the host's handler: create, load or the title screen's world), answered with a result when it's ready
     world(m) {
-      const done = r => out({ t: "result", wid: m.wid, result: r });
+      // (replica: the new world's player, its spawn or saved spot, arrives before the answer: a teleport the client makes once it has the
+      // answer is not then undone by a self message from before it)
+      const done = r => { flushSelf(); out({ t: "result", wid: m.wid, result: r }); };
       if (!opts.world) { done({ ok: false, why: "no worlds here" }); return; }
       let p;
       try { p = Promise.resolve(opts.world(m.op, m.args || {})); } catch (e) { p = Promise.reject(e); }
       p.then(r => done(Object.assign({ ok: true }, r || {})), e => { glog("ERROR", "Could not " + m.op + " the world: " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n")); done({ ok: false, why: String(e && e.message || e) }); });
     },
-    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters)
+    // the open world's name or monster options changed on the title screen (js/save.js rename, setMonsters), or the player quit it (save.quit)
     meta(m) {
+      if (m.forget) { if (BF.glog) BF.glog.forget(m.id); if (BF.save && BF.save.current && BF.save.current.id === m.id) BF.save.current = null; return; }   // the world is being deleted
       const cur = BF.save && BF.save.current;
       if (!cur || (m.id && m.id !== cur.id)) return;
+      if (m.quit) { BF.save.current = null; return; }   // Save and Quit to Title: the world plays on as the title background, unsaved (its log closes)
       if (m.name != null) cur.name = m.name;
       if (m.monsters) { cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
     },

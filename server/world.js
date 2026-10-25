@@ -175,7 +175,10 @@ function start(o) {
     if (m.feedPage) { srv.page = m.feedPage; return; }
     if (m.feedIcons) {
       for (const id in m.feedIcons) { srv.icons.set(id, m.feedIcons[id]); if (srv.wantIcons.has(id)) { srv.iconsDue.set(id, srv.wantIcons.get(id)); srv.wantIcons.delete(id); } }
-      srv.wantIcons.clear(); srv.iconsAsked = false;   // (one the page couldn't draw isn't asked for again)
+      // one asked for that the page couldn't draw isn't asked for again; one wanted since the ask went out is asked for next (clearing all
+      // of them lost those: the simulation sends an item's icon once, so the debug screen never had its name or picture)
+      for (const id of srv.iconsAsked || []) srv.wantIcons.delete(id);
+      srv.iconsAsked = false;
       return;
     }
     if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
@@ -361,7 +364,7 @@ function start(o) {
         if (Object.keys(simA).length) srv.feedAck = simA;
         if (Object.keys(pageA).length) toPage({ feedAck: pageA });
       }
-      if (srv.wantIcons.size && srv.client && !srv.iconsAsked) { srv.iconsAsked = true; toPage({ feedAck: { icons: [...srv.wantIcons.keys()] } }); }
+      if (srv.wantIcons.size && srv.client && !srv.iconsAsked) { srv.iconsAsked = [...srv.wantIcons.keys()]; toPage({ feedAck: { icons: srv.iconsAsked } }); }   // (the ids asked for: false when none is out)
     } finally { feeding = false; }
   }
   const feedTimer = setInterval(() => { feed().catch(e => say("debug feed: " + e.message)); }, FEED_MS);

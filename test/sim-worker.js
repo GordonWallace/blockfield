@@ -44,6 +44,7 @@ async function open(b, url) {
   pg.on('pageerror', e => console.log('PAGEERROR', (e.stack || e.message).slice(0, 600)));
   pg.on('console', m => { if (m.type() === 'error' && !/GL Driver/.test(m.text())) console.log('console.error:', m.text().slice(0, 400)); });
   await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
+  await pg.addInitScript(() => { window.BF_TEST = true; });   // (the eval query in the worker: BF.simHost.eval)
   // frame times: how long each of the game's frames (js/main.js frame) takes on the page's thread, for the report. The day is played
   // with drawing switched off (renderer.render does nothing): the software renderer the tests draw with takes most of the machine,
   // so with it on, frames a second measure the renderer, not the game.
@@ -73,6 +74,9 @@ async function playDay(pg, mode) {
   }, seed);
   check(r.village, `${mode}: the player is at the village nearest the spawn`);
   await pg.waitForTimeout(8000);   // chunks and villagers round the village
+  // the simulation has the player there too (a self message from before the teleport once put it back at the spawn, on CI)
+  const there = await pg.waitForFunction(() => BF.simHost.eval(String(() => [BF.player.position.x, BF.player.position.z]), null).then(q => Math.hypot(q[0] - BF.player.position.x, q[1] - BF.player.position.z) < 2), null, { timeout: 60000, polling: 1000 }).then(() => true, () => false);
+  check(there, `${mode}: the simulation has the player at the village too`);
   const day0 = await pg.evaluate(() => BF.client.world.clock ? BF.client.world.clock.day + BF.client.world.clock.time : -1);
   await pg.evaluate(() => {
     const R = BF.renderer;
@@ -86,7 +90,8 @@ async function playDay(pg, mode) {
   console.log(`${mode}: a game day at 100x in ${real.toFixed(0)} s real (${(1200 / real).toFixed(0)}x); page frames ${fr.n} (${(fr.n / real).toFixed(1)} a second), ${fr.avg.toFixed(2)} ms avg, p95 ${fr.p95.toFixed(2)} ms, max ${fr.max.toFixed(1)} ms; ${fr.drawn} chunks drawn, ${fr.calls} draw calls`);
   await pg.evaluate(() => { BF.warp.set(0); BF.renderer.render = window.__draw; });
   const seen = await pg.evaluate(() => { const E = [...BF.client.world.entities.values()]; return { villagers: E.filter(e => e.kind === "mob" && e.type === "villager").length, mobs: E.length, villages: BF.client.world.villages.size }; });
-  check(seen.villagers > 0 && seen.villages > 0, `${mode}: villagers in the client's mirror (${seen.villagers} villagers, ${seen.mobs} entities, ${seen.villages} villages)`);
+  const why = seen.villagers > 0 && seen.villages > 0 ? '' : '; ' + JSON.stringify(await pg.evaluate(() => BF.simHost.eval(String(() => ({ seed: BF.state.seed, world: BF.save.current && BF.save.current.name, p: [BF.player.position.x, BF.player.position.z].map(Math.round), mobs: BF.mobs.list.length, villages: BF.vlog && BF.vlog.villageAt ? !!BF.vlog.villageAt(BF.player.position.x, BF.player.position.z) : null })), null).then(sim => ({ sim, page: [BF.player.position.x, BF.player.position.z].map(Math.round), clock: BF.client.world.clock && BF.client.world.clock.day })).catch(e => String(e))));
+  check(seen.villagers > 0 && seen.villages > 0, `${mode}: villagers in the client's mirror (${seen.villagers} villagers, ${seen.mobs} entities, ${seen.villages} villages${why})`);
   // paused (the page's menus), the hash, then the save
   await pg.evaluate(() => { BF.state.paused = true; });
   await pg.waitForTimeout(1000);
@@ -129,6 +134,11 @@ async function loadBack(b, url, mode, day) {
     const logs = await pg.evaluate(() => BF.glog.recent(500).filter(e => e.k === 'worker').map(e => e.x));
     check(logs.some(x => /The simulation runs in a Web Worker/.test(x)) && logs.some(x => /Simulation worker loaded/.test(x)), 'the game log says where the simulation runs');
     check(logs.some(x => /started in the simulation worker .*the page's river network/.test(x)), "the worker reused the page's river network");
+    // and has the same network: the replay ran to its end and found the same lakes and node samples (the page's copy once came through
+    // the protocol's JSON with its typed arrays emptied, and the worker solved a network of its own from zeros: no lakes)
+    const net = () => { const N = BF.rivers.planet(); let s = 0; for (let i = 0; i < N.pre.p.length; i += 97) s += N.pre.p[i]; return { lakes: N.lakes.length, links: N.link.length, p: s, miss: BF.worldgen.tapeMiss() }; };
+    const pn = await pg.evaluate(net), wn = await pg.evaluate(src => BF.simHost.eval(src, null), String(net));
+    check(wn.miss === -1 && pn.lakes > 0 && wn.lakes === pn.lakes && wn.links === pn.links && wn.p === pn.p, `the worker's river network is the page's (worker ${JSON.stringify(wn)}, page ${JSON.stringify(pn)})`);
     const day = await playDay(pg, 'worker');
     // the page's copy of the world against the worker's
     const keys = await pg.evaluate(() => [...BF.world.chunks.keys()]);

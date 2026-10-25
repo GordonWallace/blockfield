@@ -597,7 +597,7 @@ function quitToTitle(btn) {
   btn.disabled = true; btn.textContent = "Saving…";
   savePause().then(() => {
     btn.disabled = false; btn.textContent = "Save and Quit to Title";
-    if (BF.save) BF.save.current = null;     // the world stays as the title background, unsaved
+    if (BF.save) { if (BF.save.quit) BF.save.quit(); else BF.save.current = null; }     // the world stays as the title background, unsaved
     started = false;
     keys.clear(); mouseL = mouseR = false; resetBreak();
     exitLock();

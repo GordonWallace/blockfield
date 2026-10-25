@@ -24,10 +24,12 @@ function boot(o) {
     try { importScripts(u); three = typeof THREE !== "undefined"; } catch (e) { /* the next one */ }
   }
   if (!three) throw new Error("three.js would not load in the worker");
+  if (o.build) self.BF_BUILD = o.build;   // the commit and branch debug/server.js gave the page, for the game log (js/gamelog.js)
   importScripts("simfiles.js" + Q);
   BF = self.BF;
   importScripts(...BF.SIM_FILES.map(f => "../" + f + Q));
   importScripts("debugfeed.js" + Q);   // (its snapshot only: the page sends it to the debug server)
+  importScripts("coords.js" + Q);      // (the planet's positions, for the commands: /tp corner, latitude / longitude, face / u / v)
   importScripts("commands.js" + Q);    // (the slash commands: the page's command line sends them as "command" requests)
   BF.boot.initSim();
   BF.glog.setSink(e => { if (e.l === "ERROR") post({ errorLine: e.x }); });   // (the page shows the latest error with a crash)
@@ -51,13 +53,14 @@ function rivers(seed, st) {
   return (BF.worker.replayed = !!BF.worldgen.adoptRivers(st));
 }
 // js/save.js load() asks for the rivers first (the page's loading screen, BF.prepareWorld); here they come with the world message
-let riverSt = null;
+let riverSt = null, pageRivers = null;
 function worldOp(op, a) {
   // the world server (r15-41, server/simthread.js): the world held paused since its page closed, picked again: it goes on as it is
   if (op === "load" && BF.worker.held && BF.save.current && BF.save.current.id === a.id) return BF.worker.held(a);
   BF.worker.held = null;
   const t0 = performance.now();
-  riverSt = a.rivers || (BF.worker.rivers ? BF.worker.rivers() : null);   // (the world server's cache, server/simthread.js)
+  riverSt = (a.rivers && pageRivers && pageRivers.seed === a.rivers ? pageRivers : null) || (BF.worker.rivers ? BF.worker.rivers() : null);   // (the world server's cache, server/simthread.js)
+  pageRivers = null;
   BF.prepareWorld = seed => { rivers(seed, riverSt); return Promise.resolve(); };
   const S = BF.save;
   const started = what => {
@@ -126,6 +129,7 @@ self.onmessage = ev => {
   if (d && d.boot) { try { boot(d.boot); } catch (e) { post({ failed: String(e && e.message || e) }); } return; }
   if (d && d.test === "crash") { crashNext = true; return; }   // (test/sim-worker.js: the crash path)
   if (d && d.test === "eval") { if (BF) BF.testEval = true; return; }
+  if (d && d.rivers) { pageRivers = d.rivers; return; }   // the page's river network for the next world message (js/simhost.js world)
   if (d && d.auto) { if (BF && BF.active) BF.active.set({ on: false }); return; }   // (an automated browser's page: the budget off, js/active.js)   // (a test page: the protocol's eval query, BFT.sim)
   if (!d || d.h == null) return;
   if (!sim) { early.push(d); return; }

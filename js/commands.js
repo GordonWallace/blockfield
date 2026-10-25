@@ -295,6 +295,13 @@ function surfaceY(x, z) {
   if (h < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) h = BF.worldgen.heightAt(Math.floor(x), Math.floor(z));
   return h + 1.01;
 }
+// surfaceY, but on the water over water: js/mapview.js surfaceAt, which the simulation doesn't load (a worker or the world server, r15-38)
+function waterSurfaceY(x, z) {
+  const G = BF.worldgen;
+  let h = surfaceY(x, z) - 1.01, wl = BF.SEA;
+  if (G && G.waterLevelAt) wl = Math.max(wl, G.waterLevelAt(x, z));
+  return Math.max(h, wl) + 1.01;
+}
 function killMob(m) {
   if (!m || m.dead || m.removed) return false;
   if (BF.mobs.kill) return BF.mobs.kill(m) !== false;
@@ -377,7 +384,7 @@ def("tp", {
 // The planet's own /tp forms (the round-planet prototype's teleport panel). Null when a is none of them (plain u y v / u v).
 function planetTp(a) {
   const k = norm(a[0]), Pl = BF.planet, N = Pl.N;
-  const ground = (x, z) => (BF.mapview && BF.mapview.surfaceAt ? BF.mapview.surfaceAt(x, z) : surfaceY(x, z));   // on the water over the sea, as the prototype
+  const ground = (x, z) => (BF.mapview && BF.mapview.surfaceAt ? BF.mapview.surfaceAt(x, z) : waterSurfaceY(x, z));   // on the water over the sea, as the prototype
   const fly = on => { if (P().setFlying && P().gameMode === "creative") P().setFlying(on); };
   if (k === "face") {
     if (a.length < 4 || a.length > 5) usage("tp");
@@ -755,14 +762,14 @@ def("say", {
 // at, so /setblock, /fill, /give, /summon, /kill, /time, /weather and /tp change the world between ticks, in the requests' order,
 // and a recorded session replays them. The result is the command's {ok, msg}.
 // With the simulation in a worker (r15-38) it runs there (this file is loaded for it) and the answer comes back later: the page echoes
-// the command now and prints the answer when it comes; the result is then {ok: true, pending: true}.
+// the command now and prints the answer when it comes; the result is then {ok: true, pending: true, done} (done: a promise of {ok, msg}).
 function execute(text) {
   if (!BF.req || !BF.req.player) return run(text);
   const req = BF.req.player("command", null, { text: String(text) });
   if (!req.delivered && req.then) {
     print("/" + String(text).replace(/^\//, "").trim(), "dim");
-    req.then(r => { if (r && r.msg) print(r.msg, r.ok ? "ok" : "err"); });
-    return { ok: true, pending: true, msg: "" };
+    const done = new Promise(res => req.then(r => { if (r && r.msg) print(r.msg, r.ok ? "ok" : "err"); res({ ok: !!(r && r.ok), msg: (r && r.msg) || "" }); }));
+    return { ok: true, pending: true, msg: "", done };
   }
   const r = req.result;
   return { ok: !!r.ok, msg: r.msg || "" };
