@@ -204,6 +204,9 @@ module.exports = async (pg, out) => {
         if (c(shp, "white_wool") < 28) inv.add(shp.inv, I.white_wool, 28 - c(shp, "white_wool"));
         // the shepherd is the village's only string: on the planet a fisherman can come home with some and sell it first
         for (const v of vs) if (v !== shp && v !== Fl && c(v, "string")) inv.remove(v.inv, I.string, 999);
+        // and a beekeeper buys string for its candles (js/beekeeper.js) and turns it into candles at once, so it never shows as held: with
+        // its candle stock full it doesn't shop for string (a CI flake: the fletcher never got any)
+        for (const v of vs) if (v.profession === "beekeeper" && BF.beekeeper && c(v, "candle") < BF.beekeeper.CANDLE_STOCK) inv.add(v.inv, I.candle, BF.beekeeper.CANDLE_STOCK - c(v, "candle"));
         const st = BF.villagerStatus.text(Fl); if (st) seenStatus.add(st);
         if (spunAt == null && c(shp, "string") > 0) spunAt = +BF.sky.time.toFixed(3);
         if (arrowsAt == null && c(Fl, "arrow") > 0) arrowsAt = +BF.sky.time.toFixed(3);
