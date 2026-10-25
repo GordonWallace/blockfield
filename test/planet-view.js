@@ -1,10 +1,10 @@
-// @ci integration suite=world timeout=600
+// @ci integration suite=world timeout=600 hosts=worker,server
 // Drawing near the ground on the planet (generator 4, spec r14-03): a floating origin (chunk meshes are chunk-local and the camera
 // sits at the render origin, so float32 drawing stays precise at the largest atlas x); the picture doesn't move when the view
 // switches to the next face (a margin view and the canonical view of the same spot match, across an edge that turns and one that
 // doesn't); a straight flight across a turned edge stays straight; near two cube corners the round drawing fills the wedge the
 // flat drawing leaves empty. (The check that flat worlds draw their chunks in place went with the flat generators, r14-24.)
-// node test/run.js /tmp/pv test/planet-view.js
+// node test/run.js /tmp/pv test/planet-view.js [--host page|worker|server] (drawing: the page's)
 module.exports = async (pg) => {
   await pg.setViewportSize({ width: 320, height: 200 });   // small: swiftshader is slow (never judge frame rate here)
   let bad = 0;
@@ -29,8 +29,9 @@ module.exports = async (pg) => {
       for (let i = 0; i < 120 && BF.world.queueLength > 0; i++) await new Promise(r => setTimeout(r, 250));
       await new Promise(r => setTimeout(r, 600));
     };
-    BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative");
   });
+  await require('./lib').newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => { BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative"); });
   await pg.evaluate(() => settle(3000));
 
   // ---- floating origin, at the largest atlas x (face 5, near its +u edge)

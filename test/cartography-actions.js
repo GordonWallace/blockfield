@@ -1,6 +1,8 @@
-// Cartographer checks: node test/run.js /tmp/cart test/cartography-actions.js
+// @ci baseline hosts=worker,server
+// Cartographer checks: node test/run.js /tmp/cart test/cartography-actions.js [--host page|worker|server]
+// (Trades and villagers are simulation state: the checks run where the simulation is, spec r15-43.)
 module.exports = async (pg, out) => {
-  const r = await pg.evaluate(async () => {
+  const r = await require('./lib').sim(pg, async () => {
     const res = {}, I = BF.I, T = BF.trades, C = BF.cartography, inv = T.inv;
     // starting stock: no compasses/maps, ingredients for a compass always, for a map about half the time
     let mapOk = 0, compassOk = 0, bad = 0, N = 400;

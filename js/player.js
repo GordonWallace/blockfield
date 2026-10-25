@@ -316,7 +316,11 @@ function buildDOM() {
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
     else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.monsters()); }
-    else if (a === "mon") { BF.gameOpts.set(act.dataset.mon, flipOpt(act)); savePause(); }   // in game: applies at once, and saves
+    else if (a === "mon") {   // in game: applies at once (where the simulation is too: js/protocol.js meta), and saves
+      BF.gameOpts.set(act.dataset.mon, flipOpt(act));
+      if (BF.simHost && BF.simHost.worker && BF.client) BF.client.meta({ id: BF.save && BF.save.current ? BF.save.current.id : null, monsters: BF.gameOpts.monsters() });
+      savePause();
+    }
     else if (a === "quit") quitToTitle(act);
   });
   deathEl.addEventListener("click", e => { if (e.target.closest('[data-act="respawn"]')) respawn(); });
@@ -1315,6 +1319,14 @@ onAct("player.hive", d => {   // a bee nest or beehive: {cell: the targeted bloc
 });
 onAct("player.bucket", d => ({ ok: !!(BF.villageLife.useBucket(BF.items[selectedItem() ? selectedItem().id : 0], d.cell)), why: "nothing to do" }));
 onAct("player.map", () => { const sel = selectedItem(), it = sel && BF.items[sel.id]; return { ok: true, r: it ? BF.maps.use(sel, it) : null }; });
+// The creative auto map's width prompt (js/mapview.js, on the page): the held blank auto map becomes the filled one named {name}
+onAct("player.autoMap", d => {
+  const sel = selectedItem(), it = sel && BF.items[sel.id], I2 = inv();
+  if (!it || !it.autoBlank || !/^auto_map_\d+_-?\d+_-?\d+$/.test(d.name || "")) return { ok: false, why: "not a blank auto map" };
+  const id = BF.resolveItem(d.name);
+  if (sel.count === 1) I2.setSlot(I2.selectedIndex, { id, count: 1 });
+  else { I2.setSlot(I2.selectedIndex, { id: sel.id, count: sel.count - 1 }); giveOrDrop(id, 1); }
+});
 onAct("player.boat", d => {
   if (!BF.boats.placeFromPlayer(d.boat, vec(d.eye), vec(d.dir), d.yaw, REACH)) return { ok: false, why: "no room" };
   consumeHeld(1);
@@ -1338,9 +1350,23 @@ onAct("player.sign", d => {
   if (!(BF.signs && BF.signs.place(d.cell, it))) return { ok: false, why: "no room" };
   consumeHeld(1);
 });
-// Sleeping: the spawn point at the bed or tent ({spawn}), then waking ("player.wake") the next morning.
-onAct("player.sleep", d => { BF.spawnPoint = d.spawn; });
-onAct("player.wake", () => { wakeUp(); });
+// Sleeping: the spawn point at the bed or tent ({spawn}), then waking ("player.wake") the next morning. The simulation's own clock
+// decides: with the simulation off the page, the page's clock can lag behind it just after a wake, so a quick second click on the bed
+// asks again in the morning; that sleep is refused and its wake moves no day on (bug-041). (A sleep whose wake never came, e.g. the
+// page closed, stops counting after 10 game seconds.)
+let asleepAt = null;
+onAct("player.sleep", d => {
+  const S = BF.sky, now = BF.state.time;
+  if (asleepAt != null && now >= asleepAt && now - asleepAt < 10) return { ok: false, why: "asleep" };
+  if (!S || !(S.isNight() || (S.stormy && S.stormy()))) return { ok: false, why: "not night" };
+  asleepAt = now;
+  BF.spawnPoint = d.spawn;
+});
+onAct("player.wake", () => {
+  if (asleepAt == null) return { ok: false, why: "not asleep" };
+  asleepAt = null;
+  wakeUp();
+});
 
 // ---------- world interaction ----------
 function eyeVec() { return new THREE.Vector3(pos.x, pos.y + eyeOffset, pos.z); }

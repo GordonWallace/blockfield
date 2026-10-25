@@ -110,6 +110,7 @@ function frame(now) {
   if (remote) host.sky(W.frozen ? 0 : drawnDt);   // the worker's clock and weather
   BF.sky.draw(alpha, drawnDt);
   BF.inventory.simFrame(dt);   // the simulation's screens (js/playerinv.js; in a worker a no-op here, the worker runs its own)
+  if (!host.worker) BF.maps.simFrame();   // the held map fills in (js/maps.js; the worker runs its own)
   BF.inventory.update && BF.inventory.update(dt);   // the page's screens (js/invscreen.js)
   if (BF.mapview) BF.mapview.tick();   // auto-filling maps generate a few ms per frame
   BF.world.setDaylight(BF.sky.light);

@@ -1,18 +1,26 @@
-// @ci integration suite=world timeout=600
+// @ci integration suite=world timeout=600 hosts=worker,server
 // Wild mobs live in the world (js/wildlife.js, idea-037): chunks roll their animals once by habitat (old saves too), a chunk that unloads
 // keeps its wild mobs (back on the same spot within a game hour, nearby after that, an undead mob on open ground gone after daylight),
 // quitting keeps every loaded wild mob (no 120 cap), wild animals breed on their own, and fed pigs breed. No group is set down inside a village
 // pasture (or any pen, coop, sty or stable: js/mobs.js penBoxes).
-// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/wild test/wild-mobs.js
+// Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/wild test/wild-mobs.js [--host page|worker|server]
+// The mobs, chunks and saves checked are the simulation's: read and driven where it is (spec r15-43); the player moves on the page.
+const lib = require('./lib');
+// waits until fn(arg) holds where the simulation is (up to ms)
+const simWait = async (pg, fn, arg, ms) => { for (const t0 = Date.now(); Date.now() - t0 < ms;) { if (await lib.sim(pg, fn, arg)) return true; await pg.waitForTimeout(500); } return false; };
 module.exports = async (pg) => {
   const fails = [];
   const ok = (name, cond, extra) => { console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra === undefined ? "" : extra)); if (!cond) fails.push(name); };
-  const step = (n, dt = 0.05) => pg.evaluate(async ([n, dt]) => { for (let i = 0; i < n; i++) { BF.sky.update(dt); (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); } }, [n, dt]);
-  const goTo = async (x, z, wait = 7000) => { await pg.evaluate(([x, z]) => BF.player.spawn(x + 0.5, BF.worldgen.heightAt(x, z) + 2, z + 0.5), [x, z]); await pg.waitForTimeout(wait); };
+  const step = (n, dt = 0.05) => lib.sim(pg, async ([n, dt]) => { for (let i = 0; i < n; i++) { BF.sky.advance(dt); (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); } }, [n, dt]);
+  const goTo = async (x, z, wait = 7000) => {
+    await pg.evaluate(([x, z]) => BF.player.spawn(x + 0.5, BF.worldgen.heightAt(x, z) + 2, z + 0.5), [x, z]);
+    await pg.waitForTimeout(wait);
+    await simWait(pg, ([x, z]) => BF.world.isLoaded(x, z), [x, z], 60000);   // (the simulation's chunks there too)
+  };
 
   // ---- first generation: every loaded chunk rolls once, by habitat
   await pg.waitForTimeout(4000);
-  const gen = await pg.evaluate(() => {
+  const gen = await lib.sim(pg, () => {
     const W = BF.world, L = BF.wildlife;
     const keys = [...W.chunks.keys()], rolled = keys.filter(k => L.isRolled(k)).length;
     const rolls = L.log.filter(e => e.kind === "rolled");
@@ -24,7 +32,7 @@ module.exports = async (pg) => {
   ok("every loaded chunk had its first-generation roll", gen.rolled >= gen.chunks - 4, gen);
   ok("animals were placed by habitat, never in desert, ocean, beach or peaks", gen.rolls > 0 && gen.badBiome.length === 0, { rolls: gen.rolls, biomes: gen.biomes, bad: gen.badBiome });
   ok("first-generation animals stand on grass", gen.animals > 0 && gen.onGrass >= gen.animals * 0.8, gen);
-  const reroll = await pg.evaluate(() => { const n = BF.wildlife.log.filter(e => e.kind === "rolled").length; for (let i = 0; i < 40; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); return [n, BF.wildlife.log.filter(e => e.kind === "rolled").length]; });
+  const reroll = await lib.sim(pg, () => { const n = BF.wildlife.log.filter(e => e.kind === "rolled").length; for (let i = 0; i < 40; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); return [n, BF.wildlife.log.filter(e => e.kind === "rolled").length]; });
   ok("a chunk rolls only once", reroll[0] === reroll[1], reroll);
 
   // ---- never inside a village's pen, coop, pasture, sty or stable: groups rolled again and again in the chunks of a village's pasture
@@ -36,8 +44,8 @@ module.exports = async (pg) => {
     const x1 = b.bx + b.ax * (b.w - 1) + b.sx * (b.d - 1), z1 = b.bz + b.az * (b.w - 1) + b.sz * (b.d - 1);
     return { x: v.x, z: v.z, f: [Math.min(b.bx, x1), Math.min(b.bz, z1), Math.max(b.bx, x1), Math.max(b.bz, z1)] };
   });
-  if (VP) { await goTo(VP.x, VP.z, 3000); await pg.waitForFunction(f => [[f[0], f[1]], [f[2], f[3]], [f[0], f[3]], [f[2], f[1]]].every(([x, z]) => BF.world.isLoaded(x, z)), VP.f, { timeout: 90000 }).catch(() => {}); }
-  const pen = VP && await pg.evaluate(f => {
+  if (VP) { await goTo(VP.x, VP.z, 3000); await simWait(pg, f => [[f[0], f[1]], [f[2], f[3]], [f[0], f[3]], [f[2], f[1]]].every(([x, z]) => BF.world.isLoaded(x, z)), VP.f, 90000); }
+  const pen = VP && await lib.sim(pg, f => {
     const CS = BF.CS, out = { fence: f, groups: 0, made: 0, inside: 0 }, chunks = new Set();
     for (let x = f[0]; x <= f[2]; x++) for (let z = f[1]; z <= f[3]; z++) chunks.add(Math.floor(x / CS) + "," + Math.floor(z / CS));
     for (const k of chunks) {
@@ -62,7 +70,7 @@ module.exports = async (pg) => {
     return [sp.x + 1000, sp.z];
   });
   await goTo(Q[0], Q[1], 9000);
-  const placed = await pg.evaluate(([qx, qz]) => {
+  const placed = await lib.sim(pg, ([qx, qz]) => {
     BF.mobs.spawning = false;
     BF.gameOpts.set("creeper", true);   // creepers are off by default (js/gameopts.js); this checks storing, not the option
     BF.sky.day = 4; BF.sky.setTime(0.8);
@@ -78,21 +86,21 @@ module.exports = async (pg) => {
     return out;
   }, Q);
   ok("test mobs placed", placed.cow && placed.creeper && placed.zombie, placed);
-  const tagged = () => pg.evaluate(() => { const o = {}; for (const m of BF.mobs.list) if (m.tag && !m.dead && !m.removed) o[m.tag] = [+m.position.x.toFixed(2), +m.position.y.toFixed(2), +m.position.z.toFixed(2)]; return o; });
+  const tagged = () => lib.sim(pg, () => { const o = {}; for (const m of BF.mobs.list) if (m.tag && !m.dead && !m.removed) o[m.tag] = [+m.position.x.toFixed(2), +m.position.y.toFixed(2), +m.position.z.toFixed(2)]; return o; });
   const leave = async () => {
     await goTo(Q[0] + 1600, Q[1], 2000);
-    await pg.waitForFunction(q => !BF.world.isLoaded(q[0], q[1]), Q, { timeout: 60000 }).catch(() => {});
-    return pg.evaluate(q => { const k = Math.floor(q[0] / 16) + "," + Math.floor(q[1] / 16), all = [...BF.wildlife.stored().values()].flat(); const at = {}; for (const e of all) if (e.snap.s.tag) at[e.snap.s.tag] = e.snap.p; return { unloaded: !BF.world.isLoaded(q[0], q[1]), tags: Object.keys(at).sort(), at, open: all.filter(e => e.snap.s.tag === "zombie").map(e => !!e.open) }; }, Q);
+    await simWait(pg, q => !BF.world.isLoaded(q[0], q[1]), Q, 60000);
+    return lib.sim(pg, q => { const k = Math.floor(q[0] / 16) + "," + Math.floor(q[1] / 16), all = [...BF.wildlife.stored().values()].flat(); const at = {}; for (const e of all) if (e.snap.s.tag) at[e.snap.s.tag] = e.snap.p; return { unloaded: !BF.world.isLoaded(q[0], q[1]), tags: Object.keys(at).sort(), at, open: all.filter(e => e.snap.s.tag === "zombie").map(e => !!e.open) }; }, Q);
   };
   // back to Q with the mobs standing still (only js/wildlife.js runs), so what comes back is read before anything walks
   const back = async (hours) => {
-    await pg.evaluate(h => {
+    await lib.sim(pg, h => {
       const t = BF.sky.day + BF.sky.time + h / 24; BF.sky.day = Math.floor(t); BF.sky.setTime(t - Math.floor(t));
-      window.__upd = BF.mobs.update; BF.mobs.update = dt => BF.wildlife.update(dt);
+      globalThis.__upd = BF.mobs.update; BF.mobs.update = dt => BF.wildlife.update(dt);
     }, hours);
     await goTo(Q[0], Q[1], 9000);
     const got = await tagged();
-    await pg.evaluate(() => { BF.mobs.update = window.__upd; });
+    await lib.sim(pg, () => { BF.mobs.update = globalThis.__upd; });
     return got;
   };
   const d2 = (a, b) => a && b ? Math.hypot(a[0] - b[0], a[2] - b[2]) : Infinity;
@@ -111,7 +119,8 @@ module.exports = async (pg) => {
   // ---- quit and rejoin with more than 120 wild mobs loaded
   const id = await pg.evaluate(async () => (await BF.save.create({ name: "wild", seed: 1337, gameMode: "creative", villages: 9, gen: 4 })).id);
   await pg.waitForTimeout(8000);
-  const before = await pg.evaluate(async () => {
+  await simWait(pg, () => BF.save.current && BF.save.current.name === "wild" && BF.world.isLoaded(BF.player.position.x, BF.player.position.z), null, 120000);
+  const before = await lib.sim(pg, async () => {
     BF.mobs.spawning = false;
     const p = BF.player.position;
     let n = 0;
@@ -126,27 +135,33 @@ module.exports = async (pg) => {
     return { tagged: n, wild };
   });
   await pg.reload();
-  await require('./lib').ready(pg);   // the planet's boot works out its rivers first; its newWorld would wipe a save loaded before then
-  await pg.evaluate(async id => { await BF.save.load(id); BF.mobs.spawning = false; }, id);
+  // the planet's boot (with the simulation off the page, once its host has started) works out its rivers first; its newWorld would wipe a
+  // save loaded before then
+  await pg.waitForFunction(() => window.BF && BF.state && BF.state.seed && !BF.preparing, null, { timeout: 300000, polling: 250 });
+  await lib.simReady(pg);
+  await lib.ready(pg);
+  await pg.evaluate(id => BF.save.load(id), id);
+  await lib.sim(pg, () => { BF.mobs.spawning = false; });
   await pg.waitForTimeout(9000);
   await step(4);
-  const after = await pg.evaluate(() => ({ tagged: BF.mobs.list.filter(m => m.tag && /^q/.test(m.tag) && !m.dead).length, wild: BF.mobs.list.filter(m => BF.mobs.isWild(m)).length }));
+  const after = await lib.sim(pg, () => ({ tagged: BF.mobs.list.filter(m => m.tag && /^q/.test(m.tag) && !m.dead).length, wild: BF.mobs.list.filter(m => BF.mobs.isWild(m)).length }));
   ok("quit and rejoin: all " + before.wild + " wild mobs come back (more than 120)", before.wild > 120 && after.tagged === before.tagged && after.wild >= before.wild, { before, after });
 
   // ---- an old save (no wildlife data): its chunks roll once
-  await pg.evaluate(async id => {
+  // (the save is where the simulation is: the browser's IndexedDB, or the world server's files through the same calls)
+  await lib.sim(pg, async id => {
     const db = await new Promise((res, rej) => { const r = indexedDB.open("blockfield", 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     await new Promise((res, rej) => { const t = db.transaction(["data"], "readwrite"), st = t.objectStore("data"), g = st.get(id); g.onsuccess = () => { const d = g.result; delete d.wildlife; delete d.mobs; st.put(d, id); }; t.oncomplete = res; t.onerror = () => rej(t.error); });
-    BF.mobs.spawning = true;
-    await BF.save.load(id);
   }, id);
+  await pg.evaluate(id => BF.save.load(id), id);
+  await lib.sim(pg, () => { BF.mobs.spawning = true; });
   await pg.waitForTimeout(9000);
-  const old = await pg.evaluate(() => { const keys = [...BF.world.chunks.keys()]; return { chunks: keys.length, rolled: keys.filter(k => BF.wildlife.isRolled(k)).length, animals: BF.mobs.list.filter(m => BF.mobs.passiveTypes.includes(m.type) && BF.mobs.isWild(m)).length }; });
+  const old = await lib.sim(pg, () => { const keys = [...BF.world.chunks.keys()]; return { chunks: keys.length, rolled: keys.filter(k => BF.wildlife.isRolled(k)).length, animals: BF.mobs.list.filter(m => BF.mobs.passiveTypes.includes(m.type) && BF.mobs.isWild(m)).length }; });
   ok("an old save's chunks get their one-time roll", old.rolled >= old.chunks - 4 && old.animals > 0, old);
   await pg.evaluate(id => BF.save.remove(id), id);
 
   // ---- breeding: two wild cows on grass (chance raised so it happens now), crowded herds don't, fed pigs breed
-  const spot = await pg.evaluate(async () => {
+  const spot = await lib.sim(pg, async () => {
     const p = BF.player.position, W = BF.world;
     // the reloaded save's ground around the player loads first (on the planet's hills a flat 7x7 of grass can be a few chunks off)
     for (let i = 0; i < 600 && W.queueLength > 4; i++) await new Promise(r => setTimeout(r, 100));
@@ -164,7 +179,7 @@ module.exports = async (pg) => {
   });
   ok("found flat grass for breeding", !!spot, spot);
   if (spot) {
-    const br = await pg.evaluate(async ([x, y, z]) => {
+    const br = await lib.sim(pg, async ([x, y, z]) => {
       const L = BF.mobs.list;
       // by day with no monsters about: a young one killed or chased off at night isn't a breeding failure
       const calm = () => { if (BF.sky.time > 0.4) BF.sky.setTime(0.1); for (const m of L.slice()) if (m.hostile && Math.hypot(m.position.x - x, m.position.z - z) < 48) m.dead = true; };
@@ -176,7 +191,7 @@ module.exports = async (pg) => {
       for (const m of [a, b]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
       for (let i = 0; i < 40; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());   // landed on the grass before their daily roll
       for (const m of [a, b]) m.wildB = { next: 0 };
-      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
+      for (let i = 0; i < 1200; i++) { BF.sky.advance(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
       const calves = L.filter(m => m.type === "cow" && !m.dead && m.cow && m.cow.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).length;
       const pairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "cow").length, cows = [a, b].map(m => [m.dead ? "dead" : "", m.cow && m.cow.fed, +m.position.x.toFixed(1), +m.position.y.toFixed(1), +m.position.z.toFixed(1)]);
       // a crowd: 9 cows together never pair up on their own
@@ -198,7 +213,7 @@ module.exports = async (pg) => {
       // day's roll, as the game would, until the pair is willing (the roll itself still has to pick the pair)
       const hRolls = [], ground = m => BF.world.getBlock(Math.floor(m.position.x), Math.floor(m.position.y + 0.01) - 1, Math.floor(m.position.z));
       for (let i = 0; i < 1200; i++) {
-        BF.sky.update(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+        BF.sky.advance(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
         if (i % 200 === 0) {
           calm();
           if (h1.horse.fed == null && i < 1000) { hRolls.push([h1, h2].map(ground)); for (const m of [h1, h2]) m.wildB = { next: 0 }; }
@@ -212,7 +227,7 @@ module.exports = async (pg) => {
       // fed pigs
       const p1 = BF.mobs.spawn("pig", x + 0.5, y, z + 0.5), p2 = BF.mobs.spawn("pig", x + 2.5, y, z + 1.5);
       const fedOk = BF.pigFarmer.feed(p1, "player") && BF.pigFarmer.feed(p2, "player");
-      for (let i = 0; i < 1200; i++) { BF.sky.update(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
+      for (let i = 0; i < 1200; i++) { BF.sky.advance(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
       const piglets = L.filter(m => m.type === "pig" && !m.dead && m.pig && m.pig.growAt != null).length;
       return { calves, pairs, cows, foals, horses, hPairs, hRolls, wildHorses, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.scale.toFixed(2)) };
     }, spot);

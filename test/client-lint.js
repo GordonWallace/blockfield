@@ -34,6 +34,8 @@ const ALLOW = [
   ["entityview.js", "bees", "whether bees exist in this build (BF.bees ?)"],
   ["mapview.js", "maps.heldCanvas", "draws a map held in the hand (a drawing helper of js/maps.js)"],
   ["mapview.js", "maps", "whether maps exist in this build (BF.maps ?)"],
+  ["mapview.js", "req.player", "the auto-fill map's width prompt sends a player request (js/requests.js player(): through BF.client)"],
+  ["mapview.js", "req", "whether the request queue is there (BF.req ?)"],
   ["invscreen.js", "req.player", "sends the player's screen actions as requests (js/requests.js player(): through BF.client)"],
   ["invscreen.js", "req", "whether the request queue is there (BF.req ?)"],
   ["invscreen.js", "durability", "an item's uses when new, for the durability bar (a constant of the item tables, js/toolwear.js)"],

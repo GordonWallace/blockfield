@@ -1,11 +1,14 @@
-// @ci baseline suite=world timeout=240
+// @ci baseline suite=world timeout=240 hosts=worker,server
 // The world across face edges on the planet (generator 4, spec r14-02): near each of the four edges of face 4, blocks read and
 // written through margin addresses (the unfolded neighbouring face) reach the canonical cell on the next face; a block with a facing
 // written through a turned edge is stored turned back and reads the same way through the margin; chunks at the edge mesh, with
 // their neighbours across the edge in the 3x3 neighbourhood; corner wedges read air and refuse writes; the cube corners are ocean.
-// node test/run.js /tmp/pw test/planet-world.js
+// node test/run.js /tmp/pw test/planet-world.js [--host page|worker|server] (the page's copy of the world: with the simulation off the page
+// it generates its own chunks and takes the simulation's edits through the same calls, spec r15-38)
 module.exports = async (pg) => {
-  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); BF.newWorld(1337, { gen: 4 }); BF.player.start(); });
+  await pg.evaluate(() => { window.__errs = []; addEventListener("error", e => window.__errs.push(e.message)); });
+  await require('./lib').newWorld(pg, 1337, { gen: 4 });
+  await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(2500);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
