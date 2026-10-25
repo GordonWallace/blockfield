@@ -427,8 +427,21 @@ let logCap = null, fxCap = null;
 // because thinking changes the village record (its farm plans, coops, caches built on first use); every other mob goes with its region
 // (a number). Like Folia's merged regions: whatever acts on shared state ticks on one worker.
 const PEN_KEYS = ["penKey", "coopKey", "styKey", "pastureKey"];   // ("coop:<village key>|<building>": a pen animal's place, js/ids.js)
+// Animals a villager is working on (a keeper fetching, feeding or leading a wild chicken, sheep, cow, pig or horse): with that villager's
+// village, so the keeper and the animal think on one worker in their order, as on one (its thinking changes the animal and reads it back).
+// Built from the start of the tick's state at beginThink, the same on every worker. mob id -> village key.
+const TASKS = ["pkp", "shp", "cwk", "pgk", "stb"];
+let claimed = new Map();
+function claims() {
+  claimed = new Map();
+  for (const m of BF.regions ? BF.regions.ofType("villager") : BF.mobs.list) {
+    if (m.type !== "villager" || m.villageId == null || m.dead || m.removed) continue;
+    for (const f of TASKS) { const t = m[f] && m[f].task; if (t && t.mobId != null && !claimed.has(t.mobId)) claimed.set(t.mobId, m.villageId); }
+  }
+}
 function unitOf(m, k) {
   let v = m.villageId != null ? m.villageId : m.penVillageId;
+  if (v == null && claimed.size) { const c = claimed.get(m.id); if (c != null) v = c; }
   if (v == null) for (const f of PEN_KEYS) {
     const p = m[f];
     if (typeof p !== "string") continue;
@@ -471,6 +484,7 @@ function beginThink(order) {
   T.ticks++;
   refsOn();
   const sp = BF.rtick ? BF.rtick.spans : [-1, 0];
+  claims();
   mine = []; idxOf = new Map(); own = [];
   const units = new Set();
   for (let i = 0; i < sp.length; i += 2) {
