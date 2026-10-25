@@ -259,6 +259,13 @@ function surfaceY(x, z) {
   if (h < BF.MIN_Y && BF.worldgen && BF.worldgen.heightAt) h = BF.worldgen.heightAt(Math.floor(x), Math.floor(z));
   return h + 1.01;
 }
+// /tp x z: on top of whatever is highest at (x, z), the water and sea ice included, from the real chunk (generated now if it
+// isn't loaded), not the bare terrain height of the generator (the sea floor under the water, the ground under a tree or a house).
+function topY(x, z) {
+  if (W().loadAt) W().loadAt(x, z);
+  if (!W().isLoaded(x, z) || !W().topAt) return surfaceY(x, z);
+  return W().topAt(x, z) + 1.01;
+}
 function killMob(m) {
   if (!m || m.dead || m.removed) return false;
   if (BF.mobs.kill) return BF.mobs.kill(m) !== false;
@@ -305,8 +312,9 @@ def("tp", {
     if (a.length === 2) {
       const p = pos(), x = parseCoord(a[0], p.x, "x"), z = parseCoord(a[1], p.z, "z");
       if (Math.abs(x) > 3e7 || Math.abs(z) > 3e7) fail("Invalid position: outside of the world border");
-      const y = surfaceY(x, z);
+      const y = topY(x, z);
       teleport(x, y, z);
+      if (BF.glog) BF.glog.log("INFO", "command", `/tp to the surface at ${fmt(x)}, ${fmt(y)}, ${fmt(z)}`, { at: [x, y, z] });
       return `Teleported ${PLAYER} to ${fmt(x)}, ${fmt(y)}, ${fmt(z)}`;
     }
     if (a.length !== 3 && a.length !== 5) usage("tp");
