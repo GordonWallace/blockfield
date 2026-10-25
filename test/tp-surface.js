@@ -5,39 +5,42 @@ module.exports = async (pg) => {
   await pg.waitForTimeout(1500);
   let bad = 0;
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
-  // spots by biome along a line, found from the generator without loading anything
-  const spots = await pg.evaluate(() => {
-    const G = BF.worldgen, want = { ocean: null, frozen: null, land: null };
-    for (let i = 0; i < 4000 && (!want.ocean || !want.frozen || !want.land); i++) {
-      const x = 3000 + i * 97, z = -2000 + i * 61, n = G.biomeAt(x, z).name;
-      if (BF.world.isLoaded(x, z)) continue;
-      if (/Frozen Ocean/.test(n)) want.frozen = want.frozen || [x, z, n];
-      else if (/Ocean/.test(n)) want.ocean = want.ocean || [x, z, n];
-      else if (G.heightAt(x, z) > BF.SEA + 4) want.land = want.land || [x, z, n];
+  // spots by biome, as offsets from the player found from the generator without loading anything (/tp ~dx ~dz: the same frame on
+  // a round planet, where plain numbers are u v on the player's face)
+  const find = k => pg.evaluate(k => {
+    const G = BF.worldgen, p = BF.player.position, want = { ocean: null, frozen: null, land: null };
+    for (let i = 1; i < 6000 && !want[k]; i++) {
+      const dx = Math.round(Math.cos(i * 2.39996) * (400 + i * 40)), dz = Math.round(Math.sin(i * 2.39996) * (400 + i * 40));
+      const x = Math.floor(p.x) + dx, z = Math.floor(p.z) + dz;
+      if (BF.world.isLoaded(x, z) || (BF.world.canonXZ && !BF.world.canonXZ(x, z))) continue;
+      const n = G.biomeAt(x, z).name;
+      if (/Frozen Ocean/.test(n)) want.frozen = want.frozen || [dx, dz, n];
+      else if (/Ocean/.test(n)) want.ocean = want.ocean || [dx, dz, n];
+      else if (G.heightAt(x, z) > BF.SEA + 4 && !/River|Beach/.test(n)) want.land = want.land || [dx, dz, n];
     }
-    return want;
-  });
+    return want[k];
+  }, k);
   const near = (y, top) => y > top + 0.85 && y < top + 1.02;   // feet on the top block (a frame of physics settles them, or the water lets them sink a little)
   const tp = async (x, z) => {
-    const r = await pg.evaluate(c => BF.commands.execute(c), `/tp ${x} ${z}`);
+    const r = await pg.evaluate(c => BF.commands.execute(c), `/tp ${x} ${z}`);   // x, z: numbers or ~offsets
     const at = await pg.evaluate(() => {
       const p = BF.player.position, bx = Math.floor(p.x), bz = Math.floor(p.z), by = Math.floor(p.y), W = BF.world;
       return { y: p.y, below: W.getBlock(bx, by - 1, bz), feet: W.getBlock(bx, by, bz), head: W.getBlock(bx, by + 1, bz), top: W.topAt(bx, bz), solid: W.heightAt(bx, bz) };
     });
-    const said = r.msg && +(/to [-\d.]+, ([-\d.]+),/.exec(r.msg) || [])[1];
+    const said = r.msg && +((/to [-\d.]+, ([-\d.]+),/.exec(r.msg) || /\by ([-\d.,]+)$/.exec(r.msg) || [])[1] || "").replace(/,/g, "");
     return { r, at, said };
   };
   const WATER = await pg.evaluate(() => BF.B.water), SOLID = await pg.evaluate(() => Array.from(BF.SOLID));
   for (const k of ["ocean", "frozen", "land"]) {
-    const s = spots[k];
+    const s = await find(k);   // from where the player is now: ~ offsets are relative
     check(!!s, `found a ${k} spot ${JSON.stringify(s)}`);
     if (!s) continue;
-    const { r, at, said } = await tp(s[0], s[1]);
-    check(r.ok, `/tp ${s[0]} ${s[1]} (${s[2]}): ${r.msg}`);
+    const { r, at, said } = await tp("~" + s[0], "~" + s[1]);
+    check(r.ok, `/tp ~${s[0]} ~${s[1]} (${s[2]}): ${r.msg}`);
     check(near(at.y, at.top) && Math.abs(said - (at.top + 1.01)) < 0.01, `stands on the top of the column (y ${at.y.toFixed(2)}, said ${said}, top ${at.top}, solid ${at.solid})`);
     check(!BF_SOLID(at.feet) && !BF_SOLID(at.head), "feet and head are clear");
     if (k === "ocean") check(at.below === WATER && at.top >= -1 && at.top > at.solid + 2, `on the water over the sea (block below ${at.below}, top ${at.top}, sea floor ${at.solid})`);
-    if (k === "frozen") check(at.below !== WATER && at.top >= -1, `on the sea ice, not the floor under it (block below ${at.below}, top ${at.top})`);
+    if (k === "frozen") check(at.top >= -1 && at.top > at.solid + 2 || at.top === at.solid && at.below !== WATER && at.top >= -1, `on the sea ice or water, not the floor under it (block below ${at.below}, top ${at.top}, solid ${at.solid})`);
     await pg.waitForTimeout(1500);
   }
   function BF_SOLID(id) { return SOLID[id]; }
