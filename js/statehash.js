@@ -37,8 +37,11 @@ const num = v => Number.isInteger(v) ? String(v) : Number.isFinite(v) ? "f" + Ma
 // Fields that are drawing, animation or static definitions, never simulation state; and caches (_res: a villager's reserve, js/market.js,
 // worked out by whoever asks first in a tick, so its time stamp depends on the order mobs think in, spec r15-33).
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
-  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res"]);
-let mobSet = new Set();
+  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res",
+  "swingT"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report)
+// Fields named _snd...: mobs' sound timers (js/audio.js), heard only.
+const skipKey = k => SKIP.has(k) || k.startsWith("_snd");
+let mobSet = new Set(), dropSet = new Set();
 const mobRef = m => m.id != null ? "#" + m.id : m.type + (m.name ? ":" + m.name : "");
 const isMob = v => mobSet.has(v) || (v.def && v.position && v.type && v.ai);   // (a mob: js/mobs.js createMob)
 
@@ -53,6 +56,7 @@ function canon(v, out, d, seen) {
   if (v.isObject3D || v.isMaterial || v.isBufferGeometry || v.isTexture || v.nodeType) { out.push("R"); return; }
   if (d > 0 && isMob(v)) { out.push("@" + mobRef(v)); return; }
   if (d > 0 && v.members && v.key != null) { out.push("V" + v.key); return; }   // a village record
+  if (d > 0 && dropSet.has(v)) { out.push("D" + v.key); return; }   // a dropped item (the drops part has its state; its bob phase is drawn only)
   if (d > MAX_DEPTH) { out.push("…"); return; }
   if (seen.has(v)) { out.push("~"); return; }
   seen.add(v);
@@ -72,7 +76,7 @@ function canon(v, out, d, seen) {
     out.push((v instanceof Map ? "M{" : "S{") + e.join(",") + "}");
   } else {
     out.push("{");
-    const keys = Object.keys(v).filter(k => !SKIP.has(k)).sort();
+    const keys = Object.keys(v).filter(k => !skipKey(k)).sort();
     for (const k of keys) {
       const x = v[k];
       if (x === undefined || typeof x === "function") continue;
@@ -145,21 +149,23 @@ const PARTS = {
 };
 
 // A part's canonical text (what its hash is taken of), to find where two worlds differ.
+function refsOn() { mobSet = new Set(BF.mobs ? BF.mobs.list : []); dropSet = new Set(BF.drops && BF.drops.list ? BF.drops.list : []); }
+function refsOff() { mobSet = new Set(); dropSet = new Set(); }
 function partText(k) {
-  mobSet = new Set(BF.mobs ? BF.mobs.list : []);
-  try { return PARTS[k](); } finally { mobSet = new Set(); }
+  refsOn();
+  try { return PARTS[k](); } finally { refsOff(); }
 }
 
 // Every part's hash, and the whole world's (the hash of the part hashes in PARTS order).
 function full() {
   const t0 = performance.now(), parts = {};
-  mobSet = new Set(BF.mobs ? BF.mobs.list : []);
+  refsOn();
   for (const k in PARTS) {
     let s;
     try { s = PARTS[k](); } catch (e) { s = "error:" + e.message; }
     parts[k] = hashStr(s);
   }
-  mobSet = new Set();
+  refsOff();
   const hash = hashStr(Object.keys(parts).map(k => k + "=" + parts[k]).join(";"));
   const r = { hash, parts, day: BF.sky ? +((BF.sky.day || 0) + (BF.sky.time || 0)).toFixed(4) : 0, ms: +(performance.now() - t0).toFixed(1) };
   stateHash.last = r;
