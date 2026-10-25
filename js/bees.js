@@ -233,7 +233,8 @@ function nextErrand(b) {
 function flyTo(b, tx, ty, tz, v, dt, low) {
   const w = W(), dx = tx - b.x, dz = tz - b.z, hd = Math.hypot(dx, dz);
   let gy = ty;
-  if (!low && hd > 2.5) {
+  const roofed = [1, 2, 3].some(k => BF.SOLID[w.getBlock(Math.floor(b.x), Math.floor(b.y) + k, Math.floor(b.z))]);   // under leaves or a roof: out from under it first (bug-065)
+  if (!low && hd > 2.5 && !roofed) {
     const ax = b.x + (dx / hd) * Math.min(hd, 2), az = b.z + (dz / hd) * Math.min(hd, 2);
     const gh = Math.max(w.heightAt(b.x, b.z), w.heightAt(ax, az));
     gy = Math.max(ty, gh + 1.6);
@@ -243,9 +244,16 @@ function flyTo(b, tx, ty, tz, v, dt, low) {
   const s = Math.min(d, v * dt);
   let nx = b.x + (dx / d) * s, ny = b.y + (dy / d) * s, nz = b.z + (dz / d) * s;
   ny += Math.sin(simNow() * 7 + b.phase) * 0.12 * dt;   // a little bob
-  if (BF.SOLID[w.getBlock(Math.floor(nx), Math.floor(ny), Math.floor(nz))]) {   // the way is blocked: hop straight up instead
-    nx = b.x; nz = b.z; ny = b.y + v * dt;
-    if (BF.SOLID[w.getBlock(Math.floor(nx), Math.floor(ny + 0.1), Math.floor(nz))]) ny = b.y;
+  const solid = (x, y, z) => BF.SOLID[w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z))];
+  if (solid(nx, ny, nz)) {
+    // The way is blocked. Before bug-065 it only hopped straight up, so a bee under leaves (a nest under its own tree's canopy, whose top
+    // sets the cruising height) pressed into them for good. Now it takes the first open move of: up (only when it wants to climb), level
+    // on its way, sideways along the obstacle (each bee always the same side, so it works round it), up after all, then down.
+    const hx = hd > 1e-4 ? dx / hd : 0, hz = hd > 1e-4 ? dz / hd : 0, side = b.phase > Math.PI ? 1 : -1;
+    const tries = [[b.x + hx * s, b.y, b.z + hz * s], [b.x + hz * s * side, b.y, b.z - hx * s * side], [b.x - hz * s * side, b.y, b.z + hx * s * side], [b.x, b.y + v * dt, b.z], [b.x, b.y - v * dt, b.z]];
+    if (dy > 0) tries.unshift(tries[3]);
+    const ok = tries.find(([x, y, z]) => !solid(x, y + (y > b.y ? 0.1 : 0), z));
+    if (ok) [nx, ny, nz] = ok; else { nx = b.x; ny = b.y; nz = b.z; }
   }
   b.vx = (nx - b.x) / Math.max(dt, 1e-4); b.vy = (ny - b.y) / Math.max(dt, 1e-4); b.vz = (nz - b.z) / Math.max(dt, 1e-4);
   if (Math.abs(b.vx) + Math.abs(b.vz) > 0.05) b.yaw = Math.atan2(b.vx, b.vz);

@@ -154,6 +154,7 @@ function ai(m, dt, out) {
   const giveUp = () => { if (v2) sh.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; sh.stage = null; sh.deal = null; a.route = null; sh.checkT = 0.5; if (BF.villageSim) BF.villageSim.done(m); return false; };
   if (!v2 || !canSell(v2)) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   a.mode = "idle"; a.t = 2;
   if (sh.stage === "walk") {
     sh.walkT += dt;
