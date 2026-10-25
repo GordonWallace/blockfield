@@ -2,8 +2,9 @@
 // (js/save.js logStore) and shown live on the debug screen (debug/index.html, the Game log button).
 // Each entry has the system time, the game time, the chunk time (game days the chunk at the event's position has been loaded over
 // the whole game; "-" for events with no position), a level, a kind, the village's name (village events) and the text. Levels:
-//   ERROR  villager tasks cut off when their village unloads (js/villagesim.js), errors the game caught (console.error), uncaught errors
-//   WARN   console warnings, a session that ended without unloading the game, game files that changed on disk mid-session
+//   ERROR  villager tasks cut off when their village unloads (js/villagesim.js), errors the game caught (console.error), uncaught errors,
+//          the browser taking away the 3D view's graphics context (a black screen)
+//   WARN   console warnings, the game hanging for 3 s or more between frames, a session that ended without unloading the game, game files that changed on disk mid-session
 //   INFO   the game loaded and unloaded, version or commit changes, every village log entry (js/villagelog.js)
 //   DEBUG  the jobs' own event lists (the LOG arrays of the miner, baker, builder... modules) and births and grow-ups (js/breeding.js)
 // The file starts with a header line: world, seed, version and commit (the commit is read by the debug server, window.BF_BUILD;
@@ -107,6 +108,33 @@ for (const [fn, level] of [["error", "ERROR"], ["warn", "WARN"]]) {
 }
 addEventListener("error", ev => { if (ev.error || ev.message) log("ERROR", "uncaught", ev.error ? stackOf(ev.error) : ev.message + (ev.filename ? " (" + ev.filename + ":" + ev.lineno + ")" : "")); });
 addEventListener("unhandledrejection", ev => log("ERROR", "uncaught", "unhandled promise rejection: " + stackOf(ev.reason)));
+// The 3D view (kind "graphics"): the browser can take the WebGL context away (a graphics driver reset or crash, too little graphics
+// memory) and the view goes black until it gives it back (three.js restores it then). That is logged with what the renderer held,
+// so a black screen leaves a trace. A gap of STALL ms or more between frames while the page is visible means the game hung that
+// long; it is logged when the next frame comes.
+const STALL = 3000;
+function watchGraphics() {
+  const cv = document.getElementById("view");
+  if (!cv) return;
+  const held = () => {
+    try {
+      const r = BF.renderer && BF.renderer.info, m = performance.memory;
+      return (r ? r.memory.geometries + " geometries, " + r.memory.textures + " textures, " + r.render.calls + " draw calls" : "renderer unknown") +
+        (m ? ", JS heap " + Math.round(m.usedJSHeapSize / 1e6) + " of " + Math.round(m.jsHeapSizeLimit / 1e6) + " MB" : "") + ", " + (BF.mobs ? BF.mobs.list.length : 0) + " mobs";
+    } catch (e) { return ""; }
+  };
+  cv.addEventListener("webglcontextlost", () => log("ERROR", "graphics", "The browser took away the 3D view's graphics context (WebGL context lost), so the screen goes black until it comes back: " + held()));
+  cv.addEventListener("webglcontextrestored", () => log("INFO", "graphics", "The graphics context came back (WebGL context restored)"));
+  let last = performance.now();
+  document.addEventListener("visibilitychange", () => { last = performance.now(); });   // a hidden tab gets no frames: not a stall
+  const frame = now => {
+    const gap = now - last; last = now;
+    if (gap >= STALL && !document.hidden) log("WARN", "graphics", "The game hung for " + (gap / 1000).toFixed(1) + " s between frames (" + held() + ")");
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+if (document.readyState === "loading") addEventListener("DOMContentLoaded", watchGraphics); else watchGraphics();
 
 // ---------------------------------------------------------------- the world's log
 const fmtBuild = (v, c, b) => v + " (commit " + (c ? c.slice(0, 10) : "unknown") + (c && b ? ", " + b : "") + ")";
