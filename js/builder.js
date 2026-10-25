@@ -645,6 +645,16 @@ function reserve(m) {
 // What it is short of while shopping (js/market.js turns what its table doesn't buy into need offers). {item id: n}
 const shortfall = m => (m.bs && m.bs.mode === "shop" && m.bs.want && m.bs.want.short) || {};
 
+// A village's builders take turns to think, one a tick (by slot), as think reads what another builder's think just started (the village's
+// active build, its site): two builders thinking in the same tick would see each other or not depending on the order mobs think in
+// (spec r15-33). One waiting for its turn waits at most as many ticks as the village has builders.
+function myTurn(m, R) {
+  if (!BF.req || BF.req.phase !== "think") return true;   // outside a tick (a test running BF.mobs.update by hand): no order to depend on
+  const me = m.slot ? m.slot.idx : 0, tick = BF.rand ? BF.rand.tick : 0;
+  let n = 0, before = 0;
+  for (const x of R.members) if (!x.removed && !x.dead && x.profession === "builder") { n++; if ((x.slot ? x.slot.idx : 0) < me) before++; }
+  return n <= 1 || tick % n === before;
+}
 function think(m, bs) {
   const R = m.village, built = builtOf(R);
   const active = built.find(e => e.state === "building");
@@ -1149,7 +1159,7 @@ function ai(m, dt, out) {
   switch (bs.mode) {
     case "idle":
       bs.t -= dt;
-      if (bs.t <= 0) { bs.t = 2 + RS(m).next() * 2; think(m, bs); }
+      if (bs.t <= 0 && myTurn(m, R)) { bs.t = 2 + RS(m).next() * 2; think(m, bs); }
       return false;
     case "build": return buildMode(m, bs, dt, out);
     case "fill": return fillMode(m, bs, dt, out);
