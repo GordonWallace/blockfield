@@ -916,7 +916,7 @@ function meshTables() {
 function workerTables() {
   if (WTBL) return WTBL;
   const t = Object.assign({}, meshTables());
-  t.blocks = BF.blocks.map(b => b && { model: b.model, translucent: b.translucent, boxes: b.boxes, gate: b.gate && { axis: b.gate.axis }, wallTorch: b.wallTorch && { f: b.wallTorch.f }, name: b.name, render: b.render });
+  t.blocks = BF.blocks.map(b => b && { model: b.model, translucent: b.translucent, boxes: b.boxes, gate: b.gate && { axis: b.gate.axis }, wallTorch: b.wallTorch && { f: b.wallTorch.f }, door: b.door && { f: b.door.f }, name: b.name, render: b.render });
   return (WTBL = t);
 }
 

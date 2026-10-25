@@ -72,16 +72,20 @@ const MODELS = {
 };
 // ---- panes, iron bars and ladders ----
 // "pane" model (glass panes, stained panes, iron bars): a 2/16 post plus an arm towards every neighbour that is another pane/bars, a glass block
-// or a full opaque solid block (a lone pane is a cross). One block id each; the arms are computed here (like fences) for the mesh and for collision (BF.DYNBOXES).
+// a door beside it in line (the arm meets the door's frame, js/blocks.js doorDefsOf) or a full opaque solid block (a lone pane is a cross). One block id each; the arms are computed here (like fences) for the mesh and for collision (BF.DYNBOXES).
 const isPane = n => { const b = TB.blocks[n]; return !!b && b.model === "pane"; };
 const isGlassBlock = n => { const b = TB.blocks[n]; return !!b && b.render === "cutout" && /(^|_)glass$/.test(b.name); };
 const paneJoins = n => isPane(n) || isGlassBlock(n) || (TB.OPAQUE[n] === 1 && TB.SOLID[n] === 1 && TB.RENDER[n] === 1);
+// a door in line with the pane (the pane beside one of its jambs, not in front of it): arm i is north/south when even, its jambs face
+// east/west when the door's closed slab lies along x (f 0 or 2)
+const doorJamb = (n, i) => { const b = TB.blocks[n]; return !!b && !!b.door && (b.door.f & 1) !== (i & 1); };
 const PANE_ARMS = [[7, 0, 0, 9, 16, 7], [9, 0, 7, 16, 16, 9], [7, 0, 9, 9, 16, 16], [0, 0, 7, 7, 16, 9]]; // north (-z), east (+x), south (+z), west (-x)
 // face bits (emitBox 8th entry): 0 top, 1 bottom, 2 +x, 3 -x, 4 +z, 5 -z
 const ARM_HIDE = [(1 << 5) | (1 << 4), (1 << 2) | (1 << 3), (1 << 4) | (1 << 5), (1 << 3) | (1 << 2)]; // cap at the cell edge + face towards the post
 const POST_HIDE = [1 << 5, 1 << 2, 1 << 4, 1 << 3];                                                     // post face on the side of arm i
 function paneArms(get, x, y, z) {
-  const a = [paneJoins(get(x, y, z - 1)), paneJoins(get(x + 1, y, z)), paneJoins(get(x, y, z + 1)), paneJoins(get(x - 1, y, z))];
+  const n = [get(x, y, z - 1), get(x + 1, y, z), get(x, y, z + 1), get(x - 1, y, z)];
+  const a = n.map((id, i) => paneJoins(id) || doorJamb(id, i));
   return a[0] || a[1] || a[2] || a[3] ? a : [true, true, true, true];
 }
 function paneBoxes(get, x, y, z) {
