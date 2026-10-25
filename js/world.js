@@ -330,6 +330,21 @@ world.heightAt = function (x, z) {
   }
   return c.y0 - 1;   // nothing solid in the band: solid stone below it
 };
+// The top of column (x, z) that something can stand on or swim at: heightAt, or the water over it (sea, lakes, rivers), so
+// /tp x z lands on the water and on sea ice, not on the sea floor under them. BF.MIN_Y - 1 when the column is not loaded.
+world.topAt = function (x, z) {
+  x = Math.floor(x); z = Math.floor(z);
+  let h = world.heightAt(x, z);
+  const c = chunkAt(x, z);
+  if (!c) return h;
+  while (h + 1 < c.y1 && BF.FLUID[world.getBlock(x, h + 1, z)]) h++;
+  return h;
+};
+// Generates the chunk holding (x, z) now if it isn't loaded yet (/tp x z needs its real surface at once). Returns the chunk.
+world.loadAt = function (x, z) {
+  const cx = Math.floor(Math.floor(x) / CS), cz = Math.floor(Math.floor(z) / CS);
+  return world.chunks.get(ckey(cx, cz)) || createChunk(cx, cz);
+};
 
 function updateColumn(c, lx, lz) {
   // light-blocking top (opaque blocks and leaves): rain and snow stop here (js/weather.js); sky light is js/skylight.js

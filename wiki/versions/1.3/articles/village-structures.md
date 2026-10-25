@@ -2,7 +2,7 @@
 title: Village structures
 category: Villages
 ---
-This page lists every building a village is generated with, and every structure that [[page:builders|builders]] add later. Sizes are the footprint in blocks. How a village is laid out is on [[page:villages]]; workstation blocks and where they stand are described there too.
+This page lists every building a village is generated with, and every structure that [[villager:builder|builders]] add later. Sizes are the footprint in blocks. How a village is laid out is on [[page:villages]]; workstation blocks and where they stand are described there too.
 
 ## Generated buildings
 
@@ -74,7 +74,7 @@ There is no building for bakers, glassmakers or beekeepers at generation. Their 
 
 ## Builder structures
 
-Builders ([[page:builders]]) build from their own materials, using the village's style but a single wood species per structure. Their houses use torches instead of lanterns and have a torch inside and out. Doors are always oak. How they choose is explained on [[page:builders]]; the conditions below are the hard ones.
+Builders ([[villager:builder]]) build from their own materials, using the village's style but a single wood species per structure. Their houses use torches instead of lanterns and have a torch inside and out. Doors are always oak. How they choose is explained on the [[villager:builder|builder]] page; the conditions below are the hard ones.
 
 | Structure | Size | What it is |
 |---|---|---|

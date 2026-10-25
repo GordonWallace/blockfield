@@ -2,7 +2,7 @@ Villagers are the people of the villages. Their behaviour is large enough to hav
 
 - What they do all day, how they sleep, eat, have children and die: [[page:villager-life]].
 - How they trade and why prices move: [[page:village-economy]].
-- The work builders do: [[page:builders]].
+- The work builders do: [[villager:builder]].
 - Where villagers walk when a village is far from you: [[page:village-loading]].
 - Merchants and their trips between villages: [[page:caravans]].
 

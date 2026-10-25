@@ -33,4 +33,4 @@ A river's surface never rises as it flows. On the high plains it sits at plateau
 - Riverbeds are sand, with patches of clay and gravel. The biome is River, or Frozen River in the coldest climate band; rivers also freeze over in the cold band. See [[page:biomes]].
 - Caves stay a good way from rivers: the ground under and beside a river is kept sealed, so rivers do not drain into caverns ([[page:caves-and-ores]]).
 - Villages are never placed on a river, and village roads stop at one.
-- Villagers that keep swimming across a river can lead the village's [[page:builders|builders]] to put up a wooden bridge. See [[page:village-structures]].
+- Villagers that keep swimming across a river can lead the village's [[villager:builder|builders]] to put up a wooden bridge. See [[page:village-structures]].

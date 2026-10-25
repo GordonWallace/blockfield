@@ -2651,8 +2651,14 @@ BF.mobs = {
     for (const m of list) {
       if (m.dead || m.removed || m === skip) continue;
       const p = m.position, hw = m.halfWidth;
-      mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
-      mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
+      if (m.sleeping && m.bed) {   // lying on the bed (sleepPose): feet at the position, head m.height along the bed's facing
+        const [fx, fz] = BF.DIRS[m.bed.f], hx = p.x + fx * m.height, hz = p.z + fz * m.height;
+        mn[0] = Math.min(p.x, hx) - (fx ? 0 : hw); mn[1] = p.y - hw; mn[2] = Math.min(p.z, hz) - (fz ? 0 : hw);
+        mx[0] = Math.max(p.x, hx) + (fx ? 0 : hw); mx[1] = p.y + hw; mx[2] = Math.max(p.z, hz) + (fz ? 0 : hw);
+      } else {
+        mn[0] = p.x - hw; mn[1] = p.y; mn[2] = p.z - hw;
+        mx[0] = p.x + hw; mx[1] = p.y + m.height; mx[2] = p.z + hw;
+      }
       const t = rayAABB(origin, dir, mn, mx);
       if (t != null && t <= maxDist && (!best || t < best.dist)) best = { mob: m, dist: t };
     }
