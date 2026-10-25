@@ -422,7 +422,7 @@ function attach(sh, me, n) {
 const REBALANCE = 100;   // ticks between owner plans
 const SOLO_MS = 0.6;     // below this much thinking a tick (all workers' regions together) every region goes to the leader
 const RW = {
-  active: false, n: 1, me: 0, link: null, verify: 0,
+  active: false, n: 1, me: 0, link: null, verify: 0, shuffle: 0,
   owners: new Map(),   // region key -> worker (the same on every worker)
   solo: false,
 };
@@ -697,6 +697,7 @@ function afterDeliver() {
 // where they are unless their worker has more than its share; the heaviest move first, to the lightest worker. Below SOLO_MS a tick
 // in all, everything to the leader.
 function replan(loads) {
+  if (RW.shuffle) { shuffled(loads); return; }
   const by = new Map();
   for (const [k, ms] of loads) by.set(k, (by.get(k) || 0) + ms);
   let total = 0;
@@ -719,6 +720,17 @@ function replan(loads) {
     next.set(k, best); loadOf[best] += by.get(k);
   }
   RW.owners = next;
+}
+// (tests, RW.shuffle k) every region with load to a worker picked by a hash of k, the key and the tick, the same on every worker
+function shuffled(loads) {
+  const next = new Map();
+  for (const [k] of loads) {
+    if (next.has(k)) continue;
+    let h = (RW.shuffle * 2654435761 + T.ticks * 40503) >>> 0;
+    for (const c of String(k)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+    next.set(k, h % RW.n);
+  }
+  RW.solo = false; RW.owners = next;
 }
 function checkHashes(hs) {
   RW.checks = (RW.checks || 0) + 1;

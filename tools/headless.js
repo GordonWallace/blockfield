@@ -3,12 +3,12 @@
 // villager-seconds per second (js/perf.js) and the world state hash (js/statehash.js). The fast CI path, and the base of the Node
 // world server (r15-41).
 // Usage: node tools/headless.js [--seed 3] [--seconds 600] [--at village|spawn] [--villages 10] [--view 8] [--log file.log]
-//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s]
+//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k]
 //   --at village (default): the player moves to the village nearest the spawn first, so villagers are simulated; spawn: stays there.
 //   --log: the game log, one line an entry (js/logmatch.js gameLine), as the debug screen's download writes it.
 //   --save / --load: the save data as js/save.js stores it (snapshot / restore), as JSON. --every: print the hash every s game seconds.
 //   --workers n: the regions' thinking split over n workers (spec r15-39: n - 1 worker_threads, server/regionthread.js); the world must
-//   come out the same as with one. --verify t: the workers compare state hashes every t ticks (slow; tests). --after s: the
+//   come out the same as with one. --verify t: the workers compare state hashes every t ticks (slow; tests). --shuffle k (tests): regions go to workers by a hash of k at every rebalance, whatever they cost, to try other splits. --after s: the
 //   split starts after s game seconds that every copy plays on its own (as in play, js/rplay.js).
 //   --json: one JSON line at the end ({seed, seconds, ticks, vss, mobss, msPerTick, real, villagers, mobs, chunks, hash, parts, workers,
 //   census: every item in the world by name, and the emeralds}).
@@ -113,9 +113,10 @@ async function main(argv) {
       await Promise.all(wait);
     }
     const shared = BF.rworkers.makeShared(nw);
-    await Promise.all(pool.list.map(f => f.ask({ start: { shared, me: f.me, n: nw, verify: +a.verify || 0, audit: !!a.audit } })));
+    await Promise.all(pool.list.map(f => f.ask({ start: { shared, me: f.me, n: nw, verify: +a.verify || 0, audit: !!a.audit, shuffle: +a.shuffle || 0 } })));
     BF.rworkers.verify = +a.verify || 0;
     BF.rworkers.audit = !!a.audit;
+    BF.rworkers.shuffle = +a.shuffle || 0;
     BF.rworkers.setup({ n: nw, me: 0, link: BF.rworkers.attach(shared, 0, nw) });
     say(`${nw} workers: ${nw - 1} followers booted the same world in ${((performance.now() - t1) / 1000).toFixed(1)} s`);
   }

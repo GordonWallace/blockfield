@@ -57,6 +57,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
         const s = d.start;
         BF.rworkers.verify = s.verify || 0;
         BF.rworkers.audit = !!s.audit;
+        BF.rworkers.shuffle = s.shuffle || 0;
         BF.rworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n) });
         parentPort.postMessage({ started: true });
       } else if (d.ticks) {
