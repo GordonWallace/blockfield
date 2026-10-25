@@ -10,6 +10,7 @@ Each villager's trade screen shows three kinds of offer:
 - **Job offers.** The wares of its profession, with more of them at higher levels (see [[page:villagers]]). A villager sells a ware only while it holds it, so these offers run out.
 - **Spare goods.** Anything a villager holds beyond what it needs that its job offers do not already sell is put on sale too, in lots of about one emerald. The price is the cheapest base price any villager charges for that item, or the item's worth plus 5 percent if no one sells it. This is how a leftover empty bottle or a pile of raw copper finds a buyer.
 - **Needs.** When a villager lacks something right now, it posts an offer to buy it: food when it is down to less than a day's worth, a tool of its trade it has none of, wheat for a shepherd short of feed, or building materials a builder is short of. Needs pay 88 percent of an item's worth. Other villagers fill needs by buying through each other's sell offers, and you can fill them directly.
+- **One side per item.** A villager is either selling an item or looking for it, never both at once. Where its offers would buy and sell the same thing (an armorer's lanterns, a farmer's carrots, a cleric's bones once it has a pile of them), it sells while it can spare a full lot and buys otherwise. The other side's offers are hidden from the trade screen until its stock changes, and their prices wait where they were.
 
 ## Reserves
 Each villager keeps what its next moves require, and never sells it, to villagers or to you. The trade screen says "Keeping for own use". A villager keeps:
@@ -35,7 +36,7 @@ Every emerald offer drifts with shortage and surplus, for you and for villagers 
 - **A sell offer** (the villager sells a ware) whose ware sits at its stock cap for a day without a sale drops one step.
 - **Each trade** that fills an offer moves its price three steps back toward the base price.
 
-A month of constant shortage or glut takes a price to its limit. Prices only change once a day, never in the middle of a trade. Three floors keep the market sane: a villager never buys an item for more than it sells it for, never sells it for less than it buys it, and never buys above the cheapest base price any villager charges for it. Offers with no emerald on one side (barter) and the explorer's maps keep fixed prices.
+A month of constant shortage or glut takes a price to its limit. Prices only change once a day, never in the middle of a trade. Two floors keep the market sane: a villager only ever has one side of an item open (see above), and it never buys above the cheapest base price any villager charges for it. Offers with no emerald on one side (barter) and the explorer's maps keep fixed prices.
 
 Prices matter for [[page:caravans]] too: a [[villager:merchant]] carries goods from a village where a price has fallen to one where it has risen.
 
