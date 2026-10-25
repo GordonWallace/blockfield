@@ -275,7 +275,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT"];
+  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -788,7 +788,7 @@ function pickWander(m, r) {
   if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
   if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return;   // sty pigs root about inside the sty (js/pigfarmer.js)
   if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
-  for (let k = 0; k < (m.def.golem ? 8 : 1); k++) {   // a golem keeps to spots it fits (golemFits)
+  for (let k = 0; k < (m.def.golem ? 16 : 1); k++) {   // a golem keeps to spots it fits (golemFits; by a wall half the spots round it can be inside)
     const a = R(m).next() * Math.PI * 2, d = rnd(R(m), 3, r);
     m.ai.tx = m.position.x + Math.cos(a) * d;
     m.ai.tz = m.position.z + Math.sin(a) * d;
@@ -1700,8 +1700,12 @@ function golemChase(m, dt, out) {
     if (Math.hypot(end[0] + 0.5 - op.x, end[2] + 0.5 - op.z) > 4 || followRoute(m, dt, out, sp, C) !== "going") ai.chase = null;   // the foe moved off, or the route is walked
     return true;
   }
-  if (ai.blockedT > DETOUR_AFTER && takePlan()) {
-    ai.blockedT = 0;
+  // Held up: pushing straight at a wall, or sliding along one (a foe on the far side of a house) without getting any closer to the foe.
+  const d = mdist(m, o);
+  if (d < (ai.chaseBest == null ? Infinity : ai.chaseBest) - 1 || d < 3) { ai.chaseBest = d; ai.chaseSlowT = 0; }
+  else ai.chaseSlowT = (ai.chaseSlowT || 0) + dt;
+  if ((ai.blockedT > DETOUR_AFTER || ai.chaseSlowT > 3) && takePlan()) {
+    ai.blockedT = 0; ai.chaseSlowT = 0; ai.chaseBest = null;
     const [fx, fy, fz] = feetCell(m), op = seen(m.position, o.position, _sB), ox = Math.floor(op.x), oy = Math.floor(op.y + 0.01), oz = Math.floor(op.z);   // the foe in this golem's frame
     const route = findPath(fx, fy, fz, { x: ox, z: oz, at: (x, y, z) => Math.abs(x - ox) + Math.abs(z - oz) <= 2 && Math.abs(y - oy) <= 1 }, 1500, true);
     if (route && route.length) ai.chase = BF.ids.refs({ route, ri: 0, stuckT: 0, foe: o });   // (the foe kept as its id)
@@ -1764,7 +1768,7 @@ function golemAI(m, dt, out) {
   }
   if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14 && !(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
     ai.mode = "walk"; ai.t = rnd(R(m), 5, 8);
-    for (let k = 0; k < 8; k++) { ai.tx = px + rnd(R(m), -6, 6); ai.tz = pz + rnd(R(m), -6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
+    for (let k = 0; k < 16; k++) { ai.tx = px + rnd(R(m), -6, 6); ai.tz = pz + rnd(R(m), -6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
   }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;
