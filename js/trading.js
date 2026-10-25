@@ -547,6 +547,7 @@ function syncFeed(v, open = true) {
 function blockReason(v, o) {
   if (!v || !v.inv || !o) return "Unavailable";
   if (o.horse) return BF.stables ? BF.stables.horseReason(v, o) : "Unavailable";   // a paddock horse: the stable's rules (js/stables.js)
+  if (o.off) return (BF.market && BF.market.OFF_NOTE[o.off]) || "Unavailable";   // the other side of an item it buys and sells (js/market.js oneSide)
   if (o.feed && BF.food && !v.starving && BF.food.available(v) >= FEED_DAYS * BF.food.rate(v)) return "Has enough food";
   const hungry = BF.food && BF.food.blockReason(v, o);   // starving villagers only trade food (js/villagelife.js)
   if (hungry) return hungry;

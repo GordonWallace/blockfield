@@ -1613,6 +1613,14 @@ function doWheatDeal(m, deal) {
   }
   return done;
 }
+// What a shopping trip is for, as its status (bug-053: a farmer off to buy a bucket said "Buying food" with a pack full of bread).
+function dealLabel(d) {
+  if (!d) return "Shopping";
+  if (d.kind === "wheat") return "Buying " + (d.item === ids().wheat ? "wheat" : BF.itemName(d.item).toLowerCase());
+  if (d.kind === "tool") return "Buying " + (d.item != null ? BF.itemName(d.item).toLowerCase() : "a tool");
+  if (d.treat) return "Buying a treat";
+  return "Buying food";
+}
 function shopAI(m, dt, out) {
   const F = FD(), sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(0, 3), avoid: {}, cd: 0 }), ai = m.ai;
   if (!sh.stage) {
@@ -1635,7 +1643,7 @@ function shopAI(m, dt, out) {
       const d = f && f();
       if (!d) continue;
       found = true;
-      if (!VS || !VS.begin || VS.begin(m, VS.walkSecs(m, [d.seller.position]) + TRADE_PAUSE, d.kind === "wheat" ? "Buying " + (d.item === ids().wheat ? "wheat" : BF.itemName(d.item).toLowerCase()) : "Buying food")) { deal = d; break; }
+      if (!VS || !VS.begin || VS.begin(m, VS.walkSecs(m, [d.seller.position]) + TRADE_PAUSE, dealLabel(d))) { deal = d; break; }
     }
     if (!deal) {
       if (found) { sh.cd = now + 0.02; return false; }
@@ -1758,7 +1766,7 @@ const NAMES = { dig: "Levelling a field", raise: "Filling in a field", gather: "
 function statusText(m) {
   if (!m) return "";
   if (m.starving) return "Starving, only trades food";
-  if (m.fshop && m.fshop.stage) return m.fshop.deal && m.fshop.deal.kind === "wheat" ? "Buying " + (m.fshop.deal.item === ids().wheat ? "wheat" : BF.itemName(m.fshop.deal.item).toLowerCase()) : "Buying food";
+  if (m.fshop && m.fshop.stage) return dealLabel(m.fshop.deal);
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.statusText) { const t = BF.shepherd.statusText(m); if (t) return t; }
   if (m.profession === "poultry_keeper" && BF.poultry) { const t = BF.poultry.statusText(m); if (t) return t; }
   if (m.profession === "cowherd" && BF.cowherd) { const t = BF.cowherd.statusText(m); if (t) return t; }
