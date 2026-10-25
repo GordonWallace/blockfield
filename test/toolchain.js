@@ -39,6 +39,10 @@ async function openWorld(seed) {
 // ---- in-page recorder, installed before the villagers spawn (starting kits are handed out at spawn)
 function install(key) {
   const R = globalThis.__rec = { key, trades: [], calls: [], uses: {}, breaks: [], dug: {}, logs: [], minerLog: [], snaps: [], furn: [], lastTools: {}, appeared: [], vanished: [] };
+  // the Economy view's tallies so far: on the server host (spec r15-43) the world simulates on its own before the test holds it, and a
+  // builder near spawn can already have bought beds then; econCheck counts only what was tallied after this
+  const base = R.econBase = {};
+  if (BF.econ) { const v = BF.econ.view(key); for (const d in v.days) for (const f of v.days[d].f) { const k = f[0] + '|' + f[1] + '|' + f[2]; base[k] = (base[k] || 0) + f[4]; } }
   const day = () => +(BF.sky.day + BF.sky.time).toFixed(3);
   const inV = m => m && m.village && m.village.key === globalThis.__rec.key;
   // a unique label per villager (names can repeat within a village)
@@ -111,6 +115,7 @@ function econCheck() {
   }
   const have = {}, v = E.view(R.key);
   for (const d in v.days) for (const f of v.days[d].f) have[f[0] + '|' + f[1] + '|' + f[2]] = (have[f[0] + '|' + f[1] + '|' + f[2]] || 0) + f[4];
+  for (const k in R.econBase || {}) have[k] = (have[k] || 0) - R.econBase[k];
   const keys = new Set([...Object.keys(want), ...Object.keys(have)]), bad = [...keys].filter(k => (want[k] || 0) !== (have[k] || 0));
   out.push((bad.length ? 'FAIL' : 'PASS') + ` economy tallies match the soak's ${R.calls.length} trades (${keys.size} flows)` + (bad.length ? ': ' + bad.slice(0, 5).map(k => k + ' soak ' + (want[k] || 0) + ' tally ' + (have[k] || 0)).join('; ') : ''));
   // dead ends
