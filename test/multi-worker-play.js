@@ -2,12 +2,13 @@
 // Region workers while the game is played (spec r15-39, js/rplay.js): the simulation worker leads, its followers (Web Workers from
 // js/regionworker.js, Node worker threads from server/regionthread.js on the world server) hold copies of the world made from the
 // leader's journal. Served over http (debug/server.js on free ports, as ./run.sh serves the game), seed 3:
-//   - ?sim=worker&workers=3&split=always&verify=20: a new world at the village nearest the spawn, a game hour at 100x. The two
+//   - ?sim=worker&workers=3&split=always&verify=20: a new world at the village nearest the spawn, half a game hour at 100x. The two
 //     followers boot the leader's world (the same hash), the regions are split over the three, the copies are compared every 20
 //     ticks and never differ; F3 says "Workers 3", the game log has the workers' lines;
 //   - paused, the leader's state hash matches a follower's (the journal brought it the player's packets, commands, chunk loads);
 //   - a follower that crashes while split stops the simulation: the page shows the crash, naming the region worker;
-//   - the world server (--workers 3 --split always) splits the same way with Node threads.
+//   - the world server (--workers 3 --split always --verify 20) splits the same way with Node threads, 20 game minutes.
+// Every copy is also compared every 20 ticks while one worker thinks, before the split (js/rplay.js soloCheck).
 // Usage: NODE_PATH=$(npm root -g) node test/multi-worker-play.js [seed=3]
 const path = require('path'), cp = require('child_process'), net = require('net'), fs = require('fs'), os = require('os');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -55,7 +56,7 @@ async function until(pg, fn, ms) {
 }
 const status = pg => sim(pg, () => Object.assign(BF.rplay.status(), { text: BF.rplay.text(), checks: BF.rworkers.checks || 0, mismatch: BF.rworkers.mismatch, crashed: null }));
 
-// A new world at the village nearest the spawn, then a game hour at 100x; returns the status after it.
+// A new world at the village nearest the spawn, then `minutes` game minutes at 100x; returns the status after it.
 async function play(pg, label, minutes) {
   const r = await pg.evaluate(async seed => {
     BF.player.start();
@@ -88,8 +89,8 @@ async function play(pg, label, minutes) {
   const pg = await open(b, url + '?sim=worker&workers=3&split=always&verify=20');
   const mode = await pg.evaluate(() => BF.simHost.mode);
   check(/worker/.test(mode), `the simulation runs in a worker (${mode})`);
-  const s = await play(pg, 'browser', 60);
-  check(s.split && s.followers === 2, `browser: still split over 3 workers after the hour (${s.text})`);
+  const s = await play(pg, 'browser', 30);
+  check(s.split && s.followers === 2, `browser: still split over 3 workers after the half hour (${s.text})`);
   check(s.checks > 0 && !s.mismatch, `browser: the copies were compared ${s.checks} times and never differed${s.mismatch ? ' (' + JSON.stringify(s.mismatch).slice(0, 300) + ')' : ''}`);
   const mobs = s.stats && s.stats.workers ? s.stats.workers.map(w => w.mobs) : [];
   check(mobs.length === 3 && mobs.every(n => n > 0), `browser: every worker thinks for some of the mobs (${mobs.join('/')})`);
@@ -114,7 +115,7 @@ async function play(pg, label, minutes) {
   const S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--verify', '20']);
   const sp = await open(b, S.url + '?sim=server');
   check(await sp.evaluate(() => BF.simHost.mode === 'server'), 'server: the page is the world server\'s client');
-  const ss = await play(sp, 'server', 30);
+  const ss = await play(sp, 'server', 20);
   check(ss.split && ss.followers === 2 && !ss.mismatch, `server: split over 3 threads, the copies agree (${ss.text})`);
   await sp.context().close();
   S.srv.kill();

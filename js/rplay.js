@@ -57,10 +57,11 @@ function begin(world) {
   world.active = BF.active ? BF.active.opts() : null;   // (the simulation budget's settings: the leader's may differ from a fresh copy's, js/active.js)
   world.testEval = !!BF.testEval;
   world.dyn = BF.dynItems ? BF.dynItems() : [];   // (map items made in earlier worlds keep their ids: the follower makes them alike)
+  world.player = player();   // (the look and the rest the title world left: a new world keeps them)
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
-  L.world = world; L.ticks = 0; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
+  L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
   L.soloMs = null; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
-  L.hash = BF.stateHash.full().hash;   // (the followers must boot the same world)
+  { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
   RW.onTick = onTick;
   L.shared = RW.makeShared(n);
@@ -82,14 +83,46 @@ function onFollower(f, epoch, m) {
     return;
   }
   if (m.booted != null) {
-    if (m.booted !== L.hash) { log("ERROR", "Region worker " + f.me + " booted a different world (hash " + m.booted + ", not " + L.hash + ")"); end("a follower's world differs"); return; }
+    if (m.booted !== L.hash) {
+      const parts = Object.keys(L.bootParts).filter(k => m.parts && L.bootParts[k] !== m.parts[k]);
+      log("ERROR", "Region worker " + f.me + " booted a different world (hash " + m.booted + ", not " + L.hash + "; parts " + parts.join(", ") + ")");
+      if (L.bootText && m.texts) soloText(f, { textOf: -1, texts: m.texts }, L.bootText); end("a follower's world differs"); return; }
     f.booted = true; L.ready++;
     if (L.ready === L.list.length) log("INFO", "Region workers: all " + L.list.length + " followers ready (" + L.list.map(x => L.ticks - x.ticks).join("/") + " ticks behind)");
   }
   if (m.ticks != null) f.ticks = m.ticks;
+  if (m.hashAt != null) soloCheck(f, m);
+  if (m.textOf != null) soloText(f, m);
+}
+const texts = () => { const t = {}; for (const k of BF.stateHash.PARTS) t[k] = BF.stateHash.text(k); return t; };
+function soloText(f, m, text) {
+  const mine = text ? { text } : L.solo.get(m.textOf);
+  if (L.diff) L.diff.told = true;
+  if (!mine) return;
+  for (const k in m.texts) {
+    const p = mine.text[k] || "", q = m.texts[k] || "";
+    if (p === q) continue;
+    let i = 0; while (i < p.length && p[i] === q[i]) i++;
+    log("ERROR", "Region workers out of step: worker " + f.me + ", " + k + " from character " + i + ": leader ..." + p.slice(Math.max(0, i - 300), i + 200) + " / worker " + f.me + " ..." + q.slice(Math.max(0, i - 300), i + 200));
+  }
+}
+function soloCheck(f, m) {
+  const mine = L.solo.get(m.hashAt);
+  if (!mine || L.diff) return;
+  RW.checks = (RW.checks || 0) + 1;
+  const parts = Object.keys(mine.parts).filter(k => mine.parts[k] !== m.parts[k]);
+  if (!parts.length) { if (L.list.every(x => x.ticks >= m.hashAt)) for (const k of [...L.solo.keys()]) if (k <= m.hashAt) L.solo.delete(k); return; }
+  L.diff = { tick: m.hashAt, worker: f.me, parts, at: now(), told: false };
+  log("ERROR", "Region workers out of step: worker " + f.me + "'s copy differs from the leader's in " + parts.join(", ") + " at tick " + m.hashAt + " (one thinking)");
+  f.h.post({ textAt: m.hashAt, parts });
+  log("ERROR", "Region workers: the journal before tick " + m.hashAt + ": " + L.recent.filter(e => e[0] >= m.hashAt - 4 && e[0] <= m.hashAt).map(e => e[0] + ":" + JSON.stringify(e[1]).slice(0, 160)).join(" | "));   // (its text of those parts, kept from then, to say where)
+  RW.mismatch = { tick: m.hashAt, worker: f.me, parts };
 }
 function onTick() {
   L.ticks++; L.loopTicks++;
+  // (tests, ?verify=: while one thinks, the followers' copies are compared too, at the start of every verify-th tick: the journal
+  // brought them everything that happened since the last)
+  if (L.verify && !L.split && L.ticks % L.verify === 0 && !L.diff) L.solo.set(L.ticks, { parts: BF.stateHash.full().parts, text: texts() });
   if (L.loopT0 == null) L.loopT0 = now();
   if (L.split) flush();   // (lockstep: the followers need this tick now)
 }
@@ -98,6 +131,7 @@ function flush() {
   const ops = RW.journal;
   if (!ops || !ops.length || !L.list.length) return;
   RW.journal = [];
+  if (L.verify) { let t = L.ticks - ops.filter(o => o[0] === "t").length; for (const o of ops) { if (o[0] === "t") t++; L.recent.push([t, o]); } if (L.recent.length > 3000) L.recent.splice(0, L.recent.length - 2000); }
   for (const f of L.list) f.h.post({ ops });
 }
 // After each loop of the simulation worker (its ticks run): the measure, the switches, the journal out.
@@ -113,6 +147,7 @@ function frame() {
   const dropped = W && !BF.state.paused && W.speed > 1 && W.last < W.speed * 0.9;
   L.busySince = dropped ? (L.busySince == null ? t : L.busySince) : null;
   L.loopT0 = null; L.loopTicks = 0;
+  if (RW.mismatch && L.diff && !L.diff.told && t - L.diff.at < 5000) return;   // (its text of the parts that differ first: soloText)
   if (RW.mismatch) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one"); end("the copies differ"); return; }
   if (!L.split) {
     const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
@@ -125,7 +160,8 @@ function frame() {
     if (L.policy === "auto" && before != null && after != null && after > before * 0.9) {
       toSolo("ticks took " + after.toFixed(1) + " ms split against " + before.toFixed(1) + " ms on one: not worth it");
       L.retryAt = L.ticks + L.backoff; L.backoff = Math.min(BACKOFF * 16, L.backoff * 2);
-    } else log("INFO", "Region workers: the split pays (" + (after != null ? after.toFixed(1) : "?") + " ms a tick split, " + (before != null ? before.toFixed(1) : "?") + " ms on one): kept");
+    } else if (L.policy !== "auto") log("INFO", "Region workers: split kept (split=" + L.policy + "; " + (after != null ? after.toFixed(1) : "?") + " ms a tick split, " + (before != null ? before.toFixed(1) : "?") + " ms on one)");
+    else log("INFO", "Region workers: the split pays (" + (after != null ? after.toFixed(1) : "?") + " ms a tick split, " + (before != null ? before.toFixed(1) : "?") + " ms on one): kept");
   }
   flush();
 }
@@ -188,18 +224,22 @@ function setPlayer(a) {
   P.health = a[7]; P.hunger = a[8]; if (a[9] !== undefined) P.saturation = a[9]; P.dead = a[10];
   if (BF.inventory && BF.inventory.selectedIndex !== a[11]) BF.inventory.select(a[11]);
 }
-// queries a follower needn't answer: read only, and costly (the debug screen's feed hashes the world)
-const READ_ONLY = /^\{"t":"query","qid":\d+,"what":"(feed|f3)"/;
 
 // ---------------------------------------------------------------- a follower
 // follower(post) -> the message handler: {boot: {world, me, n, verify}}, {ops: [...]}, {end}. Answers {booted: hash}, {ticks: n} after each
 // batch, {error} (and stops the barrier, so a split tick on the leader fails at once rather than waiting).
 function follower(post) {
   let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0;
+  const kept = new Map();   // (tests) the texts of the copy at the last few solo checks
   const op = o => {
     switch (o[0]) {
-      case "t": RW.clock = o[2]; BF.simStep(o[1]); ticks++; break;
-      case "p": if (!READ_ONLY.test(o[1].h)) host.receive(o[1]); if (o[2]) setPlayer(o[2]); break;
+      case "t":
+        if (verify && !RW.active && (ticks + 1) % verify === 0) {   // (tests: the leader compares, js/rplay.js soloCheck)
+          kept.set(ticks + 1, texts()); if (kept.size > Math.max(32, Math.ceil(400 / verify))) kept.delete(kept.keys().next().value);
+          post({ hashAt: ticks + 1, parts: BF.stateHash.full().parts });
+        }
+        RW.clock = o[2]; BF.simStep(o[1]); ticks++; break;
+      case "p": host.receive(o[1]);   /* (queries too: answering F3 or the debug screen works out things lazily that the world keeps, a poultry keeper's task state with a roll of its own) */ if (o[2]) setPlayer(o[2]); break;
       case "c": BF.world.replay.create(o[1], o[2]); break;
       case "u": BF.world.replay.unload(o[1]); break;
       case "g": BF.world.replay.purge(o[1]); break;
@@ -208,6 +248,7 @@ function follower(post) {
       case "a": if (BF.active) BF.active.frame(o[1], o[2]); break;
       case "f": BF.inventory.simFrame(o[1]); BF.maps.simFrame(); BF.player.simRide(o[1]); break;
       case "s": BF.save.snapshot(); break;
+      case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1]); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
       case "split": RW.verify = verify; RW.setup({ n: o[2], me, link: link || (link = RW.attach(o[1], me, o[2])) }); break;
       case "solo": RW.pause(); break;
       case "crash": if (o[1] === me) throw new Error("a test crash (test/multi-worker-play.js)"); break;
@@ -238,7 +279,8 @@ function follower(post) {
           }
           BF.proto.flush();
           post({ ticks });
-        } else if (d.end) { if (RW.active) RW.pause(); queue.length = 0; }
+        } else if (d.textAt != null) { const t = kept.get(d.textAt); if (t) { const o = {}; for (const k of d.parts) o[k] = t[k]; post({ textOf: d.textAt, texts: o }); } }
+        else if (d.end) { if (RW.active) RW.pause(); queue.length = 0; }
       }
     } catch (e) { queue.length = 0; fail(e); }
     busy = false;
@@ -260,9 +302,10 @@ function follower(post) {
     if (w.active && BF.active) BF.active.set(w.active);
     if (w.op === "load") BF.save.restore(w.data, w.meta);
     else BF.newWorld(w.seed, w.opts || {});
+    if (w.player) setPlayer(w.player);
     // a protocol host whose output goes nowhere: the client's packets do here what they did on the leader
     host = BF.proto.host(() => {}, { replica: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
-    post({ booted: BF.stateHash.full().hash });
+    { const h = BF.stateHash.full(); post({ booted: h.hash, parts: h.parts, texts: verify ? texts() : null }); }
   }
   return d => { queue.push(d); pump(); };
 }

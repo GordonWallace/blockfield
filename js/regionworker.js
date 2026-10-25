@@ -21,7 +21,7 @@ self.onmessage = ev => {
       if (!three) throw new Error("three.js would not load in the region worker");
       importScripts("simfiles.js" + Q);
       importScripts(...self.BF.SIM_FILES.map(f => "../" + f + Q));
-      importScripts("coords.js" + Q, "commands.js" + Q, "rplay.js" + Q);
+      importScripts("coords.js" + Q, "commands.js" + Q, "debugfeed.js" + Q, "rplay.js" + Q);
       handle = self.BF.rplay.follower(m => self.postMessage(m));
     } catch (e) { fail(e); return; }
   }

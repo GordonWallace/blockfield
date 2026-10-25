@@ -133,6 +133,18 @@ function sharedIndex() {
     for (let i = 0; i < m.trades.length; i++) { const o = m.trades[i]; if (o && typeof o === "object" && !shared.has(o)) shared.set(o, [{ "@": m.id }, top || (top = [{ "@": m.id }, [{ "@": m.id }, null, null], "trades"]), i]); }   // (m, then .trades, then [i])
   }
   for (const rec of recSet) indexTree(rec, [{ V: rec.key }, null, null], shared, 0);
+  // then every mob's own plain objects, one level down: a task that holds another mob's record (a stable keeper's catch holds the horse's
+  // m.horse, js/stables.js) must point at it there, or the other workers keep a copy that the horse's own changes never reach
+  for (const m of mobSet) {
+    let top = null;
+    for (const k in m) {
+      const o = m[k];
+      if (!o || typeof o !== "object" || Array.isArray(o) || shared.has(o) || mobSet.has(o)) continue;
+      const pr = Object.getPrototypeOf(o);
+      if (pr !== Object.prototype && !(BF.ids && BF.ids.isRefs(o))) continue;
+      shared.set(o, [{ "@": m.id }, top || (top = [{ "@": m.id }, null, null]), k]);
+    }
+  }
   return shared;
 }
 function topOf(e) { let x = e; while (x[1] && x[1][1] !== null) x = x[1]; return x[1] ? x[2] : null; }   // the first key of an entry's path

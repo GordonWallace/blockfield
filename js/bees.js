@@ -133,6 +133,7 @@ function flowersNear(h, fresh) {
     }
   }
   h.fl = out; h.flT = now;
+  if (BF.rworkers) BF.rworkers.touch("hive", h);   // (a beekeeper looking while it thinks: the others keep the same flowers, js/rworkers.js)
   return out;
 }
 
@@ -560,10 +561,10 @@ function playerUse(target, stack) {
   return { msg: what() };
 }
 function lure(m, on) { if (on ? lures.has(m) : !lures.has(m)) return; if (on) lures.add(m); else lures.delete(m); if (BF.rworkers) BF.rworkers.touch("lure", m); }
-// Several workers (spec r15-39): a beekeeper changes its home's honey and its lure while it thinks, on its own worker; these send them on.
+// Several workers (spec r15-39): a beekeeper changes its home's honey, the flowers it found and its lure while it thinks, on its own worker; these send them on.
 if (BF.rworkers) {
-  BF.rworkers.channel("hive", { key: h => [h.x, h.y, h.z], get: k => homeAt(k[0], k[1], k[2]), state: h => ({ honey: h.honey, bees: h.bees, day: h.day }),
-    set: (h, d) => { if (h && d) { h.honey = d.honey; h.bees = d.bees; h.day = d.day; } } });
+  BF.rworkers.channel("hive", { key: h => [h.x, h.y, h.z], get: k => homeAt(k[0], k[1], k[2]), state: h => ({ honey: h.honey, bees: h.bees, day: h.day, fl: h.fl, flT: h.flT }),
+    set: (h, d) => { if (h && d) { h.honey = d.honey; h.bees = d.bees; h.day = d.day; h.fl = d.fl; h.flT = d.flT; } } });
   BF.rworkers.channel("lure", { key: m => m.id, get: id => BF.ids.get(id), state: m => lures.has(m), set: (m, on) => { if (!m) return; if (on) lures.add(m); else lures.delete(m); } });
 }
 

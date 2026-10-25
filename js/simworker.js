@@ -145,7 +145,7 @@ self.onmessage = ev => {
   if (d && d.test === "crash") { crashNext = true; return; }   // (test/sim-worker.js: the crash path)
   if (d && d.test === "eval") { if (BF) BF.testEval = true; return; }
   if (d && d.rivers) { pageRivers = d.rivers; return; }   // the page's river network for the next world message (js/simhost.js world)
-  if (d && d.auto) { if (BF && BF.active) BF.active.set({ on: false }); if (BF && BF.rplay && !d.workers) { BF.rplay.end(); BF.rplay.setup({ workers: 1 }); } return; }   // (an automated browser's page: the budget off, js/active.js; one region worker unless the URL asks for more)
+  if (d && d.auto) { if (BF && BF.active) BF.active.set({ on: false }); if (BF && BF.rplay && !d.workers && !d.server) { BF.rplay.end(); BF.rplay.setup({ workers: 1 }); } return; }   // (an automated browser's page: the budget off, js/active.js; one region worker unless the URL asks for more; the world server's own --workers stand)
   if (!d || d.h == null) return;
   if (!sim) { early.push(d); return; }
   if (crashed) return;

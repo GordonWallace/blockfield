@@ -110,7 +110,7 @@ function start(o) {
   for (const [a, b] of worlds.tidy()) say("renamed folder " + JSON.stringify(a) + " to " + JSON.stringify(b) + " (its world's name)");
   // region workers per world (spec r15-39, js/rplay.js): --workers N, else every core but two, at most 8 (each holds a copy of the world)
   const os = require("os"), cores = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
-  const workers = o.workers > 0 ? Math.floor(o.workers) : Math.max(1, Math.min(8, cores - 2));
+  const workers = o.workers > 0 ? Math.floor(o.workers) : o.test ? 1 : Math.max(1, Math.min(8, cores - 2));   // (tests: one unless they ask)
   const srv = { saves: o.saves, build: o.build || null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
