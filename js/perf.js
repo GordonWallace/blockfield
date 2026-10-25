@@ -71,7 +71,9 @@ const P = {
     const t = now();
     if (t - cur.t0 >= BUCKET_MS) {
       buckets.push(cur = bucket(t));
-      while (buckets.length && buckets[0].t0 < t - WINDOW_MS) buckets.shift();
+      // a slice leaving the window keeps counting in the totals (totals() reads allT plus the window: dropped slices were lost, so a
+      // harness run longer than the window got a split that covered only its last 5 s, r15-50)
+      while (buckets.length && buckets[0].t0 < t - WINDOW_MS) { const o = buckets.shift(); for (let i = 0; i < N; i++) allT[i] += o.t[i]; }
     }
     if (t - histT >= 1000) { histT = t; const s = P.stats(); hist.push(s.stale ? 0 : Math.round(s.vss)); if (hist.length > HIST) hist.shift(); }
     return true;
