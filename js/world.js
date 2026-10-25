@@ -486,6 +486,23 @@ world.heightAt = function (x, z) {
   }
   return c.y0 - 1;   // nothing solid in the band: solid stone below it
 };
+// The top of column (x, z) that something can stand on or swim at: heightAt, or the water over it (sea, lakes, rivers), so
+// /tp u v lands on the water and on sea ice, not on the sea floor under them. BF.MIN_Y - 1 when the column is not loaded.
+world.topAt = function (x, z) {
+  x = Math.floor(x); z = Math.floor(z);
+  let h = world.heightAt(x, z);
+  const c = chunkAt(x, z);
+  if (!c) return h;
+  while (h + 1 < c.y1 && BF.FLUID[world.getBlock(x, h + 1, z)]) h++;
+  return h;
+};
+// Generates the chunk holding (x, z) now if it isn't loaded yet (/tp u v needs its real surface at once). Returns the chunk, or
+// null in a corner wedge.
+world.loadAt = function (x, z) {
+  if (!res(Math.floor(x), Math.floor(z))) return null;
+  const c = rawChunk(RX, RZ);
+  return c || createChunk(Math.floor(RX / CS), Math.floor(RZ / CS));
+};
 
 function updateColumn(c, lx, lz) {
   // light-blocking top (opaque blocks and leaves): rain and snow stop here (js/weather.js); sky light is js/skylight.js
@@ -784,16 +801,20 @@ const MODELS = {
 };
 // ---- panes, iron bars and ladders ----
 // "pane" model (glass panes, stained panes, iron bars): a 2/16 post plus an arm towards every neighbour that is another pane/bars, a glass block
-// or a full opaque solid block (a lone pane is a cross). One block id each; the arms are computed here (like fences) for the mesh and for collision (BF.DYNBOXES).
+// a door beside it in line (the arm meets the door's frame, js/blocks.js doorDefsOf) or a full opaque solid block (a lone pane is a cross). One block id each; the arms are computed here (like fences) for the mesh and for collision (BF.DYNBOXES).
 const isPane = n => { const b = BF.blocks[n]; return !!b && b.model === "pane"; };
 const isGlassBlock = n => { const b = BF.blocks[n]; return !!b && b.render === "cutout" && /(^|_)glass$/.test(b.name); };
 const paneJoins = n => isPane(n) || isGlassBlock(n) || (BF.OPAQUE[n] === 1 && BF.SOLID[n] === 1 && BF.RENDER[n] === 1);
+// a door in line with the pane (the pane beside one of its jambs, not in front of it): arm i is north/south when even, its jambs face
+// east/west when the door's closed slab lies along x (f 0 or 2)
+const doorJamb = (n, i) => { const b = BF.blocks[n]; return !!b && !!b.door && (b.door.f & 1) !== (i & 1); };
 const PANE_ARMS = [[7, 0, 0, 9, 16, 7], [9, 0, 7, 16, 16, 9], [7, 0, 9, 9, 16, 16], [0, 0, 7, 7, 16, 9]]; // north (-z), east (+x), south (+z), west (-x)
 // face bits (emitBox 8th entry): 0 top, 1 bottom, 2 +x, 3 -x, 4 +z, 5 -z
 const ARM_HIDE = [(1 << 5) | (1 << 4), (1 << 2) | (1 << 3), (1 << 4) | (1 << 5), (1 << 3) | (1 << 2)]; // cap at the cell edge + face towards the post
 const POST_HIDE = [1 << 5, 1 << 2, 1 << 4, 1 << 3];                                                     // post face on the side of arm i
 function paneArms(get, x, y, z) {
-  const a = [paneJoins(get(x, y, z - 1)), paneJoins(get(x + 1, y, z)), paneJoins(get(x, y, z + 1)), paneJoins(get(x - 1, y, z))];
+  const n = [get(x, y, z - 1), get(x + 1, y, z), get(x, y, z + 1), get(x - 1, y, z)];
+  const a = n.map((id, i) => paneJoins(id) || doorJamb(id, i));
   return a[0] || a[1] || a[2] || a[3] ? a : [true, true, true, true];
 }
 function paneBoxes(get, x, y, z) {

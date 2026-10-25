@@ -6,13 +6,13 @@ A day in the game lasts 20 minutes. The clock times below follow the F3 clock, w
 
 ## A villager's day
 - **Morning.** A villager that slept indoors walks out through the door, keeps going for about 5 blocks straight away from it, and the door shuts behind it. This includes a child, and a house at the edge of the village whose door faces away from the centre: only after those 5 blocks does a villager that far out turn back toward the village.
-- **Working hours, about 07:00 to 16:50.** Villagers with a workstation walk to it now and then and stand beside it for 8 to 20 seconds, which is when many crafters actually craft. In between, each does the job described on its profession page: the [[villager:farmer]] tends fields, the [[villager:builder]] builds, the [[villager:miner]] digs. A villager with nothing to do wanders within about 40 blocks of its bed, or the village centre, opening and closing doors as it goes. One that finds itself standing in a closed doorway opens that door too before it sets off.
+- **Working hours, about 07:00 to 16:50.** Villagers with a workstation walk to it now and then and stand beside it for 8 to 20 seconds, which is when many crafters actually craft. In between, each does the job described on its profession page: the [[villager:farmer]] tends fields, the [[villager:builder]] builds, the [[villager:miner]] digs. A villager with nothing to do wanders within about 40 blocks of its bed, or the village centre, opening and closing doors and fence gates as it goes, also on the way round something that blocks it. Villagers and golems never walk or get pushed over the edge into a well or any small pool lying a block or more below them that has no low bank to climb out by; one knocked in swims to the lowest bank and jumps out. One that finds itself standing in a closed doorway opens that door too before it sets off.
 - **Meals** at about 07:00, 11:15 and 16:05.
 - **Shopping and farming** carry on until sunset. Builders stop a little earlier, at about 17:15.
 - **Evening, from 18:00 to the next dawn.** Everyone heads for bed and sleeps.
 - **Travellers.** [[villager:merchant|Merchants]] and [[villager:explorer|explorers]] who are caught far from home at dusk pitch a tent and sleep in it, and strike camp in the morning.
 
-The trade screen has a line saying what the villager is doing right now, such as "Harvesting Wheat", "Buying food" or "Resting".
+The trade screen has a line saying what the villager is doing right now, such as "Harvesting Wheat", "Buying food", "Buying bucket" or "Resting". A shopping trip names what it is for: food, a tool of its trade, feed or a treat.
 
 ## Beds and sleep
 Most villagers have a bed in the house they live in. A villager without a usable bed (a broken bed, a builder or explorer with no home yet, a child) claims the nearest free bed in the village at night. **No villager ever takes a bed another villager holds.** A bedless villager that cannot find a free bed goes inside the nearest building with room, or stands by the bell.
@@ -20,7 +20,7 @@ Most villagers have a bed in the house they live in. A villager without a usable
 ## Food and hunger
 A villager eats the equivalent of one bread a day, a child two, in three meals. Every food you can eat counts, and the villager eats the cheapest per bread first, rotten flesh and raw food before bread. You can see crumbs and hear it eat when you are near.
 
-- A villager that holds less than a day's food and has an emerald walks to the villager with the most spare food, farmers first, and buys up to three days' worth. A seller always keeps about 7 bread's worth for itself. See [[page:village-economy]].
+- A villager that holds less than a day's food and has an emerald walks to the villager with the most spare food, farmers first, and buys up to three days' worth. A seller always keeps about 7 bread's worth for itself. A villager buying anything from another calls it once it is within 10 blocks, and the seller stops and waits for it, for up to 8 seconds, rather than walk on with a line of buyers trailing behind it. See [[page:village-economy]].
 - Someone who goes more than a day without finding food is **starving**. A starving villager only trades food ("Too hungry to trade").
 - A hungry [[villager:unemployed|unemployed villager]] buys food from you: it pays an emerald for food worth about 88 percent of an emerald, until it holds three days of food.
 - A villager who can cook buys eggs and cooks them in a furnace; one who cannot buys ready food. Raw eggs are not food.

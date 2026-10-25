@@ -376,6 +376,7 @@ function ai(m, dt, out, cont) {
   const v2 = job.other, key = (v2 && v2.slot ? v2.slot.idx : 0) + ":" + job.item;
   if (!F.canSell(m, v2)) return giveUp(v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone", key);
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   if (S.stage === "walk") {
     if (S.walkT > 60) return giveUp("timeout", key);
     if (d <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) { S.stage = "trade"; S.tt = TRADE_PAUSE; a.route = null; return true; }
@@ -513,6 +514,7 @@ function farmTask(m, fs, R, D, H) {
   let best = null, bd = Infinity;
   const pick = (t, extra) => { const k = H.key3(t.x, t.y, t.z); if (!H.ok(k)) return; const d = dist(t.x, t.z) + (extra || 0); if (d < bd) { bd = d; best = Object.assign(t, { k }); } };
   let spots = 0;
+  const planted = cells.filter(c => c[4] === cane && besideWater(c[0], c[1], c[2])).length;   // cane already growing: no more than CANE_SPOTS plants (a builder's farm has grass all along its channel)
   const seeds = cnt(m, I("pumpkin_seeds")) + 4 * cnt(m, I("pumpkin"));
   for (const [x, y, z, g, a] of cells) {
     const gn = bname(g), water = besideWater(x, y, z);
@@ -521,7 +523,7 @@ function farmTask(m, fs, R, D, H) {
       spots++;
       const h = caneHeight(x, y, z);
       if (h >= CANE_CUT && T.canFit(m.inv, [{ id: cane, n: h - 1 }], [])) pick({ kind: "cane", x, y: y + 1, z, ty: y + 1, soil: y });
-      else if (h === 0 && a === 0 && cnt(m, cane) > 0) pick({ kind: "caneplant", x, y: y + 1, z, ty: y + 1, soil: y }, 1);
+      else if (h === 0 && a === 0 && cnt(m, cane) > 0 && planted < CANE_SPOTS) pick({ kind: "caneplant", x, y: y + 1, z, ty: y + 1, soil: y }, 1);
       continue;
     }
     if (a === 0 && seeds > 0 && ((TILL.has(gn) && !water && H.hasHoe(m)) || (isFarmland(g) && P.has(H.key3(x, y, z))))) pick({ kind: "pumpkinplant", x, y: y + 1, z, ty: y + 1, soil: y }, 1);

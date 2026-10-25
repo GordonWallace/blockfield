@@ -366,6 +366,21 @@ function wellCells(R) {
   if (BF.builder && BF.builder.builtOf) for (const e of BF.builder.builtOf(R) || []) if (e.type === "well" && e.state === "done") out.push([e.ox + 1, e.oy + 1, e.oz + 1]);
   return out;
 }
+// The beds of the vegetable farms the builders made (js/builder.js, idea-044): {x0, z0, x1, z1, y} interiors. Their soil is left untilled, so
+// no farmland leads the scan to them; detectBeds looks for them by these, and a farmer within reach tills them before it makes a bed of its
+// own (bug-057).
+function builderFarms(R) {
+  const out = [];
+  if (!BF.builder || !BF.builder.builtOf || !BF.builder.bpOf) return out;
+  for (const e of BF.builder.builtOf(R) || []) {
+    if (e.type !== "veg_farm" || e.state !== "done") continue;
+    const ring = (BF.builder.bpOf(e).marks || {}).ring;
+    if (!ring || ring.length < 2) continue;
+    const [a, b] = ring;
+    out.push({ x0: e.ox + Math.min(a[0], b[0]) + 1, x1: e.ox + Math.max(a[0], b[0]) - 1, z0: e.oz + Math.min(a[1], b[1]) + 1, z1: e.oz + Math.max(a[1], b[1]) - 1, y: e.oy - 1, e });
+  }
+  return out;
+}
 function inArea(D, x, z) { const A = D.area; return x >= A.x0 && x <= A.x1 && z >= A.z0 && z <= A.z1; }
 // One pass over the village area (farmland + water, top-down) and the ring of WATER_REACH blocks around it (water only), `budget` columns per call.
 function scanStep(R, D, budget) {
@@ -397,6 +412,7 @@ function scanStep(R, D, budget) {
         D.wells = new Set();
         for (const [x, y, z] of wellCells(R)) if (w.isLoaded(x, z) && BF.FLUID[w.getBlock(x, y, z)] === 8) { D.wells.add(key3(x, y, z)); if (!S.water.some(p => p[0] === x && p[1] === y && p[2] === z)) S.water.push([x, y, z]); }
         D.cells = S.cells; D.water = S.water; D.waterSet = new Set(S.water.map(p => key3(...p)));
+        D.builtFarms = builderFarms(R);
         detectBeds(D);
         D.ready = true; D.scan = null; D.scanT = BF.simNow() + RESCAN;
         return;
@@ -446,6 +462,9 @@ function think(m, fs, R, D) {
     if (have < h.n) { const g = findGather(m, D, ok); if (g) return g; }
     fs.haul = null;
   }
+  // a builder's farm it is tilling (bug-057) shares the farmer's time with the harvest, else a farmer with many beds never gets to it
+  const own = projectOf(m, R, D);
+  if (own && own.built && Math.random() < 0.5) { const t = projectTask(m, fs, R, D, own, ok); if (t) return t; }
   // harvest mature crops / plant empty farmland, only within 12 blocks of the composter: nearest first
   const mine = myBeds(m, D);
   const cells = D.cells.filter(p => inRange(m, p[0], p[1], p[2]) || mine.some(b => p[1] === b.y && p[0] >= b.x0 && p[0] <= b.x1 && p[2] >= b.z0 && p[2] <= b.z1));
@@ -714,7 +733,8 @@ function detectBeds(D) {
   const c = ids(), w = W(), beds = [], seen = new Set();
   const member = id => isFarm(c, id) || BF.FLUID[id] > 0 || id === 0 || c.till.has(id);
   const wet = id => BF.FLUID[id] > 0 || id === 0;   // a channel cell: water, or an empty trench
-  for (const [sx, sy, sz] of D.cells.concat((D.farmSeeds || []).filter(p => w.isLoaded(p[0], p[2]) && c.till.has(getB(p[0], p[1], p[2]))))) {
+  const built = D.builtFarms || [], seeds = (D.farmSeeds || []).concat(built.map(f => [f.x0, f.y, f.z0]));
+  for (const [sx, sy, sz] of D.cells.concat(seeds.filter(p => w.isLoaded(p[0], p[2]) && c.till.has(getB(p[0], p[1], p[2]))))) {
     if (seen.has(key3(sx, sy, sz))) continue;
     seen.add(key3(sx, sy, sz));
     const q = [[sx, sz]];
@@ -746,7 +766,10 @@ function detectBeds(D) {
     for (let x = x0; x <= x1; x++) if (full("x", x)) cx.push(x);
     for (let z = z0; z <= z1; z++) if (full("z", z)) cz.push(z);
     const ax = cx.length >= cz.length ? "x" : "z";
-    beds.push({ x0, z0, x1, z1, y: sy, ax, ch: ax === "x" ? cx : cz, log: getB(x0 - 1, sy, z0 - 1) });
+    const bed = { x0, z0, x1, z1, y: sy, ax, ch: ax === "x" ? cx : cz, log: getB(x0 - 1, sy, z0 - 1) };
+    const bf = built.find(f => f.x0 === x0 && f.z0 === z0 && f.x1 === x1 && f.z1 === z1 && f.y === sy);
+    if (bf) bed.built = bf.e;   // a builder's farm (its entry): all its soil is for tilling
+    beds.push(bed);
   }
   D.beds = beds;
 }
@@ -786,7 +809,7 @@ function repairJob(P, x, z) {
   const a = getB(x, y + 1, z), at = kind => ({ kind, x, y, z, k: key3(x, y, z), ty: y + 1, stage: 3, proj: P.id });
   if (want === "water") return (cur === 0 || (BF.FLUID[cur] > 0 && BF.FLUID[cur] < 8)) && BF.SOLID[getB(x, y - 1, z)] && looseAbove(a) ? at("water") : null;
   if (cur === c.dirt && besideWater(x, y, z) && caneSpots(L, c.dirt) <= ((BF.baker && BF.baker.CANE_SPOTS) || 3)) return null;
-  return cur === c.dirt && (looseAbove(a) || BF.RENDER[a] === 4) && !BF.SOLID[getB(x, y + 2, z)] ? at("till") : null;
+  return (cur === c.dirt || (P.built && c.till.has(cur))) && (looseAbove(a) || BF.RENDER[a] === 4) && !BF.SOLID[getB(x, y + 2, z)] ? at("till") : null;
 }
 // The first of the farmer's beds that needs repairing, as a new repair project (or null).
 function chooseRepair(m, D) {
@@ -794,11 +817,16 @@ function chooseRepair(m, D) {
     const o = outerOf(b);
     if (D.projects.some(p => overlap(outerOf(p.L), o))) continue;
     const P = { id: "p" + Math.floor(Math.random() * 1e9).toString(36), kind: "repair", dir: null, L: { x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1, y: b.y, ax: b.ax, ch: b.ch.slice() }, old: null, owner: m.slot ? m.slot.idx : -1, log: b.log, fails: 0 };
+    if (b.built) P.built = true;   // a builder's farm (its grass is tilled too, not kept as a pumpkin patch)
     let water = 0, till = 0;
     projectCells(P, (x, z) => { if (!W().isLoaded(x, z)) return; const j = repairJob(P, x, z); if (j) j.kind === "water" ? water++ : till++; });
     if (!water && !till) continue;
     D.projects.push(P);
-    log("project", m, { plan: "repair", options: water + " water / " + till + " till", at: [P.L.x0, P.L.y, P.L.z0], size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), gain: till, logs: 0 });
+    log("project", m, { plan: "repair", options: water + " water / " + till + " till", at: [P.L.x0, P.L.y, P.L.z0], size: (P.L.x1 - P.L.x0 + 1) + "x" + (P.L.z1 - P.L.z0 + 1), gain: till, logs: 0, built: !!P.built });
+    if (b.built && !b.built.tilled && BF.vlog && m.village) {   // the first farmer to work a builder's farm (bug-057); saved with the builder's entry
+      b.built.tilled = +dayNow().toFixed(3);
+      BF.vlog.log(m.village, "farm", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession) + ") started tilling the builders' vegetable farm at " + P.L.x0 + ", " + P.L.y + ", " + P.L.z0, [P.L.x0, P.L.y, P.L.z0]);
+    }
     return P;
   }
   return null;
@@ -1245,7 +1273,12 @@ function levelCell(m, R, D, t) {
   return true;
 }
 // harvest / plant / fill anywhere in the village area; bed work never on a building or its margin
-function freeCellOrFarm(R, D, t) { return t.proj ? clearOfBuildings(R, D, t.x, t.z) : inArea(D, t.x, t.z); }
+// a project's cell keeps clear of buildings, but the repair of a builder's farm works inside that structure (bug-057)
+function freeCellOrFarm(R, D, t) {
+  if (!t.proj) return inArea(D, t.x, t.z);
+  const P = D.projects.find(p => p.id === t.proj);
+  return (P && P.built) || clearOfBuildings(R, D, t.x, t.z);
+}
 
 function farmAI(m, dt, out) {
   const R = m.village;
@@ -1276,6 +1309,7 @@ function farmAI(m, dt, out) {
     const v2 = t.seller;
     if (!canSell(v2)) { log("giveup", m, { task: t.kind, why: v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone" }); avoidSeller(m, v2); endTask(m, fs, false); return true; }
     t.x = Math.floor(v2.position.x); t.y = Math.floor(v2.position.y + 0.01); t.z = Math.floor(v2.position.z);
+    if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z));   // the forester stops for its buyer (bug-054)
     if (fs.stage === "walk" && Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z) <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) {
       fs.stage = "act"; fs.actT = ACT.buylog; ai.route = null;
     }
@@ -1583,6 +1617,14 @@ function doWheatDeal(m, deal) {
   }
   return done;
 }
+// What a shopping trip is for, as its status (bug-053: a farmer off to buy a bucket said "Buying food" with a pack full of bread).
+function dealLabel(d) {
+  if (!d) return "Shopping";
+  if (d.kind === "wheat") return "Buying " + (d.item === ids().wheat ? "wheat" : BF.itemName(d.item).toLowerCase());
+  if (d.kind === "tool") return "Buying " + (d.item != null ? BF.itemName(d.item).toLowerCase() : "a tool");
+  if (d.treat) return "Buying a treat";
+  return "Buying food";
+}
 function shopAI(m, dt, out) {
   const F = FD(), sh = m.fshop || (m.fshop = { stage: null, deal: null, checkT: rnd(0, 3), avoid: {}, cd: 0 }), ai = m.ai;
   if (!sh.stage) {
@@ -1605,7 +1647,7 @@ function shopAI(m, dt, out) {
       const d = f && f();
       if (!d) continue;
       found = true;
-      if (!VS || !VS.begin || VS.begin(m, VS.walkSecs(m, [d.seller.position]) + TRADE_PAUSE, d.kind === "wheat" ? "Buying " + (d.item === ids().wheat ? "wheat" : BF.itemName(d.item).toLowerCase()) : "Buying food")) { deal = d; break; }
+      if (!VS || !VS.begin || VS.begin(m, VS.walkSecs(m, [d.seller.position]) + TRADE_PAUSE, dealLabel(d))) { deal = d; break; }
     }
     if (!deal) {
       if (found) { sh.cd = now + 0.02; return false; }
@@ -1622,6 +1664,7 @@ function shopAI(m, dt, out) {
   const giveUp = () => { sh.avoid[v2 && v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05; sh.stage = null; sh.deal = null; ai.route = null; sh.checkT = 0.5; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
   if (!v2 || !canSell(v2)) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   ai.mode = "idle"; ai.t = 2;
   if (sh.stage === "walk") {
     sh.walkT += dt;
@@ -1728,7 +1771,7 @@ const NAMES = { dig: "Levelling a field", raise: "Filling in a field", gather: "
 function statusText(m) {
   if (!m) return "";
   if (m.starving) return "Starving, only trades food";
-  if (m.fshop && m.fshop.stage) return m.fshop.deal && m.fshop.deal.kind === "wheat" ? "Buying " + (m.fshop.deal.item === ids().wheat ? "wheat" : BF.itemName(m.fshop.deal.item).toLowerCase()) : "Buying food";
+  if (m.fshop && m.fshop.stage) return dealLabel(m.fshop.deal);
   if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.statusText) { const t = BF.shepherd.statusText(m); if (t) return t; }
   if (m.profession === "poultry_keeper" && BF.poultry) { const t = BF.poultry.statusText(m); if (t) return t; }
   if (m.profession === "cowherd" && BF.cowherd) { const t = BF.cowherd.statusText(m); if (t) return t; }
