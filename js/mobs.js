@@ -1942,7 +1942,10 @@ function standable(x, y, z, hw, h) {
 // paddock stock, not a horse, not in a boat). Wild mobs live in the world: stored with their chunk when it unloads, never removed by
 // distance (js/wildlife.js).
 function isWild(m) {
-  return !!(m && !m.dead && !m.removed && !m.village && !m.penVillage && !m.pen && !m.coop && !m.pasture && !m.sty && !m.riding && !m.def.village && !m.def.herd && m.type !== "villager");
+  if (!m || m.dead || m.removed || m.type === "villager" || m.def.village || m.def.herd) return false;
+  // links (js/ids.js accessors: a registry lookup each) only when their id field is set
+  return (m.villageId == null || !m.village) && (m.penVillageId == null || !m.penVillage) && (m.penKey == null || !m.pen) && (m.coopKey == null || !m.coop) &&
+    (m.pastureKey == null || !m.pasture) && (m.styKey == null || !m.sty) && (m.ridingId == null || !m.riding);
 }
 // A young farm animal's size (js/herd.js users: calves, piglets): k 0 = born (half size, head hs0 times bigger) .. 1 = grown.
 function setYoungSize(m, k, hs0) {
