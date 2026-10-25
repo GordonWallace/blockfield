@@ -96,6 +96,7 @@ function turnId(id, k) {
 const FACES = BF.mesher.FACES;   // (js/mesher.js)
 
 const world = {
+  mirror: null,   // a copy of the blocks kept elsewhere (r15-50 experiment: tools/rust/movebox/glue.js), told of every change
   chunks: new Map(),      // key -> chunk
   edits: new Map(),       // key -> Map(localIndex -> blockId); survives unloading
   viewDist: 6,
@@ -336,6 +337,7 @@ function secSet(c, lx, y, lz, id) {
     c.secs[si] = s = a;
   }
   s[((y & 15) << 8) | (lz << 4) | lx] = id;
+  if (world.mirror) world.mirror.cell(c, si, ((y & 15) << 8) | (lz << 4) | lx, id);   // (a copy of the blocks elsewhere: r15-50's Rust slice)
 }
 
 // Slices a generated window (starting at section sy0) into section storage: uniform sections collapse to a number.
@@ -361,6 +363,7 @@ function extendDown(c, newLo) {
   if (c.light) c.light = new Array(n).concat(c.light);
   if (c.sky) c.sky = new Array(n).fill(0).concat(c.sky);
   c.lo = newLo; c.y0 = newLo * 16; c.ver++; for (let i = 0; i < CS * CS; i++) c.colVer[i]++;
+  if (world.mirror) world.mirror.drop(c);
   const e = world.edits.get(c.key);       // edits are applied when the chunk is created; deeper ones are only possible if the band was shorter then
   if (e) for (const [i, id] of e) { const y = (i >> 8) + BF.MIN_Y; if (y >= c.y0 && y < oldY0) secSet(c, i & 15, y, (i >> 4) & 15, id); }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) if (c.top[z * CS + x] < oldY0) updateColumn(c, x, z);
@@ -377,6 +380,7 @@ function extendUp(c, newHi) {
   if (c.light) for (let i = c.hi; i < newHi; i++) c.light.push(undefined);
   const oldHi = c.hi;
   c.hi = newHi; c.y1 = newHi * 16; c.ver++; for (let i = 0; i < CS * CS; i++) c.colVer[i]++;
+  if (world.mirror) world.mirror.drop(c);
   if (BF.skyLight) BF.skyLight.onExtendedUp(c, oldHi);
 }
 function markNeighboursDirty(c) {
@@ -575,6 +579,7 @@ function createChunk(cx, cz) {
   }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) updateColumn(c, x, z);
   world.chunks.set(key, c); CGEN++;
+  if (world.mirror) world.mirror.added(c);
   if (BF.light) BF.light.onChunkCreated(c);
   if (BF.skyLight) BF.skyLight.onChunkCreated(c);   // sky light spreading (js/skylight.js)
   if (e) for (const [i, id] of e) if (BF.blocks[id] && (BF.blocks[id].growsInto || BF.blocks[id].growsUp)) {
@@ -600,6 +605,7 @@ function extendDownRaw(c, newLo) {
   const n = c.lo - newLo;
   c.secs = sliceSections(BF.worldgen.generateRange(c.cx, c.cz, newLo, c.lo), n).concat(c.secs);
   c.lo = newLo; c.y0 = newLo * 16;
+  if (world.mirror) world.mirror.drop(c);
 }
 
 function unload(key) {
@@ -607,6 +613,7 @@ function unload(key) {
   if (!c) return;
   disposeMeshes(c);
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
+  if (world.mirror) world.mirror.removed(c);
   world._dirty.delete(key);
   MP.queue.delete(c);
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
@@ -626,6 +633,7 @@ function purge(key) {
   }
   c.meshes = [];
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
+  if (world.mirror) world.mirror.removed(c);
   world._dirty.delete(key);
   world.purged = (world.purged || 0) + 1;
   for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }

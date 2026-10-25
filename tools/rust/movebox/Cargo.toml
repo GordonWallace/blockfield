@@ -1,0 +1,19 @@
+[package]
+name = "movebox"
+version = "0.1.0"
+edition = "2021"
+
+# r15-50: one hot slice of the simulation (world.moveBox, js/world.js) in Rust, as WebAssembly (browser, Node) and as a
+# Node N-API addon. No dependencies: no bindgen, no napi crates.
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
