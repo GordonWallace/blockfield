@@ -643,6 +643,7 @@ function reserve(m) {
   };
   const mine = builtOf(R).find(e => e.state === "building" && e.owner === (m.slot ? m.slot.idx : 0));
   if (mine) add(remainingReq(mine, mine.prog), bpOf(mine).wood);
+  if (mine && waterLeft(mine)) { if (BF.I.water_bucket != null) out[BF.I.water_bucket] = (out[BF.I.water_bucket] || 0) + 1; if (BF.I.bucket != null) out[BF.I.bucket] = (out[BF.I.bucket] || 0) + 1; }   // the water it still pours: its bucket is not for sale
   else if (bs.want && bs.want.req) add(bs.want.req, bs.want.wood);
   if (bs.next) add(bs.next.req, bs.next.wood);
   return out;
@@ -904,9 +905,28 @@ function claimHome(m, e, bed) {
 
 // ---------------------------------------------------------------- fetching water for a well
 // The builder walks to a water source within ~30 blocks of the village (a lake, a pond, the village well) and fills its empty bucket there.
+// A well is pointless without its water (bug-055), so the builder fetches the water before it lays the first block: with none to be had,
+// or no bucket to carry it in, it gives the well up (nothing placed) and doesn't try another for a game day. Other structures with water
+// (troughs, a farm's channel) fetch it when they reach the cell, and are finished without it when there is none.
+function waterLeft(e) {
+  if (BF.I.water_bucket == null || !(bpOf(e).free && bpOf(e).free[BF.B.water])) return false;
+  for (let i = e.prog; i < e.n; i++) if (cellOf(e, i).id === BF.B.water) return true;
+  return false;
+}
+const waterFirst = e => e.type === "well" && !e.glaze && !e.watered && (e.prog | 0) === 0 && waterLeft(e);
+function giveUpWell(m, bs, e, why) {
+  e.state = "abandoned"; e.end = +dayNow().toFixed(3);
+  bs.fail[e.type] = dayNow() + 1;
+  if (BF.villageSim) BF.villageSim.done(m);
+  bs.mode = "idle"; bs.entry = null; bs.fill = null; bs.cool = rnd(10, 20); bs.t = 3; bs.goal = null; m.ai.route = null;
+  logEvent("nowell", m, { type: e.type, at: [e.ox, e.oy, e.oz], why });
+  if (BF.vlog && m.village) BF.vlog.log(m.village, "build", BF.vlog.nameOf(m) + " (Builder) gave up building " + what(e, true) + " at " + e.ox + ", " + e.oy + ", " + e.oz + ": " + why, [e.ox, e.oy, e.oz]);
+}
 function fillMode(m, bs, dt, out) {
   const F = bs.fill, VL = BF.villageLife, ai = m.ai, e = bs.entry;
   const back = skip => {
+    if (skip && e && F && F.first) { giveUpWell(m, bs, e, "no water to fill it"); return false; }
+    if (!skip && e && F && F.first) { e.watered = true; logEvent("watered", m, { type: e.type, at: [e.ox, e.oy, e.oz] }); }
     if (skip && e) { e.skipped++; advance(e); logEvent("nowater", m, {}); }
     bs.mode = "build"; bs.fill = null; ai.route = null; bs.goal = null; bs.stallT = 0;
     return false;
@@ -937,6 +957,12 @@ function fillMode(m, bs, dt, out) {
 function buildMode(m, bs, dt, out) {
   const e = bs.entry, ai = m.ai;
   if (!e || e.state !== "building" || e.owner !== (m.slot ? m.slot.idx : 0)) { bs.mode = "idle"; bs.entry = null; return false; }   // done, or another builder took it over
+  if (waterFirst(e) && have0(m.inv, BF.I.water_bucket) < 1) {   // a well: its water first (bug-055)
+    if (BF.I.bucket == null || have0(m.inv, BF.I.bucket) < 1) { giveUpWell(m, bs, e, "no bucket to carry its water"); return false; }
+    bs.mode = "fill"; bs.fill = { t: 0, cd: 0, src: null, act: 0, bad: 0, first: true }; ai.route = null; bs.goal = null;
+    logEvent("waterfirst", m, { type: e.type, at: [e.ox, e.oy, e.oz] });
+    return false;
+  }
   bs.placeT -= dt;
   reachNow = e.retried ? REACH + 1.6 : REACH;     // second pass: stretch a little for the last awkward cells (gable tops)
   // watchdog: a cell that cannot be placed for 15 s (unreachable, stuck, no free line) is skipped so the structure still gets finished
