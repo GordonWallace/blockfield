@@ -609,7 +609,7 @@ function beginBuild(m, blocks, x, z, name) {
 }
 // `pre`: the caller already began the task. Returns false when the structure is not started (countdown: it would not finish).
 function startBuild(m, bs, e, pre) {
-  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; } return false; }
+  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   bs.mode = "build"; bs.entry = e; bs.goal = null; bs.cands = null; bs.ci = 0; bs.noSpot = 0; bs.occT = 0; bs.want = null; bs.stage = null;
   bs.placeT = Math.max(bs.placeT, 0.4); bs.losT = 0; bs.losFor = -1;
   m.ai.route = null;
