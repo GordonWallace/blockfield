@@ -1123,6 +1123,7 @@ function shopMode(m, bs, dt, out) {
   const deal = bs.deal;
   if (!deal || !canSell(deal.seller)) { bs.stage = "think"; bs.deal = null; if (BF.villageSim) BF.villageSim.done(m); return false; }
   const v2 = deal.seller, d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   if (bs.stage === "walk") {
     bs.walkT += dt;
     if (bs.walkT > 60) { bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; bs.stage = "think"; if (BF.villageSim) BF.villageSim.done(m); return false; }

@@ -247,9 +247,16 @@ module.exports = async (pg) => {
       W.setBlock(x, y, z, B.beehive); const h = BE.homeAt(x, y, z); if (h) { h.bees = 30; extra.push([x, y, z]); }
     }
     BE.housekeeping();
-    let peak = 0;
-    for (let i = 0; i < 1800; i++) { step(); peak = Math.max(peak, BE.list.length); }
-    ok("never more than 600 bees out at once", peak <= BE.CAP && peak > 450, { peak, homes: BE.loadedHomes().length });
+    // With 700 bees the cap binds: the homes' allowances add up to 600 and the farthest homes keep theirs in. How many are out at the
+    // peak depends on how long trips take: since bees stopped hanging about stuck under leaves (bug-065) more of them are home resting
+    // at any moment, so the peak is checked against the cap and the held-back homes, not against a near-full count.
+    let peak = 0, heldOut = 0;
+    for (let i = 0; i < 1800; i++) {
+      step(); peak = Math.max(peak, BE.list.length);
+      if (i % 20 === 0) heldOut = Math.max(heldOut, BE.list.filter(b => b.home && b.home.allow === 0 && b.mode !== "home").length);
+    }
+    const allowed = BE.loadedHomes().reduce((n, h) => n + (h.allow || 0), 0);
+    ok("never more than 600 bees out at once", peak <= BE.CAP && peak > 200 && allowed === BE.CAP && heldOut === 0, { peak, allowed, heldOut, homes: BE.loadedHomes().length });
     for (const [x, y, z] of extra) W.setBlock(x, y, z, 0);
     R.info.stats = BE.stats();
     return R;
