@@ -1059,7 +1059,7 @@ function shopMode(m, bs, dt, out) {
     const deal = findSeller(m, bs, a.shortfall);
     if (deal) {
       const VS = BF.villageSim;   // a shopping trip: walk at 1.3x speed + one trade pause
-      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; return false; }
+      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; VS.done(m); return false; }
       bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0;
     }
     else if (BF.I.dirt != null && a.shortfall[BF.I.dirt] && BF.villageLife && BF.villageLife.gatherFor && !(bs.noDirt > dayNow())) {   // nobody sells dirt: it digs its own (idea-044)
@@ -1068,6 +1068,7 @@ function shopMode(m, bs, dt, out) {
     else {
       if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
       bs.stage = "wait"; bs.t = rnd(RS(m), RECHECK[0], RECHECK[1]);
+      if (BF.villageSim) BF.villageSim.done(m);   // waiting is no task: it wanders at leisure ("Looking for: ...", js/villagerstatus.js)
       if (!e && RS(m).next() < 0.5) { bs.mode = "idle"; bs.want = null; bs.cool = 0; bs.t = 1; }   // look at other plans too
     }
     return false;
