@@ -2842,7 +2842,7 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 7) !== "orders:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked") villagerSaves.set(k, o[k]);
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [], g: Math.max(0, Math.floor(+o[k].g || 0)) });
     for (const rec of villages.values()) applyDead(rec);
@@ -2872,7 +2872,7 @@ BF.mobs = {
     const inv = BF.inventory, I = BF.I || {};
     if (inv && typeof inv.openTrade === "function") {
       try { inv.openTrade(mob); } catch (e) { console.error(e); }
-      if (mob.claude && BF.claudeVillager && inv.isOpen()) BF.claudeVillager.open(mob);   // the Claude villager: chat and house designer beside it (js/claudevillager.js)
+      if (mob.claude && !mob.mayor && BF.claudeVillager && inv.isOpen()) BF.claudeVillager.open(mob);   // the Claude villager: chat and house designer beside it (js/claudevillager.js)
       return null;
     }
     const now = BF.simNow();

@@ -13,11 +13,14 @@
 // The model's tools (check_inventory, look_around, move_to) are answered by the game (js/claudevillager.js, js/claudesight.js), live.
 //   POST /claude/blueprint { villager: { name }, request, palette: [{ name, about }], previous?: design }
 //                        -> { design, attempts, problems: [left after the last attempt], usage } or { error }
+//   POST /claude/mayor   { mayor: { name, village }, wake, briefing } -> as /claude/chat (a village mayor's review, js/mayor.js; docs/MAYOR.md)
+//   POST /claude/mayor   { turn, results } -> the same
 // The house designer: Claude draws a house as JSON (DESIGN_SCHEMA, forced with structured outputs) from prompts/house-designer.md;
 // the shape is checked here (validateDesign) and sent back with the problems for another go, up to DESIGN_TRIES. The page turns
 // the design into a builder blueprint (js/housedesign.js).
-// Guards: loopback callers only (also under --lan, unless BF_CLAUDE_LAN=1), bounded request size and history, and a per-minute
-// and per-day request cap for this process (BF_CLAUDE_PER_MIN, BF_CLAUDE_PER_DAY). Set a spend limit on the key in the Console too.
+// Guards: loopback callers only (also under --lan, unless BF_CLAUDE_LAN=1), bounded request size and history, a per-minute
+// and per-day request cap for this process (BF_CLAUDE_PER_MIN, BF_CLAUDE_PER_DAY) and a spend cap per rolling hour, every kind of
+// call together (BF_CLAUDE_PER_HOUR_USD, default $1). Set a spend limit on the key in the Console too.
 // Every API call is also kept here, in memory only (the last KEEP_CALLS), for the debug screen's API calls panel: the system
 // prompt, request settings, every message sent and every reply, round by round. The key is never part of a record.
 // Needs the official SDK: `npm install` in debug/ (debug/package.json). The rest of the server has no dependencies and runs without it.
@@ -30,6 +33,7 @@ const DESIGN_TOKENS = 16000, DESIGN_TRIES = 3, DESIGN_EFFORT = process.env.BF_CL
 const MAX_W = 15, MAX_H = 14;   // largest footprint side and most layers a design may have
 const MAX_BODY = 128 * 1024, MAX_TURNS = 40, MAX_CHARS = 2000;
 const PER_MIN = +process.env.BF_CLAUDE_PER_MIN || 12, PER_DAY = +process.env.BF_CLAUDE_PER_DAY || 400;
+const PER_HOUR_USD = process.env.BF_CLAUDE_PER_HOUR_USD != null ? +process.env.BF_CLAUDE_PER_HOUR_USD : 1;   // dollars per rolling hour, every kind of call together
 const ALLOW_LAN = process.env.BF_CLAUDE_LAN === "1";
 
 let Anthropic = null, sdkError = null;
@@ -53,6 +57,7 @@ function allow() {
   if (d !== day) { day = d; today = 0; }
   if (recent.length >= PER_MIN) return "Too many messages this minute: wait a moment";
   if (today >= PER_DAY) return "Daily Claude message cap reached (BF_CLAUDE_PER_DAY)";
+  if (hourSpend() >= PER_HOUR_USD) return "Hourly Claude spend cap reached ($" + PER_HOUR_USD + " in the last hour, BF_CLAUDE_PER_HOUR_USD)";
   recent.push(now); today++;
   return null;
 }
@@ -60,8 +65,14 @@ function allow() {
 // ---------------------------------------------------------------- API call records (debug screen)
 const KEEP_CALLS = 60, calls = [], watchers = new Set();
 let callId = 0, spent = 0;   // spent: dollars for every call this server run, kept or not
+const spends = [];           // [time, dollars] of each API round in the last hour (the hourly cap)
+function hourSpend() {
+  const now = Date.now();
+  while (spends.length && now - spends[0][0] > 3600000) spends.shift();
+  return spends.reduce((a, x) => a + x[1], 0);
+}
 // The API reports tokens, not dollars, so the cost is worked out here from MODEL's price list (dollars per million tokens).
-// Cache reads cost a tenth of input and 5-minute cache writes a quarter more; this code doesn't cache, so those stay 0.
+// Cache reads cost a tenth of input and 5-minute cache writes a quarter more (mayor reviews cache their prompt; chat doesn't).
 const PRICE = { input: 0.10, output: 0.50 };
 const cost = u => ((u.input_tokens || 0) * PRICE.input + (u.cache_read_input_tokens || 0) * PRICE.input * 0.1
   + (u.cache_creation_input_tokens || 0) * PRICE.input * 1.25 + (u.output_tokens || 0) * PRICE.output) / 1e6;
@@ -80,7 +91,7 @@ function roundDone(rec, r, ms, next) {
   rec.messages.push({ role: "assistant", content: copy(r.content), round: rec.rounds.length });
   const c = cost(r.usage);
   rec.rounds.push({ stop: r.stop_reason, usage: copy(r.usage), cost: c, ms, id: r.id });
-  rec.cost = (rec.cost || 0) + c; spent += c; rec.spent = spent;
+  rec.cost = (rec.cost || 0) + c; spent += c; rec.spent = spent; spends.push([Date.now(), c]);
   if (next) rec.messages.push(copy(next));
   tell(rec);
 }
@@ -175,15 +186,17 @@ async function chat(body) {
   if (limited) return [429, { error: limited }];
   const system = systemPrompt(body.villager);
   const rec = startCall("chat", { max_tokens: MAX_TOKENS, effort: "low", tools: TOOLS, tool_choice: "auto" }, system, messages);
-  return step({ rec, convo: messages.slice(), system, used: [], input: 0, output: 0, round: 0 });
+  return step({ rec, convo: messages.slice(), system, used: [], input: 0, output: 0, round: 0, cfg: CHAT });
 }
+// How each kind of conversation is run: its tools, reply size, effort, rounds, and whether its prompt is cached.
+const CHAT = { tools: TOOLS, names: TOOL_NAMES, maxTokens: MAX_TOKENS, effort: "low", rounds: MAX_ROUNDS, cache: false };
 function toolResults(body) {
   const p = pending.get(String(body.turn));
   if (!p) return [404, { error: "that reply is no longer waiting for a tool result" }];
   const got = Array.isArray(body.results) ? body.results : [];
   const results = p.calls.map(c => {
     const r = got.find(x => x && x.id === c.id);
-    if (!TOOL_NAMES.has(c.name)) return { type: "tool_result", tool_use_id: c.id, content: "Unknown tool", is_error: true };
+    if (!p.cfg.names.has(c.name)) return { type: "tool_result", tool_use_id: c.id, content: "Unknown tool", is_error: true };
     if (!r) return { type: "tool_result", tool_use_id: c.id, content: "No answer from the game", is_error: true };
     const out = { type: "tool_result", tool_use_id: c.id, content: clip(r.content, MAX_RESULT) || "(nothing)" };
     if (r.is_error) out.is_error = true;
@@ -199,24 +212,27 @@ async function step(p) {
   const { rec } = p;
   try {
     const t0 = Date.now();
-    const r = await getClient().messages.create({
-      model: MODEL, max_tokens: MAX_TOKENS, output_config: { effort: "low" },
-      system: p.system, tools: TOOLS, tool_choice: { type: "auto" }, messages: p.convo,
-    });
+    const C = p.cfg;
+    if (p.round && hourSpend() >= PER_HOUR_USD) throw new Error("hourly spend cap reached mid-conversation ($" + PER_HOUR_USD + ")");
+    const req = { model: MODEL, max_tokens: C.maxTokens, output_config: { effort: C.effort }, system: p.system, tools: C.tools, tool_choice: { type: "auto" }, messages: p.convo };
+    if (C.cache) req.cache_control = { type: "ephemeral" };   // the shared prompt and tools, then each round of the review, read back at a tenth of the price
+    const r = await getClient().messages.create(req);
     p.input += r.usage.input_tokens; p.output += r.usage.output_tokens; p.round++;
+    p.cacheRead = (p.cacheRead || 0) + (r.usage.cache_read_input_tokens || 0);
     roundDone(rec, r, Date.now() - t0);
-    if (r.stop_reason === "tool_use" && p.round < MAX_ROUNDS) {
+    if (r.stop_reason === "tool_use" && p.round < C.rounds) {
       // every block goes back as it came (thinking included); the page answers each call
       p.convo.push({ role: "assistant", content: r.content });
       p.calls = r.content.filter(b => b.type === "tool_use").map(b => ({ id: b.id, name: b.name, input: b.input || {} }));
       for (const c of p.calls) p.used.push(c.name);
-      const unknown = p.calls.filter(c => !TOOL_NAMES.has(c.name));
+      const unknown = p.calls.filter(c => !C.names.has(c.name));
       if (unknown.length) return toolResults(Object.assign({ turn: park(p) }, { results: [] }));   // answered as errors here
       return [200, { pending: { turn: park(p), calls: p.calls } }];
     }
     const reply = r.stop_reason === "refusal" ? "" : r.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
-    endCall(rec, r.stop_reason === "refusal" ? "refused" : "ok", { usage: { input: p.input, output: p.output } });
-    return [200, { reply, stop: r.stop_reason, tools: p.used, usage: { input: p.input, output: p.output } }];
+    const usage = { input: p.input, output: p.output, cacheRead: p.cacheRead || 0, cost: +rec.cost.toFixed(6) };
+    endCall(rec, r.stop_reason === "refusal" ? "refused" : "ok", { usage });
+    return [200, { reply, stop: r.stop_reason, tools: p.used, usage, hour: +hourSpend().toFixed(4) }];
   } catch (e) { const out = apiError(e); endCall(rec, "error", { error: out[1].error }); return out; }
 }
 function park(p) {
@@ -234,6 +250,91 @@ function apiError(e) {
   if (e instanceof Anthropic.APIConnectionError) return [502, { error: "Couldn't reach the Claude API (network)" }];
   if (e instanceof Anthropic.APIError) return [502, { error: "Claude API error " + e.status + ": " + e.message }];
   return [500, { error: "Claude request failed: " + (e && e.message) }];
+}
+
+// ---------------------------------------------------------------- village mayors (js/mayor.js)
+// A mayor's review: the game wakes it (each morning, and on events), sends the reason and a briefing it wrote from the village's own numbers
+// and the mayor's saved records, and answers its tools live, like the Sage's. Every review starts fresh (no chat history): what the mayor
+// remembers is what it wrote into its records with the tools. The prompt (prompts/mayor-system.md) and the tools are the same for every
+// mayor, so they are cached and shared; the village's own text comes after them.
+//   POST /claude/mayor { mayor: { name, village }, wake, briefing } -> as /claude/chat: { reply, ... } or { pending: { turn, calls } }
+//   POST /claude/mayor { turn, results } -> the same
+const MAYOR_PROMPT = path.resolve(__dirname, "..", "prompts", "mayor-system.md");
+const STRUCTS = ["small_house", "medium_house", "cottage", "veg_farm", "pen", "pasture", "coop", "sty", "well", "lamp_posts", "market_stall", "workshop",
+  "bakehouse", "glassworks", "apiary", "stable", "bridge"];
+const METRICS = ["population", "free_beds", "homeless", "starving", "food_days", "happiness", "unemployed", "structures", "births_week", "deaths_week"];
+const obj = (props, req) => ({ type: "object", properties: props, required: req || Object.keys(props), additionalProperties: false });
+const MAYOR_TOOLS = [{
+  name: "check_structure",
+  description: "Ask whether a structure can actually be built here now, the same checks a builder makes before it starts: the village's land " +
+    "and surroundings (horses, animals, sand, grass, a busy river crossing), the materials (what each builder holds, what is missing, and whether " +
+    "anyone in the village sells it right now), recent failures, and whether there is room for it. Use it before you order something you aren't sure of.",
+  input_schema: obj({ type: { type: "string", enum: STRUCTS }, builder: { type: "string", description: "A builder's name, to check against that builder's own bag; leave empty for every builder." } }, ["type"]),
+}, {
+  name: "list_villagers", strict: true,
+  description: "Every villager in the village now: name, job, what they are doing, whether they are hungry or starving, have a bed, and food on hand (in bread).",
+  input_schema: NO_INPUT,
+}, {
+  name: "market_report", strict: true,
+  description: "What villagers wanted and couldn't buy in the last two game days (hours waited), and what they hold for sale that isn't selling.",
+  input_schema: NO_INPUT,
+}, {
+  name: "give_orders",
+  description: "Decide what a builder should build next. You then walk over and tell them yourself; the orders only apply once you have talked to " +
+    "them, and they finish the structure they are on (or buying for) first. `build` is a queue taken first to last; `avoid` lists types they should " +
+    "not start on their own. Each queued type is checked as with check_structure and any that can't be built now is refused (the result says why); " +
+    "only the rest are queued. An empty build list and empty avoid list releases the builder to choose for themselves. New orders replace earlier ones.",
+  input_schema: obj({
+    builder: { type: "string", description: "The builder's name, or \"all\" for every builder." },
+    build: { type: "array", items: obj({ type: { type: "string", enum: STRUCTS }, why: { type: "string" } }), description: "Up to 5 structures, in order." },
+    avoid: { type: "array", items: { type: "string", enum: STRUCTS } },
+    reason: { type: "string", description: "One sentence: why, for your records and the village log." },
+  }),
+}, {
+  name: "set_goal",
+  description: "Add a goal the game will measure for you: a metric, the target, and the game day to judge it on. You will see its progress in every " +
+    "briefing and the result on that day. Keep at most 5 open goals.",
+  input_schema: obj({
+    text: { type: "string", description: "The goal in a few words." },
+    metric: { type: "string", enum: METRICS },
+    structure: { type: "string", enum: STRUCTS, description: "For metric \"structures\": which kind to count (finished ones)." },
+    op: { type: "string", enum: [">=", "<="] },
+    target: { type: "number" },
+    by_day: { type: "integer", description: "The game day to judge it on." },
+  }, ["text", "metric", "op", "target", "by_day"]),
+}, {
+  name: "close_goal",
+  description: "Close an open goal early (met, no longer wanted, or replaced), with a short reason.",
+  input_schema: obj({ id: { type: "integer" }, reason: { type: "string" } }),
+}, {
+  name: "update_strategy",
+  description: "Replace your strategy: your current read of the village and plan, in your own words (at most 800 characters). It is shown to you at the top of every briefing.",
+  input_schema: obj({ text: { type: "string" } }),
+}, {
+  name: "write_journal",
+  description: "Add a dated entry to your journal: a decision and why, or what you noticed (at most 300 characters). The last 15 entries are in every briefing.",
+  input_schema: obj({ text: { type: "string" } }),
+}, {
+  name: "update_lessons",
+  description: "Replace your lessons: what you have learned works or doesn't in this village (at most 600 characters). Briefings show it; update it when old journal entries are about to roll off.",
+  input_schema: obj({ text: { type: "string" } }),
+}];
+const MAYOR = { tools: MAYOR_TOOLS, names: new Set(MAYOR_TOOLS.map(t => t.name)), maxTokens: 4096, effort: "medium", rounds: 10, cache: true };
+function mayorPrompt() {
+  try { return fs.readFileSync(MAYOR_PROMPT, "utf8").replace(/<!--[\s\S]*?-->/g, "").trim(); } catch (e) { return "You are the mayor of a village in Blockfield. Use the tools to look after it."; }
+}
+async function mayor(body) {
+  const now = Date.now();
+  for (const [k, p] of pending) if (now - p.t > PENDING_MS) { pending.delete(k); endCall(p.rec, "error", { error: "the game never answered the tool call" }); }
+  if (body && body.turn != null) return toolResults(body);
+  const m = body && body.mayor, briefing = clip(body && body.briefing, 24000).trim(), wake = clip(body && body.wake, 600).trim();
+  if (!m || !briefing || !wake) return [400, { error: "bad mayor review" }];
+  const limited = allow();
+  if (limited) return [429, { error: limited }];
+  const system = mayorPrompt();
+  const messages = [{ role: "user", content: "Why you were woken: " + wake + "\n\n" + briefing }];
+  const rec = startCall("mayor", { max_tokens: MAYOR.maxTokens, effort: MAYOR.effort, tools: MAYOR_TOOLS, tool_choice: "auto", cache_control: "ephemeral", mayor: clip(m.name, 60) + " of " + clip(m.village, 60) }, system, messages);
+  return step({ rec, convo: messages.slice(), system, used: [], input: 0, output: 0, round: 0, cfg: MAYOR });
 }
 
 // ---------------------------------------------------------------- house designer
@@ -364,10 +465,10 @@ function handle(req, res, pathname) {
   if (!pathname.startsWith("/claude/")) return false;
   if (!loopback(req) && !ALLOW_LAN) { json(res, 403, { error: "Claude chat only answers this computer (set BF_CLAUDE_LAN=1 to allow your network)" }); return true; }
   if (pathname === "/claude/status" && req.method === "GET") {
-    json(res, 200, { configured: !!KEY, sdk: !sdkError, error: !KEY ? "no API key set" : sdkError, model: MODEL });
+    json(res, 200, { configured: !!KEY, sdk: !sdkError, error: !KEY ? "no API key set" : sdkError, model: MODEL, hour: +hourSpend().toFixed(4), hourCap: PER_HOUR_USD });
     return true;
   }
-  const run = { "/claude/chat": chat, "/claude/blueprint": blueprint }[pathname];
+  const run = { "/claude/chat": chat, "/claude/blueprint": blueprint, "/claude/mayor": mayor }[pathname];
   if (run && req.method === "POST") {
     if (!KEY || sdkError) { json(res, 503, { error: !KEY ? "no API key set" : sdkError }); return true; }
     // a page on another site can POST here with a simple content type; only the game's own page may spend the key
@@ -393,4 +494,4 @@ function describe() { return KEY ? (sdkError ? "key found, but " + sdkError : "o
 const callLog = () => calls;
 const onCall = f => { watchers.add(f); return () => watchers.delete(f); };
 
-module.exports = { handle, describe, callLog, onCall, cleanMessages, validateDesign, designSchema, MODEL };
+module.exports = { handle, describe, callLog, onCall, cleanMessages, validateDesign, designSchema, MODEL, MAYOR_TOOLS, hourSpend };

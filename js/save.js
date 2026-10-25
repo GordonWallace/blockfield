@@ -79,6 +79,7 @@ function snapshot() {
     farmland: BF.farmland ? BF.farmland.serialize() : undefined, // farmland hydration clocks + last rain (js/farmland.js)
     bees: BF.bees ? BF.bees.serialize() : undefined, // every bee nest and hive: its bee count, honey level and last growth day (js/bees.js)
     claude: BF.claudeVillager && BF.claudeVillager.serialize ? BF.claudeVillager.serialize() : undefined, // the Claude villager's bag and spot (experimental, js/claudevillager.js)
+    mayors: BF.mayor ? BF.mayor.serialize() : undefined, // village mayors' records: strategy, journal, goals, orders not yet told (experimental, js/mayor.js)
     chunkTime: BF.glog ? BF.glog.chunkTimes() : undefined, // game days each chunk has been loaded, the game log's chunk time (js/gamelog.js)
     edits,
   };
@@ -120,6 +121,7 @@ function restore(data, meta) {
   if (BF.farmland) BF.farmland.deserialize(data.farmland); // farmland clocks (old saves: each block's clock starts when first seen)
   if (BF.bees) BF.bees.deserialize(data.bees); // bee homes (old saves: none)
   if (BF.claudeVillager && BF.claudeVillager.deserialize) BF.claudeVillager.deserialize(data.claude); // (saves without one: a fresh random bag)
+  if (BF.mayor) BF.mayor.deserialize(data.mayors); // (saves without one: a mayor is appointed afresh)
   if (BF.glog) BF.glog.loadChunkTimes(data.chunkTime); // chunk times (old saves: every chunk starts at 0)
   if (BF.gameOpts) BF.gameOpts.purgeStored();   // monsters switched off since the save don't come back with their chunks
 }

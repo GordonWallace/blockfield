@@ -61,3 +61,5 @@ browser                         POST /claude/chat        run.sh / debug/server.j
 - Designs last for the browser session. Their footprint is at most 15x15 and 14 layers tall. The designer runs at effort `medium`; set `BF_CLAUDE_DESIGN_EFFORT=high` for more careful (slower) drafts.
 
 Tests: `cd debug && npm install`, then `NODE_PATH=$(npm root -g) node test/claude-villager.js` and `NODE_PATH=$(npm root -g) node test/claude-sight.js` (line of sight on a test ground in the sky, the tool round trip, walking round a wall to the traveller and failing to reach a spot off the edge). Both use a mock API and never the real one.
+
+Village mayors (a Claude mayor who steers a village's builders) share this server side and API key: see docs/MAYOR.md. The hourly spend cap (`BF_CLAUDE_PER_HOUR_USD`, default $1) covers the Sage, house designs and mayors together.

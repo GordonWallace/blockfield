@@ -1740,7 +1740,7 @@ document.addEventListener("click", e => { if (gMenu && e.target.isConnected && !
 // round (a tool call or a builder's list of problems starts another round). The API key is never part of it.
 let apiCalls = [], apiOpen = false, apiSel = null, apiFollow = true, apiT = 0;
 const apiOpenKeys = new Set(["system"]);   // which folds are open, kept across redraws
-const API_KIND = { chat: "Chat", design: "House design" };
+const API_KIND = { chat: "Chat", design: "House design", mayor: "Mayor review" };
 const API_STATUS = { running: "running", ok: "done", error: "failed", refused: "refused", problems: "problems left" };
 // The API reports tokens, not dollars: the server works out each round's cost from the model's price list (debug/claude.js PRICE)
 const usd = d => "$" + (d >= 1 ? d.toFixed(2) : d >= 0.01 ? d.toFixed(3) : d.toFixed(5));
@@ -1767,7 +1767,7 @@ function apiRender(detail) {
     const t = apiTok(c);
     return `<div class="aitem${c.id === apiSel ? " sel" : ""}" data-id="${c.id}"><div class="at"><b>${esc(API_KIND[c.kind] || c.kind)}</b><span class="ast ${esc(c.status)}">${esc(API_STATUS[c.status] || c.status)}</span></div>` +
       `<div class="as">${esc(new Date(c.t).toLocaleTimeString())} \u00B7 ${c.rounds.length} round${c.rounds.length === 1 ? "" : "s"} \u00B7 ${usd(c.cost || 0)} \u00B7 ${fmt(t.i)} in / ${fmt(t.o)} out${c.ms ? " \u00B7 " + (c.ms / 1000).toFixed(1) + " s" : ""}</div>` +
-      `<div class="as">${esc(apiLastUser(c).slice(0, 90))}</div></div>`;
+      `<div class="as">${esc((c.params && c.params.mayor ? c.params.mayor + ": " : "") + apiLastUser(c).slice(0, 90))}</div></div>`;
   }).join("") : `<div class="empty">No API calls yet.</div>`;
   list.scrollTop = top;
   if (detail) apiDetail();
@@ -1792,6 +1792,7 @@ function apiMsg(c, m, i) {
     head = `<b>Model reply</b> \u00B7 round ${m.round + 1} \u00B7 stop: ${esc(r.stop)} \u00B7 ${fmt(u.input_tokens || 0)} in / ${fmt(u.output_tokens || 0)} out \u00B7 ${usd(r.cost || 0)} \u00B7 ${((r.ms || 0) / 1000).toFixed(1)} s`;
   } else if (m.role === "assistant") head = `<b>Sage</b> (earlier reply, sent back as history)`;
   else if (Array.isArray(m.content)) head = `<b>Sent back</b> (tool results)`;
+  else if (c.kind === "mayor") head = `<b>The game</b> (why the mayor was woken, and its briefing)`;
   else head = i < (c.earlier || 0) ? `<b>Player</b> (earlier message, sent as history)` : i === c.earlier ? `<b>Player</b>` : `<b>Sent back</b> (the server's check of the blueprint)`;
   const body = Array.isArray(m.content) ? m.content.map(apiBlock).join("") : apiBlock(m.content);
   return `<div class="amsg ${m.role}${i < (c.earlier || 0) ? " aearlier" : ""}"><div class="ar">${head}</div>${body}</div>`;
@@ -1800,7 +1801,9 @@ function apiDetail() {
   const el = $("api-detail"), c = apiCalls.find(x => x.id === apiSel);
   if (!c) { el.innerHTML = `<div class="empty">${apiCalls.length ? "Pick a call on the left." : "The Claude villager hasn't called the API yet. It's on only when the server has an API key (docs/CLAUDE_VILLAGER.md). Chat with the Sage or design a house and each call shows up here."}</div>`; return; }
   const top = el.scrollTop, same = el.dataset.id === String(c.id), p = c.params || {}, t = apiTok(c);
-  const set = [`model: ${c.model}`, `max_tokens: ${p.max_tokens}`, `effort: ${p.effort}`].concat(p.tool_choice ? [`tool_choice: ${p.tool_choice}`] : [], p.format ? ["output format: json_schema (structured outputs)"] : []);
+  const cached = (c.rounds || []).reduce((a, r) => a + ((r.usage && r.usage.cache_read_input_tokens) || 0), 0);
+  const set = [`model: ${c.model}`, `max_tokens: ${p.max_tokens}`, `effort: ${p.effort}`].concat(p.tool_choice ? [`tool_choice: ${p.tool_choice}`] : [], p.format ? ["output format: json_schema (structured outputs)"] : [],
+    p.mayor ? [`mayor: ${p.mayor}`] : [], p.cache_control ? [`prompt caching: ${p.cache_control} (${fmt(cached)} input tokens read from the cache)`] : []);
   const earlier = (c.messages || []).slice(0, Math.max(0, c.earlier || 0)), rest = (c.messages || []).slice(Math.max(0, c.earlier || 0));
   el.innerHTML =
     `<div class="ahead"><span><b>${esc(API_KIND[c.kind] || c.kind)}</b> #${c.id}</span><span class="ast ${esc(c.status)}">${esc(API_STATUS[c.status] || c.status)}</span>` +

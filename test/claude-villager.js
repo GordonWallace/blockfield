@@ -92,7 +92,7 @@ const start = async env => {
   await require('./lib').ready(pg);
   const until = (fn, arg, t = 60000) => pg.waitForFunction(fn, arg, { timeout: t, polling: 200 }).then(() => true, () => false);
   ok('the Sage appears', await until(() => BF.claudeVillager.mob() && !BF.claudeVillager.mob().removed));
-  const where = await pg.evaluate(() => { const m = BF.claudeVillager.mob(), w = BF.worldSpawn; return { d: Math.hypot(m.position.x - w.x, m.position.z - w.z), name: BF.vlog.nameOf(m), n: BF.mobs.list.filter(x => x.claude).length }; });
+  const where = await pg.evaluate(() => { const m = BF.claudeVillager.mob(), w = BF.worldSpawn; return { d: Math.hypot(m.position.x - w.x, m.position.z - w.z), name: BF.vlog.nameOf(m), n: BF.mobs.list.filter(x => x.claude && !x.mayor).length }; });
   ok('beside the world spawn, named Sage, only one', where.d < 14 && where.name === 'Sage' && where.n === 1, where);
   const inv = await pg.evaluate(() => ({ start: BF.claudeVillager.startingInventory(), now: BF.claudeVillager.inventory(), prof: BF.claudeVillager.mob().profession }));
   ok('no profession; carries 3-6 kinds of thing', inv.prof === 'unemployed' && inv.start.length >= 3 && inv.start.length <= 6 && JSON.stringify(inv.start) === JSON.stringify(inv.now), inv);

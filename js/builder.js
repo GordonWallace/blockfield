@@ -419,6 +419,8 @@ function materialsOK(m, type, stock) {
 function chooseFood(m, bs) {
   const R = m.village, counts = foodCounts(R), stock = sellerStock(R), out = new Set(), now = dayNow();
   for (const t of FOOD) if (bs.fail && bs.fail[t] > now) out.add(t);
+  const o = ordersOf(m);
+  if (o) for (const t of o.avoid) if (isFood(t)) out.add(t);   // a mayor told it to leave these alone
   const check = t => {
     if (!materialsOK(m, t, stock)) { logEvent("foodOut", m, { type: t, why: "materials" }); return false; }
     if (FOOD_ANIMAL[t] && wildCount(R, FOOD_ANIMAL[t]) < ANIMAL_MIN) { logEvent("foodOut", m, { type: t, why: "no " + FOOD_ANIMAL[t] + " within " + ANIMAL_R }); return false; }
@@ -508,10 +510,13 @@ function weighTypes(m, bs) {
     const x = (wt[t] || 0.3) * mult;
     ws.push([t, x]);
   }
-  return ws;
+  const o = ordersOf(m);   // types a mayor told it to leave alone
+  return o && o.avoid.length ? ws.filter(w => !o.avoid.includes(w[0])) : ws;
 }
 function pickType(m, bs) {
   const R = m.village;
+  const d = directedType(m, bs);   // a mayor's orders, once the mayor has told this builder (js/mayor.js)
+  if (d) return d;
   if (builtOf(R).length === 0 && !(bs.fail && bs.fail.small_house > dayNow())) return "small_house";
   const ws = weighTypes(m, bs);
   while (ws.length) {
@@ -526,6 +531,120 @@ function pickType(m, bs) {
     ws.splice(ws.findIndex(w => w[0] === "food_jobsite"), 1);
   }
   return null;
+}
+
+// ---------------------------------------------------------------- a mayor's orders (experimental, js/mayor.js)
+// A mayor (Claude) decides what the village's builders should build. Its orders reach a builder only when the mayor has walked over and
+// talked to it (direct): until then the builder rolls as above. Orders are a queue of structure types (taken first to last) and a list of
+// types to leave alone. A builder that is told mid-structure (or while buying for one) finishes it first: only its next choice follows the
+// orders (bs.next, chosen when it started the last one, is dropped). Each queued type is checked again when the builder comes to it
+// (eligible + materials, as the rolls check them); one that can't be built now is marked blocked with the reason and skipped, and when
+// nothing queued can be built the builder rolls as usual, avoiding the listed types. A structure begun for an order carries its id
+// (e.directed) and the order item is crossed off when it is finished. Kept per village and builder slot, saved as "orders:<village key>".
+const orderBook = new Map();   // village key -> {slot idx: {id, queue: [{type, why, state, entry?, blocked?, since?}], avoid: [type], why, made, told, done: [...]}}
+const ordersOf = m => (m && m.village && m.slot ? (orderBook.get(m.village.key) || {})[m.slot.idx] || null : null);
+// Why a structure of `type` can't go up in village R at all right now (the rules the rolls apply), or null.
+function ineligible(R, type) {
+  if (!BP().SPECS[type] || type === "garden") return "builders don't build that";
+  const has = t => builtOf(R).some(e => e.type === t && e.state !== "abandoned");
+  if (type === "stable") {
+    if (!BF.stables) return "stables aren't in this game";
+    if (has("stable") || (BF.stables.stableOf && BF.stables.stableOf(R))) return "the village already has a stable (one per village)";
+    if (wildCount(R, "horse") < ANIMAL_MIN) return "fewer than " + ANIMAL_MIN + " wild horses within " + ANIMAL_R + " blocks";
+  }
+  if (FOOD_ANIMAL[type] && wildCount(R, FOOD_ANIMAL[type]) < ANIMAL_MIN) return "fewer than " + ANIMAL_MIN + " wild " + FOOD_ANIMAL[type] + "s within " + ANIMAL_R + " blocks to fill it";
+  if (type === "glassworks" && (BF.B.glass_kiln == null || !BF.worldgen.sandNear || !BF.worldgen.sandNear(R.x, R.z, 64))) return "no natural sand within 64 blocks";
+  if (type === "apiary" && (BF.B.honey_extractor == null || !(BF.cowherd && BF.cowherd.grassVillage(R)))) return "the village isn't on grass";
+  if (type === "bridge" && !(BF.bridges && BF.bridges.weight(R) > 0 && BF.bridges.plan(R))) return "no river crossing busy enough to need a bridge";
+  return null;
+}
+// Everything a builder weighs before it takes on `type` in village R, for builder m (its bag) or, without one, for the village's builders
+// in general: {type, label, ok, why: [reasons it can't], have: true when the builder already holds everything, missing: [{item, n, sold,
+// dig}], wood, blocks, site: "found" | "none" | "not checked", builders: [name: summary] (no builder given)}.
+// ok = eligible, every missing item is held, for sale in the village now or dirt to dig (panes may be left out where nobody makes glass),
+// no recent failure and, when `site` is asked for, room for it. The same tests as weighTypes / materialsOK / beginPlan.
+function assess(R, type, m, opts2) {
+  const out = { type, label: BP().label(type), ok: false, why: [], missing: [], site: "not checked" };
+  const bad = ineligible(R, type);
+  if (bad) { out.why.push(bad); return out; }
+  const builders = (R.members || []).filter(x => x.type === "villager" && !x.dead && !x.removed && x.profession === "builder" && x.inv);
+  if (!m) {
+    if (!builders.length) { out.why.push("the village has no builder"); return out; }
+    out.builders = builders.map(b => { const a = assess(R, type, b); return { name: BF.vlog ? BF.vlog.nameOf(b) : "builder", ok: a.ok, have: a.have, why: a.why, missing: a.missing }; });
+    const best = out.builders.find(b => b.ok) || out.builders[0];
+    Object.assign(out, { ok: !!out.builders.find(b => b.ok), have: best.have, missing: best.missing, why: out.builders.find(b => b.ok) ? [] : best.why });
+    if (out.ok && opts2 && opts2.site) { const s = assess(R, type, builders.find(b => assess(R, type, b).ok), opts2); out.site = s.site; out.ok = s.ok; out.why = s.why; }
+    return out;
+  }
+  const style = styleIdx(R.style), stock = sellerStock(R), opts = optsFor(type, m.inv, R), wood = chooseWood(m, type, style, opts, stock);
+  const bp = BP().get(type, 0, style, 0.5, opts, wood);
+  if (!bp) { out.why.push("no plan for it in this village's style"); return out; }
+  out.wood = bp.woody ? wood : null; out.blocks = bp.n;
+  const a = analyze(m.inv, planReq(m, bp, type, style), wood);
+  out.have = a.ok;
+  for (const k in a.shortfall) out.missing.push({ item: BF.itemName(+k), n: a.shortfall[k], sold: stock[k] || 0, dig: +k === BF.I.dirt });
+  if (!a.ok && !onlyPanes(R, a, stock)) for (const k in a.shortfall) if (!(stock[k] > 0) && +k !== BF.I.dirt && !(+k === PANE() && noPanes(R, stock))) out.why.push("nobody in the village sells " + BF.itemName(+k) + " right now (needs " + a.shortfall[k] + ")");
+  const bs = m.bs;
+  if (bs && bs.fail && bs.fail[type] > dayNow()) out.why.push("this builder found no room for one a short while ago (tries again in " + Math.ceil((bs.fail[type] - dayNow()) * 24) + " game hours)");
+  if (!out.why.length && opts2 && opts2.site) {
+    const site = findSite({ village: R, position: m.position }, type, opts, 1e9, wood);
+    out.site = site ? "found" : "none";
+    if (!site) out.why.push("no free, level enough ground for it within " + SITE_RANGE + " blocks of the village");
+  }
+  out.ok = !out.why.length;
+  return out;
+}
+// The mayor has talked to builder m: these orders apply from its next choice on. orders = {id, queue: [{type, why}], avoid: [type], why}.
+function direct(m, orders) {
+  if (!m || !m.village || !m.slot) return false;
+  const book = orderBook.get(m.village.key) || {};
+  orderBook.set(m.village.key, book);
+  const day = +dayNow().toFixed(3);
+  book[m.slot.idx] = { id: orders.id, why: String(orders.why || ""), made: orders.made != null ? orders.made : day, told: day,
+    queue: (orders.queue || []).map(q => ({ type: q.type, why: String(q.why || ""), state: "waiting" })), avoid: (orders.avoid || []).slice(), done: [] };
+  if (m.bs) m.bs.next = null;   // it picks its next structure by the orders (the one it is on, or buying for, it finishes)
+  logEvent("orders", m, { id: orders.id, queue: book[m.slot.idx].queue.map(q => q.type), avoid: book[m.slot.idx].avoid });
+  return true;
+}
+// The first queued type the builder can take on now, or null (roll as usual). Ones that can't be built are marked blocked (once) with why.
+function directedType(m, bs) {
+  const o = ordersOf(m), R = m.village;
+  if (!o) return null;
+  const now = dayNow(), stock = sellerStock(R);
+  for (const q of o.queue) {
+    if (q.state === "building") continue;
+    if (bs.fail && bs.fail[q.type] > now) { block(m, o, q, "no room for it (looked a short while ago)"); continue; }
+    const why = ineligible(R, q.type) || (materialsOK(m, q.type, stock) ? null : "materials: " + assess(R, q.type, m).why.join("; "));
+    if (why) { block(m, o, q, why); continue; }
+    if (q.state === "blocked") { q.state = "waiting"; q.blocked = null; logEvent("orderClear", m, { type: q.type }); }
+    return q.type;
+  }
+  return null;
+}
+function block(m, o, q, why) {
+  if (q.state === "blocked" && q.blocked === why) return;
+  q.state = "blocked"; q.blocked = why; q.since = +dayNow().toFixed(3);
+  logEvent("orderBlocked", m, { id: o.id, type: q.type, why });
+  BF.emit && BF.emit("orderBlocked", m, q, o);
+}
+// beginPlan started `e`: the order item it answers (the first queued one of its type) is now under way.
+function linkOrder(m, e) {
+  const o = ordersOf(m), q = o && o.queue.find(x => x.type === e.type && x.state !== "building");
+  if (!q) return;
+  q.state = "building"; q.entry = e.id; q.blocked = null; e.directed = o.id;
+}
+// finish(): cross the order item off.
+function orderDone(m, e) {
+  const book = m.village && orderBook.get(m.village.key);
+  if (!book) return;
+  for (const k in book) {
+    const o = book[k], i = o.queue.findIndex(q => q.state === "building" && q.entry === e.id);
+    if (i < 0) continue;
+    const q = o.queue.splice(i, 1)[0];
+    o.done.push({ type: q.type, entry: e.id, day: +dayNow().toFixed(3) });
+    if (o.done.length > 10) o.done.shift();
+    BF.emit && BF.emit("orderDone", m, q, o);
+  }
 }
 
 function newState() { return { mode: "idle", t: rnd(1, 3), cool: 0, stage: null, fail: {}, avoid: {}, placeT: 0.6, entry: null, want: null, losT: 0, losFor: -1 }; }
@@ -579,6 +698,7 @@ function beginPlan(m, bs, type, wood) {
   e.n = nfill(e) + site.bp.n;
   clearSaplings(e);
   built.push(e);
+  linkOrder(m, e);
   logEvent("plan", m, { type, wood, at: [e.ox, e.oy, e.oz], rot: e.rot, blocks: e.n, fill: nfill(e) });
   vlogBuild(m, e, "started building");
   return e;
@@ -875,6 +995,7 @@ function finish(m, bs, e) {
   if (bp.house && m.slot && e.claim === m.slot.idx && m.bed && homeFor(e).beds.some(b => sameBed(b, m.bed))) m.home = homeFor(e);   // it took a bed here as it placed it (firstDibs): this is its home now
   logEvent("done", m, { type: e.type, at: [e.ox, e.oy, e.oz], blocks: e.n, skipped: e.skipped || 0 });
   vlogBuild(m, e, "built");
+  orderDone(m, e);
   BF.emit && BF.emit("builderDone", m, e);
 }
 function homeFor(e) {
@@ -1200,10 +1321,12 @@ function tick(dt) {
 const clean = list => JSON.parse(JSON.stringify(list, (k, v) => (k[0] === "_" ? undefined : v)));
 function exportAll(out) {
   for (const [k, list] of pending) if (list.length) out["built:" + k] = clean(list);
+  for (const [k, book] of orderBook) if (Object.keys(book).length) out["orders:" + k] = clean(book);
   return out;
 }
 function importAll(o) {
-  pending.clear();
+  pending.clear(); orderBook.clear();
+  for (const k in o || {}) if (k.slice(0, 7) === "orders:" && o[k] && typeof o[k] === "object") orderBook.set(k.slice(7), JSON.parse(JSON.stringify(o[k])));
   for (const k in o || {}) {
     if (k.slice(0, 6) !== "built:" || !Array.isArray(o[k])) continue;
     const list = [];
@@ -1234,6 +1357,7 @@ BF.builder = {
   BLOCK_T, REACH, BUILD_END, SITE_RANGE, log, pending,
   ai, tick, statusText, startStock, exportAll, importAll, onSpawn, builtOf, FOOD, FOOD_WEIGHT, STABLE_WEIGHT, ANIMAL_R, ANIMAL_MIN, chooseFood, foodCounts, wildCount, planReq,
   analyze, findSite, evalTerrain, beginPlan, startBuild, think, pickType, weighTypes, cellOf, bpOf, remainingReq, applyCrafts, findSeller, claimHome, reserve, shortfall, pickNext,
-  reset() { pending.clear(); log.length = 0; for (const p of pool) BF.scene.remove(p.mesh); pool.length = 0; },
+  ineligible, assess, direct, ordersOf, orderBook, sellerStock,
+  reset() { pending.clear(); orderBook.clear(); log.length = 0; for (const p of pool) BF.scene.remove(p.mesh); pool.length = 0; },
 };
 })();
