@@ -1,7 +1,7 @@
 // @ci integration suite=ui hosts=worker,server
 // Villager-seconds meter (spec r15-01, js/perf.js). In the seed 123 village: with the meter off, 50 steps run no timing point (BF.perf.laps
 // stays 0); with it on, 200 steps of 0.05 s give V·s/s within 1% of villagers x game seconds / real seconds measured here, and the split
-// by subsystem adds up to within 10% of the ms per step measured here. Then F3 shows the Sim line, a frozen game greys it, and the
+// by subsystem adds up to within 10% of the ms per step measured here, also over a run longer than the meter's 5 s window. Then F3 shows the Sim line, a frozen game greys it, and the
 // game log has the meter's on and off lines. The meter and the steps are the simulation's (lib.sim, spec r15-43); F3 is the page's, its
 // Sim line from the f3 query (off the page, F3 showing turns the meter on there).
 // node test/run.js /tmp/pm test/perf-meter.js [--host page|worker|server]
@@ -67,6 +67,18 @@ module.exports = async (pg) => {
   if (!log.some(l => l.includes('Performance meter on (a harness)'))) fails.push('no "meter on" log line');
   if (!log.some(l => /Performance meter off: \d+ V·s\/s/.test(l))) fails.push('no "meter off" log line with figures');
   if (await lib.sim(pg, () => BF.perf.on)) fails.push('meter still on with F3 closed');
+  // longer than the 5 s window (frames moving it on, as a harness does): the totals' split still covers every step (r15-50)
+  const lr = await lib.sim(pg, () => {
+    const P = BF.perf;
+    P.ask(true); P.reset();
+    const t0 = performance.now();
+    for (let i = 1; performance.now() - t0 < 6500; i++) { BF.simStep(0.05); if (i % 20 === 0) P.frame(); }
+    const t = P.totals();
+    P.ask(false);
+    return { real: t.real, stepMs: t.stepMs / t.steps, split: Object.values(t.split).reduce((a, b) => a + b, 0) / t.steps };
+  });
+  console.log(`long run: ${lr.real.toFixed(1)} s, ${lr.stepMs.toFixed(3)} ms/step, split sums to ${lr.split.toFixed(3)}`);
+  if (Math.abs(lr.split - lr.stepMs) > 0.1 * lr.stepMs) fails.push(`over ${lr.real.toFixed(1)} s the totals' split sums to ${lr.split.toFixed(3)} ms, not within 10% of ${lr.stepMs.toFixed(3)} ms per step`);
   if (fails.length) fails.forEach(f => console.log('FAIL ' + f));
   else console.log('PASS perf-meter');
 };
