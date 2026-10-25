@@ -27,6 +27,12 @@ talk to each other. Model: Claude Haiku 5.5 for everything, effort `medium`, at 
 
 Nothing carries over between reviews except the records the mayor writes with its tools. There is no chat history.
 
+**How a review ends.** Each model reply ends with a stop reason. `tool_use` means "answer these calls and let me carry on"; the game answers
+and the server sends the conversation back for another round. When the model replies with plain text instead (stop reason `end_turn`),
+the review is over and that text is its summary. The model decides this itself: it stops once it has done what it wants. A **round** is
+one model reply, which may hold several tool calls at once, so 10 rounds allows more than 10 tool calls. If the 10th reply still asks for
+tools, those calls are not carried out and the review ends there without a summary.
+
 ## What wakes the mayor
 
 Each wake is one review, which means one or more API calls. Defined in `WAKES` in `js/mayor.js`.
@@ -50,7 +56,6 @@ Events that don't wake the mayor are listed in the next briefing under "Since yo
 
 Throttles:
 - One review at a time.
-- At least 20 real seconds between reviews (`MIN_GAP`).
 - An event wakes the mayor only once 0.15 game day (about 3 real minutes) has passed since the last review (`EVENT_GAP`). A morning or
   appointment wake doesn't wait for that.
 - A review refused by the spend cap is put off for 2 real minutes; a failed one for 30 seconds. Its events are kept for the next try.

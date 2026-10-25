@@ -3,7 +3,7 @@
 // server has an API key (GET /claude/status); ?mayor=0 (or ?claude=0) turns it off. The player can't talk to it yet.
 // - Wakes: the game decides when the mayor thinks (WAKES below): when it is appointed, each morning, and on events that matter (a death,
 //   villagers starting to starve, an order that can't be carried out, a builder that finished its orders, a goal's judging day, a builder
-//   it couldn't reach). Lesser events wait for the next review. One review at a time, at least MIN_GAP real seconds apart.
+//   it couldn't reach). Lesser events wait for the next review. One review at a time; after a failed or capped one, a short wait.
 // - A review: the game writes a briefing (brief) from the village's own numbers and the mayor's records, POSTs it to /claude/mayor
 //   (debug/claude.js: prompt prompts/mayor-system.md, the tools, a $1/hour spend cap), and answers the model's tool calls live (TOOLS).
 //   Nothing carries over between reviews except the records the mayor keeps with its tools: strategy, journal, lessons, goals, orders.
@@ -26,7 +26,6 @@ const NAMES = ["Odessa Thorn", "Bram Whitlow", "Marigold Ashby", "Tobias Fenn", 
 const TEMPERS = ["careful: you prefer to secure food and shelter before anything grand", "ambitious: you like to see the village grow and try new things",
   "thrifty: you dislike waste and prefer what the village can supply easily", "warm-hearted: you put the villagers' comfort and happiness first"];
 const JOURNAL = 15, MAX_GOALS = 5;       // journal entries kept in the briefing; open goals allowed
-const MIN_GAP = 20;                      // real seconds between two reviews
 const EVENT_GAP = 0.15;                  // game days after a review before an event can wake the mayor again (the rest wait for the morning)
 const TALK_R = 3, RETRY = 20, MAX_TRIES = 5;   // blocks from a builder to talk; seconds before trying to reach it again; tries before giving up
 const PICK_R = 600;                      // the prototype's village: the nearest loaded one within this many blocks of the world spawn
@@ -59,7 +58,7 @@ const clock = d => { const h = (((d - Math.floor(d)) * 24 + 6) % 24 + 24) % 24; 
 const glog = (level, text, at) => { try { if (BF.glog) BF.glog.log(level, "mayor", text, at ? { at } : undefined); } catch (e) { /* ignore */ } };
 const label = t => (BF.blueprints ? BF.blueprints.label(t) : t);
 
-let status = null, busy = false, lastReal = -1e9, picked = null;
+let status = null, busy = false, holdUntil = 0, picked = null;   // holdUntil: performance.now() before which no review starts (after a failure)
 const mayors = new Map();   // village key -> records (saved)
 const mobs = new Map();     // village key -> the mayor's mob while spawned
 
@@ -398,7 +397,7 @@ function wakeReason(evs) {
   return ks.map(k => k === "morning" ? "a new day has begun" : k === "appointed" ? "you have just been appointed mayor; look the village over, write a strategy and decide what to do first" : WAKES[k].about).join("; ");
 }
 async function review(S, R, m) {
-  busy = true; lastReal = performance.now();
+  busy = true;
   const evs = S.events.slice(), wake = wakeReason(evs) || "a new day has begun", briefing = brief(S, R), t0 = performance.now(), used = [];
   S.events = [];
   S.starvingAtReview = measure("starving", null, R);
@@ -426,12 +425,12 @@ async function review(S, R, m) {
     S.events = evs.concat(S.events);   // told next time
     const capped = e.status === 429;
     glog(capped ? "WARN" : "ERROR", S.name + "'s review " + (capped ? "was put off: " : "failed: ") + (e instanceof TypeError ? "couldn't reach the game server" : e.message), m);
-    lastReal = performance.now() + (capped ? 120000 : 30000);   // wait before the next try
+    holdUntil = performance.now() + (capped ? 120000 : 30000);   // wait before the next try
   }
   busy = false;
 }
 function due(S) {
-  if (busy || performance.now() - lastReal < MIN_GAP * 1000) return false;
+  if (busy || performance.now() < holdUntil) return false;
   const today = Math.floor(dayNow());
   if (today > S.morning && skyT() < 0.47) { S.morning = today; note(S, "morning", "A new day began."); }
   const waking = S.events.some(e => WAKES[e.kind] && WAKES[e.kind].wake);
@@ -473,7 +472,7 @@ BF.mayor = {
   WAKES, STRUCTS,
   state: pick, mob: key => mobs.get(key || picked) || null, busy: () => busy,
   village: key => BF.mobs && BF.mobs.villages.get(key || picked),
-  wake(reason) { const S = pick(); if (S) note(S, "morning", reason || "Woken by hand."); lastReal = -1e9; },
+  wake(reason) { const S = pick(); if (S) note(S, "morning", reason || "Woken by hand."); holdUntil = 0; },
   brief(key) { const S = pick(key), R = S && BF.mobs.villages.get(S.key); return S && R ? brief(S, R) : ""; },
   runTool(name, input, key) { const S = pick(key), R = S && BF.mobs.villages.get(S.key); return S && R && TOOLS[name] ? TOOLS[name](S, R, input || {}, mobs.get(S.key)) : "no mayor"; },
   measure(metric, structure, key) { const S = pick(key), R = S && BF.mobs.villages.get(S.key); return R ? measure(metric, structure, R) : null; },
