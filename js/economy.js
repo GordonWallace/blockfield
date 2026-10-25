@@ -114,7 +114,7 @@ function forSale(m) {
   const E = em(), out = new Map(), F = BF.food;
   for (const o of m.trades || []) {
     const id = o.sell && o.sell.id;
-    if (id == null || id === E || out.has(id)) continue;
+    if (id == null || id === E || out.has(id) || o.off) continue;   // o.off: not selling it now (js/market.js oneSide)
     if (F && F.isFood && F.isFood(id)) continue;
     const it = BF.items[id];
     if (isTool(id) && !SELLS_TOOLS.has(m.profession)) continue;

@@ -757,7 +757,7 @@ function tradeView(a) {
     name: BF.vlog ? BF.vlog.nameOf(v) : "", status: BF.villagerStatus ? BF.villagerStatus.text(v) : "",
     inv: v.inv ? v.inv.map(copyStack) : null, editable: isCreative() && !!v.inv,
     trades: v.trades.map(o => ({ buy: o.buy.map(b => ({ id: b.id, n: b.n })), sell: { id: o.sell.id, n: o.sell.n }, reason: BF.trades.blockReason(v, o) || null,
-      stock: v.inv ? BF.trades.inv.count(v.inv, o.sell.id) : 0, spare: !!o.spare, need: !!o.need, feed: !!o.feed, note: o.note || null })) };
+      stock: v.inv ? BF.trades.inv.count(v.inv, o.sell.id) : 0, spare: !!o.spare, need: !!o.need, feed: !!o.feed, off: o.off || null, note: o.note || null })) };   // off: set aside (js/market.js oneSide)
 }
 // a furnace ({x, y, z}, or {} for the open screen's): its slots, how much of the fuel's burn is left, and the item's cooking time; can:
 // whether it can smelt what is on top now. Gone when the block is.
