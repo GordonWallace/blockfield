@@ -7,6 +7,7 @@
 // Prices only change at the daily tick (and when the trade screen opens), never in the middle of a trade, so every trade site and the Economy
 // view (js/economy.js) see the price that was actually paid. Floors: a villager never buys an item for more than it sells it for itself, never
 // sells it for less than it buys it, and never buys above the cheapest base price any villager charges for it (the builder's rule, for all).
+// Since bug-051 only one side of an item is open at a time (js/market.js oneSide), so the first two only matter for offers kept outside sync.
 // Offers without a single emerald side (barter, two-item payments), the explorer's maps and the hungry unemployed's food offers keep fixed prices.
 // API: BF.prices = { STEPS, STEP, FILL, kind(o), step(o), mult(o), tick(v, day), filled(v, o, times), reprice(v, o), pack(v), unpack(v, pr, pd), off }
 (() => {
@@ -23,14 +24,16 @@ const em = () => BF.I.emerald;
 const stackOf = id => (BF.items[id] && BF.items[id].stack) || 64;
 const day = () => (BF.sky ? BF.sky.day || 0 : 0);
 
-// "buy": the villager pays emeralds for goods; "sell": it sells a ware for emeralds; null: fixed price.
-function kind(o) {
+// "buy": the villager pays emeralds for goods; "sell": it sells a ware for emeralds; null: fixed price, or an offer set aside for now (o.off,
+// js/market.js oneSide): its price neither drifts nor bounds the villager's other prices while it is off.
+function kindOf(o) {
   if (!o || o.dyn || o.feed || !o.sell || !Array.isArray(o.buy) || o.buy.length !== 1) return null;
   const e = em(), b = o.buy[0];
   if (o.sell.id === e && b.id !== e) return "buy";
   if (b.id === e && o.sell.id !== e) return "sell";
   return null;
 }
+const kind = o => (o && o.off ? null : kindOf(o));
 // The offer's base amounts [paid, received], remembered the first time its price moves.
 const baseOf = o => o.base || [o.buy[0].n, o.sell.n];
 // Emeralds per item at base: [emeralds, items].
@@ -142,7 +145,7 @@ function tick(v, d) {
 const keyOf = o => { const [p, r] = baseOf(o); return BF.items[o.buy[0].id].name + ":" + p + ">" + BF.items[o.sell.id].name + ":" + r; };
 function pack(v) {
   const pr = {};
-  for (const o of v.trades || []) if (kind(o) && o.step) pr[keyOf(o)] = o.step;
+  for (const o of v.trades || []) if (kindOf(o) && o.step) pr[keyOf(o)] = o.step;   // an offer set aside keeps its price
   return Object.keys(pr).length ? pr : undefined;
 }
 function unpack(v, pr, pd) {
