@@ -20,6 +20,9 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const reg = new Map();   // id -> live object
+// Counts the registry's changes (an object put under a key, a key removed, a ghost added or dropped). A mob keeps its last answer for its
+// hottest links (cached below) with the gen and the id it was for, so the answer is reused only while nothing in the registry changed (r15-61).
+let gen = 0;
 // onNew(obj, id): a key registered for the first time (js/rworkers.js: a place made while a region worker thinks goes to the others)
 const hooks = { onNew: null };
 // Removed mobs, kept readable for a while (id -> {o, t}): code that held a mob saw it go (m.removed) and acted on that a little later;
@@ -40,7 +43,7 @@ function put(obj, id) {
     stats.collisions++; stats.last = id;
     if (stats.collisions <= 20 && BF.glog) BF.glog.log("WARN", "ids", "Entity id " + id + " was taken over by another object" + (obj.type ? " (" + obj.type + ")" : ""));
   }
-  reg.set(id, obj);
+  if (had !== obj) { reg.set(id, obj); gen++; }
   if (!had && hooks.onNew) hooks.onNew(obj, id);
   return obj;
 }
@@ -48,7 +51,7 @@ function remove(x) {
   const id = x && typeof x === "object" ? x.id : x;
   if (id == null || (typeof x === "object" && reg.get(id) !== x)) return;
   const o = reg.get(id);
-  reg.delete(id);
+  reg.delete(id); gen++;
   const t = now();
   for (const [k, g] of ghosts) { if (t - g.t < GHOST && g.t <= t) break; ghosts.delete(k); }   // oldest first
   if (o && o.removed) ghosts.set(id, { o, t });
@@ -57,9 +60,9 @@ function remove(x) {
 function idOf(v) {
   if (v == null) return null;
   if (typeof v !== "object") return v;
-  if (BF.player && v === BF.player) { if (reg.get("player") !== v) reg.set("player", v); return "player"; }
+  if (BF.player && v === BF.player) { if (reg.get("player") !== v) { reg.set("player", v); gen++; } return "player"; }
   if (v.id == null) put(v);
-  else if (!v.removed && !reg.has(v.id)) reg.set(v.id, v);
+  else if (!v.removed && !reg.has(v.id)) { reg.set(v.id, v); gen++; }
   return v.id;
 }
 // A place's key from its block cell: the planet's canonical cell, so a place seen across a face edge has one key.
@@ -130,6 +133,44 @@ Object.defineProperty(Refs, "lookAt", {
   },
   enumerable: false, configurable: true,
 });
+// The links the mob loop reads most (r15-61: lookAt, village, slot and home, hundreds of reads a tick on a big village) keep their last
+// answer on the mob: the id it was for, the answer and the registry's gen then (fields _l?K, _l?V, _l?G, js/mobs.js MOB_FIELDS; a mob
+// starts with _l?G -1, other records never have them and always look up). Reused only while the id and gen are unchanged, so it reads
+// exactly what a lookup would. Never saved, sent to a worker or hashed (js/mobsave.js, js/rworkers.js, js/statehash.js skip them).
+const cached = (n, get) => Object.defineProperty(Refs, n, { get, set: Object.getOwnPropertyDescriptor(Refs, n).set, enumerable: false, configurable: true });
+cached("village", function () {
+  const k = this.villageId;
+  if (k == null) return k;
+  if (this._lvK === k && this._lvG === gen) return this._lvV;
+  const o = reg.get(k);
+  if (this._lvG !== undefined) { this._lvK = k; this._lvV = o; this._lvG = gen; }
+  return o;
+});
+cached("slot", function () {
+  const k = this.slotKey;
+  if (k == null) return k;
+  if (this._lsK === k && this._lsG === gen) return this._lsV;
+  const o = reg.get(k);
+  if (this._lsG !== undefined) { this._lsK = k; this._lsV = o; this._lsG = gen; }
+  return o;
+});
+cached("home", function () {
+  const k = this.homeKey;
+  if (k == null) return k;
+  if (this._lhK === k && this._lhG === gen) return this._lhV;
+  const o = reg.get(k);
+  if (this._lhG !== undefined) { this._lhK = k; this._lhV = o; this._lhG = gen; }
+  return o;
+});
+cached("lookAt", function () {
+  const id = this.lookAtId;
+  if (id == null) return this.lookV;
+  if (this._laK === id && this._laG === gen) return this._laV;
+  const o = get(id);
+  if (this._laG !== undefined) { this._laK = id; this._laV = o; this._laG = gen; }
+  return o;
+});
+const CACHE_FIELDS = ["_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG"];   // (tests: test/entity-ids.js)
 const NAMES = ENT.concat(["village", "penVillage", "home", "bed", "homeBed", "slot", "bredEntry", "pen", "sty", "coop", "pasture", "exit", "lookAt"]);
 // (A copy, not the object itself: deleting fields or swapping the prototype of a live object would put it in V8's slow dictionary mode.)
 function copyOnto(proto, o) {
@@ -155,7 +196,7 @@ function mobRef(o) {
 const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototypeOf(o) : null; return p === Refs || p === MobRef; };
 
 BF.ids = {
-  alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks,
+  alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks, CACHE_FIELDS,
   get next() { return next; },
   get size() { return reg.size; },
   live: id => reg.get(id),   // the registered object only (no removed mob)
@@ -165,7 +206,7 @@ BF.ids = {
   reuse(obj, id) {
     if (typeof id !== "string" || !/^e\d+$/.test(id) || (reg.has(id) && reg.get(id) !== obj)) return false;
     if (obj.id != null && obj.id !== id && reg.get(obj.id) === obj) reg.delete(obj.id);
-    obj.id = id; reg.set(id, obj); ghosts.delete(id);
+    obj.id = id; reg.set(id, obj); ghosts.delete(id); gen++;
     const n = +id.slice(1);
     if (n >= next) next = n + 1;
     return true;
@@ -174,6 +215,6 @@ BF.ids = {
   seen(id) { const n = typeof id === "string" && /^e\d+$/.test(id) ? +id.slice(1) : 0; if (n >= next) next = n + 1; },
   serialize() { return { next }; },
   deserialize(o) { const n = o && Math.floor(+o.next); if (n > next) next = n; },
-  reset() { reg.clear(); ghosts.clear(); next = 1; stats.collisions = 0; stats.last = null; },
+  reset() { reg.clear(); ghosts.clear(); gen++; next = 1; stats.collisions = 0; stats.last = null; },
 };
 })();

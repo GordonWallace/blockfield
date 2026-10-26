@@ -77,6 +77,7 @@ const PAGE_HELPERS = () => {
   const vKey = v => Math.round(v.x) + ',' + Math.round(v.z);
   window.__vKey = vKey;
   window.__hover = () => {
+    if (BF.player.start) BF.player.start();   // out of the title screen (the boot world runs behind it)
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
     const p = BF.player.position;
     const v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];

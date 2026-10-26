@@ -292,7 +292,9 @@ const MOB_FIELDS = [
   "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "growing", "parents", "_swT",
   "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
   "penIn", "atOut", "fall", "jobMem", "seek", "exploded", "vdenied", "vanon", "local", "otherId", "sellerId", "goalSellerId", "ledById", "ridingId",
-  "pastureKey", "exitKey", "buyFromId", "buyFromAt", "holdForId", "holdT"];
+  "pastureKey", "exitKey", "buyFromId", "buyFromAt", "holdForId", "holdT",
+  // caches, never saved, sent or hashed (r15-61): the hottest links' last answers (js/ids.js CACHE_FIELDS), the id as a number (js/regiontick.js)
+  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"];
 const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
@@ -335,6 +337,7 @@ function createMob(type, x, y, z, variant, style) {
           shootCd: rnd(r, 1, 2), fuse: 0, strafe: r.next() < 0.5 ? 1 : -1, lookT: 0, swingT: 0, provoked: 0, burnT: 0, aiming: false }, AiShape),
     age: 0, rng: st.rng,
   }, MobShape);
+  mob._lvG = mob._lsG = mob._lhG = mob._laG = -1;   // its link caches on (js/ids.js cached, r15-61)
   BF.ids.put(mob);   // mob.id: a new "e<n>" (a villager's saved one comes back with its trading state, js/trading.js unpack)
   if (type === "villager" && BF.trades) BF.trades.init(mob); // level, offers, inventory with starting stock
   keepPrev(mob);
@@ -772,27 +775,51 @@ function roofLedge(x, y, z, hw) {
     for (const n of Object.keys(BF.B)) if (/_leaves$/.test(n)) leaves.add(BF.B[n]);
     for (const n of Object.keys(BF.B)) if (/^(grass|dirt|dirt_path|stone|sand|red_sand|sandstone|red_sandstone|gravel|snow|snow_grass|snow_block|ice|packed_ice|clay|farmland|farmland_dry|coarse_dirt|podzol|mycelium|mud|moss_block|granite|diorite|andesite|deepslate|tuff|calcite|bedrock)$|_ore$|terracotta/.test(n)) naturalTop.add(BF.B[n]);
   }
-  const W = BF.world, fy = Math.floor(y + 1e-3), seen = new Set();
-  for (const dx of [-hw + 0.02, 0, hw - 0.02]) for (const dz of [-hw + 0.02, 0, hw - 0.02]) {
-    const bx = Math.floor(x + dx), bz = Math.floor(z + dz), k = bx + "," + bz;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    if (!W.isSolid(bx, fy - 1, bz) || naturalTop.has(W.getBlock(bx, fy - 1, bz))) continue;
-    if (W.heightAt(bx, bz) >= fy) continue;   // something over it: a floor indoors, not a roof
-    const gy = BF.worldgen.heightAt(bx, bz), id = W.getBlock(bx, fy - 1, bz);
-    if (fy - gy < 3) continue;
-    if (leaves.has(id)) return true;
-    // a roof (an eave, a roof step over the room below) has a gap under it; a foundation, a wall or a stack of hay is solid down to the
-    // ground, and a bridge deck has the river under it
-    let gap = false;
-    for (let yy = fy - 2; yy > gy; yy--) {
-      const b = W.getBlock(bx, yy, bz);
-      if (isWater(b)) { gap = false; break; }
-      if (!W.isSolid(bx, yy, bz)) gap = true;
+  // the columns under the mob's box (its corners and middle), each once
+  const fy = Math.floor(y + 1e-3), a = hw - 0.02;
+  const x0 = Math.floor(x - a), x1 = Math.floor(x), x2 = Math.floor(x + a), z0 = Math.floor(z - a), z1 = Math.floor(z), z2 = Math.floor(z + a);
+  for (let i = 0; i < 3; i++) {
+    const bx = i === 0 ? x0 : i === 1 ? x1 : x2;
+    if ((i === 1 && bx === x0) || (i === 2 && (bx === x1 || bx === x0))) continue;
+    for (let j = 0; j < 3; j++) {
+      const bz = j === 0 ? z0 : j === 1 ? z1 : z2;
+      if ((j === 1 && bz === z0) || (j === 2 && (bz === z1 || bz === z0))) continue;
+      if (roofColumn(bx, fy, bz)) return true;
     }
-    if (gap) return true;
   }
   return false;
+}
+// One column of roofLedge: whether the block at (bx, fy - 1, bz) is a roof ledge. The answer depends only on that column's blocks, so it
+// is kept on the chunk (per column: the fy asked and the colVer it was worked out at) until a block in the column changes (r15-61: mobs
+// ask for the same few columns tick after tick). Margin addresses past a face edge are worked out every time.
+let ROOF_CELL = null;
+function roofColumn(bx, fy, bz) {
+  const W = BF.world, cl = W.cell(bx, bz, ROOF_CELL || (ROOF_CELL = W.scratchCell())), c = cl.c;
+  if (!c || cl.x !== bx || cl.z !== bz) return roofScan(bx, fy, bz);
+  const ci = (cl.lz << 4) | cl.lx;
+  let R = c.roofs;
+  if (!R) R = c.roofs = { y: new Int32Array(256).fill(-0x80000000), v: new Uint32Array(256), r: new Uint8Array(256) };
+  if (R.y[ci] === fy && R.v[ci] === c.colVer[ci]) return R.r[ci] === 1;
+  const r = roofScan(bx, fy, bz);
+  R.y[ci] = fy; R.v[ci] = c.colVer[ci]; R.r[ci] = r ? 1 : 0;
+  return r;
+}
+function roofScan(bx, fy, bz) {
+  const W = BF.world;
+  if (!W.isSolid(bx, fy - 1, bz) || naturalTop.has(W.getBlock(bx, fy - 1, bz))) return false;
+  if (W.heightAt(bx, bz) >= fy) return false;   // something over it: a floor indoors, not a roof
+  const gy = BF.worldgen.heightAt(bx, bz), id = W.getBlock(bx, fy - 1, bz);
+  if (fy - gy < 3) return false;
+  if (leaves.has(id)) return true;
+  // a roof (an eave, a roof step over the room below) has a gap under it; a foundation, a wall or a stack of hay is solid down to the
+  // ground, and a bridge deck has the river under it
+  let gap = false;
+  for (let yy = fy - 2; yy > gy; yy--) {
+    const b = W.getBlock(bx, yy, bz);
+    if (isWater(b)) { gap = false; break; }
+    if (!W.isSolid(bx, yy, bz)) gap = true;
+  }
+  return gap;
 }
 // Whether the mob keeps off roofs (roofLedge): everything that walks except monsters (spiders climb walls anyway).
 const keepsOffRoofs = m => !m.def.hostile && !m.def.climbs && !(m.ai && m.ai.route) && !m.onLadder && !(m.horse && m.horse.lead);   // a led horse goes where it is led

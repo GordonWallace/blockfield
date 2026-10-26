@@ -503,6 +503,26 @@ function stackIn(c, i) {
 
 // ---------------------------------------------------------------- drag splitting
 // d.els: the slots dragged over as [container, index] pairs (a request's data); the page draws the same plan while the drag goes on.
+// The page only offers slots its canDrop() accepts, but its copy of the slots can be a round trip behind (a shift-click just moved a
+// stack there), so the sim checks each slot again against its own slots and splits the cursor over the ones that still take it.
+function canDrop(c, i) {
+  if (!cursor) return false;
+  if (!(c === "inv" || c === "grid" || c === "pay" || (c === "chest" && !chestLocked()) || (c === "vinv" && vinvEditable()) || (c === "furn" && (i === 0 || (i === 1 && FUEL.has(cursor.id)))))) return false;
+  const arr = arrFor(c);
+  if (!arr || !Number.isInteger(i) || i < 0 || i >= arr.length) return false;
+  const s = arr[i];
+  return !s || (s.id === cursor.id && s.count < stackOf(s.id));
+}
+function dragSlots(d) {
+  const seen = new Set(), els = [];
+  for (const el of d.els) {
+    if (!Array.isArray(el)) continue;
+    const key = el[0] + ":" + el[1];
+    if (seen.has(key) || !canDrop(el[0], el[1])) continue;
+    seen.add(key); els.push(el);
+  }
+  return els;
+}
 function dragPlan(d) {
   const add = new Map();
   let left = cursor.count;
@@ -516,11 +536,13 @@ function dragPlan(d) {
 }
 function applyDrag(d) {
   if (!cursor || !d || !Array.isArray(d.els)) return;
-  const { add, left } = dragPlan(d), id = cursor.id;
+  const els = dragSlots(d);
+  if (els.length < d.els.length && BF.glog) BF.glog.log("INFO", "inventory", "A drag over " + d.els.length + " slots was split over the " + els.length + " that still take the held " + BF.items[cursor.id].name);
+  if (!els.length) return;
+  const { add, left } = dragPlan({ els, button: d.button }), id = cursor.id;
   for (const [el, m] of add) {
     if (!m) continue;
     const [c, i] = el, arr = arrFor(c);
-    if (!arr || (c === "chest" && chestLocked())) continue;
     if (arr[i]) arr[i].count += m; else arr[i] = mk(id, m, cursor.wear);
   }
   cursor.count = left;
