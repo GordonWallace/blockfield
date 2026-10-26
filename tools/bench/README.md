@@ -34,7 +34,9 @@ It writes `~/bench-8.md` (the comparison table) and `~/bench-8.json` (everything
 - At start it reads the WebGL renderer. If Chrome fell back to drawing on the CPU (SwiftShader or llvmpipe) it stops, since the numbers
   wouldn't be your GPU's. `--headless` tries Chrome's headless mode instead of the off-screen window; on Linux that usually draws on the
   CPU, so the window is the default.
-- Options: `--speeds 0,3,4,5` (indexes: 1x, 3x, 5x, 10x, 100x, 1000x), `--secs 60` a speed, `--settle 60` before measuring,
+- Each fast-forward speed runs for one whole game day (night is much cheaper than day, and the two versions reach different speeds,
+  so a fixed real time would cover different hours), at most `--maxsecs 600` real seconds; 1x runs `--secs 60`.
+- Options: `--speeds 0,3,4,5` (indexes: 1x, 3x, 5x, 10x, 100x, 1000x), `--secs 60` at 1x, `--settle 60` before measuring,
   `--monsters` (off by default, since random monster spawns make the mob counts differ), `--seed 3`, `--only 1.4|1.5`,
   `--chrome <path>`.
 

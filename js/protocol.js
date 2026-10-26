@@ -390,15 +390,20 @@ function serve(send, opts) {
     if (list.length || gone.length) out({ t: "village", list, gone });
   }
 
-  // the clock once a game second (and on a speed change); the weather's state only when it changed
+  // the clock once a game second (and on a speed change); the weather's state only when it changed. While the world is frozen or paused
+  // nothing ticks, so a /time set or /weather then goes at once: the clock is sent whenever the time or the weather differs from the last.
   function flushClock(t, force) {
     const W = BF.warp, sky = BF.sky || {}, speed = W ? W.speed : 1, frozen = !!(W && W.frozen);
-    const key = speed + "|" + frozen;
-    if (!force && key === S.clockKey && t - S.clockTick < 20) return;
-    S.clockKey = key; S.clockTick = t;
-    const m = { t: "clock", tick: t, day: sky.day || 0, time: sky.time || 0, speed, frozen, achieved: W ? W.last : 1 };
-    const w = BF.weather && BF.weather.serialize ? JSON.stringify(BF.weather.serialize()) : "null";
-    if (w !== S.weather) { S.weather = w; m.weather = JSON.parse(w); }
+    const key = speed + "|" + frozen, day = sky.day || 0, time = sky.time || 0;
+    const still = frozen || !!(BF.state && BF.state.paused);
+    const w = () => (BF.weather && BF.weather.serialize ? JSON.stringify(BF.weather.serialize()) : "null");
+    let wNow = null;
+    if (!force && key === S.clockKey && t - S.clockTick < 20 &&
+        !(still && (day !== S.clockDay || time !== S.clockTime || (wNow = w()) !== S.weather))) return;
+    S.clockKey = key; S.clockTick = t; S.clockDay = day; S.clockTime = time;
+    const m = { t: "clock", tick: t, day, time, speed, frozen, achieved: W ? W.last : 1 };
+    if (wNow == null) wNow = w();
+    if (wNow !== S.weather) { S.weather = wNow; m.weather = JSON.parse(wNow); }
     out(m);
   }
 

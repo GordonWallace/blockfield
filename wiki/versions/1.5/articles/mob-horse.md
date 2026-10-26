@@ -16,7 +16,7 @@ Your hunger bar is replaced by the horse's health. Falls hurt the horse, not you
 
 ### Leads and feeding
 
-A [[item:lead]] used on a horse makes it follow within three blocks of you; the lead snaps if you get more than twelve blocks away. Right click a fence post to tie every horse you are leading to it. Food heals a tamed horse: hay heals most.
+A [[item:lead]] used on a horse makes it follow within three blocks of you; the lead snaps if you get more than twelve blocks away. Right click a fence post to tie every horse you are leading to it (the game log notes it, kind *horses*); with no horse on your lead, a right click on a fence places the block you hold against it as usual. Food heals a tamed horse: hay heals most.
 
 ### Breeding
 
