@@ -164,16 +164,22 @@ function breedNow(a, b, t) {
 // ---------------------------------------------------------------- cow movement (mobs.js, before its wander AI): led home, tempted, or to a mate
 const follow = (m, dt, out, tx, tz, stop, speed) => H().follow(m, dt, out, tx, tz, stop, speed);
 const MATING = { willing, find: findMate, breed, mateR: MATE_R, meet: MEET };
+// The player, when holding wheat within FOLLOW_R of a cow outside a pasture: where it stands, seen from the cow's frame; else null.
+function tempter(m) {
+  if (m.pasture || !BF.player || !BF.player.position || BF.player.dead || !playerWheat()) return null;
+  const p0 = BF.player.position, q = BF.planet.local(m.position, p0), p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
+  return d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4 ? p : null;
+}
+// cowAI has nothing to do this tick (not led, not tempted, not willing): mateStep only clears m.mate and it is left to wanderAI (spec r15-63)
+const rests = m => !m.ledBy && !tempter(m) && !MATING.willing(m, now());
 function cowAI(m, dt, out) {
   const t = now(), sp = m.def.speed;
   if (m.ledBy) {   // walk the cowherd's trail (through the gate) instead of straight at it (js/herd.js)
     const S = live(m.ledBy) ? m.ledBy.cwk : null;
     if (H().ledStep(m, dt, out, S, S && S.task && S.task.pasture, inRoom)) return true;
   }
-  if (!m.pasture && BF.player && BF.player.position && !BF.player.dead && playerWheat()) {
-    const p0 = BF.player.position, q = BF.planet.local(m.position, p0), p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
-    if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 2, sp); }
-  }
+  const p = tempter(m);
+  if (p) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 2, sp); }
   return H().mateStep(m, dt, out, t, MATING);
 }
 
@@ -863,7 +869,7 @@ if (BF.texKit) {
 
 BF.cowherd = {
   FEED_DAYS, BREED_CD, CALF_DAYS, DENSITY, MIN_ADULTS, STOCK_TO, FIND_R, KIT_BOTTLES, MILK_CAP, MILK_KEEP, BEEF_KEEP, reserve, STEAK_CAP, WORK_END,
-  feed, milk, milkable, milkedToday, playerUse, cowAI, syncLook, hungry, willing, isCalf, breed, bottle,
+  feed, milk, milkable, milkedToday, playerUse, cowAI, rests, syncLook, hungry, willing, isCalf, breed, bottle,
   pasturesOf, pastureOf, tended, wheatWanted, bottleWanted, kitInto, hireKit, grassVillage, grassAt,
   ai, cookAI, toCook, tick, statusText, holdings, pickPastureTarget, contain, counts,
   exportAll, importAll, reset,

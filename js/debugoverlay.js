@@ -51,7 +51,7 @@ function updateDebug(now) {
 // figures (mobs, villages simulated, the clock, weather, the villager-seconds meter, requests, block light) are the protocol's "f3" query
 // (spec r15-37); in the page its answer comes at once, elsewhere the overlay shows the latest one.
 let f3 = null, f3Asking = false;
-const F3_NONE = { mobs: 0, boats: 0, sim: "", clock: "", weather: "", perf: null, perfText: "", requests: null, requestsText: "", regionText: "", workersText: "", blockLight: 0 };
+const F3_NONE = { mobs: 0, boats: 0, sim: "", clock: "", weather: "", perf: null, perfText: "", requests: null, requestsText: "", regionText: "", wakeText: "", workersText: "", blockLight: 0 };
 function debugInfo() {
   const p = BF.player.position;
   const biome = BF.worldgen.biomeAt(p.x, p.z), cc = BF.world.chunkAt(p.x, p.z);
@@ -72,6 +72,7 @@ function debugInfo() {
     perf: q.perf, perfText: q.perfText,   // villager-seconds meter (js/perf.js): null until it has been on
     requests: q.requests, requestsText: q.requestsText,   // the request queue and direct writes (js/requests.js)
     regionText: q.regionText,   // the region tick (js/regiontick.js)
+    wakeText: q.wakeText,   // resting animals (js/mobs.js, spec r15-63)
     workersText: q.workersText,   // region workers (js/rplay.js, spec r15-39): in the simulation worker or on the world server
     planet: planetInfo(p),
     shared: BF.shared ? BF.shared.text : "",   // "Shared memory: on" / "...off: page not isolated" (js/world.js, r15-35)
@@ -101,6 +102,7 @@ function debugText(d) {
     (d.perf ? d.perfText + "\n" : "") +
     (d.requests ? d.requestsText + "\n" : "") +
     (d.regionText ? d.regionText + "\n" : "") +
+    (d.wakeText ? d.wakeText + "\n" : "") +
     (d.workersText ? d.workersText + "\n" : "") +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +

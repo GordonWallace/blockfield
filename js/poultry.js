@@ -148,6 +148,14 @@ function follow(m, dt, out, tx, tz, stop, speed) {
   out.x = dx / d * speed; out.z = dz / d * speed;
   return true;
 }
+// The player, when holding seeds within FOLLOW_R of a chicken outside a coop: where it stands, seen from the chicken's frame; else null.
+function tempter(m) {
+  if (m.coop || !BF.player || !BF.player.position || BF.player.dead || !playerSeeds()) return null;
+  const p0 = BF.player.position, q = BF.planet.local(m.position, p0), p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
+  return d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4 ? p : null;
+}
+// chickenAI has nothing to do this tick (not led, not tempted, not willing): it only clears m.mate and leaves the chicken to wanderAI (spec r15-63)
+const rests = m => !m.ledBy && !tempter(m) && !willing(m, now());
 function chickenAI(m, dt, out) {
   const t = now(), sp = m.def.speed;
   const L = m.ledBy;
@@ -173,10 +181,8 @@ function chickenAI(m, dt, out) {
       return follow(m, dt, out, c[0], c[2], 0.2, sp * 1.25);
     }
   }
-  if (!m.coop && BF.player && BF.player.position && !BF.player.dead && playerSeeds()) {
-    const p0 = BF.player.position, q = BF.planet.local(m.position, p0), p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
-    if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 1.6, sp); }
-  }
+  const p = tempter(m);
+  if (p) { m.lookAt = "player"; return follow(m, dt, out, p.x, p.z, 1.6, sp); }
   if (!willing(m, t)) { m.mate = null; return false; }
   m.mateT = (m.mateT || 0) - dt;
   if (m.mate && (!live(m.mate) || !willing(m.mate, t))) m.mate = null;
@@ -684,7 +690,7 @@ if (BF.texKit) {
 
 BF.poultry = {
   FEED_DAYS, BREED_CD, CHICK_DAYS, LAY_MIN, LAY_MAX, CULL_AT, STOCK_TO, FIND_R, NEST_CAP,
-  feed, playerUse, chickenAI, syncLook, hungry, willing, isChick, breed,
+  feed, playerUse, chickenAI, rests, syncLook, hungry, willing, isChick, breed,
   coopsOf, coopOf, tended, seedsWanted, ai, tick, statusText, pickCoopTarget, contain, counts,
   exportAll, importAll, reset,
   coops: () => activeCoops, log: LOG,

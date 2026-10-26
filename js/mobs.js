@@ -1915,7 +1915,10 @@ function updateMob(m, dt) {
   }
   m.onFire = burning && !m.dead;
   if (m.dead) return;
-
+  orient(m, dt);
+}
+// The end of a mob's update: turning, the head's look, the walk animation, the hurt flash and a villager's badge and held tool.
+function orient(m, dt) {
   // ---- orientation ----
   const hs = Math.hypot(m.vel.x, m.vel.z);
   let targetYaw = m.yaw;
@@ -2094,6 +2097,97 @@ function separate(m, dt) {
       const d = Math.hypot(dx, dz) || 0.01;
       m.vel.x += (dx / d) * 8 * dt; m.vel.z += (dz / d) * 8 * dt;
     }
+  }
+}
+
+// ---------- resting animals (spec r15-63) ----------
+// A wild sheep, chicken, cow or pig standing idle on solid ground, with nothing near it, nothing tempting it, not willing to breed and not
+// about to pick a new wander or look, spends its update counting down timers: canRest checks every input updateMob would read, and
+// restStep then makes exactly updateMob's changes without the AI calls, the move and the burning check. It is checked again every tick,
+// so a hit, a push, a player with seeds or a timer running out wakes it on the same tick as before. BF.mobs.wake = false always runs
+// updateMob; BF.mobs.wakeVerify runs both on every resting tick and logs an ERROR when they differ (the full result is kept).
+const RESTS = { sheep: () => BF.shepherd, chicken: () => BF.poultry, cow: () => BF.cowherd, pig: () => BF.pigFarmer };
+const wakeStats = {};
+let restN = 0, animN = 0, lastRest = 0, lastAnim = 0;   // this update's resting animals and animals that could rest (F3)
+function pushed(m) {   // separate() would push m: the same overlap tests, with no writes
+  const gx = Math.floor(m.position.x / 2), gz = Math.floor(m.position.z / 2);
+  const plain = gridFast && inSquare(m.position.x, m.position.z, GRID_EDGE);
+  for (let cz = gz - 1; cz <= gz + 1; cz++) for (let cx = gx - 1; cx <= gx + 1; cx++) {
+    const cell = sepGrid.get(plain ? sepKey(cx, cz) : gridKey(cx, cz, 2));
+    if (cell) for (let i = 0; i < cell.n; i++) {
+      const o = cell.a[i];
+      if (o === m || o.dead) continue;
+      const op = seen(m.position, o.position, _sA), dx = m.position.x - op.x, dz = m.position.z - op.z;
+      const min = m.halfWidth + o.halfWidth;
+      if (Math.abs(dx) > min || Math.abs(dz) > min) continue;
+      if (m.position.y > o.position.y + o.height || o.position.y > m.position.y + m.height) continue;
+      return true;
+    }
+  }
+  if (playerAlive()) {
+    const p = player(), pp = pAt(m);
+    const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
+    const min = m.halfWidth + (p.halfWidth || 0.3);
+    if (Math.abs(dx) < min && Math.abs(dz) < min && m.position.y < p.position.y + (p.height || 1.8) && p.position.y < m.position.y + m.height) return true;
+  }
+  return false;
+}
+function canRest(m, dt) {
+  const mod = RESTS[m.type], ai = m.ai, v = m.vel;
+  if (!mod || m.dead || m.sleeping || m.rider || m.riding || ai.fleeT > 0 || ai.detour || ai.mode !== "idle") return false;
+  if (m.villageId != null || m.penVillageId != null || m.penKey != null || m.coopKey != null || m.pastureKey != null || m.styKey != null || m.ridingId != null) return false;
+  if (!(ai.t - dt > 0) || !(ai.lookT - dt > 0) || !(m.knockT - dt <= 0)) return false;
+  if (!m.onGround || m.inWater || v.x !== 0 || v.y !== 0 || v.z !== 0) return false;
+  const M = mod();
+  if (!M || !M.rests || !M.rests(m)) return false;
+  if (!BF.world.isSolid(Math.floor(m.position.x), Math.floor(m.position.y - 0.05), Math.floor(m.position.z))) return false;
+  return !pushed(m);
+}
+// updateMob's changes to a mob canRest passed
+function restStep(m, dt) {
+  const ai = m.ai;
+  m.age += dt;
+  m.hurtT -= dt; m.invuln -= dt; m.knockT -= dt; ai.swingT -= dt;
+  _desired.x = 0; _desired.z = 0; _desired.faceTarget = false; _desired.faceX = null; _desired.faceZ = null;
+  m.mate = null;   // (the animal AI's "not willing")
+  ai.wanderAt = m.age; ai.t -= dt; ai.lookT -= dt;   // (wanderAI, idle)
+  m.onLadder = false;
+  m.vel.set(0, 0, 0); m.fallStart = m.position.y; ai.blockedT = 0;   // (resting: no move)
+  keepFrame(m);
+  m.onFire = false;
+  orient(m, dt);
+}
+const REST_F = ["age", "hurtT", "invuln", "knockT", "mate", "onLadder", "fallStart", "onFire", "yaw", "headYaw", "headPitch", "walkAmt", "walkPhase", "tint", "lookAt"];
+const REST_AI = ["swingT", "wanderAt", "t", "lookT", "blockedT"];
+function restSave(m) {
+  const o = { ai: {}, vel: m.vel.clone(), pos: m.position.clone() };
+  for (const k of REST_F) o[k] = m[k];
+  for (const k of REST_AI) o.ai[k] = m.ai[k];
+  return o;
+}
+function restLoad(m, o) {
+  for (const k of REST_F) m[k] = o[k];
+  for (const k of REST_AI) m.ai[k] = o.ai[k];
+  m.vel.copy(o.vel); m.position.copy(o.pos);
+}
+const restText = m => BF.stateHash.canon(m) + "|" + REST_F.map(k => typeof m[k] === "object" && m[k] ? (m[k].id != null ? "#" + m[k].id : JSON.stringify(m[k])) : String(m[k])).join(",");
+// one mob's update in the mob loop: the rest step when it can rest, else updateMob
+function step(m, dt) {
+  const W = BF.mobs, st = wakeStats[m.type] || (wakeStats[m.type] = { full: 0, rest: 0 });
+  if (RESTS[m.type]) animN++;
+  if (!W.wake || !RESTS[m.type] || !canRest(m, dt)) { st.full++; return updateMob(m, dt); }
+  st.rest++; restN++;
+  if (!W.wakeVerify) return restStep(m, dt);
+  const s0 = restSave(m);
+  restStep(m, dt);
+  const a = restText(m);
+  restLoad(m, s0);
+  updateMob(m, dt);
+  const b = restText(m);
+  if (a !== b) {
+    W.wakeDiffs++;
+    let i = 0; while (i < a.length && a[i] === b[i]) i++;
+    if (W.wakeDiffs <= 20 && BF.glog) BF.glog.log("ERROR", "mobs", "Rest step of " + m.type + " #" + m.id + " differs from its full update at ..." + a.slice(Math.max(0, i - 40), i + 40) + " / ..." + b.slice(Math.max(0, i - 40), i + 40));
   }
 }
 
@@ -2704,6 +2798,11 @@ function rayAABB(o, d, mn, mx) {
 // ---------- public API ----------
 BF.mobs = {
   shapeAi, MOB_FIELDS, AI_FIELDS,   // one mob layout (test/mob-shape.js, js/mobsave.js)
+  // spec r15-63: idle wild animals take the rest step (see canRest); wake false = always the full update, wakeVerify = run both and compare
+  wake: true, wakeVerify: false, wakeDiffs: 0,
+  canRest,   // (tests: m would take the rest step this tick)
+  wakeText: () => `Resting animals ${lastRest} / ${lastAnim}${BF.mobs.wake ? "" : " (rest step off)"}`,   // F3: the last update's (wild sheep, chickens, cows, pigs)
+  wakeStats: () => JSON.parse(JSON.stringify(wakeStats)), resetWakeStats() { for (const k in wakeStats) delete wakeStats[k]; BF.mobs.wakeDiffs = 0; },
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
@@ -2759,6 +2858,7 @@ BF.mobs = {
     // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
     // with several workers (spec r15-39, js/rworkers.js) this worker thinks only the regions it owns; the others' changes come after the loop
     const RW = BF.rworkers, order = BF.rtick ? BF.rtick.plan(list) : list.slice();
+    restN = animN = 0;
     for (const m of RW && RW.active ? RW.beginThink(order) : order) {
       if (RW && RW.active) RW.thinking(m);
       if (m.removed) continue;
@@ -2773,12 +2873,13 @@ BF.mobs = {
         } else m._farT = null;
       }
       curMob = BF.rand.thinker = m;
-      try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
+      try { step(m, h); } catch (e) { console.error(e); removeMob(m); }
       curMob = BF.rand.thinker = null;
       hold(m);
       if (pon) PF.lap(PF.mobCat(m));
     }
     commitMoves();
+    lastRest = restN; lastAnim = animN;
     if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
     updateArrows(dt);
     PF.lap(PC.other);

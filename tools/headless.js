@@ -6,6 +6,8 @@
 //                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file] [--extra n]
 //   --at village (default): the player moves to the village nearest the spawn first, so villagers are simulated; spawn: stays there.
 //   --extra n: the n nearest other villages are simulated too, however far (js/active.js fixed set; a heavier load to measure with).
+//   --wake 0 | 1 | verify (spec r15-63): idle wild animals' rest step off (every mob takes the full update), on (the default), or both
+//   run and compared every resting tick (an ERROR in the log for each difference); the JSON then has wake {stats, diffs}.
 //   --log: the game log, one line an entry (js/logmatch.js gameLine), as the debug screen's download writes it.
 //   --save / --load: the save data as js/save.js stores it (snapshot / restore), as JSON. --every: print the hash every s game seconds.
 //   --workers n: the regions' thinking split over n workers (spec r15-39: n - 1 worker_threads, server/regionthread.js); the world must
@@ -85,6 +87,7 @@ async function main(argv) {
   const seed = a.seed != null ? +a.seed : 3, seconds = a.seconds != null ? +a.seconds : 600;
   const L = load({ log: a.log });
   const BF = L.BF;
+  if (a.wake != null) { BF.mobs.wake = a.wake !== '0'; BF.mobs.wakeVerify = a.wake === 'verify'; }
   const say = a.json ? () => {} : s => console.log(s);
   say(`loaded ${require('../js/simfiles.js').length} sim files in ${L.ms.toFixed(0)} ms`);
   const t0 = performance.now();
@@ -150,7 +153,7 @@ async function main(argv) {
     seed: BF.state.seed, seconds: h.seconds, ticks: h.ticks, real: +T.real.toFixed(2),
     vss: Math.round(T.vs / T.real), mobss: Math.round(T.mobs / T.real), msPerTick: +(T.stepMs / Math.max(1, T.steps)).toFixed(3),
     speed: +(T.game / T.real).toFixed(2), villagers, mobs: BF.mobs.list.length, chunks: BF.world.chunks.size, hash: H.hash, parts: H.parts,
-    workers, census: census(BF),
+    workers, census: census(BF), wake: { on: BF.mobs.wake, stats: BF.mobs.wakeStats(), diffs: BF.mobs.wakeDiffs },
   };
   if (a.save) fs.writeFileSync(a.save, saveJSON(h.save()));
   if (a.dump) { const o = {}; for (const k of BF.stateHash.PARTS) o[k] = BF.stateHash.text(k); fs.writeFileSync(a.dump, JSON.stringify(o)); }   // --dump file: every hash part's text (tests: where two runs differ)

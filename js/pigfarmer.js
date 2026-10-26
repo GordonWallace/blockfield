@@ -133,16 +133,22 @@ function breedNow(a, b, t) {
 
 // ---------------------------------------------------------------- pig movement (mobs.js, before its wander AI): led home, tempted, or to a mate
 const MATING = { willing, find: findMate, breed, mateR: MATE_R, meet: MEET };
+// The player, when holding feed within FOLLOW_R of a pig outside a sty: where it stands, seen from the pig's frame; else null.
+function tempter(m) {
+  if (m.sty || !BF.player || !BF.player.position || BF.player.dead || !playerFeed()) return null;
+  const p0 = BF.player.position, q = BF.planet.local(m.position, p0), p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
+  return d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4 ? p : null;
+}
+// pigAI has nothing to do this tick (not led, not tempted, not willing): mateStep only clears m.mate and it is left to wanderAI (spec r15-63)
+const rests = m => !m.ledBy && !tempter(m) && !MATING.willing(m, now());
 function pigAI(m, dt, out) {
   const t = now(), sp = m.def.speed;
   if (m.ledBy) {   // walk the pig farmer's trail (through the gate) instead of straight at it
     const S = live(m.ledBy) ? m.ledBy.pgk : null;
     if (H().ledStep(m, dt, out, S, S && S.task && S.task.sty, inRoom)) return true;
   }
-  if (!m.sty && BF.player && BF.player.position && !BF.player.dead && playerFeed()) {
-    const p0 = BF.player.position, q = BF.planet.local(m.position, p0), p = { x: q.x, y: p0.y, z: q.z }, d = Math.hypot(p.x - m.position.x, p.z - m.position.z);   // (seen from the animal's frame across a face edge)
-    if (d < FOLLOW_R && Math.abs(p.y - m.position.y) < 4) { m.lookAt = "player"; return H().follow(m, dt, out, p.x, p.z, 2, sp); }
-  }
+  const p = tempter(m);
+  if (p) { m.lookAt = "player"; return H().follow(m, dt, out, p.x, p.z, 2, sp); }
   return H().mateStep(m, dt, out, t, MATING);
 }
 
@@ -768,7 +774,7 @@ function counts() {
 
 BF.pigFarmer = {
   FEED_DAYS, BREED_CD, PIGLET_DAYS, DENSITY, MIN_ADULTS, STOCK_TO, FIND_R, FEED_KEEP, PORK_KEEP, COOKED_CAP, WORK_END, FEED_NAMES,
-  feed, playerUse, pigAI, syncLook, hungry, willing, isPiglet, breed, isFeed, feedIds, feedHeld,
+  feed, playerUse, pigAI, rests, syncLook, hungry, willing, isPiglet, breed, isFeed, feedIds, feedHeld,
   stiesOf, styOf, tended, feedWanted, reserve, keepsFood, isWare, villageOK, seed,
   ai, cookAI, toCook, forceStop, tick, statusText, holdings, pickStyTarget, contain, counts,
   exportAll, importAll, reset,

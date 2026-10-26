@@ -163,6 +163,8 @@ function breedNow(a, b, t) {
   return lamb;
 }
 // Movement for a willing sheep: walks to its mate. Returns true when it is steering the sheep.
+// sheepAI has nothing to do this tick (not led, not willing): it only clears m.mate and leaves the sheep to wanderAI (spec r15-63)
+const rests = m => !m.ledBy && !willing(m, now());
 function sheepAI(m, dt, out) {
   if (m.ledBy) {   // walk the shepherd's trail (through the gate) into its pen (js/herd.js)
     const S = live(m.ledBy) ? m.ledBy.shp : null;
@@ -668,7 +670,7 @@ if (BF.texKit) {
 
 BF.shepherd = {
   FEED_DAYS, BREED_CD, LAMB_DAYS, REGROW_DAYS, PEN_DENSITY,
-  feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb, breed,
+  feed, shear, playerUse, sheepAI, rests, syncLook, hungry, willing, isLamb, breed,
   STOCK_TO, FIND_R,
   pensOf, penOf, hasLoom, tended, wheatWanted, ensureKit, ai, tick, statusText, pickPenTarget, contain,
   WOOL_KEEP, STRING_CAP, SPIN_BATCH, SPIN_HOURS, spinnable, wantsSpin, work,
