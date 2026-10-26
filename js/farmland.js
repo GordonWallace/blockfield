@@ -168,7 +168,7 @@ function hook() {
   });
   for (const c of BF.world.chunks.values()) scanChunk(c.cx, c.cz, c);
 }
-function reset() { stamps.clear(); tracked.clear(); due.clear(); order = []; pos = 0; carry = 0; orderDirty = true; lastRain = -1e9; }
+function reset() { stamps.clear(); tracked.clear(); due.clear(); order = []; pos = 0; last = 0; carry = 0; orderDirty = true; lastRain = -1e9; }
 
 const farmland = {
   isFarmland, isDry, tillId, hydrated, tick, onSet, check, reset,   // reset: called by world.reset (new world / load)

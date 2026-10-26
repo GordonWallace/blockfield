@@ -37,7 +37,7 @@ const store = {
   if (q) { opt.on = true; opt.budget = Math.min(10, +q[1] / 100); }
 }
 
-const now = () => performance.now();
+const now = () => BF.rworkers.realNow();   // (the wall clock; with region workers the leader's reading, so every worker decides alike: js/rworkers.js)
 // ---- the measure: 1-second slices of real time that ran (not 0x, not paused), the last 10 kept for the figures shown
 let slice = { sim: 0, real: 0, frames: 0 }, slices = [], underMs = 0, overMs = 0, fps = 60;
 function frame(simMs, raw) {
@@ -171,6 +171,6 @@ BF.active = {
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: lastN, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
     under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, log: decisions.slice(-12) }),
   log: () => decisions.slice(),
-  reset() { extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, frames: 0 }; decide.memTold = false; },
+  reset() { extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, frames: 0 }; fps = 60; decide.memTold = false; },
 };
 })();

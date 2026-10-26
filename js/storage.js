@@ -417,5 +417,5 @@ function hook() {
   });
 }
 
-BF.storage = { RELEASE_DAYS, STORE_FREE, ORDER_DAYS, keepOf, storePlan, withdrawPlan, bedHouse, chestsIn, usable, pickChest, chestSpot, orders, deliver, ai, tick, statusText, keyOf };
+BF.storage = { RELEASE_DAYS, STORE_FREE, ORDER_DAYS, keepOf, storePlan, withdrawPlan, bedHouse, chestsIn, usable, pickChest, chestSpot, orders, deliver, ai, tick, statusText, keyOf, reset() { tickT = 0; } };
 })();
