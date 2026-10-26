@@ -43,7 +43,7 @@ exports.give = async (pg, names, sel = 0) => {
 };
 // serve(opts): debug/server.js on free ports, for a test served over http: {url (the game's index.html), debugUrl, game, debug, srv,
 // stop()}. The world server runs (with --test, so BFT.sim works there, and saves in a temp folder) unless opts.world is false;
-// opts.args adds arguments (e.g. ['--alerts', file]).
+// opts.test false leaves --test out (a server as players run it); opts.args adds arguments (e.g. ['--alerts', file]).
 exports.freePort = () => new Promise(res => { const s = require('net').createServer().listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
 // A port probed free can be taken again before debug/server.js binds it (another test, a browser): the server then says it "can't open"
 // the port and runs without it, so an attempt that logs that is stopped and tried again on fresh ports (up to 5 times).
@@ -52,7 +52,7 @@ exports.serve = async (opts = {}) => {
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-saves-'));
   for (let attempt = 1; ; attempt++) {
     const game = opts.game || await exports.freePort(), debug = opts.debug || await exports.freePort();
-    const args = [path.join(__dirname, '..', 'debug/server.js'), '--game', String(game), '--debug', String(debug), '--saves', saves, '--test', ...(opts.world === false ? ['--no-world'] : []),
+    const args = [path.join(__dirname, '..', 'debug/server.js'), '--game', String(game), '--debug', String(debug), '--saves', saves, ...(opts.test === false ? [] : ['--test']), ...(opts.world === false ? ['--no-world'] : []),
       ...((opts.args || []).includes('--alerts') ? [] : ['--alerts', path.join(saves, 'alerts.json')]), ...(opts.args || [])];   // (the debug screen's alerts: not debug/.alerts.json)
     const srv = cp.spawn(process.execPath, args, { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
