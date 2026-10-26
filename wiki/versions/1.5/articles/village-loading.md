@@ -28,7 +28,7 @@ The game measures how much of each real second the simulation takes. The pause m
 - The budget is per real second, so when you fast-forward each village costs more of it and fewer extra villages fit. Speed and the number of villages trade one for one. On a slow computer the game never runs fewer villages than the minimum rules above.
 - Extra villages do not count toward the safety valve's limits below. While any are running, the budget sheds them instead of the safety valve stopping villages.
 
-Each village that joins or leaves for the budget, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). The debug screen's Simulation budget card shows the budget, how much of it is in use, the extra villages and the latest decisions.
+Each village that joins or leaves for the budget, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). The debug screen's Simulation budget card shows how many villages are simulated (the nearest ones the rule above keeps, plus the extras), the share of real time the simulation took against the budget's limit, the extra villages and the latest decisions.
 
 ## The countdown before a village stops
 When a village would stop, because you moved away, because other villages pushed it out of the nearest four, or because the simulation went over its budget, it does not stop at once. It counts down.
