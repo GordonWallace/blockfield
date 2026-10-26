@@ -20,11 +20,15 @@ const fs = require("fs"), path = require("path"), v8 = require("v8");
 
 const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;   // (Windows device names)
 // a world's name -> a folder name every system can hold
+// (cut at 60 characters, never inside an emoji, and with no dot or space at the end, which Windows can't keep: bug-072; a reserved
+// device name with an extension, "CON.txt", is one too)
 function slug(name) {
-  let s = String(name == null ? "" : name).replace(/[\u0000-\u001f<>:"/\\|?*\u007f]/g, "_").replace(/[. ]+$/, "").trim();
-  if (!s || s.startsWith(".")) s = "_" + s;
-  if (RESERVED.test(s)) s += "_";
-  return s.slice(0, 60);
+  const chars = s => Array.from(s).map(c => /^[\ud800-\udfff]$/.test(c) ? "_" : c), end = s => s.replace(/[. ]+$/, "");   // (a lone half of an emoji: "_")
+  const cut = s => end(chars(s).slice(0, 60).join(""));
+  let s = cut(String(name == null ? "" : name).replace(/[\u0000-\u001f<>:"/\\|?*\u007f]/g, "_").trim());
+  if (!s || s.startsWith(".")) s = cut("_" + s);
+  if (RESERVED.test(s.split(".")[0])) s = cut(s.replace(/^[^.]*/, m => m + "_"));
+  return s || "_";
 }
 
 function open(root) {

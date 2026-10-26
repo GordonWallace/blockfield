@@ -134,6 +134,7 @@ module.exports = async (pg, out) => {
     ok("a tied horse stays by its post", dPost < 4.5, { d: +dPost.toFixed(2) });
 
     // ---- saving ----
+    wild.horse.speed = 9.123456; wild.horse.jump = 3.0987;   // rolled stats are not round numbers (bug-084: they were saved to 0.01)
     const hid = wild.horse.hid, st = { hp: wild.maxHp, speed: wild.horse.speed, jump: wild.horse.jump, coat: wild.horse.coat, mark: wild.horse.mark };
     const data = JSON.parse(JSON.stringify(H.serialize()));
     H.deserialize(data);
@@ -141,6 +142,8 @@ module.exports = async (pg, out) => {
     const back = [...H.records.values()].find(r => r.hid === hid);
     ok("a tamed horse is saved with its stats, coat, saddle, owner and post", !!back && back.tamed && back.owner === "player" && back.saddle && back.maxHp === st.hp &&
       Math.abs(back.speed - st.speed) < 0.01 && back.coat === st.coat && back.mark === st.mark && back.lead && back.lead.kind === "post", back && { tamed: back.tamed, saddle: back.saddle, lead: back.lead });
+    ok("its speed and jump come back exactly, and the record has the same fields (bug-084)", !!back && back.speed === st.speed && back.jump === st.jump &&
+      "avoid" in back && "mate" in back, back && { speed: [st.speed, back.speed], jump: [st.jump, back.jump] });
     ok("the saved horse is back in the world", !!(back && back.mob && BF.mobs.list.includes(back.mob)));
     // never despawns: far away and unloaded, it waits as a record and comes back
     const m2 = back.mob;

@@ -133,6 +133,7 @@ function flowersNear(h, fresh) {
     }
   }
   h.fl = out; h.flT = now;
+  if (BF.rworkers) BF.rworkers.touch("hive", h);   // (a beekeeper looking while it thinks: the others keep the same flowers, js/rworkers.js)
   return out;
 }
 
@@ -278,7 +279,7 @@ function stepBee(b, dt, lp, now) {
       const d = flyTo(b, pp.x, pp.y + 1.1, pp.z, STING_SPEED, dt, true);
       if (d < 0.7) {
         b.stung = true;
-        if (BF.player && BF.player.damage) BF.player.damage(1, { x: b.x, y: b.y, z: b.z });
+        if (BF.player && BF.player.damage) { const s = seen(BF.player.position, b); BF.player.damage(1, { x: s.x, y: b.y, z: s.z }); }   // (pushed away from the bee as seen from the player's frame, bug-091)
         if (BF.emit) BF.emit("beeSting", b);
         nextErrand(b);
       }
@@ -541,6 +542,7 @@ function harvest(x, y, z, how, who) {
   const h = recs.get(ckey(x, y, z));
   if (!h || h.honey < FULL) return null;
   h.honey = 0;
+  if (BF.rworkers) BF.rworkers.touch("hive", h);   // (a beekeeper harvests while it thinks: the other workers get the home's honey, js/rworkers.js)
   if (who === "player") { const out = bees.filter(b => b.home === h); if (out.length) anger(out, h); }
   if (BF.emit) BF.emit("beeHarvest", h, how, who);
   return how === "shears" ? { id: BF.I.honeycomb, n: 3 } : { id: BF.I.honey_bottle, n: 1 };
@@ -558,7 +560,13 @@ function playerUse(target, stack) {
   }
   return { msg: what() };
 }
-function lure(m, on) { if (on) lures.add(m); else lures.delete(m); }
+function lure(m, on) { if (on ? lures.has(m) : !lures.has(m)) return; if (on) lures.add(m); else lures.delete(m); if (BF.rworkers) BF.rworkers.touch("lure", m); }
+// Several workers (spec r15-39): a beekeeper changes its home's honey, the flowers it found and its lure while it thinks, on its own worker; these send them on.
+if (BF.rworkers) {
+  BF.rworkers.channel("hive", { key: h => [h.x, h.y, h.z], get: k => homeAt(k[0], k[1], k[2]), state: h => ({ honey: h.honey, bees: h.bees, day: h.day, fl: h.fl, flT: h.flT }),
+    set: (h, d) => { if (h && d) { h.honey = d.honey; h.bees = d.bees; h.day = d.day; h.fl = d.fl; h.flT = d.flT; } } });
+  BF.rworkers.channel("lure", { key: m => m.id, get: id => BF.ids.get(id), state: m => lures.has(m), set: (m, on) => { if (!m) return; if (on) lures.add(m); else lures.delete(m); } });
+}
 
 function hook() {
   if (hooked || !W() || !W().onChunkLoad) return;
@@ -574,7 +582,7 @@ function hook() {
 }
 function reset() {
   for (const b of bees) b.gone = true;
-  bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0;
+  bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
 }
 
 // ---------------------------------------------------------------- saving
@@ -608,6 +616,9 @@ BF.bees = {
   onMoveIn: fn => moveL.push(fn),
   out: h => bees.filter(b => b.home === h),
   housekeeping,
+  // (region workers, js/rplay.js: whether homes are already found as their chunks load, as after an earlier world, or first at the first
+  // step; a follower starts its world the way the leader did, so it finds them in the same order)
+  hooked: () => hooked, hook: () => { ids(); if (NEST != null) hook(); },
 };
 // The bee simulation runs with the mobs, once per simulation step (fast-forward included); js/entityview.js draws the bees (spec r15-12).
 if (BF.mobs && BF.mobs.update) {
@@ -615,4 +626,5 @@ if (BF.mobs && BF.mobs.update) {
   BF.mobs.update = function (dt) { const r = prev.apply(this, arguments); try { update(dt); } catch (e) { console.error(e); } return r; };
 }
 if (W() && W().reset) { const prev = W().reset; W().reset = function () { const r = prev.apply(this, arguments); reset(); return r; }; }
+
 })();

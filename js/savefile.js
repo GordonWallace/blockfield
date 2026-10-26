@@ -8,10 +8,14 @@
 // A file that isn't gzipped is read as plain JSON (handy for looking at one by hand).
 // API (BF.saveFile in the page, require("../js/savefile.js") in Node):
 //   encode(rec) -> JSON text, decode(text) -> rec; pack(rec) -> Promise<Blob> (page) | packSync(rec) -> Buffer (Node);
-//   unpack(bytes: ArrayBuffer | Uint8Array) -> Promise<rec>; unpackSync(buffer) (Node); fileName(name); EXT
+//   unpack(bytes: ArrayBuffer | Uint8Array) -> Promise<rec>; unpackSync(buffer) (Node); fileName(name); EXT; MAX
+// A file is at most MAX bytes unpacked (bug-071: a 2 MB file of gzipped zeros unpacked to 2 GB and froze the world server). Unpacking
+// stops as soon as it passes MAX, and unpack() in Node unpacks off the main thread (zlib's pool), so the server keeps answering.
 (() => {
 "use strict";
 const FORMAT = 1, EXT = ".bfworld";
+const MAX = 256 * 1024 * 1024;   // (a world's JSON is a few MB to tens of MB; V8 can't hold a string much past 512 MB anyway)
+const tooBig = () => new Error("That world file is too big (over " + (MAX >> 20) + " MB unpacked)");
 const TAGS = ["$t", "$m", "$s", "$n", "$o"];
 const TYPED = { Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array };
 if (typeof BigInt64Array !== "undefined") { TYPED.BigInt64Array = BigInt64Array; TYPED.BigUint64Array = BigUint64Array; }
@@ -64,7 +68,7 @@ function unwrap(v) {
 }
 
 const F = {
-  FORMAT, EXT,
+  FORMAT, EXT, MAX,
   encode(rec) {
     return JSON.stringify({ blockfield: "world", format: FORMAT, game: rec.game || null, meta: wrap(rec.meta), data: wrap(rec.data), log: wrap(rec.log || null) });
   },
@@ -77,12 +81,28 @@ const F = {
   },
   fileName: name => (String(name || "world").replace(/[\u0000-\u001f<>:"/\\|?*]/g, "_").trim() || "world") + EXT,
   isGzip: u8 => u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b,
+  // a world's name as Create, Rename and Import keep it: at most NAME_MAX characters, never half an emoji (bug-072)
+  NAME_MAX: 40,
+  clampName: (name, dflt) => { const s = Array.from(String(name == null ? "" : name)).slice(0, F.NAME_MAX).join("").trim(); return s || dflt || "World"; },
 };
 if (isNode) {
   const zlib = require("zlib");
   F.packSync = rec => zlib.gzipSync(Buffer.from(F.encode(rec), "utf8"), { level: 6 });
-  F.unpackSync = buf => { const u8 = new Uint8Array(buf.buffer || buf, buf.byteOffset || 0, buf.length != null ? buf.length : buf.byteLength); return F.decode((F.isGzip(u8) ? zlib.gunzipSync(u8) : Buffer.from(u8)).toString("utf8")); };
-  F.unpack = bytes => Promise.resolve().then(() => F.unpackSync(Buffer.from(bytes)));
+  const u8of = buf => new Uint8Array(buf.buffer || buf, buf.byteOffset || 0, buf.length != null ? buf.length : buf.byteLength);
+  const capped = e => e && (e.code === "ERR_BUFFER_TOO_LARGE" || e instanceof RangeError) ? tooBig() : e;
+  const text = b => { if (b.length > MAX) throw tooBig(); return F.decode(b.toString("utf8")); };
+  F.unpackSync = buf => {
+    const u8 = u8of(buf);
+    if (!F.isGzip(u8)) return text(Buffer.from(u8.buffer, u8.byteOffset, u8.length));
+    let out;
+    try { out = zlib.gunzipSync(u8, { maxOutputLength: MAX }); } catch (e) { throw capped(e); }
+    return text(out);
+  };
+  F.unpack = bytes => {
+    const u8 = u8of(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
+    if (!F.isGzip(u8)) return Promise.resolve().then(() => text(Buffer.from(u8.buffer, u8.byteOffset, u8.length)));
+    return new Promise((res, rej) => zlib.gunzip(u8, { maxOutputLength: MAX }, (e, out) => e ? rej(capped(e)) : res(out))).then(text);
+  };
   module.exports = F;
 } else {
   const gz = typeof CompressionStream !== "undefined";
@@ -93,9 +113,19 @@ if (isNode) {
   };
   F.unpack = bytes => {
     const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-    if (!F.isGzip(u8)) return Promise.resolve().then(() => F.decode(new TextDecoder().decode(u8)));
+    if (!F.isGzip(u8)) return Promise.resolve().then(() => { if (u8.length > MAX) throw tooBig(); return F.decode(new TextDecoder().decode(u8)); });
     if (typeof DecompressionStream === "undefined") return Promise.reject(new Error("This browser can't read compressed world files"));
-    return new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream("gzip"))).text().then(F.decode);
+    // (read piece by piece, stopped past MAX: a small file can unpack to gigabytes, bug-071)
+    const reader = new Blob([u8]).stream().pipeThrough(new DecompressionStream("gzip")).getReader(), parts = [];
+    let n = 0;
+    const next = () => reader.read().then(({ done, value }) => {
+      if (done) return;
+      n += value.length;
+      if (n > MAX) { reader.cancel().catch(() => {}); throw tooBig(); }
+      parts.push(value);
+      return next();
+    });
+    return next().then(() => new Blob(parts).text()).then(F.decode);
   };
   const BF = (globalThis.BF = globalThis.BF || {});
   BF.saveFile = F;
