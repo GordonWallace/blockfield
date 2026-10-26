@@ -165,7 +165,7 @@ module.exports = async (pg, out) => {
   console.log("part", JSON.stringify(part));
   const r5 = await watch(240);
   console.log("resume", JSON.stringify(r5));
-  ok("interrupted felling resumes", part.saved && part.saved.done >= 2 && r5.fell && r5.fell.at.join() === part.saved.key && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop, tasks: r5.tasks });
+  ok("interrupted felling resumes", part.saved && part.saved.done >= 2 && r5.fell && r5.fell.at.join() === part.saved.key && r5.chop < r5.fell.logs * 3 - 4, { saved: part.saved, logs: r5.fell && r5.fell.logs, chopAfter: r5.chop, tasks: r5.tasks, part: { chop: part.chop, task: part.task, log: part.log } });   // (part: what the 7 s of chopping did, for a failure)
 
   // 4. axe shopping: a toolsmith sells iron and diamond axes at its own offers (prices from TRADES.toolsmith)
   const shop = await sim(pg, () => {
