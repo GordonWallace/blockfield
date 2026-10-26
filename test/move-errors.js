@@ -1,7 +1,7 @@
 // @ci integration suite=village hosts=worker,server
 // Move errors (r15-70): node test/run.js /tmp/me test/move-errors.js [--host page|worker|server]
 // On a test floor 12 blocks above the ground at the edge of the village:
-// 1. A villager pottering about a small room with an open doorway walks only to spots it can reach in a straight line: in 60 s it pushes
+// 1. A villager pottering about a small room with an open doorway walks only to spots it can reach in a straight line: in 60 s it walks
 //    into the walls for under 1 s in all (it used to walk into them every few seconds: 3.7 s) and the game log has no stuck ERROR for it.
 // 2. A pen of fences with its gate open: a golem's route (three blocks high) never goes through the gate, as it can't open one and could be
 //    shut in; a villager's route does.

@@ -931,7 +931,8 @@ function hemmedIn(m) {
 const ROOMY = 24;
 function roomy(m) {
   const [x0, y0, z0] = feetCell(m), tall = m.height > 2, seen = new Set([x0 + "," + y0 + "," + z0]), q = [[x0, y0, z0]];
-  const fits = (x, y, z) => (walkCell(x, y, z) || (!tall && ladderCell(x, y, z))) && (!tall || !blockAt(x, y + 2, z).solid);
+  const swim = (x, y, z) => BF.world.isLoaded(x, z) && blockAt(x, y, z).render === "liquid" && !blockAt(x, y + 1, z).solid;   // (it can swim across water)
+  const fits = (x, y, z) => (walkCell(x, y, z) || swim(x, y, z) || (!tall && ladderCell(x, y, z))) && (!tall || !blockAt(x, y + 2, z).solid);
   const add = (x, y, z) => { const k = x + "," + y + "," + z; if (seen.has(k) || !fits(x, y, z)) return false; seen.add(k); q.push([x, y, z]); return true; };
   for (let i = 0; i < q.length && q.length < ROOMY; i++) {
     const [x, y, z] = q[i];
@@ -1335,15 +1336,15 @@ const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
 // The height of the top of the floor block at (x, y, z) above y: 1 for a full block, less for a low one (a slab, a stonecutter, a bed,
 // a path). A step up from one floor to the next block's floor one higher rises 1 + its top - this top, and a mob can climb at most
-// STEP_RISE (a jump: 7.6 m/s against GRAVITY lifts it about 1.1). r15-70: routes went up from a stonecutter in a trench onto a path
-// 1.4 higher, and the villager pushed at the bank for minutes.
-const STEP_RISE = 1.1;
+// STEP_RISE (a jump, 7.6 m/s against GRAVITY, lifts it about 1.1, just enough for a full block). r15-70: routes went up from a stonecutter
+// in a trench onto a path 1.4 higher, and from farmland onto a block 1.06 higher, and the villager pushed at the bank for minutes.
+const STEP_RISE = 1.0;
 function floorTop(x, y, z) {
   const id = BF.world.getBlock(x, y, z), bs = BF.CBOXES[id], b = BF.CBOX[id];
   if (bs) { let t = 0; for (const c of bs) t = Math.max(t, c[4]); return t; }
   return b ? Math.min(1, b[4]) : 1;
 }
-const riseOK = (x, y, z, nx, ny, nz) => ny - y + floorTop(nx, ny - 1, nz) - floorTop(x, y - 1, z) <= STEP_RISE;
+const riseOK = (x, y, z, nx, ny, nz) => ny - y + floorTop(nx, ny - 1, nz) - floorTop(x, y - 1, z) <= STEP_RISE + 1e-6;
 function bedOK(bed) {
   if (!bed) return false;   // no bed (a sleeper's bed taken away): not usable, rather than a throw that removes the villager
   const k = blockAt(bed.x, bed.y, bed.z);
