@@ -214,7 +214,7 @@ function encData(req) {
 // Diffing is most of the exchange's cost (every owned mob, twice a tick), so the usual case is kept cheap: an object whose keys are the
 // same as last time, in the same order, compares child by child, and a child that is the same object as last time recurses without
 // asking whether it has become an entity.
-class Shadow { constructor(o, K) { this.o = o; this.K = K; this.ks = null; this.vs = null; this.m = null; this.c = null; } }
+class Shadow { constructor(o, K) { this.o = o; this.K = K; this.ks = null; this.vs = null; this.m = null; this.c = null; this.fn = null; } }
 class EntRef { constructor(e) { this.e = e; } }
 const SKIPPED = Symbol("skipped");
 const kind = v => {
@@ -304,13 +304,7 @@ function diffV(v, s) {
   let same = ks.length === oks.length;
   for (let i = 0; same && i < ks.length; i++) if (ks[i] !== oks[i]) same = false;
   if (same) {   // the usual case: the same keys in the same order
-    for (let i = 0; i < ks.length; i++) {
-      const old = vs[i], x = v[ks[i]];
-      if (typeof x === "function") { vs[i] = SKIPPED; continue; }   // (methods are each worker's own)
-      if (old === SKIPPED && skipKey(ks[i])) continue;
-      if (v === self) topKey = ks[i];
-      vs[i] = diffChild(old, x, ops, ks[i]);
-    }
+    (s.fn || (s.fn = cmpFor(ks)))(v, vs, ops, v === self);
     return ops.length ? ops : null;
   }
   // keys added, deleted or reordered: by name
@@ -326,8 +320,33 @@ function diffV(v, s) {
     nvs[i] = typeof x === "function" ? SKIPPED : diffChild(old, x, ops, k);
   }
   for (const [k, old] of at) if (old !== SKIPPED) ops.push([k, 2]);
-  s.ks = ks; s.vs = nvs;
+  s.ks = ks; s.vs = nvs; s.fn = null;
   return ops.length ? ops : null;
+}
+// The usual case's compare, made once for each list of keys (shared by every object with those keys: a mob's 150 fields, its ai table's
+// 50): each field read by name, which is many times faster than v[k] with k changing (a lookup through V8's megamorphic cache each time),
+// and only a child that differs from its shadow, an object or a zero (+0 / -0) goes on to keyChild. Skipped keys are left out. Same ops,
+// same order as reading the keys one by one.
+const cmps = new Map();
+function cmpFor(ks) {
+  const id = ks.join("\u0001");
+  let fn = cmps.get(id);
+  if (fn) return fn;
+  const body = ["let x, o;"];
+  for (let i = 0; i < ks.length; i++) {
+    const k = ks[i];
+    if (skipKey(k)) continue;
+    const ref = JSON.stringify(k);
+    body.push(`x = v[${ref}]; o = vs[${i}]; if (x !== o || x === 0 || (typeof x === "object" && x !== null)) keyChild(vs, ${i}, ${ref}, x, ops, top);`);
+  }
+  fn = new Function("keyChild", "return function cmp(v, vs, ops, top) {\n" + body.join("\n") + "\n};")(keyChild);
+  if (cmps.size < 4000) cmps.set(id, fn);
+  return fn;
+}
+function keyChild(vs, i, k, x, ops, top) {
+  if (typeof x === "function") { vs[i] = SKIPPED; return; }   // (methods are each worker's own)
+  if (top) topKey = k;
+  vs[i] = diffChild(vs[i], x, ops, k);
 }
 // topKey: the mob's own field being diffed. An object of its own is written where it is, except one met under another field (a seller's
 // slot in its asks pointing at one of its own offers): that is sent as where it lives, so the other workers keep the two the same object
