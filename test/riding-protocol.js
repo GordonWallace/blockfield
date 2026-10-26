@@ -160,15 +160,20 @@ async function run(b, url, mode) {
     check(hud && hud.hp > 0 && hud.max >= hud.hp, tag('the HUD has the horse\'s health'), hud);
     const b0 = await query('entity', { id: horseId });
     // facing the floor's middle: the untamed rides may have left the horse at its edge, facing the hill beyond (a flake in CI)
-    await pg.evaluate(([g, h]) => BF.player.setLook(Math.atan2(-(g.x + 0.5 - h.x), -(g.z + 0.5 - h.z)), 0), [ground, b0]);
-    // (a second of W, more while it hasn't gone a block: on a slow runner the page's frames, and so its horse, can lag)
-    let b1, p3;
-    for (let t = 0; t < 4; t++) {
+    const yaw0 = Math.atan2(-(ground.x + 0.5 - b0.x), -(ground.z + 0.5 - b0.z));
+    await pg.evaluate(y => BF.player.setLook(y, 0), yaw0);
+    // (a second of W, more while it hasn't gone a block: on a slow runner the page's frames, and so its horse, can lag. The untamed rides
+    // can also leave the horse off the floor, wedged in a corner of the hill beyond, where W towards the middle goes nowhere (a CI flake:
+    // moved 0.68): after two tries it turns a quarter each try, so some way out is open)
+    let b1, p3, from = b0, best = 0;
+    for (let t = 0; t < 6; t++) {
+      if (t >= 2) { from = b1; await pg.evaluate(y => BF.player.setLook(y, 0), yaw0 + (t - 1) * Math.PI / 2); }
       await hold('KeyW', t ? 500 : 1000); await settle(); await pg.waitForTimeout(300); await settle();
       b1 = await query('entity', { id: horseId }); p3 = await me();
-      if (dist(b0, b1) > 1) break;
+      best = Math.max(best, dist(from, b1));
+      if (best > 1) break;
     }
-    check(dist(b0, b1) > 1, tag('W rides the horse: the simulation\'s horse moved'), { moved: +dist(b0, b1).toFixed(2) });
+    check(best > 1, tag('W rides the horse: the simulation\'s horse moved'), { moved: +best.toFixed(2), at: [b1.x, b1.y, b1.z], floor: ground });
     check(dist(p3, b1) < 0.6, tag('the simulation\'s horse is under the player'), { horse: b1, me: p3 });
     await hold('ShiftLeft', 200); await settle();
     check(await until(() => !BF.player.vehicle, null, 5000), tag('Shift gets off the horse'));

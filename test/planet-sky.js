@@ -195,6 +195,43 @@ module.exports = async (pg) => {
   check(cold[1] === 0 || cold[0] > 0.9, `snowy biomes snow (${(cold[0] * 100).toFixed(1)}% of ${cold[1]})`);
   check(dry[1] === 0 || dry[0] > 0.9, `dry biomes stay dry (${(dry[0] * 100).toFixed(1)}% of ${dry[1]})`);
 
+  // ---- the sun and moon sit 400 blocks out, but land further away still covers them (Gordon saw the sun drawn over far hills)
+  const cover = await pg.evaluate(async () => {
+    const P = BF.planet, a = P.atlas(4, P.N / 2 + 0.5, P.N / 2 + 0.5);   // high over face 4's centre, nothing near in the way
+    BF.player.teleport(a.x, 160, a.z); BF.player.setFlying(true);
+    await settle();
+    BF.state.paused = true;
+    BF.weather.set("clear"); BF.weather.intensity = 0; BF.weather.thunder = 0;
+    BF.sky.cloudMesh.visible = false;
+    const cam = BF.camera, out = {}, t0 = BF.sky.time;
+    for (const [name, t] of [["sun", 0.12], ["moon", 0.62]]) {
+      BF.sky.setTime(t);
+      const body = name === "sun" ? BF.sky.sunMesh : BF.sky.moonMesh, at = new THREE.Vector3(), dir = new THREE.Vector3();
+      BF.sky.update(0);
+      body.getWorldPosition(at); dir.copy(at).sub(cam.position).normalize();
+      BF.player.setLook(Math.atan2(-dir.x, -dir.z), Math.asin(dir.y));
+      await new Promise(r => setTimeout(r, 200));
+      BF.sky.update(0);
+      const s = BF.renderer.getSize(new THREE.Vector2()), mid = ((s.y >> 1) * s.x + (s.x >> 1)) * 4;
+      const open = grab().slice(mid, mid + 3);
+      // an opaque wall beyond the body, square across the view
+      const d = Math.min(800, cam.far * 0.9), wall = new THREE.Mesh(new THREE.PlaneGeometry(600, 600),
+        new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, fog: false }));
+      wall.position.copy(cam.position).addScaledVector(dir, d); wall.lookAt(cam.position);
+      BF.scene.add(wall);
+      const hid = grab().slice(mid, mid + 3);
+      BF.scene.remove(wall); wall.geometry.dispose(); wall.material.dispose();
+      out[name] = { open: Array.from(open), hid: Array.from(hid), d: Math.round(d), shown: body.visible && body.material.opacity > 0.5 };
+    }
+    BF.sky.setTime(t0); BF.sky.cloudMesh.visible = true; BF.state.paused = false;
+    return out;
+  });
+  for (const name of ["sun", "moon"]) {
+    const c = cover[name];
+    check(c.shown && c.open[0] + c.open[1] + c.open[2] > 450, `the ${name} shows in open sky (${c.open})`);
+    check(c.hid[0] > 200 && c.hid[1] < 40 && c.hid[2] < 40, `an opaque wall ${c.d} blocks out, behind the ${name}, covers it (${c.hid})`);
+  }
+
   // ---- cost of a planet cloud rebuild (JavaScript only)
   const ms = await pg.evaluate(() => {
     const ud = BF.sky.cloudMesh.userData, t0 = performance.now();
