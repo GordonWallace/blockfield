@@ -290,10 +290,13 @@ function start(o) {
     const meta = worlds.meta(id), data = worlds.get(id, "data");
     if (!meta || !data) throw Object.assign(new Error("World not found"), { status: 404 });
     const head = worlds.get(id, "loghead");
-    const log = head ? { head, lists: (head.batches || []).map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
+    // (only batches with proper numbers: a world imported before bug-070 was fixed may name others, which are left out)
+    const batches = head && Array.isArray(head.batches) ? head.batches.filter(b => Array.isArray(b) && SaveFile.isSeq(b[0])) : [];
+    if (head && batches.length !== (head.batches || []).length) say("export of " + JSON.stringify(meta.name) + " left out " + ((head.batches || []).length - batches.length) + " damaged game log batches");
+    const log = head ? { head: Object.assign({}, head, { batches }), lists: batches.map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
     return { meta, buf: SaveFile.packSync({ game: o.version || null, meta, data, log }) };
   }
-  function importWorld(rec, keep) {
+  function importWorld(rec, keep) {   // (rec: SaveFile.unpack checked the game log's batch numbers: bug-070)
     const meta = Object.assign({}, rec.meta);
     const old = m => !m || !(m.version >= SAVE_VERSION);
     if (old(meta) || old(rec.data)) throw new Error("Made with Blockfield " + (meta.version === 2 ? "1.4" : "1.3") + ", can't be opened in " + (o.version || "1.5"));
