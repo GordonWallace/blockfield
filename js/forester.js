@@ -178,8 +178,8 @@ function sapTick() {
 }
 {
   const world = BF.world;
-  if (world && world.onThink) world.onThink(growTick);        // think: the saws (js/world.js tickSim)
-  if (world && world.onBlockTick) world.onBlockTick(sapTick); // block tick: sapling growth
+  if (world && world.onThink) world.onThink(growTick, "forester"); // think: the saws (js/world.js tickSim)
+  if (world && world.onBlockTick) world.onBlockTick(sapTick, "saplings"); // block tick: sapling growth
 }
 
 // ---------------------------------------------------------------- trees (felling)

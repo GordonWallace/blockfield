@@ -26,6 +26,8 @@ Whether it splits or not, the world plays exactly the same: the same mobs do the
 
 - **F3**: a line starting `Workers`. With one worker thinking it says how many follow and how far behind they are, for example `Workers 3: one thinks (2/2 followers ready, 0 ticks behind; 9.9 ms a tick, splits when ticks drop)`. Split, it gives the regions and mobs each worker had and the milliseconds of each part of a tick: `Workers 2: regions 19/1, mobs 136/71  think 4.3  exchange 11.1  rest 4.0 ms`.
 - **Debug screen**: the **Workers** card shows the same, per worker.
+- **Debug screen, Threads card**: how busy each of the game's threads is: the page (drawing and input), the simulation, each region worker, and the debug server (or the world server's main thread). Each bar is the share of the last minute the thread spent working, with the last second in brackets; time a worker spends waiting for the others at the end of a split tick doesn't count. A browser can't tell which core a thread runs on, so below the threads the card draws one bar per core of the computer the debug server runs on, as the operating system reports it (green under half busy, yellow, then red over 85%), with a white tick for each core's average over the last minute.
+- **Debug screen, Mobs map**: with **Regions** on, each region is coloured by the worker that thinks for its mobs, shaded darker the more mobs it holds. Workers aren't strictly split by land: a village's villagers, pen animals and golems all think on the village's worker wherever they stand, while wild animals and monsters go by the region they're in, so a region can hold mobs of more than one worker. Such a region is drawn in stripes, one band per worker, each as tall as its share of the region's mobs. Each village is outlined in its worker's colour and named with it. The legend under the map names each worker's colour, how many regions it has most of the mobs in, and how busy its thread is; the colours match the Threads card. With one worker thinking, every region is the simulation's colour.
 - **[[page:world-server|Pause menu]]**: the *Simulation* button says `World server (N threads)`.
 - **[[page:game-log]]**: INFO lines (kind *workers*) say how many workers a world got, when they are ready, when the thinking is split and whether the split paid. An ERROR says if a worker crashed or the copies stopped matching.
 
@@ -34,6 +36,12 @@ Whether it splits or not, the world plays exactly the same: the same mobs do the
 While the thinking is split, a worker that crashes stops the simulation: the game shows the error and offers to reload from your last save, as it does for any crash of the simulation, and the error goes to the game log. While one worker is thinking, a follower that crashes is just dropped and the game goes on with one.
 
 Saving is unchanged: the thread that leads holds the whole world between ticks, so it saves as it always did.
+
+## Clusters (in progress)
+
+Region workers never pay off much, because every worker has to keep its whole copy of the world in step every tick. Version 1.5 is moving to **clusters** instead: each village and the land round it (about half the way to the next village) runs on its own, and clusters only pass things to each other once a game second, at a *meeting*. Something that crosses from one cluster to another, like a request aimed at a mob over the border, waits for the next meeting, at most one game second. That happens on one worker too, so the world plays exactly the same with any number of workers.
+
+The groundwork is in the game but off: with it off, the world plays exactly as before. The game's systems (mobs, village life, animals, caravans, blocks) are being moved over one by one. When the clusters are turned on, the [[page:game-log]] notes it, and an ERROR names any cluster whose tick fails.
 
 ## What it costs
 

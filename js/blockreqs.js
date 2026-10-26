@@ -68,7 +68,9 @@ let warnAt = -1e9;
 // when it sent a request to know that request still waits for an apply. Each pass starts the doors' same-tick map afresh.
 let ticks = 0;
 const apply0 = R.apply;
-R.apply = function () { ticks++; doorSet.clear(); return apply0.apply(this, arguments); };
+// With clusters (spec r15-39b, js/ctick.js) each cluster applies once a tick and a meeting applies between ticks: the count is the
+// tick's (2 per tick, the meeting's odd), the same whatever order the clusters run in.
+R.apply = function () { const C = BF.ctick; if (C && C.on) ticks = 2 * BF.rand.tick + (C.cur ? 0 : 1); else ticks++; doorSet.clear(); return apply0.apply(this, arguments); };
 R.on("door", (req, w) => {
   const [x, y, z] = String(req.target).split(",").map(Number), open = !!req.data.open;
   if (!w.isLoaded(x, z)) return { ok: false, why: "unloaded" };
@@ -105,5 +107,7 @@ function cells(m, list, o) {
 }
 const door = (m, x, y, z, open) => R.send("door", pk(x, y, z), { open: !!open }, m);
 
-BF.blockReq = { cells, door, free, tick: () => ticks, reset() { ticks = 0; warnAt = -1e9; doorSet.clear(); } };   // reset: a new world (BF.mobs.clear)
+// (with clusters, a group's own count: in its think the last apply it saw was the last tick's or a meeting's, both before 2 * tick - 1)
+function tick() { const C = BF.ctick; return C && C.on && C.cur ? (BF.req.phase === "think" ? 2 * BF.rand.tick - 1 : 2 * BF.rand.tick) : ticks; }
+BF.blockReq = { cells, door, free, tick, reset() { ticks = 0; warnAt = -1e9; doorSet.clear(); } };   // reset: a new world (BF.mobs.clear)
 })();

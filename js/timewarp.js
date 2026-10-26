@@ -13,7 +13,7 @@
 // BF.simNow() is the simulation clock in seconds: it advances only by simulated ticks (not while paused), and every
 // cooldown / scan timer in the sim modules reads it instead of performance.now(), so they speed up with everything else.
 // API: BF.warp = { speed, frozen, TICK, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt, achieved?), alpha, renderNow(), last, dropped, reset(), set(i),
-// freeze(), cycle(), faster(), slower(), BUDGET_MS, MAX_FRAME, SPEEDS }. advance(h) moves the clock only (tests step it by hand).
+// freeze(), cycle(), faster(), slower(), BUDGET_MS, MAX_FRAME, SPEEDS, clock }. advance(h) moves the clock only (tests step it by hand).
 // set(i) takes an index into SPEEDS (0 = 1x); speed reads 0 while frozen.
 (() => {
 "use strict";
@@ -81,6 +81,7 @@ BF.warp = {
     return { n: planned, h: TICK };
   },
   advance(dt) { clock += dt; },
+  get clock() { return clock; }, set clock(c) { clock = c; },   // (clusters, js/ctick.js: each cluster runs the interval's ticks on its own clock)
   // After the frame's ticks: n ran. The ticks it ran leave the accumulator; whole ticks it couldn't fit (the budget, MAX_STEPS, a
   // freeze mid-frame) are dropped, so only the fraction of a tick carries on.
   // ach: the speed achieved, when the simulation runs elsewhere (a worker, r15-38: the page's clock only keeps time for drawing)

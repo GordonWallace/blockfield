@@ -472,6 +472,7 @@ BF.villageSim = {
   isActive: key => active.has(key),
   areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, DROP, EST_MARGIN,
   _edgeDist: edgeDist, footprint, count: () => active.size,
+  extraCount() { let n = 0; for (const e of active.values()) if (e.extra) n++; return n; },   // of count(): the budget's extras, counting down too (js/active.js)
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}` + (BF.active && BF.active.extras().length ? ` (${BF.active.extras().length} extra)` : "") + `, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
   exportSeen(out) {
     for (const [k, d] of seen) out["seen:" + k] = +d.toFixed(3);
@@ -490,8 +491,8 @@ BF.villageSim = {
   reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
-    BF.world.onThink(step);   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
-    if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick);   // crop catch-up, a block tick (spec r15-19)
+    BF.world.onThink(step, "villageSim");   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
+    if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick, "catchUp");   // crop catch-up, a block tick (spec r15-19)
   },
 };
 })();

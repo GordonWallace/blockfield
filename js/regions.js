@@ -355,7 +355,7 @@ function mobsAround(x, z, r, filter, opts) {
     for (const m of (BF.mobs && BF.mobs.list) || []) if (!m.removed && near(m, x, z, r2, local) && (!filter || filter(m))) want.push(m);
     return want;
   }, x, z);
-  return out;
+  return hideIn(out);
 }
 // hostilesAround(x, z, r, out) -> the hostile mobs (dying and removed ones too) the index files in the regions within r + PAD of (x, z),
 // in no set order (spec r15-62): every hostile within r blocks is among them, across a face edge too, so a scan for hostiles near a
@@ -378,7 +378,17 @@ function ofType(t) {
   let a = byType.get(t);
   if (!a) byType.set(t, (a = []));
   if (regions.verifyQueries) checkQuery("ofType " + t, a, () => ((BF.mobs && BF.mobs.list) || []).filter(m => m.type === t && !m.removed));
-  return a;
+  const hide = BF.ids && BF.ids.hidden;
+  return hide ? a.filter(m => !hide(m)) : a;   // (clusters: a copy without the other clusters' mobs)
+}
+// Clusters (spec r15-39b, js/ctick.js): while a cluster runs, the queries don't see other clusters' mobs (BF.ids.hidden).
+function hideIn(out) {
+  const hide = BF.ids && BF.ids.hidden;
+  if (!hide || !out.length) return out;
+  let j = 0;
+  for (let i = 0; i < out.length; i++) if (!hide(out[i])) out[j++] = out[i];
+  out.length = j;
+  return out;
 }
 const typeAdd = m => { let a = byType.get(m.type); if (!a) byType.set(m.type, (a = [])); if (!a.length || a[a.length - 1]._rs < m._rs) a.push(m); else if (!a.includes(m)) { a.push(m); a.sort(bySeq); } };
 const typeDel = m => { const a = byType.get(m.type), i = a ? a.lastIndexOf(m) : -1; if (i >= 0) a.splice(i, 1); };
@@ -390,7 +400,7 @@ function villageMobs(rec, filter) {
   for (const m of rec.members || []) if (!m.removed && m.village === rec && (!filter || filter(m))) out.push(m);
   if (out.length > 1) { out.sort(bySeq); let j = 1; for (let i = 1; i < out.length; i++) if (out[i] !== out[j - 1]) out[j++] = out[i]; out.length = j; }   // (once each)
   if (regions.verifyQueries) checkQuery("villageMobs", out, () => ((BF.mobs && BF.mobs.list) || []).filter(m => !m.removed && m.village === rec && (!filter || filter(m))));
-  return out;
+  return hideIn(out);
 }
 const who = m => (m && m.type ? m.type + (m.id ? " " + m.id : "") + (m.position ? " at " + Math.floor(m.position.x) + "," + Math.floor(m.position.z) : "") : String(m));
 // Compares a query's answer with the old scan's (want: an array, or a function giving one), in order. Off unless verifyQueries.
