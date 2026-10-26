@@ -88,10 +88,12 @@ module.exports = async (pg) => {
     const ab = P.local(B, A, {}), L = Math.hypot(ab.x - B.x, ab.z - B.z), x = Math.floor(B.x + (ab.x - B.x) / L * (B.maxX - B.minX) / 2 + (ab.x - B.x) / L * 8), z = Math.floor(B.z + (ab.z - B.z) / L * (B.maxZ - B.minZ) / 2 + (ab.z - B.z) / L * 8);
     const c = P.local(m.position, { x: x + 0.5, z: z + 0.5 }, {}), y = BF.worldgen.heightAt(x, z) + 1;   // (the merchant keeps its home's frame)
     BF.state.paused = true;
-    return (globalThis.__near = { x, y, z, at: { x: c.x, y: y + 0.1, z: c.z } });
+    return (globalThis.__near = { x, y, z, at: { x: c.x, y: y + 0.1, z: c.z }, centre: [Math.floor(B.x), Math.floor(B.z)] });
   }, pair);
   await pg.evaluate(n => BF.player.spawn(n.x + 0.5, n.y + 2, n.z + 0.5), near);
-  const ok2 = await loadedAround(near.x, near.z);
+  // and around the village's centre, where its path goes (half a village and 8 blocks on, past the ground loaded around it: its path
+  // search failed 6 times in a row on the centre's chunk not loaded yet and it gave the trip up as lost)
+  const ok2 = await loadedAround(near.x, near.z) && await loadedAround(near.centre[0], near.centre[1]);
   await lib.sim(pg, () => { const m = globalThis.__m, s = globalThis.__near.at; m.position.set(s.x, s.y, s.z); m.vel.set(0, 0, 0); m.ai.route = null; BF.merchant._state(m).nav = {}; BF.sky.setTime(0.08); BF.state.paused = false; });
   check(ok2, "the ground just outside the other village loaded");
   const arrived = await wait(() => { const st = BF.merchant._state(globalThis.__m); return !globalThis.__m.dead && st.stage !== "go"; }, null, 150000);

@@ -1187,6 +1187,7 @@ let planBudget = 0;
 // ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
 const PLANS = 2, KEEP = 20;
 let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
+let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
 function grantPlans() {
@@ -1423,6 +1424,7 @@ function pathStatsReset() { return (DBG.pathStats = { calls: 0, same: 0, equal: 
 pathStatsReset();
 // findPath: the route search every caller uses (findPathFast, compared with findPathOld when asked).
 function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
+  if (BF.perf) BF.perf.count.paths++;   // activity per villager-second (js/perf.js, spec r15-60)
   if (!DBG.pathCompare) return findPathFast(sx, sy, sz, goal, maxNodes, tall);
   const S = DBG.pathStats || pathStatsReset();
   const t0 = performance.now(), a = findPathFast(sx, sy, sz, goal, maxNodes, tall), t1 = performance.now(), b = findPathOld(sx, sy, sz, goal, maxNodes, tall), t2 = performance.now();
@@ -2872,11 +2874,13 @@ BF.mobs = {
           h = m._farT; m._farT = 0;
         } else m._farT = null;
       }
+      const st = pon ? PF.stateOf(m) : 0;   // what it was doing, for the meter's cost by state (spec r15-60)
       curMob = BF.rand.thinker = m;
       try { step(m, h); } catch (e) { console.error(e); removeMob(m); }
       curMob = BF.rand.thinker = null;
       hold(m);
-      if (pon) PF.lap(PF.mobCat(m));
+      mobUpdates++;
+      if (pon) PF.mobLap(m, st);
     }
     commitMoves();
     lastRest = restN; lastAnim = animN;
@@ -2957,6 +2961,7 @@ BF.mobs = {
   byId: id => BF.ids.get(id),
   newVillageRec,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
+  updates: () => mobUpdates,   // mob updates run since load (test/perf-activity.js: BF.perf.byState counts each one once)
   aiTime: () => aiEma,
   aiWork: () => aiWork,
   sendHome,

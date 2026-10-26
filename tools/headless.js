@@ -62,17 +62,7 @@ function load(opts = {}) {
 // Every item stack in the world by item name: mobs' inventories, chests, furnaces, the player's slots and the drops lying about. Two runs
 // of the same seed (test/multi-worker.js: 1, 2 and 4 workers) must come out with the same; nothing made twice or lost on the way.
 // -> { items: {name: count}, coins: emeralds }
-function census(BF) {
-  const items = {}, add = s => { if (s && s.count > 0 && BF.items[s.id]) { const k = BF.items[s.id].name; items[k] = (items[k] || 0) + s.count; } };
-  for (const m of BF.mobs.list) if (!m.removed && Array.isArray(m.inv)) m.inv.forEach(add);
-  for (const c of BF.inventory.chests.values()) c.slots.forEach(add);
-  for (const f of BF.inventory.furnaces.values()) f.slots.forEach(add);
-  BF.inventory.slots.forEach(add);
-  for (const d of BF.drops.list) add(d);
-  const sorted = {};
-  for (const k of Object.keys(items).sort()) sorted[k] = items[k];
-  return { items: sorted, coins: items.emerald || 0 };
-}
+function census(BF) { return BF.perf.census(); }   // (js/perf.js, r15-60: also the base of BF.perf.activity's items gained and spent)
 
 // JSON for the save data: typed arrays (the block edits) as plain arrays, which js/save.js restore reads the same way.
 const saveJSON = data => JSON.stringify(data, (k, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v));
