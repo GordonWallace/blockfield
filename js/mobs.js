@@ -2540,7 +2540,7 @@ function updateVillages(dt) {
   const pp = player().position;
   let vs;
   try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 + 150 : 96) || []; } catch (e) { return; }   // by centre: sized villages are measured from their edge (js/villagesim.js)
-  if (BF.villageSim && BF.villageSim.pinned) { const ks = new Set(vs.map(v => v && Math.round(v.x) + "," + Math.round(v.z))); for (const v of BF.villageSim.pinned()) if (!ks.has(Math.round(v.x) + "," + Math.round(v.z))) vs.push(v); }   // villages a merchant's trip keeps loaded (js/merchant.js)
+  if (BF.villageSim && BF.villageSim.simulated) { const ks = new Set(vs.map(v => v && Math.round(v.x) + "," + Math.round(v.z))); for (const v of BF.villageSim.simulated()) if (!ks.has(Math.round(v.x) + "," + Math.round(v.z))) { ks.add(Math.round(v.x) + "," + Math.round(v.z)); vs.push(v); } }   // villages a merchant's trip keeps loaded (js/merchant.js) and the budget's extras (js/active.js), however far
   for (const v of vs) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
