@@ -118,6 +118,8 @@ let ptReq = null, ptv = "0";
 // once the game has sent it. Debug screens get it whole when they connect (/events cache, or /glog) and the new entries in each snap.
 let glog = null;
 const GLOG_CAP = 100000;
+// Each village's numbers over game time (js/villagestats.js, saved with the world): the History panel (debug/vhist.js, debug/vhist-view.js).
+const vhist = require("./vhist.js")();
 const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map(), econ = new Map();   // econ: each village's Economy tallies (js/economy.js)   // icons: item id -> {url, name}, sent once by the game
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
@@ -176,8 +178,11 @@ function take(s) {
     } else glogAt = glog.base + glog.lines.length;
   }
   const disk = readBuild(), build = s.build !== undefined && disk.commit && s.build !== disk.commit ? disk : null;   // the files on disk changed
-  latest = { ...s, layouts: undefined, logs: undefined, econ: undefined, glog: undefined };
-  broadcast("snap", { ...s, logs, glog: gl });
+  latest = { ...s, layouts: undefined, logs: undefined, econ: undefined, glog: undefined, vhist: undefined };
+  broadcast("snap", { ...s, logs, glog: gl, vhist: undefined });
+  let vh = null;
+  try { vh = vhist.take(s); } catch (e) { console.error("[debug] village history:", e.message); }   // never in the way of the snapshot
+  if (vh) broadcast("vhist", vh);
   if (fresh) console.log("[debug] game connected");
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
@@ -248,6 +253,11 @@ function serveDebug(req, res) {
     return;
   }
   if (url.pathname === "/alerts") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts })); return; }
+  if (url.pathname === "/vhist") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(vhist.cached())); return; }   // the village history as the server holds it
+  if (url.pathname === "/vhist-view.js") {   // the History panel's code (kept out of index.html)
+    fs.readFile(path.join(__dirname, "vhist-view.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
+    return;
+  }
   if (url.pathname === "/logmatch.js") {   // the log reader the game uses too, so the screen's filters and alerts read entries the same way
     fs.readFile(path.join(ROOT, "js", "logmatch.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
     return;
@@ -258,6 +268,7 @@ function serveDebug(req, res) {
     // a new screen gets everything cached first (layouts, logs, last known detail of every village), then the latest snapshot
     send(res, "cache", JSON.stringify(cached()));
     send(res, "alerts", JSON.stringify({ av, alerts }));
+    send(res, "vhist", JSON.stringify({ reset: true, data: vhist.cached() }));
     if (latest) send(res, "snap", JSON.stringify({ ...latest, age: Date.now() - lastPush }));   // age: an old one isn't shown as live
     clients.add(res);
     req.on("close", () => clients.delete(res));
