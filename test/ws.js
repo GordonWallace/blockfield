@@ -2,8 +2,11 @@
 // The world server's WebSocket (spec r15-41, server/ws.js), no browser: an http server with it attached, talked to by Node's own
 // WebSocket client and by hand-made frames on a raw socket. Checks the handshake (and refusing a bad one or another path), text and
 // binary messages both ways, a large message (16 MB, a 64-bit length), a fragmented message, ping and pong, the close handshake both
-// ways, and refusing an unmasked frame and a message over the size limit. Plain node: node test/ws.js
+// ways, and refusing an unmasked frame and a message over the size limit. A dead connection (bug-077): the client ending its half with
+// no close frame is reported closed at once, and one that sends nothing (no pong) is pinged and then dropped (ping and idle times
+// shortened to 300 ms and 1 s here). Plain node: node test/ws.js
 "use strict";
+process.env.BF_WS_PING_MS = "300"; process.env.BF_WS_IDLE_MS = "1000";
 const http = require("http"), net = require("net"), crypto = require("crypto");
 const WS = require("../server/ws.js");
 let fails = 0;
@@ -123,6 +126,16 @@ const until = (f, ms = 5000) => new Promise((res, rej) => { const t0 = Date.now(
     t.sock.write(h);
     await until(() => t.frames.some(f => f.op === 8));
     check(t.frames.find(f => f.op === 8).p.readUInt16BE(0) === 1009, "a message over the limit closes with 1009");
+    // a dead connection: the client's half closed without a close frame, and a client that never answers
+    const nc = closes.length, e = await raw(port);
+    await until(() => last && closes.length === nc);
+    e.sock.end();
+    await until(() => closes.length > nc, 3000);
+    check(closes[closes.length - 1].code === 1006, "a client ending its half with no close frame is reported closed (1006)");
+    const ns = closes.length, q = await raw(port);
+    await until(() => closes.length > ns, 4000);
+    check(q.frames.some(f => f.op === 9) && closes[closes.length - 1].code === 1006 && /nothing heard/.test(closes[closes.length - 1].reason),
+      "a client that sends nothing is pinged, then dropped after the idle time");
     // bad requests
     const other = await raw(port, "/other");
     check(other.status === 404, "another path is refused (404)");
@@ -130,7 +143,7 @@ const until = (f, ms = 5000) => new Promise((res, rej) => { const t0 = Date.now(
     check(bad.status === 400, "a bad key is refused (400)");
     const plain = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     check(plain === "plain http", "plain http requests still go to the server");
-    for (const s of [r, u, t, other, bad]) s.sock.destroy();
+    for (const s of [r, u, t, e, q, other, bad]) s.sock.destroy();
   } catch (e) {
     check(false, "the test ran: " + (e && e.stack || e));
   }
