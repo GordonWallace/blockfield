@@ -189,7 +189,7 @@ function start(o) {
       srv.iconsAsked = false;
       return;
     }
-    if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
+    if ((m.test === "eval" || m.test === "crash") && !o.test) { say("a page asked for test " + JSON.stringify(String(m.test)).slice(0, 40) + "; refused (start with --test)"); return; }
     if (m.test === "lockstep" || m.test === "eval" || m.auto) srv.tests.push(m);   // (kept for the threads this page plays on next)
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
