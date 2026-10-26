@@ -76,7 +76,7 @@ function census(BF) {
 const saveJSON = data => JSON.stringify(data, (k, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v));
 
 async function main(argv) {
-  const a = {}, flags = new Set(['json', 'audit']);
+  const a = {}, flags = new Set(['json', 'audit', 'partial']);
   for (let i = 0; i < argv.length; i++) {
     const m = /^--(\w+)$/.exec(argv[i]);
     if (!m) throw new Error('unknown argument ' + argv[i]);
@@ -114,10 +114,11 @@ async function main(argv) {
       await Promise.all(wait);
     }
     const shared = BF.rworkers.makeShared(nw);
-    await Promise.all(pool.list.map(f => f.ask({ start: { shared, me: f.me, n: nw, verify: +a.verify || 0, audit: !!a.audit, shuffle: +a.shuffle || 0 } })));
+    await Promise.all(pool.list.map(f => f.ask({ start: { shared, me: f.me, n: nw, verify: +a.verify || 0, audit: !!a.audit, shuffle: +a.shuffle || 0, partial: !!a.partial } })));
     BF.rworkers.verify = +a.verify || 0;
     BF.rworkers.audit = !!a.audit;
     BF.rworkers.shuffle = +a.shuffle || 0;
+    BF.rworkers.partial = !!a.partial;
     BF.rworkers.setup({ n: nw, me: 0, link: BF.rworkers.attach(shared, 0, nw) });
     say(`${nw} workers: ${nw - 1} followers booted the same world in ${((performance.now() - t1) / 1000).toFixed(1)} s`);
   }

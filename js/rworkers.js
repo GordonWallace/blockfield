@@ -484,7 +484,19 @@ function unitOf(m, k) {
     if (typeof r.owner === "string" && r.owner.startsWith("stable:")) v = r.owner.slice(7);
     else if (r.lead && r.lead.kind === "mob" && r.lead.mob && r.lead.mob.villageId != null) v = r.lead.mob.villageId;
   }
+  if (v == null && RW.partial && clusterOf) { const c = clusterOf(m); if (c != null) v = c; }
   return v != null ? "v:" + v : k;
+}
+// PROTOTYPE (RW.partial): a wild mob within CLUSTER_R blocks of a village goes with that village (its cluster), so contact between
+// workers only happens in the empty land between villages. Village centres cached per tick.
+const CLUSTER_R = 600;
+let vcent = null, vcentTick = -1;
+function clusterOf(m) {
+  if (vcentTick !== T.ticks) { vcentTick = T.ticks; vcent = []; for (const r of BF.mobs.villages.values()) vcent.push([r.key, r.x, r.z]); }
+  const x = m.position.x, z = m.position.z;
+  let best = null, bd = CLUSTER_R * CLUSTER_R;
+  for (const [k, vx, vz] of vcent) { const d = (vx - x) * (vx - x) + (vz - z) * (vz - z); if (d < bd) { bd = d; best = k; } }
+  return best;
 }
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 // The owner of a unit: its planned worker, else spread by key (the same on every worker).
@@ -531,7 +543,7 @@ function beginThink(order) {
   // the rest of the last tick changed on every worker alike (a diff whose ops go nowhere), so the diff after thinking holds what thinking
   // changed and nothing else: a value the rest of the tick changed and thinking changed back (a deal undone by the next trade) would
   // otherwise look unchanged, and the other workers would keep the middle value
-  for (const rec of BF.mobs.villages.values()) {
+  if (!RW.partial) for (const rec of BF.mobs.villages.values()) {
     if (ownerOf("v:" + rec.key) !== RW.me) { recShadows.delete(rec); continue; }
     const s = recShadows.get(rec);
     if (!s) recShadows.set(rec, snap(rec)); else diff(rec, s);
@@ -539,7 +551,7 @@ function beginThink(order) {
   for (const rec of recShadows.keys()) if (BF.mobs.villages.get(rec.key) !== rec) recShadows.delete(rec);
   // a shadow for each mob new to this worker (the others have it as it is now), the others' brought up to date (above); shadows of mobs
   // another worker thinks now are dropped
-  for (const m of mine) { const s = shadows.get(m); if (!s) shadows.set(m, snap(m)); else diff(m, s); }
+  if (!RW.partial) for (const m of mine) { const s = shadows.get(m); if (!s) shadows.set(m, snap(m)); else diff(m, s); }
   if (shadows.size > mine.length) for (const m of shadows.keys()) if (!idxOf.has(m)) shadows.delete(m);
   base = BF.req.seq;
   BF.req.tap = req => { if (cur) { req._tm = cur; own.push([idxOf.get(cur), curK++, req]); } };
@@ -585,7 +597,7 @@ function patchRecs(list, from) {
     const rec = BF.mobs.villages.get(key);
     if (!rec) { out_of_step("worker " + from + " changed village " + key + ", which this worker doesn't have"); continue; }
     recShadows.delete(rec);
-    patch(rec, ops);
+    if (RW.partial) { try { patch(rec, ops); } catch (e) { /* prototype */ } } else patch(rec, ops);
   }
 }
 function recOps(only) {
@@ -598,7 +610,7 @@ function patchMobs(list, from) {
     const m = BF.ids.get(id);
     if (!m || (m.removed && !removed)) { out_of_step("worker " + from + " changed mob " + id + ", which this worker doesn't have"); continue; }
     shadows.delete(m);   // (its owner moved on: a shadow here would be out of date)
-    if (ops) patch(m, ops);
+    if (ops) { if (RW.partial) { try { patch(m, ops); } catch (e) { /* prototype */ } } else patch(m, ops); }
     if (removed && !m.removed) BF.mobs.discard(m);
   }
 }
@@ -612,7 +624,7 @@ function afterThink() {
   capture(false);
   refsOn();
   const mobs = [];
-  for (const m of mine) {
+  if (!RW.partial) for (const m of mine) {
     const s = shadows.get(m);
     if (m.removed) { shadows.delete(m); mobs.push([m.id, null, 1]); continue; }
     const ops = s ? diff(m, s) : null;
@@ -673,7 +685,7 @@ function afterDeliver() {
   capture(false);
   refsOn();
   const mobs = [];
-  for (const m of cbMobs) {
+  if (!RW.partial) for (const m of cbMobs) {
     if (m.removed) { if (shadows.has(m)) { shadows.delete(m); mobs.push([m.id, null, 1]); } continue; }
     const s = shadows.get(m);
     const ops = s ? diff(m, s) : null;
