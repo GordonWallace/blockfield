@@ -365,7 +365,7 @@ function pitch(m) {
     m.homeBed = m.homeBed || m.bed;
     m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
     const k = keyOf(m);
-    if (k) camps.set(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
+    if (k) { camps.set(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() }); campTouched(k); }
     log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
   });
   return true;
@@ -379,10 +379,10 @@ function strike(m) {
     const id = BF.tentId(c.f, 0, 1), k = keyOf(m);
     if (BF.world.isLoaded(c.x, c.z)) {
       if (BF.world.getBlock(c.x, c.y, c.z) === id) BF.blockReq.cells(m, BF.tents.strikeCells(c.x, c.y, c.z, id), { give: [{ id: tentItem(), n: 1 }], fit: false });
-      if (k) camps.delete(k);
+      if (k) { camps.delete(k); campTouched(k); }
     } else {
       T().inv.add(m.inv, tentItem(), 1);
-      if (k) camps.set(k, { x: c.x, y: c.y, z: c.z, f: c.f, until: 0, returned: true, given: true });
+      if (k) { camps.set(k, { x: c.x, y: c.y, z: c.z, f: c.f, until: 0, returned: true, given: true }); campTouched(k); }
     }
     log("strike", m, { at: c.x + "," + c.z });
   }
@@ -397,6 +397,11 @@ function strike(m) {
 // - The night ends first: the tent is taken down (now, or when its land next loads) and goes back into the explorer's pack when it next loads.
 const camps = new Map();
 const keyOf = m => (m.village && m.slot ? m.village.key + "#" + m.slot.idx : null);
+// Several workers (spec r15-39): an explorer pitches and strikes its tent while it thinks, on its own worker; this sends the camp on to the
+// others (bug-083: the state hash's villagers part showed the copies' camps drifting apart).
+const campTouched = k => { if (BF.rworkers) BF.rworkers.touch("camp", k); };
+if (BF.rworkers) BF.rworkers.channel("camp", { key: k => k, get: k => k, state: k => (camps.has(k) ? Object.assign({}, camps.get(k)) : null),
+  set: (k, e) => { if (typeof k !== "string") return; if (e) camps.set(k, Object.assign({}, e)); else camps.delete(k); } });
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + skyT() : 0);
 // When the coming (or current) night ends, as a game day + time.
 function nightEnd() { const d = BF.sky ? BF.sky.day || 0 : 0, t = skyT(); return d + (t < 0.985 ? 0.985 : 1.985); }
