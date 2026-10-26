@@ -800,6 +800,7 @@ const channels = new Map();
 let touched = new Map();   // "name\u0000key" -> [name, key]
 function channel(name, ch) { channels.set(name, ch); }
 function touch(name, obj) {
+  if (RW.onTouch) { const ch = channels.get(name); if (ch) RW.onTouch(name, ch.key(obj)); }   // (clusters on several workers, js/cworkers.js)
   if (!RW.active || !owning) return;
   const ch = channels.get(name);
   if (!ch) return;
@@ -910,8 +911,8 @@ function hourly() {
   hourT = Object.assign({}, T);
 }
 
-Object.assign(RW, { journal: null, clock: null, onTick: null, rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
+Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS,
-  refs: refsOn });
+  refs: refsOn, encData });
 BF.rworkers = RW;
 })();

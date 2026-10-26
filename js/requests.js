@@ -18,7 +18,7 @@
 //   player(kind, target, data) -> req (applied now, req.result; through the protocol when R.via is set), applyPlayer(kind, target, data), via, record() -> list / record(false) -> list, replay(list), replayFlush(),
 //   recording, replaying, inPlayer, route, regionOrder, single, applying (region inboxes, spec r15-33),
 //   adopt(o), tap, onCbs, dIdx, dPart, seq (several workers, spec r15-39: js/rworkers.js),
-//   ctx(), useCtx(c), newCtx(list?), fileIn(c, req), away, think() (clusters, spec r15-39b: js/ctick.js) }
+//   ctx(), useCtx(c), newCtx(list?), fileIn(c, req), away, think() (clusters, spec r15-39b: js/ctick.js), revive(o) (js/cworkers.js) }
 // Clusters (js/ctick.js): each cluster has its own queue, inboxes, results waiting and sequence counter (a context; useCtx switches),
 // so a cluster's apply and deliver handle only its own requests. R.away(req, region) -> true takes a request out of the filing:
 // one aimed at another cluster waits for the next meeting.
@@ -86,11 +86,16 @@ function fileIn(c, req) {
 // A request another worker's mob sent this tick (spec r15-39): filed in the inbox it went to there. o: {kind, target, data, from, seq,
 // tick, region}. It has no callbacks here (they ran there).
 function adopt(o) {
-  const req = { kind: o.kind, target: o.target, data: o.data || {}, from: o.from == null ? null : o.from, seq: o.seq, tick: o.tick,
-    cbs: null, result: undefined, delivered: false };
-  req.then = fn => { if (req.delivered) { try { fn(req.result, req); } catch (e) { console.error(e); } } else (req.cbs || (req.cbs = [])).push(fn); return req; };
+  const req = revive(o);
   S.sent++; H.sent++; bump(S, req.kind, "sent"); bump(H, req.kind, "sent");
-  file(req, o.region != null && o.region >= 0 ? o.region : -1);
+  file(req, req.region);
+  return req;
+}
+// The same request made again from o, filed nowhere (clusters on several workers, js/cworkers.js: the caller files it)
+function revive(o) {
+  const req = { kind: o.kind, target: o.target, data: o.data || {}, from: o.from == null ? null : o.from, seq: o.seq, tick: o.tick,
+    region: o.region != null && o.region >= 0 ? o.region : -1, cbs: null, result: undefined, delivered: false };
+  req.then = fn => { if (req.delivered) { try { fn(req.result, req); } catch (e) { console.error(e); } } else (req.cbs || (req.cbs = [])).push(fn); return req; };
   return req;
 }
 // opts: onResult(m, req, result) for a requester that is a live mob; global: true for a kind that is always applied from the global
@@ -356,7 +361,7 @@ function text(s) {
 }
 
 const R = {
-  send, adopt, on, apply, deliver,
+  send, adopt, revive, on, apply, deliver,
   tap: null, onCbs: null, dIdx: -1, dPart: 0,   // (several workers, spec r15-39: js/rworkers.js)
   get seq() { return seq; }, set seq(n) { seq = n; },
   ctx, useCtx, newCtx, fileIn, away: null, think() { phase = "think"; },   // (clusters, spec r15-39b: js/ctick.js)

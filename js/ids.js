@@ -199,6 +199,7 @@ BF.ids = {
     get: () => ({ next, lim, more }),
     set(r) { if (r) { next = r.next; lim = r.lim; more = r.more; } else { next = top; lim = 0; more = null; } },
     get top() { return top; },
+    lift(n) { if (n > top) top = n; },   // (several workers, js/cworkers.js: past the ids the others handed out)
   },
 };
 })();

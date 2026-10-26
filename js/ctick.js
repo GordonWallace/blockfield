@@ -94,6 +94,7 @@ const H = { ticks: 0, deferred: 0, meetings: 0 };
 let hourAt = null;
 
 const CL = () => BF.clusters;
+const W = () => (BF.cworkers && BF.cworkers.active ? BF.cworkers : null);   // several workers (C7, js/cworkers.js)
 const groupOfBase = b => byKey.get(CL().groupOf(b)) || NOWHERE;
 // m is the running group's (a mob with no cluster yet goes with the first group)
 function mine(m) { return m.cl === undefined ? cur === groups[0] : CL().groupOf(m.cl) === cur.key; }
@@ -215,6 +216,7 @@ function meet() {
     i = j;
   }
   needMeet = false;
+  if (W()) W().met(groups);   // (which worker runs each group, and what each worker sends at the next meeting)
   S.meetings++; H.meetings++; S.since = 0;
   S.meetMs = performance.now() - t0;
 }
@@ -250,6 +252,7 @@ function scoped(h) {
   if (BF.regions) BF.regions.tick();
 }
 function pass(g, h) {
+  if (W() && !W().owns(g)) { g.tick = BF.rand.tick; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); return; }   // (another worker runs it)
   const t0 = performance.now();
   enter(g);
   try { scoped(h); }
@@ -270,6 +273,7 @@ function step(h) {
   BF.req.endTick();
   S.ticks++; H.ticks++; S.since++;
   hourly();
+  if (W() && BF.rand.tick % MEET === 0) W().sync();   // (the interval's last tick: the workers swap what their clusters changed)
 }
 // MEET ticks, from the next meeting: in the "tick" order MEET steps; in the "cluster" order the global part first, then each group's
 // whole interval on the clock views. Returns the ticks run.
@@ -289,6 +293,7 @@ function interval(h) {
     }
   }
   setView(views[MEET - 1]);
+  if (W()) W().sync();
   return n + MEET;
 }
 
@@ -430,6 +435,13 @@ BF.ctick = {
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },
   get system() { return running; },
+  // for several workers (js/cworkers.js): the ranges' counters, the requests waiting for the meeting, a group's queued requests
+  inner: {
+    R2, RANGE,
+    get deferred() { return deferred; }, set deferred(v) { deferred = v; },
+    pendingOf(g) { keepSlot(between); useSlot(g); try { return BF.req.pending(); } finally { useSlot(between); } },
+    setPending(g, list) { g.req = BF.req.newCtx(); for (const r of list) BF.req.fileIn(g.req, r); },
+  },
   // trace: true starts counting hidden reads ("system file:line" -> count), traced() reads them, trace = false stops
   get trace() { return !!trace; }, set trace(v) { trace = v ? new Map() : null; },
   traced: () => (trace ? [...trace].sort((a, b) => b[1] - a[1]) : []),
