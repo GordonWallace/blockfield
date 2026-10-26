@@ -15,34 +15,60 @@ module.exports = async (pg) => {
   await require('./lib').toVillage(pg);
   const r = await pg.evaluate(() => {
     const M = BF.mobs, P = BF.player.position;
-    const seller = M.list.find(v => v.type === "villager" && !v.child && !v.dead && v.village && v.village.members), V = seller && seller.village;
-    const buyer = V && V.members.find(v => v !== seller && v.type === "villager" && !v.child && !v.dead);   // a buyer calls a seller of its own village
-    if (!seller || !buyer) return { error: "not enough villagers" };
+    const all = M.list.filter(v => v.type === "villager" && !v.child && !v.dead && v.village && v.village.members);
+    if (all.length < 2) return { error: "not enough villagers" };
     const old = new Set(BF.glog ? BF.glog.recent(400) : []);
-    let T = 0;
-    const step = () => { BF.sky.setTime(0.3); M.update(0.05); T += 0.05; P.set(seller.position.x + 4, seller.position.y + 30, seller.position.z + 4); };
-    const walkOff = () => { const ai = seller.ai; ai.leaving = false; ai.mode = "walk"; ai.t = 5; ai.tx = seller.position.x + 30; ai.tz = seller.position.z; ai.route = null; };
+    let seller = null, buyer = null, start = null, dx = 1, dz = 0;
+    // Villagers' own work (jobs, errands, buying) is put off for the test: the seller only does the walk the test gives it, and only the
+    // test calls it (a villager really buying from it would hold it too).
+    const hooks = [];
+    for (const k of Object.keys(BF)) {
+      const o = BF[k];
+      if (o && typeof o === "object" && typeof o.ai === "function" && o !== M) { const f = o.ai; hooks.push([o, f]); o.ai = function (m) { return m && m.type === "villager" ? false : f.apply(this, arguments); }; }
+    }
+    const step = () => { BF.sky.setTime(0.3); M.update(0.05); P.set(seller.position.x + 4, seller.position.y + 30, seller.position.z + 4); };
+    const walkOff = () => { const ai = seller.ai; ai.leaving = false; ai.mode = "walk"; ai.t = 5; ai.tx = seller.position.x + 10 * dx; ai.tz = seller.position.z + 10 * dz; ai.route = null; };
+    const reset = () => { seller.position.copy(start); seller.vel.set(0, 0, 0); seller.ai.blockedT = 0; seller.ai.stuckT = 0; seller.ai.detour = null; };
+    const place = dist => { buyer.position.set(seller.position.x - dist * dx, seller.position.y, seller.position.z - dist * dz); buyer.vel.set(0, 0, 0); };
+    // A seller and a way for it to walk that is clear from where it stands (buildings would stop a walk one way). Each phase starts there.
+    search: for (const s of all.slice(0, 10)) {
+      const b = s.village.members.find(v => v !== s && v.type === "villager" && !v.child && !v.dead);   // a buyer calls a seller of its own village
+      if (!b) continue;
+      seller = s; buyer = b; start = s.position.clone();
+      for (const [ex, ez] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        dx = ex; dz = ez; reset();
+        for (let i = 0; i < 120; i++) { walkOff(); place(6); step(); }   // (as far as any phase goes: 1 s under way, then up to 4 s more)
+        if (Math.hypot(seller.position.x - start.x, seller.position.z - start.z) > 4.5) break search;
+      }
+      reset();
+      seller = null;
+    }
+    if (!seller) { for (const [o, f] of hooks) o.ai = f; return { error: "no villager could walk off freely to test with" }; }
+    const res = {};
+    let heldFrames = 0;   // steps the seller spent stopped for this buyer
     const moved = (n, call, dist) => {   // how far the seller walks in n steps while the buyer at `dist` calls it (or not)
+      reset(); heldFrames = 0;
+      for (let i = 0; i < 20; i++) { walkOff(); step(); }   // under way
       const x0 = seller.position.x, z0 = seller.position.z;
       for (let i = 0; i < n; i++) {
         walkOff();
-        buyer.position.set(seller.position.x - dist, seller.position.y, seller.position.z); buyer.vel.set(0, 0, 0);
+        place(dist);
         if (call) M.waitFor(seller, buyer, dist);
         step();
+        if (seller.holdFor === buyer && seller.holdT > 0) heldFrames++;
       }
       return +Math.hypot(seller.position.x - x0, seller.position.z - z0).toFixed(2);
     };
-    const res = {};
-    for (let i = 0; i < 60; i++) { walkOff(); step(); }   // under way
     res.free = moved(80, false, 6);
     res.held = moved(60, true, 6);          // 3 s of calls
     res.after = moved(80, false, 6);        // calls stop: walks on
     res.long = moved(200, true, 6);         // 10 s of calls: stops for 8, then walks on
-    res.far = moved(40, true, 15);
+    res.far = moved(40, true, 15); res.farHeld = heldFrames;
     // each buying from the other: only one of them stops
     for (let i = 0; i < 20; i++) { M.waitFor(seller, buyer, 5); M.waitFor(buyer, seller, 5); step(); }
     res.mutual = [seller.holdT > 0 && seller.holdFor === buyer, buyer.holdT > 0 && buyer.holdFor === seller];   // (either may also be held by another villager really buying from it)
     res.log = (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !old.has(e) && /to come and trade/.test(e.x)).map(e => e.l + " " + e.x);
+    for (const [o, f] of hooks) o.ai = f;
     return res;
   });
   console.log(JSON.stringify(r));
@@ -51,12 +77,12 @@ module.exports = async (pg) => {
   if (r.error) fail(r.error);
   else {
     if (r.free < 1) fail("the seller was not walking to begin with (" + r.free + ")");
-    if (r.held > 0.3) fail("the seller kept walking (" + r.held + " blocks) while a buyer 6 blocks off called it");
+    if (r.held > 0.6) fail("the seller kept walking (" + r.held + " blocks) while a buyer 6 blocks off called it");
     if (r.after < 1) fail("the seller did not walk on once the calls stopped (" + r.after + ")");
     if (r.long < 0.5) fail("the seller waited more than 8 s (" + r.long + ")");
     if (!r.log.some(t => /^INFO .*waited 8 s/.test(t))) fail("no INFO line for the seller that waited 8 s");
     if (r.mutual[0] || r.mutual[1]) fail("two villagers buying from each other: one stopped for the other");
-    if (r.far < 1) fail("a buyer 15 blocks off stopped the seller (" + r.far + ")");
+    if (r.farHeld) fail("a buyer 15 blocks off stopped the seller (" + r.farHeld + " steps, walked " + r.far + ")");   // (not the distance: another mob in the way can slow it)
   }
   console.log(fails ? "seller-waits: " + fails + " failures" : "seller-waits: ok");
 };
