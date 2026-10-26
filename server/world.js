@@ -375,7 +375,7 @@ function start(o) {
       srv.iconsDue.clear();
       const snap = Object.assign({ t: Date.now(), n: ++feedN, info: pg.info || { seed: null }, text: pg.text || "(no page open: the world is paused on the server)",
         paused: srv.client ? !!pg.paused : true, hidden: srv.client ? !!pg.hidden : true }, part,
-        { pt: pg.pt || null, wc: pg.wc || 0, ff: pg.ff || null, screens: pg.screens | 0, alerts: pg.alerts || null, server: { page: !!srv.client, held: !srv.client } });
+        { pt: pg.pt || null, wc: pg.wc || 0, ff: pg.ff || null, screens: pg.screens | 0, alerts: pg.alerts || null, page: srv.client ? pg.page || null : null, server: { page: !!srv.client, held: !srv.client } });
       let a = debug.push(snap);
       if (a === "resync") a = { resync: true };
       if (a && typeof a === "object") {
