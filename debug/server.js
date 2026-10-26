@@ -146,6 +146,35 @@ function push(body, res) {
   const o = take(s);
   res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(typeof o === "string" ? o : JSON.stringify(o));
 }
+// This computer's load for the Threads card (Gordon, 2026-10-26): each core's busy share from the operating system (os.cpus, the
+// change in its times since the last sample), and this process's main thread (performance.eventLoopUtilization: the debug server, and
+// the world server's sockets and saves with ?sim=server). The game's own threads measure themselves (js/threadload.js). A sample a
+// second at most; the last HOST_HIST kept per core for the screen's sparklines.
+const os = require("os"), { performance: perfHooks } = require("perf_hooks");
+const HOST_HIST = 60;
+let hostT = 0, hostPrev = null, hostElu = perfHooks.eventLoopUtilization(), hostOut = null;
+function hostLoad() {
+  const t = Date.now();
+  if (hostOut && t - hostT < 1000) return hostOut;
+  hostT = t;
+  const cpus = os.cpus(), prev = hostPrev, hist = hostOut ? hostOut.cores.map(c => c.hist) : [];
+  hostPrev = cpus.map(c => c.times);
+  const cores = cpus.map((c, i) => {
+    const a = c.times, b = prev && prev[i];
+    let busy = null;
+    if (b) { const idle = a.idle - b.idle, all = a.user + a.nice + a.sys + a.irq + a.idle - (b.user + b.nice + b.sys + b.irq + b.idle); busy = all > 0 ? Math.max(0, Math.min(1, 1 - idle / all)) : 0; }
+    const h = (hist[i] || []).slice();
+    if (busy != null) { h.push(Math.round(busy * 100)); if (h.length > HOST_HIST) h.shift(); }
+    return { busy, hist: h };
+  });
+  const e = perfHooks.eventLoopUtilization(), d = perfHooks.eventLoopUtilization(e, hostElu);
+  hostElu = e;
+  const mh = hostOut ? hostOut.main.hist.slice() : [];
+  mh.push(Math.round(d.utilization * 100)); if (mh.length > HOST_HIST) mh.shift();
+  hostOut = { name: os.hostname(), model: cpus.length ? cpus[0].model.trim() : "", cores, main: { busy: d.utilization, hist: mh }, load: os.loadavg() };
+  return hostOut;
+}
+
 // A snapshot from the game (POSTed by the page, or made by the world server in this process, server/world.js): cached and relayed
 // to the debug screens. Returns the answer: "ok", "resync", or an object (see below).
 function take(s) {
@@ -177,6 +206,7 @@ function take(s) {
       if (g.lines.length) gl = { w: g.w, name: g.name, head: g.head, base: glog.base, from: g.from, lines: g.lines };
     } else glogAt = glog.base + glog.lines.length;
   }
+  s.host = hostLoad();   // (this computer's cores and the debug server's thread, for the Threads card)
   const disk = readBuild(), build = s.build !== undefined && disk.commit && s.build !== disk.commit ? disk : null;   // the files on disk changed
   latest = { ...s, layouts: undefined, logs: undefined, econ: undefined, glog: undefined, vhist: undefined };
   broadcast("snap", { ...s, logs, glog: gl, vhist: undefined });

@@ -30,6 +30,7 @@ function boot(o) {
   importScripts("simfiles.js" + Q);
   BF = self.BF;
   importScripts(...BF.SIM_FILES.map(f => "../" + f + Q));
+  importScripts("threadload.js" + Q);  // (this thread's busy share, for the debug screen's Threads card)
   importScripts("debugfeed.js" + Q);   // (its snapshot only: the page sends it to the debug server)
   importScripts("coords.js" + Q);      // (the planet's positions, for the commands: /tp corner, latitude / longitude, face / u / v)
   importScripts("commands.js" + Q);    // (the slash commands: the page's command line sends them as "command" requests)
@@ -101,7 +102,10 @@ function worldOp(op, a) {
 
 // ---- the loop: a frame of ticks, chunks round the player, autosave, the protocol's flush
 let last = 0, timer = 0, crashNext = false, loadingWorld = false;
-function loop() {
+// this thread's busy share for the debug screen (js/threadload.js): the loop and the messages are where it works
+function timed(fn, a) { const TL = BF && BF.tload; if (TL) TL.begin(); try { fn(a); } finally { if (TL) TL.end(); } }
+function loop() { timed(loopBody); }
+function loopBody() {
   timer = 0;
   if (crashed) return;
   const now = performance.now(), raw = Math.max(0, (now - last) / 1000);
@@ -139,7 +143,8 @@ function crash(e) {
 self.addEventListener("error", ev => { if (BF) crash(ev.error || ev.message); });
 self.addEventListener("unhandledrejection", ev => { if (BF && BF.glog) BF.glog.log("ERROR", "uncaught", "unhandled promise rejection in the simulation worker: " + String(ev.reason && ev.reason.stack || ev.reason)); });
 
-self.onmessage = ev => {
+self.onmessage = ev => timed(onMessage, ev);
+function onMessage(ev) {
   const d = ev.data;
   if (d && d.boot) { try { boot(d.boot); } catch (e) { post({ failed: String(e && e.message || e) }); } return; }
   if (d && d.test === "crash") { crashNext = true; return; }   // (test/sim-worker.js: the crash path)
@@ -159,5 +164,5 @@ self.onmessage = ev => {
     // a speed change or unpause: the next loop now rather than at the next timer
     if (d.h.startsWith('{"t":"speed"')) { clearTimeout(timer); timer = setTimeout(loop, 0); }
   } catch (e) { crash(e); }
-};
+}
 })();

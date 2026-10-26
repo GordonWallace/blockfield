@@ -49,6 +49,9 @@
   .psplit { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 6px; align-items: center; margin-top: 6px; font-size: 11px; color: var(--muted); }
   .psplit i { display: block; height: 4px; border-radius: 2px; background: var(--accent); }
   .psplit b { font-weight: normal; color: var(--ink); text-align: right; }
+  .psplit .wsw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  canvas.cores { display: block; width: 100%; height: 46px; margin-top: 4px; }
+  .mleg .rleg { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); margin-right: 8px; } .mleg .rleg i { width: 10px; height: 9px; border-radius: 2px; display: inline-block; }
   .bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); overflow: hidden; margin-top: 6px; } .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .chip { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); color: var(--muted); white-space: nowrap; } .chip b { color: var(--ink); font-weight: 500; }
@@ -347,6 +350,9 @@
       <div class="big" id="c-rtick">-</div><div class="sub" id="c-rtick-sub"></div><div class="psplit" id="c-rtick-ms"></div><div class="psplit" id="c-rtick-regions"></div></div>
     <div class="card" id="c-wkcard" hidden title="Region workers (js/rplay.js, js/rworkers.js, spec r15-39): followers keep copies of the world; while the simulation can't keep up and splitting pays, each worker thinks its share of the regions. Regions and mobs per worker, ms per tick by phase"><h3>Workers <span class="sub" id="c-wk-st"></span></h3>
       <div class="big" id="c-wk">-</div><div class="sub" id="c-wk-sub"></div><div class="psplit" id="c-wk-ms"></div><div class="psplit" id="c-wk-per"></div></div>
+    <div class="card" id="c-thcard" title="Threads and cores (js/threadload.js): each of the game's threads measures the share of the wall clock it spends working (a browser can't see which core a thread runs on); the bars are the last minute's average, the number after it the last second. Worker colours match the Mobs map's Regions overlay. The cores are the computer the debug server runs on, from the operating system"><h3>Threads <span class="sub" id="c-th-st"></span></h3>
+      <div class="big" id="c-th">-</div><div class="sub" id="c-th-sub"></div><div class="psplit" id="c-th-list"></div>
+      <div class="sub" id="c-cores-sub" style="margin-top:8px"></div><canvas class="cores" id="c-cores"></canvas></div>
     <div class="card"><h3>Position <span id="c-facing" class="sub"></span></h3><div class="big" id="c-xyz" style="font-size:17px">-</div><div class="sub" id="c-chunk"></div><div class="sub" id="c-sections"></div></div>
     <div class="card"><h3>Biome</h3><div class="big" id="c-biome" style="font-size:20px">-</div><div class="sub" id="c-sim"></div></div>
     <div class="card"><h3>Chunks</h3><div class="big" id="c-chunks">-</div><div class="sub" id="c-queued"></div><canvas class="spark" id="s-queue"></canvas></div>
@@ -401,8 +407,9 @@
       <div class="panel" id="hpanel"></div>
       <div class="panel" id="mpanel">
         <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
-          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds">Regions</button></div></div>
+          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
         <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
+        <div class="mleg" id="m-rlegend" hidden title="With Regions on: each region coloured by the worker its mobs think on, striped when they think on several (a village's mobs go with their village wherever they stand, the wild ones with their region); each village is outlined in its worker's colour. The busy share is the worker's thread, as on the Threads card"></div>
         <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
       </div>
       <div class="panel" id="rpanel">
@@ -774,6 +781,45 @@ function renderTop(s) {
   renderRequests(s.requests);
   renderRegionTick(s.regionTick);
   renderWorkers(s.workers);
+  renderThreads(s);
+}
+
+// ---------------------------------------------------------------- threads and cores (js/threadload.js, debug/server.js hostLoad)
+// Worker colours, shared with the Mobs map's Regions overlay: worker 0 is the simulation thread itself
+const WCOL = ["#e8583c", "#5fa8e8", "#7fbf4d", "#e8c46a", "#b07fe0", "#4dd0c4", "#e07fb0", "#c8a07a"];
+const wColor = w => WCOL[w % WCOL.length];
+let threadBusy = [];   // by worker: the last minute's busy share, for the map's legend
+function renderThreads(s) {
+  const pg = s.page, sim = s.threads || [], host = s.host, onSrv = !!s.server, rows = [];
+  const pct = v => (v == null ? "?" : Math.round(v * 100) + "%");
+  if (pg) rows.push({ name: pg.sim ? "Page (draws, runs the simulation)" : "Page (draws, input)", avg: pg.avg, busy: pg.busy, worker: pg.sim ? 0 : null });
+  for (const t of sim) rows.push({ name: t.worker === 0 ? (onSrv ? "Simulation (world server thread)" : "Simulation (Web Worker)") : t.name + (onSrv ? " (server thread)" : ""), avg: t.avg, busy: t.busy, worker: t.worker });
+  if (host) rows.push({ name: onSrv ? "World server main thread" : "Debug server", avg: host.main.hist.length ? host.main.hist.reduce((a, v) => a + v, 0) / host.main.hist.length / 100 : host.main.busy, busy: host.main.busy, worker: null });
+  threadBusy = [];
+  for (const r of rows) if (r.worker != null) threadBusy[r.worker] = r.avg;
+  const nw = Math.max(1, sim.filter(t => t.worker > 0).length + 1);
+  $("c-th").innerHTML = `${fmt(rows.length)} <small>threads${nw > 1 ? ", " + nw + " workers" : ""}</small>`;
+  $("c-th-st").textContent = pg && pg.cores ? pg.cores + " cores" : "";
+  $("c-th-sub").textContent = rows.length ? "busy: last minute (last second)" : "waiting for the game";
+  $("c-th-list").innerHTML = rows.map(r => `<span>${r.worker != null ? `<i class="wsw" style="background:${wColor(r.worker)}"></i>` : `<i class="wsw" style="background:var(--edge2)"></i>`}${esc(r.name)}</span><i style="width:${Math.round(Math.min(1, r.avg || 0) * 100)}%;${r.worker != null ? "background:" + wColor(r.worker) : "background:var(--muted)"}"></i><b>${pct(r.avg)} (${pct(r.busy)})</b>`).join("");
+  // this computer's cores: one bar each, now, with the last minute's average as a tick
+  const cv = $("c-cores"), cores = host ? host.cores : [];
+  $("c-cores-sub").textContent = host ? `This computer${host.name ? " (" + host.name + ")" : ""}: ${cores.length} cores` + (cores.length ? `, ${Math.round(cores.reduce((a, c) => a + (c.busy || 0), 0) / cores.length * 100)}% busy in all` : "") + (host.load && host.load[0] ? ` · load ${host.load[0].toFixed(2)}` : "") : "";
+  cv.hidden = !cores.length;
+  const r = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !cores.length) return;
+  if (cv.width !== w * r) { cv.width = w * r; cv.height = h * r; }
+  const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+  const bw = w / cores.length, lab = cores.length <= 32, top = lab ? h - 11 : h;
+  g.font = "9px IBM Plex Mono, monospace"; g.textAlign = "center";
+  cores.forEach((c, i) => {
+    const x = i * bw + 1, ww = Math.max(1, bw - 2), v = c.busy || 0;
+    g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(x, 0, ww, top);
+    g.fillStyle = v > 0.85 ? "#e8583c" : v > 0.5 ? "#e8c46a" : "#7fbf4d"; g.fillRect(x, top - v * top, ww, v * top);
+    if (c.hist && c.hist.length) { const a = c.hist.reduce((p, q) => p + q, 0) / c.hist.length / 100; g.fillStyle = "rgba(238,243,234,0.8)"; g.fillRect(x, Math.round(top - a * top), ww, 1); }
+    if (lab) { g.fillStyle = "rgba(238,243,234,0.5)"; g.fillText(String(i), x + ww / 2, h - 1); }
+  });
+  g.textAlign = "start";
 }
 
 // region workers (js/rplay.js, spec r15-39): how many, split or one thinking, regions and mobs per worker, ms per tick by phase
@@ -1119,22 +1165,45 @@ function renderMobMap() {
     if (!set.has((cx + 1) + "," + cz)) { g.moveTo(x1, z0); g.lineTo(x1, z1); }
   }
   g.stroke();
-  // the Regions overlay (js/regions.js): each region holding mobs shaded by its count, the busiest darkest, with the count when there is room
+  // the Regions overlay (js/regions.js): each region holding mobs shaded by its count, the busiest darkest, with the count when there is
+  // room, in the colour of the worker its mobs think on; a region whose mobs think on several (a village's mobs go with their village,
+  // the wild ones with their region) is striped, each worker's band as tall as its share of the mobs (js/debugfeed.js regionWorkers).
+  // One worker: all one colour.
+  const rl = $("m-rlegend");
+  rl.hidden = !mRegions;
+  if (mRegions) {
+    const nw = Math.max(1, mm.workers || 1), per = new Array(nw).fill(0);
+    for (const r of mm.regions || []) per[Math.min(nw - 1, r[5] | 0)]++;
+    rl.innerHTML = `<span class="rleg">Regions by worker:</span>` + per.map((n, i) => `<span class="rleg"><i style="background:${wColor(i)}"></i>${i ? "Worker " + i : "Simulation"} <b>${fmt(n)}</b>${threadBusy[i] != null ? " · " + Math.round(threadBusy[i] * 100) + "% busy" : ""}</span>`).join("");
+  }
   if (mRegions && mm.regions && mm.regions.length) {
     const top = Math.max(...mm.regions.map(r => r[4]));
+    const rgb = wk => { const c = wColor(wk | 0); return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)).join(","); };
     g.font = "11px IBM Plex Mono, monospace"; g.textAlign = "center"; g.textBaseline = "middle";
-    for (const [x0, z0, x1, z1, n] of mm.regions) {
+    for (const [x0, z0, x1, z1, n, wk, by] of mm.regions) {
       const px = X(x0), pz = Z(z0), pw = (x1 - x0) * sc, ph = (z1 - z0) * sc;
       if (px > w || pz > h || px + pw < 0 || pz + ph < 0) continue;
-      g.fillStyle = `rgba(232,88,60,${(0.08 + 0.42 * n / top).toFixed(3)})`; g.fillRect(px, pz, pw, ph);
-      g.strokeStyle = "rgba(232,88,60,0.45)"; g.lineWidth = 1; g.strokeRect(Math.round(px) + 0.5, Math.round(pz) + 0.5, Math.round(pw), Math.round(ph));
+      const c = rgb(wk), a = (0.08 + 0.42 * n / top).toFixed(3);
+      if (by) {
+        const tot = by.reduce((p, v) => p + v, 0) || 1;
+        let y = pz;
+        by.forEach((v, i) => { if (!v) return; const bh = ph * v / tot; g.fillStyle = `rgba(${rgb(i)},${a})`; g.fillRect(px, y, pw, bh); y += bh; });
+      } else { g.fillStyle = `rgba(${c},${a})`; g.fillRect(px, pz, pw, ph); }
+      g.strokeStyle = `rgba(${c},0.55)`; g.lineWidth = 1; g.strokeRect(Math.round(px) + 0.5, Math.round(pz) + 0.5, Math.round(pw), Math.round(ph));
       if (pw >= 28) { g.fillStyle = "rgba(238,243,234,0.8)"; g.fillText(String(n), px + pw / 2, pz + ph / 2); }
     }
     g.textAlign = "start"; g.textBaseline = "alphabetic";
   }
-  // running villages: a subtle outline and their name
-  g.setLineDash([4, 4]); g.strokeStyle = "rgba(242,198,109,0.35)"; g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "rgba(242,198,109,0.6)";
-  for (const v of mm.villages) { g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText(v[4] || "", X(v[0]) + 3, Z(v[1]) - 4); }
+  // running villages: a subtle outline and their name; with Regions on and several workers, in the colour of the worker the village
+  // thinks on (all its villagers, pen animals and golems, wherever they stand)
+  const vByW = mRegions && (mm.workers || 1) > 1;
+  g.setLineDash([4, 4]); g.font = "11px IBM Plex Mono, monospace";
+  for (const v of mm.villages) {
+    const col = vByW ? wColor(v[5] | 0) : null;
+    g.strokeStyle = col || "rgba(242,198,109,0.35)"; g.fillStyle = col || "rgba(242,198,109,0.6)"; g.lineWidth = col ? 2 : 1;
+    g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText((v[4] || "") + (col ? " (" + ((v[5] | 0) ? "worker " + v[5] : "simulation") + ")" : ""), X(v[0]) + 3, Z(v[1]) - 4);
+  }
+  g.lineWidth = 1;
   g.setLineDash([]);
   // on the planet: the edges of the player's face (mm.sq, in its frame); past them the neighbouring faces are unfolded, and the corner
   // wedges between two neighbours hold nothing, so they stay hatched
@@ -1242,7 +1311,8 @@ function mobWhere(m) {
   return `${fmt(Math.round(d))} blocks ${dirName(b)}, y ${fmt(m[3])}`;
 }
 window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], dotData: () => mdots.map(d => [d[0], d[1], d[2][1], d[2][2]]), scale: () => mview.sc, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
-window.BFPlanet = { me: key => snap && meOn(snap, key) };   // for tests (test/debug-planet.js): the player as a village's map draws them
+window.BFPlanet = { me: key => snap && meOn(snap, key) };
+window.BFThreads = { snap: () => snap && { page: snap.page, threads: snap.threads, host: snap.host } };   // for tests (test/debug-threads.js)   // for tests (test/debug-planet.js): the player as a village's map draws them
 
 // ---------------------------------------------------------------- roster
 function renderRoster(s) {

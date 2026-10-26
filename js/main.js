@@ -119,7 +119,7 @@ function riverWorkers(seed, show) {
 // ---------- loop ----------
 const PF = BF.perf, simFrame = BF.boot.ticks, host = BF.simHost;   // the simulation's ticks for a frame (js/boot.js); its host (js/simhost.js)
 let last = performance.now();
-function frame(now) {
+const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thread's busy share on the debug screen, js/threadload.js)
   requestAnimationFrame(frame);
   if (BF.preparing) { last = now; return; }
   const raw = Math.max(0, (now - last) / 1000), dt = Math.min(0.05, raw);   // the player's step; the sim's accumulator takes up to 0.25 s (js/timewarp.js)
@@ -164,7 +164,7 @@ function frame(now) {
   if (BF.villagerHover) BF.villagerHover.update(dt);
   if (BF.stateHash && !remote) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js; the worker logs its own)
   if (BF.debugFeed) BF.debugFeed.update();
-}
+});
 
 // ---------- boot ----------
 BF.sky.init(scene);
