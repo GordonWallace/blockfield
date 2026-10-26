@@ -585,6 +585,14 @@ function purge(key) {
 const NOARR = new Float32Array(0);
 function freeArray() { this.array = NOARR; }
 function markUploaded() { this.uploaded = true; }
+// The WebGL context came back after the browser took it away (js/main.js): the far meshes' arrays were freed once on the GPU, so they can't
+// be uploaded again. They are dropped and their chunks generated and meshed again as the loader reaches them. Returns how many went.
+world.contextRestored = function () {
+  const n = world.farMeshes.size;
+  for (const k of [...world.farMeshes.keys()]) dropFar(k);
+  lastCenter = null;
+  return n;
+};
 function dropFar(key) {
   for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   world.farMeshes.delete(key);

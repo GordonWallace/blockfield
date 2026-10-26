@@ -29,6 +29,20 @@ function resize() {
 addEventListener("resize", resize);
 resize();
 
+// The browser can take the 3D view's WebGL context away (a graphics driver reset, too little graphics memory: a real GPU under load) and
+// give it back; three.js then uploads every mesh again. The distant terrain (js/lod.js rings, js/globe.js tiles) and the far chunk meshes
+// (js/world.js purge) free their arrays once uploaded, so they are built again instead: uploading them would throw "Cannot read properties
+// of null (reading 'BYTES_PER_ELEMENT')" on every frame and leave the screen black. (three.js's own listeners ran first: it was created first.)
+const glog = (level, text) => { if (BF.glog) BF.glog.log(level, "graphics", text); };
+const held = () => { const r = renderer.info; return r.memory.geometries + " geometries, " + r.memory.textures + " textures"; };
+canvas.addEventListener("webglcontextlost", () => glog("ERROR", "The browser took away the 3D view's graphics context (WebGL context lost), so the screen is black until it comes back; it held " + held()));
+canvas.addEventListener("webglcontextrestored", () => {
+  const far = BF.world.contextRestored ? BF.world.contextRestored() : 0;
+  if (BF.lod && BF.lod.active) BF.lod.reset(scene);
+  if (BF.globe && BF.globe.active) BF.globe.reset(scene);
+  glog("INFO", "The graphics context came back (WebGL context restored): distant terrain and " + far + " far chunk meshes are being built again");
+});
+
 // ---------- world lifecycle ----------
 // Starts (or restarts) a world from a seed and places the player on solid ground at the planet's spawn. Every world is the planet
 // (generator 4): the flat generators 1 to 3 were retired in 1.4 (spec r14-24), so opts.gen is not read.
