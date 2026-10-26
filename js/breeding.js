@@ -309,13 +309,15 @@ function giveChildBread(m) {
 function birth(a, b, rec, force) {
   if (breadEq(a.inv) < PAY || breadEq(b.inv) < PAY) return null;   // traded away meanwhile
   if (!bedsOK(rec) && !force) return null;                           // a bed was broken meanwhile
-  return BF.mobs.spawnLater(a, "bred:" + rec.key, () => {
-    if (bad2(a) || bad2(b)) return null;
-    if (breadEq(a.inv) < PAY || breadEq(b.inv) < PAY) return null;
-    if (!bedsOK(rec) && !force) { BF.glog.log("DEBUG", "breeding", "A birth in " + rec.key + " was refused: no spare bed left after an earlier birth this tick", { village: rec }); return null; }
-    return bornNow(a, b, rec);
-  });
+  return BF.mobs.spawnLater(a, "bred:" + rec.key, () => birthNow(a, b, rec, force), null, ["breeding", a.id, b.id, rec.key, !!force]);
 }
+function birthNow(a, b, rec, force) {
+  if (bad2(a) || bad2(b)) return null;
+  if (breadEq(a.inv) < PAY || breadEq(b.inv) < PAY) return null;
+  if (!bedsOK(rec) && !force) { BF.glog.log("DEBUG", "breeding", "A birth in " + rec.key + " was refused: no spare bed left after an earlier birth this tick", { village: rec }); return null; }
+  return bornNow(a, b, rec);
+}
+if (BF.mobs.maker) BF.mobs.maker("breeding", (ai, bi, key, force) => { const a = BF.ids.get(ai), b = BF.ids.get(bi), rec = BF.mobs.villages.get(key); return rec ? [() => birthNow(a, b, rec, force)] : null; });   // (another worker's birth, spec r15-39)
 const bad2 = m => !m || m.dead || m.removed;
 function bornNow(a, b, rec) {
   const pa = take(a, PAY), pb = take(b, PAY);

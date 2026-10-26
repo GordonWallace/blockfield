@@ -276,7 +276,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was"];
+  "fleeJitter", "gLos", "was", "planW", "planL", "planG"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -464,13 +464,23 @@ BF.req.on("explode", req => {
 });
 // spawn: data.make() makes the mob (and links it) when the request applies, so ids come in requester order; it returns the mob, or
 // null when what it needed is gone (a parent, its bread, the bed).
+// data.maker: [name, ...args], the same make (and check) again from plain data, BF.mobs.makers[name](...args) -> [make, check]: another
+// worker that files this request has no copy of the sender's make (spec r15-39, js/rworkers.js).
 BF.req.on("spawn", req => {
-  const m = req.data.make();
+  const d = req.data;
+  let make = d.make;
+  if (typeof make !== "function" && d.maker) {
+    const f = makers[d.maker[0]], mc = f ? f(...d.maker.slice(1)) : null;
+    if (mc) make = mc[1] ? () => (mc[1]() ? mc[0]() : null) : mc[0];
+  }
+  if (typeof make !== "function") return { ok: false, why: "no maker" };
+  const m = make();
   return m ? { ok: true, mob: m.id } : { ok: false, why: "refused" };
 }, { global: true });   // from the global inbox after the regions (spec r15-33): ids come in requester order over the whole world
-function spawnLater(from, what, make, check) {
+const makers = {};
+function spawnLater(from, what, make, check, maker) {
   if (!inThink()) return make();
-  BF.req.send("spawn", what, { make: check ? () => (check() ? make() : null) : make }, from);
+  BF.req.send("spawn", what, { make: check ? () => (check() ? make() : null) : make, maker: maker || null }, from);
   return null;
 }
 // Claims (BF.claims): kinds register free(m, data) -> null when the claim may be taken, else why not; take(m, data); and
@@ -723,6 +733,43 @@ function dropAhead(m, dx, dz) {
   for (let k = 0; k <= 4; k++) if (BF.world.isSolid(x, y0 - 1 - k, z) || BF.world.isSolid(x, y0 - k, z)) return k;
   return 5;
 }
+// Roofs and treetops (bug-063, bug-064): villagers, golems and animals never step, jump or walk onto an open-sky roof ledge (a built block
+// with a gap under it, or leaves) two or more blocks above the natural ground there. They used to climb hay bales onto low eaves, or walk
+// onto a roof level with a hillside, and spend the day up there.
+// A villager following a planned route (stairs, ladders, a raised path) still goes wherever its route goes. x, y, z: the mob's feet after
+// the climb; hw: its half width (a horse can stand on a ledge with its middle over air).
+let naturalTop = null;
+const leaves = new Set();
+function roofLedge(x, y, z, hw) {
+  if (!naturalTop) {
+    naturalTop = new Set();
+    for (const n of Object.keys(BF.B)) if (/_leaves$/.test(n)) leaves.add(BF.B[n]);
+    for (const n of Object.keys(BF.B)) if (/^(grass|dirt|dirt_path|stone|sand|red_sand|sandstone|red_sandstone|gravel|snow|snow_grass|snow_block|ice|packed_ice|clay|farmland|farmland_dry|coarse_dirt|podzol|mycelium|mud|moss_block|granite|diorite|andesite|deepslate|tuff|calcite|bedrock)$|_ore$|terracotta/.test(n)) naturalTop.add(BF.B[n]);
+  }
+  const W = BF.world, fy = Math.floor(y + 1e-3), seen = new Set();
+  for (const dx of [-hw + 0.02, 0, hw - 0.02]) for (const dz of [-hw + 0.02, 0, hw - 0.02]) {
+    const bx = Math.floor(x + dx), bz = Math.floor(z + dz), k = bx + "," + bz;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (!W.isSolid(bx, fy - 1, bz) || naturalTop.has(W.getBlock(bx, fy - 1, bz))) continue;
+    if (W.heightAt(bx, bz) >= fy) continue;   // something over it: a floor indoors, not a roof
+    const gy = BF.worldgen.heightAt(bx, bz), id = W.getBlock(bx, fy - 1, bz);
+    if (fy - gy < 3) continue;
+    if (leaves.has(id)) return true;
+    // a roof (an eave, a roof step over the room below) has a gap under it; a foundation, a wall or a stack of hay is solid down to the
+    // ground, and a bridge deck has the river under it
+    let gap = false;
+    for (let yy = fy - 2; yy > gy; yy--) {
+      const b = W.getBlock(bx, yy, bz);
+      if (isWater(b)) { gap = false; break; }
+      if (!W.isSolid(bx, yy, bz)) gap = true;
+    }
+    if (gap) return true;
+  }
+  return false;
+}
+// Whether the mob keeps off roofs (roofLedge): everything that walks except monsters (spiders climb walls anyway).
+const keepsOffRoofs = m => !m.def.hostile && !m.def.climbs && !(m.ai && m.ai.route) && !m.onLadder && !(m.horse && m.horse.lead);   // a led horse goes where it is led
 function waterAhead(m, dx, dz) {
   const x = m.position.x + dx * (m.halfWidth + 0.6), z = m.position.z + dz * (m.halfWidth + 0.6);
   const y0 = Math.floor(m.position.y);
@@ -1085,25 +1132,36 @@ let planBudget = 0;
 // later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
 // waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
 // village ticks after it, in a fixed order) searches share planBudget as before.
-const PLANS = 2, KEEP = 20, planWant = new Map();   // mob -> [tick it first asked, tick it last asked]
-const planGrant = new Map();   // mob -> tick granted (kept KEEP ticks: a far mob thinks only 4 times a game second)
+// The waiting list and the grants live on the mobs (ai.planW: the tick it first asked, planL: last asked, planG: granted), not in a
+// module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
+// table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
+// ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
+const PLANS = 2, KEEP = 20;
 let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
+const lapsed = (v, t) => v > t || v < t - KEEP;
 function grantPlans() {
-  const t = ++planTick;
-  for (const [m, g] of planGrant) if (m.removed || g < t - KEEP) planGrant.delete(m);
-  if (!planWant.size) return;
-  const w = [];
-  for (const [m, a] of planWant) { if (m.removed || m.dead || a[1] < t - KEEP) planWant.delete(m); else w.push([m, a[0]]); }
-  w.sort((a, b) => a[1] - b[1] || idNum(a[0]) - idNum(b[0]));
-  for (let i = 0; i < w.length && i < PLANS; i++) { planGrant.set(w[i][0], t); planWant.delete(w[i][0]); }
+  const t = ++planTick, w = [];
+  for (const m of list) {
+    const a = m.ai;
+    if (!a) continue;
+    if (a.planG != null && (m.removed || lapsed(a.planG, t))) a.planG = undefined;
+    if (a.planW == null) continue;
+    if (m.removed || m.dead || lapsed(a.planL, t) || a.planW > t) { a.planW = a.planL = undefined; continue; }
+    w.push(m);
+  }
+  if (!w.length) return;
+  w.sort((a, b) => a.ai.planW - b.ai.planW || idNum(a) - idNum(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+  for (let i = 0; i < w.length && i < PLANS; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
 }
 function takePlan() {
   const m = curMob;
   if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
-  if (planGrant.delete(m)) return true;
-  const t = planTick, a = planWant.get(m);
-  if (a) a[1] = t; else planWant.set(m, [t, t]);
+  const a = m.ai;
+  if (!a) return false;
+  if (a.planG != null) { a.planG = undefined; return true; }
+  const t = planTick;
+  if (a.planW != null) a.planL = t; else { a.planW = t; a.planL = t; }
   return false;
 }
 const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
@@ -1763,14 +1821,21 @@ function updateMob(m, dt) {
   if (resting) { m.vel.set(0, 0, 0); m.fallStart = m.position.y; ai.blockedT = 0; }
   else {
   const wasGround = m.onGround;
-  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater });   // swimming, it climbs out onto a bank (world.js moveBox)
+  const offRoofs = keepsOffRoofs(m), px = m.position.x, py = m.position.y, pz = m.position.z;
+  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater,   // swimming, it climbs out onto a bank (world.js moveBox)
+    canStep: offRoofs ? (x, y, z) => !roofLedge(x, y, z, m.halfWidth) : null });
+  // nor walks onto one level from a hillside (or lands on one): back where it was, as if it hit a wall. One already up there can get down.
+  if (offRoofs && (m.position.x !== px || m.position.z !== pz) && roofLedge(m.position.x, m.position.y, m.position.z, m.halfWidth) && !roofLedge(px, py, pz, m.halfWidth)) {
+    m.position.x = px; m.position.z = pz; m.vel.x = 0; m.vel.z = 0; res.hitX = true; res.roof = true;
+  }
   m.onGround = res.onGround; m.inWater = res.inWater; m.headInWater = !!res.headInWater;
   if (m.inWater && m.type === "villager" && BF.bridges) BF.bridges.noteSwim(m);   // a swim is a river crossing (js/bridges.js)
   const wants = Math.abs(_desired.x) + Math.abs(_desired.z) > 0.1;
   if ((res.hitX || res.hitZ) && wants) {
     if (T.climbs && (ai.target || ai.mode === "walk")) m.vel.y = 3.2;  // spiders climb walls
     else if (m.onLadder) { /* climbing: the ladder code above lifts it */ }
-    else if (res.onGround && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height)) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
+    else if (res.onGround && !res.roof && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height)
+      && !(offRoofs && roofLedge(m.position.x + Math.sign(_desired.x) * (res.hitX ? 0.6 : 0), m.position.y + 1, m.position.z + Math.sign(_desired.z) * (res.hitZ ? 0.6 : 0), m.halfWidth))) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
     else if (m.inWater) m.vel.y = 4;
     if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3) pickWander(m, 8);
   }
@@ -2448,8 +2513,10 @@ function scatterAt(rec, sl, v) {
     const x = Math.floor(cx + Math.cos(a) * d), z = Math.floor(cz + Math.sin(a) * d);
     if (v.minX != null && (x < v.minX || x > v.maxX || z < v.minZ || z > v.maxZ)) continue;
     if (!BF.world.isLoaded(x, z)) continue;
-    const at = findStand(x, BF.world.heightAt(x, z) + 1, z, TYPES.villager);
-    if (at) return at;
+    const top = BF.world.heightAt(x, z);
+    if (top - BF.worldgen.heightAt(x, z) >= 2) continue;   // a house (or a tree) stands there: not on its roof (bug-063)
+    const at = findStand(x, top + 1, z, TYPES.villager);
+    if (at && !roofLedge(at[0], at[1], at[2], TYPES.villager.hw)) return at;
   }
   return null;
 }
@@ -2499,8 +2566,14 @@ function updateVillages(dt) {
       const H = sl.house;
       const snap = BF.mobSave ? BF.mobSave.peek(rec.key + "#" + sl.idx) : null;   // quit and reload: back exactly where it was (js/mobsave.js)
       if (snap === "wait") continue;
-      let at = null;
+      let at = null, offRoof = false;
       if (snap) at = standable(Math.floor(snap.p[0]), Math.floor(snap.p[1]), Math.floor(snap.p[2]), TYPES.villager.hw, TYPES.villager.h) ? snap.p.slice() : findStand(snap.p[0], snap.p[1], snap.p[2], TYPES.villager);
+      // saved up on a roof (before bug-063): back on the ground instead. The saved spot itself, not the stand found near it: the snapshot
+      // puts the villager back on its saved spot anyway, and one saved in a doorway can have its nearest stand up on the roof above.
+      if (at && roofLedge(snap.p[0], snap.p[1], snap.p[2], TYPES.villager.hw)) {
+        if (BF.glog) BF.glog.log("INFO", "mobs", "villager " + sl.prof + " saved on a roof: placed on the ground instead", { village: rec, at: snap.p });
+        at = null; offRoof = true;
+      }
       let scattered = false;
       if (!at && villagerSaves.has(rec.key + "#" + sl.idx) && (at = scatterAt(rec, sl, v))) scattered = !bedtime();   // (a village's first load is not a return: its villagers start at home)
         // otherwise: by day a random spot within the leash of its bed, at night in the bed
@@ -2525,7 +2598,8 @@ function updateVillages(dt) {
         if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
         if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
         if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
-        if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
+        if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); if (offRoof) { m.position.set(at[0], at[1], at[2]); m.fallStart = at[1]; m.ai.route = null; } }
+        if (BF.explorer && BF.explorer.onSpawn) BF.explorer.onSpawn(m);   // back in its tent for the rest of the night, or the tent back in its pack
         return m;
       });
     }
@@ -2623,7 +2697,10 @@ BF.mobs = {
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
     // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
-    for (const m of BF.rtick ? BF.rtick.plan(list) : list.slice()) {
+    // with several workers (spec r15-39, js/rworkers.js) this worker thinks only the regions it owns; the others' changes come after the loop
+    const RW = BF.rworkers, order = BF.rtick ? BF.rtick.plan(list) : list.slice();
+    for (const m of RW && RW.active ? RW.beginThink(order) : order) {
+      if (RW && RW.active) RW.thinking(m);
       if (m.removed) continue;
       let h = dt;
       if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
@@ -2642,6 +2719,7 @@ BF.mobs = {
       if (pon) PF.lap(PF.mobCat(m));
     }
     commitMoves();
+    if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
     updateArrows(dt);
     PF.lap(PC.other);
     if (BF.builder) BF.builder.tick(dt);
@@ -2658,6 +2736,7 @@ BF.mobs = {
     if (BF.pigFarmer) BF.pigFarmer.tick(dt);   // piglets growing up, sty stock (js/pigfarmer.js)
     PF.lap(PC.vanimals);
     if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
+    if (BF.explorer && BF.explorer.tick) BF.explorer.tick(dt);   // tents of explorers that unloaded while camping (js/explorer.js)
     PF.lap(PC.villagers);
     if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
     PF.lap(PC.monsters);
@@ -2694,7 +2773,8 @@ BF.mobs = {
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return ready ? createMob(type, x, y, z, variant, style) : null; },
-  spawnLater,   // spawnLater(from, place, make, check?): make() now, or as a "spawn" request in the think phase (r15-23) that runs make() if check()
+  makers, maker: (name, fn) => { makers[name] = fn; },   // maker(name, (...args) -> [make, check]): a spawnLater's make from plain data (r15-39)
+  spawnLater,   // spawnLater(from, place, make, check?, maker?): make() now, or as a "spawn" request in the think phase (r15-23) that runs make() if check()
                 // still holds when it applies; returns the mob, or null when queued
   // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
   discard(m) { if (m && !m.removed) removeMob(m); },
@@ -2703,7 +2783,7 @@ BF.mobs = {
   spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
   spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
-  isWild, spawnGroup, penBoxes, inPenBox, standable, findPath, findPathFast, findPathOld, routeCost, pathsAgree, pathStatsReset,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}, maxNodes, tall): A* route cells (tests); the Fast/Old pair and routeCost for test/findpath-compare.js
+  isWild, spawnGroup, penBoxes, inPenBox, standable, roofLedge, findPath, findPathFast, findPathOld, routeCost, pathsAgree, pathStatsReset,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}, maxNodes, tall): A* route cells (tests); the Fast/Old pair and routeCost for test/findpath-compare.js
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
@@ -2744,6 +2824,7 @@ BF.mobs = {
     if (BF.baker) BF.baker.exportAll(out);   // "ovens" -> what each baker's oven holds
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
     if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
+    if (BF.explorer && BF.explorer.exportAll) BF.explorer.exportAll(out);   // "explorer:camps" -> camps and tents left behind (js/explorer.js)
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
     for (const rec of villages.values()) {
       const v = rec.dead ? [...rec.dead] : [];
@@ -2755,7 +2836,7 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked" && k !== "explorer:camps") villagerSaves.set(k, o[k]);
     for (const v of villagerSaves.values()) if (v && v.id) BF.ids.seen(v.id);   // new ids start past the saved villagers
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [], g: Math.max(0, Math.floor(+o[k].g || 0)) });
@@ -2766,6 +2847,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
+    if (BF.explorer && BF.explorer.importAll) BF.explorer.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
     if (BF.poultry) BF.poultry.importAll(o);
     if (BF.cowherd) BF.cowherd.importAll(o);
@@ -2868,6 +2950,10 @@ BF.mobs = {
     villagerSaves.clear();
     pendingDead.clear();
     BF.ids.reset();
+    villageT = restockT = 0;   // (and the counters and timers below, so a world started after another plays as in a fresh page: spec r15-39)
+    surfAcc = caveAcc = chunkArrT = 0; chunkArr = [];
+    planTick = planBudget = 0;
+    aiAcc = aiEma = aiN = aiWork = 0;
     if (BF.builder) BF.builder.reset();
     if (BF.bridges) BF.bridges.reset();
     if (BF.villageLife) BF.villageLife.reset();
@@ -2879,6 +2965,10 @@ BF.mobs = {
     if (BF.cowherd) BF.cowherd.reset();
     if (BF.pigFarmer) BF.pigFarmer.reset();
     if (BF.baker) BF.baker.reset();
+    if (BF.merchant) BF.merchant.reset();   // (caravan routes, path wear, prices and timers of the world before: spec r15-39 found them carried over)
+    if (BF.bees) BF.bees.reset();
+    if (BF.blockReq) BF.blockReq.reset();
+    if (BF.storage) BF.storage.reset();
   },
 };
 })();
