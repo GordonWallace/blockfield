@@ -80,34 +80,13 @@ function shortfall(m) {
 // ---------------------------------------------------------------- sellers (as js/toolsmith.js)
 const canSell = (m, v2) => v2 && v2 !== m && v2.type === "villager" && !v2.dead && !v2.removed && !v2.child && Array.isArray(v2.inv) && Array.isArray(v2.trades)
   && !v2.sleeping && !v2.tradingWith && v2.position && v2.position.y > m.position.y - 6;   // not deep in a mineshaft
-const restocked = (v2, id) => ((TR().PRODUCE[v2.profession] || []).includes(nameOf(id)));
-// Offers of m's village that sell an item matching f, in stock, which m can pay for: [{v2, o, max}] (max = how many times), the nearest first.
-function offersFor(m, f) {
-  const R = m.village, T = TR(), S = state(m), out = [];
-  if (!R) return out;
-  for (const v2 of R.members || []) {
-    if (!canSell(m, v2)) continue;
-    for (const o of v2.trades) {
-      if (o.feed || !f(o.sell.id) || restocked(v2, o.sell.id) || T.blockReason(v2, o)) continue;
-      if (avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id)) continue;
-      let k = Math.floor(T.inv.count(v2.inv, o.sell.id) / o.sell.n);
-      for (const b of o.buy) k = Math.min(k, Math.floor(T.inv.count(m.inv, b.id) / b.n));
-      if (k < 1) continue;
-      out.push({ v2, o, max: k, d: v2.position ? v2.position.distanceTo(m.position) : Infinity });
-    }
-  }
-  return out.sort((a, b) => a.d - b.d);
-}
+// Offers of m's village that sell an item matching f, in stock, which m can pay for: [{v2, o, max}] (max = how many times), the nearest first,
+// skipping the ones it gave up on a while. Read from the village's offer table (js/furnaceuse.js offersFor, spec r15-04), which gives
+// the full scan's answer in its order; it used to scan every member's every offer, every tick that jobs.js asked wantsJob (spec r15-62).
+const skipOf = S => (v2, o) => avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id);
+const offersFor = (m, f) => (m.village ? BF.furnaceUse.offersFor(m, f, false, skipOf(state(m))) : []);
 // A buying deal for need {what, f, n}: {kind: "buy", other, offer, times, item, what}, the nearest seller, or null.
-function findDeal(m, need) {
-  const T = TR();
-  for (const e of offersFor(m, need.f)) {
-    let k = Math.min(e.max, Math.ceil(need.n / e.o.sell.n), 4);
-    while (k > 0 && !T.inv.canFit(m.inv, [{ id: e.o.sell.id, n: e.o.sell.n * k }], e.o.buy.map(b => ({ id: b.id, n: b.n * k })))) k--;
-    if (k > 0) return BF.ids.refs({ kind: "buy", other: e.v2, offer: e.o, times: k, item: e.o.sell.id, what: need.what });
-  }
-  return null;
-}
+const findDeal = (m, need) => (m.village ? BF.furnaceUse.findDeal(m, need, skipOf(state(m))) : null);
 function doBuy(m, deal) {
   const T = TR(), v2 = deal.other, o = deal.offer;
   const done = T.asked(m, v2, o) || canSell(m, v2) ? T.buy(m, v2, o, deal.times, { guard: () => (canSell(m, v2) ? null : "busy") }) : 0;   // one transaction (js/trading.js buy)
