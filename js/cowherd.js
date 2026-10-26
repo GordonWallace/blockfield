@@ -68,7 +68,10 @@ function stOf(m) {
 }
 const isCalf = m => !!(m.cow && m.cow.growAt != null);
 const hungry = (m, t) => { const s = m.cow; return !s || s.fed == null || t - s.fed >= FEED_DAYS; };
-const willing = (m, t) => { const s = m.cow; return !!(s && live(m) && s.growAt == null && s.fed != null && t - s.fed < FEED_DAYS && t >= s.cd); };
+// A pasture cow does not breed while its herd is over the limit (a wild cow that walked in after the cowherd fed a pair): the calf would take
+// the herd two over it. The pair stays fed and breeds once the cowherd has culled back to the limit (within FEED_DAYS of the meal).
+const overLimit = m => { const p = m.pasture; return !!(p && p.cows && p.limit && p.cows.length > p.limit); };
+const willing = (m, t) => { const s = m.cow; return !!(s && live(m) && s.growAt == null && s.fed != null && t - s.fed < FEED_DAYS && t >= s.cd) && !overLimit(m); };
 const milkedToday = s => !!(s && s.milkDay != null && s.milkDay >= today());
 const milkable = m => live(m) && m.type === "cow" && !isCalf(m) && !milkedToday(m.cow);
 

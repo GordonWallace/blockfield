@@ -924,7 +924,7 @@ Boost flight (player.js): while flying, press E with W held (E down after W) to 
 `BF.cowherd`. Every cow mob carries `m.cow = {fed, cd, growAt, milkDay, x, z, mob}` (absolute game days; `milkDay` the whole game day it was last milked). Mirrors the poultry code (js/poultry.js).
 - **Feeding / breeding.** 1 `wheat_item` from the player (right click, player.js) or a cowherd sets `fed`; willing for 1 day. Two willing adults of the same pasture (or both wild) within 10 blocks walk together and a calf
   appears; both rest 1 day and need wheat again. Calves (`m.calf`, `growAt`) are scaled 0.5 (`BF.mobs.setCowSize`), drop nothing (mobs.js `giveDrops`), give no milk and grow up after 3 days (`CALF_DAYS`); wheat ages one by 10%.
-  No breeding while 24 cows are within 16 blocks. Events: `cowFed(m, by)`, `cowBorn(calf, a, b)`, `cowMilked(m, by)`, `cowPenned(m, pasture)`.
+  No breeding while 24 cows are within 16 blocks, or while the pasture of a pasture cow holds more cows than its limit (a wild cow that walked in after the cowherd fed a pair; the pair waits for the cull). Events: `cowFed(m, by)`, `cowBorn(calf, a, b)`, `cowMilked(m, by)`, `cowPenned(m, pasture)`.
 - **Milking.** An empty bucket on an adult cow gives a `milk_bucket` (the player's right click swaps the bucket in hand; creative keeps the bucket), once per cow per game day, for the player and the cowherd alike
   ("This cow was milked today", "Calves give no milk"). Fast-forward and unloaded time count: the day is the sky's.
 - **Items** (appended after the poultry items): `milk_bucket` (stack 1, food 6, `container: "bucket"`), `glass_bottle` (3 glass in a V -> 3), `milk_bottle` (stack 16, food 2, `container: "glass_bottle"`;
