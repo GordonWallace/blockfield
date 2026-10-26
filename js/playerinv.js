@@ -989,7 +989,7 @@ function furnaceStep(h) {
   for (const f of furnaces.values()) tickFurnace(f, h);
   if (BF.baker) BF.baker.simTick(h);   // bakers' ovens bake on the same clock (js/baker.js)
 }
-if (BF.world && BF.world.onBlockTick) BF.world.onBlockTick(() => { if (furnaceDue > 0) { const h = furnaceDue; furnaceDue = 0; furnaceStep(h); } });
+if (BF.world && BF.world.onBlockTick) BF.world.onBlockTick(() => { if (furnaceDue > 0) { const h = furnaceDue; furnaceDue = 0; furnaceStep(h); } }, "furnaces");
 
 // ---------------------------------------------------------------- "chest" requests (spec r15-22)
 // Items into and out of a chest go through the request queue (js/requests.js), so two villagers, or a villager and the player, can't

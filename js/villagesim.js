@@ -490,8 +490,8 @@ BF.villageSim = {
   reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
-    BF.world.onThink(step);   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
-    if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick);   // crop catch-up, a block tick (spec r15-19)
+    BF.world.onThink(step, "villageSim");   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
+    if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick, "catchUp");   // crop catch-up, a block tick (spec r15-19)
   },
 };
 })();

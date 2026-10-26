@@ -1309,12 +1309,15 @@ world.growingCount = () => growing.size;
 // - block ticks (world.onBlockTick: fluid spread, crop growth, farmland, grass), in registration order, each in canonical cell order;
 // - deliver: the requests' results.
 // All on the simulation clock (BF.simNow), once per tick, so fast-forward (js/timewarp.js) speeds them up too.
-const thinkHooks = [], blockHooks = [fluidTick, growTick];
-world.onThink = fn => { thinkHooks.push(fn); };
-world.onBlockTick = fn => { blockHooks.push(fn); };
-function blockTicks() { for (const f of blockHooks) f(); }
-world.tickSim = () => {
-  for (const f of thinkHooks) f();
+// Each hook has a name (clusters, spec r15-39b: js/ctick.js runs a hook per cluster once its system is converted, else once a tick).
+const thinkHooks = [], blockHooks = [[fluidTick, "fluids"], [growTick, "growth"]];
+world.onThink = (fn, name) => { thinkHooks.push([fn, name || fn.name || "think"]); };
+world.onBlockTick = (fn, name) => { blockHooks.push([fn, name || fn.name || "blocks"]); };
+const sys = (h) => { const C = BF.ctick; if (C && C.on) C.sys(h[1], h[0]); else h[0](); };
+function blockTicks() { for (const h of blockHooks) sys(h); }
+// The parts of tickSim (js/ctick.js runs them per cluster): the think hooks; apply, block ticks and deliver.
+function thinkPart() { for (const h of thinkHooks) sys(h); }
+function applyPart() {
   const R = BF.req;
   if (!R) { blockTicks(); return; }
   R.apply();
@@ -1323,7 +1326,12 @@ world.tickSim = () => {
   if (RW) RW.beforeDeliver();
   R.deliver();
   if (RW) RW.afterDeliver();   // what callbacks only this worker has did, to the other workers (spec r15-39, js/rworkers.js)
-  R.endTick();
+}
+world.tickParts = { think: thinkPart, apply: applyPart };
+world.tickSim = () => {
+  thinkPart();
+  applyPart();
+  if (BF.req) BF.req.endTick();
 };
 
 // ---------- raycast ----------

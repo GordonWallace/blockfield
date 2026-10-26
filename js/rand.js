@@ -10,7 +10,7 @@
 // Every stream has next() (0 to 1), int(n) (0 to n-1), range(a, b) and pick(arr).
 // - BF.rand.thinker: the mob whose update is running in the mob loop (js/mobs.js). A mob thinking may draw only from its own stream: a
 //   draw from another's depends on the order mobs think in (spec r15-33). BF.rand.watch(e, thinker), when set (tests), is called on each.
-// API: BF.rand = { of, seed, at, step(), tick, made, save(), load(o), reset(), thinker, watch }
+// API: BF.rand = { of, seed, at, step(), tick, made, save(), load(o), reset(), thinker, watch, range, reps (clusters, js/ctick.js) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -58,7 +58,15 @@ HashStream.prototype = Object.assign(Object.create(methods), {
 
 let made = 0;   // entities seeded from the creation counter so far (saved, so a reload never hands out the same numbers again)
 // r15-13 (stable entity ids) can key this by the entity's id instead of the counter once it has merged.
-function seedNew(e) { e.rng = mix(worldSeed() ^ mix(++made + 0x632be5ab)); }
+// Clusters (spec r15-39b, js/ctick.js): while a cluster runs, the counter takes numbers from ranges the meeting handed it, as ids do
+// (js/ids.js range), so a new entity's numbers don't depend on the order clusters run in. made then counts one past the highest taken.
+let mlim = 0, mmore = null, mnext = 0;
+function seedNew(e) {
+  let n;
+  if (mlim) { if (mnext >= mlim) { const r = mmore(); mnext = r[0]; mlim = r[1]; } n = mnext++; if (n > made) made = n; }
+  else n = ++made;
+  e.rng = mix(worldSeed() ^ mix(n + 0x632be5ab));
+}
 const streams = new WeakMap();
 function of(e) {
   let s = streams.get(e);
@@ -72,7 +80,7 @@ const kinds = new Map();
 // one again: code run more than once a tick (a test stepping the mobs by hand, two updates in one step) still sees fresh numbers. The
 // first ask of a key in a tick always gets the same stream.
 let repTick = -1;
-const reps = new Map();
+let reps = new Map();
 function at(kind, x, z, tick, y) {
   let k = kinds.get(kind);
   if (k === undefined) { k = hashStr(kind); kinds.set(kind, k); }
@@ -97,6 +105,16 @@ const R = BF.rand = {
   thinker: null, watch: null,   // the mob whose update is running (js/mobs.js) and a check called on a draw from someone else's stream (tests)
   get made() { return made; },
   step() { R.tick++; },
+  // clusters (js/ctick.js): the creation counter's range ({next, lim, more}; null: the one counter), and the repeats of this tick's keys
+  // (each cluster counts its own)
+  range: {
+    get: () => ({ next: mnext, lim: mlim, more: mmore }),
+    set(r) { if (r) { mnext = r.next; mlim = r.lim; mmore = r.more; } else { mlim = 0; mmore = null; } },
+  },
+  reps: {
+    get: () => ({ tick: repTick, map: reps }),
+    set(c) { repTick = c.tick; reps = c.map; },
+  },
   save() { return { tick: R.tick, made }; },
   load(o) { R.tick = o && o.tick >= 0 ? Math.floor(o.tick) : 0; made = o && o.made >= 0 ? Math.floor(o.made) : 0; repTick = -1; reps.clear(); },
   reset() { R.tick = 0; made = 0; repTick = -1; reps.clear(); },
