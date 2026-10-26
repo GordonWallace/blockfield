@@ -21,6 +21,8 @@ When a chunk unloads, the wild mobs standing in it are stored with it, and they 
 
 Mobs walk up a step of one block without jumping. A mob swimming in water climbs out the same way onto a bank level with the water, such as the edge of a farm's water channel or of a pond flush with the land; a bank higher than that it has to swim round.
 
+Villagers, iron golems and animals keep off roofs. They never step, jump or walk onto a roof (a built block with a gap under it, such as an eave or a roof over a room) or onto leaves, two or more blocks above the natural ground, so they don't climb a hay bale onto a low eave or walk across from a hillside onto a roof level with it. A stack of hay or a wall, solid down to the ground, is not a roof, and a bridge over a river is not either. A villager following a planned route (up stairs or a ladder) still goes where the route goes, and a horse on a lead goes where it is led. Monsters and spiders are not held back.
+
 ## Fighting
 
 - A mob you hit is briefly immune to further hits (just under half a second) and is knocked back. Hitting while sprinting knocks it back further.

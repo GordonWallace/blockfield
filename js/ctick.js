@@ -52,6 +52,7 @@ const SYSTEMS = {
   breeding: false,      // C3
   storage: false,       // C3
   baker: false,         // C3
+  explorer: false,      // C3 (explorers' tents left camping, js/explorer.js)
   restock: false,       // C3
   villages: false,      // C3 (js/mobs.js updateVillages: village records come and go)
   dayTimeline: false,   // C3
