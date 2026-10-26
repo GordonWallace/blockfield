@@ -720,7 +720,7 @@ function plan(pcx, pcz) {
     if (l > 1e-3) { fwdX = fx / l; fwdZ = fz / l; }
   }
   genList = []; meshList = []; edgeList = [];
-  const keep = new Set(), spots = new Map();
+  const keep = new Set(), spots = new Map(), border = new Set();
   // above the chunk ceiling nothing is wanted (distant terrain shows the ground, js/lod.js)
   const RL = world.high ? -2 : R;
   for (let dz = -RL - 1; dz <= RL + 1; dz++) for (let dx = -RL - 1; dx <= RL + 1; dx++) {
@@ -739,6 +739,7 @@ function plan(pcx, pcz) {
     const k = ckey(cx, cz);
     if (keep.has(k)) continue;
     keep.add(k);
+    if (d2 > R * R) border.add(k);   // past the view distance: never meshed, only data for meshing the chunks inside it
     // chunks in front of the camera load first; behind ones are weighted as further away
     const len = Math.sqrt(d2) || 1;
     const dot = (dx * fwdX + dz * fwdZ) / len;
@@ -774,12 +775,19 @@ function plan(pcx, pcz) {
     return dx * dx + dz * dz > r * r;
   };
   const RU = world.high ? -1 : R;
+  let dropped = 0;
   for (const k of [...world.chunks.keys()]) {
     const c = world.chunks.get(k);
-    if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); } continue; }
-    if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
+    const vk = BF.villageSim && BF.villageSim.keepKeys.has(k);
+    if (!keep.has(k) && far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); continue; }
+    // a chunk past the view distance (a border chunk, or one just left behind) that no chunk still to be meshed needs: the purge never
+    // takes it (it has no mesh), so it would stay loaded, with its mobs, as a thin ring outside the view distance
+    if ((border.has(k) || !keep.has(k)) && !data.has(k) && c.mesh === undefined && !vk) { jrec("u", k); unload(k); dropped++; continue; }
+    // (chunks just left behind, kept for the hysteresis, keep only their meshes too)
+    if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !vk &&
       far(c.cx, c.cz, Math.min(R, KEEP) + 3)) { jrec("g", k); purge(k); }
   }
+  if (dropped && BF.glog) BF.glog.log("DEBUG", "chunks", "Unloaded " + dropped + " border chunk" + (dropped > 1 ? "s" : "") + " past the view distance once their neighbours were drawn");
   for (const k of [...world.farMeshes.keys()]) {
     if (keep.has(k)) continue;
     const [cx, cz] = k.split(",").map(Number);
@@ -840,6 +848,7 @@ function chunkD2(c, pcx, pcz) {
   const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: c.cx * CS + 8, z: c.cz * CS + 8 }, TW), dx = t.x / CS, dz = t.z / CS;
   return dx * dx + dz * dz;
 }
+let planTail = false;   // chunks were generated or meshed since the last plan
 let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength without the mesher workers' jobs)
 
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
@@ -861,7 +870,8 @@ world.update = function (px, pz, budgetMs = 8) {
   } else world.high = false;
   const center = pcx + "," + pcz + "," + world.viewDist + "," + roundPlan + "," + world.high;
   // re-plan on chunk change, and periodically while loading so turning re-prioritises
-  if (center !== lastCenter || (loadQ > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
+  // and once more when loading ends, so the data the last meshes needed (border chunks, edge chunks' blocks) is let go
+  if (center !== lastCenter || (loadQ > 0 && performance.now() - lastPlanT > 1000) || (planTail && world.queueLength === 0)) { lastCenter = center; planTail = false; plan(pcx, pcz); }
   if (loadQ > 40) budgetMs = Math.max(budgetMs, 12);
   if (!MP.started || (BF.meshInline && !MP.inline)) poolStart();
 
@@ -910,16 +920,19 @@ world.update = function (px, pz, budgetMs = 8) {
       const c = world.chunks.get(ckey(meshCand[0], meshCand[1]));
       if (MP.inline) buildMesh(c); else { c.mesh = null; enqueue(c, meshCand[2]); }
       meshList.splice(mi, 1);
+      planTail = true;
     } else {
       if (RJ) RJ.rec(["c", genCand[0], genCand[1]]);
       createChunk(genCand[0], genCand[1]);
       genList.splice(gi, 1);
+      planTail = true;
       mi = 0; // newly generated data may unblock a nearer mesh
     }
   }
   pump();
   loadQ = genList.length + meshList.filter(m => { const k = ckey(m[0], m[1]), c = world.chunks.get(k); return c ? c.mesh === undefined : !world.farMeshes.has(k); }).length;
   world.queueLength = loadQ + poolPending();   // (chunks waiting for or in a mesher worker count as still loading)
+  if (world.queueLength > 0) planTail = true;
   // how far out every wanted chunk has a mesh, in blocks: distant terrain (js/lod.js) leaves its hole only that far while chunks load
   // (the distance from the player to the nearest chunk square, in the planned set or just past it, that has no mesh)
   const lx = px - pcx * CS, lz = pz - pcz * CS;
