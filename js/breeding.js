@@ -461,10 +461,11 @@ function tick(dt) {
 // ---------- persistence (mobs.exportVillagers / importVillagers hooks) ----------
 function metaOf(e) {
   const m = e.mob && !e.mob.removed ? e.mob : null;
-  if (m) { e.pos = [m.position.x, m.position.y, m.position.z]; if (!m.child) e.prof = m.profession; }
+  // (read only: a save, and the state hash's villagers part, must not change the record; the tick and an unload keep e.pos and e.prof)
+  const pos = m ? [m.position.x, m.position.y, m.position.z] : e.pos, prof = m && !m.child ? m.profession : e.prof;
   const r = v => Math.round(v * 100) / 100;
-  return { k: e.k, child: !!e.child, born: e.born, eaten: e.eaten || 0, parents: e.parents || [], prof: e.prof, cd: e.cd,
-    pos: e.pos ? e.pos.map(r) : null, bed: e.bed || null, lastDay: e.lastDay, dead: !!e.dead };
+  return { k: e.k, child: !!e.child, born: e.born, eaten: e.eaten || 0, parents: e.parents || [], prof, cd: e.cd,
+    pos: pos ? pos.map(r) : null, bed: e.bed || null, lastDay: e.lastDay, dead: !!e.dead };
 }
 function exportAll(out) {
   const recs = new Map();
