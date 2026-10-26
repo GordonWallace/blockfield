@@ -22,7 +22,7 @@
 //   page), start() -> Promise("worker" | "in page"), world(op, args) -> Promise, demo(seed, opts), ticks(raw) -> n, achieved(), frame(),
 //   sky(drawnDt), crashed (text or null), wanted() -> "server" | "worker" | "auto" | null, saves(q) -> Promise (the server's worlds), post(m),
 //   refused (why the world server turned this page away: another page plays on it; else undefined),
-//   label() -> the host as the player sees it, threads (the world server's), CHOICES, pref() / setPref(v) / prefLabel(v) (the setting),
+//   budget() (the page's simulation budget to the simulation, bug-081), label() -> the host as the player sees it, threads (the world server's), CHOICES, pref() / setPref(v) / prefLabel(v) (the setting),
 //   eval(src, arg) -> Promise (tests only: test/bft.js BFT.sim) }
 (() => {
 "use strict";
@@ -125,8 +125,11 @@ function run(w, via) {
         H.mode = server ? "server" : "worker"; H.worker = true; H.server = server; H.why = "";
         H.threads = server ? (w.hello && w.hello.threads) || 1 : 1;
         if (globalThis.BF_TEST) w.postMessage({ test: "eval" });
-        // an automated browser starts the budget off (js/active.js); the world server's Node has a navigator of its own that never says so
-        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) { w.postMessage({ auto: true, workers: urlWorkers().workers }); if (!urlWorkers().workers) H.threads = 1; }   // (it plays on one thread then; tests: BFT.sim runs code where the simulation is, protocol query eval)
+        // the page's simulation budget (js/active.js: the remembered setting, ?budget=, off in an automated browser), which the worker's
+        // or the world server's copy can't know (no localStorage there, and the world server's Node has a navigator that never says webdriver)
+        H.budget();
+        // an automated browser plays on one region worker unless the URL asks for more (the world server's Node has a navigator of its own that never says so)
+        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) { w.postMessage({ auto: true, workers: urlWorkers().workers }); if (!urlWorkers().workers) H.threads = 1; }   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
         BF.world.replica = true;
         BF.glog.remote(list => client.log(list));
         glog("INFO", server ? "The simulation runs on the world server (" + location.host + ", ready in " + Math.round(performance.now() - t0) + " ms)" + (w.hello.held ? "; it holds world \"" + w.hello.held.name + "\", paused since its page closed" : "")
@@ -209,6 +212,13 @@ H.saves = function (q) {
 H.eval = function (src, arg) {
   if (!H.worker) return Promise.resolve().then(() => (0, eval)("(" + src + ")")(arg));
   return new Promise((resolve, reject) => BF.client.query("eval", { src, arg }, r => (r && r.ok ? resolve(r.value) : reject(new Error("in the simulation: " + (r && (r.error || r.why)))))));
+};
+// The pause menu's Simulated villages setting to where the simulation is (bug-081): {budget: {on, budget}} outside the protocol, as a
+// worker's page posts {test}; the world server keeps it for the threads this page plays on next (server/world.js)
+H.budget = function () {
+  if (!H.worker || !BF.active || !BF.proto.worker.w) return;
+  const o = BF.active.opts();
+  BF.proto.worker.w.postMessage({ budget: { on: o.on, budget: o.budget } });
 };
 // to the world server, outside the protocol (the debug feed's page part, js/debugfeed.js)
 H.post = m => { if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage(m); };
