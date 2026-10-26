@@ -43,7 +43,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     return BFT.villages(3000).filter(v => v && v.pop >= 15 && (v.buildings || []).some(x => x.type === 'pasture')).slice(0, 6).map(v => ({ x: v.x, y: v.y, z: v.z, pop: v.pop }));
   });
   await lib.sim(pg, () => {
-    const WATCH = globalThis.__WATCH = ['cake', 'cake_slice', 'pumpkin_pie', 'sugar', 'sugar_cane', 'pumpkin', 'egg', 'wheat_item', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'bucket'];
+    const WATCH = globalThis.__WATCH = ['cake', 'cake_slice', 'pumpkin_pie', 'sugar', 'sugar_cane', 'pumpkin', 'egg', 'wheat_item', 'milk_bottle', 'milk_bucket', 'glass_bottle', 'bucket', 'water_bucket'];
     const R = globalThis.__rec = { key: null, lines: [], restock: [], trades: [], baked: { cake: 0, pie: 0 }, kits: 0, happy: [], soldTreats: 0 };
     const mine = m => m && m.village && m.village.key === R.key;
     const oLog = BF.vlog.log;
@@ -142,7 +142,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     R.bakerEnd = { alive: !bk.dead, inv: bk.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count).join(' '), holdings: BF.baker.holdings(bk) };
     R.log = Object.entries(BF.baker.log.reduce((a, e) => (a[e.kind] = (a[e.kind] || 0) + 1, a), {})).map(([k, n]) => k + ':' + n).join(' ');
     R.holders = {};
-    for (const n of ['cake_slice', 'pumpkin_pie', 'cake', 'sugar_cane', 'pumpkin', 'glass_bottle']) R.holders[n] = globalThis.__villagers().filter(m => globalThis.__count(m, n) > 0).map(m => m.profession + ':' + globalThis.__count(m, n)).join(' ');
+    for (const n of ['cake_slice', 'pumpkin_pie', 'cake', 'sugar_cane', 'pumpkin', 'glass_bottle', 'bucket', 'water_bucket', 'milk_bucket']) R.holders[n] = globalThis.__villagers().filter(m => globalThis.__count(m, n) > 0).map(m => m.profession + ':' + globalThis.__count(m, n)).join(' ');
     delete R.bk;
     return R;
   });
@@ -178,8 +178,10 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
   ok('no glass bottles from nothing (only hire kits and the glassmaker)', R.end.glass_bottle + R.end.milk_bottle <= R.start.glass_bottle + R.start.milk_bottle + 30 * R.kits + R.beeKitBottles * R.beeKits + glassMade,
     [R.start.glass_bottle + R.start.milk_bottle, R.kits, R.beeKits, glassMade, R.end.glass_bottle + R.end.milk_bottle]);
   const bucketsMade = sum(/\(Toolsmith\) made Bucket/), bucketsIn = traded(x => x[2] === 'bucket' && !x[4]);   // the toolsmith makes them from iron; a merchant may bring some
-  ok('no buckets from nothing (start + kits + made by the toolsmith + brought from other villages)', R.end.bucket + R.end.milk_bucket <= R.start.bucket + R.start.milk_bucket + R.kits + bucketsMade + bucketsIn,
-    [R.start.bucket + R.start.milk_bucket, R.kits, bucketsMade, bucketsIn, R.end.bucket + R.end.milk_bucket]);
+  // (full or empty: a builder pouring a well's water gets its bucket back empty, js/builder.js)
+  const buckets = t => t.bucket + t.milk_bucket + t.water_bucket;
+  ok('no buckets from nothing (start + kits + made by the toolsmith + brought from other villages)', buckets(R.end) <= buckets(R.start) + R.kits + bucketsMade + bucketsIn,
+    [buckets(R.start), R.kits, bucketsMade, bucketsIn, buckets(R.end), R.holders.bucket, R.holders.water_bucket, R.holders.milk_bucket]);
   ok('the baker never held a bucket or milked', !R.bucketSeen);
   ok('villagers bought treats from the baker', R.soldTreats > 0, R.soldTreats);
   ok('the treats happiness term counted villagers', R.happy.some(x => x > 0), Math.max(0, ...R.happy.filter(x => x != null)));
