@@ -276,7 +276,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was"];
+  "fleeJitter", "gLos", "was", "planW", "planL", "planG"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -464,13 +464,23 @@ BF.req.on("explode", req => {
 });
 // spawn: data.make() makes the mob (and links it) when the request applies, so ids come in requester order; it returns the mob, or
 // null when what it needed is gone (a parent, its bread, the bed).
+// data.maker: [name, ...args], the same make (and check) again from plain data, BF.mobs.makers[name](...args) -> [make, check]: another
+// worker that files this request has no copy of the sender's make (spec r15-39, js/rworkers.js).
 BF.req.on("spawn", req => {
-  const m = req.data.make();
+  const d = req.data;
+  let make = d.make;
+  if (typeof make !== "function" && d.maker) {
+    const f = makers[d.maker[0]], mc = f ? f(...d.maker.slice(1)) : null;
+    if (mc) make = mc[1] ? () => (mc[1]() ? mc[0]() : null) : mc[0];
+  }
+  if (typeof make !== "function") return { ok: false, why: "no maker" };
+  const m = make();
   return m ? { ok: true, mob: m.id } : { ok: false, why: "refused" };
 }, { global: true });   // from the global inbox after the regions (spec r15-33): ids come in requester order over the whole world
-function spawnLater(from, what, make, check) {
+const makers = {};
+function spawnLater(from, what, make, check, maker) {
   if (!inThink()) return make();
-  BF.req.send("spawn", what, { make: check ? () => (check() ? make() : null) : make }, from);
+  BF.req.send("spawn", what, { make: check ? () => (check() ? make() : null) : make, maker: maker || null }, from);
   return null;
 }
 // Claims (BF.claims): kinds register free(m, data) -> null when the claim may be taken, else why not; take(m, data); and
@@ -1085,25 +1095,36 @@ let planBudget = 0;
 // later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
 // waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
 // village ticks after it, in a fixed order) searches share planBudget as before.
-const PLANS = 2, KEEP = 20, planWant = new Map();   // mob -> [tick it first asked, tick it last asked]
-const planGrant = new Map();   // mob -> tick granted (kept KEEP ticks: a far mob thinks only 4 times a game second)
+// The waiting list and the grants live on the mobs (ai.planW: the tick it first asked, planL: last asked, planG: granted), not in a
+// module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
+// table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
+// ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
+const PLANS = 2, KEEP = 20;
 let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
+const lapsed = (v, t) => v > t || v < t - KEEP;
 function grantPlans() {
-  const t = ++planTick;
-  for (const [m, g] of planGrant) if (m.removed || g < t - KEEP) planGrant.delete(m);
-  if (!planWant.size) return;
-  const w = [];
-  for (const [m, a] of planWant) { if (m.removed || m.dead || a[1] < t - KEEP) planWant.delete(m); else w.push([m, a[0]]); }
-  w.sort((a, b) => a[1] - b[1] || idNum(a[0]) - idNum(b[0]));
-  for (let i = 0; i < w.length && i < PLANS; i++) { planGrant.set(w[i][0], t); planWant.delete(w[i][0]); }
+  const t = ++planTick, w = [];
+  for (const m of list) {
+    const a = m.ai;
+    if (!a) continue;
+    if (a.planG != null && (m.removed || lapsed(a.planG, t))) a.planG = undefined;
+    if (a.planW == null) continue;
+    if (m.removed || m.dead || lapsed(a.planL, t) || a.planW > t) { a.planW = a.planL = undefined; continue; }
+    w.push(m);
+  }
+  if (!w.length) return;
+  w.sort((a, b) => a.ai.planW - b.ai.planW || idNum(a) - idNum(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+  for (let i = 0; i < w.length && i < PLANS; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
 }
 function takePlan() {
   const m = curMob;
   if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
-  if (planGrant.delete(m)) return true;
-  const t = planTick, a = planWant.get(m);
-  if (a) a[1] = t; else planWant.set(m, [t, t]);
+  const a = m.ai;
+  if (!a) return false;
+  if (a.planG != null) { a.planG = undefined; return true; }
+  const t = planTick;
+  if (a.planW != null) a.planL = t; else { a.planW = t; a.planL = t; }
   return false;
 }
 const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
@@ -2623,7 +2644,10 @@ BF.mobs = {
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
     // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
-    for (const m of BF.rtick ? BF.rtick.plan(list) : list.slice()) {
+    // with several workers (spec r15-39, js/rworkers.js) this worker thinks only the regions it owns; the others' changes come after the loop
+    const RW = BF.rworkers, order = BF.rtick ? BF.rtick.plan(list) : list.slice();
+    for (const m of RW && RW.active ? RW.beginThink(order) : order) {
+      if (RW && RW.active) RW.thinking(m);
       if (m.removed) continue;
       let h = dt;
       if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
@@ -2642,6 +2666,7 @@ BF.mobs = {
       if (pon) PF.lap(PF.mobCat(m));
     }
     commitMoves();
+    if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
     updateArrows(dt);
     PF.lap(PC.other);
     if (BF.builder) BF.builder.tick(dt);
@@ -2694,7 +2719,8 @@ BF.mobs = {
   // Debug helper: spawn a mob with its feet at (x, y, z). Villagers take a profession and a style
   // ("plains" | "desert" | "snowy" | "savanna" | "taiga" or 0..4; default from the biome).
   spawn(type, x, y, z, variant, style) { return ready ? createMob(type, x, y, z, variant, style) : null; },
-  spawnLater,   // spawnLater(from, place, make, check?): make() now, or as a "spawn" request in the think phase (r15-23) that runs make() if check()
+  makers, maker: (name, fn) => { makers[name] = fn; },   // maker(name, (...args) -> [make, check]): a spawnLater's make from plain data (r15-39)
+  spawnLater,   // spawnLater(from, place, make, check?, maker?): make() now, or as a "spawn" request in the think phase (r15-23) that runs make() if check()
                 // still holds when it applies; returns the mob, or null when queued
   // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
   discard(m) { if (m && !m.removed) removeMob(m); },
@@ -2868,6 +2894,10 @@ BF.mobs = {
     villagerSaves.clear();
     pendingDead.clear();
     BF.ids.reset();
+    villageT = restockT = 0;   // (and the counters and timers below, so a world started after another plays as in a fresh page: spec r15-39)
+    surfAcc = caveAcc = chunkArrT = 0; chunkArr = [];
+    planTick = planBudget = 0;
+    aiAcc = aiEma = aiN = aiWork = 0;
     if (BF.builder) BF.builder.reset();
     if (BF.bridges) BF.bridges.reset();
     if (BF.villageLife) BF.villageLife.reset();
@@ -2879,6 +2909,10 @@ BF.mobs = {
     if (BF.cowherd) BF.cowherd.reset();
     if (BF.pigFarmer) BF.pigFarmer.reset();
     if (BF.baker) BF.baker.reset();
+    if (BF.merchant) BF.merchant.reset();   // (caravan routes, path wear, prices and timers of the world before: spec r15-39 found them carried over)
+    if (BF.bees) BF.bees.reset();
+    if (BF.blockReq) BF.blockReq.reset();
+    if (BF.storage) BF.storage.reset();
   },
 };
 })();
