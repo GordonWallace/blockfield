@@ -66,6 +66,16 @@ Each villager stopped in the middle of a job is dealt with so that nothing is lo
 
 Each forced stop is written to the loading errors, with the reason.
 
+## Far villages: full detail or coarse
+Each world has a game option, **Far villages**, that sets how villages beyond your view distance are simulated. It is *Full detail* unless you change it. Set it when creating a world, from *Options* on a world's row on the title screen, or in game from *Game options* in the pause menu (see [[page:mob-spawning|game options]]). It is saved with the world, and a change in game applies from the next tick.
+
+- **Full detail**: every running village is simulated the same way, wherever you are.
+- **Coarse (faster)**: villagers, golems and village animals farther away than your view distance think 4 times a game second instead of 20. A villager walking somewhere follows its route cell by cell at its usual speed, still opening doors and gates, instead of moving with full physics. Idle strolls about the village that achieve nothing are skipped. They do the same work as at full detail: the same jobs, trades, items made and used, births and deaths, to within a few percent, for less computer time, so more villages fit in the simulation budget.
+- Anything in a fight is always simulated in full: a villager fleeing a zombie it can see, a golem with a foe or a villager to rescue, and any mob that was just hit, until a few seconds after it ends. A zombie that only wanders past a village doesn't change anything. Monsters and wild animals far away already think 4 times a game second either way.
+- When you come within view distance of a coarse village, its mobs go back to full detail at the spot they had reached on their way. That happens out of sight, so nothing jumps.
+
+The F3 overlay shows the mode on its own line: `Far villages: coarse (120 mobs)` or `Far villages: full detail`. The [[page:game-log]] notes each village switching (kind *coarse*).
+
 ## Quitting and loading again
 If you save, quit and load straight away, no game time has passed, so everything that was loaded comes back as it was: villagers, golems, wild and hostile mobs, each in the same place, facing the same way, with the same health and the same job. A village with several golems gets each of them back at its own spot. If more than about 24 seconds of game time have passed, villagers return to the usual places instead.
 

@@ -6,7 +6,7 @@ The performance meter measures how much simulation the game gets through. Its ma
 
 ## Where it shows
 
-- **F3**: the second line of the overlay, for example `Sim 774 V·s/s  1488 mob-s/s  3.2 ms/step  (villagers 2.23, monsters 0.09, ...)`, and below it the busiest village, for example `Busiest village: Oakbrook 1.6 ms/tick, max 30x`.
+- **F3**: the second line of the overlay, for example `Sim 774 V·s/s  1488 mob-s/s  3.2 ms/step  (villagers 2.23, monsters 0.09, ...)`, and below it the busiest village, for example `Busiest village: Oakbrook 1.6 ms/tick, max 30x`, and the *Far villages* mode, for example `Far villages: coarse (120 mobs)` (see [[page:village-loading]]).
 - **Debug screen** (`./run.sh`, then the debug screen on port 8001): the **Performance** card at the top shows V·s/s, the game speed it ran at, ms per step, mob-seconds per second, the villagers and mobs loaded, a bar for each part of the step and a sparkline of V·s/s over the last 2 minutes.
 
 ## What the numbers mean

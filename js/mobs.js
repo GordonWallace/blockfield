@@ -28,6 +28,16 @@ BF.polls = {
 
 const GRAVITY = 26;
 const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or the view distance) update 4 times a game second (BF.mobs.update)
+// Coarse mode for far villages (spec r15-64; the world's "Far villages" option, js/gameopts.js, off by default). Villagers, golems and
+// village animals farther than the view distance from the player think COARSE_HZ times a game second, each update covering the time since
+// the last; a coarse walker follows its A* route cell by cell at its normal speed (cellWalk) with no physics, separation, turning or
+// animation, and idle wandering that produces nothing is skipped. A mob in a fight (fighting(): hit, fleeing, a golem with a foe) is
+// fine, and stays fine FINE_HOLD s after. Decided from simulation state only (the player's position), never from timing. Off, none of
+// this runs and the world is the same as without it.
+// COARSE_PACE: a fine walker covers its route at about 0.87 of its speed (turning, slowing into each cell, steps, doors, crowds; measured
+// over seed 3's nine villages, r15-64 report), so a coarse one walks at that pace too, or it would get its work done sooner.
+const COARSE_HZ = 4, FINE_HOLD = 4, COARSE_PACE = 0.87;
+const coarseOpts = { wander: false };   // (measuring: wander: true keeps idle wandering in coarse mode, BF.mobs.coarseOpts)
 const DESPAWN_DIST = 100;   // village stock of a stopped village only: wild mobs and horses are never removed by distance (they wait with their chunk)
 const TRAVELLER_SPEED = 1.5;   // merchants and explorers walk this much faster than other villagers (village loading plan)
 
@@ -287,7 +297,7 @@ const MOB_FIELDS = [
   // set later by the game's systems
   "id", "xp", "trades", "inv", "life", "restockDay", "_res", "_rs", "_ri", "slotKey", "bedKey", "jobStocked", "jobsite", "onLadder", "starving",
   "_agePass", "_ageT", "vname", "priceDay", "store", "fshop", "eggc", "job", "idleT", "tsm", "farm", "flt", "cshop", "bs", "kitFor", "vtask", "ex",
-  "fo", "shp", "pkp", "pgk", "pgc", "stb", "furn", "mi", "mc", "bkr", "beeKit", "bkp", "patrol", "_farT", "mateId", "cow", "calf", "_k", "wildB",
+  "fo", "shp", "pkp", "pgk", "pgc", "stb", "furn", "mi", "mc", "bkr", "beeKit", "bkp", "patrol", "_farT", "_crsT", "_fineT", "mateId", "cow", "calf", "_k", "wildB",
   "pig", "piglet", "hen", "chick", "sheep", "penKey", "penVillageId", "_shorn", "lamb", "coopKey", "styKey", "horse", "kind", "ctl", "escrow",
   "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "growing", "parents", "_swT",
   "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
@@ -426,6 +436,7 @@ function hitNow(m, amount, knockDir, byPlayer, cause) {
 }
 
 function kill(m, byPlayer) {
+  if (BF.perf) { const D = BF.perf.count.deaths, k = m.type + ":" + (m.lastHurt || "unknown causes"); D[k] = (D[k] || 0) + 1; }   // (tools/perf/activity.js)
   m.dead = true;
   m.deathT = 0;
   m.hp = 0;
@@ -985,6 +996,17 @@ function wanderAI(m, dt, out) {
   }
 }
 
+// Coarse idle (spec r15-64): a wander that produces nothing is skipped; its timer runs on, so walks end and the next ones start as before.
+function coarseIdle(m, dt) {
+  const ai = m.ai;
+  ai.detour = null;
+  ai.t -= dt;
+  if (ai.t <= 0) {
+    if (ai.mode === "idle" && R(m).next() < 0.6) { ai.mode = "walk"; ai.tx = m.position.x; ai.tz = m.position.z; ai.t = rnd(R(m), 3, 7); }
+    else { ai.mode = "idle"; ai.t = rnd(R(m), 2, 6); }
+  }
+}
+
 function hostileAI(m, dt, out) {
   const ai = m.ai, T = m.def;
   const p = playerAlive() && !creative() && !(BF.player && BF.player.hiddenInTent) ? player() : null;   // asleep in a tent: unseen
@@ -1281,6 +1303,7 @@ let planBudget = 0;
 // ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
 const PLANS = 2, KEEP = 20;
 let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
+let coarseStep = false, walked = false, coarseN = 0;   // this update is a coarse one; its route walk moved the mob (cellWalk); coarse mobs this tick
 let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
@@ -1553,6 +1576,7 @@ function pathOut(m) {
 function followRoute(m, dt, out, speed, ai = m.ai) {
   const r = ai.route;
   if (!r || ai.ri >= r.length) return "done";
+  if (coarseStep && m === curMob) { const w = cellWalk(m, dt, speed, ai); if (w) return w; }   // (coarse mode: cell by cell)
   const c = r[ai.ri], dx = c[0] + 0.5 - m.position.x, dz = c[2] + 0.5 - m.position.z, d = Math.hypot(dx, dz);
   // reached: within 0.3 of its centre, and on a ladder only once the feet are in that cell
   if (d < 0.3 && (m.onLadder ? Math.floor(m.position.y + 0.01) === c[1] : Math.abs(m.position.y - c[1]) < 1.1)) { ai.ri++; ai.stuckT = 0; return ai.ri >= r.length ? "done" : "going"; }
@@ -1562,6 +1586,76 @@ function followRoute(m, dt, out, speed, ai = m.ai) {
   out.x = dx / d * s; out.z = dz / d * s;
   m.lookAt = null;
   return "going";
+}
+// The coarse walker (spec r15-64): along the route cell by cell, speed * dt blocks this update, without physics. Per cell it checks what the
+// fine walker would run into: a closed door or gate (a villager waits: villagerDoors opens it, as for the fine walker), a cell it can't
+// stand in or a corner it can't cut (it stops there, and if it hasn't moved this update the fine walker's steering does the update and
+// replans as it would). Off its route (knocked, fallen, swimming): the fine walker's steering as well. Feet move up or down a block at
+// the cell edge, on ladders smoothly. -> "done" | "going" | "stuck" | null (steer as the fine walker)
+function cellWalk(m, dt, speed, ai) {
+  if (!m.onGround || m.inWater || m.knockT > 0 || m.riding) return null;
+  speed *= COARSE_PACE;
+  if (m.profession === "merchant" || m.profession === "explorer") speed *= TRAVELLER_SPEED;   // (updateMob speeds their steering up alike)
+  const r = ai.route, p = m.position;
+  let left = speed * dt, moved = false, lx = 0, lz = 0, cx = Math.floor(p.x), cz = Math.floor(p.z);   // (cx, cz: the cell it walks from)
+  while (ai.ri < r.length) {
+    const c = r[ai.ri], dx = c[0] + 0.5 - p.x, dz = c[2] + 0.5 - p.z, dy = c[1] - p.y, d = Math.hypot(dx, dz);
+    if (d > 1.6 || Math.abs(dy) > 1.1) break;   // not the next cell along: the fine walker's steering
+    const bk = blockAt(c[0], c[1], c[2]), door = bk.door || bk.gate;
+    if (door && !door.open) {
+      if (m.type !== "villager" || moved) break;
+      ai.stuckT = (ai.stuckT || 0) + dt;
+      if (ai.stuckT > 6) return "stuck";
+      m.vel.set(0, 0, 0); walked = true;
+      return "going";
+    }
+    if (!walkCell(c[0], c[1], c[2]) && !ladderCell(c[0], c[1], c[2])) break;
+    if (cx !== c[0] && cz !== c[2] && !(walkCell(cx, c[1], c[2]) && walkCell(c[0], c[1], cz))) break;   // a corner: both sides open
+    const ladder = d < 0.3, cost = ladder ? Math.abs(dy) * speed / LADDER_UP : d;
+    if (cost <= left) {
+      p.x = c[0] + 0.5; p.z = c[2] + 0.5; p.y = c[1]; left -= cost; lx = dx || lx; lz = dz || lz;
+      ai.ri++; ai.stuckT = 0; moved = true; cx = c[0]; cz = c[2];
+      continue;
+    }
+    const k = left / cost, ox = p.x, oy = p.y, oz = p.z;
+    p.x += dx * k; p.z += dz * k;
+    if (ladder) p.y += dy * k; else if (d * (1 - k) <= (dy > 0 ? 0.55 + m.halfWidth : 0.45 - m.halfWidth)) p.y = c[1];   // up a step as its body reaches it, down one once its body is off
+    // between two cells its body may brush a wall (it set off from off the centre line, or past a door frame): it stays put this time
+    if (!ladder && BF.world.boxCollides(p.x, p.y + 0.01, p.z, m.halfWidth, m.height - 0.05)) { p.x = ox; p.y = oy; p.z = oz; break; }
+    lx = dx || lx; lz = dz || lz; moved = true;
+    break;
+  }
+  if (!moved) return null;
+  walked = true;
+  const l = Math.hypot(lx, lz) || 1;
+  m.vel.set(lx / l * speed, 0, lz / l * speed);
+  if (lx || lz) m.yaw = Math.atan2(lx, lz);
+  m.onGround = true; m.fallStart = p.y; m.lookAt = null;
+  m.onLadder = m.type === "villager" && onLadder(m);
+  return ai.ri >= r.length ? "done" : "going";
+}
+// A mob in a fight is never coarse (spec r15-64): just hit or knocked, fleeing (a villager from a zombie it sees, an animal from a hit),
+// a golem with a foe or a villager to rescue, or angry at the player.
+function fighting(m) {
+  const ai = m.ai;
+  if (m.hurtT > 0 || m.knockT > 0 || ai.fleeT > 0) return true;
+  if (m.type === "villager") { const t = ai.threat; return !!(t && !t.dead && !t.removed); }
+  if (m.def.golem) return !!(ai.foe || ai.rescue || ai.provoked > 0);
+  return false;
+}
+// Which mobs may be coarse: villagers, golems and village animals (owned horses and stock); not wild mobs and monsters (FAR_HZ already
+// covers them past the view distance: the mob loop asks only for the others), nor anything ridden, riding, led or dying.
+const coarseKind = m => !m.hostile && !m.dead && !m.riding && !m.rider && !m.ledBy && (m.type === "villager" || m.def.golem || !isWild(m));
+// Back to full detail: the mob is put at the centre of the route cell it last reached (its route kept), so the fine walker goes on from
+// a cell it can stand in. Beyond the view distance: never seen.
+function goFine(m) {
+  m._crsT = undefined;
+  const ai = m.ai, r = ai.route;
+  if (r && ai.ri > 0 && ai.ri <= r.length && m.onGround) {
+    const c = r[ai.ri - 1];
+    if (Math.abs(c[0] + 0.5 - m.position.x) <= 1 && Math.abs(c[2] + 0.5 - m.position.z) <= 1 && Math.abs(c[1] - m.position.y) <= 1) m.position.set(c[0] + 0.5, c[1], c[2] + 0.5);
+  }
+  m.vel.set(0, 0, 0);
 }
 function isOccupied(x, y, z) {
   const hit = (p, hw, h) => p.x + hw > x && p.x - hw < x + 1 && p.z + hw > z && p.z - hw < z + 1 && p.y < y + 2 && p.y + h > y;
@@ -1830,6 +1924,8 @@ function villagerAI(m, dt, out) {
       ai.tx = ax + rnd(R(m), -20, 20); ai.tz = az + rnd(R(m), -20, 20);
     }
   }
+  // coarse (spec r15-64): no idle wandering, unless it is heading back from too far out
+  if (coarseStep && m === curMob && !coarseOpts.wander && !(V && !away && Math.hypot(ax - m.position.x, az - m.position.z) > 40)) { coarseIdle(m, dt); return; }
   wanderAI(m, dt, out);
   if (m.child && BF.breeding) BF.breeding.childMove(m, dt, out);   // children run about (js/breeding.js)
 }
@@ -2009,6 +2105,7 @@ function updateMob(m, dt) {
   else if (m.type === "cow" && BF.cowherd && BF.cowherd.cowAI(m, dt, _desired)) { /* led home, following wheat, or to a mate (js/cowherd.js) */ }
   // Pig breeding lives in js/pigfarmer.js (feed, mates, piglets; wild and sty pigs alike; js/wildlife.js makes wild pairs willing)
   else if (m.type === "pig" && BF.pigFarmer && BF.pigFarmer.pigAI(m, dt, _desired)) { /* led home, following feed, or to a mate (js/pigfarmer.js) */ }
+  else if (coarseStep && !coarseOpts.wander) coarseIdle(m, dt);   // (coarse: an animal's idle wandering is skipped)
   else wanderAI(m, dt, _desired);
   if (m.pen && BF.shepherd) BF.shepherd.contain(m, _desired);   // a penned sheep never walks into the fence or out of the gate gap
   if (m.coop && BF.poultry) BF.poultry.contain(m, _desired);   // nor does a coop chicken
@@ -2022,6 +2119,7 @@ function updateMob(m, dt) {
 
   // ---- physics ----
   if (m.rider) {   // ridden (js/horses.js moves it every real-time frame)
+  } else if (walked) {   // a coarse walker moved along its route (cellWalk): no physics
   } else if (m.riding && BF.boats && BF.boats.seat(m)) {   // sitting in a boat (js/boats.js): the boat carries it, no walking, falling or fall damage
     m.onGround = true; m.inWater = false; m.headInWater = false; m.onLadder = false; m.fallStart = m.position.y;
   } else {
@@ -2045,7 +2143,7 @@ function updateMob(m, dt) {
     if (T.slowFall && m.vel.y < -2) m.vel.y = -2;
     if (m.vel.y < -40) m.vel.y = -40;
   }
-  separate(m, dt);
+  if (!coarseStep) separate(m, dt);   // (coarse: no separation)
   if (T.village) keepOutOfPits(m);   // never walked or pushed over the edge into a well (bug-061)
 
   // standing still on solid ground with nothing pushing it: no move to make (most grazing animals most of the time)
@@ -2099,7 +2197,7 @@ function updateMob(m, dt) {
     }
   }
   m.onFire = burning && !m.dead;
-  if (m.dead) return;
+  if (m.dead || coarseStep) return;   // coarse (spec r15-64): no turning, head look or animation; the fine updates set them again
 
   // ---- orientation ----
   const hs = Math.hypot(m.vel.x, m.vel.z);
@@ -2775,11 +2873,26 @@ function newVillageRec(key, v) {
   BF.ids.put(rec, key);
   return rec;
 }
+// INFO "coarse" when a village's villagers go coarse or back to full detail (spec r15-64), checked once a game second. The state is kept
+// on the village record (hidden from saves and the hash); a village never coarse never gets it.
+function noteCoarse() {
+  for (const rec of villages.values()) {
+    if (!rec.members || (!rec.members.length && rec._coarse === undefined)) continue;
+    let n = 0;
+    for (const m of rec.members) if (m._crsT !== undefined) n++;
+    const c = n > 0;
+    if (c === !!rec._coarse) continue;
+    if (rec._coarse === undefined && !c) continue;
+    Object.defineProperty(rec, "_coarse", { value: c, writable: true, enumerable: false, configurable: true });
+    if (BF.glog) BF.glog.log("INFO", "coarse", c ? "Past the view distance: coarse (" + n + " of its " + rec.members.length + " villagers and golems)" : "Back to full detail", { village: rec });   // (the line names the village)
+  }
+}
 function updateVillages(dt) {
   for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
   villageT -= dt;
   if (villageT > 0) return;
   villageT = 1;
+  noteCoarse();
   const wg = BF.worldgen;
   if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return;
   const pp = player().position;
@@ -2940,6 +3053,9 @@ BF.mobs = {
     // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
     const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
+    // far villages coarse (spec r15-64): past the view distance, from the option in force at this tick's start
+    const coarseOn = !!(pp && BF.gameOpts && BF.gameOpts.coarse()), view2 = (BF.world.viewDist * BF.CS) ** 2;
+    coarseN = 0;
     for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
     // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
     // with several workers (spec r15-39, js/rworkers.js) this worker thinks only the regions it owns; the others' changes come after the loop
@@ -2948,7 +3064,9 @@ BF.mobs = {
       if (RW && RW.active) RW.thinking(m);
       if (m.removed) continue;
       let h = dt;
-      if (pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner))) {
+      const farRule = pp && !m.riding && !m.rider && (m.hostile || isWild(m) || (m.horse && !m.horse.owner));
+      if (farRule) {
+        if (m._crsT !== undefined) m._crsT = undefined;   // (FAR_HZ, not coarse mode: a stable horse let go)
         const q = seen(m.position, pp, _sA), dx = m.position.x - q.x, dz = m.position.z - q.z;
         if (dx * dx + dz * dz > far2) {
           if (m._farT == null) m._farT = R(m).next() / FAR_HZ;
@@ -2957,9 +3075,23 @@ BF.mobs = {
           h = m._farT; m._farT = 0;
         } else m._farT = null;
       }
+      let coarse = false;
+      if (coarseOn && !farRule && coarseKind(m)) {
+        const q = seen(m.position, pp, _sA), dx = m.position.x - q.x, dz = m.position.z - q.z, far = dx * dx + dz * dz > view2;
+        if (far) { if (fighting(m)) m._fineT = FINE_HOLD; else if (m._fineT > 0) m._fineT -= dt; }
+        if (far && !(m._fineT > 0)) {
+          coarseN++;
+          if (m._crsT === undefined) m._crsT = R(m).next() / COARSE_HZ;   // (spread out, so they don't all think on the same tick)
+          m._crsT += dt;
+          if (m._crsT < 1 / COARSE_HZ) continue;
+          h = m._crsT; m._crsT = 0; coarse = true;
+        } else if (m._crsT !== undefined) goFine(m);
+      } else if (m._crsT !== undefined) goFine(m);   // (the option turned off, or it went into a fight, a boat or a lead)
       const st = pon ? PF.stateOf(m) : 0;   // what it was doing, for the meter's cost by state (spec r15-60)
       curMob = BF.rand.thinker = m;
+      coarseStep = coarse; walked = false;
       try { updateMob(m, h); } catch (e) { console.error(e); removeMob(m); }
+      coarseStep = false;
       curMob = BF.rand.thinker = null;
       hold(m);
       mobUpdates++;
@@ -3043,6 +3175,9 @@ BF.mobs = {
   byId: id => BF.ids.get(id),
   newVillageRec,
   // A village that stops (js/villagesim.js): all its villagers, golems and owned animals leave together (their trading state is kept).
+  coarseOpts,
+  coarseNow: () => coarseStep,   // the mob thinking now is on a coarse update (spec r15-64)
+  coarse: () => ({ on: !!(BF.gameOpts && BF.gameOpts.coarse()), n: coarseN }),   // far villages (spec r15-64): the mode in force, mobs coarse last tick (F3)
   updates: () => mobUpdates,   // mob updates run since load (test/perf-activity.js: BF.perf.byState counts each one once)
   aiTime: () => aiEma,
   aiWork: () => aiWork,
