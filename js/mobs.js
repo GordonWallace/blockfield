@@ -1050,7 +1050,7 @@ function pickWander(m, r) {
   if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
   if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return;   // sty pigs root about inside the sty (js/pigfarmer.js)
   if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
-  for (let k = 0; k < (m.def.golem ? 8 : 1); k++) {   // a golem keeps to spots it fits (golemFits)
+  for (let k = 0; k < (m.def.golem ? 16 : 1); k++) {   // a golem keeps to spots it fits (golemFits; by a wall half the spots round it can be inside)
     const a = Math.random() * Math.PI * 2, d = rnd(3, r);
     m.ai.tx = m.position.x + Math.cos(a) * d;
     m.ai.tz = m.position.z + Math.sin(a) * d;
@@ -1718,8 +1718,12 @@ function golemChase(m, dt, out) {
     if (Math.hypot(end[0] + 0.5 - o.position.x, end[2] + 0.5 - o.position.z) > 4 || followRoute(m, dt, out, sp, C) !== "going") ai.chase = null;   // the foe moved off, or the route is walked
     return true;
   }
-  if (ai.blockedT > DETOUR_AFTER && planBudget > 0) {
-    planBudget--; ai.blockedT = 0;
+  // Held up: pushing straight at a wall, or sliding along one (a foe on the far side of a house) without getting any closer to the foe.
+  const d = m.position.distanceTo(o.position);
+  if (d < (ai.chaseBest == null ? Infinity : ai.chaseBest) - 1 || d < 3) { ai.chaseBest = d; ai.chaseSlowT = 0; }
+  else ai.chaseSlowT = (ai.chaseSlowT || 0) + dt;
+  if ((ai.blockedT > DETOUR_AFTER || ai.chaseSlowT > 3) && planBudget > 0) {
+    planBudget--; ai.blockedT = 0; ai.chaseSlowT = 0; ai.chaseBest = null;
     const [fx, fy, fz] = feetCell(m), [ox, oy, oz] = feetCell(o);
     const route = findPath(fx, fy, fz, { x: ox, z: oz, at: (x, y, z) => Math.abs(x - ox) + Math.abs(z - oz) <= 2 && Math.abs(y - oy) <= 1 }, 1500, true);
     if (route && route.length) ai.chase = { route, ri: 0, stuckT: 0, foe: o };
@@ -1782,7 +1786,7 @@ function golemAI(m, dt, out) {
   }
   if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14 && !(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
     ai.mode = "walk"; ai.t = rnd(5, 8);
-    for (let k = 0; k < 8; k++) { ai.tx = px + rnd(-6, 6); ai.tz = pz + rnd(-6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
+    for (let k = 0; k < 16; k++) { ai.tx = px + rnd(-6, 6); ai.tz = pz + rnd(-6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
   }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;

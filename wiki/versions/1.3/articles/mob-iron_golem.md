@@ -12,7 +12,7 @@ A golem attacks any hostile mob within 16 blocks. Its hit is heavy enough to kil
 2. **Revenge.** Whatever hurt the golem, as long as it is within 32 blocks.
 3. **The nearest hostile** within 16 blocks.
 
-A golem runs straight at its target. When a wall is in the way (a monster inside a house, or behind one), it looks for a route round with room for its height; if there is none, it leaves that monster alone for a minute and goes back to its patrol rather than pressing against the wall.
+A golem runs straight at its target. When a wall is in the way (a monster inside a house, or behind one), or it has gone a few seconds without getting any closer, it looks for a route round with room for its height; if there is none, it leaves that monster alone for a minute and goes back to its patrol rather than pressing against the wall.
 
 Monsters fight back: zombies, spiders and skeletons that are not busy with you will attack a golem within 10 blocks, hurting it for 4, 3 and 3 to 5 points. A monster the golem has hit targets it for 12 seconds, even over you. Creepers ignore golems.
 
