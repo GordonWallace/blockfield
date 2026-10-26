@@ -2,7 +2,7 @@
 // Villager-seconds meter (spec r15-01, js/perf.js). In the seed 123 village: with the meter off, 50 steps run no timing point (BF.perf.laps
 // stays 0); with it on, 200 steps of 0.05 s give V·s/s within 1% of villagers x game seconds / real seconds measured here, and the split
 // by subsystem adds up to within 10% of the ms per step measured here, also over a run longer than the meter's 5 s window. Then F3 shows the Sim line, a frozen game greys it, and the
-// game log has the meter's on and off lines. The meter and the steps are the simulation's (lib.sim, spec r15-43); F3 is the page's, its
+// game log has the meter's on and off lines. F3 also shows the busiest village's ms per tick and top speed (spec r15-60). The meter and the steps are the simulation's (lib.sim, spec r15-43); F3 is the page's, its
 // Sim line from the f3 query (off the page, F3 showing turns the meter on there).
 // node test/run.js /tmp/pm test/perf-meter.js [--host page|worker|server]
 const lib = require('./lib');
@@ -49,6 +49,9 @@ module.exports = async (pg) => {
   await pg.waitForFunction(() => /Sim \d+ V·s\/s .* ms\/step/.test(document.getElementById('debug').textContent), null, { timeout: 30000, polling: 250 }).catch(() => fails.push('F3 has no Sim line'));
   const f3 = await pg.evaluate(() => document.getElementById('debug').textContent.split('\n').find(l => l.startsWith('Sim ')));
   console.log('F3: ' + f3);
+  // r15-60: the busiest village's line below it
+  await pg.waitForFunction(() => /\nBusiest village: .+ [\d.]+ ms\/tick, max \d+x/.test(document.getElementById('debug').textContent), null, { timeout: 30000, polling: 250 }).catch(() => fails.push('F3 has no busiest village line'));
+  console.log('F3: ' + await pg.evaluate(() => document.getElementById('debug').textContent.split('\n').find(l => l.startsWith('Busiest village'))));
   await pg.evaluate(() => BF.warp.freeze());
   await pg.waitForFunction(() => !!document.querySelector('#debug span'), null, { timeout: 30000, polling: 250 }).catch(() => fails.push('frozen game: the Sim line is not greyed'));
   // (the frozen warp reaches the simulation with its next message, and the meter goes stale once no step has run for a while: poll for it)

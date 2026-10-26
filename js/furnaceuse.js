@@ -289,17 +289,18 @@ function offersScan(m, f, loose, skip, rec) {
 // offers and the wares a seller gets from the restock. Shoppers ask several times a plan (a toolsmith prices every material), and most of a
 // scan was matching each of a big village's offers against f; now f sees each sold item once. The table holds only which offers exist:
 // whether a seller can trade now (canSell, blockReason: asleep, out of stock, keeping it, hungry) and its stock are checked live, so the
-// answers are the full scan's. It is rebuilt when the member list, a member's offer list or a profession changes (offers are only ever
-// added by replacing or pushing onto the list, js/market.js sync, trading.js addXp; prices change amounts, which are read live).
+// answers are the full scan's. It is rebuilt when the member list, a member's offer list, a profession or that profession's restock list
+// (trading.js PRODUCE, replaced by tests) changes (offers are only ever added by replacing or pushing onto the list, js/market.js sync,
+// trading.js addXp; prices change amounts, which are read live).
 const tables = new WeakMap();   // village record -> table
 function offerTable(R) {
-  const ms = R.members || [], t = tables.get(R);
+  const ms = R.members || [], t = tables.get(R), P = TR().PRODUCE;
   if (t && t.ms === ms && t.n === ms.length) {
     const k = t.keys;
     let ok = true;
-    for (let i = 0, j = 0; i < ms.length; i++, j += 4) {
-      const v = ms[i], tr = v && Array.isArray(v.trades) ? v.trades : null;
-      if (k[j] !== v || k[j + 1] !== tr || k[j + 2] !== (tr ? tr.length : 0) || k[j + 3] !== (v && v.profession)) { ok = false; break; }
+    for (let i = 0, j = 0; i < ms.length; i++, j += 5) {
+      const v = ms[i], tr = v && Array.isArray(v.trades) ? v.trades : null, pr = v && v.profession;
+      if (k[j] !== v || k[j + 1] !== tr || k[j + 2] !== (tr ? tr.length : 0) || k[j + 3] !== pr || k[j + 4] !== P[pr]) { ok = false; break; }
     }
     if (ok) return t;
   }
@@ -307,7 +308,7 @@ function offerTable(R) {
   let i = 0;
   for (const v of ms) {
     const tr = v && Array.isArray(v.trades) ? v.trades : null;
-    keys.push(v, tr, tr ? tr.length : 0, v && v.profession);
+    keys.push(v, tr, tr ? tr.length : 0, v && v.profession, P[v && v.profession]);
     for (const o of tr || []) {
       i++;
       if (o.feed || restocked(v, o.sell.id)) continue;

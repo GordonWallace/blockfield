@@ -12,10 +12,13 @@
 //    unload countdown (its villagers finish their tasks first, as for any village the player walks away from). It isn't picked again
 //    for COOL seconds.
 //  - An extra past REACH (the player went away) leaves the same way; one that became part of the minimum stops being an extra.
+// Where the simulation runs in a worker or on the world server (bug-081), the page's copy holds the setting (localStorage, ?budget=,
+// off in automated browsers) and sends it there ({budget: {on, budget}}, js/simhost.js budget), where the decisions are made and logged;
+// the pause menu's line asks the simulation for its text (the protocol's budget query).
 // Real time decides here on purpose: what the machine can afford. So that the tests and the determinism checks see the distance rule,
 // automated browsers start with it off (BF.active.set({ on: true }) or ?budget=N turns it on).
 // API: BF.active = { frame(simMs, raw), decide(px, pz, base) -> [{key, v}], isExtra(key), extras(), set({on, budget, memMB, win, hold,
-//                    cool, reach, minFps}), opts(), cycle(), text(), feed(), log(), reset(), BUDGETS }
+//                    cool, reach, minFps}, quiet), opts(), cycle(quiet) -> {on, budget}, text(), feed(), log(), reset(), BUDGETS }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -175,19 +178,21 @@ BF.active = {
   extras: () => [...extras.keys()],
   opts: () => Object.assign({}, opt),
   // tests and the pause menu (a budget chosen there is remembered)
-  set(o) {
+  // (quiet: the page's copy when the simulation is elsewhere; the simulation logs the change)
+  set(o, quiet) {
     const was = opt.on && opt.budget > 0 ? opt.budget : 0;
     for (const k in o) if (k in opt) opt[k] = k === "on" ? !!o[k] : +o[k];
-    if ("budget" in o || "on" in o) {
+    if (("budget" in o || "on" in o) && !quiet) {
       const b = opt.on && opt.budget > 0 ? opt.budget : 0;
       if (b !== was) note(b ? `Simulation budget set to ${pct(b)} of each second` : "Simulation budget off: only the nearest villages are simulated");
     }
     underMs = overMs = 0;
   },
-  cycle() {
+  cycle(quiet) {
     const cur = opt.on ? opt.budget : 0, i = BUDGETS.findIndex(b => Math.abs(b - cur) < 1e-6), b = BUDGETS[(i + 1) % BUDGETS.length];
-    this.set({ on: true, budget: b });
+    this.set({ on: true, budget: b }, quiet);
     store.set(b);
+    return { on: true, budget: b };
   },
   text,
   // the debug screen's Simulation budget card

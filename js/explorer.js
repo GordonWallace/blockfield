@@ -366,7 +366,7 @@ function pitch(m) {
     m.homeBed = m.homeBed || m.bed;
     m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
     const k = keyOf(m);
-    if (k) camps.set(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
+    if (k) campSet(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
     log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
   });
   return true;
@@ -380,10 +380,10 @@ function strike(m) {
     const id = BF.tentId(c.f, 0, 1), k = keyOf(m);
     if (BF.world.isLoaded(c.x, c.z)) {
       if (BF.world.getBlock(c.x, c.y, c.z) === id) BF.blockReq.cells(m, BF.tents.strikeCells(c.x, c.y, c.z, id), { give: [{ id: tentItem(), n: 1 }], fit: false });
-      if (k) camps.delete(k);
+      if (k) campDrop(k);
     } else {
       T().inv.add(m.inv, tentItem(), 1);
-      if (k) camps.set(k, { x: c.x, y: c.y, z: c.z, f: c.f, until: 0, returned: true, given: true });
+      if (k) campSet(k, { x: c.x, y: c.y, z: c.z, f: c.f, until: 0, returned: true, given: true });
     }
     log("strike", m, { at: c.x + "," + c.z });
   }
@@ -397,6 +397,15 @@ function strike(m) {
 // - Its village loads again before the night is over: it comes back in its tent, asleep (onSpawn).
 // - The night ends first: the tent is taken down (now, or when its land next loads) and goes back into the explorer's pack when it next loads.
 const camps = new Map();
+// Changed while the explorer thinks or in its requests' callbacks, which run only on the region worker that thinks it (spec r15-39): each
+// change goes to the other workers (js/rworkers.js channel "camp"), or a worker that missed the explorer striking its tent would take the
+// tent down a second time when the night ends (tick), and the copies' blocks would differ.
+const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); };
+const campDrop = k => { camps.delete(k); if (BF.rworkers) BF.rworkers.touch("camp", k); };
+if (BF.rworkers) BF.rworkers.channel("camp", {
+  key: k => k, get: k => k, state: k => { const e = camps.get(k); return e ? Object.assign({}, e) : null; },
+  set: (k, e) => { if (e) camps.set(k, Object.assign({}, e)); else camps.delete(k); },
+});
 const keyOf = m => (m.village && m.slot ? m.village.key + "#" + m.slot.idx : null);
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + skyT() : 0);
 // When the coming (or current) night ends, as a game day + time.
