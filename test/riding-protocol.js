@@ -190,7 +190,7 @@ async function run(b, url, mode) {
     await pg.evaluate(c => { const P = BF.player, p = P.position; const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1; P.teleport(p.x + dx / d * 6, p.y + 1, p.z + dz / d * 6); }, c0);
     await pg.waitForTimeout(5000); await settle();
     const c1 = await query('entity', { id: horseId }), p4 = await me();
-    check(dist(c1, p4) < dist(c0, p4) - 1.5, tag('the led horse follows the player'), { before: +dist(c0, p4).toFixed(2), after: +dist(c1, p4).toFixed(2) });
+    check(dist(c1, p4) < dist(c0, p4) - 1.5, tag('the led horse follows the player'), { before: +dist(c0, p4).toFixed(2), after: +dist(c1, p4).toFixed(2), c0, c1, p4 });
   }
   const errs = await pg.evaluate(() => (BF.client.world.log || []).filter(e => e.l === "ERROR").map(e => e.x).slice(0, 5));
   check(!errs.length, tag('no ERROR in the game log'), errs);
