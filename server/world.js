@@ -32,7 +32,7 @@ const { Worker } = require("worker_threads");
 const path = require("path"), fs = require("fs"), v8 = require("v8");
 const WS = require("./ws.js"), IDB = require("./idb.js"), SaveFile = require("../js/savefile.js");
 
-const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = 1 << 30;
+const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = SaveFile.MAX;   // (bytes sent; unpacked it is held to SaveFile.MAX too: bug-071)
 const SAVE_VERSION = 3;   // (js/save.js VERSION: the worlds this release opens)
 const say = s => console.log("[world] " + s);
 
@@ -216,6 +216,12 @@ function start(o) {
       const st = meta ? rivers.get(riverKey(meta.seed, meta.biomeScale)) : rivers.get(riverKey(a.seed, (a.opts || {}).biomeScale));
       if (st) srv.active.post({ server: "rivers", st });
     }
+    // Save and Quit to Title (js/save.js quit): the thread plays on as the title background, holding no saved world any more, so an
+    // export or rename of that world goes to its folder, and a page closing doesn't hold it (bug-074)
+    if (srv.active && p.h.startsWith('{"t":"meta"')) {
+      const q = JSON.parse(p.h);
+      if (q.quit && q.id && srv.active.id === q.id) { say("world " + JSON.stringify(srv.active.name) + " quit to the title screen"); srv.active.id = null; srv.active.name = null; }
+    }
     if (srv.active) srv.active.post(p, p.b ? [p.b] : []);
   }
   // a held world's thread goes once its save (from the page closing) is done
@@ -263,7 +269,7 @@ function start(o) {
     if (q.op === "rename" || q.op === "monsters") {
       const meta = worlds.meta(q.id);
       if (!meta) return { ok: false, why: "World not found" };
-      if (q.op === "rename") meta.name = String(q.name).slice(0, 40); else meta.monsters = q.monsters;
+      if (q.op === "rename") meta.name = SaveFile.clampName(q.name, meta.name); else meta.monsters = q.monsters;
       worlds.put(q.id, "meta", meta);
       // its folder follows the name, unless a thread is writing to it (then at the server's next start: savedir.js tidy)
       if (q.op === "rename" && !inUse(q.id)) try { const to = worlds.rename(q.id, meta.name); say("world " + q.id + " is in folder " + JSON.stringify(to)); } catch (e) { say("could not rename the folder of " + q.id + ": " + e.message); }
@@ -284,14 +290,15 @@ function start(o) {
     const log = head ? { head, lists: (head.batches || []).map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
     return { meta, buf: SaveFile.packSync({ game: o.version || null, meta, data, log }) };
   }
-  function importWorld(buf, keep) {
-    const rec = SaveFile.unpackSync(buf), meta = Object.assign({}, rec.meta);
+  function importWorld(rec, keep) {
+    const meta = Object.assign({}, rec.meta);
     const old = m => !m || !(m.version >= SAVE_VERSION);
     if (old(meta) || old(rec.data)) throw new Error("Made with Blockfield " + (meta.version === 2 ? "1.4" : "1.3") + ", can't be opened in " + (o.version || "1.5"));
     const had = meta.id && worlds.meta(meta.id);
     if (had && keep) return { ok: true, skipped: true, meta: had };
     if (had || !meta.id) meta.id = "w" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
     meta.lastPlayed = Date.now();
+    meta.name = SaveFile.clampName(meta.name, "Imported world");   // (as Create and Rename keep names: bug-072)
     worlds.put(meta.id, "meta", meta);
     try {
       worlds.put(meta.id, "data", rec.data);
@@ -324,10 +331,11 @@ function start(o) {
       req.on("data", d => { n += d.length; if (n > IMPORT_MAX) { over = true; req.destroy(); } else parts.push(d); });
       req.on("end", () => {
         if (over) return;
-        try { reply(200, importWorld(Buffer.concat(parts), /[?&]keep=1\b/.test(req.url))); }
-        catch (e) { say("an import failed: " + e.message); reply(400, { ok: false, why: e.message }); }
+        // (unpacked off the main thread, so the server keeps answering while a big file unpacks)
+        SaveFile.unpack(Buffer.concat(parts)).then(rec => reply(200, importWorld(rec, /[?&]keep=1\b/.test(req.url))))
+          .catch(e => { say("an import failed: " + e.message); reply(400, { ok: false, why: e.message }); });
       });
-      req.on("close", () => { if (over) reply(413, { ok: false, why: "that file is over 1 GB" }); });
+      req.on("close", () => { if (over) reply(413, { ok: false, why: "that file is over " + (IMPORT_MAX >> 20) + " MB" }); });
       return true;
     }
     reply(404, { ok: false, why: "no such saves request" });

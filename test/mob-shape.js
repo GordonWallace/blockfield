@@ -3,7 +3,7 @@
 // once and must stay in V8's fast-property mode with exactly those fields. A field some system sets on a mob that is missing from the
 // lists adds a property later: the mob changes layout and, with enough of them, drops into the slow dictionary mode that made the mob
 // loop ~25% slower before. Headless (tools/headless.js load), seed 3 at the village nearest the spawn:
-//   - every monster and animal type spawned next to the player, then the village run for some game seconds;
+//   - every monster and animal type spawned next to the player and a villager child set growing up, then the village run for some game seconds;
 //   - every live mob and ai table has fast properties (%HasFastProperties);
 //   - no mob or ai table has a field outside the lists (named, with the mob type, so the fix is to add it there).
 // Usage: node test/mob-shape.js [seed=3] [seconds=300]
@@ -32,6 +32,10 @@ for (const t of M.types) {
   if (M.spawn(t, x + 0.5, y, z + 0.5)) made++;
 }
 check(made === M.types.length, `spawned ${made} of ${M.types.length} types`);
+// a villager child that grows up during the run (bug-080: growUp set a field outside the lists, and no child grew up in a plain run)
+const kid = M.spawn('villager', Math.floor(p.x) + 2.5, Math.floor(p.y) + 1, Math.floor(p.z) + 2.5);
+const madeKid = !!(kid && BF.breeding.makeChild(kid));
+check(madeKid && kid.child && BF.breeding.growUp(kid), 'a villager child made and set growing up');
 
 const extra = new Map(), extraAi = new Map();
 let seen = 0, slow = [], slowAi = [];
@@ -47,6 +51,7 @@ const scan = () => {
 };
 const t1 = Date.now(), n = Math.round(seconds / BF.warp.TICK);
 for (let i = 0; i < n; i += 200) { h.tick(Math.min(200, n - i)); scan(); }
+check(madeKid && !kid.child, 'the child grew up during the run');
 console.log(`ran ${seconds} game s in ${((Date.now() - t1) / 1000).toFixed(0)} s; ${M.list.length} mobs now, ${seen} mob checks`);
 check(!extra.size, `no mob fields outside MOB_FIELDS` + (extra.size ? ': ' + JSON.stringify([...extra]) : ''));
 check(!extraAi.size, `no ai fields outside AI_FIELDS` + (extraAi.size ? ': ' + JSON.stringify([...extraAi]) : ''));

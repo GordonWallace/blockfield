@@ -134,7 +134,8 @@ function initSim() {
   BF.inventory.initSim();   // the recipes (no screens)
 }
 // settings: what the page's start screen and options give: villages, biomeScale, monsters, gameMode, viewDist (chunks, default 8),
-// at ("spawn" or "village": the player moves to the nearest village before the first tick; default "spawn").
+// at ("spawn" or "village": the player moves to the nearest village before the first tick; default "spawn"), extra (measuring: that
+// many more villages simulated, the nearest, js/active.js fixed).
 function headless(o) {
   o = o || {};
   const s = o.settings || {};
@@ -143,6 +144,7 @@ function headless(o) {
   BF.world.setViewDist(s.viewDist > 0 ? s.viewDist | 0 : 8);
   if (o.save) BF.save.restore(o.save, o.save.meta || null);
   else BF.newWorld(o.seed != null ? +o.seed : 1337, { villages: s.villages, biomeScale: s.biomeScale, monsters: s.monsters, gameMode: s.gameMode });
+  if (s.extra > 0) BF.active.set({ on: true, fixed: s.extra | 0, reach: 4000 });   // the nearest n villages simulated besides the minimum, up to 4000 blocks away (js/active.js)
   const village = !o.save && s.at === "village" ? toVillage() : null;
   const chunks = settle();
   BF.glog.log("INFO", "headless", "Headless simulation booted: " + (o.save ? "a save" : "seed " + BF.state.seed) +
@@ -161,6 +163,7 @@ function headless(o) {
     stateHash: () => BF.stateHash.full(),
     save: () => BF.save.snapshot(),
   };
+  if (s.extra > 0) { h.tick(40); settle(); h.ticks = 0; h.seconds = 0; }   // (the far-village check runs in the first ticks: their chunks loaded before any measuring)
   return h;
 }
 BF.boot = { ticks: simFrame, headless, stream, settle, toVillage, initSim };   // (initSim: the sim modules' hooks, once: the worker, js/simworker.js)
