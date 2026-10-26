@@ -63,7 +63,7 @@ module.exports = async (pg, out) => {
   if (typeof setup === "string") return;
 
   // grows an oak about 6-30 blocks from the forester; clears every other natural tree in its reach first so it has to fell this one
-  const grow = () => sim(pg, () => {
+  const growIn = () => sim(pg, () => {
     const A = globalThis.__A, B = BF.B, W = BF.world, F = BF.forester;
     globalThis.__clearOthers(null);
     let tries = 0;
@@ -75,12 +75,17 @@ module.exports = async (pg, out) => {
       const snap = [];
       for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) for (let dy = 1; dy <= 12; dy++) snap.push([x + dx, y + dy, z + dz, W.getBlock(x + dx, y + dy, z + dz)]);
       W.setBlock(x, y + 1, z, B.oak_sapling);
-      if (F.growTree(x, y + 1, z)) { const t = F.treeAt(x, y + 1, z); if (t) { globalThis.__T = t.base.join(); return { at: t.base, logs: t.logs.length, tries }; } }
+      // and one it can walk up to, as its own travel() asks (js/forester.js: within 2 cells of the trunk, 2 up or down; 2500 steps): a
+      // spot past a fence or a drop made it give the tree up ("no path") over and over (CI flakes, in the control and the interrupted felling)
+      const N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(A);
+      const reachable = b => !!N.findPath(fx, fy, fz, { x: b[0], z: b[2], at: (cx, cy, cz) => Math.abs(cx - b[0]) <= 2 && Math.abs(cz - b[2]) <= 2 && Math.abs(cy - b[1]) <= 2 }, 2500);
+      if (F.growTree(x, y + 1, z)) { const t = F.treeAt(x, y + 1, z); if (t && reachable(t.base)) { globalThis.__T = t.base.join(); return { at: t.base, logs: t.logs.length, tries }; } }
       for (const [sx, sy, sz, id] of snap) if (W.getBlock(sx, sy, sz) !== id) W.setBlock(sx, sy, sz, id);
       tries++;
     }
     return null;
   });
+  const grow = async () => { const t = await growIn(); console.log("tree", JSON.stringify(t)); return t; };   // (where, for a failure)
   // runs the forester until it fells a tree (or `limit` seconds): seconds spent chopping (task cut, within reach) and the fell log entry
   const watch = (limit, opts) => sim(pg, ([limit, opts]) => {
     const A = globalThis.__A, F = BF.forester, n0 = F.LOG.length, dt = 0.05, others = globalThis.__clearOthers(globalThis.__T);
@@ -134,7 +139,7 @@ module.exports = async (pg, out) => {
   const t3 = await grow();
   const r3 = await watch(240);
   const left3 = await sim(pg, () => !!BF.forester.axeOf(globalThis.__A));
-  ok("worn-out axe breaks mid-tree, rest by hand", r3.fell && !left3 && Math.abs(r3.chop - (2 * 1.5 + (r3.fell.logs - 2) * 3)) <= 0.6, { logs: r3.fell && r3.fell.logs, chop: r3.chop, axeLeft: left3 });
+  ok("worn-out axe breaks mid-tree, rest by hand", r3.fell && !left3 && Math.abs(r3.chop - (2 * 1.5 + (r3.fell.logs - 2) * 3)) <= 0.6, { logs: r3.fell && r3.fell.logs, chop: r3.chop, axeLeft: left3, tree: t3, tasks: r3.tasks, pos: r3.pos });
 
   // 3. interrupted (a trade): progress kept
   await sim(pg, () => { const A = globalThis.__A; A.inv = BF.trades.inv.create(); });
