@@ -73,7 +73,19 @@ const F = {
     try { o = JSON.parse(text); } catch (e) { throw new Error("That isn't a Blockfield world file"); }
     if (!o || o.blockfield !== "world" || !o.meta || !o.data) throw new Error("That isn't a Blockfield world file");
     if (o.format > FORMAT) throw new Error("That world file was written by a newer Blockfield (format " + o.format + ")");
-    return { game: o.game || null, meta: unwrap(o.meta), data: unwrap(o.data), log: unwrap(o.log) };
+    const log = unwrap(o.log);
+    F.checkLog(log);
+    return { game: o.game || null, meta: unwrap(o.meta), data: unwrap(o.data), log };
+  },
+  // A game log's batch numbers are whole numbers (js/gamelog.js counts them up from 0): they name files on the world server and
+  // keys in IndexedDB, so a file whose log names one "../../Other world/save" would write over another world (bug-070). Throws.
+  isSeq: seq => Number.isSafeInteger(seq) && seq >= 0 && seq <= 999999999,
+  checkLog(log) {
+    if (log == null) return;
+    const head = log.head, batches = head && head.batches;
+    if (!head || typeof head !== "object" || (batches != null && !Array.isArray(batches)) || (log.lists != null && !Array.isArray(log.lists)))
+      throw new Error("That world file's game log is damaged");
+    for (const b of batches || []) if (!Array.isArray(b) || !F.isSeq(b[0])) throw new Error("That world file's game log is damaged (a batch numbered " + JSON.stringify(Array.isArray(b) ? b[0] : b).slice(0, 40) + ")");
   },
   fileName: name => (String(name || "world").replace(/[\u0000-\u001f<>:"/\\|?*]/g, "_").trim() || "world") + EXT,
   isGzip: u8 => u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b,

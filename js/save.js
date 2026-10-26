@@ -13,7 +13,7 @@
 // downloads one (from the server, or made here from IndexedDB), importFile(file) adds the world it holds (to the server, or to
 // IndexedDB), and copyToServer() copies this browser's IndexedDB worlds to the server (they stay in the browser too).
 // Game log: DEBUG "save" for each save (how long it took), ERROR when a save fails (the previous save is kept); INFO "save" for an
-// export, an import, a copy to the server, and for a world refused as too old.
+// export, an import, a copy to the server, and for a world refused as too old; ERROR "save" for an import that fails (a damaged file).
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -395,7 +395,8 @@ const save = {
     return Promise.resolve(file.arrayBuffer()).then(buf => {
       if (server()) return upload(buf, false).then(r => r.meta);
       return BF.saveFile.unpack(buf).then(rec => importRecord(rec, false)).then(r => r.meta);
-    }).then(meta => { slog("INFO", "Imported world \"" + meta.name + "\" from " + (file.name || "a file") + (server() ? " to the world server" : "")); return meta; });
+    }).then(meta => { slog("INFO", "Imported world \"" + meta.name + "\" from " + (file.name || "a file") + (server() ? " to the world server" : "")); return meta; },
+      e => { slog("ERROR", "Importing " + (file.name || "a file") + " failed: " + (e && e.message || e)); throw e; });
   },
   // This browser's own worlds (IndexedDB), whatever the page plays on: for "Copy browser saves to the server"
   browserList() {

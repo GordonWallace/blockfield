@@ -24,7 +24,7 @@ Saves are written safely: each file is written beside the old one and only then 
 The title screen has three ways to move a world, in every mode:
 
 - **Export**, on a world's row, downloads the world as a single `.bfworld` file (named after the world). The file is the same whether it came from the server or from a browser, and it includes the world's game log.
-- **Import world…**, under the list, adds the world in a `.bfworld` file to the list you are looking at: the server's folders, or your browser's storage. If a world with the same id is already there, the imported one becomes a second copy.
+- **Import world…**, under the list, adds the world in a `.bfworld` file to the list you are looking at: the server's folders, or your browser's storage. If a world with the same id is already there, the imported one becomes a second copy. A damaged file is refused with the reason (*That world file's game log is damaged*, for one whose log names a batch by anything but a number), and nothing of it is kept: an imported world only ever writes inside its own folder.
 - **Copy browser saves to the server** appears when you are playing on the world server and this browser has worlds of its own. It copies them all into `saves/`. The browser keeps its copies, and worlds that were copied before are skipped, so pressing it twice does no harm.
 
 To move a world from the server back into a browser, Export it while playing on the server, then open the game without the server (as a file, say) and Import it there.
@@ -39,4 +39,4 @@ The world server plays one page at a time. A second page opened while one is pla
 
 ## In the game log
 
-Each save is a DEBUG line (kind *save*) with how long it took. A save that failed is an ERROR. Exports, imports, copies to the server and a world that was too old to open are INFO lines.
+Each save is a DEBUG line (kind *save*) with how long it took. A save that failed is an ERROR. Exports, imports, copies to the server and a world that was too old to open are INFO lines. An import that fails is an ERROR with the reason.
