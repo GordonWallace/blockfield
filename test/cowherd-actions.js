@@ -265,9 +265,17 @@ module.exports = async (pg, out) => {
     run(3);
     const crowded = P.cows.length, culls0 = P.culls;
     ok("the pasture is over its limit", crowded > P.limit, [crowded, P.limit]);
+    const pair = P.cows.filter(s => s.mob && !s.mob.dead && s.growAt == null).slice(0, 2);
+    for (const s of pair) { s.cd = 0; s.fed = day(); }
+    ok("fed cows do not breed while the pasture is over its limit (the calf would take it two over)", pair.length === 2 && pair.every(s => !C.willing(s.mob, day())), pair.map(s => C.willing(s.mob, day())));
+    for (const s of pair) s.cd = day() + 5;
     for (let i = 0; i < 9000 && P.cows.length > P.limit; i++) step();
     const n = crowded - P.limit;
     ok("the cowherd culled the herd back to the limit", P.cows.length === P.limit && P.culls - culls0 === n, [P.cows.length, P.limit, P.culls]);
+    const fedAt = P.cows.find(s => s.mob && !s.mob.dead && s.growAt == null);
+    if (fedAt) fedAt.cd = 0;
+    ok("back at the limit, a fed cow is willing to breed again", !!fedAt && C.willing(fedAt.mob, day()), fedAt && [fedAt.fed, fedAt.cd, day()]);
+    if (fedAt) fedAt.cd = day() + 5;
     ok("it kept the beef: 1-3 a cow", c("raw_beef") - beef0 >= n && c("raw_beef") - beef0 <= 3 * n, [beef0, c("raw_beef")]);
     ok("and the leather: 0-2 a cow", c("leather") - lea0 <= 2 * n, [lea0, c("leather")]);
     run(20);
