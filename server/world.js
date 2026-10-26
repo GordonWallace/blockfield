@@ -159,7 +159,11 @@ function start(o) {
     const h = srv.held;
     ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: 1, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (1 until r15-39)
     ws.on("message", (data, binary) => { try { binary ? fromPagePacket(packetIn(data)) : fromPageText(JSON.parse(data.toString("utf8"))); } catch (e) { say("a bad message from the page: " + e.message); } });
-    ws.on("close", () => { if (srv.client === ws) closed(); });
+    ws.on("close", (code, reason) => {
+      if (srv.client !== ws) return;
+      if (code === 1006) { say("the page's connection was lost: " + (reason || "dropped")); logIn(srv.active, "The page's connection was lost without closing (" + (reason || "dropped") + ")", "WARN"); }
+      closed();
+    });
     ws.on("error", () => {});
   }
   function fromPageText(m) {
