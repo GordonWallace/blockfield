@@ -17,7 +17,7 @@
 //                     mobIdsIn(key) -> [mob ids], villageIdsIn(key) -> [village keys],
 //                     tick(), stats() -> [{key, name, f, ru, rv, mobs, drops, villages, blockEntities}], counts(), check() -> {ok, diffs},
 //                     reset(), Index (the bare per-object index, for tests and benchmarks), regionOf(mob), dropRegionOf(drop), mobsByRegion() -> Map key -> Set (r15-33),
-//                     mobsAround(x, z, r, filter, {local, label}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter, opts), ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
+//                     mobsAround(x, z, r, filter, {local, label}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter, opts), hostilesAround(x, z, r, out) -> [hostile mobs], ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -98,19 +98,26 @@ function around(x, z, r) {
 // x / z of their positions, and works a key out again only when a position has left its box. An object moves between sets only when its
 // region changes. Objects come and go by add / remove (each keeps its slot in o._ri, which js/statehash.js skips).
 class Index {
-  constructor(pos) {
-    this.pos = pos; this.by = new Map(); this.n = 0; this.moves = 0;
+  // flag(o) (optional; spec r15-62): objects also kept in a second set per region (fs: region -> Set), so a scan for them reads only
+  // those. It must give the same answer for an object all its life.
+  constructor(pos, flag) {
+    this.pos = pos; this.by = new Map(); this.n = 0; this.moves = 0; this.flag = flag || null; this.fs = new Map();
     this.objs = []; this.ps = []; this.ks = new Int32Array(64); this.bx = new Float64Array(64); this.bz = new Float64Array(64);
   }
   // put o in region k (-1: nowhere, kept out of the sets until it is somewhere) and its slot's box with it
   _set(i, o, k) {
     const old = this.ks[i];
-    if (old >= 0) { const s = this.by.get(old); if (s && s.delete(o)) { this.n--; if (!s.size) this.by.delete(old); } }
+    const f = this.flag && this.flag(o);
+    if (old >= 0) {
+      const s = this.by.get(old);
+      if (s && s.delete(o)) { this.n--; if (!s.size) this.by.delete(old); if (f) { const q = this.fs.get(old); if (q && q.delete(o) && !q.size) this.fs.delete(old); } }
+    }
     this.ks[i] = k;
     if (k < 0) { this.bx[i] = this.bz[i] = NaN; return; }
     let s = this.by.get(k);
     if (!s) this.by.set(k, (s = new Set()));
     s.add(o); this.n++;
+    if (f) { let q = this.fs.get(k); if (!q) this.fs.set(k, (q = new Set())); q.add(o); }
     const rv = k % K, r = (k - rv) / K, ru = r % K;
     this.bx[i] = FW * ((r - ru) / K) + FN + ru * REGION; this.bz[i] = FN + rv * REGION;
   }
@@ -147,11 +154,11 @@ class Index {
     }
   }
   in(k) { return this.by.get(k); }
-  clear() { for (const o of this.objs) o._ri = undefined; this.objs = []; this.ps = []; this.by.clear(); this.n = 0; }
+  clear() { for (const o of this.objs) o._ri = undefined; this.objs = []; this.ps = []; this.by.clear(); this.fs.clear(); this.n = 0; }
 }
 
 const mobPos = m => m.position, dropPos = d => d.pos, vilPos = v => v;
-const mobs = new Index(mobPos), drops = new Index(dropPos), villages = new Index(vilPos);
+const mobs = new Index(mobPos, m => m.hostile === true), drops = new Index(dropPos), villages = new Index(vilPos);
 const bes = new Map(), beBy = new Map();   // block entity "x,y,z" -> region; region -> Set of "x,y,z"
 const mobGone = m => m.removed;
 
@@ -272,6 +279,8 @@ function check() {
   };
   const at = p => Math.floor(p.x) + "," + Math.floor(p.z);
   cmp("mob", (BF.mobs && BF.mobs.list) || [], mobs, mobPos, mobGone, m => m.type + " at " + at(m.position));
+  for (const [k, s] of mobs.by) { let h = 0; for (const m of s) if (m.hostile === true) h++; const q = mobs.fs.get(k); if ((q ? q.size : 0) !== h) diffs.push(`hostiles in ${name(k)}: ${q ? q.size : 0} filed, ${h} there`); else if (q) for (const m of q) if (!s.has(m)) diffs.push(`hostile ${m.type} filed in ${name(k)}, not a mob there`); }
+  for (const k of mobs.fs.keys()) if (!mobs.by.has(k)) diffs.push(`hostiles filed in ${name(k)}, which holds no mobs`);
   if (BF.ids) for (const s of mobs.by.values()) for (const m of s) if (BF.ids.live(m.id) !== m) diffs.push(`mob ${m.type} indexed under id ${m.id}, which is not its registered id`);
   cmp("drop", (BF.drops && BF.drops.list) || [], drops, dropPos, null, d => "at " + at(d.pos));
   cmp("village", BF.mobs && BF.mobs.villages ? [...BF.mobs.villages.values()] : [], villages, vilPos, vilSkip, v => v.key);
@@ -318,6 +327,15 @@ function mobsAround(x, z, r, filter, opts) {
     return want;
   }, x, z);
   return hideIn(out);
+}
+// hostilesAround(x, z, r, out) -> the hostile mobs (dying and removed ones too) the index files in the regions within r + PAD of (x, z),
+// in no set order (spec r15-62): every hostile within r blocks is among them, across a face edge too, so a scan for hostiles near a
+// point need only test these. Fills and returns out (a fresh array when not given).
+function hostilesAround(x, z, r, out) {
+  out = out || [];
+  out.length = 0;
+  for (const k of around(x, z, r + PAD)) { const q = mobs.fs.get(k); if (q) for (const m of q) out.push(m); }
+  return out;
 }
 // mobsInBox(x0, z0, x1, z1, filter) -> the live mobs standing in the atlas box x in [x0, x1], z in [z0, z1] (raw x / z) passing filter,
 // in list order: the circle around the box, then the box.
@@ -390,7 +408,7 @@ const regions = {
   mobIdsIn: k => idsOf(mobs.in(k), m => m.id), villageIdsIn: k => idsOf(villages.in(k), v => v.key),
   onSet, mobAdded, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
   regionOf, dropRegionOf, mobsByRegion,
-  mobsAround, mobsInBox, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
+  mobsAround, mobsInBox, hostilesAround, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
 };
 BF.regions = regions;
 setSize(REGION);
