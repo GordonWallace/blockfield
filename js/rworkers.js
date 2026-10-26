@@ -913,6 +913,7 @@ function hourly() {
 
 Object.assign(RW, { journal: null, clock: null, onTick: null, rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS,
+  ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
   refs: refsOn });
 BF.rworkers = RW;
 })();

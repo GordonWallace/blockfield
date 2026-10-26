@@ -266,18 +266,67 @@ function mobMap(pp) {
     const p = inF(a.v.minX, a.v.minZ), x0 = p && p.x, z0 = p && p.z, q = p && inF(a.v.maxX + 1, a.v.maxZ + 1);   // block corners, so a turned box stays whole
     if (q) villages.push([Math.min(x0, q.x), Math.min(z0, q.z), Math.max(x0, q.x) - 1, Math.max(z0, q.z) - 1, nameOf(a.key)]);
   }
-  // regions holding mobs (js/regions.js, spec r15-30) for the map's Regions overlay: [x0, z0, x1, z1 (exclusive), mobs]. Corner cells'
-  // centres are mapped, so a region on a neighbouring face comes out as the right (turned) box.
+  // regions holding mobs (js/regions.js, spec r15-30) for the map's Regions overlay: [x0, z0, x1, z1 (exclusive), mobs, worker]. Corner
+  // cells' centres are mapped, so a region on a neighbouring face comes out as the right (turned) box. worker: the worker most of its
+  // mobs think on (workerOfMob), for the overlay's colours by worker.
   const regions = [];
   if (BF.regions) for (const s of BF.regions.stats()) {
     if (!s.mobs) continue;
     const b = BF.regions.bounds(s.key), p = inF(b.x0 + 0.5, b.z0 + 0.5), x0 = p && p.x, z0 = p && p.z, q = p && inF(b.x1 - 0.5, b.z1 - 0.5);
-    if (q) regions.push([Math.min(x0, q.x) - 0.5, Math.min(z0, q.z) - 0.5, Math.max(x0, q.x) + 0.5, Math.max(z0, q.z) + 0.5, s.mobs]);
+    if (q) regions.push([Math.min(x0, q.x) - 0.5, Math.min(z0, q.z) - 0.5, Math.max(x0, q.x) + 0.5, Math.max(z0, q.z) + 0.5, s.mobs, regionWorker(s.key)]);
   }
-  const out = { kinds, acts, mobs, chunks, villages, regions, region: BF.regions ? BF.regions.REGION : 0, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: CS };
+  const out = { kinds, acts, mobs, chunks, villages, regions, workers: workerCount(), region: BF.regions ? BF.regions.REGION : 0, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: CS };
   if (F >= 0) {
     const x0 = P.W * F + P.N;
     Object.assign(out, { face: F, sq: [x0, P.N, x0 + P.N, 2 * P.N], north: northAt(pp.x, pp.z) });
+  }
+  return out;
+}
+
+// The worker a mob thinks on: its cluster group's (js/cworkers.js workerOf: spec r15-39b, once clusters run on several workers), else
+// its unit's while the region workers split the thinking (js/rworkers.js ownerOf: its village, else its region), else the first (0).
+function workerOfMob(m, k) {
+  const CW = BF.cworkers, RW = BF.rworkers, CL = BF.clusters;
+  if (CW && CW.active && CW.workerOf && CL) return CW.workerOf(CL.groupOf(m.cl !== undefined ? m.cl : CL.baseOf(m))) | 0;
+  if (RW && RW.active && RW.ownerOf && RW.unitOf) return RW.ownerOf(RW.unitOf(m, k)) | 0;
+  return 0;
+}
+// A region's worker: the one most of its mobs think on (a village's mobs go with their village, wherever they stand)
+function regionWorker(k) {
+  const n = workerCount();
+  if (n <= 1) return 0;
+  const by = new Array(n).fill(0);
+  for (const m of BF.regions.mobsIn(k)) if (!m.dead && !m.removed) by[Math.min(n - 1, workerOfMob(m, k))]++;
+  let best = 0;
+  for (let w = 1; w < n; w++) if (by[w] > by[best]) best = w;
+  return best;
+}
+// how many workers the simulation thinks on now (1: the simulation thread alone)
+function workerCount() {
+  const CW = BF.cworkers, RW = BF.rworkers;
+  if (CW && CW.active) return CW.n;
+  if (RW && RW.active) return RW.n;
+  return 1;
+}
+
+// The simulation's threads and how busy each is (js/threadload.js): this one (the Web Worker or the world server's thread; on the page
+// the page's own entry covers it) and each region worker (js/rplay.js followers, their reports). worker: its index for the map's colours.
+// Game log: INFO "threads" when the set of threads changes, and once a game hour while a debug screen watches, each one's busy share.
+let threadSet = "", threadHour = null;
+function threads() {
+  const out = [];
+  if (BF.tload) out.push(Object.assign({ name: "Simulation", worker: 0, node: !!BF.tload.ELU }, BF.tload.report()));
+  const st = BF.rplay ? BF.rplay.status() : null;
+  if (st && st.loads) st.loads.forEach((l, i) => out.push(Object.assign({ name: "Worker " + (i + 1), worker: i + 1 }, l || { busy: null, avg: null, hist: [] })));
+  if (BF.glog) {
+    const set = out.map(t => t.name).join(", ");
+    if (set !== threadSet) { threadSet = set; BF.glog.log("INFO", "threads", "Simulation threads: " + set); }
+    const t = BF.simNow ? BF.simNow() : 0;
+    if (threadHour == null || t < threadHour) threadHour = t;
+    else if (t - threadHour >= 1200 / 24) {
+      threadHour = t;
+      BF.glog.log("INFO", "threads", "Busy over the last minute: " + out.map(e => e.name + " " + (e.avg == null ? "?" : Math.round(e.avg * 100) + "%")).join(", "));
+    }
   }
   return out;
 }
@@ -312,6 +361,7 @@ function simPart(ack) {
     requests: BF.req ? BF.req.stats() : undefined,   // the request queue and transition-mode direct writes by module (js/requests.js)
     regionTick: BF.rtick ? BF.rtick.stats() : undefined,   // regions ticked, ms per phase, the busiest regions (js/regiontick.js, spec r15-33)
     workers: BF.rplay ? Object.assign(BF.rplay.status(), { text: BF.rplay.text() }) : undefined,   // region workers (js/rplay.js, spec r15-39)
+    threads: BF.page ? threads().slice(1) : threads(),   // the simulation's threads, how busy (on the page: its followers; the page's entry is its own)
     hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
@@ -349,6 +399,8 @@ function snapshot() {
     for (const id in part.icons || {}) if (part.icons[id] && !part.icons[id].url) { try { part.icons[id].url = BF.inventory.iconURL ? BF.inventory.iconURL(+id) : BF.textures.icon(+id); } catch (e) { /* none */ } }
   } else part = simPart();
   return Object.assign({ t: Date.now(), n: ++sent, info, text: BF.debugText(info), paused: !!BF.state.paused, hidden: document.hidden }, part, {
+    // this page's thread, how busy (js/threadload.js): it draws and takes input, and runs the simulation too when it has no worker
+    page: BF.tload ? Object.assign({ sim: !inWorker() && !onServer(), cores: navigator.hardwareConcurrency || null }, BF.tload.report()) : null,
     // the planet debug toggles (js/view.js setDebug: F3 + B / C / R, or the debug screen's Planet section) and which request from the
     // screen they include (tv)
     pt: BF.view && BF.view.debug ? { tv: ptv, ...BF.view.debug } : null,
