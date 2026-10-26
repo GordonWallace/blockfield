@@ -541,26 +541,31 @@ function explodeNow(m, part) {
     if (w.removePartner) w.removePartner(x, y, z, id);
   }
   const own = rk == null || rk === part.own;
+  // Distances and pushes go through a face edge (bug-088): who is hit is measured in the blast's frame (seen), and each one is pushed
+  // away from the blast as seen from its own frame.
   if (own && playerAlive()) {
     const p = player();
     const pc = new THREE.Vector3(p.position.x, p.position.y + (p.height || 1.8) / 2, p.position.z);
-    const d = pc.distanceTo(c);
+    const d = seen(c, pc).distanceTo(c);
     if (d < 7) {
       const dmg = Math.round(22 * Math.pow(1 - d / 7, 1.3));
-      if (dmg > 0 && p.damage) p.damage(dmg, c.clone());
+      if (dmg > 0 && p.damage) p.damage(dmg, seen(p.position, c).clone());
     }
   }
-  const blast = L => L.filter(o => o !== m && !o.dead && o.position.distanceTo(c) < BLAST_MOBS && (rk == null || G.regionOf(o) === rk));
-  for (const o of vq("mobs.explosion", blast(nearMobs(c, BLAST_MOBS)), blast)) {
+  const blast = L => L.filter(o => o !== m && !o.dead && seen(c, o.position).distanceTo(c) < BLAST_MOBS && (rk == null || G.regionOf(o) === rk));
+  let hitN = 0;
+  for (const o of vq("mobs.explosion", blast(nearMobs(c, BLAST_MOBS, true)), blast)) {
     if (o.dead) continue;
-    const d = o.position.distanceTo(c);
-    damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(c), false, "an explosion");
+    hitN++;
+    const d = seen(c, o.position).distanceTo(c);
+    damageMob(o, Math.max(1, Math.round(18 * (1 - d / 6))), o.position.clone().sub(seen(o.position, c)), false, "an explosion");
   }
   if (!own) return;
   puff(c, 26, 1.6, false, 4);
   puff(c, 10, 1.0, true, 3);
   noiseSound(1.2, 500, 0.9, c);
   m.exploded = true;
+  if (BF.glog) BF.glog.log("INFO", "explosion", "A " + m.type + " blew up; " + hitN + (hitN === 1 ? " mob" : " mobs") + " in the blast", { at: [cx, cy, cz] });
   if (BF.emit) BF.emit("mobExploded", m, c);
   removeMob(m);
 }

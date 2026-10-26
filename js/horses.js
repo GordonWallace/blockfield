@@ -170,7 +170,8 @@ function breedNow(a, b) {
   const ra = a.horse, rb = b.horse, t = now();
   const r = R(a), st = foalStats(ra, rb, r);
   const pick = (x, y) => (r.next() < 0.45 ? x : r.next() < 0.82 ? y : null);
-  const foal = spawn((a.position.x + b.position.x) / 2, Math.max(a.position.y, b.position.y), (a.position.z + b.position.z) / 2, {
+  const at = BF.herd.birthSpot(a, b);   // (through a face edge, bug-089)
+  const foal = spawn(at.x, at.y, at.z, {
     stats: st, coat: pick(ra.coat, rb.coat) || COATS[irnd(r, 0, 6)], mark: pick(ra.mark, rb.mark) || MARKS[irnd(r, 0, 4)],
     tamed: !!ra.tamed, owner: ra.owner, growAt: t + FOAL_DAYS, cd: t + FOAL_DAYS + BREED_CD, pen: ra.pen || rb.pen,
   });

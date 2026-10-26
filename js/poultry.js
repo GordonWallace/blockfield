@@ -122,7 +122,7 @@ function breed(a, b, t) {
   return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
 }
 function breedNow(a, b, t) {
-  const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
+  const { x, y, z } = BF.herd.birthSpot(a, b);   // (through a face edge, bug-089)
   const chick = BF.mobs.spawn("chicken", x, y, z);
   if (!chick) return null;
   const s = stOf(chick);
