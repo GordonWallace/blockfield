@@ -13,7 +13,10 @@
 //   meetings    every MEET ticks (the tick counter a multiple of MEET), before the tick: the clusters are worked out again
 //               (BF.clusters.rebuild), the requests still queued are filed again by target into the new groups, the requests that
 //               waited for the meeting apply (one list, in requester order) and their results are delivered, and each group gets its id
-//               ranges.
+//               ranges. The requests that cross carry their sender's tick and a due tick (the meeting's) and apply by due tick, then
+//               sending cluster, then sending order.
+//   clocks      each cluster keeps its own tick (BF.ctick.tickOf). For now every loaded cluster keeps one clock, and a meeting that finds
+//               one on another tick logs an ERROR; a later spec may let a cluster nobody watches run behind (idea 3, not turned on).
 // Two orders give the same world when no system reads across groups (test/cluster-isolation.js checks it):
 //   "tick"      every group each tick (the game's order, and how one worker runs several groups);
 //   "cluster"   a whole interval group by group: the global part runs the interval's ticks first, keeping what each tick's clock read
@@ -26,7 +29,8 @@
 // API: BF.ctick = { MEET, on (get / set), order (get / set: "tick" | "cluster"), cur (the running group), filter (the running group's
 //                   mob test, or null when every mob is seen), mine(m), hidden(o), sys(name, fn), local(name, init), step(h), interval(h),
 //                   meet(), groups(), SYSTEMS, converted() -> [names], only (a Set of system names, or null: all), system (the running one),
-//                   trace, traced() -> [["system file:line", count]], stats(), text(), hourly(), reset() }
+//                   trace, traced() -> [["system file:line", count]], tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
+//                   reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -137,7 +141,9 @@ function away(req, k) {
   const g = targetOf(req, k);
   if (cur) {
     if (!g || g === cur) return false;
-    req._g = cur.i; req._n = cur.sent++;   // (the order they apply in doesn't depend on the order groups ran in)
+    // stamped with the sending cluster's tick and the tick it is due (the next meeting's: at most MEET later, the lookahead), and
+    // numbered in its group's sending order, so the order they apply in doesn't depend on the order groups ran in
+    req._from = cur.key; req._n = cur.sent++; req._at = BF.rand.tick; req._due = Math.ceil(BF.rand.tick / MEET) * MEET;
     deferred.push(req); S.deferred++; H.deferred++;
     return true;
   }
@@ -154,9 +160,18 @@ function refile(req) {
 }
 
 // ---------------------------------------------------------------- the meeting
+// Each cluster's own tick (idea 3 of notes/sim-scaling-fable-ideas.md, Gordon 2026-10-26: built in, not used yet): the tick its last
+// pass reached. Every loaded cluster keeps one clock for now (the whole loaded world moves at one speed), so at a meeting they all read
+// the meeting's tick; the requests that cross carry their sender's tick and their due tick, so a later spec can let a cluster nobody
+// watches run behind without changing the meeting.
+const clocks = new Map();   // base cluster -> tick
 function meet() {
   const t0 = performance.now();
   leave();
+  // every cluster that ran must have reached the meeting's tick (one clock)
+  let behind = 0, eg = null;
+  for (const g of groups) if (g.bases && g.tick !== undefined && g.tick !== BF.rand.tick) { behind++; eg = eg || g.key + " at tick " + g.tick; }
+  if (behind && BF.glog) BF.glog.log("ERROR", "clusters", behind + " cluster group(s) reached the meeting at tick " + BF.rand.tick + " on another clock (" + eg + ")");
   const pending = [];
   for (const g of groups) { useSlot(g); for (const r of BF.req.pending()) pending.push(r); }
   if (between) { useSlot(between); for (const r of BF.req.pending()) pending.push(r); }
@@ -170,14 +185,18 @@ function meet() {
   useSlot(between);
   for (const r of pending) refile(r);
   // the requests that waited: one list in requester order, applied and delivered now; what they send goes to its target's group
-  const waited = deferred.sort((a, b) => a._g - b._g || a._n - b._n);
-  deferred = [];
+  // the requests due now (by due tick, then sending cluster, then sending order), each due tick's batch in requester order
+  const T = BF.rand.tick, by = (a, b) => a._due - b._due || (a._from < b._from ? -1 : a._from > b._from ? 1 : 0) || a._n - b._n;
+  const waited = deferred.filter(r => r._due <= T).sort(by);
+  deferred = deferred.filter(r => r._due > T);   // (none while every cluster keeps one clock)
   S.lastDeferred = waited.length;
-  if (waited.length) {
+  for (let i = 0; i < waited.length;) {
+    let j = i; while (j < waited.length && waited[j]._due === waited[i]._due) j++;
     const keep = BF.req.ctx();
-    BF.req.useCtx(BF.req.newCtx(waited));
+    BF.req.useCtx(BF.req.newCtx(waited.slice(i, j)));
     try { BF.req.apply(); BF.req.deliver(); }
     finally { const left = BF.req.pending(); BF.req.useCtx(keep); between.req = keep; for (const r of left) refile(r); }
+    i = j;
   }
   needMeet = false;
   S.meetings++; H.meetings++; S.since = 0;
@@ -219,7 +238,11 @@ function pass(g, h) {
   enter(g);
   try { scoped(h); }
   catch (e) { S.err++; if (S.err <= 20 && BF.glog) BF.glog.log("ERROR", "clusters", "Cluster " + g.key + " failed a tick: " + (e && e.message || e)); console.error(e); }
-  finally { leave(); g.ms += performance.now() - t0; }
+  finally {
+    leave(); g.ms += performance.now() - t0;
+    g.tick = BF.rand.tick;
+    if (g.bases) for (const b of g.bases) clocks.set(b, g.tick);
+  }
 }
 const due = () => needMeet || BF.rand.tick % MEET === 0 && S.metAt !== BF.rand.tick;
 function meetNow() { meet(); S.metAt = BF.rand.tick; }
@@ -364,6 +387,7 @@ function reset() {
   S.meetings = S.deferred = S.refiled = S.ticks = S.lastDeferred = S.err = 0; S.metAt = undefined; S.meetMs = 0;
   H.ticks = H.deferred = H.meetings = 0;
   if (CL()) CL().reset();
+  clocks.clear();
   if (on) {
     R2.ids.h = BF.ids.range.top; R2.made.h = BF.rand.made + 1; R2.ids.j = R2.made.j = 0; R2.ids.n = R2.made.n = 1;
     between = slot("between", 0); between.req = BF.req.ctx();
@@ -376,6 +400,7 @@ BF.ctick = {
   get order() { return order; }, set order(o) { setOrder(o); },
   get cur() { return cur; },
   get filter() { return cur && !legacy ? mine : null; },
+  tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },
   get system() { return running; },

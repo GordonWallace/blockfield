@@ -12,6 +12,7 @@
 //   converted  the systems js/ctick.js SYSTEMS marks converted (the rest don't run, in either order): must match. The default, and CI.
 //   full       every system, converted or not: shows what is left to convert (exit 0 whatever differs, unless --strict).
 //   a list     "mobloop,builder,...": just those.
+// Each cluster's own tick must be the meeting's at every meeting (one clock: no cluster runs behind yet).
 // The cluster-order child also traces the reads of another cluster's mobs that were hidden (BF.ctick.trace), by system and line.
 // Usage: node test/cluster-isolation.js [--seed 3] [--extra 3] [--seconds 60] [--profile converted|full|a,b,c] [--strict] [--control]
 //   --control: a third child in the tick order too; a part that differs between the two tick-order children isn't deterministic to
@@ -57,7 +58,8 @@ function child() {
       C.interval(BF.warp.TICK);
       const s = C.stats();
       process.send({ parts: BF.stateHash.parts(), objs: objs(), tick: BF.rand.tick, mobs: BF.mobs.list.length,
-        groups: s.groups.map(g => g.key + (g.player ? '*' : '') + ' ' + g.mobs), waited: s.lastDeferred, errors: errors.splice(0) });
+        groups: s.groups.map(g => g.key + (g.player ? '*' : '') + ' ' + g.mobs), waited: s.lastDeferred, errors: errors.splice(0),
+        skew: [...C.clocks().values()].filter(t => t !== BF.rand.tick).length });
     } else if (msg.do === 'text') process.send({ texts: msg.keys.map(textOf) });
     else if (msg.do === 'probe') {
       // a request from the first cluster's pass to a mob of the last cluster: it must wait for the next meeting
@@ -68,7 +70,8 @@ function child() {
       BF.world.onThink(() => {
         if (sent || !target || !C.cur || C.cur !== C.groups()[0]) return;
         sent = true; out.sentAt = BF.rand.tick;
-        BF.req.send('probe', target.id, {}, null).then(r => { out.delivered = BF.rand.tick; });
+        const q = BF.req.send('probe', target.id, {}, null).then(r => { out.delivered = BF.rand.tick; });
+        out.stamp = [q._at, q._due];
       }, 'probe');
       if (C.only) C.only = [...C.only, 'probe'];
       C.SYSTEMS.probe = false;
@@ -113,10 +116,11 @@ async function parent() {
   console.log(`booted ${NAMES.length} worlds (seed ${arg('seed', 3)}, ${arg('extra', 3)} extra villages, profile ${profile}) in ${((Date.now() - t0) / 1000).toFixed(0)} s; mobs ${ready.map(r => r.mobs).join(' / ')}`);
 
   const noise = new Set(), firstDiff = {};
-  let shown = 0, intervals = Math.round(seconds), lastGroups = '';
+  let skewed = 0, shown = 0, intervals = Math.round(seconds), lastGroups = '';
   for (let n = 1; n <= intervals; n++) {
     const r = await Promise.all(kids.map((k, i) => ask(i, { do: 'interval' })));
     for (const x of r) for (const e of x.errors) console.log(`  game log ERROR: ${e}`);
+    for (const x of r) if (x.skew) skewed++;
     const g = r[0].groups.join(', '), gk = r[0].groups.map(x => x.split(' ')[0]).join();
     if (gk !== lastGroups) { console.log(`  second ${n}: ${r[0].groups.length} clusters (mobs): ${g}`); lastGroups = gk; }
     if (r[2]) for (const k of Object.keys(r[0].parts)) if (r[0].parts[k] !== r[2].parts[k]) noise.add(k);
@@ -147,6 +151,7 @@ async function parent() {
     check(p.groups > 1 && p.target != null && p.sentAt != null, `${NAMES[i]} order: a request sent from one cluster to a mob of another (${p.target}, tick ${p.sentAt})`);
     check(p.appliedAt != null && p.appliedAt % 20 === 0 && p.appliedAt > p.sentAt && p.appliedIn === null, `${NAMES[i]} order: it applied at the next meeting (tick ${p.appliedAt}, ${p.appliedIn === null ? 'between ticks' : 'in ' + p.appliedIn})`);
     check(p.delivered === p.appliedAt, `${NAMES[i]} order: its result was delivered at the meeting`);
+    check(p.stamp && p.stamp[0] === p.sentAt && p.stamp[1] === p.appliedAt, `${NAMES[i]} order: it carried its sender's tick and its due tick (${p.stamp})`);
   }
   check(JSON.stringify(pr[0]) === JSON.stringify(pr[1]), 'the request went the same way in both orders');
   const end = await Promise.all(kids.map((k, i) => ask(i, { do: 'end' })));
@@ -157,6 +162,7 @@ async function parent() {
   console.log(`systems run: ${end[0].only.join(', ')}`);
   if (noise.size) console.log(`not deterministic to begin with (tick order twice): ${[...noise].join(', ')}`);
   const diffs = Object.keys(firstDiff);
+  check(!skewed, 'every cluster kept one clock: its own tick was the meeting\'s at every meeting' + (skewed ? ` (${skewed} times not)` : ''));
   if (strict) check(!diffs.length, `the tick and cluster orders give the same world for ${intervals} s` + (diffs.length ? ` (differ: ${diffs.map(k => k + ' from second ' + firstDiff[k]).join(', ')})` : ''));
   else console.log(diffs.length ? `differs (profile ${profile}): ${diffs.map(k => k + ' from second ' + firstDiff[k]).join(', ')}` : `the same (profile ${profile})`);
   console.log(`${((Date.now() - t0) / 1000).toFixed(0)} s`);

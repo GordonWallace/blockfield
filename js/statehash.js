@@ -140,7 +140,9 @@ const PARTS = {
   furnaces: () => byPos(inv().furnaces),
   signs: () => text(call(BF.signs, "serialize")),
   drops: () => (call(BF.drops, "serialize") || []).map(text).sort().join("\n"),
-  clock: () => text({ day: BF.sky ? BF.sky.day : 0, t: BF.sky ? BF.sky.time : 0, time: BF.state ? BF.state.time : 0 }),
+  // (with the cluster tick on, each cluster's own tick too: js/ctick.js)
+  clock: () => text(Object.assign({ day: BF.sky ? BF.sky.day : 0, t: BF.sky ? BF.sky.time : 0, time: BF.state ? BF.state.time : 0 },
+    BF.ctick && BF.ctick.on ? { clusters: BF.ctick.clocks() } : {})),
   weather: () => text(call(BF.weather, "serialize")),
   wildlife: () => text(call(BF.wildlife, "serialize")),
   boats: () => text(call(BF.boats, "serialize")),
