@@ -2088,15 +2088,15 @@ function golemAI(m, dt, out) {
   }
   // A patrol spot more than 14 blocks off is walked to along a planned route three blocks high (r15-70: walking straight at it, and taking
   // short detours round what was in the way, a golem spent minutes pushing under eaves, at fences and at roof edges between houses, and
-  // went in the game log as stuck). With no route there, or one that gets stuck, it picks another spot; ai.stuckT below zero, with no route,
-// is the wait before it plans again.
+  // went in the game log as stuck). With no route there it walks straight at it as before, and once a route gets stuck it heads for
+  // another spot; ai.stuckT below zero, with no route, is the wait before it plans again.
   if (ai.route && ai.routeKind === "patrol") {
     const st = followRoute(m, dt, out, T.speed * 0.6);
     if (st === "going") return;
     ai.route = null; ai.mode = "idle"; ai.t = rnd(R(m), 2, 4);
-    if (st === "stuck") { m.patrol = null; ai.stuckT = -15; }   // (it wanders about meanwhile, so the next route sets off from elsewhere)
+    if (st === "stuck") { m.patrol = null; ai.stuckT = -15; }
   }
-  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14 && !(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
+  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14) {
     if (ai.stuckT < 0) ai.stuckT += dt;
     else if (takePlan()) {
       let gx = null, gz = null;
@@ -2104,7 +2104,11 @@ function golemAI(m, dt, out) {
       const [fx, fy, fz] = feetCell(m);
       const route = gx != null && findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.abs(x - gx) + Math.abs(z - gz) <= 3 }, 3000, true);
       if (route && route.length) { ai.route = route; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "patrol"; ai.detour = null; return; }
-      m.patrol = null; ai.stuckT = -15;
+      ai.stuckT = -15;
+    }
+    if (!(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
+      ai.mode = "walk"; ai.t = rnd(R(m), 5, 8);
+      for (let k = 0; k < 16; k++) { ai.tx = px + rnd(R(m), -6, 6); ai.tz = pz + rnd(R(m), -6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
     }
   }
   wanderAI(m, dt, out);
