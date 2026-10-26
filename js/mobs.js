@@ -1978,9 +1978,25 @@ function villagerAI(m, dt, out) {
   }
   if (ai.outT > 0) ai.outT -= dt;
   if (away && ai.mode === "walk" && Math.hypot(ai.tx - m.position.x, ai.tz - m.position.z) > 12) { ai.mode = "idle"; ai.t = rnd(R(m), 1, 3); }
+  // Too far out (below), it walks back along a planned route to within 30 blocks of the centre (r15-70: walking straight back, it could
+  // push at a bank or a wall in the way for minutes). With none, or once that route gets stuck, it walks straight as before for a while
+  // (ai.stuckT below zero, with no route: the wait before planning again).
+  if (ai.route && ai.routeKind === "back") {
+    const st = followRoute(m, dt, out, T.speed);
+    if (st === "going") return;
+    ai.route = null; ai.mode = "idle"; ai.t = rnd(R(m), 1, 3);
+    if (st === "stuck") ai.stuckT = -10;
+  }
   if (V && !away && !(ai.outT > 0 && ai.mode === "walk")) {   // (not while walking away from the door it came out of this morning: morningAI)
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
+      if (ai.stuckT < 0 && !ai.route) ai.stuckT += dt;
+      else if (takePlan()) {
+        const [fx, fy, fz] = feetCell(m), gx = Math.floor(ax), gz = Math.floor(az);
+        const route = findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.hypot(x + 0.5 - ax, z + 0.5 - az) <= 30 }, 3000);
+        if (route && route.length) { ai.route = route; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "back"; ai.detour = null; ai.mode = "idle"; return; }
+        ai.stuckT = -10;
+      }
       ai.mode = "walk"; ai.tx = ax + rnd(R(m), -6, 6); ai.tz = az + rnd(R(m), -6, 6); ai.t = rnd(R(m), 5, 8);
     } else if (ai.mode === "walk" && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
       ai.tx = ax + rnd(R(m), -20, 20); ai.tz = az + rnd(R(m), -20, 20);
@@ -2072,12 +2088,13 @@ function golemAI(m, dt, out) {
   }
   // A patrol spot more than 14 blocks off is walked to along a planned route three blocks high (r15-70: walking straight at it, and taking
   // short detours round what was in the way, a golem spent minutes pushing under eaves, at fences and at roof edges between houses, and
-  // went in the game log as stuck). With no route there it picks another spot; ai.stuckT below zero, with no route, waits to plan again.
+  // went in the game log as stuck). With no route there, or one that gets stuck, it picks another spot; ai.stuckT below zero, with no route,
+// is the wait before it plans again.
   if (ai.route && ai.routeKind === "patrol") {
     const st = followRoute(m, dt, out, T.speed * 0.6);
     if (st === "going") return;
     ai.route = null; ai.mode = "idle"; ai.t = rnd(R(m), 2, 4);
-    if (st === "stuck") { m.patrol = null; ai.stuckT = -4; }
+    if (st === "stuck") { m.patrol = null; ai.stuckT = -15; }   // (it wanders about meanwhile, so the next route sets off from elsewhere)
   }
   if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14 && !(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
     if (ai.stuckT < 0) ai.stuckT += dt;
@@ -2087,7 +2104,7 @@ function golemAI(m, dt, out) {
       const [fx, fy, fz] = feetCell(m);
       const route = gx != null && findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.abs(x - gx) + Math.abs(z - gz) <= 3 }, 3000, true);
       if (route && route.length) { ai.route = route; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "patrol"; ai.detour = null; return; }
-      m.patrol = null; ai.stuckT = -4;
+      m.patrol = null; ai.stuckT = -15;
     }
   }
   wanderAI(m, dt, out);
