@@ -2,6 +2,7 @@
 // bug-057: a vegetable farm a builder made is left untilled (the farmer does that), so it holds no farmland for the farm scan to find it by;
 // farmers used to walk past it and lay out beds of their own. Now the scan finds builders' farms by their entries, and a farmer whose reach
 // takes one in tills all of its soil (grass too) before it makes a new bed, and the village log says so once.
+// A farmer carrying pumpkin seeds used to plant that untilled soil as a pumpkin patch first, and the stems kept the hoe off it.
 // Usage: NODE_PATH=$(npm root -g) node test/farmer-builder-farm.js [seed=1337] [days=1]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -78,7 +79,8 @@ const check = (ok, msg, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg +
     const W = BF.world, B = BF.B, y = S.oy - 1, R = BF.mobs.list.find(m => m.village && m.village.key === S.key).village;
     const e = BF.builder.builtOf(R).find(x => x.id === 9000), mk = BF.builder.bpOf(e).marks.soil;
     const out = { farm: 0, untilled: 0, n: mk.length };
-    for (const [u, q] of mk) { const id = W.getBlock(S.ox + u, y, S.oz + q); if (id === B.farmland || id === B.farmland_dry) out.farm++; else out.untilled++; }
+    out.pumpkins = 0;   // stems or pumpkins on its soil: a builder's farm has no pumpkin patch (js/baker.js), they would keep the hoe off it
+    for (const [u, q] of mk) { const id = W.getBlock(S.ox + u, y, S.oz + q), a = W.getBlock(S.ox + u, y + 1, S.oz + q); if (id === B.farmland || id === B.farmland_dry) out.farm++; else out.untilled++; if (a === B.pumpkin || a === B.pumpkin_stem) out.pumpkins++; }
     const D = BF.villageLife.vdata(R);
     out.detected = (D.beds || []).some(bd => bd.built && bd.built.id === 9000);
     out.tilledMark = e.tilled != null;
@@ -105,6 +107,7 @@ const check = (ok, msg, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg +
   check(mine[0] === 'project:repair' && (iNew < 0 || (iDone >= 0 && iDone < iNew)), 'the farmer\'s first project is the builder\'s farm, and it makes no new bed before that is done', seq);
   check(after.farm >= after.n - 3, 'its soil is tilled (but for up to 3 cane spots by the water, js/baker.js)', after);
   check(lines.length === 1 && after.tilledMark, 'the village log says so, once', lines);
+  check(after.pumpkins === 0, 'no pumpkins planted on the builder\'s farm (its soil is all for tilling)', after);
   console.log(fails ? `FAILED ${fails}` : 'ALL OK');
   await b.close();
   process.exit(fails ? 1 : 0);
