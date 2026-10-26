@@ -5,6 +5,27 @@
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 
+// Polls replaced by indexes and change events (spec r15-62): each counts its checks, how many it skipped (the index or the events said
+// nothing could have changed) and how many found something (changed). verify (tests): a skipped check runs anyway and must agree;
+// a difference is counted in diffs and logged as an ERROR. off (tests): every check runs as before r15-62, to compare against.
+// Counters only: nothing in the world reads them.
+// API: BF.polls = { note(label, ran, changed), check(label, same, detail), stats() -> {label: {checks, skipped, changed}}, diffs, reset(), verify, off }
+const pollStats = {};
+BF.polls = {
+  verify: false, off: false, diffs: 0,
+  note(label, ran, changed) {
+    const s = pollStats[label] || (pollStats[label] = { checks: 0, skipped: 0, changed: 0 });
+    s.checks++; if (!ran) s.skipped++; if (changed) s.changed++;
+  },
+  check(label, same, detail) {
+    if (same) return true;
+    if (++BF.polls.diffs <= 20 && BF.glog) BF.glog.log("ERROR", "polls", "Skipped check " + label + " differs from running it" + (detail ? ": " + detail : ""));
+    return false;
+  },
+  stats: () => JSON.parse(JSON.stringify(pollStats)),
+  reset() { for (const k of Object.keys(pollStats)) delete pollStats[k]; BF.polls.diffs = 0; },
+};
+
 const GRAVITY = 26;
 const FAR_R = 100, FAR_HZ = 4;   // wild mobs and monsters past 100 blocks (or the view distance) update 4 times a game second (BF.mobs.update)
 const DESPAWN_DIST = 100;   // village stock of a stopped village only: wild mobs and horses are never removed by distance (they wait with their chunk)
@@ -954,14 +975,24 @@ function vq(label, got, scan) {
 const villageMobs = V => (BF.regions && BF.regions.villageMobs ? BF.regions.villageMobs(V) : list.filter(o => o.village === V));
 const ofType = t => (BF.regions && BF.regions.ofType ? BF.regions.ofType(t).slice() : list.filter(o => o.type === t));
 // Finds the nearest living mob matching pred within r blocks (horizontal + vertical box).
-function nearestMob(m, r, pred) {
+// kind ("z" zombie, "h" hostile, "g" golem; spec r15-62): pred only passes mobs of that kind, so the grid's counts of it (GRID_N, each
+// cell's) let the scan skip what holds none. With BF.regions.verifyQueries on (tests), a skipped scan runs anyway and is compared.
+const KIND_SCAN = { z: "villager zombie scan", h: "golem hostile scan", g: "hostile golem scan" };
+function nearestMob(m, r, pred, kind) {
+  if (!kind || !(r <= 32 && chunkCells) || BF.polls.off) return nearestGrid(m, r, pred, null);
+  const got = GRID_N[kind] ? nearestGrid(m, r, pred, kind) : null, R = BF.regions;
+  BF.polls.note(KIND_SCAN[kind], !!GRID_N[kind], !!got);
+  if (R && R.verifyQueries && R.checkQuery) R.checkQuery("mobs.nearestMob " + kind, qNorm(got), qNorm(nearestGrid(m, r, pred, null)));
+  return got;
+}
+function nearestGrid(m, r, pred, kind) {
   let best = null, bd = r;
   if (r <= 32 && chunkCells) {   // only the 16-block cells within r (the grid is rebuilt every update)
     const gx = Math.floor(m.position.x / 16), gz = Math.floor(m.position.z / 16), n = Math.ceil(r / 16);
     const plain = gridFast && inSquare(m.position.x, m.position.z, GRID_EDGE);
     for (let cz = gz - n; cz <= gz + n; cz++) for (let cx = gx - n; cx <= gx + n; cx++) {
       const cell = chunkGrid.get(plain ? sepKey(cx, cz) : gridKey(cx, cz, 16));
-      if (cell) for (let i = 0; i < cell.n; i++) {
+      if (cell && !(kind && !cell[kind])) for (let i = 0; i < cell.n; i++) {
         const o = cell.a[i];
         if (o === m || o.dead || o.removed || !pred(o)) continue;
         const d = mdist(m, o);
@@ -1013,7 +1044,20 @@ const GOLEM_HITS = { zombie: 4, spider: 3, arrow: [3, 5] };
 // A villager is under attack when a mob hit it in the last 6 s, or a zombie hunting it is within 6 blocks.
 // Returns the nearest such attacker to golem g (only its own village's villagers when it has a village).
 // The attacker is within RESCUE_RANGE; the villager it hit is looked for RESCUE_RANGE further out (it was hit up to 6 s ago, maybe by an arrow).
-function villagerInDanger(g) { return vq("mobs.villagerInDanger", dangerIn(nearMobs(g.position, 2 * RESCUE_RANGE, true), g), L => dangerIn(L, g)); }
+// An attacker is a living hostile mob within RESCUE_RANGE of g, so with none among the hostiles the region index files around g
+// (BF.regions.hostilesAround, spec r15-62) the answer is null without the scan of every mob within 2 * RESCUE_RANGE.
+const _hs = [];
+function villagerInDanger(g) {
+  const R = BF.regions;
+  if (R && R.hostilesAround && !BF.polls.off) {
+    let any = false;
+    for (const h of R.hostilesAround(g.position.x, g.position.z, RESCUE_RANGE, _hs)) if (!h.dead && !h.removed && mdist(g, h) < RESCUE_RANGE) { any = true; break; }
+    _hs.length = 0;
+    BF.polls.note("golem rescue scan", any, false);
+    if (!any) return vq("mobs.villagerInDanger (no hostile near)", null, L => dangerIn(L, g));
+  }
+  return vq("mobs.villagerInDanger", dangerIn(nearMobs(g.position, 2 * RESCUE_RANGE, true), g), L => dangerIn(L, g));
+}
 function dangerIn(L, g) {
   let best = null, bd = RESCUE_RANGE;
   const consider = (v, h) => {
@@ -1040,7 +1084,7 @@ function golemFight(m, dt, out) {
     if (ai.gScanT <= 0) {
       ai.gScanT = 0.8;
       const calm = m.type === "spider" && skyLight() * skyAt(m.position.x, m.position.y + 0.5, m.position.z).factor > 0.6;
-      const g = calm ? null : nearestMob(m, 10, o => o.def.golem);
+      const g = calm ? null : nearestMob(m, 10, o => o.def.golem, "g");
       if (g && ai.golemFoeT <= 0) { ai.golemFoe = g; ai.golemFoeT = 6; }
     }
   }
@@ -1642,7 +1686,7 @@ function villagerAI(m, dt, out) {
   }
   // flee nearby zombies
   ai.zScanT = (ai.zScanT || 0) - dt;
-  if (ai.zScanT <= 0) { ai.zScanT = 0.5; ai.threat = nearestMob(m, 8, o => o.type === "zombie" && hasLineOfSight(m, new THREE.Vector3(o.position.x, o.position.y + o.height * 0.85, o.position.z))); }   // not through rock: a miner would flee a zombie in a cave beside its tunnel all day
+  if (ai.zScanT <= 0) { ai.zScanT = 0.5; ai.threat = nearestMob(m, 8, o => o.type === "zombie" && hasLineOfSight(m, new THREE.Vector3(o.position.x, o.position.y + o.height * 0.85, o.position.z)), "z"); }   // not through rock: a miner would flee a zombie in a cave beside its tunnel all day
   if (ai.threat && !ai.threat.dead && !ai.threat.removed) ai.fleeT = Math.max(ai.fleeT, 1);
   if (ai.fleeT > 0) {
     ai.fleeT -= dt;
@@ -1704,7 +1748,7 @@ function golemAI(m, dt, out) {
     ai.rescue = villagerInDanger(m);
     const rv = ai.revenge && !ai.revenge.dead && !ai.revenge.removed && mdist(m, ai.revenge) < 32 ? ai.revenge : null;
     if (!rv) ai.revenge = null;
-    ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile);
+    ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile, "h");
   }
   if (ai.foe && chaseAndHit(m, ai.foe, dt, out, irnd(R(m), 7, 14), 1.2, ai.foe === ai.rescue ? RESCUE_SPEED : T.speed)) return;
   ai.foe = null; ai.rescue = null;
@@ -1972,11 +2016,12 @@ class CellTable {
     if (this.n * 2 >= this.mask) this.grow();
     const m = this.mask, g = this.gen;
     let i = Math.imul(k, 0x9e3779b1) >>> this.sh;
-    for (; this.stamp[i] === g; i = (i + 1) & m) if (this.keys[i] === k) { const c = this.cells[i]; c.a[c.n++] = o; return; }
+    for (; this.stamp[i] === g; i = (i + 1) & m) if (this.keys[i] === k) { const c = this.cells[i]; c.a[c.n++] = o; return c; }
     this.stamp[i] = g; this.keys[i] = k; this.n++;
     let c = this.cells[i];
-    if (!c) c = this.cells[i] = { n: 0, a: [] };
-    c.n = 0; c.a[c.n++] = o;
+    if (!c) c = this.cells[i] = { n: 0, a: [], z: 0, h: 0, g: 0 };
+    c.n = 0; c.z = c.h = c.g = 0; c.a[c.n++] = o;
+    return c;
   }
   grow() {   // twice the slots, this update's cells carried over (arrays kept by their new slots)
     const { keys, stamp, cells, gen } = this, bits = 33 - this.sh;
@@ -1991,14 +2036,23 @@ class CellTable {
 }
 const SEP = new CellTable(), CHUNK = new CellTable();
 let sepGrid = SEP, chunkGrid = CHUNK, chunkCells = 0, gridFast = true;   // (the reference grids of test/mobgrid-compare.js swap in here)
+// Counts of the scanned-for kinds in the 16-block grid (spec r15-62): each cell's z (zombies), h (hostiles) and g (golems), and the
+// whole grid's in GRID_N. A scan for one kind (nearestMob's `kind`) skips the cells without one, and the whole scan when the grid has
+// none: the same answer, since its test only ever passes mobs of that kind and it only looks at the cells' mobs.
+const GRID_N = { z: 0, h: 0, g: 0 };
+function countIn(c, o) {
+  if (o.hostile) { c.h++; GRID_N.h++; if (o.type === "zombie") { c.z++; GRID_N.z++; } }
+  else if (o.def && o.def.golem) { c.g++; GRID_N.g++; }
+}
 function buildSepGrid() {
+  GRID_N.z = GRID_N.h = GRID_N.g = 0;
   if (!gridFast) return buildSepGridRef();
   SEP.clear(); CHUNK.clear();
   for (const o of list) {
     if (o.dead || o.removed) continue;
     const x = o.position.x, z = o.position.z, gx = Math.floor(x / 2), gz = Math.floor(z / 2), hx = Math.floor(x / 16), hz = Math.floor(z / 16);
-    if (inSquare(x, z, GRID_EDGE)) { SEP.add(sepKey(gx, gz), o); CHUNK.add(sepKey(hx, hz), o); }
-    else { SEP.add(gridKey(gx, gz, 2), o); CHUNK.add(gridKey(hx, hz, 16), o); }
+    if (inSquare(x, z, GRID_EDGE)) { SEP.add(sepKey(gx, gz), o); countIn(CHUNK.add(sepKey(hx, hz), o), o); }
+    else { SEP.add(gridKey(gx, gz, 2), o); countIn(CHUNK.add(gridKey(hx, hz, 16), o), o); }
   }
   chunkCells = CHUNK.n;
 }
@@ -2012,8 +2066,9 @@ function buildSepGridRef() {
     const a = REF_SEP.get(k);
     if (a) a.a[a.n++] = o; else REF_SEP.set(k, { n: 1, a: [o] });
     const k2 = gridKey(Math.floor(o.position.x / 16), Math.floor(o.position.z / 16), 16);
-    const b = REF_CHUNK.get(k2);
-    if (b) b.a[b.n++] = o; else REF_CHUNK.set(k2, { n: 1, a: [o] });
+    let b = REF_CHUNK.get(k2);
+    if (b) b.a[b.n++] = o; else REF_CHUNK.set(k2, (b = { n: 1, a: [o], z: 0, h: 0, g: 0 }));
+    countIn(b, o);
   }
   chunkCells = REF_CHUNK.size;
 }
