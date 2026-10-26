@@ -77,6 +77,9 @@ const F = {
   },
   fileName: name => (String(name || "world").replace(/[\u0000-\u001f<>:"/\\|?*]/g, "_").trim() || "world") + EXT,
   isGzip: u8 => u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b,
+  // a world's name as Create, Rename and Import keep it: at most NAME_MAX characters, never half an emoji (bug-072)
+  NAME_MAX: 40,
+  clampName: (name, dflt) => { const s = Array.from(String(name == null ? "" : name)).slice(0, F.NAME_MAX).join("").trim(); return s || dflt || "World"; },
 };
 if (isNode) {
   const zlib = require("zlib");
