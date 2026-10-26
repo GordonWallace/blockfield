@@ -14,7 +14,7 @@
 // fast-forward when several ticks went by). A sleeping mob, a ridden one and one that moved more than 4 blocks in a tick (a teleport) are
 // drawn where they are; a rider is placed by its boat or horse every tick.
 // API: BF.mobView = { init(scene), render(dt), viewOf(entity | protocol number | sim mob (tests)) -> {root, model, meshes, ...} | undefined,
-//   drawPos(entity, out), typeParts(type, variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }
+//   drawPos(entity, out), rayBoxOf(o, entity, mn, mx), typeParts(type, variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -743,8 +743,27 @@ function drawFailed(m, e) {
   if (BF.glog) BF.glog.log("ERROR", "mobs", "Could not draw a " + String(m.type).replace(/_/g, " ") + " (" + (e && e.message ? e.message : e) + "); it may look wrong until the game is reloaded", { at: [Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)] });
 }
 
+// The ray box of a mob of the mirror, seen from point o's frame (planet), in mn / mx: standing, its upright hw x h box; asleep on a bed, the
+// flat box draw() lays it in (feet at its position, head h along the bed's facing bedF), so the crosshair finds it where it is drawn
+// (js/villagerhover.js, js/player.js mirrorHit; js/mobs.js raycast keeps the same box for the simulation's mobs).
+const _bA = {}, _bB = {}, _bH = { x: 0, y: 0, z: 0 };
+function rayBoxOf(o, e, mn, mx) {
+  const hw = e.hw, p = BF.planet.local(o, e, _bA);
+  if (e.sleeping && e.bedF != null && !e.dead) {
+    const [fx, fz] = BF.DIRS[e.bedF];
+    _bH.x = e.x + fx * e.h; _bH.y = e.y; _bH.z = e.z + fz * e.h;
+    const h = BF.planet.local(o, _bH, _bB), alongX = Math.abs(h.x - p.x) > Math.abs(h.z - p.z);   // a bed over a face edge turns
+    mn[0] = Math.min(p.x, h.x) - (alongX ? 0 : hw); mn[1] = e.y - hw; mn[2] = Math.min(p.z, h.z) - (alongX ? hw : 0);
+    mx[0] = Math.max(p.x, h.x) + (alongX ? 0 : hw); mx[1] = e.y + hw; mx[2] = Math.max(p.z, h.z) + (alongX ? hw : 0);
+  } else {
+    mn[0] = p.x - hw; mn[1] = e.y; mn[2] = p.z - hw;
+    mx[0] = p.x + hw; mx[1] = e.y + e.h; mx[2] = p.z + hw;
+  }
+  return p;
+}
+
 BF.mobView = {
-  PX, box, buildGeometry, typeParts, drawPos,
+  PX, box, buildGeometry, typeParts, drawPos, rayBoxOf,
   init(sceneRef) {
     scene = sceneRef;
     if (!baseMat) {

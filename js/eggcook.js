@@ -27,6 +27,7 @@ const skyT = () => (BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.
 const dayNow = () => (BF.sky ? BF.sky.day || 0 : 0) + skyT();
 
 const WORK_END = 0.45, TRADE_PAUSE = 1.6, CHECK = 4;
+const AWAY_R = 64;                             // an explorer out mapping cooks at a village furnace this close (cookPlan)
 const BUY_BY = 0.38;                           // eggs are bought as food only while there is time left to cook them today
 const SHOP_DAYS = 3;                           // as villagelife.js: a hungry villager stocks up to 3 days of food
 const NO_WOOD = { builder: 1, farmer: 1, forester: 1, furniture_maker: 1 };   // they work with wood: coal only
@@ -57,16 +58,19 @@ const skipFurnace = S => f => avoided(S, "f:" + FU.pk(f.x, f.y, f.z));
 const skipOffer = S => (v2, o) => avoided(S, (v2.slot ? v2.slot.idx : 0) + ":" + o.sell.id);
 // How it would cook n eggs, spending at most `budget` emeralds on fuel: {furnace} (fuel in hand or burning there), {furnace, need: {f, n, what}}
 // (fuel to buy first, `cost` emeralds), or null when it cannot (no usable furnace in its village, no fuel it holds or can afford).
+// An explorer still out mapping (bug-067) uses a furnace of whatever village is near (within AWAY_R), buying any fuel there, rather than
+// walking all the way home; with none near it keeps its eggs until it is home.
 function cookPlan(m, n, budget) {
   if (!m.village || !n || EGG() == null || COOKED() == null) return null;
-  const S = state(m), fs = FU.near(m, EGG(), COOKED(), skipFurnace(S));
+  const S = state(m), away = !!(BF.explorer && BF.explorer.away && BF.explorer.away(m));
+  const fs = away ? FU.nearHere(m, EGG(), COOKED(), skipFurnace(S), AWAY_R) : FU.near(m, EGG(), COOKED(), skipFurnace(S));
   if (!fs.length) return null;
-  const f = fs[0], ok = fuelOk(m), k = Math.min(n, 16);
+  const f = fs[0], rec = f.rec, ok = fuelOk(m), k = Math.min(n, 16);
   if (FU.fuelIn(f) >= k || FU.fuelFor(m, Math.max(0, k - FU.fuelIn(f)), ok).length) return { furnace: f };
-  const coal = Math.ceil(k / FU.PER_COAL), cc = FU.priceOf(m, FU.isCoal, coal, false, skipOffer(S));
-  if (cc <= budget) return { furnace: f, need: { what: "fuel", f: FU.isCoal, n: coal }, cost: cc };
-  const wood = id => (FU.isLog(id) || FU.isPlanks(id)) && ok(id), w = Math.ceil(k / FU.PER_WOOD), wc = FU.priceOf(m, wood, w, false, skipOffer(S));
-  if (wc <= budget) return { furnace: f, need: { what: "fuel", f: wood, n: w }, cost: wc };
+  const coal = Math.ceil(k / FU.PER_COAL), cc = FU.priceOf(m, FU.isCoal, coal, false, skipOffer(S), rec);
+  if (cc <= budget) return { furnace: f, need: { what: "fuel", f: FU.isCoal, n: coal }, cost: cc, rec };
+  const wood = id => (FU.isLog(id) || FU.isPlanks(id)) && ok(id), w = Math.ceil(k / FU.PER_WOOD), wc = FU.priceOf(m, wood, w, false, skipOffer(S), rec);
+  if (wc <= budget) return { furnace: f, need: { what: "fuel", f: wood, n: w }, cost: wc, rec };
   return null;
 }
 const canCook = (m, n, budget) => !!cookPlan(m, n, budget == null ? ems(m) : budget);
@@ -116,8 +120,10 @@ function nextTrip(m) {
   if (!n) return null;
   const p = cookPlan(m, n, ems(m));
   if (!p) return null;
-  if (p.need) return FU.findDeal(m, p.need, skipOffer(state(m)));
-  return { kind: "cook", furnace: p.furnace, rawId: EGG(), outId: COOKED(), n, fuelOk: fuelOk(m) };
+  if (p.need) return FU.findDeal(m, p.need, skipOffer(state(m)), p.rec);
+  const f = p.furnace;
+  if (f.rec && f.rec !== m.village && BF.glog) BF.glog.log("INFO", "egg-cook", "explorer out mapping takes its eggs to the furnace at " + FU.pk(f.x, f.y, f.z) + " in another village", { village: m.village, at: m });
+  return { kind: "cook", furnace: f, rawId: EGG(), outId: COOKED(), n, fuelOk: fuelOk(m) };
 }
 
 // ---------------------------------------------------------------- AI

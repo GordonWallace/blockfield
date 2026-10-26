@@ -1399,7 +1399,8 @@ const MLQ = {};
 function standIn(e, x, z) {
   const boat = e.kind === "boat";
   return { mirror: true, kind: e.kind, sid: e.sid, type: e.type, position: new THREE.Vector3(x, e.y, z), pos: new THREE.Vector3(x, e.y, z),
-    halfWidth: boat ? BF.boats.HW : e.hw, height: boat ? BF.boats.H : e.h, dead: !!e.dead, rider: e.rider, hostile: !boat && !!(BF.mobs && BF.mobs.isHostile && BF.mobs.isHostile(e.type)) };
+    halfWidth: boat ? BF.boats.HW : e.hw, height: boat ? BF.boats.H : e.h, dead: !!e.dead, rider: e.rider, hostile: !boat && !!(BF.mobs && BF.mobs.isHostile && BF.mobs.isHostile(e.type)),
+    lying: !boat && e.sleeping && e.bedF != null ? e : null };   // asleep on a bed: aimed at by its flat box (BF.mobView.rayBoxOf)
 }
 function mirrorEntities(kind, o, r) {   // the mirror's living mobs (or boats) within r of o, as stand-ins seen from o's frame
   const W = BF.client && BF.client.world, out = [];
@@ -1416,7 +1417,9 @@ function mirrorHit(kind) {
   let best = null;
   for (const m of mirrorEntities(kind, o, MOB_REACH + 2)) {
     if (vehicle && vehicle.sid === m.sid) continue;
-    const p = m.position, t = rayBox(o, d, [p.x - m.halfWidth, p.y, p.z - m.halfWidth], [p.x + m.halfWidth, p.y + m.height, p.z + m.halfWidth]);
+    const p = m.position, mn = [p.x - m.halfWidth, p.y, p.z - m.halfWidth], mx = [p.x + m.halfWidth, p.y + m.height, p.z + m.halfWidth];
+    if (m.lying && BF.mobView && BF.mobView.rayBoxOf) BF.mobView.rayBoxOf(o, m.lying, mn, mx);
+    const t = rayBox(o, d, mn, mx);
     if (t != null && t <= MOB_REACH && (!best || t < best.dist)) best = { [kind === "boat" ? "boat" : "mob"]: m, dist: t };
   }
   return best;

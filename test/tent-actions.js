@@ -73,7 +73,12 @@ module.exports = async (pg, out) => {
     A.position.set(A.position.x, A.position.y, A.position.z);
     res.homeDist = BF.explorer.pitch ? 0 : -1;
     BF.sky.setTime(0.1);
-    // pretend it is 120 blocks from home by moving the home bed marker
+    // out of its village (anywhere inside it is home, bug-052), on open grass, and 150 blocks from its bed
+    { const W = BF.world, wg = A.village.wg || {}, ox = Math.floor(wg.maxX != null ? wg.maxX + 14 : A.village.x + 50), oz = Math.floor(A.village.z);
+      res.outside = !BF.vlog.villageAt(ox, oz) && W.isLoaded(ox, oz);
+      const oy = W.heightAt(ox, oz) + 1;
+      for (let dx = -5; dx <= 5; dx++) for (let dz = -5; dz <= 5; dz++) { W.setBlock(ox + dx, oy - 1, oz + dz, BF.B.grass); for (let k = 0; k < 40; k++) W.setBlock(ox + dx, oy + k, oz + dz, 0); }
+      A.position.set(ox + 0.5, oy, oz + 0.5); A.ai.route = null; }
     A.bed = { x: A.position.x - 150, y: A.position.y, z: A.position.z, f: 0 };
     BF.sky.setTime(0.47);
     BF.sky.setTime(0.2); BF.explorer.ai(A, 0.1, {}); BF.req.apply(); BF.req.deliver();   // a new day: tonight's camping decision is still to be made

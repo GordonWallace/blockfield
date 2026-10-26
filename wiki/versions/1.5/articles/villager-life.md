@@ -12,7 +12,7 @@ A day in the game lasts 20 minutes. The clock times below follow the F3 clock, w
 - **Evening, from 18:00 to the next dawn.** Everyone heads for bed and sleeps.
 - **Travellers.** [[villager:merchant|Merchants]] and [[villager:explorer|explorers]] who are caught far from home at dusk pitch a tent and sleep in it, and strike camp in the morning.
 
-The trade screen has a line saying what the villager is doing right now, such as "Harvesting Wheat", "Buying food" or "Resting".
+The trade screen has a line saying what the villager is doing right now, such as "Harvesting Wheat", "Buying food", "Buying bucket" or "Resting". A shopping trip names what it is for: food, a tool of its trade, feed or a treat.
 
 ## Beds and sleep
 Most villagers have a bed in the house they live in. A villager without a usable bed (a broken bed, a builder or explorer with no home yet, a child) claims the nearest free bed in the village at night. **No villager ever takes a bed another villager holds.** A bedless villager that cannot find a free bed goes inside the nearest building with room, or stands by the bell.
@@ -23,7 +23,7 @@ A villager eats the equivalent of one bread a day, a child two, in three meals. 
 - A villager that holds less than a day's food and has an emerald walks to the villager with the most spare food, farmers first, and buys up to three days' worth. A seller always keeps about 7 bread's worth for itself. A villager buying anything from another calls it once it is within 10 blocks, and the seller stops and waits for it, for up to 8 seconds, rather than walk on with a line of buyers trailing behind it. See [[page:village-economy]].
 - Someone who goes more than a day without finding food is **starving**. A starving villager only trades food ("Too hungry to trade").
 - A hungry [[villager:unemployed|unemployed villager]] buys food from you: it pays an emerald for food worth about 88 percent of an emerald, until it holds three days of food.
-- A villager who can cook buys eggs and cooks them in a furnace; one who cannot buys ready food. Raw eggs are not food.
+- A villager who can cook buys eggs and cooks them in a furnace of its village; one who cannot buys ready food. Raw eggs are not food. An explorer out mapping uses a furnace of the village it is in (see [[villager:explorer]]).
 - A villager buys a **treat**, a cake slice or a pumpkin pie from the [[villager:baker]], at most every 3 days and only with 2 emeralds to spare. It eats one a day at most.
 - Food is never created for them: starting food is a few bread, apples, carrots or baked potatoes, farmers grow their own.
 

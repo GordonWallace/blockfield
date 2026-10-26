@@ -20,6 +20,8 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const reg = new Map();   // id -> live object
+// onNew(obj, id): a key registered for the first time (js/rworkers.js: a place made while a region worker thinks goes to the others)
+const hooks = { onNew: null };
 // Removed mobs, kept readable for a while (id -> {o, t}): code that held a mob saw it go (m.removed) and acted on that a little later;
 // it still does. After GHOST game seconds a link to it reads undefined.
 const ghosts = new Map(), GHOST = 600;
@@ -39,6 +41,7 @@ function put(obj, id) {
     if (stats.collisions <= 20 && BF.glog) BF.glog.log("WARN", "ids", "Entity id " + id + " was taken over by another object" + (obj.type ? " (" + obj.type + ")" : ""));
   }
   reg.set(id, obj);
+  if (!had && hooks.onNew) hooks.onNew(obj, id);
   return obj;
 }
 function remove(x) {
@@ -152,7 +155,7 @@ function mobRef(o) {
 const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototypeOf(o) : null; return p === Refs || p === MobRef; };
 
 BF.ids = {
-  alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats,
+  alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks,
   get next() { return next; },
   get size() { return reg.size; },
   live: id => reg.get(id),   // the registered object only (no removed mob)

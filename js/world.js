@@ -243,6 +243,7 @@ world.reset = function () {
   staleFar.clear();
   fluidQ.clear();
   growing.clear();
+  fluidLast = growLast = 0;   // (as in a fresh page: a world started after another ticks the same, spec r15-39)
   if (BF.farmland) BF.farmland.reset();
   lastCenter = null; genList = []; meshList = []; simList = [];
   MP.queue.clear(); TBL = null;   // (answers still in workers are for chunks that are gone: dropped)
@@ -545,6 +546,23 @@ world.heightAt = function (x, z) {
   }
   return c.y0 - 1;   // nothing solid in the band: solid stone below it
 };
+// The top of column (x, z) that something can stand on or swim at: heightAt, or the water over it (sea, lakes, rivers), so
+// /tp u v lands on the water and on sea ice, not on the sea floor under them. BF.MIN_Y - 1 when the column is not loaded.
+world.topAt = function (x, z) {
+  x = Math.floor(x); z = Math.floor(z);
+  let h = world.heightAt(x, z);
+  const c = chunkAt(x, z);
+  if (!c) return h;
+  while (h + 1 < c.y1 && BF.FLUID[world.getBlock(x, h + 1, z)]) h++;
+  return h;
+};
+// Generates the chunk holding (x, z) now if it isn't loaded yet (/tp u v needs its real surface at once), as world.update would.
+// Returns the chunk, or null in a corner wedge.
+world.loadAt = function (x, z) {
+  if (!res(Math.floor(x), Math.floor(z))) return null;
+  const c = rawChunk(RX, RZ);
+  return c || createChunk(Math.floor(RX / CS), Math.floor(RZ / CS));
+};
 
 function updateColumn(c, lx, lz) {
   // light-blocking top (opaque blocks and leaves): rain and snow stop here (js/weather.js); sky light is js/skylight.js
@@ -639,6 +657,15 @@ function dropFar(key) {
   world.farMeshes.delete(key);
 }
 
+// the region workers' journal (js/rworkers.js): a chunk streaming dropped, for the followers to drop too
+function jrec(op, key) { const RJ = BF.rworkers; if (RJ && RJ.journal) RJ.rec([op, key]); }
+// The followers' side of the journal (js/rplay.js): what the leader's streaming did, done the same way
+world.replay = {
+  create: (cx, cz) => (world.chunks.has(ckey(cx, cz)) ? world.chunks.get(ckey(cx, cz)) : createChunk(cx, cz)),
+  extendDown: (cx, cz, lo) => { const c = world.chunks.get(ckey(cx, cz)); if (c && c.lo > lo) extendDown(c, lo); },
+  unload, purge,
+};
+
 function disposeMeshes(c) {
   for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   c.meshes = [];
@@ -722,9 +749,9 @@ function plan(pcx, pcz) {
   const RU = world.high ? -1 : R;
   for (const k of [...world.chunks.keys()]) {
     const c = world.chunks.get(k);
-    if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) unload(k); continue; }
+    if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); } continue; }
     if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
-      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) purge(k);
+      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) { jrec("g", k); purge(k); }
   }
   for (const k of [...world.farMeshes.keys()]) {
     if (keep.has(k)) continue;
@@ -791,6 +818,8 @@ let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength w
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
+  const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;   // the region workers' journal (js/rworkers.js): the followers do what streaming did here
+  if (RJ && BF.villageSim) RJ.rec(["v", px, pz, RJ.stamp()]);
   if (BF.villageSim && !world.replica && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
   roundPlan = !!(BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
   // the chunk ceiling: above min(pxScale, chunkCeiling) over the ground no chunks load; back below 90% of it they do
@@ -815,7 +844,7 @@ world.update = function (px, pz, budgetMs = 8) {
     let budget = 3;
     for (let dz = -2; dz <= 2 && budget > 0; dz++) for (let dx = -2; dx <= 2 && budget > 0; dx++) {
       const c = world.chunkC(pcx + dx, pcz + dz);
-      if (c && c.lo > want) { extendDown(c, dx || dz ? Math.max(want, c.lo - 8) : want); budget--; }
+      if (c && c.lo > want) { const lo = dx || dz ? Math.max(want, c.lo - 8) : want; if (RJ) RJ.rec(["d", c.cx, c.cz, lo]); extendDown(c, lo); budget--; }
     }
   }
 
@@ -846,6 +875,7 @@ world.update = function (px, pz, budgetMs = 8) {
       while (simList.length && world.chunks.has(ckey(simList[0][0], simList[0][1]))) simList.shift();
       if (!simList.length) break;
       const [sx, sz] = simList.shift();
+      if (RJ) RJ.rec(["c", sx, sz]);
       createChunk(sx, sz);
       continue;
     }
@@ -854,6 +884,7 @@ world.update = function (px, pz, budgetMs = 8) {
       if (MP.inline) buildMesh(c); else { c.mesh = null; enqueue(c, meshCand[2]); }
       meshList.splice(mi, 1);
     } else {
+      if (RJ) RJ.rec(["c", genCand[0], genCand[1]]);
       createChunk(genCand[0], genCand[1]);
       genList.splice(gi, 1);
       mi = 0; // newly generated data may unblock a nearer mesh
@@ -916,7 +947,7 @@ function meshTables() {
 function workerTables() {
   if (WTBL) return WTBL;
   const t = Object.assign({}, meshTables());
-  t.blocks = BF.blocks.map(b => b && { model: b.model, translucent: b.translucent, boxes: b.boxes, gate: b.gate && { axis: b.gate.axis }, wallTorch: b.wallTorch && { f: b.wallTorch.f }, name: b.name, render: b.render });
+  t.blocks = BF.blocks.map(b => b && { model: b.model, translucent: b.translucent, boxes: b.boxes, gate: b.gate && { axis: b.gate.axis }, wallTorch: b.wallTorch && { f: b.wallTorch.f }, door: b.door && { f: b.door.f }, name: b.name, render: b.render });
   return (WTBL = t);
 }
 
@@ -1143,12 +1174,22 @@ function qf(x, y, z) {
   x = RX; z = RZ;
   fluidQ.add(fkey(x, y, z));
 }
+
+// Water passes through fences and fence gates (bug-060): a fence doesn't hold it, it runs on to the cell beyond as if the fence's cell were
+// water one level thinner. The fence's own cell stays dry (no waterlogged blocks).
+let leakyT = null;
+function leaky(id) {
+  if (!leakyT) { leakyT = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); for (const b of BF.blocks) if (b && (b.model === "fence" || b.gate)) leakyT[b.id] = 1; }
+  return leakyT[id] === 1;
+}
+world.leaky = leaky;
 function scheduleFluid(x, y, z, withNeighbours) {
   if (y < BF.MIN_Y || y >= BF.H) return;
   qf(x, y, z);
   if (withNeighbours) {
     qf(x + 1, y, z); qf(x - 1, y, z);
     qf(x, y, z + 1); qf(x, y, z - 1);
+    for (const [dx, dz] of HN) if (leaky(world.getBlock(x + dx, y, z + dz))) qf(x + 2 * dx, y, z + 2 * dz);   // and on through a fence
     if (y + 1 < BF.H) qf(x, y + 1, z);
     if (y > BF.MIN_Y) qf(x, y - 1, z);
   }
@@ -1164,9 +1205,15 @@ function desiredLevel(x, y, z, cur) {
   if (FLUID[get(x, y + 1, z)]) return 1; // falling water
   let best = 99, sources = 0;
   for (const [dx, dz] of HN) {
-    const nx = x + dx, nz = z + dz;
+    let nx = x + dx, nz = z + dz, thru = 0;
+    if (leaky(get(nx, y, nz))) { nx += dx; nz += dz; thru = 1; }   // through a fence: the water beyond it, one level thinner
     const f = FLUID[get(nx, y, nz)];
     if (!f) continue;
+    if (thru) {
+      if (f !== 8) { const below = get(nx, y - 1, nz); if ((BF.REPLACEABLE[below] && !FLUID[below]) || (FLUID[below] && FLUID[below] !== 8)) continue; }
+      best = Math.min(best, (f === 8 ? 1 : f + 1) + 1);
+      continue;
+    }
     if (f === 8) { sources++; best = Math.min(best, 1); continue; }
     // flowing water only spreads sideways when it rests on something
     const below = get(nx, y - 1, nz);
@@ -1272,7 +1319,10 @@ world.tickSim = () => {
   if (!R) { blockTicks(); return; }
   R.apply();
   R.blocks(blockTicks);
+  const RW = BF.rworkers && BF.rworkers.active ? BF.rworkers : null;
+  if (RW) RW.beforeDeliver();
   R.deliver();
+  if (RW) RW.afterDeliver();   // what callbacks only this worker has did, to the other workers (spec r15-39, js/rworkers.js)
   R.endTick();
 };
 
@@ -1426,7 +1476,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
         lift.y = top > save.y ? top : Math.floor(save.y + 1e-3) + 1; // top of the block we bumped into
         if (lift.y - save.y <= stepUp && !world.boxCollides(lift.x, lift.y, lift.z, hw, h)) {
           lift[axis] += d;
-          if (!world.boxCollides(lift.x, lift.y, lift.z, hw, h)) { pos.x = lift.x; pos.y = lift.y; pos.z = lift.z; continue; }
+          if (!world.boxCollides(lift.x, lift.y, lift.z, hw, h) && !(opts.canStep && lift.y - save.y > 0.5 && !opts.canStep(lift.x, lift.y, lift.z))) { pos.x = lift.x; pos.y = lift.y; pos.z = lift.z; continue; }
         }
       }
       vel[axis] = 0;

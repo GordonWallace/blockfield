@@ -75,6 +75,7 @@ function snd(name, m, vol) { const V = BF.villageLife; if (V && V.sound && m.pos
 
 // Wheat eaten by `m` (from the player or a shepherd). Returns false for lambs or sheep that are not hungry.
 function feed(m, by) {
+  if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!live(m) || m.type !== "sheep") return false;
   const s = stOf(m), t = now();
   if (s.growAt != null) { s.growAt -= LAMB_DAYS * 0.1; syncLook(m); fx(m, "#ffd84a", 5); snd("sheep", m, 0.4); return true; }   // wheat speeds a lamb up by 10%
@@ -86,6 +87,7 @@ function feed(m, by) {
 }
 // Takes the wool: returns how many items, or 0 when there is nothing to shear. The caller puts them somewhere.
 function shear(m, by) {
+  if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!live(m) || m.type !== "sheep") return 0;
   const s = stOf(m);
   if (s.growAt != null || s.shorn) return 0;
@@ -142,8 +144,9 @@ function mateIn(L, m, t) {
 // In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
 // when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
-  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t), ["shepherd", a.id, b.id, t]);
 }
+if (BF.mobs.maker) BF.mobs.maker("shepherd", (ai, bi, t) => { const a = BF.ids.get(ai), b = BF.ids.get(bi); return a && b ? [() => breedNow(a, b, t), () => willing(a, t) && willing(b, t)] : null; });   // (another worker's birth, spec r15-39)
 function breedNow(a, b, t) {
   const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
   const lamb = BF.mobs.spawn("sheep", x, y, z);

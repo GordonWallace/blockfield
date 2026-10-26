@@ -34,7 +34,8 @@ function init() {
   (document.getElementById("ui") || document.body).appendChild(el);
 }
 
-// The nearest mob in the mirror the look ray hits (its box: half width hw, height h, seen from the eye's frame on the planet), or null.
+// The nearest mob in the mirror the look ray hits (its box: half width hw, height h, seen from the eye's frame on the planet; flat on its bed
+// while asleep), or null.
 const LQ = {};
 function rayAABB(o, d, mn, mx) {
   let t0 = 0, t1 = Infinity;
@@ -58,8 +59,11 @@ function raycast(o, d, max) {
     BF.planet.local(o, m, LQ);
     const x = LQ.x, z = LQ.z;
     if ((x - o.x) ** 2 + (m.y - o.y) ** 2 + (z - o.z) ** 2 > R2) continue;
-    mn[0] = x - m.hw; mn[1] = m.y; mn[2] = z - m.hw;
-    mx[0] = x + m.hw; mx[1] = m.y + m.h; mx[2] = z + m.hw;
+    if (BF.mobView && BF.mobView.rayBoxOf) BF.mobView.rayBoxOf(o, m, mn, mx);   // lying flat while asleep on a bed (bug-058)
+    else {
+      mn[0] = x - m.hw; mn[1] = m.y; mn[2] = z - m.hw;
+      mx[0] = x + m.hw; mx[1] = m.y + m.h; mx[2] = z + m.hw;
+    }
     const t = rayAABB(o, d, mn, mx);
     if (t != null && t <= max && (!best || t < best.dist)) best = { mob: m, dist: t };
   }
