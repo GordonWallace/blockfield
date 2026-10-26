@@ -14,7 +14,7 @@
 // Folders without a world.json (the river cache, rivers/) are not worlds and are left alone.
 // API: open(root) -> { list(), meta(id), folder(id), get(id, part), put(id, part, value), del(id, part), parts(id), remove(id),
 //   rename(id, name) -> folder, tidy() (folder names to world names), failWrites(n, code) (tests: the next n writes fail) }
-//   part: "meta" | "data" | "loghead" | "log:<seq>"
+//   part: "meta" | "data" | "loghead" | "log:<seq>" (seq: up to 9 digits; any other part throws, code EBADPART)
 "use strict";
 const fs = require("fs"), path = require("path"), v8 = require("v8");
 
@@ -59,8 +59,16 @@ function open(root) {
     if (except) taken.delete(except.toLowerCase());
     for (let i = 1; ; i++) { const n = i === 1 ? base : base + " (" + i + ")"; if (!taken.has(n.toLowerCase()) && n.toLowerCase() !== "rivers") return n; }
   }
-  const file = (f, part) => part === "meta" ? path.join(dir(f), "world.json") : part === "data" ? path.join(dir(f), "save.v8")
-    : part === "loghead" ? path.join(dir(f), "log", "head.v8") : path.join(dir(f), "log", part.slice(4) + ".v8");
+  // a part's file; anything but the parts above (a log batch "log:../../Other world/save", bug-070) is refused, and the file must be
+  // inside the world's folder
+  function file(f, part) {
+    const p = part === "meta" ? path.join(dir(f), "world.json") : part === "data" ? path.join(dir(f), "save.v8")
+      : part === "loghead" ? path.join(dir(f), "log", "head.v8") : /^log:\d{1,9}$/.test(part) ? path.join(dir(f), "log", part.slice(4) + ".v8") : null;
+    const rel = p && path.relative(path.resolve(root), path.resolve(p));
+    if (!p || !rel || rel.startsWith("..") || path.isAbsolute(rel) || rel.split(path.sep)[0] !== f)
+      throw Object.assign(new Error("not a part of a world: " + JSON.stringify(String(part)).slice(0, 60)), { code: "EBADPART" });
+    return p;
+  }
   function write(target, bytes) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     const tmp = target + ".tmp" + process.pid + "_" + Math.random().toString(36).slice(2);

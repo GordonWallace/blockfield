@@ -311,7 +311,11 @@ function buildDOM() {
     else if (a === "view") {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
-    } else if (a === "budget") { if (BF.active) BF.active.cycle(); updateBudgetBtn(); }   // 20, 40, 60, 80% or off (js/active.js)
+    } else if (a === "budget") {   // 20, 40, 60, 80% or off (js/active.js); where the simulation is elsewhere, there too (bug-081)
+      const away = !!(BF.simHost && BF.simHost.worker);
+      if (BF.active) { BF.active.cycle(away); if (away) BF.simHost.budget(); }
+      updateBudgetBtn();
+    }
     else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
@@ -333,8 +337,13 @@ function buildDOM() {
   knobEl = touchEl.querySelector(".bfp-knob");
 }
 
-// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js)
-function updateBudgetBtn() { if (budgetBtn && BF.active) budgetBtn.textContent = BF.active.text(); }
+// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js); in a worker or on the world server the simulation's own line (the
+// budget query, answered after the setting it was just sent: bug-081)
+function updateBudgetBtn() {
+  if (!budgetBtn || !BF.active) return;
+  if (!(BF.simHost && BF.simHost.worker && BF.client)) { budgetBtn.textContent = BF.active.text(); return; }
+  BF.client.query("budget", {}, r => { if (r && r.ok) budgetBtn.textContent = r.text; });
+}
 // "Simulation: World server (1 thread)", and the setting when it forces a host (spec r15-43, js/simhost.js); a click cycles the setting
 // (Automatic, World server, Browser (worker), Browser (this page)), which applies from the next start
 function updateHostBtn() {
@@ -1191,6 +1200,16 @@ function act(kind, target, data) {
   if (!req.delivered && BF.client && BF.client.mode === "worker") return { ok: true, pending: true, then: fn => req.then(fn) };
   return req.result || { ok: false, why: "pending" };
 }
+// Off the page act's answer comes later, so a right click that only sometimes does something checks what the page knows first, and one
+// that always does (a cake, a hive, a blank map) takes its message when the answer comes.
+const offPage = () => !!(BF.client && BF.client.mode === "worker");
+function leadsHorse() {   // a horse on the player's lead, as the protocol's mob views show it (their lead field)
+  const M = BF.client && BF.client.world;
+  if (!M || !M.entities) return false;
+  for (const e of M.entities.values()) if (e.kind === "mob" && e.lead === "player") return true;
+  return false;
+}
+const later = (a, fn) => { if (a.pending) a.then(res => fn(res && res.r)); else fn(a.r); };
 // A right click on a mob (player.mob): the module's answer, or true while it is on its way (the simulation in a worker answers later)
 function mobAct(data) {
   const a = act("player.mob", null, data);
@@ -1437,7 +1456,13 @@ function rayBox(o, d, mn, mx) {   // distance along the ray to the box, or null
   return t0;
 }
 // The mobs whose boxes block a placement or a rest: the simulation's, or the mirror's stand-ins with the simulation in a worker
-const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { label: "player near" }) : (BF.mobs && BF.mobs.list) || [];   // (r15-32)
+// (r15-32). Through a face edge (bug-091): a mob kept in another frame is given as a copy at its spot seen from the player's frame.
+const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { local: true, label: "player near" }).map(seenMob) : (BF.mobs && BF.mobs.list) || [];
+function seenMob(m) {
+  BF.planet.local(pos, m.position, MLQ);
+  if (MLQ.x === m.position.x && MLQ.z === m.position.z) return m;
+  return { type: m.type, position: new THREE.Vector3(MLQ.x, m.position.y, MLQ.z), halfWidth: m.halfWidth, height: m.height, dead: m.dead, hostile: m.hostile };
+}
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
   const bh = boatHit(), m0 = mobHit();
@@ -1778,17 +1803,23 @@ function secondaryDown() {
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
   if (tb && tb.door && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), {}); swing(); mouseR = false; return true; }
-  if (tb && /_fence$/.test(tb.name) && BF.horses && act("player.tie", cellKey(target.x, target.y, target.z), {}).ok) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
+  if (tb && /_fence$/.test(tb.name) && BF.horses && (!offPage() || leadsHorse()) && act("player.tie", cellKey(target.x, target.y, target.z), {}).ok) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
   if (tb && tb.gate && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), { gate: true }); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (tb && BF.baker && BF.baker.isCake(target.id) && useBlk) {   // a placed cake: eat a slice (js/baker.js)
-    const r = act("player.cake", cellKey(target.x, target.y, target.z), { creative: creative() }).r;
-    if (r === true) swing(); else if (typeof r === "string") actionBar(r);
+    later(act("player.cake", cellKey(target.x, target.y, target.z), { creative: creative() }), r => {
+      if (r === true) swing(); else if (typeof r === "string") actionBar(r);
+    });
     mouseR = false; return true;
   }
   if (tb && BF.baker && BF.baker.isOven(target.id) && useBlk) { actionBar(BF.baker.ovenText(target.x, target.y, target.z)); mouseR = false; return true; }   // what a baker's oven holds
   if (tb && BF.bees && BF.bees.isHome(target.id) && useBlk) {   // a bee nest or beehive: shears or a glass bottle harvest a full one, otherwise how it is (js/bees.js)
-    const r = act("player.hive", null, { cell: Object.assign({}, target), creative: creative() }).r;
+    const a = act("player.hive", null, { cell: Object.assign({}, target), creative: creative() });
+    if (a.pending) {   // the sim keeps a record for every loaded hive, so the click is the hive's: its answer comes later
+      a.then(res => { const r = res && res.r; if (r && r.give) swing(); if (r && r.msg) actionBar(r.msg); });
+      mouseR = false; return true;
+    }
+    const r = a.r;
     if (r) {
       mouseR = false;
       if (r.give) swing();
@@ -1841,8 +1872,9 @@ function secondaryDown() {
     if (BF.mapview.use(sel, it)) { swing(); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
-    const msg = act("player.map", null, {}).r;
-    if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+    const a = act("player.map", null, {});
+    if (a.pending) { a.then(res => { if (res && res.r) actionBar(res.r); }); swing(); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+    if (a.r) { swing(); actionBar(a.r); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.boat && BF.boats) {   // boat: on the water (or the ground) in front, facing the way the player looks
     if (!act("player.boat", null, { boat: it.boat, eye: arr(eyeVec()), dir: arr(dirVec()), yaw }).ok) return false;

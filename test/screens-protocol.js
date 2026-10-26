@@ -40,6 +40,7 @@ async function run(b, url, mode) {
   const pg = await ctx.newPage();
   pg.on('pageerror', e => { console.log('PAGEERROR', (e.stack || e.message).slice(0, 600)); fails++; });
   pg.on('console', m => { if (m.type() === 'error' && !/GL Driver|ERR_CONNECTION_REFUSED|Failed to load resource/.test(m.text())) console.log('console.error:', m.text().slice(0, 400)); });
+  await pg.addInitScript(() => { window.BF_TEST = true; });   // (js/simhost.js: the simulation's eval query, for the trade's stock below)
   await pg.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { const v = document.getElementById('view'); if (v) v.requestPointerLock = null; }));
   await pg.goto(url + '?sim=' + mode);
   await pg.waitForFunction(() => window.BF && BF.simHost && (BF.simHost.worker || BF.simHost.why), null, { timeout: 120000 });
@@ -292,6 +293,23 @@ async function run(b, url, mode) {
     return list.map(e => e.sid);
   });
   check(ids.length > 0, tag('a villager in the mirror'));
+  // One of them is given what one of its emerald offers sells: stock is earned in play and differs between runs, and in some runs every
+  // emerald offer of the 16 nearest said "Out of stock" (the screen is what is tested here, not the village's stock)
+  const stocked = ids.length ? await pg.evaluate(([src, a]) => BF.simHost.eval(src, a), [String(ids => {
+    const T = BF.trades, em = BF.I.emerald;
+    for (const id of ids) {
+      const v = BF.ids.get(id);
+      if (!v || !v.trades || !v.inv) continue;
+      for (const o of v.trades) {
+        if (o.buy[0].id !== em || o.buy[1] || o.buy[0].n > 16 || o.sell.id === em || T.blockReason(v, o) !== "Out of stock") continue;
+        if (T.inv.add(v.inv, o.sell.id, o.sell.n) > 0) continue;
+        if (!T.blockReason(v, o)) return { id, sell: o.sell };
+        T.inv.take(v.inv, o.sell.id, o.sell.n);   // (no use to it: back as it was)
+      }
+    }
+    return null;
+  }), ids.slice(0, 16)]) : null;
+  console.log('stocked for the trade:', JSON.stringify(stocked));
   const canDo = (tv, em) => (tv ? tv.trades.findIndex(o => !o.reason && o.buy[0].id === em && !o.buy[1] && o.buy[0].n <= 16 && o.sell.id !== em) : -1);
   let tv = null, oi = -1, opened = false;
   for (const id of ids.slice(0, 16)) {

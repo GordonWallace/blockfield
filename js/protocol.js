@@ -34,6 +34,7 @@ const VERSION = 1;
 const TYPES = { out: ["hello", "chunk", "unload", "blockChanges", "edits", "entities", "events", "village", "clock", "log", "self", "result"],
   in: ["request", "view", "query", "speed", "save", "player", "world", "meta", "clientLog"] };
 const SECN = 4096;
+const MAX_VIEW = 32;   // the farthest view distance the page offers (chunks, js/player.js VIEW_OPTS): a view message asking for more gets this
 const glog = (lvl, text) => { if (BF.glog) BF.glog.log(lvl, "protocol", text); };
 const errOnce = new Set();
 const errorOnce = (key, text) => { if (!errOnce.has(key)) { errOnce.add(key); glog("ERROR", text); } };
@@ -389,15 +390,20 @@ function serve(send, opts) {
     if (list.length || gone.length) out({ t: "village", list, gone });
   }
 
-  // the clock once a game second (and on a speed change); the weather's state only when it changed
+  // the clock once a game second (and on a speed change); the weather's state only when it changed. While the world is frozen or paused
+  // nothing ticks, so a /time set or /weather then goes at once: the clock is sent whenever the time or the weather differs from the last.
   function flushClock(t, force) {
     const W = BF.warp, sky = BF.sky || {}, speed = W ? W.speed : 1, frozen = !!(W && W.frozen);
-    const key = speed + "|" + frozen;
-    if (!force && key === S.clockKey && t - S.clockTick < 20) return;
-    S.clockKey = key; S.clockTick = t;
-    const m = { t: "clock", tick: t, day: sky.day || 0, time: sky.time || 0, speed, frozen, achieved: W ? W.last : 1 };
-    const w = BF.weather && BF.weather.serialize ? JSON.stringify(BF.weather.serialize()) : "null";
-    if (w !== S.weather) { S.weather = w; m.weather = JSON.parse(w); }
+    const key = speed + "|" + frozen, day = sky.day || 0, time = sky.time || 0;
+    const still = frozen || !!(BF.state && BF.state.paused);
+    const w = () => (BF.weather && BF.weather.serialize ? JSON.stringify(BF.weather.serialize()) : "null");
+    let wNow = null;
+    if (!force && key === S.clockKey && t - S.clockTick < 20 &&
+        !(still && (day !== S.clockDay || time !== S.clockTime || (wNow = w()) !== S.weather))) return;
+    S.clockKey = key; S.clockTick = t; S.clockDay = day; S.clockTime = time;
+    const m = { t: "clock", tick: t, day, time, speed, frozen, achieved: W ? W.last : 1 };
+    if (wNow == null) wNow = w();
+    if (wNow !== S.weather) { S.weather = wNow; m.weather = JSON.parse(wNow); }
     out(m);
   }
 
@@ -515,7 +521,13 @@ function serve(send, opts) {
     count("in", m.t, bytes(p));
     const fn = IN[m.t];
     if (!fn) { errorOnce("type " + m.t, "The simulation got a message of unknown type \"" + m.t + "\""); return; }
-    fn(m);
+    // a message the handler can't take (a bug, or a malformed message from a page) is logged and dropped, never the end of the simulation
+    // (bug-078); a request or query still gets an answer, so the page doesn't wait for it forever
+    try { fn(m); } catch (e) {
+      errorOnce("threw " + m.t, "The simulation could not take a \"" + m.t + "\" message: " + (e && e.message));
+      if (m.rid != null) out({ t: "result", rid: m.rid, tick: tickNow(), result: { ok: false, why: "error" } });
+      else if (m.qid != null) out({ t: "result", qid: m.qid, result: { ok: false, why: "error", error: String(e && e.message || e) } });
+    }
   }
   const IN = {
     // a player request (r15-20): applied at once at this tick boundary; its block changes go first, then its result
@@ -529,7 +541,8 @@ function serve(send, opts) {
     },
     view(m) {
       const first = !S.view;
-      S.view = { x: m.x, y: m.y, z: m.z, dist: m.dist | 0, budget: m.budget };
+      const num = (v, old) => (Number.isFinite(v) ? v : old != null ? old : 0), V0 = S.view || {};
+      S.view = { x: num(m.x, V0.x), y: num(m.y, V0.y), z: num(m.z, V0.z), dist: Math.max(0, Math.min(MAX_VIEW, m.dist | 0)), budget: m.budget };
       if (opts.onView) opts.onView(S.view);   // (the worker loads chunks to the page's view distance, as the page did)
       if (first) flush(true);
     },
@@ -576,7 +589,7 @@ function serve(send, opts) {
       if (m.monsters) { if (cur) cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
     },
     // the client's own log entries (its errors): into this game log, which is the one saved
-    clientLog(m) { if (BF.glog) for (const e of m.list || []) BF.glog.log(e.l, e.k, e.x, { at: e.p }); },
+    clientLog(m) { if (BF.glog && Array.isArray(m.list)) for (const e of m.list) if (e) BF.glog.log(e.l, e.k, e.x, { at: e.p }); },
   };
 
   // ---- taps: block edits (js/world.js), effects (js/fx.js), the game log (js/gamelog.js)
@@ -615,6 +628,8 @@ const QUERIES = {
   },
   // the world state hash and its parts (js/statehash.js)
   hash() { return BF.stateHash ? Object.assign({ ok: true, tick: BF.rand ? BF.rand.tick : null }, BF.stateHash.full()) : { ok: false, why: "no state hash" }; },   // (tick: r15-41's test compares with a headless run of as many ticks)
+  // the pause menu's Simulated villages line, where the simulation is (bug-081: js/player.js updateBudgetBtn)
+  budget() { return BF.active ? { ok: true, text: BF.active.text(), on: BF.active.opts().on, budget: BF.active.opts().budget } : { ok: false, why: "no budget" }; },
   // the protocol's own figures
   stats() { return Object.assign({ ok: true }, stats()); },
   // a hash of the blocks of chunks {keys} and which of them aren't loaded (a client keeping its own copy checks it against this, r15-38)
