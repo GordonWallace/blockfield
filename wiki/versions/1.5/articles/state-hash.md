@@ -16,6 +16,10 @@ The hash is made from separate parts, each with its own hash, so when two worlds
 - **drops**: items lying on the ground;
 - **clock** and **weather**;
 - **wildlife** (wild mobs stored with chunks that aren't loaded), **boats**, **horses**, **bees** (nests and hives) and **farmland**.
+- **rand** and **ids**: where the world's random number streams have got to, and the next id to hand out. Two worlds can look the same and still play differently if these differ;
+- **villagers**: what the save keeps for villages besides their mobs: builders' structures and how far along they are, farm beds, how old each village is, ovens, pens and coops, newborns and the dead, caravans.
+
+Village logs, economy tallies, happiness and day timelines are not in the hash. They record what happened, and nothing in the simulation reads them back.
 
 Positions are rounded to 1/1024 of a block, and anything that is only drawing or sound (models, walking animation, arm swings, items bobbing on the ground, particles, sound timers) is left out. Working out the hash doesn't change the world.
 
