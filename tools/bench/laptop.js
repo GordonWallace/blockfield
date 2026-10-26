@@ -5,7 +5,9 @@
 //                       [--secs 60] [--settle 60] [--monsters] [--out results] [--headless] [--allow-cpu] [--chrome <path>] [--only 1.4|1.5]
 //   --villages n: the n villages nearest the spawn's village are simulated (1 = that village alone). Both versions load them the same
 //     way (villageSim trip pins with its limits lifted), wherever they are; in 1.5 that happens inside its Web Worker.
-//   --speeds: fast-forward indexes (0 = 1x, 1 = 3x, 2 = 5x, 3 = 10x, 4 = 100x, 5 = 1000x), each measured for --secs real seconds.
+//   --speeds: fast-forward indexes (0 = 1x, 1 = 3x, 2 = 5x, 3 = 10x, 4 = 100x, 5 = 1000x). 1x is measured for --secs real seconds;
+//     each fast-forward speed for one whole game day (20 game minutes, so night and day weigh the same in both versions), at most
+//     --maxsecs (600) real seconds.
 //   --settle: real seconds after the villages are in and before measuring (villagers come out and get going).
 //   --monsters: monsters spawn as in play. Off by default: they spawn at random and would make the mob counts differ between the two
 //     runs (wild animals still differ a little: they roll at random as chunks load).
@@ -22,7 +24,7 @@ const { chromium } = require(process.env.PW || 'playwright');
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf('--' + n); return i < 0 ? d : (argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : true); };
-const SEED = +opt('seed', 3), NV = +opt('villages', 8), SECS = +opt('secs', 60), SETTLE = +opt('settle', 60);
+const SEED = +opt('seed', 3), NV = +opt('villages', 8), SECS = +opt('secs', 60), SETTLE = +opt('settle', 60), MAXSECS = +opt('maxsecs', 600);
 const SPEEDS = String(opt('speeds', '0,3,4,5')).split(',').map(Number), CALM = !opt('monsters', false), OUT = opt('out', 'bench-results');
 const SPEED_X = [1, 3, 5, 10, 100, 1000];
 const log = (...a) => console.log(new Date().toTimeString().slice(0, 8), ...a);
@@ -130,8 +132,9 @@ async function runVersion(label, root) {
   }, [fn.toString(), arg]);
   // (1.5: the page learns the player's place from the worker a moment after it starts)
   await pg.waitForFunction(() => { const p = BF.player.position; return (BF.worldgen.villagesNear(p.x, p.z, 6000) || []).length > 0; }, null, { timeout: 120000, polling: 500 });
-  // the player: creative, flying 40 blocks over the village nearest the spawn, looking down at it
+  // the player: out of the title screen (the boot world runs behind it), creative, flying 40 blocks over the village nearest the spawn
   const home = await pg.evaluate(() => {
+    if (BF.player.start) BF.player.start();
     const P = BF.planet, p = BF.player.position;
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
     const v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];
@@ -160,16 +163,28 @@ async function runVersion(label, root) {
   log(label, `settling ${SETTLE} s`);
   await pg.waitForTimeout(SETTLE * 1000);
   const res = { label, root, ...info, url, home, villages: plan, runs: [], errors };
+  const shot = OUT + '-' + label + '.png';
+  await pg.screenshot({ path: shot }).catch(() => {});   // what was on screen while measuring: the village, not the title screen
+  log(label, 'screenshot', shot);
   for (const si of SPEEDS) {
     await pg.evaluate(i => BF.warp.set(i), si);
     await pg.waitForTimeout(5000);
     const c0 = await sim(() => globalThis.__bench.census());
-    const f = await pg.evaluate(async S => {
-      window.__ft = []; window.__ftOn = true; const h0 = window.__hidden, t0 = performance.now();
-      await new Promise(r => setTimeout(r, S * 1000));
+    // 1x: --secs of real time. Fast-forward: one whole game day (villagers asleep at night cost far less, so a shorter stretch would
+    // depend on the hour it covered, and the two versions reach different speeds), at most --maxsecs of real time.
+    const DAY = 1200, whole = si > 0;
+    await pg.evaluate(() => { window.__ft = []; window.__ftOn = true; window.__h0 = window.__hidden; window.__t0 = performance.now(); });
+    const tStart = Date.now();
+    for (;;) {
+      await pg.waitForTimeout(whole ? 2000 : SECS * 1000);
+      if (!whole) break;
+      const now = await sim(() => (globalThis.BF.simNow ? globalThis.BF.simNow() : 0));
+      if (now - c0.now >= DAY || Date.now() - tStart >= MAXSECS * 1000) break;
+    }
+    const f = await pg.evaluate(() => {
       window.__ftOn = false;
-      return { wall: (performance.now() - t0) / 1000, ft: window.__ft.slice(), hidden: window.__hidden - h0 || (document.hidden ? 1 : 0) };
-    }, SECS);
+      return { wall: (performance.now() - window.__t0) / 1000, ft: window.__ft.slice(), hidden: window.__hidden - window.__h0 || (document.hidden ? 1 : 0) };
+    });
     const c1 = await sim(() => globalThis.__bench.census());
     const d = f.ft.map(x => x[1]).sort((a, b) => a - b), gaps = [];
     for (let i = 1; i < f.ft.length; i++) gaps.push(f.ft[i][0] - f.ft[i - 1][0]);
@@ -179,13 +194,14 @@ async function runVersion(label, root) {
       speed: SPEED_X[si] + 'x', achieved: r2((c1.now - c0.now) / f.wall), fps: r2(f.ft.length / f.wall),
       frameMs: { mean: r2(d.reduce((a, x) => a + x, 0) / Math.max(1, d.length)), p50: r2(q(d, 0.5)), p95: r2(q(d, 0.95)), p99: r2(q(d, 0.99)), max: r2(d[d.length - 1]) },
       gapMs: { p50: r2(q(gaps, 0.5)), p95: r2(q(gaps, 0.95)), p99: r2(q(gaps, 0.99)), max: r2(gaps[gaps.length - 1]) },
-      longFrames: gaps.filter(g => g > 50).length,
+      longFrames: gaps.filter(g => g > 50).length, longPerMin: r2(gaps.filter(g => g > 50).length * 60 / f.wall), secs: r2(f.wall),
+      gameSecs: r2(c1.now - c0.now), wholeDay: whole ? c1.now - c0.now >= DAY : null,
       villagers: c1.villagers, mobs: c1.mobs, hostile: c1.hostile, animals: c1.animals, chunks: c1.chunks, simulated: c1.simulated, forcedActive: c1.forcedActive,
       hidden: f.hidden > 0,
     };
     res.runs.push(run);
     log(label, `${run.speed}: ${run.achieved} game s/s achieved, ${run.fps} fps, frame ms p50 ${run.frameMs.p50} p95 ${run.frameMs.p95} p99 ${run.frameMs.p99}, ` +
-      `${run.longFrames} gaps over 50 ms; ${run.villagers} villagers, ${run.mobs} mobs, ${run.chunks} chunks${run.hidden ? ' (THE PAGE WAS HIDDEN)' : ''}`);
+      `${run.longPerMin} gaps over 50 ms a minute, ${run.secs} s real for ${run.gameSecs} game s${run.wholeDay === false ? ' (NOT a whole day: --maxsecs ran out)' : ''}; ${run.villagers} villagers, ${run.mobs} mobs, ${run.chunks} chunks${run.hidden ? ' (THE PAGE WAS HIDDEN)' : ''}`);
   }
   await pg.evaluate(() => BF.warp.set(0));
   await b.close(); srv.close();
@@ -195,13 +211,13 @@ async function runVersion(label, root) {
 function table(out) {
   const L = [];
   L.push(`# Blockfield 1.4 vs 1.5, ${out.when.slice(0, 16).replace('T', ' ')} UTC`, '');
-  L.push(`Machine: ${out.machine.cpus} x ${out.machine.cpu}, ${out.machine.memGB} GB, ${out.machine.platform}. Seed ${SEED}, ${NV} villages forced${CALM ? ', no monsters' : ''}, ${SECS} s a speed.`, '');
+  L.push(`Machine: ${out.machine.cpus} x ${out.machine.cpu}, ${out.machine.memGB} GB, ${out.machine.platform}. Seed ${SEED}, ${NV} villages forced${CALM ? ', no monsters' : ''}, ${SECS} s at 1x, a whole game day at each fast-forward speed (at most ${MAXSECS} s).`, '');
   for (const v of out.versions) L.push(`- ${v.label}: Blockfield ${v.version}, simulation in ${v.host}, GPU ${v.renderer}. ${v.villages.length} villages forced, ${v.runs[0] ? v.runs[0].villagers : '?'} villagers.${v.errors.length ? ' Page errors: ' + v.errors.length + ' (see the JSON).' : ''}`);
-  L.push('', '| speed | version | game s/s achieved | fps | frame ms p50 / p95 / p99 | gaps > 50 ms | villagers | mobs | chunks |', '|---|---|---|---|---|---|---|---|---|');
+  L.push('', '| speed | version | game s/s achieved | fps | frame ms p50 / p95 / p99 | gaps > 50 ms a minute | real s / game s | villagers | mobs | chunks |', '|---|---|---|---|---|---|---|---|---|---|');
   const by = {};
   for (const v of out.versions) for (const r of v.runs) (by[r.speed] = by[r.speed] || []).push([v.label, r]);
   for (const [sp, rows] of Object.entries(by)) for (const [lab, r] of rows)
-    L.push(`| ${sp} | ${lab} | ${r.achieved} | ${r.fps} | ${r.frameMs.p50} / ${r.frameMs.p95} / ${r.frameMs.p99} | ${r.longFrames} | ${r.villagers} | ${r.mobs} | ${r.chunks} |${r.hidden ? ' (page hidden)' : ''}`);
+    L.push(`| ${sp} | ${lab} | ${r.achieved} | ${r.fps} | ${r.frameMs.p50} / ${r.frameMs.p95} / ${r.frameMs.p99} | ${r.longPerMin} | ${r.secs} / ${r.gameSecs}${r.wholeDay === false ? ' (part day)' : ''} | ${r.villagers} | ${r.mobs} | ${r.chunks} |${r.hidden ? ' (page hidden)' : ''}`);
   L.push('', 'Frame ms is the time inside the game\'s own animation frame (in 1.4 that includes the simulation; in 1.5 the simulation is in the worker). ' +
     'Game s/s achieved is the simulation clock against the wall clock: at 1x it should be 1; at the top speeds it is the most the machine kept up.');
   return L.join('\n') + '\n';
