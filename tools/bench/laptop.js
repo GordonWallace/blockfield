@@ -130,8 +130,9 @@ async function runVersion(label, root) {
   }, [fn.toString(), arg]);
   // (1.5: the page learns the player's place from the worker a moment after it starts)
   await pg.waitForFunction(() => { const p = BF.player.position; return (BF.worldgen.villagesNear(p.x, p.z, 6000) || []).length > 0; }, null, { timeout: 120000, polling: 500 });
-  // the player: creative, flying 40 blocks over the village nearest the spawn, looking down at it
+  // the player: out of the title screen (the boot world runs behind it), creative, flying 40 blocks over the village nearest the spawn
   const home = await pg.evaluate(() => {
+    if (BF.player.start) BF.player.start();
     const P = BF.planet, p = BF.player.position;
     if (BF.player.setGameMode) BF.player.setGameMode('creative');
     const v = BF.worldgen.villagesNear(p.x, p.z, 6000).sort((a, b) => P.distance(p, a) - P.distance(p, b))[0];
@@ -160,6 +161,9 @@ async function runVersion(label, root) {
   log(label, `settling ${SETTLE} s`);
   await pg.waitForTimeout(SETTLE * 1000);
   const res = { label, root, ...info, url, home, villages: plan, runs: [], errors };
+  const shot = OUT + '-' + label + '.png';
+  await pg.screenshot({ path: shot }).catch(() => {});   // what was on screen while measuring: the village, not the title screen
+  log(label, 'screenshot', shot);
   for (const si of SPEEDS) {
     await pg.evaluate(i => BF.warp.set(i), si);
     await pg.waitForTimeout(5000);
