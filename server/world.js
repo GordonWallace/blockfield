@@ -79,7 +79,7 @@ class Sim {
   constructor(srv) {
     this.n = nextSim++; this.srv = srv; this.id = null; this.name = null; this.ready = false; this.dead = false; this.crashed = false;
     this.waits = {}; this.onReady = []; this.early = []; this.played = false;
-    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build } });
+    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build, coarse: srv.coarse } });   // (coarse: --coarse on|off, js/gameopts.js)
     this.w.on("message", m => srv.fromSim(this, m));
     this.w.on("error", e => srv.simStopped(this, "it failed: " + (e && e.stack || e)));
     this.w.on("exit", code => srv.simStopped(this, "it exited (code " + code + ")"));
@@ -111,7 +111,7 @@ function start(o) {
   // region workers per world (spec r15-39, js/rplay.js): --workers N, else every core but two, at most 8 (each holds a copy of the world)
   const os = require("os"), cores = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
   const workers = o.workers > 0 ? Math.floor(o.workers) : o.test ? 1 : Math.max(1, Math.min(8, cores - 2));   // (tests: one unless they ask)
-  const srv = { saves: o.saves, build: o.build || null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
+  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
   const warm = () => { if (!srv.spare && !srv.stopping) srv.spare = new Sim(srv); };   // the next page's thread, loading while nobody waits

@@ -81,7 +81,7 @@ const P = {
     const r = villageOf(m);
     if (r) { cur.vil.set(r, (cur.vil.get(r) || 0) + d); acc.vil.set(r, (acc.vil.get(r) || 0) + d); }
   },
-  count: { paths: 0, trades: 0 },   // path searches (js/mobs.js findPath) and trades (js/villagelog.js trade), on or off: a count costs nothing
+  count: { paths: 0, trades: 0, deaths: {} },   // path searches (js/mobs.js findPath), trades (js/villagelog.js trade) and deaths by "type:cause" (js/mobs.js kill), on or off: a count costs nothing
   // which category a mob's update counts under
   mobCat(m) {
     if (m.type === "villager") return C.villagers;
@@ -142,7 +142,8 @@ const P = {
     let sys = 0;
     for (const b of buckets) { sys += b.sys; for (const [r, x] of b.vil) vil.set(r, (vil.get(r) || 0) + x); for (const [r, x] of b.vv) vv.set(r, (vv.get(r) || 0) + x); }
     const busiest = speeds(vil, vv, sys, steps)[0] || null;
-    lastLive = { vss: vs / real, mobss: mobs / real, msPerStep: (ms + tt[C.stream]) / steps, split, villagers: lastB.v, mobs: lastB.m, speed: game / real, busiest, stale: false };
+    const far = BF.mobs && BF.mobs.coarse ? BF.mobs.coarse() : null;   // far villages (spec r15-64)
+    lastLive = { vss: vs / real, mobss: mobs / real, msPerStep: (ms + tt[C.stream]) / steps, split, villagers: lastB.v, mobs: lastB.m, speed: game / real, busiest, far, stale: false };
     return lastLive;
   },
   vss: () => (P.stats() || {}).vss || 0,
@@ -265,7 +266,8 @@ P.text = s => {
   const parts = CATS.map(k => `${k} ${s.split[k].toFixed(2)}`).join(", ");
   const b = s.busiest;   // r15-60: "Busiest village: Oakbrook 2.8 ms/tick, max 18x"
   return `Sim ${Math.round(s.vss)} V·s/s  ${Math.round(s.mobss)} mob-s/s  ${s.msPerStep.toFixed(1)} ms/step  (${parts})${s.stale ? "  (paused)" : ""}` +
-    (b ? `\nBusiest village: ${b.name} ${b.ms.toFixed(1)} ms/tick, max ${isFinite(b.max) ? Math.floor(b.max) : "∞"}x` : "");
+    (b ? `\nBusiest village: ${b.name} ${b.ms.toFixed(1)} ms/tick, max ${isFinite(b.max) ? Math.floor(b.max) : "∞"}x` : "") +
+    (s.far ? `\nFar villages: ${s.far.on ? "coarse (" + s.far.n + " mobs)" : "full detail"}` : "");
 };
 
 BF.perf = P;

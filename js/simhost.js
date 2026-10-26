@@ -218,7 +218,7 @@ H.eval = function (src, arg) {
 H.budget = function () {
   if (!H.worker || !BF.active || !BF.proto.worker.w) return;
   const o = BF.active.opts();
-  BF.proto.worker.w.postMessage({ budget: { on: o.on, budget: o.budget } });
+  BF.proto.worker.w.postMessage({ budget: { on: o.on, budget: o.budget }, coarse: BF.gameOpts ? BF.gameOpts.overridden() : null });   // (and ?coarse=, spec r15-64)
 };
 // to the world server, outside the protocol (the debug feed's page part, js/debugfeed.js)
 H.post = m => { if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage(m); };

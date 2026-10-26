@@ -204,12 +204,16 @@ const HELP_HTML = isTouch
      <div><b>Shift</b> sneak</div><div><b>R / Ctrl / W x2</b> sprint</div><div><b>Z</b> free the mouse (game keeps running)</div><div><b>Fly + hold W and R</b> 10x boost</div><div><b>L-click</b> break / hit</div><div><b>R-click</b> place / use / eat</div>
      <div><b>1-9 / wheel</b> hotbar</div><div><b>E</b> inventory</div><div><b>Q</b> throw one item</div><div><b>Boat</b> R-click to get in, W/S row, A/D turn, Shift out</div><div><b>Esc</b> pause, <b>F3</b> debug</div><div><b>/</b> command line</div>`;
 
-// Game options of a world (js/gameopts.js): one on/off button per monster. o: {type: bool}. The buttons carry data-act="mon".
+// Game options of a world (js/gameopts.js): one on/off button per monster (data-act="mon"), and the far villages switch (data-act="far",
+// spec r15-64). o: {type: bool, coarse: bool}.
+const farLabel = on => "Far villages: " + (on ? "Coarse (faster)" : "Full detail");
 const optsHTML = o => { const G = BF.gameOpts, ts = G ? G.types() : []; return `<div class="bfp-opts">Monsters that spawn<div class="bfp-optgrid">` +
   ts.map(t => `<button type="button" data-act="mon" data-mon="${t}" class="${o[t] ? "on" : ""}" aria-pressed="${!!o[t]}">${G.name(t)}: ${o[t] ? "On" : "Off"}</button>`).join("") +
-  `</div><span class="bfp-hint">Off: they never spawn, and any already in the world leave. The others spawn as often as before.</span></div>`; };
-const readOpts = box => { const o = {}; for (const b of box.querySelectorAll('[data-act="mon"]')) o[b.dataset.mon] = b.classList.contains("on"); return o; };
-const flipOpt = b => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.textContent = BF.gameOpts.name(b.dataset.mon) + ": " + (on ? "On" : "Off"); return on; };
+  `</div><span class="bfp-hint">Off: they never spawn, and any already in the world leave. The others spawn as often as before.</span>` +
+  `<div class="bfp-optgrid"><button type="button" data-act="far" data-mon="coarse" class="${o.coarse ? "on" : ""}" aria-pressed="${!!o.coarse}">${farLabel(o.coarse)}</button></div>` +
+  `<span class="bfp-hint">Coarse: villages beyond your view distance think a few times a second and walk their routes cell by cell. They do the same work, for less computer time.</span></div>`; };
+const readOpts = box => { const o = {}; for (const b of box.querySelectorAll('[data-act="mon"], [data-act="far"]')) o[b.dataset.mon] = b.classList.contains("on"); return o; };
+const flipOpt = b => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.textContent = b.dataset.act === "far" ? farLabel(on) : BF.gameOpts.name(b.dataset.mon) + ": " + (on ? "On" : "Off"); return on; };
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
 function buildDOM() {
@@ -274,7 +278,7 @@ function buildDOM() {
     if (!act) return;
     const a = act.dataset.act, row = act.closest("[data-id]"), id = row && row.dataset.id;
     if (a === "mode") { createMode = act.dataset.mode; updateModeUI(); }
-    else if (a === "mon") flipOpt(act);   // the create form's and a world row's options (saved with Create / Save)
+    else if (a === "mon" || a === "far") flipOpt(act);   // the create form's and a world row's options (saved with Create / Save)
     else if (a === "options") renderWorlds({ options: id });
     else if (a === "options-ok") finishOptions(row);
     else if (a === "show-create") showStartView("create");
@@ -319,10 +323,10 @@ function buildDOM() {
     else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
-    else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.monsters()); }
-    else if (a === "mon") {   // in game: applies at once (where the simulation is too: js/protocol.js meta), and saves
+    else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.all()); }
+    else if (a === "mon" || a === "far") {   // in game: applies at once (where the simulation is too: js/protocol.js meta), and saves
       BF.gameOpts.set(act.dataset.mon, flipOpt(act));
-      if (BF.simHost && BF.simHost.worker && BF.client) BF.client.meta({ id: BF.save && BF.save.current ? BF.save.current.id : null, monsters: BF.gameOpts.monsters() });
+      if (BF.simHost && BF.simHost.worker && BF.client) BF.client.meta({ id: BF.save && BF.save.current ? BF.save.current.id : null, monsters: BF.gameOpts.all() });
       savePause();
     }
     else if (a === "quit") quitToTitle(act);

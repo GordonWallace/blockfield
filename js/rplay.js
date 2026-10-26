@@ -56,6 +56,7 @@ function begin(world) {
   world.viewDist = BF.world.viewDist;
   world.active = BF.active ? BF.active.opts() : null;   // (the simulation budget's settings: the leader's may differ from a fresh copy's, js/active.js)
   world.testEval = !!BF.testEval;
+  world.coarse = BF.gameOpts ? BF.gameOpts.overridden() : null;   // (a run's ?coarse= / --coarse: js/gameopts.js)
   world.dyn = BF.dynItems ? BF.dynItems() : [];   // (map items made in earlier worlds keep their ids: the follower makes them alike)
   world.beesHooked = !!(BF.bees && BF.bees.hooked && BF.bees.hooked());
   world.player = player();   // (the look and the rest the title world left: a new world keeps them)
@@ -301,6 +302,7 @@ function follower(post) {
     for (const [name, id] of w.dyn || []) BF.dynItemAs(name, id);
     if (w.viewDist > 0) BF.world.setViewDist(w.viewDist);
     if (w.active && BF.active) BF.active.set(w.active);
+    if (BF.gameOpts) BF.gameOpts.override(w.coarse);
     if (w.beesHooked && BF.bees && BF.bees.hook) BF.bees.hook();   // (homes found as chunks load, as the leader does after an earlier world)
     if (w.op === "load") BF.save.restore(w.data, w.meta);
     else BF.newWorld(w.seed, w.opts || {});
