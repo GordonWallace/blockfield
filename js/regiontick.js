@@ -47,36 +47,36 @@ let queue = [], next = 0;
 // The last plan's regions: [key, first index in the plan, key, first index, ..., -1, first unindexed mob] (several workers split the
 // plan by region, js/rworkers.js)
 let spans = [];
-const idCache = new Map();   // "e<n>" -> n
+// A mob's id as a number ("e<n>" -> n; anything else after every e<n>), kept on the mob with the id it was for (r15-61: it used to be a
+// module-wide map, looked up for every mob every tick)
 function idNum(m) {
   const id = m.id;
-  let n = idCache.get(id);
-  if (n === undefined) { n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; if (n !== n) n = 1e15; if (idCache.size > 100000) idCache.clear(); idCache.set(id, n); }
+  if (id !== undefined && m._idK === id) return m._idN;
+  let n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN;
+  if (n !== n) n = 1e15;
+  m._idK = id; m._idN = n;
   return n;
 }
-const byId = (a, b) => idNum(a) - idNum(b);
 function take() { return next < queue.length ? queue[next++] : undefined; }
 // The mobs of this tick in the order they think: list order for "list"; else region by region from the queue, each region's mobs by id.
-// Mobs the index doesn't hold (none, normally) think last, in list order.
+// Mobs the index doesn't hold (none, normally) think last, in list order. The region index keeps the regions' keys in order and each
+// region's mobs sorted from tick to tick, sorting again only a region whose mobs changed (r15-61; the same order as sorting every tick).
 function plan(list) {
   S.ticks++; H.ticks++;
   roll();
   const G = BF.regions;
   if (order === "list" || !G || !G.regionOf) { S.last = { regions: 0, mobs: list.length, rest: 0 }; spans = [-1, 0]; return list.slice(); }
-  const by = G.mobsByRegion();
+  const I = G.mobIndex(), keys = I.keys(), rev = order === "reverse";
   queue = [];
-  for (const k of by.keys()) if (!rt.active || rt.active(k)) queue.push(k);
-  queue.sort(order === "reverse" ? (a, b) => b - a : (a, b) => a - b);
+  for (let i = 0; i < keys.length; i++) { const k = keys[rev ? keys.length - 1 - i : i]; if (!rt.active || rt.active(k)) queue.push(k); }
   next = 0;
   const out = [];
   spans = [];
   let k;
   while ((k = take()) !== undefined) {
-    const start = out.length;
-    spans.push(k, start);
-    let sorted = true, last = -Infinity;
-    for (const m of by.get(k)) { const n = idNum(m); if (n < last) sorted = false; last = n; out.push(m); }
-    if (!sorted) { const part = out.splice(start).sort(byId); for (const m of part) out.push(m); }
+    spans.push(k, out.length);
+    const a = I.ordered(k, idNum);
+    for (let i = 0; i < a.length; i++) out.push(a[i]);
   }
   const n = out.length;
   spans.push(-1, n);   // (the mobs the index doesn't hold, if any)
