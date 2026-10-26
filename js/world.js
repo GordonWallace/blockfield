@@ -543,6 +543,25 @@ world.heightAt = function (x, z) {
   c.hgtV[ci] = c.colVer[ci];
   return (c.hgt[ci] = scanHeight(c, lx, lz));
 };
+// heightAt through the caller's memo of column (x, z): m = {x, z, g, c, i} (the column, the chunk set's generation CGEN, its chunk or null,
+// its index there), so a caller asking about the same column tick after tick (a bee's flight, r15-61) skips resolving the address while no
+// chunk has loaded or unloaded. The same answer as heightAt.
+world.heightMemo = () => ({ x: NaN, z: NaN, g: -1, c: null, i: 0 });
+world.heightAtMemo = function (x, z, m) {
+  x = Math.floor(x); z = Math.floor(z);
+  if (m.x !== x || m.z !== z || m.g !== CGEN) {
+    m.x = x; m.z = z; m.g = CGEN;
+    const c = res(x, z) ? rawChunk(RX, RZ) : undefined;
+    m.c = c || null;
+    if (c) m.i = ((RZ - c.cz * CS) << 4) | (RX - c.cx * CS);
+  }
+  const c = m.c;
+  if (!c) return BF.MIN_Y - 1;
+  const ci = m.i;
+  if (c.hgtV[ci] === c.colVer[ci]) return c.hgt[ci];
+  c.hgtV[ci] = c.colVer[ci];
+  return (c.hgt[ci] = scanHeight(c, ci & 15, ci >> 4));
+};
 function scanHeight(c, lx, lz) {
   const SOLID = BF.SOLID;
   for (let si = c.hi - c.lo - 1; si >= 0; si--) {

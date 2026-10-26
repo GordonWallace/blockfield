@@ -169,6 +169,7 @@ cached("lookAt", function () {
   if (this._laG !== undefined) { this._laK = id; this._laV = o; this._laG = gen; }
   return o;
 });
+const CACHE_FIELDS = ["_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG"];   // (tests: test/entity-ids.js)
 const NAMES = ENT.concat(["village", "penVillage", "home", "bed", "homeBed", "slot", "bredEntry", "pen", "sty", "coop", "pasture", "exit", "lookAt"]);
 // (A copy, not the object itself: deleting fields or swapping the prototype of a live object would put it in V8's slow dictionary mode.)
 function copyOnto(proto, o) {
@@ -194,7 +195,7 @@ function mobRef(o) {
 const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototypeOf(o) : null; return p === Refs || p === MobRef; };
 
 BF.ids = {
-  alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks,
+  alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks, CACHE_FIELDS,
   get next() { return next; },
   get size() { return reg.size; },
   live: id => reg.get(id),   // the registered object only (no removed mob)
