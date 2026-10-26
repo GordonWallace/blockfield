@@ -62,6 +62,9 @@ module.exports = async (pg) => {
       return m;
     };
     BF.state.paused = true;
+    // refilled now: off the page the window may have been filled at the clock before the host's last clock message, whose wind angle
+    // (game time) the rebuilds below no longer use
+    S.cloudMesh.userData.invalidate();
     S.update(0);
     const before = sample();
     let mx = 0, mz = 0, px = D[0], pz = D[1];
@@ -101,20 +104,27 @@ module.exports = async (pg) => {
       await settle();
       BF.state.paused = true;
       BF.sky.setTime(0.07);   // morning: the sun low in the east
-      BF.weather.set("clear"); BF.weather.intensity = 0; BF.weather.thunder = 0;
+      const day = BF.sky.day;
+      // both pictures at that one time and clear weather: off the page a clock message from the host (js/simhost.js sky()) can land
+      // between them and move the time, which turns the clouds (their wind angle is game time) and moves their height
+      const pin = () => {
+        BF.sky.time = 0.07; BF.sky.day = day;
+        BF.weather.set("clear"); BF.weather.intensity = 0; BF.weather.thunder = 0;
+        BF.sky.cloudMesh.userData.invalidate(); BF.sky.update(0);
+      };
       BF.player.position.set(m.x, Y, m.z); BF.player.setLook(0, 0);
       await new Promise(r => setTimeout(r, 300));
-      BF.sky.update(0);
+      pin();
       const fy = BF.sky.sunYaw, look = Math.atan2(-Math.cos(fy), Math.sin(fy)) + 0.25;   // facing the sun, a little to its left
       BF.player.setLook(look, 0.45);
       await new Promise(r => setTimeout(r, 300));
-      BF.sky.update(0);
+      pin();
       const fa = BF.view.state.f, A = grab(), ya = BF.sky.sunYaw, ha = BF.sky.cloudHeight;
       BF.sky.cloudMesh.visible = false; const A0 = grab(); BF.sky.cloudMesh.visible = true;
       const q = (4 - c.turn) % 4;
       BF.player.position.set(c.x, Y, c.z); BF.player.setLook(P.turnYaw(q, look), 0.45);
       await new Promise(r => setTimeout(r, 300));
-      BF.sky.update(0);
+      pin();
       const fb = BF.view.state.f, B = grab(), yb = BF.sky.sunYaw, hb = BF.sky.cloudHeight;
       BF.sky.cloudMesh.visible = false; const B0 = grab(); BF.sky.cloudMesh.visible = true;
       BF.state.paused = false;
