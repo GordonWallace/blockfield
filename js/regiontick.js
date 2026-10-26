@@ -18,7 +18,7 @@
 // Debug screen and F3: regions ticked, mobs and requests per region, ms per phase (BF.req.times). Game log: INFO "regions" once a game
 // hour while the debug overlay or debug screen is on, and an INFO line when the order is changed.
 // API: BF.rtick = { order (get / set), active: null | (key) -> bool, plan(list) -> mobs in tick order, take() -> next region key or
-//                   undefined, route(req) -> key or -1, stats() -> {regions, mobs, requests, inactive, ticks, ms: {think, apply, blocks,
+//                   undefined, spans (the last plan's regions: key, first index, ...), route(req) -> key or -1, stats() -> {regions, mobs, requests, inactive, ticks, ms: {think, apply, blocks,
 //                   deliver}}, text(), reset() }
 (() => {
 "use strict";
@@ -44,6 +44,9 @@ function roll() {
 
 // ---------------------------------------------------------------- think: the shared queue of regions
 let queue = [], next = 0;
+// The last plan's regions: [key, first index in the plan, key, first index, ..., -1, first unindexed mob] (several workers split the
+// plan by region, js/rworkers.js)
+let spans = [];
 const idCache = new Map();   // "e<n>" -> n
 function idNum(m) {
   const id = m.id;
@@ -59,21 +62,24 @@ function plan(list) {
   S.ticks++; H.ticks++;
   roll();
   const G = BF.regions;
-  if (order === "list" || !G || !G.regionOf) { S.last = { regions: 0, mobs: list.length, rest: 0 }; return list.slice(); }
+  if (order === "list" || !G || !G.regionOf) { S.last = { regions: 0, mobs: list.length, rest: 0 }; spans = [-1, 0]; return list.slice(); }
   const by = G.mobsByRegion();
   queue = [];
   for (const k of by.keys()) if (!rt.active || rt.active(k)) queue.push(k);
   queue.sort(order === "reverse" ? (a, b) => b - a : (a, b) => a - b);
   next = 0;
   const out = [];
+  spans = [];
   let k;
   while ((k = take()) !== undefined) {
     const start = out.length;
+    spans.push(k, start);
     let sorted = true, last = -Infinity;
     for (const m of by.get(k)) { const n = idNum(m); if (n < last) sorted = false; last = n; out.push(m); }
     if (!sorted) { const part = out.splice(start).sort(byId); for (const m of part) out.push(m); }
   }
   const n = out.length;
+  spans.push(-1, n);   // (the mobs the index doesn't hold, if any)
   for (const m of list) { const k = G.regionOf(m); if ((k === undefined || k < 0) && !m.removed) out.push(m); }
   S.regions = queue.length; S.mobs = n;
   H.regions += queue.length;
@@ -172,6 +178,7 @@ function reset() {
 const rt = {
   get order() { return order; }, set order(o) { setOrder(o); },
   active: null, plan, take, route, inactive, stats, text, hourly, reset,
+  get spans() { return spans; },
 };
 BF.rtick = rt;
 if (BF.req) { BF.req.route = route; BF.req.regionOrder = regionOrder; BF.req.inactive = inactive; }

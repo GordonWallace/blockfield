@@ -666,6 +666,7 @@ const QUERIES = {
       perf: BF.perf ? BF.perf.stats() : null, perfText: BF.perf && BF.perf.stats() ? BF.perf.text(BF.perf.stats()) : "",
       requests: BF.req ? BF.req.stats() : null, requestsText: BF.req && BF.req.stats() ? BF.req.text(BF.req.stats()) : "",
       regionText: BF.rtick ? BF.rtick.text() : "",   // regions ticked and ms per phase (js/regiontick.js, spec r15-33)
+      workersText: BF.rplay ? BF.rplay.text() : "",   // region workers: how many, split or one thinking, ms per phase (js/rplay.js, spec r15-39)
       blockLight: p && BF.world ? BF.world.getBlockLight(p.x, p.y + 0.05, p.z) : 0 };
   },
   // the F3 village panel ({x, z}): the village there, its tally, occupations, free job blocks and newest log lines (js/villagelog.js)

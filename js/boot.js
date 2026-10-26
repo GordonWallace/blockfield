@@ -24,6 +24,7 @@ BF.state = { paused: false, seed: 0, time: 0 };
 BF.newWorld = function (seed, opts) {
   BF.emit("worldClosing");   // the world being replaced is unloaded (js/gamelog.js logs it while its clock still reads right)
   BF.state.seed = seed >>> 0;
+  BF.state.time = 0;   // (game seconds simulated in this world: a world started after another starts from 0, as in a fresh page)
   BF.state.gen = 4;                                                          // worldgen version: 4 = the planet (saves keep it)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier
   BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
@@ -56,6 +57,7 @@ BF.newWorld = function (seed, opts) {
 // The BF.perf points charge each part's time to its category of the villager-seconds meter (js/perf.js); they do nothing while it's off.
 const PF = BF.perf;
 function simStep(h) {
+  if (BF.rworkers.journal) BF.rworkers.tick(h);   // region workers (js/rworkers.js): the leader's journal gets the tick, the followers run it too
   PF.beginStep();
   BF.warp.advance(h);
   BF.rand.step();   // the tick that keys world-event rolls (js/rand.js)
@@ -81,14 +83,17 @@ BF.simStep = simStep;
 // speed, as many as the accumulator holds after a frame of `raw` real seconds (20 a second at 1x, W.speed times that when
 // fast-forwarding), so behaviour is the same at any speed and frame rate. Stops early if the frame budget runs out; those ticks are
 // dropped, not owed (W.done). Returns the number of ticks run. BF.simFrame runs it on its own (tests: a forced frame rate).
+// With region workers (js/rworkers.js) the leader's journal gets the frame's measure, so the followers' budgets decide alike.
 function simFrame(raw) {
-  const W = BF.warp, plan = W.plan(raw), t0 = performance.now();
+  const W = BF.warp, plan = W.plan(raw), t0 = performance.now(), RJ = BF.rworkers.journal ? BF.rworkers : null;
   let done = 0;
   while (done < plan.n && !W.frozen && (done === 0 || performance.now() - t0 < W.BUDGET_MS)) {   // an alert can freeze it mid-frame (js/alerts.js)
     simStep(plan.h);
     done++;
   }
-  if (BF.active) BF.active.frame(performance.now() - t0, raw);   // the simulation's share of real time, for the budget (js/active.js, spec r15-34)
+  const ms = performance.now() - t0;   // the simulation's share of real time, for the budget (js/active.js, spec r15-34)
+  if (RJ) RJ.rec(["a", ms, raw]);
+  if (BF.active) BF.active.frame(ms, raw);
   return done;
 }
 BF.simFrame = raw => { const n = simFrame(raw); BF.warp.done(n, n * BF.warp.TICK, raw); return n; };

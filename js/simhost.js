@@ -126,7 +126,7 @@ function run(w, via) {
         H.threads = server ? (w.hello && w.hello.threads) || 1 : 1;
         if (globalThis.BF_TEST) w.postMessage({ test: "eval" });
         // an automated browser starts the budget off (js/active.js); the world server's Node has a navigator of its own that never says so
-        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) w.postMessage({ auto: true });   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
+        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) { w.postMessage({ auto: true, workers: urlWorkers().workers }); if (!urlWorkers().workers) H.threads = 1; }   // (it plays on one thread then; tests: BFT.sim runs code where the simulation is, protocol query eval)
         BF.world.replica = true;
         BF.glog.remote(list => client.log(list));
         glog("INFO", server ? "The simulation runs on the world server (" + location.host + ", ready in " + Math.round(performance.now() - t0) + " ms)" + (w.hello.held ? "; it holds world \"" + w.hello.held.name + "\", paused since its page closed" : "")
@@ -142,8 +142,14 @@ function run(w, via) {
     };
     w.onerror = ev => { if (ev && ev.preventDefault) ev.preventDefault(); if (!settled) fail(ev && ev.message || "it could not load"); else crashed(ev && ev.message || "the " + what + " failed"); };
     const three = document.querySelector('script[src*="three"]');
-    w.postMessage({ boot: { three: three ? three.src : null, build: window.BF_BUILD || null } });   // (build: the checkout's commit, for the game log's header)
+    w.postMessage({ boot: Object.assign({ three: three ? three.src : null, build: window.BF_BUILD || null }, urlWorkers()) });   // (build: the checkout's commit, for the game log's header)
   });
+}
+
+// ?workers=N, ?split=always|never and ?verify=N (spec r15-39, js/rplay.js): region workers for the simulation worker, when the URL says
+function urlWorkers() {
+  const q = location.search.slice(1), w = /(?:^|[?&])workers=(\d+)/.exec(q), s = /(?:^|[?&])split=(always|never|auto)/.exec(q), v = /(?:^|[?&])verify=(\d+)/.exec(q);
+  return { workers: w ? +w[1] : undefined, split: s ? s[1] : undefined, verify: v ? +v[1] : undefined };
 }
 
 // ---- the world server's socket (ws://<this page's host>/sim, server/world.js), made to look like a Worker for run(): protocol packets
