@@ -49,7 +49,7 @@ body font `--mono`. These CSS variables are defined on :root in index.html.
   while it stands, else back at `world`. Event `playerSlept()` after a successful night skip.
 - `BF.makeNoise(seed)` -> `{n2, n3, fbm(x,y,oct), fbm3(x,y,z,oct), hash(x,z,salt) -> [0,1), hash3(x,y,z,salt)}`.
 - `BF.world`: `getBlock(x,y,z)`, `setBlock(x,y,z,id)` (records edits, remeshes), `isSolid`, `heightAt(x,z)`
-  (top solid y in loaded data or -1), `isLoaded(x,z)`, `raycast(origin, dir, maxDist, pred?)` ->
+  (top solid y in loaded data or -1), `topAt(x,z)` (heightAt, or the water over it), `loadAt(x,z)` (generates that chunk now if missing), `isLoaded(x,z)`, `raycast(origin, dir, maxDist, pred?)` ->
   `{x,y,z,id,normal:[nx,ny,nz],dist}|null`, `boxCollides(px,py,pz,halfW,h)`,
   `moveBox(pos, vel, halfW, h, dt, {stepUp})` -> `{onGround, hitX, hitZ, hitCeil, inWater, headInWater}`
   (pos = feet centre, mutated; vel mutated; unloaded chunks are solid),
@@ -458,7 +458,7 @@ Sky light is an integer 0..15 per voxel that spreads like Minecraft's. Derived d
   (10 s; all lines visible while open; errors red, results grey). Commands never throw: bad input prints a usage/error line.
 - Coordinates: absolute, `~` or `~n` (block commands floor; `/tp` centres integer x/z). Item names with or without `minecraft:` plus a few vanilla aliases
   (`grass_block`, `oak_planks`, `wheat`, `cooked_beef` ...); hidden block states give their `item`.
-- Commands: `/help [cmd]`, `/tp <x y z> [yaw pitch]` / `/tp <x z>` (surface; alias `/teleport`), `/time set <day|noon|sunset|night|midnight|sunrise|ticks>`, `/time add <ticks>`,
+- Commands: `/help [cmd]`, `/tp <x y z> [yaw pitch]` / `/tp <x z>` (on the top of the column: water, sea ice, leaves or a roof included, from the real chunk, generated on the spot if needed; alias `/teleport`), `/time set <day|noon|sunset|night|midnight|sunrise|ticks>`, `/time add <ticks>`,
   `/time query <daytime|day|gametime>` (24000 ticks/day, `BF.sky.time = ticks/24000`, 0 = sunrise 06:00 like the F3 clock; units t/s/d; `add` rolls `BF.sky.day`),
   `/gamemode <survival|creative|s|c|0|1>` (`/gm`), `/give <item> [count<=2304]` (overflow is dropped), `/clear [item] [max]`, `/summon <mob> [x y z] [profession]`,
   `/kill` (you), `/kill <@e|mobs|hostile|passive|items|type|@e[type=t]>` (mobs, never you), `/weather <clear|rain|thunder> [seconds]` (`BF.weather.set(type, sec)`, else

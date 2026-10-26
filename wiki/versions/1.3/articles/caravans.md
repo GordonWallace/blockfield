@@ -9,7 +9,7 @@ A merchant works out where carrying goods pays best. Prices tell it:
 
 - An item is in **surplus** where a villager's sell offer for it has been marked down.
 - An item is **lacking** where a villager's buy offer for it has risen.
-- A village is worth visiting when the dearest buy price there beats the cheapest sell price at home by at least 5 percent for some goods. The merchant takes off a little for the length of the walk and only goes if it expects to make at least half an emerald.
+- A village is worth visiting when the dearest buy price there beats the cheapest sell price at home by at least 5 percent for some goods. The merchant takes off a little for the length of the walk and only goes if it expects to make at least half an emerald. Goods the other village already sells as cheaply from a villager with stock to spare are never worth carrying there: its buyers can get them at home. The same rule picks what the merchant brings back.
 
 It can choose any village within 600 blocks whose prices it has seen, whether or not that village is loaded right now. A village's prices are written down when it is first loaded and again as it unloads. Setting out loads the destination. The trip must be expected to be over within 2 game days, and a merchant that has no tent must be able to get back the same day. Villages are often more than 600 blocks apart, so some merchants have nowhere to go.
 

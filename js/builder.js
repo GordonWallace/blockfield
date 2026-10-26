@@ -201,7 +201,11 @@ function startStock(v) {
 function bpOf(e) {
   if (!e.wood || !BP().woodsAvailable().includes(e.wood)) e.wood = BP().styleWood(e.style);   // planned before woods were chosen: the style's own wood
   const key = e.rot + "|" + e.style + "|" + e.wood;
-  if (!e._bp || e._bpKey !== key) { e._bp = BP().get(e.type, e.rot, e.style, e.h, e.opts, e.wood); e._bpKey = key; }
+  if (!e._bp || e._bpKey !== key) {
+    e._bp = BP().get(e.type, e.rot, e.style, e.h, e.opts, e.wood); e._bpKey = key;
+    // a structure begun before its blueprint changed (bug-060: sunken troughs) goes on by the new one; its cells are placed by position
+    if (e.state !== "done" && e.n !== nfill(e) + e._bp.n) { e.n = nfill(e) + e._bp.n; e.prog = Math.min(e.prog | 0, e.n); }
+  }
   return e._bp;
 }
 const nfill = e => (e.fill ? e.fill.length : 0);
@@ -287,6 +291,12 @@ function evalTerrain(bp, px, pz, found) {
     if (g == null) continue;
     for (let y = g + 1; y < oy - 1; y++) fill.push([x, y, z, 3]);
     if (g < oy - 1 || w.getBlock(x, g, z) !== BF.B.grass) fill.push([x, oy - 1, z, 2]);
+  }
+  // a sunken trough's surroundings (marks.basin, bug-060): ground up to the fence's ground level, so the water has a bank all round
+  for (const [u, q] of bp.marks.basin || []) {
+    const x = px + u, z = pz + q, g = gs.get(x + "," + z);
+    if (g == null) continue;
+    for (let y = g + 1; y < oy; y++) fill.push([x, y, z, 3]);
   }
   for (const [u, q] of (bp.ground && bp.marks.soil) || []) {
     const x = px + u, z = pz + q, g = gs.get(x + "," + z);
@@ -609,7 +619,7 @@ function beginBuild(m, blocks, x, z, name) {
 }
 // `pre`: the caller already began the task. Returns false when the structure is not started (countdown: it would not finish).
 function startBuild(m, bs, e, pre) {
-  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; } return false; }
+  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   bs.mode = "build"; bs.entry = e; bs.goal = null; bs.cands = null; bs.ci = 0; bs.noSpot = 0; bs.occT = 0; bs.want = null; bs.stage = null;
   bs.placeT = Math.max(bs.placeT, 0.4); bs.losT = 0; bs.losFor = -1;
   m.ai.route = null;
@@ -1059,7 +1069,7 @@ function shopMode(m, bs, dt, out) {
     const deal = findSeller(m, bs, a.shortfall);
     if (deal) {
       const VS = BF.villageSim;   // a shopping trip: walk at 1.3x speed + one trade pause
-      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; return false; }
+      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; VS.done(m); return false; }
       bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0;
     }
     else if (BF.I.dirt != null && a.shortfall[BF.I.dirt] && BF.villageLife && BF.villageLife.gatherFor && !(bs.noDirt > dayNow())) {   // nobody sells dirt: it digs its own (idea-044)
@@ -1068,6 +1078,7 @@ function shopMode(m, bs, dt, out) {
     else {
       if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
       bs.stage = "wait"; bs.t = rnd(RS(m), RECHECK[0], RECHECK[1]);
+      if (BF.villageSim) BF.villageSim.done(m);   // waiting is no task: it wanders at leisure ("Looking for: ...", js/villagerstatus.js)
       if (!e && RS(m).next() < 0.5) { bs.mode = "idle"; bs.want = null; bs.cool = 0; bs.t = 1; }   // look at other plans too
     }
     return false;

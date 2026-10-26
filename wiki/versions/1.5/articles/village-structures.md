@@ -2,7 +2,7 @@
 title: Village structures
 category: Villages
 ---
-This page lists every building a village is generated with, and every structure that [[page:builders|builders]] add later. Sizes are the footprint in blocks. How a village is laid out is on [[page:villages]]; workstation blocks and where they stand are described there too.
+This page lists every building a village is generated with, and every structure that [[villager:builder|builders]] add later. Sizes are the footprint in blocks. How a village is laid out is on [[page:villages]]; workstation blocks and where they stand are described there too.
 
 ## Generated buildings
 
@@ -75,7 +75,7 @@ There is no building for bakers, glassmakers or beekeepers at generation. Their 
 
 ## Builder structures
 
-Builders ([[page:builders]]) build from their own materials, using the village's style but a single wood species per structure. Their houses use torches instead of lanterns and have a torch inside and out. Doors are always oak. How they choose is explained on [[page:builders]]; the conditions below are the hard ones.
+Builders ([[villager:builder]]) build from their own materials, using the village's style but a single wood species per structure. Their houses use torches instead of lanterns and have a torch inside and out. Doors are always oak. How they choose is explained on the [[villager:builder|builder]] page; the conditions below are the hard ones.
 
 | Structure | Size | What it is |
 |---|---|---|
@@ -86,11 +86,11 @@ Builders ([[page:builders]]) build from their own materials, using the village's
 | Well | 3x3 | A small well with a pool, four posts and a roof. |
 | Lamp posts | 9x1 | Three fence posts four blocks apart, topped with torches or lanterns. |
 | Vegetable farm | 10x7 | A bed ringed with logs, with a water channel down the middle and a composter beside it. The builder levels the soil and fills the channel, but leaves it untilled and unplanted for a farmer to work. |
-| Sheep pen | 10x8 | The generated pen: a fenced yard with a gate, a water trough, two hay bales if the builder has some, and a loom outside. |
+| Sheep pen | 10x8 | The generated pen: a fenced yard with a gate, a sunken water trough, two hay bales if the builder has some, and a loom outside. |
 | Market stall | 5x3 | A roof on four posts over a crafting table, a chest and a merchant's counter. Every stall is a workstation for a merchant. |
 | Chicken coop | 7x7 | A fenced run with a gap to walk in by and a nesting box. |
-| Pasture | 11x9 | A fenced field with a gate, water trough and milk churn. The builder lays a grass floor. |
-| Sty | 7x9 | A fenced pen with a gate, trough, shelter and feed trough. |
+| Pasture | 11x9 | A fenced field with a gate, sunken water trough and milk churn. The builder lays a grass floor. |
+| Sty | 7x9 | A fenced pen with a gate, sunken water trough, shelter and feed trough. |
 | Bakehouse | 3x3 | A roof on four posts over a baker's oven. Wanted by a village of 15 or more with no baker or oven. |
 | Glassworks | 5x3 | An open-sided shed with a glass kiln, furnace and chest. Only where there is natural sand within 64 blocks, and wanted at 12 or more villagers with no glassmaker or kiln. |
 | Apiary | 3x1 | A honey extractor between two fence posts. Only in a grass village, wanted at 6 or more with no beekeeper or extractor. |

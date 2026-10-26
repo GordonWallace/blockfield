@@ -545,6 +545,23 @@ world.heightAt = function (x, z) {
   }
   return c.y0 - 1;   // nothing solid in the band: solid stone below it
 };
+// The top of column (x, z) that something can stand on or swim at: heightAt, or the water over it (sea, lakes, rivers), so
+// /tp u v lands on the water and on sea ice, not on the sea floor under them. BF.MIN_Y - 1 when the column is not loaded.
+world.topAt = function (x, z) {
+  x = Math.floor(x); z = Math.floor(z);
+  let h = world.heightAt(x, z);
+  const c = chunkAt(x, z);
+  if (!c) return h;
+  while (h + 1 < c.y1 && BF.FLUID[world.getBlock(x, h + 1, z)]) h++;
+  return h;
+};
+// Generates the chunk holding (x, z) now if it isn't loaded yet (/tp u v needs its real surface at once), as world.update would.
+// Returns the chunk, or null in a corner wedge.
+world.loadAt = function (x, z) {
+  if (!res(Math.floor(x), Math.floor(z))) return null;
+  const c = rawChunk(RX, RZ);
+  return c || createChunk(Math.floor(RX / CS), Math.floor(RZ / CS));
+};
 
 function updateColumn(c, lx, lz) {
   // light-blocking top (opaque blocks and leaves): rain and snow stop here (js/weather.js); sky light is js/skylight.js
@@ -916,7 +933,7 @@ function meshTables() {
 function workerTables() {
   if (WTBL) return WTBL;
   const t = Object.assign({}, meshTables());
-  t.blocks = BF.blocks.map(b => b && { model: b.model, translucent: b.translucent, boxes: b.boxes, gate: b.gate && { axis: b.gate.axis }, wallTorch: b.wallTorch && { f: b.wallTorch.f }, name: b.name, render: b.render });
+  t.blocks = BF.blocks.map(b => b && { model: b.model, translucent: b.translucent, boxes: b.boxes, gate: b.gate && { axis: b.gate.axis }, wallTorch: b.wallTorch && { f: b.wallTorch.f }, door: b.door && { f: b.door.f }, name: b.name, render: b.render });
   return (WTBL = t);
 }
 
@@ -1143,12 +1160,22 @@ function qf(x, y, z) {
   x = RX; z = RZ;
   fluidQ.add(fkey(x, y, z));
 }
+
+// Water passes through fences and fence gates (bug-060): a fence doesn't hold it, it runs on to the cell beyond as if the fence's cell were
+// water one level thinner. The fence's own cell stays dry (no waterlogged blocks).
+let leakyT = null;
+function leaky(id) {
+  if (!leakyT) { leakyT = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); for (const b of BF.blocks) if (b && (b.model === "fence" || b.gate)) leakyT[b.id] = 1; }
+  return leakyT[id] === 1;
+}
+world.leaky = leaky;
 function scheduleFluid(x, y, z, withNeighbours) {
   if (y < BF.MIN_Y || y >= BF.H) return;
   qf(x, y, z);
   if (withNeighbours) {
     qf(x + 1, y, z); qf(x - 1, y, z);
     qf(x, y, z + 1); qf(x, y, z - 1);
+    for (const [dx, dz] of HN) if (leaky(world.getBlock(x + dx, y, z + dz))) qf(x + 2 * dx, y, z + 2 * dz);   // and on through a fence
     if (y + 1 < BF.H) qf(x, y + 1, z);
     if (y > BF.MIN_Y) qf(x, y - 1, z);
   }
@@ -1164,9 +1191,15 @@ function desiredLevel(x, y, z, cur) {
   if (FLUID[get(x, y + 1, z)]) return 1; // falling water
   let best = 99, sources = 0;
   for (const [dx, dz] of HN) {
-    const nx = x + dx, nz = z + dz;
+    let nx = x + dx, nz = z + dz, thru = 0;
+    if (leaky(get(nx, y, nz))) { nx += dx; nz += dz; thru = 1; }   // through a fence: the water beyond it, one level thinner
     const f = FLUID[get(nx, y, nz)];
     if (!f) continue;
+    if (thru) {
+      if (f !== 8) { const below = get(nx, y - 1, nz); if ((BF.REPLACEABLE[below] && !FLUID[below]) || (FLUID[below] && FLUID[below] !== 8)) continue; }
+      best = Math.min(best, (f === 8 ? 1 : f + 1) + 1);
+      continue;
+    }
     if (f === 8) { sources++; best = Math.min(best, 1); continue; }
     // flowing water only spreads sideways when it rests on something
     const below = get(nx, y - 1, nz);

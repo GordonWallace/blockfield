@@ -12,7 +12,7 @@ A day in the game lasts 20 minutes. The clock times below follow the F3 clock, w
 - **Evening, from 18:00 to the next dawn.** Everyone heads for bed and sleeps.
 - **Travellers.** [[villager:merchant|Merchants]] and [[villager:explorer|explorers]] who are caught far from home at dusk pitch a tent and sleep in it, and strike camp in the morning.
 
-The trade screen has a line saying what the villager is doing right now, such as "Harvesting Wheat", "Buying food" or "Resting".
+The trade screen has a line saying what the villager is doing right now, such as "Harvesting Wheat", "Buying food", "Buying bucket" or "Resting". A shopping trip names what it is for: food, a tool of its trade, feed or a treat.
 
 ## Beds and sleep
 Most villagers have a bed in the house they live in. A villager without a usable bed (a broken bed, a builder or explorer with no home yet, a child) claims the nearest free bed in the village at night. **No villager ever takes a bed another villager holds.** A bedless villager that cannot find a free bed goes inside the nearest building with room, or stands by the bell.
