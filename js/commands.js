@@ -49,8 +49,9 @@ function buildDOM() {
 }
 
 // ---------- chat log ----------
+let printed = null;   // off the page, the lines a command prints while it runs: they go back with its result (lines) for the page to print
 function print(text, kind = "info") {
-  if (!BF.page) return;   // (in the simulation worker the result's msg carries it to the page)
+  if (!BF.page) { if (printed) printed.push([String(text), kind]); return; }   // (in the simulation worker the result carries it to the page)
   buildDOM();
   for (const part of String(text).split("\n")) {
     const el = document.createElement("div");
@@ -776,7 +777,9 @@ function execute(text) {
   const req = BF.req.player("command", null, { text: String(text) });
   if (!req.delivered && req.then) {
     print("/" + String(text).replace(/^\//, "").trim(), "dim");
-    const done = new Promise(res => req.then(r => { if (r && r.msg) print(r.msg, r.ok ? "ok" : "err"); res({ ok: !!(r && r.ok), msg: (r && r.msg) || "" }); }));
+    const done = new Promise(res => req.then(r => {
+      if (r && Array.isArray(r.lines)) for (const l of r.lines) if (Array.isArray(l)) print(l[0], l[1]);
+      if (r && r.msg) print(r.msg, r.ok ? "ok" : "err"); res({ ok: !!(r && r.ok), msg: (r && r.msg) || "" }); }));
     return { ok: true, pending: true, msg: "", done };
   }
   const r = req.result;
@@ -792,16 +795,20 @@ function run(text) {
   const cmd = CMDS[name] || CMDS[ALIASES[name]];
   print("/" + body.trim(), "dim");
   if (!cmd) { const m = `Unknown command '${name}'. Type /help for a list.`; print(m, "err"); return { ok: false, msg: m }; }
+  const lines = BF.page ? null : (printed = []);
   try {
     const out = cmd.run(parts.slice(1), body);
+    printed = null;
     if (cmd.cheat !== false) markCheats();
     if (out) print(out, "ok");
     BF.emit && BF.emit("commandExecuted", cmd.name, parts.slice(1));
-    return { ok: true, msg: out || "" };
+    return lines && lines.length ? { ok: true, msg: out || "", lines } : { ok: true, msg: out || "" };
   } catch (e) {
+    printed = null;
     const m = e instanceof CmdError ? e.message : "An unexpected error occurred trying to execute that command" + (e && e.message ? ": " + e.message : "");
     print(m, "err");
-    return { ok: false, msg: m };
+    if (BF.glog && !(e instanceof CmdError)) BF.glog.log("ERROR", "command", "/" + name + " failed: " + (e && e.message));
+    return lines && lines.length ? { ok: false, msg: m, lines } : { ok: false, msg: m };
   }
 }
 
