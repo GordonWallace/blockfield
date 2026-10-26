@@ -86,12 +86,20 @@ module.exports = async (pg) => {
     const L = BF.vlog, p = BF.player.position, rec = L.villageAt(p.x, p.z);
     const vs = rec.members.filter(m => m.type === "villager" && !m.dead && !m.child && m.slot && Array.isArray(m.inv) && Array.isArray(m.trades) && m.trades.some(o => P.kind(o)));
     ok("village villagers with priced offers", vs.length >= 2);
-    const v = vs[0], o = v.trades.find(x => P.kind(x));
-    o.base = [o.buy[0].n, o.sell.n]; o.step = P.kind(o) === "buy" ? 20 : -20; P.reprice(v, o);
+    // a job offer: the save rebuilds those (js/trading.js unpack); spare-goods and needs offers are made again from the inventory (js/market.js sync),
+    // at base, so until then (and until the next daily tick reprices) an offer whose floor is set by the villager's other offer of the same item can
+    // come back at other amounts with the same step. So: one with no other offer of its item.
+    const ware = x => (P.kind(x) === "buy" ? x.buy[0].id : x.sell.id);
+    const job = (m, x) => P.kind(x) && !x.spare && !x.need && !x.feed && !m.trades.some(y => y !== x && (y.sell.id === ware(x) || y.buy.some(b => b.id === ware(x))));
+    const v = vs.find(m => m.trades.some(x => job(m, x))), o = v && v.trades.find(x => job(v, x));
+    ok("a villager with a job offer of its own item", !!o);
+    if (!o) return out;
+    // (its price may have moved already in the simulation: the base stays the table's, which the save's key is made of)
+    o.base = o.base || [o.buy[0].n, o.sell.n]; o.step = P.kind(o) === "buy" ? 20 : -20; P.reprice(v, o);
     const amounts = [o.buy[0].n, o.sell.n];
     const packed = JSON.parse(JSON.stringify(T.pack(v)));
     const v2 = { type: "villager", profession: v.profession, level: 1, xp: 0 }; T.unpack(v2, packed);
-    const o2 = v2.trades.find(x => P.kind(x) && x.base && x.buy[0].id === o.buy[0].id && x.sell.id === o.sell.id);
+    const o2 = v2.trades.find(x => P.kind(x) && x.base && x.buy[0].id === o.buy[0].id && x.sell.id === o.sell.id && x.base[0] === o.base[0] && x.base[1] === o.base[1]);
     ok(`villager save keeps it: ${JSON.stringify(amounts)}`, o2 && o2.step === o.step && o2.buy[0].n === amounts[0] && o2.sell.n === amounts[1]);
     // ---- the Economy view records the price paid, and the trade eases it at the next tick
     const E = BF.econ, buyer = vs[1];

@@ -70,7 +70,7 @@ function snapshot() {
     seed: BF.state.seed,
     gen: 4, biomeScale: BF.state.biomeScale,               // worldgen version (4: the planet, the only one since 1.4) + biome size
     villages: BF.state.villages,                           // village generator (old saves have none => 1, the classic villages)
-    monsters: BF.gameOpts ? BF.gameOpts.monsters() : undefined,   // game options: which monsters spawn (js/gameopts.js; the list entry's copy is the one read)
+    monsters: BF.gameOpts ? BF.gameOpts.all() : undefined,   // game options: which monsters spawn, and far villages (coarse) (js/gameopts.js; the list entry's copy is the one read)
     time: { t: BF.sky.time, day: BF.sky.day },
     rand: BF.rand ? BF.rand.save() : undefined,           // the simulation tick and creation counter of the seeded random streams (js/rand.js)
     spawn: BF.spawnPoint,

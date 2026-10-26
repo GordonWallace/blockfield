@@ -8,6 +8,9 @@
 //   player    the player's saved state and inventory
 //   chests, furnaces, signs   block-entity contents
 //   drops, clock, weather, wildlife (wild mobs stored with unloaded chunks), boats, horses, bees, farmland
+//   rand, ids  the random streams' counters and the entity id counter
+//   villagers  the save's village state beyond the mobs (structures, farm beds, village ages, ovens, pens...)
+// The logs and statistics (village logs, economy tallies, happiness, day timelines) are left out: nothing in the simulation reads them.
 // Numbers that aren't whole are rounded to 1/1024 before hashing; render-only fields (meshes, animation phases, prevPos) are skipped.
 // Mobs have no stable ids yet (r15-13): a reference to a mob is its id when it has one, else its type and name (villagers have names).
 // Hashing only reads: it never draws random numbers or changes the world.
@@ -150,6 +153,13 @@ const PARTS = {
   horses: horsesText,
   bees: () => text(call(BF.bees, "serialize")),
   farmland: () => text(call(BF.farmland, "serialize")),
+  // counters that decide what comes next (bug-083): the random streams' tick and creation counter (js/rand.js) and the entity id counter
+  // (js/ids.js). Two worlds that differ only here look the same now and play differently later.
+  rand: () => text(call(BF.rand, "save")),
+  ids: () => text(call(BF.ids, "serialize")),
+  // what the save keeps for villages beyond their mobs (js/mobs.js exportVillagers): builders' structures and progress, farm beds, village
+  // ages, ovens, pens and coops, newborns, the dead, caravans... (also bug-083: none of it was in another part)
+  villagers: () => text(call(BF.mobs, "exportVillagers")),
 };
 
 // A part's canonical text (what its hash is taken of), to find where two worlds differ.
