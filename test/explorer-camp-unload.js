@@ -9,6 +9,16 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.start(); BF.player.setGameMode("creative"); });
   const lib = require('./lib');
   await lib.toVillage(pg);
+  // the test ground east of the village (16 past its box, and 12 round that) loaded before anything starts: under load it can lag the village
+  for (let t = 0; t < 180; t++) {
+    if (await lib.sim(pg, () => {
+      const A = BF.mobs.list.find(m => m.type === "villager" && m.village && m.inv && !m.child && !m.dead && m.slot && m.profession !== "explorer" && m.village.wg && m.village.wg.maxX != null);
+      if (!A) return false;
+      const W = BF.world, ox = Math.floor(A.village.wg.maxX) + 16, oz = Math.floor(A.village.z);
+      return [[-10, -10], [12, 12], [-10, 12], [12, -10]].every(([dx, dz]) => W.isLoaded(ox + dx, oz + dz));
+    })) break;
+    await pg.waitForTimeout(500);
+  }
   let bad = 0;
   const fail = s => { console.log("FAIL " + s); bad++; };
   const r1 = await lib.sim(pg, () => {
