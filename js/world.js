@@ -1464,7 +1464,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
         lift.y = top > save.y ? top : Math.floor(save.y + 1e-3) + 1; // top of the block we bumped into
         if (lift.y - save.y <= stepUp && !world.boxCollides(lift.x, lift.y, lift.z, hw, h)) {
           lift[axis] += d;
-          if (!world.boxCollides(lift.x, lift.y, lift.z, hw, h)) { pos.x = lift.x; pos.y = lift.y; pos.z = lift.z; continue; }
+          if (!world.boxCollides(lift.x, lift.y, lift.z, hw, h) && !(opts.canStep && lift.y - save.y > 0.5 && !opts.canStep(lift.x, lift.y, lift.z))) { pos.x = lift.x; pos.y = lift.y; pos.z = lift.z; continue; }
         }
       }
       vel[axis] = 0;

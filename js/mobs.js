@@ -1027,6 +1027,43 @@ function dropAhead(m, dx, dz) {
   for (let k = 0; k <= 4; k++) if (BF.world.isSolid(x, y0 - 1 - k, z) || BF.world.isSolid(x, y0 - k, z)) return k;
   return 5;
 }
+// Roofs and treetops (bug-063, bug-064): villagers, golems and animals never step, jump or walk onto an open-sky roof ledge (a built block
+// with a gap under it, or leaves) two or more blocks above the natural ground there. They used to climb hay bales onto low eaves, or walk
+// onto a roof level with a hillside, and spend the day up there.
+// A villager following a planned route (stairs, ladders, a raised path) still goes wherever its route goes. x, y, z: the mob's feet after
+// the climb; hw: its half width (a horse can stand on a ledge with its middle over air).
+let naturalTop = null;
+const leaves = new Set();
+function roofLedge(x, y, z, hw) {
+  if (!naturalTop) {
+    naturalTop = new Set();
+    for (const n of Object.keys(BF.B)) if (/_leaves$/.test(n)) leaves.add(BF.B[n]);
+    for (const n of Object.keys(BF.B)) if (/^(grass|dirt|dirt_path|stone|sand|red_sand|sandstone|red_sandstone|gravel|snow|snow_grass|snow_block|ice|packed_ice|clay|farmland|farmland_dry|coarse_dirt|podzol|mycelium|mud|moss_block|granite|diorite|andesite|deepslate|tuff|calcite|bedrock)$|_ore$|terracotta/.test(n)) naturalTop.add(BF.B[n]);
+  }
+  const W = BF.world, fy = Math.floor(y + 1e-3), seen = new Set();
+  for (const dx of [-hw + 0.02, 0, hw - 0.02]) for (const dz of [-hw + 0.02, 0, hw - 0.02]) {
+    const bx = Math.floor(x + dx), bz = Math.floor(z + dz), k = bx + "," + bz;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (!W.isSolid(bx, fy - 1, bz) || naturalTop.has(W.getBlock(bx, fy - 1, bz))) continue;
+    if (W.heightAt(bx, bz) >= fy) continue;   // something over it: a floor indoors, not a roof
+    const gy = BF.worldgen.heightAt(bx, bz), id = W.getBlock(bx, fy - 1, bz);
+    if (fy - gy < 3) continue;
+    if (leaves.has(id)) return true;
+    // a roof (an eave, a roof step over the room below) has a gap under it; a foundation, a wall or a stack of hay is solid down to the
+    // ground, and a bridge deck has the river under it
+    let gap = false;
+    for (let yy = fy - 2; yy > gy; yy--) {
+      const b = W.getBlock(bx, yy, bz);
+      if (isWater(b)) { gap = false; break; }
+      if (!W.isSolid(bx, yy, bz)) gap = true;
+    }
+    if (gap) return true;
+  }
+  return false;
+}
+// Whether the mob keeps off roofs (roofLedge): everything that walks except monsters (spiders climb walls anyway).
+const keepsOffRoofs = m => !m.def.hostile && !m.def.climbs && !(m.ai && m.ai.route) && !m.onLadder && !(m.horse && m.horse.lead);   // a led horse goes where it is led
 function waterAhead(m, dx, dz) {
   const x = m.position.x + dx * (m.halfWidth + 0.6), z = m.position.z + dz * (m.halfWidth + 0.6);
   const y0 = Math.floor(m.position.y);
@@ -1987,14 +2024,21 @@ function updateMob(m, dt) {
   if (resting) { m.vel.set(0, 0, 0); m.fallStart = m.position.y; ai.blockedT = 0; }
   else {
   const wasGround = m.onGround;
-  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater || ai.climbT > 0 });   // swimming, it climbs out onto a bank (world.js moveBox)
+  const offRoofs = keepsOffRoofs(m), px = m.position.x, py = m.position.y, pz = m.position.z;
+  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater || ai.climbT > 0,   // swimming, it climbs out onto a bank (world.js moveBox)
+    canStep: offRoofs ? (x, y, z) => !roofLedge(x, y, z, m.halfWidth) : null });
+  // nor walks onto one level from a hillside (or lands on one): back where it was, as if it hit a wall. One already up there can get down.
+  if (offRoofs && (m.position.x !== px || m.position.z !== pz) && roofLedge(m.position.x, m.position.y, m.position.z, m.halfWidth) && !roofLedge(px, py, pz, m.halfWidth)) {
+    m.position.x = px; m.position.z = pz; m.vel.x = 0; m.vel.z = 0; res.hitX = true; res.roof = true;
+  }
   m.onGround = res.onGround; m.inWater = res.inWater; m.headInWater = !!res.headInWater;
   if (m.inWater && m.type === "villager" && BF.bridges) BF.bridges.noteSwim(m);   // a swim is a river crossing (js/bridges.js)
   const wants = Math.abs(_desired.x) + Math.abs(_desired.z) > 0.1;
   if ((res.hitX || res.hitZ) && wants) {
     if (T.climbs && (ai.target || ai.mode === "walk")) m.vel.y = 3.2;  // spiders climb walls
     else if (m.onLadder) { /* climbing: the ladder code above lifts it */ }
-    else if (res.onGround && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height) && (!T.village || stepAhead(m, _desired))) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
+    else if (res.onGround && !res.roof && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height) && (!T.village || stepAhead(m, _desired))
+      && !(offRoofs && roofLedge(m.position.x + Math.sign(_desired.x) * (res.hitX ? 0.6 : 0), m.position.y + 1, m.position.z + Math.sign(_desired.z) * (res.hitZ ? 0.6 : 0), m.halfWidth))) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
     else if (m.inWater && T.village && ai.pitOut) { m.vel.y = 6.5; ai.climbT = 0.3; }   // a well's rim, a block above the water: jump out like the player can
     else if (m.inWater) m.vel.y = 4;
     if (!T.hostile && ai.mode === "walk" && !ai.detour && Math.random() < 0.3) pickWander(m, 8);
@@ -2696,8 +2740,10 @@ function scatterAt(rec, sl, v) {
     const x = Math.floor(cx + Math.cos(a) * d), z = Math.floor(cz + Math.sin(a) * d);
     if (v.minX != null && (x < v.minX || x > v.maxX || z < v.minZ || z > v.maxZ)) continue;
     if (!BF.world.isLoaded(x, z)) continue;
-    const at = findStand(x, BF.world.heightAt(x, z) + 1, z, TYPES.villager);
-    if (at) return at;
+    const top = BF.world.heightAt(x, z);
+    if (top - BF.worldgen.heightAt(x, z) >= 2) continue;   // a house (or a tree) stands there: not on its roof (bug-063)
+    const at = findStand(x, top + 1, z, TYPES.villager);
+    if (at && !roofLedge(at[0], at[1], at[2], TYPES.villager.hw)) return at;
   }
   return null;
 }
@@ -2738,8 +2784,14 @@ function updateVillages(dt) {
       const H = sl.house;
       const snap = BF.mobSave ? BF.mobSave.peek(rec.key + "#" + sl.idx) : null;   // quit and reload: back exactly where it was (js/mobsave.js)
       if (snap === "wait") continue;
-      let at = null;
+      let at = null, offRoof = false;
       if (snap) at = standable(Math.floor(snap.p[0]), Math.floor(snap.p[1]), Math.floor(snap.p[2]), TYPES.villager.hw, TYPES.villager.h) ? snap.p.slice() : findStand(snap.p[0], snap.p[1], snap.p[2], TYPES.villager);
+      // saved up on a roof (before bug-063): back on the ground instead. The saved spot itself, not the stand found near it: the snapshot
+      // puts the villager back on its saved spot anyway, and one saved in a doorway can have its nearest stand up on the roof above.
+      if (at && roofLedge(snap.p[0], snap.p[1], snap.p[2], TYPES.villager.hw)) {
+        if (BF.glog) BF.glog.log("INFO", "mobs", "villager " + sl.prof + " saved on a roof: placed on the ground instead", { village: rec, at: snap.p });
+        at = null; offRoof = true;
+      }
       let scattered = false;
       if (!at && villagerSaves.has(rec.key + "#" + sl.idx) && (at = scatterAt(rec, sl, v))) scattered = !bedtime();   // (a village's first load is not a return: its villagers start at home)
         // otherwise: by day a random spot within the leash of its bed, at night in the bed
@@ -2759,7 +2811,8 @@ function updateVillages(dt) {
       if (m.bed && m.bed.claimed) m.home = homeOfBed(rec, m.bed) || m.home;   // a bed it claimed (saved): that house is home now
       if (BF.jobs) BF.jobs.onSpawn(m, rec, sv);   // jobsite claim / saved profession (js/jobs.js)
       if (sl.prof === "builder" && BF.builder) BF.builder.onSpawn(m, rec, sv);
-      if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); }
+      if (snap && snap.p) { BF.mobSave.apply(m, snap); BF.mobSave.done(rec.key + "#" + sl.idx); if (offRoof) { m.position.set(at[0], at[1], at[2]); m.fallStart = at[1]; m.ai.route = null; } }
+      if (BF.explorer && BF.explorer.onSpawn) BF.explorer.onSpawn(m);   // back in its tent for the rest of the night, or the tent back in its pack
     }
     const wantG = (rec.pop ? Math.max(1, Math.round(rec.pop / 15)) : rec.houses.length >= 12 ? 2 : 1) - (rec.killed.iron_golem || 0);   // sized villages: a golem per ~15 villagers
     if (alive("iron_golem") < wantG) {
@@ -2871,6 +2924,7 @@ BF.mobs = {
     if (BF.cowherd) BF.cowherd.tick(dt);   // calves growing up, pasture stock (js/cowherd.js)
     if (BF.pigFarmer) BF.pigFarmer.tick(dt);   // piglets growing up, sty stock (js/pigfarmer.js)
     if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
+    if (BF.explorer && BF.explorer.tick) BF.explorer.tick(dt);   // tents of explorers that unloaded while camping (js/explorer.js)
     arrowMat.color.setScalar(Math.max(0.15, skyLight()));
     for (let i = 2; i < badgeMats.length; i++) if (badgeMats[i]) badgeMats[i].color.setHex(BADGE_COLORS[i]).multiplyScalar(Math.max(0.15, skyLight()));
     if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
@@ -2919,7 +2973,7 @@ BF.mobs = {
   spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)
   spawnShare() { let all = 0, on = 0; for (const [t, w] of HOSTILE_WEIGHTS) { all += w; if (TYPES[t].spawns) on += w; } return all ? on / all : 1; },
   // Wild mobs (js/wildlife.js): which mobs count as wild, a first-generation group, a standable spot near (x, y, z), the sky over a spot.
-  isWild, spawnGroup, penBoxes, inPenBox, standable, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
+  isWild, spawnGroup, penBoxes, inPenBox, standable, roofLedge, findPath,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}): A* route cells (tests)
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
@@ -2951,6 +3005,7 @@ BF.mobs = {
     if (BF.baker) BF.baker.exportAll(out);   // "ovens" -> what each baker's oven holds
     if (BF.villageSim) BF.villageSim.exportSeen(out);   // "seen:<village key>" -> game day it was last simulated, "pin:<trip>" -> trips on the road
     if (BF.merchant) BF.merchant.exportAll(out);   // "caravans" -> routes and path wear (js/merchant.js)
+    if (BF.explorer && BF.explorer.exportAll) BF.explorer.exportAll(out);   // "explorer:camps" -> camps and tents left behind (js/explorer.js)
     for (const [k, d] of pendingDead) out["dead:" + k] = d;   // "dead:<village key>" -> {v: roster slots of killed villagers, info: who they were}
     for (const rec of villages.values()) {
       const v = rec.dead ? [...rec.dead] : [];
@@ -2962,7 +3017,7 @@ BF.mobs = {
   },
   importVillagers(o) {
     villagerSaves.clear();
-    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked") villagerSaves.set(k, o[k]);
+    if (o && typeof o === "object") for (const k in o) if (k.slice(0, 6) !== "built:" && k.slice(0, 6) !== "cross:" && k.slice(0, 5) !== "seen:" && k.slice(0, 5) !== "pens:" && k.slice(0, 9) !== "farmbeds:" && k.slice(0, 8) !== "farmdig:" && k.slice(0, 5) !== "dead:" && k.slice(0, 4) !== "pin:" && k !== "caravans" && k !== "ovens" && k !== "stables:stocked" && k !== "explorer:camps") villagerSaves.set(k, o[k]);
     pendingDead.clear();
     if (o && typeof o === "object") for (const k in o) if (k.slice(0, 5) === "dead:" && o[k] && typeof o[k] === "object") pendingDead.set(k.slice(5), { v: Array.isArray(o[k].v) ? o[k].v : [], info: Array.isArray(o[k].info) ? o[k].info.filter(e => e && typeof e === "object") : [], g: Math.max(0, Math.floor(+o[k].g || 0)) });
     for (const rec of villages.values()) applyDead(rec);
@@ -2972,6 +3027,7 @@ BF.mobs = {
     if (BF.villageLife) BF.villageLife.importAll(o);
     if (BF.jobs) BF.jobs.importAll(o);   // jobsite claims of saved villagers
     if (BF.breeding) BF.breeding.importAll(o);
+    if (BF.explorer && BF.explorer.importAll) BF.explorer.importAll(o);
     if (BF.shepherd) BF.shepherd.importAll(o);
     if (BF.poultry) BF.poultry.importAll(o);
     if (BF.cowherd) BF.cowherd.importAll(o);

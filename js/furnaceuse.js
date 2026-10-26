@@ -75,6 +75,22 @@ function near(m, inId, outId, skip, own) {
   const d = f => (own && f.x === own.x && f.y === own.y && f.z === own.z ? -1e6 : 0) + Math.hypot(f.x - m.position.x, f.z - m.position.z) + Math.abs(f.y - m.position.y) * 2;
   return out.sort((a, b) => d(a) - d(b));
 }
+// Away from home (an explorer out mapping, bug-067): the furnaces of any village within r blocks of where m stands, the nearest first, so
+// it cooks there instead of walking home. Another village's furnace only when no fuel is in it: it takes out all the fuel left when it
+// is done, and that must be its own. Each comes with the village it belongs to (f.rec), where it buys fuel.
+function nearHere(m, inId, outId, skip, r) {
+  hook();
+  const out = [], at = BF.vlog && BF.vlog.villageAt;
+  if (!at) return out;
+  for (const f of furnaces.values()) {
+    if (Math.hypot(f.x + 0.5 - m.position.x, f.z + 0.5 - m.position.z) > r || (skip && skip(f))) continue;
+    const rec = at(f.x, f.z);
+    if (!rec || !usable(m, f, inId, outId) || (rec !== m.village && fuelIn(f) > 0)) continue;
+    out.push(Object.assign({}, f, { rec }));
+  }
+  const d = f => Math.hypot(f.x - m.position.x, f.z - m.position.z) + Math.abs(f.y - m.position.y) * 2;
+  return out.sort((a, b) => d(a) - d(b));
+}
 
 // ---------------------------------------------------------------- fuel
 // Fuel from its pack enough to smelt n items: [{id, n}] (coal first, then logs, then planks past 3), [] when it has too little.
@@ -174,10 +190,10 @@ const beside = s => (x, y, z) => Math.abs(x - s.x) + Math.abs(z - s.z) === 1 && 
 const canSell = (m, v2, loose) => v2 && v2 !== m && v2.type === "villager" && !v2.dead && !v2.removed && !v2.child && Array.isArray(v2.inv) && Array.isArray(v2.trades)
   && (loose || (!v2.sleeping && !v2.tradingWith && v2.position && v2.position.y > m.position.y - 6));   // not deep in a mineshaft
 const restocked = (v2, id) => ((TR().PRODUCE[v2.profession] || []).includes(nameOf(id)));
-// Offers of m's village that sell an item matching f, which m can pay for: [{v2, o, max}] (max = how many times), the nearest first.
-// skip(v2, o): an offer it gave up on a while (not checked when loose).
-function offersFor(m, f, loose, skip) {
-  const R = m.village, T = TR(), out = [];
+// Offers of m's village (or of village rec, an explorer buying where it cooks) that sell an item matching f, which m can pay for:
+// [{v2, o, max}] (max = how many times), the nearest first. skip(v2, o): an offer it gave up on a while (not checked when loose).
+function offersFor(m, f, loose, skip, rec) {
+  const R = rec || m.village, T = TR(), out = [];
   if (!R) return out;
   for (const v2 of R.members || []) {
     if (!canSell(m, v2, loose)) continue;
@@ -193,8 +209,8 @@ function offersFor(m, f, loose, skip) {
   return out.sort((a, b) => a.d - b.d);
 }
 // Emeralds needed to buy n items matching f (cheapest offers first), or Infinity when the village does not sell that many.
-function priceOf(m, f, n, loose, skip) {
-  const list = offersFor(m, f, loose, skip).filter(e => e.o.buy.every(b => b.id === I("emerald")))
+function priceOf(m, f, n, loose, skip, rec) {
+  const list = offersFor(m, f, loose, skip, rec).filter(e => e.o.buy.every(b => b.id === I("emerald")))
     .sort((a, b) => a.o.buy[0].n / a.o.sell.n - b.o.buy[0].n / b.o.sell.n);
   let cost = 0;
   for (const e of list) {
@@ -205,9 +221,9 @@ function priceOf(m, f, n, loose, skip) {
   return n > 0 ? Infinity : cost;
 }
 // A buying deal for need {f, n, what}: {kind: "buy", other, offer, times, item, what}, the nearest seller.
-function findDeal(m, need, skip) {
+function findDeal(m, need, skip, rec) {
   const T = TR();
-  for (const e of offersFor(m, need.f, false, skip)) {
+  for (const e of offersFor(m, need.f, false, skip, rec)) {
     let k = Math.min(e.max, Math.ceil(need.n / e.o.sell.n), 4);
     while (k > 0 && !T.inv.canFit(m.inv, [{ id: e.o.sell.id, n: e.o.sell.n * k }], e.o.buy.map(b => ({ id: b.id, n: b.n * k })))) k--;
     if (k > 0) return { kind: "buy", other: e.v2, offer: e.o, times: k, item: e.o.sell.id, what: need.what };
@@ -234,7 +250,7 @@ function doBuy(m, deal) {
 }
 
 BF.furnaceUse = {
-  COOK, PER_COAL, PER_WOOD, furnaces, inUse, pk, hook, busyWhen, atFurnace, usable, near, reachOf,
+  COOK, PER_COAL, PER_WOOD, furnaces, inUse, pk, hook, busyWhen, atFurnace, usable, near, nearHere, reachOf,
   isCoal, isLog, isPlanks, isFuel, fuelWorth, fuelFor, fuelIn, load, topUp, empty, travel, beside, canSell, restocked, offersFor, priceOf, findDeal, doBuy,
 };
 })();

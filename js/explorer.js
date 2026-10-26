@@ -338,12 +338,23 @@ function homeDistance(m) {
 // Within this many blocks of its bed (the village centre when it has none) it is home: it never camps there, it just goes to bed when night falls
 // like everyone else (after dusk villagers keep within 40 blocks of their own neighbourhood, mobs.js villagerAI).
 const HOME_R = 48;
-const atHome = m => homeDistance(m) <= HOME_R;
+// Anywhere inside its own village counts as home too, however big the village grows (bug-052: explorers pitched on farms at the far end
+// of their own village): from there it walks to bed.
+const inOwnVillage = (m, x, z) => !!(m.village && BF.vlog && BF.vlog.villageAt && BF.vlog.villageAt(x, z) === m.village);
+const atHome = m => homeDistance(m) <= HOME_R || inOwnVillage(m, m.position.x, m.position.z);
+// Ground a tent may stand on: natural ground, never farmland, a path or anything built (bug-052: tents on farms).
+let campGround = null;
+function groundOk(id) {
+  if (!campGround) campGround = new Set(["grass", "dirt", "coarse_dirt", "podzol", "mycelium", "sand", "red_sand", "gravel", "snow", "snow_grass", "snow_block", "stone", "sandstone", "red_sandstone", "moss_block", "mud", "clay"].map(n => BF.B[n]).filter(x => x != null));
+  return campGround.has(id);
+}
+const PITCH_RETRY = 3;   // seconds between tries at a site when there was none (each try searches 15 x 15 origins)
 function pitch(m) {
-  const X = state(m), T0 = T();
+  const X = state(m), T0 = T(), W = BF.world;
   if (!BF.tents || tentItem() == null || cnt(m, tentItem()) < 1) return false;
   const px = Math.floor(m.position.x), pz = Math.floor(m.position.z);
-  const site = BF.tents.findSite(m.position.x, m.position.z, 7, (x, y, z) => x === px && z === pz);
+  const blocked = (x, y, z) => (x === px && z === pz) || inOwnVillage(m, x, z) || (BF.SOLID[W.getBlock(x, y - 1, z)] && !groundOk(W.getBlock(x, y - 1, z)));
+  const site = BF.tents.findSite(m.position.x, m.position.z, 7, blocked);
   if (BF.vlog) BF.vlog.actor = m;                       // the blockPlaced events inside place() are logged as this villager's
   const placed = site && BF.tents.place(site.x, site.y, site.z, site.f);
   if (BF.vlog) BF.vlog.actor = null;
@@ -352,19 +363,90 @@ function pitch(m) {
   X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
   m.homeBed = m.homeBed || m.bed;
   m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
+  const k = keyOf(m);
+  if (k) camps.set(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
   log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
   return true;
 }
-// Takes the tent down (when it still stands the item comes back) and gives the villager its own bed again.
+// Takes the tent down (when it still stands the item comes back) and gives the villager its own bed again. A tent on land that is not loaded
+// (the explorer came back somewhere else) comes back into its pack straight away and is taken down when its land loads (camps, tick).
 function strike(m) {
   const X = state(m), c = X.camp;
   if (c) {
-    const id = BF.tentId(c.f, 0, 1);
-    if (BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === id && BF.tents.remove(c.x, c.y, c.z, id)) T().inv.add(m.inv, tentItem(), 1);
+    const id = BF.tentId(c.f, 0, 1), k = keyOf(m);
+    if (BF.world.isLoaded(c.x, c.z)) {
+      if (BF.world.getBlock(c.x, c.y, c.z) === id && BF.tents.remove(c.x, c.y, c.z, id)) T().inv.add(m.inv, tentItem(), 1);
+      if (k) camps.delete(k);
+    } else {
+      T().inv.add(m.inv, tentItem(), 1);
+      if (k) camps.set(k, { x: c.x, y: c.y, z: c.z, f: c.f, until: 0, returned: true, given: true });
+    }
     log("strike", m, { at: c.x + "," + c.z });
   }
   X.camp = null;
   if (m.homeBed !== undefined) { m.bed = m.homeBed; m.homeBed = undefined; }
+}
+
+// ---------------------------------------------------------------- tents left behind (bug-067)
+// An explorer unloads with its village wherever it is (js/villagesim.js), so a camping explorer can vanish from its tent. Every camp is
+// written down here (saved with the villagers, "explorer:camps"): villager key -> {x, y, z, f, until (game day + time the night ends),
+// returned (the night ended with the explorer away: the tent is back in its pack), given (it has it), removed (taken down)}.
+// - Its village loads again before the night is over: it comes back in its tent, asleep (onSpawn).
+// - The night ends first: the tent is taken down (now, or when its land next loads) and goes back into the explorer's pack when it next loads.
+const camps = new Map();
+const keyOf = m => (m.village && m.slot ? m.village.key + "#" + m.slot.idx : null);
+const dayNow = () => (BF.sky ? (BF.sky.day || 0) + skyT() : 0);
+// When the coming (or current) night ends, as a game day + time.
+function nightEnd() { const d = BF.sky ? BF.sky.day || 0 : 0, t = skyT(); return d + (t < 0.985 ? 0.985 : 1.985); }
+const tentAt = c => BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === BF.tentId(c.f, 0, 1);
+let tickT = 0;
+function tick(dt) {
+  if (!camps.size || (tickT -= dt) > 0) return;
+  tickT = 2;
+  const here = new Set();
+  for (const m of BF.mobs.list) if (m.profession === "explorer" && !m.dead && !m.removed) { const k = keyOf(m); if (k) here.add(k); }
+  const now = dayNow();
+  for (const [k, e] of camps) {
+    if (here.has(k) && !e.returned) continue;   // its own AI strikes it in the morning
+    if (!e.returned && now >= e.until) {
+      e.returned = true;
+      if (BF.glog) BF.glog.log("INFO", "explorer", "explorer " + k + " away when the night ended: its tent at " + e.x + ", " + e.z + " is taken down and goes back into its pack", { at: [e.x, e.y, e.z] });
+    }
+    if (e.returned && !e.removed && BF.world.isLoaded(e.x, e.z)) {
+      if (tentAt(e)) BF.tents.remove(e.x, e.y, e.z, BF.tentId(e.f, 0, 1));
+      e.removed = true;
+    }
+    if (e.returned && e.removed && e.given) camps.delete(k);
+  }
+}
+// A villager of its village loading (mobs.js updateVillages, after its saved state and snapshot are back on it).
+function onSpawn(m) {
+  if (!m || m.profession !== "explorer") return;
+  const X = state(m), k = keyOf(m), e = k ? camps.get(k) : null;
+  if (e && e.returned) {
+    if (!e.given) { T().inv.add(m.inv, tentItem(), 1); e.given = true; log("tent_back", m, { at: e.x + "," + e.z }); }
+    X.camp = null;
+    if (e.removed) camps.delete(k);
+    return;
+  }
+  if (!X.camp) return;
+  const c = X.camp;
+  if (e && dayNow() < e.until && tentAt(c)) {   // back before morning: into its tent, asleep
+    m.homeBed = m.bed;
+    m.bed = { x: c.x, y: c.y, z: c.z, f: c.f, tent: true };
+    if (Math.hypot(c.x + 0.5 - m.position.x, c.z + 0.5 - m.position.z) > 3) m.position.set(c.x + 0.5, c.y, c.z + 0.5);
+    if (BF.glog) BF.glog.log("INFO", "explorer", "explorer " + k + " came back to its tent at " + c.x + ", " + c.z + " for the rest of the night", { village: m.village, at: m });
+    return;
+  }
+  strike(m);   // the night is over (or the tent is gone): pack up, own bed again
+}
+if (typeof BF.on === "function") BF.on("newWorld", () => camps.clear());
+function exportAll(out) { if (camps.size) out["explorer:camps"] = [...camps].map(([k, e]) => Object.assign({ k }, e)); }
+function importAll(o) {
+  camps.clear();
+  const a = o && o["explorer:camps"];
+  if (Array.isArray(a)) for (const e of a) if (e && typeof e.k === "string" && [e.x, e.y, e.z, e.f].every(Number.isFinite))
+    camps.set(e.k, { x: e.x, y: e.y, z: e.z, f: e.f & 3, until: +e.until || 0, returned: !!e.returned, given: !!e.given, removed: !!e.removed });
 }
 // An explorer starts with one tent, but it can lose it (a world saved before tents existed, the player breaking its camp, a full pack when striking it).
 // Back in the village by day it collects a spare from home, so no explorer is ever caught out at dusk without one.
@@ -385,13 +467,17 @@ function campAI(m, t, a) {
   if (t < DUSK || t >= BEDTIME) { X.eve = null; return false; }
   const day = BF.sky ? BF.sky.day : 0;
   if (X.eve && X.eve.day === day) {
-    if (X.eve.camp && !atHome(m) && !m.sleeping && cnt(m, tentItem()) >= 1 && pitch(m)) { X.eve = null; return true; }   // a failed site: tries again
+    if (X.eve.camp && !atHome(m) && !m.sleeping && cnt(m, tentItem()) >= 1 && nowS() >= (X.pitchAt || 0)) {   // a failed site: tries again
+      if (pitch(m)) { X.eve = null; return true; }
+      X.pitchAt = nowS() + PITCH_RETRY;
+    }
     return false;
   }
   if (m.sleeping || m.child || tentItem() == null || cnt(m, tentItem()) < 1) return false;
   const left = (BEDTIME - t) * DAY_S, reach = left * m.def.speed * 1.3 * 1.5 * WALK_SLACK;
   X.eve = { day, camp: !atHome(m) && homeDistance(m) > reach };
   if (X.eve.camp && pitch(m)) { X.eve = null; return true; }
+  if (X.eve.camp) X.pitchAt = nowS() + PITCH_RETRY;
   return false;
 }
 
@@ -441,5 +527,5 @@ function unpack(m, o) {
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { offerFor, pitch, strike, away, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
+BF.explorer = { offerFor, pitch, strike, away, tick, onSpawn, exportAll, importAll, camps, atHome, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
 })();
