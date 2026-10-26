@@ -5,10 +5,13 @@
 //   ws: an EventEmitter. send(string | Buffer | ArrayBuffer | typed array) (text for a string, binary otherwise), close(code?, reason?),
 //   ping(), open (bool), bufferedAmount; events "message" (data: Buffer, binary: bool), "close" (code, reason), "error" (err).
 // Limits: one message may be up to MAX bytes (256 MB): a bigger one closes the socket with 1009.
+// A dead connection is noticed (bug-077): the other end closing its half without a close frame (a killed browser) ends ours too, and a
+// ping goes every PING_MS: a connection that sends nothing at all (not even the browser's automatic pong) for IDLE_MS is dropped.
 "use strict";
 const crypto = require("crypto"), EventEmitter = require("events");
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", MAX = 256 * 1024 * 1024;
+const PING_MS = +process.env.BF_WS_PING_MS || 10000, IDLE_MS = +process.env.BF_WS_IDLE_MS || 30000;   // (env: tests shorten them)
 const OP = { cont: 0, text: 1, bin: 2, close: 8, ping: 9, pong: 10 };
 
 const acceptKey = key => crypto.createHash("sha1").update(key + GUID).digest("base64");
@@ -30,8 +33,15 @@ class WebSocket extends EventEmitter {
     this.socket = socket; this.open = true;
     this.q = []; this.qn = 0; this.need = 0; this.parts = []; this.partOp = 0; this.partLen = 0; this.closeSent = false;
     socket.setNoDelay(true);
-    socket.on("data", d => { try { this.data(d); } catch (e) { this.fail(1002, e.message); } });
-    socket.on("close", () => this.gone(1006, ""));
+    this.heard = Date.now();
+    socket.on("data", d => { this.heard = Date.now(); try { this.data(d); } catch (e) { this.fail(1002, e.message); } });
+    socket.on("end", () => { socket.end(); this.gone(1006, "the other end closed without a close frame"); });   // (http sockets allow half-open)
+    socket.on("close", () => { clearInterval(this.beat); this.gone(1006, ""); });
+    this.beat = setInterval(() => {
+      if (Date.now() - this.heard > IDLE_MS) { clearInterval(this.beat); socket.destroy(); this.gone(1006, "nothing heard for " + IDLE_MS / 1000 + " s"); }
+      else this.ping();
+    }, PING_MS);
+    this.beat.unref();
     socket.on("error", e => { this.emit("error", e); this.gone(1006, e.message); });
   }
   get bufferedAmount() { return this.socket.writableLength; }
@@ -99,7 +109,7 @@ class WebSocket extends EventEmitter {
     setTimeout(() => this.socket.destroy(), 2000).unref();
   }
   fail(code, why) { this.emit("error", new Error(why)); this.close(code, why); this.socket.end(); this.gone(code, why); }
-  gone(code, reason) { if (!this.open) return; this.open = false; this.emit("close", code, reason); }
+  gone(code, reason) { if (!this.open) return; this.open = false; clearInterval(this.beat); this.emit("close", code, reason); }
 }
 
 // The handshake: a valid upgrade request becomes a WebSocket; anything else gets a 400 and null
@@ -126,4 +136,4 @@ function attach(server, path, onSocket) {
   });
 }
 
-module.exports = { attach, accept, acceptKey, frame, WebSocket, MAX };
+module.exports = { attach, accept, acceptKey, frame, WebSocket, MAX, PING_MS, IDLE_MS };

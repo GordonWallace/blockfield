@@ -22,7 +22,7 @@
 //   page), start() -> Promise("worker" | "in page"), world(op, args) -> Promise, demo(seed, opts), ticks(raw) -> n, achieved(), frame(),
 //   sky(drawnDt), crashed (text or null), wanted() -> "server" | "worker" | "auto" | null, saves(q) -> Promise (the server's worlds), post(m),
 //   refused (why the world server turned this page away: another page plays on it; else undefined),
-//   label() -> the host as the player sees it, threads (the world server's), CHOICES, pref() / setPref(v) / prefLabel(v) (the setting),
+//   budget() (the page's simulation budget to the simulation, bug-081), label() -> the host as the player sees it, threads (the world server's), CHOICES, pref() / setPref(v) / prefLabel(v) (the setting),
 //   eval(src, arg) -> Promise (tests only: test/bft.js BFT.sim) }
 (() => {
 "use strict";
@@ -116,7 +116,8 @@ function run(w, via) {
     const timer = setTimeout(() => fail("it did not start in 60 s"), 60000);
     const client = BF.proto.worker.connect(w, via);   // first, so the worker's hello finds it
     hook(client);
-    w.onmessage = ev => {
+    const tl = BF.tload || { wrap: f => f };   // (timed: the page thread's busy share, js/threadload.js)
+    w.onmessage = tl.wrap(ev => {
       const d = ev.data;
       if (d && d.h != null) { BF.proto.worker.receive(d); return; }
       if (!d) return;
@@ -125,8 +126,11 @@ function run(w, via) {
         H.mode = server ? "server" : "worker"; H.worker = true; H.server = server; H.why = "";
         H.threads = server ? (w.hello && w.hello.threads) || 1 : 1;
         if (globalThis.BF_TEST) w.postMessage({ test: "eval" });
-        // an automated browser starts the budget off (js/active.js); the world server's Node has a navigator of its own that never says so
-        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) { w.postMessage({ auto: true, workers: urlWorkers().workers }); if (!urlWorkers().workers) H.threads = 1; }   // (it plays on one thread then; tests: BFT.sim runs code where the simulation is, protocol query eval)
+        // the page's simulation budget (js/active.js: the remembered setting, ?budget=, off in an automated browser), which the worker's
+        // or the world server's copy can't know (no localStorage there, and the world server's Node has a navigator that never says webdriver)
+        H.budget();
+        // an automated browser plays on one region worker unless the URL asks for more (the world server's Node has a navigator of its own that never says so)
+        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) { w.postMessage({ auto: true, workers: urlWorkers().workers }); if (!urlWorkers().workers) H.threads = 1; }   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
         BF.world.replica = true;
         BF.glog.remote(list => client.log(list));
         glog("INFO", server ? "The simulation runs on the world server (" + location.host + ", ready in " + Math.round(performance.now() - t0) + " ms)" + (w.hello.held ? "; it holds world \"" + w.hello.held.name + "\", paused since its page closed" : "")
@@ -139,7 +143,7 @@ function run(w, via) {
       else if (d.saves) { const f = asked.get(d.saves.rid); if (f) { asked.delete(d.saves.rid); f(d.saves); } }
       else if (d.feedAck) { if (BF.debugFeed && BF.debugFeed.serverAck) BF.debugFeed.serverAck(d.feedAck); }
       else if (d.gone) gone(d.gone);
-    };
+    });
     w.onerror = ev => { if (ev && ev.preventDefault) ev.preventDefault(); if (!settled) fail(ev && ev.message || "it could not load"); else crashed(ev && ev.message || "the " + what + " failed"); };
     const three = document.querySelector('script[src*="three"]');
     w.postMessage({ boot: Object.assign({ three: three ? three.src : null, build: window.BF_BUILD || null }, urlWorkers()) });   // (build: the checkout's commit, for the game log's header)
@@ -210,6 +214,13 @@ H.eval = function (src, arg) {
   if (!H.worker) return Promise.resolve().then(() => (0, eval)("(" + src + ")")(arg));
   return new Promise((resolve, reject) => BF.client.query("eval", { src, arg }, r => (r && r.ok ? resolve(r.value) : reject(new Error("in the simulation: " + (r && (r.error || r.why)))))));
 };
+// The pause menu's Simulated villages setting to where the simulation is (bug-081): {budget: {on, budget}} outside the protocol, as a
+// worker's page posts {test}; the world server keeps it for the threads this page plays on next (server/world.js)
+H.budget = function () {
+  if (!H.worker || !BF.active || !BF.proto.worker.w) return;
+  const o = BF.active.opts();
+  BF.proto.worker.w.postMessage({ budget: { on: o.on, budget: o.budget }, coarse: BF.gameOpts ? BF.gameOpts.overridden() : null });   // (and ?coarse=, spec r15-64)
+};
 // to the world server, outside the protocol (the debug feed's page part, js/debugfeed.js)
 H.post = m => { if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage(m); };
 
@@ -271,12 +282,40 @@ H.demo = (seed, opts) => H.world("demo", { seed, opts: opts || {} });
 // ---- each frame (js/main.js)
 let sentPlayer = "", sentSpeed = null, sentPause = null, lastClock = null, moveSeen = 0;
 // The page's clock for drawing: the ticks a frame would run, counted but not run (they run in the worker). Returns how many.
+// It runs at the worker's pace, not the speed asked for: at 1000x the worker may reach only 15x, and the sky, clouds, water and
+// entities drawn by this clock would otherwise race at 1000x between the clock messages and snap back at each one.
 H.ticks = function (raw) {
-  const W = BF.warp, plan = W.plan(raw);
+  const W = BF.warp, plan = W.plan(raw * paceFactor());
   W.advance(plan.n * plan.h);
   return plan.n;
 };
-H.achieved = () => { const c = BF.client && BF.client.world.clock; return c ? c.achieved : undefined; };
+H.achieved = () => { if (pace != null) return pace; const c = BF.client && BF.client.world.clock; return c ? c.achieved : undefined; };
+// The worker's pace: game seconds it ran per real second, measured from its clock messages (each carries its tick count) at least
+// PACE_MS apart and smoothed; until the first measure after a speed change, the achieved speed the latest clock message reports.
+const PACE_MS = 500;
+let pace = null, paceRef = null, paceSpeed = null, paceSeen = null, paceTold = false;
+function paceFactor() {
+  const W = BF.warp, sp = W.speed, c = BF.client && BF.client.world.clock;
+  if (sp !== paceSpeed) { paceSpeed = sp; pace = null; paceRef = null; paceTold = false; }
+  if (!c || !(sp > 0) || BF.state.paused) { paceRef = null; return 1; }
+  if (c !== paceSeen) {
+    paceSeen = c;
+    const t = performance.now();
+    if (c.speed !== sp || c.frozen) paceRef = null;
+    else if (!paceRef || c.tick < paceRef.tick) paceRef = { tick: c.tick, t };
+    else if (t - paceRef.t >= PACE_MS) {
+      const r = (c.tick - paceRef.tick) * W.TICK / ((t - paceRef.t) / 1000);
+      pace = pace == null ? r : pace + (r - pace) * 0.3;
+      paceRef = { tick: c.tick, t };
+      if (!paceTold && sp > 1) {
+        paceTold = true;
+        if (pace < sp * 0.9) glog("INFO", "Fast-forward " + sp + "x: the simulation keeps up about " + pace.toFixed(1) + "x here; the sky, water and mobs are drawn at that pace");
+      }
+    }
+  }
+  const r = pace != null ? pace : c.speed === sp && c.achieved > 0 ? c.achieved : sp;
+  return r >= sp * 0.95 ? 1 : r / sp;   // (within 5%: the speed asked for, so 1x doesn't wobble with the measure)
+}
 // The player's body and the speed to the worker, when they changed
 H.frame = function () {
   if (!H.worker || H.crashed) return;

@@ -49,8 +49,9 @@ function buildDOM() {
 }
 
 // ---------- chat log ----------
+let printed = null;   // off the page, the lines a command prints while it runs: they go back with its result (lines) for the page to print
 function print(text, kind = "info") {
-  if (!BF.page) return;   // (in the simulation worker the result's msg carries it to the page)
+  if (!BF.page) { if (printed) printed.push([String(text), kind]); return; }   // (in the simulation worker the result carries it to the page)
   buildDOM();
   for (const part of String(text).split("\n")) {
     const el = document.createElement("div");
@@ -432,6 +433,7 @@ function planetTp(a) {
   const m1 = LATLON.exec(a[0] || ""), m2 = LATLON.exec(a[1] || "");
   if (m1 || m2) {   // latitude / longitude need their hemisphere letters (plain numbers are u / v)
     if (!m1 || !m2 || a.length > 3) fail("Usage: /tp <lat><N|S> <lon><E|W> [y], e.g. /tp 35.26N 45E");
+    for (const [m, t] of [[m1, a[0]], [m2, a[1]]]) if (/^[+-]/.test(m[1])) fail(`The letter gives the hemisphere, so no + or - with it: ${t.replace(/^[+-]/, "")}, not ${t}`);   // -10S would quietly be 10N (bug-090)
     const lat = +m1[1] * (/s/i.test(m1[2]) ? -1 : 1), lon = +m2[1] * (/w/i.test(m2[2]) ? -1 : 1);
     if (!/[ns]/i.test(m1[2]) || !/[ew]/i.test(m2[2])) fail("Latitude comes first (N or S), then longitude (E or W)");
     if (Math.abs(lat) > 90) fail(`Latitude must be between 90S and 90N, found ${a[0]}`);
@@ -776,7 +778,9 @@ function execute(text) {
   const req = BF.req.player("command", null, { text: String(text) });
   if (!req.delivered && req.then) {
     print("/" + String(text).replace(/^\//, "").trim(), "dim");
-    const done = new Promise(res => req.then(r => { if (r && r.msg) print(r.msg, r.ok ? "ok" : "err"); res({ ok: !!(r && r.ok), msg: (r && r.msg) || "" }); }));
+    const done = new Promise(res => req.then(r => {
+      if (r && Array.isArray(r.lines)) for (const l of r.lines) if (Array.isArray(l)) print(l[0], l[1]);
+      if (r && r.msg) print(r.msg, r.ok ? "ok" : "err"); res({ ok: !!(r && r.ok), msg: (r && r.msg) || "" }); }));
     return { ok: true, pending: true, msg: "", done };
   }
   const r = req.result;
@@ -792,16 +796,20 @@ function run(text) {
   const cmd = CMDS[name] || CMDS[ALIASES[name]];
   print("/" + body.trim(), "dim");
   if (!cmd) { const m = `Unknown command '${name}'. Type /help for a list.`; print(m, "err"); return { ok: false, msg: m }; }
+  const lines = BF.page ? null : (printed = []);
   try {
     const out = cmd.run(parts.slice(1), body);
+    printed = null;
     if (cmd.cheat !== false) markCheats();
     if (out) print(out, "ok");
     BF.emit && BF.emit("commandExecuted", cmd.name, parts.slice(1));
-    return { ok: true, msg: out || "" };
+    return lines && lines.length ? { ok: true, msg: out || "", lines } : { ok: true, msg: out || "" };
   } catch (e) {
+    printed = null;
     const m = e instanceof CmdError ? e.message : "An unexpected error occurred trying to execute that command" + (e && e.message ? ": " + e.message : "");
     print(m, "err");
-    return { ok: false, msg: m };
+    if (BF.glog && !(e instanceof CmdError)) BF.glog.log("ERROR", "command", "/" + name + " failed: " + (e && e.message));
+    return lines && lines.length ? { ok: false, msg: m, lines } : { ok: false, msg: m };
   }
 }
 

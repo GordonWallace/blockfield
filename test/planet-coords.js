@@ -90,6 +90,7 @@ module.exports = async (pg, out) => {
     r.ll = await tp("/tp 35.26N 45E"); const ll = P.latLonAt(BF.player.position.x, BF.player.position.z); r.llAt = [ll.lat, ll.lon];
     r.llS = await tp("/tp 10.5S 120.25W 2000"); const l2 = P.latLonAt(BF.player.position.x, BF.player.position.z); r.llSAt = [l2.lat, l2.lon, BF.player.position.y];
     r.llBad = await tp("/tp 95N 10E");
+    const st = Object.assign({}, here()); r.llSign = [await tp("/tp -10S 20E"), await tp("/tp 10N -20W"), await tp("/tp +10S 20E")]; r.llSignMoved = here().u !== st.u || here().v !== st.v;
     r.corner = await tp("/tp corner 3"); const c3 = BF.coords.corner(3, 0), h3 = here();
     r.cornerAt = { f: h3.f, du: Math.abs(h3.u - c3.u), dv: Math.abs(h3.v - c3.v), flying: BF.player.flying };
     // facing the corner: the forward vector points toward the corner point
@@ -114,6 +115,7 @@ module.exports = async (pg, out) => {
   check(forms.ll.ok && Math.abs(forms.llAt[0] - 35.26) < 0.01 && Math.abs(forms.llAt[1] - 45) < 0.01, "/tp 35.26N 45E lands at that latitude / longitude");
   check(forms.llS.ok && Math.abs(forms.llSAt[0] + 10.5) < 0.01 && Math.abs(forms.llSAt[1] + 120.25) < 0.01 && forms.llSAt[2] === 2000, "/tp 10.5S 120.25W 2000 takes S / W and a layer");
   check(!forms.llBad.ok, "a latitude past 90 is refused");
+  check(forms.llSign.every(r => !r.ok && /hemisphere/.test(r.msg)) && !forms.llSignMoved, "a sign with a hemisphere letter (-10S, -20W, +10S) is refused, not flipped (bug-090): " + forms.llSign.map(r => r.msg).join(" / "));
   check(forms.corner.ok && forms.cornerAt.du <= 41 && forms.cornerAt.dv <= 41 && forms.cornerAt.du >= 39 && forms.cornerAt.flying && forms.cornerFacing > 0.99, "/tp corner 3 lands 40 blocks in from the corner, flying, facing it");
   check(forms.up.ok && Math.abs(forms.upY - 5000) < 2 && forms.upFly, "/tp up 5000 goes 5,000 blocks above the ground, flying");
   check(forms.ground.ok && forms.groundY > 0 && forms.groundY < 3, "/tp ground comes back down");

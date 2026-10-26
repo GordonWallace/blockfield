@@ -3,10 +3,11 @@
 // villager-seconds per second (js/perf.js) and the world state hash (js/statehash.js). The fast CI path, and the base of the Node
 // world server (r15-41).
 // Usage: node tools/headless.js [--seed 3] [--seconds 600] [--at village|spawn] [--villages 10] [--view 8] [--log file.log]
-//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file] [--extra n]
+//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file] [--extra n] [--coarse on|off]
 //                               [--ctick converted|full|a,b,c] [--cworkers n]
 //   --at village (default): the player moves to the village nearest the spawn first, so villagers are simulated; spawn: stays there.
 //   --extra n: the n nearest other villages are simulated too, however far (js/active.js fixed set; a heavier load to measure with).
+//   --coarse on|off: far villages coarse or full detail for this run, whatever the world's option (spec r15-64, js/gameopts.js).
 //   --log: the game log, one line an entry (js/logmatch.js gameLine), as the debug screen's download writes it.
 //   --save / --load: the save data as js/save.js stores it (snapshot / restore), as JSON. --every: print the hash every s game seconds.
 //   --workers n: the regions' thinking split over n workers (spec r15-39: n - 1 worker_threads, server/regionthread.js); the world must
@@ -66,17 +67,7 @@ function load(opts = {}) {
 // Every item stack in the world by item name: mobs' inventories, chests, furnaces, the player's slots and the drops lying about. Two runs
 // of the same seed (test/multi-worker.js: 1, 2 and 4 workers) must come out with the same; nothing made twice or lost on the way.
 // -> { items: {name: count}, coins: emeralds }
-function census(BF) {
-  const items = {}, add = s => { if (s && s.count > 0 && BF.items[s.id]) { const k = BF.items[s.id].name; items[k] = (items[k] || 0) + s.count; } };
-  for (const m of BF.mobs.list) if (!m.removed && Array.isArray(m.inv)) m.inv.forEach(add);
-  for (const c of BF.inventory.chests.values()) c.slots.forEach(add);
-  for (const f of BF.inventory.furnaces.values()) f.slots.forEach(add);
-  BF.inventory.slots.forEach(add);
-  for (const d of BF.drops.list) add(d);
-  const sorted = {};
-  for (const k of Object.keys(items).sort()) sorted[k] = items[k];
-  return { items: sorted, coins: items.emerald || 0 };
-}
+function census(BF) { return BF.perf.census(); }   // (js/perf.js, r15-60: also the base of BF.perf.activity's items gained and spent)
 
 // JSON for the save data: typed arrays (the block edits) as plain arrays, which js/save.js restore reads the same way.
 const saveJSON = data => JSON.stringify(data, (k, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v));
@@ -96,7 +87,7 @@ async function main(argv) {
   const t0 = performance.now();
   const h = BF.boot.headless({
     seed, save: a.load ? JSON.parse(fs.readFileSync(a.load, 'utf8')) : null,
-    settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined },
+    settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, coarse: a.coarse },
   });
   const p = BF.player.position;
   say(`booted ${a.load ? a.load : 'seed ' + BF.state.seed} in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${BF.world.chunks.size} chunks, ` +
@@ -132,7 +123,7 @@ async function main(argv) {
     pool = require('../server/regionthread.js').spawn(nw);
     const rivers = BF.worldgen.riverState();
     const boots = await Promise.all(pool.list.map(f => f.ask({ boot: { seed, save: a.load ? JSON.parse(fs.readFileSync(a.load, 'utf8')) : null, rivers,
-      settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined } } })));
+      settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, coarse: a.coarse } } })));
     for (const [i, b] of boots.entries()) if (b.booted !== H0.hash) throw new Error(`region worker ${i + 1} booted a different world (${b.booted}, not ${H0.hash})`);
     if (+a.after > 0) {   // --after s: every copy plays s game seconds on its own first, then the split starts mid-run (as it does in play)
       const t = Math.round(+a.after / BF.warp.TICK), wait = pool.list.map(f => f.ask({ ticks: t }));

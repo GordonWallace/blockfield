@@ -6,7 +6,7 @@ The performance meter measures how much simulation the game gets through. Its ma
 
 ## Where it shows
 
-- **F3**: the second line of the overlay, for example `Sim 774 V·s/s  1488 mob-s/s  3.2 ms/step  (villagers 2.23, monsters 0.09, ...)`.
+- **F3**: the second line of the overlay, for example `Sim 774 V·s/s  1488 mob-s/s  3.2 ms/step  (villagers 2.23, monsters 0.09, ...)`, and below it the busiest village, for example `Busiest village: Oakbrook 1.6 ms/tick, max 30x`, and the *Far villages* mode, for example `Far villages: coarse (120 mobs)` (see [[page:village-loading]]).
 - **Debug screen** (`./run.sh`, then the debug screen on port 8001): the **Performance** card at the top shows V·s/s, the game speed it ran at, ms per step, mob-seconds per second, the villagers and mobs loaded, a bar for each part of the step and a sparkline of V·s/s over the last 2 minutes.
 
 ## What the numbers mean
@@ -23,13 +23,15 @@ The performance meter measures how much simulation the game gets through. Its ma
   - *world*: sky, block ticks, furnaces, drops and boats;
   - *other*: mob bookkeeping (crowding, arrows, despawning, saving mobs).
 
+- **Busiest village**: what the village that costs the most takes each tick: its villagers, golems and animals, the monsters and wild animals in its area, and its share of the village systems (building, jobs, pens, bees and the like, shared out by villagers). **max** is the fastest that village could fast-forward on one core: 50 ms (one tick at 1x) divided by that cost. More cores can run more villages at that speed, but not one village faster. Villages with no villagers are left out.
+
 All of them are averaged over the last 5 seconds of real time. When the game is frozen (0x) or paused, the meter keeps its last figures and greys them out.
 
 The meter runs only while the F3 overlay or a debug screen is open (or a test asks for it), so it costs nothing in normal play. It measures the simulation wherever it runs: in the page, in a Web Worker or on the world server, the F3 overlay turns it on there. Turning it on and off writes a line to the [[page:game-log]] (kind *perf*), and the line for turning it off gives the last figures.
 
 ## Measuring on your own computer
 
-The `tools/perf/` folder in the repository holds the harness that measures the simulation without drawing: `perfmobs.js` runs a village for some game hours and records the meter's figures each hour, `live.js` measures the real frame loop at the top fast-forward speed, `analyze.js` summarises runs and `profsum.js` reads CPU profiles. Its README says how to run them.
+The `tools/perf/` folder in the repository holds the harness that measures the simulation without drawing: `perfmobs.js` runs a village for some game hours and records the meter's figures each hour, `live.js` measures the real frame loop at the top fast-forward speed, `analyze.js` summarises runs, `profsum.js` reads CPU profiles, and `activity.js` runs a seed without a browser and reports what a mob costs in each state (idle, on a route, wandering, working, asleep), what villagers get done per villager-second (requests, path searches, trades, items gained and spent) and each village's cost per tick and top speed. Its README says how to run them.
 
 ## The simulation on its own thread
 

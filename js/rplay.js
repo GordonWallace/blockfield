@@ -14,6 +14,8 @@
 // cores − 2, at least 1, at most MAX); one is none. They need SharedArrayBuffer (a cross-origin isolated page: ./run.sh).
 // Game log: INFO "workers" when they start for a world (how many), each switch to split or solo (with ms a tick before and after), and
 // when they stop; ERROR when one crashes, boots a different world or no longer matches.
+// Each follower sends its thread's busy share (js/threadload.js) with a batch's answer about once a second: status().loads, for the
+// debug screen's Threads card.
 // API: BF.rplay = { setup({workers, cores, spawn, split}), begin(world), end(why), frame(raw), flush(), status(), text(), follower(post) }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (js/regionworker.js in a browser, server/regionthread.js in Node)
 (() => {
@@ -56,6 +58,7 @@ function begin(world) {
   world.viewDist = BF.world.viewDist;
   world.active = BF.active ? BF.active.opts() : null;   // (the simulation budget's settings: the leader's may differ from a fresh copy's, js/active.js)
   world.testEval = !!BF.testEval;
+  world.coarse = BF.gameOpts ? BF.gameOpts.overridden() : null;   // (a run's ?coarse= / --coarse: js/gameopts.js)
   world.dyn = BF.dynItems ? BF.dynItems() : [];   // (map items made in earlier worlds keep their ids: the follower makes them alike)
   world.beesHooked = !!(BF.bees && BF.bees.hooked && BF.bees.hooked());
   world.player = player();   // (the look and the rest the title world left: a new world keeps them)
@@ -92,6 +95,7 @@ function onFollower(f, epoch, m) {
     if (L.ready === L.list.length) log("INFO", "Region workers: all " + L.list.length + " followers ready (" + L.list.map(x => L.ticks - x.ticks).join("/") + " ticks behind)");
   }
   if (m.ticks != null) f.ticks = m.ticks;
+  if (m.load) f.load = m.load;   // its thread's busy share (js/threadload.js), about once a second
   if (m.hashAt != null) soloCheck(f, m);
   if (m.textOf != null) soloText(f, m);
 }
@@ -197,7 +201,7 @@ function end(why) {
 function status() {
   const s = RW.active ? RW.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
-    behind: L.list.map(f => L.ticks - f.ticks), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, stats: s };
+    behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, stats: s };
 }
 // The F3 / debug screen line.
 function text() {
@@ -264,11 +268,13 @@ function follower(post) {
   // Messages are taken in order through a queue: a test's eval packet (BFT.sim) runs its function a microtask after the packet, on the
   // leader before anything else happens, so here the ops after it wait a turn of the event loop too.
   const queue = [];
-  let busy = false;
+  let busy = false, loadT = 0;
+  const TL = BF.tload || { begin() {}, end() {}, report: () => null, SAMPLE: 1000 };   // (this thread's busy share for the debug screen)
   const EVAL = /^\{"t":"query","qid":\d+,"what":"eval"/;
   async function pump() {
     if (busy) return;
     busy = true;
+    TL.begin();
     try {
       while (queue.length) {
         const d = queue.shift();
@@ -276,14 +282,17 @@ function follower(post) {
         else if (d.ops) {
           for (const o of d.ops) {
             op(o);
-            if (o[0] === "p" && EVAL.test(o[1].h)) await new Promise(r => setTimeout(r, 0));
+            if (o[0] === "p" && EVAL.test(o[1].h)) { TL.end(); await new Promise(r => setTimeout(r, 0)); TL.begin(); }
           }
           BF.proto.flush();
-          post({ ticks });
+          const t = now();
+          if (t - loadT >= TL.SAMPLE) { loadT = t; post({ ticks, load: TL.report() }); }
+          else post({ ticks });
         } else if (d.textAt != null) { const t = kept.get(d.textAt); if (t) { const o = {}; for (const k of d.parts) o[k] = t[k]; post({ textOf: d.textAt, texts: o }); } }
         else if (d.end) { if (RW.active) RW.pause(); queue.length = 0; }
       }
     } catch (e) { queue.length = 0; fail(e); }
+    TL.end();
     busy = false;
   }
   function boot(b) {
@@ -301,6 +310,7 @@ function follower(post) {
     for (const [name, id] of w.dyn || []) BF.dynItemAs(name, id);
     if (w.viewDist > 0) BF.world.setViewDist(w.viewDist);
     if (w.active && BF.active) BF.active.set(w.active);
+    if (BF.gameOpts) BF.gameOpts.override(w.coarse);
     if (w.beesHooked && BF.bees && BF.bees.hook) BF.bees.hook();   // (homes found as chunks load, as the leader does after an earlier world)
     if (w.op === "load") BF.save.restore(w.data, w.meta);
     else BF.newWorld(w.seed, w.opts || {});

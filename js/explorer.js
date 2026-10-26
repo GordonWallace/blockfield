@@ -365,7 +365,7 @@ function pitch(m) {
     m.homeBed = m.homeBed || m.bed;
     m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
     const k = keyOf(m);
-    if (k) camps.set(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
+    if (k) campSet(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
     log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
   });
   return true;
@@ -379,10 +379,11 @@ function strike(m) {
     const id = BF.tentId(c.f, 0, 1), k = keyOf(m);
     if (BF.world.isLoaded(c.x, c.z)) {
       if (BF.world.getBlock(c.x, c.y, c.z) === id) BF.blockReq.cells(m, BF.tents.strikeCells(c.x, c.y, c.z, id), { give: [{ id: tentItem(), n: 1 }], fit: false });
-      if (k) camps.delete(k);
+      else if (BF.glog) BF.glog.log("INFO", "explorer", m.profession + " " + k + " found its tent at " + c.x + ", " + c.z + " gone when it packed up", { village: m.village, at: m });
+      if (k) campDrop(k);
     } else {
       T().inv.add(m.inv, tentItem(), 1);
-      if (k) camps.set(k, { x: c.x, y: c.y, z: c.z, f: c.f, until: 0, returned: true, given: true });
+      if (k) campSet(k, { x: c.x, y: c.y, z: c.z, f: c.f, until: 0, returned: true, given: true });
     }
     log("strike", m, { at: c.x + "," + c.z });
   }
@@ -396,6 +397,18 @@ function strike(m) {
 // - Its village loads again before the night is over: it comes back in its tent, asleep (onSpawn).
 // - The night ends first: the tent is taken down (now, or when its land next loads) and goes back into the explorer's pack when it next loads.
 const camps = new Map();
+// Merchants camp on the road with the same tent (js/merchant.js campAI): their camps are kept here too. A merchant left out of `here` in tick
+// had its tent taken down at dawn while it slept in it, struck nothing and lost the tent, and without one it never set out on a long trip again.
+const CAMPERS = new Set(["explorer", "merchant"]);
+// Changed while the explorer thinks or in its requests' callbacks, which run only on the region worker that thinks it (spec r15-39): each
+// change goes to the other workers (js/rworkers.js channel "camp"), or a worker that missed the explorer striking its tent would take the
+// tent down a second time when the night ends (tick), and the copies' blocks would differ.
+const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); };
+const campDrop = k => { camps.delete(k); if (BF.rworkers) BF.rworkers.touch("camp", k); };
+if (BF.rworkers) BF.rworkers.channel("camp", {
+  key: k => k, get: k => k, state: k => { const e = camps.get(k); return e ? Object.assign({}, e) : null; },
+  set: (k, e) => { if (e) camps.set(k, Object.assign({}, e)); else camps.delete(k); },
+});
 const keyOf = m => (m.village && m.slot ? m.village.key + "#" + m.slot.idx : null);
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + skyT() : 0);
 // When the coming (or current) night ends, as a game day + time.
@@ -406,13 +419,13 @@ function tick(dt) {
   if (!camps.size || (tickT -= dt) > 0) return;
   tickT = 2;
   const here = new Set();
-  for (const m of BF.mobs.list) if (m.profession === "explorer" && !m.dead && !m.removed) { const k = keyOf(m); if (k) here.add(k); }
+  for (const m of BF.mobs.list) if (CAMPERS.has(m.profession) && !m.dead && !m.removed) { const k = keyOf(m); if (k) here.add(k); }
   const now = dayNow();
   for (const [k, e] of camps) {
     if (here.has(k) && !e.returned) continue;   // its own AI strikes it in the morning
     if (!e.returned && now >= e.until) {
       e.returned = true;
-      if (BF.glog) BF.glog.log("INFO", "explorer", "explorer " + k + " away when the night ended: its tent at " + e.x + ", " + e.z + " is taken down and goes back into its pack", { at: [e.x, e.y, e.z] });
+      if (BF.glog) BF.glog.log("INFO", "explorer", "camper " + k + " away when the night ended: its tent at " + e.x + ", " + e.z + " is taken down and goes back into its pack", { at: [e.x, e.y, e.z] });
     }
     if (e.returned && !e.removed && BF.world.isLoaded(e.x, e.z)) {
       if (tentAt(e)) BF.blockReq.cells(null, BF.tents.strikeCells(e.x, e.y, e.z, BF.tentId(e.f, 0, 1)));   // nobody's request: no items move
@@ -423,8 +436,10 @@ function tick(dt) {
 }
 // A villager of its village loading (mobs.js updateVillages, after its saved state and snapshot are back on it).
 function onSpawn(m) {
-  if (!m || m.profession !== "explorer") return;
-  const X = state(m), k = keyOf(m), e = k ? camps.get(k) : null;
+  if (!m || !CAMPERS.has(m.profession)) return;
+  const k = keyOf(m), e = k ? camps.get(k) : null;
+  if (!e && !(m.ex && m.ex.camp)) return;
+  const X = state(m);
   if (e && e.returned) {
     if (!e.given) { T().inv.add(m.inv, tentItem(), 1); e.given = true; log("tent_back", m, { at: e.x + "," + e.z }); }
     X.camp = null;
@@ -437,7 +452,7 @@ function onSpawn(m) {
     m.homeBed = m.bed;
     m.bed = { x: c.x, y: c.y, z: c.z, f: c.f, tent: true };
     if (Math.hypot(c.x + 0.5 - m.position.x, c.z + 0.5 - m.position.z) > 3) m.position.set(c.x + 0.5, c.y, c.z + 0.5);
-    if (BF.glog) BF.glog.log("INFO", "explorer", "explorer " + k + " came back to its tent at " + c.x + ", " + c.z + " for the rest of the night", { village: m.village, at: m });
+    if (BF.glog) BF.glog.log("INFO", "explorer", m.profession + " " + k + " came back to its tent at " + c.x + ", " + c.z + " for the rest of the night", { village: m.village, at: m });
     return;
   }
   strike(m);   // the night is over (or the tent is gone): pack up, own bed again
@@ -496,8 +511,11 @@ function ai(m, dt, out) {
   if (act && X.fin[act.it.name] !== undefined) { delete X.fin[act.it.name]; log("resume", m, { map: act.it.name, coverage: +coverage(act.d).toFixed(3) }); vlog(m, "went back to " + mapText(act) + " (" + Math.floor(coverage(act.d) * 100) + "% filled)"); }
   if (!act && blankSlots(m).length) {
     X.cd -= dt;
-    if (X.cd <= 0 && useBlank(m)) act = carried(m).find(c => !c.done && !c.shelved);
-    else if (X.cd <= 0) X.cd = 30;
+    // (X.cd is shopAI's countdown too, which takes it down again in the same update and restarts it at 0: in full detail this one
+    // reaches 0 by rounding; in coarse mode, spec r15-64, a whole update short of 0 counts as due)
+    const due = X.cd <= 0 || (BF.mobs.coarseNow() && X.cd <= dt);
+    if (due && useBlank(m)) act = carried(m).find(c => !c.done && !c.shelved);
+    else if (due) X.cd = 30;
   }
   if (act) return exploreAI(m, act, dt, out);
   return shopAI(m, dt, out);

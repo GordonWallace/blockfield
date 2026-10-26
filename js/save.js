@@ -13,7 +13,7 @@
 // downloads one (from the server, or made here from IndexedDB), importFile(file) adds the world it holds (to the server, or to
 // IndexedDB), and copyToServer() copies this browser's IndexedDB worlds to the server (they stay in the browser too).
 // Game log: DEBUG "save" for each save (how long it took), ERROR when a save fails (the previous save is kept); INFO "save" for an
-// export, an import, a copy to the server, and for a world refused as too old.
+// export, an import, a copy to the server, and for a world refused as too old; ERROR "save" for an import that fails (a damaged file).
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -70,7 +70,7 @@ function snapshot() {
     seed: BF.state.seed,
     gen: 4, biomeScale: BF.state.biomeScale,               // worldgen version (4: the planet, the only one since 1.4) + biome size
     villages: BF.state.villages,                           // village generator (old saves have none => 1, the classic villages)
-    monsters: BF.gameOpts ? BF.gameOpts.monsters() : undefined,   // game options: which monsters spawn (js/gameopts.js; the list entry's copy is the one read)
+    monsters: BF.gameOpts ? BF.gameOpts.all() : undefined,   // game options: which monsters spawn, and far villages (coarse) (js/gameopts.js; the list entry's copy is the one read)
     time: { t: BF.sky.time, day: BF.sky.day },
     rand: BF.rand ? BF.rand.save() : undefined,           // the simulation tick and creation counter of the seeded random streams (js/rand.js)
     spawn: BF.spawnPoint,
@@ -208,6 +208,7 @@ function importRecord(rec, keepId) {
     if (had && keepId) return { meta: had, skipped: true };
     if (had || !meta.id) meta.id = newId();
     meta.lastPlayed = Date.now();
+    meta.name = clampName(meta.name, "Imported world");   // (as Create and Rename keep names: bug-072)
     const log = rec.log;
     return tx(["worlds", "data"], "readwrite", t => {
       t.objectStore("worlds").put(meta);
@@ -221,6 +222,9 @@ function importRecord(rec, keepId) {
     }).then(() => ({ meta, skipped: false }));
   });
 }
+// a world's name as kept: at most 40 characters, never half an emoji (bug-072; as js/savefile.js clampName, which the simulation
+// doesn't load; the world server clamps its own renames)
+const clampName = (name, dflt) => Array.from(String(name == null ? "" : name)).slice(0, 40).join("").trim() || dflt || "World";
 const newId = () => "w" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
 const download = (url, name) => { const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
 // the world server's import (debug/server.js -> server/world.js): the file's bytes; keep: as importRecord's keepId
@@ -265,7 +269,7 @@ const save = {
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: newId(), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: 4, version: VERSION, game: BF.VERSION, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
+    const meta = { id: newId(), name: clampName(opts.name, "New World"), seed, gameMode: opts.gameMode || "survival", gen: 4, version: VERSION, game: BF.VERSION, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
     const start = () => {
       const o = { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages, monsters: meta.monsters };
       BF.newWorld(seed, o);
@@ -312,13 +316,13 @@ const save = {
   },
 
   rename(id, name) {
-    if (server()) return asked({ op: "rename", id, name: String(name).slice(0, 40) }, "rename it").then(r => {
+    if (server()) return asked({ op: "rename", id, name: String(name) }, "rename it").then(r => {
       if (save.current && save.current.id === id) { save.current.name = r.meta.name; BF.client.meta({ id, name: r.meta.name }); }
     });
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds");
       const r = s.get(id);
-      r.onsuccess = () => { if (r.result) { r.result.name = String(name).slice(0, 40); s.put(r.result); if (save.current && save.current.id === id) { save.current.name = r.result.name; if (host()) BF.client.meta({ id, name: r.result.name }); } } };
+      r.onsuccess = () => { if (r.result) { r.result.name = clampName(name, r.result.name); s.put(r.result); if (save.current && save.current.id === id) { save.current.name = r.result.name; if (host()) BF.client.meta({ id, name: r.result.name }); } } };
     });
   },
 
@@ -407,7 +411,8 @@ const save = {
     return Promise.resolve(file.arrayBuffer()).then(buf => {
       if (server()) return upload(buf, false).then(r => r.meta);
       return BF.saveFile.unpack(buf).then(rec => importRecord(rec, false)).then(r => r.meta);
-    }).then(meta => { slog("INFO", "Imported world \"" + meta.name + "\" from " + (file.name || "a file") + (server() ? " to the world server" : "")); return meta; });
+    }).then(meta => { slog("INFO", "Imported world \"" + meta.name + "\" from " + (file.name || "a file") + (server() ? " to the world server" : "")); return meta; },
+      e => { slog("ERROR", "Importing " + (file.name || "a file") + " failed: " + (e && e.message || e)); throw e; });
   },
   // This browser's own worlds (IndexedDB), whatever the page plays on: for "Copy browser saves to the server"
   browserList() {

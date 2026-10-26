@@ -538,14 +538,39 @@ world.heightAt = function (x, z) {
   x = RX; z = RZ;
   const c = rawChunk(x, z);
   if (!c) return BF.MIN_Y - 1;
-  const lx = x - c.cx * CS, lz = z - c.cz * CS, SOLID = BF.SOLID;
+  const lx = x - c.cx * CS, lz = z - c.cz * CS, ci = (lz << 4) | lx;
+  if (c.hgtV[ci] === c.colVer[ci]) return c.hgt[ci];   // (kept until a block in the column changes, r15-61)
+  c.hgtV[ci] = c.colVer[ci];
+  return (c.hgt[ci] = scanHeight(c, lx, lz));
+};
+// heightAt through the caller's memo of column (x, z): m = {x, z, g, c, i} (the column, the chunk set's generation CGEN, its chunk or null,
+// its index there), so a caller asking about the same column tick after tick (a bee's flight, r15-61) skips resolving the address while no
+// chunk has loaded or unloaded. The same answer as heightAt.
+world.heightMemo = () => ({ x: NaN, z: NaN, g: -1, c: null, i: 0 });
+world.heightAtMemo = function (x, z, m) {
+  x = Math.floor(x); z = Math.floor(z);
+  if (m.x !== x || m.z !== z || m.g !== CGEN) {
+    m.x = x; m.z = z; m.g = CGEN;
+    const c = res(x, z) ? rawChunk(RX, RZ) : undefined;
+    m.c = c || null;
+    if (c) m.i = ((RZ - c.cz * CS) << 4) | (RX - c.cx * CS);
+  }
+  const c = m.c;
+  if (!c) return BF.MIN_Y - 1;
+  const ci = m.i;
+  if (c.hgtV[ci] === c.colVer[ci]) return c.hgt[ci];
+  c.hgtV[ci] = c.colVer[ci];
+  return (c.hgt[ci] = scanHeight(c, ci & 15, ci >> 4));
+};
+function scanHeight(c, lx, lz) {
+  const SOLID = BF.SOLID;
   for (let si = c.hi - c.lo - 1; si >= 0; si--) {
     const s = c.secs[si];
     if (typeof s === "number") { if (SOLID[s]) return (c.lo + si) * 16 + 15; continue; }
     for (let ly = 15; ly >= 0; ly--) if (SOLID[s[(ly << 8) | (lz << 4) | lx]]) return (c.lo + si) * 16 + ly;
   }
   return c.y0 - 1;   // nothing solid in the band: solid stone below it
-};
+}
 // The top of column (x, z) that something can stand on or swim at: heightAt, or the water over it (sea, lakes, rivers), so
 // /tp u v lands on the water and on sea ice, not on the sea floor under them. BF.MIN_Y - 1 when the column is not loaded.
 world.topAt = function (x, z) {
@@ -580,8 +605,10 @@ function createChunk(cx, cz) {
   // ver counts the block changes since the chunk was created (setBlock, the band growing), colVer the same per column (lz * 16 + lx):
   // caches of block scans keyed by (chunk, ver) stay right without listening for every change, and a reloaded chunk is a new object,
   // so they rebuild from it (r15-07). mapCols (js/maps.js) and logBases (js/forester.js) are such caches, declared here so every chunk keeps
-  // one shape (a property added later would slow every block lookup down)
-  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), ver: 0, colVer: new Uint32Array(CS * CS), mapCols: null, logBases: null, mesh: undefined, meshes: [], light: undefined, sky: undefined };
+  // one shape (a property added later would slow every block lookup down). hgt / hgtV: heightAt per column and the colVer it was worked
+  // out at (r15-61: bees and roof checks ask for the same columns every tick); roofs: js/mobs.js roofLedge's answers, made on first use
+  const c = { cx, cz, key, lo, hi, y0: lo * 16, y1: hi * 16, secs: sliceSections(data, hi - lo), top: new Int16Array(CS * CS), ver: 0, colVer: new Uint32Array(CS * CS),
+    hgt: new Int16Array(CS * CS), hgtV: new Uint32Array(CS * CS).fill(0xffffffff), roofs: null, mapCols: null, logBases: null, mesh: undefined, meshes: [], light: undefined, sky: undefined };
   const e = world.edits.get(key);
   if (e) {
     // the band must cover every edited cell (builds above it, tunnels below it)
@@ -651,6 +678,14 @@ function purge(key) {
 const NOARR = new Float32Array(0);
 function freeArray() { this.array = NOARR; }
 function markUploaded() { this.uploaded = true; }
+// The WebGL context came back after the browser took it away (js/main.js): the far meshes' arrays were freed once on the GPU, so they can't
+// be uploaded again. They are dropped and their chunks generated and meshed again as the loader reaches them. Returns how many went.
+world.contextRestored = function () {
+  const n = world.farMeshes.size;
+  for (const k of [...world.farMeshes.keys()]) dropFar(k);
+  staleFar.clear(); lastCenter = null;
+  return n;
+};
 function dropFar(key) {
   staleFar.delete(key);
   for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
@@ -693,7 +728,7 @@ function plan(pcx, pcz) {
     if (l > 1e-3) { fwdX = fx / l; fwdZ = fz / l; }
   }
   genList = []; meshList = []; edgeList = [];
-  const keep = new Set(), spots = new Map();
+  const keep = new Set(), spots = new Map(), border = new Set();
   // above the chunk ceiling nothing is wanted (distant terrain shows the ground, js/lod.js)
   const RL = world.high ? -2 : R;
   for (let dz = -RL - 1; dz <= RL + 1; dz++) for (let dx = -RL - 1; dx <= RL + 1; dx++) {
@@ -712,6 +747,7 @@ function plan(pcx, pcz) {
     const k = ckey(cx, cz);
     if (keep.has(k)) continue;
     keep.add(k);
+    if (d2 > R * R) border.add(k);   // past the view distance: never meshed, only data for meshing the chunks inside it
     // chunks in front of the camera load first; behind ones are weighted as further away
     const len = Math.sqrt(d2) || 1;
     const dot = (dx * fwdX + dz * fwdZ) / len;
@@ -747,12 +783,19 @@ function plan(pcx, pcz) {
     return dx * dx + dz * dz > r * r;
   };
   const RU = world.high ? -1 : R;
+  let dropped = 0;
   for (const k of [...world.chunks.keys()]) {
     const c = world.chunks.get(k);
-    if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); } continue; }
-    if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
+    const vk = BF.villageSim && BF.villageSim.keepKeys.has(k);
+    if (!keep.has(k) && far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); continue; }
+    // a chunk past the view distance (a border chunk, or one just left behind) that no chunk still to be meshed needs: the purge never
+    // takes it (it has no mesh), so it would stay loaded, with its mobs, as a thin ring outside the view distance
+    if ((border.has(k) || !keep.has(k)) && !data.has(k) && c.mesh === undefined && !vk) { jrec("u", k); unload(k); dropped++; continue; }
+    // (chunks just left behind, kept for the hysteresis, keep only their meshes too)
+    if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !vk &&
       far(c.cx, c.cz, Math.min(R, KEEP) + 3)) { jrec("g", k); purge(k); }
   }
+  if (dropped && BF.glog) BF.glog.log("DEBUG", "chunks", "Unloaded " + dropped + " border chunk" + (dropped > 1 ? "s" : "") + " past the view distance once their neighbours were drawn");
   for (const k of [...world.farMeshes.keys()]) {
     if (keep.has(k)) continue;
     const [cx, cz] = k.split(",").map(Number);
@@ -813,6 +856,7 @@ function chunkD2(c, pcx, pcz) {
   const t = BF.planet.toward({ x: pcx * CS + 8, z: pcz * CS + 8 }, { x: c.cx * CS + 8, z: c.cz * CS + 8 }, TW), dx = t.x / CS, dz = t.z / CS;
   return dx * dx + dz * dz;
 }
+let planTail = false;   // chunks were generated or meshed since the last plan
 let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength without the mesher workers' jobs)
 
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
@@ -834,7 +878,8 @@ world.update = function (px, pz, budgetMs = 8) {
   } else world.high = false;
   const center = pcx + "," + pcz + "," + world.viewDist + "," + roundPlan + "," + world.high;
   // re-plan on chunk change, and periodically while loading so turning re-prioritises
-  if (center !== lastCenter || (loadQ > 0 && performance.now() - lastPlanT > 1000)) { lastCenter = center; plan(pcx, pcz); }
+  // and once more when loading ends, so the data the last meshes needed (border chunks, edge chunks' blocks) is let go
+  if (center !== lastCenter || (loadQ > 0 && performance.now() - lastPlanT > 1000) || (planTail && world.queueLength === 0)) { lastCenter = center; planTail = false; plan(pcx, pcz); }
   if (loadQ > 40) budgetMs = Math.max(budgetMs, 12);
   if (!MP.started || (BF.meshInline && !MP.inline)) poolStart();
 
@@ -883,16 +928,19 @@ world.update = function (px, pz, budgetMs = 8) {
       const c = world.chunks.get(ckey(meshCand[0], meshCand[1]));
       if (MP.inline) buildMesh(c); else { c.mesh = null; enqueue(c, meshCand[2]); }
       meshList.splice(mi, 1);
+      planTail = true;
     } else {
       if (RJ) RJ.rec(["c", genCand[0], genCand[1]]);
       createChunk(genCand[0], genCand[1]);
       genList.splice(gi, 1);
+      planTail = true;
       mi = 0; // newly generated data may unblock a nearer mesh
     }
   }
   pump();
   loadQ = genList.length + meshList.filter(m => { const k = ckey(m[0], m[1]), c = world.chunks.get(k); return c ? c.mesh === undefined : !world.farMeshes.has(k); }).length;
   world.queueLength = loadQ + poolPending();   // (chunks waiting for or in a mesher worker count as still loading)
+  if (world.queueLength > 0) planTail = true;
   // how far out every wanted chunk has a mesh, in blocks: distant terrain (js/lod.js) leaves its hole only that far while chunks load
   // (the distance from the player to the nearest chunk square, in the planned set or just past it, that has no mesh)
   const lx = px - pcx * CS, lz = pz - pcz * CS;

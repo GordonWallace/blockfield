@@ -79,7 +79,7 @@ class Sim {
   constructor(srv) {
     this.n = nextSim++; this.srv = srv; this.id = null; this.name = null; this.ready = false; this.dead = false; this.crashed = false;
     this.waits = {}; this.onReady = []; this.early = []; this.played = false;
-    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build } });
+    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build, coarse: srv.coarse } });   // (coarse: --coarse on|off, js/gameopts.js)
     this.w.on("message", m => srv.fromSim(this, m));
     this.w.on("error", e => srv.simStopped(this, "it failed: " + (e && e.stack || e)));
     this.w.on("exit", code => srv.simStopped(this, "it exited (code " + code + ")"));
@@ -111,7 +111,7 @@ function start(o) {
   // region workers per world (spec r15-39, js/rplay.js): --workers N, else every core but two, at most 8 (each holds a copy of the world)
   const os = require("os"), cores = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
   const workers = o.workers > 0 ? Math.floor(o.workers) : o.test ? 1 : Math.max(1, Math.min(8, cores - 2));   // (tests: one unless they ask)
-  const srv = { saves: o.saves, build: o.build || null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
+  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
   const warm = () => { if (!srv.spare && !srv.stopping) srv.spare = new Sim(srv); };   // the next page's thread, loading while nobody waits
@@ -158,12 +158,16 @@ function start(o) {
       return;
     }
     srv.client = ws;
-    srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = [];
+    srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = []; srv.budget = null;
     say("a page connected");
     const h = srv.held;
     ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: srv.workers, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (region workers, r15-39)
     ws.on("message", (data, binary) => { try { binary ? fromPagePacket(packetIn(data)) : fromPageText(JSON.parse(data.toString("utf8"))); } catch (e) { say("a bad message from the page: " + e.message); } });
-    ws.on("close", () => { if (srv.client === ws) closed(); });
+    ws.on("close", (code, reason) => {
+      if (srv.client !== ws) return;
+      if (code === 1006) { say("the page's connection was lost: " + (reason || "dropped")); logIn(srv.active, "The page's connection was lost without closing (" + (reason || "dropped") + ")", "WARN"); }
+      closed();
+    });
     ws.on("error", () => {});
   }
   function fromPageText(m) {
@@ -185,8 +189,9 @@ function start(o) {
       srv.iconsAsked = false;
       return;
     }
-    if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
+    if ((m.test === "eval" || m.test === "crash") && !o.test) { say("a page asked for test " + JSON.stringify(String(m.test)).slice(0, 40) + "; refused (start with --test)"); return; }
     if (m.test === "lockstep" || m.test === "eval" || m.auto) srv.tests.push(m);   // (kept for the threads this page plays on next)
+    if (m.budget) srv.budget = m;   // the page's simulation budget (bug-081): the latest, for the threads this page plays on next
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
   // a protocol packet for the simulation; a world message decides which thread plays
@@ -199,6 +204,7 @@ function start(o) {
       if (m.op === "load" && h && h.id === a.id) {   // the held world, picked again: its thread plays, the title screen's goes
         if (srv.active && srv.active !== h) srv.active.kill();
         srv.active = h; srv.held = null;
+        if (srv.budget) h.post(srv.budget);   // (the setting may have changed since its page closed)
       } else {
         if (h && m.op !== "demo") { srv.held = null; letGo(h); }   // another world: the held one was saved when its page closed
         // a world to play starts in a fresh thread, so nothing of the title screen's world (its clock, counters, timers) carries over
@@ -206,6 +212,7 @@ function start(o) {
           srv.active.kill();
           srv.active = fresh(); srv.active.played = true;
           for (const t of srv.tests) srv.active.post(t);
+          if (srv.budget) srv.active.post(srv.budget);
           warm();
         }
       }
@@ -269,7 +276,7 @@ function start(o) {
     if (q.op === "rename" || q.op === "monsters") {
       const meta = worlds.meta(q.id);
       if (!meta) return { ok: false, why: "World not found" };
-      if (q.op === "rename") meta.name = String(q.name).slice(0, 40); else meta.monsters = q.monsters;
+      if (q.op === "rename") meta.name = SaveFile.clampName(q.name, meta.name); else meta.monsters = q.monsters;
       worlds.put(q.id, "meta", meta);
       // its folder follows the name, unless a thread is writing to it (then at the server's next start: savedir.js tidy)
       if (q.op === "rename" && !inUse(q.id)) try { const to = worlds.rename(q.id, meta.name); say("world " + q.id + " is in folder " + JSON.stringify(to)); } catch (e) { say("could not rename the folder of " + q.id + ": " + e.message); }
@@ -287,10 +294,13 @@ function start(o) {
     const meta = worlds.meta(id), data = worlds.get(id, "data");
     if (!meta || !data) throw Object.assign(new Error("World not found"), { status: 404 });
     const head = worlds.get(id, "loghead");
-    const log = head ? { head, lists: (head.batches || []).map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
+    // (only batches with proper numbers: a world imported before bug-070 was fixed may name others, which are left out)
+    const batches = head && Array.isArray(head.batches) ? head.batches.filter(b => Array.isArray(b) && SaveFile.isSeq(b[0])) : [];
+    if (head && batches.length !== (head.batches || []).length) say("export of " + JSON.stringify(meta.name) + " left out " + ((head.batches || []).length - batches.length) + " damaged game log batches");
+    const log = head ? { head: Object.assign({}, head, { batches }), lists: batches.map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
     return { meta, buf: SaveFile.packSync({ game: o.version || null, meta, data, log }) };
   }
-  function importWorld(rec, keep) {
+  function importWorld(rec, keep) {   // (rec: SaveFile.unpack checked the game log's batch numbers: bug-070)
     const meta = Object.assign({}, rec.meta);
     const old = m => !m || !(m.version >= SAVE_VERSION);
     if (old(meta) || old(rec.data)) throw new Error("Made with Blockfield " + (meta.version === 2 ? "1.4" : "1.3") + ", can't be opened in " + (o.version || "1.5"));
@@ -298,6 +308,7 @@ function start(o) {
     if (had && keep) return { ok: true, skipped: true, meta: had };
     if (had || !meta.id) meta.id = "w" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
     meta.lastPlayed = Date.now();
+    meta.name = SaveFile.clampName(meta.name, "Imported world");   // (as Create and Rename keep names: bug-072)
     worlds.put(meta.id, "meta", meta);
     try {
       worlds.put(meta.id, "data", rec.data);
@@ -364,7 +375,7 @@ function start(o) {
       srv.iconsDue.clear();
       const snap = Object.assign({ t: Date.now(), n: ++feedN, info: pg.info || { seed: null }, text: pg.text || "(no page open: the world is paused on the server)",
         paused: srv.client ? !!pg.paused : true, hidden: srv.client ? !!pg.hidden : true }, part,
-        { pt: pg.pt || null, screens: pg.screens | 0, alerts: pg.alerts || null, server: { page: !!srv.client, held: !srv.client } });
+        { pt: pg.pt || null, screens: pg.screens | 0, alerts: pg.alerts || null, page: srv.client ? pg.page || null : null, server: { page: !!srv.client, held: !srv.client } });
       let a = debug.push(snap);
       if (a === "resync") a = { resync: true };
       if (a && typeof a === "object") {

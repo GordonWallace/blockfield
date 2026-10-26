@@ -21,7 +21,8 @@ const SKIP = new Set(["def", "position", "vel", "prev", "root", "model", "meshes
   "jobStocked", "jobMem", "inv", "trades", "pen", "penVillage", "penIn", "atOut", "coop", "hen", "cow", "pasture", "pig", "sty", "sheep", "horse", "riding", "ledBy",
   "level", "xp", "restockDay", "priceDay", "life", "profession", "variant", "style", "type", "hostile", "halfWidth", "height", "maxHp", "bs",
   "tradingWith", "badge", "badgeLevel", "look", "scale", "headScale", "partVis", "tint", "held", "onFire", "removed", "dead", "deathT", "kitFor", "cowKit", "parents", "bredEntry", "bred", "child", "_k", "pig",
-  "_ri", "_rs"]);   // (the region index's slot and creation order, js/regions.js: the new mob's own, never the snapshot's)
+  "_ri", "_rs",   // (the region index's slot and creation order, js/regions.js: the new mob's own, never the snapshot's)
+  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"]);   // (caches, r15-61: js/ids.js, js/regiontick.js)
 
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
 const r2 = v => Math.round(v * 100) / 100;

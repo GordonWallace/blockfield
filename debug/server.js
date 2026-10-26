@@ -6,7 +6,7 @@
 //   (--alerts <file> keeps the debug screen's alerts somewhere other than debug/.alerts.json)
 //   (--saves <dir> keeps the world server's saves somewhere other than saves/; --no-world runs no world server; --test lets a test page
 //   run code in the simulation, BFT.sim: tests only, never on a server others can reach; --workers N: the world server's region workers
-//   per world, spec r15-39, default every core but two, at most 8; --split always|never: split the regions' thinking always / never, js/rplay.js; --verify N (tests): compare the workers' copies every N split ticks)
+//   per world, spec r15-39, default every core but two, at most 8; --split always|never: split the regions' thinking always / never, js/rplay.js; --verify N (tests): compare the workers' copies every N split ticks; --coarse on|off: far villages coarse or full detail whatever each world's option, js/gameopts.js)
 // It also runs the world server (spec r15-41, server/world.js): the game's simulation in this process, with the page as its client
 // over a WebSocket on the game port (/sim). Ctrl+C saves its worlds before stopping.
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to
@@ -118,6 +118,8 @@ let ptReq = null, ptv = "0";
 // once the game has sent it. Debug screens get it whole when they connect (/events cache, or /glog) and the new entries in each snap.
 let glog = null;
 const GLOG_CAP = 100000;
+// Each village's numbers over game time (js/villagestats.js, saved with the world): the History panel (debug/vhist.js, debug/vhist-view.js).
+const vhist = require("./vhist.js")();
 const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map(), econ = new Map();   // econ: each village's Economy tallies (js/economy.js)   // icons: item id -> {url, name}, sent once by the game
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
@@ -144,6 +146,35 @@ function push(body, res) {
   const o = take(s);
   res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(typeof o === "string" ? o : JSON.stringify(o));
 }
+// This computer's load for the Threads card (Gordon, 2026-10-26): each core's busy share from the operating system (os.cpus, the
+// change in its times since the last sample), and this process's main thread (performance.eventLoopUtilization: the debug server, and
+// the world server's sockets and saves with ?sim=server). The game's own threads measure themselves (js/threadload.js). A sample a
+// second at most; the last HOST_HIST kept per core for the screen's sparklines.
+const os = require("os"), { performance: perfHooks } = require("perf_hooks");
+const HOST_HIST = 60;
+let hostT = 0, hostPrev = null, hostElu = perfHooks.eventLoopUtilization(), hostOut = null;
+function hostLoad() {
+  const t = Date.now();
+  if (hostOut && t - hostT < 1000) return hostOut;
+  hostT = t;
+  const cpus = os.cpus(), prev = hostPrev, hist = hostOut ? hostOut.cores.map(c => c.hist) : [];
+  hostPrev = cpus.map(c => c.times);
+  const cores = cpus.map((c, i) => {
+    const a = c.times, b = prev && prev[i];
+    let busy = null;
+    if (b) { const idle = a.idle - b.idle, all = a.user + a.nice + a.sys + a.irq + a.idle - (b.user + b.nice + b.sys + b.irq + b.idle); busy = all > 0 ? Math.max(0, Math.min(1, 1 - idle / all)) : 0; }
+    const h = (hist[i] || []).slice();
+    if (busy != null) { h.push(Math.round(busy * 100)); if (h.length > HOST_HIST) h.shift(); }
+    return { busy, hist: h };
+  });
+  const e = perfHooks.eventLoopUtilization(), d = perfHooks.eventLoopUtilization(e, hostElu);
+  hostElu = e;
+  const mh = hostOut ? hostOut.main.hist.slice() : [];
+  mh.push(Math.round(d.utilization * 100)); if (mh.length > HOST_HIST) mh.shift();
+  hostOut = { name: os.hostname(), model: cpus.length ? cpus[0].model.trim() : "", cores, main: { busy: d.utilization, hist: mh }, load: os.loadavg() };
+  return hostOut;
+}
+
 // A snapshot from the game (POSTed by the page, or made by the world server in this process, server/world.js): cached and relayed
 // to the debug screens. Returns the answer: "ok", "resync", or an object (see below).
 function take(s) {
@@ -175,9 +206,13 @@ function take(s) {
       if (g.lines.length) gl = { w: g.w, name: g.name, head: g.head, base: glog.base, from: g.from, lines: g.lines };
     } else glogAt = glog.base + glog.lines.length;
   }
+  s.host = hostLoad();   // (this computer's cores and the debug server's thread, for the Threads card)
   const disk = readBuild(), build = s.build !== undefined && disk.commit && s.build !== disk.commit ? disk : null;   // the files on disk changed
-  latest = { ...s, layouts: undefined, logs: undefined, econ: undefined, glog: undefined };
-  broadcast("snap", { ...s, logs, glog: gl });
+  latest = { ...s, layouts: undefined, logs: undefined, econ: undefined, glog: undefined, vhist: undefined };
+  broadcast("snap", { ...s, logs, glog: gl, vhist: undefined });
+  let vh = null;
+  try { vh = vhist.take(s); } catch (e) { console.error("[debug] village history:", e.message); }   // never in the way of the snapshot
+  if (vh) broadcast("vhist", vh);
   if (fresh) console.log("[debug] game connected");
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
@@ -248,6 +283,11 @@ function serveDebug(req, res) {
     return;
   }
   if (url.pathname === "/alerts") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts })); return; }
+  if (url.pathname === "/vhist") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(vhist.cached())); return; }   // the village history as the server holds it
+  if (url.pathname === "/vhist-view.js") {   // the History panel's code (kept out of index.html)
+    fs.readFile(path.join(__dirname, "vhist-view.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
+    return;
+  }
   if (url.pathname === "/logmatch.js") {   // the log reader the game uses too, so the screen's filters and alerts read entries the same way
     fs.readFile(path.join(ROOT, "js", "logmatch.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
     return;
@@ -258,6 +298,7 @@ function serveDebug(req, res) {
     // a new screen gets everything cached first (layouts, logs, last known detail of every village), then the latest snapshot
     send(res, "cache", JSON.stringify(cached()));
     send(res, "alerts", JSON.stringify({ av, alerts }));
+    send(res, "vhist", JSON.stringify({ reset: true, data: vhist.cached() }));
     if (latest) send(res, "snap", JSON.stringify({ ...latest, age: Date.now() - lastPush }));   // age: an old one isn't shown as live
     clients.add(res);
     req.on("close", () => clients.delete(res));
@@ -303,7 +344,7 @@ const gameServers = NO_GAME ? [] : listen(serveGame, GAME_PORT, "game");
 // --no-world leaves it out (the page then runs the simulation itself); --saves <dir> keeps its saved worlds somewhere other than saves/.
 const si = args.indexOf("--saves"), SAVES = si >= 0 && args[si + 1] ? path.resolve(args[si + 1]) : path.join(ROOT, "saves");
 const world = NO_GAME || args.includes("--no-world") ? null : require("../server/world.js").start({
-  servers: gameServers, saves: SAVES, test: args.includes("--test"), workers: opt("workers", 0), split: args.includes("--split") ? args[args.indexOf("--split") + 1] : null, verify: opt("verify", 0), version: readBuild().version, build: { commit: readBuild().commit, branch: readBuild().branch }, debug: { push: take, screens: () => clients.size } });
+  servers: gameServers, saves: SAVES, test: args.includes("--test"), workers: opt("workers", 0), coarse: args.includes("--coarse") ? args[args.indexOf("--coarse") + 1] : null, split: args.includes("--split") ? args[args.indexOf("--split") + 1] : null, verify: opt("verify", 0), version: readBuild().version, build: { commit: readBuild().commit, branch: readBuild().branch }, debug: { push: take, screens: () => clients.size } });
 let stopping = false;
 const stop = () => {
   if (stopping) process.exit(1);   // (a second Ctrl+C: at once)

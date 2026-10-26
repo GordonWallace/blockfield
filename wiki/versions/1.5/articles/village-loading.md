@@ -28,7 +28,7 @@ The game measures how much of each real second the simulation takes. The pause m
 - The budget is per real second, so when you fast-forward each village costs more of it and fewer extra villages fit. Speed and the number of villages trade one for one. On a slow computer the game never runs fewer villages than the minimum rules above.
 - Extra villages do not count toward the safety valve's limits below. While any are running, the budget sheds them instead of the safety valve stopping villages.
 
-Each village that joins or leaves for the budget, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). The debug screen's Simulation budget card shows the budget, how much of it is in use, the extra villages and the latest decisions.
+Each village that joins or leaves for the budget, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). The debug screen's Simulation budget card shows how many villages are simulated (the nearest ones the rule above keeps, plus the extras), the share of real time the simulation took against the budget's limit, the extra villages and the latest decisions.
 
 ## The countdown before a village stops
 When a village would stop, because you moved away, because other villages pushed it out of the nearest four, or because the simulation went over its budget, it does not stop at once. It counts down.
@@ -36,7 +36,7 @@ When a village would stop, because you moved away, because other villages pushed
 1. Each villager works out how long it needs to finish what it is doing: the walk there and back and the work itself, plus a 25% margin. A [[villager:builder]] times its own pace while it builds and bases the estimate for the rest of the structure on it.
 2. The longest estimate sets the village's timer. It is never longer than 2 game days.
 3. While the timer runs, a villager that finishes a task only starts a new one if the new one will end before the timer does. Otherwise it idles near home. Short jobs still start.
-4. Waiting does not count as a task, such as a villager with nobody to trade with. A villager asleep in bed or a child holds nothing up. Nor does leisure: strolling around the village, relaxing, loafing or wandering about, winding down for the evening, looking for work, heading out for the day or to bed, having no bed, being in love, running from a zombie, a [[villager:forester]] between tasks (looking for saplings or holding saplings to plant) and a [[villager:builder]] planning its next structure or waiting for materials nobody sells yet ("Looking for"). Leisure just ends when the village unloads; a villager at leisure outside the village is put back home, and the village log says so.
+4. Waiting does not count as a task, such as a villager with nobody to trade with. A villager asleep in bed or a child holds nothing up. Nor does leisure: strolling around the village, relaxing, loafing or wandering about, winding down for the evening, looking for work, heading out for the day or to bed, having no bed, being in love, running from a zombie, a [[villager:forester]] between tasks (looking for saplings or holding saplings to plant) and a [[villager:builder]] planning its next structure, admiring the one it just finished, or waiting for materials nobody sells yet ("Looking for"). Leisure just ends when the village unloads; a villager at leisure outside the village is put back home, and the village log says so.
 5. If you come back within range, the countdown is cancelled and the village carries on.
 6. When the timer reaches zero, the village unloads **together with all its villagers**, its iron golems and the animals that belong to its pens, coops, pastures and paddocks. Nobody is ever unloaded without their village.
 
@@ -65,6 +65,16 @@ Each villager stopped in the middle of a job is dealt with so that nothing is lo
 - A builder inside the village simply stops: the structure's progress is saved and it carries on later.
 
 Each forced stop is written to the loading errors, with the reason.
+
+## Far villages: full detail or coarse
+Each world has a game option, **Far villages**, that sets how villages beyond your view distance are simulated. It is *Full detail* unless you change it. Set it when creating a world, from *Options* on a world's row on the title screen, or in game from *Game options* in the pause menu (see [[page:mob-spawning|game options]]). It is saved with the world, and a change in game applies from the next tick.
+
+- **Full detail**: every running village is simulated the same way, wherever you are.
+- **Coarse (faster)**: villagers, golems and village animals farther away than your view distance think 4 times a game second instead of 20. A villager walking somewhere follows its route cell by cell at its usual speed, still opening doors and gates, instead of moving with full physics. Idle strolls about the village that achieve nothing are skipped. They do the same work as at full detail: the same jobs, trades, items made and used, births and deaths, to within a few percent, for less computer time, so more villages fit in the simulation budget.
+- Anything in a fight is always simulated in full: a villager fleeing a zombie it can see, a golem with a foe or a villager to rescue, and any mob that was just hit, until a few seconds after it ends. A zombie that only wanders past a village doesn't change anything. Monsters and wild animals far away already think 4 times a game second either way.
+- When you come within view distance of a coarse village, its mobs go back to full detail at the spot they had reached on their way. That happens out of sight, so nothing jumps.
+
+The F3 overlay shows the mode on its own line: `Far villages: coarse (120 mobs)` or `Far villages: full detail`. The [[page:game-log]] notes each village switching (kind *coarse*).
 
 ## Quitting and loading again
 If you save, quit and load straight away, no game time has passed, so everything that was loaded comes back as it was: villagers, golems, wild and hostile mobs, each in the same place, facing the same way, with the same health and the same job. A village with several golems gets each of them back at its own spot. If more than about 24 seconds of game time have passed, villagers return to the usual places instead.

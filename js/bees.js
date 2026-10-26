@@ -153,8 +153,11 @@ function doorOf(h) {
   return h.door;
 }
 function spawnBee(h, at, mode) {
+  // (every field a bee ever gets, from the start: one object layout for all bees, so the flight code's property reads stay fast, r15-61)
   const b = { id: ++seq, home: h, x: at.x, y: at.y, z: at.z, vx: 0, vy: 0, vz: 0, mode: mode || "start", t: 0, nectar: false, land: null, tgt: null,
-    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0 };
+    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0, rng: undefined, px: undefined, py: undefined,
+    pz: undefined, pyaw: undefined, followT: undefined, front: undefined, restedOut: undefined, restedBack: undefined, hurry: undefined,
+    landYaw: undefined, gone: undefined, hm0: null, hm1: null };   // hm0 / hm1: the columns under it and ahead (world.heightAtMemo)
   b.phase = rs(b).next() * 6.28; b.yaw = rs(b).next() * 6.28;
   bees.push(b); h.out++;
   return b;
@@ -236,7 +239,7 @@ function flyTo(b, tx, ty, tz, v, dt, low) {
   let gy = ty;
   if (!low && hd > 2.5) {
     const ax = b.x + (dx / hd) * Math.min(hd, 2), az = b.z + (dz / hd) * Math.min(hd, 2);
-    const gh = Math.max(w.heightAt(b.x, b.z), w.heightAt(ax, az));
+    const gh = Math.max(w.heightAtMemo(b.x, b.z, b.hm0 || (b.hm0 = w.heightMemo())), w.heightAtMemo(ax, az, b.hm1 || (b.hm1 = w.heightMemo())));
     gy = Math.max(ty, gh + 1.6);
   }
   const dy = gy - b.y, d = Math.hypot(dx, dy, dz), dist = Math.hypot(dx, ty - b.y, dz);
@@ -279,7 +282,7 @@ function stepBee(b, dt, lp, now) {
       const d = flyTo(b, pp.x, pp.y + 1.1, pp.z, STING_SPEED, dt, true);
       if (d < 0.7) {
         b.stung = true;
-        if (BF.player && BF.player.damage) BF.player.damage(1, { x: b.x, y: b.y, z: b.z });
+        if (BF.player && BF.player.damage) { const s = seen(BF.player.position, b); BF.player.damage(1, { x: s.x, y: b.y, z: s.z }); }   // (pushed away from the bee as seen from the player's frame, bug-091)
         if (BF.emit) BF.emit("beeSting", b);
         nextErrand(b);
       }

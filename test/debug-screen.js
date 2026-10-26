@@ -50,7 +50,12 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   ok('village name ' + g.name, g.name === want.name);
   ok('villager count', g.villagers === want.villagers);
   ok('seed', g.seed === want.seed);
-  ok('roster rows = loaded villagers', g.rows === want.loaded);
+  // (villagers load and unload around the player, so the roster can be a snapshot behind too: up to 5 s for the two to agree)
+  for (let i = 0; i < 20 && g.rows !== want.loaded; i++) {
+    await dbg.waitForTimeout(250); g = await got();
+    want.loaded = await lib.sim(game, () => BF.vlog.panelData(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z)).loaded);
+  }
+  ok('roster rows = loaded villagers ' + g.rows + '/' + want.loaded, g.rows === want.loaded);
   // emeralds and food (inventory plus owned chests) and starving, per villager
   const gv = await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
     const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && BF.trades.inv.count(x.inv, BF.I.emerald) > 0) || rec.members.find(x => x.type === 'villager' && !x.dead);
@@ -71,6 +76,10 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   const pc = await dbg.evaluate(() => ({ vss: document.getElementById('c-vss').textContent, ms: document.getElementById('c-perf-ms').textContent, parts: document.querySelectorAll('#c-split span').length, f3: document.getElementById('f3').textContent }));
   ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
   ok('meter on in the game while the screen is open', await lib.sim(game, () => BF.perf.on));
+  // the Simulation budget card (js/active.js): the villages simulated now, nearest and extra, from the start (bug: 0 until the first decision)
+  const bc = await dbg.evaluate(() => ({ big: document.getElementById('c-budget').textContent, sub: document.getElementById('c-budget-sub').textContent }));
+  const nSim = await lib.sim(game, () => BF.villageSim.count());
+  ok('Simulation budget card counts the villages simulated ' + JSON.stringify(bc), bc.big === nSim + (nSim === 1 ? ' village' : ' villages') + ' simulated (' + nSim + ' nearest + 0 extra)' && /^simulation took \d+% of real time/.test(bc.sub));
   // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
   // (the game hashes again every 10 s and the screen shows it with the next snapshot: wait, up to 15 s, until both show the same one)
   let hs, gh;
@@ -88,8 +97,9 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   else { await srv.stop(); srv = await start(); }
   await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z); BF.vlog.log(rec, 'job', 'Someone became a Tester'); });
   await dbg.waitForTimeout(7000);
+  await dbg.waitForFunction(() => document.getElementById('conn').textContent === 'Live', null, { timeout: 15000 }).catch(() => {});   // (a slow reconnect)
   g = await got();
-  ok('after restart: live again', g.conn === 'Live');
+  ok('after restart: live again (' + g.conn + ')', g.conn === 'Live');
   const now = await lib.sim(game, () => BF.vlog.entries(BF.vlog.villageAt(BF.player.position.x, BF.player.position.z).key));
   await dbg.waitForTimeout(1500);   // villagers may log more meanwhile: the screen must hold at least what the game had
   await dbg.waitForFunction(n => document.querySelectorAll('#log .ent').length >= n, now.length, { timeout: 10000 }).catch(() => {});   // (a snapshot later off the page)
@@ -136,7 +146,12 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   await dbg.reload(); await dbg.waitForTimeout(1500);
   ok('choice remembered after reload', !(await texts()).some(t => /^Player traded/.test(t)) && await dbg.evaluate(s => !document.querySelector(s + ' input.tcb').checked, row('Player')));
   // Select none, then one type: only entries involving that type (whoever the other party is)
-  await dbg.click('#l-types summary'); await dbg.click('#l-types [data-all="0"]'); await dbg.waitForTimeout(200);
+  // (opened until its entries show: the page can redraw the menu closed between the two clicks, a CI flake)
+  for (let i = 0; i < 5 && !(await dbg.isVisible('#l-types [data-all="0"]')); i++) {
+    if (!(await dbg.evaluate(() => document.getElementById('l-types').open))) await dbg.click('#l-types summary');
+    await dbg.waitForTimeout(200);
+  }
+  await dbg.click('#l-types [data-all="0"]'); await dbg.waitForTimeout(200);
   const none = await dbg.evaluate(() => [...document.querySelectorAll('#log .ent')].filter(e => /trade|bed|job|birth|death/.test(e.className)).length);
   ok('select none hides villager entries', none === 0);
   await dbg.check(`${row(tr.buyer)} input.tcb`); await dbg.waitForTimeout(200);
