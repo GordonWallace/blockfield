@@ -113,7 +113,7 @@ function breed(a, b, t) {
 }
 if (BF.mobs.maker) BF.mobs.maker("pigfarmer", (ai, bi, t) => { const a = BF.ids.get(ai), b = BF.ids.get(bi); return a && b ? [() => breedNow(a, b, t), () => willing(a, t) && willing(b, t)] : null; });   // (another worker's birth, spec r15-39)
 function breedNow(a, b, t) {
-  const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
+  const { x, y, z } = BF.herd.birthSpot(a, b);   // (through a face edge, bug-089)
   const young = BF.mobs.spawn("pig", x, y, z);
   if (!young) return null;
   const s = stOf(young);
