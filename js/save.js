@@ -376,21 +376,31 @@ const save = {
   },
 
   // A saved world as a .bfworld file, downloaded (spec r15-42): the world server's copy (debug/server.js serves it), or this browser's.
+  // One that can't be exported rejects with why (the title screen shows it) and is an ERROR "save" in the game log.
   exportFile(id) {
     const w = save.current && save.current.id === id ? save.current : null;
+    const failed = e => { slog("ERROR", "Exporting world " + (w ? "\"" + w.name + "\"" : id) + " failed: " + (e && e.message || e)); throw e; };
+    const give = (blob, name) => { const url = URL.createObjectURL(blob); download(url, name); setTimeout(() => URL.revokeObjectURL(url), 60000); };
     if (server()) {
-      download("/saves/" + encodeURIComponent(id) + "/export", "");
-      slog("INFO", "Exported world " + (w ? "\"" + w.name + "\"" : id) + " from the world server");
-      return Promise.resolve(true);
+      // fetched first, so a server that can't export it (a 404, a failed save) gives its reason instead of a junk download (bug-073)
+      return fetch("/saves/" + encodeURIComponent(id) + "/export").then(r => {
+        if (!r.ok) return r.json().catch(() => ({})).then(j => { throw new Error(j.why || "the world server answered " + r.status); });
+        const cd = r.headers.get("Content-Disposition") || "", m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+        let name = BF.saveFile.fileName(w && w.name);
+        if (m) try { name = decodeURIComponent(m[1]); } catch (e) { /* the default */ }
+        return r.blob().then(blob => {
+          give(blob, name);
+          slog("INFO", "Exported world " + (w ? "\"" + w.name + "\"" : id) + " from the world server (" + Math.round(blob.size / 1024) + " KB)");
+          return true;
+        });
+      }).catch(failed);
     }
     const first = w && save.saveNow ? save.saveNow() : Promise.resolve();
     return first.then(() => exportRecord(id)).then(rec => BF.saveFile.pack(rec).then(blob => {
-      const url = URL.createObjectURL(blob);
-      download(url, BF.saveFile.fileName(rec.meta.name));
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      give(blob, BF.saveFile.fileName(rec.meta.name));
       slog("INFO", "Exported world \"" + rec.meta.name + "\" (" + Math.round(blob.size / 1024) + " KB)");
       return true;
-    }));
+    })).catch(failed);
   },
   // A .bfworld file (a File or Blob) -> the world it holds, added to the world server's saves or this browser's. -> its meta
   importFile(file) {
