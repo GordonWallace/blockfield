@@ -1,16 +1,16 @@
 // Blockfield 1.4 vs 1.5 benchmark: the same measurements on any 1.4 or 1.5 checkout, so the two can be compared on one machine.
 // Usage: node bench.js <mode> <root> [--seed 3] [--out file.json] [mode options]
-//   sim     <root> [--villages 1,4,8,12,16] [--warm 2400] [--steps 2000] [--calm]
+//   sim     <root> [--villages 1,4,8,12,16] [--warm 2400] [--steps 24000] [--calm]
 //           The simulation alone, nothing drawn, in the page (file://: 1.5 runs in-page there, the same thread as 1.4). A creative player
 //           hovers over the village nearest the spawn; for each N in --villages (ascending, in one world) the N villages nearest that one
 //           are forced to be simulated with the same mechanism in both versions (villageSim trip pins, limits raised), their chunks are
-//           loaded, --warm ticks run, then --steps ticks of 0.05 s are timed. Reports ms per tick, the top fast-forward that fits
+//           loaded, --warm ticks run, then --steps ticks of 0.05 s are timed (24,000 by default: one whole game day, since sleeping villagers cost far less than working ones). Reports ms per tick, the top fast-forward that fits
 //           (game s per real s), villages actually simulated, villagers, mobs by kind and chunks loaded. --calm: no monsters spawned.
 //   frames  <root> [--speeds 0,4,5] [--secs 30] [--villages 4]
 //           The real game over http (1.5 takes a Web Worker there, as players get it), drawing, standing in the village at each speed
 //           index (0 = 1x, 4 = 100x, 5 = 1000x): frame time inside the game's animation frames (mean, p95, p99, max), frames per second,
 //           and the game seconds per real second achieved.
-//   budget  <root> [--mins 5] [--budget 40]
+//   budget  <root> [--mins 5] [--budget 40] [--speed 0]   (--speed: fast-forward index, 0 = 1x, 4 = 100x)
 //           1x play over http standing in the village, the simulated-villages budget on (1.5: ?budget=N; 1.4 has no budget, its rule
 //           runs): every 30 s the villages simulated, the extras, villagers and the sim's share of real time (1.5).
 // Needs playwright: NODE_PATH=$(npm root -g) (or PW=<path>). three.js comes from the checkout's .three-test.min.js like the tests.
@@ -33,7 +33,7 @@ function serve() {
   return new Promise(res => s.listen(0, '127.0.0.1', () => res(s)));
 }
 
-async function boot({ url, halt, size = [320, 200] }) {
+async function boot({ url, halt, size = [320, 200], init }) {
   const opts = { args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] };
   const b = await chromium.launch(opts).catch(() => chromium.launch({ ...opts, executablePath: '/opt/pw-browsers/chromium' }));
   const pg = await b.newPage({ viewport: { width: size[0], height: size[1] } });
@@ -50,6 +50,7 @@ async function boot({ url, halt, size = [320, 200] }) {
       try { cb(t); } finally { if (window.__ftOn) window.__ft.push([s, performance.now() - s]); }
     }));
   }, halt);
+  if (init) await pg.addInitScript(init);
   await pg.route('**/three.min.js', r => r.fulfill({ path: path.join(root, '.three-test.min.js'), contentType: 'text/javascript' }));
   await pg.route('https://fonts.**', r => r.abort());
   await pg.goto(url);
@@ -121,7 +122,7 @@ const r2 = x => x == null ? null : +x.toFixed(2);
 
 async function simMode() {
   const list = String(opt('villages', '1,4,8,12,16')).split(',').map(Number).sort((a, b) => a - b);
-  const WARM = +opt('warm', 2400), STEPS = +opt('steps', 2000), calm = !!opt('calm', false);
+  const WARM = +opt('warm', 2400), STEPS = +opt('steps', 24000), calm = !!opt('calm', false);
   const { b, pg, version } = await boot({ url: 'file://' + path.join(root, 'index.html') + '?debugfeed=off&sim=page#seed' + SEED });
   await pg.evaluate(PAGE_HELPERS);
   const home = await pg.evaluate(calm => { window.__halt = true; if (calm) BF.mobs.spawning = false; return window.__hover(); }, calm);
@@ -146,17 +147,29 @@ async function simMode() {
     }
     // warm up, then measure
     await pg.evaluate(({ W, h }) => { for (let i = 0; i < W; i++) { if (i % 20 === 0) BF.world.update(h.x, h.z, 3); window.__step(0.05); } }, { W: WARM, h: home });
-    const m = await pg.evaluate(({ S, h }) => {
-      const ms = [];
-      let stream = 0;
-      for (let i = 0; i < S; i++) {
-        if (i % 20 === 0) { const s = performance.now(); BF.world.update(h.x, h.z, 3); stream += performance.now() - s; }
-        const s = performance.now(); window.__step(0.05); ms.push(performance.now() - s);
-      }
-      const tot = ms.reduce((a, b) => a + b, 0);
-      ms.sort((a, b) => a - b);
-      return { msPerTick: tot / S, p50: ms[Math.floor(S * 0.5)], p95: ms[Math.floor(S * 0.95)], max: ms[S - 1], streamMsPerTick: stream / S, day: BF.sky.day + BF.sky.time };
-    }, { S: STEPS, h: home });
+    // measured in slices of 1,200 ticks (a game minute), each logged, so a slow stretch of the day shows where it is
+    const all = [], slices = [];
+    let stream = 0;
+    for (let done = 0; done < STEPS; done += 1200) {
+      const r = await pg.evaluate(({ S, h }) => {
+        const ms = []; let stream = 0;
+        for (let i = 0; i < S; i++) {
+          if (i % 20 === 0) { const s = performance.now(); BF.world.update(h.x, h.z, 3); stream += performance.now() - s; }
+          const s = performance.now(); window.__step(0.05); ms.push(performance.now() - s);
+        }
+        let mobs = 0; for (const m of BF.mobs.list) if (!m.dead && !m.removed) mobs++;
+        return { ms, stream, time: BF.sky.time, mobs };
+      }, { S: Math.min(1200, STEPS - done), h: home });
+      all.push(...r.ms); stream += r.stream;
+      const avg = r.ms.reduce((a, b) => a + b, 0) / r.ms.length;
+      slices.push({ time: r2(r.time), msPerTick: r2(avg), mobs: r.mobs });
+      if (process.env.BENCH_SLICES) log(`    time ${r.time.toFixed(2)}: ${avg.toFixed(2)} ms/tick, ${r.mobs} mobs`);
+    }
+    const tot = all.reduce((a, b) => a + b, 0);
+    all.sort((a, b) => a - b);
+    const S = all.length;
+    const m = { msPerTick: tot / S, p50: all[Math.floor(S * 0.5)], p95: all[Math.floor(S * 0.95)], max: all[S - 1], streamMsPerTick: stream / S,
+      day: await pg.evaluate(() => BF.sky.day + BF.sky.time) };
     c = await pg.evaluate(keys => window.__census(keys), keys);
     const ms = m.msPerTick + m.streamMsPerTick;
     const run = {
@@ -165,7 +178,7 @@ async function simMode() {
       topSpeed: r2(50 / ms),                                  // game s per real s with the whole core on the sim (0.05 game s a tick)
       speedAt40pct: r2(0.4 * 50 / ms),                        // ...with the 40% budget share
       perVillagerUs: r2(m.msPerTick * 1000 / Math.max(1, c.kinds.villager)),
-      status: c.status, villages: plan.map(p => ({ ...p, villagers: c.per[p.key] })), day: r2(m.day),
+      slices, status: c.status, villages: plan.map(p => ({ ...p, villagers: c.per[p.key] })), day: r2(m.day),
     };
     res.runs.push(run);
     log(`n=${n}: ${c.active}/${keys.length} forced active (${c.status}); ${run.villagers} villagers, ${run.mobs} mobs, ${run.chunks} chunks; ` +
@@ -220,23 +233,31 @@ async function budgetMode() {
   const MINS = +opt('mins', 5), BUD = +opt('budget', 40);
   const srv = await serve();
   const url = `http://127.0.0.1:${srv.address().port}/index.html?debugfeed=off&budget=${BUD}#seed${SEED}`;
-  const { b, pg, version } = await boot({ url, size: [640, 360] });
+  const { b, pg, version } = await boot({ url, size: [640, 360], init: () => { window.BF_TEST = true; } });
+  await pg.waitForFunction(() => { const p = BF.player.position; return (BF.worldgen.villagesNear(p.x, p.z, 6000) || []).length > 0; }, null, { timeout: 120000, polling: 500 });
   await pg.evaluate(PAGE_HELPERS);
-  const home = await pg.evaluate(() => window.__hover());
+  const home = await pg.evaluate(() => { const h = window.__hover(); BF.player.position.y -= 38; return h; });   // (1x play: standing in it)
   const host = await pg.evaluate(() => (BF.simHost ? (BF.simHost.label ? BF.simHost.label() : BF.simHost.mode) : 'page (1.4)'));
-  log('home', JSON.stringify(home), 'host', host);
-  const res = { mode: 'budget', version, root, seed: SEED, budget: BUD, host, home, when: new Date().toISOString(), samples: [] };
+  const SP = +opt('speed', 0);
+  if (SP) await pg.evaluate(i => BF.warp.set(i), SP);
+  log('home', JSON.stringify(home), 'host', host, 'speed index', SP);
+  // where the simulation is: 1.5's worker (the test eval hook BF_TEST turns on) or the page
+  const sim = src => pg.evaluate(src => (BF.simHost && BF.simHost.worker ? BF.simHost.eval(src) : (0, eval)('(' + src + ')')()), src);
+  const probe = (() => {
+    let villagers = 0; for (const m of BF.mobs.list) if (m.type === 'villager' && !m.dead && !m.removed) villagers++;
+    const A = BF.active, P = BF.planet, p = BF.player.position;
+    const near = BF.worldgen.villagesNear(p.x, p.z, 1200).map(v => Math.round(P.distance(p, v))).sort((a, b) => a - b);
+    return { status: BF.villageSim.status(), villagers, mobs: BF.mobs.list.length, extras: A && A.extras ? A.extras().length : 0,
+      text: A && A.text ? A.text() : null, opts: A && A.opts ? A.opts() : null, villagesWithin1200: near };
+  }).toString();
+  const res = { mode: 'budget', version, root, seed: SEED, budget: BUD, speedIndex: SP, host, home, when: new Date().toISOString(), samples: [] };
   const t0 = Date.now();
   while (Date.now() - t0 < MINS * 60000) {
     await pg.waitForTimeout(30000);
-    const s = await pg.evaluate(() => {
-      let villagers = 0; for (const m of BF.mobs.list) if (m.type === 'villager' && !m.dead && !m.removed) villagers++;
-      const A = BF.active;
-      return { status: BF.villageSim.status(), villagers, mobs: BF.mobs.list.length, text: A && A.text ? A.text() : null };
-    });
+    const s = await sim(probe);
     s.min = r2((Date.now() - t0) / 60000);
     res.samples.push(s);
-    log(`${s.min} min: ${s.status}; ${s.villagers} villagers seen by the page; ${s.text || ''}`);
+    log(`${s.min} min: ${s.status}; ${s.villagers} villagers, ${s.mobs} mobs; extras ${s.extras}; ${s.text || ''}; villages within 1200: ${s.villagesWithin1200.join(', ')}`);
   }
   await b.close(); srv.close();
   return res;

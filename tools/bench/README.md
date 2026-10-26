@@ -48,7 +48,8 @@ NODE_PATH=$(npm root -g) node tools/bench/bench.js sim ~/bf-1.4 --villages 1,4,8
 NODE_PATH=$(npm root -g) node tools/bench/bench.js sim ~/bf-1.5 --villages 1,4,8,16 --out ~/sim-15.json
 ```
 
-Run the two at the same time (as above) or one after the other the same way: back-to-back runs vary 10 to 25%. It prints ms per tick,
+Each village count is timed over a whole game day (24,000 ticks; sleeping villagers cost far less than working ones, so a shorter
+slice depends on the hour). Run the two at the same time (as above) or one after the other the same way: back-to-back runs vary 10 to 25%. It prints ms per tick,
 the top fast-forward the tick cost allows (game seconds per real second with a whole core), the same with the 40% budget share,
 villagers, mobs and chunks. `--calm` stops monster spawns. `bench.js frames` and `bench.js budget` are the container's versions of
-the frame test and of the 1.5 budget check (`?budget=40`: how many extra villages it keeps at 1x).
+the frame test and of the 1.5 budget check (`?budget=40`: how many villages it keeps, at 1x or at `--speed <index>`).
