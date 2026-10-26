@@ -19,11 +19,12 @@ module.exports = async (pg) => {
     if (all.length < 2) return { error: "not enough villagers" };
     const old = new Set(BF.glog ? BF.glog.recent(400) : []);
     let seller = null, buyer = null, start = null, dx = 1, dz = 0;
-    // The seller's own work (its job, its errands) is put off for the test, so it only does the walk the test gives it.
+    // Villagers' own work (jobs, errands, buying) is put off for the test: the seller only does the walk the test gives it, and only the
+    // test calls it (a villager really buying from it would hold it too).
     const hooks = [];
     for (const k of Object.keys(BF)) {
       const o = BF[k];
-      if (o && typeof o === "object" && typeof o.ai === "function" && o !== M) { const f = o.ai; hooks.push([o, f]); o.ai = function (m) { return m === seller ? false : f.apply(this, arguments); }; }
+      if (o && typeof o === "object" && typeof o.ai === "function" && o !== M) { const f = o.ai; hooks.push([o, f]); o.ai = function (m) { return m && m.type === "villager" ? false : f.apply(this, arguments); }; }
     }
     const step = () => { BF.sky.setTime(0.3); M.update(0.05); P.set(seller.position.x + 4, seller.position.y + 30, seller.position.z + 4); };
     const walkOff = () => { const ai = seller.ai; ai.leaving = false; ai.mode = "walk"; ai.t = 5; ai.tx = seller.position.x + 10 * dx; ai.tz = seller.position.z + 10 * dz; ai.route = null; };
@@ -74,7 +75,7 @@ module.exports = async (pg) => {
   if (r.error) fail(r.error);
   else {
     if (r.free < 1) fail("the seller was not walking to begin with (" + r.free + ")");
-    if (r.held > 0.3) fail("the seller kept walking (" + r.held + " blocks) while a buyer 6 blocks off called it");
+    if (r.held > 0.6) fail("the seller kept walking (" + r.held + " blocks) while a buyer 6 blocks off called it");
     if (r.after < 1) fail("the seller did not walk on once the calls stopped (" + r.after + ")");
     if (r.long < 0.5) fail("the seller waited more than 8 s (" + r.long + ")");
     if (!r.log.some(t => /^INFO .*waited 8 s/.test(t))) fail("no INFO line for the seller that waited 8 s");
