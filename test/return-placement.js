@@ -16,11 +16,18 @@ module.exports = async (pg) => {
   const tp = (x, z) => pg.evaluate(([x, z]) => { BF.player.spawn(x, BF.worldgen.heightAt(x, z) + 3, z); }, [x, z]);
   const wait = (fn, arg, t = 40000) => pg.waitForFunction(fn, arg, { timeout: t }).then(() => true, () => false);
   const snapshot = () => pg.evaluate(k => Object.fromEntries(BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead).map(m => [m.slot.idx, [m.position.x, m.position.z, m.profession]])), info.key);
-  const leave = async () => {   // away, then the clock jumps past the countdown (headless frames are slow) so the village unloads at once
+  const leave = async () => {   // away, then the clock jumps past the countdown (headless frames are slow) so the village unloads at once, by day
     await tp(info.x + 900, info.z);
     for (let i = 0; i < 4; i++) {
       if (await wait(k => !BF.villageSim.isActive(k) && !BF.mobs.list.some(m => m.village && m.village.key === k), info.key, 8000)) return true;
-      await pg.evaluate(k => { const t = BF.villageSim.timeLeft(k); BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200); }, info.key);   // past the countdown, which lasts as long as the longest task
+      // past the countdown, which lasts as long as the longest task. Never into bedtime: a village that unloads at bedtime comes back with
+      // everyone in bed, not where they stood (js/mobsave.js fresh), and a merchant's trip can hold the countdown for minutes (CI: the jump
+      // from 0.3 landed after 0.5 and 2 of 44 were in place). Where it would, the clock goes to the same time the next day instead.
+      await pg.evaluate(k => {
+        const t = BF.villageSim.timeLeft(k), t0 = BF.sky.time;
+        BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200);
+        if (BF.mobs.nav.bedtime()) { BF.sky.time = t0; BF.sky.day += 1; }
+      }, info.key);
     }
     return false;
   };
