@@ -1,6 +1,8 @@
 // Trading caravans soak (release 1.3): two villages between 200 and 400 blocks apart (the closest the planet's villages come: about 250
 // apart at least; caravan range is 600), both with merchants, for many game days. Runs on the planet (spec r14-22), measured from the spawn.
 // Usage: NODE_PATH=$(npm root -g) node test/caravan-soak.js [seed=1] [days=14] [out.json] [far]
+// Both pairs get a real price gap at the start (the natural one takes many days to grow, and bug-066 rules most of it out): the near pair each way,
+// the far pair from home to the far village.
 // far (or FAR=1): a pair 450-590 blocks apart (caravan range is 600), the player visits both, then stays at the one with a merchant. The home village's prices are pushed down to make a real price gap (the natural one takes many days to grow); checked: 2 or more trips out and home, and a trade at the far village.
 // Drives the simulation directly (no rendering), like test/prices-soak.js. The player stands between the two villages, then from day AWAY
 // (default: two thirds of the way), as soon as a merchant is on the road, walks 1500 blocks off and stays there, so trips on the road must keep both villages and the route loaded (pins).
@@ -80,6 +82,24 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
     BF.sky.setTime(0.02);
     for (let i = 0; i < 200; i++) { BF.world.update(mx, mz, 30); step(0.05); }
     const keys = [A, B].map(v => Math.round(v.x) + ',' + Math.round(v.z));
+    if (!__C.FAR) {   // near pair: a real price gap each way, as the far pair has one way. Merchants don't carry goods the buyers there can get as
+      // cheaply from a seller of their own (bug-066), and natural gaps between two villages of the same professions rarely beat that within 30 days
+      const recs = keys.map(k => BF.mobs.villages.get(k)), lots = [[], []];
+      const offers = (rec, kind) => BF.mobs.list.filter(v => v.type === 'villager' && v.village === rec && v.trades && v.profession !== 'merchant').flatMap(v => v.trades.filter(o => BF.prices.kind(o) === kind).map(o => ({ v, o })));
+      for (const i of [0, 1]) {   // from village i to the other: what i sells and the other buys, 6 items at most, none both ways
+        const buys = new Set(offers(recs[1 - i], 'buy').map(x => x.o.buy[0].id)), seen = new Set();
+        for (const x of offers(recs[i], 'sell')) if (buys.has(x.o.sell.id) && !seen.has(x.o.sell.id) && !(i && lots[0].includes(x.o.sell.id)) && seen.size < 6) seen.add(x.o.sell.id);
+        lots[i] = [...seen];
+      }
+      window.__gapIds = lots;
+      window.__stockHome = () => {   // once a day: each village sells its lot at half price with plenty in stock, and pays the most it can for the other's
+        for (const i of [0, 1]) {
+          for (const { v, o } of offers(recs[i], 'sell')) if (lots[i].includes(o.sell.id)) { o.step = -30; BF.prices.reprice(v, o); if (v.inv && BF.trades.inv.count(v.inv, o.sell.id) < 60) BF.trades.inv.add(v.inv, o.sell.id, 60); }
+          for (const { v, o } of offers(recs[1 - i], 'buy')) if (lots[i].includes(o.buy[0].id)) { o.step = 30; BF.prices.reprice(v, o); }
+        }
+      };
+      if (recs[0] && recs[1]) window.__stockHome();
+    }
     const R = window.__rec = { keys, d: Math.round(d), days: [], bad: [], merchantTrades: 0, maxPins: 0 };
     const orig = BF.vlog.trade;
     BF.vlog.trade = function (buyer, seller, what, times) {
