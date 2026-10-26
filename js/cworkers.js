@@ -20,7 +20,7 @@
 // The transport is js/rworkers.js's (shared-memory mailboxes and a barrier: makeShared, attach), one exchange a meeting.
 // Game log: INFO "workers" when they start and stop and once a game hour while the debug overlay or debug screen is on; ERROR when two
 // workers set the same cell, a request with callbacks changes worker, or a mob or record arrives that this worker doesn't have.
-// API: BF.cworkers = { active, n, me, setup({n, me, link}), stop(why), owns(group), owners (group key -> worker), sync(), met(groups),
+// API: BF.cworkers = { active, n, me, setup({n, me, link}), stop(why), owns(group), owners (group key -> worker), workerOf(group key) -> worker, sync(), met(groups),
 //   shuffle (tests: owners by a hash of it at every meeting), fixed (tests, with shuffle: the same owners at every meeting), stats(), text() }
 (() => {
 "use strict";
@@ -335,10 +335,13 @@ function stop(why) {
   RW().SKIP.add("prev");
 }
 
+// The worker that runs group key: its owner, or in pull mode the one that ran it last interval; 0 when not split (the debug screen's
+// Regions map colours each region by it: region -> BF.clusters.ofRegion -> group -> worker)
+const workerOf = k => !CW.active ? 0 : CW.pull ? ranBy.get(k) || 0 : CW.owners.has(k) ? CW.owners.get(k) : 0;
 const f2 = v => (Math.round(v * 100) / 100).toFixed(2);
 function stats() {
   const n = Math.max(1, T.meetings), per = new Array(CW.n).fill(0), groups = new Array(CW.n).fill(0);
-  for (const g of C().groups()) { const w = CW.pull ? ranBy.get(g.key) || 0 : CW.owners.has(g.key) ? CW.owners.get(g.key) : 0; groups[w]++; per[w] += groupMs.get(g.key) || 0; }
+  for (const g of C().groups()) { const w = workerOf(g.key); groups[w]++; per[w] += groupMs.get(g.key) || 0; }
   return { active: CW.active, n: CW.n, me: CW.me, solo: !!CW.solo, pull: CW.pull, meetings: T.meetings, groups, ms: per.map(v => v / C().MEET),
     perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024 };
 }
@@ -367,6 +370,6 @@ function hourly() {
 
 // The shared memory every worker attaches to: js/rworkers.js's mailboxes and barrier, and the claim counters
 function makeShared(n, bytes) { return Object.assign(RW().makeShared(n, bytes || 128 << 20), { claims: new SharedArrayBuffer(8) }); }
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, makeShared, pull: false });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, pull: false });
 BF.cworkers = CW;
 })();
