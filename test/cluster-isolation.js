@@ -117,8 +117,8 @@ async function parent() {
   for (let n = 1; n <= intervals; n++) {
     const r = await Promise.all(kids.map((k, i) => ask(i, { do: 'interval' })));
     for (const x of r) for (const e of x.errors) console.log(`  game log ERROR: ${e}`);
-    const g = r[0].groups.join(', ');
-    if (g !== lastGroups) { console.log(`  second ${n}: ${r[0].groups.length} clusters: ${g}`); lastGroups = g; }
+    const g = r[0].groups.join(', '), gk = r[0].groups.map(x => x.split(' ')[0]).join();
+    if (gk !== lastGroups) { console.log(`  second ${n}: ${r[0].groups.length} clusters (mobs): ${g}`); lastGroups = gk; }
     if (r[2]) for (const k of Object.keys(r[0].parts)) if (r[0].parts[k] !== r[2].parts[k]) noise.add(k);
     const parts = Object.keys(r[0].parts).filter(k => r[0].parts[k] !== r[1].parts[k] && !noise.has(k));
     for (const k of parts) if (!firstDiff[k]) firstDiff[k] = n;
