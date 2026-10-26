@@ -40,7 +40,7 @@ module.exports = async (pg, out) => {
     // a big planet village can have a jobless ex-explorer: a new survey table would go straight to it (and is kept for it)
     for (const v of BF.mobs.list) if (v !== A && v.type === "villager" && v.jobMem && v.jobMem.prof === "explorer") v.jobMem = null;
     BF.world.setBlock(tx, ty, tz, BF.B.survey_table);
-    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
+    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = []; A.jobStocked = true;   // its kit is set here: claiming the table below must not hand it a second one (a villager that never had a job gets its starting wares on its first claim)
     res.hasTent = T.inv.count(A.inv, I.tent);
     res.claimed = !!BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
     BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);   // announced once it is A's: placing a jobsite hands it at once to a jobless villager nearby
