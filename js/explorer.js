@@ -287,6 +287,7 @@ function shopAI(m, dt, out) {
   const giveUp = () => { if (v2) (X.avoidSeller || (X.avoidSeller = new Map())).set(v2, nowS() + 60); X.stage = null; X.deal = null; a.route = null; X.cd = 5; return false; };
   if (!v2 || !canSell(v2) || !offerFor(v2, cnt(m, BF.I.emerald))) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   a.mode = "idle"; a.t = 2;
   if (X.stage === "walk") {
     X.walkT += dt;

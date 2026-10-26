@@ -20,7 +20,7 @@ Commands let you change the world and yourself. They are meant for building, tes
 
 - `/help [command]`: Lists the commands, or shows one command's syntax. `/?` does the same.
 - `/tp <x> <y> <z> [yaw] [pitch]`: Teleports you. Height must be within the world. Also `/teleport`.
-- `/tp <x> <z>`: Teleports you to the surface at that spot.
+- `/tp <x> <z>`: Teleports you to the surface at that spot: on top of whatever is highest there, so on the water over a sea or lake, on sea ice, on a tree's leaves or on a roof. Ground that is not loaded yet is generated first, so the height it reports is where you land.
 - `/time set <day|noon|sunset|night|midnight|sunrise|ticks>`: Sets the time of day.
 - `/time add <ticks>`: Moves the clock on, rolling over into new days.
 - `/time query <daytime|day|gametime>`: Prints the time of day in ticks, the day number, or the total time.

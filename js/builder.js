@@ -623,7 +623,7 @@ function beginBuild(m, blocks, x, z, name) {
 }
 // `pre`: the caller already began the task. Returns false when the structure is not started (countdown: it would not finish).
 function startBuild(m, bs, e, pre) {
-  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; } return false; }
+  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   bs.mode = "build"; bs.entry = e; bs.goal = null; bs.cands = null; bs.ci = 0; bs.noSpot = 0; bs.occT = 0; bs.want = null; bs.stage = null;
   bs.placeT = Math.max(bs.placeT, 0.4); bs.losT = 0; bs.losFor = -1;
   m.ai.route = null;
@@ -1105,7 +1105,7 @@ function shopMode(m, bs, dt, out) {
     const deal = findSeller(m, bs, a.shortfall);
     if (deal) {
       const VS = BF.villageSim;   // a shopping trip: walk at 1.3x speed + one trade pause
-      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; return false; }
+      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; VS.done(m); return false; }
       bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0;
     }
     else if (BF.I.dirt != null && a.shortfall[BF.I.dirt] && BF.villageLife && BF.villageLife.gatherFor && !(bs.noDirt > dayNow())) {   // nobody sells dirt: it digs its own (idea-044)
@@ -1114,6 +1114,7 @@ function shopMode(m, bs, dt, out) {
     else {
       if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
       bs.stage = "wait"; bs.t = rnd(RECHECK[0], RECHECK[1]);
+      if (BF.villageSim) BF.villageSim.done(m);   // waiting is no task: it wanders at leisure ("Looking for: ...", js/villagerstatus.js)
       if (!e && Math.random() < 0.5) { bs.mode = "idle"; bs.want = null; bs.cool = 0; bs.t = 1; }   // look at other plans too
     }
     return false;
@@ -1123,6 +1124,7 @@ function shopMode(m, bs, dt, out) {
   const deal = bs.deal;
   if (!deal || !canSell(deal.seller)) { bs.stage = "think"; bs.deal = null; if (BF.villageSim) BF.villageSim.done(m); return false; }
   const v2 = deal.seller, d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   if (bs.stage === "walk") {
     bs.walkT += dt;
     if (bs.walkT > 60) { bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; bs.stage = "think"; if (BF.villageSim) BF.villageSim.done(m); return false; }

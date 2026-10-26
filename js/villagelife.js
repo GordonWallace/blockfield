@@ -462,6 +462,9 @@ function think(m, fs, R, D) {
     if (have < h.n) { const g = findGather(m, D, ok); if (g) return g; }
     fs.haul = null;
   }
+  // a builder's farm it is tilling (bug-057) shares the farmer's time with the harvest, else a farmer with many beds never gets to it
+  const own = projectOf(m, R, D);
+  if (own && own.built && Math.random() < 0.5) { const t = projectTask(m, fs, R, D, own, ok); if (t) return t; }
   // harvest mature crops / plant empty farmland, only within 12 blocks of the composter: nearest first
   const mine = myBeds(m, D);
   const cells = D.cells.filter(p => inRange(m, p[0], p[1], p[2]) || mine.some(b => p[1] === b.y && p[0] >= b.x0 && p[0] <= b.x1 && p[2] >= b.z0 && p[2] <= b.z1));
@@ -1306,6 +1309,7 @@ function farmAI(m, dt, out) {
     const v2 = t.seller;
     if (!canSell(v2)) { log("giveup", m, { task: t.kind, why: v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone" }); avoidSeller(m, v2); endTask(m, fs, false); return true; }
     t.x = Math.floor(v2.position.x); t.y = Math.floor(v2.position.y + 0.01); t.z = Math.floor(v2.position.z);
+    if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z));   // the forester stops for its buyer (bug-054)
     if (fs.stage === "walk" && Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z) <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) {
       fs.stage = "act"; fs.actT = ACT.buylog; ai.route = null;
     }
@@ -1660,6 +1664,7 @@ function shopAI(m, dt, out) {
   const giveUp = () => { sh.avoid[v2 && v2.slot ? v2.slot.idx : -1] = dayNow() + 0.05; sh.stage = null; sh.deal = null; ai.route = null; sh.checkT = 0.5; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
   if (!v2 || !canSell(v2)) return giveUp();
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   ai.mode = "idle"; ai.t = 2;
   if (sh.stage === "walk") {
     sh.walkT += dt;

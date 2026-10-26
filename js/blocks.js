@@ -35,13 +35,18 @@ function gateDefsOf(sp) {
   }
   return out;
 }
+// A door stands in a narrow frame (bug-059): a 1/16 jamb of its wood's planks down each side, the depth of the block, so a glass pane (or a
+// wall) beside it meets the frame and the hinges never float. The leaf fits between the jambs; the frame is drawn only, the collision box
+// is the whole closed slab as before (the opening, 14/16 wide, lets the player and villagers through as before).
 function doorDefsOf(sp) {
-  const out = [];
+  const out = [], frameTile = sp === "oak" ? "planks" : sp + "_planks";
   for (let f = 0; f < 4; f++) for (const upper of [0, 1]) for (const open of [0, 1]) {
     const box = rotBox(open ? [0, 0, 0, 3, 16, 16] : [0, 0, 13, 16, 16, 16], f);
+    const leaf = rotBox(open ? [1, 0, 0, 4, 16, 16] : [1, 0, 13, 15, 16, 16], f);
+    const jambs = [[0, 0, 0, 1, 16, 16, frameTile], [15, 0, 0, 16, 16, 16, frameTile]].map(b => rotBox(b, f));
     out.push({ name: sp + "_door_" + (upper ? "upper" : "lower") + (open ? "_open_" : "_") + "nesw"[f], tiles: sp + (upper ? "_door_top" : "_door_bottom"),
       render: "model", model: "door", solid: !open, hardness: 3, tool: "axe", drop: sp + "_door", item: sp + "_door", hidden: true,
-      door: { f, upper: !!upper, open: !!open, wood: sp }, boxes: [box], box, color: sp === "oak" ? "#9a7448" : WOOD_COLOR[sp] });
+      door: { f, upper: !!upper, open: !!open, wood: sp }, boxes: [leaf, ...jambs], box, color: sp === "oak" ? "#9a7448" : WOOD_COLOR[sp] });
   }
   return out;
 }
