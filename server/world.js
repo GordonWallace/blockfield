@@ -185,7 +185,7 @@ function start(o) {
       srv.iconsAsked = false;
       return;
     }
-    if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
+    if ((m.test === "eval" || m.test === "crash") && !o.test) { say("a page asked for test " + JSON.stringify(String(m.test)).slice(0, 40) + "; refused (start with --test)"); return; }
     if (m.test === "lockstep" || m.test === "eval" || m.auto) srv.tests.push(m);   // (kept for the threads this page plays on next)
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
@@ -269,7 +269,7 @@ function start(o) {
     if (q.op === "rename" || q.op === "monsters") {
       const meta = worlds.meta(q.id);
       if (!meta) return { ok: false, why: "World not found" };
-      if (q.op === "rename") meta.name = String(q.name).slice(0, 40); else meta.monsters = q.monsters;
+      if (q.op === "rename") meta.name = SaveFile.clampName(q.name, meta.name); else meta.monsters = q.monsters;
       worlds.put(q.id, "meta", meta);
       // its folder follows the name, unless a thread is writing to it (then at the server's next start: savedir.js tidy)
       if (q.op === "rename" && !inUse(q.id)) try { const to = worlds.rename(q.id, meta.name); say("world " + q.id + " is in folder " + JSON.stringify(to)); } catch (e) { say("could not rename the folder of " + q.id + ": " + e.message); }
@@ -298,6 +298,7 @@ function start(o) {
     if (had && keep) return { ok: true, skipped: true, meta: had };
     if (had || !meta.id) meta.id = "w" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
     meta.lastPlayed = Date.now();
+    meta.name = SaveFile.clampName(meta.name, "Imported world");   // (as Create and Rename keep names: bug-072)
     worlds.put(meta.id, "meta", meta);
     try {
       worlds.put(meta.id, "data", rec.data);

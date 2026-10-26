@@ -3,6 +3,7 @@
 //  - follow: walk towards a point (a mate, the player holding food, the herder) and stop short of it.
 //  - findMate / mateStep: a willing adult looks for a willing adult of its kind and pen within reach and walks to it; they breed when close.
 //    No breeding while LOCAL_MAX (24) or more of that kind stand within LOCAL_R (16) blocks (crowding).
+//  - birthSpot(a, b): where a pair's young is born, halfway between them through a face edge.
 //  - growK: how grown a young animal is (0 newborn .. 1 adult) from its `growAt` (absolute game day it grows up) and the days it takes;
 //    BF.mobs.setYoungSize(m, k, headScale) scales its model (js/mobs.js).
 //  - Leading an animal home: the herder (lead) walks a trail of crumbs to the path in front of the pen's gate and holds the gate open; the
@@ -23,6 +24,14 @@ const mid = m => +String(m.id).slice(1);   // the mob's stable id number (js/ids
 // as seen from the animal (BF.planet.local), so offsets are true local ones across an edge.
 const LQ = {};
 const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
+// Where a pair's young is born: halfway between them, b seen from a across a face edge (bug-089: the raw atlas midpoint of a pair astride
+// an edge is far round the planet), on the canonical square of the face it falls on. -> {x, y, z}
+const BS = {};
+function birthSpot(a, b) {
+  const P = BF.planet, q = P.local(a.position, b.position, LQ);
+  const x = (a.position.x + q.x) / 2, z = (a.position.z + q.z) / 2, c = P.canon(x, z, BS);
+  return c.off ? { x, y: Math.max(a.position.y, b.position.y), z } : { x: c.x, y: Math.max(a.position.y, b.position.y), z: c.z };
+}
 
 // ---------------------------------------------------------------- walking
 // Sets out to walk m towards (tx, tz) at `speed`, facing it once within `stop`. Always true (the caller's AI handled this step).
@@ -178,5 +187,5 @@ function startLead(m, S, tk) {
 }
 function reset() { toShut.length = 0; }
 
-BF.herd = { LOCAL_MAX, LOCAL_R, mid, follow, findMate, crowd, mateStep, growK, ledStep, lead, startLead, releaseGate, shutGates, toShut, reset };
+BF.herd = { LOCAL_MAX, LOCAL_R, mid, birthSpot, follow, findMate, crowd, mateStep, growK, ledStep, lead, startLead, releaseGate, shutGates, toShut, reset };
 })();

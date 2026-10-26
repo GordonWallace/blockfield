@@ -288,7 +288,7 @@ function stepBee(b, dt, lp, now) {
       const d = flyTo(b, pp.x, pp.y + 1.1, pp.z, STING_SPEED, dt, true);
       if (d < 0.7) {
         b.stung = true;
-        if (BF.player && BF.player.damage) BF.player.damage(1, { x: b.x, y: b.y, z: b.z });
+        if (BF.player && BF.player.damage) { const s = seen(BF.player.position, b); BF.player.damage(1, { x: s.x, y: b.y, z: s.z }); }   // (pushed away from the bee as seen from the player's frame, bug-091)
         if (BF.emit) BF.emit("beeSting", b);
         nextErrand(b);
       }
