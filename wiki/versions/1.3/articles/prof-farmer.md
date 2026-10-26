@@ -8,7 +8,7 @@ A farmer only tends farmland within 12 blocks of its composter, in every directi
 3. **Build farm beds.** With fewer than 64 farmland cells to look after, it plans a project: widen one of its own beds by pushing one side out, or make a new bed. A bed is a rectangle ringed with logs set into the ground, with water channels every fourth line and three rows of crops between them. It digs and levels the ground, fetching dirt from outside the village if it has too little, edges the bed with logs, pours water from a bucket into each channel and tills the soil with a hoe. Nothing is built on top of buildings, roads or other beds, and a bed always leaves at least a block of room around it.
 4. **Tend** young crops by standing and looking at them.
 
-A vegetable farm that a [[villager:builder]] built is left with water in its channel and untilled soil, with a composter beside it. A farmer who takes that composter tills and plants the bed as one of its farm projects.
+A vegetable farm that a [[villager:builder]] built is left with water in its channel and untilled soil, with a composter beside it. Any farmer whose reach takes in such a farm, whether or not it took that composter, tills all of its soil (grass included) and plants it before it plans a bed of its own, and the village log notes the first farmer to start on it. Up to three dirt cells beside the water stay as they are, as spots for its sugar cane.
 
 The farmer takes a short break after about one task in twenty. Farmers also wander out to look at their fields.
 

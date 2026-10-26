@@ -614,7 +614,7 @@ function beginBuild(m, blocks, x, z, name) {
 }
 // `pre`: the caller already began the task. Returns false when the structure is not started (countdown: it would not finish).
 function startBuild(m, bs, e, pre) {
-  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; } return false; }
+  if (!pre && !beginBuild(m, e.n - e.prog, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) { if (bs.mode === "shop") { bs.stage = "wait"; bs.t = 3; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   bs.mode = "build"; bs.entry = e; bs.goal = null; bs.cands = null; bs.ci = 0; bs.noSpot = 0; bs.occT = 0; bs.want = null; bs.stage = null;
   bs.placeT = Math.max(bs.placeT, 0.4); bs.losT = 0; bs.losFor = -1;
   m.ai.route = null;
@@ -643,6 +643,7 @@ function reserve(m) {
   };
   const mine = builtOf(R).find(e => e.state === "building" && e.owner === (m.slot ? m.slot.idx : 0));
   if (mine) add(remainingReq(mine, mine.prog), bpOf(mine).wood);
+  if (mine && waterLeft(mine)) { if (BF.I.water_bucket != null) out[BF.I.water_bucket] = (out[BF.I.water_bucket] || 0) + 1; if (BF.I.bucket != null) out[BF.I.bucket] = (out[BF.I.bucket] || 0) + 1; }   // the water it still pours: its bucket is not for sale
   else if (bs.want && bs.want.req) add(bs.want.req, bs.want.wood);
   if (bs.next) add(bs.next.req, bs.next.wood);
   return out;
@@ -904,9 +905,28 @@ function claimHome(m, e, bed) {
 
 // ---------------------------------------------------------------- fetching water for a well
 // The builder walks to a water source within ~30 blocks of the village (a lake, a pond, the village well) and fills its empty bucket there.
+// A well is pointless without its water (bug-055), so the builder fetches the water before it lays the first block: with none to be had,
+// or no bucket to carry it in, it gives the well up (nothing placed) and doesn't try another for a game day. Other structures with water
+// (troughs, a farm's channel) fetch it when they reach the cell, and are finished without it when there is none.
+function waterLeft(e) {
+  if (BF.I.water_bucket == null || !(bpOf(e).free && bpOf(e).free[BF.B.water])) return false;
+  for (let i = e.prog; i < e.n; i++) if (cellOf(e, i).id === BF.B.water) return true;
+  return false;
+}
+const waterFirst = e => e.type === "well" && !e.glaze && !e.watered && (e.prog | 0) === 0 && waterLeft(e);
+function giveUpWell(m, bs, e, why) {
+  e.state = "abandoned"; e.end = +dayNow().toFixed(3);
+  bs.fail[e.type] = dayNow() + 1;
+  if (BF.villageSim) BF.villageSim.done(m);
+  bs.mode = "idle"; bs.entry = null; bs.fill = null; bs.cool = rnd(10, 20); bs.t = 3; bs.goal = null; m.ai.route = null;
+  logEvent("nowell", m, { type: e.type, at: [e.ox, e.oy, e.oz], why });
+  if (BF.vlog && m.village) BF.vlog.log(m.village, "build", BF.vlog.nameOf(m) + " (Builder) gave up building " + what(e, true) + " at " + e.ox + ", " + e.oy + ", " + e.oz + ": " + why, [e.ox, e.oy, e.oz]);
+}
 function fillMode(m, bs, dt, out) {
   const F = bs.fill, VL = BF.villageLife, ai = m.ai, e = bs.entry;
   const back = skip => {
+    if (skip && e && F && F.first) { giveUpWell(m, bs, e, "no water to fill it"); return false; }
+    if (!skip && e && F && F.first) { e.watered = true; logEvent("watered", m, { type: e.type, at: [e.ox, e.oy, e.oz] }); }
     if (skip && e) { e.skipped++; advance(e); logEvent("nowater", m, {}); }
     bs.mode = "build"; bs.fill = null; ai.route = null; bs.goal = null; bs.stallT = 0;
     return false;
@@ -937,6 +957,12 @@ function fillMode(m, bs, dt, out) {
 function buildMode(m, bs, dt, out) {
   const e = bs.entry, ai = m.ai;
   if (!e || e.state !== "building" || e.owner !== (m.slot ? m.slot.idx : 0)) { bs.mode = "idle"; bs.entry = null; return false; }   // done, or another builder took it over
+  if (waterFirst(e) && have0(m.inv, BF.I.water_bucket) < 1) {   // a well: its water first (bug-055)
+    if (BF.I.bucket == null || have0(m.inv, BF.I.bucket) < 1) { giveUpWell(m, bs, e, "no bucket to carry its water"); return false; }
+    bs.mode = "fill"; bs.fill = { t: 0, cd: 0, src: null, act: 0, bad: 0, first: true }; ai.route = null; bs.goal = null;
+    logEvent("waterfirst", m, { type: e.type, at: [e.ox, e.oy, e.oz] });
+    return false;
+  }
   bs.placeT -= dt;
   reachNow = e.retried ? REACH + 1.6 : REACH;     // second pass: stretch a little for the last awkward cells (gable tops)
   // watchdog: a cell that cannot be placed for 15 s (unreachable, stuck, no free line) is skipped so the structure still gets finished
@@ -1070,7 +1096,7 @@ function shopMode(m, bs, dt, out) {
     const deal = findSeller(m, bs, a.shortfall);
     if (deal) {
       const VS = BF.villageSim;   // a shopping trip: walk at 1.3x speed + one trade pause
-      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; return false; }
+      if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.seller.position]) / 1.3 + TRADE_PAUSE, "Fetching: " + deal.times * deal.offer.sell.n + " " + BF.itemName(deal.item))) { bs.stage = "wait"; bs.t = 3; VS.done(m); return false; }
       bs.deal = deal; bs.stage = "walk"; bs.walkT = 0; bs.navFail = 0;
     }
     else if (BF.I.dirt != null && a.shortfall[BF.I.dirt] && BF.villageLife && BF.villageLife.gatherFor && !(bs.noDirt > dayNow())) {   // nobody sells dirt: it digs its own (idea-044)
@@ -1079,6 +1105,7 @@ function shopMode(m, bs, dt, out) {
     else {
       if (BF.econ) for (const id in a.shortfall) BF.econ.want(m, +id);   // nobody sells it now: the Economy view's dead ends (js/economy.js)
       bs.stage = "wait"; bs.t = rnd(RECHECK[0], RECHECK[1]);
+      if (BF.villageSim) BF.villageSim.done(m);   // waiting is no task: it wanders at leisure ("Looking for: ...", js/villagerstatus.js)
       if (!e && Math.random() < 0.5) { bs.mode = "idle"; bs.want = null; bs.cool = 0; bs.t = 1; }   // look at other plans too
     }
     return false;
@@ -1088,6 +1115,7 @@ function shopMode(m, bs, dt, out) {
   const deal = bs.deal;
   if (!deal || !canSell(deal.seller)) { bs.stage = "think"; bs.deal = null; if (BF.villageSim) BF.villageSim.done(m); return false; }
   const v2 = deal.seller, d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   if (bs.stage === "walk") {
     bs.walkT += dt;
     if (bs.walkT > 60) { bs.avoid[(v2.slot ? v2.slot.idx : 0) + ":" + deal.item] = dayNow() + 0.05; bs.stage = "think"; if (BF.villageSim) BF.villageSim.done(m); return false; }

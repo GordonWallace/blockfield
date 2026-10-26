@@ -1227,9 +1227,11 @@ function renderOffers() {
     if (!v || !v.trades.length) {
       const d = div("bf-none", offersEl); d.textContent = "This villager has nothing to trade.";
     } else v.trades.forEach((o, i) => {
+      if (o.off) return;   // set aside: it only buys or only sells an item at a time (js/market.js oneSide)
       // spare goods and what it needs now (js/market.js) come after its job's offers
       const extra = x => !!(x.spare || x.need || x.feed);
-      if (extra(o) && (i === 0 || !extra(v.trades[i - 1]))) { const d = div("bf-osep", offersEl); d.textContent = "Spare goods and needs"; }
+      const prev = v.trades.slice(0, i).filter(x => !x.off).pop();
+      if (extra(o) && (!prev || !extra(prev))) { const d = div("bf-osep", offersEl); d.textContent = "Spare goods and needs"; }
       const row = document.createElement("button"); row.type = "button";
       row.className = "bf-offer" + (i === offerSel ? " sel" : "") + (tradeReason(o) ? " out" : "");
       row.dataset.i = i;
