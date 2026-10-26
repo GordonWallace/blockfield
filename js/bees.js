@@ -212,7 +212,7 @@ const flowerSpot = (p, q) => ({ x: p[0] + 0.5 + rnd(q, -0.06, 0.06), y: p[1] + 0
 // The bee's next errand after landing (or coming out): a flower, a rest stop on the way, or home.
 function nextErrand(b) {
   const h = b.home;
-  b.land = null; b.stuck = 0; b.lastD = Infinity; b.front = false;
+  b.land = null; b.stuck = 0; b.lastD = Infinity; b.front = false; b.homeT = 0;
   const q = rs(b);
   if (!h) { const s = landingSpot(b.x, b.y, b.z, 6, q); b.mode = "fly"; b.tgt = s; b.t = 0; if (!s) { b.mode = "wander"; b.t = rnd(q, 2, 4); } return; }
   if (b.nectar) {   // flying home with nectar: now and then a short rest on the way
@@ -223,7 +223,7 @@ function nextErrand(b) {
   if (!b.restedOut && q.next() < 0.45) { const s = landingSpot(b.x, b.y, b.z, 6, q); if (s) { b.restedOut = true; b.mode = "fly"; b.tgt = s; return; } }
   if (fl.length) { b.mode = "fly"; b.tgt = flowerSpot(q.pick(fl), q); return; }
   // no flowers within reach: a few rests near home, then home with nothing
-  if ((b.trips = (b.trips || 0) + 1) > 3) { b.mode = "home"; b.tgt = null; b.homeT = 0; return; }
+  if ((b.trips = (b.trips || 0) + 1) > 3) { b.mode = "home"; b.tgt = null; return; }
   const s = landingSpot(h.x, h.y, h.z, 10, q);
   b.mode = "fly"; b.tgt = s;
   if (!s) { b.mode = "home"; b.tgt = null; }
