@@ -243,6 +243,7 @@ world.reset = function () {
   staleFar.clear();
   fluidQ.clear();
   growing.clear();
+  fluidLast = growLast = 0;   // (as in a fresh page: a world started after another ticks the same, spec r15-39)
   if (BF.farmland) BF.farmland.reset();
   lastCenter = null; genList = []; meshList = []; simList = [];
   MP.queue.clear(); TBL = null;   // (answers still in workers are for chunks that are gone: dropped)
@@ -656,6 +657,15 @@ function dropFar(key) {
   world.farMeshes.delete(key);
 }
 
+// the region workers' journal (js/rworkers.js): a chunk streaming dropped, for the followers to drop too
+function jrec(op, key) { const RJ = BF.rworkers; if (RJ && RJ.journal) RJ.rec([op, key]); }
+// The followers' side of the journal (js/rplay.js): what the leader's streaming did, done the same way
+world.replay = {
+  create: (cx, cz) => (world.chunks.has(ckey(cx, cz)) ? world.chunks.get(ckey(cx, cz)) : createChunk(cx, cz)),
+  extendDown: (cx, cz, lo) => { const c = world.chunks.get(ckey(cx, cz)); if (c && c.lo > lo) extendDown(c, lo); },
+  unload, purge,
+};
+
 function disposeMeshes(c) {
   for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   c.meshes = [];
@@ -739,9 +749,9 @@ function plan(pcx, pcz) {
   const RU = world.high ? -1 : R;
   for (const k of [...world.chunks.keys()]) {
     const c = world.chunks.get(k);
-    if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) unload(k); continue; }
+    if (!keep.has(k)) { if (far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); } continue; }
     if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !(BF.villageSim && BF.villageSim.keepKeys.has(k)) &&
-      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) purge(k);
+      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) { jrec("g", k); purge(k); }
   }
   for (const k of [...world.farMeshes.keys()]) {
     if (keep.has(k)) continue;
@@ -808,6 +818,8 @@ let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength w
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
+  const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;   // the region workers' journal (js/rworkers.js): the followers do what streaming did here
+  if (RJ && BF.villageSim) RJ.rec(["v", px, pz, RJ.stamp()]);
   if (BF.villageSim && !world.replica && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
   roundPlan = !!(BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
   // the chunk ceiling: above min(pxScale, chunkCeiling) over the ground no chunks load; back below 90% of it they do
@@ -832,7 +844,7 @@ world.update = function (px, pz, budgetMs = 8) {
     let budget = 3;
     for (let dz = -2; dz <= 2 && budget > 0; dz++) for (let dx = -2; dx <= 2 && budget > 0; dx++) {
       const c = world.chunkC(pcx + dx, pcz + dz);
-      if (c && c.lo > want) { extendDown(c, dx || dz ? Math.max(want, c.lo - 8) : want); budget--; }
+      if (c && c.lo > want) { const lo = dx || dz ? Math.max(want, c.lo - 8) : want; if (RJ) RJ.rec(["d", c.cx, c.cz, lo]); extendDown(c, lo); budget--; }
     }
   }
 
@@ -863,6 +875,7 @@ world.update = function (px, pz, budgetMs = 8) {
       while (simList.length && world.chunks.has(ckey(simList[0][0], simList[0][1]))) simList.shift();
       if (!simList.length) break;
       const [sx, sz] = simList.shift();
+      if (RJ) RJ.rec(["c", sx, sz]);
       createChunk(sx, sz);
       continue;
     }
@@ -871,6 +884,7 @@ world.update = function (px, pz, budgetMs = 8) {
       if (MP.inline) buildMesh(c); else { c.mesh = null; enqueue(c, meshCand[2]); }
       meshList.splice(mi, 1);
     } else {
+      if (RJ) RJ.rec(["c", genCand[0], genCand[1]]);
       createChunk(genCand[0], genCand[1]);
       genList.splice(gi, 1);
       mi = 0; // newly generated data may unblock a nearer mesh
@@ -1305,7 +1319,10 @@ world.tickSim = () => {
   if (!R) { blockTicks(); return; }
   R.apply();
   R.blocks(blockTicks);
+  const RW = BF.rworkers && BF.rworkers.active ? BF.rworkers : null;
+  if (RW) RW.beforeDeliver();
   R.deliver();
+  if (RW) RW.afterDeliver();   // what callbacks only this worker has did, to the other workers (spec r15-39, js/rworkers.js)
   R.endTick();
 };
 
@@ -1459,7 +1476,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
         lift.y = top > save.y ? top : Math.floor(save.y + 1e-3) + 1; // top of the block we bumped into
         if (lift.y - save.y <= stepUp && !world.boxCollides(lift.x, lift.y, lift.z, hw, h)) {
           lift[axis] += d;
-          if (!world.boxCollides(lift.x, lift.y, lift.z, hw, h)) { pos.x = lift.x; pos.y = lift.y; pos.z = lift.z; continue; }
+          if (!world.boxCollides(lift.x, lift.y, lift.z, hw, h) && !(opts.canStep && lift.y - save.y > 0.5 && !opts.canStep(lift.x, lift.y, lift.z))) { pos.x = lift.x; pos.y = lift.y; pos.z = lift.z; continue; }
         }
       }
       vel[axis] = 0;

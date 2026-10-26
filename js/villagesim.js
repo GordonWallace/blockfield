@@ -321,7 +321,7 @@ function update(px, pz) {
   let changed = stepChanged;
   stepChanged = false;
   // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see)
-  if ((!stepping() || pinDirty) && check(px, pz, realClock, performance.now() / 1000)) changed = true;
+  if ((!stepping() || pinDirty) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
   return changed;
 }
 // Called every game step (world.tickSim); cheap (re-evaluates every 1.5 game seconds, the villager windows every 0.5).

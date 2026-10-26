@@ -351,7 +351,7 @@ function deserialize(o) {
 }
 function reset() {
   rolled = new Set(); toRoll.clear(); stored = new Map(); toRestore.clear(); nights = new Map();
-  areaList = []; areaOf = new Map(); targets = new Map(); targetsDirty = true; LOG.length = 0;
+  areaList = []; areaOf = new Map(); targets = new Map(); targetsDirty = true; LOG.length = 0; areasT = breedT = watchT = 0;
 }
 function counts() {
   let n = 0;

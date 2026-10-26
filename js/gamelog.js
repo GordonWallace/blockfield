@@ -13,7 +13,7 @@
 // Adding something to the log: BF.glog.log(level, kind, text, { village: rec|key, at: mob|{x,y,z}|[x,y,z] }).
 // API: BF.glog = { LEVELS, CAP, log(level, kind, text, opts?), job(src, e) -> e, village(rec, e), entries(), base(), world(), head(),
 //                  forget(id), headLine(), recent(n) (the newest entries, also before a saved world opens), text(list?), chunkDays(x, z), chunkTimes(), loadChunkTimes(o), flush(), feed(), feedAt(n), feedReset(), setSink(fn),
-//                  diskBuild(build), build, ready(), tap(fn) (fn(entry) for each new entry), remote(fn), ingest(list) }
+//                  diskBuild(build), build, ready(), tap(fn) (fn(entry) for each new entry), remote(fn), ingest(list), put(entry) }
 // With the simulation in a Web Worker (spec r15-38) the worker keeps the world's log and saves it; the page's log is remote(fn): its own
 // entries (its errors) go to fn (the protocol, to the worker's log) instead of being kept, and the worker's come in by ingest(list) to
 // be read here (recent(), the debug overlay).
@@ -238,6 +238,7 @@ BF.glog = {
   chunkDays, chunkTimes, loadChunkTimes, flush, forget, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading, tap: fn => taps.push(fn),
   setSink: fn => { sink = typeof fn === "function" ? fn : null; },   // fn(entry) for every entry from now on (headless: the log file)
   remote: fn => { fwd = typeof fn === "function" ? fn : null; },   // fn(entries) takes this page's entries (r15-38); null: kept here again
+  put: e => add(e),   // an entry made elsewhere, as it is: a region worker's (spec r15-39, js/rworkers.js)
   ingest: list => { for (const e of list || []) rlog.push(e); if (rlog.length > 5000) rlog.splice(0, rlog.length - 5000); },   // the worker's entries, to read here
 };
 })();

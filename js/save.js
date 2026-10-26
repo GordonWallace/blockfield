@@ -51,6 +51,7 @@ const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result);
 
 // ---------- snapshot / restore ----------
 function snapshot() {
+  if (BF.rworkers) BF.rworkers.rec(["s"]);   // (region workers: the followers take one too, in case serializing changes anything: js/rworkers.js)
   const edits = {};
   for (const [k, m] of BF.world.edits) {
     if (!m.size) continue;
@@ -136,6 +137,7 @@ function restore(data, meta) {
   if (BF.bees) BF.bees.deserialize(data.bees); // bee homes (old saves: none)
   if (BF.glog) BF.glog.loadChunkTimes(data.chunkTime); // chunk times (old saves: every chunk starts at 0)
   if (BF.gameOpts) BF.gameOpts.purgeStored();   // monsters switched off since the save don't come back with their chunks
+  BF.emit("worldRestored", data, meta);   // (js/simworker.js: region workers restore the same data, js/rplay.js)
 }
 
 // The page's copy of a saved world, when the simulation is in a worker (r15-38): what the page draws and plays with. The worker restores

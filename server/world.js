@@ -2,7 +2,7 @@
 // server. Started by debug/server.js (so ./run.sh and run.cmd start everything); serves the simulation/client protocol (r15-36) on
 // ws://<game host>:<game port>/sim (server/ws.js), bound like the game port (localhost unless --lan).
 // The simulation runs in worker_threads (server/simthread.js), each the Web Worker's simulation (js/simworker.js, r15-38) unchanged:
-// one thread per world. Regions spread over several workers (r15-39) will plug in behind simworker.js the same way in both hosts.
+// one thread per world, which starts its region workers (r15-39, js/rplay.js: --workers N, else every core but two, at most 8).
 // One page plays at a time (a second one is refused and runs its own simulation); the world it plays is the one it picks on the title
 // screen (its world message: demo, create, load). Saves are on disk, a folder per world (spec r15-42: <saves>/<world name>/, see
 // server/savedir.js; the simulation writes them through server/idb.js), listed to the page instead of its IndexedDB ones (the saves
@@ -24,14 +24,15 @@
 // the page's latest part, so the screen keeps going with no page open.
 // Game log (the simulation thread's, which is the world's): INFO "server" for a page connecting, refused, closing, picking a held world
 // up; ERROR when a simulation thread stops on its own. Imports and exports go in the page's log (js/save.js) and this one's output.
-// API: start({ servers (http servers to hook /sim on), saves (folder), build ({commit, branch}: the game log's), debug: { push(snapshot) -> answer, screens() } }) -> world server
+// API: start({ servers (http servers to hook /sim on), saves (folder), build ({commit, branch}: the game log's), workers (region workers per
+//   world, r15-39), split ("always" | "never"), verify (tests: split ticks between the copies' checks), debug: { push(snapshot) -> answer, screens() } }) -> world server
 //   { stop() -> Promise (saves every world), status(), http(req, res, path) -> true when it answered (/saves/...) }
 "use strict";
 const { Worker } = require("worker_threads");
 const path = require("path"), fs = require("fs"), v8 = require("v8");
 const WS = require("./ws.js"), IDB = require("./idb.js"), SaveFile = require("../js/savefile.js");
 
-const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = 1 << 30;
+const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = SaveFile.MAX;   // (bytes sent; unpacked it is held to SaveFile.MAX too: bug-071)
 const SAVE_VERSION = 3;   // (js/save.js VERSION: the worlds this release opens)
 const say = s => console.log("[world] " + s);
 
@@ -82,7 +83,7 @@ class Sim {
     this.w.on("message", m => srv.fromSim(this, m));
     this.w.on("error", e => srv.simStopped(this, "it failed: " + (e && e.stack || e)));
     this.w.on("exit", code => srv.simStopped(this, "it exited (code " + code + ")"));
-    this.post({ boot: { three: null } });
+    this.post({ boot: { three: null, workers: srv.workers, split: srv.split, verify: srv.verify } });   // (region workers per world: js/rplay.js)
   }
   post(m, transfer) { if (!this.dead) this.w.postMessage(m, transfer || []); }
   // a server request answered by the thread's {server: kind} (one at a time per kind); wait() only waits for it
@@ -107,7 +108,10 @@ class Sim {
 function start(o) {
   const worlds = IDB.open(o.saves).worlds, rivers = riverCache(o.saves);
   for (const [a, b] of worlds.tidy()) say("renamed folder " + JSON.stringify(a) + " to " + JSON.stringify(b) + " (its world's name)");
-  const srv = { saves: o.saves, build: o.build || null, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
+  // region workers per world (spec r15-39, js/rplay.js): --workers N, else every core but two, at most 8 (each holds a copy of the world)
+  const os = require("os"), cores = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
+  const workers = o.workers > 0 ? Math.floor(o.workers) : o.test ? 1 : Math.max(1, Math.min(8, cores - 2));   // (tests: one unless they ask)
+  const srv = { saves: o.saves, build: o.build || null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
   const warm = () => { if (!srv.spare && !srv.stopping) srv.spare = new Sim(srv); };   // the next page's thread, loading while nobody waits
@@ -157,7 +161,7 @@ function start(o) {
     srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = [];
     say("a page connected");
     const h = srv.held;
-    ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: 1, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (1 until r15-39)
+    ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: srv.workers, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (region workers, r15-39)
     ws.on("message", (data, binary) => { try { binary ? fromPagePacket(packetIn(data)) : fromPageText(JSON.parse(data.toString("utf8"))); } catch (e) { say("a bad message from the page: " + e.message); } });
     ws.on("close", () => { if (srv.client === ws) closed(); });
     ws.on("error", () => {});
@@ -283,8 +287,8 @@ function start(o) {
     const log = head ? { head: Object.assign({}, head, { batches }), lists: batches.map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
     return { meta, buf: SaveFile.packSync({ game: o.version || null, meta, data, log }) };
   }
-  function importWorld(buf, keep) {
-    const rec = SaveFile.unpackSync(buf), meta = Object.assign({}, rec.meta);   // (checks the game log's batch numbers: bug-070)
+  function importWorld(rec, keep) {   // (rec: SaveFile.unpack checked the game log's batch numbers: bug-070)
+    const meta = Object.assign({}, rec.meta);
     const old = m => !m || !(m.version >= SAVE_VERSION);
     if (old(meta) || old(rec.data)) throw new Error("Made with Blockfield " + (meta.version === 2 ? "1.4" : "1.3") + ", can't be opened in " + (o.version || "1.5"));
     const had = meta.id && worlds.meta(meta.id);
@@ -323,10 +327,11 @@ function start(o) {
       req.on("data", d => { n += d.length; if (n > IMPORT_MAX) { over = true; req.destroy(); } else parts.push(d); });
       req.on("end", () => {
         if (over) return;
-        try { reply(200, importWorld(Buffer.concat(parts), /[?&]keep=1\b/.test(req.url))); }
-        catch (e) { say("an import failed: " + e.message); reply(400, { ok: false, why: e.message }); }
+        // (unpacked off the main thread, so the server keeps answering while a big file unpacks)
+        SaveFile.unpack(Buffer.concat(parts)).then(rec => reply(200, importWorld(rec, /[?&]keep=1\b/.test(req.url))))
+          .catch(e => { say("an import failed: " + e.message); reply(400, { ok: false, why: e.message }); });
       });
-      req.on("close", () => { if (over) reply(413, { ok: false, why: "that file is over 1 GB" }); });
+      req.on("close", () => { if (over) reply(413, { ok: false, why: "that file is over " + (IMPORT_MAX >> 20) + " MB" }); });
       return true;
     }
     reply(404, { ok: false, why: "no such saves request" });

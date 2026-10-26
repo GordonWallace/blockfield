@@ -149,6 +149,7 @@ function tame(m, owner) {
 // Food eaten by a horse (from the player or a villager): heals, calms an untamed one, speeds a foal up, makes a tamed adult willing to breed
 // (wheat or hay). Returns false when it has no use for it.
 function feed(m, itemName, by) {
+  if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   const r = m && m.horse, f = FEED[itemName];
   if (!r || !f || !live(m)) return false;
   const t = now();
@@ -164,8 +165,9 @@ const willing = (r, t) => (r.tamed || !r.owner) && !isFoal(r) && r.fed != null &
 // In the think phase the birth is a "spawn" request from a (r15-23); both must still be willing when it applies. Returns the foal when born at once.
 function breed(a, b) {
   const t = now();
-  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b), () => live(a) && live(b) && a.horse && b.horse && willing(a.horse, t) && willing(b.horse, t));
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b), () => live(a) && live(b) && a.horse && b.horse && willing(a.horse, t) && willing(b.horse, t), ["horses", a.id, b.id, t]);
 }
+if (BF.mobs.maker) BF.mobs.maker("horses", (ai, bi, t) => { const a = BF.ids.get(ai), b = BF.ids.get(bi); return a && b ? [() => breedNow(a, b), () => live(a) && live(b) && a.horse && b.horse && willing(a.horse, t) && willing(b.horse, t)] : null; });   // (another worker's foal, spec r15-39)
 function breedNow(a, b) {
   const ra = a.horse, rb = b.horse, t = now();
   const r = R(a), st = foalStats(ra, rb, r);
@@ -617,7 +619,7 @@ function deserialize(o) {
   backT = 0;
 }
 function reset() {
-  recs.clear(); herds.clear(); nextId = 1; nextHerd = 1;
+  recs.clear(); herds.clear(); nextId = 1; nextHerd = 1; backT = 0;
 }
 
 BF.horses = {
